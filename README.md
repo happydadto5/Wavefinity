@@ -257,12 +257,31 @@ really do interlock and take a clip at every seam.
 
 ## Code layout
 
+**There are exactly three Python files, and all three are live.** Nothing here
+is legacy or superseded:
+
+| File | Role | Entry point? |
+|---|---|---|
+| `organizer_engine.py` | Every piece of geometry, validation, fit simulation and export. **The single source of truth** - the UI, the CLI and the tests all get their shapes from here, so a change to it changes all three at once. | No. It is a library; it has no `__main__` and is never run directly. |
+| `organizer_app.py` | The CLI and the Tkinter UI, including the 3D preview. Imports the engine; contains **no geometry of its own**. | **Yes - the only one.** `python organizer_app.py ui`, or a subcommand. |
+| `test_organizer_app.py` | 80 tests, written against behaviour rather than implementation. Imports both of the above. | Only via `python -m unittest`. |
+
+The dependency runs one way: `test_organizer_app` -> `organizer_app` ->
+`organizer_engine`. The engine imports neither of the others.
+
+Two things worth knowing before tidying anything up:
+
+- The **twelve `*Tests` classes** in the test file look unreferenced, because
+  nothing calls them by name - `unittest` discovers them. They are not dead.
+- Every other top-level definition in the engine (51) and the app (19) is
+  referenced somewhere. There is no dead code to clear out; if you find
+  something that looks orphaned, check the tests before deleting it.
+
+Non-Python files:
+
 | File | What |
 |---|---|
-| `organizer_engine.py` | all geometry, validation, fit simulation, export. Single source of truth. |
-| `organizer_app.py` | CLI and Tkinter UI, including the 3D preview |
-| `test_organizer_app.py` | 80 tests, written against behaviour rather than implementation |
-| `Launch_Organizer_UI.bat` | bootstraps `.venv` and opens the UI |
+| `Launch_Organizer_UI.bat` | bootstraps `.venv`, installs the pinned packages, opens the UI |
 | `WAVY_SAMPLE_SET.3mf` | sample print plate |
 | `VISUAL_QA_SAMPLER.png` | render of the actual meshes |
 
