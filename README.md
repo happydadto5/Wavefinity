@@ -266,6 +266,54 @@ really do interlock and take a clip at every seam.
 | `WAVY_SAMPLE_SET.3mf` | sample print plate |
 | `VISUAL_QA_SAMPLER.png` | render of the actual meshes |
 
+## Working on this
+
+This project is developed locally, mostly by prompting an LLM. GitHub is a
+**backup and a record of what changed** — it is not a review gate.
+
+**Commit straight to `main` and push.** No feature branches, no pull requests.
+After a change is finished and the tests pass, commit it and push it, so the
+history has a real entry for it and the work is backed up:
+
+```powershell
+.venv\Scripts\python.exe -m unittest
+git add -A
+git commit -m "short description of what changed"
+git push
+```
+
+**Run the tests before committing.** They take about two minutes, and they are
+the only thing standing between a plausible-looking geometry edit and parts that
+no longer fit. If a fingerprint test fails, that is the suite telling you the
+geometry moved — decide whether you meant it, then re-pin deliberately.
+
+**Write commit messages that say why.** The history is the record. A message
+that explains the reasoning is worth more here than a tidy branch structure.
+
+### If more than one person is working in the repo
+
+Everyone commits to `main`, so the only rule that matters is: **pull before you
+start, push as soon as you are done.**
+
+```powershell
+git pull --rebase        # before starting
+git push                 # right after committing
+```
+
+Long-lived uncommitted work is the thing to avoid — two sessions editing
+`organizer_engine.py` for a day will conflict, and geometry conflicts are
+unpleasant to resolve by hand. Small, frequent, pushed commits keep that from
+happening.
+
+If a push is rejected because someone else pushed first, `git pull --rebase`
+then push again. If that surfaces a real conflict, resolve it and **re-run the
+full suite** before pushing — a merged file that imports cleanly can still be
+geometrically wrong, and only the tests will tell you.
+
+Also worth knowing before editing: the **traps** section below, and that
+`.venv/`, `__pycache__/` and `generated/` are gitignored and should stay that
+way.
+
 ---
 
 # Design notes
