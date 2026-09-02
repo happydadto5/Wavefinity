@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+
+# UI output, regenerable
+generated/
