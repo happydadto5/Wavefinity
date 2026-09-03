@@ -437,6 +437,13 @@ def difference(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
     return result
 
 
+def intersection(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
+    result = trimesh.boolean.intersection(meshes, engine="manifold")
+    result.remove_unreferenced_vertices()
+    result.merge_vertices()
+    return result
+
+
 def _extrude_polygon(polygon: Polygon, height: float) -> trimesh.Trimesh:
     return trimesh.creation.extrude_polygon(polygon, height, engine="earcut")
 
