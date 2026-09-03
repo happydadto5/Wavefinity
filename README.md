@@ -45,14 +45,16 @@ a **floor label**, and a **part name** that is appended to the filename and
 changes nothing else. Numbers get a large stepper either side rather than the
 pinhead arrows a spinbox draws.
 
-Beside the form a **live 3D preview** shows the box, label and holders, with the
+Beside the form a **live 3D preview** shows the box, label and the holders' actual
+export geometry — including holes, recesses, grooves and scallops — with the
 dimensions written along the bottom and side as `32mm (29 inside)` — outside
 size first, usable interior in brackets — and the height in the corner. Drag it
 to rotate, use the mouse wheel to zoom, and double-click to reset the view. The
 preview is built once per design change and only reprojected while the camera
 moves.
 
-The **2D layout** tab is the insert editor. Add any registered holder, click and
+The **2D layout** tab is the insert editor. Choose a plainly named interior
+support from the guided list, read the one-line description, then click and
 drag it to move, drag its blue corner to resize, or enter exact centre and size
 values. Normal layouts snap to **1 mm**. The editor exposes the supplied item
 library plus editable length-by-diameter segments, round/hex/square profiles,
@@ -101,7 +103,9 @@ number requests exactly that many.
 | Holder | Purpose | Optional `key=value` settings |
 |---|---|---|
 | `cradle` | Scalloped ribs for items lying along X or Y; every segment gets its own radius while all seats share one axis height | `rib_thickness`, `spacing`, `floor_gap` |
+| `nest` | Snug, support-free top-down recess following every measured item segment | `depth`, `height`, `wall` |
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
+| `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
 | `divider` | One straight subdividing wall along X or Y | `height`, `thickness` |
 | `pocket` | Raised rectangular tray with a recessed centre | `height`, `depth`, `wall` |
 | `slot` | Parallel grooves for cards, blades or other flat items | `width`, `height`, `depth`, `wall` |
@@ -313,9 +317,10 @@ separate `Insert ...3mf` or `Cartridge ...3mf`. Labelled parts are strict
 two-object 3MF packages so the inlay can use another filament. Both `.3mf` and
 `.stl` continue to work for legacy individual-part commands.
 
-## Supplied print file
+## Generate the sample print file
 
-`WAVY_SAMPLE_SET.3mf` — eight separately selectable objects:
+Run the sampler command above to create `WAVY_SAMPLE_SET.3mf` with eight
+separately selectable objects:
 
 - **2 x 6 (16 x 48 mm)**, **4 x 6 (32 x 48 mm)** and **6 x 6 (48 x 48 mm)** boxes
 - **Five identical connectors** at the locked 0.02 mm tolerance
@@ -332,7 +337,7 @@ or superseded:
 | File | Role | Entry point? |
 |---|---|---|
 | `organizer_engine.py` | Wavy boxes, connectors, labels, mesh validation and 3MF/STL export. | No. |
-| `organizer_inserts.py` | Item/segment model, zones, 1 mm and cartridge layouts, JSON persistence, holder registry, five builders, and fused/removable assembly. | No. |
+| `organizer_inserts.py` | Item/segment model, zones, 1 mm and cartridge layouts, JSON persistence, holder registry, seven builders, and fused/removable assembly. | No. |
 | `organizer_app.py` | CLI, exporters, interactive camera, 2D drag editor and Tkinter UI. | **Yes - the only one.** `python organizer_app.py ui`, or a subcommand. |
 | `test_organizer_app.py` | Box, connector, label, preview, editor, CLI and export regressions. | Only via `python -m unittest`. |
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
@@ -353,8 +358,7 @@ Non-Python files:
 | File | What |
 |---|---|
 | `Launch_Organizer_UI.bat` | bootstraps `.venv`, installs the pinned packages, opens the UI |
-| `WAVY_SAMPLE_SET.3mf` | sample print plate |
-| `VISUAL_QA_SAMPLER.png` | render of the actual meshes |
+| `generated/WAVY_SAMPLE_SET.3mf` | regenerable local sample print plate; intentionally gitignored |
 
 ## Working on this
 
@@ -544,7 +548,8 @@ Measured and regression-tested; run the suite for the current exact count.
   used by the 2D editor, 3D preview, mesh pocket and export report
 
 **Insert layouts**
-- Five registered builders: cradle, bore, divider, pocket and slot
+- Seven registered builders: cradle, contour nest, bore, center post, divider,
+  pocket and slot
 - Fused outputs remain one watertight solid; fitted and cartridge inserts clear
   the bin walls and stand on their own 1.2 mm print-flat plate
 - Normal moves and resizes snap to 1 mm. Cartridge coordinates and sizes are

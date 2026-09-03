@@ -84,6 +84,7 @@ class ZoneTests(unittest.TestCase):
         first = Zone(0.0, 0.0, 10.0, 10.0)
         self.assertTrue(first.overlaps(Zone(5.0, 5.0, 15.0, 15.0)))
         self.assertFalse(first.overlaps(Zone(10.5, 0.0, 20.0, 10.0)))
+        self.assertTrue(first.overlaps(Zone(10.5, 0.0, 20.0, 10.0), gap=0.8))
 
 
 class CradleTests(unittest.TestCase):
@@ -193,6 +194,14 @@ class LayoutCheckTests(unittest.TestCase):
         wall = Feature("divider", Zone(24.0, -20.0, 40.0, 20.0))
         check_layout(BIN, [cradle, wall])
 
+    def test_shallow_overlap_and_subminimum_gap_are_refused(self) -> None:
+        first = Feature("pocket", Zone(-20.0, -10.0, -10.0, 10.0))
+        overlap = Feature("slot", Zone(-10.5, -10.0, -0.5, 10.0))
+        too_close = Feature("slot", Zone(-9.5, -10.0, 0.5, 10.0))
+        for second in (overlap, too_close):
+            with self.assertRaisesRegex(ValueError, "leave at least"):
+                check_layout(BIN, [first, second])
+
     def test_an_unknown_holder_names_the_ones_that_exist(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown holder"):
             check_layout(BIN, [Feature("teleporter", Zone.whole(BIN))])
@@ -200,7 +209,7 @@ class LayoutCheckTests(unittest.TestCase):
 
 class RegistryTests(unittest.TestCase):
     def test_every_holder_is_registered_and_callable(self) -> None:
-        for kind in ("cradle", "bore", "divider", "pocket", "slot"):
+        for kind in ("cradle", "nest", "bore", "post", "divider", "pocket", "slot"):
             self.assertIn(kind, inserts.FEATURE_BUILDERS)
             self.assertTrue(callable(inserts.FEATURE_BUILDERS[kind]))
 
@@ -227,6 +236,8 @@ class OtherHoldersTests(unittest.TestCase):
         pencil = inserts.LIBRARY["pencil"]
         cases = [
             Feature("bore", Zone(-60.0, -20.0, -20.0, 20.0), pencil),
+            Feature("nest", Zone(-60.0, -20.0, 40.0, 20.0), DRIVER, count=1),
+            Feature("post", Zone(-20.0, -20.0, 20.0, 20.0), count=2),
             Feature("divider", Zone(-10.0, -20.0, 10.0, 20.0), along="y"),
             Feature("pocket", Zone(20.0, -20.0, 60.0, 20.0)),
             Feature("slot", Zone(-60.0, 24.0, -20.0, 40.0)),
@@ -243,6 +254,41 @@ class OtherHoldersTests(unittest.TestCase):
         height = bored.bounds[1][2] - bored.bounds[0][2]
         solid = trimesh.creation.box(extents=(zone.width, zone.depth, height))
         self.assertLess(bored.volume, solid.volume)
+
+    def test_a_nest_follows_each_item_segment_instead_of_one_bounding_box(self) -> None:
+        zone = Zone(-50.0, -12.0, 50.0, 12.0)
+        stepped = build_features(
+            BIN, [Feature("nest", zone, DRIVER, count=1)], BIN.wall
+        )[0]
+        uniform = Item.simple("Uniform driver", DRIVER.length, DRIVER.widest)
+        uniform_nest = build_features(
+            BIN, [Feature("nest", zone, uniform, count=1)], BIN.wall
+        )[0]
+        self.assertGreater(stepped.volume, uniform_nest.volume)
+        self.assertTrue(stepped.is_watertight)
+
+    def test_posts_are_tapered_and_repeat_along_the_selected_axis(self) -> None:
+        feature = Feature(
+            "post", Zone(-30.0, -10.0, 30.0, 10.0), count=3, along="x",
+            options={"diameter": 12.0, "height": 16.0, "spacing": 4.0, "taper": 0.4},
+        )
+        posts = build_features(BIN, [feature], BIN.wall)
+        self.assertEqual(len(posts), 3)
+        self.assertEqual(len({round(post.centroid[1], 6) for post in posts}), 1)
+        post = posts[0]
+        low = post.vertices[abs(post.vertices[:, 2] - BIN.wall) < 1e-5]
+        high = post.vertices[abs(post.vertices[:, 2] - (BIN.wall + 16.0)) < 1e-5]
+        low_radius = max((vertex[0] - post.centroid[0]) ** 2 + vertex[1] ** 2 for vertex in low)
+        high_radius = max((vertex[0] - post.centroid[0]) ** 2 + vertex[1] ** 2 for vertex in high)
+        self.assertGreater(low_radius, high_radius)
+
+    def test_a_builder_cannot_escape_the_zone_claimed_by_the_editor(self) -> None:
+        too_thick = Feature(
+            "divider", Zone(-20.0, -0.5, 20.0, 0.5),
+            options={"thickness": 5.0},
+        )
+        with self.assertRaisesRegex(ValueError, "exceeds its layout zone"):
+            build_features(BIN, [too_thick], BIN.wall)
 
 
 class KeepOutTests(unittest.TestCase):
@@ -268,6 +314,15 @@ class KeepOutTests(unittest.TestCase):
             along="y", options={"height": BIN.z - BIN.wall - 1.0},
         )
         self.assertTrue(build_features(BIN, [interior], BIN.wall))
+
+    def test_a_removable_edge_divider_is_sized_at_its_installed_height(self) -> None:
+        whole = Zone.whole(BIN)
+        edge = Feature(
+            "divider", Zone(whole.x0, -10.0, whole.x0 + 2.0, 10.0), along="y"
+        )
+        insert = make_fitted_insert(BIN, [edge])
+        seated_top = insert.bounds[1][2] + BIN.wall
+        self.assertAlmostEqual(seated_top, inserts.connector_keep_out(BIN), places=5)
 
 
 class LayoutModelTests(unittest.TestCase):

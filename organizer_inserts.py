@@ -21,6 +21,7 @@ from typing import Callable, Iterable
 
 import trimesh
 from shapely.geometry import Polygon, box as shapely_box
+from shapely.ops import unary_union
 
 from organizer_engine import (
     BoxSpec,
@@ -528,6 +529,101 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     return solids
 
 
+# --- contour nests ------------------------------------------------------------
+
+
+def _item_plan_outline(
+    item: Item, along: str, centre_along: float, centre_across: float
+) -> Polygon:
+    """Top-down stepped outline of an item, kept inside its stated length."""
+    start = centre_along - item.length / 2.0 - item.clearance / 2.0
+    pieces = []
+    run = start
+    for index, segment in enumerate(item.segments):
+        radius = item.held(segment.diameter) / 2.0
+        length = segment.length
+        if index == 0:
+            length += item.clearance / 2.0
+        if index == len(item.segments) - 1:
+            length += item.clearance / 2.0
+        if along == "x":
+            pieces.append(shapely_box(
+                run, centre_across - radius,
+                run + length, centre_across + radius,
+            ))
+        else:
+            pieces.append(shapely_box(
+                centre_across - radius, run,
+                centre_across + radius, run + length,
+            ))
+        run += length
+    outline = unary_union(pieces)
+    if not isinstance(outline, Polygon):
+        raise ValueError(f"{item.name}: its segments do not make one contour")
+    return outline
+
+
+@feature("nest")
+def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    """A shallow, snug top-down recess following an item's stepped outline.
+
+    Unlike a cradle this supports the whole item. The recess is cut straight
+    down, so it has no hidden undercut and remains support-free to print.
+    """
+    item = _need_item(spec_feature)
+    zone = spec_feature.zone
+    options = spec_feature.options
+    wall = options.get("wall", BORE_WALL)
+    recess_depth = options.get("depth", min(max(item.held(item.widest) * 0.3, 2.0), 8.0))
+    height = options.get("height", recess_depth + BASE_PLATE)
+    if (
+        not all(math.isfinite(value) for value in (wall, recess_depth, height))
+        or wall <= 0.0
+        or recess_depth <= 0.0
+        or height <= recess_depth
+    ):
+        raise ValueError("nest wall and depth must leave a positive printable base")
+
+    along = spec_feature.along
+    run = zone.width if along == "x" else zone.depth
+    across = zone.depth if along == "x" else zone.width
+    widest = item.held(item.widest)
+    required_run = item.length + item.clearance + 2.0 * wall
+    if required_run > run + 1e-9:
+        raise ValueError(
+            f"{item.name} needs {required_run:.1f} mm along {along} "
+            f"including the nest walls but the zone gives {run:.1f} mm"
+        )
+
+    count = spec_feature.count
+    if count is None:
+        count = max(0, int((across - wall) // (widest + wall)))
+    if count < 1:
+        raise ValueError(f"no room for {item.name}: the nest zone is too narrow")
+    used = count * widest + (count + 1) * wall
+    if used > across + 1e-9:
+        raise ValueError(
+            f"{count} x {item.name} nests need {used:.1f} mm across but the zone "
+            f"gives {across:.1f} mm"
+        )
+
+    centre_along, centre_across = zone.centre
+    if along != "x":
+        centre_along, centre_across = centre_across, centre_along
+    pitch = widest + wall
+    first = centre_across - (count - 1) * pitch / 2.0
+    cuts = []
+    for index in range(count):
+        outline = _item_plan_outline(item, along, centre_along, first + index * pitch)
+        cut = _extrude_polygon(outline, recess_depth * 2.0)
+        cut.apply_translation((0.0, 0.0, base_z + height - recess_depth))
+        cuts.append(cut)
+
+    block = trimesh.creation.box(extents=(zone.width, zone.depth, height))
+    block.apply_translation((*zone.centre, base_z + height / 2.0))
+    return [difference([block, union(cuts)])]
+
+
 # --- bores --------------------------------------------------------------------
 
 
@@ -594,6 +690,64 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             holes.append(hole)
             made += 1
     return [difference([block, union(holes)])]
+
+
+# --- posts --------------------------------------------------------------------
+
+
+@feature("post")
+def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    """One or more lightly tapered pegs for rolls, spools, rings and sockets."""
+    zone = spec_feature.zone
+    options = spec_feature.options
+    diameter = options.get("diameter", 12.0)
+    height = options.get("height", 16.0)
+    spacing = options.get("spacing", 4.0)
+    taper = options.get("taper", 0.4)
+    if (
+        not all(math.isfinite(value) for value in (diameter, height, spacing, taper))
+        or diameter <= 0.0
+        or height <= 0.0
+        or spacing < 0.0
+        or taper < 0.0
+        or taper >= diameter
+    ):
+        raise ValueError(
+            "post diameter and height must be positive; spacing and taper must "
+            "be non-negative, with taper smaller than the diameter"
+        )
+
+    run = zone.width if spec_feature.along == "x" else zone.depth
+    across = zone.depth if spec_feature.along == "x" else zone.width
+    count = spec_feature.count or 1
+    used = count * diameter + (count - 1) * spacing
+    if diameter > across + 1e-9 or used > run + 1e-9:
+        raise ValueError(
+            f"{count} posts need {used:.1f} x {diameter:.1f} mm but the zone "
+            f"gives {run:.1f} x {across:.1f} mm"
+        )
+
+    centre_x, centre_y = zone.centre
+    first = -(count - 1) * (diameter + spacing) / 2.0
+    posts = []
+    for index in range(count):
+        offset = first + index * (diameter + spacing)
+        post = trimesh.creation.revolve(
+            [
+                (0.0, 0.0),
+                (diameter / 2.0, 0.0),
+                ((diameter - taper) / 2.0, height),
+                (0.0, height),
+            ],
+            sections=48,
+        )
+        post.apply_translation(
+            (centre_x + offset, centre_y, base_z)
+            if spec_feature.along == "x"
+            else (centre_x, centre_y + offset, base_z)
+        )
+        posts.append(post)
+    return posts
 
 
 # --- plain shapes -------------------------------------------------------------
@@ -710,7 +864,7 @@ def check_layout(
             )
     for index, one in enumerate(features):
         for other in features[index + 1:]:
-            if one.zone.overlaps(other.zone, -MIN_FEATURE_GAP):
+            if one.zone.overlaps(other.zone, MIN_FEATURE_GAP):
                 raise ValueError(
                     f"a {one.kind} and a {other.kind} overlap; leave at least "
                     f"{MIN_FEATURE_GAP:g} mm between features"
@@ -726,6 +880,17 @@ def build_features(
     solids: list[trimesh.Trimesh] = []
     for one in features:
         made = FEATURE_BUILDERS[one.kind](box, one, base_z)
+        for solid in made:
+            if (
+                solid.bounds[0][0] < one.zone.x0 - 1e-5
+                or solid.bounds[1][0] > one.zone.x1 + 1e-5
+                or solid.bounds[0][1] < one.zone.y0 - 1e-5
+                or solid.bounds[1][1] > one.zone.y1 + 1e-5
+            ):
+                raise ValueError(
+                    f"a {one.kind} exceeds its layout zone; reduce its size "
+                    "or thickness option"
+                )
         whole = Zone.whole(box)
         touches_wall = (
             one.zone.x0 <= whole.x0 + CONNECTOR_EDGE_KEEP_OUT
@@ -762,7 +927,11 @@ def make_fitted_insert(
         1.0,
     )
     plate = _extrude_polygon(footprint, BASE_PLATE)
-    parts = build_features(box, features, BASE_PLATE)
+    # Validate and size holders at their installed height, then lower them by
+    # the bin floor thickness so the removable insert still exports on z=0.
+    parts = build_features(box, features, BASE_PLATE + box.wall)
+    for part in parts:
+        part.apply_translation((0.0, 0.0, -box.wall))
     body = union([plate] + parts) if parts else plate
     # A holder is built to its zone, which may run right out to the usable
     # rectangle - fine when fused to the box, but a standalone insert has to
@@ -786,7 +955,9 @@ def make_cartridge_insert(
         1.0,
     )
     plate = _extrude_polygon(footprint, BASE_PLATE)
-    parts = build_features(box, features, BASE_PLATE, bounds)
+    parts = build_features(box, features, BASE_PLATE + box.wall, bounds)
+    for part in parts:
+        part.apply_translation((0.0, 0.0, -box.wall))
     body = union([plate] + parts) if parts else plate
     limit = _extrude_polygon(footprint, box.z * 2.0)
     return intersection([body, limit])

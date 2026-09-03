@@ -1056,6 +1056,62 @@ class InsertEditorTests(unittest.TestCase):
         scene = organizer_app.preview_scene(spec, features=[feature])
         self.assertIn("feature_pocket", [kind for _, kind in scene["faces"]])
 
+    def test_preview_uses_finished_holder_meshes_not_solid_placeholders(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        feature = organizer_app.default_feature(spec, "bore")
+        geometry = organizer_app.preview_geometry(spec, features=[feature])
+        faces = [
+            points for points, kind, _normal, _layer in geometry["geometry"]
+            if kind == "feature_bore"
+        ]
+        self.assertGreater(len(faces), 5)
+        actual = organizer_app.FEATURE_BUILDERS["bore"](spec, feature, spec.wall)[0]
+        self.assertAlmostEqual(
+            max(point[2] for face in faces for point in face),
+            actual.bounds[1][2],
+            places=5,
+        )
+
+    def test_preview_identifies_the_exact_support_with_invalid_settings(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        invalid = organizer_app.Feature(
+            "post", organizer_app.Zone(-8, -8, 8, 8),
+            options={"diameter": 30.0},
+        )
+        geometry = organizer_app.preview_geometry(spec, features=[invalid])
+        self.assertEqual(geometry["invalid_feature_indexes"], (0,))
+        self.assertTrue(geometry["feature_errors"])
+        self.assertIn(
+            "feature_invalid",
+            [kind for _points, kind, _normal, _layer in geometry["geometry"]],
+        )
+
+    def test_support_catalog_covers_contoured_tools_and_parts_with_holes(self) -> None:
+        self.assertIn("snug tool recess", organizer_app.support_display("nest"))
+        self.assertIn("rolls and rings", organizer_app.support_display("post"))
+        self.assertIn("measured segments", organizer_app.support_help("nest"))
+        self.assertIn("diameter", organizer_app.support_help("post"))
+
+    def test_every_guided_support_choice_starts_with_valid_geometry(self) -> None:
+        spec = BoxSpec(128.0, 88.0, 40.0)
+        for kind in organizer_app.SUPPORT_ORDER:
+            item = "hex_driver" if kind in {"cradle", "nest"} else "nozzle"
+            feature = organizer_app.default_feature(spec, kind, item)
+            geometry = organizer_app.preview_geometry(spec, features=[feature])
+            self.assertFalse(geometry["feature_errors"], kind)
+            self.assertTrue(
+                any(face_kind == f"feature_{kind}"
+                    for _points, face_kind, _normal, _layer in geometry["geometry"]),
+                kind,
+            )
+
+    def test_switching_to_cartridge_resnaps_existing_supports(self) -> None:
+        spec = BoxSpec(64.0, 64.0, 40.0)
+        original = organizer_app.Feature("pocket", organizer_app.Zone(-8, -8, 8, 8))
+        converted = organizer_app.convert_layout_mode(spec, [original], "cartridge")
+        converted.validate(spec)
+        self.assertNotEqual(converted.features[0].zone, original.zone)
+
     def test_saved_design_round_trip_includes_box_layout_label_and_part_name(self) -> None:
         spec = BoxSpec(48.0, 48.0, 35.0, flat_inside=0.5)
         feature = organizer_app.default_feature(spec, "bore")
@@ -1104,6 +1160,31 @@ class InsertEditorTests(unittest.TestCase):
             self.assertEqual(result["mode"], "separate")
             for path in files:
                 self.assertEqual(validate_3mf(path, 1)["warnings"], 0)
+
+    def test_failed_removable_label_preflight_leaves_no_partial_box(self) -> None:
+        spec = BoxSpec(32.0, 32.0, 40.0)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "result"
+            with self.assertRaisesRegex(ValueError, "will not fit"):
+                organizer_app.generate_organizer_files(
+                    spec, organizer_app.Layout(mode="separate"), output,
+                    label="THIS LABEL IS MUCH TOO LONG",
+                )
+            self.assertFalse(output.exists())
+
+    def test_failed_removable_support_preflight_leaves_no_partial_box(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        invalid = organizer_app.Feature(
+            "post", organizer_app.Zone(-8, -8, 8, 8),
+            options={"diameter": 30.0},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "result"
+            with self.assertRaisesRegex(ValueError, "zone gives"):
+                organizer_app.generate_organizer_files(
+                    spec, organizer_app.Layout((invalid,), "separate"), output
+                )
+            self.assertFalse(output.exists())
 
 
 class DesktopUiTests(unittest.TestCase):
@@ -1169,6 +1250,7 @@ class DesktopUiTests(unittest.TestCase):
         import tkinter as tk
 
         labels: list[str] = []
+        choices: list[str] = []
 
         def capture_widgets(root: tk.Tk, _n: int = 0) -> None:
             stack = list(root.winfo_children())
@@ -1180,6 +1262,8 @@ class DesktopUiTests(unittest.TestCase):
                     text = ""
                 if text:
                     labels.append(str(text))
+                if widget.winfo_class() == "TCombobox":
+                    choices.extend(str(value) for value in widget.cget("values"))
                 stack.extend(widget.winfo_children())
             root.destroy()
 
@@ -1192,7 +1276,11 @@ class DesktopUiTests(unittest.TestCase):
         self.assertTrue(any("units of 8 mm" in l for l in labels))
         self.assertIn("Floor label", labels)
         self.assertIn("Part name", labels)
-        self.assertIn("Add holder", labels)
+        self.assertIn("Add support", labels)
+        self.assertIn("Interior support", labels)
+        self.assertTrue(any("Open scalloped ribs" in label for label in labels))
+        self.assertIn("Contour nest — snug tool recess", choices)
+        self.assertIn("Center post — rolls and rings", choices)
         self.assertIn("Update selected", labels)
         self.assertIn("Save layout", labels)
         self.assertIn("Open layout", labels)
@@ -1218,7 +1306,7 @@ class DesktopUiTests(unittest.TestCase):
                 if isinstance(widget, tk.Canvas):
                     canvases.append(widget)
                 try:
-                    if widget.cget("text") == "Add holder":
+                    if widget.cget("text") == "Add support":
                         buttons.append(widget)
                 except tk.TclError:
                     pass
