@@ -187,14 +187,20 @@ def clean_label(label: str) -> str:
     return " ".join(kept.split())
 
 
-def box_filename(box: BoxSpec, label: str = "", suffix: str = ".3mf") -> str:
-    """``Box 16 x 48 x 40.3mf``, or ``Box 16 x 48 x 40 BOLTS.3mf`` with a label."""
-    name = f"Box {box.x:g} x {box.y:g} x {box.z:g}"
-    tidy = clean_label(label)
-    if tidy:
-        name = f"{name} {tidy}"
-    return f"{name}{suffix}"
+def box_filename(
+    box: BoxSpec, label: str = "", suffix: str = ".3mf", part: str = ""
+) -> str:
+    """``Box 16 x 48 x 40 BOLTS Driver Rack.3mf``.
 
+    The floor label and the part name are both optional and are simply
+    appended, in that order. The part name is decoration for the filename and
+    changes nothing about the geometry.
+    """
+    name = f"Box {box.x:g} x {box.y:g} x {box.z:g}"
+    for extra in (clean_label(label), clean_label(part)):
+        if extra:
+            name += f" {extra}"
+    return name + suffix
 
 PREVIEW_SIZE = 330
 PREVIEW_PAD = 34
@@ -442,9 +448,9 @@ ADVANCED_FIELDS = (
     ("Connector height (mm)", "height", None, None),
     ("Connector length (mm)", "side_length", None, None),
     (
-        f"Connector position (mm, steps of {WAVE_LENGTH:.0f})",
+        f"Connector position (mm, steps of {WAVE_LENGTH / 2:.0f})",
         "side_position",
-        WAVE_LENGTH,
+        WAVE_LENGTH / 2.0,
         -200.0,
     ),
 )
@@ -461,31 +467,47 @@ def launch_ui() -> None:
 
     root = tk.Tk()
     root.title("Wavy Drawer Organizer Generator")
-    root.minsize(640, 520)
+    root.minsize(920, 560)
 
-    frame = ttk.Frame(root, padding=18)
+    BODY = ("Segoe UI", 10)
+    VALUE = ("Segoe UI", 12)
+    STEP = ("Segoe UI", 13, "bold")
+
+    style = ttk.Style(root)
+    style.configure("TLabel", font=BODY)
+    style.configure("TCheckbutton", font=BODY)
+    style.configure("TRadiobutton", font=BODY)
+    style.configure("Head.TLabel", font=("Segoe UI", 17, "bold"))
+    style.configure("Note.TLabel", font=("Segoe UI", 9), foreground="#666666")
+    style.configure("Field.TEntry", padding=4)
+    # A number gets a big obvious stepper either side of it rather than the
+    # pinhead arrows a Spinbox draws.
+    style.configure("Step.TButton", font=STEP, padding=(0, 0), width=3)
+    style.configure("Go.TButton", font=("Segoe UI", 11, "bold"), padding=(10, 9))
+    style.configure("Small.TButton", font=("Segoe UI", 9), padding=(8, 4))
+
+    frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
+
     ttk.Label(
-        frame,
-        text="Wavy Drawer Organizer Generator",
-        font=("Segoe UI", 16, "bold"),
-    ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
+        frame, text="Wavy Drawer Organizer Generator", style="Head.TLabel"
+    ).grid(row=0, column=0, columnspan=3, sticky="w")
     ttk.Label(
         frame,
         text=(
-            f"Box X and Y step in {GRID_PITCH:.0f} mm from {MIN_BOX_SIZE:.0f} mm up, "
-            f"so any two boxes interlock. One unit is {BASE_UNIT:.0f} mm.\n"
-            f"The connector is locked: {LOCKED_TOLERANCE:.2f} mm tolerance, "
-            f"{LOCKED_CONNECTOR_LENGTH:.0f} mm long, {LOCKED_CONNECTOR_HEIGHT:.1f} mm tall."
+            f"X and Y step in {GRID_PITCH:.0f} mm from {MIN_BOX_SIZE:.0f} mm up, so any "
+            f"two boxes interlock.  Connector locked at {LOCKED_TOLERANCE:.2f} mm, "
+            f"{LOCKED_CONNECTOR_LENGTH:.0f} x {LOCKED_CONNECTOR_HEIGHT:.1f} mm."
         ),
-        justify="left",
-    ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 14))
+        style="Note.TLabel",
+    ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 14))
 
     values = {
         "x_units": tk.StringVar(value="2"),
         "y_units": tk.StringVar(value="6"),
         "z": tk.StringVar(value="40"),
         "label": tk.StringVar(value=""),
+        "part": tk.StringVar(value=""),
         "wall": tk.StringVar(value="0.8"),
         "flat_inside": tk.StringVar(value="0"),
         "tolerance": tk.StringVar(value=f"{LOCKED_TOLERANCE:g}"),
@@ -493,38 +515,56 @@ def launch_ui() -> None:
         "side_length": tk.StringVar(value=f"{LOCKED_CONNECTOR_LENGTH:g}"),
         "side_axis": tk.StringVar(value="y"),
         "side_position": tk.StringVar(value="0"),
-        "sample_boxes": tk.StringVar(value=DEFAULT_SAMPLE_BOXES),
         "output": tk.StringVar(value=str(APP_DIR / "generated")),
-        "status": tk.StringVar(value="Ready"),
     }
     show_advanced = tk.BooleanVar(value=False)
 
-    def add_field(parent, row, label, key, step, lowest):
-        widgets = []
-        tag = ttk.Label(parent, text=label)
-        tag.grid(row=row, column=0, sticky="w", pady=4)
-        if step is None:
-            entry = ttk.Entry(parent, textvariable=values[key], width=18)
-        else:
-            entry = ttk.Spinbox(
-                parent, textvariable=values[key], from_=lowest, to=400.0,
-                increment=step, width=16,
-            )
-        entry.grid(row=row, column=1, sticky="ew", pady=4)
-        widgets += [tag, entry]
-        return widgets
+    def nudge(key: str, step: float, lowest: float) -> None:
+        try:
+            current = float(values[key].get())
+        except ValueError:
+            current = lowest
+        moved = max(lowest, round((current + step) / step) * step if step >= 1 else current + step)
+        values[key].set(f"{moved:g}")
+
+    def add_number(parent, row, label, key, step, lowest):
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3)
+        holder = ttk.Frame(parent)
+        holder.grid(row=row, column=1, sticky="w", pady=3, padx=(10, 0))
+        ttk.Button(
+            holder, text="−", style="Step.TButton",
+            command=lambda: nudge(key, -step, lowest),
+        ).pack(side="left")
+        tk.Entry(
+            holder, textvariable=values[key], width=6, justify="center",
+            font=VALUE, relief="solid", borderwidth=1,
+        ).pack(side="left", padx=4, ipady=3)
+        ttk.Button(
+            holder, text="+", style="Step.TButton",
+            command=lambda: nudge(key, step, lowest),
+        ).pack(side="left")
+
+    def add_text(parent, row, label, key, width=26):
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3)
+        tk.Entry(
+            parent, textvariable=values[key], width=width, font=VALUE,
+            relief="solid", borderwidth=1,
+        ).grid(row=row, column=1, sticky="w", pady=3, padx=(10, 0), ipady=3)
+
+    form = ttk.Frame(frame)
+    form.grid(row=2, column=0, columnspan=2, sticky="nw")
+
+    add_number(form, 0, f"Width X  (units of {BASE_UNIT:.0f} mm)", "x_units", 1.0, MIN_UNITS)
+    add_number(form, 1, f"Depth Y  (units of {BASE_UNIT:.0f} mm)", "y_units", 1.0, MIN_UNITS)
+    add_number(form, 2, "Height Z  (mm)", "z", 5.0, 5.0)
+    add_text(form, 3, "Floor label", "label")
+    add_text(form, 4, "Part name", "part")
 
     preview = tk.Canvas(
         frame, width=PREVIEW_SIZE, height=PREVIEW_SIZE,
         background="white", highlightthickness=1, highlightbackground="#cccccc",
     )
-    preview.grid(row=2, column=3, rowspan=len(BASIC_FIELDS) + 2,
-                 sticky="n", padx=(18, 0), pady=4)
-
-    row = 2
-    for label, key, step, lowest in BASIC_FIELDS:
-        add_field(frame, row, label, key, step, lowest)
-        row += 1
+    preview.grid(row=2, column=2, rowspan=3, sticky="ne", padx=(24, 0))
 
     FACE_COLOURS = {
         "outside": "#8fb8cc",
@@ -590,37 +630,27 @@ def launch_ui() -> None:
     for key in ("x_units", "y_units", "z", "wall", "flat_inside", "label"):
         values[key].trace_add("write", refresh_translation)
 
-    advanced_row = row
     ttk.Checkbutton(
         frame, text="Advanced settings", variable=show_advanced,
         command=lambda: toggle_advanced(),
-    ).grid(row=advanced_row, column=0, columnspan=2, sticky="w", pady=(10, 4))
-    row += 1
+    ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(14, 2))
 
     advanced = ttk.Frame(frame)
-    advanced.grid(row=row, column=0, columnspan=3, sticky="ew")
-    advanced.columnconfigure(1, weight=1)
+    advanced.grid(row=4, column=0, columnspan=2, sticky="nw")
     for index, (label, key, step, lowest) in enumerate(ADVANCED_FIELDS):
-        add_field(advanced, index, label, key, step, lowest)
+        add_number(advanced, index, label, key, step or 0.1, lowest or 0.0)
     axis_row = len(ADVANCED_FIELDS)
     ttk.Label(advanced, text="Connector runs along").grid(
-        row=axis_row, column=0, sticky="w", pady=4
+        row=axis_row, column=0, sticky="w", pady=3
     )
     axis_frame = ttk.Frame(advanced)
-    axis_frame.grid(row=axis_row, column=1, sticky="w")
+    axis_frame.grid(row=axis_row, column=1, sticky="w", padx=(10, 0))
     ttk.Radiobutton(
         axis_frame, text="X wall", variable=values["side_axis"], value="x"
     ).pack(side="left")
     ttk.Radiobutton(
         axis_frame, text="Y wall", variable=values["side_axis"], value="y"
     ).pack(side="left", padx=(12, 0))
-    ttk.Label(advanced, text="Sample plate boxes").grid(
-        row=axis_row + 1, column=0, sticky="w", pady=4
-    )
-    ttk.Entry(advanced, textvariable=values["sample_boxes"], width=18).grid(
-        row=axis_row + 1, column=1, sticky="ew", pady=4
-    )
-    row += 1
 
     def toggle_advanced() -> None:
         if show_advanced.get():
@@ -631,20 +661,23 @@ def launch_ui() -> None:
     toggle_advanced()
     refresh_translation()
 
-    ttk.Label(frame, text="Output folder").grid(row=row, column=0, sticky="w", pady=4)
-    ttk.Entry(frame, textvariable=values["output"]).grid(
-        row=row, column=1, sticky="ew", pady=4
-    )
+    # --- output folder --------------------------------------------------------
+    out_row = ttk.Frame(frame)
+    out_row.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(18, 0))
+    ttk.Label(out_row, text="Output folder").pack(side="left")
+    tk.Entry(
+        out_row, textvariable=values["output"], font=BODY,
+        relief="solid", borderwidth=1,
+    ).pack(side="left", fill="x", expand=True, padx=(10, 6), ipady=3)
 
     def browse() -> None:
         selected = filedialog.askdirectory(initialdir=values["output"].get())
         if selected:
             values["output"].set(selected)
 
-    ttk.Button(frame, text="Browse...", command=browse).grid(
-        row=row, column=2, padx=(8, 0)
+    ttk.Button(out_row, text="Browse...", style="Small.TButton", command=browse).pack(
+        side="left"
     )
-    row += 1
 
     def specs() -> tuple[BoxSpec, ConnectorSpec, Path]:
         box = BoxSpec(
@@ -660,92 +693,58 @@ def launch_ui() -> None:
         )
         return box, connector, Path(values["output"].get()).expanduser()
 
-    def perform(label: str, action) -> None:
-        # Generating reports itself on the status line. No dialog to dismiss on
-        # success; a failure still gets one, because it needs acting on.
+    def perform(button, action) -> None:
+        # The button reports on itself, so there is no status bar taking up a
+        # line for the 99% of the time it says nothing. A failure still gets a
+        # dialog, because it needs acting on.
+        original = button.cget("text")
         try:
-            values["status"].set(f"Generating {label}...")
+            button.configure(text="Working...")
             root.update_idletasks()
-            values["status"].set(action())
+            action()
         except Exception as error:  # UI boundary: present validation errors cleanly.
-            values["status"].set(f"Failed: {error}")
+            button.configure(text=original)
             messagebox.showerror("Could not generate part", str(error))
+            return
+        button.configure(text="Saved")
+        root.after(1500, lambda: button.configure(text=original))
 
     def box_action():
         box, _, output = specs()
         label = values["label"].get()
-        name = box_filename(box, label)
-        result = generate_box_file(box, output / name, label)
-        inside_x, inside_y = box.usable_inside
-        summary = (
-            f"Wrote {name}  -  {box.x:g} x {box.y:g} x {box.z:g} mm outside, "
-            f"{inside_x:.2f} x {inside_y:.2f} usable inside"
-        )
-        text = result.get("label")
-        if text:
-            way = "turned to run up the box" if text["rotated"] else "across the box"
-            summary += (
-                f"; label '{text['label']}' at {text['cap_height_mm']:.1f} mm "
-                f"letters, {way}, sunk {text['depth_mm']:g} mm into the floor as a "
-                f"second object for a second colour"
-            )
-        return summary
+        name = box_filename(box, label, part=values["part"].get())
+        return generate_box_file(box, output / name, label)
 
     def side_action():
         box, connector, output = specs()
-        result = generate_side_file(
+        return generate_side_file(
             box, connector, output / "Connector.3mf",
             values["side_axis"].get(), float(values["side_position"].get()),
             float(values["side_length"].get()),
         )
-        fit = result["fit"]
-        return (
-            f"Wrote Connector.3mf  -  {connector.tolerance:g} mm tolerance, "
-            f"seats at {fit['seated_overlap_mm3']:.3f} mm3, "
-            f"locks at {fit['lift_0.5_mm3']:.2f} mm3"
-        )
-
-    def kit_action():
-        box, connector, output = specs()
-        label = values["label"].get()
-        generate_kit_files(
-            box, connector, output,
-            values["side_axis"].get(), float(values["side_position"].get()),
-            label,
-        )
-        return f"Wrote {box_filename(box, label)} and Connector.3mf"
 
     def sampler_action():
         box, connector, output = specs()
-        result = generate_sampler(
+        return generate_sampler(
             output=output / "WAVY_SAMPLE_SET.3mf",
-            sizes=parse_sizes(values["sample_boxes"].get()),
+            sizes=parse_sizes(DEFAULT_SAMPLE_BOXES),
             height=box.z, wall=box.wall, connector=connector,
-        )
-        return (
-            f"Wrote WAVY_SAMPLE_SET.3mf  -  {result['objects']} objects: "
-            f"{', '.join(result['boxes'])} mm plus {result['connectors']} connectors"
         )
 
     buttons = ttk.Frame(frame)
-    buttons.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(18, 8))
-    for index, (text, label, action) in enumerate((
-        ("Generate Box", "box", box_action),
-        ("Generate Connector", "connector", side_action),
-        ("Generate Both", "box + connector", kit_action),
-        ("Generate Sample Set", "sample set", sampler_action),
-    )):
-        ttk.Button(
-            buttons, text=text, command=lambda l=label, a=action: perform(l, a)
-        ).grid(row=index // 2, column=index % 2, padx=(0, 6), pady=4, sticky="ew")
-    for column in range(2):
-        buttons.columnconfigure(column, weight=1)
-    row += 1
-
-    ttk.Separator(frame).grid(row=row, column=0, columnspan=3, sticky="ew", pady=10)
-    ttk.Label(frame, textvariable=values["status"], wraplength=600).grid(
-        row=row + 1, column=0, columnspan=3, sticky="w"
+    buttons.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(20, 0))
+    box_button = ttk.Button(buttons, text="Generate Box", style="Go.TButton")
+    box_button.configure(command=lambda: perform(box_button, box_action))
+    box_button.pack(side="left", fill="x", expand=True)
+    side_button = ttk.Button(buttons, text="Generate Connector", style="Go.TButton")
+    side_button.configure(command=lambda: perform(side_button, side_action))
+    side_button.pack(side="left", fill="x", expand=True, padx=(10, 0))
+    sampler_button = ttk.Button(
+        buttons, text="Generate Sampler", style="Small.TButton"
     )
+    sampler_button.configure(command=lambda: perform(sampler_button, sampler_action))
+    sampler_button.pack(side="left", padx=(16, 0))
+
     frame.columnconfigure(1, weight=1)
     root.mainloop()
 

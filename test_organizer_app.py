@@ -1078,12 +1078,18 @@ class DesktopUiTests(unittest.TestCase):
 
         with mock.patch.object(tk.Tk, "mainloop", capture_widgets):
             organizer_app.launch_ui()
-        self.assertIn("Generate Sample Set", labels)
+        self.assertIn("Generate Sampler", labels)
+        self.assertIn("Generate Box", labels)
+        self.assertIn("Generate Connector", labels)
         self.assertIn("Advanced settings", labels)
         self.assertTrue(any("units of 8 mm" in l for l in labels))
-        self.assertIn("Floor label (blank for none)", labels)
+        self.assertIn("Floor label", labels)
+        self.assertIn("Part name", labels)
         self.assertIn("Flat wall band from base (0-1 mm)", labels)
         self.assertNotIn("Generate Corner", labels)
+        # the sample plate is fixed, and there is no status bar
+        self.assertFalse(any("Sample plate boxes" in l for l in labels))
+        self.assertNotIn("Ready", labels)
 
 
 class CompatibilityTests(unittest.TestCase):

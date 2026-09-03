@@ -38,18 +38,25 @@ They take about two minutes; boolean operations dominate.
 ### Using the UI
 
 The main form is deliberately short: **box X and Y in units**, box height in mm,
-and a **floor label**. Beside them a **live 3D preview** draws the box and its
-label, with the dimensions written along the bottom and side as
-`32mm (29 inside)` — outside size first, usable interior in brackets — and the
-height in the corner. It turns the label when the box is too narrow and says so
-if the label will not fit.
+a **floor label**, and a **part name** that is appended to the filename and
+changes nothing else. Numbers get a large stepper either side rather than the
+pinhead arrows a spinbox draws.
 
-Everything else — wall thickness, the flat wall band, connector tolerance, height,
-length, position, wall direction and the sample-plate contents — sits behind an
-**Advanced settings** checkbox.
+Beside the form a **live 3D preview** shows the box and its label, with the
+dimensions written along the bottom and side as `32mm (29 inside)` — outside
+size first, usable interior in brackets — and the height in the corner. It turns
+the label when the box is too narrow and says so if the label will not fit.
 
-Generating writes the file and reports on the status line; no dialog to dismiss.
-A failure still raises one, because it needs acting on.
+Everything else — wall thickness, the flat wall band, connector tolerance,
+height, length, position and wall direction — sits behind an **Advanced
+settings** checkbox. The sample plate is a fixed set of sizes, so it has no
+settings at all.
+
+Three buttons: **Generate Box** and **Generate Connector**, with a smaller
+**Generate Sampler** beside them. There is no status bar — a button reports on
+itself, briefly reading *Saved* when it has written the file, so nothing takes
+up a line saying "Ready" for the 99% of the time it has nothing to report. A
+failure still raises a dialog, because it needs acting on.
 
 ---
 
