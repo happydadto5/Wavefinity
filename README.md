@@ -1,11 +1,14 @@
 # Wavefinity — wavy drawer organizer generator
 
 Parametric Python generator for a 3D-printable modular drawer organizer with
-**wavy walls that interlock**. The desktop UI, command-line interface, fit
-sampler and tests all use `organizer_engine.py` as their only geometry source.
+**wavy walls that interlock** and configurable holders inside. The desktop UI,
+command-line interface, fit sampler and tests share the same box, insert and
+export engines.
 
-There are **two printed parts**: the box, and one **connector** — a small staple
-that joins two boxes across their shared seam. There is no corner connector.
+The basic system has a box and one **connector** — a small staple that joins two
+boxes across their shared seam. Holders can be fused into the box, printed as a
+removable fitted insert, or printed on an optional 8 mm cartridge footprint.
+There is no corner connector.
 
 Everything below is millimetres. This is the whole documentation for the
 project: design, rationale, measured evidence, and the traps.
@@ -42,17 +45,43 @@ a **floor label**, and a **part name** that is appended to the filename and
 changes nothing else. Numbers get a large stepper either side rather than the
 pinhead arrows a spinbox draws.
 
-Beside the form a **live 3D preview** shows the box and its label, with the
+Beside the form a **live 3D preview** shows the box, label and holders, with the
 dimensions written along the bottom and side as `32mm (29 inside)` — outside
-size first, usable interior in brackets — and the height in the corner. It turns
-the label when the box is too narrow and says so if the label will not fit.
+size first, usable interior in brackets — and the height in the corner. Drag it
+to rotate, use the mouse wheel to zoom, and double-click to reset the view. The
+preview is built once per design change and only reprojected while the camera
+moves.
+
+The **2D layout** tab is the insert editor. Add any registered holder, click and
+drag it to move, drag its blue corner to resize, or enter exact centre and size
+values. Normal layouts snap to **1 mm**. The editor exposes the supplied item
+library plus editable length-by-diameter segments, round/hex/square profiles,
+fit clearance, count, orientation, and open-ended `key=value` builder options.
+Overlaps and out-of-bounds features turn red and are refused at export. Layouts
+can be saved and reopened as `.wavefinity.json` files.
+
+Tall holders may use the middle of the bin, but anything entering the 2 mm strip
+beside a wall is capped below the connector arms. The editor's default divider
+height follows that limit; an explicit unsafe height is refused at generation.
+
+**Fused** is the default and gives the most usable floor. **Removable** adds a
+1.2 mm fitted base plate. **8 mm cartridge** is a removable export constrained
+to centred whole cells; it deliberately gives up edge area in exchange for a
+reusable coordinate footprint. On the 128 x 88 comparison bin that is 120 x 80
+mm, 9.8% less floor, which is why cartridge snapping is not the default.
+
+Labels are placed after holders. They stay centred when possible, then move,
+rotate, and finally shrink (never below 7 mm) to dodge occupied zones. In
+removable modes the label is inlaid into the insert plate rather than hidden
+under it.
 
 Everything else — wall thickness, the flat wall band, connector tolerance,
 height, length, position and wall direction — sits behind an **Advanced
 settings** checkbox. The sample plate is a fixed set of sizes, so it has no
 settings at all.
 
-Three buttons: **Generate Box** and **Generate Connector**, with a smaller
+Three buttons: **Generate Box** (including the current insert layout) and
+**Generate Connector**, with a smaller
 **Generate Sampler** beside them. There is no status bar — a button reports on
 itself, briefly reading *Saved* when it has written the file, so nothing takes
 up a line saying "Ready" for the 99% of the time it has nothing to report. A
@@ -61,6 +90,25 @@ failure still raises a dialog, because it needs acting on.
 ---
 
 ## The design
+
+### Holder primitives
+
+Every holder owns a rectangular floor zone. Item-based holders use one or more
+`length x diameter` segments, so `50x6, 30x18` describes a hex driver shaft and
+handle without hard-coding a hex-driver rack. `Count = auto` fills the zone; a
+number requests exactly that many.
+
+| Holder | Purpose | Optional `key=value` settings |
+|---|---|---|
+| `cradle` | Scalloped ribs for items lying along X or Y; every segment gets its own radius while all seats share one axis height | `rib_thickness`, `spacing`, `floor_gap` |
+| `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
+| `divider` | One straight subdividing wall along X or Y | `height`, `thickness` |
+| `pocket` | Raised rectangular tray with a recessed centre | `height`, `depth`, `wall` |
+| `slot` | Parallel grooves for cards, blades or other flat items | `width`, `height`, `depth`, `wall` |
+
+Builder options are intentionally generic. The editor passes them to the
+registered builder, so a future `@feature` function can add its own settings
+without changing the layout file format or editor data model.
 
 ### The wave
 
@@ -227,6 +275,8 @@ whole reason it stays a separate object.
 - The pocket and the inlay are exact complements: put them back together and you
   get the plain box, to the last cubic micron
 - If it will not fit either way at 7 mm you get an error naming what it needs
+- With holders present, the label automatically moves to unused floor; if none
+  remains, export gives a clear error instead of burying text in a holder
 - **Blank label changes nothing**: one object, and the plain filename
 
 The label is added to the filename: `Box 48 x 48 x 40 BOLTS.3mf`. Characters a
@@ -243,6 +293,8 @@ python organizer_app.py box --x 32 --y 32 --z 40 --flat-inside 1.0 --output flat
 python organizer_app.py side --box-x 40 --box-y 32 --box-z 55 --along y --output side_y.3mf
 python organizer_app.py kit --x 40 --y 32 --z 55 --output-dir generated_40x32
 python organizer_app.py sampler --boxes 2x6,4x6,6x6 --output WAVY_SAMPLE_SET.3mf
+python organizer_app.py organizer --layout drivers.wavefinity.json --output-dir generated
+python organizer_app.py organizer --layout drivers.wavefinity.json --mode cartridge --label HEX --part-name "Driver rack" --output-dir generated
 ```
 
 X and Y must be multiples of 8 mm (minimum 8); Z and wall are free. `--boxes`
@@ -252,8 +304,14 @@ Generated box files are named for their size, plus the label if there is one:
 `Box 16 x 48 x 40.3mf` or `Box 16 x 48 x 40 BOLTS.3mf`. The connector is one
 part, so it is just `Connector.3mf`.
 
-Both `.3mf` and `.stl` work for individual parts. Combined files are strict 3MF
-packages.
+The `organizer` command reads either a complete saved UI design or a bare layout
+object. A complete design supplies its box, label and part name; explicit CLI
+values override any of them. `--mode` overrides the saved
+fused/separate/cartridge mode.
+Fused export writes one box file. Removable modes write a plain box and a
+separate `Insert ...3mf` or `Cartridge ...3mf`. Labelled parts are strict
+two-object 3MF packages so the inlay can use another filament. Both `.3mf` and
+`.stl` continue to work for legacy individual-part commands.
 
 ## Supplied print file
 
@@ -268,25 +326,27 @@ really do interlock and take a clip at every seam.
 
 ## Code layout
 
-**There are exactly three Python files, and all three are live.** Nothing here
-is legacy or superseded:
+There are three live source modules and two test modules. Nothing here is legacy
+or superseded:
 
 | File | Role | Entry point? |
 |---|---|---|
-| `organizer_engine.py` | Every piece of geometry, validation, fit simulation and export. **The single source of truth** - the UI, the CLI and the tests all get their shapes from here, so a change to it changes all three at once. | No. It is a library; it has no `__main__` and is never run directly. |
-| `organizer_app.py` | The CLI and the Tkinter UI, including the 3D preview. Imports the engine; contains **no geometry of its own**. | **Yes - the only one.** `python organizer_app.py ui`, or a subcommand. |
-| `test_organizer_app.py` | 80 tests, written against behaviour rather than implementation. Imports both of the above. | Only via `python -m unittest`. |
+| `organizer_engine.py` | Wavy boxes, connectors, labels, mesh validation and 3MF/STL export. | No. |
+| `organizer_inserts.py` | Item/segment model, zones, 1 mm and cartridge layouts, JSON persistence, holder registry, five builders, and fused/removable assembly. | No. |
+| `organizer_app.py` | CLI, exporters, interactive camera, 2D drag editor and Tkinter UI. | **Yes - the only one.** `python organizer_app.py ui`, or a subcommand. |
+| `test_organizer_app.py` | Box, connector, label, preview, editor, CLI and export regressions. | Only via `python -m unittest`. |
+| `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
 
-The dependency runs one way: `test_organizer_app` -> `organizer_app` ->
-`organizer_engine`. The engine imports neither of the others.
+Dependencies run one way: the insert module imports the geometry engine, and the
+app imports both. Neither library imports the app.
 
 Two things worth knowing before tidying anything up:
 
-- The **twelve `*Tests` classes** in the test file look unreferenced, because
+- The `*Tests` classes look unreferenced, because
   nothing calls them by name - `unittest` discovers them. They are not dead.
-- Every other top-level definition in the engine (51) and the app (19) is
-  referenced somewhere. There is no dead code to clear out; if you find
-  something that looks orphaned, check the tests before deleting it.
+- Registered holder builders look unreferenced because the registry calls them.
+  A new holder is one `@feature("name")` function; removing it is deleting that
+  function. Check the tests before deleting apparently orphaned definitions.
 
 Non-Python files:
 
@@ -433,12 +493,21 @@ Both were stated as done and later found false. Tests now exist for each.
   sort behind the floor and vanish. The 76-degree elevation was calculated: for a
   40 mm bin the floor only clears the near rim past about 88 degrees, so a low
   dramatic angle hides the floor and the label with it.
+- **Cartridge cells are anchored at the cartridge corner, not world zero.** An
+  even cell count puts legal feature centres half a cell from zero; snapping the
+  centre itself creates layouts that look aligned but are not reusable.
+- **Labels avoid complete feature zones, not just generated surfaces.** That is
+  conservative by design: it preserves readable clearance and makes preview and
+  export agree without running expensive booleans on every drag.
+- **A tall feature at the wall can block a connector even when the 2D zones are
+  valid.** Builders check the 2 mm edge strip against the connector-arm bottom;
+  the default divider stops exactly at that safe height.
 - **The `.venv` here is the only Python that works.** Use
   `.venv\Scripts\python.exe`, not the system interpreter.
 
 ## Verified behaviour
 
-Measured, not asserted. All figures from the current geometry; 80/80 tests pass.
+Measured and regression-tested; run the suite for the current exact count.
 
 **Mating and the grid**
 - Boxes one pitch apart: **0.0 mm³** interference, constant 0.25 mm clearance
@@ -471,20 +540,32 @@ Measured, not asserted. All figures from the current geometry; 80/80 tests pass.
 - Pocket volume removed == inlay volume; the two intersect by **<0.01 mm³**;
   union restores the plain box exactly. Checked on 48x48, 16x48 and 24x40
 - Strict 3MF, **zero warnings**, two named objects
+- Labels move around insert zones with a 1 mm clearance; the same placement is
+  used by the 2D editor, 3D preview, mesh pocket and export report
+
+**Insert layouts**
+- Five registered builders: cradle, bore, divider, pocket and slot
+- Fused outputs remain one watertight solid; fitted and cartridge inserts clear
+  the bin walls and stand on their own 1.2 mm print-flat plate
+- Normal moves and resizes snap to 1 mm. Cartridge coordinates and sizes are
+  validated on 8 mm cell edges and survive a JSON round trip
+- All three production modes were exported as strict, zero-warning 3MF files;
+  labelled outputs contain exactly two named objects
 
 **Usable inside**
 - The exact reported rectangle fits; **+0.3 mm does not**
 
 ## Where it stands
 
-Working and verified: box, connector, lock, labels, flat-inside fill, 3D
-preview, CLI, UI, sample plate.
+Working and verified: box, connector, lock, insert registry and primitives,
+fused/removable/cartridge exports, insert-aware labels, flat-inside fill,
+interactive 3D preview, 2D drag editor, saved layouts, CLI, UI and sample plate.
 
 Physically printed so far: **test pieces only** — the five-clip tolerance plate
 that set the connector fit. That plate predates the 4 mm wave, so **nothing in
 the current design is confirmed in plastic yet.**
 
-Next steps, none started:
+Remaining physical next steps:
 
 - Print `WAVY_SAMPLE_SET.3mf` and check the lock feel, the label colour change,
   and that a connector really does drop on either way round.

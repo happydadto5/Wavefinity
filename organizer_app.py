@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, replace
 import json
 import math
 from pathlib import Path
 import sys
+from typing import Iterable
 
 from organizer_engine import (
     BASE_UNIT,
@@ -17,22 +19,44 @@ from organizer_engine import (
     LOCKED_CONNECTOR_LENGTH,
     LOCKED_TOLERANCE,
     MIN_BOX_SIZE,
-    MIN_JOINABLE_SIZE,
     WAVE_LENGTH,
     export_labelled_box,
     export_mesh,
     generate_sampler,
     label_report,
+    label_placement,
     make_labelled_box,
     placed_label_outline,
     preview_rings,
-    wavy_cavity_polygon,
-    wavy_outer_polygon,
     make_box,
     make_side_connector,
     measure_lock,
     mesh_report,
     validate_side_fit,
+)
+from organizer_inserts import (
+    BASE_PLATE,
+    CARTRIDGE_PITCH,
+    EDITOR_SNAP,
+    FEATURE_BUILDERS,
+    LIBRARY,
+    Feature,
+    Item,
+    Layout,
+    Segment,
+    Zone,
+    cartridge_zone,
+    connector_keep_out,
+    insert_report,
+    layout_from_dict,
+    layout_to_dict,
+    layout_zone,
+    make_cartridge_insert,
+    make_fitted_insert,
+    make_fused_box,
+    moved_feature,
+    resized_feature,
+    snapped_zone,
 )
 
 
@@ -106,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
     box_parser.add_argument(
         "--label",
         default="",
-        help="raised text on the floor, as a second object for a second colour",
+        help="sunk floor inlay, as a second object for a second colour",
     )
     box_parser.add_argument("--output", type=Path, required=True)
 
@@ -132,6 +156,20 @@ def build_parser() -> argparse.ArgumentParser:
     kit_parser.add_argument("--side-position", type=float, default=0.0)
     kit_parser.add_argument("--label", default="")
     kit_parser.add_argument("--output-dir", type=Path, required=True)
+
+    layout_parser = subparsers.add_parser(
+        "organizer", help="generate a fused or removable organizer from a layout JSON"
+    )
+    layout_parser.add_argument("--x", type=float)
+    layout_parser.add_argument("--y", type=float)
+    layout_parser.add_argument("--z", type=float)
+    layout_parser.add_argument("--wall", type=float)
+    layout_parser.add_argument("--flat-inside", type=float)
+    layout_parser.add_argument("--layout", type=Path, required=True)
+    layout_parser.add_argument("--mode", choices=("fused", "separate", "cartridge"))
+    layout_parser.add_argument("--label")
+    layout_parser.add_argument("--part-name")
+    layout_parser.add_argument("--output-dir", type=Path, required=True)
 
     sampler_parser = subparsers.add_parser(
         "sampler", help="assembly sample: a set of boxes plus a row of connectors"
@@ -202,6 +240,21 @@ def box_filename(
             name += f" {extra}"
     return name + suffix
 
+
+def insert_filename(
+    box: BoxSpec,
+    label: str = "",
+    part: str = "",
+    cartridge: bool = False,
+    suffix: str = ".3mf",
+) -> str:
+    prefix = "Cartridge" if cartridge else "Insert"
+    name = f"{prefix} {box.x:g} x {box.y:g}"
+    for extra in (clean_label(label), clean_label(part)):
+        if extra:
+            name += f" {extra}"
+    return name + suffix
+
 PREVIEW_SIZE = 330
 PREVIEW_PAD = 34
 
@@ -210,102 +263,144 @@ PREVIEW_PAD = 34
 # floor is where the label is, so the view is steep enough to see in while
 # still showing two outer faces and the wall thickness.
 PREVIEW_ELEVATION = 76.0
-_YAW = 0.7071067811865476                                  # cos 45
-_LIFT = _YAW * math.sin(math.radians(PREVIEW_ELEVATION))
-_DROP = math.cos(math.radians(PREVIEW_ELEVATION))
-# unit vector from the scene toward the camera
-_TO_CAMERA = (-_YAW * _DROP, -_YAW * _DROP, math.sin(math.radians(PREVIEW_ELEVATION)))
 
 
-def iso_point(point: tuple[float, float, float]) -> tuple[float, float]:
+@dataclass(frozen=True)
+class PreviewCamera:
+    yaw: float = 45.0
+    elevation: float = PREVIEW_ELEVATION
+    zoom: float = 1.0
+
+    def normalized(self) -> "PreviewCamera":
+        return PreviewCamera(
+            self.yaw % 360.0,
+            min(89.0, max(8.0, self.elevation)),
+            min(4.0, max(0.35, self.zoom)),
+        )
+
+
+def iso_point(
+    point: tuple[float, float, float], camera: PreviewCamera | None = None
+) -> tuple[float, float]:
     """One 3D point in screen coordinates, before scaling.
 
     Screen Y grows downward, so both world axes and Z are negated: +X, +Y and
     +Z all travel up the canvas, which is what keeps floor text the right way
     up instead of mirrored or upside down.
     """
+    camera = (camera or PreviewCamera()).normalized()
     x, y, z = point
-    return (x - y) * _YAW, -(x + y) * _LIFT - z * _DROP
+    yaw = math.radians(camera.yaw)
+    elevation = math.radians(camera.elevation)
+    side = x * math.cos(yaw) - y * math.sin(yaw)
+    forward = x * math.sin(yaw) + y * math.cos(yaw)
+    return side, -forward * math.sin(elevation) - z * math.cos(elevation)
 
 
-def _towards_camera(normal: tuple[float, float, float]) -> float:
-    return sum(n * c for n, c in zip(normal, _TO_CAMERA))
+def _towards_camera(
+    normal: tuple[float, float, float], camera: PreviewCamera | None = None
+) -> float:
+    camera = (camera or PreviewCamera()).normalized()
+    yaw = math.radians(camera.yaw)
+    elevation = math.radians(camera.elevation)
+    vector = (
+        -math.sin(yaw) * math.cos(elevation),
+        -math.cos(yaw) * math.cos(elevation),
+        math.sin(elevation),
+    )
+    return sum(n * c for n, c in zip(normal, vector))
 
 
-def preview_scene(box: BoxSpec, label: str = "") -> dict[str, object]:
-    """The box as 3D faces ordered far to near, plus its dimension text.
+def _feature_height(box: BoxSpec, one: Feature, base_z: float) -> float:
+    options = one.options
+    if one.kind == "cradle" and one.item is not None:
+        return base_z + options.get("floor_gap", 2.0) + one.item.held(one.item.widest) / 2.0
+    if one.kind == "bore" and one.item is not None:
+        depth = options.get("depth", min(one.item.length * 0.4, box.z - base_z - 2.0))
+        return base_z + options.get("height", depth + 2.0)
+    if one.kind == "divider":
+        return base_z + options.get("height", connector_keep_out(box) - base_z)
+    return base_z + options.get("height", 12.0)
 
-    Built outside the widget code so the layout can be checked without opening
-    a window.  Faces pointing away from the camera are dropped first - painting
-    order alone cannot hide the far outside wall, because from above its top
-    edge is genuinely nearer the camera than the floor is.
-    """
+
+def _prism_geometry(zone: Zone, z0: float, z1: float, kind: str) -> list[tuple]:
+    a = (zone.x0, zone.y0)
+    b = (zone.x1, zone.y0)
+    c = (zone.x1, zone.y1)
+    d = (zone.x0, zone.y1)
+    return [
+        ([(*a, z0), (*b, z0), (*b, z1), (*a, z1)], kind, (0.0, -1.0, 0.0), 0),
+        ([(*b, z0), (*c, z0), (*c, z1), (*b, z1)], kind, (1.0, 0.0, 0.0), 0),
+        ([(*c, z0), (*d, z0), (*d, z1), (*c, z1)], kind, (0.0, 1.0, 0.0), 0),
+        ([(*d, z0), (*a, z0), (*a, z1), (*d, z1)], kind, (-1.0, 0.0, 0.0), 0),
+        ([(*a, z1), (*b, z1), (*c, z1), (*d, z1)], kind, (0.0, 0.0, 1.0), 0),
+    ]
+
+
+def preview_geometry(
+    box: BoxSpec, label: str = "", features: Iterable[Feature] = (),
+    mode: str = "fused",
+) -> dict[str, object]:
+    """Build camera-independent preview geometry once per design change."""
+    features = tuple(features)
     outer, cavity = preview_rings(box)
     floor_z, rim_z = box.wall, box.z
-    faces: list[tuple[float, list[tuple[float, float, float]], str]] = []
-
-    def depth(points) -> float:
-        return sum(_towards_camera(point) for point in points) / len(points)
-
-    def add(points, kind, normal, key=None) -> None:
-        if _towards_camera(normal) <= 0.0:
-            return
-        faces.append((depth(points) if key is None else key, points, kind))
+    geometry: list[tuple[list[tuple[float, float, float]], str,
+                         tuple[float, float, float], int]] = []
 
     count = len(outer)
     for index in range(count):
         a, b = outer[index], outer[(index + 1) % count]
         c, d = cavity[index], cavity[(index + 1) % count]
-        # the rings run anticlockwise, so (dy, -dx) points out of the box
         run = (b[0] - a[0], b[1] - a[1])
         outward = (run[1], -run[0], 0.0)
         inward = (-run[1], run[0], 0.0)
-        add([(*a, 0.0), (*b, 0.0), (*b, rim_z), (*a, rim_z)], "outside", outward)
-        add(
-            [(*c, floor_z), (*d, floor_z), (*d, rim_z), (*c, rim_z)],
-            "inside", inward,
-        )
-        add(
-            [(*a, rim_z), (*b, rim_z), (*d, rim_z), (*c, rim_z)],
-            "rim", (0.0, 0.0, 1.0),
-        )
+        geometry.append(([(a[0], a[1], 0.0), (b[0], b[1], 0.0),
+                          (b[0], b[1], rim_z), (a[0], a[1], rim_z)],
+                         "outside", outward, 0))
+        geometry.append(([(c[0], c[1], floor_z), (d[0], d[1], floor_z),
+                          (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
+                         "inside", inward, 0))
+        geometry.append(([(a[0], a[1], rim_z), (b[0], b[1], rim_z),
+                          (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
+                         "rim", (0.0, 0.0, 1.0), 0))
+    geometry.append(([(*point, floor_z) for point in cavity],
+                     "floor", (0.0, 0.0, 1.0), 1))
 
-    floor = [(*point, floor_z) for point in cavity]
-    floor_depth = depth(floor)
-    add(floor, "floor", (0.0, 0.0, 1.0))
+    if mode != "fused":
+        geometry.extend(_prism_geometry(
+            layout_zone(box, mode), box.wall, box.wall + BASE_PLATE, "insert_base"
+        ))
+    base_z = box.wall if mode == "fused" else box.wall + BASE_PLATE
+    for one in features:
+        geometry.extend(_prism_geometry(
+            one.zone, base_z, min(box.z - 0.25, _feature_height(box, one, base_z)),
+            f"feature_{one.kind}",
+        ))
 
     fits, message = True, ""
     tidy = clean_label(label)
     if tidy:
+        occupied = [one.zone.polygon for one in features]
+        if mode == "cartridge":
+            occupied.append(Zone.whole(box).polygon.difference(cartridge_zone(box).polygon))
         try:
-            outline = placed_label_outline(box, tidy)
+            outline = placed_label_outline(box, tidy, occupied)
         except ValueError as error:
             fits, message, outline = False, str(error), None
         if outline is not None:
-            pieces = (
-                list(outline.geoms)
-                if outline.geom_type == "MultiPolygon"
-                else [outline]
-            )
-            # The label lies on the floor, so it is pinned just in front of the
-            # floor's own depth rather than taking each glyph's position: a
-            # letter on the far side would otherwise sort behind the floor and
-            # be painted over by it.
+            pieces = list(outline.geoms) if outline.geom_type == "MultiPolygon" else [outline]
+            label_z = floor_z if mode == "fused" else box.wall + BASE_PLATE
             for piece in pieces:
-                add(
-                    [(x, y, floor_z) for x, y in piece.exterior.coords],
-                    "label", (0.0, 0.0, 1.0), floor_depth + 0.001,
-                )
+                geometry.append(([(x, y, label_z) for x, y in piece.exterior.coords],
+                                 "label", (0.0, 0.0, 1.0), 2))
                 for ring in piece.interiors:
-                    add(
-                        [(x, y, floor_z) for x, y in ring.coords],
-                        "label_hole", (0.0, 0.0, 1.0), floor_depth + 0.002,
-                    )
+                    geometry.append(([(x, y, label_z) for x, y in ring.coords],
+                                     "label_hole", (0.0, 0.0, 1.0), 3))
 
-    faces.sort(key=lambda item: item[0])
     inside_x, inside_y = box.usable_inside
     return {
-        "faces": [(points, kind) for _, points, kind in faces],
+        "geometry": geometry,
         "fits": fits,
         "message": message,
         "x_text": f"{box.x:g}mm ({math.floor(inside_x):g} inside)",
@@ -314,21 +409,75 @@ def preview_scene(box: BoxSpec, label: str = "") -> dict[str, object]:
     }
 
 
-def preview_transform(box: BoxSpec, size: int = PREVIEW_SIZE, pad: int = PREVIEW_PAD):
+def project_preview(geometry: dict[str, object], camera: PreviewCamera | None = None) -> dict[str, object]:
+    """Cull and depth-sort a cached scene for the current camera."""
+    camera = (camera or PreviewCamera()).normalized()
+    faces = []
+    floor_depth = None
+    for points, kind, normal, layer in geometry["geometry"]:
+        if _towards_camera(normal, camera) <= 0.0:
+            continue
+        depth = sum(_towards_camera(point, camera) for point in points) / len(points)
+        if kind == "floor":
+            floor_depth = depth
+        faces.append([depth, layer, points, kind])
+    if floor_depth is not None:
+        label_z = next(
+            (points[0][2] for _, _, points, kind in faces if kind == "label"),
+            None,
+        )
+        floor_z = next(
+            (points[0][2] for _, _, points, kind in faces if kind == "floor"),
+            None,
+        )
+        surface_depth = floor_depth
+        if label_z is not None and floor_z is not None:
+            surface_depth += (label_z - floor_z) * _towards_camera(
+                (0.0, 0.0, 1.0), camera
+            )
+        for face in faces:
+            if face[3] in {"label", "label_hole"}:
+                face[0] = surface_depth + face[1] * 0.001
+    faces.sort(key=lambda item: item[0])
+    result = dict(geometry)
+    result.pop("geometry", None)
+    result["faces"] = [(points, kind) for _, _, points, kind in faces]
+    return result
+
+
+def preview_scene(
+    box: BoxSpec, label: str = "", features: Iterable[Feature] = (),
+    mode: str = "fused", camera: PreviewCamera | None = None,
+) -> dict[str, object]:
+    """The box as 3D faces ordered far to near, plus its dimension text.
+
+    Built outside the widget code so the layout can be checked without opening
+    a window.  Faces pointing away from the camera are dropped first - painting
+    order alone cannot hide the far outside wall, because from above its top
+    edge is genuinely nearer the camera than the floor is.
+    """
+    return project_preview(preview_geometry(box, label, features, mode), camera)
+
+
+def preview_transform(
+    box: BoxSpec, size: int = PREVIEW_SIZE, pad: int = PREVIEW_PAD,
+    camera: PreviewCamera | None = None,
+):
     """Millimetres to canvas pixels: isometric, centred, scaled to fit."""
     corners = [
-        iso_point((sx * box.x / 2.0, sy * box.y / 2.0, z))
+        iso_point((sx * box.x / 2.0, sy * box.y / 2.0, z), camera)
         for sx in (-1, 1) for sy in (-1, 1) for z in (0.0, box.z)
     ]
     us = [u for u, _ in corners]
     vs = [v for _, v in corners]
     span = max(max(us) - min(us), max(vs) - min(vs)) or 1.0
-    scale = (size - 2 * pad) / span
+    camera = (camera or PreviewCamera()).normalized()
+    scale = (size - 2 * pad) / span * camera.zoom
     mid_u = (max(us) + min(us)) / 2.0
     mid_v = (max(vs) + min(vs)) / 2.0
 
     def to_canvas(point: tuple[float, float, float]) -> tuple[float, float]:
-        u, v = iso_point(point)
+        u, v = iso_point(point, camera)
         return size / 2.0 + (u - mid_u) * scale, size / 2.0 + (v - mid_v) * scale
 
     return to_canvas
@@ -337,7 +486,7 @@ def preview_transform(box: BoxSpec, size: int = PREVIEW_SIZE, pad: int = PREVIEW
 def generate_box_file(
     box: BoxSpec, output: Path, label: str = ""
 ) -> dict[str, object]:
-    """Write the box, plus a raised floor label as a second object if asked.
+    """Write the box, plus a sunk floor label as a second object if asked.
 
     An empty label changes nothing: one object, and the plain filename.
     """
@@ -353,6 +502,100 @@ def generate_box_file(
     export_labelled_box(pocketed, inlay, output, box_filename(box, suffix=""), tidy)
     result = _part_result(output, report)
     result["label"] = label_report(box, tidy)
+    return result
+
+
+def _label_obstacles(box: BoxSpec, layout: Layout) -> list:
+    occupied = [one.zone.polygon for one in layout.features]
+    if layout.mode == "cartridge":
+        occupied.append(
+            Zone.whole(box).polygon.difference(cartridge_zone(box).polygon)
+        )
+    return occupied
+
+
+def generate_organizer_files(
+    box: BoxSpec,
+    layout: Layout,
+    output_dir: Path,
+    label: str = "",
+    part_name: str = "",
+) -> dict[str, object]:
+    """Export an editor design as fused, fitted-removable, or cartridge parts."""
+    layout.validate(box)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tidy = clean_label(label)
+    obstacles = _label_obstacles(box, layout)
+
+    if layout.mode == "fused":
+        body = make_fused_box(box, layout.features, make_box(box))
+        output = output_dir / box_filename(box, tidy, part=part_name)
+        if tidy:
+            pocketed, inlay = make_labelled_box(
+                box, tidy, occupied=obstacles, body=body
+            )
+            export_labelled_box(
+                pocketed,
+                inlay,
+                output,
+                box_filename(box, part=part_name, suffix=""),
+                tidy,
+            )
+            reported = pocketed
+        else:
+            export_mesh(body, output, "fused_organizer")
+            reported = body
+        result: dict[str, object] = {
+            "mode": layout.mode,
+            "box": _part_result(output, mesh_report("fused_organizer", reported)),
+            "layout": insert_report("fused_organizer", layout.features, body),
+        }
+    else:
+        box_output = output_dir / box_filename(box, part=part_name)
+        plain_box = make_box(box)
+        export_mesh(plain_box, box_output, "wavy_box")
+        insert = (
+            make_cartridge_insert(box, layout.features)
+            if layout.mode == "cartridge"
+            else make_fitted_insert(box, layout.features)
+        )
+        insert_output = output_dir / insert_filename(
+            box, tidy, part_name, layout.mode == "cartridge"
+        )
+        if tidy:
+            pocketed, inlay = make_labelled_box(
+                box,
+                tidy,
+                occupied=obstacles,
+                body=insert,
+                top_z=BASE_PLATE,
+            )
+            export_labelled_box(
+                pocketed,
+                inlay,
+                insert_output,
+                insert_filename(
+                    box,
+                    part=part_name,
+                    cartridge=layout.mode == "cartridge",
+                    suffix="",
+                ),
+                tidy,
+            )
+            reported_insert = pocketed
+        else:
+            export_mesh(insert, insert_output, "organizer_insert")
+            reported_insert = insert
+        result = {
+            "mode": layout.mode,
+            "box": _part_result(box_output, mesh_report("wavy_box", plain_box)),
+            "insert": _part_result(
+                insert_output, mesh_report("organizer_insert", reported_insert)
+            ),
+            "layout": insert_report("organizer_insert", layout.features, insert),
+        }
+    if tidy:
+        result["label"] = label_report(box, tidy, obstacles)
     return result
 
 
@@ -410,6 +653,29 @@ def run_command(args: argparse.Namespace) -> dict[str, object] | None:
         )
     if args.command == "box":
         return generate_box_file(_box_spec(args), args.output, args.label)
+    if args.command == "organizer":
+        raw = json.loads(args.layout.read_text(encoding="utf-8"))
+        if "box" in raw:
+            saved_box, layout, saved_label, saved_part = design_from_dict(raw)
+        else:
+            saved_box, layout, saved_label, saved_part = BoxSpec(), layout_from_dict(raw), "", ""
+        box = BoxSpec(
+            saved_box.x if args.x is None else args.x,
+            saved_box.y if args.y is None else args.y,
+            saved_box.z if args.z is None else args.z,
+            saved_box.wall if args.wall is None else args.wall,
+            saved_box.corner_fillet,
+            saved_box.flat_inside if args.flat_inside is None else args.flat_inside,
+        )
+        if args.mode:
+            layout = replace(layout, mode=args.mode)
+        return generate_organizer_files(
+            box,
+            layout,
+            args.output_dir,
+            saved_label if args.label is None else args.label,
+            saved_part if args.part_name is None else args.part_name,
+        )
     if args.command == "side":
         return generate_side_file(
             _box_spec(args, "box"),
@@ -434,6 +700,120 @@ def run_command(args: argparse.Namespace) -> dict[str, object] | None:
 # --------------------------------------------------------------------------- #
 # desktop UI
 # --------------------------------------------------------------------------- #
+
+
+def parse_segments(text: str) -> tuple[Segment, ...]:
+    """Parse editor text such as ``50x6, 30x18`` as length/diameter segments."""
+    segments = []
+    for raw in text.split(","):
+        raw = raw.strip().lower().replace("mm", "")
+        if not raw:
+            continue
+        if "x" not in raw:
+            raise ValueError("item segments use length x diameter, separated by commas")
+        length, diameter = raw.split("x", 1)
+        segments.append(Segment(float(length.strip()), float(diameter.strip())))
+    if not segments:
+        raise ValueError("an item needs at least one length x diameter segment")
+    return tuple(segments)
+
+
+def format_segments(item: Item) -> str:
+    return ", ".join(f"{part.length:g}x{part.diameter:g}" for part in item.segments)
+
+
+def parse_feature_options(text: str) -> dict[str, float]:
+    """Parse the registry's open-ended ``key=value`` option field."""
+    options = {}
+    for raw in text.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        if "=" not in raw:
+            raise ValueError("holder options use key=value, separated by commas")
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key or not key.replace("_", "").isalnum():
+            raise ValueError(f"invalid holder option name {key!r}")
+        options[key] = float(value.strip())
+    return options
+
+
+def format_feature_options(options: dict) -> str:
+    return ", ".join(f"{key}={value:g}" for key, value in sorted(options.items()))
+
+
+def default_feature(
+    box: BoxSpec,
+    kind: str,
+    item_key: str = "nozzle",
+    along: str = "x",
+    mode: str = "fused",
+) -> Feature:
+    """A useful, valid starting rectangle for a newly-added holder."""
+    if kind not in FEATURE_BUILDERS:
+        raise ValueError(f"unknown holder {kind!r}")
+    bounds = layout_zone(box, mode)
+    item = LIBRARY[item_key] if kind in {"cradle", "bore"} else None
+    if item is not None and kind == "cradle":
+        if along == "x" and item.length > bounds.width:
+            along = "y"
+        if along == "y" and item.length > bounds.depth:
+            along = "x"
+        run = bounds.width if along == "x" else bounds.depth
+        if item.length > run:
+            raise ValueError(
+                f"{item.name} is {item.length:g} mm long; enlarge the bin first"
+            )
+        across = min(
+            bounds.depth if along == "x" else bounds.width,
+            max(8.0, item.held(item.widest) + 1.6),
+        )
+        width, depth = ((item.length, across) if along == "x"
+                        else (across, item.length))
+    elif kind == "divider":
+        width, depth = ((bounds.width, 2.0) if along == "x"
+                        else (2.0, bounds.depth))
+    else:
+        width, depth = min(16.0, bounds.width), min(16.0, bounds.depth)
+    raw = Zone(-width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0)
+    return Feature(kind, snapped_zone(raw, box, mode), item=item, along=along)
+
+
+def design_to_dict(
+    box: BoxSpec, layout: Layout, label: str = "", part_name: str = ""
+) -> dict:
+    return {
+        "version": 1,
+        "box": {
+            "x": box.x,
+            "y": box.y,
+            "z": box.z,
+            "wall": box.wall,
+            "corner_fillet": box.corner_fillet,
+            "flat_inside": box.flat_inside,
+        },
+        "label": label,
+        "part_name": part_name,
+        "layout": layout_to_dict(layout),
+    }
+
+
+def design_from_dict(data: dict) -> tuple[BoxSpec, Layout, str, str]:
+    if data.get("version", 1) != 1:
+        raise ValueError(f"unsupported design version {data.get('version')!r}")
+    raw = data["box"]
+    box = BoxSpec(
+        float(raw["x"]), float(raw["y"]), float(raw["z"]),
+        float(raw.get("wall", 0.8)),
+        float(raw.get("corner_fillet", 0.6)),
+        flat_inside=float(raw.get("flat_inside", 0.0)),
+    )
+    layout = layout_from_dict(data.get("layout", {}))
+    layout.validate(box)
+    return box, layout, str(data.get("label", "")), str(data.get("part_name", ""))
+
+
 MIN_UNITS = int(round(MIN_BOX_SIZE / BASE_UNIT))
 BASIC_FIELDS = (
     (f"Box width X (units of {BASE_UNIT:.0f} mm)", "x_units", 1.0, MIN_UNITS),
@@ -467,7 +847,7 @@ def launch_ui() -> None:
 
     root = tk.Tk()
     root.title("Wavy Drawer Organizer Generator")
-    root.minsize(920, 560)
+    root.minsize(1060, 790)
 
     BODY = ("Segoe UI", 10)
     VALUE = ("Segoe UI", 12)
@@ -515,9 +895,27 @@ def launch_ui() -> None:
         "side_length": tk.StringVar(value=f"{LOCKED_CONNECTOR_LENGTH:g}"),
         "side_axis": tk.StringVar(value="y"),
         "side_position": tk.StringVar(value="0"),
+        "mode": tk.StringVar(value="fused"),
+        "feature_kind": tk.StringVar(value="cradle"),
+        "feature_item": tk.StringVar(value="nozzle"),
+        "feature_along": tk.StringVar(value="x"),
+        "feature_count": tk.StringVar(value="auto"),
+        "feature_x": tk.StringVar(value="0"),
+        "feature_y": tk.StringVar(value="0"),
+        "feature_width": tk.StringVar(value="13"),
+        "feature_depth": tk.StringVar(value="8"),
+        "item_name": tk.StringVar(value="Printer nozzle"),
+        "item_segments": tk.StringVar(value="13x6"),
+        "item_profile": tk.StringVar(value="round"),
+        "item_clearance": tk.StringVar(value="0.4"),
+        "feature_options": tk.StringVar(value=""),
         "output": tk.StringVar(value=str(APP_DIR / "generated")),
     }
     show_advanced = tk.BooleanVar(value=False)
+    features: list[Feature] = []
+    selected = {"index": None}
+    camera = {"value": PreviewCamera(), "drag": None}
+    preview_cache = {"spec": None, "geometry": None}
 
     def nudge(key: str, step: float, lowest: float) -> None:
         try:
@@ -559,12 +957,34 @@ def launch_ui() -> None:
     add_number(form, 2, "Height Z  (mm)", "z", 5.0, 5.0)
     add_text(form, 3, "Floor label", "label")
     add_text(form, 4, "Part name", "part")
+    ttk.Label(form, text="Insert form").grid(row=5, column=0, sticky="w", pady=3)
+    mode_row = ttk.Frame(form)
+    mode_row.grid(row=5, column=1, sticky="w", padx=(10, 0), pady=3)
+    for text, value in (
+        ("Fused", "fused"), ("Removable", "separate"), ("8 mm cartridge", "cartridge")
+    ):
+        ttk.Radiobutton(
+            mode_row, text=text, variable=values["mode"], value=value,
+            command=lambda: refresh_translation(),
+        ).pack(side="left", padx=(0, 8))
+
+    views = ttk.Notebook(frame)
+    views.grid(row=2, column=2, rowspan=3, sticky="ne", padx=(24, 0))
+    preview_tab = ttk.Frame(views)
+    layout_tab = ttk.Frame(views)
+    views.add(preview_tab, text="3D preview")
+    views.add(layout_tab, text="2D layout")
 
     preview = tk.Canvas(
-        frame, width=PREVIEW_SIZE, height=PREVIEW_SIZE,
+        preview_tab, width=PREVIEW_SIZE, height=PREVIEW_SIZE,
         background="white", highlightthickness=1, highlightbackground="#cccccc",
     )
-    preview.grid(row=2, column=2, rowspan=3, sticky="ne", padx=(24, 0))
+    preview.pack(fill="both", expand=True)
+    layout_canvas = tk.Canvas(
+        layout_tab, width=PREVIEW_SIZE, height=PREVIEW_SIZE,
+        background="white", highlightthickness=1, highlightbackground="#cccccc",
+    )
+    layout_canvas.pack(fill="both", expand=True)
 
     FACE_COLOURS = {
         "outside": "#8fb8cc",
@@ -573,21 +993,41 @@ def launch_ui() -> None:
         "floor": "#e8f0f4",
         "label": "#d9544d",
         "label_hole": "#e8f0f4",
+        "insert_base": "#d9e4e8",
+        "feature_cradle": "#e59f54",
+        "feature_bore": "#6fb98f",
+        "feature_divider": "#9d86c8",
+        "feature_pocket": "#d4778c",
+        "feature_slot": "#d5b84d",
     }
 
-    def refresh_preview(spec: BoxSpec | None) -> None:
+    def current_box() -> BoxSpec:
+        return BoxSpec(
+            x=float(values["x_units"].get()) * BASE_UNIT,
+            y=float(values["y_units"].get()) * BASE_UNIT,
+            z=float(values["z"].get()),
+            wall=float(values["wall"].get()),
+            flat_inside=float(values["flat_inside"].get()),
+        )
+
+    def current_layout() -> Layout:
+        return Layout(tuple(features), values["mode"].get(), EDITOR_SNAP)
+
+    def draw_preview() -> None:
         preview.delete("all")
-        if spec is None:
+        spec = preview_cache["spec"]
+        geometry = preview_cache["geometry"]
+        if spec is None or geometry is None:
             preview.create_text(
                 PREVIEW_SIZE / 2, PREVIEW_SIZE / 2,
                 text="-", fill="#999999", font=("Segoe UI", 11),
             )
             return
 
-        scene = preview_scene(spec, values["label"].get())
-        to_canvas = preview_transform(spec)
+        scene = project_preview(geometry, camera["value"])
+        to_canvas = preview_transform(spec, camera=camera["value"])
         for points, kind in scene["faces"]:
-            colour = FACE_COLOURS[kind]
+            colour = FACE_COLOURS.get(kind, "#d99b62")
             outline = "" if kind in ("label", "label_hole") else colour
             preview.create_polygon(
                 [c for point in points for c in to_canvas(point)],
@@ -612,20 +1052,152 @@ def launch_ui() -> None:
                 PREVIEW_SIZE / 2, 16, text="label will not fit",
                 fill="#c0392b", font=("Segoe UI", 10, "bold"),
             )
+        preview.create_text(
+            PREVIEW_SIZE / 2, 12,
+            text="drag to rotate  •  wheel to zoom  •  double-click to reset",
+            fill="#777777", font=("Segoe UI", 8),
+        )
+
+    def draw_layout() -> None:
+        layout_canvas.delete("all")
+        try:
+            spec = current_box()
+            bounds = layout_zone(spec, values["mode"].get())
+        except Exception:
+            layout_canvas.create_text(
+                PREVIEW_SIZE / 2, PREVIEW_SIZE / 2, text="-", fill="#999999"
+            )
+            return
+        scale = (PREVIEW_SIZE - 2 * PREVIEW_PAD) / max(bounds.width, bounds.depth)
+
+        def point(x: float, y: float) -> tuple[float, float]:
+            return PREVIEW_SIZE / 2 + x * scale, PREVIEW_SIZE / 2 - y * scale
+
+        x0, y1 = point(bounds.x0, bounds.y0)
+        x1, y0 = point(bounds.x1, bounds.y1)
+        layout_canvas.create_rectangle(x0, y0, x1, y1, fill="#f4f7f8", outline="#46616e", width=2)
+        pitch = CARTRIDGE_PITCH if values["mode"].get() == "cartridge" else 5.0
+        gx = math.ceil(bounds.x0 / pitch) * pitch
+        while gx < bounds.x1:
+            px, _ = point(gx, 0.0)
+            layout_canvas.create_line(px, y0, px, y1, fill="#dce4e8")
+            gx += pitch
+        gy = math.ceil(bounds.y0 / pitch) * pitch
+        while gy < bounds.y1:
+            _, py = point(0.0, gy)
+            layout_canvas.create_line(x0, py, x1, py, fill="#dce4e8")
+            gy += pitch
+
+        collision_indexes = set()
+        for index, one in enumerate(features):
+            if (one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
+                    or one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6):
+                collision_indexes.add(index)
+            for other_index, other in enumerate(features[index + 1:], index + 1):
+                if one.zone.overlaps(other.zone, -0.8):
+                    collision_indexes.update((index, other_index))
+        colours = {
+            "cradle": "#efb36f", "bore": "#7bc49a", "divider": "#aa94d1",
+            "pocket": "#df879a", "slot": "#dfc45e",
+        }
+        for index, one in enumerate(features):
+            ax, ay = point(one.zone.x0, one.zone.y1)
+            bx, by = point(one.zone.x1, one.zone.y0)
+            chosen = selected["index"] == index
+            outline = "#c0392b" if index in collision_indexes else ("#1666a8" if chosen else "#526a73")
+            layout_canvas.create_rectangle(
+                ax, ay, bx, by, fill=colours.get(one.kind, "#cccccc"),
+                outline=outline, width=3 if chosen else 1,
+                tags=(f"feature_{index}", "feature"),
+            )
+            layout_canvas.create_text(
+                (ax + bx) / 2, (ay + by) / 2,
+                text=f"{one.kind}\n{one.item.name if one.item else ''}".strip(),
+                width=max(10, abs(bx - ax) - 4), font=("Segoe UI", 8),
+                tags=(f"feature_{index}", "feature"),
+            )
+            if chosen:
+                layout_canvas.create_rectangle(
+                    bx - 5, by - 5, bx + 5, by + 5, fill="#1666a8", outline="white",
+                    tags=("resize_handle",),
+                )
+        tidy = clean_label(values["label"].get())
+        if tidy:
+            try:
+                placement = label_placement(spec, tidy, _label_obstacles(spec, current_layout()))
+                lx, ly = point(placement.x, placement.y)
+                layout_canvas.create_text(
+                    lx, ly, text=tidy, fill="#b83934", font=("Segoe UI", 9, "bold"),
+                    angle=90 if placement.rotated else 0,
+                )
+            except ValueError:
+                layout_canvas.create_text(
+                    PREVIEW_SIZE / 2, 13, text="label will not fit",
+                    fill="#c0392b", font=("Segoe UI", 9, "bold"),
+                )
+        inside_x, inside_y = spec.usable_inside
+        layout_canvas.create_text(
+            PREVIEW_SIZE / 2, PREVIEW_SIZE - 12,
+            text=f"{spec.x:g}mm ({math.floor(inside_x):g} inside)",
+            font=("Segoe UI", 9, "bold"), fill="#333333",
+        )
+        layout_canvas.create_text(
+            13, PREVIEW_SIZE / 2,
+            text=f"{spec.y:g}mm ({math.floor(inside_y):g} inside)", angle=90,
+            font=("Segoe UI", 9, "bold"), fill="#333333",
+        )
+        layout_canvas.create_text(
+            PREVIEW_SIZE - 8, 8, text=f"{spec.z:g}mm tall", anchor="ne",
+            font=("Segoe UI", 8), fill="#666666",
+        )
+        layout_canvas._world = (point, scale, bounds)  # transient interaction state
 
     def refresh_translation(*_args) -> None:
         try:
-            spec = BoxSpec(
-                x=float(values["x_units"].get()) * BASE_UNIT,
-                y=float(values["y_units"].get()) * BASE_UNIT,
-                z=float(values["z"].get()),
-                wall=float(values["wall"].get()),
-                flat_inside=float(values["flat_inside"].get()),
+            spec = current_box()
+            preview_cache["spec"] = spec
+            preview_cache["geometry"] = preview_geometry(
+                spec, values["label"].get(), features, values["mode"].get()
             )
         except Exception:
-            refresh_preview(None)
+            preview_cache["spec"] = preview_cache["geometry"] = None
+            draw_preview()
+            draw_layout()
             return
-        refresh_preview(spec)
+        draw_preview()
+        draw_layout()
+
+    def preview_press(event) -> None:
+        camera["drag"] = (event.x, event.y, camera["value"])
+
+    def preview_drag(event) -> None:
+        if camera["drag"] is None:
+            return
+        start_x, start_y, start = camera["drag"]
+        camera["value"] = PreviewCamera(
+            start.yaw + (event.x - start_x) * 0.7,
+            start.elevation - (event.y - start_y) * 0.5,
+            start.zoom,
+        ).normalized()
+        draw_preview()
+
+    def preview_zoom(event) -> None:
+        direction = 1 if getattr(event, "delta", 0) > 0 or getattr(event, "num", 0) == 4 else -1
+        old = camera["value"]
+        camera["value"] = replace(old, zoom=old.zoom * (1.12 if direction > 0 else 1 / 1.12)).normalized()
+        draw_preview()
+
+    def preview_reset(_event=None) -> None:
+        camera["value"] = PreviewCamera()
+        draw_preview()
+
+    preview.bind("<ButtonPress-1>", preview_press)
+    preview.bind("<B1-Motion>", preview_drag)
+    preview.bind("<ButtonRelease-1>", lambda _event: camera.update(drag=None))
+    preview.bind("<MouseWheel>", preview_zoom)
+    preview.bind("<Button-4>", preview_zoom)
+    preview.bind("<Button-5>", preview_zoom)
+    preview.bind("<Double-Button-1>", preview_reset)
 
     for key in ("x_units", "y_units", "z", "wall", "flat_inside", "label"):
         values[key].trace_add("write", refresh_translation)
@@ -659,11 +1231,307 @@ def launch_ui() -> None:
             advanced.grid_remove()
 
     toggle_advanced()
+
+    # --- insert layout editor -------------------------------------------------
+    editor = ttk.LabelFrame(
+        frame,
+        text="Insert layout — drag holders to move, drag the blue corner to resize (1 mm snap)",
+        padding=8,
+    )
+    editor.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+
+    tools_row = ttk.Frame(editor)
+    tools_row.pack(fill="x")
+    ttk.Label(tools_row, text="Holder").pack(side="left")
+    kind_combo = ttk.Combobox(
+        tools_row, textvariable=values["feature_kind"],
+        values=tuple(sorted(FEATURE_BUILDERS)), state="readonly", width=10,
+    )
+    kind_combo.pack(side="left", padx=(5, 10))
+    ttk.Label(tools_row, text="Item").pack(side="left")
+    item_combo = ttk.Combobox(
+        tools_row, textvariable=values["feature_item"],
+        values=tuple(sorted(LIBRARY)), state="readonly", width=13,
+    )
+    item_combo.pack(side="left", padx=(5, 10))
+
+    def sync_feature_fields() -> None:
+        index = selected["index"]
+        if index is None or not 0 <= index < len(features):
+            return
+        one = features[index]
+        cx, cy = one.zone.centre
+        values["feature_kind"].set(one.kind)
+        if one.item is not None:
+            key = next((key for key, item in LIBRARY.items() if item == one.item), None)
+            if key:
+                values["feature_item"].set(key)
+            values["item_name"].set(one.item.name)
+            values["item_segments"].set(format_segments(one.item))
+            values["item_profile"].set(one.item.profile)
+            values["item_clearance"].set(f"{one.item.clearance:g}")
+        values["feature_along"].set(one.along)
+        values["feature_count"].set("auto" if one.count is None else str(one.count))
+        values["feature_x"].set(f"{cx:g}")
+        values["feature_y"].set(f"{cy:g}")
+        values["feature_width"].set(f"{one.zone.width:g}")
+        values["feature_depth"].set(f"{one.zone.depth:g}")
+        values["feature_options"].set(format_feature_options(one.options))
+
+    def choose_library_item(_event=None) -> None:
+        item = LIBRARY[values["feature_item"].get()]
+        values["item_name"].set(item.name)
+        values["item_segments"].set(format_segments(item))
+        values["item_profile"].set(item.profile)
+        values["item_clearance"].set(f"{item.clearance:g}")
+
+    item_combo.bind("<<ComboboxSelected>>", choose_library_item)
+
+    def first_open_position(one: Feature, spec: BoxSpec, mode: str) -> Feature:
+        bounds = layout_zone(spec, mode)
+        pitch = CARTRIDGE_PITCH if mode == "cartridge" else EDITOR_SNAP
+        candidates = []
+        x = bounds.x0 + one.zone.width / 2.0
+        while x <= bounds.x1 - one.zone.width / 2.0 + 1e-9:
+            y = bounds.y0 + one.zone.depth / 2.0
+            while y <= bounds.y1 - one.zone.depth / 2.0 + 1e-9:
+                candidates.append((x, y))
+                y += pitch
+            x += pitch
+        candidates.sort(key=lambda p: p[0] ** 2 + p[1] ** 2)
+        for centre in candidates:
+            placed = moved_feature(one, spec, centre, mode)
+            if all(not placed.zone.overlaps(other.zone, -0.8) for other in features):
+                return placed
+        raise ValueError("there is no open floor area large enough for that holder")
+
+    def add_feature_action() -> None:
+        try:
+            spec = current_box()
+            one = default_feature(
+                spec, values["feature_kind"].get(), values["feature_item"].get(),
+                values["feature_along"].get(), values["mode"].get(),
+            )
+            one = first_open_position(one, spec, values["mode"].get())
+            features.append(one)
+            selected["index"] = len(features) - 1
+            sync_feature_fields()
+            refresh_translation()
+        except Exception as error:
+            messagebox.showerror("Could not add holder", str(error))
+
+    def delete_feature_action() -> None:
+        index = selected["index"]
+        if index is None or not 0 <= index < len(features):
+            return
+        del features[index]
+        selected["index"] = min(index, len(features) - 1) if features else None
+        sync_feature_fields()
+        refresh_translation()
+
+    def apply_feature_action() -> None:
+        index = selected["index"]
+        if index is None or not 0 <= index < len(features):
+            return
+        try:
+            spec = current_box()
+            kind = values["feature_kind"].get()
+            item = (
+                Item(
+                    values["item_name"].get().strip() or "Custom item",
+                    parse_segments(values["item_segments"].get()),
+                    values["item_profile"].get(),
+                    float(values["item_clearance"].get()),
+                )
+                if kind in {"cradle", "bore"} else None
+            )
+            count_text = values["feature_count"].get().strip().lower()
+            count = None if count_text in {"", "auto"} else int(count_text)
+            one = replace(
+                features[index], kind=kind, item=item, count=count,
+                along=values["feature_along"].get(),
+                options=parse_feature_options(values["feature_options"].get()),
+            )
+            one = resized_feature(
+                one, spec,
+                (float(values["feature_width"].get()), float(values["feature_depth"].get())),
+                values["mode"].get(),
+            )
+            one = moved_feature(
+                one, spec,
+                (float(values["feature_x"].get()), float(values["feature_y"].get())),
+                values["mode"].get(),
+            )
+            features[index] = one
+            sync_feature_fields()
+            refresh_translation()
+        except Exception as error:
+            messagebox.showerror("Could not update holder", str(error))
+
+    def rotate_feature_action() -> None:
+        index = selected["index"]
+        if index is None or not 0 <= index < len(features):
+            return
+        try:
+            one = features[index]
+            one = replace(one, along="y" if one.along == "x" else "x")
+            one = resized_feature(
+                one, current_box(), (one.zone.depth, one.zone.width), values["mode"].get()
+            )
+            features[index] = one
+            sync_feature_fields()
+            refresh_translation()
+        except Exception as error:
+            messagebox.showerror("Could not rotate holder", str(error))
+
+    ttk.Button(tools_row, text="Add holder", command=add_feature_action).pack(side="left")
+    ttk.Button(tools_row, text="Update selected", command=apply_feature_action).pack(side="left", padx=(6, 0))
+    ttk.Button(tools_row, text="Rotate", command=rotate_feature_action).pack(side="left", padx=(6, 0))
+    ttk.Button(tools_row, text="Delete", command=delete_feature_action).pack(side="left", padx=(6, 0))
+
+    props = ttk.Frame(editor)
+    props.pack(fill="x", pady=(7, 0))
+    for label, key, width in (
+        ("Center X", "feature_x", 7), ("Center Y", "feature_y", 7),
+        ("Width", "feature_width", 7), ("Depth", "feature_depth", 7),
+        ("Count", "feature_count", 7),
+    ):
+        ttk.Label(props, text=label).pack(side="left", padx=(0, 3))
+        ttk.Entry(props, textvariable=values[key], width=width).pack(side="left", padx=(0, 9))
+    ttk.Label(props, text="Runs along").pack(side="left")
+    ttk.Radiobutton(props, text="X", variable=values["feature_along"], value="x").pack(side="left")
+    ttk.Radiobutton(props, text="Y", variable=values["feature_along"], value="y").pack(side="left")
+
+    item_props = ttk.Frame(editor)
+    item_props.pack(fill="x", pady=(6, 0))
+    for label, key, width in (
+        ("Item name", "item_name", 14),
+        ("Segments LxD", "item_segments", 18),
+        ("Clearance", "item_clearance", 6),
+    ):
+        ttk.Label(item_props, text=label).pack(side="left", padx=(0, 3))
+        ttk.Entry(item_props, textvariable=values[key], width=width).pack(side="left", padx=(0, 9))
+    ttk.Label(item_props, text="Profile").pack(side="left", padx=(0, 3))
+    ttk.Combobox(
+        item_props, textvariable=values["item_profile"],
+        values=("round", "hex", "square"), state="readonly", width=7,
+    ).pack(side="left", padx=(0, 9))
+    ttk.Label(item_props, text="Options").pack(side="left", padx=(0, 3))
+    ttk.Entry(item_props, textvariable=values["feature_options"], width=24).pack(
+        side="left", fill="x", expand=True
+    )
+
+    layout_drag = {"mode": None, "index": None, "offset": (0.0, 0.0)}
+
+    def canvas_world(event) -> tuple[float, float]:
+        _point, scale, _bounds = layout_canvas._world
+        return ((event.x - PREVIEW_SIZE / 2.0) / scale,
+                (PREVIEW_SIZE / 2.0 - event.y) / scale)
+
+    def layout_press(event) -> None:
+        tags = layout_canvas.gettags("current")
+        index = None
+        for tag in tags:
+            if tag.startswith("feature_"):
+                index = int(tag.split("_", 1)[1])
+                break
+        if "resize_handle" in tags:
+            index = selected["index"]
+            layout_drag["mode"] = "resize"
+        elif index is not None:
+            selected["index"] = index
+            layout_drag["mode"] = "move"
+        else:
+            selected["index"] = None
+            layout_drag["mode"] = None
+        layout_drag["index"] = selected["index"]
+        if selected["index"] is not None:
+            wx, wy = canvas_world(event)
+            cx, cy = features[selected["index"]].zone.centre
+            layout_drag["offset"] = (cx - wx, cy - wy)
+        sync_feature_fields()
+        draw_layout()
+
+    def layout_motion(event) -> None:
+        index = layout_drag["index"]
+        if index is None or not 0 <= index < len(features):
+            return
+        try:
+            wx, wy = canvas_world(event)
+            one = features[index]
+            if layout_drag["mode"] == "resize":
+                cx, cy = one.zone.centre
+                one = resized_feature(
+                    one, current_box(),
+                    (max(EDITOR_SNAP, 2 * abs(wx - cx)),
+                     max(EDITOR_SNAP, 2 * abs(wy - cy))),
+                    values["mode"].get(),
+                )
+            else:
+                ox, oy = layout_drag["offset"]
+                one = moved_feature(
+                    one, current_box(), (wx + ox, wy + oy), values["mode"].get()
+                )
+            features[index] = one
+            sync_feature_fields()
+            refresh_translation()
+        except ValueError:
+            pass
+
+    layout_canvas.bind("<ButtonPress-1>", layout_press)
+    layout_canvas.bind("<B1-Motion>", layout_motion)
+    layout_canvas.bind("<ButtonRelease-1>", lambda _event: layout_drag.update(mode=None))
+    root.bind("<Delete>", lambda _event: delete_feature_action())
+
+    def save_design_action() -> None:
+        try:
+            path = filedialog.asksaveasfilename(
+                defaultextension=".wavefinity.json",
+                filetypes=(("Wavefinity layout", "*.wavefinity.json"), ("JSON", "*.json")),
+            )
+            if path:
+                Path(path).write_text(
+                    json.dumps(design_to_dict(
+                        current_box(), current_layout(), values["label"].get(),
+                        values["part"].get(),
+                    ), indent=2) + "\n",
+                    encoding="utf-8",
+                )
+        except Exception as error:
+            messagebox.showerror("Could not save layout", str(error))
+
+    def open_design_action() -> None:
+        try:
+            path = filedialog.askopenfilename(
+                filetypes=(("Wavefinity layout", "*.wavefinity.json"), ("JSON", "*.json"))
+            )
+            if not path:
+                return
+            box, loaded, label, part = design_from_dict(
+                json.loads(Path(path).read_text(encoding="utf-8"))
+            )
+            features[:] = loaded.features
+            selected["index"] = None
+            values["x_units"].set(f"{box.x / BASE_UNIT:g}")
+            values["y_units"].set(f"{box.y / BASE_UNIT:g}")
+            values["z"].set(f"{box.z:g}")
+            values["wall"].set(f"{box.wall:g}")
+            values["flat_inside"].set(f"{box.flat_inside:g}")
+            values["label"].set(label)
+            values["part"].set(part)
+            values["mode"].set(loaded.mode)
+            refresh_translation()
+        except Exception as error:
+            messagebox.showerror("Could not open layout", str(error))
+
+    ttk.Button(tools_row, text="Open layout", command=open_design_action).pack(side="right")
+    ttk.Button(tools_row, text="Save layout", command=save_design_action).pack(side="right", padx=(0, 6))
+
     refresh_translation()
 
     # --- output folder --------------------------------------------------------
     out_row = ttk.Frame(frame)
-    out_row.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(18, 0))
+    out_row.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(14, 0))
     ttk.Label(out_row, text="Output folder").pack(side="left")
     tk.Entry(
         out_row, textvariable=values["output"], font=BODY,
@@ -680,13 +1548,7 @@ def launch_ui() -> None:
     )
 
     def specs() -> tuple[BoxSpec, ConnectorSpec, Path]:
-        box = BoxSpec(
-            x=float(values["x_units"].get()) * BASE_UNIT,
-            y=float(values["y_units"].get()) * BASE_UNIT,
-            z=float(values["z"].get()),
-            wall=float(values["wall"].get()),
-            flat_inside=float(values["flat_inside"].get()),
-        )
+        box = current_box()
         connector = ConnectorSpec(
             tolerance=float(values["tolerance"].get()),
             height=float(values["height"].get()),
@@ -711,9 +1573,9 @@ def launch_ui() -> None:
 
     def box_action():
         box, _, output = specs()
-        label = values["label"].get()
-        name = box_filename(box, label, part=values["part"].get())
-        return generate_box_file(box, output / name, label)
+        return generate_organizer_files(
+            box, current_layout(), output, values["label"].get(), values["part"].get()
+        )
 
     def side_action():
         box, connector, output = specs()
@@ -732,7 +1594,7 @@ def launch_ui() -> None:
         )
 
     buttons = ttk.Frame(frame)
-    buttons.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(20, 0))
+    buttons.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(14, 0))
     box_button = ttk.Button(buttons, text="Generate Box", style="Go.TButton")
     box_button.configure(command=lambda: perform(box_button, box_action))
     box_button.pack(side="left", fill="x", expand=True)

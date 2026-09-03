@@ -999,6 +999,113 @@ class PreviewTests(unittest.TestCase):
                 self.assertLessEqual(y, size)
 
 
+class InsertEditorTests(unittest.TestCase):
+    def test_custom_item_and_registry_options_parse_from_editor_text(self) -> None:
+        segments = organizer_app.parse_segments("50x6 mm, 30 x 18")
+        self.assertEqual(
+            [(segment.length, segment.diameter) for segment in segments],
+            [(50.0, 6.0), (30.0, 18.0)],
+        )
+        self.assertEqual(
+            organizer_app.parse_feature_options("height=15, wall=1.6"),
+            {"height": 15.0, "wall": 1.6},
+        )
+        with self.assertRaisesRegex(ValueError, "length x diameter"):
+            organizer_app.parse_segments("12")
+
+    def test_label_moves_clear_of_a_holder_zone(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        occupied = organizer_app.Zone(-8.0, -8.0, 8.0, 8.0).polygon
+        placement = organizer_app.label_placement(spec, "M3", [occupied])
+        outline = placed_label_outline(spec, "M3", [occupied])
+        self.assertNotEqual((placement.x, placement.y), (0.0, 0.0))
+        self.assertFalse(outline.intersects(occupied.buffer(TEXT_MARGIN)))
+
+    def test_preview_camera_rotates_and_zooms_without_rebuilding_geometry(self) -> None:
+        spec = BoxSpec(32.0, 48.0, 40.0)
+        geometry = organizer_app.preview_geometry(spec)
+        cached_faces = geometry["geometry"]
+        first = organizer_app.project_preview(
+            geometry, organizer_app.PreviewCamera(45.0, 60.0, 1.0)
+        )
+        second = organizer_app.project_preview(
+            geometry, organizer_app.PreviewCamera(135.0, 60.0, 1.0)
+        )
+        self.assertIs(geometry["geometry"], cached_faces)
+        self.assertNotEqual(
+            organizer_app.iso_point((10, 0, 0), organizer_app.PreviewCamera(45, 60)),
+            organizer_app.iso_point((10, 0, 0), organizer_app.PreviewCamera(135, 60)),
+        )
+        self.assertTrue(first["faces"])
+        self.assertTrue(second["faces"])
+        normal = organizer_app.preview_transform(
+            spec, camera=organizer_app.PreviewCamera(45.0, 60.0, 1.0)
+        )
+        zoomed = organizer_app.preview_transform(
+            spec, camera=organizer_app.PreviewCamera(45.0, 60.0, 2.0)
+        )
+        centre = organizer_app.PREVIEW_SIZE / 2.0
+        self.assertAlmostEqual(
+            abs(zoomed((16, 0, 0))[0] - centre),
+            2 * abs(normal((16, 0, 0))[0] - centre),
+        )
+
+    def test_preview_includes_each_registered_holder_kind(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        feature = organizer_app.default_feature(spec, "pocket")
+        scene = organizer_app.preview_scene(spec, features=[feature])
+        self.assertIn("feature_pocket", [kind for _, kind in scene["faces"]])
+
+    def test_saved_design_round_trip_includes_box_layout_label_and_part_name(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 35.0, flat_inside=0.5)
+        feature = organizer_app.default_feature(spec, "bore")
+        layout = organizer_app.Layout((feature,), "separate")
+        rebuilt = organizer_app.design_from_dict(
+            organizer_app.design_to_dict(spec, layout, "M3", "Nozzles")
+        )
+        self.assertEqual(rebuilt, (spec, layout, "M3", "Nozzles"))
+
+    def test_organizer_cli_uses_saved_design_values_unless_overridden(self) -> None:
+        spec = BoxSpec(48.0, 32.0, 35.0, flat_inside=0.5)
+        layout = organizer_app.Layout(mode="separate")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.wavefinity.json"
+            path.write_text(
+                organizer_app.json.dumps(
+                    organizer_app.design_to_dict(spec, layout, "M3", "Nozzles")
+                ),
+                encoding="utf-8",
+            )
+            args = organizer_app.build_parser().parse_args([
+                "organizer", "--layout", str(path), "--z", "50",
+                "--output-dir", directory,
+            ])
+            with mock.patch.object(
+                organizer_app, "generate_organizer_files", return_value={}
+            ) as generate:
+                organizer_app.run_command(args)
+            used_box, used_layout, _, used_label, used_part = generate.call_args.args
+            self.assertEqual((used_box.x, used_box.y, used_box.z), (48.0, 32.0, 50.0))
+            self.assertEqual(used_layout, layout)
+            self.assertEqual((used_label, used_part), ("M3", "Nozzles"))
+
+    def test_separate_export_writes_a_box_and_a_removable_insert(self) -> None:
+        spec = BoxSpec(16.0, 24.0, 20.0)
+        with tempfile.TemporaryDirectory() as directory:
+            result = organizer_app.generate_organizer_files(
+                spec, organizer_app.Layout(mode="separate"), Path(directory),
+                part_name="Test",
+            )
+            files = sorted(Path(directory).glob("*.3mf"))
+            self.assertEqual(
+                [path.name for path in files],
+                ["Box 16 x 24 x 20 Test.3mf", "Insert 16 x 24 Test.3mf"],
+            )
+            self.assertEqual(result["mode"], "separate")
+            for path in files:
+                self.assertEqual(validate_3mf(path, 1)["warnings"], 0)
+
+
 class DesktopUiTests(unittest.TestCase):
     def test_generating_does_not_pop_a_confirmation_dialog(self) -> None:
         # Success reports on the status line; only failures get a dialog.
@@ -1085,11 +1192,53 @@ class DesktopUiTests(unittest.TestCase):
         self.assertTrue(any("units of 8 mm" in l for l in labels))
         self.assertIn("Floor label", labels)
         self.assertIn("Part name", labels)
+        self.assertIn("Add holder", labels)
+        self.assertIn("Update selected", labels)
+        self.assertIn("Save layout", labels)
+        self.assertIn("Open layout", labels)
+        self.assertIn("Fused", labels)
+        self.assertIn("Removable", labels)
+        self.assertIn("8 mm cartridge", labels)
         self.assertIn("Flat wall band from base (0-1 mm)", labels)
         self.assertNotIn("Generate Corner", labels)
         # the sample plate is fixed, and there is no status bar
         self.assertFalse(any("Sample plate boxes" in l for l in labels))
         self.assertNotIn("Ready", labels)
+
+    def test_ui_add_button_draws_a_holder_and_both_canvases_are_interactive(self) -> None:
+        import tkinter as tk
+
+        found = {}
+
+        def exercise(root: tk.Tk, _n: int = 0) -> None:
+            stack = list(root.winfo_children())
+            buttons, canvases = [], []
+            while stack:
+                widget = stack.pop()
+                if isinstance(widget, tk.Canvas):
+                    canvases.append(widget)
+                try:
+                    if widget.cget("text") == "Add holder":
+                        buttons.append(widget)
+                except tk.TclError:
+                    pass
+                stack.extend(widget.winfo_children())
+            buttons[0].invoke()
+            root.update_idletasks()
+            found["holders"] = sum(len(canvas.find_withtag("feature")) for canvas in canvases)
+            found["drag_bindings"] = sum(
+                bool(canvas.bind("<B1-Motion>")) for canvas in canvases
+            )
+            found["zoom_bindings"] = sum(
+                bool(canvas.bind("<MouseWheel>")) for canvas in canvases
+            )
+            root.destroy()
+
+        with mock.patch.object(tk.Tk, "mainloop", exercise):
+            organizer_app.launch_ui()
+        self.assertGreater(found["holders"], 0)
+        self.assertEqual(found["drag_bindings"], 2)
+        self.assertEqual(found["zoom_bindings"], 1)
 
 
 class CompatibilityTests(unittest.TestCase):

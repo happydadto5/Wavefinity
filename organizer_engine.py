@@ -23,10 +23,11 @@ Design summary
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import hashlib
 import math
 from pathlib import Path
+from typing import Iterable
 
 import lib3mf
 import numpy as np
@@ -834,96 +835,200 @@ def text_outline(label: str, cap_height: float) -> Polygon | MultiPolygon:
     )
 
 
-def label_layout(box: BoxSpec, label: str) -> tuple[float, bool]:
-    """``(cap_height, rotated)`` for the largest label that fits this floor.
+@dataclass(frozen=True)
+class LabelPlacement:
+    cap_height: float
+    rotated: bool
+    x: float = 0.0
+    y: float = 0.0
 
-    Horizontal is tried first at the ideal height and shrunk towards the
-    minimum; only if it still will not fit does the label turn to run up the
-    box instead.  Rotation is always the same way round, so a row of printed
-    boxes reads consistently.
-    """
+
+def _label_candidates(
+    room: Polygon, occupied: tuple[Polygon, ...], width: float, height: float
+) -> Iterable[tuple[float, float]]:
+    """Useful positions beside obstacle edges, then a complete 1 mm fallback."""
+    minx, miny, maxx, maxy = room.bounds
+    low_x, high_x = minx + width / 2.0, maxx - width / 2.0
+    low_y, high_y = miny + height / 2.0, maxy - height / 2.0
+    if low_x > high_x + 1e-9 or low_y > high_y + 1e-9:
+        return
+
+    xs = {0.0, low_x, high_x}
+    ys = {0.0, low_y, high_y}
+    for obstacle in occupied:
+        ox0, oy0, ox1, oy1 = obstacle.bounds
+        xs.update((ox0 - width / 2.0, ox1 + width / 2.0, (ox0 + ox1) / 2.0))
+        ys.update((oy0 - height / 2.0, oy1 + height / 2.0, (oy0 + oy1) / 2.0))
+    xs = {min(max(value, low_x), high_x) for value in xs}
+    ys = {min(max(value, low_y), high_y) for value in ys}
+    candidates = {(x, y) for x in xs for y in ys}
+    ordered = sorted(
+        candidates,
+        key=lambda point: (point[0] ** 2 + point[1] ** 2,
+                           abs(point[1]), abs(point[0]), point[1], point[0]),
+    )
+    yield from ordered
+
+    # Obstacles can make a useful location unrelated to another edge (for
+    # example a narrow corridor). Cover the remaining floor at the editor's
+    # one-millimetre resolution. Typical bins are only a few thousand points.
+    x = math.ceil(low_x)
+    while x <= high_x + 1e-9:
+        y = math.ceil(low_y)
+        while y <= high_y + 1e-9:
+            candidate = (float(x), float(y))
+            if candidate not in candidates:
+                yield candidate
+            y += 1
+        x += 1
+
+
+def label_placement(
+    box: BoxSpec,
+    label: str,
+    occupied: Iterable[Polygon] = (),
+) -> LabelPlacement:
+    """Largest legal label position, automatically moved around insert zones."""
     inside_x, inside_y = box.usable_inside
     room_x = inside_x - 2.0 * TEXT_MARGIN
     room_y = inside_y - 2.0 * TEXT_MARGIN
     if room_x <= 0 or room_y <= 0:
         raise ValueError("this box has no floor area to label")
 
-    outline = text_outline(label, TEXT_CAP_HEIGHT_IDEAL)
-    minx, miny, maxx, maxy = outline.bounds
-    width, height = maxx - minx, maxy - miny
+    room = shapely_box(-room_x / 2.0, -room_y / 2.0,
+                       room_x / 2.0, room_y / 2.0)
+    obstacles = tuple(
+        polygon.buffer(TEXT_MARGIN, join_style="mitre")
+        for polygon in occupied if not polygon.is_empty
+    )
+
+    ideal = text_outline(label, TEXT_CAP_HEIGHT_IDEAL)
+    minx, miny, maxx, maxy = ideal.bounds
+    ideal_width, ideal_height = maxx - minx, maxy - miny
 
     for rotated in (False, True):
-        across, up = (height, width) if rotated else (width, height)
-        scale = min(room_x / across, room_y / up, 1.0)
-        cap = TEXT_CAP_HEIGHT_IDEAL * scale
-        if cap >= TEXT_CAP_HEIGHT_MIN - 1e-9:
-            return min(cap, TEXT_CAP_HEIGHT_IDEAL), rotated
+        across, up = ((ideal_height, ideal_width) if rotated
+                      else (ideal_width, ideal_height))
+        max_cap = min(TEXT_CAP_HEIGHT_IDEAL,
+                      TEXT_CAP_HEIGHT_IDEAL * room_x / across,
+                      TEXT_CAP_HEIGHT_IDEAL * room_y / up)
+        if max_cap < TEXT_CAP_HEIGHT_MIN - 1e-9:
+            continue
+        if not obstacles:
+            return LabelPlacement(max_cap, rotated)
+
+        # Quarter-millimetre cap steps are visually continuous while keeping a
+        # live editor responsive. Always test the exact minimum as the last try.
+        caps = []
+        cap = max_cap
+        while cap >= TEXT_CAP_HEIGHT_MIN - 1e-9:
+            caps.append(max(cap, TEXT_CAP_HEIGHT_MIN))
+            cap -= 0.25
+        if not caps or caps[-1] > TEXT_CAP_HEIGHT_MIN + 1e-9:
+            caps.append(TEXT_CAP_HEIGHT_MIN)
+        for cap in caps:
+            outline = text_outline(label, cap)
+            if rotated:
+                outline = rotate_polygon(outline, 90.0, origin=(0.0, 0.0),
+                                         use_radians=False)
+            bx0, by0, bx1, by1 = outline.bounds
+            width, height = bx1 - bx0, by1 - by0
+            footprint = shapely_box(-width / 2.0, -height / 2.0,
+                                    width / 2.0, height / 2.0)
+            for x, y in _label_candidates(room, obstacles, width, height):
+                placed = translate_polygon(footprint, xoff=x, yoff=y)
+                if room.covers(placed) and all(not placed.intersects(o) for o in obstacles):
+                    return LabelPlacement(cap, rotated, x, y)
 
     longest = max(room_x, room_y)
-    needed = width * (TEXT_CAP_HEIGHT_MIN / TEXT_CAP_HEIGHT_IDEAL)
+    needed = ideal_width * (TEXT_CAP_HEIGHT_MIN / TEXT_CAP_HEIGHT_IDEAL)
+    obstacle_note = " around the insert features" if obstacles else ""
     raise ValueError(
-        f"'{label}' will not fit on this floor either way round: it needs "
+        f"'{label}' will not fit on this floor{obstacle_note} either way round: it needs "
         f"{needed:.1f} mm at the {TEXT_CAP_HEIGHT_MIN:.0f} mm minimum letter "
         f"height and the floor gives {longest:.1f} mm. Use a shorter label or "
         f"a bigger box"
     )
 
 
-def placed_label_outline(box: BoxSpec, label: str) -> Polygon | MultiPolygon:
-    """The label's final 2D shape on the floor, turned and centred."""
-    cap_height, rotated = label_layout(box, label)
-    outline = text_outline(label, cap_height)
-    if rotated:
+def label_layout(box: BoxSpec, label: str) -> tuple[float, bool]:
+    """Backward-compatible size/orientation result for an unobstructed floor."""
+    placement = label_placement(box, label)
+    return placement.cap_height, placement.rotated
+
+
+def placed_label_outline(
+    box: BoxSpec, label: str, occupied: Iterable[Polygon] = ()
+) -> Polygon | MultiPolygon:
+    """The label's final 2D shape, turned and moved clear of insert features."""
+    placement = label_placement(box, label, occupied)
+    outline = text_outline(label, placement.cap_height)
+    if placement.rotated:
         outline = rotate_polygon(outline, 90.0, origin=(0.0, 0.0), use_radians=False)
         minx, miny, maxx, maxy = outline.bounds
         outline = translate_polygon(
             outline, xoff=-(minx + maxx) / 2.0, yoff=-(miny + maxy) / 2.0
         )
-    return outline
+    return translate_polygon(outline, xoff=placement.x, yoff=placement.y)
 
 
-def make_floor_label(box: BoxSpec, label: str) -> trimesh.Trimesh:
+def make_floor_label(
+    box: BoxSpec,
+    label: str,
+    occupied: Iterable[Polygon] = (),
+    top_z: float | None = None,
+) -> trimesh.Trimesh:
     """The solid that fills the label pocket, flush with the floor.
 
     It sits in the top ``TEXT_DEPTH`` of the floor rather than standing on it,
     so the finished floor is flat and the lettering is an inlay.  It is a
     separate object in the 3MF so a slicer can give it its own filament.
     """
-    outline = placed_label_outline(box, label)
+    outline = placed_label_outline(box, label, occupied)
     pieces = list(outline.geoms) if isinstance(outline, MultiPolygon) else [outline]
     solid = union([_extrude_polygon(piece, TEXT_DEPTH) for piece in pieces])
-    solid.apply_translation((0.0, 0.0, box.wall - TEXT_DEPTH))
+    top_z = box.wall if top_z is None else top_z
+    if top_z < TEXT_DEPTH:
+        raise ValueError(f"label depth {TEXT_DEPTH:g} mm exceeds its floor thickness")
+    solid.apply_translation((0.0, 0.0, top_z - TEXT_DEPTH))
     solid.remove_unreferenced_vertices()
     solid.merge_vertices()
     return solid
 
 
 def make_labelled_box(
-    box: BoxSpec, label: str
+    box: BoxSpec,
+    label: str,
+    occupied: Iterable[Polygon] = (),
+    body: trimesh.Trimesh | None = None,
+    top_z: float | None = None,
 ) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
     """``(box with the label pocket cut, the solid that fills it)``.
 
     The two share faces and nothing else, which is exactly what a slicer wants
     from a two-material part.
     """
-    inlay = make_floor_label(box, label)
-    pocketed = difference([make_box(box), inlay])
+    inlay = make_floor_label(box, label, occupied, top_z)
+    pocketed = difference([make_box(box) if body is None else body, inlay])
     pocketed.remove_unreferenced_vertices()
     pocketed.merge_vertices()
     return pocketed, inlay
 
 
-def label_report(box: BoxSpec, label: str) -> dict[str, object]:
-    cap_height, rotated = label_layout(box, label)
-    outline = text_outline(label, cap_height)
+def label_report(
+    box: BoxSpec, label: str, occupied: Iterable[Polygon] = ()
+) -> dict[str, object]:
+    placement = label_placement(box, label, occupied)
+    outline = text_outline(label, placement.cap_height)
     minx, miny, maxx, maxy = outline.bounds
     across, up = maxx - minx, maxy - miny
-    if rotated:
+    if placement.rotated:
         across, up = up, across
     return {
         "label": label,
-        "cap_height_mm": round(cap_height, 3),
-        "rotated": rotated,
+        "cap_height_mm": round(placement.cap_height, 3),
+        "rotated": placement.rotated,
+        "position_mm": [round(placement.x, 3), round(placement.y, 3)],
         "footprint_mm": [round(across, 3), round(up, 3)],
         "depth_mm": TEXT_DEPTH,
     }
@@ -1115,7 +1220,7 @@ def export_labelled_box(
     box_name: str = "box",
     label_name: str = "label",
 ) -> None:
-    """Write the box and its raised label as two objects in one 3MF.
+    """Write a pocketed body and its sunk label as two objects in one 3MF.
 
     Keeping them separate is the point: load the file in Bambu Studio, answer
     yes to "load as a single object with multiple parts", and the label can be

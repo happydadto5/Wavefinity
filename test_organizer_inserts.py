@@ -51,6 +51,10 @@ class ItemTests(unittest.TestCase):
             Item("nothing", ())
         with self.assertRaisesRegex(ValueError, "profile"):
             Item("odd", (Segment(10.0, 5.0),), profile="triangle")
+        with self.assertRaisesRegex(ValueError, "clearance"):
+            Item.simple("tight", 10.0, 5.0, clearance=-0.1)
+        with self.assertRaisesRegex(ValueError, "finite"):
+            Segment(float("nan"), 5.0)
 
     def test_clearance_is_added_to_the_diameter(self) -> None:
         self.assertAlmostEqual(DRIVER.held(18.0), 18.0 + inserts.ITEM_CLEARANCE)
@@ -250,6 +254,72 @@ class KeepOutTests(unittest.TestCase):
         )
         for rib in ribs:
             self.assertLess(rib.bounds[1][2], limit)
+
+    def test_a_tall_wall_edge_feature_is_refused_but_an_interior_one_is_not(self) -> None:
+        whole = Zone.whole(BIN)
+        edge = Feature(
+            "divider", Zone(whole.x0, -10.0, whole.x0 + 2.0, 10.0),
+            along="y", options={"height": BIN.z - BIN.wall - 1.0},
+        )
+        with self.assertRaisesRegex(ValueError, "connector can seat"):
+            build_features(BIN, [edge], BIN.wall)
+        interior = Feature(
+            "divider", Zone(-1.0, -10.0, 1.0, 10.0),
+            along="y", options={"height": BIN.z - BIN.wall - 1.0},
+        )
+        self.assertTrue(build_features(BIN, [interior], BIN.wall))
+
+
+class LayoutModelTests(unittest.TestCase):
+    def test_normal_dragging_snaps_to_one_millimetre_and_clamps(self) -> None:
+        one = Feature("pocket", Zone(-8.0, -8.0, 8.0, 8.0))
+        moved = inserts.moved_feature(one, BIN, (999.4, -13.6))
+        bounds = inserts.layout_zone(BIN)
+        self.assertAlmostEqual(moved.zone.x1, bounds.x1)
+        self.assertEqual(moved.zone.centre[1], -14.0)
+
+    def test_cartridge_area_is_whole_eight_millimetre_cells(self) -> None:
+        zone = inserts.cartridge_zone(BIN)
+        self.assertEqual((zone.width, zone.depth), (120.0, 80.0))
+        self.assertAlmostEqual(
+            1.0 - zone.width * zone.depth / (Zone.whole(BIN).width * Zone.whole(BIN).depth),
+            0.098,
+            places=3,
+        )
+
+    def test_cartridge_features_snap_from_the_cartridge_origin(self) -> None:
+        one = Feature("pocket", Zone(-7.0, -7.0, 8.0, 8.0))
+        snapped = inserts.resized_feature(one, BIN, (16.0, 16.0), "cartridge")
+        layout = inserts.Layout((snapped,), "cartridge")
+        layout.validate(BIN)
+        bounds = inserts.cartridge_zone(BIN)
+        self.assertAlmostEqual((snapped.zone.x0 - bounds.x0) % 8.0, 0.0)
+        self.assertAlmostEqual((snapped.zone.y0 - bounds.y0) % 8.0, 0.0)
+
+    def test_a_non_cell_cartridge_layout_is_refused(self) -> None:
+        bad = inserts.Layout((Feature("pocket", Zone(-5, -5, 5, 5)),), "cartridge")
+        with self.assertRaisesRegex(ValueError, "8 mm cells"):
+            bad.validate(BIN)
+
+    def test_layout_json_round_trip_preserves_custom_items_and_options(self) -> None:
+        layout = inserts.Layout((Feature(
+            "cradle", Zone(-40, -20, 40, 20), DRIVER, 3, "x", {"floor_gap": 3.0}
+        ),), "separate")
+        rebuilt = inserts.layout_from_dict(inserts.layout_to_dict(layout))
+        self.assertEqual(rebuilt, layout)
+
+    def test_empty_standalone_and_cartridge_inserts_are_valid_base_plates(self) -> None:
+        for mesh in (inserts.make_fitted_insert(BIN, []),
+                     inserts.make_cartridge_insert(BIN, [])):
+            self.assertTrue(mesh.is_watertight)
+            self.assertAlmostEqual(mesh.bounds[0][2], 0.0)
+            self.assertAlmostEqual(mesh.bounds[1][2], inserts.BASE_PLATE)
+
+    def test_slot_orientation_changes_which_axis_is_repeated(self) -> None:
+        zone = Zone(-15.0, -5.0, 15.0, 5.0)
+        along_x = build_features(BIN, [Feature("slot", zone, along="x")], BIN.wall)[0]
+        along_y = build_features(BIN, [Feature("slot", zone, along="y")], BIN.wall)[0]
+        self.assertNotAlmostEqual(along_x.volume, along_y.volume)
 
 
 if __name__ == "__main__":
