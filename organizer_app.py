@@ -83,7 +83,7 @@ def add_box_arguments(parser: argparse.ArgumentParser, prefix: str = "") -> None
     parser.add_argument(
         f"--{option}flat-inside", dest=f"{destination}flat_inside",
         type=float, default=0.0,
-        help="0-1 mm of fill that straightens the interior walls (0.8 = dead flat)",
+        help="0-1 mm: height of a flat-walled band rising from the floor",
     )
 
 
@@ -437,7 +437,7 @@ BASIC_FIELDS = (
 )
 ADVANCED_FIELDS = (
     ("Wall / floor thickness (mm)", "wall", None, None),
-    ("Flat inside walls (0-1 mm)", "flat_inside", 0.1, 0.0),
+    ("Flat wall band from base (0-1 mm)", "flat_inside", 0.1, 0.0),
     ("Connector tolerance (mm)", "tolerance", None, None),
     ("Connector height (mm)", "height", None, None),
     ("Connector length (mm)", "side_length", None, None),

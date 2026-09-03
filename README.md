@@ -44,7 +44,7 @@ label, with the dimensions written along the bottom and side as
 height in the corner. It turns the label when the box is too narrow and says so
 if the label will not fit.
 
-Everything else — wall thickness, flat-inside fill, connector tolerance, height,
+Everything else — wall thickness, the flat wall band, connector tolerance, height,
 length, position, wall direction and the sample-plate contents — sits behind an
 **Advanced settings** checkbox.
 
@@ -177,27 +177,31 @@ bumps every 2 mm they do. With bumps on alternate extrema the two requirements
 landed on odd and even millimetres and could never both hold — **no length or
 position could fix that**, which is why the wave shape had to change instead.
 
-### Flat inside walls (optional)
+### Flat wall band at the base (optional)
 
-The wave runs on both faces of a wall, so by default the inside is wavy too. An
-advanced setting, **flat inside, 0 to 1 mm**, fills that in:
+The wave runs on both faces of a wall, so the inside is wavy too, right down to
+the floor. An advanced setting, **0 to 1 mm**, gives the bottom of the bin a
+band of **flat** wall rising from the floor:
 
-| Setting | Inside wall |
+| Setting | What you get |
 |---:|---|
-| 0.0 | follows the wave, wandering the full 0.8 mm (default) |
-| 0.4 | half straightened |
-| **0.8** | **dead flat** — the fill exactly cancels the wave |
-| 1.0 | flat, plus 0.2 mm of extra wall |
+| 0.0 | wavy all the way down (default) |
+| 0.5 | the first 0.5 mm above the floor has flat walls |
+| 1.0 | the first 1 mm above the floor has flat walls |
 
-Only the inside changes; the outside profile, the grid and the mating are
-untouched. Three things follow the fill so nothing stops fitting: the cavity
-itself; the **lock bumps**, which stand proud of the *new* face, so a bump on a
-filled-in crest is not buried; and the **connector arm**, which hugs that face and
-would otherwise clash with it.
+It is a **height**, not a strength: the wave above the band is completely
+unchanged. The cavity becomes two stacked shapes - a straight-sided one sitting
+on the floor, and the usual wavy one above it.
 
-Usable interior does **not** improve, because a straight-sided object was always
-limited by the innermost point of the wave. The fill buys a clean wall, not
-capacity.
+The band is sized to the innermost point the wave ever reaches, so it only ever
+**adds** material against the wall and can never cut into it. That is also why
+**usable interior does not change**: the band is exactly the rectangle
+`usable_inside` already reported.
+
+The outside profile, the grid and the mating are untouched. The band sits on the
+floor and the connector arms hang from the rim, so on any normal bin they are
+nowhere near each other; on a very shallow one they would meet, and asking for a
+connector then gives an error saying how tall the box needs to be.
 
 ### Floor label
 
@@ -228,7 +232,7 @@ filesystem would object to are stripped.
 ```powershell
 python organizer_app.py box --x 40 --y 32 --z 55 --output box_40x32x55.3mf
 python organizer_app.py box --x 48 --y 48 --z 40 --label BOLTS --output "Box 48 x 48 x 40 BOLTS.3mf"
-python organizer_app.py box --x 32 --y 32 --z 40 --flat-inside 0.8 --output flat.3mf
+python organizer_app.py box --x 32 --y 32 --z 40 --flat-inside 1.0 --output flat.3mf
 python organizer_app.py side --box-x 40 --box-y 32 --box-z 55 --along y --output side_y.3mf
 python organizer_app.py kit --x 40 --y 32 --z 55 --output-dir generated_40x32
 python organizer_app.py sampler --boxes 2x6,4x6,6x6 --output WAVY_SAMPLE_SET.3mf
@@ -353,6 +357,7 @@ these numbers look arbitrary and are not.
 | One "unit" | **8.0** | so 1, 2, 3 units = 8, 16, 24 mm |
 | Smallest box that clips on both sides | **16.0** | derived, not hard-coded |
 | Wall / floor | **0.8** | |
+| Flat wall band | **0–1.0**, default 0 | height above the floor, not a fill depth |
 | Corner fillet | **0.6** | walls stop `CORNER_INSET` = 1.0 short of the nominal corner |
 | **Connector tolerance** | **0.02** | **locked** by a physical print |
 | **Connector length** | **12.0** | **locked** |
@@ -361,7 +366,6 @@ these numbers look arbitrary and are not.
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |
 | Bump band | top **4.0** below the rim | |
 | Label letters | **10.0** ideal, **7.0** minimum | sunk **0.4** into the floor |
-| Flat inside fill | **0–1.0**, default 0 | 0.8 = dead flat |
 
 Connector tolerance, length and height were chosen from a **printed five-clip fit
 plate** — the leftmost clip, read back from that 3MF as `side_clip_tol_0p020`.
@@ -377,6 +381,7 @@ Do not re-derive these.
 | Bumps on alternate troughs only | Locked one side of a mixed-size seam, and blocked reversibility. |
 | Even (cosine) wave | Replaced with odd sine so boxes can be turned round. |
 | Raised (proud) floor labels | Replaced with a sunk inlay. |
+| Reading "flat inside walls" as a horizontal fill depth | Wrong. It is a **height**: a flat-walled band rising from the floor, with the wave unchanged above it. |
 | 16 mm "bin" as the unit | Replaced with 8 mm so whole numbers reach 8/16/24/32/40/48. |
 | Success dialog after generating | Removed; the status line reports instead. Failures still get a dialog. |
 | Connector-fit line in the size readout | Removed. |
@@ -445,11 +450,15 @@ Measured, not asserted. All figures from the current geometry; 80/80 tests pass.
 - Seated: **0.0 mm³**. At 0.5 mm lift: **1.70 mm³**. Rose from 1.41 when bumps
   went to every extremum — shorter bumps, twice as many under a clip
 
-**Flat inside**
-- +X interior wall wanders **0.76 / 0.58 / 0.38 / 0.000 mm** at fills of
-  0 / 0.2 / 0.4 / 0.8
+**Flat wall band**
+- Cavity cross-section is the straight profile (**844.47 mm²**) throughout the
+  band and the wavy one (**892.01 mm²**) immediately above it, on a 32x32x40
+  box with a 1 mm band
+- The band's height tracks the setting continuously; it is not on/off
+- The straight profile is fully contained by the wavy one, so the band cannot
+  cut into the wall
 - Outer profile area identical to 6 places, so grid and mating are unaffected
-- Connector still seats and locks at fills of 0, 0.4, 0.8 and 1.0
+- Connector still seats and locks with the band at 0, 0.5 and 1.0
 
 **Labels**
 - Pocket volume removed == inlay volume; the two intersect by **<0.01 mm³**;

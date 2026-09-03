@@ -131,7 +131,7 @@ class BoxSpec:
     z: float = 40.0
     wall: float = DEFAULT_WALL
     corner_fillet: float = DEFAULT_CORNER_FILLET
-    flat_inside: float = 0.0   # mm of fill that straightens the interior walls
+    flat_inside: float = 0.0   # mm of flat-walled band rising from the floor
 
     def __post_init__(self) -> None:
         values = {
@@ -158,6 +158,8 @@ class BoxSpec:
                 )
         if not 0.0 <= self.flat_inside <= 1.0:
             raise ValueError("flat inside must be between 0 and 1 mm")
+        if self.flat_inside > 0.0 and self.wall + self.flat_inside >= self.z:
+            raise ValueError("box is too shallow for a flat-walled band")
         if self.wall_depth * 2.0 >= min(self.x, self.y) - WAVE_MATING_GAP:
             raise ValueError("wall thickness leaves no cavity")
 
@@ -196,28 +198,6 @@ class BoxSpec:
         return self.x + span, self.y + span
 
     @property
-    def flat_trim(self) -> float:
-        """How far out the interior face may still follow the wave.
-
-        The face swings ``+/- WAVE_AMPLITUDE``.  Filling ``flat_inside`` mm caps
-        it here instead, so ``WAVE_AMPLITUDE`` leaves it untouched, ``0`` takes
-        off the outer half of the swing, and ``-WAVE_AMPLITUDE`` - which is
-        ``flat_inside`` of twice the amplitude - leaves a dead flat wall.
-        """
-        return WAVE_AMPLITUDE - self.flat_inside
-
-    def face_wave(self, coordinate: float, from_above: bool) -> float:
-        """The wave as the flattened interior face follows it.
-
-        ``from_above`` is for a face on the positive side of the box, which the
-        fill caps from above; the opposite face is capped from below.
-        """
-        value = wave_value(coordinate)
-        if self.flat_inside <= 0.0:
-            return value
-        return min(value, self.flat_trim) if from_above else max(value, -self.flat_trim)
-
-    @property
     def usable_inside(self) -> tuple[float, float]:
         """Largest axis-aligned rectangle that fits the cavity.
 
@@ -226,11 +206,8 @@ class BoxSpec:
         has to clear the wave's full swing, which costs one amplitude at each
         end on top of the two walls.
         """
-        # a straight object clears the innermost the face ever reaches, which
-        # the fill only moves once it has flattened the wave completely
-        reach = min(-WAVE_AMPLITUDE, self.flat_trim)
-        clear_x = 2.0 * (self.half_x - self.wall_depth + reach)
-        clear_y = 2.0 * (self.half_y - self.wall_depth + reach)
+        clear_x = 2.0 * (self.half_x - self.wall_depth) - 2.0 * WAVE_AMPLITUDE
+        clear_y = 2.0 * (self.half_y - self.wall_depth) - 2.0 * WAVE_AMPLITUDE
         return clear_x, clear_y
 
     @property
@@ -410,13 +387,6 @@ def preview_rings(
     cavity = _wall_points(
         spec.half_x - depth, spec.half_y - depth, tangent_x, tangent_y, per_wall
     )
-    if spec.flat_inside > 0.0:
-        limit_x = spec.half_x - depth + spec.flat_trim
-        limit_y = spec.half_y - depth + spec.flat_trim
-        cavity = [
-            (min(max(x, -limit_x), limit_x), min(max(y, -limit_y), limit_y))
-            for x, y in cavity
-        ]
     return outer, cavity
 
 
@@ -439,17 +409,6 @@ def wavy_cavity_polygon(spec: BoxSpec) -> Polygon:
     )
     if not polygon.is_valid:
         polygon = polygon.buffer(0)
-    if spec.flat_inside > 0.0:
-        # Straighten the interior by refusing to let the cavity reach past a
-        # plain rectangle.  The wall thickens where the wave bulged the cavity
-        # outward, which is exactly the material the fill adds.
-        limit_x = spec.half_x - depth + spec.flat_trim
-        limit_y = spec.half_y - depth + spec.flat_trim
-        polygon = polygon.intersection(
-            shapely_box(-limit_x, -limit_y, limit_x, limit_y)
-        )
-        if not isinstance(polygon, Polygon) or polygon.is_empty:
-            raise RuntimeError("flattening left no cavity")
     if not isinstance(polygon, Polygon) or not polygon.is_valid:
         raise RuntimeError("wavy cavity outline is not a valid single polygon")
     return _rounded(polygon, max(0.2, spec.corner_fillet - spec.wall))
@@ -577,17 +536,10 @@ def _wall_lock_paths(
         for centre in lock_positions(wave_half - CORNER_INSET - LOCK_CORNER_CLEAR):
             lo, hi = centre - LOCK_RUN / 2.0, centre + LOCK_RUN / 2.0
             ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
-            # follow the flattened face, so a bump on a filled-in crest still
-            # stands its full height proud of the wall rather than being buried
-            above = face > 0.0
             if run_axis == "y":
-                path = [
-                    (face + spec.face_wave(float(s), above), float(s)) for s in ss
-                ]
+                path = [(face + wave_value(float(s)), float(s)) for s in ss]
             else:
-                path = [
-                    (float(s), face + spec.face_wave(float(s), above)) for s in ss
-                ]
+                path = [(float(s), face + wave_value(float(s))) for s in ss]
             paths.append((path, inward))
     return paths
 
@@ -604,10 +556,44 @@ def make_wall_lock_bumps(spec: BoxSpec) -> list[trimesh.Trimesh]:
 # --------------------------------------------------------------------------- #
 # parts
 # --------------------------------------------------------------------------- #
+def flat_cavity_polygon(spec: BoxSpec) -> Polygon:
+    """Straight-sided cavity profile for the flat band at the bottom.
+
+    Sized to the innermost the wavy cavity ever reaches, so the band adds
+    material against the wall and never cuts into it.  It is exactly the
+    rectangle ``usable_inside`` reports, which is why turning the band on does
+    not change how much straight-sided room the box has.
+    """
+    half_x = spec.half_x - spec.wall_depth - WAVE_AMPLITUDE
+    half_y = spec.half_y - spec.wall_depth - WAVE_AMPLITUDE
+    if half_x <= 0.0 or half_y <= 0.0:
+        raise ValueError("box is too small for a flat-walled band")
+    return _rounded(
+        shapely_box(-half_x, -half_y, half_x, half_y),
+        max(0.2, spec.corner_fillet - spec.wall),
+    )
+
+
 def make_box(spec: BoxSpec) -> trimesh.Trimesh:
     envelope = _extrude_polygon(wavy_outer_polygon(spec), spec.z)
-    cavity = _extrude_polygon(wavy_cavity_polygon(spec), spec.z - spec.wall + 1.0)
-    cavity.apply_translation((0.0, 0.0, spec.wall))
+    if spec.flat_inside > 0.0:
+        # The cavity is two stacked prisms: a straight-sided one sitting on the
+        # floor, and the wavy one above it.  What that leaves behind is a band
+        # of wall with flat faces for the first flat_inside mm, which is the
+        # point - the wave carries on unchanged above it.
+        band = _extrude_polygon(flat_cavity_polygon(spec), spec.flat_inside)
+        band.apply_translation((0.0, 0.0, spec.wall))
+        above = _extrude_polygon(
+            wavy_cavity_polygon(spec),
+            spec.z - spec.wall - spec.flat_inside + 1.0,
+        )
+        above.apply_translation((0.0, 0.0, spec.wall + spec.flat_inside))
+        cavity = union([band, above])
+    else:
+        cavity = _extrude_polygon(
+            wavy_cavity_polygon(spec), spec.z - spec.wall + 1.0
+        )
+        cavity.apply_translation((0.0, 0.0, spec.wall))
     shell = difference([envelope, cavity])
     bumps = make_wall_lock_bumps(spec)
     result = union([shell, *bumps]) if bumps else shell
@@ -665,6 +651,21 @@ def make_side_connector(
             f"{length:g}. A wall this short joins nothing - use the box's other "
             f"side, or make this one at least {shortest:.2f} mm"
         )
+    # The band sits on the floor and the arms hang from the rim, so on any
+    # normal bin they are nowhere near each other.  On a very shallow one they
+    # meet, and it is worth saying so plainly rather than letting the fit check
+    # report a bare collision volume.
+    band_top = box.wall + box.flat_inside
+    arm_bottom = box.z - connector.arm_depth
+    if box.flat_inside > 0.0 and arm_bottom < band_top:
+        room = box.z - connector.arm_depth - box.wall
+        raise ValueError(
+            f"the flat band reaches {band_top:.2f} mm up but the connector's arms "
+            f"hang down to {arm_bottom:.2f} mm, so they would collide. On a "
+            f"{box.z:g} mm box the band can be at most {max(room, 0.0):.2f} mm, or "
+            f"make the box at least {box.wall + box.flat_inside + connector.arm_depth:.2f} mm tall"
+        )
+
     step = WAVE_LENGTH / 2.0
     steps = position / step
     if abs(steps - round(steps)) > 1e-6:
@@ -681,12 +682,7 @@ def make_side_connector(
     )
 
     def corridor(half_width: float, coordinates: np.ndarray) -> Polygon:
-        # Each side follows the interior face of the box on that side.  With no
-        # fill both are the plain wave and the arms are mirror images; with fill
-        # each side is capped where its own wall was straightened, so the arm
-        # keeps hugging the wall instead of clashing with it.
-        low = [box.face_wave(position + float(v), True) for v in coordinates]
-        high = [box.face_wave(position + float(v), False) for v in coordinates]
+        low = high = [wave_value(position + float(v)) for v in coordinates]
         if axis == "y":
             near = [(o - half_width, float(v)) for v, o in zip(coordinates, low)]
             far = [
@@ -744,10 +740,8 @@ def _arm_notches(
         local = centre - position
         lo, hi = local - LOCK_RUN / 2.0, local + LOCK_RUN / 2.0
         ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
+        offsets = [wave_value(position + float(s)) for s in ss]
         for sign in (1.0, -1.0):
-            offsets = [
-                box.face_wave(position + float(s), sign < 0.0) for s in ss
-            ]
             # The arm's wall-facing face is its inner one; the notch is cut from
             # there outward into the arm, matching the bump that pokes in.
             if axis == "y":

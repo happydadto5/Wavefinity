@@ -39,6 +39,9 @@ from organizer_engine import (
     connector_half_widths,
     generate_sampler,
     make_sampler_scene,
+    flat_cavity_polygon,
+    _extrude_polygon,
+    difference,
     preview_rings,
     make_floor_label,
     make_labelled_box,
@@ -759,18 +762,14 @@ class ReversibilityTests(unittest.TestCase):
 
 
 class FlatInsideTests(unittest.TestCase):
-    """An optional 0-1 mm of fill that straightens the interior walls."""
+    """An optional 0-1 mm band at the bottom whose walls are flat, not wavy."""
 
-    def _wall_wander(self, spec) -> float:
-        from shapely.geometry import LineString
-
-        cavity = wavy_cavity_polygon(spec)
-        reach = []
-        for y in np.linspace(-spec.half_y / 2.0, spec.half_y / 2.0, 41):
-            hit = LineString([(0.0, y), (spec.x, y)]).intersection(cavity.exterior)
-            points = [hit] if hit.geom_type == "Point" else list(hit.geoms)
-            reach.append(max(point.x for point in points))
-        return max(reach) - min(reach)
+    @staticmethod
+    def _cavity_area_at(spec, mesh, z, thickness=0.02):
+        """Cross-section of the hole at height z, measured with a thin slab."""
+        slab = _extrude_polygon(wavy_outer_polygon(spec), thickness)
+        slab.apply_translation((0.0, 0.0, z))
+        return difference([slab, mesh]).volume / thickness
 
     def test_off_by_default_and_range_checked(self) -> None:
         self.assertEqual(BoxSpec().flat_inside, 0.0)
@@ -780,47 +779,96 @@ class FlatInsideTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "between 0 and 1"):
                 BoxSpec(32.0, 32.0, 40.0, flat_inside=bad)
 
-    def test_fill_straightens_the_interior_wall(self) -> None:
-        spec = lambda f: BoxSpec(32.0, 32.0, 40.0, flat_inside=f)
-        wander = [self._wall_wander(spec(f)) for f in (0.0, 0.2, 0.4, 0.8)]
-        self.assertAlmostEqual(wander[0], 2 * WAVE_AMPLITUDE, delta=0.05)
-        self.assertLess(wander[1], wander[0])
-        self.assertLess(wander[2], wander[1])
-        self.assertAlmostEqual(wander[3], 0.0, places=6)   # dead flat
+    def test_the_band_is_flat_and_the_wave_carries_on_above_it(self) -> None:
+        spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=1.0)
+        mesh = make_box(spec)
+        flat = flat_cavity_polygon(spec).area
+        wavy = wavy_cavity_polygon(spec).area
+        self.assertLess(flat, wavy)          # the band adds material
 
-    def test_fill_only_adds_material(self) -> None:
+        top = spec.wall + spec.flat_inside
+        for z in (spec.wall + 0.05, spec.wall + 0.5, top - 0.05):
+            self.assertAlmostEqual(
+                self._cavity_area_at(spec, mesh, z), flat, delta=0.5, msg=f"z={z}"
+            )
+        # stay clear of the lock bumps, which sit in the top 5 mm
+        for z in (top + 0.05, top + 2.0, spec.z - 12.0):
+            self.assertAlmostEqual(
+                self._cavity_area_at(spec, mesh, z), wavy, delta=0.5, msg=f"z={z}"
+            )
+
+    def test_the_band_height_follows_the_setting(self) -> None:
+        # it is a height, not an on/off switch: half the number, half the band
+        for flat in (0.4, 0.8):
+            spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=flat)
+            mesh = make_box(spec)
+            straight = flat_cavity_polygon(spec).area
+            just_under = self._cavity_area_at(spec, mesh, spec.wall + flat - 0.05)
+            just_over = self._cavity_area_at(spec, mesh, spec.wall + flat + 0.05)
+            self.assertAlmostEqual(just_under, straight, delta=0.5)
+            self.assertGreater(just_over, straight + 1.0)
+
+    def test_no_band_at_all_when_it_is_off(self) -> None:
+        spec = BoxSpec(32.0, 32.0, 40.0)
+        mesh = make_box(spec)
+        wavy = wavy_cavity_polygon(spec).area
+        self.assertAlmostEqual(
+            self._cavity_area_at(spec, mesh, spec.wall + 0.05), wavy, delta=0.5
+        )
+
+    def test_the_band_only_adds_material(self) -> None:
         plain = make_box(BoxSpec(32.0, 32.0, 40.0)).volume
-        for f in (0.2, 0.8):
-            filled = make_box(BoxSpec(32.0, 32.0, 40.0, flat_inside=f))
-            report = mesh_report(f"flat_{f}", filled)
-            self.assertEqual(report["components"], 1)
+        for flat in (0.5, 1.0):
+            filled = make_box(BoxSpec(32.0, 32.0, 40.0, flat_inside=flat))
+            self.assertEqual(mesh_report(f"flat_{flat}", filled)["components"], 1)
             self.assertGreater(filled.volume, plain)
 
-    def test_the_outside_is_untouched(self) -> None:
-        plain = wavy_outer_polygon(BoxSpec(32.0, 32.0, 40.0))
-        filled = wavy_outer_polygon(BoxSpec(32.0, 32.0, 40.0, flat_inside=0.8))
-        self.assertAlmostEqual(plain.area, filled.area, places=6)
+    def test_the_band_never_cuts_into_the_wall(self) -> None:
+        # it is sized to the innermost the wave reaches, so it cannot
+        for flat in (0.5, 1.0):
+            spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=flat)
+            straight = flat_cavity_polygon(spec)
+            self.assertTrue(wavy_cavity_polygon(spec).contains(straight))
 
-    def test_the_connector_still_fits_a_filled_box(self) -> None:
-        # the arm hugs the interior face, so it has to follow the fill too
+    def test_the_outside_and_the_wave_are_untouched(self) -> None:
+        plain = wavy_outer_polygon(BoxSpec(32.0, 32.0, 40.0))
+        banded = wavy_outer_polygon(BoxSpec(32.0, 32.0, 40.0, flat_inside=1.0))
+        self.assertAlmostEqual(plain.area, banded.area, places=6)
+
+    def test_the_connector_is_unaffected_on_a_normal_box(self) -> None:
+        # the band sits on the floor, the arms hang from the rim
         connector = ConnectorSpec()
-        for f in (0.0, 0.4, 0.8, 1.0):
-            spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=f)
+        for flat in (0.0, 0.5, 1.0):
+            spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=flat)
             clip = make_side_connector(spec, connector, "y")
             self.assertLess(validate_side_fit(spec, connector, clip, "y"), 1e-3)
             self.assertGreater(measure_lock(spec, connector)["lift_0.5_mm3"], 0.1)
 
-    def test_the_bumps_still_stand_proud_of_a_filled_wall(self) -> None:
-        # built from the wave, a bump on a filled-in crest would be buried
-        for f in (0.4, 0.8):
-            spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=f)
-            self.assertGreater(
-                measure_lock(spec, ConnectorSpec())["no_notch_mm3"], 0.1
+    def test_a_shallow_box_says_why_the_band_will_not_work(self) -> None:
+        with self.assertRaisesRegex(ValueError, "would collide"):
+            make_side_connector(
+                BoxSpec(32.0, 32.0, 10.0, flat_inside=1.0), ConnectorSpec(), "y"
+            )
+        # and the same box is fine without the band
+        spec = BoxSpec(32.0, 32.0, 10.0)
+        clip = make_side_connector(spec, ConnectorSpec(), "y")
+        self.assertLess(validate_side_fit(spec, ConnectorSpec(), clip, "y"), 1e-3)
+
+    def test_too_shallow_for_a_band_at_all_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "too shallow"):
+            BoxSpec(32.0, 32.0, 1.5, flat_inside=1.0)
+
+    def test_usable_inside_is_unchanged(self) -> None:
+        # the band is exactly the rectangle usable_inside already reported
+        plain = BoxSpec(32.0, 32.0, 40.0).usable_inside
+        for flat in (0.5, 1.0):
+            self.assertEqual(
+                BoxSpec(32.0, 32.0, 40.0, flat_inside=flat).usable_inside, plain
             )
 
-    def test_a_filled_box_still_tiles_and_still_turns(self) -> None:
-        for f in (0.4, 0.8):
-            spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=f)
+    def test_a_banded_box_still_tiles_and_still_turns(self) -> None:
+        for flat in (0.5, 1.0):
+            spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=flat)
             mesh = make_box(spec)
             left = translated(mesh, (-spec.x / 2.0, 0.0, 0.0))
             for neighbour in (mesh, ReversibilityTests._spin(mesh)):
@@ -831,24 +879,14 @@ class FlatInsideTests(unittest.TestCase):
                     0.0,
                 )
 
-    def test_usable_inside_only_shrinks_once_the_wall_is_already_flat(self) -> None:
-        plain = BoxSpec(32.0, 32.0, 40.0).usable_inside
-        # up to full flattening the innermost point has not moved
-        for f in (0.2, 0.8):
-            self.assertEqual(
-                BoxSpec(32.0, 32.0, 40.0, flat_inside=f).usable_inside, plain
-            )
-        more = BoxSpec(32.0, 32.0, 40.0, flat_inside=1.0).usable_inside
-        self.assertLess(more[0], plain[0])
-
-    def test_cli_takes_the_fill(self) -> None:
+    def test_cli_takes_the_band(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "flat.3mf"
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(
                     organizer_app.main(
                         ["box", "--x", "32", "--y", "32", "--z", "40",
-                         "--flat-inside", "0.8", "--output", str(output)]
+                         "--flat-inside", "1.0", "--output", str(output)]
                     ),
                     0,
                 )
@@ -1044,7 +1082,7 @@ class DesktopUiTests(unittest.TestCase):
         self.assertIn("Advanced settings", labels)
         self.assertTrue(any("units of 8 mm" in l for l in labels))
         self.assertIn("Floor label (blank for none)", labels)
-        self.assertIn("Flat inside walls (0-1 mm)", labels)
+        self.assertIn("Flat wall band from base (0-1 mm)", labels)
         self.assertNotIn("Generate Corner", labels)
 
 
