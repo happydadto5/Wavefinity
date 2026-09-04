@@ -342,20 +342,24 @@ def _wall_points(
     half_y: float,
     tangent_x: float,
     tangent_y: float,
-    per_wall: int | None = None,
+    points_per_cycle: float | None = None,
 ) -> list[tuple[float, float]]:
     """Counter-clockwise outline: four wavy walls joined by corner chords.
 
     ``half_*`` place the faces; ``tangent_*`` say where the walls stop short of
     the nominal corner and always come from the outer profile, so an inner
-    outline stays exactly parallel to the outer one.  ``per_wall`` overrides the
-    sampling, which the preview uses to get a coarse ring it can draw quickly.
+    outline stays exactly parallel to the outer one.  ``points_per_cycle``
+    overrides the sampling with a *density* rather than a fixed total, so a
+    long wall and a short one on the same box come out equally smooth - the
+    preview uses this to get a coarse ring it can draw quickly without a
+    fixed point budget starving whichever pair of walls is longer.
     """
-    if per_wall is None:
+    if points_per_cycle is None:
         count_x = _sample_count(2.0 * tangent_x)
         count_y = _sample_count(2.0 * tangent_y)
     else:
-        count_x = count_y = max(4, per_wall)
+        count_x = max(4, round(points_per_cycle * 2.0 * tangent_x / WAVE_LENGTH))
+        count_y = max(4, round(points_per_cycle * 2.0 * tangent_y / WAVE_LENGTH))
     xs = np.linspace(-tangent_x, tangent_x, count_x)
     ys = np.linspace(-tangent_y, tangent_y, count_y)
     points: list[tuple[float, float]] = []
@@ -384,21 +388,23 @@ def _rounded(polygon: Polygon, radius: float) -> Polygon:
 
 
 def preview_rings(
-    spec: BoxSpec, per_wall: int = 22
+    spec: BoxSpec, points_per_cycle: float = 7.0
 ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
     """Coarse outer and cavity rings for drawing, matched point for point.
 
     Both come from the same walk of the same walls, so ring[i] on one is
     directly opposite ring[i] on the other and the two can be stitched into
     quads without any searching.  The corner fillet is left off: at preview
-    size it is smaller than a pixel.
+    size it is smaller than a pixel. ``points_per_cycle`` is a density, not a
+    per-wall total, so the short and long pair of walls on a non-square box
+    read equally smooth instead of the longer pair coming out faceted.
     """
     tangent_x = spec.half_x - CORNER_INSET
     tangent_y = spec.half_y - CORNER_INSET
     depth = spec.wall_depth
-    outer = _wall_points(spec.half_x, spec.half_y, tangent_x, tangent_y, per_wall)
+    outer = _wall_points(spec.half_x, spec.half_y, tangent_x, tangent_y, points_per_cycle)
     cavity = _wall_points(
-        spec.half_x - depth, spec.half_y - depth, tangent_x, tangent_y, per_wall
+        spec.half_x - depth, spec.half_y - depth, tangent_x, tangent_y, points_per_cycle
     )
     return outer, cavity
 

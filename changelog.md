@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-04 — Claude (preview wave-density fix)
+
+### Fixed
+
+- **The 3D/2D preview drew the longer pair of walls as straight segments
+  meeting at angles instead of a smooth wave.** `preview_rings` sampled
+  every wall with the same fixed point count (22) regardless of its
+  length, so a short wall (say 13 mm, ~3 cycles) got a smooth ~7 points
+  per wave cycle while a long one on the same box (say 45 mm, ~11 cycles)
+  got barely 2 - visibly faceted, not curved. `_wall_points`'s override
+  parameter is now a *density* (points per wave cycle, default 7), scaled
+  by each wall's own length, so a non-square box's short and long walls
+  read equally smooth. This only ever affected the coarse preview ring;
+  the actual exported mesh always sampled by length via `_sample_count`
+  and was correct the whole time. `PreviewRingDensityTests` pins the fix:
+  a longer wall gets proportionally more points, and the short and long
+  pair sample at the same density.
+
 ## 2026-09-04 — Claude (stale-server fix)
 
 ### Fixed

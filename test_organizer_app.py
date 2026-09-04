@@ -202,6 +202,7 @@ class BoxTests(unittest.TestCase):
             self.assertEqual(report["components"], 1)
             self.assertAlmostEqual(mesh.extents[2], dimensions[2], places=5)
 
+
     def test_sizes_must_sit_on_the_grid(self) -> None:
         for good in (8.0, 16.0, 24.0, 96.0):
             BoxSpec(x=good, y=24.0)          # must not raise
@@ -262,6 +263,44 @@ class BoxTests(unittest.TestCase):
             ConnectorSpec(arm_thickness=0.4)
         with self.assertRaises(ValueError):
             make_side_connector(BoxSpec(), ConnectorSpec(), position=16.0)
+
+
+class PreviewRingDensityTests(unittest.TestCase):
+    """The browser preview's coarse wall outline, not the exported mesh.
+
+    ``preview_rings`` used to spend a fixed point budget on every wall
+    regardless of its length, so on a non-square box the longer pair read
+    as a smooth curve only if it happened to be short enough - a 45 mm
+    wall got the same ~22 points as a 13 mm one, roughly two points per
+    4 mm wave cycle, which looks like straight segments meeting at angles
+    rather than a wave. Sampling by density instead of by a fixed total
+    fixes that; these pin the density is actually constant, not just "more
+    points on a bigger box."
+    """
+
+    def test_a_longer_wall_gets_proportionally_more_preview_points(self) -> None:
+        square = BoxSpec(32.0, 32.0, 40.0)
+        elongated = BoxSpec(16.0, 96.0, 40.0)
+        outer_square, _ = preview_rings(square)
+        outer_elongated, _ = preview_rings(elongated)
+        # before the fix this ratio was ~1 - a fixed per-wall budget didn't
+        # care how much longer the elongated box's long walls actually were
+        self.assertGreater(len(outer_elongated), len(outer_square) * 1.5)
+
+    def test_the_short_and_long_wall_pair_sample_at_the_same_density(self) -> None:
+        spec = BoxSpec(16.0, 48.0, 40.0)
+        density = 7.0
+        tangent_x = spec.half_x - CORNER_INSET
+        tangent_y = spec.half_y - CORNER_INSET
+        count_x = max(4, round(density * 2.0 * tangent_x / WAVE_LENGTH))
+        count_y = max(4, round(density * 2.0 * tangent_y / WAVE_LENGTH))
+        outer, _ = preview_rings(spec, density)
+        self.assertEqual(len(outer), 2 * count_x + 2 * count_y)
+        # points per mm of wall length - close between the short (x) and
+        # long (y) wall pair is exactly what "equally smooth" means here
+        density_x = count_x / (2.0 * tangent_x)
+        density_y = count_y / (2.0 * tangent_y)
+        self.assertAlmostEqual(density_x, density_y, delta=0.05)
 
 
 class LockTests(unittest.TestCase):
