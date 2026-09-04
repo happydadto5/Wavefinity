@@ -30,6 +30,7 @@ from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
     generate_sampler,
+    wavy_cavity_polygon,
 )
 from organizer_inserts import (
     EDITOR_SNAP,
@@ -349,6 +350,7 @@ def preview_payload(raw: dict[str, Any]) -> dict[str, Any]:
         {"points": points, "kind": kind, "normal": normal, "layer": layer}
         for points, kind, normal, layer in scene["geometry"]
     ]
+    cavity = wavy_cavity_polygon(box)
     return {
         "design": design_to_dict(
             box, layout, label, part_name, label_location, scoop
@@ -364,6 +366,11 @@ def preview_payload(raw: dict[str, Any]) -> dict[str, Any]:
             "z": scene["z_text"],
         },
         "layout_bounds": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
+        # The true, wavy interior wall - Z-invariant, so one outline covers
+        # the whole cavity - shown in the 2D layout so a full-span divider's
+        # fit against the real wall is visible, not just against the flat
+        # placement rectangle every other support is confined to.
+        "cavity_outline": [[float(x), float(y)] for x, y in cavity.exterior.coords],
         "customization_zones": [
             {"name": name, "zone": [zone.x0, zone.y0, zone.x1, zone.y1]}
             for name, zone in scene["customization_zones"]

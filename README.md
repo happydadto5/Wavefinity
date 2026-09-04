@@ -57,7 +57,10 @@ locally by the browser. Drag to rotate, use the wheel to zoom, and double-click
 to reset. A single pixels-per-millimetre scale is chosen from the available
 width and height, so enlarging the browser makes the model larger without
 stretching it. The 2D tab uses the same rule and supports click-to-select,
-drag-to-move and blue-corner resize.
+drag-to-move and blue-corner resize. It draws the bin's true wavy interior,
+not the flat placement rectangle - that rectangle still shows as a dashed
+reference line, since every non-full-span support has to stay inside it, but
+the wavy outline is what answers "does this actually reach the wall."
 
 Selecting an interior support immediately builds its actual mesh. Parameter
 changes rebuild that draft after a short typing pause, before it is added to the
@@ -245,6 +248,14 @@ stays thickest at the floor — where the sideways push of whatever leans
 against it actually bears — and tapers as it rises, the shape a physical
 gusset uses. Turning `wedge` off gets a uniform-thickness sheared wall
 instead: the same lean, thinner at the base, and the shape that snaps.
+
+Every divider - wedge, straight-leaning or plain vertical - also gets a
+1 mm, 45-degree chamfer where its two long faces meet the floor
+(`DIVIDER_CHAMFER`). It is a pure addition below the wall's stated profile,
+not a substitute for any of it: the lean and thickness the fields describe
+are exactly what is built above that first millimetre. A straight
+(non-leaning) full-span divider does not get one yet - it is built by a
+separate, simpler path that has not been extended to match.
 
 A divider can also be told to run the full width or depth of the bin and
 hug the box's true wavy wall exactly — not the safe straight-sided

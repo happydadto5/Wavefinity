@@ -357,6 +357,29 @@ class AngledDividerTests(unittest.TestCase):
         self.assertTrue((plain.bounds == explicit_zero.bounds).all())
         self.assertAlmostEqual(plain.volume, explicit_zero.volume, places=6)
 
+    def test_the_base_gets_a_45_degree_chamfer_for_strength(self) -> None:
+        zone = Zone(-15.0, -self.thickness / 2.0, 15.0, self.thickness / 2.0)
+        height = 8.0
+        one = Feature("divider", zone, along="x",
+                      options={"thickness": self.thickness, "height": height})
+        mesh = build_features(self.box, [one], self.box.wall)[0]
+        self.assertTrue(mesh.is_watertight)
+        from organizer_inserts import DIVIDER_CHAMFER
+        floor = self.box.wall
+        # flared by the full chamfer at the very floor - 45 degrees means the
+        # horizontal flare equals the 1 mm rise
+        lo, hi = self._cross_section(mesh, floor + 1e-4, "x")
+        self.assertAlmostEqual(hi - lo, self.thickness + 2.0 * DIVIDER_CHAMFER, delta=0.02)
+        # and back to the nominal thickness exactly at chamfer height
+        lo, hi = self._cross_section(mesh, floor + DIVIDER_CHAMFER, "x")
+        self.assertAlmostEqual(hi - lo, self.thickness, places=3)
+
+    def test_a_divider_shorter_than_its_own_chamfer_is_refused(self) -> None:
+        zone = Zone(-15.0, -1.0, 15.0, 1.0)
+        one = Feature("divider", zone, along="x", options={"height": 0.5})
+        with self.assertRaisesRegex(ValueError, "chamfer"):
+            build_features(self.box, [one], self.box.wall)
+
     def test_a_straight_sloped_wall_keeps_uniform_thickness_while_it_leans(
         self,
     ) -> None:
@@ -369,13 +392,20 @@ class AngledDividerTests(unittest.TestCase):
         mesh = build_features(self.box, [one], self.box.wall)[0]
         self.assertTrue(mesh.is_watertight)
         lean = height * math.tan(math.radians(angle))
-        for frac in (0.05, 0.5, 0.95):
+        # fractions kept above the base chamfer (DIVIDER_CHAMFER / height =
+        # 0.125 here), which is a deliberate local exception to "uniform
+        # thickness" covered by its own test below
+        for frac in (0.2, 0.5, 0.95):
             z = self.box.wall + frac * height
             lo, hi = self._cross_section(mesh, z, "x")
             self.assertAlmostEqual(hi - lo, self.thickness, places=3)
             # both faces slide together, proportionally to height
             self.assertAlmostEqual(lo, -self.thickness / 2.0 + frac * lean, places=2)
-        self.assertAlmostEqual(mesh.volume, self.thickness * height * 30.0, places=1)
+        from organizer_inserts import DIVIDER_CHAMFER
+        # the shear does not change the area the chamfer's two 45-degree
+        # corners add (Cavalieri's principle), so it is just chamfer^2 * run
+        chamfer_volume = DIVIDER_CHAMFER ** 2 * 30.0
+        self.assertAlmostEqual(mesh.volume, self.thickness * height * 30.0 + chamfer_volume, places=1)
 
     def test_the_default_wedge_is_thick_at_the_floor_and_tapers_as_it_rises(
         self,
@@ -391,7 +421,7 @@ class AngledDividerTests(unittest.TestCase):
         self.assertTrue(mesh.is_watertight)
         lean = height * math.tan(math.radians(angle))
         back = None
-        for frac in (0.05, 0.5, 0.95):
+        for frac in (0.2, 0.5, 0.95):
             z = self.box.wall + frac * height
             lo, hi = self._cross_section(mesh, z, "x")
             # the back face never moves
@@ -418,7 +448,7 @@ class AngledDividerTests(unittest.TestCase):
         )
         mesh = build_features(self.box, [one], self.box.wall)[0]
         front = None
-        for frac in (0.05, 0.95):
+        for frac in (0.2, 0.95):
             z = self.box.wall + frac * height
             lo, hi = self._cross_section(mesh, z, "x")
             front = hi if front is None else front
@@ -434,7 +464,7 @@ class AngledDividerTests(unittest.TestCase):
         )
         mesh = build_features(self.box, [one], self.box.wall)[0]
         back = None
-        for frac in (0.05, 0.95):
+        for frac in (0.2, 0.95):
             z = self.box.wall + frac * height
             lo, hi = self._cross_section(mesh, z, "y")
             back = lo if back is None else back
@@ -681,7 +711,13 @@ class OtherHoldersTests(unittest.TestCase):
             options={"thickness": 5.0},
         )
         wall = build_features(BIN, [thicker], BIN.wall)[0]
-        self.assertAlmostEqual(wall.bounds[1][1] - wall.bounds[0][1], 5.0, places=6)
+        # the built wall's overall footprint also carries the base chamfer's
+        # flare on top of the 5 mm thickness (see
+        # AngledDividerTests.test_the_base_gets_a_45_degree_chamfer_for_strength)
+        from organizer_inserts import DIVIDER_CHAMFER
+        self.assertAlmostEqual(
+            wall.bounds[1][1] - wall.bounds[0][1], 5.0 + 2.0 * DIVIDER_CHAMFER, places=6
+        )
         self.assertTrue(wall.is_watertight)
 
 

@@ -1,6 +1,42 @@
 # Changelog
 
-## 2026-09-04 — Claude (browser UI pass 2)
+## 2026-09-04 — Claude (browser UI pass 3)
+
+### Added
+
+- **2D layout now draws the box's true wavy interior**, not a plain
+  rectangle. `preview_payload` returns a new `cavity_outline` (the same
+  `wavy_cavity_polygon` the engine itself builds from), and the 2D canvas
+  fills and clips to that shape instead of the flat placement rectangle -
+  which is still drawn, as a dashed reference line, since every
+  non-full-span support still has to stay inside it. This is what makes it
+  possible to see, at a glance, whether a divider actually reaches the real
+  wall or stops short of it.
+- **Every divider gets a 1 mm, 45-degree base chamfer for strength** - both
+  long faces flare out by that much at the floor and taper back to the
+  wall's own line one millimetre up (`DIVIDER_CHAMFER` in
+  `organizer_inserts.py`). It is a pure addition below the wall's stated
+  profile - the lean and thickness above the chamfer are exactly what was
+  asked for - and applies to a plain, wedge, straight-leaning, and even a
+  full-span leaning divider (inherited for free, since that path already
+  builds its oversized wedge through the same function). A straight,
+  non-leaning full-span divider is unaffected: it is built by a separate,
+  simpler clip-and-extrude path this pass did not touch. `build_divider`'s
+  plain-box special case is gone - every non-full-span divider now goes
+  through one function (`_divider_wall`, renamed from `_angled_divider`).
+
+### Investigated, not a bug
+
+- "Changing quantity and clicking Update selected does nothing" -
+  reproduced on cradle and bore with a fresh server: the dirty-check
+  correctly enables Update selected the moment quantity changes, and a
+  rejected edit (e.g. an item too long for a since-shrunk zone) correctly
+  shows a 5-second red toast naming exactly why. Likely explanation: an
+  old server process still running from earlier in this session, predating
+  several of today's fixes - screenshots showed the pre-merge "Customize
+  your bin" section and the old standalone Delete button, both gone in the
+  commit before this one. Restarting the app should resolve it; if not,
+  the toast text is the thing to report back.
 
 ### Changed
 

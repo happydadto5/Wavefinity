@@ -51,6 +51,9 @@ empty, the suites are not testing the things that break.
 | 2026-09-04 | Claude | `unittest` (full suite) | 179 | Nothing | After wiring the auto-size feature end to end. |
 | 2026-09-04 | Claude | `unittest test_wavefinity_web` | 12 | Nothing | Auto-size collapsed to one "Fit to bin" goal (the "quantity" branch and its refusal test are gone, replaced by a slot-specific test that Fit to bin grows both directions and drops a typed count back to automatic), plus the catalog/static-page checks updated for cartridge's removal from the browser and the merged "Advanced bin settings" heading. |
 | 2026-09-04 | Claude | `unittest` (full suite) | 178 | Nothing | After simplifying auto-size to one button, thinning the removable base plate to 0.6 mm, and dropping cartridge from the browser mode list. |
+| 2026-09-04 | Claude | `unittest test_organizer_inserts.AngledDividerTests` | 11 | Caught | Sample fractions of 0.05 (0.4 mm) fell inside the new 1 mm base chamfer on four tests, and the thick-wall/volume assertions on two others predated it - all five needed the chamfer accounted for. New: `test_the_base_gets_a_45_degree_chamfer_for_strength` (flared by the chamfer at the floor, back to nominal exactly one chamfer-height up) and `test_a_divider_shorter_than_its_own_chamfer_is_refused`. |
+| 2026-09-04 | Claude | `unittest test_organizer_inserts.OtherHoldersTests.test_a_thicker_wall_than_the_zone_widens_to_match` | 1 | Caught | Same cause as above - the wall's overall bounding box now includes the chamfer flare, so the expected width needed `+ 2 * DIVIDER_CHAMFER`. |
+| 2026-09-04 | Claude | `unittest` (full suite) | 180 | Nothing | After the divider base chamfer and the 2D layout's wavy cavity outline. |
 
 ## Defects found outside the suites
 

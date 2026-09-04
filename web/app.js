@@ -856,11 +856,24 @@ function renderLayout2D() {
   const toWorld = ([x, y]) => [cx + (x - width / 2) / scale, cy - (y - height / 2) / scale];
   state.layoutTransform = { toCanvas, toWorld, scale };
   const a = toCanvas([bounds[0], bounds[3]]), b = toCanvas([bounds[2], bounds[1]]);
+  const cavity = state.preview.cavity_outline;
+  const cavityPath = new Path2D();
+  if (cavity && cavity.length) {
+    cavity.forEach((point, index) => {
+      const p = toCanvas(point);
+      index === 0 ? cavityPath.moveTo(p[0], p[1]) : cavityPath.lineTo(p[0], p[1]);
+    });
+    cavityPath.closePath();
+  } else {
+    cavityPath.rect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+  }
   context.fillStyle = "#ffffff";
   context.strokeStyle = "#5e7f88";
   context.lineWidth = 2;
-  context.fillRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
-  context.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+  context.fill(cavityPath);
+  context.stroke(cavityPath);
+  context.save();
+  context.clip(cavityPath);
   const pitch = state.design.layout.mode === "cartridge" ? 8 : 1;
   if (pitch * scale >= 8) {
     context.strokeStyle = "rgba(55,96,105,.10)";
@@ -872,6 +885,14 @@ function renderLayout2D() {
       const p = toCanvas([0, y]); context.beginPath(); context.moveTo(a[0], p[1]); context.lineTo(b[0], p[1]); context.stroke();
     }
   }
+  context.restore();
+  // The flat rectangle every non-full-span support must still stay inside,
+  // drawn as a reference against the true wavy wall around it.
+  context.strokeStyle = "rgba(94,127,136,.55)";
+  context.lineWidth = 1;
+  context.setLineDash([4, 3]);
+  context.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+  context.setLineDash([]);
   for (const reserved of state.preview.customization_zones) {
     const r0 = toCanvas([reserved.zone[0], reserved.zone[3]]), r1 = toCanvas([reserved.zone[2], reserved.zone[1]]);
     context.fillStyle = "rgba(201,95,88,.13)";

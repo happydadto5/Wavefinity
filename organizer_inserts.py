@@ -53,6 +53,7 @@ EDITOR_SNAP = 1.0          # normal editor movement; effectively no floor loss
 CARTRIDGE_PITCH = 8.0      # optional interchangeable standalone-insert grid
 MAX_DIVIDER_ANGLE = 45.0   # steepest lean an FDM overhang prints support-free
 MIN_WEDGE_EDGE = 0.4       # thinnest a wedge's tapered top may print
+DIVIDER_CHAMFER = 1.0      # 45-degree foot flare where a divider meets the floor
 LAYOUT_MODES = ("fused", "separate", "cartridge")
 
 # A cradle notch is a half circle: any deeper and the object cannot be dropped
@@ -874,27 +875,19 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
         return _full_span_leaning_divider(
             box, spec_feature, thickness, height, angle, base_z
         )
-    if angle != 0.0:
-        return _angled_divider(box, spec_feature, thickness, height, angle, base_z)
     if spec_feature.full_span:
         cross_centre = centre_y if spec_feature.along == "x" else centre_x
         return _full_span_divider(
             box, spec_feature.along, cross_centre, thickness, base_z, height
         )
-    if spec_feature.along == "x":
-        extents = (zone.width, thickness, height)
-    else:
-        extents = (thickness, zone.depth, height)
-    wall = trimesh.creation.box(extents=extents)
-    wall.apply_translation((centre_x, centre_y, base_z + height / 2.0))
-    return [wall]
+    return _divider_wall(box, spec_feature, thickness, height, angle, base_z)
 
 
-def _angled_divider(
+def _divider_wall(
     box: BoxSpec, spec_feature: Feature, thickness: float, height: float,
     angle: float, base_z: float,
 ) -> list[trimesh.Trimesh]:
-    """A divider leaning up to ``MAX_DIVIDER_ANGLE`` off vertical.
+    """A straight or leaning divider, up to ``MAX_DIVIDER_ANGLE`` off vertical.
 
     A thin wall sheared over bodily at an angle is an unsupported FDM
     overhang with no more material at its base than anywhere else along its
@@ -905,10 +898,21 @@ def _angled_divider(
     tapers away toward the top, the shape a physical gusset or bracket would
     use. ``wedge=False`` gets the plain sheared wall instead: uniform
     thickness throughout, for the rare case that is genuinely wanted.
+
+    Every divider - wedge, straight or plain vertical - also gets a
+    ``DIVIDER_CHAMFER`` 45-degree foot where it meets the floor: the two
+    long faces flare out by that much at ``base_z`` and taper back to the
+    wall's own line by ``DIVIDER_CHAMFER`` above it. It is a pure addition
+    below the wall's nominal profile, not a substitute for any of it, so
+    the lean and thickness above that point are exactly what was asked for.
     """
     if not math.isfinite(angle) or abs(angle) > MAX_DIVIDER_ANGLE:
         raise ValueError(
             f"a divider's angle must be within {MAX_DIVIDER_ANGLE:g} degrees of vertical"
+        )
+    if height <= DIVIDER_CHAMFER:
+        raise ValueError(
+            f"a divider must stand taller than its {DIVIDER_CHAMFER:g} mm base chamfer"
         )
     zone = spec_feature.zone
     centre_x, centre_y = zone.centre
@@ -930,9 +934,17 @@ def _angled_divider(
             )
     else:
         top_low, top_high = base_low + lean, base_high + lean
+    # Where the wall's own (un-chamfered) line would sit at chamfer height -
+    # the chamfer's inner edge lands exactly here, so the taper above it is
+    # untouched.
+    frac = DIVIDER_CHAMFER / height
+    chamfer_low = base_low + frac * (top_low - base_low)
+    chamfer_high = base_high + frac * (top_high - base_high)
+    chamfer_z = base_z + DIVIDER_CHAMFER
     profile = Polygon([
-        (base_low, base_z), (base_high, base_z),
-        (top_high, base_z + height), (top_low, base_z + height),
+        (base_low - DIVIDER_CHAMFER, base_z), (base_high + DIVIDER_CHAMFER, base_z),
+        (chamfer_high, chamfer_z), (top_high, base_z + height),
+        (top_low, base_z + height), (chamfer_low, chamfer_z),
     ])
     if not profile.is_valid:
         raise ValueError("that divider angle and thickness do not form a valid wall")
@@ -959,9 +971,10 @@ def _full_span_leaning_divider(
     no longer flat, or even the same shape at every height, so the 2D
     polygon-clip the plain full-span divider uses no longer applies on its
     own. This instead builds the oversized leaning wedge as a real 3D solid
-    - exactly what ``_angled_divider`` already builds, just wider - and
-    intersects it against the box's actual interior volume, the same
-    boolean a standalone insert is already trimmed to its footprint with.
+    - exactly what ``_divider_wall`` already builds (base chamfer included),
+    just wider - and intersects it against the box's actual interior
+    volume, the same boolean a standalone insert is already trimmed to its
+    footprint with.
     """
     along = spec_feature.along
     half_run = (box.half_x if along == "x" else box.half_y) + 2.0 * WAVE_AMPLITUDE
@@ -972,7 +985,7 @@ def _full_span_leaning_divider(
         if along == "x" else
         Zone(zone.x0, centre_y - half_run, zone.x1, centre_y + half_run)
     )
-    wedge = _angled_divider(
+    wedge = _divider_wall(
         box, replace(spec_feature, zone=oversized_zone), thickness, height,
         angle, base_z,
     )[0]
@@ -1160,13 +1173,17 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
     thickness = options.get("thickness", 0.0)
     angle = options.get("angle", 0.0)
     lean = abs(options["height"] * math.tan(math.radians(angle))) if angle else 0.0
+    # The base chamfer comes from _divider_wall, used by every divider except
+    # a straight (non-leaning) full-span one, which is built by a separate,
+    # simpler clip-and-extrude path with no chamfer (see build_divider).
+    chamfer = 0.0 if (one.full_span and angle == 0.0) else DIVIDER_CHAMFER
     if one.along == "x":
         centre = (zone.y0 + zone.y1) / 2.0
-        half = max((zone.y1 - zone.y0) / 2.0, thickness / 2.0) + lean
+        half = max((zone.y1 - zone.y0) / 2.0, thickness / 2.0) + lean + chamfer
         zone = Zone(zone.x0, centre - half, zone.x1, centre + half)
     else:
         centre = (zone.x0 + zone.x1) / 2.0
-        half = max((zone.x1 - zone.x0) / 2.0, thickness / 2.0) + lean
+        half = max((zone.x1 - zone.x0) / 2.0, thickness / 2.0) + lean + chamfer
         zone = Zone(centre - half, zone.y0, centre + half, zone.y1)
     return zone
 
