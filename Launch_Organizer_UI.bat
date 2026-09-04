@@ -29,12 +29,16 @@ if errorlevel 1 (
 )
 
 if /i "%~1"=="--check" (
-    "%ORGANIZER_PY%" -c "import organizer_app; print('Organizer launcher ready')"
+    "%ORGANIZER_PY%" -c "import organizer_app, wavefinity_web; print('Organizer launcher ready')"
     if errorlevel 1 exit /b 1
     exit /b 0
 )
 
-"%ORGANIZER_PY%" organizer_app.py ui
+if /i "%~1"=="--desktop" (
+    "%ORGANIZER_PY%" organizer_app.py ui
+) else (
+    "%ORGANIZER_PY%" wavefinity_web.py
+)
 set "ORGANIZER_EXIT=%errorlevel%"
 if not "%ORGANIZER_EXIT%"=="0" pause
 exit /b %ORGANIZER_EXIT%

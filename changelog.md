@@ -2,6 +2,45 @@
 
 Notable Wavefinity changes are recorded here by date and author.
 
+## 2026-09-04 — Codex
+
+### Added
+
+- Added a dependency-free local browser application backed by the existing
+  Python geometry engine. It includes the complete Build, Customize and Label
+  sections; live Python-generated support meshes; responsive 3D and 2D views;
+  drag/zoom/reset camera controls; drag/resize layout editing; support
+  add/update/delete; mode conversion; design save/open; and bin, connector and
+  sampler generation.
+- Added a small JSON API for catalog, design validation, preview, holder drafts,
+  layout edits and exports. Browser state uses the existing versioned
+  `.wavefinity.json` schema rather than introducing a second design model.
+- Added `Launch_Organizer_Desktop.bat` as an explicit Tkinter fallback.
+- Added browser/API contract tests covering static delivery, all registered
+  supports, real parameter-driven geometry, layout editing, mode conversion,
+  preview metadata, validation errors and cross-origin request rejection.
+
+### Changed
+
+- `Launch_Organizer_UI.bat` now opens the local browser app by default while
+  preserving `--desktop` and `--check` behavior.
+- Both browser previews use one uniform scale, so resizing makes the geometry
+  larger or smaller without changing its proportions.
+
+### Security
+
+- The service binds to loopback by default, requires JSON for API calls, rejects
+  foreign browser origins, prevents directory traversal in static files, and
+  sends a restrictive content-security policy and same-origin resource policy.
+
+### Validation
+
+- Exercised the application in a Chromium browser at narrow and wide responsive
+  sizes. Confirmed live dimension changes, live holder parameters, holder
+  placement, top-label and scoop validation, removable-mode conversion, 2D
+  layout rendering, design download feedback, and a real two-file `.3mf`
+  organizer export. No browser console errors remained.
+
 ## 2026-09-03 — Codex (later)
 
 ### Fixed

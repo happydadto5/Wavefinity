@@ -31,6 +31,9 @@ empty, the suites are not testing the things that break.
 | 2026-09-03 | Claude | `unittest test_organizer_app test_organizer_inserts` | 179 | Nothing | Both suites, after the resolved-option defaults, live parameter editing, the delete fallback and the callout layout fix. |
 | 2026-09-03 | Codex | `unittest test_organizer_app.PartDiagramTests test_organizer_app.DesktopUiTests.test_parameter_typing_redraws_the_actual_part_before_it_is_added test_organizer_app.DesktopUiTests.test_choosing_a_shape_draws_it_with_a_field_beside_each_parameter` | 7 | Nothing | Focused verification of uniform diagram scaling, actual-geometry redraws and parameter callouts. |
 | 2026-09-03 | Codex | `unittest` | 182 | Nothing | Complete suite after the proportional, live holder-diagram and divider-orientation fixes. |
+| 2026-09-04 | Codex | `unittest test_wavefinity_web` | 8 | Caught | Initial live-browser startup exposed two arrays that mixed selector strings with DOM elements and called `addEventListener` on the strings. Corrected both, then verified the API, security boundary and static application contract. |
+| 2026-09-04 | Codex | Browser QA plus real organizer export | — | Caught | Verified narrow and wide responsive layouts, parameter-driven draft geometry, support placement, label/scoop conflict feedback, mode conversion, 2D layout and browser-triggered `.3mf` generation. Caught the disabled Add button after an asynchronous draft load; the selection state now refreshes when the real draft arrives. Browser console finished with no errors or warnings. |
+| 2026-09-04 | Codex | `unittest` | 190 | Nothing | Complete geometry, insert, desktop UI and browser/API suite after the browser migration and hardening pass. |
 
 ## Defects found outside the suites
 

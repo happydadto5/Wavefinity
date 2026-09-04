@@ -1,9 +1,9 @@
 # Wavefinity — wavy drawer organizer generator
 
 Parametric Python generator for a 3D-printable modular drawer organizer with
-**wavy walls that interlock** and configurable holders inside. The desktop UI,
-command-line interface, fit sampler and tests share the same box, insert and
-export engines.
+**wavy walls that interlock** and configurable holders inside. The local browser
+UI, desktop fallback, command-line interface, fit sampler and tests share the
+same Python box, insert and export engines.
 
 The basic system has a box and one **connector** — a small staple that joins two
 boxes across their shared seam. Holders can be fused into the box, printed as a
@@ -21,15 +21,20 @@ See [changelog.md](changelog.md) for dated implementation changes, and
 ## Quick start
 
 Double-click `Launch_Organizer_UI.bat`. On its first run it creates a private
-`.venv` beside the app, installs the pinned geometry packages, and opens the UI.
-Later launches reuse that environment.
+`.venv` beside the app, installs the pinned geometry packages, starts the local
+Wavefinity service, and opens the browser interface. Later launches reuse that
+environment. The service listens only on `127.0.0.1`; it is not hosted on the
+internet and the browser never replaces the Python geometry engine.
+
+The original Tkinter interface remains available as a fallback through
+`Launch_Organizer_Desktop.bat`, or with `Launch_Organizer_UI.bat --desktop`.
 
 Manual setup instead:
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install lib3mf==2.5.0 lxml==6.1.2 manifold3d==3.5.2 mapbox-earcut==2.0.0 matplotlib==3.11.1 networkx==3.6.1 numpy==2.5.2 shapely==2.1.2 trimesh==5.0.0
-.venv\Scripts\python.exe organizer_app.py ui
+.venv\Scripts\python.exe wavefinity_web.py
 ```
 
 Those nine pins are the whole dependency list. `matplotlib` is not optional — it
@@ -43,9 +48,36 @@ They take about two minutes; boolean operations dominate. **Log every run in
 [TESTING.md](TESTING.md)** — the result, and whether it caught anything. Runs
 that find nothing get logged too; that is how the file earns its keep.
 
-### Using the UI
+### Using the browser UI
 
-The controls are grouped by intent: **Build your bin** holds dimensions and the
+The page is split between intent-based controls and a large responsive
+workspace. **Build your bin** contains the dimensions, print mode and interior
+support editor. **Customize your bin** contains the scoop and advanced physical
+settings. **Label your bin** contains the label position and part filename.
+
+The 3D preview is real camera-independent geometry returned by Python and drawn
+locally by the browser. Drag to rotate, use the wheel to zoom, and double-click
+to reset. A single pixels-per-millimetre scale is chosen from the available
+width and height, so enlarging the browser makes the model larger without
+stretching it. The 2D tab uses the same rule and supports click-to-select,
+drag-to-move and blue-corner resize.
+
+Selecting an interior support immediately builds its actual mesh. Parameter
+changes rebuild that draft after a short typing pause, before it is added to the
+layout. **Add support** finds open floor space; selecting a placed support loads
+it back into the same editor for exact changes. Invalid dimensions, overlaps,
+reserved scoop/label space, and labels that cannot fit are reported beside the
+preview and refused at export.
+
+**Save design** downloads the existing `.wavefinity.json` format, and **Open
+design** validates that format through Python before using it. Generated `.3mf`
+files are written to the shown output folder. The browser API is same-origin
+only, accepts JSON only, and applies a restrictive content-security policy so
+an unrelated web page cannot invoke local file generation.
+
+### Using the desktop fallback
+
+The desktop controls are grouped by intent: **Build your bin** holds dimensions and the
 insert form, **Customize your bin** holds the curved scoop and advanced physical
 settings, and **Label your bin** holds the label, its Bottom/Top toggle, and the
 part name used in filenames. Numbers get a large stepper either side rather

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wavefinity</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">PARAMETRIC ORGANIZER</p>
+      <h1>Wavefinity</h1>
+    </div>
+    <div class="header-actions">
+      <span id="connection" class="connection">Starting…</span>
+      <button id="new-design" class="button secondary">New</button>
+      <button id="save-design" class="button secondary">Save design</button>
+      <label class="button secondary file-button">Open design<input id="open-design" type="file" accept=".json,.wavefinity.json"></label>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="controls" aria-label="Bin controls">
+      <section class="control-section open" data-section="build">
+        <button class="section-heading" aria-expanded="true">
+          <span><small>01</small> Build your bin</span><span class="chevron">⌄</span>
+        </button>
+        <div class="section-body">
+          <div class="field-grid three">
+            <label>Width X <span class="unit">8 mm units</span><input id="x-units" type="number" min="1" step="1"></label>
+            <label>Depth Y <span class="unit">8 mm units</span><input id="y-units" type="number" min="1" step="1"></label>
+            <label>Height <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
+          </div>
+          <p id="inside-size" class="measurement"></p>
+
+          <fieldset class="mode-fieldset">
+            <legend>How should the interior print?</legend>
+            <div id="mode-options" class="segmented three"></div>
+          </fieldset>
+
+          <div class="subheading-row">
+            <div><h2>Interior supports</h2><p>Pick a shape, set its fit, then place it.</p></div>
+            <span id="support-count" class="count-badge">0 placed</span>
+          </div>
+          <div id="support-palette" class="support-palette" role="list"></div>
+
+          <div class="support-editor">
+            <div class="editor-title">
+              <div><span class="step">2</span><strong id="draft-title">Set parameters</strong></div>
+              <span id="draft-status" class="quiet-status"></span>
+            </div>
+            <p id="draft-description" class="muted"></p>
+            <canvas id="draft-preview" aria-label="Live support preview"></canvas>
+            <div id="draft-fields" class="draft-fields"></div>
+            <div class="button-row">
+              <button id="add-support" class="button primary">Add support</button>
+              <button id="update-support" class="button secondary" disabled>Update selected</button>
+              <button id="delete-support" class="button danger" disabled>Delete</button>
+            </div>
+          </div>
+
+          <div class="placed-block">
+            <h3>Placed supports</h3>
+            <div id="placed-supports" class="placed-supports"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="control-section open" data-section="customize">
+        <button class="section-heading" aria-expanded="true">
+          <span><small>02</small> Customize your bin</span><span class="chevron">⌄</span>
+        </button>
+        <div class="section-body">
+          <label class="check-card">
+            <input id="scoop" type="checkbox">
+            <span><strong>Add curved scoop</strong><small>Rises halfway up the front wall for easy access to small parts.</small></span>
+          </label>
+          <details class="advanced">
+            <summary>Advanced physical settings</summary>
+            <div class="field-grid two">
+              <label>Wall / floor <span class="unit">mm</span><input id="wall" type="number" min="0.4" step="0.1"></label>
+              <label>Flat wall band <span class="unit">0–1 mm</span><input id="flat-inside" type="number" min="0" max="1" step="0.1"></label>
+              <label>Connector tolerance <span class="unit">mm</span><input id="connector-tolerance" type="number" min="0" max="1" step="0.01"></label>
+              <label>Connector height <span class="unit">mm</span><input id="connector-height" type="number" min="2" step="0.1"></label>
+              <label>Connector length <span class="unit">mm</span><input id="connector-length" type="number" min="2" step="1"></label>
+              <label>Connector position <span class="unit">mm</span><input id="connector-position" type="number" step="2"></label>
+            </div>
+            <fieldset>
+              <legend>Connector wall direction</legend>
+              <div class="segmented two">
+                <label><input type="radio" name="connector-axis" value="x"><span>X wall</span></label>
+                <label><input type="radio" name="connector-axis" value="y" checked><span>Y wall</span></label>
+              </div>
+            </fieldset>
+          </details>
+        </div>
+      </section>
+
+      <section class="control-section open" data-section="label">
+        <button class="section-heading" aria-expanded="true">
+          <span><small>03</small> Label your bin</span><span class="chevron">⌄</span>
+        </button>
+        <div class="section-body">
+          <label>Label text<input id="label-text" type="text" maxlength="80" placeholder="e.g. M3 BOLTS"></label>
+          <fieldset>
+            <legend>Label position</legend>
+            <div class="segmented two">
+              <label><input type="radio" name="label-position" value="bottom" checked><span>Bottom label</span></label>
+              <label><input type="radio" name="label-position" value="top"><span>Top label</span></label>
+            </div>
+          </fieldset>
+          <p id="label-help" class="field-help">Inlaid into the floor and moved around supports automatically.</p>
+          <label>Part name <span class="unit">filename only</span><input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>
+        </div>
+      </section>
+
+      <section class="output-panel">
+        <label>Output folder<input id="output-folder" type="text"></label>
+        <button id="generate-bin" class="button primary wide">Generate bin files</button>
+        <div class="button-row equal">
+          <button id="generate-connector" class="button secondary">Generate connector</button>
+          <button id="generate-sampler" class="button secondary">Generate sampler</button>
+        </div>
+        <label class="sampler-row">Sampler boxes<input id="sampler-boxes" type="text" aria-label="Sampler box sizes"></label>
+      </section>
+    </aside>
+
+    <section class="workspace" aria-label="Design preview">
+      <div class="workspace-toolbar">
+        <div class="view-tabs" role="tablist">
+          <button class="view-tab active" data-view="3d" role="tab" aria-selected="true">3D preview</button>
+          <button class="view-tab" data-view="2d" role="tab" aria-selected="false">2D layout</button>
+        </div>
+        <div class="preview-hint"><span id="preview-state">Building preview…</span><span>Drag to rotate · Wheel to zoom · Double-click to reset</span></div>
+      </div>
+      <div class="canvas-wrap active" data-canvas="3d">
+        <canvas id="preview-3d" aria-label="Interactive 3D preview"></canvas>
+        <div id="dimensions" class="dimensions"></div>
+      </div>
+      <div class="canvas-wrap" data-canvas="2d">
+        <canvas id="preview-2d" aria-label="Interactive top-down layout"></canvas>
+        <div class="layout-hint">Click a support to edit it. Drag to move; drag the blue corner to resize.</div>
+      </div>
+      <div id="error-panel" class="error-panel" hidden></div>
+      <div class="workspace-footer">
+        <p id="design-summary">No supports placed</p>
+        <p>All geometry is generated by the tested Python engine.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
