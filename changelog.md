@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026-09-04 — Claude (browser UI pass)
+
+### Fixed
+
+- The 3D/2D preview could grow far taller than the viewport and run off
+  the bottom, with the floor painting mostly white. Root cause was a
+  circular height dependency: `.app-shell` set only `min-height`, so
+  `.workspace`'s `minmax(500px, 1fr)` canvas row had no definite height to
+  resolve against, and the canvas's own pixel-buffer size fed back into
+  that same calculation. `.app-shell` now gets a firm `height`, both
+  columns get `min-height: 0` so they can actually shrink to their track,
+  and the mobile stacked layout gets its own explicit height instead of
+  inheriting the desktop one.
+- Switching Fused/Removable/Cartridge did change the preview - confirmed
+  by directly reading back `kindColor()` - but the insert tint (a 30%
+  blend) was too close to each holder's own hue to read as "changed" at a
+  glance. Raised to 50%.
+- The mode-description text sat directly against the segmented control
+  above it (`.field-help` had a *negative* top margin), reported as
+  "overlapping."
+
+### Changed
+
+- Left settings column widened from a 430px cap to 690px (+60%); the
+  preview column gives up the difference.
+- "Build your bin" / "Customize your bin" / "Label your bin" lost their
+  01/02/03 prefixes and gained a bolder 3px divider between them.
+- "Width X" / "Depth Y" are now "Units X" / "Units Y"; the per-field
+  "8 mm units" caption is gone, replaced by one "(unit = 8 mm)" note next
+  to the "Build your bin" heading.
+- The bin-size readout ("16mm (13 inside) wide...") is larger and bolder.
+  Number-input spin buttons are forced visible (`opacity: 1`) rather than
+  hover-only.
+- Removed the "Live geometry" status text (silent on success, matching
+  every other status line in the app) and the description paragraphs
+  under Bottom/Top label.
+- "Part name" is now "Part Name (For file)"; the "filename only" caption
+  is gone.
+- Removed the "Sampler boxes" field - the sample plate is a fixed set of
+  sizes, matching what the README already said.
+- Quantity is now a real number field with an adjacent **Auto** button
+  that clears it back to "let the builder fit as many as possible,"
+  instead of a text field where typing the word "auto" was the only way in.
+- **Update selected** is now enabled only when the draft actually differs
+  from the placed feature it came from (a `JSON.stringify` comparison
+  against a snapshot taken at selection time), not merely because
+  something is selected - it no longer lights up from clicking a support
+  in the 2D layout alone.
+- **Output folder** is now sticky: a new `POST /api/preferences` route
+  writes it to `wavefinity_prefs.json` next to the app (gitignored, a
+  per-machine file, not browser storage - it survives a different browser
+  or a cleared profile because the *server* owns it), and the catalog
+  response returns the saved value on the next load.
+
+### Not done - see the reply for why
+
+The two "auto-size" buttons requested above the parameter fields (one
+sizing a support to fill the bin, one guessing a size from quantity) need
+real per-kind design decisions this session asked about rather than
+guessed at; not implemented yet.
+
 ## 2026-09-04 — Claude (latest)
 
 ### Added
