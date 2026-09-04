@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026-09-04 — Claude (latest)
+
+### Added
+
+- Added a lean to the divider holder: an `angle` option (±45°, the standard
+  support-free FDM overhang limit) and a `wedge` shape flag
+  (`organizer_inserts.py`, `Feature.wedge`, default `True`), plus the
+  browser field to drive both.
+  - **Wedge (default)**: the back face stays vertical; only the leaning face
+    slopes, so the wall is thickest at the floor - where the sideways push
+    of whatever leans against it actually bears - and tapers as it rises,
+    the same shape a physical gusset uses.
+  - **Straight**: both faces shear together, uniform thickness the whole way
+    up, with no extra material at the base. Deliberately the weaker,
+    opt-in option; it is exactly the "easy to break" shape the wedge exists
+    to avoid.
+  - Verified geometrically, not just that it builds: sliced the actual solid
+    at several heights and confirmed the straight wall holds its stated
+    thickness everywhere while sliding, and the wedge's back face never
+    moves while its front face narrows linearly to
+    `thickness − height·tan(angle)` at the top - and uses measurably less
+    material than the straight wall spanning the same lean. Negative angles
+    mirror correctly, `along="y"` mirrors `along="x"`, angles past ±45° and
+    wedges tapered past their own thickness are refused with a clear
+    message, and both fields round-trip through the saved-design schema
+    with safe defaults for older files.
+  - Wired into the browser editor: an "Angle °" field beside the divider's
+    existing Height/Wall fields, and a Wedge/Straight toggle next to it that
+    explains the trade-off inline. Uses the same resolve-for-display,
+    write-only-on-edit pattern as every other option field, so an
+    unedited angle keeps showing the live resolved default instead of a
+    frozen number.
+  - A full-span divider can lean too (`_full_span_leaning_divider`).
+    Originally shipped as a refusal, on the assumption that combining "hug
+    the true wavy wall" with "lean at an angle" would need the wall
+    intersection done one height-slice at a time. It doesn't: the same
+    oversized wedge `_angled_divider` already builds, generously widened in
+    the run direction, intersects directly against the box's real 3D
+    interior volume - one boolean, not a slice per height - and the result
+    hugs the wave correctly in both directions at once, because the lean
+    only moves the wedge's *cross*-axis position and the wave only varies
+    along its *run* axis; the two never fight over the same coordinate.
+    Verified by sampling several (position-across-the-lean, height) points
+    directly, not just each height's overall bounding box, and comparing
+    each to the wall's true boundary at that exact point: zero gap to mesh
+    precision, at every one of them.
+
+### Fixed
+
+- A divider's "Wall mm" (its real thickness) could be refused outright for
+  being wider than "Depth" - the footprint rectangle the editor happened to
+  draw, a separate number that was never kept in step with it. Caught live
+  in the browser testing the wedge above: the default 2 mm footprint
+  rejected any wedge thick enough to actually work. A divider has always
+  built from its own `thickness` option on the cross axis, not from the
+  zone (`build_divider` has never used `zone.depth` there); `_feature_reach`
+  now says so explicitly and widens to whichever is bigger, instead of
+  treating the disagreement as an escaped builder. The browser editor keeps
+  the two in step going forward: typing a new "Wall mm" widens the shown
+  Width/Depth field to match, live, rather than leaving it to fall behind.
+
 ## 2026-09-04 — Codex
 
 - Completed the browser-only transition: removed the obsolete Tkinter launcher

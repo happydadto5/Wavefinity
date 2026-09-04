@@ -73,11 +73,38 @@ WEB_ROOT = APP_DIR / "web"
 DEFAULT_OUTPUT = APP_DIR / "generated"
 SERVER_VERSION = "1"
 GEOMETRY_LOCK = threading.RLock()
+PREFERENCES_FILE = APP_DIR / "wavefinity_prefs.json"
+PREFERENCES_LOCK = threading.RLock()
 
 
 def default_design() -> dict[str, Any]:
     box = BoxSpec(x=2 * BASE_UNIT, y=6 * BASE_UNIT, z=40.0)
     return design_to_dict(box, Layout((), "fused", EDITOR_SNAP))
+
+
+def load_preferences() -> dict[str, Any]:
+    """Small local settings that should survive between browser sessions.
+
+    A plain JSON file next to the app, not browser storage - the output
+    folder is a filesystem path the *server* writes to, so it belongs with
+    the server, and stays put across a different browser or a cleared
+    profile.
+    """
+    try:
+        with PREFERENCES_LOCK:
+            return json.loads(PREFERENCES_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_preferences(update: dict[str, Any]) -> dict[str, Any]:
+    with PREFERENCES_LOCK:
+        current = load_preferences()
+        current.update(update)
+        PREFERENCES_FILE.write_text(
+            json.dumps(current, indent=2) + "\n", encoding="utf-8"
+        )
+        return current
 
 
 def _json_value(value: Any) -> Any:
@@ -216,7 +243,15 @@ def catalog_payload() -> dict[str, Any]:
             },
             "sampler_boxes": DEFAULT_SAMPLE_BOXES,
         },
+        "preferences": load_preferences(),
     }
+
+
+def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    update: dict[str, Any] = {}
+    if "output" in payload:
+        update["output"] = str(payload["output"])
+    return {"preferences": save_preferences(update)}
 
 
 def _design(raw: dict[str, Any]) -> tuple[BoxSpec, Layout, str, str, str, bool]:
@@ -433,6 +468,7 @@ POST_ROUTES = {
     "/api/generate": generate_payload,
     "/api/connector": connector_payload,
     "/api/sampler": sampler_payload,
+    "/api/preferences": preferences_payload,
 }
 
 

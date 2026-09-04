@@ -13,12 +13,8 @@ There is no corner connector.
 Everything below is millimetres. This is the whole documentation for the
 project: design, rationale, measured evidence, and the traps.
 
-See [changelog.md](changelog.md) for dated implementation changes,
-[TESTING.md](TESTING.md) for the log of what each test run actually found, and
-[BROWSER_MIGRATION_REVIEW.md](BROWSER_MIGRATION_REVIEW.md) for the architecture,
-security, evidence, known limitations, outside-review checklist and audit
-resolution. The independent review response is preserved in
-[BROWSER_MIGRATION_REVIEW_REPLY.md](BROWSER_MIGRATION_REVIEW_REPLY.md).
+See [changelog.md](changelog.md) for dated implementation changes and
+[TESTING.md](TESTING.md) for the log of what each test run actually found.
 
 ---
 
@@ -139,6 +135,63 @@ itself, briefly reading *Saved* when it has written the file, so nothing takes
 up a line saying "Ready" for the 99% of the time it has nothing to report. A
 failure still raises a dialog, because it needs acting on.
 
+### The browser service
+
+`wavefinity_web.py` is a dependency-free `http.server` wrapper, nothing more:
+
+```text
+Browser UI (HTML/CSS/JavaScript)
+              |
+       same-origin JSON
+              |
+Local loopback service (Python standard library)
+              |
+Existing design, validation, mesh and 3MF export modules
+```
+
+It is a stateless translation layer — every request carries the complete
+design, every response uses the same versioned `.wavefinity.json` schema the
+CLI and saved files already use. Nothing about the geometry, validation or
+export changed to add it; the browser is a new consumer of the existing
+engine, not a reimplementation of it. It binds to `127.0.0.1:8765` by
+default and is never exposed to the network.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/health` | Identify an existing Wavefinity server. |
+| `GET /api/catalog` | Registered supports, modes and initial values. |
+| `POST /api/preview` | Validate a design and return camera-independent geometry. |
+| `POST /api/design/validate` | Validate and normalize a saved design. |
+| `POST /api/feature/default` | Create an engine-derived support draft. |
+| `POST /api/feature/draft` | Build actual mesh faces for live parameter preview. |
+| `POST /api/feature/apply` | Snap, validate, add or update a support. |
+| `POST /api/feature/delete` | Remove a support. |
+| `POST /api/layout/mode` | Convert a layout between print modes. |
+| `POST /api/generate` | Generate the organizer parts. |
+| `POST /api/connector` | Generate a connector. |
+| `POST /api/sampler` | Generate the fit sampler. |
+
+**Security boundary**, since the service writes files: loopback binding
+only; POST routes require `application/json` and reject a foreign `Origin`;
+static file paths resolve beneath `web/`, blocking traversal; every response
+carries `nosniff` and same-origin resource policy, the static page also gets
+`no-referrer` and a same-origin-only content-security-policy; request bodies
+are capped at 25 MB; no cookies, accounts, credentials or telemetry. The
+output-folder field intentionally lets the local user pick any writable
+path — that is application function, not a sandbox escape. Mesh boolean
+operations run behind a process-wide lock, serializing geometry work rather
+than risking concurrent calls into the mesh backend — fine for one local
+user, not a multi-user server design.
+
+**Known limitations:** no standalone browser/DOM test suite yet — Python API
+contracts and JavaScript syntax are covered by `test_wavefinity_web.py` and
+`node --check`, interactive QA is manual. A very dense design (many
+cradle/nest/bore supports at once) serializes a large triangle payload to
+the browser; camera motion stays client-side and fast regardless, but the
+initial load is heavier. **Save design** relies on the browser's own
+download prompt, which some browser-automation tools cannot observe as an
+event — a real browser session shows it normally.
+
 ---
 
 ## The design
@@ -160,9 +213,28 @@ many.
 | `nest` | Snug, support-free top-down recess following every measured item segment | `depth`, `height`, `wall` |
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
-| `divider` | One straight subdividing wall along X or Y | `height`, `thickness` |
+| `divider` | One straight or leaning subdividing wall along X or Y | `height`, `thickness`, `angle` |
 | `pocket` | Raised rectangular tray with a recessed centre | `height`, `depth`, `wall` |
 | `slot` | Parallel grooves for cards, blades or other flat items | `width`, `height`, `depth`, `wall` |
+
+A divider can lean up to **45 degrees** off vertical — the standard
+support-free FDM overhang limit — for holding what it stores at an angle
+instead of straight up. `angle` is signed (negative leans the other way). A
+second flag, `wedge` (default **on**), picks the cross-section: a wedge
+keeps its back face vertical and only the leaning face slopes, so the wall
+stays thickest at the floor — where the sideways push of whatever leans
+against it actually bears — and tapers as it rises, the shape a physical
+gusset uses. Turning `wedge` off gets a uniform-thickness sheared wall
+instead: the same lean, thinner at the base, and the shape that snaps.
+
+A divider can also be told to run the full width or depth of the bin and
+hug the box's true wavy wall exactly — not the safe straight-sided
+rectangle every other holder is confined to, which would leave a visible
+gap at most points along the wall. This `full_span` option (engine-level,
+not yet exposed as a browser field) works together with a lean: the two
+combine into one 3D boolean intersection against the bin's real interior
+volume, so a leaning full-span divider hugs the wave in both directions at
+once.
 
 Builder options are intentionally generic. The editor passes them to the
 registered builder, so a future `@feature` function can add its own settings
@@ -393,23 +465,34 @@ really do interlock and take a clip at every seam.
 
 ## Code layout
 
-There are three live source modules and two test modules. Nothing here is legacy
-or superseded:
+Four live Python modules and three test modules. Nothing here is legacy or
+superseded — the old Tkinter desktop UI was fully removed once the browser
+replaced it:
 
 | File | Role | Entry point? |
 |---|---|---|
 | `organizer_engine.py` | Wavy boxes, connectors, labels, mesh validation and 3MF/STL export. | No. |
 | `organizer_inserts.py` | Item/segment model, zones, 1 mm and cartridge layouts, JSON persistence, holder registry, seven builders, and fused/removable assembly. | No. |
-| `organizer_app.py` | CLI, exporters, validation and shared browser-service helpers. | Yes, for CLI subcommands. |
-| `test_organizer_app.py` | Box, connector, label, preview, editor, CLI and export regressions. | Only via `python -m unittest`. |
+| `organizer_app.py` | CLI, exporters, validation and the catalog/defaults the browser service reads. | Yes, for CLI subcommands. |
+| `wavefinity_web.py` | The local HTTP service — see [The browser service](#the-browser-service). | Yes, the default UI launch target. |
+| `test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest`. |
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
+| `test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest`. |
 
-`TESTING.md` is the running log of what those two suites have caught, alongside
-the defects that got past them. It exists to answer a fair question - whether
-two minutes a run is buying anything - with evidence instead of a feeling.
+`web/index.html`, `web/styles.css` and `web/app.js` are the browser front
+end: plain HTML/CSS and dependency-free JavaScript, no build step. `app.js`
+holds all client state and API calls; it never computes geometry itself —
+every preview, validation and export result comes from a `wavefinity_web.py`
+call into the same engine the CLI uses.
 
-Dependencies run one way: the insert module imports the geometry engine, and the
-app imports both. Neither library imports the app.
+`TESTING.md` is the running log of what those three suites have caught,
+alongside the defects that got past them. It exists to answer a fair
+question - whether two minutes a run is buying anything - with evidence
+instead of a feeling.
+
+Dependencies run one way: the insert module imports the geometry engine, the
+app imports both, and the web service imports all three. Nothing is imported
+back the other way.
 
 Two things worth knowing before tidying anything up:
 
@@ -423,7 +506,7 @@ Non-Python files:
 
 | File | What |
 |---|---|
-| `Launch_Organizer_UI.bat` | bootstraps `.venv`, installs the pinned packages, opens the UI |
+| `Launch_Organizer_UI.bat` | bootstraps `.venv`, installs the pinned packages, starts `wavefinity_web.py`, opens the browser |
 | `generated/WAVY_SAMPLE_SET.3mf` | regenerable local sample print plate; intentionally gitignored |
 
 ## Working on this
@@ -431,9 +514,13 @@ Non-Python files:
 This project is developed locally, mostly by prompting an LLM. GitHub is a
 **backup and a record of what changed** — it is not a review gate.
 
-**Commit straight to `main` and push.** No feature branches, no pull requests.
-After a change is finished and the tests pass, commit it and push it, so the
-history has a real entry for it and the work is backed up:
+**One prompt may become one cohesive commit.** Keep all code, tests, and
+documentation needed to complete that prompt together; do not split a single
+request into artificial commits just to make the history look smaller. When a
+prompt is complete and its tests pass, commit and push it so the history has a
+clear entry and the work is backed up. Separate unrelated prompts into separate
+commits when practical. No feature branches or pull requests are needed for
+this local workflow:
 
 ```powershell
 .venv\Scripts\python.exe -m unittest

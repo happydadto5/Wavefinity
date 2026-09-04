@@ -4,3 +4,6 @@ __pycache__/
 
 # UI output, regenerable
 generated/
+
+# per-machine local settings, not shared
+wavefinity_prefs.json

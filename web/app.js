@@ -18,7 +18,7 @@ const state = {
   draftRequest: 0,
   output: "",
   connector: {},
-  samplerBoxes: "",
+  selectedOriginal: null,
   layoutDrag: null,
   layoutTransform: null,
   designMutationBusy: false,
@@ -32,7 +32,7 @@ const COLORS = {
   divider: "#9d86c8", pocket: "#d4778c", slot: "#d5b84d",
 };
 const INSERT_TINT = "#c2a075";
-const INSERT_TINT_MIX = .3;
+const INSERT_TINT_MIX = .5;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -171,14 +171,12 @@ function syncForm() {
   const labelPosition = $(`input[name="label-position"][value="${state.design.label_position}"]`);
   if (labelPosition) labelPosition.checked = true;
   $("#output-folder").value = state.output;
-  $("#sampler-boxes").value = state.samplerBoxes;
   $("#connector-tolerance").value = fmt(state.connector.tolerance);
   $("#connector-height").value = fmt(state.connector.height);
   $("#connector-length").value = fmt(state.connector.length);
   $("#connector-position").value = fmt(state.connector.position);
   const connectorAxis = $(`input[name="connector-axis"][value="${state.connector.axis}"]`);
   if (connectorAxis) connectorAxis.checked = true;
-  updateLabelHelp();
   renderPlaced();
 }
 
@@ -195,8 +193,11 @@ function updateDesignFromForm() {
   design.part_name = $("#part-name").value;
   design.scoop = $("#scoop").checked;
   design.label_position = $('input[name="label-position"]:checked')?.value || "bottom";
-  state.output = $("#output-folder").value.trim();
-  state.samplerBoxes = $("#sampler-boxes").value.trim();
+  const newOutput = $("#output-folder").value.trim();
+  if (newOutput !== state.output) {
+    state.output = newOutput;
+    saveOutputPreference(newOutput);
+  }
   state.connector = {
     tolerance: number($("#connector-tolerance").value, state.connector.tolerance),
     height: number($("#connector-height").value, state.connector.height),
@@ -204,15 +205,11 @@ function updateDesignFromForm() {
     position: number($("#connector-position").value, state.connector.position),
     axis: $('input[name="connector-axis"]:checked')?.value || "y",
   };
-  updateLabelHelp();
 }
 
-function updateLabelHelp() {
-  const top = ($('input[name="label-position"]:checked')?.value || state.design?.label_position) === "top";
-  $("#label-help").textContent = top
-    ? "Fixed 5 mm letters, flush in a 7 mm rear ledge with a support-free 45° underside."
-    : "Inlaid into the floor and moved around supports automatically.";
-}
+const saveOutputPreference = debounce(output => {
+  api("/api/preferences", { output }).catch(() => {});
+}, 500);
 
 function updatePreviewHelp(view) {
   $("#preview-help").textContent = view === "2d"
@@ -242,7 +239,7 @@ function wireControls() {
       refreshPreview();
     });
   });
-  ["#output-folder", "#sampler-boxes", "#connector-tolerance", "#connector-height",
+  ["#output-folder", "#connector-tolerance", "#connector-height",
     "#connector-length", "#connector-position"]
     .forEach(selector => $(selector).addEventListener("change", updateDesignFromForm));
   $$('input[name="connector-axis"]').forEach(input =>
@@ -332,6 +329,7 @@ function selectedFeature(index) {
   if (index === null || index < 0 || index >= state.design.layout.features.length) return;
   state.selected = index;
   state.draft = clone(state.design.layout.features[index]);
+  state.selectedOriginal = clone(state.draft);
   state.draftResolvedOptions = {};
   state.draftKind = state.draft.kind;
   $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === state.draftKind));
@@ -368,7 +366,12 @@ function renderDraftFields() {
     html += field("Width", "width", fmt(width), { unit: "mm" });
     html += field("Depth", "depth", fmt(depth), { unit: "mm" });
   }
-  if (info.flags.qty) html += field("Quantity", "count", one.count ?? "auto", { type: "text" });
+  if (info.flags.qty) {
+    html += `<label class="wide">Quantity<div class="input-with-button">
+      <input type="number" min="1" step="1" data-draft="count" value="${one.count ?? ""}" placeholder="auto">
+      <button type="button" class="button secondary" data-action="auto-count">Auto</button>
+    </div></label>`;
+  }
   if (info.flags.along) {
     html += `<fieldset class="wide"><legend>Runs along</legend><div class="segmented two">
       <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
@@ -395,6 +398,13 @@ function renderDraftFields() {
       ? one.options[option.key]
       : state.draftResolvedOptions?.[option.key] ?? option.default;
     html += field(option.label, `option:${option.key}`, shown);
+    if (option.key === "angle") {
+      html += `<fieldset class="wide"><legend>Leaning shape</legend><div class="segmented two">
+        <label><input type="radio" name="draft-wedge" value="wedge" ${one.wedge !== false ? "checked" : ""}><span>Wedge</span></label>
+        <label><input type="radio" name="draft-wedge" value="straight" ${one.wedge === false ? "checked" : ""}><span>Straight</span></label>
+      </div></fieldset>
+      <p class="field-help">Only matters once the angle above is not zero. <strong>Wedge</strong> stays thick at the floor and tapers as it leans, so it takes the sideways push of whatever rests against it. <strong>Straight</strong> keeps the same thin thickness the whole way up and can snap off.</p>`;
+    }
   }
   $("#draft-fields").innerHTML = html;
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
@@ -402,8 +412,22 @@ function renderDraftFields() {
   });
   $$('input[name="draft-along"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
     state.draft.along = input.value;
+    updateSelectionButtons();
     refreshDraftSoon();
   }));
+  $$('input[name="draft-wedge"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
+    state.draft.wedge = input.value === "wedge";
+    updateSelectionButtons();
+    refreshDraftSoon();
+  }));
+  const autoCount = $('[data-action="auto-count"]', $("#draft-fields"));
+  if (autoCount) autoCount.addEventListener("click", () => {
+    state.draft.count = null;
+    const input = $('[data-draft="count"]', $("#draft-fields"));
+    if (input) input.value = "";
+    updateSelectionButtons();
+    refreshDraftSoon();
+  });
 }
 
 function updateDraftFromFields(event) {
@@ -452,7 +476,33 @@ function updateDraftFromFields(event) {
       raw,
       one.options[key] ?? state.draftResolvedOptions?.[key] ?? number(option?.default),
     );
+    if (info.kind === "divider" && key === "thickness") {
+      // A divider builds from this, not from the footprint drawn below -
+      // widen that footprint to match so what the Width/Depth fields and
+      // the 2D layout show never falls short of the real wall.
+      const t = one.options.thickness;
+      if (Number.isFinite(t) && t > 0) {
+        const zw = one.zone[2] - one.zone[0], zd = one.zone[3] - one.zone[1];
+        const cx = (one.zone[0] + one.zone[2]) / 2, cy = (one.zone[1] + one.zone[3]) / 2;
+        const wideningKey = zw >= zd ? "depth" : "width";
+        if (zw >= zd) {
+          const depth = Math.max(zd, t);
+          one.zone = [one.zone[0], cy - depth / 2, one.zone[2], cy + depth / 2];
+        } else {
+          const width = Math.max(zw, t);
+          one.zone = [cx - width / 2, one.zone[1], cx + width / 2, one.zone[3]];
+        }
+        const shownField = $(`[data-draft="${wideningKey}"]`, $("#draft-fields"));
+        if (shownField) {
+          const newSpan = wideningKey === "width"
+            ? one.zone[2] - one.zone[0]
+            : one.zone[3] - one.zone[1];
+          shownField.value = fmt(newSpan);
+        }
+      }
+    }
   }
+  updateSelectionButtons();
   refreshDraftSoon();
 }
 
@@ -475,7 +525,7 @@ async function refreshDraft() {
         input.value = fmt(state.draftResolvedOptions[option.key]);
       }
     }
-    $("#draft-status").textContent = "Live geometry";
+    $("#draft-status").textContent = "";
     renderDraftPreview();
   } catch (error) {
     if (request !== state.draftRequest) return;
@@ -493,6 +543,7 @@ async function applySupport(index) {
     state.design = result.design;
     state.selected = result.selected;
     state.draft = clone(state.design.layout.features[state.selected]);
+    state.selectedOriginal = clone(state.draft);
     state.draftResolvedOptions = {};
     renderDraftFields();
     renderPlaced();
@@ -555,10 +606,15 @@ function finishDesignMutation() {
   updateSelectionButtons();
 }
 
+function draftIsDirty() {
+  if (state.selected === null || !state.selectedOriginal) return false;
+  return JSON.stringify(state.draft) !== JSON.stringify(state.selectedOriginal);
+}
+
 function updateSelectionButtons() {
   const selected = state.selected !== null;
   const busy = state.designMutationBusy;
-  $("#update-support").disabled = busy || !selected;
+  $("#update-support").disabled = busy || !draftIsDirty();
   $("#delete-support").disabled = busy || !selected;
   $("#add-support").disabled = busy || !state.draft;
   $$(".support-choice, .placed-item").forEach(button => button.disabled = busy);
@@ -956,7 +1012,6 @@ async function generate(path, selector) {
       design: state.design,
       output: state.output,
       connector: state.connector,
-      boxes: state.samplerBoxes,
     };
     const result = await api(path, payload);
     const files = collectOutputs(result.result);
@@ -982,9 +1037,8 @@ async function init() {
     const catalog = await api("/api/catalog");
     state.catalog = catalog;
     state.design = clone(catalog.defaults.design);
-    state.output = catalog.defaults.output;
+    state.output = catalog.preferences?.output || catalog.defaults.output;
     state.connector = clone(catalog.defaults.connector);
-    state.samplerBoxes = catalog.defaults.sampler_boxes;
     renderCatalog();
     wireControls();
     syncForm();
