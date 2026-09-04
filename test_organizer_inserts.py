@@ -456,14 +456,6 @@ class AngledDividerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "taper"):
             build_features(self.box, [one], self.box.wall)
 
-    def test_full_span_and_a_lean_together_are_refused_for_now(self) -> None:
-        zone = Zone(-15.0, -1.0, 15.0, 1.0)
-        one = Feature(
-            "divider", zone, along="x", full_span=True, options={"angle": 10.0}
-        )
-        with self.assertRaisesRegex(ValueError, "full-width divider cannot lean"):
-            build_features(self.box, [one], self.box.wall)
-
     def test_wedge_round_trips_through_the_saved_design_schema(self) -> None:
         zone = Zone(-15.0, -1.0, 15.0, 1.0)
         layout = Layout(
@@ -481,6 +473,110 @@ class AngledDividerTests(unittest.TestCase):
         del data["features"][0]["wedge"]
         legacy = layout_from_dict(data)
         self.assertTrue(legacy.features[0].wedge)
+
+
+class FullSpanLeaningDividerTests(unittest.TestCase):
+    """A leaning divider that also hugs the box's true wavy wall."""
+
+    box = BoxSpec(40.0, 48.0, 40.0)
+    thickness, height, angle = 4.0, 8.0, 20.0
+
+    def _feature(self, along: str = "x", **overrides) -> Feature:
+        whole = Zone.whole(self.box)
+        half_t = self.thickness / 2.0
+        zone = (
+            Zone(whole.x0, -half_t, whole.x1, half_t) if along == "x" else
+            Zone(-half_t, whole.y0, half_t, whole.y1)
+        )
+        options = {"thickness": self.thickness, "height": self.height, "angle": self.angle}
+        options.update(overrides.pop("options", {}))
+        return Feature("divider", zone, along=along, full_span=True, options=options, **overrides)
+
+    def test_the_edge_touches_the_true_wall_at_every_point_across_the_lean(
+        self,
+    ) -> None:
+        # Not just close at each height's overall extent (its bounding box),
+        # but exactly zero gap at every point the wedge's own cross-section
+        # actually covers, which itself shifts sideways as it rises.
+        from trimesh.intersections import mesh_plane
+        from shapely.geometry import LineString
+
+        cavity = wavy_cavity_polygon(self.box)
+        one = self._feature()
+        solid = build_features(self.box, [one], self.box.wall)[0]
+        self.assertTrue(solid.is_watertight)
+        lean = self.height * math.tan(math.radians(self.angle))
+        half_t = self.thickness / 2.0
+        worst = 0.0
+        for frac in (0.02, 0.3, 0.6, 0.98):
+            z = self.box.wall + frac * self.height
+            y_low, y_high = -half_t, half_t - frac * lean
+            lines = mesh_plane(
+                solid, plane_normal=np.array([0.0, 0.0, 1.0]),
+                plane_origin=np.array([0.0, 0.0, z]),
+            )
+            for y in np.linspace(y_low + 1e-4, y_high - 1e-4, 5):
+                probe = LineString([(-30.0, y), (30.0, y)])
+                true_xs = [point[0] for point in probe.intersection(cavity).coords]
+                at_y = []
+                for (x0, py0, _z0), (x1, py1, _z1) in lines:
+                    if (py0 - y) * (py1 - y) <= 0 and py0 != py1:
+                        t = (y - py0) / (py1 - py0)
+                        at_y.append(x0 + t * (x1 - x0))
+                if not at_y:
+                    continue
+                worst = max(
+                    worst, abs(min(at_y) - min(true_xs)), abs(max(true_xs) - max(at_y))
+                )
+        self.assertLess(worst, 1e-3)  # mesh vertex precision, not a real gap
+
+    def test_a_negative_angle_and_a_straight_wall_still_build(self) -> None:
+        for overrides in ({"options": {"angle": -self.angle}}, {"wedge": False}):
+            one = self._feature(**overrides)
+            solid = build_features(self.box, [one], self.box.wall)[0]
+            self.assertTrue(solid.is_watertight, overrides)
+
+    def test_along_y_mirrors_along_x(self) -> None:
+        solid = build_features(self.box, [self._feature(along="y")], self.box.wall)[0]
+        self.assertTrue(solid.is_watertight)
+
+    def test_flat_inside_still_gives_two_stacked_pieces(self) -> None:
+        box = BoxSpec(40.0, 48.0, 40.0, flat_inside=0.6)
+        whole = Zone.whole(box)
+        half_t = self.thickness / 2.0
+        zone = Zone(whole.x0, -half_t, whole.x1, half_t)
+        one = Feature(
+            "divider", zone, along="x", full_span=True,
+            options={"thickness": self.thickness, "height": self.height, "angle": self.angle},
+        )
+        pieces = build_features(box, [one], box.wall)
+        self.assertEqual(len(pieces), 2)
+        flat, wavy = sorted(pieces, key=lambda solid: solid.bounds[0][2])
+        self.assertAlmostEqual(flat.bounds[0][2], box.wall, places=6)
+        self.assertAlmostEqual(flat.bounds[1][2], box.wall + box.flat_inside, places=6)
+        self.assertAlmostEqual(wavy.bounds[0][2], flat.bounds[1][2], places=6)
+        for solid in pieces:
+            self.assertTrue(solid.is_watertight)
+
+    def test_still_refuses_an_angle_past_the_limit_and_a_collapsed_wedge(self) -> None:
+        with self.assertRaisesRegex(ValueError, "45 degrees"):
+            build_features(
+                self.box, [self._feature(options={"angle": 46.0})], self.box.wall
+            )
+        with self.assertRaisesRegex(ValueError, "taper"):
+            build_features(
+                self.box,
+                [self._feature(options={"thickness": 1.6, "height": 30.0, "angle": 30.0})],
+                self.box.wall,
+            )
+
+    def test_inside_a_removable_insert_it_clips_flush_to_the_straight_plate_edge(
+        self,
+    ) -> None:
+        insert = make_fitted_insert(self.box, [self._feature()])
+        footprint = insert_footprint(self.box, "separate")
+        self.assertAlmostEqual(insert.bounds[1][0], footprint.bounds[2], places=3)
+        self.assertAlmostEqual(insert.bounds[0][0], footprint.bounds[0], places=3)
 
 
 class RegistryTests(unittest.TestCase):
@@ -559,12 +655,34 @@ class OtherHoldersTests(unittest.TestCase):
         self.assertGreater(low_radius, high_radius)
 
     def test_a_builder_cannot_escape_the_zone_claimed_by_the_editor(self) -> None:
-        too_thick = Feature(
+        # A divider is a deliberate, documented exception to this (its
+        # thickness option, not its zone, decides how wide it actually
+        # builds - see test_a_thicker_wall_than_the_zone_widens_to_match
+        # below) - so prove the general safety net still holds with a kind
+        # that has no such exception, by making its builder misbehave.
+        from unittest.mock import patch
+
+        oversized = Feature("pocket", Zone(-10.0, -10.0, 10.0, 10.0))
+        runaway = lambda box, one, base_z: [
+            trimesh.creation.box(extents=(40.0, 40.0, 5.0))
+        ]
+        with patch.dict(inserts.FEATURE_BUILDERS, {"pocket": runaway}):
+            with self.assertRaisesRegex(ValueError, "exceeds its layout zone"):
+                build_features(BIN, [oversized], BIN.wall)
+
+    def test_a_thicker_wall_than_the_zone_widens_to_match(self) -> None:
+        # A divider is built from its own thickness option on the cross
+        # axis, not from the zone's stored footprint there - the two are
+        # allowed to disagree, and the wider one wins rather than the
+        # builder being refused for a footprint that was only ever a
+        # convenience the editor drew, never the wall's real thickness.
+        thicker = Feature(
             "divider", Zone(-20.0, -0.5, 20.0, 0.5),
             options={"thickness": 5.0},
         )
-        with self.assertRaisesRegex(ValueError, "exceeds its layout zone"):
-            build_features(BIN, [too_thick], BIN.wall)
+        wall = build_features(BIN, [thicker], BIN.wall)[0]
+        self.assertAlmostEqual(wall.bounds[1][1] - wall.bounds[0][1], 5.0, places=6)
+        self.assertTrue(wall.is_watertight)
 
 
 class KeepOutTests(unittest.TestCase):

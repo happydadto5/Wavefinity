@@ -870,12 +870,11 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
     if thickness <= 0.0 or height <= 0.0 or base_z + height > box.z + 1e-9:
         raise ValueError("divider thickness and height must fit inside the bin")
     centre_x, centre_y = zone.centre
+    if angle != 0.0 and spec_feature.full_span:
+        return _full_span_leaning_divider(
+            box, spec_feature, thickness, height, angle, base_z
+        )
     if angle != 0.0:
-        if spec_feature.full_span:
-            raise ValueError(
-                "a full-width divider cannot lean yet; turn off full width "
-                "or set the angle back to 0"
-            )
         return _angled_divider(box, spec_feature, thickness, height, angle, base_z)
     if spec_feature.full_span:
         cross_centre = centre_y if spec_feature.along == "x" else centre_x
@@ -945,6 +944,54 @@ def _angled_divider(
         wall = _extrude_xz_profile(profile, run)
         wall.apply_translation((0.0, centre_y, 0.0))
     return [wall]
+
+
+def _full_span_leaning_divider(
+    box: BoxSpec, spec_feature: Feature, thickness: float, height: float,
+    angle: float, base_z: float,
+) -> list[trimesh.Trimesh]:
+    """A leaning divider that also reaches the box's true wavy wall.
+
+    Full span and a lean each bend one of the same assumption in a
+    different place: a full-span divider's run-axis reach is the wave, not
+    the safe rectangle; a leaning divider's cross-axis position shifts with
+    height instead of staying put. Together, the divider's own end face is
+    no longer flat, or even the same shape at every height, so the 2D
+    polygon-clip the plain full-span divider uses no longer applies on its
+    own. This instead builds the oversized leaning wedge as a real 3D solid
+    - exactly what ``_angled_divider`` already builds, just wider - and
+    intersects it against the box's actual interior volume, the same
+    boolean a standalone insert is already trimmed to its footprint with.
+    """
+    along = spec_feature.along
+    half_run = (box.half_x if along == "x" else box.half_y) + 2.0 * WAVE_AMPLITUDE
+    zone = spec_feature.zone
+    centre_x, centre_y = zone.centre
+    oversized_zone = (
+        Zone(centre_x - half_run, zone.y0, centre_x + half_run, zone.y1)
+        if along == "x" else
+        Zone(zone.x0, centre_y - half_run, zone.x1, centre_y + half_run)
+    )
+    wedge = _angled_divider(
+        box, replace(spec_feature, zone=oversized_zone), thickness, height,
+        angle, base_z,
+    )[0]
+
+    z0, z1 = base_z, base_z + height
+    flat_top = box.wall + box.flat_inside
+    pieces: list[trimesh.Trimesh] = []
+    if box.flat_inside > 0.0 and z0 < flat_top:
+        band = _extrude_polygon(flat_cavity_polygon(box), min(z1, flat_top) - z0)
+        band.apply_translation((0.0, 0.0, z0))
+        pieces.append(intersection([wedge, band]))
+    wavy_z0 = max(z0, flat_top) if box.flat_inside > 0.0 else z0
+    if wavy_z0 < z1:
+        above = _extrude_polygon(wavy_cavity_polygon(box), z1 - wavy_z0)
+        above.apply_translation((0.0, 0.0, wavy_z0))
+        pieces.append(intersection([wedge, above]))
+    if not pieces or any(len(piece.faces) == 0 for piece in pieces):
+        raise ValueError("no room for a leaning full-width divider at this position")
+    return pieces
 
 
 def _trimmed_prism(strip: Polygon, cavity: Polygon, z0: float, z1: float) -> trimesh.Trimesh:
@@ -1089,13 +1136,17 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
 
     For an ordinary feature this is simply its stored zone - the builder is
     never allowed to produce anything bigger than what the editor placed. A
-    divider has two deliberate exceptions (see ``build_divider``): full-span
+    divider is built from its own ``thickness`` option on the cross axis,
+    not from the zone's stored footprint there (see ``build_divider``), so
+    the two can disagree - typing a thicker wall than the zone happened to
+    be does not, on its own, mean anything is actually wrong. The reach
+    widens on the cross axis to whichever is bigger. Two more deliberate
+    divider exceptions stack on top (see ``build_divider``): full-span
     reaches past its stored zone along its run axis, all the way to the
     box's true wavy wall, so its reach widens there to the box's own
     physical envelope - the one bound nothing can legitimately cross; a
-    leaning divider reaches past its stored zone on its *cross* axis instead,
-    by however far its own lean carries it. Both stay exactly as stored on
-    the axis the exception does not apply to.
+    leaning divider reaches further still on the cross axis, by however far
+    its own lean carries it.
     """
     if one.kind != "divider":
         return one.zone
@@ -1106,13 +1157,17 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
         else:
             zone = Zone(zone.x0, -box.half_y, zone.x1, box.half_y)
     options = resolved_options(box, one, base_z)
+    thickness = options.get("thickness", 0.0)
     angle = options.get("angle", 0.0)
-    if angle:
-        lean = abs(options["height"] * math.tan(math.radians(angle)))
-        if one.along == "x":
-            zone = Zone(zone.x0, zone.y0 - lean, zone.x1, zone.y1 + lean)
-        else:
-            zone = Zone(zone.x0 - lean, zone.y0, zone.x1 + lean, zone.y1)
+    lean = abs(options["height"] * math.tan(math.radians(angle))) if angle else 0.0
+    if one.along == "x":
+        centre = (zone.y0 + zone.y1) / 2.0
+        half = max((zone.y1 - zone.y0) / 2.0, thickness / 2.0) + lean
+        zone = Zone(zone.x0, centre - half, zone.x1, centre + half)
+    else:
+        centre = (zone.x0 + zone.x1) / 2.0
+        half = max((zone.x1 - zone.x0) / 2.0, thickness / 2.0) + lean
+        zone = Zone(centre - half, zone.y0, centre + half, zone.y1)
     return zone
 
 
