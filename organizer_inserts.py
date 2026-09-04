@@ -20,17 +20,22 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 import trimesh
-from shapely.geometry import Polygon, box as shapely_box
+from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 from shapely.ops import unary_union
 
 from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
+    WAVE_AMPLITUDE,
     _extrude_polygon,
+    _extrude_xz_profile,
+    _extrude_yz_profile,
     _rounded,
     difference,
+    flat_cavity_polygon,
     intersection,
     union,
+    wavy_cavity_polygon,
 )
 
 # --- how much room to leave ---------------------------------------------------
@@ -46,6 +51,8 @@ MIN_FEATURE_GAP = 0.8      # material between two features
 CONNECTOR_EDGE_KEEP_OUT = 2.0  # interior strip kept low for connector arms
 EDITOR_SNAP = 1.0          # normal editor movement; effectively no floor loss
 CARTRIDGE_PITCH = 8.0      # optional interchangeable standalone-insert grid
+MAX_DIVIDER_ANGLE = 45.0   # steepest lean an FDM overhang prints support-free
+MIN_WEDGE_EDGE = 0.4       # thinnest a wedge's tapered top may print
 LAYOUT_MODES = ("fused", "separate", "cartridge")
 
 # A cradle notch is a half circle: any deeper and the object cannot be dropped
@@ -191,6 +198,14 @@ class Feature:
     count: int | None = None            # None means as many as fit
     along: str = "x"                    # axis the stored object lies along
     options: dict = field(default_factory=dict)
+    # A divider that runs edge to edge, hugging the box's true wavy wall
+    # instead of the straight-sided rectangle every other zone is confined
+    # to. Nothing else reads this - see ``build_divider``.
+    full_span: bool = False
+    # A leaning divider's cross-section: a wedge, thick at the floor and
+    # tapering as it rises, or (False) a uniform-thickness sloped wall - see
+    # ``build_divider``. Meaningless at zero angle; only a divider sets it.
+    wedge: bool = True
 
     def __post_init__(self) -> None:
         if not self.kind:
@@ -199,6 +214,8 @@ class Feature:
             raise ValueError("feature orientation must be 'x' or 'y'")
         if self.count is not None and self.count < 1:
             raise ValueError("feature count must be positive or automatic")
+        if self.full_span and self.kind != "divider":
+            raise ValueError("only a divider can span the full wall")
 
 
 @dataclass(frozen=True)
@@ -358,6 +375,8 @@ def layout_to_dict(layout: Layout) -> dict:
                 "count": one.count,
                 "along": one.along,
                 "options": dict(one.options),
+                "full_span": one.full_span,
+                "wedge": one.wedge,
             }
             for one in layout.features
         ],
@@ -386,6 +405,8 @@ def layout_from_dict(data: dict) -> Layout:
             str(raw["kind"]), Zone(*coords), item,
             None if raw.get("count") is None else int(raw["count"]),
             str(raw.get("along", "x")), dict(raw.get("options", {})),
+            bool(raw.get("full_span", False)),
+            bool(raw.get("wedge", True)),
         ))
     return Layout(tuple(made), str(data.get("mode", "fused")),
                   float(data.get("snap", EDITOR_SNAP)))
@@ -834,6 +855,7 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
     return {
         "thickness": RIB_THICKNESS,
         "height": connector_keep_out(box) - base_z,
+        "angle": 0.0,
     }
 
 
@@ -844,9 +866,22 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
     options = resolved_options(box, spec_feature, base_z)
     thickness = options["thickness"]
     height = options["height"]
+    angle = options.get("angle", 0.0)
     if thickness <= 0.0 or height <= 0.0 or base_z + height > box.z + 1e-9:
         raise ValueError("divider thickness and height must fit inside the bin")
     centre_x, centre_y = zone.centre
+    if angle != 0.0:
+        if spec_feature.full_span:
+            raise ValueError(
+                "a full-width divider cannot lean yet; turn off full width "
+                "or set the angle back to 0"
+            )
+        return _angled_divider(box, spec_feature, thickness, height, angle, base_z)
+    if spec_feature.full_span:
+        cross_centre = centre_y if spec_feature.along == "x" else centre_x
+        return _full_span_divider(
+            box, spec_feature.along, cross_centre, thickness, base_z, height
+        )
     if spec_feature.along == "x":
         extents = (zone.width, thickness, height)
     else:
@@ -854,6 +889,110 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
     wall = trimesh.creation.box(extents=extents)
     wall.apply_translation((centre_x, centre_y, base_z + height / 2.0))
     return [wall]
+
+
+def _angled_divider(
+    box: BoxSpec, spec_feature: Feature, thickness: float, height: float,
+    angle: float, base_z: float,
+) -> list[trimesh.Trimesh]:
+    """A divider leaning up to ``MAX_DIVIDER_ANGLE`` off vertical.
+
+    A thin wall sheared over bodily at an angle is an unsupported FDM
+    overhang with no more material at its base than anywhere else along its
+    height - exactly the shape that snaps off under the sideways load of
+    whatever is leaning against it. The default instead builds a wedge: the
+    back face stays vertical and only the leaning face slopes, so the wall
+    is thickest right where that load actually bears - at the floor - and
+    tapers away toward the top, the shape a physical gusset or bracket would
+    use. ``wedge=False`` gets the plain sheared wall instead: uniform
+    thickness throughout, for the rare case that is genuinely wanted.
+    """
+    if not math.isfinite(angle) or abs(angle) > MAX_DIVIDER_ANGLE:
+        raise ValueError(
+            f"a divider's angle must be within {MAX_DIVIDER_ANGLE:g} degrees of vertical"
+        )
+    zone = spec_feature.zone
+    centre_x, centre_y = zone.centre
+    along = spec_feature.along
+    cross_centre = centre_y if along == "x" else centre_x
+    lean = height * math.tan(math.radians(angle))
+    half_t = thickness / 2.0
+    base_low, base_high = cross_centre - half_t, cross_centre + half_t
+    if spec_feature.wedge:
+        if lean >= 0.0:
+            top_low, top_high = base_low, base_high - lean
+        else:
+            top_low, top_high = base_low - lean, base_high
+        if top_high - top_low < MIN_WEDGE_EDGE:
+            raise ValueError(
+                f"that angle and height taper the divider to less than "
+                f"{MIN_WEDGE_EDGE:g} mm at the top; reduce the angle or "
+                "increase the thickness"
+            )
+    else:
+        top_low, top_high = base_low + lean, base_high + lean
+    profile = Polygon([
+        (base_low, base_z), (base_high, base_z),
+        (top_high, base_z + height), (top_low, base_z + height),
+    ])
+    if not profile.is_valid:
+        raise ValueError("that divider angle and thickness do not form a valid wall")
+    run = zone.width if along == "x" else zone.depth
+    if along == "x":
+        wall = _extrude_yz_profile(profile, run)
+        wall.apply_translation((centre_x, 0.0, 0.0))
+    else:
+        wall = _extrude_xz_profile(profile, run)
+        wall.apply_translation((0.0, centre_y, 0.0))
+    return [wall]
+
+
+def _trimmed_prism(strip: Polygon, cavity: Polygon, z0: float, z1: float) -> trimesh.Trimesh:
+    """``strip`` cut back to wherever ``cavity`` actually allows it, then extruded."""
+    trimmed = strip.intersection(cavity)
+    if trimmed.is_empty:
+        raise ValueError("no room for a full-width divider at this position")
+    if isinstance(trimmed, MultiPolygon):
+        trimmed = max(trimmed.geoms, key=lambda item: item.area)
+    prism = _extrude_polygon(trimmed, z1 - z0)
+    prism.apply_translation((0.0, 0.0, z0))
+    return prism
+
+
+def _full_span_divider(
+    box: BoxSpec, along: str, cross_centre: float, thickness: float,
+    base_z: float, height: float,
+) -> list[trimesh.Trimesh]:
+    """A divider that runs edge to edge, hugging the box's true interior wall.
+
+    A straight rib sized to the safe usable rectangle - the only rectangle
+    guaranteed to clear the wave at *every* position - still leaves the
+    wave's own swing as a gap at most positions, because that rectangle is
+    pulled in by a full amplitude just to stay valid everywhere. A divider
+    only has to be right at its own position, so instead it is built
+    oversized and trimmed back against the box's real interior outline: the
+    flat, straight-sided band near the floor if the box has one, the wavy
+    profile above it - exactly the same outlines the wall itself is built
+    from, so the two can never disagree.
+    """
+    half_run = (box.half_x if along == "x" else box.half_y) + 2.0 * WAVE_AMPLITUDE
+    half_thick = thickness / 2.0
+    strip = (
+        shapely_box(-half_run, cross_centre - half_thick, half_run, cross_centre + half_thick)
+        if along == "x" else
+        shapely_box(cross_centre - half_thick, -half_run, cross_centre + half_thick, half_run)
+    )
+    z0, z1 = base_z, base_z + height
+    flat_top = box.wall + box.flat_inside
+    pieces: list[trimesh.Trimesh] = []
+    if box.flat_inside > 0.0 and z0 < flat_top:
+        pieces.append(_trimmed_prism(strip, flat_cavity_polygon(box), z0, min(z1, flat_top)))
+    wavy_z0 = max(z0, flat_top) if box.flat_inside > 0.0 else z0
+    if wavy_z0 < z1:
+        pieces.append(_trimmed_prism(strip, wavy_cavity_polygon(box), wavy_z0, z1))
+    if not pieces:
+        raise ValueError("divider height leaves nothing to build")
+    return pieces
 
 
 @defaults("pocket")
@@ -945,6 +1084,38 @@ def connector_keep_out(box: BoxSpec, connector: ConnectorSpec | None = None) -> 
     return box.z - connector.arm_depth
 
 
+def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
+    """How far a feature's own built geometry may legitimately extend.
+
+    For an ordinary feature this is simply its stored zone - the builder is
+    never allowed to produce anything bigger than what the editor placed. A
+    divider has two deliberate exceptions (see ``build_divider``): full-span
+    reaches past its stored zone along its run axis, all the way to the
+    box's true wavy wall, so its reach widens there to the box's own
+    physical envelope - the one bound nothing can legitimately cross; a
+    leaning divider reaches past its stored zone on its *cross* axis instead,
+    by however far its own lean carries it. Both stay exactly as stored on
+    the axis the exception does not apply to.
+    """
+    if one.kind != "divider":
+        return one.zone
+    zone = one.zone
+    if one.full_span:
+        if one.along == "x":
+            zone = Zone(-box.half_x, zone.y0, box.half_x, zone.y1)
+        else:
+            zone = Zone(zone.x0, -box.half_y, zone.x1, box.half_y)
+    options = resolved_options(box, one, base_z)
+    angle = options.get("angle", 0.0)
+    if angle:
+        lean = abs(options["height"] * math.tan(math.radians(angle)))
+        if one.along == "x":
+            zone = Zone(zone.x0, zone.y0 - lean, zone.x1, zone.y1 + lean)
+        else:
+            zone = Zone(zone.x0 - lean, zone.y0, zone.x1 + lean, zone.y1)
+    return zone
+
+
 def check_layout(
     box: BoxSpec, features: Iterable[Feature], bounds: Zone | None = None
 ) -> None:
@@ -983,12 +1154,13 @@ def build_features(
     solids: list[trimesh.Trimesh] = []
     for one in features:
         made = FEATURE_BUILDERS[one.kind](box, one, base_z)
+        reach = _feature_reach(box, one, base_z)
         for solid in made:
             if (
-                solid.bounds[0][0] < one.zone.x0 - 1e-5
-                or solid.bounds[1][0] > one.zone.x1 + 1e-5
-                or solid.bounds[0][1] < one.zone.y0 - 1e-5
-                or solid.bounds[1][1] > one.zone.y1 + 1e-5
+                solid.bounds[0][0] < reach.x0 - 1e-5
+                or solid.bounds[1][0] > reach.x1 + 1e-5
+                or solid.bounds[0][1] < reach.y0 - 1e-5
+                or solid.bounds[1][1] > reach.y1 + 1e-5
             ):
                 raise ValueError(
                     f"a {one.kind} exceeds its layout zone; reduce its size "

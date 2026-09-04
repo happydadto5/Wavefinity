@@ -1,6 +1,56 @@
 # Changelog
 
+## 2026-09-04 — Codex
+
+- Completed the browser-only transition: removed the obsolete Tkinter launcher
+  and widget UI, and made `Launch_Organizer_UI.bat` the sole application entry
+  point.
+- Added visible descriptions for fused, removable, and 8 mm cartridge inserts.
+- Added mutation locking and stale-preview invalidation so rapid add/delete or
+  mode changes cannot overwrite newer browser state.
+- Added keyboard/tab semantics and accessible equivalent fields for the canvas
+  editors; full suite now passes 169 tests.
+
 Notable Wavefinity changes are recorded here by date and author.
+
+## 2026-09-04 — Claude (later)
+
+### Added
+
+- Added a full-span option to the divider holder (`Feature.full_span`,
+  `organizer_inserts.py`). A straight rib sized to the safe usable
+  rectangle - the only rectangle guaranteed to clear the wave at every
+  position - still leaves the wave's own swing as a gap at most positions
+  along its own thickness, since that rectangle gives up a full amplitude
+  just to stay valid everywhere. A full-span divider only has to be right at
+  its own position: it is built oversized and trimmed against the box's real
+  interior outline (the flat band near the floor if the box has one, the
+  wavy profile above it) instead of approximated with a margin, so its end
+  face follows the true wall contour and touches it everywhere along its
+  thickness, not just at the centre. Verified by slicing the built solid at
+  several points across its own band and comparing the true cross-section to
+  the wall's, not just the bounding box.
+  - Inside a removable or cartridge insert, the same oversized divider is
+    re-clipped to the insert's own straight, rounded-rectangle footprint by
+    the existing insert-trim step, so it meets *that* edge exactly instead of
+    the wavy wall it was built against.
+  - `full_span` is refused on every kind but `divider`, and round-trips
+    through the saved-design JSON schema (`layout_to_dict`/`layout_from_dict`),
+    defaulting to `False` for designs saved before this existed.
+  - Engine-only so far: no editor checkbox yet in either front end. See the
+    note below.
+
+### Note for whoever wires the UI
+
+This landed as engine capability only (`organizer_inserts.py` +
+`test_organizer_inserts.py`), deliberately not touching `organizer_app.py`,
+`web/app.js` or `web/index.html` - all four were mid-edit, uncommitted, at
+the time (`organizer_app.py` had just dropped from 3425 to ~1035 lines and
+lost its `launch_ui()` entirely; `test_organizer_app.py` had dropped by 899
+lines). Once that settles, the remaining piece is a "Full width" checkbox on
+the divider editor that sets `full_span=True` and hands the run-axis
+width/depth field over to the engine (any manual width edit should clear the
+flag again, since it's an explicit override of "figure it out").
 
 ## 2026-09-04 — Codex
 

@@ -10,8 +10,8 @@ Wavefinity previously used a large Tkinter interface over a tested Python CAD
 engine. This change adds a browser interface without porting or duplicating the
 geometry implementation. The review should determine whether the new local web
 boundary preserves geometry/export behavior, safely exposes local file-writing
-operations, and provides a reliable replacement UI while the desktop fallback
-remains available.
+operations, and provides a reliable browser replacement for the retired desktop
+interface.
 
 The intended architecture is:
 
@@ -80,11 +80,9 @@ Boolean/mesh work is protected by a process-wide lock. This intentionally
 serializes geometry operations instead of risking concurrent calls into the
 mesh backends. UI camera movement remains local and does not call Python.
 
-### Launch and fallback behavior
+### Launch behavior
 
 - `Launch_Organizer_UI.bat` now starts the browser interface by default.
-- `Launch_Organizer_Desktop.bat` and `Launch_Organizer_UI.bat --desktop` retain
-  the former Tkinter application.
 - `Launch_Organizer_UI.bat --check` checks imports without starting a UI.
 - A second browser launcher detects the existing local service and opens it
   instead of starting a second process on the same Windows port.
@@ -178,9 +176,9 @@ These generated artifacts are ignored working output and were not committed.
 4. **Geometry requests are serialized.** This is appropriate for one local
    user and safer for the current mesh stack, but it is not a multi-user server
    architecture.
-5. **The Tkinter fallback should remain for at least one release cycle.** It is
-   the recovery path if an untested browser/platform combination exposes a UI
-   regression.
+5. **The former Tkinter fallback was recommended for one release cycle.** It
+   has since been removed at the product owner's direction; the browser
+   launcher is now the only UI entry point.
 
 ## External-audit resolution — 2026-09-04
 
@@ -233,11 +231,8 @@ From `C:\Users\happy\Projects\Wavefinity`:
 # Run everything
 .venv\Scripts\python.exe -m unittest
 
-# Check both launch targets import
+# Check the browser launcher imports
 cmd /c Launch_Organizer_UI.bat --check
-
-# Start the retained desktop fallback
-cmd /c Launch_Organizer_Desktop.bat
 ```
 
 ## File map
@@ -250,7 +245,6 @@ cmd /c Launch_Organizer_Desktop.bat
 | `web/app.js` | Client state, canvas projection, editor interactions and API calls. |
 | `test_wavefinity_web.py` | Browser-service contract and security regressions. |
 | `Launch_Organizer_UI.bat` | Default browser launch and environment bootstrap. |
-| `Launch_Organizer_Desktop.bat` | Explicit desktop fallback. |
 | `README.md` | User-facing operation and architecture notes. |
 | `TESTING.md` | Test runs and defects caught during browser QA. |
 | `changelog.md` | Dated implementation record. |

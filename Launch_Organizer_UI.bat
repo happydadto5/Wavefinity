@@ -34,11 +34,7 @@ if /i "%~1"=="--check" (
     exit /b 0
 )
 
-if /i "%~1"=="--desktop" (
-    "%ORGANIZER_PY%" organizer_app.py ui
-) else (
-    "%ORGANIZER_PY%" wavefinity_web.py
-)
+"%ORGANIZER_PY%" wavefinity_web.py
 set "ORGANIZER_EXIT=%errorlevel%"
 if not "%ORGANIZER_EXIT%"=="0" pause
 exit /b %ORGANIZER_EXIT%

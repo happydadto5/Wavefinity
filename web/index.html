@@ -37,6 +37,7 @@
           <fieldset class="mode-fieldset">
             <legend>How should the interior print?</legend>
             <div id="mode-options" class="segmented three"></div>
+            <p class="field-help mode-help"><strong>Fused</strong> prints supports as one piece with the bin. <strong>Removable</strong> uses a fitted plate you can swap. <strong>8 mm cartridge</strong> uses repeatable whole-cell inserts and gives up a little edge space.</p>
           </fieldset>
 
           <div class="subheading-row">
@@ -132,15 +133,15 @@
           <button class="view-tab active" data-view="3d" role="tab" aria-selected="true">3D preview</button>
           <button class="view-tab" data-view="2d" role="tab" aria-selected="false">2D layout</button>
         </div>
-        <div class="preview-hint"><span id="preview-state">Building preview…</span><span>Drag to rotate · Wheel to zoom · Double-click to reset</span></div>
+        <div class="preview-hint"><span id="preview-state">Building preview…</span><span id="preview-help">Visual preview only. Drag to rotate, use the wheel to zoom, or double-click to reset; these controls do not change the printed part.</span></div>
       </div>
       <div class="canvas-wrap active" data-canvas="3d">
-        <canvas id="preview-3d" aria-label="Interactive 3D preview"></canvas>
+        <canvas id="preview-3d" role="img" aria-label="3D design preview" aria-describedby="preview-help"></canvas>
         <div id="dimensions" class="dimensions"></div>
       </div>
       <div class="canvas-wrap" data-canvas="2d">
-        <canvas id="preview-2d" aria-label="Interactive top-down layout"></canvas>
-        <div class="layout-hint">Click a support to edit it. Drag to move; drag the blue corner to resize.</div>
+        <canvas id="preview-2d" role="img" aria-label="Top-down layout preview" aria-describedby="preview-help layout-help"></canvas>
+        <div id="layout-help" class="layout-hint">Pointer: click a support, drag to move, or drag its blue corner to resize. Keyboard or screen reader: choose the support under Placed supports, then edit its Center X, Center Y, Width, and Depth fields.</div>
       </div>
       <div id="error-panel" class="error-panel" hidden></div>
       <div class="workspace-footer">

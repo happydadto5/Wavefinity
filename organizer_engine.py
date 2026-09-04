@@ -1,7 +1,7 @@
 """Parametric geometry engine for the wavy-wall drawer organizer system.
 
 All dimensions are millimetres.  This module is the single source of truth for
-the command-line app, desktop UI, fit sampler, and automated tests.
+the browser app, command-line tools, fit sampler, and automated tests.
 
 Design summary
 --------------
@@ -467,6 +467,19 @@ def _extrude_yz_profile(profile: Polygon, width: float) -> trimesh.Trimesh:
     solid.apply_transform(np.asarray([
         [0.0, 0.0, 1.0, -width / 2.0],
         [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]))
+    return solid
+
+
+def _extrude_xz_profile(profile: Polygon, width: float) -> trimesh.Trimesh:
+    """Extrude an X/Z section across world Y - the ``_extrude_yz_profile`` mirror
+    for a shape that runs the other direction."""
+    solid = _extrude_polygon(profile, width)
+    solid.apply_transform(np.asarray([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, -width / 2.0],
         [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, 0.0, 1.0],
     ]))

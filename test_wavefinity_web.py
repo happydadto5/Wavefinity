@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import threading
 import unittest
 from urllib.error import HTTPError
@@ -162,9 +163,16 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
         self.assertIn(b"Build your bin", body)
+        self.assertIn(b"Customize your bin", body)
+        self.assertIn(b"Label your bin", body)
+        self.assertIn(b"Fused", body)
+        self.assertIn(b"8 mm cartridge", body)
         status, _headers, body = self.get("/app.js")
         self.assertEqual(status, 200)
         self.assertIn(b"refreshPreview", body)
+        self.assertIn(b"designMutationBusy", body)
+        self.assertIn(b"beginDesignMutation", body)
+        self.assertIn(b"finishDesignMutation", body)
         status, health = self.post("/api/design/validate", {"design": default_design()})
         self.assertEqual(status, 200)
         self.assertEqual(health["design"]["version"], 1)

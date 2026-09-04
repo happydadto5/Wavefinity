@@ -1,8 +1,8 @@
 """Local browser interface for Wavefinity.
 
-The HTTP layer is deliberately small and dependency-free.  It translates JSON
-to the same immutable models used by the desktop UI and CLI; every preview,
-validation and export still comes from the existing Python geometry engine.
+The HTTP layer is deliberately small and dependency-free. It translates JSON
+to the immutable models shared with the command-line tools; every preview,
+validation and export comes from the existing Python geometry engine.
 """
 
 from __future__ import annotations

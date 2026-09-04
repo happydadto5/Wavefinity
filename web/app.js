@@ -21,6 +21,7 @@ const state = {
   samplerBoxes: "",
   layoutDrag: null,
   layoutTransform: null,
+  designMutationBusy: false,
 };
 
 const COLORS = {
@@ -120,6 +121,10 @@ function renderCatalog() {
   $$('input[name="layout-mode"]', modes).forEach(input => {
     input.addEventListener("change", async () => {
       if (!input.checked || input.value === state.design.layout.mode) return;
+      if (!beginDesignMutation()) {
+        syncForm();
+        return;
+      }
       const oldMode = state.design.layout.mode;
       try {
         const result = await api("/api/layout/mode", { design: state.design, mode: input.value });
@@ -131,6 +136,8 @@ function renderCatalog() {
       } catch (error) {
         $(`input[name="layout-mode"][value="${oldMode}"]`).checked = true;
         toast(error.message, true);
+      } finally {
+        finishDesignMutation();
       }
     });
   });
@@ -207,7 +214,14 @@ function updateLabelHelp() {
     : "Inlaid into the floor and moved around supports automatically.";
 }
 
+function updatePreviewHelp(view) {
+  $("#preview-help").textContent = view === "2d"
+    ? "Pointer: drag supports to move them or drag the blue corner to resize. Keyboard or screen reader: choose a placed support, then edit Center X, Center Y, Width, and Depth."
+    : "Visual preview only. Drag to rotate, use the wheel to zoom, or double-click to reset; these controls do not change the printed part.";
+}
+
 const changedDesign = debounce(() => {
+  if (state.designMutationBusy) return;
   updateDesignFromForm();
   refreshPreview();
   if (state.draft) refreshDraft();
@@ -234,14 +248,30 @@ function wireControls() {
   $$('input[name="connector-axis"]').forEach(input =>
     input.addEventListener("change", updateDesignFromForm));
 
-  $$(".view-tab").forEach(tab => tab.addEventListener("click", () => {
+  const viewTabs = $$(".view-tab");
+  const activateView = tab => {
     $$(".view-tab").forEach(other => {
       other.classList.toggle("active", other === tab);
       other.setAttribute("aria-selected", String(other === tab));
+      other.tabIndex = other === tab ? 0 : -1;
     });
     $$(".canvas-wrap").forEach(wrap => wrap.classList.toggle("active", wrap.dataset.canvas === tab.dataset.view));
+    updatePreviewHelp(tab.dataset.view);
     requestAnimationFrame(() => tab.dataset.view === "3d" ? renderPreview3D() : renderLayout2D());
-  }));
+  };
+  viewTabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => activateView(tab));
+    tab.addEventListener("keydown", event => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const targetIndex = event.key === "Home" ? 0
+        : event.key === "End" ? viewTabs.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + viewTabs.length) % viewTabs.length;
+      activateView(viewTabs[targetIndex]);
+      viewTabs[targetIndex].focus();
+    });
+  });
+  activateView(viewTabs.find(tab => tab.classList.contains("active")) || viewTabs[0]);
 
   $("#add-support").addEventListener("click", () => applySupport(null));
   $("#update-support").addEventListener("click", () => applySupport(state.selected));
@@ -454,10 +484,9 @@ async function refreshDraft() {
 }
 
 async function applySupport(index) {
-  if (!state.draft) return;
+  if (!state.draft || !beginDesignMutation()) return;
   const button = index === null ? $("#add-support") : $("#update-support");
   const previous = button.textContent;
-  button.disabled = true;
   button.textContent = index === null ? "Placing…" : "Updating…";
   try {
     const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index });
@@ -471,16 +500,18 @@ async function applySupport(index) {
     await refreshPreview();
     refreshDraft();
     toast(index === null ? "Support placed." : "Support updated.");
+    return true;
   } catch (error) {
     toast(error.message, true, 5000);
+    return false;
   } finally {
     button.textContent = previous;
-    updateSelectionButtons();
+    finishDesignMutation();
   }
 }
 
 async function deleteSupport() {
-  if (state.selected === null) return;
+  if (state.selected === null || !beginDesignMutation()) return;
   try {
     const result = await api("/api/feature/delete", { design: state.design, index: state.selected });
     state.design = result.design;
@@ -492,14 +523,45 @@ async function deleteSupport() {
     toast("Support deleted.");
   } catch (error) {
     toast(error.message, true);
+  } finally {
+    finishDesignMutation();
   }
+}
+
+function mutationControls() {
+  return $$(
+    '#x-units, #y-units, #z, #wall, #flat-inside, #label-text, #part-name, ' +
+    '#scoop, input[name="label-position"], input[name="layout-mode"], ' +
+    '#new-design, #open-design, #save-design'
+  );
+}
+
+function beginDesignMutation() {
+  if (state.designMutationBusy) {
+    toast("Finish the current design change first.", true);
+    return false;
+  }
+  updateDesignFromForm();
+  state.designMutationBusy = true;
+  state.previewRequest += 1;
+  mutationControls().forEach(control => control.disabled = true);
+  updateSelectionButtons();
+  return true;
+}
+
+function finishDesignMutation() {
+  state.designMutationBusy = false;
+  mutationControls().forEach(control => control.disabled = false);
+  updateSelectionButtons();
 }
 
 function updateSelectionButtons() {
   const selected = state.selected !== null;
-  $("#update-support").disabled = !selected;
-  $("#delete-support").disabled = !selected;
-  $("#add-support").disabled = !state.draft;
+  const busy = state.designMutationBusy;
+  $("#update-support").disabled = busy || !selected;
+  $("#delete-support").disabled = busy || !selected;
+  $("#add-support").disabled = busy || !state.draft;
+  $$(".support-choice, .placed-item").forEach(button => button.disabled = busy);
   $("#support-count").textContent = `${state.design?.layout.features.length || 0} placed`;
 }
 
@@ -776,7 +838,7 @@ function hitFeature(world) {
 function wireLayoutInteraction() {
   const canvas = $("#preview-2d");
   canvas.addEventListener("pointerdown", event => {
-    if (!state.layoutTransform) return;
+    if (!state.layoutTransform || state.designMutationBusy) return;
     const world = layoutPoint(event);
     let index = hitFeature(world);
     if (index === null) {
@@ -822,9 +884,11 @@ function wireLayoutInteraction() {
     state.layoutDrag = null;
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     state.draft = drag.feature;
-    try {
-      await applySupport(drag.index);
-    } catch (_error) {
+    const applied = await applySupport(drag.index);
+    if (!applied) {
+      state.draft = clone(state.design.layout.features[drag.index]);
+      renderDraftFields();
+      refreshDraft();
       renderLayout2D();
     }
   });
@@ -844,7 +908,7 @@ function saveDesign() {
 
 async function openDesign(event) {
   const file = event.target.files?.[0];
-  if (!file) return;
+  if (!file || !beginDesignMutation()) return;
   try {
     const parsed = JSON.parse(await file.text());
     const result = await api("/api/design/validate", { design: parsed });
@@ -858,19 +922,29 @@ async function openDesign(event) {
     toast(error.message, true, 5000);
   } finally {
     event.target.value = "";
+    finishDesignMutation();
   }
 }
 
 async function newDesign() {
   if (state.design.layout.features.length && !window.confirm("Start a new design and clear the placed supports?")) return;
+  if (!beginDesignMutation()) return;
   state.design = clone(state.catalog.defaults.design);
   state.selected = null;
   syncForm();
-  await selectKind("divider", true);
-  refreshPreview();
+  try {
+    await selectKind("divider", true);
+    await refreshPreview();
+  } finally {
+    finishDesignMutation();
+  }
 }
 
 async function generate(path, selector) {
+  if (state.designMutationBusy) {
+    toast("Finish the current design change before generating files.", true);
+    return;
+  }
   updateDesignFromForm();
   const button = $(selector);
   const old = button.textContent;

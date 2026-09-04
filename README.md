@@ -2,8 +2,8 @@
 
 Parametric Python generator for a 3D-printable modular drawer organizer with
 **wavy walls that interlock** and configurable holders inside. The local browser
-UI, desktop fallback, command-line interface, fit sampler and tests share the
-same Python box, insert and export engines.
+UI, command-line interface, fit sampler and tests share the same Python box,
+insert and export engines.
 
 The basic system has a box and one **connector** — a small staple that joins two
 boxes across their shared seam. Holders can be fused into the box, printed as a
@@ -29,9 +29,6 @@ Double-click `Launch_Organizer_UI.bat`. On its first run it creates a private
 Wavefinity service, and opens the browser interface. Later launches reuse that
 environment. The service listens only on `127.0.0.1`; it is not hosted on the
 internet and the browser never replaces the Python geometry engine.
-
-The original Tkinter interface remains available as a fallback through
-`Launch_Organizer_Desktop.bat`, or with `Launch_Organizer_UI.bat --desktop`.
 
 Manual setup instead:
 
@@ -79,52 +76,23 @@ files are written to the shown output folder. The browser API is same-origin
 only, accepts JSON only, and applies a restrictive content-security policy so
 an unrelated web page cannot invoke local file generation.
 
-### Using the desktop fallback
+### Using the browser editor
 
-The desktop controls are grouped by intent: **Build your bin** holds dimensions and the
-insert form, **Customize your bin** holds the curved scoop and advanced physical
-settings, and **Label your bin** holds the label, its Bottom/Top toggle, and the
-part name used in filenames. Numbers get a large stepper either side rather
-than the pinhead arrows a spinbox draws.
+The browser editor is a three-step flow: **1. pick a shape** from the support
+palette and read its one-line description; **2. set parameters**; **3. add
+support**. Placed supports can be selected in the list or on the 2D layout,
+then moved, resized, or edited with exact numeric fields. Normal layouts snap
+to **1 mm**. Overlaps and out-of-bounds features are refused at export.
 
-Beside the form a **live 3D preview** shows the box, label and the holders' actual
-export geometry — including holes, recesses, grooves and scallops — with the
-dimensions written along the bottom and side as `32mm (29 inside)` — outside
-size first, usable interior in brackets — and the height in the corner. Drag it
-to rotate, use the mouse wheel to zoom, and double-click to reset the view. The
-preview is built once per design change and only reprojected while the camera
-moves.
+### Three insert types
 
-The preview takes whatever room the window has: both preview canvases fill their
-panel and redraw at the new size, and spare height goes mostly to them rather
-than to the editor below, so enlarging the window really does draw a bigger bin.
-The window opens at the size its contents ask for, clamped to the screen it has
-to live on.
-
-The insert editor is a three-step flow: **1. pick a shape** from the icon
-palette (divider, post, pocket, slots, bore, cradle, nest) and read its
-one-line description; **2. set parameters**; **3. add part**.
-
-Picking a shape draws the holder's **actual generated geometry**. Step 2 is a
-labelled view of the part — a divider, bore block, cradle, nest or other support
-— and every parameter that shape uses is a small field pinned beside the feature
-it changes, joined to it by a leader line. Quantity and the run axis sit above
-the part, the width and depth footprint below it, and heights, wall thicknesses,
-hole depths and the description of the stored tool point at the edge or hole
-they set. Shapes only show the parameters they have: a cradle has no height
-field, a pocket has no quantity. Editing a value rebuilds this view after a
-short typing pause, even before the draft is added. The geometry uses one
-uniform drawing scale, so enlarging the window makes it bigger without
-stretching it.
-
-Placed parts are listed beside the diagram; select one there or on the **2D
-layout** tab to edit, drag to move, drag its blue corner to resize, or type an
-exact centre. Normal layouts snap to **1 mm**. Overlaps and out-of-bounds
-features turn red and are refused at export. Layouts can be saved and reopened
-as `.wavefinity.json` files.
-
-**↻ Reload code** (top right) restarts the app so edited modules take effect,
-carrying the current design across the restart.
+- **Fused:** holders and bin print as one solid part. It is strongest and uses
+  the most floor area, but the supports are permanent.
+- **Removable:** holders print on a fitted base plate that drops into the bin,
+  so the interior can be swapped while the bin stays put.
+- **8 mm cartridge:** a removable insert constrained to whole 8 mm cells. It is
+  repeatable and interchangeable between matching bins, at the cost of some
+  usable edge area.
 
 Tall holders may use the middle of the bin, but anything entering the 2 mm strip
 beside a wall is capped below the connector arms. The editor's default divider
@@ -432,7 +400,7 @@ or superseded:
 |---|---|---|
 | `organizer_engine.py` | Wavy boxes, connectors, labels, mesh validation and 3MF/STL export. | No. |
 | `organizer_inserts.py` | Item/segment model, zones, 1 mm and cartridge layouts, JSON persistence, holder registry, seven builders, and fused/removable assembly. | No. |
-| `organizer_app.py` | CLI, exporters, interactive camera, 2D drag editor and Tkinter UI. | **Yes - the only one.** `python organizer_app.py ui`, or a subcommand. |
+| `organizer_app.py` | CLI, exporters, validation and shared browser-service helpers. | Yes, for CLI subcommands. |
 | `test_organizer_app.py` | Box, connector, label, preview, editor, CLI and export regressions. | Only via `python -m unittest`. |
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
 
