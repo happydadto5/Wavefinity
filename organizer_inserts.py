@@ -853,24 +853,33 @@ def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
 
 @defaults("divider")
 def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    zone = one.zone
+    along = one.along
+    count = one.count or 1
+    span = (zone.y1 - zone.y0) if along == "x" else (zone.x1 - zone.x0)
     return {
         "thickness": RIB_THICKNESS,
         "height": connector_keep_out(box) - base_z,
         "angle": 0.0,
+        # Fence-post spacing: this many equal gaps fill the zone's cross
+        # axis, including from each end divider to its side of the zone -
+        # so at count == 1 it lands the one divider exactly on the zone's
+        # own centre. An explicit value overrides this and is used as-is
+        # (see build_divider), which only stays centred if it happens to
+        # equal this same auto value.
+        "spacing": span / (count + 1),
     }
 
 
-def _divider_cross_centres(zone: Zone, along: str, count: int) -> list[float]:
-    """``count`` positions evenly spaced across the zone's cross axis.
-
-    Fence-post spacing: ``count`` dividers split the span into ``count + 1``
-    equal gaps, so at ``count == 1`` the one divider lands exactly on the
-    zone's own centre - identical to the plain single-divider case this
-    generalises.
+def _divider_cross_centres(zone: Zone, along: str, count: int, spacing: float) -> list[float]:
+    """``count`` positions, ``spacing`` apart, starting ``spacing`` in from
+    the zone's low edge on its cross axis - the same fence-post arrangement
+    ``divider_defaults`` sizes ``spacing`` to fill exactly, so the auto case
+    is centred; an explicit spacing is simply used as the gap and may leave
+    the group off-centre or short of the far edge.
     """
-    low, high = (zone.y0, zone.y1) if along == "x" else (zone.x0, zone.x1)
-    span = high - low
-    return [low + (index + 1) * span / (count + 1) for index in range(count)]
+    low = zone.y0 if along == "x" else zone.x0
+    return [low + (index + 1) * spacing for index in range(count)]
 
 
 @feature("divider")
@@ -887,17 +896,26 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
     count = spec_feature.count or 1
     if count < 1:
         raise ValueError("divider count must be positive or automatic")
-    centres = _divider_cross_centres(zone, along, count)
+    spacing = options["spacing"]
+    if spacing <= 0.0:
+        raise ValueError("divider spacing must be positive")
     if count > 1:
-        span = (zone.y1 - zone.y0) if along == "x" else (zone.x1 - zone.x0)
         lean = height * math.tan(math.radians(angle)) if angle else 0.0
-        spacing = centres[1] - centres[0]
-        needed = thickness + 2.0 * abs(lean)
-        if spacing < needed:
+        needed_gap = thickness + 2.0 * abs(lean)
+        if spacing < needed_gap:
             raise ValueError(
-                f"{count} dividers need at least {needed * (count + 1):.1f} mm "
-                f"across but the zone gives {span:.1f} mm"
+                f"{count} dividers {spacing:.1f} mm apart need at least "
+                f"{needed_gap:.1f} mm between centres - increase spacing, "
+                "reduce thickness, or reduce the angle"
             )
+    span = (zone.y1 - zone.y0) if along == "x" else (zone.x1 - zone.x0)
+    needed_span = spacing * (count + 1)
+    if needed_span > span + 1e-9:
+        raise ValueError(
+            f"{count} dividers {spacing:.1f} mm apart need {needed_span:.1f} mm "
+            f"across but the zone gives {span:.1f} mm"
+        )
+    centres = _divider_cross_centres(zone, along, count, spacing)
     solids: list[trimesh.Trimesh] = []
     for cross_centre in centres:
         shift = cross_centre - (zone.centre[1] if along == "x" else zone.centre[0])

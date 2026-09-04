@@ -18,10 +18,8 @@ from urllib.request import urlopen, Request
 
 import wavefinity_web
 from organizer_app import design_from_dict
-from organizer_inserts import layout_zone
 from wavefinity_web import (
     apply_feature_payload,
-    auto_size_payload,
     catalog_payload,
     default_design,
     default_feature_payload,
@@ -117,66 +115,48 @@ class WebApplicationTests(unittest.TestCase):
         deleted = delete_feature_payload({"design": updated["design"], "index": 0})
         self.assertEqual(deleted["design"]["layout"]["features"], [])
 
-    def test_fit_to_bin_grows_a_divider_only_along_its_run_axis(self):
-        design = default_design()
-        feature = default_feature_payload({"design": design, "kind": "divider"})["feature"]
-        cross = feature["zone"][3] - feature["zone"][1]
-        feature["zone"] = [-2.0, feature["zone"][1], 2.0, feature["zone"][3]]
-        grown = auto_size_payload({
-            "design": design, "feature": feature, "index": None,
-        })["feature"]
-        box, layout, *_ = design_from_dict(design)
-        whole = layout_zone(box, layout.mode)
-        self.assertGreater(grown["zone"][2] - grown["zone"][0], 4.0)
-        self.assertLessEqual(grown["zone"][2] - grown["zone"][0], whole.width + 1e-6)
-        self.assertAlmostEqual(grown["zone"][3] - grown["zone"][1], cross, delta=0.05)
-
-    def test_fit_to_bin_stops_short_of_a_neighbouring_support(self):
-        design = default_design()
-        neighbour = default_feature_payload({"design": design, "kind": "divider"})["feature"]
-        neighbour["zone"] = [3.0, -1.0, 6.0, 1.0]
-        placed = apply_feature_payload({"design": design, "feature": neighbour, "index": None})
-        design = placed["design"]
-        divider = default_feature_payload({"design": design, "kind": "divider"})["feature"]
-        divider["zone"] = [-2.0, -1.0, 2.0, 1.0]
-        grown = auto_size_payload({
-            "design": design, "feature": divider, "index": None,
-        })["feature"]
-        self.assertLess(grown["zone"][2], 3.0)
-
-    def test_fit_to_bin_leaves_count_and_the_run_direction_untouched(self):
-        design = default_design()
-        feature = default_feature_payload({"design": design, "kind": "divider"})["feature"]
-        feature["zone"] = [-2.0, feature["zone"][1], 2.0, feature["zone"][3]]
-        feature["count"] = 3
-        grown = auto_size_payload({
-            "design": design, "feature": feature, "index": None,
-        })["feature"]
-        self.assertEqual(grown["count"], 3)
-        self.assertEqual(grown["along"], "x")
-
-    def test_fit_to_bin_is_refused_for_a_kind_other_than_divider(self):
-        design = default_design()
-        feature = default_feature_payload({"design": design, "kind": "pocket"})["feature"]
-        with self.assertRaises(ValueError):
-            auto_size_payload({"design": design, "feature": feature, "index": None})
-
     def test_mode_conversion_preserves_valid_layout(self):
         design = default_design()
         converted = mode_payload({"design": design, "mode": "separate"})["design"]
         self.assertEqual(converted["layout"]["mode"], "separate")
-        preview = preview_payload(converted)
+        preview = preview_payload({"design": converted})
         self.assertTrue(preview["geometry"])
         self.assertEqual(preview["design"]["layout"]["mode"], "separate")
 
     def test_preview_returns_camera_independent_geometry_and_uniform_bounds(self):
-        preview = preview_payload(default_design())
+        preview = preview_payload({"design": default_design()})
         self.assertTrue(preview["geometry"])
         self.assertIn("normal", preview["geometry"][0])
         x0, y0, x1, y1 = preview["layout_bounds"]
         self.assertGreater(x1, x0)
         self.assertGreater(y1, y0)
         self.assertIn("inside", preview["dimensions"]["x"])
+
+    def test_preview_includes_a_highlighted_draft_not_yet_placed(self):
+        design = default_design()
+        draft = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        with_draft = preview_payload({"design": design, "draft": draft})
+        without_draft = preview_payload({"design": design})
+        self.assertIsNone(with_draft["draft_error"])
+        self.assertTrue(any(face["kind"].startswith("draft_") for face in with_draft["geometry"]))
+        self.assertFalse(any(face["kind"].startswith("draft_") for face in without_draft["geometry"]))
+        # the draft never touches the real (empty) layout
+        self.assertEqual(with_draft["design"]["layout"]["features"], [])
+
+    def test_an_invalid_draft_does_not_break_the_rest_of_the_preview(self):
+        design = default_design()
+        placed_divider = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        placed = apply_feature_payload({
+            "design": design, "feature": placed_divider, "index": None,
+        })["design"]
+        broken_draft = default_feature_payload({"design": placed, "kind": "pocket"})["feature"]
+        broken_draft["options"] = {"height": -5.0}
+        preview = preview_payload({"design": placed, "draft": broken_draft})
+        self.assertIsNotNone(preview["draft_error"])
+        self.assertIn("pocket", preview["draft_error"])
+        # the already-placed divider still renders normally despite the bad draft
+        self.assertTrue(any(face["kind"] == "feature_divider" for face in preview["geometry"]))
+        self.assertTrue(any(face["kind"] == "draft_invalid" for face in preview["geometry"]))
 
 
 class WebServerTests(unittest.TestCase):

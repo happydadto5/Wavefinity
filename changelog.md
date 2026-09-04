@@ -1,5 +1,77 @@
 # Changelog
 
+## 2026-09-04 — Divider gets radically simpler; every draft previews live in the bin
+
+### Changed
+
+- **The isolated "Live support preview" canvas is gone, for every kind.**
+  Whatever is currently being edited (not yet added) now renders live,
+  highlighted in amber, directly inside the main 3D and 2D bin views -
+  right where it will actually sit, at the bin's own scale, instead of
+  alone on a separate small canvas with its own camera. `/api/preview`
+  gained an optional `draft` field: the draft is built and shown alongside
+  the real placed supports (tagged `draft_<kind>` so the browser can colour
+  it apart from them), but it never touches the real design - a draft
+  that's currently invalid falls back to the same red placeholder prism a
+  broken placed feature already used, so a rejected edit is now
+  unmistakable (see the wedge/45° entry below) instead of silently leaving
+  the old shape on screen.
+- **Divider is now five fields, not ten.** Wall to wall by default, with
+  quantity, spacing, angle and thickness fully determining where every
+  wall goes - Center X/Y, the footprint Width/Depth, and the "Fit to bin"
+  button are gone because there is no longer a manually-sized footprint
+  for them to describe. With that its last caller gone, `/api/feature/
+  autosize`, `auto_size_payload` and `_grow_zone_to_fit` are removed
+  outright rather than left reachable by nothing - dead code, not a
+  deprecation:
+  - **Width mm** (renamed from "Wall mm" - it always meant the same
+    thing, the wall's own thickness).
+  - **Height mm** - blank by default, with grey placeholder text reading
+    "height of box" instead of a pre-filled number, so "blank" visibly
+    means "as tall as the bin," not "I forgot to look."
+  - **Angle °**, **Quantity**, and **Leaning shape** (kept - see below) -
+    unchanged.
+  - **Spacing mm** (new) - blank by default ("fills evenly" placeholder),
+    overriding the computed even gap between walls when you want an exact
+    number instead. `divider_defaults` computes the auto value as
+    `span / (count + 1)`; `build_divider` uses whichever `spacing` resolves
+    to as the actual fence-post gap, so an override is anchored the same
+    way the auto value already was - only the number changes, not the
+    layout model.
+- **The floor now has its own colour** (`#b9a97e`, a warm tan) instead of
+  `#e8efef`, which was nearly indistinguishable from both the white page
+  background and the pale "inside wall" colour.
+
+### Fixed
+
+- **"Changing to Wedge doesn't change the preview" and "wedge at 45° looks
+  the same"** were two different things wearing one report. At the default
+  0° angle, Wedge and Straight are mathematically identical (confirmed by
+  diffing the returned geometry) - correct, matching the help text already
+  under the control. At 45° with the default thickness, a *wedge*
+  specifically is refused outright (tapers to under the printable minimum)
+  - and the now-removed small preview canvas kept silently showing the
+  last *successful* build on any error, so a rejected edit looked
+  indistinguishable from a no-op. Confirmed live: the new live-in-bin
+  preview turns the divider into the red invalid-placeholder shape the
+  instant that happens, with the reason spelled out in the status line
+  right above it.
+
+### Verified, not changed
+
+- **A full-span divider never reaches past the true outer wall.** Checked
+  directly against the engine for a 3-way divider on the default bin: the
+  maximum distance any vertex of any of the three walls sits outside the
+  box's own outer wall polygon is `0.000000` mm. Full-span dividers hug
+  the *wavy* wall exactly, not a flat approximation, so at some camera
+  angles a wall's own crest can appear to weave in front of a divider's
+  amber highlight in the simple painter's-algorithm preview - a rendering
+  ambiguity between two faces meeting at (almost) the same depth, not the
+  built part reaching anywhere it shouldn't. Softened the draft highlight's
+  outline stroke (from a bold 1.4px to a light 0.6px) since that was most
+  of what made the ambiguity visible; the fill colour remains the primary
+  way a draft reads as "this one is different."
+
 ## 2026-09-04 — Close the last gap: find a stale process even with no PID on record
 
 ### Fixed

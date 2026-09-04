@@ -10,10 +10,8 @@ const state = {
   draftKind: "divider",
   draft: null,
   draftResolvedOptions: {},
-  draftGeometry: [],
   selected: null,
   camera: { yaw: 45, elevation: 76, zoom: 1 },
-  draftCamera: { yaw: 45, elevation: 58, zoom: 1 },
   previewRequest: 0,
   draftRequest: 0,
   output: "",
@@ -28,7 +26,7 @@ const state = {
 const VERSION_POLL_MS = 5000;
 
 const COLORS = {
-  outside: "#8ea8b2", inside: "#c9d9dc", rim: "#6f8f99", floor: "#e8efef",
+  outside: "#8ea8b2", inside: "#c9d9dc", rim: "#6f8f99", floor: "#b9a97e",
   label: "#315766", label_hole: "#e8efef", top_label_ledge: "#7799a3",
   scoop: "#a9bec3", insert_base: "#c5ab83", invalid: "#c95f58",
   cradle: "#e59f54", nest: "#df8d5b", bore: "#6fb98f", post: "#51a5a1",
@@ -36,6 +34,11 @@ const COLORS = {
 };
 const INSERT_TINT = "#c2a075";
 const INSERT_TINT_MIX = .5;
+// The support currently being edited, not yet added - shown live in the
+// same bin view instead of its own isolated canvas, so it needs a colour
+// that reads as "this one is different" against every kind's own muted
+// palette above.
+const DRAFT_HIGHLIGHT = "#f0a93c";
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -286,7 +289,6 @@ function wireControls() {
   wireLayoutInteraction();
   new ResizeObserver(() => renderPreview3D()).observe($("#preview-3d").parentElement);
   new ResizeObserver(() => renderLayout2D()).observe($("#preview-2d").parentElement);
-  new ResizeObserver(() => renderDraftPreview()).observe($("#draft-preview"));
 }
 
 function starterItem() {
@@ -350,10 +352,18 @@ function field(label, key, value, options = {}) {
   const classes = options.wide ? "wide" : "";
   const type = options.type || "number";
   const attrs = type === "number" ? `step="${options.step || "0.1"}"` : "";
+  const placeholder = options.placeholder ? ` placeholder="${escapeHtml(options.placeholder)}"` : "";
   return `<label class="${classes}">${escapeHtml(label)}${options.unit ? `<span class="unit">${escapeHtml(options.unit)}</span>` : ""}
-    <input type="${type}" data-draft="${key}" value="${escapeHtml(value ?? "")}" ${attrs}>
+    <input type="${type}" data-draft="${key}" value="${escapeHtml(value ?? "")}" ${attrs}${placeholder}>
   </label>`;
 }
+
+// Fields that stay blank with explanatory grey placeholder text instead of
+// showing the resolved number, for the one kind (so far) where knowing the
+// exact auto-computed value matters less than knowing what "blank" means.
+const AUTO_PLACEHOLDER = {
+  divider: { height: "height of box", spacing: "fills evenly" },
+};
 
 function renderDraftFields() {
   if (!state.draft) return;
@@ -365,12 +375,9 @@ function renderDraftFields() {
   const width = zone[2] - zone[0];
   const depth = zone[3] - zone[1];
   let html = "";
-  if (one.kind === "divider") {
-    html += `<div class="auto-size-row wide">
-      <button type="button" class="button secondary" data-action="auto-fill" title="Stretch this divider to reach the bin's walls">Fit to bin</button>
-    </div>`;
+  if (one.kind !== "divider") {
+    html += field("Center X", "cx", fmt(cx), { unit: "mm", step: "1" }) + field("Center Y", "cy", fmt(cy), { unit: "mm", step: "1" });
   }
-  html += field("Center X", "cx", fmt(cx), { unit: "mm", step: "1" }) + field("Center Y", "cy", fmt(cy), { unit: "mm", step: "1" });
   if (info.flags.size) {
     html += field("Width", "width", fmt(width), { unit: "mm", step: "1" });
     html += field("Depth", "depth", fmt(depth), { unit: "mm", step: "1" });
@@ -403,10 +410,13 @@ function renderDraftFields() {
   }
   for (const option of info.fields) {
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
-    const shown = explicit
+    const autoHint = AUTO_PLACEHOLDER[info.kind]?.[option.key];
+    const shown = !explicit && autoHint
+      ? ""
+      : explicit
       ? one.options[option.key]
       : state.draftResolvedOptions?.[option.key] ?? option.default;
-    html += field(option.label, `option:${option.key}`, shown);
+    html += field(option.label, `option:${option.key}`, shown, autoHint ? { placeholder: autoHint } : {});
     if (option.key === "angle") {
       html += `<fieldset class="wide"><legend>Leaning shape</legend><div class="segmented two">
         <label><input type="radio" name="draft-wedge" value="wedge" ${one.wedge !== false ? "checked" : ""}><span>Wedge</span></label>
@@ -437,26 +447,6 @@ function renderDraftFields() {
     updateSelectionButtons();
     refreshDraftSoon();
   });
-  const autoFill = $('[data-action="auto-fill"]', $("#draft-fields"));
-  if (autoFill) autoFill.addEventListener("click", runAutoSize);
-}
-
-async function runAutoSize() {
-  if (!state.draft) return;
-  try {
-    const result = await api("/api/feature/autosize", {
-      design: state.design,
-      feature: state.draft,
-      index: state.selected,
-    });
-    state.draft = result.feature;
-    state.draftResolvedOptions = result.resolved_options || {};
-    renderDraftFields();
-    updateSelectionButtons();
-    refreshDraft();
-  } catch (error) {
-    toast(error.message, true);
-  }
 }
 
 function updateDraftFromFields(event) {
@@ -546,10 +536,11 @@ async function refreshDraft() {
   try {
     const result = await api("/api/feature/draft", { design: state.design, feature: state.draft });
     if (request !== state.draftRequest) return;
-    state.draftGeometry = result.geometry;
     state.draftResolvedOptions = result.resolved_options || {};
     const info = partInfo();
+    const autoHints = AUTO_PLACEHOLDER[info.kind] || {};
     for (const option of info.fields) {
+      if (option.key in autoHints) continue; // stays blank with its placeholder, not a filled number
       if (Object.prototype.hasOwnProperty.call(state.draft.options || {}, option.key)) continue;
       const input = $(`[data-draft="option:${option.key}"]`, $("#draft-fields"));
       if (input && Object.prototype.hasOwnProperty.call(state.draftResolvedOptions, option.key)) {
@@ -557,11 +548,11 @@ async function refreshDraft() {
       }
     }
     $("#draft-status").textContent = "";
-    renderDraftPreview();
   } catch (error) {
     if (request !== state.draftRequest) return;
     $("#draft-status").textContent = error.message;
   }
+  refreshPreview();
 }
 
 async function applySupport(index) {
@@ -683,7 +674,9 @@ async function refreshPreview() {
   $("#preview-state").textContent = "Building preview…";
   setError();
   try {
-    const result = await api("/api/preview", { design: state.design });
+    const payload = { design: state.design };
+    if (state.draft) payload.draft = state.draft;
+    const result = await api("/api/preview", payload);
     if (request !== state.previewRequest) return;
     state.preview = result;
     state.design = result.design;
@@ -704,6 +697,8 @@ async function refreshPreview() {
 
 function kindColor(kind) {
   if (COLORS[kind]) return COLORS[kind];
+  if (kind === "draft_invalid") return COLORS.invalid;
+  if (kind.startsWith("draft_")) return DRAFT_HIGHLIGHT;
   const base = kind.replace(/^insert_/, "").replace(/^feature_/, "");
   if (kind.endsWith("invalid")) return COLORS.invalid;
   if (kind.startsWith("insert_") && COLORS[base]) {
@@ -757,7 +752,7 @@ function canvasSize(canvas) {
   return { context, width, height };
 }
 
-function drawGeometry(canvas, geometry, camera, draft = false) {
+function drawGeometry(canvas, geometry, camera) {
   const { context, width, height } = canvasSize(canvas);
   context.clearRect(0, 0, width, height);
   if (!geometry?.length) {
@@ -780,7 +775,7 @@ function drawGeometry(canvas, geometry, camera, draft = false) {
     minY = Math.min(minY, point[1]); maxY = Math.max(maxY, point[1]);
   }
   const spanX = Math.max(1e-8, maxX - minX), spanY = Math.max(1e-8, maxY - minY);
-  const pad = draft ? 15 : Math.max(34, Math.min(width, height) * .08);
+  const pad = Math.max(34, Math.min(width, height) * .08);
   const scale = Math.min((width - 2 * pad) / spanX, (height - 2 * pad) / spanY) * camera.zoom;
   const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
   const project = point => [width / 2 + (point[0] - midX) * scale, height / 2 + (point[1] - midY) * scale];
@@ -797,19 +792,16 @@ function drawGeometry(canvas, geometry, camera, draft = false) {
     const light = .78 + Math.max(0, Math.min(1, face.facing)) * .35;
     context.fillStyle = shade(base, light);
     context.fill();
-    context.strokeStyle = draft ? "rgba(31,62,71,.18)" : "rgba(38,65,75,.13)";
-    context.lineWidth = draft ? .45 : .35;
+    const isDraft = face.kind.startsWith("draft_");
+    context.strokeStyle = isDraft ? "rgba(196,131,20,.5)" : "rgba(38,65,75,.13)";
+    context.lineWidth = isDraft ? .6 : .35;
     context.stroke();
   }
 }
 
 function renderPreview3D() {
   if (!state.preview) return;
-  drawGeometry($("#preview-3d"), state.preview.geometry, state.camera, false);
-}
-
-function renderDraftPreview() {
-  drawGeometry($("#draft-preview"), state.draftGeometry, state.draftCamera, true);
+  drawGeometry($("#preview-3d"), state.preview.geometry, state.camera);
 }
 
 function wireSceneInteraction(canvas, camera, render) {
@@ -930,6 +922,17 @@ function renderLayout2D() {
       context.strokeRect(p1[0] - 6, p1[1] - 6, 12, 12);
     }
   });
+  if (state.draft) {
+    const zone = state.draft.zone;
+    const p0 = toCanvas([zone[0], zone[3]]), p1 = toCanvas([zone[2], zone[1]]);
+    context.fillStyle = DRAFT_HIGHLIGHT + "55";
+    context.strokeStyle = DRAFT_HIGHLIGHT;
+    context.lineWidth = 2;
+    context.setLineDash([6, 3]);
+    context.fillRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+    context.strokeRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+    context.setLineDash([]);
+  }
 }
 
 function layoutPoint(event) {

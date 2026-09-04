@@ -547,10 +547,36 @@ class MultiDividerTests(unittest.TestCase):
         centres = sorted((wall.bounds[0][0] + wall.bounds[1][0]) / 2.0 for wall in walls)
         self.assertAlmostEqual(centres[1], 0.0, places=3)  # zone is centred on x=0
 
+    def test_an_explicit_spacing_overrides_the_computed_even_gap(self) -> None:
+        zone = Zone(-15.0, -20.0, 15.0, 20.0)
+        walls = build_features(
+            self.box,
+            [Feature("divider", zone, along="x", count=3,
+                      options={"thickness": 1.0, "spacing": 5.0})],
+            self.box.wall,
+        )
+        self.assertEqual(len(walls), 3)
+        centres = sorted((wall.bounds[0][1] + wall.bounds[1][1]) / 2.0 for wall in walls)
+        gaps = [b - a for a, b in zip(centres, centres[1:])]
+        self.assertAlmostEqual(gaps[0], 5.0, places=3)
+        self.assertAlmostEqual(gaps[1], 5.0, places=3)
+        # anchored from the zone's low edge, not necessarily centred, since
+        # an explicit spacing need not equal the auto (evenly-filling) value
+        self.assertAlmostEqual(centres[0] - zone.y0, 5.0, places=3)
+
+    def test_an_explicit_spacing_too_tight_for_the_zone_is_refused(self) -> None:
+        zone = Zone(-15.0, -20.0, 15.0, 20.0)
+        one = Feature(
+            "divider", zone, along="x", count=3,
+            options={"thickness": 1.0, "spacing": 100.0},
+        )
+        with self.assertRaisesRegex(ValueError, "need .* mm.*but the zone gives"):
+            build_features(self.box, [one], self.box.wall)
+
     def test_too_many_dividers_for_the_zone_is_refused(self) -> None:
         zone = Zone(-15.0, -2.0, 15.0, 2.0)
         one = Feature("divider", zone, along="x", count=5, options={"thickness": 2.0})
-        with self.assertRaisesRegex(ValueError, "dividers need at least"):
+        with self.assertRaisesRegex(ValueError, "need at least"):
             build_features(self.box, [one], self.box.wall)
 
     def test_count_also_works_full_span_and_leaning(self) -> None:

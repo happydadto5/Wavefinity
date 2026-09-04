@@ -44,7 +44,6 @@ from organizer_inserts import (
     Item,
     Layout,
     Segment,
-    Zone,
     build_features,
     layout_from_dict,
     layout_to_dict,
@@ -52,7 +51,6 @@ from organizer_inserts import (
     moved_feature,
     resized_feature,
     resolved_options,
-    snapped_zone,
 )
 from organizer_app import (
     APP_DIR,
@@ -213,78 +211,6 @@ def _first_open_position(
     raise ValueError("there is no open floor area large enough for that support")
 
 
-def _grow_zone_to_fit(
-    zone: Zone,
-    bounds: Zone,
-    obstacles: list[Zone],
-    grow_x: bool,
-    grow_y: bool,
-    pitch: float,
-) -> Zone:
-    """Inflate a zone's active sides until each hits the layout bounds or an obstacle.
-
-    Each of the four sides grows independently, ``pitch`` at a time, and stops
-    the moment it would leave the usable floor or come within
-    ``MIN_FEATURE_GAP`` of another support or a reserved scoop/label zone.
-    That is a simple greedy fill, not a true maximal-rectangle solve, but it
-    is enough to turn "make this as big as it can be" into one click.
-    """
-    x0, y0, x1, y1 = zone.x0, zone.y0, zone.x1, zone.y1
-    active = {"x0": grow_x, "x1": grow_x, "y0": grow_y, "y1": grow_y}
-    steps = int(max(bounds.width, bounds.depth) / pitch) + 4
-    for _ in range(steps):
-        moved = False
-        for side in ("x0", "x1", "y0", "y1"):
-            if not active[side]:
-                continue
-            trial = {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
-            trial[side] += -pitch if side in ("x0", "y0") else pitch
-            if (trial["x0"] < bounds.x0 - 1e-6 or trial["y0"] < bounds.y0 - 1e-6
-                    or trial["x1"] > bounds.x1 + 1e-6 or trial["y1"] > bounds.y1 + 1e-6):
-                active[side] = False
-                continue
-            candidate = Zone(trial["x0"], trial["y0"], trial["x1"], trial["y1"])
-            if any(candidate.overlaps(other, MIN_FEATURE_GAP) for other in obstacles):
-                active[side] = False
-                continue
-            x0, y0, x1, y1 = trial["x0"], trial["y0"], trial["x1"], trial["y1"]
-            moved = True
-        if not moved:
-            break
-    return Zone(x0, y0, x1, y1)
-
-
-def auto_size_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """"Fit to bin": grow a divider draft's zone to reach the usable floor.
-
-    Only grows along the divider's own run axis - the other axis is its
-    wall thickness, a separate setting entirely.
-    """
-    box, layout, label, _part_name, label_location, scoop = _design(payload["design"])
-    one = _feature_from_json(payload["feature"], layout.mode)
-    if one.kind != "divider":
-        raise ValueError("fitting to the bin is only offered for a divider")
-    index = payload.get("index")
-    bounds = layout_zone(box, layout.mode)
-    pitch = 8.0 if layout.mode == "cartridge" else layout.snap
-    others = [
-        feature.zone for position, feature in enumerate(layout.features)
-        if index is None or position != int(index)
-    ]
-    reserved = [
-        zone for _name, zone in _customization_zones(
-            box, label, label_location, scoop, layout.mode
-        )
-    ]
-    grow_x, grow_y = one.along == "x", one.along != "x"
-    grown = _grow_zone_to_fit(one.zone, bounds, others + reserved, grow_x, grow_y, pitch)
-    one = replace(one, zone=snapped_zone(grown, box, layout.mode, layout.snap))
-    return {
-        "feature": feature_to_dict(one, layout.mode),
-        "resolved_options": resolved_options(box, one, base_height(box, layout.mode)),
-    }
-
-
 def catalog_payload() -> dict[str, Any]:
     parts = []
     indexed = {kind: (title, blurb, flags, fields)
@@ -338,11 +264,13 @@ def _design(raw: dict[str, Any]) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     return design_from_dict(raw)
 
 
-def preview_payload(raw: dict[str, Any]) -> dict[str, Any]:
-    box, layout, label, part_name, label_location, scoop = _design(raw)
+def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    draft_raw = payload.get("draft")
+    draft = _feature_from_json(draft_raw, layout.mode) if draft_raw else None
     with GEOMETRY_LOCK:
         scene = preview_geometry(
-            box, label, layout.features, layout.mode, label_location, scoop
+            box, label, layout.features, layout.mode, label_location, scoop, draft
         )
     bounds = layout_zone(box, layout.mode)
     geometry = [
@@ -359,6 +287,7 @@ def preview_payload(raw: dict[str, Any]) -> dict[str, Any]:
         "message": scene["message"],
         "feature_errors": scene["feature_errors"],
         "invalid_feature_indexes": scene["invalid_feature_indexes"],
+        "draft_error": scene["draft_error"],
         "dimensions": {
             "x": scene["x_text"],
             "y": scene["y_text"],
@@ -542,12 +471,11 @@ def sampler_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 POST_ROUTES = {
-    "/api/preview": lambda payload: preview_payload(payload["design"]),
+    "/api/preview": preview_payload,
     "/api/design/validate": lambda payload: {
         "design": design_to_dict(*_design(payload["design"]))
     },
     "/api/feature/default": default_feature_payload,
-    "/api/feature/autosize": auto_size_payload,
     "/api/feature/draft": draft_payload,
     "/api/feature/apply": apply_feature_payload,
     "/api/feature/delete": delete_feature_payload,

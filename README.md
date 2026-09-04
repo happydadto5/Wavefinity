@@ -62,11 +62,16 @@ not the flat placement rectangle - that rectangle still shows as a dashed
 reference line, since every non-full-span support has to stay inside it, but
 the wavy outline is what answers "does this actually reach the wall."
 
-Selecting an interior support immediately builds its actual mesh. Parameter
-changes rebuild that draft after a short typing pause, before it is added to the
-layout. **Add support** finds open floor space; selecting a placed support loads
-it back into the same editor for exact changes. Invalid dimensions, overlaps,
-reserved scoop/label space, and labels that cannot fit are reported beside the
+Selecting an interior support immediately builds its actual mesh and shows it
+live, highlighted, right inside the main 3D and 2D bin views - at the bin's
+own scale, alongside whatever is already placed, not on a separate isolated
+canvas with its own camera. Parameter changes rebuild that draft after a
+short typing pause, before it is added to the layout; a draft that is
+currently invalid falls back to a red placeholder shape in the same spot, so
+a rejected edit is never mistaken for no change happening. **Add support**
+finds open floor space; selecting a placed support loads it back into the
+same editor for exact changes. Invalid dimensions, overlaps, reserved
+scoop/label space, and labels that cannot fit are reported beside the
 preview and refused at export.
 
 **Save design** downloads the existing `.wavefinity.json` format, and **Open
@@ -86,13 +91,17 @@ support**. Placed supports can be selected in the list or on the 2D layout,
 then moved, resized, or edited with exact numeric fields. Normal layouts snap
 to **1 mm**. Overlaps and out-of-bounds features are refused at export.
 
-A **divider** also gets a **Fit to bin** button above its fields, since it is
-the one kind where a size has an unambiguous "reach the bin" meaning - every
-other kind's quantity means repeated elements inside one footprint, not
-sections of the bin, so they keep manual sizing and the ordinary per-kind
-**Auto** button next to Quantity. Fit to bin grows the zone to the usable
-floor edge, a placed neighbour, or a reserved scoop/label zone, only along
-the divider's own run axis - its wall thickness is a separate field.
+A **divider** is a special case with no manually-sized footprint at all: it
+defaults to full-span (wall to wall) and centres itself, so there is nothing
+for Center X/Y or a footprint Width/Depth to describe, and no separate
+"fit it to the bin" action either - it already is. Its whole field set is
+just **Width mm** (the wall's own thickness), **Height mm** (blank by
+default, reading "height of box" until you type one), **Angle °**,
+**Quantity**, **Spacing mm** (blank - "fills evenly" - until overridden with
+an exact gap), and **Leaning shape**. Every other kind keeps manual sizing
+and the ordinary per-kind **Auto** button next to Quantity, since their
+quantity means repeated elements inside one footprint, not sections of the
+bin.
 
 ### Insert types
 
@@ -177,11 +186,10 @@ default and is never exposed to the network.
 |---|---|
 | `GET /api/health` | Identify an existing Wavefinity server. |
 | `GET /api/catalog` | Registered supports, modes and initial values. |
-| `POST /api/preview` | Validate a design and return camera-independent geometry. |
+| `POST /api/preview` | Validate a design and return camera-independent geometry, plus an optional live-highlighted draft. |
 | `POST /api/design/validate` | Validate and normalize a saved design. |
 | `POST /api/feature/default` | Create an engine-derived support draft. |
-| `POST /api/feature/autosize` | "Fit to bin": grow a divider draft's zone to the usable floor. |
-| `POST /api/feature/draft` | Build actual mesh faces for live parameter preview. |
+| `POST /api/feature/draft` | Build one support's own mesh faces to validate it and resolve its blank options. |
 | `POST /api/feature/apply` | Snap, validate, add or update a support. |
 | `POST /api/feature/delete` | Remove a support. |
 | `POST /api/layout/mode` | Convert a layout between print modes. |
@@ -232,7 +240,7 @@ many.
 | `nest` | Snug, support-free top-down recess following every measured item segment | `depth`, `height`, `wall` |
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
-| `divider` | One or more straight or leaning subdividing walls along X or Y | `height`, `thickness`, `angle` |
+| `divider` | One or more straight or leaning subdividing walls along X or Y | `height`, `thickness`, `angle`, `spacing` |
 | `pocket` | Raised rectangular tray with a recessed centre | `height`, `depth`, `wall` |
 
 There is no separate "slot" kind - a divider covers it. A slot's one real
@@ -273,10 +281,13 @@ to, `full_span` or not).
 A divider is also the one kind whose `along` is a direct browser choice
 ("Runs along" X/Y) rather than inferred from its footprint, and whose
 `count` places several parallel walls instead of repeating some other
-element: `count` dividers split the zone's cross axis into `count + 1` equal
-gaps - fence-post spacing, so `count = 1` (the default) lands exactly where a
-single centred divider always has. Height, angle and thickness apply to
-every wall the count places, not just one.
+element: `count` dividers split the cross axis into `count + 1` equal gaps -
+fence-post spacing, so `count = 1` (the default) lands exactly where a
+single centred divider always has. `spacing` overrides that computed gap
+with an exact one instead (blank keeps it automatic); since it is used as
+the gap as-is, an override only keeps the group centred if it happens to
+equal the auto value. Height, angle, thickness and spacing apply to every
+wall the count places, not just one.
 
 Builder options are intentionally generic. The editor passes them to the
 registered builder, so a future `@feature` function can add its own settings

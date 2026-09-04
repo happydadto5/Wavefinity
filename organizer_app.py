@@ -121,9 +121,9 @@ def label_position(value: str) -> str:
 # means "let the builder choose".
 PART_KINDS = (
     ("divider", "Divider", "A straight wall that splits the floor into compartments.",
-     {"qty": True, "size": True, "along": True, "item": False, "lean": True},
-     (("Height mm", "height", ""), ("Wall mm", "thickness", "1.6"),
-      ("Angle °", "angle", "0"))),
+     {"qty": True, "size": False, "along": True, "item": False, "lean": True},
+     (("Width mm", "thickness", "1.6"), ("Height mm", "height", ""),
+      ("Angle °", "angle", "0"), ("Spacing mm", "spacing", ""))),
     ("post", "Post", "A tapered peg for tape rolls, spools, sockets and rings.",
      {"qty": True, "size": False, "along": True, "item": False, "lean": False},
      (("Height mm", "height", "16"), ("Diameter mm", "diameter", "12"),
@@ -467,8 +467,19 @@ def validate_customization_clearance(
 def preview_geometry(
     box: BoxSpec, label: str = "", features: Iterable[Feature] = (),
     mode: str = "fused", label_location: str = "bottom", scoop: bool = False,
+    draft: Feature | None = None,
 ) -> dict[str, object]:
-    """Build camera-independent preview geometry once per design change."""
+    """Build camera-independent preview geometry once per design change.
+
+    ``draft`` is the support currently being edited, not yet added to the
+    layout - included in the same geometry, tagged ``draft_<kind>`` instead
+    of ``feature_<kind>``/``insert_<kind>`` so the browser can highlight it
+    in place, right where it will actually sit, instead of drawing it alone
+    on its own tiny canvas. It never affects ``feature_errors`` or
+    ``invalid_feature_indexes`` - those describe the real layout - and a
+    draft that fails to build still falls back to the same placeholder
+    prism a placed feature would, reported through ``draft_error`` instead.
+    """
     features = tuple(features)
     outer, cavity = preview_rings(box)
     floor_z, rim_z = box.wall, box.z
@@ -541,6 +552,26 @@ def preview_geometry(
                 f"{part_kind}_invalid",
             ))
 
+    draft_error = None
+    if draft is not None:
+        conflict = next(
+            (name for name, zone in reserved if draft.zone.overlaps(zone, MIN_FEATURE_GAP)),
+            None,
+        )
+        if conflict is not None:
+            draft_error = f"{draft.kind}: overlaps the {conflict}"
+        try:
+            for solid in build_features(box, [draft], base_z, layout_zone(box, mode)):
+                geometry.extend(_mesh_preview_geometry(solid, f"draft_{draft.kind}"))
+        except Exception as error:
+            draft_error = f"{draft.kind}: {error}"
+            geometry.extend(_prism_geometry(
+                draft.zone,
+                base_z,
+                min(box.z - 0.25, _feature_height(box, draft, base_z)),
+                "draft_invalid",
+            ))
+
     fits, message = True, ""
     if tidy:
         try:
@@ -575,6 +606,7 @@ def preview_geometry(
         "message": message,
         "feature_errors": tuple(feature_errors),
         "invalid_feature_indexes": tuple(invalid_feature_indexes),
+        "draft_error": draft_error,
         "customization_zones": tuple(reserved),
         "x_text": f"{box.x:g}mm ({math.floor(inside_x):g} inside)",
         "y_text": f"{box.y:g}mm ({math.floor(inside_y):g} inside)",

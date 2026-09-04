@@ -104,7 +104,6 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .step { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 7px; border-radius: 50%; background: var(--teal); color: white; font-size: 11px; }
 .quiet-status { color: var(--muted); font-size: 11px; }
 .muted { color: var(--muted); font-size: 12px; line-height: 1.4; }
-#draft-preview { width: 100%; height: 150px; display: block; border-radius: 6px; background: white; border: 1px solid #e4eaec; margin: 10px 0; }
 .draft-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .draft-fields .wide { grid-column: 1 / -1; }
 .input-with-button { display: flex; gap: 6px; margin-top: 5px; }
