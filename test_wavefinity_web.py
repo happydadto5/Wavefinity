@@ -320,35 +320,72 @@ class StaleProcessReplacementTests(unittest.TestCase):
         # real pid was recorded at all.
         self.assertGreater(int(self.pid_file.read_text(encoding="utf-8").strip()), 0)
 
-        replaced = wavefinity_web._replace_stale_process(f"http://127.0.0.1:{port}/")
+        replaced = wavefinity_web._replace_stale_process(f"http://127.0.0.1:{port}/", "127.0.0.1", port)
         self.assertTrue(replaced)
         self.assertIsNotNone(proc.wait(timeout=5))  # actually terminated, not just unresponsive
 
         fresh = wavefinity_web.make_server("127.0.0.1", port)  # the port is genuinely free again
         fresh.server_close()
 
-    def test_a_service_with_no_recorded_pid_is_left_running(self):
-        # a health-check that succeeds with no PID file on record - an
-        # older server predating this feature, or an unrelated program -
-        # must never be touched
-        server = wavefinity_web.make_server("127.0.0.1", 0)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            port = server.server_address[1]
-            self.assertFalse(self.pid_file.exists())
-            replaced = wavefinity_web._replace_stale_process(f"http://127.0.0.1:{port}/")
-            self.assertFalse(replaced)
-            with urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as response:
-                self.assertTrue(json.loads(response.read())["ok"])
-        finally:
-            server.shutdown()
-            server.server_close()
+    def test_a_service_with_no_recorded_pid_is_still_found_and_replaced(self):
+        # An older server predating wavefinity.pid, or one started some
+        # other way, never wrote this test's PID_FILE - the OS-level
+        # fallback in _pid_on_port must still find and safely replace it.
+        # A real subprocess, not an in-thread server: the fallback finds
+        # whatever the OS says holds the port, so an in-thread server would
+        # have this very test process's own pid killed instead.
+        port = _free_port()
+        script = Path(wavefinity_web.__file__).resolve()
+        decoy_pid_file = self.tmp_dir / "a-different-process-wrote-this.pid"
+        env = dict(os.environ, WAVEFINITY_PID_FILE=str(decoy_pid_file))
+        proc = subprocess.Popen(
+            [sys.executable, str(script), "--port", str(port), "--no-browser"],
+            cwd=str(script.parent), env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        self.procs.append(proc)
+        url = f"http://127.0.0.1:{port}/"
+        for _ in range(100):
+            try:
+                with urlopen(url + "api/health", timeout=0.3) as response:
+                    if json.loads(response.read()).get("ok"):
+                        break
+            except Exception:
+                pass
+            time.sleep(0.1)
+        else:
+            self.fail("spawned Wavefinity process never answered its health check")
+        self.assertFalse(self.pid_file.exists())  # this test's own PID_FILE, untouched
+
+        replaced = wavefinity_web._replace_stale_process(url, "127.0.0.1", port)
+        self.assertTrue(replaced)
+        self.assertIsNotNone(proc.wait(timeout=5))
+
+    def test_an_unrelated_service_on_the_port_is_left_alone(self):
+        # Something real answers, but not as a Wavefinity service - the
+        # health-check schema is what draws the actual safety line, not
+        # merely "does anything respond."
+        port = _free_port()
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        self.procs.append(proc)
+        url = f"http://127.0.0.1:{port}/"
+        for _ in range(50):
+            try:
+                urlopen(url, timeout=0.3)
+                break
+            except Exception:
+                time.sleep(0.1)
+        replaced = wavefinity_web._replace_stale_process(url, "127.0.0.1", port)
+        self.assertFalse(replaced)
+        self.assertIsNone(proc.poll())  # still running, untouched
 
     def test_nothing_answering_the_port_is_reported_as_not_replaced(self):
         port = _free_port()
         self.pid_file.write_text("999999", encoding="utf-8")
-        replaced = wavefinity_web._replace_stale_process(f"http://127.0.0.1:{port}/")
+        replaced = wavefinity_web._replace_stale_process(f"http://127.0.0.1:{port}/", "127.0.0.1", port)
         self.assertFalse(replaced)
 
     def test_two_separately_started_processes_report_different_instances(self):

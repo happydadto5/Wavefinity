@@ -582,14 +582,22 @@ geometry moved — decide whether you meant it, then re-pin deliberately.
 **Write commit messages that say why.** The history is the record. A message
 that explains the reasoning is worth more here than a tidy branch structure.
 
-**Relaunching replaces the running server, but only one it started.**
-`wavefinity_web.py` records its own process id in `wavefinity.pid` and, if a
-relaunch finds the port already taken, kills whatever process that file names
-and rebinds - a browser tab has no way to tell it is talking to code from
-before your last edit, so silently reattaching to an old process would serve
-stale code with no visible sign anything was wrong. A server the launcher did
-not itself start (or one from before this existed) is left alone and reported
-as already running - close that window by hand and relaunch.
+**Relaunching replaces whatever is already running on the port.** If a
+relaunch finds the port taken, it first confirms a genuine Wavefinity
+service - not some unrelated program - answers there (a real `/api/health`
+response, not just something listening), then finds its process id two
+ways: `wavefinity_web.py`'s own record of a process it started
+(`wavefinity.pid`, fast, no shelling out), and failing that, an OS-level
+lookup of whatever the operating system says actually holds the port
+(`netstat` on Windows, `lsof` on macOS/Linux) - so it still finds and
+replaces an old process from before `wavefinity.pid` existed, or one
+started some other way entirely, not just ones this exact launcher is
+already tracking. Either way it then kills that process and rebinds. Only
+if a genuine service answers but no PID can be found by either method, or
+killing it fails, is it left alone and reported as already running - close
+that window by hand and relaunch. A browser tab has no way to tell it is
+talking to code from before your last edit, so silently reattaching to an
+old process would serve stale code with no visible sign anything was wrong.
 
 **A page that outlives the backend it loaded against says so.** The server
 generates a random instance id on every start (`SERVER_INSTANCE`, separate
@@ -597,9 +605,10 @@ from `SERVER_VERSION`, so any restart is caught even without a version bump)
 and returns it from `/api/health`. The browser polls that every 5 seconds; if
 the id it gets back ever differs from the one it loaded with, the connection
 indicator turns amber ("Engine updated") and a banner offers **Reload now**.
-This is the backstop for the one case the paragraph above can't fix on its
-own - a process the launcher didn't start and so won't kill - so an editing
-session never runs silently stale for more than a few seconds either way.
+This is the backstop for the rare case the paragraph above can't fix on its
+own - a genuine service whose process could not be identified - so an
+editing session never runs silently stale for more than a few seconds
+either way.
 
 ### If more than one person is working in the repo
 

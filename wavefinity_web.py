@@ -14,6 +14,7 @@ import mimetypes
 import os
 from pathlib import Path
 import signal
+import subprocess
 import threading
 import time
 import uuid
@@ -662,26 +663,68 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _replace_stale_process(requested_url: str) -> bool:
-    """Kill a previous run of this same launcher still holding the port.
+def _pid_on_port(host: str, port: int) -> int | None:
+    """Best-effort: whichever process the OS says is actually bound to this
+    port right now, independent of anything this app wrote about itself.
+
+    ``PID_FILE`` only names a process this launcher itself started; a
+    process from before that file existed, or started some other way
+    entirely, never wrote one - this is the fallback that finds it anyway,
+    by asking the OS directly instead of relying on the process's own
+    cooperation. Never trusted by itself: the caller still requires a real
+    ``/api/health`` response before acting on whatever PID this returns.
+    """
+    try:
+        if os.name == "nt":
+            output = subprocess.run(
+                ["netstat", "-ano"], capture_output=True, text=True,
+                timeout=5, creationflags=subprocess.CREATE_NO_WINDOW,
+            ).stdout
+            for line in output.splitlines():
+                parts = line.split()
+                if (len(parts) >= 5 and parts[0] == "TCP"
+                        and parts[3] == "LISTENING"
+                        and parts[1].rsplit(":", 1)[-1] == str(port)):
+                    return int(parts[-1])
+        else:
+            output = subprocess.run(
+                ["lsof", "-ti", f"tcp:{port}"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+            for line in output.splitlines():
+                if line.strip():
+                    return int(line.strip())
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    return None
+
+
+def _replace_stale_process(requested_url: str, host: str, port: int) -> bool:
+    """Kill whatever previous process is still holding the port.
 
     A relaunch during active development means "give me the code on disk
     now," not "reuse whatever is already listening" - that silently serves
     stale code with no visible sign anything is wrong, since the browser
-    just talks to whichever process answers the port. Only ever kills a
-    process this app itself recorded starting (``PID_FILE``), and only
-    after confirming a genuine Wavefinity service - not some unrelated
-    program - is the one holding the port.
+    just talks to whichever process answers the port. The only thing that
+    licenses killing anything here is ``/api/health`` proving a genuine
+    Wavefinity service - not some unrelated program - is what actually
+    answers on this port; how its PID is found (this launcher's own record
+    of a process it started, or failing that an OS-level lookup that does
+    not depend on the target's cooperation at all) does not change that.
     """
     try:
         with urlopen(requested_url + "api/health", timeout=1.5) as response:
             if not json.loads(response.read()).get("ok"):
                 return False
-    except Exception:
+    except Exception as error:
+        if hasattr(error, "close"):
+            error.close()
         return False
     try:
         pid = int(PID_FILE.read_text(encoding="utf-8").strip())
     except (FileNotFoundError, ValueError, OSError):
+        pid = _pid_on_port(host, port)
+    if pid is None:
         return False
     try:
         os.kill(pid, signal.SIGTERM)
@@ -692,7 +735,9 @@ def _replace_stale_process(requested_url: str) -> bool:
         try:
             with urlopen(requested_url + "api/health", timeout=0.3):
                 continue
-        except Exception:
+        except Exception as error:
+            if hasattr(error, "close"):
+                error.close()
             return True
     return False
 
@@ -703,7 +748,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         server = make_server(args.host, args.port)
     except OSError:
-        if _replace_stale_process(requested_url):
+        if _replace_stale_process(requested_url, args.host, args.port):
             try:
                 server = make_server(args.host, args.port)
             except OSError as error:
@@ -722,9 +767,8 @@ def main(argv: list[str] | None = None) -> int:
                 ) from error
             print(
                 f"Wavefinity is already running: {requested_url}\n"
-                "(started by something other than this launcher, or before "
-                "this version added the ability to replace it - close that "
-                "window and relaunch to pick up code changes)"
+                "(could not confirm which process to replace - close that "
+                "window by hand and relaunch to pick up code changes)"
             )
             if not args.no_browser:
                 webbrowser.open(requested_url)

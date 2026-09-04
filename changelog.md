@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-09-04 — Close the last gap: find a stale process even with no PID on record
+
+### Fixed
+
+- **A relaunch could still silently reattach to an ancient process** if
+  that process predated `wavefinity.pid` (or was started some other way)
+  and so never recorded its own PID - exactly what happened after the
+  slot-removal commit: the `.bat` launcher kept opening a browser tab
+  against a process that had been running continuously since well before
+  `SERVER_INSTANCE` existed (its `/api/health` didn't even have an
+  `instance` field). The version-mismatch banner (previous entry) can tell
+  a user *after the fact*, but the actual fix is not reattaching to it in
+  the first place.
+- `_replace_stale_process` now has a second way to find the PID to kill:
+  `_pid_on_port(host, port)` asks the OS directly which process holds the
+  port (`netstat -ano` on Windows, `lsof -ti` on macOS/Linux), used only
+  when `wavefinity.pid` doesn't name one. The safety condition hasn't
+  changed and doesn't depend on either lookup method - a real
+  `/api/health` response confirming a genuine Wavefinity service, not
+  merely something listening, still gates any kill. An unrelated program
+  on the port (verified live with a plain `http.server` instance) is still
+  left strictly alone.
+- New tests: `test_a_service_with_no_recorded_pid_is_still_found_and_replaced`
+  (a real subprocess with a decoy PID file elsewhere, found only via the OS
+  lookup, and killed) and `test_an_unrelated_service_on_the_port_is_left_alone`
+  (a real, separate `http.server` process, confirmed still running
+  afterward). The old "no PID file means never touch it" test is gone -
+  that was a proxy for "we can't be sure it's really Wavefinity," and the
+  health-check schema was always the actual, stronger guarantee.
+
 ## 2026-09-04 — Detect a restarted backend instead of silently running stale
 
 ### Added
