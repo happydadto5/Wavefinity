@@ -165,25 +165,35 @@ These generated artifacts are ignored working output and were not committed.
 
 ## Known limitations and follow-up risks
 
-1. **Independent Edge smoke test remains advisable.** Chromium QA is relevant
-   because current Edge is Chromium-based, but it is not evidence from the Edge
-   executable on this machine.
-2. **Design download needs an ordinary-browser confirmation.** The controlled
+1. **Design download needs an ordinary-browser confirmation.** The controlled
    browser displayed the successful download feedback, but its automation layer
    did not surface the synthetic Blob download as a downloadable event.
-3. **The JavaScript UI does not yet have a standalone DOM test suite.** Python
+2. **The JavaScript UI does not yet have a standalone DOM test suite.** Python
    API contracts, JavaScript syntax, and interactive browser QA are covered;
    long-term UI work would benefit from checked-in browser automation.
-4. **Very complex previews may be bandwidth/paint heavy.** Actual triangle
+3. **Very complex previews may be bandwidth/paint heavy.** Actual triangle
    faces are serialized as JSON and painted on a 2D canvas. Camera motion is
    fast because it stays client-side, but an unusually dense design can produce
    a large initial preview payload.
-5. **Geometry requests are serialized.** This is appropriate for one local
+4. **Geometry requests are serialized.** This is appropriate for one local
    user and safer for the current mesh stack, but it is not a multi-user server
    architecture.
-6. **The Tkinter fallback should remain for at least one release cycle.** It is
+5. **The Tkinter fallback should remain for at least one release cycle.** It is
    the recovery path if an untested browser/platform combination exposes a UI
    regression.
+
+## External-audit resolution — 2026-09-04
+
+Codex reproduced and accepted the audit's three live defects. Automatic holder
+values are now display-only until edited, removable-holder tags and tint reach
+both browser canvases, and the default post adapts to an 8 mm cartridge cell.
+The fourth finding was already resolved in the reviewed branch because the
+shared JSON response helper applies the baseline headers to both GET and POST;
+the health-route test now verifies them explicitly.
+
+The resolution passed all 193 tests. A Microsoft Edge smoke test also confirmed
+that an 8 mm cartridge post can be selected, placed and previewed on the default
+starter bin without console warnings or errors.
 
 ## Requested reviewer focus
 

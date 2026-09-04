@@ -43,6 +43,53 @@ class WebApplicationTests(unittest.TestCase):
         high_top = max(point[2] for face in high["geometry"] for point in face["points"])
         self.assertGreater(high_top, low_top + 4.0)
 
+    def test_resolved_defaults_are_display_only_until_the_user_edits_them(self):
+        design = default_design()
+        item = {
+            "name": "test tool",
+            "profile": "round",
+            "clearance": 0.4,
+            "segments": [{"length": 8.0, "diameter": 6.0}],
+        }
+        response = default_feature_payload({
+            "design": design, "kind": "nest", "item": item,
+        })
+        feature = response["feature"]
+        self.assertEqual(feature["options"], {})
+        self.assertEqual(
+            set(response["resolved_options"]), {"wall", "depth", "height"}
+        )
+
+        applied = apply_feature_payload({
+            "design": design, "feature": feature, "index": None,
+        })
+        stored = applied["design"]["layout"]["features"][0]
+        self.assertEqual(stored["options"], {})
+
+        # Enlarge the zone so a thicker tool still fits, then prove the
+        # automatic depth and height follow it without becoming stored values.
+        feature["zone"][1], feature["zone"][3] = -8.0, 8.0
+        feature["item"]["segments"][0]["diameter"] = 8.0
+        changed = draft_payload({"design": design, "feature": feature})
+        self.assertGreater(
+            changed["resolved_options"]["depth"],
+            response["resolved_options"]["depth"],
+        )
+        self.assertEqual(changed["feature"]["options"], {})
+
+    def test_draft_geometry_identifies_the_part_it_will_print_with(self):
+        for mode, prefix in (("fused", "feature_"), ("separate", "insert_")):
+            design = default_design()
+            design["layout"]["mode"] = mode
+            feature = default_feature_payload({
+                "design": design, "kind": "pocket",
+            })["feature"]
+            draft = draft_payload({"design": design, "feature": feature})
+            self.assertEqual(
+                {face["kind"] for face in draft["geometry"]},
+                {f"{prefix}pocket"},
+            )
+
     def test_add_update_delete_round_trip_uses_design_schema(self):
         design = default_design()
         feature = default_feature_payload({"design": design, "kind": "divider"})["feature"]
@@ -106,6 +153,11 @@ class WebServerTests(unittest.TestCase):
             return response.status, json.loads(response.read())
 
     def test_health_catalog_and_static_application_are_served(self):
+        status, headers, body = self.get("/api/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(headers["Cross-Origin-Resource-Policy"], "same-origin")
+        self.assertTrue(json.loads(body)["ok"])
         status, headers, body = self.get("/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])

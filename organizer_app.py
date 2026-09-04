@@ -1759,6 +1759,7 @@ def default_feature(
         item = item if item is not None else LIBRARY[item_key]
     else:
         item = None
+    feature_options = {}
     if item is not None and kind in {"cradle", "nest"}:
         required_length = item.length + (
             item.clearance + 2.0 * 1.6 if kind == "nest" else 0.0
@@ -1787,6 +1788,18 @@ def default_feature(
     elif kind == "divider":
         width, depth = ((bounds.width, 2.0) if along == "x"
                         else (2.0, bounds.depth))
+    elif kind == "post":
+        # A one-cell-wide cartridge cannot hold the normal 12 mm starter peg.
+        # Size the starter diameter to both axes, then give it as much of the
+        # usual 16 mm editing footprint as the layout has. Wider bins retain
+        # the established 12 mm default unchanged.
+        run_limit = bounds.width if along == "x" else bounds.depth
+        across_limit = bounds.depth if along == "x" else bounds.width
+        diameter = min(12.0, run_limit, across_limit)
+        run = min(16.0, run_limit)
+        across = min(16.0, across_limit)
+        width, depth = ((run, across) if along == "x" else (across, run))
+        feature_options = {"diameter": diameter, "height": 16.0, "taper": 0.4}
     else:
         width, depth = min(16.0, bounds.width), min(16.0, bounds.depth)
     raw = Zone(-width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0)
@@ -1796,8 +1809,7 @@ def default_feature(
         item=item,
         count=1 if kind == "post" else None,
         along=along,
-        options={"diameter": 12.0, "height": 16.0, "taper": 0.4}
-        if kind == "post" else {},
+        options=feature_options,
     )
 
 

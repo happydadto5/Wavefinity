@@ -4,6 +4,23 @@ Notable Wavefinity changes are recorded here by date and author.
 
 ## 2026-09-04 — Codex
 
+### Audit follow-up
+
+- Preserved automatic holder parameters as automatic values in the browser.
+  Resolved dimensions still appear in the form, but only a field the user
+  edits is stored as an explicit override. Nests, pockets, bores, slots and
+  dividers therefore continue to follow later item, zone and bin changes.
+- Restored the visual distinction between fused holders and holders printed on
+  removable/cartridge inserts. Both the full preview and live support preview
+  now retain the engine's `feature_*` / `insert_*` geometry tags, and removable
+  holders receive a related warm tint.
+- Made the default post fit a one-cell-wide 8 mm cartridge by adapting its
+  starter diameter to the available footprint. Wider layouts retain the
+  established 12 mm post default.
+- Confirmed that JSON GET responses already receive the shared nosniff and
+  same-origin resource-policy headers, and added a regression assertion so the
+  hardening cannot silently drift.
+
 ### Added
 
 - Added a dependency-free local browser application backed by the existing
@@ -40,6 +57,11 @@ Notable Wavefinity changes are recorded here by date and author.
   placement, top-label and scoop validation, removable-mode conversion, 2D
   layout rendering, design download feedback, and a real two-file `.3mf`
   organizer export. No browser console errors remained.
+- Re-ran the audit scenarios against the live application and completed an
+  independent Microsoft Edge smoke test. The automatic nest dimensions tracked
+  a changed tool, and an 8 mm cartridge post placed and previewed successfully
+  with no Edge console warnings or errors.
+- All 193 tests pass after the audit fixes.
 
 ### Documentation
 

@@ -16,7 +16,9 @@ project: design, rationale, measured evidence, and the traps.
 See [changelog.md](changelog.md) for dated implementation changes,
 [TESTING.md](TESTING.md) for the log of what each test run actually found, and
 [BROWSER_MIGRATION_REVIEW.md](BROWSER_MIGRATION_REVIEW.md) for the architecture,
-security, evidence, known limitations and checklist prepared for outside review.
+security, evidence, known limitations, outside-review checklist and audit
+resolution. The independent review response is preserved in
+[BROWSER_MIGRATION_REVIEW_REPLY.md](BROWSER_MIGRATION_REVIEW_REPLY.md).
 
 ---
 

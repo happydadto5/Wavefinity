@@ -271,28 +271,37 @@ def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         mode=layout.mode,
         item=item,
     )
-    options = dict(one.options)
-    options.update(resolved_options(box, one, base_height(box, layout.mode)))
-    one = replace(one, options=options)
-    return {"feature": feature_to_dict(one, layout.mode)}
+    # Defaults are values to display, not values the user explicitly chose.
+    # Keeping them out of ``one.options`` preserves the builder's dependency
+    # cascade: for example, an automatic nest depth continues to follow a
+    # changed tool diameter and a pocket recess follows an edited height.
+    return {
+        "feature": feature_to_dict(one, layout.mode),
+        "resolved_options": resolved_options(
+            box, one, base_height(box, layout.mode)
+        ),
+    }
 
 
 def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, *_ = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
+    shown = resolved_options(box, one, base_height(box, layout.mode))
     with GEOMETRY_LOCK:
         solids = build_features(
             box, [one], base_height(box, layout.mode), layout_zone(box, layout.mode)
         )
     geometry = []
+    part_kind = "feature" if layout.mode == "fused" else "insert"
     for solid in solids:
-        geometry.extend(_mesh_preview_geometry(solid, one.kind))
+        geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_{one.kind}"))
     return {
         "geometry": [
             {"points": points, "kind": kind, "normal": normal, "layer": layer}
             for points, kind, normal, layer in geometry
         ],
         "feature": feature_to_dict(one, layout.mode),
+        "resolved_options": shown,
     }
 
 

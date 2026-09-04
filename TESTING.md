@@ -34,6 +34,9 @@ empty, the suites are not testing the things that break.
 | 2026-09-04 | Codex | `unittest test_wavefinity_web` | 8 | Caught | Initial live-browser startup exposed two arrays that mixed selector strings with DOM elements and called `addEventListener` on the strings. Corrected both, then verified the API, security boundary and static application contract. |
 | 2026-09-04 | Codex | Browser QA plus real organizer export | — | Caught | Verified narrow and wide responsive layouts, parameter-driven draft geometry, support placement, label/scoop conflict feedback, mode conversion, 2D layout and browser-triggered `.3mf` generation. Caught the disabled Add button after an asynchronous draft load; the selection state now refreshes when the real draft arrives. Browser console finished with no errors or warnings. |
 | 2026-09-04 | Codex | `unittest` | 190 | Nothing | Complete geometry, insert, desktop UI and browser/API suite after the browser migration and hardening pass. |
+| 2026-09-04 | Codex | `unittest test_wavefinity_web test_organizer_app.InsertEditorTests.test_default_post_adapts_to_a_one_cell_wide_cartridge` | 11 | Nothing | Focused audit regressions for display-only automatic values, fused/removable draft tags, GET hardening headers and a valid one-cell cartridge post. |
+| 2026-09-04 | Codex | Microsoft Edge smoke test | — | Nothing | Live automatic nest defaults followed a changed item; the default 8 mm cartridge post built, placed and refreshed the full preview; no browser warnings or errors. |
+| 2026-09-04 | Codex | `unittest` | 193 | Nothing | Complete suite after resolving the external browser-port audit findings. |
 
 ## Defects found outside the suites
 

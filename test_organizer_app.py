@@ -1252,6 +1252,19 @@ class InsertEditorTests(unittest.TestCase):
                 kind,
             )
 
+    def test_default_post_adapts_to_a_one_cell_wide_cartridge(self) -> None:
+        spec = BoxSpec(16.0, 48.0, 40.0)
+        feature = organizer_app.default_feature(spec, "post", mode="cartridge")
+        self.assertEqual(feature.zone.width, 8.0)
+        self.assertEqual(feature.options["diameter"], 8.0)
+        built = build_features(
+            spec,
+            [feature],
+            organizer_app.base_height(spec, "cartridge"),
+            organizer_app.layout_zone(spec, "cartridge"),
+        )
+        self.assertTrue(built)
+
     def test_switching_to_cartridge_resnaps_existing_supports(self) -> None:
         spec = BoxSpec(64.0, 64.0, 40.0)
         original = organizer_app.Feature("pocket", organizer_app.Zone(-8, -8, 8, 8))

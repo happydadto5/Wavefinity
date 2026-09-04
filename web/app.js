@@ -9,6 +9,7 @@ const state = {
   preview: null,
   draftKind: "divider",
   draft: null,
+  draftResolvedOptions: {},
   draftGeometry: [],
   selected: null,
   camera: { yaw: 45, elevation: 76, zoom: 1 },
@@ -29,6 +30,8 @@ const COLORS = {
   cradle: "#e59f54", nest: "#df8d5b", bore: "#6fb98f", post: "#51a5a1",
   divider: "#9d86c8", pocket: "#d4778c", slot: "#d5b84d",
 };
+const INSERT_TINT = "#c2a075";
+const INSERT_TINT_MIX = .3;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -285,6 +288,7 @@ async function selectKind(kind, reset = false) {
       item: info.flags.item ? starterItem() : null,
     });
     state.draft = result.feature;
+    state.draftResolvedOptions = result.resolved_options || {};
     renderDraftFields();
     updateSelectionButtons();
     refreshDraft();
@@ -298,6 +302,7 @@ function selectedFeature(index) {
   if (index === null || index < 0 || index >= state.design.layout.features.length) return;
   state.selected = index;
   state.draft = clone(state.design.layout.features[index]);
+  state.draftResolvedOptions = {};
   state.draftKind = state.draft.kind;
   $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === state.draftKind));
   const info = partInfo();
@@ -355,7 +360,11 @@ function renderDraftFields() {
     html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), { unit: "mm" });
   }
   for (const option of info.fields) {
-    html += field(option.label, `option:${option.key}`, one.options?.[option.key] ?? option.default);
+    const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
+    const shown = explicit
+      ? one.options[option.key]
+      : state.draftResolvedOptions?.[option.key] ?? option.default;
+    html += field(option.label, `option:${option.key}`, shown);
   }
   $("#draft-fields").innerHTML = html;
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
@@ -367,7 +376,7 @@ function renderDraftFields() {
   }));
 }
 
-function updateDraftFromFields() {
+function updateDraftFromFields(event) {
   const one = state.draft;
   const get = key => $(`[data-draft="${key}"]`, $("#draft-fields"))?.value;
   const oldZone = one.zone;
@@ -403,10 +412,16 @@ function updateDraftFromFields() {
     one.item = item;
   }
   one.options ||= {};
-  for (const option of info.fields) {
-    const raw = String(get(`option:${option.key}`) ?? "").trim();
-    if (raw === "") delete one.options[option.key];
-    else one.options[option.key] = number(raw, one.options[option.key] ?? number(option.default));
+  const changed = event?.currentTarget?.dataset?.draft || "";
+  if (changed.startsWith("option:")) {
+    const key = changed.slice("option:".length);
+    const option = info.fields.find(entry => entry.key === key);
+    const raw = String(get(changed) ?? "").trim();
+    if (raw === "") delete one.options[key];
+    else one.options[key] = number(
+      raw,
+      one.options[key] ?? state.draftResolvedOptions?.[key] ?? number(option?.default),
+    );
   }
   refreshDraftSoon();
 }
@@ -421,6 +436,15 @@ async function refreshDraft() {
     const result = await api("/api/feature/draft", { design: state.design, feature: state.draft });
     if (request !== state.draftRequest) return;
     state.draftGeometry = result.geometry;
+    state.draftResolvedOptions = result.resolved_options || {};
+    const info = partInfo();
+    for (const option of info.fields) {
+      if (Object.prototype.hasOwnProperty.call(state.draft.options || {}, option.key)) continue;
+      const input = $(`[data-draft="option:${option.key}"]`, $("#draft-fields"));
+      if (input && Object.prototype.hasOwnProperty.call(state.draftResolvedOptions, option.key)) {
+        input.value = fmt(state.draftResolvedOptions[option.key]);
+      }
+    }
     $("#draft-status").textContent = "Live geometry";
     renderDraftPreview();
   } catch (error) {
@@ -440,6 +464,7 @@ async function applySupport(index) {
     state.design = result.design;
     state.selected = result.selected;
     state.draft = clone(state.design.layout.features[state.selected]);
+    state.draftResolvedOptions = {};
     renderDraftFields();
     renderPlaced();
     updateSelectionButtons();
@@ -529,7 +554,18 @@ function kindColor(kind) {
   if (COLORS[kind]) return COLORS[kind];
   const base = kind.replace(/^insert_/, "").replace(/^feature_/, "");
   if (kind.endsWith("invalid")) return COLORS.invalid;
+  if (kind.startsWith("insert_") && COLORS[base]) {
+    return blend(COLORS[base], INSERT_TINT, INSERT_TINT_MIX);
+  }
   return COLORS[base] || "#7896a0";
+}
+
+function blend(start, end, amount) {
+  const channels = value => [1, 3, 5].map(at => parseInt(value.slice(at, at + 2), 16));
+  const from = channels(start), to = channels(end);
+  return "#" + from.map((value, index) =>
+    Math.round(value + (to[index] - value) * amount).toString(16).padStart(2, "0")
+  ).join("");
 }
 
 function shade(hex, amount) {
