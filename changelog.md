@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-09-04 — Detect a restarted backend instead of silently running stale
+
+### Added
+
+- **The browser now notices when the Python backend it's talking to has
+  restarted**, and says so. `wavefinity_web.py` generates a random
+  `SERVER_INSTANCE` id each time the process starts - not a manually-bumped
+  version, so *any* restart is caught, even one that didn't change
+  `SERVER_VERSION` - and returns it from `/api/health` and `/api/catalog`.
+  `web/app.js` records the instance it loaded against and polls
+  `/api/health` every 5 seconds; on a mismatch the connection indicator
+  turns amber ("Engine updated") and a banner offers **Reload now**, which
+  hard-reloads both the page and its connection to the (now current)
+  backend. Both the indicator and the banner's button trigger the same
+  reload.
+- This is a detection layer, not a replacement for
+  `_replace_stale_process` (2026-09-04, stale-server fix) - that one
+  actively kills and replaces a process *this launcher* started. A process
+  it did not start (an old one from before that fix existed, or a manual
+  `python wavefinity_web.py` run some other way) is deliberately left
+  running rather than killed on a guess, and previously gave no sign that
+  the page was talking to it. The banner now catches exactly that case:
+  confirmed live by killing a server process behind an already-open page,
+  starting a fresh one on the same port without touching the page, and
+  watching the banner appear within one 5-second poll and clear on Reload
+  now.
+- `StaleProcessReplacementTests` gained
+  `test_two_separately_started_processes_report_different_instances`, and
+  the health/catalog contract test now asserts `instance` is present and
+  agrees between the two routes.
+
 ## 2026-09-04 — Claude (retire slot, expand divider)
 
 ### Removed

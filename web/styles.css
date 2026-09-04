@@ -29,8 +29,10 @@ button { color: inherit; }
 .app-header h1 { margin: -3px 0 0; font-size: 27px; letter-spacing: -.04em; }
 .eyebrow { margin: 0; color: #96c8c5; font-size: 10px; font-weight: 800; letter-spacing: .18em; }
 .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.connection { font-size: 12px; color: #b6d2d0; margin-right: 8px; }
+.connection { font-size: 12px; color: #b6d2d0; margin-right: 8px; background: none; border: none; padding: 0; cursor: pointer; font-family: inherit; }
+.connection:hover { color: white; }
 .connection.ready::before { content: ""; display: inline-block; width: 7px; height: 7px; background: #63d391; border-radius: 50%; margin-right: 6px; }
+.connection.stale::before { background: #e5b84d; }
 
 .button {
   border: 1px solid transparent; border-radius: 7px; padding: 9px 13px; cursor: pointer;
@@ -155,6 +157,14 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .toast { position: fixed; right: 22px; bottom: 22px; max-width: min(440px, calc(100vw - 44px)); padding: 12px 15px; border-radius: 8px; background: #16333d; color: white; box-shadow: var(--shadow); font-size: 13px; opacity: 0; transform: translateY(12px); pointer-events: none; transition: .2s; z-index: 10; white-space: pre-line; }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.error { background: #7f302c; }
+
+.update-banner {
+  position: fixed; left: 50%; top: 92px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 14px; max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 12px 10px 16px; border-radius: 9px; background: #16333d; color: white;
+  box-shadow: var(--shadow); font-size: 13px; z-index: 20;
+}
+.update-banner[hidden] { display: none; }
 
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 1fr; height: auto; }

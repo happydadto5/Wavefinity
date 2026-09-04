@@ -13,7 +13,7 @@
       <h1>Wavefinity</h1>
     </div>
     <div class="header-actions">
-      <span id="connection" class="connection">Starting…</span>
+      <button id="connection" class="connection" title="Reload the app and Python engine">Starting…</button>
       <button id="new-design" class="button secondary">New</button>
       <button id="save-design" class="button secondary">Save design</button>
       <label class="button secondary file-button">Open design<input id="open-design" type="file" accept=".json,.wavefinity.json"></label>
@@ -142,6 +142,10 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="update-banner" class="update-banner" role="status" hidden>
+    <span>The Python engine restarted with new code. The page you're looking at is out of sync.</span>
+    <button id="update-banner-reload" class="button primary" type="button">Reload now</button>
+  </div>
   <script src="/app.js" defer></script>
 </body>
 </html>

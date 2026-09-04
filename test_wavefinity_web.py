@@ -212,7 +212,10 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
         self.assertEqual(headers["Cross-Origin-Resource-Policy"], "same-origin")
-        self.assertTrue(json.loads(body)["ok"])
+        health = json.loads(body)
+        self.assertTrue(health["ok"])
+        self.assertTrue(health["instance"])
+        self.assertEqual(health["instance"], catalog_payload()["instance"])
         status, headers, body = self.get("/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
@@ -347,6 +350,21 @@ class StaleProcessReplacementTests(unittest.TestCase):
         self.pid_file.write_text("999999", encoding="utf-8")
         replaced = wavefinity_web._replace_stale_process(f"http://127.0.0.1:{port}/")
         self.assertFalse(replaced)
+
+    def test_two_separately_started_processes_report_different_instances(self):
+        # SERVER_INSTANCE is regenerated per process, not per code version, so
+        # the frontend's staleness banner (web/app.js watchServerVersion)
+        # fires on *any* restart, not just ones that bumped SERVER_VERSION.
+        first_port, second_port = _free_port(), _free_port()
+        first = self._spawn_real_server(first_port)
+        second = self._spawn_real_server(second_port)
+        with urlopen(f"http://127.0.0.1:{first_port}/api/health", timeout=2) as response:
+            first_instance = json.loads(response.read())["instance"]
+        with urlopen(f"http://127.0.0.1:{second_port}/api/health", timeout=2) as response:
+            second_instance = json.loads(response.read())["instance"]
+        self.assertTrue(first_instance)
+        self.assertTrue(second_instance)
+        self.assertNotEqual(first_instance, second_instance)
 
 
 if __name__ == "__main__":

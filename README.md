@@ -591,6 +591,16 @@ stale code with no visible sign anything was wrong. A server the launcher did
 not itself start (or one from before this existed) is left alone and reported
 as already running - close that window by hand and relaunch.
 
+**A page that outlives the backend it loaded against says so.** The server
+generates a random instance id on every start (`SERVER_INSTANCE`, separate
+from `SERVER_VERSION`, so any restart is caught even without a version bump)
+and returns it from `/api/health`. The browser polls that every 5 seconds; if
+the id it gets back ever differs from the one it loaded with, the connection
+indicator turns amber ("Engine updated") and a banner offers **Reload now**.
+This is the backstop for the one case the paragraph above can't fix on its
+own - a process the launcher didn't start and so won't kill - so an editing
+session never runs silently stale for more than a few seconds either way.
+
 ### If more than one person is working in the repo
 
 Everyone commits to `main`, so the only rule that matters is: **pull before you

@@ -16,6 +16,7 @@ from pathlib import Path
 import signal
 import threading
 import time
+import uuid
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -76,6 +77,10 @@ from organizer_app import (
 WEB_ROOT = APP_DIR / "web"
 DEFAULT_OUTPUT = APP_DIR / "generated"
 SERVER_VERSION = "1"
+# Regenerated every time the process starts, so the frontend can tell a
+# fresh backend apart from the one it originally loaded against - even
+# when SERVER_VERSION itself wasn't bumped for a given code change.
+SERVER_INSTANCE = uuid.uuid4().hex
 GEOMETRY_LOCK = threading.RLock()
 PREFERENCES_FILE = APP_DIR / "wavefinity_prefs.json"
 PREFERENCES_LOCK = threading.RLock()
@@ -298,6 +303,7 @@ def catalog_payload() -> dict[str, Any]:
         })
     return {
         "version": SERVER_VERSION,
+        "instance": SERVER_INSTANCE,
         "base_unit": BASE_UNIT,
         "modes": [
             {"value": "fused", "label": "Fused into box"},
@@ -581,7 +587,7 @@ class WavefinityHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/health":
-            self._send_json({"ok": True, "version": SERVER_VERSION})
+            self._send_json({"ok": True, "version": SERVER_VERSION, "instance": SERVER_INSTANCE})
             return
         if path == "/api/catalog":
             self._send_json(catalog_payload())

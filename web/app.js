@@ -22,7 +22,10 @@ const state = {
   layoutDrag: null,
   layoutTransform: null,
   designMutationBusy: false,
+  serverInstance: null,
 };
+
+const VERSION_POLL_MS = 5000;
 
 const COLORS = {
   outside: "#8ea8b2", inside: "#c9d9dc", rim: "#6f8f99", floor: "#e8efef",
@@ -274,6 +277,8 @@ function wireControls() {
   $("#save-design").addEventListener("click", saveDesign);
   $("#open-design").addEventListener("change", openDesign);
   $("#new-design").addEventListener("click", newDesign);
+  $("#connection").addEventListener("click", () => location.reload(true));
+  $("#update-banner-reload").addEventListener("click", () => location.reload(true));
   $("#generate-bin").addEventListener("click", () => generate("/api/generate", "#generate-bin"));
   $("#generate-connector").addEventListener("click", () => generate("/api/connector", "#generate-connector"));
   $("#generate-sampler").addEventListener("click", () => generate("/api/sampler", "#generate-sampler"));
@@ -1082,10 +1087,27 @@ function collectOutputs(value, found = []) {
   return [...new Set(found)];
 }
 
+function watchServerVersion() {
+  setInterval(async () => {
+    let health;
+    try {
+      health = await api("/api/health");
+    } catch (_error) {
+      return; // A blip shouldn't flip the banner - only a confirmed different instance should.
+    }
+    if (health.instance === state.serverInstance) return;
+    $("#connection").textContent = "Engine updated";
+    $("#connection").classList.remove("ready");
+    $("#connection").classList.add("stale");
+    $("#update-banner").hidden = false;
+  }, VERSION_POLL_MS);
+}
+
 async function init() {
   try {
     const catalog = await api("/api/catalog");
     state.catalog = catalog;
+    state.serverInstance = catalog.instance;
     state.design = clone(catalog.defaults.design);
     state.output = catalog.preferences?.output || catalog.defaults.output;
     state.connector = clone(catalog.defaults.connector);
@@ -1094,6 +1116,7 @@ async function init() {
     syncForm();
     $("#connection").textContent = "Local engine connected";
     $("#connection").classList.add("ready");
+    watchServerVersion();
     await selectKind("divider", true);
     await refreshPreview();
   } catch (error) {
