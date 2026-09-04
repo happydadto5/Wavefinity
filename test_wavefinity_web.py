@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
 import threading
+import time
 import unittest
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import urlopen, Request
 
+import wavefinity_web
 from organizer_app import design_from_dict
 from organizer_inserts import layout_zone
 from wavefinity_web import (
@@ -248,6 +256,95 @@ class WebServerTests(unittest.TestCase):
             urlopen(request, timeout=20)
         self.assertEqual(caught.exception.code, 403)
         caught.exception.close()
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+class StaleProcessReplacementTests(unittest.TestCase):
+    """Relaunching must replace an old process holding the port, not
+    silently reattach to it and go on serving whatever code that process
+    happened to start with - see TESTING.md, 2026-09-04, "unknown API
+    route"."""
+
+    def setUp(self):
+        self.tmp_dir = Path(tempfile.mkdtemp())
+        self.pid_file = self.tmp_dir / "wavefinity.pid"
+        self.original_pid_file = wavefinity_web.PID_FILE
+        wavefinity_web.PID_FILE = self.pid_file
+        self.procs: list[subprocess.Popen] = []
+
+    def tearDown(self):
+        wavefinity_web.PID_FILE = self.original_pid_file
+        for proc in self.procs:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _spawn_real_server(self, port: int) -> subprocess.Popen:
+        script = Path(wavefinity_web.__file__).resolve()
+        env = dict(os.environ, WAVEFINITY_PID_FILE=str(self.pid_file))
+        proc = subprocess.Popen(
+            [sys.executable, str(script), "--port", str(port), "--no-browser"],
+            cwd=str(script.parent), env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        self.procs.append(proc)
+        url = f"http://127.0.0.1:{port}/"
+        for _ in range(100):
+            try:
+                with urlopen(url + "api/health", timeout=0.3) as response:
+                    if json.loads(response.read()).get("ok"):
+                        return proc
+            except Exception:
+                pass
+            time.sleep(0.1)
+        self.fail("spawned Wavefinity process never answered its health check")
+
+    def test_a_process_this_launcher_started_is_replaced_not_reattached_to(self):
+        port = _free_port()
+        proc = self._spawn_real_server(port)
+        # on Windows, python.exe under a venv is itself a small launcher
+        # that execs a child running the real interpreter, so the pid this
+        # app records (its own os.getpid(), from inside that child) need
+        # not equal subprocess.Popen's pid for the launcher - only that a
+        # real pid was recorded at all.
+        self.assertGreater(int(self.pid_file.read_text(encoding="utf-8").strip()), 0)
+
+        replaced = wavefinity_web._replace_stale_process(f"http://127.0.0.1:{port}/")
+        self.assertTrue(replaced)
+        self.assertIsNotNone(proc.wait(timeout=5))  # actually terminated, not just unresponsive
+
+        fresh = wavefinity_web.make_server("127.0.0.1", port)  # the port is genuinely free again
+        fresh.server_close()
+
+    def test_a_service_with_no_recorded_pid_is_left_running(self):
+        # a health-check that succeeds with no PID file on record - an
+        # older server predating this feature, or an unrelated program -
+        # must never be touched
+        server = wavefinity_web.make_server("127.0.0.1", 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = server.server_address[1]
+            self.assertFalse(self.pid_file.exists())
+            replaced = wavefinity_web._replace_stale_process(f"http://127.0.0.1:{port}/")
+            self.assertFalse(replaced)
+            with urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as response:
+                self.assertTrue(json.loads(response.read())["ok"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_nothing_answering_the_port_is_reported_as_not_replaced(self):
+        port = _free_port()
+        self.pid_file.write_text("999999", encoding="utf-8")
+        replaced = wavefinity_web._replace_stale_process(f"http://127.0.0.1:{port}/")
+        self.assertFalse(replaced)
 
 
 if __name__ == "__main__":

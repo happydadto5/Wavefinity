@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-09-04 — Claude (stale-server fix)
+
+### Fixed
+
+- **Relaunching silently reattached to an old, already-running server
+  instead of replacing it with current code.** `wavefinity_web.py`'s port
+  reuse-check (added to stop a launcher racing a genuinely separate second
+  server) treated "something is already answering this port" as always
+  meaning "nothing to do here" - including when that something was this
+  same app's own previous run, holding stale code from before the last
+  edit. Every stale-UI report earlier in this session traced back to this:
+  clicking Fit to bin got `unknown API route` because the process actually
+  answering the browser's requests predated the route's existence, even
+  though the source on disk was current and the tests against it passed.
+  The app now writes its own process id to `wavefinity.pid` on startup; on
+  a relaunch, if the port is taken, it terminates whatever process that
+  file names (after confirming a genuine Wavefinity service - not some
+  unrelated program - is the one holding the port) and rebinds. A server
+  this launcher did not itself start, or one from before this fix existed,
+  is left alone with a clearer message explaining why and what to do.
+  `test_wavefinity_web.StaleProcessReplacementTests` spawns a real
+  subprocess to verify it actually gets killed and the port frees, and
+  that an unrecorded process is never touched.
+
 ## 2026-09-04 — Claude (browser UI pass 3)
 
 ### Added

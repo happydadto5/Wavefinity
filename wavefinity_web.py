@@ -11,8 +11,11 @@ import argparse
 from dataclasses import replace
 import json
 import mimetypes
+import os
 from pathlib import Path
+import signal
 import threading
+import time
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -77,6 +80,7 @@ SERVER_VERSION = "1"
 GEOMETRY_LOCK = threading.RLock()
 PREFERENCES_FILE = APP_DIR / "wavefinity_prefs.json"
 PREFERENCES_LOCK = threading.RLock()
+PID_FILE = Path(os.environ.get("WAVEFINITY_PID_FILE", str(APP_DIR / "wavefinity.pid")))
 
 
 def default_design() -> dict[str, Any]:
@@ -664,25 +668,74 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _replace_stale_process(requested_url: str) -> bool:
+    """Kill a previous run of this same launcher still holding the port.
+
+    A relaunch during active development means "give me the code on disk
+    now," not "reuse whatever is already listening" - that silently serves
+    stale code with no visible sign anything is wrong, since the browser
+    just talks to whichever process answers the port. Only ever kills a
+    process this app itself recorded starting (``PID_FILE``), and only
+    after confirming a genuine Wavefinity service - not some unrelated
+    program - is the one holding the port.
+    """
+    try:
+        with urlopen(requested_url + "api/health", timeout=1.5) as response:
+            if not json.loads(response.read()).get("ok"):
+                return False
+    except Exception:
+        return False
+    try:
+        pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, ValueError, OSError):
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        return False
+    for _ in range(30):
+        time.sleep(0.1)
+        try:
+            with urlopen(requested_url + "api/health", timeout=0.3):
+                continue
+        except Exception:
+            return True
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     requested_url = f"http://{args.host}:{args.port}/"
     try:
         server = make_server(args.host, args.port)
     except OSError:
-        try:
-            with urlopen(requested_url + "api/health", timeout=1.5) as response:
-                existing = json.loads(response.read())
-            if not existing.get("ok"):
-                raise RuntimeError("another service is using the Wavefinity port")
-        except Exception as error:
-            raise RuntimeError(
-                f"port {args.port} is already in use and is not Wavefinity"
-            ) from error
-        print(f"Wavefinity is already running: {requested_url}")
-        if not args.no_browser:
-            webbrowser.open(requested_url)
-        return 0
+        if _replace_stale_process(requested_url):
+            try:
+                server = make_server(args.host, args.port)
+            except OSError as error:
+                raise RuntimeError(
+                    f"port {args.port} freed up but would not rebind"
+                ) from error
+        else:
+            try:
+                with urlopen(requested_url + "api/health", timeout=1.5) as response:
+                    existing = json.loads(response.read())
+                if not existing.get("ok"):
+                    raise RuntimeError("another service is using the Wavefinity port")
+            except Exception as error:
+                raise RuntimeError(
+                    f"port {args.port} is already in use and is not Wavefinity"
+                ) from error
+            print(
+                f"Wavefinity is already running: {requested_url}\n"
+                "(started by something other than this launcher, or before "
+                "this version added the ability to replace it - close that "
+                "window and relaunch to pick up code changes)"
+            )
+            if not args.no_browser:
+                webbrowser.open(requested_url)
+            return 0
+    PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
     host, port = server.server_address[:2]
     url = f"http://{host}:{port}/"
     print(f"Wavefinity browser app: {url}")
@@ -695,6 +748,11 @@ def main(argv: list[str] | None = None) -> int:
         pass
     finally:
         server.server_close()
+        try:
+            if PID_FILE.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                PID_FILE.unlink()
+        except (FileNotFoundError, ValueError, OSError):
+            pass
     return 0
 
 

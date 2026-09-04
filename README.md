@@ -570,6 +570,15 @@ geometry moved — decide whether you meant it, then re-pin deliberately.
 **Write commit messages that say why.** The history is the record. A message
 that explains the reasoning is worth more here than a tidy branch structure.
 
+**Relaunching replaces the running server, but only one it started.**
+`wavefinity_web.py` records its own process id in `wavefinity.pid` and, if a
+relaunch finds the port already taken, kills whatever process that file names
+and rebinds - a browser tab has no way to tell it is talking to code from
+before your last edit, so silently reattaching to an old process would serve
+stale code with no visible sign anything was wrong. A server the launcher did
+not itself start (or one from before this existed) is left alone and reported
+as already running - close that window by hand and relaunch.
+
 ### If more than one person is working in the repo
 
 Everyone commits to `main`, so the only rule that matters is: **pull before you
