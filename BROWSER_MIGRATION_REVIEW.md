@@ -1,8 +1,8 @@
 # Wavefinity browser migration — outside review brief
 
-**Prepared by:** Codex  
-**Date:** 2026-09-04  
-**Implementation commit:** `4401dac` (`Add local browser organizer app`)
+- **Prepared by:** Codex
+- **Date:** 2026-09-04
+- **Implementation commit:** `4401dac` (`Add local browser organizer app`)
 
 ## Review objective
 
