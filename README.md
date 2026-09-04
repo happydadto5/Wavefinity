@@ -13,6 +13,9 @@ There is no corner connector.
 Everything below is millimetres. This is the whole documentation for the
 project: design, rationale, measured evidence, and the traps.
 
+See [changelog.md](changelog.md) for dated implementation changes, and
+[TESTING.md](TESTING.md) for the log of what each test run actually found.
+
 ---
 
 ## Quick start
@@ -36,14 +39,17 @@ supplies the font outlines for floor labels. Run the tests with:
 .venv\Scripts\python.exe -m unittest
 ```
 
-They take about two minutes; boolean operations dominate.
+They take about two minutes; boolean operations dominate. **Log every run in
+[TESTING.md](TESTING.md)** — the result, and whether it caught anything. Runs
+that find nothing get logged too; that is how the file earns its keep.
 
 ### Using the UI
 
-The main form is deliberately short: **box X and Y in units**, box height in mm,
-a **floor label**, and a **part name** that is appended to the filename and
-changes nothing else. Numbers get a large stepper either side rather than the
-pinhead arrows a spinbox draws.
+The controls are grouped by intent: **Build your bin** holds dimensions and the
+insert form, **Customize your bin** holds the curved scoop and advanced physical
+settings, and **Label your bin** holds the label, its Bottom/Top toggle, and the
+part name used in filenames. Numbers get a large stepper either side rather
+than the pinhead arrows a spinbox draws.
 
 Beside the form a **live 3D preview** shows the box, label and the holders' actual
 export geometry — including holes, recesses, grooves and scallops — with the
@@ -53,14 +59,35 @@ to rotate, use the mouse wheel to zoom, and double-click to reset the view. The
 preview is built once per design change and only reprojected while the camera
 moves.
 
-The **2D layout** tab is the insert editor. Choose a plainly named interior
-support from the guided list, read the one-line description, then click and
-drag it to move, drag its blue corner to resize, or enter exact centre and size
-values. Normal layouts snap to **1 mm**. The editor exposes the supplied item
-library plus editable length-by-diameter segments, round/hex/square profiles,
-fit clearance, count, orientation, and open-ended `key=value` builder options.
-Overlaps and out-of-bounds features turn red and are refused at export. Layouts
-can be saved and reopened as `.wavefinity.json` files.
+The preview takes whatever room the window has: both preview canvases fill their
+panel and redraw at the new size, and spare height goes mostly to them rather
+than to the editor below, so enlarging the window really does draw a bigger bin.
+The window opens at the size its contents ask for, clamped to the screen it has
+to live on.
+
+The insert editor is a three-step flow: **1. pick a shape** from the icon
+palette (divider, post, pocket, slots, bore, cradle, nest) and read its
+one-line description; **2. set parameters**; **3. add part**.
+
+Picking a shape draws that shape. Step 2 is a labelled sketch of the part —
+a divider standing on its plate, a bore block with a tool stood in one of its
+holes, a cradle with a tool lying across its notched ribs — and every parameter
+that shape uses is a small field pinned beside the feature it changes, joined to
+it by a leader line. Quantity and the run axis sit above the part, the width and
+depth footprint below it, and heights, wall thicknesses, hole depths and the
+description of the stored tool point at the edge or hole they set. Shapes only
+show the parameters they have: a cradle has no height field, a pocket has no
+quantity. The sketch scales to the panel it is given rather than growing off the
+screen.
+
+Placed parts are listed beside the diagram; select one there or on the **2D
+layout** tab to edit, drag to move, drag its blue corner to resize, or type an
+exact centre. Normal layouts snap to **1 mm**. Overlaps and out-of-bounds
+features turn red and are refused at export. Layouts can be saved and reopened
+as `.wavefinity.json` files.
+
+**↻ Reload code** (top right) restarts the app so edited modules take effect,
+carrying the current design across the restart.
 
 Tall holders may use the middle of the bin, but anything entering the 2 mm strip
 beside a wall is capped below the connector arms. The editor's default divider
@@ -72,10 +99,28 @@ to centred whole cells; it deliberately gives up edge area in exchange for a
 reusable coordinate footprint. On the 128 x 88 comparison bin that is 120 x 80
 mm, 9.8% less floor, which is why cartridge snapping is not the default.
 
-Labels are placed after holders. They stay centred when possible, then move,
-rotate, and finally shrink (never below 7 mm) to dodge occupied zones. In
-removable modes the label is inlaid into the insert plate rather than hidden
-under it.
+Bottom labels are placed after holders. They stay centred when possible, then
+move, rotate, and finally shrink (never below 7 mm) to dodge occupied zones. In
+removable modes a bottom label is inlaid into the insert plate rather than
+hidden under it. A top label instead uses fixed 5 mm letters inlaid flush into a
+7 mm-deep rear ledge at the rim. The ledge underside rises at 45 degrees and
+prints without supports.
+
+The optional **curved scoop** spans the usable width at the front of the bin and
+rises halfway up the usable wall height, so a part sweeps forward and lifts out
+over the low front lip — the opposite wall from the top-label ledge. In
+removable modes it is part of the insert; in fused mode it is part of the box.
+A floor label is moved clear of the scoop strip, and the 2D editor shades the
+space reserved by a scoop or top-label ledge and refuses overlapping supports.
+
+What a scoop reserves is not its whole run. The curve meets the floor
+tangentially, so its innermost millimetres are only microns proud of it — on a
+40 mm bin the ramp stands 0.03 mm off the floor one millimetre in from where it
+lands. Reserving that lip called a divider across the middle of the bin
+"invalid" when it was in fact sitting flat, so the support keep-out stops where
+the curve has risen `SCOOP_FLOOR_TOLERANCE` (0.4 mm, about one layer) instead.
+`scoop_floor_zone` is still the true footprint, used where the real extent
+matters; `scoop_keep_out` is the smaller strip a support has to avoid.
 
 Everything else — wall thickness, the flat wall band, connector tolerance,
 height, length, position and wall direction — sits behind an **Advanced
@@ -95,10 +140,14 @@ failure still raises a dialog, because it needs acting on.
 
 ### Holder primitives
 
-Every holder owns a rectangular floor zone. Item-based holders use one or more
-`length x diameter` segments, so `50x6, 30x18` describes a hex driver shaft and
-handle without hard-coding a hex-driver rack. `Count = auto` fills the zone; a
-number requests exactly that many.
+Every holder owns a rectangular floor zone. Item-based holders (`cradle`,
+`nest`, `bore`) describe the stored tool as one or more `length x diameter`
+segments internally, so `50x6, 30x18` is a hex driver shaft and handle without
+hard-coding a hex-driver rack. The editor collects this as plain **Length /
+Thickness** fields, with optional **Handle length / Handle thickness** for a
+two-part tool — there are no fixed tool presets, since every bin is cut for one
+specific tool. `Count = auto` fills the zone; a number requests exactly that
+many.
 
 | Holder | Purpose | Optional `key=value` settings |
 |---|---|---|
@@ -262,7 +311,7 @@ floor and the connector arms hang from the rim, so on any normal bin they are
 nowhere near each other; on a very shallow one they would meet, and asking for a
 connector then gives an error saying how tall the box needs to be.
 
-### Floor label
+### Bottom and top labels
 
 Give a box a label and the text is **sunk into its floor**: the box gets a pocket
 and the label is the solid that fills it flush, exported as a **second object in
@@ -283,6 +332,13 @@ whole reason it stays a separate object.
   remains, export gives a clear error instead of burying text in a holder
 - **Blank label changes nothing**: one object, and the plain filename
 
+Choose **Top** to put the label at the rear rim instead. Top labels use fixed
+**5 mm** letter height on a **7 mm** front-to-back shelf. The text remains a
+0.4 mm-deep flush inlay and a second selectable 3MF object. The shelf's underside
+rises by 7 mm over its 7 mm run, an exact 45-degree self-supporting slope. A top
+label that cannot fit at its fixed size is rejected with a clear message rather
+than silently shrunk.
+
 The label is added to the filename: `Box 48 x 48 x 40 BOLTS.3mf`. Characters a
 filesystem would object to are stripped.
 
@@ -293,6 +349,7 @@ filesystem would object to are stripped.
 ```powershell
 python organizer_app.py box --x 40 --y 32 --z 55 --output box_40x32x55.3mf
 python organizer_app.py box --x 48 --y 48 --z 40 --label BOLTS --output "Box 48 x 48 x 40 BOLTS.3mf"
+python organizer_app.py box --x 48 --y 48 --z 40 --label M3 --label-position top --scoop --output custom.3mf
 python organizer_app.py box --x 32 --y 32 --z 40 --flat-inside 1.0 --output flat.3mf
 python organizer_app.py side --box-x 40 --box-y 32 --box-z 55 --along y --output side_y.3mf
 python organizer_app.py kit --x 40 --y 32 --z 55 --output-dir generated_40x32
@@ -309,8 +366,8 @@ Generated box files are named for their size, plus the label if there is one:
 part, so it is just `Connector.3mf`.
 
 The `organizer` command reads either a complete saved UI design or a bare layout
-object. A complete design supplies its box, label and part name; explicit CLI
-values override any of them. `--mode` overrides the saved
+object. A complete design supplies its box, label position, scoop choice and
+part name; explicit CLI values override any of them. `--mode` overrides the saved
 fused/separate/cartridge mode.
 Fused export writes one box file. Removable modes write a plain box and a
 separate `Insert ...3mf` or `Cartridge ...3mf`. Labelled parts are strict
@@ -341,6 +398,10 @@ or superseded:
 | `organizer_app.py` | CLI, exporters, interactive camera, 2D drag editor and Tkinter UI. | **Yes - the only one.** `python organizer_app.py ui`, or a subcommand. |
 | `test_organizer_app.py` | Box, connector, label, preview, editor, CLI and export regressions. | Only via `python -m unittest`. |
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
+
+`TESTING.md` is the running log of what those two suites have caught, alongside
+the defects that got past them. It exists to answer a fair question - whether
+two minutes a run is buying anything - with evidence instead of a feeling.
 
 Dependencies run one way: the insert module imports the geometry engine, and the
 app imports both. Neither library imports the app.
@@ -375,6 +436,9 @@ git add -A
 git commit -m "short description of what changed"
 git push
 ```
+
+Add a line to [TESTING.md](TESTING.md) for that run before committing, and a
+dated entry to [changelog.md](changelog.md) for the change itself.
 
 **Run the tests before committing.** They take about two minutes, and they are
 the only thing standing between a plausible-looking geometry edit and parts that
@@ -437,6 +501,8 @@ these numbers look arbitrary and are not.
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |
 | Bump band | top **4.0** below the rim | |
 | Label letters | **10.0** ideal, **7.0** minimum | sunk **0.4** into the floor |
+| Top label | **5.0** letters, **7.0** ledge | flush at rim; 45-degree underside |
+| Scoop | **50%** of usable wall height | full usable width at front |
 
 Connector tolerance, length and height were chosen from a **printed five-clip fit
 plate** — the leftmost clip, read back from that 3MF as `side_clip_tol_0p020`.

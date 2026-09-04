@@ -123,6 +123,18 @@ TEXT_MARGIN = 1.0              # clear space between the label and the cavity wa
 TEXT_FONT_FAMILY = "DejaVu Sans"
 TEXT_FONT_WEIGHT = "bold"
 
+# A rim label is deliberately a fixed physical feature rather than an
+# automatically-scaled floor label.  The 7 mm ledge leaves one millimetre of
+# breathing room either side of the requested 5 mm letters.  Its underside
+# rises 7 mm over the same 7 mm run: exactly 45 degrees and printable without
+# support.
+TOP_LABEL_LEDGE_DEPTH = 7.0
+TOP_LABEL_CAP_HEIGHT = 5.0
+TOP_LABEL_MARGIN = 1.0
+SCOOP_HEIGHT_FRACTION = 0.5
+SCOOP_FLOOR_TOLERANCE = 0.4   # a scoop lower than this counts as flat floor
+SCOOP_CURVE_SEGMENTS = 32
+
 
 
 @dataclass(frozen=True)
@@ -447,6 +459,18 @@ def intersection(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
 
 def _extrude_polygon(polygon: Polygon, height: float) -> trimesh.Trimesh:
     return trimesh.creation.extrude_polygon(polygon, height, engine="earcut")
+
+
+def _extrude_yz_profile(profile: Polygon, width: float) -> trimesh.Trimesh:
+    """Extrude a Y/Z section across world X."""
+    solid = _extrude_polygon(profile, width)
+    solid.apply_transform(np.asarray([
+        [0.0, 0.0, 1.0, -width / 2.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]))
+    return solid
 
 
 def _sweep_profile(
@@ -835,6 +859,206 @@ def text_outline(label: str, cap_height: float) -> Polygon | MultiPolygon:
     )
 
 
+def top_label_zone(box: BoxSpec) -> Polygon:
+    """Floor-plan area reserved by the rear rim-label ledge."""
+    inside_x, inside_y = box.usable_inside
+    if inside_y < TOP_LABEL_LEDGE_DEPTH - 1e-9:
+        raise ValueError(
+            f"a top label needs at least {TOP_LABEL_LEDGE_DEPTH:g} mm of usable "
+            f"bin depth; this bin has {inside_y:.1f} mm"
+        )
+    wall_y = inside_y / 2.0
+    return shapely_box(
+        -inside_x / 2.0,
+        wall_y - TOP_LABEL_LEDGE_DEPTH,
+        inside_x / 2.0,
+        wall_y,
+    )
+
+
+def top_label_outline(box: BoxSpec, label: str) -> Polygon | MultiPolygon:
+    """Fixed 5 mm text, centred on the 7 mm rear ledge."""
+    if box.z < TOP_LABEL_LEDGE_DEPTH - 1e-9:
+        raise ValueError(
+            f"a top label needs a bin at least {TOP_LABEL_LEDGE_DEPTH:g} mm tall "
+            "for its 45-degree ledge"
+        )
+    top_label_zone(box)
+    outline = text_outline(label, TOP_LABEL_CAP_HEIGHT)
+    minx, miny, maxx, maxy = outline.bounds
+    inside_x, _inside_y = box.usable_inside
+    room_x = inside_x - 2.0 * TOP_LABEL_MARGIN
+    room_y = TOP_LABEL_LEDGE_DEPTH - 2.0 * TOP_LABEL_MARGIN
+    width, height = maxx - minx, maxy - miny
+    if width > room_x + 1e-9 or height > TOP_LABEL_LEDGE_DEPTH + 1e-9:
+        raise ValueError(
+            f"'{label}' will not fit on the top label ledge: fixed "
+            f"{TOP_LABEL_CAP_HEIGHT:g} mm letters need {width:.1f} x {height:.1f} mm "
+            f"and the ledge gives {room_x:.1f} x {room_y:.1f} mm. Use a shorter "
+            "label or a wider box"
+        )
+    inside_x, inside_y = box.usable_inside
+    return translate_polygon(
+        outline, yoff=inside_y / 2.0 - TOP_LABEL_LEDGE_DEPTH / 2.0
+    )
+
+
+def make_top_label_ledge(box: BoxSpec) -> trimesh.Trimesh:
+    """Rear label shelf with a 45-degree self-supporting underside.
+
+    The shelf runs the full interior width so it meets the left and right
+    walls flush.  It is cut across the whole outer envelope and then trimmed
+    back to the wavy side walls, which leaves no gap at either end.
+    """
+    _inside_x, inside_y = box.usable_inside
+    wall_y = inside_y / 2.0
+    inner_y = wall_y - TOP_LABEL_LEDGE_DEPTH
+    envelope_polygon = wavy_outer_polygon(box)
+    minx, _miny, maxx, rear_y = envelope_polygon.bounds
+    low_z = box.z - TOP_LABEL_LEDGE_DEPTH
+    profile = Polygon([
+        (inner_y, box.z),
+        (rear_y, box.z),
+        (rear_y, low_z),
+        (wall_y, low_z),
+    ])
+    ledge = _extrude_yz_profile(profile, maxx - minx)
+    # Trim the ends back to just inside the wavy side walls.  Cutting a hair
+    # shy of the real wall surface keeps the shelf buried in wall material -
+    # it merges with the body cleanly instead of leaving coincident faces.
+    trim = _extrude_polygon(envelope_polygon.buffer(-0.1), box.z + 2.0)
+    trim.apply_translation((0.0, 0.0, -1.0))
+    ledge = intersection([ledge, trim])
+    ledge.remove_unreferenced_vertices()
+    ledge.merge_vertices()
+    return ledge
+
+
+def make_top_label(box: BoxSpec, label: str) -> trimesh.Trimesh:
+    """The separate-colour inlay that finishes flush with the rim."""
+    outline = top_label_outline(box, label)
+    pieces = list(outline.geoms) if isinstance(outline, MultiPolygon) else [outline]
+    solid = union([_extrude_polygon(piece, TEXT_DEPTH) for piece in pieces])
+    solid.apply_translation((0.0, 0.0, box.z - TEXT_DEPTH))
+    solid.remove_unreferenced_vertices()
+    solid.merge_vertices()
+    return solid
+
+
+def make_top_labelled_box(
+    box: BoxSpec,
+    label: str,
+    body: trimesh.Trimesh | None = None,
+) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
+    """Add the rim shelf and return its pocketed body plus flush text inlay."""
+    with_ledge = union([
+        make_box(box) if body is None else body,
+        make_top_label_ledge(box),
+    ])
+    inlay = make_top_label(box, label)
+    pocketed = difference([with_ledge, inlay])
+    pocketed.remove_unreferenced_vertices()
+    pocketed.merge_vertices()
+    return pocketed, inlay
+
+
+def _scoop_bounds(
+    box: BoxSpec,
+    floor_bounds: tuple[float, float, float, float] | None = None,
+) -> tuple[float, float, float, float]:
+    if floor_bounds is None:
+        inside_x, inside_y = box.usable_inside
+        return -inside_x / 2.0, -inside_y / 2.0, inside_x / 2.0, inside_y / 2.0
+    x0, y0, x1, y1 = floor_bounds
+    if not all(math.isfinite(value) for value in floor_bounds) or x1 <= x0 or y1 <= y0:
+        raise ValueError("scoop floor bounds must have positive finite width and depth")
+    return x0, y0, x1, y1
+
+
+def scoop_dimensions(
+    box: BoxSpec,
+    floor_bounds: tuple[float, float, float, float] | None = None,
+) -> tuple[float, float]:
+    """Return the scoop's vertical rise and front-to-back run."""
+    _x0, y0, _x1, y1 = _scoop_bounds(box, floor_bounds)
+    height = (box.z - box.wall) * SCOOP_HEIGHT_FRACTION
+    # Normal bins get a circular quarter curve.  Very shallow floor plans keep
+    # the requested half-wall rise with an elliptical curve that still leaves
+    # usable floor in front of it.
+    run = min(height, (y1 - y0) * 0.5)
+    if height <= 0.0 or run <= 0.0:
+        raise ValueError("this box is too small for a scoop")
+    return height, run
+
+
+def scoop_floor_zone(
+    box: BoxSpec,
+    floor_bounds: tuple[float, float, float, float] | None = None,
+) -> Polygon:
+    """Floor-plan strip occupied by the front scoop."""
+    x0, y0, x1, _y1 = _scoop_bounds(box, floor_bounds)
+    _height, run = scoop_dimensions(box, floor_bounds)
+    return shapely_box(x0, y0, x1, y0 + run)
+
+
+def scoop_keep_out(
+    box: BoxSpec,
+    floor_bounds: tuple[float, float, float, float] | None = None,
+    tolerance: float = SCOOP_FLOOR_TOLERANCE,
+) -> Polygon:
+    """The part of the scoop strip a support genuinely cannot stand on.
+
+    The curve meets the floor tangentially, so its innermost millimetres are
+    only microns proud of it - on a 40 mm bin the scoop is 0.03 mm high one
+    millimetre in.  Reserving the whole run as if it were a wall rejected
+    supports that in fact sit flat, so the strip stops where the curve has
+    risen ``tolerance`` above the floor.  The profile is
+    ``rise = height * (1 - cos(phi))`` at ``run * sin(phi)`` in from that
+    meeting point, which inverts to the offset below.
+    """
+    x0, y0, x1, _y1 = _scoop_bounds(box, floor_bounds)
+    height, run = scoop_dimensions(box, floor_bounds)
+    inner = y0 + run
+    if tolerance > 0.0:
+        gained = min(1.0, max(0.0, tolerance / height))
+        inner -= run * math.sin(math.acos(1.0 - gained))
+    return shapely_box(x0, y0, x1, max(y0 + min(run, 0.5), inner))
+
+
+def make_scoop(
+    box: BoxSpec,
+    floor_bounds: tuple[float, float, float, float] | None = None,
+) -> trimesh.Trimesh:
+    """Full-width curved retrieval ramp rising halfway up the front wall.
+
+    The concave face looks back into the bin, so a part can be swept forward
+    and lifted out over the low front lip.
+    """
+    x0, wall_y, x1, _y1 = _scoop_bounds(box, floor_bounds)
+    height, run = scoop_dimensions(box, floor_bounds)
+    inner_y = wall_y + run
+    floor_z = box.wall
+    centre_z = floor_z + height
+    curve = [
+        (
+            inner_y - run * math.cos(theta),
+            centre_z + height * math.sin(theta),
+        )
+        for theta in np.linspace(0.0, -math.pi / 2.0, SCOOP_CURVE_SEGMENTS + 1)
+    ]
+    profile = Polygon([
+        (inner_y, floor_z),
+        (wall_y, floor_z),
+        (wall_y, centre_z),
+        *curve[1:-1],
+    ])
+    scoop = _extrude_yz_profile(profile, x1 - x0)
+    scoop.apply_translation(((x0 + x1) / 2.0, 0.0, 0.0))
+    scoop.remove_unreferenced_vertices()
+    scoop.merge_vertices()
+    return scoop
+
+
 @dataclass(frozen=True)
 class LabelPlacement:
     cap_height: float
@@ -1030,6 +1254,21 @@ def label_report(
         "rotated": placement.rotated,
         "position_mm": [round(placement.x, 3), round(placement.y, 3)],
         "footprint_mm": [round(across, 3), round(up, 3)],
+        "depth_mm": TEXT_DEPTH,
+    }
+
+
+def top_label_report(box: BoxSpec, label: str) -> dict[str, object]:
+    outline = top_label_outline(box, label)
+    minx, miny, maxx, maxy = outline.bounds
+    return {
+        "label": label,
+        "position": "top",
+        "cap_height_mm": TOP_LABEL_CAP_HEIGHT,
+        "rotated": False,
+        "footprint_mm": [round(maxx - minx, 3), round(maxy - miny, 3)],
+        "ledge_depth_mm": TOP_LABEL_LEDGE_DEPTH,
+        "ledge_underside_degrees": 45.0,
         "depth_mm": TEXT_DEPTH,
     }
 

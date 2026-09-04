@@ -417,6 +417,41 @@ def feature(kind: str) -> Callable[[Builder], Builder]:
     return register
 
 
+# A holder may leave an option unset, meaning "work it out from the bin, the
+# zone or the stored item".  That was fine while only the builders needed the
+# number, but the editor has to show it too: a parameter box that sits blank
+# cannot be reasoned about or edited.  So each kind registers how it resolves
+# its own defaults, once, and both the builder and the editor read them here.
+Defaults = Callable[[BoxSpec, "Feature", float], dict[str, float]]
+FEATURE_DEFAULTS: dict[str, Defaults] = {}
+
+
+def defaults(kind: str) -> Callable[[Defaults], Defaults]:
+    def register(function: Defaults) -> Defaults:
+        FEATURE_DEFAULTS[kind] = function
+        return function
+    return register
+
+
+def resolved_options(
+    box: BoxSpec, spec_feature: "Feature", base_z: float = 0.0
+) -> dict[str, float]:
+    """Every option of a holder as a concrete number.
+
+    Defaults first, then whatever the holder actually sets on top.  A default
+    may read the options already chosen - a pocket's recess follows its height
+    - so the two cascade the same way they did when each builder worked its
+    own defaults out inline.
+    """
+    resolve = FEATURE_DEFAULTS.get(spec_feature.kind)
+    resolved = dict(resolve(box, spec_feature, base_z)) if resolve else {}
+    resolved.update({
+        name: value for name, value in spec_feature.options.items()
+        if value is not None
+    })
+    return resolved
+
+
 def _need_item(spec_feature: Feature) -> Item:
     if spec_feature.item is None:
         raise ValueError(f"a {spec_feature.kind} needs an item to hold")
@@ -433,6 +468,15 @@ def _fit_count(available: float, pitch: float, body: float) -> int:
 # --- cradles ------------------------------------------------------------------
 
 
+@defaults("cradle")
+def cradle_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    return {
+        "rib_thickness": RIB_THICKNESS,
+        "spacing": RIB_SPACING,
+        "floor_gap": CRADLE_FLOOR_GAP,
+    }
+
+
 @feature("cradle")
 def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """Scalloped ribs holding objects lying on their side.
@@ -445,13 +489,13 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     item = _need_item(spec_feature)
     zone = spec_feature.zone
     along = spec_feature.along
-    options = spec_feature.options
+    options = resolved_options(box, spec_feature, base_z)
     if along not in {"x", "y"}:
         raise ValueError("cradle orientation must be 'x' or 'y'")
 
-    rib_thickness = options.get("rib_thickness", RIB_THICKNESS)
-    spacing = options.get("spacing", RIB_SPACING)
-    floor_gap = options.get("floor_gap", CRADLE_FLOOR_GAP)
+    rib_thickness = options["rib_thickness"]
+    spacing = options["spacing"]
+    floor_gap = options["floor_gap"]
 
     run = zone.width if along == "x" else zone.depth
     across = zone.depth if along == "x" else zone.width
@@ -563,6 +607,19 @@ def _item_plan_outline(
     return outline
 
 
+@defaults("nest")
+def nest_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    item = _need_item(one)
+    # Deep enough to hold the tool without swallowing it, and never so deep
+    # that the recess turns into a well you cannot get a fingernail into.
+    recess = min(max(item.held(item.widest) * 0.3, 2.0), 8.0)
+    return {
+        "wall": BORE_WALL,
+        "depth": recess,
+        "height": one.options.get("depth", recess) + BASE_PLATE,
+    }
+
+
 @feature("nest")
 def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A shallow, snug top-down recess following an item's stepped outline.
@@ -572,17 +629,20 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     """
     item = _need_item(spec_feature)
     zone = spec_feature.zone
-    options = spec_feature.options
-    wall = options.get("wall", BORE_WALL)
-    recess_depth = options.get("depth", min(max(item.held(item.widest) * 0.3, 2.0), 8.0))
-    height = options.get("height", recess_depth + BASE_PLATE)
+    options = resolved_options(box, spec_feature, base_z)
+    wall = options["wall"]
+    recess_depth = options["depth"]
+    height = options["height"]
     if (
         not all(math.isfinite(value) for value in (wall, recess_depth, height))
         or wall <= 0.0
         or recess_depth <= 0.0
         or height <= recess_depth
     ):
-        raise ValueError("nest wall and depth must leave a positive printable base")
+        raise ValueError(
+            f"a nest {recess_depth:g} mm deep needs a height above {recess_depth:g} mm "
+            f"to leave a printable base, but its height is {height:g} mm"
+        )
 
     along = spec_feature.along
     run = zone.width if along == "x" else zone.depth
@@ -627,17 +687,28 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
 # --- bores --------------------------------------------------------------------
 
 
+@defaults("bore")
+def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    item = _need_item(one)
+    hole = min(item.length * 0.4, box.z - base_z - 2.0)
+    return {
+        "depth": hole,
+        "wall": BORE_WALL,
+        "height": one.options.get("depth", hole) + 2.0,
+    }
+
+
 @feature("bore")
 def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A block of holes for objects stood on end."""
     item = _need_item(spec_feature)
     zone = spec_feature.zone
-    options = spec_feature.options
+    options = resolved_options(box, spec_feature, base_z)
 
     held = item.held(item.widest)
-    depth = options.get("depth", min(item.length * 0.4, box.z - base_z - 2.0))
-    wall = options.get("wall", BORE_WALL)
-    height = options.get("height", depth + 2.0)
+    depth = options["depth"]
+    wall = options["wall"]
+    height = options["height"]
     if depth <= 0.0 or height <= 0.0 or wall <= 0.0 or depth >= height:
         raise ValueError(
             f"{item.name}: bore depth must be below its positive height and wall"
@@ -695,15 +766,20 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
 # --- posts --------------------------------------------------------------------
 
 
+@defaults("post")
+def post_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    return {"diameter": 12.0, "height": 16.0, "spacing": 4.0, "taper": 0.4}
+
+
 @feature("post")
 def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """One or more lightly tapered pegs for rolls, spools, rings and sockets."""
     zone = spec_feature.zone
-    options = spec_feature.options
-    diameter = options.get("diameter", 12.0)
-    height = options.get("height", 16.0)
-    spacing = options.get("spacing", 4.0)
-    taper = options.get("taper", 0.4)
+    options = resolved_options(box, spec_feature, base_z)
+    diameter = options["diameter"]
+    height = options["height"]
+    spacing = options["spacing"]
+    taper = options["taper"]
     if (
         not all(math.isfinite(value) for value in (diameter, height, spacing, taper))
         or diameter <= 0.0
@@ -753,13 +829,21 @@ def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
 # --- plain shapes -------------------------------------------------------------
 
 
+@defaults("divider")
+def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    return {
+        "thickness": RIB_THICKNESS,
+        "height": connector_keep_out(box) - base_z,
+    }
+
+
 @feature("divider")
 def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A plain wall subdividing the bin."""
     zone = spec_feature.zone
-    options = spec_feature.options
-    thickness = options.get("thickness", RIB_THICKNESS)
-    height = options.get("height", connector_keep_out(box) - base_z)
+    options = resolved_options(box, spec_feature, base_z)
+    thickness = options["thickness"]
+    height = options["height"]
     if thickness <= 0.0 or height <= 0.0 or base_z + height > box.z + 1e-9:
         raise ValueError("divider thickness and height must fit inside the bin")
     centre_x, centre_y = zone.centre
@@ -772,14 +856,23 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
     return [wall]
 
 
+@defaults("pocket")
+def pocket_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    return {
+        "height": 12.0,
+        "wall": 1.6,
+        "depth": one.options.get("height", 12.0) - 1.2,
+    }
+
+
 @feature("pocket")
 def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A raised block with a rectangular recess in it."""
     zone = spec_feature.zone
-    options = spec_feature.options
-    height = options.get("height", 12.0)
-    wall = options.get("wall", 1.6)
-    depth = options.get("depth", height - 1.2)
+    options = resolved_options(box, spec_feature, base_z)
+    height = options["height"]
+    wall = options["wall"]
+    depth = options["depth"]
     if (height <= 0.0 or wall <= 0.0 or depth <= 0.0 or depth >= height
             or 2 * wall >= zone.width or 2 * wall >= zone.depth):
         raise ValueError("pocket wall and depth must leave a positive shell")
@@ -793,15 +886,25 @@ def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     return [difference([block, inner])]
 
 
+@defaults("slot")
+def slot_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    return {
+        "width": 2.0,
+        "height": 12.0,
+        "depth": one.options.get("height", 12.0) - 2.0,
+        "wall": 1.6,
+    }
+
+
 @feature("slot")
 def build_slot(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """Parallel straight slots for flat things."""
     zone = spec_feature.zone
-    options = spec_feature.options
-    width = options.get("width", 2.0)
-    height = options.get("height", 12.0)
-    depth = options.get("depth", height - 2.0)
-    wall = options.get("wall", 1.6)
+    options = resolved_options(box, spec_feature, base_z)
+    width = options["width"]
+    height = options["height"]
+    depth = options["depth"]
+    wall = options["wall"]
     if (width <= 0.0 or wall <= 0.0 or height <= 0.0 or depth <= 0.0
             or depth >= height):
         raise ValueError("slot dimensions must leave a positive base")
@@ -909,6 +1012,29 @@ def build_features(
     return solids
 
 
+def insert_footprint(box: BoxSpec, mode: str = "separate") -> Polygon:
+    """The floor outline of a standalone insert.
+
+    The layout area pulled in by ``INSERT_CLEARANCE`` all round with softened
+    corners.  That clearance is the whole reason a removable insert can go in
+    and come back out, so the preview draws this same outline rather than the
+    bare layout rectangle.
+    """
+    bounds = layout_zone(box, mode)
+    return _rounded(
+        shapely_box(
+            bounds.x0 + INSERT_CLEARANCE, bounds.y0 + INSERT_CLEARANCE,
+            bounds.x1 - INSERT_CLEARANCE, bounds.y1 - INSERT_CLEARANCE,
+        ),
+        1.0,
+    )
+
+
+def make_insert_plate(box: BoxSpec, mode: str = "separate") -> trimesh.Trimesh:
+    """The bare base plate of a standalone insert, sitting on z = 0."""
+    return _extrude_polygon(insert_footprint(box, mode), BASE_PLATE)
+
+
 def make_fitted_insert(
     box: BoxSpec, features: Iterable[Feature]
 ) -> trimesh.Trimesh:
@@ -918,14 +1044,7 @@ def make_fitted_insert(
     round so it actually goes in, which is the cost of being able to lift it
     out and swap it.
     """
-    whole = Zone.whole(box)
-    footprint = _rounded(
-        shapely_box(
-            whole.x0 + INSERT_CLEARANCE, whole.y0 + INSERT_CLEARANCE,
-            whole.x1 - INSERT_CLEARANCE, whole.y1 - INSERT_CLEARANCE,
-        ),
-        1.0,
-    )
+    footprint = insert_footprint(box, "separate")
     plate = _extrude_polygon(footprint, BASE_PLATE)
     # Validate and size holders at their installed height, then lower them by
     # the bin floor thickness so the removable insert still exports on z=0.
@@ -947,13 +1066,7 @@ def make_cartridge_insert(
 ) -> trimesh.Trimesh:
     """Standalone insert on the optional centred 8 mm cartridge footprint."""
     bounds = cartridge_zone(box)
-    footprint = _rounded(
-        shapely_box(
-            bounds.x0 + INSERT_CLEARANCE, bounds.y0 + INSERT_CLEARANCE,
-            bounds.x1 - INSERT_CLEARANCE, bounds.y1 - INSERT_CLEARANCE,
-        ),
-        1.0,
-    )
+    footprint = insert_footprint(box, "cartridge")
     plate = _extrude_polygon(footprint, BASE_PLATE)
     parts = build_features(box, features, BASE_PLATE + box.wall, bounds)
     for part in parts:
