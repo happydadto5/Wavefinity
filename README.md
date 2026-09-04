@@ -68,9 +68,12 @@ preview and refused at export.
 
 **Save design** downloads the existing `.wavefinity.json` format, and **Open
 design** validates that format through Python before using it. Generated `.3mf`
-files are written to the shown output folder. The browser API is same-origin
-only, accepts JSON only, and applies a restrictive content-security policy so
-an unrelated web page cannot invoke local file generation.
+files are written to the shown output folder, which is sticky — the server
+saves it to `wavefinity_prefs.json` next to the app, so it survives a reload
+or a different browser rather than resetting every launch. The browser API is
+same-origin only, accepts JSON only, and applies a restrictive
+content-security policy so an unrelated web page cannot invoke local file
+generation.
 
 ### Using the browser editor
 
@@ -173,6 +176,7 @@ default and is never exposed to the network.
 | `POST /api/preview` | Validate a design and return camera-independent geometry. |
 | `POST /api/design/validate` | Validate and normalize a saved design. |
 | `POST /api/feature/default` | Create an engine-derived support draft. |
+| `POST /api/feature/autosize` | Grow a divider or slot draft to fill the bin, or size a slot from its quantity. |
 | `POST /api/feature/draft` | Build actual mesh faces for live parameter preview. |
 | `POST /api/feature/apply` | Snap, validate, add or update a support. |
 | `POST /api/feature/delete` | Remove a support. |
@@ -180,6 +184,7 @@ default and is never exposed to the network.
 | `POST /api/generate` | Generate the organizer parts. |
 | `POST /api/connector` | Generate a connector. |
 | `POST /api/sampler` | Generate the fit sampler. |
+| `POST /api/preferences` | Persist sticky per-machine settings (currently the output folder) to `wavefinity_prefs.json`. |
 
 **Security boundary**, since the service writes files: loopback binding
 only; POST routes require `application/json` and reject a foreign `Origin`;
