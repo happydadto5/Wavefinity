@@ -361,7 +361,14 @@ function renderDraftFields() {
   const cy = (zone[1] + zone[3]) / 2;
   const width = zone[2] - zone[0];
   const depth = zone[3] - zone[1];
-  let html = field("Center X", "cx", fmt(cx), { unit: "mm" }) + field("Center Y", "cy", fmt(cy), { unit: "mm" });
+  let html = "";
+  if (one.kind === "divider" || one.kind === "slot") {
+    html += `<div class="auto-size-row wide">
+      <button type="button" class="button secondary" data-action="auto-fill" title="Grow this support to fill the open floor around it">Fill the bin</button>
+      ${one.kind === "slot" ? `<button type="button" class="button secondary" data-action="auto-quantity" title="Size the footprint from the quantity, dividing the bin across it">Guess from quantity</button>` : ""}
+    </div>`;
+  }
+  html += field("Center X", "cx", fmt(cx), { unit: "mm" }) + field("Center Y", "cy", fmt(cy), { unit: "mm" });
   if (info.flags.size) {
     html += field("Width", "width", fmt(width), { unit: "mm" });
     html += field("Depth", "depth", fmt(depth), { unit: "mm" });
@@ -428,6 +435,29 @@ function renderDraftFields() {
     updateSelectionButtons();
     refreshDraftSoon();
   });
+  const autoFill = $('[data-action="auto-fill"]', $("#draft-fields"));
+  if (autoFill) autoFill.addEventListener("click", () => runAutoSize("fill"));
+  const autoQuantity = $('[data-action="auto-quantity"]', $("#draft-fields"));
+  if (autoQuantity) autoQuantity.addEventListener("click", () => runAutoSize("quantity"));
+}
+
+async function runAutoSize(goal) {
+  if (!state.draft) return;
+  try {
+    const result = await api("/api/feature/autosize", {
+      design: state.design,
+      feature: state.draft,
+      index: state.selected,
+      goal,
+    });
+    state.draft = result.feature;
+    state.draftResolvedOptions = result.resolved_options || {};
+    renderDraftFields();
+    updateSelectionButtons();
+    refreshDraft();
+  } catch (error) {
+    toast(error.message, true);
+  }
 }
 
 function updateDraftFromFields(event) {

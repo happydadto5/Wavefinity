@@ -46,6 +46,7 @@ from organizer_inserts import (
     moved_feature,
     resized_feature,
     resolved_options,
+    snapped_zone,
 )
 from organizer_app import (
     APP_DIR,
@@ -203,6 +204,89 @@ def _first_open_position(
         ):
             return placed
     raise ValueError("there is no open floor area large enough for that support")
+
+
+def _grow_zone_to_fit(
+    zone: Zone,
+    bounds: Zone,
+    obstacles: list[Zone],
+    grow_x: bool,
+    grow_y: bool,
+    pitch: float,
+) -> Zone:
+    """Inflate a zone's active sides until each hits the layout bounds or an obstacle.
+
+    Each of the four sides grows independently, ``pitch`` at a time, and stops
+    the moment it would leave the usable floor or come within
+    ``MIN_FEATURE_GAP`` of another support or a reserved scoop/label zone.
+    That is a simple greedy fill, not a true maximal-rectangle solve, but it
+    is enough to turn "make this as big as it can be" into one click.
+    """
+    x0, y0, x1, y1 = zone.x0, zone.y0, zone.x1, zone.y1
+    active = {"x0": grow_x, "x1": grow_x, "y0": grow_y, "y1": grow_y}
+    steps = int(max(bounds.width, bounds.depth) / pitch) + 4
+    for _ in range(steps):
+        moved = False
+        for side in ("x0", "x1", "y0", "y1"):
+            if not active[side]:
+                continue
+            trial = {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
+            trial[side] += -pitch if side in ("x0", "y0") else pitch
+            if (trial["x0"] < bounds.x0 - 1e-6 or trial["y0"] < bounds.y0 - 1e-6
+                    or trial["x1"] > bounds.x1 + 1e-6 or trial["y1"] > bounds.y1 + 1e-6):
+                active[side] = False
+                continue
+            candidate = Zone(trial["x0"], trial["y0"], trial["x1"], trial["y1"])
+            if any(candidate.overlaps(other, MIN_FEATURE_GAP) for other in obstacles):
+                active[side] = False
+                continue
+            x0, y0, x1, y1 = trial["x0"], trial["y0"], trial["x1"], trial["y1"]
+            moved = True
+        if not moved:
+            break
+    return Zone(x0, y0, x1, y1)
+
+
+def auto_size_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    box, layout, label, _part_name, label_location, scoop = _design(payload["design"])
+    one = _feature_from_json(payload["feature"], layout.mode)
+    goal = str(payload.get("goal", "fill"))
+    index = payload.get("index")
+    bounds = layout_zone(box, layout.mode)
+    pitch = 8.0 if layout.mode == "cartridge" else layout.snap
+    if goal == "quantity":
+        if one.kind != "slot":
+            raise ValueError("guessing a size from quantity is only offered for slots")
+        zone = one.zone
+        # "Divide the bin by the quantity" means the footprint spans the
+        # whole usable floor across the slots, regardless of what else is
+        # already placed - a deliberate estimate, not a collision-checked fit.
+        one = replace(one, zone=(
+            Zone(zone.x0, bounds.y0, zone.x1, bounds.y1) if one.along == "x"
+            else Zone(bounds.x0, zone.y0, bounds.x1, zone.y1)
+        ))
+    else:
+        others = [
+            feature.zone for position, feature in enumerate(layout.features)
+            if index is None or position != int(index)
+        ]
+        reserved = [
+            zone for _name, zone in _customization_zones(
+                box, label, label_location, scoop, layout.mode
+            )
+        ]
+        grow_x, grow_y = True, True
+        if one.kind == "divider":
+            grow_x, grow_y = (one.along == "x", one.along != "x")
+        grown = _grow_zone_to_fit(one.zone, bounds, others + reserved, grow_x, grow_y, pitch)
+        one = replace(one, zone=grown)
+        if one.kind == "divider":
+            one = replace(one, along=divider_axis(grown.width, grown.depth))
+    one = replace(one, zone=snapped_zone(one.zone, box, layout.mode, layout.snap))
+    return {
+        "feature": feature_to_dict(one, layout.mode),
+        "resolved_options": resolved_options(box, one, base_height(box, layout.mode)),
+    }
 
 
 def catalog_payload() -> dict[str, Any]:
@@ -461,6 +545,7 @@ POST_ROUTES = {
         "design": design_to_dict(*_design(payload["design"]))
     },
     "/api/feature/default": default_feature_payload,
+    "/api/feature/autosize": auto_size_payload,
     "/api/feature/draft": draft_payload,
     "/api/feature/apply": apply_feature_payload,
     "/api/feature/delete": delete_feature_payload,

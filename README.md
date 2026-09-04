@@ -80,6 +80,16 @@ support**. Placed supports can be selected in the list or on the 2D layout,
 then moved, resized, or edited with exact numeric fields. Normal layouts snap
 to **1 mm**. Overlaps and out-of-bounds features are refused at export.
 
+A **divider** or **slot** also gets two auto-size buttons above its fields,
+since those are the only two kinds where a size or a count has an
+unambiguous "divide the bin" meaning - every other kind's quantity means
+repeated elements inside one footprint, not sections of the bin. **Fill the
+bin** grows the zone to the usable floor edge, a placed neighbour, or a
+reserved scoop/label zone - a divider only along its run axis, a slot in
+both directions. **Guess from quantity** (slot only) sets the footprint's
+cross-axis to the whole usable floor regardless of what else is placed, an
+estimate rather than a collision-checked fit.
+
 ### Three insert types
 
 - **Fused:** holders and bin print as one solid part. It is strongest and uses

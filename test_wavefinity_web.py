@@ -10,8 +10,10 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from organizer_app import design_from_dict
+from organizer_inserts import layout_zone
 from wavefinity_web import (
     apply_feature_payload,
+    auto_size_payload,
     catalog_payload,
     default_design,
     default_feature_payload,
@@ -106,6 +108,54 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(saved["zone"][2] - saved["zone"][0], 10.0)
         deleted = delete_feature_payload({"design": updated["design"], "index": 0})
         self.assertEqual(deleted["design"]["layout"]["features"], [])
+
+    def test_fill_the_bin_grows_a_divider_only_along_its_run_axis(self):
+        design = default_design()
+        feature = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        cross = feature["zone"][3] - feature["zone"][1]
+        feature["zone"] = [-2.0, feature["zone"][1], 2.0, feature["zone"][3]]
+        grown = auto_size_payload({
+            "design": design, "feature": feature, "index": None, "goal": "fill",
+        })["feature"]
+        box, layout, *_ = design_from_dict(design)
+        whole = layout_zone(box, layout.mode)
+        self.assertGreater(grown["zone"][2] - grown["zone"][0], 4.0)
+        self.assertLessEqual(grown["zone"][2] - grown["zone"][0], whole.width + 1e-6)
+        self.assertAlmostEqual(grown["zone"][3] - grown["zone"][1], cross, delta=0.05)
+
+    def test_fill_the_bin_stops_short_of_a_neighbouring_support(self):
+        design = default_design()
+        neighbour = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        neighbour["zone"] = [3.0, -1.0, 6.0, 1.0]
+        placed = apply_feature_payload({"design": design, "feature": neighbour, "index": None})
+        design = placed["design"]
+        divider = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        divider["zone"] = [-2.0, -1.0, 2.0, 1.0]
+        grown = auto_size_payload({
+            "design": design, "feature": divider, "index": None, "goal": "fill",
+        })["feature"]
+        self.assertLess(grown["zone"][2], 3.0)
+
+    def test_guess_from_quantity_divides_the_bin_for_a_slot(self):
+        design = default_design()
+        box, layout, *_ = design_from_dict(design)
+        whole = layout_zone(box, layout.mode)
+        slot = default_feature_payload({"design": design, "kind": "slot"})["feature"]
+        slot["along"] = "x"
+        slot["count"] = 4
+        sized = auto_size_payload({
+            "design": design, "feature": slot, "index": None, "goal": "quantity",
+        })["feature"]
+        self.assertAlmostEqual(sized["zone"][3] - sized["zone"][1], whole.depth, delta=1.0)
+        self.assertEqual(sized["count"], 4)
+
+    def test_guess_from_quantity_is_refused_for_a_divider(self):
+        design = default_design()
+        feature = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        with self.assertRaises(ValueError):
+            auto_size_payload({
+                "design": design, "feature": feature, "index": None, "goal": "quantity",
+            })
 
     def test_mode_conversion_preserves_valid_layout(self):
         design = default_design()

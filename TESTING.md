@@ -47,6 +47,8 @@ empty, the suites are not testing the things that break.
 | 2026-09-04 | Claude | `unittest test_organizer_inserts.FullSpanLeaningDividerTests` | 6 | Nothing | Full-span + leaning divider combined. The precision check samples several (position-across-the-lean, height) points directly and compares each to the wall's true boundary at that exact point (not just each height's bounding box), finding zero gap to mesh precision. Also covers negative angle, straight (non-wedge) mode, `along="y"`, the `flat_inside` two-piece split, insert-mode clipping, and that the ±45° and collapsed-wedge refusals still apply. |
 | 2026-09-04 | Claude | `unittest test_organizer_inserts` | 64 | Nothing | After combining full-span with a lean. |
 | 2026-09-04 | Claude | `unittest` (full suite) | 175 | Nothing | After the browser-UI overhaul pass (sidebar layout, preferences, quantity/auto controls, dirty-check on Update selected). The bugs found this run were all layout/CSS/visual, so the suite itself caught none of them - see below. |
+| 2026-09-04 | Claude | `unittest test_wavefinity_web` | 14 | Nothing | The two auto-size buttons (`POST /api/feature/autosize`): a divider grows only along its run axis and stops one snap-step short of a placed neighbour; a slot's "guess from quantity" sets its cross-axis to the full usable floor and keeps the typed count; a divider refuses the quantity goal outright (it has no `count` to guess from). |
+| 2026-09-04 | Claude | `unittest` (full suite) | 179 | Nothing | After wiring the auto-size feature end to end. |
 
 ## Defects found outside the suites
 

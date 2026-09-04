@@ -54,12 +54,25 @@
   or a cleared profile because the *server* owns it), and the catalog
   response returns the saved value on the next load.
 
-### Not done - see the reply for why
+### Added
 
-The two "auto-size" buttons requested above the parameter fields (one
-sizing a support to fill the bin, one guessing a size from quantity) need
-real per-kind design decisions this session asked about rather than
-guessed at; not implemented yet.
+- Two auto-size buttons sit above the parameter fields for **divider** and
+  **slot** - the only two kinds where a quantity or a footprint has an
+  unambiguous "divide the bin" meaning; the other five kinds' `count` means
+  repeated elements inside one footprint, not sections of the bin, so they
+  keep manual sizing only. **Fill the bin** (new `POST
+  /api/feature/autosize`, `goal: "fill"`) grows the draft's zone one
+  `snap`-sized step at a time on each side independently until it meets
+  the usable floor edge, another placed support, or a reserved scoop/label
+  zone - a divider only grows along its run axis, a slot grows in both
+  directions. It is a greedy fill, not a true maximal-rectangle solve, so
+  a divider recentred after a big manual shrink can land a step short of
+  the wall on 1 mm grid rounding; good enough for "make this big," not a
+  precision tool. **Guess from quantity** (`goal: "quantity"`, slot only)
+  sets the footprint's cross-axis - the direction the N grooves stack
+  across - to the *whole* usable floor in that direction, ignoring what
+  else is already placed, exactly as asked for: an estimate, not a
+  collision-checked fit.
 
 ## 2026-09-04 — Claude (latest)
 
