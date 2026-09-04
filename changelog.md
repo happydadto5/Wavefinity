@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-09-04 — Claude (browser UI pass 2)
+
+### Changed
+
+- **Auto-size simplified to one button.** The previous "Fill the bin" /
+  "Guess from quantity" pair on a divider or slot was confusing and, for
+  anyone still running an older server process, silently did nothing (the
+  route did not exist yet on that process - restarting picks up the fix).
+  It is now a single **Fit to bin**: a divider grows only along its run
+  axis to reach the walls; a slot grows in both directions and also drops
+  any typed quantity back to automatic, so the builder fits as many slots
+  as the new, bigger footprint actually holds. The existing per-kind
+  **Auto** button next to Quantity is unchanged.
+- **Delete moved to the placed-supports list.** It was a single button up
+  in the parameter editor, enabled only for whichever support happened to
+  be selected. Each row in **Placed supports** now carries its own small
+  ✕, so a support can be removed directly without first selecting it.
+- **"Customize your bin" folded into "Build your bin."** It did not need
+  to be its own accordion section; the scoop checkbox and the physical
+  settings (renamed **Advanced bin settings**, still an expandable
+  `<details>`) now sit at the end of the bin section, after Placed
+  supports.
+- **8 mm cartridge removed from the browser UI.** It is still a real,
+  tested engine and CLI mode (`organizer_app.py organizer --mode
+  cartridge`), useful for a reusable coordinate footprint across bins, but
+  in the editor it mostly produced a confusing flash-and-revert the moment
+  an already-placed support did not land on an 8 mm cell. The browser now
+  offers only **Fused** and **Removable**.
+- **Removable's base plate thinned from 1.2 mm to 0.6 mm** (`BASE_PLATE`
+  in `organizer_inserts.py`) - "thin" was the point of a separately
+  printed plate that just drops into the bin.
+- **Zone fields (Center X/Y, Width, Depth) now step by 1 mm**, not 0.1 mm,
+  matching the 1 mm snap every one of those edits is already silently
+  rounded to server-side. Per-kind option fields (Height, Wall, Angle, and
+  so on) are unaffected - they are not snapped and keep finer control.
+
 ## 2026-09-04 — Claude (browser UI pass)
 
 ### Fixed

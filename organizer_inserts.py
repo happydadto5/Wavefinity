@@ -43,7 +43,7 @@ from organizer_engine import (
 ITEM_CLEARANCE = 0.4       # slack around a stored object, on the diameter
 RIB_THICKNESS = 1.6        # four perimeters at 0.4
 RIB_SPACING = 1.2          # material left between two neighbouring cradles
-BASE_PLATE = 1.2           # floor of a standalone insert
+BASE_PLATE = 0.6           # floor of a standalone insert
 CRADLE_FLOOR_GAP = 2.0     # gap under the widest part of a lying object
 BORE_WALL = 1.6            # material around a bore
 INSERT_CLEARANCE = 0.4     # slack around a standalone insert, per side

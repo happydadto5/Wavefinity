@@ -115,10 +115,13 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .placed-block h3 { margin: 15px 0 8px; font-size: 13px; }
 .placed-supports { display: grid; gap: 5px; }
 .placed-empty { border: 1px dashed var(--line-dark); border-radius: 7px; padding: 12px; color: var(--muted); text-align: center; font-size: 12px; }
-.placed-item { border: 1px solid var(--line); border-radius: 7px; padding: 9px; background: white; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.placed-item { border: 1px solid var(--line); border-radius: 7px; padding: 5px 6px 5px 9px; background: white; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .placed-item.selected { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue); background: #f4fbfe; }
-.placed-item strong { font-size: 12px; }
-.placed-item span { color: var(--muted); font-size: 11px; }
+.placed-item-select { flex: 1; min-width: 0; border: 0; background: none; padding: 4px 0; text-align: left; cursor: pointer; display: flex; flex-direction: column; }
+.placed-item-select strong { font-size: 12px; }
+.placed-item-select span { color: var(--muted); font-size: 11px; }
+.placed-item-delete { flex: none; border: 0; border-radius: 6px; background: none; color: var(--danger); font-size: 13px; line-height: 1; padding: 7px 8px; cursor: pointer; }
+.placed-item-delete:hover { background: #fff0ef; }
 
 .check-card { display: flex; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfc; cursor: pointer; }
 .check-card input { margin-top: 2px; accent-color: var(--teal); }

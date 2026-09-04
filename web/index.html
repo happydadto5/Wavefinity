@@ -36,8 +36,8 @@
 
           <fieldset class="mode-fieldset">
             <legend>How should the interior print?</legend>
-            <div id="mode-options" class="segmented three"></div>
-            <p class="field-help mode-help"><strong>Fused</strong> prints supports as one piece with the bin. <strong>Removable</strong> uses a fitted plate you can swap. <strong>8 mm cartridge</strong> uses repeatable whole-cell inserts and gives up a little edge space.</p>
+            <div id="mode-options" class="segmented two"></div>
+            <p class="field-help mode-help"><strong>Fused</strong> prints supports as one piece with the bin. <strong>Removable</strong> prints them separately on a thin 0.6 mm base plate that fits into the bin.</p>
           </fieldset>
 
           <div class="subheading-row">
@@ -57,7 +57,6 @@
             <div class="button-row">
               <button id="add-support" class="button primary">Add support</button>
               <button id="update-support" class="button secondary" disabled>Update selected</button>
-              <button id="delete-support" class="button danger" disabled>Delete</button>
             </div>
           </div>
 
@@ -65,20 +64,13 @@
             <h3>Placed supports</h3>
             <div id="placed-supports" class="placed-supports"></div>
           </div>
-        </div>
-      </section>
 
-      <section class="control-section open" data-section="customize">
-        <button class="section-heading" aria-expanded="true">
-          <span>Customize your bin</span><span class="chevron">⌄</span>
-        </button>
-        <div class="section-body">
           <label class="check-card">
             <input id="scoop" type="checkbox">
             <span><strong>Add curved scoop</strong><small>Rises halfway up the front wall for easy access to small parts.</small></span>
           </label>
           <details class="advanced">
-            <summary>Advanced physical settings</summary>
+            <summary>Advanced bin settings</summary>
             <div class="field-grid two">
               <label>Wall / floor <span class="unit">mm</span><input id="wall" type="number" min="0.4" step="0.1"></label>
               <label>Flat wall band <span class="unit">0–1 mm</span><input id="flat-inside" type="number" min="0" max="1" step="0.1"></label>

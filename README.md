@@ -83,35 +83,39 @@ support**. Placed supports can be selected in the list or on the 2D layout,
 then moved, resized, or edited with exact numeric fields. Normal layouts snap
 to **1 mm**. Overlaps and out-of-bounds features are refused at export.
 
-A **divider** or **slot** also gets two auto-size buttons above its fields,
-since those are the only two kinds where a size or a count has an
-unambiguous "divide the bin" meaning - every other kind's quantity means
-repeated elements inside one footprint, not sections of the bin. **Fill the
-bin** grows the zone to the usable floor edge, a placed neighbour, or a
-reserved scoop/label zone - a divider only along its run axis, a slot in
-both directions. **Guess from quantity** (slot only) sets the footprint's
-cross-axis to the whole usable floor regardless of what else is placed, an
-estimate rather than a collision-checked fit.
+A **divider** or **slot** also gets a **Fit to bin** button above its fields,
+since those are the only two kinds where a size has an unambiguous "reach the
+bin" meaning - every other kind's quantity means repeated elements inside one
+footprint, not sections of the bin, so they keep manual sizing and the
+ordinary per-kind **Auto** button next to Quantity. Fit to bin grows the zone
+to the usable floor edge, a placed neighbour, or a reserved scoop/label zone -
+a divider only along its run axis (its wall thickness is a separate field), a
+slot in both directions. For a slot it also clears any typed quantity back to
+automatic, so the builder fits as many slots as the new, bigger footprint
+actually holds rather than stretching an old fixed count across empty space.
 
-### Three insert types
+### Insert types
 
-- **Fused:** holders and bin print as one solid part. It is strongest and uses
-  the most floor area, but the supports are permanent.
-- **Removable:** holders print on a fitted base plate that drops into the bin,
-  so the interior can be swapped while the bin stays put.
-- **8 mm cartridge:** a removable insert constrained to whole 8 mm cells. It is
-  repeatable and interchangeable between matching bins, at the cost of some
-  usable edge area.
+The browser UI offers two: **Fused**, where holders print as one solid part
+with the bin — strongest, uses the most floor area, but the supports are
+permanent — and **Removable**, where holders print separately on a thin
+0.6 mm base plate that drops into the bin, so the interior can be swapped
+while the bin stays put.
+
+A third mode, **8 mm cartridge**, exists at the engine and CLI level
+(`--mode cartridge`): a removable insert constrained to whole 8 mm cells, so
+it is repeatable and interchangeable between matching bins at the cost of
+some usable edge area (on the 128 x 88 comparison bin that is 120 x 80 mm,
+9.8% less floor). The browser UI does not expose it as a choice — reusable
+coordinate footprints across bins are a scripting concern, and picking it by
+mistake in the editor just produced a confusing revert once an already-placed
+support did not land on an 8 mm cell.
 
 Tall holders may use the middle of the bin, but anything entering the 2 mm strip
 beside a wall is capped below the connector arms. The editor's default divider
 height follows that limit; an explicit unsafe height is refused at generation.
 
-**Fused** is the default and gives the most usable floor. **Removable** adds a
-1.2 mm fitted base plate. **8 mm cartridge** is a removable export constrained
-to centred whole cells; it deliberately gives up edge area in exchange for a
-reusable coordinate footprint. On the 128 x 88 comparison bin that is 120 x 80
-mm, 9.8% less floor, which is why cartridge snapping is not the default.
+**Fused** is the default and gives the most usable floor.
 
 Bottom labels are placed after holders. They stay centred when possible, then
 move, rotate, and finally shrink (never below 7 mm) to dodge occupied zones. In
@@ -176,7 +180,7 @@ default and is never exposed to the network.
 | `POST /api/preview` | Validate a design and return camera-independent geometry. |
 | `POST /api/design/validate` | Validate and normalize a saved design. |
 | `POST /api/feature/default` | Create an engine-derived support draft. |
-| `POST /api/feature/autosize` | Grow a divider or slot draft to fill the bin, or size a slot from its quantity. |
+| `POST /api/feature/autosize` | "Fit to bin": grow a divider or slot draft's zone to the usable floor. |
 | `POST /api/feature/draft` | Build actual mesh faces for live parameter preview. |
 | `POST /api/feature/apply` | Snap, validate, add or update a support. |
 | `POST /api/feature/delete` | Remove a support. |
@@ -724,7 +728,7 @@ Measured and regression-tested; run the suite for the current exact count.
 - Seven registered builders: cradle, contour nest, bore, center post, divider,
   pocket and slot
 - Fused outputs remain one watertight solid; fitted and cartridge inserts clear
-  the bin walls and stand on their own 1.2 mm print-flat plate
+  the bin walls and stand on their own 0.6 mm print-flat plate
 - Normal moves and resizes snap to 1 mm. Cartridge coordinates and sizes are
   validated on 8 mm cell edges and survive a JSON round trip
 - All three production modes were exported as strict, zero-warning 3MF files;

@@ -272,7 +272,6 @@ function wireControls() {
 
   $("#add-support").addEventListener("click", () => applySupport(null));
   $("#update-support").addEventListener("click", () => applySupport(state.selected));
-  $("#delete-support").addEventListener("click", deleteSupport);
   $("#save-design").addEventListener("click", saveDesign);
   $("#open-design").addEventListener("change", openDesign);
   $("#new-design").addEventListener("click", newDesign);
@@ -363,15 +362,17 @@ function renderDraftFields() {
   const depth = zone[3] - zone[1];
   let html = "";
   if (one.kind === "divider" || one.kind === "slot") {
+    const hint = one.kind === "divider"
+      ? "Stretch this divider to reach the bin's walls"
+      : "Grow this support to fill the open floor, then let the quantity fit it";
     html += `<div class="auto-size-row wide">
-      <button type="button" class="button secondary" data-action="auto-fill" title="Grow this support to fill the open floor around it">Fill the bin</button>
-      ${one.kind === "slot" ? `<button type="button" class="button secondary" data-action="auto-quantity" title="Size the footprint from the quantity, dividing the bin across it">Guess from quantity</button>` : ""}
+      <button type="button" class="button secondary" data-action="auto-fill" title="${hint}">Fit to bin</button>
     </div>`;
   }
-  html += field("Center X", "cx", fmt(cx), { unit: "mm" }) + field("Center Y", "cy", fmt(cy), { unit: "mm" });
+  html += field("Center X", "cx", fmt(cx), { unit: "mm", step: "1" }) + field("Center Y", "cy", fmt(cy), { unit: "mm", step: "1" });
   if (info.flags.size) {
-    html += field("Width", "width", fmt(width), { unit: "mm" });
-    html += field("Depth", "depth", fmt(depth), { unit: "mm" });
+    html += field("Width", "width", fmt(width), { unit: "mm", step: "1" });
+    html += field("Depth", "depth", fmt(depth), { unit: "mm", step: "1" });
   }
   if (info.flags.qty) {
     html += `<label class="wide">Quantity<div class="input-with-button">
@@ -436,19 +437,16 @@ function renderDraftFields() {
     refreshDraftSoon();
   });
   const autoFill = $('[data-action="auto-fill"]', $("#draft-fields"));
-  if (autoFill) autoFill.addEventListener("click", () => runAutoSize("fill"));
-  const autoQuantity = $('[data-action="auto-quantity"]', $("#draft-fields"));
-  if (autoQuantity) autoQuantity.addEventListener("click", () => runAutoSize("quantity"));
+  if (autoFill) autoFill.addEventListener("click", runAutoSize);
 }
 
-async function runAutoSize(goal) {
+async function runAutoSize() {
   if (!state.draft) return;
   try {
     const result = await api("/api/feature/autosize", {
       design: state.design,
       feature: state.draft,
       index: state.selected,
-      goal,
     });
     state.draft = result.feature;
     state.draftResolvedOptions = result.resolved_options || {};
@@ -591,10 +589,10 @@ async function applySupport(index) {
   }
 }
 
-async function deleteSupport() {
-  if (state.selected === null || !beginDesignMutation()) return;
+async function deleteSupportAt(index) {
+  if (index === null || index === undefined || !beginDesignMutation()) return;
   try {
-    const result = await api("/api/feature/delete", { design: state.design, index: state.selected });
+    const result = await api("/api/feature/delete", { design: state.design, index });
     state.design = result.design;
     state.selected = null;
     renderPlaced();
@@ -642,12 +640,10 @@ function draftIsDirty() {
 }
 
 function updateSelectionButtons() {
-  const selected = state.selected !== null;
   const busy = state.designMutationBusy;
   $("#update-support").disabled = busy || !draftIsDirty();
-  $("#delete-support").disabled = busy || !selected;
   $("#add-support").disabled = busy || !state.draft;
-  $$(".support-choice, .placed-item").forEach(button => button.disabled = busy);
+  $$(".support-choice, .placed-item-select, .placed-item-delete").forEach(button => button.disabled = busy);
   $("#support-count").textContent = `${state.design?.layout.features.length || 0} placed`;
 }
 
@@ -661,12 +657,17 @@ function renderPlaced() {
     container.innerHTML = features.map((one, index) => {
       const width = one.zone[2] - one.zone[0];
       const depth = one.zone[3] - one.zone[1];
-      return `<button class="placed-item ${index === state.selected ? "selected" : ""}" data-index="${index}">
-        <strong>${index + 1}. ${escapeHtml(partInfo(one.kind)?.title || one.kind)}</strong>
-        <span>${fmt(width)} × ${fmt(depth)} mm</span>
-      </button>`;
+      const title = escapeHtml(partInfo(one.kind)?.title || one.kind);
+      return `<div class="placed-item ${index === state.selected ? "selected" : ""}">
+        <button type="button" class="placed-item-select" data-index="${index}">
+          <strong>${index + 1}. ${title}</strong>
+          <span>${fmt(width)} × ${fmt(depth)} mm</span>
+        </button>
+        <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this support" aria-label="Delete ${title}">✕</button>
+      </div>`;
     }).join("");
-    $$(".placed-item", container).forEach(button => button.addEventListener("click", () => selectedFeature(Number(button.dataset.index))));
+    $$(".placed-item-select", container).forEach(button => button.addEventListener("click", () => selectedFeature(Number(button.dataset.index))));
+    $$(".placed-item-delete", container).forEach(button => button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
   }
   $("#support-count").textContent = `${features.length} placed`;
   $("#design-summary").textContent = features.length

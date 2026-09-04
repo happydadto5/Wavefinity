@@ -248,40 +248,37 @@ def _grow_zone_to_fit(
 
 
 def auto_size_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """"Fit to bin": grow a divider or slot draft's zone to the usable floor.
+
+    A divider only grows along its run axis - the other axis is its wall
+    thickness, a different setting. A slot grows in both directions and
+    also drops any typed count back to automatic, so the builder fits as
+    many slots as the new, bigger footprint actually holds instead of
+    stretching the old fixed count across empty space.
+    """
     box, layout, label, _part_name, label_location, scoop = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
-    goal = str(payload.get("goal", "fill"))
     index = payload.get("index")
     bounds = layout_zone(box, layout.mode)
     pitch = 8.0 if layout.mode == "cartridge" else layout.snap
-    if goal == "quantity":
-        if one.kind != "slot":
-            raise ValueError("guessing a size from quantity is only offered for slots")
-        zone = one.zone
-        # "Divide the bin by the quantity" means the footprint spans the
-        # whole usable floor across the slots, regardless of what else is
-        # already placed - a deliberate estimate, not a collision-checked fit.
-        one = replace(one, zone=(
-            Zone(zone.x0, bounds.y0, zone.x1, bounds.y1) if one.along == "x"
-            else Zone(bounds.x0, zone.y0, bounds.x1, zone.y1)
-        ))
-    else:
-        others = [
-            feature.zone for position, feature in enumerate(layout.features)
-            if index is None or position != int(index)
-        ]
-        reserved = [
-            zone for _name, zone in _customization_zones(
-                box, label, label_location, scoop, layout.mode
-            )
-        ]
-        grow_x, grow_y = True, True
-        if one.kind == "divider":
-            grow_x, grow_y = (one.along == "x", one.along != "x")
-        grown = _grow_zone_to_fit(one.zone, bounds, others + reserved, grow_x, grow_y, pitch)
-        one = replace(one, zone=grown)
-        if one.kind == "divider":
-            one = replace(one, along=divider_axis(grown.width, grown.depth))
+    others = [
+        feature.zone for position, feature in enumerate(layout.features)
+        if index is None or position != int(index)
+    ]
+    reserved = [
+        zone for _name, zone in _customization_zones(
+            box, label, label_location, scoop, layout.mode
+        )
+    ]
+    grow_x, grow_y = True, True
+    if one.kind == "divider":
+        grow_x, grow_y = (one.along == "x", one.along != "x")
+    grown = _grow_zone_to_fit(one.zone, bounds, others + reserved, grow_x, grow_y, pitch)
+    one = replace(one, zone=grown)
+    if one.kind == "divider":
+        one = replace(one, along=divider_axis(grown.width, grown.depth))
+    if one.kind == "slot":
+        one = replace(one, count=None)
     one = replace(one, zone=snapped_zone(one.zone, box, layout.mode, layout.snap))
     return {
         "feature": feature_to_dict(one, layout.mode),
@@ -312,7 +309,6 @@ def catalog_payload() -> dict[str, Any]:
         "modes": [
             {"value": "fused", "label": "Fused into box"},
             {"value": "separate", "label": "Removable insert"},
-            {"value": "cartridge", "label": "8 mm cartridge"},
         ],
         "parts": parts,
         "defaults": {
