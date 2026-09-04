@@ -41,6 +41,12 @@ Notable Wavefinity changes are recorded here by date and author.
   layout rendering, design download feedback, and a real two-file `.3mf`
   organizer export. No browser console errors remained.
 
+### Documentation
+
+- Added `BROWSER_MIGRATION_REVIEW.md`, a self-contained outside-review brief
+  covering the architecture boundary, implementation scope, security controls,
+  test evidence, known limitations, reproduction commands and reviewer focus.
+
 ## 2026-09-03 — Codex (later)
 
 ### Fixed

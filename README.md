@@ -13,8 +13,10 @@ There is no corner connector.
 Everything below is millimetres. This is the whole documentation for the
 project: design, rationale, measured evidence, and the traps.
 
-See [changelog.md](changelog.md) for dated implementation changes, and
-[TESTING.md](TESTING.md) for the log of what each test run actually found.
+See [changelog.md](changelog.md) for dated implementation changes,
+[TESTING.md](TESTING.md) for the log of what each test run actually found, and
+[BROWSER_MIGRATION_REVIEW.md](BROWSER_MIGRATION_REVIEW.md) for the architecture,
+security, evidence, known limitations and checklist prepared for outside review.
 
 ---
 
