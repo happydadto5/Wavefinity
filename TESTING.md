@@ -29,6 +29,8 @@ empty, the suites are not testing the things that break.
 | 2026-09-03 | Claude | `unittest test_organizer_app test_organizer_inserts` | 164 | Nothing | After the preview learned to draw the removable insert's real plate. |
 | 2026-09-03 | Claude | `unittest test_organizer_app.DesktopUiTests` | 13 | Caught | The UI suite hung, not failed: `Add part` popped a modal `showerror` that no test can dismiss, and the run blocked forever. `DesktopUiTests.setUp` now stubs `messagebox` so a dialog is recorded and asserted on instead of shown. |
 | 2026-09-03 | Claude | `unittest test_organizer_app test_organizer_inserts` | 179 | Nothing | Both suites, after the resolved-option defaults, live parameter editing, the delete fallback and the callout layout fix. |
+| 2026-09-03 | Codex | `unittest test_organizer_app.PartDiagramTests test_organizer_app.DesktopUiTests.test_parameter_typing_redraws_the_actual_part_before_it_is_added test_organizer_app.DesktopUiTests.test_choosing_a_shape_draws_it_with_a_field_beside_each_parameter` | 7 | Nothing | Focused verification of uniform diagram scaling, actual-geometry redraws and parameter callouts. |
+| 2026-09-03 | Codex | `unittest` | 182 | Nothing | Complete suite after the proportional, live holder-diagram and divider-orientation fixes. |
 
 ## Defects found outside the suites
 

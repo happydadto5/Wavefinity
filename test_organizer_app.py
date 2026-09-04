@@ -1415,6 +1415,36 @@ class SectionPreviewTests(unittest.TestCase):
 
 
 class PartDiagramTests(unittest.TestCase):
+    def test_widening_the_diagram_scales_every_axis_by_the_same_factor(self) -> None:
+        small = organizer_app.diagram_projector((0.0, 0.0, 200.0, 200.0))
+        wide = organizer_app.diagram_projector((0.0, 0.0, 300.0, 200.0))
+
+        def distance(project, a, b):
+            first, second = project(a), project(b)
+            return math.hypot(second[0] - first[0], second[1] - first[1])
+
+        origin = (0.5, 0.5, 0.5)
+        horizontal = (0.6, 0.5, 0.5)
+        vertical = (0.5, 0.5, 0.6)
+        x_ratio = distance(wide, origin, horizontal) / distance(small, origin, horizontal)
+        z_ratio = distance(wide, origin, vertical) / distance(small, origin, vertical)
+        self.assertGreater(x_ratio, 1.0)
+        self.assertAlmostEqual(x_ratio, z_ratio, places=9)
+
+    def test_divider_dimensions_choose_the_visible_orientation(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        for size, expected_axis, expected_xy in (
+            ((13.0, 2.0), "x", (13.0, 1.6)),
+            ((2.0, 13.0), "y", (1.6, 13.0)),
+        ):
+            one = organizer_app.default_feature(spec, "divider")
+            one = replace(one, along=organizer_app.divider_axis(*size))
+            one = organizer_app.resized_feature(one, spec, size)
+            solid = build_features(spec, [one], spec.wall)[0]
+            self.assertEqual(one.along, expected_axis)
+            self.assertAlmostEqual(float(solid.extents[0]), expected_xy[0])
+            self.assertAlmostEqual(float(solid.extents[1]), expected_xy[1])
+
     def test_every_shape_parameter_is_pinned_somewhere_on_its_diagram(self) -> None:
         for kind, *_rest in organizer_app.PART_KINDS:
             callouts = organizer_app.diagram_callouts(kind)
@@ -2130,6 +2160,55 @@ class DesktopUiTests(unittest.TestCase):
         self.assertIn("Length mm", found["labels"])
         self.assertIn("Runs along", found["labels"])
         self.assertNotIn("Height mm", found["labels"])   # a cradle has no height
+
+    def test_parameter_typing_redraws_the_actual_part_before_it_is_added(self) -> None:
+        import tkinter as tk
+        from tkinter import ttk
+
+        found = {}
+
+        def exercise(root: tk.Tk, _n: int = 0) -> None:
+            widgets = _all_widgets(root)
+            cells = [
+                widget for widget in widgets
+                if isinstance(widget, tk.Frame)
+                and any(
+                    isinstance(child, tk.Canvas) and int(child.cget("width")) == 34
+                    for child in widget.winfo_children()
+                )
+            ]
+            cells[2].event_generate("<Button-1>")  # pocket
+            root.update_idletasks()
+            root.tk.call("after", 250)
+            root.update()
+            widgets = _all_widgets(root)
+            diagram = next(
+                widget for widget in widgets
+                if isinstance(widget, tk.Canvas) and widget.find_withtag("sketch")
+            )
+
+            def sketch_coordinates():
+                return tuple(
+                    round(value, 3)
+                    for item in diagram.find_withtag("sketch")
+                    for value in diagram.coords(item)
+                )
+
+            before = sketch_coordinates()
+            height = _entry_beside(widgets, "Height mm")
+            height.delete(0, "end")
+            height.insert(0, "24")
+            root.tk.call("after", 250)
+            root.update()
+            after = sketch_coordinates()
+            found["changed"] = before != after
+            found["focus_survived"] = height.winfo_exists()
+            root.destroy()
+
+        with mock.patch.object(tk.Tk, "mainloop", exercise):
+            organizer_app.launch_ui()
+        self.assertTrue(found["changed"])
+        self.assertTrue(found["focus_survived"])
 
     def test_the_window_has_a_reload_code_button(self) -> None:
         import tkinter as tk

@@ -145,6 +145,13 @@ def support_help(kind: str) -> str:
     return description + " Fine-tune it with the size, count and Options fields below."
 
 
+def divider_axis(width: float, depth: float) -> str:
+    """A divider runs along the longer footprint dimension."""
+    if not all(math.isfinite(value) and value > 0.0 for value in (width, depth)):
+        raise ValueError("divider width and depth must be positive finite numbers")
+    return "x" if width >= depth else "y"
+
+
 # --- guided part palette ---------------------------------------------------
 #
 # Each entry drives the visual "pick a shape, then set its parameters" editor.
@@ -154,7 +161,7 @@ def support_help(kind: str) -> str:
 # means "let the builder choose".
 PART_KINDS = (
     ("divider", "Divider", "A straight wall that splits the floor into compartments.",
-     {"qty": False, "size": True, "along": True, "item": False},
+     {"qty": False, "size": True, "along": False, "item": False},
      (("Height mm", "height", ""), ("Wall mm", "thickness", "1.6"))),
     ("post", "Post", "A tapered peg for tape rolls, spools, sockets and rings.",
      {"qty": True, "size": False, "along": True, "item": False},
@@ -390,7 +397,6 @@ PART_SKETCHES = {
 # below it, and everything else beside the feature it sizes.
 PART_DIAGRAM_ANCHORS = {
     "divider": {
-        "feature_along": (0.50, 0.51, 0.62, "top"),
         "thickness": (0.30, 0.46, 0.62, "left"),
         "height": (0.98, 0.51, 0.34, "right"),
         "feature_depth": (0.98, 0.85, 0.05, "right"),
@@ -505,17 +511,26 @@ def diagram_callouts(kind: str) -> tuple[tuple[str, str, str], ...]:
 
 
 def diagram_projector(area: tuple[float, float, float, float]):
-    """Normalized part space to canvas pixels, as a shallow oblique view."""
+    """Normalized part space to canvas pixels, without aspect distortion."""
     x0, y0, x1, y1 = area
     width = x1 - x0
     height = y1 - y0
-    across, back = width * 0.62, width * 0.38
-    up, lift = height * 0.34, height * 0.44
-    base = y1 - height * 0.11
+    # The old projection took X/Y from ``width`` and Z from ``height``. Merely
+    # widening the window therefore stretched the same part sideways. Fit one
+    # fixed-aspect drawing inside the available area and derive every axis from
+    # its single scale instead.
+    unit = min(width / DIAGRAM_ASPECT, height)
+    draw_width = unit * DIAGRAM_ASPECT
+    draw_height = unit
+    left = x0 + (width - draw_width) / 2.0
+    top = y0 + (height - draw_height) / 2.0
+    across, back = draw_width * 0.62, draw_width * 0.38
+    up, lift = draw_height * 0.34, draw_height * 0.44
+    base = top + draw_height * 0.89
 
     def project(point: tuple[float, float, float]) -> tuple[float, float]:
         x, y, z = point
-        return x0 + x * across + y * back, base - y * lift - z * up
+        return left + x * across + y * back, base - y * lift - z * up
 
     project.spans = (across, back, up, lift)   # for round shapes on a plane
     return project
@@ -544,6 +559,71 @@ def draw_part_diagram(canvas, kind: str, area, tags=("sketch",)):
                 fill=tone, outline=edge or DIAGRAM_TONE["edge"], tags=tags,
             )
     return project
+
+
+def mesh_diagram_projector(meshes, area, camera=None):
+    """Fit real holder meshes into a diagram with one uniform pixel/mm scale."""
+    camera = (camera or PreviewCamera(45.0, 58.0, 1.0)).normalized()
+    vertex_arrays = [mesh.vertices for mesh in meshes if len(mesh.vertices)]
+    if not vertex_arrays:
+        raise ValueError("the holder has no geometry to draw")
+    vertices = np.vstack(vertex_arrays)
+    projected = np.asarray([iso_point(tuple(point), camera) for point in vertices])
+    low = projected.min(axis=0)
+    high = projected.max(axis=0)
+    span = np.maximum(high - low, 1e-9)
+    x0, y0, x1, y1 = area
+    room_width = max(1.0, x1 - x0)
+    room_height = max(1.0, y1 - y0)
+    scale = min(room_width / span[0], room_height / span[1]) * 0.92
+    centre_raw = (low + high) / 2.0
+    centre_canvas = np.asarray(((x0 + x1) / 2.0, (y0 + y1) / 2.0))
+
+    def project(point: tuple[float, float, float]) -> tuple[float, float]:
+        raw = np.asarray(iso_point(point, camera))
+        spot = centre_canvas + (raw - centre_raw) * scale
+        return float(spot[0]), float(spot[1])
+
+    bounds_low = vertices.min(axis=0)
+    bounds_high = vertices.max(axis=0)
+
+    def anchor(point: tuple[float, float, float]) -> tuple[float, float]:
+        normalized = np.asarray(point, dtype=float)
+        world = bounds_low + normalized * (bounds_high - bounds_low)
+        return project(tuple(float(value) for value in world))
+
+    project.scale = scale
+    project.anchor = anchor
+    project.camera = camera
+    return project
+
+
+def draw_feature_diagram(canvas, meshes, area, tags=("sketch",)):
+    """Draw the actual holder geometry and return its normalized anchor map."""
+    project = mesh_diagram_projector(meshes, area)
+    camera = project.camera
+    faces = []
+    for mesh in meshes:
+        for triangle, normal in zip(mesh.triangles, mesh.face_normals):
+            normal_tuple = tuple(float(value) for value in normal)
+            if _towards_camera(normal_tuple, camera) <= 0.0:
+                continue
+            points = [tuple(float(value) for value in point) for point in triangle]
+            depth = sum(_towards_camera(point, camera) for point in points) / 3.0
+            if normal_tuple[2] > 0.55:
+                tone = DIAGRAM_TONE["top"]
+            elif abs(normal_tuple[0]) >= abs(normal_tuple[1]):
+                tone = DIAGRAM_TONE["side"]
+            else:
+                tone = DIAGRAM_TONE["front"]
+            faces.append((depth, points, tone))
+    faces.sort(key=lambda item: item[0])
+    for _depth, points, tone in faces:
+        canvas.create_polygon(
+            [value for point in points for value in project(point)],
+            fill=tone, outline=DIAGRAM_TONE["edge"], tags=tags,
+        )
+    return project.anchor
 
 
 def parse_sizes(text: str) -> tuple[tuple[float, float], ...]:
@@ -2433,7 +2513,9 @@ def launch_ui() -> None:
     opt_vars: dict[str, dict[str, "tk.StringVar"]] = {}
     palette_cells: dict[str, tk.Widget] = {}
     callout_widgets: list = []
-    diagram_state: dict[str, object] = {"kind": None, "size": None}
+    diagram_state: dict[str, object] = {
+        "kind": None, "size": None, "area": None, "project": None,
+    }
 
     tools_row = ttk.Frame(editor)
     tools_row.grid(row=0, column=0, sticky="ew")
@@ -2655,11 +2737,15 @@ def launch_ui() -> None:
                 options[opt] = float(text)
         one = replace(one, options=options)
         if flags["size"]:
+            width = _num(values["feature_width"].get(), one.zone.width)
+            depth = _num(values["feature_depth"].get(), one.zone.depth)
+            # Width and depth are already an unambiguous orientation for a
+            # divider. Keeping a second hidden/visible axis switch allowed a
+            # 2 x 13 wall to remain X-oriented and collapse to a 2 mm nub.
+            if kind == "divider":
+                one = replace(one, along=divider_axis(width, depth))
             one = resized_feature(
-                one, spec,
-                (_num(values["feature_width"].get(), one.zone.width),
-                 _num(values["feature_depth"].get(), one.zone.depth)),
-                mode,
+                one, spec, (width, depth), mode,
             )
         return one
 
@@ -2768,6 +2854,9 @@ def launch_ui() -> None:
         good part standing.
         """
         live_edit_job["id"] = None
+        # The large parameter diagram is a preview too. It must respond even
+        # before a draft has been added to the placed-parts list.
+        redraw_diagram_geometry()
         index = selected["index"]
         if index is None or not 0 <= index < len(features):
             return
@@ -2904,7 +2993,9 @@ def launch_ui() -> None:
         sketch_w = max(80.0, min(width - 2 * column, sketch_h * DIAGRAM_ASPECT))
         middle = width / 2.0
         area = (middle - sketch_w / 2, band, middle + sketch_w / 2, height - band)
-        project = draw_part_diagram(diagram, kind, area)
+        project = paint_diagram_geometry(kind, area)
+        diagram_state["area"] = area
+        diagram_state["project"] = project
         anchors = PART_DIAGRAM_ANCHORS.get(kind, {})
         sides: dict[str, list] = {"top": [], "bottom": [], "left": [], "right": []}
         for key, label, control in diagram_callouts(kind):
@@ -2960,8 +3051,52 @@ def launch_ui() -> None:
                 diagram.create_oval(
                     target[0] - 2.5, target[1] - 2.5, target[0] + 2.5, target[1] + 2.5,
                     fill=DIAGRAM_TONE["leader"], outline="",
+                    tags=("anchor", f"anchor_{key}"),
                 )
                 callout_widgets.append(tag)
+
+    def paint_diagram_geometry(kind: str, area):
+        """Draw the current fields as real geometry, with a safe schematic fallback."""
+        try:
+            spec = current_box()
+            mode = values["mode"].get()
+            candidate = build_editor_feature(spec, kind, mode)
+            solids = build_features(
+                spec, [candidate], base_height(spec, mode), layout_zone(spec, mode)
+            )
+            project = draw_feature_diagram(diagram, solids, area)
+            diagram.tag_lower("sketch")
+            return project
+        except Exception:
+            project = draw_part_diagram(diagram, kind, area)
+            diagram.tag_lower("sketch")
+            return project
+
+    def redraw_diagram_geometry() -> None:
+        """Refresh the part and leader endpoints without replacing focused fields."""
+        area = diagram_state.get("area")
+        if area is None or drawing_diagram["on"]:
+            return
+        kind = kind_state["value"]
+        diagram.delete("sketch")
+        project = paint_diagram_geometry(kind, area)
+        diagram_state["project"] = project
+        for key, _label, _control in diagram_callouts(kind):
+            anchor = PART_DIAGRAM_ANCHORS.get(kind, {}).get(key)
+            if anchor is None:
+                continue
+            target = project(anchor[:3])
+            leaders = diagram.find_withtag(f"leader_{key}")
+            if leaders:
+                points = diagram.coords(leaders[0])
+                if len(points) >= 4:
+                    diagram.coords(leaders[0], *points[:-2], target[0], target[1])
+            dots = diagram.find_withtag(f"anchor_{key}")
+            if dots:
+                diagram.coords(
+                    dots[0], target[0] - 2.5, target[1] - 2.5,
+                    target[0] + 2.5, target[1] + 2.5,
+                )
 
     def on_diagram_resize(event) -> None:
         if diagram_state["size"] == (event.width, event.height):

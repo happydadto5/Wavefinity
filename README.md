@@ -69,16 +69,17 @@ The insert editor is a three-step flow: **1. pick a shape** from the icon
 palette (divider, post, pocket, slots, bore, cradle, nest) and read its
 one-line description; **2. set parameters**; **3. add part**.
 
-Picking a shape draws that shape. Step 2 is a labelled sketch of the part —
-a divider standing on its plate, a bore block with a tool stood in one of its
-holes, a cradle with a tool lying across its notched ribs — and every parameter
-that shape uses is a small field pinned beside the feature it changes, joined to
-it by a leader line. Quantity and the run axis sit above the part, the width and
-depth footprint below it, and heights, wall thicknesses, hole depths and the
-description of the stored tool point at the edge or hole they set. Shapes only
-show the parameters they have: a cradle has no height field, a pocket has no
-quantity. The sketch scales to the panel it is given rather than growing off the
-screen.
+Picking a shape draws the holder's **actual generated geometry**. Step 2 is a
+labelled view of the part — a divider, bore block, cradle, nest or other support
+— and every parameter that shape uses is a small field pinned beside the feature
+it changes, joined to it by a leader line. Quantity and the run axis sit above
+the part, the width and depth footprint below it, and heights, wall thicknesses,
+hole depths and the description of the stored tool point at the edge or hole
+they set. Shapes only show the parameters they have: a cradle has no height
+field, a pocket has no quantity. Editing a value rebuilds this view after a
+short typing pause, even before the draft is added. The geometry uses one
+uniform drawing scale, so enlarging the window makes it bigger without
+stretching it.
 
 Placed parts are listed beside the diagram; select one there or on the **2D
 layout** tab to edit, drag to move, drag its blue corner to resize, or type an

@@ -2,6 +2,29 @@
 
 Notable Wavefinity changes are recorded here by date and author.
 
+## 2026-09-03 — Codex (later)
+
+### Fixed
+
+- The interior-part diagram now enlarges with one uniform pixels-per-millimetre
+  scale. Widening the window can no longer stretch the part horizontally while
+  leaving its vertical scale unchanged.
+- The parameter diagram now renders the actual holder geometry produced by the
+  export builder instead of a fixed illustration. Editing dimensions, heights,
+  wall thicknesses, recesses, bores, tapers, counts, or stored-tool measurements
+  redraws the part after the typing debounce, including before a draft is added.
+- Live diagram redraws update only the mesh and leader endpoints, preserving
+  focus in the parameter field being edited.
+- Divider orientation is now inferred from its Width and Depth. A 13 x 2 mm
+  divider runs across X, while 2 x 13 mm rotates across Y instead of collapsing
+  into a 2 mm nub. The redundant divider-only axis control was removed.
+
+### Validation
+
+- Added regressions for proportional diagram scaling, live pre-add parameter
+  redraws, preserved parameter widgets, and both divider orientations.
+- All 182 tests pass.
+
 ## 2026-09-03 — Claude (later)
 
 ### Fixed
