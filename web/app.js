@@ -29,7 +29,7 @@ const COLORS = {
   label: "#315766", label_hole: "#e8efef", top_label_ledge: "#7799a3",
   scoop: "#a9bec3", insert_base: "#c5ab83", invalid: "#c95f58",
   cradle: "#e59f54", nest: "#df8d5b", bore: "#6fb98f", post: "#51a5a1",
-  divider: "#9d86c8", pocket: "#d4778c", slot: "#d5b84d",
+  divider: "#9d86c8", pocket: "#d4778c",
 };
 const INSERT_TINT = "#c2a075";
 const INSERT_TINT_MIX = .5;
@@ -105,7 +105,6 @@ function iconFor(kind) {
     divider: '<rect x="4" y="5" width="24" height="22" rx="2"/><path d="M16 5v22"/>',
     post: '<ellipse cx="16" cy="23" rx="10" ry="4"/><path d="M10 22V10c0-5 12-5 12 0v12"/><ellipse cx="16" cy="10" rx="6" ry="2.5"/>',
     pocket: '<rect x="4" y="6" width="24" height="20" rx="3"/><rect x="8" y="10" width="16" height="12" rx="2"/>',
-    slot: '<path d="M4 25h24V8H4zM9 20V11m5 9V11m5 9V11m5 9V11"/>',
     bore: '<rect x="4" y="5" width="24" height="22" rx="2"/><circle cx="11" cy="12" r="3"/><circle cx="21" cy="12" r="3"/><circle cx="11" cy="21" r="3"/><circle cx="21" cy="21" r="3"/>',
     cradle: '<path d="M4 24h24M7 24V9m18 15V9M7 11c3 0 3 5 6 5s3-5 6-5 3 5 6 5"/>',
     nest: '<rect x="3" y="6" width="26" height="20" rx="3"/><path d="M7 17h6v-6h7v4h5v6H7z"/>',
@@ -361,12 +360,9 @@ function renderDraftFields() {
   const width = zone[2] - zone[0];
   const depth = zone[3] - zone[1];
   let html = "";
-  if (one.kind === "divider" || one.kind === "slot") {
-    const hint = one.kind === "divider"
-      ? "Stretch this divider to reach the bin's walls"
-      : "Grow this support to fill the open floor, then let the quantity fit it";
+  if (one.kind === "divider") {
     html += `<div class="auto-size-row wide">
-      <button type="button" class="button secondary" data-action="auto-fill" title="${hint}">Fit to bin</button>
+      <button type="button" class="button secondary" data-action="auto-fill" title="Stretch this divider to reach the bin's walls">Fit to bin</button>
     </div>`;
   }
   html += field("Center X", "cx", fmt(cx), { unit: "mm", step: "1" }) + field("Center Y", "cy", fmt(cy), { unit: "mm", step: "1" });
@@ -507,13 +503,15 @@ function updateDraftFromFields(event) {
     if (info.kind === "divider" && key === "thickness") {
       // A divider builds from this, not from the footprint drawn below -
       // widen that footprint to match so what the Width/Depth fields and
-      // the 2D layout show never falls short of the real wall.
+      // the 2D layout show never falls short of the real wall. Which side
+      // is "across" follows the explicit Runs-along choice, not a guess
+      // from whichever of width/depth is currently bigger.
       const t = one.options.thickness;
       if (Number.isFinite(t) && t > 0) {
         const zw = one.zone[2] - one.zone[0], zd = one.zone[3] - one.zone[1];
         const cx = (one.zone[0] + one.zone[2]) / 2, cy = (one.zone[1] + one.zone[3]) / 2;
-        const wideningKey = zw >= zd ? "depth" : "width";
-        if (zw >= zd) {
+        const wideningKey = one.along === "x" ? "depth" : "width";
+        if (one.along === "x") {
           const depth = Math.max(zd, t);
           one.zone = [one.zone[0], cy - depth / 2, one.zone[2], cy + depth / 2];
         } else {

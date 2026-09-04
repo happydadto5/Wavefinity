@@ -65,7 +65,6 @@ from organizer_app import (
     default_feature,
     design_from_dict,
     design_to_dict,
-    divider_axis,
     generate_organizer_files,
     generate_side_file,
     parse_sizes,
@@ -167,10 +166,7 @@ def _feature_from_json(raw: dict[str, Any], mode: str) -> Feature:
         "snap": EDITOR_SNAP,
         "features": [data],
     })
-    one = layout.features[0]
-    if one.kind == "divider":
-        one = replace(one, along=divider_axis(one.zone.width, one.zone.depth))
-    return one
+    return layout.features[0]
 
 
 def _first_open_position(
@@ -253,16 +249,15 @@ def _grow_zone_to_fit(
 
 
 def auto_size_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """"Fit to bin": grow a divider or slot draft's zone to the usable floor.
+    """"Fit to bin": grow a divider draft's zone to reach the usable floor.
 
-    A divider only grows along its run axis - the other axis is its wall
-    thickness, a different setting. A slot grows in both directions and
-    also drops any typed count back to automatic, so the builder fits as
-    many slots as the new, bigger footprint actually holds instead of
-    stretching the old fixed count across empty space.
+    Only grows along the divider's own run axis - the other axis is its
+    wall thickness, a separate setting entirely.
     """
     box, layout, label, _part_name, label_location, scoop = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
+    if one.kind != "divider":
+        raise ValueError("fitting to the bin is only offered for a divider")
     index = payload.get("index")
     bounds = layout_zone(box, layout.mode)
     pitch = 8.0 if layout.mode == "cartridge" else layout.snap
@@ -275,16 +270,9 @@ def auto_size_payload(payload: dict[str, Any]) -> dict[str, Any]:
             box, label, label_location, scoop, layout.mode
         )
     ]
-    grow_x, grow_y = True, True
-    if one.kind == "divider":
-        grow_x, grow_y = (one.along == "x", one.along != "x")
+    grow_x, grow_y = one.along == "x", one.along != "x"
     grown = _grow_zone_to_fit(one.zone, bounds, others + reserved, grow_x, grow_y, pitch)
-    one = replace(one, zone=grown)
-    if one.kind == "divider":
-        one = replace(one, along=divider_axis(grown.width, grown.depth))
-    if one.kind == "slot":
-        one = replace(one, count=None)
-    one = replace(one, zone=snapped_zone(one.zone, box, layout.mode, layout.snap))
+    one = replace(one, zone=snapped_zone(grown, box, layout.mode, layout.snap))
     return {
         "feature": feature_to_dict(one, layout.mode),
         "resolved_options": resolved_options(box, one, base_height(box, layout.mode)),

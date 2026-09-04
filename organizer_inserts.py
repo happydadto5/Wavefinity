@@ -860,9 +860,22 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
     }
 
 
+def _divider_cross_centres(zone: Zone, along: str, count: int) -> list[float]:
+    """``count`` positions evenly spaced across the zone's cross axis.
+
+    Fence-post spacing: ``count`` dividers split the span into ``count + 1``
+    equal gaps, so at ``count == 1`` the one divider lands exactly on the
+    zone's own centre - identical to the plain single-divider case this
+    generalises.
+    """
+    low, high = (zone.y0, zone.y1) if along == "x" else (zone.x0, zone.x1)
+    span = high - low
+    return [low + (index + 1) * span / (count + 1) for index in range(count)]
+
+
 @feature("divider")
 def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
-    """A plain wall subdividing the bin."""
+    """One or more evenly spaced parallel walls subdividing the bin."""
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
     thickness = options["thickness"]
@@ -870,17 +883,36 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
     angle = options.get("angle", 0.0)
     if thickness <= 0.0 or height <= 0.0 or base_z + height > box.z + 1e-9:
         raise ValueError("divider thickness and height must fit inside the bin")
-    centre_x, centre_y = zone.centre
-    if angle != 0.0 and spec_feature.full_span:
-        return _full_span_leaning_divider(
-            box, spec_feature, thickness, height, angle, base_z
+    along = spec_feature.along
+    count = spec_feature.count or 1
+    if count < 1:
+        raise ValueError("divider count must be positive or automatic")
+    centres = _divider_cross_centres(zone, along, count)
+    if count > 1:
+        span = (zone.y1 - zone.y0) if along == "x" else (zone.x1 - zone.x0)
+        lean = height * math.tan(math.radians(angle)) if angle else 0.0
+        spacing = centres[1] - centres[0]
+        needed = thickness + 2.0 * abs(lean)
+        if spacing < needed:
+            raise ValueError(
+                f"{count} dividers need at least {needed * (count + 1):.1f} mm "
+                f"across but the zone gives {span:.1f} mm"
+            )
+    solids: list[trimesh.Trimesh] = []
+    for cross_centre in centres:
+        shift = cross_centre - (zone.centre[1] if along == "x" else zone.centre[0])
+        one_zone = (
+            Zone(zone.x0, zone.y0 + shift, zone.x1, zone.y1 + shift) if along == "x"
+            else Zone(zone.x0 + shift, zone.y0, zone.x1 + shift, zone.y1)
         )
-    if spec_feature.full_span:
-        cross_centre = centre_y if spec_feature.along == "x" else centre_x
-        return _full_span_divider(
-            box, spec_feature.along, cross_centre, thickness, base_z, height
-        )
-    return _divider_wall(box, spec_feature, thickness, height, angle, base_z)
+        one = replace(spec_feature, zone=one_zone)
+        if angle != 0.0 and one.full_span:
+            solids.extend(_full_span_leaning_divider(box, one, thickness, height, angle, base_z))
+        elif one.full_span:
+            solids.extend(_full_span_divider(box, along, cross_centre, thickness, base_z, height))
+        else:
+            solids.extend(_divider_wall(box, one, thickness, height, angle, base_z))
+    return solids
 
 
 def _divider_wall(
@@ -1085,56 +1117,6 @@ def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     return [difference([block, inner])]
 
 
-@defaults("slot")
-def slot_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
-    return {
-        "width": 2.0,
-        "height": 12.0,
-        "depth": one.options.get("height", 12.0) - 2.0,
-        "wall": 1.6,
-    }
-
-
-@feature("slot")
-def build_slot(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
-    """Parallel straight slots for flat things."""
-    zone = spec_feature.zone
-    options = resolved_options(box, spec_feature, base_z)
-    width = options["width"]
-    height = options["height"]
-    depth = options["depth"]
-    wall = options["wall"]
-    if (width <= 0.0 or wall <= 0.0 or height <= 0.0 or depth <= 0.0
-            or depth >= height):
-        raise ValueError("slot dimensions must leave a positive base")
-    pitch = width + wall
-    across = zone.depth if spec_feature.along == "x" else zone.width
-    count = spec_feature.count or _fit_count(across, pitch, width + wall)
-    if count < 1:
-        raise ValueError("no room for a slot")
-    needed = (count - 1) * pitch + width + wall
-    if needed > across + 1e-9:
-        raise ValueError(
-            f"{count} slots need {needed:.1f} mm across but the zone gives {across:.1f} mm"
-        )
-    centre_x, centre_y = zone.centre
-    block = trimesh.creation.box(extents=(zone.width, zone.depth, height))
-    block.apply_translation((centre_x, centre_y, base_z + height / 2.0))
-    cuts = []
-    for index in range(count):
-        offset = (index - (count - 1) / 2.0) * pitch
-        if spec_feature.along == "x":
-            extents, position = ((zone.width * 2.0, width, depth * 2.0),
-                                 (centre_x, centre_y + offset, base_z + height))
-        else:
-            extents, position = ((width, zone.depth * 2.0, depth * 2.0),
-                                 (centre_x + offset, centre_y, base_z + height))
-        cut = trimesh.creation.box(extents=extents)
-        cut.apply_translation(position)
-        cuts.append(cut)
-    return [difference([block, union(cuts)])]
-
-
 # --- putting an insert together ----------------------------------------------
 
 
@@ -1177,14 +1159,17 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
     # a straight (non-leaning) full-span one, which is built by a separate,
     # simpler clip-and-extrude path with no chamfer (see build_divider).
     chamfer = 0.0 if (one.full_span and angle == 0.0) else DIVIDER_CHAMFER
+    # Margin each individual wall may reach past its own centre line. With
+    # more than one (see build_divider), every centre sits strictly inside
+    # the zone's own cross span, so widening that span by this margin on
+    # each side always covers every wall - not the tightest possible bound,
+    # but a safe one that does not need each wall's exact position redone
+    # here too.
+    margin = thickness / 2.0 + lean + chamfer
     if one.along == "x":
-        centre = (zone.y0 + zone.y1) / 2.0
-        half = max((zone.y1 - zone.y0) / 2.0, thickness / 2.0) + lean + chamfer
-        zone = Zone(zone.x0, centre - half, zone.x1, centre + half)
+        zone = Zone(zone.x0, zone.y0 - margin, zone.x1, zone.y1 + margin)
     else:
-        centre = (zone.x0 + zone.x1) / 2.0
-        half = max((zone.x1 - zone.x0) / 2.0, thickness / 2.0) + lean + chamfer
-        zone = Zone(centre - half, zone.y0, centre + half, zone.y1)
+        zone = Zone(zone.x0 - margin, zone.y0, zone.x1 + margin, zone.y1)
     return zone
 
 

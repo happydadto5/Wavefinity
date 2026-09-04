@@ -96,16 +96,12 @@ SUPPORT_CATALOG = {
         "Pocket — loose small parts",
         "A raised tray for fasteners, adapters and other loose pieces.",
     ),
-    "slot": (
-        "Slots — cards and blades",
-        "Parallel grooves for cards, blades, files and thin flat objects.",
-    ),
     "divider": (
         "Divider — split the bin",
         "A straight wall that divides the usable floor into compartments.",
     ),
 }
-SUPPORT_ORDER = ("cradle", "nest", "bore", "post", "pocket", "slot", "divider")
+SUPPORT_ORDER = ("cradle", "nest", "bore", "post", "pocket", "divider")
 LABEL_POSITIONS = ("bottom", "top")
 
 
@@ -114,13 +110,6 @@ def label_position(value: str) -> str:
     if position not in LABEL_POSITIONS:
         raise ValueError("label position must be 'bottom' or 'top'")
     return position
-
-
-def divider_axis(width: float, depth: float) -> str:
-    """A divider runs along the longer footprint dimension."""
-    if not all(math.isfinite(value) and value > 0.0 for value in (width, depth)):
-        raise ValueError("divider width and depth must be positive finite numbers")
-    return "x" if width >= depth else "y"
 
 
 # --- guided part palette ---------------------------------------------------
@@ -132,7 +121,7 @@ def divider_axis(width: float, depth: float) -> str:
 # means "let the builder choose".
 PART_KINDS = (
     ("divider", "Divider", "A straight wall that splits the floor into compartments.",
-     {"qty": False, "size": True, "along": False, "item": False, "lean": True},
+     {"qty": True, "size": True, "along": True, "item": False, "lean": True},
      (("Height mm", "height", ""), ("Wall mm", "thickness", "1.6"),
       ("Angle °", "angle", "0"))),
     ("post", "Post", "A tapered peg for tape rolls, spools, sockets and rings.",
@@ -143,10 +132,6 @@ PART_KINDS = (
      {"qty": False, "size": True, "along": False, "item": False, "lean": False},
      (("Height mm", "height", "12"), ("Wall mm", "wall", "1.6"),
       ("Recess mm", "depth", ""))),
-    ("slot", "Slots", "Parallel grooves for cards, blades and thin flat things.",
-     {"qty": True, "size": True, "along": True, "item": False, "lean": False},
-     (("Height mm", "height", "12"), ("Slot mm", "width", "2"),
-      ("Cut mm", "depth", ""), ("Wall mm", "wall", "1.6"))),
     ("bore", "Bore", "A block of snug upright holes for tools stood on end.",
      {"qty": True, "size": True, "along": True, "item": True, "lean": False},
      (("Height mm", "height", ""), ("Hole depth mm", "depth", ""),
@@ -921,8 +906,10 @@ def default_feature(
         width, depth = ((required_length, across) if along == "x"
                         else (across, required_length))
     elif kind == "divider":
-        width, depth = ((bounds.width, 2.0) if along == "x"
-                        else (2.0, bounds.depth))
+        # Wall to wall on its own run axis by default, and spread across
+        # the bin's whole other axis too - room for count > 1 to divide the
+        # bin evenly without the user having to widen it by hand first.
+        width, depth = bounds.width, bounds.depth
     elif kind == "post":
         # A one-cell-wide cartridge cannot hold the normal 12 mm starter peg.
         # Size the starter diameter to both axes, then give it as much of the
@@ -945,6 +932,7 @@ def default_feature(
         count=1 if kind == "post" else None,
         along=along,
         options=feature_options,
+        full_span=(kind == "divider"),
     )
 
 

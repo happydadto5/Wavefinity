@@ -86,16 +86,13 @@ support**. Placed supports can be selected in the list or on the 2D layout,
 then moved, resized, or edited with exact numeric fields. Normal layouts snap
 to **1 mm**. Overlaps and out-of-bounds features are refused at export.
 
-A **divider** or **slot** also gets a **Fit to bin** button above its fields,
-since those are the only two kinds where a size has an unambiguous "reach the
-bin" meaning - every other kind's quantity means repeated elements inside one
-footprint, not sections of the bin, so they keep manual sizing and the
-ordinary per-kind **Auto** button next to Quantity. Fit to bin grows the zone
-to the usable floor edge, a placed neighbour, or a reserved scoop/label zone -
-a divider only along its run axis (its wall thickness is a separate field), a
-slot in both directions. For a slot it also clears any typed quantity back to
-automatic, so the builder fits as many slots as the new, bigger footprint
-actually holds rather than stretching an old fixed count across empty space.
+A **divider** also gets a **Fit to bin** button above its fields, since it is
+the one kind where a size has an unambiguous "reach the bin" meaning - every
+other kind's quantity means repeated elements inside one footprint, not
+sections of the bin, so they keep manual sizing and the ordinary per-kind
+**Auto** button next to Quantity. Fit to bin grows the zone to the usable
+floor edge, a placed neighbour, or a reserved scoop/label zone, only along
+the divider's own run axis - its wall thickness is a separate field.
 
 ### Insert types
 
@@ -183,7 +180,7 @@ default and is never exposed to the network.
 | `POST /api/preview` | Validate a design and return camera-independent geometry. |
 | `POST /api/design/validate` | Validate and normalize a saved design. |
 | `POST /api/feature/default` | Create an engine-derived support draft. |
-| `POST /api/feature/autosize` | "Fit to bin": grow a divider or slot draft's zone to the usable floor. |
+| `POST /api/feature/autosize` | "Fit to bin": grow a divider draft's zone to the usable floor. |
 | `POST /api/feature/draft` | Build actual mesh faces for live parameter preview. |
 | `POST /api/feature/apply` | Snap, validate, add or update a support. |
 | `POST /api/feature/delete` | Remove a support. |
@@ -235,9 +232,14 @@ many.
 | `nest` | Snug, support-free top-down recess following every measured item segment | `depth`, `height`, `wall` |
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
-| `divider` | One straight or leaning subdividing wall along X or Y | `height`, `thickness`, `angle` |
+| `divider` | One or more straight or leaning subdividing walls along X or Y | `height`, `thickness`, `angle` |
 | `pocket` | Raised rectangular tray with a recessed centre | `height`, `depth`, `wall` |
-| `slot` | Parallel grooves for cards, blades or other flat items | `width`, `height`, `depth`, `wall` |
+
+There is no separate "slot" kind - a divider covers it. A slot's one real
+extra, a shallow groove with a solid floor left under it, was a narrower need
+than a full separator wall; the browser now defaults a new divider to run
+wall to wall and lets `count` place several of them, which covers dividing
+a bin into compartments in one action instead.
 
 A divider can lean up to **45 degrees** off vertical — the standard
 support-free FDM overhang limit — for holding what it stores at an angle
@@ -260,11 +262,21 @@ separate, simpler path that has not been extended to match.
 A divider can also be told to run the full width or depth of the bin and
 hug the box's true wavy wall exactly — not the safe straight-sided
 rectangle every other holder is confined to, which would leave a visible
-gap at most points along the wall. This `full_span` option (engine-level,
-not yet exposed as a browser field) works together with a lean: the two
-combine into one 3D boolean intersection against the bin's real interior
-volume, so a leaning full-span divider hugs the wave in both directions at
-once.
+gap at most points along the wall. This `full_span` flag works together with
+a lean: the two combine into one 3D boolean intersection against the bin's
+real interior volume, so a leaning full-span divider hugs the wave in both
+directions at once. The browser sets it by default for every new divider -
+"wall to wall" is the normal case, and there is no manual toggle for it yet
+(saving a design still preserves whatever a script or an older save set it
+to, `full_span` or not).
+
+A divider is also the one kind whose `along` is a direct browser choice
+("Runs along" X/Y) rather than inferred from its footprint, and whose
+`count` places several parallel walls instead of repeating some other
+element: `count` dividers split the zone's cross axis into `count + 1` equal
+gaps - fence-post spacing, so `count = 1` (the default) lands exactly where a
+single centred divider always has. Height, angle and thickness apply to
+every wall the count places, not just one.
 
 Builder options are intentionally generic. The editor passes them to the
 registered builder, so a future `@feature` function can add its own settings
@@ -502,7 +514,7 @@ replaced it:
 | File | Role | Entry point? |
 |---|---|---|
 | `organizer_engine.py` | Wavy boxes, connectors, labels, mesh validation and 3MF/STL export. | No. |
-| `organizer_inserts.py` | Item/segment model, zones, 1 mm and cartridge layouts, JSON persistence, holder registry, seven builders, and fused/removable assembly. | No. |
+| `organizer_inserts.py` | Item/segment model, zones, 1 mm and cartridge layouts, JSON persistence, holder registry, six builders, and fused/removable assembly. | No. |
 | `organizer_app.py` | CLI, exporters, validation and the catalog/defaults the browser service reads. | Yes, for CLI subcommands. |
 | `wavefinity_web.py` | The local HTTP service — see [The browser service](#the-browser-service). | Yes, the default UI launch target. |
 | `test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest`. |
@@ -745,8 +757,8 @@ Measured and regression-tested; run the suite for the current exact count.
   used by the 2D editor, 3D preview, mesh pocket and export report
 
 **Insert layouts**
-- Seven registered builders: cradle, contour nest, bore, center post, divider,
-  pocket and slot
+- Six registered builders: cradle, contour nest, bore, center post, divider
+  and pocket
 - Fused outputs remain one watertight solid; fitted and cartridge inserts clear
   the bin walls and stand on their own 0.6 mm print-flat plate
 - Normal moves and resizes snap to 1 mm. Cartridge coordinates and sizes are

@@ -59,6 +59,10 @@ empty, the suites are not testing the things that break.
 | 2026-09-04 | Claude | manual: two real `wavefinity_web.py` processes launched in sequence on the same port | — | Nothing | Confirmed live outside the suite: the second launch kills the first (verified absent from `tasklist`) and the new process's code actually answers - `POST /api/feature/autosize`, the exact route that 404'd for the user, succeeded through the relaunched server. |
 | 2026-09-04 | Claude | `unittest test_organizer_app.PreviewRingDensityTests` | 2 | Nothing | The preview ring's point density fix: a longer wall gets proportionally more points, and a box's short and long wall pairs sample at the same points-per-cycle density. |
 | 2026-09-04 | Claude | `unittest` (full suite) | 185 | Nothing | After the preview wave-density fix. |
+| 2026-09-04 | Claude | `unittest test_organizer_inserts.MultiDividerTests` | 5 | Nothing | A divider's new `count`: one divider with `count=1` is pixel-identical to no count at all; three dividers split a zone into four equal gaps; `along="y"` spaces across X instead of Y; too many for the zone is refused with a clear message; count works combined with full-span and a lean. |
+| 2026-09-04 | Claude | `unittest test_organizer_inserts` `test_wavefinity_web` `test_organizer_app` | 70, 17, 103 | Nothing | After removing `slot` and its tests, and reworking every divider test that touched the old fixed-2mm-cross-axis default, the auto-inferred `along`, or a hardcoded kind list. |
+| 2026-09-04 | Claude | `unittest` (full suite) | 190 | Nothing | After retiring slot and adding wall-to-wall default, explicit `along`, and multi-divider `count`. |
+| 2026-09-04 | Claude | manual, live browser | — | Nothing | Placed a default (wall-to-wall, count=auto) divider: reaches the true wavy wall at both ends. Set count=3, along=X: three evenly spaced full-span walls, correct gaps. Switched Runs along to Y with count=2: two walls correctly reoriented front-to-back, still full-span. Palette no longer shows Slots. |
 
 ## Defects found outside the suites
 

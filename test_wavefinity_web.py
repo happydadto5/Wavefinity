@@ -38,7 +38,7 @@ class WebApplicationTests(unittest.TestCase):
         catalog = catalog_payload()
         self.assertEqual(
             {part["kind"] for part in catalog["parts"]},
-            {"divider", "post", "pocket", "slot", "bore", "cradle", "nest"},
+            {"divider", "post", "pocket", "bore", "cradle", "nest"},
         )
         box, layout, *_ = design_from_dict(catalog["defaults"]["design"])
         self.assertEqual((box.x, box.y, box.z), (16.0, 48.0, 40.0))
@@ -144,20 +144,22 @@ class WebApplicationTests(unittest.TestCase):
         })["feature"]
         self.assertLess(grown["zone"][2], 3.0)
 
-    def test_fit_to_bin_grows_a_slot_in_both_directions_and_lets_count_go_auto(self):
+    def test_fit_to_bin_leaves_count_and_the_run_direction_untouched(self):
         design = default_design()
-        box, layout, *_ = design_from_dict(design)
-        whole = layout_zone(box, layout.mode)
-        slot = default_feature_payload({"design": design, "kind": "slot"})["feature"]
-        slot["along"] = "x"
-        slot["count"] = 4
-        slot["zone"] = [-3.0, -3.0, 3.0, 3.0]
-        sized = auto_size_payload({
-            "design": design, "feature": slot, "index": None,
+        feature = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        feature["zone"] = [-2.0, feature["zone"][1], 2.0, feature["zone"][3]]
+        feature["count"] = 3
+        grown = auto_size_payload({
+            "design": design, "feature": feature, "index": None,
         })["feature"]
-        self.assertAlmostEqual(sized["zone"][2] - sized["zone"][0], whole.width, delta=1.5)
-        self.assertAlmostEqual(sized["zone"][3] - sized["zone"][1], whole.depth, delta=1.5)
-        self.assertIsNone(sized["count"])
+        self.assertEqual(grown["count"], 3)
+        self.assertEqual(grown["along"], "x")
+
+    def test_fit_to_bin_is_refused_for_a_kind_other_than_divider(self):
+        design = default_design()
+        feature = default_feature_payload({"design": design, "kind": "pocket"})["feature"]
+        with self.assertRaises(ValueError):
+            auto_size_payload({"design": design, "feature": feature, "index": None})
 
     def test_mode_conversion_preserves_valid_layout(self):
         design = default_design()

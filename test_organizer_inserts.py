@@ -204,8 +204,8 @@ class LayoutCheckTests(unittest.TestCase):
 
     def test_shallow_overlap_and_subminimum_gap_are_refused(self) -> None:
         first = Feature("pocket", Zone(-20.0, -10.0, -10.0, 10.0))
-        overlap = Feature("slot", Zone(-10.5, -10.0, -0.5, 10.0))
-        too_close = Feature("slot", Zone(-9.5, -10.0, 0.5, 10.0))
+        overlap = Feature("pocket", Zone(-10.5, -10.0, -0.5, 10.0))
+        too_close = Feature("pocket", Zone(-9.5, -10.0, 0.5, 10.0))
         for second in (overlap, too_close):
             with self.assertRaisesRegex(ValueError, "leave at least"):
                 check_layout(BIN, [first, second])
@@ -505,6 +505,66 @@ class AngledDividerTests(unittest.TestCase):
         self.assertTrue(legacy.features[0].wedge)
 
 
+class MultiDividerTests(unittest.TestCase):
+    """A divider's ``count`` builds several evenly spaced parallel walls."""
+
+    box = BoxSpec(80.0, 80.0, 40.0)
+
+    def test_count_one_is_identical_to_no_count_at_all(self) -> None:
+        zone = Zone(-15.0, -20.0, 15.0, 20.0)
+        auto = build_features(self.box, [Feature("divider", zone, along="x")], self.box.wall)
+        explicit = build_features(
+            self.box, [Feature("divider", zone, along="x", count=1)], self.box.wall
+        )
+        self.assertEqual(len(auto), 1)
+        self.assertEqual(len(explicit), 1)
+        self.assertTrue((auto[0].bounds == explicit[0].bounds).all())
+
+    def test_three_dividers_split_the_zone_into_four_equal_gaps(self) -> None:
+        zone = Zone(-15.0, -20.0, 15.0, 20.0)
+        walls = build_features(
+            self.box,
+            [Feature("divider", zone, along="x", count=3,
+                      options={"thickness": 1.0})],
+            self.box.wall,
+        )
+        self.assertEqual(len(walls), 3)
+        centres = sorted((wall.bounds[0][1] + wall.bounds[1][1]) / 2.0 for wall in walls)
+        gaps = [b - a for a, b in zip(centres, centres[1:])]
+        self.assertAlmostEqual(gaps[0], gaps[1], places=3)
+        # the outer gaps to the zone edges match the inner gap between walls
+        self.assertAlmostEqual(centres[0] - zone.y0, gaps[0], places=3)
+        self.assertAlmostEqual(zone.y1 - centres[-1], gaps[0], places=3)
+
+    def test_along_y_spaces_dividers_across_x_instead(self) -> None:
+        zone = Zone(-20.0, -15.0, 20.0, 15.0)
+        walls = build_features(
+            self.box,
+            [Feature("divider", zone, along="y", count=3,
+                      options={"thickness": 1.0})],
+            self.box.wall,
+        )
+        centres = sorted((wall.bounds[0][0] + wall.bounds[1][0]) / 2.0 for wall in walls)
+        self.assertAlmostEqual(centres[1], 0.0, places=3)  # zone is centred on x=0
+
+    def test_too_many_dividers_for_the_zone_is_refused(self) -> None:
+        zone = Zone(-15.0, -2.0, 15.0, 2.0)
+        one = Feature("divider", zone, along="x", count=5, options={"thickness": 2.0})
+        with self.assertRaisesRegex(ValueError, "dividers need at least"):
+            build_features(self.box, [one], self.box.wall)
+
+    def test_count_also_works_full_span_and_leaning(self) -> None:
+        zone = Zone(-15.0, -30.0, 15.0, 30.0)
+        one = Feature(
+            "divider", zone, along="x", count=3, full_span=True,
+            options={"angle": 10.0, "thickness": 3.0, "height": 10.0},
+        )
+        walls = build_features(self.box, [one], self.box.wall)
+        self.assertEqual(len(walls), 3)
+        for wall in walls:
+            self.assertTrue(wall.is_watertight)
+
+
 class FullSpanLeaningDividerTests(unittest.TestCase):
     """A leaning divider that also hugs the box's true wavy wall."""
 
@@ -611,7 +671,7 @@ class FullSpanLeaningDividerTests(unittest.TestCase):
 
 class RegistryTests(unittest.TestCase):
     def test_every_holder_is_registered_and_callable(self) -> None:
-        for kind in ("cradle", "nest", "bore", "post", "divider", "pocket", "slot"):
+        for kind in ("cradle", "nest", "bore", "post", "divider", "pocket"):
             self.assertIn(kind, inserts.FEATURE_BUILDERS)
             self.assertTrue(callable(inserts.FEATURE_BUILDERS[kind]))
 
@@ -642,7 +702,6 @@ class OtherHoldersTests(unittest.TestCase):
             Feature("post", Zone(-20.0, -20.0, 20.0, 20.0), count=2),
             Feature("divider", Zone(-10.0, -20.0, 10.0, 20.0), along="y"),
             Feature("pocket", Zone(20.0, -20.0, 60.0, 20.0)),
-            Feature("slot", Zone(-60.0, 24.0, -20.0, 40.0)),
         ]
         for one in cases:
             for solid in build_features(BIN, [one], BIN.wall):
@@ -799,12 +858,6 @@ class LayoutModelTests(unittest.TestCase):
             self.assertTrue(mesh.is_watertight)
             self.assertAlmostEqual(mesh.bounds[0][2], 0.0)
             self.assertAlmostEqual(mesh.bounds[1][2], inserts.BASE_PLATE)
-
-    def test_slot_orientation_changes_which_axis_is_repeated(self) -> None:
-        zone = Zone(-15.0, -5.0, 15.0, 5.0)
-        along_x = build_features(BIN, [Feature("slot", zone, along="x")], BIN.wall)[0]
-        along_y = build_features(BIN, [Feature("slot", zone, along="y")], BIN.wall)[0]
-        self.assertNotAlmostEqual(along_x.volume, along_y.volume)
 
 
 if __name__ == "__main__":

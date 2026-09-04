@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-09-04 — Claude (retire slot, expand divider)
+
+### Removed
+
+- **The `slot` holder is gone.** Its one genuine difference from a divider -
+  a shallow groove with a solid floor left under it (`depth < height` was
+  always enforced) - was judged not worth keeping as a separate kind versus
+  the overhead of two similar-looking tools. `build_slot`/`slot_defaults`,
+  its catalog entry, its palette icon and its own colour are all removed;
+  a divider fills the gap it leaves.
+
+### Added
+
+- **A divider now defaults to running wall to wall.** `default_feature` sets
+  `full_span=True` for a new divider and starts its zone at the bin's full
+  footprint on both axes, instead of a thin 2 mm strip - "reach the real
+  wall" is now the normal case, not something reached for with Fit to bin
+  afterward.
+- **`along` (Runs along X/Y) is now a direct browser choice for a divider**,
+  the same segmented control every other along-having kind already has,
+  instead of being silently inferred from whichever of Width/Depth happened
+  to be bigger. The server no longer overrides a divider's `along` on every
+  request; wherever it used to (loading a saved feature, after Fit to bin)
+  now leaves it exactly as sent.
+- **A divider's `count` places several evenly spaced parallel walls**
+  instead of one - fence-post spacing, splitting the zone's cross axis into
+  `count + 1` equal gaps, so `count = 1` (the default, shown as "auto")
+  reproduces the existing single-centred-divider case exactly. Height,
+  angle, thickness and full-span all apply to every wall the count places.
+  Too many for the available width is refused with a clear "N dividers need
+  at least X mm" message, the same style the removed slot used to give.
+  `_feature_reach` widens for count generically now (each wall's own margin
+  applied to the whole zone span, not the single-wall centred formula) -
+  safe for any count, including the default of one.
+
 ## 2026-09-04 — Claude (preview wave-density fix)
 
 ### Fixed
