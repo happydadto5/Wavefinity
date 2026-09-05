@@ -151,8 +151,9 @@ PART_KINDS = (
      {"qty": False, "size": False, "along": False, "item": False, "lean": False,
       "alternate": False, "photo": True},
      (("Clearance (mm)", "clearance", "0.6"),
-      ("Cavity depth (mm)", "depth", "8"),
-      ("Rim border (mm)", "rim", "3"))),
+      ("Wall height (mm)", "depth", "8"),
+      ("Outline wall (mm)", "rim", "3"),
+      ("Soften outline (mm)", "smoothing", "0"))),
 )
 PART_KIND_INFO = {
     kind: (title, blurb, flags, fields)

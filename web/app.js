@@ -250,8 +250,6 @@ function syncForm() {
   $("#x-size").value = fmt(box.x);
   $("#y-size").value = fmt(box.y);
   $("#z").value = fmt(box.z);
-  $("#wall").value = fmt(box.wall);
-  $("#flat-inside").value = fmt(box.flat_inside);
   $("#label-text").value = state.design.label || "";
   $("#part-name").value = state.design.part_name || "";
   $("#scoop").checked = Boolean(state.design.scoop);
@@ -295,8 +293,6 @@ function updateDesignFromForm() {
   design.box.x = snapSize($("#x-size").value, design.box.x);
   design.box.y = snapSize($("#y-size").value, design.box.y);
   design.box.z = number($("#z").value, design.box.z);
-  design.box.wall = number($("#wall").value, design.box.wall);
-  design.box.flat_inside = number($("#flat-inside").value, design.box.flat_inside);
   design.label = $("#label-text").value;
   design.part_name = $("#part-name").value;
   design.scoop = $("#scoop").checked;
@@ -449,7 +445,7 @@ function wireControls() {
     button.setAttribute("aria-expanded", String(section.classList.contains("open")));
   }));
 
-  ["#x-size", "#y-size", "#z", "#wall", "#flat-inside", "#label-text", "#part-name"]
+  ["#x-size", "#y-size", "#z", "#label-text", "#part-name"]
     .forEach(selector => $(selector).addEventListener("input", () => {
       state.canGenerate = false;
       updateGenerateAvailability();
@@ -1056,7 +1052,7 @@ function updateDraftFromFields(event) {
         }
       }
     }
-    if (one.kind === "nest" && one.contour && ["clearance", "rim"].includes(key)) {
+    if (one.kind === "nest" && one.contour && ["clearance", "rim", "smoothing"].includes(key)) {
       syncNestZone(one);
     }
   }
@@ -1202,7 +1198,7 @@ async function deleteSupportAt(index) {
 
 function mutationControls() {
   return $$(
-    '#x-size, #y-size, #z, #wall, #flat-inside, #label-text, #part-name, ' +
+    '#x-size, #y-size, #z, #label-text, #part-name, ' +
     '#scoop, input[name="label-position"], input[name="layout-mode"], ' +
     '#new-design, #open-design, #save-design'
   );

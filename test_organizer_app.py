@@ -1657,7 +1657,7 @@ class ResolvedOptionTests(unittest.TestCase):
     spec = BoxSpec(80.0, 80.0, 40.0)
 
     def photo_nest(self, **options):
-        values = {"clearance": 0.6, "depth": 8.0, "rim": 3.0}
+        values = {"clearance": 0.6, "depth": 8.0, "rim": 3.0, "smoothing": 0.0}
         values.update(options)
         one = organizer_app.Feature(
             "nest", organizer_app.Zone(-1, -1, 1, 1), options=values,
@@ -1689,18 +1689,18 @@ class ResolvedOptionTests(unittest.TestCase):
         base = organizer_app.base_height(self.spec, "fused")
         shown = resolved_options(self.spec, one, base)
         built = build_features(self.spec, [one], base)[0]
-        self.assertAlmostEqual(float(built.bounds[1][2]), self.spec.z, 4)
+        self.assertAlmostEqual(float(built.bounds[1][2]), base + 8.0, 4)
         self.assertEqual(shown["depth"], 8.0)
 
     def test_changing_a_nest_parameter_changes_the_solid(self) -> None:
         base = organizer_app.base_height(self.spec, "fused")
         shallow = build_features(self.spec, [self.photo_nest(depth=2.0)], base)[0]
         deep = build_features(self.spec, [self.photo_nest(depth=6.0)], base)[0]
-        self.assertLess(float(deep.volume), float(shallow.volume))
-        self.assertAlmostEqual(float(deep.bounds[1][2]), float(shallow.bounds[1][2]))
+        self.assertGreater(float(deep.volume), float(shallow.volume))
+        self.assertGreater(float(deep.bounds[1][2]), float(shallow.bounds[1][2]))
 
     def test_a_refused_parameter_says_which_numbers_disagree(self) -> None:
-        one = self.photo_nest(depth=39.0)
+        one = self.photo_nest(depth=40.0)
         with self.assertRaises(ValueError) as caught:
             build_features(
                 self.spec,
@@ -1708,8 +1708,8 @@ class ResolvedOptionTests(unittest.TestCase):
                 organizer_app.base_height(self.spec, "fused"),
             )
         message = str(caught.exception)
-        self.assertIn("39", message)
-        self.assertIn("38.6", message)
+        self.assertIn("40", message)
+        self.assertIn("39.2", message)
 
 
 class CompatibilityTests(unittest.TestCase):

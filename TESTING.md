@@ -94,6 +94,8 @@ empty, the suites are not testing the things that break.
 | 2026-09-05 | Codex | `unittest` plus `node --check web/app.js`, launcher check, and `git diff --check` | 264 | Nothing | Complete regression suite after the Photo Nest replacement. |
 | 2026-09-05 | Codex | live browser plus exported/reloaded 3MF and STL | — | Caught | A known 80 × 20 mm perspective photo fixture produced an 80 × 20 mm outline and 96 × 32 mm bin. Clearance, move, rotation, and proportional resize all recomputed the grid footprint. Caught and fixed stale upload status and pre-resize validation. A blank image returned the paper-missing message without losing the valid design. The generated 64 × 128 × 40 mm mesh was watertight, winding-consistent, one component, and retained the 8 mm cavity depth and base. Browser console finished clean. |
 
+| 2026-09-05 | Codex | `unittest -q` plus `node --check web/app.js` and `git diff --check` | 266 | Nothing | Photo Nest now uses Wall height, Outline wall, and Soften outline; the Advanced bin settings UI is removed. The Nest is an open raised cutter wall with a reinforced chamfered foot, not a filled block. |
+
 ## Defects found outside the suites
 
 | Date | Found by | Defect | Would a test have caught it? |

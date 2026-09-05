@@ -149,10 +149,8 @@ the curve has risen `SCOOP_FLOOR_TOLERANCE` (0.4 mm, about one layer) instead.
 `scoop_floor_zone` is still the true footprint, used where the real extent
 matters; `scoop_keep_out` is the smaller strip a support has to avoid.
 
-Everything else — wall thickness, the flat wall band, connector tolerance,
-height, length, position and wall direction — sits behind an **Advanced
-settings** checkbox. The sample plate is a fixed set of sizes, so it has no
-settings at all.
+Bin wall, floor, and mating geometry use the tested printable defaults. The
+editor exposes only the dimensions and support settings that affect the part.
 
 Three buttons: **Generate Box** (including the current insert layout) and
 **Generate Connector**, with a smaller
@@ -258,19 +256,22 @@ to the smallest size that holds every support at its real footprint (a clamped
 cradle gets its full length back), trims any axis that overshot, and leaves
 each support where it sat.
 
-**Photo Nest — custom part cavity** creates one cavity from a JPG, JPEG, PNG,
+**Photo Nest — custom part cavity** creates a raised cookie-cutter wall from a JPG, JPEG, PNG,
 or WEBP photo. Put one flat part on an 8.5 × 11 in sheet, keep all four paper
 corners visible, and photograph it directly overhead. Wavefinity corrects the
 paper to 215.9 × 279.4 mm, isolates the outside silhouette, cleans camera
 noise, and stores only the closed millimetre contour — never the source image.
 The 2D layout shows that contour and provides move, proportional-resize, and
-rotation handles. **Clearance** expands the cavity, **Cavity depth** cuts down
-from the bin top, and **Rim border** reserves surrounding material. The outer
-bin width and depth recalculate to the smallest enclosing 8 mm-grid footprint;
-height remains solely the Bin height. Missing paper, severe perspective, an
-edge-touching part, multiple parts, and unusably small/noisy outlines are
-rejected with a specific correction. The retired measured/segment Nest format
-is rejected explicitly rather than silently reinterpreted.
+rotation handles. **Clearance** sets the holding gap, **Wall height** sets how
+high the cutter rises from the floor, **Outline wall** sets its thickness, and
+**Soften outline** removes small inward and outward details. A chamfered foot
+reinforces the cutter at the floor; the bin remains open inside rather than a
+filled block with a cutout. The outer bin width and depth recalculate to the
+smallest enclosing 8 mm-grid footprint; height remains solely the Bin height.
+Missing paper, severe perspective, an edge-touching part, multiple parts, and
+unusably small/noisy outlines are rejected with a specific correction. The
+retired measured/segment Nest format is rejected explicitly rather than
+silently reinterpreted.
 
 Cradle holders also offer **Alternate ends** (off by default): when enabled,
 every second repeated tool is shifted half a tool length along the run axis so fatter
@@ -282,7 +283,7 @@ way; turn it off, or rotate, if the run axis runs short. Saved as
 | Holder | Purpose | Optional `key=value` settings |
 |---|---|---|
 | `cradle` | Half-round troughs along X or Y - `spacing` 0 joins the row into one shared body, higher values split it. No fit clearance; wall thickness auto-scales with the tool | `spacing`, `floor_gap` |
-| `nest` | Photo-scaled custom contour cavity cut straight down from the bin top | `clearance`, `depth`, `rim` |
+| `nest` | Photo-scaled raised custom contour wall with a chamfered foot | `clearance`, `depth`, `rim`, `smoothing` |
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
 | `divider` | One or more straight or leaning subdividing walls along X or Y | `height`, `thickness`, `angle`, `spacing` |

@@ -49,7 +49,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(parts["nest"]["title"], "Photo Nest")
         self.assertEqual(
             [field["label"] for field in parts["nest"]["fields"]],
-            ["Clearance (mm)", "Cavity depth (mm)", "Rim border (mm)"],
+            ["Clearance (mm)", "Wall height (mm)", "Outline wall (mm)", "Soften outline (mm)"],
         )
         box, layout, *_ = design_from_dict(catalog["defaults"]["design"])
         self.assertEqual((box.x, box.y, box.z), (16.0, 48.0, 40.0))
@@ -100,7 +100,7 @@ class WebApplicationTests(unittest.TestCase):
         feature = response["feature"]
         self.assertEqual(feature["options"], {})
         self.assertIsNone(feature["contour"])
-        self.assertEqual(set(response["resolved_options"]), {"clearance", "depth", "rim"})
+        self.assertEqual(set(response["resolved_options"]), {"clearance", "depth", "rim", "smoothing"})
 
     def test_photo_upload_creates_one_contour_and_smallest_grid_bin(self):
         outline = PhotoOutline(
@@ -367,7 +367,9 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
         self.assertIn(b"Build your bin", body)
-        self.assertIn(b"Advanced bin settings", body)
+        self.assertNotIn(b"Advanced bin settings", body)
+        self.assertNotIn(b"Wall / floor", body)
+        self.assertNotIn(b"Flat wall band", body)
         self.assertNotIn(b"Label your bin", body)
         self.assertIn(b"Label position", body)
         self.assertIn(b"Part Name (For file)", body)

@@ -58,6 +58,7 @@ CARTRIDGE_PITCH = 8.0      # optional interchangeable standalone-insert grid
 MAX_DIVIDER_ANGLE = 45.0   # steepest lean an FDM overhang prints support-free
 MIN_WEDGE_EDGE = 0.4       # thinnest a wedge's tapered top may print
 DIVIDER_CHAMFER = 1.0      # 45-degree foot flare where a divider meets the floor
+NEST_CHAMFER = 0.8         # reinforced outside foot on a Photo Nest cutter wall
 LAYOUT_MODES = ("fused", "separate", "cartridge")
 
 # A cradle notch is a half circle: any deeper and the object cannot be dropped
@@ -710,6 +711,18 @@ def nest_contour_polygon(one: Feature, include_clearance: bool = False) -> Polyg
     if not one.contour:
         raise ValueError("upload a part photo before generating a Photo Nest")
     outline = Polygon(one.contour)
+    smoothing = float(one.options.get("smoothing", 0.0))
+    if not math.isfinite(smoothing) or smoothing < 0.0:
+        raise ValueError("Soften outline must be zero or greater")
+    if smoothing > 0.0:
+        softened = outline.buffer(smoothing, join_style="round").buffer(
+            -smoothing, join_style="round"
+        )
+        softened = softened.buffer(-smoothing, join_style="round").buffer(
+            smoothing, join_style="round"
+        )
+        if not softened.is_empty and softened.area > 1e-6:
+            outline = softened
     outline = affinity.scale(outline, xfact=one.scale, yfact=one.scale, origin=(0, 0))
     outline = affinity.rotate(outline, one.rotation, origin=(0, 0), use_radians=False)
     if include_clearance:
@@ -727,13 +740,13 @@ def nest_required_zone(one: Feature) -> Zone:
     rim = float(one.options.get("rim", 3.0))
     if not math.isfinite(rim) or rim <= 0.0:
         raise ValueError("Rim border must be greater than zero")
-    outer = cavity.buffer(rim, join_style="round")
+    outer = cavity.buffer(rim, join_style="round").buffer(NEST_CHAMFER, join_style="round")
     min_x, min_y, max_x, max_y = outer.bounds
     return Zone(float(min_x), float(min_y), float(max_x), float(max_y))
 
 
 def fitted_nest_feature(one: Feature, centre: tuple[float, float] | None = None) -> Feature:
-    """Recompute a Photo Nest zone after contour, clearance, rim or rotation changes."""
+    """Recompute a Photo Nest zone after contour or fit changes."""
     if centre is None:
         centre = one.zone.centre
     cx, cy = centre
@@ -749,8 +762,9 @@ def fitted_nest_feature(one: Feature, centre: tuple[float, float] | None = None)
 def nest_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     return {
         "clearance": 0.6,
-        "depth": min(8.0, max(1.0, box.z - base_z - BASE_PLATE)),
+        "depth": min(8.0, max(1.0, box.z - base_z)),
         "rim": 3.0,
+        "smoothing": 0.0,
     }
 
 
@@ -761,31 +775,39 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     clearance = options["clearance"]
     depth = options["depth"]
     rim = options["rim"]
-    if not all(math.isfinite(value) for value in (clearance, depth, rim)):
+    smoothing = options["smoothing"]
+    if not all(math.isfinite(value) for value in (clearance, depth, rim, smoothing)):
         raise ValueError("Photo Nest measurements must be finite")
     if clearance < 0.0:
         raise ValueError("Clearance must be zero or greater")
     if rim <= 0.0:
         raise ValueError("Rim border must be greater than zero")
-    available = box.z - base_z - BASE_PLATE
+    if smoothing < 0.0:
+        raise ValueError("Soften outline must be zero or greater")
+    available = box.z - base_z
     if depth <= 0.0 or depth > available + 1e-9:
         raise ValueError(
-            f"Cavity depth {depth:g} mm must be between 0 and {available:.1f} mm to preserve "
-            f"the {BASE_PLATE:g} mm printable base"
+            f"Wall height {depth:g} mm must be between 0 and {available:.1f} mm "
+            f"above the printable floor"
         )
     fitted = fitted_nest_feature(spec_feature)
     if (abs(fitted.zone.width - spec_feature.zone.width) > 1e-4
             or abs(fitted.zone.depth - spec_feature.zone.depth) > 1e-4):
         raise ValueError("Photo Nest footprint is stale; update the outline or measurements")
     cavity = nest_contour_polygon(spec_feature, include_clearance=True)
-    block_height = box.z - base_z
-    block = trimesh.creation.box(
-        extents=(spec_feature.zone.width, spec_feature.zone.depth, block_height)
-    )
-    block.apply_translation((*spec_feature.zone.centre, base_z + block_height / 2.0))
-    cut = _extrude_polygon(cavity, depth + 1.0)
-    cut.apply_translation((0.0, 0.0, box.z - depth))
-    return [difference([block, cut])]
+    outer = cavity.buffer(rim, join_style="round")
+    outer_mesh = _extrude_polygon(outer, depth)
+    inner_mesh = _extrude_polygon(cavity, depth + 2.0)
+    outer_mesh.apply_translation((0.0, 0.0, base_z))
+    inner_mesh.apply_translation((0.0, 0.0, base_z - 1.0))
+    cutter = difference([outer_mesh, inner_mesh])
+    # Short stepped 45-degree-equivalent outside foot; the opening remains
+    # unchanged so the part still rests on the normal bin floor.
+    foot_outer = outer.buffer(NEST_CHAMFER, join_style="round")
+    foot = foot_outer.difference(outer)
+    foot_mesh = _extrude_polygon(foot, NEST_CHAMFER)
+    foot_mesh.apply_translation((0.0, 0.0, base_z + NEST_CHAMFER / 2.0))
+    return [cutter, foot_mesh]
 
 
 # --- bores --------------------------------------------------------------------
@@ -1243,6 +1265,12 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
     leaning divider reaches further still on the cross axis, by however far
     its own lean carries it.
     """
+    if one.kind == "nest" and one.contour:
+        # Shapely/earcut round-tripping can move a boundary by sub-micron
+        # amounts; keep the editor's fitted footprint authoritative.
+        epsilon = 0.01
+        return Zone(one.zone.x0 - epsilon, one.zone.y0 - epsilon,
+                    one.zone.x1 + epsilon, one.zone.y1 + epsilon)
     if one.kind != "divider":
         return one.zone
     zone = one.zone

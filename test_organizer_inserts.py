@@ -1085,7 +1085,7 @@ class OtherHoldersTests(unittest.TestCase):
         rectangle = photo_nest(contour=((-30, -10), (30, -10), (30, 10), (-30, 10)))
         shaped_mesh = build_features(BIN, [shaped], BIN.wall)[0]
         rectangle_mesh = build_features(BIN, [rectangle], BIN.wall)[0]
-        self.assertGreater(shaped_mesh.volume, rectangle_mesh.volume)
+        self.assertNotAlmostEqual(shaped_mesh.volume, rectangle_mesh.volume, places=3)
         self.assertTrue(shaped_mesh.is_watertight)
 
     def test_clearance_and_rim_control_cavity_and_footprint(self) -> None:
@@ -1103,16 +1103,37 @@ class OtherHoldersTests(unittest.TestCase):
 
     def test_cavity_depth_leaves_printable_base(self) -> None:
         one = photo_nest(options={"clearance": 0.0, "rim": 3.0, "depth": 12.0})
-        mesh = build_features(BIN, [one], BIN.wall)[0]
-        block_volume = one.zone.width * one.zone.depth * (BIN.z - BIN.wall)
-        cavity_area = inserts.nest_contour_polygon(one, True).area
-        self.assertAlmostEqual(block_volume - mesh.volume, cavity_area * 12.0, delta=2.0)
+        meshes = build_features(BIN, [one], BIN.wall)
+        mesh = inserts.union(meshes)
+        self.assertTrue(mesh.is_watertight)
+        self.assertAlmostEqual(mesh.bounds[0][2], BIN.wall, places=5)
+        self.assertAlmostEqual(mesh.bounds[1][2], BIN.wall + 12.0, places=5)
+        self.assertLess(mesh.volume, one.zone.width * one.zone.depth * 12.0)
         too_deep = photo_nest(options={
             "clearance": 0.0, "rim": 3.0,
-            "depth": BIN.z - BIN.wall - inserts.BASE_PLATE + 0.1,
+            "depth": BIN.z - BIN.wall + 0.1,
         })
-        with self.assertRaisesRegex(ValueError, "printable base"):
+        with self.assertRaisesRegex(ValueError, "printable floor"):
             build_features(BIN, [too_deep], BIN.wall)
+
+    def test_smoothing_removes_small_outline_details(self) -> None:
+        detailed = photo_nest(contour=((-20, -8), (-4, -8), (-4, -2), (4, -2),
+                                       (4, -8), (20, -8), (20, 8), (4, 8),
+                                       (4, 2), (-4, 2), (-4, 8), (-20, 8)),
+                              options={"smoothing": 3.0})
+        raw_area = inserts.nest_contour_polygon(
+            photo_nest(contour=detailed.contour), include_clearance=False
+        ).area
+        smooth_area = inserts.nest_contour_polygon(detailed, include_clearance=False).area
+        self.assertNotAlmostEqual(raw_area, smooth_area, places=3)
+
+    def test_photo_nest_is_a_raised_cutter_not_a_filled_block(self) -> None:
+        one = photo_nest(options={"clearance": 0.0, "rim": 3.0, "depth": 8.0})
+        cutter = inserts.union(build_features(BIN, [one], BIN.wall))
+        outer_area = inserts.nest_contour_polygon(one, True).buffer(3.0).area
+        self.assertLess(cutter.volume, outer_area * 8.0)
+        self.assertTrue(cutter.is_watertight)
+        self.assertGreater(cutter.bounds[0][2], 0.0)
 
     def test_posts_are_tapered_and_repeat_along_the_selected_axis(self) -> None:
         feature = Feature(

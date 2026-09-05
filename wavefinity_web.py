@@ -213,6 +213,7 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "clearance": float(supplied.get("clearance", 0.6)),
         "depth": float(supplied.get("depth", min(8.0, box.z - box.wall - 0.6))),
         "rim": float(supplied.get("rim", 3.0)),
+        "smoothing": float(supplied.get("smoothing", 0.0)),
     }
     starter = Feature(
         "nest", Zone(-0.5, -0.5, 0.5, 0.5), options=options,

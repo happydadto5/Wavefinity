@@ -8,23 +8,33 @@
 - Uploads accept JPG/JPEG, PNG, and WEBP; detect all four letter-paper corners,
   correct perspective to 215.9 × 279.4 mm, isolate one outside silhouette,
   remove small noise, and return a closed millimetre contour.
-- The editor now contains only Upload part photo, Clearance, Cavity depth, and
-  Rim border. The source photo is never stored in the design or generated files.
+- The editor now contains only Upload part photo, Clearance, Wall height,
+  Outline wall, and Soften outline. Bin wall/floor and flat-wall-band controls
+  were removed from the browser editor.
 - The 2D view draws the real cavity contour with move, rotation, and
   proportional-resize handles. Width/depth automatically snap upward to the
   smallest enclosing 8 mm-grid bin while Bin height remains independent.
-- Geometry now cuts the cleared contour straight down from the bin top and
-  refuses depths that violate the printable base. Old segment Nest files fail
-  with an explicit retired-format message.
+- Geometry now builds an open raised cutter wall from the printable floor,
+  softens small outline details on request, adds a chamfered reinforcing foot,
+  and leaves the bin open inside. Old segment Nest files fail with an explicit
+  retired-format message.
 
 ### Verified
 
 - Added scale, perspective, cleanup, upload-rejection, contour offset, rim,
   cavity-depth, base-thickness, grid-sizing, serialization, API, browser
   contract, and retired-format tests.
-- All 264 tests pass. Live browser QA confirmed outline editing, automatic bin
+- All 266 tests pass. Live browser QA confirmed outline editing, automatic bin
   resizing, clear upload errors, a clean console, and a watertight exported and
   reloaded 3MF/STL mesh.
+
+## 2026-09-05 — Photo Nest cutter tuning
+
+- Removed Advanced bin settings from the browser editor; printable wall, floor,
+  and flat-band values now stay on tested defaults.
+- Replaced the filled cavity block with an open contour wall rising from the
+  bin floor. Added a small reinforced chamfered foot and a Soften outline
+  control that removes small inward and outward details before clearance.
 
 ## 2026-09-05 — Cradle Spacing, and Auto Expand Bin
 
