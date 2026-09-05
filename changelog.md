@@ -1,5 +1,224 @@
 # Changelog
 
+## 2026-09-05 — Photo Nest custom cavities
+
+### Replaced
+
+- Replaced the measured segment Nest with **Photo Nest — custom part cavity**.
+- Uploads accept JPG/JPEG, PNG, and WEBP; detect all four letter-paper corners,
+  correct perspective to 215.9 × 279.4 mm, isolate one outside silhouette,
+  remove small noise, and return a closed millimetre contour.
+- The editor now contains only Upload part photo, Clearance, Cavity depth, and
+  Rim border. The source photo is never stored in the design or generated files.
+- The 2D view draws the real cavity contour with move, rotation, and
+  proportional-resize handles. Width/depth automatically snap upward to the
+  smallest enclosing 8 mm-grid bin while Bin height remains independent.
+- Geometry now cuts the cleared contour straight down from the bin top and
+  refuses depths that violate the printable base. Old segment Nest files fail
+  with an explicit retired-format message.
+
+### Verified
+
+- Added scale, perspective, cleanup, upload-rejection, contour offset, rim,
+  cavity-depth, base-thickness, grid-sizing, serialization, API, browser
+  contract, and retired-format tests.
+- All 264 tests pass. Live browser QA confirmed outline editing, automatic bin
+  resizing, clear upload errors, a clean console, and a watertight exported and
+  reloaded 3MF/STL mesh.
+
+## 2026-09-05 — Cradle Spacing, and Auto Expand Bin
+
+### Added
+
+- **Cradle `Spacing` setting** (default `0`). At `0` the row of troughs is
+  **one continuous body**, neighbours sharing the wall between their channels.
+  Raising it first widens that shared wall; past one wall thickness the troughs
+  become **separate solids** with a growing air gap. So the same control runs
+  from "joined into one piece" to "fully separated". Exposed in the cradle
+  editor next to Floor gap.
+- **"Auto Expand Bin"** button at the top of the interior-supports section,
+  shown only while a support does not fit. It grows the bin on the 8 mm grid to
+  the smallest size that holds every support at the footprint it actually needs
+  — a cradle clamped to a too-small bin gets its real tool length back — then
+  trims any axis that overshot. Supports keep their position; nothing is
+  rearranged. New endpoint `POST /api/layout/expand`.
+
+### Changed
+
+- Cradle pitch is now `diameter + wall + spacing` with `spacing` defaulting to
+  `0` (was a fixed 1.2 mm gap). `RIB_SPACING` is gone.
+
+### Tested
+
+- `test_spacing_zero_joins_the_row_into_one_shared_body`,
+  `test_raising_spacing_past_a_wall_splits_the_row`, and three
+  `expand_layout_payload` tests (grows a clamped cradle back to size, leaves a
+  fitting layout alone, refuses an empty layout). Full suite green.
+
+## 2026-09-05 — A cradle is one continuous trough per tool
+
+### Changed
+
+- **The cradle is a continuous half-round trough, not two ribs.** It used to
+  support a tool on two thin ribs, one near each end, with the tool bridging
+  the gap between them. It is now a single block the length of the tool with a
+  half-cylinder channel cut the whole way along the top, so the entire tool —
+  shaft and handle — beds into one continuous cradle. The channel mouth still
+  sits on the top face, so there is still no overhang for the printer.
+- **Quantity places separate troughs, not more notches in a shared rib.**
+  Quantity 3 is now three distinct trough bodies side by side, each its own
+  solid with `spacing` mm of clear air between them, rather than one wide rib
+  pair with three notches cut in it. "Auto" fills the zone with troughs.
+- `rib_thickness` (still the JSON key, unexposed) is now the trough's wall,
+  split half to each side of the channel; same proportional sizing as before.
+
+### Tested
+
+- Rewrote the cradle geometry suite for the trough model: one continuous body
+  per tool spanning the full length, its top level with the channel mouth, a
+  short tool still getting a full-length trough, N separate watertight troughs
+  for Quantity N (alternating or not), clear air between neighbours, and the
+  staggered row. `test_organizer_inserts` 103, full suite green.
+
+## 2026-09-05 — Cradle X/Y and Quantity actually fit now
+
+A pass over every cradle direction × quantity combination turned up three bugs
+that made valid layouts fail:
+
+### Fixed
+
+- **Quantity 2+ was rejected in a bin with plenty of room.** The live footprint
+  sizer produced a fractional zone (e.g. 16.4 mm across for two lanes); the
+  design pipeline then snapped it to the *nearest* grid line — 16 mm — and the
+  engine refused the now-too-small zone with *"needs 16.4 mm across but the zone
+  gives 16.0 mm"*. Every auto-computed cradle edge now rounds **up** to the 1 mm
+  grid, so the snap can't shrink it below what the tool needs.
+- **"Auto" Quantity always built exactly one lane.** The sizer collapsed the
+  across axis to a single lane before the engine's "fit as many as fit" could
+  run. Auto now spans the whole bin, and the engine packs it with lanes.
+- **A too-long tool gave a cryptic overflow.** Rotating a 40 mm tool across a
+  13 mm bin axis reported *"a cradle reaches outside the bin: its zone is
+  61.6 × 16.4 mm at (-30.8, -4.0)…"*. The sizer now clamps the zone to the bin,
+  so the engine's specific message fires instead: *"Custom item is 40 mm long
+  but its zone only runs 13 mm along x"* — which points straight at the fix
+  (rotate, or turn off Alternate ends, whose stagger adds half a tool length).
+
+### Changed
+
+- **A cradle starts at Quantity 1**, like a post — "auto" is now opt-in and
+  means "fill the bin with lanes".
+- Resizing the bin re-fits the open cradle draft to the new floor instead of
+  leaving its zone — and a stale error — hanging off the old size.
+- The client computes the bin's usable rectangle itself (mirrors
+  `BoxSpec.usable_inside`) so the sizer never fights a lagging preview.
+
+### Tested
+
+- New Python probe over 4 bin sizes × {1,2,3,8,auto} × {x,y} × alternate: every
+  combination either builds or fails with a message that names the real
+  constraint. Browser-verified the same matrix live. Full suite (240) green.
+
+## 2026-09-05 — A cradle has no fit tolerance and no rib knob
+
+### Changed
+
+- **A cradle ignores fit clearance.** It is an open half-circle the tool drops
+  into, not a socket that grips it, so the notch is now cut to the tool's true
+  diameter. The **Fit clearance** field is gone from the cradle editor (Nest and
+  Bore keep it); a cradle item's stored clearance is pinned at 0.
+- **Rib thickness is automatic and proportional.** A cradle rib is now about a
+  quarter of the tool's diameter, floored at the thinnest printable wall
+  (1.6 mm) and capped at 6 mm, so a thin driver shaft gets a thin rib and a fat
+  handle a chunkier one without anyone tuning a number. The **Rib mm** field is
+  gone; `rib_thickness` still works as a JSON/CLI override for the rare case
+  that needs it.
+- **"Alternate ends" is unchecked by default** - it was always the code default;
+  this just states it. Floor gap is unchanged and still editable.
+
+### Tested
+
+- Reworked the cradle geometry tests around the true diameter and the
+  proportional rib; replaced "more fit clearance lifts the tool" with "a cradle
+  ignores fit clearance". `test_organizer_inserts`, `test_organizer_app` and
+  `test_wavefinity_web` all green.
+
+## 2026-09-05 — The cradle is just a length and a diameter now
+
+### Changed
+
+- **A cradle holds one plain cylinder.** It used to describe the tool as a
+  shaft plus a handle - four numbers - and cut a rib per segment so a
+  screwdriver sat level. In practice a cradle is a half-circle notch, and the
+  only things it needs to know are how long the tool is and how fat. The
+  editor now shows **Length** and **Diameter** and nothing else; Handle length,
+  Handle thickness and the Round/Hex/Square profile are gone from the cradle
+  (they stay on Nest and Bore, which still use them). Each tool now rests on
+  two ribs, one near each end.
+- **"Alternate ends" now staggers, it does not flip.** With a single-diameter
+  tool there is no end to flip, so the option instead shifts every second lane
+  half a tool length along the run axis - a row of real screwdrivers, whose
+  handles are fatter than this model, can interlock head-to-tail instead of
+  butting handles. A cradle set to alternate needs a zone about 1.5x the tool
+  length along the run.
+- Old saved designs with a two-segment cradle item still load and build; the
+  cradle just treats the item as one cylinder of the overall length at the
+  widest diameter.
+
+### Tested
+
+- Rewrote the cradle suite and added `MultipleCradleTests` and
+  `CradleAndDividerLayoutTests` - even lane pitch, one shared axis height,
+  auto-fill without overrun, the staggered row, fused and removable assembly,
+  and cradles sharing a bin with dividers. 103 tests in `test_organizer_inserts`,
+  plus the app and browser suites, all green. Browser check: the cradle editor
+  shows only Length and Diameter; Nest still shows the handle and profile
+  fields; the 3D preview builds the two-rib notch.
+
+## 2026-09-05 — Connector positions must be whole waves; corner flats explained
+
+### Fixed
+
+- **A connector slid half a wave along a seam jams by about 48 mm3.**
+  `make_side_connector` accepted any position on a 2 mm lattice and told the
+  user that this was what made one printed part fit every seam. It is not. The
+  corridor between the arms is cut to the wall's wave, and that wave inverts
+  every half cycle, so the clip wanted a half-wave along is the printed one
+  **mirrored** — same volume, and a shape no amount of turning a part over
+  will produce. Positions now have to be whole multiples of `WAVE_LENGTH`
+  (4 mm). Every fixed position the suite happened to exercise landed on a whole
+  wave, which is why nothing caught it. The browser generates at position 0 and
+  was never affected; `organizer_app.py side --position` was.
+
+### Added
+
+- `placed_outline()` and `mating_clearance()` in the engine measure the real
+  gap between two bins standing on the grid, and refuse a centre that is off
+  the wave lattice rather than quietly reporting a number nothing can be built
+  to. `nested_clearance()` names the figure they should return: 0.21 mm, the
+  perpendicular gap between two mated walls.
+- Regression tests for the thing the 8 mm grid exists for: a mixed-size seam
+  has to clear by *exactly* as much as a matched one, not merely fail to
+  overlap. Covered for 24x48 against two 24x24s in both orientations, the
+  extremes of the size range against each other, and a packed drawer of seven
+  different sizes. Plus: one printed clip still seats after being slid to
+  another lattice step, and it grips a tall bin and a short neighbour at every
+  position their shared wall has room for.
+
+### Documented
+
+- **Two of a bin's four corners really are flatter than the other two.** Walls
+  stop 1 mm short of the nominal corner wherever the wave happens to be, and
+  because the wave is odd one diagonal ends on a crest and the other on a
+  trough. The chamfer joining them is about 1.97 mm on one pair and 0.86 mm on
+  the other, leaving roughly 1.26 mm and 0.50 mm of flat after the 0.6 mm
+  fillet. This is in the exported solid, not just the preview. It does not
+  affect mating: a corner chord cuts *inward* from the wave envelope, so it can
+  only add clearance. Bins sharing a wall clear by 0.21 mm; bins meeting only
+  at a corner clear by about 1.2 mm.
+- A clip cannot straddle the joint where two short bins butt end to end — the
+  far side of the seam there is their end walls, full height. On the 4 mm
+  lattice the first usable spot is 8 mm from the joint.
+
 ## 2026-09-05 — Removable inserts follow the waves
 
 ### Changed

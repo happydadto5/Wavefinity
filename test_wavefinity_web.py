@@ -26,10 +26,13 @@ from wavefinity_web import (
     default_feature_payload,
     delete_feature_payload,
     draft_payload,
+    expand_layout_payload,
     make_server,
     mode_payload,
+    photo_nest_payload,
     preview_payload,
 )
+from photo_nest import PhotoOutline
 
 
 class WebApplicationTests(unittest.TestCase):
@@ -41,10 +44,43 @@ class WebApplicationTests(unittest.TestCase):
             {"divider", "post", "pocket", "bore", "cradle", "nest"},
         )
         self.assertTrue(parts["cradle"]["flags"]["alternate"])
-        self.assertTrue(parts["nest"]["flags"]["alternate"])
+        self.assertFalse(parts["nest"]["flags"]["alternate"])
+        self.assertTrue(parts["nest"]["flags"]["photo"])
+        self.assertEqual(parts["nest"]["title"], "Photo Nest")
+        self.assertEqual(
+            [field["label"] for field in parts["nest"]["fields"]],
+            ["Clearance (mm)", "Cavity depth (mm)", "Rim border (mm)"],
+        )
         box, layout, *_ = design_from_dict(catalog["defaults"]["design"])
         self.assertEqual((box.x, box.y, box.z), (16.0, 48.0, 40.0))
         self.assertEqual(layout.mode, "fused")
+
+    def test_brief_interior_sizing_designs_migrate_back_to_the_modular_grid(self):
+        design = default_design()
+        design["box"].update({"x": 18.93962, "y": 50.93962, "interior_sizing": True})
+        box, *_ = design_from_dict(design)
+        self.assertEqual((box.x, box.y), (16.0, 48.0))
+
+        design["box"].update({"x": 19.88442, "y": 51.88442, "wall": 1.2})
+        box, *_ = design_from_dict(design)
+        self.assertEqual((box.x, box.y), (16.0, 48.0))
+
+    def test_connector_uses_two_heights_only_when_requested(self):
+        with patch.object(wavefinity_web, "generate_side_file", return_value={}) as generate:
+            wavefinity_web.connector_payload({
+                "design": default_design(),
+                "connector": {"bin_a_height": 40.0, "bin_b_height": 20.0},
+            })
+            self.assertEqual(generate.call_args.args[-2:], (40.0, 40.0))
+
+            wavefinity_web.connector_payload({
+                "design": default_design(),
+                "connector": {
+                    "different_heights": True, "bin_a_height": 40.0,
+                    "bin_b_height": 20.0,
+                },
+            })
+            self.assertEqual(generate.call_args.args[-2:], (40.0, 20.0))
 
     def test_default_draft_changes_real_geometry_when_height_changes(self):
         design = default_design()
@@ -56,39 +92,82 @@ class WebApplicationTests(unittest.TestCase):
         high_top = max(point[2] for face in high["geometry"] for point in face["points"])
         self.assertGreater(high_top, low_top + 4.0)
 
-    def test_resolved_defaults_are_display_only_until_the_user_edits_them(self):
+    def test_photo_nest_defaults_have_only_the_three_new_measurements(self):
         design = default_design()
-        item = {
-            "name": "test tool",
-            "profile": "round",
-            "clearance": 0.4,
-            "segments": [{"length": 8.0, "diameter": 6.0}],
-        }
         response = default_feature_payload({
-            "design": design, "kind": "nest", "item": item,
+            "design": design, "kind": "nest",
         })
         feature = response["feature"]
         self.assertEqual(feature["options"], {})
-        self.assertEqual(
-            set(response["resolved_options"]), {"wall", "depth", "height"}
-        )
+        self.assertIsNone(feature["contour"])
+        self.assertEqual(set(response["resolved_options"]), {"clearance", "depth", "rim"})
 
-        applied = apply_feature_payload({
-            "design": design, "feature": feature, "index": None,
-        })
-        stored = applied["design"]["layout"]["features"][0]
-        self.assertEqual(stored["options"], {})
-
-        # Enlarge the zone so a thicker tool still fits, then prove the
-        # automatic depth and height follow it without becoming stored values.
-        feature["zone"][1], feature["zone"][3] = -8.0, 8.0
-        feature["item"]["segments"][0]["diameter"] = 8.0
-        changed = draft_payload({"design": design, "feature": feature})
-        self.assertGreater(
-            changed["resolved_options"]["depth"],
-            response["resolved_options"]["depth"],
+    def test_photo_upload_creates_one_contour_and_smallest_grid_bin(self):
+        outline = PhotoOutline(
+            ((-40, -10), (40, -10), (35, 10), (-40, 10)),
+            80.0, 20.0, ((0, 0), (1, 0), (1, 1), (0, 1)),
         )
-        self.assertEqual(changed["feature"]["options"], {})
+        with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
+            result = photo_nest_payload({
+                "design": default_design(), "image": "unused", "mime_type": "image/png",
+                "options": {"clearance": 1.0, "depth": 9.0, "rim": 4.0},
+            })
+        design = result["design"]
+        feature = design["layout"]["features"][0]
+        self.assertEqual(len(design["layout"]["features"]), 1)
+        self.assertEqual(feature["kind"], "nest")
+        self.assertIsNone(feature["item"])
+        self.assertEqual(feature["contour"], [list(point) for point in outline.contour])
+        self.assertNotIn("image", json.dumps(design).lower())
+        self.assertEqual(design["box"]["x"] % 8.0, 0.0)
+        self.assertEqual(design["box"]["y"] % 8.0, 0.0)
+        box, layout, *_ = design_from_dict(design)
+        one = layout.features[0]
+        if box.x > 8.0:
+            narrower = type(box)(box.x - 8.0, box.y, box.z, box.wall,
+                                 box.corner_fillet, box.flat_inside)
+            with self.assertRaisesRegex(ValueError, "outside the bin"):
+                layout.validate(narrower)
+        if box.y > 8.0:
+            shallower = type(box)(box.x, box.y - 8.0, box.z, box.wall,
+                                  box.corner_fillet, box.flat_inside)
+            with self.assertRaisesRegex(ValueError, "outside the bin"):
+                layout.validate(shallower)
+        preview = preview_payload({"design": design})
+        self.assertFalse(preview["feature_errors"])
+        self.assertTrue(preview["feature_outlines"][0])
+
+    def test_photo_nest_clearance_recomputes_bin_footprint(self):
+        outline = PhotoOutline(
+            ((-38, -10), (38, -10), (38, 10), (-38, 10)),
+            76.0, 20.0, ((0, 0), (1, 0), (1, 1), (0, 1)),
+        )
+        with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
+            made = photo_nest_payload({"design": default_design(), "image": "unused", "mime_type": "image/png"})
+        feature = made["design"]["layout"]["features"][0]
+        old_x = made["design"]["box"]["x"]
+        feature["options"]["clearance"] = 5.0
+        changed = apply_feature_payload({"design": made["design"], "feature": feature, "index": 0})
+        self.assertGreater(changed["design"]["box"]["x"], old_x)
+
+    def test_photo_nest_rotation_and_proportional_scale_recompute_footprint(self):
+        outline = PhotoOutline(
+            ((-38, -9), (38, -9), (38, 9), (-38, 9)),
+            76.0, 18.0, ((0, 0), (1, 0), (1, 1), (0, 1)),
+        )
+        with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
+            made = photo_nest_payload({"design": default_design(), "image": "unused", "mime_type": "image/png"})
+        original = made["design"]
+        feature = original["layout"]["features"][0]
+        feature["rotation"] = 90.0
+        rotated = apply_feature_payload({"design": original, "feature": feature, "index": 0})["design"]
+        self.assertLess(rotated["box"]["x"], original["box"]["x"])
+        self.assertGreater(rotated["box"]["y"], original["box"]["y"])
+        feature = rotated["layout"]["features"][0]
+        feature["scale"] = 1.5
+        scaled = apply_feature_payload({"design": rotated, "feature": feature, "index": 0})["design"]
+        self.assertGreaterEqual(scaled["box"]["x"], rotated["box"]["x"])
+        self.assertGreater(scaled["box"]["y"], rotated["box"]["y"])
 
     def test_draft_geometry_identifies_the_part_it_will_print_with(self):
         for mode, prefix in (("fused", "feature_"), ("separate", "insert_")):
@@ -124,11 +203,8 @@ class WebApplicationTests(unittest.TestCase):
         design["box"]["x"] = 96.0
         design["box"]["y"] = 96.0
         item = {
-            "name": "hex driver", "profile": "round", "clearance": 0.4,
-            "segments": [
-                {"length": 50.0, "diameter": 6.0},
-                {"length": 30.0, "diameter": 18.0},
-            ],
+            "name": "driver", "profile": "round", "clearance": 0.4,
+            "segments": [{"length": 50.0, "diameter": 8.0}],
         }
         feature = default_feature_payload({
             "design": design, "kind": "cradle", "item": item,
@@ -158,6 +234,51 @@ class WebApplicationTests(unittest.TestCase):
         recovered = delete_feature_payload({"design": design, "index": 0})
         self.assertEqual(recovered["design"]["layout"]["features"], [])
 
+    def test_auto_expand_grows_the_bin_to_fit_a_clamped_cradle(self):
+        # a 40 mm tool in a 16 mm-wide bin: the cradle's zone was clamped to
+        # 13 mm and would not build. Auto Expand grows the bin and gives the
+        # cradle its real 40 mm footprint back.
+        design = default_design()
+        design["box"]["x"] = 16.0
+        design["box"]["y"] = 48.0
+        item = {
+            "name": "Driver", "profile": "round", "clearance": 0.0,
+            "segments": [{"length": 40.0, "diameter": 6.0}],
+        }
+        feature = default_feature_payload({
+            "design": design, "kind": "cradle", "item": item,
+        })["feature"]
+        feature["along"] = "x"
+        feature["count"] = 3
+        feature["zone"] = [-6.5, -13.0, 6.5, 13.0]
+        design["layout"]["features"] = [feature]
+
+        expanded = expand_layout_payload({"design": design})
+        self.assertTrue(expanded["grew"])
+        self.assertGreaterEqual(expanded["box"]["x"], 48.0)
+        box, layout, *_ = design_from_dict(expanded["design"])
+        one = layout.features[0]
+        self.assertAlmostEqual(one.zone.width, 40.0, delta=1.0)   # tool length back
+        # the whole layout now builds
+        preview = preview_payload({"design": expanded["design"]})
+        self.assertFalse(preview["feature_errors"])
+        self.assertIsNone(preview["draft_error"])
+
+    def test_auto_expand_leaves_a_layout_that_already_fits_alone(self):
+        design = default_design()
+        design["box"]["x"] = 120.0
+        design["box"]["y"] = 120.0
+        divider = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        design["layout"]["features"] = [divider]
+        result = expand_layout_payload({"design": design})
+        self.assertFalse(result["grew"])
+        self.assertEqual(result["box"]["x"], 120.0)
+        self.assertEqual(result["box"]["y"], 120.0)
+
+    def test_auto_expand_with_no_supports_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "no interior supports"):
+            expand_layout_payload({"design": default_design()})
+
     def test_mode_conversion_preserves_valid_layout(self):
         design = default_design()
         converted = mode_payload({"design": design, "mode": "separate"})["design"]
@@ -173,7 +294,10 @@ class WebApplicationTests(unittest.TestCase):
         x0, y0, x1, y1 = preview["layout_bounds"]
         self.assertGreater(x1, x0)
         self.assertGreater(y1, y0)
-        self.assertIn("inside", preview["dimensions"]["x"])
+        self.assertRegex(
+            preview["dimensions"]["size"],
+            r"\d+ X \d+ \(Inside\) - \d+ X \d+ mm \(Outside\)",
+        )
 
     def test_preview_includes_a_highlighted_draft_not_yet_placed(self):
         design = default_design()
@@ -244,7 +368,22 @@ class WebServerTests(unittest.TestCase):
         self.assertIn("text/html", headers["Content-Type"])
         self.assertIn(b"Build your bin", body)
         self.assertIn(b"Advanced bin settings", body)
-        self.assertIn(b"Label your bin", body)
+        self.assertNotIn(b"Label your bin", body)
+        self.assertIn(b"Label position", body)
+        self.assertIn(b"Part Name (For file)", body)
+        self.assertIn(b"Connect bins", body)
+        self.assertIn(b"Generate STLs", body)
+        self.assertIn(b"Different height bins?", body)
+        self.assertIn(b"connector-bin-a-height", body)
+        self.assertNotIn(b"connector-position", body)
+        self.assertNotIn(b"connector-axis", body)
+        self.assertIn(b"support-layout-dialog", body)
+        self.assertNotIn(b"Center X", body)
+        self.assertLess(body.index(b"Label position"), body.index(b"Add curved scoop"))
+        self.assertLess(body.index(b"Add curved scoop"), body.index(b"Interior supports"))
+        self.assertLess(body.index(b"Interior supports"), body.index(b"Connect bins"))
+        self.assertLess(body.index(b"Connect bins"), body.index(b"Generate STLs"))
+        self.assertLess(body.index(b"How should the interior print?"), body.index(b"Connect bins"))
         self.assertIn(b"Fused", body)
         status, _headers, body = self.get("/app.js")
         self.assertEqual(status, 200)
@@ -252,6 +391,12 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b"designMutationBusy", body)
         self.assertIn(b"beginDesignMutation", body)
         self.assertIn(b"finishDesignMutation", body)
+        self.assertIn(b"previewSupportPolygons", body)
+        self.assertIn(b"Upload part photo", body)
+        self.assertIn(b".jpg,.jpeg,.png,.webp", body)
+        self.assertIn(b"Camera directly overhead", body)
+        self.assertIn(b"syncNestZone", body)
+        self.assertIn(b'"rotate"', body)
         status, health = self.post("/api/design/validate", {"design": default_design()})
         self.assertEqual(status, 200)
         self.assertEqual(health["design"]["version"], 1)

@@ -26,28 +26,48 @@
     <aside class="controls" aria-label="Bin controls">
       <section class="control-section open" data-section="build">
         <button class="section-heading" aria-expanded="true">
-          <span>Build your bin <small class="unit-note">(unit = 8 mm)</small></span><span class="chevron">⌄</span>
+          <span>Build your bin <small class="unit-note">(8 mm grid)</small></span><span class="chevron">⌄</span>
         </button>
         <div class="section-body">
           <div class="field-grid three">
-            <label>Width <span class="unit">mm</span><input id="x-size" type="number" min="8" step="8"></label>
-            <label>Depth <span class="unit">mm</span><input id="y-size" type="number" min="8" step="8"></label>
+            <label>Grid width <span class="unit">mm</span><input id="x-size" type="number" min="8" step="8"></label>
+            <label>Grid depth <span class="unit">mm</span><input id="y-size" type="number" min="8" step="8"></label>
             <label>Height <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
           </div>
-          <p class="field-help size-help">Width and depth snap to the nearest 8 mm.</p>
           <p id="inside-size" class="measurement"></p>
 
-          <fieldset class="mode-fieldset">
+          <div class="build-label-fields">
+            <label>Label text<input id="label-text" type="text" maxlength="80" placeholder="e.g. M3 BOLTS"></label>
+            <p id="label-error" class="field-error" hidden></p>
+            <fieldset>
+              <legend>Label position</legend>
+              <div class="segmented two">
+                <label><input type="radio" name="label-position" value="bottom" checked><span>Bottom label</span></label>
+                <label><input type="radio" name="label-position" value="top"><span>Top label</span></label>
+              </div>
+            </fieldset>
+            <label>Part Name (For file)<input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>
+          </div>
+
+          <label class="check-card">
+            <input id="scoop" type="checkbox">
+            <span><strong>Add curved scoop</strong><small>Rises halfway up the front wall for easy access to small parts.</small></span>
+          </label>
+
+          <div class="subheading-row">
+            <div><h2>Interior supports</h2></div>
+            <span id="support-count" class="count-badge">0 placed</span>
+          </div>
+          <button id="auto-expand-bin" class="button secondary auto-expand" type="button" hidden>
+            Auto Expand Bin<small>Grow the bin to fit the supports that don't fit right now</small>
+          </button>
+          <div id="support-palette" class="support-palette" role="list"></div>
+
+          <fieldset id="interior-mode" class="mode-fieldset" hidden>
             <legend>How should the interior print?</legend>
             <div id="mode-options" class="segmented two"></div>
             <p class="field-help mode-help"><strong>Fused</strong> prints supports as one piece with the bin. <strong>Removable</strong> prints them separately on a thin 0.6 mm base plate that fits into the bin.</p>
           </fieldset>
-
-          <div class="subheading-row">
-            <div><h2>Interior supports</h2><p>Pick a shape and set its fit - it's placed as you go.</p></div>
-            <span id="support-count" class="count-badge">0 placed</span>
-          </div>
-          <div id="support-palette" class="support-palette" role="list"></div>
 
           <div class="support-editor" hidden>
             <div class="editor-title">
@@ -67,51 +87,38 @@
             <div id="placed-supports" class="placed-supports"></div>
           </div>
 
-          <label class="check-card">
-            <input id="scoop" type="checkbox">
-            <span><strong>Add curved scoop</strong><small>Rises halfway up the front wall for easy access to small parts.</small></span>
-          </label>
           <details class="advanced">
             <summary>Advanced bin settings</summary>
             <div class="field-grid two">
               <label>Wall / floor <span class="unit">mm</span><input id="wall" type="number" min="0.4" step="0.1"></label>
               <label>Flat wall band <span class="unit">0–1 mm</span><input id="flat-inside" type="number" min="0" max="1" step="0.1"></label>
-              <label>Connector tolerance <span class="unit">mm</span><input id="connector-tolerance" type="number" min="0" max="1" step="0.01"></label>
-              <label>Connector height <span class="unit">mm</span><input id="connector-height" type="number" min="2" step="0.1"></label>
-              <label>Connector length <span class="unit">mm</span><input id="connector-length" type="number" min="2" step="1"></label>
-              <label>Connector position <span class="unit">mm</span><input id="connector-position" type="number" step="2"></label>
             </div>
-            <fieldset>
-              <legend>Connector wall direction</legend>
-              <div class="segmented two">
-                <label><input type="radio" name="connector-axis" value="x"><span>X wall</span></label>
-                <label><input type="radio" name="connector-axis" value="y" checked><span>Y wall</span></label>
-              </div>
-            </fieldset>
           </details>
         </div>
       </section>
 
-      <section class="control-section open" data-section="label">
+      <section class="control-section open" data-section="connector">
         <button class="section-heading" aria-expanded="true">
-          <span>Label your bin</span><span class="chevron">⌄</span>
+          <span>Connect bins</span><span class="chevron">⌄</span>
         </button>
         <div class="section-body">
-          <label>Label text<input id="label-text" type="text" maxlength="80" placeholder="e.g. M3 BOLTS"></label>
-          <p id="label-error" class="field-error" hidden></p>
-          <fieldset>
-            <legend>Label position</legend>
-            <div class="segmented two">
-              <label><input type="radio" name="label-position" value="bottom" checked><span>Bottom label</span></label>
-              <label><input type="radio" name="label-position" value="top"><span>Top label</span></label>
-            </div>
-          </fieldset>
-          <label>Part Name (For file)<input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>
+          <label class="check-card">
+            <input id="different-height-bins" type="checkbox">
+            <span><strong>Different height bins?</strong><small>Extend the arm over the shorter bin so both sides lock.</small></span>
+          </label>
+          <div id="connector-bin-heights" class="field-grid two" hidden>
+            <label>Bin A height <span class="unit">mm</span><input id="connector-bin-a-height" type="number" min="2" step="1"></label>
+            <label>Bin B height <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>
+          </div>
+          <div class="field-grid two">
+            <label>Connector tolerance <span class="unit">mm</span><input id="connector-tolerance" type="number" min="0" max="1" step="0.01"></label>
+            <label>Connector length <span class="unit">mm</span><input id="connector-length" type="number" min="2" step="1"></label>
+          </div>
         </div>
       </section>
 
       <section class="output-panel">
-        <label>Output folder<div class="input-with-button">
+        <label>Generate STLs<div class="input-with-button">
           <input id="output-folder" type="text">
           <button type="button" class="button secondary" id="output-folder-picker">Browse</button>
         </div></label>
@@ -158,7 +165,7 @@
       </div>
       <div class="canvas-wrap" data-canvas="2d">
         <canvas id="preview-2d" role="img" aria-label="Top-down layout preview" aria-describedby="preview-help layout-help"></canvas>
-        <div id="layout-help" class="layout-hint">Pointer: click a support, drag to move, or drag its blue corner to resize. Keyboard or screen reader: choose the support under Placed supports, then edit its Center X, Center Y, Width, and Depth fields.</div>
+        <div id="layout-help" class="layout-hint">Pointer: drag to move, drag the blue corner to resize proportionally, or use the round handle to rotate a Photo Nest.</div>
       </div>
       <div id="error-panel" class="error-panel" hidden></div>
       <div class="workspace-footer">
@@ -169,6 +176,14 @@
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="support-layout-dialog" class="support-layout-dialog" aria-labelledby="support-layout-dialog-title">
+    <h2 id="support-layout-dialog-title">Adjust this support?</h2>
+    <p>Switch to 2D layout to adjust supports.</p>
+    <div class="button-row">
+      <button id="support-layout-dialog-close" type="button" class="button secondary">Stay in 3D</button>
+      <button id="support-layout-dialog-open" type="button" class="button primary">Open 2D layout</button>
+    </div>
+  </dialog>
   <div id="update-banner" class="update-banner" role="status" hidden>
     <span>The Python engine restarted with new code. The page you're looking at is out of sync.</span>
     <button id="update-banner-reload" class="button primary" type="button">Reload now</button>

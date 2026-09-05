@@ -17,11 +17,15 @@ from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
     GRID_PITCH,
+    WAVE_AMPLITUDE,
+    WAVE_LENGTH,
+    WAVE_MATING_GAP,
     LOCKED_CONNECTOR_HEIGHT,
     LOCKED_CONNECTOR_LENGTH,
     LOCKED_TOLERANCE,
     export_labelled_box,
     export_mesh,
+    connector_for_print,
     generate_sampler,
     label_report,
     label_placement,
@@ -34,6 +38,7 @@ from organizer_engine import (
     make_box,
     make_side_connector,
     measure_lock,
+    max_wave_slope,
     mesh_report,
     scoop_floor_zone,
     scoop_keep_out,
@@ -50,6 +55,7 @@ from organizer_inserts import (
     EDITOR_SNAP,
     FEATURE_BUILDERS,
     INSERT_CLEARANCE,
+    _cradle_rib_thickness,
     LIBRARY,
     MIN_FEATURE_GAP,
     Feature,
@@ -67,6 +73,7 @@ from organizer_inserts import (
     make_cartridge_insert,
     make_fitted_insert,
     make_fused_box,
+    fitted_nest_feature,
     make_insert_plate,
     snapped_zone,
 )
@@ -78,11 +85,11 @@ DEFAULT_SAMPLE_BOXES = "2x6,4x6,6x6"   # 16x48, 32x48, 48x48 mm
 SUPPORT_CATALOG = {
     "cradle": (
         "Cradle — tools laid down",
-        "Open scalloped ribs for screwdrivers, markers and other handled tools.",
+        "A half-circle notch that holds a screwdriver, marker or other tool on its side.",
     ),
     "nest": (
-        "Contour nest — snug tool recess",
-        "A shallow recess following each length × diameter segment of the item.",
+        "Photo Nest — custom part cavity",
+        "Upload a flat overhead photo on letter paper to create a scaled cavity for one part.",
     ),
     "bore": (
         "Bore — upright tools",
@@ -136,15 +143,16 @@ PART_KINDS = (
      {"qty": True, "size": True, "along": True, "item": True, "lean": False},
      (("Height mm", "height", ""), ("Hole depth mm", "depth", ""),
       ("Wall mm", "wall", "1.6"))),
-    ("cradle", "Cradle", "Scalloped ribs that hold a handled tool on its side.",
+    ("cradle", "Cradle", "A half-circle notch that holds a tool on its side.",
      {"qty": True, "size": True, "along": True, "item": True, "lean": False,
       "alternate": True},
-     (("Floor gap mm", "floor_gap", "2"), ("Rib mm", "rib_thickness", "1.6"))),
-    ("nest", "Nest", "A shallow snug recess following a tool's stepped outline.",
-     {"qty": True, "size": True, "along": True, "item": True, "lean": False,
-      "alternate": True},
-     (("Height mm", "height", ""), ("Recess mm", "depth", ""),
-      ("Wall mm", "wall", "1.6"))),
+     (("Spacing mm", "spacing", "0"), ("Floor gap mm", "floor_gap", "2"))),
+    ("nest", "Photo Nest", "Upload a flat overhead photo on letter paper to create a scaled cavity for one part.",
+     {"qty": False, "size": False, "along": False, "item": False, "lean": False,
+      "alternate": False, "photo": True},
+     (("Clearance (mm)", "clearance", "0.6"),
+      ("Cavity depth (mm)", "depth", "8"),
+      ("Rim border (mm)", "rim", "3"))),
 )
 PART_KIND_INFO = {
     kind: (title, blurb, flags, fields)
@@ -232,7 +240,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--position",
         type=float,
         default=0.0,
-        help="connector center from the wall center, in steps of the wave",
+        help=(
+            "connector center from the wall center, in whole "
+            f"{WAVE_LENGTH:g} mm waves"
+        ),
     )
     side_parser.add_argument("--length", type=float, default=LOCKED_CONNECTOR_LENGTH)
     side_parser.add_argument("--output", type=Path, required=True)
@@ -610,9 +621,10 @@ def preview_geometry(
         "invalid_feature_indexes": tuple(invalid_feature_indexes),
         "draft_error": draft_error,
         "customization_zones": tuple(reserved),
-        "x_text": f"{box.x:g}mm ({math.floor(inside_x):g} inside)",
-        "y_text": f"{box.y:g}mm ({math.floor(inside_y):g} inside)",
-        "z_text": f"{box.z:g}mm tall",
+        "size_text": (
+            f"{math.floor(inside_x):g} X {math.floor(inside_y):g} (Inside) - "
+            f"{box.x:g} X {box.y:g} mm (Outside)"
+        ),
     }
 
 
@@ -793,13 +805,28 @@ def generate_side_file(
     along: str = "y",
     position: float = 0.0,
     length: float = LOCKED_CONNECTOR_LENGTH,
+    bin_a_height: float | None = None,
+    bin_b_height: float | None = None,
 ) -> dict[str, object]:
-    mesh = make_side_connector(box, connector, along, position, length)
+    mesh = make_side_connector(
+        box, connector, along, position, length, bin_a_height, bin_b_height
+    )
     report = mesh_report("side_connector", mesh)
-    overlap = validate_side_fit(box, connector, mesh, along, position)
+    overlap = validate_side_fit(
+        box, connector, mesh, along, position, bin_a_height, bin_b_height
+    )
     fit = {"seated_overlap_mm3": round(overlap, 6)}
-    fit.update(measure_lock(box, connector, along, position))
-    export_mesh(mesh, output, "side_connector")
+    fit.update(measure_lock(
+        box, connector, along, position, bin_a_height=bin_a_height,
+        bin_b_height=bin_b_height,
+    ))
+    print_mesh = connector_for_print(mesh)
+    export_mesh(print_mesh, output, "side_connector")
+    fit.update({
+        "bin_a_height_mm": bin_a_height if bin_a_height is not None else box.z,
+        "bin_b_height_mm": bin_b_height if bin_b_height is not None else box.z,
+        "print_orientation": "flat cap down",
+    })
     return _part_result(output, report, fit)
 
 
@@ -909,14 +936,14 @@ def default_feature(
     if kind not in FEATURE_BUILDERS:
         raise ValueError(f"unknown holder {kind!r}")
     bounds = layout_zone(box, mode)
-    if kind in {"cradle", "bore", "nest"}:
+    if kind in {"cradle", "bore"}:
         item = item if item is not None else LIBRARY[item_key]
     else:
         item = None
     feature_options = {}
-    if item is not None and kind in {"cradle", "nest"}:
+    if item is not None and kind == "cradle":
         required_length = item.length + (
-            item.clearance + 2.0 * 1.6 if kind == "nest" else 0.0
+            _cradle_rib_thickness(item.widest)
         )
         pitch = CARTRIDGE_PITCH if mode == "cartridge" else EDITOR_SNAP
         required_length = math.ceil((required_length - 1e-9) / pitch) * pitch
@@ -930,8 +957,10 @@ def default_feature(
                 f"{item.name} needs {required_length:g} mm; enlarge the bin first"
             )
         available_across = bounds.depth if along == "x" else bounds.width
+        cradle_across = item.widest + _cradle_rib_thickness(item.widest)
         wanted_across = max(
-            8.0, item.held(item.widest) + (3.2 if kind == "nest" else 1.6)
+            8.0,
+            cradle_across,
         )
         across = min(
             available_across,
@@ -939,6 +968,8 @@ def default_feature(
         )
         width, depth = ((required_length, across) if along == "x"
                         else (across, required_length))
+    elif kind == "nest":
+        width, depth = min(8.0, bounds.width), min(8.0, bounds.depth)
     elif kind == "divider":
         # Wall to wall on its own run axis by default, and spread across
         # the bin's whole other axis too - room for count > 1 to divide the
@@ -963,7 +994,9 @@ def default_feature(
         kind,
         snapped_zone(raw, box, mode),
         item=item,
-        count=1 if kind == "post" else None,
+        # A cradle, like a post, starts as a single holder - Quantity "auto"
+        # then fills the zone with lanes only when the user asks for it.
+        count=1 if kind in {"post", "cradle"} else None,
         along=along,
         options=feature_options,
         full_span=(kind == "divider"),
@@ -976,6 +1009,9 @@ def convert_layout_mode(
     """Snap every support onto a new mode's grid and validate the result."""
     converted_items = []
     for one in features:
+        if one.kind == "nest" and one.contour:
+            converted_items.append(fitted_nest_feature(one))
+            continue
         zone = one.zone
         if mode == "cartridge":
             width = math.ceil((zone.width - 1e-9) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
@@ -1026,8 +1062,18 @@ def design_from_dict(
     if data.get("version", 1) != 1:
         raise ValueError(f"unsupported design version {data.get('version')!r}")
     raw = data["box"]
+    x, y = float(raw["x"]), float(raw["y"])
+    # Brief browser builds stored a requested usable size plus the wall
+    # allowance. Recover the user's 8 mm modular choice when those designs are
+    # reopened; every BoxSpec remains grid-locked after migration.
+    if bool(raw.get("interior_sizing", False)):
+        wall = float(raw.get("wall", 0.8))
+        wall_depth = wall * math.sqrt(1.0 + max_wave_slope() ** 2)
+        allowance = WAVE_MATING_GAP + 2.0 * wall_depth + 2.0 * WAVE_AMPLITUDE
+        x = max(GRID_PITCH, round((x - allowance) / GRID_PITCH) * GRID_PITCH)
+        y = max(GRID_PITCH, round((y - allowance) / GRID_PITCH) * GRID_PITCH)
     box = BoxSpec(
-        float(raw["x"]), float(raw["y"]), float(raw["z"]),
+        x, y, float(raw["z"]),
         float(raw.get("wall", 0.8)),
         float(raw.get("corner_fillet", 0.6)),
         flat_inside=float(raw.get("flat_inside", 0.0)),

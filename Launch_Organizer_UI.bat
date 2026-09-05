@@ -21,10 +21,10 @@ if not exist "%ORGANIZER_PY%" (
     if errorlevel 1 goto :failed
 )
 
-"%ORGANIZER_PY%" -c "import lib3mf, lxml, manifold3d, mapbox_earcut, matplotlib, networkx, numpy, shapely, trimesh" >nul 2>&1
+"%ORGANIZER_PY%" -c "import cv2, lib3mf, lxml, manifold3d, mapbox_earcut, matplotlib, networkx, numpy, shapely, trimesh" >nul 2>&1
 if errorlevel 1 (
     echo Installing the organizer geometry components. This is only needed on first launch...
-    "%ORGANIZER_PY%" -m pip install --disable-pip-version-check lib3mf==2.5.0 lxml==6.1.2 manifold3d==3.5.2 mapbox-earcut==2.0.0 matplotlib==3.11.1 networkx==3.6.1 numpy==2.5.2 shapely==2.1.2 trimesh==5.0.0
+    "%ORGANIZER_PY%" -m pip install --disable-pip-version-check opencv-python-headless==5.0.0.93 lib3mf==2.5.0 lxml==6.1.2 manifold3d==3.5.2 mapbox-earcut==2.0.0 matplotlib==3.11.1 networkx==3.6.1 numpy==2.5.2 shapely==2.1.2 trimesh==5.0.0
     if errorlevel 1 goto :failed
 )
 

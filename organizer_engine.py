@@ -270,6 +270,17 @@ def max_wave_slope() -> float:
     return WAVE_AMPLITUDE * 2.0 * math.pi / WAVE_LENGTH
 
 
+def nested_clearance() -> float:
+    """The real air gap between two mated walls, measured perpendicular.
+
+    ``WAVE_MATING_GAP`` is the gap measured *across* the seam, but the walls
+    lean, so the shortest distance between them is shorter than that by the
+    wave's own slope.  This is the number a slicer sees, and it is the same for
+    every pair of bins that mate, whatever sizes they are.
+    """
+    return WAVE_MATING_GAP / math.sqrt(1.0 + max_wave_slope() ** 2)
+
+
 def wave_value(coordinate: float) -> float:
     """Fixed-pitch wave, measured from the centre of the wall it runs along.
 
@@ -431,6 +442,63 @@ def wavy_cavity_polygon(spec: BoxSpec) -> Polygon:
     if not isinstance(polygon, Polygon) or not polygon.is_valid:
         raise RuntimeError("wavy cavity outline is not a valid single polygon")
     return _rounded(polygon, max(0.2, spec.corner_fillet - spec.wall))
+
+
+def placed_outline(
+    spec: BoxSpec, centre: tuple[float, float] = (0.0, 0.0)
+) -> Polygon:
+    """``spec``'s outer outline, moved to a centre on the drawer grid.
+
+    A legal box spans a whole number of ``GRID_PITCH`` cells, so wherever it
+    sits in a packed drawer its centre lands on a multiple of ``WAVE_LENGTH`` -
+    half a grid step.  That is the whole reason mixed sizes tile.  The wave's
+    phase depends only on the distance from the wall's own centre, so two walls
+    a whole number of cycles apart carry the identical curve and nest; anything
+    else puts a crest against a crest.  An off-lattice centre is refused here
+    rather than quietly measured, because the clearance it reported would be a
+    number nothing can be built to.
+    """
+    cx, cy = float(centre[0]), float(centre[1])
+    for name, value in (("X", cx), ("Y", cy)):
+        cycles = value / WAVE_LENGTH
+        if abs(cycles - round(cycles)) > 1e-6:
+            raise ValueError(
+                f"a bin centre has to land on the {WAVE_LENGTH:g} mm wave lattice "
+                f"so its walls share phase with its neighbours'; centre {name} = "
+                f"{value:g} mm does not - try {round(cycles) * WAVE_LENGTH:g} mm"
+            )
+    return translate_polygon(wavy_outer_polygon(spec), cx, cy)
+
+
+def mating_clearance(
+    a: BoxSpec,
+    a_centre: tuple[float, float],
+    b: BoxSpec,
+    b_centre: tuple[float, float],
+) -> float:
+    """Smallest gap between two bins standing side by side on the grid.
+
+    Two bins that share a wall measure ``nested_clearance()`` whatever their
+    sizes, because that wall is one global wave and the two outlines are the
+    same curve offset by ``WAVE_MATING_GAP``.  Two that meet only at a corner
+    measure more: a corner chord cuts *inward* from the wave envelope, so a
+    corner can only ever add clearance.  That is why the corner flats - which
+    the odd wave makes longer on one diagonal than on the other - are a
+    cosmetic asymmetry and never a mating problem.
+
+    Raises if the two outlines actually intersect.  A collision is a fault in
+    the sizes or the placement, not a clearance worth reporting.
+    """
+    first = placed_outline(a, a_centre)
+    second = placed_outline(b, b_centre)
+    overlap = first.intersection(second)
+    if not overlap.is_empty:
+        raise ValueError(
+            f"a {a.x:g} x {a.y:g} bin at {a_centre} and a {b.x:g} x {b.y:g} bin at "
+            f"{b_centre} collide over {overlap.area:.4f} mm2; they cannot both "
+            f"stand on the grid as placed"
+        )
+    return first.distance(second)
 
 
 # --------------------------------------------------------------------------- #
@@ -670,6 +738,20 @@ def connector_half_widths(box: BoxSpec, connector: ConnectorSpec) -> tuple[float
     return inner, inner + connector.arm_thickness
 
 
+def connector_bin_heights(
+    box: BoxSpec, bin_a_height: float | None = None, bin_b_height: float | None = None,
+) -> tuple[float, float]:
+    """Resolve and validate the two rim heights used by a side connector."""
+    heights = (
+        box.z if bin_a_height is None else float(bin_a_height),
+        box.z if bin_b_height is None else float(bin_b_height),
+    )
+    for name, height in zip(("bin A height", "bin B height"), heights):
+        if not math.isfinite(height) or height <= box.wall:
+            raise ValueError(f"{name} must be greater than the wall/floor thickness")
+    return heights
+
+
 def connector_fits(
     box: BoxSpec,
     along_axis: str = "y",
@@ -697,7 +779,14 @@ def make_side_connector(
     along_axis: str = "y",
     position: float = 0.0,
     length: float = DEFAULT_SIDE_LENGTH,
+    bin_a_height: float | None = None,
+    bin_b_height: float | None = None,
 ) -> trimesh.Trimesh:
+    """Make a connector for two bins whose rims may be at different heights.
+
+    Bin A is the negative side of the seam and bin B is the positive side.  The
+    cap sits on the taller rim; only the arm over a shorter bin is extended.
+    """
     axis = along_axis.lower()
     if axis not in {"x", "y"}:
         raise ValueError("along_axis must be 'x' or 'y'")
@@ -712,28 +801,37 @@ def make_side_connector(
             f"{length:g}. A wall this short joins nothing - use the box's other "
             f"side, or make this one at least {shortest:.2f} mm"
         )
+    heights = connector_bin_heights(box, bin_a_height, bin_b_height)
     # The band sits on the floor and the arms hang from the rim, so on any
     # normal bin they are nowhere near each other.  On a very shallow one they
     # meet, and it is worth saying so plainly rather than letting the fit check
     # report a bare collision volume.
     band_top = box.wall + box.flat_inside
-    arm_bottom = box.z - connector.arm_depth
-    if box.flat_inside > 0.0 and arm_bottom < band_top:
-        room = box.z - connector.arm_depth - box.wall
-        raise ValueError(
-            f"the flat band reaches {band_top:.2f} mm up but the connector's arms "
-            f"hang down to {arm_bottom:.2f} mm, so they would collide. On a "
-            f"{box.z:g} mm box the band can be at most {max(room, 0.0):.2f} mm, or "
-            f"make the box at least {box.wall + box.flat_inside + connector.arm_depth:.2f} mm tall"
-        )
+    for bin_height in heights:
+        arm_bottom = bin_height - connector.arm_depth
+        if box.flat_inside > 0.0 and arm_bottom < band_top:
+            room = bin_height - connector.arm_depth - box.wall
+            raise ValueError(
+                f"the flat band reaches {band_top:.2f} mm up but the connector's arms "
+                f"hang down to {arm_bottom:.2f} mm, so they would collide. On a "
+                f"{bin_height:g} mm box the band can be at most {max(room, 0.0):.2f} mm, or "
+                f"make the box at least {box.wall + box.flat_inside + connector.arm_depth:.2f} mm tall"
+            )
 
-    step = WAVE_LENGTH / 2.0
+    # A whole wave, not half of one.  The corridor between the arms is cut to
+    # the wall's wave at this position, and the wave inverts every half cycle:
+    # a clip made half a wave away is the *mirror* of this one, same volume and
+    # a shape no amount of turning it over will recover.  Slid onto this seam it
+    # meets the wall crest-to-crest.  Whole cycles are the only offsets at which
+    # one printed part really is the universal part.
+    step = WAVE_LENGTH
     steps = position / step
     if abs(steps - round(steps)) > 1e-6:
         raise ValueError(
-            f"connector position must be a whole multiple of {step:g} mm - half a "
-            f"wave - so one connector part fits every seam and drops on either way "
-            f"round; {position:g} mm is not - try {round(steps) * step:g} mm"
+            f"connector position must be a whole multiple of {step:g} mm - one "
+            f"whole wave - so one connector part fits every seam and drops on "
+            f"either way round; {position:g} mm is not - try "
+            f"{round(steps) * step:g} mm"
         )
 
     inner_hw, outer_hw = connector_half_widths(box, connector)
@@ -761,11 +859,43 @@ def make_side_connector(
             raise RuntimeError("side-connector corridor is not a valid polygon")
         return polygon
 
+    def arm_strip(sign: float, coordinates: np.ndarray) -> Polygon:
+        offsets = [wave_value(position + float(v)) for v in coordinates]
+        if axis == "y":
+            if sign < 0:
+                near = [(o - outer_hw, float(v)) for v, o in zip(coordinates, offsets)]
+                far = [(o - inner_hw, float(v)) for v, o in zip(coordinates[::-1], offsets[::-1])]
+            else:
+                near = [(o + inner_hw, float(v)) for v, o in zip(coordinates, offsets)]
+                far = [(o + outer_hw, float(v)) for v, o in zip(coordinates[::-1], offsets[::-1])]
+        else:
+            if sign < 0:
+                near = [(float(v), o - outer_hw) for v, o in zip(coordinates, offsets)]
+                far = [(float(v), o - inner_hw) for v, o in zip(coordinates[::-1], offsets[::-1])]
+            else:
+                near = [(float(v), o + inner_hw) for v, o in zip(coordinates, offsets)]
+                far = [(float(v), o + outer_hw) for v, o in zip(coordinates[::-1], offsets[::-1])]
+        return Polygon(near + far)
+
     body = _extrude_polygon(corridor(outer_hw, samples), connector.height)
     channel = _extrude_polygon(corridor(inner_hw, cavity_samples), connector.arm_depth)
     result = difference([body, channel])
 
-    notches = _arm_notches(box, connector, axis, position, length, inner_hw)
+    cap_height = max(heights)
+    arm_extensions = ((-1.0, cap_height - heights[0]), (1.0, cap_height - heights[1]))
+    extensions = []
+    for sign, extension_depth in arm_extensions:
+        if extension_depth > 1e-6:
+            extension = _extrude_polygon(arm_strip(sign, samples), extension_depth + 0.01)
+            extension.apply_translation((0.0, 0.0, -extension_depth))
+            extensions.append(extension)
+    if extensions:
+        result = union([result, *extensions])
+
+    notches = _arm_notches(
+        box, connector, axis, position, length, inner_hw,
+        {-1.0: -arm_extensions[0][1], 1.0: -arm_extensions[1][1]},
+    )
     if notches:
         result = difference([result, *notches])
     result.remove_unreferenced_vertices()
@@ -780,6 +910,7 @@ def _arm_notches(
     position: float,
     length: float,
     inner_hw: float,
+    z_offsets: dict[float, float] | None = None,
 ) -> list[trimesh.Trimesh]:
     """Recesses in both arms that receive the walls' lock bumps.
 
@@ -814,10 +945,20 @@ def _arm_notches(
             notches.append(
                 translated(
                     _sweep_profile(path, lateral, profile),
-                    (0.0, 0.0, connector.arm_depth),
+                    (0.0, 0.0, connector.arm_depth + (z_offsets or {}).get(sign, 0.0)),
                 )
             )
     return notches
+
+
+def connector_for_print(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Turn a connector over so its broad, flat cap is on the build plate."""
+    result = mesh.copy()
+    result.apply_transform(
+        trimesh.transformations.rotation_matrix(math.pi, (1.0, 0.0, 0.0))
+    )
+    result.apply_translation((0.0, 0.0, -float(result.bounds[0][2])))
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -1353,8 +1494,32 @@ def installed_boxes(
     ]
 
 
-def seat_transform(box: BoxSpec, connector: ConnectorSpec, position: float, axis: str):
-    z = box.z - connector.arm_depth
+def installed_side_boxes(
+    box: BoxSpec, along_axis: str, bin_a_height: float, bin_b_height: float,
+) -> list[trimesh.Trimesh]:
+    """Two adjacent boxes with independently specified rim heights."""
+    a = BoxSpec(
+        box.x, box.y, bin_a_height, box.wall, box.corner_fillet, box.flat_inside,
+    )
+    b = BoxSpec(
+        box.x, box.y, bin_b_height, box.wall, box.corner_fillet, box.flat_inside,
+    )
+    if along_axis.lower() == "y":
+        return [
+            translated(make_box(a), (-box.x / 2.0, 0.0, 0.0)),
+            translated(make_box(b), (box.x / 2.0, 0.0, 0.0)),
+        ]
+    return [
+        translated(make_box(a), (0.0, -box.y / 2.0, 0.0)),
+        translated(make_box(b), (0.0, box.y / 2.0, 0.0)),
+    ]
+
+
+def seat_transform(
+    box: BoxSpec, connector: ConnectorSpec, position: float, axis: str,
+    cap_height: float | None = None,
+):
+    z = (box.z if cap_height is None else cap_height) - connector.arm_depth
     return (position, 0.0, z) if axis == "x" else (0.0, position, z)
 
 
@@ -1364,11 +1529,14 @@ def validate_side_fit(
     clip: trimesh.Trimesh,
     along_axis: str = "y",
     position: float = 0.0,
+    bin_a_height: float | None = None,
+    bin_b_height: float | None = None,
 ) -> float:
     """Overlap of the seated connector with the two boxes it joins."""
     axis = along_axis.lower()
-    boxes = installed_boxes(box, axis)
-    seated = translated(clip, seat_transform(box, connector, position, axis))
+    heights = connector_bin_heights(box, bin_a_height, bin_b_height)
+    boxes = installed_side_boxes(box, axis, *heights)
+    seated = translated(clip, seat_transform(box, connector, position, axis, max(heights)))
     overlap = sum(intersection_volume(seated, item) for item in boxes)
     if overlap > 0.01:
         raise RuntimeError(
@@ -1383,6 +1551,8 @@ def measure_lock(
     along_axis: str = "y",
     position: float = 0.0,
     lifts: tuple[float, ...] = (0.0, 0.5, 1.5),
+    bin_a_height: float | None = None,
+    bin_b_height: float | None = None,
 ) -> dict[str, float]:
     """Seated clearance, and the interference met while lifting the clip out.
 
@@ -1391,9 +1561,12 @@ def measure_lock(
     the bumps stand in the arm's path at all.
     """
     axis = along_axis.lower()
-    boxes = installed_boxes(box, axis)
-    clip = make_side_connector(box, connector, axis, position)
-    base = seat_transform(box, connector, position, axis)
+    heights = connector_bin_heights(box, bin_a_height, bin_b_height)
+    boxes = installed_side_boxes(box, axis, *heights)
+    clip = make_side_connector(
+        box, connector, axis, position, DEFAULT_SIDE_LENGTH, *heights
+    )
+    base = seat_transform(box, connector, position, axis, max(heights))
 
     result: dict[str, float] = {}
     for lift in lifts:
@@ -1614,8 +1787,9 @@ def make_sampler_scene(
     clip = make_side_connector(
         BoxSpec(flat_inside=flat_inside), connector, "y", 0.0, side_length
     )
-    mesh_report("sample connector", clip)
     validate_side_fit(BoxSpec(flat_inside=flat_inside), connector, clip, "y")
+    clip = connector_for_print(clip)
+    mesh_report("sample connector", clip)
     cell = float(clip.extents[0]) + 6.0
     row_y = -depth / 2.0 - gap - float(clip.extents[1]) / 2.0
     for index in range(clips):

@@ -30,11 +30,11 @@ Manual setup instead:
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\python.exe -m pip install lib3mf==2.5.0 lxml==6.1.2 manifold3d==3.5.2 mapbox-earcut==2.0.0 matplotlib==3.11.1 networkx==3.6.1 numpy==2.5.2 shapely==2.1.2 trimesh==5.0.0
+.venv\Scripts\python.exe -m pip install opencv-python-headless==5.0.0.93 lib3mf==2.5.0 lxml==6.1.2 manifold3d==3.5.2 mapbox-earcut==2.0.0 matplotlib==3.11.1 networkx==3.6.1 numpy==2.5.2 shapely==2.1.2 trimesh==5.0.0
 .venv\Scripts\python.exe wavefinity_web.py
 ```
 
-Those nine pins are the whole dependency list. `matplotlib` is not optional — it
+Those ten pins are the whole dependency list. `matplotlib` is not optional — it
 supplies the font outlines for floor labels. Run the tests with:
 
 ```powershell
@@ -54,7 +54,7 @@ settings. **Label your bin** contains the label position and part filename.
 
 The 3D preview is real camera-independent geometry returned by Python and drawn
 locally by the browser. Drag to rotate, use the wheel to zoom, and double-click
-to reset. A single pixels-per-millimetre scale is chosen from the available
+to reset. Click a support to open the 2D layout for adjustment. A single pixels-per-millimetre scale is chosen from the available
 width and height, so enlarging the browser makes the model larger without
 stretching it. The 2D tab uses the same rule and supports click-to-select,
 drag-to-move and blue-corner resize. It draws the bin's true wavy interior,
@@ -88,7 +88,7 @@ generation.
 The browser editor is a three-step flow: **1. pick a shape** from the support
 palette and read its one-line description; **2. set parameters**; **3. add
 support**. Placed supports can be selected in the list or on the 2D layout,
-then moved, resized, or edited with exact numeric fields. Normal layouts snap
+then moved or resized there, or edited with exact numeric size fields. Normal layouts snap
 to **1 mm**. Overlaps and out-of-bounds features are refused at export.
 
 A **divider** is a special case with no manually-sized footprint at all: it
@@ -213,7 +213,7 @@ user, not a multi-user server design.
 **Known limitations:** no standalone browser/DOM test suite yet — Python API
 contracts and JavaScript syntax are covered by `test_wavefinity_web.py` and
 `node --check`, interactive QA is manual. A very dense design (many
-cradle/nest/bore supports at once) serializes a large triangle payload to
+cradle/bore supports at once) serializes a large triangle payload to
 the browser; camera motion stays client-side and fast regardless, but the
 initial load is heavier. **Save design** relies on the browser's own
 download prompt, which some browser-automation tools cannot observe as an
@@ -225,22 +225,64 @@ event — a real browser session shows it normally.
 
 ### Holder primitives
 
-Every holder owns a rectangular floor zone. Item-based holders (`cradle`,
-`nest`, `bore`) describe the stored tool as one or more `length x diameter`
-segments internally, so `50x6, 30x18` is a hex driver shaft and handle without
-hard-coding a hex-driver rack. The editor collects this as plain **Length /
-Thickness** fields, with optional **Handle length / Handle thickness** for a
-two-part tool — there are no fixed tool presets, since every bin is cut for one
-specific tool. `Count = auto` fills the zone; a number requests exactly that
-many. Cradle and nest holders also offer **Alternate ends**: when enabled,
-every second repeated tool is turned end-for-end so a handle sits beside the
-next tool's shaft. The setting is saved as `alternate_ends` and has no effect
-when only one tool fits.
+Every holder owns a floor zone. Item-based holders (`cradle`, `bore`) describe
+the stored tool with measured dimensions. `cradle` is deliberately just
+**Length** and **Diameter** — it
+beds the whole tool, shaft and handle, into one continuous half-round trough,
+so the fatter handle needs no separate number. The trough is an open channel
+the tool simply drops into, so it takes the tool at its **true diameter — no
+fit clearance** — and has no fit-clearance field. The trough walls are sized
+automatically, proportional to the tool diameter (about a quarter of it,
+floored at the thinnest printable wall and capped so a fat handle never grows a
+slab), so there is no wall setting to expose either. There are no fixed tool
+presets, since every bin is cut for one specific tool.
+
+A cradle starts as a single trough (**Quantity 1**, like a post). **Quantity =
+N** places N troughs across the zone, **Quantity = auto** fits as many as the
+zone holds. **Spacing** controls how a row relates: `0` (the default) joins the
+row into **one continuous body**, neighbours sharing the wall between their
+channels; raising it first thickens that shared wall, then — once every trough
+has its own full wall — opens a real air gap and splits the row into separate
+pieces. Its footprint tracks what it holds: the run axis (the tool lies along
+it) is the tool length; the across axis is N channels at `diameter + wall +
+spacing` pitch. **X direction / Y direction** chooses which bin axis the tool
+lies along — a 40 mm tool needs 40+ mm that way, so in a long narrow bin only
+one direction fits, and the editor says which when it doesn't: *"40 mm long but
+its zone only runs 13 mm along x"* rather than a raw overflow. Every
+auto-computed edge rounds up to the 1 mm editor grid so the pipeline's snap
+can't trim a trough below what the tool needs.
+
+When any support does not fit the current bin, an **Auto Expand Bin** button
+appears at the top of the interior section; it grows the bin on the 8 mm grid
+to the smallest size that holds every support at its real footprint (a clamped
+cradle gets its full length back), trims any axis that overshot, and leaves
+each support where it sat.
+
+**Photo Nest — custom part cavity** creates one cavity from a JPG, JPEG, PNG,
+or WEBP photo. Put one flat part on an 8.5 × 11 in sheet, keep all four paper
+corners visible, and photograph it directly overhead. Wavefinity corrects the
+paper to 215.9 × 279.4 mm, isolates the outside silhouette, cleans camera
+noise, and stores only the closed millimetre contour — never the source image.
+The 2D layout shows that contour and provides move, proportional-resize, and
+rotation handles. **Clearance** expands the cavity, **Cavity depth** cuts down
+from the bin top, and **Rim border** reserves surrounding material. The outer
+bin width and depth recalculate to the smallest enclosing 8 mm-grid footprint;
+height remains solely the Bin height. Missing paper, severe perspective, an
+edge-touching part, multiple parts, and unusably small/noisy outlines are
+rejected with a specific correction. The retired measured/segment Nest format
+is rejected explicitly rather than silently reinterpreted.
+
+Cradle holders also offer **Alternate ends** (off by default): when enabled,
+every second repeated tool is shifted half a tool length along the run axis so fatter
+handles interlock instead of colliding. It adds half a tool length to the run
+axis, so a cradle set to alternate needs a bin about 1.5× the tool length that
+way; turn it off, or rotate, if the run axis runs short. Saved as
+`alternate_ends`; no effect when only one tool fits.
 
 | Holder | Purpose | Optional `key=value` settings |
 |---|---|---|
-| `cradle` | Scalloped ribs for items lying along X or Y; every segment gets its own radius while all seats share one axis height | `rib_thickness`, `spacing`, `floor_gap` |
-| `nest` | Snug, support-free top-down recess following every measured item segment | `depth`, `height`, `wall` |
+| `cradle` | Half-round troughs along X or Y - `spacing` 0 joins the row into one shared body, higher values split it. No fit clearance; wall thickness auto-scales with the tool | `spacing`, `floor_gap` |
+| `nest` | Photo-scaled custom contour cavity cut straight down from the bin top | `clearance`, `depth`, `rim` |
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
 | `divider` | One or more straight or leaning subdividing walls along X or Y | `height`, `thickness`, `angle`, `spacing` |
@@ -308,10 +350,15 @@ Every straight wall carries the same fixed-pitch wave:
 
 Changing X or Y reveals more or fewer whole cycles; it never stretches the wave.
 
-The wave being *odd* is load-bearing, not cosmetic. It is what lets a box be
-**turned round**: spun 180 degrees, a box's +X wall lands where its −X wall was,
-and an odd wave means the two carry the same shape, so the turned box still
-nests with its neighbours.
+Bins have an assembly orientation: **left mates with right, and top mates with
+bottom**. Same-side seams are not part of the supported layout. The odd wave
+keeps each opposing pair on the same global phase lattice.
+
+Turning a bin 180 degrees is still fine, and that is what the odd wave buys.
+Spun, a bin's +X wall lands where its —X wall was, and an odd wave means the two
+carry the same shape, so the turned bin tiles exactly as before
+(`test_a_box_still_tiles_when_it_is_turned_round`). The orientation rule above
+is about which *faces* meet, not about keeping every bin the same way up.
 
 ### The 8 mm size grid
 
@@ -321,8 +368,10 @@ scale proportionally.
 
 **One unit is 8 mm** — the grid step itself — so every legal size is a whole
 number of units and no decimals are needed: 1, 2, 3, 4, 5, 6 = 8, 16, 24, 32,
-40, 48 mm. The browser UI takes width and depth in millimetres and snaps them
-to the nearest 8 mm grid step.
+40, 48 mm. The browser UI takes the modular drawer footprint in millimetres and
+snaps it to the nearest 8 mm step. Usable interior is a derived measurement;
+making it the input would add the wall allowance once per bin and break mixed-size
+tiling.
 
 **16 mm (2 units)** is the smallest box that takes a connector on both sides. A
 1-unit side is still legal and useful: an 8 mm wall is too short for a connector
@@ -367,12 +416,31 @@ end on top of the two walls.
 
 Boxes tile on a plain X by Y pitch. The solid outline is smaller than that pitch
 by a **0.25 mm mating gap**, so two boxes placed one pitch apart have their waves
-nested with a constant 0.25 mm clearance and never touch.
+nested with a constant 0.25 mm clearance and never touch. Measured perpendicular
+to the leaning wall rather than straight across the seam that is **0.21 mm**
+— `nested_clearance()`, and the figure a slicer actually sees.
 
 Where two wavy walls meet, the corner is a short chamfer eased to a **0.6 mm
 fillet**. The rounding is a morphological opening, which only affects convex
 corners sharper than that radius — the wave's own crests are far blunter, so they
 come through untouched.
+
+**Two of the four corners look flatter than the other two, and that is correct.**
+Walls stop `CORNER_INSET` = 1.0 mm short of the nominal corner, wherever the wave
+happens to be at that point. Because the wave is odd, one diagonal's walls end on
+a crest and the other's on a trough, so the chamfer joining them comes out about
+**1.97 mm** on one pair of corners and **0.86 mm** on the other. The 0.6 mm
+fillet eases the ends of each chord but does not remove it, leaving roughly
+**1.26 mm** and **0.50 mm** of flat in the exported solid. This is real geometry,
+not a preview artefact.
+
+It is also not a mating surface. A corner is a chord across the wave, and a
+chord cuts *inward* from the envelope the walls sweep — so a corner can only
+ever add clearance, never take it away. Two bins sharing a wall clear each other
+by 0.21 mm the whole length of that wall, matched sizes and mixed sizes alike;
+two meeting only at a corner clear each other by about **1.2 mm**.
+`mating_clearance()` measures exactly this, and the suite pins it for a packed
+drawer of seven different sizes.
 
 ### Lock detent
 
@@ -402,14 +470,31 @@ A staple that drops over the seam between two boxes; its two arms descend inside
 both. Arms are **1.0 mm** thick (two 0.5 mm perimeters), the cap is 1.2 mm, total
 height 9.6 mm, default length 12 mm.
 
-**The connector is locked**: 0.02 mm tolerance, 12 mm long, 9.6 mm tall, chosen
-from a printed five-clip fit plate. Those three numbers are no longer tuning
-knobs, and the UI hides them behind **Advanced settings**.
+Set the two rim heights in **Connect bins**. When they differ, the arm over the
+shorter bin is extended by the height difference, so both sides still lock. The
+generated file is flipped with its flat cap down for support-free printing.
 
-**It is one universal part, and it goes on either way round.** Because the wave
-and the lock lattice are global, a connector generated for any box seats on any
-seam. Its centre has to land on a half-wave, so `--position` must be a whole
-multiple of 2 mm; anything else is rejected.
+The 0.02 mm tolerance, 12 mm length and 9.6 mm base connector height were
+chosen from a printed five-clip fit plate. **Connect bins** shows the resulting
+printed height, including any extension for a shorter bin.
+
+For equal-height bins it is one universal part and goes on either way round.
+For unequal-height bins, generate the connector with the two actual rim heights.
+Its centre has to land on a **whole wave**, so `--position` must be a whole
+multiple of **4 mm**; anything else is rejected.
+
+Whole waves, not half waves. The corridor between the arms is cut to the wall's
+wave, and that wave *inverts* every half cycle. A clip made a half-wave along is
+therefore the printed one **mirrored** — identical volume, and a shape no amount
+of turning a part over will produce. Slide the real part half a wave onto a seam
+and it meets the wall crest to crest, jamming by about 48 mm3. The rule used to
+accept 2 mm, and every fixed position the tests exercised happened to land on a
+whole wave, so nothing caught it.
+
+A clip also needs open cavity on **both** sides of the seam. Where two short bins
+butt end to end, the far side of the seam at that joint is their end walls, full
+height — so the clip has to clear the joint by half its own length, which on the
+4 mm lattice makes the first usable spot 8 mm away.
 
 Reversibility is why the bumps sit on **every** extremum rather than every other
 one. Two things have to line up when you spin a connector: the wall it hugs must
@@ -418,6 +503,10 @@ an **even** millimetre, and the notches must mirror about that centre, which wit
 bumps every 2 mm they do. With bumps on alternate extrema the two requirements
 landed on odd and even millimetres and could never both hold — **no length or
 position could fix that**, which is why the wave shape had to change instead.
+
+Note that spinning the part and *moving* it are two different requirements.
+Turning it over needs an even millimetre; being the same part at all needs a
+whole wave. Whole waves satisfy both, which is why 4 mm is the rule.
 
 ### Flat wall band at the base (optional)
 
@@ -592,10 +681,11 @@ git push
 Add a line to [TESTING.md](TESTING.md) for that run before committing, and a
 dated entry to [changelog.md](changelog.md) for the change itself.
 
-**Run the tests before committing.** They take about two minutes, and they are
-the only thing standing between a plausible-looking geometry edit and parts that
-no longer fit. If a fingerprint test fails, that is the suite telling you the
-geometry moved — decide whether you meant it, then re-pin deliberately.
+**Run the full regression suite before every commit.** The only exception is a
+change so minor it could not affect behavior — a label, a comment, a doc typo.
+Any change to model assembly or build/geometry logic must be tested, full
+stop, no judgment call. If a fingerprint test fails, that is the suite telling
+you the geometry moved — decide whether you meant it, then re-pin deliberately.
 
 **Write commit messages that say why.** The history is the record. A message
 that explains the reasoning is worth more here than a tidy branch structure.
@@ -673,6 +763,8 @@ these numbers look arbitrary and are not.
 | **Connector tolerance** | **0.02** | **locked** by a physical print |
 | **Connector length** | **12.0** | **locked** |
 | **Connector height** | **9.6** | **locked**; cap 1.2, arms 1.0 thick |
+| Connector position step | **4.0** | one whole wave; half a wave wants a mirrored part |
+| Mated wall clearance | **0.21** | 0.25 across the seam, measured perpendicular |
 | Lock bump | **0.35** proud, 1.0 tall, **1.2** long | on every wave extremum, so every **2.0** |
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |
 | Bump band | top **4.0** below the rim | |
@@ -700,7 +792,7 @@ Do not re-derive these.
 | Connector-fit line in the size readout | Removed. |
 | Native `.f3d` export | Impossible outside Fusion. A build script was written and is now stale — it predates the 4 mm wave and the removal of the corner connector. |
 
-## Two claims this project got wrong
+## Three claims this project got wrong
 
 Both were stated as done and later found false. Tests now exist for each.
 
@@ -714,6 +806,16 @@ Both were stated as done and later found false. Tests now exist for each.
    working; the edit had silently failed to apply and the line never existed.
    The line was later removed at the user's request anyway, but a test now
    asserts the readout and preview actually have content.
+3. **"One connector part fits every seam, at any half-wave position."** False by
+   a factor of two. The wave inverts every half cycle, so the clip a half-wave
+   along is the printed one **mirrored** — identical volume, 58% shape overlap,
+   and not obtainable by turning a part over. Measured: the real part slid 2 mm
+   along a seam jams by **48 mm3**. The tests that looked universal all
+   regenerated the clip for the position they were checking, and every fixed
+   position they used happened to land on a whole wave. Positions are now whole
+   multiples of `WAVE_LENGTH`, and
+   `test_the_printed_clip_still_seats_when_slid_to_another_lattice_step` prints
+   one part and slides it, which is what the claim was actually about.
 
 ## Traps
 
@@ -790,7 +892,7 @@ Measured and regression-tested; run the suite for the current exact count.
   used by the 2D editor, 3D preview, mesh pocket and export report
 
 **Insert layouts**
-- Six registered builders: cradle, contour nest, bore, center post, divider
+- Six registered builders: cradle, Photo Nest, bore, center post, divider
   and pocket
 - Fused outputs remain one watertight solid; fitted and cartridge inserts clear
   the bin walls and stand on their own 0.6 mm print-flat plate

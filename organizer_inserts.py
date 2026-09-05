@@ -4,7 +4,9 @@ The idea here is to describe **the object being stored**, not the holder. An
 ``Item`` is a list of ``Segment``s - a length and a diameter each - so a plain
 glue stick is one segment and a hex driver is two, shaft then handle. From that
 one description the builders work out the geometry for either posture: lying in
-a cradle, or standing in a bore.
+a cradle, or standing in a bore. A cradle keeps it simple and treats the item
+as one plain cylinder - its overall length, at its widest diameter - so all it
+ever needs is a length and a diameter.
 
 Adding a new kind of holder means writing one function and registering it with
 ``@feature``. Nothing else in the module needs to know about it, and removing a
@@ -21,6 +23,7 @@ from typing import Callable, Iterable
 
 import trimesh
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
+from shapely import affinity
 from shapely.ops import unary_union
 
 from organizer_engine import (
@@ -41,8 +44,9 @@ from organizer_engine import (
 # --- how much room to leave ---------------------------------------------------
 
 ITEM_CLEARANCE = 0.4       # slack around a stored object, on the diameter
-RIB_THICKNESS = 1.6        # four perimeters at 0.4
-RIB_SPACING = 1.2          # material left between two neighbouring cradles
+RIB_THICKNESS = 1.6        # four perimeters at 0.4 - the thinnest a cradle wall may be
+CRADLE_RIB_FRACTION = 0.25 # a cradle wall is this much of the tool's diameter, so it scales with the tool
+CRADLE_RIB_MAX = 6.0       # but never thicker than this, however fat the tool
 BASE_PLATE = 0.6           # floor of a standalone insert
 CRADLE_FLOOR_GAP = 2.0     # gap under the widest part of a lying object
 BORE_WALL = 1.6            # material around a bore
@@ -79,9 +83,8 @@ class Item:
     """Something you want to store, described end to end.
 
     ``segments`` run along the object's own axis, so a hex driver is
-    ``(Segment(50, 6), Segment(30, 18))`` - shaft then handle. That is enough
-    for a cradle to give each part its own radius, which is what makes a
-    handled tool sit level instead of see-sawing on one rib.
+    ``(Segment(50, 6), Segment(30, 18))`` - shaft then handle. A bore and a
+    cradle use the relevant overall dimensions; Photo Nest uses its own polygon.
     """
 
     name: str
@@ -208,9 +211,14 @@ class Feature:
     # tapering as it rises, or (False) a uniform-thickness sloped wall - see
     # ``build_divider``. Meaningless at zero angle; only a divider sets it.
     wedge: bool = True
-    # For repeated cradles/nests, turn every second stored item end-for-end so
+    # For repeated cradles, turn every second stored item end-for-end so
     # neighbouring handles and shafts interleave.
     alternate_ends: bool = False
+    # Photo Nest stores only its cleaned, millimetre-based local outline plus
+    # reversible editor transforms. The source image never enters a design.
+    contour: tuple[tuple[float, float], ...] | None = None
+    rotation: float = 0.0
+    scale: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.kind:
@@ -221,8 +229,17 @@ class Feature:
             raise ValueError("feature count must be positive or automatic")
         if self.full_span and self.kind != "divider":
             raise ValueError("only a divider can span the full wall")
-        if self.alternate_ends and self.kind not in {"cradle", "nest"}:
-            raise ValueError("only a cradle or nest can alternate item ends")
+        if self.alternate_ends and self.kind != "cradle":
+            raise ValueError("only a cradle can alternate item ends")
+        if not math.isfinite(self.rotation):
+            raise ValueError("feature rotation must be finite")
+        if not math.isfinite(self.scale) or self.scale <= 0.0:
+            raise ValueError("feature scale must be positive and finite")
+        if self.contour is not None:
+            polygon = Polygon(self.contour)
+            if (len(self.contour) < 3 or not polygon.is_valid
+                    or polygon.is_empty or polygon.area <= 0.0):
+                raise ValueError("a photo nest needs one valid closed contour")
 
 
 @dataclass(frozen=True)
@@ -385,6 +402,9 @@ def layout_to_dict(layout: Layout) -> dict:
                 "full_span": one.full_span,
                 "wedge": one.wedge,
                 "alternate_ends": one.alternate_ends,
+                "contour": [list(point) for point in one.contour] if one.contour else None,
+                "rotation": one.rotation,
+                "scale": one.scale,
             }
             for one in layout.features
         ],
@@ -396,6 +416,10 @@ def layout_from_dict(data: dict) -> Layout:
         raise ValueError(f"unsupported layout version {data.get('version')!r}")
     made = []
     for raw in data.get("features", []):
+        if raw.get("kind") == "nest" and not raw.get("contour"):
+            raise ValueError(
+                "this design uses the retired measured Nest; upload a part photo to create a new Photo Nest"
+            )
         item_data = raw.get("item")
         item = None
         if item_data:
@@ -416,6 +440,10 @@ def layout_from_dict(data: dict) -> Layout:
             bool(raw.get("full_span", False)),
             bool(raw.get("wedge", True)),
             bool(raw.get("alternate_ends", False)),
+            (tuple((float(point[0]), float(point[1])) for point in raw["contour"])
+             if raw.get("contour") else None),
+            float(raw.get("rotation", 0.0)),
+            float(raw.get("scale", 1.0)),
         ))
     return Layout(tuple(made), str(data.get("mode", "fused")),
                   float(data.get("snap", EDITOR_SNAP)))
@@ -498,23 +526,55 @@ def _fit_count(available: float, pitch: float, body: float) -> int:
 # --- cradles ------------------------------------------------------------------
 
 
+def _cradle_wall(held: float) -> float:
+    """The trough wall sized to the tool it carries.
+
+    A thin driver shaft gets the thinnest printable wall; a fat handle gets a
+    proportionally chunkier one, capped so a big tool does not grow a slab.
+    Not a user setting - there is nothing to tune here that the tool diameter
+    does not already decide. Split half to each side of the channel.
+    """
+    return min(max(held * CRADLE_RIB_FRACTION, RIB_THICKNESS), CRADLE_RIB_MAX)
+
+
+# kept for callers that still import the old name (organizer_app, tests)
+_cradle_rib_thickness = _cradle_wall
+
+
 @defaults("cradle")
 def cradle_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    item = _need_item(one)
     return {
-        "rib_thickness": RIB_THICKNESS,
-        "spacing": RIB_SPACING,
+        "rib_thickness": _cradle_wall(item.widest),
+        # 0 = neighbours join into one continuous piece, sharing the wall
+        # between them; raising it first thickens that shared wall, then opens
+        # a real gap once every trough has its own full wall.
+        "spacing": 0.0,
         "floor_gap": CRADLE_FLOOR_GAP,
     }
 
 
 @feature("cradle")
 def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
-    """Scalloped ribs holding objects lying on their side.
+    """Half-round troughs holding a tool lying along X or Y.
 
-    One rib per segment of the item, each scalloped to that segment's own
-    radius, so a handled tool rests level. Every notch is a half circle centred
-    on the rib's top edge: the object drops straight in, and there is no
-    overhang anywhere for the printer to bridge.
+    Each tool beds into a block the length of the tool with a half-cylinder
+    channel cut the whole way along its top - the entire tool, shaft and
+    handle, in one continuous channel rather than balancing on two ribs. The
+    channel's mouth sits on the block's top face, so the tool drops straight
+    in and no layer overhangs the one below it.
+
+    ``spacing`` sets how a row of troughs relates:
+
+    * ``0`` - neighbours join into **one continuous body**, sharing the wall
+      between their channels.
+    * up to one wall thickness - still one body, but that shared wall widens.
+    * beyond that - each trough is its **own** solid, with ``spacing`` minus a
+      wall of clear air between them.
+
+    ``alternate_ends`` shifts every second trough half a tool length along the
+    run axis so fatter real handles interlock head-to-tail instead of
+    colliding; a staggered row is always separate bodies.
     """
     item = _need_item(spec_feature)
     zone = spec_feature.zone
@@ -523,241 +583,209 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     if along not in {"x", "y"}:
         raise ValueError("cradle orientation must be 'x' or 'y'")
 
-    rib_thickness = options["rib_thickness"]
+    wall = options["rib_thickness"]
     spacing = options["spacing"]
     floor_gap = options["floor_gap"]
 
-    run = zone.width if along == "x" else zone.depth
-    across = zone.depth if along == "x" else zone.width
-    if item.length > run:
+    length = item.length
+    # A cradle is an open half-circle the tool simply drops into, so it takes
+    # the tool at its true diameter - no fit slack, nothing to tune.
+    held = item.widest
+    radius = held / 2.0
+    axis_z = base_z + floor_gap + held / 2.0
+    trough_height = axis_z - base_z
+    if radius >= trough_height:
         raise ValueError(
-            f"{item.name} is {item.length:g} mm long but its zone only runs "
-            f"{run:.1f} mm along {along}"
+            f"{item.name}: a {item.widest:g} mm tool needs more than "
+            f"{floor_gap:g} mm of clearance under it to leave material below"
         )
 
-    # every object is cradled on its centreline, so they share one axis height
-    widest = item.held(item.widest)
-    axis_z = base_z + floor_gap + widest / 2.0
+    run = zone.width if along == "x" else zone.depth
+    across = zone.depth if along == "x" else zone.width
 
-    pitch = widest + spacing + rib_thickness
+    body = held + wall            # one trough, wall split to either side
+    pitch = body + spacing
     count = spec_feature.count
     if count is None:
-        count = _fit_count(across, pitch, widest + rib_thickness)
+        count = _fit_count(across, pitch, body)
     if count < 1:
         raise ValueError(
             f"no room for {item.name}: {across:.1f} mm across needs at least "
-            f"{widest + rib_thickness:.1f} mm"
+            f"{body:.1f} mm"
         )
-    used = (count - 1) * pitch + widest + rib_thickness
+    used = (count - 1) * pitch + body
     if used > across + 1e-9:
         raise ValueError(
             f"{count} x {item.name} needs {used:.1f} mm across but the zone "
             f"gives {across:.1f} mm"
         )
 
-    # centre the row of objects in the zone
+    alternating = bool(spec_feature.alternate_ends) and count > 1
+    stagger = length / 2.0 if alternating else 0.0
+    if length + stagger > run + 1e-9:
+        tail = ", every second one staggered," if alternating else ""
+        raise ValueError(
+            f"{item.name} is {length:g} mm long{tail} but its zone only runs "
+            f"{run:.1f} mm along {along}"
+        )
+
     centre_along, centre_across = zone.centre
     if along != "x":
         centre_along, centre_across = centre_across, centre_along
     first = centre_across - (count - 1) * pitch / 2.0
-    start = centre_along - item.length / 2.0
+    seats = [first + index * pitch for index in range(count)]
+
+    def _channel(seat: float, shift: float) -> trimesh.Trimesh:
+        cut = trimesh.creation.cylinder(
+            radius=radius, height=length + 2.0, sections=48
+        )
+        cut.apply_transform(
+            trimesh.transformations.rotation_matrix(
+                math.pi / 2.0, (0, 1, 0) if along == "x" else (1, 0, 0)
+            )
+        )
+        cut.apply_translation(
+            (centre_along + shift, seat, axis_z) if along == "x"
+            else (seat, centre_along + shift, axis_z)
+        )
+        return cut
+
+    def _body(block_seat: float, block_across: float,
+              channel_seats: list[float], shift: float) -> trimesh.Trimesh:
+        block = trimesh.creation.box(
+            extents=(
+                length if along == "x" else block_across,
+                block_across if along == "x" else length,
+                trough_height,
+            )
+        )
+        block.apply_translation(
+            (centre_along + shift, block_seat, base_z + trough_height / 2.0)
+            if along == "x"
+            else (block_seat, centre_along + shift, base_z + trough_height / 2.0)
+        )
+        cuts = [_channel(seat, shift) for seat in channel_seats]
+        return difference(
+            [block, union(cuts) if len(cuts) > 1 else cuts[0]]
+        )
+
+    # Neighbours whose blocks touch or overlap (spacing up to one wall) come
+    # out as one continuous body; wider spacing splits them into separate ones.
+    if count > 1 and not alternating and spacing <= wall + 1e-9:
+        return [_body(centre_across, used, seats, 0.0)]
 
     solids: list[trimesh.Trimesh] = []
-    if spec_feature.alternate_ends and count > 1 and len(item.segments) > 1:
-        # Alternating tools cannot share the old full-width ribs: at a given
-        # longitudinal position one lane may hold a shaft while its neighbour
-        # holds a handle. Give every lane its own short pair/set of ribs.
-        lane_width = widest + rib_thickness
-        for index in range(count):
-            seat = first + index * pitch
-            for offset, segment in item.segment_centres(index % 2 == 1):
-                radius = item.held(segment.diameter) / 2.0
-                rib_height = axis_z - base_z
-                if radius >= rib_height:
-                    raise ValueError(
-                        f"{item.name}: a {segment.diameter:g} mm section needs more than "
-                        f"{floor_gap:g} mm of clearance under it to leave material below"
-                    )
-                here = start + offset
-                rib = trimesh.creation.box(
-                    extents=(
-                        rib_thickness if along == "x" else lane_width,
-                        lane_width if along == "x" else rib_thickness,
-                        rib_height,
-                    )
-                )
-                rib.apply_translation(
-                    (here, seat, base_z + rib_height / 2.0) if along == "x"
-                    else (seat, here, base_z + rib_height / 2.0)
-                )
-                notch = trimesh.creation.cylinder(
-                    radius=radius, height=rib_thickness * 3.0, sections=48
-                )
-                notch.apply_transform(
-                    trimesh.transformations.rotation_matrix(
-                        math.pi / 2.0, (0, 1, 0) if along == "x" else (1, 0, 0)
-                    )
-                )
-                notch.apply_translation(
-                    (here, seat, axis_z) if along == "x" else (seat, here, axis_z)
-                )
-                solids.append(difference([rib, notch]))
-        return solids
-
-    for offset, segment in item.segment_centres():
-        radius = item.held(segment.diameter) / 2.0
-        rib_height = axis_z - base_z
-        if radius >= rib_height:
-            raise ValueError(
-                f"{item.name}: a {segment.diameter:g} mm section needs more than "
-                f"{floor_gap:g} mm of clearance under it to leave material below"
-            )
-        rib = trimesh.creation.box(
-            extents=(
-                rib_thickness if along == "x" else across,
-                across if along == "x" else rib_thickness,
-                rib_height,
-            )
-        )
-        here = start + offset
-        rib.apply_translation(
-            (here, centre_across, base_z + rib_height / 2.0) if along == "x"
-            else (centre_across, here, base_z + rib_height / 2.0)
-        )
-        notches = []
-        for index in range(count):
-            seat = first + index * pitch
-            notch = trimesh.creation.cylinder(
-                radius=radius, height=rib_thickness * 3.0, sections=48
-            )
-            # lay the notch along the object's axis
-            notch.apply_transform(
-                trimesh.transformations.rotation_matrix(
-                    math.pi / 2.0, (0, 1, 0) if along == "x" else (1, 0, 0)
-                )
-            )
-            notch.apply_translation(
-                (here, seat, axis_z) if along == "x" else (seat, here, axis_z)
-            )
-            notches.append(notch)
-        solids.append(difference([rib, union(notches)]))
+    for index, seat in enumerate(seats):
+        shift = stagger / 2.0 if index % 2 else -stagger / 2.0
+        solids.append(_body(seat, body, [seat], shift))
     return solids
 
 
-# --- contour nests ------------------------------------------------------------
+def cradle_min_footprint(one: Feature) -> tuple[float, float]:
+    """The smallest ``(width, depth)`` a cradle needs for its tool, count and
+    spacing - regardless of what its zone has been clamped to. Mirrors the
+    sizing in :func:`build_cradle`; used to grow a bin to fit its contents.
+    """
+    item = _need_item(one)
+    wall = _cradle_wall(item.widest)
+    try:
+        spacing = max(0.0, float(one.options.get("spacing")))
+    except (TypeError, ValueError):
+        spacing = 0.0
+    count = one.count or 1
+    length = item.length
+    alternating = bool(one.alternate_ends) and count > 1
+    stagger = length / 2.0 if alternating else 0.0
+    run = math.ceil(length + stagger)
+    body = item.widest + wall
+    across = math.ceil((count - 1) * (body + spacing) + body)
+    return (float(run), float(across)) if one.along == "x" else (float(across), float(run))
 
 
-def _item_plan_outline(
-    item: Item, along: str, centre_along: float, centre_across: float,
-    reversed_end: bool = False,
-) -> Polygon:
-    """Top-down stepped outline of an item, kept inside its stated length."""
-    start = centre_along - item.length / 2.0 - item.clearance / 2.0
-    pieces = []
-    run = start
-    segments = tuple(reversed(item.segments)) if reversed_end else item.segments
-    for index, segment in enumerate(segments):
-        radius = item.held(segment.diameter) / 2.0
-        length = segment.length
-        if index == 0:
-            length += item.clearance / 2.0
-        if index == len(segments) - 1:
-            length += item.clearance / 2.0
-        if along == "x":
-            pieces.append(shapely_box(
-                run, centre_across - radius,
-                run + length, centre_across + radius,
-            ))
-        else:
-            pieces.append(shapely_box(
-                centre_across - radius, run,
-                centre_across + radius, run + length,
-            ))
-        run += length
-    outline = unary_union(pieces)
-    if not isinstance(outline, Polygon):
-        raise ValueError(f"{item.name}: its segments do not make one contour")
-    return outline
+# --- photo nests --------------------------------------------------------------
+
+
+def nest_contour_polygon(one: Feature, include_clearance: bool = False) -> Polygon:
+    """The photo outline after proportional resize, rotation and placement."""
+    if not one.contour:
+        raise ValueError("upload a part photo before generating a Photo Nest")
+    outline = Polygon(one.contour)
+    outline = affinity.scale(outline, xfact=one.scale, yfact=one.scale, origin=(0, 0))
+    outline = affinity.rotate(outline, one.rotation, origin=(0, 0), use_radians=False)
+    if include_clearance:
+        clearance = float(one.options.get("clearance", 0.6))
+        if not math.isfinite(clearance) or clearance < 0.0:
+            raise ValueError("Clearance must be zero or greater")
+        outline = outline.buffer(clearance, join_style="round")
+    cx, cy = one.zone.centre
+    return affinity.translate(outline, xoff=cx, yoff=cy)
+
+
+def nest_required_zone(one: Feature) -> Zone:
+    """Tight axis-aligned footprint enclosing the cleared cavity and rim."""
+    cavity = nest_contour_polygon(one, include_clearance=True)
+    rim = float(one.options.get("rim", 3.0))
+    if not math.isfinite(rim) or rim <= 0.0:
+        raise ValueError("Rim border must be greater than zero")
+    outer = cavity.buffer(rim, join_style="round")
+    min_x, min_y, max_x, max_y = outer.bounds
+    return Zone(float(min_x), float(min_y), float(max_x), float(max_y))
+
+
+def fitted_nest_feature(one: Feature, centre: tuple[float, float] | None = None) -> Feature:
+    """Recompute a Photo Nest zone after contour, clearance, rim or rotation changes."""
+    if centre is None:
+        centre = one.zone.centre
+    cx, cy = centre
+    local = replace(one, zone=Zone(-0.5, -0.5, 0.5, 0.5))
+    needed = nest_required_zone(local)
+    return replace(one, zone=Zone(
+        cx - needed.width / 2.0, cy - needed.depth / 2.0,
+        cx + needed.width / 2.0, cy + needed.depth / 2.0,
+    ))
 
 
 @defaults("nest")
 def nest_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
-    item = _need_item(one)
-    # Deep enough to hold the tool without swallowing it, and never so deep
-    # that the recess turns into a well you cannot get a fingernail into.
-    recess = min(max(item.held(item.widest) * 0.3, 2.0), 8.0)
     return {
-        "wall": BORE_WALL,
-        "depth": recess,
-        "height": one.options.get("depth", recess) + BASE_PLATE,
+        "clearance": 0.6,
+        "depth": min(8.0, max(1.0, box.z - base_z - BASE_PLATE)),
+        "rim": 3.0,
     }
 
 
 @feature("nest")
 def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
-    """A shallow, snug top-down recess following an item's stepped outline.
-
-    Unlike a cradle this supports the whole item. The recess is cut straight
-    down, so it has no hidden undercut and remains support-free to print.
-    """
-    item = _need_item(spec_feature)
-    zone = spec_feature.zone
+    """A straight-walled cavity cut from the bin top from a photo contour."""
     options = resolved_options(box, spec_feature, base_z)
-    wall = options["wall"]
-    recess_depth = options["depth"]
-    height = options["height"]
-    if (
-        not all(math.isfinite(value) for value in (wall, recess_depth, height))
-        or wall <= 0.0
-        or recess_depth <= 0.0
-        or height <= recess_depth
-    ):
+    clearance = options["clearance"]
+    depth = options["depth"]
+    rim = options["rim"]
+    if not all(math.isfinite(value) for value in (clearance, depth, rim)):
+        raise ValueError("Photo Nest measurements must be finite")
+    if clearance < 0.0:
+        raise ValueError("Clearance must be zero or greater")
+    if rim <= 0.0:
+        raise ValueError("Rim border must be greater than zero")
+    available = box.z - base_z - BASE_PLATE
+    if depth <= 0.0 or depth > available + 1e-9:
         raise ValueError(
-            f"a nest {recess_depth:g} mm deep needs a height above {recess_depth:g} mm "
-            f"to leave a printable base, but its height is {height:g} mm"
+            f"Cavity depth {depth:g} mm must be between 0 and {available:.1f} mm to preserve "
+            f"the {BASE_PLATE:g} mm printable base"
         )
-
-    along = spec_feature.along
-    run = zone.width if along == "x" else zone.depth
-    across = zone.depth if along == "x" else zone.width
-    widest = item.held(item.widest)
-    required_run = item.length + item.clearance + 2.0 * wall
-    if required_run > run + 1e-9:
-        raise ValueError(
-            f"{item.name} needs {required_run:.1f} mm along {along} "
-            f"including the nest walls but the zone gives {run:.1f} mm"
-        )
-
-    count = spec_feature.count
-    if count is None:
-        count = max(0, int((across - wall) // (widest + wall)))
-    if count < 1:
-        raise ValueError(f"no room for {item.name}: the nest zone is too narrow")
-    used = count * widest + (count + 1) * wall
-    if used > across + 1e-9:
-        raise ValueError(
-            f"{count} x {item.name} nests need {used:.1f} mm across but the zone "
-            f"gives {across:.1f} mm"
-        )
-
-    centre_along, centre_across = zone.centre
-    if along != "x":
-        centre_along, centre_across = centre_across, centre_along
-    pitch = widest + wall
-    first = centre_across - (count - 1) * pitch / 2.0
-    cuts = []
-    for index in range(count):
-        outline = _item_plan_outline(
-            item, along, centre_along, first + index * pitch,
-            spec_feature.alternate_ends and index % 2 == 1,
-        )
-        cut = _extrude_polygon(outline, recess_depth * 2.0)
-        cut.apply_translation((0.0, 0.0, base_z + height - recess_depth))
-        cuts.append(cut)
-
-    block = trimesh.creation.box(extents=(zone.width, zone.depth, height))
-    block.apply_translation((*zone.centre, base_z + height / 2.0))
-    return [difference([block, union(cuts)])]
+    fitted = fitted_nest_feature(spec_feature)
+    if (abs(fitted.zone.width - spec_feature.zone.width) > 1e-4
+            or abs(fitted.zone.depth - spec_feature.zone.depth) > 1e-4):
+        raise ValueError("Photo Nest footprint is stale; update the outline or measurements")
+    cavity = nest_contour_polygon(spec_feature, include_clearance=True)
+    block_height = box.z - base_z
+    block = trimesh.creation.box(
+        extents=(spec_feature.zone.width, spec_feature.zone.depth, block_height)
+    )
+    block.apply_translation((*spec_feature.zone.centre, base_z + block_height / 2.0))
+    cut = _extrude_polygon(cavity, depth + 1.0)
+    cut.apply_translation((0.0, 0.0, box.z - depth))
+    return [difference([block, cut])]
 
 
 # --- bores --------------------------------------------------------------------
@@ -1302,7 +1330,7 @@ def build_features(
             or one.zone.y0 <= whole.y0 + CONNECTOR_EDGE_KEEP_OUT
             or one.zone.y1 >= whole.y1 - CONNECTOR_EDGE_KEEP_OUT
         )
-        if touches_wall and any(
+        if touches_wall and not (one.kind == "nest" and one.contour) and any(
             solid.bounds[1][2] > connector_keep_out(box) + 1e-6 for solid in made
         ):
             raise ValueError(

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 import json
+import math
 import mimetypes
 import os
 from pathlib import Path
@@ -44,14 +45,20 @@ from organizer_inserts import (
     Item,
     Layout,
     Segment,
+    Zone,
     build_features,
+    cradle_min_footprint,
+    fitted_nest_feature,
+    nest_contour_polygon,
     layout_from_dict,
     layout_to_dict,
     layout_zone,
     moved_feature,
     resized_feature,
     resolved_options,
+    snapped_zone,
 )
+from photo_nest import photo_outline_from_data
 from organizer_app import (
     APP_DIR,
     DEFAULT_SAMPLE_BOXES,
@@ -173,6 +180,60 @@ def _feature_from_json(raw: dict[str, Any], mode: str) -> Feature:
     return layout.features[0]
 
 
+def _fit_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
+    """Smallest 8 mm-grid bin whose usable floor contains the Photo Nest."""
+    required_x = 2.0 * max(abs(one.zone.x0), abs(one.zone.x1))
+    required_y = 2.0 * max(abs(one.zone.y0), abs(one.zone.y1))
+    x = max(BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
+    y = max(BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
+    for _attempt in range(200):
+        trial = replace(box, x=float(x), y=float(y))
+        bounds = layout_zone(trial, mode)
+        grow_x = one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
+        grow_y = one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6
+        if not grow_x and not grow_y:
+            return trial
+        if grow_x:
+            x += BASE_UNIT
+        if grow_y:
+            y += BASE_UNIT
+    raise ValueError("the photographed outline is too large for a printable bin")
+
+
+def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extract one contour and replace the design interior with its new bin."""
+    box, layout, label, part_name, label_location, scoop = design_from_dict(
+        payload["design"], validate_layout=False
+    )
+    outline = photo_outline_from_data(
+        str(payload.get("image", "")), str(payload.get("mime_type", ""))
+    )
+    supplied = dict(payload.get("options", {}))
+    options = {
+        "clearance": float(supplied.get("clearance", 0.6)),
+        "depth": float(supplied.get("depth", min(8.0, box.z - box.wall - 0.6))),
+        "rim": float(supplied.get("rim", 3.0)),
+    }
+    starter = Feature(
+        "nest", Zone(-0.5, -0.5, 0.5, 0.5), options=options,
+        contour=outline.contour,
+    )
+    one = fitted_nest_feature(starter, (0.0, 0.0))
+    box = _fit_photo_nest_box(box, one, layout.mode)
+    updated = Layout((one,), layout.mode, layout.snap)
+    updated.validate(box)
+    validate_customization_clearance(
+        box, updated.features, label, label_location, scoop, updated.mode
+    )
+    with GEOMETRY_LOCK:
+        build_features(box, updated.features, base_height(box, layout.mode), layout_zone(box, layout.mode))
+    return {
+        "design": design_to_dict(box, updated, label, part_name, label_location, scoop),
+        "selected": 0,
+        "outline": {"width": outline.width, "depth": outline.depth},
+    }
+
+
 def _first_open_position(
     one: Feature,
     box: BoxSpec,
@@ -246,6 +307,9 @@ def catalog_payload() -> dict[str, Any]:
                 "length": LOCKED_CONNECTOR_LENGTH,
                 "axis": "y",
                 "position": 0.0,
+                "bin_a_height": 40.0,
+                "bin_b_height": 40.0,
+                "different_heights": False,
             },
             "sampler_boxes": DEFAULT_SAMPLE_BOXES,
         },
@@ -309,9 +373,7 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "invalid_feature_indexes": scene["invalid_feature_indexes"],
         "draft_error": scene["draft_error"],
         "dimensions": {
-            "x": scene["x_text"],
-            "y": scene["y_text"],
-            "z": scene["z_text"],
+            "size": scene["size_text"],
         },
         "layout_bounds": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
         # The true, wavy interior wall - Z-invariant, so one outline covers
@@ -322,6 +384,11 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "customization_zones": [
             {"name": name, "zone": [zone.x0, zone.y0, zone.x1, zone.y1]}
             for name, zone in scene["customization_zones"]
+        ],
+        "feature_outlines": [
+            ([[float(x), float(y)] for x, y in nest_contour_polygon(one).exterior.coords]
+             if one.kind == "nest" and one.contour else None)
+            for one in layout.features
         ],
     }
 
@@ -343,8 +410,7 @@ def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     )
     # Defaults are values to display, not values the user explicitly chose.
     # Keeping them out of ``one.options`` preserves the builder's dependency
-    # cascade: for example, an automatic nest depth continues to follow a
-    # changed tool diameter and a pocket recess follows an edited height.
+    # cascade: for example, a pocket depth continues to follow an edited height.
     return {
         "feature": feature_to_dict(one, layout.mode),
         "resolved_options": resolved_options(
@@ -378,13 +444,23 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
-    width, depth = one.zone.width, one.zone.depth
-    cx, cy = one.zone.centre
-    one = resized_feature(one, box, (width, depth), layout.mode, layout.snap)
-    one = moved_feature(one, box, (cx, cy), layout.mode, layout.snap)
+    if one.kind == "nest":
+        if not one.contour:
+            raise ValueError("upload a part photo before adding a Photo Nest")
+        one = fitted_nest_feature(one, one.zone.centre)
+        box = _fit_photo_nest_box(box, one, layout.mode)
+    else:
+        width, depth = one.zone.width, one.zone.depth
+        cx, cy = one.zone.centre
+        one = resized_feature(one, box, (width, depth), layout.mode, layout.snap)
+        one = moved_feature(one, box, (cx, cy), layout.mode, layout.snap)
     index = payload.get("index")
     existing = list(layout.features)
+    if one.kind != "nest" and any(item.kind == "nest" and item.contour for item in existing):
+        raise ValueError("a Photo Nest bin contains only its one custom cavity")
     if index is None:
+        if one.kind == "nest" and existing:
+            raise ValueError("a Photo Nest is one custom cavity; start a new photo bin to replace these supports")
         one = _first_open_position(
             one, box, layout, label, label_location, scoop
         )
@@ -395,6 +471,8 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if not 0 <= selected < len(existing):
             raise ValueError("the selected support no longer exists")
         existing[selected] = one
+    if one.kind == "nest" and len(existing) != 1:
+        raise ValueError("a Photo Nest design can contain only its one custom cavity")
     updated = Layout(tuple(existing), layout.mode, layout.snap)
     updated.validate(box)
     validate_customization_clearance(
@@ -442,6 +520,88 @@ def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
     )}
 
 
+def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Grow the bin - on the 8 mm grid, both axes - to the smallest size that
+    fits every interior support at the footprint it actually needs, then trim
+    back any axis that overshot. Cradle footprints are recomputed from their
+    tool so a clamped one gets its real size back; other supports keep the
+    size the user drew. Supports keep their centre; nothing is rearranged.
+    """
+    box, layout, label, part_name, label_location, scoop = design_from_dict(
+        payload["design"], validate_layout=False
+    )
+    mode = layout.mode
+    originals = list(layout.features)
+    if not originals:
+        raise ValueError("there are no interior supports to fit")
+
+    def sized(one: Feature, trial: BoxSpec) -> Feature:
+        if one.kind == "nest" and one.contour:
+            return fitted_nest_feature(one)
+        if one.kind == "cradle" and one.item is not None:
+            width, depth = cradle_min_footprint(one)
+        else:
+            width, depth = one.zone.width, one.zone.depth
+        cx, cy = one.zone.centre
+        raw = Zone(cx - width / 2.0, cy - depth / 2.0,
+                   cx + width / 2.0, cy + depth / 2.0)
+        return replace(one, zone=snapped_zone(raw, trial, mode))
+
+    def fits(x: float, y: float):
+        trial = replace(box, x=float(x), y=float(y))
+        try:
+            placed = tuple(sized(one, trial) for one in originals)
+            updated = Layout(placed, mode, layout.snap)
+            updated.validate(trial)
+            validate_customization_clearance(
+                trial, updated.features, label, label_location, scoop, mode
+            )
+        except ValueError:
+            return None
+        return trial, updated
+
+    start_x, start_y = box.x, box.y
+    ceiling = 100.0 * BASE_UNIT
+    x, y = start_x, start_y
+    result = fits(x, y)
+    while result is None:
+        x = round(x + BASE_UNIT)
+        y = round(y + BASE_UNIT)
+        if x > ceiling:
+            raise ValueError(
+                "this layout will not fit even in a very large bin - "
+                "remove or shrink a support"
+            )
+        result = fits(x, y)
+
+    # First fit found by growing both axes; give back any step that was not
+    # actually needed.
+    for _ in range(200):
+        trimmed = False
+        if x - BASE_UNIT >= start_x and fits(x - BASE_UNIT, y) is not None:
+            x = round(x - BASE_UNIT)
+            trimmed = True
+        if y - BASE_UNIT >= start_y and fits(x, y - BASE_UNIT) is not None:
+            y = round(y - BASE_UNIT)
+            trimmed = True
+        if not trimmed:
+            break
+
+    trial, updated = fits(x, y)
+    with GEOMETRY_LOCK:
+        build_features(
+            trial, updated.features, base_height(trial, mode),
+            layout_zone(trial, mode),
+        )
+    return {
+        "design": design_to_dict(
+            trial, updated, label, part_name, label_location, scoop
+        ),
+        "box": {"x": trial.x, "y": trial.y, "z": trial.z},
+        "grew": (trial.x != start_x or trial.y != start_y),
+    }
+
+
 def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     output = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
@@ -459,6 +619,9 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         tolerance=float(options.get("tolerance", LOCKED_TOLERANCE)),
         height=float(options.get("height", LOCKED_CONNECTOR_HEIGHT)),
     )
+    different_heights = bool(options.get("different_heights", False))
+    bin_a_height = float(options.get("bin_a_height", box.z)) if different_heights else box.z
+    bin_b_height = float(options.get("bin_b_height", box.z)) if different_heights else box.z
     output_dir = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     with GEOMETRY_LOCK:
@@ -466,9 +629,11 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
             box,
             connector,
             output_dir / "Connector.3mf",
-            str(options.get("axis", "y")),
-            float(options.get("position", 0.0)),
+            "y",
+            0.0,
             float(options.get("length", LOCKED_CONNECTOR_LENGTH)),
+            bin_a_height,
+            bin_b_height,
         )
     return {"result": result, "output": str(output_dir)}
 
@@ -504,7 +669,9 @@ POST_ROUTES = {
     "/api/feature/draft": draft_payload,
     "/api/feature/apply": apply_feature_payload,
     "/api/feature/delete": delete_feature_payload,
+    "/api/nest/photo": photo_nest_payload,
     "/api/layout/mode": mode_payload,
+    "/api/layout/expand": expand_layout_payload,
     "/api/generate": generate_payload,
     "/api/connector": connector_payload,
     "/api/sampler": sampler_payload,

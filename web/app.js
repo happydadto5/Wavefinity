@@ -37,6 +37,7 @@ const state = {
   connector: {},
   layoutDrag: null,
   layoutTransform: null,
+  previewSupportPolygons: [],
   designMutationBusy: false,
   canGenerate: true,
   history: [],
@@ -188,7 +189,7 @@ function iconFor(kind) {
     post: '<ellipse cx="16" cy="23" rx="10" ry="4"/><path d="M10 22V10c0-5 12-5 12 0v12"/><ellipse cx="16" cy="10" rx="6" ry="2.5"/>',
     pocket: '<rect x="4" y="6" width="24" height="20" rx="3"/><rect x="8" y="10" width="16" height="12" rx="2"/>',
     bore: '<rect x="4" y="5" width="24" height="22" rx="2"/><circle cx="11" cy="12" r="3"/><circle cx="21" cy="12" r="3"/><circle cx="11" cy="21" r="3"/><circle cx="21" cy="21" r="3"/>',
-    cradle: '<path d="M4 24h24M7 24V9m18 15V9M7 11c3 0 3 5 6 5s3-5 6-5 3 5 6 5"/>',
+    cradle: '<path d="M4 25h24M7 25V10h4c0 4 2 6 5 6s5-2 5-6h4v15"/>',
     nest: '<rect x="3" y="6" width="26" height="20" rx="3"/><path d="M7 17h6v-6h7v4h5v6H7z"/>',
   };
   return `<svg ${common}>${paths[kind] || paths.pocket}</svg>`;
@@ -260,12 +261,29 @@ function syncForm() {
   if (labelPosition) labelPosition.checked = true;
   $("#output-folder").value = state.output;
   $("#connector-tolerance").value = fmt(state.connector.tolerance);
-  $("#connector-height").value = fmt(state.connector.height);
   $("#connector-length").value = fmt(state.connector.length);
-  $("#connector-position").value = fmt(state.connector.position);
-  const connectorAxis = $(`input[name="connector-axis"][value="${state.connector.axis}"]`);
-  if (connectorAxis) connectorAxis.checked = true;
+  $("#connector-bin-a-height").value = fmt(state.connector.bin_a_height);
+  $("#connector-bin-b-height").value = fmt(state.connector.bin_b_height);
+  $("#different-height-bins").checked = Boolean(state.connector.different_heights);
+  syncConnectorHeightControls();
+  updateInteriorModeVisibility();
   renderPlaced();
+}
+
+function syncConnectorHeightControls() {
+  const different = $("#different-height-bins").checked;
+  $("#connector-bin-heights").hidden = !different;
+}
+
+function updateInteriorModeVisibility(reveal = false) {
+  const fieldset = $("#interior-mode");
+  const hasSupport = Boolean(state.draft || state.design?.layout?.features?.length);
+  if (reveal && !hasSupport && state.design.layout.mode !== "fused") {
+    state.design.layout.mode = "fused";
+    const fused = $('input[name="layout-mode"][value="fused"]');
+    if (fused) fused.checked = true;
+  }
+  fieldset.hidden = !(reveal || hasSupport);
 }
 
 function updateDesignFromForm() {
@@ -290,11 +308,15 @@ function updateDesignFromForm() {
   }
   state.connector = {
     tolerance: number($("#connector-tolerance").value, state.connector.tolerance),
-    height: number($("#connector-height").value, state.connector.height),
     length: number($("#connector-length").value, state.connector.length),
-    position: number($("#connector-position").value, state.connector.position),
-    axis: $('input[name="connector-axis"]:checked')?.value || "y",
+    height: state.connector.height,
+    bin_a_height: number($("#connector-bin-a-height").value, state.design.box.z),
+    bin_b_height: number($("#connector-bin-b-height").value, state.design.box.z),
+    different_heights: $("#different-height-bins").checked,
+    position: 0,
+    axis: "y",
   };
+  syncConnectorHeightControls();
 }
 
 const saveOutputPreference = debounce(output => {
@@ -322,7 +344,7 @@ async function selectOutputFolder() {
 
 function updatePreviewHelp(view) {
   $("#preview-help").textContent = view === "2d"
-    ? "Pointer: drag supports to move them or drag the blue corner to resize. Keyboard or screen reader: choose a placed support, then edit Center X, Center Y, Width, and Depth."
+    ? "Drag supports to move them. Photo Nest also has a proportional resize corner and round rotation handle."
     : "Visual preview only. Drag to rotate, use the wheel to zoom, or double-click to reset; these controls do not change the printed part.";
 }
 
@@ -331,9 +353,27 @@ const changedDesign = debounce(() => {
   const previousDesign = clone(state.design);
   updateDesignFromForm();
   recordHistory(previousDesign);
+  // A cradle hugs its zone to the tool and the bin, so re-fit the open cradle
+  // draft to the resized bin - otherwise a shrunk bin leaves its zone hanging
+  // outside with a stale "reaches outside the bin" error.
+  if (state.draft?.kind === "cradle") sizeCradleToItem(state.draft);
   refreshPreview();
   if (state.draft) refreshDraft();
 }, 280);
+
+// The largest straight-sided rectangle that fits a bin's wavy cavity - the
+// same number the engine's BoxSpec.usable_inside returns, recomputed here so
+// the cradle auto-sizer never has to wait on a preview round-trip to know how
+// much floor it has. Browser designs are always fused/removable (no cartridge)
+// and the flat-inside band does not touch this rectangle, so the plain formula
+// is exact.
+function binInsideExtent(box) {
+  const WAVE_AMPLITUDE = 0.4, WAVE_LENGTH = 4.0, WAVE_MATING_GAP = 0.25;
+  const slope = (WAVE_AMPLITUDE * 2 * Math.PI) / WAVE_LENGTH;
+  const wallDepth = number(box.wall, 0.8) * Math.sqrt(1 + slope * slope);
+  const trim = WAVE_MATING_GAP + 2 * wallDepth + 2 * WAVE_AMPLITUDE;
+  return [Math.max(1, number(box.x) - trim), Math.max(1, number(box.y) - trim)];
+}
 
 function setSidebarCollapsed(collapsed) {
   const shell = $("#app-shell");
@@ -433,12 +473,19 @@ function wireControls() {
       if (state.draft) refreshDraft();
     });
   });
-  ["#output-folder", "#connector-tolerance", "#connector-height",
-    "#connector-length", "#connector-position"]
+  ["#output-folder", "#connector-tolerance", "#connector-length",
+    "#connector-bin-a-height", "#connector-bin-b-height"]
     .forEach(selector => $(selector).addEventListener("change", updateDesignFromForm));
+  ["#connector-bin-a-height", "#connector-bin-b-height"].forEach(selector =>
+    $(selector).addEventListener("input", syncConnectorHeightControls));
+  $("#different-height-bins").addEventListener("change", () => {
+    if ($("#different-height-bins").checked && !state.connector.different_heights) {
+      $("#connector-bin-a-height").value = fmt(state.design.box.z);
+      $("#connector-bin-b-height").value = fmt(state.design.box.z);
+    }
+    updateDesignFromForm();
+  });
   $("#output-folder-picker").addEventListener("click", selectOutputFolder);
-  $$('input[name="connector-axis"]').forEach(input =>
-    input.addEventListener("change", updateDesignFromForm));
 
   const viewTabs = $$(".view-tab");
   const activateView = tab => {
@@ -469,6 +516,7 @@ function wireControls() {
   // suggestion for the current shape - whatever was already being edited is
   // already saved (state.draftAutoCommit), so there's nothing to lose here.
   $("#add-support").addEventListener("click", () => selectKind(state.draftKind, true));
+  $("#auto-expand-bin").addEventListener("click", autoExpandBin);
   $("#save-design").addEventListener("click", saveDesign);
   $("#open-design").addEventListener("change", openDesign);
   $("#new-design").addEventListener("click", newDesign);
@@ -491,6 +539,7 @@ function wireControls() {
   $("#generate-connector").addEventListener("click", () => generate("/api/connector", "#generate-connector"));
   $("#generate-sampler").addEventListener("click", () => generate("/api/sampler", "#generate-sampler"));
   wireSceneInteraction($("#preview-3d"), state.camera, renderPreview3D);
+  wireSupportLayoutDialog();
   wireLayoutInteraction();
   new ResizeObserver(() => renderPreview3D()).observe($("#preview-3d").parentElement);
   new ResizeObserver(() => renderLayout2D()).observe($("#preview-2d").parentElement);
@@ -523,12 +572,15 @@ function clearDraftSelection() {
   state.selected = null;
   $$(".support-choice").forEach(button => button.classList.remove("active"));
   $(".support-editor").hidden = true;
+  $("#add-support").hidden = false;
   $("#draft-status").textContent = "";
   $("#draft-status").classList.remove("error");
+  updateInteriorModeVisibility();
   updateSelectionButtons();
 }
 
 function pickKind(kind) {
+  updateInteriorModeVisibility(true);
   if (state.draft && state.draft.kind !== kind && state.selected === null) {
     state.drafts[state.draft.kind] = clone(state.draft);
   }
@@ -540,7 +592,7 @@ function pickKind(kind) {
   }
   state.draftKind = kind;
   state.draft = clone(cached);
-  state.draftAutoCommit = true;
+  state.draftAutoCommit = kind !== "nest";
   state.draftResolvedOptions = {};
   $(".support-editor").hidden = false;
   $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === kind));
@@ -553,9 +605,10 @@ function pickKind(kind) {
 }
 
 async function selectKind(kind, reset = false) {
+  updateInteriorModeVisibility(true);
   state.draftKind = kind;
   state.selected = reset ? null : state.selected;
-  state.draftAutoCommit = true;
+  state.draftAutoCommit = kind !== "nest";
   $(".support-editor").hidden = false;
   $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === kind));
   const info = partInfo(kind);
@@ -593,6 +646,7 @@ function selectedFeature(index) {
   state.draftAutoCommit = true;
   state.draftResolvedOptions = {};
   state.draftKind = state.draft.kind;
+  updateInteriorModeVisibility(true);
   $(".support-editor").hidden = false;
   $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === state.draftKind));
   const info = partInfo();
@@ -627,15 +681,24 @@ function renderDraftFields() {
   const info = partInfo();
   const one = state.draft;
   const zone = one.zone;
-  const cx = (zone[0] + zone[2]) / 2;
-  const cy = (zone[1] + zone[3]) / 2;
   const width = zone[2] - zone[0];
   const depth = zone[3] - zone[1];
+  $("#add-support").hidden = one.kind === "nest";
   let html = "";
-  if (one.kind !== "divider") {
-    html += field("Center X", "cx", fmt(cx), { unit: "mm", step: "1" }) + field("Center Y", "cy", fmt(cy), { unit: "mm", step: "1" });
+  if (one.kind === "nest") {
+    html += `<div class="photo-upload wide">
+      <label class="button secondary photo-button" for="nest-photo-input">Upload part photo</label>
+      <input id="nest-photo-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+      <div><strong>Photo requirements</strong><ul>
+        <li>Entire 8.5 × 11 in sheet visible</li>
+        <li>Camera directly overhead</li>
+        <li>Part lies flat</li>
+        <li>Plain, high-contrast background preferred</li>
+      </ul></div>
+      ${one.contour ? `<p class="photo-measurement">Outline ready — move, rotate, or proportionally resize it in 2D.</p>` : ""}
+    </div>`;
   }
-  if (info.flags.size) {
+  if (info.flags.size && one.kind !== "cradle") {
     html += field("Width", "width", fmt(width), { unit: "mm", step: "1" });
     html += field("Depth", "depth", fmt(depth), { unit: "mm", step: "1" });
   }
@@ -644,7 +707,7 @@ function renderDraftFields() {
       <input type="number" min="1" step="1" data-draft="count" value="${one.count ?? ""}" placeholder="auto">
       <button type="button" class="button secondary" data-action="auto-count">Auto</button>
     </div></label>`;
-    // Unlike Cradle/Nest/Bore/Post, a divider's "auto" isn't "fit as many as
+    // Unlike Cradle/Bore/Post, a divider's "auto" isn't "fit as many as
     // possible" - it's always a single centered wall, with Spacing (above)
     // doing the auto-fill work instead. Worth saying, since that reads as
     // the same "auto" everywhere else.
@@ -655,7 +718,7 @@ function renderDraftFields() {
   if (info.flags.alternate) {
     html += `<label class="check-card wide">
       <input type="checkbox" data-draft="alternate_ends" ${one.alternate_ends === true ? "checked" : ""}>
-      <span><strong>Alternate ends</strong><small>Flips every second tool so each handle sits beside the next tool's shaft.</small></span>
+      <span><strong>Alternate ends</strong><small>Staggers every second tool end-for-end so fatter handles interlock instead of colliding.</small></span>
     </label>`;
   }
   if (info.flags.along) {
@@ -667,16 +730,23 @@ function renderDraftFields() {
   if (info.flags.item) {
     const item = one.item || starterItem();
     const first = item.segments[0] || { length: 40, diameter: 6 };
-    const handle = item.segments[1] || { length: "", diameter: "" };
-    html += field("Item name", "item_name", item.name || "Custom item", { type: "text", wide: true });
-    html += field("Length", "item_length", fmt(first.length), { unit: "mm" });
-    html += field("Thickness", "item_diameter", fmt(first.diameter), { unit: "mm" });
-    html += field("Handle length", "handle_length", handle.length === "" ? "" : fmt(handle.length), { unit: "mm" });
-    html += field("Handle thickness", "handle_diameter", handle.diameter === "" ? "" : fmt(handle.diameter), { unit: "mm" });
-    html += `<label>Profile<select data-draft="profile">
-      ${["round", "hex", "square"].map(profile => `<option value="${profile}" ${item.profile === profile ? "selected" : ""}>${profile[0].toUpperCase() + profile.slice(1)}</option>`).join("")}
-    </select></label>`;
-    html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), { unit: "mm" });
+    const isCradle = one.kind === "cradle";
+    const isBore = one.kind === "bore";
+    // Cradles and bores use measured dimensions. Photo Nest has no item fields.
+    if (!isBore) html += field("Length", "item_length", fmt(first.length), { unit: "mm" });
+    html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm" });
+    if (!isCradle) {
+      html += `<label>Profile<select data-draft="profile">
+        ${["round", "hex", "square"].map(profile => `<option value="${profile}" ${item.profile === profile ? "selected" : ""}>${profile[0].toUpperCase() + profile.slice(1)}</option>`).join("")}
+      </select></label>`;
+      html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), { unit: "mm" });
+    }
+    if (isCradle) {
+      html += `<p class="field-help wide">Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.</p>`;
+    }
+    if (isBore) {
+      html += `<p class="field-help wide">Enter the widest diameter that must drop into the hole. The bore adds its own wall and fit clearance; set the hole's depth below.</p>`;
+    }
   }
   for (const option of info.fields) {
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
@@ -696,6 +766,8 @@ function renderDraftFields() {
     }
   }
   $("#draft-fields").innerHTML = html;
+  const photoInput = $("#nest-photo-input", $("#draft-fields"));
+  if (photoInput) photoInput.addEventListener("change", uploadNestPhoto);
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateDraftFromFields);
   });
@@ -725,6 +797,7 @@ function renderDraftFields() {
   }
   $$('input[name="draft-along"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
     state.draft.along = input.value;
+    if (state.draft.kind === "cradle") sizeCradleToItem(state.draft);
     state.draftAutoCommit = true;
     updateSelectionButtons();
     refreshDraftSoon();
@@ -738,6 +811,7 @@ function renderDraftFields() {
   const autoCount = $('[data-action="auto-count"]', $("#draft-fields"));
   if (autoCount) autoCount.addEventListener("click", () => {
     state.draft.count = null;
+    if (state.draft.kind === "cradle") sizeCradleToItem(state.draft);
     state.draftAutoCommit = true;
     const input = $('[data-draft="count"]', $("#draft-fields"));
     if (input) input.value = "";
@@ -751,9 +825,11 @@ function renderDraftFields() {
 // below - widen that footprint to match so what the Width/Depth fields and
 // the 2D layout show never falls short of the real wall. Which side is
 // "across" follows the explicit Runs-along choice, not a guess from
-// whichever of width/depth is currently bigger.
+// whichever of width/depth is currently bigger. Round the wall's thickness up
+// to the 1 mm grid first, so the pipeline's nearest-line snap can't leave the
+// footprint a hair under the wall (same trap sizeCradleToItem sidesteps).
 function widenDividerFootprint(one) {
-  const t = one.options.thickness;
+  const t = Math.ceil(one.options.thickness);
   if (!Number.isFinite(t) || t <= 0) return;
   const zw = one.zone[2] - one.zone[0], zd = one.zone[3] - one.zone[1];
   const cx = (one.zone[0] + one.zone[2]) / 2, cy = (one.zone[1] + one.zone[3]) / 2;
@@ -771,6 +847,134 @@ function widenDividerFootprint(one) {
       ? one.zone[2] - one.zone[0]
       : one.zone[3] - one.zone[1];
     shownField.value = fmt(newSpan);
+  }
+}
+
+// Keep a cradle's footprint hugging what it actually holds, so the Width/Depth
+// fields and the 2D layout never disagree with the built ribs.
+//
+//   run axis (the tool lies along it): tool length + any alternate-ends
+//     stagger + one rib. Fixed by the tool, so this always hugs.
+//   across axis (lanes sit side by side on it): a set Quantity hugs to exactly
+//     that many lanes; Quantity = auto spans the whole bin so the engine's
+//     "fit as many as will fit" has room to work - otherwise a 1-lane zone
+//     boxes it in and auto can only ever place one.
+//
+// Every dimension is rounded UP to the 1 mm editor grid: the design pipeline
+// snaps a zone to the nearest grid line, and rounding a 16.4 mm need down to
+// 16 mm builds a cradle the engine then rejects. Both axes are also clamped to
+// the usable floor so an over-long tool yields the engine's specific "40 mm
+// long but the zone only runs 39 mm" message instead of a generic overflow.
+function sizeCradleToItem(one) {
+  const item = one.item;
+  if (!item?.segments?.length) return;
+  const cx = (one.zone[0] + one.zone[2]) / 2;
+  const cy = (one.zone[1] + one.zone[3]) / 2;
+  const spacing = number(one.options?.spacing, state.draftResolvedOptions?.spacing ?? 0);
+  const length = item.segments.reduce((total, segment) => total + number(segment.length), 0);
+  // The true tool diameter (no fit slack) and a wall a quarter of it, floored at
+  // the thinnest printable wall and capped so a fat handle never grows a slab.
+  // Mirrors _cradle_wall in organizer_inserts.py.
+  const diameter = Math.max(...item.segments.map(segment => number(segment.diameter)));
+  const rib = Math.min(Math.max(diameter * 0.25, 1.6), 6);
+  const auto = one.count == null;
+  const count = auto ? 1 : one.count;
+  // Auto Quantity fits as many lanes as the zone holds, so treat it as "more
+  // than one" when reserving room for the alternate-ends stagger.
+  const stagger = one.alternate_ends === true && (auto || count > 1) ? length / 2 : 0;
+
+  const [insideX, insideY] = binInsideExtent(state.design.box);
+  const roomAlong = one.along === "x" ? insideX : insideY;
+  const roomAcross = one.along === "x" ? insideY : insideX;
+
+  const oneLane = diameter + rib;
+  const run = Math.min(roomAlong, Math.max(1, Math.ceil(length + stagger + rib)));
+  const across = auto
+    ? roomAcross
+    : Math.min(roomAcross, Math.max(1, Math.ceil(oneLane + (count - 1) * (diameter + spacing + rib))));
+
+  const width = one.along === "x" ? run : across;
+  const depth = one.along === "x" ? across : run;
+  one.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
+}
+
+function syncNestZone(one) {
+  if (!one?.contour?.length) return;
+  const cx = (one.zone[0] + one.zone[2]) / 2;
+  const cy = (one.zone[1] + one.zone[3]) / 2;
+  const angle = number(one.rotation) * Math.PI / 180;
+  const scale = Math.max(.05, number(one.scale, 1));
+  const cosine = Math.cos(angle), sine = Math.sin(angle);
+  const points = one.contour.map(([x, y]) => [
+    scale * (number(x) * cosine - number(y) * sine),
+    scale * (number(x) * sine + number(y) * cosine),
+  ]);
+  const xs = points.map(point => point[0]), ys = points.map(point => point[1]);
+  const margin = Math.max(0, number(one.options?.clearance, .6))
+    + Math.max(0, number(one.options?.rim, 3));
+  const width = Math.max(...xs) - Math.min(...xs) + 2 * margin;
+  const depth = Math.max(...ys) - Math.min(...ys) + 2 * margin;
+  one.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
+}
+
+function readFileDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("The selected photo could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadNestPhoto(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  const mimeByExtension = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
+  const mimeType = file.type || mimeByExtension[extension];
+  if (!mimeType || !["image/jpeg", "image/png", "image/webp"].includes(mimeType)) {
+    toast("Choose a JPG, JPEG, PNG, or WEBP photo.", true, 5000);
+    return;
+  }
+  if (file.size > 17_000_000) {
+    toast("The photo must be smaller than 17 MB.", true, 5000);
+    return;
+  }
+  const input = event.target;
+  let mutationStarted = false;
+  $("#draft-status").textContent = "Finding letter paper and tracing the part…";
+  try {
+    const image = await readFileDataUrl(file);
+    if (!beginDesignMutation()) return;
+    mutationStarted = true;
+    const previousDesign = clone(state.design);
+    const result = await api("/api/nest/photo", {
+      design: state.design,
+      image,
+      mime_type: mimeType,
+      options: state.draft?.options || {},
+    });
+    state.design = result.design;
+    recordHistory(previousDesign);
+    state.selected = result.selected;
+    state.draftKind = "nest";
+    state.draft = clone(state.design.layout.features[state.selected]);
+    state.draftAutoCommit = true;
+    state.drafts = {};
+    syncForm();
+    renderDraftFields();
+    await refreshPreview();
+    $("#draft-status").textContent = "";
+    $("#draft-status").classList.remove("error");
+    $('.view-tab[data-view="2d"]').click();
+    toast(`Photo Nest ready: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm outline.`);
+  } catch (error) {
+    $("#draft-status").textContent = error.message;
+    $("#draft-status").classList.add("error");
+    toast(error.message, true, 6500);
+  } finally {
+    input.value = "";
+    if (mutationStarted) finishDesignMutation();
   }
 }
 
@@ -802,19 +1006,19 @@ function updateDraftFromFields(event) {
   }
   if (info.flags.item) {
     const item = one.item || starterItem();
-    item.name = get("item_name") || "Custom item";
-    item.profile = get("profile") || "round";
-    item.clearance = number(get("clearance"), item.clearance ?? 0.4);
+    const isCradle = one.kind === "cradle";
+    // No holder editor names the tool any more; keep whatever is stored so the
+    // engine still has a label for its error messages.
+    item.name = item.name || "Custom item";
+    item.profile = isCradle ? "round" : (get("profile") || "round");
+    // A cradle ignores fit slack entirely, so it has no clearance field - keep
+    // the stored value at 0 rather than a stale 0.4 nothing reads.
+    item.clearance = isCradle ? 0 : number(get("clearance"), item.clearance ?? 0.4);
     const first = {
       length: number(get("item_length"), item.segments?.[0]?.length || 40),
       diameter: number(get("item_diameter"), item.segments?.[0]?.diameter || 6),
     };
-    const handleLength = String(get("handle_length") ?? "").trim();
-    const handleDiameter = String(get("handle_diameter") ?? "").trim();
     item.segments = [first];
-    if (handleLength && handleDiameter) item.segments.push({
-      length: number(handleLength), diameter: number(handleDiameter),
-    });
     one.item = item;
   }
   one.options ||= {};
@@ -852,7 +1056,14 @@ function updateDraftFromFields(event) {
         }
       }
     }
+    if (one.kind === "nest" && one.contour && ["clearance", "rim"].includes(key)) {
+      syncNestZone(one);
+    }
   }
+  if (one.kind === "cradle" && (
+    changed === "count" || changed === "item_length" || changed === "item_diameter" ||
+    changed === "alternate_ends" || changed === "option:spacing"
+  )) sizeCradleToItem(one);
   updateSelectionButtons();
   refreshDraftSoon();
 }
@@ -861,7 +1072,25 @@ const refreshDraftSoon = debounce(refreshDraft, 220);
 
 async function refreshDraft() {
   if (!state.draft) return;
+  if (state.draft.kind === "nest" && !state.draft.contour) {
+    $("#draft-status").textContent = "Upload one part photo to create the cavity outline.";
+    $("#draft-status").classList.remove("error");
+    refreshPreview();
+    return;
+  }
   const request = ++state.draftRequest;
+  if (state.draft.kind === "nest") {
+    $("#draft-status").textContent = "Resizing bin around cavity…";
+    if (state.draftAutoCommit && !(await autoCommitDraft(request))) {
+      refreshPreview();
+      return;
+    }
+    if (request !== state.draftRequest) return;
+    $("#draft-status").textContent = "";
+    $("#draft-status").classList.remove("error");
+    refreshPreview();
+    return;
+  }
   $("#draft-status").textContent = "Rebuilding…";
   try {
     const result = await api("/api/feature/draft", { design: state.design, feature: state.draft });
@@ -884,6 +1113,8 @@ async function refreshDraft() {
     if (request !== state.draftRequest) return;
     $("#draft-status").textContent = error.message;
     $("#draft-status").classList.add("error");
+    state.fitError = true;
+    updateAutoExpandButton();
   }
   refreshPreview();
 }
@@ -897,6 +1128,7 @@ async function refreshDraft() {
 // single-feature check above can't see) just shows in draft-status like any
 // other validation error.
 async function autoCommitDraft(request) {
+  if (state.draft?.kind === "nest" && !state.draft.contour) return false;
   try {
     const previousDesign = clone(state.design);
     const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index: state.selected });
@@ -904,12 +1136,21 @@ async function autoCommitDraft(request) {
     state.design = result.design;
     recordHistory(previousDesign);
     if (state.selected === null) state.selected = result.selected;
+    // Saved support zones snap to the grid. Without this sync the preview
+    // draws an almost-identical draft over the saved support, which is most
+    // noticeable after changing a cradle row from one tool to two.
+    if (state.selected !== null && state.design.layout.features[state.selected]) {
+      state.draft = clone(state.design.layout.features[state.selected]);
+    }
+    if (state.draft?.kind === "nest") syncForm();
     renderPlaced();
     updateSelectionButtons();
+    return true;
   } catch (error) {
     if (request !== state.draftRequest) return;
     $("#draft-status").textContent = error.message;
     $("#draft-status").classList.add("error");
+    return false;
   }
 }
 
@@ -925,6 +1166,7 @@ async function applySupport(index) {
     state.selected = result.selected;
     state.draft = clone(state.design.layout.features[state.selected]);
     state.draftResolvedOptions = {};
+    if (state.draft.kind === "nest") syncForm();
     renderDraftFields();
     renderPlaced();
     updateSelectionButtons();
@@ -947,8 +1189,8 @@ async function deleteSupportAt(index) {
     state.design = result.design;
     recordHistory(previousDesign);
     state.selected = null;
-    renderPlaced();
     clearDraftSelection();
+    renderPlaced();
     refreshPreview();
     toast("Support deleted.");
   } catch (error) {
@@ -992,7 +1234,11 @@ function finishDesignMutation() {
 function updateSelectionButtons() {
   const busy = state.designMutationBusy;
   $("#add-support").disabled = busy || !state.draft;
-  $$(".support-choice, .placed-item-select, .placed-item-delete").forEach(button => button.disabled = busy);
+  const hasPhotoNest = state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour);
+  $$(".support-choice").forEach(button => {
+    button.disabled = busy || (hasPhotoNest && button.dataset.kind !== "nest");
+  });
+  $$(".placed-item-select, .placed-item-delete").forEach(button => button.disabled = busy);
   $("#support-count").textContent = `${state.design?.layout.features.length || 0} placed`;
 }
 
@@ -1022,6 +1268,14 @@ function renderPlaced() {
   $("#design-summary").textContent = features.length
     ? `${features.length} support${features.length === 1 ? "" : "s"} · ${state.design.layout.mode}`
     : `No supports placed · ${state.design.layout.mode}`;
+
+  // With a single support there's nothing to choose between, so drop straight
+  // into its settings rather than make the user pick it out of the list first.
+  // selectedFeature() sets state.selected, so the re-entrant renderPlaced() it
+  // triggers falls through here instead of looping.
+  if (features.length === 1 && state.selected === null && !state.draft) {
+    selectedFeature(0);
+  }
 }
 
 async function refreshPreview() {
@@ -1032,14 +1286,14 @@ async function refreshPreview() {
   setError();
   try {
     const payload = { design: state.design };
-    if (state.draft) payload.draft = state.draft;
+    if (state.draft && !(state.draft.kind === "nest" && !state.draft.contour)) payload.draft = state.draft;
     const result = await api("/api/preview", payload);
     if (request !== state.previewRequest) return;
     state.preview = result;
     state.design = result.design;
     const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
     $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
-    $("#inside-size").textContent = `${result.dimensions.x} wide · ${result.dimensions.y} deep · ${result.dimensions.z}`;
+    $("#inside-size").textContent = result.dimensions.size;
     $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(state.design.box.x)} mm`;
     $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(state.design.box.y)} mm`;
     $(".dimension-height", $("#dimensions")).textContent = `Height ${fmt(state.design.box.z)} mm`;
@@ -1084,6 +1338,8 @@ async function refreshPreview() {
     const labelError = $("#label-error");
     labelError.textContent = !result.fits && result.message ? result.message : "";
     labelError.hidden = !labelError.textContent;
+    state.fitError = Boolean(result.feature_errors.length || result.draft_error);
+    updateAutoExpandButton();
     renderPreview3D();
     renderLayout2D();
     renderPlaced();
@@ -1095,6 +1351,58 @@ async function refreshPreview() {
     updateGenerateAvailability();
     $("#label-error").hidden = true;
     $("#label-error").textContent = "";
+    // A hard preview failure with supports present is usually a footprint that
+    // outgrew the bin - offer the expand button and let the endpoint judge.
+    state.fitError = true;
+    updateAutoExpandButton();
+  }
+}
+
+// "Auto Expand Bin" shows only while a support does not fit; clicking it grows
+// the bin (see /api/layout/expand) to the smallest size that holds them all.
+function updateAutoExpandButton() {
+  const hasSupports = Boolean(
+    state.design?.layout?.features?.length || state.draft
+  );
+  $("#auto-expand-bin").hidden = !(state.fitError && hasSupports);
+}
+
+async function autoExpandBin() {
+  if (!beginDesignMutation()) return;
+  const button = $("#auto-expand-bin");
+  button.disabled = true;
+  try {
+    // Grow for what the user is actually looking at: an open draft may hold
+    // edits (a flipped direction, a raised count) that never committed because
+    // they don't fit yet. Fold it in - appended if new, in place if it's the
+    // selected support being edited.
+    const layout = state.design.layout;
+    let features = layout.features;
+    if (state.draft) {
+      features = state.selected === null
+        ? [...layout.features, state.draft]
+        : layout.features.map((f, i) => i === state.selected ? state.draft : f);
+    }
+    const design = features === layout.features
+      ? state.design
+      : { ...state.design, layout: { ...layout, features } };
+    const previousDesign = clone(state.design);
+    const result = await api("/api/layout/expand", { design });
+    state.design = result.design;
+    recordHistory(previousDesign);
+    clearDraftSelection();
+    syncForm();
+    state.fitError = false;
+    updateAutoExpandButton();
+    await refreshPreview();
+    toast(result.grew
+      ? `Bin expanded to ${fmt(result.box.x)} × ${fmt(result.box.y)} mm.`
+      : "The supports already fit - bin unchanged.");
+  } catch (error) {
+    toast(error.message, true, 5000);
+  } finally {
+    button.disabled = false;
+    finishDesignMutation();
   }
 }
 
@@ -1158,6 +1466,7 @@ function canvasSize(canvas) {
 function drawGeometry(canvas, geometry, camera) {
   const { context, width, height } = canvasSize(canvas);
   context.clearRect(0, 0, width, height);
+  state.previewSupportPolygons = [];
   if (!geometry?.length) {
     context.fillStyle = "#8b989e";
     context.textAlign = "center";
@@ -1187,6 +1496,7 @@ function drawGeometry(canvas, geometry, camera) {
   for (const face of faces) {
     const points = face.projected.map(project);
     if (points.length < 3) continue;
+    if (/^(feature_|insert_|draft_)/.test(face.kind)) state.previewSupportPolygons.push(points);
     context.beginPath();
     context.moveTo(points[0][0], points[0][1]);
     points.slice(1).forEach(point => context.lineTo(point[0], point[1]));
@@ -1207,22 +1517,53 @@ function renderPreview3D() {
   drawGeometry($("#preview-3d"), state.preview.geometry, state.camera);
 }
 
+function pointInPolygon([x, y], polygon) {
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const [xi, yi] = polygon[index];
+    const [xj, yj] = polygon[previous];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function clickedPreviewSupport(canvas, event) {
+  const bounds = canvas.getBoundingClientRect();
+  const point = [event.clientX - bounds.left, event.clientY - bounds.top];
+  return state.previewSupportPolygons.some(polygon => pointInPolygon(point, polygon));
+}
+
+function wireSupportLayoutDialog() {
+  const dialog = $("#support-layout-dialog");
+  $("#support-layout-dialog-close").addEventListener("click", () => dialog.close());
+  $("#support-layout-dialog-open").addEventListener("click", () => {
+    dialog.close();
+    $('.view-tab[data-view="2d"]').click();
+  });
+}
+
 function wireSceneInteraction(canvas, camera, render) {
   let drag = null;
   canvas.addEventListener("pointerdown", event => {
-    drag = { x: event.clientX, y: event.clientY, yaw: camera.yaw, elevation: camera.elevation };
+    drag = { x: event.clientX, y: event.clientY, yaw: camera.yaw, elevation: camera.elevation, moved: false };
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener("pointermove", event => {
     if (!drag) return;
+    if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4) drag.moved = true;
     $$('[data-camera-view]').forEach(button => button.classList.remove("active"));
     camera.yaw = drag.yaw + (event.clientX - drag.x) * .45;
     camera.elevation = Math.max(8, Math.min(89, drag.elevation - (event.clientY - drag.y) * .35));
     render();
   });
   canvas.addEventListener("pointerup", event => {
+    const clickedSupport = drag && !drag.moved && clickedPreviewSupport(canvas, event);
     drag = null;
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    if (clickedSupport) {
+      const dialog = $("#support-layout-dialog");
+      if (!dialog.open) dialog.showModal();
+    }
   });
   canvas.addEventListener("wheel", event => {
     event.preventDefault();
@@ -1238,6 +1579,29 @@ function layoutFeatures() {
   const features = state.design.layout.features.map(feature => clone(feature));
   if (state.layoutDrag?.feature && state.layoutDrag.index !== null) features[state.layoutDrag.index] = state.layoutDrag.feature;
   return features;
+}
+
+function nestOutlineWorld(feature) {
+  if (!feature?.contour?.length) return [];
+  const cx = (feature.zone[0] + feature.zone[2]) / 2;
+  const cy = (feature.zone[1] + feature.zone[3]) / 2;
+  const angle = number(feature.rotation) * Math.PI / 180;
+  const scale = Math.max(.05, number(feature.scale, 1));
+  const cosine = Math.cos(angle), sine = Math.sin(angle);
+  return feature.contour.map(([x, y]) => [
+    cx + scale * (number(x) * cosine - number(y) * sine),
+    cy + scale * (number(x) * sine + number(y) * cosine),
+  ]);
+}
+
+function drawClosedPath(context, points, toCanvas) {
+  const path = new Path2D();
+  points.forEach((point, index) => {
+    const p = toCanvas(point);
+    index === 0 ? path.moveTo(p[0], p[1]) : path.lineTo(p[0], p[1]);
+  });
+  path.closePath();
+  return path;
 }
 
 function drawDimensionLine(context, start, end, label, vertical = false) {
@@ -1339,22 +1703,38 @@ function renderLayout2D() {
   layoutFeatures().forEach((feature, index) => {
     const p0 = toCanvas([feature.zone[0], feature.zone[3]]), p1 = toCanvas([feature.zone[2], feature.zone[1]]);
     const color = invalid.has(index) ? COLORS.invalid : kindColor(feature.kind);
-    context.fillStyle = color + "cc";
     context.strokeStyle = index === state.selected ? "#176e91" : shade(color, .72);
     context.lineWidth = index === state.selected ? 3 : 1.2;
-    context.fillRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
-    context.strokeRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
-    context.fillStyle = "rgba(20,36,42,.82)";
-    context.font = "600 11px Segoe UI";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText(`${index + 1} ${partInfo(feature.kind)?.title || feature.kind}`, (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
+    if (feature.kind === "nest" && feature.contour) {
+      const outline = drawClosedPath(context, nestOutlineWorld(feature), toCanvas);
+      context.fillStyle = color + "35";
+      context.fill(outline);
+      context.stroke(outline);
+    } else {
+      context.fillStyle = color + "cc";
+      context.fillRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+      context.strokeRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+      context.fillStyle = "rgba(20,36,42,.82)";
+      context.font = "600 11px Segoe UI";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(`${index + 1} ${partInfo(feature.kind)?.title || feature.kind}`, (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
+    }
     if (index === state.selected) {
       context.fillStyle = "#237fa6";
       context.strokeStyle = "white";
       context.lineWidth = 1;
       context.fillRect(p1[0] - 6, p1[1] - 6, 12, 12);
       context.strokeRect(p1[0] - 6, p1[1] - 6, 12, 12);
+      if (feature.kind === "nest" && feature.contour) {
+        const top = toCanvas([(feature.zone[0] + feature.zone[2]) / 2, feature.zone[3]]);
+        const rotate = toCanvas([(feature.zone[0] + feature.zone[2]) / 2, feature.zone[3] + 8]);
+        context.strokeStyle = "#237fa6";
+        context.beginPath(); context.moveTo(top[0], top[1]); context.lineTo(rotate[0], rotate[1]); context.stroke();
+        context.fillStyle = "#237fa6";
+        context.beginPath(); context.arc(rotate[0], rotate[1], 6, 0, Math.PI * 2); context.fill();
+        context.strokeStyle = "white"; context.stroke();
+      }
     }
   });
   if (state.draft) {
@@ -1364,8 +1744,13 @@ function renderLayout2D() {
     context.strokeStyle = DRAFT_HIGHLIGHT;
     context.lineWidth = 2;
     context.setLineDash([6, 3]);
-    context.fillRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
-    context.strokeRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+    if (state.draft.kind === "nest" && state.draft.contour) {
+      const outline = drawClosedPath(context, nestOutlineWorld(state.draft), toCanvas);
+      context.fill(outline); context.stroke(outline);
+    } else if (state.draft.kind !== "nest") {
+      context.fillRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+      context.strokeRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+    }
     context.setLineDash([]);
   }
   drawDimensionLine(context, [a[0], a[1] - 18], [b[0], a[1] - 18], `Width ${fmt(state.design.box.x)} mm`);
@@ -1381,6 +1766,18 @@ function hitFeature(world) {
   const features = state.design.layout.features;
   for (let index = features.length - 1; index >= 0; index--) {
     const zone = features[index].zone;
+    if (features[index].kind === "nest" && features[index].contour) {
+      if (index === state.selected && state.layoutTransform) {
+        const cx = (zone[0] + zone[2]) / 2;
+        const handles = [[zone[2], zone[1]], [cx, zone[3] + 8]];
+        if (handles.some(point => Math.hypot(
+          (world[0] - point[0]) * state.layoutTransform.scale,
+          (world[1] - point[1]) * state.layoutTransform.scale,
+        ) < 14)) return index;
+      }
+      if (pointInPolygon(world, nestOutlineWorld(features[index]))) return index;
+      continue;
+    }
     if (world[0] >= zone[0] && world[0] <= zone[2] && world[1] >= zone[1] && world[1] <= zone[3]) return index;
   }
   return null;
@@ -1402,11 +1799,16 @@ function wireLayoutInteraction() {
     const feature = clone(state.design.layout.features[index]);
     const zone = feature.zone;
     const handlePixels = Math.hypot((world[0] - zone[2]) * state.layoutTransform.scale, (world[1] - zone[1]) * state.layoutTransform.scale);
+    const rotatePoint = [(zone[0] + zone[2]) / 2, zone[3] + 8];
+    const rotatePixels = Math.hypot((world[0] - rotatePoint[0]) * state.layoutTransform.scale, (world[1] - rotatePoint[1]) * state.layoutTransform.scale);
+    const centre = [(zone[0] + zone[2]) / 2, (zone[1] + zone[3]) / 2];
     state.layoutDrag = {
       index, feature, original: clone(feature),
-      mode: handlePixels < 14 ? "resize" : "move",
+      mode: feature.kind === "nest" && rotatePixels < 14 ? "rotate" : handlePixels < 14 ? "resize" : "move",
       start: world,
-      centre: [(zone[0] + zone[2]) / 2, (zone[1] + zone[3]) / 2],
+      centre,
+      startAngle: Math.atan2(world[1] - centre[1], world[0] - centre[0]),
+      startRadius: Math.max(.01, Math.hypot(world[0] - centre[0], world[1] - centre[1])),
     };
     canvas.setPointerCapture(event.pointerId);
   });
@@ -1422,6 +1824,14 @@ function wireLayoutInteraction() {
       const cx = snap(drag.centre[0] + world[0] - drag.start[0]);
       const cy = snap(drag.centre[1] + world[1] - drag.start[1]);
       drag.feature.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
+    } else if (drag.feature.kind === "nest" && drag.mode === "rotate") {
+      const angle = Math.atan2(world[1] - drag.centre[1], world[0] - drag.centre[0]);
+      drag.feature.rotation = Math.round(number(drag.original.rotation) + (angle - drag.startAngle) * 180 / Math.PI);
+      syncNestZone(drag.feature);
+    } else if (drag.feature.kind === "nest") {
+      const radius = Math.hypot(world[0] - drag.centre[0], world[1] - drag.centre[1]);
+      drag.feature.scale = Math.max(.1, number(drag.original.scale, 1) * radius / drag.startRadius);
+      syncNestZone(drag.feature);
     } else {
       const width = Math.max(pitch, snap(2 * Math.abs(world[0] - drag.centre[0])));
       const depth = Math.max(pitch, snap(2 * Math.abs(world[1] - drag.centre[1])));
