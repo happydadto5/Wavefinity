@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-05 — Removable inserts follow the waves
+
+### Changed
+
+- Removable-insert base plates now follow the box's real wavy interior with
+  0.4 mm clearance all around. This covers the floor cleanly without leaving
+  the long debris-catching gaps made by the former straight rectangle.
+
+## 2026-09-05 — Repeated handled tools can alternate ends
+
+### Added
+
+- Cradle and nest editors now include **Alternate ends**. It turns every
+  second repeated tool end-for-end, placing neighbouring handles and shafts
+  beside one another. The choice is preserved in saved designs as
+  `alternate_ends`; older files continue to load with it off.
+
 ## 2026-09-04 — Divider gets radically simpler; every draft previews live in the bin
 
 ### Changed

@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 
@@ -34,10 +35,13 @@ from wavefinity_web import (
 class WebApplicationTests(unittest.TestCase):
     def test_catalog_exposes_every_support_and_safe_default_design(self):
         catalog = catalog_payload()
+        parts = {part["kind"]: part for part in catalog["parts"]}
         self.assertEqual(
-            {part["kind"] for part in catalog["parts"]},
+            set(parts),
             {"divider", "post", "pocket", "bore", "cradle", "nest"},
         )
+        self.assertTrue(parts["cradle"]["flags"]["alternate"])
+        self.assertTrue(parts["nest"]["flags"]["alternate"])
         box, layout, *_ = design_from_dict(catalog["defaults"]["design"])
         self.assertEqual((box.x, box.y, box.z), (16.0, 48.0, 40.0))
         self.assertEqual(layout.mode, "fused")
@@ -114,6 +118,45 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(saved["zone"][2] - saved["zone"][0], 10.0)
         deleted = delete_feature_payload({"design": updated["design"], "index": 0})
         self.assertEqual(deleted["design"]["layout"]["features"], [])
+
+    def test_alternate_ends_survives_the_browser_api_round_trip(self):
+        design = default_design()
+        design["box"]["x"] = 96.0
+        design["box"]["y"] = 96.0
+        item = {
+            "name": "hex driver", "profile": "round", "clearance": 0.4,
+            "segments": [
+                {"length": 50.0, "diameter": 6.0},
+                {"length": 30.0, "diameter": 18.0},
+            ],
+        }
+        feature = default_feature_payload({
+            "design": design, "kind": "cradle", "item": item,
+        })["feature"]
+        feature["zone"] = [-40.0, -44.0, 40.0, 44.0]
+        feature["count"] = 4
+        feature["alternate_ends"] = True
+        applied = apply_feature_payload({
+            "design": design, "feature": feature, "index": None,
+        })
+        saved = applied["design"]["layout"]["features"][0]
+        self.assertTrue(saved["alternate_ends"])
+        self.assertTrue(draft_payload({
+            "design": design, "feature": saved,
+        })["geometry"])
+
+    def test_delete_can_recover_a_layout_after_the_bin_is_shrunk(self):
+        design = default_design()
+        design["box"]["x"] = 48.0
+        feature = default_feature_payload({"design": design, "kind": "post"})["feature"]
+        feature["zone"] = [10.0, -8.0, 22.0, 8.0]
+        feature["options"] = {"diameter": 8.0, "height": 16.0}
+        design = apply_feature_payload({
+            "design": design, "feature": feature, "index": None,
+        })["design"]
+        design["box"]["x"] = 16.0
+        recovered = delete_feature_payload({"design": design, "index": 0})
+        self.assertEqual(recovered["design"]["layout"]["features"], [])
 
     def test_mode_conversion_preserves_valid_layout(self):
         design = default_design()
@@ -306,6 +349,22 @@ class StaleProcessReplacementTests(unittest.TestCase):
 
         fresh = wavefinity_web.make_server("127.0.0.1", port)  # the port is genuinely free again
         fresh.server_close()
+
+    def test_a_stale_pid_file_cannot_target_an_unrelated_process(self):
+        self.pid_file.write_text("456", encoding="utf-8")
+        response = MagicMock()
+        response.read.return_value = b'{"ok": true}'
+        response.__enter__.return_value = response
+        with (
+            patch.object(wavefinity_web, "urlopen", side_effect=[response, OSError()]),
+            patch.object(wavefinity_web, "_pid_on_port", return_value=123),
+            patch.object(wavefinity_web.os, "kill") as kill,
+            patch.object(wavefinity_web.time, "sleep"),
+        ):
+            self.assertTrue(wavefinity_web._replace_stale_process(
+                "http://127.0.0.1:8765/", "127.0.0.1", 8765
+            ))
+        self.assertEqual(kill.call_args.args[0], 123)
 
     def test_a_service_with_no_recorded_pid_is_still_found_and_replaced(self):
         # An older server predating wavefinity.pid, or one started some

@@ -1296,9 +1296,7 @@ class InsertFormPreviewTests(unittest.TestCase):
             self.assertGreater(self.kinds(mode).get("insert_base", 0), 0, mode)
 
     def test_the_plate_in_the_preview_is_the_plate_that_gets_exported(self) -> None:
-        # It used to be the bare layout rectangle: flush to the wall, so its
-        # sides were hidden behind the wall and only a 1.2 mm colour change on
-        # the floor said anything had happened at all.
+        # Preview and export must share the fitted plate outline.
         for mode, build in (
             ("separate", make_fitted_insert), ("cartridge", make_cartridge_insert)
         ):
@@ -1312,10 +1310,17 @@ class InsertFormPreviewTests(unittest.TestCase):
                 self.assertAlmostEqual(
                     float(drawn.bounds[1][axis]), float(exported.bounds[1][axis]), 4
                 )
-            # and it clears the wall, which is what makes it removable
-            whole = organizer_app.layout_zone(self.spec, mode)
-            self.assertGreater(float(drawn.bounds[0][0]), whole.x0 + 0.2)
-            self.assertLess(float(drawn.bounds[1][0]), whole.x1 - 0.2)
+            if mode == "separate":
+                # The removable plate now reaches into the cavity's waves,
+                # beyond the conservative straight-sided layout area.
+                whole = organizer_app.layout_zone(self.spec, mode)
+                self.assertLess(float(drawn.bounds[0][0]), whole.x0)
+                self.assertGreater(float(drawn.bounds[1][0]), whole.x1)
+            else:
+                # A reusable cartridge remains inset from its cell rectangle.
+                whole = organizer_app.layout_zone(self.spec, mode)
+                self.assertGreater(float(drawn.bounds[0][0]), whole.x0 + 0.2)
+                self.assertLess(float(drawn.bounds[1][0]), whole.x1 - 0.2)
 
     def test_holders_take_the_colour_of_the_part_they_print_as(self) -> None:
         one = organizer_app.default_feature(self.spec, "post")

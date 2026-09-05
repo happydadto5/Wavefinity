@@ -3,23 +3,44 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
+// Mirrors organizer_inserts.py's MIN_WEDGE_EDGE - the thinnest a wedge
+// divider's tapered top may print. A small margin over the server's own
+// cutoff keeps float rounding from tripping the same error right back.
+const MIN_WEDGE_EDGE_MM = 0.45;
+
+function flashField(input) {
+  if (!input) return;
+  input.classList.remove("field-flash");
+  void input.offsetWidth; // restart the animation if it's already flashing
+  input.classList.add("field-flash");
+}
+
 const state = {
   catalog: null,
   design: null,
   preview: null,
   draftKind: "divider",
   draft: null,
+  drafts: {}, // kind -> last-edited draft, so switching the palette selection doesn't lose in-progress edits
   draftResolvedOptions: {},
+  // Whether the current draft should save itself into the design as it's edited,
+  // rather than staying a preview-only suggestion. True for anything the user
+  // deliberately started (palette pick, Additional support, re-editing a placed
+  // one); false for drafts the app puts up on its own (New/Open/after a delete/
+  // mode switch) until the user actually touches a field.
+  draftAutoCommit: false,
   selected: null,
   camera: { yaw: 45, elevation: 76, zoom: 1 },
   previewRequest: 0,
   draftRequest: 0,
   output: "",
   connector: {},
-  selectedOriginal: null,
   layoutDrag: null,
   layoutTransform: null,
   designMutationBusy: false,
+  canGenerate: true,
+  history: [],
+  future: [],
   serverInstance: null,
 };
 
@@ -39,9 +60,52 @@ const INSERT_TINT_MIX = .5;
 // that reads as "this one is different" against every kind's own muted
 // palette above.
 const DRAFT_HIGHLIGHT = "#f0a93c";
+const CAMERA_VIEWS = {
+  top: { yaw: 45, elevation: 89, zoom: 1 },
+  front: { yaw: 0, elevation: 8, zoom: 1 },
+  side: { yaw: 90, elevation: 8, zoom: 1 },
+  reset: { yaw: 45, elevation: 76, zoom: 1 },
+};
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function recordHistory(before) {
+  if (!before || JSON.stringify(before) === JSON.stringify(state.design)) return;
+  state.history.push(clone(before));
+  if (state.history.length > 50) state.history.shift();
+  state.future = [];
+  updateHistoryButtons();
+}
+
+function updateHistoryButtons() {
+  const undo = $("#undo-design");
+  const redo = $("#redo-design");
+  if (undo) undo.disabled = state.designMutationBusy || !state.history.length;
+  if (redo) redo.disabled = state.designMutationBusy || !state.future.length;
+}
+
+function updateGenerateAvailability() {
+  const button = $("#generate-bin");
+  if (button) {
+    button.disabled = state.designMutationBusy || !state.canGenerate;
+    button.title = state.canGenerate ? "Generate the current bin files" : "Resolve the highlighted issue before generating";
+  }
+}
+
+async function restoreHistory(redo = false) {
+  const from = redo ? state.future : state.history;
+  const to = redo ? state.history : state.future;
+  if (!from.length || state.designMutationBusy) return;
+  updateDesignFromForm();
+  to.push(clone(state.design));
+  state.design = from.pop();
+  state.drafts = {};
+  syncForm();
+  clearDraftSelection();
+  updateHistoryButtons();
+  await refreshPreview();
 }
 
 function number(value, fallback = 0) {
@@ -95,10 +159,22 @@ function toast(message, error = false, hold = 3200) {
   toastTimer = setTimeout(() => node.classList.remove("show"), hold);
 }
 
-function setError(message = "") {
+function setError(message = "", actions = []) {
   const panel = $("#error-panel");
-  panel.hidden = !message;
-  panel.textContent = message;
+  panel.replaceChildren();
+  if (actions.length) {
+    actions.forEach(action => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "error-link";
+      button.textContent = action.message;
+      button.addEventListener("click", action.activate);
+      panel.append(button);
+    });
+  } else if (message) {
+    panel.textContent = message;
+  }
+  panel.hidden = !message && !actions.length;
 }
 
 function partInfo(kind = state.draftKind) {
@@ -131,12 +207,21 @@ function renderCatalog() {
         return;
       }
       const oldMode = state.design.layout.mode;
+      const previousDesign = clone(state.design);
+      const previousSelected = state.selected;
       try {
         const result = await api("/api/layout/mode", { design: state.design, mode: input.value });
         state.design = result.design;
-        state.selected = null;
+        recordHistory(previousDesign);
         syncForm();
-        await selectKind(state.draftKind, true);
+        // A support that was already saved keeps being edited, just in its
+        // converted form - only fall back to a fresh, not-yet-saved
+        // suggestion when nothing was actually selected before the switch.
+        if (previousSelected !== null && previousSelected < state.design.layout.features.length) {
+          selectedFeature(previousSelected);
+        } else {
+          clearDraftSelection();
+        }
         refreshPreview();
       } catch (error) {
         $(`input[name="layout-mode"][value="${oldMode}"]`).checked = true;
@@ -149,22 +234,20 @@ function renderCatalog() {
 
   const palette = $("#support-palette");
   palette.innerHTML = state.catalog.parts.map(part => `
-    <button class="support-choice" data-kind="${part.kind}" title="${escapeHtml(part.description)}">
-      ${iconFor(part.kind)}<span>${escapeHtml(part.title)}</span>
+    <button class="support-choice" data-kind="${part.kind}" style="--support-color:${kindColor(part.kind)}" aria-label="${escapeHtml(part.title)}: ${escapeHtml(part.description)}">
+      ${iconFor(part.kind)}
+      <span class="support-choice-copy"><strong>${escapeHtml(part.title)}</strong><small>${escapeHtml(part.description)}</small></span>
     </button>
   `).join("");
   $$(".support-choice", palette).forEach(button => {
-    button.addEventListener("click", () => {
-      state.selected = null;
-      selectKind(button.dataset.kind, true);
-    });
+    button.addEventListener("click", () => pickKind(button.dataset.kind));
   });
 }
 
 function syncForm() {
   const { box, layout } = state.design;
-  $("#x-units").value = fmt(box.x / state.catalog.base_unit);
-  $("#y-units").value = fmt(box.y / state.catalog.base_unit);
+  $("#x-size").value = fmt(box.x);
+  $("#y-size").value = fmt(box.y);
   $("#z").value = fmt(box.z);
   $("#wall").value = fmt(box.wall);
   $("#flat-inside").value = fmt(box.flat_inside);
@@ -187,10 +270,12 @@ function syncForm() {
 
 function updateDesignFromForm() {
   const design = state.design;
-  const xUnits = number($("#x-units").value, design.box.x / state.catalog.base_unit);
-  const yUnits = number($("#y-units").value, design.box.y / state.catalog.base_unit);
-  design.box.x = xUnits * state.catalog.base_unit;
-  design.box.y = yUnits * state.catalog.base_unit;
+  const snapSize = (value, fallback) => {
+    const unit = state.catalog.base_unit;
+    return Math.max(unit, Math.round(number(value, fallback) / unit) * unit);
+  };
+  design.box.x = snapSize($("#x-size").value, design.box.x);
+  design.box.y = snapSize($("#y-size").value, design.box.y);
   design.box.z = number($("#z").value, design.box.z);
   design.box.wall = number($("#wall").value, design.box.wall);
   design.box.flat_inside = number($("#flat-inside").value, design.box.flat_inside);
@@ -216,6 +301,25 @@ const saveOutputPreference = debounce(output => {
   api("/api/preferences", { output }).catch(() => {});
 }, 500);
 
+async function selectOutputFolder() {
+  const button = $("#output-folder-picker");
+  const old = button.textContent;
+  button.disabled = true;
+  try {
+    const result = await api("/api/browse-output-folder", { current: state.output });
+    if (result.folder) {
+      state.output = result.folder;
+      $("#output-folder").value = result.folder;
+      saveOutputPreference(result.folder);
+      toast(`Selected: ${result.folder}`);
+    }
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function updatePreviewHelp(view) {
   $("#preview-help").textContent = view === "2d"
     ? "Pointer: drag supports to move them or drag the blue corner to resize. Keyboard or screen reader: choose a placed support, then edit Center X, Center Y, Width, and Depth."
@@ -224,29 +328,115 @@ function updatePreviewHelp(view) {
 
 const changedDesign = debounce(() => {
   if (state.designMutationBusy) return;
+  const previousDesign = clone(state.design);
   updateDesignFromForm();
+  recordHistory(previousDesign);
   refreshPreview();
   if (state.draft) refreshDraft();
 }, 280);
 
+function setSidebarCollapsed(collapsed) {
+  const shell = $("#app-shell");
+  const button = $("#sidebar-toggle");
+  shell.classList.toggle("sidebar-collapsed", collapsed);
+  button.setAttribute("aria-expanded", String(!collapsed));
+  button.title = collapsed ? "Show controls" : "Hide controls";
+  $("span", button).textContent = collapsed ? "Show controls" : "Hide controls";
+  try { localStorage.setItem("wavefinity-sidebar-collapsed", collapsed ? "1" : "0"); } catch (_error) {}
+  requestAnimationFrame(() => { renderPreview3D(); renderLayout2D(); });
+}
+
+function wireSidebar() {
+  const shell = $("#app-shell");
+  const resizer = $("#sidebar-resizer");
+  let drag = null;
+  try {
+    const savedWidth = Number(localStorage.getItem("wavefinity-sidebar-width"));
+    if (Number.isFinite(savedWidth) && savedWidth >= 420) shell.style.setProperty("--sidebar-width", `${savedWidth}px`);
+    setSidebarCollapsed(localStorage.getItem("wavefinity-sidebar-collapsed") === "1");
+  } catch (_error) {
+    setSidebarCollapsed(false);
+  }
+  $("#sidebar-toggle").addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
+  resizer.addEventListener("pointerdown", event => {
+    drag = { startX: event.clientX, width: $(".controls").getBoundingClientRect().width };
+    resizer.classList.add("dragging");
+    resizer.setPointerCapture(event.pointerId);
+  });
+  resizer.addEventListener("pointermove", event => {
+    if (!drag) return;
+    const width = Math.max(420, Math.min(window.innerWidth - 440, drag.width + event.clientX - drag.startX));
+    shell.style.setProperty("--sidebar-width", `${width}px`);
+  });
+  resizer.addEventListener("pointerup", event => {
+    if (!drag) return;
+    const width = Math.round($(".controls").getBoundingClientRect().width);
+    drag = null;
+    resizer.classList.remove("dragging");
+    if (resizer.hasPointerCapture(event.pointerId)) resizer.releasePointerCapture(event.pointerId);
+    try { localStorage.setItem("wavefinity-sidebar-width", String(width)); } catch (_error) {}
+  });
+  resizer.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const current = $(".controls").getBoundingClientRect().width;
+    const width = Math.max(420, Math.min(window.innerWidth - 440, current + (event.key === "ArrowRight" ? 24 : -24)));
+    shell.style.setProperty("--sidebar-width", `${width}px`);
+    try { localStorage.setItem("wavefinity-sidebar-width", String(Math.round(width))); } catch (_error) {}
+  });
+}
+
+function setCameraView(view) {
+  Object.assign(state.camera, CAMERA_VIEWS[view] || CAMERA_VIEWS.reset);
+  $$('[data-camera-view]').forEach(button => button.classList.toggle("active", button.dataset.cameraView === view && view !== "reset"));
+  renderPreview3D();
+}
+
+function wireCameraControls() {
+  $$('[data-camera-view]').forEach(button => button.addEventListener("click", () => setCameraView(button.dataset.cameraView)));
+  $$('[data-camera-zoom]').forEach(button => button.addEventListener("click", () => {
+    state.camera.zoom = Math.max(.35, Math.min(4, state.camera.zoom * (button.dataset.cameraZoom === "in" ? 1.2 : 1 / 1.2)));
+    renderPreview3D();
+  }));
+}
+
 function wireControls() {
+  wireSidebar();
+  wireCameraControls();
   $$(".section-heading").forEach(button => button.addEventListener("click", () => {
     const section = button.closest(".control-section");
     section.classList.toggle("open");
     button.setAttribute("aria-expanded", String(section.classList.contains("open")));
   }));
 
-  ["#x-units", "#y-units", "#z", "#wall", "#flat-inside", "#label-text", "#part-name"]
-    .forEach(selector => $(selector).addEventListener("input", changedDesign));
+  ["#x-size", "#y-size", "#z", "#wall", "#flat-inside", "#label-text", "#part-name"]
+    .forEach(selector => $(selector).addEventListener("input", () => {
+      state.canGenerate = false;
+      updateGenerateAvailability();
+      changedDesign();
+    }));
+  ["#x-size", "#y-size"].forEach(selector => $(selector).addEventListener("blur", () => {
+    const input = $(selector);
+    const unit = state.catalog.base_unit;
+    const snapped = Math.max(unit, Math.round(number(input.value, unit) / unit) * unit);
+    if (String(snapped) !== input.value) {
+      input.value = String(snapped);
+      flashField(input);
+    }
+  }));
   [$("#scoop"), ...$$('input[name="label-position"]')].forEach(input => {
     input.addEventListener("change", () => {
+      const previousDesign = clone(state.design);
       updateDesignFromForm();
+      recordHistory(previousDesign);
       refreshPreview();
+      if (state.draft) refreshDraft();
     });
   });
   ["#output-folder", "#connector-tolerance", "#connector-height",
     "#connector-length", "#connector-position"]
     .forEach(selector => $(selector).addEventListener("change", updateDesignFromForm));
+  $("#output-folder-picker").addEventListener("click", selectOutputFolder);
   $$('input[name="connector-axis"]').forEach(input =>
     input.addEventListener("change", updateDesignFromForm));
 
@@ -275,11 +465,26 @@ function wireControls() {
   });
   activateView(viewTabs.find(tab => tab.classList.contains("active")) || viewTabs[0]);
 
-  $("#add-support").addEventListener("click", () => applySupport(null));
-  $("#update-support").addEventListener("click", () => applySupport(state.selected));
+  // "Additional support" always starts a genuinely fresh, not-yet-saved
+  // suggestion for the current shape - whatever was already being edited is
+  // already saved (state.draftAutoCommit), so there's nothing to lose here.
+  $("#add-support").addEventListener("click", () => selectKind(state.draftKind, true));
   $("#save-design").addEventListener("click", saveDesign);
   $("#open-design").addEventListener("change", openDesign);
   $("#new-design").addEventListener("click", newDesign);
+  $("#undo-design").addEventListener("click", () => restoreHistory());
+  $("#redo-design").addEventListener("click", () => restoreHistory(true));
+  document.addEventListener("keydown", event => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    if (event.target.closest("input, textarea, select, [contenteditable='true']")) return;
+    if (event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      restoreHistory(event.shiftKey);
+    } else if (event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      restoreHistory(true);
+    }
+  });
   $("#connection").addEventListener("click", () => location.reload(true));
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
   $("#generate-bin").addEventListener("click", () => generate("/api/generate", "#generate-bin"));
@@ -298,9 +503,60 @@ function starterItem() {
   };
 }
 
+// Choosing a shape from the palette - unlike selectKind's other callers
+// (post-delete refresh, New, Open, mode switch), which want a genuinely
+// fresh, not-yet-saved suggestion, this one is the user deliberately
+// starting a support, so it auto-commits as it's edited (see
+// state.draftAutoCommit) and restores whatever was last being edited for
+// that shape, so hopping Post -> Cradle -> Post doesn't wipe out Post's
+// fields. Never restores a cached draft that was actually an edit of an
+// already-placed feature (state.selected set) - that one is safe in the
+// design already and belongs to the Placed supports list, not the palette.
+// Nothing selected, nothing shown as a live draft - the state on first load
+// and after New/Open/a delete/a mode switch with nothing selected. A
+// palette button never doubles as "still working on the last shape you
+// looked at": if none of them is highlighted, nothing has been added yet.
+function clearDraftSelection() {
+  state.draft = null;
+  state.draftKind = null;
+  state.draftAutoCommit = false;
+  state.selected = null;
+  $$(".support-choice").forEach(button => button.classList.remove("active"));
+  $(".support-editor").hidden = true;
+  $("#draft-status").textContent = "";
+  $("#draft-status").classList.remove("error");
+  updateSelectionButtons();
+}
+
+function pickKind(kind) {
+  if (state.draft && state.draft.kind !== kind && state.selected === null) {
+    state.drafts[state.draft.kind] = clone(state.draft);
+  }
+  state.selected = null;
+  const cached = state.drafts[kind];
+  if (!cached) {
+    selectKind(kind, true);
+    return;
+  }
+  state.draftKind = kind;
+  state.draft = clone(cached);
+  state.draftAutoCommit = true;
+  state.draftResolvedOptions = {};
+  $(".support-editor").hidden = false;
+  $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === kind));
+  const info = partInfo(kind);
+  $("#draft-title").textContent = info.title;
+  $("#draft-description").textContent = info.description;
+  renderDraftFields();
+  updateSelectionButtons();
+  refreshDraft();
+}
+
 async function selectKind(kind, reset = false) {
   state.draftKind = kind;
   state.selected = reset ? null : state.selected;
+  state.draftAutoCommit = true;
+  $(".support-editor").hidden = false;
   $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === kind));
   const info = partInfo(kind);
   $("#draft-title").textContent = info.title;
@@ -334,9 +590,10 @@ function selectedFeature(index) {
   if (index === null || index < 0 || index >= state.design.layout.features.length) return;
   state.selected = index;
   state.draft = clone(state.design.layout.features[index]);
-  state.selectedOriginal = clone(state.draft);
+  state.draftAutoCommit = true;
   state.draftResolvedOptions = {};
   state.draftKind = state.draft.kind;
+  $(".support-editor").hidden = false;
   $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === state.draftKind));
   const info = partInfo();
   $("#draft-title").textContent = info.title;
@@ -387,6 +644,19 @@ function renderDraftFields() {
       <input type="number" min="1" step="1" data-draft="count" value="${one.count ?? ""}" placeholder="auto">
       <button type="button" class="button secondary" data-action="auto-count">Auto</button>
     </div></label>`;
+    // Unlike Cradle/Nest/Bore/Post, a divider's "auto" isn't "fit as many as
+    // possible" - it's always a single centered wall, with Spacing (above)
+    // doing the auto-fill work instead. Worth saying, since that reads as
+    // the same "auto" everywhere else.
+    if (info.kind === "divider") {
+      html += `<p id="count-auto-hint" class="field-help" ${one.count == null ? "" : "hidden"}>Auto places a single, centered divider - set a number here for more.</p>`;
+    }
+  }
+  if (info.flags.alternate) {
+    html += `<label class="check-card wide">
+      <input type="checkbox" data-draft="alternate_ends" ${one.alternate_ends === true ? "checked" : ""}>
+      <span><strong>Alternate ends</strong><small>Flips every second tool so each handle sits beside the next tool's shaft.</small></span>
+    </label>`;
   }
   if (info.flags.along) {
     html += `<fieldset class="wide"><legend>Runs along</legend><div class="segmented two">
@@ -429,27 +699,87 @@ function renderDraftFields() {
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateDraftFromFields);
   });
+  // Width/Depth are floored to a minimum footprint below - reflect that back
+  // once the user leaves the field, so a typed 0 or -5 doesn't keep showing
+  // as though it were still in effect while a different error is displayed.
+  $$('[data-draft="width"], [data-draft="depth"]', $("#draft-fields")).forEach(input => {
+    input.addEventListener("blur", () => {
+      const zone = state.draft.zone;
+      const actual = input.dataset.draft === "width" ? zone[2] - zone[0] : zone[3] - zone[1];
+      if (fmt(actual) !== input.value) input.value = fmt(actual);
+    });
+  });
+  // Quantity is floored to 1 below (blank/"auto" stays open-ended) - same
+  // reasoning as Width/Depth above: reflect the floor back so a typed 0
+  // doesn't keep showing while one is actually placed.
+  const countField = $('[data-draft="count"]', $("#draft-fields"));
+  const countAutoHint = $("#count-auto-hint", $("#draft-fields"));
+  const syncCountAutoHint = () => { if (countAutoHint) countAutoHint.hidden = state.draft.count != null; };
+  if (countField) {
+    countField.addEventListener("input", syncCountAutoHint);
+    countField.addEventListener("blur", () => {
+      if (state.draft.count != null && String(state.draft.count) !== countField.value) {
+        countField.value = String(state.draft.count);
+      }
+    });
+  }
   $$('input[name="draft-along"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
     state.draft.along = input.value;
+    state.draftAutoCommit = true;
     updateSelectionButtons();
     refreshDraftSoon();
   }));
   $$('input[name="draft-wedge"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
     state.draft.wedge = input.value === "wedge";
+    state.draftAutoCommit = true;
     updateSelectionButtons();
     refreshDraftSoon();
   }));
   const autoCount = $('[data-action="auto-count"]', $("#draft-fields"));
   if (autoCount) autoCount.addEventListener("click", () => {
     state.draft.count = null;
+    state.draftAutoCommit = true;
     const input = $('[data-draft="count"]', $("#draft-fields"));
     if (input) input.value = "";
+    syncCountAutoHint();
     updateSelectionButtons();
     refreshDraftSoon();
   });
 }
 
+// A divider builds from its thickness option, not from the footprint drawn
+// below - widen that footprint to match so what the Width/Depth fields and
+// the 2D layout show never falls short of the real wall. Which side is
+// "across" follows the explicit Runs-along choice, not a guess from
+// whichever of width/depth is currently bigger.
+function widenDividerFootprint(one) {
+  const t = one.options.thickness;
+  if (!Number.isFinite(t) || t <= 0) return;
+  const zw = one.zone[2] - one.zone[0], zd = one.zone[3] - one.zone[1];
+  const cx = (one.zone[0] + one.zone[2]) / 2, cy = (one.zone[1] + one.zone[3]) / 2;
+  const wideningKey = one.along === "x" ? "depth" : "width";
+  if (one.along === "x") {
+    const depth = Math.max(zd, t);
+    one.zone = [one.zone[0], cy - depth / 2, one.zone[2], cy + depth / 2];
+  } else {
+    const width = Math.max(zw, t);
+    one.zone = [cx - width / 2, one.zone[1], cx + width / 2, one.zone[3]];
+  }
+  const shownField = $(`[data-draft="${wideningKey}"]`, $("#draft-fields"));
+  if (shownField) {
+    const newSpan = wideningKey === "width"
+      ? one.zone[2] - one.zone[0]
+      : one.zone[3] - one.zone[1];
+    shownField.value = fmt(newSpan);
+  }
+}
+
 function updateDraftFromFields(event) {
+  // Any deliberate edit is a strong enough signal to start saving this draft
+  // as it goes, even if the app put it up on its own (see state.draftAutoCommit).
+  state.draftAutoCommit = true;
+  state.canGenerate = false;
+  updateGenerateAvailability();
   const one = state.draft;
   const get = key => $(`[data-draft="${key}"]`, $("#draft-fields"))?.value;
   const oldZone = one.zone;
@@ -466,6 +796,9 @@ function updateDraftFromFields(event) {
   if (info.flags.qty) {
     const count = String(get("count") ?? "auto").trim().toLowerCase();
     one.count = count === "" || count === "auto" ? null : Math.max(1, Math.round(number(count, 1)));
+  }
+  if (info.flags.alternate) {
+    one.alternate_ends = $('[data-draft="alternate_ends"]', $("#draft-fields"))?.checked === true;
   }
   if (info.flags.item) {
     const item = one.item || starterItem();
@@ -496,29 +829,26 @@ function updateDraftFromFields(event) {
       one.options[key] ?? state.draftResolvedOptions?.[key] ?? number(option?.default),
     );
     if (info.kind === "divider" && key === "thickness") {
-      // A divider builds from this, not from the footprint drawn below -
-      // widen that footprint to match so what the Width/Depth fields and
-      // the 2D layout show never falls short of the real wall. Which side
-      // is "across" follows the explicit Runs-along choice, not a guess
-      // from whichever of width/depth is currently bigger.
-      const t = one.options.thickness;
-      if (Number.isFinite(t) && t > 0) {
-        const zw = one.zone[2] - one.zone[0], zd = one.zone[3] - one.zone[1];
-        const cx = (one.zone[0] + one.zone[2]) / 2, cy = (one.zone[1] + one.zone[3]) / 2;
-        const wideningKey = one.along === "x" ? "depth" : "width";
-        if (one.along === "x") {
-          const depth = Math.max(zd, t);
-          one.zone = [one.zone[0], cy - depth / 2, one.zone[2], cy + depth / 2];
-        } else {
-          const width = Math.max(zw, t);
-          one.zone = [cx - width / 2, one.zone[1], cx + width / 2, one.zone[3]];
-        }
-        const shownField = $(`[data-draft="${wideningKey}"]`, $("#draft-fields"));
-        if (shownField) {
-          const newSpan = wideningKey === "width"
-            ? one.zone[2] - one.zone[0]
-            : one.zone[3] - one.zone[1];
-          shownField.value = fmt(newSpan);
+      widenDividerFootprint(one);
+    }
+    if (info.kind === "divider" && key === "angle" && one.wedge !== false) {
+      // A wedge keeps its back face flat and only tapers the leaning face,
+      // so a steep angle on a tall divider can taper that face down to
+      // nothing before it reaches the top. Rather than block the angle,
+      // widen the wall (Width mm) just enough to keep a printable edge up
+      // there, and flash that field since its value just changed on its own.
+      const angle = one.options.angle ?? 0;
+      const height = one.options.height ?? state.draftResolvedOptions?.height;
+      if (Number.isFinite(angle) && Number.isFinite(height) && height > 0) {
+        const lean = Math.abs(height * Math.tan((angle * Math.PI) / 180));
+        const required = Math.ceil((lean + MIN_WEDGE_EDGE_MM) * 10) / 10;
+        const current = one.options.thickness ?? state.draftResolvedOptions?.thickness ?? 1.6;
+        if (required > current) {
+          one.options.thickness = required;
+          const thicknessField = $('[data-draft="option:thickness"]', $("#draft-fields"));
+          if (thicknessField) thicknessField.value = fmt(required);
+          flashField(thicknessField);
+          widenDividerFootprint(one);
         }
       }
     }
@@ -548,37 +878,63 @@ async function refreshDraft() {
       }
     }
     $("#draft-status").textContent = "";
+    $("#draft-status").classList.remove("error");
+    if (state.draftAutoCommit) await autoCommitDraft(request);
   } catch (error) {
     if (request !== state.draftRequest) return;
     $("#draft-status").textContent = error.message;
+    $("#draft-status").classList.add("error");
   }
   refreshPreview();
 }
 
+// Saves the draft into the design as its own feature (or updates it in
+// place if it's already one) - the "auto add" half of the workflow: once a
+// draft is armed (state.draftAutoCommit), every valid edit lands here
+// instead of waiting for an explicit button click. Runs silently - no
+// button state, no toast, no field re-render - so it never interrupts
+// active typing; a failure (e.g. it now overlaps another support, which the
+// single-feature check above can't see) just shows in draft-status like any
+// other validation error.
+async function autoCommitDraft(request) {
+  try {
+    const previousDesign = clone(state.design);
+    const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index: state.selected });
+    if (request !== state.draftRequest) return;
+    state.design = result.design;
+    recordHistory(previousDesign);
+    if (state.selected === null) state.selected = result.selected;
+    renderPlaced();
+    updateSelectionButtons();
+  } catch (error) {
+    if (request !== state.draftRequest) return;
+    $("#draft-status").textContent = error.message;
+    $("#draft-status").classList.add("error");
+  }
+}
+
+// Used only for committing a 2D-layout drag of an already-placed support -
+// a discrete one-shot action, unlike the continuous autoCommitDraft above.
 async function applySupport(index) {
   if (!state.draft || !beginDesignMutation()) return;
-  const button = index === null ? $("#add-support") : $("#update-support");
-  const previous = button.textContent;
-  button.textContent = index === null ? "Placing…" : "Updating…";
   try {
+    const previousDesign = clone(state.design);
     const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index });
     state.design = result.design;
+    recordHistory(previousDesign);
     state.selected = result.selected;
     state.draft = clone(state.design.layout.features[state.selected]);
-    state.selectedOriginal = clone(state.draft);
     state.draftResolvedOptions = {};
     renderDraftFields();
     renderPlaced();
     updateSelectionButtons();
     await refreshPreview();
     refreshDraft();
-    toast(index === null ? "Support placed." : "Support updated.");
     return true;
   } catch (error) {
     toast(error.message, true, 5000);
     return false;
   } finally {
-    button.textContent = previous;
     finishDesignMutation();
   }
 }
@@ -586,12 +942,13 @@ async function applySupport(index) {
 async function deleteSupportAt(index) {
   if (index === null || index === undefined || !beginDesignMutation()) return;
   try {
+    const previousDesign = clone(state.design);
     const result = await api("/api/feature/delete", { design: state.design, index });
     state.design = result.design;
+    recordHistory(previousDesign);
     state.selected = null;
     renderPlaced();
-    updateSelectionButtons();
-    await selectKind(state.draftKind, true);
+    clearDraftSelection();
     refreshPreview();
     toast("Support deleted.");
   } catch (error) {
@@ -603,7 +960,7 @@ async function deleteSupportAt(index) {
 
 function mutationControls() {
   return $$(
-    '#x-units, #y-units, #z, #wall, #flat-inside, #label-text, #part-name, ' +
+    '#x-size, #y-size, #z, #wall, #flat-inside, #label-text, #part-name, ' +
     '#scoop, input[name="label-position"], input[name="layout-mode"], ' +
     '#new-design, #open-design, #save-design'
   );
@@ -619,6 +976,8 @@ function beginDesignMutation() {
   state.previewRequest += 1;
   mutationControls().forEach(control => control.disabled = true);
   updateSelectionButtons();
+  updateHistoryButtons();
+  updateGenerateAvailability();
   return true;
 }
 
@@ -626,16 +985,12 @@ function finishDesignMutation() {
   state.designMutationBusy = false;
   mutationControls().forEach(control => control.disabled = false);
   updateSelectionButtons();
-}
-
-function draftIsDirty() {
-  if (state.selected === null || !state.selectedOriginal) return false;
-  return JSON.stringify(state.draft) !== JSON.stringify(state.selectedOriginal);
+  updateHistoryButtons();
+  updateGenerateAvailability();
 }
 
 function updateSelectionButtons() {
   const busy = state.designMutationBusy;
-  $("#update-support").disabled = busy || !draftIsDirty();
   $("#add-support").disabled = busy || !state.draft;
   $$(".support-choice, .placed-item-select, .placed-item-delete").forEach(button => button.disabled = busy);
   $("#support-count").textContent = `${state.design?.layout.features.length || 0} placed`;
@@ -671,6 +1026,8 @@ function renderPlaced() {
 
 async function refreshPreview() {
   const request = ++state.previewRequest;
+  state.canGenerate = false;
+  updateGenerateAvailability();
   $("#preview-state").textContent = "Building preview…";
   setError();
   try {
@@ -680,11 +1037,53 @@ async function refreshPreview() {
     if (request !== state.previewRequest) return;
     state.preview = result;
     state.design = result.design;
-    $("#preview-state").textContent = result.fits ? "Preview current" : "Label needs attention";
+    const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
+    $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
     $("#inside-size").textContent = `${result.dimensions.x} wide · ${result.dimensions.y} deep · ${result.dimensions.z}`;
-    $("#dimensions").innerHTML = `<span>${escapeHtml(result.dimensions.x)}</span><span>${escapeHtml(result.dimensions.y)}</span><span>${escapeHtml(result.dimensions.z)}</span>`;
-    const messages = [result.message, ...result.feature_errors].filter(Boolean);
-    if (messages.length) setError(messages.join(" · "));
+    $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(state.design.box.x)} mm`;
+    $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(state.design.box.y)} mm`;
+    $(".dimension-height", $("#dimensions")).textContent = `Height ${fmt(state.design.box.z)} mm`;
+    const messages = [result.message, ...result.feature_errors, result.draft_error].filter(Boolean);
+    const actions = [];
+    if (result.message) actions.push({
+      message: result.message,
+      activate: () => {
+        const input = $("#label-text");
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+        input.focus();
+        flashField(input);
+      },
+    });
+    result.feature_errors.forEach((message, errorIndex) => {
+      const featureIndex = result.invalid_feature_indexes?.[errorIndex];
+      actions.push({
+        message: featureIndex === undefined ? message : `Support ${featureIndex + 1}: ${message}`,
+        activate: () => {
+          if (featureIndex === undefined) return;
+          selectedFeature(featureIndex);
+          $(".support-editor").scrollIntoView({ behavior: "smooth", block: "center" });
+          flashField($(".support-editor"));
+        },
+      });
+    });
+    if (result.draft_error) actions.push({
+      message: `Current support: ${result.draft_error}`,
+      activate: () => {
+        $(".support-editor").scrollIntoView({ behavior: "smooth", block: "center" });
+        const invalidField = $('#draft-fields input:invalid') || $('#draft-fields input');
+        invalidField?.focus();
+        flashField(invalidField || $(".support-editor"));
+      },
+    });
+    state.canGenerate = !messages.length;
+    updateGenerateAvailability();
+    if (messages.length) setError("", actions);
+    // The label-fit message is about the Label text field specifically, so
+    // show it right there too - the workspace panel above is easy to miss
+    // since it sits far from the field the user is actually typing in.
+    const labelError = $("#label-error");
+    labelError.textContent = !result.fits && result.message ? result.message : "";
+    labelError.hidden = !labelError.textContent;
     renderPreview3D();
     renderLayout2D();
     renderPlaced();
@@ -692,6 +1091,10 @@ async function refreshPreview() {
     if (request !== state.previewRequest) return;
     $("#preview-state").textContent = "Preview could not build";
     setError(error.message);
+    state.canGenerate = false;
+    updateGenerateAvailability();
+    $("#label-error").hidden = true;
+    $("#label-error").textContent = "";
   }
 }
 
@@ -812,6 +1215,7 @@ function wireSceneInteraction(canvas, camera, render) {
   });
   canvas.addEventListener("pointermove", event => {
     if (!drag) return;
+    $$('[data-camera-view]').forEach(button => button.classList.remove("active"));
     camera.yaw = drag.yaw + (event.clientX - drag.x) * .45;
     camera.elevation = Math.max(8, Math.min(89, drag.elevation - (event.clientY - drag.y) * .35));
     render();
@@ -826,8 +1230,7 @@ function wireSceneInteraction(canvas, camera, render) {
     render();
   }, { passive: false });
   canvas.addEventListener("dblclick", () => {
-    Object.assign(camera, { yaw: 45, elevation: 76, zoom: 1 });
-    render();
+    setCameraView("reset");
   });
 }
 
@@ -835,6 +1238,38 @@ function layoutFeatures() {
   const features = state.design.layout.features.map(feature => clone(feature));
   if (state.layoutDrag?.feature && state.layoutDrag.index !== null) features[state.layoutDrag.index] = state.layoutDrag.feature;
   return features;
+}
+
+function drawDimensionLine(context, start, end, label, vertical = false) {
+  context.save();
+  context.strokeStyle = "#496873";
+  context.fillStyle = "#496873";
+  context.lineWidth = 1;
+  context.font = "700 11px Segoe UI";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.beginPath();
+  context.moveTo(start[0], start[1]);
+  context.lineTo(end[0], end[1]);
+  context.stroke();
+  const angle = Math.atan2(end[1] - start[1], end[0] - start[0]);
+  for (const [point, direction] of [[start, 1], [end, -1]]) {
+    context.beginPath();
+    context.moveTo(point[0], point[1]);
+    context.lineTo(point[0] + Math.cos(angle + .55) * 7 * direction, point[1] + Math.sin(angle + .55) * 7 * direction);
+    context.moveTo(point[0], point[1]);
+    context.lineTo(point[0] + Math.cos(angle - .55) * 7 * direction, point[1] + Math.sin(angle - .55) * 7 * direction);
+    context.stroke();
+  }
+  const middle = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+  context.translate(middle[0], middle[1]);
+  if (vertical) context.rotate(-Math.PI / 2);
+  const textWidth = context.measureText(label).width;
+  context.fillStyle = "rgba(248,250,249,.92)";
+  context.fillRect(-textWidth / 2 - 5, -8, textWidth + 10, 16);
+  context.fillStyle = "#496873";
+  context.fillText(label, 0, 0);
+  context.restore();
 }
 
 function renderLayout2D() {
@@ -933,6 +1368,8 @@ function renderLayout2D() {
     context.strokeRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
     context.setLineDash([]);
   }
+  drawDimensionLine(context, [a[0], a[1] - 18], [b[0], a[1] - 18], `Width ${fmt(state.design.box.x)} mm`);
+  drawDimensionLine(context, [a[0] - 18, a[1]], [a[0] - 18, b[1]], `Depth ${fmt(state.design.box.y)} mm`, true);
 }
 
 function layoutPoint(event) {
@@ -1027,9 +1464,11 @@ async function openDesign(event) {
     const parsed = JSON.parse(await file.text());
     const result = await api("/api/design/validate", { design: parsed });
     state.design = result.design;
-    state.selected = null;
+    state.drafts = {};
+    state.history = [];
+    state.future = [];
     syncForm();
-    await selectKind("divider", true);
+    clearDraftSelection();
     await refreshPreview();
     toast(`Opened ${file.name}.`);
   } catch (error) {
@@ -1043,11 +1482,13 @@ async function openDesign(event) {
 async function newDesign() {
   if (state.design.layout.features.length && !window.confirm("Start a new design and clear the placed supports?")) return;
   if (!beginDesignMutation()) return;
+  const previousDesign = clone(state.design);
   state.design = clone(state.catalog.defaults.design);
-  state.selected = null;
+  recordHistory(previousDesign);
+  state.drafts = {};
   syncForm();
   try {
-    await selectKind("divider", true);
+    clearDraftSelection();
     await refreshPreview();
   } finally {
     finishDesignMutation();
@@ -1066,6 +1507,19 @@ async function generate(path, selector) {
   button.textContent = "Generating…";
   setError();
   try {
+    // A debounced support edit may still be visible only in the draft. Save
+    // it now so the exported files always match the canvas.
+    if (state.draft && state.draftAutoCommit) {
+      state.draftRequest += 1;
+      const previousDesign = clone(state.design);
+      const committed = await api("/api/feature/apply", {
+        design: state.design, feature: state.draft, index: state.selected,
+      });
+      state.design = committed.design;
+      if (state.selected === null) state.selected = committed.selected;
+      recordHistory(previousDesign);
+      renderPlaced();
+    }
     const payload = {
       design: state.design,
       output: state.output,
@@ -1078,7 +1532,7 @@ async function generate(path, selector) {
     setError(error.message);
     toast(error.message, true, 7000);
   } finally {
-    button.disabled = false;
+    button.disabled = selector === "#generate-bin" ? !state.canGenerate : false;
     button.textContent = old;
   }
 }
@@ -1120,7 +1574,8 @@ async function init() {
     $("#connection").textContent = "Local engine connected";
     $("#connection").classList.add("ready");
     watchServerVersion();
-    await selectKind("divider", true);
+    updateHistoryButtons();
+    clearDraftSelection();
     await refreshPreview();
   } catch (error) {
     $("#connection").textContent = "Engine unavailable";

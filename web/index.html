@@ -14,13 +14,15 @@
     </div>
     <div class="header-actions">
       <button id="connection" class="connection" title="Reload the app and Python engine">Starting…</button>
+      <button id="undo-design" class="button secondary" type="button" title="Undo last design change">Undo</button>
+      <button id="redo-design" class="button secondary" type="button" title="Redo last undone design change">Redo</button>
       <button id="new-design" class="button secondary">New</button>
       <button id="save-design" class="button secondary">Save design</button>
       <label class="button secondary file-button">Open design<input id="open-design" type="file" accept=".json,.wavefinity.json"></label>
     </div>
   </header>
 
-  <main class="app-shell">
+  <main class="app-shell" id="app-shell">
     <aside class="controls" aria-label="Bin controls">
       <section class="control-section open" data-section="build">
         <button class="section-heading" aria-expanded="true">
@@ -28,10 +30,11 @@
         </button>
         <div class="section-body">
           <div class="field-grid three">
-            <label>Units X<input id="x-units" type="number" min="1" step="1"></label>
-            <label>Units Y<input id="y-units" type="number" min="1" step="1"></label>
+            <label>Width <span class="unit">mm</span><input id="x-size" type="number" min="8" step="8"></label>
+            <label>Depth <span class="unit">mm</span><input id="y-size" type="number" min="8" step="8"></label>
             <label>Height <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
           </div>
+          <p class="field-help size-help">Width and depth snap to the nearest 8 mm.</p>
           <p id="inside-size" class="measurement"></p>
 
           <fieldset class="mode-fieldset">
@@ -41,22 +44,21 @@
           </fieldset>
 
           <div class="subheading-row">
-            <div><h2>Interior supports</h2><p>Pick a shape, set its fit, then place it.</p></div>
+            <div><h2>Interior supports</h2><p>Pick a shape and set its fit - it's placed as you go.</p></div>
             <span id="support-count" class="count-badge">0 placed</span>
           </div>
           <div id="support-palette" class="support-palette" role="list"></div>
 
-          <div class="support-editor">
+          <div class="support-editor" hidden>
             <div class="editor-title">
               <div><span class="step">2</span><strong id="draft-title">Set parameters</strong></div>
               <span id="draft-status" class="quiet-status"></span>
             </div>
             <p id="draft-description" class="muted"></p>
-            <p class="field-help">Shown live, highlighted, in the preview to the right.</p>
+            <p class="field-help">Shown live, highlighted, in the preview to the right - and saved into the bin automatically as you go.</p>
             <div id="draft-fields" class="draft-fields"></div>
             <div class="button-row">
-              <button id="add-support" class="button primary">Add support</button>
-              <button id="update-support" class="button secondary" disabled>Update selected</button>
+              <button id="add-support" class="button primary">Additional support</button>
             </div>
           </div>
 
@@ -96,6 +98,7 @@
         </button>
         <div class="section-body">
           <label>Label text<input id="label-text" type="text" maxlength="80" placeholder="e.g. M3 BOLTS"></label>
+          <p id="label-error" class="field-error" hidden></p>
           <fieldset>
             <legend>Label position</legend>
             <div class="segmented two">
@@ -108,7 +111,10 @@
       </section>
 
       <section class="output-panel">
-        <label>Output folder<input id="output-folder" type="text"></label>
+        <label>Output folder<div class="input-with-button">
+          <input id="output-folder" type="text">
+          <button type="button" class="button secondary" id="output-folder-picker">Browse</button>
+        </div></label>
         <button id="generate-bin" class="button primary wide">Generate bin files</button>
         <div class="button-row equal">
           <button id="generate-connector" class="button secondary">Generate connector</button>
@@ -117,17 +123,38 @@
       </section>
     </aside>
 
+    <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="Resize controls" aria-orientation="vertical" tabindex="0"></div>
+
     <section class="workspace" aria-label="Design preview">
       <div class="workspace-toolbar">
-        <div class="view-tabs" role="tablist">
-          <button class="view-tab active" data-view="3d" role="tab" aria-selected="true">3D preview</button>
-          <button class="view-tab" data-view="2d" role="tab" aria-selected="false">2D layout</button>
+        <div class="workspace-tools">
+          <button id="sidebar-toggle" class="icon-button" type="button" aria-expanded="true" title="Hide controls">☰ <span>Hide controls</span></button>
+          <div class="view-tabs" role="tablist">
+            <button class="view-tab active" data-view="3d" role="tab" aria-selected="true">3D preview</button>
+            <button class="view-tab" data-view="2d" role="tab" aria-selected="false">2D layout</button>
+          </div>
         </div>
         <div class="preview-hint"><span id="preview-state">Building preview…</span><span id="preview-help">Visual preview only. Drag to rotate, use the wheel to zoom, or double-click to reset; these controls do not change the printed part.</span></div>
       </div>
       <div class="canvas-wrap active" data-canvas="3d">
         <canvas id="preview-3d" role="img" aria-label="3D design preview" aria-describedby="preview-help"></canvas>
-        <div id="dimensions" class="dimensions"></div>
+        <div class="camera-controls" aria-label="3D view controls">
+          <div class="camera-views">
+            <button type="button" data-camera-view="top">Top</button>
+            <button type="button" data-camera-view="front">Front</button>
+            <button type="button" data-camera-view="side">Side</button>
+            <button type="button" data-camera-view="reset">Reset</button>
+          </div>
+          <div class="zoom-controls">
+            <button type="button" data-camera-zoom="out" aria-label="Zoom out">−</button>
+            <button type="button" data-camera-zoom="in" aria-label="Zoom in">+</button>
+          </div>
+        </div>
+        <div id="dimensions" class="dimension-guides" aria-label="Bin dimensions">
+          <span class="dimension-width"></span>
+          <span class="dimension-depth"></span>
+          <span class="dimension-height"></span>
+        </div>
       </div>
       <div class="canvas-wrap" data-canvas="2d">
         <canvas id="preview-2d" role="img" aria-label="Top-down layout preview" aria-describedby="preview-help layout-help"></canvas>

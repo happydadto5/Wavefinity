@@ -260,6 +260,26 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {"preferences": save_preferences(update)}
 
 
+def browse_output_folder_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Open the native folder chooser for this local desktop app."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        current = Path(str(payload.get("current") or DEFAULT_OUTPUT)).expanduser()
+        initial = current if current.is_dir() else DEFAULT_OUTPUT
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        try:
+            selected = filedialog.askdirectory(parent=root, initialdir=str(initial))
+        finally:
+            root.destroy()
+    except Exception as error:
+        raise RuntimeError("could not open the output-folder chooser") from error
+    return {"folder": selected}
+
+
 def _design(raw: dict[str, Any]) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     return design_from_dict(raw)
 
@@ -394,7 +414,12 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def delete_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    # Deletion is the recovery path for a design made invalid by shrinking the
+    # bin. Parse its schema and box, but defer layout validation until after
+    # the unwanted support has been removed.
+    box, layout, label, part_name, label_location, scoop = design_from_dict(
+        payload["design"], validate_layout=False
+    )
     index = int(payload["index"])
     existing = list(layout.features)
     if not 0 <= index < len(existing):
@@ -484,6 +509,7 @@ POST_ROUTES = {
     "/api/connector": connector_payload,
     "/api/sampler": sampler_payload,
     "/api/preferences": preferences_payload,
+    "/api/browse-output-folder": browse_output_folder_payload,
 }
 
 
@@ -648,10 +674,9 @@ def _replace_stale_process(requested_url: str, host: str, port: int) -> bool:
         if hasattr(error, "close"):
             error.close()
         return False
-    try:
-        pid = int(PID_FILE.read_text(encoding="utf-8").strip())
-    except (FileNotFoundError, ValueError, OSError):
-        pid = _pid_on_port(host, port)
+    # A PID file can outlive its process and be reused by Windows. Only the
+    # operating system's current port owner is safe to terminate.
+    pid = _pid_on_port(host, port)
     if pid is None:
         return False
     try:

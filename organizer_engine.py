@@ -442,25 +442,35 @@ def translated(mesh: trimesh.Trimesh, xyz: tuple[float, float, float]) -> trimes
     return result
 
 
+def _cleaned(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Drop unreferenced/duplicate vertices left over from a boolean op.
+
+    ``merge_vertices`` welds anything within its tolerance, which is usually
+    just harmless leftovers - but two surfaces that pass close and near
+    parallel for a long run (a steep full-span divider tracking the wavy
+    wall, say) can have distinct vertices fall within that same tolerance,
+    and welding those turns a clean manifold result non-watertight. Keep the
+    cleanup when it's safe; skip it rather than hand back a broken mesh.
+    """
+    was_watertight = mesh.is_watertight
+    cleaned = mesh.copy()
+    cleaned.remove_unreferenced_vertices()
+    cleaned.merge_vertices()
+    if was_watertight and not cleaned.is_watertight:
+        return mesh
+    return cleaned
+
+
 def union(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
-    result = trimesh.boolean.union(meshes, engine="manifold")
-    result.remove_unreferenced_vertices()
-    result.merge_vertices()
-    return result
+    return _cleaned(trimesh.boolean.union(meshes, engine="manifold"))
 
 
 def difference(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
-    result = trimesh.boolean.difference(meshes, engine="manifold")
-    result.remove_unreferenced_vertices()
-    result.merge_vertices()
-    return result
+    return _cleaned(trimesh.boolean.difference(meshes, engine="manifold"))
 
 
 def intersection(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
-    result = trimesh.boolean.intersection(meshes, engine="manifold")
-    result.remove_unreferenced_vertices()
-    result.merge_vertices()
-    return result
+    return _cleaned(trimesh.boolean.intersection(meshes, engine="manifold"))
 
 
 def _extrude_polygon(polygon: Polygon, height: float) -> trimesh.Trimesh:

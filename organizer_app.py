@@ -137,10 +137,12 @@ PART_KINDS = (
      (("Height mm", "height", ""), ("Hole depth mm", "depth", ""),
       ("Wall mm", "wall", "1.6"))),
     ("cradle", "Cradle", "Scalloped ribs that hold a handled tool on its side.",
-     {"qty": True, "size": True, "along": True, "item": True, "lean": False},
+     {"qty": True, "size": True, "along": True, "item": True, "lean": False,
+      "alternate": True},
      (("Floor gap mm", "floor_gap", "2"), ("Rib mm", "rib_thickness", "1.6"))),
     ("nest", "Nest", "A shallow snug recess following a tool's stepped outline.",
-     {"qty": True, "size": True, "along": True, "item": True, "lean": False},
+     {"qty": True, "size": True, "along": True, "item": True, "lean": False,
+      "alternate": True},
      (("Height mm", "height", ""), ("Recess mm", "depth", ""),
       ("Wall mm", "wall", "1.6"))),
 )
@@ -1018,7 +1020,9 @@ def design_to_dict(
     }
 
 
-def design_from_dict(data: dict) -> tuple[BoxSpec, Layout, str, str, str, bool]:
+def design_from_dict(
+    data: dict, *, validate_layout: bool = True
+) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     if data.get("version", 1) != 1:
         raise ValueError(f"unsupported design version {data.get('version')!r}")
     raw = data["box"]
@@ -1029,7 +1033,8 @@ def design_from_dict(data: dict) -> tuple[BoxSpec, Layout, str, str, str, bool]:
         flat_inside=float(raw.get("flat_inside", 0.0)),
     )
     layout = layout_from_dict(data.get("layout", {}))
-    layout.validate(box)
+    if validate_layout:
+        layout.validate(box)
     return (
         box,
         layout,

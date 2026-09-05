@@ -232,7 +232,10 @@ hard-coding a hex-driver rack. The editor collects this as plain **Length /
 Thickness** fields, with optional **Handle length / Handle thickness** for a
 two-part tool — there are no fixed tool presets, since every bin is cut for one
 specific tool. `Count = auto` fills the zone; a number requests exactly that
-many.
+many. Cradle and nest holders also offer **Alternate ends**: when enabled,
+every second repeated tool is turned end-for-end so a handle sits beside the
+next tool's shaft. The setting is saved as `alternate_ends` and has no effect
+when only one tool fits.
 
 | Holder | Purpose | Optional `key=value` settings |
 |---|---|---|
@@ -318,7 +321,8 @@ scale proportionally.
 
 **One unit is 8 mm** — the grid step itself — so every legal size is a whole
 number of units and no decimals are needed: 1, 2, 3, 4, 5, 6 = 8, 16, 24, 32,
-40, 48 mm. The UI takes X and Y in units.
+40, 48 mm. The browser UI takes width and depth in millimetres and snaps them
+to the nearest 8 mm grid step.
 
 **16 mm (2 units)** is the smallest box that takes a connector on both sides. A
 1-unit side is still legal and useful: an 8 mm wall is too short for a connector
@@ -340,7 +344,7 @@ interference. They are rejected with the nearest legal size named.
 
 ### What a size actually measures
 
-The UI shows this live as you change the units:
+The UI shows this live as you change the size:
 
 | X units | Grid footprint | Outside (crest to crest) | Usable inside | Joins on |
 |---:|---:|---:|---:|---|
@@ -567,6 +571,9 @@ Non-Python files:
 This project is developed locally, mostly by prompting an LLM. GitHub is a
 **backup and a record of what changed** — it is not a review gate.
 
+**After completing an implementation, commit all changes and push them to
+GitHub before reporting that the work is finished.**
+
 **One prompt may become one cohesive commit.** Keep all code, tests, and
 documentation needed to complete that prompt together; do not split a single
 request into artificial commits just to make the history look smaller. When a
@@ -596,16 +603,12 @@ that explains the reasoning is worth more here than a tidy branch structure.
 **Relaunching replaces whatever is already running on the port.** If a
 relaunch finds the port taken, it first confirms a genuine Wavefinity
 service - not some unrelated program - answers there (a real `/api/health`
-response, not just something listening), then finds its process id two
-ways: `wavefinity_web.py`'s own record of a process it started
-(`wavefinity.pid`, fast, no shelling out), and failing that, an OS-level
-lookup of whatever the operating system says actually holds the port
-(`netstat` on Windows, `lsof` on macOS/Linux) - so it still finds and
-replaces an old process from before `wavefinity.pid` existed, or one
-started some other way entirely, not just ones this exact launcher is
-already tracking. Either way it then kills that process and rebinds. Only
-if a genuine service answers but no PID can be found by either method, or
-killing it fails, is it left alone and reported as already running - close
+response, not just something listening), then asks the operating system
+which process currently owns that port (`netstat` on Windows, `lsof` on
+macOS/Linux). It does not trust `wavefinity.pid` for this: a stale PID can
+be reused by an unrelated program. It then kills that verified port owner
+and rebinds. Only if a genuine service answers but no current port owner
+can be found, or killing it fails, is it left alone and reported as already running - close
 that window by hand and relaunch. A browser tab has no way to tell it is
 talking to code from before your last edit, so silently reattaching to an
 old process would serve stale code with no visible sign anything was wrong.

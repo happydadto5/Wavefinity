@@ -74,6 +74,12 @@ empty, the suites are not testing the things that break.
 | 2026-09-04 | Claude | `unittest` (full suite) | 196 | Nothing | After the divider field simplification (spacing, renamed Width, blank-placeholder Height) and the live-in-bin draft preview, before removing the now-orphaned Fit to bin route. |
 | 2026-09-04 | Claude | manual, live browser | — | Nothing | Verified the whole redesign together: default divider renders live in the main bin view (amber highlight, no isolated canvas); Width/Height/Angle/Spacing render as described, Height and Spacing genuinely blank with placeholder text (`input.value === ""`, not a filled number); an invalid combination (wedge + 45°) turns the live shape red immediately with the reason above it, instead of silently freezing; a full add → select → edit-to-invalid → refuse → fix → update → delete round trip all worked; Pocket (an untouched kind) still shows Center X/Y and Width/Depth and renders live too, confirming the preview change applies everywhere without disturbing kinds that were not part of the field simplification. |
 | 2026-09-04 | Claude | `unittest` (full suite) | 192 | Nothing | After removing the now-unreachable `/api/feature/autosize` route, `auto_size_payload`, `_grow_zone_to_fit`, and their tests. |
+| 2026-09-05 | Codex | `unittest test_wavefinity_web.py` | 19 | Nothing | After the resizable controls, millimetre sizing, camera presets, support cards, dimension guides, and actionable validation UI. JavaScript syntax and desktop/narrow visual checks also passed with no console warnings. |
+| 2026-09-05 | Codex | `unittest test_wavefinity_web.py` | 19 | Nothing | Final rerun after disabling generation immediately while edited values await preview validation. |
+| 2026-09-05 | Codex | focused alternating-end engine/API suites | 30 | Nothing | Cradle lane reversal, nest outline reversal, saved-layout compatibility, validation, and browser API persistence. |
+| 2026-09-05 | Codex | `unittest` plus `node --check web/app.js` and `git diff --check` | 200 | Nothing | Complete geometry, export, browser/API, and compatibility suite after adding alternating cradle/nest ends. |
+| 2026-09-05 | Codex | focused alternating-end engine/API suites plus JavaScript/diff checks | 32 | Nothing | Final check after preserving identical geometry for a single cradle and asserting the browser catalog exposes the control. |
+| 2026-09-05 | Codex | `unittest -q -b` | 203 | Nothing | Final full suite before committing and pushing all current changes. |
 
 ## Defects found outside the suites
 

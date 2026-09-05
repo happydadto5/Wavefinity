@@ -116,10 +116,11 @@ class Item:
         """A diameter with the fit slack added."""
         return diameter + self.clearance
 
-    def segment_centres(self) -> list[tuple[float, Segment]]:
-        """Each segment's midpoint measured from the object's near end."""
+    def segment_centres(self, reversed_end: bool = False) -> list[tuple[float, Segment]]:
+        """Each segment's midpoint measured from the selected near end."""
         out, run = [], 0.0
-        for segment in self.segments:
+        segments = reversed(self.segments) if reversed_end else self.segments
+        for segment in segments:
             out.append((run + segment.length / 2.0, segment))
             run += segment.length
         return out
@@ -207,6 +208,9 @@ class Feature:
     # tapering as it rises, or (False) a uniform-thickness sloped wall - see
     # ``build_divider``. Meaningless at zero angle; only a divider sets it.
     wedge: bool = True
+    # For repeated cradles/nests, turn every second stored item end-for-end so
+    # neighbouring handles and shafts interleave.
+    alternate_ends: bool = False
 
     def __post_init__(self) -> None:
         if not self.kind:
@@ -217,6 +221,8 @@ class Feature:
             raise ValueError("feature count must be positive or automatic")
         if self.full_span and self.kind != "divider":
             raise ValueError("only a divider can span the full wall")
+        if self.alternate_ends and self.kind not in {"cradle", "nest"}:
+            raise ValueError("only a cradle or nest can alternate item ends")
 
 
 @dataclass(frozen=True)
@@ -378,6 +384,7 @@ def layout_to_dict(layout: Layout) -> dict:
                 "options": dict(one.options),
                 "full_span": one.full_span,
                 "wedge": one.wedge,
+                "alternate_ends": one.alternate_ends,
             }
             for one in layout.features
         ],
@@ -408,6 +415,7 @@ def layout_from_dict(data: dict) -> Layout:
             str(raw.get("along", "x")), dict(raw.get("options", {})),
             bool(raw.get("full_span", False)),
             bool(raw.get("wedge", True)),
+            bool(raw.get("alternate_ends", False)),
         ))
     return Layout(tuple(made), str(data.get("mode", "fused")),
                   float(data.get("snap", EDITOR_SNAP)))
@@ -555,6 +563,47 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     start = centre_along - item.length / 2.0
 
     solids: list[trimesh.Trimesh] = []
+    if spec_feature.alternate_ends and count > 1 and len(item.segments) > 1:
+        # Alternating tools cannot share the old full-width ribs: at a given
+        # longitudinal position one lane may hold a shaft while its neighbour
+        # holds a handle. Give every lane its own short pair/set of ribs.
+        lane_width = widest + rib_thickness
+        for index in range(count):
+            seat = first + index * pitch
+            for offset, segment in item.segment_centres(index % 2 == 1):
+                radius = item.held(segment.diameter) / 2.0
+                rib_height = axis_z - base_z
+                if radius >= rib_height:
+                    raise ValueError(
+                        f"{item.name}: a {segment.diameter:g} mm section needs more than "
+                        f"{floor_gap:g} mm of clearance under it to leave material below"
+                    )
+                here = start + offset
+                rib = trimesh.creation.box(
+                    extents=(
+                        rib_thickness if along == "x" else lane_width,
+                        lane_width if along == "x" else rib_thickness,
+                        rib_height,
+                    )
+                )
+                rib.apply_translation(
+                    (here, seat, base_z + rib_height / 2.0) if along == "x"
+                    else (seat, here, base_z + rib_height / 2.0)
+                )
+                notch = trimesh.creation.cylinder(
+                    radius=radius, height=rib_thickness * 3.0, sections=48
+                )
+                notch.apply_transform(
+                    trimesh.transformations.rotation_matrix(
+                        math.pi / 2.0, (0, 1, 0) if along == "x" else (1, 0, 0)
+                    )
+                )
+                notch.apply_translation(
+                    (here, seat, axis_z) if along == "x" else (seat, here, axis_z)
+                )
+                solids.append(difference([rib, notch]))
+        return solids
+
     for offset, segment in item.segment_centres():
         radius = item.held(segment.diameter) / 2.0
         rib_height = axis_z - base_z
@@ -599,18 +648,20 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
 
 
 def _item_plan_outline(
-    item: Item, along: str, centre_along: float, centre_across: float
+    item: Item, along: str, centre_along: float, centre_across: float,
+    reversed_end: bool = False,
 ) -> Polygon:
     """Top-down stepped outline of an item, kept inside its stated length."""
     start = centre_along - item.length / 2.0 - item.clearance / 2.0
     pieces = []
     run = start
-    for index, segment in enumerate(item.segments):
+    segments = tuple(reversed(item.segments)) if reversed_end else item.segments
+    for index, segment in enumerate(segments):
         radius = item.held(segment.diameter) / 2.0
         length = segment.length
         if index == 0:
             length += item.clearance / 2.0
-        if index == len(item.segments) - 1:
+        if index == len(segments) - 1:
             length += item.clearance / 2.0
         if along == "x":
             pieces.append(shapely_box(
@@ -696,7 +747,10 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     first = centre_across - (count - 1) * pitch / 2.0
     cuts = []
     for index in range(count):
-        outline = _item_plan_outline(item, along, centre_along, first + index * pitch)
+        outline = _item_plan_outline(
+            item, along, centre_along, first + index * pitch,
+            spec_feature.alternate_ends and index % 2 == 1,
+        )
         cut = _extrude_polygon(outline, recess_depth * 2.0)
         cut.apply_translation((0.0, 0.0, base_z + height - recess_depth))
         cuts.append(cut)
@@ -1262,11 +1316,22 @@ def build_features(
 def insert_footprint(box: BoxSpec, mode: str = "separate") -> Polygon:
     """The floor outline of a standalone insert.
 
-    The layout area pulled in by ``INSERT_CLEARANCE`` all round with softened
-    corners.  That clearance is the whole reason a removable insert can go in
-    and come back out, so the preview draws this same outline rather than the
-    bare layout rectangle.
+    A removable insert follows the box's real cavity, including its waves, and
+    is offset inward by ``INSERT_CLEARANCE`` so it can still slide in and out.
+    A box with a flat lower wall band uses that lower profile because the plate
+    sits inside the band.  Cartridge inserts retain their reusable rectangular
+    cell footprint.
     """
+    if mode == "separate":
+        cavity = (
+            flat_cavity_polygon(box)
+            if box.flat_inside > 0.0
+            else wavy_cavity_polygon(box)
+        )
+        footprint = cavity.buffer(-INSERT_CLEARANCE)
+        if not isinstance(footprint, Polygon) or footprint.is_empty:
+            raise ValueError("this bin is too small for a removable insert")
+        return footprint
     bounds = layout_zone(box, mode)
     return _rounded(
         shapely_box(

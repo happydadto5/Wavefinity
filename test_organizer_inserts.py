@@ -47,6 +47,12 @@ class ItemTests(unittest.TestCase):
         centres = [round(c, 3) for c, _ in DRIVER.segment_centres()]
         self.assertEqual(centres, [25.0, 65.0])       # 50 long, then 30 long
 
+    def test_segment_centres_can_be_measured_from_the_other_end(self) -> None:
+        centres = [round(c, 3) for c, _ in DRIVER.segment_centres(True)]
+        diameters = [segment.diameter for _, segment in DRIVER.segment_centres(True)]
+        self.assertEqual(centres, [15.0, 55.0])
+        self.assertEqual(diameters, [18.0, 6.0])
+
     def test_a_simple_item_is_one_segment(self) -> None:
         stick = Item.simple("Glue", 100.0, 11.0)
         self.assertEqual(len(stick.segments), 1)
@@ -142,6 +148,38 @@ class CradleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "long"):
             build_features(BIN, [cramped], BIN.wall)
 
+    def test_alternate_ends_flips_every_second_cradle_lane(self) -> None:
+        one = Feature(
+            "cradle", Zone.end(BIN, "x", 88.0), DRIVER,
+            count=4, along="x", alternate_ends=True,
+        )
+        ribs = build_features(BIN, [one], BIN.wall)
+        self.assertEqual(len(ribs), 4 * len(DRIVER.segments))
+        centre_along = one.zone.centre[0]
+        lanes: dict[float, list[float]] = {}
+        for rib in ribs:
+            lane = round(float(rib.bounds[:, 1].mean()), 3)
+            station = round(float(rib.bounds[:, 0].mean()) - centre_along, 3)
+            lanes.setdefault(lane, []).append(station)
+        stations = [sorted(value) for _, value in sorted(lanes.items())]
+        self.assertEqual(stations, [[-15.0, 25.0], [-25.0, 15.0]] * 2)
+        self.assertTrue(all(rib.is_watertight for rib in ribs))
+
+    def test_alternate_ends_does_not_change_a_single_cradle(self) -> None:
+        plain = Feature(
+            "cradle", Zone.end(BIN, "x", 88.0), DRIVER, count=1,
+        )
+        alternate = Feature(
+            "cradle", plain.zone, DRIVER, count=1, alternate_ends=True,
+        )
+        for expected, actual in zip(
+            build_features(BIN, [plain], BIN.wall),
+            build_features(BIN, [alternate], BIN.wall),
+            strict=True,
+        ):
+            np.testing.assert_array_equal(actual.vertices, expected.vertices)
+            np.testing.assert_array_equal(actual.faces, expected.faces)
+
 
 class BuildTests(unittest.TestCase):
     def _feature(self) -> Feature:
@@ -161,20 +199,29 @@ class BuildTests(unittest.TestCase):
         plain = make_box(BIN)
         self.assertIs(make_fused_box(BIN, [], plain), plain)
 
+    def test_alternating_cradles_assemble_into_valid_fused_and_removable_parts(self) -> None:
+        one = Feature(
+            "cradle", Zone.end(BIN, "x", 88.0), DRIVER,
+            count=4, alternate_ends=True,
+        )
+        fused = make_fused_box(BIN, [one], make_box(BIN))
+        fitted = make_fitted_insert(BIN, [one])
+        for part in (fused, fitted):
+            self.assertTrue(part.is_watertight)
+            self.assertEqual(len(part.split(only_watertight=False)), 1)
+
     def test_a_standalone_insert_clears_the_bin_walls(self) -> None:
         insert = make_fitted_insert(BIN, [self._feature()])
         self.assertTrue(insert.is_watertight)
+        footprint = insert_footprint(BIN, "separate")
+        expected = inserts.wavy_cavity_polygon(BIN).buffer(-inserts.INSERT_CLEARANCE)
+        self.assertLess(footprint.hausdorff_distance(expected), 1e-6)
+        # Following the waves covers more floor than the former safe rectangle.
         clear_x, clear_y = BIN.usable_inside
-        # trimmed to the plate footprint, so it clears the wall on every side
-        self.assertLessEqual(
-            insert.bounds[1][0], clear_x / 2.0 - inserts.INSERT_CLEARANCE + 1e-6
-        )
-        self.assertLessEqual(
-            insert.bounds[1][1], clear_y / 2.0 - inserts.INSERT_CLEARANCE + 1e-6
-        )
-        self.assertGreaterEqual(
-            insert.bounds[0][1], -clear_y / 2.0 + inserts.INSERT_CLEARANCE - 1e-6
-        )
+        old_rectangle_area = (
+            clear_x - 2.0 * inserts.INSERT_CLEARANCE
+        ) * (clear_y - 2.0 * inserts.INSERT_CLEARANCE)
+        self.assertGreater(footprint.area, old_rectangle_area)
         # it is built standing on z=0 so it prints flat on the bed; dropped
         # onto the bin floor it clears the box entirely
         seated = translated(insert, (0.0, 0.0, BIN.wall))
@@ -290,11 +337,10 @@ class FullSpanDividerTests(unittest.TestCase):
         for solid in pieces:
             self.assertTrue(solid.is_watertight)
 
-    def test_inside_a_removable_insert_it_clips_flush_to_the_straight_plate_edge(
+    def test_inside_a_removable_insert_it_clips_flush_to_the_wavy_plate_edge(
         self,
     ) -> None:
-        # The insert's own plate is a straight rounded rectangle, not wavy -
-        # a full-span divider inside one should meet *that* edge exactly.
+        # A full-span divider meets the removable plate's fitted wavy edge.
         box = BoxSpec(40.0, 48.0, 40.0)
         whole = Zone.whole(box)
         zone = Zone(whole.x0, -0.8, whole.x1, 0.8)
@@ -308,6 +354,14 @@ class FullSpanDividerTests(unittest.TestCase):
         self.assertAlmostEqual(
             insert.bounds[0][0], footprint.bounds[0], places=3
         )
+
+    def test_flat_lower_wall_band_uses_its_actual_straight_profile(self) -> None:
+        box = BoxSpec(40.0, 48.0, 40.0, flat_inside=0.6)
+        footprint = insert_footprint(box, "separate")
+        expected = inserts.flat_cavity_polygon(box).buffer(-inserts.INSERT_CLEARANCE)
+        self.assertLess(footprint.hausdorff_distance(expected), 1e-6)
+        seated = translated(make_fitted_insert(box, []), (0.0, 0.0, box.wall))
+        self.assertLess(intersection_volume(seated, make_box(box)), 0.01)
 
     def test_full_span_round_trips_through_the_saved_design_schema(self) -> None:
         box = BoxSpec(40.0, 48.0, 40.0)
@@ -754,6 +808,18 @@ class OtherHoldersTests(unittest.TestCase):
         self.assertGreater(stepped.volume, uniform_nest.volume)
         self.assertTrue(stepped.is_watertight)
 
+    def test_alternate_nest_outline_puts_the_handle_at_the_other_end(self) -> None:
+        normal = inserts._item_plan_outline(DRIVER, "x", 0.0, 0.0)
+        flipped = inserts._item_plan_outline(DRIVER, "x", 0.0, 0.0, True)
+        self.assertLess(normal.intersection(Zone(-35, 7, -25, 8).polygon).area, 1e-6)
+        self.assertGreater(flipped.intersection(Zone(-35, 7, -25, 8).polygon).area, 1.0)
+        self.assertAlmostEqual(normal.area, flipped.area)
+        built = build_features(BIN, [Feature(
+            "nest", Zone(-50.0, -24.0, 50.0, 24.0), DRIVER,
+            count=2, alternate_ends=True,
+        )], BIN.wall)[0]
+        self.assertTrue(built.is_watertight)
+
     def test_posts_are_tapered_and_repeat_along_the_selected_axis(self) -> None:
         feature = Feature(
             "post", Zone(-30.0, -10.0, 30.0, 10.0), count=3, along="x",
@@ -873,10 +939,22 @@ class LayoutModelTests(unittest.TestCase):
 
     def test_layout_json_round_trip_preserves_custom_items_and_options(self) -> None:
         layout = inserts.Layout((Feature(
-            "cradle", Zone(-40, -20, 40, 20), DRIVER, 3, "x", {"floor_gap": 3.0}
+            "cradle", Zone(-40, -20, 40, 20), DRIVER, 3, "x", {"floor_gap": 3.0},
+            alternate_ends=True,
         ),), "separate")
         rebuilt = inserts.layout_from_dict(inserts.layout_to_dict(layout))
         self.assertEqual(rebuilt, layout)
+
+    def test_old_layouts_default_to_non_alternating_ends(self) -> None:
+        data = inserts.layout_to_dict(Layout((Feature(
+            "cradle", Zone(-40, -20, 40, 20), DRIVER, 2,
+        ),)))
+        del data["features"][0]["alternate_ends"]
+        self.assertFalse(layout_from_dict(data).features[0].alternate_ends)
+
+    def test_only_curved_item_holders_can_alternate_ends(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cradle or nest"):
+            Feature("bore", Zone(-10, -10, 10, 10), DRIVER, alternate_ends=True)
 
     def test_empty_standalone_and_cartridge_inserts_are_valid_base_plates(self) -> None:
         for mesh in (inserts.make_fitted_insert(BIN, []),
