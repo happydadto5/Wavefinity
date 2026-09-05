@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-05 — Adjustable cradle end margin
+
+- Turning on **Alternate ends** now reveals a **% from ends** field beneath the
+  checkbox, pre-filled with the value in force (10%).
+- The number is stored per cradle as `options['end_margin']` and drives both the
+  build (`_cradle_end_margin`) and the bin auto-grow footprint. Larger values
+  pull alternating troughs toward the middle; smaller values push them to the
+  ends. Clamped to 45% so the two margins always leave a real middle.
+- Absent or blank keeps the historic 10%, so existing designs are unchanged.
+
 ## 2026-09-05 — Photo Nest custom cavities
 
 ### Replaced

@@ -714,8 +714,19 @@ function renderDraftFields() {
   if (info.flags.alternate) {
     html += `<label class="check-card wide">
       <input type="checkbox" data-draft="alternate_ends" ${one.alternate_ends === true ? "checked" : ""}>
-      <span><strong>Alternate ends</strong><small>Places every second trough near the opposite end of the bin, with 10% end clearance; each trough becomes a separate body.</small></span>
+      <span><strong>Alternate ends</strong><small>Places every second trough near the opposite end of the bin, with an adjustable end clearance (10% by default); each trough becomes a separate body.</small></span>
     </label>`;
+    if (one.alternate_ends === true) {
+      const marginField = info.fields.find(entry => entry.key === "end_margin");
+      if (marginField) {
+        const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, "end_margin");
+        const shown = explicit
+          ? one.options.end_margin
+          : state.draftResolvedOptions?.end_margin ?? marginField.default;
+        html += field(marginField.label, "option:end_margin", fmt(shown), { step: "1" });
+        html += `<p class="field-help wide">How far each trough sits in from its end of the bin, as a share of the run. Larger pulls the troughs toward the middle; smaller pushes them out to the ends.</p>`;
+      }
+    }
   }
   if (info.flags.along) {
     html += `<fieldset class="wide"><legend>Runs along</legend><div class="segmented two">
@@ -729,8 +740,9 @@ function renderDraftFields() {
     const isCradle = one.kind === "cradle";
     const isBore = one.kind === "bore";
     // Cradles and bores use measured dimensions. Photo Nest has no item fields.
-    if (!isBore) html += field("Length", "item_length", fmt(first.length), { unit: "mm" });
-    html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm" });
+    const measuredStep = isCradle ? "1" : undefined;
+    if (!isBore) html += field("Length", "item_length", fmt(first.length), { unit: "mm", step: measuredStep });
+    html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: measuredStep });
     if (!isCradle) {
       html += `<label>Profile<select data-draft="profile">
         ${["round", "hex", "square"].map(profile => `<option value="${profile}" ${item.profile === profile ? "selected" : ""}>${profile[0].toUpperCase() + profile.slice(1)}</option>`).join("")}
@@ -745,6 +757,8 @@ function renderDraftFields() {
     }
   }
   for (const option of info.fields) {
+    // Shown inline with the Alternate ends checkbox above, only when it's on.
+    if (option.key === "end_margin") continue;
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
     const autoHint = AUTO_PLACEHOLDER[info.kind]?.[option.key];
     const shown = !explicit && autoHint
@@ -1059,8 +1073,10 @@ function updateDraftFromFields(event) {
   }
   if (one.kind === "cradle" && (
     changed === "count" || changed === "item_length" || changed === "item_diameter" ||
-    changed === "alternate_ends" || changed === "option:spacing"
+    changed === "alternate_ends" || changed === "option:spacing" || changed === "option:end_margin"
   )) sizeCradleToItem(one);
+  // Toggling Alternate ends shows or hides the "% from ends" field beneath it.
+  if (changed === "alternate_ends") renderDraftFields();
   updateSelectionButtons();
   refreshDraftSoon();
 }

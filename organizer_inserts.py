@@ -50,7 +50,8 @@ CRADLE_RIB_MAX = 6.0       # but never thicker than this, however fat the tool
 BASE_PLATE = 0.6           # floor of a standalone insert
 CRADLE_FLOOR_GAP = 2.0     # gap under the widest part of a lying object
 CRADLE_MIN_FLOOR_GAP = 0.4 # thinnest bottom floor under a cradle trough
-CRADLE_ALTERNATE_END_MARGIN = 0.10  # clear floor left at each run-axis end
+CRADLE_ALTERNATE_END_MARGIN = 0.10  # default floor left at each run-axis end
+CRADLE_ALTERNATE_END_MARGIN_MAX = 0.45  # keep a real middle so troughs still cross
 BORE_WALL = 1.6            # material around a bore
 INSERT_CLEARANCE = 0.4     # slack around a standalone insert, per side
 MIN_FEATURE_GAP = 0.8      # material between two features
@@ -529,6 +530,28 @@ def _fit_count(available: float, pitch: float, body: float) -> int:
 # --- cradles ------------------------------------------------------------------
 
 
+def _cradle_end_margin(one: "Feature") -> float:
+    """Alternate-ends clearance kept at each run-axis end, as a fraction of the
+    run.
+
+    Stored as a percent in ``options['end_margin']`` - the editor's "% from
+    ends" field, which only appears once Alternate ends is on. Missing, blank or
+    unparseable falls back to the historic 10%. Clamped to
+    ``CRADLE_ALTERNATE_END_MARGIN_MAX`` so the two end margins can never eat the
+    whole run.
+    """
+    raw = one.options.get("end_margin")
+    if raw is None or raw == "":
+        return CRADLE_ALTERNATE_END_MARGIN
+    try:
+        fraction = float(raw) / 100.0
+    except (TypeError, ValueError):
+        return CRADLE_ALTERNATE_END_MARGIN
+    if not math.isfinite(fraction):
+        return CRADLE_ALTERNATE_END_MARGIN
+    return min(max(fraction, 0.0), CRADLE_ALTERNATE_END_MARGIN_MAX)
+
+
 def _cradle_wall(held: float) -> float:
     """The trough wall sized to the tool it carries.
 
@@ -554,6 +577,9 @@ def cradle_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, fl
         # those overlapping walls, then opens a real gap.
         "spacing": 0.0,
         "floor_gap": CRADLE_FLOOR_GAP,
+        # Only read when ``alternate_ends`` is on; the editor hides the field
+        # otherwise. Percent of the run left clear at each end.
+        "end_margin": CRADLE_ALTERNATE_END_MARGIN * 100.0,
     }
 
 
@@ -577,7 +603,8 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
       ``spacing`` opening as clear air between them.
 
     ``alternate_ends`` places every second trough near the opposite end of the
-    run axis, leaving ten percent of that axis clear at each end.
+    run axis, leaving ``options['end_margin']`` percent (default ten) of that
+    axis clear at each end.
     """
     item = _need_item(spec_feature)
     zone = spec_feature.zone
@@ -628,11 +655,12 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
         )
 
     alternating = bool(spec_feature.alternate_ends) and count > 1
-    minimum_alternate_run = length / (1.0 - 2.0 * CRADLE_ALTERNATE_END_MARGIN)
+    end_margin = _cradle_end_margin(spec_feature)
+    minimum_alternate_run = length / (1.0 - 2.0 * end_margin)
     if alternating and run + 1e-9 < minimum_alternate_run:
         raise ValueError(
             f"{item.name} is {length:g} mm long, alternating ends need room "
-            f"for {CRADLE_ALTERNATE_END_MARGIN:.0%} end clearance, but its zone only runs "
+            f"for {end_margin:.0%} end clearance, but its zone only runs "
             f"{run:.1f} mm along {along}"
         )
     if not alternating and length > run + 1e-9:
@@ -688,7 +716,7 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
 
     solids: list[trimesh.Trimesh] = []
     alternate_shift = (
-        (run - length) / 2.0 - CRADLE_ALTERNATE_END_MARGIN * run
+        (run - length) / 2.0 - end_margin * run
         if alternating else 0.0
     )
     for index, seat in enumerate(seats):
@@ -712,7 +740,7 @@ def cradle_min_footprint(one: Feature) -> tuple[float, float]:
     length = item.length
     alternating = bool(one.alternate_ends) and count > 1
     run = math.ceil(
-        length / (1.0 - 2.0 * CRADLE_ALTERNATE_END_MARGIN)
+        length / (1.0 - 2.0 * _cradle_end_margin(one))
         if alternating else length
     )
     body = item.widest + wall
