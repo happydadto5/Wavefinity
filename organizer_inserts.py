@@ -49,6 +49,8 @@ CRADLE_RIB_FRACTION = 0.25 # a cradle wall is this much of the tool's diameter, 
 CRADLE_RIB_MAX = 6.0       # but never thicker than this, however fat the tool
 BASE_PLATE = 0.6           # floor of a standalone insert
 CRADLE_FLOOR_GAP = 2.0     # gap under the widest part of a lying object
+CRADLE_MIN_FLOOR_GAP = 0.4 # thinnest bottom floor under a cradle trough
+CRADLE_ALTERNATE_END_MARGIN = 0.10  # clear floor left at each run-axis end
 BORE_WALL = 1.6            # material around a bore
 INSERT_CLEARANCE = 0.4     # slack around a standalone insert, per side
 MIN_FEATURE_GAP = 0.8      # material between two features
@@ -547,9 +549,9 @@ def cradle_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, fl
     item = _need_item(one)
     return {
         "rib_thickness": _cradle_wall(item.widest),
-        # 0 = neighbours join into one continuous piece, sharing the wall
-        # between them; raising it first thickens that shared wall, then opens
-        # a real gap once every trough has its own full wall.
+        # 0 = neighbouring side walls fully overlap, so the joint is no
+        # thicker than either exposed outer side. Raising it first separates
+        # those overlapping walls, then opens a real gap.
         "spacing": 0.0,
         "floor_gap": CRADLE_FLOOR_GAP,
     }
@@ -567,15 +569,15 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
 
     ``spacing`` sets how a row of troughs relates:
 
-    * ``0`` - neighbours join into **one continuous body**, sharing the wall
-      between their channels.
-    * up to one wall thickness - still one body, but that shared wall widens.
-    * beyond that - each trough is its **own** solid, with ``spacing`` minus a
-      wall of clear air between them.
+    * ``0`` - neighbours join into **one continuous body**. Their facing side
+      walls fully overlap, so the joint is no thicker than an exposed side.
+    * up to half a wall thickness - still one body, while the shared joint
+      widens from one side-wall thickness to two.
+    * beyond that - each trough is its **own** solid, with the remaining
+      ``spacing`` opening as clear air between them.
 
-    ``alternate_ends`` shifts every second trough half a tool length along the
-    run axis so fatter real handles interlock head-to-tail instead of
-    colliding; a staggered row is always separate bodies.
+    ``alternate_ends`` places every second trough near the opposite end of the
+    run axis, leaving ten percent of that axis clear at each end.
     """
     item = _need_item(spec_feature)
     zone = spec_feature.zone
@@ -595,17 +597,21 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     radius = held / 2.0
     axis_z = base_z + floor_gap + held / 2.0
     trough_height = axis_z - base_z
-    if radius >= trough_height:
+    if floor_gap < CRADLE_MIN_FLOOR_GAP:
         raise ValueError(
-            f"{item.name}: a {item.widest:g} mm tool needs more than "
-            f"{floor_gap:g} mm of clearance under it to leave material below"
+            f"{item.name}: a {item.widest:g} mm tool needs at least "
+            f"{CRADLE_MIN_FLOOR_GAP:g} mm of clearance under it to leave material below"
         )
 
     run = zone.width if along == "x" else zone.depth
     across = zone.depth if along == "x" else zone.width
 
+    # A trough's wall is split half to each side. At zero spacing its facing
+    # halves occupy the same space: the middle joint is one side-wall thick,
+    # exactly matching either exposed outside edge rather than becoming 2x.
+    side_wall = wall / 2.0
     body = held + wall            # one trough, wall split to either side
-    pitch = body + spacing
+    pitch = held + side_wall + spacing
     count = spec_feature.count
     if count is None:
         count = _fit_count(across, pitch, body)
@@ -622,11 +628,16 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
         )
 
     alternating = bool(spec_feature.alternate_ends) and count > 1
-    stagger = length / 2.0 if alternating else 0.0
-    if length + stagger > run + 1e-9:
-        tail = ", every second one staggered," if alternating else ""
+    minimum_alternate_run = length / (1.0 - 2.0 * CRADLE_ALTERNATE_END_MARGIN)
+    if alternating and run + 1e-9 < minimum_alternate_run:
         raise ValueError(
-            f"{item.name} is {length:g} mm long{tail} but its zone only runs "
+            f"{item.name} is {length:g} mm long, alternating ends need room "
+            f"for {CRADLE_ALTERNATE_END_MARGIN:.0%} end clearance, but its zone only runs "
+            f"{run:.1f} mm along {along}"
+        )
+    if not alternating and length > run + 1e-9:
+        raise ValueError(
+            f"{item.name} is {length:g} mm long but its zone only runs "
             f"{run:.1f} mm along {along}"
         )
 
@@ -670,14 +681,18 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
             [block, union(cuts) if len(cuts) > 1 else cuts[0]]
         )
 
-    # Neighbours whose blocks touch or overlap (spacing up to one wall) come
-    # out as one continuous body; wider spacing splits them into separate ones.
-    if count > 1 and not alternating and spacing <= wall + 1e-9:
+    # Neighbours whose blocks touch or overlap (spacing up to one side wall)
+    # come out as one continuous body; wider spacing splits them apart.
+    if count > 1 and not alternating and spacing <= side_wall + 1e-9:
         return [_body(centre_across, used, seats, 0.0)]
 
     solids: list[trimesh.Trimesh] = []
+    alternate_shift = (
+        (run - length) / 2.0 - CRADLE_ALTERNATE_END_MARGIN * run
+        if alternating else 0.0
+    )
     for index, seat in enumerate(seats):
-        shift = stagger / 2.0 if index % 2 else -stagger / 2.0
+        shift = alternate_shift if index % 2 else -alternate_shift
         solids.append(_body(seat, body, [seat], shift))
     return solids
 
@@ -696,33 +711,64 @@ def cradle_min_footprint(one: Feature) -> tuple[float, float]:
     count = one.count or 1
     length = item.length
     alternating = bool(one.alternate_ends) and count > 1
-    stagger = length / 2.0 if alternating else 0.0
-    run = math.ceil(length + stagger)
+    run = math.ceil(
+        length / (1.0 - 2.0 * CRADLE_ALTERNATE_END_MARGIN)
+        if alternating else length
+    )
     body = item.widest + wall
-    across = math.ceil((count - 1) * (body + spacing) + body)
+    pitch = item.widest + wall / 2.0 + spacing
+    across = math.ceil((count - 1) * pitch + body)
     return (float(run), float(across)) if one.along == "x" else (float(across), float(run))
 
 
 # --- photo nests --------------------------------------------------------------
 
 
+def _softened_outline(outline: Polygon, smoothing: float) -> Polygon:
+    """Round off inward and outward details smaller than ``smoothing`` mm.
+
+    A close (fill notches) then an open (shave nubs); either can be skipped if
+    it would collapse the shape. Applied in the outline's own local scale,
+    before any resize/rotation, so a fixed millimetre value reads the same
+    however the nest is later scaled.
+    """
+    if not math.isfinite(smoothing) or smoothing < 0.0:
+        raise ValueError("Soften outline must be zero or greater")
+    if smoothing <= 0.0:
+        return outline
+    closed = outline.buffer(smoothing, join_style="round").buffer(
+        -smoothing, join_style="round"
+    )
+    opened = closed.buffer(-smoothing, join_style="round").buffer(
+        smoothing, join_style="round"
+    )
+    if not opened.is_empty and opened.area > 1e-6:
+        return opened
+    return outline
+
+
+def nest_smoothed_contour(one: Feature) -> tuple[tuple[float, float], ...]:
+    """The stored outline with the Soften-outline pass applied, still in the
+    feature's own local millimetres - before resize, rotation and placement -
+    so the 2D layout can draw exactly the silhouette the part will get."""
+    if not one.contour:
+        raise ValueError("upload a part photo before generating a Photo Nest")
+    poly = _softened_outline(
+        Polygon(one.contour), float(one.options.get("smoothing", 0.0))
+    )
+    return tuple(
+        (round(float(x), 3), round(float(y), 3))
+        for x, y in list(poly.exterior.coords)[:-1]
+    )
+
+
 def nest_contour_polygon(one: Feature, include_clearance: bool = False) -> Polygon:
     """The photo outline after proportional resize, rotation and placement."""
     if not one.contour:
         raise ValueError("upload a part photo before generating a Photo Nest")
-    outline = Polygon(one.contour)
-    smoothing = float(one.options.get("smoothing", 0.0))
-    if not math.isfinite(smoothing) or smoothing < 0.0:
-        raise ValueError("Soften outline must be zero or greater")
-    if smoothing > 0.0:
-        softened = outline.buffer(smoothing, join_style="round").buffer(
-            -smoothing, join_style="round"
-        )
-        softened = softened.buffer(-smoothing, join_style="round").buffer(
-            smoothing, join_style="round"
-        )
-        if not softened.is_empty and softened.area > 1e-6:
-            outline = softened
+    outline = _softened_outline(
+        Polygon(one.contour), float(one.options.get("smoothing", 0.0))
+    )
     outline = affinity.scale(outline, xfact=one.scale, yfact=one.scale, origin=(0, 0))
     outline = affinity.rotate(outline, one.rotation, origin=(0, 0), use_radians=False)
     if include_clearance:
@@ -735,11 +781,11 @@ def nest_contour_polygon(one: Feature, include_clearance: bool = False) -> Polyg
 
 
 def nest_required_zone(one: Feature) -> Zone:
-    """Tight axis-aligned footprint enclosing the cleared cavity and rim."""
+    """Tight axis-aligned footprint enclosing the cutter wall and its foot."""
     cavity = nest_contour_polygon(one, include_clearance=True)
     rim = float(one.options.get("rim", 3.0))
     if not math.isfinite(rim) or rim <= 0.0:
-        raise ValueError("Rim border must be greater than zero")
+        raise ValueError("Outline wall must be greater than zero")
     outer = cavity.buffer(rim, join_style="round").buffer(NEST_CHAMFER, join_style="round")
     min_x, min_y, max_x, max_y = outer.bounds
     return Zone(float(min_x), float(min_y), float(max_x), float(max_y))
@@ -770,7 +816,13 @@ def nest_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
 
 @feature("nest")
 def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
-    """A straight-walled cavity cut from the bin top from a photo contour."""
+    """A cookie-cutter wall that traces one photographed outline.
+
+    The wall stands straight up from ``base_z`` with the part's own footprint
+    for the opening - just enough to hold the part, not a filled block that
+    the part is cut out of. Its outside foot is chamfered so the thin wall has
+    no sharp root to snap at.
+    """
     options = resolved_options(box, spec_feature, base_z)
     clearance = options["clearance"]
     depth = options["depth"]
@@ -781,7 +833,7 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     if clearance < 0.0:
         raise ValueError("Clearance must be zero or greater")
     if rim <= 0.0:
-        raise ValueError("Rim border must be greater than zero")
+        raise ValueError("Outline wall must be greater than zero")
     if smoothing < 0.0:
         raise ValueError("Soften outline must be zero or greater")
     available = box.z - base_z
@@ -794,20 +846,31 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     if (abs(fitted.zone.width - spec_feature.zone.width) > 1e-4
             or abs(fitted.zone.depth - spec_feature.zone.depth) > 1e-4):
         raise ValueError("Photo Nest footprint is stale; update the outline or measurements")
-    cavity = nest_contour_polygon(spec_feature, include_clearance=True)
-    outer = cavity.buffer(rim, join_style="round")
-    outer_mesh = _extrude_polygon(outer, depth)
-    inner_mesh = _extrude_polygon(cavity, depth + 2.0)
-    outer_mesh.apply_translation((0.0, 0.0, base_z))
-    inner_mesh.apply_translation((0.0, 0.0, base_z - 1.0))
-    cutter = difference([outer_mesh, inner_mesh])
-    # Short stepped 45-degree-equivalent outside foot; the opening remains
-    # unchanged so the part still rests on the normal bin floor.
-    foot_outer = outer.buffer(NEST_CHAMFER, join_style="round")
-    foot = foot_outer.difference(outer)
-    foot_mesh = _extrude_polygon(foot, NEST_CHAMFER)
-    foot_mesh.apply_translation((0.0, 0.0, base_z + NEST_CHAMFER / 2.0))
-    return [cutter, foot_mesh]
+
+    opening = nest_contour_polygon(spec_feature, include_clearance=True)
+    outer = opening.buffer(rim, join_style="round")
+    chamfer = min(NEST_CHAMFER, rim, depth / 2.0)
+
+    # Solid outer column for the full wall height...
+    column = _extrude_polygon(outer, depth)
+    column.apply_translation((0.0, 0.0, base_z))
+    block = [column]
+    # ...plus a 45-degree outside foot, stepped into thin printable layers: the
+    # outer face starts a full chamfer proud of the wall at the floor and pulls
+    # back flush by the top of the foot, so the wall meets the bed on a wedge
+    # and not a sharp thin edge.
+    steps = 4
+    layer = chamfer / steps
+    for index in range(steps):
+        grow = chamfer * (steps - index) / steps
+        disk = _extrude_polygon(outer.buffer(grow, join_style="round"), layer)
+        disk.apply_translation((0.0, 0.0, base_z + index * layer))
+        block.append(disk)
+    # One vertical bore leaves the part's own footprint open the whole way up,
+    # so the result is a cookie cutter, not a filled block with a cutout.
+    bore = _extrude_polygon(opening, depth + 2.0)
+    bore.apply_translation((0.0, 0.0, base_z - 1.0))
+    return [difference([union(block), bore])]
 
 
 # --- bores --------------------------------------------------------------------

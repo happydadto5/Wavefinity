@@ -238,12 +238,12 @@ presets, since every bin is cut for one specific tool.
 A cradle starts as a single trough (**Quantity 1**, like a post). **Quantity =
 N** places N troughs across the zone, **Quantity = auto** fits as many as the
 zone holds. **Spacing** controls how a row relates: `0` (the default) joins the
-row into **one continuous body**, neighbours sharing the wall between their
-channels; raising it first thickens that shared wall, then — once every trough
-has its own full wall — opens a real air gap and splits the row into separate
-pieces. Its footprint tracks what it holds: the run axis (the tool lies along
-it) is the tool length; the across axis is N channels at `diameter + wall +
-spacing` pitch. **X direction / Y direction** chooses which bin axis the tool
+row into **one continuous body**, with each pair of facing side walls fully
+overlapping so the middle joint is no thicker than either outer side. Raising
+it separates those walls; once they no longer touch, a real air gap opens and
+the row splits into separate pieces. For ordinary cradles, its footprint tracks
+what it holds: the run axis (the tool lies along it) is the tool length; the across axis is N
+channels at `diameter + half wall + spacing` pitch. **X direction / Y direction** chooses which bin axis the tool
 lies along — a 40 mm tool needs 40+ mm that way, so in a long narrow bin only
 one direction fits, and the editor says which when it doesn't: *"40 mm long but
 its zone only runs 13 mm along x"* rather than a raw overflow. Every
@@ -261,29 +261,32 @@ or WEBP photo. Put one flat part on an 8.5 × 11 in sheet, keep all four paper
 corners visible, and photograph it directly overhead. Wavefinity corrects the
 paper to 215.9 × 279.4 mm, isolates the outside silhouette, cleans camera
 noise, and stores only the closed millimetre contour — never the source image.
-The 2D layout shows that contour and provides move, proportional-resize, and
-rotation handles. **Clearance** sets the holding gap, **Wall height** sets how
-high the cutter rises from the floor, **Outline wall** sets its thickness, and
-**Soften outline** removes small inward and outward details. A chamfered foot
-reinforces the cutter at the floor; the bin remains open inside rather than a
-filled block with a cutout. The outer bin width and depth recalculate to the
-smallest enclosing 8 mm-grid footprint; height remains solely the Bin height.
-Missing paper, severe perspective, an edge-touching part, multiple parts, and
-unusably small/noisy outlines are rejected with a specific correction. The
-retired measured/segment Nest format is rejected explicitly rather than
-silently reinterpreted.
+The 2D layout draws the softened silhouette — the same one the printed cutter
+gets — and provides move, proportional-resize, and rotation handles. Only two
+settings are exposed: **Fit clearance** sets the gap between the wall and the
+part, and **Soften outline** rounds off small inward and outward details so the
+wall does not have to trace every jag. The wall's
+thickness and height are fixed printable defaults. The Photo Nest prints on its
+own as a bare cookie-cutter loop standing straight on the bed — no wavy bin, no
+floor — with a chamfered foot so the thin wall has no sharp root to snap at. It
+holds the part in place; it is not a filled block with the part cut out. The
+outer bin width and depth still recalculate to the smallest enclosing 8 mm-grid
+footprint. Missing paper, severe perspective, an edge-touching part, multiple
+parts, and unusably small/noisy outlines are rejected with a specific
+correction. The retired measured/segment Nest format is rejected explicitly
+rather than silently reinterpreted.
 
 Cradle holders also offer **Alternate ends** (off by default): when enabled,
-every second repeated tool is shifted half a tool length along the run axis so fatter
-handles interlock instead of colliding. It adds half a tool length to the run
-axis, so a cradle set to alternate needs a bin about 1.5× the tool length that
-way; turn it off, or rotate, if the run axis runs short. Saved as
-`alternate_ends`; no effect when only one tool fits.
+every second repeated tool sits near the opposite end of the run axis, leaving
+about 10% of that axis clear at each end. Each trough becomes its own separate
+solid body. Alternating needs a run axis at least 1.25× the tool length; turn
+it off, or rotate, if the run axis runs short. Saved as `alternate_ends`; no
+effect when only one tool fits.
 
 | Holder | Purpose | Optional `key=value` settings |
 |---|---|---|
 | `cradle` | Half-round troughs along X or Y - `spacing` 0 joins the row into one shared body, higher values split it. No fit clearance; wall thickness auto-scales with the tool | `spacing`, `floor_gap` |
-| `nest` | Photo-scaled raised custom contour wall with a chamfered foot | `clearance`, `depth`, `rim`, `smoothing` |
+| `nest` | Photo-scaled cookie-cutter wall on a chamfered foot, printed on its own with no bin. `depth` (height) and `rim` (thickness) are fixed | `clearance`, `smoothing` |
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
 | `divider` | One or more straight or leaning subdividing walls along X or Y | `height`, `thickness`, `angle`, `spacing` |

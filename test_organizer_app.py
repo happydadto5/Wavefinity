@@ -1433,11 +1433,11 @@ class InsertEditorTests(unittest.TestCase):
                 run_room, across_room = (
                     (inside_x, inside_y) if along == "x" else (inside_y, inside_x)
                 )
-                run = min(run_room, math.ceil(item.length + rib))
+                run = min(run_room, math.ceil(item.length))
                 across = min(
                     across_room,
                     math.ceil(item.widest + rib
-                              + (count - 1) * (item.widest + spacing + rib)),
+                              + (count - 1) * (item.widest + spacing + rib / 2)),
                 )
                 w, d = (run, across) if along == "x" else (across, run)
                 zone = organizer_app.snapped_zone(
@@ -1448,6 +1448,26 @@ class InsertEditorTests(unittest.TestCase):
                 )
                 built = build_features(spec, [feature], base)
                 self.assertTrue(built, (count, along))
+
+    def test_default_cradle_hugs_tool_length_without_ghost_rib_margin(self) -> None:
+        spec = BoxSpec(96.0, 96.0, 30.0)
+        item = organizer_inserts.Item.simple("Driver", 40.0, 6.0)
+        feature = organizer_app.default_feature(spec, "cradle", item=item, along="x")
+        self.assertEqual(feature.zone.width, 40.0)
+
+    def test_cradle_part_kind_flags_has_size_false(self) -> None:
+        cradle_info = organizer_app.PART_KIND_INFO["cradle"]
+        flags = cradle_info[2]
+        self.assertFalse(flags["size"])
+
+    def test_cradle_feature_height_ignores_item_clearance(self) -> None:
+        spec = BoxSpec(96.0, 96.0, 30.0)
+        item = organizer_inserts.Item.simple("Driver", 40.0, 6.0, clearance=2.0)
+        feature = organizer_app.default_feature(spec, "cradle", item=item)
+        base_z = 0.8
+        height = organizer_app._feature_height(spec, feature, base_z)
+        expected = base_z + 2.0 + item.widest / 2.0
+        self.assertAlmostEqual(height, expected, places=5)
 
     def test_default_post_adapts_to_a_one_cell_wide_cartridge(self) -> None:
         spec = BoxSpec(16.0, 48.0, 40.0)
@@ -1535,6 +1555,37 @@ class InsertEditorTests(unittest.TestCase):
             ) as generate:
                 organizer_app.run_command(args)
             self.assertEqual(generate.call_args.args[-2:], ("bottom", False))
+
+    def test_photo_nest_exports_a_bare_cutter_with_no_bin(self) -> None:
+        spec = BoxSpec(96.0, 64.0, 40.0)
+        one = organizer_inserts.fitted_nest_feature(
+            organizer_app.Feature(
+                "nest", organizer_app.Zone(-1, -1, 1, 1),
+                options={"clearance": 0.6, "depth": 8.0, "rim": 3.0, "smoothing": 0.0},
+                contour=((-30, -12), (30, -12), (28, 12), (-30, 12)),
+            )
+        )
+        layout = organizer_app.Layout((one,), "fused")
+        with tempfile.TemporaryDirectory() as directory:
+            result = organizer_app.generate_organizer_files(
+                spec, layout, Path(directory), label="IGNORED", scoop=True
+            )
+            self.assertEqual(result["mode"], "fused")
+            self.assertNotIn("insert", result)
+            self.assertNotIn("label", result)
+            self.assertEqual(result["customizations"]["scoop"], False)
+            files = sorted(Path(directory).glob("*.3mf"))
+            self.assertEqual(len(files), 1)
+            self.assertEqual(validate_3mf(files[0], 1)["warnings"], 0)
+        body = organizer_inserts.union(build_features(spec, [one], 0.0))
+        self.assertTrue(body.is_watertight)
+        # Stands on the bed and rises only the cutter height - no bin walls.
+        self.assertAlmostEqual(float(body.bounds[0][2]), 0.0, places=5)
+        self.assertAlmostEqual(float(body.bounds[1][2]), 8.0, places=5)
+        # A traced wall, nowhere near the volume of a filled block.
+        self.assertLess(
+            float(body.volume), one.zone.width * one.zone.depth * 8.0 * 0.5
+        )
 
     def test_separate_export_writes_a_box_and_a_removable_insert(self) -> None:
         spec = BoxSpec(16.0, 24.0, 20.0)

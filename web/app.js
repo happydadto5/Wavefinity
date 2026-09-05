@@ -714,7 +714,7 @@ function renderDraftFields() {
   if (info.flags.alternate) {
     html += `<label class="check-card wide">
       <input type="checkbox" data-draft="alternate_ends" ${one.alternate_ends === true ? "checked" : ""}>
-      <span><strong>Alternate ends</strong><small>Staggers every second tool end-for-end so fatter handles interlock instead of colliding.</small></span>
+      <span><strong>Alternate ends</strong><small>Places every second trough near the opposite end of the bin, with 10% end clearance; each trough becomes a separate body.</small></span>
     </label>`;
   }
   if (info.flags.along) {
@@ -849,8 +849,8 @@ function widenDividerFootprint(one) {
 // Keep a cradle's footprint hugging what it actually holds, so the Width/Depth
 // fields and the 2D layout never disagree with the built ribs.
 //
-//   run axis (the tool lies along it): tool length + any alternate-ends
-//     stagger + one rib. Fixed by the tool, so this always hugs.
+//   run axis (the tool lies along it): tool length, except Alternate ends uses
+//     the whole available run so troughs can sit 10% in from opposite sides.
 //   across axis (lanes sit side by side on it): a set Quantity hugs to exactly
 //     that many lanes; Quantity = auto spans the whole bin so the engine's
 //     "fit as many as will fit" has room to work - otherwise a 1-lane zone
@@ -875,19 +875,20 @@ function sizeCradleToItem(one) {
   const rib = Math.min(Math.max(diameter * 0.25, 1.6), 6);
   const auto = one.count == null;
   const count = auto ? 1 : one.count;
-  // Auto Quantity fits as many lanes as the zone holds, so treat it as "more
-  // than one" when reserving room for the alternate-ends stagger.
-  const stagger = one.alternate_ends === true && (auto || count > 1) ? length / 2 : 0;
+  // Auto Quantity may become multiple lanes, so it also uses the end-to-end
+  // layout whenever Alternate ends is on.
+  const alternating = one.alternate_ends === true && (auto || count > 1);
 
   const [insideX, insideY] = binInsideExtent(state.design.box);
   const roomAlong = one.along === "x" ? insideX : insideY;
   const roomAcross = one.along === "x" ? insideY : insideX;
 
   const oneLane = diameter + rib;
-  const run = Math.min(roomAlong, Math.max(1, Math.ceil(length + stagger + rib)));
+  const pitch = diameter + rib / 2 + spacing;
+  const run = alternating ? roomAlong : Math.min(roomAlong, Math.max(1, Math.ceil(length)));
   const across = auto
     ? roomAcross
-    : Math.min(roomAcross, Math.max(1, Math.ceil(oneLane + (count - 1) * (diameter + spacing + rib))));
+    : Math.min(roomAcross, Math.max(1, Math.ceil(oneLane + (count - 1) * pitch)));
 
   const width = one.along === "x" ? run : across;
   const depth = one.along === "x" ? across : run;
@@ -1577,14 +1578,20 @@ function layoutFeatures() {
   return features;
 }
 
-function nestOutlineWorld(feature) {
-  if (!feature?.contour?.length) return [];
+// The nest silhouette in world space. Prefer the server's softened contour
+// (the Soften outline pass, in the feature's own local mm) so the 2D layout
+// matches the 3D preview and the printed part; the raw contour is the fallback
+// before the first preview comes back. Move/rotate/resize stay client-side, so
+// this still tracks a live drag - smoothing does not depend on those.
+function nestOutlineWorld(feature, softContour = null) {
+  const local = softContour?.length ? softContour : feature?.contour;
+  if (!local?.length) return [];
   const cx = (feature.zone[0] + feature.zone[2]) / 2;
   const cy = (feature.zone[1] + feature.zone[3]) / 2;
   const angle = number(feature.rotation) * Math.PI / 180;
   const scale = Math.max(.05, number(feature.scale, 1));
   const cosine = Math.cos(angle), sine = Math.sin(angle);
-  return feature.contour.map(([x, y]) => [
+  return local.map(([x, y]) => [
     cx + scale * (number(x) * cosine - number(y) * sine),
     cy + scale * (number(x) * sine + number(y) * cosine),
   ]);
@@ -1702,7 +1709,7 @@ function renderLayout2D() {
     context.strokeStyle = index === state.selected ? "#176e91" : shade(color, .72);
     context.lineWidth = index === state.selected ? 3 : 1.2;
     if (feature.kind === "nest" && feature.contour) {
-      const outline = drawClosedPath(context, nestOutlineWorld(feature), toCanvas);
+      const outline = drawClosedPath(context, nestOutlineWorld(feature, state.preview.nest_soft_contours?.[index]), toCanvas);
       context.fillStyle = color + "35";
       context.fill(outline);
       context.stroke(outline);
@@ -1717,11 +1724,14 @@ function renderLayout2D() {
       context.fillText(`${index + 1} ${partInfo(feature.kind)?.title || feature.kind}`, (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
     }
     if (index === state.selected) {
-      context.fillStyle = "#237fa6";
-      context.strokeStyle = "white";
-      context.lineWidth = 1;
-      context.fillRect(p1[0] - 6, p1[1] - 6, 12, 12);
-      context.strokeRect(p1[0] - 6, p1[1] - 6, 12, 12);
+      const resizable = Boolean(partInfo(feature.kind)?.flags?.size || feature.kind === "nest");
+      if (resizable) {
+        context.fillStyle = "#237fa6";
+        context.strokeStyle = "white";
+        context.lineWidth = 1;
+        context.fillRect(p1[0] - 6, p1[1] - 6, 12, 12);
+        context.strokeRect(p1[0] - 6, p1[1] - 6, 12, 12);
+      }
       if (feature.kind === "nest" && feature.contour) {
         const top = toCanvas([(feature.zone[0] + feature.zone[2]) / 2, feature.zone[3]]);
         const rotate = toCanvas([(feature.zone[0] + feature.zone[2]) / 2, feature.zone[3] + 8]);
@@ -1741,7 +1751,7 @@ function renderLayout2D() {
     context.lineWidth = 2;
     context.setLineDash([6, 3]);
     if (state.draft.kind === "nest" && state.draft.contour) {
-      const outline = drawClosedPath(context, nestOutlineWorld(state.draft), toCanvas);
+      const outline = drawClosedPath(context, nestOutlineWorld(state.draft, state.preview.draft_soft_contour), toCanvas);
       context.fill(outline); context.stroke(outline);
     } else if (state.draft.kind !== "nest") {
       context.fillRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
@@ -1771,7 +1781,7 @@ function hitFeature(world) {
           (world[1] - point[1]) * state.layoutTransform.scale,
         ) < 14)) return index;
       }
-      if (pointInPolygon(world, nestOutlineWorld(features[index]))) return index;
+      if (pointInPolygon(world, nestOutlineWorld(features[index], state.preview?.nest_soft_contours?.[index]))) return index;
       continue;
     }
     if (world[0] >= zone[0] && world[0] <= zone[2] && world[1] >= zone[1] && world[1] <= zone[3]) return index;
@@ -1798,9 +1808,10 @@ function wireLayoutInteraction() {
     const rotatePoint = [(zone[0] + zone[2]) / 2, zone[3] + 8];
     const rotatePixels = Math.hypot((world[0] - rotatePoint[0]) * state.layoutTransform.scale, (world[1] - rotatePoint[1]) * state.layoutTransform.scale);
     const centre = [(zone[0] + zone[2]) / 2, (zone[1] + zone[3]) / 2];
+    const resizable = Boolean(partInfo(feature.kind)?.flags?.size || feature.kind === "nest");
     state.layoutDrag = {
       index, feature, original: clone(feature),
-      mode: feature.kind === "nest" && rotatePixels < 14 ? "rotate" : handlePixels < 14 ? "resize" : "move",
+      mode: feature.kind === "nest" && rotatePixels < 14 ? "rotate" : (resizable && handlePixels < 14) ? "resize" : "move",
       start: world,
       centre,
       startAngle: Math.atan2(world[1] - centre[1], world[0] - centre[0]),

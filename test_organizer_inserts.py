@@ -68,7 +68,7 @@ SPLIT_SPACING = 4.0
 
 
 def _cradle_pitch(diameter: float, spacing: float = SPLIT_SPACING) -> float:
-    return diameter + _cradle_wall(diameter) + spacing
+    return diameter + _cradle_wall(diameter) / 2.0 + spacing
 
 
 def _lane_centres(solids, axis: int) -> list[float]:
@@ -210,14 +210,20 @@ class CradleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "long"):
             build_features(BIN, [cramped], BIN.wall)
 
-    def test_a_negative_floor_gap_that_leaves_no_material_below_is_refused(self) -> None:
-        buried = Feature(
-            "cradle", Zone.end(BIN, "x", 88.0), ROD, options={"floor_gap": -1.0}
+    def test_a_subminimum_floor_gap_that_leaves_unprintable_material_below_is_refused(self) -> None:
+        for bad_gap in (-1.0, 0.0, 0.1, 0.35):
+            buried = Feature(
+                "cradle", Zone.end(BIN, "x", 88.0), ROD, options={"floor_gap": bad_gap}
+            )
+            with self.assertRaisesRegex(ValueError, "clearance under it"):
+                build_features(BIN, [buried], BIN.wall)
+        valid = Feature(
+            "cradle", Zone.end(BIN, "x", 88.0), ROD, options={"floor_gap": inserts.CRADLE_MIN_FLOOR_GAP}
         )
-        with self.assertRaisesRegex(ValueError, "clearance under it"):
-            build_features(BIN, [buried], BIN.wall)
+        solids = build_features(BIN, [valid], BIN.wall)
+        self.assertTrue(solids[0].is_watertight)
 
-    def test_alternate_ends_staggers_every_second_trough_along_the_run(self) -> None:
+    def test_alternate_ends_places_troughs_near_opposite_run_ends(self) -> None:
         one = Feature(
             "cradle", Zone.end(BIN, "x", 124.0), ROD,
             count=4, along="x", alternate_ends=True,
@@ -230,18 +236,21 @@ class CradleTests(unittest.TestCase):
             float(t.bounds[:, 0].mean()) - centre_along
             for t in sorted(troughs, key=lambda t: t.bounds[:, 1].mean())
         ]
-        # troughs alternate: one shifted low along the run, the next shifted high
-        self.assertLess(mids[0], -1.0)
-        self.assertGreater(mids[1], 1.0)
+        # Trough ends sit 10% in from each end of the run, not around its middle.
+        run = one.zone.width
+        margin = inserts.CRADLE_ALTERNATE_END_MARGIN * run
+        self.assertAlmostEqual(mids[0] - ROD.length / 2.0, -run / 2.0 + margin, places=3)
+        self.assertAlmostEqual(mids[1] + ROD.length / 2.0, run / 2.0 - margin, places=3)
         self.assertAlmostEqual(mids[0], mids[2], places=3)
         self.assertAlmostEqual(mids[1], mids[3], places=3)
-        self.assertAlmostEqual(mids[1] - mids[0], ROD.length / 2.0, places=3)
+        self.assertAlmostEqual(mids[1] - mids[0], run * 0.8 - ROD.length, places=3)
 
-    def test_alternate_ends_needs_room_for_the_stagger(self) -> None:
+    def test_alternate_ends_needs_room_for_end_clearance(self) -> None:
         snug = Feature(
             "cradle", Zone.end(BIN, "x", 70.0), ROD, count=4, alternate_ends=True
         )
-        with self.assertRaisesRegex(ValueError, "staggered"):
+        self.assertEqual(inserts.cradle_min_footprint(snug)[0], 75.0)
+        with self.assertRaisesRegex(ValueError, "end clearance"):
             build_features(BIN, [snug], BIN.wall)
 
     def test_alternate_ends_does_not_change_a_single_cradle(self) -> None:
@@ -420,21 +429,28 @@ class MultipleCradleTests(unittest.TestCase):
                 self.assertEqual(len(trough.split(only_watertight=False)), 1)
 
     def test_spacing_zero_joins_the_row_into_one_shared_body(self) -> None:
-        # neighbours share the wall between them - the whole row is one solid
+        # Facing side walls fully overlap: the middle joint is only as thick
+        # as one exposed side, not the double-thick joint that abutting blocks
+        # would create.
         solids = build_features(BIN, [self._row(count=5, spacing=0.0)], BIN.wall)
         self.assertEqual(len(solids), 1)
         self.assertTrue(solids[0].is_watertight)
         self.assertEqual(len(solids[0].split(only_watertight=False)), 1)
-
-    def test_raising_spacing_past_a_wall_splits_the_row(self) -> None:
         wall = _cradle_wall(ROD.widest)
-        merged = build_features(BIN, [self._row(count=4, spacing=wall)], BIN.wall)
-        split = build_features(BIN, [self._row(count=4, spacing=wall + 2.0)], BIN.wall)
-        self.assertEqual(len(merged), 1)          # up to one wall: still joined
-        self.assertEqual(len(split), 4)           # beyond it: separate troughs
+        expected = 5 * ROD.widest + 6 * wall / 2.0
+        self.assertAlmostEqual(
+            float(solids[0].bounds[1][1] - solids[0].bounds[0][1]), expected, places=6
+        )
+
+    def test_raising_spacing_past_a_side_wall_splits_the_row(self) -> None:
+        side_wall = _cradle_wall(ROD.widest) / 2.0
+        merged = build_features(BIN, [self._row(count=4, spacing=side_wall)], BIN.wall)
+        split = build_features(BIN, [self._row(count=4, spacing=side_wall + 2.0)], BIN.wall)
+        self.assertEqual(len(merged), 1)          # side walls still touch
+        self.assertEqual(len(split), 4)           # beyond that, clear air
         gap = _lane_centres(split, 1)
         self.assertAlmostEqual(
-            float(np.diff(gap)[0]), _cradle_pitch(ROD.widest, wall + 2.0), places=6
+            float(np.diff(gap)[0]), _cradle_pitch(ROD.widest, side_wall + 2.0), places=6
         )
 
     def test_a_fused_row_of_many_cradles_is_one_solid(self) -> None:
@@ -1126,6 +1142,24 @@ class OtherHoldersTests(unittest.TestCase):
         ).area
         smooth_area = inserts.nest_contour_polygon(detailed, include_clearance=False).area
         self.assertNotAlmostEqual(raw_area, smooth_area, places=3)
+
+    def test_smoothed_local_contour_matches_the_built_silhouette(self) -> None:
+        # what the 2D layout draws (local, pre-transform) must be the same
+        # softening the builder bakes into the printed wall
+        shape = ((-20, -8), (-4, -8), (-4, -2), (4, -2), (4, -8),
+                 (20, -8), (20, 8), (-20, 8))
+        sharp = photo_nest(contour=shape, options={"smoothing": 0.0})
+        soft = photo_nest(contour=shape, options={"smoothing": 3.0})
+        self.assertEqual(len(inserts.nest_smoothed_contour(sharp)), len(shape))
+        soft_local = inserts.nest_smoothed_contour(soft)
+        self.assertGreater(len(soft_local), len(shape))
+        from shapely.geometry import Polygon as _P
+        # the local softened ring, scaled/placed by hand, lands on the same
+        # outline nest_contour_polygon produces for the builder
+        built = inserts.nest_contour_polygon(soft, include_clearance=False)
+        placed = _P([(x * soft.scale + soft.zone.centre[0],
+                      y * soft.scale + soft.zone.centre[1]) for x, y in soft_local])
+        self.assertAlmostEqual(placed.area, built.area, delta=built.area * 0.02)
 
     def test_photo_nest_is_a_raised_cutter_not_a_filled_block(self) -> None:
         one = photo_nest(options={"clearance": 0.0, "rim": 3.0, "depth": 8.0})

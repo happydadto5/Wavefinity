@@ -50,6 +50,7 @@ from organizer_inserts import (
     cradle_min_footprint,
     fitted_nest_feature,
     nest_contour_polygon,
+    nest_smoothed_contour,
     layout_from_dict,
     layout_to_dict,
     layout_zone,
@@ -209,10 +210,13 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         str(payload.get("image", "")), str(payload.get("mime_type", ""))
     )
     supplied = dict(payload.get("options", {}))
+    # Only fit clearance and outline softening are user-set; the cutter wall's
+    # thickness ("rim") and height ("depth") are fixed so a Photo Nest always
+    # prints as the same simple cookie-cutter shape.
     options = {
         "clearance": float(supplied.get("clearance", 0.6)),
-        "depth": float(supplied.get("depth", min(8.0, box.z - box.wall - 0.6))),
-        "rim": float(supplied.get("rim", 3.0)),
+        "depth": 8.0,
+        "rim": 3.0,
         "smoothing": float(supplied.get("smoothing", 0.0)),
     }
     starter = Feature(
@@ -391,6 +395,18 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
              if one.kind == "nest" and one.contour else None)
             for one in layout.features
         ],
+        # The Soften-outline result in each nest's own local millimetres, so the
+        # 2D layout can apply its own cheap move/rotate/resize and still draw
+        # the exact silhouette the printed cutter gets.
+        "nest_soft_contours": [
+            ([list(point) for point in nest_smoothed_contour(one)]
+             if one.kind == "nest" and one.contour else None)
+            for one in layout.features
+        ],
+        "draft_soft_contour": (
+            [list(point) for point in nest_smoothed_contour(draft)]
+            if draft is not None and draft.kind == "nest" and draft.contour else None
+        ),
     }
 
 
@@ -540,7 +556,16 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if one.kind == "nest" and one.contour:
             return fitted_nest_feature(one)
         if one.kind == "cradle" and one.item is not None:
-            width, depth = cradle_min_footprint(one)
+            min_width, min_depth = cradle_min_footprint(one)
+            if one.count is None:
+                if one.along == "x":
+                    width = min_width
+                    depth = max(one.zone.depth, min_depth)
+                else:
+                    width = max(one.zone.width, min_width)
+                    depth = min_depth
+            else:
+                width, depth = min_width, min_depth
         else:
             width, depth = one.zone.width, one.zone.depth
         cx, cy = one.zone.centre

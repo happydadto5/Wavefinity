@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 import shutil
 import socket
@@ -18,7 +19,8 @@ from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 
 import wavefinity_web
-from organizer_app import design_from_dict
+from organizer_app import base_height, design_from_dict
+from organizer_inserts import build_features
 from wavefinity_web import (
     apply_feature_payload,
     catalog_payload,
@@ -49,7 +51,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(parts["nest"]["title"], "Photo Nest")
         self.assertEqual(
             [field["label"] for field in parts["nest"]["fields"]],
-            ["Clearance (mm)", "Wall height (mm)", "Outline wall (mm)", "Soften outline (mm)"],
+            ["Fit clearance (mm)", "Soften outline (mm)"],
         )
         box, layout, *_ = design_from_dict(catalog["defaults"]["design"])
         self.assertEqual((box.x, box.y, box.z), (16.0, 48.0, 40.0))
@@ -136,6 +138,26 @@ class WebApplicationTests(unittest.TestCase):
         preview = preview_payload({"design": design})
         self.assertFalse(preview["feature_errors"])
         self.assertTrue(preview["feature_outlines"][0])
+        self.assertTrue(preview["nest_soft_contours"][0])
+
+    def test_preview_softened_contour_follows_the_soften_outline_value(self):
+        notched = PhotoOutline(
+            ((-20, -8), (-4, -8), (-4, -1), (4, -1), (4, -8),
+             (20, -8), (20, 8), (-20, 8)),
+            40.0, 16.0, ((0, 0), (1, 0), (1, 1), (0, 1)),
+        )
+        with patch.object(wavefinity_web, "photo_outline_from_data", return_value=notched):
+            design = photo_nest_payload({
+                "design": default_design(), "image": "x", "mime_type": "image/png",
+            })["design"]
+        sharp = preview_payload({"design": design})["nest_soft_contours"][0]
+        self.assertEqual(len(sharp), len(notched.contour))
+        self.assertEqual({tuple(p) for p in sharp},
+                         {tuple(map(float, p)) for p in notched.contour})
+
+        design["layout"]["features"][0]["options"]["smoothing"] = 3.0
+        softened = preview_payload({"design": design})["nest_soft_contours"][0]
+        self.assertGreater(len(softened), len(sharp) + 10)
 
     def test_photo_nest_clearance_recomputes_bin_footprint(self):
         outline = PhotoOutline(
@@ -263,6 +285,34 @@ class WebApplicationTests(unittest.TestCase):
         preview = preview_payload({"design": expanded["design"]})
         self.assertFalse(preview["feature_errors"])
         self.assertIsNone(preview["draft_error"])
+
+    def test_auto_expand_preserves_auto_count_cradle_across_dimension(self):
+        design = default_design()
+        design["box"]["x"] = 16.0
+        design["box"]["y"] = 48.0
+        item = {
+            "name": "Driver", "profile": "round", "clearance": 0.0,
+            "segments": [{"length": 40.0, "diameter": 6.0}],
+        }
+        feature = default_feature_payload({
+            "design": design, "kind": "cradle", "item": item,
+        })["feature"]
+        feature["along"] = "x"
+        feature["count"] = None
+        feature["zone"] = [-6.5, -20.0, 6.5, 20.0]  # 40 mm across in y
+        design["layout"]["features"] = [feature]
+
+        expanded = expand_layout_payload({"design": design})
+        self.assertTrue(expanded["grew"])
+        self.assertGreaterEqual(expanded["box"]["x"], 48.0)
+        box, layout, *_ = design_from_dict(expanded["design"])
+        one = layout.features[0]
+        self.assertAlmostEqual(one.zone.width, 40.0, delta=1.0)
+        self.assertGreaterEqual(one.zone.depth, 38.0)
+        base_z = base_height(box, layout.mode)
+        single = build_features(box, [replace(one, count=1)], base_z)[0]
+        multi = build_features(box, [one], base_z)[0]
+        self.assertGreater(multi.volume, 1.5 * single.volume)
 
     def test_auto_expand_leaves_a_layout_that_already_fits_alone(self):
         design = default_design()

@@ -36,16 +36,31 @@
   bin floor. Added a small reinforced chamfered foot and a Soften outline
   control that removes small inward and outward details before clearance.
 
+## 2026-09-05 — Photo Nest is a standalone cookie cutter
+
+- A Photo Nest now prints on its own — no wavy bin and no floor. The preview
+  and the exporter both drop the box shell for a Photo Nest design and stand
+  the cutter wall straight on the bed.
+- Wall height and wall thickness are fixed printable defaults; the editor
+  exposes only **Fit clearance** and **Soften outline**.
+- The stepped outside foot is now a true tapered 45° chamfer built into the
+  wall as one watertight solid.
+- A Photo Nest design ignores any label or scoop, since the bare wall has no
+  surface to carry one.
+- The 2D layout now draws the **softened** outline (previously it always showed
+  the raw photo contour, so *Soften outline* only changed the 3D preview and
+  the printed part). The server sends the softened contour in each nest's local
+  millimetres, so live move/rotate/resize still track it.
+
 ## 2026-09-05 — Cradle Spacing, and Auto Expand Bin
 
 ### Added
 
 - **Cradle `Spacing` setting** (default `0`). At `0` the row of troughs is
-  **one continuous body**, neighbours sharing the wall between their channels.
-  Raising it first widens that shared wall; past one wall thickness the troughs
-  become **separate solids** with a growing air gap. So the same control runs
-  from "joined into one piece" to "fully separated". Exposed in the cradle
-  editor next to Floor gap.
+  **one continuous body**, with facing side walls fully overlapped so the
+  middle joint matches an outside wall. Raising it separates those walls; once
+  they no longer touch, the troughs become **separate solids** with a growing
+  air gap. Exposed in the cradle editor next to Floor gap.
 - **"Auto Expand Bin"** button at the top of the interior-supports section,
   shown only while a support does not fit. It grows the bin on the 8 mm grid to
   the smallest size that holds every support at the footprint it actually needs
@@ -55,8 +70,14 @@
 
 ### Changed
 
-- Cradle pitch is now `diameter + wall + spacing` with `spacing` defaulting to
-  `0` (was a fixed 1.2 mm gap). `RIB_SPACING` is gone.
+- Cradle pitch is now `diameter + half wall + spacing` with `spacing` defaulting
+  to `0` (was a fixed 1.2 mm gap). `RIB_SPACING` is gone.
+
+### Fixed
+
+- At `Spacing = 0`, adjacent cradle side walls now fully overlap. The shared
+  middle joint is the same thickness as an outside wall, rather than visibly
+  double-thick.
 
 ### Tested
 
