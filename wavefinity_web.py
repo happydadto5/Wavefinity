@@ -754,6 +754,12 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         selected = int(index)
         if not 0 <= selected < len(existing):
             raise ValueError("the selected interior part no longer exists")
+        if one.kind != existing[selected].kind and one.kind != "nest":
+            remaining = existing[:selected] + existing[selected + 1:]
+            one = _first_open_position(
+                one, box, replace(layout, features=tuple(remaining)),
+                label, label_location, scoop,
+            )
         existing[selected] = one
     if one.kind == "nest" and len(existing) != 1:
         raise ValueError("a Photo Nest design can contain only its one custom cavity")

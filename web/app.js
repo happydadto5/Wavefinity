@@ -21,7 +21,6 @@ const state = {
   preview: null,
   draftKind: "divider",
   draft: null,
-  drafts: {}, // kind -> last-edited draft, so switching the palette selection doesn't lose in-progress edits
   draftResolvedOptions: {},
   // Whether the current draft should save itself into the design as it's edited,
   // rather than staying a preview-only suggestion. True for anything the user
@@ -116,7 +115,6 @@ async function restoreHistory(redo = false) {
   updateDesignFromForm();
   to.push(clone(state.design));
   state.design = from.pop();
-  state.drafts = {};
   syncForm();
   clearDraftSelection();
   updateHistoryButtons();
@@ -532,9 +530,8 @@ function wireControls() {
   });
   activateView(viewTabs.find(tab => tab.classList.contains("active")) || viewTabs[0]);
 
-  // "Additional support" always starts a genuinely fresh, not-yet-saved
-  // suggestion for the current shape - whatever was already being edited is
-  // already saved (state.draftAutoCommit), so there's nothing to lose here.
+  // This is the only control that starts another support. Palette choices
+  // change the currently selected support instead.
   $("#add-support").addEventListener("click", () => selectKind(state.draftKind, true));
   $("#auto-expand-bin").addEventListener("click", autoExpandBin);
   $("#save-design").addEventListener("click", saveDesign);
@@ -574,15 +571,6 @@ function starterItem() {
   };
 }
 
-// Choosing a shape from the palette - unlike selectKind's other callers
-// (post-delete refresh, New, Open, mode switch), which want a genuinely
-// fresh, not-yet-saved suggestion, this one is the user deliberately
-// starting a support, so it auto-commits as it's edited (see
-// state.draftAutoCommit) and restores whatever was last being edited for
-// that shape, so hopping Post -> Cradle -> Post doesn't wipe out Post's
-// fields. Never restores a cached draft that was actually an edit of an
-// already-placed feature (state.selected set) - that one is safe in the
-// design already and belongs to the Placed supports list, not the palette.
 // Nothing selected, nothing shown as a live draft - the state on first load
 // and after New/Open/a delete/a mode switch with nothing selected. A
 // palette button never doubles as "still working on the last shape you
@@ -596,7 +584,6 @@ function clearDraftSelection() {
   state.selected = null;
   $$(".support-choice").forEach(button => button.classList.remove("active"));
   $(".support-editor").hidden = true;
-  $("#add-support").hidden = false;
   $("#draft-status").textContent = "";
   $("#draft-status").classList.remove("error");
   updateInteriorModeVisibility();
@@ -605,29 +592,7 @@ function clearDraftSelection() {
 
 function pickKind(kind) {
   updateInteriorModeVisibility(true);
-  if (state.draft && state.draft.kind !== kind && state.selected === null) {
-    state.drafts[state.draft.kind] = clone(state.draft);
-  }
-  state.selected = null;
-  state.draftIsNew = true;
-  state.draftSourceIndex = null;
-  const cached = state.drafts[kind];
-  if (!cached) {
-    selectKind(kind, true);
-    return;
-  }
-  state.draftKind = kind;
-  state.draft = clone(cached);
-  state.draftAutoCommit = kind !== "nest";
-  state.draftResolvedOptions = {};
-  $(".support-editor").hidden = false;
-  $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === kind));
-  const info = partInfo(kind);
-  $("#draft-title").textContent = info.title;
-  $("#draft-description").textContent = info.description;
-  renderDraftFields();
-  updateSelectionButtons();
-  refreshDraft();
+  selectKind(kind);
 }
 
 async function selectKind(kind, reset = false) {
@@ -716,7 +681,6 @@ function renderDraftFields() {
   const zone = one.zone;
   const width = zone[2] - zone[0];
   const depth = zone[3] - zone[1];
-  $("#add-support").hidden = one.kind === "nest";
   let html = "";
   if (one.kind === "nest") {
     html += `<div class="photo-upload wide">
@@ -1424,8 +1388,12 @@ function updateSelectionButtons() {
   const busy = state.designMutationBusy;
   $("#add-support").disabled = busy || !state.draft;
   const hasPhotoNest = state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour);
+  const hasPlacedPart = Boolean(state.design?.layout?.features?.length);
+  const replacingPhotoNest = hasPhotoNest && state.selected !== null &&
+    state.design.layout.features[state.selected]?.kind === "nest";
+  $("#add-support").hidden = !hasPlacedPart || hasPhotoNest || state.draft?.kind === "nest";
   $$(".support-choice").forEach(button => {
-    button.disabled = busy || (hasPhotoNest && button.dataset.kind !== "nest");
+    button.disabled = busy || (hasPhotoNest && !replacingPhotoNest && button.dataset.kind !== "nest");
   });
   $$(".placed-item-select, .placed-item-delete").forEach(button => button.disabled = busy);
   $("#support-count").textContent = `${state.design?.layout.features.length || 0} placed`;
@@ -1442,10 +1410,11 @@ function renderPlaced() {
       const width = one.zone[2] - one.zone[0];
       const depth = one.zone[3] - one.zone[1];
       const title = escapeHtml(partInfo(one.kind)?.title || one.kind);
-      return `<div class="placed-item ${index === state.selected ? "selected" : ""}">
+      const specs = `${fmt(width)} × ${fmt(depth)} mm`;
+      return `<div class="placed-item ${index === state.selected ? "selected" : ""}" style="--support-color:${kindColor(one.kind)}">
         <button type="button" class="placed-item-select" data-index="${index}">
-          <strong>${index + 1}. ${title}</strong>
-          <span>${fmt(width)} × ${fmt(depth)} mm</span>
+          <span class="placed-item-icon">${iconFor(one.kind)}</span>
+          <span class="placed-item-copy"><strong>${title}</strong><span>${specs}</span></span>
         </button>
         <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this interior part" aria-label="Delete ${title}">✕</button>
       </div>`;
@@ -2053,7 +2022,7 @@ function renderLayout2D() {
       context.textBaseline = "middle";
       const [tx, ty] = covered ? [(f0[0] + f1[0]) / 2, (f0[1] + f1[1]) / 2]
                                : [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
-      context.fillText(`${index + 1} ${partInfo(feature.kind)?.title || feature.kind}`, tx, ty);
+      context.fillText(partInfo(feature.kind)?.title || feature.kind, tx, ty);
     }
     if (index === state.selected) {
       const resizable = Boolean(partInfo(feature.kind)?.flags?.size || feature.kind === "nest");

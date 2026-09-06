@@ -259,6 +259,37 @@ class WebApplicationTests(unittest.TestCase):
         deleted = delete_feature_payload({"design": updated["design"], "index": 0})
         self.assertEqual(deleted["design"]["layout"]["features"], [])
 
+    def test_changing_a_placed_part_type_reuses_its_list_slot(self):
+        design = default_design()
+        design["box"]["x"] = 48.0
+        design["box"]["y"] = 48.0
+        post = default_feature_payload({"design": design, "kind": "post"})["feature"]
+        design = apply_feature_payload({
+            "design": design, "feature": post, "index": None,
+        })["design"]
+        second = default_feature_payload({"design": design, "kind": "post"})["feature"]
+        design = apply_feature_payload({
+            "design": design, "feature": second, "index": None,
+        })["design"]
+
+        cradle = default_feature_payload({
+            "design": design, "kind": "cradle",
+            "item": {
+                "name": "Driver", "profile": "round", "clearance": 0.4,
+                "segments": [{"length": 40.0, "diameter": 6.0}],
+            },
+        })["feature"]
+        changed = apply_feature_payload({
+            "design": design, "feature": cradle, "index": 1,
+        })
+
+        self.assertEqual(changed["selected"], 1)
+        self.assertEqual(
+            [one["kind"] for one in changed["design"]["layout"]["features"]],
+            ["post", "cradle"],
+        )
+        self.assertTrue(preview_payload({"design": changed["design"]})["fits"])
+
     def test_alternate_ends_survives_the_browser_api_round_trip(self):
         design = default_design()
         design["box"]["x"] = 96.0
@@ -741,6 +772,10 @@ class WebServerTests(unittest.TestCase):
         self.assertLess(body.index(b"Interior parts"), body.index(b"Connect bins"))
         self.assertLess(body.index(b"Connect bins"), body.index(b"Generate STLs"))
         self.assertLess(body.index(b"How should the interior print?"), body.index(b"Connect bins"))
+        self.assertLess(body.index(b'id="support-palette"'), body.index(b'id="add-support"'))
+        self.assertLess(body.index(b'id="add-support"'), body.index(b'id="draft-fields"'))
+        self.assertIn(b'id="add-support" class="button secondary add-support" type="button" hidden', body)
+        self.assertNotIn(b'class="step"', body)
         self.assertIn(b"Fused", body)
         status, _headers, body = self.get("/app.js")
         self.assertEqual(status, 200)
@@ -758,6 +793,9 @@ class WebServerTests(unittest.TestCase):
         # and the bespoke floor-label drag is gone - text is an interior part.
         self.assertIn(b"seedPartNameFromText", body)
         self.assertIn(b"SIZE_LIKE_TEXT", body)
+        self.assertIn(b"selectKind(kind);", body)
+        self.assertIn(b"placed-item-icon", body)
+        self.assertNotIn(b"${index + 1}. ${title}", body)
         self.assertNotIn(b"drawMovableLabel", body)
         self.assertNotIn(b"label_placement", body)
         # Text is inlaid flush with the floor, so the painter sort has only the

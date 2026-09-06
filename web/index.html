@@ -62,6 +62,9 @@
             Auto Expand Bin<small>Grow the bin to fit the interior parts that don't fit right now</small>
           </button>
           <div id="support-palette" class="support-palette" role="list"></div>
+          <button id="add-support" class="button secondary add-support" type="button" hidden>
+            + Additional interior part
+          </button>
 
           <fieldset id="interior-mode" class="mode-fieldset" hidden>
             <legend>How should the interior print?</legend>
@@ -71,15 +74,12 @@
 
           <div class="support-editor" hidden>
             <div class="editor-title">
-              <div><span class="step">2</span><strong id="draft-title">Set parameters</strong></div>
+              <strong id="draft-title">Set parameters</strong>
               <span id="draft-status" class="quiet-status"></span>
             </div>
             <p id="draft-description" class="muted"></p>
             <p class="field-help">Shown live, highlighted, in the preview to the right - and saved into the bin automatically as you go.</p>
             <div id="draft-fields" class="draft-fields"></div>
-            <div class="button-row">
-              <button id="add-support" class="button primary">Additional interior part</button>
-            </div>
           </div>
 
           <div class="placed-block">
