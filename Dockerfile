@@ -11,8 +11,10 @@ RUN apt-get update \
 # Spaces runs the container as uid 1000; give that user a home and a writable app dir.
 RUN useradd -m -u 1000 user
 USER user
-ENV PATH="/home/user/.local/bin:$PATH" \
+ENV HOME=/home/user \
+    PATH="/home/user/.local/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
+    MPLCONFIGDIR=/tmp/matplotlib \
     WAVEFINITY_PID_FILE=/tmp/wavefinity.pid
 
 WORKDIR /app
