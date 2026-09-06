@@ -59,6 +59,10 @@ They take about two minutes; boolean operations dominate. **Log every run in
 [TESTING.md](TESTING.md)** — the result, and whether it caught anything. Runs
 that find nothing get logged too; that is how the file earns its keep.
 
+### Cloud deployments & updates
+
+All code gets committed and pushed to the cloud (`origin/main`) after every change so the live hosted app ([Wavefinity on Render](https://wavefinity.onrender.com/)) stays up to date.
+
 ### Using the browser UI
 
 The page is split between intent-based controls and a large responsive

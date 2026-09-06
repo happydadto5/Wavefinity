@@ -2963,7 +2963,14 @@ async function showAboutDialog() {
   try {
     const res = await fetch("/Brochure.md");
     if (!res.ok) throw new Error("Could not load Brochure.md");
-    const text = await res.text();
+    let text = await res.text();
+    const cutIndex = text.search(/##\s*🚀\s*Ready to test it out/i);
+    if (cutIndex !== -1) {
+      text = text.slice(0, cutIndex).trimEnd();
+      if (text.endsWith("---")) {
+        text = text.slice(0, -3).trimEnd();
+      }
+    }
     content.innerHTML = renderSimpleMarkdown(text);
   } catch (err) {
     content.textContent = "Could not load brochure: " + err.message;
