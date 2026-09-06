@@ -802,6 +802,9 @@ function renderDraftFields() {
     // Rendered together as the one "% from end / Offset from center" field
     // beneath Runs along, above.
     if (option.key === "end_margin" || option.key === "run_offset") continue;
+    // Rendered by the divider bottom-slope block below, on its own and only
+    // while Use support crossbars is ticked.
+    if (option.key === "bottom_supports") continue;
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
     const autoHint = AUTO_PLACEHOLDER[info.kind]?.[option.key];
     const shown = !explicit && autoHint
@@ -815,7 +818,28 @@ function renderDraftFields() {
         <label><input type="radio" name="draft-wedge" value="wedge" ${one.wedge !== false ? "checked" : ""}><span>Wedge</span></label>
         <label><input type="radio" name="draft-wedge" value="straight" ${one.wedge === false ? "checked" : ""}><span>Straight</span></label>
       </div></fieldset>
-      <p class="field-help">Only matters once the angle above is not zero. <strong>Wedge</strong> stays thick at the floor and tapers as it leans, so it takes the sideways push of whatever rests against it. <strong>Straight</strong> keeps the same thin thickness the whole way up and can snap off.</p>`;
+      <p class="field-help">Only matters once the wall lean above is not zero. <strong>Wedge</strong> stays thick at the floor and tapers as it leans, so it takes the sideways push of whatever rests against it. <strong>Straight</strong> keeps the same thin thickness the whole way up and can snap off.</p>`;
+    }
+    if (option.key === "bottom_angle") {
+      html += `<p class="field-help wide">Raises tools toward the right or back. Tilts the tool-slot bottoms only; separate from Wall lean above, which tilts the wall.</p>`;
+      const opt = one.options || {};
+      const bottomCheck = (key, title, help, on) => `<label class="check-card wide">
+        <input type="checkbox" data-draft="option:${key}" ${on ? "checked" : ""}>
+        <span><strong>${title}</strong><small>${help}</small></span>
+      </label>`;
+      html += bottomCheck("reverse_bottom", "Reverse slope",
+        "Raises tools toward the left or front instead.", opt.reverse_bottom === true);
+      html += bottomCheck("alternate_bottom", "Alternate slopes",
+        "Reverses every second tool slot.", opt.alternate_bottom === true);
+      html += bottomCheck("minimal_bottom", "Use support crossbars",
+        "Uses printable support bars instead of a solid slope.", opt.minimal_bottom === true);
+      if (opt.minimal_bottom === true) {
+        const explicitBars = Object.prototype.hasOwnProperty.call(opt, "bottom_supports");
+        const bars = explicitBars
+          ? opt.bottom_supports
+          : state.draftResolvedOptions?.bottom_supports ?? 3;
+        html += field("Number of crossbars", "option:bottom_supports", bars, { step: "1" });
+      }
     }
   }
   $("#draft-fields").innerHTML = html;
@@ -1125,8 +1149,21 @@ function updateDraftFromFields(event) {
       if (capField) capField.value = "";
     }
   }
+  // A divider's sloped-bottom yes/no choices, read straight off their
+  // checkboxes; an unticked one is dropped so a saved design stays clean and
+  // an older one keeps its plain flat bottom.
+  if (one.kind === "divider") {
+    const fields = $("#draft-fields");
+    for (const key of ["reverse_bottom", "alternate_bottom", "minimal_bottom"]) {
+      const boxEl = $(`[data-draft="option:${key}"]`, fields);
+      if (!boxEl) continue;
+      if (boxEl.checked) one.options[key] = true;
+      else delete one.options[key];
+    }
+  }
   if (changed.startsWith("option:") &&
-      !["text", "auto", "raised"].includes(changed.slice("option:".length))) {
+      !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom"]
+        .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
     const option = info.fields.find(entry => entry.key === key);
     const raw = String(get(changed) ?? "").trim();
@@ -1186,6 +1223,8 @@ function updateDraftFromFields(event) {
   // Toggling Alternate ends swaps the field beneath Runs along between
   // "% from end" and "Offset from center".
   if (changed === "alternate_ends") renderDraftFields();
+  // Ticking Use support crossbars reveals (or hides) Number of crossbars.
+  if (changed === "option:minimal_bottom") renderDraftFields();
   updateSelectionButtons();
   refreshDraftSoon();
 }

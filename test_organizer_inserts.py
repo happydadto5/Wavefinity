@@ -969,6 +969,295 @@ class MultiDividerTests(unittest.TestCase):
             self.assertTrue(wall.is_watertight)
 
 
+class DividerBottomSlopeTests(unittest.TestCase):
+    """Sloped tool-slot bottoms under a divider - see _divider_support_bottoms."""
+
+    box = BoxSpec(80.0, 80.0, 40.0)
+
+    def _walls_and_bottoms(self, zone, **kw):
+        """(wall solids, added support-bottom solids) for one divider."""
+        options = dict(kw.pop("options", {}))
+        base = build_features(
+            self.box,
+            [Feature("divider", zone, count=kw.get("count"), along=kw.get("along", "x"),
+                     full_span=kw.get("full_span", False),
+                     options={k: v for k, v in options.items()
+                              if not k.startswith(("bottom_", "reverse_", "alternate_",
+                                                   "minimal_"))})],
+            self.box.base_thickness,
+        )
+        full = build_features(
+            self.box,
+            [Feature("divider", zone, count=kw.get("count"), along=kw.get("along", "x"),
+                     full_span=kw.get("full_span", False), options=options)],
+            self.box.base_thickness,
+        )
+        return full[:len(base)], full[len(base):]
+
+    @staticmethod
+    def _ends(solid, axis):
+        """Max z at the low and high face of ``solid`` along ``axis`` (0=x,1=y)."""
+        verts = solid.vertices
+        lo = verts[:, axis].min()
+        hi = verts[:, axis].max()
+        low_z = verts[np.isclose(verts[:, axis], lo, atol=1e-6)][:, 2].max()
+        high_z = verts[np.isclose(verts[:, axis], hi, atol=1e-6)][:, 2].max()
+        return low_z, high_z
+
+    def test_legacy_and_explicit_zero_are_unchanged(self) -> None:
+        zone = Zone(-15.0, -20.0, 15.0, 20.0)
+        legacy = build_features(
+            self.box, [Feature("divider", zone, along="x", count=2)],
+            self.box.base_thickness,
+        )
+        explicit = build_features(
+            self.box,
+            [Feature("divider", zone, along="x", count=2,
+                     options={"bottom_angle": 0.0, "reverse_bottom": False,
+                              "alternate_bottom": False, "minimal_bottom": False,
+                              "bottom_supports": 3})],
+            self.box.base_thickness,
+        )
+        self.assertEqual(len(legacy), len(explicit))
+        for a, b in zip(legacy, explicit):
+            self.assertTrue((a.bounds == b.bounds).all())
+            self.assertAlmostEqual(a.volume, b.volume, places=6)
+
+    def test_full_bottom_rises_toward_the_right_for_x(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        _walls, bottoms = self._walls_and_bottoms(
+            zone, count=2, along="x", options={"bottom_angle": 20.0})
+        self.assertEqual(len(bottoms), 3)  # 2 walls -> 3 slots
+        rise = 40.0 * math.tan(math.radians(20.0))
+        for solid in bottoms:
+            self.assertTrue(solid.is_watertight)
+            low_z, high_z = self._ends(solid, 0)
+            self.assertAlmostEqual(low_z, self.box.base_thickness, places=3)
+            self.assertAlmostEqual(high_z, self.box.base_thickness + rise, places=3)
+
+    def test_full_bottom_rises_toward_the_back_for_y(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        _walls, bottoms = self._walls_and_bottoms(
+            zone, count=2, along="y", options={"bottom_angle": 20.0})
+        rise = 40.0 * math.tan(math.radians(20.0))
+        for solid in bottoms:
+            low_z, high_z = self._ends(solid, 1)
+            self.assertAlmostEqual(low_z, self.box.base_thickness, places=3)
+            self.assertAlmostEqual(high_z, self.box.base_thickness + rise, places=3)
+
+    def test_reverse_mirrors_the_slope(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        _w, plain = self._walls_and_bottoms(
+            zone, count=1, along="x", options={"bottom_angle": 20.0})
+        _w, flipped = self._walls_and_bottoms(
+            zone, count=1, along="x",
+            options={"bottom_angle": 20.0, "reverse_bottom": True})
+        for solid in plain:
+            low_z, high_z = self._ends(solid, 0)
+            self.assertGreater(high_z, low_z + 1.0)
+        for solid in flipped:
+            low_z, high_z = self._ends(solid, 0)
+            self.assertGreater(low_z, high_z + 1.0)
+
+    def test_alternate_opposes_neighbouring_slots(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        _w, bottoms = self._walls_and_bottoms(
+            zone, count=2, along="x",
+            options={"bottom_angle": 20.0, "alternate_bottom": True})
+        self.assertEqual(len(bottoms), 3)
+        # ordered low to high across y (the divider's cross axis)
+        bottoms = sorted(bottoms, key=lambda s: s.vertices[:, 1].mean())
+        signs = []
+        for solid in bottoms:
+            low_z, high_z = self._ends(solid, 0)
+            signs.append(1 if high_z > low_z else -1)
+        self.assertEqual(signs, [1, -1, 1])
+
+    def test_reverse_plus_alternate_flips_the_pattern(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        _w, bottoms = self._walls_and_bottoms(
+            zone, count=2, along="x",
+            options={"bottom_angle": 20.0, "alternate_bottom": True,
+                     "reverse_bottom": True})
+        bottoms = sorted(bottoms, key=lambda s: s.vertices[:, 1].mean())
+        signs = []
+        for solid in bottoms:
+            low_z, high_z = self._ends(solid, 0)
+            signs.append(1 if high_z > low_z else -1)
+        self.assertEqual(signs, [-1, 1, -1])
+
+    def test_n_walls_make_n_plus_one_supported_slots(self) -> None:
+        zone = Zone(-20.0, -30.0, 20.0, 30.0)
+        for count in (1, 2, 3, 4):
+            _w, bottoms = self._walls_and_bottoms(
+                zone, count=count, along="x", options={"bottom_angle": 15.0})
+            self.assertEqual(len(bottoms), count + 1)
+
+    def test_full_bottom_is_one_continuous_solid_per_slot(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        _w, bottoms = self._walls_and_bottoms(
+            zone, count=2, along="x", options={"bottom_angle": 20.0})
+        from organizer_inserts import BOTTOM_EMBED
+        run, rise = 40.0, 40.0 * math.tan(math.radians(20.0))
+        for solid in bottoms:
+            # spans the whole tool-slot length with no break
+            self.assertAlmostEqual(solid.bounds[0][0], zone.x0, places=6)
+            self.assertAlmostEqual(solid.bounds[1][0], zone.x1, places=6)
+            slot_width = solid.bounds[1][1] - solid.bounds[0][1]
+            # a single continuous wedge: its volume is exactly the sloped prism
+            # plus the thin slab embedded into the floor, nothing missing
+            expected = slot_width * (0.5 * run * rise + BOTTOM_EMBED * run)
+            self.assertAlmostEqual(solid.volume, expected, delta=expected * 0.01)
+
+    def test_crossbar_count_is_exact_and_evenly_spaced(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        _w, bars = self._walls_and_bottoms(
+            zone, count=1, along="x",
+            options={"bottom_angle": 25.0, "minimal_bottom": True,
+                     "bottom_supports": 4})
+        self.assertEqual(len(bars), 2 * 4)  # 2 slots, 4 bars each
+        per_slot = {}
+        for bar in bars:
+            key = round(bar.vertices[:, 1].mean(), 3)
+            per_slot.setdefault(key, []).append(bar.vertices[:, 0].mean())
+        for centres in per_slot.values():
+            centres.sort()
+            self.assertEqual(len(centres), 4)
+            gaps = [b - a for a, b in zip(centres, centres[1:])]
+            for gap in gaps:
+                self.assertAlmostEqual(gap, 40.0 / 5.0, delta=0.05)
+            self.assertAlmostEqual(centres[0] - zone.x0, 40.0 / 5.0, delta=0.05)
+
+    def test_crossbar_tops_sit_on_the_requested_slope_plane(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        angle = 25.0
+        _w, bars = self._walls_and_bottoms(
+            zone, count=1, along="x",
+            options={"bottom_angle": angle, "minimal_bottom": True,
+                     "bottom_supports": 3})
+        span, rise = 40.0, 40.0 * math.tan(math.radians(angle))
+        for bar in bars:
+            verts = bar.vertices
+            top = verts[:, 2].max()
+            centre = verts[:, 0].mean()
+            frac = (centre - zone.x0) / span
+            plane_z = self.box.base_thickness + frac * rise
+            # top follows the plane, give or take half a bar's own run of slope
+            self.assertAlmostEqual(top, plane_z, delta=1.0)
+
+    def test_crossbar_undersides_are_not_steeper_than_45_degrees(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        _w, bars = self._walls_and_bottoms(
+            zone, count=1, along="x",
+            options={"bottom_angle": 30.0, "minimal_bottom": True,
+                     "bottom_supports": 3})
+        floor = self.box.base_thickness
+        for bar in bars:
+            for centroid, normal in zip(bar.triangles_center, bar.face_normals):
+                if normal[2] < -1e-6 and centroid[2] > floor - 0.4 + 1e-3:
+                    # a downward face above the embedded base must be within
+                    # 45 degrees of vertical to print support-free
+                    self.assertGreaterEqual(normal[2], -math.sqrt(0.5) - 1e-6)
+
+    def test_crossbars_use_less_material_than_the_solid_wedge(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        opts = {"bottom_angle": 25.0}
+        _w, wedge = self._walls_and_bottoms(zone, count=2, along="x", options=opts)
+        _w, bars = self._walls_and_bottoms(
+            zone, count=2, along="x",
+            options={**opts, "minimal_bottom": True, "bottom_supports": 3})
+        self.assertLess(sum(b.volume for b in bars),
+                        0.5 * sum(w.volume for w in wedge))
+
+    def test_forty_five_degrees_succeeds_when_it_fits(self) -> None:
+        zone = Zone(-6.0, -20.0, 6.0, 20.0)  # 12 mm run -> 12 mm rise
+        _w, bottoms = self._walls_and_bottoms(
+            zone, count=1, along="x",
+            options={"bottom_angle": 45.0, "height": 16.0})
+        self.assertEqual(len(bottoms), 2)
+        for solid in bottoms:
+            self.assertTrue(solid.is_watertight)
+
+    def test_negative_and_over_45_values_fail_clearly(self) -> None:
+        zone = Zone(-15.0, -20.0, 15.0, 20.0)
+        for bad in (-1.0, 45.5, math.nan):
+            one = Feature("divider", zone, along="x", count=1,
+                          options={"bottom_angle": bad})
+            with self.assertRaisesRegex(ValueError, "between 0 and 45 degrees"):
+                build_features(self.box, [one], self.box.base_thickness)
+
+    def test_excessive_rise_fails_clearly(self) -> None:
+        zone = Zone(-30.0, -20.0, 30.0, 20.0)  # 60 mm run
+        one = Feature("divider", zone, along="x", count=1,
+                      options={"bottom_angle": 40.0, "height": 12.0})
+        with self.assertRaisesRegex(ValueError, "reduce the bottom slope"):
+            build_features(self.box, [one], self.box.base_thickness)
+
+    def test_crossbar_count_must_be_a_positive_whole_number(self) -> None:
+        zone = Zone(-15.0, -20.0, 15.0, 20.0)
+        one = Feature("divider", zone, along="x", count=1,
+                      options={"bottom_angle": 20.0, "minimal_bottom": True,
+                               "bottom_supports": 0})
+        with self.assertRaisesRegex(ValueError, "positive whole number"):
+            build_features(self.box, [one], self.box.base_thickness)
+
+    def test_options_survive_the_saved_design_schema(self) -> None:
+        zone = Zone(-15.0, -20.0, 15.0, 20.0)
+        layout = Layout(
+            (Feature("divider", zone, along="x", count=2,
+                     options={"bottom_angle": 22.5, "reverse_bottom": True,
+                              "alternate_bottom": True, "minimal_bottom": True,
+                              "bottom_supports": 5}),),
+            "fused", EDITOR_SNAP,
+        )
+        data = layout_to_dict(layout)
+        self.assertEqual(data["version"], 1)
+        restored = layout_from_dict(data).features[0].options
+        self.assertEqual(restored["bottom_angle"], 22.5)
+        self.assertIs(restored["reverse_bottom"], True)
+        self.assertIs(restored["alternate_bottom"], True)
+        self.assertIs(restored["minimal_bottom"], True)
+        self.assertEqual(restored["bottom_supports"], 5)
+
+    def test_older_designs_without_any_new_keys_still_load(self) -> None:
+        zone = Zone(-15.0, -20.0, 15.0, 20.0)
+        data = layout_to_dict(Layout(
+            (Feature("divider", zone, along="x", count=2),), "fused", EDITOR_SNAP))
+        for key in ("bottom_angle", "reverse_bottom", "alternate_bottom",
+                    "minimal_bottom", "bottom_supports"):
+            self.assertNotIn(key, data["features"][0]["options"])
+        restored = layout_from_dict(data)
+        rebuilt = build_features(
+            self.box, list(restored.features), self.box.base_thickness)
+        plain = build_features(
+            self.box, [Feature("divider", zone, along="x", count=2)],
+            self.box.base_thickness)
+        self.assertEqual(len(rebuilt), len(plain))
+
+    def test_fused_and_removable_outputs_are_one_watertight_component(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        for minimal in (False, True):
+            options = {"bottom_angle": 22.0, "minimal_bottom": minimal}
+            feature = Feature("divider", zone, along="x", count=2, options=options)
+            fused = make_fused_box(self.box, [feature], make_box(self.box))
+            self.assertTrue(fused.is_watertight)
+            self.assertEqual(fused.split(only_watertight=False).__len__(), 1)
+            removable = make_fitted_insert(self.box, [feature])
+            self.assertTrue(removable.is_watertight)
+            self.assertEqual(
+                removable.split(only_watertight=False).__len__(), 1)
+
+    def test_slope_material_stays_inside_the_divider_zone(self) -> None:
+        zone = Zone(-20.0, -18.0, 20.0, 18.0)
+        _w, bottoms = self._walls_and_bottoms(
+            zone, count=2, along="x", options={"bottom_angle": 20.0})
+        for solid in bottoms:
+            self.assertGreaterEqual(solid.bounds[0][0], zone.x0 - 1e-6)
+            self.assertLessEqual(solid.bounds[1][0], zone.x1 + 1e-6)
+            self.assertGreaterEqual(solid.bounds[0][1], zone.y0 - 1e-6)
+            self.assertLessEqual(solid.bounds[1][1], zone.y1 + 1e-6)
+
+
 class FullSpanLeaningDividerTests(unittest.TestCase):
     """A leaning divider that also hugs the box's true wavy wall."""
 

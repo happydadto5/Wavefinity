@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-09-06 — Divider sloped tool-slot bottoms
+
+- A divider can now tilt the **bottoms of the tool slots** it forms so a tool
+  rests at an angle without the wall itself leaning. New `Feature.options`
+  keys (stored without a schema-version bump; a 0° slope adds nothing, so older
+  saves are unchanged): `bottom_angle` (0–45°, default 0), `reverse_bottom`,
+  `alternate_bottom`, `minimal_bottom` (all default false), `bottom_supports`
+  (default 3). The three booleans are declared as flags in
+  `NON_NUMERIC_OPTIONS` so browser/API round-trips keep them boolean.
+- The slope runs along the divider/tool direction — rising toward +X (right)
+  or +Y (back). `reverse_bottom` flips it; `alternate_bottom` flips every
+  second slot ordered across the zone; `reverse_bottom` then flips that whole
+  alternating pattern. `count` walls make `count + 1` supported slots, each
+  rising `slot_length × tan(bottom_angle)` from the existing floor.
+- `minimal_bottom` swaps the solid per-slot wedge for `bottom_supports` evenly
+  spaced crossbars that share the same sloped plane, print support-free
+  (vertical stems, 45° gussets), and use materially less plastic. The normal
+  bin floor / removable-insert plate is never touched.
+- Angles outside 0–45°, and combinations whose high end clears the divider
+  height or the bin, are refused with plain guidance ("reduce the bottom
+  slope, shorten the run, or increase the bin height").
+- Browser editor: the divider's old **Angle °** control is renamed **Wall
+  lean °** so it is not confused with the new **Bottom slope °**; Wedge /
+  Straight still applies only to the wall lean. New **Reverse slope**,
+  **Alternate slopes** and **Use support crossbars** checkboxes, with
+  **Number of crossbars** shown only while crossbars are ticked. Every change
+  updates the live 3D preview and auto-saves through the existing draft flow.
+
 ## 2026-09-06 — Interior-part selection and placed-part list
 
 - Picking a different interior-part type now changes the selected part instead

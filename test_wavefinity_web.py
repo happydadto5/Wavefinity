@@ -313,6 +313,74 @@ class WebApplicationTests(unittest.TestCase):
             "design": design, "feature": saved,
         })["geometry"])
 
+    def test_divider_bottom_slope_options_survive_the_browser_api_round_trip(self):
+        design = default_design()
+        design["box"]["x"] = 96.0
+        design["box"]["y"] = 96.0
+        feature = default_feature_payload({
+            "design": design, "kind": "divider",
+        })["feature"]
+        feature["zone"] = [-24.0, -24.0, 24.0, 24.0]
+        feature["count"] = 2
+        # exactly as the browser sends them: a numeric slope, whole-number
+        # crossbar count, and three yes/no flags as real booleans
+        feature["options"] = {
+            "bottom_angle": 20.0,
+            "reverse_bottom": True,
+            "alternate_bottom": True,
+            "minimal_bottom": True,
+            "bottom_supports": 4,
+        }
+        applied = apply_feature_payload({
+            "design": design, "feature": feature, "index": None,
+        })
+        saved = applied["design"]["layout"]["features"][0]["options"]
+        self.assertEqual(saved["bottom_angle"], 20.0)
+        self.assertIs(saved["reverse_bottom"], True)
+        self.assertIs(saved["alternate_bottom"], True)
+        self.assertIs(saved["minimal_bottom"], True)
+        self.assertEqual(saved["bottom_supports"], 4)
+        # and the round-tripped design still previews with real geometry
+        drafted = draft_payload({
+            "design": design,
+            "feature": applied["design"]["layout"]["features"][0],
+        })
+        self.assertTrue(drafted["geometry"])
+        self.assertEqual(drafted["resolved_options"]["bottom_angle"], 20.0)
+
+    def test_divider_bottom_flags_sent_as_strings_stay_flags_not_floats(self):
+        design = default_design()
+        feature = default_feature_payload({
+            "design": design, "kind": "divider",
+        })["feature"]
+        feature["options"] = {
+            "bottom_angle": "15",
+            "minimal_bottom": "true",
+            "reverse_bottom": "false",
+        }
+        one = wavefinity_web._feature_from_json(feature, "fused")
+        self.assertEqual(one.options["bottom_angle"], 15.0)
+        self.assertIs(one.options["minimal_bottom"], True)
+        self.assertIs(one.options["reverse_bottom"], False)
+
+    def test_a_divider_design_with_no_bottom_keys_still_loads(self):
+        design = default_design()
+        design["box"]["x"] = 96.0
+        design["box"]["y"] = 96.0
+        design["layout"]["features"] = [{
+            "kind": "divider",
+            "zone": [-20.0, -20.0, 20.0, 20.0],
+            "item": None, "count": 2, "along": "x", "options": {},
+            "full_span": False, "wedge": True, "alternate_ends": False,
+            "contour": None, "rotation": 0.0, "scale": 1.0,
+        }]
+        drafted = draft_payload({
+            "design": design,
+            "feature": design["layout"]["features"][0],
+        })
+        self.assertTrue(drafted["geometry"])
+        self.assertEqual(drafted["resolved_options"]["bottom_angle"], 0.0)
+
     def _long_cradle_design(self, mode):
         """A bin barely longer than one cradle zone, whose trough fills well
         under half of it - the rest is open floor a fused support may use."""

@@ -1839,6 +1839,88 @@ class ResolvedOptionTests(unittest.TestCase):
         self.assertIn(f"{headroom:g}", message)
 
 
+class DividerBottomSlopePaletteTests(unittest.TestCase):
+    """The guided-editor palette entry for a divider's sloped bottoms."""
+
+    spec = BoxSpec(80.0, 80.0, 40.0)
+
+    def _divider_fields(self):
+        for kind, _title, _blurb, _flags, fields in organizer_app.PART_KINDS:
+            if kind == "divider":
+                return fields
+        self.fail("no divider palette entry")
+
+    def test_lean_is_relabelled_and_bottom_slope_fields_exist(self) -> None:
+        fields = self._divider_fields()
+        labels = {label for label, _key, _default in fields}
+        keys = {key for _label, key, _default in fields}
+        self.assertIn("Wall lean °", labels)
+        self.assertNotIn("Angle °", labels)
+        self.assertIn("bottom_angle", keys)
+        self.assertIn("bottom_supports", keys)
+
+    def test_defaults_resolve_to_a_flat_bottom(self) -> None:
+        one = organizer_app.default_feature(self.spec, "divider")
+        base = organizer_app.base_height(self.spec, "fused")
+        shown = resolved_options(self.spec, one, base)
+        self.assertEqual(shown["bottom_angle"], 0.0)
+        self.assertEqual(shown["reverse_bottom"], 0)
+        self.assertEqual(shown["alternate_bottom"], 0)
+        self.assertEqual(shown["minimal_bottom"], 0)
+        self.assertEqual(shown["bottom_supports"], 3)
+        # nothing extra is built at the flat default
+        plain = build_features(self.spec, [one], base)
+        sloped = build_features(
+            self.spec,
+            [replace(one, options={"bottom_angle": 0.0})],
+            base,
+        )
+        self.assertEqual(len(plain), len(sloped))
+
+    def test_a_divider_with_bottom_slope_builds_from_the_app_base_height(self) -> None:
+        base = organizer_app.base_height(self.spec, "fused")
+        one = organizer_app.Feature(
+            "divider", organizer_app.Zone(-20.0, -20.0, 20.0, 20.0),
+            along="x", count=2,
+            options={"bottom_angle": 18.0, "minimal_bottom": True,
+                     "bottom_supports": 3},
+        )
+        built = build_features(self.spec, [one], base)
+        self.assertGreater(len(built), 2)  # 2 walls + crossbars
+        for solid in built:
+            self.assertTrue(solid.is_watertight)
+
+    def test_a_legacy_divider_design_still_loads_and_builds_flat(self) -> None:
+        data = {
+            "version": 1,
+            "box": {"x": 80.0, "y": 80.0, "z": 40.0, "wall": 0.8,
+                    "base_thickness": 0.6, "flat_inside": 0.0},
+            "mode": "fused",
+            "layout": {
+                "version": 1, "mode": "fused", "snap": 1.0,
+                "features": [{
+                    "kind": "divider",
+                    "zone": [-20.0, -20.0, 20.0, 20.0],
+                    "along": "x", "count": 2, "options": {},
+                }],
+            },
+        }
+        box, layout, *_ = organizer_app.design_from_dict(data)
+        feature = layout.features[0]
+        for key in ("bottom_angle", "reverse_bottom", "alternate_bottom",
+                    "minimal_bottom", "bottom_supports"):
+            self.assertNotIn(key, feature.options)
+        built = build_features(box, list(layout.features), box.base_thickness)
+        plain = build_features(
+            box,
+            [organizer_app.Feature("divider",
+                                   organizer_app.Zone(-20.0, -20.0, 20.0, 20.0),
+                                   along="x", count=2)],
+            box.base_thickness,
+        )
+        self.assertEqual(len(built), len(plain))
+
+
 class CompatibilityTests(unittest.TestCase):
     def test_default_meshes_match_their_reference_fingerprints(self) -> None:
         self.assertEqual(

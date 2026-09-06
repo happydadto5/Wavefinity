@@ -293,7 +293,7 @@ effect when only one tool fits.
 | `nest` | Photo-scaled cookie-cutter wall on a chamfered foot, printed on its own with no bin. `depth` (height) and `rim` (thickness) are fixed | `clearance`, `smoothing` |
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
-| `divider` | One or more straight or leaning subdividing walls along X or Y | `height`, `thickness`, `angle`, `spacing` |
+| `divider` | One or more straight or leaning subdividing walls along X or Y, with optional sloped tool-slot bottoms | `height`, `thickness`, `angle`, `spacing`, `bottom_angle`, `reverse_bottom`, `alternate_bottom`, `minimal_bottom`, `bottom_supports` |
 | `pocket` | Raised rectangular tray with a recessed centre and 0.5 mm chamfered edges | `height`, `wall` |
 | `text` | Lettering sunk flush into the floor (or standing proud), one 3MF object each, any number per bin | `text`, `cap_height`, `quarter_turns`, `depth`, `raised`, `auto` |
 
@@ -312,6 +312,28 @@ stays thickest at the floor — where the sideways push of whatever leans
 against it actually bears — and tapers as it rises, the shape a physical
 gusset uses. Turning `wedge` off gets a uniform-thickness sheared wall
 instead: the same lean, thinner at the base, and the shape that snaps.
+In the browser this control is now labelled **Wall lean** so it is not
+confused with **Bottom slope** below; `wedge` / straight still applies only
+to the wall lean.
+
+A divider can also tilt the **bottoms of the tool slots** it forms, so a
+tool rests at an angle without the wall itself leaning. `bottom_angle`
+(0–45°, default 0 — a plain flat bin bottom, so older designs are
+unchanged) sets the rise, measured along the divider/tool direction: +X
+(toward the right) for a divider that runs along X, +Y (toward the back)
+along Y. `reverse_bottom` sends the rise the other way; `alternate_bottom`
+flips every second slot, ordered across the divider zone, and
+`reverse_bottom` then flips that whole alternating pattern. `count`
+dividers make `count + 1` supported slots, each rising `slot_length ×
+tan(bottom_angle)` from the existing floor. A combination whose high end
+clears the divider height or the bin is refused with a plain "reduce the
+bottom slope, shorten the run, or increase the bin height". By default the
+slope material is one solid wedge per slot; `minimal_bottom` replaces it
+with `bottom_supports` (default 3, a positive whole number) evenly spaced
+crossbars that touch the same theoretical sloped plane, print support-free
+(vertical stems, 45° gussets to the floor), and use materially less
+plastic. Either way the normal structural bin floor or removable-insert
+plate is untouched — this is only the material added above it.
 
 Every divider - wedge, straight-leaning or plain vertical - also gets a
 1 mm, 45-degree chamfer where its two long faces meet the floor

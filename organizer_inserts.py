@@ -68,6 +68,10 @@ CARTRIDGE_PITCH = 8.0      # optional interchangeable standalone-insert grid
 MAX_DIVIDER_ANGLE = 45.0   # steepest lean an FDM overhang prints support-free
 MIN_WEDGE_EDGE = 0.4       # thinnest a wedge's tapered top may print
 DIVIDER_CHAMFER = 1.0      # 45-degree foot flare where a divider meets the floor
+BOTTOM_SLOPE_MAX = 45.0    # steepest support-free FDM overhang, same limit as a wall lean
+BOTTOM_EMBED = 0.4         # sink slope solids this far into the floor for a clean union
+BOTTOM_CROSSBAR_THICKNESS = 2.4  # run-axis width of one printable support crossbar
+BOTTOM_CROSSBAR_CHAMFER = 1.0    # 45-degree gusset where a crossbar meets the floor
 NEST_CHAMFER = 0.8         # reinforced outside foot on a Photo Nest cutter wall
 POCKET_CHAMFER = 0.5       # 45-degree chamfer on pocket outside edges for strength
 POCKET_FLOOR = 1.2         # solid floor thickness under a pocket recess
@@ -1110,6 +1114,14 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
         # (see build_divider), which only stays centred if it happens to
         # equal this same auto value.
         "spacing": span / (count + 1),
+        # Sloped tool-slot bottoms - see _divider_support_bottoms. A zero
+        # angle adds nothing, so an older design with none of these keys
+        # keeps exactly the geometry it always had.
+        "bottom_angle": 0.0,
+        "reverse_bottom": 0,
+        "alternate_bottom": 0,
+        "minimal_bottom": 0,
+        "bottom_supports": 3,
     }
 
 
@@ -1172,6 +1184,144 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
             solids.extend(_full_span_divider(box, along, cross_centre, thickness, base_z, height))
         else:
             solids.extend(_divider_wall(box, one, thickness, height, angle, base_z))
+    bottom_angle = float(options.get("bottom_angle", 0.0) or 0.0)
+    if bottom_angle:
+        raw_supports = options.get("bottom_supports", 3)
+        supports = (int(round(float(raw_supports)))
+                    if raw_supports not in (None, "") else 3)
+        solids.extend(_divider_support_bottoms(
+            box, zone, along, centres, height, base_z, bottom_angle,
+            _option_flag(options.get("reverse_bottom")),
+            _option_flag(options.get("alternate_bottom")),
+            _option_flag(options.get("minimal_bottom")),
+            supports,
+        ))
+    return solids
+
+
+def _option_flag(value: object) -> bool:
+    """A yes/no option however it arrived - real bool, or a browser string."""
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "false", "0", "no", "off"}
+    return bool(value)
+
+
+def _bottom_slot_bounds(
+    zone: Zone, along: str, centres: Iterable[float],
+) -> list[tuple[float, float]]:
+    """The N+1 tool slots a divider's N wall centres cut its zone into.
+
+    Boundaries are the wall centres plus the zone's own two cross-axis edges
+    (see the task's "slot boundaries from the divider centers and the divider
+    zone's two cross-axis boundaries"), ordered low to high so ``Alternate
+    slopes`` can walk them in a stable order.
+    """
+    if along == "x":
+        edges = sorted([zone.y0, *centres, zone.y1])
+    else:
+        edges = sorted([zone.x0, *centres, zone.x1])
+    return [(edges[index], edges[index + 1]) for index in range(len(edges) - 1)]
+
+
+def _bottom_plane_z(r: float, r0: float, r1: float, rise: float,
+                    base_z: float, reverse: bool) -> float:
+    """Height of the theoretical sloped plane at run coordinate ``r``.
+
+    Low end at ``base_z`` (the existing support surface); the high end
+    ``rise`` above it, toward +run unless ``reverse`` flips it toward -run.
+    """
+    frac = (r - r0) / (r1 - r0)
+    return base_z + (1.0 - frac if reverse else frac) * rise
+
+
+def _extrude_bottom(
+    profile: Polygon, along: str, cross_lo: float, cross_hi: float,
+) -> trimesh.Trimesh:
+    """Extrude a ``(run, z)`` profile across one slot's cross-axis span.
+
+    The shape varies along the run, so - unlike a divider wall, whose section
+    is constant along its length - the profile is the run/z plane and the
+    extrusion is across the slot width.
+    """
+    width = cross_hi - cross_lo
+    centre = (cross_lo + cross_hi) / 2.0
+    if along == "x":
+        solid = _extrude_xz_profile(profile, width)
+        solid.apply_translation((0.0, centre, 0.0))
+    else:
+        solid = _extrude_yz_profile(profile, width)
+        solid.apply_translation((centre, 0.0, 0.0))
+    return solid
+
+
+def _divider_support_bottoms(
+    box: BoxSpec, zone: Zone, along: str, centres: list[float], height: float,
+    base_z: float, angle: float, reverse: bool, alternate: bool,
+    minimal: bool, supports: int,
+) -> list[trimesh.Trimesh]:
+    """Sloped support under each tool slot so a tool rests tilted, not flat.
+
+    ``angle`` degrees of rise runs along the divider/tool direction: +X (to
+    the right) for a divider that runs along x, +Y (to the back) along y.
+    ``reverse`` sends the rise the other way; ``alternate`` flips every second
+    slot, ordered across the divider zone, and ``reverse`` then flips that
+    whole pattern. A full bottom is one continuous wedge per slot; ``minimal``
+    replaces it with ``supports`` evenly spaced crossbars that touch the same
+    sloped plane but print without support - vertical stems with 45-degree
+    gussets where they meet the floor - and use materially less plastic. The
+    normal bin or insert floor is untouched; this is only the material above
+    it. Solids sink ``BOTTOM_EMBED`` into the floor for a clean union.
+    """
+    if not math.isfinite(angle) or angle < 0.0 or angle > BOTTOM_SLOPE_MAX:
+        raise ValueError(
+            f"bottom slope must be between 0 and {BOTTOM_SLOPE_MAX:g} degrees; "
+            "reduce the bottom slope"
+        )
+    if angle == 0.0:
+        return []
+    if minimal and supports < 1:
+        raise ValueError("number of crossbars must be a positive whole number")
+    run = zone.width if along == "x" else zone.depth
+    r0, r1 = (zone.x0, zone.x1) if along == "x" else (zone.y0, zone.y1)
+    rise = run * math.tan(math.radians(angle))
+    if rise > height + 1e-6 or base_z + rise > box.z + 1e-6:
+        raise ValueError(
+            "the bottom slope's high end rises past the divider height or the "
+            "bin: reduce the bottom slope, shorten the run, or increase the "
+            "bin height"
+        )
+    half_t = BOTTOM_CROSSBAR_THICKNESS / 2.0
+    solids: list[trimesh.Trimesh] = []
+    for index, (c_lo, c_hi) in enumerate(_bottom_slot_bounds(zone, along, centres)):
+        flip = reverse ^ (alternate and index % 2 == 1)
+        if not minimal:
+            if not flip:
+                pts = [(r0, base_z - BOTTOM_EMBED), (r1, base_z - BOTTOM_EMBED),
+                       (r1, base_z + rise), (r0, base_z)]
+            else:
+                pts = [(r0, base_z - BOTTOM_EMBED), (r1, base_z - BOTTOM_EMBED),
+                       (r1, base_z), (r0, base_z + rise)]
+            solids.append(_extrude_bottom(Polygon(pts), along, c_lo, c_hi))
+            continue
+        for step in range(supports):
+            centre = r0 + (step + 1) * run / (supports + 1)
+            z_left = _bottom_plane_z(centre - half_t, r0, r1, rise, base_z, flip)
+            z_right = _bottom_plane_z(centre + half_t, r0, r1, rise, base_z, flip)
+            top_left = max(z_left, base_z + 0.2)
+            top_right = max(z_right, base_z + 0.2)
+            # 45-degree gusset feet, never taller than the stem they brace.
+            chamfer = max(0.0, min(BOTTOM_CROSSBAR_CHAMFER,
+                                   top_left - base_z - 0.1,
+                                   top_right - base_z - 0.1))
+            pts = [
+                (centre - half_t - chamfer, base_z - BOTTOM_EMBED),
+                (centre + half_t + chamfer, base_z - BOTTOM_EMBED),
+                (centre + half_t, base_z + chamfer),
+                (centre + half_t, top_right),
+                (centre - half_t, top_left),
+                (centre - half_t, base_z + chamfer),
+            ]
+            solids.append(_extrude_bottom(Polygon(pts), along, c_lo, c_hi))
     return solids
 
 
@@ -1575,7 +1725,12 @@ TEXT_ZONE_EPSILON = 0.01     # glyph bounds land exactly on the zone; see _featu
 # them as such. Text brought the first that are not: what it says, and two
 # yes/no choices. Naming them here keeps that conversion honest instead of
 # letting it guess from the value it happens to receive.
-NON_NUMERIC_OPTIONS = {"text": "string", "auto": "flag", "raised": "flag"}
+NON_NUMERIC_OPTIONS = {
+    "text": "string", "auto": "flag", "raised": "flag",
+    # A divider's sloped-bottom yes/no choices - kept flags so a browser or
+    # API round-trip does not turn them into 0.0 / 1.0 floats.
+    "reverse_bottom": "flag", "alternate_bottom": "flag", "minimal_bottom": "flag",
+}
 
 
 def option_value(key: str, value: object) -> object:
@@ -1874,6 +2029,13 @@ def _divider_footprint(box: BoxSpec, one: Feature, base_z: float) -> Zone | None
     margin = thickness / 2.0 + lean + chamfer
     centres = _divider_cross_centres(zone, one.along, count, spacing)
     low, high = min(centres) - margin, max(centres) + margin
+    # A sloped bottom fills the whole zone cross span between the walls, not
+    # just the strip the walls stand on, so it does claim those compartments.
+    if float(options.get("bottom_angle", 0.0) or 0.0) > 0.0:
+        if one.along == "x":
+            low, high = min(low, zone.y0), max(high, zone.y1)
+        else:
+            low, high = min(low, zone.x0), max(high, zone.x1)
     # Full span runs to the box's true wavy wall, past the flat rectangle.
     if one.along == "x":
         x0, x1 = (-box.half_x, box.half_x) if one.full_span else (zone.x0, zone.x1)
