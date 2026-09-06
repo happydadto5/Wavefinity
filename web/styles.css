@@ -108,7 +108,9 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .field-grid.two { grid-template-columns: repeat(2, 1fr); }
 .advanced-build-settings { margin-top: 10px; }
 .measurement { color: var(--teal); margin: 4px 0 15px; font-size: 15px; font-weight: 600; }
-.inside-dim { display: block; color: var(--teal); font-size: 11px; font-weight: 600; margin-top: 3px; min-height: 14px; }
+.dimension-value { display: flex; align-items: center; gap: 5px; margin-top: 5px; }
+.dimension-value input { flex: 1; min-width: 0; margin-top: 0; }
+.inside-dim { color: var(--teal); font-size: 11px; font-weight: 600; white-space: nowrap; }
 .size-help { margin-top: 6px !important; }
 
 .segmented { display: grid; border: 1px solid var(--line-dark); border-radius: 7px; overflow: hidden; background: #f6f8f8; }

@@ -480,15 +480,23 @@ function wireControls() {
       updateGenerateAvailability();
       changedDesign();
     }));
-  ["#x-size", "#y-size"].forEach(selector => $(selector).addEventListener("blur", () => {
-    const input = $(selector);
-    const unit = state.catalog.base_unit;
-    const snapped = Math.max(unit, Math.round(number(input.value, unit) / unit) * unit);
-    if (String(snapped) !== input.value) {
-      input.value = String(snapped);
-      flashField(input);
-    }
-  }));
+  ["#x-size", "#y-size"].forEach(selector => {
+    $(selector).addEventListener("focus", () => {
+      const inside = $(selector === "#x-size" ? "#x-inside" : "#y-inside");
+      if (inside) inside.hidden = true;
+    });
+    $(selector).addEventListener("blur", () => {
+      const input = $(selector);
+      const unit = state.catalog.base_unit;
+      const snapped = Math.max(unit, Math.round(number(input.value, unit) / unit) * unit);
+      if (String(snapped) !== input.value) {
+        input.value = String(snapped);
+        flashField(input);
+      }
+      const inside = $(selector === "#x-size" ? "#x-inside" : "#y-inside");
+      if (inside) inside.hidden = false;
+    });
+  });
   $("#scoop").addEventListener("change", () => {
     const previousDesign = clone(state.design);
     updateDesignFromForm();
@@ -1458,9 +1466,9 @@ async function refreshPreview() {
     const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
     $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
     const xInside = $("#x-inside");
-    if (xInside) xInside.textContent = result.dimensions?.inside_x != null ? `(${result.dimensions.inside_x} inside)` : "";
+    if (xInside) xInside.textContent = result.dimensions?.inside_x != null ? `(${result.dimensions.inside_x} Inside)` : "";
     const yInside = $("#y-inside");
-    if (yInside) yInside.textContent = result.dimensions?.inside_y != null ? `(${result.dimensions.inside_y} inside)` : "";
+    if (yInside) yInside.textContent = result.dimensions?.inside_y != null ? `(${result.dimensions.inside_y} Inside)` : "";
     $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(state.design.box.x)} mm`;
     $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(state.design.box.y)} mm`;
     $(".dimension-height", $("#dimensions")).textContent = `Height ${fmt(state.design.box.z)} mm`;
