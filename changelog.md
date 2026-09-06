@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-09-06 — Bore: hex-bit profiles, an X/Y grid, and leaning holes
+
+- Two new **Profile** choices on a Bore, **Hex bit – short** and **Hex bit –
+  long**, size the hole for a 1/4" hex driver bit (6.35 mm across the flats,
+  0.25 mm clearance) and set the hole depth so the bit stands well proud —
+  12 mm hold for a ~1" insert bit, 16 mm for a ~1.5" power bit. Length,
+  diameter and fit clearance are shown but locked. New engine constants
+  `HEX_BIT_FLATS`, `HEX_BIT_CLEARANCE`, `HEX_BIT_HOLD`; `Item` accepts the
+  `hex_bit_short` / `hex_bit_long` profiles.
+- The Bore's single **Quantity** is replaced by **Columns (X)** and **Rows
+  (Y)**; each is blank to fit as many as the zone holds, or a whole number
+  for an exact grid. Wires the browser up to the engine's existing
+  `columns` / `rows` options.
+- A new **Angle °** field (round or square profiles only) leans a **single
+  row** of holes so tubes rest at a slant; 90° is straight up, and the limit
+  is 45°. It is refused on a real grid ("angled bores need a single row").
+  `BORE_MIN_ANGLE` caps the tilt.
+- Every hole now gets a small 45° lead-in **chamfer** at its mouth so tools
+  guide in and the top edge is less fragile (`BORE_MOUTH_CHAMFER`).
+
 ## 2026-09-06 — Print to Bambu bundles two connectors
 
 - **Print to Bambu Studio** now sends the bin plus two side connectors, so a

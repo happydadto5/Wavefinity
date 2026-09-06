@@ -19,6 +19,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 
 import wavefinity_web
+import organizer_inserts as inserts
 from organizer_app import base_height, design_from_dict
 from organizer_inserts import build_features
 from wavefinity_web import (
@@ -78,6 +79,31 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual((box.x, box.y, box.z), (16.0, 48.0, 40.0))
         self.assertEqual(box.base_thickness, 0.6)
         self.assertEqual(layout.mode, "fused")
+
+    def test_bore_catalog_exposes_the_grid_and_angle_and_drops_quantity(self):
+        parts = {part["kind"]: part for part in catalog_payload()["parts"]}
+        bore = parts["bore"]
+        self.assertFalse(bore["flags"]["qty"])
+        labels = [field["label"] for field in bore["fields"]]
+        self.assertIn("Columns (X)", labels)
+        self.assertIn("Rows (Y)", labels)
+        self.assertIn("Angle \xc2\xb0", labels)
+
+    def test_hex_bit_bore_default_holds_the_bit_and_stands_upright(self):
+        design = default_design()
+        response = default_feature_payload({
+            "design": design,
+            "kind": "bore",
+            "item": {
+                "name": "bit",
+                "profile": "hex_bit_long",
+                "segments": [{"length": 38, "diameter": 6.35}],
+                "clearance": 0.25,
+            },
+        })
+        resolved = response["resolved_options"]
+        self.assertEqual(resolved["depth"], inserts.HEX_BIT_HOLD["hex_bit_long"])
+        self.assertEqual(resolved["angle"], 90.0)
 
     def test_base_thickness_round_trips_and_legacy_designs_keep_their_floor(self):
         design = default_design()

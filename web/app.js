@@ -688,7 +688,16 @@ function field(label, key, value, options = {}) {
 // exact auto-computed value matters less than knowing what "blank" means.
 const AUTO_PLACEHOLDER = {
   divider: { height: "height of box", spacing: "fills evenly" },
+  bore: { columns: "fills width", rows: "fills depth", height: "auto" },
 };
+
+// The two fixed-size hex-bit profiles. Selecting one locks the hole to a
+// 1/4-inch bit and drives the hole depth so the bit stands well proud.
+const HEX_BIT_PROFILES = {
+  hex_bit_short: { label: "Hex bit – short", length: 25, diameter: 6.35, clearance: 0.25 },
+  hex_bit_long: { label: "Hex bit – long", length: 38, diameter: 6.35, clearance: 0.25 },
+};
+const isHexBitProfile = profile => Object.prototype.hasOwnProperty.call(HEX_BIT_PROFILES, profile);
 
 function renderDraftFields() {
   if (!state.draft) return;
@@ -786,18 +795,38 @@ function renderDraftFields() {
     const isBore = one.kind === "bore";
     // Cradles and bores use measured dimensions. Photo Nest has no item fields.
     const measuredStep = isCradle ? "1" : undefined;
+    const hexBit = isBore && isHexBitProfile(item.profile);
     if (!isBore) html += field("Length", "item_length", fmt(first.length), { unit: "mm", step: measuredStep });
-    html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: measuredStep });
+    if (hexBit) {
+      // Size and fit are fixed for a hex bit - show them, but locked.
+      const preset = HEX_BIT_PROFILES[item.profile];
+      html += `<label>Diameter<span class="unit">mm</span>
+        <input type="number" value="${preset.diameter}" disabled></label>`;
+    } else {
+      html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: measuredStep });
+    }
     if (!isCradle) {
+      const profiles = isBore
+        ? [["round", "Round"], ["hex", "Hex"], ["square", "Square"],
+           ["hex_bit_short", HEX_BIT_PROFILES.hex_bit_short.label],
+           ["hex_bit_long", HEX_BIT_PROFILES.hex_bit_long.label]]
+        : [["round", "Round"], ["hex", "Hex"], ["square", "Square"]];
       html += `<label>Profile<select data-draft="profile">
-        ${["round", "hex", "square"].map(profile => `<option value="${profile}" ${item.profile === profile ? "selected" : ""}>${profile[0].toUpperCase() + profile.slice(1)}</option>`).join("")}
+        ${profiles.map(([value, label]) => `<option value="${value}" ${item.profile === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>`;
-      html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), { unit: "mm" });
+      if (hexBit) {
+        html += `<label>Fit clearance<span class="unit">mm</span>
+          <input type="number" value="${HEX_BIT_PROFILES[item.profile].clearance}" disabled></label>`;
+      } else {
+        html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), { unit: "mm" });
+      }
     }
     if (isCradle) {
       html += `<p class="field-help wide">Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.</p>`;
     }
-    if (isBore) {
+    if (isBore && hexBit) {
+      html += `<p class="field-help wide">A 1/4-inch hex driver bit. The hole size, fit and depth are set for you so the bit slides in and out freely but stands well proud to grab.</p>`;
+    } else if (isBore) {
       html += `<p class="field-help wide">Enter the widest diameter that must drop into the hole. The bore adds its own wall and fit clearance; set the hole's depth below.</p>`;
     }
   }
@@ -805,6 +834,12 @@ function renderDraftFields() {
     // Rendered together as the one "% from end / Offset from center" field
     // beneath Runs along, above.
     if (option.key === "end_margin" || option.key === "run_offset") continue;
+    // A bore only leans round or square holes; a hex socket or a hex-bit
+    // profile always stands straight up.
+    if (info.kind === "bore" && option.key === "angle") {
+      const draftProfile = one.item?.profile || "round";
+      if (draftProfile !== "round" && draftProfile !== "square") continue;
+    }
     // Rendered by the divider bottom-slope block below, on its own and only
     // while Use support crossbars is ticked.
     if (option.key === "bottom_supports") continue;
@@ -826,7 +861,10 @@ function renderDraftFields() {
     if (autoHint) fieldOpts.placeholder = autoHint;
     if (stepFor[option.key]) fieldOpts.step = stepFor[option.key];
     html += field(option.label, `option:${option.key}`, shown, fieldOpts);
-    if (option.key === "angle") {
+    if (option.key === "angle" && info.kind === "bore") {
+      html += `<p class="field-help wide">90° is straight up. A lower angle leans the holes so tubes rest at a slant — it only works with a single row, so set Columns or Rows to 1.</p>`;
+    }
+    if (option.key === "angle" && info.kind === "divider") {
       // The wedge-vs-straight choice only means anything once the wall
       // leans, so it stays hidden until the lean above is non-zero
       // (updateDraftFromFields re-toggles this as the field changes).
@@ -1137,15 +1175,29 @@ function updateDraftFromFields(event) {
     // No holder editor names the tool any more; keep whatever is stored so the
     // engine still has a label for its error messages.
     item.name = item.name || "Custom item";
+    const previousProfile = item.profile;
     item.profile = isCradle ? "round" : (get("profile") || "round");
-    // A cradle ignores fit slack entirely, so it has no clearance field - keep
-    // the stored value at 0 rather than a stale 0.4 nothing reads.
-    item.clearance = isCradle ? 0 : number(get("clearance"), item.clearance ?? 0.4);
-    const first = {
-      length: number(get("item_length"), item.segments?.[0]?.length || 40),
-      diameter: number(get("item_diameter"), item.segments?.[0]?.diameter || 6),
-    };
-    item.segments = [first];
+    // Leaving a locked hex-bit profile: drop its fixed 6.35 / 0.25 back to
+    // ordinary editable defaults rather than carrying them over.
+    const leftHexBit = isHexBitProfile(previousProfile) && !isHexBitProfile(item.profile);
+    if (!isCradle && isHexBitProfile(item.profile)) {
+      // Size, length and fit are fixed for a hex bit - the fields are locked,
+      // so take the preset regardless of what the disabled inputs read.
+      const preset = HEX_BIT_PROFILES[item.profile];
+      item.clearance = preset.clearance;
+      item.segments = [{ length: preset.length, diameter: preset.diameter }];
+      delete one.options?.angle;   // a hex bit always stands straight up
+    } else {
+      // A cradle ignores fit slack entirely, so it has no clearance field -
+      // keep the stored value at 0 rather than a stale 0.4 nothing reads.
+      item.clearance = isCradle ? 0
+        : leftHexBit ? 0.4
+        : number(get("clearance"), item.clearance ?? 0.4);
+      item.segments = [{
+        length: number(get("item_length"), item.segments?.[0]?.length || 40),
+        diameter: leftHexBit ? 6 : number(get("item_diameter"), item.segments?.[0]?.diameter || 6),
+      }];
+    }
     one.item = item;
   }
   one.options ||= {};
@@ -1185,10 +1237,17 @@ function updateDraftFromFields(event) {
     const option = info.fields.find(entry => entry.key === key);
     const raw = String(get(changed) ?? "").trim();
     if (raw === "") delete one.options[key];
-    else one.options[key] = number(
-      raw,
-      one.options[key] ?? state.draftResolvedOptions?.[key] ?? number(option?.default),
-    );
+    else {
+      let value = number(
+        raw,
+        one.options[key] ?? state.draftResolvedOptions?.[key] ?? number(option?.default),
+      );
+      // A bore's grid counts are whole numbers.
+      if (info.kind === "bore" && (key === "columns" || key === "rows")) {
+        value = Math.max(1, Math.round(value));
+      }
+      one.options[key] = value;
+    }
     // A hand-set letter height means the user is placing it themselves.
     if (info.flags.text && key === "cap_height" && raw !== "") {
       one.options.auto = false;
@@ -1231,6 +1290,9 @@ function updateDraftFromFields(event) {
   // Toggling Alternate ends swaps the field beneath Runs along between
   // "% from end" and "Offset from center".
   if (changed === "alternate_ends") renderDraftFields();
+  // Switching a bore's profile swaps which fields show (locked hex-bit size,
+  // the Angle field for round/square only).
+  if (changed === "profile" && one.kind === "bore") renderDraftFields();
   // Ticking Use support crossbars reveals (or hides) Number of crossbars.
   if (changed === "option:minimal_bottom") renderDraftFields();
   updateSelectionButtons();
@@ -2768,7 +2830,84 @@ function watchServerVersion() {
   }, VERSION_POLL_MS);
 }
 
+async function showAboutDialog() {
+  const dialog = $("#about-dialog");
+  const content = $("#about-dialog-content");
+  if (!dialog || !content) return;
+  dialog.showModal();
+  try {
+    const res = await fetch("/Brochure.md");
+    if (!res.ok) throw new Error("Could not load Brochure.md");
+    const text = await res.text();
+    content.innerHTML = renderSimpleMarkdown(text);
+  } catch (err) {
+    content.textContent = "Could not load brochure: " + err.message;
+  }
+}
+
+function renderSimpleMarkdown(md) {
+  let html = md
+    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+    .replace(/^> (.*$)/gim, '<blockquote>$1</blockquote>')
+    .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/gim, '<em>$1</em>')
+    .replace(/\[(.*?)\]\((.*?)\)/gim, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/^(?:---|\*\*\*)$/gim, '<hr>');
+
+  const lines = html.split("\n");
+  let inList = false;
+  const processed = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("- ")) {
+      if (!inList) {
+        processed.push("<ul>");
+        inList = true;
+      }
+      processed.push(`<li>${trimmed.slice(2)}</li>`);
+    } else {
+      if (inList) {
+        processed.push("</ul>");
+        inList = false;
+      }
+      if (trimmed && !trimmed.startsWith("<h") && !trimmed.startsWith("<blockquote") && !trimmed.startsWith("<hr")) {
+        processed.push(`<p>${trimmed}</p>`);
+      } else if (trimmed) {
+        processed.push(trimmed);
+      }
+    }
+  }
+  if (inList) processed.push("</ul>");
+  return processed.join("\n");
+}
+
+function wireAboutDialog() {
+  const aboutBtn = $("#about-btn");
+  const dialog = $("#about-dialog");
+  const closeBtn = $("#about-dialog-close");
+  const closeHeaderBtn = $("#about-dialog-close-btn");
+
+  if (aboutBtn) {
+    aboutBtn.addEventListener("click", () => showAboutDialog());
+  }
+  if (closeBtn && dialog) {
+    closeBtn.addEventListener("click", () => dialog.close());
+  }
+  if (closeHeaderBtn && dialog) {
+    closeHeaderBtn.addEventListener("click", () => dialog.close());
+  }
+  if (dialog) {
+    dialog.addEventListener("click", (e) => {
+      if (e.target === dialog) dialog.close();
+    });
+  }
+}
+
 async function init() {
+  wireAboutDialog();
   try {
     const catalog = await api("/api/catalog");
     state.catalog = catalog;
@@ -2783,12 +2922,15 @@ async function init() {
     syncForm();
     $("#connection").textContent = "Local engine connected";
     $("#connection").classList.add("ready");
+    $("#connection").classList.remove("stale");
     watchServerVersion();
     updateHistoryButtons();
     clearDraftSelection();
     await refreshPreview();
   } catch (error) {
     $("#connection").textContent = "Engine unavailable";
+    $("#connection").classList.remove("ready");
+    $("#connection").classList.add("stale");
     setError(error.message);
     toast(error.message, true, 8000);
   }

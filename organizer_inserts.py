@@ -60,6 +60,19 @@ CRADLE_ALTERNATE_END_MARGIN = 0.10  # default floor left at each run-axis end
 CRADLE_ALTERNATE_END_MARGIN_MAX = 0.45  # keep a real middle so troughs still cross
 CRADLE_RUN_OFFSET_MAX = 1.0  # +/-100%: a trough edge reaches its zone wall
 BORE_WALL = 1.6            # material around a bore
+HEX_BIT_FLATS = 6.35      # 1/4" hex driver bit, measured across the flats
+HEX_BIT_SHORT_LENGTH = 25.0  # a nominal 1" insert bit
+HEX_BIT_LONG_LENGTH = 38.0   # a nominal 1.5" power bit
+HEX_BIT_CLEARANCE = 0.25  # snug in the hex hole but still slides in and out freely
+# Hole depth per hex-bit type: holds roughly half the bit so it stands well proud
+# and stays easy to pinch out.
+HEX_BIT_HOLD = {"hex_bit_short": 12.0, "hex_bit_long": 16.0}
+HEX_BIT_LENGTH = {
+    "hex_bit_short": HEX_BIT_SHORT_LENGTH,
+    "hex_bit_long": HEX_BIT_LONG_LENGTH,
+}
+BORE_MOUTH_CHAMFER = 0.6  # 45-degree lead-in at each hole mouth
+BORE_MIN_ANGLE = 45.0     # shallowest tilt whose blind-hole roof still prints
 INSERT_CLEARANCE = 0.2     # slack around a standalone insert, per side
 MIN_FEATURE_GAP = 0.8      # material between two features
 CONNECTOR_EDGE_KEEP_OUT = 2.0  # interior strip kept low for connector arms
@@ -116,7 +129,9 @@ class Item:
             raise ValueError("an item needs a name")
         if not self.segments:
             raise ValueError(f"{self.name}: an item needs at least one segment")
-        if self.profile not in {"round", "hex", "square"}:
+        if self.profile not in {
+            "round", "hex", "square", "hex_bit_short", "hex_bit_long"
+        }:
             raise ValueError(f"{self.name}: unknown profile {self.profile!r}")
         if not math.isfinite(self.clearance) or self.clearance < 0.0:
             raise ValueError(f"{self.name}: clearance must be a non-negative finite number")
@@ -957,14 +972,33 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
 # --- bores --------------------------------------------------------------------
 
 
+def _is_hex_bit(profile: str) -> bool:
+    return profile in HEX_BIT_HOLD
+
+
+def _hole_sides(profile: str) -> int:
+    """Polygon sides for a bore hole of this profile - round is a fine circle,
+    a hex bit is a six-sided socket."""
+    return {
+        "round": 48, "hex": 6, "square": 4,
+        "hex_bit_short": 6, "hex_bit_long": 6,
+    }[profile]
+
+
 @defaults("bore")
 def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     item = _need_item(one)
-    hole = min(item.length * 0.4, box.z - base_z - 2.0)
+    if _is_hex_bit(item.profile):
+        hole = min(HEX_BIT_HOLD[item.profile], box.z - base_z - 2.0)
+    else:
+        hole = min(item.length * 0.4, box.z - base_z - 2.0)
     return {
         "depth": hole,
         "wall": BORE_WALL,
         "height": one.options.get("depth", hole) + 2.0,
+        # 90 degrees is straight up; a shallower angle leans a single row of
+        # round or square holes so tubes rest at a slant.
+        "angle": 90.0,
     }
 
 
@@ -975,13 +1009,21 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
 
-    held = item.held(item.widest)
+    if _is_hex_bit(item.profile):
+        held = HEX_BIT_FLATS + HEX_BIT_CLEARANCE
+    else:
+        held = item.held(item.widest)
     depth = options["depth"]
     wall = options["wall"]
     height = options["height"]
+    angle = options.get("angle", 90.0)
     if depth <= 0.0 or height <= 0.0 or wall <= 0.0 or depth >= height:
         raise ValueError(
             f"{item.name}: bore depth must be below its positive height and wall"
+        )
+    if not math.isfinite(angle) or not (BORE_MIN_ANGLE - 1e-9 <= angle <= 90.0 + 1e-9):
+        raise ValueError(
+            f"bore angle must be between {BORE_MIN_ANGLE:g} and 90 degrees"
         )
 
     pitch = held + wall
@@ -1001,8 +1043,35 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         rows = max(1, math.ceil(spec_feature.count / max(columns, 1)))
     if columns < 1 or rows < 1:
         raise ValueError(f"no room for {item.name}: zone is too small for a bore")
-    needed_x = (columns - 1) * pitch + held + wall
-    needed_y = (rows - 1) * pitch + held + wall
+
+    # A tilt only makes sense for a single line of holes - a full grid would
+    # need an ever taller block and the rows behind would foul each other.
+    tilted = angle < 90.0 - 1e-9
+    if tilted and min(columns, rows) != 1:
+        raise ValueError(
+            "angled bores need a single row - set Columns or Rows to 1"
+        )
+    lean = math.radians(90.0 - angle) if tilted else 0.0
+    lean_axis = spec_feature.along           # 'x' or 'y'
+    reach = depth * math.sin(lean)           # sideways travel of the hole bottom
+    drop = depth * math.cos(lean)            # how far the bottom sits below the mouth
+
+    # An angled blind hole needs the block tall enough to keep its bottom
+    # buried. Grow the auto height to suit; a hand-set height that is too
+    # short is an error rather than a silent breakthrough.
+    if tilted:
+        need_height = drop + 2.0
+        if spec_feature.options.get("height") is not None:
+            if height < need_height - 1e-6:
+                raise ValueError(
+                    f"an angled bore needs at least {need_height:.1f} mm of height "
+                    f"but {height:.1f} mm is set"
+                )
+        else:
+            height = max(height, need_height)
+
+    needed_x = (columns - 1) * pitch + held + wall + (reach if lean_axis == "x" else 0.0)
+    needed_y = (rows - 1) * pitch + held + wall + (reach if lean_axis == "y" else 0.0)
     if needed_x > zone.width + 1e-9 or needed_y > zone.depth + 1e-9:
         raise ValueError(
             f"{columns} x {rows} bores need {needed_x:.1f} x {needed_y:.1f} mm "
@@ -1013,6 +1082,13 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     block = trimesh.creation.box(extents=(zone.width, zone.depth, height))
     block.apply_translation((centre_x, centre_y, base_z + height / 2.0))
 
+    sections = _hole_sides(item.profile)
+    hole_radius = held / 2.0 / (math.cos(math.pi / sections) if sections < 8 else 1.0)
+    over = max(2.0, held)                    # stub above the top face for a clean mouth
+    chamfer = min(BORE_MOUTH_CHAMFER, depth / 3.0, wall / 3.0)
+    # Centre the lean in the zone's slack so the leaning bottoms stay balanced.
+    lean_shift = -reach / 2.0
+
     holes = []
     made = 0
     for row in range(rows):
@@ -1021,13 +1097,38 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
                 break
             x = centre_x + (column - (columns - 1) / 2.0) * pitch
             y = centre_y + (row - (rows - 1) / 2.0) * pitch
-            sections = {"round": 48, "hex": 6, "square": 4}[item.profile]
-            hole = trimesh.creation.cylinder(
-                radius=held / 2.0 / (math.cos(math.pi / sections) if sections < 8 else 1.0),
-                height=depth * 2.0,
-                sections=sections,
+            if lean_axis == "x":
+                x += lean_shift
+            else:
+                y += lean_shift
+
+            shaft = trimesh.creation.cylinder(
+                radius=hole_radius, height=depth + over, sections=sections,
             )
-            hole.apply_translation((x, y, base_z + height + depth - depth))
+            shaft.apply_translation((0.0, 0.0, (over - depth) / 2.0))
+            parts = [shaft]
+            if chamfer > 1e-6:
+                mouth = trimesh.creation.revolve(
+                    [
+                        (0.0, -chamfer),
+                        (hole_radius, -chamfer),
+                        (hole_radius + chamfer, 0.0),
+                        (0.0, 0.0),
+                    ],
+                    sections=sections,
+                )
+                parts.append(mouth)
+            hole = union(parts) if len(parts) > 1 else parts[0]
+
+            if tilted:
+                # Lean toward the far (high) end of the run axis: +x for a row
+                # running along x, +y for one along y.
+                axis = (0.0, 1.0, 0.0) if lean_axis == "x" else (1.0, 0.0, 0.0)
+                sign = -1.0 if lean_axis == "x" else 1.0
+                hole.apply_transform(
+                    trimesh.transformations.rotation_matrix(sign * lean, axis)
+                )
+            hole.apply_translation((x, y, base_z + height))
             holes.append(hole)
             made += 1
     return [difference([block, union(holes)])]

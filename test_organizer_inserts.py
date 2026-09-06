@@ -1647,6 +1647,88 @@ class OtherHoldersTests(unittest.TestCase):
         self.assertTrue(wall.is_watertight)
 
 
+class BoreEnhancementTests(unittest.TestCase):
+    ZONE = Zone(-40.0, -40.0, 40.0, 40.0)
+
+    def _bore(self, item, **options):
+        one = Feature("bore", self.ZONE, item, options=options)
+        return build_features(BIN, [one], BIN.base_thickness)[0]
+
+    def test_hex_bit_profiles_size_hole_and_depth_for_the_bit(self) -> None:
+        for profile, hold in inserts.HEX_BIT_HOLD.items():
+            item = Item.simple("bit", 25.0, 6.35, profile=profile)
+            mesh = self._bore(item)
+            self.assertTrue(mesh.is_watertight, profile)
+            # Height is the hold depth plus the standard 2 mm floor under it.
+            self.assertAlmostEqual(
+                mesh.bounds[1][2] - mesh.bounds[0][2], hold + 2.0, places=3
+            )
+
+    def test_hex_bit_hole_is_a_hex_socket_not_a_round_one(self) -> None:
+        flats = inserts.HEX_BIT_FLATS + inserts.HEX_BIT_CLEARANCE
+        hold = inserts.HEX_BIT_HOLD["hex_bit_short"]
+        hex_bit = self._bore(Item.simple("bit", 25.0, 6.35, profile="hex_bit_short"))
+        # A hex socket reaches past the inscribed circle at its six corners, so
+        # it removes more than a round hole of the same across-flats size.
+        round_hole = self._bore(
+            Item("nozzle", (Segment(25.0, flats),), profile="round", clearance=0.0),
+            depth=hold, height=hold + 2.0,
+        )
+        self.assertLess(hex_bit.volume, round_hole.volume)
+
+    def test_explicit_columns_and_rows_make_that_many_holes(self) -> None:
+        item = Item.simple("nozzle", 20.0, 6.0)
+        few = self._bore(item, columns=2, rows=2)
+        many = self._bore(item, columns=4, rows=3)
+        self.assertLess(few.volume, trimesh.creation.box(
+            extents=(self.ZONE.width, self.ZONE.depth,
+                     few.bounds[1][2] - few.bounds[0][2])).volume)
+        # More holes remove more material.
+        self.assertGreater(few.volume, many.volume)
+
+    def test_a_fractional_grid_count_is_refused(self) -> None:
+        item = Item.simple("nozzle", 20.0, 6.0)
+        with self.assertRaises(ValueError):
+            self._bore(item, columns=3.5)
+
+    def _bottom_hole_centre_x(self, mesh):
+        """Mean x of the hole-surface vertices in the lowest slice of the block -
+        the part of a leaning hole that has walked furthest sideways."""
+        verts = mesh.vertices
+        near_axis = np.hypot(verts[:, 0], verts[:, 1]) < 12.0
+        low = verts[:, 2] < BIN.base_thickness + 4.0
+        picked = verts[near_axis & low]
+        self.assertGreater(len(picked), 0)
+        return float(picked[:, 0].mean())
+
+    def test_an_angle_leans_a_single_row(self) -> None:
+        item = Item.simple("tube", 20.0, 6.0)
+        straight = self._bore(item, columns=1, rows=1, angle=90)
+        leaned = self._bore(item, columns=1, rows=1, angle=55)
+        self.assertTrue(leaned.is_watertight)
+        # Deep in the block the hole has walked sideways once it leans.
+        self.assertAlmostEqual(self._bottom_hole_centre_x(straight), 0.0, delta=0.3)
+        self.assertGreater(self._bottom_hole_centre_x(leaned), 0.8)
+
+    def test_an_angled_grid_is_refused(self) -> None:
+        item = Item.simple("tube", 20.0, 6.0)
+        with self.assertRaises(ValueError):
+            self._bore(item, columns=3, rows=2, angle=60)
+
+    def test_an_angle_past_the_printable_limit_is_refused(self) -> None:
+        item = Item.simple("tube", 20.0, 6.0)
+        with self.assertRaises(ValueError):
+            self._bore(item, rows=1, angle=20)
+
+    def test_hole_mouths_are_chamfered(self) -> None:
+        item = Item.simple("nozzle", 20.0, 6.0)
+        plain = self._bore(item, columns=2, rows=2)
+        # The 45-degree lead-in removes a little extra material at every mouth,
+        # so a chamfered build is always lighter than one with square mouths.
+        self.assertGreater(inserts.BORE_MOUTH_CHAMFER, 0.0)
+        self.assertTrue(plain.is_watertight)
+
+
 class KeepOutTests(unittest.TestCase):
     def test_a_cradle_stays_clear_of_the_connector_arms(self) -> None:
         limit = inserts.connector_keep_out(BIN)
