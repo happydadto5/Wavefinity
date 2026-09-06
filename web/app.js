@@ -36,6 +36,7 @@ const state = {
   draftSourceIndex: null,
   selected: null,
   camera: { yaw: 45, elevation: 76, zoom: 1 },
+  lastBoxSize: null,
   previewRequest: 0,
   draftRequest: 0,
   output: "",
@@ -250,8 +251,11 @@ function renderCatalog() {
   const palette = $("#support-palette");
   palette.innerHTML = state.catalog.parts.map(part => `
     <button class="support-choice" data-kind="${part.kind}" style="--support-color:${kindColor(part.kind)}" aria-label="${escapeHtml(part.title)}: ${escapeHtml(part.description)}" title="${escapeHtml(part.title)} — ${escapeHtml(part.description)}">
-      ${iconFor(part.kind)}
-      <span class="support-choice-copy"><strong>${escapeHtml(part.title)}</strong><small>${escapeHtml(part.description)}</small></span>
+      <div class="support-choice-header">
+        ${iconFor(part.kind)}
+        <strong>${escapeHtml(part.title)}</strong>
+      </div>
+      <small class="support-choice-desc">${escapeHtml(part.description)}</small>
     </button>
   `).join("");
   $$(".support-choice", palette).forEach(button => {
@@ -306,6 +310,7 @@ function updateDesignFromForm() {
   design.box.x = snapSize($("#x-size").value, design.box.x);
   design.box.y = snapSize($("#y-size").value, design.box.y);
   design.box.z = number($("#z").value, design.box.z);
+  checkBinSizeChange();
   design.box.base_thickness = number(
     $("#base-thickness").value,
     design.box.base_thickness ?? 0.6,
@@ -1449,9 +1454,13 @@ async function refreshPreview() {
     if (request !== state.previewRequest) return;
     state.preview = result;
     state.design = result.design;
+    checkBinSizeChange();
     const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
     $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
-    $("#inside-size").textContent = result.dimensions.size;
+    const xInside = $("#x-inside");
+    if (xInside) xInside.textContent = result.dimensions?.inside_x != null ? `(${result.dimensions.inside_x} inside)` : "";
+    const yInside = $("#y-inside");
+    if (yInside) yInside.textContent = result.dimensions?.inside_y != null ? `(${result.dimensions.inside_y} inside)` : "";
     $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(state.design.box.x)} mm`;
     $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(state.design.box.y)} mm`;
     $(".dimension-height", $("#dimensions")).textContent = `Height ${fmt(state.design.box.z)} mm`;
@@ -1690,8 +1699,7 @@ function drawGeometry(canvas, geometry, camera) {
     minY = Math.min(minY, point[1]); maxY = Math.max(maxY, point[1]);
   }
   const spanX = Math.max(1e-8, maxX - minX), spanY = Math.max(1e-8, maxY - minY);
-  const pad = Math.max(34, Math.min(width, height) * .08);
-  const scale = Math.min((width - 2 * pad) / spanX, (height - 2 * pad) / spanY) * camera.zoom;
+  const scale = Math.min((width * 0.75) / spanX, (height * 0.75) / spanY) * camera.zoom;
   const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
   const project = point => [width / 2 + (point[0] - midX) * scale, height / 2 + (point[1] - midY) * scale];
   faces.sort((a, b) => a.depth - b.depth || number(a.layer) - number(b.layer));
@@ -1713,10 +1721,268 @@ function drawGeometry(canvas, geometry, camera) {
     context.lineWidth = isDraft ? .6 : .35;
     context.stroke();
   }
+  drawUsableFloor(context, faces, camera, project);
+  draw3DDimensions(context, state.design?.box, camera, project);
+}
+
+// Lay the straight-sided placement rectangle - the real usable floor, the same
+// one the 2D layout draws dashed and the engine's BoxSpec.usable_inside
+// returns - flat on the bin floor. The wavy cavity floor painted behind it is
+// larger, so a tool as long as the bin can still be rejected for want of room;
+// this makes that gap visible. The margin between the two is tinted.
+function drawUsableFloor(context, faces, camera, project) {
+  const box = state.design?.box;
+  const floors = faces.filter(face => face.kind === "floor");
+  if (!box || !floors.length) return;
+  const floorZ = Math.max(
+    ...floors.flatMap(face => face.points.map(point => point[2])),
+  );
+  const flat = point => project(iso([point[0], point[1], floorZ], camera));
+  const [insideX, insideY] = binInsideExtent(box);
+  const halfX = insideX / 2, halfY = insideY / 2;
+  const rect = [[-halfX, -halfY], [halfX, -halfY], [halfX, halfY], [-halfX, halfY]]
+    .map(flat);
+  const trace = (points, close = true) => {
+    context.moveTo(points[0][0], points[0][1]);
+    points.slice(1).forEach(point => context.lineTo(point[0], point[1]));
+    if (close) context.closePath();
+  };
+  const cavity = state.preview?.cavity_outline;
+  if (cavity && cavity.length > 2) {
+    context.save();
+    context.beginPath();
+    trace(cavity.map(flat));
+    trace(rect);
+    context.fillStyle = "rgba(196,131,20,.16)";
+    context.fill("evenodd");
+    context.restore();
+  }
+  context.save();
+  context.beginPath();
+  trace(rect);
+  context.setLineDash([5, 4]);
+  context.lineWidth = 1.3;
+  context.strokeStyle = "rgba(38,65,75,.6)";
+  context.stroke();
+  context.setLineDash([]);
+  context.restore();
+}
+
+function checkBinSizeChange() {
+  const box = state.design?.box;
+  if (!box) return;
+  const current = { x: number(box.x), y: number(box.y), z: number(box.z) };
+  if (state.lastBoxSize && (
+    state.lastBoxSize.x !== current.x ||
+    state.lastBoxSize.y !== current.y ||
+    state.lastBoxSize.z !== current.z
+  )) {
+    state.camera.zoom = 1;
+  }
+  state.lastBoxSize = current;
+}
+
+function draw3DDimensions(context, box, camera, project) {
+  if (!box) return;
+  const hx = number(box.x) / 2;
+  const hy = number(box.y) / 2;
+  const hz = number(box.z);
+  if (hx <= 0 || hy <= 0 || hz <= 0) return;
+
+  const yawRad = camera.yaw * Math.PI / 180;
+  const camX = -Math.sin(yawRad);
+  const camY = -Math.cos(yawRad);
+
+  const frontY = camY < 0 ? -hy : hy;
+  const frontX = camX < 0 ? -hx : hx;
+  const normWidth = [0, frontY > 0 ? 1 : -1, 0];
+  const normDepth = [frontX > 0 ? 1 : -1, 0, 0];
+
+  const standoff = 24;
+  const gap = 3;
+  const over = 4;
+
+  const computeDimGuide = (p3dA, p3dB, norm3d) => {
+    const sA = project(iso(p3dA, camera));
+    const sB = project(iso(p3dB, camera));
+    const sNorm = project(iso([p3dA[0] + norm3d[0], p3dA[1] + norm3d[1], p3dA[2] + norm3d[2]], camera));
+    let nx = sNorm[0] - sA[0], ny = sNorm[1] - sA[1];
+    const nLen = Math.hypot(nx, ny);
+    if (nLen > 1e-4) {
+      nx /= nLen;
+      ny /= nLen;
+    } else {
+      nx = 0;
+      ny = 1;
+    }
+    const offA = [sA[0] + nx * standoff, sA[1] + ny * standoff];
+    const offB = [sB[0] + nx * standoff, sB[1] + ny * standoff];
+    return { sA, sB, offA, offB, normal: [nx, ny] };
+  };
+
+  // 1. Width (along X on front ground)
+  const widthDim = computeDimGuide([-hx, frontY, 0], [hx, frontY, 0], normWidth);
+  renderDimensionGuide(
+    context,
+    widthDim.offA,
+    widthDim.offB,
+    widthDim.sA,
+    widthDim.sB,
+    widthDim.normal,
+    `Width ${fmt(box.x)} mm`,
+    gap,
+    over
+  );
+
+  // 2. Depth (along Y on front ground)
+  const depthDim = computeDimGuide([frontX, -hy, 0], [frontX, hy, 0], normDepth);
+  renderDimensionGuide(
+    context,
+    depthDim.offA,
+    depthDim.offB,
+    depthDim.sA,
+    depthDim.sB,
+    depthDim.normal,
+    `Depth ${fmt(box.y)} mm`,
+    gap,
+    over
+  );
+
+  // 3. Height (vertical Z edge on the leftmost corner of the bin)
+  const corners = [
+    [-hx, -hy],
+    [hx, -hy],
+    [hx, hy],
+    [-hx, hy],
+  ];
+  let leftmostCorner = corners[0];
+  let minScreenX = Infinity;
+  for (const [cx, cy] of corners) {
+    const pt = project(iso([cx, cy, 0], camera));
+    if (pt[0] < minScreenX) {
+      minScreenX = pt[0];
+      leftmostCorner = [cx, cy];
+    }
+  }
+
+  const sBot = project(iso([leftmostCorner[0], leftmostCorner[1], 0], camera));
+  const sTop = project(iso([leftmostCorner[0], leftmostCorner[1], hz], camera));
+  const heightNormal = [-1, 0];
+  const offBot = [sBot[0] - standoff, sBot[1]];
+  const offTop = [sTop[0] - standoff, sTop[1]];
+
+  renderDimensionGuide(
+    context,
+    offBot,
+    offTop,
+    sBot,
+    sTop,
+    heightNormal,
+    `Height ${fmt(box.z)} mm`,
+    gap,
+    over
+  );
+}
+
+function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, gap, over) {
+  const dx = pEnd[0] - pStart[0];
+  const dy = pEnd[1] - pStart[1];
+  const span = Math.hypot(dx, dy);
+  if (span < 14) return;
+
+  context.save();
+
+  // Extension / witness lines from bin corner to dimension line
+  context.strokeStyle = "rgba(20, 108, 112, 0.45)";
+  context.lineWidth = 1;
+  context.beginPath();
+  context.moveTo(witA[0] + normal[0] * gap, witA[1] + normal[1] * gap);
+  context.lineTo(pStart[0] + normal[0] * over, pStart[1] + normal[1] * over);
+  context.moveTo(witB[0] + normal[0] * gap, witB[1] + normal[1] * gap);
+  context.lineTo(pEnd[0] + normal[0] * over, pEnd[1] + normal[1] * over);
+  context.stroke();
+
+  // Dimension line
+  context.strokeStyle = "#146c70";
+  context.lineWidth = 1.25;
+  context.beginPath();
+  context.moveTo(pStart[0], pStart[1]);
+  context.lineTo(pEnd[0], pEnd[1]);
+  context.stroke();
+
+  // Inward arrowheads at each end
+  const lineAngle = Math.atan2(dy, dx);
+  for (const [pt, dir] of [[pStart, 1], [pEnd, -1]]) {
+    context.beginPath();
+    context.moveTo(pt[0], pt[1]);
+    context.lineTo(
+      pt[0] + Math.cos(lineAngle + 0.45) * 6 * dir,
+      pt[1] + Math.sin(lineAngle + 0.45) * 6 * dir
+    );
+    context.moveTo(pt[0], pt[1]);
+    context.lineTo(
+      pt[0] + Math.cos(lineAngle - 0.45) * 6 * dir,
+      pt[1] + Math.sin(lineAngle - 0.45) * 6 * dir
+    );
+    context.stroke();
+  }
+
+  // Label badge at midpoint
+  const mid = [(pStart[0] + pEnd[0]) / 2, (pStart[1] + pEnd[1]) / 2];
+
+  // Text orientation: spins with line, but NEVER upside-down!
+  let textAngle = lineAngle;
+  if (textAngle > Math.PI / 2) {
+    textAngle -= Math.PI;
+  } else if (textAngle < -Math.PI / 2) {
+    textAngle += Math.PI;
+  }
+  if (Math.abs(textAngle - Math.PI / 2) < 1e-4) {
+    textAngle = -Math.PI / 2;
+  }
+
+  context.translate(mid[0], mid[1]);
+  context.rotate(textAngle);
+  context.font = "600 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  const tw = context.measureText(label).width;
+  const padX = 8;
+  const bw = tw + padX * 2;
+  const bh = 18;
+  const r = 5;
+
+  // Subtle drop shadow for badge
+  context.shadowColor = "rgba(18, 38, 46, 0.25)";
+  context.shadowBlur = 6;
+  context.shadowOffsetY = 2;
+
+  // Dark HUD pill badge
+  context.fillStyle = "rgba(18, 38, 46, 0.90)";
+  context.beginPath();
+  if (context.roundRect) {
+    context.roundRect(-bw / 2, -bh / 2, bw, bh, r);
+  } else {
+    context.rect(-bw / 2, -bh / 2, bw, bh);
+  }
+  context.fill();
+
+  context.shadowColor = "transparent";
+  context.strokeStyle = "rgba(105, 172, 168, 0.70)";
+  context.lineWidth = 1;
+  context.stroke();
+
+  // Crisp text
+  context.fillStyle = "#ffffff";
+  context.fillText(label, 0, 0.5);
+
+  context.restore();
 }
 
 function renderPreview3D() {
   if (!state.preview) return;
+  checkBinSizeChange();
   drawGeometry($("#preview-3d"), state.preview.geometry, state.camera);
 }
 
@@ -2337,22 +2603,15 @@ async function printModel(target = "bin") {
 }
 
 function updateSlicerUI() {
-  const statusEl = $("#slicer-status-text");
   const printBtn = $("#print-bin");
-  if (!statusEl) return;
+  if (!printBtn) return;
   const slicer = state.slicer || {};
   if (slicer.available) {
-    statusEl.innerHTML = `<span class="slicer-status-dot"></span>${slicer.name || "Bambu Studio"}: Ready`;
-    if (printBtn) {
-      printBtn.textContent = "Print";
-      printBtn.title = `Send directly to ${slicer.name || "Bambu Studio"}`;
-    }
+    printBtn.hidden = false;
+    printBtn.textContent = `Print to ${slicer.name || "Bambu Studio"}`;
+    printBtn.title = `Send directly to ${slicer.name || "Bambu Studio"}`;
   } else {
-    statusEl.innerHTML = `<span class="slicer-status-dot missing"></span>Bambu Studio: Not found`;
-    if (printBtn) {
-      printBtn.textContent = "Print";
-      printBtn.title = "Bambu Studio is not installed - click 'Change slicer' to locate executable";
-    }
+    printBtn.hidden = true;
   }
 }
 

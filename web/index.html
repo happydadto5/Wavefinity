@@ -33,14 +33,13 @@
         </div>
         <div class="section-body">
           <div class="field-grid three">
-            <label>Grid width <span class="unit">mm</span><input id="x-size" type="number" min="8" step="8"></label>
-            <label>Grid depth <span class="unit">mm</span><input id="y-size" type="number" min="8" step="8"></label>
+            <label>Width <span class="unit">mm</span><input id="x-size" type="number" min="8" step="8"><span id="x-inside" class="inside-dim"></span></label>
+            <label>Length <span class="unit">mm</span><input id="y-size" type="number" min="8" step="8"><span id="y-inside" class="inside-dim"></span></label>
             <label>Height <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
           </div>
           <div id="advanced-build-settings" class="field-grid three advanced-build-settings" hidden>
             <label>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1"></label>
           </div>
-          <p id="inside-size" class="measurement"></p>
 
           <div class="build-label-fields">
             <label>Rim label<input id="label-text" type="text" maxlength="80" placeholder="e.g. M3 BOLTS"></label>
@@ -69,7 +68,6 @@
           <fieldset id="interior-mode" class="mode-fieldset" hidden>
             <legend>How should the interior print?</legend>
             <div id="mode-options" class="segmented two"></div>
-            <p class="field-help mode-help"><strong>Fused</strong> prints interior parts as one piece with the bin. <strong>Removable</strong> prints them separately on a thin 0.6 mm base plate that fits into the bin.</p>
           </fieldset>
 
           <div class="support-editor" hidden>
@@ -110,18 +108,17 @@
       </section>
 
       <section class="output-panel">
-        <label>Generate STLs<div class="input-with-button">
+        <label>Save to folder<div class="input-with-button">
           <input id="output-folder" type="text">
           <button type="button" class="button secondary" id="output-folder-picker">Browse</button>
         </div></label>
-        <button id="print-bin" class="button primary wide print-button">Print</button>
-        <button id="generate-bin" class="button secondary wide">Generate bin files</button>
+        <button id="print-bin" class="button primary wide print-button">Print to Bambu Studio</button>
+        <button id="generate-bin" class="button secondary wide">Generate Bin</button>
         <div class="button-row equal">
           <button id="generate-connector" class="button secondary">Generate connector</button>
           <button id="generate-sampler" class="button secondary">Generate sampler</button>
         </div>
         <div class="slicer-status-row">
-          <span id="slicer-status-text" class="slicer-status-text"><span class="slicer-status-dot"></span>Bambu Studio</span>
           <button type="button" id="slicer-picker-button" class="link-button" title="Select custom Bambu Studio or OrcaSlicer executable">Change slicer</button>
         </div>
       </section>

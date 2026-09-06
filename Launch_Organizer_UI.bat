@@ -4,6 +4,7 @@ cd /d "%~dp0"
 set "PYTHONPATH="
 set "ORGANIZER_ENV=%~dp0.venv"
 set "ORGANIZER_PY=%ORGANIZER_ENV%\Scripts\python.exe"
+set "ORGANIZER_PYW=%ORGANIZER_ENV%\Scripts\pythonw.exe"
 
 if not exist "%ORGANIZER_PY%" (
     echo Preparing the organizer app for first use...
@@ -34,10 +35,11 @@ if /i "%~1"=="--check" (
     exit /b 0
 )
 
-"%ORGANIZER_PY%" wavefinity_web.py
-set "ORGANIZER_EXIT=%errorlevel%"
-if not "%ORGANIZER_EXIT%"=="0" pause
-exit /b %ORGANIZER_EXIT%
+rem Run the long-lived local server without attaching it to this command
+rem window.  A later launch may replace it without leaving a paused window.
+start "" /b "%ORGANIZER_PYW%" wavefinity_web.py
+if errorlevel 1 goto :failed
+exit /b 0
 
 :failed
 echo.

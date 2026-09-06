@@ -103,7 +103,7 @@ INTERIOR_PART_CATALOG = {
     ),
     "nest": (
         "Photo Nest — custom part cavity",
-        "Upload a flat overhead photo on letter paper to create a scaled cavity for one part.",
+        "Snug holder based on photo.",
     ),
     "bore": (
         "Bore — upright tools",
@@ -131,7 +131,7 @@ INTERIOR_PART_CATALOG = {
     ),
     TEXT_KIND: (
         "Text — a label on the floor",
-        "Lettering sunk flush into the floor as its own colour. Add as many as you like.",
+        "Lettering sunk flush into the floor as its own colour.",
     ),
 }
 INTERIOR_PART_ORDER = (
@@ -181,7 +181,7 @@ PART_KINDS = (
       "alternate": True},
      (("Spacing", "spacing", "0"), ("Floor gap", "floor_gap", "2"),
       ("% from ends", "end_margin", "10"))),
-    ("nest", "Photo Nest", "Upload a flat overhead photo on letter paper to create a scaled cavity for one part.",
+    ("nest", "Photo Nest", "Snug holder based on photo.",
      {"qty": False, "size": False, "along": False, "item": False, "lean": False,
       "alternate": False, "photo": True},
      (("Fit clearance", "clearance", "0.6"),
@@ -195,7 +195,7 @@ PART_KINDS = (
      {"qty": True, "size": True, "along": True, "item": False, "lean": False},
      (("Height", "height", ""), ("Lip", "lip", "1"))),
     (TEXT_KIND, "Text",
-     "Lettering sunk flush into the floor as its own colour. Add as many as you like.",
+     "Lettering sunk flush into the floor as its own colour.",
      {"qty": False, "size": True, "along": False, "item": False, "lean": False,
       "text": True},
      (("Letter height", "cap_height", ""), ("Depth", "depth", "0.4"))),
@@ -749,6 +749,8 @@ def preview_geometry(
             if is_text(one) and _text_fits(one)
         ),
         "features": layout_to_dict(Layout(features, mode))["features"],
+        "inside_x": math.floor(inside_x),
+        "inside_y": math.floor(inside_y),
         "size_text": (
             f"{math.floor(inside_x):g} X {math.floor(inside_y):g} (Inside) - "
             f"{box.x:g} X {box.y:g} mm (Outside)"

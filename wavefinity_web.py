@@ -628,6 +628,8 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "draft_error": scene["draft_error"],
         "dimensions": {
             "size": scene["size_text"],
+            "inside_x": scene.get("inside_x"),
+            "inside_y": scene.get("inside_y"),
         },
         "layout_bounds": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
         # The true, wavy interior wall - Z-invariant, so one outline covers
