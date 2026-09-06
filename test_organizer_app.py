@@ -162,6 +162,22 @@ class WaveTests(unittest.TestCase):
 
 
 class BoxTests(unittest.TestCase):
+    def test_base_thickness_changes_only_the_floor_material(self) -> None:
+        thin = BoxSpec(32.0, 32.0, 24.0, base_thickness=0.6)
+        thick = replace(thin, base_thickness=1.0)
+
+        thin_mesh = make_box(thin)
+        thick_mesh = make_box(thick)
+
+        # The outside, walls, rim and locks do not move.  The only added
+        # material is the 0.4 mm slice beneath the unchanged cavity.
+        np.testing.assert_allclose(thick_mesh.bounds, thin_mesh.bounds, atol=1e-6)
+        self.assertAlmostEqual(
+            thick_mesh.volume - thin_mesh.volume,
+            wavy_cavity_polygon(thin).area * 0.4,
+            places=4,
+        )
+
     def test_outline_keeps_the_wave_and_rounds_only_the_corners(self) -> None:
         spec = BoxSpec()
         outline = wavy_outer_polygon(spec)
