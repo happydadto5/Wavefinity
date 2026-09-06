@@ -39,7 +39,8 @@
   Length and Height sit on one row at the top with an **Auto width** /
   **Auto length** pair beneath that fill that side of the bin floor; Hole
   depth, Wall and the grid counts follow. Height, Hole depth and Wall step
-  in 0.5 mm.
+  in 0.5 mm. Raising **Hole depth** to or past **Height** now lifts Height to
+  sit 1 mm above it, so the hole never outgrows the block.
 - A new **Angle °** field (round or square profiles only) leans a **single
   row** of holes so tubes rest at a slant; 90° is straight up, and the limit
   is 45°. It is refused on a real grid ("angled bores need a single row").

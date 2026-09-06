@@ -1393,6 +1393,20 @@ function updateDraftFromFields(event) {
       const newD = innerD + 2 * newWall;
       one.zone = [cx - newW / 2, cy - newD / 2, cx + newW / 2, cy + newD / 2];
     }
+    if (info.kind === "bore" && key === "depth") {
+      // The hole can't be deeper than the block is tall. If a bigger Hole
+      // depth would reach or pass the current Height, lift Height to sit
+      // 1 mm above it.
+      const holeDepth = number(one.options.depth, 0);
+      const heightNow = number(
+        one.options.height ?? state.draftResolvedOptions?.height, holeDepth + 2,
+      );
+      if (holeDepth >= heightNow) {
+        one.options.height = holeDepth + 1;
+        const heightField = $('[data-draft="option:height"]', $("#draft-fields"));
+        if (heightField) heightField.value = fmt(one.options.height);
+      }
+    }
     if (info.kind === "divider" && key === "angle") {
       // The wedge/straight choice only bites once the wall leans - show or
       // hide it to match, without a full re-render that would steal focus
