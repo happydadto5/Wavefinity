@@ -30,6 +30,7 @@ from wavefinity_web import (
     delete_feature_payload,
     draft_payload,
     expand_layout_payload,
+    feature_fit_payload,
     make_server,
     mode_payload,
     photo_nest_payload,
@@ -104,6 +105,36 @@ class WebApplicationTests(unittest.TestCase):
         resolved = response["resolved_options"]
         self.assertEqual(resolved["depth"], inserts.HEX_BIT_HOLD["hex_bit_long"])
         self.assertEqual(resolved["angle"], 90.0)
+
+    def test_feature_fit_snaps_a_bore_zone_down_to_its_hole_grid(self):
+        design = default_design()
+        design["box"]["x"], design["box"]["y"] = 200.0, 200.0
+        feature = {
+            "kind": "bore",
+            "zone": [-60.0, -60.0, 60.0, 60.0],
+            "item": {"name": "n", "profile": "round", "clearance": 0.4,
+                     "segments": [{"length": 20, "diameter": 6}]},
+            "count": None, "along": "x",
+            "options": {"columns": "3", "rows": "2"},
+            "full_span": False, "wedge": True, "alternate_ends": False,
+            "contour": None, "rotation": 0.0, "scale": 1.0,
+        }
+        fitted = feature_fit_payload({"design": design, "feature": feature})["feature"]
+        z = fitted["zone"]
+        self.assertAlmostEqual(z[2] - z[0], 24.0, places=3)   # 3 * (6.4 + 1.6)
+        self.assertAlmostEqual(z[3] - z[1], 16.0, places=3)   # 2 * (6.4 + 1.6)
+        self.assertAlmostEqual((z[0] + z[2]) / 2, 0.0, places=3)   # stays centred
+
+    def test_feature_fit_refuses_a_kind_with_no_contents(self):
+        design = default_design()
+        feature = {
+            "kind": "pocket", "zone": [-30.0, -30.0, 30.0, 30.0], "item": None,
+            "count": None, "along": "x", "options": {}, "full_span": False,
+            "wedge": True, "alternate_ends": False, "contour": None,
+            "rotation": 0.0, "scale": 1.0,
+        }
+        with self.assertRaises(ValueError):
+            feature_fit_payload({"design": design, "feature": feature})
 
     def test_base_thickness_round_trips_and_legacy_designs_keep_their_floor(self):
         design = default_design()

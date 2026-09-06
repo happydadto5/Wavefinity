@@ -33,6 +33,23 @@
 - The last control section had always been partly hidden behind the sticky
   action panel; it now has room to scroll clear.
 
+## 2026-09-06 — Interior-part auto-size buttons
+
+- The Bore editor's **Auto width** / **Auto length** buttons are replaced by
+  up to three general buttons that appear in any interior-part editor where
+  they apply and show/hide themselves as the current fit changes:
+  - **Fit this <Part> to its <holes/pegs/slots>** — resize the footprint to
+    exactly what the part builds. Shown only while the part fits; Bore, Post
+    and Slot Rack. New `POST /api/feature/fit`, backed by
+    `feature_min_footprint` in `organizer_inserts.py` (mirrors the sizing in
+    `build_bore` / `build_post` / `build_slot`, delegates to
+    `cradle_min_footprint` for cradles).
+  - **Expand this <Part> to the whole bin** — stretch the footprint to the
+    full usable bin floor. Bore, Pocket, Slot Rack, Steps.
+  - **Grow the bin to fit this <Part>** — enlarge the bin (same
+    `/api/layout/expand` as the top-of-section button). Every kind; shown
+    only while the part does not fit.
+
 ## 2026-09-06 — Bore: hex-bit profiles, an X/Y grid, and leaning holes
 
 - Two new **Profile** choices on a Bore, **Hex bit – short** and **Hex bit –
@@ -47,11 +64,11 @@
   zone holds, or a whole number for an exact grid. Wires the browser up to
   the engine's existing `columns` / `rows` options.
 - Bore footprint now reads **Width x Length** (was Width x Depth). Width,
-  Length and Height sit on one row at the top with an **Auto width** /
-  **Auto length** pair beneath that fill that side of the bin floor; Hole
-  depth, Wall and the grid counts follow. Height, Hole depth and Wall step
-  in 0.5 mm. Raising **Hole depth** to or past **Height** now lifts Height to
-  sit 1 mm above it, so the hole never outgrows the block.
+  Length and Height sit on one row at the top; Hole depth, Wall and the grid
+  counts follow. Height, Hole depth and Wall step in 0.5 mm. Raising **Hole
+  depth** to or past **Height** now lifts Height to sit 1 mm above it, so the
+  hole never outgrows the block. (The per-side Auto buttons were later
+  replaced by the shared auto-size buttons above.)
 - A new **Angle °** field (round or square profiles only) leans a **single
   row** of holes so tubes rest at a slant; 90° is straight up, and the limit
   is 45°. It is refused on a real grid ("angled bores need a single row").

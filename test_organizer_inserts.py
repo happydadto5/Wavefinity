@@ -1729,6 +1729,56 @@ class BoreEnhancementTests(unittest.TestCase):
         self.assertTrue(plain.is_watertight)
 
 
+class FeatureMinFootprintTests(unittest.TestCase):
+    """``feature_min_footprint`` - the size the editor's 'fit this part to its
+    contents' button resizes a zone to."""
+
+    def mn(self, one):
+        return inserts.feature_min_footprint(BIN, one, BIN.base_thickness)
+
+    def test_bore_grid_is_columns_by_rows_at_pitch(self) -> None:
+        item = Item("n", (Segment(20.0, 6.0),), profile="round")
+        one = Feature("bore", Zone(-60.0, -60.0, 60.0, 60.0), item,
+                      options={"columns": 3, "rows": 2, "wall": 1.6})
+        pitch = item.held(6.0) + 1.6            # 6.4 + 1.6 = 8
+        self.assertEqual(self.mn(one), (3 * pitch, 2 * pitch))
+
+    def test_bore_auto_grid_wraps_what_currently_fits(self) -> None:
+        item = Item("n", (Segment(20.0, 6.0),), profile="round")
+        one = Feature("bore", Zone(-20.0, -12.0, 20.0, 12.0), item,
+                      options={"wall": 1.6})
+        width, depth = self.mn(one)
+        self.assertLessEqual(width, 40.0 + 1e-6)
+        self.assertLessEqual(depth, 24.0 + 1e-6)
+        self.assertGreater(width, 0.0)
+
+    def test_post_row_is_pegs_plus_gaps(self) -> None:
+        one = Feature("post", Zone(-40.0, -20.0, 40.0, 20.0), count=3,
+                      options={"diameter": 12.0, "spacing": 4.0})
+        self.assertEqual(self.mn(one), (3 * 12.0 + 2 * 4.0, 12.0))
+
+    def test_slot_tightens_the_across_axis_keeps_the_run(self) -> None:
+        one = Feature("slot", Zone(-40.0, -30.0, 40.0, 30.0), count=3,
+                      along="x")
+        width, depth = self.mn(one)
+        self.assertEqual(width, 80.0)           # run axis untouched
+        self.assertLess(depth, 60.0)            # across axis trimmed to 3 slots
+
+    def test_cradle_delegates_to_its_own_helper(self) -> None:
+        one = Feature("cradle", Zone(-60.0, -15.0, 60.0, 15.0), DRIVER)
+        self.assertEqual(self.mn(one), inserts.cradle_min_footprint(one))
+
+    def test_kinds_with_no_contents_return_none(self) -> None:
+        cases = [
+            Feature("pocket", Zone(-20.0, -20.0, 20.0, 20.0)),
+            Feature("steps", Zone(-20.0, -20.0, 20.0, 20.0)),
+            Feature("divider", Zone(-20.0, -2.0, 20.0, 2.0)),
+            Feature("text", Zone(-20.0, -6.0, 20.0, 6.0), options={"text": "M3"}),
+        ]
+        for one in cases:
+            self.assertIsNone(self.mn(one), one.kind)
+
+
 class KeepOutTests(unittest.TestCase):
     def test_a_cradle_stays_clear_of_the_connector_arms(self) -> None:
         limit = inserts.connector_keep_out(BIN)
