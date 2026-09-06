@@ -13,9 +13,11 @@
   quantity** (with **Auto** buttons); each is blank to fit as many as the
   zone holds, or a whole number for an exact grid. Wires the browser up to
   the engine's existing `columns` / `rows` options.
-- Bore footprint now reads **Width x Length** (was Width x Depth), and Width
-  and Length each get an **Auto** button that fills that side of the bin
-  floor. Height, Hole depth and Wall are shown up with the footprint.
+- Bore footprint now reads **Width x Length** (was Width x Depth). Width,
+  Length and Height sit on one row at the top with an **Auto width** /
+  **Auto length** pair beneath that fill that side of the bin floor; Hole
+  depth, Wall and the grid counts follow. Height, Hole depth and Wall step
+  in 0.5 mm.
 - A new **Angle °** field (round or square profiles only) leans a **single
   row** of holes so tubes rest at a slant; 90° is straight up, and the limit
   is 45°. It is refused on a real grid ("angled bores need a single row").

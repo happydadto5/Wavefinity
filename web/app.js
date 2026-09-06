@@ -745,16 +745,9 @@ function renderDraftFields() {
     // A bore's footprint reads Width x Length, matching Pocket and the item terms.
     const depthLabel = isPocket || isBore ? "Length" : "Depth";
     if (isBore) {
-      // Width / Length each get an Auto button that fills that side of the bin.
-      const sizeField = (label, key, value) => `<label class="wide">${escapeHtml(label)}<span class="unit">mm</span>
-        <div class="input-with-button">
-          <input type="number" step="1" data-draft="${key}" value="${escapeHtml(value)}">
-          <button type="button" class="button secondary" data-action="auto-size" data-key="${key}">Auto</button>
-        </div></label>`;
-      html += sizeField("Width", "width", fmt(shownWidth));
-      html += sizeField("Length", "depth", fmt(shownDepth));
-      // Block dimensions sit right under the footprint; the two grid counts get
-      // their own Auto (blank = fit as many as the zone holds).
+      const draftProfile = one.item?.profile || "round";
+      const hexBit = isHexBitProfile(draftProfile);
+      // An option field, resolved to its number (or left blank on an "auto" hint).
       const optionField = (key, label, opts = {}) => {
         const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
         const autoHint = AUTO_PLACEHOLDER.bore?.[key];
@@ -774,11 +767,26 @@ function renderDraftFields() {
             <button type="button" class="button secondary" data-action="auto-option" data-key="${key}">Auto</button>
           </div></label>`;
       };
-      html += optionField("height", "Height", { unit: "mm" });
-      html += optionField("depth", "Hole depth", { unit: "mm" });
-      html += optionField("wall", "Wall", { unit: "mm" });
+      // Footprint and block height share the top row.
+      html += `<div class="draft-triple wide">
+        ${field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" })}
+        ${field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
+        ${optionField("height", "Height", { unit: "mm", step: "0.5" })}
+      </div>`;
+      // One Auto per footprint side: stretches it to the full bin floor.
+      html += `<div class="auto-size-row wide">
+        <button type="button" class="button secondary" data-action="auto-size" data-key="width">Auto width</button>
+        <button type="button" class="button secondary" data-action="auto-size" data-key="depth">Auto length</button>
+      </div>`;
+      html += optionField("depth", "Hole depth", { unit: "mm", step: "0.5" });
+      html += optionField("wall", "Wall", { unit: "mm", step: "0.5" });
       html += gridField("columns", "X quantity");
       html += gridField("rows", "Y quantity");
+      // A hex socket or hex-bit profile always stands upright, so no Angle for it.
+      if (!hexBit) {
+        html += optionField("angle", "Angle °", { step: "1" });
+        html += `<p class="field-help wide">90° is straight up. A lower angle leans the holes so tubes rest at a slant — it only works with a single row, so set X quantity or Y quantity to 1.</p>`;
+      }
     } else {
       html += field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" });
       html += field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
@@ -873,17 +881,9 @@ function renderDraftFields() {
     // Rendered together as the one "% from end / Offset from center" field
     // beneath Runs along, above.
     if (option.key === "end_margin" || option.key === "run_offset") continue;
-    if (info.kind === "bore") {
-      // Height / Hole depth / Wall / grid counts are drawn up with the
-      // footprint above; only Angle is left for this loop.
-      if (["height", "depth", "wall", "columns", "rows"].includes(option.key)) continue;
-      // A bore only leans round or square holes; a hex socket or a hex-bit
-      // profile always stands straight up.
-      if (option.key === "angle") {
-        const draftProfile = one.item?.profile || "round";
-        if (draftProfile !== "round" && draftProfile !== "square") continue;
-      }
-    }
+    // Every bore field is drawn up with the footprint above; nothing is left
+    // for this loop.
+    if (info.kind === "bore") continue;
     // Rendered by the divider bottom-slope block below, on its own and only
     // while Use support crossbars is ticked.
     if (option.key === "bottom_supports") continue;
@@ -905,9 +905,6 @@ function renderDraftFields() {
     if (autoHint) fieldOpts.placeholder = autoHint;
     if (stepFor[option.key]) fieldOpts.step = stepFor[option.key];
     html += field(option.label, `option:${option.key}`, shown, fieldOpts);
-    if (option.key === "angle" && info.kind === "bore") {
-      html += `<p class="field-help wide">90° is straight up. A lower angle leans the holes so tubes rest at a slant — it only works with a single row, so set X quantity or Y quantity to 1.</p>`;
-    }
     if (option.key === "angle" && info.kind === "divider") {
       // The wedge-vs-straight choice only means anything once the wall
       // leans, so it stays hidden until the lean above is non-zero

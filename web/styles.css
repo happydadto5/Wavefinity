@@ -148,6 +148,7 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .muted { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .draft-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .draft-fields .wide { grid-column: 1 / -1; }
+.draft-fields .draft-triple { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; align-items: start; }
 @keyframes field-flash-anim {
   0% { background: var(--teal-soft); box-shadow: 0 0 0 2px var(--teal); }
   100% { background: none; box-shadow: none; }
