@@ -40,6 +40,9 @@
           <div id="advanced-build-settings" class="field-grid three advanced-build-settings" hidden>
             <label>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1"></label>
           </div>
+          <button id="auto-expand-bin" class="button secondary auto-expand" type="button" hidden>
+            Adjust to fit interior parts<small>Resize the bin to the smallest that holds every interior part</small>
+          </button>
 
           <div class="build-label-fields">
             <label>Rim label<input id="label-text" type="text" maxlength="80" placeholder="e.g. M3 BOLTS"></label>
@@ -57,9 +60,6 @@
             <div><h2>Interior parts</h2></div>
             <span id="support-count" class="count-badge">0 placed</span>
           </div>
-          <button id="auto-expand-bin" class="button secondary auto-expand" type="button" hidden>
-            Auto Expand Bin<small>Grow the bin to fit the interior parts that don't fit right now</small>
-          </button>
           <div id="support-palette" class="support-palette" role="list"></div>
           <button id="add-support" class="button secondary add-support" type="button" hidden>
             + Additional interior part

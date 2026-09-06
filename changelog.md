@@ -46,6 +46,10 @@
   `BORE_MIN_ANGLE` caps the tilt.
 - Every hole now gets a small 45° lead-in **chamfer** at its mouth so tools
   guide in and the top edge is less fragile (`BORE_MOUTH_CHAMFER`).
+- The bin auto-expand control (now **Adjust to fit interior parts**) moved to
+  the top of the bin section, right under Width / Length / Height. It still
+  appears only when an interior part does not fit, and resizes the bin to
+  the smallest that holds every part.
 
 ## 2026-09-06 — Print to Bambu bundles two connectors
 

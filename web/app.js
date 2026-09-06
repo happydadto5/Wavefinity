@@ -1799,8 +1799,9 @@ function adoptResolvedFeatures(resolved) {
   });
 }
 
-// "Auto Expand Bin" shows only while an interior part does not fit; clicking it
-// grows the bin (see /api/layout/expand) to the smallest size that holds them all.
+// "Adjust to fit interior parts" (top of the bin section) shows only while an
+// interior part does not fit; clicking it grows the bin (see /api/layout/expand)
+// to the smallest size that holds them all.
 function updateAutoExpandButton() {
   const hasParts = Boolean(
     state.design?.layout?.features?.length || state.draft
