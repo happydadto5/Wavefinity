@@ -68,7 +68,9 @@ CARTRIDGE_PITCH = 8.0      # optional interchangeable standalone-insert grid
 MAX_DIVIDER_ANGLE = 45.0   # steepest lean an FDM overhang prints support-free
 MIN_WEDGE_EDGE = 0.4       # thinnest a wedge's tapered top may print
 DIVIDER_CHAMFER = 1.0      # 45-degree foot flare where a divider meets the floor
-BOTTOM_SLOPE_MAX = 45.0    # steepest support-free FDM overhang, same limit as a wall lean
+BOTTOM_SLOPE_MAX = 75.0    # steepest tool-slot slope; the ramp itself is solid or
+                           #   45-degree-tapered, so this is a usability cap, not a
+                           #   print limit (the rise-past-the-bin check is the real one)
 BOTTOM_EMBED = 0.4         # sink slope solids this far into the floor for a clean union
 BOTTOM_CROSSBAR_THICKNESS = 2.4  # run-axis width of one printable support crossbar
 BOTTOM_CROSSBAR_CHAMFER = 1.0    # 45-degree gusset where a crossbar meets the floor
@@ -1270,15 +1272,19 @@ def _divider_support_bottoms(
     ``minimal`` replaces it with ``supports`` evenly spaced crossbars and uses
     materially less plastic.
 
-    A crossbar is a short bar hugging the underside of the tool line, welded
-    into the wall on each side of the slot and tapered at 45 degrees so it
-    prints with no support - it does *not* run down to the floor, it hangs off
-    the walls at roughly the height it carries the tool. Only where a slot has
-    no wall to hang from - an open end of a divider set into bare floor, never
-    a ``full_span`` divider, which has the bin's own side walls - does it fall
-    back to a floor-standing stem with 45-degree gusset feet. The normal bin
-    or insert floor is untouched; this is only the material above it. Solids
-    sink ``BOTTOM_EMBED`` into the floor (or into a wall) for a clean union.
+    A crossbar hangs off the walls at the height it carries the tool, never
+    reaching the floor. Its underside is an inverted V: a 45-degree corbel
+    grows inward from the wall on each side of the slot until the two meet at
+    a central ridge, and a full bar rides the slope on top of that ridge. The
+    whole underside is at 45 degrees and the top faces up, so it prints with
+    no support. Where the corbels have no room to meet before the floor - a
+    wide slot, or a crossbar down near the low end of the slope - or the slot
+    has no wall to hang from (an open end of a divider set into bare floor,
+    never a ``full_span`` divider, which has the bin's own side walls), it
+    falls back to a floor-standing stem with 45-degree gusset feet. The normal
+    bin or insert floor is untouched; this is only the material above it.
+    Solids sink ``BOTTOM_EMBED`` into the floor (or into a wall) for a clean
+    union.
     """
     if not math.isfinite(angle) or abs(angle) > BOTTOM_SLOPE_MAX:
         raise ValueError(
@@ -1303,7 +1309,7 @@ def _divider_support_bottoms(
             "bin height"
         )
     half_t = BOTTOM_CROSSBAR_THICKNESS / 2.0
-    shoulder_drop = 0.8            # short vertical side before the 45-degree taper
+    bar_min = 0.8                  # thinnest the "full bar" above the ridge may be
     edge_lo, edge_hi = (zone.y0, zone.y1) if along == "x" else (zone.x0, zone.x1)
     wall_line = box.half_y if along == "x" else box.half_x
     solids: list[trimesh.Trimesh] = []
@@ -1328,18 +1334,24 @@ def _divider_support_bottoms(
         # at the zone edge instead of at a divider wall.
         span_lo = -wall_line if (lo_is_edge and full_span) else c_lo
         span_hi = wall_line if (hi_is_edge and full_span) else c_hi
+        span_mid = (span_lo + span_hi) / 2.0
+        half_span = (span_hi - span_lo) / 2.0
         for step in range(supports):
             centre = r0 + (step + 1) * run / (supports + 1)
             z_left = _bottom_plane_z(centre - half_t, r0, r1, rise, base_z, flip)
             z_right = _bottom_plane_z(centre + half_t, r0, r1, rise, base_z, flip)
             low = min(z_left, z_right)
-            # A floating bar needs enough headroom under the tool line for its
-            # full 45-degree taper to clear the floor; the crossbars nearest
-            # the low end of the slope don't have it, so those stand on the
-            # floor like before - which is right, the tool line is nearly on
-            # the floor there anyway.
-            room = low - shoulder_drop - half_t >= base_z - BOTTOM_EMBED - 1e-9
-            if not (floating and room):
+            # A floating crossbar is a 45-degree corbel growing inward from the
+            # wall on each side of the slot; the two meet at a central ridge and
+            # a full bar rides the slope on top of it. Its whole underside is at
+            # 45 degrees so it prints support-free, and it never reaches the
+            # floor. That needs head-room: the corbels climb half the slot's
+            # width to meet. Where there isn't room - a wide slot, or a crossbar
+            # down near the low end of the slope - fall back to the old
+            # floor-standing stem, which prints fine on its own gusset feet.
+            z_ridge = low - bar_min
+            z_base = z_ridge - half_span
+            if not (floating and z_base >= base_z - BOTTOM_EMBED - 1e-9):
                 top_left = max(z_left, base_z + 0.2)
                 top_right = max(z_right, base_z + 0.2)
                 # 45-degree gusset feet, never taller than the stem they brace.
@@ -1356,23 +1368,30 @@ def _divider_support_bottoms(
                 ]
                 solids.append(_extrude_bottom(Polygon(pts), along, c_lo, c_hi))
                 continue
-            # A short bar under the tool line: top rides the slope, the sides
-            # drop a little, then taper in at 45 degrees to an apex so no face
-            # overhangs past 45 degrees. The headroom check above guarantees
-            # the apex clears the floor.
-            z_shoulder = low - shoulder_drop
-            z_bot = z_shoulder - half_t
-            pts = [
-                (centre - half_t, z_left),
-                (centre + half_t, z_right),
-                (centre + half_t, z_shoulder),
-                (centre, z_bot),
-                (centre - half_t, z_shoulder),
-            ]
-            profile = Polygon(pts)
-            if not profile.is_valid or profile.area < 1e-6:
+            # Inverted-V underside spanning wall to wall, capped by the slope.
+            z_ceiling = max(z_left, z_right) + 5.0
+            v_profile = Polygon([
+                (span_lo, z_base), (span_mid, z_ridge), (span_hi, z_base),
+                (span_hi, z_ceiling), (span_lo, z_ceiling),
+            ])
+            cap_profile = Polygon([
+                (centre - half_t, z_base - 5.0), (centre + half_t, z_base - 5.0),
+                (centre + half_t, z_right), (centre - half_t, z_left),
+            ])
+            if along == "x":
+                under = _extrude_yz_profile(v_profile, BOTTOM_CROSSBAR_THICKNESS)
+                under.apply_translation((centre, 0.0, 0.0))
+                cap = _extrude_xz_profile(cap_profile, span_hi - span_lo)
+                cap.apply_translation((0.0, span_mid, 0.0))
+            else:
+                under = _extrude_xz_profile(v_profile, BOTTOM_CROSSBAR_THICKNESS)
+                under.apply_translation((0.0, centre, 0.0))
+                cap = _extrude_yz_profile(cap_profile, span_hi - span_lo)
+                cap.apply_translation((span_mid, 0.0, 0.0))
+            bar = intersection([under, cap])
+            if bar.faces.shape[0] == 0:
                 continue
-            solids.append(_extrude_bottom(profile, along, span_lo, span_hi))
+            solids.append(bar)
     return solids
 
 

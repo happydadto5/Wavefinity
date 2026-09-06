@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-06 — Print to Bambu bundles two connectors
+
+- **Print to Bambu Studio** now sends the bin plus two side connectors, so a
+  fresh build opens with the parts on the plate to link bins together.
+  `print_payload` runs `connector_payload` for the default (bin) target,
+  copies the connector 3MF to a second `… 2.3mf` file, and passes both to the
+  slicer. The **Connector** and **sampler** targets are unchanged.
+
 ## 2026-09-06 — Divider slope is signed; Wall lean moved last
 
 - The divider's **Bottom slope °** field is now just **Slope °(±)**. A
@@ -7,8 +15,13 @@
   (unchanged); a negative value tilts them toward the left or front.
   `_divider_support_bottoms` folds the sign into its `reverse` flag and
   works on the magnitude, so `reverse_bottom` from older saved designs still
-  applies on top. The out-of-range message is now "within 45 degrees either
-  way".
+  applies on top.
+- **Slope** may now go up to **75°** either way (was 45°). The ramp is a
+  solid wedge or 45-degree-tapered crossbars, so nothing about it needed the
+  old print-overhang cap; the real limit is the existing check that the
+  slope's high end must not rise past the divider height or the bin.
+  `BOTTOM_SLOPE_MAX` is 75; the out-of-range message reads "within 75
+  degrees either way".
 - The **Reverse slope** checkbox is gone — a negative **Slope** does the same
   thing. `reverse_bottom` stays a valid stored/API option for backward
   compatibility; the browser editor just no longer shows a control for it.
@@ -20,14 +33,16 @@
   rebuild, so the walls re-space evenly after the bin is resized or a wall
   lean is added (a lean needs more room between wall centres). Matches how a
   divider is first laid out.
-- **Use support crossbars** reworked. A crossbar is now a short bar that
-  hangs off the walls at the tool line and tapers in at 45 degrees to a
-  ridge, so it prints unsupported and uses far less plastic - it no longer
-  runs all the way down to the floor. A full-span divider welds each bar
-  into the bin's own side walls as well as its dividers. Only the crossbars
-  nearest the low end of the slope, where there is no room for the taper to
-  clear the floor, still stand on it (with the old 45-degree gusset feet) -
-  which is correct there, the tool line is nearly on the floor anyway.
+- **Use support crossbars** reworked. A crossbar now hangs off the walls at
+  the tool line with an **inverted-V underside**: a 45-degree corbel grows
+  inward from the wall on each side of the slot, the two meet at a central
+  ridge, and a full bar rides the slope on top. Nothing overhangs past 45
+  degrees, so it prints with no support, uses far less plastic, and no
+  longer runs down to the floor. Where the corbels have no room to meet
+  before the floor - a wide slot, or a crossbar near the low end of the
+  slope - or the slot has no wall on one side (a bare-floor divider's outer
+  slot), it falls back to the old floor-standing stem with gusset feet. A
+  full-span divider welds each bar into the bin's own side walls too.
 
 ## 2026-09-06 — Leaning-divider wedge reworked
 

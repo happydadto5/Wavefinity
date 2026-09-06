@@ -1203,6 +1203,19 @@ class DividerBottomSlopeTests(unittest.TestCase):
         for solid in bottoms:
             self.assertTrue(solid.is_watertight)
 
+    def test_a_slope_steeper_than_45_still_builds(self) -> None:
+        # Nothing about the ramp needs a 45-degree cap - it is solid, or
+        # 45-degree-tapered crossbars - so steep angles are allowed up to 75.
+        zone = Zone(-5.0, -20.0, 5.0, 20.0)  # 10 mm run
+        for minimal in (False, True):
+            _w, bottoms = self._walls_and_bottoms(
+                zone, count=1, along="x",
+                options={"bottom_angle": 60.0, "height": 24.0,
+                         "minimal_bottom": minimal, "bottom_supports": 3})
+            self.assertTrue(bottoms)
+            for solid in bottoms:
+                self.assertTrue(solid.is_watertight)
+
     def test_a_negative_slope_mirrors_the_wedge(self) -> None:
         zone = Zone(-20.0, -20.0, 20.0, 20.0)
         _w, up = self._walls_and_bottoms(
@@ -1216,12 +1229,12 @@ class DividerBottomSlopeTests(unittest.TestCase):
             low_z, high_z = self._ends(solid, 0)
             self.assertGreater(low_z, high_z + 1.0)
 
-    def test_over_45_and_non_finite_values_fail_clearly(self) -> None:
+    def test_over_75_and_non_finite_values_fail_clearly(self) -> None:
         zone = Zone(-15.0, -20.0, 15.0, 20.0)
-        for bad in (45.5, -45.5, math.nan):
+        for bad in (75.5, -75.5, math.nan):
             one = Feature("divider", zone, along="x", count=1,
                           options={"bottom_angle": bad})
-            with self.assertRaisesRegex(ValueError, "within 45 degrees either way"):
+            with self.assertRaisesRegex(ValueError, "within 75 degrees either way"):
                 build_features(self.box, [one], self.box.base_thickness)
 
     def test_excessive_rise_fails_clearly(self) -> None:
@@ -1295,41 +1308,53 @@ class DividerBottomSlopeTests(unittest.TestCase):
             self.assertGreaterEqual(solid.bounds[0][1], zone.y0 - 1e-6)
             self.assertLessEqual(solid.bounds[1][1], zone.y1 + 1e-6)
 
-    def test_full_span_crossbars_hang_from_the_walls_not_the_floor(self) -> None:
-        # A full-span divider's crossbars have the bin's own side walls to hang
-        # from, so they should sit at the tool line, not run down to the floor -
-        # except the ones so near the low end of the slope that a floating bar's
-        # taper could not clear the floor anyway.
+    def test_floating_crossbars_are_inverted_v_and_print_without_support(self) -> None:
+        # A narrow interior slot's crossbars hang off both walls: a 45-degree
+        # corbel from each side meets at a central ridge, with a full bar on
+        # top. Nothing overhangs past 45 degrees, and they never reach the
+        # floor.
         zone = Zone(-30.0, -30.0, 30.0, 30.0)
-        angle = 10.0
+        angle = 25.0
         _walls, bars = self._walls_and_bottoms(
-            zone, count=1, along="x", full_span=True,
-            options={"bottom_angle": angle, "minimal_bottom": True,
-                     "bottom_supports": 6})
+            zone, count=3, along="x",
+            options={"bottom_angle": angle, "height": 32.0,
+                     "minimal_bottom": True, "bottom_supports": 3})
         self.assertTrue(bars)
         floor = self.box.base_thickness
         run, rise = 60.0, 60.0 * math.tan(math.radians(angle))
-        by_x = sorted(bars, key=lambda b: b.vertices[:, 0].mean())
+        floaters = []
         for bar in bars:
             self.assertTrue(bar.is_watertight)
-            centre = bar.vertices[:, 0].mean()
+            v = bar.vertices
+            centre = v[:, 0].mean()
             plane_z = floor + (centre - zone.x0) / run * rise
-            self.assertAlmostEqual(bar.vertices[:, 2].max(), plane_z, delta=1.0)
-        # up the slope the bars float: the lowest point of each is only a short
-        # taper below the tool line it carries, nowhere near the floor
-        for bar in by_x[len(by_x) // 2:]:
-            centre = bar.vertices[:, 0].mean()
-            plane_z = floor + (centre - zone.x0) / run * rise
-            self.assertGreater(bar.vertices[:, 2].min(), plane_z - 4.0)
-            self.assertGreater(bar.vertices[:, 2].min(), floor + 3.0)
-        # the lowest, where the tool line is nearly on the floor, still stands
-        # on it (the old stem fallback)
-        self.assertLess(by_x[0].vertices[:, 2].min(), floor + 1.5)
-        # every downward face clear of the floor prints within 45 degrees
-        for bar in bars:
-            for normal, centroid in zip(bar.face_normals, bar.triangles_center):
-                if normal[2] < -1e-6 and centroid[2] > floor + 0.5:
+            self.assertAlmostEqual(v[:, 2].max(), plane_z, delta=1.5)
+            # no downward face steeper than 45 degrees off vertical, anywhere
+            # clear of the floor - i.e. it prints with no support
+            for normal, cen in zip(bar.face_normals, bar.triangles_center):
+                if normal[2] < -1e-6 and cen[2] > floor + 0.5:
                     self.assertGreaterEqual(normal[2], -math.sqrt(0.5) - 1e-6)
+            if v[:, 2].min() > floor + 1.0:
+                floaters.append(bar)
+        # the interior slots well up the slope do float, as inverted Vs:
+        # the underside is lower at the walls than at the slot's centre
+        self.assertTrue(floaters)
+        for bar in floaters:
+            v = bar.vertices
+            ylo, yhi = v[:, 1].min(), v[:, 1].max()
+            ymid = (ylo + yhi) / 2.0
+            at_wall = v[np.abs(v[:, 1] - ylo) < 0.6][:, 2].min()
+            at_mid = v[np.abs(v[:, 1] - ymid) < 0.6][:, 2].min()
+            self.assertGreater(at_mid, at_wall + 1.0)
+
+    def test_a_full_span_divider_with_crossbars_unions_watertight(self) -> None:
+        zone = Zone(-30.0, -30.0, 30.0, 30.0)
+        one = Feature("divider", zone, along="x", count=2, full_span=True,
+                      options={"bottom_angle": 20.0, "minimal_bottom": True,
+                               "bottom_supports": 3})
+        fused = make_fused_box(self.box, [one], make_box(self.box))
+        self.assertTrue(fused.is_watertight)
+        self.assertEqual(len(fused.split(only_watertight=False)), 1)
 
 
 class FullSpanLeaningDividerTests(unittest.TestCase):
