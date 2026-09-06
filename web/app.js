@@ -559,6 +559,24 @@ function wireControls() {
         changedDesign();
       }
     });
+    input.addEventListener("wheel", event => {
+      event.preventDefault();
+      const unit = state.catalog.base_unit;
+      const current = number(input.value, state.design.box[axis]);
+      const delta = event.deltaY < 0 ? unit : -unit;
+      const next = Math.max(unit, Math.round((current + delta) / unit) * unit);
+      if (next === current && delta < 0) return;
+      state.design.box[axis] = next;
+      if (document.activeElement === input) {
+        input.value = String(next);
+        input.select();
+      } else {
+        formatDimField(axis);
+      }
+      state.canGenerate = false;
+      updateGenerateAvailability();
+      changedDesign();
+    }, { passive: false });
   });
   $("#scoop").addEventListener("change", () => {
     const previousDesign = clone(state.design);
