@@ -14,8 +14,10 @@ import math
 import mimetypes
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -55,7 +57,10 @@ from organizer_inserts import (
     layout_to_dict,
     layout_zone,
     moved_feature,
+    occupied_zones,
+    option_value,
     resized_feature,
+    resolve_text_features,
     resolved_options,
     snapped_zone,
 )
@@ -64,8 +69,8 @@ from organizer_app import (
     APP_DIR,
     DEFAULT_SAMPLE_BOXES,
     PART_KINDS,
-    SUPPORT_CATALOG,
-    SUPPORT_ORDER,
+    INTERIOR_PART_CATALOG,
+    INTERIOR_PART_ORDER,
     _customization_zones,
     _mesh_preview_geometry,
     base_height,
@@ -164,7 +169,7 @@ def _item_from_json(raw: dict[str, Any] | None) -> Item | None:
 def _feature_from_json(raw: dict[str, Any], mode: str) -> Feature:
     data = dict(raw)
     options = {
-        str(key): float(value)
+        str(key): option_value(str(key), value)
         for key, value in dict(data.get("options", {})).items()
         if str(value).strip() != ""
     }
@@ -231,9 +236,12 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         box, updated.features, label, label_location, scoop, updated.mode
     )
     with GEOMETRY_LOCK:
-        build_features(box, updated.features, base_height(box, layout.mode), layout_zone(box, layout.mode))
+        build_features(box, updated.features, base_height(box, layout.mode),
+                       layout_zone(box, layout.mode), layout.mode)
     return {
-        "design": design_to_dict(box, updated, label, part_name, label_location, scoop),
+        "design": design_to_dict(
+            box, updated, label, part_name, label_location, scoop,
+        ),
         "selected": 0,
         "outline": {"width": outline.width, "depth": outline.depth},
     }
@@ -247,6 +255,12 @@ def _first_open_position(
     label_location: str,
     scoop: bool,
 ) -> Feature:
+    # Auto-placed text does its own searching, over its real ink rather than a
+    # placeholder rectangle, so hunting a slot for it here only produces a
+    # zone that ``resolve_text_features`` immediately replaces - and a bad one,
+    # since the placeholder is wider than the lettering it stands for.
+    if one.kind == "text" and one.options.get("auto"):
+        return one
     bounds = layout_zone(box, layout.mode)
     pitch = 8.0 if layout.mode == "cartridge" else layout.snap
     xs = np.arange(
@@ -261,32 +275,45 @@ def _first_open_position(
     )
     candidates = [(float(x), float(y)) for y in ys for x in xs]
     candidates.sort(key=lambda point: point[0] ** 2 + point[1] ** 2)
+    if not candidates:
+        raise ValueError("there is no open floor area large enough for that interior part")
     reserved = _customization_zones(
         box, label, label_location, scoop, layout.mode
     )
+    # Judged on the floor each support actually covers rather than on its zone,
+    # so a new one can drop into the open end of a cradle's zone - see
+    # ``occupied_zones``.
+    base_z = base_height(box, layout.mode)
+    taken = occupied_zones(box, layout.features, base_z, layout.mode)
+    taken.extend(zone for _name, zone in reserved)
+    # That covered floor sits at a fixed offset inside the support's own zone,
+    # and moving the support moves both together, so it is worked out once here
+    # instead of being rebuilt for every candidate centre on the grid.
+    trial = moved_feature(one, box, candidates[0], layout.mode, layout.snap)
+    covered = occupied_zones(box, [trial], base_z, layout.mode)[0]
+    trial_x, trial_y = trial.zone.centre
+    inset = (covered.x0 - trial_x, covered.y0 - trial_y,
+             covered.x1 - trial_x, covered.y1 - trial_y)
     for centre in candidates:
         placed = moved_feature(one, box, centre, layout.mode, layout.snap)
-        if all(
-            not placed.zone.overlaps(other.zone, MIN_FEATURE_GAP)
-            for other in layout.features
-        ) and all(
-            not placed.zone.overlaps(zone, MIN_FEATURE_GAP)
-            for _name, zone in reserved
-        ):
+        centre_x, centre_y = placed.zone.centre
+        covers = Zone(centre_x + inset[0], centre_y + inset[1],
+                      centre_x + inset[2], centre_y + inset[3])
+        if all(not covers.overlaps(zone, MIN_FEATURE_GAP) for zone in taken):
             return placed
-    raise ValueError("there is no open floor area large enough for that support")
+    raise ValueError("there is no open floor area large enough for that interior part")
 
 
 def catalog_payload() -> dict[str, Any]:
     parts = []
     indexed = {kind: (title, blurb, flags, fields)
                for kind, title, blurb, flags, fields in PART_KINDS}
-    for kind in SUPPORT_ORDER:
+    for kind in INTERIOR_PART_ORDER:
         title, blurb, flags, fields = indexed[kind]
         parts.append({
             "kind": kind,
             "title": title,
-            "display": SUPPORT_CATALOG[kind][0],
+            "display": INTERIOR_PART_CATALOG[kind][0],
             "description": blurb,
             "flags": flags,
             "fields": [
@@ -319,14 +346,180 @@ def catalog_payload() -> dict[str, Any]:
             "sampler_boxes": DEFAULT_SAMPLE_BOXES,
         },
         "preferences": load_preferences(),
+        "slicer": {
+            "available": (slicer_exe := detect_bambu_studio()) is not None,
+            "path": str(slicer_exe) if slicer_exe else None,
+            "name": slicer_name(slicer_exe),
+        },
     }
+
+
+def slicer_name(slicer_path: Path | None) -> str:
+    if slicer_path is None:
+        return "Bambu Studio"
+    name = slicer_path.stem.replace("-", " ").replace("_", " ").title()
+    if "bambu" in name.lower():
+        return "Bambu Studio"
+    if "orca" in name.lower():
+        return "OrcaSlicer"
+    return name or "Bambu Studio"
+
+
+def _find_bambu_studio_windows() -> Path | None:
+    # 1. Standard installation locations
+    candidates = [
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Bambu Studio" / "bambu-studio.exe",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Bambu Studio" / "bambu-studio.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Bambu Studio" / "bambu-studio.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Bambu Studio" / "bambu-studio.exe",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+
+    # 2. PATH
+    which = shutil.which("bambu-studio") or shutil.which("bambu-studio.exe")
+    if which:
+        return Path(which).resolve()
+
+    # 3. Windows Registry
+    try:
+        import winreg
+
+        # App Paths
+        for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            try:
+                with winreg.OpenKey(root, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\bambu-studio.exe") as key:
+                    val, _ = winreg.QueryValueEx(key, "")
+                    if val and Path(str(val)).is_file():
+                        return Path(str(val)).resolve()
+            except OSError:
+                pass
+
+        # Uninstall keys
+        for root, subkey in (
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        ):
+            try:
+                with winreg.OpenKey(root, subkey) as ukey:
+                    for i in range(winreg.QueryInfoKey(ukey)[0]):
+                        try:
+                            subkey_name = winreg.EnumKey(ukey, i)
+                            with winreg.OpenKey(ukey, subkey_name) as app_key:
+                                display_name, _ = winreg.QueryValueEx(app_key, "DisplayName")
+                                if "bambu studio" in str(display_name).lower():
+                                    try:
+                                        icon, _ = winreg.QueryValueEx(app_key, "DisplayIcon")
+                                        icon_path = Path(str(icon).strip('"'))
+                                        if icon_path.is_file() and icon_path.name.lower() == "bambu-studio.exe":
+                                            return icon_path.resolve()
+                                    except OSError:
+                                        pass
+                                    try:
+                                        loc, _ = winreg.QueryValueEx(app_key, "InstallLocation")
+                                        loc_exe = Path(str(loc).strip('"')) / "bambu-studio.exe"
+                                        if loc_exe.is_file():
+                                            return loc_exe.resolve()
+                                    except OSError:
+                                        pass
+                        except OSError:
+                            continue
+            except OSError:
+                pass
+    except Exception:
+        pass
+    return None
+
+
+def _find_bambu_studio_darwin() -> Path | None:
+    candidates = [
+        Path("/Applications/BambuStudio.app/Contents/MacOS/BambuStudio"),
+        Path.home() / "Applications/BambuStudio.app/Contents/MacOS/BambuStudio",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    which = shutil.which("BambuStudio") or shutil.which("bambu-studio")
+    return Path(which).resolve() if which else None
+
+
+def _find_bambu_studio_linux() -> Path | None:
+    which = shutil.which("bambu-studio")
+    return Path(which).resolve() if which else None
+
+
+def detect_bambu_studio(custom_path: str | None = None) -> Path | None:
+    if custom_path:
+        p = Path(custom_path).expanduser().resolve()
+        if p.is_file():
+            return p
+    prefs = load_preferences()
+    if prefs.get("slicer_path"):
+        p = Path(prefs["slicer_path"]).expanduser().resolve()
+        if p.is_file():
+            return p
+    if sys.platform == "win32":
+        return _find_bambu_studio_windows()
+    elif sys.platform == "darwin":
+        return _find_bambu_studio_darwin()
+    else:
+        return _find_bambu_studio_linux()
+
+
+def launch_slicer(slicer_path: Path, files: list[Path]) -> None:
+    if not slicer_path.is_file():
+        raise FileNotFoundError(f"Slicer executable not found: {slicer_path}")
+    if not files:
+        raise ValueError("No files to open in slicer")
+    args = [str(slicer_path.resolve())] + [str(f.resolve()) for f in files]
+    subprocess.Popen(
+        args,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+    )
 
 
 def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
     update: dict[str, Any] = {}
     if "output" in payload:
         update["output"] = str(payload["output"])
+    if "slicer_path" in payload:
+        update["slicer_path"] = str(payload["slicer_path"]) if payload["slicer_path"] else ""
     return {"preferences": save_preferences(update)}
+
+
+def browse_slicer_path_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Open the native file chooser to select a slicer executable."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        filetypes = [
+            ("Executable Files", "*.exe" if sys.platform == "win32" else "*"),
+            ("All Files", "*.*"),
+        ]
+        initialdir = "C:\\Program Files" if sys.platform == "win32" else "/"
+        try:
+            selected = filedialog.askopenfilename(
+                parent=root,
+                title="Select Slicer Executable (e.g. Bambu Studio)",
+                initialdir=initialdir,
+                filetypes=filetypes,
+            )
+        finally:
+            root.destroy()
+    except Exception as error:
+        raise RuntimeError("could not open the file chooser") from error
+    if selected:
+        save_preferences({"slicer_path": selected})
+    return {"slicer_path": selected or None}
 
 
 def browse_output_folder_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -353,13 +546,62 @@ def _design(raw: dict[str, Any]) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     return design_from_dict(raw)
 
 
+def _footprint_bounds(
+    box: BoxSpec, one: Feature | None, mode: str
+) -> list[float] | None:
+    """One support's covered floor for the 2D layout, or ``None`` when it is
+    simply its whole zone and the browser has nothing extra to draw."""
+    if one is None:
+        return None
+    zone = occupied_zones(box, [one], base_height(box, mode), mode)[0]
+    if zone == one.zone:
+        return None
+    return [zone.x0, zone.y0, zone.x1, zone.y1]
+
+
+def _resolved_text(
+    box: BoxSpec, features: tuple, mode: str,
+    label: str, label_location: str, scoop: bool,
+) -> tuple:
+    """``features`` with every auto-placed text moved to where it really goes.
+
+    Any endpoint that judges a layout has to do this first: an auto text's
+    stored zone is only a cache of where it last landed, and a brand-new one
+    starts on a placeholder in the middle of the bin.
+    """
+    return resolve_text_features(
+        box, features,
+        reserved=[
+            zone.polygon for _name, zone in _customization_zones(
+                box, label, label_location, scoop, mode
+            )
+        ],
+        base_z=base_height(box, mode), mode=mode,
+    )
+
+
+def _features_from_preview(layout: Layout, scene: dict[str, Any]) -> tuple:
+    """The layout's features as the preview resolved them.
+
+    Only ``auto`` text moves, and only during the preview, so a scene that
+    could not report its features leaves the layout exactly as it was.
+    """
+    raw = scene.get("features")
+    if not raw:
+        return layout.features
+    try:
+        return layout_from_dict({"mode": layout.mode, "features": raw}).features
+    except (ValueError, KeyError, TypeError):
+        return layout.features
+
+
 def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     draft_raw = payload.get("draft")
     draft = _feature_from_json(draft_raw, layout.mode) if draft_raw else None
     with GEOMETRY_LOCK:
         scene = preview_geometry(
-            box, label, layout.features, layout.mode, label_location, scoop, draft
+            box, label, layout.features, layout.mode, label_location, scoop, draft,
         )
     bounds = layout_zone(box, layout.mode)
     geometry = [
@@ -367,10 +609,17 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         for points, kind, normal, layer in scene["geometry"]
     ]
     cavity = wavy_cavity_polygon(box)
+    # An auto text part finds its own spot during the preview, so the design
+    # that comes back carries the zone it actually landed on - otherwise the
+    # browser would keep drawing it where it used to be.
+    resolved = replace(layout, features=_features_from_preview(layout, scene))
     return {
         "design": design_to_dict(
-            box, layout, label, part_name, label_location, scoop
+            box, resolved, label, part_name, label_location, scoop
         ),
+        "label_outline": scene["label_outline"],
+        "label_meta": scene["label_meta"],
+        "text_meta": scene["text_meta"],
         "geometry": geometry,
         "fits": scene["fits"],
         "message": scene["message"],
@@ -390,6 +639,14 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
             {"name": name, "zone": [zone.x0, zone.y0, zone.x1, zone.y1]}
             for name, zone in scene["customization_zones"]
         ],
+        # The floor each support actually covers, which for a fused cradle,
+        # post or divider is smaller than the zone it is drawn in. The 2D
+        # layout fills this and outlines the zone around it, so the open floor
+        # a neighbour may now use is visible rather than implied.
+        "feature_footprints": [
+            _footprint_bounds(box, one, layout.mode) for one in layout.features
+        ],
+        "draft_footprint": _footprint_bounds(box, draft, layout.mode),
         "feature_outlines": [
             ([[float(x), float(y)] for x, y in nest_contour_polygon(one).exterior.coords]
              if one.kind == "nest" and one.contour else None)
@@ -415,7 +672,7 @@ def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     kind = str(payload["kind"])
     indexed = {entry[0]: entry for entry in PART_KINDS}
     if kind not in indexed:
-        raise ValueError(f"unknown interior support {kind!r}")
+        raise ValueError(f"unknown interior part {kind!r}")
     flags = indexed[kind][3]
     item = _item_from_json(payload.get("item")) if flags["item"] else None
     one = default_feature(
@@ -437,12 +694,22 @@ def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    box, layout, *_ = _design(payload["design"])
+    box, layout, label, _part, label_location, scoop = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
+    # An auto text's stored zone is a placeholder until the resolver has had
+    # the rest of the layout to look at, so resolve it here too - otherwise the
+    # draft is judged, and drawn, somewhere it will never actually be.
+    if one.kind == "text" and one.options.get("auto"):
+        placed = _resolved_text(
+            box, tuple(layout.features) + (one,), layout.mode,
+            label, label_location, scoop,
+        )
+        one = placed[-1]
     shown = resolved_options(box, one, base_height(box, layout.mode))
     with GEOMETRY_LOCK:
         solids = build_features(
-            box, [one], base_height(box, layout.mode), layout_zone(box, layout.mode)
+            box, [one], base_height(box, layout.mode),
+            layout_zone(box, layout.mode), layout.mode, include_text=True,
         )
     geometry = []
     part_kind = "feature" if layout.mode == "fused" else "insert"
@@ -477,7 +744,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("a Photo Nest bin contains only its one custom cavity")
     if index is None:
         if one.kind == "nest" and existing:
-            raise ValueError("a Photo Nest is one custom cavity; start a new photo bin to replace these supports")
+            raise ValueError("a Photo Nest is one custom cavity; start a new photo bin to replace these interior parts")
         one = _first_open_position(
             one, box, layout, label, label_location, scoop
         )
@@ -486,10 +753,15 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         selected = int(index)
         if not 0 <= selected < len(existing):
-            raise ValueError("the selected support no longer exists")
+            raise ValueError("the selected interior part no longer exists")
         existing[selected] = one
     if one.kind == "nest" and len(existing) != 1:
         raise ValueError("a Photo Nest design can contain only its one custom cavity")
+    # Auto-placed text finds its own spot, so resolve before judging overlaps -
+    # otherwise a second one is refused for sitting on the first at the
+    # placeholder zone it has not been moved out of yet.
+    existing = list(_resolved_text(box, tuple(existing), layout.mode,
+                                   label, label_location, scoop))
     updated = Layout(tuple(existing), layout.mode, layout.snap)
     updated.validate(box)
     validate_customization_clearance(
@@ -498,11 +770,11 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     with GEOMETRY_LOCK:
         build_features(
             box, updated.features, base_height(box, updated.mode),
-            layout_zone(box, updated.mode),
+            layout_zone(box, updated.mode), updated.mode,
         )
     return {
         "design": design_to_dict(
-            box, updated, label, part_name, label_location, scoop
+            box, updated, label, part_name, label_location, scoop,
         ),
         "selected": selected,
     }
@@ -518,11 +790,11 @@ def delete_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     index = int(payload["index"])
     existing = list(layout.features)
     if not 0 <= index < len(existing):
-        raise ValueError("the selected support no longer exists")
+        raise ValueError("the selected interior part no longer exists")
     existing.pop(index)
     updated = replace(layout, features=tuple(existing))
     return {"design": design_to_dict(
-        box, updated, label, part_name, label_location, scoop
+        box, updated, label, part_name, label_location, scoop,
     )}
 
 
@@ -533,7 +805,7 @@ def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
         box, converted.features, label, label_location, scoop, converted.mode
     )
     return {"design": design_to_dict(
-        box, converted, label, part_name, label_location, scoop
+        box, converted, label, part_name, label_location, scoop,
     )}
 
 
@@ -617,11 +889,11 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     with GEOMETRY_LOCK:
         build_features(
             trial, updated.features, base_height(trial, mode),
-            layout_zone(trial, mode),
+            layout_zone(trial, mode), mode,
         )
     return {
         "design": design_to_dict(
-            trial, updated, label, part_name, label_location, scoop
+            trial, updated, label, part_name, label_location, scoop,
         ),
         "box": {"x": trial.x, "y": trial.y, "z": trial.z},
         "grew": (trial.x != start_x or trial.y != start_y),
@@ -633,7 +905,7 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     output = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
     with GEOMETRY_LOCK:
         result = generate_organizer_files(
-            box, layout, output, label, part_name, label_location, scoop
+            box, layout, output, label, part_name, label_location, scoop,
         )
     return {"result": result, "output": str(output)}
 
@@ -679,11 +951,64 @@ def sampler_payload(payload: dict[str, Any]) -> dict[str, Any]:
             sizes=parse_sizes(str(payload.get("boxes", DEFAULT_SAMPLE_BOXES))),
             height=box.z,
             wall=box.wall,
+            base_thickness=box.base_thickness,
             connector=connector,
             side_length=float(options.get("length", LOCKED_CONNECTOR_LENGTH)),
             flat_inside=box.flat_inside,
         )
     return {"result": result, "output": str(output_dir)}
+
+
+def _extract_generated_files(result_data: Any) -> list[Path]:
+    paths: list[Path] = []
+    if isinstance(result_data, dict):
+        if "output" in result_data and isinstance(result_data["output"], (str, Path)):
+            paths.append(Path(result_data["output"]))
+        for v in result_data.values():
+            paths.extend(_extract_generated_files(v))
+    elif isinstance(result_data, (list, tuple)):
+        for item in result_data:
+            paths.extend(_extract_generated_files(item))
+    seen: set[Path] = set()
+    deduped: list[Path] = []
+    for p in paths:
+        try:
+            res = p.resolve()
+            if res not in seen and res.is_file():
+                seen.add(res)
+                deduped.append(res)
+        except Exception:
+            continue
+    return deduped
+
+
+def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    target = str(payload.get("target", "bin"))
+    if target == "connector":
+        gen_result = connector_payload(payload)
+    elif target == "sampler":
+        gen_result = sampler_payload(payload)
+    else:
+        gen_result = generate_payload(payload)
+
+    files = _extract_generated_files(gen_result)
+    if not files:
+        raise RuntimeError("No 3MF files were generated to send to Bambu Studio.")
+
+    custom = payload.get("slicer_path")
+    slicer_path = detect_bambu_studio(custom)
+    if slicer_path is None or not slicer_path.is_file():
+        raise ValueError(
+            "Bambu Studio was not found. Please locate your Bambu Studio executable in settings or install Bambu Studio."
+        )
+
+    launch_slicer(slicer_path, files)
+    return {
+        "result": gen_result.get("result"),
+        "output": gen_result.get("output"),
+        "files": [str(f) for f in files],
+        "slicer": str(slicer_path),
+    }
 
 
 POST_ROUTES = {
@@ -701,8 +1026,10 @@ POST_ROUTES = {
     "/api/generate": generate_payload,
     "/api/connector": connector_payload,
     "/api/sampler": sampler_payload,
+    "/api/print": print_payload,
     "/api/preferences": preferences_payload,
     "/api/browse-output-folder": browse_output_folder_payload,
+    "/api/browse-slicer-path": browse_slicer_path_payload,
 }
 
 

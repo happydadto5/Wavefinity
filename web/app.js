@@ -29,6 +29,12 @@ const state = {
   // one); false for drafts the app puts up on its own (New/Open/after a delete/
   // mode switch) until the user actually touches a field.
   draftAutoCommit: false,
+  // Whether the armed draft is a brand-new support (from the palette) that
+  // should be appended on first commit, versus an edit of one already placed.
+  // draftSourceIndex is that placed support's index, so an edit still commits
+  // in place even if the canvas selection gets cleared underneath it.
+  draftIsNew: false,
+  draftSourceIndex: null,
   selected: null,
   camera: { yaw: 45, elevation: 76, zoom: 1 },
   previewRequest: 0,
@@ -52,7 +58,10 @@ const COLORS = {
   label: "#315766", label_hole: "#e8efef", top_label_ledge: "#7799a3",
   scoop: "#a9bec3", insert_base: "#c5ab83", invalid: "#c95f58",
   cradle: "#e59f54", nest: "#df8d5b", bore: "#6fb98f", post: "#51a5a1",
-  divider: "#9d86c8", pocket: "#d4778c",
+  divider: "#9d86c8", pocket: "#d4778c", slot: "#8b78cf", steps: "#4b8eb9",
+  // Floor lettering keeps the colour the single floor label always had, so a
+  // text interior part reads as writing rather than as another holder.
+  text: "#315766",
 };
 const INSERT_TINT = "#c2a075";
 const INSERT_TINT_MIX = .5;
@@ -92,6 +101,11 @@ function updateGenerateAvailability() {
   if (button) {
     button.disabled = state.designMutationBusy || !state.canGenerate;
     button.title = state.canGenerate ? "Generate the current bin files" : "Resolve the highlighted issue before generating";
+  }
+  const printButton = $("#print-bin");
+  if (printButton) {
+    printButton.disabled = state.designMutationBusy || !state.canGenerate;
+    printButton.title = state.canGenerate ? "Export and open in Bambu Studio" : "Resolve the highlighted issue before printing";
   }
 }
 
@@ -191,6 +205,8 @@ function iconFor(kind) {
     bore: '<rect x="4" y="5" width="24" height="22" rx="2"/><circle cx="11" cy="12" r="3"/><circle cx="21" cy="12" r="3"/><circle cx="11" cy="21" r="3"/><circle cx="21" cy="21" r="3"/>',
     cradle: '<path d="M4 25h24M7 25V10h4c0 4 2 6 5 6s5-2 5-6h4v15"/>',
     nest: '<rect x="3" y="6" width="26" height="20" rx="3"/><path d="M7 17h6v-6h7v4h5v6H7z"/>',
+    slot: '<rect x="4" y="5" width="24" height="22" rx="2"/><path d="M9 22l5-12M15 22l5-12M21 22l5-12"/>',
+    steps: '<path d="M4 25h24V10h-8v5h-8v5H4z"/>',
   };
   return `<svg ${common}>${paths[kind] || paths.pocket}</svg>`;
 }
@@ -235,7 +251,7 @@ function renderCatalog() {
 
   const palette = $("#support-palette");
   palette.innerHTML = state.catalog.parts.map(part => `
-    <button class="support-choice" data-kind="${part.kind}" style="--support-color:${kindColor(part.kind)}" aria-label="${escapeHtml(part.title)}: ${escapeHtml(part.description)}">
+    <button class="support-choice" data-kind="${part.kind}" style="--support-color:${kindColor(part.kind)}" aria-label="${escapeHtml(part.title)}: ${escapeHtml(part.description)}" title="${escapeHtml(part.title)} — ${escapeHtml(part.description)}">
       ${iconFor(part.kind)}
       <span class="support-choice-copy"><strong>${escapeHtml(part.title)}</strong><small>${escapeHtml(part.description)}</small></span>
     </button>
@@ -250,13 +266,12 @@ function syncForm() {
   $("#x-size").value = fmt(box.x);
   $("#y-size").value = fmt(box.y);
   $("#z").value = fmt(box.z);
+  $("#base-thickness").value = fmt(box.base_thickness ?? 0.6);
   $("#label-text").value = state.design.label || "";
   $("#part-name").value = state.design.part_name || "";
   $("#scoop").checked = Boolean(state.design.scoop);
   const mode = $(`input[name="layout-mode"][value="${layout.mode}"]`);
   if (mode) mode.checked = true;
-  const labelPosition = $(`input[name="label-position"][value="${state.design.label_position}"]`);
-  if (labelPosition) labelPosition.checked = true;
   $("#output-folder").value = state.output;
   $("#connector-tolerance").value = fmt(state.connector.tolerance);
   $("#connector-length").value = fmt(state.connector.length);
@@ -293,10 +308,17 @@ function updateDesignFromForm() {
   design.box.x = snapSize($("#x-size").value, design.box.x);
   design.box.y = snapSize($("#y-size").value, design.box.y);
   design.box.z = number($("#z").value, design.box.z);
+  design.box.base_thickness = number(
+    $("#base-thickness").value,
+    design.box.base_thickness ?? 0.6,
+  );
   design.label = $("#label-text").value;
   design.part_name = $("#part-name").value;
   design.scoop = $("#scoop").checked;
-  design.label_position = $('input[name="label-position"]:checked')?.value || "bottom";
+  // The rim label is the only label the design itself carries, and it always
+  // lives on the rear ledge. Empty simply means there isn't one; floor
+  // lettering is a text interior part in the layout.
+  design.label_position = design.label.trim() ? "top" : "bottom";
   const newOutput = $("#output-folder").value.trim();
   if (newOutput !== state.output) {
     state.output = newOutput;
@@ -340,7 +362,7 @@ async function selectOutputFolder() {
 
 function updatePreviewHelp(view) {
   $("#preview-help").textContent = view === "2d"
-    ? "Drag supports to move them. Photo Nest also has a proportional resize corner and round rotation handle."
+    ? "Drag interior parts to move them. Photo Nest also has a proportional resize corner and round rotation handle."
     : "Visual preview only. Drag to rotate, use the wheel to zoom, or double-click to reset; these controls do not change the printed part.";
 }
 
@@ -445,7 +467,11 @@ function wireControls() {
     button.setAttribute("aria-expanded", String(section.classList.contains("open")));
   }));
 
-  ["#x-size", "#y-size", "#z", "#label-text", "#part-name"]
+  $("#advanced-settings").addEventListener("change", event => {
+    $("#advanced-build-settings").hidden = !event.target.checked;
+  });
+
+  ["#x-size", "#y-size", "#z", "#base-thickness", "#label-text", "#part-name"]
     .forEach(selector => $(selector).addEventListener("input", () => {
       state.canGenerate = false;
       updateGenerateAvailability();
@@ -460,14 +486,12 @@ function wireControls() {
       flashField(input);
     }
   }));
-  [$("#scoop"), ...$$('input[name="label-position"]')].forEach(input => {
-    input.addEventListener("change", () => {
-      const previousDesign = clone(state.design);
-      updateDesignFromForm();
-      recordHistory(previousDesign);
-      refreshPreview();
-      if (state.draft) refreshDraft();
-    });
+  $("#scoop").addEventListener("change", () => {
+    const previousDesign = clone(state.design);
+    updateDesignFromForm();
+    recordHistory(previousDesign);
+    refreshPreview();
+    if (state.draft) refreshDraft();
   });
   ["#output-folder", "#connector-tolerance", "#connector-length",
     "#connector-bin-a-height", "#connector-bin-b-height"]
@@ -531,9 +555,11 @@ function wireControls() {
   });
   $("#connection").addEventListener("click", () => location.reload(true));
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
+  $("#print-bin").addEventListener("click", () => printModel("bin"));
   $("#generate-bin").addEventListener("click", () => generate("/api/generate", "#generate-bin"));
   $("#generate-connector").addEventListener("click", () => generate("/api/connector", "#generate-connector"));
   $("#generate-sampler").addEventListener("click", () => generate("/api/sampler", "#generate-sampler"));
+  $("#slicer-picker-button").addEventListener("click", browseSlicer);
   wireSceneInteraction($("#preview-3d"), state.camera, renderPreview3D);
   wireSupportLayoutDialog();
   wireLayoutInteraction();
@@ -565,6 +591,8 @@ function clearDraftSelection() {
   state.draft = null;
   state.draftKind = null;
   state.draftAutoCommit = false;
+  state.draftIsNew = false;
+  state.draftSourceIndex = null;
   state.selected = null;
   $$(".support-choice").forEach(button => button.classList.remove("active"));
   $(".support-editor").hidden = true;
@@ -581,6 +609,8 @@ function pickKind(kind) {
     state.drafts[state.draft.kind] = clone(state.draft);
   }
   state.selected = null;
+  state.draftIsNew = true;
+  state.draftSourceIndex = null;
   const cached = state.drafts[kind];
   if (!cached) {
     selectKind(kind, true);
@@ -604,6 +634,8 @@ async function selectKind(kind, reset = false) {
   updateInteriorModeVisibility(true);
   state.draftKind = kind;
   state.selected = reset ? null : state.selected;
+  state.draftIsNew = true;
+  state.draftSourceIndex = null;
   state.draftAutoCommit = kind !== "nest";
   $(".support-editor").hidden = false;
   $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === kind));
@@ -626,6 +658,9 @@ async function selectKind(kind, reset = false) {
     });
     state.draft = result.feature;
     state.draftResolvedOptions = result.resolved_options || {};
+    // What the engine started this text at, so the Part Name is only ever
+    // seeded from lettering the user actually typed - never the placeholder.
+    state.draftStartingText = result.feature?.options?.text ?? null;
     renderDraftFields();
     updateSelectionButtons();
     refreshDraft();
@@ -640,6 +675,8 @@ function selectedFeature(index) {
   state.selected = index;
   state.draft = clone(state.design.layout.features[index]);
   state.draftAutoCommit = true;
+  state.draftIsNew = false;
+  state.draftSourceIndex = index;
   state.draftResolvedOptions = {};
   state.draftKind = state.draft.kind;
   updateInteriorModeVisibility(true);
@@ -694,9 +731,30 @@ function renderDraftFields() {
       ${one.contour ? `<p class="photo-measurement">Outline ready — move, rotate, or proportionally resize it in 2D.</p>` : ""}
     </div>`;
   }
+  if (info.flags.text) {
+    html += `<label class="wide">What it says
+      <input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="e.g. M3">
+    </label>`;
+    html += `<label class="check-card wide">
+      <input type="checkbox" data-draft="option:auto" ${one.options?.auto ? "checked" : ""}>
+      <span><strong>Place it for me</strong><small>Keeps it centred where it fits, moving around the other interior parts as they change. Turn this off to put it exactly where you want.</small></span>
+    </label>`;
+    html += `<fieldset class="wide"><legend>Turn</legend><div class="segmented two">
+      ${[0, 1, 2, 3].map(turn => `<label><input type="radio" name="draft-turns" value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "checked" : ""}><span>${turn * 90}°</span></label>`).join("")}
+    </div></fieldset>`;
+    html += `<label class="check-card wide">
+      <input type="checkbox" data-draft="option:raised" ${one.options?.raised ? "checked" : ""}>
+      <span><strong>Stand proud</strong><small>Letters sit on top of the floor instead of sunk flush into it. Either way they stay a separate object for a second filament.</small></span>
+    </label>`;
+  }
   if (info.flags.size && one.kind !== "cradle") {
-    html += field("Width", "width", fmt(width), { unit: "mm", step: "1" });
-    html += field("Depth", "depth", fmt(depth), { unit: "mm", step: "1" });
+    const isPocket = one.kind === "pocket";
+    const wall = isPocket ? number(one.options?.wall, state.draftResolvedOptions?.wall ?? 1.6) : 0;
+    const shownWidth = isPocket ? Math.max(0.1, width - 2 * wall) : width;
+    const shownDepth = isPocket ? Math.max(0.1, depth - 2 * wall) : depth;
+    const depthLabel = isPocket ? "Length" : "Depth";
+    html += field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" });
+    html += field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
   }
   if (info.flags.qty) {
     html += `<label class="wide">Quantity<div class="input-with-button">
@@ -714,25 +772,32 @@ function renderDraftFields() {
   if (info.flags.alternate) {
     html += `<label class="check-card wide">
       <input type="checkbox" data-draft="alternate_ends" ${one.alternate_ends === true ? "checked" : ""}>
-      <span><strong>Alternate ends</strong><small>Places every second trough near the opposite end of the bin, with an adjustable end clearance (10% by default); each trough becomes a separate body.</small></span>
+      <span><strong>Alternate ends</strong><small>Places every second trough near the opposite end of the bin; each trough becomes a separate body.</small></span>
     </label>`;
-    if (one.alternate_ends === true) {
-      const marginField = info.fields.find(entry => entry.key === "end_margin");
-      if (marginField) {
-        const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, "end_margin");
-        const shown = explicit
-          ? one.options.end_margin
-          : state.draftResolvedOptions?.end_margin ?? marginField.default;
-        html += field(marginField.label, "option:end_margin", fmt(shown), { step: "1" });
-        html += `<p class="field-help wide">How far each trough sits in from its end of the bin, as a share of the run. Larger pulls the troughs toward the middle; smaller pushes them out to the ends.</p>`;
-      }
-    }
   }
   if (info.flags.along) {
     html += `<fieldset class="wide"><legend>Runs along</legend><div class="segmented two">
       <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
       <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
     </div></fieldset>`;
+  }
+  if (info.flags.alternate) {
+    // One field, two readings. Alternate ends on: the clearance kept at each
+    // run end (writes end_margin). Off: a signed slide of the whole row along
+    // the bin (writes run_offset). Each key keeps its own last value.
+    const alternating = one.alternate_ends === true;
+    const key = alternating ? "end_margin" : "run_offset";
+    const label = alternating ? "% from end" : "Offset from center";
+    const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
+    const shown = explicit
+      ? one.options[key]
+      : alternating
+      ? state.draftResolvedOptions?.end_margin ?? 10
+      : 0;
+    html += field(label, `option:${key}`, fmt(shown), { step: "1" });
+    html += `<p class="field-help wide">${alternating
+      ? "Share of the run kept clear at each end. Larger pulls the alternating troughs toward the middle; smaller pushes them to the ends."
+      : "Slides the trough along the bin from centre, as a share of the room to the wall. Positive one way, negative the other; 0 stays centred."}</p>`;
   }
   if (info.flags.item) {
     const item = one.item || starterItem();
@@ -757,8 +822,9 @@ function renderDraftFields() {
     }
   }
   for (const option of info.fields) {
-    // Shown inline with the Alternate ends checkbox above, only when it's on.
-    if (option.key === "end_margin") continue;
+    // Rendered together as the one "% from end / Offset from center" field
+    // beneath Runs along, above.
+    if (option.key === "end_margin" || option.key === "run_offset") continue;
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
     const autoHint = AUTO_PLACEHOLDER[info.kind]?.[option.key];
     const shown = !explicit && autoHint
@@ -787,7 +853,10 @@ function renderDraftFields() {
   $$('[data-draft="width"], [data-draft="depth"]', $("#draft-fields")).forEach(input => {
     input.addEventListener("blur", () => {
       const zone = state.draft.zone;
-      const actual = input.dataset.draft === "width" ? zone[2] - zone[0] : zone[3] - zone[1];
+      const isPocket = state.draft.kind === "pocket";
+      const wall = isPocket ? number(state.draft.options?.wall, state.draftResolvedOptions?.wall ?? 1.6) : 0;
+      let actual = input.dataset.draft === "width" ? zone[2] - zone[0] : zone[3] - zone[1];
+      if (isPocket) actual = Math.max(0.1, actual - 2 * wall);
       if (fmt(actual) !== input.value) input.value = fmt(actual);
     });
   });
@@ -814,6 +883,25 @@ function renderDraftFields() {
   }));
   $$('input[name="draft-wedge"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
     state.draft.wedge = input.value === "wedge";
+    state.draftAutoCommit = true;
+    updateSelectionButtons();
+    refreshDraftSoon();
+  }));
+  $$('input[name="draft-turns"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
+    state.draft.options ||= {};
+    state.draft.options.quarter_turns = Number(input.value) % 4;
+    // Turning it is a placement decision, so it stops being auto-placed.
+    if (state.draft.options.auto) {
+      state.draft.options.auto = false;
+      const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
+      if (autoField) autoField.checked = false;
+    }
+    // The zone was fitted to the old orientation; swap its sides so the
+    // lettering keeps roughly the same size after the quarter turn.
+    const zone = state.draft.zone;
+    const cx = (zone[0] + zone[2]) / 2, cy = (zone[1] + zone[3]) / 2;
+    const w = zone[2] - zone[0], d = zone[3] - zone[1];
+    state.draft.zone = [cx - d / 2, cy - w / 2, cx + d / 2, cy + w / 2];
     state.draftAutoCommit = true;
     updateSelectionButtons();
     refreshDraftSoon();
@@ -892,6 +980,10 @@ function sizeCradleToItem(one) {
   // Auto Quantity may become multiple lanes, so it also uses the end-to-end
   // layout whenever Alternate ends is on.
   const alternating = one.alternate_ends === true && (auto || count > 1);
+  // A non-alternating cradle hugs its tool until "Offset from center" is set;
+  // then it needs the whole run so the trough has room to slide within it.
+  const offset = alternating ? 0 : number(one.options?.run_offset, 0);
+  const spansRun = alternating || Math.abs(offset) > 1e-9;
 
   const [insideX, insideY] = binInsideExtent(state.design.box);
   const roomAlong = one.along === "x" ? insideX : insideY;
@@ -899,7 +991,7 @@ function sizeCradleToItem(one) {
 
   const oneLane = diameter + rib;
   const pitch = diameter + rib / 2 + spacing;
-  const run = alternating ? roomAlong : Math.min(roomAlong, Math.max(1, Math.ceil(length)));
+  const run = spansRun ? roomAlong : Math.min(roomAlong, Math.max(1, Math.ceil(length)));
   const across = auto
     ? roomAcross
     : Math.min(roomAcross, Math.max(1, Math.ceil(oneLane + (count - 1) * pitch)));
@@ -1004,8 +1096,14 @@ function updateDraftFromFields(event) {
   const oldDepth = oldZone[3] - oldZone[1];
   const cx = number(get("cx"), oldCx);
   const cy = number(get("cy"), oldCy);
-  const width = Math.max(0.1, number(get("width"), oldWidth));
-  const depth = Math.max(0.1, number(get("depth"), oldDepth));
+  const isPocket = one.kind === "pocket";
+  const wall = isPocket ? number(one.options?.wall, state.draftResolvedOptions?.wall ?? 1.6) : 0;
+  let width = Math.max(0.1, number(get("width"), isPocket ? oldWidth - 2 * wall : oldWidth));
+  let depth = Math.max(0.1, number(get("depth"), isPocket ? oldDepth - 2 * wall : oldDepth));
+  if (isPocket) {
+    width = width + 2 * wall;
+    depth = depth + 2 * wall;
+  }
   one.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
   const info = partInfo();
   if (info.flags.qty) {
@@ -1034,7 +1132,24 @@ function updateDraftFromFields(event) {
   }
   one.options ||= {};
   const changed = event?.currentTarget?.dataset?.draft || "";
-  if (changed.startsWith("option:")) {
+  // Text carries the only options that are not numbers: what it says, and two
+  // plain yes/no choices. Read them straight off their own controls.
+  if (info.flags.text) {
+    const fields = $("#draft-fields");
+    const said = $('[data-draft="option:text"]', fields);
+    if (said) one.options.text = said.value;
+    one.options.auto = $('[data-draft="option:auto"]', fields)?.checked === true;
+    one.options.raised = $('[data-draft="option:raised"]', fields)?.checked === true;
+    if (changed === "option:auto" && one.options.auto) {
+      // Handing placement back to the engine: drop the hand-set letter height
+      // so it can pick the biggest that fits wherever it lands.
+      delete one.options.cap_height;
+      const capField = $('[data-draft="option:cap_height"]', fields);
+      if (capField) capField.value = "";
+    }
+  }
+  if (changed.startsWith("option:") &&
+      !["text", "auto", "raised"].includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
     const option = info.fields.find(entry => entry.key === key);
     const raw = String(get(changed) ?? "").trim();
@@ -1043,8 +1158,23 @@ function updateDraftFromFields(event) {
       raw,
       one.options[key] ?? state.draftResolvedOptions?.[key] ?? number(option?.default),
     );
+    // A hand-set letter height means the user is placing it themselves.
+    if (info.flags.text && key === "cap_height" && raw !== "") {
+      one.options.auto = false;
+      const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
+      if (autoField) autoField.checked = false;
+    }
     if (info.kind === "divider" && key === "thickness") {
       widenDividerFootprint(one);
+    }
+    if (info.kind === "pocket" && key === "wall") {
+      const newWall = number(one.options.wall, 1.6);
+      const prevWall = number(state.draftResolvedOptions?.wall, 1.6);
+      const innerW = Math.max(0.1, oldWidth - 2 * prevWall);
+      const innerD = Math.max(0.1, oldDepth - 2 * prevWall);
+      const newW = innerW + 2 * newWall;
+      const newD = innerD + 2 * newWall;
+      one.zone = [cx - newW / 2, cy - newD / 2, cx + newW / 2, cy + newD / 2];
     }
     if (info.kind === "divider" && key === "angle" && one.wedge !== false) {
       // A wedge keeps its back face flat and only tapers the leaning face,
@@ -1073,9 +1203,11 @@ function updateDraftFromFields(event) {
   }
   if (one.kind === "cradle" && (
     changed === "count" || changed === "item_length" || changed === "item_diameter" ||
-    changed === "alternate_ends" || changed === "option:spacing" || changed === "option:end_margin"
+    changed === "alternate_ends" || changed === "option:spacing" ||
+    changed === "option:end_margin" || changed === "option:run_offset"
   )) sizeCradleToItem(one);
-  // Toggling Alternate ends shows or hides the "% from ends" field beneath it.
+  // Toggling Alternate ends swaps the field beneath Runs along between
+  // "% from end" and "Offset from center".
   if (changed === "alternate_ends") renderDraftFields();
   updateSelectionButtons();
   refreshDraftSoon();
@@ -1132,6 +1264,43 @@ async function refreshDraft() {
   refreshPreview();
 }
 
+// Anything that is only a size - "8", "12mm" - names a compartment, not the
+// part, so it never becomes the filename.
+const SIZE_LIKE_TEXT = /^\s*\d+(\.\d+)?\s*(mm)?\s*$/i;
+
+// The first real piece of lettering fills in a blank Part Name, once. After
+// that the two are independent: renaming either never touches the other, so a
+// bin can say "M3" on the floor and still save as "Driver rack".
+//
+// "Real" means the user typed it. A text part starts life with placeholder
+// lettering so it is valid and visible the moment it is added, and naming
+// every file after that placeholder would be worse than leaving it blank.
+function seedPartNameFromText(one) {
+  if (!one || one.kind !== "text") return;
+  const partInput = $("#part-name");
+  if (!partInput || partInput.value.trim() !== "") return;
+  const said = String(one.options?.text ?? "").trim();
+  if (!said || SIZE_LIKE_TEXT.test(said)) return;
+  if (said === String(state.draftStartingText ?? "").trim()) return;
+  partInput.value = said;
+  state.design.part_name = said;
+}
+
+// Where /api/feature/apply should land the current draft:
+//   number -> update that already-placed support in place
+//   null   -> append it as a brand-new support (a fresh palette draft only)
+//   false  -> don't commit: the canvas selection was cleared while editing a
+//             placed support, and appending would duplicate it
+function draftCommitIndex() {
+  if (state.selected !== null) return state.selected;
+  if (state.draftIsNew) return null;
+  if (Number.isInteger(state.draftSourceIndex) &&
+      state.draftSourceIndex < state.design.layout.features.length) {
+    return state.draftSourceIndex;
+  }
+  return false;
+}
+
 // Saves the draft into the design as its own feature (or updates it in
 // place if it's already one) - the "auto add" half of the workflow: once a
 // draft is armed (state.draftAutoCommit), every valid edit lands here
@@ -1142,12 +1311,17 @@ async function refreshDraft() {
 // other validation error.
 async function autoCommitDraft(request) {
   if (state.draft?.kind === "nest" && !state.draft.contour) return false;
+  const index = draftCommitIndex();
+  if (index === false) return false;   // stale edit - don't append a duplicate
   try {
     const previousDesign = clone(state.design);
-    const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index: state.selected });
+    const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index });
     if (request !== state.draftRequest) return;
     state.design = result.design;
+    seedPartNameFromText(state.draft);
     recordHistory(previousDesign);
+    state.draftIsNew = false;
+    if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
     if (state.selected === null) state.selected = result.selected;
     // Saved support zones snap to the grid. Without this sync the preview
     // draws an almost-identical draft over the saved support, which is most
@@ -1177,6 +1351,8 @@ async function applySupport(index) {
     state.design = result.design;
     recordHistory(previousDesign);
     state.selected = result.selected;
+    state.draftIsNew = false;
+    if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
     state.draft = clone(state.design.layout.features[state.selected]);
     state.draftResolvedOptions = {};
     if (state.draft.kind === "nest") syncForm();
@@ -1205,7 +1381,7 @@ async function deleteSupportAt(index) {
     clearDraftSelection();
     renderPlaced();
     refreshPreview();
-    toast("Support deleted.");
+    toast("Interior part deleted.");
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -1215,8 +1391,8 @@ async function deleteSupportAt(index) {
 
 function mutationControls() {
   return $$(
-    '#x-size, #y-size, #z, #label-text, #part-name, ' +
-    '#scoop, input[name="label-position"], input[name="layout-mode"], ' +
+    '#x-size, #y-size, #z, #base-thickness, #label-text, #part-name, ' +
+    '#scoop, input[name="layout-mode"], ' +
     '#new-design, #open-design, #save-design'
   );
 }
@@ -1260,7 +1436,7 @@ function renderPlaced() {
   const features = state.design.layout.features;
   const container = $("#placed-supports");
   if (!features.length) {
-    container.innerHTML = '<div class="placed-empty">No supports yet. Pick a shape above.</div>';
+    container.innerHTML = '<div class="placed-empty">No interior parts yet. Pick a shape above.</div>';
   } else {
     container.innerHTML = features.map((one, index) => {
       const width = one.zone[2] - one.zone[0];
@@ -1271,7 +1447,7 @@ function renderPlaced() {
           <strong>${index + 1}. ${title}</strong>
           <span>${fmt(width)} × ${fmt(depth)} mm</span>
         </button>
-        <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this support" aria-label="Delete ${title}">✕</button>
+        <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this interior part" aria-label="Delete ${title}">✕</button>
       </div>`;
     }).join("");
     $$(".placed-item-select", container).forEach(button => button.addEventListener("click", () => selectedFeature(Number(button.dataset.index))));
@@ -1279,8 +1455,8 @@ function renderPlaced() {
   }
   $("#support-count").textContent = `${features.length} placed`;
   $("#design-summary").textContent = features.length
-    ? `${features.length} support${features.length === 1 ? "" : "s"} · ${state.design.layout.mode}`
-    : `No supports placed · ${state.design.layout.mode}`;
+    ? `${features.length} interior part${features.length === 1 ? "" : "s"} · ${state.design.layout.mode}`
+    : `No interior parts placed · ${state.design.layout.mode}`;
 
   // With a single support there's nothing to choose between, so drop straight
   // into its settings rather than make the user pick it out of the list first.
@@ -1324,7 +1500,7 @@ async function refreshPreview() {
     result.feature_errors.forEach((message, errorIndex) => {
       const featureIndex = result.invalid_feature_indexes?.[errorIndex];
       actions.push({
-        message: featureIndex === undefined ? message : `Support ${featureIndex + 1}: ${message}`,
+        message: featureIndex === undefined ? message : `Interior part ${featureIndex + 1}: ${message}`,
         activate: () => {
           if (featureIndex === undefined) return;
           selectedFeature(featureIndex);
@@ -1334,7 +1510,7 @@ async function refreshPreview() {
       });
     });
     if (result.draft_error) actions.push({
-      message: `Current support: ${result.draft_error}`,
+      message: `Current interior part: ${result.draft_error}`,
       activate: () => {
         $(".support-editor").scrollIntoView({ behavior: "smooth", block: "center" });
         const invalidField = $('#draft-fields input:invalid') || $('#draft-fields input');
@@ -1345,12 +1521,16 @@ async function refreshPreview() {
     state.canGenerate = !messages.length;
     updateGenerateAvailability();
     if (messages.length) setError("", actions);
-    // The label-fit message is about the Label text field specifically, so
+    // The rim-label fit message is about the Rim label field specifically, so
     // show it right there too - the workspace panel above is easy to miss
     // since it sits far from the field the user is actually typing in.
     const labelError = $("#label-error");
     labelError.textContent = !result.fits && result.message ? result.message : "";
     labelError.hidden = !labelError.textContent;
+    // An auto text part places itself server-side, so adopt the zones the
+    // preview resolved - otherwise the next edit would send the stale ones.
+    adoptResolvedFeatures(result.design?.layout?.features);
+    state.textMeta = result.text_meta || [];
     state.fitError = Boolean(result.feature_errors.length || result.draft_error);
     updateAutoExpandButton();
     renderPreview3D();
@@ -1371,13 +1551,31 @@ async function refreshPreview() {
   }
 }
 
-// "Auto Expand Bin" shows only while a support does not fit; clicking it grows
-// the bin (see /api/layout/expand) to the smallest size that holds them all.
+// An auto-placed text part is positioned by the engine, not by the editor, so
+// the zone it lands on only comes back with the preview. Take those zones -
+// and nothing else - so a drag or a field edit in flight is never overwritten.
+function adoptResolvedFeatures(resolved) {
+  const features = state.design?.layout?.features;
+  if (!Array.isArray(resolved) || !Array.isArray(features)) return;
+  if (resolved.length !== features.length) return;
+  features.forEach((one, index) => {
+    if (one.kind !== "text" || !one.options?.auto) return;
+    const from = resolved[index];
+    if (!from || from.kind !== "text") return;
+    one.zone = from.zone.slice();
+    if (from.options && from.options.quarter_turns !== undefined) {
+      one.options.quarter_turns = from.options.quarter_turns;
+    }
+  });
+}
+
+// "Auto Expand Bin" shows only while an interior part does not fit; clicking it
+// grows the bin (see /api/layout/expand) to the smallest size that holds them all.
 function updateAutoExpandButton() {
-  const hasSupports = Boolean(
+  const hasParts = Boolean(
     state.design?.layout?.features?.length || state.draft
   );
-  $("#auto-expand-bin").hidden = !(state.fitError && hasSupports);
+  $("#auto-expand-bin").hidden = !(state.fitError && hasParts);
 }
 
 async function autoExpandBin() {
@@ -1410,7 +1608,7 @@ async function autoExpandBin() {
     await refreshPreview();
     toast(result.grew
       ? `Bin expanded to ${fmt(result.box.x)} × ${fmt(result.box.y)} mm.`
-      : "The supports already fit - bin unchanged.");
+      : "The interior parts already fit - bin unchanged.");
   } catch (error) {
     toast(error.message, true, 5000);
   } finally {
@@ -1494,6 +1692,29 @@ function drawGeometry(canvas, geometry, camera) {
     return { ...face, projected: points, depth, facing };
   }).filter(face => face.facing > 0 || face.kind === "label_hole");
   if (!faces.length) return;
+  // Lettering sits flush on one big surface (the floor, or the top-label
+  // ledge). The painter sort compares face centroids, so a glyph near the edge
+  // of that surface can sort behind it at some viewing angles and vanish - the
+  // "missing first letter" effect. Pin every letter face to its substrate's
+  // depth so the layer tie-break (floor/ledge < label < label_hole) always
+  // paints them on top, without letting them punch through nearer walls. Text
+  // interior parts are inlaid into the same surface and need the same pin.
+  const isLettering = face =>
+    face.kind === "label" || face.kind === "label_hole" ||
+    /^(feature|insert|draft)_text$/.test(face.kind);
+  const substrate = faces.filter(face => face.kind === "floor" || face.kind === "top_label_ledge");
+  if (substrate.length) {
+    const substrateDepth = Math.max(...substrate.map(face => face.depth));
+    for (const face of faces) {
+      if (!isLettering(face)) continue;
+      face.depth = substrateDepth;
+      // Sharing the substrate's depth leaves only the layer to break the tie,
+      // and a text part arrives on layer 0 like every other holder - under the
+      // floor's own layer 1, which would paint straight over it. Lift it onto
+      // the layer the floor label has always used.
+      if (number(face.layer) < 2) face.layer = 2;
+    }
+  }
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const face of faces) for (const point of face.projected) {
     minX = Math.min(minX, point[0]); maxX = Math.max(maxX, point[0]);
@@ -1592,6 +1813,23 @@ function layoutFeatures() {
   const features = state.design.layout.features.map(feature => clone(feature));
   if (state.layoutDrag?.feature && state.layoutDrag.index !== null) features[state.layoutDrag.index] = state.layoutDrag.feature;
   return features;
+}
+
+// The floor a placed support actually covers, in world space, or null when it
+// simply fills its own zone and there is nothing extra to draw. The server
+// works this out (see occupied_zones) against the saved zone, so a live drag -
+// which moves a support without waiting for the next preview - shifts it by the
+// same amount. A resize drag only re-centres it until that preview lands.
+function footprintWorld(feature, index) {
+  const all = state.preview?.feature_footprints;
+  if (!all || all.length !== state.design.layout.features.length) return null;
+  const covered = all[index];
+  if (!covered) return null;
+  const saved = state.design.layout.features[index].zone;
+  const dx = (feature.zone[0] + feature.zone[2] - saved[0] - saved[2]) / 2;
+  const dy = (feature.zone[1] + feature.zone[3] - saved[1] - saved[3]) / 2;
+  if (!dx && !dy) return covered;
+  return [covered[0] + dx, covered[1] + dy, covered[2] + dx, covered[3] + dy];
 }
 
 // The nest silhouette in world space. Prefer the server's softened contour
@@ -1730,14 +1968,92 @@ function renderLayout2D() {
       context.fill(outline);
       context.stroke(outline);
     } else {
+      // A fused cradle, post or divider fills less of its zone than the zone
+      // itself, and the rest is floor a neighbour may use. Fill what the part
+      // really covers and leave the zone as a faint outline around it, so the
+      // difference between "mine" and "just my handle" is visible.
+      const covered = footprintWorld(feature, index);
+      const f0 = covered && toCanvas([covered[0], covered[3]]);
+      const f1 = covered && toCanvas([covered[2], covered[1]]);
       context.fillStyle = color + "cc";
-      context.fillRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+      context.fillRect(...(covered ? [f0[0], f0[1], f1[0] - f0[0], f1[1] - f0[1]]
+                                   : [p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]]));
+      if (covered) {
+        context.strokeRect(f0[0], f0[1], f1[0] - f0[0], f1[1] - f0[1]);
+        context.save();
+        context.globalAlpha = .45;
+        context.setLineDash([4, 3]);
+      }
       context.strokeRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+      if (covered) context.restore();
+      if (feature.kind === "pocket") {
+        const wall = number(feature.options?.wall, 1.6);
+        const i0 = toCanvas([feature.zone[0] + wall, feature.zone[3] - wall]);
+        const i1 = toCanvas([feature.zone[2] - wall, feature.zone[1] + wall]);
+        context.save();
+        context.fillStyle = "rgba(255, 255, 255, 0.4)";
+        context.fillRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
+        context.strokeStyle = shade(color, 0.5);
+        context.lineWidth = 1;
+        context.strokeRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
+        context.restore();
+      }
+      if (feature.kind === "slot") {
+        const wall = number(feature.options?.wall, 1.6);
+        const along = feature.along || "x";
+        const count = feature.count || 2;
+        context.save();
+        context.strokeStyle = shade(color, 0.4);
+        context.lineWidth = 1;
+        const [z0, z1, z2, z3] = feature.zone;
+        if (along === "x") {
+          const step = (z3 - z1 - 2 * wall) / Math.max(1, count);
+          for (let s = 0; s < count; s++) {
+            const y = z1 + wall + (s + 0.5) * step;
+            const pt0 = toCanvas([z0 + wall, y]), pt1 = toCanvas([z2 - wall, y]);
+            context.beginPath(); context.moveTo(pt0[0], pt0[1]); context.lineTo(pt1[0], pt1[1]); context.stroke();
+          }
+        } else {
+          const step = (z2 - z0 - 2 * wall) / Math.max(1, count);
+          for (let s = 0; s < count; s++) {
+            const x = z0 + wall + (s + 0.5) * step;
+            const pt0 = toCanvas([x, z1 + wall]), pt1 = toCanvas([x, z3 - wall]);
+            context.beginPath(); context.moveTo(pt0[0], pt0[1]); context.lineTo(pt1[0], pt1[1]); context.stroke();
+          }
+        }
+        context.restore();
+      }
+      if (feature.kind === "steps") {
+        const along = feature.along || "x";
+        const count = feature.count || 3;
+        context.save();
+        context.strokeStyle = shade(color, 0.4);
+        context.lineWidth = 1;
+        const [z0, z1, z2, z3] = feature.zone;
+        if (along === "x") {
+          const step = (z3 - z1) / Math.max(1, count);
+          for (let s = 1; s < count; s++) {
+            const y = z1 + s * step;
+            const pt0 = toCanvas([z0, y]), pt1 = toCanvas([z2, y]);
+            context.beginPath(); context.moveTo(pt0[0], pt0[1]); context.lineTo(pt1[0], pt1[1]); context.stroke();
+          }
+        } else {
+          const step = (z2 - z0) / Math.max(1, count);
+          for (let s = 1; s < count; s++) {
+            const x = z0 + s * step;
+            const pt0 = toCanvas([x, z1]), pt1 = toCanvas([x, z3]);
+            context.beginPath(); context.moveTo(pt0[0], pt0[1]); context.lineTo(pt1[0], pt1[1]); context.stroke();
+          }
+        }
+        context.restore();
+      }
       context.fillStyle = "rgba(20,36,42,.82)";
       context.font = "600 11px Segoe UI";
       context.textAlign = "center";
       context.textBaseline = "middle";
-      context.fillText(`${index + 1} ${partInfo(feature.kind)?.title || feature.kind}`, (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
+      const [tx, ty] = covered ? [(f0[0] + f1[0]) / 2, (f0[1] + f1[1]) / 2]
+                               : [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+      context.fillText(`${index + 1} ${partInfo(feature.kind)?.title || feature.kind}`, tx, ty);
     }
     if (index === state.selected) {
       const resizable = Boolean(partInfo(feature.kind)?.flags?.size || feature.kind === "nest");
@@ -1770,8 +2086,29 @@ function renderLayout2D() {
       const outline = drawClosedPath(context, nestOutlineWorld(state.draft, state.preview.draft_soft_contour), toCanvas);
       context.fill(outline); context.stroke(outline);
     } else if (state.draft.kind !== "nest") {
-      context.fillRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+      // Same as a placed support: fill the floor it really covers, outline the
+      // zone it lives in.
+      const covered = state.preview.draft_footprint;
+      if (covered) {
+        const d0 = toCanvas([covered[0], covered[3]]), d1 = toCanvas([covered[2], covered[1]]);
+        context.fillRect(d0[0], d0[1], d1[0] - d0[0], d1[1] - d0[1]);
+        context.strokeRect(d0[0], d0[1], d1[0] - d0[0], d1[1] - d0[1]);
+      } else {
+        context.fillRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+      }
       context.strokeRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+      if (state.draft.kind === "pocket") {
+        const wall = number(state.draft.options?.wall, state.draftResolvedOptions?.wall ?? 1.6);
+        const i0 = toCanvas([zone[0] + wall, zone[3] - wall]);
+        const i1 = toCanvas([zone[2] - wall, zone[1] + wall]);
+        context.save();
+        context.fillStyle = "rgba(255, 255, 255, 0.35)";
+        context.fillRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
+        context.strokeStyle = DRAFT_HIGHLIGHT;
+        context.lineWidth = 1;
+        context.strokeRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
+        context.restore();
+      }
     }
     context.setLineDash([]);
   }
@@ -1819,6 +2156,14 @@ function wireLayoutInteraction() {
     }
     if (index !== state.selected) selectedFeature(index);
     const feature = clone(state.design.layout.features[index]);
+    // Moving or resizing lettering by hand is a placement decision, so it
+    // stops placing itself - otherwise the next preview would put it straight
+    // back where the engine wanted it and the drag would look broken.
+    if (feature.kind === "text" && feature.options?.auto) {
+      feature.options.auto = false;
+      const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
+      if (autoField) autoField.checked = false;
+    }
     const zone = feature.zone;
     const handlePixels = Math.hypot((world[0] - zone[2]) * state.layoutTransform.scale, (world[1] - zone[1]) * state.layoutTransform.scale);
     const rotatePoint = [(zone[0] + zone[2]) / 2, zone[3] + 8];
@@ -1867,6 +2212,7 @@ function wireLayoutInteraction() {
     if (!drag) return;
     state.layoutDrag = null;
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    if (typeof drag.index !== "number") return;   // not a feature drag - nothing to apply
     state.draft = drag.feature;
     const applied = await applySupport(drag.index);
     if (!applied) {
@@ -1913,7 +2259,7 @@ async function openDesign(event) {
 }
 
 async function newDesign() {
-  if (state.design.layout.features.length && !window.confirm("Start a new design and clear the placed supports?")) return;
+  if (state.design.layout.features.length && !window.confirm("Start a new design and clear the placed interior parts?")) return;
   if (!beginDesignMutation()) return;
   const previousDesign = clone(state.design);
   state.design = clone(state.catalog.defaults.design);
@@ -1942,13 +2288,15 @@ async function generate(path, selector) {
   try {
     // A debounced support edit may still be visible only in the draft. Save
     // it now so the exported files always match the canvas.
-    if (state.draft && state.draftAutoCommit) {
+    if (state.draft && state.draftAutoCommit && draftCommitIndex() !== false) {
       state.draftRequest += 1;
       const previousDesign = clone(state.design);
       const committed = await api("/api/feature/apply", {
-        design: state.design, feature: state.draft, index: state.selected,
+        design: state.design, feature: state.draft, index: draftCommitIndex(),
       });
       state.design = committed.design;
+      state.draftIsNew = false;
+      if (Number.isInteger(committed.selected)) state.draftSourceIndex = committed.selected;
       if (state.selected === null) state.selected = committed.selected;
       recordHistory(previousDesign);
       renderPlaced();
@@ -1967,6 +2315,93 @@ async function generate(path, selector) {
   } finally {
     button.disabled = selector === "#generate-bin" ? !state.canGenerate : false;
     button.textContent = old;
+  }
+}
+
+async function printModel(target = "bin") {
+  if (!state.slicer || !state.slicer.available) {
+    toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
+    return;
+  }
+  if (state.designMutationBusy) {
+    toast("Finish the current design change before printing.", true);
+    return;
+  }
+  updateDesignFromForm();
+  const button = $("#print-bin");
+  const old = button.textContent;
+  button.disabled = true;
+  const slicerName = state.slicer?.name || "Bambu Studio";
+  button.textContent = `Sending to ${slicerName}…`;
+  setError();
+  try {
+    if (state.draft && state.draftAutoCommit && draftCommitIndex() !== false) {
+      state.draftRequest += 1;
+      const previousDesign = clone(state.design);
+      const committed = await api("/api/feature/apply", {
+        design: state.design, feature: state.draft, index: draftCommitIndex(),
+      });
+      state.design = committed.design;
+      state.draftIsNew = false;
+      if (Number.isInteger(committed.selected)) state.draftSourceIndex = committed.selected;
+      if (state.selected === null) state.selected = committed.selected;
+      recordHistory(previousDesign);
+      renderPlaced();
+    }
+    const payload = {
+      design: state.design,
+      output: state.output,
+      connector: state.connector,
+      target: target,
+    };
+    const result = await api("/api/print", payload);
+    const files = result.files || [];
+    const fileNames = files.map(f => f.split(/[\\/]/).pop());
+    toast(`Sent to ${slicerName}!\n${fileNames.join("\n")}`, false, 7000);
+  } catch (error) {
+    setError(error.message);
+    toast(error.message, true, 8000);
+  } finally {
+    button.disabled = !state.canGenerate;
+    button.textContent = old;
+  }
+}
+
+function updateSlicerUI() {
+  const statusEl = $("#slicer-status-text");
+  const printBtn = $("#print-bin");
+  if (!statusEl) return;
+  const slicer = state.slicer || {};
+  if (slicer.available) {
+    statusEl.innerHTML = `<span class="slicer-status-dot"></span>${slicer.name || "Bambu Studio"}: Ready`;
+    if (printBtn) {
+      printBtn.textContent = "Print";
+      printBtn.title = `Send directly to ${slicer.name || "Bambu Studio"}`;
+    }
+  } else {
+    statusEl.innerHTML = `<span class="slicer-status-dot missing"></span>Bambu Studio: Not found`;
+    if (printBtn) {
+      printBtn.textContent = "Print";
+      printBtn.title = "Bambu Studio is not installed - click 'Change slicer' to locate executable";
+    }
+  }
+}
+
+async function browseSlicer() {
+  try {
+    const result = await api("/api/browse-slicer-path");
+    if (result.slicer_path) {
+      const name = result.slicer_path.split(/[\\/]/).pop().replace(/\.exe$/i, "");
+      state.slicer = {
+        available: true,
+        path: result.slicer_path,
+        name: /bambu/i.test(name) ? "Bambu Studio" : /orca/i.test(name) ? "OrcaSlicer" : name,
+      };
+      updateSlicerUI();
+      toast(`Slicer set to ${state.slicer.name}`);
+    }
+  } catch (error) {
+    toast(error.message, true);
   }
 }
 
@@ -2001,6 +2436,8 @@ async function init() {
     state.design = clone(catalog.defaults.design);
     state.output = catalog.preferences?.output || catalog.defaults.output;
     state.connector = clone(catalog.defaults.connector);
+    state.slicer = catalog.slicer || { available: false, path: null, name: "Bambu Studio" };
+    updateSlicerUI();
     renderCatalog();
     wireControls();
     syncForm();

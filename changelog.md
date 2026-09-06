@@ -1,14 +1,105 @@
 # Changelog
 
-## 2026-09-05 — Adjustable cradle end margin
+## 2026-09-06 — Text is an interior part, so a bin can carry several labels
 
-- Turning on **Alternate ends** now reveals a **% from ends** field beneath the
-  checkbox, pre-filled with the value in force (10%).
-- The number is stored per cradle as `options['end_margin']` and drives both the
-  build (`_cradle_end_margin`) and the bin auto-grow footprint. Larger values
-  pull alternating troughs toward the middle; smaller values push them to the
-  ends. Clamped to 45% so the two margins always leave a real middle.
-- Absent or blank keeps the historic 10%, so existing designs are unchanged.
+- **Lettering on the floor is now an interior part like any other.** Pick
+  **Text** from the palette, type what it should say, and it moves, resizes,
+  turns and is checked against its neighbours through exactly the same editor
+  path as a cradle or a divider. **A bin may carry as many as you like** — a
+  size over each bore cluster, a name along the front.
+- Each text is still **its own object in the 3MF**, so every one can take its
+  own filament. Recessed (the default) it is sunk flush into the floor and the
+  body carries a matching pocket; **Stand proud** puts the letters on top of
+  the floor instead. Two texts reading the same thing get distinct object
+  names (`M3`, `M3 2`) rather than one silently replacing the other.
+- **The zone is the size.** Drag a corner and the lettering scales to fill it;
+  **Letter height** overrides that but is never allowed to overflow the box.
+  **Place it for me** hands positioning back to the engine — the old
+  "stay centred, then move around the holders, then turn, then shrink"
+  behaviour — and is dropped the moment you drag, resize or turn it by hand.
+- **Interior "supports" are now "interior parts"** throughout the interface and
+  the documentation. A label is not a support, and the palette holds both.
+- **The rim label is now the only label the bin itself carries.** The Bottom /
+  Top position choice is gone: **Rim label** fills the rear-ledge label and
+  empty means there isn't one. The ledge itself is unchanged.
+- **The part name alone names the file.** Lettering no longer appears in it —
+  with several labels there is no answer to which one would stand for the whole
+  file. The first label you actually type seeds a blank **Part Name** once
+  (a bare size like `8` or `12mm` never does), and the two are independent
+  after that.
+- `--label` on the `organizer` command is sugar for a self-placing text part;
+  `--label-position top` still means the rim ledge. Passing a floor label
+  straight to the exporter is now refused with a message saying to add a text
+  part, rather than silently ignored.
+- Removed: the bespoke floor-label drag in the browser (about 200 lines) and
+  `ManualLabel` with its `label_placement` design field. Saved designs use the
+  new format; older ones are not migrated.
+- **Six defects this found, none of them visible to the Python suite.** Caught
+  by driving the real browser: every draft option was being coerced to a float,
+  so a text part failed with *could not convert string to float*; text pinned
+  flush to the floor sorted *under* the floor in the painter's algorithm and was
+  painted over, rendering nothing at all; adding a **second** auto text was
+  refused as an overlap, because every new one starts on the same placeholder
+  in the middle of the bin and `/api/feature/apply` judged that raw submission
+  before the resolver could separate them; and the draft preview for text drew
+  nothing while being validated against that same placeholder. Caught by
+  reviewing edge cases: auto text was impossible in **cartridge** mode, since
+  the resolved zone never lands on an 8 mm cell (it now grows outward to whole
+  cells, preserving the letter height); and a design whose auto text had gone
+  stale would not reopen, so loading now re-resolves before validating — while
+  still reporting a genuine hand-placed overlap.
+- The default box fingerprint was re-pinned for the 0.8 → 0.6 mm floor default
+  of the entry below. Only the floor moved: the connector's fingerprint is
+  byte-identical either side of that change. Several tests that read `wall`
+  where they meant the floor's thickness now read `base_thickness`.
+
+## 2026-09-05 — Adjustable bin base thickness
+
+- **Advanced** beside **Build your bin** now reveals **Base thickness** below
+  the dimension row.
+- New bins default to a **0.6 mm** floor while walls remain **0.8 mm**.
+- Base thickness is saved independently and drives the shell, fused supports,
+  labels, scoops, removable inserts, previews, and exported meshes.
+- Older saved designs without this field retain their original wall-matched
+  floor thickness, so existing 0.8 mm bins regenerate identically.
+
+## 2026-09-05 — Fused supports share the floor a zone leaves open
+
+- A fused support's neighbours are now judged on the floor it **actually
+  covers**, not on the whole zone rectangle it is drawn in. A cradle's trough is
+  only as long as its tool and slides with **Offset from center**; a post is only
+  as wide as its peg; a divider is only as thick as its wall. That remainder is
+  ordinary open floor, and another support may now stand on it.
+- This fixes "there is no open floor area large enough for that support" being
+  raised over floor that was visibly empty — typically a short tool in a long
+  cradle zone, which reserved the entire zone whether the trough reached it or
+  not.
+- **Fused only.** A removable insert prints on a base plate spanning the whole
+  bin floor, so its supports stay one interchangeable tile and each keeps its
+  full zone; the cartridge grid keeps whole 8 mm cells for the same reason.
+- Bore, Pocket and Photo Nest fill their zones exactly, so nothing changes for
+  them.
+- The 2D layout now fills what a support really covers and draws its zone as a
+  faint dashed outline around it, so the open floor inside a zone is visible
+  rather than implied. The zone is still what you drag and resize.
+- Trade-off: floor a neighbour has taken is no longer held in reserve, so later
+  lengthening a cradle's tool, raising its count or sliding it into an occupied
+  spot now reports an overlap at that moment instead of being prevented earlier.
+
+## 2026-09-05 — Cradle run-axis position control
+
+- A percentage field now sits permanently beneath **Runs along** in the cradle
+  editor. It reads **% from end** while **Alternate ends** is on and **Offset
+  from center** while it is off.
+- **% from end** (`options['end_margin']`, default 10, clamped 0–45%) is the
+  clear run kept at each end; larger pulls the alternating troughs toward the
+  middle.
+- **Offset from center** (`options['run_offset']`, default 0, ±100%) slides the
+  whole row along the run as a signed share of the slack to the wall — positive
+  one way, negative the other. A non-zero value expands the cradle's zone to the
+  full run so the trough has room to move; back to 0 re-hugs the tool.
+- The two keys hold their own values, so toggling Alternate ends swaps which one
+  the field edits without losing the other. Absent/blank keeps prior behaviour.
 
 ## 2026-09-05 — Photo Nest custom cavities
 

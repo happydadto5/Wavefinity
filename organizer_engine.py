@@ -73,6 +73,7 @@ BASE_UNIT = GRID_PITCH           # one unit is one grid step, so sizes are whole
 # says so plainly if you ask for a connector that will not fit.
 
 DEFAULT_WALL = 0.8
+DEFAULT_BASE_THICKNESS = 0.6
 DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner
 # Locked in after the physical tolerance print: these are no longer tuning
@@ -116,9 +117,10 @@ LOCK_NOTCH_CLEARANCE = 0.12
 # Studio can print it in a second colour
 # --------------------------------------------------------------------------- #
 TEXT_CAP_HEIGHT_IDEAL = 10.0   # letter height we want
-TEXT_CAP_HEIGHT_MIN = 7.0      # letter height we will shrink to, but no further
+TEXT_CAP_HEIGHT_MIN = 7.0      # auto letter height will shrink to here, no further
+TEXT_CAP_HEIGHT_FLOOR = 4.0    # a hand-set letter height may go this small
 TEXT_DEPTH = 0.4               # how deep the label is sunk into the floor,
-                               # leaving DEFAULT_WALL - TEXT_DEPTH beneath it
+                               # leaving DEFAULT_BASE_THICKNESS - TEXT_DEPTH beneath it
 TEXT_MARGIN = 1.0              # clear space between the label and the cavity wall
 TEXT_FONT_FAMILY = "DejaVu Sans"
 TEXT_FONT_WEIGHT = "bold"
@@ -145,17 +147,23 @@ class BoxSpec:
     wall: float = DEFAULT_WALL
     corner_fillet: float = DEFAULT_CORNER_FILLET
     flat_inside: float = 0.0   # mm of flat-walled band rising from the floor
+    base_thickness: float = DEFAULT_BASE_THICKNESS
 
     def __post_init__(self) -> None:
         values = {
             "X": self.x, "Y": self.y, "Z": self.z,
             "wall": self.wall, "corner fillet": self.corner_fillet,
+            "base thickness": self.base_thickness,
         }
         for name, value in values.items():
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be a positive finite number")
-        if self.z <= self.wall:
-            raise ValueError("box Z must be greater than the wall/floor thickness")
+        if self.base_thickness < TEXT_DEPTH:
+            raise ValueError(
+                f"base thickness must be at least {TEXT_DEPTH:g} mm"
+            )
+        if self.z <= self.base_thickness:
+            raise ValueError("box Z must be greater than the base thickness")
         for name, value in (("X", self.x), ("Y", self.y)):
             if value < MIN_BOX_SIZE - 1e-9:
                 raise ValueError(
@@ -171,7 +179,7 @@ class BoxSpec:
                 )
         if not 0.0 <= self.flat_inside <= 1.0:
             raise ValueError("flat inside must be between 0 and 1 mm")
-        if self.flat_inside > 0.0 and self.wall + self.flat_inside >= self.z:
+        if self.flat_inside > 0.0 and self.base_thickness + self.flat_inside >= self.z:
             raise ValueError("box is too shallow for a flat-walled band")
         if self.wall_depth * 2.0 >= min(self.x, self.y) - WAVE_MATING_GAP:
             raise ValueError("wall thickness leaves no cavity")
@@ -711,18 +719,18 @@ def make_box(spec: BoxSpec) -> trimesh.Trimesh:
         # of wall with flat faces for the first flat_inside mm, which is the
         # point - the wave carries on unchanged above it.
         band = _extrude_polygon(flat_cavity_polygon(spec), spec.flat_inside)
-        band.apply_translation((0.0, 0.0, spec.wall))
+        band.apply_translation((0.0, 0.0, spec.base_thickness))
         above = _extrude_polygon(
             wavy_cavity_polygon(spec),
-            spec.z - spec.wall - spec.flat_inside + 1.0,
+            spec.z - spec.base_thickness - spec.flat_inside + 1.0,
         )
-        above.apply_translation((0.0, 0.0, spec.wall + spec.flat_inside))
+        above.apply_translation((0.0, 0.0, spec.base_thickness + spec.flat_inside))
         cavity = union([band, above])
     else:
         cavity = _extrude_polygon(
-            wavy_cavity_polygon(spec), spec.z - spec.wall + 1.0
+            wavy_cavity_polygon(spec), spec.z - spec.base_thickness + 1.0
         )
-        cavity.apply_translation((0.0, 0.0, spec.wall))
+        cavity.apply_translation((0.0, 0.0, spec.base_thickness))
     shell = difference([envelope, cavity])
     bumps = make_wall_lock_bumps(spec)
     result = union([shell, *bumps]) if bumps else shell
@@ -747,8 +755,8 @@ def connector_bin_heights(
         box.z if bin_b_height is None else float(bin_b_height),
     )
     for name, height in zip(("bin A height", "bin B height"), heights):
-        if not math.isfinite(height) or height <= box.wall:
-            raise ValueError(f"{name} must be greater than the wall/floor thickness")
+        if not math.isfinite(height) or height <= box.base_thickness:
+            raise ValueError(f"{name} must be greater than the base thickness")
     return heights
 
 
@@ -806,16 +814,16 @@ def make_side_connector(
     # normal bin they are nowhere near each other.  On a very shallow one they
     # meet, and it is worth saying so plainly rather than letting the fit check
     # report a bare collision volume.
-    band_top = box.wall + box.flat_inside
+    band_top = box.base_thickness + box.flat_inside
     for bin_height in heights:
         arm_bottom = bin_height - connector.arm_depth
         if box.flat_inside > 0.0 and arm_bottom < band_top:
-            room = bin_height - connector.arm_depth - box.wall
+            room = bin_height - connector.arm_depth - box.base_thickness
             raise ValueError(
                 f"the flat band reaches {band_top:.2f} mm up but the connector's arms "
                 f"hang down to {arm_bottom:.2f} mm, so they would collide. On a "
                 f"{bin_height:g} mm box the band can be at most {max(room, 0.0):.2f} mm, or "
-                f"make the box at least {box.wall + box.flat_inside + connector.arm_depth:.2f} mm tall"
+                f"make the box at least {box.base_thickness + box.flat_inside + connector.arm_depth:.2f} mm tall"
             )
 
     # A whole wave, not half of one.  The corridor between the arms is cut to
@@ -1106,13 +1114,7 @@ def make_top_label_ledge(box: BoxSpec) -> trimesh.Trimesh:
 
 def make_top_label(box: BoxSpec, label: str) -> trimesh.Trimesh:
     """The separate-colour inlay that finishes flush with the rim."""
-    outline = top_label_outline(box, label)
-    pieces = list(outline.geoms) if isinstance(outline, MultiPolygon) else [outline]
-    solid = union([_extrude_polygon(piece, TEXT_DEPTH) for piece in pieces])
-    solid.apply_translation((0.0, 0.0, box.z - TEXT_DEPTH))
-    solid.remove_unreferenced_vertices()
-    solid.merge_vertices()
-    return solid
+    return text_prism(top_label_outline(box, label), box.z)
 
 
 def make_top_labelled_box(
@@ -1151,7 +1153,7 @@ def scoop_dimensions(
 ) -> tuple[float, float]:
     """Return the scoop's vertical rise and front-to-back run."""
     _x0, y0, _x1, y1 = _scoop_bounds(box, floor_bounds)
-    height = (box.z - box.wall) * SCOOP_HEIGHT_FRACTION
+    height = (box.z - box.base_thickness) * SCOOP_HEIGHT_FRACTION
     # Normal bins get a circular quarter curve.  Very shallow floor plans keep
     # the requested half-wall rise with an elliptical curve that still leaves
     # usable floor in front of it.
@@ -1207,7 +1209,7 @@ def make_scoop(
     x0, wall_y, x1, _y1 = _scoop_bounds(box, floor_bounds)
     height, run = scoop_dimensions(box, floor_bounds)
     inner_y = wall_y + run
-    floor_z = box.wall
+    floor_z = box.base_thickness
     centre_z = floor_z + height
     curve = [
         (
@@ -1235,6 +1237,7 @@ class LabelPlacement:
     rotated: bool
     x: float = 0.0
     y: float = 0.0
+    quarter_turns: int = 0
 
 
 def _label_candidates(
@@ -1277,12 +1280,45 @@ def _label_candidates(
         x += 1
 
 
+def _oriented_outline(
+    label: str, cap_height: float, quarter_turns: int
+) -> Polygon | MultiPolygon:
+    """``label`` at ``cap_height`` turned ``quarter_turns`` x 90 deg, centred."""
+    outline = text_outline(label, cap_height)
+    if quarter_turns % 4:
+        outline = rotate_polygon(outline, 90.0 * (quarter_turns % 4),
+                                 origin=(0.0, 0.0), use_radians=False)
+    minx, miny, maxx, maxy = outline.bounds
+    return translate_polygon(
+        outline, xoff=-(minx + maxx) / 2.0, yoff=-(miny + maxy) / 2.0
+    )
+
+
+def _cap_steps(max_cap: float, floor: float = TEXT_CAP_HEIGHT_MIN) -> list[float]:
+    """Cap heights from ``max_cap`` down to ``floor``, always ending exactly at
+    ``floor``."""
+    caps: list[float] = []
+    cap = max_cap
+    while cap >= floor - 1e-9:
+        caps.append(max(cap, floor))
+        cap -= 0.25
+    if not caps or caps[-1] > floor + 1e-9:
+        caps.append(floor)
+    return caps
+
+
 def label_placement(
     box: BoxSpec,
     label: str,
     occupied: Iterable[Polygon] = (),
 ) -> LabelPlacement:
-    """Largest legal label position, automatically moved around insert zones."""
+    """Largest legal label position, automatically moved around insert zones.
+
+    Text stays centred when it can, then moves beside the obstacles, then turns,
+    and finally shrinks - never below ``TEXT_CAP_HEIGHT_MIN``.  This is what a
+    ``text`` interior part with ``auto`` set uses to find its own spot, and what
+    the plain ``box --label`` command uses for its single centred floor label.
+    """
     inside_x, inside_y = box.usable_inside
     room_x = inside_x - 2.0 * TEXT_MARGIN
     room_y = inside_y - 2.0 * TEXT_MARGIN
@@ -1308,19 +1344,13 @@ def label_placement(
                       TEXT_CAP_HEIGHT_IDEAL * room_y / up)
         if max_cap < TEXT_CAP_HEIGHT_MIN - 1e-9:
             continue
+        turns = 1 if rotated else 0
         if not obstacles:
-            return LabelPlacement(max_cap, rotated)
+            return LabelPlacement(max_cap, rotated, quarter_turns=turns)
 
         # Quarter-millimetre cap steps are visually continuous while keeping a
         # live editor responsive. Always test the exact minimum as the last try.
-        caps = []
-        cap = max_cap
-        while cap >= TEXT_CAP_HEIGHT_MIN - 1e-9:
-            caps.append(max(cap, TEXT_CAP_HEIGHT_MIN))
-            cap -= 0.25
-        if not caps or caps[-1] > TEXT_CAP_HEIGHT_MIN + 1e-9:
-            caps.append(TEXT_CAP_HEIGHT_MIN)
-        for cap in caps:
+        for cap in _cap_steps(max_cap):
             outline = text_outline(label, cap)
             if rotated:
                 outline = rotate_polygon(outline, 90.0, origin=(0.0, 0.0),
@@ -1332,7 +1362,7 @@ def label_placement(
             for x, y in _label_candidates(room, obstacles, width, height):
                 placed = translate_polygon(footprint, xoff=x, yoff=y)
                 if room.covers(placed) and all(not placed.intersects(o) for o in obstacles):
-                    return LabelPlacement(cap, rotated, x, y)
+                    return LabelPlacement(cap, rotated, x, y, turns)
 
     longest = max(room_x, room_y)
     needed = ideal_width * (TEXT_CAP_HEIGHT_MIN / TEXT_CAP_HEIGHT_IDEAL)
@@ -1352,18 +1382,41 @@ def label_layout(box: BoxSpec, label: str) -> tuple[float, bool]:
 
 
 def placed_label_outline(
-    box: BoxSpec, label: str, occupied: Iterable[Polygon] = ()
+    box: BoxSpec, label: str, occupied: Iterable[Polygon] = (),
 ) -> Polygon | MultiPolygon:
     """The label's final 2D shape, turned and moved clear of insert features."""
     placement = label_placement(box, label, occupied)
-    outline = text_outline(label, placement.cap_height)
-    if placement.rotated:
-        outline = rotate_polygon(outline, 90.0, origin=(0.0, 0.0), use_radians=False)
-        minx, miny, maxx, maxy = outline.bounds
-        outline = translate_polygon(
-            outline, xoff=-(minx + maxx) / 2.0, yoff=-(miny + maxy) / 2.0
-        )
+    outline = _oriented_outline(label, placement.cap_height, placement.quarter_turns)
     return translate_polygon(outline, xoff=placement.x, yoff=placement.y)
+
+
+def text_prism(
+    outline: Polygon | MultiPolygon,
+    top_z: float,
+    depth: float = TEXT_DEPTH,
+    raised: bool = False,
+) -> trimesh.Trimesh:
+    """Lettering turned into a solid, referenced to the surface it sits on.
+
+    ``top_z`` is that surface - a bin floor, an insert plate, a rim ledge.
+    Recessed (the default) the solid occupies the ``depth`` immediately below
+    it, so it fills a pocket cut to match and the finished surface stays flat.
+    Raised, it stands on the surface instead.  Either way it stays a separate
+    object in the 3MF, which is what lets a slicer give it its own filament.
+
+    This is the one place glyph outlines become geometry: the plain floor
+    label, the rim ledge label and every ``text`` interior part share it.
+    """
+    if depth <= 0.0:
+        raise ValueError("text depth must be positive")
+    pieces = list(outline.geoms) if isinstance(outline, MultiPolygon) else [outline]
+    if not pieces:
+        raise ValueError("this text has no printable outline")
+    solid = union([_extrude_polygon(piece, depth) for piece in pieces])
+    solid.apply_translation((0.0, 0.0, top_z if raised else top_z - depth))
+    solid.remove_unreferenced_vertices()
+    solid.merge_vertices()
+    return solid
 
 
 def make_floor_label(
@@ -1379,15 +1432,10 @@ def make_floor_label(
     separate object in the 3MF so a slicer can give it its own filament.
     """
     outline = placed_label_outline(box, label, occupied)
-    pieces = list(outline.geoms) if isinstance(outline, MultiPolygon) else [outline]
-    solid = union([_extrude_polygon(piece, TEXT_DEPTH) for piece in pieces])
-    top_z = box.wall if top_z is None else top_z
+    top_z = box.base_thickness if top_z is None else top_z
     if top_z < TEXT_DEPTH:
         raise ValueError(f"label depth {TEXT_DEPTH:g} mm exceeds its floor thickness")
-    solid.apply_translation((0.0, 0.0, top_z - TEXT_DEPTH))
-    solid.remove_unreferenced_vertices()
-    solid.merge_vertices()
-    return solid
+    return text_prism(outline, top_z)
 
 
 def make_labelled_box(
@@ -1410,18 +1458,17 @@ def make_labelled_box(
 
 
 def label_report(
-    box: BoxSpec, label: str, occupied: Iterable[Polygon] = ()
+    box: BoxSpec, label: str, occupied: Iterable[Polygon] = (),
 ) -> dict[str, object]:
     placement = label_placement(box, label, occupied)
-    outline = text_outline(label, placement.cap_height)
+    outline = _oriented_outline(label, placement.cap_height, placement.quarter_turns)
     minx, miny, maxx, maxy = outline.bounds
     across, up = maxx - minx, maxy - miny
-    if placement.rotated:
-        across, up = up, across
     return {
         "label": label,
         "cap_height_mm": round(placement.cap_height, 3),
         "rotated": placement.rotated,
+        "quarter_turns": placement.quarter_turns,
         "position_mm": [round(placement.x, 3), round(placement.y, 3)],
         "footprint_mm": [round(across, 3), round(up, 3)],
         "depth_mm": TEXT_DEPTH,
@@ -1500,9 +1547,11 @@ def installed_side_boxes(
     """Two adjacent boxes with independently specified rim heights."""
     a = BoxSpec(
         box.x, box.y, bin_a_height, box.wall, box.corner_fillet, box.flat_inside,
+        box.base_thickness,
     )
     b = BoxSpec(
         box.x, box.y, bin_b_height, box.wall, box.corner_fillet, box.flat_inside,
+        box.base_thickness,
     )
     if along_axis.lower() == "y":
         return [
@@ -1654,6 +1703,58 @@ def label_mesh_report(name: str, mesh: trimesh.Trimesh) -> dict[str, object]:
     return report
 
 
+def unique_object_names(names: Iterable[str], taken: Iterable[str] = ()) -> list[str]:
+    """``names`` made unique for a 3MF scene, in order, keeping ``taken`` clear.
+
+    Two text parts reading the same thing are perfectly reasonable - "M3" over
+    each of two bore clusters - but a 3MF object name has to be unique or the
+    second silently replaces the first in the scene.
+    """
+    used = set(taken)
+    out: list[str] = []
+    for name in names:
+        base = name.strip() or "text"
+        candidate, suffix = base, 2
+        while candidate in used:
+            candidate, suffix = f"{base} {suffix}", suffix + 1
+        used.add(candidate)
+        out.append(candidate)
+    return out
+
+
+def export_text_body_3mf(
+    body_mesh: trimesh.Trimesh,
+    texts: Iterable[tuple[str, trimesh.Trimesh]],
+    output: Path,
+    body_name: str = "box",
+) -> list[str]:
+    """Write a body plus any number of separate text objects into one 3MF.
+
+    Keeping them separate is the point: load the file in Bambu Studio, answer
+    yes to "load as a single object with multiple parts", and each piece of
+    lettering can be given its own filament.  A recessed text has already been
+    subtracted from ``body_mesh``, so the two must share faces and nothing
+    else; a raised one stands on the surface and touches it the same way.
+    Returns the object names actually written.
+    """
+    texts = list(texts)
+    mesh_report(body_name, body_mesh)
+    names = unique_object_names((name for name, _ in texts), taken=(body_name,))
+    scene = trimesh.Scene()
+    scene.units = "mm"
+    scene.add_geometry(body_mesh, node_name=body_name, geom_name=body_name)
+    for name, (_raw, mesh) in zip(names, texts):
+        label_mesh_report(name, mesh)
+        if intersection_volume(body_mesh, mesh) > 0.01:
+            raise RuntimeError(
+                f"the text '{name}' overlaps the body instead of sitting in "
+                "its own pocket"
+            )
+        scene.add_geometry(mesh, node_name=name, geom_name=name)
+    export_bambu_compatible_3mf(scene, output)
+    return names
+
+
 def export_labelled_box(
     box_mesh: trimesh.Trimesh,
     label_mesh: trimesh.Trimesh,
@@ -1661,23 +1762,8 @@ def export_labelled_box(
     box_name: str = "box",
     label_name: str = "label",
 ) -> None:
-    """Write a pocketed body and its sunk label as two objects in one 3MF.
-
-    Keeping them separate is the point: load the file in Bambu Studio, answer
-    yes to "load as a single object with multiple parts", and the label can be
-    given its own filament.
-    """
-    mesh_report(box_name, box_mesh)
-    label_mesh_report(label_name, label_mesh)
-    if intersection_volume(box_mesh, label_mesh) > 0.01:
-        raise RuntimeError(
-            "the label overlaps the box instead of filling its pocket"
-        )
-    scene = trimesh.Scene()
-    scene.units = "mm"
-    scene.add_geometry(box_mesh, node_name=box_name, geom_name=box_name)
-    scene.add_geometry(label_mesh, node_name=label_name, geom_name=label_name)
-    export_bambu_compatible_3mf(scene, output)
+    """One body and one label - the rim-ledge and plain ``box --label`` case."""
+    export_text_body_3mf(box_mesh, [(label_name, label_mesh)], output, box_name)
 
 
 def export_mesh(mesh: trimesh.Trimesh, output: Path, name: str) -> None:
@@ -1748,6 +1834,7 @@ def make_sampler_scene(
     clips: int = 5,
     side_length: float = DEFAULT_SIDE_LENGTH,
     flat_inside: float = 0.0,
+    base_thickness: float = DEFAULT_BASE_THICKNESS,
 ) -> trimesh.Scene:
     """Assembly sample: one box per requested size, plus a row of connectors.
 
@@ -1763,7 +1850,8 @@ def make_sampler_scene(
     boxes = []
     for size_x, size_y in sizes:
         spec = BoxSpec(
-            x=size_x, y=size_y, z=height, wall=wall, flat_inside=flat_inside
+            x=size_x, y=size_y, z=height, wall=wall, flat_inside=flat_inside,
+            base_thickness=base_thickness,
         )
         mesh = make_box(spec)
         mesh_report(f"sample box {size_x:g}x{size_y:g}", mesh)
@@ -1785,9 +1873,13 @@ def make_sampler_scene(
     total_width = cursor - gap
 
     clip = make_side_connector(
-        BoxSpec(flat_inside=flat_inside), connector, "y", 0.0, side_length
+        BoxSpec(flat_inside=flat_inside, base_thickness=base_thickness),
+        connector, "y", 0.0, side_length,
     )
-    validate_side_fit(BoxSpec(flat_inside=flat_inside), connector, clip, "y")
+    validate_side_fit(
+        BoxSpec(flat_inside=flat_inside, base_thickness=base_thickness),
+        connector, clip, "y",
+    )
     clip = connector_for_print(clip)
     mesh_report("sample connector", clip)
     cell = float(clip.extents[0]) + 6.0
@@ -1813,9 +1905,11 @@ def generate_sampler(
     clips: int = 5,
     side_length: float = DEFAULT_SIDE_LENGTH,
     flat_inside: float = 0.0,
+    base_thickness: float = DEFAULT_BASE_THICKNESS,
 ) -> dict[str, object]:
     kwargs: dict[str, object] = {
-        "height": height, "wall": wall, "connector": connector,
+        "height": height, "wall": wall, "base_thickness": base_thickness,
+        "connector": connector,
         "clips": clips, "side_length": side_length, "flat_inside": flat_inside,
     }
     if sizes is not None:

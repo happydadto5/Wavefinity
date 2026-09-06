@@ -100,7 +100,11 @@ from organizer_inserts import (
 
 
 REFERENCE_FINGERPRINTS = {
-    "box": "80F09E19A9422D66ED44BD051702CF70089D487FCA2CE575C7F5D25E3CF2E707",
+    # Re-pinned when the floor became its own setting and its default dropped
+    # from 0.8 to 0.6 mm. Only the floor moved: the connector's fingerprint is
+    # byte-identical either side of that change, which is what says the wave,
+    # the mating and the lock were not touched.
+    "box": "884CE0CA18924E23054376E9DC6457DA6EF22AD11A62606DE58DA61AC7CB5A19",
     "connector": "B192E6A9FA4D486A9E491F84778497738264CBC063B62D34E179D46C02E6BC13",
 }
 
@@ -923,9 +927,9 @@ class FloorLabelTests(unittest.TestCase):
             self.assertAlmostEqual(centre[1], 0.0, places=6)
             # sunk into the top of the floor, flush with it
             self.assertAlmostEqual(
-                mesh.bounds[0][2], spec.wall - TEXT_DEPTH, places=6
+                mesh.bounds[0][2], spec.base_thickness - TEXT_DEPTH, places=6
             )
-            self.assertAlmostEqual(mesh.bounds[1][2], spec.wall, places=6)
+            self.assertAlmostEqual(mesh.bounds[1][2], spec.base_thickness, places=6)
 
     def test_the_label_is_sunk_into_the_floor_not_standing_on_it(self) -> None:
         for spec, label in (
@@ -1058,8 +1062,8 @@ class BinCustomizationTests(unittest.TestCase):
         inside_x, inside_y = spec.usable_inside
         self.assertTrue(scoop.is_volume)
         self.assertAlmostEqual(scoop.extents[0], inside_x)
-        self.assertAlmostEqual(scoop.bounds[0][2], spec.wall)
-        self.assertAlmostEqual(scoop.bounds[1][2], spec.wall + height)
+        self.assertAlmostEqual(scoop.bounds[0][2], spec.base_thickness)
+        self.assertAlmostEqual(scoop.bounds[1][2], spec.base_thickness + height)
         self.assertAlmostEqual(
             scoop_floor_zone(spec).bounds[3] - scoop_floor_zone(spec).bounds[1], run
         )
@@ -1249,8 +1253,8 @@ class FlatInsideTests(unittest.TestCase):
         wavy = wavy_cavity_polygon(spec).area
         self.assertLess(flat, wavy)          # the band adds material
 
-        top = spec.wall + spec.flat_inside
-        for z in (spec.wall + 0.05, spec.wall + 0.5, top - 0.05):
+        top = spec.base_thickness + spec.flat_inside
+        for z in (spec.base_thickness + 0.05, spec.base_thickness + 0.5, top - 0.05):
             self.assertAlmostEqual(
                 self._cavity_area_at(spec, mesh, z), flat, delta=0.5, msg=f"z={z}"
             )
@@ -1266,8 +1270,8 @@ class FlatInsideTests(unittest.TestCase):
             spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=flat)
             mesh = make_box(spec)
             straight = flat_cavity_polygon(spec).area
-            just_under = self._cavity_area_at(spec, mesh, spec.wall + flat - 0.05)
-            just_over = self._cavity_area_at(spec, mesh, spec.wall + flat + 0.05)
+            just_under = self._cavity_area_at(spec, mesh, spec.base_thickness + flat - 0.05)
+            just_over = self._cavity_area_at(spec, mesh, spec.base_thickness + flat + 0.05)
             self.assertAlmostEqual(just_under, straight, delta=0.5)
             self.assertGreater(just_over, straight + 1.0)
 
@@ -1374,7 +1378,7 @@ class InsertEditorTests(unittest.TestCase):
             if kind == "feature_bore"
         ]
         self.assertGreater(len(faces), 5)
-        actual = organizer_app.FEATURE_BUILDERS["bore"](spec, feature, spec.wall)[0]
+        actual = organizer_app.FEATURE_BUILDERS["bore"](spec, feature, spec.base_thickness)[0]
         self.assertAlmostEqual(
             max(point[2] for face in faces for point in face),
             actual.bounds[1][2],
@@ -1395,9 +1399,9 @@ class InsertEditorTests(unittest.TestCase):
             [kind for _points, kind, _normal, _layer in geometry["geometry"]],
         )
 
-    def test_every_guided_support_choice_starts_with_valid_geometry(self) -> None:
+    def test_every_guided_interior_part_choice_starts_with_valid_geometry(self) -> None:
         spec = BoxSpec(128.0, 88.0, 40.0)
-        for kind in organizer_app.SUPPORT_ORDER:
+        for kind in organizer_app.INTERIOR_PART_ORDER:
             item = "hex_driver" if kind == "cradle" else "nozzle"
             feature = organizer_app.default_feature(spec, kind, item)
             if kind == "nest":
@@ -1514,7 +1518,9 @@ class InsertEditorTests(unittest.TestCase):
             path = Path(directory) / "saved.wavefinity.json"
             path.write_text(
                 organizer_app.json.dumps(
-                    organizer_app.design_to_dict(spec, layout, "M3", "Nozzles")
+                    organizer_app.design_to_dict(
+                        spec, layout, "M3", "Nozzles", "top"
+                    )
                 ),
                 encoding="utf-8",
             )
@@ -1531,7 +1537,42 @@ class InsertEditorTests(unittest.TestCase):
             self.assertEqual((used_box.x, used_box.y, used_box.z), (48.0, 32.0, 50.0))
             self.assertEqual(used_layout, layout)
             self.assertEqual((used_label, used_part), ("M3", "Nozzles"))
-            self.assertEqual((used_label_location, used_scoop), ("bottom", False))
+            self.assertEqual((used_label_location, used_scoop), ("top", False))
+
+    def test_a_floor_label_on_the_command_line_becomes_a_text_part(self) -> None:
+        """``--label`` with no position is sugar for a self-placing text part."""
+        spec = BoxSpec(48.0, 32.0, 35.0)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.wavefinity.json"
+            path.write_text(
+                organizer_app.json.dumps(
+                    organizer_app.design_to_dict(spec, organizer_app.Layout())
+                ),
+                encoding="utf-8",
+            )
+            args = organizer_app.build_parser().parse_args([
+                "organizer", "--layout", str(path), "--label", "BOLTS",
+                "--output-dir", directory,
+            ])
+            with mock.patch.object(
+                organizer_app, "generate_organizer_files", return_value={}
+            ) as generate:
+                organizer_app.run_command(args)
+            (_box, used_layout, _out, used_label, used_part,
+             used_location, _scoop) = generate.call_args.args
+            self.assertEqual([one.kind for one in used_layout.features], ["text"])
+            said = used_layout.features[0]
+            self.assertEqual(said.options["text"], "BOLTS")
+            self.assertTrue(said.options["auto"])
+            # The rim label stays empty, and the part name is seeded once.
+            self.assertEqual((used_label, used_location), ("", "bottom"))
+            self.assertEqual(used_part, "BOLTS")
+
+    def test_a_size_like_label_never_seeds_the_part_name(self) -> None:
+        for size in ("8", "12mm", " 6.5 mm "):
+            self.assertEqual(organizer_app.part_name_seed(size), "")
+        for real in ("M3", "BOLTS", "8mm hex"):
+            self.assertEqual(organizer_app.part_name_seed(real), real.strip())
 
     def test_organizer_cli_can_override_saved_customizations(self) -> None:
         spec = BoxSpec(48.0, 32.0, 35.0)
@@ -1620,16 +1661,31 @@ class InsertEditorTests(unittest.TestCase):
                 validate_3mf(Path(result["insert"]["output"]), 1)["warnings"], 0
             )
 
-    def test_failed_removable_label_preflight_leaves_no_partial_box(self) -> None:
+    def test_failed_removable_text_preflight_leaves_no_partial_box(self) -> None:
         spec = BoxSpec(32.0, 32.0, 40.0)
+        too_long = organizer_app.Feature(
+            "text", organizer_app.Zone(-12.0, -4.0, 12.0, 4.0),
+            options={"text": "THIS LABEL IS MUCH TOO LONG"},
+        )
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "result"
             with self.assertRaisesRegex(ValueError, "will not fit"):
                 organizer_app.generate_organizer_files(
-                    spec, organizer_app.Layout(mode="separate"), output,
-                    label="THIS LABEL IS MUCH TOO LONG",
+                    spec,
+                    organizer_app.Layout((too_long,), "separate"),
+                    output,
                 )
             self.assertFalse(output.exists())
+
+    def test_a_floor_label_reaching_the_exporter_says_to_use_a_text_part(self) -> None:
+        """The one place the old bottom-label API could fail silently."""
+        spec = BoxSpec(32.0, 32.0, 40.0)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "text.*interior part"):
+                organizer_app.generate_organizer_files(
+                    spec, organizer_app.Layout(mode="separate"), Path(directory),
+                    label="M3", label_location="bottom",
+                )
 
     def test_failed_removable_support_preflight_leaves_no_partial_box(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
@@ -1760,7 +1816,10 @@ class ResolvedOptionTests(unittest.TestCase):
             )
         message = str(caught.exception)
         self.assertIn("40", message)
-        self.assertIn("39.2", message)
+        # The room actually left above the floor, not a hard-coded number -
+        # the floor's thickness is its own setting now, separate from the wall.
+        headroom = self.spec.z - organizer_app.base_height(self.spec, "fused")
+        self.assertIn(f"{headroom:g}", message)
 
 
 class CompatibilityTests(unittest.TestCase):
@@ -1803,6 +1862,190 @@ class DimensionReadoutTests(unittest.TestCase):
 
             self.assertTrue(rect(wide, deep).within(cavity))          # fits
             self.assertFalse(rect(wide + 0.3, deep + 0.3).within(cavity))  # tight
+
+
+class TextExportTests(unittest.TestCase):
+    """Any number of text parts, each its own object for its own filament."""
+
+    @staticmethod
+    def _text(said, zone, **options):
+        return organizer_app.Feature(
+            "text", organizer_app.Zone(*zone), options={"text": said, **options}
+        )
+
+    def test_several_texts_export_as_one_object_each(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        layout = organizer_app.Layout((
+            self._text("M3", (-20.0, 6.0, -2.0, 15.0)),
+            self._text("M4", (2.0, 6.0, 20.0, 15.0)),
+            self._text("M5", (-20.0, -15.0, -2.0, -6.0), raised=True),
+        ), "fused")
+        with tempfile.TemporaryDirectory() as directory:
+            result = organizer_app.generate_organizer_files(
+                spec, layout, Path(directory), part_name="Fasteners"
+            )
+            self.assertEqual(result["text_objects"], ["M3", "M4", "M5"])
+            output = Path(result["box"]["output"])
+            # The body plus one object per text, strict and warning-free.
+            report = validate_3mf(output, 4, multipart=("M3", "M4", "M5"))
+            self.assertEqual(report["warnings"], 0)
+            self.assertEqual(
+                report["names"], ["M3", "M4", "M5", "fused_organizer"]
+            )
+
+    def test_two_texts_reading_the_same_thing_get_distinct_objects(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        layout = organizer_app.Layout((
+            self._text("M3", (-20.0, 6.0, -2.0, 15.0)),
+            self._text("M3", (2.0, 6.0, 20.0, 15.0)),
+        ), "fused")
+        with tempfile.TemporaryDirectory() as directory:
+            result = organizer_app.generate_organizer_files(
+                spec, layout, Path(directory), part_name="Twins"
+            )
+            self.assertEqual(result["text_objects"], ["M3", "M3 2"])
+            self.assertEqual(
+                validate_3mf(
+                    Path(result["box"]["output"]), 3, multipart=("M3", "M3 2")
+                )["warnings"],
+                0,
+            )
+
+    def test_a_sunk_text_and_its_pocket_are_exact_complements(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        one = self._text("M3", (-20.0, 6.0, -2.0, 15.0))
+        body = make_box(spec)
+        inlay = organizer_inserts.build_text(spec, one, spec.base_thickness)[0]
+        pocketed = organizer_inserts.apply_texts(body, [("M3", inlay, False)])
+        # Nothing shared but faces, and putting them back gives the plain box.
+        self.assertLess(intersection_volume(pocketed, inlay), 0.01)
+        self.assertAlmostEqual(
+            float(pocketed.volume) + float(inlay.volume),
+            float(body.volume), places=3,
+        )
+
+    def test_a_raised_text_takes_nothing_out_of_the_body(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        one = self._text("M3", (-20.0, 6.0, -2.0, 15.0), raised=True)
+        body = make_box(spec)
+        inlay = organizer_inserts.build_text(spec, one, spec.base_thickness)[0]
+        self.assertIs(
+            organizer_inserts.apply_texts(body, [("M3", inlay, True)]), body
+        )
+
+    def test_text_is_inlaid_into_a_removable_insert_plate(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        layout = organizer_app.Layout(
+            (self._text("M3", (-20.0, 6.0, -2.0, 15.0)),), "separate"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = organizer_app.generate_organizer_files(
+                spec, layout, Path(directory), part_name="Tray"
+            )
+            # The lettering rides on the insert, not the bare box.
+            self.assertEqual(
+                validate_3mf(Path(result["insert"]["output"]), 2, multipart=("M3",))["warnings"],
+                0,
+            )
+            self.assertEqual(validate_3mf(Path(result["box"]["output"]), 1)["warnings"], 0)
+            said = result["texts"][0]
+            self.assertAlmostEqual(said["surface_z_mm"], organizer_app.BASE_PLATE)
+
+    def test_text_hanging_off_the_insert_plate_is_refused(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        wide, deep = spec.usable_inside
+        edge = self._text("M3", (-wide / 2.0, deep / 2.0 - 9.0, 0.0, deep / 2.0))
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "hangs over the edge"):
+                organizer_app.generate_organizer_files(
+                    spec, organizer_app.Layout((edge,), "separate"), Path(directory)
+                )
+
+    def test_a_rim_label_and_floor_text_coexist_as_separate_objects(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        layout = organizer_app.Layout(
+            (self._text("M3", (-20.0, -15.0, -2.0, -6.0)),), "fused"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = organizer_app.generate_organizer_files(
+                spec, layout, Path(directory), label="BOLTS",
+                label_location="top", part_name="Both",
+            )
+            self.assertEqual(result["text_objects"], ["M3", "BOLTS"])
+            self.assertEqual(result["label"]["position"], "top")
+            self.assertEqual(
+                validate_3mf(
+                    Path(result["box"]["output"]), 3, multipart=("M3", "BOLTS")
+                )["warnings"],
+                0,
+            )
+
+    def test_a_design_whose_auto_text_went_stale_still_opens(self) -> None:
+        """An auto text's stored zone is a cache; the resolver is the authority."""
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        post = organizer_app.Feature("post", organizer_app.Zone(-10, -10, 10, 10))
+        # Saved sitting right on top of the post - as it would be if a holder
+        # were moved onto it and the design saved before the next preview.
+        stale = self._text("BOLTS", (-16.0, -6.0, 16.0, 6.0), auto=True)
+        saved = organizer_app.design_to_dict(
+            spec, organizer_app.Layout((post, stale), "fused")
+        )
+        _box, layout, *_rest = organizer_app.design_from_dict(
+            organizer_app.json.loads(organizer_app.json.dumps(saved))
+        )
+        moved = layout.features[1]
+        self.assertEqual(moved.kind, "text")
+        self.assertNotEqual(moved.zone, stale.zone)
+        organizer_inserts.check_layout(
+            spec, list(layout.features), base_z=spec.base_thickness
+        )
+
+    def test_a_hand_placed_overlap_is_still_reported_on_open(self) -> None:
+        """Auto-resolution must not paper over a real mistake."""
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        post = organizer_app.Feature("post", organizer_app.Zone(-10, -10, 10, 10))
+        fixed = self._text("M3", (-10.0, -6.0, 10.0, 6.0))
+        saved = organizer_app.design_to_dict(
+            spec, organizer_app.Layout((post, fixed), "fused")
+        )
+        with self.assertRaisesRegex(ValueError, "overlap"):
+            organizer_app.design_from_dict(saved)
+
+    def test_preview_and_export_agree_on_where_an_auto_text_landed(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        features = (
+            organizer_app.Feature("post", organizer_app.Zone(-10, -10, 10, 10)),
+            self._text("BOLTS", (-16.0, -6.0, 16.0, 6.0), auto=True),
+        )
+        preview = organizer_app.preview_geometry(spec, features=features)
+        zone = preview["features"][1]["zone"]
+        with tempfile.TemporaryDirectory() as directory:
+            result = organizer_app.generate_organizer_files(
+                spec, organizer_app.Layout(features, "fused"), Path(directory),
+                part_name="Agree",
+            )
+        said = result["texts"][0]
+        self.assertEqual(
+            [round((zone[0] + zone[2]) / 2, 3), round((zone[1] + zone[3]) / 2, 3)],
+            said["position_mm"],
+        )
+        self.assertAlmostEqual(
+            preview["text_meta"][0]["cap_height"], said["cap_height_mm"], places=6
+        )
+
+    def test_the_filename_comes_from_the_part_name_alone(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        self.assertEqual(
+            organizer_app.box_filename(spec, "Driver rack"),
+            "Box 48 x 48 x 40 Driver rack.3mf",
+        )
+        self.assertEqual(
+            organizer_app.box_filename(spec), "Box 48 x 48 x 40.3mf"
+        )
+        self.assertEqual(
+            organizer_app.insert_filename(spec, "Driver rack"),
+            "Insert 48 x 48 Driver rack.3mf",
+        )
 
 
 if __name__ == "__main__":

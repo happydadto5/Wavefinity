@@ -29,6 +29,9 @@ from shapely.ops import unary_union
 from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
+    TEXT_CAP_HEIGHT_FLOOR,
+    TEXT_CAP_HEIGHT_IDEAL,
+    TEXT_DEPTH,
     WAVE_AMPLITUDE,
     _extrude_polygon,
     _extrude_xz_profile,
@@ -37,6 +40,9 @@ from organizer_engine import (
     difference,
     flat_cavity_polygon,
     intersection,
+    label_placement,
+    text_outline,
+    text_prism,
     union,
     wavy_cavity_polygon,
 )
@@ -52,6 +58,7 @@ CRADLE_FLOOR_GAP = 2.0     # gap under the widest part of a lying object
 CRADLE_MIN_FLOOR_GAP = 0.4 # thinnest bottom floor under a cradle trough
 CRADLE_ALTERNATE_END_MARGIN = 0.10  # default floor left at each run-axis end
 CRADLE_ALTERNATE_END_MARGIN_MAX = 0.45  # keep a real middle so troughs still cross
+CRADLE_RUN_OFFSET_MAX = 1.0  # +/-100%: a trough edge reaches its zone wall
 BORE_WALL = 1.6            # material around a bore
 INSERT_CLEARANCE = 0.4     # slack around a standalone insert, per side
 MIN_FEATURE_GAP = 0.8      # material between two features
@@ -62,6 +69,8 @@ MAX_DIVIDER_ANGLE = 45.0   # steepest lean an FDM overhang prints support-free
 MIN_WEDGE_EDGE = 0.4       # thinnest a wedge's tapered top may print
 DIVIDER_CHAMFER = 1.0      # 45-degree foot flare where a divider meets the floor
 NEST_CHAMFER = 0.8         # reinforced outside foot on a Photo Nest cutter wall
+POCKET_CHAMFER = 0.5       # 45-degree chamfer on pocket outside edges for strength
+POCKET_FLOOR = 1.2         # solid floor thickness under a pocket recess
 LAYOUT_MODES = ("fused", "separate", "cartridge")
 
 # A cradle notch is a half circle: any deeper and the object cannot be dropped
@@ -270,7 +279,9 @@ class Layout:
 
     def validate(self, box: BoxSpec) -> None:
         bounds = layout_zone(box, self.mode)
-        check_layout(box, self.features, bounds)
+        # Fused holders stand on the bin floor; that is the only mode whose
+        # Spacing is judged on real footprints at the top of the bin floor.
+        check_layout(box, self.features, bounds, box.base_thickness, self.mode)
         if self.mode == "cartridge":
             for one in self.features:
                 values = (
@@ -552,6 +563,27 @@ def _cradle_end_margin(one: "Feature") -> float:
     return min(max(fraction, 0.0), CRADLE_ALTERNATE_END_MARGIN_MAX)
 
 
+def _cradle_offset(one: "Feature") -> float:
+    """Run-axis slide of a non-alternating cradle, as a signed fraction of the
+    slack between the tool and its zone ends.
+
+    Stored as a percent in ``options['run_offset']`` - the editor's "Offset from
+    center" field. 0 (or missing / blank / unparseable) keeps the trough
+    centred; +100 slides it until its end meets one zone wall, -100 the other
+    way. Ignored while ``alternate_ends`` is on.
+    """
+    raw = one.options.get("run_offset")
+    if raw is None or raw == "":
+        return 0.0
+    try:
+        fraction = float(raw) / 100.0
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(fraction):
+        return 0.0
+    return min(max(fraction, -CRADLE_RUN_OFFSET_MAX), CRADLE_RUN_OFFSET_MAX)
+
+
 def _cradle_wall(held: float) -> float:
     """The trough wall sized to the tool it carries.
 
@@ -577,9 +609,11 @@ def cradle_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, fl
         # those overlapping walls, then opens a real gap.
         "spacing": 0.0,
         "floor_gap": CRADLE_FLOOR_GAP,
-        # Only read when ``alternate_ends`` is on; the editor hides the field
-        # otherwise. Percent of the run left clear at each end.
+        # The editor's one "% from end / Offset from center" field writes to
+        # whichever of these matches the Alternate ends state; the other keeps
+        # its own last value. Percentages.
         "end_margin": CRADLE_ALTERNATE_END_MARGIN * 100.0,
+        "run_offset": 0.0,
     }
 
 
@@ -604,7 +638,9 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
 
     ``alternate_ends`` places every second trough near the opposite end of the
     run axis, leaving ``options['end_margin']`` percent (default ten) of that
-    axis clear at each end.
+    axis clear at each end. With ``alternate_ends`` off, ``options['run_offset']``
+    percent slides every trough together along the run - signed, 0 centres them,
+    +/-100 pushes a trough edge to a zone wall.
     """
     item = _need_item(spec_feature)
     zone = spec_feature.zone
@@ -675,6 +711,14 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     first = centre_across - (count - 1) * pitch / 2.0
     seats = [first + index * pitch for index in range(count)]
 
+    # A non-alternating row can be slid bodily along the run; the slide is a
+    # fraction of the slack between the tool and the zone ends, so it can never
+    # push a trough past a wall.
+    offset_shift = (
+        0.0 if alternating
+        else _cradle_offset(spec_feature) * max(0.0, (run - length) / 2.0)
+    )
+
     def _channel(seat: float, shift: float) -> trimesh.Trimesh:
         cut = trimesh.creation.cylinder(
             radius=radius, height=length + 2.0, sections=48
@@ -712,7 +756,7 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     # Neighbours whose blocks touch or overlap (spacing up to one side wall)
     # come out as one continuous body; wider spacing splits them apart.
     if count > 1 and not alternating and spacing <= side_wall + 1e-9:
-        return [_body(centre_across, used, seats, 0.0)]
+        return [_body(centre_across, used, seats, offset_shift)]
 
     solids: list[trimesh.Trimesh] = []
     alternate_shift = (
@@ -720,7 +764,10 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
         if alternating else 0.0
     )
     for index, seat in enumerate(seats):
-        shift = alternate_shift if index % 2 else -alternate_shift
+        shift = (
+            (alternate_shift if index % 2 else -alternate_shift)
+            if alternating else offset_shift
+        )
         solids.append(_body(seat, body, [seat], shift))
     return solids
 
@@ -1236,7 +1283,7 @@ def _full_span_leaning_divider(
     )[0]
 
     z0, z1 = base_z, base_z + height
-    flat_top = box.wall + box.flat_inside
+    flat_top = box.base_thickness + box.flat_inside
     pieces: list[trimesh.Trimesh] = []
     if box.flat_inside > 0.0 and z0 < flat_top:
         band = _extrude_polygon(flat_cavity_polygon(box), min(z1, flat_top) - z0)
@@ -1288,7 +1335,7 @@ def _full_span_divider(
         shapely_box(cross_centre - half_thick, -half_run, cross_centre + half_thick, half_run)
     )
     z0, z1 = base_z, base_z + height
-    flat_top = box.wall + box.flat_inside
+    flat_top = box.base_thickness + box.flat_inside
     pieces: list[trimesh.Trimesh] = []
     if box.flat_inside > 0.0 and z0 < flat_top:
         pieces.append(_trimmed_prism(strip, flat_cavity_polygon(box), z0, min(z1, flat_top)))
@@ -1302,32 +1349,374 @@ def _full_span_divider(
 
 @defaults("pocket")
 def pocket_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    height = one.options.get("height", 12.0)
     return {
         "height": 12.0,
         "wall": 1.6,
-        "depth": one.options.get("height", 12.0) - 1.2,
+        "depth": max(0.1, height - POCKET_FLOOR),
     }
 
 
 @feature("pocket")
 def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
-    """A raised block with a rectangular recess in it."""
+    """A raised block with a rectangular recess in it, chamfered on outside edges for strength."""
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
     height = options["height"]
     wall = options["wall"]
-    depth = options["depth"]
+    depth = options.get("depth", max(0.1, height - POCKET_FLOOR))
     if (height <= 0.0 or wall <= 0.0 or depth <= 0.0 or depth >= height
             or 2 * wall >= zone.width or 2 * wall >= zone.depth):
         raise ValueError("pocket wall and depth must leave a positive shell")
     centre_x, centre_y = zone.centre
+    c = min(POCKET_CHAMFER, wall / 2.0, zone.width / 4.0, zone.depth / 4.0)
+    w, d = zone.width, zone.depth
+    hx, hy = w / 2.0, d / 2.0
+    pts = [
+        (-hx + c, -hy), (hx - c, -hy),
+        (hx, -hy + c), (hx, hy - c),
+        (hx - c, hy), (-hx + c, hy),
+        (-hx, hy - c), (-hx, -hy + c),
+    ]
+    poly = Polygon(pts)
+    column = _extrude_polygon(poly, height)
+    column.apply_translation((centre_x, centre_y, base_z))
+    block = [column]
+    if c > 0.0 and height > c:
+        steps = 4
+        layer = c / steps
+        for index in range(steps):
+            grow = c * (steps - index) / steps
+            foot = _extrude_polygon(poly.buffer(grow, join_style="mitre"), layer)
+            foot.apply_translation((centre_x, centre_y, base_z + index * layer))
+            block.append(foot)
+    outer_solid = union(block) if len(block) > 1 else column
+    inner_w = zone.width - 2 * wall
+    inner_d = zone.depth - 2 * wall
+    inner = trimesh.creation.box(extents=(inner_w, inner_d, depth * 2.0))
+    inner.apply_translation((centre_x, centre_y, base_z + height))
+    pocket = difference([outer_solid, inner])
+    return [pocket]
+
+
+# --- slots -------------------------------------------------------------------
+
+
+@defaults("slot")
+def slot_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    hole = min(14.0, max(2.0, box.z - base_z - 4.0))
+    height = one.options.get("depth", hole) + 2.0
+    return {
+        "depth": hole,
+        "thickness": 4.0,
+        "wall": 1.6,
+        "angle": 20.0,
+        "height": height,
+    }
+
+
+@feature("slot")
+def build_slot(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    """A block of angled, backward-leaning slots for bits, cards, and tools."""
+    zone = spec_feature.zone
+    options = resolved_options(box, spec_feature, base_z)
+    depth = options["depth"]
+    thickness = options["thickness"]
+    wall = options["wall"]
+    angle = options.get("angle", 20.0)
+    height = options["height"]
+
+    if (depth <= 0.0 or thickness <= 0.0 or wall <= 0.0 or height <= 0.0
+            or depth >= height or abs(angle) > 45.0):
+        raise ValueError("slot depth, thickness, wall and height must be positive, "
+                         "depth must be less than height, and angle <= 45°")
+    if base_z + height > box.z + 1e-9:
+        raise ValueError("slot height must fit inside the bin")
+
+    along = spec_feature.along
+    run = zone.width if along == "x" else zone.depth
+    across = zone.depth if along == "x" else zone.width
+
+    if 2.0 * wall >= run or 2.0 * wall >= across:
+        raise ValueError("zone is too small for a slot rack with the given wall thickness")
+
+    slot_len = run - 2.0 * wall
+    rad = math.radians(angle)
+    cos_a = math.cos(rad)
+    sin_a = math.sin(rad)
+
+    pitch = (thickness + wall) / cos_a
+    count = spec_feature.count
+    if count is None:
+        count = max(1, int((across - 2.0 * wall - thickness / cos_a) // pitch) + 1)
+    if count < 1:
+        raise ValueError(f"no room for slot rack: {across:.1f} mm across needs at least {pitch + 2.0 * wall:.1f} mm")
+
+    used_across = (count - 1) * pitch + (thickness / cos_a) + 2.0 * wall
+    if used_across > across + 1e-9:
+        raise ValueError(f"{count} slots need {used_across:.1f} mm across but zone gives {across:.1f} mm")
+
+    centre_x, centre_y = zone.centre
     block = trimesh.creation.box(extents=(zone.width, zone.depth, height))
     block.apply_translation((centre_x, centre_y, base_z + height / 2.0))
-    inner = trimesh.creation.box(
-        extents=(zone.width - 2 * wall, zone.depth - 2 * wall, depth * 2.0)
-    )
-    inner.apply_translation((centre_x, centre_y, base_z + height + depth - depth))
-    return [difference([block, inner])]
+
+    cutter_len = (depth + 4.0) / cos_a
+    d_mid = cutter_len / 2.0 - 2.0
+    top_z = base_z + height
+    cut_mid_z = top_z - d_mid * cos_a
+    cut_shift = -d_mid * sin_a
+
+    centre_cross = centre_y if along == "x" else centre_x
+    first = centre_cross - ((count - 1) * pitch) / 2.0
+    cutters = []
+
+    for i in range(count):
+        c_cross = first + i * pitch
+        c = trimesh.creation.box(extents=(
+            slot_len if along == "x" else thickness,
+            thickness if along == "x" else slot_len,
+            cutter_len,
+        ))
+        rot_axis = (1, 0, 0) if along == "x" else (0, 1, 0)
+        c.apply_transform(trimesh.transformations.rotation_matrix(rad, rot_axis))
+        if along == "x":
+            c.apply_translation((centre_x, c_cross + cut_shift, cut_mid_z))
+        else:
+            c.apply_translation((c_cross + cut_shift, centre_y, cut_mid_z))
+        cutters.append(c)
+
+    return [difference([block, union(cutters) if len(cutters) > 1 else cutters[0]])]
+
+
+# --- steps -------------------------------------------------------------------
+
+
+@defaults("steps")
+def steps_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    return {
+        "height": min(16.0, max(4.0, box.z - base_z - 2.0)),
+        "lip": 1.0,
+    }
+
+
+@feature("steps")
+def build_steps(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    """A stepped stadium-riser platform stepping up across the zone."""
+    zone = spec_feature.zone
+    options = resolved_options(box, spec_feature, base_z)
+    height = options["height"]
+    lip = max(0.0, float(options.get("lip", 1.0)))
+    count = spec_feature.count or int(options.get("count", 3))
+
+    if count < 1:
+        raise ValueError("steps count must be at least 1")
+    if height <= 0.0 or base_z + height + lip > box.z + 1e-9:
+        raise ValueError("steps height must fit inside the bin")
+
+    along = spec_feature.along
+    if along == "x":
+        span = zone.depth
+        width = zone.width
+        u0, u1 = zone.y0, zone.y1
+    else:
+        span = zone.width
+        width = zone.depth
+        u0, u1 = zone.x0, zone.x1
+
+    step_run = span / count
+    step_rise = height / count
+
+    pts = [(u0, base_z)]
+    for i in range(count):
+        u_start = u0 + i * step_run
+        u_end = u0 + (i + 1) * step_run
+        z_tread = base_z + (i + 1) * step_rise
+
+        if lip > 0.0:
+            pts.append((u_start, z_tread + lip))
+            lip_run = min(lip, step_run * 0.25)
+            pts.append((u_start + lip_run, z_tread))
+            pts.append((u_end, z_tread))
+        else:
+            pts.append((u_start, z_tread))
+            pts.append((u_end, z_tread))
+
+    pts.append((u1, base_z))
+
+    poly = Polygon(pts)
+    if not poly.is_valid:
+        raise ValueError("invalid step profile generated")
+
+    if along == "x":
+        solid = _extrude_yz_profile(poly, width)
+        solid.apply_translation((zone.centre[0], 0.0, 0.0))
+    else:
+        solid = _extrude_xz_profile(poly, width)
+        solid.apply_translation((0.0, zone.centre[1], 0.0))
+
+    return [solid]
+
+
+# --- text --------------------------------------------------------------------
+#
+# Lettering is an interior part like any other: it owns a zone, it is dragged,
+# resized and turned in the same editor, and it keeps its neighbours out of its
+# own floor.  What makes it different is only how it is assembled - a recessed
+# text is subtracted from the body it sits in rather than added to it, and
+# either way it stays its own object in the 3MF so a slicer can give it its own
+# filament.  ``build_features`` therefore builds it (so its errors surface with
+# every other feature's) but leaves it out of the additive union; the exporter
+# collects it through ``build_texts``.
+
+TEXT_KIND = "text"
+TEXT_ZONE_EPSILON = 0.01     # glyph bounds land exactly on the zone; see _feature_reach
+
+# Every other holder's options are numbers, and the browser layer converts
+# them as such. Text brought the first that are not: what it says, and two
+# yes/no choices. Naming them here keeps that conversion honest instead of
+# letting it guess from the value it happens to receive.
+NON_NUMERIC_OPTIONS = {"text": "string", "auto": "flag", "raised": "flag"}
+
+
+def option_value(key: str, value: object) -> object:
+    """One option as its declared type, or a float like every other one."""
+    kind = NON_NUMERIC_OPTIONS.get(key)
+    if kind == "string":
+        return str(value)
+    if kind == "flag":
+        if isinstance(value, str):
+            return value.strip().lower() not in {"", "false", "0", "no", "off"}
+        return bool(value)
+    return float(value)
+
+
+def is_text(one: Feature) -> bool:
+    return one.kind == TEXT_KIND
+
+
+def text_of(one: Feature) -> str:
+    """The lettering a text feature carries, stripped."""
+    return str(one.options.get("text", "") or "").strip()
+
+
+def _oriented_text(label: str, cap_height: float, quarter_turns: int):
+    """``label`` at ``cap_height``, turned in 90-degree steps, centred on origin."""
+    outline = text_outline(label, cap_height)
+    turns = int(quarter_turns) % 4
+    if turns:
+        outline = affinity.rotate(outline, 90.0 * turns, origin=(0.0, 0.0),
+                                  use_radians=False)
+    minx, miny, maxx, maxy = outline.bounds
+    return affinity.translate(outline, xoff=-(minx + maxx) / 2.0,
+                              yoff=-(miny + maxy) / 2.0)
+
+
+def text_fitted(one: Feature) -> tuple[float, object]:
+    """``(cap height, outline centred on the origin)`` fitted into the zone.
+
+    The zone is what the editor drags and resizes, so it is authoritative: a
+    blank ``cap_height`` fills it, and a hand-set one is honoured but never
+    allowed to overflow it.  That is what makes dragging a corner scale the
+    lettering, exactly the way resizing any other interior part scales it.
+    """
+    label = text_of(one)
+    if not label:
+        raise ValueError("this text part has no text; type what it should say")
+    turns = int(one.options.get("quarter_turns", 0) or 0) % 4
+    probe = _oriented_text(label, TEXT_CAP_HEIGHT_IDEAL, turns)
+    bx0, by0, bx1, by1 = probe.bounds
+    width, height = bx1 - bx0, by1 - by0
+    if width <= 0.0 or height <= 0.0:
+        raise ValueError(f"'{label}' has no printable outline")
+    zone = one.zone
+    fits = TEXT_CAP_HEIGHT_IDEAL * min(zone.width / width, zone.depth / height)
+    if fits < TEXT_CAP_HEIGHT_FLOOR - 1e-9:
+        needed_x = width * TEXT_CAP_HEIGHT_FLOOR / TEXT_CAP_HEIGHT_IDEAL
+        needed_y = height * TEXT_CAP_HEIGHT_FLOOR / TEXT_CAP_HEIGHT_IDEAL
+        raise ValueError(
+            f"'{label}' will not fit its box: at the {TEXT_CAP_HEIGHT_FLOOR:g} mm "
+            f"minimum letter height it needs {needed_x:.1f} x {needed_y:.1f} mm "
+            f"and the box is {zone.width:.1f} x {zone.depth:.1f} mm. Make it "
+            f"bigger, turn it, or use shorter text"
+        )
+    wanted = one.options.get("cap_height")
+    cap = min(float(wanted), fits) if wanted else fits
+    cap = max(cap, TEXT_CAP_HEIGHT_FLOOR)
+    return cap, _oriented_text(label, cap, turns)
+
+
+def text_placed_outline(one: Feature):
+    """A text feature's real 2D ink, centred in its zone."""
+    _cap, outline = text_fitted(one)
+    centre_x, centre_y = one.zone.centre
+    return affinity.translate(outline, xoff=centre_x, yoff=centre_y)
+
+
+def text_is_raised(one: Feature) -> bool:
+    return bool(one.options.get("raised", False))
+
+
+def text_depth(one: Feature) -> float:
+    depth = one.options.get("depth")
+    return TEXT_DEPTH if depth in (None, "") else float(depth)
+
+
+@defaults(TEXT_KIND)
+def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    """Resolved numbers the editor shows in its own fields.
+
+    ``cap_height`` reports what the zone currently produces, so the field can
+    sit blank and still read ``auto (8.5)`` rather than empty.
+    """
+    resolved: dict[str, float] = {
+        "depth": TEXT_DEPTH,
+        "quarter_turns": 0,
+        "raised": 0,
+        "auto": 0,
+    }
+    try:
+        resolved["cap_height"] = round(text_fitted(one)[0], 3)
+    except ValueError:
+        resolved["cap_height"] = TEXT_CAP_HEIGHT_IDEAL
+    return resolved
+
+
+@feature(TEXT_KIND)
+def build_text(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    """The lettering solid, sunk into (or standing on) the surface at ``base_z``.
+
+    Recessed - the default - it occupies the depth immediately below the floor
+    it sits in, so the exporter subtracts it and the finished floor stays flat
+    with the letters as an inlay.
+    """
+    outline = text_placed_outline(spec_feature)
+    depth = text_depth(spec_feature)
+    raised = text_is_raised(spec_feature)
+    if depth <= 0.0:
+        raise ValueError("text depth must be positive")
+    if not raised and depth > base_z + 1e-9:
+        raise ValueError(
+            f"sunk text {depth:g} mm deep needs {depth:g} mm of floor beneath it; "
+            f"this one has {base_z:.2f} mm. Make it shallower, thicken the base, "
+            f"or set it to stand proud instead"
+        )
+    if raised and base_z + depth > box.z + 1e-9:
+        raise ValueError("raised text must stay inside the bin")
+    return [text_prism(outline, base_z, depth, raised)]
+
+
+def _text_footprint(box: BoxSpec, one: Feature, base_z: float) -> Zone | None:
+    """The floor the lettering really covers - its ink, not its whole box.
+
+    Text is usually a different shape from the rectangle it was dragged out to,
+    so judging neighbours on the ink lets a label sit close beside a holder
+    without the empty corners of its box pushing them apart.
+    """
+    outline = text_placed_outline(one)
+    bx0, by0, bx1, by1 = outline.bounds
+    if bx1 <= bx0 or by1 <= by0:
+        return None
+    return Zone(bx0, by0, bx1, by1)
 
 
 # --- putting an insert together ----------------------------------------------
@@ -1362,6 +1751,15 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
         epsilon = 0.01
         return Zone(one.zone.x0 - epsilon, one.zone.y0 - epsilon,
                     one.zone.x1 + epsilon, one.zone.y1 + epsilon)
+    if one.kind == "pocket":
+        epsilon = POCKET_CHAMFER + 0.01
+        return Zone(one.zone.x0 - epsilon, one.zone.y0 - epsilon,
+                    one.zone.x1 + epsilon, one.zone.y1 + epsilon)
+    if is_text(one):
+        # Lettering is fitted to fill its zone, so its bounds land exactly on
+        # it; leave room for the rounding that puts them there.
+        return Zone(one.zone.x0 - TEXT_ZONE_EPSILON, one.zone.y0 - TEXT_ZONE_EPSILON,
+                    one.zone.x1 + TEXT_ZONE_EPSILON, one.zone.y1 + TEXT_ZONE_EPSILON)
     if one.kind != "divider":
         return one.zone
     zone = one.zone
@@ -1392,8 +1790,150 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
     return zone
 
 
+def _cradle_footprint(box: BoxSpec, one: Feature, base_z: float) -> Zone | None:
+    """The floor a cradle's troughs really cover - see ``build_cradle``.
+
+    The run axis carries the tool's own length, not the zone's: a shorter tool
+    in a longer zone leaves real, usable floor at the ends, wherever
+    ``run_offset`` has slid it (or, alternating, between the two extremes the
+    ``end_margin`` allows). The cross axis carries the row the count and
+    spacing actually build.
+    """
+    item = one.item
+    if item is None:
+        return None
+    options = resolved_options(box, one, base_z)
+    wall = options["rib_thickness"]
+    spacing = max(0.0, float(options["spacing"]))
+    held, length = item.widest, item.length
+    body = held + wall
+    pitch = held + wall / 2.0 + spacing
+    zone, along = one.zone, one.along
+    run = zone.width if along == "x" else zone.depth
+    across = zone.depth if along == "x" else zone.width
+    count = one.count if one.count is not None else _fit_count(across, pitch, body)
+    if count < 1:
+        return None
+    centre_along, centre_across = zone.centre
+    if along != "x":
+        centre_along, centre_across = centre_across, centre_along
+    if one.alternate_ends and count > 1:
+        # Both extremes of the alternating swing, as one span.
+        swing = max(0.0, (run - length) / 2.0 - _cradle_end_margin(one) * run)
+        run_span, run_centre = length + 2.0 * swing, centre_along
+    else:
+        slide = _cradle_offset(one) * max(0.0, (run - length) / 2.0)
+        run_span, run_centre = length, centre_along + slide
+    run_span = min(run, run_span)
+    across_span = min(across, (count - 1) * pitch + body)
+    if along == "x":
+        return Zone(run_centre - run_span / 2.0, centre_across - across_span / 2.0,
+                    run_centre + run_span / 2.0, centre_across + across_span / 2.0)
+    return Zone(centre_across - across_span / 2.0, run_centre - run_span / 2.0,
+                centre_across + across_span / 2.0, run_centre + run_span / 2.0)
+
+
+def _post_footprint(box: BoxSpec, one: Feature, base_z: float) -> Zone | None:
+    """The floor a row of pegs really covers - see ``build_post``. A peg is as
+    wide as its diameter however big a zone it was given."""
+    options = resolved_options(box, one, base_z)
+    diameter, spacing = options["diameter"], options["spacing"]
+    count = one.count or 1
+    used = count * diameter + (count - 1) * spacing
+    zone = one.zone
+    centre_x, centre_y = zone.centre
+    run = min(zone.width if one.along == "x" else zone.depth, used)
+    across = min(zone.depth if one.along == "x" else zone.width, diameter)
+    if one.along == "x":
+        return Zone(centre_x - run / 2.0, centre_y - across / 2.0,
+                    centre_x + run / 2.0, centre_y + across / 2.0)
+    return Zone(centre_x - across / 2.0, centre_y - run / 2.0,
+                centre_x + across / 2.0, centre_y + run / 2.0)
+
+
+def _divider_footprint(box: BoxSpec, one: Feature, base_z: float) -> Zone | None:
+    """The floor a divider's walls really cover - see ``build_divider``.
+
+    Unlike :func:`_feature_reach`, which widens the whole zone by one wall's
+    margin because it only needs a safe upper bound, this bounds the walls
+    where they actually stand: the fence-post centres, each grown by half a
+    thickness plus its lean and base chamfer. The zone's cross axis is
+    otherwise open floor, so a two-wall divider drawn across a wide zone no
+    longer claims the compartments it merely separates.
+    """
+    zone = one.zone
+    options = resolved_options(box, one, base_z)
+    thickness = options.get("thickness", 0.0)
+    angle = options.get("angle", 0.0)
+    spacing = options["spacing"]
+    count = one.count or 1
+    if thickness <= 0.0 or spacing <= 0.0 or count < 1:
+        return None
+    lean = abs(options["height"] * math.tan(math.radians(angle))) if angle else 0.0
+    chamfer = 0.0 if (one.full_span and angle == 0.0) else DIVIDER_CHAMFER
+    margin = thickness / 2.0 + lean + chamfer
+    centres = _divider_cross_centres(zone, one.along, count, spacing)
+    low, high = min(centres) - margin, max(centres) + margin
+    # Full span runs to the box's true wavy wall, past the flat rectangle.
+    if one.along == "x":
+        x0, x1 = (-box.half_x, box.half_x) if one.full_span else (zone.x0, zone.x1)
+        return Zone(x0, low, x1, high)
+    y0, y1 = (-box.half_y, box.half_y) if one.full_span else (zone.y0, zone.y1)
+    return Zone(low, y0, high, y1)
+
+
+_FOOTPRINT_BUILDERS = {
+    "cradle": _cradle_footprint,
+    "post": _post_footprint,
+    "divider": _divider_footprint,
+    TEXT_KIND: _text_footprint,
+}
+
+
+def feature_footprint(box: BoxSpec, one: Feature, base_z: float = 0.0) -> Zone:
+    """The floor a feature's built geometry actually covers.
+
+    A zone is the rectangle the editor gives a support to live in - what you
+    drag and resize - and for a bore, pocket or photo nest the built part fills
+    it exactly. A cradle, post or divider deliberately fills less: the trough
+    is only as long as its tool, a peg only as wide as its diameter, a wall
+    only as thick as its thickness. Fused to the bin floor, the remainder is
+    ordinary open floor another support can stand on, so neighbour spacing is
+    judged on this rather than on the zone (see :func:`check_layout`).
+
+    Never raises: anything it cannot work out - a cradle with no item yet,
+    options that will not resolve - falls back to the zone, which is what the
+    caller would have used anyway.
+    """
+    build = _FOOTPRINT_BUILDERS.get(one.kind)
+    if build is None:
+        return one.zone
+    try:
+        return build(box, one, base_z) or one.zone
+    except (ValueError, TypeError, KeyError, ZeroDivisionError):
+        return one.zone
+
+
+def occupied_zones(
+    box: BoxSpec, features: Iterable[Feature], base_z: float = 0.0,
+    mode: str = "fused",
+) -> list[Zone]:
+    """What each feature keeps other features (and bin customizations) out of.
+
+    Only a fused layout judges this on the real footprint. A removable insert
+    prints on a base plate spanning the whole bin floor, so its supports are
+    one interchangeable tile and each keeps its whole zone; cartridge mode
+    needs whole 8 mm cells for the same reason.
+    """
+    return [
+        feature_footprint(box, one, base_z) if mode == "fused" else one.zone
+        for one in features
+    ]
+
+
 def check_layout(
-    box: BoxSpec, features: Iterable[Feature], bounds: Zone | None = None
+    box: BoxSpec, features: Iterable[Feature], bounds: Zone | None = None,
+    base_z: float = 0.0, mode: str = "fused",
 ) -> None:
     """Catch the mistakes that produce quietly wrong parts."""
     features = list(features)
@@ -1412,9 +1952,12 @@ def check_layout(
                 f"({one.zone.x0:.1f}, {one.zone.y0:.1f}) but the bin gives "
                 f"{whole.width:.1f} x {whole.depth:.1f} mm"
             )
+    # Zones may legitimately overlap once the parts inside them do not, so
+    # neighbours are judged on the floor each one actually covers.
+    occupied = occupied_zones(box, features, base_z, mode)
     for index, one in enumerate(features):
-        for other in features[index + 1:]:
-            if one.zone.overlaps(other.zone, MIN_FEATURE_GAP):
+        for offset, other in enumerate(features[index + 1:], index + 1):
+            if occupied[index].overlaps(occupied[offset], MIN_FEATURE_GAP):
                 raise ValueError(
                     f"a {one.kind} and a {other.kind} overlap; leave at least "
                     f"{MIN_FEATURE_GAP:g} mm between features"
@@ -1423,10 +1966,19 @@ def check_layout(
 
 def build_features(
     box: BoxSpec, features: Iterable[Feature], base_z: float,
-    bounds: Zone | None = None,
+    bounds: Zone | None = None, mode: str = "fused",
+    include_text: bool = False,
 ) -> list[trimesh.Trimesh]:
+    """Every holder's solids, ready to be added to the body.
+
+    Text is built too - so a bad one reports its error alongside every other
+    feature's - but left out of the returned solids unless ``include_text`` is
+    set, because a recessed text has to be subtracted from the body rather
+    than added to it. The exporter collects it through :func:`build_texts`;
+    the preview asks for it here so it can draw it in place.
+    """
     features = list(features)
-    check_layout(box, features, bounds)
+    check_layout(box, features, bounds, base_z, mode)
     solids: list[trimesh.Trimesh] = []
     for one in features:
         made = FEATURE_BUILDERS[one.kind](box, one, base_z)
@@ -1456,8 +2008,111 @@ def build_features(
                 f"a {one.kind} touching the wall must stay below "
                 f"{connector_keep_out(box):.1f} mm so a connector can seat"
             )
+        if is_text(one) and not include_text:
+            continue
         solids.extend(made)
     return solids
+
+
+def build_texts(
+    box: BoxSpec, features: Iterable[Feature], base_z: float,
+    limit: Polygon | None = None,
+) -> list[tuple[str, trimesh.Trimesh, bool]]:
+    """``(what it says, its solid, whether it stands proud)`` for each text part.
+
+    The caller subtracts every recessed solid from the body to cut its pocket,
+    leaves the raised ones alone, and writes all of them as their own objects.
+
+    ``limit`` is the surface the lettering has to stay on - a removable
+    insert's plate is pulled in from the wall, so text that would hang over
+    its edge is refused here rather than quietly clipped mid-letter the way
+    trimming a holder to the same outline safely can be.
+    """
+    made: list[tuple[str, trimesh.Trimesh, bool]] = []
+    for one in features:
+        if not is_text(one):
+            continue
+        if limit is not None and not limit.covers(text_placed_outline(one)):
+            raise ValueError(
+                f"the text '{text_of(one)}' hangs over the edge of the insert "
+                "plate; move it further from the wall"
+            )
+        made.append((text_of(one), build_text(box, one, base_z)[0],
+                     text_is_raised(one)))
+    return made
+
+
+def resolve_text_features(
+    box: BoxSpec,
+    features: Iterable[Feature],
+    reserved: Iterable[Polygon] = (),
+    base_z: float = 0.0,
+    mode: str = "fused",
+) -> tuple[Feature, ...]:
+    """Give every ``auto`` text part the best spot left on the floor.
+
+    This is the "blank config just works" case the plain floor label always
+    had: stay centred if you can, otherwise move beside whatever is in the
+    way, then turn, then shrink. Everything else keeps the zone it was
+    dragged to. Never raises - a text that cannot be placed keeps the zone it
+    already had, so the ordinary validation reports it in the usual way.
+    """
+    features = tuple(features)
+    auto = [
+        index for index, one in enumerate(features)
+        if is_text(one) and one.options.get("auto")
+    ]
+    if not auto:
+        return features
+    resolved = list(features)
+    # Each auto text has to dodge the others too, so they are placed one at a
+    # time and every one already placed becomes an obstacle for the next.
+    obstacles = [polygon for polygon in reserved if not polygon.is_empty]
+    obstacles += [
+        feature_footprint(box, one, base_z).polygon
+        for index, one in enumerate(features)
+        if index not in auto
+    ]
+    for index in auto:
+        one = resolved[index]
+        label = text_of(one)
+        if not label:
+            continue
+        try:
+            placement = label_placement(box, label, obstacles)
+            outline = _oriented_text(label, placement.cap_height,
+                                     placement.quarter_turns)
+            bx0, by0, bx1, by1 = outline.bounds
+            zone = Zone(bx0 + placement.x, by0 + placement.y,
+                        bx1 + placement.x, by1 + placement.y)
+        except (ValueError, ZeroDivisionError):
+            obstacles.append(one.zone.polygon)
+            continue
+        options = dict(one.options)
+        options["quarter_turns"] = placement.quarter_turns
+        # The zone is now exactly the ink, so re-fitting into it lands back on
+        # the cap height the search chose; leave the field free to say so.
+        options.pop("cap_height", None)
+        if mode == "cartridge":
+            # A cartridge layout only accepts whole 8 mm cells and the ink
+            # never lands on one, so grow the zone *outward* to the cells
+            # around it - snapping to the nearest would cut the lettering off.
+            # Pin the height the search chose so the bigger box does not
+            # quietly enlarge the lettering to fill it either.
+            cells = cartridge_zone(box)
+            low_x = cells.x0 + math.floor((zone.x0 - cells.x0) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
+            low_y = cells.y0 + math.floor((zone.y0 - cells.y0) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
+            high_x = cells.x0 + math.ceil((zone.x1 - cells.x0) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
+            high_y = cells.y0 + math.ceil((zone.y1 - cells.y0) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
+            if (low_x < cells.x0 - 1e-9 or low_y < cells.y0 - 1e-9
+                    or high_x > cells.x1 + 1e-9 or high_y > cells.y1 + 1e-9):
+                obstacles.append(one.zone.polygon)
+                continue
+            zone = Zone(low_x, low_y, high_x, high_y)
+            options["cap_height"] = placement.cap_height
+        resolved[index] = replace(one, zone=zone, options=options)
+        obstacles.append(zone.polygon)
+    return tuple(resolved)
 
 
 def insert_footprint(box: BoxSpec, mode: str = "separate") -> Polygon:
@@ -1507,9 +2162,11 @@ def make_fitted_insert(
     plate = _extrude_polygon(footprint, BASE_PLATE)
     # Validate and size holders at their installed height, then lower them by
     # the bin floor thickness so the removable insert still exports on z=0.
-    parts = build_features(box, features, BASE_PLATE + box.wall)
+    parts = build_features(
+        box, features, BASE_PLATE + box.base_thickness, mode="separate"
+    )
     for part in parts:
-        part.apply_translation((0.0, 0.0, -box.wall))
+        part.apply_translation((0.0, 0.0, -box.base_thickness))
     body = union([plate] + parts) if parts else plate
     # A holder is built to its zone, which may run right out to the usable
     # rectangle - fine when fused to the box, but a standalone insert has to
@@ -1527,9 +2184,11 @@ def make_cartridge_insert(
     bounds = cartridge_zone(box)
     footprint = insert_footprint(box, "cartridge")
     plate = _extrude_polygon(footprint, BASE_PLATE)
-    parts = build_features(box, features, BASE_PLATE + box.wall, bounds)
+    parts = build_features(
+        box, features, BASE_PLATE + box.base_thickness, bounds, "cartridge"
+    )
     for part in parts:
-        part.apply_translation((0.0, 0.0, -box.wall))
+        part.apply_translation((0.0, 0.0, -box.base_thickness))
     body = union([plate] + parts) if parts else plate
     limit = _extrude_polygon(footprint, box.z * 2.0)
     return intersection([body, limit])
@@ -1539,10 +2198,28 @@ def make_fused_box(
     box: BoxSpec, features: Iterable[Feature], box_mesh: trimesh.Trimesh
 ) -> trimesh.Trimesh:
     """The bin with its holders grown straight out of the floor."""
-    parts = build_features(box, features, box.wall)
+    parts = build_features(box, features, box.base_thickness)
     if not parts:
         return box_mesh
     return union([box_mesh, *parts])
+
+
+def apply_texts(
+    body: trimesh.Trimesh,
+    texts: Iterable[tuple[str, trimesh.Trimesh, bool]],
+) -> trimesh.Trimesh:
+    """Cut every recessed text's pocket out of ``body``.
+
+    A raised text stands on the surface and takes nothing away, so it is left
+    alone here and simply written as its own object beside the body.
+    """
+    sunk = [mesh for _label, mesh, raised in texts if not raised]
+    if not sunk:
+        return body
+    pocketed = difference([body, union(sunk) if len(sunk) > 1 else sunk[0]])
+    pocketed.remove_unreferenced_vertices()
+    pocketed.merge_vertices()
+    return pocketed
 
 
 def insert_report(name: str, features: Iterable[Feature], mesh: trimesh.Trimesh) -> dict:

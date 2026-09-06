@@ -49,29 +49,30 @@ that find nothing get logged too; that is how the file earns its keep.
 
 The page is split between intent-based controls and a large responsive
 workspace. **Build your bin** contains the dimensions, print mode and interior
-support editor. **Customize your bin** contains the scoop and advanced physical
-settings. **Label your bin** contains the label position and part filename.
+interior-part editor. **Customize your bin** contains the scoop and advanced
+physical settings. **Label your bin** contains the rim label and the part
+filename.
 
 The 3D preview is real camera-independent geometry returned by Python and drawn
 locally by the browser. Drag to rotate, use the wheel to zoom, and double-click
-to reset. Click a support to open the 2D layout for adjustment. A single pixels-per-millimetre scale is chosen from the available
+to reset. Click an interior part to open the 2D layout for adjustment. A single pixels-per-millimetre scale is chosen from the available
 width and height, so enlarging the browser makes the model larger without
 stretching it. The 2D tab uses the same rule and supports click-to-select,
 drag-to-move and blue-corner resize. It draws the bin's true wavy interior,
 not the flat placement rectangle - that rectangle still shows as a dashed
-reference line, since every non-full-span support has to stay inside it, but
+reference line, since every non-full-span interior part has to stay inside it, but
 the wavy outline is what answers "does this actually reach the wall."
 
-Selecting an interior support immediately builds its actual mesh and shows it
+Selecting an interior part immediately builds its actual mesh and shows it
 live, highlighted, right inside the main 3D and 2D bin views - at the bin's
 own scale, alongside whatever is already placed, not on a separate isolated
 canvas with its own camera. Parameter changes rebuild that draft after a
 short typing pause, before it is added to the layout; a draft that is
 currently invalid falls back to a red placeholder shape in the same spot, so
-a rejected edit is never mistaken for no change happening. **Add support**
-finds open floor space; selecting a placed support loads it back into the
+a rejected edit is never mistaken for no change happening. **Add interior
+part** finds open floor space; selecting a placed one loads it back into the
 same editor for exact changes. Invalid dimensions, overlaps, reserved
-scoop/label space, and labels that cannot fit are reported beside the
+scoop/rim-label space, and lettering that cannot fit are reported beside the
 preview and refused at export.
 
 **Save design** downloads the existing `.wavefinity.json` format, and **Open
@@ -85,9 +86,9 @@ generation.
 
 ### Using the browser editor
 
-The browser editor is a three-step flow: **1. pick a shape** from the support
-palette and read its one-line description; **2. set parameters**; **3. add
-support**. Placed supports can be selected in the list or on the 2D layout,
+The browser editor is a three-step flow: **1. pick a shape** from the
+interior-part palette and read its one-line description; **2. set parameters**;
+**3. add interior part**. Placed parts can be selected in the list or on the 2D layout,
 then moved or resized there, or edited with exact numeric size fields. Normal layouts snap
 to **1 mm**. Overlaps and out-of-bounds features are refused at export.
 
@@ -106,7 +107,7 @@ bin.
 ### Insert types
 
 The browser UI offers two: **Fused**, where holders print as one solid part
-with the bin — strongest, uses the most floor area, but the supports are
+with the bin — strongest, uses the most floor area, but the parts are
 permanent — and **Removable**, where holders print separately on a thin
 0.6 mm base plate that drops into the bin, so the interior can be swapped
 while the bin stays put.
@@ -118,7 +119,7 @@ some usable edge area (on the 128 x 88 comparison bin that is 120 x 80 mm,
 9.8% less floor). The browser UI does not expose it as a choice — reusable
 coordinate footprints across bins are a scripting concern, and picking it by
 mistake in the editor just produced a confusing revert once an already-placed
-support did not land on an 8 mm cell.
+interior part did not land on an 8 mm cell.
 
 Tall holders may use the middle of the bin, but anything entering the 2 mm strip
 beside a wall is capped below the connector arms. The editor's default divider
@@ -126,31 +127,31 @@ height follows that limit; an explicit unsafe height is refused at generation.
 
 **Fused** is the default and gives the most usable floor.
 
-Bottom labels are placed after holders. They stay centred when possible, then
-move, rotate, and finally shrink (never below 7 mm) to dodge occupied zones. In
-removable modes a bottom label is inlaid into the insert plate rather than
-hidden under it. A top label instead uses fixed 5 mm letters inlaid flush into a
-7 mm-deep rear ledge at the rim. The ledge underside rises at 45 degrees and
-prints without supports.
+Floor lettering is a **text** interior part, placed and checked like every other
+one — see [Text on the floor, and the rim label](#text-on-the-floor-and-the-rim-label).
+A bin may carry several. In removable modes each is inlaid into the insert plate
+rather than hidden under it. The **rim label** is separate: fixed 5 mm letters
+inlaid flush into a 7 mm-deep rear ledge at the rim, whose underside rises at 45
+degrees and prints without supports.
 
 The optional **curved scoop** spans the usable width at the front of the bin and
 rises halfway up the usable wall height, so a part sweeps forward and lifts out
-over the low front lip — the opposite wall from the top-label ledge. In
+over the low front lip — the opposite wall from the rim-label ledge. In
 removable modes it is part of the insert; in fused mode it is part of the box.
-A floor label is moved clear of the scoop strip, and the 2D editor shades the
-space reserved by a scoop or top-label ledge and refuses overlapping supports.
+An auto-placed text moves clear of the scoop strip, and the 2D editor shades the
+space reserved by a scoop or rim-label ledge and refuses overlapping parts.
 
 What a scoop reserves is not its whole run. The curve meets the floor
 tangentially, so its innermost millimetres are only microns proud of it — on a
 40 mm bin the ramp stands 0.03 mm off the floor one millimetre in from where it
 lands. Reserving that lip called a divider across the middle of the bin
-"invalid" when it was in fact sitting flat, so the support keep-out stops where
+"invalid" when it was in fact sitting flat, so the keep-out stops where
 the curve has risen `SCOOP_FLOOR_TOLERANCE` (0.4 mm, about one layer) instead.
 `scoop_floor_zone` is still the true footprint, used where the real extent
-matters; `scoop_keep_out` is the smaller strip a support has to avoid.
+matters; `scoop_keep_out` is the smaller strip an interior part has to avoid.
 
 Bin wall, floor, and mating geometry use the tested printable defaults. The
-editor exposes only the dimensions and support settings that affect the part.
+editor exposes only the dimensions and interior-part settings that affect the part.
 
 Three buttons: **Generate Box** (including the current insert layout) and
 **Generate Connector**, with a smaller
@@ -183,13 +184,13 @@ default and is never exposed to the network.
 | Route | Purpose |
 |---|---|
 | `GET /api/health` | Identify an existing Wavefinity server. |
-| `GET /api/catalog` | Registered supports, modes and initial values. |
+| `GET /api/catalog` | Registered interior parts, modes and initial values. |
 | `POST /api/preview` | Validate a design and return camera-independent geometry, plus an optional live-highlighted draft. |
 | `POST /api/design/validate` | Validate and normalize a saved design. |
-| `POST /api/feature/default` | Create an engine-derived support draft. |
-| `POST /api/feature/draft` | Build one support's own mesh faces to validate it and resolve its blank options. |
-| `POST /api/feature/apply` | Snap, validate, add or update a support. |
-| `POST /api/feature/delete` | Remove a support. |
+| `POST /api/feature/default` | Create an engine-derived interior-part draft. |
+| `POST /api/feature/draft` | Build one interior part's own mesh faces to validate it and resolve its blank options. |
+| `POST /api/feature/apply` | Snap, validate, add or update an interior part. |
+| `POST /api/feature/delete` | Remove an interior part. |
 | `POST /api/layout/mode` | Convert a layout between print modes. |
 | `POST /api/generate` | Generate the organizer parts. |
 | `POST /api/connector` | Generate a connector. |
@@ -211,7 +212,7 @@ user, not a multi-user server design.
 **Known limitations:** no standalone browser/DOM test suite yet — Python API
 contracts and JavaScript syntax are covered by `test_wavefinity_web.py` and
 `node --check`, interactive QA is manual. A very dense design (many
-cradle/bore supports at once) serializes a large triangle payload to
+cradle/bore parts at once) serializes a large triangle payload to
 the browser; camera motion stays client-side and fast regardless, but the
 initial load is heavier. **Save design** relies on the browser's own
 download prompt, which some browser-automation tools cannot observe as an
@@ -250,11 +251,11 @@ its zone only runs 13 mm along x"* rather than a raw overflow. Every
 auto-computed edge rounds up to the 1 mm editor grid so the pipeline's snap
 can't trim a trough below what the tool needs.
 
-When any support does not fit the current bin, an **Auto Expand Bin** button
+When any interior part does not fit the current bin, an **Auto Expand Bin** button
 appears at the top of the interior section; it grows the bin on the 8 mm grid
-to the smallest size that holds every support at its real footprint (a clamped
+to the smallest size that holds every interior part at its real footprint (a clamped
 cradle gets its full length back), trims any axis that overshot, and leaves
-each support where it sat.
+each part where it sat.
 
 **Photo Nest — custom part cavity** creates a raised cookie-cutter wall from a JPG, JPEG, PNG,
 or WEBP photo. Put one flat part on an 8.5 × 11 in sheet, keep all four paper
@@ -290,7 +291,8 @@ effect when only one tool fits.
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
 | `divider` | One or more straight or leaning subdividing walls along X or Y | `height`, `thickness`, `angle`, `spacing` |
-| `pocket` | Raised rectangular tray with a recessed centre | `height`, `depth`, `wall` |
+| `pocket` | Raised rectangular tray with a recessed centre and 0.5 mm chamfered edges | `height`, `wall` |
+| `text` | Lettering sunk flush into the floor (or standing proud), one 3MF object each, any number per bin | `text`, `cap_height`, `quarter_turns`, `depth`, `raised`, `auto` |
 
 There is no separate "slot" kind - a divider covers it. A slot's one real
 extra, a shallow groove with a solid floor left under it, was a narrower need
@@ -538,36 +540,54 @@ floor and the connector arms hang from the rim, so on any normal bin they are
 nowhere near each other; on a very shallow one they would meet, and asking for a
 connector then gives an error saying how tall the box needs to be.
 
-### Bottom and top labels
+### Text on the floor, and the rim label
 
-Give a box a label and the text is **sunk into its floor**: the box gets a pocket
-and the label is the solid that fills it flush, exported as a **second object in
+Floor lettering is an **interior part**, not a property of the bin — so a bin can
+carry **as many labels as it needs**: a size over each bore cluster, a name along
+the front. Pick **Text** from the palette, type what it should say, and it moves,
+resizes, turns and is checked against its neighbours through exactly the same
+editor path as a cradle or a divider.
+
+Each text is **sunk into the surface it sits on**: that surface gets a pocket and
+the lettering is the solid that fills it flush, exported as **its own object in
 the same 3MF**. Open it in Bambu Studio, answer yes to "load as a single object
-with multiple parts", and the label can be given its own filament — that is the
-whole reason it stays a separate object.
+with multiple parts", and each piece of lettering can be given its own filament —
+that is the whole reason they stay separate objects.
 
-- Letters are **10 mm** tall if they fit, shrinking no further than **7 mm**
-- Text runs **across** the box when it can; only if 7 mm still will not fit does
-  it **turn** to run up the box, always the same way round so a row of printed
-  boxes reads consistently
-- Sunk **0.4 mm** into the 0.8 mm floor, leaving 0.4 mm beneath, and reads
-  correctly looking into the open box, which is the way the box prints
-- The pocket and the inlay are exact complements: put them back together and you
-  get the plain box, to the last cubic micron
-- If it will not fit either way at 7 mm you get an error naming what it needs
-- With holders present, the label automatically moves to unused floor; if none
-  remains, export gives a clear error instead of burying text in a holder
-- **Blank label changes nothing**: one object, and the plain filename
+- **Its zone is its size.** Drag a corner and the lettering scales to fill it.
+  **Letter height** overrides that but is never allowed to overflow the box; a
+  box too small to hold the text at the **4 mm** minimum is refused, saying what
+  it needs.
+- **Place it for me** hands positioning back to the engine: stay centred where it
+  fits, otherwise move beside whatever is in the way, then turn, then shrink (no
+  smaller than **7 mm** on that path). Dragging, resizing or turning it by hand
+  switches that off, so it stays where you put it.
+- **Stand proud** puts the letters on top of the floor instead of sunk into it.
+  Either way they remain their own object.
+- Sunk **0.4 mm** into the default 0.6 mm floor, leaving 0.2 mm beneath, and
+  reads correctly looking into the open box, which is the way the box prints.
+  The pocket and the inlay are exact complements: put them back together and you
+  get the plain box, to the last cubic micron.
+- In removable modes the lettering is inlaid into the **0.6 mm insert plate**
+  rather than hidden under it. Text that would hang over that plate's edge is
+  refused rather than clipped mid-letter.
+- Two texts reading the same thing get distinct object names (`M3`, `M3 2`) — a
+  3MF object name has to be unique or the second silently replaces the first.
 
-Choose **Top** to put the label at the rear rim instead. Top labels use fixed
-**5 mm** letter height on a **7 mm** front-to-back shelf. The text remains a
-0.4 mm-deep flush inlay and a second selectable 3MF object. The shelf's underside
-rises by 7 mm over its 7 mm run, an exact 45-degree self-supporting slope. A top
-label that cannot fit at its fixed size is rejected with a clear message rather
-than silently shrunk.
+The **rim label** is the one piece of lettering that is not an interior part: it
+sits on a shelf at the rear rim, so it has no floor zone to drag. Fixed **5 mm**
+letter height on a **7 mm** front-to-back shelf, still a 0.4 mm-deep flush inlay
+and its own 3MF object; the shelf's underside rises 7 mm over its 7 mm run, an
+exact 45-degree self-supporting slope. Leave **Rim label** empty for none. One
+that cannot fit at its fixed size is rejected with a clear message rather than
+silently shrunk.
 
-The label is added to the filename: `Box 48 x 48 x 40 BOLTS.3mf`. Characters a
-filesystem would object to are stripped.
+**The part name alone names the file**: `Box 48 x 48 x 40 Driver rack.3mf`.
+Lettering does not appear in it — with several labels there is no answer to which
+one would stand for the whole file. The first label you actually type seeds a
+blank **Part Name** once (a bare size like `8` or `12mm` never does); after that
+the two are independent, so a bin can say `M3` on the floor and still save as
+`Driver rack`. Characters a filesystem would object to are stripped.
 
 ---
 
@@ -588,13 +608,19 @@ python organizer_app.py organizer --layout drivers.wavefinity.json --mode cartri
 X and Y must be multiples of 8 mm (minimum 8); Z and wall are free. `--boxes`
 takes units (`2x6`), or millimetres with an explicit suffix (`16x48mm`).
 
-Generated box files are named for their size, plus the label if there is one:
-`Box 16 x 48 x 40.3mf` or `Box 16 x 48 x 40 BOLTS.3mf`. The connector is one
-part, so it is just `Connector.3mf`.
+Generated box files are named for their size, plus the part name if there is
+one: `Box 16 x 48 x 40.3mf` or `Box 16 x 48 x 40 Driver rack.3mf`. Lettering
+does not appear in a filename — a bin may carry several labels. The connector is
+one part, so it is just `Connector.3mf`.
+
+On the `organizer` command, `--label` is sugar for a **text interior part that
+places itself**, and seeds a blank `--part-name` from it; `--label-position top`
+puts it on the rim ledge instead. On the plain `box` command (which has no
+layout) `--label` remains a single centred floor label.
 
 The `organizer` command reads either a complete saved UI design or a bare layout
-object. A complete design supplies its box, label position, scoop choice and
-part name; explicit CLI values override any of them. `--mode` overrides the saved
+object. A complete design supplies its box, rim label, scoop choice and part
+name; explicit CLI values override any of them. `--mode` overrides the saved
 fused/separate/cartridge mode.
 Fused export writes one box file. Removable modes write a plain box and a
 separate `Insert ...3mf` or `Cartridge ...3mf`. Labelled parts are strict
@@ -621,8 +647,8 @@ replaced it:
 
 | File | Role | Entry point? |
 |---|---|---|
-| `organizer_engine.py` | Wavy boxes, connectors, labels, mesh validation and 3MF/STL export. | No. |
-| `organizer_inserts.py` | Item/segment model, zones, 1 mm and cartridge layouts, JSON persistence, holder registry, six builders, and fused/removable assembly. | No. |
+| `organizer_engine.py` | Wavy boxes, connectors, glyph outlines and the text-to-solid core, mesh validation and 3MF/STL export. | No. |
+| `organizer_inserts.py` | Item/segment model, zones, 1 mm and cartridge layouts, JSON persistence, holder registry, nine builders, and fused/removable assembly. | No. |
 | `organizer_app.py` | CLI, exporters, validation and the catalog/defaults the browser service reads. | Yes, for CLI subcommands. |
 | `wavefinity_web.py` | The local HTTP service — see [The browser service](#the-browser-service). | Yes, the default UI launch target. |
 | `test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest`. |
@@ -761,7 +787,8 @@ these numbers look arbitrary and are not.
 | Minimum box | **8.0** | one grid step |
 | One "unit" | **8.0** | so 1, 2, 3 units = 8, 16, 24 mm |
 | Smallest box that clips on both sides | **16.0** | derived, not hard-coded |
-| Wall / floor | **0.8** | |
+| Wall | **0.8** | independent of the floor |
+| Base thickness | **0.6** default, **0.4** minimum | shown under Advanced in Build your bin |
 | Flat wall band | **0–1.0**, default 0 | height above the floor, not a fill depth |
 | Corner fillet | **0.6** | walls stop `CORNER_INSET` = 1.0 short of the nominal corner |
 | **Connector tolerance** | **0.02** | **locked** by a physical print |
@@ -772,8 +799,8 @@ these numbers look arbitrary and are not.
 | Lock bump | **0.35** proud, 1.0 tall, **1.2** long | on every wave extremum, so every **2.0** |
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |
 | Bump band | top **4.0** below the rim | |
-| Label letters | **10.0** ideal, **7.0** minimum | sunk **0.4** into the floor |
-| Top label | **5.0** letters, **7.0** ledge | flush at rim; 45-degree underside |
+| Text letters | **10.0** ideal, **7.0** auto minimum, **4.0** floor | sunk **0.4**; a zone sizes it, a hand-set height is capped by that zone |
+| Rim label | **5.0** letters, **7.0** ledge | flush at rim; 45-degree underside |
 | Scoop | **50%** of usable wall height | full usable width at front |
 
 Connector tolerance, length and height were chosen from a **printed five-clip fit
@@ -789,7 +816,8 @@ Do not re-derive these.
 | Shortening the connector to make it reversible | Provably useless — it is a parity clash, not a size problem. |
 | Bumps on alternate troughs only | Locked one side of a mixed-size seam, and blocked reversibility. |
 | Even (cosine) wave | Replaced with odd sine so boxes can be turned round. |
-| Raised (proud) floor labels | Replaced with a sunk inlay. |
+| Raised (proud) floor labels *as the only option* | Replaced with a sunk inlay by default; **Stand proud** is now a per-text choice. |
+| One label per bin, owned by the design | Replaced by `text` interior parts, any number of them. One label meant no answer to "which compartment is this size for", and the label already had bespoke move/rotate/resize code duplicating the feature editor. |
 | Reading "flat inside walls" as a horizontal fill depth | Wrong. It is a **height**: a flat-walled band rising from the floor, with the wave unchanged above it. |
 | 16 mm "bin" as the unit | Replaced with 8 mm so whole numbers reach 8/16/24/32/40/48. |
 | Success dialog after generating | Removed; the status line reports instead. Failures still get a dialog. |
@@ -848,9 +876,21 @@ Both were stated as done and later found false. Tests now exist for each.
 - **Cartridge cells are anchored at the cartridge corner, not world zero.** An
   even cell count puts legal feature centres half a cell from zero; snapping the
   centre itself creates layouts that look aligned but are not reusable.
-- **Labels avoid complete feature zones, not just generated surfaces.** That is
-  conservative by design: it preserves readable clearance and makes preview and
-  export agree without running expensive booleans on every drag.
+- **Text is built by `build_features` but kept out of its returned solids.** A
+  recessed inlay has to be *subtracted* from the body, not added to it, so the
+  builder runs (its errors surface with every other interior part's) while the
+  exporter collects the solids separately through `build_texts`. Pass
+  `include_text=True` to get them, as the preview does.
+- **Lettering flush with the floor needs a painter *layer*, not just a depth.**
+  Text sunk into the floor shares the floor's face exactly, so pinning it to the
+  floor's sort depth leaves only the layer to break the tie — and an interior
+  part arrives on layer 0, under the floor's own layer 1. Without lifting it the
+  lettering is painted over and renders nothing at all. No Python test can see
+  this; it was found by reading pixels out of the real canvas.
+- **The browser layer converts every builder option to a float.** Text brought
+  the first options that are not numbers, so `NON_NUMERIC_OPTIONS` in
+  `organizer_inserts.py` declares them and `option_value` does the conversion.
+  Add a non-numeric option anywhere and it must be declared there too.
 - **A tall feature at the wall can block a connector even when the 2D zones are
   valid.** Builders check the 2 mm edge strip against the connector-arm bottom;
   the default divider stops exactly at that safe height.
@@ -888,22 +928,30 @@ Measured and regression-tested; run the suite for the current exact count.
 - Outer profile area identical to 6 places, so grid and mating are unaffected
 - Connector still seats and locks with the band at 0, 0.5 and 1.0
 
-**Labels**
+**Text and labels**
 - Pocket volume removed == inlay volume; the two intersect by **<0.01 mm³**;
   union restores the plain box exactly. Checked on 48x48, 16x48 and 24x40
-- Strict 3MF, **zero warnings**, two named objects
-- Labels move around insert zones with a 1 mm clearance; the same placement is
-  used by the 2D editor, 3D preview, mesh pocket and export report
+- Strict 3MF, **zero warnings**; the body plus one named object per piece of
+  lettering — verified with three floor texts and with a rim label alongside
+  floor text (4 objects)
+- A raised text takes nothing out of the body; a recessed one is its exact
+  complement
+- An auto-placed text moves around holders, reserved scoop/ledge space and other
+  auto texts with a 1 mm clearance; the same placement is used by the 2D editor,
+  3D preview, mesh pocket and export report
+- Neighbours are judged on the lettering's **ink**, not the box it was dragged
+  out to, so a short word in a wide box does not push a holder away
 
 **Insert layouts**
-- Six registered builders: cradle, Photo Nest, bore, center post, divider
-  and pocket
+- Nine registered builders: cradle, Photo Nest, bore, center post, divider,
+  pocket, slot rack, steps and text
 - Fused outputs remain one watertight solid; fitted and cartridge inserts clear
   the bin walls and stand on their own 0.6 mm print-flat plate
 - Normal moves and resizes snap to 1 mm. Cartridge coordinates and sizes are
   validated on 8 mm cell edges and survive a JSON round trip
 - All three production modes were exported as strict, zero-warning 3MF files;
-  labelled outputs contain exactly two named objects
+  a lettered output contains the body plus one named object per piece of
+  lettering, and two texts reading the same thing stay distinct objects
 
 **Usable inside**
 - The exact reported rectangle fits; **+0.3 mm does not**
@@ -911,7 +959,7 @@ Measured and regression-tested; run the suite for the current exact count.
 ## Where it stands
 
 Working and verified: box, connector, lock, insert registry and primitives,
-fused/removable/cartridge exports, insert-aware labels, flat-inside fill,
+fused/removable/cartridge exports, multi-label text parts, flat-inside fill,
 interactive 3D preview, 2D drag editor, saved layouts, CLI, UI and sample plate.
 
 Physically printed so far: **test pieces only** — the five-clip tolerance plate

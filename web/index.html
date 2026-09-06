@@ -25,27 +25,27 @@
   <main class="app-shell" id="app-shell">
     <aside class="controls" aria-label="Bin controls">
       <section class="control-section open" data-section="build">
-        <button class="section-heading" aria-expanded="true">
-          <span>Build your bin <small class="unit-note">(8 mm grid)</small></span><span class="chevron">⌄</span>
-        </button>
+        <div class="section-heading-wrap">
+          <button class="section-heading" aria-expanded="true">
+            <span>Build your bin <small class="unit-note">(8 mm grid)</small></span><span class="chevron">⌄</span>
+          </button>
+          <label class="advanced-toggle"><input id="advanced-settings" type="checkbox">Advanced</label>
+        </div>
         <div class="section-body">
           <div class="field-grid three">
             <label>Grid width <span class="unit">mm</span><input id="x-size" type="number" min="8" step="8"></label>
             <label>Grid depth <span class="unit">mm</span><input id="y-size" type="number" min="8" step="8"></label>
             <label>Height <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
           </div>
+          <div id="advanced-build-settings" class="field-grid three advanced-build-settings" hidden>
+            <label>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1"></label>
+          </div>
           <p id="inside-size" class="measurement"></p>
 
           <div class="build-label-fields">
-            <label>Label text<input id="label-text" type="text" maxlength="80" placeholder="e.g. M3 BOLTS"></label>
+            <label>Rim label<input id="label-text" type="text" maxlength="80" placeholder="e.g. M3 BOLTS"></label>
             <p id="label-error" class="field-error" hidden></p>
-            <fieldset>
-              <legend>Label position</legend>
-              <div class="segmented two">
-                <label><input type="radio" name="label-position" value="bottom" checked><span>Bottom label</span></label>
-                <label><input type="radio" name="label-position" value="top"><span>Top label</span></label>
-              </div>
-            </fieldset>
+            <p class="field-help">Fixed 5 mm lettering on a shelf at the rear rim, readable with the bin in a drawer. Leave it empty for no rim label. For lettering on the floor, add a <strong>Text</strong> interior part below - you can have as many as you like, and each one moves, resizes and turns like any other part.</p>
             <label>Part Name (For file)<input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>
           </div>
 
@@ -55,18 +55,18 @@
           </label>
 
           <div class="subheading-row">
-            <div><h2>Interior supports</h2></div>
+            <div><h2>Interior parts</h2></div>
             <span id="support-count" class="count-badge">0 placed</span>
           </div>
           <button id="auto-expand-bin" class="button secondary auto-expand" type="button" hidden>
-            Auto Expand Bin<small>Grow the bin to fit the supports that don't fit right now</small>
+            Auto Expand Bin<small>Grow the bin to fit the interior parts that don't fit right now</small>
           </button>
           <div id="support-palette" class="support-palette" role="list"></div>
 
           <fieldset id="interior-mode" class="mode-fieldset" hidden>
             <legend>How should the interior print?</legend>
             <div id="mode-options" class="segmented two"></div>
-            <p class="field-help mode-help"><strong>Fused</strong> prints supports as one piece with the bin. <strong>Removable</strong> prints them separately on a thin 0.6 mm base plate that fits into the bin.</p>
+            <p class="field-help mode-help"><strong>Fused</strong> prints interior parts as one piece with the bin. <strong>Removable</strong> prints them separately on a thin 0.6 mm base plate that fits into the bin.</p>
           </fieldset>
 
           <div class="support-editor" hidden>
@@ -78,12 +78,12 @@
             <p class="field-help">Shown live, highlighted, in the preview to the right - and saved into the bin automatically as you go.</p>
             <div id="draft-fields" class="draft-fields"></div>
             <div class="button-row">
-              <button id="add-support" class="button primary">Additional support</button>
+              <button id="add-support" class="button primary">Additional interior part</button>
             </div>
           </div>
 
           <div class="placed-block">
-            <h3>Placed supports</h3>
+            <h3>Placed interior parts</h3>
             <div id="placed-supports" class="placed-supports"></div>
           </div>
         </div>
@@ -114,10 +114,15 @@
           <input id="output-folder" type="text">
           <button type="button" class="button secondary" id="output-folder-picker">Browse</button>
         </div></label>
-        <button id="generate-bin" class="button primary wide">Generate bin files</button>
+        <button id="print-bin" class="button primary wide print-button">Print</button>
+        <button id="generate-bin" class="button secondary wide">Generate bin files</button>
         <div class="button-row equal">
           <button id="generate-connector" class="button secondary">Generate connector</button>
           <button id="generate-sampler" class="button secondary">Generate sampler</button>
+        </div>
+        <div class="slicer-status-row">
+          <span id="slicer-status-text" class="slicer-status-text"><span class="slicer-status-dot"></span>Bambu Studio</span>
+          <button type="button" id="slicer-picker-button" class="link-button" title="Select custom Bambu Studio or OrcaSlicer executable">Change slicer</button>
         </div>
       </section>
     </aside>
@@ -157,11 +162,11 @@
       </div>
       <div class="canvas-wrap" data-canvas="2d">
         <canvas id="preview-2d" role="img" aria-label="Top-down layout preview" aria-describedby="preview-help layout-help"></canvas>
-        <div id="layout-help" class="layout-hint">Pointer: drag to move, drag the blue corner to resize proportionally, or use the round handle to rotate a Photo Nest.</div>
+        <div id="layout-help" class="layout-hint">Pointer: drag to move, drag the blue corner to resize proportionally, or use the round handle to rotate a Photo Nest or the label.</div>
       </div>
       <div id="error-panel" class="error-panel" hidden></div>
       <div class="workspace-footer">
-        <p id="design-summary">No supports placed</p>
+        <p id="design-summary">No interior parts placed</p>
         <p>All geometry is generated by the tested Python engine.</p>
       </div>
     </section>
@@ -169,8 +174,8 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <dialog id="support-layout-dialog" class="support-layout-dialog" aria-labelledby="support-layout-dialog-title">
-    <h2 id="support-layout-dialog-title">Adjust this support?</h2>
-    <p>Switch to 2D layout to adjust supports.</p>
+    <h2 id="support-layout-dialog-title">Adjust this interior part?</h2>
+    <p>Switch to 2D layout to adjust interior parts.</p>
     <div class="button-row">
       <button id="support-layout-dialog-close" type="button" class="button secondary">Stay in 3D</button>
       <button id="support-layout-dialog-open" type="button" class="button primary">Open 2D layout</button>

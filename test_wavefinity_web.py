@@ -37,25 +37,62 @@ from wavefinity_web import (
 from photo_nest import PhotoOutline
 
 
+def _text_feature(said, auto=False, zone=(-20.0, -6.0, 20.0, 6.0), **options):
+    """One ``text`` interior part, as the browser would send it."""
+    return {
+        "kind": "text",
+        "zone": list(zone),
+        "item": None,
+        "count": None,
+        "along": "x",
+        "options": {"text": said, "auto": auto, **options},
+        "full_span": False,
+        "wedge": True,
+        "alternate_ends": False,
+        "contour": None,
+        "rotation": 0.0,
+        "scale": 1.0,
+    }
+
+
 class WebApplicationTests(unittest.TestCase):
-    def test_catalog_exposes_every_support_and_safe_default_design(self):
+    def test_catalog_exposes_every_interior_part_and_safe_default_design(self):
         catalog = catalog_payload()
         parts = {part["kind"]: part for part in catalog["parts"]}
         self.assertEqual(
             set(parts),
-            {"divider", "post", "pocket", "bore", "cradle", "nest"},
+            {"divider", "post", "pocket", "bore", "cradle", "nest", "slot",
+             "steps", "text"},
         )
+        self.assertTrue(parts["text"]["flags"]["text"])
+        self.assertEqual(parts["text"]["title"], "Text")
         self.assertTrue(parts["cradle"]["flags"]["alternate"])
         self.assertFalse(parts["nest"]["flags"]["alternate"])
         self.assertTrue(parts["nest"]["flags"]["photo"])
         self.assertEqual(parts["nest"]["title"], "Photo Nest")
         self.assertEqual(
             [field["label"] for field in parts["nest"]["fields"]],
-            ["Fit clearance (mm)", "Soften outline (mm)"],
+            ["Fit clearance", "Soften outline"],
         )
         box, layout, *_ = design_from_dict(catalog["defaults"]["design"])
         self.assertEqual((box.x, box.y, box.z), (16.0, 48.0, 40.0))
+        self.assertEqual(box.base_thickness, 0.6)
         self.assertEqual(layout.mode, "fused")
+
+    def test_base_thickness_round_trips_and_legacy_designs_keep_their_floor(self):
+        design = default_design()
+        design["box"]["base_thickness"] = 1.1
+        box, layout, label, part, location, scoop = design_from_dict(design)
+        saved = wavefinity_web.design_to_dict(
+            box, layout, label, part, location, scoop
+        )
+        self.assertEqual(saved["box"]["base_thickness"], 1.1)
+
+        legacy = default_design()
+        legacy["box"].pop("base_thickness")
+        legacy["box"]["wall"] = 0.8
+        legacy_box, *_ = design_from_dict(legacy)
+        self.assertEqual(legacy_box.base_thickness, 0.8)
 
     def test_brief_interior_sizing_designs_migrate_back_to_the_modular_grid(self):
         design = default_design()
@@ -127,12 +164,14 @@ class WebApplicationTests(unittest.TestCase):
         one = layout.features[0]
         if box.x > 8.0:
             narrower = type(box)(box.x - 8.0, box.y, box.z, box.wall,
-                                 box.corner_fillet, box.flat_inside)
+                                 box.corner_fillet, box.flat_inside,
+                                 box.base_thickness)
             with self.assertRaisesRegex(ValueError, "outside the bin"):
                 layout.validate(narrower)
         if box.y > 8.0:
             shallower = type(box)(box.x, box.y - 8.0, box.z, box.wall,
-                                  box.corner_fillet, box.flat_inside)
+                                  box.corner_fillet, box.flat_inside,
+                                  box.base_thickness)
             with self.assertRaisesRegex(ValueError, "outside the bin"):
                 layout.validate(shallower)
         preview = preview_payload({"design": design})
@@ -243,6 +282,63 @@ class WebApplicationTests(unittest.TestCase):
             "design": design, "feature": saved,
         })["geometry"])
 
+    def _long_cradle_design(self, mode):
+        """A bin barely longer than one cradle zone, whose trough fills well
+        under half of it - the rest is open floor a fused support may use."""
+        design = default_design()
+        design["layout"]["mode"] = mode
+        design["box"]["x"] = 40.0
+        design["box"]["y"] = 176.0
+        item = {
+            "name": "driver", "profile": "round", "clearance": 0.4,
+            "segments": [{"length": 60.0, "diameter": 22.0}],
+        }
+        cradle = default_feature_payload({
+            "design": design, "kind": "cradle", "item": item, "along": "y",
+        })["feature"]
+        cradle["zone"] = [-14.0, -78.0, 14.0, 78.0]
+        cradle["count"] = 1
+        return apply_feature_payload({
+            "design": design, "feature": cradle, "index": None,
+        })["design"]
+
+    def test_a_fused_support_may_use_the_floor_a_cradle_zone_leaves_open(self):
+        design = self._long_cradle_design("fused")
+        cradle_zone = design["layout"]["features"][0]["zone"]
+        pocket = default_feature_payload({"design": design, "kind": "pocket"})["feature"]
+        added = apply_feature_payload({
+            "design": design, "feature": pocket, "index": None,
+        })
+        placed = added["design"]["layout"]["features"][1]["zone"]
+        # Nowhere else to go: it lands inside the cradle's zone, past its trough.
+        self.assertLess(placed[1], cradle_zone[3])
+        self.assertGreater(placed[3], cradle_zone[1])
+        self.assertTrue(preview_payload({"design": added["design"]})["fits"])
+
+    def test_a_removable_insert_still_keeps_a_cradle_whole_zone_clear(self):
+        design = self._long_cradle_design("separate")
+        pocket = default_feature_payload({"design": design, "kind": "pocket"})["feature"]
+        with self.assertRaisesRegex(ValueError, "no open floor area"):
+            apply_feature_payload({
+                "design": design, "feature": pocket, "index": None,
+            })
+
+    def test_the_preview_reports_the_floor_a_cradle_really_covers(self):
+        design = self._long_cradle_design("fused")
+        covered = preview_payload({"design": design})["feature_footprints"][0]
+        zone = design["layout"]["features"][0]["zone"]
+        self.assertIsNotNone(covered)
+        # Shorter than its zone along the run, and inside it.
+        self.assertLess(covered[3] - covered[1], zone[3] - zone[1])
+        self.assertGreaterEqual(covered[1], zone[1])
+        self.assertLessEqual(covered[3], zone[3])
+        # A pocket fills its zone exactly, so there is nothing extra to draw.
+        pocket = default_feature_payload({"design": design, "kind": "pocket"})["feature"]
+        added = apply_feature_payload({
+            "design": design, "feature": pocket, "index": None,
+        })["design"]
+        self.assertIsNone(preview_payload({"design": added})["feature_footprints"][1])
+
     def test_delete_can_recover_a_layout_after_the_bin_is_shrunk(self):
         design = default_design()
         design["box"]["x"] = 48.0
@@ -349,6 +445,115 @@ class WebApplicationTests(unittest.TestCase):
             r"\d+ X \d+ \(Inside\) - \d+ X \d+ mm \(Outside\)",
         )
 
+    def test_preview_renders_the_rim_label_on_its_ledge(self):
+        design = default_design()
+        design["label"] = "M3"
+        design["label_position"] = "top"
+        preview = preview_payload({"design": design})
+        self.assertTrue(preview["label_outline"])
+        self.assertEqual(preview["label_meta"]["location"], "top")
+
+    def test_preview_draws_a_text_part_like_any_other_interior_part(self):
+        design = default_design()
+        design["box"].update({"x": 120.0, "y": 80.0})
+        design["layout"]["features"] = [_text_feature("DEBURR", auto=True)]
+        preview = preview_payload({"design": design})
+        self.assertTrue(preview["fits"])
+        self.assertFalse(preview["feature_errors"])
+        self.assertTrue(any(
+            face["kind"] == "feature_text" for face in preview["geometry"]
+        ))
+        # No rim label, so the label channels stay empty - text is a feature.
+        self.assertEqual(preview["label_outline"], [])
+        self.assertIsNone(preview["label_meta"])
+        said = preview["text_meta"][0]
+        self.assertEqual(said["text"], "DEBURR")
+        self.assertTrue(said["auto"])
+        self.assertGreater(said["cap_height"], 0.0)
+
+    def test_an_auto_text_part_comes_back_where_the_engine_put_it(self):
+        design = default_design()
+        design["box"].update({"x": 120.0, "y": 80.0})
+        design["layout"]["features"] = [
+            _text_feature("M3", auto=True, zone=[-4.0, -4.0, 4.0, 4.0])
+        ]
+        preview = preview_payload({"design": design})
+        placed = preview["design"]["layout"]["features"][0]["zone"]
+        self.assertNotEqual(placed, [-4.0, -4.0, 4.0, 4.0])
+        # It fills the room it found rather than the placeholder it started in.
+        self.assertGreater(placed[2] - placed[0], 8.0)
+
+    def test_a_hand_placed_text_part_keeps_the_zone_it_was_given(self):
+        design = default_design()
+        design["box"].update({"x": 120.0, "y": 80.0})
+        zone = [-20.0, 5.0, 20.0, 17.0]
+        design["layout"]["features"] = [_text_feature("M3", auto=False, zone=zone)]
+        preview = preview_payload({"design": design})
+        self.assertEqual(preview["design"]["layout"]["features"][0]["zone"], zone)
+        self.assertFalse(preview["text_meta"][0]["auto"])
+
+    def test_a_second_auto_text_places_itself_instead_of_being_refused(self):
+        """Apply has to resolve before it judges overlaps.
+
+        Every new text starts on the same placeholder zone in the middle of
+        the bin, so judging the raw submission refuses the second one for
+        sitting on the first - which auto placement would have moved.
+        """
+        design = default_design()
+        design["box"]["x"] = 48.0
+        for said in ("M3", "M4"):
+            feature = default_feature_payload(
+                {"design": design, "kind": "text", "along": "x", "item": None}
+            )["feature"]
+            feature["options"]["text"] = said
+            design = apply_feature_payload(
+                {"design": design, "feature": feature, "index": None}
+            )["design"]
+        placed = design["layout"]["features"]
+        self.assertEqual([one["options"]["text"] for one in placed], ["M3", "M4"])
+        self.assertNotEqual(placed[0]["zone"], placed[1]["zone"])
+
+    def test_a_draft_auto_text_is_drawn_where_it_will_actually_go(self):
+        """The draft endpoint has to resolve too, and must return geometry.
+
+        Text is left out of ``build_features``'s solids by default because a
+        recessed inlay is subtracted rather than added; the draft preview has
+        to ask for it, or the shape being edited draws nothing at all.
+        """
+        design = default_design()
+        design["box"]["x"] = 48.0
+        design["layout"]["features"] = [_text_feature("M3", auto=True)]
+        design = preview_payload({"design": design})["design"]
+        draft = default_feature_payload(
+            {"design": design, "kind": "text", "along": "x", "item": None}
+        )["feature"]
+        draft["options"]["text"] = "M4"
+        result = draft_payload({"design": design, "feature": draft})
+        self.assertTrue(result["geometry"])
+        # Moved clear of the one already placed, not left on the placeholder.
+        self.assertNotEqual(result["feature"]["zone"], draft["zone"])
+        placed = design["layout"]["features"][0]["zone"]
+        self.assertNotEqual(result["feature"]["zone"], placed)
+
+    def test_preview_has_no_label_outline_without_a_label(self):
+        preview = preview_payload({"design": default_design()})
+        self.assertEqual(preview["label_outline"], [])
+        self.assertIsNone(preview["label_meta"])
+        self.assertEqual(preview["text_meta"], ())
+        self.assertNotIn("label_placement", preview["design"])
+
+    def test_preview_reports_a_text_part_that_will_not_fit_its_box(self):
+        design = default_design()
+        design["layout"]["features"] = [
+            _text_feature("MUCH TOO LONG FOR THIS", auto=False,
+                          zone=[-5.0, -2.0, 5.0, 2.0])
+        ]
+        preview = preview_payload({"design": design})
+        self.assertEqual(preview["invalid_feature_indexes"], (0,))
+        self.assertTrue(
+            any("will not fit" in message for message in preview["feature_errors"])
+        )
+
     def test_preview_includes_a_highlighted_draft_not_yet_placed(self):
         design = default_design()
         draft = default_feature_payload({"design": design, "kind": "divider"})["feature"]
@@ -374,6 +579,99 @@ class WebApplicationTests(unittest.TestCase):
         # the already-placed divider still renders normally despite the bad draft
         self.assertTrue(any(face["kind"] == "feature_divider" for face in preview["geometry"]))
         self.assertTrue(any(face["kind"] == "draft_invalid" for face in preview["geometry"]))
+
+    def test_catalog_exposes_slicer_info(self):
+        catalog = catalog_payload()
+        self.assertIn("slicer", catalog)
+        slicer = catalog["slicer"]
+        self.assertIn("available", slicer)
+        self.assertIn("path", slicer)
+        self.assertIn("name", slicer)
+        self.assertIsInstance(slicer["available"], bool)
+
+    def test_detect_bambu_studio_finds_configured_and_custom_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_exe = Path(temp_dir) / "bambu-studio.exe"
+            fake_exe.touch()
+
+            # Custom path explicitly supplied
+            found = wavefinity_web.detect_bambu_studio(str(fake_exe))
+            self.assertEqual(found, fake_exe.resolve())
+
+            # Preferences path
+            with patch.object(wavefinity_web, "load_preferences", return_value={"slicer_path": str(fake_exe)}):
+                found = wavefinity_web.detect_bambu_studio()
+                self.assertEqual(found, fake_exe.resolve())
+
+    def test_launch_slicer_validates_file_and_launches(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_exe = Path(temp_dir) / "bambu-studio.exe"
+            fake_exe.touch()
+            fake_3mf = Path(temp_dir) / "test.3mf"
+            fake_3mf.touch()
+
+            # Empty files list raises ValueError
+            with self.assertRaises(ValueError):
+                wavefinity_web.launch_slicer(fake_exe, [])
+
+            # Missing executable raises FileNotFoundError
+            missing_exe = Path(temp_dir) / "missing.exe"
+            with self.assertRaises(FileNotFoundError):
+                wavefinity_web.launch_slicer(missing_exe, [fake_3mf])
+
+            # Successful launch
+            with patch("subprocess.Popen") as mock_popen:
+                wavefinity_web.launch_slicer(fake_exe, [fake_3mf])
+                mock_popen.assert_called_once()
+                args = mock_popen.call_args[0][0]
+                self.assertEqual(args[0], str(fake_exe.resolve()))
+                self.assertEqual(args[1], str(fake_3mf.resolve()))
+
+    def test_print_payload_generates_and_opens_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_exe = Path(temp_dir) / "bambu-studio.exe"
+            fake_exe.touch()
+            fake_3mf = Path(temp_dir) / "Box.3mf"
+            fake_3mf.touch()
+
+            fake_gen_result = {
+                "result": {"box": {"output": str(fake_3mf)}},
+                "output": str(temp_dir),
+            }
+
+            with (
+                patch.object(wavefinity_web, "generate_payload", return_value=fake_gen_result),
+                patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
+                patch.object(wavefinity_web, "launch_slicer") as mock_launch,
+            ):
+                response = wavefinity_web.print_payload({
+                    "design": default_design(),
+                    "output": temp_dir,
+                })
+                self.assertEqual(response["output"], str(temp_dir))
+                self.assertEqual(response["files"], [str(fake_3mf.resolve())])
+                self.assertEqual(response["slicer"], str(fake_exe.resolve()))
+                mock_launch.assert_called_once_with(fake_exe, [fake_3mf.resolve()])
+
+    def test_print_payload_raises_when_no_slicer(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_3mf = Path(temp_dir) / "Box.3mf"
+            fake_3mf.touch()
+            fake_gen_result = {
+                "result": {"box": {"output": str(fake_3mf)}},
+                "output": str(temp_dir),
+            }
+
+            with (
+                patch.object(wavefinity_web, "generate_payload", return_value=fake_gen_result),
+                patch.object(wavefinity_web, "detect_bambu_studio", return_value=None),
+            ):
+                with self.assertRaises(ValueError) as ctx:
+                    wavefinity_web.print_payload({
+                        "design": default_design(),
+                        "output": temp_dir,
+                    })
+                self.assertIn("Bambu Studio was not found", str(ctx.exception))
 
 
 class WebServerTests(unittest.TestCase):
@@ -417,23 +715,30 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
         self.assertIn(b"Build your bin", body)
+        self.assertIn(b'id="advanced-settings"', body)
+        self.assertIn(b'id="advanced-build-settings"', body)
+        self.assertIn(b"Base thickness", body)
+        self.assertIn(b'id="base-thickness"', body)
         self.assertNotIn(b"Advanced bin settings", body)
         self.assertNotIn(b"Wall / floor", body)
         self.assertNotIn(b"Flat wall band", body)
         self.assertNotIn(b"Label your bin", body)
-        self.assertIn(b"Label position", body)
+        self.assertIn(b"Rim label", body)
+        self.assertIn(b"Interior parts", body)
         self.assertIn(b"Part Name (For file)", body)
         self.assertIn(b"Connect bins", body)
         self.assertIn(b"Generate STLs", body)
+        self.assertIn(b'id="print-bin"', body)
+        self.assertIn(b">Print</button>", body)
         self.assertIn(b"Different height bins?", body)
         self.assertIn(b"connector-bin-a-height", body)
         self.assertNotIn(b"connector-position", body)
         self.assertNotIn(b"connector-axis", body)
         self.assertIn(b"support-layout-dialog", body)
         self.assertNotIn(b"Center X", body)
-        self.assertLess(body.index(b"Label position"), body.index(b"Add curved scoop"))
-        self.assertLess(body.index(b"Add curved scoop"), body.index(b"Interior supports"))
-        self.assertLess(body.index(b"Interior supports"), body.index(b"Connect bins"))
+        self.assertLess(body.index(b"Rim label"), body.index(b"Add curved scoop"))
+        self.assertLess(body.index(b"Add curved scoop"), body.index(b"Interior parts"))
+        self.assertLess(body.index(b"Interior parts"), body.index(b"Connect bins"))
         self.assertLess(body.index(b"Connect bins"), body.index(b"Generate STLs"))
         self.assertLess(body.index(b"How should the interior print?"), body.index(b"Connect bins"))
         self.assertIn(b"Fused", body)
@@ -449,6 +754,18 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b"Camera directly overhead", body)
         self.assertIn(b"syncNestZone", body)
         self.assertIn(b'"rotate"', body)
+        # The part name is seeded once from the first real piece of lettering,
+        # and the bespoke floor-label drag is gone - text is an interior part.
+        self.assertIn(b"seedPartNameFromText", body)
+        self.assertIn(b"SIZE_LIKE_TEXT", body)
+        self.assertNotIn(b"drawMovableLabel", body)
+        self.assertNotIn(b"label_placement", body)
+        # Text is inlaid flush with the floor, so the painter sort has only the
+        # layer left to break the tie - and a holder arrives under the floor's
+        # own layer. Without this lift the lettering is painted over and
+        # vanishes, which no Python test can see.
+        self.assertIn(b"isLettering", body)
+        self.assertIn(b"face.layer = 2", body)
         status, health = self.post("/api/design/validate", {"design": default_design()})
         self.assertEqual(status, 200)
         self.assertEqual(health["design"]["version"], 1)
@@ -481,6 +798,29 @@ class WebServerTests(unittest.TestCase):
             urlopen(request, timeout=20)
         self.assertEqual(caught.exception.code, 403)
         caught.exception.close()
+
+    def test_print_endpoint_accessible_via_http(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_exe = Path(temp_dir) / "bambu-studio.exe"
+            fake_exe.touch()
+            fake_3mf = Path(temp_dir) / "Box.3mf"
+            fake_3mf.touch()
+
+            fake_gen = {
+                "result": {"box": {"output": str(fake_3mf)}},
+                "output": str(temp_dir),
+            }
+
+            with (
+                patch.object(wavefinity_web, "generate_payload", return_value=fake_gen),
+                patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
+                patch.object(wavefinity_web, "launch_slicer"),
+            ):
+                status, response = self.post("/api/print", {"design": default_design()})
+                self.assertEqual(status, 200)
+                self.assertIn("files", response)
+                self.assertIn("slicer", response)
+
 
 
 def _free_port() -> int:

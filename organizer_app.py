@@ -7,6 +7,7 @@ from dataclasses import replace
 import json
 import math
 from pathlib import Path
+import re
 import sys
 from typing import Iterable
 
@@ -16,7 +17,10 @@ from organizer_engine import (
     BASE_UNIT,
     BoxSpec,
     ConnectorSpec,
+    DEFAULT_BASE_THICKNESS,
     GRID_PITCH,
+    TEXT_CAP_HEIGHT_IDEAL,
+    TEXT_DEPTH,
     WAVE_AMPLITUDE,
     WAVE_LENGTH,
     WAVE_MATING_GAP,
@@ -24,6 +28,7 @@ from organizer_engine import (
     LOCKED_CONNECTOR_LENGTH,
     LOCKED_TOLERANCE,
     export_labelled_box,
+    export_text_body_3mf,
     export_mesh,
     connector_for_print,
     generate_sampler,
@@ -55,6 +60,7 @@ from organizer_inserts import (
     EDITOR_SNAP,
     FEATURE_BUILDERS,
     INSERT_CLEARANCE,
+    TEXT_KIND,
     _cradle_rib_thickness,
     LIBRARY,
     MIN_FEATURE_GAP,
@@ -62,11 +68,13 @@ from organizer_inserts import (
     Item,
     Layout,
     Zone,
+    apply_texts,
     build_features,
-    cartridge_zone,
+    build_texts,
     connector_keep_out,
     insert_footprint,
     insert_report,
+    is_text,
     layout_from_dict,
     layout_to_dict,
     layout_zone,
@@ -75,14 +83,20 @@ from organizer_inserts import (
     make_fused_box,
     fitted_nest_feature,
     make_insert_plate,
+    resolve_text_features,
     snapped_zone,
+    text_depth,
+    text_fitted,
+    text_is_raised,
+    text_of,
+    text_placed_outline,
 )
 
 
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_SAMPLE_BOXES = "2x6,4x6,6x6"   # 16x48, 32x48, 48x48 mm
 
-SUPPORT_CATALOG = {
+INTERIOR_PART_CATALOG = {
     "cradle": (
         "Cradle — tools laid down",
         "A half-circle notch that holds a screwdriver, marker or other tool on its side.",
@@ -107,8 +121,27 @@ SUPPORT_CATALOG = {
         "Divider — split the bin",
         "A straight wall that divides the usable floor into compartments.",
     ),
+    "slot": (
+        "Slot Rack — tilted tools",
+        "Angled slots for driver bits, cards, and small tools.",
+    ),
+    "steps": (
+        "Steps — tiered riser",
+        "Stepped shelves rising from front to back.",
+    ),
+    TEXT_KIND: (
+        "Text — a label on the floor",
+        "Lettering sunk flush into the floor as its own colour. Add as many as you like.",
+    ),
 }
-SUPPORT_ORDER = ("cradle", "nest", "bore", "post", "pocket", "divider")
+INTERIOR_PART_ORDER = (
+    "cradle", "nest", "bore", "post", "pocket", "divider", "slot", "steps",
+    TEXT_KIND,
+)
+# The rim label is the one piece of lettering that is not an interior part: it
+# lives on a shelf at the rear rim, not on the floor, so it has no zone to
+# drag. "bottom" now simply means there is no rim label - floor lettering is a
+# text interior part.
 LABEL_POSITIONS = ("bottom", "top")
 
 
@@ -129,30 +162,43 @@ def label_position(value: str) -> str:
 PART_KINDS = (
     ("divider", "Divider", "A straight wall that splits the floor into compartments.",
      {"qty": True, "size": False, "along": True, "item": False, "lean": True},
-     (("Width mm", "thickness", "1.6"), ("Height mm", "height", ""),
-      ("Angle °", "angle", "0"), ("Spacing mm", "spacing", ""))),
+     (("Width", "thickness", "1.6"), ("Height", "height", ""),
+      ("Angle °", "angle", "0"), ("Spacing", "spacing", ""))),
     ("post", "Post", "A tapered peg for tape rolls, spools, sockets and rings.",
      {"qty": True, "size": False, "along": True, "item": False, "lean": False},
-     (("Height mm", "height", "16"), ("Diameter mm", "diameter", "12"),
-      ("Taper mm", "taper", "0.4"), ("Gap mm", "spacing", "4"))),
+     (("Height", "height", "16"), ("Diameter", "diameter", "12"),
+      ("Taper", "taper", "0.4"), ("Gap", "spacing", "4"))),
     ("pocket", "Pocket", "A raised open tray for loose small parts.",
      {"qty": False, "size": True, "along": False, "item": False, "lean": False},
-     (("Height mm", "height", "12"), ("Wall mm", "wall", "1.6"),
-      ("Recess mm", "depth", ""))),
+     (("Height", "height", "12"), ("Wall", "wall", "1.6"),
+      ("Recess", "depth", ""))),
     ("bore", "Bore", "A block of snug upright holes for tools stood on end.",
      {"qty": True, "size": True, "along": True, "item": True, "lean": False},
-     (("Height mm", "height", ""), ("Hole depth mm", "depth", ""),
-      ("Wall mm", "wall", "1.6"))),
+     (("Height", "height", ""), ("Hole depth", "depth", ""),
+      ("Wall", "wall", "1.6"))),
     ("cradle", "Cradle", "A half-circle notch that holds a tool on its side.",
      {"qty": True, "size": False, "along": True, "item": True, "lean": False,
       "alternate": True},
-     (("Spacing mm", "spacing", "0"), ("Floor gap mm", "floor_gap", "2"),
+     (("Spacing", "spacing", "0"), ("Floor gap", "floor_gap", "2"),
       ("% from ends", "end_margin", "10"))),
     ("nest", "Photo Nest", "Upload a flat overhead photo on letter paper to create a scaled cavity for one part.",
      {"qty": False, "size": False, "along": False, "item": False, "lean": False,
       "alternate": False, "photo": True},
-     (("Fit clearance (mm)", "clearance", "0.6"),
-      ("Soften outline (mm)", "smoothing", "0"))),
+     (("Fit clearance", "clearance", "0.6"),
+      ("Soften outline", "smoothing", "0"))),
+    ("slot", "Slot Rack", "Angled slots for driver bits, cards, and small tools.",
+     {"qty": True, "size": True, "along": True, "item": False, "lean": False},
+     (("Height", "height", ""), ("Depth", "depth", ""),
+      ("Thickness", "thickness", "4"), ("Angle °", "angle", "20"),
+      ("Wall", "wall", "1.6"))),
+    ("steps", "Steps", "Stepped shelves rising from front to back.",
+     {"qty": True, "size": True, "along": True, "item": False, "lean": False},
+     (("Height", "height", ""), ("Lip", "lip", "1"))),
+    (TEXT_KIND, "Text",
+     "Lettering sunk flush into the floor as its own colour. Add as many as you like.",
+     {"qty": False, "size": True, "along": False, "item": False, "lean": False,
+      "text": True},
+     (("Letter height", "cap_height", ""), ("Depth", "depth", "0.4"))),
 )
 PART_KIND_INFO = {
     kind: (title, blurb, flags, fields)
@@ -199,6 +245,10 @@ def add_box_arguments(parser: argparse.ArgumentParser, prefix: str = "") -> None
     parser.add_argument(f"--{option}z", dest=f"{destination}z", type=float, default=40.0)
     parser.add_argument(
         f"--{option}wall", dest=f"{destination}wall", type=float, default=0.8
+    )
+    parser.add_argument(
+        f"--{option}base-thickness", dest=f"{destination}base_thickness",
+        type=float, default=DEFAULT_BASE_THICKNESS,
     )
     parser.add_argument(
         f"--{option}flat-inside", dest=f"{destination}flat_inside",
@@ -267,6 +317,7 @@ def build_parser() -> argparse.ArgumentParser:
     layout_parser.add_argument("--y", type=float)
     layout_parser.add_argument("--z", type=float)
     layout_parser.add_argument("--wall", type=float)
+    layout_parser.add_argument("--base-thickness", type=float)
     layout_parser.add_argument("--flat-inside", type=float)
     layout_parser.add_argument("--layout", type=Path, required=True)
     layout_parser.add_argument("--mode", choices=("fused", "separate", "cartridge"))
@@ -289,6 +340,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sampler_parser.add_argument("--z", type=float, default=40.0)
     sampler_parser.add_argument("--wall", type=float, default=0.8)
+    sampler_parser.add_argument(
+        "--base-thickness", type=float, default=DEFAULT_BASE_THICKNESS
+    )
     sampler_parser.add_argument("--flat-inside", type=float, default=0.0)
     sampler_parser.add_argument("--clips", type=int, default=5)
     sampler_parser.add_argument("--tolerance", type=float, default=LOCKED_TOLERANCE)
@@ -305,6 +359,7 @@ def _box_spec(args: argparse.Namespace, prefix: str = "") -> BoxSpec:
         z=getattr(args, f"{key}z"),
         wall=getattr(args, f"{key}wall"),
         flat_inside=getattr(args, f"{key}flat_inside"),
+        base_thickness=getattr(args, f"{key}base_thickness"),
     )
 
 
@@ -332,35 +387,49 @@ def clean_label(label: str) -> str:
     return " ".join(kept.split())
 
 
-def box_filename(
-    box: BoxSpec, label: str = "", suffix: str = ".3mf", part: str = ""
-) -> str:
-    """``Box 16 x 48 x 40 BOLTS Driver Rack.3mf``.
+def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+    """``Box 16 x 48 x 40 Driver Rack.3mf``.
 
-    The floor label and the part name are both optional and are simply
-    appended, in that order. The part name is decoration for the filename and
-    changes nothing about the geometry.
+    The part name is the only thing that names a file. Lettering on the part
+    is an interior part in its own right - there can be several, and which of
+    them would stand for the whole file is not a question with an answer - so
+    text no longer appears here. Seed the part name from the first label if
+    you want the old behaviour; the editor offers to do exactly that.
     """
     name = f"Box {box.x:g} x {box.y:g} x {box.z:g}"
-    for extra in (clean_label(label), clean_label(part)):
-        if extra:
-            name += f" {extra}"
+    tidy = clean_label(part)
+    if tidy:
+        name += f" {tidy}"
     return name + suffix
 
 
 def insert_filename(
     box: BoxSpec,
-    label: str = "",
     part: str = "",
     cartridge: bool = False,
     suffix: str = ".3mf",
 ) -> str:
     prefix = "Cartridge" if cartridge else "Insert"
     name = f"{prefix} {box.x:g} x {box.y:g}"
-    for extra in (clean_label(label), clean_label(part)):
-        if extra:
-            name += f" {extra}"
+    tidy = clean_label(part)
+    if tidy:
+        name += f" {tidy}"
     return name + suffix
+
+
+SIZE_LIKE = re.compile(r"^\s*\d+(\.\d+)?\s*(mm)?\s*$", re.IGNORECASE)
+
+
+def part_name_seed(text: str) -> str:
+    """The part name a piece of lettering should seed, or ``""``.
+
+    A label that is just a size - "8", "12mm" - names a compartment, not the
+    part, so it is never promoted to the filename.
+    """
+    tidy = str(text or "").strip()
+    if not tidy or SIZE_LIKE.match(tidy):
+        return ""
+    return tidy
 
 def _feature_height(box: BoxSpec, one: Feature, base_z: float) -> float:
     options = one.options
@@ -435,13 +504,18 @@ def _scoop_floor_bounds(
 
 def _removable_scoop(box: BoxSpec, mode: str):
     return translated(
-        make_scoop(box, _scoop_floor_bounds(box, mode)), (0.0, 0.0, -box.wall)
+        make_scoop(box, _scoop_floor_bounds(box, mode)),
+        (0.0, 0.0, -box.base_thickness),
     )
 
 
 def base_height(box: BoxSpec, mode: str) -> float:
     """The z a holder is built up from: the bin floor, or the insert's plate."""
-    return box.wall if mode == "fused" else box.wall + BASE_PLATE
+    return (
+        box.base_thickness
+        if mode == "fused"
+        else box.base_thickness + BASE_PLATE
+    )
 
 
 def is_photo_nest_design(features: Iterable[Feature]) -> bool:
@@ -470,7 +544,9 @@ def insert_plate_solid(box: BoxSpec, mode: str):
     """
     if mode == "fused":
         return None
-    return translated(make_insert_plate(box, mode), (0.0, 0.0, box.wall))
+    return translated(
+        make_insert_plate(box, mode), (0.0, 0.0, box.base_thickness)
+    )
 
 
 def validate_customization_clearance(
@@ -487,8 +563,8 @@ def validate_customization_clearance(
         ):
             if one.zone.overlaps(zone, MIN_FEATURE_GAP):
                 raise ValueError(
-                    f"interior support {index + 1} ({one.kind}) overlaps the {name}; "
-                    "move or resize the support in the 2D layout"
+                    f"interior part {index + 1} ({one.kind}) overlaps the {name}; "
+                    "move or resize the part in the 2D layout"
                 )
 
 
@@ -499,16 +575,26 @@ def preview_geometry(
 ) -> dict[str, object]:
     """Build camera-independent preview geometry once per design change.
 
-    ``draft`` is the support currently being edited, not yet added to the
-    layout - included in the same geometry, tagged ``draft_<kind>`` instead
-    of ``feature_<kind>``/``insert_<kind>`` so the browser can highlight it
-    in place, right where it will actually sit, instead of drawing it alone
-    on its own tiny canvas. It never affects ``feature_errors`` or
-    ``invalid_feature_indexes`` - those describe the real layout - and a
-    draft that fails to build still falls back to the same placeholder
-    prism a placed feature would, reported through ``draft_error`` instead.
+    ``draft`` is the interior part currently being edited, not yet added to
+    the layout - included in the same geometry, tagged ``draft_<kind>``
+    instead of ``feature_<kind>``/``insert_<kind>`` so the browser can
+    highlight it in place, right where it will actually sit, instead of
+    drawing it alone on its own tiny canvas. It never affects
+    ``feature_errors`` or ``invalid_feature_indexes`` - those describe the
+    real layout - and a draft that fails to build still falls back to the
+    same placeholder prism a placed feature would, reported through
+    ``draft_error`` instead.
     """
     features = tuple(features)
+    features = resolve_text_features(
+        box, features,
+        reserved=[
+            zone.polygon for _name, zone in _customization_zones(
+                box, clean_label(label), label_position(label_location), scoop, mode
+            )
+        ],
+        base_z=base_height(box, mode), mode=mode,
+    )
     # Bare-cutter preview for a Photo Nest, whether it is already placed or is
     # still the draft being positioned before it is applied.
     nest_design = is_photo_nest_design(features) or (
@@ -516,7 +602,7 @@ def preview_geometry(
         and draft.kind == "nest" and bool(draft.contour)
     )
     outer, cavity = preview_rings(box)
-    floor_z, rim_z = box.wall, box.z
+    floor_z, rim_z = box.base_thickness, box.z
     geometry: list[tuple[list[tuple[float, float, float]], str,
                          tuple[float, float, float], int]] = []
 
@@ -550,7 +636,10 @@ def preview_geometry(
         scoop_mesh = (
             make_scoop(box)
             if mode == "fused"
-            else translated(_removable_scoop(box, mode), (0.0, 0.0, box.wall))
+            else translated(
+                _removable_scoop(box, mode),
+                (0.0, 0.0, box.base_thickness),
+            )
         )
         geometry.extend(_mesh_preview_geometry(scoop_mesh, "scoop"))
 
@@ -574,7 +663,7 @@ def preview_geometry(
             invalid_feature_indexes.append(feature_index)
         try:
             for solid in build_features(
-                box, [one], base_z, layout_zone(box, mode)
+                box, [one], base_z, layout_zone(box, mode), include_text=True
             ):
                 geometry.extend(
                     _mesh_preview_geometry(solid, f"{part_kind}_{one.kind}")
@@ -598,7 +687,8 @@ def preview_geometry(
         if conflict is not None:
             draft_error = f"{draft.kind}: overlaps the {conflict}"
         try:
-            for solid in build_features(box, [draft], base_z, layout_zone(box, mode)):
+            for solid in build_features(box, [draft], base_z, layout_zone(box, mode),
+                                        include_text=True):
                 geometry.extend(_mesh_preview_geometry(solid, f"draft_{draft.kind}"))
         except Exception as error:
             draft_error = f"{draft.kind}: {error}"
@@ -609,31 +699,30 @@ def preview_geometry(
                 "draft_invalid",
             ))
 
+    # The rim label is the only lettering left that is not an interior part:
+    # it sits on a shelf at the rear rim and has no zone to drag, so the
+    # preview still draws it here. Floor text drew itself above, with every
+    # other interior part.
     fits, message = True, ""
-    if tidy:
+    label_outline_coords = []
+    label_meta = None
+    if tidy and location == "top":
         try:
-            if location == "top":
-                outline = top_label_outline(box, tidy)
-                label_z = box.z
-            else:
-                occupied = [one.zone.polygon for one in features]
-                if scoop:
-                    occupied.append(
-                        scoop_floor_zone(box, _scoop_floor_bounds(box, mode))
-                    )
-                if mode == "cartridge":
-                    occupied.append(Zone.whole(box).polygon.difference(cartridge_zone(box).polygon))
-                outline = placed_label_outline(box, tidy, occupied)
-                label_z = floor_z if mode == "fused" else box.wall + BASE_PLATE
+            outline = top_label_outline(box, tidy)
+            label_meta = {"location": "top"}
         except ValueError as error:
             fits, message, outline = False, str(error), None
         if outline is not None:
             pieces = list(outline.geoms) if outline.geom_type == "MultiPolygon" else [outline]
+            label_outline_coords = [
+                [[float(x), float(y)] for x, y in piece.exterior.coords]
+                for piece in pieces
+            ]
             for piece in pieces:
-                geometry.append(([(x, y, label_z) for x, y in piece.exterior.coords],
+                geometry.append(([(x, y, box.z) for x, y in piece.exterior.coords],
                                  "label", (0.0, 0.0, 1.0), 2))
                 for ring in piece.interiors:
-                    geometry.append(([(x, y, label_z) for x, y in ring.coords],
+                    geometry.append(([(x, y, box.z) for x, y in ring.coords],
                                      "label_hole", (0.0, 0.0, 1.0), 3))
 
     inside_x, inside_y = box.usable_inside
@@ -645,11 +734,34 @@ def preview_geometry(
         "invalid_feature_indexes": tuple(invalid_feature_indexes),
         "draft_error": draft_error,
         "customization_zones": tuple(reserved),
+        "label_outline": label_outline_coords,
+        "label_meta": label_meta,
+        # Where each text interior part ended up, so the browser can show the
+        # resolved letter height an auto or zone-fitted one landed on.
+        "text_meta": tuple(
+            {
+                "index": index,
+                "text": text_of(one),
+                "auto": bool(one.options.get("auto")),
+                "cap_height": round(text_fitted(one)[0], 3),
+            }
+            for index, one in enumerate(features)
+            if is_text(one) and _text_fits(one)
+        ),
+        "features": layout_to_dict(Layout(features, mode))["features"],
         "size_text": (
             f"{math.floor(inside_x):g} X {math.floor(inside_y):g} (Inside) - "
             f"{box.x:g} X {box.y:g} mm (Outside)"
         ),
     }
+
+
+def _text_fits(one: Feature) -> bool:
+    try:
+        text_fitted(one)
+        return True
+    except ValueError:
+        return False
 
 
 def generate_box_file(
@@ -690,15 +802,23 @@ def generate_box_file(
     return result
 
 
-def _label_obstacles(box: BoxSpec, layout: Layout, scoop: bool = False) -> list:
-    occupied = [one.zone.polygon for one in layout.features]
-    if scoop:
-        occupied.append(scoop_floor_zone(box, _scoop_floor_bounds(box, layout.mode)))
-    if layout.mode == "cartridge":
-        occupied.append(
-            Zone.whole(box).polygon.difference(cartridge_zone(box).polygon)
-        )
-    return occupied
+def text_report(box: BoxSpec, one: Feature, surface: float) -> dict[str, object]:
+    """What one text interior part came out as, for the export report."""
+    cap, _outline = text_fitted(one)
+    placed = text_placed_outline(one)
+    minx, miny, maxx, maxy = placed.bounds
+    centre_x, centre_y = one.zone.centre
+    return {
+        "text": text_of(one),
+        "cap_height_mm": round(cap, 3),
+        "quarter_turns": int(one.options.get("quarter_turns", 0) or 0) % 4,
+        "auto": bool(one.options.get("auto")),
+        "raised": text_is_raised(one),
+        "position_mm": [round(centre_x, 3), round(centre_y, 3)],
+        "footprint_mm": [round(maxx - minx, 3), round(maxy - miny, 3)],
+        "depth_mm": round(text_depth(one), 3),
+        "surface_z_mm": round(surface, 3),
+    }
 
 
 def generate_organizer_files(
@@ -710,7 +830,23 @@ def generate_organizer_files(
     label_location: str = "bottom",
     scoop: bool = False,
 ) -> dict[str, object]:
-    """Export an editor design as fused, fitted-removable, or cartridge parts."""
+    """Export an editor design as fused, fitted-removable, or cartridge parts.
+
+    ``label`` is the rim-ledge label only. Floor lettering rides in ``layout``
+    as ``text`` interior parts and is written as one extra 3MF object each, so
+    every piece can take its own filament.
+    """
+    layout = replace(
+        layout,
+        features=resolve_text_features(
+            box, layout.features,
+            reserved=[zone.polygon for _name, zone in
+                      _customization_zones(box, clean_label(label),
+                                           label_position(label_location),
+                                           scoop, layout.mode)],
+            base_z=base_height(box, layout.mode), mode=layout.mode,
+        ),
+    )
     layout.validate(box)
     nest_only = is_photo_nest_design(layout.features)
     if nest_only:
@@ -718,21 +854,36 @@ def generate_organizer_files(
         label, scoop = "", False
     tidy = clean_label(label)
     location = label_position(label_location)
+    if tidy and location != "top":
+        # Floor lettering is a text interior part now, so a label arriving here
+        # for the floor is a caller mistake - say so rather than dropping it.
+        raise ValueError(
+            f"'{label}' is a floor label, and floor lettering is a text "
+            "interior part now. Add one to the layout, or set the label "
+            "position to 'top' for the rim ledge"
+        )
     validate_customization_clearance(
         box, layout.features, tidy, location, scoop, layout.mode
     )
-    obstacles = _label_obstacles(box, layout, scoop)
-    label_info = (
-        top_label_report(box, tidy)
-        if tidy and location == "top"
-        else label_report(box, tidy, obstacles) if tidy else None
+    label_info = top_label_report(box, tidy) if tidy else None
+    text_surface = (
+        box.base_thickness if layout.mode == "fused" and not nest_only
+        else BASE_PLATE
+    )
+    text_limit = (
+        None if layout.mode == "fused" or nest_only
+        else insert_footprint(box, layout.mode)
+    )
+    texts = (
+        [] if nest_only
+        else build_texts(box, layout.features, text_surface, text_limit)
     )
 
     if nest_only:
         # A Photo Nest is one bare cutter wall standing on the bed: no wavy
         # bin, no floor, and nothing for a label or scoop to attach to.
         body = union(build_features(box, list(layout.features), 0.0))
-        output = output_dir / box_filename(box, tidy, part=part_name)
+        output = output_dir / box_filename(box, part_name)
         output_dir.mkdir(parents=True, exist_ok=True)
         export_mesh(body, output, "fused_organizer")
         result: dict[str, object] = {
@@ -744,37 +895,31 @@ def generate_organizer_files(
         body = make_fused_box(box, layout.features, make_box(box))
         if scoop:
             body = union([body, make_scoop(box)])
-        output = output_dir / box_filename(box, tidy, part=part_name)
+        output = output_dir / box_filename(box, part_name)
+        # The rim label's ledge is part of the body, so it goes on before the
+        # floor text is sunk into it.
+        inlays = list(texts)
         if tidy:
-            if location == "top":
-                pocketed, inlay = make_top_labelled_box(box, tidy, body)
-            else:
-                pocketed, inlay = make_labelled_box(
-                    box, tidy, occupied=obstacles, body=body
-                )
-            reported = pocketed
-        else:
-            reported = body
+            body, ledge_inlay = make_top_labelled_box(box, tidy, body)
+            inlays.append((tidy, ledge_inlay, False))
+        reported = apply_texts(body, texts)
         output_dir.mkdir(parents=True, exist_ok=True)
-        if tidy:
-            export_labelled_box(
-                pocketed,
-                inlay,
-                output,
-                box_filename(box, part=part_name, suffix=""),
-                tidy,
+        if inlays:
+            written = export_text_body_3mf(
+                reported, [(name, mesh) for name, mesh, _raised in inlays],
+                output, "fused_organizer",
             )
         else:
+            written = []
             export_mesh(body, output, "fused_organizer")
         result: dict[str, object] = {
             "mode": layout.mode,
             "box": _part_result(output, mesh_report("fused_organizer", reported)),
             "layout": insert_report("fused_organizer", layout.features, body),
+            "text_objects": written,
         }
     else:
-        box_output = output_dir / box_filename(
-            box, tidy if tidy and location == "top" else "", part=part_name
-        )
+        box_output = output_dir / box_filename(box, part_name)
         plain_box = make_box(box)
         insert = (
             make_cartridge_insert(box, layout.features)
@@ -784,45 +929,29 @@ def generate_organizer_files(
         if scoop:
             insert = union([insert, _removable_scoop(box, layout.mode)])
         insert_output = output_dir / insert_filename(
-            box, tidy if location == "bottom" else "", part_name,
-            layout.mode == "cartridge"
+            box, part_name, layout.mode == "cartridge"
         )
-        if tidy and location == "bottom":
-            pocketed, inlay = make_labelled_box(
-                box,
-                tidy,
-                occupied=obstacles,
-                body=insert,
-                top_z=BASE_PLATE,
-            )
-            reported_insert = pocketed
-        else:
-            reported_insert = insert
+        reported_insert = apply_texts(insert, texts)
         output_dir.mkdir(parents=True, exist_ok=True)
-        if tidy and location == "top":
+        # The rim label belongs to the box; the floor text belongs to the
+        # insert it is sunk into.
+        if tidy:
             pocketed_box, box_inlay = make_top_labelled_box(box, tidy, plain_box)
             export_labelled_box(
                 pocketed_box, box_inlay, box_output,
-                box_filename(box, part=part_name, suffix=""), tidy,
+                box_filename(box, part_name, suffix=""), tidy,
             )
             reported_box = pocketed_box
         else:
             export_mesh(plain_box, box_output, "wavy_box")
             reported_box = plain_box
-        if tidy and location == "bottom":
-            export_labelled_box(
-                pocketed,
-                inlay,
-                insert_output,
-                insert_filename(
-                    box,
-                    part=part_name,
-                    cartridge=layout.mode == "cartridge",
-                    suffix="",
-                ),
-                tidy,
+        if texts:
+            written = export_text_body_3mf(
+                reported_insert, [(name, mesh) for name, mesh, _raised in texts],
+                insert_output, "organizer_insert",
             )
         else:
+            written = []
             export_mesh(insert, insert_output, "organizer_insert")
         result = {
             "mode": layout.mode,
@@ -831,9 +960,13 @@ def generate_organizer_files(
                 insert_output, mesh_report("organizer_insert", reported_insert)
             ),
             "layout": insert_report("organizer_insert", layout.features, insert),
+            "text_objects": written,
         }
     if label_info is not None:
         result["label"] = label_info
+    result["texts"] = [
+        text_report(box, one, text_surface) for one in layout.features if is_text(one)
+    ]
     result["customizations"] = {"scoop": scoop, "label_position": location}
     return result
 
@@ -883,7 +1016,7 @@ def generate_kit_files(
     output_dir.mkdir(parents=True, exist_ok=True)
     return {
         "box": generate_box_file(
-            box, output_dir / box_filename(box, label), label, label_location, scoop
+            box, output_dir / box_filename(box), label, label_location, scoop
         ),
         "side": generate_side_file(
             box,
@@ -902,6 +1035,7 @@ def run_command(args: argparse.Namespace) -> dict[str, object]:
             sizes=parse_sizes(args.boxes),
             height=args.z,
             wall=args.wall,
+            base_thickness=args.base_thickness,
             flat_inside=args.flat_inside,
             connector=ConnectorSpec(tolerance=args.tolerance),
             clips=args.clips,
@@ -925,16 +1059,33 @@ def run_command(args: argparse.Namespace) -> dict[str, object]:
             saved_box.wall if args.wall is None else args.wall,
             saved_box.corner_fillet,
             saved_box.flat_inside if args.flat_inside is None else args.flat_inside,
+            saved_box.base_thickness
+            if args.base_thickness is None
+            else args.base_thickness,
         )
         if args.mode:
             layout = replace(layout, mode=args.mode)
+        label = saved_label if args.label is None else args.label
+        location = (saved_label_location if args.label_position is None
+                    else args.label_position)
+        part = saved_part if args.part_name is None else args.part_name
+        if clean_label(label) and label_position(location) == "bottom":
+            # Sugar: a floor label from the command line is a text interior
+            # part that finds its own spot, exactly as adding one in the
+            # editor with "place it for me" left on would.
+            layout = replace(
+                layout,
+                features=layout.features + (auto_text_feature(box, label, layout.mode),),
+            )
+            part = part or part_name_seed(label)
+            label = ""
         return generate_organizer_files(
             box,
             layout,
             args.output_dir,
-            saved_label if args.label is None else args.label,
-            saved_part if args.part_name is None else args.part_name,
-            saved_label_location if args.label_position is None else args.label_position,
+            label,
+            part,
+            location,
             saved_scoop if args.scoop is None else args.scoop,
         )
     if args.command == "side":
@@ -1025,6 +1176,21 @@ def default_feature(
         across = min(16.0, across_limit)
         width, depth = ((run, across) if along == "x" else (across, run))
         feature_options = {"diameter": diameter, "height": 16.0, "taper": 0.4}
+    elif kind == "slot":
+        run = min(32.0, bounds.width if along == "x" else bounds.depth)
+        across = min(24.0, bounds.depth if along == "x" else bounds.width)
+        width, depth = ((run, across) if along == "x" else (across, run))
+    elif kind == "steps":
+        run = min(32.0, bounds.width if along == "x" else bounds.depth)
+        across = min(32.0, bounds.depth if along == "x" else bounds.width)
+        width, depth = ((run, across) if along == "x" else (across, run))
+    elif kind == TEXT_KIND:
+        # Wide and short, the shape lettering actually wants, and starting
+        # life placed for itself rather than dumped in the middle.
+        width = min(max(16.0, bounds.width * 0.6), bounds.width)
+        depth = min(max(8.0, TEXT_CAP_HEIGHT_IDEAL + 2.0), bounds.depth)
+        feature_options = {"text": "LABEL", "auto": True, "quarter_turns": 0,
+                           "raised": False, "depth": TEXT_DEPTH}
     else:
         width, depth = min(16.0, bounds.width), min(16.0, bounds.depth)
     raw = Zone(-width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0)
@@ -1034,17 +1200,30 @@ def default_feature(
         item=item,
         # A cradle, like a post, starts as a single holder - Quantity "auto"
         # then fills the zone with lanes only when the user asks for it.
-        count=1 if kind in {"post", "cradle"} else None,
+        count=3 if kind == "steps" else (1 if kind in {"post", "cradle"} else None),
         along=along,
         options=feature_options,
         full_span=(kind == "divider"),
     )
 
 
+def auto_text_feature(box: BoxSpec, label: str, mode: str = "fused") -> Feature:
+    """A text interior part that places itself, from a plain string.
+
+    Used by the ``--label`` command-line sugar and anywhere else a piece of
+    lettering arrives without a zone of its own. ``resolve_text_features``
+    replaces the provisional zone with the spot it actually finds.
+    """
+    one = default_feature(box, TEXT_KIND, mode=mode)
+    options = dict(one.options)
+    options["text"] = str(label).strip()
+    return replace(one, options=options)
+
+
 def convert_layout_mode(
     box: BoxSpec, features: Iterable[Feature], mode: str
 ) -> Layout:
-    """Snap every support onto a new mode's grid and validate the result."""
+    """Snap every interior part onto a new mode's grid and validate the result."""
     converted_items = []
     for one in features:
         if one.kind == "nest" and one.contour:
@@ -1076,6 +1255,13 @@ def design_to_dict(
     label_location: str = "bottom",
     scoop: bool = False,
 ) -> dict:
+    """The saved design.
+
+    ``label`` is the rim-ledge label and means something only when
+    ``label_position`` is ``"top"``. Floor lettering lives in the layout as
+    ``text`` interior parts - one per label, any number of them - so there is
+    nothing for it here.
+    """
     return {
         "version": 1,
         "box": {
@@ -1083,6 +1269,7 @@ def design_to_dict(
             "y": box.y,
             "z": box.z,
             "wall": box.wall,
+            "base_thickness": box.base_thickness,
             "corner_fillet": box.corner_fillet,
             "flat_inside": box.flat_inside,
         },
@@ -1115,18 +1302,32 @@ def design_from_dict(
         float(raw.get("wall", 0.8)),
         float(raw.get("corner_fillet", 0.6)),
         flat_inside=float(raw.get("flat_inside", 0.0)),
+        base_thickness=float(raw.get("base_thickness", raw.get("wall", 0.8))),
     )
     layout = layout_from_dict(data.get("layout", {}))
+    label = str(data.get("label", ""))
+    location = label_position(data.get("label_position", "bottom"))
+    scoop = bool(data.get("scoop", False))
     if validate_layout:
+        # An auto text's stored zone is a cache of where it last landed, not
+        # the authority - the resolver is. Re-run it before validating, so a
+        # design saved with a holder since moved onto that spot still opens:
+        # the lettering simply finds somewhere else, exactly as it would have
+        # on screen.
+        layout = replace(
+            layout,
+            features=resolve_text_features(
+                box, layout.features,
+                reserved=[
+                    zone.polygon for _name, zone in _customization_zones(
+                        box, clean_label(label), location, scoop, layout.mode
+                    )
+                ],
+                base_z=base_height(box, layout.mode), mode=layout.mode,
+            ),
+        )
         layout.validate(box)
-    return (
-        box,
-        layout,
-        str(data.get("label", "")),
-        str(data.get("part_name", "")),
-        label_position(data.get("label_position", "bottom")),
-        bool(data.get("scoop", False)),
-    )
+    return (box, layout, label, str(data.get("part_name", "")), location, scoop)
 
 
 def main(argv: list[str] | None = None) -> int:
