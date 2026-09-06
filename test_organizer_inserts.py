@@ -1295,6 +1295,42 @@ class DividerBottomSlopeTests(unittest.TestCase):
             self.assertGreaterEqual(solid.bounds[0][1], zone.y0 - 1e-6)
             self.assertLessEqual(solid.bounds[1][1], zone.y1 + 1e-6)
 
+    def test_full_span_crossbars_hang_from_the_walls_not_the_floor(self) -> None:
+        # A full-span divider's crossbars have the bin's own side walls to hang
+        # from, so they should sit at the tool line, not run down to the floor -
+        # except the ones so near the low end of the slope that a floating bar's
+        # taper could not clear the floor anyway.
+        zone = Zone(-30.0, -30.0, 30.0, 30.0)
+        angle = 10.0
+        _walls, bars = self._walls_and_bottoms(
+            zone, count=1, along="x", full_span=True,
+            options={"bottom_angle": angle, "minimal_bottom": True,
+                     "bottom_supports": 6})
+        self.assertTrue(bars)
+        floor = self.box.base_thickness
+        run, rise = 60.0, 60.0 * math.tan(math.radians(angle))
+        by_x = sorted(bars, key=lambda b: b.vertices[:, 0].mean())
+        for bar in bars:
+            self.assertTrue(bar.is_watertight)
+            centre = bar.vertices[:, 0].mean()
+            plane_z = floor + (centre - zone.x0) / run * rise
+            self.assertAlmostEqual(bar.vertices[:, 2].max(), plane_z, delta=1.0)
+        # up the slope the bars float: the lowest point of each is only a short
+        # taper below the tool line it carries, nowhere near the floor
+        for bar in by_x[len(by_x) // 2:]:
+            centre = bar.vertices[:, 0].mean()
+            plane_z = floor + (centre - zone.x0) / run * rise
+            self.assertGreater(bar.vertices[:, 2].min(), plane_z - 4.0)
+            self.assertGreater(bar.vertices[:, 2].min(), floor + 3.0)
+        # the lowest, where the tool line is nearly on the floor, still stands
+        # on it (the old stem fallback)
+        self.assertLess(by_x[0].vertices[:, 2].min(), floor + 1.5)
+        # every downward face clear of the floor prints within 45 degrees
+        for bar in bars:
+            for normal, centroid in zip(bar.face_normals, bar.triangles_center):
+                if normal[2] < -1e-6 and centroid[2] > floor + 0.5:
+                    self.assertGreaterEqual(normal[2], -math.sqrt(0.5) - 1e-6)
+
 
 class FullSpanLeaningDividerTests(unittest.TestCase):
     """A leaning divider that also hugs the box's true wavy wall."""

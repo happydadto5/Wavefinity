@@ -1194,7 +1194,7 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
             _option_flag(options.get("reverse_bottom")),
             _option_flag(options.get("alternate_bottom")),
             _option_flag(options.get("minimal_bottom")),
-            supports,
+            supports, spec_feature.full_span,
         ))
     return solids
 
@@ -1257,7 +1257,7 @@ def _extrude_bottom(
 def _divider_support_bottoms(
     box: BoxSpec, zone: Zone, along: str, centres: list[float], height: float,
     base_z: float, angle: float, reverse: bool, alternate: bool,
-    minimal: bool, supports: int,
+    minimal: bool, supports: int, full_span: bool = False,
 ) -> list[trimesh.Trimesh]:
     """Sloped support under each tool slot so a tool rests tilted, not flat.
 
@@ -1267,12 +1267,18 @@ def _divider_support_bottoms(
     flips that whole pattern once more (kept for older saved designs that set
     it as a separate flag); ``alternate`` flips every second slot, ordered
     across the divider zone. A full bottom is one continuous wedge per slot;
-    ``minimal`` replaces it with ``supports`` evenly spaced crossbars that
-    touch the same sloped plane but print without support - vertical stems
-    with 45-degree gussets where they meet the floor - and use materially less
-    plastic. The normal bin or insert floor is untouched; this is only the
-    material above it. Solids sink ``BOTTOM_EMBED`` into the floor for a clean
-    union.
+    ``minimal`` replaces it with ``supports`` evenly spaced crossbars and uses
+    materially less plastic.
+
+    A crossbar is a short bar hugging the underside of the tool line, welded
+    into the wall on each side of the slot and tapered at 45 degrees so it
+    prints with no support - it does *not* run down to the floor, it hangs off
+    the walls at roughly the height it carries the tool. Only where a slot has
+    no wall to hang from - an open end of a divider set into bare floor, never
+    a ``full_span`` divider, which has the bin's own side walls - does it fall
+    back to a floor-standing stem with 45-degree gusset feet. The normal bin
+    or insert floor is untouched; this is only the material above it. Solids
+    sink ``BOTTOM_EMBED`` into the floor (or into a wall) for a clean union.
     """
     if not math.isfinite(angle) or abs(angle) > BOTTOM_SLOPE_MAX:
         raise ValueError(
@@ -1297,6 +1303,9 @@ def _divider_support_bottoms(
             "bin height"
         )
     half_t = BOTTOM_CROSSBAR_THICKNESS / 2.0
+    shoulder_drop = 0.8            # short vertical side before the 45-degree taper
+    edge_lo, edge_hi = (zone.y0, zone.y1) if along == "x" else (zone.x0, zone.x1)
+    wall_line = box.half_y if along == "x" else box.half_x
     solids: list[trimesh.Trimesh] = []
     for index, (c_lo, c_hi) in enumerate(_bottom_slot_bounds(zone, along, centres)):
         flip = reverse ^ (alternate and index % 2 == 1)
@@ -1309,25 +1318,61 @@ def _divider_support_bottoms(
                        (r1, base_z), (r0, base_z + rise)]
             solids.append(_extrude_bottom(Polygon(pts), along, c_lo, c_hi))
             continue
+        # Which side of this slot has a wall to hang a crossbar from. A
+        # full-span divider always does on both sides (its own wall, and the
+        # bin's); a bare-floor divider's outermost slot has an open end.
+        lo_is_edge = math.isclose(c_lo, edge_lo, abs_tol=1e-6)
+        hi_is_edge = math.isclose(c_hi, edge_hi, abs_tol=1e-6)
+        floating = full_span or (not lo_is_edge and not hi_is_edge)
+        # Weld a floating crossbar into the bin's side wall where the slot ends
+        # at the zone edge instead of at a divider wall.
+        span_lo = -wall_line if (lo_is_edge and full_span) else c_lo
+        span_hi = wall_line if (hi_is_edge and full_span) else c_hi
         for step in range(supports):
             centre = r0 + (step + 1) * run / (supports + 1)
             z_left = _bottom_plane_z(centre - half_t, r0, r1, rise, base_z, flip)
             z_right = _bottom_plane_z(centre + half_t, r0, r1, rise, base_z, flip)
-            top_left = max(z_left, base_z + 0.2)
-            top_right = max(z_right, base_z + 0.2)
-            # 45-degree gusset feet, never taller than the stem they brace.
-            chamfer = max(0.0, min(BOTTOM_CROSSBAR_CHAMFER,
-                                   top_left - base_z - 0.1,
-                                   top_right - base_z - 0.1))
+            low = min(z_left, z_right)
+            # A floating bar needs enough headroom under the tool line for its
+            # full 45-degree taper to clear the floor; the crossbars nearest
+            # the low end of the slope don't have it, so those stand on the
+            # floor like before - which is right, the tool line is nearly on
+            # the floor there anyway.
+            room = low - shoulder_drop - half_t >= base_z - BOTTOM_EMBED - 1e-9
+            if not (floating and room):
+                top_left = max(z_left, base_z + 0.2)
+                top_right = max(z_right, base_z + 0.2)
+                # 45-degree gusset feet, never taller than the stem they brace.
+                chamfer = max(0.0, min(BOTTOM_CROSSBAR_CHAMFER,
+                                       top_left - base_z - 0.1,
+                                       top_right - base_z - 0.1))
+                pts = [
+                    (centre - half_t - chamfer, base_z - BOTTOM_EMBED),
+                    (centre + half_t + chamfer, base_z - BOTTOM_EMBED),
+                    (centre + half_t, base_z + chamfer),
+                    (centre + half_t, top_right),
+                    (centre - half_t, top_left),
+                    (centre - half_t, base_z + chamfer),
+                ]
+                solids.append(_extrude_bottom(Polygon(pts), along, c_lo, c_hi))
+                continue
+            # A short bar under the tool line: top rides the slope, the sides
+            # drop a little, then taper in at 45 degrees to an apex so no face
+            # overhangs past 45 degrees. The headroom check above guarantees
+            # the apex clears the floor.
+            z_shoulder = low - shoulder_drop
+            z_bot = z_shoulder - half_t
             pts = [
-                (centre - half_t - chamfer, base_z - BOTTOM_EMBED),
-                (centre + half_t + chamfer, base_z - BOTTOM_EMBED),
-                (centre + half_t, base_z + chamfer),
-                (centre + half_t, top_right),
-                (centre - half_t, top_left),
-                (centre - half_t, base_z + chamfer),
+                (centre - half_t, z_left),
+                (centre + half_t, z_right),
+                (centre + half_t, z_shoulder),
+                (centre, z_bot),
+                (centre - half_t, z_shoulder),
             ]
-            solids.append(_extrude_bottom(Polygon(pts), along, c_lo, c_hi))
+            profile = Polygon(pts)
+            if not profile.is_valid or profile.area < 1e-6:
+                continue
+            solids.append(_extrude_bottom(profile, along, span_lo, span_hi))
     return solids
 
 
@@ -1929,10 +1974,10 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
         return one.zone
     zone = one.zone
     if one.full_span:
-        if one.along == "x":
-            zone = Zone(-box.half_x, zone.y0, box.half_x, zone.y1)
-        else:
-            zone = Zone(zone.x0, -box.half_y, zone.x1, box.half_y)
+        # Reaches the box's true walls on the run axis always, and on the
+        # cross axis too once minimal crossbars weld into the bin's side
+        # walls (see _divider_support_bottoms).
+        zone = Zone(-box.half_x, -box.half_y, box.half_x, box.half_y)
     options = resolved_options(box, one, base_z)
     thickness = options.get("thickness", 0.0)
     angle = options.get("angle", 0.0)

@@ -849,7 +849,7 @@ function renderDraftFields() {
       html += bottomCheck("alternate_bottom", "Alternate slopes",
         "Reverses every second tool slot.", opt.alternate_bottom === true);
       html += bottomCheck("minimal_bottom", "Use support crossbars",
-        "Uses printable support bars instead of a solid slope.", opt.minimal_bottom === true);
+        "A few thin bars hung off the walls at the tool line instead of a solid slope - less plastic, and each bar is tapered so it prints without support.", opt.minimal_bottom === true);
       if (opt.minimal_bottom === true) {
         const explicitBars = Object.prototype.hasOwnProperty.call(opt, "bottom_supports");
         const bars = explicitBars

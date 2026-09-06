@@ -20,6 +20,14 @@
   rebuild, so the walls re-space evenly after the bin is resized or a wall
   lean is added (a lean needs more room between wall centres). Matches how a
   divider is first laid out.
+- **Use support crossbars** reworked. A crossbar is now a short bar that
+  hangs off the walls at the tool line and tapers in at 45 degrees to a
+  ridge, so it prints unsupported and uses far less plastic - it no longer
+  runs all the way down to the floor. A full-span divider welds each bar
+  into the bin's own side walls as well as its dividers. Only the crossbars
+  nearest the low end of the slope, where there is no room for the taper to
+  clear the floor, still stand on it (with the old 45-degree gusset feet) -
+  which is correct there, the tool line is nearly on the floor anyway.
 
 ## 2026-09-06 — Leaning-divider wedge reworked
 
