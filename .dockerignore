@@ -1,0 +1,12 @@
+.git
+.venv
+__pycache__
+*.pyc
+.claude
+generated/
+test results/
+test_*.py
+*.bat
+*.vbs
+wavefinity_prefs.json
+wavefinity.pid

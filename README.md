@@ -1,3 +1,14 @@
+---
+title: Wavefinity
+emoji: 🌊
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+---
+
 # Wavefinity — wavy drawer organizer generator
 
 Parametric Python generator for a 3D-printable modular drawer organizer with
