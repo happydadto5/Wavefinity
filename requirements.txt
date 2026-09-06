@@ -1,0 +1,9 @@
+manifold3d==3.5.2
+mapbox_earcut==2.0.0
+matplotlib==3.11.1
+networkx==3.6.1
+numpy==2.5.2
+opencv-python-headless==5.0.0.93
+pillow==12.3.0
+shapely==2.1.2
+trimesh==5.0.0
