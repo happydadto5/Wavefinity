@@ -8,9 +8,9 @@
 </head>
 <body>
   <header class="app-header">
-    <div>
-      <p class="eyebrow">PARAMETRIC ORGANIZER</p>
-      <h1>Wavefinity</h1>
+    <div class="brand-group">
+      <h1>Wavefinity <small class="brand-author">by happydadto5</small></h1>
+      <button id="about-btn" class="starburst-btn" type="button" title="Learn about Wavefinity">About</button>
     </div>
     <div class="header-actions">
       <button id="connection" class="connection" title="Reload the app and Python engine">Starting…</button>
@@ -26,15 +26,15 @@
     <aside class="controls" aria-label="Bin controls">
       <section class="control-section open" data-section="build">
         <div class="section-heading-wrap">
-          <button class="section-heading" aria-expanded="true">
-            <span>Build your bin <small class="unit-note">(8 mm grid)</small></span><span class="chevron">⌄</span>
-          </button>
+          <div class="section-heading no-toggle">
+            <span>Build your bin</span>
+          </div>
           <label class="advanced-toggle"><input id="advanced-settings" type="checkbox">Advanced</label>
         </div>
         <div class="section-body">
           <div class="field-grid three">
-            <label>Width <span class="unit">mm</span><span class="dimension-value"><input id="x-size" type="number" min="8" step="8"><span id="x-inside" class="inside-dim"></span></span></label>
-            <label>Length <span class="unit">mm</span><span class="dimension-value"><input id="y-size" type="number" min="8" step="8"><span id="y-inside" class="inside-dim"></span></span></label>
+            <label>Width <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
+            <label>Length <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
             <label>Height <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
           </div>
           <div id="advanced-build-settings" class="field-grid three advanced-build-settings" hidden>
@@ -107,10 +107,11 @@
       </section>
 
       <section class="output-panel">
-        <label>Save to folder<div class="input-with-button">
+        <div class="save-location-row">
+          <label for="output-folder">Save Location:</label>
           <input id="output-folder" type="text">
           <button type="button" class="button secondary" id="output-folder-picker">Browse</button>
-        </div></label>
+        </div>
         <button id="print-bin" class="button primary wide print-button">Print to Bambu Studio</button>
         <button id="generate-bin" class="button secondary wide">Generate Bin</button>
         <div class="button-row equal">
@@ -128,7 +129,6 @@
     <section class="workspace" aria-label="Design preview">
       <div class="workspace-toolbar">
         <div class="workspace-tools">
-          <button id="sidebar-toggle" class="icon-button" type="button" aria-expanded="true" title="Hide controls">☰ <span>Hide controls</span></button>
           <div class="view-tabs" role="tablist">
             <button class="view-tab active" data-view="3d" role="tab" aria-selected="true">3D preview</button>
             <button class="view-tab" data-view="2d" role="tab" aria-selected="false">2D layout</button>
@@ -139,23 +139,29 @@
       <div class="canvas-wrap active" data-canvas="3d">
         <canvas id="preview-3d" role="img" aria-label="3D design preview" aria-describedby="preview-help"></canvas>
         <div class="camera-controls" aria-label="3D view controls">
-          <div class="camera-views">
-            <div class="camera-views-row">
-              <button type="button" data-camera-view="top">Top</button>
-              <button type="button" data-camera-view="front">Front</button>
-              <button type="button" data-camera-view="side">Side</button>
-              <button type="button" data-camera-view="reset">Reset</button>
+          <div class="camera-controls-row">
+            <div class="camera-views">
+              <div class="camera-views-row">
+                <button type="button" data-camera-view="top">Top</button>
+                <button type="button" data-camera-view="front">Front</button>
+                <button type="button" data-camera-view="side">Side</button>
+                <button type="button" data-camera-view="reset">Reset</button>
+              </div>
             </div>
-            <div class="camera-views-row">
-              <button type="button" data-preview-mode="standard" class="active">Standard</button>
-              <button type="button" data-preview-mode="xray">Xray</button>
-              <button type="button" data-preview-mode="bin">Bin</button>
-              <button type="button" data-preview-mode="interior">Interior</button>
+            <div class="zoom-controls">
+              <button type="button" data-camera-zoom="out" aria-label="Zoom out">−</button>
+              <button type="button" data-camera-zoom="in" aria-label="Zoom in">+</button>
             </div>
           </div>
-          <div class="zoom-controls">
-            <button type="button" data-camera-zoom="out" aria-label="Zoom out">−</button>
-            <button type="button" data-camera-zoom="in" aria-label="Zoom in">+</button>
+          <div class="camera-controls-row">
+            <div class="camera-options">
+              <div class="camera-views-row">
+                <button type="button" data-preview-mode="standard" class="active">Standard</button>
+                <button type="button" data-preview-mode="xray">Xray</button>
+                <button type="button" data-preview-mode="bin">Bin</button>
+                <button type="button" data-preview-mode="interior">Interior</button>
+              </div>
+            </div>
           </div>
         </div>
         <div id="dimensions" class="dimension-guides" aria-label="Bin dimensions">
@@ -183,6 +189,18 @@
     <div class="button-row">
       <button id="support-layout-dialog-close" type="button" class="button secondary">Stay in 3D</button>
       <button id="support-layout-dialog-open" type="button" class="button primary">Open 2D layout</button>
+    </div>
+  </dialog>
+  <dialog id="about-dialog" class="about-dialog" aria-labelledby="about-dialog-title">
+    <div class="about-dialog-header">
+      <h2 id="about-dialog-title">About Wavefinity</h2>
+      <button id="about-dialog-close-btn" class="button secondary" type="button" aria-label="Close dialog">✕</button>
+    </div>
+    <div id="about-dialog-content" class="about-dialog-content">
+      Loading brochure…
+    </div>
+    <div class="button-row" style="margin-top: 16px;">
+      <button id="about-dialog-close" type="button" class="button primary">Close</button>
     </div>
   </dialog>
   <div id="update-banner" class="update-banner" role="status" hidden>

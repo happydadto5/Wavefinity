@@ -119,8 +119,15 @@ async function restoreHistory(redo = false) {
 }
 
 function number(value, fallback = 0) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  if (Number.isFinite(parsed)) return parsed;
+  const match = String(value ?? "").match(/^\s*([+-]?\d+(?:\.\d+)?)/);
+  if (match) {
+    const num = Number(match[1]);
+    if (Number.isFinite(num)) return num;
+  }
+  return fallback;
 }
 
 function fmt(value) {
@@ -261,8 +268,16 @@ function renderCatalog() {
 
 function syncForm() {
   const { box, layout } = state.design;
-  $("#x-size").value = fmt(box.x);
-  $("#y-size").value = fmt(box.y);
+  if (document.activeElement === $("#x-size")) {
+    $("#x-size").value = fmt(box.x);
+  } else {
+    formatDimField("x");
+  }
+  if (document.activeElement === $("#y-size")) {
+    $("#y-size").value = fmt(box.y);
+  } else {
+    formatDimField("y");
+  }
   $("#z").value = fmt(box.z);
   $("#base-thickness").value = fmt(box.base_thickness ?? 0.6);
   $("#label-text").value = state.design.label || "";
@@ -392,13 +407,36 @@ function binInsideExtent(box) {
   return [Math.max(1, number(box.x) - trim), Math.max(1, number(box.y) - trim)];
 }
 
+function getInsideDimension(axis, val) {
+  const key = axis === "x" ? "inside_x" : "inside_y";
+  if (state.preview?.dimensions?.[key] != null && state.design?.box?.[axis] === val) {
+    return state.preview.dimensions[key];
+  }
+  const box = state.design?.box || { x: val, y: val, wall: 0.8 };
+  const tempBox = { ...box, [axis]: val };
+  const extents = binInsideExtent(tempBox);
+  return Math.floor(axis === "x" ? extents[0] : extents[1]);
+}
+
+function formatDimField(axis) {
+  const selector = axis === "x" ? "#x-size" : "#y-size";
+  const input = $(selector);
+  if (!input || document.activeElement === input) return;
+  const val = state.design?.box?.[axis];
+  if (val == null) return;
+  const inside = getInsideDimension(axis, val);
+  input.value = `${fmt(val)}mm (${inside} inside)`;
+}
+
 function setSidebarCollapsed(collapsed) {
   const shell = $("#app-shell");
   const button = $("#sidebar-toggle");
   shell.classList.toggle("sidebar-collapsed", collapsed);
-  button.setAttribute("aria-expanded", String(!collapsed));
-  button.title = collapsed ? "Show controls" : "Hide controls";
-  $("span", button).textContent = collapsed ? "Show controls" : "Hide controls";
+  if (button) {
+    button.setAttribute("aria-expanded", String(!collapsed));
+    button.title = collapsed ? "Show controls" : "Hide controls";
+    $("span", button).textContent = collapsed ? "Show controls" : "Hide controls";
+  }
   try { localStorage.setItem("wavefinity-sidebar-collapsed", collapsed ? "1" : "0"); } catch (_error) {}
   requestAnimationFrame(() => { renderPreview3D(); renderLayout2D(); });
 }
@@ -414,7 +452,7 @@ function wireSidebar() {
   } catch (_error) {
     setSidebarCollapsed(false);
   }
-  $("#sidebar-toggle").addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
+  $("#sidebar-toggle")?.addEventListener("click", () => setSidebarCollapsed(!shell.classList.contains("sidebar-collapsed")));
   resizer.addEventListener("pointerdown", event => {
     drag = { startX: event.clientX, width: $(".controls").getBoundingClientRect().width };
     resizer.classList.add("dragging");
@@ -467,7 +505,7 @@ function wireCameraControls() {
 function wireControls() {
   wireSidebar();
   wireCameraControls();
-  $$(".section-heading").forEach(button => button.addEventListener("click", () => {
+  $$("button.section-heading").forEach(button => button.addEventListener("click", () => {
     const section = button.closest(".control-section");
     section.classList.toggle("open");
     button.setAttribute("aria-expanded", String(section.classList.contains("open")));
@@ -484,20 +522,42 @@ function wireControls() {
       changedDesign();
     }));
   ["#x-size", "#y-size"].forEach(selector => {
-    $(selector).addEventListener("focus", () => {
-      const inside = $(selector === "#x-size" ? "#x-inside" : "#y-inside");
-      if (inside) inside.hidden = true;
+    const axis = selector === "#x-size" ? "x" : "y";
+    const input = $(selector);
+    input.addEventListener("focus", () => {
+      input.value = fmt(state.design.box[axis]);
+      input.select();
     });
-    $(selector).addEventListener("blur", () => {
-      const input = $(selector);
+    input.addEventListener("blur", () => {
       const unit = state.catalog.base_unit;
-      const snapped = Math.max(unit, Math.round(number(input.value, unit) / unit) * unit);
-      if (String(snapped) !== input.value) {
-        input.value = String(snapped);
+      const rawVal = number(input.value, state.design.box[axis]);
+      const snapped = Math.max(unit, Math.round(rawVal / unit) * unit);
+      const prev = state.design.box[axis];
+      state.design.box[axis] = snapped;
+      formatDimField(axis);
+      if (snapped !== prev) {
         flashField(input);
+        state.canGenerate = false;
+        updateGenerateAvailability();
+        changedDesign();
       }
-      const inside = $(selector === "#x-size" ? "#x-inside" : "#y-inside");
-      if (inside) inside.hidden = false;
+    });
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        input.blur();
+      } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        const unit = state.catalog.base_unit;
+        const current = number(input.value, state.design.box[axis]);
+        const delta = event.key === "ArrowUp" ? unit : -unit;
+        const next = Math.max(unit, Math.round((current + delta) / unit) * unit);
+        input.value = String(next);
+        input.select();
+        state.design.box[axis] = next;
+        state.canGenerate = false;
+        updateGenerateAvailability();
+        changedDesign();
+      }
     });
   });
   $("#scoop").addEventListener("change", () => {
@@ -1651,10 +1711,8 @@ async function refreshPreview() {
     checkBinSizeChange();
     const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
     $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
-    const xInside = $("#x-inside");
-    if (xInside) xInside.textContent = result.dimensions?.inside_x != null ? `(${result.dimensions.inside_x} Inside)` : "";
-    const yInside = $("#y-inside");
-    if (yInside) yInside.textContent = result.dimensions?.inside_y != null ? `(${result.dimensions.inside_y} Inside)` : "";
+    formatDimField("x");
+    formatDimField("y");
     $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(state.design.box.x)} mm`;
     $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(state.design.box.y)} mm`;
     $(".dimension-height", $("#dimensions")).textContent = `Height ${fmt(state.design.box.z)} mm`;

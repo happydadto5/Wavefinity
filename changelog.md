@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-09-06 — Different-height connector gets a real web, not just a longer arm
+
+- A connector for two bins whose rims differ used to be an ordinary clip with
+  the arm over the shorter bin simply run out longer. Across the height
+  difference that arm has **no wall beside it** — the shorter bin's wall is
+  not there yet — so a plain 1.0 mm arm is an unbraced blade with the lock
+  notches on its end, and it flexes straight off the bumps.
+- Past a 2 mm rim difference the extended arm is now fattened into a **tapered
+  web** over that unbraced span: grown toward the corridor as far as the mated
+  walls allow and the rest outward into the space the missing wall would fill,
+  up to **3.0 mm** thick at a 30 mm difference (a 50→20 pair), then ramped
+  back to a plain 1.0 mm arm over the last 6 mm so the part that enters the
+  bin, and every notch, is unchanged. A small brace fills the inside corner
+  where the long arm meets the cap. Stacked-slab build so it still prints as a
+  support-free taper with the cap down.
+- The whole part is also made **up to 50% longer** in step with the
+  difference, so more bump/notch pairs share the load on the weaker side.
+- Equal-height connectors are byte-for-byte unchanged. New engine constants
+  `DIFFERING_MIN_DROP`, `DIFFERING_FULL_DROP`, `DIFFERING_WEB_THICKNESS`,
+  `DIFFERING_LENGTH_GAIN`, `DIFFERING_WEB_TAPER`, `DIFFERING_WEB_KEEP_IN` and
+  helper `differing_drop_fraction`.
+
 ## 2026-09-06 — Bore: hex-bit profiles, an X/Y grid, and leaning holes
 
 - Two new **Profile** choices on a Bore, **Hex bit – short** and **Hex bit –

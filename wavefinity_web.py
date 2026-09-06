@@ -911,9 +911,11 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     output = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
+    auto_timestamp = bool(payload.get("auto_timestamp", False))
     with GEOMETRY_LOCK:
         result = generate_organizer_files(
             box, layout, output, label, part_name, label_location, scoop,
+            auto_timestamp=auto_timestamp,
         )
     return {"result": result, "output": str(output)}
 
@@ -997,9 +999,20 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     elif target == "sampler":
         gen_result = sampler_payload(payload)
     else:
-        gen_result = generate_payload(payload)
+        # For Bambu printing, always auto-save with timestamp if file exists or unnamed
+        gen_result = generate_payload(dict(payload, auto_timestamp=True))
 
     files = _extract_generated_files(gen_result)
+
+    # The default bin print also carries two side connectors, so a fresh
+    # build has the parts on the plate to link bins together.
+    if target not in {"connector", "sampler"}:
+        connector_files = _extract_generated_files(connector_payload(payload))
+        for connector in connector_files:
+            second = connector.with_name(f"{connector.stem} 2{connector.suffix}")
+            shutil.copyfile(connector, second)
+            files.extend([connector, second])
+
     if not files:
         raise RuntimeError("No 3MF files were generated to send to Bambu Studio.")
 
@@ -1075,6 +1088,17 @@ class WavefinityHandler(BaseHTTPRequestHandler):
         if path == "/api/catalog":
             self._send_json(catalog_payload())
             return
+        if path in {"/Brochure.md", "/brochure.md"}:
+            brochure_file = APP_DIR / "Brochure.md"
+            if brochure_file.is_file():
+                body = brochure_file.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                self.wfile.write(body)
+                return
         relative = "index.html" if path in {"", "/"} else unquote(path.lstrip("/"))
         candidate = (WEB_ROOT / relative).resolve()
         try:
@@ -1208,7 +1232,15 @@ def _replace_stale_process(requested_url: str, host: str, port: int) -> bool:
     if pid is None:
         return False
     try:
-        os.kill(pid, signal.SIGTERM)
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            os.kill(pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
         return False
     for _ in range(30):

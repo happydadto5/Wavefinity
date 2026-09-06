@@ -70,6 +70,7 @@ from organizer_engine import (
     TEXT_DEPTH,
     TOP_LABEL_CAP_HEIGHT,
     TOP_LABEL_LEDGE_DEPTH,
+    differing_drop_fraction,
     installed_boxes,
     intersection_volume,
     lock_positions,
@@ -644,6 +645,48 @@ class ConnectorTests(unittest.TestCase):
             )["lift_0.5_mm3"],
             0.1,
         )
+
+    def test_a_big_rim_difference_fattens_and_lengthens_the_clip(self) -> None:
+        """A 50 -> 20 mm pair: the arm over the short bin spans 30 mm with no
+        wall beside it.  A plain 1.0 mm arm there is an unbraced blade, so it
+        is grown into a web and the whole part is run longer - while still
+        seating free, still biting when lifted, and not fouling either bin.
+        """
+        box, connector = BoxSpec(40.0, 40.0, 50.0), ConnectorSpec()
+        plain = make_side_connector(box, connector, "y", 0.0, 12.0)
+        clip = make_side_connector(
+            box, connector, "y", 0.0, 12.0, bin_a_height=50.0, bin_b_height=20.0,
+        )
+        self.assertTrue(clip.is_watertight)
+        # +50% length at the full 30 mm drop, and clearly thicker across the seam
+        self.assertAlmostEqual(differing_drop_fraction(30.0), 1.0, places=6)
+        self.assertAlmostEqual(clip.extents[1], 18.0, places=2)
+        self.assertGreater(clip.extents[0], plain.extents[0] + 2.0)
+        # z envelope is still just the cap plus the 30 mm extension
+        self.assertAlmostEqual(clip.extents[2], connector.height + 30.0, places=3)
+        # seats without touching the two installed bins, and locks on lift
+        self.assertLess(
+            validate_side_fit(
+                box, connector, clip, "y", 0.0, bin_a_height=50.0, bin_b_height=20.0,
+            ),
+            1e-3,
+        )
+        self.assertGreater(
+            measure_lock(
+                box, connector, "y", 0.0, bin_a_height=50.0, bin_b_height=20.0,
+            )["lift_0.5_mm3"],
+            0.1,
+        )
+
+    def test_a_tiny_rim_difference_leaves_the_clip_plain(self) -> None:
+        box, connector = BoxSpec(32.0, 32.0, 40.0), ConnectorSpec()
+        plain = make_side_connector(box, connector, "y", 0.0, 12.0)
+        near = make_side_connector(
+            box, connector, "y", 0.0, 12.0, bin_a_height=40.0, bin_b_height=38.5,
+        )
+        self.assertEqual(differing_drop_fraction(1.5), 0.0)
+        self.assertAlmostEqual(near.extents[1], plain.extents[1], places=5)
+        self.assertAlmostEqual(near.extents[0], plain.extents[0], places=5)
 
     def test_orientation_and_position_are_explicit(self) -> None:
         box = BoxSpec(x=32.0, y=48.0, z=40.0)

@@ -99,6 +99,28 @@ DEFAULT_CAP_THICKNESS = 1.2
 DEFAULT_ARM_THICKNESS = 1.0   # two 0.5 mm perimeters
 DEFAULT_SIDE_LENGTH = LOCKED_CONNECTOR_LENGTH
 
+# Different-height connector.  Over the shorter bin the arm has to span the
+# height difference with no wall beside it - the shorter bin's wall simply is
+# not there yet - so a plain 1.0 mm arm is an unbraced blade with the lock
+# notches hanging off its end, and it just flexes off the bumps.  Past a small
+# drop the arm over that gap is fattened into a web and the whole part is made
+# longer, both ramping in with the drop so the unbraced span stays stiff and
+# still prints as a clean vertical taper with the cap down.
+DIFFERING_MIN_DROP = 2.0        # <= one bump pitch: plain extension, no web
+DIFFERING_FULL_DROP = 30.0      # web and length maxed here (a 50 -> 20 mm pair)
+DIFFERING_WEB_THICKNESS = 3.0   # widest the unbraced span is grown to
+DIFFERING_LENGTH_GAIN = 0.5     # + this fraction of length at the full drop
+DIFFERING_WEB_TAPER = 6.0       # ramp back to a plain arm before it enters the bin
+DIFFERING_WEB_KEEP_IN = 0.4     # web inner face stays this clear of the mated walls
+
+
+def differing_drop_fraction(drop: float) -> float:
+    """0 below ``DIFFERING_MIN_DROP``, ramping to 1 at ``DIFFERING_FULL_DROP``."""
+    if drop <= DIFFERING_MIN_DROP:
+        return 0.0
+    span = DIFFERING_FULL_DROP - DIFFERING_MIN_DROP
+    return max(0.0, min(1.0, (drop - DIFFERING_MIN_DROP) / span))
+
 # --------------------------------------------------------------------------- #
 # lock detent: chamfered bumps inside the wall, notches in the connector arms
 # --------------------------------------------------------------------------- #
@@ -796,12 +818,25 @@ def make_side_connector(
 
     Bin A is the negative side of the seam and bin B is the positive side.  The
     cap sits on the taller rim; only the arm over a shorter bin is extended.
+
+    When the two rims differ by more than ``DIFFERING_MIN_DROP`` the clip is
+    also made sturdier in step with the difference: ``length`` grows by up to
+    ``DIFFERING_LENGTH_GAIN``, and the extended arm is fattened into a tapered
+    web over the unbraced span (see ``unbraced_web``).  Equal rims give exactly
+    the part they always did.
     """
     axis = along_axis.lower()
     if axis not in {"x", "y"}:
         raise ValueError("along_axis must be 'x' or 'y'")
     if length <= 0:
         raise ValueError("side connector length must be positive")
+    heights = connector_bin_heights(box, bin_a_height, bin_b_height)
+    # A different-height pair gets a beefier clip: the arm over the shorter bin
+    # spans an unbraced gap, so past a small drop it is both fattened (below)
+    # and lengthened here, in step with the drop, for more bumps to share the
+    # load.  Equal heights leave the part exactly as it was.
+    drop_fraction = differing_drop_fraction(max(heights) - min(heights))
+    length = length * (1.0 + DIFFERING_LENGTH_GAIN * drop_fraction)
     wave_half = box.half_x if axis == "x" else box.half_y
     if abs(position) + length / 2.0 > wave_half - CORNER_INSET:
         shortest = 2.0 * (length / 2.0 + CORNER_INSET) + WAVE_MATING_GAP
@@ -811,7 +846,6 @@ def make_side_connector(
             f"{length:g}. A wall this short joins nothing - use the box's other "
             f"side, or make this one at least {shortest:.2f} mm"
         )
-    heights = connector_bin_heights(box, bin_a_height, bin_b_height)
     # The band sits on the floor and the arms hang from the rim, so on any
     # normal bin they are nowhere near each other.  On a very shallow one they
     # meet, and it is worth saying so plainly rather than letting the fit check
@@ -887,6 +921,76 @@ def make_side_connector(
                 far = [(float(v), o + outer_hw) for v, o in zip(coordinates[::-1], offsets[::-1])]
         return Polygon(near + far)
 
+    def offset_strip(
+        sign: float, half_near: float, half_far: float, coordinates: np.ndarray
+    ) -> Polygon:
+        """One arm's footprint with its two faces set explicitly, ``half_near``
+        and ``half_far`` measured from the seam centre-line (near < far)."""
+        offsets = [wave_value(position + float(v)) for v in coordinates]
+        if axis == "y":
+            near = [(o + sign * half_near, float(v)) for v, o in zip(coordinates, offsets)]
+            far = [(o + sign * half_far, float(v)) for v, o in zip(coordinates[::-1], offsets[::-1])]
+        else:
+            near = [(float(v), o + sign * half_near) for v, o in zip(coordinates, offsets)]
+            far = [(float(v), o + sign * half_far) for v, o in zip(coordinates[::-1], offsets[::-1])]
+        return Polygon(near + far)
+
+    def unbraced_web(sign: float, drop: float) -> list[trimesh.Trimesh]:
+        """The fattened, tapered arm over the shorter bin's missing wall.
+
+        Spans from the shorter bin's rim (``z_rim``) up to the cap: over that
+        run nothing is beside the arm, so it is grown to a web - inward toward
+        the corridor as far as the mated walls allow, the rest outward into the
+        space the absent wall would occupy - and ramped back to a plain arm
+        over the last few millimetres so the part that actually enters the bin,
+        and every notch, is unchanged.  Built as thin stacked slabs: with the
+        cap flipped down to print, each slab sits inside the one below it, so
+        the whole taper is a support-free overhang.
+        """
+        if drop_fraction <= 0.0 or drop <= DIFFERING_MIN_DROP:
+            return []
+        z_rim = connector.arm_depth - drop
+        web_t = connector.arm_thickness + (
+            DIFFERING_WEB_THICKNESS - connector.arm_thickness
+        ) * drop_fraction
+        grow = web_t - connector.arm_thickness
+        move_in = max(
+            0.0,
+            min(grow * 0.5, inner_hw - WAVE_MATING_GAP / 2.0 - DIFFERING_WEB_KEEP_IN),
+        )
+        move_out = grow - move_in
+        taper = min(DIFFERING_WEB_TAPER, drop * 0.5)
+        span = drop
+        slabs: list[trimesh.Trimesh] = []
+        steps = max(4, int(round(span / 1.5)))
+        h = span / steps
+        for k in range(steps):
+            z0 = z_rim + k * h
+            z1 = z0 + h
+            ramp = 1.0 if z1 >= z_rim + taper else (z1 - z_rim) / taper
+            slab = _extrude_polygon(
+                offset_strip(
+                    sign, inner_hw - move_in * ramp, outer_hw + move_out * ramp, samples
+                ),
+                h + 0.02,
+            )
+            slab.apply_translation((0.0, 0.0, z0))
+            slabs.append(slab)
+        # A brace in the inside corner where the long arm meets the cap - the
+        # most worked point - added on the outer face, which is clear here.
+        gusset_h = min(drop, DIFFERING_WEB_TAPER)
+        gsteps = max(3, int(round(gusset_h / 1.5)))
+        gh = gusset_h / gsteps
+        for k in range(gsteps):
+            reach = move_out * (gsteps - k) / gsteps
+            slab = _extrude_polygon(
+                offset_strip(sign, outer_hw, outer_hw + move_out + reach, samples),
+                gh + 0.02,
+            )
+            slab.apply_translation((0.0, 0.0, connector.arm_depth - (k + 1) * gh))
+            slabs.append(slab)
+        return slabs
+
     body = _extrude_polygon(corridor(outer_hw, samples), connector.height)
     channel = _extrude_polygon(corridor(inner_hw, cavity_samples), connector.arm_depth)
     result = difference([body, channel])
@@ -899,6 +1003,7 @@ def make_side_connector(
             extension = _extrude_polygon(arm_strip(sign, samples), extension_depth + 0.01)
             extension.apply_translation((0.0, 0.0, -extension_depth))
             extensions.append(extension)
+            extensions.extend(unbraced_web(sign, extension_depth))
     if extensions:
         result = union([result, *extensions])
 

@@ -516,6 +516,15 @@ Set the two rim heights in **Connect bins**. When they differ, the arm over the
 shorter bin is extended by the height difference, so both sides still lock. The
 generated file is flipped with its flat cap down for support-free printing.
 
+Across that extension the shorter bin's wall has not started yet, so the arm has
+nothing bracing it. Past a 2 mm difference the extended arm is fattened into a
+**tapered web** over the unbraced span — up to 3.0 mm thick at a 30 mm
+difference (a 50→20 mm pair), ramped back to a plain arm over the last 6 mm
+before it enters the bin, with a brace in the corner under the cap — and the
+whole part is made up to **50% longer** so more bumps share the load. Equal-rim
+connectors are unchanged. Handles differences of roughly 30–40 mm; see the
+`DIFFERING_*` constants in `organizer_engine.py`.
+
 The 0.02 mm tolerance, 12 mm length and 9.6 mm base connector height were
 chosen from a printed five-clip fit plate. **Connect bins** shows the resulting
 printed height, including any extension for a shorter bin.

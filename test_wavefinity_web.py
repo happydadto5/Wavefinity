@@ -87,7 +87,7 @@ class WebApplicationTests(unittest.TestCase):
         labels = [field["label"] for field in bore["fields"]]
         self.assertIn("X quantity", labels)
         self.assertIn("Y quantity", labels)
-        self.assertIn("Angle \xc2\xb0", labels)
+        self.assertIn("Angle °", labels)
 
     def test_hex_bit_bore_default_holds_the_bit_and_stands_upright(self):
         design = default_design()
@@ -758,14 +758,21 @@ class WebApplicationTests(unittest.TestCase):
             fake_exe.touch()
             fake_3mf = Path(temp_dir) / "Box.3mf"
             fake_3mf.touch()
+            fake_connector = Path(temp_dir) / "Connector.3mf"
+            fake_connector.touch()
 
             fake_gen_result = {
                 "result": {"box": {"output": str(fake_3mf)}},
                 "output": str(temp_dir),
             }
+            fake_connector_result = {
+                "result": {"output": str(fake_connector)},
+                "output": str(temp_dir),
+            }
 
             with (
                 patch.object(wavefinity_web, "generate_payload", return_value=fake_gen_result),
+                patch.object(wavefinity_web, "connector_payload", return_value=fake_connector_result),
                 patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
                 patch.object(wavefinity_web, "launch_slicer") as mock_launch,
             ):
@@ -774,9 +781,19 @@ class WebApplicationTests(unittest.TestCase):
                     "output": temp_dir,
                 })
                 self.assertEqual(response["output"], str(temp_dir))
-                self.assertEqual(response["files"], [str(fake_3mf.resolve())])
+                second_connector = fake_connector.with_name("Connector 2.3mf")
+                self.assertEqual(response["files"], [
+                    str(fake_3mf.resolve()),
+                    str(fake_connector.resolve()),
+                    str(second_connector.resolve()),
+                ])
+                self.assertTrue(second_connector.is_file())
                 self.assertEqual(response["slicer"], str(fake_exe.resolve()))
-                mock_launch.assert_called_once_with(fake_exe, [fake_3mf.resolve()])
+                mock_launch.assert_called_once_with(fake_exe, [
+                    fake_3mf.resolve(),
+                    fake_connector.resolve(),
+                    second_connector.resolve(),
+                ])
 
     def test_print_payload_raises_when_no_slicer(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -789,6 +806,7 @@ class WebApplicationTests(unittest.TestCase):
 
             with (
                 patch.object(wavefinity_web, "generate_payload", return_value=fake_gen_result),
+                patch.object(wavefinity_web, "connector_payload", return_value={"result": {}, "output": str(temp_dir)}),
                 patch.object(wavefinity_web, "detect_bambu_studio", return_value=None),
             ):
                 with self.assertRaises(ValueError) as ctx:
@@ -852,7 +870,7 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b"Interior parts", body)
         self.assertIn(b"Part Name (For file)", body)
         self.assertIn(b"Connect bins", body)
-        self.assertIn(b"Save to folder", body)
+        self.assertIn(b"Save Location:", body)
         self.assertIn(b'id="print-bin"', body)
         self.assertIn(b">Print to Bambu Studio</button>", body)
         self.assertIn(b"Different height bins?", body)
@@ -864,7 +882,7 @@ class WebServerTests(unittest.TestCase):
         self.assertLess(body.index(b"Rim label"), body.index(b"Add curved scoop"))
         self.assertLess(body.index(b"Add curved scoop"), body.index(b"Interior parts"))
         self.assertLess(body.index(b"Interior parts"), body.index(b"Connect bins"))
-        self.assertLess(body.index(b"Connect bins"), body.index(b"Save to folder"))
+        self.assertLess(body.index(b"Connect bins"), body.index(b"Save Location:"))
         self.assertLess(body.index(b"How should the interior print?"), body.index(b"Connect bins"))
         self.assertLess(body.index(b'id="support-palette"'), body.index(b'id="add-support"'))
         self.assertLess(body.index(b'id="add-support"'), body.index(b'id="draft-fields"'))
@@ -941,6 +959,9 @@ class WebServerTests(unittest.TestCase):
             fake_3mf = Path(temp_dir) / "Box.3mf"
             fake_3mf.touch()
 
+            fake_connector = Path(temp_dir) / "Connector.3mf"
+            fake_connector.touch()
+
             fake_gen = {
                 "result": {"box": {"output": str(fake_3mf)}},
                 "output": str(temp_dir),
@@ -948,6 +969,10 @@ class WebServerTests(unittest.TestCase):
 
             with (
                 patch.object(wavefinity_web, "generate_payload", return_value=fake_gen),
+                patch.object(
+                    wavefinity_web, "connector_payload",
+                    return_value={"result": {"output": str(fake_connector)}, "output": str(temp_dir)},
+                ),
                 patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
                 patch.object(wavefinity_web, "launch_slicer"),
             ):
@@ -1031,12 +1056,16 @@ class StaleProcessReplacementTests(unittest.TestCase):
             patch.object(wavefinity_web, "urlopen", side_effect=[response, OSError()]),
             patch.object(wavefinity_web, "_pid_on_port", return_value=123),
             patch.object(wavefinity_web.os, "kill") as kill,
+            patch.object(wavefinity_web.subprocess, "run") as run,
             patch.object(wavefinity_web.time, "sleep"),
         ):
             self.assertTrue(wavefinity_web._replace_stale_process(
                 "http://127.0.0.1:8765/", "127.0.0.1", 8765
             ))
-        self.assertEqual(kill.call_args.args[0], 123)
+            if os.name == "nt":
+                self.assertIn("123", run.call_args[0][0])
+            else:
+                self.assertEqual(kill.call_args.args[0], 123)
 
     def test_a_service_with_no_recorded_pid_is_still_found_and_replaced(self):
         # An older server predating wavefinity.pid, or one started some

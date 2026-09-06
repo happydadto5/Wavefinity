@@ -37,7 +37,7 @@ if /i "%~1"=="--check" (
 
 rem Run the long-lived local server without attaching it to this command
 rem window.  A later launch may replace it without leaving a paused window.
-start "" /b "%ORGANIZER_PYW%" wavefinity_web.py
+start "" "%ORGANIZER_PYW%" wavefinity_web.py
 if errorlevel 1 goto :failed
 exit /b 0
 

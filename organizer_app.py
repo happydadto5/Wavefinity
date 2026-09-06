@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from datetime import datetime
 import json
 import math
 from pathlib import Path
@@ -835,6 +836,7 @@ def generate_organizer_files(
     part_name: str = "",
     label_location: str = "bottom",
     scoop: bool = False,
+    auto_timestamp: bool = False,
 ) -> dict[str, object]:
     """Export an editor design as fused, fitted-removable, or cartridge parts.
 
@@ -885,11 +887,22 @@ def generate_organizer_files(
         else build_texts(box, layout.features, text_surface, text_limit)
     )
 
+    def _resolve_file(filename_fn, *args, **kwargs) -> Path:
+        base_name = filename_fn(*args, **kwargs)
+        target = output_dir / base_name
+        if auto_timestamp:
+            has_name = bool(clean_label(part_name))
+            if not has_name or target.exists():
+                ts = datetime.now().strftime("%m%d%y%H%M%S")
+                stem = target.stem
+                target = output_dir / f"{stem} {ts}{target.suffix}"
+        return target
+
     if nest_only:
         # A Photo Nest is one bare cutter wall standing on the bed: no wavy
         # bin, no floor, and nothing for a label or scoop to attach to.
         body = union(build_features(box, list(layout.features), 0.0))
-        output = output_dir / box_filename(box, part_name)
+        output = _resolve_file(box_filename, box, part_name)
         output_dir.mkdir(parents=True, exist_ok=True)
         export_mesh(body, output, "fused_organizer")
         result: dict[str, object] = {
@@ -901,7 +914,7 @@ def generate_organizer_files(
         body = make_fused_box(box, layout.features, make_box(box))
         if scoop:
             body = union([body, make_scoop(box)])
-        output = output_dir / box_filename(box, part_name)
+        output = _resolve_file(box_filename, box, part_name)
         # The rim label's ledge is part of the body, so it goes on before the
         # floor text is sunk into it.
         inlays = list(texts)
@@ -925,7 +938,7 @@ def generate_organizer_files(
             "text_objects": written,
         }
     else:
-        box_output = output_dir / box_filename(box, part_name)
+        box_output = _resolve_file(box_filename, box, part_name)
         plain_box = make_box(box)
         insert = (
             make_cartridge_insert(box, layout.features)
@@ -934,8 +947,8 @@ def generate_organizer_files(
         )
         if scoop:
             insert = union([insert, _removable_scoop(box, layout.mode)])
-        insert_output = output_dir / insert_filename(
-            box, part_name, layout.mode == "cartridge"
+        insert_output = _resolve_file(
+            insert_filename, box, part_name, layout.mode == "cartridge"
         )
         reported_insert = apply_texts(insert, texts)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -945,7 +958,7 @@ def generate_organizer_files(
             pocketed_box, box_inlay = make_top_labelled_box(box, tidy, plain_box)
             export_labelled_box(
                 pocketed_box, box_inlay, box_output,
-                box_filename(box, part_name, suffix=""), tidy,
+                box_output.stem, tidy,
             )
             reported_box = pocketed_box
         else:
