@@ -738,12 +738,51 @@ function renderDraftFields() {
   }
   if (info.flags.size && one.kind !== "cradle") {
     const isPocket = one.kind === "pocket";
+    const isBore = one.kind === "bore";
     const wall = isPocket ? number(one.options?.wall, state.draftResolvedOptions?.wall ?? 1.6) : 0;
     const shownWidth = isPocket ? Math.max(0.1, width - 2 * wall) : width;
     const shownDepth = isPocket ? Math.max(0.1, depth - 2 * wall) : depth;
-    const depthLabel = isPocket ? "Length" : "Depth";
-    html += field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" });
-    html += field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
+    // A bore's footprint reads Width x Length, matching Pocket and the item terms.
+    const depthLabel = isPocket || isBore ? "Length" : "Depth";
+    if (isBore) {
+      // Width / Length each get an Auto button that fills that side of the bin.
+      const sizeField = (label, key, value) => `<label class="wide">${escapeHtml(label)}<span class="unit">mm</span>
+        <div class="input-with-button">
+          <input type="number" step="1" data-draft="${key}" value="${escapeHtml(value)}">
+          <button type="button" class="button secondary" data-action="auto-size" data-key="${key}">Auto</button>
+        </div></label>`;
+      html += sizeField("Width", "width", fmt(shownWidth));
+      html += sizeField("Length", "depth", fmt(shownDepth));
+      // Block dimensions sit right under the footprint; the two grid counts get
+      // their own Auto (blank = fit as many as the zone holds).
+      const optionField = (key, label, opts = {}) => {
+        const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
+        const autoHint = AUTO_PLACEHOLDER.bore?.[key];
+        const shown = !explicit && autoHint ? ""
+          : explicit ? one.options[key]
+          : state.draftResolvedOptions?.[key] ?? info.fields.find(f => f.key === key)?.default;
+        const fieldOpts = { ...opts };
+        if (autoHint && !fieldOpts.placeholder) fieldOpts.placeholder = autoHint;
+        return field(label, `option:${key}`, shown, fieldOpts);
+      };
+      const gridField = (key, label) => {
+        const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
+        const hint = AUTO_PLACEHOLDER.bore?.[key] || "auto";
+        return `<label class="wide">${escapeHtml(label)}
+          <div class="input-with-button">
+            <input type="number" min="1" step="1" data-draft="option:${key}" value="${escapeHtml(explicit ? one.options[key] : "")}" placeholder="${escapeHtml(hint)}">
+            <button type="button" class="button secondary" data-action="auto-option" data-key="${key}">Auto</button>
+          </div></label>`;
+      };
+      html += optionField("height", "Height", { unit: "mm" });
+      html += optionField("depth", "Hole depth", { unit: "mm" });
+      html += optionField("wall", "Wall", { unit: "mm" });
+      html += gridField("columns", "X quantity");
+      html += gridField("rows", "Y quantity");
+    } else {
+      html += field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" });
+      html += field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
+    }
   }
   if (info.flags.qty) {
     html += `<label class="wide">Quantity<div class="input-with-button">
@@ -834,11 +873,16 @@ function renderDraftFields() {
     // Rendered together as the one "% from end / Offset from center" field
     // beneath Runs along, above.
     if (option.key === "end_margin" || option.key === "run_offset") continue;
-    // A bore only leans round or square holes; a hex socket or a hex-bit
-    // profile always stands straight up.
-    if (info.kind === "bore" && option.key === "angle") {
-      const draftProfile = one.item?.profile || "round";
-      if (draftProfile !== "round" && draftProfile !== "square") continue;
+    if (info.kind === "bore") {
+      // Height / Hole depth / Wall / grid counts are drawn up with the
+      // footprint above; only Angle is left for this loop.
+      if (["height", "depth", "wall", "columns", "rows"].includes(option.key)) continue;
+      // A bore only leans round or square holes; a hex socket or a hex-bit
+      // profile always stands straight up.
+      if (option.key === "angle") {
+        const draftProfile = one.item?.profile || "round";
+        if (draftProfile !== "round" && draftProfile !== "square") continue;
+      }
     }
     // Rendered by the divider bottom-slope block below, on its own and only
     // while Use support crossbars is ticked.
@@ -862,7 +906,7 @@ function renderDraftFields() {
     if (stepFor[option.key]) fieldOpts.step = stepFor[option.key];
     html += field(option.label, `option:${option.key}`, shown, fieldOpts);
     if (option.key === "angle" && info.kind === "bore") {
-      html += `<p class="field-help wide">90° is straight up. A lower angle leans the holes so tubes rest at a slant — it only works with a single row, so set Columns or Rows to 1.</p>`;
+      html += `<p class="field-help wide">90° is straight up. A lower angle leans the holes so tubes rest at a slant — it only works with a single row, so set X quantity or Y quantity to 1.</p>`;
     }
     if (option.key === "angle" && info.kind === "divider") {
       // The wedge-vs-straight choice only means anything once the wall
@@ -973,6 +1017,32 @@ function renderDraftFields() {
     updateSelectionButtons();
     refreshDraftSoon();
   });
+  // Bore: "Auto" beside Width / Length stretches that side to the full bin floor.
+  $$('[data-action="auto-size"]', $("#draft-fields")).forEach(button => button.addEventListener("click", () => {
+    const key = button.dataset.key;
+    const [insideX, insideY] = binInsideExtent(state.design.box);
+    const zone = state.draft.zone;
+    if (key === "width") {
+      state.draft.zone = [-insideX / 2, zone[1], insideX / 2, zone[3]];
+    } else {
+      state.draft.zone = [zone[0], -insideY / 2, zone[2], insideY / 2];
+    }
+    const input = $(`[data-draft="${key}"]`, $("#draft-fields"));
+    if (input) input.value = fmt(key === "width" ? insideX : insideY);
+    state.draftAutoCommit = true;
+    updateSelectionButtons();
+    refreshDraftSoon();
+  }));
+  // Bore: "Auto" beside an X / Y quantity hands that count back to the fitter.
+  $$('[data-action="auto-option"]', $("#draft-fields")).forEach(button => button.addEventListener("click", () => {
+    const key = button.dataset.key;
+    if (state.draft.options) delete state.draft.options[key];
+    const input = $(`[data-draft="option:${key}"]`, $("#draft-fields"));
+    if (input) input.value = "";
+    state.draftAutoCommit = true;
+    updateSelectionButtons();
+    refreshDraftSoon();
+  }));
 }
 
 // A divider builds from its thickness option, not from the footprint drawn

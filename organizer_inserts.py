@@ -1049,7 +1049,7 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     tilted = angle < 90.0 - 1e-9
     if tilted and min(columns, rows) != 1:
         raise ValueError(
-            "angled bores need a single row - set Columns or Rows to 1"
+            "angled bores need a single row - set X quantity or Y quantity to 1"
         )
     lean = math.radians(90.0 - angle) if tilted else 0.0
     lean_axis = spec_feature.along           # 'x' or 'y'

@@ -9,10 +9,13 @@
   diameter and fit clearance are shown but locked. New engine constants
   `HEX_BIT_FLATS`, `HEX_BIT_CLEARANCE`, `HEX_BIT_HOLD`; `Item` accepts the
   `hex_bit_short` / `hex_bit_long` profiles.
-- The Bore's single **Quantity** is replaced by **Columns (X)** and **Rows
-  (Y)**; each is blank to fit as many as the zone holds, or a whole number
-  for an exact grid. Wires the browser up to the engine's existing
-  `columns` / `rows` options.
+- The Bore's single **Quantity** is replaced by **X quantity** and **Y
+  quantity** (with **Auto** buttons); each is blank to fit as many as the
+  zone holds, or a whole number for an exact grid. Wires the browser up to
+  the engine's existing `columns` / `rows` options.
+- Bore footprint now reads **Width x Length** (was Width x Depth), and Width
+  and Length each get an **Auto** button that fills that side of the bin
+  floor. Height, Hole depth and Wall are shown up with the footprint.
 - A new **Angle °** field (round or square profiles only) leans a **single
   row** of holes so tubes rest at a slant; 90° is straight up, and the limit
   is 45°. It is refused on a real grid ("angled bores need a single row").

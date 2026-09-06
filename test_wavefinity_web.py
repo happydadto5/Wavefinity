@@ -85,8 +85,8 @@ class WebApplicationTests(unittest.TestCase):
         bore = parts["bore"]
         self.assertFalse(bore["flags"]["qty"])
         labels = [field["label"] for field in bore["fields"]]
-        self.assertIn("Columns (X)", labels)
-        self.assertIn("Rows (Y)", labels)
+        self.assertIn("X quantity", labels)
+        self.assertIn("Y quantity", labels)
         self.assertIn("Angle \xc2\xb0", labels)
 
     def test_hex_bit_bore_default_holds_the_bit_and_stands_upright(self):
