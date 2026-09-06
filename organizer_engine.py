@@ -121,6 +121,35 @@ def differing_drop_fraction(drop: float) -> float:
     span = DIFFERING_FULL_DROP - DIFFERING_MIN_DROP
     return max(0.0, min(1.0, (drop - DIFFERING_MIN_DROP) / span))
 
+
+def differing_connector_plan(
+    connector: "ConnectorSpec", base_length: float, height_a: float, height_b: float,
+) -> dict[str, float | str | bool | None]:
+    """Every dimension a different-height connector self-adjusts, in one place.
+
+    ``make_side_connector`` and the UI both read this so the numbers a person is
+    shown are exactly the ones the part is built to.  With equal rims it just
+    reports the plain part.
+    """
+    drop = abs(height_a - height_b)
+    fraction = differing_drop_fraction(drop)
+    arm_thickness = connector.arm_thickness
+    return {
+        "drop_mm": drop,
+        "drop_fraction": fraction,
+        "base_length_mm": base_length,
+        "length_mm": base_length * (1.0 + DIFFERING_LENGTH_GAIN * fraction),
+        "arm_thickness_mm": arm_thickness,
+        "web_thickness_mm": arm_thickness + (
+            DIFFERING_WEB_THICKNESS - arm_thickness
+        ) * fraction,
+        "printed_height_mm": connector.height + drop,
+        "shorter_bin": None if height_a == height_b else (
+            "A" if height_a < height_b else "B"
+        ),
+        "webbed": fraction > 0.0,
+    }
+
 # --------------------------------------------------------------------------- #
 # lock detent: chamfered bumps inside the wall, notches in the connector arms
 # --------------------------------------------------------------------------- #
@@ -835,8 +864,9 @@ def make_side_connector(
     # spans an unbraced gap, so past a small drop it is both fattened (below)
     # and lengthened here, in step with the drop, for more bumps to share the
     # load.  Equal heights leave the part exactly as it was.
-    drop_fraction = differing_drop_fraction(max(heights) - min(heights))
-    length = length * (1.0 + DIFFERING_LENGTH_GAIN * drop_fraction)
+    plan = differing_connector_plan(connector, length, heights[0], heights[1])
+    drop_fraction = plan["drop_fraction"]
+    length = plan["length_mm"]
     wave_half = box.half_x if axis == "x" else box.half_y
     if abs(position) + length / 2.0 > wave_half - CORNER_INSET:
         shortest = 2.0 * (length / 2.0 + CORNER_INSET) + WAVE_MATING_GAP

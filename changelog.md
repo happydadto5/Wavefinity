@@ -20,7 +20,18 @@
 - Equal-height connectors are byte-for-byte unchanged. New engine constants
   `DIFFERING_MIN_DROP`, `DIFFERING_FULL_DROP`, `DIFFERING_WEB_THICKNESS`,
   `DIFFERING_LENGTH_GAIN`, `DIFFERING_WEB_TAPER`, `DIFFERING_WEB_KEEP_IN` and
-  helper `differing_drop_fraction`.
+  helpers `differing_drop_fraction` / `differing_connector_plan` (the one place
+  `make_side_connector` and the UI both read the self-adjusting numbers from).
+- **Connect bins** rework in the browser UI. **Bin A is now "This bin"** — a
+  read-only field that always mirrors the bin's own height; only **Other bin
+  (B)** is a free number. Ticking *Different height bins?* shows a live readout
+  of every value the clip self-adjusts: height difference, which side is
+  shorter, `12 mm → 15.86 mm` connector length, `1 mm → 2.29 mm` arm
+  thickness, and printed height — recomputed as the heights change and again
+  from the real part after **Generate connector**. `catalog_payload` now sends
+  a `connector_rules` block; `connector_payload` returns a `connector_plan`.
+- The last control section had always been partly hidden behind the sticky
+  action panel; it now has room to scroll clear.
 
 ## 2026-09-06 — Bore: hex-bit profiles, an X/Y grid, and leaning holes
 

@@ -32,11 +32,17 @@ import numpy as np
 
 from organizer_engine import (
     BASE_UNIT,
+    DEFAULT_ARM_THICKNESS,
+    DIFFERING_FULL_DROP,
+    DIFFERING_LENGTH_GAIN,
+    DIFFERING_MIN_DROP,
+    DIFFERING_WEB_THICKNESS,
     LOCKED_CONNECTOR_HEIGHT,
     LOCKED_CONNECTOR_LENGTH,
     LOCKED_TOLERANCE,
     BoxSpec,
     ConnectorSpec,
+    differing_connector_plan,
     generate_sampler,
     wavy_cavity_polygon,
 )
@@ -50,6 +56,7 @@ from organizer_inserts import (
     Zone,
     build_features,
     cradle_min_footprint,
+    feature_min_footprint,
     fitted_nest_feature,
     nest_contour_polygon,
     nest_smoothed_contour,
@@ -344,6 +351,16 @@ def catalog_payload() -> dict[str, Any]:
                 "different_heights": False,
             },
             "sampler_boxes": DEFAULT_SAMPLE_BOXES,
+        },
+        # The differing-clip rules, so the UI can show the self-adjusting
+        # length / web thickness / printed height live without a round-trip.
+        "connector_rules": {
+            "min_drop_mm": DIFFERING_MIN_DROP,
+            "full_drop_mm": DIFFERING_FULL_DROP,
+            "web_thickness_mm": DIFFERING_WEB_THICKNESS,
+            "length_gain": DIFFERING_LENGTH_GAIN,
+            "arm_thickness_mm": DEFAULT_ARM_THICKNESS,
+            "base_height_mm": LOCKED_CONNECTOR_HEIGHT,
         },
         "preferences": load_preferences(),
         "slicer": {
@@ -727,6 +744,26 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def feature_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Resize one draft feature's zone to the smallest that still holds
+    everything it builds - its hole grid, peg row, slot bank or tool. Keeps the
+    zone centred and touches nothing else. Raises for a kind with no natural
+    contents size (pocket, steps, photo nest, divider, text).
+    """
+    box, layout, *_ = _design(payload["design"])
+    one = _feature_from_json(payload["feature"], layout.mode)
+    base_z = base_height(box, layout.mode)
+    size = feature_min_footprint(box, one, base_z)
+    if size is None:
+        raise ValueError("this interior part has no contents to fit its size to")
+    fitted = resized_feature(one, box, size, layout.mode, layout.snap)
+    with GEOMETRY_LOCK:
+        build_features(
+            box, (fitted,), base_z, layout_zone(box, layout.mode), layout.mode,
+        )
+    return {"feature": feature_to_dict(fitted, layout.mode)}
+
+
 def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
@@ -928,8 +965,10 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         height=float(options.get("height", LOCKED_CONNECTOR_HEIGHT)),
     )
     different_heights = bool(options.get("different_heights", False))
-    bin_a_height = float(options.get("bin_a_height", box.z)) if different_heights else box.z
+    # Bin A is always this bin; only the other side is a free number.
+    bin_a_height = box.z
     bin_b_height = float(options.get("bin_b_height", box.z)) if different_heights else box.z
+    base_length = float(options.get("length", LOCKED_CONNECTOR_LENGTH))
     output_dir = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     with GEOMETRY_LOCK:
@@ -939,11 +978,18 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
             output_dir / "Connector.3mf",
             "y",
             0.0,
-            float(options.get("length", LOCKED_CONNECTOR_LENGTH)),
+            base_length,
             bin_a_height,
             bin_b_height,
         )
-    return {"result": result, "output": str(output_dir)}
+    plan = differing_connector_plan(connector, base_length, bin_a_height, bin_b_height)
+    return {
+        "result": result,
+        "output": str(output_dir),
+        "connector_plan": {
+            k: (round(v, 3) if isinstance(v, float) else v) for k, v in plan.items()
+        },
+    }
 
 
 def sampler_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1039,6 +1085,7 @@ POST_ROUTES = {
     },
     "/api/feature/default": default_feature_payload,
     "/api/feature/draft": draft_payload,
+    "/api/feature/fit": feature_fit_payload,
     "/api/feature/apply": apply_feature_payload,
     "/api/feature/delete": delete_feature_payload,
     "/api/nest/photo": photo_nest_payload,

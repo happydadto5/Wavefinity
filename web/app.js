@@ -288,8 +288,9 @@ function syncForm() {
   $("#output-folder").value = state.output;
   $("#connector-tolerance").value = fmt(state.connector.tolerance);
   $("#connector-length").value = fmt(state.connector.length);
-  $("#connector-bin-a-height").value = fmt(state.connector.bin_a_height);
-  $("#connector-bin-b-height").value = fmt(state.connector.bin_b_height);
+  // Bin A is always this bin, so it just mirrors the box height.
+  $("#connector-bin-a-height").value = fmt(box.z);
+  $("#connector-bin-b-height").value = fmt(state.connector.bin_b_height ?? box.z);
   $("#different-height-bins").checked = Boolean(state.connector.different_heights);
   syncConnectorHeightControls();
   updateInteriorModeVisibility();
@@ -299,6 +300,65 @@ function syncForm() {
 function syncConnectorHeightControls() {
   const different = $("#different-height-bins").checked;
   $("#connector-bin-heights").hidden = !different;
+  renderConnectorReadout();
+}
+
+// Mirror the engine's differing_connector_plan so the self-adjusting numbers
+// show live, before anything is generated. The server plan (from a real
+// generate) is authoritative and is passed straight through when we have it.
+function computeConnectorPlan() {
+  const rules = state.catalog?.connector_rules || {};
+  const armT = rules.arm_thickness_mm ?? 1.0;
+  const baseH = rules.base_height_mm ?? 9.6;
+  const minDrop = rules.min_drop_mm ?? 2.0;
+  const fullDrop = rules.full_drop_mm ?? 30.0;
+  const webT = rules.web_thickness_mm ?? 3.0;
+  const gain = rules.length_gain ?? 0.5;
+  const binA = number(state.design?.box?.z, 40);
+  const binB = number($("#connector-bin-b-height").value, binA);
+  const baseLen = number($("#connector-length").value, state.connector.length ?? 12);
+  const drop = Math.abs(binA - binB);
+  const frac = drop <= minDrop
+    ? 0 : Math.max(0, Math.min(1, (drop - minDrop) / (fullDrop - minDrop)));
+  return {
+    drop_mm: drop,
+    base_length_mm: baseLen,
+    length_mm: baseLen * (1 + gain * frac),
+    arm_thickness_mm: armT,
+    web_thickness_mm: armT + (webT - armT) * frac,
+    printed_height_mm: baseH + drop,
+    shorter_bin: binA === binB ? null : (binA < binB ? "A" : "B"),
+    webbed: frac > 0,
+  };
+}
+
+function renderConnectorReadout(serverPlan) {
+  const el = $("#connector-derived");
+  if (!el) return;
+  if (!$("#different-height-bins").checked) {
+    el.hidden = true;
+    el.innerHTML = "";
+    return;
+  }
+  const plan = serverPlan || computeConnectorPlan();
+  const mm = value => `${fmt(Math.round(value * 100) / 100)} mm`;
+  const adjusted = (base, now) => Math.abs(base - now) < 0.05
+    ? mm(now)
+    : `${mm(base)} → <span class="readout-adjust">${mm(now)}</span>`;
+  const shorter = plan.shorter_bin === "B" ? "the other bin"
+    : plan.shorter_bin === "A" ? "this bin" : "neither — equal";
+  const rows = [
+    ["Height difference", mm(plan.drop_mm)],
+    ["Shorter side", shorter],
+    ["Connector length", adjusted(plan.base_length_mm, plan.length_mm)],
+    ["Arm thickness", adjusted(plan.arm_thickness_mm, plan.web_thickness_mm)],
+    ["Printed height", mm(plan.printed_height_mm)],
+  ];
+  el.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")
+    + `<p class="readout-caption">${plan.webbed
+      ? "Arm over the shorter bin is thickened into a web and the part run longer, so the span with no wall beside it stays stiff."
+      : "Difference is small: an ordinary connector with a longer arm on the short side."}</p>`;
+  el.hidden = false;
 }
 
 function updateInteriorModeVisibility(reveal = false) {
@@ -342,12 +402,14 @@ function updateDesignFromForm() {
     tolerance: number($("#connector-tolerance").value, state.connector.tolerance),
     length: number($("#connector-length").value, state.connector.length),
     height: state.connector.height,
-    bin_a_height: number($("#connector-bin-a-height").value, state.design.box.z),
+    // Bin A is this bin, never a free field.
+    bin_a_height: state.design.box.z,
     bin_b_height: number($("#connector-bin-b-height").value, state.design.box.z),
     different_heights: $("#different-height-bins").checked,
     position: 0,
     axis: "y",
   };
+  $("#connector-bin-a-height").value = fmt(state.design.box.z);
   syncConnectorHeightControls();
 }
 
@@ -591,9 +653,11 @@ function wireControls() {
   ["#connector-bin-a-height", "#connector-bin-b-height"].forEach(selector =>
     $(selector).addEventListener("input", syncConnectorHeightControls));
   $("#different-height-bins").addEventListener("change", () => {
-    if ($("#different-height-bins").checked && !state.connector.different_heights) {
+    if ($("#different-height-bins").checked) {
       $("#connector-bin-a-height").value = fmt(state.design.box.z);
-      $("#connector-bin-b-height").value = fmt(state.design.box.z);
+      if (!Number.isFinite(number($("#connector-bin-b-height").value, NaN))) {
+        $("#connector-bin-b-height").value = fmt(state.design.box.z);
+      }
     }
     updateDesignFromForm();
   });
@@ -851,11 +915,6 @@ function renderDraftFields() {
         ${field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
         ${optionField("height", "Height", { unit: "mm", step: "0.5" })}
       </div>`;
-      // One Auto per footprint side: stretches it to the full bin floor.
-      html += `<div class="auto-size-row wide">
-        <button type="button" class="button secondary" data-action="auto-size" data-key="width">Auto width</button>
-        <button type="button" class="button secondary" data-action="auto-size" data-key="depth">Auto length</button>
-      </div>`;
       html += optionField("depth", "Hole depth", { unit: "mm", step: "0.5" });
       html += optionField("wall", "Wall", { unit: "mm", step: "0.5" });
       html += gridField("columns", "X quantity");
@@ -870,6 +929,7 @@ function renderDraftFields() {
       html += field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
     }
   }
+  html += renderFitActions(one);
   if (info.flags.qty) {
     html += `<label class="wide">Quantity<div class="input-with-button">
       <input type="number" min="1" step="1" data-draft="count" value="${one.count ?? ""}" placeholder="auto">
@@ -1092,22 +1152,14 @@ function renderDraftFields() {
     updateSelectionButtons();
     refreshDraftSoon();
   });
-  // Bore: "Auto" beside Width / Length stretches that side to the full bin floor.
-  $$('[data-action="auto-size"]', $("#draft-fields")).forEach(button => button.addEventListener("click", () => {
-    const key = button.dataset.key;
-    const [insideX, insideY] = binInsideExtent(state.design.box);
-    const zone = state.draft.zone;
-    if (key === "width") {
-      state.draft.zone = [-insideX / 2, zone[1], insideX / 2, zone[3]];
-    } else {
-      state.draft.zone = [zone[0], -insideY / 2, zone[2], insideY / 2];
-    }
-    const input = $(`[data-draft="${key}"]`, $("#draft-fields"));
-    if (input) input.value = fmt(key === "width" ? insideX : insideY);
-    state.draftAutoCommit = true;
-    updateSelectionButtons();
-    refreshDraftSoon();
-  }));
+  // The three per-part auto-size buttons (see renderFitActions).
+  const fitBtn = $('[data-action="fit-part"]', $("#draft-fields"));
+  if (fitBtn) fitBtn.addEventListener("click", fitPartToContents);
+  const fillBtn = $('[data-action="fill-part"]', $("#draft-fields"));
+  if (fillBtn) fillBtn.addEventListener("click", fillPartToBin);
+  const growBtn = $('[data-action="grow-bin"]', $("#draft-fields"));
+  if (growBtn) growBtn.addEventListener("click", autoExpandBin);
+  updateFitActions();
   // Bore: "Auto" beside an X / Y quantity hands that count back to the fitter.
   $$('[data-action="auto-option"]', $("#draft-fields")).forEach(button => button.addEventListener("click", () => {
     const key = button.dataset.key;
@@ -1839,6 +1891,77 @@ function updateAutoExpandButton() {
     state.design?.layout?.features?.length || state.draft
   );
   $("#auto-expand-bin").hidden = !(state.fitError && hasParts);
+  updateFitActions();
+}
+
+// The auto-size row inside an interior-part editor. Which of the three buttons
+// a kind gets is fixed; which is currently shown tracks whether the part fits.
+//   fit-part  - resize the footprint to exactly its contents (holes/pegs/slots)
+//   fill-part - stretch the footprint to the whole bin floor
+//   grow-bin  - enlarge the bin instead
+// fit-part and grow-bin are opposites: one shows while the other hides.
+const FIT_PART_KINDS = { bore: "holes", post: "pegs", slot: "slots" };
+const FILL_PART_KINDS = new Set(["bore", "pocket", "slot", "steps"]);
+
+function renderFitActions(one) {
+  const kind = one.kind;
+  const title = escapeHtml(partInfo(kind)?.title || kind);
+  const rows = [];
+  if (FIT_PART_KINDS[kind]) {
+    rows.push(`<button type="button" class="button secondary" data-action="fit-part" hidden>Fit this ${title} to its ${FIT_PART_KINDS[kind]}</button>`);
+  }
+  if (FILL_PART_KINDS.has(kind)) {
+    rows.push(`<button type="button" class="button secondary" data-action="fill-part" hidden>Expand this ${title} to the whole bin</button>`);
+  }
+  rows.push(`<button type="button" class="button secondary" data-action="grow-bin" hidden>Grow the bin to fit this ${title}</button>`);
+  return `<div class="fit-actions wide">${rows.join("")}</div>`;
+}
+
+function updateFitActions() {
+  const container = $(".fit-actions", $("#draft-fields"));
+  if (!container || !state.draft) return;
+  const fits = !state.fitError;
+  const fitBtn = $('[data-action="fit-part"]', container);
+  const fillBtn = $('[data-action="fill-part"]', container);
+  const growBtn = $('[data-action="grow-bin"]', container);
+  if (fitBtn) fitBtn.hidden = !fits;
+  if (growBtn) growBtn.hidden = fits;
+  if (fillBtn) {
+    const [insideX, insideY] = binInsideExtent(state.design.box);
+    const z = state.draft.zone;
+    const alreadyFull = Math.abs((z[2] - z[0]) - insideX) < 0.5
+      && Math.abs((z[3] - z[1]) - insideY) < 0.5;
+    fillBtn.hidden = alreadyFull;
+  }
+}
+
+async function fitPartToContents() {
+  if (!state.draft) return;
+  try {
+    const result = await api("/api/feature/fit", {
+      design: state.design, feature: state.draft,
+    });
+    const zone = result.feature.zone;
+    const unchanged = state.draft.zone.every((v, i) => Math.abs(v - zone[i]) < 0.05);
+    state.draft.zone = zone;
+    renderDraftFields();
+    state.draftAutoCommit = true;
+    updateSelectionButtons();
+    refreshDraftSoon();
+    if (unchanged) toast("Already a snug fit — nothing to trim.");
+  } catch (error) {
+    toast(error.message, true, 5000);
+  }
+}
+
+function fillPartToBin() {
+  if (!state.draft) return;
+  const [insideX, insideY] = binInsideExtent(state.design.box);
+  state.draft.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
+  renderDraftFields();
+  state.draftAutoCommit = true;
+  updateSelectionButtons();
+  refreshDraftSoon();
 }
 
 async function autoExpandBin() {
@@ -2874,8 +2997,18 @@ async function generate(path, selector) {
       connector: state.connector,
     };
     const result = await api(path, payload);
+    if (result.connector_plan) renderConnectorReadout(result.connector_plan);
     const files = collectOutputs(result.result);
-    toast(`Saved to ${result.output}${files.length ? `\n${files.join("\n")}` : ""}`, false, 7000);
+    const plan = result.connector_plan;
+    const planNote = plan && plan.webbed
+      ? `\nConnector: ${fmt(plan.length_mm)} mm long, ${fmt(plan.web_thickness_mm)} mm web, `
+        + `${fmt(plan.printed_height_mm)} mm printed height`
+      : "";
+    toast(
+      `Saved to ${result.output}${files.length ? `\n${files.join("\n")}` : ""}${planNote}`,
+      false,
+      7000,
+    );
   } catch (error) {
     setError(error.message);
     toast(error.message, true, 7000);

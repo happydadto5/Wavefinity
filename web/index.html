@@ -93,12 +93,13 @@
         <div class="section-body">
           <label class="check-card">
             <input id="different-height-bins" type="checkbox">
-            <span><strong>Different height bins?</strong><small>Extend the arm over the shorter bin so both sides lock.</small></span>
+            <span><strong>Different height bins?</strong><small>The clip fattens and lengthens itself to bridge the gap where the shorter bin's wall stops.</small></span>
           </label>
           <div id="connector-bin-heights" class="field-grid two" hidden>
-            <label>Bin A height <span class="unit">mm</span><input id="connector-bin-a-height" type="number" min="2" step="1"></label>
-            <label>Bin B height <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>
+            <label>This bin (A) <span class="unit">mm</span><input id="connector-bin-a-height" type="number" min="2" step="1" readonly></label>
+            <label>Other bin (B) <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>
           </div>
+          <dl id="connector-derived" class="derived-readout" hidden></dl>
           <div class="field-grid two">
             <label>Connector tolerance <span class="unit">mm</span><input id="connector-tolerance" type="number" min="0" max="1" step="0.01"></label>
             <label>Connector length <span class="unit">mm</span><input id="connector-length" type="number" min="2" step="1"></label>

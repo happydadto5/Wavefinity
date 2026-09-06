@@ -990,12 +990,23 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     item = _need_item(one)
     if _is_hex_bit(item.profile):
         hole = min(HEX_BIT_HOLD[item.profile], box.z - base_z - 2.0)
+        held = HEX_BIT_FLATS + HEX_BIT_CLEARANCE
     else:
         hole = min(item.length * 0.4, box.z - base_z - 2.0)
+        held = item.held(item.widest)
+    wall = float(one.options.get("wall", BORE_WALL))
+    pitch = held + wall
+    cols = _fit_count(one.zone.width, pitch, held + wall)
+    rows = _fit_count(one.zone.depth, pitch, held + wall)
+    if one.count is not None:
+        cols = min(cols, one.count)
+        rows = max(1, math.ceil(one.count / max(cols, 1)))
     return {
         "depth": hole,
         "wall": BORE_WALL,
         "height": one.options.get("depth", hole) + 2.0,
+        "columns": float(max(1, cols)),
+        "rows": float(max(1, rows)),
         # 90 degrees is straight up; a shallower angle leans a single row of
         # round or square holes so tubes rest at a slant.
         "angle": 90.0,
@@ -2225,6 +2236,69 @@ _FOOTPRINT_BUILDERS = {
     "divider": _divider_footprint,
     TEXT_KIND: _text_footprint,
 }
+
+
+def feature_min_footprint(
+    box: BoxSpec, one: Feature, base_z: float = 0.0,
+) -> tuple[float, float] | None:
+    """The smallest ``(width, depth)`` mm a feature needs for everything it
+    builds - its hole grid, its row of pegs, its bank of slots, its tool.
+
+    ``None`` for kinds with no such natural size (pocket, steps, photo nest,
+    divider, text): "fit this part to its contents" means nothing for them.
+
+    Unlike :func:`feature_footprint`, this is never clamped to the current
+    zone - it is the size the editor's "fit to contents" button resizes the
+    zone *to*, growing it when the zone was drawn too small.
+    """
+    kind = one.kind
+
+    if kind == "cradle":
+        return cradle_min_footprint(one) if one.item is not None else None
+
+    if kind == "bore":
+        item = one.item
+        if item is None:
+            return None
+        options = resolved_options(box, one, base_z)
+        held = (HEX_BIT_FLATS + HEX_BIT_CLEARANCE
+                if _is_hex_bit(item.profile) else item.held(item.widest))
+        wall = float(options["wall"])
+        pitch = held + wall
+        raw_c, raw_r = one.options.get("columns"), one.options.get("rows")
+        columns = (max(1, int(round(float(raw_c)))) if raw_c is not None
+                   else max(1, _fit_count(one.zone.width, pitch, held + wall)))
+        rows = (max(1, int(round(float(raw_r)))) if raw_r is not None
+                else max(1, _fit_count(one.zone.depth, pitch, held + wall)))
+        angle = float(options.get("angle", 90.0))
+        reach = (float(options["depth"]) * math.sin(math.radians(90.0 - angle))
+                 if angle < 90.0 else 0.0)
+        width = columns * pitch + (reach if one.along == "x" else 0.0)
+        depth = rows * pitch + (reach if one.along == "y" else 0.0)
+        return (width, depth)
+
+    if kind == "post":
+        options = resolved_options(box, one, base_z)
+        diameter, spacing = float(options["diameter"]), float(options["spacing"])
+        count = one.count or 1
+        used = count * diameter + (count - 1) * spacing
+        return (used, diameter) if one.along == "x" else (diameter, used)
+
+    if kind == "slot":
+        options = resolved_options(box, one, base_z)
+        thickness, wall = float(options["thickness"]), float(options["wall"])
+        cos_a = math.cos(math.radians(float(options.get("angle", 20.0))))
+        pitch = (thickness + wall) / cos_a
+        run = one.zone.width if one.along == "x" else one.zone.depth
+        if one.count is not None:
+            count = one.count
+        else:
+            across_now = one.zone.depth if one.along == "x" else one.zone.width
+            count = max(1, int((across_now - 2.0 * wall - thickness / cos_a) // pitch) + 1)
+        across = (count - 1) * pitch + thickness / cos_a + 2.0 * wall
+        return (run, across) if one.along == "x" else (across, run)
+
+    return None
 
 
 def feature_footprint(box: BoxSpec, one: Feature, base_z: float = 0.0) -> Zone:

@@ -147,6 +147,25 @@ class WebApplicationTests(unittest.TestCase):
             })
             self.assertEqual(generate.call_args.args[-2:], (40.0, 20.0))
 
+    def test_bin_a_height_is_always_this_bin_not_the_payload(self):
+        design = default_design()
+        design["box"]["z"] = 30.0
+        with patch.object(wavefinity_web, "generate_side_file", return_value={}) as generate:
+            result = wavefinity_web.connector_payload({
+                "design": design,
+                "connector": {
+                    "different_heights": True, "bin_a_height": 99.0,
+                    "bin_b_height": 20.0,
+                },
+            })
+        # Bin A follows the box (30), not the stale 99 in the payload.
+        self.assertEqual(generate.call_args.args[-2:], (30.0, 20.0))
+        plan = result["connector_plan"]
+        self.assertEqual(plan["drop_mm"], 10.0)
+        self.assertGreater(plan["length_mm"], plan["base_length_mm"])
+        self.assertGreater(plan["web_thickness_mm"], plan["arm_thickness_mm"])
+        self.assertEqual(plan["shorter_bin"], "B")
+
     def test_default_draft_changes_real_geometry_when_height_changes(self):
         design = default_design()
         feature = default_feature_payload({"design": design, "kind": "pocket"})["feature"]
