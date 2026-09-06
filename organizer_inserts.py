@@ -1261,24 +1261,30 @@ def _divider_support_bottoms(
 ) -> list[trimesh.Trimesh]:
     """Sloped support under each tool slot so a tool rests tilted, not flat.
 
-    ``angle`` degrees of rise runs along the divider/tool direction: +X (to
-    the right) for a divider that runs along x, +Y (to the back) along y.
-    ``reverse`` sends the rise the other way; ``alternate`` flips every second
-    slot, ordered across the divider zone, and ``reverse`` then flips that
-    whole pattern. A full bottom is one continuous wedge per slot; ``minimal``
-    replaces it with ``supports`` evenly spaced crossbars that touch the same
-    sloped plane but print without support - vertical stems with 45-degree
-    gussets where they meet the floor - and use materially less plastic. The
-    normal bin or insert floor is untouched; this is only the material above
-    it. Solids sink ``BOTTOM_EMBED`` into the floor for a clean union.
+    ``angle`` is signed: positive rises along the divider/tool direction - +X
+    (to the right) for a divider that runs along x, +Y (to the back) along y -
+    and negative rises the other way, toward the left or front. ``reverse``
+    flips that whole pattern once more (kept for older saved designs that set
+    it as a separate flag); ``alternate`` flips every second slot, ordered
+    across the divider zone. A full bottom is one continuous wedge per slot;
+    ``minimal`` replaces it with ``supports`` evenly spaced crossbars that
+    touch the same sloped plane but print without support - vertical stems
+    with 45-degree gussets where they meet the floor - and use materially less
+    plastic. The normal bin or insert floor is untouched; this is only the
+    material above it. Solids sink ``BOTTOM_EMBED`` into the floor for a clean
+    union.
     """
-    if not math.isfinite(angle) or angle < 0.0 or angle > BOTTOM_SLOPE_MAX:
+    if not math.isfinite(angle) or abs(angle) > BOTTOM_SLOPE_MAX:
         raise ValueError(
-            f"bottom slope must be between 0 and {BOTTOM_SLOPE_MAX:g} degrees; "
-            "reduce the bottom slope"
+            f"the slope must be within {BOTTOM_SLOPE_MAX:g} degrees either way; "
+            "reduce the slope"
         )
     if angle == 0.0:
         return []
+    # A negative slope just points the rise the other way - same wedge,
+    # mirrored - so fold its sign into ``reverse`` and work with a magnitude.
+    reverse = bool(reverse) ^ (angle < 0.0)
+    angle = abs(angle)
     if minimal and supports < 1:
         raise ValueError("number of crossbars must be a positive whole number")
     run = zone.width if along == "x" else zone.depth
@@ -1335,11 +1341,13 @@ def _divider_wall(
     overhang with no more material at its base than anywhere else along its
     height - exactly the shape that snaps off under the sideways load of
     whatever is leaning against it. The default instead builds a wedge: the
-    back face stays vertical and only the leaning face slopes, so the wall
-    is thickest right where that load actually bears - at the floor - and
-    tapers away toward the top, the shape a physical gusset or bracket would
-    use. ``wedge=False`` gets the plain sheared wall instead: uniform
-    thickness throughout, for the rare case that is genuinely wanted.
+    top keeps the asked-for ``thickness`` and leans over by ``lean``, while
+    the base widens on the trailing side to a vertical face, so the wall is
+    thickest right where that load actually bears - at the floor - and
+    slims to the asked-for thickness at the top, the shape a physical gusset
+    or bracket would use. ``wedge=False`` gets the plain sheared wall
+    instead: uniform thickness throughout, for the rare case that is
+    genuinely wanted.
 
     Every divider - wedge, straight or plain vertical - also gets a
     ``DIVIDER_CHAMFER`` 45-degree foot where it meets the floor: the two
@@ -1363,17 +1371,19 @@ def _divider_wall(
     lean = height * math.tan(math.radians(angle))
     half_t = thickness / 2.0
     base_low, base_high = cross_centre - half_t, cross_centre + half_t
+    if thickness < MIN_WEDGE_EDGE:
+        raise ValueError(
+            f"a divider must be at least {MIN_WEDGE_EDGE:g} mm thick"
+        )
     if spec_feature.wedge:
+        # The top slab keeps the asked-for thickness but leans over by
+        # ``lean``; the base holds one face vertical and widens on the
+        # trailing side to meet it, so the wedge is thick at the floor.
+        top_low, top_high = base_low + lean, base_high + lean
         if lean >= 0.0:
-            top_low, top_high = base_low, base_high - lean
+            base_high = top_high
         else:
-            top_low, top_high = base_low - lean, base_high
-        if top_high - top_low < MIN_WEDGE_EDGE:
-            raise ValueError(
-                f"that angle and height taper the divider to less than "
-                f"{MIN_WEDGE_EDGE:g} mm at the top; reduce the angle or "
-                "increase the thickness"
-            )
+            base_low = top_low
     else:
         top_low, top_high = base_low + lean, base_high + lean
     # Where the wall's own (un-chamfered) line would sit at chamfer height -
@@ -2031,7 +2041,7 @@ def _divider_footprint(box: BoxSpec, one: Feature, base_z: float) -> Zone | None
     low, high = min(centres) - margin, max(centres) + margin
     # A sloped bottom fills the whole zone cross span between the walls, not
     # just the strip the walls stand on, so it does claim those compartments.
-    if float(options.get("bottom_angle", 0.0) or 0.0) > 0.0:
+    if float(options.get("bottom_angle", 0.0) or 0.0) != 0.0:
         if one.along == "x":
             low, high = min(low, zone.y0), max(high, zone.y1)
         else:

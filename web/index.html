@@ -76,7 +76,6 @@
               <span id="draft-status" class="quiet-status"></span>
             </div>
             <p id="draft-description" class="muted"></p>
-            <p class="field-help">Shown live, highlighted, in the preview to the right - and saved into the bin automatically as you go.</p>
             <div id="draft-fields" class="draft-fields"></div>
           </div>
 
@@ -141,10 +140,18 @@
         <canvas id="preview-3d" role="img" aria-label="3D design preview" aria-describedby="preview-help"></canvas>
         <div class="camera-controls" aria-label="3D view controls">
           <div class="camera-views">
-            <button type="button" data-camera-view="top">Top</button>
-            <button type="button" data-camera-view="front">Front</button>
-            <button type="button" data-camera-view="side">Side</button>
-            <button type="button" data-camera-view="reset">Reset</button>
+            <div class="camera-views-row">
+              <button type="button" data-camera-view="top">Top</button>
+              <button type="button" data-camera-view="front">Front</button>
+              <button type="button" data-camera-view="side">Side</button>
+              <button type="button" data-camera-view="reset">Reset</button>
+            </div>
+            <div class="camera-views-row">
+              <button type="button" data-preview-mode="standard" class="active">Standard</button>
+              <button type="button" data-preview-mode="xray">Xray</button>
+              <button type="button" data-preview-mode="bin">Bin</button>
+              <button type="button" data-preview-mode="interior">Interior</button>
+            </div>
           </div>
           <div class="zoom-controls">
             <button type="button" data-camera-zoom="out" aria-label="Zoom out">−</button>

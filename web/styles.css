@@ -163,15 +163,15 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .placed-block h3 { margin: 15px 0 8px; font-size: 13px; }
 .placed-supports { display: grid; gap: 5px; }
 .placed-empty { border: 1px dashed var(--line-dark); border-radius: 7px; padding: 12px; color: var(--muted); text-align: center; font-size: 12px; }
-.placed-item { border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px; background: white; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.placed-item { border: 1px solid var(--line); border-radius: 8px; background: white; display: flex; justify-content: space-between; align-items: stretch; gap: 0; }
 .placed-item.selected { border-color: #d58d21; box-shadow: 0 0 0 2px rgba(240,169,60,.35); background: #fffaf0; }
-.placed-item-select { flex: 1; min-width: 0; border: 0; background: none; padding: 3px; text-align: left; cursor: pointer; display: flex; align-items: center; gap: 9px; }
-.placed-item-icon { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border-radius: 7px; color: var(--support-color); background: color-mix(in srgb, var(--support-color) 14%, white); }
-.placed-item-icon svg { width: 26px; height: 26px; stroke: currentColor; fill: none; stroke-width: 1.8; }
-.placed-item-copy { display: flex; flex-direction: column; min-width: 0; }
+.placed-item-select { flex: 1; min-width: 0; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; display: flex; align-items: stretch; gap: 0; }
+.placed-item-icon { display: grid; place-items: center; flex: 0 0 auto; width: 80px; border-radius: 8px 0 0 8px; color: var(--support-color); background: color-mix(in srgb, var(--support-color) 14%, white); }
+.placed-item-icon svg { width: 48px; height: 48px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+.placed-item-copy { display: flex; flex-direction: column; min-width: 0; flex: 1; padding: 10px 12px; justify-content: center; }
 .placed-item-copy strong { color: var(--ink); font-size: 12px; }
 .placed-item-copy span { color: var(--muted); font-size: 11px; }
-.placed-item-delete { flex: none; border: 0; border-radius: 6px; background: none; color: var(--danger); font-size: 13px; line-height: 1; padding: 7px 8px; cursor: pointer; }
+.placed-item-delete { flex: none; border: 0; border-radius: 0 8px 8px 0; background: none; color: var(--danger); font-size: 16px; line-height: 1; padding: 0 8px; cursor: pointer; display: grid; place-items: center; }
 .placed-item-delete:hover { background: #fff0ef; }
 
 .check-card { display: flex; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfc; cursor: pointer; }
@@ -203,8 +203,11 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .canvas-wrap.active { display: block; }
 .canvas-wrap canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 .camera-controls { position: absolute; top: 16px; left: 16px; display: flex; gap: 8px; z-index: 2; }
-.camera-views, .zoom-controls { display: flex; overflow: hidden; border: 1px solid var(--line-dark); border-radius: 8px; background: rgba(255,255,255,.92); box-shadow: 0 3px 12px rgba(30,51,61,.08); backdrop-filter: blur(6px); }
-.camera-controls button { min-width: 38px; border: 0; border-right: 1px solid var(--line); padding: 7px 9px; background: transparent; cursor: pointer; color: var(--muted); font-size: 11px; font-weight: 700; }
+.camera-views, .zoom-controls { display: flex; overflow: hidden; border: 1px solid var(--line-dark); border-radius: 8px; background: rgba(255,255,255,.92); box-shadow: 0 3px 12px rgba(30,51,61,.08); backdrop-filter: blur(6px); align-self: flex-start; }
+.camera-views { flex-direction: column; }
+.camera-views-row { display: flex; }
+.camera-views-row:not(:last-child) { border-bottom: 1px solid var(--line); }
+.camera-controls button { min-width: 38px; border: 0; border-right: 1px solid var(--line); padding: 7px 9px; background: transparent; cursor: pointer; color: var(--muted); font-size: 11px; font-weight: 700; flex: 1; text-align: center; }
 .camera-controls button:last-child { border-right: 0; }
 .camera-controls button:hover, .camera-controls button.active { background: var(--teal-soft); color: var(--teal-dark); }
 .zoom-controls button { font-size: 17px; line-height: 1; }

@@ -785,7 +785,7 @@ class AngledDividerTests(unittest.TestCase):
         chamfer_volume = DIVIDER_CHAMFER ** 2 * 30.0
         self.assertAlmostEqual(mesh.volume, self.thickness * height * 30.0 + chamfer_volume, places=1)
 
-    def test_the_default_wedge_is_thick_at_the_floor_and_tapers_as_it_rises(
+    def test_the_default_wedge_keeps_its_top_width_and_widens_at_the_floor(
         self,
     ) -> None:
         zone = Zone(-15.0, -self.thickness / 2.0, 15.0, self.thickness / 2.0)
@@ -798,16 +798,21 @@ class AngledDividerTests(unittest.TestCase):
         mesh = build_features(self.box, [one], self.box.base_thickness)[0]
         self.assertTrue(mesh.is_watertight)
         lean = height * math.tan(math.radians(angle))
-        back = None
+        front = None
         for frac in (0.2, 0.5, 0.95):
             z = self.box.base_thickness + frac * height
             lo, hi = self._cross_section(mesh, z, "x")
-            # the back face never moves
-            back = lo if back is None else back
-            self.assertAlmostEqual(lo, back, places=3)
-            # the leaning face narrows the cross-section as height increases
-            self.assertAlmostEqual(hi - lo, self.thickness - frac * lean, places=2)
-        # strictly less material than the straight wall covering the same lean
+            # the face the load leans into stays vertical - it never moves
+            front = hi if front is None else front
+            self.assertAlmostEqual(hi, front, places=3)
+            # widest at the floor, tapering back to the asked-for width up top
+            self.assertAlmostEqual(hi - lo, self.thickness + (1.0 - frac) * lean, places=2)
+        # right at the top the wedge is exactly the width that was asked for
+        lo, hi = self._cross_section(
+            mesh, self.box.base_thickness + height - 1e-3, "x")
+        self.assertAlmostEqual(hi - lo, self.thickness, places=2)
+        # it uses more material than the plain sheared wall - the extra is
+        # the gusset packed in at the base
         straight = build_features(
             self.box,
             [Feature("divider", zone, along="x", wedge=False,
@@ -815,7 +820,7 @@ class AngledDividerTests(unittest.TestCase):
                                "height": height})],
             self.box.base_thickness,
         )[0]
-        self.assertLess(mesh.volume, straight.volume)
+        self.assertGreater(mesh.volume, straight.volume)
 
     def test_a_negative_angle_leans_the_wedge_the_other_way(self) -> None:
         zone = Zone(-15.0, -self.thickness / 2.0, 15.0, self.thickness / 2.0)
@@ -825,13 +830,16 @@ class AngledDividerTests(unittest.TestCase):
             options={"angle": angle, "thickness": self.thickness, "height": height},
         )
         mesh = build_features(self.box, [one], self.box.base_thickness)[0]
-        front = None
+        self.assertTrue(mesh.is_watertight)
+        lean = abs(height * math.tan(math.radians(angle)))
+        back = None
         for frac in (0.2, 0.95):
             z = self.box.base_thickness + frac * height
             lo, hi = self._cross_section(mesh, z, "x")
-            front = hi if front is None else front
-            # this time the *high* face stays put and the low face sweeps up
-            self.assertAlmostEqual(hi, front, places=3)
+            # this time the low face is the vertical one that stays put
+            back = lo if back is None else back
+            self.assertAlmostEqual(lo, back, places=3)
+            self.assertAlmostEqual(hi - lo, self.thickness + (1.0 - frac) * lean, places=2)
 
     def test_along_y_mirrors_along_x(self) -> None:
         zone = Zone(-self.thickness / 2.0, -15.0, self.thickness / 2.0, 15.0)
@@ -841,12 +849,12 @@ class AngledDividerTests(unittest.TestCase):
             options={"angle": angle, "thickness": self.thickness, "height": height},
         )
         mesh = build_features(self.box, [one], self.box.base_thickness)[0]
-        back = None
+        front = None
         for frac in (0.2, 0.95):
             z = self.box.base_thickness + frac * height
             lo, hi = self._cross_section(mesh, z, "y")
-            back = lo if back is None else back
-            self.assertAlmostEqual(lo, back, places=3)
+            front = hi if front is None else front
+            self.assertAlmostEqual(hi, front, places=3)
 
     def test_an_angle_past_the_printable_limit_is_refused(self) -> None:
         zone = Zone(-15.0, -1.0, 15.0, 1.0)
@@ -855,13 +863,30 @@ class AngledDividerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "45 degrees"):
                 build_features(self.box, [one], self.box.base_thickness)
 
-    def test_a_wedge_tapered_past_its_own_thickness_is_refused(self) -> None:
+    def test_a_steep_lean_widens_the_wedge_base_instead_of_being_refused(self) -> None:
+        zone = Zone(-15.0, -1.0, 15.0, 1.0)
+        thickness, height, angle = 2.0, 30.0, 44.0
+        one = Feature(
+            "divider", zone, along="x",
+            options={"angle": angle, "thickness": thickness, "height": height},
+        )
+        mesh = build_features(self.box, [one], self.box.base_thickness)[0]
+        self.assertTrue(mesh.is_watertight)
+        lean = height * math.tan(math.radians(angle))
+        lo, hi = self._cross_section(
+            mesh, self.box.base_thickness + height - 1e-3, "x")
+        self.assertAlmostEqual(hi - lo, thickness, places=2)
+        lo, hi = self._cross_section(
+            mesh, self.box.base_thickness + 2.0, "x")
+        self.assertGreater(hi - lo, thickness + 0.5 * lean)
+
+    def test_a_sub_millimetre_divider_is_refused(self) -> None:
         zone = Zone(-15.0, -1.0, 15.0, 1.0)
         one = Feature(
             "divider", zone, along="x",
-            options={"angle": 44.0, "thickness": 2.0, "height": 30.0},
+            options={"angle": 20.0, "thickness": 0.3, "height": 8.0},
         )
-        with self.assertRaisesRegex(ValueError, "taper"):
+        with self.assertRaisesRegex(ValueError, "0.4 mm thick"):
             build_features(self.box, [one], self.box.base_thickness)
 
     def test_wedge_round_trips_through_the_saved_design_schema(self) -> None:
@@ -1178,12 +1203,25 @@ class DividerBottomSlopeTests(unittest.TestCase):
         for solid in bottoms:
             self.assertTrue(solid.is_watertight)
 
-    def test_negative_and_over_45_values_fail_clearly(self) -> None:
+    def test_a_negative_slope_mirrors_the_wedge(self) -> None:
+        zone = Zone(-20.0, -20.0, 20.0, 20.0)
+        _w, up = self._walls_and_bottoms(
+            zone, count=1, along="x", options={"bottom_angle": 20.0})
+        _w, down = self._walls_and_bottoms(
+            zone, count=1, along="x", options={"bottom_angle": -20.0})
+        for solid in up:
+            low_z, high_z = self._ends(solid, 0)
+            self.assertGreater(high_z, low_z + 1.0)
+        for solid in down:
+            low_z, high_z = self._ends(solid, 0)
+            self.assertGreater(low_z, high_z + 1.0)
+
+    def test_over_45_and_non_finite_values_fail_clearly(self) -> None:
         zone = Zone(-15.0, -20.0, 15.0, 20.0)
-        for bad in (-1.0, 45.5, math.nan):
+        for bad in (45.5, -45.5, math.nan):
             one = Feature("divider", zone, along="x", count=1,
                           options={"bottom_angle": bad})
-            with self.assertRaisesRegex(ValueError, "between 0 and 45 degrees"):
+            with self.assertRaisesRegex(ValueError, "within 45 degrees either way"):
                 build_features(self.box, [one], self.box.base_thickness)
 
     def test_excessive_rise_fails_clearly(self) -> None:
@@ -1293,7 +1331,10 @@ class FullSpanLeaningDividerTests(unittest.TestCase):
         worst = 0.0
         for frac in (0.02, 0.3, 0.6, 0.98):
             z = self.box.base_thickness + frac * self.height
-            y_low, y_high = -half_t, half_t - frac * lean
+            # the wedge keeps its width up top and widens at the floor: the
+            # leaning face sweeps from -half_t at the base to -half_t + lean
+            # at the top, while the trailing face sits vertical at half_t + lean
+            y_low, y_high = -half_t + frac * lean, half_t + lean
             lines = mesh_plane(
                 solid, plane_normal=np.array([0.0, 0.0, 1.0]),
                 plane_origin=np.array([0.0, 0.0, z]),
@@ -1341,15 +1382,15 @@ class FullSpanLeaningDividerTests(unittest.TestCase):
         for solid in pieces:
             self.assertTrue(solid.is_watertight)
 
-    def test_still_refuses_an_angle_past_the_limit_and_a_collapsed_wedge(self) -> None:
+    def test_still_refuses_an_angle_past_the_limit_and_a_paper_thin_wall(self) -> None:
         with self.assertRaisesRegex(ValueError, "45 degrees"):
             build_features(
                 self.box, [self._feature(options={"angle": 46.0})], self.box.base_thickness
             )
-        with self.assertRaisesRegex(ValueError, "taper"):
+        with self.assertRaisesRegex(ValueError, "0.4 mm thick"):
             build_features(
                 self.box,
-                [self._feature(options={"thickness": 1.6, "height": 30.0, "angle": 30.0})],
+                [self._feature(options={"thickness": 0.3, "height": 30.0, "angle": 30.0})],
                 self.box.base_thickness,
             )
 

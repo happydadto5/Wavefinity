@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026-09-06 — Divider slope is signed; Wall lean moved last
+
+- The divider's **Bottom slope °** field is now just **Slope °(±)**. A
+  positive value tilts the tool-slot bottoms up toward the right or back
+  (unchanged); a negative value tilts them toward the left or front.
+  `_divider_support_bottoms` folds the sign into its `reverse` flag and
+  works on the magnitude, so `reverse_bottom` from older saved designs still
+  applies on top. The out-of-range message is now "within 45 degrees either
+  way".
+- The **Reverse slope** checkbox is gone — a negative **Slope** does the same
+  thing. `reverse_bottom` stays a valid stored/API option for backward
+  compatibility; the browser editor just no longer shows a control for it.
+- Browser editor: **Slope °(±)** now steps a whole degree on the mouse wheel
+  and spinners (was 0.1°). **Wall lean °** and its **Wedge / Straight**
+  choice are now the *last* divider settings, so revealing the wedge options
+  no longer pushes Spacing and Slope down the panel.
+- A divider's footprint is re-stretched to the bin's usable inside on every
+  rebuild, so the walls re-space evenly after the bin is resized or a wall
+  lean is added (a lean needs more room between wall centres). Matches how a
+  divider is first laid out.
+
+## 2026-09-06 — Leaning-divider wedge reworked
+
+- A leaning **wedge** divider now keeps the asked-for **Width** at its *top*
+  and widens its *base* to accommodate the lean, instead of holding the base
+  at Width and tapering the top toward nothing. `_divider_wall` builds the
+  top slab at full thickness shifted over by `lean`, then drops one face
+  vertical and widens the trailing face to meet it, so the gusset sits where
+  the sideways load bears — at the floor. Positive lean holds the
+  leaned-into (high) face vertical; negative lean holds the low face.
+- The old "wedge tapered past its own thickness" refusal is gone (the top no
+  longer tapers). The only wall-thickness floor now is `MIN_WEDGE_EDGE`
+  (0.4 mm), applied to plain, wedge and straight dividers alike.
+- Browser editor: the **Wedge / Straight** choice is hidden entirely until
+  **Wall lean °** is non-zero. Mouse-wheel / spinner steps are now 1° for
+  **Wall lean °** and 0.5 mm for a divider's **Width** (were 0.1). The old
+  auto-nudge that widened Width when a steep lean would have collapsed the
+  wedge top is removed — no longer needed.
+
 ## 2026-09-06 — Divider sloped tool-slot bottoms
 
 - A divider can now tilt the **bottoms of the tool slots** it forms so a tool

@@ -3,11 +3,6 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
-// Mirrors organizer_inserts.py's MIN_WEDGE_EDGE - the thinnest a wedge
-// divider's tapered top may print. A small margin over the server's own
-// cutoff keeps float rounding from tripping the same error right back.
-const MIN_WEDGE_EDGE_MM = 0.45;
-
 function flashField(input) {
   if (!input) return;
   input.classList.remove("field-flash");
@@ -46,6 +41,7 @@ const state = {
   previewSupportPolygons: [],
   designMutationBusy: false,
   canGenerate: true,
+  previewMode: "standard",
   history: [],
   future: [],
   serverInstance: null,
@@ -453,8 +449,15 @@ function setCameraView(view) {
   renderPreview3D();
 }
 
+function setPreviewMode(mode) {
+  state.previewMode = mode;
+  $$('[data-preview-mode]').forEach(button => button.classList.toggle("active", button.dataset.previewMode === mode));
+  renderPreview3D();
+}
+
 function wireCameraControls() {
   $$('[data-camera-view]').forEach(button => button.addEventListener("click", () => setCameraView(button.dataset.cameraView)));
+  $$('[data-preview-mode]').forEach(button => button.addEventListener("click", () => setPreviewMode(button.dataset.previewMode)));
   $$('[data-camera-zoom]').forEach(button => button.addEventListener("click", () => {
     state.camera.zoom = Math.max(.35, Math.min(4, state.camera.zoom * (button.dataset.cameraZoom === "in" ? 1.2 : 1 / 1.2)));
     renderPreview3D();
@@ -812,23 +815,37 @@ function renderDraftFields() {
       : explicit
       ? one.options[option.key]
       : state.draftResolvedOptions?.[option.key] ?? option.default;
-    html += field(option.label, `option:${option.key}`, shown, autoHint ? { placeholder: autoHint } : {});
+    // Mouse-wheel / spinner steps: lean and slope a whole degree, width
+    // half a mm.
+    const stepFor = { angle: "1" };
+    if (info.kind === "divider") {
+      stepFor.thickness = "0.5";
+      stepFor.bottom_angle = "1";
+    }
+    const fieldOpts = {};
+    if (autoHint) fieldOpts.placeholder = autoHint;
+    if (stepFor[option.key]) fieldOpts.step = stepFor[option.key];
+    html += field(option.label, `option:${option.key}`, shown, fieldOpts);
     if (option.key === "angle") {
-      html += `<fieldset class="wide"><legend>Leaning shape</legend><div class="segmented two">
+      // The wedge-vs-straight choice only means anything once the wall
+      // leans, so it stays hidden until the lean above is non-zero
+      // (updateDraftFromFields re-toggles this as the field changes).
+      const leanNow = number(
+        one.options?.angle ?? state.draftResolvedOptions?.angle ?? shown, 0,
+      );
+      html += `<fieldset id="leaning-shape" class="wide"${leanNow ? "" : " hidden"}><legend>Leaning shape</legend><div class="segmented two">
         <label><input type="radio" name="draft-wedge" value="wedge" ${one.wedge !== false ? "checked" : ""}><span>Wedge</span></label>
         <label><input type="radio" name="draft-wedge" value="straight" ${one.wedge === false ? "checked" : ""}><span>Straight</span></label>
-      </div></fieldset>
-      <p class="field-help">Only matters once the wall lean above is not zero. <strong>Wedge</strong> stays thick at the floor and tapers as it leans, so it takes the sideways push of whatever rests against it. <strong>Straight</strong> keeps the same thin thickness the whole way up and can snap off.</p>`;
+      </div>
+      <p class="field-help"><strong>Wedge</strong> keeps the asked-for width at the top and widens the base to carry the sideways push of whatever rests against it. <strong>Straight</strong> keeps the same thin thickness the whole way up and can snap off.</p></fieldset>`;
     }
     if (option.key === "bottom_angle") {
-      html += `<p class="field-help wide">Raises tools toward the right or back. Tilts the tool-slot bottoms only; separate from Wall lean above, which tilts the wall.</p>`;
+      html += `<p class="field-help wide">Tilts the tool-slot bottoms so a tool rests at an angle instead of flat. Positive raises tools toward the right or back; negative (set a minus value) raises them toward the left or front. Separate from Wall lean below, which tilts the whole wall.</p>`;
       const opt = one.options || {};
       const bottomCheck = (key, title, help, on) => `<label class="check-card wide">
         <input type="checkbox" data-draft="option:${key}" ${on ? "checked" : ""}>
         <span><strong>${title}</strong><small>${help}</small></span>
       </label>`;
-      html += bottomCheck("reverse_bottom", "Reverse slope",
-        "Raises tools toward the left or front instead.", opt.reverse_bottom === true);
       html += bottomCheck("alternate_bottom", "Alternate slopes",
         "Reverses every second tool slot.", opt.alternate_bottom === true);
       html += bottomCheck("minimal_bottom", "Use support crossbars",
@@ -1154,7 +1171,7 @@ function updateDraftFromFields(event) {
   // an older one keeps its plain flat bottom.
   if (one.kind === "divider") {
     const fields = $("#draft-fields");
-    for (const key of ["reverse_bottom", "alternate_bottom", "minimal_bottom"]) {
+    for (const key of ["alternate_bottom", "minimal_bottom"]) {
       const boxEl = $(`[data-draft="option:${key}"]`, fields);
       if (!boxEl) continue;
       if (boxEl.checked) one.options[key] = true;
@@ -1190,26 +1207,17 @@ function updateDraftFromFields(event) {
       const newD = innerD + 2 * newWall;
       one.zone = [cx - newW / 2, cy - newD / 2, cx + newW / 2, cy + newD / 2];
     }
-    if (info.kind === "divider" && key === "angle" && one.wedge !== false) {
-      // A wedge keeps its back face flat and only tapers the leaning face,
-      // so a steep angle on a tall divider can taper that face down to
-      // nothing before it reaches the top. Rather than block the angle,
-      // widen the wall (Width mm) just enough to keep a printable edge up
-      // there, and flash that field since its value just changed on its own.
-      const angle = one.options.angle ?? 0;
-      const height = one.options.height ?? state.draftResolvedOptions?.height;
-      if (Number.isFinite(angle) && Number.isFinite(height) && height > 0) {
-        const lean = Math.abs(height * Math.tan((angle * Math.PI) / 180));
-        const required = Math.ceil((lean + MIN_WEDGE_EDGE_MM) * 10) / 10;
-        const current = one.options.thickness ?? state.draftResolvedOptions?.thickness ?? 1.6;
-        if (required > current) {
-          one.options.thickness = required;
-          const thicknessField = $('[data-draft="option:thickness"]', $("#draft-fields"));
-          if (thicknessField) thicknessField.value = fmt(required);
-          flashField(thicknessField);
-          widenDividerFootprint(one);
-        }
-      }
+    if (info.kind === "divider" && key === "angle") {
+      // The wedge/straight choice only bites once the wall leans - show or
+      // hide it to match, without a full re-render that would steal focus
+      // from the field being typed into. A wedge now keeps the asked-for
+      // width at the top and just widens its base, so nothing here needs
+      // to nudge the thickness on the user's behalf any more.
+      const leaning = number(
+        one.options.angle ?? state.draftResolvedOptions?.angle ?? 0, 0,
+      ) !== 0;
+      const shape = $("#leaning-shape", $("#draft-fields"));
+      if (shape) shape.hidden = !leaning;
     }
     if (one.kind === "nest" && one.contour && ["clearance", "rim", "smoothing"].includes(key)) {
       syncNestZone(one);
@@ -1238,6 +1246,16 @@ async function refreshDraft() {
     $("#draft-status").classList.remove("error");
     refreshPreview();
     return;
+  }
+  // A divider always splits the whole bin, so keep its footprint pinned to
+  // the usable inside - re-stretched here every rebuild, which is what makes
+  // the walls re-space evenly after the bin is resized (or a wall lean is
+  // added, which needs more room between centres). Matches how default_feature
+  // first lays a divider out. Its run axis reaches past this rectangle to the
+  // wavy wall on its own; this only sets the axis the walls divide.
+  if (state.draft.kind === "divider") {
+    const [insideX, insideY] = binInsideExtent(state.design.box);
+    state.draft.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
   }
   const request = ++state.draftRequest;
   if (state.draft.kind === "nest") {
@@ -1710,12 +1728,58 @@ function drawGeometry(canvas, geometry, camera) {
     return;
   }
   const vector = cameraVector(camera);
+  const yawRad = camera.yaw * Math.PI / 180;
+  const camX = -Math.sin(yawRad);
+  const camY = -Math.cos(yawRad);
+
+  const isBinFace = kind =>
+    kind === "outside" || kind === "inside" || kind === "rim" || kind === "floor" ||
+    kind === "top_label_ledge" || kind === "label" || kind === "label_hole";
+
+  const isFacingSide = (face) => {
+    let sideX = 0, sideY = 0;
+    if (Math.abs(camX) >= Math.abs(camY)) {
+      sideX = camX > 0 ? 1 : -1;
+    } else {
+      sideY = camY > 0 ? 1 : -1;
+    }
+    const nx = face.normal[0], ny = face.normal[1];
+    if (sideX !== 0) {
+      if (sideX > 0 ? nx > 0.3 : nx < -0.3) return true;
+    }
+    if (sideY !== 0) {
+      if (sideY > 0 ? ny > 0.3 : ny < -0.3) return true;
+    }
+    let sumX = 0, sumY = 0;
+    for (const pt of face.points) {
+      sumX += pt[0];
+      sumY += pt[1];
+    }
+    const avgX = sumX / face.points.length;
+    const avgY = sumY / face.points.length;
+    const box = state.design?.box;
+    const hx = box ? number(box.x) / 2 : 1;
+    const hy = box ? number(box.y) / 2 : 1;
+    if (sideX > 0 && avgX > hx * 0.45) return true;
+    if (sideX < 0 && avgX < -hx * 0.45) return true;
+    if (sideY > 0 && avgY > hy * 0.45) return true;
+    if (sideY < 0 && avgY < -hy * 0.45) return true;
+    return false;
+  };
+
   const faces = geometry.map(face => {
     const points = face.points.map(point => iso(point, camera));
     const depth = face.points.reduce((sum, point) => sum + dot(point, vector), 0) / face.points.length;
     const facing = dot(face.normal, vector);
     return { ...face, projected: points, depth, facing };
-  }).filter(face => face.facing > 0 || face.kind === "label_hole");
+  }).filter(face => {
+    const isBin = isBinFace(face.kind);
+    const mode = state.previewMode || "standard";
+    if (mode === "bin" && !isBin) return false;
+    if (mode === "interior" && isBin) return false;
+    if (mode === "xray" && isBin && isFacingSide(face)) return false;
+    return face.facing > 0 || face.kind === "label_hole";
+  });
   if (!faces.length) return;
   // Lettering sits flush on one big surface (the floor, or the top-label
   // ledge). The painter sort compares face centroids, so a glyph near the edge
@@ -1768,7 +1832,7 @@ function drawGeometry(canvas, geometry, camera) {
     context.lineWidth = isDraft ? .6 : .35;
     context.stroke();
   }
-  drawUsableFloor(context, faces, camera, project);
+  drawUsableFloor(context, geometry, camera, project);
   draw3DDimensions(context, state.design?.box, camera, project);
 }
 
@@ -1777,9 +1841,10 @@ function drawGeometry(canvas, geometry, camera) {
 // returns - flat on the bin floor. The wavy cavity floor painted behind it is
 // larger, so a tool as long as the bin can still be rejected for want of room;
 // this makes that gap visible. The margin between the two is tinted.
-function drawUsableFloor(context, faces, camera, project) {
+function drawUsableFloor(context, geometry, camera, project) {
+  if (state.previewMode === "interior") return;
   const box = state.design?.box;
-  const floors = faces.filter(face => face.kind === "floor");
+  const floors = (geometry || []).filter(face => face.kind === "floor");
   if (!box || !floors.length) return;
   const floorZ = Math.max(
     ...floors.flatMap(face => face.points.map(point => point[2])),
