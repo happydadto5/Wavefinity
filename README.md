@@ -20,11 +20,14 @@ See [changelog.md](changelog.md) for dated implementation changes and
 
 ## Quick start
 
-Double-click `Launch_Organizer_UI.bat`. On its first run it creates a private
-`.venv` beside the app, installs the pinned geometry packages, starts the local
-Wavefinity service, and opens the browser interface. Later launches reuse that
-environment. The service listens only on `127.0.0.1`; it is not hosted on the
-internet and the browser never replaces the Python geometry engine.
+Double-click `Launch_Organizer_UI.vbs`. It starts Wavefinity without showing a
+command window. On its first run it creates a private `.venv` beside the app,
+installs the pinned geometry packages, starts the local Wavefinity service, and
+opens the browser interface. Later launches reuse that environment. The service
+listens only on `127.0.0.1`; it is not hosted on the internet and the browser
+never replaces the Python geometry engine. Use `Launch_Organizer_UI.bat` only
+when diagnosing a startup problem, because Windows must show a command window
+for a batch file run directly.
 
 Manual setup instead:
 
@@ -549,10 +552,15 @@ resizes, turns and is checked against its neighbours through exactly the same
 editor path as a cradle or a divider.
 
 Each text is **sunk into the surface it sits on**: that surface gets a pocket and
-the lettering is the solid that fills it flush, exported as **its own object in
-the same 3MF**. Open it in Bambu Studio, answer yes to "load as a single object
-with multiple parts", and each piece of lettering can be given its own filament —
-that is the whole reason they stay separate objects.
+the lettering is the solid that fills it flush, exported as **its own part of the
+3MF**. The `.3mf` is written as one assembly object with the body and every piece
+of lettering as named parts, so Bambu Studio / OrcaSlicer opens it directly — no
+"load as a single object with multiple parts?" prompt — and a
+`Metadata/model_settings.config` sidecar opens the body on **filament 1** and all
+lettering on **filament 2**, so the two-colour intent is already set. No print
+profile is embedded, so an opened file still uses the slicer's current printer
+and process. (A generic 3MF from a non-slicer tool: recent Bambu Studio may still
+note it "only contains geometry" — nothing is lost, and slicing is unaffected.)
 
 - **Its zone is its size.** Drag a corner and the lettering scales to fill it.
   **Letter height** overrides that but is never allowed to overflow the box; a
@@ -563,7 +571,7 @@ that is the whole reason they stay separate objects.
   smaller than **7 mm** on that path). Dragging, resizing or turning it by hand
   switches that off, so it stays where you put it.
 - **Stand proud** puts the letters on top of the floor instead of sunk into it.
-  Either way they remain their own object.
+  Either way they remain their own part on filament 2.
 - Sunk **0.4 mm** into the default 0.6 mm floor, leaving 0.2 mm beneath, and
   reads correctly looking into the open box, which is the way the box prints.
   The pocket and the inlay are exact complements: put them back together and you
@@ -571,14 +579,14 @@ that is the whole reason they stay separate objects.
 - In removable modes the lettering is inlaid into the **0.6 mm insert plate**
   rather than hidden under it. Text that would hang over that plate's edge is
   refused rather than clipped mid-letter.
-- Two texts reading the same thing get distinct object names (`M3`, `M3 2`) — a
+- Two texts reading the same thing get distinct part names (`M3`, `M3 2`) — a
   3MF object name has to be unique or the second silently replaces the first.
 
 The **rim label** is the one piece of lettering that is not an interior part: it
 sits on a shelf at the rear rim, so it has no floor zone to drag. Fixed **5 mm**
 letter height on a **7 mm** front-to-back shelf, still a 0.4 mm-deep flush inlay
-and its own 3MF object; the shelf's underside rises 7 mm over its 7 mm run, an
-exact 45-degree self-supporting slope. Leave **Rim label** empty for none. One
+and its own part on filament 2; the shelf's underside rises 7 mm over its 7 mm
+run, an exact 45-degree self-supporting slope. Leave **Rim label** empty for none. One
 that cannot fit at its fixed size is rejected with a clear message rather than
 silently shrunk.
 
@@ -623,9 +631,11 @@ object. A complete design supplies its box, rim label, scoop choice and part
 name; explicit CLI values override any of them. `--mode` overrides the saved
 fused/separate/cartridge mode.
 Fused export writes one box file. Removable modes write a plain box and a
-separate `Insert ...3mf` or `Cartridge ...3mf`. Labelled parts are strict
-two-object 3MF packages so the inlay can use another filament. Both `.3mf` and
-`.stl` continue to work for legacy individual-part commands.
+separate `Insert ...3mf` or `Cartridge ...3mf`. A lettered file is a strict 3MF
+**assembly** — the body and every piece of lettering as named parts of one
+object, one build item — with a `model_settings.config` sidecar opening the
+lettering on filament 2. Both `.3mf` and `.stl` continue to work for legacy
+individual-part commands.
 
 ## Generate the sample print file
 
@@ -682,7 +692,8 @@ Non-Python files:
 
 | File | What |
 |---|---|
-| `Launch_Organizer_UI.bat` | bootstraps `.venv`, installs the pinned packages, starts `wavefinity_web.py`, opens the browser |
+| `Launch_Organizer_UI.vbs` | normal windowless application launcher |
+| `Launch_Organizer_UI.bat` | bootstrapper and diagnostic launcher; starts the local service windowlessly |
 | `generated/WAVY_SAMPLE_SET.3mf` | regenerable local sample print plate; intentionally gitignored |
 
 ## Working on this
@@ -860,6 +871,12 @@ Both were stated as done and later found false. Tests now exist for each.
 - **`mesh_report` demands a single component.** Right for boxes and connectors,
   wrong for labels — a label is legitimately one solid per letter, so it uses
   `label_mesh_report` and `validate_3mf(..., multipart=(...))`.
+- **A non-empty `multipart` also means "assembly".** `export_text_body_3mf`
+  groups the body and every text into one components object with a single build
+  item, so `validate_3mf` then expects `expected_objects + 1` strict objects and
+  1 build item, and reports `filaments`. A plain `export_mesh` file is still
+  N objects / N build items. Bambu opens the assembly with no multi-part prompt;
+  the filament split lives in `Metadata/model_settings.config`, not the mesh.
 - **Glyph contours arrive unnested.** Ring-containment depth decides shell from
   hole, or every `O` fills in.
 - **Label sizes are cap height, not font size.** A 10 mm font size gives 7.29 mm
@@ -931,9 +948,10 @@ Measured and regression-tested; run the suite for the current exact count.
 **Text and labels**
 - Pocket volume removed == inlay volume; the two intersect by **<0.01 mm³**;
   union restores the plain box exactly. Checked on 48x48, 16x48 and 24x40
-- Strict 3MF, **zero warnings**; the body plus one named object per piece of
-  lettering — verified with three floor texts and with a rim label alongside
-  floor text (4 objects)
+- Strict 3MF, **zero warnings**; one assembly object, one build item, the body
+  and every piece of lettering as named parts — verified with three floor texts
+  and with a rim label alongside floor text. `model_settings.config` opens the
+  body on filament 1 and all lettering on filament 2
 - A raised text takes nothing out of the body; a recessed one is its exact
   complement
 - An auto-placed text moves around holders, reserved scoop/ledge space and other
@@ -950,8 +968,8 @@ Measured and regression-tested; run the suite for the current exact count.
 - Normal moves and resizes snap to 1 mm. Cartridge coordinates and sizes are
   validated on 8 mm cell edges and survive a JSON round trip
 - All three production modes were exported as strict, zero-warning 3MF files;
-  a lettered output contains the body plus one named object per piece of
-  lettering, and two texts reading the same thing stay distinct objects
+  a lettered output is a one-build-item assembly of the body and every piece of
+  lettering as named parts, and two texts reading the same thing stay distinct
 
 **Usable inside**
 - The exact reported rectangle fits; **+0.3 mm does not**

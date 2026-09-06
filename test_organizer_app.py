@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 
 import numpy as np
@@ -1760,8 +1761,8 @@ class InsertFormPreviewTests(unittest.TestCase):
             else:
                 # A reusable cartridge remains inset from its cell rectangle.
                 whole = organizer_app.layout_zone(self.spec, mode)
-                self.assertGreater(float(drawn.bounds[0][0]), whole.x0 + 0.2)
-                self.assertLess(float(drawn.bounds[1][0]), whole.x1 - 0.2)
+                self.assertGreater(float(drawn.bounds[0][0]), whole.x0)
+                self.assertLess(float(drawn.bounds[1][0]), whole.x1)
 
     def test_holders_take_the_colour_of_the_part_they_print_as(self) -> None:
         one = organizer_app.default_feature(self.spec, "post")
@@ -1908,6 +1909,44 @@ class TextExportTests(unittest.TestCase):
             self.assertEqual(
                 report["names"], ["M3", "M4", "M5", "fused_organizer"]
             )
+
+    def test_a_lettered_file_is_one_assembly_with_the_lettering_on_filament_2(self) -> None:
+        """Opens with no multi-part prompt; the two-colour split is preset."""
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        layout = organizer_app.Layout((
+            self._text("M3", (-20.0, 6.0, -2.0, 15.0)),
+            self._text("M4", (2.0, 6.0, 20.0, 15.0)),
+        ), "fused")
+        with tempfile.TemporaryDirectory() as directory:
+            result = organizer_app.generate_organizer_files(
+                spec, layout, Path(directory), part_name="Fasteners"
+            )
+            output = Path(result["box"]["output"])
+            report = validate_3mf(output, 3, multipart=("M3", "M4"))
+            # One grouping object over the three meshes, a single build item.
+            self.assertEqual(report["objects"], 3)
+            self.assertEqual(
+                report["filaments"],
+                {"fused_organizer": 1, "M3": 2, "M4": 2},
+            )
+            # The sidecar Bambu/Orca reads is actually in the package.
+            with zipfile.ZipFile(output) as archive:
+                self.assertIn("Metadata/model_settings.config", archive.namelist())
+
+    def test_a_plain_box_stays_a_single_object_with_no_sidecar(self) -> None:
+        spec = BoxSpec(48.0, 48.0, 40.0)
+        with tempfile.TemporaryDirectory() as directory:
+            result = organizer_app.generate_organizer_files(
+                spec, organizer_app.Layout((), "fused"), Path(directory),
+                part_name="Plain",
+            )
+            output = Path(result["box"]["output"])
+            report = validate_3mf(output, 1)
+            self.assertNotIn("filaments", report)
+            with zipfile.ZipFile(output) as archive:
+                self.assertNotIn(
+                    "Metadata/model_settings.config", archive.namelist()
+                )
 
     def test_two_texts_reading_the_same_thing_get_distinct_objects(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)

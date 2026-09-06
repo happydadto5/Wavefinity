@@ -26,8 +26,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
+import zipfile
 from pathlib import Path
 from typing import Iterable
+from xml.etree import ElementTree
 
 import lib3mf
 import numpy as np
@@ -1666,6 +1668,53 @@ def _plain_corridor(
 # --------------------------------------------------------------------------- #
 # export
 # --------------------------------------------------------------------------- #
+
+# The relationship type Bambu Studio / OrcaSlicer use to find the part-level
+# settings sidecar inside a 3MF. Attaching the file under this type is what
+# lets the slicer pick up per-part names and filament assignments.
+BAMBU_PACKAGE_REL = "http://schemas.bambulab.com/package/2021"
+TEXT_PART_FILAMENT = 2   # lettering opens pre-assigned to this filament slot
+
+
+def _xml_attr(value: str) -> str:
+    """Escape a string for use inside an XML attribute."""
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _stamp_identity(model, title: str = "") -> None:
+    """Name the file so a slicer shows something better than 'Unsaved'.
+
+    No print profile is embedded, so an opened file still uses the slicer's
+    current printer and process - this only labels it.
+    """
+    group = model.GetMetaDataGroup()
+    seen = set()
+    for index in range(group.GetMetaDataCount()):
+        try:
+            seen.add(group.GetMetaData(index).GetName())
+        except Exception:  # pragma: no cover - defensive against binding quirks
+            pass
+    if "Application" not in seen:
+        group.AddMetaData("", "Application", "Wavefinity", "xs:string", False)
+    if title and "Title" not in seen:
+        group.AddMetaData("", "Title", title, "xs:string", False)
+
+
+def _strict_write(model, wrapper, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    writer = model.QueryWriter("3mf")
+    writer.SetStrictModeActive(True)
+    writer.WriteToFile(str(output.resolve()))
+    if writer.GetWarningCount() != 0:
+        raise RuntimeError(f"strict 3MF writer reported {writer.GetWarningCount()} warnings")
+
+
 def export_bambu_compatible_3mf(scene: trimesh.Scene, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     generic = scene.export(file_type="3mf")
@@ -1676,11 +1725,63 @@ def export_bambu_compatible_3mf(scene: trimesh.Scene, output: Path) -> None:
     reader = model.QueryReader("3mf")
     reader.SetStrictModeActive(False)
     reader.ReadFromBuffer(generic)
-    writer = model.QueryWriter("3mf")
-    writer.SetStrictModeActive(True)
-    writer.WriteToFile(str(output.resolve()))
-    if writer.GetWarningCount() != 0:
-        raise RuntimeError(f"strict 3MF writer reported {writer.GetWarningCount()} warnings")
+    _stamp_identity(model, output.stem)
+    _strict_write(model, wrapper, output)
+
+
+def _model_settings_config(
+    title: str, object_id: int, parts: Iterable[tuple[int, str, int]]
+) -> bytes:
+    """Bambu ``model_settings.config``: the assembly's name plus, per part, its
+    name and which filament slot it opens on.
+
+    ``parts`` is ``(part resource id, part name, filament slot)``. A slot of 1
+    is the default and is left off the part so only the deliberate second-colour
+    assignment is written.
+    """
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<config>",
+        f'  <object id="{object_id}">',
+        f'    <metadata key="name" value="{_xml_attr(title)}"/>',
+        '    <metadata key="extruder" value="1"/>',
+    ]
+    for part_id, name, filament in parts:
+        lines.append(f'    <part id="{part_id}" subtype="normal_part">')
+        lines.append(f'      <metadata key="name" value="{_xml_attr(name)}"/>')
+        lines.append(
+            '      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>'
+        )
+        if filament != 1:
+            lines.append(f'      <metadata key="extruder" value="{filament}"/>')
+        lines.append("    </part>")
+    lines += ["  </object>", "</config>", ""]
+    return "\n".join(lines).encode("utf-8")
+
+
+def assigned_filaments(path: Path) -> dict[str, int]:
+    """``{part name: filament slot}`` read back from a 3MF's model_settings.config.
+
+    Empty when the file carries no such sidecar (a plain single-mesh export).
+    """
+    with zipfile.ZipFile(path) as archive:
+        try:
+            raw = archive.read("Metadata/model_settings.config").decode("utf-8")
+        except KeyError:
+            return {}
+    root = ElementTree.fromstring(raw)
+    out: dict[str, int] = {}
+    for part in root.iter("part"):
+        name = None
+        slot = 1
+        for meta in part.findall("metadata"):
+            if meta.get("key") == "name":
+                name = meta.get("value")
+            elif meta.get("key") == "extruder":
+                slot = int(meta.get("value", "1"))
+        if name is not None:
+            out[name] = slot
+    return out
 
 
 def label_mesh_report(name: str, mesh: trimesh.Trimesh) -> dict[str, object]:
@@ -1727,19 +1828,26 @@ def export_text_body_3mf(
     texts: Iterable[tuple[str, trimesh.Trimesh]],
     output: Path,
     body_name: str = "box",
+    part_filament: int = TEXT_PART_FILAMENT,
 ) -> list[str]:
-    """Write a body plus any number of separate text objects into one 3MF.
+    """Write a body plus any number of text solids as one 3MF **assembly**.
 
-    Keeping them separate is the point: load the file in Bambu Studio, answer
-    yes to "load as a single object with multiple parts", and each piece of
-    lettering can be given its own filament.  A recessed text has already been
-    subtracted from ``body_mesh``, so the two must share faces and nothing
-    else; a raised one stands on the surface and touches it the same way.
-    Returns the object names actually written.
+    Every mesh becomes a named part of a single object, so the file opens in
+    Bambu Studio / OrcaSlicer directly as one object with parts - no "load as
+    a single object with multiple parts?" prompt to answer. A
+    ``model_settings.config`` sidecar carries the part names and opens the
+    lettering on filament slot ``part_filament`` while the body stays on 1, so
+    the two-colour intent is already set. No print profile is embedded: an
+    opened file still uses the slicer's current printer and process.
+
+    A recessed text has already been subtracted from ``body_mesh``, so the two
+    share faces and nothing else; a raised one stands on the surface and
+    touches it the same way. Returns the part names actually written.
     """
     texts = list(texts)
     mesh_report(body_name, body_mesh)
     names = unique_object_names((name for name, _ in texts), taken=(body_name,))
+
     scene = trimesh.Scene()
     scene.units = "mm"
     scene.add_geometry(body_mesh, node_name=body_name, geom_name=body_name)
@@ -1751,7 +1859,52 @@ def export_text_body_3mf(
                 "its own pocket"
             )
         scene.add_geometry(mesh, node_name=name, geom_name=name)
-    export_bambu_compatible_3mf(scene, output)
+
+    generic = scene.export(file_type="3mf")
+    if not isinstance(generic, bytes):
+        raise RuntimeError("intermediate 3MF export did not return binary data")
+    wrapper = lib3mf.Wrapper()
+    model = wrapper.CreateModel()
+    reader = model.QueryReader("3mf")
+    reader.SetStrictModeActive(False)
+    reader.ReadFromBuffer(generic)
+
+    by_name: dict[str, object] = {}
+    iterator = model.GetMeshObjects()
+    while iterator.MoveNext():
+        obj = iterator.GetCurrentMeshObject()
+        by_name[obj.GetName()] = obj
+    try:
+        ordered = [by_name[body_name]] + [by_name[name] for name in names]
+    except KeyError as missing:  # pragma: no cover - trimesh contract change
+        raise RuntimeError(f"3MF export dropped object {missing}") from None
+
+    stale = []
+    build_items = model.GetBuildItems()
+    while build_items.MoveNext():
+        stale.append(build_items.GetCurrent())
+    for item in stale:
+        model.RemoveBuildItem(item)
+
+    title = output.stem or body_name
+    assembly = model.AddComponentsObject()
+    assembly.SetName(title)
+    identity = wrapper.GetIdentityTransform()
+    for obj in ordered:
+        assembly.AddComponent(obj, identity)
+    model.AddBuildItem(assembly, identity)
+
+    parts = [(ordered[0].GetResourceID(), body_name, 1)]
+    for obj, name in zip(ordered[1:], names):
+        parts.append((obj.GetResourceID(), name, part_filament))
+    config = _model_settings_config(title, assembly.GetResourceID(), parts)
+    attachment = model.AddAttachment(
+        "/Metadata/model_settings.config", BAMBU_PACKAGE_REL
+    )
+    attachment.ReadFromBuffer(bytearray(config))
+
+    _stamp_identity(model, title)
+    _strict_write(model, wrapper, output)
     return names
 
 
@@ -1787,8 +1940,18 @@ def validate_3mf(
     expected_objects: int,
     multipart: tuple[str, ...] = (),
 ) -> dict[str, object]:
-    """Names listed in ``multipart`` may be several solids - a label is one per
-    letter - so they get the relaxed check."""
+    """Check a written 3MF is strict, watertight and shaped as expected.
+
+    ``expected_objects`` is the mesh count, as a slicer sees it. Names listed
+    in ``multipart`` may be several disconnected solids - a label is one per
+    letter - so they get the relaxed mesh check.
+
+    A non-empty ``multipart`` also means the file is an **assembly**: every
+    mesh is a part of one grouping object with a single build item, so the
+    strict model then holds ``expected_objects + 1`` objects and 1 build item.
+    The returned ``filaments`` maps each part name to the slot it opens on.
+    """
+    assembly = bool(multipart)
     scene = trimesh.load(path, force="scene")
     if len(scene.geometry) != expected_objects:
         raise RuntimeError(
@@ -1806,17 +1969,26 @@ def validate_3mf(
     reader.ReadFromFile(str(path.resolve()))
     if reader.GetWarningCount() != 0:
         raise RuntimeError(f"strict 3MF reader reported {reader.GetWarningCount()} warnings")
-    if model.GetObjects().Count() != expected_objects:
-        raise RuntimeError("strict 3MF object count does not match")
-    if model.GetBuildItems().Count() != expected_objects:
-        raise RuntimeError("strict 3MF build-item count does not match")
-    return {
+    want_objects = expected_objects + 1 if assembly else expected_objects
+    want_items = 1 if assembly else expected_objects
+    if model.GetObjects().Count() != want_objects:
+        raise RuntimeError(
+            f"strict 3MF has {model.GetObjects().Count()} objects, expected {want_objects}"
+        )
+    if model.GetBuildItems().Count() != want_items:
+        raise RuntimeError(
+            f"strict 3MF has {model.GetBuildItems().Count()} build items, expected {want_items}"
+        )
+    result: dict[str, object] = {
         "objects": expected_objects,
         "names": sorted(scene.geometry.keys()),
         "bounds_mm": np.round(scene.bounds, 3).tolist(),
         "warnings": 0,
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper(),
     }
+    if assembly:
+        result["filaments"] = assigned_filaments(path)
+    return result
 
 
 # --------------------------------------------------------------------------- #

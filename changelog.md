@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-09-06 — Interior-part selection and placed-part list
+
+- Picking a different interior-part type now changes the selected part instead
+  of silently adding another. **Additional interior part** is the sole add
+  action, appears beside the part palette after the first part is placed, and
+  the replacement automatically finds open floor when other parts are present.
+- Placed parts now use clean icon/name/spec cards without list or 2D-view
+  numbering.
+
+## 2026-09-06 — Lettered 3MFs open as one object with parts, lettering on filament 2
+
+- A lettered `.3mf` is now written as **one assembly object** with the body and
+  every piece of lettering as named parts under a single build item. Bambu
+  Studio / OrcaSlicer opens it directly — the old "load as a single object with
+  multiple parts?" prompt is gone.
+- A `Metadata/model_settings.config` sidecar (linked with Bambu's package
+  relationship) carries the part names and opens the **body on filament 1, all
+  lettering on filament 2**, so the two-colour intent is set without touching the
+  slicer. No print profile is embedded: an opened file still uses the slicer's
+  current printer and process. A recent Bambu Studio may still note a generic
+  3MF "only contains geometry" — nothing is lost and slicing is unaffected;
+  removing that entirely would mean baking in a printer-specific profile.
+- Every exported `.3mf` now carries an `Application` / `Title` metadata pair so a
+  slicer shows the file's name rather than "Unsaved".
+- `validate_3mf` treats a non-empty `multipart` as an assembly: it then expects
+  `objects + 1` strict objects and one build item, and returns a `filaments`
+  map. `assigned_filaments(path)` reads that map back from the sidecar. Plain
+  `export_mesh` files (single box, connector, sampler, Photo Nest) are unchanged
+  — N objects, N build items, no sidecar.
+
 ## 2026-09-06 — Text is an interior part, so a bin can carry several labels
 
 - **Lettering on the floor is now an interior part like any other.** Pick
