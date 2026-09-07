@@ -664,6 +664,9 @@ class ConnectorTests(unittest.TestCase):
         self.assertGreater(clip.extents[0], plain.extents[0] + 2.0)
         # z envelope is still just the cap plus the 30 mm extension
         self.assertAlmostEqual(clip.extents[2], connector.height + 30.0, places=3)
+        # Cap covers the entire gusset width at top z so there is no hollow shelf
+        top_verts = clip.vertices[clip.vertices[:, 2] > connector.height - 0.05]
+        self.assertAlmostEqual(top_verts[:, 0].max(), clip.bounds[1][0], places=3)
         # seats without touching the two installed bins, and locks on lift
         self.assertLess(
             validate_side_fit(

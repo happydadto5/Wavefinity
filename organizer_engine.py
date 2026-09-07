@@ -1027,6 +1027,14 @@ def make_side_connector(
             )
             slab.apply_translation((0.0, 0.0, connector.arm_depth - (k + 1) * gh))
             slabs.append(slab)
+        # Continue the widened cap over the top of the gusset so the connector
+        # top is full across its entire width rather than leaving a hollow shelf.
+        cap_slab = _extrude_polygon(
+            offset_strip(sign, outer_hw, outer_hw + move_out * 2, samples),
+            connector.cap_thickness + 0.01,
+        )
+        cap_slab.apply_translation((0.0, 0.0, connector.arm_depth - 0.01))
+        slabs.append(cap_slab)
         return slabs
 
     body = _extrude_polygon(corridor(outer_hw, samples), connector.height)
