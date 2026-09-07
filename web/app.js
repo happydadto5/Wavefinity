@@ -938,7 +938,7 @@ function renderDraftFields() {
       // A hex socket or hex-bit profile always stands upright, so no Angle for it.
       if (!hexBit) {
         html += optionField("angle", "Angle °", { step: "1" });
-        html += `<p class="field-help wide">90° is straight up. A lower angle leans the holes so tubes rest at a slant — it only works with a single row, so set X quantity or Y quantity to 1.</p>`;
+        html += `<p class="field-help wide">0° is straight up; a higher angle leans the holes so tubes rest at a slant, up to 45°. The whole grid leans together — if the holes need more room, use “Grow the bin” below.</p>`;
       }
     } else {
       html += field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" });

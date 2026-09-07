@@ -104,7 +104,7 @@ class WebApplicationTests(unittest.TestCase):
         })
         resolved = response["resolved_options"]
         self.assertEqual(resolved["depth"], inserts.HEX_BIT_HOLD["hex_bit_long"])
-        self.assertEqual(resolved["angle"], 90.0)
+        self.assertEqual(resolved["angle"], 0.0)
 
     def test_feature_fit_snaps_a_bore_zone_down_to_its_hole_grid(self):
         design = default_design()

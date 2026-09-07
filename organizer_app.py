@@ -181,7 +181,7 @@ PART_KINDS = (
      {"qty": False, "size": True, "along": True, "item": True, "lean": False},
      (("Height", "height", ""), ("Hole depth", "depth", ""),
       ("Wall", "wall", "1.6"), ("X quantity", "columns", ""),
-      ("Y quantity", "rows", ""), ("Angle °", "angle", "90"))),
+      ("Y quantity", "rows", ""), ("Angle °", "angle", "0"))),
     ("cradle", "Cradle", "A half-circle notch that holds a tool on its side.",
      {"qty": True, "size": False, "along": True, "item": True, "lean": False,
       "alternate": True},
