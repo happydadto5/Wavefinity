@@ -133,6 +133,39 @@ Run the full suite again after all other work has stopped and immediately before
   `_core.py`, registries to `_registry.py`, and preserve the package facade and
   all Phase 1 compatibility tests.
 
+### Phase 3 — Foundation Extraction
+
+- Moved shared constants, data models, layout serialization, save/load,
+  snapping, editor movement/resize helpers, item/count helpers, and
+  `connector_keep_out()` into `organizer_inserts/_core.py`.
+- Moved the builder/default type aliases, singleton registries, decorators,
+  and `resolved_options()` into `organizer_inserts/_registry.py`.
+- The package facade explicitly re-exports every moved name and both facade
+  registries are the exact singleton objects owned by `_registry.py`.
+- `_core.Layout.validate()` uses a narrow runtime import from the package
+  facade until `_layout.py` is introduced in Phase 5; there is no module-level
+  reverse dependency.
+- Fresh-process registry/singleton check: all 10 builders and defaults present;
+  both singleton identity checks passed.
+- Compatibility suite: `Ran 4 tests in 0.913s` — `OK`.
+- Insert suite: `Ran 186 tests in 79.861s` — `OK`.
+- Full suite: `Ran 420 tests in 372.915s` — `OK`.
+- `node --check web/app.js` and `git diff --check` passed.
+- Commit: `e7535fbbafdc2f9e8ca3378708b48d900a66e75e`.
+
+### Session 3 Handoff
+
+- Start from the clean, pushed `codex/split-organizer-inserts` branch at the
+  checkpoint documentation commit that follows this entry.
+- Verify the Phase 3 commit and green results above, then execute only Phase 4.
+  Do not begin Phase 5.
+- No Phase 4 feature module exists yet. All feature implementations remain in
+  `organizer_inserts/__init__.py`; extract them one at a time in the specified
+  order, preserving explicit facade re-exports and the complete fresh-process
+  registries after every feature.
+- Do not replace the temporary runtime `Layout.validate()` bridge during Phase
+  4; it is replaced with the `_layout.check_layout` local import in Phase 5.
+
 ## Goal
 
 Turn `organizer_inserts.py` into a Python package of focused modules without changing behavior, saved-design compatibility, geometry, exports, UI behavior, or imports used elsewhere in the app.
