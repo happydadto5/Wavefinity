@@ -136,16 +136,33 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .count-badge { border-radius: 999px; background: var(--teal-soft); color: var(--teal-dark); padding: 4px 8px; font-size: 11px; font-weight: 700; }
 .support-palette { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; margin: 8px 0; }
 .support-choice {
-  --support-color: var(--teal); min-height: 44px; padding: 4px 7px; background: white; border: 1px solid var(--line);
-  border-radius: 7px; cursor: pointer; text-align: left; display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  --support-color: var(--teal); min-height: 48px; padding: 0; background: white; border: 1px solid var(--line);
+  border-radius: 8px; cursor: pointer; text-align: left; display: flex; align-items: stretch; gap: 0;
+  overflow: hidden;
 }
 .support-choice:hover { border-color: var(--support-color); transform: translateY(-1px); box-shadow: 0 3px 8px rgba(30,51,61,.08); }
-.support-choice-header { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.support-choice-header svg { display: block; flex: 0 0 20px; width: 20px; height: 20px; padding: 2px; border-radius: 4px; color: var(--support-color); background: color-mix(in srgb, var(--support-color) 14%, white); stroke: currentColor; fill: none; stroke-width: 1.8; }
-.support-choice-header strong { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.support-choice-desc { display: block; color: var(--muted); font-size: 9.5px; font-weight: 450; line-height: 1.2; white-space: normal; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.support-choice-icon {
+  display: grid; place-items: center; flex: 0 0 48px; width: 48px; align-self: stretch;
+  border-radius: 7px 0 0 7px; color: var(--support-color);
+  background: color-mix(in srgb, var(--support-color) 14%, white);
+}
+.support-choice-icon svg {
+  display: block; width: 34px; height: 34px;
+  stroke: currentColor; fill: none; stroke-width: 1.8;
+}
+.support-choice-copy {
+  flex: 1; min-width: 0; padding: 6px 10px; display: flex; align-items: center; gap: 6px;
+  overflow: hidden;
+}
+.support-choice-copy strong {
+  font-size: 12px; white-space: nowrap; flex-shrink: 0; color: var(--ink);
+}
+.support-choice-desc {
+  color: var(--muted); font-size: 10px; font-weight: 450; line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .support-choice.active { color: var(--ink); border-color: #d58d21; background: #fff8e8; box-shadow: 0 0 0 2px rgba(240,169,60,.45); }
-.support-choice.active .support-choice-header svg { color: #b9740b; background: #ffedc5; }
+.support-choice.active .support-choice-icon { color: #b9740b; background: #ffedc5; }
 .add-support { width: 100%; margin: 1px 0 9px; border-style: dashed; }
 
 .support-editor { border: 1px solid var(--line); border-radius: 9px; padding: 13px; background: #fbfcfc; }
@@ -273,7 +290,8 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .dimension-depth::before, .dimension-depth::after { position: absolute; bottom: -4px; width: 7px; height: 7px; border-bottom: 1px solid; }
 .dimension-depth::before { left: 0; border-left: 1px solid; transform: rotate(45deg); }
 .dimension-depth::after { right: 0; border-right: 1px solid; transform: rotate(-45deg); }
-.layout-hint { position: absolute; left: 18px; bottom: 16px; color: var(--muted); background: rgba(255,255,255,.9); padding: 7px 10px; border-radius: 6px; font-size: 11px; }
+.layout-hint { position: absolute; left: 18px; bottom: 16px; color: var(--muted); background: rgba(255,255,255,.94); padding: 7px 10px; border-radius: 6px; font-size: 11px; box-shadow: 0 1px 4px rgba(0,0,0,.08); pointer-events: none; }
+.layout-hint strong { color: var(--ink); font-weight: 600; }
 .error-panel { margin: 0 18px 14px; padding: 9px; border: 1px solid #e0aaa5; border-radius: 7px; background: #fff4f2; color: #7e302b; font-size: 12px; }
 .error-link { display: block; width: 100%; border: 0; border-radius: 5px; padding: 6px 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .error-link:hover, .error-link:focus { background: #ffe5e1; outline: none; }

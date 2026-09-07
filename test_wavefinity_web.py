@@ -946,6 +946,25 @@ class WebApplicationTests(unittest.TestCase):
             self.assertIsNone(result["slicer_path"])
             mock_save.assert_not_called()
 
+    def test_2d_layout_arrow_keys_and_movement_hints(self):
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+        styles_css = (root / "web" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn("Use Arrow keys or drag to move", index_html)
+        self.assertIn("handleLayoutArrowKeys", app_js)
+        self.assertIn("ArrowUp", app_js)
+        self.assertIn("ArrowDown", app_js)
+        self.assertIn("ArrowLeft", app_js)
+        self.assertIn("ArrowRight", app_js)
+        # Shift 10mm, Ctrl 0.1mm, default 1mm
+        self.assertIn("step = 10", app_js)
+        self.assertIn("step = 0.1", app_js)
+        self.assertIn("step = 1", app_js)
+        self.assertIn("Shift: 10 mm", app_js)
+        self.assertIn("Ctrl: 0.1 mm", app_js)
+        self.assertIn("layout-hint", styles_css)
 
 
 class WebServerTests(unittest.TestCase):

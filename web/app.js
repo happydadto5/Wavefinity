@@ -50,6 +50,7 @@ const state = {
   kindRequest: 0,
   fitRequest: 0,
   nestPhotoRequest: 0,
+  nudgeFeedback: null,
 };
 
 const VERSION_POLL_MS = 5000;
@@ -239,6 +240,7 @@ function iconFor(kind) {
     slot: '<rect x="4" y="5" width="24" height="22" rx="2"/><path d="M9 22l5-12M15 22l5-12M21 22l5-12"/>',
     steps: '<path d="M4 25h24V10h-8v5h-8v5H4z"/>',
     scoop: '<path d="M4 9v16h24C20 25 14 18 14 9H4z"/>',
+    text: '<path d="M6 7h20M16 7v18" stroke-linecap="round" stroke-linejoin="round"/>',
   };
   return `<svg ${common}>${paths[kind] || paths.pocket}</svg>`;
 }
@@ -288,11 +290,13 @@ function renderCatalog() {
   const palette = $("#support-palette");
   palette.innerHTML = state.catalog.parts.map(part => `
     <button class="support-choice" data-kind="${part.kind}" style="--support-color:${kindColor(part.kind)}" aria-label="${escapeHtml(part.title)}: ${escapeHtml(part.description)}" title="${escapeHtml(part.title)} — ${escapeHtml(part.description)}">
-      <div class="support-choice-header">
+      <span class="support-choice-icon">
         ${iconFor(part.kind)}
+      </span>
+      <span class="support-choice-copy">
         <strong>${escapeHtml(part.title)}</strong>
-      </div>
-      <small class="support-choice-desc">${escapeHtml(part.description)}</small>
+        <span class="support-choice-desc">${escapeHtml(part.description)}</span>
+      </span>
     </button>
   `).join("");
   $$(".support-choice", palette).forEach(button => {
@@ -487,11 +491,21 @@ async function selectOutputFolder() {
   }
 }
 
+function updateNudgeUI() {
+  const el = $("#layout-help");
+  if (!el) return;
+  if (state.nudgeFeedback) {
+    el.innerHTML = `<strong>Moved ${state.nudgeFeedback.amount}</strong> &nbsp;·&nbsp; Arrow: 1 mm | Shift: 10 mm | Ctrl: 0.1 mm`;
+  } else {
+    el.textContent = "Use Arrow keys or drag to move";
+  }
+}
+
 function updatePreviewHelp(view) {
   const el = $("#preview-help");
   if (!el) return;
   el.textContent = view === "2d"
-    ? "Drag interior parts to move them. Photo Nest also has a proportional resize corner and round rotation handle."
+    ? "Use Arrow keys or drag to move (Arrow: 1 mm, Shift: 10 mm, Ctrl: 0.1 mm). Photo Nest also has a proportional resize corner and round rotation handle."
     : "Drag to rotate, use the wheel to zoom, or double-click to reset.";
 }
 
@@ -522,6 +536,43 @@ function changedDesign(previousDesign = null) {
   }
   applyChangedDesign();
 }
+
+let pendingNudgeHistory = null;
+const commitNudge = debounce(async () => {
+  if (state.selected === null || !state.draft) {
+    pendingNudgeHistory = null;
+    return;
+  }
+  const historySnapshot = pendingNudgeHistory || clone(state.design);
+  pendingNudgeHistory = null;
+  const index = state.selected;
+  try {
+    const result = await api("/api/feature/apply", {
+      design: state.design,
+      feature: state.draft,
+      index,
+    });
+    state.design = result.design;
+    recordHistory(historySnapshot);
+    state.selected = result.selected;
+    if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
+    state.draft = clone(state.design.layout.features[state.selected]);
+    renderDraftFields();
+    renderPlaced();
+    updateSelectionButtons();
+    await refreshPreview();
+    refreshDraft();
+    renderLayout2D();
+  } catch (error) {
+    toast(error.message, true, 5000);
+    if (state.design?.layout?.features?.[index]) {
+      state.draft = clone(state.design.layout.features[index]);
+      renderDraftFields();
+      refreshDraft();
+      renderLayout2D();
+    }
+  }
+}, 200);
 
 // The largest straight-sided rectangle that fits a bin's wavy cavity - the
 // same number the engine's BoxSpec.usable_inside returns, recomputed here so
@@ -748,6 +799,7 @@ function wireControls() {
     });
     $$(".canvas-wrap").forEach(wrap => wrap.classList.toggle("active", wrap.dataset.canvas === tab.dataset.view));
     updatePreviewHelp(tab.dataset.view);
+    if (tab.dataset.view === "2d") updateNudgeUI();
     requestAnimationFrame(() => tab.dataset.view === "3d" ? renderPreview3D() : renderLayout2D());
   };
   viewTabs.forEach((tab, index) => {
@@ -812,6 +864,8 @@ function starterItem() {
 
 function cancelPendingDraftWork() {
   refreshDraftSoon.cancel();
+  commitNudge.cancel();
+  pendingNudgeHistory = null;
   state.kindRequest += 1;
   state.fitRequest += 1;
   state.nestPhotoRequest += 1;
@@ -833,6 +887,8 @@ function clearDraftSelection() {
   state.draftIsNew = false;
   state.draftSourceIndex = null;
   state.selected = null;
+  state.nudgeFeedback = null;
+  updateNudgeUI();
   $$(".support-choice").forEach(button => button.classList.remove("active"));
   $(".support-editor").hidden = true;
   $("#draft-status").textContent = "";
@@ -898,6 +954,8 @@ function selectedFeature(index) {
   if (index === null || index < 0 || index >= state.design.layout.features.length) return;
   cancelPendingDraftWork();
   state.selected = index;
+  state.nudgeFeedback = null;
+  updateNudgeUI();
   state.draft = clone(state.design.layout.features[index]);
   state.draftAutoCommit = true;
   state.draftIsNew = false;
@@ -3023,6 +3081,36 @@ function renderLayout2D() {
   }
   drawDimensionLine(context, [a[0], a[1] - 18], [b[0], a[1] - 18], `Width ${fmt(state.design.box.x)} mm`);
   drawDimensionLine(context, [a[0] - 18, a[1]], [a[0] - 18, b[1]], `Depth ${fmt(state.design.box.y)} mm`, true);
+
+  const binBottom = b[1];
+  const hintY = Math.min(height - 15, Math.max(binBottom + 24, height - 24));
+  context.save();
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  if (state.nudgeFeedback) {
+    const text = `Moved ${state.nudgeFeedback.amount}  (Arrow: 1 mm · Shift: 10 mm · Ctrl: 0.1 mm)`;
+    context.font = "600 11px Segoe UI, sans-serif";
+    const tw = context.measureText(text).width;
+    context.fillStyle = "rgba(248, 250, 249, 0.94)";
+    context.fillRect(width / 2 - tw / 2 - 8, hintY - 10, tw + 16, 20);
+    context.strokeStyle = "#237fa6";
+    context.lineWidth = 1;
+    context.strokeRect(width / 2 - tw / 2 - 8, hintY - 10, tw + 16, 20);
+    context.fillStyle = "#176e91";
+    context.fillText(text, width / 2, hintY);
+  } else {
+    const text = "Use Arrow keys or drag to move";
+    context.font = "11px Segoe UI, sans-serif";
+    const tw = context.measureText(text).width;
+    context.fillStyle = "rgba(248, 250, 249, 0.88)";
+    context.fillRect(width / 2 - tw / 2 - 8, hintY - 10, tw + 16, 20);
+    context.strokeStyle = "rgba(94, 127, 136, 0.35)";
+    context.lineWidth = 1;
+    context.strokeRect(width / 2 - tw / 2 - 8, hintY - 10, tw + 16, 20);
+    context.fillStyle = "#5e7f88";
+    context.fillText(text, width / 2, hintY);
+  }
+  context.restore();
 }
 
 function layoutPoint(event) {
@@ -3060,6 +3148,8 @@ function wireLayoutInteraction() {
     if (index === null) {
       state.selected = null;
       state.layoutDrag = null;
+      state.nudgeFeedback = null;
+      updateNudgeUI();
       renderPlaced(); updateSelectionButtons(); renderLayout2D();
       return;
     }
@@ -3139,6 +3229,80 @@ function wireLayoutInteraction() {
       renderLayout2D();
     }
   });
+  window.addEventListener("keydown", handleLayoutArrowKeys);
+}
+
+function handleLayoutArrowKeys(event) {
+  const arrowKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
+  if (!arrowKeys.includes(event.key)) return;
+
+  const is2D = $(".canvas-wrap[data-canvas='2d']")?.classList.contains("active");
+  if (!is2D) return;
+
+  const inField = Boolean(
+    event.target.closest("input, textarea, select, [contenteditable='true'], .view-tab") ||
+    document.activeElement?.closest("input, textarea, select, [contenteditable='true'], .view-tab")
+  );
+  if (inField) return;
+
+  if (document.querySelector("dialog[open], .modal.active")) return;
+  if (state.selected === null || !state.design?.layout?.features?.[state.selected]) return;
+
+  event.preventDefault();
+
+  let step = 1;
+  let mod = "normal";
+  if (event.ctrlKey || event.metaKey) {
+    step = 0.1;
+    mod = "ctrl";
+  } else if (event.shiftKey) {
+    step = 10;
+    mod = "shift";
+  }
+
+  let dx = 0, dy = 0;
+  if (event.key === "ArrowLeft") dx = -step;
+  else if (event.key === "ArrowRight") dx = step;
+  else if (event.key === "ArrowUp") dy = step;
+  else if (event.key === "ArrowDown") dy = -step;
+
+  if (!state.draft) {
+    state.draft = clone(state.design.layout.features[state.selected]);
+    state.draftAutoCommit = true;
+  }
+  const feature = state.draft;
+  const z = feature.zone;
+  const roundCoord = val => Math.round(val * 1000) / 1000;
+  feature.zone = [
+    roundCoord(z[0] + dx),
+    roundCoord(z[1] + dy),
+    roundCoord(z[2] + dx),
+    roundCoord(z[3] + dy),
+  ];
+
+  if (state.design.layout.features[state.selected]) {
+    state.design.layout.features[state.selected].zone = clone(feature.zone);
+  }
+  if (feature.kind === "text" && feature.options?.auto) {
+    feature.options.auto = false;
+    const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
+    if (autoField) autoField.checked = false;
+  }
+  if (feature.kind === "nest") {
+    syncNestZone(feature);
+  }
+
+  state.nudgeFeedback = {
+    amount: `${step} mm`,
+    mod,
+  };
+  updateNudgeUI();
+  renderLayout2D();
+
+  if (!pendingNudgeHistory) {
+    pendingNudgeHistory = clone(state.design);
+  }
+  commitNudge();
 }
 
 async function saveDesign() {
