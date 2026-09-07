@@ -49,15 +49,25 @@ python -m venv .venv
 ```
 
 Those ten pins are the whole dependency list. `matplotlib` is not optional — it
-supplies the font outlines for floor labels. When changing or adding functionality,
-write targeted tests and run those focused tests to ensure they pass:
+supplies the font outlines for floor labels.
 
-```powershell
-.venv\Scripts\python.exe -m unittest test_file.py
-```
+**Testing philosophy: run only when needed, write only when valuable.** Tests
+have caught almost zero actual defects. Most testing effort is wasted. **Do not
+write tests by default**, and run only targeted tests in these narrow cases:
 
-The full battery of tests (`.venv\Scripts\python.exe -m unittest`) is reserved for major overall architectural/system-wide changes. **Log runs in
-[TESTING.md](TESTING.md)** — the result, and whether it caught anything.
+1. **Major changes** (refactoring, adding a new interior part type, architectural
+   changes): Run the full test battery (`.venv\Scripts\python.exe -m unittest`)
+   afterward to catch regressions.
+2. **High-risk changes** (algorithms, geometry, mesh operations): Write a focused
+   test *only if* the change is genuinely likely to break future work. One test
+   that actually catches defects beats ten that never do.
+3. **Bug fixes**: No test needed unless the bug would likely recur without one.
+
+Normal feature work, UI changes, and parameter tweaks need no tests. This cuts
+testing effort by 75%+ without losing coverage.
+
+**Log major runs in [TESTING.md](TESTING.md)** — what it found, and whether it
+caught anything real.
 
 ### Cloud deployments & updates
 
@@ -280,15 +290,23 @@ or WEBP photo. Put one flat part on an 8.5 × 11 in sheet, keep all four paper
 corners visible, and photograph it directly overhead. Wavefinity corrects the
 paper to 215.9 × 279.4 mm, isolates the outside silhouette, cleans camera
 noise, and stores only the closed millimetre contour — never the source image.
-The 2D layout draws the softened silhouette — the same one the printed cutter
-gets — and provides move, proportional-resize, and rotation handles. Only two
-settings are exposed: **Fit clearance** sets the gap between the wall and the
-part, and **Soften outline** rounds off small inward and outward details so the
-wall does not have to trace every jag. The wall's
-thickness and height are fixed printable defaults. The Photo Nest prints on its
-own as a bare cookie-cutter loop standing straight on the bed — no wavy bin, no
-floor — with a chamfered foot so the thin wall has no sharp root to snap at. It
-holds the part in place; it is not a filled block with the part cut out. The
+The 2D layout draws the softened silhouette — the same one the printed wall
+gets — and provides move, proportional-resize, and rotation handles. **Fit
+clearance** sets the gap between the wall and the part, and **Soften outline**
+rounds off small inward and outward details so the wall does not have to trace
+every jag. The wall's thickness and containment height are fixed printable
+defaults. It grows from the bin floor in fused mode or from the fitted plate in
+removable-insert mode. Every wall gets a substantial 2 mm-high 45-degree outside
+foot and a gentle rounded top.
+
+**Lift assist** defaults to **Finger grasp**. It cuts a pair of one-inch rounded
+openings at the part-relative sides; the dropdown can instead use top/bottom or
+both pairs, and the openings rotate with the outline. The rounded U-shaped edge
+drops visibly into each opening so fingers do not land on a sharp wall top.
+**Push Out** instead raises the tool on a shaped floor while leaving one selected
+end low: choose the press end, the percent used as the low push area, and its
+depth. Pressing there pivots the opposite end up. **No assist** leaves the plain
+continuous wall. Only one assist can be active. The
 outer bin width and depth still recalculate to the smallest enclosing 8 mm-grid
 footprint. Missing paper, severe perspective, an edge-touching part, multiple
 parts, and unusably small/noisy outlines are rejected with a specific
@@ -305,7 +323,7 @@ effect when only one tool fits.
 | Holder | Purpose | Optional `key=value` settings |
 |---|---|---|
 | `cradle` | Half-round troughs along X or Y - `spacing` 0 joins the row into one shared body, higher values split it. No fit clearance; wall thickness auto-scales with the tool | `spacing`, `floor_gap` |
-| `nest` | Photo-scaled cookie-cutter wall on a chamfered foot, printed on its own with no bin. `depth` (height) and `rim` (thickness) are fixed | `clearance`, `smoothing` |
+| `nest` | Photo-scaled rounded wall on the bin floor or removable insert, with Finger grasp (default), Push Out, or no lift assist. `depth` (containment height) and `rim` (thickness) are fixed | `clearance`, `smoothing`, `lift_assist`, `finger_position`, `finger_width`, `push_position`, `push_area`, `push_depth` |
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
 | `divider` | One or more straight or leaning subdividing walls along X or Y, with optional sloped tool-slot bottoms | `height`, `thickness`, `angle`, `spacing`, `bottom_angle`, `reverse_bottom`, `alternate_bottom`, `minimal_bottom`, `bottom_supports` |
@@ -769,8 +787,13 @@ git push
 Add a line to [TESTING.md](TESTING.md) for test runs before committing, and a
 dated entry to [changelog.md](changelog.md) for the change itself.
 
-**Keep building new tests when changing functionality and run targeted tests to ensure new tests work.** Reserve the full battery of tests (`unittest` across all suites) for major overall architectural changes only. If a fingerprint test fails during a full run, that is the suite telling
-you the geometry moved — decide whether you meant it, then re-pin deliberately.
+**Do not write new tests by reflex.** Write one only when the change is genuinely
+likely to introduce future defects — not for normal edits, UI tweaks, or parameter
+changes. When you do write a test, run just that test to ensure it works, not the
+full suite. Reserve the full battery of tests (`unittest` across all suites) for
+major changes only (refactoring, new interior part types, architectural shifts).
+If a fingerprint test fails during a full run, that is the suite telling you the
+geometry moved — decide whether you meant it, then re-pin deliberately.
 
 **Write commit messages that say why.** The history is the record. A message
 that explains the reasoning is worth more here than a tidy branch structure.

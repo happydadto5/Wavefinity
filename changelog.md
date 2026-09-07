@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-07 — Photo Nest retrieval assists and finished wall edges
+
+- Photo Nest now prints where its mode says it should: fused to the bin floor
+  or fused to the fitted removable-insert plate. The obsolete bare-ring export
+  exception is removed.
+- **Lift assist** sits first in the Photo Nest settings and allows exactly one
+  of **Finger grasp** (default), **Push Out**, or **No assist**.
+- Finger grasp cuts rounded opposing U-shaped openings. **Sides (left/right)**
+  is the default; **Top/bottom** and **Both** are available. The openings and
+  their locations rotate with the photographed outline. Width defaults to
+  25.4 mm and is adjustable from 12–40 mm.
+- Push Out adds a tool-shaped raised floor while leaving one selected end low.
+  Its press end, low-area percentage (30% default), and travel depth (4 mm
+  default) are editable. The wall grows by the travel depth so it retains the
+  normal 8 mm containment above the raised tool.
+- Every Photo Nest wall now has a 2 mm-high 45-degree outside foot and a gentle
+  1 mm round-over across the entire top, independent of its lift assist.
+
 ## 2026-09-06 — Different-height connector gets a real web, not just a longer arm
 
 - A connector for two bins whose rims differ used to be an ordinary clip with

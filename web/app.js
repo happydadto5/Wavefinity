@@ -30,6 +30,11 @@ const state = {
   // in place even if the canvas selection gets cleared underneath it.
   draftIsNew: false,
   draftSourceIndex: null,
+  // Set the moment the user actually changes the open draft (a field edit, a
+  // fit button, a quarter turn). Cleared when a draft is freshly loaded or
+  // successfully saved. Lets a part switch tell "untouched suggestion, safe to
+  // drop" apart from "real work that would be lost".
+  draftTouched: false,
   selected: null,
   camera: { yaw: 45, elevation: 76, zoom: 1 },
   lastBoxSize: null,
@@ -273,7 +278,9 @@ function renderCatalog() {
         // converted form - only fall back to a fresh, not-yet-saved
         // suggestion when nothing was actually selected before the switch.
         if (previousSelected !== null && previousSelected < state.design.layout.features.length) {
-          selectedFeature(previousSelected);
+          // The visible draft was already folded in by commitVisibleDraft above
+          // and the layout has just been reconverted - reselect straight through.
+          selectedFeature(previousSelected, true);
         } else {
           clearDraftSelection();
         }
@@ -917,6 +924,7 @@ function clearDraftSelection() {
   state.draftAutoCommit = false;
   state.draftIsNew = false;
   state.draftSourceIndex = null;
+  state.draftTouched = false;
   state.selected = null;
   state.nudgeFeedback = null;
   updateNudgeUI();
@@ -934,6 +942,11 @@ function pickKind(kind) {
 }
 
 async function selectKind(kind, reset = false) {
+  // Re-picking the shape already open keeps the same draft, so there is nothing
+  // to lose - skip the guard in that case. Anything else replaces the draft, so
+  // give the user the chance to keep unsaved work first.
+  const keepsSameDraft = !reset && state.draft?.kind === kind;
+  if (!keepsSameDraft && !(await guardDraftSwitch())) return;
   // The palette request is independent of preview/draft requests. Without its
   // own token, a slower earlier click could overwrite a newer shape choice.
   // A new palette choice also makes every pending edit to the prior draft
@@ -967,6 +980,7 @@ async function selectKind(kind, reset = false) {
     });
     if (request !== state.kindRequest) return;
     state.draft = result.feature;
+    state.draftTouched = false;
     state.draftResolvedOptions = result.resolved_options || {};
     // What the engine started this text at, so the Part Name is only ever
     // seeded from lettering the user actually typed - never the placeholder.
@@ -981,13 +995,17 @@ async function selectKind(kind, reset = false) {
   }
 }
 
-function selectedFeature(index) {
+async function selectedFeature(index, force = false) {
   if (index === null || index < 0 || index >= state.design.layout.features.length) return;
+  if (!force && index === state.selected) return;
+  // Don't drop unsaved work on the part currently open without asking first.
+  if (!force && !(await guardDraftSwitch())) return;
   cancelPendingDraftWork();
   state.selected = index;
   state.nudgeFeedback = null;
   updateNudgeUI();
   state.draft = clone(state.design.layout.features[index]);
+  state.draftTouched = false;
   state.draftAutoCommit = true;
   state.draftIsNew = false;
   state.draftSourceIndex = index;
@@ -1011,9 +1029,10 @@ function field(label, key, value, options = {}) {
   const type = options.type || "number";
   const attrs = type === "number" ? `step="${options.step || "0.1"}"` : "";
   const min = options.min !== undefined ? ` min="${escapeHtml(options.min)}"` : "";
+  const max = options.max !== undefined ? ` max="${escapeHtml(options.max)}"` : "";
   const placeholder = options.placeholder ? ` placeholder="${escapeHtml(options.placeholder)}"` : "";
   return `<label class="${classes}">${escapeHtml(label)}${options.unit ? `<span class="unit">${escapeHtml(options.unit)}</span>` : ""}
-    <input type="${type}" data-draft="${key}" value="${escapeHtml(value ?? "")}" ${attrs}${min}${placeholder}>
+    <input type="${type}" data-draft="${key}" value="${escapeHtml(value ?? "")}" ${attrs}${min}${max}${placeholder}>
   </label>`;
 }
 
@@ -1023,7 +1042,7 @@ function field(label, key, value, options = {}) {
 const AUTO_PLACEHOLDER = {
   divider: { height: "height of box", spacing: "fills evenly" },
   bore: { columns: "fills width", rows: "fills depth", height: "auto" },
-  scoop: { height: "half wall height" },
+  scoop: { depth: "60% of bin height" },
 };
 
 // The two fixed-size hex-bit profiles. Selecting one locks the hole to a
@@ -1042,7 +1061,61 @@ function renderDraftFields() {
   const width = zone[2] - zone[0];
   const depth = zone[3] - zone[1];
   let html = "";
+  if (one.kind === "scoop") {
+    const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, "depth");
+    const shown = explicit ? one.options.depth : state.draftResolvedOptions?.depth ?? 60;
+    html += field("Depth", "option:depth", shown, {
+      unit: "% of bin height", step: "1", min: "1", max: "100", wide: true,
+    });
+    html += `<p class="field-help wide">The scoop always spans the full usable bin width and starts at the front floor edge.</p>`;
+  }
   if (one.kind === "nest") {
+    const assist = String(one.options?.lift_assist ?? state.draftResolvedOptions?.lift_assist ?? "finger_grasp");
+    const fingerPosition = String(one.options?.finger_position ?? state.draftResolvedOptions?.finger_position ?? "sides");
+    const pushPosition = String(one.options?.push_position ?? state.draftResolvedOptions?.push_position ?? "right");
+    const selected = (value, actual) => value === actual ? "selected" : "";
+    html += `<label class="wide">Lift assist
+      <select data-draft="option:lift_assist">
+        <option value="finger_grasp" ${selected("finger_grasp", assist)}>Finger grasp</option>
+        <option value="push_out" ${selected("push_out", assist)}>Push Out</option>
+        <option value="none" ${selected("none", assist)}>No assist</option>
+      </select>
+    </label>`;
+    if (assist === "finger_grasp") {
+      html += `<label class="wide">Finger grasp locations
+        <select data-draft="option:finger_position">
+          <option value="sides" ${selected("sides", fingerPosition)}>Sides (left/right)</option>
+          <option value="top_bottom" ${selected("top_bottom", fingerPosition)}>Top/bottom</option>
+          <option value="both" ${selected("both", fingerPosition)}>Both</option>
+        </select>
+      </label>`;
+      html += field(
+        "Finger opening width", "option:finger_width",
+        fmt(one.options?.finger_width ?? state.draftResolvedOptions?.finger_width ?? 25.4),
+        { unit: "mm", step: "1", min: "12", max: "40", wide: true },
+      );
+      html += `<p class="field-help wide">The openings rotate with the photographed outline. Their edges curve gently down into the grasp instead of ending in a sharp corner.</p>`;
+    } else if (assist === "push_out") {
+      html += `<label class="wide">Push at
+        <select data-draft="option:push_position">
+          <option value="right" ${selected("right", pushPosition)}>Right</option>
+          <option value="left" ${selected("left", pushPosition)}>Left</option>
+          <option value="top" ${selected("top", pushPosition)}>Top</option>
+          <option value="bottom" ${selected("bottom", pushPosition)}>Bottom</option>
+        </select>
+      </label>`;
+      html += field(
+        "Push area", "option:push_area",
+        fmt(one.options?.push_area ?? state.draftResolvedOptions?.push_area ?? 30),
+        { unit: "%", step: "5", min: "15", max: "40" },
+      );
+      html += field(
+        "Push depth", "option:push_depth",
+        fmt(one.options?.push_depth ?? state.draftResolvedOptions?.push_depth ?? 4),
+        { unit: "mm", step: "0.5", min: "2", max: "8" },
+      );
+      html += `<p class="field-help wide">Most of the tool rests on a raised floor. Press the selected end into the lower area to lift the opposite end.</p>`;
+    }
     html += `<div class="photo-upload wide">
       <label class="button secondary photo-button" for="nest-photo-input">Upload part photo</label>
       <input id="nest-photo-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
@@ -1587,6 +1660,7 @@ function markDraftChanged() {
   // Invalidate an auto-save immediately, at the moment the user changes the
   // visible draft. Waiting for the debounced rebuild leaves a short window in
   // which the older response can replace the newer edit.
+  state.draftTouched = true;
   state.draftRequest += 1;
   state.canGenerate = false;
   updateGenerateAvailability();
@@ -1596,6 +1670,7 @@ function updateDraftFromFields(event) {
   // Any deliberate edit is a strong enough signal to start saving this draft
   // as it goes, even if the app put it up on its own (see state.draftAutoCommit).
   state.draftAutoCommit = true;
+  state.draftTouched = true;
   markDraftChanged();
   const one = state.draft;
   const get = key => $(`[data-draft="${key}"]`, $("#draft-fields"))?.value;
@@ -1656,6 +1731,12 @@ function updateDraftFromFields(event) {
   }
   one.options ||= {};
   const changed = event?.currentTarget?.dataset?.draft || "";
+  if (one.kind === "nest") {
+    for (const key of ["lift_assist", "finger_position", "push_position"]) {
+      const value = get(`option:${key}`);
+      if (value !== undefined) one.options[key] = value;
+    }
+  }
   // Text carries the only options that are not numbers: what it says, and two
   // plain yes/no choices. Read them straight off their own controls.
   if (info.flags.text) {
@@ -1694,7 +1775,8 @@ function updateDraftFromFields(event) {
     }
   }
   if (changed.startsWith("option:") &&
-      !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom"]
+      !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom",
+        "lift_assist", "finger_position", "push_position"]
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
     const option = info.fields.find(entry => entry.key === key);
@@ -1797,6 +1879,7 @@ function updateDraftFromFields(event) {
   // Switching a bore's profile swaps which fields show (locked hex-bit size,
   // the Angle field for round/square only).
   if (changed === "profile" && one.kind === "bore") renderDraftFields();
+  if (changed === "option:lift_assist" && one.kind === "nest") renderDraftFields();
   // Ticking Use support crossbars reveals (or hides) Number of crossbars.
   if (changed === "option:minimal_bottom") renderDraftFields();
   updateSelectionButtons();
@@ -1927,6 +2010,7 @@ async function autoCommitDraft(request) {
     seedPartNameFromText(state.draft);
     recordHistory(previousDesign);
     state.draftIsNew = false;
+    state.draftTouched = false;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
     if (state.selected === null && wasNew) state.selected = result.selected;
     // Saved support zones snap to the grid. Without this sync the preview
@@ -1969,6 +2053,7 @@ async function commitVisibleDraft() {
   seedPartNameFromText(draft);
   recordHistory(previousDesign);
   state.draftIsNew = false;
+  state.draftTouched = false;
   state.selected = committed.selected;
   if (Number.isInteger(committed.selected)) {
     state.draftSourceIndex = committed.selected;
@@ -1983,6 +2068,109 @@ async function commitVisibleDraft() {
   return true;
 }
 
+// True when the open draft holds work that switching parts would throw away:
+// a new part the user has actually started, or edits to a placed part that
+// haven't been saved back yet. An untouched suggestion the app put up on its
+// own counts as nothing to lose.
+function draftNeedsSaving() {
+  if (!state.draft) return false;
+  const index = draftCommitIndex();
+  if (Number.isInteger(index)) {
+    return JSON.stringify(state.design.layout.features[index]) !== JSON.stringify(state.draft);
+  }
+  // index is null (brand-new) or false (its row was cleared underneath it).
+  return state.draftTouched === true;
+}
+
+// Gate every "switch to a different interior part" path. Returns true if the
+// caller may go ahead and replace the draft, false if the user chose to stay
+// and keep editing. Edits to an already-placed part are folded back in
+// silently when they're valid; anything that can't be saved cleanly - or a
+// new part that was never added - puts the choice to the user.
+async function guardDraftSwitch() {
+  if (!draftNeedsSaving()) return true;
+  const index = draftCommitIndex();
+  if (Number.isInteger(index)) {
+    try {
+      if (await commitVisibleDraft()) return true;
+    } catch (error) {
+      return promptDraftConflict("edit", error.message);
+    }
+    // An edit of a placed part that didn't save and didn't throw: still don't
+    // wipe it without asking, but "add as new" would only duplicate the row.
+    return promptDraftConflict("edit", "");
+  }
+  return promptDraftConflict("new", "");
+}
+
+// The "you'll lose this part" dialog. mode "new": the draft was never added -
+// offer Add as new / Discard it / Keep editing. mode "edit": a placed part has
+// an edit that won't save - offer Discard change / Keep editing.
+function promptDraftConflict(mode, reason) {
+  return new Promise(resolve => {
+    const dialog = $("#draft-switch-dialog");
+    const titleEl = $("#draft-switch-title");
+    const msgEl = $("#draft-switch-message");
+    const reasonEl = $("#draft-switch-reason");
+    const keepBtn = $("#draft-switch-keep");
+    const discardBtn = $("#draft-switch-discard");
+    const addBtn = $("#draft-switch-add");
+    const title = partInfo(state.draft?.kind)?.title || "interior part";
+
+    let done = false;
+    const finish = proceed => {
+      if (done) return;
+      done = true;
+      keepBtn.onclick = discardBtn.onclick = addBtn.onclick = null;
+      dialog.removeEventListener("cancel", onCancel);
+      if (dialog.open) dialog.close();
+      resolve(proceed);
+    };
+    const onCancel = event => { event.preventDefault(); finish(false); };
+
+    reasonEl.textContent = reason || "";
+    reasonEl.hidden = !reason;
+    addBtn.disabled = false;
+
+    if (mode === "edit") {
+      titleEl.textContent = "Discard this change?";
+      msgEl.textContent = `Your last change to this ${title} can't be saved yet, so leaving it now will lose that change. The ${title}'s other settings are already saved.`;
+      addBtn.hidden = true;
+      discardBtn.textContent = "Discard change";
+    } else {
+      titleEl.textContent = `Keep this ${title}?`;
+      msgEl.textContent = `You've been setting up a new ${title} but haven't added it to the design yet. Switching to another part now will discard it.`;
+      addBtn.hidden = false;
+      addBtn.textContent = "Add as new";
+      discardBtn.textContent = "Discard it";
+    }
+
+    keepBtn.onclick = () => finish(false);
+    discardBtn.onclick = () => finish(true);
+    addBtn.onclick = async () => {
+      addBtn.disabled = true;
+      try {
+        state.selected = null;
+        state.draftIsNew = true;
+        state.draftAutoCommit = true;
+        await commitVisibleDraft();
+        toast(`Added ${title}.`);
+        finish(true);
+      } catch (error) {
+        addBtn.hidden = true;
+        addBtn.disabled = false;
+        reasonEl.textContent = error.message;
+        reasonEl.hidden = false;
+        titleEl.textContent = "This part isn't ready";
+        msgEl.textContent = `This ${title} can't be added yet. Discard it, or keep editing to fix the problem.`;
+      }
+    };
+
+    dialog.addEventListener("cancel", onCancel);
+    if (!dialog.open) dialog.showModal();
+  });
+}
+
 // Used only for committing a 2D-layout drag of an already-placed support -
 // a discrete one-shot action, unlike the continuous autoCommitDraft above.
 async function applySupport(index) {
@@ -1994,6 +2182,7 @@ async function applySupport(index) {
     recordHistory(previousDesign);
     state.selected = result.selected;
     state.draftIsNew = false;
+    state.draftTouched = false;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
     state.draft = clone(state.design.layout.features[state.selected]);
     state.draftResolvedOptions = {};
@@ -2173,9 +2362,10 @@ async function refreshPreview() {
       const featureIndex = result.invalid_feature_indexes?.[errorIndex];
       actions.push({
         message: featureIndex === undefined ? message : `Interior part ${featureIndex + 1}: ${message}`,
-        activate: () => {
+        activate: async () => {
           if (featureIndex === undefined) return;
-          selectedFeature(featureIndex);
+          await selectedFeature(featureIndex);
+          if (state.selected !== featureIndex) return;
           $(".support-editor").scrollIntoView({ behavior: "smooth", block: "center" });
           flashField($(".support-editor"));
         },
@@ -3311,8 +3501,13 @@ function hitFeature(world) {
 
 function wireLayoutInteraction() {
   const canvas = $("#preview-2d");
-  canvas.addEventListener("pointerdown", event => {
+  // Tracks whether the pointer is still down after an awaited "keep this part?"
+  // prompt - if the user lifted their finger to answer it, there's no drag.
+  let pointerActive = false;
+  canvas.addEventListener("pointercancel", () => { pointerActive = false; });
+  canvas.addEventListener("pointerdown", async event => {
     if (!state.layoutTransform || state.designMutationBusy) return;
+    pointerActive = true;
     const world = layoutPoint(event);
     let index = hitFeature(world);
     if (index === null) {
@@ -3323,8 +3518,14 @@ function wireLayoutInteraction() {
       renderPlaced(); updateSelectionButtons(); renderLayout2D();
       return;
     }
-    if (index !== state.selected) selectedFeature(index);
-    else cancelPendingDraftWork();
+    if (index !== state.selected) {
+      // May put up the "keep this part?" dialog before the selection moves.
+      await selectedFeature(index);
+      if (state.selected !== index) return;   // user chose to keep editing
+      if (!pointerActive) return;             // finger already lifted for the dialog
+    } else {
+      cancelPendingDraftWork();
+    }
     // A field edit may still exist only in the live draft. Start the drag from
     // exactly what is on screen, not the last server-saved copy, or moving the
     // same part immediately after typing can silently restore its old values.
@@ -3355,7 +3556,7 @@ function wireLayoutInteraction() {
       startAngle: Math.atan2(world[1] - centre[1], world[0] - centre[0]),
       startRadius: Math.max(.01, Math.hypot(world[0] - centre[0], world[1] - centre[1])),
     };
-    canvas.setPointerCapture(event.pointerId);
+    try { canvas.setPointerCapture(event.pointerId); } catch (_error) {}
   });
   canvas.addEventListener("pointermove", event => {
     const drag = state.layoutDrag;
@@ -3385,6 +3586,7 @@ function wireLayoutInteraction() {
     renderLayout2D();
   });
   canvas.addEventListener("pointerup", async event => {
+    pointerActive = false;
     const drag = state.layoutDrag;
     if (!drag) return;
     state.layoutDrag = null;

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 import trimesh
-from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box as shapely_box
 from shapely import affinity
 from shapely.ops import unary_union
 
@@ -90,7 +90,14 @@ BOTTOM_SLOPE_MAX = 75.0    # steepest tool-slot slope; the ramp itself is solid 
 BOTTOM_EMBED = 0.4         # sink slope solids this far into the floor for a clean union
 BOTTOM_CROSSBAR_THICKNESS = 2.4  # run-axis width of one printable support crossbar
 BOTTOM_CROSSBAR_CHAMFER = 1.0    # 45-degree gusset where a crossbar meets the floor
-NEST_CHAMFER = 0.8         # reinforced outside foot on a Photo Nest cutter wall
+NEST_CHAMFER = 2.0         # substantial 45-degree outside foot on a Photo Nest wall
+NEST_TOP_ROUND = 1.0       # gentle round-over on both edges of the wall top
+NEST_FINGER_WIDTH = 25.4   # one-inch-wide rounded finger opening
+NEST_PUSH_AREA = 30.0      # percent of the outline occupied by the low press area
+NEST_PUSH_DEPTH = 4.0      # how far the press end travels before reaching the floor
+NEST_ASSISTS = {"none", "finger_grasp", "push_out"}
+NEST_FINGER_POSITIONS = {"sides", "top_bottom", "both"}
+NEST_PUSH_POSITIONS = {"left", "right", "top", "bottom"}
 POCKET_CHAMFER = 0.5       # 45-degree chamfer on pocket outside edges for strength
 POCKET_FLOOR = 2.0         # solid floor thickness under a pocket recess
 LAYOUT_MODES = ("fused", "separate", "cartridge")
@@ -381,6 +388,27 @@ def snapped_zone(
                 cx + width / 2.0, cy + depth / 2.0)
 
 
+def scoop_zone(
+    box: BoxSpec,
+    one: "Feature",
+    base_z: float,
+    mode: str = "fused",
+    snap: float = EDITOR_SNAP,
+) -> Zone:
+    """The scoop is always full-width and starts at the front wall."""
+    bounds = layout_zone(box, mode)
+    try:
+        depth_percent = float(one.options.get("depth", 60.0))
+    except (TypeError, ValueError):
+        depth_percent = 60.0
+    height = (box.z - base_z) * depth_percent / 100.0
+    run = min(max(height, snap), bounds.depth / 2.0)
+    return snapped_zone(
+        Zone(bounds.x0, bounds.y0, bounds.x1, bounds.y0 + run),
+        box, mode, snap,
+    )
+
+
 def moved_feature(
     one: Feature,
     box: BoxSpec,
@@ -519,7 +547,7 @@ def feature(kind: str) -> Callable[[Builder], Builder]:
 # number, but the editor has to show it too: a parameter box that sits blank
 # cannot be reasoned about or edited.  So each kind registers how it resolves
 # its own defaults, once, and both the builder and the editor read them here.
-Defaults = Callable[[BoxSpec, "Feature", float], dict[str, float]]
+Defaults = Callable[[BoxSpec, "Feature", float], dict[str, object]]
 FEATURE_DEFAULTS: dict[str, Defaults] = {}
 
 
@@ -532,7 +560,7 @@ def defaults(kind: str) -> Callable[[Defaults], Defaults]:
 
 def resolved_options(
     box: BoxSpec, spec_feature: "Feature", base_z: float = 0.0
-) -> dict[str, float]:
+) -> dict[str, object]:
     """Every option of a holder as a concrete number.
 
     Defaults first, then whatever the holder actually sets on top.  A default
@@ -865,20 +893,26 @@ def nest_smoothed_contour(one: Feature) -> tuple[tuple[float, float], ...]:
     )
 
 
-def nest_contour_polygon(one: Feature, include_clearance: bool = False) -> Polygon:
-    """The photo outline after proportional resize, rotation and placement."""
+def _nest_local_polygon(one: Feature, include_clearance: bool = False) -> Polygon:
+    """The resized Photo Nest outline before editor rotation and placement."""
     if not one.contour:
         raise ValueError("upload a part photo before generating a Photo Nest")
     outline = _softened_outline(
         Polygon(one.contour), float(one.options.get("smoothing", 0.0))
     )
     outline = affinity.scale(outline, xfact=one.scale, yfact=one.scale, origin=(0, 0))
-    outline = affinity.rotate(outline, one.rotation, origin=(0, 0), use_radians=False)
     if include_clearance:
         clearance = float(one.options.get("clearance", 0.6))
         if not math.isfinite(clearance) or clearance < 0.0:
             raise ValueError("Clearance must be zero or greater")
         outline = outline.buffer(clearance, join_style="round")
+    return outline
+
+
+def nest_contour_polygon(one: Feature, include_clearance: bool = False) -> Polygon:
+    """The photo outline after proportional resize, rotation and placement."""
+    outline = _nest_local_polygon(one, include_clearance)
+    outline = affinity.rotate(outline, one.rotation, origin=(0, 0), use_radians=False)
     cx, cy = one.zone.centre
     return affinity.translate(outline, xoff=cx, yoff=cy)
 
@@ -908,30 +942,192 @@ def fitted_nest_feature(one: Feature, centre: tuple[float, float] | None = None)
 
 
 @defaults("nest")
-def nest_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+def nest_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, object]:
     return {
         "clearance": 0.6,
         "depth": min(8.0, max(1.0, box.z - base_z)),
         "rim": 3.0,
         "smoothing": 0.0,
+        "lift_assist": "finger_grasp",
+        "finger_position": "sides",
+        "finger_width": NEST_FINGER_WIDTH,
+        "push_position": "right",
+        "push_area": NEST_PUSH_AREA,
+        "push_depth": NEST_PUSH_DEPTH,
     }
+
+
+def _nest_transform_mesh(mesh: trimesh.Trimesh, one: Feature) -> trimesh.Trimesh:
+    """Rotate a local nest detail with its outline, then place it in the layout."""
+    if one.rotation:
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(
+            math.radians(one.rotation), (0.0, 0.0, 1.0)
+        ))
+    cx, cy = one.zone.centre
+    mesh.apply_translation((cx, cy, 0.0))
+    return mesh
+
+
+def _line_coordinates(geometry, axis: int) -> list[float]:
+    """Coordinates from any Shapely line/boundary intersection."""
+    if geometry.is_empty:
+        return []
+    if hasattr(geometry, "geoms"):
+        values: list[float] = []
+        for part in geometry.geoms:
+            values.extend(_line_coordinates(part, axis))
+        return values
+    if hasattr(geometry, "coords"):
+        return [float(point[axis]) for point in geometry.coords]
+    return []
+
+
+def _nest_finger_cutters(
+    one: Feature, opening: Polygon, wall_height: float, width: float,
+    position: str, base_z: float, rim: float,
+) -> list[trimesh.Trimesh]:
+    """Rounded U-shaped notches through chosen sides of the local nest wall."""
+    min_x, min_y, max_x, max_y = opening.bounds
+    inside = opening.representative_point()
+    reach = rim + NEST_CHAMFER + 3.0
+    radius = width / 2.0
+    cutters: list[trimesh.Trimesh] = []
+
+    if position in {"sides", "both"}:
+        crossing = opening.boundary.intersection(LineString([
+            (min_x - reach, inside.y), (max_x + reach, inside.y)
+        ]))
+        xs = _line_coordinates(crossing, 0)
+        if len(xs) < 2:
+            raise ValueError("Finger grasps could not find both sides of this outline")
+        profile = Point(float(inside.y), base_z + wall_height).buffer(radius, quad_segs=32)
+        for boundary, direction in ((min(xs), -1.0), (max(xs), 1.0)):
+            start = boundary + direction * (rim + NEST_CHAMFER + 1.0)
+            end = boundary - direction * 2.0
+            cutter = _extrude_yz_profile(profile, abs(end - start))
+            cutter.apply_translation(((start + end) / 2.0, 0.0, 0.0))
+            cutters.append(_nest_transform_mesh(cutter, one))
+
+    if position in {"top_bottom", "both"}:
+        crossing = opening.boundary.intersection(LineString([
+            (inside.x, min_y - reach), (inside.x, max_y + reach)
+        ]))
+        ys = _line_coordinates(crossing, 1)
+        if len(ys) < 2:
+            raise ValueError("Finger grasps could not find both ends of this outline")
+        profile = Point(float(inside.x), base_z + wall_height).buffer(radius, quad_segs=32)
+        for boundary, direction in ((min(ys), -1.0), (max(ys), 1.0)):
+            start = boundary + direction * (rim + NEST_CHAMFER + 1.0)
+            end = boundary - direction * 2.0
+            cutter = _extrude_xz_profile(profile, abs(end - start))
+            cutter.apply_translation((0.0, (start + end) / 2.0, 0.0))
+            cutters.append(_nest_transform_mesh(cutter, one))
+    return cutters
+
+
+def _nest_rounded_wall(
+    opening: Polygon, rim: float, height: float, base_z: float,
+) -> trimesh.Trimesh:
+    """One nest wall with a 2 mm outside foot and a softly rounded top."""
+    outer = opening.buffer(rim, join_style="round")
+    top_round = min(NEST_TOP_ROUND, rim * 0.4, height * 0.25)
+    straight_height = height - top_round
+    outside: list[trimesh.Trimesh] = []
+
+    straight = _extrude_polygon(outer, straight_height)
+    straight.apply_translation((0.0, 0.0, base_z))
+    outside.append(straight)
+
+    # A full 2 mm-high, 45-degree outside flare, independent of retrieval style.
+    chamfer_steps = 8
+    layer = NEST_CHAMFER / chamfer_steps
+    for index in range(chamfer_steps):
+        grow = NEST_CHAMFER - index * layer
+        disk = _extrude_polygon(outer.buffer(grow, join_style="round"), layer)
+        disk.apply_translation((0.0, 0.0, base_z + index * layer))
+        outside.append(disk)
+
+    # A fine layered quarter-round eases both top edges into a broad crown.
+    inside: list[trimesh.Trimesh] = []
+    bore = _extrude_polygon(opening, height + 2.0)
+    bore.apply_translation((0.0, 0.0, base_z - 1.0))
+    inside.append(bore)
+    top_steps = 8
+    layer = top_round / top_steps
+    for index in range(top_steps):
+        rise = (index + 1) * layer
+        inset = top_round - math.sqrt(max(0.0, top_round ** 2 - rise ** 2))
+        top_outer = outer.buffer(-inset, join_style="round")
+        top_inner = opening.buffer(inset, join_style="round")
+        if top_outer.is_empty or top_inner.is_empty or not top_outer.contains(top_inner):
+            raise ValueError("Outline wall is too thin for its rounded top")
+        disk = _extrude_polygon(top_outer, layer)
+        disk.apply_translation((0.0, 0.0, base_z + straight_height + index * layer))
+        outside.append(disk)
+        cut = _extrude_polygon(top_inner, layer + 0.02)
+        cut.apply_translation((
+            0.0, 0.0, base_z + straight_height + index * layer - 0.01
+        ))
+        inside.append(cut)
+    return difference([union(outside), union(inside)])
+
+
+def _nest_push_support(
+    one: Feature, opening: Polygon, position: str, area: float,
+    depth: float, base_z: float,
+) -> trimesh.Trimesh:
+    """Raised tool-shaped deck, leaving one selected end low for push-to-lift."""
+    min_x, min_y, max_x, max_y = opening.bounds
+    fraction = area / 100.0
+    if position == "left":
+        support = opening.intersection(shapely_box(
+            min_x + (max_x - min_x) * fraction, min_y - 1.0,
+            max_x + 1.0, max_y + 1.0,
+        ))
+    elif position == "right":
+        support = opening.intersection(shapely_box(
+            min_x - 1.0, min_y - 1.0,
+            max_x - (max_x - min_x) * fraction, max_y + 1.0,
+        ))
+    elif position == "bottom":
+        support = opening.intersection(shapely_box(
+            min_x - 1.0, min_y + (max_y - min_y) * fraction,
+            max_x + 1.0, max_y + 1.0,
+        ))
+    else:  # top
+        support = opening.intersection(shapely_box(
+            min_x - 1.0, min_y - 1.0,
+            max_x + 1.0, max_y - (max_y - min_y) * fraction,
+        ))
+    if support.is_empty or support.area < opening.area * 0.5:
+        raise ValueError("Push area leaves too little of the tool supported")
+    deck = _extrude_polygon(support, depth)
+    deck.apply_translation((0.0, 0.0, base_z))
+    return _nest_transform_mesh(deck, one)
 
 
 @feature("nest")
 def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
-    """A cookie-cutter wall that traces one photographed outline.
+    """A finished wall that traces one photographed outline.
 
     The wall stands straight up from ``base_z`` with the part's own footprint
-    for the opening - just enough to hold the part, not a filled block that
-    the part is cut out of. Its outside foot is chamfered so the thin wall has
-    no sharp root to snap at.
+    for the opening. It has a reinforced outside foot and rounded top, then
+    receives either rounded finger openings or a raised push-to-lift floor.
     """
     options = resolved_options(box, spec_feature, base_z)
     clearance = options["clearance"]
     depth = options["depth"]
     rim = options["rim"]
     smoothing = options["smoothing"]
-    if not all(math.isfinite(value) for value in (clearance, depth, rim, smoothing)):
+    assist = str(options["lift_assist"])
+    finger_position = str(options["finger_position"])
+    finger_width = float(options["finger_width"])
+    push_position = str(options["push_position"])
+    push_area = float(options["push_area"])
+    push_depth = float(options["push_depth"])
+    if not all(math.isfinite(value) for value in (
+        clearance, depth, rim, smoothing, finger_width, push_area, push_depth
+    )):
         raise ValueError("Photo Nest measurements must be finite")
     if clearance < 0.0:
         raise ValueError("Clearance must be zero or greater")
@@ -939,10 +1135,23 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         raise ValueError("Outline wall must be greater than zero")
     if smoothing < 0.0:
         raise ValueError("Soften outline must be zero or greater")
+    if assist not in NEST_ASSISTS:
+        raise ValueError("Lift assist must be None, Finger grasp, or Push Out")
+    if finger_position not in NEST_FINGER_POSITIONS:
+        raise ValueError("Finger grasp locations must be Sides, Top/bottom, or Both")
+    if finger_width < 12.0 or finger_width > 40.0:
+        raise ValueError("Finger opening width must be between 12 and 40 mm")
+    if push_position not in NEST_PUSH_POSITIONS:
+        raise ValueError("Push position must be left, right, top, or bottom")
+    if push_area < 15.0 or push_area > 40.0:
+        raise ValueError("Push area must be between 15% and 40%")
+    if push_depth < 2.0 or push_depth > 8.0:
+        raise ValueError("Push depth must be between 2 and 8 mm")
     available = box.z - base_z
-    if depth <= 0.0 or depth > available + 1e-9:
+    wall_height = depth + (push_depth if assist == "push_out" else 0.0)
+    if depth <= 0.0 or wall_height > available + 1e-9:
         raise ValueError(
-            f"Wall height {depth:g} mm must be between 0 and {available:.1f} mm "
+            f"Wall height {wall_height:g} mm must be between 0 and {available:.1f} mm "
             f"above the printable floor"
         )
     fitted = fitted_nest_feature(spec_feature)
@@ -950,30 +1159,23 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             or abs(fitted.zone.depth - spec_feature.zone.depth) > 1e-4):
         raise ValueError("Photo Nest footprint is stale; update the outline or measurements")
 
-    opening = nest_contour_polygon(spec_feature, include_clearance=True)
-    outer = opening.buffer(rim, join_style="round")
-    chamfer = min(NEST_CHAMFER, rim, depth / 2.0)
+    local_opening = _nest_local_polygon(spec_feature, include_clearance=True)
+    world_opening = nest_contour_polygon(spec_feature, include_clearance=True)
+    wall = _nest_rounded_wall(world_opening, rim, wall_height, base_z)
 
-    # Solid outer column for the full wall height...
-    column = _extrude_polygon(outer, depth)
-    column.apply_translation((0.0, 0.0, base_z))
-    block = [column]
-    # ...plus a 45-degree outside foot, stepped into thin printable layers: the
-    # outer face starts a full chamfer proud of the wall at the floor and pulls
-    # back flush by the top of the foot, so the wall meets the bed on a wedge
-    # and not a sharp thin edge.
-    steps = 4
-    layer = chamfer / steps
-    for index in range(steps):
-        grow = chamfer * (steps - index) / steps
-        disk = _extrude_polygon(outer.buffer(grow, join_style="round"), layer)
-        disk.apply_translation((0.0, 0.0, base_z + index * layer))
-        block.append(disk)
-    # One vertical bore leaves the part's own footprint open the whole way up,
-    # so the result is a cookie cutter, not a filled block with a cutout.
-    bore = _extrude_polygon(opening, depth + 2.0)
-    bore.apply_translation((0.0, 0.0, base_z - 1.0))
-    return [difference([union(block), bore])]
+    if assist == "finger_grasp":
+        cutters = _nest_finger_cutters(
+            spec_feature, local_opening, wall_height, finger_width,
+            finger_position, base_z, rim,
+        )
+        wall = difference([wall, union(cutters)])
+    elif assist == "push_out":
+        deck = _nest_push_support(
+            spec_feature, local_opening, push_position, push_area,
+            push_depth, base_z,
+        )
+        wall = union([wall, deck])
+    return [wall]
 
 
 # --- bores --------------------------------------------------------------------
@@ -1948,7 +2150,7 @@ def build_steps(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trim
 @defaults("scoop")
 def scoop_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     return {
-        "height": max(2.0, (box.z - base_z) * SCOOP_HEIGHT_FRACTION),
+        "depth": SCOOP_HEIGHT_FRACTION * 100.0,
     }
 
 
@@ -1957,7 +2159,14 @@ def build_scoop(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trim
     """A full-zone curved retrieval ramp rising up the wall."""
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
-    height = float(options["height"])
+    if "depth" in spec_feature.options:
+        depth_percent = float(options["depth"])
+        if depth_percent <= 0.0 or depth_percent > 100.0:
+            raise ValueError("scoop depth must be between 1 and 100 percent")
+        height = (box.z - base_z) * depth_percent / 100.0
+    else:
+        # Keep older saved interior scoops usable. New designs use depth (%).
+        height = float(options.get("height", (box.z - base_z) * SCOOP_HEIGHT_FRACTION))
     if height <= 0.0 or base_z + height > box.z + 1e-9:
         raise ValueError("scoop height must fit inside the bin")
 
@@ -2033,6 +2242,8 @@ TEXT_ZONE_EPSILON = 0.01     # glyph bounds land exactly on the zone; see _featu
 # letting it guess from the value it happens to receive.
 NON_NUMERIC_OPTIONS = {
     "text": "string", "auto": "flag", "raised": "flag", "level": "string",
+    "lift_assist": "string", "finger_position": "string",
+    "push_position": "string",
     # A divider's sloped-bottom yes/no choices - kept flags so a browser or
     # API round-trip does not turn them into 0.0 / 1.0 floats.
     "reverse_bottom": "flag", "alternate_bottom": "flag", "minimal_bottom": "flag",

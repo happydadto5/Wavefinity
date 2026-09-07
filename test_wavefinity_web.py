@@ -67,8 +67,13 @@ class WebApplicationTests(unittest.TestCase):
              "steps", "scoop", "text"},
         )
         self.assertEqual(parts["scoop"]["title"], "Curved Scoop")
-        self.assertTrue(parts["scoop"]["flags"]["size"])
-        self.assertTrue(parts["scoop"]["flags"]["along"])
+        self.assertFalse(parts["scoop"]["flags"]["size"])
+        self.assertFalse(parts["scoop"]["flags"]["along"])
+        self.assertEqual(
+            [(field["label"], field["key"], field["default"])
+             for field in parts["scoop"]["fields"]],
+            [("Depth", "depth", "60")],
+        )
         self.assertTrue(parts["text"]["flags"]["text"])
         self.assertEqual(parts["text"]["title"], "Text")
         self.assertTrue(parts["cradle"]["flags"]["alternate"])
@@ -227,7 +232,7 @@ class WebApplicationTests(unittest.TestCase):
         high_top = max(point[2] for face in high["geometry"] for point in face["points"])
         self.assertGreater(high_top, low_top + 4.0)
 
-    def test_photo_nest_defaults_have_only_the_three_new_measurements(self):
+    def test_photo_nest_defaults_include_finger_grasp_lift_assist(self):
         design = default_design()
         response = default_feature_payload({
             "design": design, "kind": "nest",
@@ -235,7 +240,13 @@ class WebApplicationTests(unittest.TestCase):
         feature = response["feature"]
         self.assertEqual(feature["options"], {})
         self.assertIsNone(feature["contour"])
-        self.assertEqual(set(response["resolved_options"]), {"clearance", "depth", "rim", "smoothing"})
+        resolved = response["resolved_options"]
+        self.assertEqual(resolved["lift_assist"], "finger_grasp")
+        self.assertEqual(resolved["finger_position"], "sides")
+        self.assertEqual(resolved["finger_width"], 25.4)
+        self.assertEqual(resolved["push_position"], "right")
+        self.assertEqual(resolved["push_area"], 30.0)
+        self.assertEqual(resolved["push_depth"], 4.0)
 
     def test_photo_upload_creates_one_contour_and_smallest_grid_bin(self):
         outline = PhotoOutline(
@@ -245,13 +256,21 @@ class WebApplicationTests(unittest.TestCase):
         with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
             result = photo_nest_payload({
                 "design": default_design(), "image": "unused", "mime_type": "image/png",
-                "options": {"clearance": 1.0, "depth": 9.0, "rim": 4.0},
+                "options": {
+                    "clearance": 1.0, "depth": 9.0, "rim": 4.0,
+                    "lift_assist": "push_out", "push_position": "left",
+                    "push_area": 25.0, "push_depth": 5.0,
+                },
             })
         design = result["design"]
         feature = design["layout"]["features"][0]
         self.assertEqual(len(design["layout"]["features"]), 1)
         self.assertEqual(feature["kind"], "nest")
         self.assertIsNone(feature["item"])
+        self.assertEqual(feature["options"]["lift_assist"], "push_out")
+        self.assertEqual(feature["options"]["push_position"], "left")
+        self.assertEqual(feature["options"]["push_area"], 25.0)
+        self.assertEqual(feature["options"]["push_depth"], 5.0)
         self.assertEqual(feature["contour"], [list(point) for point in outline.contour])
         self.assertNotIn("image", json.dumps(design).lower())
         self.assertEqual(design["box"]["x"] % 8.0, 0.0)
@@ -1025,7 +1044,7 @@ class WebServerTests(unittest.TestCase):
         self.assertNotIn(b"Wall / floor", body)
         self.assertNotIn(b"Flat wall band", body)
         self.assertNotIn(b"Label your bin", body)
-        self.assertIn(b"Rim label", body)
+        self.assertNotIn(b"Rim label", body)
         self.assertIn(b"Interior parts", body)
         self.assertIn(b"Part Name (For file)", body)
         self.assertIn(b"Connect bins", body)
@@ -1052,7 +1071,7 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b"support-layout-dialog", body)
         self.assertNotIn(b"Add curved scoop", body)
         self.assertNotIn(b"Fixed 5 mm lettering on a shelf", body)
-        self.assertLess(body.index(b"Rim label"), body.index(b"Interior parts"))
+        self.assertLess(body.index(b"Part Name (For file)"), body.index(b"Interior parts"))
         self.assertLess(body.index(b"Interior parts"), body.index(b"Connect bins"))
         self.assertLess(body.index(b"Connect bins"), body.index(b"Save Location:"))
         self.assertLess(body.index(b"How should the interior print?"), body.index(b"Connect bins"))

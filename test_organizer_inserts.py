@@ -1603,6 +1603,88 @@ class OtherHoldersTests(unittest.TestCase):
         self.assertTrue(cutter.is_watertight)
         self.assertGreater(cutter.bounds[0][2], 0.0)
 
+    def test_default_finger_grasps_are_rounded_opposing_side_openings(self) -> None:
+        plain = build_features(
+            BIN, [photo_nest(options={"lift_assist": "none"})], BIN.base_thickness
+        )[0]
+        sides = build_features(BIN, [photo_nest()], BIN.base_thickness)[0]
+        ends = build_features(
+            BIN,
+            [photo_nest(options={
+                "lift_assist": "finger_grasp", "finger_position": "top_bottom",
+            })],
+            BIN.base_thickness,
+        )[0]
+        both = build_features(
+            BIN,
+            [photo_nest(options={
+                "lift_assist": "finger_grasp", "finger_position": "both",
+            })],
+            BIN.base_thickness,
+        )[0]
+        self.assertEqual(
+            inserts.resolved_options(BIN, photo_nest(), BIN.base_thickness)["finger_position"],
+            "sides",
+        )
+        self.assertLess(sides.volume, plain.volume)
+        self.assertLess(ends.volume, plain.volume)
+        self.assertLess(both.volume, min(sides.volume, ends.volume))
+        self.assertTrue(all(mesh.is_watertight for mesh in (plain, sides, ends, both)))
+
+    def test_finger_grasps_rotate_with_the_photo_outline(self) -> None:
+        base = photo_nest(options={"lift_assist": "finger_grasp"})
+        turned = photo_nest(options={"lift_assist": "finger_grasp"}, rotation=90.0)
+        base_mesh = build_features(BIN, [base], BIN.base_thickness)[0]
+        turned_mesh = build_features(BIN, [turned], BIN.base_thickness)[0]
+        self.assertAlmostEqual(base_mesh.volume, turned_mesh.volume, places=2)
+        self.assertAlmostEqual(
+            base_mesh.bounds[1][0] - base_mesh.bounds[0][0],
+            turned_mesh.bounds[1][1] - turned_mesh.bounds[0][1],
+            places=2,
+        )
+        self.assertAlmostEqual(
+            base_mesh.bounds[1][1] - base_mesh.bounds[0][1],
+            turned_mesh.bounds[1][0] - turned_mesh.bounds[0][0],
+            places=2,
+        )
+
+    def test_photo_nest_has_two_mm_foot_and_gently_rounded_top(self) -> None:
+        one = photo_nest(
+            contour=((-30, -10), (30, -10), (30, 10), (-30, 10)),
+            options={"lift_assist": "none"},
+        )
+        mesh = build_features(BIN, [one], BIN.base_thickness)[0]
+        opening = inserts.nest_contour_polygon(one, include_clearance=True)
+        nominal_outer = opening.buffer(3.0, join_style="round")
+        self.assertAlmostEqual(mesh.bounds[1][0], nominal_outer.bounds[2] + 2.0, places=2)
+        top = float(mesh.bounds[1][2])
+        crown_x = max(
+            vertex[0] for vertex in mesh.vertices if abs(float(vertex[2]) - top) < 1e-4
+        )
+        self.assertAlmostEqual(crown_x, nominal_outer.bounds[2] - 1.0, places=2)
+
+    def test_push_out_builds_a_low_press_end_and_four_mm_raised_support(self) -> None:
+        one = photo_nest(
+            contour=((-30, -10), (30, -10), (30, 10), (-30, 10)),
+            options={"lift_assist": "push_out"},
+        )
+        mesh = build_features(BIN, [one], BIN.base_thickness)[0]
+        support_top = BIN.base_thickness + inserts.NEST_PUSH_DEPTH
+        support_faces = [
+            face for face in mesh.triangles
+            if all(abs(float(point[2]) - support_top) < 1e-4 for point in face)
+            and float(np.cross(face[1] - face[0], face[2] - face[0])[2]) > 0.0
+        ]
+        self.assertTrue(support_faces)
+        support_centres = np.asarray([face.mean(axis=0) for face in support_faces])
+        self.assertLess(float(support_centres[:, 0].max()), 15.0)
+        self.assertLess(float(support_centres[:, 0].min()), -25.0)
+        self.assertAlmostEqual(
+            mesh.bounds[1][2], BIN.base_thickness + 8.0 + inserts.NEST_PUSH_DEPTH,
+            places=3,
+        )
+        self.assertTrue(mesh.is_watertight)
+
     def test_posts_are_tapered_and_repeat_along_the_selected_axis(self) -> None:
         feature = Feature(
             "post", Zone(-30.0, -10.0, 30.0, 10.0), count=3, along="x",

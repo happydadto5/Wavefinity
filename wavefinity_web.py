@@ -74,6 +74,7 @@ from organizer_inserts import (
     occupied_zones,
     option_value,
     resized_feature,
+    scoop_zone,
     resolve_text_features,
     resolved_options,
     snapped_zone,
@@ -232,14 +233,19 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         str(payload.get("image", "")), str(payload.get("mime_type", ""))
     )
     supplied = dict(payload.get("options", {}))
-    # Only fit clearance and outline softening are user-set; the cutter wall's
-    # thickness ("rim") and height ("depth") are fixed so a Photo Nest always
-    # prints as the same simple cookie-cutter shape.
+    # Wall thickness and containment height stay fixed. Retrieval choices are
+    # stored with the outline so they survive later moves, turns and resizing.
     options = {
         "clearance": float(supplied.get("clearance", 0.6)),
         "depth": 8.0,
         "rim": 3.0,
         "smoothing": float(supplied.get("smoothing", 0.0)),
+        "lift_assist": str(supplied.get("lift_assist", "finger_grasp")),
+        "finger_position": str(supplied.get("finger_position", "sides")),
+        "finger_width": float(supplied.get("finger_width", 25.4)),
+        "push_position": str(supplied.get("push_position", "right")),
+        "push_area": float(supplied.get("push_area", 30.0)),
+        "push_depth": float(supplied.get("push_depth", 4.0)),
     }
     starter = Feature(
         "nest", Zone(-0.5, -0.5, 0.5, 0.5), options=options,
@@ -278,6 +284,10 @@ def _first_open_position(
     # since the placeholder is wider than the lettering it stands for.
     if one.kind == "text" and one.options.get("auto"):
         return one
+    if one.kind == "scoop":
+        return replace(one, zone=scoop_zone(
+            box, one, base_height(box, layout.mode), layout.mode, layout.snap
+        ))
     bounds = layout_zone(box, layout.mode)
     pitch = 8.0 if layout.mode == "cartridge" else layout.snap
     xs = np.arange(
@@ -834,6 +844,11 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         if one.kind == "text" and not one.options.get("auto"):
             one = auto_grow_text_feature(one, box, layout.mode)
+        if one.kind == "scoop":
+            one = replace(one, zone=scoop_zone(
+                box, one, base_height(box, layout.mode), layout.mode, layout.snap
+            ))
+
         width, depth = one.zone.width, one.zone.depth
         cx, cy = one.zone.centre
         one = resized_feature(one, box, (width, depth), layout.mode, layout.snap)

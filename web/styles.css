@@ -310,6 +310,9 @@ dialog:not([open]) { display: none; }
 .support-layout-dialog h2 { margin: 0 0 7px; font-size: 18px; }
 .support-layout-dialog p { margin: 0 0 16px; color: var(--muted); }
 .support-layout-dialog .button-row { justify-content: end; }
+#draft-switch-dialog { width: min(440px, calc(100vw - 32px)); }
+#draft-switch-dialog p { line-height: 1.45; }
+#draft-switch-dialog .field-error { color: var(--danger); margin: 0 0 16px; }
 
 .generation-dialog {
   width: min(440px, calc(100vw - 32px));

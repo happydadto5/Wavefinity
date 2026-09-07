@@ -1339,7 +1339,7 @@ class BinCustomizationTests(unittest.TestCase):
         # front wall is -Y; the strip starts at the wall and reaches `run` in
         self.assertAlmostEqual(zone.bounds[1], -inside_y / 2.0)
         self.assertAlmostEqual(zone.bounds[3], -inside_y / 2.0 + run)
-        self.assertLess(make_scoop(spec).bounds[1][1], 0.0)
+        self.assertLessEqual(make_scoop(spec).bounds[1][1], 0.0)
         # the top-label ledge is on the opposite (+Y) wall
         self.assertGreater(top_label_zone(spec).bounds[1], 0.0)
 
@@ -1404,14 +1404,14 @@ class BinCustomizationTests(unittest.TestCase):
                 "divider", organizer_app.Zone(-8.0, y0, 8.0, y1)
             )
 
-        # a bar across the middle of the bin clears the scoop; 8 mm of it used
-        # to be called a collision because the ramp was 0.03 mm proud there
+        # A bar crossing only the shallow tail of the ramp clears the scoop;
+        # it used to be called a collision even when the ramp was 0.03 mm proud.
         organizer_app.validate_customization_clearance(
-            spec, [divider(-4.0, 4.0)], scoop=True
+            spec, [divider(-2.0, 2.0)], scoop=True
         )
         self.assertEqual(
             organizer_app.preview_geometry(
-                spec, "", [divider(-4.0, 4.0)], "fused", "bottom", True
+                spec, "", [divider(-2.0, 2.0)], "fused", "bottom", True
             )["feature_errors"],
             (),
         )
@@ -1876,36 +1876,41 @@ class InsertEditorTests(unittest.TestCase):
                 organizer_app.run_command(args)
             self.assertEqual(generate.call_args.args[-2:], ("bottom", False))
 
-    def test_photo_nest_exports_a_bare_cutter_with_no_bin(self) -> None:
+    def test_photo_nest_exports_on_the_bin_floor_or_removable_insert(self) -> None:
         spec = BoxSpec(96.0, 64.0, 40.0)
         one = organizer_inserts.fitted_nest_feature(
             organizer_app.Feature(
                 "nest", organizer_app.Zone(-1, -1, 1, 1),
-                options={"clearance": 0.6, "depth": 8.0, "rim": 3.0, "smoothing": 0.0},
+                options={
+                    "clearance": 0.6, "depth": 8.0, "rim": 3.0,
+                    "smoothing": 0.0, "lift_assist": "finger_grasp",
+                },
                 contour=((-30, -12), (30, -12), (28, 12), (-30, 12)),
             )
         )
-        layout = organizer_app.Layout((one,), "fused")
         with tempfile.TemporaryDirectory() as directory:
-            result = organizer_app.generate_organizer_files(
-                spec, layout, Path(directory), label="IGNORED", scoop=True
+            fused = organizer_app.generate_organizer_files(
+                spec, organizer_app.Layout((one,), "fused"), Path(directory)
             )
-            self.assertEqual(result["mode"], "fused")
-            self.assertNotIn("insert", result)
-            self.assertNotIn("label", result)
-            self.assertEqual(result["customizations"]["scoop"], False)
-            files = sorted(Path(directory).glob("*.3mf"))
-            self.assertEqual(len(files), 1)
-            self.assertEqual(validate_3mf(files[0], 1)["warnings"], 0)
-        body = organizer_inserts.union(build_features(spec, [one], 0.0))
+            separate = organizer_app.generate_organizer_files(
+                spec, organizer_app.Layout((one,), "separate"), Path(directory),
+                part_name="Removable Nest",
+            )
+            self.assertNotIn("insert", fused)
+            self.assertIn("insert", separate)
+            self.assertEqual(validate_3mf(Path(fused["box"]["output"]), 1)["warnings"], 0)
+            self.assertEqual(validate_3mf(Path(separate["box"]["output"]), 1)["warnings"], 0)
+            self.assertEqual(validate_3mf(Path(separate["insert"]["output"]), 1)["warnings"], 0)
+        body = organizer_inserts.make_fused_box(spec, [one], organizer_app.make_box(spec))
+        insert = organizer_inserts.make_fitted_insert(spec, [one])
         self.assertTrue(body.is_watertight)
-        # Stands on the bed and rises only the cutter height - no bin walls.
+        self.assertTrue(insert.is_watertight)
         self.assertAlmostEqual(float(body.bounds[0][2]), 0.0, places=5)
-        self.assertAlmostEqual(float(body.bounds[1][2]), 8.0, places=5)
-        # A traced wall, nowhere near the volume of a filled block.
-        self.assertLess(
-            float(body.volume), one.zone.width * one.zone.depth * 8.0 * 0.5
-        )
+        self.assertAlmostEqual(float(body.bounds[1][2]), spec.z, places=5)
+        self.assertAlmostEqual(float(insert.bounds[0][2]), 0.0, places=5)
+        self.assertGreater(float(insert.volume), float(build_features(
+            spec, [one], organizer_app.base_height(spec, "separate"), mode="separate"
+        )[0].volume))
 
     def test_separate_export_writes_a_box_and_a_removable_insert(self) -> None:
         spec = BoxSpec(16.0, 24.0, 20.0)

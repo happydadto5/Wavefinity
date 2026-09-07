@@ -41,11 +41,7 @@
             <label>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1"></label>
           </div>
 
-          <div class="build-label-fields">
-            <label>Rim label<input id="label-text" type="text" maxlength="80" placeholder="e.g. M3 BOLTS"></label>
-            <p id="label-error" class="field-error" hidden></p>
-            <label>Part Name (For file)<input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>
-          </div>
+          <label>Part Name (For file)<input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>
 
           <div class="subheading-row">
             <div><h2>Interior parts</h2></div>
@@ -184,6 +180,16 @@
     <div class="button-row">
       <button id="support-layout-dialog-close" type="button" class="button secondary">Stay in 3D</button>
       <button id="support-layout-dialog-open" type="button" class="button primary">Open 2D layout</button>
+    </div>
+  </dialog>
+  <dialog id="draft-switch-dialog" class="support-layout-dialog" aria-labelledby="draft-switch-title">
+    <h2 id="draft-switch-title">Keep this interior part?</h2>
+    <p id="draft-switch-message"></p>
+    <p id="draft-switch-reason" class="field-error" hidden></p>
+    <div class="button-row">
+      <button id="draft-switch-keep" type="button" class="button secondary">Keep editing</button>
+      <button id="draft-switch-discard" type="button" class="button danger">Discard it</button>
+      <button id="draft-switch-add" type="button" class="button primary">Add as new</button>
     </div>
   </dialog>
   <dialog id="about-dialog" class="about-dialog" aria-labelledby="about-dialog-title">

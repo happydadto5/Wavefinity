@@ -88,6 +88,7 @@ from organizer_inserts import (
     make_insert_plate,
     resolve_text_features,
     snapped_zone,
+    scoop_zone,
     text_depth,
     text_fitted,
     text_is_raised,
@@ -207,8 +208,8 @@ PART_KINDS = (
      {"qty": True, "size": True, "along": True, "item": False, "lean": False},
      (("Height", "height", ""), ("Lip", "lip", "1"))),
     ("scoop", "Curved Scoop", "A curved retrieval ramp for easy access to small parts.",
-     {"qty": False, "size": True, "along": True, "item": False, "lean": False},
-     (("Height", "height", ""),)),
+     {"qty": False, "size": False, "along": False, "item": False, "lean": False},
+     (("Depth", "depth", "60"),)),
     (TEXT_KIND, "Text",
      "Lettering sunk into the base floor or rim level as its own colour.",
      {"qty": False, "size": True, "along": False, "item": False, "lean": False,
@@ -489,6 +490,14 @@ def _feature_height(box: BoxSpec, one: Feature, base_z: float) -> float:
     if one.kind == "bore" and one.item is not None:
         depth = options.get("depth", min(one.item.length * 0.4, box.z - base_z - 2.0))
         return base_z + options.get("height", depth + 2.0)
+    if one.kind == "nest":
+        depth = float(options.get("depth", 8.0))
+        lift = (
+            float(options.get("push_depth", 4.0))
+            if options.get("lift_assist", "finger_grasp") == "push_out"
+            else 0.0
+        )
+        return base_z + depth + lift
     if one.kind == "divider":
         return base_z + options.get("height", connector_keep_out(box) - base_z)
     return base_z + options.get("height", 12.0)
@@ -569,21 +578,6 @@ def base_height(box: BoxSpec, mode: str) -> float:
     )
 
 
-def is_photo_nest_design(features: Iterable[Feature]) -> bool:
-    """True when the layout is a single Photo Nest with an uploaded outline.
-
-    A Photo Nest prints on its own as a bare cutter wall - no wavy bin, no
-    floor - so both the preview and the exporter skip the box shell for it and
-    stand the wall straight on the print bed.
-    """
-    features = tuple(features)
-    return (
-        len(features) == 1
-        and features[0].kind == "nest"
-        and bool(features[0].contour)
-    )
-
-
 def insert_plate_solid(box: BoxSpec, mode: str):
     """The standalone insert's base plate, sitting on the bin floor.
 
@@ -660,38 +654,29 @@ def preview_geometry(
         ],
         base_z=base_height(box, mode), mode=mode,
     )
-    # Bare-cutter preview for a Photo Nest, whether it is already placed or is
-    # still the draft being positioned before it is applied.
-    nest_design = is_photo_nest_design(features) or (
-        not features and draft is not None
-        and draft.kind == "nest" and bool(draft.contour)
-    )
     outer, cavity = preview_rings(box)
     floor_z, rim_z = box.base_thickness, box.z
     geometry: list[tuple[list[tuple[float, float, float]], str,
                          tuple[float, float, float], int]] = []
 
-    # A Photo Nest prints as a bare cutter wall standing on the bed, so its
-    # preview omits the wavy bin shell and floor entirely.
-    if not nest_design:
-        count = len(outer)
-        for index in range(count):
-            a, b = outer[index], outer[(index + 1) % count]
-            c, d = cavity[index], cavity[(index + 1) % count]
-            run = (b[0] - a[0], b[1] - a[1])
-            outward = (run[1], -run[0], 0.0)
-            inward = (-run[1], run[0], 0.0)
-            geometry.append(([(a[0], a[1], 0.0), (b[0], b[1], 0.0),
-                              (b[0], b[1], rim_z), (a[0], a[1], rim_z)],
-                             "outside", outward, 0))
-            geometry.append(([(c[0], c[1], floor_z), (d[0], d[1], floor_z),
-                              (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
-                             "inside", inward, 0))
-            geometry.append(([(a[0], a[1], rim_z), (b[0], b[1], rim_z),
-                              (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
-                             "rim", (0.0, 0.0, 1.0), 0))
-        geometry.append(([(*point, floor_z) for point in cavity],
-                         "floor", (0.0, 0.0, 1.0), 1))
+    count = len(outer)
+    for index in range(count):
+        a, b = outer[index], outer[(index + 1) % count]
+        c, d = cavity[index], cavity[(index + 1) % count]
+        run = (b[0] - a[0], b[1] - a[1])
+        outward = (run[1], -run[0], 0.0)
+        inward = (-run[1], run[0], 0.0)
+        geometry.append(([(a[0], a[1], 0.0), (b[0], b[1], 0.0),
+                          (b[0], b[1], rim_z), (a[0], a[1], rim_z)],
+                         "outside", outward, 0))
+        geometry.append(([(c[0], c[1], floor_z), (d[0], d[1], floor_z),
+                          (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
+                         "inside", inward, 0))
+        geometry.append(([(a[0], a[1], rim_z), (b[0], b[1], rim_z),
+                          (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
+                         "rim", (0.0, 0.0, 1.0), 0))
+    geometry.append(([(*point, floor_z) for point in cavity],
+                     "floor", (0.0, 0.0, 1.0), 1))
 
     tidy = clean_label(label)
     location = label_position(label_location)
@@ -708,10 +693,10 @@ def preview_geometry(
         )
         geometry.extend(_mesh_preview_geometry(scoop_mesh, "scoop"))
 
-    plate = None if nest_design else insert_plate_solid(box, mode)
+    plate = insert_plate_solid(box, mode)
     if plate is not None:
         geometry.extend(_mesh_preview_geometry(plate, "insert_base"))
-    base_z = 0.0 if nest_design else base_height(box, mode)
+    base_z = base_height(box, mode)
     # Holders belong to whichever part they are printed as: the bin when fused,
     # the insert otherwise.  The prefix picks the colour family.
     part_kind = "feature" if mode == "fused" else "insert"
@@ -1005,10 +990,6 @@ def generate_organizer_files(
         ),
     )
     layout.validate(box)
-    nest_only = is_photo_nest_design(layout.features)
-    if nest_only:
-        # The bare cutter wall has no surface to carry a label or a scoop.
-        label, scoop = "", False
     tidy = clean_label(label)
     location = label_position(label_location)
     if tidy and location != "top":
@@ -1023,18 +1004,12 @@ def generate_organizer_files(
         box, layout.features, tidy, location, scoop, layout.mode
     )
     label_info = top_label_report(box, tidy) if tidy else None
-    text_surface = (
-        box.base_thickness if layout.mode == "fused" and not nest_only
-        else BASE_PLATE
-    )
+    text_surface = box.base_thickness if layout.mode == "fused" else BASE_PLATE
     text_limit = (
-        None if layout.mode == "fused" or nest_only
+        None if layout.mode == "fused"
         else insert_footprint(box, layout.mode)
     )
-    texts = (
-        [] if nest_only
-        else build_texts(box, layout.features, text_surface, text_limit)
-    )
+    texts = build_texts(box, layout.features, text_surface, text_limit)
 
     def _resolve_file(filename_fn, *args, **kwargs) -> Path:
         base_name = filename_fn(*args, **kwargs)
@@ -1047,19 +1022,7 @@ def generate_organizer_files(
                 target = output_dir / f"{stem} {ts}{target.suffix}"
         return target
 
-    if nest_only:
-        # A Photo Nest is one bare cutter wall standing on the bed: no wavy
-        # bin, no floor, and nothing for a label or scoop to attach to.
-        body = union(build_features(box, list(layout.features), 0.0))
-        output = _resolve_file(box_filename, box, part_name)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        export_mesh(body, output, "fused_organizer")
-        result: dict[str, object] = {
-            "mode": layout.mode,
-            "box": _part_result(output, mesh_report("fused_organizer", body)),
-            "layout": insert_report("fused_organizer", layout.features, body),
-        }
-    elif layout.mode == "fused":
+    if layout.mode == "fused":
         body = make_fused_box(box, layout.features, make_box(box))
         if scoop:
             body = union([body, make_scoop(box)])
@@ -1485,9 +1448,9 @@ def default_feature(
         across = min(32.0, bounds.depth if along == "x" else bounds.width)
         width, depth = ((run, across) if along == "x" else (across, run))
     elif kind == "scoop":
-        run = min(16.0, bounds.depth if along == "x" else bounds.width)
-        across = bounds.width if along == "x" else bounds.depth
-        width, depth = ((across, run) if along == "x" else (run, across))
+        along = "x"
+        scoop_height = (box.z - box.base_thickness) * 0.6
+        width, depth = bounds.width, min(scoop_height, bounds.depth / 2.0)
     elif kind == TEXT_KIND:
         # Wide and short, the shape lettering actually wants, and starting
         # life placed for itself rather than dumped in the middle.
@@ -1498,9 +1461,17 @@ def default_feature(
     else:
         width, depth = min(16.0, bounds.width), min(16.0, bounds.depth)
     raw = Zone(-width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0)
+    one_zone = snapped_zone(raw, box, mode)
+    if kind == "scoop":
+        one = Feature(kind, one_zone, along=along, options=feature_options)
+        one_zone = scoop_zone(
+            box, one,
+            box.base_thickness if mode == "fused" else box.base_thickness + BASE_PLATE,
+            mode,
+        )
     return Feature(
         kind,
-        snapped_zone(raw, box, mode),
+        one_zone,
         item=item,
         # A cradle, like a post, starts as a single holder - Quantity "auto"
         # then fills the zone with lanes only when the user asks for it.
