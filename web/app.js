@@ -1200,10 +1200,20 @@ function renderDraftFields() {
       stepFor.thickness = "0.5";
       stepFor.bottom_angle = "1";
     }
+    if (info.kind === "pocket") {
+      stepFor.height = "0.5";
+      stepFor.depth = "0.5";
+      stepFor.wall = "0.1";
+      stepFor.rounding = "0.1";
+    }
     const fieldOpts = {};
     if (autoHint) fieldOpts.placeholder = autoHint;
     if (stepFor[option.key]) fieldOpts.step = stepFor[option.key];
     if (info.kind === "cradle" && option.key === "spacing") fieldOpts.min = 0;
+    if (info.kind === "pocket" && option.key === "rounding") fieldOpts.min = 0;
+    if (info.kind === "pocket" && option.key === "wall") fieldOpts.min = 0.4;
+    if (info.kind === "pocket" && option.key === "depth") fieldOpts.min = 0.1;
+    if (info.kind === "pocket" && option.key === "height") fieldOpts.min = 1.0;
     html += field(option.label, `option:${option.key}`, shown, fieldOpts);
     if (option.key === "angle" && info.kind === "divider") {
       // The wedge-vs-straight choice only means anything once the wall
@@ -1638,6 +1648,26 @@ function updateDraftFromFields(event) {
       const newW = innerW + 2 * newWall;
       const newD = innerD + 2 * newWall;
       one.zone = [cx - newW / 2, cy - newD / 2, cx + newW / 2, cy + newD / 2];
+    }
+    if (info.kind === "pocket" && key === "depth") {
+      // If recess gets within 2 mm of the height, auto adjust up the height so it is recess + 2 mm.
+      const recess = number(one.options.depth, 0);
+      const heightNow = number(
+        one.options.height ?? state.draftResolvedOptions?.height, recess + 2,
+      );
+      if (recess >= heightNow - 2) {
+        one.options.height = recess + 2;
+        const heightField = $('[data-draft="option:height"]', $("#draft-fields"));
+        if (heightField) heightField.value = fmt(one.options.height);
+      }
+    }
+    if (info.kind === "pocket" && key === "height") {
+      const h = number(one.options.height, 0);
+      if (one.options.depth !== undefined && one.options.depth >= h - 2) {
+        one.options.depth = Math.max(0.1, h - 2);
+        const recessField = $('[data-draft="option:depth"]', $("#draft-fields"));
+        if (recessField) recessField.value = fmt(one.options.depth);
+      }
     }
     if (info.kind === "bore" && key === "depth") {
       // The hole can't be deeper than the block is tall. If a bigger Hole
