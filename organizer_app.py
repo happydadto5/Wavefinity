@@ -131,6 +131,10 @@ INTERIOR_PART_CATALOG = {
         "Steps — tiered riser",
         "Stepped shelves rising from front to back.",
     ),
+    "scoop": (
+        "Curved Scoop — retrieval ramp",
+        "A curved ramp rising up the wall for easy access to small parts.",
+    ),
     TEXT_KIND: (
         "Text — a label on the floor",
         "Lettering sunk flush into the floor as its own colour.",
@@ -138,6 +142,7 @@ INTERIOR_PART_CATALOG = {
 }
 INTERIOR_PART_ORDER = (
     "cradle", "nest", "bore", "post", "pocket", "divider", "slot", "steps",
+    "scoop",
     TEXT_KIND,
 )
 # The rim label is the one piece of lettering that is not an interior part: it
@@ -200,6 +205,9 @@ PART_KINDS = (
     ("steps", "Steps", "Stepped shelves rising from front to back.",
      {"qty": True, "size": True, "along": True, "item": False, "lean": False},
      (("Height", "height", ""), ("Lip", "lip", "1"))),
+    ("scoop", "Curved Scoop", "A curved retrieval ramp for easy access to small parts.",
+     {"qty": False, "size": True, "along": True, "item": False, "lean": False},
+     (("Height", "height", ""),)),
     (TEXT_KIND, "Text",
      "Lettering sunk flush into the floor as its own colour.",
      {"qty": False, "size": True, "along": False, "item": False, "lean": False,
@@ -1373,6 +1381,10 @@ def default_feature(
         run = min(32.0, bounds.width if along == "x" else bounds.depth)
         across = min(32.0, bounds.depth if along == "x" else bounds.width)
         width, depth = ((run, across) if along == "x" else (across, run))
+    elif kind == "scoop":
+        run = min(16.0, bounds.depth if along == "x" else bounds.width)
+        across = bounds.width if along == "x" else bounds.depth
+        width, depth = ((across, run) if along == "x" else (run, across))
     elif kind == TEXT_KIND:
         # Wide and short, the shape lettering actually wants, and starting
         # life placed for itself rather than dumped in the middle.

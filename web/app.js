@@ -220,6 +220,7 @@ function iconFor(kind) {
     nest: '<rect x="3" y="6" width="26" height="20" rx="3"/><path d="M7 17h6v-6h7v4h5v6H7z"/>',
     slot: '<rect x="4" y="5" width="24" height="22" rx="2"/><path d="M9 22l5-12M15 22l5-12M21 22l5-12"/>',
     steps: '<path d="M4 25h24V10h-8v5h-8v5H4z"/>',
+    scoop: '<path d="M4 9v16h24C20 25 14 18 14 9H4z"/>',
   };
   return `<svg ${common}>${paths[kind] || paths.pocket}</svg>`;
 }
@@ -293,7 +294,8 @@ function syncForm() {
   $("#base-thickness").value = fmt(box.base_thickness ?? 0.6);
   $("#label-text").value = state.design.label || "";
   $("#part-name").value = state.design.part_name || "";
-  $("#scoop").checked = Boolean(state.design.scoop);
+  const scoopEl = $("#scoop");
+  if (scoopEl) scoopEl.checked = Boolean(state.design.scoop);
   const mode = $(`input[name="layout-mode"][value="${layout.mode}"]`);
   if (mode) mode.checked = true;
   $("#output-folder").value = state.output;
@@ -393,7 +395,8 @@ function updateDesignFromForm() {
   );
   design.label = $("#label-text").value;
   design.part_name = $("#part-name").value;
-  design.scoop = $("#scoop").checked;
+  const scoopEl = $("#scoop");
+  if (scoopEl) design.scoop = scoopEl.checked;
   // The rim label is the only label the design itself carries, and it always
   // lives on the rear ledge. Empty simply means there isn't one; floor
   // lettering is a text interior part in the layout.
@@ -651,7 +654,7 @@ function wireControls() {
       changedDesign();
     }, { passive: false });
   });
-  $("#scoop").addEventListener("change", () => {
+  $("#scoop")?.addEventListener("change", () => {
     const previousDesign = clone(state.design);
     updateDesignFromForm();
     recordHistory(previousDesign);
@@ -847,6 +850,7 @@ function field(label, key, value, options = {}) {
 const AUTO_PLACEHOLDER = {
   divider: { height: "height of box", spacing: "fills evenly" },
   bore: { columns: "fills width", rows: "fills depth", height: "auto" },
+  scoop: { height: "half wall height" },
 };
 
 // The two fixed-size hex-bit profiles. Selecting one locks the hole to a
@@ -1722,7 +1726,7 @@ async function deleteSupportAt(index) {
 function mutationControls() {
   return $$(
     '#x-size, #y-size, #z, #base-thickness, #label-text, #part-name, ' +
-    '#scoop, input[name="layout-mode"], ' +
+    'input[name="layout-mode"], ' +
     '#new-design, #open-design, #save-design'
   );
 }
@@ -2752,6 +2756,28 @@ function renderLayout2D() {
           const step = (z2 - z0) / Math.max(1, count);
           for (let s = 1; s < count; s++) {
             const x = z0 + s * step;
+            const pt0 = toCanvas([x, z1]), pt1 = toCanvas([x, z3]);
+            context.beginPath(); context.moveTo(pt0[0], pt0[1]); context.lineTo(pt1[0], pt1[1]); context.stroke();
+          }
+        }
+        context.restore();
+      }
+      if (feature.kind === "scoop") {
+        const along = feature.along || "x";
+        context.save();
+        context.strokeStyle = shade(color, 0.4);
+        context.lineWidth = 1;
+        const [z0, z1, z2, z3] = feature.zone;
+        const steps = [0.2, 0.45, 0.7, 0.9];
+        if (along === "x") {
+          for (const s of steps) {
+            const y = z1 + (z3 - z1) * s;
+            const pt0 = toCanvas([z0, y]), pt1 = toCanvas([z2, y]);
+            context.beginPath(); context.moveTo(pt0[0], pt0[1]); context.lineTo(pt1[0], pt1[1]); context.stroke();
+          }
+        } else {
+          for (const s of steps) {
+            const x = z0 + (z2 - z0) * s;
             const pt0 = toCanvas([x, z1]), pt1 = toCanvas([x, z3]);
             context.beginPath(); context.moveTo(pt0[0], pt0[1]); context.lineTo(pt1[0], pt1[1]); context.stroke();
           }

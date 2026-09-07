@@ -29,6 +29,8 @@ from shapely.ops import unary_union
 from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
+    SCOOP_CURVE_SEGMENTS,
+    SCOOP_HEIGHT_FRACTION,
     TEXT_CAP_HEIGHT_FLOOR,
     TEXT_CAP_HEIGHT_IDEAL,
     TEXT_DEPTH,
@@ -1895,6 +1897,77 @@ def build_steps(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trim
         solid = _extrude_xz_profile(poly, width)
         solid.apply_translation((0.0, zone.centre[1], 0.0))
 
+    return [solid]
+
+
+# --- scoop -------------------------------------------------------------------
+
+
+@defaults("scoop")
+def scoop_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
+    return {
+        "height": max(2.0, (box.z - base_z) * SCOOP_HEIGHT_FRACTION),
+    }
+
+
+@feature("scoop")
+def build_scoop(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    """A full-zone curved retrieval ramp rising up the wall."""
+    zone = spec_feature.zone
+    options = resolved_options(box, spec_feature, base_z)
+    height = float(options["height"])
+    if height <= 0.0 or base_z + height > box.z + 1e-9:
+        raise ValueError("scoop height must fit inside the bin")
+
+    along = spec_feature.along
+    floor_z = base_z
+    centre_z = floor_z + height
+
+    if along == "x":
+        wall_y = zone.y0
+        run = zone.depth
+        inner_y = zone.y1
+        curve = [
+            (
+                inner_y - run * math.cos(-math.pi / 2.0 * i / SCOOP_CURVE_SEGMENTS),
+                centre_z + height * math.sin(-math.pi / 2.0 * i / SCOOP_CURVE_SEGMENTS),
+            )
+            for i in range(SCOOP_CURVE_SEGMENTS + 1)
+        ]
+        profile = Polygon([
+            (inner_y, floor_z),
+            (wall_y, floor_z),
+            (wall_y, centre_z),
+            *curve[1:-1],
+        ])
+        if not profile.is_valid:
+            raise ValueError("invalid scoop profile generated")
+        solid = _extrude_yz_profile(profile, zone.width)
+        solid.apply_translation((zone.centre[0], 0.0, 0.0))
+    else:
+        wall_x = zone.x0
+        run = zone.width
+        inner_x = zone.x1
+        curve = [
+            (
+                inner_x - run * math.cos(-math.pi / 2.0 * i / SCOOP_CURVE_SEGMENTS),
+                centre_z + height * math.sin(-math.pi / 2.0 * i / SCOOP_CURVE_SEGMENTS),
+            )
+            for i in range(SCOOP_CURVE_SEGMENTS + 1)
+        ]
+        profile = Polygon([
+            (inner_x, floor_z),
+            (wall_x, floor_z),
+            (wall_x, centre_z),
+            *curve[1:-1],
+        ])
+        if not profile.is_valid:
+            raise ValueError("invalid scoop profile generated")
+        solid = _extrude_xz_profile(profile, zone.depth)
+        solid.apply_translation((0.0, zone.centre[1], 0.0))
+
+    solid.remove_unreferenced_vertices()
+    solid.merge_vertices()
     return [solid]
 
 

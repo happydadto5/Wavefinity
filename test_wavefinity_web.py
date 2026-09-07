@@ -64,8 +64,11 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(
             set(parts),
             {"divider", "post", "pocket", "bore", "cradle", "nest", "slot",
-             "steps", "text"},
+             "steps", "scoop", "text"},
         )
+        self.assertEqual(parts["scoop"]["title"], "Curved Scoop")
+        self.assertTrue(parts["scoop"]["flags"]["size"])
+        self.assertTrue(parts["scoop"]["flags"]["along"])
         self.assertTrue(parts["text"]["flags"]["text"])
         self.assertEqual(parts["text"]["title"], "Text")
         self.assertTrue(parts["cradle"]["flags"]["alternate"])
@@ -958,9 +961,9 @@ class WebServerTests(unittest.TestCase):
         self.assertNotIn(b"connector-position", body)
         self.assertNotIn(b"connector-axis", body)
         self.assertIn(b"support-layout-dialog", body)
-        self.assertNotIn(b"Center X", body)
-        self.assertLess(body.index(b"Rim label"), body.index(b"Add curved scoop"))
-        self.assertLess(body.index(b"Add curved scoop"), body.index(b"Interior parts"))
+        self.assertNotIn(b"Add curved scoop", body)
+        self.assertNotIn(b"Fixed 5 mm lettering on a shelf", body)
+        self.assertLess(body.index(b"Rim label"), body.index(b"Interior parts"))
         self.assertLess(body.index(b"Interior parts"), body.index(b"Connect bins"))
         self.assertLess(body.index(b"Connect bins"), body.index(b"Save Location:"))
         self.assertLess(body.index(b"How should the interior print?"), body.index(b"Connect bins"))
