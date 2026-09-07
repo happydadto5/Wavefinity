@@ -49,15 +49,15 @@ python -m venv .venv
 ```
 
 Those ten pins are the whole dependency list. `matplotlib` is not optional — it
-supplies the font outlines for floor labels. Run the tests with:
+supplies the font outlines for floor labels. When changing or adding functionality,
+write targeted tests and run those focused tests to ensure they pass:
 
 ```powershell
-.venv\Scripts\python.exe -m unittest
+.venv\Scripts\python.exe -m unittest test_file.py
 ```
 
-They take about two minutes; boolean operations dominate. **Log every run in
-[TESTING.md](TESTING.md)** — the result, and whether it caught anything. Runs
-that find nothing get logged too; that is how the file earns its keep.
+The full battery of tests (`.venv\Scripts\python.exe -m unittest`) is reserved for major overall architectural/system-wide changes. **Log runs in
+[TESTING.md](TESTING.md)** — the result, and whether it caught anything.
 
 ### Cloud deployments & updates
 
@@ -766,13 +766,10 @@ git commit -m "short description of what changed"
 git push
 ```
 
-Add a line to [TESTING.md](TESTING.md) for that run before committing, and a
+Add a line to [TESTING.md](TESTING.md) for test runs before committing, and a
 dated entry to [changelog.md](changelog.md) for the change itself.
 
-**Run the full regression suite before every commit.** The only exception is a
-change so minor it could not affect behavior — a label, a comment, a doc typo.
-Any change to model assembly or build/geometry logic must be tested, full
-stop, no judgment call. If a fingerprint test fails, that is the suite telling
+**Keep building new tests when changing functionality and run targeted tests to ensure new tests work.** Reserve the full battery of tests (`unittest` across all suites) for major overall architectural changes only. If a fingerprint test fails during a full run, that is the suite telling
 you the geometry moved — decide whether you meant it, then re-pin deliberately.
 
 **Write commit messages that say why.** The history is the record. A message
