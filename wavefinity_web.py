@@ -46,6 +46,8 @@ from organizer_engine import (
     ConnectorSpec,
     differing_connector_plan,
     differing_web_reach,
+    make_top_label,
+    make_top_label_ledge,
     max_wave_slope,
     generate_sampler,
     wavy_cavity_polygon,
@@ -75,6 +77,7 @@ from organizer_inserts import (
     resolve_text_features,
     resolved_options,
     snapped_zone,
+    text_of,
 )
 from photo_nest import photo_outline_from_data
 from organizer_app import (
@@ -86,6 +89,7 @@ from organizer_app import (
     _customization_zones,
     _mesh_preview_geometry,
     base_height,
+    clean_label,
     convert_layout_mode,
     connector_filename,
     default_feature,
@@ -739,6 +743,23 @@ def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, _part, label_location, scoop = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
+    if one.kind == "text" and one.options.get("level") == "rim":
+        geometry = []
+        tidy = clean_label(text_of(one))
+        geometry.extend(_mesh_preview_geometry(make_top_label_ledge(box), "top_label_ledge"))
+        if tidy:
+            try:
+                geometry.extend(_mesh_preview_geometry(make_top_label(box, tidy), "top_label"))
+            except ValueError:
+                pass
+        return {
+            "geometry": [
+                {"points": points, "kind": kind, "normal": normal, "layer": layer}
+                for points, kind, normal, layer in geometry
+            ],
+            "feature": feature_to_dict(one, layout.mode),
+            "resolved_options": {},
+        }
     # An auto text's stored zone is a placeholder until the resolver has had
     # the rest of the layout to look at, so resolve it here too - otherwise the
     # draft is judged, and drawn, somewhere it will never actually be.

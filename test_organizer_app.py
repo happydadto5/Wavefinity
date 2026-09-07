@@ -2061,6 +2061,10 @@ class ResolvedOptionTests(unittest.TestCase):
                 self.assertIn(option, shown, (kind, option))
                 self.assertTrue(math.isfinite(shown[option]), (kind, option))
 
+    def test_default_text_part_has_label_text(self) -> None:
+        text_feature = organizer_app.default_feature(self.spec, "text")
+        self.assertEqual(text_feature.options.get("text"), "label")
+
     def test_a_default_still_follows_the_value_it_depends_on(self) -> None:
         # a pocket's recess is "its height less a floor", and setting the
         # height by hand has to keep dragging the recess with it

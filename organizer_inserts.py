@@ -2032,7 +2032,7 @@ TEXT_ZONE_EPSILON = 0.01     # glyph bounds land exactly on the zone; see _featu
 # yes/no choices. Naming them here keeps that conversion honest instead of
 # letting it guess from the value it happens to receive.
 NON_NUMERIC_OPTIONS = {
-    "text": "string", "auto": "flag", "raised": "flag",
+    "text": "string", "auto": "flag", "raised": "flag", "level": "string",
     # A divider's sloped-bottom yes/no choices - kept flags so a browser or
     # API round-trip does not turn them into 0.0 / 1.0 floats.
     "reverse_bottom": "flag", "alternate_bottom": "flag", "minimal_bottom": "flag",
@@ -2135,6 +2135,8 @@ def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         "raised": 0,
         "auto": 0,
     }
+    if one.options.get("level") == "rim":
+        return resolved
     try:
         resolved["cap_height"] = round(text_fitted(one)[0], 3)
     except ValueError:
@@ -2150,6 +2152,8 @@ def build_text(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     it sits in, so the exporter subtracts it and the finished floor stays flat
     with the letters as an inlay.
     """
+    if spec_feature.options.get("level") == "rim":
+        return []
     outline = text_placed_outline(spec_feature)
     depth = text_depth(spec_feature)
     raised = text_is_raised(spec_feature)
@@ -2173,6 +2177,8 @@ def _text_footprint(box: BoxSpec, one: Feature, base_z: float) -> Zone | None:
     so judging neighbours on the ink lets a label sit close beside a holder
     without the empty corners of its box pushing them apart.
     """
+    if one.options.get("level") == "rim":
+        return None
     outline = text_placed_outline(one)
     bx0, by0, bx1, by1 = outline.bounds
     if bx1 <= bx0 or by1 <= by0:
@@ -2631,7 +2637,7 @@ def build_texts(
     """
     made: list[tuple[str, trimesh.Trimesh, bool]] = []
     for one in features:
-        if not is_text(one):
+        if not is_text(one) or one.options.get("level") == "rim":
             continue
         if limit is not None and not limit.covers(text_placed_outline(one)):
             raise ValueError(
@@ -2661,7 +2667,7 @@ def resolve_text_features(
     features = tuple(features)
     auto = [
         index for index, one in enumerate(features)
-        if is_text(one) and one.options.get("auto")
+        if is_text(one) and one.options.get("auto") and one.options.get("level") != "rim"
     ]
     if not auto:
         return features

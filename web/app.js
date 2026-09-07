@@ -304,8 +304,44 @@ function renderCatalog() {
   });
 }
 
+function ensureRimFeatureInLayout() {
+  if (!state.design) return;
+  const tidy = (state.design.label || "").trim();
+  const hasRimFeature = state.design.layout?.features?.some(f => f.kind === "text" && f.options?.level === "rim");
+  if (tidy && !hasRimFeature) {
+    state.design.layout.features = [
+      ...state.design.layout.features,
+      {
+        kind: "text",
+        zone: [-16, -4, 16, 4],
+        options: { text: tidy, level: "rim" },
+        along: "x",
+        item: null,
+        count: null,
+      },
+    ];
+  }
+}
+
+function syncRimLabelFromFeatures() {
+  if (!state.design) return;
+  let rimText = "";
+  if (state.draft?.kind === "text" && state.draft.options?.level === "rim") {
+    rimText = String(state.draft.options?.text ?? "").trim();
+  } else {
+    const rimFeature = state.design.layout?.features?.find(f => f.kind === "text" && f.options?.level === "rim");
+    if (rimFeature) {
+      rimText = String(rimFeature.options?.text ?? "").trim();
+    }
+  }
+  state.design.label = rimText;
+  state.design.label_position = rimText ? "top" : "bottom";
+}
+
 function syncForm() {
   const { box, layout } = state.design;
+  ensureRimFeatureInLayout();
+  syncRimLabelFromFeatures();
   if (document.activeElement === $("#x-size")) {
     $("#x-size").value = fmt(box.x);
   } else {
@@ -318,7 +354,6 @@ function syncForm() {
   }
   $("#z").value = fmt(box.z);
   $("#base-thickness").value = fmt(box.base_thickness ?? 0.6);
-  $("#label-text").value = state.design.label || "";
   $("#part-name").value = state.design.part_name || "";
   const scoopEl = $("#scoop");
   if (scoopEl) scoopEl.checked = Boolean(state.design.scoop);
@@ -434,14 +469,10 @@ function updateDesignFromForm() {
     $("#base-thickness").value,
     design.box.base_thickness ?? 0.6,
   );
-  design.label = $("#label-text").value;
   design.part_name = $("#part-name").value;
   const scoopEl = $("#scoop");
   if (scoopEl) design.scoop = scoopEl.checked;
-  // The rim label is the only label the design itself carries, and it always
-  // lives on the rear ledge. Empty simply means there isn't one; floor
-  // lettering is a text interior part in the layout.
-  design.label_position = design.label.trim() ? "top" : "bottom";
+  syncRimLabelFromFeatures();
   const newOutput = $("#output-folder").value.trim();
   if (newOutput !== state.output) {
     state.output = newOutput;
@@ -696,7 +727,7 @@ function wireControls() {
     $("#advanced-build-settings").hidden = !event.target.checked;
   });
 
-  ["#x-size", "#y-size", "#z", "#base-thickness", "#label-text", "#part-name"]
+  ["#x-size", "#y-size", "#z", "#base-thickness", "#part-name"]
     .forEach(selector => $(selector).addEventListener("input", () => {
       state.canGenerate = false;
       updateGenerateAvailability();
@@ -1025,22 +1056,29 @@ function renderDraftFields() {
     </div>`;
   }
   if (info.flags.text) {
-    html += `<label class="wide">What it says
-      <input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="e.g. M3">
-    </label>`;
-    html += `<label class="check-card wide">
-      <input type="checkbox" data-draft="option:auto" ${one.options?.auto ? "checked" : ""}>
-      <span><strong>Place it for me</strong><small>Keeps it centred where it fits, moving around the other interior parts as they change. Turn this off to put it exactly where you want.</small></span>
-    </label>`;
-    html += `<fieldset class="wide"><legend>Turn</legend><div class="segmented two">
-      ${[0, 1, 2, 3].map(turn => `<label><input type="radio" name="draft-turns" value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "checked" : ""}><span>${turn * 90}°</span></label>`).join("")}
+    const textLevel = one.options?.level === "rim" ? "rim" : "base";
+    html += `<fieldset class="wide"><div class="segmented two">
+      <label><input type="radio" name="draft-text-level" value="base" ${textLevel === "base" ? "checked" : ""}><span>Base text</span></label>
+      <label><input type="radio" name="draft-text-level" value="rim" ${textLevel === "rim" ? "checked" : ""}><span>Rim Level</span></label>
     </div></fieldset>`;
-    html += `<label class="check-card wide">
-      <input type="checkbox" data-draft="option:raised" ${one.options?.raised ? "checked" : ""}>
-      <span><strong>Stand proud</strong><small>Letters sit on top of the floor instead of sunk flush into it. Either way they stay a separate object for a second filament.</small></span>
+    html += `<label class="wide">What it says
+      <input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">
     </label>`;
+    if (textLevel === "base") {
+      html += `<label class="check-card wide">
+        <input type="checkbox" data-draft="option:auto" ${one.options?.auto ? "checked" : ""}>
+        <span><strong>Place it for me</strong><small>Keeps it centred where it fits, moving around the other interior parts as they change. Turn this off to put it exactly where you want.</small></span>
+      </label>`;
+      html += `<fieldset class="wide"><legend>Turn</legend><div class="segmented two">
+        ${[0, 1, 2, 3].map(turn => `<label><input type="radio" name="draft-turns" value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "checked" : ""}><span>${turn * 90}°</span></label>`).join("")}
+      </div></fieldset>`;
+      html += `<label class="check-card wide">
+        <input type="checkbox" data-draft="option:raised" ${one.options?.raised ? "checked" : ""}>
+        <span><strong>Stand proud</strong><small>Letters sit on top of the floor instead of sunk flush into it. Either way they stay a separate object for a second filament.</small></span>
+      </label>`;
+    }
   }
-  if (info.flags.size && one.kind !== "cradle") {
+  if (info.flags.size && one.kind !== "cradle" && !(one.kind === "text" && one.options?.level === "rim")) {
     const isPocket = one.kind === "pocket";
     const isBore = one.kind === "bore";
     const wall = isPocket ? number(one.options?.wall, state.draftResolvedOptions?.wall ?? 1.6) : 0;
@@ -1177,6 +1215,7 @@ function renderDraftFields() {
     }
   }
   for (const option of info.fields) {
+    if (one.kind === "text" && one.options?.level === "rim") continue;
     // Rendered together as the one "% from end / Offset from center" field
     // beneath Runs along, above.
     if (option.key === "end_margin" || option.key === "run_offset") continue;
@@ -1249,13 +1288,46 @@ function renderDraftFields() {
     }
   }
   // The auto-size buttons sit at the very bottom of the editor.
-  html += renderFitActions(one);
+  if (!(one.kind === "text" && one.options?.level === "rim")) {
+    html += renderFitActions(one);
+  }
   $("#draft-fields").innerHTML = html;
   const photoInput = $("#nest-photo-input", $("#draft-fields"));
   if (photoInput) photoInput.addEventListener("change", uploadNestPhoto);
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateDraftFromFields);
   });
+  $$('input[name="draft-text-level"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
+    markDraftChanged();
+    state.draft.options ||= {};
+    const newLevel = input.value;
+    state.draft.options.level = newLevel;
+    if (newLevel === "rim") {
+      delete state.draft.options.auto;
+      delete state.draft.options.quarter_turns;
+      delete state.draft.options.raised;
+      delete state.draft.options.cap_height;
+      delete state.draft.options.depth;
+    } else {
+      if (!("auto" in state.draft.options)) state.draft.options.auto = true;
+    }
+    state.draftAutoCommit = true;
+    syncRimLabelFromFeatures();
+    renderDraftFields();
+    updateSelectionButtons();
+    refreshDraftSoon();
+  }));
+  const textInput = $('[data-draft="option:text"]', $("#draft-fields"));
+  if (textInput) {
+    const clearIfLabel = () => {
+      if (textInput.value.trim().toLowerCase() === "label") {
+        textInput.value = "";
+        textInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    };
+    textInput.addEventListener("focus", clearIfLabel);
+    textInput.addEventListener("click", clearIfLabel);
+  }
   // Width/Depth are floored to a minimum footprint below - reflect that back
   // once the user leaves the field, so a typed 0 or -5 doesn't keep showing
   // as though it were still in effect while a different error is displayed.
@@ -1590,15 +1662,24 @@ function updateDraftFromFields(event) {
     const fields = $("#draft-fields");
     const said = $('[data-draft="option:text"]', fields);
     if (said) one.options.text = said.value;
-    one.options.auto = $('[data-draft="option:auto"]', fields)?.checked === true;
-    one.options.raised = $('[data-draft="option:raised"]', fields)?.checked === true;
-    if (changed === "option:auto" && one.options.auto) {
-      // Handing placement back to the engine: drop the hand-set letter height
-      // so it can pick the biggest that fits wherever it lands.
+    if (one.options.level === "rim") {
+      delete one.options.auto;
+      delete one.options.raised;
+      delete one.options.quarter_turns;
       delete one.options.cap_height;
-      const capField = $('[data-draft="option:cap_height"]', fields);
-      if (capField) capField.value = "";
+      delete one.options.depth;
+    } else {
+      one.options.auto = $('[data-draft="option:auto"]', fields)?.checked === true;
+      one.options.raised = $('[data-draft="option:raised"]', fields)?.checked === true;
+      if (changed === "option:auto" && one.options.auto) {
+        // Handing placement back to the engine: drop the hand-set letter height
+        // so it can pick the biggest that fits wherever it lands.
+        delete one.options.cap_height;
+        const capField = $('[data-draft="option:cap_height"]', fields);
+        if (capField) capField.value = "";
+      }
     }
+    syncRimLabelFromFeatures();
   }
   // A divider's sloped-bottom yes/no choices, read straight off their
   // checkboxes; an unticked one is dropped so a saved design stays clean and
@@ -1719,6 +1800,7 @@ function updateDraftFromFields(event) {
   // Ticking Use support crossbars reveals (or hides) Number of crossbars.
   if (changed === "option:minimal_bottom") renderDraftFields();
   updateSelectionButtons();
+  renderLayout2D();
   refreshDraftSoon();
 }
 
@@ -1951,7 +2033,7 @@ async function deleteSupportAt(index) {
 
 function mutationControls() {
   return $$(
-    '#x-size, #y-size, #z, #base-thickness, #label-text, #part-name, ' +
+    '#x-size, #y-size, #z, #base-thickness, #part-name, ' +
     'input[name="layout-mode"], ' +
     '#new-design, #open-design, #save-design'
   );
@@ -2022,8 +2104,9 @@ function renderPlaced() {
     container.innerHTML = features.map((one, index) => {
       const width = one.zone[2] - one.zone[0];
       const depth = one.zone[3] - one.zone[1];
-      const title = escapeHtml(partInfo(one.kind)?.title || one.kind);
-      const specs = `${fmt(width)} × ${fmt(depth)} mm`;
+      const isRim = one.kind === "text" && one.options?.level === "rim";
+      const title = isRim ? "Text (Rim Level)" : escapeHtml(partInfo(one.kind)?.title || one.kind);
+      const specs = isRim ? escapeHtml(one.options?.text || "Rim label") : `${fmt(width)} × ${fmt(depth)} mm`;
       return `<div class="placed-item ${index === state.selected ? "selected" : ""}" style="--support-color:${kindColor(one.kind)}">
         <button type="button" class="placed-item-select" data-index="${index}">
           <span class="placed-item-icon">${iconFor(one.kind)}</span>
@@ -2078,10 +2161,12 @@ async function refreshPreview() {
     if (result.message) actions.push({
       message: result.message,
       activate: () => {
-        const input = $("#label-text");
-        input.scrollIntoView({ behavior: "smooth", block: "center" });
-        input.focus();
-        flashField(input);
+        const input = $('[data-draft="option:text"]', $("#draft-fields"));
+        if (input) {
+          input.scrollIntoView({ behavior: "smooth", block: "center" });
+          input.focus();
+          flashField(input);
+        }
       },
     });
     result.feature_errors.forEach((message, errorIndex) => {
@@ -2108,12 +2193,6 @@ async function refreshPreview() {
     state.canGenerate = !messages.length;
     updateGenerateAvailability();
     if (messages.length) setError("", actions);
-    // The rim-label fit message is about the Rim label field specifically, so
-    // show it right there too - the workspace panel above is easy to miss
-    // since it sits far from the field the user is actually typing in.
-    const labelError = $("#label-error");
-    labelError.textContent = !result.fits && result.message ? result.message : "";
-    labelError.hidden = !labelError.textContent;
     // An auto text part places itself server-side, so adopt the zones the
     // preview resolved - otherwise the next edit would send the stale ones.
     adoptResolvedFeatures(result.design?.layout?.features);
@@ -2129,8 +2208,6 @@ async function refreshPreview() {
     setError(error.message);
     state.canGenerate = false;
     updateGenerateAvailability();
-    $("#label-error").hidden = true;
-    $("#label-error").textContent = "";
     // A hard preview failure with supports present is usually a footprint that
     // outgrew the bin - offer the expand button and let the endpoint judge.
     state.fitError = true;
@@ -2868,6 +2945,61 @@ function drawDimensionLine(context, start, end, label, vertical = false) {
   context.restore();
 }
 
+function renderLayoutText(context, feature, toCanvas, scale, isDraft = false) {
+  const text = String(feature.options?.text ?? "").trim();
+  const zone = feature.zone;
+  const turns = ((Number(feature.options?.quarter_turns || 0) % 4) + 4) % 4;
+  const zw = Math.abs(zone[2] - zone[0]);
+  const zd = Math.abs(zone[3] - zone[1]);
+  const cx = (zone[0] + zone[2]) / 2;
+  const cy = (zone[1] + zone[3]) / 2;
+  const centerCanvas = toCanvas([cx, cy]);
+  const run = (turns % 2 === 0) ? zw : zd;
+  const across = (turns % 2 === 0) ? zd : zw;
+
+  if (!text) {
+    context.save();
+    context.fillStyle = "rgba(20,36,42,.35)";
+    context.font = "italic 11px Segoe UI, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("Text", centerCanvas[0], centerCanvas[1]);
+    context.restore();
+    return;
+  }
+
+  context.save();
+  context.font = 'bold 100px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif';
+  const refWidth = context.measureText(text).width || 100;
+  context.restore();
+
+  const aspect = (refWidth / 100) / 0.729;
+  const fitRun = Math.max(0.1, run - 0.5) / Math.max(0.1, aspect);
+  const fitAcross = Math.max(0.1, across - 0.5) / 1.15;
+  const fits = Math.min(fitRun, fitAcross);
+
+  let cap = Number(feature.options?.cap_height);
+  if (!Number.isFinite(cap) || cap <= 0) {
+    cap = Math.min(7.0, fits);
+  } else {
+    cap = Math.min(cap, fits);
+  }
+  cap = Math.max(cap, 3.5);
+
+  const fontSizePx = Math.max(6, (cap / 0.729) * scale);
+  const angle = -turns * (Math.PI / 2);
+
+  context.save();
+  context.translate(centerCanvas[0], centerCanvas[1]);
+  context.rotate(angle);
+  context.font = `bold ${fontSizePx}px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = isDraft ? DRAFT_HIGHLIGHT : "#315766";
+  context.fillText(text, 0, 0);
+  context.restore();
+}
+
 function renderLayout2D() {
   if (!state.preview) return;
   const canvas = $("#preview-2d");
@@ -2950,7 +3082,7 @@ function renderLayout2D() {
       const covered = footprintWorld(feature, index);
       const f0 = covered && toCanvas([covered[0], covered[3]]);
       const f1 = covered && toCanvas([covered[2], covered[1]]);
-      context.fillStyle = color + "cc";
+      context.fillStyle = feature.kind === "text" ? color + "25" : color + "cc";
       context.fillRect(...(covered ? [f0[0], f0[1], f1[0] - f0[0], f1[1] - f0[1]]
                                    : [p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]]));
       if (covered) {
@@ -3044,13 +3176,18 @@ function renderLayout2D() {
         }
         context.restore();
       }
-      context.fillStyle = "rgba(20,36,42,.82)";
-      context.font = "600 11px Segoe UI";
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      const [tx, ty] = covered ? [(f0[0] + f1[0]) / 2, (f0[1] + f1[1]) / 2]
-                               : [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
-      context.fillText(partInfo(feature.kind)?.title || feature.kind, tx, ty);
+      if (feature.kind === "text") {
+        const activeFeature = (index === state.selected && state.draft?.kind === "text") ? state.draft : feature;
+        renderLayoutText(context, activeFeature, toCanvas, scale, false);
+      } else {
+        context.fillStyle = "rgba(20,36,42,.82)";
+        context.font = "600 11px Segoe UI";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        const [tx, ty] = covered ? [(f0[0] + f1[0]) / 2, (f0[1] + f1[1]) / 2]
+                                 : [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+        context.fillText(partInfo(feature.kind)?.title || feature.kind, tx, ty);
+      }
     }
     if (index === state.selected) {
       const resizable = Boolean(partInfo(feature.kind)?.flags?.size || feature.kind === "nest");
@@ -3075,7 +3212,7 @@ function renderLayout2D() {
   if (state.draft) {
     const zone = state.draft.zone;
     const p0 = toCanvas([zone[0], zone[3]]), p1 = toCanvas([zone[2], zone[1]]);
-    context.fillStyle = DRAFT_HIGHLIGHT + "55";
+    context.fillStyle = state.draft.kind === "text" ? DRAFT_HIGHLIGHT + "25" : DRAFT_HIGHLIGHT + "55";
     context.strokeStyle = DRAFT_HIGHLIGHT;
     context.lineWidth = 2;
     context.setLineDash([6, 3]);
@@ -3105,6 +3242,9 @@ function renderLayout2D() {
         context.lineWidth = 1;
         context.strokeRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
         context.restore();
+      }
+      if (state.draft.kind === "text" && state.selected === null) {
+        renderLayoutText(context, state.draft, toCanvas, scale, true);
       }
     }
     context.setLineDash([]);
@@ -3367,15 +3507,9 @@ function designHasChanges() {
   visibleDesign.box.x = snapSize($("#x-size").value, visibleDesign.box.x);
   visibleDesign.box.y = snapSize($("#y-size").value, visibleDesign.box.y);
   visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
-  visibleDesign.box.base_thickness = number(
-    $("#base-thickness").value,
-    visibleDesign.box.base_thickness ?? 0.6,
-  );
-  visibleDesign.label = $("#label-text").value;
   visibleDesign.part_name = $("#part-name").value;
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
-  visibleDesign.label_position = visibleDesign.label.trim() ? "top" : "bottom";
   const index = draftCommitIndex();
   if (state.draft && state.draftAutoCommit && (
     index === null ||

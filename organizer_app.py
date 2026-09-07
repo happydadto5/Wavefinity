@@ -210,7 +210,7 @@ PART_KINDS = (
      {"qty": False, "size": True, "along": True, "item": False, "lean": False},
      (("Height", "height", ""),)),
     (TEXT_KIND, "Text",
-     "Lettering sunk flush into the floor as its own colour.",
+     "Lettering sunk into the base floor or rim level as its own colour.",
      {"qty": False, "size": True, "along": False, "item": False, "lean": False,
       "text": True},
      (("Letter height", "cap_height", ""), ("Depth", "depth", "0.4"))),
@@ -608,7 +608,14 @@ def validate_customization_clearance(
     scoop: bool = False,
     mode: str = "fused",
 ) -> None:
+    features = list(features)
+    rim_feature = next((one for one in features if is_text(one) and one.options.get("level") == "rim"), None)
+    if rim_feature is not None:
+        label = text_of(rim_feature)
+        label_location = "top"
     for index, one in enumerate(features):
+        if is_text(one) and one.options.get("level") == "rim":
+            continue
         for name, zone in _customization_zones(
             box, label, label_location, scoop, mode
         ):
@@ -637,6 +644,13 @@ def preview_geometry(
     ``draft_error`` instead.
     """
     features = tuple(features)
+    rim_feature = next((one for one in features if is_text(one) and one.options.get("level") == "rim"), None)
+    if rim_feature is None and draft is not None and is_text(draft) and draft.options.get("level") == "rim":
+        rim_feature = draft
+    if rim_feature is not None:
+        label = text_of(rim_feature)
+        label_location = "top"
+
     features = resolve_text_features(
         box, features,
         reserved=[
@@ -707,38 +721,46 @@ def preview_geometry(
     reserved = _customization_zones(box, tidy, location, scoop, mode)
 
     occupied = [
-        feature_footprint(box, one, base_z) if mode == "fused" else one.zone
+        None if (is_text(one) and one.options.get("level") == "rim")
+        else (feature_footprint(box, one, base_z) if mode == "fused" else one.zone)
         for one in features
     ]
 
     draft_error = None
     if draft is not None:
-        conflict = next(
-            (name for name, zone in reserved if draft.zone.overlaps(zone, MIN_FEATURE_GAP)),
-            None,
-        )
-        if conflict is not None:
-            draft_error = f"{draft.kind}: overlaps the {conflict}"
-        else:
-            try:
-                draft_occ = feature_footprint(box, draft, base_z) if mode == "fused" else draft.zone
-                for idx, one_occ in enumerate(occupied):
-                    if selected is not None and idx == selected:
-                        continue
-                    if draft_occ.overlaps(one_occ, MIN_FEATURE_GAP):
-                        conflicting_feature_indexes.append(idx)
-                        if draft_error is None:
-                            draft_error = (
-                                f"a {draft.kind} and a {features[idx].kind} overlap; "
-                                f"leave at least {MIN_FEATURE_GAP:g} mm between features"
-                            )
-            except Exception:
-                pass
+        if not (is_text(draft) and draft.options.get("level") == "rim"):
+            conflict = next(
+                (name for name, zone in reserved if draft.zone.overlaps(zone, MIN_FEATURE_GAP)),
+                None,
+            )
+            if conflict is not None:
+                draft_error = f"{draft.kind}: overlaps the {conflict}"
+            else:
+                try:
+                    draft_occ = feature_footprint(box, draft, base_z) if mode == "fused" else draft.zone
+                    for idx, one_occ in enumerate(occupied):
+                        if one_occ is None:
+                            continue
+                        if selected is not None and idx == selected:
+                            continue
+                        if draft_occ.overlaps(one_occ, MIN_FEATURE_GAP):
+                            conflicting_feature_indexes.append(idx)
+                            if draft_error is None:
+                                draft_error = (
+                                    f"a {draft.kind} and a {features[idx].kind} overlap; "
+                                    f"leave at least {MIN_FEATURE_GAP:g} mm between features"
+                                )
+                except Exception:
+                    pass
 
     for i, one_occ in enumerate(occupied):
+        if one_occ is None:
+            continue
         if selected is not None and i == selected and draft is not None:
             continue
         for j in range(i + 1, len(occupied)):
+            if occupied[j] is None:
+                continue
             if selected is not None and j == selected and draft is not None:
                 continue
             if one_occ.overlaps(occupied[j], MIN_FEATURE_GAP):
@@ -752,6 +774,8 @@ def preview_geometry(
                     invalid_feature_indexes.append(j)
 
     for feature_index, one in enumerate(features):
+        if is_text(one) and one.options.get("level") == "rim":
+            continue
         if selected is not None and feature_index == selected and draft is not None:
             continue
         conflict = next(
@@ -965,6 +989,10 @@ def generate_organizer_files(
     as ``text`` interior parts and is written as one extra 3MF object each, so
     every piece can take its own filament.
     """
+    rim_feature = next((one for one in layout.features if is_text(one) and one.options.get("level") == "rim"), None)
+    if rim_feature is not None:
+        label = text_of(rim_feature)
+        label_location = "top"
     layout = replace(
         layout,
         features=resolve_text_features(
