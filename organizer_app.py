@@ -74,6 +74,7 @@ from organizer_inserts import (
     build_features,
     build_texts,
     connector_keep_out,
+    feature_footprint,
     insert_footprint,
     insert_report,
     is_text,
@@ -621,7 +622,7 @@ def validate_customization_clearance(
 def preview_geometry(
     box: BoxSpec, label: str = "", features: Iterable[Feature] = (),
     mode: str = "fused", label_location: str = "bottom", scoop: bool = False,
-    draft: Feature | None = None,
+    draft: Feature | None = None, selected: int | None = None,
 ) -> dict[str, object]:
     """Build camera-independent preview geometry once per design change.
 
@@ -702,31 +703,13 @@ def preview_geometry(
     part_kind = "feature" if mode == "fused" else "insert"
     feature_errors = []
     invalid_feature_indexes = []
+    conflicting_feature_indexes = []
     reserved = _customization_zones(box, tidy, location, scoop, mode)
-    for feature_index, one in enumerate(features):
-        conflict = next(
-            (name for name, zone in reserved if one.zone.overlaps(zone, MIN_FEATURE_GAP)),
-            None,
-        )
-        if conflict is not None:
-            feature_errors.append(f"{one.kind}: overlaps the {conflict}")
-            invalid_feature_indexes.append(feature_index)
-        try:
-            for solid in build_features(
-                box, [one], base_z, layout_zone(box, mode), include_text=True
-            ):
-                geometry.extend(
-                    _mesh_preview_geometry(solid, f"{part_kind}_{one.kind}")
-                )
-        except Exception as error:
-            feature_errors.append(f"{one.kind}: {error}")
-            invalid_feature_indexes.append(feature_index)
-            geometry.extend(_prism_geometry(
-                one.zone,
-                base_z,
-                min(box.z - 0.25, _feature_height(box, one, base_z)),
-                f"{part_kind}_invalid",
-            ))
+
+    occupied = [
+        feature_footprint(box, one, base_z) if mode == "fused" else one.zone
+        for one in features
+    ]
 
     draft_error = None
     if draft is not None:
@@ -736,18 +719,109 @@ def preview_geometry(
         )
         if conflict is not None:
             draft_error = f"{draft.kind}: overlaps the {conflict}"
+        else:
+            try:
+                draft_occ = feature_footprint(box, draft, base_z) if mode == "fused" else draft.zone
+                for idx, one_occ in enumerate(occupied):
+                    if selected is not None and idx == selected:
+                        continue
+                    if draft_occ.overlaps(one_occ, MIN_FEATURE_GAP):
+                        conflicting_feature_indexes.append(idx)
+                        if draft_error is None:
+                            draft_error = (
+                                f"a {draft.kind} and a {features[idx].kind} overlap; "
+                                f"leave at least {MIN_FEATURE_GAP:g} mm between features"
+                            )
+            except Exception:
+                pass
+
+    for i, one_occ in enumerate(occupied):
+        if selected is not None and i == selected and draft is not None:
+            continue
+        for j in range(i + 1, len(occupied)):
+            if selected is not None and j == selected and draft is not None:
+                continue
+            if one_occ.overlaps(occupied[j], MIN_FEATURE_GAP):
+                feature_errors.append(
+                    f"a {features[i].kind} and a {features[j].kind} overlap; "
+                    f"leave at least {MIN_FEATURE_GAP:g} mm between features"
+                )
+                if i not in invalid_feature_indexes:
+                    invalid_feature_indexes.append(i)
+                if j not in invalid_feature_indexes:
+                    invalid_feature_indexes.append(j)
+
+    for feature_index, one in enumerate(features):
+        if selected is not None and feature_index == selected and draft is not None:
+            continue
+        conflict = next(
+            (name for name, zone in reserved if one.zone.overlaps(zone, MIN_FEATURE_GAP)),
+            None,
+        )
+        if conflict is not None:
+            feature_errors.append(f"{one.kind}: overlaps the {conflict}")
+            if feature_index not in invalid_feature_indexes:
+                invalid_feature_indexes.append(feature_index)
+
+        is_conflicting = feature_index in conflicting_feature_indexes
+        is_invalid = feature_index in invalid_feature_indexes
+
+        if is_invalid:
+            tag = f"{part_kind}_invalid"
+        elif is_conflicting:
+            tag = f"{part_kind}_conflict_{one.kind}"
+        else:
+            tag = f"{part_kind}_{one.kind}"
+
         try:
-            for solid in build_features(box, [draft], base_z, layout_zone(box, mode),
-                                        include_text=True):
-                geometry.extend(_mesh_preview_geometry(solid, f"draft_{draft.kind}"))
+            for solid in build_features(
+                box, [one], base_z, layout_zone(box, mode), include_text=True
+            ):
+                geometry.extend(
+                    _mesh_preview_geometry(solid, tag)
+                )
         except Exception as error:
-            draft_error = f"{draft.kind}: {error}"
+            feature_errors.append(f"{one.kind}: {error}")
+            if feature_index not in invalid_feature_indexes:
+                invalid_feature_indexes.append(feature_index)
             geometry.extend(_prism_geometry(
-                draft.zone,
+                one.zone,
                 base_z,
-                min(box.z - 0.25, _feature_height(box, draft, base_z)),
-                "draft_invalid",
+                min(box.z - 0.25, _feature_height(box, one, base_z)),
+                f"{part_kind}_invalid",
             ))
+
+    if draft is not None:
+        if draft_error is not None:
+            built = False
+            try:
+                solids = build_features(box, [draft], base_z, layout_zone(box, mode),
+                                        include_text=True)
+                for solid in solids:
+                    geometry.extend(_mesh_preview_geometry(solid, "draft_invalid"))
+                built = True
+            except Exception:
+                pass
+            if not built:
+                geometry.extend(_prism_geometry(
+                    draft.zone,
+                    base_z,
+                    min(box.z - 0.25, _feature_height(box, draft, base_z)),
+                    "draft_invalid",
+                ))
+        else:
+            try:
+                for solid in build_features(box, [draft], base_z, layout_zone(box, mode),
+                                            include_text=True):
+                    geometry.extend(_mesh_preview_geometry(solid, f"draft_{draft.kind}"))
+            except Exception as error:
+                draft_error = f"{draft.kind}: {error}"
+                geometry.extend(_prism_geometry(
+                    draft.zone,
+                    base_z,
+                    min(box.z - 0.25, _feature_height(box, draft, base_z)),
+                    "draft_invalid",
+                ))
 
     # The rim label is the only lettering left that is not an interior part:
     # it sits on a shelf at the rear rim and has no zone to drag, so the
@@ -782,6 +856,7 @@ def preview_geometry(
         "message": message,
         "feature_errors": tuple(feature_errors),
         "invalid_feature_indexes": tuple(invalid_feature_indexes),
+        "conflicting_feature_indexes": tuple(conflicting_feature_indexes),
         "draft_error": draft_error,
         "customization_zones": tuple(reserved),
         "label_outline": label_outline_coords,
@@ -1390,7 +1465,7 @@ def default_feature(
         # life placed for itself rather than dumped in the middle.
         width = min(max(16.0, bounds.width * 0.6), bounds.width)
         depth = min(max(8.0, TEXT_CAP_HEIGHT_IDEAL + 2.0), bounds.depth)
-        feature_options = {"text": "LABEL", "auto": True, "quarter_turns": 0,
+        feature_options = {"text": "label", "auto": True, "quarter_turns": 0,
                            "raised": False, "depth": TEXT_DEPTH}
     else:
         width, depth = min(16.0, bounds.width), min(16.0, bounds.depth)

@@ -222,7 +222,7 @@ class WebApplicationTests(unittest.TestCase):
         feature = default_feature_payload({"design": design, "kind": "pocket"})["feature"]
         low = draft_payload({"design": design, "feature": feature})
         low_top = max(point[2] for face in low["geometry"] for point in face["points"])
-        feature["options"]["height"] = 18.0
+        feature["options"]["height"] = 28.0
         high = draft_payload({"design": design, "feature": feature})
         high_top = max(point[2] for face in high["geometry"] for point in face["points"])
         self.assertGreater(high_top, low_top + 4.0)
@@ -750,6 +750,15 @@ class WebApplicationTests(unittest.TestCase):
         placed = design["layout"]["features"][0]["zone"]
         self.assertNotEqual(result["feature"]["zone"], placed)
 
+    def test_draft_text_part_auto_grows_width_when_text_added(self):
+        design = default_design()
+        design["box"].update({"x": 120.0, "y": 80.0})
+        zone = [-8.0, -5.0, 8.0, 5.0]
+        feature = _text_feature("M3 BOLTS AND NUTS", auto=False, zone=zone)
+        result = draft_payload({"design": design, "feature": feature})
+        grown_zone = result["feature"]["zone"]
+        self.assertGreater(grown_zone[2] - grown_zone[0], 16.0)
+
     def test_auto_text_replacing_a_part_does_not_avoid_that_part(self):
         design = default_design()
         scoop = default_feature_payload({"design": design, "kind": "scoop"})["feature"]
@@ -809,7 +818,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIsNotNone(preview["draft_error"])
         self.assertIn("pocket", preview["draft_error"])
         # the already-placed divider still renders normally despite the bad draft
-        self.assertTrue(any(face["kind"] == "feature_divider" for face in preview["geometry"]))
+        self.assertTrue(any(face["kind"] in ("feature_divider", "feature_conflict_divider") for face in preview["geometry"]))
         self.assertTrue(any(face["kind"] == "draft_invalid" for face in preview["geometry"]))
 
     def test_catalog_exposes_slicer_info(self):

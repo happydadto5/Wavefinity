@@ -2066,9 +2066,31 @@ class ResolvedOptionTests(unittest.TestCase):
         # height by hand has to keep dragging the recess with it
         one = organizer_app.default_feature(self.spec, "pocket")
         base = organizer_app.base_height(self.spec, "fused")
-        self.assertEqual(resolved_options(self.spec, one, base)["depth"], 10.8)
-        taller = replace(one, options={"height": 20.0})
-        self.assertEqual(resolved_options(self.spec, taller, base)["depth"], 18.8)
+        self.assertEqual(resolved_options(self.spec, one, base)["depth"], 18.0)
+        taller = replace(one, options={"height": 25.0})
+        self.assertEqual(resolved_options(self.spec, taller, base)["depth"], 23.0)
+
+    def test_pocket_height_and_rounding_rules(self) -> None:
+        base = organizer_app.base_height(self.spec, "fused")
+        # 20mm bin: full bin height
+        box_20 = BoxSpec(64.0, 64.0, 20.0)
+        feat_20 = organizer_app.default_feature(box_20, "pocket")
+        self.assertEqual(resolved_options(box_20, feat_20, base)["height"], 20.0)
+        self.assertEqual(resolved_options(box_20, feat_20, base)["depth"], 18.0)
+
+        # 40mm bin: 40% is 16mm < 20mm minimum -> 20mm
+        box_40 = BoxSpec(64.0, 64.0, 40.0)
+        feat_40 = organizer_app.default_feature(box_40, "pocket")
+        self.assertEqual(resolved_options(box_40, feat_40, base)["height"], 20.0)
+
+        # 60mm bin: 40% of 60mm = 24mm > 20mm -> 24mm
+        box_60 = BoxSpec(64.0, 64.0, 60.0)
+        feat_60 = organizer_app.default_feature(box_60, "pocket")
+        self.assertEqual(resolved_options(box_60, feat_60, base)["height"], 24.0)
+        self.assertEqual(resolved_options(box_60, feat_60, base)["depth"], 22.0)
+
+        # insertion rounding proportional to pocket side
+        self.assertAlmostEqual(resolved_options(box_40, feat_40, base)["rounding"], 0.8, places=1)
 
     def test_the_resolved_numbers_are_the_ones_the_builder_uses(self) -> None:
         one = self.photo_nest()

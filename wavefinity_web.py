@@ -58,6 +58,7 @@ from organizer_inserts import (
     Layout,
     Segment,
     Zone,
+    auto_grow_text_feature,
     build_features,
     cradle_min_footprint,
     feature_min_footprint,
@@ -754,6 +755,8 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
             label, label_location, scoop,
         )
         one = placed[-1]
+    elif one.kind == "text":
+        one = auto_grow_text_feature(one, box, layout.mode)
     shown = resolved_options(box, one, base_height(box, layout.mode))
     with GEOMETRY_LOCK:
         solids = build_features(
@@ -808,6 +811,8 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         one = fitted_nest_feature(one, one.zone.centre)
         box = _fit_photo_nest_box(box, one, layout.mode)
     else:
+        if one.kind == "text" and not one.options.get("auto"):
+            one = auto_grow_text_feature(one, box, layout.mode)
         width, depth = one.zone.width, one.zone.depth
         cx, cy = one.zone.centre
         one = resized_feature(one, box, (width, depth), layout.mode, layout.snap)

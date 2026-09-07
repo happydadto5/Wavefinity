@@ -2103,6 +2103,21 @@ class TextPartTests(unittest.TestCase):
             resolved[0].options["cap_height"], places=6,
         )
 
+    def test_auto_grow_text_feature_widens_when_text_fits(self) -> None:
+        starter = text_part("M3 BOLTS", zone=Zone(-8.0, -5.0, 8.0, 5.0))
+        grown = inserts.auto_grow_text_feature(starter, BIN)
+        self.assertGreater(grown.zone.width, starter.zone.width)
+        cap, _ = inserts.text_fitted(grown)
+        self.assertGreaterEqual(cap, inserts.TEXT_CAP_HEIGHT_FLOOR)
+
+    def test_auto_grow_text_feature_does_not_exceed_bin_bounds(self) -> None:
+        very_long = text_part("EXTRAORDINARILY LONG LABEL WITH MANY WORDS", zone=Zone(-8.0, -5.0, 8.0, 5.0))
+        grown = inserts.auto_grow_text_feature(very_long, BIN)
+        bounds = inserts.layout_zone(BIN)
+        self.assertLessEqual(grown.zone.width, bounds.width + 1e-9)
+        self.assertGreater(grown.zone.width, 16.0)
+
+
 
 if __name__ == "__main__":
     unittest.main()

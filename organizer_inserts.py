@@ -92,7 +92,7 @@ BOTTOM_CROSSBAR_THICKNESS = 2.4  # run-axis width of one printable support cross
 BOTTOM_CROSSBAR_CHAMFER = 1.0    # 45-degree gusset where a crossbar meets the floor
 NEST_CHAMFER = 0.8         # reinforced outside foot on a Photo Nest cutter wall
 POCKET_CHAMFER = 0.5       # 45-degree chamfer on pocket outside edges for strength
-POCKET_FLOOR = 1.2         # solid floor thickness under a pocket recess
+POCKET_FLOOR = 2.0         # solid floor thickness under a pocket recess
 LAYOUT_MODES = ("fused", "separate", "cartridge")
 
 # A cradle notch is a half circle: any deeper and the object cannot be dropped
@@ -1697,11 +1697,22 @@ def _full_span_divider(
 
 @defaults("pocket")
 def pocket_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
-    height = one.options.get("height", 12.0)
+    if box.z <= 20.0:
+        default_height = box.z
+    else:
+        default_height = min(box.z, max(20.0, round(0.40 * box.z, 1)))
+    height = one.options.get("height", default_height)
+    if "depth" in one.options and "height" not in one.options:
+        height = max(height, one.options["depth"] + POCKET_FLOOR)
+    wall = one.options.get("wall", 1.6)
+    zone = one.zone
+    side = min(zone.width, zone.depth)
+    default_rounding = round(max(0.0, min(side * 0.05, wall - 0.4)), 1)
     return {
-        "height": 12.0,
+        "height": default_height,
         "wall": 1.6,
         "depth": max(0.1, height - POCKET_FLOOR),
+        "rounding": default_rounding,
     }
 
 
@@ -1713,6 +1724,7 @@ def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     height = options["height"]
     wall = options["wall"]
     depth = options.get("depth", max(0.1, height - POCKET_FLOOR))
+    rounding = max(0.0, options.get("rounding", 0.0))
     if (height <= 0.0 or wall <= 0.0 or depth <= 0.0 or depth >= height
             or 2 * wall >= zone.width or 2 * wall >= zone.depth):
         raise ValueError("pocket wall and depth must leave a positive shell")
@@ -1741,8 +1753,33 @@ def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     outer_solid = union(block) if len(block) > 1 else column
     inner_w = zone.width - 2 * wall
     inner_d = zone.depth - 2 * wall
-    inner = trimesh.creation.box(extents=(inner_w, inner_d, depth * 2.0))
-    inner.apply_translation((centre_x, centre_y, base_z + height))
+    inner_hx, inner_hy = inner_w / 2.0, inner_d / 2.0
+    inner_poly = Polygon([
+        (-inner_hx, -inner_hy), (inner_hx, -inner_hy),
+        (inner_hx, inner_hy), (-inner_hx, inner_hy)
+    ])
+    cavity_parts = []
+    col = _extrude_polygon(inner_poly, depth + 1.0)
+    col.apply_translation((centre_x, centre_y, base_z + height - depth))
+    cavity_parts.append(col)
+
+    r = min(rounding, wall - 0.2, depth - 0.2, inner_hx - 0.1, inner_hy - 0.1)
+    if r > 1e-4:
+        steps = 6
+        layer = r / steps
+        for i in range(steps):
+            t = (i + 1) / steps
+            grow = r * (1.0 - math.sqrt(max(0.0, 1.0 - t * t)))
+            slice_poly = inner_poly.buffer(grow, join_style="round")
+            sl = _extrude_polygon(slice_poly, layer)
+            sl.apply_translation((centre_x, centre_y, base_z + height - r + i * layer))
+            cavity_parts.append(sl)
+        top_poly = inner_poly.buffer(r, join_style="round")
+        top_cut = _extrude_polygon(top_poly, 2.0)
+        top_cut.apply_translation((centre_x, centre_y, base_z + height))
+        cavity_parts.append(top_cut)
+
+    inner = union(cavity_parts) if len(cavity_parts) > 1 else col
     pocket = difference([outer_solid, inner])
     return [pocket]
 
@@ -2141,6 +2178,70 @@ def _text_footprint(box: BoxSpec, one: Feature, base_z: float) -> Zone | None:
     if bx1 <= bx0 or by1 <= by0:
         return None
     return Zone(bx0, by0, bx1, by1)
+
+
+def text_min_footprint(
+    box: BoxSpec, one: Feature, base_z: float = 0.0
+) -> tuple[float, float] | None:
+    """The smallest ``(width, depth)`` mm needed to fit the text without squeezing."""
+    label = text_of(one)
+    if not label:
+        return None
+    turns = int(one.options.get("quarter_turns", 0) or 0) % 4
+    try:
+        probe = _oriented_text(label, TEXT_CAP_HEIGHT_IDEAL, turns)
+    except (ValueError, ZeroDivisionError):
+        return None
+    bx0, by0, bx1, by1 = probe.bounds
+    text_w, text_h = bx1 - bx0, by1 - by0
+    if text_w <= 0.0 or text_h <= 0.0:
+        return None
+    wanted = one.options.get("cap_height")
+    target_cap = float(wanted) if wanted else TEXT_CAP_HEIGHT_IDEAL
+    if turns % 2 == 0:
+        cap_by_depth = TEXT_CAP_HEIGHT_IDEAL * (one.zone.depth / text_h)
+        effective_cap = min(target_cap, max(TEXT_CAP_HEIGHT_FLOOR, cap_by_depth))
+        needed_w = text_w * (effective_cap / TEXT_CAP_HEIGHT_IDEAL)
+        needed_d = max(one.zone.depth, text_h * (effective_cap / TEXT_CAP_HEIGHT_IDEAL))
+        return (math.ceil(needed_w), math.ceil(needed_d))
+    else:
+        cap_by_width = TEXT_CAP_HEIGHT_IDEAL * (one.zone.width / text_w)
+        effective_cap = min(target_cap, max(TEXT_CAP_HEIGHT_FLOOR, cap_by_width))
+        needed_w = max(one.zone.width, text_w * (effective_cap / TEXT_CAP_HEIGHT_IDEAL))
+        needed_d = text_h * (effective_cap / TEXT_CAP_HEIGHT_IDEAL)
+        return (math.ceil(needed_w), math.ceil(needed_d))
+
+
+def auto_grow_text_feature(
+    one: Feature, box: BoxSpec, mode: str = "fused"
+) -> Feature:
+    """Auto grow text part footprint if it needs more room and can fit inside the bin."""
+    if not is_text(one):
+        return one
+    size = text_min_footprint(box, one)
+    if size is None:
+        return one
+    bounds = layout_zone(box, mode)
+    turns = int(one.options.get("quarter_turns", 0) or 0) % 4
+    if turns % 2 == 0:
+        needed_w = size[0]
+        max_fit_w = bounds.width
+        grow_w = min(needed_w, max_fit_w)
+        if grow_w > one.zone.width:
+            cx = one.zone.centre[0]
+            cx = min(max(cx, bounds.x0 + grow_w / 2.0), bounds.x1 - grow_w / 2.0)
+            new_zone = Zone(cx - grow_w / 2.0, one.zone.y0, cx + grow_w / 2.0, one.zone.y1)
+            return replace(one, zone=snapped_zone(new_zone, box, mode))
+    else:
+        needed_d = size[1]
+        max_fit_d = bounds.depth
+        grow_d = min(needed_d, max_fit_d)
+        if grow_d > one.zone.depth:
+            cy = one.zone.centre[1]
+            cy = min(max(cy, bounds.y0 + grow_d / 2.0), bounds.y1 - grow_d / 2.0)
+            new_zone = Zone(one.zone.x0, cy - grow_d / 2.0, one.zone.x1, cy + grow_d / 2.0)
+            return replace(one, zone=snapped_zone(new_zone, box, mode))
+    return one
 
 
 # --- putting an insert together ----------------------------------------------
