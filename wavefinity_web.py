@@ -761,6 +761,11 @@ def feature_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
     size = feature_min_footprint(box, one, base_z)
     if size is None:
         raise ValueError("this interior part has no contents to fit its size to")
+    # Round the exact footprint up to the editor grid so the snapped zone is
+    # never a hair under what the part needs (a leaned grid's reach is rarely
+    # a whole millimetre).
+    snap = layout.snap or EDITOR_SNAP
+    size = tuple(math.ceil(v / snap - 1e-6) * snap for v in size)
     fitted = resized_feature(one, box, size, layout.mode, layout.snap)
     with GEOMETRY_LOCK:
         build_features(
