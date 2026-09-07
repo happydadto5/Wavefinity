@@ -166,6 +166,33 @@ Run the full suite again after all other work has stopped and immediately before
 - Do not replace the temporary runtime `Layout.validate()` bridge during Phase
   4; it is replaced with the `_layout.check_layout` local import in Phase 5.
 
+### Phase 4 — Feature Extraction
+
+- Extracted one feature module at a time, in the required order:
+  `_post.py`, `_pocket.py`, `_steps.py`, `_scoop.py`, `_slot.py`, `_bore.py`,
+  `_cradle.py`, `_nest.py`, `_divider.py`, and `_text.py`.
+- Each module owns its feature defaults, builder, constants, and local helpers;
+  `__init__.py` imports each module explicitly so decorators populate the same
+  singleton registries and re-exports the pre-existing facade names.
+- Focused compatibility, registry, and per-feature geometry/layout tests passed
+  after every extraction. The full suite passed: `Ran 420 tests in 374.047s` —
+  `OK`.
+- `node --check web/app.js` and `git diff --check` passed.
+- Feature extraction commits: `261f37e`, `db03afe`, `0fc5f43`, `8c73627`,
+  `8799866`, `de71f3a`, `0c7a104`, `a881eab`, `09ff31e`, `24b0a13`, and
+  `4759f54`.
+
+### Session 4 Handoff
+
+- Start from the clean, pushed `codex/split-organizer-inserts` branch at the
+  Phase 4 documentation commit that follows this entry.
+- Verify the Phase 4 checkpoint and complete only Phase 5. Do not begin Phase
+  6.
+- The temporary `Layout.validate()` bridge remains in `_core.py`. Phase 5 must
+  move cross-feature footprint/validation work to `_layout.py`, replace that
+  bridge with its narrow local `_layout.check_layout` import, then move assembly
+  work to `_assembly.py` without changing the public facade or registry order.
+
 ## Goal
 
 Turn `organizer_inserts.py` into a Python package of focused modules without changing behavior, saved-design compatibility, geometry, exports, UI behavior, or imports used elsewhere in the app.
