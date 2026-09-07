@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-07 — Organizer insert engine split into focused modules
+
+- The 3,071-line `organizer_inserts.py` implementation is now an
+  `organizer_inserts/` package with separate core, registry, feature, layout,
+  and assembly modules.
+- The package facade preserves all existing imports, shared registries, registry
+  order, saved designs, geometry, exports, and browser behavior.
+- Four compatibility-contract tests guard the 72 externally used facade names,
+  fresh-process registration, singleton registries, and legacy layout round
+  trips. The final suite contains 420 tests.
+
 ## 2026-09-07 — Photo Nest retrieval assists and finished wall edges
 
 - Photo Nest now prints where its mode says it should: fused to the bin floor

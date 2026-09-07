@@ -224,6 +224,74 @@ Run the full suite again after all other work has stopped and immediately before
   dependency-direction audit, complete diff review, documentation finalization,
   final commit, and push required by Phases 6 and 7.
 
+### Phase 6 — Final Verification
+
+- Verified the baseline tag and every Phase 1–5 implementation/checkpoint commit
+  as ancestors of `codex/split-organizer-inserts`; the annotated tag resolves to
+  baseline commit `01cfb58a55542c793df7b82ecafe9c7b94183143` locally and on
+  `origin`.
+- Final package map (physical lines):
+
+  ```text
+  organizer_inserts/
+  ├── __init__.py        185
+  ├── _assembly.py       313
+  ├── _bore.py           204
+  ├── _core.py           461
+  ├── _cradle.py         274
+  ├── _divider.py        487
+  ├── _layout.py         328
+  ├── _nest.py           340
+  ├── _pocket.py         106
+  ├── _post.py            73
+  ├── _registry.py        57
+  ├── _scoop.py          115
+  ├── _slot.py            66
+  ├── _steps.py           77
+  └── _text.py           249
+  ```
+
+- Final full suite: `Ran 420 tests in 397.173s` — `OK`. This is the 416-test
+  baseline plus the four Phase 1 compatibility-contract tests.
+- The diff audit then found that feature imports had changed registry iteration
+  order. The original order (`cradle`, `nest`, `bore`, `post`, `divider`,
+  `pocket`, `slot`, `steps`, `scoop`, `text`) was restored. The four focused
+  compatibility tests passed again in `0.804s`. A second full run remained green
+  through the observed tests and was stopped by the user, who directed that the
+  completed 420-test run be treated as the final green result.
+- Fresh-process imports see all 10 builders and defaults in the original order;
+  both facade registries are the exact `_registry.py` singleton objects; all 72
+  recorded facade names import successfully.
+- `organizer_app.py` and `wavefinity_web.py` are unchanged from the baseline and
+  import through the same `organizer_inserts` facade.
+- The facade is 185 lines with no function or class bodies. Feature modules have
+  no forbidden feature-to-feature, layout, assembly, or facade imports. All 18
+  functions moved in Phase 5 have AST-identical bodies to the Phase 4 checkpoint.
+- The full suite covered the existing mesh fingerprints, watertightness,
+  export/reload, saved-design round trips, and web API behavior without changed
+  expectations. The old top-level `organizer_inserts.py` is absent.
+- `node --check web/app.js`, working-tree `git diff --check`, and the complete
+  baseline-to-final branch diff check passed. Five extracted modules had extra
+  end-of-file blank lines; they were removed without logic changes.
+- Final compatibility/diff correction commit:
+  `becdc266df0255fbf61c24276011c387f540ce0e`.
+
+### Phase 7 — Completion
+
+- Updated `split.md`, `changelog.md`, and `TESTING.md` with the final package,
+  verification, audit, and recovery record.
+- Final documentation commit: `Document organizer inserts split completion`
+  (the commit containing this section; its exact SHA is reported in the Session 5
+  handoff).
+- All implementation and documentation commits are pushed only to
+  `origin/codex/split-organizer-inserts`; `main` remains at the baseline.
+- Restore checkpoint: `pre-organizer-inserts-split-2026-09-07`.
+- Inspect it with `git show pre-organizer-inserts-split-2026-09-07`.
+- Create a safe recovery branch with
+  `git switch -c codex/restore-pre-split pre-organizer-inserts-split-2026-09-07`.
+- If this branch is later merged, revert its commits or merge commit; do not hard
+  reset shared history.
+
 ## Goal
 
 Turn `organizer_inserts.py` into a Python package of focused modules without changing behavior, saved-design compatibility, geometry, exports, UI behavior, or imports used elsewhere in the app.
