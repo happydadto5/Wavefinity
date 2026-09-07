@@ -122,6 +122,7 @@ from ._bore import (
     _is_hex_bit,
     build_bore,
     bore_defaults,
+    bore_hole_axes,
 )
 from ._post import build_post, post_defaults
 from ._divider import (

@@ -76,7 +76,7 @@ const INSERT_TINT_MIX = .5;
 // same bin view instead of its own isolated canvas, so it needs a colour
 // that reads as "this one is different" against every kind's own muted
 // palette above.
-const DRAFT_HIGHLIGHT = "#f0a93c";
+const DRAFT_HIGHLIGHT = "#1f6b45";
 const CAMERA_VIEWS = {
   top: { yaw: 45, elevation: 89, zoom: 1 },
   front: { yaw: 0, elevation: 8, zoom: 1 },
@@ -932,6 +932,7 @@ function clearDraftSelection() {
   $(".support-editor").hidden = true;
   $("#draft-status").textContent = "";
   $("#draft-status").classList.remove("error");
+  updateDraftStatusColor(null);
   updateInteriorModeVisibility();
   updateSelectionButtons();
 }
@@ -1308,6 +1309,8 @@ function renderDraftFields() {
     // Rendered by the divider bottom-slope block below, on its own and only
     // while Use support crossbars is ticked.
     if (option.key === "bottom_supports") continue;
+    // The scoop depth field is rendered with its own % unit and help text above.
+    if (info.kind === "scoop") continue;
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
     const autoHint = AUTO_PLACEHOLDER[info.kind]?.[option.key];
     const shown = !explicit && autoHint
@@ -2293,6 +2296,17 @@ function updateSelectionButtons() {
   $("#support-count").textContent = `${state.design?.layout.features.length || 0} placed`;
 }
 
+function updateDraftStatusColor(hasError) {
+  const editor = $(".support-editor");
+  editor?.classList.toggle("status-valid", hasError === false);
+  editor?.classList.toggle("status-error", hasError === true);
+  $$(".support-choice").forEach(button => {
+    const active = button.classList.contains("active");
+    button.classList.toggle("status-valid", active && hasError === false);
+    button.classList.toggle("status-error", active && hasError === true);
+  });
+}
+
 function renderPlaced() {
   if (!state.design) return;
   const features = state.design.layout.features;
@@ -2306,7 +2320,9 @@ function renderPlaced() {
       const isRim = one.kind === "text" && one.options?.level === "rim";
       const title = isRim ? "Text (Rim Level)" : escapeHtml(partInfo(one.kind)?.title || one.kind);
       const specs = isRim ? escapeHtml(one.options?.text || "Rim label") : `${fmt(width)} × ${fmt(depth)} mm`;
-      return `<div class="placed-item ${index === state.selected ? "selected" : ""}" style="--support-color:${kindColor(one.kind)}">
+      const invalid = new Set(state.preview?.invalid_feature_indexes || []).has(index);
+      const statusClass = invalid ? "status-error" : (index === state.selected ? "status-valid" : "");
+      return `<div class="placed-item ${index === state.selected ? "selected" : ""} ${statusClass}" style="--support-color:${kindColor(one.kind)}">
         <button type="button" class="placed-item-select" data-index="${index}">
           <span class="placed-item-icon">${iconFor(one.kind)}</span>
           <span class="placed-item-copy"><strong>${title}</strong><span>${specs}</span></span>
@@ -2339,6 +2355,7 @@ async function refreshPreview() {
   state.canGenerate = false;
   updateGenerateAvailability();
   $("#preview-state").textContent = "Building preview…";
+  $("#preview-state").classList.remove("status-ok", "status-error");
   setError();
   try {
     const payload = { design: state.design };
@@ -2350,6 +2367,8 @@ async function refreshPreview() {
     checkBinSizeChange();
     const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
     $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
+    $("#preview-state").classList.toggle("status-error", Boolean(previewHasErrors));
+    $("#preview-state").classList.toggle("status-ok", !previewHasErrors);
     formatDimField("x");
     formatDimField("y");
     $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(state.design.box.x)} mm`;
@@ -2398,6 +2417,7 @@ async function refreshPreview() {
     adoptResolvedFeatures(result.design?.layout?.features);
     state.textMeta = result.text_meta || [];
     state.fitError = Boolean(result.feature_errors.length || result.draft_error);
+    updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
     updateAutoExpandButton();
     renderPreview3D();
     renderLayout2D();
@@ -2405,6 +2425,8 @@ async function refreshPreview() {
   } catch (error) {
     if (request !== state.previewRequest) return;
     $("#preview-state").textContent = "Preview could not build";
+    $("#preview-state").classList.remove("status-ok");
+    $("#preview-state").classList.add("status-error");
     setError(error.message);
     state.canGenerate = false;
     updateGenerateAvailability();
@@ -2459,7 +2481,10 @@ function renderFitActions(one) {
   if (FILL_PART_KINDS.has(kind)) {
     rows.push(`<button type="button" class="button" data-action="fill-part" hidden>Fill the bin</button>`);
   }
-  rows.push(`<button type="button" class="button" data-action="grow-bin" hidden>Grow the bin</button>`);
+  if (kind !== "scoop") {
+    rows.push(`<button type="button" class="button" data-action="grow-bin" hidden>Grow the bin</button>`);
+  }
+  if (!rows.length) return "";
   return `<div class="fit-actions">${rows.join("")}</div>`;
 }
 
@@ -2632,6 +2657,10 @@ function drawGeometry(canvas, geometry, camera) {
     context.fillText("No geometry", width / 2, height / 2);
     return;
   }
+  // Leaned-bore centre lines are annotation, not solid faces - pull them out so
+  // the painter below doesn't cull them, and draw them on top at the end.
+  const boreAxes = geometry.filter(face => face.kind?.endsWith("bore_axis"));
+  if (boreAxes.length) geometry = geometry.filter(face => !face.kind?.endsWith("bore_axis"));
   const vector = cameraVector(camera);
   const yawRad = camera.yaw * Math.PI / 180;
   const camX = -Math.sin(yawRad);
@@ -2738,7 +2767,52 @@ function drawGeometry(canvas, geometry, camera) {
     context.stroke();
   }
   drawUsableFloor(context, geometry, camera, project);
+  drawBoreAxes(context, boreAxes, camera, project);
   draw3DDimensions(context, state.design?.box, camera, project);
+}
+
+// A line up the centre of every hole in a leaned bore, arrow-tipped, so it's
+// clear which way the holes point and how far they lean. Drawn last, over the
+// solid, since it's an annotation rather than part of the model.
+function drawBoreAxes(context, boreAxes, camera, project) {
+  if (!boreAxes?.length) return;
+  for (const line of boreAxes) {
+    const points = (line.points || []).map(point => project(iso(point, camera)));
+    if (points.length < 2) continue;
+    const isDraft = line.kind.startsWith("draft_");
+    const ink = isDraft ? "rgba(196,131,20,.95)" : "rgba(20,108,112,.95)";
+    context.save();
+    context.lineJoin = "round";
+    context.lineCap = "round";
+    const trace = () => {
+      context.beginPath();
+      context.moveTo(points[0][0], points[0][1]);
+      for (let i = 1; i < points.length; i += 1) context.lineTo(points[i][0], points[i][1]);
+    };
+    trace();
+    context.strokeStyle = "rgba(255,255,255,.85)";
+    context.lineWidth = 3.6;
+    context.stroke();
+    context.strokeStyle = ink;
+    context.lineWidth = 1.6;
+    context.stroke();
+    // Arrowhead on the stub end, aimed along the last segment.
+    const tip = points[points.length - 1];
+    const prev = points[points.length - 2];
+    const heading = Math.atan2(tip[1] - prev[1], tip[0] - prev[0]);
+    const size = 7;
+    context.beginPath();
+    context.moveTo(tip[0], tip[1]);
+    context.lineTo(tip[0] - size * Math.cos(heading - 0.42), tip[1] - size * Math.sin(heading - 0.42));
+    context.lineTo(tip[0] - size * Math.cos(heading + 0.42), tip[1] - size * Math.sin(heading + 0.42));
+    context.closePath();
+    context.fillStyle = ink;
+    context.strokeStyle = "rgba(255,255,255,.85)";
+    context.lineWidth = 1.1;
+    context.fill();
+    context.stroke();
+    context.restore();
+  }
 }
 
 // Lay the straight-sided placement rectangle - the real usable floor, the same
@@ -3410,10 +3484,12 @@ function renderLayout2D() {
     }
   });
   if (state.draft) {
+    const draftHasError = Boolean(state.preview.draft_error);
+    const draftColor = draftHasError ? COLORS.invalid : DRAFT_HIGHLIGHT;
     const zone = state.draft.zone;
     const p0 = toCanvas([zone[0], zone[3]]), p1 = toCanvas([zone[2], zone[1]]);
-    context.fillStyle = state.draft.kind === "text" ? DRAFT_HIGHLIGHT + "25" : DRAFT_HIGHLIGHT + "55";
-    context.strokeStyle = DRAFT_HIGHLIGHT;
+    context.fillStyle = draftColor;
+    context.strokeStyle = draftColor;
     context.lineWidth = 2;
     context.setLineDash([6, 3]);
     if (state.draft.kind === "nest" && state.draft.contour) {
@@ -3438,7 +3514,7 @@ function renderLayout2D() {
         context.save();
         context.fillStyle = "rgba(255, 255, 255, 0.35)";
         context.fillRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
-        context.strokeStyle = DRAFT_HIGHLIGHT;
+        context.strokeStyle = draftColor;
         context.lineWidth = 1;
         context.strokeRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
         context.restore();

@@ -71,6 +71,7 @@ from organizer_inserts import (
     Layout,
     Zone,
     apply_texts,
+    bore_hole_axes,
     build_features,
     build_texts,
     connector_keep_out,
@@ -517,6 +518,25 @@ def _prism_geometry(zone: Zone, z0: float, z1: float, kind: str) -> list[tuple]:
     ]
 
 
+def _bore_axis_geometry(
+    box: BoxSpec, one: Feature, base_z: float, kind: str
+) -> list[tuple]:
+    """Centre-line polylines for a leaned bore, so the preview can draw an arrow
+    up each hole showing which way it points. Empty for anything but an angled
+    bore, and silent if the bore itself will not resolve."""
+    if one.kind != "bore":
+        return []
+    try:
+        axes = bore_hole_axes(box, one, base_z)
+    except Exception:
+        return []
+    return [
+        ([tuple(float(v) for v in point) for point in polyline],
+         kind, (0.0, 0.0, 1.0), 9)
+        for polyline in axes
+    ]
+
+
 def _mesh_preview_geometry(mesh, kind: str) -> list[tuple]:
     """Convert a finished holder mesh into camera-independent preview faces."""
     geometry = []
@@ -799,6 +819,9 @@ def preview_geometry(
                 min(box.z - 0.25, _feature_height(box, one, base_z)),
                 f"{part_kind}_invalid",
             ))
+        geometry.extend(_bore_axis_geometry(
+            box, one, base_z, f"{part_kind}_bore_axis"
+        ))
 
     if draft is not None:
         if draft_error is not None:
@@ -831,6 +854,7 @@ def preview_geometry(
                     min(box.z - 0.25, _feature_height(box, draft, base_z)),
                     "draft_invalid",
                 ))
+        geometry.extend(_bore_axis_geometry(box, draft, base_z, "draft_bore_axis"))
 
     # The rim label is the only lettering left that is not an interior part:
     # it sits on a shelf at the rear rim and has no zone to drag, so the

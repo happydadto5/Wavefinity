@@ -75,9 +75,10 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     }
 
 
-@feature("bore")
-def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
-    """A block of holes for objects stood on end."""
+def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
+    """Resolve and validate a bore's grid once, for both the mesh builder and
+    the preview's lean indicator. Raises the same errors ``build_bore`` used to
+    raise inline, so nothing about validation changes."""
     item = _need_item(spec_feature)
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
@@ -149,15 +150,99 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         )
 
     centre_x, centre_y = zone.centre
-    block = trimesh.creation.box(extents=(zone.width, zone.depth, height))
-    block.apply_translation((centre_x, centre_y, base_z + height / 2.0))
-
     sections = _hole_sides(item.profile)
     hole_radius = held / 2.0 / (math.cos(math.pi / sections) if sections < 8 else 1.0)
     over = max(2.0, held)                    # stub above the top face for a clean mouth
     chamfer = min(BORE_MOUTH_CHAMFER, depth / 3.0, wall / 3.0)
     # Centre the lean in the zone's slack so the leaning bottoms stay balanced.
     lean_shift = -reach / 2.0
+    return {
+        "item": item, "zone": zone, "held": held, "depth": depth, "wall": wall,
+        "height": height, "angle": angle, "tilted": tilted, "lean": lean,
+        "lean_axis": lean_axis, "reach": reach, "drop": drop,
+        "lean_shift": lean_shift, "pitch": pitch, "columns": columns,
+        "rows": rows, "centre_x": centre_x, "centre_y": centre_y,
+        "sections": sections, "hole_radius": hole_radius, "over": over,
+        "chamfer": chamfer,
+    }
+
+
+def _bore_hole_centres(grid: dict, count: int | None):
+    """(x, y) mouth centres for every hole in a resolved grid, in order."""
+    columns, rows, pitch = grid["columns"], grid["rows"], grid["pitch"]
+    centre_x, centre_y = grid["centre_x"], grid["centre_y"]
+    lean_axis, lean_shift = grid["lean_axis"], grid["lean_shift"]
+    made = 0
+    for row in range(rows):
+        for column in range(columns):
+            if count is not None and made >= count:
+                return
+            x = centre_x + (column - (columns - 1) / 2.0) * pitch
+            y = centre_y + (row - (rows - 1) / 2.0) * pitch
+            if lean_axis == "x":
+                x += lean_shift
+            else:
+                y += lean_shift
+            yield x, y
+            made += 1
+
+
+def bore_hole_axes(
+    box: BoxSpec, spec_feature: Feature, base_z: float
+) -> list[tuple[tuple[float, float, float], ...]]:
+    """Centre-line polylines for a leaned bore's holes, in world coordinates:
+    ``(bottom, mouth, tip)`` where ``tip`` is a short stub above the mouth that
+    carries the preview arrow. Empty for an upright grid - nothing to point out.
+    """
+    grid = _bore_grid(box, spec_feature, base_z)
+    if not grid["tilted"]:
+        return []
+    lean, lean_axis = grid["lean"], grid["lean_axis"]
+    depth, height, held = grid["depth"], grid["height"], grid["held"]
+    stub = max(10.0, held)
+    # Unit vector up the hole and out of the block - opposite the way the buried
+    # bottom shifts. Mirrors the hole rotation in ``build_bore``.
+    if lean_axis == "x":
+        up = (-math.sin(lean), 0.0, math.cos(lean))
+    else:
+        up = (0.0, -math.sin(lean), math.cos(lean))
+    mouth_z = base_z + height
+    axes = []
+    for x, y in _bore_hole_centres(grid, spec_feature.count):
+        mouth = (x, y, mouth_z)
+        bottom = (x - up[0] * depth, y - up[1] * depth, mouth_z - up[2] * depth)
+        tip = (x + up[0] * stub, y + up[1] * stub, mouth_z + up[2] * stub)
+        axes.append((bottom, mouth, tip))
+    return axes
+
+
+@feature("bore")
+def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
+    """A block of holes for objects stood on end."""
+    grid = _bore_grid(box, spec_feature, base_z)
+    zone = grid["zone"]
+    held = grid["held"]
+    depth = grid["depth"]
+    wall = grid["wall"]
+    height = grid["height"]
+    tilted = grid["tilted"]
+    lean = grid["lean"]
+    lean_axis = grid["lean_axis"]
+    pitch = grid["pitch"]
+    columns = grid["columns"]
+    rows = grid["rows"]
+    centre_x = grid["centre_x"]
+    centre_y = grid["centre_y"]
+
+    block = trimesh.creation.box(extents=(zone.width, zone.depth, height))
+    block.apply_translation((centre_x, centre_y, base_z + height / 2.0))
+
+    sections = grid["sections"]
+    hole_radius = grid["hole_radius"]
+    over = grid["over"]                      # stub above the top face for a clean mouth
+    chamfer = grid["chamfer"]
+    # Centre the lean in the zone's slack so the leaning bottoms stay balanced.
+    lean_shift = grid["lean_shift"]
 
     holes = []
     made = 0
