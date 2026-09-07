@@ -4,7 +4,7 @@ import math
 from dataclasses import replace
 import trimesh
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
-from organizer_engine import BoxSpec, _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile, _rounded, flat_cavity_polygon, intersection, union, wavy_cavity_polygon
+from organizer_engine import BoxSpec, WAVE_AMPLITUDE, _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile, _rounded, flat_cavity_polygon, intersection, union, wavy_cavity_polygon
 from ._core import Feature, Zone, connector_keep_out
 from ._registry import defaults, feature, resolved_options
 MAX_DIVIDER_ANGLE = 45.0
