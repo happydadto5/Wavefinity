@@ -193,6 +193,37 @@ Run the full suite again after all other work has stopped and immediately before
   bridge with its narrow local `_layout.check_layout` import, then move assembly
   work to `_assembly.py` without changing the public facade or registry order.
 
+### Phase 5 — Cross-Feature Layout and Assembly Extraction
+
+- Moved footprint dispatch, minimum-footprint dispatch, feature reach,
+  occupied-zone calculation, and layout validation into `_layout.py`.
+- Replaced the temporary package-facade bridge in `Layout.validate()` with the
+  required narrow local import of `_layout.check_layout`.
+- Moved feature build dispatch, text coordination, insert footprints and
+  plates, fused/removable/cartridge assembly, text application, and reporting
+  into `_assembly.py`.
+- Moved the starter item library into `_core.py`; `__init__.py` is now a
+  185-line import-only compatibility facade with no function or class bodies.
+- Fresh-process import checks preserved all 10 builders/defaults, their order,
+  and both registry singleton identities. Every moved function's AST matched
+  the Phase 4 checkpoint exactly, and the prior facade namespace was preserved.
+- Focused layout/build/text suite: `Ran 58 tests in 42.297s` — `OK`.
+- Focused export/preview suite: `Ran 39 tests in 56.104s` — `OK`.
+- Full suite: `Ran 420 tests in 365.552s` — `OK`.
+- `git diff --check` passed.
+- Commit: `7d1257db1b66d71fc4f27bb6a77b752ff019cc6c`.
+
+### Session 5 Handoff
+
+- Start from the clean, pushed `codex/split-organizer-inserts` branch at the
+  Phase 5 documentation commit that follows this entry.
+- Verify the Phase 5 commit and green results above, then execute Phases 6 and
+  7 only. Do not merge to `main`.
+- The package split is structurally complete. Session 5 must perform the final
+  full verification, fresh-process registry/import checks, facade and
+  dependency-direction audit, complete diff review, documentation finalization,
+  final commit, and push required by Phases 6 and 7.
+
 ## Goal
 
 Turn `organizer_inserts.py` into a Python package of focused modules without changing behavior, saved-design compatibility, geometry, exports, UI behavior, or imports used elsewhere in the app.
