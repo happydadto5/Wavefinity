@@ -72,7 +72,8 @@ HEX_BIT_LENGTH = {
     "hex_bit_long": HEX_BIT_LONG_LENGTH,
 }
 BORE_MOUTH_CHAMFER = 0.6  # 45-degree lead-in at each hole mouth
-BORE_MIN_ANGLE = 45.0     # shallowest tilt whose blind-hole roof still prints
+BORE_MAX_TILT = 45.0      # steepest lean off vertical a blind-hole roof still prints
+BORE_TILTED_WALL = 3.0    # thicker default wall once a bore is leaned
 INSERT_CLEARANCE = 0.2     # slack around a standalone insert, per side
 MIN_FEATURE_GAP = 0.8      # material between two features
 CONNECTOR_EDGE_KEEP_OUT = 2.0  # interior strip kept low for connector arms
@@ -994,7 +995,12 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     else:
         hole = min(item.length * 0.4, box.z - base_z - 2.0)
         held = item.held(item.widest)
-    wall = float(one.options.get("wall", BORE_WALL))
+    try:
+        tilted = abs(float(one.options.get("angle", 0.0) or 0.0)) > 1e-9
+    except (TypeError, ValueError):
+        tilted = False
+    default_wall = BORE_TILTED_WALL if tilted else BORE_WALL
+    wall = float(one.options.get("wall", default_wall))
     pitch = held + wall
     cols = _fit_count(one.zone.width, pitch, held + wall)
     rows = _fit_count(one.zone.depth, pitch, held + wall)
@@ -1003,13 +1009,15 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         rows = max(1, math.ceil(one.count / max(cols, 1)))
     return {
         "depth": hole,
-        "wall": BORE_WALL,
+        # A leaned bore takes a thicker wall by default so the extra material
+        # between slanting holes still prints; an explicit Wall overrides it.
+        "wall": default_wall,
         "height": one.options.get("depth", hole) + 2.0,
         "columns": float(max(1, cols)),
         "rows": float(max(1, rows)),
-        # 90 degrees is straight up; a shallower angle leans a single row of
-        # round or square holes so tubes rest at a slant.
-        "angle": 90.0,
+        # 0 is straight up; a positive angle leans the holes off vertical so
+        # tubes rest at a slant. Any grid may lean.
+        "angle": 0.0,
     }
 
 
@@ -1027,14 +1035,14 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     depth = options["depth"]
     wall = options["wall"]
     height = options["height"]
-    angle = options.get("angle", 90.0)
+    angle = options.get("angle", 0.0)
     if depth <= 0.0 or height <= 0.0 or wall <= 0.0 or depth >= height:
         raise ValueError(
             f"{item.name}: bore depth must be below its positive height and wall"
         )
-    if not math.isfinite(angle) or not (BORE_MIN_ANGLE - 1e-9 <= angle <= 90.0 + 1e-9):
+    if not math.isfinite(angle) or not (-1e-9 <= angle <= BORE_MAX_TILT + 1e-9):
         raise ValueError(
-            f"bore angle must be between {BORE_MIN_ANGLE:g} and 90 degrees"
+            f"bore lean angle must be between 0 and {BORE_MAX_TILT:g} degrees off vertical"
         )
 
     pitch = held + wall
@@ -1055,14 +1063,11 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     if columns < 1 or rows < 1:
         raise ValueError(f"no room for {item.name}: zone is too small for a bore")
 
-    # A tilt only makes sense for a single line of holes - a full grid would
-    # need an ever taller block and the rows behind would foul each other.
-    tilted = angle < 90.0 - 1e-9
-    if tilted and min(columns, rows) != 1:
-        raise ValueError(
-            "angled bores need a single row - set X quantity or Y quantity to 1"
-        )
-    lean = math.radians(90.0 - angle) if tilted else 0.0
+    # Every hole leans the same way by the same amount, so the whole block
+    # just shifts along the lean axis - rows and columns keep their pitch and
+    # any grid may lean. The zone only needs the extra sideways ``reach``.
+    tilted = angle > 1e-9
+    lean = math.radians(angle) if tilted else 0.0
     lean_axis = spec_feature.along           # 'x' or 'y'
     reach = depth * math.sin(lean)           # sideways travel of the hole bottom
     drop = depth * math.cos(lean)            # how far the bottom sits below the mouth
@@ -2270,9 +2275,9 @@ def feature_min_footprint(
                    else max(1, _fit_count(one.zone.width, pitch, held + wall)))
         rows = (max(1, int(round(float(raw_r)))) if raw_r is not None
                 else max(1, _fit_count(one.zone.depth, pitch, held + wall)))
-        angle = float(options.get("angle", 90.0))
-        reach = (float(options["depth"]) * math.sin(math.radians(90.0 - angle))
-                 if angle < 90.0 else 0.0)
+        angle = float(options.get("angle", 0.0))
+        reach = (float(options["depth"]) * math.sin(math.radians(angle))
+                 if angle > 0.0 else 0.0)
         width = columns * pitch + (reach if one.along == "x" else 0.0)
         depth = rows * pitch + (reach if one.along == "y" else 0.0)
         return (width, depth)

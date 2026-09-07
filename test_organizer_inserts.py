@@ -1701,24 +1701,25 @@ class BoreEnhancementTests(unittest.TestCase):
         self.assertGreater(len(picked), 0)
         return float(picked[:, 0].mean())
 
-    def test_an_angle_leans_a_single_row(self) -> None:
+    def test_an_angle_leans_the_holes(self) -> None:
         item = Item.simple("tube", 20.0, 6.0)
-        straight = self._bore(item, columns=1, rows=1, angle=90)
-        leaned = self._bore(item, columns=1, rows=1, angle=55)
+        straight = self._bore(item, columns=1, rows=1, angle=0)
+        leaned = self._bore(item, columns=1, rows=1, angle=35)
         self.assertTrue(leaned.is_watertight)
         # Deep in the block the hole has walked sideways once it leans.
         self.assertAlmostEqual(self._bottom_hole_centre_x(straight), 0.0, delta=0.3)
         self.assertGreater(self._bottom_hole_centre_x(leaned), 0.8)
 
-    def test_an_angled_grid_is_refused(self) -> None:
+    def test_an_angled_grid_builds(self) -> None:
         item = Item.simple("tube", 20.0, 6.0)
-        with self.assertRaises(ValueError):
-            self._bore(item, columns=3, rows=2, angle=60)
+        mesh = self._bore(item, columns=3, rows=2, angle=30)
+        self.assertTrue(mesh.is_watertight)
+        self.assertGreater(mesh.volume, 0.0)
 
-    def test_an_angle_past_the_printable_limit_is_refused(self) -> None:
+    def test_a_lean_past_the_printable_limit_is_refused(self) -> None:
         item = Item.simple("tube", 20.0, 6.0)
         with self.assertRaises(ValueError):
-            self._bore(item, rows=1, angle=20)
+            self._bore(item, rows=1, angle=60)
 
     def test_hole_mouths_are_chamfered(self) -> None:
         item = Item.simple("nozzle", 20.0, 6.0)
