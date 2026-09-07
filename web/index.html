@@ -78,9 +78,9 @@
       </section>
 
       <section class="control-section open" data-section="connector">
-        <button class="section-heading" aria-expanded="true">
-          <span>Connect bins</span><span class="chevron">⌄</span>
-        </button>
+        <div class="section-heading no-toggle">
+          <span>Connect bins</span>
+        </div>
         <div class="section-body">
           <label class="checkbox-row" for="different-height-bins">
             <input id="different-height-bins" type="checkbox">
@@ -103,8 +103,6 @@
           <label for="output-folder">Save Location:</label>
           <input id="output-folder" type="text">
           <button type="button" class="button secondary" id="output-folder-picker">Browse</button>
-        </div>
-        <div class="keep-log-row">
           <label class="keep-log-label" for="keep-log">
             <input id="keep-log" type="checkbox" checked>
             <span>Keep log</span>

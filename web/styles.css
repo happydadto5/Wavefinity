@@ -206,11 +206,16 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .field-error { margin: 6px 0 0; font-size: 11px; color: var(--danger); line-height: 1.4; }
 .output-panel { position: sticky; bottom: 0; z-index: 5; margin-top: 10px; padding: 16px 20px 20px; background: rgba(235,241,242,.97); border-top: 1px solid var(--line-dark); box-shadow: 0 -10px 24px rgba(30,51,61,.09); backdrop-filter: blur(8px); }
 .save-location-row { display: flex; align-items: center; gap: 8px; }
-.save-location-row label { white-space: nowrap; font-size: 12px; font-weight: 650; margin: 0; flex-shrink: 0; }
-.save-location-row input { margin-top: 0; flex: 1; min-width: 0; }
+.save-location-row > label:first-child { white-space: nowrap; font-size: 12px; font-weight: 650; margin: 0; flex-shrink: 0; }
+.save-location-row input[type="text"] {
+  margin-top: 0;
+  flex: 0.7;
+  min-width: 0;
+  direction: rtl;
+  text-align: left;
+}
 .save-location-row .button { flex-shrink: 0; padding: 9px 12px; }
-.keep-log-row { display: flex; align-items: center; margin-top: 8px; }
-.keep-log-label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink); user-select: none; margin: 0; }
+.keep-log-label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink); user-select: none; margin: 0; flex-shrink: 0; }
 .keep-log-label input[type="checkbox"] { margin: 0; cursor: pointer; accent-color: var(--teal); }
 .output-panel .print-button { margin-top: 10px; margin-bottom: 7px; display: flex; align-items: center; justify-content: center; gap: 7px; }
 .output-panel .print-button::before { content: "🖨️"; font-size: 14px; }
