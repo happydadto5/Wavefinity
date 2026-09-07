@@ -881,21 +881,32 @@ def make_side_connector(
             f"{length:g}. A wall this short joins nothing - use the box's other "
             f"side, or make this one at least {shortest:.2f} mm"
         )
-    # The band sits on the floor and the arms hang from the rim, so on any
-    # normal bin they are nowhere near each other.  On a very shallow one they
-    # meet, and it is worth saying so plainly rather than letting the fit check
-    # report a bare collision volume.
+    # The base slab, and any flat band on top of it, sit on the floor; the arms
+    # hang from the rim.  On a normal bin the two are nowhere near each other.
+    # On a very shallow one - easy to ask for as the short side of a
+    # differing-height pair - the arm drives into the band, or into the base
+    # slab itself, and the clip cannot seat on either bin.  Say so plainly
+    # rather than letting the fit check report a bare collision volume.
     band_top = box.base_thickness + box.flat_inside
     for bin_height in heights:
         arm_bottom = bin_height - connector.arm_depth
-        if box.flat_inside > 0.0 and arm_bottom < band_top:
+        if arm_bottom >= band_top:
+            continue
+        min_height = band_top + connector.arm_depth
+        if box.flat_inside > 0.0:
             room = bin_height - connector.arm_depth - box.base_thickness
             raise ValueError(
                 f"the flat band reaches {band_top:.2f} mm up but the connector's arms "
                 f"hang down to {arm_bottom:.2f} mm, so they would collide. On a "
                 f"{bin_height:g} mm box the band can be at most {max(room, 0.0):.2f} mm, or "
-                f"make the box at least {box.base_thickness + box.flat_inside + connector.arm_depth:.2f} mm tall"
+                f"make the box at least {min_height:.2f} mm tall"
             )
+        raise ValueError(
+            f"a {bin_height:g} mm bin is too shallow for this connector: the arms hang "
+            f"{connector.arm_depth:.2f} mm below the rim, down to {arm_bottom:.2f} mm, so "
+            f"they would collide with the {box.base_thickness:.2f} mm base and the clip "
+            f"could not seat. Make that bin at least {min_height:.2f} mm tall"
+        )
 
     # A whole wave, not half of one.  The corridor between the arms is cut to
     # the wall's wave at this position, and the wave inverts every half cycle:

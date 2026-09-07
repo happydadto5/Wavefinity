@@ -451,9 +451,11 @@ async function selectOutputFolder() {
 }
 
 function updatePreviewHelp(view) {
-  $("#preview-help").textContent = view === "2d"
+  const el = $("#preview-help");
+  if (!el) return;
+  el.textContent = view === "2d"
     ? "Drag interior parts to move them. Photo Nest also has a proportional resize corner and round rotation handle."
-    : "Visual preview only. Drag to rotate, use the wheel to zoom, or double-click to reset; these controls do not change the printed part.";
+    : "Drag to rotate, use the wheel to zoom, or double-click to reset.";
 }
 
 const changedDesign = debounce(() => {
@@ -838,9 +840,10 @@ function field(label, key, value, options = {}) {
   const classes = options.wide ? "wide" : "";
   const type = options.type || "number";
   const attrs = type === "number" ? `step="${options.step || "0.1"}"` : "";
+  const min = options.min !== undefined ? ` min="${escapeHtml(options.min)}"` : "";
   const placeholder = options.placeholder ? ` placeholder="${escapeHtml(options.placeholder)}"` : "";
   return `<label class="${classes}">${escapeHtml(label)}${options.unit ? `<span class="unit">${escapeHtml(options.unit)}</span>` : ""}
-    <input type="${type}" data-draft="${key}" value="${escapeHtml(value ?? "")}" ${attrs}${placeholder}>
+    <input type="${type}" data-draft="${key}" value="${escapeHtml(value ?? "")}" ${attrs}${min}${placeholder}>
   </label>`;
 }
 
@@ -1061,6 +1064,7 @@ function renderDraftFields() {
     const fieldOpts = {};
     if (autoHint) fieldOpts.placeholder = autoHint;
     if (stepFor[option.key]) fieldOpts.step = stepFor[option.key];
+    if (info.kind === "cradle" && option.key === "spacing") fieldOpts.min = 0;
     html += field(option.label, `option:${option.key}`, shown, fieldOpts);
     if (option.key === "angle" && info.kind === "divider") {
       // The wedge-vs-straight choice only means anything once the wall
@@ -1242,7 +1246,7 @@ function sizeCradleToItem(one) {
   if (!item?.segments?.length) return;
   const cx = (one.zone[0] + one.zone[2]) / 2;
   const cy = (one.zone[1] + one.zone[3]) / 2;
-  const spacing = number(one.options?.spacing, state.draftResolvedOptions?.spacing ?? 0);
+  const spacing = Math.max(0, number(one.options?.spacing, state.draftResolvedOptions?.spacing ?? 0));
   const length = item.segments.reduce((total, segment) => total + number(segment.length), 0);
   // The true tool diameter (no fit slack) and a wall a quarter of it, floored at
   // the thinnest printable wall and capped so a fat handle never grows a slab.
@@ -1279,19 +1283,10 @@ function syncNestZone(one) {
   if (!one?.contour?.length) return;
   const cx = (one.zone[0] + one.zone[2]) / 2;
   const cy = (one.zone[1] + one.zone[3]) / 2;
-  const angle = number(one.rotation) * Math.PI / 180;
-  const scale = Math.max(.05, number(one.scale, 1));
-  const cosine = Math.cos(angle), sine = Math.sin(angle);
-  const points = one.contour.map(([x, y]) => [
-    scale * (number(x) * cosine - number(y) * sine),
-    scale * (number(x) * sine + number(y) * cosine),
-  ]);
-  const xs = points.map(point => point[0]), ys = points.map(point => point[1]);
-  const margin = Math.max(0, number(one.options?.clearance, .6))
-    + Math.max(0, number(one.options?.rim, 3));
-  const width = Math.max(...xs) - Math.min(...xs) + 2 * margin;
-  const depth = Math.max(...ys) - Math.min(...ys) + 2 * margin;
-  one.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
+  // The server owns the exact outline calculation: it includes smoothing and
+  // the reinforced outside foot. Keep only a valid centre placeholder here;
+  // /api/feature/apply refits the authoritative footprint before saving.
+  one.zone = [cx - .5, cy - .5, cx + .5, cy + .5];
 }
 
 function readFileDataUrl(file) {
@@ -1464,6 +1459,7 @@ function updateDraftFromFields(event) {
       if (info.kind === "bore" && (key === "columns" || key === "rows")) {
         value = Math.max(1, Math.round(value));
       }
+      if (info.kind === "cradle" && key === "spacing") value = Math.max(0, value);
       one.options[key] = value;
     }
     // A hand-set letter height means the user is placing it themselves.
@@ -1572,7 +1568,11 @@ async function refreshDraft() {
   }
   $("#draft-status").textContent = "Rebuilding…";
   try {
-    const result = await api("/api/feature/draft", { design: state.design, feature: state.draft });
+    const index = draftCommitIndex();
+    const result = await api("/api/feature/draft", {
+      design: state.design, feature: state.draft,
+      ...(index === false ? {} : { index }),
+    });
     if (request !== state.draftRequest) return;
     state.draftResolvedOptions = result.resolved_options || {};
     const info = partInfo();
@@ -1793,9 +1793,12 @@ function renderPlaced() {
     $$(".placed-item-delete", container).forEach(button => button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
   }
   $("#support-count").textContent = `${features.length} placed`;
-  $("#design-summary").textContent = features.length
-    ? `${features.length} interior part${features.length === 1 ? "" : "s"} · ${state.design.layout.mode}`
-    : `No interior parts placed · ${state.design.layout.mode}`;
+  const summaryEl = $("#design-summary");
+  if (summaryEl) {
+    summaryEl.textContent = features.length
+      ? `${features.length} interior part${features.length === 1 ? "" : "s"} · ${state.design.layout.mode}`
+      : `No interior parts placed · ${state.design.layout.mode}`;
+  }
 
   // With a single support there's nothing to choose between, so drop straight
   // into its settings rather than make the user pick it out of the list first.
@@ -1990,6 +1993,11 @@ function fillPartToBin() {
 }
 
 async function autoExpandBin(event) {
+  const draftIndex = state.draft ? draftCommitIndex() : null;
+  if (draftIndex === false) {
+    toast("Select the interior part again before growing the bin.", true);
+    return;
+  }
   if (!beginDesignMutation()) return;
   const button = event?.currentTarget || null;
   if (button) button.disabled = true;
@@ -2001,9 +2009,9 @@ async function autoExpandBin(event) {
     const layout = state.design.layout;
     let features = layout.features;
     if (state.draft) {
-      features = state.selected === null
+      features = draftIndex === null
         ? [...layout.features, state.draft]
-        : layout.features.map((f, i) => i === state.selected ? state.draft : f);
+        : layout.features.map((f, i) => i === draftIndex ? state.draft : f);
     }
     const design = features === layout.features
       ? state.design

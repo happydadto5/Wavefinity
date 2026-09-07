@@ -1509,6 +1509,20 @@ def design_from_dict(
     label = str(data.get("label", ""))
     location = label_position(data.get("label_position", "bottom"))
     scoop = bool(data.get("scoop", False))
+    # The retired scoop checkbox made a real ramp but was not represented in
+    # the interior-parts list. Turn it into the equivalent editable feature
+    # when an older design is reopened, then retire the hidden flag.
+    if scoop:
+        if (not any(one.kind == "scoop" for one in layout.features)
+                and not any(one.kind == "nest" and one.contour for one in layout.features)):
+            legacy_zone = Zone(*scoop_floor_zone(
+                box, _scoop_floor_bounds(box, layout.mode)
+            ).bounds)
+            layout = replace(
+                layout,
+                features=layout.features + (Feature("scoop", legacy_zone),),
+            )
+        scoop = False
     if validate_layout:
         # An auto text's stored zone is a cache of where it last landed, not
         # the authority - the resolver is. Re-run it before validating, so a

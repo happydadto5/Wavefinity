@@ -676,6 +676,8 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     wall = options["rib_thickness"]
     spacing = options["spacing"]
     floor_gap = options["floor_gap"]
+    if not math.isfinite(spacing) or spacing < 0.0:
+        raise ValueError("cradle spacing must be zero or greater")
 
     length = item.length
     # A cradle is an open half-circle the tool simply drops into, so it takes
@@ -804,9 +806,11 @@ def cradle_min_footprint(one: Feature) -> tuple[float, float]:
     item = _need_item(one)
     wall = _cradle_wall(item.widest)
     try:
-        spacing = max(0.0, float(one.options.get("spacing")))
-    except (TypeError, ValueError):
-        spacing = 0.0
+        spacing = float(one.options.get("spacing", 0.0))
+    except (TypeError, ValueError) as error:
+        raise ValueError("cradle spacing must be zero or greater") from error
+    if not math.isfinite(spacing) or spacing < 0.0:
+        raise ValueError("cradle spacing must be zero or greater")
     count = one.count or 1
     length = item.length
     alternating = bool(one.alternate_ends) and count > 1
@@ -1184,9 +1188,10 @@ def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
 
     run = zone.width if spec_feature.along == "x" else zone.depth
     across = zone.depth if spec_feature.along == "x" else zone.width
-    count = spec_feature.count or 1
+    count = (spec_feature.count if spec_feature.count is not None
+             else _fit_count(run, diameter + spacing, diameter))
     used = count * diameter + (count - 1) * spacing
-    if diameter > across + 1e-9 or used > run + 1e-9:
+    if count < 1 or diameter > across + 1e-9 or used > run + 1e-9:
         raise ValueError(
             f"{count} posts need {used:.1f} x {diameter:.1f} mm but the zone "
             f"gives {run:.1f} x {across:.1f} mm"
@@ -2257,9 +2262,13 @@ def _post_footprint(box: BoxSpec, one: Feature, base_z: float) -> Zone | None:
     wide as its diameter however big a zone it was given."""
     options = resolved_options(box, one, base_z)
     diameter, spacing = options["diameter"], options["spacing"]
-    count = one.count or 1
-    used = count * diameter + (count - 1) * spacing
     zone = one.zone
+    available = zone.width if one.along == "x" else zone.depth
+    count = (one.count if one.count is not None
+             else _fit_count(available, diameter + spacing, diameter))
+    if count < 1:
+        return None
+    used = count * diameter + (count - 1) * spacing
     centre_x, centre_y = zone.centre
     run = min(zone.width if one.along == "x" else zone.depth, used)
     across = min(zone.depth if one.along == "x" else zone.width, diameter)
@@ -2358,7 +2367,9 @@ def feature_min_footprint(
     if kind == "post":
         options = resolved_options(box, one, base_z)
         diameter, spacing = float(options["diameter"]), float(options["spacing"])
-        count = one.count or 1
+        run = one.zone.width if one.along == "x" else one.zone.depth
+        count = (one.count if one.count is not None
+                 else max(1, _fit_count(run, diameter + spacing, diameter)))
         used = count * diameter + (count - 1) * spacing
         return (used, diameter) if one.along == "x" else (diameter, used)
 

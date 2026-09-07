@@ -206,6 +206,14 @@ class CradleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "across"):
             build_features(BIN, [crowded], BIN.base_thickness)
 
+    def test_negative_cradle_spacing_is_refused(self) -> None:
+        invalid = Feature(
+            "cradle", Zone.end(BIN, "x", 88.0), ROD,
+            options={"spacing": -0.8},
+        )
+        with self.assertRaisesRegex(ValueError, "spacing must be zero or greater"):
+            build_features(BIN, [invalid], BIN.base_thickness)
+
     def test_an_item_longer_than_its_zone_is_refused(self) -> None:
         cramped = Feature("cradle", Zone.end(BIN, "x", 40.0), PEN)
         with self.assertRaisesRegex(ValueError, "long"):
@@ -1610,6 +1618,13 @@ class OtherHoldersTests(unittest.TestCase):
         high_radius = max((vertex[0] - post.centroid[0]) ** 2 + vertex[1] ** 2 for vertex in high)
         self.assertGreater(low_radius, high_radius)
 
+    def test_auto_posts_fill_the_available_run(self) -> None:
+        feature = Feature(
+            "post", Zone(-24.0, -8.0, 24.0, 8.0), count=None, along="x",
+            options={"diameter": 12.0, "spacing": 4.0},
+        )
+        self.assertEqual(len(build_features(BIN, [feature], BIN.base_thickness)), 3)
+
     def test_a_builder_cannot_escape_the_zone_claimed_by_the_editor(self) -> None:
         # A divider is a deliberate, documented exception to this (its
         # thickness option, not its zone, decides how wide it actually
@@ -1757,6 +1772,11 @@ class FeatureMinFootprintTests(unittest.TestCase):
         one = Feature("post", Zone(-40.0, -20.0, 40.0, 20.0), count=3,
                       options={"diameter": 12.0, "spacing": 4.0})
         self.assertEqual(self.mn(one), (3 * 12.0 + 2 * 4.0, 12.0))
+
+    def test_auto_post_row_fits_the_available_run(self) -> None:
+        one = Feature("post", Zone(-24.0, -8.0, 24.0, 8.0), count=None,
+                      options={"diameter": 12.0, "spacing": 4.0})
+        self.assertEqual(self.mn(one), (44.0, 12.0))
 
     def test_slot_tightens_the_across_axis_keeps_the_run(self) -> None:
         one = Feature("slot", Zone(-40.0, -30.0, 40.0, 30.0), count=3,

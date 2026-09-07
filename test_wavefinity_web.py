@@ -307,6 +307,26 @@ class WebApplicationTests(unittest.TestCase):
         changed = apply_feature_payload({"design": made["design"], "feature": feature, "index": 0})
         self.assertGreater(changed["design"]["box"]["x"], old_x)
 
+    def test_photo_nest_apply_refits_a_client_placeholder_zone(self):
+        """Changing a nest setting must never save the browser's rough zone."""
+        outline = PhotoOutline(
+            ((-5, -3), (5, -3), (5, 3), (-5, 3)), 10.0, 6.0,
+            ((0, 0), (1, 0), (1, 1), (0, 1)),
+        )
+        with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
+            made = photo_nest_payload({
+                "design": default_design(), "image": "unused", "mime_type": "image/png",
+            })
+        feature = made["design"]["layout"]["features"][0]
+        feature["options"]["clearance"] = 1.0
+        cx = (feature["zone"][0] + feature["zone"][2]) / 2.0
+        cy = (feature["zone"][1] + feature["zone"][3]) / 2.0
+        feature["zone"] = [cx - .5, cy - .5, cx + .5, cy + .5]
+        saved = apply_feature_payload({
+            "design": made["design"], "feature": feature, "index": 0,
+        })["design"]["layout"]["features"][0]
+        self.assertGreater(saved["zone"][2] - saved["zone"][0], 15.0)
+
     def test_photo_nest_rotation_and_proportional_scale_recompute_footprint(self):
         outline = PhotoOutline(
             ((-38, -9), (38, -9), (38, 9), (-38, 9)),
@@ -729,6 +749,23 @@ class WebApplicationTests(unittest.TestCase):
         self.assertNotEqual(result["feature"]["zone"], draft["zone"])
         placed = design["layout"]["features"][0]["zone"]
         self.assertNotEqual(result["feature"]["zone"], placed)
+
+    def test_auto_text_replacing_a_part_does_not_avoid_that_part(self):
+        design = default_design()
+        scoop = default_feature_payload({"design": design, "kind": "scoop"})["feature"]
+        design = apply_feature_payload({
+            "design": design, "feature": scoop, "index": None,
+        })["design"]
+        text = default_feature_payload({"design": design, "kind": "text"})["feature"]
+        result = draft_payload({"design": design, "feature": text, "index": 0})
+        self.assertTrue(result["geometry"])
+
+    def test_legacy_scoop_becomes_an_editable_interior_part(self):
+        design = default_design()
+        design["scoop"] = True
+        _box, layout, _label, _part, _location, scoop = design_from_dict(design)
+        self.assertFalse(scoop)
+        self.assertEqual([one.kind for one in layout.features], ["scoop"])
 
     def test_preview_has_no_label_outline_without_a_label(self):
         preview = preview_payload({"design": default_design()})

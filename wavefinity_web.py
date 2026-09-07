@@ -724,8 +724,15 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # the rest of the layout to look at, so resolve it here too - otherwise the
     # draft is judged, and drawn, somewhere it will never actually be.
     if one.kind == "text" and one.options.get("auto"):
+        existing = list(layout.features)
+        index = payload.get("index")
+        if index is not None:
+            index = int(index)
+            if not 0 <= index < len(existing):
+                raise ValueError("the selected interior part no longer exists")
+            existing.pop(index)
         placed = _resolved_text(
-            box, tuple(layout.features) + (one,), layout.mode,
+            box, tuple(existing) + (one,), layout.mode,
             label, label_location, scoop,
         )
         one = placed[-1]

@@ -691,6 +691,26 @@ class ConnectorTests(unittest.TestCase):
         self.assertAlmostEqual(near.extents[1], plain.extents[1], places=5)
         self.assertAlmostEqual(near.extents[0], plain.extents[0], places=5)
 
+    def test_a_too_shallow_short_bin_is_refused_with_a_clear_message(self) -> None:
+        # Pair a 40 mm bin with one shorter than the arms are deep: the arm
+        # would punch into that bin's base slab and the clip could not seat on
+        # either side.  Say so plainly, not as a bare fit-check collision.
+        box, connector = BoxSpec(32.0, 32.0, 40.0), ConnectorSpec()
+        with self.assertRaisesRegex(ValueError, "too shallow for this connector"):
+            make_side_connector(
+                box, connector, "y", 0.0, 12.0, bin_a_height=40.0, bin_b_height=8.5,
+            )
+        # One that just clears the base slab still builds and seats cleanly.
+        ok = make_side_connector(
+            box, connector, "y", 0.0, 12.0, bin_a_height=40.0, bin_b_height=12.0,
+        )
+        self.assertLess(
+            validate_side_fit(
+                box, connector, ok, "y", 0.0, bin_a_height=40.0, bin_b_height=12.0,
+            ),
+            1e-3,
+        )
+
     def test_orientation_and_position_are_explicit(self) -> None:
         box = BoxSpec(x=32.0, y=48.0, z=40.0)
         connector = ConnectorSpec()
