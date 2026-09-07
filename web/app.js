@@ -94,10 +94,20 @@ function updateHistoryButtons() {
 }
 
 function updateGenerateAvailability() {
-  const button = $("#generate-bin");
-  if (button) {
-    button.disabled = state.designMutationBusy || !state.canGenerate;
-    button.title = state.canGenerate ? "Generate the current bin files" : "Resolve the highlighted issue before generating";
+  const binButton = $("#generate-bin");
+  if (binButton) {
+    binButton.disabled = state.designMutationBusy || !state.canGenerate;
+    binButton.title = state.canGenerate ? "Generate the current bin files" : "Resolve the highlighted issue before generating";
+  }
+  const allButton = $("#generate-all");
+  if (allButton) {
+    allButton.disabled = state.designMutationBusy || !state.canGenerate;
+    allButton.title = state.canGenerate ? "Generate bin and connector files" : "Resolve the highlighted issue before generating";
+  }
+  const connectorButton = $("#generate-connector");
+  if (connectorButton) {
+    connectorButton.disabled = state.designMutationBusy;
+    connectorButton.title = "Generate connector for the current bin";
   }
   const printButton = $("#print-bin");
   if (printButton) {
@@ -716,9 +726,10 @@ function wireControls() {
   $("#connection").addEventListener("click", () => location.reload(true));
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
   $("#print-bin").addEventListener("click", () => printModel("bin"));
-  $("#generate-bin").addEventListener("click", () => generate("/api/generate", "#generate-bin"));
-  $("#generate-connector").addEventListener("click", () => generate("/api/connector", "#generate-connector"));
-  $("#generate-sampler").addEventListener("click", () => generate("/api/sampler", "#generate-sampler"));
+  $("#generate-all")?.addEventListener("click", () => generateParts("all"));
+  $("#generate-bin")?.addEventListener("click", () => generateParts("bin"));
+  $("#generate-connector")?.addEventListener("click", () => generateParts("connector"));
+  wireGenerationDialog();
   $("#slicer-picker-button").addEventListener("click", browseSlicer);
   wireSceneInteraction($("#preview-3d"), state.camera, renderPreview3D);
   wireSupportLayoutDialog();
@@ -2968,17 +2979,122 @@ async function newDesign() {
   }
 }
 
-async function generate(path, selector) {
-  if (state.designMutationBusy) {
-    toast("Finish the current design change before generating files.", true);
+let isGenerating = false;
+
+function wireGenerationDialog() {
+  const dialog = $("#generation-dialog");
+  const closeBtn = $("#generation-dialog-close");
+  if (!dialog) return;
+  dialog.addEventListener("cancel", (event) => {
+    if (isGenerating) {
+      event.preventDefault();
+    }
+  });
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      dialog.close();
+    });
+  }
+}
+
+function getIndicatorHtml(status) {
+  if (status === "generating") {
+    return `<span class="gen-spinner" aria-label="Generating"></span>`;
+  }
+  if (status === "done") {
+    return `<span class="gen-status-icon done" aria-label="Done">✓</span>`;
+  }
+  if (status === "error") {
+    return `<span class="gen-status-icon error" aria-label="Failed">✕</span>`;
+  }
+  return `<span class="gen-status-icon waiting" aria-label="Waiting">⋯</span>`;
+}
+
+function renderGenerationItems(items) {
+  const container = $("#generation-items");
+  if (!container) return;
+  container.innerHTML = items.map(item => `
+    <div class="generation-item status-${item.status}" id="gen-item-${item.id}">
+      <div class="gen-item-indicator">
+        ${getIndicatorHtml(item.status)}
+      </div>
+      <div class="gen-item-details">
+        <strong class="gen-item-title">${escapeHtml(item.title)}</strong>
+        <span class="gen-item-status">${escapeHtml(item.text)}</span>
+      </div>
+    </div>
+  `).join("");
+}
+
+function setItemStatus(id, status, text) {
+  const row = $(`#gen-item-${id}`);
+  if (!row) return;
+  row.className = `generation-item status-${status}`;
+  const indicator = row.querySelector(".gen-item-indicator");
+  if (indicator) indicator.innerHTML = getIndicatorHtml(status);
+  const statusSpan = row.querySelector(".gen-item-status");
+  if (statusSpan) statusSpan.textContent = text;
+}
+
+async function generateParts(target) {
+  if (state.designMutationBusy || isGenerating) {
+    toast("Finish the current action before generating files.", true);
     return;
   }
+  if ((target === "all" || target === "bin") && !state.canGenerate) {
+    toast("Resolve the highlighted issue before generating.", true);
+    return;
+  }
+
   updateDesignFromForm();
-  const button = $(selector);
-  const old = button.textContent;
-  button.disabled = true;
-  button.textContent = "Generating…";
   setError();
+
+  const dialog = $("#generation-dialog");
+  const dialogTitle = $("#generation-dialog-title");
+  const dialogSubtitle = $("#generation-dialog-subtitle");
+  const dialogError = $("#generation-error");
+  const dialogActions = $("#generation-actions");
+
+  if (dialogTitle) dialogTitle.textContent = "Generating Parts…";
+  if (dialogSubtitle) dialogSubtitle.textContent = "Please wait while your files are being generated and saved.";
+  if (dialogError) {
+    dialogError.hidden = true;
+    dialogError.textContent = "";
+  }
+  if (dialogActions) {
+    dialogActions.hidden = true;
+  }
+
+  const boxTitle = `Bin (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} × ${fmt(state.design.box.z)} mm)`;
+  const connTitle = `Connector (${fmt(state.design.box.z)} mm)`;
+
+  const items = [];
+  if (target === "all" || target === "bin") {
+    items.push({ id: "bin", title: boxTitle, status: "waiting", text: "Waiting…" });
+  }
+  if (target === "all" || target === "connector") {
+    items.push({ id: "connector", title: connTitle, status: "waiting", text: "Waiting…" });
+  }
+
+  renderGenerationItems(items);
+
+  isGenerating = true;
+  state.designMutationBusy = true;
+  updateGenerateAvailability();
+  updateHistoryButtons();
+
+  if (dialog && typeof dialog.showModal === "function") {
+    try {
+      if (!dialog.open) dialog.showModal();
+    } catch (_err) {
+      // Ignore if already open
+    }
+  }
+
+  const allFiles = [];
+  let connectorPlan = null;
+  let saveOutput = state.output;
+
   try {
     // A debounced support edit may still be visible only in the draft. Save
     // it now so the exported files always match the canvas.
@@ -2995,32 +3111,96 @@ async function generate(path, selector) {
       recordHistory(previousDesign);
       renderPlaced();
     }
+
     const payload = {
       design: state.design,
       output: state.output,
       connector: state.connector,
       keep_log: state.keepLog,
     };
-    const result = await api(path, payload);
-    if (result.connector_plan) renderConnectorReadout(result.connector_plan);
-    const files = collectOutputs(result.result);
-    const plan = result.connector_plan;
-    const planNote = plan && plan.webbed
-      ? `\nConnector: ${fmt(plan.length_mm)} mm long, ${fmt(plan.web_thickness_mm)} mm web, `
-        + `${fmt(plan.printed_height_mm)} mm printed height`
+
+    // Step 1: Generate Bin if requested
+    if (target === "all" || target === "bin") {
+      setItemStatus("bin", "generating", "Generating…");
+      const binResult = await api("/api/generate", payload);
+      saveOutput = binResult.output || saveOutput;
+      const binFiles = collectOutputs(binResult.result);
+      allFiles.push(...binFiles);
+      setItemStatus("bin", "done", "Done");
+    }
+
+    // Step 2: Generate Connector if requested
+    if (target === "all" || target === "connector") {
+      setItemStatus("connector", "generating", "Generating…");
+      const connResult = await api("/api/connector", payload);
+      saveOutput = connResult.output || saveOutput;
+      if (connResult.connector_plan) {
+        connectorPlan = connResult.connector_plan;
+        renderConnectorReadout(connResult.connector_plan);
+      }
+      const connFiles = collectOutputs(connResult.result);
+      allFiles.push(...connFiles);
+      setItemStatus("connector", "done", "Done");
+    }
+
+    if (dialogTitle) dialogTitle.textContent = "Complete!";
+    if (dialogSubtitle) dialogSubtitle.textContent = "All parts generated and saved.";
+
+    // Pause briefly so user clearly sees checkmarks
+    await new Promise(resolve => setTimeout(resolve, 650));
+
+    if (dialog && dialog.open) {
+      dialog.close();
+    }
+
+    const uniqueFiles = [...new Set(allFiles)];
+    const planNote = connectorPlan && connectorPlan.webbed
+      ? `\nConnector: ${fmt(connectorPlan.length_mm)} mm long, ${fmt(connectorPlan.web_thickness_mm)} mm web, `
+        + `${fmt(connectorPlan.printed_height_mm)} mm printed height`
       : "";
     toast(
-      `Saved to ${result.output}${files.length ? `\n${files.join("\n")}` : ""}${planNote}`,
+      `Saved to ${saveOutput}${uniqueFiles.length ? `\n${uniqueFiles.join("\n")}` : ""}${planNote}`,
       false,
       7000,
     );
   } catch (error) {
+    if (target === "all" || target === "bin") {
+      const binRow = $("#gen-item-bin");
+      if (binRow && !binRow.classList.contains("status-done")) {
+        setItemStatus("bin", "error", "Failed");
+      }
+    }
+    if (target === "all" || target === "connector") {
+      const connRow = $("#gen-item-connector");
+      if (connRow && !connRow.classList.contains("status-done")) {
+        setItemStatus("connector", "error", "Failed");
+      }
+    }
+
+    if (dialogTitle) dialogTitle.textContent = "Generation Failed";
+    if (dialogSubtitle) dialogSubtitle.textContent = "An error occurred while generating parts.";
+    if (dialogError) {
+      dialogError.textContent = error.message;
+      dialogError.hidden = false;
+    }
+    if (dialogActions) {
+      dialogActions.hidden = false;
+    }
     setError(error.message);
     toast(error.message, true, 7000);
   } finally {
-    button.disabled = selector === "#generate-bin" ? !state.canGenerate : false;
-    button.textContent = old;
+    isGenerating = false;
+    state.designMutationBusy = false;
+    updateGenerateAvailability();
+    updateHistoryButtons();
   }
+}
+
+async function generate(path, selector) {
+  if (path && path.includes("connector")) {
+    return generateParts("connector");
+  }
+  return generateParts("bin");
 }
 
 async function printModel(target = "bin") {

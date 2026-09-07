@@ -213,9 +213,20 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .output-panel .print-button { margin-top: 10px; margin-bottom: 7px; display: flex; align-items: center; justify-content: center; gap: 7px; }
 .output-panel .print-button::before { content: "🖨️"; font-size: 14px; }
 .slicer-status-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line-dark); font-size: 11.5px; color: var(--muted); }
-.link-button { background: none; border: none; padding: 0 4px; color: var(--blue); cursor: pointer; font-size: 11px; font-weight: 600; text-decoration: underline; }
-.link-button:hover { color: var(--teal-dark); }
-.sampler-row { display: block; margin-top: 10px; }
+.generate-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: nowrap; }
+.generate-actions .button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 9px 4px;
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+}
 
 .workspace { min-width: 0; min-height: 0; position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; background: #f8faf9; }
 .workspace-toolbar { min-height: 54px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 18px; border-bottom: 1px solid var(--line); background: white; }
@@ -273,6 +284,144 @@ dialog:not([open]) { display: none; }
 .support-layout-dialog h2 { margin: 0 0 7px; font-size: 18px; }
 .support-layout-dialog p { margin: 0 0 16px; color: var(--muted); }
 .support-layout-dialog .button-row { justify-content: end; }
+
+.generation-dialog {
+  width: min(440px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 14px;
+  padding: 0;
+  color: var(--ink);
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 30, 36, .35);
+  overflow: hidden;
+}
+.generation-dialog:not([open]) {
+  display: none;
+}
+.generation-dialog::backdrop {
+  background: rgba(14, 28, 34, .65);
+  backdrop-filter: blur(3px);
+}
+.generation-dialog-card {
+  padding: 24px 28px;
+}
+.generation-dialog-header h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+  color: #14303a;
+}
+.generation-dialog-subtitle {
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.generation-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.generation-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: #f7fafb;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  transition: background .2s, border-color .2s;
+}
+.generation-item.status-generating {
+  background: #f0f8fa;
+  border-color: #79b5c2;
+}
+.generation-item.status-done {
+  background: #f4faf6;
+  border-color: #92d4ab;
+}
+.generation-item.status-error {
+  background: #fef5f5;
+  border-color: #e5a4a0;
+}
+.gen-item-indicator {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+}
+.gen-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid rgba(36, 117, 134, 0.25);
+  border-top-color: var(--teal);
+  border-radius: 50%;
+  animation: gen-spin 0.8s linear infinite;
+}
+@keyframes gen-spin {
+  to { transform: rotate(360deg); }
+}
+.gen-status-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 13px;
+}
+.gen-status-icon.waiting {
+  background: #e4ecee;
+  color: #7a8b90;
+  font-size: 16px;
+}
+.gen-status-icon.done {
+  background: #2ea043;
+  color: white;
+}
+.gen-status-icon.error {
+  background: #cf222e;
+  color: white;
+}
+.gen-item-details {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.gen-item-title {
+  font-size: 13px;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.gen-item-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+.status-generating .gen-item-status {
+  color: var(--teal);
+  font-weight: 600;
+}
+.status-done .gen-item-status {
+  color: #1a7f37;
+  font-weight: 600;
+}
+.status-error .gen-item-status {
+  color: #cf222e;
+  font-weight: 600;
+}
+.generation-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: #fff0ef;
+  border: 1px solid #f2bcba;
+  color: #8c1d18;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
 
 .about-dialog {
   width: min(640px, calc(100vw - 32px));

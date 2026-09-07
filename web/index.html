@@ -117,10 +117,10 @@
           </label>
         </div>
         <button id="print-bin" class="button primary wide print-button">Print to Bambu Studio</button>
-        <button id="generate-bin" class="button secondary wide">Generate Bin</button>
-        <div class="button-row equal">
-          <button id="generate-connector" class="button secondary">Generate connector</button>
-          <button id="generate-sampler" class="button secondary">Generate sampler</button>
+        <div class="button-row equal generate-actions">
+          <button id="generate-all" class="button secondary">Generate Bin and Connectors</button>
+          <button id="generate-bin" class="button secondary">Generate Bin</button>
+          <button id="generate-connector" class="button secondary">Generate Connector</button>
         </div>
         <div class="slicer-status-row">
           <button type="button" id="slicer-picker-button" class="link-button" title="Select custom Bambu Studio or OrcaSlicer executable">Change slicer</button>
@@ -205,6 +205,19 @@
     </div>
     <div class="button-row" style="margin-top: 16px;">
       <button id="about-dialog-close" type="button" class="button primary">Close</button>
+    </div>
+  </dialog>
+  <dialog id="generation-dialog" class="generation-dialog" aria-labelledby="generation-dialog-title">
+    <div class="generation-dialog-card">
+      <div class="generation-dialog-header">
+        <h2 id="generation-dialog-title">Generating Parts…</h2>
+        <p id="generation-dialog-subtitle" class="generation-dialog-subtitle">Please wait while your parts are being generated and saved.</p>
+      </div>
+      <div id="generation-items" class="generation-items"></div>
+      <div id="generation-error" class="generation-error" hidden></div>
+      <div id="generation-actions" class="button-row" hidden>
+        <button id="generation-dialog-close" type="button" class="button primary">Close</button>
+      </div>
     </div>
   </dialog>
   <div id="update-banner" class="update-banner" role="status" hidden>
