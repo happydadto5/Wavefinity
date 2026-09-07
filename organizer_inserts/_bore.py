@@ -200,6 +200,7 @@ def bore_hole_axes(
     lean, lean_axis = grid["lean"], grid["lean_axis"]
     depth, height, held = grid["depth"], grid["height"], grid["held"]
     stub = max(10.0, held)
+    centre_x, centre_y = grid["centre_x"], grid["centre_y"]
     # Unit vector up the hole and out of the block - opposite the way the buried
     # bottom shifts. Mirrors the hole rotation in ``build_bore``.
     if lean_axis == "x":
@@ -207,12 +208,25 @@ def bore_hole_axes(
     else:
         up = (0.0, -math.sin(lean), math.cos(lean))
     mouth_z = base_z + height
+    centre = (centre_x, centre_y, base_z + height / 2.0)
+    axis = (0.0, 1.0, 0.0) if lean_axis == "x" else (1.0, 0.0, 0.0)
+    sign = -1.0 if lean_axis == "x" else 1.0
+    rotation = trimesh.transformations.rotation_matrix(sign * lean, axis)
     axes = []
     for x, y in _bore_hole_centres(grid, spec_feature.count):
         mouth = (x, y, mouth_z)
         bottom = (x - up[0] * depth, y - up[1] * depth, mouth_z - up[2] * depth)
         tip = (x + up[0] * stub, y + up[1] * stub, mouth_z + up[2] * stub)
-        axes.append((bottom, mouth, tip))
+        # Transform all three points by the bore tilt, around the bore centre.
+        def rotate_point(pt):
+            p = (pt[0] - centre[0], pt[1] - centre[1], pt[2] - centre[2], 1.0)
+            rotated = rotation @ (p[0], p[1], p[2], p[3])
+            return (
+                rotated[0] + centre[0],
+                rotated[1] + centre[1],
+                rotated[2] + centre[2],
+            )
+        axes.append((rotate_point(bottom), rotate_point(mouth), rotate_point(tip)))
     return axes
 
 
@@ -286,4 +300,16 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             hole.apply_translation((x, y, base_z + height))
             holes.append(hole)
             made += 1
-    return [difference([block, union(holes)])]
+    result = difference([block, union(holes)])
+    # If the bore is tilted, rotate the entire block and holes together around the block centre.
+    if tilted:
+        centre = (centre_x, centre_y, base_z + height / 2.0)
+        axis = (0.0, 1.0, 0.0) if lean_axis == "x" else (1.0, 0.0, 0.0)
+        sign = -1.0 if lean_axis == "x" else 1.0
+        # Translate to origin, rotate, translate back.
+        result.apply_translation((-centre[0], -centre[1], -centre[2]))
+        result.apply_transform(
+            trimesh.transformations.rotation_matrix(sign * lean, axis)
+        )
+        result.apply_translation(centre)
+    return [result]
