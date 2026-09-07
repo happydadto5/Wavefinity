@@ -1060,6 +1060,10 @@ function renderDraftFields() {
   const zone = one.zone;
   const width = zone[2] - zone[0];
   const depth = zone[3] - zone[1];
+  // The bore editor carries its own "Base" / "Hole" headings, so the grey
+  // panel blurb just wastes space there.
+  const descEl = $("#draft-description");
+  if (descEl) descEl.hidden = one.kind === "bore";
   let html = "";
   if (one.kind === "scoop") {
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, "depth");
@@ -1162,6 +1166,8 @@ function renderDraftFields() {
     if (isBore) {
       const draftProfile = one.item?.profile || "round";
       const hexBit = isHexBitProfile(draftProfile);
+      const boreItem = one.item || starterItem();
+      const boreFirst = boreItem.segments[0] || { length: 40, diameter: 6 };
       // An option field, resolved to its number (or left blank on an "auto" hint).
       const optionField = (key, label, opts = {}) => {
         const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
@@ -1173,30 +1179,56 @@ function renderDraftFields() {
         if (autoHint && !fieldOpts.placeholder) fieldOpts.placeholder = autoHint;
         return field(label, `option:${key}`, shown, fieldOpts);
       };
+      // X / Y counts: a whole number, blank meaning "let the fitter decide".
       const gridField = (key, label) => {
         const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
         const hint = AUTO_PLACEHOLDER.bore?.[key] || "auto";
-        return `<label class="wide">${escapeHtml(label)}
-          <div class="input-with-button">
-            <input type="number" min="1" step="1" data-draft="option:${key}" value="${escapeHtml(explicit ? one.options[key] : "")}" placeholder="${escapeHtml(hint)}">
-            <button type="button" class="button secondary" data-action="auto-option" data-key="${key}">Auto</button>
-          </div></label>`;
+        return field(label, `option:${key}`, explicit ? one.options[key] : "", {
+          step: "1", min: "1", placeholder: hint,
+        });
       };
-      // Footprint and block height share the top row.
-      html += `<div class="draft-triple wide">
-        ${field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" })}
-        ${field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
-        ${optionField("height", "Height", { unit: "mm", step: "0.5" })}
+      // Diameter and fit clearance are locked to the preset for a hex-bit profile.
+      const diameterField = hexBit
+        ? `<label>Diameter<span class="unit">mm</span>
+            <input type="number" value="${HEX_BIT_PROFILES[draftProfile].diameter}" disabled></label>`
+        : field("Diameter", "item_diameter", fmt(boreFirst.diameter), { unit: "mm" });
+      const clearanceField = hexBit
+        ? `<label>Clearance<span class="unit">mm</span>
+            <input type="number" value="${HEX_BIT_PROFILES[draftProfile].clearance}" disabled></label>`
+        : field("Clearance", "clearance", fmt(boreItem.clearance ?? 0.4), { unit: "mm" });
+      const boreProfiles = [
+        ["round", "Round"], ["hex", "Hex"], ["square", "Square"],
+        ["hex_bit_short", HEX_BIT_PROFILES.hex_bit_short.label],
+        ["hex_bit_long", HEX_BIT_PROFILES.hex_bit_long.label],
+      ];
+      const profileField = `<label>Profile<select data-draft="profile">
+        ${boreProfiles.map(([value, label]) => `<option value="${value}" ${draftProfile === value ? "selected" : ""}>${label}</option>`).join("")}
+      </select></label>`;
+
+      // Base: the solid block the holes are cut into.
+      html += `<div class="bore-group wide">
+        <span class="bore-group-label">Base</span>
+        <div class="bore-group-fields">
+          ${field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" })}
+          ${field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
+          ${optionField("height", "Height", { unit: "mm", step: "0.5" })}
+        </div>
       </div>`;
-      html += optionField("depth", "Hole depth", { unit: "mm", step: "0.5" });
-      html += optionField("wall", "Wall", { unit: "mm", step: "0.5" });
-      html += gridField("columns", "X quantity");
-      html += gridField("rows", "Y quantity");
-      // A hex socket or hex-bit profile always stands upright, so no Angle for it.
-      if (!hexBit) {
-        html += optionField("angle", "Angle °", { step: "1" });
-        html += `<p class="field-help wide">0° is straight up; a higher angle leans the holes so tubes rest at a slant, up to 45°. The whole grid leans together — if the holes need more room, use “Grow the bin” below.</p>`;
-      }
+
+      // Hole: everything about the holes cut into that block.
+      html += `<div class="bore-group wide">
+        <span class="bore-group-label">Hole</span>
+        <div class="bore-group-fields bore-hole-fields">
+          ${diameterField}
+          ${profileField}
+          ${clearanceField}
+          ${optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
+          ${optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
+          ${gridField("columns", "X Qty")}
+          ${gridField("rows", "Y Qty")}
+          ${hexBit ? "" : optionField("angle", "Angle", { step: "1" })}
+        </div>
+      </div>`;
     } else {
       html += field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" });
       html += field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
@@ -1245,46 +1277,24 @@ function renderDraftFields() {
       ? "Share of the run kept clear at each end. Larger pulls the alternating troughs toward the middle; smaller pushes them to the ends."
       : "Slides the trough along the bin from centre, as a share of the room to the wall. Positive one way, negative the other; 0 stays centred."}</p>`;
   }
-  if (info.flags.item) {
+  if (info.flags.item && one.kind !== "bore") {
+    // A bore's Diameter / Profile / Clearance are drawn in the "Hole" group above.
     const item = one.item || starterItem();
     const first = item.segments[0] || { length: 40, diameter: 6 };
     const isCradle = one.kind === "cradle";
-    const isBore = one.kind === "bore";
-    // Cradles and bores use measured dimensions. Photo Nest has no item fields.
+    // Cradles use measured dimensions. Photo Nest has no item fields.
     const measuredStep = isCradle ? "1" : undefined;
-    const hexBit = isBore && isHexBitProfile(item.profile);
-    if (!isBore) html += field("Length", "item_length", fmt(first.length), { unit: "mm", step: measuredStep });
-    if (hexBit) {
-      // Size and fit are fixed for a hex bit - show them, but locked.
-      const preset = HEX_BIT_PROFILES[item.profile];
-      html += `<label>Diameter<span class="unit">mm</span>
-        <input type="number" value="${preset.diameter}" disabled></label>`;
-    } else {
-      html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: measuredStep });
-    }
+    html += field("Length", "item_length", fmt(first.length), { unit: "mm", step: measuredStep });
+    html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: measuredStep });
     if (!isCradle) {
-      const profiles = isBore
-        ? [["round", "Round"], ["hex", "Hex"], ["square", "Square"],
-           ["hex_bit_short", HEX_BIT_PROFILES.hex_bit_short.label],
-           ["hex_bit_long", HEX_BIT_PROFILES.hex_bit_long.label]]
-        : [["round", "Round"], ["hex", "Hex"], ["square", "Square"]];
+      const profiles = [["round", "Round"], ["hex", "Hex"], ["square", "Square"]];
       html += `<label>Profile<select data-draft="profile">
         ${profiles.map(([value, label]) => `<option value="${value}" ${item.profile === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>`;
-      if (hexBit) {
-        html += `<label>Fit clearance<span class="unit">mm</span>
-          <input type="number" value="${HEX_BIT_PROFILES[item.profile].clearance}" disabled></label>`;
-      } else {
-        html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), { unit: "mm" });
-      }
+      html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), { unit: "mm" });
     }
     if (isCradle) {
       html += `<p class="field-help wide">Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.</p>`;
-    }
-    if (isBore && hexBit) {
-      html += `<p class="field-help wide">A 1/4-inch hex driver bit. The hole size, fit and depth are set for you so the bit slides in and out freely but stands well proud to grab.</p>`;
-    } else if (isBore) {
-      html += `<p class="field-help wide">Enter the widest diameter that must drop into the hole. The bore adds its own wall and fit clearance; set the hole's depth below.</p>`;
     }
   }
   for (const option of info.fields) {

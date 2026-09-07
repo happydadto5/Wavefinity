@@ -136,7 +136,7 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .count-badge { border-radius: 999px; background: var(--teal-soft); color: var(--teal-dark); padding: 4px 8px; font-size: 11px; font-weight: 700; }
 .support-palette { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; margin: 8px 0; }
 .support-choice {
-  --support-color: var(--teal); min-height: 48px; padding: 0; background: white; border: 1px solid var(--line);
+  --support-color: var(--teal); min-height: 48px; max-height: 48px; padding: 0; background: white; border: 1px solid var(--line);
   border-radius: 8px; cursor: pointer; text-align: left; display: flex; align-items: stretch; gap: 0;
   overflow: hidden;
 }
@@ -151,15 +151,16 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
   stroke: currentColor; fill: none; stroke-width: 1.8;
 }
 .support-choice-copy {
-  flex: 1; min-width: 0; padding: 6px 10px; display: flex; align-items: center; gap: 6px;
+  flex: 1; min-width: 0; padding: 4px 8px 6px; display: flex; flex-direction: column; justify-content: center; gap: 1px;
   overflow: hidden;
 }
 .support-choice-copy strong {
-  font-size: 12px; white-space: nowrap; flex-shrink: 0; color: var(--ink);
+  font-size: 12px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink);
 }
 .support-choice-desc {
-  color: var(--muted); font-size: 10px; font-weight: 450; line-height: 1.3;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--muted); font-size: 10px; font-weight: 450; line-height: 1.2;
+  white-space: normal; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
 .support-choice.active { color: var(--ink); border-color: #d58d21; background: #fff8e8; box-shadow: 0 0 0 2px rgba(240,169,60,.45); }
 .support-choice.active .support-choice-icon { color: #b9740b; background: #ffedc5; }
@@ -174,6 +175,15 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .draft-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .draft-fields .wide { grid-column: 1 / -1; }
 .draft-fields .draft-triple { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; align-items: start; }
+/* Bore editor: a bold heading on the left, its fields wrapping on the right. */
+.draft-fields .bore-group { grid-column: 1 / -1; display: grid; grid-template-columns: 3.2em 1fr; gap: 12px; align-items: start; margin: 2px 0; }
+.bore-group-label { font-size: 18px; font-weight: 700; line-height: 1.3; }
+.bore-group-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; align-items: start; }
+.bore-group-fields.bore-hole-fields { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.bore-group-fields > label { min-width: 0; }
+@media (max-width: 460px) {
+  .bore-group-fields, .bore-group-fields.bore-hole-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @keyframes field-flash-anim {
   0% { background: var(--teal-soft); box-shadow: 0 0 0 2px var(--teal); }
   100% { background: none; box-shadow: none; }
@@ -273,7 +283,7 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .camera-views-row { display: flex; }
 .camera-views-row:not(:last-child) { border-bottom: 1px solid var(--line); }
 .camera-controls button { min-width: 53px; border: 0; border-right: 1px solid var(--line); padding: 10px 13px; background: transparent; cursor: pointer; color: var(--muted); font-size: 15px; font-weight: 700; flex: 1; text-align: center; white-space: nowrap; }
-.camera-options button { min-width: 82px; padding: 12.5px 16px; font-size: 16px; }
+.camera-options button { min-width: 92px; padding: 12.5px 8px; font-size: 16px; }
 .camera-controls button:last-child { border-right: 0; }
 .camera-controls button:hover, .camera-controls button.active { background: var(--teal-soft); color: var(--teal-dark); }
 .zoom-controls button { font-size: 22px; line-height: 1; padding: 10px 14px; min-width: 44px; }
