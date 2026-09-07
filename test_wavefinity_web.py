@@ -994,6 +994,18 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn("Ctrl: 0.1 mm", app_js)
         self.assertIn("layout-hint", styles_css)
 
+    def test_undo_redo_keyboard_shortcuts_and_titles(self):
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn('title="Undo last design change (Ctrl+Z)"', index_html)
+        self.assertIn('title="Redo last undone design change (Ctrl+Y or Ctrl+Shift+Z)"', index_html)
+        self.assertIn("restoreHistory(event.shiftKey)", app_js)
+        self.assertIn("restoreHistory(true)", app_js)
+        self.assertIn('event.key.toLowerCase() === "z"', app_js)
+        self.assertIn('event.key.toLowerCase() === "y"', app_js)
+
 
 class WebServerTests(unittest.TestCase):
     @classmethod

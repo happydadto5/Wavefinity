@@ -865,10 +865,12 @@ function wireControls() {
   document.addEventListener("keydown", event => {
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
     if (event.target.closest("input, textarea, select, [contenteditable='true']")) return;
-    if (event.key.toLowerCase() === "z") {
+    const isZ = event.key.toLowerCase() === "z" || event.code === "KeyZ";
+    const isY = event.key.toLowerCase() === "y" || event.code === "KeyY";
+    if (isZ) {
       event.preventDefault();
       restoreHistory(event.shiftKey);
-    } else if (event.key.toLowerCase() === "y") {
+    } else if (isY) {
       event.preventDefault();
       restoreHistory(true);
     }
