@@ -224,9 +224,8 @@ class Layout:
             raise ValueError("layout snap must be positive and finite")
 
     def validate(self, box: BoxSpec) -> None:
-        # _layout does not exist until Phase 5, so use the package facade as
-        # the temporary runtime bridge without creating a module-level cycle.
-        from . import check_layout
+        # Import locally to keep the shared core independent at module load time.
+        from ._layout import check_layout
 
         bounds = layout_zone(box, self.mode)
         # Fused holders stand on the bin floor; that is the only mode whose
@@ -440,3 +439,23 @@ def connector_keep_out(box: BoxSpec, connector: ConnectorSpec | None = None) -> 
     """Height above which an insert would foul a seated connector's arms."""
     connector = connector or ConnectorSpec()
     return box.z - connector.arm_depth
+
+
+# --- a starter library --------------------------------------------------------
+#
+# Measured nominal sizes. Extend freely; nothing here is special.
+
+LIBRARY: dict[str, Item] = {
+    "pencil": Item.simple("Pencil", 175.0, 7.5),
+    "sharpie": Item.simple("Sharpie", 140.0, 14.0),
+    "glue_stick": Item.simple("Glue stick", 100.0, 11.0),
+    "hex_driver": Item(
+        "Hex driver", (Segment(50.0, 6.0), Segment(30.0, 18.0))
+    ),
+    "screwdriver": Item(
+        "Screwdriver", (Segment(90.0, 5.0), Segment(80.0, 22.0))
+    ),
+    "deburr_tool": Item("Deburring tool", (Segment(40.0, 6.0), Segment(60.0, 12.0))),
+    "tweezers": Item.simple("Tweezers", 120.0, 8.0),
+    "nozzle": Item.simple("Printer nozzle", 13.0, 6.0),
+}
