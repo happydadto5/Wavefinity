@@ -13,6 +13,7 @@ function flashField(input) {
 const state = {
   catalog: null,
   design: null,
+  cleanDesign: null,
   preview: null,
   draftKind: "divider",
   draft: null,
@@ -120,16 +121,25 @@ function updateGenerateAvailability() {
 }
 
 async function restoreHistory(redo = false) {
-  const from = redo ? state.future : state.history;
-  const to = redo ? state.history : state.future;
-  if (!from.length || state.designMutationBusy) return;
-  updateDesignFromForm();
-  to.push(clone(state.design));
-  state.design = from.pop();
-  syncForm();
-  clearDraftSelection();
-  updateHistoryButtons();
-  await refreshPreview();
+  if (!(redo ? state.future : state.history).length) return;
+  if (!beginDesignMutation()) return;
+  try {
+    // Fold any values still visible only in controls/the live part draft into
+    // history first. Undo then removes that newest edit; a new edit correctly
+    // invalidates Redo instead of applying an obsolete future state.
+    await commitVisibleDraft();
+    const from = redo ? state.future : state.history;
+    const to = redo ? state.history : state.future;
+    if (!from.length) return;
+    to.push(clone(state.design));
+    state.design = from.pop();
+    syncForm();
+    clearDraftSelection();
+    updateHistoryButtons();
+    await refreshPreview();
+  } finally {
+    finishDesignMutation();
+  }
 }
 
 function number(value, fallback = 0) {
@@ -157,10 +167,15 @@ function escapeHtml(value) {
 
 function debounce(fn, delay) {
   let timer = null;
-  return (...args) => {
+  const wrapped = (...args) => {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   };
+  wrapped.cancel = () => {
+    clearTimeout(timer);
+    timer = null;
+  };
+  return wrapped;
 }
 
 async function api(path, payload = null) {
@@ -241,9 +256,13 @@ function renderCatalog() {
         return;
       }
       const oldMode = state.design.layout.mode;
-      const previousDesign = clone(state.design);
-      const previousSelected = state.selected;
       try {
+        // Preserve the exact visible edit before converting the saved layout.
+        // A debounced draft must not disappear just because the user switches
+        // print mode quickly after changing a field.
+        await commitVisibleDraft();
+        const previousDesign = clone(state.design);
+        const previousSelected = state.selected;
         const result = await api("/api/layout/mode", { design: state.design, mode: input.value });
         state.design = result.design;
         recordHistory(previousDesign);
@@ -476,9 +495,14 @@ function updatePreviewHelp(view) {
     : "Drag to rotate, use the wheel to zoom, or double-click to reset.";
 }
 
-const changedDesign = debounce(() => {
-  if (state.designMutationBusy) return;
-  const previousDesign = clone(state.design);
+let pendingDesignHistory = null;
+const applyChangedDesign = debounce(() => {
+  if (state.designMutationBusy) {
+    pendingDesignHistory = null;
+    return;
+  }
+  const previousDesign = pendingDesignHistory || clone(state.design);
+  pendingDesignHistory = null;
   updateDesignFromForm();
   recordHistory(previousDesign);
   // A cradle hugs its zone to the tool and the bin, so re-fit the open cradle
@@ -488,6 +512,16 @@ const changedDesign = debounce(() => {
   refreshPreview();
   if (state.draft) refreshDraft();
 }, 280);
+
+function changedDesign(previousDesign = null) {
+  // Width/length keyboard, wheel and blur handlers update state immediately so
+  // their inline inside-dimension readout stays correct. Preserve the snapshot
+  // from before the first such edit until the debounced history entry lands.
+  if (previousDesign && pendingDesignHistory === null) {
+    pendingDesignHistory = clone(previousDesign);
+  }
+  applyChangedDesign();
+}
 
 // The largest straight-sided rectangle that fits a bin's wavy cavity - the
 // same number the engine's BoxSpec.usable_inside returns, recomputed here so
@@ -625,6 +659,7 @@ function wireControls() {
       input.select();
     });
     input.addEventListener("blur", () => {
+      const previousDesign = clone(state.design);
       const unit = state.catalog.base_unit;
       const rawVal = number(input.value, state.design.box[axis]);
       const snapped = Math.max(unit, Math.round(rawVal / unit) * unit);
@@ -635,7 +670,7 @@ function wireControls() {
         flashField(input);
         state.canGenerate = false;
         updateGenerateAvailability();
-        changedDesign();
+        changedDesign(previousDesign);
       }
     });
     input.addEventListener("keydown", event => {
@@ -643,6 +678,7 @@ function wireControls() {
         input.blur();
       } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         event.preventDefault();
+        const previousDesign = clone(state.design);
         const unit = state.catalog.base_unit;
         const current = number(input.value, state.design.box[axis]);
         const delta = event.key === "ArrowUp" ? unit : -unit;
@@ -652,11 +688,12 @@ function wireControls() {
         state.design.box[axis] = next;
         state.canGenerate = false;
         updateGenerateAvailability();
-        changedDesign();
+        changedDesign(previousDesign);
       }
     });
     input.addEventListener("wheel", event => {
       event.preventDefault();
+      const previousDesign = clone(state.design);
       const unit = state.catalog.base_unit;
       const current = number(input.value, state.design.box[axis]);
       const delta = event.deltaY < 0 ? unit : -unit;
@@ -671,7 +708,7 @@ function wireControls() {
       }
       state.canGenerate = false;
       updateGenerateAvailability();
-      changedDesign();
+      changedDesign(previousDesign);
     }, { passive: false });
   });
   $("#scoop")?.addEventListener("change", () => {
@@ -746,6 +783,11 @@ function wireControls() {
       restoreHistory(true);
     }
   });
+  window.addEventListener("beforeunload", event => {
+    if (!state.design || !designHasChanges()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
   $("#connection").addEventListener("click", () => location.reload(true));
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
   $("#print-bin").addEventListener("click", () => printModel("bin"));
@@ -769,6 +811,7 @@ function starterItem() {
 }
 
 function cancelPendingDraftWork() {
+  refreshDraftSoon.cancel();
   state.kindRequest += 1;
   state.fitRequest += 1;
   state.nestPhotoRequest += 1;
@@ -1173,6 +1216,7 @@ function renderDraftFields() {
     });
   }
   $$('input[name="draft-along"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
+    markDraftChanged();
     state.draft.along = input.value;
     if (state.draft.kind === "cradle") sizeCradleToItem(state.draft);
     state.draftAutoCommit = true;
@@ -1180,12 +1224,14 @@ function renderDraftFields() {
     refreshDraftSoon();
   }));
   $$('input[name="draft-wedge"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
+    markDraftChanged();
     state.draft.wedge = input.value === "wedge";
     state.draftAutoCommit = true;
     updateSelectionButtons();
     refreshDraftSoon();
   }));
   $$('input[name="draft-turns"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
+    markDraftChanged();
     state.draft.options ||= {};
     state.draft.options.quarter_turns = Number(input.value) % 4;
     // Turning it is a placement decision, so it stops being auto-placed.
@@ -1206,6 +1252,7 @@ function renderDraftFields() {
   }));
   const autoCount = $('[data-action="auto-count"]', $("#draft-fields"));
   if (autoCount) autoCount.addEventListener("click", () => {
+    markDraftChanged();
     state.draft.count = null;
     if (state.draft.kind === "cradle") sizeCradleToItem(state.draft);
     state.draftAutoCommit = true;
@@ -1225,6 +1272,7 @@ function renderDraftFields() {
   updateFitActions();
   // Bore: "Auto" beside an X / Y quantity hands that count back to the fitter.
   $$('[data-action="auto-option"]', $("#draft-fields")).forEach(button => button.addEventListener("click", () => {
+    markDraftChanged();
     const key = button.dataset.key;
     if (state.draft.options) delete state.draft.options[key];
     const input = $(`[data-draft="option:${key}"]`, $("#draft-fields"));
@@ -1395,12 +1443,20 @@ async function uploadNestPhoto(event) {
   }
 }
 
+function markDraftChanged() {
+  // Invalidate an auto-save immediately, at the moment the user changes the
+  // visible draft. Waiting for the debounced rebuild leaves a short window in
+  // which the older response can replace the newer edit.
+  state.draftRequest += 1;
+  state.canGenerate = false;
+  updateGenerateAvailability();
+}
+
 function updateDraftFromFields(event) {
   // Any deliberate edit is a strong enough signal to start saving this draft
   // as it goes, even if the app put it up on its own (see state.draftAutoCommit).
   state.draftAutoCommit = true;
-  state.canGenerate = false;
-  updateGenerateAvailability();
+  markDraftChanged();
   const one = state.draft;
   const get = key => $(`[data-draft="${key}"]`, $("#draft-fields"))?.value;
   const oldZone = one.zone;
@@ -1693,6 +1749,7 @@ async function autoCommitDraft(request) {
   const index = draftCommitIndex();
   if (index === false) return false;   // stale edit - don't append a duplicate
   try {
+    const wasNew = state.draftIsNew;
     const previousDesign = clone(state.design);
     const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index });
     if (request !== state.draftRequest) return;
@@ -1701,7 +1758,7 @@ async function autoCommitDraft(request) {
     recordHistory(previousDesign);
     state.draftIsNew = false;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
-    if (state.selected === null) state.selected = result.selected;
+    if (state.selected === null && wasNew) state.selected = result.selected;
     // Saved support zones snap to the grid. Without this sync the preview
     // draws an almost-identical draft over the saved support, which is most
     // noticeable after changing a cradle row from one tool to two.
@@ -1718,6 +1775,42 @@ async function autoCommitDraft(request) {
     $("#draft-status").classList.add("error");
     return false;
   }
+}
+
+async function commitVisibleDraft() {
+  if (!state.draft || !state.draftAutoCommit) return false;
+  const index = draftCommitIndex();
+  if (index === false) return false;
+  if (Number.isInteger(index) &&
+      JSON.stringify(state.design.layout.features[index]) === JSON.stringify(state.draft)) {
+    return false;
+  }
+  const draft = state.draft;
+  const snapshot = JSON.stringify(draft);
+  const previousDesign = clone(state.design);
+  state.draftRequest += 1;
+  const committed = await api("/api/feature/apply", {
+    design: state.design, feature: draft, index,
+  });
+  if (state.draft !== draft || JSON.stringify(draft) !== snapshot) {
+    throw new Error("The interior part changed while it was being saved. Try again.");
+  }
+  state.design = committed.design;
+  seedPartNameFromText(draft);
+  recordHistory(previousDesign);
+  state.draftIsNew = false;
+  state.selected = committed.selected;
+  if (Number.isInteger(committed.selected)) {
+    state.draftSourceIndex = committed.selected;
+    const saved = state.design.layout.features[committed.selected];
+    if (saved) state.draft = clone(saved);
+  }
+  state.draftResolvedOptions = {};
+  if (state.draft?.kind === "nest") syncForm();
+  renderDraftFields();
+  renderPlaced();
+  updateSelectionButtons();
+  return true;
 }
 
 // Used only for committing a 2D-layout drag of an already-placed support -
@@ -1776,6 +1869,12 @@ function mutationControls() {
   );
 }
 
+function setMutationSurfacesInert(inert) {
+  [$('header'), $('.controls')].forEach(surface => {
+    if (surface) surface.inert = inert;
+  });
+}
+
 function beginDesignMutation() {
   if (state.designMutationBusy) {
     toast("Finish the current design change first.", true);
@@ -1783,10 +1882,17 @@ function beginDesignMutation() {
   }
   // The mutation operates on a new snapshot of the design. Pending draft
   // work was calculated against the old snapshot and must not land afterward.
+  const beforeForm = clone(pendingDesignHistory || state.design);
   cancelPendingDraftWork();
+  // A queued size-history snapshot belongs to the design before this atomic
+  // operation. Do not let it become the "before" state of a later edit.
+  applyChangedDesign.cancel();
+  pendingDesignHistory = null;
   updateDesignFromForm();
+  recordHistory(beforeForm);
   state.designMutationBusy = true;
   state.previewRequest += 1;
+  setMutationSurfacesInert(true);
   mutationControls().forEach(control => control.disabled = true);
   updateSelectionButtons();
   updateHistoryButtons();
@@ -1796,6 +1902,7 @@ function beginDesignMutation() {
 
 function finishDesignMutation() {
   state.designMutationBusy = false;
+  setMutationSurfacesInert(false);
   mutationControls().forEach(control => control.disabled = false);
   updateSelectionButtons();
   updateHistoryButtons();
@@ -2026,6 +2133,7 @@ async function fitPartToContents() {
         JSON.stringify(draft) !== snapshot) return;
     const zone = result.feature.zone;
     const unchanged = state.draft.zone.every((v, i) => Math.abs(v - zone[i]) < 0.05);
+    markDraftChanged();
     state.draft.zone = zone;
     renderDraftFields();
     state.draftAutoCommit = true;
@@ -2039,6 +2147,7 @@ async function fitPartToContents() {
 
 function fillPartToBin() {
   if (!state.draft) return;
+  markDraftChanged();
   const [insideX, insideY] = binInsideExtent(state.design.box);
   state.draft.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
   renderDraftFields();
@@ -2955,7 +3064,15 @@ function wireLayoutInteraction() {
       return;
     }
     if (index !== state.selected) selectedFeature(index);
-    const feature = clone(state.design.layout.features[index]);
+    else cancelPendingDraftWork();
+    // A field edit may still exist only in the live draft. Start the drag from
+    // exactly what is on screen, not the last server-saved copy, or moving the
+    // same part immediately after typing can silently restore its old values.
+    const feature = clone(
+      state.selected === index && state.draft
+        ? state.draft
+        : state.design.layout.features[index]
+    );
     // Moving or resizing lettering by hand is a placement decision, so it
     // stops placing itself - otherwise the next preview would put it straight
     // back where the engine wanted it and the drag would look broken.
@@ -3024,25 +3141,69 @@ function wireLayoutInteraction() {
   });
 }
 
-function saveDesign() {
-  updateDesignFromForm();
-  const body = JSON.stringify(state.design, null, 2) + "\n";
-  const blob = new Blob([body], { type: "application/json" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = `${(state.design.part_name || "Wavefinity design").replace(/[^a-z0-9 _-]/gi, "").trim() || "Wavefinity design"}.wavefinity.json`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-  toast("Design downloaded.");
+async function saveDesign() {
+  if (!beginDesignMutation()) return;
+  try {
+    // The editor saves valid part edits after a short typing pause. Commit the
+    // visible draft explicitly so an immediate Save cannot download the older
+    // server copy while the new value is still waiting in that pause.
+    await commitVisibleDraft();
+    const body = JSON.stringify(state.design, null, 2) + "\n";
+    const blob = new Blob([body], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${(state.design.part_name || "Wavefinity design").replace(/[^a-z0-9 _-]/gi, "").trim() || "Wavefinity design"}.wavefinity.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    state.cleanDesign = clone(state.design);
+    toast("Design downloaded.");
+  } catch (error) {
+    toast(error.message, true, 5000);
+  } finally {
+    finishDesignMutation();
+  }
+}
+
+function designHasChanges() {
+  const visibleDesign = clone(state.design);
+  const snapSize = (value, fallback) => {
+    const unit = state.catalog.base_unit;
+    return Math.max(unit, Math.round(number(value, fallback) / unit) * unit);
+  };
+  visibleDesign.box.x = snapSize($("#x-size").value, visibleDesign.box.x);
+  visibleDesign.box.y = snapSize($("#y-size").value, visibleDesign.box.y);
+  visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
+  visibleDesign.box.base_thickness = number(
+    $("#base-thickness").value,
+    visibleDesign.box.base_thickness ?? 0.6,
+  );
+  visibleDesign.label = $("#label-text").value;
+  visibleDesign.part_name = $("#part-name").value;
+  const scoopEl = $("#scoop");
+  if (scoopEl) visibleDesign.scoop = scoopEl.checked;
+  visibleDesign.label_position = visibleDesign.label.trim() ? "top" : "bottom";
+  const index = draftCommitIndex();
+  if (state.draft && state.draftAutoCommit && (
+    index === null ||
+    (Number.isInteger(index) &&
+      JSON.stringify(state.draft) !== JSON.stringify(state.design.layout.features[index]))
+  )) return true;
+  return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
 }
 
 async function openDesign(event) {
   const file = event.target.files?.[0];
-  if (!file || !beginDesignMutation()) return;
+  if (!file) return;
+  if (designHasChanges() && !window.confirm("Open this design and replace the current one?")) {
+    event.target.value = "";
+    return;
+  }
+  if (!beginDesignMutation()) return;
   try {
     const parsed = JSON.parse(await file.text());
     const result = await api("/api/design/validate", { design: parsed });
     state.design = result.design;
+    state.cleanDesign = clone(state.design);
     state.drafts = {};
     state.history = [];
     state.future = [];
@@ -3059,10 +3220,11 @@ async function openDesign(event) {
 }
 
 async function newDesign() {
-  if (state.design.layout.features.length && !window.confirm("Start a new design and clear the placed interior parts?")) return;
+  if (designHasChanges() && !window.confirm("Start a new design and discard the current changes?")) return;
   if (!beginDesignMutation()) return;
   const previousDesign = clone(state.design);
   state.design = clone(state.catalog.defaults.design);
+  state.cleanDesign = clone(state.design);
   recordHistory(previousDesign);
   state.drafts = {};
   syncForm();
@@ -3175,6 +3337,7 @@ async function generateParts(target) {
 
   isGenerating = true;
   state.designMutationBusy = true;
+  setMutationSurfacesInert(true);
   updateGenerateAvailability();
   updateHistoryButtons();
 
@@ -3193,19 +3356,7 @@ async function generateParts(target) {
   try {
     // A debounced support edit may still be visible only in the draft. Save
     // it now so the exported files always match the canvas.
-    if (state.draft && state.draftAutoCommit && draftCommitIndex() !== false) {
-      state.draftRequest += 1;
-      const previousDesign = clone(state.design);
-      const committed = await api("/api/feature/apply", {
-        design: state.design, feature: state.draft, index: draftCommitIndex(),
-      });
-      state.design = committed.design;
-      state.draftIsNew = false;
-      if (Number.isInteger(committed.selected)) state.draftSourceIndex = committed.selected;
-      if (state.selected === null) state.selected = committed.selected;
-      recordHistory(previousDesign);
-      renderPlaced();
-    }
+    await commitVisibleDraft();
 
     const payload = {
       design: state.design,
@@ -3286,6 +3437,7 @@ async function generateParts(target) {
   } finally {
     isGenerating = false;
     state.designMutationBusy = false;
+    setMutationSurfacesInert(false);
     updateGenerateAvailability();
     updateHistoryButtons();
   }
@@ -3303,11 +3455,7 @@ async function printModel(target = "bin") {
     toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
     return;
   }
-  if (state.designMutationBusy) {
-    toast("Finish the current design change before printing.", true);
-    return;
-  }
-  updateDesignFromForm();
+  if (!beginDesignMutation()) return;
   const button = $("#print-bin");
   const old = button.textContent;
   button.disabled = true;
@@ -3315,19 +3463,7 @@ async function printModel(target = "bin") {
   button.textContent = `Sending to ${slicerName}…`;
   setError();
   try {
-    if (state.draft && state.draftAutoCommit && draftCommitIndex() !== false) {
-      state.draftRequest += 1;
-      const previousDesign = clone(state.design);
-      const committed = await api("/api/feature/apply", {
-        design: state.design, feature: state.draft, index: draftCommitIndex(),
-      });
-      state.design = committed.design;
-      state.draftIsNew = false;
-      if (Number.isInteger(committed.selected)) state.draftSourceIndex = committed.selected;
-      if (state.selected === null) state.selected = committed.selected;
-      recordHistory(previousDesign);
-      renderPlaced();
-    }
+    await commitVisibleDraft();
     const payload = {
       design: state.design,
       output: state.output,
@@ -3343,8 +3479,8 @@ async function printModel(target = "bin") {
     setError(error.message);
     toast(error.message, true, 8000);
   } finally {
-    button.disabled = !state.canGenerate;
     button.textContent = old;
+    finishDesignMutation();
   }
 }
 
@@ -3362,8 +3498,10 @@ function updateSlicerUI() {
 }
 
 async function browseSlicer() {
+  const button = $("#slicer-picker-button");
+  if (button) button.disabled = true;
   try {
-    const result = await api("/api/browse-slicer-path");
+    const result = await api("/api/browse-slicer-path", { current: state.slicer?.path });
     if (result.slicer_path) {
       const name = result.slicer_path.split(/[\\/]/).pop().replace(/\.exe$/i, "");
       state.slicer = {
@@ -3376,6 +3514,8 @@ async function browseSlicer() {
     }
   } catch (error) {
     toast(error.message, true);
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -3492,6 +3632,7 @@ async function init() {
     state.catalog = catalog;
     state.serverInstance = catalog.instance;
     state.design = clone(catalog.defaults.design);
+    state.cleanDesign = clone(state.design);
     state.output = catalog.preferences?.output || catalog.defaults.output;
     state.keepLog = catalog.preferences?.keep_log !== undefined ? Boolean(catalog.preferences.keep_log) : true;
     state.connector = clone(catalog.defaults.connector);

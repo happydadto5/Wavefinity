@@ -70,7 +70,10 @@ from organizer_engine import (
     TEXT_DEPTH,
     TOP_LABEL_CAP_HEIGHT,
     TOP_LABEL_LEDGE_DEPTH,
+    connector_for_print,
+    differing_connector_plan,
     differing_drop_fraction,
+    differing_web_reach,
     installed_boxes,
     installed_side_boxes,
     intersection_volume,
@@ -723,6 +726,88 @@ class ConnectorTests(unittest.TestCase):
             # Runs on that wall rather than floating a whole wall-width away.
             self.assertGreater(gap, 0.0, f"web fouls the taller wall at z={z}")
             self.assertLess(gap, 0.25, f"web is not bearing on anything at z={z}")
+
+    def test_every_rim_difference_makes_one_sound_solid(self) -> None:
+        """Sweep the drop, not a couple of favourite pairs.
+
+        The web ramps in steps and its inner face tracks the channel closely
+        for the whole drop, so particular drops used to land a near-parallel
+        pair of surfaces inside the vertex-weld tolerance and hand back a leaky
+        mesh - silently, and only at some heights.
+        """
+        connector = ConnectorSpec()
+        tall = 50.0
+        for drop in range(0, 41):
+            box = BoxSpec(40.0, 40.0, tall)
+            clip = make_side_connector(
+                box, connector, "y", 0.0, 12.0,
+                bin_a_height=tall, bin_b_height=tall - drop,
+            )
+            self.assertTrue(clip.is_watertight, f"leaky mesh at a {drop} mm drop")
+            self.assertTrue(clip.is_winding_consistent, f"bad winding at {drop} mm")
+            self.assertGreater(clip.volume, 0.0, f"empty at a {drop} mm drop")
+
+    def test_the_tallest_drop_still_seats_locks_and_prints_flat(self) -> None:
+        """A 60 -> 20 pair, past the drop the ramps are maxed at.
+
+        The web bears on the taller wall the whole way down, so a span this
+        long is guided rather than cantilevered, and the whole part still has
+        to come off the plate without support with its cap face down.
+        """
+        tall, short = 60.0, 20.0
+        box, connector = BoxSpec(40.0, 40.0, tall), ConnectorSpec()
+        clip = make_side_connector(
+            box, connector, "y", 0.0, 12.0, bin_a_height=tall, bin_b_height=short,
+        )
+        self.assertTrue(clip.is_watertight)
+        self.assertLess(
+            validate_side_fit(
+                box, connector, clip, "y", 0.0, bin_a_height=tall, bin_b_height=short,
+            ),
+            1e-3,
+        )
+        self.assertGreater(
+            measure_lock(
+                box, connector, "y", 0.0, bin_a_height=tall, bin_b_height=short,
+            )["lift_0.5_mm3"],
+            0.1,
+        )
+        # Cap down, nothing overhangs: no downward-facing face clear of the
+        # build plate may lean past 45 degrees off vertical.
+        printed = connector_for_print(clip)
+        plate = float(printed.bounds[0][2])
+        normals, centres = printed.face_normals, printed.triangles_center
+        airborne = (
+            (normals[:, 2] < -1e-6)
+            & (centres[:, 2] > plate + 0.5)
+            & (printed.area_faces > 0.05)
+        )
+        if airborne.any():
+            off_vertical = np.degrees(
+                np.arcsin(np.clip(-normals[airborne][:, 2], 0.0, 1.0))
+            ).max()
+            self.assertLessEqual(
+                off_vertical, 45.0, "the printed clip needs support"
+            )
+
+    def test_the_plan_reports_the_web_that_is_actually_built(self) -> None:
+        """The readout has to include the fixed inward reach.
+
+        The reach does not scale with the drop, so at small drops the web is
+        thicker than the drop-scaled target alone would suggest - and that is
+        the number a person is shown before they print.
+        """
+        box, connector = BoxSpec(40.0, 40.0, 50.0), ConnectorSpec()
+        reach = differing_web_reach(box, connector)
+        self.assertGreater(reach, 0.0)
+        for drop in (4.0, 10.0, 16.0):
+            plan = differing_connector_plan(connector, 12.0, 50.0, 50.0 - drop, box)
+            self.assertAlmostEqual(
+                plan["web_thickness_mm"], connector.arm_thickness + reach, places=6
+            )
+        # At the full drop the drop-scaled growth is the wider of the two.
+        full = differing_connector_plan(connector, 12.0, 50.0, 20.0, box)
+        self.assertAlmostEqual(full["web_thickness_mm"], 3.0, places=6)
 
     def test_a_tiny_rim_difference_leaves_the_clip_plain(self) -> None:
         box, connector = BoxSpec(32.0, 32.0, 40.0), ConnectorSpec()

@@ -923,6 +923,30 @@ class WebApplicationTests(unittest.TestCase):
                     })
                 self.assertIn("Bambu Studio was not found", str(ctx.exception))
 
+    def test_browse_slicer_path_saves_preference_and_returns_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_exe = Path(temp_dir) / "orca-slicer.exe"
+            fake_exe.touch()
+            with (
+                patch("tkinter.Tk"),
+                patch("tkinter.filedialog.askopenfilename", return_value=str(fake_exe)),
+                patch.object(wavefinity_web, "save_preferences") as mock_save,
+            ):
+                result = wavefinity_web.browse_slicer_path_payload({"current": str(fake_exe)})
+                self.assertEqual(result["slicer_path"], str(fake_exe))
+                mock_save.assert_called_once_with({"slicer_path": str(fake_exe)})
+
+    def test_browse_slicer_path_handles_cancel(self):
+        with (
+            patch("tkinter.Tk"),
+            patch("tkinter.filedialog.askopenfilename", return_value=""),
+            patch.object(wavefinity_web, "save_preferences") as mock_save,
+        ):
+            result = wavefinity_web.browse_slicer_path_payload({})
+            self.assertIsNone(result["slicer_path"])
+            mock_save.assert_not_called()
+
+
 
 class WebServerTests(unittest.TestCase):
     @classmethod
@@ -1106,6 +1130,20 @@ class WebServerTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertIn("files", response)
                 self.assertIn("slicer", response)
+
+    def test_browse_slicer_path_serves_get_and_post(self):
+        with (
+            patch("tkinter.Tk"),
+            patch("tkinter.filedialog.askopenfilename", return_value=r"C:\fake.exe"),
+            patch.object(wavefinity_web, "save_preferences"),
+        ):
+            get_status, _, get_raw = self.get("/api/browse-slicer-path")
+            self.assertEqual(get_status, 200)
+            self.assertEqual(json.loads(get_raw)["slicer_path"], r"C:\fake.exe")
+
+            post_status, post_body = self.post("/api/browse-slicer-path", {})
+            self.assertEqual(post_status, 200)
+            self.assertEqual(post_body["slicer_path"], r"C:\fake.exe")
 
 
 

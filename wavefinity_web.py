@@ -538,7 +538,14 @@ def browse_slicer_path_payload(payload: dict[str, Any]) -> dict[str, Any]:
             ("Executable Files", "*.exe" if sys.platform == "win32" else "*"),
             ("All Files", "*.*"),
         ]
+        current = payload.get("current") or payload.get("slicer_path")
         initialdir = "C:\\Program Files" if sys.platform == "win32" else "/"
+        if current:
+            cur_path = Path(str(current))
+            if cur_path.is_file():
+                initialdir = str(cur_path.parent)
+            elif cur_path.is_dir():
+                initialdir = str(cur_path)
         try:
             selected = filedialog.askopenfilename(
                 parent=root,
@@ -1192,6 +1199,9 @@ class WavefinityHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/catalog":
             self._send_json(catalog_payload())
+            return
+        if path == "/api/browse-slicer-path":
+            self._send_json(browse_slicer_path_payload({}))
             return
         if path in {"/Brochure.md", "/brochure.md"}:
             brochure_file = APP_DIR / "Brochure.md"
