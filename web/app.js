@@ -1940,18 +1940,6 @@ function updateDraftFromFields(event) {
       const wallField = $('[data-draft="option:wall"]', $("#draft-fields"));
       if (wallField) wallField.value = number(one.options.angle, 0) > 0 ? "3" : "1.6";
     }
-    if (info.kind === "divider" && key === "angle") {
-      // The wedge/straight choice only bites once the wall leans - show or
-      // hide it to match, without a full re-render that would steal focus
-      // from the field being typed into. A wedge now keeps the asked-for
-      // width at the top and just widens its base, so nothing here needs
-      // to nudge the thickness on the user's behalf any more.
-      const leaning = number(
-        one.options.angle ?? state.draftResolvedOptions?.angle ?? 0, 0,
-      ) !== 0;
-      const shape = $("#leaning-shape", $("#draft-fields"));
-      if (shape) shape.hidden = !leaning;
-    }
     if (one.kind === "nest" && one.contour && ["clearance", "rim", "smoothing"].includes(key)) {
       syncNestZone(one);
     }
@@ -1970,6 +1958,10 @@ function updateDraftFromFields(event) {
   if (changed === "option:lift_assist" && one.kind === "nest") renderDraftFields();
   // Ticking Use support crossbars reveals (or hides) Number of crossbars.
   if (changed === "option:minimal_bottom") renderDraftFields();
+  if (one.kind === "divider" && (
+    changed === "option:slope_base" || changed === "option:label_divisions" ||
+    changed === "count" || changed === "option:bottom_angle"
+  )) renderDraftFields();
   updateSelectionButtons();
   renderLayout2D();
   refreshDraftSoon();
@@ -3349,6 +3341,68 @@ function renderLayoutText(context, feature, toCanvas, scale, isDraft = false) {
   context.restore();
 }
 
+function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
+  const opt = feature.options || {};
+  let labels = opt.division_labels;
+  if (!labels) return;
+  if (typeof labels === "string") {
+    try { labels = JSON.parse(labels); } catch { labels = labels.split(","); }
+  }
+  if (!Array.isArray(labels) || !labels.length) return;
+
+  const count = Math.max(1, number(feature.count, 1));
+  const along = feature.along || "x";
+  const [z0, z1, z2, z3] = feature.zone;
+  const thickness = number(opt.thickness, 1.6);
+  const span = (along === "x") ? (z3 - z1) : (z2 - z0);
+  const spacing = number(opt.spacing, 0) > 0 ? number(opt.spacing, 0) : span / (count + 1);
+
+  const low = (along === "x") ? z1 : z0;
+  const centres = [];
+  for (let i = 0; i < count; i++) centres.push(low + (i + 1) * spacing);
+  const edges = [(along === "x") ? z1 : z0, ...centres, (along === "x") ? z3 : z2].sort((a, b) => a - b);
+
+  for (let s = 0; s < edges.length - 1; s++) {
+    if (s >= labels.length) break;
+    const text = String(labels[s] || "").trim();
+    if (!text) continue;
+
+    const slotLow = edges[s];
+    const slotHigh = edges[s + 1];
+    const innerLow = slotLow + (s === 0 ? 0 : thickness / 2);
+    const innerHigh = slotHigh - (s === edges.length - 2 ? 0 : thickness / 2);
+    const slotAcross = Math.max(1, innerHigh - innerLow);
+    const slotRun = Math.max(1, (along === "x") ? (z2 - z0) : (z3 - z1));
+
+    context.save();
+    context.font = 'bold 100px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif';
+    const refWidth = context.measureText(text).width || 100;
+    context.restore();
+
+    const aspect = (refWidth / 100) / 0.729;
+    const fitRun = Math.max(0.1, slotRun - 2) / Math.max(0.1, aspect);
+    const fitAcross = Math.max(0.1, slotAcross - 1) / 1.15;
+    const fits = Math.min(fitRun, fitAcross);
+    const cap = Math.max(2.5, fits);
+
+    const fontSizePx = Math.max(6, (cap / 0.729) * scale);
+    const cx = (along === "x") ? (z0 + z2) / 2 : (innerLow + innerHigh) / 2;
+    const cy = (along === "x") ? (innerLow + innerHigh) / 2 : (z1 + z3) / 2;
+    const centerCanvas = toCanvas([cx, cy]);
+    const angle = (along === "y") ? -(Math.PI / 2) : 0;
+
+    context.save();
+    context.translate(centerCanvas[0], centerCanvas[1]);
+    if (angle) context.rotate(angle);
+    context.font = `bold ${fontSizePx}px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillStyle = "#1e4c5f";
+    context.fillText(text, 0, 0);
+    context.restore();
+  }
+}
+
 function renderLayout2D() {
   if (!state.preview) return;
   const canvas = $("#preview-2d");
@@ -3528,6 +3582,20 @@ function renderLayout2D() {
       if (feature.kind === "text") {
         const activeFeature = (index === state.selected && state.draft?.kind === "text") ? state.draft : feature;
         renderLayoutText(context, activeFeature, toCanvas, scale, false);
+      } else if (feature.kind === "divider") {
+        const activeFeature = (index === state.selected && state.draft?.kind === "divider") ? state.draft : feature;
+        const opt = activeFeature.options || {};
+        if (opt.label_divisions && opt.division_labels) {
+          renderDividerDivisionLabels(context, activeFeature, toCanvas, scale);
+        } else {
+          context.fillStyle = "rgba(20,36,42,.82)";
+          context.font = "600 11px Segoe UI";
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          const [tx, ty] = covered ? [(f0[0] + f1[0]) / 2, (f0[1] + f1[1]) / 2]
+                                   : [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+          context.fillText(partInfo(feature.kind)?.title || feature.kind, tx, ty);
+        }
       } else {
         context.fillStyle = "rgba(20,36,42,.82)";
         context.font = "600 11px Segoe UI";
