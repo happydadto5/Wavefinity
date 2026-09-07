@@ -1494,6 +1494,12 @@ function updateDraftFromFields(event) {
         if (heightField) heightField.value = fmt(one.options.height);
       }
     }
+    if (info.kind === "bore" && key === "angle" && !("wall" in (one.options || {}))) {
+      // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL);
+      // reflect that in the field right away when Wall hasn't been hand-set.
+      const wallField = $('[data-draft="option:wall"]', $("#draft-fields"));
+      if (wallField) wallField.value = number(one.options.angle, 0) > 0 ? "3" : "1.6";
+    }
     if (info.kind === "divider" && key === "angle") {
       // The wedge/straight choice only bites once the wall leans - show or
       // hide it to match, without a full re-render that would steal focus
