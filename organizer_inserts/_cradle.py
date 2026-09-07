@@ -272,5 +272,3 @@ def cradle_min_footprint(one: Feature) -> tuple[float, float]:
     pitch = item.widest + wall / 2.0 + spacing
     across = math.ceil((count - 1) * pitch + body)
     return (float(run), float(across)) if one.along == "x" else (float(across), float(run))
-
-

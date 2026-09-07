@@ -485,5 +485,3 @@ def _full_span_divider(
     if not pieces:
         raise ValueError("divider height leaves nothing to build")
     return pieces
-
-

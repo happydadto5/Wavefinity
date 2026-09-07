@@ -202,5 +202,3 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             holes.append(hole)
             made += 1
     return [difference([block, union(holes)])]
-
-

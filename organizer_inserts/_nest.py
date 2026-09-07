@@ -338,7 +338,3 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         )
         wall = union([wall, deck])
     return [wall]
-
-
-
-

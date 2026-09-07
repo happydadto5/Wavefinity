@@ -247,5 +247,3 @@ def auto_grow_text_feature(
             new_zone = Zone(one.zone.x0, cy - grow_d / 2.0, one.zone.x1, cy + grow_d / 2.0)
             return replace(one, zone=snapped_zone(new_zone, box, mode))
     return one
-
-

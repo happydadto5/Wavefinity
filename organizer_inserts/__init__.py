@@ -74,7 +74,6 @@ from ._registry import (
 )
 
 # Keep this order stable: importing each feature populates the shared registries.
-from ._post import build_post, post_defaults
 from ._cradle import (
     CRADLE_ALTERNATE_END_MARGIN,
     CRADLE_ALTERNATE_END_MARGIN_MAX,
@@ -93,20 +92,6 @@ from ._cradle import (
     cradle_defaults,
     cradle_min_footprint,
 )
-from ._divider import (
-    BOTTOM_CROSSBAR_CHAMFER,
-    BOTTOM_CROSSBAR_THICKNESS,
-    BOTTOM_EMBED,
-    BOTTOM_SLOPE_MAX,
-    DIVIDER_CHAMFER,
-    MAX_DIVIDER_ANGLE,
-    MIN_WEDGE_EDGE,
-    _divider_cross_centres,
-    _divider_support_bottoms,
-    _divider_wall,
-    build_divider,
-    divider_defaults,
-)
 from ._nest import (
     NEST_ASSISTS,
     NEST_CHAMFER,
@@ -123,7 +108,6 @@ from ._nest import (
     nest_required_zone,
     nest_smoothed_contour,
 )
-from ._pocket import POCKET_CHAMFER, POCKET_FLOOR, build_pocket, pocket_defaults
 from ._bore import (
     BORE_MAX_TILT,
     BORE_MOUTH_CHAMFER,
@@ -139,8 +123,25 @@ from ._bore import (
     build_bore,
     bore_defaults,
 )
-from ._scoop import build_scoop, scoop_defaults, scoop_zone
+from ._post import build_post, post_defaults
+from ._divider import (
+    BOTTOM_CROSSBAR_CHAMFER,
+    BOTTOM_CROSSBAR_THICKNESS,
+    BOTTOM_EMBED,
+    BOTTOM_SLOPE_MAX,
+    DIVIDER_CHAMFER,
+    MAX_DIVIDER_ANGLE,
+    MIN_WEDGE_EDGE,
+    _divider_cross_centres,
+    _divider_support_bottoms,
+    _divider_wall,
+    build_divider,
+    divider_defaults,
+)
+from ._pocket import POCKET_CHAMFER, POCKET_FLOOR, build_pocket, pocket_defaults
 from ._slot import build_slot, slot_defaults
+from ._steps import build_steps, steps_defaults
+from ._scoop import build_scoop, scoop_defaults, scoop_zone
 from ._text import (
     NON_NUMERIC_OPTIONS,
     TEXT_KIND,
@@ -158,7 +159,6 @@ from ._text import (
     text_of,
     text_placed_outline,
 )
-from ._steps import build_steps, steps_defaults
 
 from ._layout import (
     _FOOTPRINT_BUILDERS,
