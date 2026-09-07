@@ -664,8 +664,9 @@ takes units (`2x6`), or millimetres with an explicit suffix (`16x48mm`).
 
 Generated box files are named for their size, plus the part name if there is
 one: `Box 16 x 48 x 40.3mf` or `Box 16 x 48 x 40 Driver rack.3mf`. Lettering
-does not appear in a filename — a bin may carry several labels. The connector is
-one part, so it is just `Connector.3mf`.
+does not appear in a filename — a bin may carry several labels. Default connectors
+save as `Connector - Same height.3mf`, or reflect any customized variables (e.g.
+`Connector - 40mm to 20mm Tol 0.05mm.3mf`).
 
 On the `organizer` command, `--label` is sugar for a **text interior part that
 places itself**, and seeds a blank `--part-name` from it; `--label-position top`

@@ -28,6 +28,7 @@ from organizer_engine import (
     LOCKED_CONNECTOR_HEIGHT,
     LOCKED_CONNECTOR_LENGTH,
     LOCKED_TOLERANCE,
+    DEFAULT_ARM_THICKNESS,
     export_labelled_box,
     export_text_body_3mf,
     export_mesh,
@@ -420,6 +421,42 @@ def insert_filename(
     if tidy:
         name += f" {tidy}"
     return name + suffix
+
+
+def connector_filename(
+    connector: ConnectorSpec | None = None,
+    length: float = LOCKED_CONNECTOR_LENGTH,
+    bin_a_height: float | None = None,
+    bin_b_height: float | None = None,
+    arm_thickness: float | None = None,
+    different_heights: bool = False,
+    suffix: str = ".3mf",
+) -> str:
+    tolerance = LOCKED_TOLERANCE if connector is None else connector.tolerance
+    height = LOCKED_CONNECTOR_HEIGHT if connector is None else connector.height
+    effective_arm = (
+        arm_thickness
+        if arm_thickness is not None
+        else (DEFAULT_ARM_THICKNESS if connector is None else connector.arm_thickness)
+    )
+
+    diff = []
+    if different_heights and bin_a_height is not None and bin_b_height is not None:
+        if abs(bin_a_height - bin_b_height) > 1e-6:
+            diff.append(f"{bin_a_height:g}mm to {bin_b_height:g}mm")
+
+    if abs(tolerance - LOCKED_TOLERANCE) > 1e-6:
+        diff.append(f"Tol {tolerance:g}mm")
+    if abs(height - LOCKED_CONNECTOR_HEIGHT) > 1e-6:
+        diff.append(f"Height {height:g}mm")
+    if abs(length - LOCKED_CONNECTOR_LENGTH) > 1e-6:
+        diff.append(f"Len {length:g}mm")
+    if abs(effective_arm - DEFAULT_ARM_THICKNESS) > 1e-6:
+        diff.append(f"Arm {effective_arm:g}mm")
+
+    if not diff:
+        return f"Connector - Same height{suffix}"
+    return f"Connector - {' '.join(diff)}{suffix}"
 
 
 SIZE_LIKE = re.compile(r"^\s*\d+(\.\d+)?\s*(mm)?\s*$", re.IGNORECASE)
@@ -1173,7 +1210,7 @@ def generate_kit_files(
         "side": generate_side_file(
             box,
             connector,
-            output_dir / "Connector.3mf",
+            output_dir / connector_filename(connector),
             side_along,
             side_position,
         ),

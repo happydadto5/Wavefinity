@@ -178,6 +178,26 @@ class WebApplicationTests(unittest.TestCase):
             })
             self.assertEqual(generate.call_args.args[-2:], (40.0, 20.0))
 
+    def test_connector_payload_names_file_appropriately(self):
+        with patch.object(wavefinity_web, "generate_side_file", return_value={}) as generate:
+            wavefinity_web.connector_payload({
+                "design": default_design(),
+                "output": "/fake/output",
+            })
+            self.assertEqual(generate.call_args.args[2].name, "Connector - Same height.3mf")
+
+            wavefinity_web.connector_payload({
+                "design": default_design(),
+                "output": "/fake/output",
+                "connector": {
+                    "different_heights": True,
+                    "bin_a_height": 50.0,
+                    "bin_b_height": 20.0,
+                    "tolerance": 0.05,
+                },
+            })
+            self.assertEqual(generate.call_args.args[2].name, "Connector - 50mm to 20mm Tol 0.05mm.3mf")
+
     def test_bin_a_height_accepts_custom_height_from_payload(self):
         design = default_design()
         design["box"]["z"] = 30.0

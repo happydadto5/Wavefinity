@@ -82,6 +82,7 @@ from organizer_app import (
     _mesh_preview_geometry,
     base_height,
     convert_layout_mode,
+    connector_filename,
     default_feature,
     design_from_dict,
     design_to_dict,
@@ -986,11 +987,19 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
     length = float(options.get("length", LOCKED_CONNECTOR_LENGTH))
     output_dir = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    filename = connector_filename(
+        connector,
+        length=length,
+        bin_a_height=bin_a_height,
+        bin_b_height=bin_b_height,
+        arm_thickness=arm_thickness,
+        different_heights=different_heights,
+    )
     with GEOMETRY_LOCK:
         result = generate_side_file(
             box,
             connector,
-            output_dir / "Connector.3mf",
+            output_dir / filename,
             "y",
             0.0,
             length,

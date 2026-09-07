@@ -870,7 +870,7 @@ class SamplerTests(unittest.TestCase):
             )
             self.assertEqual(
                 sorted(p.name for p in out.iterdir()),
-                ["Box 16 x 48 x 40.3mf", "Connector.3mf"],
+                ["Box 16 x 48 x 40.3mf", "Connector - Same height.3mf"],
             )
 
     def test_unit_sizes_parse_to_grid_millimetres(self) -> None:
@@ -923,7 +923,7 @@ class ExportAndCliTests(unittest.TestCase):
                     ),
                     0,
                 )
-            for filename in ("Box 32 x 24 x 45.3mf", "Connector.3mf"):
+            for filename in ("Box 32 x 24 x 45.3mf", "Connector - Tol 0.06mm Height 12mm.3mf"):
                 path = output_dir / filename
                 self.assertTrue(path.exists())
                 self.assertEqual(validate_3mf(path, 1)["warnings"], 0)
@@ -1073,6 +1073,58 @@ class FloorLabelTests(unittest.TestCase):
         self.assertEqual(organizer_app.clean_label("  M3 / M4  "), "M3 M4")
         self.assertEqual(
             organizer_app.box_filename(spec, "M3/M4"), "Box 48 x 48 x 40 M3 M4.3mf"
+        )
+
+    def test_connector_filename_defaults_and_custom_options(self) -> None:
+        self.assertEqual(
+            organizer_app.connector_filename(),
+            "Connector - Same height.3mf",
+        )
+        self.assertEqual(
+            organizer_app.connector_filename(ConnectorSpec()),
+            "Connector - Same height.3mf",
+        )
+        # Equal heights with different_heights=True should still be same height
+        self.assertEqual(
+            organizer_app.connector_filename(different_heights=True, bin_a_height=40.0, bin_b_height=40.0),
+            "Connector - Same height.3mf",
+        )
+        # Different heights
+        self.assertEqual(
+            organizer_app.connector_filename(different_heights=True, bin_a_height=40.0, bin_b_height=20.0),
+            "Connector - 40mm to 20mm.3mf",
+        )
+        # Custom tolerance
+        self.assertEqual(
+            organizer_app.connector_filename(ConnectorSpec(tolerance=0.06)),
+            "Connector - Tol 0.06mm.3mf",
+        )
+        # Custom height
+        self.assertEqual(
+            organizer_app.connector_filename(ConnectorSpec(height=12.0)),
+            "Connector - Height 12mm.3mf",
+        )
+        # Custom length
+        self.assertEqual(
+            organizer_app.connector_filename(length=16.0),
+            "Connector - Len 16mm.3mf",
+        )
+        # Custom arm thickness
+        self.assertEqual(
+            organizer_app.connector_filename(arm_thickness=1.5),
+            "Connector - Arm 1.5mm.3mf",
+        )
+        # Multiple non-default variables combined
+        self.assertEqual(
+            organizer_app.connector_filename(
+                ConnectorSpec(tolerance=0.05, height=14.0),
+                length=18.0,
+                bin_a_height=50.0,
+                bin_b_height=30.0,
+                arm_thickness=1.2,
+                different_heights=True,
+            ),
+            "Connector - 50mm to 30mm Tol 0.05mm Height 14mm Len 18mm Arm 1.2mm.3mf",
         )
 
     def test_cli_labels_a_box(self) -> None:
