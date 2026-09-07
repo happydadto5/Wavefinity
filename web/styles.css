@@ -165,9 +165,13 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .input-with-button { display: flex; gap: 6px; margin-top: 5px; }
 .input-with-button input { margin-top: 0; flex: 1; }
 .input-with-button .button { flex: none; padding: 8px 12px; }
-.fit-actions { display: grid; gap: 6px; margin: 4px 0 14px; }
-.fit-actions:empty, .fit-actions:not(:has(> *:not([hidden]))) { margin: 0; }
-.fit-actions .button { width: 100%; text-align: left; }
+.fit-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }
+.fit-actions:not(:has(> *:not([hidden]))) { margin: 0; }
+.fit-actions .button {
+  width: calc((100% - 16px) / 3); text-align: center; font-size: 12px;
+  border-color: #e2bd82; background: #fdf1de; color: #6b4d1c;
+}
+.fit-actions .button:hover { background: #fbe6c4; border-color: #d7ab63; }
 .button-row { display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap; }
 .button-row.equal > * { flex: 1; }
 .placed-block h3 { margin: 15px 0 8px; font-size: 13px; }
@@ -203,7 +207,10 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .save-location-row label { white-space: nowrap; font-size: 12px; font-weight: 650; margin: 0; flex-shrink: 0; }
 .save-location-row input { margin-top: 0; flex: 1; min-width: 0; }
 .save-location-row .button { flex-shrink: 0; padding: 9px 12px; }
-.output-panel .print-button { margin-top: 12px; margin-bottom: 7px; display: flex; align-items: center; justify-content: center; gap: 7px; }
+.keep-log-row { display: flex; align-items: center; margin-top: 8px; }
+.keep-log-label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink); user-select: none; margin: 0; }
+.keep-log-label input[type="checkbox"] { margin: 0; cursor: pointer; accent-color: var(--teal); }
+.output-panel .print-button { margin-top: 10px; margin-bottom: 7px; display: flex; align-items: center; justify-content: center; gap: 7px; }
 .output-panel .print-button::before { content: "🖨️"; font-size: 14px; }
 .slicer-status-row { display: flex; justify-content: flex-end; align-items: center; margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line-dark); font-size: 11.5px; color: var(--muted); }
 .link-button { background: none; border: none; padding: 0 4px; color: var(--blue); cursor: pointer; font-size: 11px; font-weight: 600; text-decoration: underline; }

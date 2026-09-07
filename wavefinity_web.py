@@ -340,10 +340,12 @@ def catalog_payload() -> dict[str, Any]:
         "defaults": {
             "design": default_design(),
             "output": str(DEFAULT_OUTPUT),
+            "keep_log": True,
             "connector": {
                 "tolerance": LOCKED_TOLERANCE,
                 "height": LOCKED_CONNECTOR_HEIGHT,
                 "length": LOCKED_CONNECTOR_LENGTH,
+                "arm_thickness": DEFAULT_ARM_THICKNESS,
                 "axis": "y",
                 "position": 0.0,
                 "bin_a_height": 40.0,
@@ -506,6 +508,8 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
         update["output"] = str(payload["output"])
     if "slicer_path" in payload:
         update["slicer_path"] = str(payload["slicer_path"]) if payload["slicer_path"] else ""
+    if "keep_log" in payload:
+        update["keep_log"] = bool(payload["keep_log"])
     return {"preferences": save_preferences(update)}
 
 
@@ -857,9 +861,12 @@ def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Grow the bin - on the 8 mm grid, both axes - to the smallest size that
     fits every interior support at the footprint it actually needs, then trim
-    back any axis that overshot. Cradle footprints are recomputed from their
-    tool so a clamped one gets its real size back; other supports keep the
-    size the user drew. Supports keep their centre; nothing is rearranged.
+    back any axis that overshot. A cradle footprint is recomputed from its
+    tool, and a bore / post / slot zone is grown (never shrunk) to hold the
+    hole grid, peg row or slot bank it was given - so an explicit X/Y quantity
+    that overflowed the drawn zone still makes the bin grow instead of erroring.
+    Other supports keep the size the user drew. Supports keep their centre;
+    nothing is rearranged.
     """
     box, layout, label, part_name, label_location, scoop = design_from_dict(
         payload["design"], validate_layout=False
@@ -885,6 +892,9 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 width, depth = min_width, min_depth
         else:
             width, depth = one.zone.width, one.zone.depth
+            grown = feature_min_footprint(trial, one, base_height(trial, mode))
+            if grown is not None:
+                width, depth = max(width, grown[0]), max(depth, grown[1])
         cx, cy = one.zone.centre
         raw = Zone(cx - width / 2.0, cy - depth / 2.0,
                    cx + width / 2.0, cy + depth / 2.0)
@@ -949,10 +959,12 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     output = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
     auto_timestamp = bool(payload.get("auto_timestamp", False))
+    keep_log = bool(payload.get("keep_log", True))
     with GEOMETRY_LOCK:
         result = generate_organizer_files(
             box, layout, output, label, part_name, label_location, scoop,
             auto_timestamp=auto_timestamp,
+            keep_log=keep_log,
         )
     return {"result": result, "output": str(output)}
 
@@ -960,15 +972,18 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, *_ = _design(payload["design"])
     options = payload.get("connector", {})
+    tolerance = float(options.get("tolerance", LOCKED_TOLERANCE))
+    height = float(options.get("height", LOCKED_CONNECTOR_HEIGHT))
+    arm_thickness = float(options.get("arm_thickness", DEFAULT_ARM_THICKNESS))
     connector = ConnectorSpec(
-        tolerance=float(options.get("tolerance", LOCKED_TOLERANCE)),
-        height=float(options.get("height", LOCKED_CONNECTOR_HEIGHT)),
+        tolerance=tolerance,
+        height=height,
+        arm_thickness=DEFAULT_ARM_THICKNESS,
     )
     different_heights = bool(options.get("different_heights", False))
-    # Bin A is always this bin; only the other side is a free number.
-    bin_a_height = box.z
+    bin_a_height = float(options.get("bin_a_height", box.z)) if different_heights else box.z
     bin_b_height = float(options.get("bin_b_height", box.z)) if different_heights else box.z
-    base_length = float(options.get("length", LOCKED_CONNECTOR_LENGTH))
+    length = float(options.get("length", LOCKED_CONNECTOR_LENGTH))
     output_dir = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     with GEOMETRY_LOCK:
@@ -978,11 +993,16 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
             output_dir / "Connector.3mf",
             "y",
             0.0,
-            base_length,
+            length,
             bin_a_height,
             bin_b_height,
+            web_thickness=arm_thickness if different_heights else None,
+            auto_adjust=False,
         )
-    plan = differing_connector_plan(connector, base_length, bin_a_height, bin_b_height)
+    plan = differing_connector_plan(connector, length, bin_a_height, bin_b_height)
+    if different_heights:
+        plan["length_mm"] = length
+        plan["web_thickness_mm"] = arm_thickness
     return {
         "result": result,
         "output": str(output_dir),

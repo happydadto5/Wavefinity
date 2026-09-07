@@ -842,6 +842,8 @@ def make_side_connector(
     length: float = DEFAULT_SIDE_LENGTH,
     bin_a_height: float | None = None,
     bin_b_height: float | None = None,
+    web_thickness: float | None = None,
+    auto_adjust: bool = True,
 ) -> trimesh.Trimesh:
     """Make a connector for two bins whose rims may be at different heights.
 
@@ -864,9 +866,12 @@ def make_side_connector(
     # spans an unbraced gap, so past a small drop it is both fattened (below)
     # and lengthened here, in step with the drop, for more bumps to share the
     # load.  Equal heights leave the part exactly as it was.
-    plan = differing_connector_plan(connector, length, heights[0], heights[1])
-    drop_fraction = plan["drop_fraction"]
-    length = plan["length_mm"]
+    if auto_adjust:
+        plan = differing_connector_plan(connector, length, heights[0], heights[1])
+        drop_fraction = plan["drop_fraction"]
+        length = plan["length_mm"]
+    else:
+        drop_fraction = differing_drop_fraction(abs(heights[0] - heights[1]))
     wave_half = box.half_x if axis == "x" else box.half_y
     if abs(position) + length / 2.0 > wave_half - CORNER_INSET:
         shortest = 2.0 * (length / 2.0 + CORNER_INSET) + WAVE_MATING_GAP
@@ -980,10 +985,13 @@ def make_side_connector(
         if drop_fraction <= 0.0 or drop <= DIFFERING_MIN_DROP:
             return []
         z_rim = connector.arm_depth - drop
-        web_t = connector.arm_thickness + (
-            DIFFERING_WEB_THICKNESS - connector.arm_thickness
-        ) * drop_fraction
-        grow = web_t - connector.arm_thickness
+        if web_thickness is not None:
+            web_t = web_thickness
+        else:
+            web_t = connector.arm_thickness + (
+                DIFFERING_WEB_THICKNESS - connector.arm_thickness
+            ) * drop_fraction
+        grow = max(0.0, web_t - connector.arm_thickness)
         move_in = max(
             0.0,
             min(grow * 0.5, inner_hw - WAVE_MATING_GAP / 2.0 - DIFFERING_WEB_KEEP_IN),

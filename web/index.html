@@ -40,9 +40,6 @@
           <div id="advanced-build-settings" class="field-grid three advanced-build-settings" hidden>
             <label>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1"></label>
           </div>
-          <button id="auto-expand-bin" class="button secondary auto-expand" type="button" hidden>
-            Adjust to fit interior parts<small>Resize the bin to the smallest that holds every interior part</small>
-          </button>
 
           <div class="build-label-fields">
             <label>Rim label<input id="label-text" type="text" maxlength="80" placeholder="e.g. M3 BOLTS"></label>
@@ -96,13 +93,13 @@
             <span><strong>Different height bins?</strong><small>The clip fattens and lengthens itself to bridge the gap where the shorter bin's wall stops.</small></span>
           </label>
           <div id="connector-bin-heights" class="field-grid two" hidden>
-            <label>This bin (A) <span class="unit">mm</span><input id="connector-bin-a-height" type="number" min="2" step="1" readonly></label>
-            <label>Other bin (B) <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>
+            <label>Bin A <span class="unit">mm</span><input id="connector-bin-a-height" type="number" min="2" step="1"></label>
+            <label>Bin B <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>
           </div>
-          <dl id="connector-derived" class="derived-readout" hidden></dl>
-          <div class="field-grid two">
+          <div class="field-grid three">
             <label>Connector tolerance <span class="unit">mm</span><input id="connector-tolerance" type="number" min="0" max="1" step="0.01"></label>
-            <label>Connector length <span class="unit">mm</span><input id="connector-length" type="number" min="2" step="1"></label>
+            <label>Connector length <span class="unit">mm</span><input id="connector-length" type="number" min="2" step="0.1"></label>
+            <label>Arm thickness <span class="unit">mm</span><input id="connector-arm-thickness" type="number" min="0.5" max="10" step="0.1"></label>
           </div>
         </div>
       </section>
@@ -112,6 +109,12 @@
           <label for="output-folder">Save Location:</label>
           <input id="output-folder" type="text">
           <button type="button" class="button secondary" id="output-folder-picker">Browse</button>
+        </div>
+        <div class="keep-log-row">
+          <label class="keep-log-label" for="keep-log">
+            <input id="keep-log" type="checkbox" checked>
+            <span>Keep log</span>
+          </label>
         </div>
         <button id="print-bin" class="button primary wide print-button">Print to Bambu Studio</button>
         <button id="generate-bin" class="button secondary wide">Generate Bin</button>

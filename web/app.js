@@ -35,6 +35,7 @@ const state = {
   previewRequest: 0,
   draftRequest: 0,
   output: "",
+  keepLog: true,
   connector: {},
   layoutDrag: null,
   layoutTransform: null,
@@ -286,10 +287,13 @@ function syncForm() {
   const mode = $(`input[name="layout-mode"][value="${layout.mode}"]`);
   if (mode) mode.checked = true;
   $("#output-folder").value = state.output;
+  const keepLogEl = $("#keep-log");
+  if (keepLogEl) keepLogEl.checked = Boolean(state.keepLog);
   $("#connector-tolerance").value = fmt(state.connector.tolerance);
   $("#connector-length").value = fmt(state.connector.length);
-  // Bin A is always this bin, so it just mirrors the box height.
-  $("#connector-bin-a-height").value = fmt(box.z);
+  const armThicknessEl = $("#connector-arm-thickness");
+  if (armThicknessEl) armThicknessEl.value = fmt(state.connector.arm_thickness ?? 1.0);
+  $("#connector-bin-a-height").value = fmt(state.connector.bin_a_height ?? box.z);
   $("#connector-bin-b-height").value = fmt(state.connector.bin_b_height ?? box.z);
   $("#different-height-bins").checked = Boolean(state.connector.different_heights);
   syncConnectorHeightControls();
@@ -297,68 +301,49 @@ function syncForm() {
   renderPlaced();
 }
 
-function syncConnectorHeightControls() {
-  const different = $("#different-height-bins").checked;
-  $("#connector-bin-heights").hidden = !different;
-  renderConnectorReadout();
-}
-
-// Mirror the engine's differing_connector_plan so the self-adjusting numbers
-// show live, before anything is generated. The server plan (from a real
-// generate) is authoritative and is passed straight through when we have it.
-function computeConnectorPlan() {
+function autoAdjustConnectorFields() {
   const rules = state.catalog?.connector_rules || {};
   const armT = rules.arm_thickness_mm ?? 1.0;
-  const baseH = rules.base_height_mm ?? 9.6;
   const minDrop = rules.min_drop_mm ?? 2.0;
   const fullDrop = rules.full_drop_mm ?? 30.0;
   const webT = rules.web_thickness_mm ?? 3.0;
   const gain = rules.length_gain ?? 0.5;
-  const binA = number(state.design?.box?.z, 40);
-  const binB = number($("#connector-bin-b-height").value, binA);
-  const baseLen = number($("#connector-length").value, state.connector.length ?? 12);
-  const drop = Math.abs(binA - binB);
+  const baseLen = 12.0;
+
+  const different = $("#different-height-bins").checked;
+  const binA = number($("#connector-bin-a-height").value, state.design?.box?.z ?? 40);
+  const binB = different
+    ? number($("#connector-bin-b-height").value, binA)
+    : binA;
+  const drop = different ? Math.abs(binA - binB) : 0;
   const frac = drop <= minDrop
-    ? 0 : Math.max(0, Math.min(1, (drop - minDrop) / (fullDrop - minDrop)));
-  return {
-    drop_mm: drop,
-    base_length_mm: baseLen,
-    length_mm: baseLen * (1 + gain * frac),
-    arm_thickness_mm: armT,
-    web_thickness_mm: armT + (webT - armT) * frac,
-    printed_height_mm: baseH + drop,
-    shorter_bin: binA === binB ? null : (binA < binB ? "A" : "B"),
-    webbed: frac > 0,
-  };
+    ? 0
+    : Math.max(0, Math.min(1, (drop - minDrop) / (fullDrop - minDrop)));
+
+  const adjustedLen = baseLen * (1 + gain * frac);
+  const adjustedArm = armT + (webT - armT) * frac;
+
+  $("#connector-length").value = fmt(adjustedLen);
+  const armEl = $("#connector-arm-thickness");
+  if (armEl) armEl.value = fmt(adjustedArm);
+  if (state.connector) {
+    state.connector.length = adjustedLen;
+    state.connector.arm_thickness = adjustedArm;
+  }
 }
 
-function renderConnectorReadout(serverPlan) {
+function syncConnectorHeightControls() {
+  const different = $("#different-height-bins").checked;
+  $("#connector-bin-heights").hidden = !different;
+  autoAdjustConnectorFields();
+}
+
+function renderConnectorReadout() {
   const el = $("#connector-derived");
-  if (!el) return;
-  if (!$("#different-height-bins").checked) {
+  if (el) {
     el.hidden = true;
     el.innerHTML = "";
-    return;
   }
-  const plan = serverPlan || computeConnectorPlan();
-  const mm = value => `${fmt(Math.round(value * 100) / 100)} mm`;
-  const adjusted = (base, now) => Math.abs(base - now) < 0.05
-    ? mm(now)
-    : `${mm(base)} → <span class="readout-adjust">${mm(now)}</span>`;
-  const shorter = plan.shorter_bin === "B" ? "the other bin"
-    : plan.shorter_bin === "A" ? "this bin" : "neither — equal";
-  const rows = [
-    ["Height difference", mm(plan.drop_mm)],
-    ["Shorter side", shorter],
-    ["Connector length", adjusted(plan.base_length_mm, plan.length_mm)],
-    ["Arm thickness", adjusted(plan.arm_thickness_mm, plan.web_thickness_mm)],
-    ["Printed height", mm(plan.printed_height_mm)],
-  ];
-  el.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")
-    + `<p class="readout-caption">${plan.webbed
-      ? "Arm over the shorter bin is thickened into a web and the part run longer, so the span with no wall beside it stays stiff."
-      : "Difference is small: an ordinary connector with a longer arm on the short side."}</p>`;
-  el.hidden = false;
 }
 
 function updateInteriorModeVisibility(reveal = false) {
@@ -380,8 +365,18 @@ function updateDesignFromForm() {
   };
   design.box.x = snapSize($("#x-size").value, design.box.x);
   design.box.y = snapSize($("#y-size").value, design.box.y);
+  const prevBoxZ = design.box.z;
   design.box.z = number($("#z").value, design.box.z);
   checkBinSizeChange();
+  if (design.box.z !== prevBoxZ) {
+    if (!$("#different-height-bins").checked) {
+      $("#connector-bin-a-height").value = fmt(design.box.z);
+      $("#connector-bin-b-height").value = fmt(design.box.z);
+    } else {
+      $("#connector-bin-a-height").value = fmt(design.box.z);
+      autoAdjustConnectorFields();
+    }
+  }
   design.box.base_thickness = number(
     $("#base-thickness").value,
     design.box.base_thickness ?? 0.6,
@@ -398,19 +393,25 @@ function updateDesignFromForm() {
     state.output = newOutput;
     saveOutputPreference(newOutput);
   }
+  const keepLogEl = $("#keep-log");
+  if (keepLogEl) {
+    const newKeepLog = keepLogEl.checked;
+    if (newKeepLog !== state.keepLog) {
+      state.keepLog = newKeepLog;
+      api("/api/preferences", { keep_log: newKeepLog }).catch(() => {});
+    }
+  }
   state.connector = {
     tolerance: number($("#connector-tolerance").value, state.connector.tolerance),
     length: number($("#connector-length").value, state.connector.length),
+    arm_thickness: number($("#connector-arm-thickness")?.value, state.connector.arm_thickness ?? 1.0),
     height: state.connector.height,
-    // Bin A is this bin, never a free field.
-    bin_a_height: state.design.box.z,
+    bin_a_height: number($("#connector-bin-a-height").value, state.design.box.z),
     bin_b_height: number($("#connector-bin-b-height").value, state.design.box.z),
     different_heights: $("#different-height-bins").checked,
     position: 0,
     axis: "y",
   };
-  $("#connector-bin-a-height").value = fmt(state.design.box.z);
-  syncConnectorHeightControls();
 }
 
 const saveOutputPreference = debounce(output => {
@@ -647,11 +648,15 @@ function wireControls() {
     refreshPreview();
     if (state.draft) refreshDraft();
   });
-  ["#output-folder", "#connector-tolerance", "#connector-length",
-    "#connector-bin-a-height", "#connector-bin-b-height"]
-    .forEach(selector => $(selector).addEventListener("change", updateDesignFromForm));
-  ["#connector-bin-a-height", "#connector-bin-b-height"].forEach(selector =>
-    $(selector).addEventListener("input", syncConnectorHeightControls));
+  ["#output-folder", "#keep-log", "#connector-tolerance", "#connector-length",
+    "#connector-arm-thickness", "#connector-bin-a-height", "#connector-bin-b-height"]
+    .forEach(selector => $(selector)?.addEventListener("change", updateDesignFromForm));
+  ["#connector-bin-a-height", "#connector-bin-b-height"].forEach(selector => {
+    $(selector)?.addEventListener("input", () => {
+      autoAdjustConnectorFields();
+      updateDesignFromForm();
+    });
+  });
   $("#different-height-bins").addEventListener("change", () => {
     if ($("#different-height-bins").checked) {
       $("#connector-bin-a-height").value = fmt(state.design.box.z);
@@ -659,6 +664,7 @@ function wireControls() {
         $("#connector-bin-b-height").value = fmt(state.design.box.z);
       }
     }
+    syncConnectorHeightControls();
     updateDesignFromForm();
   });
   $("#output-folder-picker").addEventListener("click", selectOutputFolder);
@@ -691,7 +697,6 @@ function wireControls() {
   // This is the only control that starts another support. Palette choices
   // change the currently selected support instead.
   $("#add-support").addEventListener("click", () => selectKind(state.draftKind, true));
-  $("#auto-expand-bin").addEventListener("click", autoExpandBin);
   $("#save-design").addEventListener("click", saveDesign);
   $("#open-design").addEventListener("change", openDesign);
   $("#new-design").addEventListener("click", newDesign);
@@ -929,7 +934,6 @@ function renderDraftFields() {
       html += field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
     }
   }
-  html += renderFitActions(one);
   if (info.flags.qty) {
     html += `<label class="wide">Quantity<div class="input-with-button">
       <input type="number" min="1" step="1" data-draft="count" value="${one.count ?? ""}" placeholder="auto">
@@ -1076,6 +1080,8 @@ function renderDraftFields() {
       }
     }
   }
+  // The auto-size buttons sit at the very bottom of the editor.
+  html += renderFitActions(one);
   $("#draft-fields").innerHTML = html;
   const photoInput = $("#nest-photo-input", $("#draft-fields"));
   if (photoInput) photoInput.addEventListener("change", uploadNestPhoto);
@@ -1883,49 +1889,47 @@ function adoptResolvedFeatures(resolved) {
   });
 }
 
-// "Adjust to fit interior parts" (top of the bin section) shows only while an
-// interior part does not fit; clicking it grows the bin (see /api/layout/expand)
-// to the smallest size that holds them all.
+// Kept as the single hook the preview/draft paths call whenever the fit state
+// moves; the top-of-section button it once toggled is gone - the per-part
+// "Grow the bin" button below replaces it.
 function updateAutoExpandButton() {
-  const hasParts = Boolean(
-    state.design?.layout?.features?.length || state.draft
-  );
-  $("#auto-expand-bin").hidden = !(state.fitError && hasParts);
   updateFitActions();
 }
 
-// The auto-size row inside an interior-part editor. Which of the three buttons
-// a kind gets is fixed; which is currently shown tracks whether the part fits.
-//   fit-part  - resize the footprint to exactly its contents (holes/pegs/slots)
+// The auto-size buttons inside an interior-part editor. Which buttons a kind
+// gets is fixed; which are shown right now tracks the fit:
+//   fit-part  - size the footprint to exactly its contents (holes/pegs/slots)
 //   fill-part - stretch the footprint to the whole bin floor
-//   grow-bin  - enlarge the bin instead
-// fit-part and grow-bin are opposites: one shows while the other hides.
+//   grow-bin  - grow the bin (and the part's footprint) to hold its contents
+// fit-part and fill-part are always offered for their kinds; grow-bin appears
+// only while the part does not fit the bin.
 const FIT_PART_KINDS = { bore: "holes", post: "pegs", slot: "slots" };
 const FILL_PART_KINDS = new Set(["bore", "pocket", "slot", "steps"]);
 
 function renderFitActions(one) {
   const kind = one.kind;
-  const title = escapeHtml(partInfo(kind)?.title || kind);
   const rows = [];
   if (FIT_PART_KINDS[kind]) {
-    rows.push(`<button type="button" class="button secondary" data-action="fit-part" hidden>Fit this ${title} to its ${FIT_PART_KINDS[kind]}</button>`);
+    rows.push(`<button type="button" class="button" data-action="fit-part" hidden>Fit to ${FIT_PART_KINDS[kind]}</button>`);
   }
   if (FILL_PART_KINDS.has(kind)) {
-    rows.push(`<button type="button" class="button secondary" data-action="fill-part" hidden>Expand this ${title} to the whole bin</button>`);
+    rows.push(`<button type="button" class="button" data-action="fill-part" hidden>Fill the bin</button>`);
   }
-  rows.push(`<button type="button" class="button secondary" data-action="grow-bin" hidden>Grow the bin to fit this ${title}</button>`);
-  return `<div class="fit-actions wide">${rows.join("")}</div>`;
+  rows.push(`<button type="button" class="button" data-action="grow-bin" hidden>Grow the bin</button>`);
+  return `<div class="fit-actions">${rows.join("")}</div>`;
 }
 
 function updateFitActions() {
   const container = $(".fit-actions", $("#draft-fields"));
   if (!container || !state.draft) return;
-  const fits = !state.fitError;
   const fitBtn = $('[data-action="fit-part"]', container);
   const fillBtn = $('[data-action="fill-part"]', container);
   const growBtn = $('[data-action="grow-bin"]', container);
-  if (fitBtn) fitBtn.hidden = !fits;
-  if (growBtn) growBtn.hidden = fits;
+  // "Fit to …" is always available for its kinds - it grows the part when the
+  // zone was drawn too small and shrinks it when there is slack.
+  if (fitBtn) fitBtn.hidden = false;
+  // "Grow the bin" only makes sense while something does not fit.
+  if (growBtn) growBtn.hidden = !state.fitError;
   if (fillBtn) {
     const [insideX, insideY] = binInsideExtent(state.design.box);
     const z = state.draft.zone;
@@ -1964,10 +1968,10 @@ function fillPartToBin() {
   refreshDraftSoon();
 }
 
-async function autoExpandBin() {
+async function autoExpandBin(event) {
   if (!beginDesignMutation()) return;
-  const button = $("#auto-expand-bin");
-  button.disabled = true;
+  const button = event?.currentTarget || null;
+  if (button) button.disabled = true;
   try {
     // Grow for what the user is actually looking at: an open draft may hold
     // edits (a flipped direction, a raised count) that never committed because
@@ -1998,7 +2002,7 @@ async function autoExpandBin() {
   } catch (error) {
     toast(error.message, true, 5000);
   } finally {
-    button.disabled = false;
+    if (button) button.disabled = false;
     finishDesignMutation();
   }
 }
@@ -2995,6 +2999,7 @@ async function generate(path, selector) {
       design: state.design,
       output: state.output,
       connector: state.connector,
+      keep_log: state.keepLog,
     };
     const result = await api(path, payload);
     if (result.connector_plan) renderConnectorReadout(result.connector_plan);
@@ -3053,6 +3058,7 @@ async function printModel(target = "bin") {
       output: state.output,
       connector: state.connector,
       target: target,
+      keep_log: state.keepLog,
     };
     const result = await api("/api/print", payload);
     const files = result.files || [];
@@ -3212,6 +3218,7 @@ async function init() {
     state.serverInstance = catalog.instance;
     state.design = clone(catalog.defaults.design);
     state.output = catalog.preferences?.output || catalog.defaults.output;
+    state.keepLog = catalog.preferences?.keep_log !== undefined ? Boolean(catalog.preferences.keep_log) : true;
     state.connector = clone(catalog.defaults.connector);
     state.slicer = catalog.slicer || { available: false, path: null, name: "Bambu Studio" };
     updateSlicerUI();

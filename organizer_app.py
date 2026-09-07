@@ -837,6 +837,7 @@ def generate_organizer_files(
     label_location: str = "bottom",
     scoop: bool = False,
     auto_timestamp: bool = False,
+    keep_log: bool = False,
 ) -> dict[str, object]:
     """Export an editor design as fused, fitted-removable, or cartridge parts.
 
@@ -987,7 +988,136 @@ def generate_organizer_files(
         text_report(box, one, text_surface) for one in layout.features if is_text(one)
     ]
     result["customizations"] = {"scoop": scoop, "label_position": location}
+    if keep_log:
+        out_files: list[Path] = []
+        if "box" in result and isinstance(result["box"], dict) and "output" in result["box"]:
+            out_files.append(Path(str(result["box"]["output"])))
+        if "insert" in result and isinstance(result["insert"], dict) and "output" in result["insert"]:
+            out_files.append(Path(str(result["insert"]["output"])))
+        log_file = log_bin_to_folder(
+            output_dir,
+            box,
+            layout,
+            generated_files=out_files,
+            label=label,
+            part_name=part_name,
+            scoop=scoop,
+        )
+        result["log_file"] = str(log_file)
     return result
+
+
+def summarize_interior_parts(layout: Layout, scoop: bool = False) -> str:
+    """Return a short human-readable description of interior parts for logging."""
+    counts: dict[str, int] = {}
+    for feature in layout.features:
+        kind = getattr(feature, "kind", "part")
+        if kind == "divider":
+            name = "Full-span Divider" if getattr(feature, "full_span", False) else "Divider"
+        elif kind == "cradle":
+            item = getattr(feature, "item", None)
+            name = f"Cradle ({item.name})" if item and getattr(item, "name", None) else "Cradle"
+        elif kind == "nest":
+            opts = getattr(feature, "options", {}) or {}
+            is_photo = bool(opts.get("photo") or getattr(feature, "contour", None) is not None)
+            name = "Photo Nest" if is_photo else "Nest"
+        elif kind == "pocket":
+            name = "Pocket"
+        elif kind == "bore":
+            name = "Bore"
+        elif kind == "slot":
+            name = "Slot"
+        elif kind == "steps":
+            name = "Steps"
+        elif kind == "post":
+            name = "Post"
+        elif kind == "text":
+            opts = getattr(feature, "options", {}) or {}
+            txt = str(opts.get("text", "")).strip()
+            name = f'Text ("{txt}")' if txt else "Text"
+        else:
+            name = kind.capitalize()
+        counts[name] = counts.get(name, 0) + 1
+
+    parts: list[str] = []
+    for name, cnt in counts.items():
+        if cnt > 1:
+            parts.append(f"{cnt}x {name}")
+        else:
+            parts.append(name)
+    if scoop:
+        parts.append("Scoop")
+
+    return ", ".join(parts) if parts else "None"
+
+
+def log_bin_to_folder(
+    output_dir: Path,
+    box: BoxSpec,
+    layout: Layout,
+    generated_files: list[Path] | None = None,
+    label: str = "",
+    part_name: str = "",
+    scoop: bool = False,
+) -> Path:
+    """Record a generated/printed bin in '<folder name> bins.md' in output_dir."""
+    output_dir = Path(output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    folder_name = output_dir.name
+    log_file = output_dir / f"{folder_name} bins.md"
+
+    if generated_files:
+        file_names = ", ".join(dict.fromkeys(p.name for p in generated_files))
+    else:
+        file_names = box_filename(box, part_name)
+
+    tidy_label = clean_label(label)
+    floor_texts = [
+        str(f.options.get("text", "")).strip()
+        for f in layout.features
+        if getattr(f, "kind", "") == "text" and str(f.options.get("text", "")).strip()
+    ]
+    if tidy_label and floor_texts:
+        label_text = f"{tidy_label} (rim), {', '.join(floor_texts)} (floor)"
+    elif tidy_label:
+        label_text = tidy_label
+    elif floor_texts:
+        label_text = f"{', '.join(floor_texts)} (floor)"
+    else:
+        label_text = "-"
+
+    interior_text = summarize_interior_parts(layout, scoop=scoop)
+
+    file_names = file_names.replace("|", "/")
+    label_text = label_text.replace("|", "/")
+    interior_text = interior_text.replace("|", "/")
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    row = f"| {now_str} | {file_names} | {box.x:g} | {box.y:g} | {box.z:g} | {label_text} | {interior_text} |\n"
+
+    header = (
+        f"# {folder_name} Bins\n\n"
+        "| Date | File | X (mm) | Y (mm) | Z (mm) | Label | Interior Part(s) |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+    )
+
+    if not log_file.exists():
+        log_file.write_text(header + row, encoding="utf-8")
+    else:
+        content = log_file.read_text(encoding="utf-8")
+        if "| Date |" not in content or "| --- |" not in content:
+            if not content.endswith("\n"):
+                content += "\n"
+            content += "\n" + header + row
+            log_file.write_text(content, encoding="utf-8")
+        else:
+            if not content.endswith("\n"):
+                content += "\n"
+            content += row
+            log_file.write_text(content, encoding="utf-8")
+
+    return log_file
+
 
 
 def generate_side_file(
@@ -999,9 +1129,12 @@ def generate_side_file(
     length: float = LOCKED_CONNECTOR_LENGTH,
     bin_a_height: float | None = None,
     bin_b_height: float | None = None,
+    web_thickness: float | None = None,
+    auto_adjust: bool = True,
 ) -> dict[str, object]:
     mesh = make_side_connector(
-        box, connector, along, position, length, bin_a_height, bin_b_height
+        box, connector, along, position, length, bin_a_height, bin_b_height,
+        web_thickness=web_thickness, auto_adjust=auto_adjust,
     )
     report = mesh_report("side_connector", mesh)
     overlap = validate_side_fit(
