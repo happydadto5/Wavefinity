@@ -106,12 +106,27 @@ DEFAULT_SIDE_LENGTH = LOCKED_CONNECTOR_LENGTH
 # drop the arm over that gap is fattened into a web and the whole part is made
 # longer, both ramping in with the drop so the unbraced span stays stiff and
 # still prints as a clean vertical taper with the cap down.
+#
+# The channel between the arms is one constant width, because it is cut to hold
+# two mated walls.  Over the drop it holds *one*: the shorter bin's wall has not
+# started yet, so half that channel is empty air and the clip has nothing to
+# bear against for the whole span.  The web therefore does two separate jobs,
+# and they must not be traded off against each other:
+#
+# * Reach back across the seam until it runs on the taller bin's outer face.
+#   That is a fixed distance set by the seam - the same whatever the drop is -
+#   so it is deliberately not scaled by ``differing_drop_fraction``.
+# * Grow outward, into the space the absent wall would have filled, for
+#   stiffness.  That part does scale with the drop.
 DIFFERING_MIN_DROP = 2.0        # <= one bump pitch: plain extension, no web
 DIFFERING_FULL_DROP = 30.0      # web and length maxed here (a 50 -> 20 mm pair)
 DIFFERING_WEB_THICKNESS = 3.0   # widest the unbraced span is grown to
 DIFFERING_LENGTH_GAIN = 0.5     # + this fraction of length at the full drop
 DIFFERING_WEB_TAPER = 6.0       # ramp back to a plain arm before it enters the bin
-DIFFERING_WEB_KEEP_IN = 0.4     # web inner face stays this clear of the mated walls
+DIFFERING_WEB_RUN_CLEARANCE = 0.15  # running gap to the taller bin's outer face.
+                                # Looser than the arms' 0.02: this face guides
+                                # for the whole drop, not 8 mm, so it has to
+                                # slide rather than grip.
 
 
 def differing_drop_fraction(drop: float) -> float:
@@ -122,27 +137,48 @@ def differing_drop_fraction(drop: float) -> float:
     return max(0.0, min(1.0, (drop - DIFFERING_MIN_DROP) / span))
 
 
+def differing_web_reach(box: "BoxSpec", connector: "ConnectorSpec") -> float:
+    """How far the web reaches inward, past the plain arm's inner face.
+
+    Enough to cross the half of the channel the missing wall would have filled
+    and stop ``DIFFERING_WEB_RUN_CLEARANCE`` short of the taller bin's outer
+    face.  A property of the seam, so it is the same at every drop - which is
+    exactly why it must not be scaled by ``differing_drop_fraction``.
+    """
+    inner_hw = box.wall_depth + WAVE_MATING_GAP / 2.0 + connector.tolerance
+    return max(
+        0.0, inner_hw + WAVE_MATING_GAP / 2.0 - DIFFERING_WEB_RUN_CLEARANCE
+    )
+
+
 def differing_connector_plan(
     connector: "ConnectorSpec", base_length: float, height_a: float, height_b: float,
+    box: "BoxSpec | None" = None,
 ) -> dict[str, float | str | bool | None]:
     """Every dimension a different-height connector self-adjusts, in one place.
 
     ``make_side_connector`` and the UI both read this so the numbers a person is
     shown are exactly the ones the part is built to.  With equal rims it just
     reports the plain part.
+
+    Pass ``box`` to get the true web thickness.  The web is never thinner than
+    the inward reach allows, so at small drops it is thicker than the
+    drop-scaled target on its own would suggest; without ``box`` the seam is
+    unknown and only that target can be reported.
     """
     drop = abs(height_a - height_b)
     fraction = differing_drop_fraction(drop)
     arm_thickness = connector.arm_thickness
+    grow = (DIFFERING_WEB_THICKNESS - arm_thickness) * fraction
+    if box is not None:
+        grow = max(grow, differing_web_reach(box, connector))
     return {
         "drop_mm": drop,
         "drop_fraction": fraction,
         "base_length_mm": base_length,
         "length_mm": base_length * (1.0 + DIFFERING_LENGTH_GAIN * fraction),
         "arm_thickness_mm": arm_thickness,
-        "web_thickness_mm": arm_thickness + (
-            DIFFERING_WEB_THICKNESS - arm_thickness
-        ) * fraction,
+        "web_thickness_mm": arm_thickness + grow,
         "printed_height_mm": connector.height + drop,
         "shorter_bin": None if height_a == height_b else (
             "A" if height_a < height_b else "B"
@@ -867,7 +903,9 @@ def make_side_connector(
     # and lengthened here, in step with the drop, for more bumps to share the
     # load.  Equal heights leave the part exactly as it was.
     if auto_adjust:
-        plan = differing_connector_plan(connector, length, heights[0], heights[1])
+        plan = differing_connector_plan(
+            connector, length, heights[0], heights[1], box
+        )
         drop_fraction = plan["drop_fraction"]
         length = plan["length_mm"]
     else:
@@ -984,14 +1022,15 @@ def make_side_connector(
     def unbraced_web(sign: float, drop: float) -> list[trimesh.Trimesh]:
         """The fattened, tapered arm over the shorter bin's missing wall.
 
-        Spans from the shorter bin's rim (``z_rim``) up to the cap: over that
-        run nothing is beside the arm, so it is grown to a web - inward toward
-        the corridor as far as the mated walls allow, the rest outward into the
-        space the absent wall would occupy - and ramped back to a plain arm
-        over the last few millimetres so the part that actually enters the bin,
-        and every notch, is unchanged.  Built as thin stacked slabs: with the
-        cap flipped down to print, each slab sits inside the one below it, so
-        the whole taper is a support-free overhang.
+        Spans from the shorter bin's rim (``z_rim``) up to the cap.  Over that
+        run the channel holds only the taller bin's wall, so the web reaches
+        back across the seam until it runs on that wall's outer face - a fixed
+        distance, not a fraction of the drop - and grows outward on top of that,
+        by the drop-scaled amount, into the space the absent wall would occupy.
+        It ramps back to a plain arm over the last few millimetres so the part
+        that actually enters the bin, and every notch, is unchanged.  Built as
+        thin stacked slabs: with the cap flipped down to print, each slab sits
+        inside the one below it, so the whole taper is a support-free overhang.
         """
         if drop_fraction <= 0.0 or drop <= DIFFERING_MIN_DROP:
             return []
@@ -1003,12 +1042,22 @@ def make_side_connector(
                 DIFFERING_WEB_THICKNESS - connector.arm_thickness
             ) * drop_fraction
         grow = max(0.0, web_t - connector.arm_thickness)
-        move_in = max(
-            0.0,
-            min(grow * 0.5, inner_hw - WAVE_MATING_GAP / 2.0 - DIFFERING_WEB_KEEP_IN),
-        )
-        move_out = grow - move_in
-        taper = min(DIFFERING_WEB_TAPER, drop * 0.5)
+        # Inward: cross the empty half of the channel and stop a running
+        # clearance short of the taller bin's outer face.  A fact about the
+        # seam, so it does not scale with the drop - scaling it was what left
+        # the web short of that wall at every drop, with the clip bearing on
+        # nothing for the whole span.
+        move_in = differing_web_reach(box, connector)
+        # Outward: whatever stiffening the drop asks for beyond that.
+        move_out = max(0.0, grow - move_in)
+        # The taper is what lets the web ramp back to a plain arm before it
+        # reaches the shorter bin's wall, so it is dead length as far as bearing
+        # on the taller wall goes.  The stretch that actually needs the web is
+        # the one below the taller bin's own arm, ``drop - arm_depth``; a fixed
+        # 6 mm ramp swallowed most of that at moderate drops.  Never give up
+        # more than half of it, and never ramp in less than 2 mm.
+        unbraced = max(0.0, drop - connector.arm_depth)
+        taper = min(DIFFERING_WEB_TAPER, drop * 0.5, max(2.0, unbraced * 0.5))
         span = drop
         slabs: list[trimesh.Trimesh] = []
         steps = max(4, int(round(span / 1.5)))
@@ -1027,25 +1076,30 @@ def make_side_connector(
             slabs.append(slab)
         # A brace in the inside corner where the long arm meets the cap - the
         # most worked point - added on the outer face, which is clear here.
-        gusset_h = min(drop, DIFFERING_WEB_TAPER)
-        gsteps = max(3, int(round(gusset_h / 1.5)))
-        gh = gusset_h / gsteps
-        for k in range(gsteps):
-            reach = move_out * (gsteps - k) / gsteps
-            slab = _extrude_polygon(
-                offset_strip(sign, outer_hw, outer_hw + move_out + reach, samples),
-                gh + 0.02,
+        # Only when the web actually grew outward: with nothing past the plain
+        # arm's outer face there is no corner to brace, and a zero-width strip
+        # is not a solid.
+        if move_out > 1e-9:
+            gusset_h = min(drop, DIFFERING_WEB_TAPER)
+            gsteps = max(3, int(round(gusset_h / 1.5)))
+            gh = gusset_h / gsteps
+            for k in range(gsteps):
+                reach = move_out * (gsteps - k) / gsteps
+                slab = _extrude_polygon(
+                    offset_strip(sign, outer_hw, outer_hw + move_out + reach, samples),
+                    gh + 0.02,
+                )
+                slab.apply_translation((0.0, 0.0, connector.arm_depth - (k + 1) * gh))
+                slabs.append(slab)
+            # Continue the widened cap over the top of the gusset so the
+            # connector top is full across its entire width rather than
+            # leaving a hollow shelf.
+            cap_slab = _extrude_polygon(
+                offset_strip(sign, outer_hw, outer_hw + move_out * 2, samples),
+                connector.cap_thickness + 0.01,
             )
-            slab.apply_translation((0.0, 0.0, connector.arm_depth - (k + 1) * gh))
-            slabs.append(slab)
-        # Continue the widened cap over the top of the gusset so the connector
-        # top is full across its entire width rather than leaving a hollow shelf.
-        cap_slab = _extrude_polygon(
-            offset_strip(sign, outer_hw, outer_hw + move_out * 2, samples),
-            connector.cap_thickness + 0.01,
-        )
-        cap_slab.apply_translation((0.0, 0.0, connector.arm_depth - 0.01))
-        slabs.append(cap_slab)
+            cap_slab.apply_translation((0.0, 0.0, connector.arm_depth - 0.01))
+            slabs.append(cap_slab)
         return slabs
 
     body = _extrude_polygon(corridor(outer_hw, samples), connector.height)
@@ -1070,9 +1124,11 @@ def make_side_connector(
     )
     if notches:
         result = difference([result, *notches])
-    result.remove_unreferenced_vertices()
-    result.merge_vertices()
-    return result
+    # Through ``_cleaned``, not a bare merge: on a differing-height clip the
+    # web's inner face and the channel it reaches into run close and near
+    # parallel for the whole drop, which is exactly the case where welding by
+    # tolerance can turn a sound manifold into a leaky one.
+    return _cleaned(result)
 
 
 def _arm_notches(

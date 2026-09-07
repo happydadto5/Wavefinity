@@ -72,6 +72,7 @@ from organizer_engine import (
     TOP_LABEL_LEDGE_DEPTH,
     differing_drop_fraction,
     installed_boxes,
+    installed_side_boxes,
     intersection_volume,
     lock_positions,
     make_box,
@@ -658,10 +659,10 @@ class ConnectorTests(unittest.TestCase):
             box, connector, "y", 0.0, 12.0, bin_a_height=50.0, bin_b_height=20.0,
         )
         self.assertTrue(clip.is_watertight)
-        # +50% length at the full 30 mm drop, and clearly thicker across the seam
+        # +50% length at the full 30 mm drop, and thicker across the seam
         self.assertAlmostEqual(differing_drop_fraction(30.0), 1.0, places=6)
         self.assertAlmostEqual(clip.extents[1], 18.0, places=2)
-        self.assertGreater(clip.extents[0], plain.extents[0] + 2.0)
+        self.assertGreater(clip.extents[0], plain.extents[0])
         # z envelope is still just the cap plus the 30 mm extension
         self.assertAlmostEqual(clip.extents[2], connector.height + 30.0, places=3)
         # Cap covers the entire gusset width at top z so there is no hollow shelf
@@ -680,6 +681,48 @@ class ConnectorTests(unittest.TestCase):
             )["lift_0.5_mm3"],
             0.1,
         )
+
+    def test_the_web_runs_on_the_taller_wall_where_the_short_one_is_missing(
+        self,
+    ) -> None:
+        """The whole point of the web, and the thing a width check misses.
+
+        Over the drop the seam holds one wall, not two: the short bin's has not
+        started yet.  The channel is cut for two, so half of it is empty air and
+        the clip would bear on nothing for the entire span - locked at its two
+        ends and free to rock everywhere between.  The web has to reach back
+        across and run on the taller bin's outer face.
+        """
+        tall, short = 50.0, 20.0
+        box, connector = BoxSpec(40.0, 40.0, tall), ConnectorSpec()
+        clip = make_side_connector(
+            box, connector, "y", 0.0, 12.0, bin_a_height=tall, bin_b_height=short,
+        )
+        seated = translated(
+            clip, seat_transform(box, connector, 0.0, "y", tall)
+        )
+        tall_bin = installed_side_boxes(box, "y", tall, short)[0]
+
+        def span_at(mesh, z):
+            """x-interval of solid across the seam at height ``z``."""
+            knife = trimesh.creation.box(extents=(20.0, 0.05, 0.05))
+            knife.apply_translation((0.0, 0.0, z))
+            hit = knife.intersection(mesh)
+            if hit.is_empty or hit.volume < 1e-9:
+                return None
+            return float(hit.bounds[0][0]), float(hit.bounds[1][0])
+
+        # Between the taller bin's arm (which stops arm_depth below its rim) and
+        # the taper into the short bin, the web is all there is across the seam.
+        arm_bottom = tall - connector.arm_depth
+        for z in (arm_bottom - 1.0, 35.0, 30.0, 27.0):
+            clip_span, wall_span = span_at(seated, z), span_at(tall_bin, z)
+            self.assertIsNotNone(clip_span, z)
+            self.assertIsNotNone(wall_span, z)
+            gap = clip_span[0] - wall_span[1]
+            # Runs on that wall rather than floating a whole wall-width away.
+            self.assertGreater(gap, 0.0, f"web fouls the taller wall at z={z}")
+            self.assertLess(gap, 0.25, f"web is not bearing on anything at z={z}")
 
     def test_a_tiny_rim_difference_leaves_the_clip_plain(self) -> None:
         box, connector = BoxSpec(32.0, 32.0, 40.0), ConnectorSpec()
@@ -1630,12 +1673,28 @@ class InsertEditorTests(unittest.TestCase):
 
     def test_saved_design_round_trip_includes_customizations(self) -> None:
         spec = BoxSpec(48.0, 48.0, 35.0, flat_inside=0.5)
-        feature = organizer_app.default_feature(spec, "bore")
+        # A bore up in the +Y half, clear of the front-wall scoop strip.
+        feature = replace(
+            organizer_app.default_feature(spec, "bore"),
+            zone=organizer_app.snapped_zone(
+                organizer_app.Zone(-8.0, 4.0, 8.0, 20.0), spec, "separate"
+            ),
+        )
         layout = organizer_app.Layout((feature,), "separate")
-        rebuilt = organizer_app.design_from_dict(
+        box, rebuilt, label, part_name, location, scoop = organizer_app.design_from_dict(
             organizer_app.design_to_dict(spec, layout, "M3", "Nozzles", "top", True)
         )
-        self.assertEqual(rebuilt, (spec, layout, "M3", "Nozzles", "top", True))
+        self.assertEqual((box, label, part_name, location), (spec, "M3", "Nozzles", "top"))
+        # The retired scoop checkbox reopens as an editable scoop interior part,
+        # and the hidden flag is gone.
+        self.assertFalse(scoop)
+        self.assertEqual([one.kind for one in rebuilt.features], ["bore", "scoop"])
+        self.assertEqual(rebuilt.features[0], feature)
+        # Saving the migrated design and reopening it is stable.
+        again = organizer_app.design_from_dict(
+            organizer_app.design_to_dict(spec, rebuilt, label, part_name, location, scoop)
+        )
+        self.assertEqual(again, (spec, rebuilt, "M3", "Nozzles", "top", False))
 
     def test_old_saved_design_defaults_to_bottom_label_without_scoop(self) -> None:
         spec = BoxSpec(48.0, 48.0, 35.0)

@@ -192,6 +192,8 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .check-card input { margin-top: 2px; accent-color: var(--teal); }
 .check-card strong, .check-card small { display: block; }
 .check-card small { color: var(--muted); margin-top: 3px; font-weight: 450; line-height: 1.4; }
+.checkbox-row { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink); user-select: none; margin: 4px 0 10px; }
+.checkbox-row input[type="checkbox"] { margin: 0; cursor: pointer; accent-color: var(--teal); }
 /* The sticky output panel floats over the end of the scroll area, so the last
    control section needs room to scroll clear of it. */
 .control-section:last-of-type { margin-bottom: 260px; }

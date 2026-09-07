@@ -36,13 +36,17 @@ from organizer_engine import (
     DIFFERING_FULL_DROP,
     DIFFERING_LENGTH_GAIN,
     DIFFERING_MIN_DROP,
+    DIFFERING_WEB_RUN_CLEARANCE,
     DIFFERING_WEB_THICKNESS,
     LOCKED_CONNECTOR_HEIGHT,
     LOCKED_CONNECTOR_LENGTH,
     LOCKED_TOLERANCE,
+    WAVE_MATING_GAP,
     BoxSpec,
     ConnectorSpec,
     differing_connector_plan,
+    differing_web_reach,
+    max_wave_slope,
     generate_sampler,
     wavy_cavity_polygon,
 )
@@ -364,6 +368,13 @@ def catalog_payload() -> dict[str, Any]:
             "length_gain": DIFFERING_LENGTH_GAIN,
             "arm_thickness_mm": DEFAULT_ARM_THICKNESS,
             "base_height_mm": LOCKED_CONNECTOR_HEIGHT,
+            # The web's fixed inward reach is not a fraction of the drop, so
+            # the browser cannot get it from the ramp alone. These are its
+            # inputs, served rather than hard-coded so the live readout and
+            # the generated part can never disagree.
+            "mating_gap_mm": WAVE_MATING_GAP,
+            "web_run_clearance_mm": DIFFERING_WEB_RUN_CLEARANCE,
+            "wall_depth_factor": math.sqrt(1.0 + max_wave_slope() ** 2),
         },
         "preferences": load_preferences(),
         "slicer": {
@@ -1020,10 +1031,16 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
             web_thickness=arm_thickness if different_heights else None,
             auto_adjust=False,
         )
-    plan = differing_connector_plan(connector, length, bin_a_height, bin_b_height)
+    plan = differing_connector_plan(
+        connector, length, bin_a_height, bin_b_height, box
+    )
     if different_heights:
         plan["length_mm"] = length
-        plan["web_thickness_mm"] = arm_thickness
+        # The web is never thinner than the inward reach, whatever the browser
+        # asked for, so report what was actually built.
+        plan["web_thickness_mm"] = max(
+            arm_thickness, DEFAULT_ARM_THICKNESS + differing_web_reach(box, connector)
+        )
     return {
         "result": result,
         "output": str(output_dir),

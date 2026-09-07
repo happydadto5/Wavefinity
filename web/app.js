@@ -46,6 +46,9 @@ const state = {
   history: [],
   future: [],
   serverInstance: null,
+  kindRequest: 0,
+  fitRequest: 0,
+  nestPhotoRequest: 0,
 };
 
 const VERSION_POLL_MS = 5000;
@@ -332,8 +335,23 @@ function autoAdjustConnectorFields() {
     ? 0
     : Math.max(0, Math.min(1, (drop - minDrop) / (fullDrop - minDrop)));
 
+  // Over the drop the seam holds one wall, not two, so the web has to reach
+  // back across the empty half of the channel and run on the taller bin's
+  // outer face. That reach is set by the seam, not by the drop, so it is a
+  // floor under the drop-scaled thickness rather than a fraction of it - the
+  // web is never thinner than this, however small the difference in height.
+  const wall = state.design?.box?.wall ?? 0.8;
+  const tolerance = number($("#connector-tolerance")?.value, 0.02);
+  const reach = wall * (rules.wall_depth_factor ?? 1.181)
+    + (rules.mating_gap_mm ?? 0.25)
+    + tolerance
+    - (rules.web_run_clearance_mm ?? 0.15);
+
   const adjustedLen = baseLen * (1 + gain * frac);
-  const adjustedArm = armT + (webT - armT) * frac;
+  // frac === 0 is a plain extension with no web at all.
+  const adjustedArm = frac > 0
+    ? armT + Math.max((webT - armT) * frac, reach)
+    : armT;
 
   $("#connector-length").value = fmt(adjustedLen);
   const armEl = $("#connector-arm-thickness");
@@ -750,11 +768,22 @@ function starterItem() {
   };
 }
 
+function cancelPendingDraftWork() {
+  state.kindRequest += 1;
+  state.fitRequest += 1;
+  state.nestPhotoRequest += 1;
+  state.draftRequest += 1;
+}
+
 // Nothing selected, nothing shown as a live draft - the state on first load
 // and after New/Open/a delete/a mode switch with nothing selected. A
 // palette button never doubles as "still working on the last shape you
 // looked at": if none of them is highlighted, nothing has been added yet.
 function clearDraftSelection() {
+  // Opening, resetting, deleting or changing layout mode starts a new editing
+  // context. Invalidate every in-flight draft operation so an old palette
+  // response, fit, photo upload, or auto-save cannot alter the new design.
+  cancelPendingDraftWork();
   state.draft = null;
   state.draftKind = null;
   state.draftAutoCommit = false;
@@ -775,6 +804,12 @@ function pickKind(kind) {
 }
 
 async function selectKind(kind, reset = false) {
+  // The palette request is independent of preview/draft requests. Without its
+  // own token, a slower earlier click could overwrite a newer shape choice.
+  // A new palette choice also makes every pending edit to the prior draft
+  // obsolete. Otherwise its auto-save could land after this new choice.
+  cancelPendingDraftWork();
+  const request = ++state.kindRequest;
   updateInteriorModeVisibility(true);
   state.draftKind = kind;
   state.selected = reset ? null : state.selected;
@@ -800,6 +835,7 @@ async function selectKind(kind, reset = false) {
       along: "x",
       item: info.flags.item ? starterItem() : null,
     });
+    if (request !== state.kindRequest) return;
     state.draft = result.feature;
     state.draftResolvedOptions = result.resolved_options || {};
     // What the engine started this text at, so the Part Name is only ever
@@ -809,6 +845,7 @@ async function selectKind(kind, reset = false) {
     updateSelectionButtons();
     refreshDraft();
   } catch (error) {
+    if (request !== state.kindRequest) return;
     $("#draft-status").textContent = error.message;
     toast(error.message, true);
   }
@@ -816,6 +853,7 @@ async function selectKind(kind, reset = false) {
 
 function selectedFeature(index) {
   if (index === null || index < 0 || index >= state.design.layout.features.length) return;
+  cancelPendingDraftWork();
   state.selected = index;
   state.draft = clone(state.design.layout.features[index]);
   state.draftAutoCommit = true;
@@ -1313,10 +1351,17 @@ async function uploadNestPhoto(event) {
     return;
   }
   const input = event.target;
+  const draft = state.draft;
+  const request = ++state.nestPhotoRequest;
   let mutationStarted = false;
   $("#draft-status").textContent = "Finding letter paper and tracing the part…";
   try {
     const image = await readFileDataUrl(file);
+    // The file picker stays open while the browser reads it. If the user
+    // chose another palette part meanwhile, never let this old photo replace
+    // that newer design choice (a Photo Nest replaces the whole layout).
+    if (request !== state.nestPhotoRequest || state.draft !== draft ||
+        state.draftKind !== "nest") return;
     if (!beginDesignMutation()) return;
     mutationStarted = true;
     const previousDesign = clone(state.design);
@@ -1736,6 +1781,9 @@ function beginDesignMutation() {
     toast("Finish the current design change first.", true);
     return false;
   }
+  // The mutation operates on a new snapshot of the design. Pending draft
+  // work was calculated against the old snapshot and must not land afterward.
+  cancelPendingDraftWork();
   updateDesignFromForm();
   state.designMutationBusy = true;
   state.previewRequest += 1;
@@ -1965,10 +2013,17 @@ function updateFitActions() {
 
 async function fitPartToContents() {
   if (!state.draft) return;
+  const draft = state.draft;
+  const snapshot = JSON.stringify(draft);
+  const request = ++state.fitRequest;
   try {
     const result = await api("/api/feature/fit", {
-      design: state.design, feature: state.draft,
+      design: state.design, feature: draft,
     });
+    // Do not apply a completed fit to a different part, or over an edit made
+    // while the calculation was in flight.
+    if (request !== state.fitRequest || state.draft !== draft ||
+        JSON.stringify(draft) !== snapshot) return;
     const zone = result.feature.zone;
     const unchanged = state.draft.zone.every((v, i) => Math.abs(v - zone[i]) < 0.05);
     state.draft.zone = zone;
