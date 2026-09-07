@@ -77,6 +77,7 @@ BASE_UNIT = GRID_PITCH           # one unit is one grid step, so sizes are whole
 DEFAULT_WALL = 0.8
 DEFAULT_BASE_THICKNESS = 0.6
 DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
+EASY_CLEAN_RADIUS = 2.0      # inside floor-to-wall radius when exposed
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner
 # Locked in after the physical tolerance print: these are no longer tuning
 # knobs, they are the connector's specification.
@@ -237,12 +238,16 @@ class BoxSpec:
     corner_fillet: float = DEFAULT_CORNER_FILLET
     flat_inside: float = 0.0   # mm of flat-walled band rising from the floor
     base_thickness: float = DEFAULT_BASE_THICKNESS
+    easy_clean: bool = False
+    standard_base: bool = True
+    easy_clean_radius: float = EASY_CLEAN_RADIUS
 
     def __post_init__(self) -> None:
         values = {
             "X": self.x, "Y": self.y, "Z": self.z,
             "wall": self.wall, "corner fillet": self.corner_fillet,
             "base thickness": self.base_thickness,
+            "easy clean radius": self.easy_clean_radius,
         }
         for name, value in values.items():
             if not math.isfinite(value) or value <= 0:
@@ -270,6 +275,8 @@ class BoxSpec:
             raise ValueError("flat inside must be between 0 and 1 mm")
         if self.flat_inside > 0.0 and self.base_thickness + self.flat_inside >= self.z:
             raise ValueError("box is too shallow for a flat-walled band")
+        if self.easy_clean_radius <= 0.0:
+            raise ValueError("easy clean radius must be positive")
         if self.wall_depth * 2.0 >= min(self.x, self.y) - WAVE_MATING_GAP:
             raise ValueError("wall thickness leaves no cavity")
 
@@ -711,6 +718,183 @@ def _sweep_profile(
     return mesh
 
 
+def _easy_clean_profile(spec: BoxSpec) -> list[tuple[float, float]]:
+    """Quarter-round material added at an exposed inside floor/wall joint."""
+    radius = spec.easy_clean_radius
+    # A straight lower band must cover the full excursion of the cavity above
+    # it.  Otherwise the troughs left beside a straight fillet form a second,
+    # wavy dirt-catching groove at the floor.
+    embed = 2.0 * WAVE_AMPLITUDE + 0.2
+    centre_z = spec.base_thickness + radius
+    points = [(-embed, spec.base_thickness), (-embed, centre_z), (0.0, centre_z)]
+    for index in range(1, 17):
+        angle = math.pi + (math.pi / 2.0) * index / 16.0
+        points.append((radius + radius * math.cos(angle), centre_z + radius * math.sin(angle)))
+    return points
+
+
+def _easy_clean_fillets(
+    spec: BoxSpec,
+    blocked_walls: Iterable[tuple[str, float, float]] = (),
+) -> list[trimesh.Trimesh]:
+    """Return fillet sweeps, omitting intervals occupied by interior parts.
+
+    Wall labels are ``+x``, ``-x``, ``+y`` and ``-y``; the interval is measured
+    along that wall's y or x axis respectively.
+    """
+    blocked: dict[str, list[tuple[float, float]]] = {name: [] for name in ("+x", "-x", "+y", "-y")}
+    for wall, low, high in blocked_walls:
+        if wall in blocked and high > low:
+            blocked[wall].append((low, high))
+    tx, ty = spec.half_x - CORNER_INSET, spec.half_y - CORNER_INSET
+    walls = (
+        ("+x", "y", spec.half_x - spec.wall_depth, ty, (-1.0, 0.0)),
+        ("-x", "y", -(spec.half_x - spec.wall_depth), ty, (1.0, 0.0)),
+        ("+y", "x", spec.half_y - spec.wall_depth, tx, (0.0, -1.0)),
+        ("-y", "x", -(spec.half_y - spec.wall_depth), tx, (0.0, 1.0)),
+    )
+    result: list[trimesh.Trimesh] = []
+    for name, axis, face, reach, inward in walls:
+        cuts = sorted((max(-reach, low), min(reach, high)) for low, high in blocked[name])
+        cursor = -reach
+        free: list[tuple[float, float]] = []
+        for low, high in cuts:
+            if low > cursor:
+                free.append((cursor, low))
+            cursor = max(cursor, high)
+        if cursor < reach:
+            free.append((cursor, reach))
+        for low, high in free:
+            if high - low < 0.25:
+                continue
+            samples = np.linspace(low, high, max(4, _sample_count(high - low)))
+            if axis == "y":
+                path = [(face, float(s)) for s in samples]
+            else:
+                path = [(float(s), face) for s in samples]
+            result.append(_sweep_profile(path, inward, _easy_clean_profile(spec)))
+    return result
+
+
+def _resampled_ring(polygon: Polygon, count: int) -> np.ndarray:
+    """Return a counter-clockwise, evenly spaced exterior ring."""
+    boundary = polygon.exterior
+    ring = np.asarray([
+        boundary.interpolate(boundary.length * index / count).coords[0]
+        for index in range(count)
+    ], dtype=float)
+    if not polygon.exterior.is_ccw:
+        ring = ring[::-1]
+    return ring
+
+
+def _align_ring(reference: np.ndarray, ring: np.ndarray) -> np.ndarray:
+    """Rotate a same-sized ring so equivalent perimeter points line up."""
+    start = int(np.argmin(np.sum((ring - reference[0]) ** 2, axis=1)))
+    return np.roll(ring, -start, axis=0)
+
+
+def _loft_cavity(rings: list[np.ndarray], heights: list[float]) -> trimesh.Trimesh:
+    """Create one closed cavity solid through matching horizontal rings."""
+    if len(rings) != len(heights) or len(rings) < 2:
+        raise ValueError("a cavity loft needs at least two matching rings")
+    count = len(rings[0])
+    if any(len(ring) != count for ring in rings):
+        raise ValueError("cavity loft rings must have matching point counts")
+
+    vertices = [
+        (float(x), float(y), height)
+        for ring, height in zip(rings, heights)
+        for x, y in ring
+    ]
+    faces: list[tuple[int, int, int]] = []
+    for level in range(len(rings) - 1):
+        low, high = level * count, (level + 1) * count
+        for index in range(count):
+            next_index = (index + 1) % count
+            faces.append((low + index, low + next_index, high + next_index))
+            faces.append((low + index, high + next_index, high + index))
+
+    # Caps are triangulated from the same sampled points as the side walls, so
+    # trimesh can weld every cap edge to its matching side edge exactly.
+    for ring, height, reverse in ((rings[0], heights[0], True), (rings[-1], heights[-1], False)):
+        cap = Polygon(ring)
+        cap_vertices, cap_faces = trimesh.creation.triangulate_polygon(cap, engine="earcut")
+        offset = len(vertices)
+        vertices.extend((float(x), float(y), height) for x, y in cap_vertices)
+        for face in cap_faces:
+            triangle = tuple(offset + int(index) for index in face)
+            faces.append(triangle[::-1] if reverse else triangle)
+
+    mesh = trimesh.Trimesh(
+        vertices=np.asarray(vertices, dtype=float),
+        faces=np.asarray(faces, dtype=np.int64),
+        process=True,
+    )
+    trimesh.repair.fix_winding(mesh)
+    if mesh.volume < 0:
+        mesh.invert()
+    if not (mesh.is_watertight and mesh.is_winding_consistent):
+        raise RuntimeError("easy-clean cavity loft is not a clean solid")
+    return mesh
+
+
+def _easy_clean_cavity(spec: BoxSpec) -> trimesh.Trimesh:
+    """Cavity with a straight, rounded lower band that blends into the wave.
+
+    The first radius is the constant floor-to-wall round.  The next radius
+    eases from the straight wall into the normal wave, so there is no ledge at
+    the top for debris to collect on.
+    """
+    radius = spec.easy_clean_radius
+    floor_z = spec.base_thickness
+    blend_top = floor_z + 2.0 * radius
+    if blend_top >= spec.z:
+        raise ValueError(
+            "easy clean needs room for its curve and smooth wall transition; "
+            "reduce the curve or increase Z"
+        )
+
+    flat = flat_cavity_polygon(spec)
+    floor = flat.buffer(-radius, join_style=1, quad_segs=16)
+    if not isinstance(floor, Polygon) or floor.is_empty or floor.area <= 0.0:
+        raise ValueError("easy clean curve is too large for this bin")
+
+    wave = wavy_cavity_polygon(spec)
+    # The full-resolution rounded outline carries many duplicate-near corner
+    # samples.  Half the normal wall sampling is still finer than a printable
+    # layer while keeping this otherwise tall, multi-ring cavity lightweight.
+    count = max(128, math.ceil(wave.length * SAMPLES_PER_MM / 2.0))
+    wave_points = _resampled_ring(wave, count)
+    flat_points = _align_ring(wave_points, _resampled_ring(flat, count))
+    floor_points = _align_ring(wave_points, _resampled_ring(floor, count))
+
+    # A circular fillet reaches the straight wall at one radius.  Cosine easing
+    # then starts and finishes tangent to both walls, rather than making a
+    # horizontal shelf where the normal wave resumes.
+    rings: list[np.ndarray] = []
+    heights: list[float] = []
+    curve_steps = 16
+    for step in range(curve_steps + 1):
+        fraction = step / curve_steps
+        inset = radius * math.sqrt(max(0.0, 1.0 - (1.0 - fraction) ** 2))
+        # ``inset`` is 0 at the floor and radius at the top of the round.
+        # Interpolating from the eroded floor ring keeps its contour smooth.
+        rings.append(floor_points + fraction * (flat_points - floor_points))
+        heights.append(floor_z + inset)
+
+    blend_steps = 16
+    for step in range(1, blend_steps + 1):
+        fraction = step / blend_steps
+        eased = 0.5 - 0.5 * math.cos(math.pi * fraction)
+        rings.append(flat_points + eased * (wave_points - flat_points))
+        heights.append(floor_z + radius + radius * fraction)
+
+    rings.append(wave_points)
+    heights.append(spec.z + 1.0)
+    return _loft_cavity(rings, heights)
+
+
 # --------------------------------------------------------------------------- #
 # lock bumps
 # --------------------------------------------------------------------------- #
@@ -800,9 +984,15 @@ def flat_cavity_polygon(spec: BoxSpec) -> Polygon:
     )
 
 
-def make_box(spec: BoxSpec) -> trimesh.Trimesh:
+def make_box(
+    spec: BoxSpec,
+    blocked_walls: Iterable[tuple[str, float, float]] = (),
+) -> trimesh.Trimesh:
+    blocked_walls = tuple(blocked_walls)
     envelope = _extrude_polygon(wavy_outer_polygon(spec), spec.z)
-    if spec.flat_inside > 0.0:
+    if spec.easy_clean and not blocked_walls:
+        cavity = _easy_clean_cavity(spec)
+    elif spec.flat_inside > 0.0:
         # The cavity is two stacked prisms: a straight-sided one sitting on the
         # floor, and the wavy one above it.  What that leaves behind is a band
         # of wall with flat faces for the first flat_inside mm, which is the
@@ -823,8 +1013,15 @@ def make_box(spec: BoxSpec) -> trimesh.Trimesh:
     shell = difference([envelope, cavity])
     bumps = make_wall_lock_bumps(spec)
     result = union([shell, *bumps]) if bumps else shell
+    if spec.easy_clean and blocked_walls:
+        # Manifold's multi-solid union can leave a non-manifold seam where
+        # adjacent wall sweeps meet at a corner; fusing each wall in turn is
+        # equivalent geometry and keeps the exported bin watertight.
+        for fillet in _easy_clean_fillets(spec, blocked_walls):
+            result = union([result, fillet])
     result.remove_unreferenced_vertices()
-    result.merge_vertices()
+    if not spec.easy_clean:
+        result.merge_vertices()
     return result
 
 

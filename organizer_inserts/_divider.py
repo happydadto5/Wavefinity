@@ -3,8 +3,13 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 import trimesh
+from shapely import affinity
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
-from organizer_engine import BoxSpec, WAVE_AMPLITUDE, _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile, _rounded, flat_cavity_polygon, intersection, union, wavy_cavity_polygon
+from organizer_engine import (
+    BoxSpec, WAVE_AMPLITUDE, _extrude_polygon, _extrude_xz_profile,
+    _extrude_yz_profile, _rounded, flat_cavity_polygon, intersection,
+    text_outline, text_prism, union, wavy_cavity_polygon,
+)
 from ._core import Feature, Zone, connector_keep_out
 from ._registry import defaults, feature, resolved_options
 MAX_DIVIDER_ANGLE = 45.0
@@ -36,10 +41,13 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
         # angle adds nothing, so an older design with none of these keys
         # keeps exactly the geometry it always had.
         "bottom_angle": 0.0,
+        "slope_base": 0,
         "reverse_bottom": 0,
         "alternate_bottom": 0,
         "minimal_bottom": 0,
         "bottom_supports": 3,
+        "label_divisions": 0,
+        "division_level": "base",
     }
 
 
@@ -114,6 +122,9 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
             _option_flag(options.get("minimal_bottom")),
             supports, spec_feature.full_span,
         ))
+    div_texts = divider_division_texts(box, spec_feature, base_z)
+    for _text_label, text_solid, _raised in div_texts:
+        solids.append(text_solid)
     return solids
 
 
@@ -139,6 +150,89 @@ def _bottom_slot_bounds(
     else:
         edges = sorted([zone.x0, *centres, zone.x1])
     return [(edges[index], edges[index + 1]) for index in range(len(edges) - 1)]
+
+
+def divider_division_texts(
+    box: BoxSpec, spec_feature: Feature, base_z: float
+) -> list[tuple[str, trimesh.Trimesh, bool]]:
+    """(label, text_solid, raised) for each division label on a divider."""
+    options = spec_feature.options or {}
+    if not _option_flag(options.get("label_divisions")):
+        return []
+    raw_labels = options.get("division_labels")
+    if not raw_labels:
+        return []
+    if isinstance(raw_labels, str):
+        import json
+        try:
+            labels = json.loads(raw_labels)
+        except Exception:
+            labels = [s.strip() for s in raw_labels.split(",") if s.strip()]
+    elif isinstance(raw_labels, (list, tuple)):
+        labels = list(raw_labels)
+    else:
+        return []
+
+    zone = spec_feature.zone
+    along = spec_feature.along
+    count = spec_feature.count or 1
+    thickness = float(options.get("thickness", RIB_THICKNESS) or RIB_THICKNESS)
+    height = float(options.get("height", connector_keep_out(box) - base_z) or (connector_keep_out(box) - base_z))
+    spacing = float(options.get("spacing", 0.0) or 0.0)
+    if spacing <= 0.0:
+        span = (zone.y1 - zone.y0) if along == "x" else (zone.x1 - zone.x0)
+        spacing = span / (count + 1)
+
+    centres = _divider_cross_centres(zone, along, count, spacing)
+    slots = _bottom_slot_bounds(zone, along, centres)
+    level = str(options.get("division_level", "base")).strip().lower()
+    z = (base_z + height) if level == "rim" else base_z
+
+    results = []
+    for idx, (slot_low, slot_high) in enumerate(slots):
+        if idx >= len(labels):
+            break
+        text = str(labels[idx] or "").strip()
+        if not text:
+            continue
+        inner_low = slot_low + (0.0 if idx == 0 else thickness / 2.0)
+        inner_high = slot_high - (0.0 if idx == len(slots) - 1 else thickness / 2.0)
+        slot_across = max(1.0, inner_high - inner_low)
+        slot_run = max(1.0, (zone.x1 - zone.x0) if along == "x" else (zone.y1 - zone.y0))
+
+        try:
+            probe = text_outline(text, 10.0)
+        except Exception:
+            continue
+        bx0, by0, bx1, by1 = probe.bounds
+        pw, ph = bx1 - bx0, by1 - by0
+        if pw <= 0 or ph <= 0:
+            continue
+        avail_run = max(0.5, slot_run - 2.0)
+        avail_across = max(0.5, slot_across - 1.0)
+        cap_by_across = avail_across
+        cap_by_run = avail_run / (pw / 10.0)
+        cap = max(2.5, min(cap_by_across, cap_by_run))
+
+        try:
+            outline = text_outline(text, cap)
+        except Exception:
+            continue
+
+        if along == "y":
+            outline = affinity.rotate(outline, 90.0, origin=(0.0, 0.0), use_radians=False)
+
+        cx = (zone.x0 + zone.x1) / 2.0 if along == "x" else (inner_low + inner_high) / 2.0
+        cy = (inner_low + inner_high) / 2.0 if along == "x" else (zone.y0 + zone.y1) / 2.0
+        outline = affinity.translate(outline, xoff=cx, yoff=cy)
+
+        try:
+            solid = text_prism(outline, z, depth=0.6, raised=True)
+            results.append((text, solid, True))
+        except Exception:
+            continue
+
+    return results
 
 
 def _bottom_plane_z(r: float, r0: float, r1: float, rise: float,

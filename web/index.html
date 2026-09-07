@@ -29,7 +29,6 @@
           <div class="section-heading no-toggle">
             <span>Build your bin</span>
           </div>
-          <label class="advanced-toggle"><input id="advanced-settings" type="checkbox">Advanced</label>
         </div>
         <div class="section-body">
           <div class="field-grid three">
@@ -37,8 +36,14 @@
             <label>Length <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
             <label>Height <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
           </div>
-          <div id="advanced-build-settings" class="field-grid three advanced-build-settings" hidden>
-            <label>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1"></label>
+          <div class="mode-and-bin-options">
+            <label>Interior parts print as
+              <select id="mode-select"></select>
+            </label>
+            <label class="checkbox-row inline-option"><input id="standard-base" type="checkbox" checked><span>Standard base?</span></label>
+            <label id="base-thickness-setting" class="inline-number" hidden>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1"></label>
+            <label class="checkbox-row inline-option"><input id="easy-clean" type="checkbox"><span>Easy Clean</span></label>
+            <label id="easy-clean-radius-setting" class="inline-number" hidden>Curve <span class="unit">mm</span><input id="easy-clean-radius" type="number" min="0.1" step="0.1"></label>
           </div>
 
           <label>Part Name (For file)<input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>
@@ -51,11 +56,6 @@
           <button id="add-support" class="button secondary add-support" type="button" hidden>
             + Additional interior part
           </button>
-
-          <fieldset id="interior-mode" class="mode-fieldset" hidden>
-            <legend>How should the interior print?</legend>
-            <div id="mode-options" class="segmented two"></div>
-          </fieldset>
 
           <div class="support-editor" hidden>
             <div class="editor-title">

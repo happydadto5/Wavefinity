@@ -168,6 +168,42 @@ class WaveTests(unittest.TestCase):
 
 
 class BoxTests(unittest.TestCase):
+    def test_easy_clean_adds_watertight_two_mm_floor_wall_rounds(self) -> None:
+        plain = make_box(BoxSpec(32.0, 32.0, 24.0))
+        clean = make_box(BoxSpec(32.0, 32.0, 24.0, easy_clean=True))
+        self.assertTrue(clean.is_watertight)
+        self.assertGreater(clean.volume, plain.volume)
+
+    def test_easy_clean_straightens_then_smoothly_blends_into_the_wave(self) -> None:
+        spec = BoxSpec(32.0, 32.0, 24.0, easy_clean=True)
+        mesh = make_box(spec)
+
+        def cavity_area(z: float) -> float:
+            slab = _extrude_polygon(wavy_outer_polygon(spec), 0.02)
+            slab.apply_translation((0.0, 0.0, z))
+            return difference([slab, mesh]).volume / 0.02
+
+        flat = flat_cavity_polygon(spec).area
+        wavy = wavy_cavity_polygon(spec).area
+        radius = spec.easy_clean_radius
+        # The floor round narrows the cavity, reaches a completely straight
+        # wall at one radius, then opens progressively before meeting the
+        # ordinary wavy cavity at two radii.  The middle assertion specifically
+        # rules out an abrupt ledge at the end of the straight portion.
+        self.assertLess(cavity_area(spec.base_thickness + 0.05), flat)
+        self.assertAlmostEqual(cavity_area(spec.base_thickness + radius + 0.05), flat, delta=2.0)
+        middle = cavity_area(spec.base_thickness + 1.5 * radius)
+        self.assertGreater(middle, flat + 10.0)
+        self.assertLess(middle, wavy - 10.0)
+        self.assertAlmostEqual(cavity_area(spec.base_thickness + 2.0 * radius + 0.05), wavy, delta=0.5)
+
+    def test_easy_clean_omits_a_wall_span_blocked_by_an_interior_part(self) -> None:
+        spec = BoxSpec(32.0, 32.0, 24.0, easy_clean=True)
+        clean = make_box(spec)
+        blocked = make_box(spec, [("-y", -10.0, 10.0)])
+        self.assertTrue(blocked.is_watertight)
+        self.assertLess(blocked.volume, clean.volume)
+
     def test_base_thickness_changes_only_the_floor_material(self) -> None:
         thin = BoxSpec(32.0, 32.0, 24.0, base_thickness=0.6)
         thick = replace(thin, base_thickness=1.0)
@@ -2147,7 +2183,8 @@ class DividerBottomSlopePaletteTests(unittest.TestCase):
         fields = self._divider_fields()
         labels = {label for label, _key, _default in fields}
         keys = {key for _label, key, _default in fields}
-        self.assertIn("Wall lean °", labels)
+        self.assertNotIn("Wall lean °", labels)
+        self.assertIn("Degree °", labels)
         self.assertNotIn("Angle °", labels)
         self.assertIn("bottom_angle", keys)
         self.assertIn("bottom_supports", keys)

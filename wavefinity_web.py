@@ -654,9 +654,13 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     draft_raw = payload.get("draft")
     draft = _feature_from_json(draft_raw, layout.mode) if draft_raw else None
+    selected = payload.get("selected")
+    if not isinstance(selected, int) or isinstance(selected, bool):
+        selected = None
     with GEOMETRY_LOCK:
         scene = preview_geometry(
             box, label, layout.features, layout.mode, label_location, scoop, draft,
+            selected=selected,
         )
     bounds = layout_zone(box, layout.mode)
     geometry = [
@@ -931,7 +935,7 @@ def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Grow the bin - on the 8 mm grid, both axes - to the smallest size that
+    """Resize the bin - on the 8 mm grid, both axes - to the smallest size that
     fits every interior support at the footprint it actually needs, then trim
     back any axis that overshot. A cradle footprint is recomputed from its
     tool, and a bore / post / slot zone is grown (never shrunk) to hold the
@@ -939,6 +943,10 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     that overflowed the drawn zone still makes the bin grow instead of erroring.
     Other supports keep the size the user drew. Supports keep their centre;
     nothing is rearranged.
+
+    By default the current size is the floor - the bin only grows. With
+    ``payload["tighten"]`` the floor drops to one grid unit, so a bin that is
+    now bigger than its contents need is shrunk to fit as well.
     """
     box, layout, label, part_name, label_location, scoop = design_from_dict(
         payload["design"], validate_layout=False
@@ -966,7 +974,13 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
             width, depth = one.zone.width, one.zone.depth
             grown = feature_min_footprint(trial, one, base_height(trial, mode))
             if grown is not None:
+                # Round the grown footprint up to the editor grid, exactly as
+                # "Fit to contents" does - otherwise the zone snap can leave it
+                # a hair under what a leaned grid's reach needs.
+                snap = layout.snap or EDITOR_SNAP
+                grown = tuple(math.ceil(v / snap - 1e-6) * snap for v in grown)
                 width, depth = max(width, grown[0]), max(depth, grown[1])
+                return resized_feature(one, trial, (width, depth), mode, layout.snap)
         cx, cy = one.zone.centre
         raw = Zone(cx - width / 2.0, cy - depth / 2.0,
                    cx + width / 2.0, cy + depth / 2.0)
@@ -987,7 +1001,13 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     start_x, start_y = box.x, box.y
     ceiling = 100.0 * BASE_UNIT
-    x, y = start_x, start_y
+    # Normally the current size is the floor - the bin only ever grows. In
+    # "tighten" mode the floor drops to one grid unit, so the same search that
+    # grows to a fit then trims back also shrinks a bin that is now too big.
+    tighten = bool(payload.get("tighten"))
+    floor_x = float(BASE_UNIT) if tighten else start_x
+    floor_y = float(BASE_UNIT) if tighten else start_y
+    x, y = floor_x, floor_y
     result = fits(x, y)
     while result is None:
         x = round(x + BASE_UNIT)
@@ -1000,13 +1020,13 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
         result = fits(x, y)
 
     # First fit found by growing both axes; give back any step that was not
-    # actually needed.
+    # actually needed (down to the floor).
     for _ in range(200):
         trimmed = False
-        if x - BASE_UNIT >= start_x and fits(x - BASE_UNIT, y) is not None:
+        if x - BASE_UNIT >= floor_x and fits(x - BASE_UNIT, y) is not None:
             x = round(x - BASE_UNIT)
             trimmed = True
-        if y - BASE_UNIT >= start_y and fits(x, y - BASE_UNIT) is not None:
+        if y - BASE_UNIT >= floor_y and fits(x, y - BASE_UNIT) is not None:
             y = round(y - BASE_UNIT)
             trimmed = True
         if not trimmed:
@@ -1023,7 +1043,8 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
             trial, updated, label, part_name, label_location, scoop,
         ),
         "box": {"x": trial.x, "y": trial.y, "z": trial.z},
-        "grew": (trial.x != start_x or trial.y != start_y),
+        "grew": (trial.x > start_x or trial.y > start_y),
+        "changed": (trial.x != start_x or trial.y != start_y),
     }
 
 

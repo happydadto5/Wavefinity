@@ -118,9 +118,10 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
     if columns < 1 or rows < 1:
         raise ValueError(f"no room for {item.name}: zone is too small for a bore")
 
-    # Every hole leans the same way by the same amount, so the whole block
-    # just shifts along the lean axis - rows and columns keep their pitch and
-    # any grid may lean. The zone only needs the extra sideways ``reach``.
+    # Every hole leans the same way by the same amount, tilting about its own
+    # mouth on the flat top face. The block stays upright; rows and columns keep
+    # their pitch. The zone only needs the extra sideways ``reach`` the leaning
+    # bottoms travel.
     tilted = angle > 1e-9
     lean = math.radians(angle) if tilted else 0.0
     lean_axis = spec_feature.along           # 'x' or 'y'
@@ -198,35 +199,23 @@ def bore_hole_axes(
     if not grid["tilted"]:
         return []
     lean, lean_axis = grid["lean"], grid["lean_axis"]
-    depth, height, held = grid["depth"], grid["height"], grid["held"]
+    depth, held = grid["depth"], grid["held"]
+    height = grid["height"]
     stub = max(10.0, held)
-    centre_x, centre_y = grid["centre_x"], grid["centre_y"]
     # Unit vector up the hole and out of the block - opposite the way the buried
-    # bottom shifts. Mirrors the hole rotation in ``build_bore``.
+    # bottom shifts. Mirrors the per-hole tilt in ``build_bore``; the block
+    # itself never rotates, so these points need no further transform.
     if lean_axis == "x":
         up = (-math.sin(lean), 0.0, math.cos(lean))
     else:
         up = (0.0, -math.sin(lean), math.cos(lean))
     mouth_z = base_z + height
-    centre = (centre_x, centre_y, base_z + height / 2.0)
-    axis = (0.0, 1.0, 0.0) if lean_axis == "x" else (1.0, 0.0, 0.0)
-    sign = -1.0 if lean_axis == "x" else 1.0
-    rotation = trimesh.transformations.rotation_matrix(sign * lean, axis)
     axes = []
     for x, y in _bore_hole_centres(grid, spec_feature.count):
         mouth = (x, y, mouth_z)
         bottom = (x - up[0] * depth, y - up[1] * depth, mouth_z - up[2] * depth)
         tip = (x + up[0] * stub, y + up[1] * stub, mouth_z + up[2] * stub)
-        # Transform all three points by the bore tilt, around the bore centre.
-        def rotate_point(pt):
-            p = (pt[0] - centre[0], pt[1] - centre[1], pt[2] - centre[2], 1.0)
-            rotated = rotation @ (p[0], p[1], p[2], p[3])
-            return (
-                rotated[0] + centre[0],
-                rotated[1] + centre[1],
-                rotated[2] + centre[2],
-            )
-        axes.append((rotate_point(bottom), rotate_point(mouth), rotate_point(tip)))
+        axes.append((bottom, mouth, tip))
     return axes
 
 
@@ -300,16 +289,9 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             hole.apply_translation((x, y, base_z + height))
             holes.append(hole)
             made += 1
+    # The block stays an upright rectangular prism - flat top and bottom, plumb
+    # sides. Only the holes lean inside it (each was tilted about its own mouth
+    # above), and the zone was widened by ``reach`` to keep the leaning bottoms
+    # buried. The whole block is never rotated.
     result = difference([block, union(holes)])
-    # If the bore is tilted, rotate the entire block and holes together around the block centre.
-    if tilted:
-        centre = (centre_x, centre_y, base_z + height / 2.0)
-        axis = (0.0, 1.0, 0.0) if lean_axis == "x" else (1.0, 0.0, 0.0)
-        sign = -1.0 if lean_axis == "x" else 1.0
-        # Translate to origin, rotate, translate back.
-        result.apply_translation((-centre[0], -centre[1], -centre[2]))
-        result.apply_transform(
-            trimesh.transformations.rotation_matrix(sign * lean, axis)
-        )
-        result.apply_translation(centre)
     return [result]

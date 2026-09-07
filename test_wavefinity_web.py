@@ -840,6 +840,17 @@ class WebApplicationTests(unittest.TestCase):
         self.assertTrue(any(face["kind"] in ("feature_divider", "feature_conflict_divider") for face in preview["geometry"]))
         self.assertTrue(any(face["kind"] == "draft_invalid" for face in preview["geometry"]))
 
+    def test_preview_ignores_the_saved_part_when_it_is_the_open_draft(self):
+        design = default_design()
+        divider = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        placed = apply_feature_payload({
+            "design": design, "feature": divider, "index": None,
+        })["design"]
+        draft = placed["layout"]["features"][0]
+        preview = preview_payload({"design": placed, "draft": draft, "selected": 0})
+        self.assertIsNone(preview["draft_error"])
+        self.assertFalse(preview["feature_errors"])
+
     def test_catalog_exposes_slicer_info(self):
         catalog = catalog_payload()
         self.assertIn("slicer", catalog)
@@ -1048,8 +1059,8 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
         self.assertIn(b"Build your bin", body)
-        self.assertIn(b'id="advanced-settings"', body)
-        self.assertIn(b'id="advanced-build-settings"', body)
+        self.assertNotIn(b'id="advanced-settings"', body)
+        self.assertNotIn(b'id="advanced-build-settings"', body)
         self.assertIn(b"Base thickness", body)
         self.assertIn(b'id="base-thickness"', body)
         self.assertNotIn(b"Advanced bin settings", body)
@@ -1083,14 +1094,16 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b"support-layout-dialog", body)
         self.assertNotIn(b"Add curved scoop", body)
         self.assertNotIn(b"Fixed 5 mm lettering on a shelf", body)
-        self.assertLess(body.index(b"Part Name (For file)"), body.index(b"Interior parts"))
-        self.assertLess(body.index(b"Interior parts"), body.index(b"Connect bins"))
+        # The interior print-mode dropdown is a universal setting: it sits above
+        # the Part Name, which in turn sits above the interior parts section.
+        self.assertLess(body.index(b'id="mode-select"'), body.index(b"Part Name (For file)"))
+        self.assertLess(body.index(b"Part Name (For file)"), body.index(b"<h2>Interior parts</h2>"))
+        self.assertLess(body.index(b"<h2>Interior parts</h2>"), body.index(b"Connect bins"))
         self.assertLess(body.index(b"Connect bins"), body.index(b"Save Location:"))
-        self.assertLess(body.index(b"How should the interior print?"), body.index(b"Connect bins"))
         self.assertLess(body.index(b'id="support-palette"'), body.index(b'id="add-support"'))
         self.assertLess(body.index(b'id="add-support"'), body.index(b'id="draft-fields"'))
         self.assertIn(b'id="add-support" class="button secondary add-support" type="button" hidden', body)
-        self.assertIn(b'id="mode-options"', body)
+        self.assertIn(b'id="mode-select"', body)
         self.assertIn(b'data-preview-mode="standard"', body)
         self.assertIn(b'data-preview-mode="xray"', body)
         self.assertIn(b'data-preview-mode="bin"', body)

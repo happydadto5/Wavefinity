@@ -1311,6 +1311,8 @@ function renderDraftFields() {
     // Rendered by the divider bottom-slope block below, on its own and only
     // while Use support crossbars is ticked.
     if (option.key === "bottom_supports") continue;
+    // Slope and angle are handled specifically for divider below.
+    if (info.kind === "divider" && (option.key === "bottom_angle" || option.key === "angle")) continue;
     // The scoop depth field is rendered with its own % unit and help text above.
     if (info.kind === "scoop") continue;
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
@@ -1342,37 +1344,79 @@ function renderDraftFields() {
     if (info.kind === "pocket" && option.key === "depth") fieldOpts.min = 0.1;
     if (info.kind === "pocket" && option.key === "height") fieldOpts.min = 1.0;
     html += field(option.label, `option:${option.key}`, shown, fieldOpts);
-    if (option.key === "angle" && info.kind === "divider") {
-      // The wedge-vs-straight choice only means anything once the wall
-      // leans, so it stays hidden until the lean above is non-zero
-      // (updateDraftFromFields re-toggles this as the field changes).
-      const leanNow = number(
-        one.options?.angle ?? state.draftResolvedOptions?.angle ?? shown, 0,
-      );
-      html += `<fieldset id="leaning-shape" class="wide"${leanNow ? "" : " hidden"}><legend>Leaning shape</legend><div class="segmented two">
-        <label><input type="radio" name="draft-wedge" value="wedge" ${one.wedge !== false ? "checked" : ""}><span>Wedge</span></label>
-        <label><input type="radio" name="draft-wedge" value="straight" ${one.wedge === false ? "checked" : ""}><span>Straight</span></label>
-      </div>
-      <p class="field-help"><strong>Wedge</strong> keeps the asked-for width at the top and widens the base to carry the sideways push of whatever rests against it. <strong>Straight</strong> keeps the same thin thickness the whole way up and can snap off.</p></fieldset>`;
-    }
-    if (option.key === "bottom_angle") {
-      html += `<p class="field-help wide">Tilts the tool-slot bottoms so a tool rests at an angle instead of flat. Positive raises tools toward the right or back; negative (set a minus value) raises them toward the left or front. Separate from Wall lean below, which tilts the whole wall.</p>`;
-      const opt = one.options || {};
-      const bottomCheck = (key, title, help, on) => `<label class="check-card wide">
-        <input type="checkbox" data-draft="option:${key}" ${on ? "checked" : ""}>
-        <span><strong>${title}</strong><small>${help}</small></span>
-      </label>`;
-      html += bottomCheck("alternate_bottom", "Alternate slopes",
-        "Reverses every second tool slot.", opt.alternate_bottom === true);
-      html += bottomCheck("minimal_bottom", "Use support crossbars",
-        "A few thin bars hung off the walls at the tool line instead of a solid slope - less plastic, and each bar is tapered so it prints without support.", opt.minimal_bottom === true);
-      if (opt.minimal_bottom === true) {
-        const explicitBars = Object.prototype.hasOwnProperty.call(opt, "bottom_supports");
-        const bars = explicitBars
-          ? opt.bottom_supports
-          : state.draftResolvedOptions?.bottom_supports ?? 3;
-        html += field("Number of crossbars", "option:bottom_supports", bars, { step: "1" });
+  }
+  if (info.kind === "divider") {
+    const opt = one.options || {};
+    const hasSlope = opt.slope_base === true || (opt.bottom_angle !== undefined && Number(opt.bottom_angle) !== 0);
+    const bottomCheck = (key, title, help, on) => `<label class="check-card wide">
+      <input type="checkbox" data-draft="option:${key}" ${on ? "checked" : ""}>
+      <span><strong>${title}</strong><small>${help}</small></span>
+    </label>`;
+
+    html += bottomCheck("slope_base", "Slope base", "Tilts the tool-slot bottoms so tools rest at an angle instead of flat.", hasSlope);
+
+    if (hasSlope) {
+      const explicitAngle = Object.prototype.hasOwnProperty.call(opt, "bottom_angle");
+      const angleVal = explicitAngle ? opt.bottom_angle : (state.draftResolvedOptions?.bottom_angle ?? 20);
+      html += field("Degree °", "option:bottom_angle", angleVal, { step: "1" });
+      html += bottomCheck("alternate_bottom", "Alternate slopes", "Reverses every second tool slot.", opt.alternate_bottom === true);
+
+      const angleNum = number(angleVal, 0);
+      if (angleNum !== 0) {
+        html += bottomCheck("minimal_bottom", "Use support crossbars", "A few thin bars hung off the walls at the tool line instead of a solid slope.", opt.minimal_bottom === true);
+        if (opt.minimal_bottom === true) {
+          const explicitBars = Object.prototype.hasOwnProperty.call(opt, "bottom_supports");
+          const bars = explicitBars
+            ? opt.bottom_supports
+            : state.draftResolvedOptions?.bottom_supports ?? 3;
+          html += field("Number of crossbars", "option:bottom_supports", bars, { step: "1" });
+        }
       }
+    }
+
+    const hasLabels = opt.label_divisions === true;
+    html += bottomCheck("label_divisions", "Label divisions", "Add text labels to each division slot.", hasLabels);
+
+    if (hasLabels) {
+      const divLevel = opt.division_level === "rim" ? "rim" : "base";
+      html += `<fieldset class="wide"><legend>Level</legend><div class="segmented two">
+        <label><input type="radio" name="draft-division-level" value="base" ${divLevel === "base" ? "checked" : ""}><span>Flush with base</span></label>
+        <label><input type="radio" name="draft-division-level" value="rim" ${divLevel === "rim" ? "checked" : ""}><span>Rim level</span></label>
+      </div></fieldset>`;
+
+      const count = Math.max(1, number(one.count, 1));
+      const slotCount = count + 1;
+      let divLabels = [];
+      if (Array.isArray(opt.division_labels)) {
+        divLabels = opt.division_labels;
+      } else if (typeof opt.division_labels === "string") {
+        try {
+          divLabels = JSON.parse(opt.division_labels);
+        } catch {
+          divLabels = opt.division_labels.split(",");
+        }
+      }
+
+      html += `<div class="wide division-labels-wrap">
+        <label>Division labels</label>
+        <table class="division-table" style="width:100%; border-collapse:collapse; margin-top:4px;">
+          <thead>
+            <tr style="text-align:left; font-size:12px; color:var(--text-muted, #666);">
+              <th style="padding:4px 8px; width:70px;">Slot</th>
+              <th style="padding:4px 8px;">Text</th>
+            </tr>
+          </thead>
+          <tbody>`;
+      for (let s = 0; s < slotCount; s++) {
+        const val = escapeHtml(String(divLabels[s] || ""));
+        html += `<tr>
+          <td style="padding:4px 8px; font-weight:600; font-size:12px;">Slot ${s + 1}</td>
+          <td style="padding:4px 8px;">
+            <input type="text" data-division-index="${s}" value="${val}" placeholder="e.g. ${s + 1}" style="width:100%;">
+          </td>
+        </tr>`;
+      }
+      html += `</tbody></table></div>`;
     }
   }
   // The auto-size buttons sit at the very bottom of the editor.
@@ -1385,6 +1429,25 @@ function renderDraftFields() {
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateDraftFromFields);
   });
+  $$('input[name="draft-division-level"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
+    markDraftChanged();
+    state.draft.options ||= {};
+    state.draft.options.division_level = input.value;
+    state.draftAutoCommit = true;
+    renderDraftFields();
+    renderLayout2D();
+    refreshDraftSoon();
+  }));
+  $$('input[data-division-index]', $("#draft-fields")).forEach(input => input.addEventListener("input", () => {
+    markDraftChanged();
+    state.draft.options ||= {};
+    let labels = Array.isArray(state.draft.options.division_labels) ? [...state.draft.options.division_labels] : [];
+    const idx = parseInt(input.dataset.divisionIndex, 10);
+    labels[idx] = input.value;
+    state.draft.options.division_labels = labels;
+    renderLayout2D();
+    refreshDraftSoon();
+  }));
   $$('input[name="draft-text-level"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
     markDraftChanged();
     state.draft.options ||= {};
@@ -1779,18 +1842,28 @@ function updateDraftFromFields(event) {
   }
   // A divider's sloped-bottom yes/no choices, read straight off their
   // checkboxes; an unticked one is dropped so a saved design stays clean and
-  // an older one keeps its plain flat bottom.
   if (one.kind === "divider") {
     const fields = $("#draft-fields");
-    for (const key of ["alternate_bottom", "minimal_bottom"]) {
+    for (const key of ["slope_base", "alternate_bottom", "minimal_bottom", "label_divisions"]) {
       const boxEl = $(`[data-draft="option:${key}"]`, fields);
       if (!boxEl) continue;
       if (boxEl.checked) one.options[key] = true;
       else delete one.options[key];
     }
+    if (!one.options.slope_base) {
+      delete one.options.bottom_angle;
+      delete one.options.alternate_bottom;
+      delete one.options.minimal_bottom;
+      delete one.options.bottom_supports;
+    }
+    if (!one.options.label_divisions) {
+      delete one.options.division_level;
+      delete one.options.division_labels;
+    }
   }
   if (changed.startsWith("option:") &&
       !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom",
+        "slope_base", "label_divisions", "division_level", "division_labels",
         "lift_assist", "finger_position", "push_position"]
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
@@ -2403,7 +2476,7 @@ async function refreshPreview() {
       });
     });
     if (result.draft_error) actions.push({
-      message: `Current interior part: ${result.draft_error}`,
+      message: result.draft_error,
       activate: () => {
         $(".support-editor").scrollIntoView({ behavior: "smooth", block: "center" });
         const invalidField = $('#draft-fields input:invalid') || $('#draft-fields input');

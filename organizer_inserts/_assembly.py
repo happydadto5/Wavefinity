@@ -42,6 +42,7 @@ from ._text import (
     text_of,
     text_placed_outline,
 )
+from ._divider import divider_division_texts
 
 
 def build_features(
@@ -110,6 +111,10 @@ def build_texts(
     """
     made: list[tuple[str, trimesh.Trimesh, bool]] = []
     for one in features:
+        if one.kind == "divider":
+            for text_label, text_solid, raised in divider_division_texts(box, one, base_z):
+                made.append((text_label, text_solid, raised))
+            continue
         if not is_text(one) or one.options.get("level") == "rim":
             continue
         if limit is not None and not limit.covers(text_placed_outline(one)):

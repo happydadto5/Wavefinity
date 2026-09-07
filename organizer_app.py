@@ -171,12 +171,11 @@ def label_position(value: str) -> str:
 # means "let the builder choose".
 PART_KINDS = (
     ("divider", "Divider", "A straight wall that splits the floor into compartments.",
-     {"qty": True, "size": False, "along": True, "item": False, "lean": True},
+     {"qty": True, "size": False, "along": True, "item": False, "lean": False},
      (("Width", "thickness", "1.6"), ("Height", "height", ""),
       ("Spacing", "spacing", ""),
-      ("Slope °(±)", "bottom_angle", "0"),
-      ("Number of crossbars", "bottom_supports", "3"),
-      ("Wall lean °", "angle", "0"))),
+      ("Degree °", "bottom_angle", "0"),
+      ("Number of crossbars", "bottom_supports", "3"))),
     ("post", "Post", "A tapered peg for tape rolls, spools, sockets and rings.",
      {"qty": True, "size": False, "along": True, "item": False, "lean": False},
      (("Height", "height", "16"), ("Diameter", "diameter", "12"),

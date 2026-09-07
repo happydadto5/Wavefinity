@@ -35,6 +35,8 @@ NON_NUMERIC_OPTIONS = {
     # A divider's sloped-bottom yes/no choices - kept flags so a browser or
     # API round-trip does not turn them into 0.0 / 1.0 floats.
     "reverse_bottom": "flag", "alternate_bottom": "flag", "minimal_bottom": "flag",
+    "slope_base": "flag", "label_divisions": "flag", "division_level": "string",
+    "division_labels": "json",
 }
 
 
@@ -47,6 +49,14 @@ def option_value(key: str, value: object) -> object:
         if isinstance(value, str):
             return value.strip().lower() not in {"", "false", "0", "no", "off"}
         return bool(value)
+    if kind == "json":
+        if isinstance(value, str):
+            import json
+            try:
+                return json.loads(value)
+            except Exception:
+                return [s.strip() for s in value.split(",") if s.strip()]
+        return value
     return float(value)
 
 

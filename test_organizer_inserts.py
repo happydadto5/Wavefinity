@@ -1910,6 +1910,27 @@ class BoreEnhancementTests(unittest.TestCase):
         self.assertTrue(mesh.is_watertight)
         self.assertGreater(mesh.volume, 0.0)
 
+    def test_an_angled_bore_fits_a_zone_sized_to_its_contents(self) -> None:
+        # "Fit to holes" sizes the zone to feature_min_footprint (rounded up to
+        # the editor grid). An angled bore then rotates its whole block about
+        # the centre, swinging the top corners out past that snug edge - the
+        # reach must allow for it or the build is wrongly refused.
+        item = Item.simple("tube", 40.0, 12.0)
+        for along, angle in (("x", 8.0), ("x", 25.0), ("y", 15.0)):
+            one = Feature("bore", Zone(-60.0, -60.0, 60.0, 60.0), item, along=along,
+                          options={"columns": 2, "rows": 2, "angle": angle})
+            size = inserts.feature_min_footprint(BIN, one, BIN.base_thickness)
+            snug = tuple(math.ceil(v / EDITOR_SNAP - 1e-6) * EDITOR_SNAP for v in size)
+            cx, cy = one.zone.centre
+            fitted = Feature(
+                "bore",
+                Zone(cx - snug[0] / 2.0, cy - snug[1] / 2.0,
+                     cx + snug[0] / 2.0, cy + snug[1] / 2.0),
+                item, along=along, options=one.options,
+            )
+            mesh = build_features(BIN, [fitted], BIN.base_thickness)[0]
+            self.assertTrue(mesh.is_watertight, (along, angle))
+
     def test_a_lean_past_the_printable_limit_is_refused(self) -> None:
         item = Item.simple("tube", 20.0, 6.0)
         with self.assertRaises(ValueError):
