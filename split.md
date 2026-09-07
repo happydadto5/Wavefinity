@@ -87,6 +87,28 @@ The full test suite works. `node --check web\app.js` and `git diff --check` also
 
 Run the full suite again after all other work has stopped and immediately before creating the pre-refactor checkpoint. That gives the executing agent one stable, reproducible baseline to compare with the final result.
 
+## Execution Checkpoints
+
+### Baseline — 2026-09-07
+
+- Green baseline commit: `01cfb58a55542c793df7b82ecafe9c7b94183143`
+- Pushed annotated restore tag: `pre-organizer-inserts-split-2026-09-07`
+- Implementation branch: `codex/split-organizer-inserts` (pushed from that tag)
+- Full suite: `Ran 416 tests in 377.693s` — `OK`
+- The prior uncommitted Photo Nest/editor work included three stale scoop/UI
+  test expectations. They were corrected before this baseline was created;
+  no organizer-inserts split code had been moved.
+
+### Phase 1 — Compatibility Contract
+
+- Recorded the 72 exact externally referenced `organizer_inserts` facade names
+  in `test_organizer_inserts.py`.
+- Recorded fresh-process builder/default registry keys: `bore`, `cradle`,
+  `divider`, `nest`, `pocket`, `post`, `scoop`, `slot`, `steps`, and `text`.
+- Added tests for direct imports and attributes, live shared registries,
+  fresh-process registration, JSON round trips, and legacy saved-layout defaults.
+- Focused suite: `Ran 186 tests in 81.571s` — `OK`.
+
 ## Goal
 
 Turn `organizer_inserts.py` into a Python package of focused modules without changing behavior, saved-design compatibility, geometry, exports, UI behavior, or imports used elsewhere in the app.

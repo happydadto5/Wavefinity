@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
+import json
+import subprocess
+import sys
 import unittest
 
 import numpy as np
@@ -43,6 +47,99 @@ BIT = Item.simple("Bit", 36.0, 6.0)
 
 PHOTO_CONTOUR = ((-30.0, -10.0), (30.0, -10.0), (30.0, 0.0),
                  (5.0, 0.0), (5.0, 10.0), (-30.0, 10.0))
+
+
+# Exact facade names referenced outside organizer_inserts.py on 2026-09-07.
+# The package refactor must preserve every one of these direct imports and
+# module attributes, including compatibility aliases used by existing tests.
+REQUIRED_FACADE_NAMES = frozenset({
+    "BASE_PLATE", "BORE_MOUTH_CHAMFER", "BOTTOM_EMBED", "CARTRIDGE_PITCH",
+    "CRADLE_ALTERNATE_END_MARGIN", "CRADLE_FLOOR_GAP", "CRADLE_MIN_FLOOR_GAP",
+    "CRADLE_RIB_FRACTION", "CRADLE_RIB_MAX", "DIVIDER_CHAMFER", "EDITOR_SNAP",
+    "FEATURE_BUILDERS", "Feature", "HEX_BIT_CLEARANCE", "HEX_BIT_FLATS",
+    "HEX_BIT_HOLD", "INSERT_CLEARANCE", "ITEM_CLEARANCE", "Item", "LIBRARY",
+    "Layout", "MIN_FEATURE_GAP", "NEST_PUSH_DEPTH", "RIB_THICKNESS", "Segment",
+    "TEXT_CAP_HEIGHT_FLOOR", "TEXT_DEPTH", "TEXT_KIND", "Zone",
+    "_cradle_rib_thickness", "_cradle_wall", "apply_texts", "auto_grow_text_feature",
+    "build_features", "build_text", "build_texts", "cartridge_zone", "check_layout",
+    "connector_keep_out", "cradle_min_footprint", "feature", "feature_footprint",
+    "feature_min_footprint", "fitted_nest_feature", "flat_cavity_polygon",
+    "insert_footprint", "insert_report", "is_text", "layout_from_dict",
+    "layout_to_dict", "layout_zone", "make_cartridge_insert", "make_fitted_insert",
+    "make_fused_box", "make_insert_plate", "moved_feature", "nest_contour_polygon",
+    "nest_smoothed_contour", "occupied_zones", "option_value", "resized_feature",
+    "resolve_text_features", "resolved_options", "scoop_zone", "snapped_zone",
+    "text_depth", "text_fitted", "text_is_raised", "text_of", "text_placed_outline",
+    "union", "wavy_cavity_polygon",
+})
+EXPECTED_REGISTRY_KEYS = frozenset({
+    "bore", "cradle", "divider", "nest", "pocket", "post", "scoop", "slot",
+    "steps", "text",
+})
+
+
+class OrganizerInsertsCompatibilityContractTests(unittest.TestCase):
+    def test_recorded_direct_imports_and_attributes_remain_available(self) -> None:
+        self.assertTrue(all(hasattr(inserts, name) for name in REQUIRED_FACADE_NAMES))
+        namespace: dict[str, object] = {}
+        exec(
+            "from organizer_inserts import " + ", ".join(sorted(REQUIRED_FACADE_NAMES)),
+            namespace,
+        )
+        self.assertTrue(all(name in namespace for name in REQUIRED_FACADE_NAMES))
+
+    def test_fresh_process_sees_the_complete_recorded_registries(self) -> None:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import json, organizer_inserts as m; print(json.dumps({"
+                "'builders': sorted(m.FEATURE_BUILDERS), "
+                "'defaults': sorted(m.FEATURE_DEFAULTS)}))",
+            ],
+            cwd=Path(__file__).resolve().parent,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        fresh = json.loads(completed.stdout)
+        self.assertEqual(set(fresh["builders"]), EXPECTED_REGISTRY_KEYS)
+        self.assertEqual(set(fresh["defaults"]), EXPECTED_REGISTRY_KEYS)
+
+    def test_facade_exposes_the_live_registry_singletons(self) -> None:
+        kind = "_compatibility_contract_probe"
+        builders = inserts.FEATURE_BUILDERS
+        defaults = inserts.FEATURE_DEFAULTS
+        builders.pop(kind, None)
+        defaults.pop(kind, None)
+        try:
+            @inserts.feature(kind)
+            def builder(_box, _feature, _base_z):
+                return []
+
+            @inserts.defaults(kind)
+            def resolver(_box, _feature, _base_z):
+                return {}
+
+            self.assertIs(inserts.FEATURE_BUILDERS, builders)
+            self.assertIs(inserts.FEATURE_DEFAULTS, defaults)
+            self.assertIs(builders[kind], builder)
+            self.assertIs(defaults[kind], resolver)
+        finally:
+            builders.pop(kind, None)
+            defaults.pop(kind, None)
+
+    def test_saved_layouts_still_round_trip_and_legacy_defaults_survive(self) -> None:
+        layout = Layout((Feature(
+            "cradle", Zone(-24.0, -12.0, 24.0, 12.0),
+            Item.simple("Driver", 40.0, 6.0),
+            options={"spacing": 0.0},
+        ),), "fused")
+        saved = layout_to_dict(layout)
+        self.assertEqual(layout_from_dict(saved), layout)
+        legacy = json.loads(json.dumps(saved))
+        legacy["features"][0].pop("alternate_ends")
+        self.assertFalse(layout_from_dict(legacy).features[0].alternate_ends)
 
 
 def photo_nest(**changes) -> Feature:
