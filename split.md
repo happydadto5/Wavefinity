@@ -108,6 +108,30 @@ Run the full suite again after all other work has stopped and immediately before
 - Added tests for direct imports and attributes, live shared registries,
   fresh-process registration, JSON round trips, and legacy saved-layout defaults.
 - Focused suite: `Ran 186 tests in 81.571s` — `OK`.
+- Commit: `b7ba7fa9dc1e8a5e32d14013927b4eca3e137a2f` (pushed).
+
+### Phase 2 — Intact File-to-Package Move
+
+- Performed a Git-recognized 100% rename:
+  `organizer_inserts.py` → `organizer_inserts/__init__.py`.
+- `__init__.py` is still the entire original implementation; no logic was edited.
+- Fresh-process import resolves to `organizer_inserts/__init__.py` and sees the
+  recorded complete builder/default registries.
+- Compatibility suite: `Ran 4 tests in 0.888s` — `OK`.
+- Insert suite: `Ran 186 tests in 83.013s` — `OK`.
+- Full suite: `Ran 420 tests in 396.312s` — `OK` (416 baseline + 4 new
+  compatibility tests).
+- Commit: `a064853fe794e43bf025d43b853d07604a018d8c` (pushed).
+
+### Session 2 Handoff
+
+- Start from the clean, pushed `codex/split-organizer-inserts` branch at the
+  checkpoint documentation commit that follows this entry.
+- Verify the baseline tag and the Phase 1/2 commits above, then execute only
+  Phase 3. Do not begin Phase 4.
+- The next extraction must move shared data/layout/save/load helpers to
+  `_core.py`, registries to `_registry.py`, and preserve the package facade and
+  all Phase 1 compatibility tests.
 
 ## Goal
 
