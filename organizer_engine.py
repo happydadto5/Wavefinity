@@ -874,16 +874,18 @@ def _easy_clean_cavity(spec: BoxSpec) -> trimesh.Trimesh:
     # horizontal shelf where the normal wave resumes.
     rings: list[np.ndarray] = []
     heights: list[float] = []
-    curve_steps = 16
+    # Ten evenly spaced arc sections are finer than a typical print layer at
+    # the default 2 mm radius.  Sampling the angle (rather than the horizontal
+    # inset) keeps those sections evenly distributed and avoids a needlessly
+    # dense exported mesh.
+    curve_steps = 10
     for step in range(curve_steps + 1):
-        fraction = step / curve_steps
-        inset = radius * math.sqrt(max(0.0, 1.0 - (1.0 - fraction) ** 2))
-        # ``inset`` is 0 at the floor and radius at the top of the round.
-        # Interpolating from the eroded floor ring keeps its contour smooth.
+        angle = math.pi * step / (2.0 * curve_steps)
+        fraction = 1.0 - math.cos(angle)
         rings.append(floor_points + fraction * (flat_points - floor_points))
-        heights.append(floor_z + inset)
+        heights.append(floor_z + radius * math.sin(angle))
 
-    blend_steps = 16
+    blend_steps = 10
     for step in range(1, blend_steps + 1):
         fraction = step / blend_steps
         eased = 0.5 - 0.5 * math.cos(math.pi * fraction)

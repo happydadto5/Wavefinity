@@ -150,6 +150,17 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
             f"but the zone gives {zone.width:.1f} x {zone.depth:.1f} mm"
         )
 
+    # When the base is bigger than the tight grid needs, spread the holes evenly
+    # to fill it rather than leaving all the slack as one margin at the far
+    # edges. The per-axis pitch opens up from the printable minimum
+    # (``held + wall``) to whatever divides the usable span into equal cells; at
+    # the minimum footprint it is exactly ``pitch`` and nothing moves. ``reach``
+    # is taken out first so a leaned grid still balances inside what is left.
+    span_x = zone.width - (reach if lean_axis == "x" else 0.0)
+    span_y = zone.depth - (reach if lean_axis == "y" else 0.0)
+    pitch_x = max(pitch, span_x / columns)
+    pitch_y = max(pitch, span_y / rows)
+
     centre_x, centre_y = zone.centre
     sections = _hole_sides(item.profile)
     hole_radius = held / 2.0 / (math.cos(math.pi / sections) if sections < 8 else 1.0)
@@ -161,7 +172,8 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
         "item": item, "zone": zone, "held": held, "depth": depth, "wall": wall,
         "height": height, "angle": angle, "tilted": tilted, "lean": lean,
         "lean_axis": lean_axis, "reach": reach, "drop": drop,
-        "lean_shift": lean_shift, "pitch": pitch, "columns": columns,
+        "lean_shift": lean_shift, "pitch": pitch, "pitch_x": pitch_x,
+        "pitch_y": pitch_y, "columns": columns,
         "rows": rows, "centre_x": centre_x, "centre_y": centre_y,
         "sections": sections, "hole_radius": hole_radius, "over": over,
         "chamfer": chamfer,
@@ -170,7 +182,8 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
 
 def _bore_hole_centres(grid: dict, count: int | None):
     """(x, y) mouth centres for every hole in a resolved grid, in order."""
-    columns, rows, pitch = grid["columns"], grid["rows"], grid["pitch"]
+    columns, rows = grid["columns"], grid["rows"]
+    pitch_x, pitch_y = grid["pitch_x"], grid["pitch_y"]
     centre_x, centre_y = grid["centre_x"], grid["centre_y"]
     lean_axis, lean_shift = grid["lean_axis"], grid["lean_shift"]
     made = 0
@@ -178,8 +191,8 @@ def _bore_hole_centres(grid: dict, count: int | None):
         for column in range(columns):
             if count is not None and made >= count:
                 return
-            x = centre_x + (column - (columns - 1) / 2.0) * pitch
-            y = centre_y + (row - (rows - 1) / 2.0) * pitch
+            x = centre_x + (column - (columns - 1) / 2.0) * pitch_x
+            y = centre_y + (row - (rows - 1) / 2.0) * pitch_y
             if lean_axis == "x":
                 x += lean_shift
             else:
@@ -231,7 +244,8 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     tilted = grid["tilted"]
     lean = grid["lean"]
     lean_axis = grid["lean_axis"]
-    pitch = grid["pitch"]
+    pitch_x = grid["pitch_x"]
+    pitch_y = grid["pitch_y"]
     columns = grid["columns"]
     rows = grid["rows"]
     centre_x = grid["centre_x"]
@@ -253,8 +267,8 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         for column in range(columns):
             if spec_feature.count is not None and made >= spec_feature.count:
                 break
-            x = centre_x + (column - (columns - 1) / 2.0) * pitch
-            y = centre_y + (row - (rows - 1) / 2.0) * pitch
+            x = centre_x + (column - (columns - 1) / 2.0) * pitch_x
+            y = centre_y + (row - (rows - 1) / 2.0) * pitch_y
             if lean_axis == "x":
                 x += lean_shift
             else:

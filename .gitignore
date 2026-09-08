@@ -8,3 +8,6 @@ generated/
 # per-machine local settings, not shared
 wavefinity_prefs.json
 wavefinity.pid
+
+# archive, not backed to git
+archive/

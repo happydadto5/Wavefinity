@@ -1100,9 +1100,13 @@ class WebServerTests(unittest.TestCase):
         self.assertLess(body.index(b"Part Name (For file)"), body.index(b"<h2>Interior parts</h2>"))
         self.assertLess(body.index(b"<h2>Interior parts</h2>"), body.index(b"Connect bins"))
         self.assertLess(body.index(b"Connect bins"), body.index(b"Save Location:"))
-        self.assertLess(body.index(b'id="support-palette"'), body.index(b'id="add-support"'))
-        self.assertLess(body.index(b'id="add-support"'), body.index(b'id="draft-fields"'))
-        self.assertIn(b'id="add-support" class="button secondary add-support" type="button" hidden', body)
+        # The palette itself is the "add another part" affordance now - there is
+        # no separate button. Editing a part shows Save / Delete Part below its
+        # settings.
+        self.assertNotIn(b'id="add-support"', body)
+        self.assertLess(body.index(b'id="support-palette"'), body.index(b'id="draft-fields"'))
+        self.assertLess(body.index(b'id="draft-fields"'), body.index(b'id="save-part"'))
+        self.assertLess(body.index(b'id="save-part"'), body.index(b'id="delete-part"'))
         self.assertIn(b'id="mode-select"', body)
         self.assertIn(b'data-preview-mode="standard"', body)
         self.assertIn(b'data-preview-mode="xray"', body)
@@ -1111,6 +1115,11 @@ class WebServerTests(unittest.TestCase):
         status, _headers, body = self.get("/app.js")
         self.assertEqual(status, 200)
         self.assertIn(b"refreshPreview", body)
+        # The page uses a select for print mode. The startup renderer must
+        # target that select rather than the retired radio-button container,
+        # or initialization aborts before it can request a preview.
+        self.assertIn(b'const modes = $("#mode-select")', body)
+        self.assertNotIn(b"mode-options", body)
         self.assertIn(b"designMutationBusy", body)
         self.assertIn(b"beginDesignMutation", body)
         self.assertIn(b"finishDesignMutation", body)

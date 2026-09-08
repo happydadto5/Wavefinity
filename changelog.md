@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-09-07 — Bores auto-size their base, spread their holes, and reflow the bin
+
+- Changing a bore's X/Y quantity, hole diameter, clearance, hole depth, wall,
+  angle, or profile now resizes its Base block to the grid on its own (browser
+  editor), instead of showing a "reaches outside the bin" error to resolve by
+  hand.
+- When a bore's grid needs more floor than the bin has, the bin grows to fit
+  automatically — the old "Grow the bin" button path, run for you.
+- A base larger than its hole grid strictly needs now spreads the holes evenly
+  to fill it (per-axis pitch opens from `hole + wall` upward) rather than
+  leaving all the slack as one edge margin.
+- `expand_layout_payload` gained a re-spacing pass: interior parts that overlap
+  after one grows are slid apart along the floor, holding the edited part
+  (`anchor`) still and moving the rest outward, with the bin growing to take in
+  whatever ends up past its edge.
+- Removed Bore's manual **Fit to holes** and **Fill the bin** controls. The
+  automatic grid sizing now performs the former, while filling a Bore's base
+  would override the size the selected holes require. **Grow the bin** remains
+  available whenever another layout issue needs the user to choose expansion.
+
 ## 2026-09-07 — Organizer insert engine split into focused modules
 
 - The 3,071-line `organizer_inserts.py` implementation is now an

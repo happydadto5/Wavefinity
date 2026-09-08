@@ -36,6 +36,10 @@ const state = {
   // drop" apart from "real work that would be lost".
   draftTouched: false,
   selected: null,
+  // True right after an explicit "Save Part" / "Delete Part": the user asked to
+  // be back at the 10-part palette, so renderPlaced() must not helpfully re-open
+  // a lone part for editing. Cleared the moment a part is picked or reopened.
+  paletteBrowsing: false,
   camera: { yaw: 45, elevation: 76, zoom: 1 },
   lastBoxSize: null,
   previewRequest: 0,
@@ -251,13 +255,12 @@ function iconFor(kind) {
 }
 
 function renderCatalog() {
-  const modes = $("#mode-options");
+  const modes = $("#mode-select");
   modes.innerHTML = state.catalog.modes.map(mode => `
-    <label><input type="radio" name="layout-mode" value="${mode.value}"><span>${escapeHtml(mode.label)}</span></label>
+    <option value="${escapeHtml(mode.value)}">${escapeHtml(mode.label)}</option>
   `).join("");
-  $$('input[name="layout-mode"]', modes).forEach(input => {
-    input.addEventListener("change", async () => {
-      if (!input.checked || input.value === state.design.layout.mode) return;
+  modes.addEventListener("change", async () => {
+      if (modes.value === state.design.layout.mode) return;
       if (!beginDesignMutation()) {
         syncForm();
         return;
@@ -270,7 +273,7 @@ function renderCatalog() {
         await commitVisibleDraft();
         const previousDesign = clone(state.design);
         const previousSelected = state.selected;
-        const result = await api("/api/layout/mode", { design: state.design, mode: input.value });
+        const result = await api("/api/layout/mode", { design: state.design, mode: modes.value });
         state.design = result.design;
         recordHistory(previousDesign);
         syncForm();
@@ -286,12 +289,11 @@ function renderCatalog() {
         }
         refreshPreview();
       } catch (error) {
-        $(`input[name="layout-mode"][value="${oldMode}"]`).checked = true;
+        modes.value = oldMode;
         toast(error.message, true);
       } finally {
         finishDesignMutation();
       }
-    });
   });
 
   const palette = $("#support-palette");
@@ -360,12 +362,16 @@ function syncForm() {
     formatDimField("y");
   }
   $("#z").value = fmt(box.z);
+  $("#standard-base").checked = box.standard_base !== false;
   $("#base-thickness").value = fmt(box.base_thickness ?? 0.6);
+  $("#easy-clean").checked = Boolean(box.easy_clean);
+  $("#easy-clean-radius").value = fmt(box.easy_clean_radius ?? 2.0);
+  $("#base-thickness-setting").hidden = $("#standard-base").checked;
+  $("#easy-clean-radius-setting").hidden = !$("#easy-clean").checked;
   $("#part-name").value = state.design.part_name || "";
   const scoopEl = $("#scoop");
   if (scoopEl) scoopEl.checked = Boolean(state.design.scoop);
-  const mode = $(`input[name="layout-mode"][value="${layout.mode}"]`);
-  if (mode) mode.checked = true;
+  $("#mode-select").value = layout.mode;
   $("#output-folder").value = state.output;
   const keepLogEl = $("#keep-log");
   if (keepLogEl) keepLogEl.checked = Boolean(state.keepLog);
@@ -442,14 +448,11 @@ function renderConnectorReadout() {
 }
 
 function updateInteriorModeVisibility(reveal = false) {
-  const fieldset = $("#interior-mode");
   const hasSupport = Boolean(state.draft || state.design?.layout?.features?.length);
   if (reveal && !hasSupport && state.design.layout.mode !== "fused") {
     state.design.layout.mode = "fused";
-    const fused = $('input[name="layout-mode"][value="fused"]');
-    if (fused) fused.checked = true;
+    $("#mode-select").value = "fused";
   }
-  fieldset.hidden = !(reveal || hasSupport);
 }
 
 function updateDesignFromForm() {
@@ -475,6 +478,13 @@ function updateDesignFromForm() {
   design.box.base_thickness = number(
     $("#base-thickness").value,
     design.box.base_thickness ?? 0.6,
+  );
+  design.box.standard_base = $("#standard-base").checked;
+  if (design.box.standard_base) design.box.base_thickness = 0.6;
+  design.box.easy_clean = $("#easy-clean").checked;
+  design.box.easy_clean_radius = number(
+    $("#easy-clean-radius").value,
+    design.box.easy_clean_radius ?? 2.0,
   );
   design.part_name = $("#part-name").value;
   const scoopEl = $("#scoop");
@@ -730,7 +740,7 @@ function wireControls() {
     button.setAttribute("aria-expanded", String(section.classList.contains("open")));
   }));
 
-  $("#advanced-settings").addEventListener("change", event => {
+  $("#advanced-settings")?.addEventListener("change", event => {
     $("#advanced-build-settings").hidden = !event.target.checked;
   });
 
@@ -740,6 +750,15 @@ function wireControls() {
       updateGenerateAvailability();
       changedDesign();
     }));
+  $("#standard-base").addEventListener("change", () => {
+    $("#base-thickness-setting").hidden = $("#standard-base").checked;
+    changedDesign();
+  });
+  $("#easy-clean").addEventListener("change", () => {
+    $("#easy-clean-radius-setting").hidden = !$("#easy-clean").checked;
+    changedDesign();
+  });
+  $("#easy-clean-radius").addEventListener("input", changedDesign);
   ["#x-size", "#y-size"].forEach(selector => {
     const axis = selector === "#x-size" ? "x" : "y";
     const input = $(selector);
@@ -854,9 +873,10 @@ function wireControls() {
   });
   activateView(viewTabs.find(tab => tab.classList.contains("active")) || viewTabs[0]);
 
-  // This is the only control that starts another support. Palette choices
-  // change the currently selected support instead.
-  $("#add-support").addEventListener("click", () => selectKind(state.draftKind, true));
+  // Editing a part: "Save Part" finalises it and returns to the 10-part
+  // palette; "Delete Part" removes the part being edited and does the same.
+  $("#save-part").addEventListener("click", saveCurrentPart);
+  $("#delete-part").addEventListener("click", deleteCurrentPart);
   $("#save-design").addEventListener("click", saveDesign);
   $("#open-design").addEventListener("change", openDesign);
   $("#new-design").addEventListener("click", newDesign);
@@ -940,6 +960,7 @@ function clearDraftSelection() {
 }
 
 function pickKind(kind) {
+  state.paletteBrowsing = false;
   updateInteriorModeVisibility(true);
   selectKind(kind);
 }
@@ -1004,6 +1025,7 @@ async function selectedFeature(index, force = false) {
   // Don't drop unsaved work on the part currently open without asking first.
   if (!force && !(await guardDraftSwitch())) return;
   cancelPendingDraftWork();
+  state.paletteBrowsing = false;
   state.selected = index;
   state.nudgeFeedback = null;
   updateNudgeUI();
@@ -1656,6 +1678,78 @@ function sizeCradleToItem(one) {
   one.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
 }
 
+// Keep a bore's Base (the drilled block) exactly big enough for its hole grid,
+// so the Width / Length fields and the 2D layout never disagree with what the
+// engine builds - and so raising a count, widening a hole, or leaning the grid
+// grows the block on its own instead of throwing "reaches outside the bin".
+//
+// Mirrors feature_min_footprint()'s bore branch in organizer_inserts/_layout.py:
+// pitch is (hole + wall), the block runs columns x pitch by rows x pitch, and a
+// leaned grid adds along its lean axis the sideways "reach" the slanting hole
+// bottoms travel. Only an axis given an explicit X / Y quantity is resized;
+// left on "auto" the fitter still decides that count from whatever base the
+// user drew, so that axis is left alone. The block grows AND shrinks to the
+// grid; when the grid now needs more floor than the bin has, refreshDraft()'s
+// catch grows the bin around it.
+function sizeBoreToGrid(one) {
+  if (one.kind !== "bore") return;
+  const opts = one.options || {};
+  const hasCols = Object.prototype.hasOwnProperty.call(opts, "columns");
+  const hasRows = Object.prototype.hasOwnProperty.call(opts, "rows");
+  if (!hasCols && !hasRows) return;
+
+  const resolved = state.draftResolvedOptions || {};
+  const profile = one.item?.profile || "round";
+  const hexBit = isHexBitProfile(profile);
+  const diameter = hexBit
+    ? HEX_BIT_PROFILES[profile].diameter
+    : number(one.item?.segments?.[0]?.diameter, 6);
+  const clearance = hexBit
+    ? HEX_BIT_PROFILES[profile].clearance
+    : number(one.item?.clearance, 0.4);
+  const held = diameter + clearance;
+  const angle = hexBit ? 0 : Math.max(0, number(opts.angle ?? resolved.angle, 0));
+  // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
+  // Wall was hand-set - match that so the block sizing tracks the real pitch.
+  const wall = number(opts.wall ?? resolved.wall, angle > 0 ? 3 : 1.6);
+  const pitch = held + wall;
+  if (!(pitch > 0)) return;
+
+  const holeDepth = number(opts.depth ?? resolved.depth, 0);
+  const reach = angle > 0 ? holeDepth * Math.sin(angle * Math.PI / 180) : 0;
+  const along = one.along === "y" ? "y" : "x";
+
+  const cx = (one.zone[0] + one.zone[2]) / 2;
+  const cy = (one.zone[1] + one.zone[3]) / 2;
+  let width = one.zone[2] - one.zone[0];
+  let depth = one.zone[3] - one.zone[1];
+  if (hasCols) {
+    const cols = Math.max(1, Math.round(number(opts.columns, 1)));
+    width = Math.ceil(cols * pitch + (along === "x" ? reach : 0) - 1e-6);
+  }
+  if (hasRows) {
+    const rows = Math.max(1, Math.round(number(opts.rows, 1)));
+    depth = Math.ceil(rows * pitch + (along === "y" ? reach : 0) - 1e-6);
+  }
+
+  // Stay where the block already sits when it still fits; once an axis outgrows
+  // the bin, keep it on its old centre and let the bin grow around it.
+  const [insideX, insideY] = binInsideExtent(state.design.box);
+  const place = (centre, span, inside) => {
+    if (span >= inside) return centre;
+    const half = span / 2;
+    return Math.min(Math.max(centre, -inside / 2 + half), inside / 2 - half);
+  };
+  const ncx = place(cx, width, insideX);
+  const ncy = place(cy, depth, insideY);
+  one.zone = [ncx - width / 2, ncy - depth / 2, ncx + width / 2, ncy + depth / 2];
+
+  const widthField = $('[data-draft="width"]', $("#draft-fields"));
+  if (widthField) widthField.value = fmt(width);
+  const depthField = $('[data-draft="depth"]', $("#draft-fields"));
+  if (depthField) depthField.value = fmt(depth);
+}
+
 function syncNestZone(one) {
   if (!one?.contour?.length) return;
   const cx = (one.zone[0] + one.zone[2]) / 2;
@@ -1949,6 +2043,16 @@ function updateDraftFromFields(event) {
     changed === "alternate_ends" || changed === "option:spacing" ||
     changed === "option:end_margin" || changed === "option:run_offset"
   )) sizeCradleToItem(one);
+  // Any hole parameter that moves the grid's footprint - the X / Y counts, the
+  // hole size, the wall between holes, or the lean that adds sideways reach -
+  // re-fits the Base block to that grid. Runs before the profile re-render
+  // below so the refreshed Width / Length fields show the new size.
+  if (one.kind === "bore" && (
+    changed === "option:columns" || changed === "option:rows" ||
+    changed === "option:depth" || changed === "option:wall" ||
+    changed === "option:angle" || changed === "item_diameter" ||
+    changed === "clearance" || changed === "profile" || changed === "along"
+  )) sizeBoreToGrid(one);
   // Toggling Alternate ends swaps the field beneath Runs along between
   // "% from end" and "Offset from center".
   if (changed === "alternate_ends") renderDraftFields();
@@ -2024,6 +2128,21 @@ async function refreshDraft() {
     if (state.draftAutoCommit) await autoCommitDraft(request);
   } catch (error) {
     if (request !== state.draftRequest) return;
+    // A bore whose hole grid outgrew the bin: grow the bin around it instead of
+    // stopping at the error, so "put 10 x 10 holes in a stock bin" just resizes
+    // the bin the way the "Grow the bin" button would. Guarded so the expand's
+    // own rebuild can't loop back in here.
+    const outgrewBin = /reaches outside the bin|bores need|zone is too small|layout area|overlap/i
+      .test(error.message || "");
+    if (state.draft?.kind === "bore" && outgrewBin && !state.autoGrowingBin) {
+      state.autoGrowingBin = true;
+      try {
+        await autoExpandBin();
+      } finally {
+        state.autoGrowingBin = false;
+      }
+      return;
+    }
     $("#draft-status").textContent = error.message;
     $("#draft-status").classList.add("error");
     state.fitError = true;
@@ -2281,6 +2400,51 @@ async function applySupport(index) {
   }
 }
 
+// "Save Part": fold the open draft into the design (appending a new part or
+// updating the one being re-edited), then return to the 10-part palette. A
+// draft that can't be saved (overlap, doesn't fit) keeps the editor open with
+// its error.
+async function saveCurrentPart() {
+  if (!state.draft || !beginDesignMutation()) return;
+  try {
+    const index = draftCommitIndex();
+    const applyIndex = Number.isInteger(index) ? index : null;
+    const previousDesign = clone(state.design);
+    const result = await api("/api/feature/apply", {
+      design: state.design, feature: state.draft, index: applyIndex,
+    });
+    state.design = result.design;
+    seedPartNameFromText(state.draft);
+    recordHistory(previousDesign);
+    state.paletteBrowsing = true;
+    clearDraftSelection();
+    renderPlaced();
+    await refreshPreview();
+    toast("Part saved.");
+  } catch (error) {
+    toast(error.message, true, 5000);
+  } finally {
+    finishDesignMutation();
+  }
+}
+
+// "Delete Part": drop the part currently being edited - a placed one is
+// removed from the design, a brand-new draft is just discarded - then return
+// to the 10-part palette.
+async function deleteCurrentPart() {
+  if (!state.draft) return;
+  const index = draftCommitIndex();
+  state.paletteBrowsing = true;
+  if (Number.isInteger(index)) {
+    await deleteSupportAt(index);
+    return;
+  }
+  // Never committed - nothing on the server to delete.
+  clearDraftSelection();
+  renderPlaced();
+  refreshPreview();
+}
+
 async function deleteSupportAt(index) {
   if (index === null || index === undefined || !beginDesignMutation()) return;
   try {
@@ -2302,8 +2466,8 @@ async function deleteSupportAt(index) {
 
 function mutationControls() {
   return $$(
-    '#x-size, #y-size, #z, #base-thickness, #part-name, ' +
-    'input[name="layout-mode"], ' +
+    '#x-size, #y-size, #z, #standard-base, #base-thickness, #easy-clean, #easy-clean-radius, #part-name, ' +
+    '#mode-select, ' +
     '#new-design, #open-design, #save-design'
   );
 }
@@ -2350,12 +2514,25 @@ function finishDesignMutation() {
 
 function updateSelectionButtons() {
   const busy = state.designMutationBusy;
-  $("#add-support").disabled = busy || !state.draft;
+  // The editor being open IS "editing mode" - set synchronously the moment a
+  // part is picked, before its defaults have loaded. Collapse the palette to
+  // just that part and hide the placed list so the settings get the whole
+  // panel; back at the palette, all 10 types and the placed list return.
+  const editing = !$(".support-editor").hidden;
+  $("#support-palette").classList.toggle("editing", editing);
+  // Save / Delete Part live over the preview (top right), shown only while a
+  // part is open for editing.
+  const draftActions = $("#draft-actions");
+  if (draftActions) draftActions.hidden = !editing;
+  const placedBlock = $(".placed-block");
+  if (placedBlock) {
+    placedBlock.hidden = editing || !state.design?.layout?.features?.length;
+  }
+  $("#save-part").disabled = busy || !state.draft;
+  $("#delete-part").disabled = busy || !state.draft;
   const hasPhotoNest = state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour);
-  const hasPlacedPart = Boolean(state.design?.layout?.features?.length);
   const replacingPhotoNest = hasPhotoNest && state.selected !== null &&
     state.design.layout.features[state.selected]?.kind === "nest";
-  $("#add-support").hidden = !hasPlacedPart || hasPhotoNest || state.draft?.kind === "nest";
   $$(".support-choice").forEach(button => {
     button.disabled = busy || (hasPhotoNest && !replacingPhotoNest && button.dataset.kind !== "nest");
   });
@@ -2411,8 +2588,10 @@ function renderPlaced() {
   // With a single support there's nothing to choose between, so drop straight
   // into its settings rather than make the user pick it out of the list first.
   // selectedFeature() sets state.selected, so the re-entrant renderPlaced() it
-  // triggers falls through here instead of looping.
-  if (features.length === 1 && state.selected === null && !state.draft) {
+  // triggers falls through here instead of looping. Suppressed right after an
+  // explicit Save / Delete Part, when the user asked to be back at the palette.
+  if (features.length === 1 && state.selected === null && !state.draft
+      && !state.paletteBrowsing) {
     selectedFeature(0);
   }
 }
@@ -2529,15 +2708,13 @@ function updateAutoExpandButton() {
   updateFitActions();
 }
 
-// The auto-size buttons inside an interior-part editor. Which buttons a kind
-// gets is fixed; which are shown right now tracks the fit:
-//   fit-part  - size the footprint to exactly its contents (holes/pegs/slots)
-//   fill-part - stretch the footprint to the whole bin floor
-//   grow-bin  - grow the bin (and the part's footprint) to hold its contents
-// fit-part and fill-part are always offered for their kinds; grow-bin appears
-// only while the part does not fit the bin.
-const FIT_PART_KINDS = { bore: "holes", post: "pegs", slot: "slots" };
-const FILL_PART_KINDS = new Set(["bore", "pocket", "slot", "steps"]);
+// The automatic bore fitter now keeps its Base snug around the selected hole
+// grid and grows the bin when needed, so it does not need manual "Fit to
+// holes" or "Fill the bin" shortcuts. The remaining actions describe choices
+// the automatic fitter cannot infer: a Post/Slot Rack may need a deliberately
+// sized footprint, and Pocket/Steps have no contents from which to derive one.
+const FIT_PART_KINDS = { post: "pegs", slot: "slots" };
+const FILL_PART_KINDS = new Set(["pocket", "slot", "steps"]);
 
 function renderFitActions(one) {
   const kind = one.kind;
@@ -2637,8 +2814,12 @@ async function autoExpandBin(event) {
     const design = features === layout.features
       ? state.design
       : { ...state.design, layout: { ...layout, features } };
+    // Name the part being edited so the server slides the *others* apart around
+    // it, not it around them.
+    const anchor = features === layout.features ? undefined
+      : draftIndex === null ? features.length - 1 : draftIndex;
     const previousDesign = clone(state.design);
-    const result = await api("/api/layout/expand", { design });
+    const result = await api("/api/layout/expand", { design, anchor });
     state.design = result.design;
     recordHistory(previousDesign);
     clearDraftSelection();

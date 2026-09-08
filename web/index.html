@@ -53,9 +53,6 @@
             <span id="support-count" class="count-badge">0 placed</span>
           </div>
           <div id="support-palette" class="support-palette" role="list"></div>
-          <button id="add-support" class="button secondary add-support" type="button" hidden>
-            + Additional interior part
-          </button>
 
           <div class="support-editor" hidden>
             <div class="editor-title">
@@ -119,6 +116,10 @@
     <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="Resize controls" aria-orientation="vertical" tabindex="0"></div>
 
     <section class="workspace" aria-label="Design preview">
+      <div id="draft-actions" class="draft-actions" hidden>
+        <button type="button" id="save-part" class="button primary">Save Part</button>
+        <button type="button" id="delete-part" class="button danger">Delete Part</button>
+      </div>
       <div class="workspace-toolbar">
         <div class="workspace-tools">
           <div class="view-tabs" role="tablist">

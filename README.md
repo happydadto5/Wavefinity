@@ -24,8 +24,8 @@ There is no corner connector.
 Everything below is millimetres. This is the whole documentation for the
 project: design, rationale, measured evidence, and the traps.
 
-See [changelog.md](changelog.md) for dated implementation changes and
-[TESTING.md](TESTING.md) for the log of what each test run actually found.
+See [changelog.md](changelog.md) for dated implementation changes.
+(The historical test log has been moved to an untracked `archive/` folder; keeping a testing log is no longer needed or maintained.)
 
 ---
 
@@ -51,23 +51,25 @@ python -m venv .venv
 Those ten pins are the whole dependency list. `matplotlib` is not optional — it
 supplies the font outlines for floor labels.
 
-**Testing philosophy: run only when needed, write only when valuable.** Tests
-have caught almost zero actual defects. Most testing effort is wasted. **Do not
-write tests by default**, and run only targeted tests in these narrow cases:
+## Do not be obsessed with testing
 
-1. **Major changes** (refactoring, adding a new interior part type, architectural
-   changes): Run the full test battery (`.venv\Scripts\python.exe -m unittest`)
-   afterward to catch regressions.
-2. **High-risk changes** (algorithms, geometry, mesh operations): Write a focused
-   test *only if* the change is genuinely likely to break future work. One test
-   that actually catches defects beats ten that never do.
-3. **Bug fixes**: No test needed unless the bug would likely recur without one.
+We do NOT need to be obsessed with testing. STOP all unnecessary testing.
+In this project, tests and manual click-throughs have caught almost zero real defects. Time spent on them is mostly wasted. The rules:
 
-Normal feature work, UI changes, and parameter tweaks need no tests. This cuts
-testing effort by 75%+ without losing coverage.
+**Tweaking existing code, adjusting UI, moving a button, changing a default,
+renaming, small refactors, wording, styling — STOP ALL TESTING.** No unit test, no
+`unittest` run, no starting the app, no browser checks. Read the change, reason it
+through, and move on. If you find yourself opening a screenshot to check a
+CSS tweak, stop.
 
-**Log major runs in [TESTING.md](TESTING.md)** — what it found, and whether it
-caught anything real.
+**Writing genuinely new code or new logic — do one small, targeted check that proves
+it works.** Write one focused test or run one targeted check to make sure the new code
+actually functions. Not the full test suite. Not the browser. One targeted check, then done.
+
+**We no longer keep or update `TESTING.md`.** It has been moved into the untracked `archive/`
+folder. Do not log test runs to any file.
+
+When in doubt, treat the work as a tweak: DO NOT TEST.
 
 ### Cloud deployments & updates
 
@@ -736,10 +738,8 @@ holds all client state and API calls; it never computes geometry itself —
 every preview, validation and export result comes from a `wavefinity_web.py`
 call into the same engine the CLI uses.
 
-`TESTING.md` is the running log of what those three suites have caught,
-alongside the defects that got past them. It exists to answer a fair
-question - whether two minutes a run is buying anything - with evidence
-instead of a feeling.
+`TESTING.md` was the historical test log, now moved to the untracked `archive/`
+folder. We no longer maintain or keep this testing log updated.
 
 Dependencies run one way: the insert module imports the geometry engine, the
 app imports both, and the web service imports all three. Nothing is imported
@@ -778,22 +778,19 @@ commits when practical. No feature branches or pull requests are needed for
 this local workflow:
 
 ```powershell
-.venv\Scripts\python.exe -m unittest
 git add -A
 git commit -m "short description of what changed"
 git push
 ```
 
-Add a line to [TESTING.md](TESTING.md) for test runs before committing, and a
-dated entry to [changelog.md](changelog.md) for the change itself.
+Add a dated entry to [changelog.md](changelog.md) for user-facing changes.
+Do NOT log to `TESTING.md` — that file is retired and archived.
 
-**Do not write new tests by reflex.** Write one only when the change is genuinely
-likely to introduce future defects — not for normal edits, UI tweaks, or parameter
-changes. When you do write a test, run just that test to ensure it works, not the
-full suite. Reserve the full battery of tests (`unittest` across all suites) for
-major changes only (refactoring, new interior part types, architectural shifts).
-If a fingerprint test fails during a full run, that is the suite telling you the
-geometry moved — decide whether you meant it, then re-pin deliberately.
+**Do not be obsessed with testing** (see the section of that name near the top).
+Short version: tweaking code, UI, defaults, styling, small refactors — **STOP all testing**
+and do not test at all; read the change and reason it through. Writing genuinely new
+logic — do one small targeted check (a script or a single focused test) to make sure the
+new code works; do not run the full suite or the browser.
 
 **Write commit messages that say why.** The history is the record. A message
 that explains the reasoning is worth more here than a tidy branch structure.

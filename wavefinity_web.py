@@ -941,8 +941,11 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     tool, and a bore / post / slot zone is grown (never shrunk) to hold the
     hole grid, peg row or slot bank it was given - so an explicit X/Y quantity
     that overflowed the drawn zone still makes the bin grow instead of erroring.
-    Other supports keep the size the user drew. Supports keep their centre;
-    nothing is rearranged.
+    Other supports keep the size the user drew. Supports that now overlap - a
+    grown block crowding its neighbour - are slid apart along the floor: the
+    ``payload["anchor"]`` part (the one just edited) holds still and the rest
+    move outward from it, with the bin growing to take in whatever ends up past
+    its edge. Nothing is re-sized to make room; only moved.
 
     By default the current size is the floor - the bin only grows. With
     ``payload["tighten"]`` the floor drops to one grid unit, so a bin that is
@@ -955,6 +958,10 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     originals = list(layout.features)
     if not originals:
         raise ValueError("there are no interior supports to fit")
+    # The part the user was editing when the fit gave out. It stays where it is
+    # and the others move around it; without one, the biggest block anchors.
+    anchor = payload.get("anchor")
+    anchor = int(anchor) if anchor is not None and 0 <= int(anchor) < len(originals) else None
 
     def sized(one: Feature, trial: BoxSpec) -> Feature:
         if one.kind == "nest" and one.contour:
@@ -986,11 +993,63 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
                    cx + width / 2.0, cy + depth / 2.0)
         return replace(one, zone=snapped_zone(raw, trial, mode))
 
+    def spread_apart(placed: list[Feature], trial: BoxSpec) -> list[Feature]:
+        """Slide parts along the floor until none overlap, holding the anchor
+        still and pushing the rest outward from it. Movement is clamped to the
+        trial bin, so a size that cannot separate them just fails this trial and
+        the search grows the bin one grid step and tries again."""
+        if len(placed) < 2:
+            return placed
+        base_z = base_height(trial, mode)
+        covered = lambda feat: occupied_zones(trial, [feat], base_z, mode)[0]
+        zones = [covered(f) for f in placed]
+        pivot = anchor
+        if pivot is None:
+            pivot = max(range(len(placed)),
+                        key=lambda i: zones[i].width * zones[i].depth)
+        ax, ay = zones[pivot].centre
+        order = sorted((i for i in range(len(placed)) if i != pivot),
+                       key=lambda i: (zones[i].centre[0] - ax) ** 2
+                       + (zones[i].centre[1] - ay) ** 2)
+        out = list(placed)
+        settled = [pivot]
+        for i in order:
+            feat = out[i]
+            for _ in range(80):
+                here = covered(feat)
+                clash = next((j for j in settled
+                              if here.overlaps(covered(out[j]), MIN_FEATURE_GAP)),
+                             None)
+                if clash is None:
+                    break
+                other = covered(out[clash])
+                # One editor grid step of slack on top of the bare overlap, so
+                # the centre snap in ``moved_feature`` can't round it back into
+                # a sub-gap touch and stall the loop.
+                slack = (layout.snap or EDITOR_SNAP) + MIN_FEATURE_GAP
+                over_x = min(here.x1, other.x1) - max(here.x0, other.x0) + slack
+                over_y = min(here.y1, other.y1) - max(here.y0, other.y0) + slack
+                cx, cy = here.centre
+                if over_x <= over_y:
+                    step = over_x if cx >= other.centre[0] else -over_x
+                    moved = moved_feature(feat, trial, (cx + step, cy), mode, layout.snap)
+                else:
+                    step = over_y if cy >= other.centre[1] else -over_y
+                    moved = moved_feature(feat, trial, (cx, cy + step), mode, layout.snap)
+                if moved.zone.centre == feat.zone.centre:
+                    break        # pinned against the bin wall - this trial is too small
+                feat = moved
+            out[i] = feat
+            settled.append(i)
+        return out
+
     def fits(x: float, y: float):
         trial = replace(box, x=float(x), y=float(y))
         try:
-            placed = tuple(sized(one, trial) for one in originals)
-            updated = Layout(placed, mode, layout.snap)
+            placed = spread_apart(
+                [sized(one, trial) for one in originals], trial
+            )
+            updated = Layout(tuple(placed), mode, layout.snap)
             updated.validate(trial)
             validate_customization_clearance(
                 trial, updated.features, label, label_location, scoop, mode
