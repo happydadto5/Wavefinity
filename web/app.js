@@ -1149,8 +1149,22 @@ function field(label, key, value, options = {}) {
   const min = options.min !== undefined ? ` min="${escapeHtml(options.min)}"` : "";
   const max = options.max !== undefined ? ` max="${escapeHtml(options.max)}"` : "";
   const placeholder = options.placeholder ? ` placeholder="${escapeHtml(options.placeholder)}"` : "";
-  return `<label class="${classes}">${escapeHtml(label)}${options.unit ? `<span class="unit">${escapeHtml(options.unit)}</span>` : ""}
+  const tip = options.tip ? ` title="${escapeHtml(options.tip)}"` : "";
+  return `<label class="${classes}"${tip}>${escapeHtml(label)}${options.unit ? `<span class="unit">${escapeHtml(options.unit)}</span>` : ""}
     <input type="${type}" data-draft="${key}" value="${escapeHtml(value ?? "")}" ${attrs}${min}${max}${placeholder}>
+  </label>`;
+}
+
+// Compact inline checkbox - the space-saving replacement for the full-width
+// check-card. `help` becomes a hover tooltip rather than always-on body text.
+// `key` is the full data-draft attribute (e.g. "option:slope_base").
+function toggle(key, title, help, on, options = {}) {
+  const classes = ["editor-toggle"];
+  if (options.wide) classes.push("wide");
+  const tip = help ? ` title="${escapeHtml(help)}"` : "";
+  return `<label class="${classes.join(" ")}"${tip}>
+    <input type="checkbox" data-draft="${key}" ${on ? "checked" : ""}>
+    <span>${escapeHtml(title)}</span>
   </label>`;
 }
 
@@ -1183,28 +1197,36 @@ function renderDraftFields() {
   const descEl = $("#draft-description");
   if (descEl) descEl.hidden = one.kind === "bore";
   let html = "";
+  // Keys pulled up into the "Repeats" cluster, so the body loop skips them.
+  const repeatKeys = new Set();
   if (one.kind === "scoop") {
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, "depth");
     const shown = explicit ? one.options.depth : state.draftResolvedOptions?.depth ?? 60;
     html += field("Depth", "option:depth", shown, {
-      unit: "% of bin height", step: "1", min: "1", max: "100", wide: true,
+      unit: "% of bin height", step: "1", min: "1", max: "100",
+      tip: "The scoop always spans the full usable bin width and starts at the front floor edge.",
     });
-    html += `<p class="field-help wide">The scoop always spans the full usable bin width and starts at the front floor edge.</p>`;
   }
   if (one.kind === "nest") {
     const assist = String(one.options?.lift_assist ?? state.draftResolvedOptions?.lift_assist ?? "finger_grasp");
     const fingerPosition = String(one.options?.finger_position ?? state.draftResolvedOptions?.finger_position ?? "sides");
     const pushPosition = String(one.options?.push_position ?? state.draftResolvedOptions?.push_position ?? "right");
     const selected = (value, actual) => value === actual ? "selected" : "";
-    html += `<label class="wide">Lift assist
+    html += `<label>Lift assist
       <select data-draft="option:lift_assist">
         <option value="finger_grasp" ${selected("finger_grasp", assist)}>Finger grasp</option>
         <option value="push_out" ${selected("push_out", assist)}>Push Out</option>
         <option value="none" ${selected("none", assist)}>No assist</option>
       </select>
     </label>`;
+    // Fit clearance / Soften outline are the two top-level fit numbers - keep
+    // them beside Lift assist rather than orphaned at the foot of the editor.
+    html += field("Fit clearance", "option:clearance",
+      fmt(one.options?.clearance ?? state.draftResolvedOptions?.clearance ?? 0.6), { unit: "mm", step: "0.1" });
+    html += field("Soften outline", "option:smoothing",
+      fmt(one.options?.smoothing ?? state.draftResolvedOptions?.smoothing ?? 0), { step: "1" });
     if (assist === "finger_grasp") {
-      html += `<label class="wide">Finger grasp locations
+      html += `<label>Finger grasp locations
         <select data-draft="option:finger_position">
           <option value="sides" ${selected("sides", fingerPosition)}>Sides (left/right)</option>
           <option value="top_bottom" ${selected("top_bottom", fingerPosition)}>Top/bottom</option>
@@ -1214,11 +1236,12 @@ function renderDraftFields() {
       html += field(
         "Finger opening width", "option:finger_width",
         fmt(one.options?.finger_width ?? state.draftResolvedOptions?.finger_width ?? 25.4),
-        { unit: "mm", step: "1", min: "12", max: "40", wide: true },
+        { unit: "mm", step: "1", min: "12", max: "40",
+          tip: "The openings rotate with the photographed outline. Their edges curve gently down into the grasp instead of ending in a sharp corner." },
       );
-      html += `<p class="field-help wide">The openings rotate with the photographed outline. Their edges curve gently down into the grasp instead of ending in a sharp corner.</p>`;
     } else if (assist === "push_out") {
-      html += `<label class="wide">Push at
+      html += `<div class="draft-triple">`;
+      html += `<label>Push at
         <select data-draft="option:push_position">
           <option value="right" ${selected("right", pushPosition)}>Right</option>
           <option value="left" ${selected("left", pushPosition)}>Left</option>
@@ -1234,19 +1257,20 @@ function renderDraftFields() {
       html += field(
         "Push depth", "option:push_depth",
         fmt(one.options?.push_depth ?? state.draftResolvedOptions?.push_depth ?? 4),
-        { unit: "mm", step: "0.5", min: "2", max: "8" },
+        { unit: "mm", step: "0.5", min: "2", max: "8",
+          tip: "Most of the tool rests on a raised floor. Press the selected end into the lower area to lift the opposite end." },
       );
-      html += `<p class="field-help wide">Most of the tool rests on a raised floor. Press the selected end into the lower area to lift the opposite end.</p>`;
+      html += `</div>`;
     }
     html += `<div class="photo-upload wide">
       <label class="button secondary photo-button" for="nest-photo-input">Upload part photo</label>
       <input id="nest-photo-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
-      <div><strong>Photo requirements</strong><ul>
+      <details><summary>Photo requirements</summary><ul>
         <li>Entire 8.5 × 11 in sheet visible</li>
         <li>Camera directly overhead</li>
         <li>Part lies flat</li>
         <li>Plain, high-contrast background preferred</li>
-      </ul></div>
+      </ul></details>
       ${one.contour ? `<p class="photo-measurement">Outline ready — move, rotate, or proportionally resize it in 2D.</p>` : ""}
     </div>`;
   }
@@ -1260,17 +1284,21 @@ function renderDraftFields() {
       <input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">
     </label>`;
     if (textLevel === "base") {
-      html += `<label class="check-card wide">
-        <input type="checkbox" data-draft="option:auto" ${one.options?.auto ? "checked" : ""}>
-        <span><strong>Place it for me</strong><small>Keeps it centred where it fits, moving around the other interior parts as they change. Turn this off to put it exactly where you want.</small></span>
-      </label>`;
-      html += `<fieldset class="wide"><legend>Turn</legend><div class="segmented two">
+      const capShown = one.options?.cap_height ?? state.draftResolvedOptions?.cap_height ?? "";
+      const depthShown = one.options?.depth ?? state.draftResolvedOptions?.depth ?? 0.4;
+      html += field("Letter height", "option:cap_height", capShown === "" ? "" : fmt(capShown), { unit: "mm", step: "0.5" });
+      html += field("Depth", "option:depth", fmt(depthShown), { unit: "mm", step: "0.1" });
+      html += `<fieldset class="wide"><legend>Turn</legend><div class="segmented four">
         ${[0, 1, 2, 3].map(turn => `<label><input type="radio" name="draft-turns" value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "checked" : ""}><span>${turn * 90}°</span></label>`).join("")}
       </div></fieldset>`;
-      html += `<label class="check-card wide">
-        <input type="checkbox" data-draft="option:raised" ${one.options?.raised ? "checked" : ""}>
-        <span><strong>Stand proud</strong><small>Letters sit on top of the floor instead of sunk flush into it. Either way they stay a separate object for a second filament.</small></span>
-      </label>`;
+      html += `<div class="toggle-grid">`;
+      html += toggle("option:auto", "Place it for me",
+        "Keeps it centred where it fits, moving around the other interior parts as they change. Turn this off to put it exactly where you want.",
+        one.options?.auto === true);
+      html += toggle("option:raised", "Stand proud",
+        "Letters sit on top of the floor instead of sunk flush into it. Either way they stay a separate object for a second filament.",
+        one.options?.raised === true);
+      html += `</div>`;
     }
   }
   if (info.flags.size && one.kind !== "cradle" && !(one.kind === "text" && one.options?.level === "rim")) {
@@ -1280,7 +1308,12 @@ function renderDraftFields() {
     const shownWidth = isPocket ? Math.max(0.1, width - 2 * wall) : width;
     const shownDepth = isPocket ? Math.max(0.1, depth - 2 * wall) : depth;
     // A bore's footprint reads Width x Length, matching Pocket and the item terms.
-    const depthLabel = isPocket || isBore ? "Length" : "Depth";
+    // Slot and base Text each also carry their own "Depth" field (slot cut / letter
+    // sink), so the footprint dimension is named apart to avoid two "Depth" boxes.
+    const depthLabel = isPocket || isBore ? "Length"
+      : one.kind === "slot" ? "Footprint depth"
+      : one.kind === "text" ? "Text box depth"
+      : "Depth";
     if (isBore) {
       const draftProfile = one.item?.profile || "round";
       const hexBit = isHexBitProfile(draftProfile);
@@ -1323,13 +1356,17 @@ function renderDraftFields() {
         ${boreProfiles.map(([value, label]) => `<option value="${value}" ${draftProfile === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>`;
 
-      // Base: the solid block the holes are cut into.
+      // Base: the solid block the holes are cut into - its size and the hole
+      // grid that fills it (X / Y counts drive the same footprint as Width /
+      // Length, so they belong together).
       html += `<div class="bore-group wide">
         <span class="bore-group-label">Base</span>
         <div class="bore-group-fields">
           ${field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" })}
           ${field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
           ${optionField("height", "Height", { unit: "mm", step: "0.5" })}
+          ${gridField("columns", "X Qty")}
+          ${gridField("rows", "Y Qty")}
         </div>
       </div>`;
 
@@ -1342,8 +1379,6 @@ function renderDraftFields() {
           ${clearanceField}
           ${optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
           ${optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
-          ${gridField("columns", "X Qty")}
-          ${gridField("rows", "Y Qty")}
           ${hexBit ? "" : optionField("angle", "Angle", { step: "1" })}
         </div>
       </div>`;
@@ -1352,48 +1387,69 @@ function renderDraftFields() {
       html += field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
     }
   }
-  if (info.flags.qty) {
-    html += `<label class="wide">Quantity<div class="input-with-button">
-      <input type="number" min="1" step="1" data-draft="count" value="${one.count ?? ""}" placeholder="auto">
-      <button type="button" class="button secondary" data-action="auto-count">Auto</button>
-    </div></label>`;
-    // Unlike Cradle/Bore/Post, a divider's "auto" isn't "fit as many as
-    // possible" - it's always a single centered wall, with Spacing (above)
-    // doing the auto-fill work instead. Worth saying, since that reads as
-    // the same "auto" everywhere else.
-    if (info.kind === "divider") {
-      html += `<p id="count-auto-hint" class="field-help" ${one.count == null ? "" : "hidden"}>Auto places a single, centered divider - set a number here for more.</p>`;
+  // Repeats: how many, how far apart, which way they run - one cluster, in
+  // reading order, instead of Quantity / spacing / Runs along scattered apart.
+  if (info.flags.qty || info.flags.along) {
+    // The part's own spacing / gap belongs with Quantity, not up in the body.
+    let repeatFieldsHtml = "";
+    for (const option of info.fields) {
+      if (!["spacing", "floor_gap"].includes(option.key)) continue;
+      repeatKeys.add(option.key);
+      const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
+      const autoHint = AUTO_PLACEHOLDER[info.kind]?.[option.key];
+      const shown = !explicit && autoHint ? ""
+        : explicit ? one.options[option.key]
+        : state.draftResolvedOptions?.[option.key] ?? option.default;
+      const fo = {};
+      if (autoHint) fo.placeholder = autoHint;
+      if (info.kind === "cradle" && option.key === "spacing") fo.min = 0;
+      repeatFieldsHtml += field(option.label, `option:${option.key}`, shown, fo);
     }
-  }
-  if (info.flags.alternate) {
-    html += `<label class="check-card wide">
-      <input type="checkbox" data-draft="alternate_ends" ${one.alternate_ends === true ? "checked" : ""}>
-      <span><strong>Alternate ends</strong><small>Places every second trough near the opposite end of the bin; each trough becomes a separate body.</small></span>
-    </label>`;
-  }
-  if (info.flags.along) {
-    html += `<fieldset class="wide"><legend>Runs along</legend><div class="segmented two">
-      <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
-      <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
-    </div></fieldset>`;
-  }
-  if (info.flags.alternate) {
-    // One field, two readings. Alternate ends on: the clearance kept at each
-    // run end (writes end_margin). Off: a signed slide of the whole row along
-    // the bin (writes run_offset). Each key keeps its own last value.
-    const alternating = one.alternate_ends === true;
-    const key = alternating ? "end_margin" : "run_offset";
-    const label = alternating ? "% from end" : "Offset from center";
-    const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
-    const shown = explicit
-      ? one.options[key]
-      : alternating
-      ? state.draftResolvedOptions?.end_margin ?? 10
-      : 0;
-    html += field(label, `option:${key}`, fmt(shown), { step: "1" });
-    html += `<p class="field-help wide">${alternating
-      ? "Share of the run kept clear at each end. Larger pulls the alternating troughs toward the middle; smaller pushes them to the ends."
-      : "Slides the trough along the bin from centre, as a share of the room to the wall. Positive one way, negative the other; 0 stays centred."}</p>`;
+
+    html += `<div class="editor-group"><span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`;
+    if (info.flags.qty) {
+      // Unlike Cradle/Bore/Post, a divider's "auto" is always a single centered
+      // wall - Spacing does the auto-fill instead. Said here as a tooltip.
+      const qtyTip = info.kind === "divider"
+        ? " title=\"Auto places a single, centered divider - set a number here for more.\""
+        : "";
+      html += `<div class="pair"><label${qtyTip}>Quantity<div class="input-with-button">
+        <input type="number" min="1" step="1" data-draft="count" value="${one.count ?? ""}" placeholder="auto">
+        <button type="button" class="button secondary" data-action="auto-count">Auto</button>
+      </div></label>${repeatFieldsHtml}</div>`;
+    } else if (repeatFieldsHtml) {
+      html += `<div class="pair">${repeatFieldsHtml}</div>`;
+    }
+    if (info.flags.alternate) {
+      html += toggle("alternate_ends", "Alternate ends",
+        "Places every second trough near the opposite end of the bin; each trough becomes a separate body.",
+        one.alternate_ends === true, { wide: true });
+    }
+    if (info.flags.along) {
+      html += `<fieldset><legend>Runs along</legend><div class="segmented two">
+        <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
+        <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
+      </div></fieldset>`;
+    }
+    if (info.flags.alternate) {
+      // One field, two readings. Alternate ends on: the clearance kept at each
+      // run end (writes end_margin). Off: a signed slide of the whole row along
+      // the bin (writes run_offset). Each key keeps its own last value.
+      const alternating = one.alternate_ends === true;
+      const key = alternating ? "end_margin" : "run_offset";
+      const label = alternating ? "% from end" : "Offset from center";
+      const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
+      const shown = explicit
+        ? one.options[key]
+        : alternating
+        ? state.draftResolvedOptions?.end_margin ?? 10
+        : 0;
+      const tip = alternating
+        ? "Share of the run kept clear at each end. Larger pulls the alternating troughs toward the middle; smaller pushes them to the ends."
+        : "Slides the trough along the bin from centre, as a share of the room to the wall. Positive one way, negative the other; 0 stays centred.";
+      html += field(label, `option:${key}`, fmt(shown), { step: "1", tip });
+    }
+    html += `</div>`;
   }
   if (info.flags.item && one.kind !== "bore") {
     // A bore's Diameter / Profile / Clearance are drawn in the "Hole" group above.
@@ -1402,8 +1458,11 @@ function renderDraftFields() {
     const isCradle = one.kind === "cradle";
     // Cradles use measured dimensions. Photo Nest has no item fields.
     const measuredStep = isCradle ? "1" : undefined;
-    html += field("Length", "item_length", fmt(first.length), { unit: "mm", step: measuredStep });
-    html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: measuredStep });
+    const lengthTip = isCradle
+      ? "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool."
+      : undefined;
+    html += field("Length", "item_length", fmt(first.length), { unit: "mm", step: measuredStep, tip: lengthTip });
+    html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: measuredStep, tip: lengthTip });
     if (!isCradle) {
       const profiles = [["round", "Round"], ["hex", "Hex"], ["square", "Square"]];
       html += `<label>Profile<select data-draft="profile">
@@ -1411,18 +1470,22 @@ function renderDraftFields() {
       </select></label>`;
       html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), { unit: "mm" });
     }
-    if (isCradle) {
-      html += `<p class="field-help wide">Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.</p>`;
-    }
   }
+  let bodyHtml = "";
   for (const option of info.fields) {
     if (one.kind === "text" && one.options?.level === "rim") continue;
     // Rendered together as the one "% from end / Offset from center" field
     // beneath Runs along, above.
     if (option.key === "end_margin" || option.key === "run_offset") continue;
+    // Pulled up into the "Repeats" cluster (spacing / floor gap).
+    if (repeatKeys.has(option.key)) continue;
     // Every bore field is drawn up with the footprint above; nothing is left
     // for this loop.
     if (info.kind === "bore") continue;
+    // Nest's fit numbers ride beside Lift assist; Text's letter size/depth ride
+    // under "What it says".
+    if (info.kind === "nest" && (option.key === "clearance" || option.key === "smoothing")) continue;
+    if (info.kind === "text" && (option.key === "cap_height" || option.key === "depth")) continue;
     // Rendered by the divider bottom-slope block below, on its own and only
     // while Use support crossbars is ticked.
     if (option.key === "bottom_supports") continue;
@@ -1458,43 +1521,60 @@ function renderDraftFields() {
     if (info.kind === "pocket" && option.key === "wall") fieldOpts.min = 0.4;
     if (info.kind === "pocket" && option.key === "depth") fieldOpts.min = 0.1;
     if (info.kind === "pocket" && option.key === "height") fieldOpts.min = 1.0;
-    html += field(option.label, `option:${option.key}`, shown, fieldOpts);
+    bodyHtml += field(option.label, `option:${option.key}`, shown, fieldOpts);
+  }
+  // Three-across for the kinds whose leftover body fields would otherwise leave
+  // a half-empty row (matches the Width / Length / Height row at the top).
+  if (bodyHtml) {
+    html += ["post", "pocket", "slot"].includes(info.kind)
+      ? `<div class="draft-triple">${bodyHtml}</div>`
+      : bodyHtml;
   }
   if (info.kind === "divider") {
     const opt = one.options || {};
     const hasSlope = opt.slope_base === true || (opt.bottom_angle !== undefined && Number(opt.bottom_angle) !== 0);
-    const bottomCheck = (key, title, help, on) => `<label class="check-card wide">
-      <input type="checkbox" data-draft="option:${key}" ${on ? "checked" : ""}>
-      <span><strong>${title}</strong><small>${help}</small></span>
-    </label>`;
 
-    html += bottomCheck("slope_base", "Slope base", "Tilts the tool-slot bottoms so tools rest at an angle instead of flat.", hasSlope);
+    html += `<div class="editor-group"><span class="editor-group-label">Slot bottoms</span>`;
+    html += toggle("option:slope_base", "Slope base",
+      "Tilts the tool-slot bottoms so tools rest at an angle instead of flat.", hasSlope, { wide: true });
 
     if (hasSlope) {
       const explicitAngle = Object.prototype.hasOwnProperty.call(opt, "bottom_angle");
       const angleVal = explicitAngle ? opt.bottom_angle : (state.draftResolvedOptions?.bottom_angle ?? 20);
+      html += `<div class="pair">`;
       html += field("Degree °", "option:bottom_angle", angleVal, { step: "1" });
-      html += bottomCheck("alternate_bottom", "Alternate slopes", "Reverses every second tool slot.", opt.alternate_bottom === true);
+      html += toggle("option:alternate_bottom", "Alternate slopes",
+        "Reverses every second tool slot.", opt.alternate_bottom === true);
+      html += `</div>`;
 
       const angleNum = number(angleVal, 0);
       if (angleNum !== 0) {
-        html += bottomCheck("minimal_bottom", "Use support crossbars", "A few thin bars hung off the walls at the tool line instead of a solid slope.", opt.minimal_bottom === true);
-        if (opt.minimal_bottom === true) {
+        const useBars = opt.minimal_bottom === true;
+        const barsHelp = "A few thin bars hung off the walls at the tool line instead of a solid slope.";
+        if (useBars) {
           const explicitBars = Object.prototype.hasOwnProperty.call(opt, "bottom_supports");
           const bars = explicitBars
             ? opt.bottom_supports
             : state.draftResolvedOptions?.bottom_supports ?? 3;
+          html += `<div class="pair">`;
+          html += toggle("option:minimal_bottom", "Use support crossbars", barsHelp, true);
           html += field("Number of crossbars", "option:bottom_supports", bars, { step: "1" });
+          html += `</div>`;
+        } else {
+          html += toggle("option:minimal_bottom", "Use support crossbars", barsHelp, false, { wide: true });
         }
       }
     }
+    html += `</div>`;
 
     const hasLabels = opt.label_divisions === true;
-    html += bottomCheck("label_divisions", "Label divisions", "Add text labels to each division slot.", hasLabels);
+    html += `<div class="editor-group"><span class="editor-group-label">Division labels</span>`;
+    html += toggle("option:label_divisions", "Label divisions",
+      "Add text labels to each division slot.", hasLabels, { wide: true });
 
     if (hasLabels) {
       const divLevel = opt.division_level === "rim" ? "rim" : "base";
-      html += `<fieldset class="wide"><legend>Level</legend><div class="segmented two">
+      html += `<fieldset><legend>Level</legend><div class="segmented two">
         <label><input type="radio" name="draft-division-level" value="base" ${divLevel === "base" ? "checked" : ""}><span>Flush with base</span></label>
         <label><input type="radio" name="draft-division-level" value="rim" ${divLevel === "rim" ? "checked" : ""}><span>Rim level</span></label>
       </div></fieldset>`;
@@ -1512,27 +1592,14 @@ function renderDraftFields() {
         }
       }
 
-      html += `<div class="wide division-labels-wrap">
-        <label>Division labels</label>
-        <table class="division-table" style="width:100%; border-collapse:collapse; margin-top:4px;">
-          <thead>
-            <tr style="text-align:left; font-size:12px; color:var(--text-muted, #666);">
-              <th style="padding:4px 8px; width:70px;">Slot</th>
-              <th style="padding:4px 8px;">Text</th>
-            </tr>
-          </thead>
-          <tbody>`;
+      html += `<table class="division-table">`;
       for (let s = 0; s < slotCount; s++) {
         const val = escapeHtml(String(divLabels[s] || ""));
-        html += `<tr>
-          <td style="padding:4px 8px; font-weight:600; font-size:12px;">Slot ${s + 1}</td>
-          <td style="padding:4px 8px;">
-            <input type="text" data-division-index="${s}" value="${val}" placeholder="e.g. ${s + 1}" style="width:100%;">
-          </td>
-        </tr>`;
+        html += `<tr><td>${s + 1}</td><td><input type="text" data-division-index="${s}" value="${val}" placeholder="e.g. ${s + 1}"></td></tr>`;
       }
-      html += `</tbody></table></div>`;
+      html += `</table>`;
     }
+    html += `</div>`;
   }
   // The auto-size buttons sit at the very bottom of the editor.
   if (!(one.kind === "text" && one.options?.level === "rim")) {
