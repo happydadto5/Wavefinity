@@ -232,6 +232,38 @@ def bore_hole_axes(
     return axes
 
 
+def bore_tool_clearance_zone(
+    box: BoxSpec, spec_feature: Feature, base_z: float,
+) -> "Zone | None":
+    """Tool envelope from each bore mouth to the bin rim.
+
+    The tool is an infinite cylinder on its bore axis.  A bin side exists only
+    below the rim, and that part of a straight ray is bounded by its mouth and
+    rim endpoints.  The returned rectangle includes the held-tool radius.
+    """
+    # Avoid making the bore geometry module depend on layout validation at
+    # import time.
+    from ._core import Zone
+
+    grid = _bore_grid(box, spec_feature, base_z)
+    if not grid["tilted"]:
+        return None
+    rise_to_rim = box.z - (base_z + grid["height"])
+    if rise_to_rim <= 1e-9:
+        return None
+
+    outward = rise_to_rim * math.tan(grid["lean"])
+    radius = grid["held"] / 2.0
+    xs: list[float] = []
+    ys: list[float] = []
+    for x, y in _bore_hole_centres(grid, spec_feature.count):
+        rim_x = x - outward if grid["lean_axis"] == "x" else x
+        rim_y = y - outward if grid["lean_axis"] == "y" else y
+        xs.extend((x - radius, x + radius, rim_x - radius, rim_x + radius))
+        ys.extend((y - radius, y + radius, rim_y - radius, rim_y + radius))
+    return Zone(min(xs), min(ys), max(xs), max(ys))
+
+
 @feature("bore")
 def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A block of holes for objects stood on end."""

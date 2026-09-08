@@ -644,6 +644,37 @@ class WebApplicationTests(unittest.TestCase):
         multi = build_features(box, [one], base_z)[0]
         self.assertGreater(multi.volume, 1.5 * single.volume)
 
+    def test_auto_expand_clears_an_angled_bore_tool_from_the_bin_side(self):
+        design = default_design()
+        design["box"]["x"] = 80.0
+        design["box"]["y"] = 96.0
+        feature = default_feature_payload({
+            "design": design, "kind": "bore",
+            "item": {
+                "name": "Angled cylinder", "profile": "round", "clearance": 0.4,
+                "segments": [{"length": 80.0, "diameter": 12.0}],
+            },
+        })["feature"]
+        feature["along"] = "y"
+        # This is a valid 2 x 2 base placed close to the -Y side. Its
+        # cylinders lean farther towards that wall once they leave the bore.
+        feature["zone"] = [-16.0, -46.0, 16.0, -2.0]
+        feature["options"] = {"columns": 2, "rows": 2, "depth": 16.0,
+                              "wall": 3.0, "angle": 45.0}
+        design["layout"]["features"] = [feature]
+
+        # The infinite tool ray reaches the -Y wall before it rises above the
+        # rim, even though the bore block itself fits on the floor.
+        with self.assertRaisesRegex(ValueError, "tool reaches the side"):
+            draft_payload({"design": design, "feature": feature, "index": 0})
+
+        expanded = expand_layout_payload({"design": design, "anchor": 0})
+        self.assertTrue(expanded["grew"])
+        self.assertGreater(expanded["box"]["y"], 96.0)
+        preview = preview_payload({"design": expanded["design"]})
+        self.assertFalse(preview["feature_errors"])
+        self.assertIsNone(preview["draft_error"])
+
     def test_auto_expand_leaves_a_layout_that_already_fits_alone(self):
         design = default_design()
         design["box"]["x"] = 120.0

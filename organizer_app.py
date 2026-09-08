@@ -19,6 +19,7 @@ from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
     DEFAULT_BASE_THICKNESS,
+    EASY_CLEAN_RADIUS,
     GRID_PITCH,
     TEXT_CAP_HEIGHT_IDEAL,
     TEXT_DEPTH,
@@ -271,6 +272,18 @@ def add_box_arguments(parser: argparse.ArgumentParser, prefix: str = "") -> None
         type=float, default=0.0,
         help="0-1 mm: height of a flat-walled band rising from the floor",
     )
+    parser.add_argument(
+        f"--{option}easy-clean", dest=f"{destination}easy_clean",
+        action="store_true", default=False,
+    )
+    parser.add_argument(
+        f"--{option}easy-clean-style", dest=f"{destination}easy_clean_style",
+        choices=("bevel", "curve"), default="bevel",
+    )
+    parser.add_argument(
+        f"--{option}easy-clean-radius", dest=f"{destination}easy_clean_radius",
+        type=float, default=EASY_CLEAN_RADIUS,
+    )
 
 
 def add_connector_arguments(parser: argparse.ArgumentParser) -> None:
@@ -376,6 +389,9 @@ def _box_spec(args: argparse.Namespace, prefix: str = "") -> BoxSpec:
         wall=getattr(args, f"{key}wall"),
         flat_inside=getattr(args, f"{key}flat_inside"),
         base_thickness=getattr(args, f"{key}base_thickness"),
+        easy_clean=getattr(args, f"{key}easy_clean", False),
+        easy_clean_style=getattr(args, f"{key}easy_clean_style", "bevel"),
+        easy_clean_radius=getattr(args, f"{key}easy_clean_radius", EASY_CLEAN_RADIUS),
     )
 
 
@@ -1348,6 +1364,10 @@ def run_command(args: argparse.Namespace) -> dict[str, object]:
             saved_box.base_thickness
             if args.base_thickness is None
             else args.base_thickness,
+            easy_clean=saved_box.easy_clean if getattr(args, "easy_clean", None) is None else args.easy_clean,
+            standard_base=saved_box.standard_base,
+            easy_clean_radius=saved_box.easy_clean_radius if getattr(args, "easy_clean_radius", None) is None else args.easy_clean_radius,
+            easy_clean_style=saved_box.easy_clean_style if getattr(args, "easy_clean_style", None) is None else args.easy_clean_style,
         )
         if args.mode:
             layout = replace(layout, mode=args.mode)
@@ -1570,6 +1590,10 @@ def design_to_dict(
             "base_thickness": box.base_thickness,
             "corner_fillet": box.corner_fillet,
             "flat_inside": box.flat_inside,
+            "easy_clean": box.easy_clean,
+            "easy_clean_style": box.easy_clean_style,
+            "easy_clean_radius": box.easy_clean_radius,
+            "standard_base": box.standard_base,
         },
         "label": label,
         "label_position": label_position(label_location),
@@ -1595,12 +1619,19 @@ def design_from_dict(
         allowance = WAVE_MATING_GAP + 2.0 * wall_depth + 2.0 * WAVE_AMPLITUDE
         x = max(GRID_PITCH, round((x - allowance) / GRID_PITCH) * GRID_PITCH)
         y = max(GRID_PITCH, round((y - allowance) / GRID_PITCH) * GRID_PITCH)
+    easy_clean_style = str(raw.get("easy_clean_style", "bevel"))
+    if easy_clean_style not in {"bevel", "curve"}:
+        easy_clean_style = "bevel"
     box = BoxSpec(
         x, y, float(raw["z"]),
         float(raw.get("wall", 0.8)),
         float(raw.get("corner_fillet", 0.6)),
         flat_inside=float(raw.get("flat_inside", 0.0)),
         base_thickness=float(raw.get("base_thickness", raw.get("wall", 0.8))),
+        easy_clean=bool(raw.get("easy_clean", False)),
+        standard_base=bool(raw.get("standard_base", True)),
+        easy_clean_radius=float(raw.get("easy_clean_radius", EASY_CLEAN_RADIUS)),
+        easy_clean_style=easy_clean_style,
     )
     layout = layout_from_dict(data.get("layout", {}))
     label = str(data.get("label", ""))

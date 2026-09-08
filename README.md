@@ -69,7 +69,9 @@ actually functions. Not the full test suite. Not the browser. One targeted check
 **We no longer keep or update `TESTING.md`.** It has been moved into the untracked `archive/`
 folder. Do not log test runs to any file.
 
-When in doubt, treat the work as a tweak: DO NOT TEST.
+**When in doubt: DO NOT TEST.** Treat uncertain work as a tweak and stop.
+Only run one focused check when it is unquestionably new logic that needs
+proof it runs at all.
 
 ### Cloud deployments & updates
 

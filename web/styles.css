@@ -114,6 +114,8 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
 .mode-and-bin-options .inline-option { margin: 0 0 3px; white-space: nowrap; }
 .mode-and-bin-options .inline-number { margin: 0 0 1px; min-width: 106px; }
 .mode-and-bin-options .inline-number input { margin-top: 3px; }
+.mode-and-bin-options .inline-select { margin: 0 0 1px; min-width: 90px; }
+.mode-and-bin-options .inline-select select { margin-top: 3px; }
 .measurement { color: var(--teal); margin: 4px 0 15px; font-size: 15px; font-weight: 600; }
 #x-size, #y-size { font-size: 12.5px; padding-left: 8px; padding-right: 8px; }
 .size-help { margin-top: 6px !important; }
@@ -169,22 +171,24 @@ input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
    settings get the whole panel. */
 .support-palette.editing { grid-template-columns: 1fr; margin: 8px 0 10px; }
 .support-palette.editing .support-choice:not(.active) { display: none; }
-.support-palette.editing .support-choice.active { cursor: default; transform: none; box-shadow: 0 0 0 2px rgba(31,107,69,.32); }
+.support-palette.editing .support-choice.active {
+  cursor: default; transform: none; box-shadow: 0 0 0 2px rgba(31,107,69,.32);
+  max-height: none; min-height: 84px; padding-right: 132px;
+}
+
+/* Save / Delete Part ride in the top-right of the green part chip, stacked,
+   shown only while a part is open for editing. */
+.palette-wrap { position: relative; }
+.draft-actions {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  display: flex; flex-direction: column; gap: 5px; width: 116px;
+}
+.draft-actions[hidden] { display: none; }
+.draft-actions .button { width: 100%; padding: 6px 10px; font-size: 12px; }
 
 .support-editor { border: 1px solid var(--line); border-radius: 9px; padding: 13px; background: #fbfcfc; }
 .support-editor:not([hidden]) { border-color: #1f6b45; box-shadow: 0 0 0 2px rgba(31,107,69,.16); }
 .editor-title { display: flex; justify-content: space-between; align-items: center; }
-/* While an interior part is being edited these float over the preview, top
-   right, where that part shows in 3D - Save above Delete, one stacked on the
-   other. */
-.draft-actions {
-  position: absolute; top: 70px; right: 16px; z-index: 3;
-  display: flex; flex-direction: column; gap: 8px; width: 150px;
-  padding: 8px; border-radius: 9px;
-  background: rgba(255, 255, 255, .92); box-shadow: 0 2px 10px rgba(0, 0, 0, .12);
-}
-.draft-actions[hidden] { display: none; }
-.draft-actions .button { width: 100%; }
 .quiet-status { color: var(--muted); font-size: 11px; }
 .quiet-status.error { color: var(--danger); font-weight: 650; }
 .muted { color: var(--muted); font-size: 12px; line-height: 1.4; }
@@ -554,7 +558,6 @@ dialog:not([open]) { display: none; }
   .icon-button span { display: none; }
   .camera-controls { top: 10px; left: 10px; }
   .camera-controls button { padding: 6px; }
-  .draft-actions { top: 64px; right: 10px; width: 128px; }
   .preview-hint span:last-child { display: none; }
   .workspace-footer { display: block; }
 }

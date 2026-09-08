@@ -133,6 +133,11 @@ class Zone:
     def whole(spec: BoxSpec) -> "Zone":
         """Everything a straight-sided insert can occupy in this bin."""
         clear_x, clear_y = spec.usable_inside
+        if spec.easy_clean:
+            clear_x -= 2.0 * spec.easy_clean_radius
+            clear_y -= 2.0 * spec.easy_clean_radius
+            if clear_x <= 0 or clear_y <= 0:
+                raise ValueError("this bin is too small for an insert with easy clean")
         return Zone(-clear_x / 2.0, -clear_y / 2.0, clear_x / 2.0, clear_y / 2.0)
 
     @staticmethod

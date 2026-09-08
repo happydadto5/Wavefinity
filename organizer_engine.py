@@ -241,6 +241,7 @@ class BoxSpec:
     easy_clean: bool = False
     standard_base: bool = True
     easy_clean_radius: float = EASY_CLEAN_RADIUS
+    easy_clean_style: str = "bevel"
 
     def __post_init__(self) -> None:
         values = {
@@ -252,6 +253,8 @@ class BoxSpec:
         for name, value in values.items():
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be a positive finite number")
+        if self.easy_clean_style not in {"bevel", "curve"}:
+            raise ValueError("easy clean style must be 'bevel' or 'curve'")
         if self.base_thickness < TEXT_DEPTH:
             raise ValueError(
                 f"base thickness must be at least {TEXT_DEPTH:g} mm"
@@ -719,13 +722,20 @@ def _sweep_profile(
 
 
 def _easy_clean_profile(spec: BoxSpec) -> list[tuple[float, float]]:
-    """Quarter-round material added at an exposed inside floor/wall joint."""
+    """Quarter-round or 45-degree beveled material added at an exposed inside floor/wall joint."""
     radius = spec.easy_clean_radius
     # A straight lower band must cover the full excursion of the cavity above
     # it.  Otherwise the troughs left beside a straight fillet form a second,
     # wavy dirt-catching groove at the floor.
     embed = 2.0 * WAVE_AMPLITUDE + 0.2
     centre_z = spec.base_thickness + radius
+    if spec.easy_clean_style == "bevel":
+        return [
+            (-embed, spec.base_thickness),
+            (-embed, centre_z),
+            (0.0, centre_z),
+            (radius, spec.base_thickness),
+        ]
     points = [(-embed, spec.base_thickness), (-embed, centre_z), (0.0, centre_z)]
     for index in range(1, 17):
         angle = math.pi + (math.pi / 2.0) * index / 16.0
@@ -874,16 +884,22 @@ def _easy_clean_cavity(spec: BoxSpec) -> trimesh.Trimesh:
     # horizontal shelf where the normal wave resumes.
     rings: list[np.ndarray] = []
     heights: list[float] = []
-    # Ten evenly spaced arc sections are finer than a typical print layer at
-    # the default 2 mm radius.  Sampling the angle (rather than the horizontal
-    # inset) keeps those sections evenly distributed and avoids a needlessly
-    # dense exported mesh.
-    curve_steps = 10
-    for step in range(curve_steps + 1):
-        angle = math.pi * step / (2.0 * curve_steps)
-        fraction = 1.0 - math.cos(angle)
-        rings.append(floor_points + fraction * (flat_points - floor_points))
-        heights.append(floor_z + radius * math.sin(angle))
+    if spec.easy_clean_style == "bevel":
+        rings.append(floor_points)
+        heights.append(floor_z)
+        rings.append(flat_points)
+        heights.append(floor_z + radius)
+    else:
+        # Ten evenly spaced arc sections are finer than a typical print layer at
+        # the default 2 mm radius.  Sampling the angle (rather than the horizontal
+        # inset) keeps those sections evenly distributed and avoids a needlessly
+        # dense exported mesh.
+        curve_steps = 10
+        for step in range(curve_steps + 1):
+            angle = math.pi * step / (2.0 * curve_steps)
+            fraction = 1.0 - math.cos(angle)
+            rings.append(floor_points + fraction * (flat_points - floor_points))
+            heights.append(floor_z + radius * math.sin(angle))
 
     blend_steps = 10
     for step in range(1, blend_steps + 1):

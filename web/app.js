@@ -40,6 +40,14 @@ const state = {
   // be back at the 10-part palette, so renderPlaced() must not helpfully re-open
   // a lone part for editing. Cleared the moment a part is picked or reopened.
   paletteBrowsing: false,
+  // Which of the open draft's zone axes the user has set by hand. A pinned axis
+  // is only ever grown to fit the part's contents, never shrunk back or
+  // overwritten - a manual size always wins. Reset whenever a fresh draft loads.
+  pinnedZone: {},
+  // True while the bin is at a size the app grew it to (not one the user typed).
+  // Only then does shrinking a part's contents pull the bin back in - a
+  // hand-set bin size is left exactly as entered.
+  binAutoGrown: false,
   camera: { yaw: 45, elevation: 76, zoom: 1 },
   lastBoxSize: null,
   previewRequest: 0,
@@ -271,6 +279,9 @@ function renderCatalog() {
         // A debounced draft must not disappear just because the user switches
         // print mode quickly after changing a field.
         await commitVisibleDraft();
+        if (modes.value !== "fused" && state.design?.box?.easy_clean_style === "curve") {
+          state.design.box.easy_clean_style = "bevel";
+        }
         const previousDesign = clone(state.design);
         const previousSelected = state.selected;
         const result = await api("/api/layout/mode", { design: state.design, mode: modes.value });
@@ -347,6 +358,38 @@ function syncRimLabelFromFeatures() {
   state.design.label_position = rimText ? "top" : "bottom";
 }
 
+function syncEasyCleanControls() {
+  const isClean = $("#easy-clean") ? $("#easy-clean").checked : false;
+  const mode = state.design?.layout?.mode || $("#mode-select")?.value || "fused";
+  const isFused = mode === "fused";
+
+  const curveOption = $("#easy-clean-style option[value='curve']");
+  if (!isFused) {
+    if (curveOption) {
+      curveOption.hidden = true;
+      curveOption.disabled = true;
+    }
+    if ($("#easy-clean-style") && $("#easy-clean-style").value === "curve") {
+      $("#easy-clean-style").value = "bevel";
+      if (state.design?.box) state.design.box.easy_clean_style = "bevel";
+    }
+  } else {
+    if (curveOption) {
+      curveOption.hidden = false;
+      curveOption.disabled = false;
+    }
+  }
+
+  if ($("#easy-clean-style-setting")) $("#easy-clean-style-setting").hidden = !isClean;
+  if ($("#easy-clean-radius-setting")) $("#easy-clean-radius-setting").hidden = !isClean;
+
+  const currentStyle = ($("#easy-clean-style") && $("#easy-clean-style").value) || "bevel";
+  const labelEl = $("#easy-clean-radius-label");
+  if (labelEl) {
+    labelEl.textContent = currentStyle === "bevel" ? "Bevel" : "Curve";
+  }
+}
+
 function syncForm() {
   const { box, layout } = state.design;
   ensureRimFeatureInLayout();
@@ -363,11 +406,11 @@ function syncForm() {
   }
   $("#z").value = fmt(box.z);
   $("#standard-base").checked = box.standard_base !== false;
-  $("#base-thickness").value = fmt(box.base_thickness ?? 0.6);
   $("#easy-clean").checked = Boolean(box.easy_clean);
+  $("#easy-clean-style").value = box.easy_clean_style || "bevel";
   $("#easy-clean-radius").value = fmt(box.easy_clean_radius ?? 2.0);
   $("#base-thickness-setting").hidden = $("#standard-base").checked;
-  $("#easy-clean-radius-setting").hidden = !$("#easy-clean").checked;
+  syncEasyCleanControls();
   $("#part-name").value = state.design.part_name || "";
   const scoopEl = $("#scoop");
   if (scoopEl) scoopEl.checked = Boolean(state.design.scoop);
@@ -461,8 +504,12 @@ function updateDesignFromForm() {
     const unit = state.catalog.base_unit;
     return Math.max(unit, Math.round(number(value, fallback) / unit) * unit);
   };
-  design.box.x = snapSize($("#x-size").value, design.box.x);
-  design.box.y = snapSize($("#y-size").value, design.box.y);
+  const newBoxX = snapSize($("#x-size").value, design.box.x);
+  const newBoxY = snapSize($("#y-size").value, design.box.y);
+  // A hand-typed bin size takes back control: the app stops auto-shrinking it.
+  if (newBoxX !== design.box.x || newBoxY !== design.box.y) state.binAutoGrown = false;
+  design.box.x = newBoxX;
+  design.box.y = newBoxY;
   const prevBoxZ = design.box.z;
   design.box.z = number($("#z").value, design.box.z);
   checkBinSizeChange();
@@ -482,6 +529,10 @@ function updateDesignFromForm() {
   design.box.standard_base = $("#standard-base").checked;
   if (design.box.standard_base) design.box.base_thickness = 0.6;
   design.box.easy_clean = $("#easy-clean").checked;
+  design.box.easy_clean_style = ($("#easy-clean-style") && $("#easy-clean-style").value) || "bevel";
+  if (design.layout?.mode !== "fused" && design.box.easy_clean_style === "curve") {
+    design.box.easy_clean_style = "bevel";
+  }
   design.box.easy_clean_radius = number(
     $("#easy-clean-radius").value,
     design.box.easy_clean_radius ?? 2.0,
@@ -567,13 +618,31 @@ const applyChangedDesign = debounce(() => {
   pendingDesignHistory = null;
   updateDesignFromForm();
   recordHistory(previousDesign);
-  // A cradle hugs its zone to the tool and the bin, so re-fit the open cradle
-  // draft to the resized bin - otherwise a shrunk bin leaves its zone hanging
-  // outside with a stale "reaches outside the bin" error.
-  if (state.draft?.kind === "cradle") sizeCradleToItem(state.draft);
+  // Re-fit the open draft to the resized bin so a shrunk bin doesn't leave its
+  // zone hanging outside with a stale "reaches outside the bin" error.
+  reflowDraftToBin(state.draft);
   refreshPreview();
   if (state.draft) refreshDraft();
 }, 280);
+
+// Snap the open draft back inside the bin after the bin itself changed size.
+// Contents-driven kinds re-fit to their contents (which also re-clamps them);
+// a plain sized block is just nudged/trimmed to the new usable floor.
+function reflowDraftToBin(one) {
+  if (!one) return;
+  if (one.kind === "cradle") return sizeCradleToItem(one);
+  if (one.kind === "bore") return sizeBoreToGrid(one);
+  if (one.kind === "post") return sizePostToRow(one);
+  if (one.kind === "slot") return sizeSlotToBank(one);
+  if (["pocket", "steps"].includes(one.kind)) {
+    const [insideX, insideY] = binInsideExtent(state.design.box);
+    const cx = (one.zone[0] + one.zone[2]) / 2;
+    const cy = (one.zone[1] + one.zone[3]) / 2;
+    const w = Math.min(one.zone[2] - one.zone[0], insideX);
+    const d = Math.min(one.zone[3] - one.zone[1], insideY);
+    applyResizedZone(one, cx, cy, w, d);
+  }
+}
 
 function changedDesign(previousDesign = null) {
   // Width/length keyboard, wheel and blur handlers update state immediately so
@@ -755,9 +824,16 @@ function wireControls() {
     changedDesign();
   });
   $("#easy-clean").addEventListener("change", () => {
-    $("#easy-clean-radius-setting").hidden = !$("#easy-clean").checked;
+    syncEasyCleanControls();
     changedDesign();
   });
+  const cleanStyleEl = $("#easy-clean-style");
+  if (cleanStyleEl) {
+    cleanStyleEl.addEventListener("change", () => {
+      syncEasyCleanControls();
+      changedDesign();
+    });
+  }
   $("#easy-clean-radius").addEventListener("input", changedDesign);
   ["#x-size", "#y-size"].forEach(selector => {
     const axis = selector === "#x-size" ? "x" : "y";
@@ -947,6 +1023,7 @@ function clearDraftSelection() {
   state.draftIsNew = false;
   state.draftSourceIndex = null;
   state.draftTouched = false;
+  state.pinnedZone = {};
   state.selected = null;
   state.nudgeFeedback = null;
   updateNudgeUI();
@@ -1005,6 +1082,7 @@ async function selectKind(kind, reset = false) {
     if (request !== state.kindRequest) return;
     state.draft = result.feature;
     state.draftTouched = false;
+    state.pinnedZone = {};
     state.draftResolvedOptions = result.resolved_options || {};
     // What the engine started this text at, so the Part Name is only ever
     // seeded from lettering the user actually typed - never the placeholder.
@@ -1034,6 +1112,9 @@ async function selectedFeature(index, force = false) {
   state.draftAutoCommit = true;
   state.draftIsNew = false;
   state.draftSourceIndex = index;
+  // Contents still auto-track on a re-opened part; only a hand-typed Base size
+  // pins an axis (see the width/depth handler in updateDraftFromFields).
+  state.pinnedZone = {};
   state.draftResolvedOptions = {};
   state.draftKind = state.draft.kind;
   updateInteriorModeVisibility(true);
@@ -1686,17 +1767,17 @@ function sizeCradleToItem(one) {
 // Mirrors feature_min_footprint()'s bore branch in organizer_inserts/_layout.py:
 // pitch is (hole + wall), the block runs columns x pitch by rows x pitch, and a
 // leaned grid adds along its lean axis the sideways "reach" the slanting hole
-// bottoms travel. Only an axis given an explicit X / Y quantity is resized;
-// left on "auto" the fitter still decides that count from whatever base the
-// user drew, so that axis is left alone. The block grows AND shrinks to the
-// grid; when the grid now needs more floor than the bin has, refreshDraft()'s
-// catch grows the bin around it.
+// bottoms travel. The block grows AND shrinks to that minimum on its own; when
+// it now needs more floor than the bin has, refreshDraft()'s catch grows the
+// bin around it. A pinned axis (see state.pinnedZone) only ever grows to the
+// minimum - a hand-set Base size is never shrunk back. An axis left on "auto"
+// count still keeps room for at least one hole so the fitter always has
+// something to divide.
 function sizeBoreToGrid(one) {
   if (one.kind !== "bore") return;
   const opts = one.options || {};
   const hasCols = Object.prototype.hasOwnProperty.call(opts, "columns");
   const hasRows = Object.prototype.hasOwnProperty.call(opts, "rows");
-  if (!hasCols && !hasRows) return;
 
   const resolved = state.draftResolvedOptions || {};
   const profile = one.item?.profile || "round";
@@ -1721,20 +1802,27 @@ function sizeBoreToGrid(one) {
 
   const cx = (one.zone[0] + one.zone[2]) / 2;
   const cy = (one.zone[1] + one.zone[3]) / 2;
-  let width = one.zone[2] - one.zone[0];
-  let depth = one.zone[3] - one.zone[1];
-  if (hasCols) {
-    const cols = Math.max(1, Math.round(number(opts.columns, 1)));
-    width = Math.ceil(cols * pitch + (along === "x" ? reach : 0) - 1e-6);
-  }
-  if (hasRows) {
-    const rows = Math.max(1, Math.round(number(opts.rows, 1)));
-    depth = Math.ceil(rows * pitch + (along === "y" ? reach : 0) - 1e-6);
-  }
+  const curW = one.zone[2] - one.zone[0];
+  const curD = one.zone[3] - one.zone[1];
+  const [insideX, insideY] = binInsideExtent(state.design.box);
+  const axisSpan = (count, leanAxis) =>
+    Math.ceil(count * pitch + (along === leanAxis ? reach : 0) - 1e-6);
+  // For an explicit count: shrink to the grid (or only grow, if pinned). For
+  // "auto": keep whatever is drawn, but never below one hole and never past the
+  // bin wall - so a shrunk bin trims an auto grid back instead of erroring.
+  const resolveAxis = (has, countKey, cur, pinKey, leanAxis, inside) => {
+    if (has) {
+      const min = axisSpan(Math.max(1, Math.round(number(opts[countKey], 1))), leanAxis);
+      return state.pinnedZone[pinKey] ? Math.max(cur, min) : min;
+    }
+    return Math.min(Math.max(cur, axisSpan(1, leanAxis)), Math.max(inside, axisSpan(1, leanAxis)));
+  };
+  const width = resolveAxis(hasCols, "columns", curW, "width", "x", insideX);
+  const depth = resolveAxis(hasRows, "rows", curD, "depth", "y", insideY);
+  if (Math.abs(width - curW) < 0.05 && Math.abs(depth - curD) < 0.05) return;
 
   // Stay where the block already sits when it still fits; once an axis outgrows
   // the bin, keep it on its old centre and let the bin grow around it.
-  const [insideX, insideY] = binInsideExtent(state.design.box);
   const place = (centre, span, inside) => {
     if (span >= inside) return centre;
     const half = span / 2;
@@ -1744,6 +1832,88 @@ function sizeBoreToGrid(one) {
   const ncy = place(cy, depth, insideY);
   one.zone = [ncx - width / 2, ncy - depth / 2, ncx + width / 2, ncy + depth / 2];
 
+  const widthField = $('[data-draft="width"]', $("#draft-fields"));
+  if (widthField) widthField.value = fmt(width);
+  const depthField = $('[data-draft="depth"]', $("#draft-fields"));
+  if (depthField) depthField.value = fmt(depth);
+}
+
+// The peg-row twin of sizeBoreToGrid. feature_min_footprint()'s post branch:
+// the run axis carries count pegs of `diameter` with `spacing` gaps between;
+// the across axis only needs one `diameter`. Count on "auto" is left for the
+// fitter. Only the run axis is resized - the across axis is whatever the user
+// drew (grown if a fat peg now needs more). A pinned run axis only grows.
+function sizePostToRow(one) {
+  if (one.kind !== "post" || one.count == null) return;
+  const resolved = state.draftResolvedOptions || {};
+  const opts = one.options || {};
+  const diameter = number(opts.diameter ?? resolved.diameter, 12);
+  const spacing = Math.max(0, number(opts.spacing ?? resolved.spacing, 4));
+  const count = Math.max(1, Math.round(one.count));
+  if (!(diameter > 0)) return;
+  const runNeeded = Math.ceil(count * diameter + (count - 1) * spacing - 1e-6);
+  const acrossNeeded = Math.ceil(diameter - 1e-6);
+  const along = one.along === "y" ? "y" : "x";
+  const runKey = along === "x" ? "width" : "depth";
+  const cx = (one.zone[0] + one.zone[2]) / 2;
+  const cy = (one.zone[1] + one.zone[3]) / 2;
+  const curW = one.zone[2] - one.zone[0];
+  const curD = one.zone[3] - one.zone[1];
+  const curRun = along === "x" ? curW : curD;
+  const curAcross = along === "x" ? curD : curW;
+  const run = state.pinnedZone[runKey] ? Math.max(curRun, runNeeded) : runNeeded;
+  const across = Math.max(curAcross, acrossNeeded);
+  const width = along === "x" ? run : across;
+  const depth = along === "x" ? across : run;
+  if (Math.abs(width - curW) < 0.05 && Math.abs(depth - curD) < 0.05) return;
+  applyResizedZone(one, cx, cy, width, depth);
+}
+
+// The slot-bank twin. feature_min_footprint()'s slot branch: pitch is
+// (thickness + wall) / cos(angle); the across axis holds count of them plus a
+// half-slot and a wall each end; the run axis is left as drawn (slots span it
+// minus walls). Count on "auto" is the fitter's. A pinned across axis only
+// grows.
+function sizeSlotToBank(one) {
+  if (one.kind !== "slot" || one.count == null) return;
+  const resolved = state.draftResolvedOptions || {};
+  const opts = one.options || {};
+  const thickness = number(opts.thickness ?? resolved.thickness, 4);
+  const wall = number(opts.wall ?? resolved.wall, 1.6);
+  const angle = Math.min(45, Math.abs(number(opts.angle ?? resolved.angle, 20)));
+  const cosA = Math.cos(angle * Math.PI / 180);
+  if (!(thickness > 0) || !(wall > 0) || !(cosA > 0)) return;
+  const count = Math.max(1, Math.round(one.count));
+  const pitch = (thickness + wall) / cosA;
+  const acrossNeeded = Math.ceil((count - 1) * pitch + thickness / cosA + 2 * wall - 1e-6);
+  const along = one.along === "y" ? "y" : "x";
+  const acrossKey = along === "x" ? "depth" : "width";
+  const cx = (one.zone[0] + one.zone[2]) / 2;
+  const cy = (one.zone[1] + one.zone[3]) / 2;
+  const curW = one.zone[2] - one.zone[0];
+  const curD = one.zone[3] - one.zone[1];
+  const curAcross = along === "x" ? curD : curW;
+  const curRun = along === "x" ? curW : curD;
+  const across = state.pinnedZone[acrossKey] ? Math.max(curAcross, acrossNeeded) : acrossNeeded;
+  const width = along === "x" ? curRun : across;
+  const depth = along === "x" ? across : curRun;
+  if (Math.abs(width - curW) < 0.05 && Math.abs(depth - curD) < 0.05) return;
+  applyResizedZone(one, cx, cy, width, depth);
+}
+
+// Set one.zone to width x depth about (cx, cy), nudged back inside the bin when
+// it still fits, and push the matching Width / Length fields. Shared by the
+// post / slot sizers (the bore sizer inlines the same steps).
+function applyResizedZone(one, cx, cy, width, depth) {
+  const [insideX, insideY] = binInsideExtent(state.design.box);
+  const place = (centre, span, inside) => {
+    if (span >= inside) return centre;
+    const half = span / 2;
+    return Math.min(Math.max(centre, -inside / 2 + half), inside / 2 - half);
+  };
+  const ncx = place(cx, width, insideX);
+  const ncy = place(cy, depth, insideY);
+  one.zone = [ncx - width / 2, ncy - depth / 2, ncx + width / 2, ncy + depth / 2];
   const widthField = $('[data-draft="width"]', $("#draft-fields"));
   if (widthField) widthField.value = fmt(width);
   const depthField = $('[data-draft="depth"]', $("#draft-fields"));
@@ -2015,17 +2185,28 @@ function updateDraftFromFields(event) {
       }
     }
     if (info.kind === "bore" && key === "depth") {
-      // The hole can't be deeper than the block is tall. If a bigger Hole
-      // depth would reach or pass the current Height, lift Height to sit
-      // 1 mm above it.
+      // Hole depth and block Height stay 2 mm apart: editing Depth pushes
+      // Height to Depth + 2 whenever Height would otherwise be too short (the
+      // block always keeps a 2 mm floor under the hole bottom).
       const holeDepth = number(one.options.depth, 0);
       const heightNow = number(
         one.options.height ?? state.draftResolvedOptions?.height, holeDepth + 2,
       );
-      if (holeDepth >= heightNow) {
-        one.options.height = holeDepth + 1;
+      if (holeDepth > 0 && heightNow < holeDepth + 2) {
+        one.options.height = holeDepth + 2;
         const heightField = $('[data-draft="option:height"]', $("#draft-fields"));
         if (heightField) heightField.value = fmt(one.options.height);
+      }
+    }
+    if (info.kind === "bore" && key === "height") {
+      // The other direction: editing Height pulls Hole depth down to Height - 2
+      // when it would otherwise breach the floor.
+      const h = number(one.options.height, 0);
+      const depthNow = number(one.options.depth ?? state.draftResolvedOptions?.depth, 0);
+      if (h > 2 && depthNow >= h - 2) {
+        one.options.depth = h - 2;
+        const depthField = $('[data-draft="option:depth"]', $("#draft-fields"));
+        if (depthField) depthField.value = fmt(one.options.depth);
       }
     }
     if (info.kind === "bore" && key === "angle" && !("wall" in (one.options || {}))) {
@@ -2053,6 +2234,22 @@ function updateDraftFromFields(event) {
     changed === "option:angle" || changed === "item_diameter" ||
     changed === "clearance" || changed === "profile" || changed === "along"
   )) sizeBoreToGrid(one);
+  // The peg row and the slot bank track their own contents the same way the
+  // bore base tracks its grid: change the count, peg size, gap, slot pitch or
+  // lean and the zone re-fits (grow or shrink) on the driven axis.
+  if (one.kind === "post" && (
+    changed === "count" || changed === "option:diameter" ||
+    changed === "option:spacing" || changed === "along"
+  )) sizePostToRow(one);
+  if (one.kind === "slot" && (
+    changed === "count" || changed === "option:thickness" ||
+    changed === "option:wall" || changed === "option:angle" || changed === "along"
+  )) sizeSlotToBank(one);
+  // A hand-typed Base Width / Length pins that axis: from now on the contents
+  // sizers only ever grow it to fit, never shrink or overwrite the number.
+  if (info.flags.size && (changed === "width" || changed === "depth")) {
+    state.pinnedZone[changed] = true;
+  }
   // Toggling Alternate ends swaps the field beneath Runs along between
   // "% from end" and "Offset from center".
   if (changed === "alternate_ends") renderDraftFields();
@@ -2072,6 +2269,16 @@ function updateDraftFromFields(event) {
 }
 
 const refreshDraftSoon = debounce(refreshDraft, 220);
+
+// After the contents of a part shrink, pull an app-grown bin back in around
+// what is left - staying in the editor, quietly, and never past a size the
+// user typed (state.binAutoGrown). Debounced so a run of edits settles first.
+const tightenBinSoon = debounce(() => {
+  if (!state.binAutoGrown || state.autoGrowingBin || !state.draft) return;
+  state.autoGrowingBin = true;
+  Promise.resolve(autoExpandBin({ tighten: true, keepDraft: true, silent: true }))
+    .finally(() => { state.autoGrowingBin = false; });
+}, 500);
 
 async function refreshDraft() {
   if (!state.draft) return;
@@ -2126,18 +2333,28 @@ async function refreshDraft() {
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
     if (state.draftAutoCommit) await autoCommitDraft(request);
+    // The draft now fits. If the bin was auto-grown earlier and the part has
+    // since shrunk, reclaim the slack.
+    if (state.binAutoGrown && !state.autoGrowingBin &&
+        ["bore", "post", "slot", "cradle"].includes(state.draft?.kind)) {
+      tightenBinSoon();
+    }
   } catch (error) {
     if (request !== state.draftRequest) return;
-    // A bore whose hole grid outgrew the bin: grow the bin around it instead of
-    // stopping at the error, so "put 10 x 10 holes in a stock bin" just resizes
-    // the bin the way the "Grow the bin" button would. Guarded so the expand's
-    // own rebuild can't loop back in here.
-    const outgrewBin = /reaches outside the bin|bores need|zone is too small|layout area|overlap/i
-      .test(error.message || "");
-    if (state.draft?.kind === "bore" && outgrewBin && !state.autoGrowingBin) {
+    // A part whose contents outgrew the bin: grow the bin around it instead of
+    // stopping at the error, so "put 10 x 10 holes in a stock bin" (or a longer
+    // tool, more pegs, more slots) just resizes the bin the way the "Grow the
+    // bin" button would. Guarded so the expand's own rebuild can't loop back in.
+    const outgrewBin = new RegExp(
+      "reaches outside the bin|bores need|posts need|slots? need|zone is too small" +
+      "|the zone (only )?runs|mm long but the zone|layout area|does not fit in|overlap|tool reaches the side",
+      "i",
+    ).test(error.message || "");
+    const growKinds = new Set(["bore", "post", "slot", "cradle", "pocket"]);
+    if (growKinds.has(state.draft?.kind) && outgrewBin && !state.autoGrowingBin) {
       state.autoGrowingBin = true;
       try {
-        await autoExpandBin();
+        await autoExpandBin({ keepDraft: true });
       } finally {
         state.autoGrowingBin = false;
       }
@@ -2447,6 +2664,7 @@ async function deleteCurrentPart() {
 
 async function deleteSupportAt(index) {
   if (index === null || index === undefined || !beginDesignMutation()) return;
+  let deleted = false;
   try {
     const previousDesign = clone(state.design);
     const result = await api("/api/feature/delete", { design: state.design, index });
@@ -2457,16 +2675,22 @@ async function deleteSupportAt(index) {
     renderPlaced();
     refreshPreview();
     toast("Interior part deleted.");
+    deleted = true;
   } catch (error) {
     toast(error.message, true);
   } finally {
     finishDesignMutation();
   }
+  // Losing a part can leave an app-grown bin bigger than the rest now need -
+  // pull it back in. Quietly, and only when the bin size wasn't hand-set.
+  if (deleted && state.binAutoGrown && state.design.layout.features.length) {
+    await autoExpandBin({ tighten: true, silent: true });
+  }
 }
 
 function mutationControls() {
   return $$(
-    '#x-size, #y-size, #z, #standard-base, #base-thickness, #easy-clean, #easy-clean-radius, #part-name, ' +
+    '#x-size, #y-size, #z, #standard-base, #base-thickness, #easy-clean, #easy-clean-style, #easy-clean-radius, #part-name, ' +
     '#mode-select, ' +
     '#new-design, #open-design, #save-design'
   );
@@ -2520,8 +2744,8 @@ function updateSelectionButtons() {
   // panel; back at the palette, all 10 types and the placed list return.
   const editing = !$(".support-editor").hidden;
   $("#support-palette").classList.toggle("editing", editing);
-  // Save / Delete Part live over the preview (top right), shown only while a
-  // part is open for editing.
+  // Save / Delete Part ride in the top-right of the green part chip, shown
+  // only while a part is open for editing.
   const draftActions = $("#draft-actions");
   if (draftActions) draftActions.hidden = !editing;
   const placedBlock = $(".placed-block");
@@ -2605,7 +2829,14 @@ async function refreshPreview() {
   setError();
   try {
     const payload = { design: state.design };
-    if (state.draft && !(state.draft.kind === "nest" && !state.draft.contour)) payload.draft = state.draft;
+    if (state.draft && !(state.draft.kind === "nest" && !state.draft.contour)) {
+      payload.draft = state.draft;
+      // A draft opened from a placed part replaces that part for preview
+      // validation. Without its index, the server sees the saved bore and its
+      // live draft as two separate bores and reports a false self-overlap.
+      const draftIndex = draftCommitIndex();
+      if (Number.isInteger(draftIndex)) payload.selected = draftIndex;
+    }
     const result = await api("/api/preview", payload);
     if (request !== state.previewRequest) return;
     state.preview = result;
@@ -2790,10 +3021,16 @@ function fillPartToBin() {
   refreshDraftSoon();
 }
 
+// Resize the bin to the minimum that holds every interior part. Options (all
+// off for a plain "Grow the bin" click):
+//   tighten   - also shrink the bin when it now has slack, not just grow it
+//   keepDraft - stay in the editor on the same part instead of closing it
+//   silent    - no toast
 async function autoExpandBin(event) {
+  const opts = event && !event.currentTarget ? event : {};
   const draftIndex = state.draft ? draftCommitIndex() : null;
   if (draftIndex === false) {
-    toast("Select the interior part again before growing the bin.", true);
+    if (!opts.silent) toast("Select the interior part again before growing the bin.", true);
     return;
   }
   if (!beginDesignMutation()) return;
@@ -2816,22 +3053,43 @@ async function autoExpandBin(event) {
       : { ...state.design, layout: { ...layout, features } };
     // Name the part being edited so the server slides the *others* apart around
     // it, not it around them.
-    const anchor = features === layout.features ? undefined
-      : draftIndex === null ? features.length - 1 : draftIndex;
+    const anchorIndex = draftIndex === null ? features.length - 1 : draftIndex;
+    const anchor = features === layout.features ? undefined : anchorIndex;
     const previousDesign = clone(state.design);
-    const result = await api("/api/layout/expand", { design, anchor });
+    const result = await api("/api/layout/expand", {
+      design, anchor, tighten: !!opts.tighten,
+    });
+    const changed = result.changed ?? result.grew;
     state.design = result.design;
-    recordHistory(previousDesign);
-    clearDraftSelection();
-    syncForm();
+    if (changed) recordHistory(previousDesign);
+    if (result.grew) state.binAutoGrown = true;
     state.fitError = false;
-    updateAutoExpandButton();
-    await refreshPreview();
-    toast(result.grew
-      ? `Bin expanded to ${fmt(result.box.x)} × ${fmt(result.box.y)} mm.`
-      : "The interior parts already fit - bin unchanged.");
+    if (opts.keepDraft && state.draft) {
+      // Keep editing the same part with whatever zone the resize settled on.
+      const at = anchorIndex < state.design.layout.features.length ? anchorIndex : null;
+      if (at !== null) {
+        state.selected = at;
+        state.draftIsNew = false;
+        state.draftSourceIndex = at;
+        state.draft = clone(state.design.layout.features[at]);
+      }
+      renderDraftFields();
+      syncForm();
+      updateSelectionButtons();
+      await refreshPreview();
+    } else {
+      clearDraftSelection();
+      syncForm();
+      updateAutoExpandButton();
+      await refreshPreview();
+    }
+    if (!opts.silent && changed) {
+      toast(`Bin resized to ${fmt(result.box.x)} × ${fmt(result.box.y)} mm.`);
+    } else if (!opts.silent && !opts.keepDraft) {
+      toast("The interior parts already fit - bin unchanged.");
+    }
   } catch (error) {
-    toast(error.message, true, 5000);
+    if (!opts.silent) toast(error.message, true, 5000);
   } finally {
     if (button) button.disabled = false;
     finishDesignMutation();

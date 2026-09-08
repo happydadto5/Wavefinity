@@ -11,7 +11,10 @@ from shapely.geometry import Polygon, box as shapely_box
 
 from organizer_engine import (
     BoxSpec,
+    _align_ring,
     _extrude_polygon,
+    _loft_cavity,
+    _resampled_ring,
     _rounded,
     difference,
     flat_cavity_polygon,
@@ -19,6 +22,7 @@ from organizer_engine import (
     label_placement,
     union,
     wavy_cavity_polygon,
+    SAMPLES_PER_MM,
 )
 
 from ._core import (
@@ -210,6 +214,14 @@ def insert_footprint(box: BoxSpec, mode: str = "separate") -> Polygon:
     cell footprint.
     """
     if mode == "separate":
+        if box.easy_clean:
+            radius = box.easy_clean_radius
+            chamfer = min(BASE_PLATE, radius)
+            flat = flat_cavity_polygon(box)
+            footprint = flat.buffer(-radius + chamfer - INSERT_CLEARANCE, join_style=1, quad_segs=16)
+            if not isinstance(footprint, Polygon) or footprint.is_empty or footprint.area <= 0.0:
+                raise ValueError("this bin is too small for a removable insert with easy clean")
+            return footprint
         cavity = (
             flat_cavity_polygon(box)
             if box.flat_inside > 0.0
@@ -231,7 +243,36 @@ def insert_footprint(box: BoxSpec, mode: str = "separate") -> Polygon:
 
 def make_insert_plate(box: BoxSpec, mode: str = "separate") -> trimesh.Trimesh:
     """The bare base plate of a standalone insert, sitting on z = 0."""
-    return _extrude_polygon(insert_footprint(box, mode), BASE_PLATE)
+    if not box.easy_clean:
+        return _extrude_polygon(insert_footprint(box, mode), BASE_PLATE)
+
+    radius = box.easy_clean_radius
+    chamfer = min(BASE_PLATE, radius)
+    if mode == "separate":
+        flat = flat_cavity_polygon(box)
+        bottom_poly = flat.buffer(-radius - INSERT_CLEARANCE, join_style=1, quad_segs=16)
+        if not isinstance(bottom_poly, Polygon) or bottom_poly.is_empty or bottom_poly.area <= 0.0:
+            raise ValueError("this bin is too small for a removable insert with easy clean")
+        top_poly = insert_footprint(box, "separate")
+        ref_poly = flat
+    else:
+        top_poly = insert_footprint(box, "cartridge")
+        bottom_poly = top_poly.buffer(-chamfer, join_style=1, quad_segs=16)
+        if not isinstance(bottom_poly, Polygon) or bottom_poly.is_empty or bottom_poly.area <= 0.0:
+            raise ValueError("this bin is too small for a cartridge insert with easy clean")
+        ref_poly = top_poly
+
+    count = max(128, math.ceil(ref_poly.length * SAMPLES_PER_MM / 2.0))
+    ref_points = _resampled_ring(ref_poly, count)
+    bottom_points = _align_ring(ref_points, _resampled_ring(bottom_poly, count))
+    top_points = _align_ring(ref_points, _resampled_ring(top_poly, count))
+
+    rings = [bottom_points, top_points]
+    heights = [0.0, chamfer]
+    if BASE_PLATE > chamfer:
+        rings.append(top_points)
+        heights.append(BASE_PLATE)
+    return _loft_cavity(rings, heights)
 
 
 def make_fitted_insert(
@@ -244,7 +285,7 @@ def make_fitted_insert(
     out and swap it.
     """
     footprint = insert_footprint(box, "separate")
-    plate = _extrude_polygon(footprint, BASE_PLATE)
+    plate = make_insert_plate(box, "separate")
     # Validate and size holders at their installed height, then lower them by
     # the bin floor thickness so the removable insert still exports on z=0.
     parts = build_features(
@@ -268,7 +309,7 @@ def make_cartridge_insert(
     """Standalone insert on the optional centred 8 mm cartridge footprint."""
     bounds = cartridge_zone(box)
     footprint = insert_footprint(box, "cartridge")
-    plate = _extrude_polygon(footprint, BASE_PLATE)
+    plate = make_insert_plate(box, "cartridge")
     parts = build_features(
         box, features, BASE_PLATE + box.base_thickness, bounds, "cartridge"
     )

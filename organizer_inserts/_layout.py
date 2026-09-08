@@ -7,7 +7,12 @@ from typing import Iterable
 
 from organizer_engine import BoxSpec
 
-from ._bore import HEX_BIT_CLEARANCE, HEX_BIT_FLATS, _is_hex_bit
+from ._bore import (
+    HEX_BIT_CLEARANCE,
+    HEX_BIT_FLATS,
+    _is_hex_bit,
+    bore_tool_clearance_zone,
+)
 from ._core import MIN_FEATURE_GAP, Feature, Zone, _fit_count
 from ._cradle import _cradle_end_margin, _cradle_offset, cradle_min_footprint
 from ._divider import DIVIDER_CHAMFER, _divider_cross_centres
@@ -315,6 +320,18 @@ def check_layout(
                 f"{one.zone.width:.1f} x {one.zone.depth:.1f} mm at "
                 f"({one.zone.x0:.1f}, {one.zone.y0:.1f}) but the bin gives "
                 f"{whole.width:.1f} x {whole.depth:.1f} mm"
+            )
+        # A bore block may fit while the cylinder it holds intersects a side
+        # wall above it. Project the cylinder's axis to infinity; only the
+        # mouth-to-rim section can meet the finite-height bin wall.
+        tool_path = bore_tool_clearance_zone(box, one, base_z) if one.kind == "bore" else None
+        if tool_path is not None and (
+            tool_path.x0 < whole.x0 - 1e-6 or tool_path.x1 > whole.x1 + 1e-6
+            or tool_path.y0 < whole.y0 - 1e-6 or tool_path.y1 > whole.y1 + 1e-6
+        ):
+            raise ValueError(
+                "an angled bore's tool reaches the side of the bin; "
+                "grow the bin or reduce its angle"
             )
     # Zones may legitimately overlap once the parts inside them do not, so
     # neighbours are judged on the floor each one actually covers.
