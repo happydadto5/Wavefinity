@@ -40,6 +40,17 @@ def _hole_sides(profile: str) -> int:
     }[profile]
 
 
+def bore_minimum_pitches(
+    profile: str, held: float, wall: float, angle: float, lean_axis: str,
+) -> tuple[float, float]:
+    """Smallest X/Y centre pitches that retain the requested wall thickness."""
+    sides = _hole_sides(profile)
+    radius = held / 2.0 / (math.cos(math.pi / sides) if sides < 8 else 1.0)
+    cross_pitch = 2.0 * radius + wall
+    lean_pitch = cross_pitch / math.cos(math.radians(angle)) if angle > 1e-9 else cross_pitch
+    return (lean_pitch, cross_pitch) if lean_axis == "x" else (cross_pitch, lean_pitch)
+
+
 @defaults("bore")
 def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     item = _need_item(one)
@@ -50,14 +61,20 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         hole = min(item.length * 0.4, box.z - base_z - 2.0)
         held = item.held(item.widest)
     try:
-        tilted = abs(float(one.options.get("angle", 0.0) or 0.0)) > 1e-9
+        angle = max(0.0, float(one.options.get("angle", 0.0) or 0.0))
     except (TypeError, ValueError):
-        tilted = False
+        angle = 0.0
+    tilted = angle > 1e-9
     default_wall = BORE_TILTED_WALL if tilted else BORE_WALL
     wall = float(one.options.get("wall", default_wall))
-    pitch = held + wall
-    cols = _fit_count(one.zone.width, pitch, held + wall)
-    rows = _fit_count(one.zone.depth, pitch, held + wall)
+    pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, one.along)
+    try:
+        depth = float(one.options.get("depth", hole))
+    except (TypeError, ValueError):
+        depth = hole
+    reach = max(0.0, depth) * math.sin(math.radians(angle)) if tilted else 0.0
+    cols = _fit_count(one.zone.width - (reach if one.along == "x" else 0.0), pitch_x, pitch_x)
+    rows = _fit_count(one.zone.depth - (reach if one.along == "y" else 0.0), pitch_y, pitch_y)
     if one.count is not None:
         cols = min(cols, one.count)
         rows = max(1, math.ceil(one.count / max(cols, 1)))
@@ -100,14 +117,22 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
             f"bore lean angle must be between 0 and {BORE_MAX_TILT:g} degrees off vertical"
         )
 
-    pitch = held + wall
+    # Every hole leans the same way by the same amount, tilting about its own
+    # mouth on the flat top face. The pitch on the lean axis grows by
+    # 1 / cos(angle), preserving the wall between the parallel holes.
+    tilted = angle > 1e-9
+    lean = math.radians(angle) if tilted else 0.0
+    lean_axis = spec_feature.along           # 'x' or 'y'
+    reach = depth * math.sin(lean)           # sideways travel of the hole bottom
+    drop = depth * math.cos(lean)            # how far the bottom sits below the mouth
+    pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, lean_axis)
     raw_columns = options.get("columns")
     raw_rows = options.get("rows")
     columns = int(raw_columns) if raw_columns is not None else _fit_count(
-        zone.width, pitch, held + wall
+        zone.width - (reach if lean_axis == "x" else 0.0), pitch_x, pitch_x
     )
     rows = int(raw_rows) if raw_rows is not None else _fit_count(
-        zone.depth, pitch, held + wall
+        zone.depth - (reach if lean_axis == "y" else 0.0), pitch_y, pitch_y
     )
     if ((raw_columns is not None and abs(float(raw_columns) - columns) > 1e-9)
             or (raw_rows is not None and abs(float(raw_rows) - rows) > 1e-9)):
@@ -117,16 +142,6 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
         rows = max(1, math.ceil(spec_feature.count / max(columns, 1)))
     if columns < 1 or rows < 1:
         raise ValueError(f"no room for {item.name}: zone is too small for a bore")
-
-    # Every hole leans the same way by the same amount, tilting about its own
-    # mouth on the flat top face. The block stays upright; rows and columns keep
-    # their pitch. The zone only needs the extra sideways ``reach`` the leaning
-    # bottoms travel.
-    tilted = angle > 1e-9
-    lean = math.radians(angle) if tilted else 0.0
-    lean_axis = spec_feature.along           # 'x' or 'y'
-    reach = depth * math.sin(lean)           # sideways travel of the hole bottom
-    drop = depth * math.cos(lean)            # how far the bottom sits below the mouth
 
     # An angled blind hole needs the block tall enough to keep its bottom
     # buried. Grow the auto height to suit; a hand-set height that is too
@@ -142,8 +157,8 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
         else:
             height = max(height, need_height)
 
-    needed_x = (columns - 1) * pitch + held + wall + (reach if lean_axis == "x" else 0.0)
-    needed_y = (rows - 1) * pitch + held + wall + (reach if lean_axis == "y" else 0.0)
+    needed_x = columns * pitch_x + (reach if lean_axis == "x" else 0.0)
+    needed_y = rows * pitch_y + (reach if lean_axis == "y" else 0.0)
     if needed_x > zone.width + 1e-9 or needed_y > zone.depth + 1e-9:
         raise ValueError(
             f"{columns} x {rows} bores need {needed_x:.1f} x {needed_y:.1f} mm "
@@ -153,13 +168,13 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
     # When the base is bigger than the tight grid needs, spread the holes evenly
     # to fill it rather than leaving all the slack as one margin at the far
     # edges. The per-axis pitch opens up from the printable minimum
-    # (``held + wall``) to whatever divides the usable span into equal cells; at
-    # the minimum footprint it is exactly ``pitch`` and nothing moves. ``reach``
+    # (the angle-aware pitch) to whatever divides the usable span into equal
+    # cells; at the minimum footprint it is exactly that pitch. ``reach``
     # is taken out first so a leaned grid still balances inside what is left.
     span_x = zone.width - (reach if lean_axis == "x" else 0.0)
     span_y = zone.depth - (reach if lean_axis == "y" else 0.0)
-    pitch_x = max(pitch, span_x / columns)
-    pitch_y = max(pitch, span_y / rows)
+    pitch_x = max(pitch_x, span_x / columns)
+    pitch_y = max(pitch_y, span_y / rows)
 
     centre_x, centre_y = zone.centre
     sections = _hole_sides(item.profile)
@@ -172,7 +187,7 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
         "item": item, "zone": zone, "held": held, "depth": depth, "wall": wall,
         "height": height, "angle": angle, "tilted": tilted, "lean": lean,
         "lean_axis": lean_axis, "reach": reach, "drop": drop,
-        "lean_shift": lean_shift, "pitch": pitch, "pitch_x": pitch_x,
+        "lean_shift": lean_shift, "pitch": min(pitch_x, pitch_y), "pitch_x": pitch_x,
         "pitch_y": pitch_y, "columns": columns,
         "rows": rows, "centre_x": centre_x, "centre_y": centre_y,
         "sections": sections, "hole_radius": hole_radius, "over": over,

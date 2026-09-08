@@ -173,6 +173,16 @@
       </div>
       <div class="canvas-wrap" data-canvas="2d">
         <canvas id="preview-2d" role="img" aria-label="Top-down layout preview" aria-describedby="preview-help layout-help"></canvas>
+        <div class="camera-controls layout-controls" aria-label="2D orientation controls">
+          <div class="camera-controls-row">
+            <div class="camera-views">
+              <div class="camera-views-row">
+                <button type="button" data-layout-orientation="match3d" class="active">Match 3D</button>
+                <button type="button" data-layout-orientation="topup">Top Up</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <div id="layout-help" class="layout-hint">Use Arrow keys or drag to move</div>
       </div>
       <div id="error-panel" class="error-panel" hidden></div>

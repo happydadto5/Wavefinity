@@ -279,7 +279,7 @@ def feature_footprint(box: BoxSpec, one: Feature, base_z: float = 0.0) -> Zone:
         return one.zone
     try:
         return build(box, one, base_z) or one.zone
-    except (ValueError, TypeError, KeyError, ZeroDivisionError):
+    except Exception:
         return one.zone
 
 

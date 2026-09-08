@@ -141,9 +141,9 @@ def save_preferences(update: dict[str, Any]) -> dict[str, Any]:
     with PREFERENCES_LOCK:
         current = load_preferences()
         current.update(update)
-        PREFERENCES_FILE.write_text(
-            json.dumps(current, indent=2) + "\n", encoding="utf-8"
-        )
+        temp_file = PREFERENCES_FILE.with_suffix(".tmp")
+        temp_file.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+        temp_file.replace(PREFERENCES_FILE)
         return current
 
 
@@ -543,12 +543,6 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def browse_slicer_path_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Open the native file chooser to select a slicer executable."""
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
         filetypes = [
             ("Executable Files", "*.exe" if sys.platform == "win32" else "*"),
             ("All Files", "*.*"),
@@ -561,15 +555,16 @@ def browse_slicer_path_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 initialdir = str(cur_path.parent)
             elif cur_path.is_dir():
                 initialdir = str(cur_path)
-        try:
-            selected = filedialog.askopenfilename(
-                parent=root,
-                title="Select Slicer Executable (e.g. Bambu Studio)",
-                initialdir=initialdir,
-                filetypes=filetypes,
-            )
-        finally:
-            root.destroy()
+        script = f"""
+import tkinter as tk
+from tkinter import filedialog
+root = tk.Tk()
+root.withdraw()
+root.attributes("-topmost", True)
+print(filedialog.askopenfilename(parent=root, title="Select Slicer Executable (e.g. Bambu Studio)", initialdir={repr(initialdir)}, filetypes={repr(filetypes)}))
+"""
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+        selected = result.stdout.strip()
     except Exception as error:
         raise RuntimeError("could not open the file chooser") from error
     if selected:
@@ -580,18 +575,18 @@ def browse_slicer_path_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def browse_output_folder_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Open the native folder chooser for this local desktop app."""
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-
         current = Path(str(payload.get("current") or DEFAULT_OUTPUT)).expanduser()
         initial = current if current.is_dir() else DEFAULT_OUTPUT
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        try:
-            selected = filedialog.askdirectory(parent=root, initialdir=str(initial))
-        finally:
-            root.destroy()
+        script = f"""
+import tkinter as tk
+from tkinter import filedialog
+root = tk.Tk()
+root.withdraw()
+root.attributes("-topmost", True)
+print(filedialog.askdirectory(parent=root, initialdir={repr(str(initial))}))
+"""
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+        selected = result.stdout.strip()
     except Exception as error:
         raise RuntimeError("could not open the output-folder chooser") from error
     return {"folder": selected}

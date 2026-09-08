@@ -259,8 +259,8 @@ class BoxSpec:
             raise ValueError(
                 f"base thickness must be at least {TEXT_DEPTH:g} mm"
             )
-        if self.z <= self.base_thickness:
-            raise ValueError("box Z must be greater than the base thickness")
+        if self.z < self.base_thickness + 5.0:
+            raise ValueError(f"box Z must be at least {self.base_thickness + 5.0:g} mm to fit the lock bump")
         for name, value in (("X", self.x), ("Y", self.y)):
             if value < MIN_BOX_SIZE - 1e-9:
                 raise ValueError(
@@ -280,7 +280,7 @@ class BoxSpec:
             raise ValueError("box is too shallow for a flat-walled band")
         if self.easy_clean_radius <= 0.0:
             raise ValueError("easy clean radius must be positive")
-        if self.wall_depth * 2.0 >= min(self.x, self.y) - WAVE_MATING_GAP:
+        if self.wall_depth * 2.0 >= min(self.x, self.y) - WAVE_MATING_GAP - 2.0 * WAVE_AMPLITUDE:
             raise ValueError("wall thickness leaves no cavity")
 
     @property
@@ -765,7 +765,8 @@ def _easy_clean_fillets(
     )
     result: list[trimesh.Trimesh] = []
     for name, axis, face, reach, inward in walls:
-        cuts = sorted((max(-reach, low), min(reach, high)) for low, high in blocked[name])
+        cuts = [(max(-reach, low), min(reach, high)) for low, high in blocked[name]]
+        cuts = sorted((low, high) for low, high in cuts if low < high)
         cursor = -reach
         free: list[tuple[float, float]] = []
         for low, high in cuts:

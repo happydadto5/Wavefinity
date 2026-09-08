@@ -57,6 +57,9 @@ const state = {
   connector: {},
   layoutDrag: null,
   layoutTransform: null,
+  // The 2D layout normally uses the same heading as the 3D camera.  Users can
+  // instead pin it to the conventional top-up plan view.
+  layoutOrientation: "match3d",
   previewSupportPolygons: [],
   designMutationBusy: false,
   canGenerate: true,
@@ -800,9 +803,18 @@ function wireCameraControls() {
   }));
 }
 
+function setLayoutOrientation(orientation) {
+  state.layoutOrientation = orientation;
+  $$('[data-layout-orientation]').forEach(button =>
+    button.classList.toggle("active", button.dataset.layoutOrientation === orientation));
+  renderLayout2D();
+}
+
 function wireControls() {
   wireSidebar();
   wireCameraControls();
+  $$('[data-layout-orientation]').forEach(button =>
+    button.addEventListener("click", () => setLayoutOrientation(button.dataset.layoutOrientation)));
   $$("button.section-heading").forEach(button => button.addEventListener("click", () => {
     const section = button.closest(".control-section");
     section.classList.toggle("open");
@@ -1702,7 +1714,10 @@ function widenDividerFootprint(one) {
     const newSpan = wideningKey === "width"
       ? one.zone[2] - one.zone[0]
       : one.zone[3] - one.zone[1];
-    shownField.value = fmt(newSpan);
+    if (shownField.value !== fmt(newSpan)) {
+      shownField.value = fmt(newSpan);
+      flashField(shownField);
+    }
   }
 }
 
@@ -1793,8 +1808,11 @@ function sizeBoreToGrid(one) {
   // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
   // Wall was hand-set - match that so the block sizing tracks the real pitch.
   const wall = number(opts.wall ?? resolved.wall, angle > 0 ? 3 : 1.6);
-  const pitch = held + wall;
-  if (!(pitch > 0)) return;
+  const sides = profile === "round" ? 48 : profile === "square" ? 4 : 6;
+  const holeRadius = held / 2 / (sides < 8 ? Math.cos(Math.PI / sides) : 1);
+  const crossPitch = 2 * holeRadius + wall;
+  const leanPitch = angle > 0 ? crossPitch / Math.cos(angle * Math.PI / 180) : crossPitch;
+  if (!(crossPitch > 0) || !(leanPitch > 0)) return;
 
   const holeDepth = number(opts.depth ?? resolved.depth, 0);
   const reach = angle > 0 ? holeDepth * Math.sin(angle * Math.PI / 180) : 0;
@@ -1805,8 +1823,10 @@ function sizeBoreToGrid(one) {
   const curW = one.zone[2] - one.zone[0];
   const curD = one.zone[3] - one.zone[1];
   const [insideX, insideY] = binInsideExtent(state.design.box);
-  const axisSpan = (count, leanAxis) =>
-    Math.ceil(count * pitch + (along === leanAxis ? reach : 0) - 1e-6);
+  const axisSpan = (count, axis) => {
+    const pitch = along === axis ? leanPitch : crossPitch;
+    return Math.ceil(count * pitch + (along === axis ? reach : 0) - 1e-6);
+  };
   // For an explicit count: shrink to the grid (or only grow, if pinned). For
   // "auto": keep whatever is drawn, but never below one hole and never past the
   // bin wall - so a shrunk bin trims an auto grid back instead of erroring.
@@ -1833,9 +1853,9 @@ function sizeBoreToGrid(one) {
   one.zone = [ncx - width / 2, ncy - depth / 2, ncx + width / 2, ncy + depth / 2];
 
   const widthField = $('[data-draft="width"]', $("#draft-fields"));
-  if (widthField) widthField.value = fmt(width);
+  if (widthField && Math.abs(width - curW) >= 0.05) { widthField.value = fmt(width); flashField(widthField); }
   const depthField = $('[data-draft="depth"]', $("#draft-fields"));
-  if (depthField) depthField.value = fmt(depth);
+  if (depthField && Math.abs(depth - curD) >= 0.05) { depthField.value = fmt(depth); flashField(depthField); }
 }
 
 // The peg-row twin of sizeBoreToGrid. feature_min_footprint()'s post branch:
@@ -1905,6 +1925,8 @@ function sizeSlotToBank(one) {
 // it still fits, and push the matching Width / Length fields. Shared by the
 // post / slot sizers (the bore sizer inlines the same steps).
 function applyResizedZone(one, cx, cy, width, depth) {
+  const prevW = one.zone[2] - one.zone[0];
+  const prevD = one.zone[3] - one.zone[1];
   const [insideX, insideY] = binInsideExtent(state.design.box);
   const place = (centre, span, inside) => {
     if (span >= inside) return centre;
@@ -1915,9 +1937,9 @@ function applyResizedZone(one, cx, cy, width, depth) {
   const ncy = place(cy, depth, insideY);
   one.zone = [ncx - width / 2, ncy - depth / 2, ncx + width / 2, ncy + depth / 2];
   const widthField = $('[data-draft="width"]', $("#draft-fields"));
-  if (widthField) widthField.value = fmt(width);
+  if (widthField && Math.abs(width - prevW) >= 0.05) { widthField.value = fmt(width); flashField(widthField); }
   const depthField = $('[data-draft="depth"]', $("#draft-fields"));
-  if (depthField) depthField.value = fmt(depth);
+  if (depthField && Math.abs(depth - prevD) >= 0.05) { depthField.value = fmt(depth); flashField(depthField); }
 }
 
 function syncNestZone(one) {
@@ -2173,7 +2195,7 @@ function updateDraftFromFields(event) {
       if (recess >= heightNow - 2) {
         one.options.height = recess + 2;
         const heightField = $('[data-draft="option:height"]', $("#draft-fields"));
-        if (heightField) heightField.value = fmt(one.options.height);
+        if (heightField) { heightField.value = fmt(one.options.height); flashField(heightField); }
       }
     }
     if (info.kind === "pocket" && key === "height") {
@@ -2181,7 +2203,7 @@ function updateDraftFromFields(event) {
       if (one.options.depth !== undefined && one.options.depth >= h - 2) {
         one.options.depth = Math.max(0.1, h - 2);
         const recessField = $('[data-draft="option:depth"]', $("#draft-fields"));
-        if (recessField) recessField.value = fmt(one.options.depth);
+        if (recessField) { recessField.value = fmt(one.options.depth); flashField(recessField); }
       }
     }
     if (info.kind === "bore" && key === "depth") {
@@ -2195,7 +2217,7 @@ function updateDraftFromFields(event) {
       if (holeDepth > 0 && heightNow < holeDepth + 2) {
         one.options.height = holeDepth + 2;
         const heightField = $('[data-draft="option:height"]', $("#draft-fields"));
-        if (heightField) heightField.value = fmt(one.options.height);
+        if (heightField) { heightField.value = fmt(one.options.height); flashField(heightField); }
       }
     }
     if (info.kind === "bore" && key === "height") {
@@ -2206,14 +2228,17 @@ function updateDraftFromFields(event) {
       if (h > 2 && depthNow >= h - 2) {
         one.options.depth = h - 2;
         const depthField = $('[data-draft="option:depth"]', $("#draft-fields"));
-        if (depthField) depthField.value = fmt(one.options.depth);
+        if (depthField) { depthField.value = fmt(one.options.depth); flashField(depthField); }
       }
     }
     if (info.kind === "bore" && key === "angle" && !("wall" in (one.options || {}))) {
       // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL);
       // reflect that in the field right away when Wall hasn't been hand-set.
       const wallField = $('[data-draft="option:wall"]', $("#draft-fields"));
-      if (wallField) wallField.value = number(one.options.angle, 0) > 0 ? "3" : "1.6";
+      if (wallField) {
+        const nextWall = number(one.options.angle, 0) > 0 ? "3" : "1.6";
+        if (wallField.value !== nextWall) { wallField.value = nextWall; flashField(wallField); }
+      }
     }
     if (one.kind === "nest" && one.contour && ["clearance", "rim", "smoothing"].includes(key)) {
       syncNestZone(one);
@@ -2326,6 +2351,10 @@ async function refreshDraft() {
       if (option.key in autoHints) continue; // stays blank with its placeholder, not a filled number
       if (Object.prototype.hasOwnProperty.call(state.draft.options || {}, option.key)) continue;
       const input = $(`[data-draft="option:${option.key}"]`, $("#draft-fields"));
+      // Don't overwrite a field the user is still typing in - clearing it to
+      // retype briefly drops the key from options, and stomping the auto value
+      // back in mid-edit is exactly what makes a 16->20 change snap back to 16.
+      if (input && input === document.activeElement) continue;
       if (input && Object.prototype.hasOwnProperty.call(state.draftResolvedOptions, option.key)) {
         input.value = fmt(state.draftResolvedOptions[option.key]);
       }
@@ -3849,13 +3878,30 @@ function renderLayout2D() {
   context.clearRect(0, 0, width, height);
   const bounds = state.preview.layout_bounds;
   const worldWidth = bounds[2] - bounds[0], worldHeight = bounds[3] - bounds[1];
+  const layoutYaw = (state.layoutOrientation === "topup" ? 0 : state.camera.yaw) * Math.PI / 180;
+  const cosine = Math.cos(layoutYaw), sine = Math.sin(layoutYaw);
+  // Match the 3D camera's top-down projection: as it turns, the 2D placement
+  // view turns with it.  This makes on-screen drag directions agree between
+  // the two views without changing the layout's actual world coordinates.
+  const layoutWidth = Math.abs(cosine) * worldWidth + Math.abs(sine) * worldHeight;
+  const layoutHeight = Math.abs(sine) * worldWidth + Math.abs(cosine) * worldHeight;
   const pad = Math.max(42, Math.min(width, height) * .08);
-  const scale = Math.min((width - 2 * pad) / worldWidth, (height - 2 * pad) / worldHeight);
+  const scale = Math.min((width - 2 * pad) / layoutWidth, (height - 2 * pad) / layoutHeight);
   const cx = (bounds[0] + bounds[2]) / 2, cy = (bounds[1] + bounds[3]) / 2;
-  const toCanvas = ([x, y]) => [width / 2 + (x - cx) * scale, height / 2 - (y - cy) * scale];
-  const toWorld = ([x, y]) => [cx + (x - width / 2) / scale, cy - (y - height / 2) / scale];
+  const toCanvas = ([x, y]) => {
+    const dx = x - cx, dy = y - cy;
+    return [width / 2 + (dx * cosine - dy * sine) * scale,
+      height / 2 + (-dx * sine - dy * cosine) * scale];
+  };
+  const toWorld = ([x, y]) => {
+    const horizontal = (x - width / 2) / scale, vertical = (y - height / 2) / scale;
+    return [cx + horizontal * cosine - vertical * sine,
+      cy - horizontal * sine - vertical * cosine];
+  };
   state.layoutTransform = { toCanvas, toWorld, scale };
-  const a = toCanvas([bounds[0], bounds[3]]), b = toCanvas([bounds[2], bounds[1]]);
+  const worldRect = zone => drawClosedPath(context, [
+    [zone[0], zone[1]], [zone[2], zone[1]], [zone[2], zone[3]], [zone[0], zone[3]],
+  ], toCanvas);
   const cavity = state.preview.cavity_outline;
   const cavityPath = new Path2D();
   if (cavity && cavity.length) {
@@ -3865,7 +3911,8 @@ function renderLayout2D() {
     });
     cavityPath.closePath();
   } else {
-    cavityPath.rect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+    const path = worldRect(bounds);
+    cavityPath.addPath(path);
   }
   context.fillStyle = "#ffffff";
   context.strokeStyle = "#5e7f88";
@@ -3879,10 +3926,12 @@ function renderLayout2D() {
     context.strokeStyle = "rgba(55,96,105,.10)";
     context.lineWidth = 1;
     for (let x = bounds[0] + pitch; x < bounds[2] - 1e-8; x += pitch) {
-      const p = toCanvas([x, 0]); context.beginPath(); context.moveTo(p[0], a[1]); context.lineTo(p[0], b[1]); context.stroke();
+      const p0 = toCanvas([x, bounds[1]]), p1 = toCanvas([x, bounds[3]]);
+      context.beginPath(); context.moveTo(p0[0], p0[1]); context.lineTo(p1[0], p1[1]); context.stroke();
     }
     for (let y = bounds[1] + pitch; y < bounds[3] - 1e-8; y += pitch) {
-      const p = toCanvas([0, y]); context.beginPath(); context.moveTo(a[0], p[1]); context.lineTo(b[0], p[1]); context.stroke();
+      const p0 = toCanvas([bounds[0], y]), p1 = toCanvas([bounds[2], y]);
+      context.beginPath(); context.moveTo(p0[0], p0[1]); context.lineTo(p1[0], p1[1]); context.stroke();
     }
   }
   context.restore();
@@ -3891,23 +3940,26 @@ function renderLayout2D() {
   context.strokeStyle = "rgba(94,127,136,.55)";
   context.lineWidth = 1;
   context.setLineDash([4, 3]);
-  context.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+  context.stroke(worldRect(bounds));
   context.setLineDash([]);
   for (const reserved of state.preview.customization_zones) {
-    const r0 = toCanvas([reserved.zone[0], reserved.zone[3]]), r1 = toCanvas([reserved.zone[2], reserved.zone[1]]);
+    const reservedPath = worldRect(reserved.zone);
+    const reservedCenter = toCanvas([(reserved.zone[0] + reserved.zone[2]) / 2, (reserved.zone[1] + reserved.zone[3]) / 2]);
     context.fillStyle = "rgba(201,95,88,.13)";
     context.strokeStyle = "rgba(164,68,61,.55)";
     context.setLineDash([5, 4]);
-    context.fillRect(r0[0], r0[1], r1[0] - r0[0], r1[1] - r0[1]);
-    context.strokeRect(r0[0], r0[1], r1[0] - r0[0], r1[1] - r0[1]);
+    context.fill(reservedPath);
+    context.stroke(reservedPath);
     context.setLineDash([]);
     context.fillStyle = "#8f4540";
     context.font = "11px Segoe UI";
-    context.fillText(reserved.name, r0[0] + 6, r0[1] + 15);
+    context.fillText(reserved.name, reservedCenter[0], reservedCenter[1]);
   }
   const invalid = new Set(state.preview.invalid_feature_indexes || []);
   layoutFeatures().forEach((feature, index) => {
-    const p0 = toCanvas([feature.zone[0], feature.zone[3]]), p1 = toCanvas([feature.zone[2], feature.zone[1]]);
+    const zonePath = worldRect(feature.zone);
+    const p1 = toCanvas([feature.zone[2], feature.zone[1]]);
+    const zoneCenter = toCanvas([(feature.zone[0] + feature.zone[2]) / 2, (feature.zone[1] + feature.zone[3]) / 2]);
     const color = invalid.has(index) ? COLORS.invalid : kindColor(feature.kind);
     context.strokeStyle = index === state.selected ? "#176e91" : shade(color, .72);
     context.lineWidth = index === state.selected ? 3 : 1.2;
@@ -3922,29 +3974,27 @@ function renderLayout2D() {
       // really covers and leave the zone as a faint outline around it, so the
       // difference between "mine" and "just my handle" is visible.
       const covered = footprintWorld(feature, index);
-      const f0 = covered && toCanvas([covered[0], covered[3]]);
-      const f1 = covered && toCanvas([covered[2], covered[1]]);
+      const coveredPath = covered && worldRect(covered);
+      const coveredCenter = covered && toCanvas([(covered[0] + covered[2]) / 2, (covered[1] + covered[3]) / 2]);
       context.fillStyle = feature.kind === "text" ? color + "25" : color + "cc";
-      context.fillRect(...(covered ? [f0[0], f0[1], f1[0] - f0[0], f1[1] - f0[1]]
-                                   : [p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]]));
+      context.fill(coveredPath || zonePath);
       if (covered) {
-        context.strokeRect(f0[0], f0[1], f1[0] - f0[0], f1[1] - f0[1]);
+        context.stroke(coveredPath);
         context.save();
         context.globalAlpha = .45;
         context.setLineDash([4, 3]);
       }
-      context.strokeRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+      context.stroke(zonePath);
       if (covered) context.restore();
       if (feature.kind === "pocket") {
         const wall = number(feature.options?.wall, 1.6);
-        const i0 = toCanvas([feature.zone[0] + wall, feature.zone[3] - wall]);
-        const i1 = toCanvas([feature.zone[2] - wall, feature.zone[1] + wall]);
+        const innerPath = worldRect([feature.zone[0] + wall, feature.zone[1] + wall, feature.zone[2] - wall, feature.zone[3] - wall]);
         context.save();
         context.fillStyle = "rgba(255, 255, 255, 0.4)";
-        context.fillRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
+        context.fill(innerPath);
         context.strokeStyle = shade(color, 0.5);
         context.lineWidth = 1;
-        context.strokeRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
+        context.stroke(innerPath);
         context.restore();
       }
       if (feature.kind === "slot") {
@@ -4031,8 +4081,7 @@ function renderLayout2D() {
           context.font = "600 11px Segoe UI";
           context.textAlign = "center";
           context.textBaseline = "middle";
-          const [tx, ty] = covered ? [(f0[0] + f1[0]) / 2, (f0[1] + f1[1]) / 2]
-                                   : [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+          const [tx, ty] = coveredCenter || zoneCenter;
           context.fillText(partInfo(feature.kind)?.title || feature.kind, tx, ty);
         }
       } else {
@@ -4040,8 +4089,7 @@ function renderLayout2D() {
         context.font = "600 11px Segoe UI";
         context.textAlign = "center";
         context.textBaseline = "middle";
-        const [tx, ty] = covered ? [(f0[0] + f1[0]) / 2, (f0[1] + f1[1]) / 2]
-                                 : [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+        const [tx, ty] = coveredCenter || zoneCenter;
         context.fillText(partInfo(feature.kind)?.title || feature.kind, tx, ty);
       }
     }
@@ -4069,7 +4117,7 @@ function renderLayout2D() {
     const draftHasError = Boolean(state.preview.draft_error);
     const draftColor = draftHasError ? COLORS.invalid : DRAFT_HIGHLIGHT;
     const zone = state.draft.zone;
-    const p0 = toCanvas([zone[0], zone[3]]), p1 = toCanvas([zone[2], zone[1]]);
+    const zonePath = worldRect(zone);
     context.fillStyle = draftColor;
     context.strokeStyle = draftColor;
     context.lineWidth = 2;
@@ -4082,23 +4130,22 @@ function renderLayout2D() {
       // zone it lives in.
       const covered = state.preview.draft_footprint;
       if (covered) {
-        const d0 = toCanvas([covered[0], covered[3]]), d1 = toCanvas([covered[2], covered[1]]);
-        context.fillRect(d0[0], d0[1], d1[0] - d0[0], d1[1] - d0[1]);
-        context.strokeRect(d0[0], d0[1], d1[0] - d0[0], d1[1] - d0[1]);
+        const coveredPath = worldRect(covered);
+        context.fill(coveredPath);
+        context.stroke(coveredPath);
       } else {
-        context.fillRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+        context.fill(zonePath);
       }
-      context.strokeRect(p0[0], p0[1], p1[0] - p0[0], p1[1] - p0[1]);
+      context.stroke(zonePath);
       if (state.draft.kind === "pocket") {
         const wall = number(state.draft.options?.wall, state.draftResolvedOptions?.wall ?? 1.6);
-        const i0 = toCanvas([zone[0] + wall, zone[3] - wall]);
-        const i1 = toCanvas([zone[2] - wall, zone[1] + wall]);
+        const innerPath = worldRect([zone[0] + wall, zone[1] + wall, zone[2] - wall, zone[3] - wall]);
         context.save();
         context.fillStyle = "rgba(255, 255, 255, 0.35)";
-        context.fillRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
+        context.fill(innerPath);
         context.strokeStyle = draftColor;
         context.lineWidth = 1;
-        context.strokeRect(i0[0], i0[1], i1[0] - i0[0], i1[1] - i0[1]);
+        context.stroke(innerPath);
         context.restore();
       }
       if (state.draft.kind === "text" && state.selected === null) {
@@ -4107,10 +4154,22 @@ function renderLayout2D() {
     }
     context.setLineDash([]);
   }
-  drawDimensionLine(context, [a[0], a[1] - 18], [b[0], a[1] - 18], `Width ${fmt(state.design.box.x)} mm`);
-  drawDimensionLine(context, [a[0] - 18, a[1]], [a[0] - 18, b[1]], `Depth ${fmt(state.design.box.y)} mm`, true);
+  const offsetOutside = (start, end) => {
+    const middle = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+    const length = Math.max(1, Math.hypot(middle[0] - width / 2, middle[1] - height / 2));
+    const dx = (middle[0] - width / 2) * 18 / length;
+    const dy = (middle[1] - height / 2) * 18 / length;
+    return [[start[0] + dx, start[1] + dy], [end[0] + dx, end[1] + dy]];
+  };
+  const widthLine = offsetOutside(toCanvas([bounds[0], bounds[3]]), toCanvas([bounds[2], bounds[3]]));
+  const depthLine = offsetOutside(toCanvas([bounds[0], bounds[1]]), toCanvas([bounds[0], bounds[3]]));
+  drawDimensionLine(context, ...widthLine, `Width ${fmt(state.design.box.x)} mm`);
+  drawDimensionLine(context, ...depthLine, `Depth ${fmt(state.design.box.y)} mm`);
 
-  const binBottom = b[1];
+  const binBottom = Math.max(...[
+    toCanvas([bounds[0], bounds[1]])[1], toCanvas([bounds[2], bounds[1]])[1],
+    toCanvas([bounds[2], bounds[3]])[1], toCanvas([bounds[0], bounds[3]])[1],
+  ]);
   const hintY = Math.min(height - 15, Math.max(binBottom + 24, height - 24));
   context.save();
   context.textAlign = "center";

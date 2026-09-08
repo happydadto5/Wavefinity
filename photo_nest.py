@@ -45,7 +45,7 @@ def decode_image_data(data_url: str, mime_type: str = "") -> np.ndarray:
     header, encoded = data_url.split(",", 1)
     declared = header[5:].split(";", 1)[0].lower() if header.startswith("data:") else ""
     chosen = (mime_type or declared).lower()
-    if chosen not in ACCEPTED_IMAGE_TYPES or declared not in ACCEPTED_IMAGE_TYPES:
+    if chosen not in ACCEPTED_IMAGE_TYPES or (declared and declared not in ACCEPTED_IMAGE_TYPES):
         raise ValueError("choose a JPG, JPEG, PNG, or WEBP photo")
     try:
         payload = base64.b64decode(encoded, validate=True)
@@ -53,11 +53,22 @@ def decode_image_data(data_url: str, mime_type: str = "") -> np.ndarray:
         raise ValueError("the selected photo could not be read") from error
     if not payload or len(payload) > MAX_UPLOAD_BYTES:
         raise ValueError("the photo must be smaller than 18 MB")
+    
+    # Check dimensions before decompressing to avoid OOM bombs
+    try:
+        from PIL import Image
+        import io
+        with Image.open(io.BytesIO(payload)) as img:
+            if img.width * img.height > MAX_IMAGE_PIXELS:
+                raise ValueError("the photo is too large; use an image under 32 megapixels")
+    except ValueError:
+        raise
+    except Exception as error:
+        raise ValueError("the selected photo could not be read") from error
+
     image = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("the selected photo could not be read")
-    if image.shape[0] * image.shape[1] > MAX_IMAGE_PIXELS:
-        raise ValueError("the photo is too large; use an image under 32 megapixels")
     return image
 
 

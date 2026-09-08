@@ -21,6 +21,7 @@ from organizer_engine import (
     wavy_cavity_polygon,
 )
 import organizer_inserts as inserts
+from organizer_inserts._bore import _bore_grid
 from organizer_inserts import (
     EDITOR_SNAP,
     Feature,
@@ -1967,6 +1968,33 @@ class FeatureMinFootprintTests(unittest.TestCase):
         self.assertLessEqual(width, 40.0 + 1e-6)
         self.assertLessEqual(depth, 24.0 + 1e-6)
         self.assertGreater(width, 0.0)
+
+    def test_leaned_bore_pitch_preserves_the_requested_wall(self) -> None:
+        item = Item("n", (Segment(20.0, 12.0),), profile="round", clearance=0.4)
+        wall, depth = 2.0, 16.0
+        straight = Feature(
+            "bore", Zone(-60.0, -30.0, 60.0, 30.0), item, along="x",
+            options={"columns": 2, "rows": 1, "wall": wall, "depth": depth, "angle": 0.0},
+        )
+        leaned = Feature(
+            "bore", straight.zone, item, along="x",
+            options={**straight.options, "angle": 45.0},
+        )
+        straight_width, _ = self.mn(straight)
+        leaned_width, _ = self.mn(leaned)
+        held = item.held(item.widest)
+        angle = math.radians(45.0)
+        centre_pitch = (leaned_width - depth * math.sin(angle)) / 2.0
+        fitted = Feature(
+            "bore", Zone(-leaned_width / 2.0, -8.0, leaned_width / 2.0, 8.0),
+            item, along="x", options=leaned.options,
+        )
+        grid = _bore_grid(BIN, fitted, BIN.base_thickness)
+
+        self.assertGreater(leaned_width, straight_width)
+        self.assertAlmostEqual(centre_pitch * math.cos(angle) - held, wall, places=6)
+        self.assertAlmostEqual(grid["pitch_x"] * math.cos(angle) - held, wall, places=6)
+        self.assertTrue(build_features(BIN, [fitted], BIN.base_thickness)[0].is_watertight)
 
     def test_post_row_is_pegs_plus_gaps(self) -> None:
         one = Feature("post", Zone(-40.0, -20.0, 40.0, 20.0), count=3,
