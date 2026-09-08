@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-08 — Print to Bambu bundles one connector
+
+- **Print to Bambu Studio** now sends the bin plus one side connector instead of
+  two.
+
 ## 2026-09-07 — Bores auto-size their base, spread their holes, and reflow the bin
 
 - Changing a bore's X/Y quantity, hole diameter, clearance, hole depth, wall,

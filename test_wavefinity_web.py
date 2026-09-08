@@ -958,18 +958,14 @@ class WebApplicationTests(unittest.TestCase):
                     "output": temp_dir,
                 })
                 self.assertEqual(response["output"], str(temp_dir))
-                second_connector = fake_connector.with_name("Connector 2.3mf")
                 self.assertEqual(response["files"], [
                     str(fake_3mf.resolve()),
                     str(fake_connector.resolve()),
-                    str(second_connector.resolve()),
                 ])
-                self.assertTrue(second_connector.is_file())
                 self.assertEqual(response["slicer"], str(fake_exe.resolve()))
                 mock_launch.assert_called_once_with(fake_exe, [
                     fake_3mf.resolve(),
                     fake_connector.resolve(),
-                    second_connector.resolve(),
                 ])
 
     def test_print_payload_raises_when_no_slicer(self):

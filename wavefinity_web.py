@@ -1239,14 +1239,11 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     files = _extract_generated_files(gen_result)
 
-    # The default bin print also carries two side connectors, so a fresh
-    # build has the parts on the plate to link bins together.
+    # The default bin print also carries one side connector, so a fresh
+    # build has the part on the plate to link bins together.
     if target not in {"connector", "sampler"}:
         connector_files = _extract_generated_files(connector_payload(payload))
-        for connector in connector_files:
-            second = connector.with_name(f"{connector.stem} 2{connector.suffix}")
-            shutil.copyfile(connector, second)
-            files.extend([connector, second])
+        files.extend(connector_files)
 
     if not files:
         raise RuntimeError("No 3MF files were generated to send to Bambu Studio.")
