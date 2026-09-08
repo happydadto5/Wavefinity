@@ -104,7 +104,15 @@ input[readonly] { background: #eef2f2; color: var(--muted); cursor: default; }
 input[readonly]:focus { outline: none; border-color: var(--line-dark); }
 [hidden] { display: none !important; }
 input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+}
+input[type="number"]::-webkit-inner-spin-button {
+  transform: scale(1.5);
+  transform-origin: right center;
+  margin-left: 6px;
+  cursor: pointer;
+}
 .unit { float: right; color: var(--muted); font-weight: 450; }
 .field-grid { display: grid; gap: 10px; }
 .field-grid.three { grid-template-columns: repeat(3, 1fr); }

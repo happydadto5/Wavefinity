@@ -2,6 +2,7 @@
 
 ## 2026-09-08 — Print to Bambu bundles one connector
 
+- Number-input up and down spin buttons are now 50% larger with a pointer cursor.
 - **Print to Bambu Studio** now sends the bin plus one side connector instead of
   two.
 
