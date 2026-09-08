@@ -20,6 +20,7 @@ BOTTOM_EMBED = 0.4
 BOTTOM_CROSSBAR_THICKNESS = 2.4
 BOTTOM_CROSSBAR_CHAMFER = 1.0
 RIB_THICKNESS = 1.6
+DIVISION_TEXT_DEPTH = 0.6
 @defaults("divider")
 def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     zone = one.zone
@@ -186,7 +187,12 @@ def divider_division_texts(
     centres = _divider_cross_centres(zone, along, count, spacing)
     slots = _bottom_slot_bounds(zone, along, centres)
     level = str(options.get("division_level", "base")).strip().lower()
-    z = (base_z + height) if level == "rim" else base_z
+    # A rim label rides at the divider top, which already sits right at the
+    # connector keep-out height. Standing it proud there makes it poke past
+    # that line and foul a connector seating against a wall-touching divider,
+    # so drop a rim label by its own depth and sit its top flush with the
+    # divider crest instead.
+    z = (base_z + height - DIVISION_TEXT_DEPTH) if level == "rim" else base_z
 
     results = []
     for idx, (slot_low, slot_high) in enumerate(slots):
@@ -227,7 +233,7 @@ def divider_division_texts(
         outline = affinity.translate(outline, xoff=cx, yoff=cy)
 
         try:
-            solid = text_prism(outline, z, depth=0.6, raised=True)
+            solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH, raised=True)
             results.append((text, solid, True))
         except Exception:
             continue
