@@ -153,9 +153,8 @@ the part. When growth creates a collision, the part being edited stays put and
 the other parts move outward only as much as needed.
 
 Typing a part Width/Length or resizing it in 2D makes that size the new minimum;
-later automatic changes can grow it but cannot pull it smaller. That manual
-choice survives saving and reopening; older designs without an ownership marker
-also keep their existing footprints. Bin
+later automatic changes can grow it but cannot pull it smaller. Reopening any
+placed or saved part protects its existing footprint the same way. Bin
 Width and Length entered by the user are also floors. The explicit **Fit to
 pegs/slots** action is the user's permission to trim a rack snugly, while
 **Fill the bin** is the user's permission to expand a free-size part across the

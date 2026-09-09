@@ -44,8 +44,7 @@ const state = {
   // is only ever grown to fit the part's contents, never shrunk back or
   // overwritten - a manual size always wins. Reset whenever a fresh draft loads.
   pinnedZone: {},
-  // Fast session cache of the per-axis ownership persisted on each auto-sized
-  // feature as auto_width / auto_depth.
+  // Session-only manual Base widths/lengths, keyed by placed-part index.
   partZoneLocks: {},
   // Set while a user-driven Width/Length edit waits for grow-only minimum
   // enforcement. Consumed by the debounced design update.
@@ -106,18 +105,8 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function markFootprintAutomatic(one) {
-  if (!one || !AUTO_FOOTPRINT_KINDS.has(one.kind)) return;
-  one.options ||= {};
-  one.options.auto_width = true;
-  one.options.auto_depth = true;
-}
-
-function pinDraftAxis(axis, one = state.draft) {
+function pinDraftAxis(axis) {
   state.pinnedZone[axis] = true;
-  if (!one || !AUTO_FOOTPRINT_KINDS.has(one.kind)) return;
-  one.options ||= {};
-  one.options[`auto_${axis}`] = false;
 }
 
 function recordHistory(before) {
@@ -1180,7 +1169,6 @@ async function selectKind(kind, reset = false) {
     // What the engine started this text at, so the Part Name is only ever
     // seeded from lettering the user actually typed - never the placeholder.
     state.draftStartingText = result.feature?.options?.text ?? null;
-    markFootprintAutomatic(state.draft);
     if (kind === "bore") sizeBoreToGrid(state.draft);
     renderDraftFields();
     updateSelectionButtons();
@@ -1237,13 +1225,10 @@ async function selectedFeature(index, force = false) {
   state.draftSourceIndex = index;
   state.pinnedZone = state.partZoneLocks[index] ||= {};
   if (AUTO_FOOTPRINT_KINDS.has(state.draft.kind)) {
-    for (const axis of ["width", "depth"]) {
-      if (!(axis in state.pinnedZone)) {
-        // New designs persist their automatic axes. A legacy saved part has
-        // no marker, so preserve its existing footprint as intentional.
-        state.pinnedZone[axis] = state.draft.options?.[`auto_${axis}`] !== true;
-      }
-    }
+    // Once a part is placed, its stored footprint is user-owned. Locks remain
+    // session-only, but every reopened part starts protected on both axes.
+    state.pinnedZone.width = true;
+    state.pinnedZone.depth = true;
   }
   state.draftResolvedOptions = {};
   if (state.draft.kind === "bore") sizeBoreToGrid(state.draft);
@@ -2594,7 +2579,7 @@ function updateDraftFromFields(event) {
   // A hand-typed Base Width / Length pins that axis: from now on the contents
   // sizers only ever grow it to fit, never shrink or overwrite the number.
   if (info.flags.size && (changed === "width" || changed === "depth")) {
-    pinDraftAxis(changed, one);
+    pinDraftAxis(changed);
     if (Number.isInteger(state.selected)) state.partZoneLocks[state.selected] = state.pinnedZone;
   }
   // Toggling Alternate ends swaps the field beneath Runs along between
@@ -4666,8 +4651,8 @@ function wireLayoutInteraction() {
     if (drag.mode === "resize" && drag.feature.kind !== "nest") {
       // Resizing by the blue corner is just as intentional as typing Width or
       // Length. Preserve both axes from later contents-driven auto fitting.
-      pinDraftAxis("width", drag.feature);
-      pinDraftAxis("depth", drag.feature);
+      pinDraftAxis("width");
+      pinDraftAxis("depth");
       state.partZoneLocks[drag.index] = state.pinnedZone;
     }
     const applied = await applySupport(drag.index);
