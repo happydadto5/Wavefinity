@@ -470,9 +470,16 @@ function autoAdjustConnectorFields() {
     ? armT + Math.max((webT - armT) * frac, reach)
     : armT;
 
-  $("#connector-length").value = fmt(adjustedLen);
+  const lenEl = $("#connector-length");
+  if (lenEl && lenEl.value !== fmt(adjustedLen)) {
+    lenEl.value = fmt(adjustedLen);
+    flashField(lenEl);
+  }
   const armEl = $("#connector-arm-thickness");
-  if (armEl) armEl.value = fmt(adjustedArm);
+  if (armEl && armEl.value !== fmt(adjustedArm)) {
+    armEl.value = fmt(adjustedArm);
+    flashField(armEl);
+  }
   if (state.connector) {
     state.connector.length = adjustedLen;
     state.connector.arm_thickness = adjustedArm;
@@ -1395,6 +1402,8 @@ function renderDraftFields() {
     for (const option of info.fields) {
       if (!["spacing", "floor_gap"].includes(option.key)) continue;
       repeatKeys.add(option.key);
+      // Grid dividers space their walls evenly on both axes; no spacing field.
+      if (info.kind === "divider") continue;
       const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
       const autoHint = AUTO_PLACEHOLDER[info.kind]?.[option.key];
       const shown = !explicit && autoHint ? ""
@@ -1406,14 +1415,22 @@ function renderDraftFields() {
       repeatFieldsHtml += field(option.label, `option:${option.key}`, shown, fo);
     }
 
-    html += `<div class="editor-group"><span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`;
-    if (info.flags.qty) {
-      // Unlike Cradle/Bore/Post, a divider's "auto" is always a single centered
-      // wall - Spacing does the auto-fill instead. Said here as a tooltip.
-      const qtyTip = info.kind === "divider"
-        ? " title=\"Auto places a single, centered divider - set a number here for more.\""
-        : "";
-      html += `<div class="pair"><label${qtyTip}>Quantity<div class="input-with-button">
+    html += `<div class="editor-group"><span class="editor-group-label">${info.kind === "divider" ? "Grid" : info.flags.qty ? "Repeats" : "Orientation"}</span>`;
+    if (info.kind === "divider") {
+      // Two quantities instead of one direction: walls across X and walls
+      // across Y, together making a grid of compartments.
+      const opt = one.options || {};
+      const legacyN = one.count == null ? 1 : Math.max(1, number(one.count, 1));
+      const gx = (opt.count_x != null && opt.count_x !== "") ? opt.count_x
+        : (one.along === "y" ? legacyN : 0);
+      const gy = (opt.count_y != null && opt.count_y !== "") ? opt.count_y
+        : (one.along === "x" ? legacyN : 0);
+      html += `<div class="pair">
+        <label title="Walls dividing the bin left to right (across X). 0 for none.">Qty X<input type="number" min="0" step="1" data-draft="option:count_x" value="${gx}" placeholder="0"></label>
+        <label title="Walls dividing the bin front to back (across Y). 0 for none.">Qty Y<input type="number" min="0" step="1" data-draft="option:count_y" value="${gy}" placeholder="0"></label>
+      </div>`;
+    } else if (info.flags.qty) {
+      html += `<div class="pair"><label>Quantity<div class="input-with-button">
         <input type="number" min="1" step="1" data-draft="count" value="${one.count ?? ""}" placeholder="auto">
         <button type="button" class="button secondary" data-action="auto-count">Auto</button>
       </div></label>${repeatFieldsHtml}</div>`;
@@ -1425,7 +1442,7 @@ function renderDraftFields() {
         "Places every second trough near the opposite end of the bin; each trough becomes a separate body.",
         one.alternate_ends === true, { wide: true });
     }
-    if (info.flags.along) {
+    if (info.flags.along && info.kind !== "divider") {
       html += `<fieldset><legend>Runs along</legend><div class="segmented two">
         <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
         <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
@@ -1507,6 +1524,9 @@ function renderDraftFields() {
       stepFor.thickness = "0.5";
       stepFor.bottom_angle = "1";
     }
+    if (info.kind === "post") {
+      stepFor.height = "1.0";
+    }
     if (info.kind === "pocket") {
       stepFor.height = "0.5";
       stepFor.depth = "0.5";
@@ -1579,8 +1599,27 @@ function renderDraftFields() {
         <label><input type="radio" name="draft-division-level" value="rim" ${divLevel === "rim" ? "checked" : ""}><span>Rim level</span></label>
       </div></fieldset>`;
 
-      const count = Math.max(1, number(one.count, 1));
-      const slotCount = count + 1;
+      if (divLevel === "rim") {
+        const sides = [["center", "Centre"], ["left", "Left"], ["right", "Right"],
+          ["top", "Back"], ["bottom", "Front"]];
+        const divSide = sides.some(([v]) => v === opt.division_side) ? opt.division_side : "center";
+        const sideTip = "Rim labels ride on a self-supporting shelf at the divider height. Centre floats each label on the crest; the others line its shelf up against that bin wall. Every label shares the largest letter size that fits the longest one.";
+        html += `<fieldset><legend title="${escapeHtml(sideTip)}">Line up against</legend><div class="segmented" title="${escapeHtml(sideTip)}">
+          ${sides.map(([value, label]) => `<label><input type="radio" name="draft-division-side" value="${value}" ${divSide === value ? "checked" : ""}><span>${label}</span></label>`).join("")}
+        </div></fieldset>`;
+      }
+
+      // A cell per compartment: (Qty X + 1) columns by (Qty Y + 1) rows,
+      // laid out to mirror the bin so a label lands where its slot is.
+      const legacyN = one.count == null ? 1 : Math.max(1, number(one.count, 1));
+      let gcX = number(opt.count_x, NaN);
+      if (!Number.isFinite(gcX)) gcX = one.along === "y" ? legacyN : 0;
+      let gcY = number(opt.count_y, NaN);
+      if (!Number.isFinite(gcY)) gcY = one.along === "x" ? legacyN : 0;
+      gcX = Math.max(0, Math.round(gcX));
+      gcY = Math.max(0, Math.round(gcY));
+      const nCols = gcX + 1;
+      const nRows = gcY + 1;
       let divLabels = [];
       if (Array.isArray(opt.division_labels)) {
         divLabels = opt.division_labels;
@@ -1592,10 +1631,15 @@ function renderDraftFields() {
         }
       }
 
-      html += `<table class="division-table">`;
-      for (let s = 0; s < slotCount; s++) {
-        const val = escapeHtml(String(divLabels[s] || ""));
-        html += `<tr><td>${s + 1}</td><td><input type="text" data-division-index="${s}" value="${val}" placeholder="e.g. ${s + 1}"></td></tr>`;
+      html += `<table class="division-table division-grid">`;
+      for (let r = 0; r < nRows; r++) {
+        html += `<tr>`;
+        for (let c = 0; c < nCols; c++) {
+          const idx = r * nCols + c;
+          const val = escapeHtml(String(divLabels[idx] || ""));
+          html += `<td><input type="text" data-division-index="${idx}" value="${val}" placeholder="${idx + 1}"></td>`;
+        }
+        html += `</tr>`;
       }
       html += `</table>`;
     }
@@ -1617,6 +1661,15 @@ function renderDraftFields() {
     state.draft.options.division_level = input.value;
     state.draftAutoCommit = true;
     renderDraftFields();
+    renderLayout2D();
+    refreshDraftSoon();
+  }));
+  $$('input[name="draft-division-side"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
+    markDraftChanged();
+    state.draft.options ||= {};
+    if (input.value === "center") delete state.draft.options.division_side;
+    else state.draft.options.division_side = input.value;
+    state.draftAutoCommit = true;
     renderLayout2D();
     refreshDraftSoon();
   }));
@@ -2212,11 +2265,13 @@ function updateDraftFromFields(event) {
     if (!one.options.label_divisions) {
       delete one.options.division_level;
       delete one.options.division_labels;
+      delete one.options.division_side;
     }
+    if (one.options.division_level !== "rim") delete one.options.division_side;
   }
   if (changed.startsWith("option:") &&
       !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom",
-        "slope_base", "label_divisions", "division_level", "division_labels",
+        "slope_base", "label_divisions", "division_level", "division_side", "division_labels",
         "lift_assist", "finger_position", "push_position"]
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
@@ -2232,6 +2287,10 @@ function updateDraftFromFields(event) {
       if (info.kind === "bore" && (key === "columns" || key === "rows")) {
         value = Math.max(1, Math.round(value));
       }
+      // A grid divider's wall counts are whole numbers, zero or more.
+      if (info.kind === "divider" && (key === "count_x" || key === "count_y")) {
+        value = Math.max(0, Math.round(value));
+      }
       if (info.kind === "cradle" && key === "spacing") value = Math.max(0, value);
       one.options[key] = value;
     }
@@ -2243,6 +2302,15 @@ function updateDraftFromFields(event) {
     }
     if (info.kind === "divider" && key === "thickness") {
       widenDividerFootprint(one);
+    }
+    // Once either grid quantity is set, the divider is a grid: pin both
+    // quantities and drop the old single-direction count so nothing double-builds.
+    if (info.kind === "divider" && (key === "count_x" || key === "count_y")) {
+      if ("count_x" in one.options || "count_y" in one.options) {
+        one.options.count_x = Math.max(0, Math.round(number(one.options.count_x, 0)));
+        one.options.count_y = Math.max(0, Math.round(number(one.options.count_y, 0)));
+        one.count = null;
+      }
     }
     if (info.kind === "pocket" && key === "wall") {
       const newWall = number(one.options.wall, 1.6);
@@ -2353,7 +2421,8 @@ function updateDraftFromFields(event) {
   if (changed === "option:minimal_bottom") renderDraftFields();
   if (one.kind === "divider" && (
     changed === "option:slope_base" || changed === "option:label_divisions" ||
-    changed === "count" || changed === "option:bottom_angle"
+    changed === "count" || changed === "option:bottom_angle" ||
+    changed === "option:count_x" || changed === "option:count_y"
   )) renderDraftFields();
   updateSelectionButtons();
   renderLayout2D();
@@ -3885,56 +3954,62 @@ function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
   }
   if (!Array.isArray(labels) || !labels.length) return;
 
-  const count = Math.max(1, number(feature.count, 1));
-  const along = feature.along || "x";
-  const [z0, z1, z2, z3] = feature.zone;
+  const [z0, z1, z2, z3] = feature.zone;   // x0, y0, x1, y1
   const thickness = number(opt.thickness, 1.6);
-  const span = (along === "x") ? (z3 - z1) : (z2 - z0);
-  const spacing = number(opt.spacing, 0) > 0 ? number(opt.spacing, 0) : span / (count + 1);
+  const along = feature.along || "x";
+  const legacyN = feature.count == null ? 1 : Math.max(1, number(feature.count, 1));
+  let gx = number(opt.count_x, NaN);
+  if (!Number.isFinite(gx)) gx = along === "y" ? legacyN : 0;
+  let gy = number(opt.count_y, NaN);
+  if (!Number.isFinite(gy)) gy = along === "x" ? legacyN : 0;
+  gx = Math.max(0, Math.round(gx));
+  gy = Math.max(0, Math.round(gy));
 
-  const low = (along === "x") ? z1 : z0;
-  const centres = [];
-  for (let i = 0; i < count; i++) centres.push(low + (i + 1) * spacing);
-  const edges = [(along === "x") ? z1 : z0, ...centres, (along === "x") ? z3 : z2].sort((a, b) => a - b);
+  const xEdges = [z0];
+  for (let i = 0; i < gx; i++) xEdges.push(z0 + (i + 1) * (z2 - z0) / (gx + 1));
+  xEdges.push(z2);
+  const yEdges = [z1];
+  for (let i = 0; i < gy; i++) yEdges.push(z1 + (i + 1) * (z3 - z1) / (gy + 1));
+  yEdges.push(z3);
+  const nCols = xEdges.length - 1;
+  const nRows = yEdges.length - 1;
 
-  for (let s = 0; s < edges.length - 1; s++) {
-    if (s >= labels.length) break;
-    const text = String(labels[s] || "").trim();
-    if (!text) continue;
+  for (let r = 0; r < nRows; r++) {
+    for (let c = 0; c < nCols; c++) {
+      const idx = r * nCols + c;
+      if (idx >= labels.length) continue;
+      const text = String(labels[idx] || "").trim();
+      if (!text) continue;
 
-    const slotLow = edges[s];
-    const slotHigh = edges[s + 1];
-    const innerLow = slotLow + (s === 0 ? 0 : thickness / 2);
-    const innerHigh = slotHigh - (s === edges.length - 2 ? 0 : thickness / 2);
-    const slotAcross = Math.max(1, innerHigh - innerLow);
-    const slotRun = Math.max(1, (along === "x") ? (z2 - z0) : (z3 - z1));
+      const x0 = xEdges[c] + (c === 0 ? 0 : thickness / 2);
+      const x1 = xEdges[c + 1] - (c === nCols - 1 ? 0 : thickness / 2);
+      const y0 = yEdges[r] + (r === 0 ? 0 : thickness / 2);
+      const y1 = yEdges[r + 1] - (r === nRows - 1 ? 0 : thickness / 2);
+      const cellW = Math.max(1, x1 - x0);
+      const cellD = Math.max(1, y1 - y0);
 
-    context.save();
-    context.font = 'bold 100px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif';
-    const refWidth = context.measureText(text).width || 100;
-    context.restore();
+      context.save();
+      context.font = 'bold 100px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif';
+      const refWidth = context.measureText(text).width || 100;
+      context.restore();
 
-    const aspect = (refWidth / 100) / 0.729;
-    const fitRun = Math.max(0.1, slotRun - 2) / Math.max(0.1, aspect);
-    const fitAcross = Math.max(0.1, slotAcross - 1) / 1.15;
-    const fits = Math.min(fitRun, fitAcross);
-    const cap = Math.max(2.5, fits);
+      const aspect = (refWidth / 100) / 0.729;
+      const fitW = Math.max(0.1, cellW - 2) / Math.max(0.1, aspect);
+      const fitD = Math.max(0.1, cellD - 2) / 1.15;
+      const cap = Math.max(2.5, Math.min(fitW, fitD));
 
-    const fontSizePx = Math.max(6, (cap / 0.729) * scale);
-    const cx = (along === "x") ? (z0 + z2) / 2 : (innerLow + innerHigh) / 2;
-    const cy = (along === "x") ? (innerLow + innerHigh) / 2 : (z1 + z3) / 2;
-    const centerCanvas = toCanvas([cx, cy]);
-    const angle = (along === "y") ? -(Math.PI / 2) : 0;
+      const fontSizePx = Math.max(6, (cap / 0.729) * scale);
+      const centerCanvas = toCanvas([(x0 + x1) / 2, (y0 + y1) / 2]);
 
-    context.save();
-    context.translate(centerCanvas[0], centerCanvas[1]);
-    if (angle) context.rotate(angle);
-    context.font = `bold ${fontSizePx}px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif`;
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillStyle = "#1e4c5f";
-    context.fillText(text, 0, 0);
-    context.restore();
+      context.save();
+      context.translate(centerCanvas[0], centerCanvas[1]);
+      context.font = `bold ${fontSizePx}px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillStyle = "#1e4c5f";
+      context.fillText(text, 0, 0);
+      context.restore();
+    }
   }
 }
 

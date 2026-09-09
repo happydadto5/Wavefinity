@@ -7,7 +7,7 @@ from shapely import affinity
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 from organizer_engine import (
     BoxSpec, WAVE_AMPLITUDE, _extrude_polygon, _extrude_xz_profile,
-    _extrude_yz_profile, _rounded, flat_cavity_polygon, intersection,
+    _extrude_yz_profile, _rounded, difference, flat_cavity_polygon, intersection,
     text_outline, text_prism, union, wavy_cavity_polygon,
 )
 from ._core import Feature, Zone, connector_keep_out
@@ -21,6 +21,16 @@ BOTTOM_CROSSBAR_THICKNESS = 2.4
 BOTTOM_CROSSBAR_CHAMFER = 1.0
 RIB_THICKNESS = 1.6
 DIVISION_TEXT_DEPTH = 0.6
+# Rim-level division labels can ride on a real shelf welded to the divider, the
+# same self-supporting ledge the box's own rim label uses: flat top at the
+# divider height, a 45-degree underside so it prints without support, and the
+# lettering inlaid flush for its own filament colour.
+DIVISION_SHELF_DEPTH = 7.0
+DIVISION_SHELF_EMBED = 0.6
+DIVISION_SHELF_TEXT_MARGIN = 1.5
+DIVISION_CAP_MAX = 5.0            # matches the box rim label's fixed letters
+DIVISION_CAP_MIN = 2.5
+DIVISION_SIDES = ("left", "right", "top", "bottom")
 @defaults("divider")
 def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     zone = one.zone
@@ -49,7 +59,40 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
         "bottom_supports": 3,
         "label_divisions": 0,
         "division_level": "base",
+        # Which bin wall a rim-level label lines its shelf up against - "left",
+        # "right", "top" (back) or "bottom" (front). "center" keeps the older
+        # flat label floating on the divider crest.
+        "division_side": "center",
+        # Grid dividers: this many walls across X and across Y. Both zero (the
+        # default) keeps the legacy single-direction divider driven by
+        # ``along``/``count``; set either and the divider becomes a grid.
+        "count_x": 0,
+        "count_y": 0,
     }
+
+
+def divider_grid_counts(options: dict) -> tuple[int, int]:
+    """``(walls across X, walls across Y)`` for a grid divider.
+
+    ``(0, 0)`` means this is a legacy single-direction divider laid out from
+    ``along``/``count`` instead - see ``build_divider``.
+    """
+    def one(value: object) -> int:
+        if value in (None, ""):
+            return 0
+        try:
+            return max(0, int(round(float(value))))
+        except (TypeError, ValueError):
+            return 0
+    return one(options.get("count_x")), one(options.get("count_y"))
+
+
+def _even_centres(lo: float, hi: float, count: int) -> list[float]:
+    """``count`` fence-post positions evenly filling ``lo``..``hi``."""
+    if count < 1:
+        return []
+    gap = (hi - lo) / (count + 1)
+    return [lo + (index + 1) * gap for index in range(count)]
 
 
 def _divider_cross_centres(zone: Zone, along: str, count: int, spacing: float) -> list[float]:
@@ -68,6 +111,9 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
     """One or more evenly spaced parallel walls subdividing the bin."""
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
+    grid_x, grid_y = divider_grid_counts(options)
+    if grid_x or grid_y:
+        return _build_divider_grid(box, spec_feature, base_z, options, grid_x, grid_y)
     thickness = options["thickness"]
     height = options["height"]
     angle = options.get("angle", 0.0)
@@ -129,6 +175,58 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
     return solids
 
 
+def _build_divider_grid(
+    box: BoxSpec, spec_feature: Feature, base_z: float, options: dict,
+    grid_x: int, grid_y: int,
+) -> list[trimesh.Trimesh]:
+    """A grid of dividers - ``grid_x`` walls across X, ``grid_y`` across Y -
+    cutting the zone into a ``(grid_x + 1) x (grid_y + 1)`` set of cells.
+
+    Each wall is built by the same helpers a single-direction divider uses, so
+    a full-span grid still hugs the box's true wavy wall and every wall still
+    gets its base chamfer. Division labels, when on, drop one per cell.
+    """
+    zone = spec_feature.zone
+    thickness = options["thickness"]
+    height = options["height"]
+    angle = float(options.get("angle", 0.0) or 0.0)
+    if thickness <= 0.0 or height <= 0.0 or base_z + height > box.z + 1e-9:
+        raise ValueError("divider thickness and height must fit inside the bin")
+    full_span = spec_feature.full_span
+    solids: list[trimesh.Trimesh] = []
+    # Walls that divide X run along Y; walls that divide Y run along X.
+    for centre in _even_centres(zone.x0, zone.x1, grid_x):
+        solids.extend(_one_grid_wall(
+            box, spec_feature, "y", centre, thickness, height, angle, base_z, full_span,
+        ))
+    for centre in _even_centres(zone.y0, zone.y1, grid_y):
+        solids.extend(_one_grid_wall(
+            box, spec_feature, "x", centre, thickness, height, angle, base_z, full_span,
+        ))
+    for _label, text_solid, _raised in divider_division_texts(box, spec_feature, base_z):
+        solids.append(text_solid)
+    return solids
+
+
+def _one_grid_wall(
+    box: BoxSpec, spec_feature: Feature, along: str, centre: float,
+    thickness: float, height: float, angle: float, base_z: float, full_span: bool,
+) -> list[trimesh.Trimesh]:
+    """One wall of a grid divider, centred on ``centre`` of its cross axis."""
+    if full_span and angle == 0.0:
+        return _full_span_divider(box, along, centre, thickness, base_z, height)
+    zone = spec_feature.zone
+    half_t = thickness / 2.0
+    if along == "y":
+        wall_zone = Zone(centre - half_t, zone.y0, centre + half_t, zone.y1)
+    else:
+        wall_zone = Zone(zone.x0, centre - half_t, zone.x1, centre + half_t)
+    one = replace(spec_feature, zone=wall_zone, along=along)
+    if full_span and angle != 0.0:
+        return _full_span_leaning_divider(box, one, thickness, height, angle, base_z)
+    return _divider_wall(box, one, thickness, height, angle, base_z)
+
+
 def _option_flag(value: object) -> bool:
     """A yes/no option however it arrived - real bool, or a browser string."""
     if isinstance(value, str):
@@ -153,6 +251,215 @@ def _bottom_slot_bounds(
     return [(edges[index], edges[index + 1]) for index in range(len(edges) - 1)]
 
 
+def _divider_grid_texts(
+    box: BoxSpec, spec_feature: Feature, base_z: float, labels: list,
+    grid_x: int, grid_y: int,
+) -> list[tuple[str, trimesh.Trimesh, bool]]:
+    """One label per grid-divider cell, row-major from the low (front-left)
+    corner: cell ``(row, col)`` takes ``labels[row * (grid_x + 1) + col]``.
+    """
+    options = spec_feature.options or {}
+    zone = spec_feature.zone
+    thickness = float(options.get("thickness", RIB_THICKNESS) or RIB_THICKNESS)
+    height = float(options.get("height", connector_keep_out(box) - base_z)
+                   or (connector_keep_out(box) - base_z))
+    x_edges = [zone.x0, *_even_centres(zone.x0, zone.x1, grid_x), zone.x1]
+    y_edges = [zone.y0, *_even_centres(zone.y0, zone.y1, grid_y), zone.y1]
+    n_cols, n_rows = len(x_edges) - 1, len(y_edges) - 1
+    level = str(options.get("division_level", "base")).strip().lower()
+    z = (base_z + height - DIVISION_TEXT_DEPTH) if level == "rim" else base_z
+
+    results: list[tuple[str, trimesh.Trimesh, bool]] = []
+    for row in range(n_rows):
+        for col in range(n_cols):
+            idx = row * n_cols + col
+            if idx >= len(labels):
+                continue
+            text = str(labels[idx] or "").strip()
+            if not text:
+                continue
+            x0 = x_edges[col] + (0.0 if col == 0 else thickness / 2.0)
+            x1 = x_edges[col + 1] - (0.0 if col == n_cols - 1 else thickness / 2.0)
+            y0 = y_edges[row] + (0.0 if row == 0 else thickness / 2.0)
+            y1 = y_edges[row + 1] - (0.0 if row == n_rows - 1 else thickness / 2.0)
+            cell_w, cell_d = max(1.0, x1 - x0), max(1.0, y1 - y0)
+            try:
+                probe = text_outline(text, 10.0)
+            except Exception:
+                continue
+            bx0, by0, bx1, by1 = probe.bounds
+            pw, ph = bx1 - bx0, by1 - by0
+            if pw <= 0 or ph <= 0:
+                continue
+            avail_w = max(0.5, cell_w - 2.0)
+            avail_d = max(0.5, cell_d - 2.0)
+            cap = max(2.5, min(avail_d, avail_w / (pw / 10.0)))
+            try:
+                outline = text_outline(text, cap)
+            except Exception:
+                continue
+            outline = affinity.translate(
+                outline, xoff=(x0 + x1) / 2.0, yoff=(y0 + y1) / 2.0
+            )
+            try:
+                solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH, raised=True)
+            except Exception:
+                continue
+            results.append((text, solid, True))
+    return results
+
+
+def _division_shelf_solid(
+    edge: float, edge_axis: str, span_lo: float, span_hi: float,
+    inward: float, z_top: float, depth: float, embed: float,
+) -> trimesh.Trimesh:
+    """A rim-height label ledge welded along one edge of a compartment.
+
+    ``edge`` is the fixed cross coordinate of that edge - a ``y`` value when
+    the edge runs along ``x``, an ``x`` value when it runs along ``y``.
+    ``inward`` is +1 or -1, the way the compartment lies off it. The ledge
+    keeps a flat top at ``z_top`` and a 45-degree self-supporting underside
+    that falls ``depth`` back to the edge line, with a short buried lip so it
+    fuses cleanly to the divider crest (or bin wall) it sits on.
+    """
+    near = edge - inward * embed          # buried, inside the crest / wall
+    far = edge + inward * depth           # inner top lip, over the compartment
+    profile = Polygon([
+        (near, z_top),
+        (far, z_top),
+        (edge, z_top - depth),
+        (near, z_top - depth),
+    ])
+    if not profile.is_valid:
+        profile = profile.buffer(0)
+    length = span_hi - span_lo
+    centre = (span_lo + span_hi) / 2.0
+    if edge_axis == "x":
+        solid = _extrude_yz_profile(profile, length)
+        solid.apply_translation((centre, 0.0, 0.0))
+    else:
+        solid = _extrude_xz_profile(profile, length)
+        solid.apply_translation((0.0, centre, 0.0))
+    return solid
+
+
+def _division_side_shelves(
+    box: BoxSpec, along: str, zone: Zone, slots: list[tuple[float, float]],
+    labels: list, thickness: float, base_z: float, height: float, side: str,
+) -> list[tuple[str, trimesh.Trimesh, bool]]:
+    """Rim-level division labels on self-supporting shelves lined up against
+    one bin wall, with a single letter height shared by every label.
+
+    ``side`` is ``left`` / ``right`` / ``top`` (back) / ``bottom`` (front).
+    Where that edge of a compartment is a divider crest the shelf sits on it;
+    where it is the bin's own wall the shelf welds into that instead. Each
+    label is inlaid flush into its shelf as its own object.
+    """
+    z_top = base_z + height
+    max_depth = min(DIVISION_SHELF_DEPTH, max(2.0, height - 1.0))
+    # Whether this side's edge runs the same way as the divider walls (so the
+    # shelf lands right on a crest) or across them (so it bridges crest to
+    # crest). Only the on-crest case buries a lip past the edge.
+    on_crest = (
+        (along == "x" and side in ("top", "bottom"))
+        or (along == "y" and side in ("left", "right"))
+    )
+    embed = DIVISION_SHELF_EMBED if on_crest else 0.0
+
+    def geom(slot_lo: float, slot_hi: float):
+        """(edge, edge_axis, span_lo, span_hi, inward) for one compartment."""
+        if along == "x":
+            if side == "bottom":
+                return slot_lo, "x", zone.x0, zone.x1, 1.0
+            if side == "top":
+                return slot_hi, "x", zone.x0, zone.x1, -1.0
+            if side == "left":
+                return zone.x0, "y", slot_lo, slot_hi, 1.0
+            return zone.x1, "y", slot_lo, slot_hi, -1.0
+        if side == "left":
+            return slot_lo, "y", zone.y0, zone.y1, 1.0
+        if side == "right":
+            return slot_hi, "y", zone.y0, zone.y1, -1.0
+        if side == "bottom":
+            return zone.y0, "x", slot_lo, slot_hi, 1.0
+        return zone.y1, "x", slot_lo, slot_hi, -1.0
+
+    # First pass: the largest letter height that still fits the longest label
+    # in the tightest compartment, then clamp it to the box rim label's size.
+    picked: list[tuple[str, float, float, float]] = []
+    shared_cap = DIVISION_CAP_MAX
+    for idx, (slot_lo, slot_hi) in enumerate(slots):
+        if idx >= len(labels):
+            break
+        text = str(labels[idx] or "").strip()
+        if not text:
+            continue
+        _edge, _axis, span_lo, span_hi, _inward = geom(slot_lo, slot_hi)
+        depth_here = min(max_depth, (slot_hi - slot_lo) - 1.0) if on_crest else max_depth
+        if depth_here < DIVISION_CAP_MIN:
+            continue
+        try:
+            probe = text_outline(text, 10.0)
+        except Exception:
+            continue
+        bx0, by0, bx1, by1 = probe.bounds
+        pw, ph = bx1 - bx0, by1 - by0
+        if pw <= 0 or ph <= 0:
+            continue
+        avail_along = max(0.5, (span_hi - span_lo) - 2.0 * DIVISION_SHELF_TEXT_MARGIN)
+        avail_across = max(0.5, depth_here - 2.0 * DIVISION_SHELF_TEXT_MARGIN)
+        cap_here = min(avail_along * 10.0 / pw, avail_across * 10.0 / ph)
+        shared_cap = min(shared_cap, cap_here)
+        picked.append((text, slot_lo, slot_hi, depth_here))
+    if not picked:
+        return []
+    shared_cap = max(DIVISION_CAP_MIN, min(DIVISION_CAP_MAX, shared_cap))
+
+    results: list[tuple[str, trimesh.Trimesh, bool]] = []
+    for text, slot_lo, slot_hi, depth_here in picked:
+        edge, edge_axis, span_lo, span_hi, inward = geom(slot_lo, slot_hi)
+        if on_crest:
+            lo = span_lo + DIVISION_SHELF_TEXT_MARGIN
+            hi = span_hi - DIVISION_SHELF_TEXT_MARGIN
+        else:
+            # Weld the bridging ledge into the walls it spans between.
+            lo = span_lo - thickness / 2.0
+            hi = span_hi + thickness / 2.0
+        try:
+            shelf = _division_shelf_solid(
+                edge, edge_axis, lo, hi, inward, z_top, depth_here, embed,
+            )
+        except Exception:
+            continue
+        try:
+            outline = text_outline(text, shared_cap)
+        except Exception:
+            continue
+        if edge_axis == "y":
+            outline = affinity.rotate(
+                outline, 90.0, origin=(0.0, 0.0), use_radians=False
+            )
+        if edge_axis == "x":
+            cx = (span_lo + span_hi) / 2.0
+            cy = edge + inward * depth_here / 2.0
+        else:
+            cx = edge + inward * depth_here / 2.0
+            cy = (span_lo + span_hi) / 2.0
+        outline = affinity.translate(outline, xoff=cx, yoff=cy)
+        try:
+            inlay = text_prism(outline, z_top)
+        except Exception:
+            results.append((text, shelf, True))
+            continue
+        try:
+            shelf = difference([shelf, inlay])
+        except Exception:
+            pass
+        results.append((text, shelf, True))
+        results.append((text, inlay, True))
+    return results
+
+
 def divider_division_texts(
     box: BoxSpec, spec_feature: Feature, base_z: float
 ) -> list[tuple[str, trimesh.Trimesh, bool]]:
@@ -174,6 +481,10 @@ def divider_division_texts(
     else:
         return []
 
+    grid_x, grid_y = divider_grid_counts(options)
+    if grid_x or grid_y:
+        return _divider_grid_texts(box, spec_feature, base_z, labels, grid_x, grid_y)
+
     zone = spec_feature.zone
     along = spec_feature.along
     count = spec_feature.count or 1
@@ -187,6 +498,11 @@ def divider_division_texts(
     centres = _divider_cross_centres(zone, along, count, spacing)
     slots = _bottom_slot_bounds(zone, along, centres)
     level = str(options.get("division_level", "base")).strip().lower()
+    side = str(options.get("division_side", "center")).strip().lower()
+    if level == "rim" and side in DIVISION_SIDES:
+        return _division_side_shelves(
+            box, along, zone, slots, labels, thickness, base_z, height, side,
+        )
     # A rim label rides at the divider top, which already sits right at the
     # connector keep-out height. Standing it proud there makes it poke past
     # that line and foul a connector seating against a wall-touching divider,

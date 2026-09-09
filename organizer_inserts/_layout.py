@@ -15,7 +15,7 @@ from ._bore import (
 )
 from ._core import MIN_FEATURE_GAP, Feature, Zone, _fit_count
 from ._cradle import _cradle_end_margin, _cradle_offset, cradle_min_footprint
-from ._divider import DIVIDER_CHAMFER, _divider_cross_centres
+from ._divider import DIVIDER_CHAMFER, _divider_cross_centres, divider_grid_counts
 from ._pocket import POCKET_CHAMFER
 from ._registry import FEATURE_BUILDERS, resolved_options
 from ._text import TEXT_KIND, TEXT_ZONE_EPSILON, _text_footprint, is_text
@@ -76,7 +76,13 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
     # but a safe one that does not need each wall's exact position redone
     # here too.
     margin = thickness / 2.0 + lean + chamfer
-    if one.along == "x":
+    grid_x, grid_y = divider_grid_counts(options)
+    if grid_x or grid_y:
+        # A grid divider has walls on both axes, so it reaches past its zone
+        # on both.
+        zone = Zone(zone.x0 - margin, zone.y0 - margin,
+                    zone.x1 + margin, zone.y1 + margin)
+    elif one.along == "x":
         zone = Zone(zone.x0, zone.y0 - margin, zone.x1, zone.y1 + margin)
     else:
         zone = Zone(zone.x0 - margin, zone.y0, zone.x1 + margin, zone.y1)

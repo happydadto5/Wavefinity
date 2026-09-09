@@ -36,7 +36,7 @@ NON_NUMERIC_OPTIONS = {
     # API round-trip does not turn them into 0.0 / 1.0 floats.
     "reverse_bottom": "flag", "alternate_bottom": "flag", "minimal_bottom": "flag",
     "slope_base": "flag", "label_divisions": "flag", "division_level": "string",
-    "division_labels": "json",
+    "division_side": "string", "division_labels": "json",
 }
 
 

@@ -237,6 +237,10 @@ input[type="number"]::-webkit-inner-spin-button {
 .draft-fields .division-table td { padding: 3px 6px 3px 0; vertical-align: middle; }
 .draft-fields .division-table td:first-child { width: 1.6em; font-weight: 600; font-size: 12px; color: var(--muted); text-align: right; padding-right: 8px; }
 .draft-fields .division-table input { width: 100%; margin: 0; }
+/* Grid dividers: one text cell per compartment, laid out to mirror the bin. */
+.draft-fields .division-grid { table-layout: fixed; }
+.draft-fields .division-grid td { width: auto; font-weight: 400; font-size: inherit; color: inherit; text-align: left; padding: 3px 3px 3px 0; }
+.draft-fields .division-grid td:first-child { width: auto; text-align: left; padding-right: 3px; }
 /* Bore editor: a bold heading on the left, its fields wrapping on the right.
    The heading shares the field-label font metrics so its text top sits level
    with the top of the first field's label ("Width" / "Diameter"). */
