@@ -1111,7 +1111,7 @@ async function selectKind(kind, reset = false) {
   const request = ++state.kindRequest;
   updateInteriorModeVisibility(true);
   state.draftKind = kind;
-  state.selected = reset ? null : state.selected;
+  state.selected = null;
   state.draftIsNew = true;
   state.draftSourceIndex = null;
   state.draftAutoCommit = kind !== "nest";
@@ -1144,6 +1144,34 @@ async function selectKind(kind, reset = false) {
     state.draftStartingText = result.feature?.options?.text ?? null;
     renderDraftFields();
     updateSelectionButtons();
+
+    // Auto-save the new part immediately and treat it as a saved part we are editing
+    if (kind !== "nest") {
+      try {
+        const applyResult = await api("/api/feature/apply", {
+          design: state.design,
+          feature: state.draft,
+          index: null,
+        });
+        if (request !== state.kindRequest) return;
+        const previousDesign = clone(state.design);
+        state.design = applyResult.design;
+        seedPartNameFromText(state.draft);
+        recordHistory(previousDesign);
+        state.selected = applyResult.selected;
+        state.draftIsNew = false;
+        state.draftTouched = false;
+        if (Number.isInteger(applyResult.selected)) state.draftSourceIndex = applyResult.selected;
+        if (state.selected !== null && state.design.layout.features[state.selected]) {
+          state.draft = clone(state.design.layout.features[state.selected]);
+        }
+        renderPlaced();
+        updateSelectionButtons();
+      } catch (applyErr) {
+        $("#draft-status").textContent = applyErr.message;
+        $("#draft-status").classList.add("error");
+      }
+    }
     refreshDraft();
   } catch (error) {
     if (request !== state.kindRequest) return;
@@ -1381,21 +1409,17 @@ function renderDraftFields() {
           step: "1", min: "1", placeholder: hint,
         });
       };
-      // Diameter and fit clearance are locked to the preset for a hex-bit profile.
+      // Diameter is locked to the preset for a hex-bit profile.
       const diameterField = hexBit
         ? `<label>Diameter<span class="unit">mm</span>
             <input type="number" value="${HEX_BIT_PROFILES[draftProfile].diameter}" disabled></label>`
         : field("Diameter", "item_diameter", fmt(boreFirst.diameter), { unit: "mm" });
-      const clearanceField = hexBit
-        ? `<label>Clearance<span class="unit">mm</span>
-            <input type="number" value="${HEX_BIT_PROFILES[draftProfile].clearance}" disabled></label>`
-        : field("Clearance", "clearance", fmt(boreItem.clearance ?? 0.4), { unit: "mm" });
       const boreProfiles = [
         ["round", "Round"], ["hex", "Hex"], ["square", "Square"],
         ["hex_bit_short", HEX_BIT_PROFILES.hex_bit_short.label],
         ["hex_bit_long", HEX_BIT_PROFILES.hex_bit_long.label],
       ];
-      const profileField = `<label>Profile<select data-draft="profile">
+      const shapeField = `<label>Shape<select data-draft="profile">
         ${boreProfiles.map(([value, label]) => `<option value="${value}" ${draftProfile === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>`;
 
@@ -1418,8 +1442,7 @@ function renderDraftFields() {
         <span class="bore-group-label">Hole</span>
         <div class="bore-group-fields bore-hole-fields">
           ${diameterField}
-          ${profileField}
-          ${clearanceField}
+          ${shapeField}
           ${optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
           ${optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
           ${hexBit ? "" : optionField("angle", "Angle above horizontal", { step: "1", min: "15", max: "90" })}
@@ -1518,7 +1541,7 @@ function renderDraftFields() {
     html += field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: measuredStep, tip: lengthTip });
     if (!isCradle) {
       const profiles = [["round", "Round"], ["hex", "Hex"], ["square", "Square"]];
-      html += `<label>Profile<select data-draft="profile">
+      html += `<label>Shape<select data-draft="profile">
         ${profiles.map(([value, label]) => `<option value="${value}" ${item.profile === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>`;
       html += field("Fit clearance", "clearance", fmt(item.clearance ?? 0.4), { unit: "mm" });
@@ -1956,10 +1979,7 @@ function sizeBoreToGrid(one) {
   const diameter = hexBit
     ? HEX_BIT_PROFILES[profile].diameter
     : number(one.item?.segments?.[0]?.diameter, 6);
-  const clearance = hexBit
-    ? HEX_BIT_PROFILES[profile].clearance
-    : number(one.item?.clearance, 0.4);
-  const held = diameter + clearance;
+  const held = diameter + 0.25;
   const angle = hexBit ? 90 : Math.min(90, Math.max(15, number(opts.angle ?? resolved.angle, 90)));
   // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
   // Wall was hand-set - match that so the block sizing tracks the real pitch.
@@ -2240,6 +2260,7 @@ function updateDraftFromFields(event) {
       // A cradle ignores fit slack entirely, so it has no clearance field -
       // keep the stored value at 0 rather than a stale 0.4 nothing reads.
       item.clearance = isCradle ? 0
+        : one.kind === "bore" ? 0.25
         : leftHexBit ? 0.4
         : number(get("clearance"), item.clearance ?? 0.4);
       item.segments = [{
@@ -2649,7 +2670,8 @@ async function autoCommitDraft(request) {
 }
 
 async function commitVisibleDraft() {
-  if (!state.draft || !state.draftAutoCommit) return false;
+  if (!state.draft) return false;
+  if (state.draft?.kind === "nest" && !state.draft.contour) return false;
   const index = draftCommitIndex();
   if (index === false) return false;
   if (Number.isInteger(index) &&
@@ -2701,29 +2723,22 @@ function draftNeedsSaving() {
 
 // Gate every "switch to a different interior part" path. Returns true if the
 // caller may go ahead and replace the draft, false if the user chose to stay
-// and keep editing. Edits to an already-placed part are folded back in
-// silently when they're valid; anything that can't be saved cleanly - or a
-// new part that was never added - puts the choice to the user.
+// and keep editing. Edits are auto-saved cleanly when valid; only an edit
+// that cannot be saved prompts the user to discard or keep editing.
 async function guardDraftSwitch() {
   if (!draftNeedsSaving()) return true;
-  const index = draftCommitIndex();
-  if (Number.isInteger(index)) {
-    try {
-      if (await commitVisibleDraft()) return true;
-    } catch (error) {
-      return promptDraftConflict("edit", error.message);
-    }
-    // An edit of a placed part that didn't save and didn't throw: still don't
-    // wipe it without asking, but "add as new" would only duplicate the row.
-    return promptDraftConflict("edit", "");
+  try {
+    state.draftAutoCommit = true;
+    await commitVisibleDraft();
+    return true;
+  } catch (error) {
+    return promptDraftConflict(error.message);
   }
-  return promptDraftConflict("new", "");
 }
 
-// The "you'll lose this part" dialog. mode "new": the draft was never added -
-// offer Add as new / Discard it / Keep editing. mode "edit": a placed part has
-// an edit that won't save - offer Discard change / Keep editing.
-function promptDraftConflict(mode, reason) {
+// The "discard this change?" dialog shown when an edit cannot be saved cleanly.
+// Simple and intuitive: only 2 buttons ("Keep editing" or "Discard change").
+function promptDraftConflict(reason) {
   return new Promise(resolve => {
     const dialog = $("#draft-switch-dialog");
     const titleEl = $("#draft-switch-title");
@@ -2738,7 +2753,8 @@ function promptDraftConflict(mode, reason) {
     const finish = proceed => {
       if (done) return;
       done = true;
-      keepBtn.onclick = discardBtn.onclick = addBtn.onclick = null;
+      keepBtn.onclick = discardBtn.onclick = null;
+      if (addBtn) addBtn.onclick = null;
       dialog.removeEventListener("cancel", onCancel);
       if (dialog.open) dialog.close();
       resolve(proceed);
@@ -2747,40 +2763,20 @@ function promptDraftConflict(mode, reason) {
 
     reasonEl.textContent = reason || "";
     reasonEl.hidden = !reason;
-    addBtn.disabled = false;
+    if (addBtn) addBtn.hidden = true;
 
-    if (mode === "edit") {
-      titleEl.textContent = "Discard this change?";
-      msgEl.textContent = `Your last change to this ${title} can't be saved yet, so leaving it now will lose that change. The ${title}'s other settings are already saved.`;
-      addBtn.hidden = true;
-      discardBtn.textContent = "Discard change";
-    } else {
-      titleEl.textContent = `Keep this ${title}?`;
-      msgEl.textContent = `You've been setting up a new ${title} but haven't added it to the design yet. Switching to another part now will discard it.`;
-      addBtn.hidden = false;
-      addBtn.textContent = "Add as new";
-      discardBtn.textContent = "Discard it";
-    }
+    titleEl.textContent = "Discard this change?";
+    msgEl.textContent = `Your last change to this ${title} can't be saved yet, so leaving it now will lose that change.`;
+    discardBtn.textContent = "Discard change";
 
     keepBtn.onclick = () => finish(false);
-    discardBtn.onclick = () => finish(true);
-    addBtn.onclick = async () => {
-      addBtn.disabled = true;
-      try {
-        state.selected = null;
-        state.draftIsNew = true;
-        state.draftAutoCommit = true;
-        await commitVisibleDraft();
-        toast(`Added ${title}.`);
-        finish(true);
-      } catch (error) {
-        addBtn.hidden = true;
-        addBtn.disabled = false;
-        reasonEl.textContent = error.message;
-        reasonEl.hidden = false;
-        titleEl.textContent = "This part isn't ready";
-        msgEl.textContent = `This ${title} can't be added yet. Discard it, or keep editing to fix the problem.`;
+    discardBtn.onclick = () => {
+      const index = draftCommitIndex();
+      if (Number.isInteger(index) && state.design.layout.features[index]) {
+        state.draft = clone(state.design.layout.features[index]);
+        state.draftTouched = false;
       }
+      finish(true);
     };
 
     dialog.addEventListener("cancel", onCancel);
@@ -4385,21 +4381,43 @@ function layoutPoint(event) {
 
 function hitFeature(world) {
   const features = state.design.layout.features;
-  for (let index = features.length - 1; index >= 0; index--) {
-    const zone = features[index].zone;
-    if (features[index].kind === "nest" && features[index].contour) {
-      if (index === state.selected && state.layoutTransform) {
+  // Prioritize the currently selected feature using its live draft zone (with generous padding for text)
+  if (state.selected !== null && state.selected < features.length) {
+    const selIndex = state.selected;
+    const feat = (state.draft && state.draft.kind === features[selIndex].kind) ? state.draft : features[selIndex];
+    const zone = feat.zone;
+    if (feat.kind === "nest" && feat.contour) {
+      if (state.layoutTransform) {
         const cx = (zone[0] + zone[2]) / 2;
         const handles = [[zone[2], zone[1]], [cx, zone[3] + 8]];
         if (handles.some(point => Math.hypot(
           (world[0] - point[0]) * state.layoutTransform.scale,
           (world[1] - point[1]) * state.layoutTransform.scale,
-        ) < 14)) return index;
+        ) < 14)) return selIndex;
       }
-      if (pointInPolygon(world, nestOutlineWorld(features[index], state.preview?.nest_soft_contours?.[index]))) return index;
+      if (pointInPolygon(world, nestOutlineWorld(feat, state.preview?.nest_soft_contours?.[selIndex]))) return selIndex;
+    } else {
+      const pad = feat.kind === "text" ? 3.0 : 0;
+      if (world[0] >= zone[0] - pad && world[0] <= zone[2] + pad &&
+          world[1] >= zone[1] - pad && world[1] <= zone[3] + pad) {
+        return selIndex;
+      }
+    }
+  }
+
+  for (let index = features.length - 1; index >= 0; index--) {
+    if (index === state.selected) continue;
+    const feat = features[index];
+    const zone = feat.zone;
+    if (feat.kind === "nest" && feat.contour) {
+      if (pointInPolygon(world, nestOutlineWorld(feat, state.preview?.nest_soft_contours?.[index]))) return index;
       continue;
     }
-    if (world[0] >= zone[0] && world[0] <= zone[2] && world[1] >= zone[1] && world[1] <= zone[3]) return index;
+    const pad = feat.kind === "text" ? 3.0 : 0;
+    if (world[0] >= zone[0] - pad && world[0] <= zone[2] + pad &&
+        world[1] >= zone[1] - pad && world[1] <= zone[3] + pad) {
+      return index;
+    }
   }
   return null;
 }
@@ -4416,7 +4434,13 @@ function wireLayoutInteraction() {
     const world = layoutPoint(event);
     let index = hitFeature(world);
     if (index === null) {
-      state.selected = null;
+      if (state.selected !== null) {
+        if (!(await guardDraftSwitch())) return;
+        state.selected = null;
+        state.draft = null;
+        state.draftKind = null;
+        $(".support-editor").hidden = true;
+      }
       state.layoutDrag = null;
       state.nudgeFeedback = null;
       updateNudgeUI();

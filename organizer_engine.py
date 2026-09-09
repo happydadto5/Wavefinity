@@ -206,9 +206,9 @@ LOCK_NOTCH_CLEARANCE = 0.12
 # label is the solid that fills it flush, exported as its own object so Bambu
 # Studio can print it in a second colour
 # --------------------------------------------------------------------------- #
-TEXT_CAP_HEIGHT_IDEAL = 10.0   # letter height we want
-TEXT_CAP_HEIGHT_MIN = 7.0      # auto letter height will shrink to here, no further
-TEXT_CAP_HEIGHT_FLOOR = 4.0    # a hand-set letter height may go this small
+TEXT_CAP_HEIGHT_IDEAL = 15.0   # letter height starts here and scales down to fit
+TEXT_CAP_HEIGHT_MIN = 5.0      # auto letter height will shrink to here, no further
+TEXT_CAP_HEIGHT_FLOOR = 5.0    # no text smaller than the readable automatic minimum
 TEXT_DEPTH = 0.4               # how deep the label is sunk into the floor,
                                # leaving DEFAULT_BASE_THICKNESS - TEXT_DEPTH beneath it
 TEXT_MARGIN = 1.0              # clear space between the label and the cavity wall

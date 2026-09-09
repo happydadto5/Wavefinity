@@ -1111,8 +1111,16 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # "tighten" mode the floor drops to one grid unit, so the same search that
     # grows to a fit then trims back also shrinks a bin that is now too big.
     tighten = bool(payload.get("tighten"))
-    floor_x = float(BASE_UNIT) if tighten else start_x
-    floor_y = float(BASE_UNIT) if tighten else start_y
+    # A manually chosen bin axis remains its own floor for this browser
+    # session. The other axis can still tighten normally.
+    def floor_from_payload(key: str, fallback: float) -> float:
+        try:
+            return max(float(BASE_UNIT), float(payload.get(key, fallback)))
+        except (TypeError, ValueError):
+            return fallback
+
+    floor_x = floor_from_payload("floor_x", float(BASE_UNIT)) if tighten else start_x
+    floor_y = floor_from_payload("floor_y", float(BASE_UNIT)) if tighten else start_y
     x, y = floor_x, floor_y
     result = fits(x, y)
     while result is None:
