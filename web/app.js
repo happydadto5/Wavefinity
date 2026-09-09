@@ -600,6 +600,19 @@ async function selectOutputFolder() {
   }
 }
 
+async function showLog() {
+  const button = $("#show-log-button");
+  if (button) button.disabled = true;
+  try {
+    const result = await api("/api/show-log", { output: state.output });
+    toast(`Opened log: ${result.file.split(/[\\\\/]/).pop()}`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function updateNudgeUI() {
   const el = $("#layout-help");
   if (!el) return;
@@ -941,6 +954,7 @@ function wireControls() {
     updateDesignFromForm();
   });
   $("#output-folder-picker").addEventListener("click", selectOutputFolder);
+  $("#show-log-button")?.addEventListener("click", showLog);
 
   const viewTabs = $$(".view-tab");
   const activateView = tab => {

@@ -592,6 +592,55 @@ print(filedialog.askdirectory(parent=root, initialdir={repr(str(initial))}))
     return {"folder": selected}
 
 
+def open_log_with_wordpad(file_path: Path) -> None:
+    """Open a file with WordPad, falling back to os.startfile / default editor if WordPad is missing."""
+    target = str(file_path.resolve())
+    wordpad_candidates = [
+        shutil.which("wordpad.exe") or shutil.which("wordpad"),
+        shutil.which("write.exe") or shutil.which("write"),
+        r"C:\Program Files\Windows NT\Accessories\wordpad.exe",
+        r"C:\Program Files (x86)\Windows NT\Accessories\wordpad.exe",
+        r"C:\Windows\write.exe",
+        r"C:\Windows\System32\write.exe",
+    ]
+    for exe in wordpad_candidates:
+        if exe and (Path(exe).is_file() or shutil.which(exe)):
+            try:
+                subprocess.Popen([exe, target])
+                return
+            except Exception:
+                pass
+    if sys.platform == "win32":
+        try:
+            os.startfile(target)
+            return
+        except Exception:
+            pass
+    fallback = shutil.which("notepad.exe") or shutil.which("notepad") or "notepad"
+    subprocess.Popen([fallback, target])
+
+
+def show_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Display the bins.md log in WordPad for the specified output folder."""
+    output_dir = Path(str(payload.get("output") or DEFAULT_OUTPUT)).expanduser().resolve()
+    folder_name = output_dir.name
+    expected_log = output_dir / f"{folder_name} bins.md"
+
+    log_file: Path | None = None
+    if expected_log.is_file():
+        log_file = expected_log
+    elif output_dir.is_dir():
+        candidates = list(output_dir.glob("*bins.md")) + list(output_dir.glob("*.md"))
+        if candidates:
+            log_file = candidates[0]
+
+    if log_file is None or not log_file.is_file():
+        raise FileNotFoundError(f"No log file found in '{output_dir}'. Generate a bin first with 'Keep log' enabled.")
+
+    open_log_with_wordpad(log_file)
+    return {"file": str(log_file)}
+
+
 def _design(raw: dict[str, Any]) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     return design_from_dict(raw)
 
@@ -1279,6 +1328,7 @@ POST_ROUTES = {
     "/api/preferences": preferences_payload,
     "/api/browse-output-folder": browse_output_folder_payload,
     "/api/browse-slicer-path": browse_slicer_path_payload,
+    "/api/show-log": show_log_payload,
 }
 
 
