@@ -614,7 +614,7 @@ function updatePreviewHelp(view) {
   const el = $("#preview-help");
   if (!el) return;
   el.textContent = view === "2d"
-    ? "Use Arrow keys or drag to move (Arrow: 1 mm, Shift: 10 mm, Ctrl: 0.1 mm). Photo Nest also has a proportional resize corner and round rotation handle."
+    ? "Use Arrow keys or drag to move (Arrow: 1 mm, Shift: 10 mm, Ctrl: 0.1 mm). Snug Holder also has a proportional resize corner and round rotation handle."
     : "Drag to rotate, use the wheel to zoom, or double-click to reset.";
 }
 
@@ -2129,7 +2129,7 @@ async function uploadNestPhoto(event) {
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
     $('.view-tab[data-view="2d"]').click();
-    toast(`Photo Nest ready: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm outline.`);
+    toast(`Snug Holder ready: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm outline.`);
   } catch (error) {
     $("#draft-status").textContent = error.message;
     $("#draft-status").classList.add("error");

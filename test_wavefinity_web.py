@@ -79,7 +79,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertTrue(parts["cradle"]["flags"]["alternate"])
         self.assertFalse(parts["nest"]["flags"]["alternate"])
         self.assertTrue(parts["nest"]["flags"]["photo"])
-        self.assertEqual(parts["nest"]["title"], "Photo Nest")
+        self.assertEqual(parts["nest"]["title"], "Snug Holder")
         self.assertEqual(
             [field["label"] for field in parts["nest"]["fields"]],
             ["Fit clearance", "Soften outline"],

@@ -108,8 +108,8 @@ INTERIOR_PART_CATALOG = {
         "A half-circle notch that holds a screwdriver, marker or other tool on its side.",
     ),
     "nest": (
-        "Photo Nest — custom part cavity",
-        "Snug holder based on photo.",
+        "Snug Holder — A custom snug holder based on your photo",
+        "A custom snug holder based on your photo.",
     ),
     "bore": (
         "Bore — upright tools",
@@ -195,7 +195,7 @@ PART_KINDS = (
       "alternate": True},
      (("Spacing", "spacing", "0"), ("Floor gap", "floor_gap", "2"),
       ("% from ends", "end_margin", "10"))),
-    ("nest", "Photo Nest", "Snug holder based on photo.",
+    ("nest", "Snug Holder", "A custom snug holder based on your photo.",
      {"qty": False, "size": False, "along": False, "item": False, "lean": False,
       "alternate": False, "photo": True},
      (("Fit clearance", "clearance", "0.6"),
@@ -1170,7 +1170,7 @@ def summarize_interior_parts(layout: Layout, scoop: bool = False) -> str:
         elif kind == "nest":
             opts = getattr(feature, "options", {}) or {}
             is_photo = bool(opts.get("photo") or getattr(feature, "contour", None) is not None)
-            name = "Photo Nest" if is_photo else "Nest"
+            name = "Snug Holder" if is_photo else "Nest"
         elif kind == "pocket":
             name = "Pocket"
         elif kind == "bore":

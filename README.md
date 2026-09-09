@@ -289,7 +289,7 @@ to the smallest size that holds every interior part at its real footprint (a cla
 cradle gets its full length back), trims any axis that overshot, and leaves
 each part where it sat.
 
-**Photo Nest — custom part cavity** creates a raised cookie-cutter wall from a JPG, JPEG, PNG,
+**Snug Holder — A custom snug holder based on your photo** creates a raised cookie-cutter wall from a JPG, JPEG, PNG,
 or WEBP photo. Put one flat part on an 8.5 × 11 in sheet, keep all four paper
 corners visible, and photograph it directly overhead. Wavefinity corrects the
 paper to 215.9 × 279.4 mm, isolates the outside silhouette, cleans camera
@@ -1027,7 +1027,7 @@ Measured and regression-tested; run the suite for the current exact count.
   out to, so a short word in a wide box does not push a holder away
 
 **Insert layouts**
-- Nine registered builders: cradle, Photo Nest, bore, center post, divider,
+- Nine registered builders: cradle, Snug Holder, bore, center post, divider,
   pocket, slot rack, steps and text
 - Fused outputs remain one watertight solid; fitted and cartridge inserts clear
   the bin walls and stand on their own 0.6 mm print-flat plate

@@ -837,7 +837,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     one = _feature_from_json(payload["feature"], layout.mode)
     if one.kind == "nest":
         if not one.contour:
-            raise ValueError("upload a part photo before adding a Photo Nest")
+            raise ValueError("upload a part photo before adding a Snug Holder")
         one = fitted_nest_feature(one, one.zone.centre)
         box = _fit_photo_nest_box(box, one, layout.mode)
     else:
@@ -855,10 +855,10 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     index = payload.get("index")
     existing = list(layout.features)
     if one.kind != "nest" and any(item.kind == "nest" and item.contour for item in existing):
-        raise ValueError("a Photo Nest bin contains only its one custom cavity")
+        raise ValueError("a Snug Holder bin contains only its one custom cavity")
     if index is None:
         if one.kind == "nest" and existing:
-            raise ValueError("a Photo Nest is one custom cavity; start a new photo bin to replace these interior parts")
+            raise ValueError("a Snug Holder is one custom cavity; start a new photo bin to replace these interior parts")
         one = _first_open_position(
             one, box, layout, label, label_location, scoop
         )
@@ -876,7 +876,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
             )
         existing[selected] = one
     if one.kind == "nest" and len(existing) != 1:
-        raise ValueError("a Photo Nest design can contain only its one custom cavity")
+        raise ValueError("a Snug Holder design can contain only its one custom cavity")
     # Auto-placed text finds its own spot, so resolve before judging overlaps -
     # otherwise a second one is refused for sitting on the first at the
     # placeholder zone it has not been moved out of yet.
