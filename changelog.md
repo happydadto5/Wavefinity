@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-08 — Print button option for slicer, log buttons spaced, click-to-select folder
+
+- **Change slicer** is now styled directly on the right edge of the Print button as
+  an option.
+- **Save Location** now opens the folder picker directly when clicked, removing the
+  separate Browse button.
+- **Keep log** and **Show Log** are grouped and spaced over to the right.
+
 ## 2026-09-08 — Print to Bambu bundles one connector
 
 - Number-input up and down spin buttons are now 50% larger with a pointer cursor.
