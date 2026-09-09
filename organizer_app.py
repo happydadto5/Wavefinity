@@ -180,7 +180,7 @@ PART_KINDS = (
     ("post", "Post", "A tapered peg for tape rolls, spools, sockets and rings.",
      {"qty": True, "size": False, "along": True, "item": False, "lean": False},
      (("Height", "height", "16"), ("Diameter", "diameter", "12"),
-      ("Taper", "taper", "0.4"), ("Gap", "spacing", "4"))),
+      ("Taper", "taper", "0.4"), ("Spacing", "spacing", "4"))),
     ("pocket", "Pocket", "A raised open tray for loose small parts.",
      {"qty": False, "size": True, "along": False, "item": False, "lean": False},
      (("Height", "height", "12"), ("Wall", "wall", "1.6"),
