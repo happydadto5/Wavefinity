@@ -270,7 +270,13 @@ input[type="number"]::-webkit-inner-spin-button {
 .fit-actions .button:hover { background: #fbe6c4; border-color: #d7ab63; }
 .button-row { display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap; }
 .button-row.equal > * { flex: 1; }
-.placed-block { margin-top: 15px; padding: 12px; border: 3px solid var(--teal); border-radius: 12px; background: #f3faf9; }
+.placed-block {
+  position: absolute; top: 70px; right: 16px; z-index: 3;
+  width: clamp(220px, 28%, 340px); max-height: calc(100% - 132px); overflow: auto;
+  margin: 0; padding: 12px; border: 3px solid var(--teal); border-radius: 12px;
+  background: rgba(243,250,249,.96); box-shadow: 0 8px 20px rgba(20,51,61,.16);
+  backdrop-filter: blur(8px);
+}
 .placed-block h3 { margin: 0 0 10px; font-size: 13px; }
 .placed-supports { display: grid; gap: 5px; }
 .placed-empty { border: 1px dashed var(--line-dark); border-radius: 7px; padding: 12px; color: var(--muted); text-align: center; font-size: 12px; }
@@ -383,6 +389,11 @@ input[type="number"]::-webkit-inner-spin-button {
 #preview-state.status-error { color: var(--danger); }
 .canvas-wrap { position: relative; min-height: 0; display: none; overflow: hidden; background: radial-gradient(circle at 52% 42%, #fff 0, #f7f9f8 55%, #edf2f1 100%); }
 .canvas-wrap.active { display: block; }
+.canvas-wrap.view-enter { animation: preview-view-enter .3s cubic-bezier(.2,.75,.25,1) both; }
+@keyframes preview-view-enter {
+  from { opacity: 0; transform: scale(.975); filter: blur(3px); }
+  to { opacity: 1; transform: scale(1); filter: blur(0); }
+}
 .canvas-wrap canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 .camera-controls { position: absolute; top: 16px; left: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 2; }
 .camera-controls-row { display: flex; gap: 8px; }
@@ -639,7 +650,11 @@ dialog:not([open]) { display: none; }
   .workspace-toolbar { align-items: flex-start; }
   .icon-button span { display: none; }
   .camera-controls { top: 10px; left: 10px; }
+  .placed-block { top: 62px; right: 10px; width: min(280px, calc(100% - 20px)); }
   .camera-controls button { padding: 6px; }
   .preview-hint span:last-child { display: none; }
   .workspace-footer { display: block; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-wrap.view-enter { animation: none; }
 }

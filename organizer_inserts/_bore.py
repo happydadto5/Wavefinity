@@ -28,6 +28,20 @@ BORE_MOUTH_CHAMFER = 0.6  # 45-degree lead-in at each hole mouth
 BORE_MAX_TILT = 45.0      # steepest lean off vertical a blind-hole roof still prints
 BORE_TILTED_WALL = 3.0    # thicker default wall once a bore is leaned
 
+
+def bore_direction(spec_feature: Feature) -> tuple[str, float]:
+    """Return the lean axis and the direction the bore points toward.
+
+    Old designs used ``along`` as their only direction control.  Keep that
+    meaning when no new direction is stored, so existing designs do not turn.
+    """
+    toward = str(spec_feature.options.get("angle_towards", "")).lower()
+    directions = {
+        "right": ("x", 1.0), "left": ("x", -1.0),
+        "back": ("y", 1.0), "front": ("y", -1.0),
+    }
+    return directions.get(toward, (spec_feature.along, -1.0))
+
 def _is_hex_bit(profile: str) -> bool:
     return profile in HEX_BIT_HOLD
 
@@ -68,25 +82,21 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     tilted = angle > 1e-9
     default_wall = BORE_TILTED_WALL if tilted else BORE_WALL
     wall = float(one.options.get("wall", default_wall))
-    pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, one.along)
     try:
         depth = float(one.options.get("depth", hole))
     except (TypeError, ValueError):
         depth = hole
     reach = max(0.0, depth) * math.sin(math.radians(angle)) if tilted else 0.0
-    cols = _fit_count(one.zone.width - (reach if one.along == "x" else 0.0), pitch_x, pitch_x)
-    rows = _fit_count(one.zone.depth - (reach if one.along == "y" else 0.0), pitch_y, pitch_y)
-    if one.count is not None:
-        cols = min(cols, one.count)
-        rows = max(1, math.ceil(one.count / max(cols, 1)))
     return {
         "depth": hole,
         # A leaned bore takes a thicker wall by default so the extra material
         # between slanting holes still prints; an explicit Wall overrides it.
         "wall": default_wall,
         "height": one.options.get("depth", hole) + 2.0,
-        "columns": float(max(1, cols)),
-        "rows": float(max(1, rows)),
+        # A new Bore is one hole. X/Y quantities grow the Base and then the
+        # bin; they never begin by filling whatever space happened to exist.
+        "columns": 1.0,
+        "rows": 1.0,
         # 0 is straight up; a positive angle leans the holes off vertical so
         # tubes rest at a slant. Any grid may lean.
         "angle": 0.0,
@@ -123,7 +133,7 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
     # 1 / cos(angle), preserving the wall between the parallel holes.
     tilted = angle > 1e-9
     lean = math.radians(angle) if tilted else 0.0
-    lean_axis = spec_feature.along           # 'x' or 'y'
+    lean_axis, lean_sign = bore_direction(spec_feature)
     reach = depth * math.sin(lean)           # sideways travel of the hole bottom
     drop = depth * math.cos(lean)            # how far the bottom sits below the mouth
     pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, lean_axis)
@@ -166,16 +176,8 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
             f"but the zone gives {zone.width:.1f} x {zone.depth:.1f} mm"
         )
 
-    # When the base is bigger than the tight grid needs, spread the holes evenly
-    # to fill it rather than leaving all the slack as one margin at the far
-    # edges. The per-axis pitch opens up from the printable minimum
-    # (the angle-aware pitch) to whatever divides the usable span into equal
-    # cells; at the minimum footprint it is exactly that pitch. ``reach``
-    # is taken out first so a leaned grid still balances inside what is left.
-    span_x = zone.width - (reach if lean_axis == "x" else 0.0)
-    span_y = zone.depth - (reach if lean_axis == "y" else 0.0)
-    pitch_x = max(pitch_x, span_x / columns)
-    pitch_y = max(pitch_y, span_y / rows)
+    # Keep holes on their minimum printable pitch. Extra Base material remains
+    # a centred outer margin; only Wall changes the gap between holes.
 
     centre_x, centre_y = zone.centre
     sections = _hole_sides(item.profile)
@@ -183,11 +185,11 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
     over = max(2.0, held)                    # stub above the top face for a clean mouth
     chamfer = min(BORE_MOUTH_CHAMFER, depth / 3.0, wall / 3.0)
     # Centre the lean in the zone's slack so the leaning bottoms stay balanced.
-    lean_shift = -reach / 2.0
+    lean_shift = lean_sign * reach / 2.0
     return {
         "item": item, "zone": zone, "held": held, "depth": depth, "wall": wall,
         "height": height, "angle": angle, "tilted": tilted, "lean": lean,
-        "lean_axis": lean_axis, "reach": reach, "drop": drop,
+        "lean_axis": lean_axis, "lean_sign": lean_sign, "reach": reach, "drop": drop,
         "lean_shift": lean_shift, "pitch": min(pitch_x, pitch_y), "pitch_x": pitch_x,
         "pitch_y": pitch_y, "columns": columns,
         "rows": rows, "centre_x": centre_x, "centre_y": centre_y,
@@ -227,7 +229,7 @@ def bore_hole_axes(
     grid = _bore_grid(box, spec_feature, base_z)
     if not grid["tilted"]:
         return []
-    lean, lean_axis = grid["lean"], grid["lean_axis"]
+    lean, lean_axis, lean_sign = grid["lean"], grid["lean_axis"], grid["lean_sign"]
     depth, held = grid["depth"], grid["held"]
     height = grid["height"]
     stub = max(10.0, held)
@@ -235,9 +237,9 @@ def bore_hole_axes(
     # bottom shifts. Mirrors the per-hole tilt in ``build_bore``; the block
     # itself never rotates, so these points need no further transform.
     if lean_axis == "x":
-        up = (-math.sin(lean), 0.0, math.cos(lean))
+        up = (lean_sign * math.sin(lean), 0.0, math.cos(lean))
     else:
-        up = (0.0, -math.sin(lean), math.cos(lean))
+        up = (0.0, lean_sign * math.sin(lean), math.cos(lean))
     mouth_z = base_z + height
     axes = []
     for x, y in _bore_hole_centres(grid, spec_feature.count):
@@ -273,8 +275,8 @@ def bore_tool_clearance_zone(
     xs: list[float] = []
     ys: list[float] = []
     for x, y in _bore_hole_centres(grid, spec_feature.count):
-        rim_x = x - outward if grid["lean_axis"] == "x" else x
-        rim_y = y - outward if grid["lean_axis"] == "y" else y
+        rim_x = x + grid["lean_sign"] * outward if grid["lean_axis"] == "x" else x
+        rim_y = y + grid["lean_sign"] * outward if grid["lean_axis"] == "y" else y
         xs.extend((x - radius, x + radius, rim_x - radius, rim_x + radius))
         ys.extend((y - radius, y + radius, rim_y - radius, rim_y + radius))
     return Zone(min(xs), min(ys), max(xs), max(ys))
@@ -292,6 +294,7 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     tilted = grid["tilted"]
     lean = grid["lean"]
     lean_axis = grid["lean_axis"]
+    lean_sign = grid["lean_sign"]
     pitch_x = grid["pitch_x"]
     pitch_y = grid["pitch_y"]
     columns = grid["columns"]
@@ -341,10 +344,9 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             hole = union(parts) if len(parts) > 1 else parts[0]
 
             if tilted:
-                # Lean toward the far (high) end of the run axis: +x for a row
-                # running along x, +y for one along y.
+                # Rotate the hole toward the selected compass direction.
                 axis = (0.0, 1.0, 0.0) if lean_axis == "x" else (1.0, 0.0, 0.0)
-                sign = -1.0 if lean_axis == "x" else 1.0
+                sign = lean_sign if lean_axis == "x" else -lean_sign
                 hole.apply_transform(
                     trimesh.transformations.rotation_matrix(sign * lean, axis)
                 )

@@ -136,6 +136,32 @@ and the ordinary per-kind **Auto** button next to Quantity, since their
 quantity means repeated elements inside one footprint, not sections of the
 bin.
 
+### Automatic sizing: grow when needed, respect what the user chose
+
+Wavefinity's automatic sizing is deliberately one-way during normal editing:
+it may **grow** an interior part or the bin to keep the design valid, but it
+does not silently shrink a size the user entered, dragged, or reopened from a
+saved design. A larger-than-required part or bin is therefore treated as an
+intentional choice, not an error to correct.
+
+New Bores, Cradles, Posts, and Slot Racks begin with a contents-driven
+footprint. Increasing a hole grid, tool size, quantity, spacing, or lean grows
+that part automatically. If the part no longer fits, the bin's width and/or
+length grows on the 8 mm grid. Shrinking a bin below any existing Pocket,
+Steps, rack, or holder grows the bin back around the part instead of trimming
+the part. When growth creates a collision, the part being edited stays put and
+the other parts move outward only as much as needed.
+
+Typing a part Width/Length or resizing it in 2D makes that size the new minimum;
+later automatic changes can grow it but cannot pull it smaller. That manual
+choice survives saving and reopening; older designs without an ownership marker
+also keep their existing footprints. Bin
+Width and Length entered by the user are also floors. The explicit **Fit to
+pegs/slots** action is the user's permission to trim a rack snugly, while
+**Fill the bin** is the user's permission to expand a free-size part across the
+available floor. Divider and Curved Scoop footprints continue to follow the bin
+because full-span behavior is their purpose.
+
 ### Insert types
 
 The browser UI offers two: **Fused**, where holders print as one solid part
@@ -283,11 +309,9 @@ its zone only runs 13 mm along x"* rather than a raw overflow. Every
 auto-computed edge rounds up to the 1 mm editor grid so the pipeline's snap
 can't trim a trough below what the tool needs.
 
-When any interior part does not fit the current bin, an **Auto Expand Bin** button
-appears at the top of the interior section; it grows the bin on the 8 mm grid
-to the smallest size that holds every interior part at its real footprint (a clamped
-cradle gets its full length back), trims any axis that overshot, and leaves
-each part where it sat.
+When an interior part does not fit, its editor offers **Grow the bin** and the
+same growth normally happens automatically. The bin grows on the 8 mm grid to
+hold every part at its real footprint. It never shrinks an already-large bin.
 
 **Snug Holder — A custom snug holder based on your photo** creates a raised cookie-cutter wall from a JPG, JPEG, PNG,
 or WEBP photo. Put one flat part on an 8.5 × 11 in sheet, keep all four paper
@@ -310,9 +334,9 @@ drops visibly into each opening so fingers do not land on a sharp wall top.
 **Push Out** instead raises the tool on a shaped floor while leaving one selected
 end low: choose the press end, the percent used as the low push area, and its
 depth. Pressing there pivots the opposite end up. **No assist** leaves the plain
-continuous wall. Only one assist can be active. The
-outer bin width and depth still recalculate to the smallest enclosing 8 mm-grid
-footprint. Missing paper, severe perspective, an edge-touching part, multiple
+continuous wall. Only one assist can be active. The outer bin width and depth
+grow as needed to enclose it on the 8 mm grid, but a larger bin the user already
+chose is never pulled smaller. Missing paper, severe perspective, an edge-touching part, multiple
 parts, and unusably small/noisy outlines are rejected with a specific
 correction. The retired measured/segment Nest format is rejected explicitly
 rather than silently reinterpreted.

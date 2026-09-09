@@ -226,18 +226,17 @@ def feature_min_footprint(
         held = (HEX_BIT_FLATS + HEX_BIT_CLEARANCE
                 if _is_hex_bit(item.profile) else item.held(item.widest))
         wall = float(options["wall"])
-        from ._bore import bore_minimum_pitches
+        from ._bore import bore_direction, bore_minimum_pitches
         angle = float(options.get("angle", 0.0))
-        pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, one.along)
+        lean_axis, _ = bore_direction(one)
+        pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, lean_axis)
         reach = (float(options["depth"]) * math.sin(math.radians(angle))
                  if angle > 0.0 else 0.0)
         raw_c, raw_r = one.options.get("columns"), one.options.get("rows")
-        columns = (max(1, int(round(float(raw_c)))) if raw_c is not None
-                   else max(1, _fit_count(one.zone.width - (reach if one.along == "x" else 0.0), pitch_x, pitch_x)))
-        rows = (max(1, int(round(float(raw_r)))) if raw_r is not None
-                else max(1, _fit_count(one.zone.depth - (reach if one.along == "y" else 0.0), pitch_y, pitch_y)))
-        width = columns * pitch_x + (reach if one.along == "x" else 0.0)
-        depth = rows * pitch_y + (reach if one.along == "y" else 0.0)
+        columns = max(1, int(round(float(raw_c)))) if raw_c is not None else 1
+        rows = max(1, int(round(float(raw_r)))) if raw_r is not None else 1
+        width = columns * pitch_x + (reach if lean_axis == "x" else 0.0)
+        depth = rows * pitch_y + (reach if lean_axis == "y" else 0.0)
         return (width, depth)
 
     if kind == "post":

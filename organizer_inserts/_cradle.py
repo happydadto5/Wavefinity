@@ -125,7 +125,9 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
 
     wall = options["rib_thickness"]
     spacing = options["spacing"]
-    floor_gap = options["floor_gap"]
+    # The trough always begins 2 mm above the base. This is deliberately not
+    # a user setting, including for older saved designs that stored a value.
+    floor_gap = CRADLE_FLOOR_GAP
     if not math.isfinite(spacing) or spacing < 0.0:
         raise ValueError("cradle spacing must be zero or greater")
 
@@ -136,12 +138,6 @@ def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     radius = held / 2.0
     axis_z = base_z + floor_gap + held / 2.0
     trough_height = axis_z - base_z
-    if floor_gap < CRADLE_MIN_FLOOR_GAP:
-        raise ValueError(
-            f"{item.name}: a {item.widest:g} mm tool needs at least "
-            f"{CRADLE_MIN_FLOOR_GAP:g} mm of clearance under it to leave material below"
-        )
-
     run = zone.width if along == "x" else zone.depth
     across = zone.depth if along == "x" else zone.width
 
@@ -261,14 +257,18 @@ def cradle_min_footprint(one: Feature) -> tuple[float, float]:
         raise ValueError("cradle spacing must be zero or greater") from error
     if not math.isfinite(spacing) or spacing < 0.0:
         raise ValueError("cradle spacing must be zero or greater")
-    count = one.count or 1
+    body = item.widest + wall
+    pitch = item.widest + wall / 2.0 + spacing
+    if one.count is None:
+        across_now = one.zone.depth if one.along == "x" else one.zone.width
+        count = max(1, _fit_count(across_now, pitch, body))
+    else:
+        count = max(1, int(round(one.count)))
     length = item.length
     alternating = bool(one.alternate_ends) and count > 1
     run = math.ceil(
         length / (1.0 - 2.0 * _cradle_end_margin(one))
         if alternating else length
     )
-    body = item.widest + wall
-    pitch = item.widest + wall / 2.0 + spacing
     across = math.ceil((count - 1) * pitch + body)
     return (float(run), float(across)) if one.along == "x" else (float(across), float(run))

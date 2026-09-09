@@ -248,7 +248,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(resolved["push_area"], 30.0)
         self.assertEqual(resolved["push_depth"], 4.0)
 
-    def test_photo_upload_creates_one_contour_and_smallest_grid_bin(self):
+    def test_photo_upload_creates_one_contour_and_only_grows_the_grid_bin(self):
         outline = PhotoOutline(
             ((-40, -10), (40, -10), (35, 10), (-40, 10)),
             80.0, 20.0, ((0, 0), (1, 0), (1, 1), (0, 1)),
@@ -275,20 +275,9 @@ class WebApplicationTests(unittest.TestCase):
         self.assertNotIn("image", json.dumps(design).lower())
         self.assertEqual(design["box"]["x"] % 8.0, 0.0)
         self.assertEqual(design["box"]["y"] % 8.0, 0.0)
+        self.assertGreaterEqual(design["box"]["x"], 16.0)
+        self.assertGreaterEqual(design["box"]["y"], 48.0)
         box, layout, *_ = design_from_dict(design)
-        one = layout.features[0]
-        if box.x > 8.0:
-            narrower = type(box)(box.x - 8.0, box.y, box.z, box.wall,
-                                 box.corner_fillet, box.flat_inside,
-                                 box.base_thickness)
-            with self.assertRaisesRegex(ValueError, "outside the bin"):
-                layout.validate(narrower)
-        if box.y > 8.0:
-            shallower = type(box)(box.x, box.y - 8.0, box.z, box.wall,
-                                  box.corner_fillet, box.flat_inside,
-                                  box.base_thickness)
-            with self.assertRaisesRegex(ValueError, "outside the bin"):
-                layout.validate(shallower)
         preview = preview_payload({"design": design})
         self.assertFalse(preview["feature_errors"])
         self.assertTrue(preview["feature_outlines"][0])
@@ -643,6 +632,30 @@ class WebApplicationTests(unittest.TestCase):
         single = build_features(box, [replace(one, count=1)], base_z)[0]
         multi = build_features(box, [one], base_z)[0]
         self.assertGreater(multi.volume, 1.5 * single.volume)
+
+    def test_auto_expand_gives_alternating_auto_cradles_their_full_run(self):
+        design = default_design()
+        design["box"]["x"] = 16.0
+        design["box"]["y"] = 48.0
+        item = {
+            "name": "Driver", "profile": "round", "clearance": 0.0,
+            "segments": [{"length": 40.0, "diameter": 6.0}],
+        }
+        feature = default_feature_payload({
+            "design": design, "kind": "cradle", "item": item,
+        })["feature"]
+        feature["along"] = "x"
+        feature["count"] = None
+        feature["alternate_ends"] = True
+        feature["zone"] = [-6.5, -20.0, 6.5, 20.0]
+        design["layout"]["features"] = [feature]
+
+        expanded = expand_layout_payload({"design": design})
+        self.assertTrue(expanded["grew"])
+        box, layout, *_ = design_from_dict(expanded["design"])
+        self.assertGreaterEqual(layout.features[0].zone.width, 50.0)
+        preview = preview_payload({"design": expanded["design"]})
+        self.assertFalse(preview["feature_errors"])
 
     def test_auto_expand_clears_an_angled_bore_tool_from_the_bin_side(self):
         design = default_design()

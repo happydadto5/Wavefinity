@@ -205,11 +205,15 @@ def _feature_from_json(raw: dict[str, Any], mode: str) -> Feature:
 
 
 def _fit_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
-    """Smallest 8 mm-grid bin whose usable floor contains the Photo Nest."""
+    """Grow an 8 mm-grid bin until its floor contains the Photo Nest.
+
+    The current dimensions are floors: uploading or editing a smaller outline
+    must not undo a larger bin the user deliberately chose.
+    """
     required_x = 2.0 * max(abs(one.zone.x0), abs(one.zone.x1))
     required_y = 2.0 * max(abs(one.zone.y0), abs(one.zone.y1))
-    x = max(BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
-    y = max(BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
+    x = max(box.x, BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
+    y = max(box.y, BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
     for _attempt in range(200):
         trial = replace(box, x=float(x), y=float(y))
         bounds = layout_zone(trial, mode)
@@ -994,9 +998,8 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     move outward from it, with the bin growing to take in whatever ends up past
     its edge. Nothing is re-sized to make room; only moved.
 
-    By default the current size is the floor - the bin only grows. With
-    ``payload["tighten"]`` the floor drops to one grid unit, so a bin that is
-    now bigger than its contents need is shrunk to fit as well.
+    The current size is always the floor: this operation only grows. A larger
+    bin is valid user intent and is never silently tightened around its parts.
     """
     box, layout, label, part_name, label_location, scoop = design_from_dict(
         payload["design"], validate_layout=False
@@ -1107,20 +1110,7 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     start_x, start_y = box.x, box.y
     ceiling = 100.0 * BASE_UNIT
-    # Normally the current size is the floor - the bin only ever grows. In
-    # "tighten" mode the floor drops to one grid unit, so the same search that
-    # grows to a fit then trims back also shrinks a bin that is now too big.
-    tighten = bool(payload.get("tighten"))
-    # A manually chosen bin axis remains its own floor for this browser
-    # session. The other axis can still tighten normally.
-    def floor_from_payload(key: str, fallback: float) -> float:
-        try:
-            return max(float(BASE_UNIT), float(payload.get(key, fallback)))
-        except (TypeError, ValueError):
-            return fallback
-
-    floor_x = floor_from_payload("floor_x", float(BASE_UNIT)) if tighten else start_x
-    floor_y = floor_from_payload("floor_y", float(BASE_UNIT)) if tighten else start_y
+    floor_x, floor_y = start_x, start_y
     x, y = floor_x, floor_y
     result = fits(x, y)
     while result is None:

@@ -37,6 +37,10 @@ NON_NUMERIC_OPTIONS = {
     "reverse_bottom": "flag", "alternate_bottom": "flag", "minimal_bottom": "flag",
     "slope_base": "flag", "label_divisions": "flag", "division_level": "string",
     "division_side": "string", "division_labels": "json",
+    # Browser footprint ownership: true while a contents-driven axis remains
+    # automatic, false after the user sizes it. Persisted so reopening a design
+    # never loses that intent.
+    "auto_width": "flag", "auto_depth": "flag",
 }
 
 

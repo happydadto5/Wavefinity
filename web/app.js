@@ -44,14 +44,12 @@ const state = {
   // is only ever grown to fit the part's contents, never shrunk back or
   // overwritten - a manual size always wins. Reset whenever a fresh draft loads.
   pinnedZone: {},
-  // Session-only manual Base widths/lengths, keyed by placed-part index.
+  // Fast session cache of the per-axis ownership persisted on each auto-sized
+  // feature as auto_width / auto_depth.
   partZoneLocks: {},
-  // Width and Length remain independent when auto-tightening the bin.
-  binLocked: { x: false, y: false },
-  // True while the bin is at a size the app grew it to (not one the user typed).
-  // Only then does shrinking a part's contents pull the bin back in - a
-  // hand-set bin size is left exactly as entered.
-  binAutoGrown: false,
+  // Set while a user-driven Width/Length edit waits for grow-only minimum
+  // enforcement. Consumed by the debounced design update.
+  binResizePending: false,
   camera: { yaw: 45, elevation: 76, zoom: 1 },
   lastBoxSize: null,
   previewRequest: 0,
@@ -96,6 +94,7 @@ const INSERT_TINT_MIX = .5;
 // that reads as "this one is different" against every kind's own muted
 // palette above.
 const DRAFT_HIGHLIGHT = "#1f6b45";
+const AUTO_FOOTPRINT_KINDS = new Set(["cradle", "bore", "post", "slot"]);
 const CAMERA_VIEWS = {
   top: { yaw: 45, elevation: 89, zoom: 1 },
   front: { yaw: 0, elevation: 8, zoom: 1 },
@@ -105,6 +104,20 @@ const CAMERA_VIEWS = {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function markFootprintAutomatic(one) {
+  if (!one || !AUTO_FOOTPRINT_KINDS.has(one.kind)) return;
+  one.options ||= {};
+  one.options.auto_width = true;
+  one.options.auto_depth = true;
+}
+
+function pinDraftAxis(axis, one = state.draft) {
+  state.pinnedZone[axis] = true;
+  if (!one || !AUTO_FOOTPRINT_KINDS.has(one.kind)) return;
+  one.options ||= {};
+  one.options[`auto_${axis}`] = false;
 }
 
 function recordHistory(before) {
@@ -528,11 +541,19 @@ function updateDesignFromForm() {
   design.box.z = number($("#z").value, design.box.z);
   checkBinSizeChange();
   if (design.box.z !== prevBoxZ) {
+    const setAutoConnectorHeight = selector => {
+      const input = $(selector);
+      const next = fmt(design.box.z);
+      if (input && input.value !== next) {
+        input.value = next;
+        flashField(input);
+      }
+    };
     if (!$("#different-height-bins").checked) {
-      $("#connector-bin-a-height").value = fmt(design.box.z);
-      $("#connector-bin-b-height").value = fmt(design.box.z);
+      setAutoConnectorHeight("#connector-bin-a-height");
+      setAutoConnectorHeight("#connector-bin-b-height");
     } else {
-      $("#connector-bin-a-height").value = fmt(design.box.z);
+      setAutoConnectorHeight("#connector-bin-a-height");
       autoAdjustConnectorFields();
     }
   }
@@ -651,30 +672,28 @@ const applyChangedDesign = debounce(() => {
   pendingDesignHistory = null;
   updateDesignFromForm();
   recordHistory(previousDesign);
-  // Re-fit the open draft to the resized bin so a shrunk bin doesn't leave its
-  // zone hanging outside with a stale "reaches outside the bin" error.
+  // Re-fit contents-driven drafts after the bin changes. Arbitrarily sized
+  // parts keep the size the user chose; if the bin was made too small, the
+  // automatic grow pass below restores enough room instead of trimming them.
   reflowDraftToBin(state.draft);
   refreshPreview();
   if (state.draft) refreshDraft();
+  if (state.binResizePending &&
+      (state.draft || state.design.layout.features.length)) {
+    enforceBinMinimumSoon();
+  }
+  state.binResizePending = false;
 }, 280);
 
-// Snap the open draft back inside the bin after the bin itself changed size.
-// Contents-driven kinds re-fit to their contents (which also re-clamps them);
-// a plain sized block is just nudged/trimmed to the new usable floor.
+// Re-evaluate contents-driven parts after the bin itself changes size. Plain
+// sized blocks are deliberately untouched: their footprint is user intent,
+// so a too-small bin must grow around them rather than cutting them down.
 function reflowDraftToBin(one) {
   if (!one) return;
   if (one.kind === "cradle") return sizeCradleToItem(one);
   if (one.kind === "bore") return sizeBoreToGrid(one);
   if (one.kind === "post") return sizePostToRow(one);
   if (one.kind === "slot") return sizeSlotToBank(one);
-  if (["pocket", "steps"].includes(one.kind)) {
-    const [insideX, insideY] = binInsideExtent(state.design.box);
-    const cx = (one.zone[0] + one.zone[2]) / 2;
-    const cy = (one.zone[1] + one.zone[3]) / 2;
-    const w = Math.min(one.zone[2] - one.zone[0], insideX);
-    const d = Math.min(one.zone[3] - one.zone[1], insideY);
-    applyResizedZone(one, cx, cy, w, d);
-  }
 }
 
 function changedDesign(previousDesign = null) {
@@ -687,9 +706,8 @@ function changedDesign(previousDesign = null) {
   applyChangedDesign();
 }
 
-function markBinAxisManual(axis) {
-  state.binLocked[axis] = true;
-  state.binAutoGrown = false;
+function markBinAxisManual(_axis) {
+  state.binResizePending = true;
 }
 
 let pendingNudgeHistory = null;
@@ -845,6 +863,25 @@ function setLayoutOrientation(orientation) {
   renderLayout2D();
 }
 
+function activatePreviewView(view) {
+  const tab = $(`.view-tab[data-view="${view}"]`);
+  const canvasWrap = $(`.canvas-wrap[data-canvas="${view}"]`);
+  if (!tab || !canvasWrap) return;
+  $$(".view-tab").forEach(other => {
+    const active = other === tab;
+    other.classList.toggle("active", active);
+    other.setAttribute("aria-selected", String(active));
+    other.tabIndex = active ? 0 : -1;
+  });
+  $$(".canvas-wrap").forEach(wrap => wrap.classList.toggle("active", wrap === canvasWrap));
+  canvasWrap.classList.remove("view-enter");
+  void canvasWrap.offsetWidth;
+  canvasWrap.classList.add("view-enter");
+  updatePreviewHelp(view);
+  if (view === "2d") updateNudgeUI();
+  requestAnimationFrame(() => view === "3d" ? renderPreview3D() : renderLayout2D());
+}
+
 function wireControls() {
   wireSidebar();
   wireCameraControls();
@@ -990,30 +1027,19 @@ function wireControls() {
   $("#show-log-button")?.addEventListener("click", showLog);
 
   const viewTabs = $$(".view-tab");
-  const activateView = tab => {
-    $$(".view-tab").forEach(other => {
-      other.classList.toggle("active", other === tab);
-      other.setAttribute("aria-selected", String(other === tab));
-      other.tabIndex = other === tab ? 0 : -1;
-    });
-    $$(".canvas-wrap").forEach(wrap => wrap.classList.toggle("active", wrap.dataset.canvas === tab.dataset.view));
-    updatePreviewHelp(tab.dataset.view);
-    if (tab.dataset.view === "2d") updateNudgeUI();
-    requestAnimationFrame(() => tab.dataset.view === "3d" ? renderPreview3D() : renderLayout2D());
-  };
   viewTabs.forEach((tab, index) => {
-    tab.addEventListener("click", () => activateView(tab));
+    tab.addEventListener("click", () => activatePreviewView(tab.dataset.view));
     tab.addEventListener("keydown", event => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
       event.preventDefault();
       const targetIndex = event.key === "Home" ? 0
         : event.key === "End" ? viewTabs.length - 1
         : (index + (event.key === "ArrowRight" ? 1 : -1) + viewTabs.length) % viewTabs.length;
-      activateView(viewTabs[targetIndex]);
+      activatePreviewView(viewTabs[targetIndex].dataset.view);
       viewTabs[targetIndex].focus();
     });
   });
-  activateView(viewTabs.find(tab => tab.classList.contains("active")) || viewTabs[0]);
+  activatePreviewView((viewTabs.find(tab => tab.classList.contains("active")) || viewTabs[0]).dataset.view);
 
   // Editing a part: "Save Part" finalises it and returns to the 10-part
   // palette; "Delete Part" removes the part being edited and does the same.
@@ -1154,6 +1180,8 @@ async function selectKind(kind, reset = false) {
     // What the engine started this text at, so the Part Name is only ever
     // seeded from lettering the user actually typed - never the placeholder.
     state.draftStartingText = result.feature?.options?.text ?? null;
+    markFootprintAutomatic(state.draft);
+    if (kind === "bore") sizeBoreToGrid(state.draft);
     renderDraftFields();
     updateSelectionButtons();
 
@@ -1208,7 +1236,17 @@ async function selectedFeature(index, force = false) {
   state.draftIsNew = false;
   state.draftSourceIndex = index;
   state.pinnedZone = state.partZoneLocks[index] ||= {};
+  if (AUTO_FOOTPRINT_KINDS.has(state.draft.kind)) {
+    for (const axis of ["width", "depth"]) {
+      if (!(axis in state.pinnedZone)) {
+        // New designs persist their automatic axes. A legacy saved part has
+        // no marker, so preserve its existing footprint as intentional.
+        state.pinnedZone[axis] = state.draft.options?.[`auto_${axis}`] !== true;
+      }
+    }
+  }
   state.draftResolvedOptions = {};
+  if (state.draft.kind === "bore") sizeBoreToGrid(state.draft);
   state.draftKind = state.draft.kind;
   updateInteriorModeVisibility(true);
   $(".support-editor").hidden = false;
@@ -1249,15 +1287,6 @@ function toggle(key, title, help, on, options = {}) {
   </label>`;
 }
 
-// Fields that stay blank with explanatory grey placeholder text instead of
-// showing the resolved number, for the one kind (so far) where knowing the
-// exact auto-computed value matters less than knowing what "blank" means.
-const AUTO_PLACEHOLDER = {
-  divider: { height: "height of box", spacing: "fills evenly" },
-  bore: { columns: 1, rows: 1 },
-  scoop: { depth: "60% of bin height" },
-};
-
 // The two fixed-size hex-bit profiles. Selecting one locks the hole to a
 // 1/4-inch bit and drives the hole depth so the bit stands well proud.
 const HEX_BIT_PROFILES = {
@@ -1265,6 +1294,39 @@ const HEX_BIT_PROFILES = {
   hex_bit_long: { label: "Hex bit – long", length: 38, diameter: 6.35, clearance: 0.25 },
 };
 const isHexBitProfile = profile => Object.prototype.hasOwnProperty.call(HEX_BIT_PROFILES, profile);
+
+function resolvedDraftCount(one) {
+  if (one.count != null) return Math.max(1, Math.round(number(one.count, 1)));
+  const [x0, y0, x1, y1] = one.zone;
+  const width = x1 - x0, depth = y1 - y0;
+  const options = one.options || {};
+  const resolved = state.draftResolvedOptions || {};
+  const along = one.along === "y" ? "y" : "x";
+  const across = along === "x" ? depth : width;
+  if (one.kind === "cradle") {
+    const diameter = number(one.item?.segments?.[0]?.diameter, 6);
+    const wall = number(resolved.rib_thickness, Math.max(1.6, diameter * .25));
+    const spacing = Math.max(0, number(options.spacing ?? resolved.spacing, 0));
+    const body = diameter + wall;
+    const pitch = diameter + wall / 2 + spacing;
+    return Math.max(1, Math.floor((across - body + 1e-6) / pitch) + 1);
+  }
+  if (one.kind === "post") {
+    const diameter = number(options.diameter ?? resolved.diameter, 12);
+    const spacing = Math.max(0, number(options.spacing ?? resolved.spacing, 4));
+    const countX = Math.max(1, Math.floor((width - diameter + 1e-6) / (diameter + spacing)) + 1);
+    const countY = Math.max(1, Math.floor((depth - diameter + 1e-6) / (diameter + spacing)) + 1);
+    return countX * countY;
+  }
+  if (one.kind === "slot") {
+    const thickness = number(options.thickness ?? resolved.thickness, 4);
+    const wall = number(options.wall ?? resolved.wall, 1.6);
+    const angle = Math.abs(number(options.angle ?? resolved.angle, 20)) * Math.PI / 180;
+    const pitch = (thickness + wall) / Math.cos(angle);
+    return Math.max(1, Math.floor((across - 2 * wall - thickness / Math.cos(angle) + 1e-6) / pitch) + 1);
+  }
+  return Math.max(1, Math.round(number(options.count ?? resolved.count, 3)));
+}
 
 function renderDraftFields() {
   if (!state.draft) return;
@@ -1400,23 +1462,22 @@ function renderDraftFields() {
       const hexBit = isHexBitProfile(draftProfile);
       const boreItem = one.item || starterItem();
       const boreFirst = boreItem.segments[0] || { length: 40, diameter: 6 };
-      // An option field, resolved to its number (or left blank on an "auto" hint).
+      // An option field always shows its current resolved number. An absent
+      // stored option remains automatic and will update when its inputs do.
       const optionField = (key, label, opts = {}) => {
         const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
-        const autoHint = AUTO_PLACEHOLDER.bore?.[key];
-        const shown = !explicit && autoHint ? ""
-          : explicit ? one.options[key]
+        const value = explicit ? one.options[key]
           : state.draftResolvedOptions?.[key] ?? info.fields.find(f => f.key === key)?.default;
-        const fieldOpts = { ...opts };
-        if (autoHint && !fieldOpts.placeholder) fieldOpts.placeholder = autoHint;
+        const shown = opts.transform ? opts.transform(value) : value;
+        const { transform, ...fieldOpts } = opts;
         return field(label, `option:${key}`, shown, fieldOpts);
       };
-      // X / Y counts: a whole number, blank meaning "let the fitter decide".
+      // X / Y counts show the fitter's current count until the user edits one.
       const gridField = (key, label) => {
         const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
-        const hint = AUTO_PLACEHOLDER.bore?.[key] || "auto";
-        return field(label, `option:${key}`, explicit ? one.options[key] : "", {
-          step: "1", min: "1", placeholder: hint,
+        return field(label, `option:${key}`, explicit ? one.options[key]
+          : state.draftResolvedOptions?.[key] ?? 1, {
+          step: "1", min: "1",
         });
       };
       // Diameter is locked to the preset for a hex-bit profile.
@@ -1455,7 +1516,10 @@ function renderDraftFields() {
           ${shapeField}
           ${optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
           ${optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
-          ${hexBit ? "" : optionField("angle", "Angle above horizontal", { step: "1", min: "15", max: "90" })}
+          ${hexBit ? "" : optionField("angle", "Angle", { step: "1", min: "45", max: "90", transform: value => 90 - number(value, 0) })}
+          ${hexBit || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label>Angle towards<select data-draft="option:angle_towards">
+            ${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]].map(([value, label]) => `<option value="${value}" ${(one.options?.angle_towards || (one.along === "y" ? "front" : "left")) === value ? "selected" : ""}>${label}</option>`).join("")}
+          </select></label>`}
         </div>
       </div>`;
     } else {
@@ -1470,16 +1534,14 @@ function renderDraftFields() {
     let repeatFieldsHtml = "";
     for (const option of info.fields) {
       if (!["spacing", "floor_gap"].includes(option.key)) continue;
+      if (info.kind === "cradle" && option.key === "floor_gap") continue;
       repeatKeys.add(option.key);
       // Grid dividers space their walls evenly on both axes; no spacing field.
       if (info.kind === "divider") continue;
       const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
-      const autoHint = AUTO_PLACEHOLDER[info.kind]?.[option.key];
-      const shown = !explicit && autoHint ? ""
-        : explicit ? one.options[option.key]
+      const shown = explicit ? one.options[option.key]
         : state.draftResolvedOptions?.[option.key] ?? option.default;
       const fo = {};
-      if (autoHint) fo.placeholder = autoHint;
       if (info.kind === "cradle" && option.key === "spacing") fo.min = 0;
       repeatFieldsHtml += field(option.label, `option:${option.key}`, shown, fo);
     }
@@ -1500,9 +1562,15 @@ function renderDraftFields() {
       </div>`;
     } else if (info.flags.qty) {
       html += `<div class="pair"><label>Quantity<div class="input-with-button">
-        <input type="number" min="1" step="1" data-draft="count" value="${one.count ?? ""}" placeholder="auto">
-        <button type="button" class="button secondary" data-action="auto-count">Auto</button>
+        <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
+        ${info.kind === "cradle" ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
       </div></label>${repeatFieldsHtml}</div>`;
+      if (info.kind === "cradle") {
+        const item = one.item || starterItem();
+        const first = item.segments[0] || { length: 40, diameter: 6 };
+        const tip = "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.";
+        html += `<div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div>`;
+      }
     } else if (repeatFieldsHtml) {
       html += `<div class="pair">${repeatFieldsHtml}</div>`;
     }
@@ -1511,13 +1579,13 @@ function renderDraftFields() {
         "Places every second trough near the opposite end of the bin; each trough becomes a separate body.",
         one.alternate_ends === true, { wide: true });
     }
-    if (info.flags.along && info.kind !== "divider") {
+    if (info.flags.along && !["divider", "bore"].includes(info.kind)) {
       html += `<fieldset><legend>Runs along</legend><div class="segmented two">
         <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
         <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
       </div></fieldset>`;
     }
-    if (info.flags.alternate) {
+    if (info.flags.alternate && (info.kind !== "cradle" || one.alternate_ends === true)) {
       // One field, two readings. Alternate ends on: the clearance kept at each
       // run end (writes end_margin). Off: a signed slide of the whole row along
       // the bin (writes run_offset). Each key keeps its own last value.
@@ -1537,7 +1605,7 @@ function renderDraftFields() {
     }
     html += `</div>`;
   }
-  if (info.flags.item && one.kind !== "bore") {
+  if (info.flags.item && !["bore", "cradle"].includes(one.kind)) {
     // A bore's Diameter / Profile / Clearance are drawn in the "Hole" group above.
     const item = one.item || starterItem();
     const first = item.segments[0] || { length: 40, diameter: 6 };
@@ -1580,11 +1648,7 @@ function renderDraftFields() {
     // The scoop depth field is rendered with its own % unit and help text above.
     if (info.kind === "scoop") continue;
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
-    const autoHint = AUTO_PLACEHOLDER[info.kind]?.[option.key];
-    const shown = !explicit && autoHint
-      ? ""
-      : explicit
-      ? one.options[option.key]
+    const shown = explicit ? one.options[option.key]
       : state.draftResolvedOptions?.[option.key] ?? option.default;
     // Mouse-wheel / spinner steps: lean and slope a whole degree, width
     // half a mm.
@@ -1603,7 +1667,6 @@ function renderDraftFields() {
       stepFor.rounding = "0.1";
     }
     const fieldOpts = {};
-    if (autoHint) fieldOpts.placeholder = autoHint;
     if (stepFor[option.key]) fieldOpts.step = stepFor[option.key];
     if (info.kind === "cradle" && option.key === "spacing") fieldOpts.min = 0;
     if (info.kind === "pocket" && option.key === "rounding") fieldOpts.min = 0;
@@ -1852,7 +1915,10 @@ function renderDraftFields() {
     if (state.draft.kind === "cradle") sizeCradleToItem(state.draft);
     state.draftAutoCommit = true;
     const input = $('[data-draft="count"]', $("#draft-fields"));
-    if (input) input.value = "";
+    if (input) {
+      input.value = String(resolvedDraftCount(state.draft));
+      flashField(input);
+    }
     syncCountAutoHint();
     updateSelectionButtons();
     refreshDraftSoon();
@@ -1871,7 +1937,10 @@ function renderDraftFields() {
     const key = button.dataset.key;
     if (state.draft.options) delete state.draft.options[key];
     const input = $(`[data-draft="option:${key}"]`, $("#draft-fields"));
-    if (input) input.value = "";
+    if (input) {
+      input.value = fmt(state.draftResolvedOptions?.[key] ?? 1);
+      flashField(input);
+    }
     state.draftAutoCommit = true;
     updateSelectionButtons();
     refreshDraftSoon();
@@ -1950,13 +2019,30 @@ function sizeCradleToItem(one) {
   const [insideX, insideY] = binInsideExtent(state.design.box);
   const roomAlong = one.along === "x" ? insideX : insideY;
   const roomAcross = one.along === "x" ? insideY : insideX;
+  const curW = one.zone[2] - one.zone[0];
+  const curD = one.zone[3] - one.zone[1];
+  const curRun = one.along === "x" ? curW : curD;
+  const curAcross = one.along === "x" ? curD : curW;
+  const runKey = one.along === "x" ? "width" : "depth";
+  const acrossKey = one.along === "x" ? "depth" : "width";
 
   const oneLane = diameter + rib;
   const pitch = diameter + rib / 2 + spacing;
-  const run = spansRun ? roomAlong : Math.min(roomAlong, Math.max(1, Math.ceil(length)));
-  const across = auto
-    ? roomAcross
-    : Math.min(roomAcross, Math.max(1, Math.ceil(oneLane + (count - 1) * pitch)));
+  const endMargin = Math.min(.45, Math.max(0,
+    number(one.options?.end_margin, state.draftResolvedOptions?.end_margin ?? 10) / 100));
+  const minimumRun = Math.max(1, Math.ceil(
+    alternating ? length / (1 - 2 * endMargin) : length,
+  ));
+  const minimumAcross = Math.max(1, Math.ceil(oneLane + (count - 1) * pitch));
+  const wantedRun = spansRun ? Math.max(roomAlong, minimumRun) : minimumRun;
+  const wantedAcross = auto ? roomAcross : minimumAcross;
+  // A hand-sized axis is a floor, never a target to overwrite. Requirements
+  // may still grow it. Do not clamp a required footprint to the current bin;
+  // the bin grower needs the real size in order to make enough room.
+  const run = state.pinnedZone[runKey] ? Math.max(curRun, minimumRun) : wantedRun;
+  const across = state.pinnedZone[acrossKey]
+    ? Math.max(curAcross, auto ? oneLane : minimumAcross)
+    : wantedAcross;
 
   const width = one.along === "x" ? run : across;
   const depth = one.along === "x" ? across : run;
@@ -1980,9 +2066,6 @@ function sizeCradleToItem(one) {
 function sizeBoreToGrid(one) {
   if (one.kind !== "bore") return;
   const opts = one.options || {};
-  const hasCols = Object.prototype.hasOwnProperty.call(opts, "columns");
-  const hasRows = Object.prototype.hasOwnProperty.call(opts, "rows");
-
   const resolved = state.draftResolvedOptions || {};
   const profile = one.item?.profile || "round";
   const hexBit = isHexBitProfile(profile);
@@ -1990,19 +2073,22 @@ function sizeBoreToGrid(one) {
     ? HEX_BIT_PROFILES[profile].diameter
     : number(one.item?.segments?.[0]?.diameter, 6);
   const held = diameter + 0.25;
-  const angle = hexBit ? 90 : Math.min(90, Math.max(15, number(opts.angle ?? resolved.angle, 90)));
+  const angle = hexBit ? 0 : Math.min(45, Math.max(0, number(opts.angle ?? resolved.angle, 0)));
   // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
   // Wall was hand-set - match that so the block sizing tracks the real pitch.
-  const wall = opts.wall !== undefined ? number(opts.wall) : (angle < 90 ? 3 : 1.6);
+  const wall = opts.wall !== undefined ? number(opts.wall) : (angle > 0 ? 3 : 1.6);
   const sides = profile === "round" ? 48 : profile === "square" ? 4 : 6;
   const holeRadius = held / 2 / (sides < 8 ? Math.cos(Math.PI / sides) : 1);
   const crossPitch = 2 * holeRadius + wall;
-  const leanPitch = crossPitch / Math.sin(angle * Math.PI / 180);
+  const leanPitch = crossPitch / Math.cos(angle * Math.PI / 180);
   if (!(crossPitch > 0) || !(leanPitch > 0)) return;
 
   const holeDepth = number(opts.depth ?? resolved.depth, 0);
-  const reach = angle < 90 ? holeDepth * Math.cos(angle * Math.PI / 180) : 0;
-  const along = one.along === "y" ? "y" : "x";
+  const reach = angle > 0 ? holeDepth * Math.sin(angle * Math.PI / 180) : 0;
+  const angleTowards = opts.angle_towards;
+  const along = ["left", "right"].includes(angleTowards) ? "x"
+    : ["front", "back"].includes(angleTowards) ? "y"
+    : one.along === "y" ? "y" : "x";
 
   const cx = (one.zone[0] + one.zone[2]) / 2;
   const cy = (one.zone[1] + one.zone[3]) / 2;
@@ -2013,18 +2099,15 @@ function sizeBoreToGrid(one) {
     const pitch = along === axis ? leanPitch : crossPitch;
     return Math.ceil(count * pitch + (along === axis ? reach : 0) - 1e-6);
   };
-  // For an explicit count: shrink to the grid (or only grow, if pinned). For
-  // "auto": keep whatever is drawn, but never below one hole and never past the
-  // bin wall - so a shrunk bin trims an auto grid back instead of erroring.
-  const resolveAxis = (has, countKey, cur, pinKey, leanAxis, inside) => {
-    if (has) {
-      const min = axisSpan(Math.max(1, Math.round(number(opts[countKey], 1))), leanAxis);
-      return state.pinnedZone[pinKey] ? Math.max(cur, min) : min;
-    }
-    return Math.min(Math.max(cur, axisSpan(1, leanAxis)), Math.max(inside, axisSpan(1, leanAxis)));
+  // An unset quantity means one hole, not “fill the existing Base.” Changing
+  // X/Y, hole diameter, Wall, depth, or lean grows the Base to its exact need.
+  const resolveAxis = (countKey, cur, pinKey, leanAxis) => {
+    const count = Math.max(1, Math.round(number(opts[countKey] ?? resolved[countKey], 1)));
+    const minimum = axisSpan(count, leanAxis);
+    return state.pinnedZone[pinKey] ? Math.max(cur, minimum) : minimum;
   };
-  const width = resolveAxis(hasCols, "columns", curW, "width", "x", insideX);
-  const depth = resolveAxis(hasRows, "rows", curD, "depth", "y", insideY);
+  const width = resolveAxis("columns", curW, "width", "x");
+  const depth = resolveAxis("rows", curD, "depth", "y");
   if (Math.abs(width - curW) < 0.05 && Math.abs(depth - curD) < 0.05) return;
 
   // Stay where the block already sits when it still fits; once an axis outgrows
@@ -2266,6 +2349,7 @@ function updateDraftFromFields(event) {
       item.clearance = preset.clearance;
       item.segments = [{ length: preset.length, diameter: preset.diameter }];
       delete one.options?.angle;   // a hex bit always stands straight up
+      delete one.options?.angle_towards;
     } else {
       // A cradle ignores fit slack entirely, so it has no clearance field -
       // keep the stored value at 0 rather than a stale 0.4 nothing reads.
@@ -2282,6 +2366,15 @@ function updateDraftFromFields(event) {
   }
   one.options ||= {};
   const changed = event?.currentTarget?.dataset?.draft || "";
+  if (one.kind === "cradle") {
+    delete one.options.floor_gap;
+    delete one.options.run_offset;
+  }
+  if (one.kind === "bore") {
+    const toward = get("option:angle_towards");
+    if (toward !== undefined) one.options.angle_towards = toward;
+    else delete one.options.angle_towards;
+  }
   if (one.kind === "nest") {
     for (const key of ["lift_assist", "finger_position", "push_position"]) {
       const value = get(`option:${key}`);
@@ -2339,7 +2432,7 @@ function updateDraftFromFields(event) {
   if (changed.startsWith("option:") &&
       !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom",
         "slope_base", "label_divisions", "division_level", "division_side", "division_labels",
-        "lift_assist", "finger_position", "push_position"]
+        "lift_assist", "finger_position", "push_position", "angle_towards"]
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
     const option = info.fields.find(entry => entry.key === key);
@@ -2350,6 +2443,11 @@ function updateDraftFromFields(event) {
         raw,
         one.options[key] ?? state.draftResolvedOptions?.[key] ?? number(option?.default),
       );
+      // Bore geometry stores lean away from vertical. The user sees the more
+      // natural absolute angle: 90 is straight up and down.
+      if (info.kind === "bore" && key === "angle") {
+        value = 90 - Math.min(90, Math.max(45, value));
+      }
       // A bore's grid counts are whole numbers.
       if (info.kind === "bore" && (key === "columns" || key === "rows")) {
         value = Math.max(1, Math.round(value));
@@ -2433,12 +2531,32 @@ function updateDraftFromFields(event) {
         if (depthField) { depthField.value = fmt(one.options.depth); flashField(depthField); }
       }
     }
+    if (info.kind === "slot" && key === "depth") {
+      // Slot depth has the same 2 mm floor rule as a Bore. Keep an automatic
+      // Height ahead of it instead of making the user repair an error.
+      const slotDepth = number(one.options.depth, 0);
+      const heightNow = number(one.options.height ?? state.draftResolvedOptions?.height, slotDepth + 2);
+      if (slotDepth > 0 && heightNow < slotDepth + 2) {
+        one.options.height = slotDepth + 2;
+        const heightField = $('[data-draft="option:height"]', $("#draft-fields"));
+        if (heightField) { heightField.value = fmt(one.options.height); flashField(heightField); }
+      }
+    }
+    if (info.kind === "slot" && key === "height") {
+      const height = number(one.options.height, 0);
+      const depthNow = number(one.options.depth ?? state.draftResolvedOptions?.depth, 0);
+      if (height > 2 && depthNow >= height - 2) {
+        one.options.depth = height - 2;
+        const depthField = $('[data-draft="option:depth"]', $("#draft-fields"));
+        if (depthField) { depthField.value = fmt(one.options.depth); flashField(depthField); }
+      }
+    }
     if (info.kind === "bore" && key === "angle" && !("wall" in (one.options || {}))) {
       // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL);
       // reflect that in the field right away when Wall hasn't been hand-set.
       const wallField = $('[data-draft="option:wall"]', $("#draft-fields"));
       if (wallField) {
-        const nextWall = number(one.options.angle, 90) < 90 ? "3" : "1.6";
+        const nextWall = number(one.options.angle, 0) > 0 ? "3" : "1.6";
         if (wallField.value !== nextWall) { wallField.value = nextWall; flashField(wallField); }
       }
     }
@@ -2459,7 +2577,8 @@ function updateDraftFromFields(event) {
     changed === "option:columns" || changed === "option:rows" ||
     changed === "option:depth" || changed === "option:wall" ||
     changed === "option:angle" || changed === "item_diameter" ||
-    changed === "clearance" || changed === "profile" || changed === "along"
+    changed === "clearance" || changed === "profile" || changed === "along" ||
+    changed === "option:angle_towards"
   )) sizeBoreToGrid(one);
   // The peg row and the slot bank track their own contents the same way the
   // bore base tracks its grid: change the count, peg size, gap, slot pitch or
@@ -2475,7 +2594,7 @@ function updateDraftFromFields(event) {
   // A hand-typed Base Width / Length pins that axis: from now on the contents
   // sizers only ever grow it to fit, never shrink or overwrite the number.
   if (info.flags.size && (changed === "width" || changed === "depth")) {
-    state.pinnedZone[changed] = true;
+    pinDraftAxis(changed, one);
     if (Number.isInteger(state.selected)) state.partZoneLocks[state.selected] = state.pinnedZone;
   }
   // Toggling Alternate ends swaps the field beneath Runs along between
@@ -2483,7 +2602,7 @@ function updateDraftFromFields(event) {
   if (changed === "alternate_ends") renderDraftFields();
   // Switching a bore's profile swaps which fields show (locked hex-bit size,
   // the Angle field for round/square only).
-  if (changed === "profile" && one.kind === "bore") renderDraftFields();
+  if ((changed === "profile" || changed === "option:angle") && one.kind === "bore") renderDraftFields();
   if (changed === "option:lift_assist" && one.kind === "nest") renderDraftFields();
   // Ticking Use support crossbars reveals (or hides) Number of crossbars.
   if (changed === "option:minimal_bottom") renderDraftFields();
@@ -2498,16 +2617,6 @@ function updateDraftFromFields(event) {
 }
 
 const refreshDraftSoon = debounce(refreshDraft, 220);
-
-// After the contents of a part shrink, pull an app-grown bin back in around
-// what is left - staying in the editor, quietly, and never past a size the
-// user typed (state.binAutoGrown). Debounced so a run of edits settles first.
-const tightenBinSoon = debounce(() => {
-  if (!state.binAutoGrown || state.autoGrowingBin || !state.draft) return;
-  state.autoGrowingBin = true;
-  Promise.resolve(autoExpandBin({ tighten: true, keepDraft: true, silent: true }))
-    .finally(() => { state.autoGrowingBin = false; });
-}, 500);
 
 async function refreshDraft() {
   if (!state.draft) return;
@@ -2550,9 +2659,10 @@ async function refreshDraft() {
     if (request !== state.draftRequest) return;
     state.draftResolvedOptions = result.resolved_options || {};
     const info = partInfo();
-    const autoHints = AUTO_PLACEHOLDER[info.kind] || {};
+    // The resolver now has the real item depth and lean. Re-size before saving
+    // so Base always reflects the actual hole grid, not a stale preview size.
+    if (info.kind === "bore") sizeBoreToGrid(state.draft);
     for (const option of info.fields) {
-      if (option.key in autoHints) continue; // stays blank with its placeholder, not a filled number
       if (Object.prototype.hasOwnProperty.call(state.draft.options || {}, option.key)) continue;
       const input = $(`[data-draft="option:${option.key}"]`, $("#draft-fields"));
       // Don't overwrite a field the user is still typing in - clearing it to
@@ -2560,18 +2670,25 @@ async function refreshDraft() {
       // back in mid-edit is exactly what makes a 16->20 change snap back to 16.
       if (input && input === document.activeElement) continue;
       if (input && Object.prototype.hasOwnProperty.call(state.draftResolvedOptions, option.key)) {
-        input.value = fmt(state.draftResolvedOptions[option.key]);
+        const value = state.draftResolvedOptions[option.key];
+        const next = fmt(info.kind === "bore" && option.key === "angle" ? 90 - number(value, 0) : value);
+        if (input.value !== next) {
+          input.value = next;
+          flashField(input);
+        }
+      }
+    }
+    if (info.flags.qty && state.draft.count == null) {
+      const input = $('[data-draft="count"]', $("#draft-fields"));
+      const next = String(resolvedDraftCount(state.draft));
+      if (input && input.value !== next) {
+        input.value = next;
+        flashField(input);
       }
     }
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
     if (state.draftAutoCommit) await autoCommitDraft(request);
-    // The draft now fits. If the bin was auto-grown earlier and the part has
-    // since shrunk, reclaim the slack.
-    if (state.binAutoGrown && !state.autoGrowingBin &&
-        ["bore", "post", "slot", "cradle"].includes(state.draft?.kind)) {
-      tightenBinSoon();
-    }
   } catch (error) {
     if (request !== state.draftRequest) return;
     // A part whose contents outgrew the bin: grow the bin around it instead of
@@ -2583,7 +2700,7 @@ async function refreshDraft() {
       "|the zone (only )?runs|mm long but the zone|layout area|does not fit in|overlap|tool reaches the side",
       "i",
     ).test(error.message || "");
-    const growKinds = new Set(["bore", "post", "slot", "cradle", "pocket"]);
+    const growKinds = new Set(["bore", "post", "slot", "cradle", "pocket", "steps"]);
     if (growKinds.has(state.draft?.kind) && outgrewBin && !state.autoGrowingBin) {
       state.autoGrowingBin = true;
       try {
@@ -2889,11 +3006,6 @@ async function deleteSupportAt(index) {
   } finally {
     finishDesignMutation();
   }
-  // Losing a part can leave an app-grown bin bigger than the rest now need -
-  // pull it back in. Quietly, and only when the bin size wasn't hand-set.
-  if (deleted && state.binAutoGrown && state.design.layout.features.length) {
-    await autoExpandBin({ tighten: true, silent: true });
-  }
 }
 
 function mutationControls() {
@@ -2948,8 +3060,8 @@ function updateSelectionButtons() {
   const busy = state.designMutationBusy;
   // The editor being open IS "editing mode" - set synchronously the moment a
   // part is picked, before its defaults have loaded. Collapse the palette to
-  // just that part and hide the placed list so the settings get the whole
-  // panel; back at the palette, all 10 types and the placed list return.
+  // just that part. Placed parts remain available in the preview for direct
+  // 2D editing.
   const editing = !$(".support-editor").hidden;
   $("#support-palette").classList.toggle("editing", editing);
   // Save / Delete Part ride in the top-right of the green part chip, shown
@@ -2958,7 +3070,7 @@ function updateSelectionButtons() {
   if (draftActions) draftActions.hidden = !editing;
   const placedBlock = $(".placed-block");
   if (placedBlock) {
-    placedBlock.hidden = editing || !state.design?.layout?.features?.length;
+    placedBlock.hidden = !state.design?.layout?.features?.length;
   }
   $("#save-part").disabled = busy || !state.draft;
   $("#delete-part").disabled = busy || !state.draft;
@@ -3006,7 +3118,11 @@ function renderPlaced() {
         <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this interior part" aria-label="Delete ${title}">✕</button>
       </div>`;
     }).join("");
-    $$(".placed-item-select", container).forEach(button => button.addEventListener("click", () => selectedFeature(Number(button.dataset.index))));
+    $$(".placed-item-select", container).forEach(button => button.addEventListener("click", async () => {
+      const index = Number(button.dataset.index);
+      await selectedFeature(index);
+      if (state.selected === index) activatePreviewView("2d");
+    }));
     $$(".placed-item-delete", container).forEach(button => button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
   }
   $("#support-count").textContent = `${features.length} placed`;
@@ -3223,15 +3339,16 @@ function fillPartToBin() {
   markDraftChanged();
   const [insideX, insideY] = binInsideExtent(state.design.box);
   state.draft.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
+  pinDraftAxis("width");
+  pinDraftAxis("depth");
+  if (Number.isInteger(state.selected)) state.partZoneLocks[state.selected] = state.pinnedZone;
   renderDraftFields();
   state.draftAutoCommit = true;
   updateSelectionButtons();
   refreshDraftSoon();
 }
 
-// Resize the bin to the minimum that holds every interior part. Options (all
-// off for a plain "Grow the bin" click):
-//   tighten   - also shrink the bin when it now has slack, not just grow it
+// Grow the bin to hold every interior part. Options:
 //   keepDraft - stay in the editor on the same part instead of closing it
 //   silent    - no toast
 async function autoExpandBin(event) {
@@ -3268,14 +3385,10 @@ async function autoExpandBin(event) {
     const result = await api("/api/layout/expand", {
       design,
       anchor,
-      tighten: !!opts.tighten,
-      ...(opts.tighten && state.binLocked.x ? { floor_x: state.design.box.x } : {}),
-      ...(opts.tighten && state.binLocked.y ? { floor_y: state.design.box.y } : {}),
     });
     const changed = result.changed ?? result.grew;
     state.design = result.design;
     if (changed) recordHistory(previousDesign);
-    if (result.grew) state.binAutoGrown = true;
     state.fitError = false;
     if (opts.keepDraft && state.draft) {
       // Keep editing the same part with whatever zone the resize settled on.
@@ -3310,6 +3423,16 @@ async function autoExpandBin(event) {
     finishDesignMutation();
   }
 }
+
+// A manually reduced bin never leaves existing parts invalid. The server grows
+// only when required, and autoExpandBin flashes each corrected axis.
+const enforceBinMinimumSoon = debounce(() => {
+  if (state.autoGrowingBin || state.designMutationBusy ||
+      !(state.draft || state.design?.layout?.features?.length)) return;
+  state.autoGrowingBin = true;
+  Promise.resolve(autoExpandBin({ keepDraft: true, silent: true }))
+    .finally(() => { state.autoGrowingBin = false; });
+}, 120);
 
 function kindColor(kind) {
   if (COLORS[kind]) return COLORS[kind];
@@ -4540,6 +4663,13 @@ function wireLayoutInteraction() {
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     if (typeof drag.index !== "number") return;   // not a feature drag - nothing to apply
     state.draft = drag.feature;
+    if (drag.mode === "resize" && drag.feature.kind !== "nest") {
+      // Resizing by the blue corner is just as intentional as typing Width or
+      // Length. Preserve both axes from later contents-driven auto fitting.
+      pinDraftAxis("width", drag.feature);
+      pinDraftAxis("depth", drag.feature);
+      state.partZoneLocks[drag.index] = state.pinnedZone;
+    }
     const applied = await applySupport(drag.index);
     if (!applied) {
       state.draft = clone(state.design.layout.features[drag.index]);
@@ -4684,6 +4814,7 @@ async function openDesign(event) {
     state.drafts = {};
     state.history = [];
     state.future = [];
+    state.binResizePending = false;
     syncForm();
     clearDraftSelection();
     await refreshPreview();
@@ -4702,6 +4833,7 @@ async function newDesign() {
   const previousDesign = clone(state.design);
   state.design = clone(state.catalog.defaults.design);
   state.cleanDesign = clone(state.design);
+  state.binResizePending = false;
   recordHistory(previousDesign);
   state.drafts = {};
   syncForm();
