@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-08 — Bore clearance automatic and Profile renamed to Shape
+
+- Removed manual clearance setting from bores; clearance defaults automatically to 0.25 mm so parts fit.
+- Renamed "Profile" setting label to "Shape".
+
 ## 2026-09-08 — Print button option for slicer, log buttons spaced, click-to-select folder
 
 - **Change slicer** is now styled directly on the right edge of the Print button as

@@ -12,6 +12,7 @@ from ._core import Feature, _fit_count, _need_item
 from ._registry import defaults, feature, resolved_options
 
 BORE_WALL = 1.6            # material around a bore
+BORE_CLEARANCE = 0.25      # automatic fit clearance on bore diameters
 HEX_BIT_FLATS = 6.35      # 1/4" hex driver bit, measured across the flats
 HEX_BIT_SHORT_LENGTH = 25.0  # a nominal 1" insert bit
 HEX_BIT_LONG_LENGTH = 38.0   # a nominal 1.5" power bit

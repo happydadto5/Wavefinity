@@ -44,6 +44,10 @@ const state = {
   // is only ever grown to fit the part's contents, never shrunk back or
   // overwritten - a manual size always wins. Reset whenever a fresh draft loads.
   pinnedZone: {},
+  // Session-only manual Base widths/lengths, keyed by placed-part index.
+  partZoneLocks: {},
+  // Width and Length remain independent when auto-tightening the bin.
+  binLocked: { x: false, y: false },
   // True while the bin is at a size the app grew it to (not one the user typed).
   // Only then does shrinking a part's contents pull the bin back in - a
   // hand-set bin size is left exactly as entered.
@@ -518,8 +522,6 @@ function updateDesignFromForm() {
   };
   const newBoxX = snapSize($("#x-size").value, design.box.x);
   const newBoxY = snapSize($("#y-size").value, design.box.y);
-  // A hand-typed bin size takes back control: the app stops auto-shrinking it.
-  if (newBoxX !== design.box.x || newBoxY !== design.box.y) state.binAutoGrown = false;
   design.box.x = newBoxX;
   design.box.y = newBoxY;
   const prevBoxZ = design.box.z;
@@ -683,6 +685,11 @@ function changedDesign(previousDesign = null) {
     pendingDesignHistory = clone(previousDesign);
   }
   applyChangedDesign();
+}
+
+function markBinAxisManual(axis) {
+  state.binLocked[axis] = true;
+  state.binAutoGrown = false;
 }
 
 let pendingNudgeHistory = null;
@@ -878,6 +885,7 @@ function wireControls() {
   ["#x-size", "#y-size"].forEach(selector => {
     const axis = selector === "#x-size" ? "x" : "y";
     const input = $(selector);
+    input.addEventListener("input", () => markBinAxisManual(axis));
     input.addEventListener("focus", () => {
       input.value = fmt(state.design.box[axis]);
       input.select();
@@ -888,6 +896,7 @@ function wireControls() {
       const rawVal = number(input.value, state.design.box[axis]);
       const snapped = Math.max(unit, Math.round(rawVal / unit) * unit);
       const prev = state.design.box[axis];
+      if (snapped !== prev) markBinAxisManual(axis);
       state.design.box[axis] = snapped;
       formatDimField(axis);
       if (snapped !== prev) {
@@ -907,6 +916,7 @@ function wireControls() {
         const current = number(input.value, state.design.box[axis]);
         const delta = event.key === "ArrowUp" ? unit : -unit;
         const next = Math.max(unit, Math.round((current + delta) / unit) * unit);
+        markBinAxisManual(axis);
         input.value = String(next);
         input.select();
         state.design.box[axis] = next;
@@ -923,6 +933,7 @@ function wireControls() {
       const delta = event.deltaY < 0 ? unit : -unit;
       const next = Math.max(unit, Math.round((current + delta) / unit) * unit);
       if (next === current && delta < 0) return;
+      markBinAxisManual(axis);
       state.design.box[axis] = next;
       if (document.activeElement === input) {
         input.value = String(next);
@@ -1067,7 +1078,7 @@ function cancelPendingDraftWork() {
 // and after New/Open/a delete/a mode switch with nothing selected. A
 // palette button never doubles as "still working on the last shape you
 // looked at": if none of them is highlighted, nothing has been added yet.
-function clearDraftSelection() {
+function clearDraftSelection(resetLocks = true) {
   // Opening, resetting, deleting or changing layout mode starts a new editing
   // context. Invalidate every in-flight draft operation so an old palette
   // response, fit, photo upload, or auto-save cannot alter the new design.
@@ -1079,6 +1090,7 @@ function clearDraftSelection() {
   state.draftSourceIndex = null;
   state.draftTouched = false;
   state.pinnedZone = {};
+  if (resetLocks) state.partZoneLocks = {};
   state.selected = null;
   state.nudgeFeedback = null;
   updateNudgeUI();
@@ -1195,9 +1207,7 @@ async function selectedFeature(index, force = false) {
   state.draftAutoCommit = true;
   state.draftIsNew = false;
   state.draftSourceIndex = index;
-  // Contents still auto-track on a re-opened part; only a hand-typed Base size
-  // pins an axis (see the width/depth handler in updateDraftFromFields).
-  state.pinnedZone = {};
+  state.pinnedZone = state.partZoneLocks[index] ||= {};
   state.draftResolvedOptions = {};
   state.draftKind = state.draft.kind;
   updateInteriorModeVisibility(true);
@@ -1244,7 +1254,7 @@ function toggle(key, title, help, on, options = {}) {
 // exact auto-computed value matters less than knowing what "blank" means.
 const AUTO_PLACEHOLDER = {
   divider: { height: "height of box", spacing: "fills evenly" },
-  bore: { columns: 1, rows: 1, height: "auto" },
+  bore: { columns: 1, rows: 1 },
   scoop: { depth: "60% of bin height" },
 };
 
@@ -2466,6 +2476,7 @@ function updateDraftFromFields(event) {
   // sizers only ever grow it to fit, never shrink or overwrite the number.
   if (info.flags.size && (changed === "width" || changed === "depth")) {
     state.pinnedZone[changed] = true;
+    if (Number.isInteger(state.selected)) state.partZoneLocks[state.selected] = state.pinnedZone;
   }
   // Toggling Alternate ends swaps the field beneath Runs along between
   // "% from end" and "Offset from center".
@@ -3253,8 +3264,13 @@ async function autoExpandBin(event) {
     const anchorIndex = draftIndex === null ? features.length - 1 : draftIndex;
     const anchor = features === layout.features ? undefined : anchorIndex;
     const previousDesign = clone(state.design);
+    const previousBox = { ...state.design.box };
     const result = await api("/api/layout/expand", {
-      design, anchor, tighten: !!opts.tighten,
+      design,
+      anchor,
+      tighten: !!opts.tighten,
+      ...(opts.tighten && state.binLocked.x ? { floor_x: state.design.box.x } : {}),
+      ...(opts.tighten && state.binLocked.y ? { floor_y: state.design.box.y } : {}),
     });
     const changed = result.changed ?? result.grew;
     state.design = result.design;
@@ -3275,11 +3291,13 @@ async function autoExpandBin(event) {
       updateSelectionButtons();
       await refreshPreview();
     } else {
-      clearDraftSelection();
+      clearDraftSelection(false);
       syncForm();
       updateAutoExpandButton();
       await refreshPreview();
     }
+    if (result.box.x !== previousBox.x) flashField($("#x-size"));
+    if (result.box.y !== previousBox.y) flashField($("#y-size"));
     if (!opts.silent && changed) {
       toast(`Bin resized to ${fmt(result.box.x)} × ${fmt(result.box.y)} mm.`);
     } else if (!opts.silent && !opts.keepDraft) {

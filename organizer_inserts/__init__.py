@@ -109,6 +109,7 @@ from ._nest import (
     nest_smoothed_contour,
 )
 from ._bore import (
+    BORE_CLEARANCE,
     BORE_MAX_TILT,
     BORE_MOUTH_CHAMFER,
     BORE_TILTED_WALL,
