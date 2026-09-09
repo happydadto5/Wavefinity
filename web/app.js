@@ -1927,7 +1927,7 @@ function sizeBoreToGrid(one) {
   const angle = hexBit ? 0 : Math.max(0, number(opts.angle ?? resolved.angle, 0));
   // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
   // Wall was hand-set - match that so the block sizing tracks the real pitch.
-  const wall = number(opts.wall ?? resolved.wall, angle > 0 ? 3 : 1.6);
+  const wall = opts.wall !== undefined ? number(opts.wall) : (angle > 0 ? 3 : 1.6);
   const sides = profile === "round" ? 48 : profile === "square" ? 4 : 6;
   const holeRadius = held / 2 / (sides < 8 ? Math.cos(Math.PI / sides) : 1);
   const crossPitch = 2 * holeRadius + wall;

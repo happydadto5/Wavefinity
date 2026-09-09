@@ -19,7 +19,7 @@ def post_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float]
 
 @feature("post")
 def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
-    """One or more lightly tapered pegs for rolls, spools, rings and sockets."""
+    """Lightly tapered pegs for rolls, spools, rings and sockets arranged in X and Y."""
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
     diameter = options["diameter"]
@@ -39,35 +39,44 @@ def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             "be non-negative, with taper smaller than the diameter"
         )
 
-    run = zone.width if spec_feature.along == "x" else zone.depth
-    across = zone.depth if spec_feature.along == "x" else zone.width
-    count = (spec_feature.count if spec_feature.count is not None
-             else _fit_count(run, diameter + spacing, diameter))
-    used = count * diameter + (count - 1) * spacing
-    if count < 1 or diameter > across + 1e-9 or used > run + 1e-9:
+    raw_cx = options.get("count_x")
+    raw_cy = options.get("count_y")
+    if raw_cx is not None or raw_cy is not None:
+        count_x = max(1, int(round(float(raw_cx)))) if raw_cx is not None else 1
+        count_y = max(1, int(round(float(raw_cy)))) if raw_cy is not None else 1
+    elif spec_feature.count is not None:
+        legacy_count = max(1, int(round(spec_feature.count)))
+        count_x = legacy_count if spec_feature.along == "x" else 1
+        count_y = 1 if spec_feature.along == "x" else legacy_count
+    else:
+        count_x = max(1, _fit_count(zone.width, diameter + spacing, diameter))
+        count_y = max(1, _fit_count(zone.depth, diameter + spacing, diameter))
+
+    used_x = count_x * diameter + (count_x - 1) * spacing
+    used_y = count_y * diameter + (count_y - 1) * spacing
+    if used_x > zone.width + 1e-9 or used_y > zone.depth + 1e-9:
         raise ValueError(
-            f"{count} posts need {used:.1f} x {diameter:.1f} mm but the zone "
-            f"gives {run:.1f} x {across:.1f} mm"
+            f"{count_x}x{count_y} posts need {used_x:.1f} x {used_y:.1f} mm but the zone "
+            f"gives {zone.width:.1f} x {zone.depth:.1f} mm"
         )
 
     centre_x, centre_y = zone.centre
-    first = -(count - 1) * (diameter + spacing) / 2.0
+    first_x = -(count_x - 1) * (diameter + spacing) / 2.0
+    first_y = -(count_y - 1) * (diameter + spacing) / 2.0
     posts = []
-    for index in range(count):
-        offset = first + index * (diameter + spacing)
-        post = trimesh.creation.revolve(
-            [
-                (0.0, 0.0),
-                (diameter / 2.0, 0.0),
-                ((diameter - taper) / 2.0, height),
-                (0.0, height),
-            ],
-            sections=48,
-        )
-        post.apply_translation(
-            (centre_x + offset, centre_y, base_z)
-            if spec_feature.along == "x"
-            else (centre_x, centre_y + offset, base_z)
-        )
-        posts.append(post)
+    for ix in range(count_x):
+        offset_x = first_x + ix * (diameter + spacing)
+        for iy in range(count_y):
+            offset_y = first_y + iy * (diameter + spacing)
+            post = trimesh.creation.revolve(
+                [
+                    (0.0, 0.0),
+                    (diameter / 2.0, 0.0),
+                    ((diameter - taper) / 2.0, height),
+                    (0.0, height),
+                ],
+                sections=48,
+            )
+            post.apply_translation((centre_x + offset_x, centre_y + offset_y, base_z))
+            posts.append(post)
     return posts
