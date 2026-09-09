@@ -40,9 +40,9 @@
             <label>Interior parts print as
               <select id="mode-select"></select>
             </label>
-            <label class="checkbox-row inline-option"><input id="standard-base" type="checkbox" checked><span>Standard base?</span></label>
+            <label class="checkbox-row inline-option"><span>Standard base?</span><input id="standard-base" type="checkbox" checked></label>
             <label id="base-thickness-setting" class="inline-number" hidden>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1"></label>
-            <label class="checkbox-row inline-option"><input id="easy-clean" type="checkbox"><span>Easy Clean</span></label>
+            <label class="checkbox-row inline-option"><span>Easy Clean?</span><input id="easy-clean" type="checkbox"></label>
             <label id="easy-clean-style-setting" class="inline-select" hidden>Clean Edge
               <select id="easy-clean-style">
                 <option value="bevel" selected>Bevel</option>
@@ -86,8 +86,8 @@
         <div class="section-heading no-toggle">
           <span>Connect bins</span>
           <label class="checkbox-row heading-check" for="different-height-bins">
-            <input id="different-height-bins" type="checkbox">
             <span>Different height bins?</span>
+            <input id="different-height-bins" type="checkbox">
           </label>
         </div>
         <div class="section-body">
@@ -95,7 +95,7 @@
             <label>Bin A <span class="unit">mm</span><input id="connector-bin-a-height" type="number" min="2" step="1"></label>
             <label>Bin B <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>
           </div>
-          <div class="field-grid three">
+          <div id="connector-settings" class="field-grid three" hidden>
             <label>Connector tolerance <span class="unit">mm</span><input id="connector-tolerance" type="number" min="0" max="1" step="0.01"></label>
             <label>Connector length <span class="unit">mm</span><input id="connector-length" type="number" min="2" step="0.1"></label>
             <label>Arm thickness <span class="unit">mm</span><input id="connector-arm-thickness" type="number" min="0.5" max="10" step="0.1"></label>
@@ -105,17 +105,22 @@
 
       <section class="output-panel">
         <div class="save-location-row">
-          <label for="output-folder">Save Location:</label>
-          <input id="output-folder" type="text">
-          <button type="button" class="button secondary" id="output-folder-picker">Browse</button>
-          <label class="keep-log-label" for="keep-log">
-            <input id="keep-log" type="checkbox" checked>
-            <span>Keep log</span>
-          </label>
-          <button type="button" id="show-log-button" class="button secondary" title="Show bins.md log file in WordPad">Show Log</button>
-          <button type="button" id="slicer-picker-button" class="link-button" title="Select custom Bambu Studio or OrcaSlicer executable">Change slicer</button>
+          <div class="save-location-group">
+            <label for="output-folder">Save Location:</label>
+            <input id="output-folder" type="text" readonly title="Click to select folder">
+          </div>
+          <div class="log-controls-group">
+            <label class="keep-log-label" for="keep-log">
+              <input id="keep-log" type="checkbox" checked>
+              <span>Keep log</span>
+            </label>
+            <button type="button" id="show-log-button" class="button secondary" title="Show bins.md log file in WordPad">Show Log</button>
+          </div>
         </div>
-        <button id="print-bin" class="button primary wide print-button">Print to Bambu Studio</button>
+        <div class="print-button-wrap">
+          <button id="print-bin" class="button primary wide print-button">Print to Bambu Studio</button>
+          <button type="button" id="slicer-picker-button" class="slicer-picker-button" title="Select custom Bambu Studio or OrcaSlicer executable">Change slicer</button>
+        </div>
         <div class="button-row equal generate-actions">
           <button id="generate-all" class="button secondary">Generate Bin and Connectors</button>
           <button id="generate-bin" class="button secondary">Generate Bin</button>

@@ -489,6 +489,8 @@ function autoAdjustConnectorFields() {
 function syncConnectorHeightControls() {
   const different = $("#different-height-bins").checked;
   $("#connector-bin-heights").hidden = !different;
+  const settingsEl = $("#connector-settings");
+  if (settingsEl) settingsEl.hidden = !different;
   autoAdjustConnectorFields();
 }
 
@@ -581,22 +583,28 @@ const saveOutputPreference = debounce(output => {
   api("/api/preferences", { output }).catch(() => {});
 }, 500);
 
+let isSelectingFolder = false;
 async function selectOutputFolder() {
+  if (isSelectingFolder) return;
+  isSelectingFolder = true;
+  const input = $("#output-folder");
   const button = $("#output-folder-picker");
-  const old = button.textContent;
-  button.disabled = true;
+  if (button) button.disabled = true;
+  if (input) input.style.pointerEvents = "none";
   try {
     const result = await api("/api/browse-output-folder", { current: state.output });
     if (result.folder) {
       state.output = result.folder;
-      $("#output-folder").value = result.folder;
+      if (input) input.value = result.folder;
       saveOutputPreference(result.folder);
       toast(`Selected: ${result.folder}`);
     }
   } catch (error) {
     toast(error.message, true);
   } finally {
-    button.disabled = false;
+    if (button) button.disabled = false;
+    if (input) input.style.pointerEvents = "";
+    isSelectingFolder = false;
   }
 }
 
@@ -953,7 +961,21 @@ function wireControls() {
     syncConnectorHeightControls();
     updateDesignFromForm();
   });
-  $("#output-folder-picker").addEventListener("click", selectOutputFolder);
+  const outputFolderEl = $("#output-folder");
+  if (outputFolderEl) {
+    outputFolderEl.addEventListener("click", selectOutputFolder);
+    outputFolderEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectOutputFolder();
+      }
+    });
+  }
+  $('label[for="output-folder"]')?.addEventListener("click", (e) => {
+    e.preventDefault();
+    selectOutputFolder();
+  });
+  $("#output-folder-picker")?.addEventListener("click", selectOutputFolder);
   $("#show-log-button")?.addEventListener("click", showLog);
 
   const viewTabs = $$(".view-tab");
@@ -1194,7 +1216,7 @@ function toggle(key, title, help, on, options = {}) {
 // exact auto-computed value matters less than knowing what "blank" means.
 const AUTO_PLACEHOLDER = {
   divider: { height: "height of box", spacing: "fills evenly" },
-  bore: { columns: "fills width", rows: "fills depth", height: "auto" },
+  bore: { columns: 1, rows: 1, height: "auto" },
   scoop: { depth: "60% of bin height" },
 };
 
@@ -1400,7 +1422,7 @@ function renderDraftFields() {
           ${clearanceField}
           ${optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
           ${optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
-          ${hexBit ? "" : optionField("angle", "Angle", { step: "1" })}
+          ${hexBit ? "" : optionField("angle", "Angle above horizontal", { step: "1", min: "15", max: "90" })}
         </div>
       </div>`;
     } else {
@@ -1938,18 +1960,18 @@ function sizeBoreToGrid(one) {
     ? HEX_BIT_PROFILES[profile].clearance
     : number(one.item?.clearance, 0.4);
   const held = diameter + clearance;
-  const angle = hexBit ? 0 : Math.max(0, number(opts.angle ?? resolved.angle, 0));
+  const angle = hexBit ? 90 : Math.min(90, Math.max(15, number(opts.angle ?? resolved.angle, 90)));
   // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
   // Wall was hand-set - match that so the block sizing tracks the real pitch.
-  const wall = opts.wall !== undefined ? number(opts.wall) : (angle > 0 ? 3 : 1.6);
+  const wall = opts.wall !== undefined ? number(opts.wall) : (angle < 90 ? 3 : 1.6);
   const sides = profile === "round" ? 48 : profile === "square" ? 4 : 6;
   const holeRadius = held / 2 / (sides < 8 ? Math.cos(Math.PI / sides) : 1);
   const crossPitch = 2 * holeRadius + wall;
-  const leanPitch = angle > 0 ? crossPitch / Math.cos(angle * Math.PI / 180) : crossPitch;
+  const leanPitch = crossPitch / Math.sin(angle * Math.PI / 180);
   if (!(crossPitch > 0) || !(leanPitch > 0)) return;
 
   const holeDepth = number(opts.depth ?? resolved.depth, 0);
-  const reach = angle > 0 ? holeDepth * Math.sin(angle * Math.PI / 180) : 0;
+  const reach = angle < 90 ? holeDepth * Math.cos(angle * Math.PI / 180) : 0;
   const along = one.along === "y" ? "y" : "x";
 
   const cx = (one.zone[0] + one.zone[2]) / 2;
@@ -2385,7 +2407,7 @@ function updateDraftFromFields(event) {
       // reflect that in the field right away when Wall hasn't been hand-set.
       const wallField = $('[data-draft="option:wall"]', $("#draft-fields"));
       if (wallField) {
-        const nextWall = number(one.options.angle, 0) > 0 ? "3" : "1.6";
+        const nextWall = number(one.options.angle, 90) < 90 ? "3" : "1.6";
         if (wallField.value !== nextWall) { wallField.value = nextWall; flashField(wallField); }
       }
     }
@@ -4899,14 +4921,19 @@ async function printModel(target = "bin") {
 
 function updateSlicerUI() {
   const printBtn = $("#print-bin");
+  const wrap = $(".print-button-wrap");
   if (!printBtn) return;
   const slicer = state.slicer || {};
   if (slicer.available) {
+    if (wrap) wrap.hidden = false;
     printBtn.hidden = false;
     printBtn.textContent = `Print to ${slicer.name || "Bambu Studio"}`;
     printBtn.title = `Send directly to ${slicer.name || "Bambu Studio"}`;
   } else {
-    printBtn.hidden = true;
+    if (wrap) wrap.hidden = false;
+    printBtn.hidden = false;
+    printBtn.textContent = `Print to ${slicer.name || "Bambu Studio"}`;
+    printBtn.title = "Bambu Studio is not installed - click 'Change slicer' to locate executable";
   }
 }
 

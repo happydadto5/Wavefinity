@@ -305,21 +305,53 @@ input[type="number"]::-webkit-inner-spin-button {
 .field-help { margin: 8px 0 13px; font-size: 11px; color: var(--muted); line-height: 1.45; }
 .field-error { margin: 6px 0 0; font-size: 11px; color: var(--danger); line-height: 1.4; }
 .output-panel { position: sticky; bottom: 0; z-index: 5; margin-top: 10px; padding: 16px 20px 20px; background: rgba(235,241,242,.97); border-top: 1px solid var(--line-dark); box-shadow: 0 -10px 24px rgba(30,51,61,.09); backdrop-filter: blur(8px); }
-.save-location-row { display: flex; align-items: center; gap: 8px; }
-.save-location-row > label:first-child { white-space: nowrap; font-size: 12px; font-weight: 650; margin: 0; flex-shrink: 0; }
-.save-location-row input[type="text"] {
+.save-location-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.save-location-group { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.save-location-group > label { white-space: nowrap; font-size: 12px; font-weight: 650; margin: 0; flex-shrink: 0; cursor: pointer; }
+.save-location-group input[type="text"] {
   margin-top: 0;
-  flex: 0.7;
+  flex: 1;
   min-width: 0;
   direction: rtl;
   text-align: left;
+  cursor: pointer;
+  background-color: #fff;
 }
-.save-location-row .button { flex-shrink: 0; padding: 9px 12px; }
+.save-location-group input[type="text"]:hover {
+  border-color: var(--teal);
+}
+.log-controls-group { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+.log-controls-group .button { flex-shrink: 0; padding: 9px 12px; }
 .keep-log-label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink); user-select: none; margin: 0; flex-shrink: 0; }
 .keep-log-label input[type="checkbox"] { margin: 0; cursor: pointer; accent-color: var(--teal); }
-.output-panel .print-button { margin-top: 10px; margin-bottom: 7px; display: flex; align-items: center; justify-content: center; gap: 7px; }
-.output-panel .print-button::before { content: "🖨️"; font-size: 14px; }
-.save-location-row #slicer-picker-button { flex-shrink: 0; font-size: 11.5px; white-space: nowrap; }
+.print-button-wrap { position: relative; display: flex; align-items: center; margin-top: 10px; margin-bottom: 7px; width: 100%; }
+.print-button-wrap .print-button { margin: 0; width: 100%; padding-right: 115px; display: flex; align-items: center; justify-content: center; gap: 7px; }
+.print-button-wrap .print-button::before { content: "🖨️"; font-size: 14px; }
+.print-button-wrap #slicer-picker-button {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: #ffffff;
+  border-radius: 5px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  cursor: pointer;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
+  z-index: 2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.print-button-wrap #slicer-picker-button:hover {
+  background: rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.7);
+  color: #ffffff;
+}
 .generate-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: nowrap; }
 .generate-actions .button {
   flex: 1 1 0;
