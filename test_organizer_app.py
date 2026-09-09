@@ -19,7 +19,10 @@ import trimesh
 from shapely.geometry import Point
 
 import organizer_app
+import organizer_engine
+import organizer_geometry
 import organizer_inserts
+from organizer_easy_clean import EasyCleanSettings, easy_clean_profile
 from organizer_engine import (
     BoxSpec,
     CORNER_INSET,
@@ -173,6 +176,18 @@ class BoxTests(unittest.TestCase):
         clean = make_box(BoxSpec(32.0, 32.0, 24.0, easy_clean=True))
         self.assertTrue(clean.is_watertight)
         self.assertGreater(clean.volume, plain.volume)
+
+    def test_easy_clean_profile_is_reusable_outside_the_box_container(self) -> None:
+        settings = EasyCleanSettings(radius=3.0, style="curve")
+        profile = easy_clean_profile(1.2, settings, 2.5)
+        self.assertEqual(profile[0], (-2.5, 1.2))
+        self.assertAlmostEqual(profile[-1][0], 3.0)
+        self.assertAlmostEqual(profile[-1][1], 1.2)
+
+    def test_engine_reexports_the_shared_geometry_helpers(self) -> None:
+        self.assertIs(organizer_engine.union, organizer_geometry.union)
+        self.assertIs(organizer_engine.difference, organizer_geometry.difference)
+        self.assertIs(organizer_engine._loft_cavity, organizer_geometry._loft_cavity)
 
     def test_easy_clean_straightens_then_smoothly_blends_into_the_wave(self) -> None:
         spec = BoxSpec(32.0, 32.0, 24.0, easy_clean=True)
@@ -1154,7 +1169,7 @@ class FloorLabelTests(unittest.TestCase):
 
     def test_the_label_never_goes_below_the_minimum_height(self) -> None:
         with self.assertRaisesRegex(ValueError, "will not fit"):
-            label_layout(BoxSpec(48.0, 48.0, 40.0), "Washers")
+            label_layout(BoxSpec(48.0, 48.0, 40.0), "LONG WASHERS")
         with self.assertRaisesRegex(ValueError, "will not fit"):
             label_layout(BoxSpec(16.0, 48.0, 40.0), "LONG WASHERS")
 

@@ -7,10 +7,10 @@ from shapely import affinity
 from shapely.geometry import Polygon
 from organizer_engine import BoxSpec, TEXT_CAP_HEIGHT_FLOOR, TEXT_CAP_HEIGHT_IDEAL, TEXT_DEPTH, text_outline, text_prism
 from ._core import EDITOR_SNAP, Feature, Zone, layout_zone, snapped_zone
-from ._registry import defaults, feature, resolved_options
-TEXT_KIND = "text"
-TEXT_ZONE_EPSILON = 0.01
-NON_NUMERIC_OPTIONS = {"text", "font", "raised", "auto", "quarter_turns"}
+from ._registry import (
+    OPTION_TYPES, OptionDefinition, SettingInteraction, defaults, feature,
+    option_value, register_setting_interactions, resolved_options,
+)
 #
 # Lettering is an interior part like any other: it owns a zone, it is dragged,
 # resized and turned in the same editor, and it keeps its neighbours out of its
@@ -28,36 +28,8 @@ TEXT_ZONE_EPSILON = 0.01     # glyph bounds land exactly on the zone; see _featu
 # them as such. Text brought the first that are not: what it says, and two
 # yes/no choices. Naming them here keeps that conversion honest instead of
 # letting it guess from the value it happens to receive.
-NON_NUMERIC_OPTIONS = {
-    "text": "string", "auto": "flag", "raised": "flag", "level": "string",
-    "lift_assist": "string", "finger_position": "string",
-    "push_position": "string",
-    # A divider's sloped-bottom yes/no choices - kept flags so a browser or
-    # API round-trip does not turn them into 0.0 / 1.0 floats.
-    "reverse_bottom": "flag", "alternate_bottom": "flag", "minimal_bottom": "flag",
-    "slope_base": "flag", "label_divisions": "flag", "division_level": "string",
-    "division_side": "string", "division_labels": "json",
-}
-
-
-def option_value(key: str, value: object) -> object:
-    """One option as its declared type, or a float like every other one."""
-    kind = NON_NUMERIC_OPTIONS.get(key)
-    if kind == "string":
-        return str(value)
-    if kind == "flag":
-        if isinstance(value, str):
-            return value.strip().lower() not in {"", "false", "0", "no", "off"}
-        return bool(value)
-    if kind == "json":
-        if isinstance(value, str):
-            import json
-            try:
-                return json.loads(value)
-            except Exception:
-                return [s.strip() for s in value.split(",") if s.strip()]
-        return value
-    return float(value)
+# Compatibility name for older callers; types now come from feature metadata.
+NON_NUMERIC_OPTIONS = OPTION_TYPES
 
 
 def is_text(one: Feature) -> bool:
@@ -153,7 +125,21 @@ def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     return resolved
 
 
-@feature(TEXT_KIND)
+@feature(
+    TEXT_KIND, title="Text", display="Text — a label on the floor",
+    description="Lettering sunk into the base floor or rim level as its own colour.",
+    capabilities=("size", "text"),
+    options=(
+        OptionDefinition("Letter height", "cap_height", ""),
+        OptionDefinition("Depth", "depth", "0.4"),
+        OptionDefinition("Text", "text", "", "string", False),
+        OptionDefinition("Font", "font", "", "string", False),
+        OptionDefinition("Stand proud", "raised", False, "boolean", False),
+        OptionDefinition("Place it for me", "auto", False, "boolean", False),
+        OptionDefinition("Quarter turns", "quarter_turns", 0, "integer", False),
+        OptionDefinition("Level", "level", "base", "enum", False),
+    ), order=100,
+)
 def build_text(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """The lettering solid, sunk into (or standing on) the surface at ``base_z``.
 
@@ -257,3 +243,21 @@ def auto_grow_text_feature(
             new_zone = Zone(one.zone.x0, cy - grow_d / 2.0, one.zone.x1, cy + grow_d / 2.0)
             return replace(one, zone=snapped_zone(new_zone, box, mode))
     return one
+
+
+register_setting_interactions(TEXT_KIND, (
+    SettingInteraction("text", "cap_height", "derived", "text-fit",
+                       "Automatic letter height is recalculated from the text and zone."),
+    SettingInteraction("quarter_turns", "cap_height", "derived", "text-fit",
+                       "Turning text changes which zone axis limits letter height."),
+    SettingInteraction("auto", "zone", "auto-adjust", "text-placement",
+                       "Auto text is placed in available floor space by one owner."),
+    SettingInteraction("cap_height", "auto", "reset", "text-editor",
+                       "A hand-entered letter height turns automatic placement off."),
+    SettingInteraction("zone", "auto", "reset", "text-editor",
+                       "Manual move or resize turns automatic placement off."),
+    SettingInteraction("level", "zone", "enable/disable", "text-editor",
+                       "Rim-level text has no draggable interior zone controls."),
+    SettingInteraction("level", "auto", "enable/disable", "text-editor",
+                       "Rim-level text does not use floor auto-placement."),
+))

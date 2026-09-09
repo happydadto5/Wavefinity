@@ -6,9 +6,16 @@ import trimesh
 from shapely import affinity
 from shapely.geometry import LineString, Point, Polygon, box as shapely_box
 from shapely.ops import unary_union
-from organizer_engine import BoxSpec, _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile, difference, union
+from organizer_engine import BoxSpec
+from organizer_geometry import (
+    _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile,
+    difference, union,
+)
 from ._core import Feature, Zone
-from ._registry import defaults, feature, resolved_options
+from ._registry import (
+    OptionDefinition, SettingInteraction, defaults, feature,
+    register_setting_interactions, resolved_options,
+)
 NEST_CHAMFER = 2.0
 NEST_TOP_ROUND = 1.0
 NEST_FINGER_WIDTH = 25.4
@@ -268,7 +275,25 @@ def _nest_push_support(
     return _nest_transform_mesh(deck, one)
 
 
-@feature("nest")
+@feature(
+    "nest", title="Snug Holder",
+    display="Snug Holder — A custom snug holder based on your photo",
+    description="A custom snug holder based on your photo.",
+    capabilities=("photo",),
+    options=(
+        OptionDefinition("Fit clearance", "clearance", "0.6"),
+        OptionDefinition("Soften outline", "smoothing", "0"),
+        OptionDefinition("Depth", "depth", "", editor=False),
+        OptionDefinition("Outline wall", "rim", "", editor=False),
+        OptionDefinition("Lift assist", "lift_assist", "finger_grasp", "enum", False),
+        OptionDefinition("Finger locations", "finger_position", "sides", "enum", False),
+        OptionDefinition("Finger width", "finger_width", "25.4", editor=False),
+        OptionDefinition("Push position", "push_position", "right", "enum", False),
+        OptionDefinition("Push area", "push_area", "30", editor=False),
+        OptionDefinition("Push depth", "push_depth", "4", editor=False),
+        OptionDefinition("Photo marker", "photo", False, "boolean", False),
+    ), order=20,
+)
 def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A finished wall that traces one photographed outline.
 
@@ -338,3 +363,25 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         )
         wall = union([wall, deck])
     return [wall]
+
+
+register_setting_interactions("nest", (
+    SettingInteraction("lift_assist", "finger_position", "enable/disable", "nest-editor",
+                       "Finger options are active only for Finger grasp."),
+    SettingInteraction("lift_assist", "finger_width", "enable/disable", "nest-editor",
+                       "Finger width is active only for Finger grasp."),
+    SettingInteraction("lift_assist", "push_position", "enable/disable", "nest-editor",
+                       "Push position is active only for Push Out."),
+    SettingInteraction("lift_assist", "push_area", "enable/disable", "nest-editor",
+                       "Push area is active only for Push Out."),
+    SettingInteraction("lift_assist", "push_depth", "enable/disable", "nest-editor",
+                       "Push depth is active only for Push Out."),
+    SettingInteraction("clearance", "zone", "auto-adjust", "nest-sizing",
+                       "Fit clearance grows the contour footprint without shrinking the bin."),
+    SettingInteraction("rim", "zone", "auto-adjust", "nest-sizing",
+                       "Outline wall grows the contour footprint."),
+    SettingInteraction("smoothing", "zone", "auto-adjust", "nest-sizing",
+                       "Outline smoothing recalculates the fitted contour bounds."),
+    SettingInteraction("push_depth", "height", "constraint", "nest",
+                       "Push Out adds its deck depth to the required wall height."),
+))

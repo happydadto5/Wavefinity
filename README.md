@@ -743,40 +743,56 @@ really do interlock and take a clip at every seam.
 
 ## Code layout
 
-Four live Python modules and three test modules. Nothing here is legacy or
-superseded — the old Tkinter desktop UI was fully removed once the browser
-replaced it:
+The old Tkinter desktop UI is gone. The browser, CLI, and exporters share this
+layered implementation:
 
 | File | Role | Entry point? |
 |---|---|---|
-| `organizer_engine.py` | Wavy boxes, connectors, glyph outlines and the text-to-solid core, mesh validation and 3MF/STL export. | No. |
-| `organizer_inserts.py` | Item/segment model, zones, 1 mm and cartridge layouts, JSON persistence, holder registry, nine builders, and fused/removable assembly. | No. |
-| `organizer_app.py` | CLI, exporters, validation and the catalog/defaults the browser service reads. | Yes, for CLI subcommands. |
+| `organizer_geometry.py` | Feature-neutral booleans, extrusion, sweep, ring alignment and loft helpers. | No. |
+| `organizer_easy_clean.py` | Reusable Easy Clean settings, validation and floor-to-wall profile math. | No. |
+| `organizer_engine.py` | Wavy boxes, connectors, labels, mesh validation and 3MF/STL export. It re-exports established geometry helper names for compatibility. | No. |
+| `organizer_inserts/` | Item/layout model, authoritative feature registry, per-feature builders, Divider compartments, and fused/removable assembly. | No. |
+| `organizer_app.py` | CLI, exporters and design persistence. Legacy palette constants are generated from the feature registry. | Yes, for CLI subcommands. |
 | `wavefinity_web.py` | The local HTTP service — see [The browser service](#the-browser-service). | Yes, the default UI launch target. |
 | `test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest`. |
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
 | `test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest`. |
 
-`web/index.html`, `web/styles.css` and `web/app.js` are the browser front
-end: plain HTML/CSS and dependency-free JavaScript, no build step. `app.js`
-holds all client state and API calls; it never computes geometry itself —
-every preview, validation and export result comes from a `wavefinity_web.py`
-call into the same engine the CLI uses.
+`web/index.html`, `web/styles.css`, `web/feature-icons.js` and `web/app.js` are
+plain dependency-free frontend files with no build step. Icon artwork lives in
+`feature-icons.js`; the feature registry supplies stable icon identifiers.
+`app.js` holds the stateful editor and preview coordination, while all printable
+geometry still comes from the Python service.
 
 `TESTING.md` was the historical test log, now moved to the untracked `archive/`
 folder. We no longer maintain or keep this testing log updated.
 
-Dependencies run one way: the insert module imports the geometry engine, the
-app imports both, and the web service imports all three. Nothing is imported
-back the other way.
+Dependencies run one way: shared geometry and Easy Clean math sit at the bottom;
+the engine and insert package consume them; the app consumes both; the web
+service consumes the app. Nothing imports back upward.
 
 Two things worth knowing before tidying anything up:
 
 - The `*Tests` classes look unreferenced, because
   nothing calls them by name - `unittest` discovers them. They are not dead.
 - Registered holder builders look unreferenced because the registry calls them.
-  A new holder is one `@feature("name")` function; removing it is deleting that
-  function. Check the tests before deleting apparently orphaned definitions.
+  Check the tests before deleting apparently orphaned definitions.
+
+### Adding or changing an interior feature
+
+1. Keep its builder, defaults, automatic-setting declarations and
+   `@feature(...)` metadata in its `organizer_inserts/_*.py` module.
+2. Put every option's type in an `OptionDefinition`; do not add another parser
+   list in the browser or app.
+3. Declare automatic source/target/effect/owner/reason relationships with
+   `register_setting_interactions()` and keep one owner for each automatic result.
+4. Reuse `organizer_geometry.py` operations and existing capability modules;
+   do not copy profile or boolean math into a feature.
+5. Give new artwork an icon identifier in feature metadata and place the SVG
+   fragment in `web/feature-icons.js`.
+
+`Make_Wave_Zip.bat` creates `wave.zip` with repository-relative entry names, so
+package folders such as `organizer_inserts/` remain intact after extraction.
 
 Non-Python files:
 
@@ -993,10 +1009,9 @@ Both were stated as done and later found false. Tests now exist for each.
   part arrives on layer 0, under the floor's own layer 1. Without lifting it the
   lettering is painted over and renders nothing at all. No Python test can see
   this; it was found by reading pixels out of the real canvas.
-- **The browser layer converts every builder option to a float.** Text brought
-  the first options that are not numbers, so `NON_NUMERIC_OPTIONS` in
-  `organizer_inserts.py` declares them and `option_value` does the conversion.
-  Add a non-numeric option anywhere and it must be declared there too.
+- **Option types come from feature metadata.** `OptionDefinition.value_type`
+  drives browser/API coercion for numbers, whole numbers, booleans, enums,
+  strings and nested JSON. Do not maintain a second key-based type list.
 - **A tall feature at the wall can block a connector even when the 2D zones are
   valid.** Builders check the 2 mm edge strip against the connector-arm bottom;
   the default divider stops exactly at that safe height.

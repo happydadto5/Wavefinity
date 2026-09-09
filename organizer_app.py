@@ -77,6 +77,7 @@ from organizer_inserts import (
     build_texts,
     connector_keep_out,
     feature_footprint,
+    feature_definitions,
     insert_footprint,
     insert_report,
     is_text,
@@ -88,6 +89,7 @@ from organizer_inserts import (
     make_fused_box,
     fitted_nest_feature,
     make_insert_plate,
+    normalize_divider_scoop,
     resolve_text_features,
     snapped_zone,
     scoop_zone,
@@ -102,52 +104,13 @@ from organizer_inserts import (
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_SAMPLE_BOXES = "2x6,4x6,6x6"   # 16x48, 32x48, 48x48 mm
 
+_FEATURE_DEFINITIONS = feature_definitions()
 INTERIOR_PART_CATALOG = {
-    "cradle": (
-        "Cradle — tools laid down",
-        "A half-circle notch that holds a screwdriver, marker or other tool on its side.",
-    ),
-    "nest": (
-        "Snug Holder — A custom snug holder based on your photo",
-        "A custom snug holder based on your photo.",
-    ),
-    "bore": (
-        "Bore — upright tools",
-        "Snug round, hex or square holes for nozzles, drivers and small tools.",
-    ),
-    "post": (
-        "Center post — rolls and rings",
-        "A lightly tapered peg for tape rolls, spools, sockets and ring-shaped parts.",
-    ),
-    "pocket": (
-        "Pocket — loose small parts",
-        "A raised tray for fasteners, adapters and other loose pieces.",
-    ),
-    "divider": (
-        "Divider — split the bin",
-        "A straight wall that divides the usable floor into compartments.",
-    ),
-    "slot": (
-        "Slot Rack — tilted tools",
-        "Angled slots for driver bits, cards, and small tools.",
-    ),
-    "steps": (
-        "Steps — tiered riser",
-        "Stepped shelves rising from front to back.",
-    ),
-    "scoop": (
-        "Curved Scoop — retrieval ramp",
-        "A curved ramp rising up the wall for easy access to small parts.",
-    ),
-    TEXT_KIND: (
-        "Text — a label on the floor",
-        "Lettering sunk flush into the floor as its own colour.",
-    ),
+    definition.kind: (definition.display, definition.description)
+    for definition in _FEATURE_DEFINITIONS
 }
-INTERIOR_PART_ORDER = (
-    "cradle", "nest", "bore", "post", "pocket", "divider", "slot", "steps",
-    "scoop",
-    TEXT_KIND,
+INTERIOR_PART_ORDER = tuple(
+    definition.kind for definition in _FEATURE_DEFINITIONS
 )
 # The rim label is the one piece of lettering that is not an interior part: it
 # lives on a shelf at the rear rim, not on the floor, so it has no zone to
@@ -165,57 +128,20 @@ def label_position(value: str) -> str:
 
 # --- guided part palette ---------------------------------------------------
 #
-# Each entry drives the visual "pick a shape, then set its parameters" editor.
-# ``flags`` say which of the shared controls (quantity / footprint / run axis /
-# stored-item description) apply; ``fields`` are the parameters unique to that
-# shape, as (label, builder-option key, default-or-blank).  A blank default
-# means "let the builder choose".
-PART_KINDS = (
-    ("divider", "Divider", "A straight wall that splits the floor into compartments.",
-     {"qty": True, "size": False, "along": True, "item": False, "lean": False},
-     (("Width", "thickness", "1.6"), ("Height", "height", ""),
-      ("Spacing", "spacing", ""),
-      ("Degree °", "bottom_angle", "0"),
-      ("Number of crossbars", "bottom_supports", "3"))),
-    ("post", "Post", "A tapered peg for tape rolls, spools, sockets and rings.",
-     {"qty": True, "size": False, "along": True, "item": False, "lean": False},
-     (("Height", "height", "16"), ("Diameter", "diameter", "12"),
-      ("Taper", "taper", "0.4"), ("Spacing", "spacing", "4"))),
-    ("pocket", "Pocket", "A raised open tray for loose small parts.",
-     {"qty": False, "size": True, "along": False, "item": False, "lean": False},
-     (("Height", "height", "12"), ("Wall", "wall", "1.6"),
-      ("Recess", "depth", ""))),
-    ("bore", "Bore", "A block of snug upright holes for tools stood on end.",
-     {"qty": False, "size": True, "along": True, "item": True, "lean": False},
-     (("Height", "height", ""), ("Hole depth", "depth", ""),
-      ("Wall", "wall", "1.6"), ("X quantity", "columns", ""),
-      ("Y quantity", "rows", ""), ("Angle °", "angle", "0"))),
-    ("cradle", "Cradle", "A half-circle notch that holds a tool on its side.",
-     {"qty": True, "size": False, "along": True, "item": True, "lean": False,
-      "alternate": True},
-     (("Spacing", "spacing", "0"), ("Floor gap", "floor_gap", "2"),
-      ("% from ends", "end_margin", "10"))),
-    ("nest", "Snug Holder", "A custom snug holder based on your photo.",
-     {"qty": False, "size": False, "along": False, "item": False, "lean": False,
-      "alternate": False, "photo": True},
-     (("Fit clearance", "clearance", "0.6"),
-      ("Soften outline", "smoothing", "0"))),
-    ("slot", "Slot Rack", "Angled slots for driver bits, cards, and small tools.",
-     {"qty": True, "size": True, "along": True, "item": False, "lean": False},
-     (("Height", "height", ""), ("Depth", "depth", ""),
-      ("Thickness", "thickness", "4"), ("Angle °", "angle", "20"),
-      ("Wall", "wall", "1.6"))),
-    ("steps", "Steps", "Stepped shelves rising from front to back.",
-     {"qty": True, "size": True, "along": True, "item": False, "lean": False},
-     (("Height", "height", ""), ("Lip", "lip", "1"))),
-    ("scoop", "Curved Scoop", "A curved retrieval ramp for easy access to small parts.",
-     {"qty": False, "size": False, "along": False, "item": False, "lean": False},
-     (("Depth", "depth", "60"),)),
-    (TEXT_KIND, "Text",
-     "Lettering sunk into the base floor or rim level as its own colour.",
-     {"qty": False, "size": True, "along": False, "item": False, "lean": False,
-      "text": True},
-     (("Letter height", "cap_height", ""), ("Depth", "depth", "0.4"))),
+# Compatibility views for existing CLI/browser callers. Their source of truth
+# is the feature-local registry populated by each feature module.
+PART_KINDS = tuple(
+    (
+        definition.kind,
+        definition.title,
+        definition.description,
+        definition.flags,
+        tuple(
+            (option.label, option.key, option.default)
+            for option in definition.options if option.editor
+        ),
+    )
+    for definition in _FEATURE_DEFINITIONS
 )
 PART_KIND_INFO = {
     kind: (title, blurb, flags, fields)
@@ -1470,6 +1396,10 @@ def default_feature(
         # the bin's whole other axis too - room for count > 1 to divide the
         # bin evenly without the user having to widen it by hand first.
         width, depth = bounds.width, bounds.depth
+        # New Dividers are grids: start with one wall on each axis. Older saved
+        # Dividers have neither key and continue through the legacy one-axis
+        # path in divider_defaults().
+        feature_options = {"count_x": 1, "count_y": 1}
     elif kind == "post":
         # A one-cell-wide cartridge cannot hold the normal 12 mm starter peg.
         # Size the starter diameter to both axes, then give it as much of the
@@ -1634,6 +1564,12 @@ def design_from_dict(
         easy_clean_style=easy_clean_style,
     )
     layout = layout_from_dict(data.get("layout", {}))
+    base_z = base_height(box, layout.mode)
+    layout = replace(layout, features=tuple(
+        normalize_divider_scoop(box, one, base_z)
+        if one.kind == "divider" else one
+        for one in layout.features
+    ))
     label = str(data.get("label", ""))
     location = label_position(data.get("label_position", "bottom"))
     scoop = bool(data.get("scoop", False))

@@ -63,6 +63,10 @@ from organizer_inserts import (
     auto_grow_text_feature,
     build_features,
     cradle_min_footprint,
+    divider_cells,
+    divider_scoop_targets,
+    feature_definition,
+    feature_definitions,
     feature_min_footprint,
     fitted_nest_feature,
     nest_contour_polygon,
@@ -73,10 +77,12 @@ from organizer_inserts import (
     moved_feature,
     occupied_zones,
     option_value,
+    normalize_divider_scoop,
     resized_feature,
     scoop_zone,
     resolve_text_features,
     resolved_options,
+    setting_interactions,
     snapped_zone,
     text_of,
 )
@@ -84,9 +90,6 @@ from photo_nest import photo_outline_from_data
 from organizer_app import (
     APP_DIR,
     DEFAULT_SAMPLE_BOXES,
-    PART_KINDS,
-    INTERIOR_PART_CATALOG,
-    INTERIOR_PART_ORDER,
     _customization_zones,
     _mesh_preview_geometry,
     base_height,
@@ -187,7 +190,7 @@ def _item_from_json(raw: dict[str, Any] | None) -> Item | None:
 def _feature_from_json(raw: dict[str, Any], mode: str) -> Feature:
     data = dict(raw)
     options = {
-        str(key): option_value(str(key), value)
+        str(key): option_value(str(key), value, str(data.get("kind", "")))
         for key, value in dict(data.get("options", {})).items()
         if str(value).strip() != ""
     }
@@ -336,22 +339,31 @@ def _first_open_position(
 
 
 def catalog_payload() -> dict[str, Any]:
-    parts = []
-    indexed = {kind: (title, blurb, flags, fields)
-               for kind, title, blurb, flags, fields in PART_KINDS}
-    for kind in INTERIOR_PART_ORDER:
-        title, blurb, flags, fields = indexed[kind]
-        parts.append({
-            "kind": kind,
-            "title": title,
-            "display": INTERIOR_PART_CATALOG[kind][0],
-            "description": blurb,
-            "flags": flags,
+    parts = [
+        {
+            "kind": definition.kind,
+            "title": definition.title,
+            "display": definition.display,
+            "description": definition.description,
+            "icon": definition.icon,
+            "flags": definition.flags,
             "fields": [
-                {"label": label, "key": key, "default": default}
-                for label, key, default in fields
+                {
+                    "label": option.label,
+                    "key": option.key,
+                    "default": option.default,
+                    "type": option.value_type,
+                }
+                for option in definition.options if option.editor
             ],
-        })
+            "options": [
+                {"key": option.key, "type": option.value_type}
+                for option in definition.options
+            ],
+            "capabilities": list(definition.capabilities),
+        }
+        for definition in feature_definitions()
+    ]
     return {
         "version": SERVER_VERSION,
         "instance": SERVER_INSTANCE,
@@ -361,6 +373,18 @@ def catalog_payload() -> dict[str, Any]:
             {"value": "separate", "label": "Removable insert"},
         ],
         "parts": parts,
+        "setting_interactions": [
+            {
+                "feature": definition.kind,
+                "source": rule.source,
+                "target": rule.target,
+                "effect": rule.effect,
+                "owner": rule.owner,
+                "reason": rule.reason,
+            }
+            for definition in feature_definitions()
+            for rule in setting_interactions(definition.kind)
+        ],
         "defaults": {
             "design": default_design(),
             "output": str(DEFAULT_OUTPUT),
@@ -779,11 +803,12 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, *_ = _design(payload["design"])
     kind = str(payload["kind"])
-    indexed = {entry[0]: entry for entry in PART_KINDS}
-    if kind not in indexed:
+    try:
+        definition = feature_definition(kind)
+    except KeyError:
         raise ValueError(f"unknown interior part {kind!r}")
-    flags = indexed[kind][3]
-    item = _item_from_json(payload.get("item")) if flags["item"] else None
+    item = (_item_from_json(payload.get("item"))
+            if definition.flags["item"] else None)
     one = default_feature(
         box,
         kind,
@@ -794,17 +819,41 @@ def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # Defaults are values to display, not values the user explicitly chose.
     # Keeping them out of ``one.options`` preserves the builder's dependency
     # cascade: for example, a pocket depth continues to follow an edited height.
-    return {
+    result = {
         "feature": feature_to_dict(one, layout.mode),
         "resolved_options": resolved_options(
             box, one, base_height(box, layout.mode)
         ),
     }
+    if one.kind == "divider":
+        result["divider_cells"] = _divider_cells_payload(box, one, layout.mode)
+    return result
+
+
+def _divider_cells_payload(
+    box: BoxSpec, one: Feature, mode: str
+) -> list[dict[str, Any]]:
+    base_z = base_height(box, mode)
+    selected = set(divider_scoop_targets(box, one, base_z))
+    return [
+        {
+            "id": cell.identity,
+            "row": cell.row,
+            "column": cell.column,
+            "zone": [cell.zone.x0, cell.zone.y0, cell.zone.x1, cell.zone.y1],
+            "scoop": cell.identity in selected,
+        }
+        for cell in divider_cells(box, one, base_z)
+    ]
 
 
 def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, _part, label_location, scoop = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
+    if one.kind == "divider":
+        one = normalize_divider_scoop(
+            box, one, base_height(box, layout.mode)
+        )
     if one.kind == "text" and one.options.get("level") == "rim":
         geometry = []
         tidy = clean_label(text_of(one))
@@ -850,7 +899,7 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     part_kind = "feature" if layout.mode == "fused" else "insert"
     for solid in solids:
         geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_{one.kind}"))
-    return {
+    result = {
         "geometry": [
             {"points": points, "kind": kind, "normal": normal, "layer": layer}
             for points, kind, normal, layer in geometry
@@ -858,6 +907,9 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "feature": feature_to_dict(one, layout.mode),
         "resolved_options": shown,
     }
+    if one.kind == "divider":
+        result["divider_cells"] = _divider_cells_payload(box, one, layout.mode)
+    return result
 
 
 def feature_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -888,6 +940,10 @@ def feature_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
+    if one.kind == "divider":
+        one = normalize_divider_scoop(
+            box, one, base_height(box, layout.mode)
+        )
     if one.kind == "nest":
         if not one.contour:
             raise ValueError("upload a part photo before adding a Snug Holder")

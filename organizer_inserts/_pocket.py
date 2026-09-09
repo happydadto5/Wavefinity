@@ -7,10 +7,14 @@ import math
 import trimesh
 from shapely.geometry import Polygon
 
-from organizer_engine import BoxSpec, _extrude_polygon, difference, union
+from organizer_engine import BoxSpec
+from organizer_geometry import _extrude_polygon, difference, union
 
 from ._core import Feature
-from ._registry import defaults, feature, resolved_options
+from ._registry import (
+    OptionDefinition, SettingInteraction, defaults, feature,
+    register_setting_interactions, resolved_options,
+)
 
 
 POCKET_CHAMFER = 0.5       # 45-degree chamfer on pocket outside edges for strength
@@ -38,7 +42,17 @@ def pocket_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, floa
     }
 
 
-@feature("pocket")
+@feature(
+    "pocket", title="Pocket", display="Pocket — loose small parts",
+    description="A raised open tray for loose small parts.",
+    capabilities=("size",),
+    options=(
+        OptionDefinition("Height", "height", "12"),
+        OptionDefinition("Wall", "wall", "1.6"),
+        OptionDefinition("Recess", "depth", ""),
+        OptionDefinition("Rounding", "rounding", "", editor=False),
+    ), order=50,
+)
 def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A raised block with a rectangular recess in it, chamfered on outside edges for strength."""
     zone = spec_feature.zone
@@ -104,3 +118,15 @@ def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     inner = union(cavity_parts) if len(cavity_parts) > 1 else col
     pocket = difference([outer_solid, inner])
     return [pocket]
+
+
+register_setting_interactions("pocket", (
+    SettingInteraction("depth", "height", "constraint", "pocket-shell",
+                       "A user-edited Recess wins and raises Height to keep a 2 mm floor."),
+    SettingInteraction("height", "depth", "constraint", "pocket-shell",
+                       "A user-edited Height wins and lowers Recess to keep a 2 mm floor."),
+    SettingInteraction("wall", "zone", "auto-adjust", "pocket-sizing",
+                       "Wall changes preserve entered inside size by resizing the outside zone."),
+    SettingInteraction("zone", "rounding", "default", "pocket",
+                       "Automatic rounding follows the smaller pocket side and wall."),
+))

@@ -6,12 +6,33 @@ import trimesh
 from shapely import affinity
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 from organizer_engine import (
-    BoxSpec, WAVE_AMPLITUDE, _extrude_polygon, _extrude_xz_profile,
-    _extrude_yz_profile, _rounded, difference, flat_cavity_polygon, intersection,
-    text_outline, text_prism, union, wavy_cavity_polygon,
+    BoxSpec, TOP_LABEL_CAP_HEIGHT, TOP_LABEL_LEDGE_DEPTH, TOP_LABEL_MARGIN,
+    WAVE_AMPLITUDE, _rounded, flat_cavity_polygon, text_outline, text_prism,
+    wavy_cavity_polygon, build_scoop_region,
+)
+from organizer_geometry import (
+    _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile,
+    difference, intersection, union,
 )
 from ._core import Feature, Zone, connector_keep_out
-from ._registry import defaults, feature, resolved_options
+from ._divider_cells import (
+    DividerCell,
+    _divider_cross_centres,
+    _even_centres,
+    divider_cells,
+    divider_grid_counts,
+    divider_scoop_targets,
+    normalize_divider_scoop,
+)
+from ._registry import (
+    OptionDefinition,
+    SettingInteraction,
+    defaults,
+    feature,
+    register_setting_interactions,
+    resolved_options,
+)
+from ._scoop import scoop_region, scoop_settings
 MAX_DIVIDER_ANGLE = 45.0
 MIN_WEDGE_EDGE = 0.4
 DIVIDER_CHAMFER = 1.0
@@ -25,12 +46,13 @@ DIVISION_TEXT_DEPTH = 0.6
 # same self-supporting ledge the box's own rim label uses: flat top at the
 # divider height, a 45-degree underside so it prints without support, and the
 # lettering inlaid flush for its own filament colour.
-DIVISION_SHELF_DEPTH = 7.0
+DIVISION_SHELF_DEPTH = TOP_LABEL_LEDGE_DEPTH
 DIVISION_SHELF_EMBED = 0.6
-DIVISION_SHELF_TEXT_MARGIN = 1.5
-DIVISION_CAP_MAX = 5.0            # matches the box rim label's fixed letters
+DIVISION_SHELF_TEXT_MARGIN = TOP_LABEL_MARGIN
+DIVISION_CAP_MAX = TOP_LABEL_CAP_HEIGHT
 DIVISION_CAP_MIN = 2.5
-DIVISION_SIDES = ("left", "right", "top", "bottom")
+
+
 @defaults("divider")
 def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     zone = one.zone
@@ -71,49 +93,62 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
     }
 
 
-def divider_grid_counts(options: dict) -> tuple[int, int]:
-    """``(walls across X, walls across Y)`` for a grid divider.
-
-    ``(0, 0)`` means this is a legacy single-direction divider laid out from
-    ``along``/``count`` instead - see ``build_divider``.
-    """
-    def one(value: object) -> int:
-        if value in (None, ""):
-            return 0
-        try:
-            return max(0, int(round(float(value))))
-        except (TypeError, ValueError):
-            return 0
-    return one(options.get("count_x")), one(options.get("count_y"))
-
-
-def _even_centres(lo: float, hi: float, count: int) -> list[float]:
-    """``count`` fence-post positions evenly filling ``lo``..``hi``."""
-    if count < 1:
+def _divider_scoops(
+    box: BoxSpec, spec_feature: Feature, base_z: float
+) -> list[trimesh.Trimesh]:
+    """Compose the shared Scoop profile into every Divider cell when enabled."""
+    config = spec_feature.options.get("scoop")
+    targets = divider_scoop_targets(box, spec_feature, base_z)
+    if not isinstance(config, dict) or not targets:
         return []
-    gap = (hi - lo) / (count + 1)
-    return [lo + (index + 1) * gap for index in range(count)]
+    settings = scoop_settings(box, config, base_z, allow_legacy_height=False)
+    by_identity = {
+        cell.identity: cell for cell in divider_cells(box, spec_feature, base_z)
+    }
+    solids = []
+    for identity in targets:
+        region = scoop_region(by_identity[identity].zone, settings, "x")
+        solids.append(build_scoop_region(
+            (region.x0, region.y0, region.x1, region.y1),
+            base_z, settings.height, "x",
+        ))
+    return solids
 
 
-def _divider_cross_centres(zone: Zone, along: str, count: int, spacing: float) -> list[float]:
-    """``count`` positions, ``spacing`` apart, starting ``spacing`` in from
-    the zone's low edge on its cross axis - the same fence-post arrangement
-    ``divider_defaults`` sizes ``spacing`` to fill exactly, so the auto case
-    is centred; an explicit spacing is simply used as the gap and may leave
-    the group off-centre or short of the far edge.
-    """
-    low = zone.y0 if along == "x" else zone.x0
-    return [low + (index + 1) * spacing for index in range(count)]
-
-
-@feature("divider")
+@feature(
+    "divider", title="Divider", display="Divider — split the bin",
+    description="A straight wall that splits the floor into compartments.",
+    capabilities=("qty", "along"),
+    options=(
+        OptionDefinition("Width", "thickness", "1.6"),
+        OptionDefinition("Height", "height", ""),
+        OptionDefinition("Spacing", "spacing", ""),
+        OptionDefinition("Degree °", "bottom_angle", "0"),
+        OptionDefinition("Number of crossbars", "bottom_supports", "3", "integer"),
+        OptionDefinition("X quantity", "count_x", 0, "integer", False),
+        OptionDefinition("Y quantity", "count_y", 0, "integer", False),
+        OptionDefinition("Wall angle", "angle", 0, "number", False),
+        OptionDefinition("Use sloped base", "slope_base", False, "boolean", False),
+        OptionDefinition("Reverse bottom", "reverse_bottom", False, "boolean", False),
+        OptionDefinition("Alternate bottom", "alternate_bottom", False, "boolean", False),
+        OptionDefinition("Minimal bottom", "minimal_bottom", False, "boolean", False),
+        OptionDefinition("Label divisions", "label_divisions", False, "boolean", False),
+        OptionDefinition("Division level", "division_level", "base", "enum", False),
+        OptionDefinition("Division side", "division_side", "center", "enum", False),
+        OptionDefinition("Division labels", "division_labels", (), "json", False),
+        OptionDefinition("Compartment Scoop", "scoop", {}, "json", False),
+    ), order=60,
+)
 def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """One or more evenly spaced parallel walls subdividing the bin."""
+    spec_feature = normalize_divider_scoop(box, spec_feature, base_z)
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
     grid_x, grid_y = divider_grid_counts(options)
     if grid_x or grid_y:
-        return _build_divider_grid(box, spec_feature, base_z, options, grid_x, grid_y)
+        solids = _build_divider_grid(box, spec_feature, base_z, options, grid_x, grid_y)
+        solids.extend(_divider_scoops(box, spec_feature, base_z))
+        return solids
     thickness = options["thickness"]
     height = options["height"]
     angle = options.get("angle", 0.0)
@@ -172,6 +207,7 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
     div_texts = divider_division_texts(box, spec_feature, base_z)
     for _text_label, text_solid, _raised in div_texts:
         solids.append(text_solid)
+    solids.extend(_divider_scoops(box, spec_feature, base_z))
     return solids
 
 
@@ -267,7 +303,9 @@ def _divider_grid_texts(
     y_edges = [zone.y0, *_even_centres(zone.y0, zone.y1, grid_y), zone.y1]
     n_cols, n_rows = len(x_edges) - 1, len(y_edges) - 1
     level = str(options.get("division_level", "base")).strip().lower()
-    z = (base_z + height - DIVISION_TEXT_DEPTH) if level == "rim" else base_z
+    if level == "rim":
+        return _divider_grid_rim_texts(box, spec_feature, base_z, labels)
+    z = base_z
 
     results: list[tuple[str, trimesh.Trimesh, bool]] = []
     for row in range(n_rows):
@@ -282,6 +320,11 @@ def _divider_grid_texts(
             x1 = x_edges[col + 1] - (0.0 if col == n_cols - 1 else thickness / 2.0)
             y0 = y_edges[row] + (0.0 if row == 0 else thickness / 2.0)
             y1 = y_edges[row + 1] - (0.0 if row == n_rows - 1 else thickness / 2.0)
+            if level == "base" and isinstance(options.get("scoop"), dict):
+                # Every Divider Scoop occupies the low-Y half (or less) of its
+                # compartment. Keep floor lettering wholly in the guaranteed
+                # untouched high-Y band.
+                y0 = (y0 + y1) / 2.0
             cell_w, cell_d = max(1.0, x1 - x0), max(1.0, y1 - y0)
             try:
                 probe = text_outline(text, 10.0)
@@ -341,6 +384,86 @@ def _division_shelf_solid(
         solid = _extrude_xz_profile(profile, length)
         solid.apply_translation((0.0, centre, 0.0))
     return solid
+
+
+def _divider_grid_rim_texts(
+    box: BoxSpec, spec_feature: Feature, base_z: float, labels: list,
+) -> list[tuple[str, trimesh.Trimesh, bool]]:
+    """One rear floating label shelf per grid compartment.
+
+    This is the Divider-cell adapter for the Text part's Rim Level behavior:
+    a 7 mm shelf, 45-degree underside, flush inlay, and letters no larger than
+    the same fixed 5 mm rim-label size.
+    """
+    options = spec_feature.options or {}
+    height = float(options.get("height", connector_keep_out(box) - base_z)
+                   or (connector_keep_out(box) - base_z))
+    z_top = base_z + height
+    cells = divider_cells(box, spec_feature, base_z)
+    max_depth = min(DIVISION_SHELF_DEPTH, max(2.0, height - 1.0))
+
+    picked: list[tuple[str, DividerCell, float]] = []
+    shared_cap = DIVISION_CAP_MAX
+    for idx, cell in enumerate(cells):
+        if idx >= len(labels):
+            break
+        text = str(labels[idx] or "").strip()
+        if not text:
+            continue
+        depth_here = min(max_depth, cell.zone.depth - 1.0)
+        if depth_here < DIVISION_CAP_MIN:
+            continue
+        try:
+            probe = text_outline(text, 10.0)
+        except Exception:
+            continue
+        bx0, by0, bx1, by1 = probe.bounds
+        pw, ph = bx1 - bx0, by1 - by0
+        if pw <= 0 or ph <= 0:
+            continue
+        avail_width = max(
+            0.5, cell.zone.width - 2.0 * DIVISION_SHELF_TEXT_MARGIN
+        )
+        avail_depth = max(
+            0.5, depth_here - 2.0 * DIVISION_SHELF_TEXT_MARGIN
+        )
+        shared_cap = min(
+            shared_cap,
+            avail_width * 10.0 / pw,
+            avail_depth * 10.0 / ph,
+        )
+        picked.append((text, cell, depth_here))
+    if not picked:
+        return []
+    shared_cap = max(DIVISION_CAP_MIN, min(DIVISION_CAP_MAX, shared_cap))
+
+    results: list[tuple[str, trimesh.Trimesh, bool]] = []
+    for text, cell, depth_here in picked:
+        lo = cell.zone.x0 + DIVISION_SHELF_TEXT_MARGIN
+        hi = cell.zone.x1 - DIVISION_SHELF_TEXT_MARGIN
+        if hi <= lo:
+            continue
+        try:
+            shelf = _division_shelf_solid(
+                cell.zone.y1, "x", lo, hi, -1.0, z_top, depth_here,
+                DIVISION_SHELF_EMBED,
+            )
+            outline = text_outline(text, shared_cap)
+            outline = affinity.translate(
+                outline,
+                xoff=(cell.zone.x0 + cell.zone.x1) / 2.0,
+                yoff=cell.zone.y1 - depth_here / 2.0,
+            )
+            inlay = text_prism(outline, z_top)
+        except Exception:
+            continue
+        try:
+            shelf = difference([shelf, inlay])
+        except Exception:
+            pass
+        results.append((text, shelf, True))
+        results.append((text, inlay, True))
+    return results
 
 
 def _division_side_shelves(
@@ -498,17 +621,11 @@ def divider_division_texts(
     centres = _divider_cross_centres(zone, along, count, spacing)
     slots = _bottom_slot_bounds(zone, along, centres)
     level = str(options.get("division_level", "base")).strip().lower()
-    side = str(options.get("division_side", "center")).strip().lower()
-    if level == "rim" and side in DIVISION_SIDES:
+    if level == "rim":
         return _division_side_shelves(
-            box, along, zone, slots, labels, thickness, base_z, height, side,
+            box, along, zone, slots, labels, thickness, base_z, height, "top",
         )
-    # A rim label rides at the divider top, which already sits right at the
-    # connector keep-out height. Standing it proud there makes it poke past
-    # that line and foul a connector seating against a wall-touching divider,
-    # so drop a rim label by its own depth and sit its top flush with the
-    # divider crest instead.
-    z = (base_z + height - DIVISION_TEXT_DEPTH) if level == "rim" else base_z
+    z = base_z
 
     results = []
     for idx, (slot_low, slot_high) in enumerate(slots):
@@ -519,8 +636,24 @@ def divider_division_texts(
             continue
         inner_low = slot_low + (0.0 if idx == 0 else thickness / 2.0)
         inner_high = slot_high - (0.0 if idx == len(slots) - 1 else thickness / 2.0)
-        slot_across = max(1.0, inner_high - inner_low)
-        slot_run = max(1.0, (zone.x1 - zone.x0) if along == "x" else (zone.y1 - zone.y0))
+        if along == "x":
+            label_x0, label_x1 = zone.x0, zone.x1
+            label_y0, label_y1 = inner_low, inner_high
+        else:
+            label_x0, label_x1 = inner_low, inner_high
+            label_y0, label_y1 = zone.y0, zone.y1
+        if level == "base" and isinstance(options.get("scoop"), dict):
+            # Scoops always rise from low Y and use no more than half the
+            # compartment depth. The back half is therefore a stable label band.
+            label_y0 = (label_y0 + label_y1) / 2.0
+        slot_across = max(
+            1.0,
+            (label_y1 - label_y0) if along == "x" else (label_x1 - label_x0),
+        )
+        slot_run = max(
+            1.0,
+            (label_x1 - label_x0) if along == "x" else (label_y1 - label_y0),
+        )
 
         try:
             probe = text_outline(text, 10.0)
@@ -544,8 +677,8 @@ def divider_division_texts(
         if along == "y":
             outline = affinity.rotate(outline, 90.0, origin=(0.0, 0.0), use_radians=False)
 
-        cx = (zone.x0 + zone.x1) / 2.0 if along == "x" else (inner_low + inner_high) / 2.0
-        cy = (inner_low + inner_high) / 2.0 if along == "x" else (zone.y0 + zone.y1) / 2.0
+        cx = (label_x0 + label_x1) / 2.0
+        cy = (label_y0 + label_y1) / 2.0
         outline = affinity.translate(outline, xoff=cx, yoff=cy)
 
         try:
@@ -901,3 +1034,83 @@ def _full_span_divider(
     if not pieces:
         raise ValueError("divider height leaves nothing to build")
     return pieces
+
+
+register_setting_interactions("divider", (
+    SettingInteraction(
+        "count", "cells", "derived", "divider",
+        "Legacy single-direction wall count determines logical compartments.",
+    ),
+    SettingInteraction(
+        "spacing", "cells", "derived", "divider",
+        "Legacy wall spacing determines logical compartment boundaries.",
+    ),
+    SettingInteraction(
+        "count_x", "cells", "derived", "divider",
+        "Grid X wall count determines logical compartment columns.",
+    ),
+    SettingInteraction(
+        "count_y", "cells", "derived", "divider",
+        "Grid Y wall count determines logical compartment rows.",
+    ),
+    SettingInteraction(
+        "thickness", "cells", "constraint", "divider",
+        "Wall thickness reduces each compartment's usable floor region.",
+    ),
+    SettingInteraction(
+        "scoop.enabled", "scoop.geometry", "enable/disable", "divider",
+        "An enabled Divider Scoop builds one shared Scoop in every compartment.",
+    ),
+    SettingInteraction(
+        "cells", "scoop.geometry", "derived", "divider",
+        "Each Divider compartment receives one Scoop while the setting is enabled.",
+    ),
+    SettingInteraction(
+        "scoop.depth", "scoop.height", "derived", "scoop",
+        "Divider Scoops use the same depth-to-height rule as standalone Scoops.",
+    ),
+    SettingInteraction(
+        "scoop.enabled", "slope_base", "reset", "divider-editor",
+        "A curved Scoop and a sloped bottom cannot own the same compartment floor.",
+    ),
+    SettingInteraction(
+        "slope_base", "scoop.enabled", "reset", "divider-editor",
+        "Selecting a sloped bottom removes the mutually exclusive curved Scoop.",
+    ),
+    SettingInteraction(
+        "scoop.enabled", "division_labels.region", "auto-adjust", "divider",
+        "Base-level division labels move to the high-Y band left clear by the Scoop.",
+    ),
+    SettingInteraction(
+        "count_x", "count", "reset", "divider-editor",
+        "Entering either grid quantity retires the legacy single-axis count.",
+    ),
+    SettingInteraction(
+        "count_y", "count", "reset", "divider-editor",
+        "Entering either grid quantity retires the legacy single-axis count.",
+    ),
+    SettingInteraction(
+        "thickness", "zone", "auto-adjust", "divider-sizing",
+        "Wall width grows the Divider footprint when required.",
+    ),
+    SettingInteraction(
+        "slope_base", "bottom_angle", "enable/disable", "divider-editor",
+        "Bottom angle is active only while sloped bottoms are enabled.",
+    ),
+    SettingInteraction(
+        "slope_base", "bottom_supports", "enable/disable", "divider-editor",
+        "Crossbar controls are active only for sloped bottoms.",
+    ),
+    SettingInteraction(
+        "minimal_bottom", "bottom_supports", "enable/disable", "divider-editor",
+        "Crossbar count is shown only when support crossbars are selected.",
+    ),
+    SettingInteraction(
+        "label_divisions", "division_labels", "enable/disable", "divider-editor",
+        "Division label text is active only when compartment labels are enabled.",
+    ),
+    SettingInteraction(
+        "division_level", "division_labels.shelf", "enable/disable", "divider",
+        "Rim-level Divider labels use the Text part's rear floating shelf profile.",
+    ),
+))

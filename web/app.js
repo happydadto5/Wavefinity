@@ -256,19 +256,9 @@ function partInfo(kind = state.draftKind) {
 
 function iconFor(kind) {
   const common = 'viewBox="0 0 32 32" aria-hidden="true"';
-  const paths = {
-    divider: '<rect x="4" y="5" width="24" height="22" rx="2"/><path d="M16 5v22"/>',
-    post: '<ellipse cx="16" cy="23" rx="10" ry="4"/><path d="M10 22V10c0-5 12-5 12 0v12"/><ellipse cx="16" cy="10" rx="6" ry="2.5"/>',
-    pocket: '<rect x="4" y="6" width="24" height="20" rx="3"/><rect x="8" y="10" width="16" height="12" rx="2"/>',
-    bore: '<rect x="4" y="5" width="24" height="22" rx="2"/><circle cx="11" cy="12" r="3"/><circle cx="21" cy="12" r="3"/><circle cx="11" cy="21" r="3"/><circle cx="21" cy="21" r="3"/>',
-    cradle: '<path d="M4 25h24M7 25V10h4c0 4 2 6 5 6s5-2 5-6h4v15"/>',
-    nest: '<rect x="3" y="6" width="26" height="20" rx="3"/><path d="M7 17h6v-6h7v4h5v6H7z"/>',
-    slot: '<rect x="4" y="5" width="24" height="22" rx="2"/><path d="M9 22l5-12M15 22l5-12M21 22l5-12"/>',
-    steps: '<path d="M4 25h24V10h-8v5h-8v5H4z"/>',
-    scoop: '<path d="M4 9v16h24C20 25 14 18 14 9H4z"/>',
-    text: '<path d="M6 7h20M16 7v18" stroke-linecap="round" stroke-linejoin="round"/>',
-  };
-  return `<svg ${common}>${paths[kind] || paths.pocket}</svg>`;
+  const iconId = partInfo(kind)?.icon || kind;
+  const paths = window.WavefinityFeatureIcons || {};
+  return `<svg ${common}>${paths[iconId] || paths.pocket || ""}</svg>`;
 }
 
 function renderCatalog() {
@@ -1254,9 +1244,20 @@ function field(label, key, value, options = {}) {
   const max = options.max !== undefined ? ` max="${escapeHtml(options.max)}"` : "";
   const placeholder = options.placeholder ? ` placeholder="${escapeHtml(options.placeholder)}"` : "";
   const tip = options.tip ? ` title="${escapeHtml(options.tip)}"` : "";
+  const data = options.dataAttribute
+    ? `${options.dataAttribute}="${escapeHtml(key)}"`
+    : `data-draft="${escapeHtml(key)}"`;
   return `<label class="${classes}"${tip}>${escapeHtml(label)}${options.unit ? `<span class="unit">${escapeHtml(options.unit)}</span>` : ""}
-    <input type="${type}" data-draft="${key}" value="${escapeHtml(value ?? "")}" ${attrs}${min}${max}${placeholder}>
+    <input type="${type}" ${data} value="${escapeHtml(value ?? "")}" ${attrs}${min}${max}${placeholder}>
   </label>`;
+}
+
+function scoopDepthField(key, value, options = {}) {
+  return field("Depth", key, value, {
+    unit: "% of bin height", step: "1", min: "1", max: "100",
+    tip: options.tip || "The scoop always spans the full usable bin width and starts at the front floor edge.",
+    dataAttribute: options.dataAttribute,
+  });
 }
 
 // Compact inline checkbox - the space-saving replacement for the full-width
@@ -1313,6 +1314,29 @@ function resolvedDraftCount(one) {
   return Math.max(1, Math.round(number(options.count ?? resolved.count, 3)));
 }
 
+function plainCheckbox(key, title, on, options = {}) {
+  const classes = ["checkbox-row"];
+  if (options.wide) classes.push("wide");
+  const tip = options.help ? ` title="${escapeHtml(options.help)}"` : "";
+  const attribute = options.dataAttribute || "data-draft";
+  return `<label class="${classes.join(" ")}"${tip}>
+    <input type="checkbox" ${attribute}="${escapeHtml(key)}" ${on ? "checked" : ""}>
+    <span>${escapeHtml(title)}</span>
+  </label>`;
+}
+
+function textLevelSelector(name, level) {
+  return `<fieldset class="wide"><div class="segmented two">
+    <label><input type="radio" name="${escapeHtml(name)}" value="base" ${level === "base" ? "checked" : ""}><span>Base text</span></label>
+    <label><input type="radio" name="${escapeHtml(name)}" value="rim" ${level === "rim" ? "checked" : ""}><span>Rim Level</span></label>
+  </div></fieldset>`;
+}
+
+function dividerScoopDefaultDepth() {
+  const scoop = partInfo("scoop");
+  return scoop?.fields?.find(field => field.key === "depth")?.default ?? "";
+}
+
 function renderDraftFields() {
   if (!state.draft) return;
   const info = partInfo();
@@ -1330,10 +1354,7 @@ function renderDraftFields() {
   if (one.kind === "scoop") {
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, "depth");
     const shown = explicit ? one.options.depth : state.draftResolvedOptions?.depth ?? 60;
-    html += field("Depth", "option:depth", shown, {
-      unit: "% of bin height", step: "1", min: "1", max: "100",
-      tip: "The scoop always spans the full usable bin width and starts at the front floor edge.",
-    });
+    html += scoopDepthField("option:depth", shown);
   }
   if (one.kind === "nest") {
     const assist = String(one.options?.lift_assist ?? state.draftResolvedOptions?.lift_assist ?? "finger_grasp");
@@ -1404,10 +1425,7 @@ function renderDraftFields() {
   }
   if (info.flags.text) {
     const textLevel = one.options?.level === "rim" ? "rim" : "base";
-    html += `<fieldset class="wide"><div class="segmented two">
-      <label><input type="radio" name="draft-text-level" value="base" ${textLevel === "base" ? "checked" : ""}><span>Base text</span></label>
-      <label><input type="radio" name="draft-text-level" value="rim" ${textLevel === "rim" ? "checked" : ""}><span>Rim Level</span></label>
-    </div></fieldset>`;
+    html += textLevelSelector("draft-text-level", textLevel);
     html += `<label class="wide">What it says
       <input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">
     </label>`;
@@ -1501,7 +1519,7 @@ function renderDraftFields() {
           ${shapeField}
           ${optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
           ${optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
-          ${hexBit ? "" : optionField("angle", "Angle", { step: "1", min: "45", max: "90", transform: value => 90 - number(value, 0) })}
+          ${hexBit ? "" : optionField("angle", "Angle", { step: "1", min: "20", max: "90", transform: value => 90 - number(value, 0) })}
           ${hexBit || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label>Angle towards<select data-draft="option:angle_towards">
             ${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]].map(([value, label]) => `<option value="${value}" ${(one.options?.angle_towards || (one.along === "y" ? "front" : "left")) === value ? "selected" : ""}>${label}</option>`).join("")}
           </select></label>`}
@@ -1669,11 +1687,17 @@ function renderDraftFields() {
   }
   if (info.kind === "divider") {
     const opt = one.options || {};
-    const hasSlope = opt.slope_base === true || (opt.bottom_angle !== undefined && Number(opt.bottom_angle) !== 0);
+    const scoopConfig = opt.scoop && typeof opt.scoop === "object" && !Array.isArray(opt.scoop)
+      ? opt.scoop : null;
+    const hasSlope = !scoopConfig && (
+      opt.slope_base === true || (opt.bottom_angle !== undefined && Number(opt.bottom_angle) !== 0)
+    );
 
-    html += `<div class="editor-group"><span class="editor-group-label">Slot bottoms</span>`;
-    html += toggle("option:slope_base", "Slope base",
-      "Tilts the tool-slot bottoms so tools rest at an angle instead of flat.", hasSlope, { wide: true });
+    html += `<div class="editor-group">`;
+    html += plainCheckbox("option:slope_base", "Slope base", hasSlope, {
+      wide: true,
+      help: "Tilts the tool-slot bottoms so tools rest at an angle instead of flat.",
+    });
 
     if (hasSlope) {
       const explicitAngle = Object.prototype.hasOwnProperty.call(opt, "bottom_angle");
@@ -1704,27 +1728,32 @@ function renderDraftFields() {
     }
     html += `</div>`;
 
+    html += `<div class="editor-group">`;
+    html += plainCheckbox("enabled", "Curved scoop", Boolean(scoopConfig), {
+      wide: true,
+      dataAttribute: "data-divider-scoop-enabled",
+      help: "Adds the same curved Scoop used by the standalone Scoop part to every Divider compartment.",
+    });
+    if (scoopConfig) {
+      const scoopDepth = Object.prototype.hasOwnProperty.call(scoopConfig, "depth")
+        ? scoopConfig.depth : dividerScoopDefaultDepth();
+      html += scoopDepthField("depth", scoopDepth, {
+        dataAttribute: "data-divider-scoop-depth",
+        tip: "Every Divider compartment gets the same Scoop depth and starts at its front floor edge.",
+      });
+    }
+    html += `</div>`;
+
     const hasLabels = opt.label_divisions === true;
-    html += `<div class="editor-group"><span class="editor-group-label">Division labels</span>`;
-    html += toggle("option:label_divisions", "Label divisions",
-      "Add text labels to each division slot.", hasLabels, { wide: true });
+    html += `<div class="editor-group">`;
+    html += plainCheckbox("option:label_divisions", "Label divisions", hasLabels, {
+      wide: true,
+      help: "Add text labels to each division slot.",
+    });
 
     if (hasLabels) {
       const divLevel = opt.division_level === "rim" ? "rim" : "base";
-      html += `<fieldset><legend>Level</legend><div class="segmented two">
-        <label><input type="radio" name="draft-division-level" value="base" ${divLevel === "base" ? "checked" : ""}><span>Flush with base</span></label>
-        <label><input type="radio" name="draft-division-level" value="rim" ${divLevel === "rim" ? "checked" : ""}><span>Rim level</span></label>
-      </div></fieldset>`;
-
-      if (divLevel === "rim") {
-        const sides = [["center", "Centre"], ["left", "Left"], ["right", "Right"],
-          ["top", "Back"], ["bottom", "Front"]];
-        const divSide = sides.some(([v]) => v === opt.division_side) ? opt.division_side : "center";
-        const sideTip = "Rim labels ride on a self-supporting shelf at the divider height. Centre floats each label on the crest; the others line its shelf up against that bin wall. Every label shares the largest letter size that fits the longest one.";
-        html += `<fieldset><legend title="${escapeHtml(sideTip)}">Line up against</legend><div class="segmented" title="${escapeHtml(sideTip)}">
-          ${sides.map(([value, label]) => `<label><input type="radio" name="draft-division-side" value="${value}" ${divSide === value ? "checked" : ""}><span>${label}</span></label>`).join("")}
-        </div></fieldset>`;
-      }
+      html += textLevelSelector("draft-division-level", divLevel);
 
       // A cell per compartment: (Qty X + 1) columns by (Qty Y + 1) rows,
       // laid out to mirror the bin so a label lands where its slot is.
@@ -1754,7 +1783,7 @@ function renderDraftFields() {
         for (let c = 0; c < nCols; c++) {
           const idx = r * nCols + c;
           const val = escapeHtml(String(divLabels[idx] || ""));
-          html += `<td><input type="text" data-division-index="${idx}" value="${val}" placeholder="${idx + 1}"></td>`;
+          html += `<td><input type="text" data-division-index="${idx}" value="${val}"></td>`;
         }
         html += `</tr>`;
       }
@@ -1781,15 +1810,6 @@ function renderDraftFields() {
     renderLayout2D();
     refreshDraftSoon();
   }));
-  $$('input[name="draft-division-side"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
-    markDraftChanged();
-    state.draft.options ||= {};
-    if (input.value === "center") delete state.draft.options.division_side;
-    else state.draft.options.division_side = input.value;
-    state.draftAutoCommit = true;
-    renderLayout2D();
-    refreshDraftSoon();
-  }));
   $$('input[data-division-index]', $("#draft-fields")).forEach(input => input.addEventListener("input", () => {
     markDraftChanged();
     state.draft.options ||= {};
@@ -1800,6 +1820,33 @@ function renderDraftFields() {
     renderLayout2D();
     refreshDraftSoon();
   }));
+  const dividerScoopEnabled = $('[data-divider-scoop-enabled]', $("#draft-fields"));
+  if (dividerScoopEnabled) dividerScoopEnabled.addEventListener("change", () => {
+    markDraftChanged();
+    state.draft.options ||= {};
+    if (dividerScoopEnabled.checked) {
+      state.draft.options.scoop = {};
+      for (const key of ["slope_base", "bottom_angle", "reverse_bottom", "alternate_bottom", "minimal_bottom", "bottom_supports"]) {
+        delete state.draft.options[key];
+      }
+    } else delete state.draft.options.scoop;
+    state.draftAutoCommit = true;
+    renderDraftFields();
+    renderLayout2D();
+    refreshDraftSoon();
+  });
+  const scoopDepth = $('[data-divider-scoop-depth]', $("#draft-fields"));
+  if (scoopDepth) scoopDepth.addEventListener("input", () => {
+    markDraftChanged();
+    state.draft.options ||= {};
+    const config = state.draft.options.scoop ||= {};
+    const raw = scoopDepth.value.trim();
+    if (raw === "") delete config.depth;
+    else config.depth = number(raw, dividerScoopDefaultDepth());
+    state.draftAutoCommit = true;
+    renderLayout2D();
+    refreshDraftSoon();
+  });
   $$('input[name="draft-text-level"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
     markDraftChanged();
     state.draft.options ||= {};
@@ -2058,7 +2105,7 @@ function sizeBoreToGrid(one) {
     ? HEX_BIT_PROFILES[profile].diameter
     : number(one.item?.segments?.[0]?.diameter, 6);
   const held = diameter + 0.25;
-  const angle = hexBit ? 0 : Math.min(45, Math.max(0, number(opts.angle ?? resolved.angle, 0)));
+  const angle = hexBit ? 0 : Math.min(70, Math.max(0, number(opts.angle ?? resolved.angle, 0)));
   // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
   // Wall was hand-set - match that so the block sizing tracks the real pitch.
   const wall = opts.wall !== undefined ? number(opts.wall) : (angle > 0 ? 3 : 1.6);
@@ -2284,6 +2331,33 @@ function markDraftChanged() {
   updateGenerateAvailability();
 }
 
+// Pocket, Bore and Slot all need a solid floor below their cut. The field the
+// user is editing owns the decision; adjust its counterpart once, without
+// dispatching another input event or allowing an A -> B -> A update loop.
+function keepCutBelowHeight(one, changedKey, gap = 2) {
+  if (!one || !["pocket", "bore", "slot"].includes(one.kind) ||
+      !["depth", "height"].includes(changedKey)) return;
+  if (changedKey === "depth") {
+    const depth = number(one.options.depth, 0);
+    const height = number(
+      one.options.height ?? state.draftResolvedOptions?.height, depth + gap,
+    );
+    if (depth > 0 && height < depth + gap) {
+      one.options.height = depth + gap;
+      const field = $('[data-draft="option:height"]', $("#draft-fields"));
+      if (field) { field.value = fmt(one.options.height); flashField(field); }
+    }
+    return;
+  }
+  const height = number(one.options.height, 0);
+  const depth = number(one.options.depth ?? state.draftResolvedOptions?.depth, 0);
+  if (height > gap && depth >= height - gap) {
+    one.options.depth = Math.max(0.1, height - gap);
+    const field = $('[data-draft="option:depth"]', $("#draft-fields"));
+    if (field) { field.value = fmt(one.options.depth); flashField(field); }
+  }
+}
+
 function updateDraftFromFields(event) {
   // Any deliberate edit is a strong enough signal to start saving this draft
   // as it goes, even if the app put it up on its own (see state.draftAutoCommit).
@@ -2407,16 +2481,18 @@ function updateDraftFromFields(event) {
       delete one.options.minimal_bottom;
       delete one.options.bottom_supports;
     }
+    if (changed === "option:slope_base" && one.options.slope_base) {
+      delete one.options.scoop;
+    }
     if (!one.options.label_divisions) {
       delete one.options.division_level;
       delete one.options.division_labels;
-      delete one.options.division_side;
     }
-    if (one.options.division_level !== "rim") delete one.options.division_side;
+    delete one.options.division_side;
   }
   if (changed.startsWith("option:") &&
       !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom",
-        "slope_base", "label_divisions", "division_level", "division_side", "division_labels",
+        "slope_base", "label_divisions", "division_level", "division_labels",
         "lift_assist", "finger_position", "push_position", "angle_towards"]
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
@@ -2431,7 +2507,7 @@ function updateDraftFromFields(event) {
       // Bore geometry stores lean away from vertical. The user sees the more
       // natural absolute angle: 90 is straight up and down.
       if (info.kind === "bore" && key === "angle") {
-        value = 90 - Math.min(90, Math.max(45, value));
+        value = 90 - Math.min(90, Math.max(20, value));
       }
       // A bore's grid counts are whole numbers.
       if (info.kind === "bore" && (key === "columns" || key === "rows")) {
@@ -2455,7 +2531,13 @@ function updateDraftFromFields(event) {
     }
     // Once either grid quantity is set, the divider is a grid: pin both
     // quantities and drop the old single-direction count so nothing double-builds.
+    // An older Divider may have only its one-axis count. Its first grid edit
+    // begins at one wall on the other axis rather than silently replacing it.
     if (info.kind === "divider" && (key === "count_x" || key === "count_y")) {
+      const otherKey = key === "count_x" ? "count_y" : "count_x";
+      if (!Object.prototype.hasOwnProperty.call(one.options, otherKey)) {
+        one.options[otherKey] = 1;
+      }
       if ("count_x" in one.options || "count_y" in one.options) {
         one.options.count_x = Math.max(0, Math.round(number(one.options.count_x, 0)));
         one.options.count_y = Math.max(0, Math.round(number(one.options.count_y, 0)));
@@ -2471,71 +2553,7 @@ function updateDraftFromFields(event) {
       const newD = innerD + 2 * newWall;
       one.zone = [cx - newW / 2, cy - newD / 2, cx + newW / 2, cy + newD / 2];
     }
-    if (info.kind === "pocket" && key === "depth") {
-      // If recess gets within 2 mm of the height, auto adjust up the height so it is recess + 2 mm.
-      const recess = number(one.options.depth, 0);
-      const heightNow = number(
-        one.options.height ?? state.draftResolvedOptions?.height, recess + 2,
-      );
-      if (recess >= heightNow - 2) {
-        one.options.height = recess + 2;
-        const heightField = $('[data-draft="option:height"]', $("#draft-fields"));
-        if (heightField) { heightField.value = fmt(one.options.height); flashField(heightField); }
-      }
-    }
-    if (info.kind === "pocket" && key === "height") {
-      const h = number(one.options.height, 0);
-      if (one.options.depth !== undefined && one.options.depth >= h - 2) {
-        one.options.depth = Math.max(0.1, h - 2);
-        const recessField = $('[data-draft="option:depth"]', $("#draft-fields"));
-        if (recessField) { recessField.value = fmt(one.options.depth); flashField(recessField); }
-      }
-    }
-    if (info.kind === "bore" && key === "depth") {
-      // Hole depth and block Height stay 2 mm apart: editing Depth pushes
-      // Height to Depth + 2 whenever Height would otherwise be too short (the
-      // block always keeps a 2 mm floor under the hole bottom).
-      const holeDepth = number(one.options.depth, 0);
-      const heightNow = number(
-        one.options.height ?? state.draftResolvedOptions?.height, holeDepth + 2,
-      );
-      if (holeDepth > 0 && heightNow < holeDepth + 2) {
-        one.options.height = holeDepth + 2;
-        const heightField = $('[data-draft="option:height"]', $("#draft-fields"));
-        if (heightField) { heightField.value = fmt(one.options.height); flashField(heightField); }
-      }
-    }
-    if (info.kind === "bore" && key === "height") {
-      // The other direction: editing Height pulls Hole depth down to Height - 2
-      // when it would otherwise breach the floor.
-      const h = number(one.options.height, 0);
-      const depthNow = number(one.options.depth ?? state.draftResolvedOptions?.depth, 0);
-      if (h > 2 && depthNow >= h - 2) {
-        one.options.depth = h - 2;
-        const depthField = $('[data-draft="option:depth"]', $("#draft-fields"));
-        if (depthField) { depthField.value = fmt(one.options.depth); flashField(depthField); }
-      }
-    }
-    if (info.kind === "slot" && key === "depth") {
-      // Slot depth has the same 2 mm floor rule as a Bore. Keep an automatic
-      // Height ahead of it instead of making the user repair an error.
-      const slotDepth = number(one.options.depth, 0);
-      const heightNow = number(one.options.height ?? state.draftResolvedOptions?.height, slotDepth + 2);
-      if (slotDepth > 0 && heightNow < slotDepth + 2) {
-        one.options.height = slotDepth + 2;
-        const heightField = $('[data-draft="option:height"]', $("#draft-fields"));
-        if (heightField) { heightField.value = fmt(one.options.height); flashField(heightField); }
-      }
-    }
-    if (info.kind === "slot" && key === "height") {
-      const height = number(one.options.height, 0);
-      const depthNow = number(one.options.depth ?? state.draftResolvedOptions?.depth, 0);
-      if (height > 2 && depthNow >= height - 2) {
-        one.options.depth = height - 2;
-        const depthField = $('[data-draft="option:depth"]', $("#draft-fields"));
-        if (depthField) { depthField.value = fmt(one.options.depth); flashField(depthField); }
-      }
-    }
+    keepCutBelowHeight(one, key);
     if (info.kind === "bore" && key === "angle" && !("wall" in (one.options || {}))) {
       // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL);
       // reflect that in the field right away when Wall hasn't been hand-set.
@@ -4141,8 +4159,11 @@ function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
 
       const x0 = xEdges[c] + (c === 0 ? 0 : thickness / 2);
       const x1 = xEdges[c + 1] - (c === nCols - 1 ? 0 : thickness / 2);
-      const y0 = yEdges[r] + (r === 0 ? 0 : thickness / 2);
+      let y0 = yEdges[r] + (r === 0 ? 0 : thickness / 2);
       const y1 = yEdges[r + 1] - (r === nRows - 1 ? 0 : thickness / 2);
+      if (opt.scoop && typeof opt.scoop === "object" && opt.division_level !== "rim") {
+        y0 = (y0 + y1) / 2;
+      }
       const cellW = Math.max(1, x1 - x0);
       const cellD = Math.max(1, y1 - y0);
 

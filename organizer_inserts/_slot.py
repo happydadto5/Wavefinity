@@ -6,10 +6,14 @@ import math
 
 import trimesh
 
-from organizer_engine import BoxSpec, difference, union
+from organizer_engine import BoxSpec
+from organizer_geometry import difference, union
 
 from ._core import Feature
-from ._registry import defaults, feature, resolved_options
+from ._registry import (
+    OptionDefinition, SettingInteraction, defaults, feature,
+    register_setting_interactions, resolved_options,
+)
 
 
 @defaults("slot")
@@ -19,7 +23,18 @@ def slot_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float]
     return {"depth": hole, "thickness": 4.0, "wall": 1.6, "angle": 20.0, "height": height}
 
 
-@feature("slot")
+@feature(
+    "slot", title="Slot Rack", display="Slot Rack — tilted tools",
+    description="Angled slots for driver bits, cards, and small tools.",
+    capabilities=("qty", "size", "along"),
+    options=(
+        OptionDefinition("Height", "height", ""),
+        OptionDefinition("Depth", "depth", ""),
+        OptionDefinition("Thickness", "thickness", "4"),
+        OptionDefinition("Angle °", "angle", "20"),
+        OptionDefinition("Wall", "wall", "1.6"),
+    ), order=70,
+)
 def build_slot(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A block of angled, backward-leaning slots for bits, cards, and tools."""
     zone = spec_feature.zone
@@ -64,3 +79,19 @@ def build_slot(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         cutter.apply_translation((centre_x, c_cross + cut_shift, cut_mid_z) if along == "x" else (c_cross + cut_shift, centre_y, cut_mid_z))
         cutters.append(cutter)
     return [difference([block, union(cutters) if len(cutters) > 1 else cutters[0]])]
+
+
+register_setting_interactions("slot", (
+    SettingInteraction("depth", "height", "constraint", "slot-shell",
+                       "A user-edited Depth wins and raises Height to keep a 2 mm floor."),
+    SettingInteraction("height", "depth", "constraint", "slot-shell",
+                       "A user-edited Height wins and lowers Depth to keep a 2 mm floor."),
+    SettingInteraction("count", "zone.run", "auto-adjust", "slot-sizing",
+                       "Quantity grows the Slot Rack run on its selected axis."),
+    SettingInteraction("thickness", "zone.run", "auto-adjust", "slot-sizing",
+                       "Slot thickness changes the pitch and required run length."),
+    SettingInteraction("wall", "zone", "auto-adjust", "slot-sizing",
+                       "Wall thickness changes the bank footprint."),
+    SettingInteraction("angle", "zone.run", "auto-adjust", "slot-sizing",
+                       "Slot angle changes the projected pitch and required run length."),
+))

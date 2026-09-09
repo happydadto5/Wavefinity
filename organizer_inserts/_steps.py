@@ -5,10 +5,11 @@ from __future__ import annotations
 import trimesh
 from shapely.geometry import Polygon
 
-from organizer_engine import BoxSpec, _extrude_xz_profile, _extrude_yz_profile
+from organizer_engine import BoxSpec
+from organizer_geometry import _extrude_xz_profile, _extrude_yz_profile
 
 from ._core import Feature
-from ._registry import defaults, feature, resolved_options
+from ._registry import OptionDefinition, defaults, feature, resolved_options
 
 
 @defaults("steps")
@@ -19,7 +20,16 @@ def steps_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float
     }
 
 
-@feature("steps")
+@feature(
+    "steps", title="Steps", display="Steps — tiered riser",
+    description="Stepped shelves rising from front to back.",
+    capabilities=("qty", "size", "along"),
+    options=(
+        OptionDefinition("Height", "height", ""),
+        OptionDefinition("Lip", "lip", "1"),
+        OptionDefinition("Count", "count", "3", "integer", False),
+    ), order=80,
+)
 def build_steps(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A stepped stadium-riser platform stepping up across the zone."""
     zone = spec_feature.zone

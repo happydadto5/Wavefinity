@@ -19,6 +19,7 @@ from organizer_engine import (
     TEXT_CAP_HEIGHT_IDEAL,
     TEXT_DEPTH,
     WAVE_AMPLITUDE,
+    build_scoop_region,
     _extrude_polygon,
     _extrude_xz_profile,
     _extrude_yz_profile,
@@ -67,10 +68,21 @@ from ._registry import (
     Builder,
     Defaults,
     FEATURE_BUILDERS,
+    FEATURE_DEFINITIONS,
     FEATURE_DEFAULTS,
+    OPTION_TYPES,
+    SETTING_INTERACTIONS,
+    FeatureDefinition,
+    OptionDefinition,
+    SettingInteraction,
     defaults,
     feature,
+    feature_definition,
+    feature_definitions,
+    option_value,
+    register_setting_interactions,
     resolved_options,
+    setting_interactions,
 )
 
 # Keep this order stable: importing each feature populates the shared registries.
@@ -132,18 +144,32 @@ from ._divider import (
     BOTTOM_EMBED,
     BOTTOM_SLOPE_MAX,
     DIVIDER_CHAMFER,
+    DividerCell,
     MAX_DIVIDER_ANGLE,
     MIN_WEDGE_EDGE,
     _divider_cross_centres,
     _divider_support_bottoms,
     _divider_wall,
     build_divider,
+    divider_cells,
     divider_defaults,
+    divider_scoop_targets,
+    normalize_divider_scoop,
 )
 from ._pocket import POCKET_CHAMFER, POCKET_FLOOR, build_pocket, pocket_defaults
 from ._slot import build_slot, slot_defaults
 from ._steps import build_steps, steps_defaults
-from ._scoop import build_scoop, scoop_defaults, scoop_zone
+from ._scoop import (
+    SCOOP_DEFAULT_DEPTH,
+    SCOOP_MAX_DEPTH,
+    SCOOP_MIN_DEPTH,
+    ScoopSettings,
+    build_scoop,
+    scoop_defaults,
+    scoop_region,
+    scoop_settings,
+    scoop_zone,
+)
 from ._text import (
     NON_NUMERIC_OPTIONS,
     TEXT_KIND,
@@ -153,7 +179,6 @@ from ._text import (
     auto_grow_text_feature,
     build_text,
     is_text,
-    option_value,
     text_defaults,
     text_depth,
     text_fitted,

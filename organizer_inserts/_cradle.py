@@ -2,9 +2,13 @@
 from __future__ import annotations
 import math
 import trimesh
-from organizer_engine import BoxSpec, difference, union
+from organizer_engine import BoxSpec
+from organizer_geometry import difference, union
 from ._core import Feature, _fit_count, _need_item
-from ._registry import defaults, feature, resolved_options
+from ._registry import (
+    OptionDefinition, SettingInteraction, defaults, feature,
+    register_setting_interactions, resolved_options,
+)
 RIB_THICKNESS = 1.6
 CRADLE_RIB_FRACTION = 0.25
 CRADLE_RIB_MAX = 6.0
@@ -91,7 +95,18 @@ def cradle_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, fl
     }
 
 
-@feature("cradle")
+@feature(
+    "cradle", title="Cradle", display="Cradle — tools laid down",
+    description="A half-circle notch that holds a tool on its side.",
+    capabilities=("qty", "along", "item", "alternate"),
+    options=(
+        OptionDefinition("Spacing", "spacing", "0"),
+        OptionDefinition("Floor gap", "floor_gap", "2"),
+        OptionDefinition("% from ends", "end_margin", "10"),
+        OptionDefinition("Offset from center", "run_offset", "0", editor=False),
+        OptionDefinition("Rib thickness", "rib_thickness", "", editor=False),
+    ), order=10,
+)
 def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """Half-round troughs holding a tool lying along X or Y.
 
@@ -272,3 +287,21 @@ def cradle_min_footprint(one: Feature) -> tuple[float, float]:
     )
     across = math.ceil((count - 1) * pitch + body)
     return (float(run), float(across)) if one.along == "x" else (float(across), float(run))
+
+
+register_setting_interactions("cradle", (
+    SettingInteraction("item.length", "zone.run", "auto-adjust", "cradle-sizing",
+                       "Tool length grows the run; a hand-sized run is never shrunk."),
+    SettingInteraction("item.diameter", "zone.across", "auto-adjust", "cradle-sizing",
+                       "Tool diameter and generated wall grow the Cradle width."),
+    SettingInteraction("count", "zone.across", "auto-adjust", "cradle-sizing",
+                       "Quantity grows the cross-axis footprint for all troughs."),
+    SettingInteraction("spacing", "zone.across", "auto-adjust", "cradle-sizing",
+                       "Spacing grows the footprint without shrinking manual size."),
+    SettingInteraction("alternate_ends", "end_margin", "enable/disable", "cradle-editor",
+                       "Alternate ends shows end clearance and uses it for sizing."),
+    SettingInteraction("alternate_ends", "run_offset", "enable/disable", "cradle-editor",
+                       "Run offset applies only while Alternate ends is off."),
+    SettingInteraction("end_margin", "zone.run", "auto-adjust", "cradle-sizing",
+                       "Alternate-end clearance can grow the required run length."),
+))

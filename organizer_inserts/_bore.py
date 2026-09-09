@@ -6,10 +6,14 @@ import math
 
 import trimesh
 
-from organizer_engine import BoxSpec, difference, union
+from organizer_engine import BoxSpec
+from organizer_geometry import difference, union
 
 from ._core import Feature, _fit_count, _need_item
-from ._registry import defaults, feature, resolved_options
+from ._registry import (
+    OptionDefinition, SettingInteraction, defaults, feature,
+    register_setting_interactions, resolved_options,
+)
 
 BORE_WALL = 1.6            # material around a bore
 BORE_CLEARANCE = 0.25      # automatic fit clearance on bore diameters
@@ -25,7 +29,7 @@ HEX_BIT_LENGTH = {
     "hex_bit_long": HEX_BIT_LONG_LENGTH,
 }
 BORE_MOUTH_CHAMFER = 0.6  # 45-degree lead-in at each hole mouth
-BORE_MAX_TILT = 45.0      # steepest lean off vertical a blind-hole roof still prints
+BORE_MAX_TILT = 70.0      # steepest lean off vertical the hole geometry still allows
 BORE_TILTED_WALL = 3.0    # thicker default wall once a bore is leaned
 
 
@@ -282,7 +286,20 @@ def bore_tool_clearance_zone(
     return Zone(min(xs), min(ys), max(xs), max(ys))
 
 
-@feature("bore")
+@feature(
+    "bore", title="Bore", display="Bore — upright tools",
+    description="A block of snug upright holes for tools stood on end.",
+    capabilities=("size", "along", "item"),
+    options=(
+        OptionDefinition("Height", "height", ""),
+        OptionDefinition("Hole depth", "depth", ""),
+        OptionDefinition("Wall", "wall", "1.6"),
+        OptionDefinition("X quantity", "columns", "", "integer"),
+        OptionDefinition("Y quantity", "rows", "", "integer"),
+        OptionDefinition("Angle °", "angle", "0"),
+        OptionDefinition("Angle towards", "angle_towards", "front", "enum", False),
+    ), order=30,
+)
 def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A block of holes for objects stood on end."""
     grid = _bore_grid(box, spec_feature, base_z)
@@ -359,3 +376,31 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     # buried. The whole block is never rotated.
     result = difference([block, union(holes)])
     return [result]
+
+
+register_setting_interactions("bore", (
+    SettingInteraction("depth", "height", "constraint", "bore-shell",
+                       "A user-edited Hole depth wins and raises Height to keep a 2 mm floor."),
+    SettingInteraction("height", "depth", "constraint", "bore-shell",
+                       "A user-edited Height wins and lowers Hole depth to keep a 2 mm floor."),
+    SettingInteraction("angle", "wall", "default", "bore",
+                       "A leaned Bore uses a thicker wall unless Wall is explicitly set."),
+    SettingInteraction("angle", "angle_towards", "enable/disable", "bore-editor",
+                       "Direction is shown only for a Bore that is actually leaned."),
+    SettingInteraction("item.profile", "angle", "reset", "bore-editor",
+                       "Hex-bit presets stand upright and remove a stored lean."),
+    SettingInteraction("item.profile", "item.diameter", "default", "bore",
+                       "Hex-bit presets own their fixed across-flats diameter."),
+    SettingInteraction("columns", "zone", "auto-adjust", "bore-sizing",
+                       "X quantity grows the Bore Base to its minimum printable width."),
+    SettingInteraction("rows", "zone", "auto-adjust", "bore-sizing",
+                       "Y quantity grows the Bore Base to its minimum printable length."),
+    SettingInteraction("item.diameter", "zone", "auto-adjust", "bore-sizing",
+                       "Hole diameter grows the Base footprint."),
+    SettingInteraction("wall", "zone", "auto-adjust", "bore-sizing",
+                       "Wall thickness grows the Base footprint."),
+    SettingInteraction("angle", "zone", "auto-adjust", "bore-sizing",
+                       "Lean grows the Base along the selected direction."),
+    SettingInteraction("angle_towards", "zone", "auto-adjust", "bore-sizing",
+                       "Lean direction determines which Base axis receives the extra reach."),
+))

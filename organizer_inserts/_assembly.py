@@ -9,18 +9,16 @@ from typing import Iterable
 import trimesh
 from shapely.geometry import Polygon, box as shapely_box
 
+from organizer_geometry import (
+    _align_ring, _extrude_polygon, _loft_cavity, _resampled_ring,
+    difference, intersection, union,
+)
+
 from organizer_engine import (
     BoxSpec,
-    _align_ring,
-    _extrude_polygon,
-    _loft_cavity,
-    _resampled_ring,
     _rounded,
-    difference,
     flat_cavity_polygon,
-    intersection,
     label_placement,
-    union,
     wavy_cavity_polygon,
     SAMPLES_PER_MM,
 )

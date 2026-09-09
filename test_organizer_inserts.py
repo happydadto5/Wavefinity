@@ -113,6 +113,7 @@ class OrganizerInsertsCompatibilityContractTests(unittest.TestCase):
         defaults = inserts.FEATURE_DEFAULTS
         builders.pop(kind, None)
         defaults.pop(kind, None)
+        inserts.FEATURE_DEFINITIONS.pop(kind, None)
         try:
             @inserts.feature(kind)
             def builder(_box, _feature, _base_z):
@@ -129,6 +130,7 @@ class OrganizerInsertsCompatibilityContractTests(unittest.TestCase):
         finally:
             builders.pop(kind, None)
             defaults.pop(kind, None)
+            inserts.FEATURE_DEFINITIONS.pop(kind, None)
 
     def test_saved_layouts_still_round_trip_and_legacy_defaults_survive(self) -> None:
         layout = Layout((Feature(
@@ -317,18 +319,16 @@ class CradleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "long"):
             build_features(BIN, [cramped], BIN.base_thickness)
 
-    def test_a_subminimum_floor_gap_that_leaves_unprintable_material_below_is_refused(self) -> None:
-        for bad_gap in (-1.0, 0.0, 0.1, 0.35):
-            buried = Feature(
-                "cradle", Zone.end(BIN, "x", 88.0), ROD, options={"floor_gap": bad_gap}
+    def test_saved_floor_gap_is_ignored_in_favour_of_the_fixed_clearance(self) -> None:
+        normal = Feature("cradle", Zone.end(BIN, "x", 88.0), ROD)
+        expected = build_features(BIN, [normal], BIN.base_thickness)[0].bounds
+        for old_gap in (-1.0, 0.0, 0.1, 0.35):
+            saved = Feature(
+                "cradle", Zone.end(BIN, "x", 88.0), ROD,
+                options={"floor_gap": old_gap},
             )
-            with self.assertRaisesRegex(ValueError, "clearance under it"):
-                build_features(BIN, [buried], BIN.base_thickness)
-        valid = Feature(
-            "cradle", Zone.end(BIN, "x", 88.0), ROD, options={"floor_gap": inserts.CRADLE_MIN_FLOOR_GAP}
-        )
-        solids = build_features(BIN, [valid], BIN.base_thickness)
-        self.assertTrue(solids[0].is_watertight)
+            actual = build_features(BIN, [saved], BIN.base_thickness)[0].bounds
+            self.assertTrue(np.allclose(actual, expected))
 
     def test_alternate_ends_places_troughs_near_opposite_run_ends(self) -> None:
         one = Feature(
@@ -1100,6 +1100,161 @@ class MultiDividerTests(unittest.TestCase):
             self.assertTrue(wall.is_watertight)
 
 
+class DividerScoopTests(unittest.TestCase):
+    box = BoxSpec(48.0, 48.0, 40.0)
+    base_z = box.base_thickness
+
+    def divider(self, scoop=False, **options) -> Feature:
+        values = {"count_x": 1, "count_y": 1, **options}
+        if scoop:
+            values["scoop"] = {"depth": 60.0}
+        return Feature(
+            "divider", Zone.whole(self.box), options=values, full_span=True,
+        )
+
+    def test_divider_exposes_stable_row_column_cells_and_usable_regions(self) -> None:
+        cells = inserts.divider_cells(self.box, self.divider(), self.base_z)
+        self.assertEqual(
+            [cell.identity for cell in cells],
+            ["r0c0", "r0c1", "r1c0", "r1c1"],
+        )
+        self.assertTrue(all(cell.zone.width > 0 and cell.zone.depth > 0 for cell in cells))
+        self.assertLess(cells[0].zone.x1, cells[1].zone.x0)
+        self.assertLess(cells[0].zone.y1, cells[2].zone.y0)
+
+    def test_disabled_scoop_adds_no_scoop_geometry(self) -> None:
+        plain = build_features(self.box, [self.divider()], self.base_z)
+        self.assertEqual(len(plain), 2)
+
+    def test_enabled_scoop_uses_shared_geometry_in_every_cell(self) -> None:
+        solids = build_features(self.box, [self.divider(True)], self.base_z)
+        cells = inserts.divider_cells(self.box, self.divider(), self.base_z)
+        self.assertEqual(len(solids), 2 + len(cells))
+        settings = inserts.scoop_settings(self.box, {"depth": 60.0}, self.base_z)
+        for scoop, cell in zip(solids[-len(cells):], cells):
+            region = inserts.scoop_region(cell.zone, settings)
+            shared = inserts.build_scoop_region(
+                (region.x0, region.y0, region.x1, region.y1),
+                self.base_z, settings.height, "x",
+            )
+            self.assertTrue(np.allclose(scoop.bounds, shared.bounds))
+            self.assertTrue(scoop.is_volume)
+
+    def test_enabled_scoops_are_valid_in_the_finished_insert(self) -> None:
+        solids = build_features(self.box, [self.divider(True)], self.base_z)
+        self.assertEqual(len(solids), 6)
+        self.assertTrue(all(solid.is_volume and solid.is_watertight for solid in solids))
+        assembled = make_fitted_insert(
+            self.box, [self.divider(True)],
+        )
+        self.assertTrue(assembled.is_volume)
+        self.assertTrue(assembled.is_watertight)
+
+    def test_base_labels_share_cells_with_scoops_in_the_clear_back_band(self) -> None:
+        feature = self.divider(
+            True,
+            label_divisions=True,
+            division_level="base",
+            division_labels=["A", "B", "C", "D"],
+        )
+        solids = build_features(self.box, [feature], self.base_z)
+        cells = inserts.divider_cells(self.box, feature, self.base_z)
+        labels = solids[2:2 + len(cells)]
+        self.assertEqual(len(labels), len(cells))
+        for label, cell in zip(labels, cells):
+            clear_band_start = (cell.zone.y0 + cell.zone.y1) / 2.0
+            self.assertGreaterEqual(label.bounds[0][1], clear_band_start - 1e-6)
+
+    def test_scoop_wins_over_an_old_conflicting_sloped_bottom(self) -> None:
+        feature = Feature(
+            "divider", Zone.whole(self.box), along="x", count=1,
+            options={
+                "scoop": {"depth": 60.0},
+                "slope_base": True,
+                "bottom_angle": 20.0,
+                "minimal_bottom": True,
+                "bottom_supports": 4,
+            },
+            full_span=True,
+        )
+        normalized = inserts.normalize_divider_scoop(self.box, feature, self.base_z)
+        self.assertEqual(normalized.options["scoop"], {"depth": 60.0})
+        for key in ("slope_base", "bottom_angle", "minimal_bottom", "bottom_supports"):
+            self.assertNotIn(key, normalized.options)
+        # One wall plus one Scoop in each of its two compartments; no slope solids.
+        self.assertEqual(len(build_features(self.box, [feature], self.base_z)), 3)
+
+    def test_grid_rim_labels_get_one_rear_floating_shelf_per_cell(self) -> None:
+        feature = self.divider(
+            label_divisions=True,
+            division_level="rim",
+            division_labels=["A", "B", "C", "D"],
+        )
+        solids = build_features(self.box, [feature], self.base_z)
+        label_pieces = solids[2:]
+        self.assertEqual(len(label_pieces), 8)
+        top = self.base_z + inserts.resolved_options(
+            self.box, feature, self.base_z,
+        )["height"]
+        for shelf, inlay in zip(label_pieces[::2], label_pieces[1::2]):
+            self.assertAlmostEqual(shelf.bounds[1][2], top, places=6)
+            self.assertLess(shelf.bounds[0][2], top - 2.0)
+            self.assertAlmostEqual(inlay.bounds[1][2], top, places=6)
+            self.assertTrue(shelf.is_volume)
+            self.assertTrue(inlay.is_volume)
+        assembled = make_fitted_insert(self.box, [feature])
+        self.assertTrue(assembled.is_volume)
+        self.assertTrue(assembled.is_watertight)
+
+    def test_divider_scoop_settings_round_trip_without_cell_targets(self) -> None:
+        layout = Layout((self.divider(True),))
+        rebuilt = layout_from_dict(layout_to_dict(layout))
+        self.assertEqual(rebuilt.features[0].options["scoop"], {"depth": 60.0})
+
+    def test_old_selected_targets_migrate_to_all_cells(self) -> None:
+        changed = Feature(
+            "divider", Zone.whole(self.box), full_span=True,
+            options={
+                "count_x": 1, "count_y": 0,
+                "scoop": {"cells": ["r0c0", "r1c1"], "depth": 60.0},
+            },
+        )
+        self.assertEqual(
+            inserts.divider_scoop_targets(self.box, changed, self.base_z),
+            ("r0c0", "r0c1"),
+        )
+        normalized = inserts.normalize_divider_scoop(self.box, changed, self.base_z)
+        self.assertEqual(normalized.options["scoop"], {"depth": 60.0})
+        self.assertTrue(build_features(self.box, [normalized], self.base_z))
+
+    def test_standalone_and_divider_scoops_share_the_same_default(self) -> None:
+        standalone = Feature("scoop", Zone(-10.0, -10.0, 10.0, 0.0))
+        standalone_settings = inserts.scoop_settings(self.box, standalone.options, self.base_z)
+        divider_settings = inserts.scoop_settings(self.box, {}, self.base_z, allow_legacy_height=False)
+        self.assertEqual(standalone_settings, divider_settings)
+        self.assertEqual(standalone_settings.depth, inserts.SCOOP_DEFAULT_DEPTH)
+
+    def test_scoop_and_divider_setting_relationships_are_discoverable(self) -> None:
+        rules = inserts.setting_interactions()
+        self.assertTrue(rules)
+        self.assertTrue(all(
+            rule.source and rule.target and rule.effect and rule.owner and rule.reason
+            for rule in rules
+        ))
+        self.assertTrue(any(
+            rule.source == "scoop.enabled" and rule.target == "scoop.geometry"
+            for rule in inserts.setting_interactions("divider")
+        ))
+
+    def test_automatic_setting_cycles_are_rejected(self) -> None:
+        rule = inserts.SettingInteraction
+        with self.assertRaisesRegex(ValueError, "automatic setting loop"):
+            inserts.register_setting_interactions("_loop_probe", (
+                rule("a", "b", "auto-adjust", "probe", "first"),
+                rule("b", "a", "derived", "probe", "second"),
+            ))
+
+
 class DividerBottomSlopeTests(unittest.TestCase):
     """Sloped tool-slot bottoms under a divider - see _divider_support_bottoms."""
 
@@ -1591,7 +1746,58 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(len(made), 1)
         finally:
             del inserts.FEATURE_BUILDERS["test_slab"]
+            inserts.FEATURE_DEFINITIONS.pop("test_slab", None)
         self.assertNotIn("test_slab", inserts.FEATURE_BUILDERS)
+
+    def test_feature_definitions_are_complete_and_authoritative(self) -> None:
+        definitions = inserts.feature_definitions()
+        self.assertEqual(
+            {one.kind for one in definitions},
+            {"cradle", "nest", "bore", "post", "pocket", "divider",
+             "slot", "steps", "scoop", "text"},
+        )
+        for definition in definitions:
+            self.assertIs(definition.builder, inserts.FEATURE_BUILDERS[definition.kind])
+            self.assertIs(definition.default_resolver, inserts.FEATURE_DEFAULTS[definition.kind])
+            self.assertTrue(definition.title)
+            self.assertTrue(definition.display)
+            self.assertTrue(definition.description)
+            self.assertTrue(definition.icon)
+            self.assertTrue(all(option.value_type for option in definition.options))
+
+    def test_divider_compartments_have_their_own_module_boundary(self) -> None:
+        self.assertEqual(inserts.DividerCell.__module__, "organizer_inserts._divider_cells")
+        self.assertEqual(inserts.divider_cells.__module__, "organizer_inserts._divider_cells")
+
+    def test_remaining_auto_setting_relationships_are_registered(self) -> None:
+        for kind in ("cradle", "nest", "bore", "post", "pocket", "divider",
+                     "slot", "scoop", "text"):
+            self.assertTrue(inserts.setting_interactions(kind), kind)
+        bore_rules = inserts.setting_interactions("bore")
+        self.assertTrue(any(
+            rule.source == "item.profile" and rule.target == "angle"
+            and rule.effect == "reset" for rule in bore_rules
+        ))
+        for kind in ("pocket", "bore", "slot"):
+            shell_rules = inserts.setting_interactions(kind)
+            self.assertTrue(any(
+                rule.source == "depth" and rule.target == "height"
+                and rule.effect == "constraint" for rule in shell_rules
+            ))
+            self.assertTrue(any(
+                rule.source == "height" and rule.target == "depth"
+                and rule.effect == "constraint" for rule in shell_rules
+            ))
+        self.assertTrue(inserts.setting_interactions("bore", "height"))
+
+    def test_registered_option_types_drive_browser_value_coercion(self) -> None:
+        self.assertIs(inserts.option_value("minimal_bottom", "false", "divider"), False)
+        self.assertEqual(inserts.option_value("division_level", "rim", "divider"), "rim")
+        self.assertEqual(inserts.option_value("columns", "3", "bore"), 3)
+        self.assertEqual(
+            inserts.option_value("scoop", '{"depth":45,"cells":["r0c0"]}', "divider"),
+            {"depth": 45, "cells": ["r0c0"]},
+        )
 
 
 class OtherHoldersTests(unittest.TestCase):
@@ -1935,7 +2141,7 @@ class BoreEnhancementTests(unittest.TestCase):
     def test_a_lean_past_the_printable_limit_is_refused(self) -> None:
         item = Item.simple("tube", 20.0, 6.0)
         with self.assertRaises(ValueError):
-            self._bore(item, rows=1, angle=60)
+            self._bore(item, rows=1, angle=71)
 
     def test_hole_mouths_are_chamfered(self) -> None:
         item = Item.simple("nozzle", 20.0, 6.0)

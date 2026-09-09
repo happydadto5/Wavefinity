@@ -67,6 +67,7 @@ class WebApplicationTests(unittest.TestCase):
              "steps", "scoop", "text"},
         )
         self.assertEqual(parts["scoop"]["title"], "Curved Scoop")
+        self.assertEqual(parts["scoop"]["icon"], "scoop")
         self.assertFalse(parts["scoop"]["flags"]["size"])
         self.assertFalse(parts["scoop"]["flags"]["along"])
         self.assertEqual(
@@ -74,6 +75,20 @@ class WebApplicationTests(unittest.TestCase):
              for field in parts["scoop"]["fields"]],
             [("Depth", "depth", "60")],
         )
+        self.assertEqual(parts["scoop"]["fields"][0]["type"], "number")
+        self.assertIn("item", parts["bore"]["capabilities"])
+        self.assertIn(
+            {"key": "angle_towards", "type": "enum"},
+            parts["bore"]["options"],
+        )
+        interactions = catalog["setting_interactions"]
+        self.assertTrue(all(rule["feature"] for rule in interactions))
+        self.assertTrue(any(
+            rule["source"] == "scoop.depth"
+            and rule["target"] == "scoop.height"
+            and rule["owner"] == "scoop"
+            for rule in interactions
+        ))
         self.assertTrue(parts["text"]["flags"]["text"])
         self.assertEqual(parts["text"]["title"], "Text")
         self.assertTrue(parts["cradle"]["flags"]["alternate"])
@@ -232,6 +247,12 @@ class WebApplicationTests(unittest.TestCase):
         high_top = max(point[2] for face in high["geometry"] for point in face["points"])
         self.assertGreater(high_top, low_top + 4.0)
 
+    def test_new_divider_starts_with_one_wall_on_each_axis(self):
+        response = default_feature_payload({"design": default_design(), "kind": "divider"})
+        self.assertEqual(response["feature"]["options"], {"count_x": 1, "count_y": 1})
+        self.assertEqual(response["resolved_options"]["count_x"], 1)
+        self.assertEqual(response["resolved_options"]["count_y"], 1)
+
     def test_photo_nest_defaults_include_finger_grasp_lift_assist(self):
         design = default_design()
         response = default_feature_payload({
@@ -346,7 +367,7 @@ class WebApplicationTests(unittest.TestCase):
         feature = original["layout"]["features"][0]
         feature["rotation"] = 90.0
         rotated = apply_feature_payload({"design": original, "feature": feature, "index": 0})["design"]
-        self.assertLess(rotated["box"]["x"], original["box"]["x"])
+        self.assertEqual(rotated["box"]["x"], original["box"]["x"])
         self.assertGreater(rotated["box"]["y"], original["box"]["y"])
         feature = rotated["layout"]["features"][0]
         feature["scale"] = 1.5
@@ -504,6 +525,87 @@ class WebApplicationTests(unittest.TestCase):
         })
         self.assertTrue(drafted["geometry"])
         self.assertEqual(drafted["resolved_options"]["bottom_angle"], 0.0)
+
+    def test_enabled_divider_scoop_applies_to_every_cell_after_browser_round_trip(self):
+        design = default_design()
+        design["box"]["x"] = 48.0
+        design["box"]["y"] = 48.0
+        feature = default_feature_payload({
+            "design": design, "kind": "divider",
+        })["feature"]
+        feature["options"] = {
+            "count_x": 1,
+            "count_y": 1,
+            "scoop": {"depth": 45, "cells": ["r0c1", "r1c0"]},
+        }
+        applied = apply_feature_payload({
+            "design": design, "feature": feature, "index": None,
+        })
+        saved = applied["design"]["layout"]["features"][0]
+        self.assertEqual(saved["options"]["scoop"], {"depth": 45})
+        drafted = draft_payload({"design": applied["design"], "feature": saved})
+        self.assertEqual(len(drafted["divider_cells"]), 4)
+        self.assertEqual(
+            {cell["id"] for cell in drafted["divider_cells"] if cell["scoop"]},
+            {"r0c0", "r0c1", "r1c0", "r1c1"},
+        )
+        self.assertTrue(drafted["geometry"])
+
+    def test_old_divider_cell_targets_migrate_to_all_cells(self):
+        design = default_design()
+        design["box"]["x"] = 48.0
+        design["box"]["y"] = 48.0
+        feature = default_feature_payload({
+            "design": design, "kind": "divider",
+        })["feature"]
+        feature["options"] = {
+            "count_x": 1,
+            "count_y": 0,
+            "scoop": {"cells": ["r0c0", "r1c1"]},
+        }
+        applied = apply_feature_payload({
+            "design": design, "feature": feature, "index": None,
+        })
+        saved = applied["design"]["layout"]["features"][0]
+        self.assertEqual(saved["options"]["scoop"], {})
+
+    def test_divider_scoop_and_sloped_bottom_are_mutually_exclusive_on_save(self):
+        design = default_design()
+        feature = default_feature_payload({
+            "design": design, "kind": "divider",
+        })["feature"]
+        feature["options"].update({
+            "scoop": {"depth": 50},
+            "slope_base": True,
+            "bottom_angle": 20,
+            "alternate_bottom": True,
+            "minimal_bottom": True,
+            "bottom_supports": 3,
+            "division_side": "left",
+        })
+        applied = apply_feature_payload({
+            "design": design, "feature": feature, "index": None,
+        })
+        saved = applied["design"]["layout"]["features"][0]["options"]
+        self.assertEqual(saved["scoop"], {"depth": 50})
+        for key in (
+            "slope_base", "bottom_angle", "alternate_bottom",
+            "minimal_bottom", "bottom_supports", "division_side",
+        ):
+            self.assertNotIn(key, saved)
+
+    def test_legacy_divider_without_scoop_configuration_still_loads(self):
+        design = default_design()
+        feature = default_feature_payload({
+            "design": design, "kind": "divider",
+        })["feature"]
+        self.assertNotIn("scoop", feature["options"])
+        design["layout"]["features"] = [feature]
+        box, layout, *_ = design_from_dict(design)
+        self.assertNotIn("scoop", layout.features[0].options)
+        self.assertTrue(build_features(
+            box, layout.features, base_height(box, layout.mode),
+        ))
 
     def _long_cradle_design(self, mode):
         """A bin barely longer than one cradle zone, whose trough fills well
@@ -671,7 +773,7 @@ class WebApplicationTests(unittest.TestCase):
         feature["along"] = "y"
         # This is a valid 2 x 2 base placed close to the -Y side. Its
         # cylinders lean farther towards that wall once they leave the bore.
-        feature["zone"] = [-16.0, -46.0, 16.0, -2.0]
+        feature["zone"] = [-16.0, -46.0, 16.0, 10.0]
         feature["options"] = {"columns": 2, "rows": 2, "depth": 16.0,
                               "wall": 3.0, "angle": 45.0}
         design["layout"]["features"] = [feature]
@@ -1002,29 +1104,6 @@ class WebApplicationTests(unittest.TestCase):
                     })
                 self.assertIn("Bambu Studio was not found", str(ctx.exception))
 
-    def test_browse_slicer_path_saves_preference_and_returns_path(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            fake_exe = Path(temp_dir) / "orca-slicer.exe"
-            fake_exe.touch()
-            with (
-                patch("tkinter.Tk"),
-                patch("tkinter.filedialog.askopenfilename", return_value=str(fake_exe)),
-                patch.object(wavefinity_web, "save_preferences") as mock_save,
-            ):
-                result = wavefinity_web.browse_slicer_path_payload({"current": str(fake_exe)})
-                self.assertEqual(result["slicer_path"], str(fake_exe))
-                mock_save.assert_called_once_with({"slicer_path": str(fake_exe)})
-
-    def test_browse_slicer_path_handles_cancel(self):
-        with (
-            patch("tkinter.Tk"),
-            patch("tkinter.filedialog.askopenfilename", return_value=""),
-            patch.object(wavefinity_web, "save_preferences") as mock_save,
-        ):
-            result = wavefinity_web.browse_slicer_path_payload({})
-            self.assertIsNone(result["slicer_path"])
-            mock_save.assert_not_called()
-
     def test_2d_layout_arrow_keys_and_movement_hints(self):
         root = Path(__file__).resolve().parent
         app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
@@ -1056,6 +1135,37 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn("restoreHistory(true)", app_js)
         self.assertIn('event.key.toLowerCase() === "z"', app_js)
         self.assertIn('event.key.toLowerCase() === "y"', app_js)
+
+    def test_divider_scoop_editor_applies_to_every_compartment(self):
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        styles_css = (root / "web" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn('plainCheckbox("option:slope_base", "Slope base"', app_js)
+        self.assertIn('dataAttribute: "data-divider-scoop-enabled"', app_js)
+        self.assertIn('plainCheckbox("option:label_divisions", "Label divisions"', app_js)
+        self.assertNotIn("Slot bottoms", app_js)
+        self.assertNotIn("Compartment scoops", app_js)
+        self.assertNotIn("Division labels", app_js)
+        self.assertNotIn("data-divider-scoop-cell", app_js)
+        self.assertNotIn("data-divider-scoop-all", app_js)
+        self.assertNotIn("data-divider-scoop-none", app_js)
+        self.assertNotIn("divider-scoop-grid", styles_css)
+        self.assertIn('changed === "option:slope_base" && one.options.slope_base', app_js)
+        self.assertIn('delete one.options.scoop;', app_js)
+        self.assertIn('delete state.draft.options[key];', app_js)
+        self.assertIn('textLevelSelector("draft-text-level", textLevel)', app_js)
+        self.assertIn('textLevelSelector("draft-division-level", divLevel)', app_js)
+        self.assertNotIn("Line up against", app_js)
+        self.assertNotIn('name="draft-division-side"', app_js)
+
+    def test_feature_icons_are_separate_and_loaded_before_the_app(self):
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        icons_js = (root / "web" / "feature-icons.js").read_text(encoding="utf-8")
+        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("WavefinityFeatureIcons", icons_js)
+        self.assertNotIn('divider: \'<rect x="4"', app_js)
+        self.assertLess(index_html.index("/feature-icons.js"), index_html.index("/app.js"))
 
 
 class WebServerTests(unittest.TestCase):
@@ -1145,8 +1255,8 @@ class WebServerTests(unittest.TestCase):
         # settings.
         self.assertNotIn(b'id="add-support"', body)
         self.assertLess(body.index(b'id="support-palette"'), body.index(b'id="draft-fields"'))
-        self.assertLess(body.index(b'id="draft-fields"'), body.index(b'id="save-part"'))
         self.assertLess(body.index(b'id="save-part"'), body.index(b'id="delete-part"'))
+        self.assertLess(body.index(b'id="delete-part"'), body.index(b'id="draft-fields"'))
         self.assertIn(b'id="mode-select"', body)
         self.assertIn(b'data-preview-mode="standard"', body)
         self.assertIn(b'data-preview-mode="xray"', body)
@@ -1251,22 +1361,6 @@ class WebServerTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertIn("files", response)
                 self.assertIn("slicer", response)
-
-    def test_browse_slicer_path_serves_get_and_post(self):
-        with (
-            patch("tkinter.Tk"),
-            patch("tkinter.filedialog.askopenfilename", return_value=r"C:\fake.exe"),
-            patch.object(wavefinity_web, "save_preferences"),
-        ):
-            get_status, _, get_raw = self.get("/api/browse-slicer-path")
-            self.assertEqual(get_status, 200)
-            self.assertEqual(json.loads(get_raw)["slicer_path"], r"C:\fake.exe")
-
-            post_status, post_body = self.post("/api/browse-slicer-path", {})
-            self.assertEqual(post_status, 200)
-            self.assertEqual(post_body["slicer_path"], r"C:\fake.exe")
-
-
 
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:

@@ -9,7 +9,10 @@ import trimesh
 from organizer_engine import BoxSpec
 
 from ._core import Feature, _fit_count
-from ._registry import defaults, feature, resolved_options
+from ._registry import (
+    OptionDefinition, SettingInteraction, defaults, feature,
+    register_setting_interactions, resolved_options,
+)
 
 
 @defaults("post")
@@ -17,7 +20,19 @@ def post_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float]
     return {"diameter": 12.0, "height": 16.0, "spacing": 4.0, "taper": 0.4}
 
 
-@feature("post")
+@feature(
+    "post", title="Post", display="Center post — rolls and rings",
+    description="A tapered peg for tape rolls, spools, sockets and rings.",
+    capabilities=("qty", "along"),
+    options=(
+        OptionDefinition("Height", "height", "16"),
+        OptionDefinition("Diameter", "diameter", "12"),
+        OptionDefinition("Taper", "taper", "0.4"),
+        OptionDefinition("Spacing", "spacing", "4"),
+        OptionDefinition("X quantity", "count_x", "", "integer", False),
+        OptionDefinition("Y quantity", "count_y", "", "integer", False),
+    ), order=40,
+)
 def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """Lightly tapered pegs for rolls, spools, rings and sockets arranged in X and Y."""
     zone = spec_feature.zone
@@ -80,3 +95,15 @@ def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             post.apply_translation((centre_x + offset_x, centre_y + offset_y, base_z))
             posts.append(post)
     return posts
+
+
+register_setting_interactions("post", (
+    SettingInteraction("count", "zone.run", "auto-adjust", "post-sizing",
+                       "Quantity grows the Post row on its run axis."),
+    SettingInteraction("diameter", "zone", "auto-adjust", "post-sizing",
+                       "Post diameter grows the footprint needed by each peg."),
+    SettingInteraction("spacing", "zone.run", "auto-adjust", "post-sizing",
+                       "Spacing grows the row without shrinking a manual Base size."),
+    SettingInteraction("along", "zone", "auto-adjust", "post-sizing",
+                       "Changing orientation swaps which footprint axis the row uses."),
+))

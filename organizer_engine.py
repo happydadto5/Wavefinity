@@ -40,6 +40,26 @@ from shapely.affinity import rotate as rotate_polygon, translate as translate_po
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 from shapely.ops import unary_union
 
+from organizer_easy_clean import (
+    EASY_CLEAN_RADIUS,
+    easy_clean_profile,
+    easy_clean_settings,
+)
+from organizer_geometry import (
+    _align_ring,
+    _cleaned,
+    _extrude_polygon,
+    _extrude_xz_profile,
+    _extrude_yz_profile,
+    _loft_cavity,
+    _resampled_ring,
+    _sweep_profile,
+    difference,
+    intersection,
+    translated,
+    union,
+)
+
 
 # --------------------------------------------------------------------------- #
 # wave and box constants
@@ -77,7 +97,6 @@ BASE_UNIT = GRID_PITCH           # one unit is one grid step, so sizes are whole
 DEFAULT_WALL = 0.8
 DEFAULT_BASE_THICKNESS = 0.6
 DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
-EASY_CLEAN_RADIUS = 2.0      # inside floor-to-wall radius when exposed
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner
 # Locked in after the physical tolerance print: these are no longer tuning
 # knobs, they are the connector's specification.
@@ -253,8 +272,11 @@ class BoxSpec:
         for name, value in values.items():
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be a positive finite number")
-        if self.easy_clean_style not in {"bevel", "curve"}:
-            raise ValueError("easy clean style must be 'bevel' or 'curve'")
+        easy_clean_settings(self.easy_clean_style, self.easy_clean_radius)
+        if not 0.0 <= self.flat_inside <= 1.0:
+            raise ValueError("flat inside must be between 0 and 1 mm")
+        if self.flat_inside > 0.0 and self.base_thickness + self.flat_inside >= self.z:
+            raise ValueError("box is too shallow for a flat-walled band")
         if self.base_thickness < TEXT_DEPTH:
             raise ValueError(
                 f"base thickness must be at least {TEXT_DEPTH:g} mm"
@@ -274,12 +296,6 @@ class BoxSpec:
                     f"grid so boxes of different sizes still interlock; "
                     f"{value:g} mm is not - try {nearest * GRID_PITCH:.0f} mm"
                 )
-        if not 0.0 <= self.flat_inside <= 1.0:
-            raise ValueError("flat inside must be between 0 and 1 mm")
-        if self.flat_inside > 0.0 and self.base_thickness + self.flat_inside >= self.z:
-            raise ValueError("box is too shallow for a flat-walled band")
-        if self.easy_clean_radius <= 0.0:
-            raise ValueError("easy clean radius must be positive")
         if self.wall_depth * 2.0 >= min(self.x, self.y) - WAVE_MATING_GAP - 2.0 * WAVE_AMPLITUDE:
             raise ValueError("wall thickness leaves no cavity")
 
@@ -608,139 +624,17 @@ def mating_clearance(
     return first.distance(second)
 
 
-# --------------------------------------------------------------------------- #
-# mesh helpers
-# --------------------------------------------------------------------------- #
-def translated(mesh: trimesh.Trimesh, xyz: tuple[float, float, float]) -> trimesh.Trimesh:
-    result = mesh.copy()
-    result.apply_translation(xyz)
-    return result
-
-
-def _cleaned(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
-    """Drop unreferenced/duplicate vertices left over from a boolean op.
-
-    ``merge_vertices`` welds anything within its tolerance, which is usually
-    just harmless leftovers - but two surfaces that pass close and near
-    parallel for a long run (a steep full-span divider tracking the wavy
-    wall, say) can have distinct vertices fall within that same tolerance,
-    and welding those turns a clean manifold result non-watertight. Keep the
-    cleanup when it's safe; skip it rather than hand back a broken mesh.
-    """
-    was_watertight = mesh.is_watertight
-    cleaned = mesh.copy()
-    cleaned.remove_unreferenced_vertices()
-    cleaned.merge_vertices()
-    if was_watertight and not cleaned.is_watertight:
-        return mesh
-    return cleaned
-
-
-def union(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
-    return _cleaned(trimesh.boolean.union(meshes, engine="manifold"))
-
-
-def difference(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
-    return _cleaned(trimesh.boolean.difference(meshes, engine="manifold"))
-
-
-def intersection(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh:
-    return _cleaned(trimesh.boolean.intersection(meshes, engine="manifold"))
-
-
-def _extrude_polygon(polygon: Polygon, height: float) -> trimesh.Trimesh:
-    return trimesh.creation.extrude_polygon(polygon, height, engine="earcut")
-
-
-def _extrude_yz_profile(profile: Polygon, width: float) -> trimesh.Trimesh:
-    """Extrude a Y/Z section across world X."""
-    solid = _extrude_polygon(profile, width)
-    solid.apply_transform(np.asarray([
-        [0.0, 0.0, 1.0, -width / 2.0],
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ]))
-    return solid
-
-
-def _extrude_xz_profile(profile: Polygon, width: float) -> trimesh.Trimesh:
-    """Extrude an X/Z section across world Y - the ``_extrude_yz_profile`` mirror
-    for a shape that runs the other direction."""
-    solid = _extrude_polygon(profile, width)
-    solid.apply_transform(np.asarray([
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, -width / 2.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ]))
-    return solid
-
-
-def _sweep_profile(
-    path: list[tuple[float, float]],
-    lateral: tuple[float, float],
-    profile_tz: list[tuple[float, float]],
-) -> trimesh.Trimesh:
-    """Sweep a closed ``(t, z)`` profile along a planar path.
-
-    ``lateral`` is the unit X/Y direction the profile's ``t`` axis points along;
-    its ``z`` axis is world Z.  Returns a watertight prism with flat end caps.
-    """
-    lateral_x, lateral_y = lateral
-    rings, loop = len(path), len(profile_tz)
-    vertices = [
-        (base_x + lateral_x * t, base_y + lateral_y * t, z)
-        for base_x, base_y in path
-        for t, z in profile_tz
-    ]
-    faces: list[tuple[int, int, int]] = []
-    for ring in range(rings - 1):
-        a, b = ring * loop, (ring + 1) * loop
-        for j in range(loop):
-            jn = (j + 1) % loop
-            faces.append((a + j, a + jn, b + jn))
-            faces.append((a + j, b + jn, b + j))
-    for j in range(1, loop - 1):
-        faces.append((0, j, j + 1))
-    last = (rings - 1) * loop
-    for j in range(1, loop - 1):
-        faces.append((last, last + j + 1, last + j))
-
-    mesh = trimesh.Trimesh(
-        vertices=np.asarray(vertices, dtype=float),
-        faces=np.asarray(faces, dtype=np.int64),
-        process=True,
-    )
-    mesh.merge_vertices()
-    trimesh.repair.fix_winding(mesh)
-    if mesh.volume < 0:
-        mesh.invert()
-    if not (mesh.is_watertight and mesh.is_winding_consistent):
-        raise RuntimeError("swept lock profile is not a clean solid")
-    return mesh
-
-
 def _easy_clean_profile(spec: BoxSpec) -> list[tuple[float, float]]:
-    """Quarter-round or 45-degree beveled material added at an exposed inside floor/wall joint."""
-    radius = spec.easy_clean_radius
+    """Box adapter for the reusable Easy Clean floor-to-wall profile."""
     # A straight lower band must cover the full excursion of the cavity above
     # it.  Otherwise the troughs left beside a straight fillet form a second,
     # wavy dirt-catching groove at the floor.
     embed = 2.0 * WAVE_AMPLITUDE + 0.2
-    centre_z = spec.base_thickness + radius
-    if spec.easy_clean_style == "bevel":
-        return [
-            (-embed, spec.base_thickness),
-            (-embed, centre_z),
-            (0.0, centre_z),
-            (radius, spec.base_thickness),
-        ]
-    points = [(-embed, spec.base_thickness), (-embed, centre_z), (0.0, centre_z)]
-    for index in range(1, 17):
-        angle = math.pi + (math.pi / 2.0) * index / 16.0
-        points.append((radius + radius * math.cos(angle), centre_z + radius * math.sin(angle)))
-    return points
+    return easy_clean_profile(
+        spec.base_thickness,
+        easy_clean_settings(spec.easy_clean_style, spec.easy_clean_radius),
+        embed,
+    )
 
 
 def _easy_clean_fillets(
@@ -787,69 +681,6 @@ def _easy_clean_fillets(
     return result
 
 
-def _resampled_ring(polygon: Polygon, count: int) -> np.ndarray:
-    """Return a counter-clockwise, evenly spaced exterior ring."""
-    boundary = polygon.exterior
-    ring = np.asarray([
-        boundary.interpolate(boundary.length * index / count).coords[0]
-        for index in range(count)
-    ], dtype=float)
-    if not polygon.exterior.is_ccw:
-        ring = ring[::-1]
-    return ring
-
-
-def _align_ring(reference: np.ndarray, ring: np.ndarray) -> np.ndarray:
-    """Rotate a same-sized ring so equivalent perimeter points line up."""
-    start = int(np.argmin(np.sum((ring - reference[0]) ** 2, axis=1)))
-    return np.roll(ring, -start, axis=0)
-
-
-def _loft_cavity(rings: list[np.ndarray], heights: list[float]) -> trimesh.Trimesh:
-    """Create one closed cavity solid through matching horizontal rings."""
-    if len(rings) != len(heights) or len(rings) < 2:
-        raise ValueError("a cavity loft needs at least two matching rings")
-    count = len(rings[0])
-    if any(len(ring) != count for ring in rings):
-        raise ValueError("cavity loft rings must have matching point counts")
-
-    vertices = [
-        (float(x), float(y), height)
-        for ring, height in zip(rings, heights)
-        for x, y in ring
-    ]
-    faces: list[tuple[int, int, int]] = []
-    for level in range(len(rings) - 1):
-        low, high = level * count, (level + 1) * count
-        for index in range(count):
-            next_index = (index + 1) % count
-            faces.append((low + index, low + next_index, high + next_index))
-            faces.append((low + index, high + next_index, high + index))
-
-    # Caps are triangulated from the same sampled points as the side walls, so
-    # trimesh can weld every cap edge to its matching side edge exactly.
-    for ring, height, reverse in ((rings[0], heights[0], True), (rings[-1], heights[-1], False)):
-        cap = Polygon(ring)
-        cap_vertices, cap_faces = trimesh.creation.triangulate_polygon(cap, engine="earcut")
-        offset = len(vertices)
-        vertices.extend((float(x), float(y), height) for x, y in cap_vertices)
-        for face in cap_faces:
-            triangle = tuple(offset + int(index) for index in face)
-            faces.append(triangle[::-1] if reverse else triangle)
-
-    mesh = trimesh.Trimesh(
-        vertices=np.asarray(vertices, dtype=float),
-        faces=np.asarray(faces, dtype=np.int64),
-        process=True,
-    )
-    trimesh.repair.fix_winding(mesh)
-    if mesh.volume < 0:
-        mesh.invert()
-    if not (mesh.is_watertight and mesh.is_winding_consistent):
-        raise RuntimeError("easy-clean cavity loft is not a clean solid")
-    return mesh
-
-
 def _easy_clean_cavity(spec: BoxSpec) -> trimesh.Trimesh:
     """Cavity with a straight, rounded lower band that blends into the wave.
 
@@ -857,7 +688,8 @@ def _easy_clean_cavity(spec: BoxSpec) -> trimesh.Trimesh:
     eases from the straight wall into the normal wave, so there is no ledge at
     the top for debris to collect on.
     """
-    radius = spec.easy_clean_radius
+    settings = easy_clean_settings(spec.easy_clean_style, spec.easy_clean_radius)
+    radius = settings.radius
     floor_z = spec.base_thickness
     blend_top = floor_z + 2.0 * radius
     if blend_top >= spec.z:
@@ -885,7 +717,7 @@ def _easy_clean_cavity(spec: BoxSpec) -> trimesh.Trimesh:
     # horizontal shelf where the normal wave resumes.
     rings: list[np.ndarray] = []
     heights: list[float] = []
-    if spec.easy_clean_style == "bevel":
+    if settings.style == "bevel":
         rings.append(floor_points)
         heights.append(floor_z)
         rings.append(flat_points)
@@ -1644,24 +1476,58 @@ def make_scoop(
     """
     x0, wall_y, x1, _y1 = _scoop_bounds(box, floor_bounds)
     height, run = scoop_dimensions(box, floor_bounds)
-    inner_y = wall_y + run
-    floor_z = box.base_thickness
+    return build_scoop_region(
+        (x0, wall_y, x1, wall_y + run), box.base_thickness, height, "x"
+    )
+
+
+def build_scoop_region(
+    bounds: tuple[float, float, float, float],
+    floor_z: float,
+    height: float,
+    along: str = "x",
+) -> trimesh.Trimesh:
+    """Build the authoritative curved Scoop profile inside one floor region.
+
+    ``along`` is the direction of the wall edge: ``x`` rises from the region's
+    low-Y edge and ``y`` rises from its low-X edge. Containers decide which
+    region receives the Scoop; this function owns the shared profile math.
+    """
+    x0, y0, x1, y1 = bounds
+    if (
+        not all(math.isfinite(value) for value in (*bounds, floor_z, height))
+        or x1 <= x0 or y1 <= y0 or height <= 0.0
+    ):
+        raise ValueError("a scoop needs positive finite bounds and height")
+    if along not in {"x", "y"}:
+        raise ValueError("scoop orientation must be 'x' or 'y'")
+
     centre_z = floor_z + height
+    if along == "x":
+        wall, inner, run = y0, y1, y1 - y0
+    else:
+        wall, inner, run = x0, x1, x1 - x0
     curve = [
         (
-            inner_y - run * math.cos(theta),
+            inner - run * math.cos(theta),
             centre_z + height * math.sin(theta),
         )
         for theta in np.linspace(0.0, -math.pi / 2.0, SCOOP_CURVE_SEGMENTS + 1)
     ]
     profile = Polygon([
-        (inner_y, floor_z),
-        (wall_y, floor_z),
-        (wall_y, centre_z),
+        (inner, floor_z),
+        (wall, floor_z),
+        (wall, centre_z),
         *curve[1:-1],
     ])
-    scoop = _extrude_yz_profile(profile, x1 - x0)
-    scoop.apply_translation(((x0 + x1) / 2.0, 0.0, 0.0))
+    if not profile.is_valid:
+        raise ValueError("invalid scoop profile generated")
+    if along == "x":
+        scoop = _extrude_yz_profile(profile, x1 - x0)
+        scoop.apply_translation(((x0 + x1) / 2.0, 0.0, 0.0))
+    else:
+        scoop = _extrude_xz_profile(profile, y1 - y0)
+        scoop.apply_translation((0.0, (y0 + y1) / 2.0, 0.0))
     scoop.remove_unreferenced_vertices()
     scoop.merge_vertices()
     return scoop
@@ -1772,6 +1638,7 @@ def label_placement(
     minx, miny, maxx, maxy = ideal.bounds
     ideal_width, ideal_height = maxx - minx, maxy - miny
 
+    orientations: list[tuple[bool, float]] = []
     for rotated in (False, True):
         across, up = ((ideal_height, ideal_width) if rotated
                       else (ideal_width, ideal_height))
@@ -1780,13 +1647,27 @@ def label_placement(
                       TEXT_CAP_HEIGHT_IDEAL * room_y / up)
         if max_cap < TEXT_CAP_HEIGHT_MIN - 1e-9:
             continue
-        turns = 1 if rotated else 0
-        if not obstacles:
-            return LabelPlacement(max_cap, rotated, quarter_turns=turns)
+        orientations.append((rotated, max_cap))
 
-        # Quarter-millimetre cap steps are visually continuous while keeping a
-        # live editor responsive. Always test the exact minimum as the last try.
-        for cap in _cap_steps(max_cap):
+    if orientations and not obstacles:
+        # Pick the direction that keeps the letters largest. Prefer the natural
+        # reading direction only when both orientations are equally good.
+        rotated, max_cap = max(
+            orientations, key=lambda choice: (choice[1], not choice[0])
+        )
+        return LabelPlacement(max_cap, rotated, quarter_turns=1 if rotated else 0)
+
+    # Try both directions at each available size before shrinking further.
+    # Including each orientation's exact maximum avoids throwing away useful
+    # fractions of a millimetre merely because the two maxima differ.
+    cap_steps = sorted({
+        cap for _rotated, max_cap in orientations for cap in _cap_steps(max_cap)
+    }, reverse=True)
+    for cap in cap_steps:
+        for rotated, max_cap in orientations:
+            if cap > max_cap + 1e-9:
+                continue
+            turns = 1 if rotated else 0
             outline = text_outline(label, cap)
             if rotated:
                 outline = rotate_polygon(outline, 90.0, origin=(0.0, 0.0),
