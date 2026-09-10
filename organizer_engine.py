@@ -934,6 +934,13 @@ def make_box(
     spec: BoxSpec,
     blocked_walls: Iterable[tuple[str, float, float]] = (),
 ) -> trimesh.Trimesh:
+    # Architecture guard: a B4B has its own body builder (organizer_b4b.
+    # make_b4b_body).  If a B4B spec reaches the ordinary path a route was
+    # missed - fail loudly rather than silently print a plain box.
+    if getattr(getattr(spec, "b4b", None), "enabled", False):
+        raise ValueError(
+            "B4B BoxSpec must use the dedicated B4B builder, not make_box()"
+        )
     blocked_walls = tuple(blocked_walls)
     envelope = _extrude_polygon(wavy_outer_polygon(spec), spec.z)
     if spec.easy_clean and not blocked_walls:

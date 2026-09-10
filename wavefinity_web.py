@@ -805,6 +805,10 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     case to render it."""
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     eff = b4b_effective_box(box)
+    # The design the browser adopts carries the *effective* grown footprint so
+    # Width/Length show what will actually print and save. The derived stacking
+    # base thickness is deliberately NOT surfaced as a manual value - only X/Y.
+    adopted = replace(box, x=eff.x, y=eff.y)
     message = ""
     geometry: list[dict[str, Any]] = []
     b4b_block: dict[str, Any] | None = None
@@ -826,7 +830,7 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     bounds = layout_zone(eff, "fused")
     cavity = wavy_cavity_polygon(eff)
     return {
-        "design": design_to_dict(box, Layout((), "fused", EDITOR_SNAP),
+        "design": design_to_dict(adopted, Layout((), "fused", EDITOR_SNAP),
                                  "", part_name, "bottom", False),
         "b4b": b4b_block,
         "label_outline": [],

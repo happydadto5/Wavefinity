@@ -1067,6 +1067,16 @@ def generate_organizer_files(
     """
     if box.b4b.enabled:
         # B4B is a container mode, not an interior layout: dedicated path.
+        # A caller that hands a B4B box a non-empty or non-fused Layout is
+        # passing conflicting intent - reject it rather than quietly ignoring
+        # the layout argument.
+        validate_b4b_design(
+            box,
+            layout_feature_count=len(layout.features),
+            layout_mode=layout.mode,
+            easy_clean=box.easy_clean,
+            flat_inside=box.flat_inside,
+        )
         return generate_b4b_files(
             box, output_dir, part_name,
             auto_timestamp=auto_timestamp, keep_log=keep_log,
@@ -1755,12 +1765,24 @@ def design_from_dict(
         b4b=b4b,
     )
     if b4b.enabled:
-        # A B4B interior is reserved for child bins: no interior features, mode
-        # forced fused, Easy Clean / flat-inside normalised off.  Nothing to
-        # resolve or validate in the layout.
+        # A B4B interior is reserved for child bins.  Imported/saved JSON is
+        # authoritative user data: if it still carries interior features, a
+        # non-fused mode, Easy Clean or the flat-inside band, that is a real
+        # conflict and must fail with an actionable message - never a silent
+        # discard.  The UI's own conversion clears these before saving, so
+        # well-formed B4B JSON passes straight through.
+        raw_layout = data.get("layout", {}) or {}
+        raw_features = raw_layout.get("features", []) or []
+        raw_mode = str(raw_layout.get("mode", "fused"))
+        validate_b4b_design(
+            box,
+            layout_feature_count=len(raw_features),
+            layout_mode=raw_mode,
+            easy_clean=bool(raw.get("easy_clean", False)),
+            flat_inside=float(raw.get("flat_inside", 0.0) or 0.0),
+        )
         box = replace(box, easy_clean=False, flat_inside=0.0)
         layout = Layout((), "fused", EDITOR_SNAP)
-        validate_b4b_design(box)
         label = str(data.get("label", ""))
         location = label_position(data.get("label_position", "bottom"))
         return (box, layout, label, str(data.get("part_name", "")), location, False)

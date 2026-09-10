@@ -592,7 +592,10 @@ function applyB4BVisibility() {
   const hide = (sel, hidden) => { const el = $(sel); if (el) el.hidden = hidden; };
   hide(".subheading-row", on);
   hide(".palette-wrap", on);
-  hide(".support-editor", on && !state.draft);
+  // Unconditional when B4B is on: a leftover draft must never keep the interior
+  // editor visible while B4B owns the interior. Off-B4B visibility is managed by
+  // the draft workflow elsewhere, so only force-hide here.
+  if (on) hide(".support-editor", true);
   const modeLabel = $("#mode-select")?.closest("label");
   if (modeLabel) modeLabel.hidden = on;
   const ecRow = $("#easy-clean")?.closest("label");
@@ -614,6 +617,29 @@ function applyB4BVisibility() {
   }
 }
 
+// Form -> form: enforce the B4B option dependencies directly on the controls
+// from their own current values, so a user edit is never overwritten from
+// stale state. `changed` is the selector the user just toggled, if any.
+function normalizeB4BDependentControls(changed) {
+  const lid = $("#b4b-lid").checked;
+  if (!lid) {
+    // no lid => no secure lid, no stacking, no top label
+    $("#b4b-secure-lid").checked = false;
+    $("#b4b-stacking").checked = false;
+    if ($("#b4b-label-location").value === "top") {
+      $("#b4b-label-location").value = "none";
+    }
+  }
+  const secure = lid && $("#b4b-secure-lid").checked;
+  // passive lid => no hinge/latch controls
+  $("#b4b-secure-lid").disabled = !lid;
+  $("#b4b-stacking").disabled = !lid;
+  $("#b4b-latch-count").disabled = !secure;
+  $("#b4b-latch-strength").disabled = !secure;
+  const topOpt = $("#b4b-label-location").querySelector('option[value="top"]');
+  if (topOpt) topOpt.disabled = !lid;
+}
+
 function syncB4BForm() {
   const b4b = b4bState();
   $("#b4b-enabled").checked = Boolean(b4b.enabled);
@@ -625,8 +651,7 @@ function syncB4BForm() {
   $("#b4b-latch-strength").value = b4b.latch_strength || "standard";
   $("#b4b-label-text").value = b4b.label_text || "";
   $("#b4b-label-location").value = b4b.label_location || "none";
-  const topOpt = $("#b4b-label-location").querySelector('option[value="top"]');
-  if (topOpt) topOpt.disabled = !$("#b4b-lid").checked;
+  normalizeB4BDependentControls();
   applyB4BVisibility();
 }
 
@@ -637,6 +662,11 @@ function readB4BForm(design) {
     if (design.box.b4b) design.box.b4b = { ...B4B_DEFAULTS };
     return;
   }
+  // Explicit UI conversion clears the options a B4B interior cannot carry, so
+  // the saved JSON is coherent and does not trip the import-time validation.
+  design.box.easy_clean = false;
+  design.box.flat_inside = 0;
+  if (design.layout) design.layout.mode = "fused";
   const lid = $("#b4b-lid").checked;
   const secure = lid && $("#b4b-secure-lid").checked;
   let location = $("#b4b-label-location").value;
@@ -689,16 +719,19 @@ function renderB4BReadout() {
 }
 
 async function toggleB4B(wantEnabled) {
-  if (wantEnabled && state.design?.layout?.features?.length) {
-    const ok = window.confirm(
-      "Turning on Bin for Bins clears the interior parts - the B4B interior is " +
-      "reserved for child bins. Continue?");
-    if (!ok) { $("#b4b-enabled").checked = false; return; }
-    state.design.layout.features = [];
-    state.selected = null;
-    state.draft = null;
-  }
   if (wantEnabled) {
+    // Placed interior parts need an explicit confirmation before they go.
+    if (state.design?.layout?.features?.length) {
+      const ok = window.confirm(
+        "Turning on Bin for Bins clears the interior parts - the B4B interior " +
+        "is reserved for child bins. Continue?");
+      if (!ok) { $("#b4b-enabled").checked = false; return; }
+      state.design.layout.features = [];
+    }
+    // An unsaved draft, a selection, or a pending debounced draft action must
+    // not survive into B4B mode and later reinsert a part. clearDraftSelection
+    // cancels every in-flight draft request and resets all draft flags.
+    clearDraftSelection();
     state.design.layout.mode = "fused";
     state.design.box.easy_clean = false;
   }
@@ -979,7 +1012,11 @@ function formatDimField(axis) {
   const val = state.design?.box?.[axis];
   if (val == null) return;
   const inside = getInsideDimension(axis, val);
-  input.value = `${fmt(val)}mm (${inside} inside)`;
+  // Blurred state shows mm + outer Wavefinity units + inside mm. The unit count
+  // is the integer number of whole grid steps, from the authoritative base unit.
+  const unit = state.catalog?.base_unit || 8;
+  const units = Math.round(val / unit);
+  input.value = `${fmt(val)}mm (${units} unit${units === 1 ? "" : "s"}; ${inside} inside)`;
 }
 
 function setSidebarCollapsed(collapsed) {
@@ -1165,9 +1202,20 @@ function wireControls() {
 
   $("#b4b-enabled").addEventListener("change", () => toggleB4B($("#b4b-enabled").checked));
   ["#b4b-lid", "#b4b-secure-lid", "#b4b-stacking"].forEach(sel =>
-    $(sel).addEventListener("change", () => { syncB4BForm(); changedDesign(); }));
+    $(sel).addEventListener("change", () => {
+      // Commit the user's new click FIRST (form -> state), THEN apply the
+      // dependent-option rules and visibility. Never run syncB4BForm here: it
+      // is state -> form and would restore the old value over the click.
+      normalizeB4BDependentControls(sel);
+      readB4BForm(state.design);
+      applyB4BVisibility();
+      changedDesign();
+    }));
   ["#b4b-lid-snugness", "#b4b-latch-count", "#b4b-latch-strength", "#b4b-label-location"]
-    .forEach(sel => $(sel).addEventListener("change", changedDesign));
+    .forEach(sel => $(sel).addEventListener("change", () => {
+      readB4BForm(state.design);
+      changedDesign();
+    }));
   $("#b4b-label-text").addEventListener("input", () => {
     state.canGenerate = false; updateGenerateAvailability(); changedDesign();
   });
@@ -3470,9 +3518,16 @@ async function refreshPreview() {
     }
     const result = await api("/api/preview", payload);
     if (request !== state.previewRequest) return;
+    const grownX = result.design?.box?.x !== state.design?.box?.x;
+    const grownY = result.design?.box?.y !== state.design?.box?.y;
     state.preview = result;
     state.design = result.design;
     checkBinSizeChange();
+    // A B4B that auto-grew its footprint comes back with the effective X/Y as
+    // the real design dimensions: adopt them into the controls and flash the
+    // fields that the engine adjusted.
+    if (grownX) flashField($("#x-size"));
+    if (grownY) flashField($("#y-size"));
     const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
     $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
     $("#preview-state").classList.toggle("status-error", Boolean(previewHasErrors));

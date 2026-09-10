@@ -79,6 +79,13 @@ B4B_M3_THREAD_ENGAGE_MIN = 3.0
 B4B_M3_HEAD_CLEAR = 6.0
 B4B_SCREW_LENGTHS = (12, 16, 20, 25, 30)   # allowed kit lengths, mm
 B4B_M3_MAX_PROTRUSION = 6.0
+B4B_M3_HEAD_SEAT = 0.0        # head bears directly on the near ear face
+
+# Print-bed layout: parts are packed in a row, none overlapping.
+B4B_PRINT_PART_GAP = 8.0
+
+# Stacking boss self-locating lead-in (a real printed taper, not a claim).
+B4B_STACK_BOSS_CHAMFER = 0.6
 
 # Hinges (exactly two, rear wall)
 B4B_HINGE_COUNT = 2
@@ -210,6 +217,14 @@ def b4b_effective_box(box: BoxSpec) -> BoxSpec:
             while x < B4B_TWO_LATCH_MIN_X - _EPS:
                 x += GRID_PITCH
 
+    # Stacking needs a footprint wide enough that the four corner locators do
+    # not run into each other (see _stack_locator_centres): enforce the minimum
+    # so B4B_STACK_MIN_FOOTPRINT_UNITS is a live constraint, not a comment.
+    if b4b.stacking and b4b.lid:
+        floor = B4B_STACK_MIN_FOOTPRINT_UNITS * GRID_PITCH
+        x = max(x, floor)
+        y = max(y, floor)
+
     base_thickness = b4b_effective_base_thickness(box)
     return replace(
         box,
@@ -324,16 +339,58 @@ class B4BHardwarePlan:
         return lines
 
 
-def _pick_screw(span_mm: float) -> int:
-    """Smallest allowed M3 length that spans ``span_mm`` plus minimum thread
-    engagement without excessive protrusion."""
-    required = span_mm + B4B_M3_THREAD_ENGAGE_MIN
+def _screw_for_stack(clear_span_mm: float, lug_thickness_mm: float, what: str) -> int:
+    """Authoritative kit-screw choice for a pivot: the screw enters at the
+    head-bearing face, crosses ``clear_span_mm`` of clearance-bored material
+    (ears/knuckles + running gaps), then thread-forms into a terminal lug of
+    ``lug_thickness_mm``.
+
+    Returns the smallest ``B4B_SCREW_LENGTHS`` entry that gives at least
+    ``B4B_M3_THREAD_ENGAGE_MIN`` of thread bite without exceeding
+    ``B4B_M3_MAX_PROTRUSION`` past the far face of the lug.  Raises with an
+    actionable message when the kit has no such screw - never a silent
+    over-long fallback that validation cannot see.
+    """
+    need_min = clear_span_mm + B4B_M3_THREAD_ENGAGE_MIN
     for length in B4B_SCREW_LENGTHS:
-        if length + _EPS >= required and length - span_mm <= B4B_M3_MAX_PROTRUSION + _EPS:
+        if length + _EPS < need_min:
+            continue
+        protrusion = length - clear_span_mm - lug_thickness_mm
+        if protrusion <= B4B_M3_MAX_PROTRUSION + _EPS:
             return length
-    # Nothing fits cleanly: fall back to the longest allowed and let validation
-    # report the along-axis geometry needs trimming.
-    return B4B_SCREW_LENGTHS[-1]
+    allowed = ", ".join(f"M3x{n}" for n in B4B_SCREW_LENGTHS)
+    raise ValueError(
+        f"no kit screw ({allowed}) spans the {what} pivot: needs "
+        f"{need_min:.1f} mm for {B4B_M3_THREAD_ENGAGE_MIN:.1f} mm of thread "
+        f"engagement across a {clear_span_mm:.1f} mm clearance stack; "
+        f"adjust the hardware profile or the B4B size"
+    )
+
+
+def _latch_lug_thickness(ear_thickness: float) -> float:
+    """Terminal (far) latch-ear thickness: the profile pad wall, but never less
+    than enough for the minimum M3 thread engagement plus a printable skin."""
+    return max(ear_thickness, B4B_M3_THREAD_ENGAGE_MIN + 1.0)
+
+
+def _hinge_screw_stack(hinge_width: float) -> tuple[float, float]:
+    """(clearance span, terminal-lug thickness) for a three-knuckle hinge pin,
+    mirroring the geometry built by :func:`_hinge_body_parts`."""
+    seg = hinge_width / 3.0
+    kw = seg - B4B_HINGE_AXIAL_GAP
+    clear_span = 2.0 * kw + 2.0 * B4B_HINGE_AXIAL_GAP   # near knuckle + gap + centre + gap
+    return clear_span, kw
+
+
+def _latch_screw_stack(latch_width: float, ear_thickness: float) -> tuple[float, float]:
+    """(clearance span, terminal-lug thickness) for a latch pivot pin,
+    mirroring the ears in :func:`_latch_lid_parts` and the lever in
+    :func:`make_b4b_latches`.  The head bears on the near-ear outer face; the
+    clearance stack is near ear + running gap + lever + running gap; the screw
+    then thread-forms into the far lug.
+    """
+    clear_span = ear_thickness + latch_width + 2.0 * B4B_HINGE_AXIAL_GAP
+    return clear_span, _latch_lug_thickness(ear_thickness)
 
 
 def _front_span(eff: BoxSpec) -> float:
@@ -373,7 +430,8 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
     # axis at the lid-underside height, just behind the rear wall: the lid swings
     # back clear of the wavy wall without a tall, fragile tower.
     hinge_axis_z = b4b_lid_underside_z(box)
-    hinge_screw = _pick_screw(hinge_width)
+    h_span, h_lug = _hinge_screw_stack(hinge_width)
+    hinge_screw = _screw_for_stack(h_span, h_lug, "hinge")
 
     # Latches: front, 1 / 2 / Auto.
     latch_width = min(
@@ -393,7 +451,8 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
     else:
         third = span / 6.0
         latch_centers_x = (-third, third)
-    latch_screw = _pick_screw(latch_width)
+    l_span, l_lug = _latch_screw_stack(latch_width, profile["pad_wall"])
+    latch_screw = _screw_for_stack(l_span, l_lug, "latch")
 
     return B4BHardwarePlan(
         hinge_count=B4B_HINGE_COUNT,
@@ -442,14 +501,21 @@ def _stack_locator_centres(eff: BoxSpec) -> list[tuple[float, float]]:
 
 
 def _stack_recesses(box: BoxSpec) -> list[trimesh.Trimesh]:
+    """Female locator recesses cut into the B4B underside.
+
+    The cutter's upper face terminates at *exactly* ``B4B_STACK_RECESS_DEPTH``;
+    all boolean overshoot is below the exterior bottom (z=0).  So the finished
+    recess floor sits at z = ``B4B_STACK_RECESS_DEPTH`` and the remaining floor
+    skin is exactly ``eff.base_thickness - B4B_STACK_RECESS_DEPTH``.
+    """
     eff = b4b_effective_box(box)
     female_r = B4B_STACK_BOSS_DIAMETER / 2.0 + B4B_STACK_FEMALE_RADIAL_CLEARANCE
+    overshoot = 0.5
+    height = B4B_STACK_RECESS_DEPTH + overshoot
     solids: list[trimesh.Trimesh] = []
     for cx, cy in _stack_locator_centres(eff):
-        cyl = trimesh.creation.cylinder(
-            radius=female_r, height=B4B_STACK_RECESS_DEPTH + 0.2, sections=48
-        )
-        cyl.apply_translation((cx, cy, (B4B_STACK_RECESS_DEPTH + 0.2) / 2.0 - 0.1))
+        cyl = trimesh.creation.cylinder(radius=female_r, height=height, sections=48)
+        cyl.apply_translation((cx, cy, B4B_STACK_RECESS_DEPTH - height / 2.0))
         solids.append(cyl)
     return solids
 
@@ -469,10 +535,13 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     cavity.apply_translation((0.0, 0.0, floor_z))
     shell = difference([envelope, cavity])
 
-    # start the rail just inside the floor so the union is a single solid, not
-    # two shells meeting face to face
-    rail = _extrude_polygon(b4b_rail_ring_polygon(box), B4B_RAIL_HEIGHT + 0.6)
-    rail.apply_translation((0.0, 0.0, floor_z - 0.6))
+    # Start the rail just inside the floor so the union is a single solid, not
+    # two shells meeting face to face.  The downward overlap is bounded by the
+    # available floor thickness so nothing is ever placed below z=0, even on a
+    # thin custom base.
+    overlap = min(0.6, max(0.0, floor_z * 0.5))
+    rail = _extrude_polygon(b4b_rail_ring_polygon(box), B4B_RAIL_HEIGHT + overlap)
+    rail.apply_translation((0.0, 0.0, floor_z - overlap))
     body = union([shell, rail])
 
     if plan.hinge_count:
@@ -571,19 +640,38 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
     return lid
 
 
+def _chamfered_boss(radius: float, height: float, chamfer: float) -> trimesh.Trimesh:
+    """A cylinder with a conical lead-in on its free (top) end, built by
+    revolving an ``(r, z)`` profile.  The taper is what lets a stack self-centre
+    into the female recess without a snap."""
+    chamfer = max(0.0, min(chamfer, radius - 0.5, height - 0.4))
+    profile = np.array([
+        [0.0, 0.0],
+        [radius, 0.0],
+        [radius, height - chamfer],
+        [radius - chamfer, height],
+        [0.0, height],
+    ])
+    boss = trimesh.creation.revolve(profile, sections=48)
+    if not boss.is_volume:
+        boss = trimesh.creation.cylinder(radius=radius, height=height, sections=48)
+        boss.apply_translation((0.0, 0.0, height / 2.0))
+    return boss
+
+
 def _stack_bosses(box: BoxSpec) -> list[trimesh.Trimesh]:
     eff = b4b_effective_box(box)
     top_z = b4b_lid_underside_z(box) + B4B_LID_SKIN
     solids: list[trimesh.Trimesh] = []
     for cx, cy in _stack_locator_centres(eff):
-        cyl = trimesh.creation.cylinder(
-            radius=B4B_STACK_BOSS_DIAMETER / 2.0,
-            height=B4B_STACK_RECESS_DEPTH,
-            sections=48,
+        boss = _chamfered_boss(
+            B4B_STACK_BOSS_DIAMETER / 2.0,
+            B4B_STACK_RECESS_DEPTH,
+            B4B_STACK_BOSS_CHAMFER,
         )
-        # slight top chamfer so it self-locates without a snap
-        cyl.apply_translation((cx, cy, top_z + B4B_STACK_RECESS_DEPTH / 2.0))
-        solids.append(cyl)
+        # embed the base slightly into the lid skin so the union is one solid
+        boss.apply_translation((cx, cy, top_z - 0.4))
+        solids.append(boss)
     return solids
 
 
@@ -716,14 +804,25 @@ def _latch_frame(eff: BoxSpec, plan: B4BHardwarePlan) -> dict:
 
 
 def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """A reinforced catch pad + forward catch lip on the front exterior."""
+    """A reinforced catch pad + forward catch lip on the front exterior, plus a
+    closed-position retention bump.
+
+    The ``detent`` profile value is realised as a small ridge on the pad's
+    forward face.  It clears the lever completely in the fully-closed pose (no
+    static interference), but the descending-arc of the lever arm has to flex
+    past it to open - a genuine, hand-releasable over-a-bump retention that is
+    firmer for Standard (0.45 mm) than Lightweight (0.25 mm).  No spring, no
+    separate hardware.
+    """
     eff = b4b_effective_box(box)
     f = _latch_frame(eff, plan)
     prof = f["prof"]
+    detent = float(prof.get("detent", 0.0))
     parts: list[trimesh.Trimesh] = []
     pad_w = plan.latch_width + 2.0 * prof["pad_wall"]
     pad_y0 = f["y_wall"] - f["pad_out"]
     pad_y1 = f["y_wall"] + 2.0
+    lever_w = plan.latch_width - 2.0 * B4B_HINGE_AXIAL_GAP
     for cx in plan.latch_centers_x:
         pad = trimesh.creation.box(
             extents=(pad_w, pad_y1 - pad_y0, prof["pad_height"])
@@ -737,7 +836,18 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
         lip.apply_translation(
             (cx, (pad_y0 + f["lip_front"]) / 2.0, eff.z - prof["catch_thickness"] / 2.0)
         )
-        parts.append(union([pad, lip]))
+        solid = union([pad, lip])
+        if detent > _EPS:
+            # ridge on the pad face (-Y), at the height the opening arm sweeps
+            # through, standing proud by `detent`
+            bump = trimesh.creation.box(
+                extents=(lever_w * 0.7, detent + 0.4, 2.4)
+            )
+            bump.apply_translation(
+                (cx, pad_y0 - (detent + 0.4) / 2.0 + 0.2, f["z_catch"])
+            )
+            solid = union([solid, bump])
+        parts.append(solid)
     return parts
 
 
@@ -747,18 +857,30 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
     f = _latch_frame(eff, plan)
     parts: list[trimesh.Trimesh] = []
     ear_t = f["ear_t"]
+    lug_t = _latch_lug_thickness(ear_t)   # far ear is a real thread-forming lug
     top = f["underside_z"] + B4B_LID_SKIN
     z0 = f["axis_z"] - 3.0
     y0 = f["axis_y"] - 2.0
     y1 = f["y_wall"] - f["pad_out"] + 1.0   # reach back to just past the pad face
     for cx in plan.latch_centers_x:
-        for sign in (-1.0, 1.0):
-            ex = cx + sign * (plan.latch_width / 2.0 + B4B_HINGE_AXIAL_GAP + ear_t / 2.0)
-            ear = trimesh.creation.box(extents=(ear_t, y1 - y0, top - z0))
-            ear.apply_translation((ex, (y0 + y1) / 2.0, (z0 + top) / 2.0))
-            bore = _x_cylinder(B4B_M3_CLEAR_BORE / 2.0, ear_t + 1.0)
-            bore.apply_translation((ex, f["axis_y"], f["axis_z"]))
-            parts.append(difference([ear, bore]))
+        inner_face = plan.latch_width / 2.0 + B4B_HINGE_AXIAL_GAP
+        # -X ear: head bearing + clearance bore, runs right through.
+        near_t = ear_t
+        near_x = cx - (inner_face + near_t / 2.0)
+        near = trimesh.creation.box(extents=(near_t, y1 - y0, top - z0))
+        near.apply_translation((near_x, (y0 + y1) / 2.0, (z0 + top) / 2.0))
+        near_bore = _x_cylinder(B4B_M3_CLEAR_BORE / 2.0, near_t + 2.0)
+        near_bore.apply_translation((near_x, f["axis_y"], f["axis_z"]))
+        parts.append(difference([near, near_bore]))
+        # +X ear: terminal thread-forming lug, always at least the minimum
+        # thread engagement thick; pilot bored right through so the screw
+        # self-retains with no nut.
+        far_x = cx + inner_face + lug_t / 2.0
+        far = trimesh.creation.box(extents=(lug_t, y1 - y0, top - z0))
+        far.apply_translation((far_x, (y0 + y1) / 2.0, (z0 + top) / 2.0))
+        pilot = _x_cylinder(B4B_M3_PILOT / 2.0, lug_t + 2.0)
+        pilot.apply_translation((far_x, f["axis_y"], f["axis_z"]))
+        parts.append(difference([far, pilot]))
     return parts
 
 
@@ -804,6 +926,119 @@ def make_b4b_latches(box: BoxSpec) -> list[trimesh.Trimesh]:
 # --------------------------------------------------------------------------- #
 # validation
 # --------------------------------------------------------------------------- #
+def _sweep_intersection_cc(
+    moving: trimesh.Trimesh,
+    fixed: trimesh.Trimesh,
+    axis_y: float,
+    axis_z: float,
+    angles_deg: tuple[float, ...],
+) -> float:
+    """Largest overlap volume (cc) between ``moving`` (rotated about the world-X
+    line through ``(axis_y, axis_z)`` by each angle) and ``fixed``."""
+    from organizer_engine import intersection_volume
+
+    worst = 0.0
+    for deg in angles_deg:
+        m = moving.copy()
+        m.apply_translation((0.0, -axis_y, -axis_z))
+        m.apply_transform(
+            trimesh.transformations.rotation_matrix(math.radians(deg), (1.0, 0.0, 0.0))
+        )
+        m.apply_translation((0.0, axis_y, axis_z))
+        try:
+            worst = max(worst, intersection_volume(m, fixed) / 1000.0)
+        except Exception:
+            # a failed boolean at an extreme pose is not proof of a clash
+            continue
+    return worst
+
+
+def _validate_b4b_mechanics(box: BoxSpec) -> None:
+    """Sampled moving-part and thread-retention checks - run at generation time,
+    not on every keystroke.  Deterministic (fixed sample angles); not a full
+    rigid-body simulator."""
+    eff = b4b_effective_box(box)
+    b4b = eff.b4b
+    plan = b4b_hardware_plan(box)
+
+    # 1-2. printed terminal-lug thread engagement + screw protrusion.
+    if b4b.secure_lid:
+        h_span, h_lug = _hinge_screw_stack(plan.hinge_width)
+        engage = plan.hinge_screw_length_mm - h_span
+        if engage < B4B_M3_THREAD_ENGAGE_MIN - _EPS:
+            raise ValueError(
+                f"hinge pin threads only {engage:.1f} mm into its lug "
+                f"(need {B4B_M3_THREAD_ENGAGE_MIN:.1f} mm)"
+            )
+        if engage - h_lug > B4B_M3_MAX_PROTRUSION + _EPS:
+            raise ValueError("hinge pin protrudes past its lug by more than the limit")
+        l_span, l_lug = _latch_screw_stack(plan.latch_width, plan.strength_profile["pad_wall"])
+        engage = plan.latch_screw_length_mm - l_span
+        if engage < B4B_M3_THREAD_ENGAGE_MIN - _EPS:
+            raise ValueError(
+                f"latch pin threads only {engage:.1f} mm into its lug "
+                f"(need {B4B_M3_THREAD_ENGAGE_MIN:.1f} mm)"
+            )
+        if engage - l_lug > B4B_M3_MAX_PROTRUSION + _EPS:
+            raise ValueError("latch pin protrudes past its lug by more than the limit")
+
+    # 11. actual generated solids are watertight single volumes.
+    body = b4b_body_with_features(box)
+    if not body.is_watertight or body.volume <= 0.0:
+        raise ValueError("B4B body did not generate as a watertight solid")
+    lid = None
+    if b4b.lid:
+        lid = make_b4b_lid(box)
+        if b4b.label_location == "top" and b4b.label_text.strip():
+            lid, _inlay = _apply_top_label(box, lid)
+        if not lid.is_watertight or lid.volume <= 0.0:
+            raise ValueError("B4B lid did not generate as a watertight solid")
+
+    if not b4b.secure_lid:
+        return
+
+    # 3-4. latch rotation against the body (the front-label frame is already
+    # unioned into `body`).  A rigid rotating hook necessarily grazes the lip
+    # while the tooth releases, so the release band is not sampled; what must
+    # hold is (a) the closed pose has no interference beyond the detent, and
+    # (b) once past release the lever swings fully clear.
+    # Opening rotates the lid and the levers the -X-handed way about their
+    # axes (front edge / lever top swings up and back), so opening angles are
+    # negative here.
+    f = _latch_frame(eff, plan)
+    detent_cc = max(0.15, (plan.latch_width * 3.0 * float(plan.strength_profile.get("detent", 0.3))) / 1000.0)
+    for lever in make_b4b_latches(box):
+        closed = _sweep_intersection_cc(
+            lever, body, f["axis_y"], f["axis_z"], angles_deg=(0.0,)
+        )
+        if closed > detent_cc:
+            raise ValueError(
+                f"a latch lever statically interferes with the body when closed "
+                f"(overlap {closed:.2f} cc, detent allowance {detent_cc:.2f} cc)"
+            )
+        open_worst = _sweep_intersection_cc(
+            lever, body, f["axis_y"], f["axis_z"], angles_deg=(-45.0, -60.0, -75.0)
+        )
+        if open_worst > 0.4:
+            raise ValueError(
+                f"a latch lever does not swing clear of the body when open "
+                f"(overlap {open_worst:.2f} cc); reduce the hook depth or grow the B4B"
+            )
+
+    # 5-6. lid opening sweep about the hinge axis through the usable range - a
+    # clean rotation with no snap feature, so it must stay clear throughout.
+    if lid is not None:
+        worst = _sweep_intersection_cc(
+            lid, body, plan.hinge_axis_y, plan.hinge_axis_z,
+            angles_deg=(0.0, -15.0, -35.0, -60.0, -85.0, -100.0),
+        )
+        if worst > 0.4:
+            raise ValueError(
+                f"the lid collides with the body while opening "
+                f"(overlap {worst:.2f} cc); check the hinge placement"
+            )
+
+
 def validate_b4b_design(
     box: BoxSpec,
     *,
@@ -811,12 +1046,16 @@ def validate_b4b_design(
     layout_mode: str = "fused",
     easy_clean: bool = False,
     flat_inside: float = 0.0,
+    deep: bool = False,
 ) -> None:
     """Deterministic, actionable checks.  Raises ``ValueError`` on the first
     problem; never swallows a geometry error behind a generic message.
 
     Runs on the normalised spec - the same one the geometry is built from - so
-    it validates the design as it will actually be produced.
+    it validates the design as it will actually be produced.  ``deep=True``
+    additionally runs the sampled moving-part and thread-retention checks
+    (:func:`_validate_b4b_mechanics`); it builds meshes, so callers on the
+    preview hot path leave it off.
     """
     b4b = box.b4b.normalised()
     if not b4b.enabled:
@@ -856,6 +1095,9 @@ def validate_b4b_design(
             raise ValueError("latch pin length did not resolve to an allowed M3 length")
         if b4b.latch_count == "2" and plan.latch_count_resolved != 2:
             raise ValueError("two latches were requested but do not fit this width")
+
+    if deep:
+        _validate_b4b_mechanics(box)
 
 
 # --------------------------------------------------------------------------- #
@@ -906,6 +1148,22 @@ def b4b_summary(box: BoxSpec) -> dict:
     return summary
 
 
+def b4b_body_with_features(box: BoxSpec) -> trimesh.Trimesh:
+    """The B4B body exactly as it will print: shell + rail + hardware, plus the
+    slide-in front-label channel frame when that label is selected.
+
+    Preview and export both go through here so they can never disagree about
+    whether the frame is present.
+    """
+    body = make_b4b_body(box)
+    if b4b_effective_box(box).b4b.label_location == "front":
+        frame, _plate, _centre = b4b_front_label_geometry(box)
+        body = union([body, frame])
+        body.remove_unreferenced_vertices()
+        body.merge_vertices()
+    return body
+
+
 @lru_cache(maxsize=32)
 def _b4b_preview_geometry(box: BoxSpec) -> tuple:
     """Cached: identical B4B designs reuse the same preview mesh walk instead of
@@ -914,7 +1172,7 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
 
     geometry: list = []
     eff = b4b_effective_box(box)
-    body = make_b4b_body(box)
+    body = b4b_body_with_features(box)
     geometry.extend(_mesh_preview_geometry(body, "b4b_rail"))
     if eff.b4b.label_location == "front":
         geometry.extend(
@@ -969,32 +1227,70 @@ def _fit_text_outline(text: str, avail_w: float, avail_h: float, ideal_cap: floa
     )
 
 
+def _top_surface_keepouts(eff: BoxSpec) -> list[Polygon]:
+    """Plan-view regions on the lid top the label must avoid: every stacking
+    boss (all four, not one row) plus a margin.  Hinge knuckles and latch ears
+    sit outboard at the rim, below the top plate, so they do not intrude on the
+    central label band; the bosses are the real keep-outs."""
+    if not (eff.b4b.stacking and eff.b4b.lid):
+        return []
+    r = B4B_STACK_BOSS_DIAMETER / 2.0 + B4B_STACK_FEMALE_RADIAL_CLEARANCE + B4B_TOP_LABEL_MARGIN
+    from shapely.geometry import Point
+    return [Point(cx, cy).buffer(r, quad_segs=24) for cx, cy in _stack_locator_centres(eff)]
+
+
 def b4b_top_label_outline(box: BoxSpec):
     """Placed outline for the lid-top label: centred in X, ~one third back from
-    the front (front is -Y), clear of stacking bosses."""
+    the front (front is -Y), fitted inside a rectangle that clears every
+    stacking boss keep-out."""
     eff = b4b_effective_box(box)
     if not eff.b4b.lid:
         raise ValueError("a top label needs the lid enabled")
-    # The label lives on the lid, which spans the full outer footprint - not the
-    # child field - so it has the whole lid width to work with.
+    # The label lives on the lid, which spans the full outer footprint.
     avail_w = eff.x - 2.0 * B4B_TOP_LABEL_MARGIN
     avail_h = eff.y / 3.0
     label_cy = -eff.y / 6.0
-    if eff.b4b.stacking:
-        # keep clear of the two rear locator bosses
-        centres = _stack_locator_centres(eff)
-        rear_y = min(c[1] for c in centres if c[1] > 0)
-        avail_h = min(avail_h, (rear_y - B4B_STACK_BOSS_DIAMETER / 2.0 - 2.0) - label_cy)
-        avail_h = max(avail_h, 4.0)
+    keepouts = _top_surface_keepouts(eff)
+
+    def clear_rect(w: float, h: float) -> bool:
+        rect = Polygon([
+            (-w / 2.0, label_cy - h / 2.0), (w / 2.0, label_cy - h / 2.0),
+            (w / 2.0, label_cy + h / 2.0), (-w / 2.0, label_cy + h / 2.0),
+        ])
+        return not any(rect.intersects(k) for k in keepouts)
+
+    # Shrink height first (label band is wide and short), then width, until the
+    # placed rectangle clears every boss.
+    for _ in range(40):
+        if clear_rect(avail_w, avail_h):
+            break
+        if avail_h > 4.0:
+            avail_h = max(4.0, avail_h - 1.0)
+        elif avail_w > 10.0:
+            avail_w -= 2.0
+        else:
+            raise ValueError(
+                "the top label cannot be placed clear of the stacking bosses; "
+                "shorten the label, disable stacking, or use a larger B4B"
+            )
     outline = _fit_text_outline(
         eff.b4b.label_text, avail_w, avail_h, B4B_TOP_LABEL_CAP_IDEAL
     )
-    return translate_polygon(outline, 0.0, label_cy)
+    placed = translate_polygon(outline, 0.0, label_cy)
+    # Hard guarantee: the pocket is never cut through a boss.
+    for k in keepouts:
+        if placed.intersects(k):
+            raise ValueError(
+                "the top label overlaps a stacking boss keep-out; shorten the "
+                "label or disable stacking"
+            )
+    return placed
 
 
 def _apply_top_label(box: BoxSpec, lid: trimesh.Trimesh):
     """Sink the top label flush into the lid; return ``(lid, inlay)`` where the
-    inlay is a separate object that fills the pocket."""
+    inlay is a separate object that fills the pocket.  ``b4b_top_label_outline``
+    has already proven the outline clears every stacking boss."""
     outline = b4b_top_label_outline(box)
     top_z = b4b_lid_underside_z(box) + B4B_LID_SKIN
     pocket = text_prism(outline, top_z, depth=TEXT_DEPTH)
@@ -1026,16 +1322,21 @@ def b4b_front_label_geometry(box: BoxSpec):
     if frame_w < 30.0 or bottom_z < 3.0:
         raise ValueError(
             "not enough clear front-wall area for a slide-in label; use a top "
-            "label, a shorter box, or turn latches off"
+            "label, a taller box, or turn latches off"
         )
 
     rail = 1.6                       # channel lip that captures the plate
     channel_t = B4B_FRONT_LABEL_PLATE_T + 2.0 * B4B_FRONT_LABEL_CLEAR
     depth = channel_t + 1.4          # + back wall
     endstop = 2.0
+    # Embed the frame block a little into the front wall so union() fuses it
+    # into the body as one connected solid (never just a face-to-face touch).
+    embed = min(0.8, max(0.3, eff.wall_depth * 0.5))
 
-    outer = trimesh.creation.box(extents=(frame_w, depth, height))
-    outer.apply_translation((0.0, y_wall - depth / 2.0, (top_z + bottom_z) / 2.0))
+    outer = trimesh.creation.box(extents=(frame_w, depth + embed, height))
+    outer.apply_translation(
+        (0.0, y_wall - depth / 2.0 + embed / 2.0, (top_z + bottom_z) / 2.0)
+    )
     # hollow the channel, open on the +X face, closed by an end stop on -X...
     # actually: end stop on +X far side, slide in from -X (finger) - keep it
     # symmetrical and simple: channel open on -X, stop on +X.
@@ -1064,13 +1365,21 @@ def b4b_front_label_geometry(box: BoxSpec):
         outline = _fit_text_outline(
             eff.b4b.label_text, plate_w - 8.0, plate_h - 2.0, B4B_FRONT_LABEL_CAP_IDEAL
         )
-        engrave = text_prism(outline, B4B_FRONT_LABEL_PLATE_T / 2.0, depth=TEXT_DEPTH)
+        # Explicit datums.  The plate is centred on the origin, so its readable
+        # (-Y) face is at y = -PLATE_T/2.  The engraving cutter must start on
+        # that face and bite inward (+Y) by TEXT_DEPTH, with a small overlap so
+        # the boolean always removes material.
+        front_face_y = -B4B_FRONT_LABEL_PLATE_T / 2.0
+        overlap = 0.1
+        engrave = text_prism(outline, top_z=0.0, depth=TEXT_DEPTH)  # z in [-TEXT_DEPTH, 0]
+        # +90 deg about X: extrude axis (-Z) -> +Y, glyph height (+Y) -> +Z upright
         engrave.apply_transform(
-            trimesh.transformations.rotation_matrix(-math.pi / 2.0, (1.0, 0.0, 0.0))
+            trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
         )
-        engrave.apply_translation(
-            (0.0, B4B_FRONT_LABEL_PLATE_T / 2.0 - TEXT_DEPTH / 2.0, 0.0)
-        )
+        centre = engrave.bounds.mean(axis=0)
+        engrave.apply_translation((-centre[0], 0.0, -centre[2]))   # centre on the plate face
+        y_min = float(engrave.bounds[0][1])
+        engrave.apply_translation((0.0, (front_face_y - overlap) - y_min, 0.0))
         plate = difference([plate, engrave])
 
     plate_centre = (
@@ -1090,64 +1399,88 @@ def make_b4b_front_label_plate(box: BoxSpec) -> trimesh.Trimesh:
 # --------------------------------------------------------------------------- #
 # print orientation + generation parts
 # --------------------------------------------------------------------------- #
-def _to_print_orientation(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
-    """Assembly-space -> a support-minimising print pose, then dropped to z=0.
+def _print_pose(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
+    """Assembly-space -> a support-minimising *orientation* only.
 
-    Assembly and print transforms are kept separate: mating coordinates are
-    never damaged to make a part lie flat.
+    No drop-to-plate and no recentring happen here: that is done once per print
+    group in :func:`_pack_print_groups`, so parts that must stay registered
+    (the lid and its top inlay) keep their exact relative coordinates.
     """
     m = mesh.copy()
-    if kind == "lid":
-        # print outer-face up: keeps the top-label surface and the stacking
-        # bosses on the upward face; the short skirt and knuckle tabs point down
-        # and take a little support or a brim
-        pass
-    elif kind == "latch":
+    if kind == "latch":
         # lay the lever on its broad face
         m.apply_transform(
             trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
         )
-    # kind == "body" / "plate": already a good pose
-    m.apply_translation((0.0, 0.0, -float(m.bounds[0][2])))
-    # recentre X/Y on the origin for a tidy plate
-    c = m.bounds.mean(axis=0)
-    m.apply_translation((-c[0], -c[1], 0.0))
+    # "lid" prints outer-face up as modelled; "body"/"plate" are already a good
+    # pose - orientation unchanged.
     return m
 
 
+def _pack_print_groups(
+    groups: list[list[tuple[str, trimesh.Trimesh]]]
+) -> list[tuple[str, trimesh.Trimesh]]:
+    """Lay independent print groups out in a row on the build plane.
+
+    Each *group* is a list of named meshes that share one rigid transform (the
+    lid + its top-label inlay are one group, so the inlay stays registered in
+    the lid pocket).  Groups are packed left to right along +X with
+    ``B4B_PRINT_PART_GAP`` between them, each centred on Y=0 and dropped so its
+    lowest point sits on z=0.  No two groups overlap.
+    """
+    packed: list[tuple[str, trimesh.Trimesh]] = []
+    x_cursor = 0.0
+    for group in groups:
+        meshes = [m for _n, m in group]
+        mins = np.min([m.bounds[0] for m in meshes], axis=0)
+        maxs = np.max([m.bounds[1] for m in meshes], axis=0)
+        offset = (
+            x_cursor - float(mins[0]),
+            -0.5 * float(mins[1] + maxs[1]),
+            -float(mins[2]),
+        )
+        for name, mesh in group:
+            mesh.apply_translation(offset)
+            packed.append((name, mesh))
+        x_cursor += float(maxs[0] - mins[0]) + B4B_PRINT_PART_GAP
+    return packed
+
+
 def b4b_build_parts(box: BoxSpec) -> list[tuple[str, trimesh.Trimesh]]:
-    """Every printable B4B object, named, in print orientation.  Screws are
-    never emitted as geometry."""
+    """Every printable B4B object, named, oriented and packed on the build
+    plane so nothing overlaps.  Screws are never emitted as geometry.
+
+    The lid and its flush top-label inlay are treated as one print group: the
+    same transform is applied to both, so the inlay stays exactly registered in
+    the lid pocket in the exported 3MF.
+    """
     eff = b4b_effective_box(box)
     b4b = eff.b4b
-    validate_b4b_design(box)
+    validate_b4b_design(box, deep=True)
 
-    parts: list[tuple[str, trimesh.Trimesh]] = []
-    body = make_b4b_body(box)
-    front_inlay = None
-    if b4b.label_location == "front":
-        frame, _plate, _c = b4b_front_label_geometry(box)
-        body = union([body, frame])
-    parts.append(("B4B Body", _to_print_orientation(body, "body")))
+    groups: list[list[tuple[str, trimesh.Trimesh]]] = []
+
+    body = b4b_body_with_features(box)
+    groups.append([("B4B Body", _print_pose(body, "body"))])
 
     if b4b.lid:
         lid = make_b4b_lid(box)
         top_inlay = None
         if b4b.label_location == "top" and b4b.label_text.strip():
             lid, top_inlay = _apply_top_label(box, lid)
-        parts.append(("B4B Lid", _to_print_orientation(lid, "lid")))
+        lid_group = [("B4B Lid", _print_pose(lid, "lid"))]
         if top_inlay is not None:
-            parts.append(
-                ("B4B Top Label", _to_print_orientation(top_inlay, "lid"))
-            )
+            lid_group.append(("B4B Top Label", _print_pose(top_inlay, "lid")))
+        groups.append(lid_group)
 
     if b4b.secure_lid:
         for i, lever in enumerate(make_b4b_latches(box), start=1):
-            parts.append((f"B4B Latch {i}", _to_print_orientation(lever, "latch")))
+            groups.append([(f"B4B Latch {i}", _print_pose(lever, "latch"))])
 
     if b4b.label_location == "front":
         _frame, plate, centre = b4b_front_label_geometry(box)
-        parts.append(
-            ("B4B Front Label", _to_print_orientation(translated(plate, centre), "plate"))
+        groups.append(
+            [("B4B Front Label", _print_pose(translated(plate, centre), "plate"))]
         )
-    return parts
+
+    return _pack_print_groups(groups)
