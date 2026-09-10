@@ -90,7 +90,11 @@ B4B_STACK_BOSS_CHAMFER = 0.6
 # Hinges (exactly two, rear wall)
 B4B_HINGE_COUNT = 2
 B4B_HINGE_WIDTH_FRACTION = 0.16
-B4B_HINGE_WIDTH_MIN = 10.0
+# Each of the three knuckle segments is (hinge_width/3 - axial_gap) wide, and
+# the outer (far) segment is the printed thread-forming lug.  The minimum is set
+# so that lug is never thinner than B4B_M3_THREAD_ENGAGE_MIN:
+#   (12/3) - 0.35 = 3.65 mm >= 3.0 mm.
+B4B_HINGE_WIDTH_MIN = 12.0
 B4B_HINGE_WIDTH_MAX = 24.0
 B4B_HINGE_KNUCKLE_RADIUS = 3.1   # encloses the clear bore with a printable wall
 B4B_HINGE_AXIAL_GAP = 0.35       # running gap between body and lid knuckles
@@ -350,7 +354,17 @@ def _screw_for_stack(clear_span_mm: float, lug_thickness_mm: float, what: str) -
     ``B4B_M3_MAX_PROTRUSION`` past the far face of the lug.  Raises with an
     actionable message when the kit has no such screw - never a silent
     over-long fallback that validation cannot see.
+
+    Real thread engagement can never exceed the physical lug thickness, so a
+    lug thinner than the minimum is a constant/geometry bug and is rejected
+    here rather than papered over by a long screw.
     """
+    if lug_thickness_mm + _EPS < B4B_M3_THREAD_ENGAGE_MIN:
+        raise ValueError(
+            f"the {what} terminal lug is only {lug_thickness_mm:.2f} mm thick - "
+            f"less than the {B4B_M3_THREAD_ENGAGE_MIN:.1f} mm minimum thread "
+            f"engagement; widen the hardware"
+        )
     need_min = clear_span_mm + B4B_M3_THREAD_ENGAGE_MIN
     for length in B4B_SCREW_LENGTHS:
         if length + _EPS < need_min:
@@ -934,7 +948,12 @@ def _sweep_intersection_cc(
     angles_deg: tuple[float, ...],
 ) -> float:
     """Largest overlap volume (cc) between ``moving`` (rotated about the world-X
-    line through ``(axis_y, axis_z)`` by each angle) and ``fixed``."""
+    line through ``(axis_y, axis_z)`` by each angle) and ``fixed``.
+
+    A pose whose intersection cannot be computed is NOT treated as zero overlap
+    (that would be fail-open): the whole check raises so the caller reports an
+    unverifiable design rather than a false all-clear.
+    """
     from organizer_engine import intersection_volume
 
     worst = 0.0
@@ -947,9 +966,11 @@ def _sweep_intersection_cc(
         m.apply_translation((0.0, axis_y, axis_z))
         try:
             worst = max(worst, intersection_volume(m, fixed) / 1000.0)
-        except Exception:
-            # a failed boolean at an extreme pose is not proof of a clash
-            continue
+        except Exception as exc:
+            raise ValueError(
+                f"could not verify the swept clearance at {deg:g} deg "
+                f"({exc}); the B4B mechanics could not be validated"
+            ) from exc
     return worst
 
 
@@ -962,25 +983,27 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
     plan = b4b_hardware_plan(box)
 
     # 1-2. printed terminal-lug thread engagement + screw protrusion.
+    # Physical engagement is min(screw beyond the clearance stack, lug thickness)
+    # - a screw longer than the lug threads only as far as the lug is thick.
     if b4b.secure_lid:
-        h_span, h_lug = _hinge_screw_stack(plan.hinge_width)
-        engage = plan.hinge_screw_length_mm - h_span
-        if engage < B4B_M3_THREAD_ENGAGE_MIN - _EPS:
-            raise ValueError(
-                f"hinge pin threads only {engage:.1f} mm into its lug "
-                f"(need {B4B_M3_THREAD_ENGAGE_MIN:.1f} mm)"
-            )
-        if engage - h_lug > B4B_M3_MAX_PROTRUSION + _EPS:
-            raise ValueError("hinge pin protrudes past its lug by more than the limit")
-        l_span, l_lug = _latch_screw_stack(plan.latch_width, plan.strength_profile["pad_wall"])
-        engage = plan.latch_screw_length_mm - l_span
-        if engage < B4B_M3_THREAD_ENGAGE_MIN - _EPS:
-            raise ValueError(
-                f"latch pin threads only {engage:.1f} mm into its lug "
-                f"(need {B4B_M3_THREAD_ENGAGE_MIN:.1f} mm)"
-            )
-        if engage - l_lug > B4B_M3_MAX_PROTRUSION + _EPS:
-            raise ValueError("latch pin protrudes past its lug by more than the limit")
+        for what, (span, lug), screw in (
+            ("hinge", _hinge_screw_stack(plan.hinge_width), plan.hinge_screw_length_mm),
+            ("latch", _latch_screw_stack(plan.latch_width, plan.strength_profile["pad_wall"]),
+             plan.latch_screw_length_mm),
+        ):
+            beyond_stack = screw - span
+            engage = min(beyond_stack, lug)
+            if engage < B4B_M3_THREAD_ENGAGE_MIN - _EPS:
+                raise ValueError(
+                    f"{what} pin threads only {engage:.2f} mm into its "
+                    f"{lug:.2f} mm lug (need {B4B_M3_THREAD_ENGAGE_MIN:.1f} mm)"
+                )
+            protrusion = beyond_stack - lug
+            if protrusion > B4B_M3_MAX_PROTRUSION + _EPS:
+                raise ValueError(
+                    f"{what} pin protrudes {protrusion:.1f} mm past its lug "
+                    f"(limit {B4B_M3_MAX_PROTRUSION:.1f} mm)"
+                )
 
     # 11. actual generated solids are watertight single volumes.
     body = b4b_body_with_features(box)
@@ -997,45 +1020,61 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
     if not b4b.secure_lid:
         return
 
-    # 3-4. latch rotation against the body (the front-label frame is already
+    # Tolerances (cc).  These are geometry/boolean-noise bounds, NOT room for a
+    # real mechanical clash: the assembled closed state has a small, expected
+    # overlap (interleaved hinge knuckles, seated skirt, the latch detent
+    # ridge), and what the sweep must show is that motion does not add
+    # interference beyond boolean noise on top of that baseline.
+    NOISE_CC = 0.05                       # motion may not add more than this
+    LATCH_CLOSED_CEIL_CC = 0.10          # detent ridge + faceting, nothing more
+    LID_CLOSED_CEIL_CC = 0.35            # knuckle interleave + skirt seat
+
+    # 3-4. latch rotation about its pivot (the front-label frame is already
     # unioned into `body`).  A rigid rotating hook necessarily grazes the lip
-    # while the tooth releases, so the release band is not sampled; what must
-    # hold is (a) the closed pose has no interference beyond the detent, and
-    # (b) once past release the lever swings fully clear.
-    # Opening rotates the lid and the levers the -X-handed way about their
-    # axes (front edge / lever top swings up and back), so opening angles are
-    # negative here.
+    # through the release band, which is therefore not sampled; what must hold
+    # is (a) the closed pose only touches at the detent, and (b) once past
+    # release the lever is fully clear.  Opening is the -X-handed rotation.
     f = _latch_frame(eff, plan)
-    detent_cc = max(0.15, (plan.latch_width * 3.0 * float(plan.strength_profile.get("detent", 0.3))) / 1000.0)
     for lever in make_b4b_latches(box):
         closed = _sweep_intersection_cc(
             lever, body, f["axis_y"], f["axis_z"], angles_deg=(0.0,)
         )
-        if closed > detent_cc:
+        if closed > LATCH_CLOSED_CEIL_CC:
             raise ValueError(
                 f"a latch lever statically interferes with the body when closed "
-                f"(overlap {closed:.2f} cc, detent allowance {detent_cc:.2f} cc)"
+                f"(overlap {closed:.3f} cc, allowance {LATCH_CLOSED_CEIL_CC:.2f} cc)"
             )
         open_worst = _sweep_intersection_cc(
             lever, body, f["axis_y"], f["axis_z"], angles_deg=(-45.0, -60.0, -75.0)
         )
-        if open_worst > 0.4:
+        if open_worst > closed + NOISE_CC:
             raise ValueError(
                 f"a latch lever does not swing clear of the body when open "
-                f"(overlap {open_worst:.2f} cc); reduce the hook depth or grow the B4B"
+                f"(overlap {open_worst:.3f} cc vs {closed:.3f} cc closed); "
+                f"reduce the hook depth or grow the B4B"
             )
 
-    # 5-6. lid opening sweep about the hinge axis through the usable range - a
-    # clean rotation with no snap feature, so it must stay clear throughout.
+    # 5-6. lid opening sweep about the hinge axis through the usable range.  A
+    # clean rotation with no snap feature: motion must not add interference
+    # beyond noise on top of the seated-closed baseline.
     if lid is not None:
-        worst = _sweep_intersection_cc(
-            lid, body, plan.hinge_axis_y, plan.hinge_axis_z,
-            angles_deg=(0.0, -15.0, -35.0, -60.0, -85.0, -100.0),
+        closed = _sweep_intersection_cc(
+            lid, body, plan.hinge_axis_y, plan.hinge_axis_z, angles_deg=(0.0,)
         )
-        if worst > 0.4:
+        if closed > LID_CLOSED_CEIL_CC:
+            raise ValueError(
+                f"the closed lid statically interferes with the body "
+                f"(overlap {closed:.3f} cc, allowance {LID_CLOSED_CEIL_CC:.2f} cc)"
+            )
+        open_worst = _sweep_intersection_cc(
+            lid, body, plan.hinge_axis_y, plan.hinge_axis_z,
+            angles_deg=(-15.0, -35.0, -60.0, -85.0, -100.0),
+        )
+        if open_worst > closed + NOISE_CC:
             raise ValueError(
                 f"the lid collides with the body while opening "
-                f"(overlap {worst:.2f} cc); check the hinge placement"
+                f"(overlap {open_worst:.3f} cc vs {closed:.3f} cc closed); "
+                f"check the hinge placement"
             )
 
 
@@ -1051,15 +1090,27 @@ def validate_b4b_design(
     """Deterministic, actionable checks.  Raises ``ValueError`` on the first
     problem; never swallows a geometry error behind a generic message.
 
-    Runs on the normalised spec - the same one the geometry is built from - so
-    it validates the design as it will actually be produced.  ``deep=True``
-    additionally runs the sampled moving-part and thread-retention checks
-    (:func:`_validate_b4b_mechanics`); it builds meshes, so callers on the
-    preview hot path leave it off.
+    Cross-field contradictions are checked on the *raw* ``box.b4b`` first, so a
+    saved/imported design that carries an impossible combination
+    (``lid=false`` with ``secure_lid``/``stacking``/``label_location='top'``)
+    fails with an actionable message instead of being silently rewritten by
+    ``normalised()``.  The rest of the checks run on the normalised spec - the
+    same one the geometry is built from.  ``deep=True`` additionally runs the
+    sampled moving-part and thread checks (:func:`_validate_b4b_mechanics`); it
+    builds meshes, so callers on the preview hot path leave it off.
     """
-    b4b = box.b4b.normalised()
-    if not b4b.enabled:
+    raw = box.b4b
+    if not raw.enabled:
         raise ValueError("validate_b4b_design called on a non-B4B design")
+    # Authoritative data must be rejected as supplied, before normalisation.
+    if raw.secure_lid and not raw.lid:
+        raise ValueError("secure lid (hinges & latches) needs the lid enabled")
+    if raw.stacking and not raw.lid:
+        raise ValueError("stacking needs the lid enabled")
+    if raw.label_location == "top" and not raw.lid:
+        raise ValueError("a top label needs the lid enabled")
+
+    b4b = raw.normalised()
     if layout_feature_count:
         raise ValueError(
             "a B4B interior is reserved for child bins - remove the "
@@ -1071,12 +1122,6 @@ def validate_b4b_design(
         raise ValueError("Easy Clean is incompatible with B4B")
     if flat_inside:
         raise ValueError("the flat-inside band is incompatible with B4B")
-    if b4b.label_location == "top" and not b4b.lid:
-        raise ValueError("a top label needs the lid enabled")
-    if b4b.stacking and not b4b.lid:
-        raise ValueError("stacking needs the lid enabled")
-    if b4b.secure_lid and not b4b.lid:
-        raise ValueError("a secure lid needs the lid enabled")
 
     cx, cy = b4b_capacity_units(box)
     if cx < 1 or cy < 1:

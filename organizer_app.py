@@ -1716,6 +1716,9 @@ def design_from_dict(
     b4b_raw = raw.get("b4b")
     b4b = B4BSpec()
     if isinstance(b4b_raw, dict) and bool(b4b_raw.get("enabled", False)):
+        # Build the spec exactly as supplied - do NOT normalise yet.  Saved and
+        # imported v2 JSON is authoritative user data: validate_b4b_design must
+        # see any impossible combination before normalised() would rewrite it.
         b4b = B4BSpec(
             enabled=True,
             lid=bool(b4b_raw.get("lid", True)),
@@ -1726,7 +1729,7 @@ def design_from_dict(
             label_text=str(b4b_raw.get("label_text", "")),
             label_location=str(b4b_raw.get("label_location", "none")),
             stacking=bool(b4b_raw.get("stacking", False)),
-        ).normalised()
+        )
     x, y = float(raw["x"]), float(raw["y"])
     # Brief browser builds stored a requested usable size plus the wall
     # allowance. Recover the user's 8 mm modular choice when those designs are
@@ -1781,7 +1784,11 @@ def design_from_dict(
             easy_clean=bool(raw.get("easy_clean", False)),
             flat_inside=float(raw.get("flat_inside", 0.0) or 0.0),
         )
-        box = replace(box, easy_clean=False, flat_inside=0.0)
+        # Validation passed on the raw spec; normalising a valid B4BSpec now is
+        # fine and gives the geometry layer the clean combination it expects.
+        box = replace(
+            box, easy_clean=False, flat_inside=0.0, b4b=box.b4b.normalised()
+        )
         layout = Layout((), "fused", EDITOR_SNAP)
         label = str(data.get("label", ""))
         location = label_position(data.get("label_position", "bottom"))
