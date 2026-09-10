@@ -1668,7 +1668,9 @@ def design_to_dict(
         "easy_clean_style": box.easy_clean_style,
         "easy_clean_radius": box.easy_clean_radius,
         "standard_base": box.standard_base,
-        "standard_walls": box.standard_walls,
+        "standard_walls": bool(box.standard_walls) and math.isclose(
+            box.wall, DEFAULT_WALL, abs_tol=1e-9
+        ),
     }
     if b4b.enabled:
         box_block["b4b"] = {

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Iterable
 
-from organizer_engine import BoxSpec
+from organizer_engine import BoxSpec, flat_cavity_polygon, wavy_cavity_polygon
 
 from ._bore import (
     HEX_BIT_CLEARANCE,
@@ -57,10 +57,17 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
         return one.zone
     zone = one.zone
     if one.full_span:
-        # Reaches the box's true walls on the run axis always, and on the
-        # cross axis too once minimal crossbars weld into the bin's side
-        # walls (see _divider_support_bottoms).
-        zone = Zone(-box.half_x, -box.half_y, box.half_x, box.half_y)
+        # Reach is bounded by the actual inward cavity, whose wave crests can
+        # extend past the nominal half-size with very thin custom walls.
+        cavity_bounds = [wavy_cavity_polygon(box).bounds]
+        if box.flat_inside > 0.0:
+            cavity_bounds.append(flat_cavity_polygon(box).bounds)
+        zone = Zone(
+            min(bounds[0] for bounds in cavity_bounds),
+            min(bounds[1] for bounds in cavity_bounds),
+            max(bounds[2] for bounds in cavity_bounds),
+            max(bounds[3] for bounds in cavity_bounds),
+        )
     options = resolved_options(box, one, base_z)
     thickness = options.get("thickness", 0.0)
     angle = options.get("angle", 0.0)

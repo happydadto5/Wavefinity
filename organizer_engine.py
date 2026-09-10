@@ -95,8 +95,9 @@ BASE_UNIT = GRID_PITCH           # one unit is one grid step, so sizes are whole
 # says so plainly if you ask for a connector that will not fit.
 
 DEFAULT_WALL = 0.8
-MIN_WALL = 0.4
-MAX_WALL = 2.0
+MIN_WALL = 0.2
+MAX_WALL = 2.4
+WALL_STEP = 0.2
 DEFAULT_BASE_THICKNESS = 0.6
 DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner

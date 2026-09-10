@@ -124,6 +124,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .mode-and-bin-options .inline-option { margin: 0 0 3px; white-space: nowrap; }
 .mode-and-bin-options .inline-number { margin: 0 0 1px; min-width: 116px; white-space: nowrap; }
 .mode-and-bin-options .inline-number input { margin-top: 3px; }
+.mode-and-bin-options .wall-warning { max-width: 220px; margin-bottom: 3px; color: var(--muted); font-size: 11px; line-height: 1.25; }
 .mode-and-bin-options .inline-select { margin: 0 0 1px; min-width: 90px; }
 .mode-and-bin-options .inline-select select { margin-top: 3px; }
 .measurement { color: var(--teal); margin: 4px 0 15px; font-size: 15px; font-weight: 600; }

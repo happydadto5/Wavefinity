@@ -404,6 +404,49 @@ function syncEasyCleanControls() {
   }
 }
 
+function populateWallChoices(box) {
+  const select = $("#wall-thickness");
+  const rules = state.catalog?.wall_rules || {};
+  const fallbackLabels = [
+    "Very thin (experimental)", "Thin", "Light", "Standard",
+    "Reinforced", "Strong", "Extra strong", "Very strong",
+    "Heavy duty", "Very heavy duty", "Extra heavy duty", "Maximum thickness",
+  ];
+  const choices = Array.isArray(rules.choices) && rules.choices.length
+    ? rules.choices
+    : Array.from({ length: 12 }, (_, index) => {
+        const value = 0.2 + index * 0.2;
+        return { value, label: fallbackLabels[index] };
+      });
+  const wall = number(box?.wall, rules.default_mm ?? 0.8);
+  const value = fmt(wall);
+  const isDiscrete = choices.some(choice => fmt(choice.value) === value);
+  const legacyValue = isDiscrete ? "" : value;
+  const signature = JSON.stringify({ choices, legacyValue });
+  if (select.dataset.choices !== signature) {
+    select.replaceChildren(...choices.map(choice => new Option(
+      `${number(choice.value).toFixed(1)} mm — ${choice.label}`,
+      fmt(choice.value),
+    )));
+    if (legacyValue) {
+      select.add(new Option(`${legacyValue} mm — Existing custom`, legacyValue));
+    }
+    select.dataset.choices = signature;
+  }
+  select.value = value;
+  if (box?.standard_walls === false) select.dataset.customValue = value;
+}
+
+function syncWallControls() {
+  const standard = $("#standard-walls").checked;
+  const rules = state.catalog?.wall_rules || {};
+  $("#wall-thickness-setting").hidden = standard;
+  $("#thin-wall-warning").hidden = standard || Math.abs(
+    number($("#wall-thickness").value, rules.default_mm ?? 0.8)
+      - (rules.min_mm ?? 0.2)
+  ) > 1e-9;
+}
+
 function syncForm() {
   const { box, layout } = state.design;
   ensureRimFeatureInLayout();
@@ -420,10 +463,9 @@ function syncForm() {
   }
   $("#z").value = fmt(box.z);
   $("#standard-base").checked = box.standard_base !== false;
-  const wallRules = state.catalog?.wall_rules || {};
   $("#standard-walls").checked = box.standard_walls !== false;
-  $("#wall-thickness").value = fmt(box.wall ?? wallRules.default_mm ?? 0.8);
-  $("#wall-thickness-setting").hidden = $("#standard-walls").checked;
+  populateWallChoices(box);
+  syncWallControls();
   $("#easy-clean").checked = Boolean(box.easy_clean);
   $("#easy-clean-style").value = box.easy_clean_style || "bevel";
   $("#easy-clean-radius").value = fmt(box.easy_clean_radius ?? 2.0);
@@ -702,8 +744,8 @@ function updateDesignFromForm() {
   const previousWall = design.box.wall;
   const wallRules = state.catalog?.wall_rules || {};
   const defaultWall = wallRules.default_mm ?? 0.8;
-  const minWall = wallRules.min_mm ?? 0.4;
-  const maxWall = wallRules.max_mm ?? 2.0;
+  const minWall = wallRules.min_mm ?? 0.2;
+  const maxWall = wallRules.max_mm ?? 2.4;
   design.box.standard_walls = $("#standard-walls").checked;
   design.box.wall = design.box.standard_walls
     ? defaultWall
@@ -1057,7 +1099,19 @@ function wireControls() {
 
   ["#x-size", "#y-size", "#z", "#base-thickness", "#wall-thickness", "#part-name"]
     .forEach(selector => $(selector).addEventListener("input", () => {
-      if (selector === "#wall-thickness") state.binResizePending = true;
+      if (selector === "#wall-thickness") {
+        const select = $(selector);
+        select.dataset.customValue = select.value;
+        const legacyOption = [...select.options].find(option =>
+          option.textContent.endsWith("Existing custom")
+        );
+        if (legacyOption && legacyOption.value !== select.value) {
+          legacyOption.remove();
+          delete select.dataset.choices;
+        }
+        state.binResizePending = true;
+        syncWallControls();
+      }
       state.canGenerate = false;
       updateGenerateAvailability();
       changedDesign();
@@ -1077,12 +1131,22 @@ function wireControls() {
   $("#standard-walls").addEventListener("change", () => {
     const isStandard = $("#standard-walls").checked;
     const rules = state.catalog?.wall_rules || {};
-    $("#wall-thickness-setting").hidden = isStandard;
+    const select = $("#wall-thickness");
+    const defaultValue = fmt(rules.default_mm ?? 0.8);
     if (isStandard) {
-      $("#wall-thickness").value = fmt(rules.default_mm ?? 0.8);
-    } else if (!$("#wall-thickness").value) {
-      $("#wall-thickness").value = fmt(state.design?.box?.wall ?? rules.default_mm ?? 0.8);
+      if (select.value && select.value !== defaultValue) {
+        select.dataset.customValue = select.value;
+      }
+      select.value = defaultValue;
+    } else if (
+      select.dataset.customValue
+      && [...select.options].some(option => option.value === select.dataset.customValue)
+    ) {
+      select.value = select.dataset.customValue;
+    } else if (!select.value) {
+      select.value = fmt(state.design?.box?.wall ?? rules.default_mm ?? 0.8);
     }
+    syncWallControls();
     state.binResizePending = true;
     changedDesign();
   });
@@ -5248,8 +5312,8 @@ function designHasChanges() {
   visibleDesign.box.standard_walls = $("#standard-walls").checked;
   visibleDesign.box.wall = visibleDesign.box.standard_walls
     ? (wallRules.default_mm ?? 0.8)
-    : Math.max(wallRules.min_mm ?? 0.4, Math.min(
-        wallRules.max_mm ?? 2.0,
+    : Math.max(wallRules.min_mm ?? 0.2, Math.min(
+        wallRules.max_mm ?? 2.4,
         number($("#wall-thickness").value, visibleDesign.box.wall ?? wallRules.default_mm ?? 0.8),
       ));
   visibleDesign.part_name = $("#part-name").value;

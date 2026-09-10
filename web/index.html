@@ -43,7 +43,10 @@
             <label class="checkbox-row inline-option"><span>Standard base?</span><input id="standard-base" type="checkbox" checked></label>
             <label id="base-thickness-setting" class="inline-number" hidden>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1" value="0.6"></label>
             <label class="checkbox-row inline-option"><span>Standard walls?</span><input id="standard-walls" type="checkbox" checked></label>
-            <label id="wall-thickness-setting" class="inline-number" hidden>Wall thickness <span class="unit">mm</span><input id="wall-thickness" type="number" min="0.4" max="2" step="0.1" value="0.8"></label>
+            <label id="wall-thickness-setting" class="inline-select" hidden>Wall thickness
+              <select id="wall-thickness"><option value="0.8">0.8 mm — Standard</option></select>
+            </label>
+            <span id="thin-wall-warning" class="wall-warning" hidden>Very thin — may not print reliably with standard nozzle/slicer settings.</span>
             <label class="checkbox-row inline-option"><span>Easy Clean?</span><input id="easy-clean" type="checkbox"></label>
             <label id="easy-clean-style-setting" class="inline-select" hidden>Clean Edge
               <select id="easy-clean-style">

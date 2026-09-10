@@ -51,6 +51,7 @@ from organizer_engine import (
     MIN_WALL,
     WAVE_AMPLITUDE,
     WAVE_MATING_GAP,
+    WALL_STEP,
     BoxSpec,
     ConnectorSpec,
     differing_connector_plan,
@@ -403,6 +404,24 @@ def catalog_payload() -> dict[str, Any]:
             "default_mm": DEFAULT_WALL,
             "min_mm": MIN_WALL,
             "max_mm": MAX_WALL,
+            "step_mm": WALL_STEP,
+            "choices": [
+                {"value": round(MIN_WALL + index * WALL_STEP, 1), "label": label}
+                for index, label in enumerate((
+                    "Very thin (experimental)",
+                    "Thin",
+                    "Light",
+                    "Standard",
+                    "Reinforced",
+                    "Strong",
+                    "Extra strong",
+                    "Very strong",
+                    "Heavy duty",
+                    "Very heavy duty",
+                    "Extra heavy duty",
+                    "Maximum thickness",
+                ))
+            ],
             "wall_depth_factor": math.sqrt(1.0 + max_wave_slope() ** 2),
             "wave_amplitude_mm": WAVE_AMPLITUDE,
             "mating_gap_mm": WAVE_MATING_GAP,

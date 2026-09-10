@@ -85,11 +85,11 @@ interior-part editor. **Customize your bin** contains the scoop and advanced
 physical settings. **Label your bin** contains the rim label and the part
 filename.
 
-**Standard walls** keeps the original 0.8 mm wall. Turn it off to use a 0.4–2.0
-mm wall; only the inside cavity moves, while the exterior wave and 8 mm grid
-stay fixed. Custom-wall connectors are generated for that wall thickness and
-include it in their filename. Use a connector only with bins of the same wall
-thickness.
+**Standard walls** keeps the original 0.8 mm wall. Turn it off to use a 0.2–2.4
+mm wall in 0.2 mm steps; only the cavity moves, while the exterior wave
+and 8 mm grid stay fixed. Custom-wall connectors are generated for that wall
+thickness and include it in their filename. Use a connector only with bins of
+the same wall thickness.
 
 The 3D preview is real camera-independent geometry returned by Python and drawn
 locally by the browser. Drag to rotate, use the wheel to zoom, and double-click
