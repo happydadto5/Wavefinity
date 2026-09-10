@@ -138,6 +138,7 @@ def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         OptionDefinition("Place it for me", "auto", False, "boolean", False),
         OptionDefinition("Quarter turns", "quarter_turns", 0, "integer", False),
         OptionDefinition("Level", "level", "base", "enum", False),
+        OptionDefinition("Rim side", "rim_side", "back", "enum", False),
     ), order=100,
 )
 def build_text(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:

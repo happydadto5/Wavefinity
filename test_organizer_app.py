@@ -1369,6 +1369,21 @@ class BinCustomizationTests(unittest.TestCase):
         self.assertTrue(pocketed.is_volume)
         self.assertLess(intersection_volume(pocketed, installed), 0.01)
 
+    def test_rim_label_location_can_use_any_wall(self) -> None:
+        spec = BoxSpec(64.0, 48.0, 40.0)
+        expected_edges = {
+            "front": (1, -1), "back": (1, 1),
+            "left": (0, -1), "right": (0, 1),
+        }
+        for side, (axis, sign) in expected_edges.items():
+            zone = top_label_zone(spec, side)
+            outline = top_label_outline(spec, "M3", side)
+            self.assertTrue(zone.covers(outline))
+            edge = zone.bounds[axis] if sign < 0 else zone.bounds[axis + 2]
+            inside = spec.usable_inside[axis]
+            self.assertAlmostEqual(edge, sign * inside / 2.0, places=6)
+        self.assertTrue(make_top_label_ledge(spec, "left").is_volume)
+
     def test_scoop_is_full_width_and_rises_halfway_up_the_inside_wall(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
         scoop = make_scoop(spec)

@@ -155,11 +155,12 @@ the other parts move outward only as much as needed.
 Typing a part Width/Length or resizing it in 2D makes that size the new minimum;
 later automatic changes can grow it but cannot pull it smaller. Reopening any
 placed or saved part protects its existing footprint the same way. Bin
-Width and Length entered by the user are also floors. The explicit **Fit to
-pegs/slots** action is the user's permission to trim a rack snugly, while
-**Fill the bin** is the user's permission to expand a free-size part across the
-available floor. Divider and Curved Scoop footprints continue to follow the bin
-because full-span behavior is their purpose.
+Width and Length entered by the user are also floors. Slot Rack Quantity grows
+its Base automatically; increasing Quantity is also how the user fills more of
+the bin. The explicit **Fit to pegs** action remains for Post Racks, while
+**Fill the bin** remains for free-size parts. Divider and Curved Scoop
+footprints continue to follow the bin because full-span behavior is their
+purpose.
 
 ### Insert types
 

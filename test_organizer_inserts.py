@@ -1126,6 +1126,24 @@ class DividerScoopTests(unittest.TestCase):
         plain = build_features(self.box, [self.divider()], self.base_z)
         self.assertEqual(len(plain), 2)
 
+    def test_grid_divider_builds_its_sloped_bases(self) -> None:
+        feature = self.divider(bottom_angle=20.0, alternate_bottom=True)
+        solids = build_features(self.box, [feature], self.base_z)
+        slopes = [
+            solid for solid in solids
+            if solid.metadata.get("wavefinity_preview_kind") == "slope"
+        ]
+        self.assertEqual(len(slopes), 2)
+        self.assertTrue(all(solid.bounds[1][2] > self.base_z + 5.0 for solid in slopes))
+
+    def test_slope_checkbox_without_saved_angle_uses_the_default_slope(self) -> None:
+        feature = self.divider(slope_base=True)
+        solids = build_features(self.box, [feature], self.base_z)
+        self.assertTrue(any(
+            solid.metadata.get("wavefinity_preview_kind") == "slope"
+            for solid in solids
+        ))
+
     def test_enabled_scoop_uses_shared_geometry_in_every_cell(self) -> None:
         solids = build_features(self.box, [self.divider(True)], self.base_z)
         cells = inserts.divider_cells(self.box, self.divider(), self.base_z)
@@ -1184,10 +1202,11 @@ class DividerScoopTests(unittest.TestCase):
         # One wall plus one Scoop in each of its two compartments; no slope solids.
         self.assertEqual(len(build_features(self.box, [feature], self.base_z)), 3)
 
-    def test_grid_rim_labels_get_one_rear_floating_shelf_per_cell(self) -> None:
+    def test_grid_rim_labels_use_the_selected_shelf_side(self) -> None:
         feature = self.divider(
             label_divisions=True,
             division_level="rim",
+            division_side="left",
             division_labels=["A", "B", "C", "D"],
         )
         solids = build_features(self.box, [feature], self.base_z)
@@ -1196,9 +1215,12 @@ class DividerScoopTests(unittest.TestCase):
         top = self.base_z + inserts.resolved_options(
             self.box, feature, self.base_z,
         )["height"]
-        for shelf, inlay in zip(label_pieces[::2], label_pieces[1::2]):
+        cells = inserts.divider_cells(self.box, feature, self.base_z)
+        for cell, shelf, inlay in zip(cells, label_pieces[::2], label_pieces[1::2]):
             self.assertAlmostEqual(shelf.bounds[1][2], top, places=6)
             self.assertLess(shelf.bounds[0][2], top - 2.0)
+            self.assertLessEqual(shelf.bounds[0][0], cell.zone.x0 + 1e-6)
+            self.assertGreater(shelf.bounds[1][0], cell.zone.x0 + 2.0)
             self.assertAlmostEqual(inlay.bounds[1][2], top, places=6)
             self.assertTrue(shelf.is_volume)
             self.assertTrue(inlay.is_volume)

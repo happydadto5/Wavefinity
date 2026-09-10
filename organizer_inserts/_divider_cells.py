@@ -112,9 +112,6 @@ def normalize_divider_scoop(
     """
     config = spec_feature.options.get("scoop")
     options = dict(spec_feature.options)
-    # Retired placement choice: Divider rim labels now use the same fixed rear
-    # shelf behavior as the Text part's Rim Level setting.
-    options.pop("division_side", None)
     if not isinstance(config, dict):
         return (
             replace(spec_feature, options=options)

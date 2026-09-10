@@ -857,10 +857,11 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if one.kind == "text" and one.options.get("level") == "rim":
         geometry = []
         tidy = clean_label(text_of(one))
-        geometry.extend(_mesh_preview_geometry(make_top_label_ledge(box), "top_label_ledge"))
+        side = str(one.options.get("rim_side", "back"))
+        geometry.extend(_mesh_preview_geometry(make_top_label_ledge(box, side), "top_label_ledge"))
         if tidy:
             try:
-                geometry.extend(_mesh_preview_geometry(make_top_label(box, tidy), "top_label"))
+                geometry.extend(_mesh_preview_geometry(make_top_label(box, tidy, side), "top_label"))
             except ValueError:
                 pass
         return {

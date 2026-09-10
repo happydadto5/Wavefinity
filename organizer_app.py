@@ -113,17 +113,24 @@ INTERIOR_PART_ORDER = tuple(
     definition.kind for definition in _FEATURE_DEFINITIONS
 )
 # The rim label is the one piece of lettering that is not an interior part: it
-# lives on a shelf at the rear rim, not on the floor, so it has no zone to
+# lives on a shelf at the selected rim side, not on the floor, so it has no zone to
 # drag. "bottom" now simply means there is no rim label - floor lettering is a
 # text interior part.
-LABEL_POSITIONS = ("bottom", "top")
+LABEL_POSITIONS = ("bottom", "top", "front", "back", "left", "right")
 
 
 def label_position(value: str) -> str:
     position = str(value).strip().lower()
     if position not in LABEL_POSITIONS:
-        raise ValueError("label position must be 'bottom' or 'top'")
+        raise ValueError("label position must be on the base or a rim side")
     return position
+
+
+def rim_label_side(value: str) -> str | None:
+    position = label_position(value)
+    if position == "bottom":
+        return None
+    return "back" if position == "top" else position
 
 
 # --- guided part palette ---------------------------------------------------
@@ -480,6 +487,9 @@ def _bore_axis_geometry(
 
 def _mesh_preview_geometry(mesh, kind: str) -> list[tuple]:
     """Convert a finished holder mesh into camera-independent preview faces."""
+    preview_kind = mesh.metadata.get("wavefinity_preview_kind")
+    if preview_kind and "invalid" not in kind and "conflict" not in kind:
+        kind = f"{kind}_{preview_kind}"
     geometry = []
     for triangle, normal in zip(mesh.triangles, mesh.face_normals):
         geometry.append((
@@ -500,8 +510,9 @@ def _customization_zones(
 ) -> list[tuple[str, Zone]]:
     """Floor-plan keep-outs for fixed bin customizations."""
     zones: list[tuple[str, Zone]] = []
-    if clean_label(label) and label_position(label_location) == "top":
-        zones.append(("top label ledge", Zone(*top_label_zone(box).bounds)))
+    side = rim_label_side(label_location)
+    if clean_label(label) and side:
+        zones.append(("rim label ledge", Zone(*top_label_zone(box, side).bounds)))
     if scoop:
         zones.append(
             ("scoop", Zone(*scoop_keep_out(box, _scoop_floor_bounds(box, mode)).bounds))
@@ -567,7 +578,7 @@ def validate_customization_clearance(
     rim_feature = next((one for one in features if is_text(one) and one.options.get("level") == "rim"), None)
     if rim_feature is not None:
         label = text_of(rim_feature)
-        label_location = "top"
+        label_location = str(rim_feature.options.get("rim_side", "back"))
     for index, one in enumerate(features):
         if is_text(one) and one.options.get("level") == "rim":
             continue
@@ -604,7 +615,7 @@ def preview_geometry(
         rim_feature = draft
     if rim_feature is not None:
         label = text_of(rim_feature)
-        label_location = "top"
+        label_location = str(rim_feature.options.get("rim_side", "back"))
 
     features = resolve_text_features(
         box, features,
@@ -641,8 +652,9 @@ def preview_geometry(
 
     tidy = clean_label(label)
     location = label_position(label_location)
-    if tidy and location == "top":
-        geometry.extend(_mesh_preview_geometry(make_top_label_ledge(box), "top_label_ledge"))
+    rim_side = rim_label_side(location)
+    if tidy and rim_side:
+        geometry.extend(_mesh_preview_geometry(make_top_label_ledge(box, rim_side), "top_label_ledge"))
     if scoop:
         scoop_mesh = (
             make_scoop(box)
@@ -798,16 +810,17 @@ def preview_geometry(
         geometry.extend(_bore_axis_geometry(box, draft, base_z, "draft_bore_axis"))
 
     # The rim label is the only lettering left that is not an interior part:
-    # it sits on a shelf at the rear rim and has no zone to drag, so the
+    # it sits on a shelf at the selected rim side and has no zone to drag, so the
     # preview still draws it here. Floor text drew itself above, with every
     # other interior part.
     fits, message = True, ""
     label_outline_coords = []
     label_meta = None
-    if tidy and location == "top":
+    side = rim_label_side(location)
+    if tidy and side:
         try:
-            outline = top_label_outline(box, tidy)
-            label_meta = {"location": "top"}
+            outline = top_label_outline(box, tidy, side)
+            label_meta = {"location": location, "side": side}
         except ValueError as error:
             fits, message, outline = False, str(error), None
         if outline is not None:
@@ -888,9 +901,10 @@ def generate_box_file(
         result["customizations"] = {"scoop": scoop, "label_position": location}
         return result
 
-    if location == "top":
-        pocketed, inlay = make_top_labelled_box(box, tidy, body)
-        label_info = top_label_report(box, tidy)
+    side = rim_label_side(location)
+    if side:
+        pocketed, inlay = make_top_labelled_box(box, tidy, body, side)
+        label_info = top_label_report(box, tidy, side)
     else:
         occupied = [scoop_floor_zone(box)] if scoop else []
         pocketed, inlay = make_labelled_box(box, tidy, occupied, body)
@@ -942,7 +956,7 @@ def generate_organizer_files(
     rim_feature = next((one for one in layout.features if is_text(one) and one.options.get("level") == "rim"), None)
     if rim_feature is not None:
         label = text_of(rim_feature)
-        label_location = "top"
+        label_location = str(rim_feature.options.get("rim_side", "back"))
     layout = replace(
         layout,
         features=resolve_text_features(
@@ -957,18 +971,19 @@ def generate_organizer_files(
     layout.validate(box)
     tidy = clean_label(label)
     location = label_position(label_location)
-    if tidy and location != "top":
+    side = rim_label_side(location)
+    if tidy and not side:
         # Floor lettering is a text interior part now, so a label arriving here
         # for the floor is a caller mistake - say so rather than dropping it.
         raise ValueError(
             f"'{label}' is a floor label, and floor lettering is a text "
             "interior part now. Add one to the layout, or set the label "
-            "position to 'top' for the rim ledge"
+            "position to a rim side for the rim ledge"
         )
     validate_customization_clearance(
         box, layout.features, tidy, location, scoop, layout.mode
     )
-    label_info = top_label_report(box, tidy) if tidy else None
+    label_info = top_label_report(box, tidy, side) if tidy and side else None
     text_surface = box.base_thickness if layout.mode == "fused" else BASE_PLATE
     text_limit = (
         None if layout.mode == "fused"
@@ -996,7 +1011,7 @@ def generate_organizer_files(
         # floor text is sunk into it.
         inlays = list(texts)
         if tidy:
-            body, ledge_inlay = make_top_labelled_box(box, tidy, body)
+            body, ledge_inlay = make_top_labelled_box(box, tidy, body, side)
             inlays.append((tidy, ledge_inlay, False))
         reported = apply_texts(body, texts)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -1032,7 +1047,7 @@ def generate_organizer_files(
         # The rim label belongs to the box; the floor text belongs to the
         # insert it is sunk into.
         if tidy:
-            pocketed_box, box_inlay = make_top_labelled_box(box, tidy, plain_box)
+            pocketed_box, box_inlay = make_top_labelled_box(box, tidy, plain_box, side)
             export_labelled_box(
                 pocketed_box, box_inlay, box_output,
                 box_output.stem, tidy,
@@ -1396,10 +1411,10 @@ def default_feature(
         # the bin's whole other axis too - room for count > 1 to divide the
         # bin evenly without the user having to widen it by hand first.
         width, depth = bounds.width, bounds.depth
-        # New Dividers are grids: start with one wall on each axis. Older saved
+        # New Dividers start with one wall on X and none on Y (X=1, Y=0). Older saved
         # Dividers have neither key and continue through the legacy one-axis
         # path in divider_defaults().
-        feature_options = {"count_x": 1, "count_y": 1}
+        feature_options = {"count_x": 1, "count_y": 0}
     elif kind == "post":
         # A one-cell-wide cartridge cannot hold the normal 12 mm starter peg.
         # Size the starter diameter to both axes, then give it as much of the
@@ -1414,7 +1429,9 @@ def default_feature(
         feature_options = {"diameter": diameter, "height": 16.0, "taper": 0.4}
     elif kind == "slot":
         run = min(32.0, bounds.width if along == "x" else bounds.depth)
-        across = min(24.0, bounds.depth if along == "x" else bounds.width)
+        # One explicit starter slot with a snug 8 mm Base. Raising Quantity in
+        # the editor grows this axis automatically.
+        across = min(8.0, bounds.depth if along == "x" else bounds.width)
         width, depth = ((run, across) if along == "x" else (across, run))
     elif kind == "steps":
         run = min(32.0, bounds.width if along == "x" else bounds.depth)
@@ -1448,7 +1465,7 @@ def default_feature(
         item=item,
         # A cradle, like a post, starts as a single holder - Quantity "auto"
         # then fills the zone with lanes only when the user asks for it.
-        count=3 if kind == "steps" else (1 if kind in {"post", "cradle"} else None),
+        count=3 if kind == "steps" else (1 if kind in {"post", "cradle", "slot"} else None),
         along=along,
         options=feature_options,
         full_span=(kind == "divider"),
@@ -1506,7 +1523,7 @@ def design_to_dict(
     """The saved design.
 
     ``label`` is the rim-ledge label and means something only when
-    ``label_position`` is ``"top"``. Floor lettering lives in the layout as
+    ``label_position`` names a rim side. Floor lettering lives in the layout as
     ``text`` interior parts - one per label, any number of them - so there is
     nothing for it here.
     """

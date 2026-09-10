@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-09 — Divider defaults to X=1, Y=0
+- New Divider parts now default to Qty X = 1, Qty Y = 0 instead of 1, 1.
+
+## 2026-09-09 — Slot Rack quantity controls its Base
+
+- Removed Slot Rack's **Auto**, **Fit to slots**, and **Fill the bin** buttons.
+- New Slot Racks start at Quantity 1 with a snug Base. Increasing Quantity grows
+  the Base automatically and grows the bin when needed.
+
 ## 2026-09-08 — Bore clearance automatic and Profile renamed to Shape
 
 - Removed manual clearance setting from bores; clearance defaults automatically to 0.25 mm so parts fit.

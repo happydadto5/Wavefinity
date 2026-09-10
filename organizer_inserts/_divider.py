@@ -81,10 +81,8 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
         "bottom_supports": 3,
         "label_divisions": 0,
         "division_level": "base",
-        # Which bin wall a rim-level label lines its shelf up against - "left",
-        # "right", "top" (back) or "bottom" (front). "center" keeps the older
-        # flat label floating on the divider crest.
-        "division_side": "center",
+        # Which bin wall a rim-level label shelf faces.
+        "division_side": "back",
         # Grid dividers: this many walls across X and across Y. Both zero (the
         # default) keeps the legacy single-direction divider driven by
         # ``along``/``count``; set either and the divider becomes a grid.
@@ -134,7 +132,7 @@ def _divider_scoops(
         OptionDefinition("Minimal bottom", "minimal_bottom", False, "boolean", False),
         OptionDefinition("Label divisions", "label_divisions", False, "boolean", False),
         OptionDefinition("Division level", "division_level", "base", "enum", False),
-        OptionDefinition("Division side", "division_side", "center", "enum", False),
+        OptionDefinition("Division side", "division_side", "back", "enum", False),
         OptionDefinition("Division labels", "division_labels", (), "json", False),
         OptionDefinition("Compartment Scoop", "scoop", {}, "json", False),
     ), order=60,
@@ -192,18 +190,9 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
             solids.extend(_full_span_divider(box, along, cross_centre, thickness, base_z, height))
         else:
             solids.extend(_divider_wall(box, one, thickness, height, angle, base_z))
-    bottom_angle = float(options.get("bottom_angle", 0.0) or 0.0)
-    if bottom_angle:
-        raw_supports = options.get("bottom_supports", 3)
-        supports = (int(round(float(raw_supports)))
-                    if raw_supports not in (None, "") else 3)
-        solids.extend(_divider_support_bottoms(
-            box, zone, along, centres, height, base_z, bottom_angle,
-            _option_flag(options.get("reverse_bottom")),
-            _option_flag(options.get("alternate_bottom")),
-            _option_flag(options.get("minimal_bottom")),
-            supports, spec_feature.full_span,
-        ))
+    solids.extend(_divider_sloped_bottoms(
+        box, spec_feature, options, along, centres, height, base_z,
+    ))
     div_texts = divider_division_texts(box, spec_feature, base_z)
     for _text_label, text_solid, _raised in div_texts:
         solids.append(text_solid)
@@ -239,6 +228,15 @@ def _build_divider_grid(
         solids.extend(_one_grid_wall(
             box, spec_feature, "x", centre, thickness, height, angle, base_z, full_span,
         ))
+    slope_along = spec_feature.along if spec_feature.along in ("x", "y") else "x"
+    slope_centres = (
+        _even_centres(zone.y0, zone.y1, grid_y)
+        if slope_along == "x"
+        else _even_centres(zone.x0, zone.x1, grid_x)
+    )
+    solids.extend(_divider_sloped_bottoms(
+        box, spec_feature, options, slope_along, slope_centres, height, base_z,
+    ))
     for _label, text_solid, _raised in divider_division_texts(box, spec_feature, base_z):
         solids.append(text_solid)
     return solids
@@ -268,6 +266,34 @@ def _option_flag(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "false", "0", "no", "off"}
     return bool(value)
+
+
+def _divider_sloped_bottoms(
+    box: BoxSpec, spec_feature: Feature, options: dict, along: str,
+    centres: list[float], height: float, base_z: float,
+) -> list[trimesh.Trimesh]:
+    angle = float(options.get("bottom_angle", 0.0) or 0.0)
+    # A saved design may carry the checkbox without the newer angle key.
+    # Keep that design visibly sloped using the editor's 20-degree default.
+    if angle == 0.0 and _option_flag(options.get("slope_base")):
+        if spec_feature.options.get("bottom_angle") in (None, ""):
+            angle = 20.0
+    if not angle:
+        return []
+    raw_supports = options.get("bottom_supports", 3)
+    supports = (
+        int(round(float(raw_supports))) if raw_supports not in (None, "") else 3
+    )
+    solids = _divider_support_bottoms(
+        box, spec_feature.zone, along, centres, height, base_z, angle,
+        _option_flag(options.get("reverse_bottom")),
+        _option_flag(options.get("alternate_bottom")),
+        _option_flag(options.get("minimal_bottom")),
+        supports, spec_feature.full_span,
+    )
+    for solid in solids:
+        solid.metadata["wavefinity_preview_kind"] = "slope"
+    return solids
 
 
 def _bottom_slot_bounds(
@@ -389,13 +415,17 @@ def _division_shelf_solid(
 def _divider_grid_rim_texts(
     box: BoxSpec, spec_feature: Feature, base_z: float, labels: list,
 ) -> list[tuple[str, trimesh.Trimesh, bool]]:
-    """One rear floating label shelf per grid compartment.
+    """One rim-level label shelf per grid compartment.
 
     This is the Divider-cell adapter for the Text part's Rim Level behavior:
     a 7 mm shelf, 45-degree underside, flush inlay, and letters no larger than
     the same fixed 5 mm rim-label size.
     """
     options = spec_feature.options or {}
+    side = str(options.get("division_side", "back")).strip().lower()
+    side = {"front": "bottom", "back": "top"}.get(side, side)
+    if side not in ("left", "right", "top", "bottom"):
+        side = "top"
     height = float(options.get("height", connector_keep_out(box) - base_z)
                    or (connector_keep_out(box) - base_z))
     z_top = base_z + height
@@ -410,7 +440,9 @@ def _divider_grid_rim_texts(
         text = str(labels[idx] or "").strip()
         if not text:
             continue
-        depth_here = min(max_depth, cell.zone.depth - 1.0)
+        across = cell.zone.depth if side in ("top", "bottom") else cell.zone.width
+        along = cell.zone.width if side in ("top", "bottom") else cell.zone.depth
+        depth_here = min(max_depth, across - 1.0)
         if depth_here < DIVISION_CAP_MIN:
             continue
         try:
@@ -421,9 +453,7 @@ def _divider_grid_rim_texts(
         pw, ph = bx1 - bx0, by1 - by0
         if pw <= 0 or ph <= 0:
             continue
-        avail_width = max(
-            0.5, cell.zone.width - 2.0 * DIVISION_SHELF_TEXT_MARGIN
-        )
+        avail_width = max(0.5, along - 2.0 * DIVISION_SHELF_TEXT_MARGIN)
         avail_depth = max(
             0.5, depth_here - 2.0 * DIVISION_SHELF_TEXT_MARGIN
         )
@@ -439,21 +469,37 @@ def _divider_grid_rim_texts(
 
     results: list[tuple[str, trimesh.Trimesh, bool]] = []
     for text, cell, depth_here in picked:
-        lo = cell.zone.x0 + DIVISION_SHELF_TEXT_MARGIN
-        hi = cell.zone.x1 - DIVISION_SHELF_TEXT_MARGIN
+        if side in ("top", "bottom"):
+            edge = cell.zone.y1 if side == "top" else cell.zone.y0
+            edge_axis = "x"
+            lo = cell.zone.x0 + DIVISION_SHELF_TEXT_MARGIN
+            hi = cell.zone.x1 - DIVISION_SHELF_TEXT_MARGIN
+            inward = -1.0 if side == "top" else 1.0
+            cx = (cell.zone.x0 + cell.zone.x1) / 2.0
+            cy = edge + inward * depth_here / 2.0
+            turn = 0.0 if side == "top" else 180.0
+        else:
+            edge = cell.zone.x0 if side == "left" else cell.zone.x1
+            edge_axis = "y"
+            lo = cell.zone.y0 + DIVISION_SHELF_TEXT_MARGIN
+            hi = cell.zone.y1 - DIVISION_SHELF_TEXT_MARGIN
+            inward = 1.0 if side == "left" else -1.0
+            cx = edge + inward * depth_here / 2.0
+            cy = (cell.zone.y0 + cell.zone.y1) / 2.0
+            turn = 90.0 if side == "left" else -90.0
         if hi <= lo:
             continue
         try:
             shelf = _division_shelf_solid(
-                cell.zone.y1, "x", lo, hi, -1.0, z_top, depth_here,
+                edge, edge_axis, lo, hi, inward, z_top, depth_here,
                 DIVISION_SHELF_EMBED,
             )
             outline = text_outline(text, shared_cap)
-            outline = affinity.translate(
-                outline,
-                xoff=(cell.zone.x0 + cell.zone.x1) / 2.0,
-                yoff=cell.zone.y1 - depth_here / 2.0,
-            )
+            if turn:
+                outline = affinity.rotate(
+                    outline, turn, origin=(0.0, 0.0), use_radians=False,
+                )
+            outline = affinity.translate(outline, xoff=cx, yoff=cy)
             inlay = text_prism(outline, z_top)
         except Exception:
             continue
@@ -478,6 +524,9 @@ def _division_side_shelves(
     where it is the bin's own wall the shelf welds into that instead. Each
     label is inlaid flush into its shelf as its own object.
     """
+    side = {"front": "bottom", "back": "top"}.get(side, side)
+    if side not in ("left", "right", "top", "bottom"):
+        side = "top"
     z_top = base_z + height
     max_depth = min(DIVISION_SHELF_DEPTH, max(2.0, height - 1.0))
     # Whether this side's edge runs the same way as the divider walls (so the
@@ -558,9 +607,12 @@ def _division_side_shelves(
             outline = text_outline(text, shared_cap)
         except Exception:
             continue
-        if edge_axis == "y":
+        turn = {
+            "top": 0.0, "bottom": 180.0, "left": 90.0, "right": -90.0,
+        }[side]
+        if turn:
             outline = affinity.rotate(
-                outline, 90.0, origin=(0.0, 0.0), use_radians=False
+                outline, turn, origin=(0.0, 0.0), use_radians=False
             )
         if edge_axis == "x":
             cx = (span_lo + span_hi) / 2.0
@@ -623,7 +675,8 @@ def divider_division_texts(
     level = str(options.get("division_level", "base")).strip().lower()
     if level == "rim":
         return _division_side_shelves(
-            box, along, zone, slots, labels, thickness, base_z, height, "top",
+            box, along, zone, slots, labels, thickness, base_z, height,
+            str(options.get("division_side", "back")),
         )
     z = base_z
 
@@ -1111,6 +1164,6 @@ register_setting_interactions("divider", (
     ),
     SettingInteraction(
         "division_level", "division_labels.shelf", "enable/disable", "divider",
-        "Rim-level Divider labels use the Text part's rear floating shelf profile.",
+        "Rim-level Divider labels use the Text part's selected-side shelf profile.",
     ),
 ))

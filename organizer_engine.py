@@ -1305,70 +1305,104 @@ def text_outline(label: str, cap_height: float) -> Polygon | MultiPolygon:
     )
 
 
-def top_label_zone(box: BoxSpec) -> Polygon:
-    """Floor-plan area reserved by the rear rim-label ledge."""
+def _rim_label_side(side: str) -> str:
+    value = str(side or "back").strip().lower()
+    if value == "top":
+        value = "back"
+    if value not in ("front", "back", "left", "right"):
+        raise ValueError("rim shelf must be at the front, back, left, or right")
+    return value
+
+
+def top_label_zone(box: BoxSpec, side: str = "back") -> Polygon:
+    """Floor-plan area reserved by a rim-label ledge."""
+    side = _rim_label_side(side)
     inside_x, inside_y = box.usable_inside
-    if inside_y < TOP_LABEL_LEDGE_DEPTH - 1e-9:
+    across = inside_y if side in ("front", "back") else inside_x
+    if across < TOP_LABEL_LEDGE_DEPTH - 1e-9:
         raise ValueError(
-            f"a top label needs at least {TOP_LABEL_LEDGE_DEPTH:g} mm of usable "
-            f"bin depth; this bin has {inside_y:.1f} mm"
+            f"a rim label needs at least {TOP_LABEL_LEDGE_DEPTH:g} mm of usable "
+            f"room; this bin has {across:.1f} mm"
         )
-    wall_y = inside_y / 2.0
-    return shapely_box(
-        -inside_x / 2.0,
-        wall_y - TOP_LABEL_LEDGE_DEPTH,
-        inside_x / 2.0,
-        wall_y,
-    )
+    if side == "back":
+        return shapely_box(-inside_x / 2.0, inside_y / 2.0 - TOP_LABEL_LEDGE_DEPTH,
+                           inside_x / 2.0, inside_y / 2.0)
+    if side == "front":
+        return shapely_box(-inside_x / 2.0, -inside_y / 2.0,
+                           inside_x / 2.0, -inside_y / 2.0 + TOP_LABEL_LEDGE_DEPTH)
+    if side == "left":
+        return shapely_box(-inside_x / 2.0, -inside_y / 2.0,
+                           -inside_x / 2.0 + TOP_LABEL_LEDGE_DEPTH, inside_y / 2.0)
+    return shapely_box(inside_x / 2.0 - TOP_LABEL_LEDGE_DEPTH, -inside_y / 2.0,
+                       inside_x / 2.0, inside_y / 2.0)
 
 
-def top_label_outline(box: BoxSpec, label: str) -> Polygon | MultiPolygon:
-    """Fixed 5 mm text, centred on the 7 mm rear ledge."""
+def top_label_outline(
+    box: BoxSpec, label: str, side: str = "back"
+) -> Polygon | MultiPolygon:
+    """Fixed 5 mm text, centred on the selected rim ledge."""
+    side = _rim_label_side(side)
     if box.z < TOP_LABEL_LEDGE_DEPTH - 1e-9:
         raise ValueError(
-            f"a top label needs a bin at least {TOP_LABEL_LEDGE_DEPTH:g} mm tall "
+            f"a rim label needs a bin at least {TOP_LABEL_LEDGE_DEPTH:g} mm tall "
             "for its 45-degree ledge"
         )
-    top_label_zone(box)
+    top_label_zone(box, side)
     outline = text_outline(label, TOP_LABEL_CAP_HEIGHT)
     minx, miny, maxx, maxy = outline.bounds
-    inside_x, _inside_y = box.usable_inside
-    room_x = inside_x - 2.0 * TOP_LABEL_MARGIN
+    inside_x, inside_y = box.usable_inside
+    room_x = (inside_x if side in ("front", "back") else inside_y) - 2.0 * TOP_LABEL_MARGIN
     room_y = TOP_LABEL_LEDGE_DEPTH - 2.0 * TOP_LABEL_MARGIN
     width, height = maxx - minx, maxy - miny
     if width > room_x + 1e-9 or height > TOP_LABEL_LEDGE_DEPTH + 1e-9:
         raise ValueError(
-            f"'{label}' will not fit on the top label ledge: fixed "
+            f"'{label}' will not fit on the rim label ledge: fixed "
             f"{TOP_LABEL_CAP_HEIGHT:g} mm letters need {width:.1f} x {height:.1f} mm "
             f"and the ledge gives {room_x:.1f} x {room_y:.1f} mm. Use a shorter "
-            "label or a wider box"
+            "label or a larger box"
         )
-    inside_x, inside_y = box.usable_inside
-    return translate_polygon(
-        outline, yoff=inside_y / 2.0 - TOP_LABEL_LEDGE_DEPTH / 2.0
-    )
+    turn = {"back": 0.0, "front": 180.0, "left": 90.0, "right": -90.0}[side]
+    if turn:
+        outline = rotate_polygon(outline, turn, origin=(0.0, 0.0))
+    offsets = {
+        "back": (0.0, inside_y / 2.0 - TOP_LABEL_LEDGE_DEPTH / 2.0),
+        "front": (0.0, -inside_y / 2.0 + TOP_LABEL_LEDGE_DEPTH / 2.0),
+        "left": (-inside_x / 2.0 + TOP_LABEL_LEDGE_DEPTH / 2.0, 0.0),
+        "right": (inside_x / 2.0 - TOP_LABEL_LEDGE_DEPTH / 2.0, 0.0),
+    }
+    xoff, yoff = offsets[side]
+    return translate_polygon(outline, xoff=xoff, yoff=yoff)
 
 
-def make_top_label_ledge(box: BoxSpec) -> trimesh.Trimesh:
-    """Rear label shelf with a 45-degree self-supporting underside.
+def make_top_label_ledge(box: BoxSpec, side: str = "back") -> trimesh.Trimesh:
+    """Rim label shelf with a 45-degree self-supporting underside.
 
-    The shelf runs the full interior width so it meets the left and right
-    walls flush.  It is cut across the whole outer envelope and then trimmed
-    back to the wavy side walls, which leaves no gap at either end.
+    The shelf runs the full selected wall span. It is cut across the whole
+    outer envelope and then trimmed back to the wavy walls.
     """
-    _inside_x, inside_y = box.usable_inside
-    wall_y = inside_y / 2.0
-    inner_y = wall_y - TOP_LABEL_LEDGE_DEPTH
+    side = _rim_label_side(side)
+    inside_x, inside_y = box.usable_inside
     envelope_polygon = wavy_outer_polygon(box)
-    minx, _miny, maxx, rear_y = envelope_polygon.bounds
+    minx, miny, maxx, maxy = envelope_polygon.bounds
     low_z = box.z - TOP_LABEL_LEDGE_DEPTH
-    profile = Polygon([
-        (inner_y, box.z),
-        (rear_y, box.z),
-        (rear_y, low_z),
-        (wall_y, low_z),
-    ])
-    ledge = _extrude_yz_profile(profile, maxx - minx)
+    if side in ("front", "back"):
+        wall = (inside_y / 2.0) if side == "back" else (-inside_y / 2.0)
+        inward = -1.0 if side == "back" else 1.0
+        outer = maxy if side == "back" else miny
+        profile = Polygon([
+            (wall + inward * TOP_LABEL_LEDGE_DEPTH, box.z),
+            (outer, box.z), (outer, low_z), (wall, low_z),
+        ])
+        ledge = _extrude_yz_profile(profile, maxx - minx)
+    else:
+        wall = (-inside_x / 2.0) if side == "left" else (inside_x / 2.0)
+        inward = 1.0 if side == "left" else -1.0
+        outer = minx if side == "left" else maxx
+        profile = Polygon([
+            (wall + inward * TOP_LABEL_LEDGE_DEPTH, box.z),
+            (outer, box.z), (outer, low_z), (wall, low_z),
+        ])
+        ledge = _extrude_xz_profile(profile, maxy - miny)
     # Trim the ends back to just inside the wavy side walls.  Cutting a hair
     # shy of the real wall surface keeps the shelf buried in wall material -
     # it merges with the body cleanly instead of leaving coincident faces.
@@ -1380,22 +1414,23 @@ def make_top_label_ledge(box: BoxSpec) -> trimesh.Trimesh:
     return ledge
 
 
-def make_top_label(box: BoxSpec, label: str) -> trimesh.Trimesh:
+def make_top_label(box: BoxSpec, label: str, side: str = "back") -> trimesh.Trimesh:
     """The separate-colour inlay that finishes flush with the rim."""
-    return text_prism(top_label_outline(box, label), box.z)
+    return text_prism(top_label_outline(box, label, side), box.z)
 
 
 def make_top_labelled_box(
     box: BoxSpec,
     label: str,
     body: trimesh.Trimesh | None = None,
+    side: str = "back",
 ) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
     """Add the rim shelf and return its pocketed body plus flush text inlay."""
     with_ledge = union([
         make_box(box) if body is None else body,
-        make_top_label_ledge(box),
+        make_top_label_ledge(box, side),
     ])
-    inlay = make_top_label(box, label)
+    inlay = make_top_label(box, label, side)
     pocketed = difference([with_ledge, inlay])
     pocketed.remove_unreferenced_vertices()
     pocketed.merge_vertices()
@@ -1792,14 +1827,16 @@ def label_report(
     }
 
 
-def top_label_report(box: BoxSpec, label: str) -> dict[str, object]:
-    outline = top_label_outline(box, label)
+def top_label_report(box: BoxSpec, label: str, side: str = "back") -> dict[str, object]:
+    normalized_side = _rim_label_side(side)
+    outline = top_label_outline(box, label, normalized_side)
     minx, miny, maxx, maxy = outline.bounds
     return {
         "label": label,
-        "position": "top",
+        "position": "top" if normalized_side == "back" else normalized_side,
+        "side": normalized_side,
         "cap_height_mm": TOP_LABEL_CAP_HEIGHT,
-        "rotated": False,
+        "rotated": normalized_side in ("left", "right"),
         "footprint_mm": [round(maxx - minx, 3), round(maxy - miny, 3)],
         "ledge_depth_mm": TOP_LABEL_LEDGE_DEPTH,
         "ledge_underside_degrees": 45.0,

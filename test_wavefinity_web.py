@@ -247,11 +247,11 @@ class WebApplicationTests(unittest.TestCase):
         high_top = max(point[2] for face in high["geometry"] for point in face["points"])
         self.assertGreater(high_top, low_top + 4.0)
 
-    def test_new_divider_starts_with_one_wall_on_each_axis(self):
+    def test_new_divider_starts_with_one_wall_on_x_axis(self):
         response = default_feature_payload({"design": default_design(), "kind": "divider"})
-        self.assertEqual(response["feature"]["options"], {"count_x": 1, "count_y": 1})
+        self.assertEqual(response["feature"]["options"], {"count_x": 1, "count_y": 0})
         self.assertEqual(response["resolved_options"]["count_x"], 1)
-        self.assertEqual(response["resolved_options"]["count_y"], 1)
+        self.assertEqual(response["resolved_options"]["count_y"], 0)
 
     def test_photo_nest_defaults_include_finger_grasp_lift_assist(self):
         design = default_design()
@@ -508,6 +508,21 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIs(one.options["minimal_bottom"], True)
         self.assertIs(one.options["reverse_bottom"], False)
 
+    def test_grid_divider_preview_marks_sloped_bases_separately(self):
+        design = default_design()
+        feature = default_feature_payload({
+            "design": design, "kind": "divider",
+        })["feature"]
+        feature["options"].update({
+            "count_x": 1, "count_y": 1, "slope_base": True,
+            "bottom_angle": 20.0,
+        })
+        design["layout"]["features"] = [feature]
+        preview = preview_payload({"design": design})
+        kinds = {face["kind"] for face in preview["geometry"]}
+        self.assertIn("feature_divider", kinds)
+        self.assertIn("feature_divider_slope", kinds)
+
     def test_a_divider_design_with_no_bottom_keys_still_loads(self):
         design = default_design()
         design["box"]["x"] = 96.0
@@ -590,9 +605,10 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(saved["scoop"], {"depth": 50})
         for key in (
             "slope_base", "bottom_angle", "alternate_bottom",
-            "minimal_bottom", "bottom_supports", "division_side",
+            "minimal_bottom", "bottom_supports",
         ):
             self.assertNotIn(key, saved)
+        self.assertEqual(saved["division_side"], "left")
 
     def test_legacy_divider_without_scoop_configuration_still_loads(self):
         design = default_design()
@@ -832,6 +848,17 @@ class WebApplicationTests(unittest.TestCase):
         preview = preview_payload({"design": design})
         self.assertTrue(preview["label_outline"])
         self.assertEqual(preview["label_meta"]["location"], "top")
+
+    def test_text_part_rim_shelf_uses_its_selected_side(self):
+        design = default_design()
+        design["box"].update({"x": 64.0, "y": 48.0})
+        design["layout"]["features"] = [
+            _text_feature("M3", level="rim", rim_side="right")
+        ]
+        preview = preview_payload({"design": design})
+        self.assertEqual(preview["label_meta"]["side"], "right")
+        xs = [point[0] for ring in preview["label_outline"] for point in ring]
+        self.assertGreater(min(xs), 0.0)
 
     def test_preview_draws_a_text_part_like_any_other_interior_part(self):
         design = default_design()
@@ -1153,10 +1180,14 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn('changed === "option:slope_base" && one.options.slope_base', app_js)
         self.assertIn('delete one.options.scoop;', app_js)
         self.assertIn('delete state.draft.options[key];', app_js)
-        self.assertIn('textLevelSelector("draft-text-level", textLevel)', app_js)
-        self.assertIn('textLevelSelector("draft-division-level", divLevel)', app_js)
-        self.assertNotIn("Line up against", app_js)
+        self.assertIn('textPlacementFields(', app_js)
+        self.assertIn('>On base</option>', app_js)
+        self.assertIn('>Rim level</option>', app_js)
+        self.assertIn('>Rim shelf<select', app_js)
         self.assertNotIn('name="draft-division-side"', app_js)
+        self.assertIn("divider-slope-toggles", styles_css)
+        self.assertIn('divider_slope: "#1f6b45"', app_js)
+        self.assertNotIn('changed === "option:bottom_angle" ||', app_js)
 
     def test_feature_icons_are_separate_and_loaded_before_the_app(self):
         root = Path(__file__).resolve().parent

@@ -82,6 +82,7 @@ const COLORS = {
   scoop: "#a9bec3", insert_base: "#c5ab83", invalid: "#c95f58",
   cradle: "#e59f54", nest: "#df8d5b", bore: "#6fb98f", post: "#51a5a1",
   divider: "#9d86c8", pocket: "#d4778c", slot: "#8b78cf", steps: "#4b8eb9",
+  divider_slope: "#1f6b45",
   // Floor lettering keeps the colour the single floor label always had, so a
   // text interior part reads as writing rather than as another holder.
   text: "#315766",
@@ -333,7 +334,12 @@ function ensureRimFeatureInLayout() {
       {
         kind: "text",
         zone: [-16, -4, 16, 4],
-        options: { text: tidy, level: "rim" },
+        options: {
+          text: tidy,
+          level: "rim",
+          rim_side: ["front", "back", "left", "right"].includes(state.design.label_position)
+            ? state.design.label_position : "back",
+        },
         along: "x",
         item: null,
         count: null,
@@ -345,16 +351,19 @@ function ensureRimFeatureInLayout() {
 function syncRimLabelFromFeatures() {
   if (!state.design) return;
   let rimText = "";
+  let rimSide = "back";
   if (state.draft?.kind === "text" && state.draft.options?.level === "rim") {
     rimText = String(state.draft.options?.text ?? "").trim();
+    rimSide = state.draft.options?.rim_side || "back";
   } else {
     const rimFeature = state.design.layout?.features?.find(f => f.kind === "text" && f.options?.level === "rim");
     if (rimFeature) {
       rimText = String(rimFeature.options?.text ?? "").trim();
+      rimSide = rimFeature.options?.rim_side || "back";
     }
   }
   state.design.label = rimText;
-  state.design.label_position = rimText ? "top" : "bottom";
+  state.design.label_position = rimText ? rimSide : "bottom";
 }
 
 function syncEasyCleanControls() {
@@ -1325,11 +1334,19 @@ function plainCheckbox(key, title, on, options = {}) {
   </label>`;
 }
 
-function textLevelSelector(name, level) {
-  return `<fieldset class="wide"><div class="segmented two">
-    <label><input type="radio" name="${escapeHtml(name)}" value="base" ${level === "base" ? "checked" : ""}><span>Base text</span></label>
-    <label><input type="radio" name="${escapeHtml(name)}" value="rim" ${level === "rim" ? "checked" : ""}><span>Rim Level</span></label>
-  </div></fieldset>`;
+function textPlacementFields(levelKey, sideKey, level, side = "back") {
+  const sides = [["front", "Front"], ["back", "Back"], ["left", "Left"], ["right", "Right"]];
+  const pickedSide = sides.some(([value]) => value === side) ? side : "back";
+  let html = `<label>Text location<select data-draft="${escapeHtml(levelKey)}">
+    <option value="base" ${level === "base" ? "selected" : ""}>On base</option>
+    <option value="rim" ${level === "rim" ? "selected" : ""}>Rim level</option>
+  </select></label>`;
+  if (level === "rim") {
+    html += `<label>Rim shelf<select data-draft="${escapeHtml(sideKey)}">
+      ${sides.map(([value, label]) => `<option value="${value}" ${pickedSide === value ? "selected" : ""}>${label}</option>`).join("")}
+    </select></label>`;
+  }
+  return html;
 }
 
 function dividerScoopDefaultDepth() {
@@ -1425,7 +1442,9 @@ function renderDraftFields() {
   }
   if (info.flags.text) {
     const textLevel = one.options?.level === "rim" ? "rim" : "base";
-    html += textLevelSelector("draft-text-level", textLevel);
+    html += textPlacementFields(
+      "option:level", "option:rim_side", textLevel, one.options?.rim_side,
+    );
     html += `<label class="wide">What it says
       <input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">
     </label>`;
@@ -1566,7 +1585,7 @@ function renderDraftFields() {
     } else if (info.flags.qty) {
       html += `<div class="pair"><label>Quantity<div class="input-with-button">
         <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
-        ${info.kind === "cradle" ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
+        ${["cradle", "slot"].includes(info.kind) ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
       </div></label>${repeatFieldsHtml}</div>`;
       if (info.kind === "cradle") {
         const item = one.item || starterItem();
@@ -1701,30 +1720,28 @@ function renderDraftFields() {
 
     if (hasSlope) {
       const explicitAngle = Object.prototype.hasOwnProperty.call(opt, "bottom_angle");
-      const angleVal = explicitAngle ? opt.bottom_angle : (state.draftResolvedOptions?.bottom_angle ?? 20);
-      html += `<div class="pair">`;
-      html += field("Degree °", "option:bottom_angle", angleVal, { step: "1" });
-      html += toggle("option:alternate_bottom", "Alternate slopes",
-        "Reverses every second tool slot.", opt.alternate_bottom === true);
-      html += `</div>`;
-
+      const angleVal = explicitAngle ? opt.bottom_angle : (number(state.draftResolvedOptions?.bottom_angle, 0) || 20);
       const angleNum = number(angleVal, 0);
+      const useBars = angleNum !== 0 && opt.minimal_bottom === true;
+      html += `<div class="pair divider-slope-options"><div class="divider-slope-fields">`;
+      html += field("Degree °", "option:bottom_angle", angleVal, { step: "1" });
       if (angleNum !== 0) {
-        const useBars = opt.minimal_bottom === true;
-        const barsHelp = "A few thin bars hung off the walls at the tool line instead of a solid slope.";
         if (useBars) {
           const explicitBars = Object.prototype.hasOwnProperty.call(opt, "bottom_supports");
           const bars = explicitBars
             ? opt.bottom_supports
             : state.draftResolvedOptions?.bottom_supports ?? 3;
-          html += `<div class="pair">`;
-          html += toggle("option:minimal_bottom", "Use support crossbars", barsHelp, true);
           html += field("Number of crossbars", "option:bottom_supports", bars, { step: "1" });
-          html += `</div>`;
-        } else {
-          html += toggle("option:minimal_bottom", "Use support crossbars", barsHelp, false, { wide: true });
         }
       }
+      html += `</div><div class="divider-slope-toggles">`;
+      html += toggle("option:alternate_bottom", "Alternate slopes",
+        "Reverses every second tool slot.", opt.alternate_bottom === true);
+      if (angleNum !== 0) {
+        const barsHelp = "A few thin bars hung off the walls at the tool line instead of a solid slope.";
+        html += toggle("option:minimal_bottom", "Use support crossbars", barsHelp, useBars);
+      }
+      html += `</div></div>`;
     }
     html += `</div>`;
 
@@ -1753,7 +1770,9 @@ function renderDraftFields() {
 
     if (hasLabels) {
       const divLevel = opt.division_level === "rim" ? "rim" : "base";
-      html += textLevelSelector("draft-division-level", divLevel);
+      html += textPlacementFields(
+        "option:division_level", "option:division_side", divLevel, opt.division_side,
+      );
 
       // A cell per compartment: (Qty X + 1) columns by (Qty Y + 1) rows,
       // laid out to mirror the bin so a label lands where its slot is.
@@ -1801,15 +1820,8 @@ function renderDraftFields() {
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateDraftFromFields);
   });
-  $$('input[name="draft-division-level"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
-    markDraftChanged();
-    state.draft.options ||= {};
-    state.draft.options.division_level = input.value;
-    state.draftAutoCommit = true;
-    renderDraftFields();
-    renderLayout2D();
-    refreshDraftSoon();
-  }));
+  const dividerAngle = $('[data-draft="option:bottom_angle"]', $("#draft-fields"));
+  if (dividerAngle) dividerAngle.addEventListener("focus", () => dividerAngle.select());
   $$('input[data-division-index]', $("#draft-fields")).forEach(input => input.addEventListener("input", () => {
     markDraftChanged();
     state.draft.options ||= {};
@@ -1847,26 +1859,6 @@ function renderDraftFields() {
     renderLayout2D();
     refreshDraftSoon();
   });
-  $$('input[name="draft-text-level"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
-    markDraftChanged();
-    state.draft.options ||= {};
-    const newLevel = input.value;
-    state.draft.options.level = newLevel;
-    if (newLevel === "rim") {
-      delete state.draft.options.auto;
-      delete state.draft.options.quarter_turns;
-      delete state.draft.options.raised;
-      delete state.draft.options.cap_height;
-      delete state.draft.options.depth;
-    } else {
-      if (!("auto" in state.draft.options)) state.draft.options.auto = true;
-    }
-    state.draftAutoCommit = true;
-    syncRimLabelFromFeatures();
-    renderDraftFields();
-    updateSelectionButtons();
-    refreshDraftSoon();
-  }));
   const textInput = $('[data-draft="option:text"]', $("#draft-fields"));
   if (textInput) {
     const clearIfLabel = () => {
@@ -2122,6 +2114,20 @@ function sizeBoreToGrid(one) {
     : ["front", "back"].includes(angleTowards) ? "y"
     : one.along === "y" ? "y" : "x";
 
+  // A leaned bore's angled tools sweep past the block toward `angle_towards`,
+  // right up to the bin rim (see bore_tool_clearance_zone in
+  // organizer_inserts/_bore.py). Bias the block away from that wall by half the
+  // tool's overhang so the tools stay balanced in the bin and it never has to
+  // grow just to let a slanting tool clear one side.
+  const leanSign = angleTowards === "right" || angleTowards === "back" ? 1 : -1;
+  const box = state.design.box;
+  const baseZ = number(box.base_thickness, 0.6) +
+    (state.design.layout.mode === "fused" ? 0 : 0.6);
+  const boreHeight = number(opts.height ?? resolved.height, holeDepth + 2);
+  const riseToRim = number(box.z, 0) - (baseZ + boreHeight);
+  const toolOverhang = angle > 0 && riseToRim > 0
+    ? riseToRim * Math.tan(angle * Math.PI / 180) : 0;
+
   const cx = (one.zone[0] + one.zone[2]) / 2;
   const cy = (one.zone[1] + one.zone[3]) / 2;
   const curW = one.zone[2] - one.zone[0];
@@ -2149,8 +2155,15 @@ function sizeBoreToGrid(one) {
     const half = span / 2;
     return Math.min(Math.max(centre, -inside / 2 + half), inside / 2 - half);
   };
-  const ncx = place(cx, width, insideX);
-  const ncy = place(cy, depth, insideY);
+  // Push the block off the wall its tools lean toward - never back toward it,
+  // so a hand-placed bore that already sits clear is left where it is.
+  const leanTarget = (centre, axis) => {
+    if (toolOverhang <= 0 || along !== axis) return centre;
+    const bias = -leanSign * toolOverhang / 2;
+    return leanSign < 0 ? Math.max(centre, bias) : Math.min(centre, bias);
+  };
+  const ncx = place(leanTarget(cx, "x"), width, insideX);
+  const ncy = place(leanTarget(cy, "y"), depth, insideY);
   one.zone = [ncx - width / 2, ncy - depth / 2, ncx + width / 2, ncy + depth / 2];
 
   const widthField = $('[data-draft="width"]', $("#draft-fields"));
@@ -2446,13 +2459,16 @@ function updateDraftFromFields(event) {
     const fields = $("#draft-fields");
     const said = $('[data-draft="option:text"]', fields);
     if (said) one.options.text = said.value;
+    one.options.level = get("option:level") === "rim" ? "rim" : "base";
     if (one.options.level === "rim") {
+      one.options.rim_side = get("option:rim_side") || one.options.rim_side || "back";
       delete one.options.auto;
       delete one.options.raised;
       delete one.options.quarter_turns;
       delete one.options.cap_height;
       delete one.options.depth;
     } else {
+      delete one.options.rim_side;
       one.options.auto = $('[data-draft="option:auto"]', fields)?.checked === true;
       one.options.raised = $('[data-draft="option:raised"]', fields)?.checked === true;
       if (changed === "option:auto" && one.options.auto) {
@@ -2483,16 +2499,25 @@ function updateDraftFromFields(event) {
     }
     if (changed === "option:slope_base" && one.options.slope_base) {
       delete one.options.scoop;
+      if (!Object.prototype.hasOwnProperty.call(one.options, "bottom_angle")) {
+        one.options.bottom_angle = 20;
+      }
     }
     if (!one.options.label_divisions) {
       delete one.options.division_level;
       delete one.options.division_labels;
+      delete one.options.division_side;
+    } else {
+      one.options.division_level = get("option:division_level") === "rim" ? "rim" : "base";
+      if (one.options.division_level === "rim") {
+        one.options.division_side = get("option:division_side") || one.options.division_side || "back";
+      } else delete one.options.division_side;
     }
-    delete one.options.division_side;
   }
   if (changed.startsWith("option:") &&
       !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom",
-        "slope_base", "label_divisions", "division_level", "division_labels",
+        "slope_base", "label_divisions", "division_level", "division_side", "division_labels",
+        "level", "rim_side",
         "lift_assist", "finger_position", "push_position", "angle_towards"]
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
@@ -2609,9 +2634,10 @@ function updateDraftFromFields(event) {
   if (changed === "option:lift_assist" && one.kind === "nest") renderDraftFields();
   // Ticking Use support crossbars reveals (or hides) Number of crossbars.
   if (changed === "option:minimal_bottom") renderDraftFields();
+  if (changed === "option:level") renderDraftFields();
   if (one.kind === "divider" && (
     changed === "option:slope_base" || changed === "option:label_divisions" ||
-    changed === "count" || changed === "option:bottom_angle" ||
+    changed === "option:division_level" || changed === "count" ||
     changed === "option:count_x" || changed === "option:count_y"
   )) renderDraftFields();
   updateSelectionButtons();
@@ -3266,13 +3292,12 @@ function updateAutoExpandButton() {
   updateFitActions();
 }
 
-// The automatic bore fitter now keeps its Base snug around the selected hole
-// grid and grows the bin when needed, so it does not need manual "Fit to
-// holes" or "Fill the bin" shortcuts. The remaining actions describe choices
-// the automatic fitter cannot infer: a Post/Slot Rack may need a deliberately
-// sized footprint, and Pocket/Steps have no contents from which to derive one.
-const FIT_PART_KINDS = { post: "pegs", slot: "slots" };
-const FILL_PART_KINDS = new Set(["pocket", "slot", "steps"]);
+// Bore and Slot Rack keep their Base snug around their selected quantities and
+// grow the bin when needed, so they do not need manual Fit or Fill shortcuts.
+// A Post Rack may still need a deliberately sized footprint, while Pocket and
+// Steps have no contents from which to derive one.
+const FIT_PART_KINDS = { post: "pegs" };
+const FILL_PART_KINDS = new Set(["pocket", "steps"]);
 
 function renderFitActions(one) {
   const kind = one.kind;
@@ -3440,6 +3465,7 @@ const enforceBinMinimumSoon = debounce(() => {
 function kindColor(kind) {
   if (COLORS[kind]) return COLORS[kind];
   if (kind === "draft_invalid") return COLORS.invalid;
+  if (kind.endsWith("_divider_slope")) return COLORS.divider_slope;
   if (kind.startsWith("draft_")) return DRAFT_HIGHLIGHT;
   const base = kind.replace(/^insert_/, "").replace(/^feature_/, "");
   if (kind.endsWith("invalid")) return COLORS.invalid;
@@ -4395,6 +4421,28 @@ function renderLayout2D() {
       } else if (feature.kind === "divider") {
         const activeFeature = (index === state.selected && state.draft?.kind === "divider") ? state.draft : feature;
         const opt = activeFeature.options || {};
+        const slopeOn = opt.slope_base === true ||
+          ["true", "1", "yes", "on"].includes(String(opt.slope_base).toLowerCase()) ||
+          Number(opt.bottom_angle) !== 0;
+        if (slopeOn) {
+          context.save();
+          context.clip(worldRect(feature.zone));
+          context.strokeStyle = "#1f6b45";
+          context.lineWidth = 1.8;
+          context.globalAlpha = .78;
+          const [sx0, sy0, sx1, sy1] = feature.zone;
+          const span = Math.max(sx1 - sx0, sy1 - sy0);
+          for (let mark = -span; mark <= span * 2; mark += 8) {
+            const a = activeFeature.along === "y"
+              ? toCanvas([sx0, sy0 + mark])
+              : toCanvas([sx0 + mark, sy0]);
+            const b = activeFeature.along === "y"
+              ? toCanvas([sx1, sy1 + mark])
+              : toCanvas([sx1 + mark, sy1]);
+            context.beginPath(); context.moveTo(a[0], a[1]); context.lineTo(b[0], b[1]); context.stroke();
+          }
+          context.restore();
+        }
         if (opt.label_divisions && opt.division_labels) {
           renderDividerDivisionLabels(context, activeFeature, toCanvas, scale);
         } else {
