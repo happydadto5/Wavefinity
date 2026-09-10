@@ -3483,6 +3483,72 @@ function shade(hex, amount) {
   return `rgb(${channels.map(channel => Math.max(0, Math.min(255, Math.round(channel * amount)))).join(",")})`;
 }
 
+// One directional key light plus a weak fill and a hemispheric term, all in
+// world space so form stays readable as the model rotates. Returns a multiplier
+// applied to each face's own colour (baseColor x lighting), clamped so no
+// surface goes black or washes out to a flat sheet.
+const KEY_LIGHT = (() => {
+  const v = [-0.5, -0.35, 0.78];
+  const len = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / len, v[1] / len, v[2] / len];
+})();
+const FILL_LIGHT = (() => {
+  const v = [0.45, 0.55, 0.2];
+  const len = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / len, v[1] / len, v[2] / len];
+})();
+
+function faceLighting(normal) {
+  let [nx, ny, nz] = normal;
+  const len = Math.hypot(nx, ny, nz) || 1;
+  nx /= len; ny /= len; nz /= len;
+  const key = Math.max(0, nx * KEY_LIGHT[0] + ny * KEY_LIGHT[1] + nz * KEY_LIGHT[2]);
+  const fill = Math.max(0, nx * FILL_LIGHT[0] + ny * FILL_LIGHT[1] + nz * FILL_LIGHT[2]);
+  // nz is the up-component: top faces gain, downward/back faces lose.
+  const light = 0.46 + 0.46 * key + 0.13 * fill + 0.12 * nz;
+  return Math.max(0.42, Math.min(1.2, light));
+}
+
+// Opaque neutral ground so the object has something to sit against, plus a soft
+// contact shadow projected from the model's base rectangle - cheap grounding,
+// no ray tracing.
+function paintBackdrop(context, width, height) {
+  const bg = context.createLinearGradient(0, 0, 0, height);
+  bg.addColorStop(0, "#eef1f2");
+  bg.addColorStop(1, "#dfe4e5");
+  context.fillStyle = bg;
+  context.fillRect(0, 0, width, height);
+}
+
+function drawContactShadow(context, box, camera, project) {
+  if (!box) return;
+  const hx = number(box.x) / 2, hy = number(box.y) / 2;
+  if (!(hx > 0) || !(hy > 0)) return;
+  const base = [[-hx, -hy, 0], [hx, -hy, 0], [hx, hy, 0], [-hx, hy, 0]]
+    .map(point => project(iso(point, camera)));
+  let cx = 0, cy = 0, minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [x, y] of base) {
+    cx += x; cy += y;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  }
+  cx /= 4; cy /= 4;
+  const rx = Math.max(8, (maxX - minX) / 2) * 1.08;
+  const ry = Math.max(5, (maxY - minY) / 2) * 1.12;
+  context.save();
+  context.translate(cx, cy);
+  context.scale(1, ry / rx);
+  const grad = context.createRadialGradient(0, 0, 0, 0, 0, rx);
+  grad.addColorStop(0, "rgba(18,30,36,.26)");
+  grad.addColorStop(0.55, "rgba(18,30,36,.14)");
+  grad.addColorStop(1, "rgba(18,30,36,0)");
+  context.fillStyle = grad;
+  context.beginPath();
+  context.arc(0, 0, rx, 0, Math.PI * 2);
+  context.fill();
+  context.restore();
+}
+
 function cameraVector(camera) {
   const yaw = camera.yaw * Math.PI / 180;
   const elevation = camera.elevation * Math.PI / 180;
@@ -3516,7 +3582,7 @@ function canvasSize(canvas) {
 
 function drawGeometry(canvas, geometry, camera) {
   const { context, width, height } = canvasSize(canvas);
-  context.clearRect(0, 0, width, height);
+  paintBackdrop(context, width, height);
   state.previewSupportPolygons = [];
   if (!geometry?.length) {
     context.fillStyle = "#8b989e";
@@ -3615,6 +3681,7 @@ function drawGeometry(canvas, geometry, camera) {
   const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
   const project = point => [width / 2 + (point[0] - midX) * scale, height / 2 + (point[1] - midY) * scale];
   faces.sort((a, b) => a.depth - b.depth || number(a.layer) - number(b.layer));
+  drawContactShadow(context, state.design?.box, camera, project);
   context.lineJoin = "round";
   for (const face of faces) {
     const points = face.projected.map(project);
@@ -3625,11 +3692,16 @@ function drawGeometry(canvas, geometry, camera) {
     points.slice(1).forEach(point => context.lineTo(point[0], point[1]));
     context.closePath();
     const base = kindColor(face.kind);
-    const light = .78 + Math.max(0, Math.min(1, face.facing)) * .35;
-    context.fillStyle = shade(base, light);
+    context.fillStyle = shade(base, faceLighting(face.normal));
     context.fill();
     const isDraft = face.kind.startsWith("draft_");
-    context.strokeStyle = isDraft ? "rgba(196,131,20,.5)" : "rgba(38,65,75,.13)";
+    // Match the seam stroke to the fill first so internal triangulation stops
+    // reading as a wireframe, then lay only a whisper of darker contrast where
+    // surfaces actually meet.
+    context.strokeStyle = context.fillStyle;
+    context.lineWidth = .8;
+    context.stroke();
+    context.strokeStyle = isDraft ? "rgba(196,131,20,.45)" : "rgba(18,32,38,.08)";
     context.lineWidth = isDraft ? .6 : .35;
     context.stroke();
   }

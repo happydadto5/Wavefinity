@@ -1439,7 +1439,7 @@ class BinCustomizationTests(unittest.TestCase):
         self.assertIn("scoop", kinds)
         self.assertEqual(
             [name for name, _zone in geometry["customization_zones"]],
-            ["top label ledge", "scoop"],
+            ["rim label ledge", "scoop"],
         )
 
     def test_supports_cannot_collide_with_fixed_customizations(self) -> None:

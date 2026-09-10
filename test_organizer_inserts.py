@@ -1133,8 +1133,18 @@ class DividerScoopTests(unittest.TestCase):
             solid for solid in solids
             if solid.metadata.get("wavefinity_preview_kind") == "slope"
         ]
-        self.assertEqual(len(slopes), 2)
+        # A 1x1 grid cuts the floor into four cells and each one carries its
+        # own ramp, restarting from the floor rather than one ramp sweeping the
+        # whole zone.
+        self.assertEqual(len(slopes), 4)
         self.assertTrue(all(solid.bounds[1][2] > self.base_z + 5.0 for solid in slopes))
+        zone = feature.zone
+        half_w = (zone.x1 - zone.x0) / 2.0
+        half_d = (zone.y1 - zone.y0) / 2.0
+        for solid in slopes:
+            (x0, y0, _), (x1, y1, _) = solid.bounds
+            self.assertLess(x1 - x0, half_w + 1e-6)
+            self.assertLess(y1 - y0, half_d + 1e-6)
 
     def test_slope_checkbox_without_saved_angle_uses_the_default_slope(self) -> None:
         feature = self.divider(slope_base=True)

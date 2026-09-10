@@ -42,6 +42,11 @@ BOTTOM_CROSSBAR_THICKNESS = 2.4
 BOTTOM_CROSSBAR_CHAMFER = 1.0
 RIB_THICKNESS = 1.6
 DIVISION_TEXT_DEPTH = 0.6
+# Clear gap kept between a base-level (floor) division label and whatever bounds
+# its compartment - a divider wall face, or the bin's own wall. The bin side
+# includes the wave's inward swing so a full-span divider's label still clears
+# the crest, not just the safe rectangle.
+DIVISION_TEXT_MARGIN = TOP_LABEL_MARGIN + WAVE_AMPLITUDE
 # Rim-level division labels can ride on a real shelf welded to the divider, the
 # same self-supporting ledge the box's own rim label uses: flat top at the
 # divider height, a 45-degree underside so it prints without support, and the
@@ -234,8 +239,17 @@ def _build_divider_grid(
         if slope_along == "x"
         else _even_centres(zone.x0, zone.x1, grid_x)
     )
+    # The dividers running the same way as the slope cut the ramp into cells;
+    # each cell restarts its own slope from the floor rather than one unbroken
+    # ramp sweeping across them.
+    slope_run_splits = (
+        _even_centres(zone.x0, zone.x1, grid_x)
+        if slope_along == "x"
+        else _even_centres(zone.y0, zone.y1, grid_y)
+    )
     solids.extend(_divider_sloped_bottoms(
         box, spec_feature, options, slope_along, slope_centres, height, base_z,
+        run_splits=slope_run_splits,
     ))
     for _label, text_solid, _raised in divider_division_texts(box, spec_feature, base_z):
         solids.append(text_solid)
@@ -271,6 +285,7 @@ def _option_flag(value: object) -> bool:
 def _divider_sloped_bottoms(
     box: BoxSpec, spec_feature: Feature, options: dict, along: str,
     centres: list[float], height: float, base_z: float,
+    run_splits: list[float] | None = None,
 ) -> list[trimesh.Trimesh]:
     angle = float(options.get("bottom_angle", 0.0) or 0.0)
     # A saved design may carry the checkbox without the newer angle key.
@@ -289,7 +304,7 @@ def _divider_sloped_bottoms(
         _option_flag(options.get("reverse_bottom")),
         _option_flag(options.get("alternate_bottom")),
         _option_flag(options.get("minimal_bottom")),
-        supports, spec_feature.full_span,
+        supports, spec_feature.full_span, run_splits,
     )
     for solid in solids:
         solid.metadata["wavefinity_preview_kind"] = "slope"
@@ -342,10 +357,10 @@ def _divider_grid_texts(
             text = str(labels[idx] or "").strip()
             if not text:
                 continue
-            x0 = x_edges[col] + (0.0 if col == 0 else thickness / 2.0)
-            x1 = x_edges[col + 1] - (0.0 if col == n_cols - 1 else thickness / 2.0)
-            y0 = y_edges[row] + (0.0 if row == 0 else thickness / 2.0)
-            y1 = y_edges[row + 1] - (0.0 if row == n_rows - 1 else thickness / 2.0)
+            x0 = x_edges[col] + (0.0 if col == 0 else thickness / 2.0) + DIVISION_TEXT_MARGIN
+            x1 = x_edges[col + 1] - (0.0 if col == n_cols - 1 else thickness / 2.0) - DIVISION_TEXT_MARGIN
+            y0 = y_edges[row] + (0.0 if row == 0 else thickness / 2.0) + DIVISION_TEXT_MARGIN
+            y1 = y_edges[row + 1] - (0.0 if row == n_rows - 1 else thickness / 2.0) - DIVISION_TEXT_MARGIN
             if level == "base" and isinstance(options.get("scoop"), dict):
                 # Every Divider Scoop occupies the low-Y half (or less) of its
                 # compartment. Keep floor lettering wholly in the guaranteed
@@ -360,8 +375,8 @@ def _divider_grid_texts(
             pw, ph = bx1 - bx0, by1 - by0
             if pw <= 0 or ph <= 0:
                 continue
-            avail_w = max(0.5, cell_w - 2.0)
-            avail_d = max(0.5, cell_d - 2.0)
+            avail_w = max(0.5, cell_w - 0.4)
+            avail_d = max(0.5, cell_d - 0.4)
             cap = max(2.5, min(avail_d, avail_w / (pw / 10.0)))
             try:
                 outline = text_outline(text, cap)
@@ -689,12 +704,16 @@ def divider_division_texts(
             continue
         inner_low = slot_low + (0.0 if idx == 0 else thickness / 2.0)
         inner_high = slot_high - (0.0 if idx == len(slots) - 1 else thickness / 2.0)
+        # Pull the label band in on every side: off the divider wall faces
+        # across the compartment, and off the bin walls at the run-axis ends.
+        inner_low += DIVISION_TEXT_MARGIN
+        inner_high -= DIVISION_TEXT_MARGIN
         if along == "x":
-            label_x0, label_x1 = zone.x0, zone.x1
+            label_x0, label_x1 = zone.x0 + DIVISION_TEXT_MARGIN, zone.x1 - DIVISION_TEXT_MARGIN
             label_y0, label_y1 = inner_low, inner_high
         else:
             label_x0, label_x1 = inner_low, inner_high
-            label_y0, label_y1 = zone.y0, zone.y1
+            label_y0, label_y1 = zone.y0 + DIVISION_TEXT_MARGIN, zone.y1 - DIVISION_TEXT_MARGIN
         if level == "base" and isinstance(options.get("scoop"), dict):
             # Scoops always rise from low Y and use no more than half the
             # compartment depth. The back half is therefore a stable label band.
@@ -716,8 +735,10 @@ def divider_division_texts(
         pw, ph = bx1 - bx0, by1 - by0
         if pw <= 0 or ph <= 0:
             continue
-        avail_run = max(0.5, slot_run - 2.0)
-        avail_across = max(0.5, slot_across - 1.0)
+        # The band is already inset by DIVISION_TEXT_MARGIN on every side, so
+        # only a hair of slack is needed here to keep glyph edges off the line.
+        avail_run = max(0.5, slot_run - 0.4)
+        avail_across = max(0.5, slot_across - 0.4)
         cap_by_across = avail_across
         cap_by_run = avail_run / (pw / 10.0)
         cap = max(2.5, min(cap_by_across, cap_by_run))
@@ -778,6 +799,7 @@ def _divider_support_bottoms(
     box: BoxSpec, zone: Zone, along: str, centres: list[float], height: float,
     base_z: float, angle: float, reverse: bool, alternate: bool,
     minimal: bool, supports: int, full_span: bool = False,
+    run_splits: list[float] | None = None,
 ) -> list[trimesh.Trimesh]:
     """Sloped support under each tool slot so a tool rests tilted, not flat.
 
@@ -819,7 +841,15 @@ def _divider_support_bottoms(
         raise ValueError("number of crossbars must be a positive whole number")
     run = zone.width if along == "x" else zone.depth
     r0, r1 = (zone.x0, zone.x1) if along == "x" else (zone.y0, zone.y1)
-    rise = run * math.tan(math.radians(angle))
+    # A grid divider crosses the run with perpendicular walls. Split the run at
+    # those wall centres so every cell between them carries its own ramp,
+    # starting again from the floor, instead of one ramp sweeping unbroken from
+    # one end of the zone to the other. With no splits this is a single segment
+    # spanning the whole run - exactly the legacy single-direction behaviour.
+    splits = sorted(s for s in (run_splits or []) if r0 + 1e-6 < s < r1 - 1e-6)
+    seg_bounds = [r0, *splits, r1]
+    segments = list(zip(seg_bounds, seg_bounds[1:]))
+    rise = max(hi - lo for lo, hi in segments) * math.tan(math.radians(angle))
     if rise > height + 1e-6 or base_z + rise > box.z + 1e-6:
         raise ValueError(
             "the bottom slope's high end rises past the divider height or the "
@@ -833,83 +863,88 @@ def _divider_support_bottoms(
     solids: list[trimesh.Trimesh] = []
     for index, (c_lo, c_hi) in enumerate(_bottom_slot_bounds(zone, along, centres)):
         flip = reverse ^ (alternate and index % 2 == 1)
-        if not minimal:
-            if not flip:
-                pts = [(r0, base_z - BOTTOM_EMBED), (r1, base_z - BOTTOM_EMBED),
-                       (r1, base_z + rise), (r0, base_z)]
-            else:
-                pts = [(r0, base_z - BOTTOM_EMBED), (r1, base_z - BOTTOM_EMBED),
-                       (r1, base_z), (r0, base_z + rise)]
-            solids.append(_extrude_bottom(Polygon(pts), along, c_lo, c_hi))
-            continue
-        # Which side of this slot has a wall to hang a crossbar from. A
-        # full-span divider always does on both sides (its own wall, and the
-        # bin's); a bare-floor divider's outermost slot has an open end.
-        lo_is_edge = math.isclose(c_lo, edge_lo, abs_tol=1e-6)
-        hi_is_edge = math.isclose(c_hi, edge_hi, abs_tol=1e-6)
-        floating = full_span or (not lo_is_edge and not hi_is_edge)
-        # Weld a floating crossbar into the bin's side wall where the slot ends
-        # at the zone edge instead of at a divider wall.
-        span_lo = -wall_line if (lo_is_edge and full_span) else c_lo
-        span_hi = wall_line if (hi_is_edge and full_span) else c_hi
-        span_mid = (span_lo + span_hi) / 2.0
-        half_span = (span_hi - span_lo) / 2.0
-        for step in range(supports):
-            centre = r0 + (step + 1) * run / (supports + 1)
-            z_left = _bottom_plane_z(centre - half_t, r0, r1, rise, base_z, flip)
-            z_right = _bottom_plane_z(centre + half_t, r0, r1, rise, base_z, flip)
-            low = min(z_left, z_right)
-            # A floating crossbar is a 45-degree corbel growing inward from the
-            # wall on each side of the slot; the two meet at a central ridge and
-            # a full bar rides the slope on top of it. Its whole underside is at
-            # 45 degrees so it prints support-free, and it never reaches the
-            # floor. That needs head-room: the corbels climb half the slot's
-            # width to meet. Where there isn't room - a wide slot, or a crossbar
-            # down near the low end of the slope - fall back to the old
-            # floor-standing stem, which prints fine on its own gusset feet.
-            z_ridge = low - bar_min
-            z_base = z_ridge - half_span
-            if not (floating and z_base >= base_z - BOTTOM_EMBED - 1e-9):
-                top_left = max(z_left, base_z + 0.2)
-                top_right = max(z_right, base_z + 0.2)
-                # 45-degree gusset feet, never taller than the stem they brace.
-                chamfer = max(0.0, min(BOTTOM_CROSSBAR_CHAMFER,
-                                       top_left - base_z - 0.1,
-                                       top_right - base_z - 0.1))
-                pts = [
-                    (centre - half_t - chamfer, base_z - BOTTOM_EMBED),
-                    (centre + half_t + chamfer, base_z - BOTTOM_EMBED),
-                    (centre + half_t, base_z + chamfer),
-                    (centre + half_t, top_right),
-                    (centre - half_t, top_left),
-                    (centre - half_t, base_z + chamfer),
-                ]
+        # Each run segment is one compartment's ramp, rising over its own length.
+        for seg_r0, seg_r1 in segments:
+            seg_run = seg_r1 - seg_r0
+            seg_rise = seg_run * math.tan(math.radians(angle))
+            if not minimal:
+                if not flip:
+                    pts = [(seg_r0, base_z - BOTTOM_EMBED), (seg_r1, base_z - BOTTOM_EMBED),
+                           (seg_r1, base_z + seg_rise), (seg_r0, base_z)]
+                else:
+                    pts = [(seg_r0, base_z - BOTTOM_EMBED), (seg_r1, base_z - BOTTOM_EMBED),
+                           (seg_r1, base_z), (seg_r0, base_z + seg_rise)]
                 solids.append(_extrude_bottom(Polygon(pts), along, c_lo, c_hi))
                 continue
-            # Inverted-V underside spanning wall to wall, capped by the slope.
-            z_ceiling = max(z_left, z_right) + 5.0
-            v_profile = Polygon([
-                (span_lo, z_base), (span_mid, z_ridge), (span_hi, z_base),
-                (span_hi, z_ceiling), (span_lo, z_ceiling),
-            ])
-            cap_profile = Polygon([
-                (centre - half_t, z_base - 5.0), (centre + half_t, z_base - 5.0),
-                (centre + half_t, z_right), (centre - half_t, z_left),
-            ])
-            if along == "x":
-                under = _extrude_yz_profile(v_profile, BOTTOM_CROSSBAR_THICKNESS)
-                under.apply_translation((centre, 0.0, 0.0))
-                cap = _extrude_xz_profile(cap_profile, span_hi - span_lo)
-                cap.apply_translation((0.0, span_mid, 0.0))
-            else:
-                under = _extrude_xz_profile(v_profile, BOTTOM_CROSSBAR_THICKNESS)
-                under.apply_translation((0.0, centre, 0.0))
-                cap = _extrude_yz_profile(cap_profile, span_hi - span_lo)
-                cap.apply_translation((span_mid, 0.0, 0.0))
-            bar = intersection([under, cap])
-            if bar.faces.shape[0] == 0:
-                continue
-            solids.append(bar)
+            # Which side of this slot has a wall to hang a crossbar from. A
+            # full-span divider always does on both sides (its own wall, and the
+            # bin's); a bare-floor divider's outermost slot has an open end.
+            lo_is_edge = math.isclose(c_lo, edge_lo, abs_tol=1e-6)
+            hi_is_edge = math.isclose(c_hi, edge_hi, abs_tol=1e-6)
+            floating = full_span or (not lo_is_edge and not hi_is_edge)
+            # Weld a floating crossbar into the bin's side wall where the slot
+            # ends at the zone edge instead of at a divider wall.
+            span_lo = -wall_line if (lo_is_edge and full_span) else c_lo
+            span_hi = wall_line if (hi_is_edge and full_span) else c_hi
+            span_mid = (span_lo + span_hi) / 2.0
+            half_span = (span_hi - span_lo) / 2.0
+            for step in range(supports):
+                centre = seg_r0 + (step + 1) * seg_run / (supports + 1)
+                z_left = _bottom_plane_z(centre - half_t, seg_r0, seg_r1, seg_rise, base_z, flip)
+                z_right = _bottom_plane_z(centre + half_t, seg_r0, seg_r1, seg_rise, base_z, flip)
+                low = min(z_left, z_right)
+                # A floating crossbar is a 45-degree corbel growing inward from
+                # the wall on each side of the slot; the two meet at a central
+                # ridge and a full bar rides the slope on top of it. Its whole
+                # underside is at 45 degrees so it prints support-free, and it
+                # never reaches the floor. That needs head-room: the corbels
+                # climb half the slot's width to meet. Where there isn't room -
+                # a wide slot, or a crossbar down near the low end of the slope
+                # - fall back to the old floor-standing stem, which prints fine
+                # on its own gusset feet.
+                z_ridge = low - bar_min
+                z_base = z_ridge - half_span
+                if not (floating and z_base >= base_z - BOTTOM_EMBED - 1e-9):
+                    top_left = max(z_left, base_z + 0.2)
+                    top_right = max(z_right, base_z + 0.2)
+                    # 45-degree gusset feet, never taller than the stem they brace.
+                    chamfer = max(0.0, min(BOTTOM_CROSSBAR_CHAMFER,
+                                           top_left - base_z - 0.1,
+                                           top_right - base_z - 0.1))
+                    pts = [
+                        (centre - half_t - chamfer, base_z - BOTTOM_EMBED),
+                        (centre + half_t + chamfer, base_z - BOTTOM_EMBED),
+                        (centre + half_t, base_z + chamfer),
+                        (centre + half_t, top_right),
+                        (centre - half_t, top_left),
+                        (centre - half_t, base_z + chamfer),
+                    ]
+                    solids.append(_extrude_bottom(Polygon(pts), along, c_lo, c_hi))
+                    continue
+                # Inverted-V underside spanning wall to wall, capped by the slope.
+                z_ceiling = max(z_left, z_right) + 5.0
+                v_profile = Polygon([
+                    (span_lo, z_base), (span_mid, z_ridge), (span_hi, z_base),
+                    (span_hi, z_ceiling), (span_lo, z_ceiling),
+                ])
+                cap_profile = Polygon([
+                    (centre - half_t, z_base - 5.0), (centre + half_t, z_base - 5.0),
+                    (centre + half_t, z_right), (centre - half_t, z_left),
+                ])
+                if along == "x":
+                    under = _extrude_yz_profile(v_profile, BOTTOM_CROSSBAR_THICKNESS)
+                    under.apply_translation((centre, 0.0, 0.0))
+                    cap = _extrude_xz_profile(cap_profile, span_hi - span_lo)
+                    cap.apply_translation((0.0, span_mid, 0.0))
+                else:
+                    under = _extrude_xz_profile(v_profile, BOTTOM_CROSSBAR_THICKNESS)
+                    under.apply_translation((0.0, centre, 0.0))
+                    cap = _extrude_yz_profile(cap_profile, span_hi - span_lo)
+                    cap.apply_translation((span_mid, 0.0, 0.0))
+                bar = intersection([under, cap])
+                if bar.faces.shape[0] == 0:
+                    continue
+                solids.append(bar)
     return solids
 
 
