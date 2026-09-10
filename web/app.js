@@ -1346,7 +1346,7 @@ function textPlacementFields(levelKey, sideKey, level, side = "back") {
       ${sides.map(([value, label]) => `<option value="${value}" ${pickedSide === value ? "selected" : ""}>${label}</option>`).join("")}
     </select></label>`;
   }
-  return html;
+  return `<div class="pair">${html}</div>`;
 }
 
 function dividerScoopDefaultDepth() {

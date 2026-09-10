@@ -226,7 +226,9 @@ input[type="number"]::-webkit-inner-spin-button {
 .draft-fields .editor-group > .editor-group-label {
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted);
 }
+.draft-fields .pair,
 .draft-fields .editor-group .pair { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; align-items: start; }
+.draft-fields > .pair { grid-column: 1 / -1; gap: 9px; }
 .draft-fields .editor-group .pair.triple { grid-template-columns: repeat(3, 1fr); }
 .draft-fields .divider-slope-fields,
 .draft-fields .divider-slope-toggles { display: grid; gap: 8px; align-items: start; }
