@@ -417,6 +417,7 @@ function syncForm() {
   $("#easy-clean").checked = Boolean(box.easy_clean);
   $("#easy-clean-style").value = box.easy_clean_style || "bevel";
   $("#easy-clean-radius").value = fmt(box.easy_clean_radius ?? 2.0);
+  $("#base-thickness").value = fmt(box.base_thickness ?? 0.6);
   $("#base-thickness-setting").hidden = $("#standard-base").checked;
   syncEasyCleanControls();
   $("#part-name").value = state.design.part_name || "";
@@ -892,7 +893,15 @@ function wireControls() {
       changedDesign();
     }));
   $("#standard-base").addEventListener("change", () => {
-    $("#base-thickness-setting").hidden = $("#standard-base").checked;
+    const isStandard = $("#standard-base").checked;
+    $("#base-thickness-setting").hidden = isStandard;
+    if (!isStandard) {
+      if (!$("#base-thickness").value) {
+        $("#base-thickness").value = fmt(state.design?.box?.base_thickness ?? 0.6);
+      }
+    } else {
+      $("#base-thickness").value = "0.6";
+    }
     changedDesign();
   });
   $("#easy-clean").addEventListener("change", () => {
@@ -4906,6 +4915,10 @@ function designHasChanges() {
   visibleDesign.box.x = snapSize($("#x-size").value, visibleDesign.box.x);
   visibleDesign.box.y = snapSize($("#y-size").value, visibleDesign.box.y);
   visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
+  visibleDesign.box.standard_base = $("#standard-base").checked;
+  visibleDesign.box.base_thickness = visibleDesign.box.standard_base
+    ? 0.6
+    : number($("#base-thickness").value, visibleDesign.box.base_thickness ?? 0.6);
   visibleDesign.part_name = $("#part-name").value;
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
