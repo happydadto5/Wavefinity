@@ -32,6 +32,12 @@ import numpy as np
 
 from organizer_engine import (
     BASE_UNIT,
+    B4B_LATCH_COUNTS,
+    B4B_LATCH_STRENGTHS,
+    B4B_LABEL_LOCATIONS,
+    B4B_LID_HEADROOM_CHOICES,
+    GRID_PITCH,
+    DEFAULT_WALL,
     DEFAULT_ARM_THICKNESS,
     DIFFERING_FULL_DROP,
     DIFFERING_LENGTH_GAIN,
@@ -41,6 +47,9 @@ from organizer_engine import (
     LOCKED_CONNECTOR_HEIGHT,
     LOCKED_CONNECTOR_LENGTH,
     LOCKED_TOLERANCE,
+    MAX_WALL,
+    MIN_WALL,
+    WAVE_AMPLITUDE,
     WAVE_MATING_GAP,
     BoxSpec,
     ConnectorSpec,
@@ -104,6 +113,13 @@ from organizer_app import (
     parse_sizes,
     preview_geometry,
     validate_customization_clearance,
+)
+from organizer_b4b import (
+    B4B_RAIL_HEIGHT,
+    b4b_effective_box,
+    b4b_preview_parts,
+    b4b_summary,
+    validate_b4b_design,
 )
 
 
@@ -217,8 +233,12 @@ def _fit_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
     required_y = 2.0 * max(abs(one.zone.y0), abs(one.zone.y1))
     x = max(box.x, BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
     y = max(box.y, BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
+    depth = float(one.options.get("depth", 8.0))
+    assist = str(one.options.get("lift_assist", "finger_grasp"))
+    push_depth = float(one.options.get("push_depth", 4.0)) if assist == "push_out" else 0.0
+    z = max(box.z, base_height(box, mode) + depth + push_depth)
     for _attempt in range(200):
-        trial = replace(box, x=float(x), y=float(y))
+        trial = replace(box, x=float(x), y=float(y), z=float(z))
         bounds = layout_zone(trial, mode)
         grow_x = one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
         grow_y = one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6
@@ -240,16 +260,16 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         str(payload.get("image", "")), str(payload.get("mime_type", ""))
     )
     supplied = dict(payload.get("options", {}))
-    # Wall thickness and containment height stay fixed. Retrieval choices are
-    # stored with the outline so they survive later moves, turns and resizing.
+    # Wall thickness, object thickness and retrieval choices are stored with
+    # the outline so they survive later moves, turns and resizing.
     options = {
         "clearance": float(supplied.get("clearance", 0.6)),
-        "depth": 8.0,
+        "depth": float(supplied.get("depth", 8.0)),
         "rim": 3.0,
         "smoothing": float(supplied.get("smoothing", 0.0)),
         "lift_assist": str(supplied.get("lift_assist", "finger_grasp")),
         "finger_position": str(supplied.get("finger_position", "sides")),
-        "finger_width": float(supplied.get("finger_width", 25.4)),
+        "finger_width": float(supplied.get("finger_width", 25.0)),
         "push_position": str(supplied.get("push_position", "right")),
         "push_area": float(supplied.get("push_area", 30.0)),
         "push_depth": float(supplied.get("push_depth", 4.0)),
@@ -268,13 +288,19 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
     with GEOMETRY_LOCK:
         build_features(box, updated.features, base_height(box, layout.mode),
                        layout_zone(box, layout.mode), layout.mode)
-    return {
+    result = {
         "design": design_to_dict(
             box, updated, label, part_name, label_location, scoop,
         ),
         "selected": 0,
         "outline": {"width": outline.width, "depth": outline.depth},
     }
+    if outline.reference_image and outline.reference_bounds:
+        result["reference"] = {
+            "image": outline.reference_image,
+            "bounds": list(outline.reference_bounds),
+        }
+    return result
 
 
 def _first_open_position(
@@ -373,6 +399,22 @@ def catalog_payload() -> dict[str, Any]:
             {"value": "separate", "label": "Removable insert"},
         ],
         "parts": parts,
+        "wall_rules": {
+            "default_mm": DEFAULT_WALL,
+            "min_mm": MIN_WALL,
+            "max_mm": MAX_WALL,
+            "wall_depth_factor": math.sqrt(1.0 + max_wave_slope() ** 2),
+            "wave_amplitude_mm": WAVE_AMPLITUDE,
+            "mating_gap_mm": WAVE_MATING_GAP,
+        },
+        "b4b_rules": {
+            "grid_pitch_mm": GRID_PITCH,
+            "rail_height_mm": B4B_RAIL_HEIGHT,
+            "lid_headroom_choices_mm": list(B4B_LID_HEADROOM_CHOICES),
+            "latch_counts": list(B4B_LATCH_COUNTS),
+            "latch_strengths": list(B4B_LATCH_STRENGTHS),
+            "label_locations": list(B4B_LABEL_LOCATIONS),
+        },
         "setting_interactions": [
             {
                 "feature": definition.kind,
@@ -673,6 +715,21 @@ def _design(raw: dict[str, Any]) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     return design_from_dict(raw)
 
 
+def _reject_if_b4b(payload: dict[str, Any], what: str) -> None:
+    """Guard routes that assume a normal box + interior layout.  A B4B interior
+    is reserved for child bins and B4B v1 does not use the side connector."""
+    design = payload.get("design")
+    if not isinstance(design, dict):
+        return
+    box_raw = design.get("box", {})
+    b4b_raw = box_raw.get("b4b") if isinstance(box_raw, dict) else None
+    if isinstance(b4b_raw, dict) and b4b_raw.get("enabled"):
+        raise ValueError(
+            f"{what} is not available while Bin for Bins is enabled - the B4B "
+            "interior is reserved for child bins and its lid controls the rim"
+        )
+
+
 def _footprint_bounds(
     box: BoxSpec, one: Feature | None, mode: str
 ) -> list[float] | None:
@@ -722,7 +779,71 @@ def _features_from_preview(layout: Layout, scene: dict[str, Any]) -> tuple:
         return layout.features
 
 
+def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Preview for a B4B design: body/lid/latch/label meshes plus the
+    authoritative capacity + hardware readout.  Shares the ordinary response
+    shape (empty interior-feature fields) so the frontend needs no special
+    case to render it."""
+    box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    eff = b4b_effective_box(box)
+    message = ""
+    geometry: list[dict[str, Any]] = []
+    b4b_block: dict[str, Any] | None = None
+    try:
+        with GEOMETRY_LOCK:
+            validate_b4b_design(box)
+            b4b_block = b4b_summary(box)
+            geometry = [
+                {"points": points, "kind": kind, "normal": normal, "layer": layer}
+                for points, kind, normal, layer in b4b_preview_parts(box)
+            ]
+    except Exception as error:  # surface the real, actionable message
+        message = str(error)
+        try:
+            b4b_block = b4b_summary(box)
+        except Exception:
+            b4b_block = None
+
+    bounds = layout_zone(eff, "fused")
+    cavity = wavy_cavity_polygon(eff)
+    return {
+        "design": design_to_dict(box, Layout((), "fused", EDITOR_SNAP),
+                                 "", part_name, "bottom", False),
+        "b4b": b4b_block,
+        "label_outline": [],
+        "label_meta": None,
+        "text_meta": [],
+        "geometry": geometry,
+        "fits": not message,
+        "message": message,
+        "feature_errors": [],
+        "invalid_feature_indexes": [],
+        "draft_error": None,
+        "dimensions": {
+            "size": (f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm B4B - "
+                     f"fits {b4b_block['capacity_units'][0]} x "
+                     f"{b4b_block['capacity_units'][1]} child units"
+                     if b4b_block else f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm B4B"),
+            "inside_x": b4b_block["capacity_mm"][0] if b4b_block else None,
+            "inside_y": b4b_block["capacity_mm"][1] if b4b_block else None,
+        },
+        "layout_bounds": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
+        "cavity_outline": [[float(x), float(y)] for x, y in cavity.exterior.coords],
+        "customization_zones": [],
+        "feature_footprints": [],
+        "draft_footprint": None,
+        "feature_outlines": [],
+        "nest_soft_contours": [],
+        "draft_soft_contour": None,
+    }
+
+
 def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(payload.get("design"), dict):
+        box_raw = payload["design"].get("box", {})
+        b4b_raw = box_raw.get("b4b") if isinstance(box_raw, dict) else None
+        if isinstance(b4b_raw, dict) and b4b_raw.get("enabled"):
+            return _b4b_preview_payload(payload)
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     draft_raw = payload.get("draft")
     draft = _feature_from_json(draft_raw, layout.mode) if draft_raw else None
@@ -801,6 +922,7 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    _reject_if_b4b(payload, "adding interior parts")
     box, layout, *_ = _design(payload["design"])
     kind = str(payload["kind"])
     try:
@@ -848,6 +970,7 @@ def _divider_cells_payload(
 
 
 def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    _reject_if_b4b(payload, "editing interior parts")
     box, layout, label, _part, label_location, scoop = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
     if one.kind == "divider":
@@ -914,6 +1037,7 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def feature_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    _reject_if_b4b(payload, "fitting interior parts")
     """Resize one draft feature's zone to the smallest that still holds
     everything it builds - its hole grid, peg row, slot bank or tool. Keeps the
     zone centred and touches nothing else. Raises for a kind with no natural
@@ -939,6 +1063,7 @@ def feature_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    _reject_if_b4b(payload, "adding interior parts")
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     one = _feature_from_json(payload["feature"], layout.mode)
     if one.kind == "divider":
@@ -1011,6 +1136,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def delete_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    _reject_if_b4b(payload, "editing interior parts")
     # Deletion is the recovery path for a design made invalid by shrinking the
     # bin. Parse its schema and box, but defer layout validation until after
     # the unwanted support has been removed.
@@ -1029,6 +1155,7 @@ def delete_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    _reject_if_b4b(payload, "changing the interior-parts print mode")
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     new_mode = str(payload["mode"])
     if new_mode != "fused" and box.easy_clean_style == "curve":
@@ -1043,6 +1170,7 @@ def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    _reject_if_b4b(payload, "auto-expanding the layout")
     """Resize the bin - on the 8 mm grid, both axes - to the smallest size that
     fits every interior support at the footprint it actually needs, then trim
     back any axis that overshot. A cradle footprint is recomputed from its
@@ -1224,6 +1352,7 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    _reject_if_b4b(payload, "the side connector")
     box, *_ = _design(payload["design"])
     options = payload.get("connector", {})
     tolerance = float(options.get("tolerance", LOCKED_TOLERANCE))
@@ -1247,6 +1376,7 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         bin_b_height=bin_b_height,
         arm_thickness=arm_thickness,
         different_heights=different_heights,
+        wall=box.wall,
     )
     with GEOMETRY_LOCK:
         result = generate_side_file(
@@ -1339,8 +1469,16 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     files = _extract_generated_files(gen_result)
 
     # The default bin print also carries one side connector, so a fresh
-    # build has the part on the plate to link bins together.
-    if target not in {"connector", "sampler"}:
+    # build has the part on the plate to link bins together - but never for a
+    # B4B, whose lid controls the rim and which does not use the connector.
+    design = payload.get("design")
+    is_b4b = (
+        isinstance(design, dict)
+        and isinstance(design.get("box"), dict)
+        and isinstance(design["box"].get("b4b"), dict)
+        and design["box"]["b4b"].get("enabled")
+    )
+    if target not in {"connector", "sampler"} and not is_b4b:
         connector_files = _extract_generated_files(connector_payload(payload))
         files.extend(connector_files)
 

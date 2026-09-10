@@ -36,6 +36,8 @@ class PhotoOutline:
     width: float
     depth: float
     paper_corners: tuple[tuple[float, float], ...]
+    reference_image: str | None = None
+    reference_bounds: tuple[float, float, float, float] | None = None
 
 
 def decode_image_data(data_url: str, mime_type: str = "") -> np.ndarray:
@@ -264,6 +266,20 @@ def segment_object(
 def contour_to_millimetres(
     pixels: np.ndarray, pixels_per_mm: float = WARP_PIXELS_PER_MM,
 ) -> tuple[tuple[float, float], ...]:
+    polygon, centre_x, centre_y = _contour_polygon_millimetres(pixels, pixels_per_mm)
+    points = tuple(
+        (round(float(x - centre_x), 3), round(float(y - centre_y), 3))
+        for x, y in list(polygon.exterior.coords)[:-1]
+    )
+    if len(points) < 3 or len(points) > 500:
+        raise ValueError("outline too small or noisy: simplify the background and retake the photo")
+    return points
+
+
+def _contour_polygon_millimetres(
+    pixels: np.ndarray, pixels_per_mm: float,
+) -> tuple[Polygon, float, float]:
+    """Return the cleaned source-space polygon and the centre used by the editor."""
     coords = np.asarray(pixels, dtype=float) / pixels_per_mm
     if coords.ndim != 2 or coords.shape[1] != 2 or len(coords) < 3:
         raise ValueError("outline too small or noisy: no closed shape was found")
@@ -278,13 +294,33 @@ def contour_to_millimetres(
     if polygon.area < 25.0 or min(max_x - min_x, max_y - min_y) < 4.0:
         raise ValueError("outline too small or noisy: use a closer, sharper photo")
     centre_x, centre_y = (min_x + max_x) / 2.0, (min_y + max_y) / 2.0
-    points = tuple(
-        (round(float(x - centre_x), 3), round(float(y - centre_y), 3))
-        for x, y in list(polygon.exterior.coords)[:-1]
+    return polygon, centre_x, centre_y
+
+
+def _reference_crop(
+    rectified: np.ndarray, pixels: np.ndarray, pixels_per_mm: float,
+) -> tuple[str, tuple[float, float, float, float]]:
+    """Small rectified photo and its bounds in the contour's local coordinates."""
+    _polygon, centre_x, centre_y = _contour_polygon_millimetres(pixels, pixels_per_mm)
+    min_px = np.floor(pixels.min(axis=0)).astype(int)
+    max_px = np.ceil(pixels.max(axis=0)).astype(int)
+    padding = max(8, int(round(10.0 * pixels_per_mm)))
+    x0 = max(0, int(min_px[0]) - padding)
+    y0 = max(0, int(min_px[1]) - padding)
+    x1 = min(rectified.shape[1], int(max_px[0]) + padding + 1)
+    y1 = min(rectified.shape[0], int(max_px[1]) + padding + 1)
+    crop = rectified[y0:y1, x0:x1]
+    ok, encoded = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 86])
+    if not ok:
+        raise ValueError("the selected photo could not be prepared for outline editing")
+    data_url = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+    bounds = (
+        round(x0 / pixels_per_mm - centre_x, 3),
+        round(-y1 / pixels_per_mm - centre_y, 3),
+        round(x1 / pixels_per_mm - centre_x, 3),
+        round(-y0 / pixels_per_mm - centre_y, 3),
     )
-    if len(points) < 3 or len(points) > 500:
-        raise ValueError("outline too small or noisy: simplify the background and retake the photo")
-    return points
+    return data_url, bounds
 
 
 def extract_photo_outline(image: np.ndarray) -> PhotoOutline:
@@ -292,6 +328,9 @@ def extract_photo_outline(image: np.ndarray) -> PhotoOutline:
     rectified = correct_perspective(image, corners)
     _mask, pixels = segment_object(rectified)
     contour = contour_to_millimetres(pixels)
+    reference_image, reference_bounds = _reference_crop(
+        rectified, pixels, WARP_PIXELS_PER_MM
+    )
     polygon = Polygon(contour)
     min_x, min_y, max_x, max_y = polygon.bounds
     return PhotoOutline(
@@ -299,6 +338,8 @@ def extract_photo_outline(image: np.ndarray) -> PhotoOutline:
         round(max_x - min_x, 3),
         round(max_y - min_y, 3),
         tuple((round(float(x), 3), round(float(y), 3)) for x, y in corners),
+        reference_image,
+        reference_bounds,
     )
 
 

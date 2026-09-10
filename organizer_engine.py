@@ -23,7 +23,7 @@ Design summary
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import math
 import zipfile
@@ -95,6 +95,8 @@ BASE_UNIT = GRID_PITCH           # one unit is one grid step, so sizes are whole
 # says so plainly if you ask for a connector that will not fit.
 
 DEFAULT_WALL = 0.8
+MIN_WALL = 0.4
+MAX_WALL = 2.0
 DEFAULT_BASE_THICKNESS = 0.6
 DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner
@@ -218,6 +220,7 @@ LOCK_CORNER_CLEAR = 2.0   # keep bumps this far short of the wall's tangent, so
                           # the bumps on two walls cannot meet at their corner
 LOCK_TOP_BELOW_RIM = 4.0  # top of the upper chamfer, measured down from the rim
 LOCK_EMBED = 0.60         # bump/notch roots sink this far into their own wall
+LOCK_SAFE_SKIN = 0.05     # keep additive bump roots inside the mating surface
 LOCK_NOTCH_CLEARANCE = 0.12
 
 # --------------------------------------------------------------------------- #
@@ -248,6 +251,81 @@ SCOOP_CURVE_SEGMENTS = 32
 
 
 
+# --------------------------------------------------------------------------- #
+# B4B (Bin for Bins) - a container mode, not an interior feature.  All of its
+# tuning lives in ``organizer_b4b.py``; this dataclass is only the saved intent.
+# --------------------------------------------------------------------------- #
+B4B_LID_HEADROOM_CHOICES = (0.5, 1.0, 2.0)   # UI: Lid snugness (Tight/Standard/Loose)
+B4B_LATCH_COUNTS = ("auto", "1", "2")
+B4B_LATCH_STRENGTHS = ("lightweight", "standard")
+B4B_LABEL_LOCATIONS = ("none", "top", "front")
+
+
+@dataclass(frozen=True)
+class B4BSpec:
+    """User-facing B4B settings.  Serialised as ``box.b4b``; harmless defaults
+    when ``enabled`` is ``False`` so an ordinary bin is untouched."""
+
+    enabled: bool = False
+    lid: bool = True
+    secure_lid: bool = True
+    latch_count: str = "auto"          # auto | 1 | 2
+    latch_strength: str = "standard"   # lightweight | standard
+    lid_headroom_mm: float = 1.0       # UI: Lid snugness
+    label_text: str = ""
+    label_location: str = "none"       # none | top | front
+    stacking: bool = False
+
+    def __post_init__(self) -> None:
+        if self.latch_count not in B4B_LATCH_COUNTS:
+            raise ValueError(
+                f"latch count must be one of {', '.join(B4B_LATCH_COUNTS)}"
+            )
+        if self.latch_strength not in B4B_LATCH_STRENGTHS:
+            raise ValueError(
+                f"latch strength must be one of {', '.join(B4B_LATCH_STRENGTHS)}"
+            )
+        if self.label_location not in B4B_LABEL_LOCATIONS:
+            raise ValueError(
+                f"label location must be one of {', '.join(B4B_LABEL_LOCATIONS)}"
+            )
+        if not math.isfinite(self.lid_headroom_mm) or self.lid_headroom_mm <= 0:
+            raise ValueError("lid snugness (headroom) must be a positive number")
+        if not any(
+            math.isclose(self.lid_headroom_mm, choice, abs_tol=1e-6)
+            for choice in B4B_LID_HEADROOM_CHOICES
+        ):
+            allowed = ", ".join(f"{c:g}" for c in B4B_LID_HEADROOM_CHOICES)
+            raise ValueError(f"lid snugness must be one of {allowed} mm")
+
+    def normalised(self) -> "B4BSpec":
+        """Cross-field cleanup: a dependent setting off whenever its parent is.
+
+        Applied at the design/UI boundary so the geometry layer never sees an
+        impossible combination (secure lid without a lid, top label without a
+        lid, stacking without a lid, hardware while the lid is passive).
+        """
+        lid = self.lid
+        secure = self.secure_lid and lid
+        stacking = self.stacking and lid
+        location = self.label_location
+        if location == "top" and not lid:
+            location = "none"
+        latch_count = self.latch_count if secure else "auto"
+        latch_strength = self.latch_strength
+        return B4BSpec(
+            enabled=self.enabled,
+            lid=lid,
+            secure_lid=secure,
+            latch_count=latch_count,
+            latch_strength=latch_strength,
+            lid_headroom_mm=self.lid_headroom_mm,
+            label_text=self.label_text,
+            label_location=location,
+            stacking=stacking,
+        )
+
+
 @dataclass(frozen=True)
 class BoxSpec:
     x: float = MIN_JOINABLE_SIZE
@@ -261,6 +339,13 @@ class BoxSpec:
     standard_base: bool = True
     easy_clean_radius: float = EASY_CLEAN_RADIUS
     easy_clean_style: str = "bevel"
+    # UI/save-state intent only. ``wall`` remains the authoritative geometry
+    # value so existing positional callers and CLI custom walls keep working.
+    standard_walls: bool = True
+    # B4B (Bin for Bins) container settings.  Last field, ``default_factory`` so
+    # every existing positional ``BoxSpec(...)`` call is unaffected and an
+    # ordinary bin carries a disabled, inert B4BSpec.
+    b4b: B4BSpec = field(default_factory=B4BSpec)
 
     def __post_init__(self) -> None:
         values = {
@@ -272,6 +357,10 @@ class BoxSpec:
         for name, value in values.items():
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be a positive finite number")
+        if not MIN_WALL <= self.wall <= MAX_WALL:
+            raise ValueError(
+                f"wall thickness must be between {MIN_WALL:g} and {MAX_WALL:g} mm"
+            )
         easy_clean_settings(self.easy_clean_style, self.easy_clean_radius)
         if not 0.0 <= self.flat_inside <= 1.0:
             raise ValueError("flat inside must be between 0 and 1 mm")
@@ -758,7 +847,11 @@ def lock_z_levels(rim_z: float) -> tuple[float, float, float, float]:
     return bottom, flat_bottom, flat_top, top
 
 
-def _lock_profile(protrusion: float, clearance: float = 0.0) -> list[tuple[float, float]]:
+def _lock_profile(
+    protrusion: float,
+    clearance: float = 0.0,
+    embed: float = LOCK_EMBED,
+) -> list[tuple[float, float]]:
     """Chamfered section, ``t`` growing away from the face it sits on.
 
     Both chamfers run at exactly 45 degrees from the buried root right out to
@@ -773,10 +866,10 @@ def _lock_profile(protrusion: float, clearance: float = 0.0) -> list[tuple[float
     if flat_top <= flat_bottom:
         raise ValueError("lock chamfers overlap; reduce the protrusion or clearance")
     return [
-        (-LOCK_EMBED, low - LOCK_EMBED),
+        (-embed, low - embed),
         (reach, flat_bottom),
         (reach, flat_top),
-        (-LOCK_EMBED, high + LOCK_EMBED),
+        (-embed, high + embed),
     ]
 
 
@@ -807,7 +900,8 @@ def _wall_lock_paths(
 
 def make_wall_lock_bumps(spec: BoxSpec) -> list[trimesh.Trimesh]:
     """Small chamfered bumps standing proud of each wall's interior face."""
-    profile = _lock_profile(LOCK_PROTRUSION)
+    embed = min(LOCK_EMBED, spec.wall_depth - LOCK_SAFE_SKIN)
+    profile = _lock_profile(LOCK_PROTRUSION, embed=embed)
     return [
         translated(_sweep_profile(path, inward, profile), (0.0, 0.0, spec.z))
         for path, inward in _wall_lock_paths(spec)
@@ -869,7 +963,9 @@ def make_box(
         # adjacent wall sweeps meet at a corner; fusing each wall in turn is
         # equivalent geometry and keeps the exported bin watertight.
         for fillet in _easy_clean_fillets(spec, blocked_walls):
-            result = union([result, fillet])
+            # Additive fillets may bury deeply for a clean lower wall, but may
+            # never cross the fixed exterior mating envelope on thin walls.
+            result = union([result, intersection([fillet, envelope])])
     result.remove_unreferenced_vertices()
     if not spec.easy_clean:
         result.merge_vertices()
@@ -2271,6 +2367,85 @@ def export_labelled_box(
     export_text_body_3mf(box_mesh, [(label_name, label_mesh)], output, box_name)
 
 
+def export_assembly_3mf(
+    parts: Iterable[tuple[str, trimesh.Trimesh]],
+    output: Path,
+    filaments: dict[str, int] | None = None,
+) -> list[str]:
+    """Write several distinct solids as one 3MF **assembly**.
+
+    Unlike ``export_text_body_3mf`` the parts here are independent printable
+    objects (a B4B body, its lid, its latches), each already transformed into
+    its own print orientation.  They become named parts of a single grouping
+    object with one build item, so the file opens directly without the
+    "load as a single object with multiple parts?" prompt.  ``filaments`` maps
+    a part name to a slot for any part that should not open on slot 1.
+
+    Returns the unique part names written, in order.
+    """
+    parts = list(parts)
+    if not parts:
+        raise ValueError("an assembly needs at least one part")
+    names = unique_object_names(name for name, _ in parts)
+    for name, mesh in zip(names, (mesh for _, mesh in parts)):
+        label_mesh_report(name, mesh)
+
+    scene = trimesh.Scene()
+    scene.units = "mm"
+    for name, (_raw, mesh) in zip(names, parts):
+        scene.add_geometry(mesh, node_name=name, geom_name=name)
+
+    generic = scene.export(file_type="3mf")
+    if not isinstance(generic, bytes):
+        raise RuntimeError("intermediate 3MF export did not return binary data")
+    wrapper = lib3mf.Wrapper()
+    model = wrapper.CreateModel()
+    reader = model.QueryReader("3mf")
+    reader.SetStrictModeActive(False)
+    reader.ReadFromBuffer(generic)
+
+    by_name: dict[str, object] = {}
+    iterator = model.GetMeshObjects()
+    while iterator.MoveNext():
+        obj = iterator.GetCurrentMeshObject()
+        by_name[obj.GetName()] = obj
+    try:
+        ordered = [by_name[name] for name in names]
+    except KeyError as missing:  # pragma: no cover - trimesh contract change
+        raise RuntimeError(f"3MF export dropped object {missing}") from None
+
+    stale = []
+    build_items = model.GetBuildItems()
+    while build_items.MoveNext():
+        stale.append(build_items.GetCurrent())
+    for item in stale:
+        model.RemoveBuildItem(item)
+
+    title = output.stem or names[0]
+    assembly = model.AddComponentsObject()
+    assembly.SetName(title)
+    identity = wrapper.GetIdentityTransform()
+    for obj in ordered:
+        assembly.AddComponent(obj, identity)
+    model.AddBuildItem(assembly, identity)
+
+    slots = filaments or {}
+    config = _model_settings_config(
+        title,
+        assembly.GetResourceID(),
+        [(obj.GetResourceID(), name, slots.get(name, 1))
+         for obj, name in zip(ordered, names)],
+    )
+    attachment = model.AddAttachment(
+        "/Metadata/model_settings.config", BAMBU_PACKAGE_REL
+    )
+    attachment.ReadFromBuffer(bytearray(config))
+
+    _stamp_identity(model, title)
+    _strict_write(model, wrapper, output)
+    return names
+
+
 def export_mesh(mesh: trimesh.Trimesh, output: Path, name: str) -> None:
     mesh_report(name, mesh)
     suffix = output.suffix.lower()
@@ -2396,13 +2571,13 @@ def make_sampler_scene(
         cursor += width + gap
     total_width = cursor - gap
 
-    clip = make_side_connector(
-        BoxSpec(flat_inside=flat_inside, base_thickness=base_thickness),
-        connector, "y", 0.0, side_length,
-    )
+    # Use a real sampler bin rather than a fresh default-size BoxSpec. Thick
+    # walls leave less room at a 16 mm bin's rounded corners, even though the
+    # same connector is valid on the sampler's longer wall.
+    clip_box = max(boxes, key=lambda item: item[0].y)[0]
+    clip = make_side_connector(clip_box, connector, "y", 0.0, side_length)
     validate_side_fit(
-        BoxSpec(flat_inside=flat_inside, base_thickness=base_thickness),
-        connector, clip, "y",
+        clip_box, connector, clip, "y",
     )
     clip = connector_for_print(clip)
     mesh_report("sample connector", clip)

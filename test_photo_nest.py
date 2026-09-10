@@ -74,6 +74,8 @@ class LetterScaleTests(unittest.TestCase):
         self.assertAlmostEqual(outline.width, 80.0, delta=1.0)
         self.assertAlmostEqual(outline.depth, 20.0, delta=1.0)
         self.assertGreaterEqual(len(outline.contour), 4)
+        self.assertTrue(outline.reference_image.startswith("data:image/jpeg;base64,"))
+        self.assertEqual(len(outline.reference_bounds), 4)
 
     def test_jpg_png_and_webp_data_urls_are_accepted(self):
         photo, _corners = photographed_letter()

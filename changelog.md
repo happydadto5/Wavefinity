@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-09-10 — Bin for Bins (B4B) container mode
+
+- New **Bin for Bins (B4B)?** checkbox near the top of *Build your bin*. It turns
+  the bin into a container whose interior is reserved for a field of child
+  Wavefinity bins.
+- Width / Length / Height still define the box. A prominent readout shows the
+  child-bin capacity in whole Wavefinity units and mm (e.g. *Fits bins totaling
+  7 x 5 units (56 x 40 mm)*), the maximum child height, and — for a secure lid —
+  the M3 screw bill of materials. The box auto-grows in 8 mm steps when it is too
+  small for one child unit or for two printable hinges, and says so.
+- A lower internal **mating rail** carries the same authoritative Wavefinity wave
+  one mating gap outside the child field, so perimeter child bins interlock with
+  the B4B exactly as they would with a neighbouring bin. The outer X/Y stay
+  exactly on the 8 mm lattice.
+- **Lid** (default on) with **Lid snugness** (0.5 Tight / 1.0 Standard / 2.0
+  Loose) as a vertical child-headroom setting. **Hinges & latches (secure lid)**
+  adds two rear M3-pin hinges and one or two front M3-pin latches (Auto / 1 / 2)
+  in Lightweight or Standard strength — no nuts, no inserts. Without secure lid
+  the lid is a passive lift-off.
+- Optional same-footprint **stacking** (four shallow locators, base auto-reinforced),
+  and a **Top** or **Front** integrated **label**.
+- B4B exports one assembly 3MF holding every printable object (body, lid, latches,
+  labels) already in print orientation. It never carries a side connector, and
+  the interior-parts / Easy Clean / Connect-bins controls are hidden while B4B is
+  on. Saved as design schema version 2 so older builds reject rather than
+  silently flatten a B4B file.
+
 ## 2026-09-09 — Divider defaults to X=1, Y=0
 - New Divider parts now default to Qty X = 1, Qty Y = 0 instead of 1, 1.
 

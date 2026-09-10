@@ -42,6 +42,8 @@
             </label>
             <label class="checkbox-row inline-option"><span>Standard base?</span><input id="standard-base" type="checkbox" checked></label>
             <label id="base-thickness-setting" class="inline-number" hidden>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1" value="0.6"></label>
+            <label class="checkbox-row inline-option"><span>Standard walls?</span><input id="standard-walls" type="checkbox" checked></label>
+            <label id="wall-thickness-setting" class="inline-number" hidden>Wall thickness <span class="unit">mm</span><input id="wall-thickness" type="number" min="0.4" max="2" step="0.1" value="0.8"></label>
             <label class="checkbox-row inline-option"><span>Easy Clean?</span><input id="easy-clean" type="checkbox"></label>
             <label id="easy-clean-style-setting" class="inline-select" hidden>Clean Edge
               <select id="easy-clean-style">
@@ -50,6 +52,51 @@
               </select>
             </label>
             <label id="easy-clean-radius-setting" class="inline-number" hidden><span id="easy-clean-radius-label">Bevel</span> <span class="unit">mm</span><input id="easy-clean-radius" type="number" min="0.1" step="0.1"></label>
+          </div>
+
+          <label class="checkbox-row inline-option b4b-toggle"><span>Bin for Bins (B4B)?</span><input id="b4b-enabled" type="checkbox"></label>
+          <div id="b4b-panel" class="b4b-panel" hidden>
+            <div id="b4b-capacity" class="b4b-capacity">
+              <strong id="b4b-capacity-line">Fits bins totaling — units</strong>
+              <span id="b4b-child-height" class="muted">Maximum bin height: — mm</span>
+              <span id="b4b-grew" class="field-error" hidden></span>
+            </div>
+            <label class="checkbox-row inline-option"><span>Lid</span><input id="b4b-lid" type="checkbox" checked></label>
+            <div id="b4b-lid-options" class="b4b-subgroup">
+              <label class="inline-select">Lid snugness
+                <select id="b4b-lid-snugness">
+                  <option value="0.5">0.5 mm — Tight</option>
+                  <option value="1" selected>1.0 mm — Standard</option>
+                  <option value="2">2.0 mm — Loose</option>
+                </select>
+              </label>
+              <label class="checkbox-row inline-option"><span>Hinges &amp; latches (secure lid)</span><input id="b4b-secure-lid" type="checkbox" checked></label>
+              <label class="checkbox-row inline-option"><span>Stacking</span><input id="b4b-stacking" type="checkbox"></label>
+              <div id="b4b-secure-options" class="b4b-subgroup">
+                <label class="inline-select">Latches
+                  <select id="b4b-latch-count">
+                    <option value="auto" selected>Auto</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                  </select>
+                </label>
+                <label class="inline-select">Latch strength
+                  <select id="b4b-latch-strength">
+                    <option value="lightweight">Lightweight</option>
+                    <option value="standard" selected>Standard</option>
+                  </select>
+                </label>
+                <div id="b4b-hardware" class="muted b4b-hardware">Hardware: —</div>
+              </div>
+            </div>
+            <label>Label text<input id="b4b-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE"></label>
+            <label class="inline-select">Label location
+              <select id="b4b-label-location">
+                <option value="none" selected>None</option>
+                <option value="top">Top</option>
+                <option value="front">Front</option>
+              </select>
+            </label>
           </div>
 
           <label>Part Name (For file)<input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>

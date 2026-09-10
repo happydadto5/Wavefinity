@@ -264,7 +264,7 @@ class WebApplicationTests(unittest.TestCase):
         resolved = response["resolved_options"]
         self.assertEqual(resolved["lift_assist"], "finger_grasp")
         self.assertEqual(resolved["finger_position"], "sides")
-        self.assertEqual(resolved["finger_width"], 25.4)
+        self.assertEqual(resolved["finger_width"], 25.0)
         self.assertEqual(resolved["push_position"], "right")
         self.assertEqual(resolved["push_area"], 30.0)
         self.assertEqual(resolved["push_depth"], 4.0)
@@ -273,6 +273,7 @@ class WebApplicationTests(unittest.TestCase):
         outline = PhotoOutline(
             ((-40, -10), (40, -10), (35, 10), (-40, 10)),
             80.0, 20.0, ((0, 0), (1, 0), (1, 1), (0, 1)),
+            "data:image/jpeg;base64,dGVzdA==", (-50.0, -20.0, 50.0, 20.0),
         )
         with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
             result = photo_nest_payload({
@@ -292,8 +293,10 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(feature["options"]["push_position"], "left")
         self.assertEqual(feature["options"]["push_area"], 25.0)
         self.assertEqual(feature["options"]["push_depth"], 5.0)
+        self.assertEqual(feature["options"]["depth"], 9.0)
         self.assertEqual(feature["contour"], [list(point) for point in outline.contour])
         self.assertNotIn("image", json.dumps(design).lower())
+        self.assertEqual(result["reference"]["bounds"], [-50.0, -20.0, 50.0, 20.0])
         self.assertEqual(design["box"]["x"] % 8.0, 0.0)
         self.assertEqual(design["box"]["y"] % 8.0, 0.0)
         self.assertGreaterEqual(design["box"]["x"], 16.0)
@@ -303,6 +306,15 @@ class WebApplicationTests(unittest.TestCase):
         self.assertFalse(preview["feature_errors"])
         self.assertTrue(preview["feature_outlines"][0])
         self.assertTrue(preview["nest_soft_contours"][0])
+
+        feature["options"]["lift_assist"] = "none"
+        feature["options"]["depth"] = 50.0
+        taller = apply_feature_payload({
+            "design": design, "feature": feature, "index": 0,
+        })["design"]
+        self.assertGreaterEqual(
+            taller["box"]["z"], taller["box"]["base_thickness"] + 50.0
+        )
 
     def test_preview_softened_contour_follows_the_soften_outline_value(self):
         notched = PhotoOutline(

@@ -664,3 +664,31 @@ dialog:not([open]) { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .canvas-wrap.view-enter { animation: none; }
 }
+
+/* Bin for Bins (B4B) panel */
+.b4b-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 8px;
+  padding: 12px;
+  border: 1px solid var(--border, #d5dcdf);
+  border-radius: 8px;
+  background: rgba(127, 169, 182, 0.08);
+}
+.b4b-panel .b4b-subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-left: 14px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(127, 169, 182, 0.35);
+}
+.b4b-capacity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.b4b-capacity strong { font-size: 0.95rem; }
+.b4b-hardware { font-size: 0.82rem; }
+.b4b-toggle span { font-weight: 600; }

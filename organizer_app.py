@@ -16,11 +16,15 @@ import trimesh
 
 from organizer_engine import (
     BASE_UNIT,
+    B4BSpec,
     BoxSpec,
     ConnectorSpec,
     DEFAULT_BASE_THICKNESS,
+    DEFAULT_WALL,
     EASY_CLEAN_RADIUS,
     GRID_PITCH,
+    MAX_WALL,
+    MIN_WALL,
     TEXT_CAP_HEIGHT_IDEAL,
     TEXT_DEPTH,
     WAVE_AMPLITUDE,
@@ -56,6 +60,14 @@ from organizer_engine import (
     translated,
     union,
     validate_side_fit,
+    validate_3mf,
+    export_assembly_3mf,
+)
+from organizer_b4b import (
+    b4b_build_parts,
+    b4b_effective_box,
+    b4b_summary,
+    validate_b4b_design,
 )
 from organizer_inserts import (
     BASE_PLATE,
@@ -194,7 +206,7 @@ def add_box_arguments(parser: argparse.ArgumentParser, prefix: str = "") -> None
     )
     parser.add_argument(f"--{option}z", dest=f"{destination}z", type=float, default=40.0)
     parser.add_argument(
-        f"--{option}wall", dest=f"{destination}wall", type=float, default=0.8
+        f"--{option}wall", dest=f"{destination}wall", type=float, default=DEFAULT_WALL
     )
     parser.add_argument(
         f"--{option}base-thickness", dest=f"{destination}base_thickness",
@@ -301,7 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma separated sizes, in units (2x6) or millimetres (16x48mm)",
     )
     sampler_parser.add_argument("--z", type=float, default=40.0)
-    sampler_parser.add_argument("--wall", type=float, default=0.8)
+    sampler_parser.add_argument("--wall", type=float, default=DEFAULT_WALL)
     sampler_parser.add_argument(
         "--base-thickness", type=float, default=DEFAULT_BASE_THICKNESS
     )
@@ -325,6 +337,9 @@ def _box_spec(args: argparse.Namespace, prefix: str = "") -> BoxSpec:
         easy_clean=getattr(args, f"{key}easy_clean", False),
         easy_clean_style=getattr(args, f"{key}easy_clean_style", "bevel"),
         easy_clean_radius=getattr(args, f"{key}easy_clean_radius", EASY_CLEAN_RADIUS),
+        standard_walls=math.isclose(
+            getattr(args, f"{key}wall"), DEFAULT_WALL, abs_tol=1e-9
+        ),
     )
 
 
@@ -362,6 +377,8 @@ def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
     you want the old behaviour; the editor offers to do exactly that.
     """
     name = f"Box {box.x:g} x {box.y:g} x {box.z:g}"
+    if not math.isclose(box.wall, DEFAULT_WALL, abs_tol=1e-9):
+        name += f" Wall {box.wall:g}mm"
     tidy = clean_label(part)
     if tidy:
         name += f" {tidy}"
@@ -376,6 +393,8 @@ def insert_filename(
 ) -> str:
     prefix = "Cartridge" if cartridge else "Insert"
     name = f"{prefix} {box.x:g} x {box.y:g}"
+    if not math.isclose(box.wall, DEFAULT_WALL, abs_tol=1e-9):
+        name += f" Wall {box.wall:g}mm"
     tidy = clean_label(part)
     if tidy:
         name += f" {tidy}"
@@ -390,6 +409,7 @@ def connector_filename(
     arm_thickness: float | None = None,
     different_heights: bool = False,
     suffix: str = ".3mf",
+    wall: float = DEFAULT_WALL,
 ) -> str:
     tolerance = LOCKED_TOLERANCE if connector is None else connector.tolerance
     height = LOCKED_CONNECTOR_HEIGHT if connector is None else connector.height
@@ -400,6 +420,8 @@ def connector_filename(
     )
 
     diff = []
+    if not math.isclose(wall, DEFAULT_WALL, abs_tol=1e-9):
+        diff.append(f"Wall {wall:g}mm")
     if different_heights and bin_a_height is not None and bin_b_height is not None:
         if abs(bin_a_height - bin_b_height) > 1e-6:
             diff.append(f"{bin_a_height:g}mm to {bin_b_height:g}mm")
@@ -936,6 +958,96 @@ def text_report(box: BoxSpec, one: Feature, surface: float) -> dict[str, object]
     }
 
 
+def b4b_filename(box: BoxSpec, part_name: str = "", suffix: str = ".3mf") -> str:
+    """``B4B 64x48x40 - Fasteners.3mf`` - distinct from an ordinary bin file of
+    the same dimensions."""
+    eff = b4b_effective_box(box)
+    name = f"B4B {eff.x:g}x{eff.y:g}x{eff.z:g}"
+    tidy = clean_label(part_name) or clean_label(box.b4b.label_text)
+    if tidy:
+        name += f" - {tidy}"
+    return name + suffix
+
+
+def generate_b4b_files(
+    box: BoxSpec,
+    output_dir: Path,
+    part_name: str = "",
+    auto_timestamp: bool = False,
+    keep_log: bool = False,
+) -> dict[str, object]:
+    """Dedicated B4B export: one assembly 3MF holding every printable object
+    (body, lid, latches, labels) already in print orientation.  Never routed
+    through ``make_fused_box`` and never carries a side connector."""
+    validate_b4b_design(box)
+    summary = b4b_summary(box)
+    parts = b4b_build_parts(box)
+
+    output_dir = Path(output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = output_dir / b4b_filename(box, part_name)
+    if auto_timestamp and (target.exists() or not clean_label(part_name)):
+        ts = datetime.now().strftime("%m%d%y%H%M%S")
+        target = target.with_name(f"{target.stem} {ts}{target.suffix}")
+
+    # non-label parts must each be one clean solid; labels are one prism per
+    # letter, so they get the relaxed check
+    for name, mesh in parts:
+        if "Label" not in name:
+            mesh_report(name, mesh)
+
+    # lettering parts open on the second filament slot
+    filaments = {
+        name: 2 for name, _ in parts
+        if name in ("B4B Top Label", "B4B Front Label")
+    }
+    written = export_assembly_3mf(parts, target, filaments)
+    # every B4B file is an assembly (one grouping object, one build item), so
+    # pass all names as ``multipart`` to get the assembly-aware structural check
+    report = validate_3mf(target, len(parts), multipart=tuple(written))
+
+    result: dict[str, object] = {
+        "mode": "b4b",
+        "b4b": summary,
+        "output": str(target),
+        "box": _part_result(target, {"name": "B4B Body", **report}),
+        "parts": [
+            {"name": name, "mesh": mesh_report(name, mesh) if "Label" not in name
+             else {"name": name}}
+            for name, mesh in parts
+        ],
+        "object_names": written,
+        "hardware_bom": summary.get("hardware_bom", []),
+    }
+    if keep_log:
+        log_file = log_bin_to_folder(
+            output_dir, b4b_effective_box(box), Layout((), "fused", EDITOR_SNAP),
+            generated_files=[target], label="", part_name=part_name,
+            b4b_note=_b4b_log_note(summary),
+        )
+        result["log_file"] = str(log_file)
+    return result
+
+
+def _b4b_log_note(summary: dict) -> str:
+    cx, cy = summary["capacity_units"]
+    bits = [f"B4B {cx}x{cy} units"]
+    if summary["lid"]:
+        bits.append("secure lid" if summary["secure_lid"] else "passive lid")
+    else:
+        bits.append("no lid")
+    if summary["secure_lid"]:
+        bits.append(f"{summary['latch_count']} latch/{summary['latch_strength']}")
+        hw = summary.get("hardware", {})
+        if hw.get("hinge_screw"):
+            bits.append(f"{hw['hinge_screw']} pins")
+    if summary["stacking"]:
+        bits.append("stacking")
+    if summary["label_location"] != "none":
+        bits.append(f"{summary['label_location']} label")
+    return ", ".join(bits)
+
+
 def generate_organizer_files(
     box: BoxSpec,
     layout: Layout,
@@ -953,6 +1065,12 @@ def generate_organizer_files(
     as ``text`` interior parts and is written as one extra 3MF object each, so
     every piece can take its own filament.
     """
+    if box.b4b.enabled:
+        # B4B is a container mode, not an interior layout: dedicated path.
+        return generate_b4b_files(
+            box, output_dir, part_name,
+            auto_timestamp=auto_timestamp, keep_log=keep_log,
+        )
     rim_feature = next((one for one in layout.features if is_text(one) and one.options.get("level") == "rim"), None)
     if rim_feature is not None:
         label = text_of(rim_feature)
@@ -1150,8 +1268,13 @@ def log_bin_to_folder(
     label: str = "",
     part_name: str = "",
     scoop: bool = False,
+    b4b_note: str = "",
 ) -> Path:
-    """Record a generated/printed bin in '<folder name> bins.md' in output_dir."""
+    """Record a generated/printed bin in '<folder name> bins.md' in output_dir.
+
+    ``b4b_note``, when set, replaces the Interior Part(s) cell so a B4B row is
+    distinguishable without changing the log's column schema.
+    """
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     folder_name = output_dir.name
@@ -1177,7 +1300,7 @@ def log_bin_to_folder(
     else:
         label_text = "-"
 
-    interior_text = summarize_interior_parts(layout, scoop=scoop)
+    interior_text = b4b_note or summarize_interior_parts(layout, scoop=scoop)
 
     file_names = file_names.replace("|", "/")
     label_text = label_text.replace("|", "/")
@@ -1264,7 +1387,7 @@ def generate_kit_files(
         "side": generate_side_file(
             box,
             connector,
-            output_dir / connector_filename(connector),
+            output_dir / connector_filename(connector, wall=box.wall),
             side_along,
             side_position,
         ),
@@ -1309,6 +1432,11 @@ def run_command(args: argparse.Namespace) -> dict[str, object]:
             standard_base=saved_box.standard_base,
             easy_clean_radius=saved_box.easy_clean_radius if getattr(args, "easy_clean_radius", None) is None else args.easy_clean_radius,
             easy_clean_style=saved_box.easy_clean_style if getattr(args, "easy_clean_style", None) is None else args.easy_clean_style,
+            standard_walls=(
+                saved_box.standard_walls
+                if args.wall is None
+                else math.isclose(args.wall, DEFAULT_WALL, abs_tol=1e-9)
+            ),
         )
         if args.mode:
             layout = replace(layout, mode=args.mode)
@@ -1527,21 +1655,38 @@ def design_to_dict(
     ``text`` interior parts - one per label, any number of them - so there is
     nothing for it here.
     """
+    b4b = box.b4b.normalised()
+    box_block = {
+        "x": box.x,
+        "y": box.y,
+        "z": box.z,
+        "wall": box.wall,
+        "base_thickness": box.base_thickness,
+        "corner_fillet": box.corner_fillet,
+        "flat_inside": box.flat_inside,
+        "easy_clean": box.easy_clean,
+        "easy_clean_style": box.easy_clean_style,
+        "easy_clean_radius": box.easy_clean_radius,
+        "standard_base": box.standard_base,
+        "standard_walls": box.standard_walls,
+    }
+    if b4b.enabled:
+        box_block["b4b"] = {
+            "enabled": True,
+            "lid": b4b.lid,
+            "secure_lid": b4b.secure_lid,
+            "latch_count": b4b.latch_count,
+            "latch_strength": b4b.latch_strength,
+            "lid_headroom_mm": b4b.lid_headroom_mm,
+            "label_text": b4b.label_text,
+            "label_location": b4b.label_location,
+            "stacking": b4b.stacking,
+        }
     return {
-        "version": 1,
-        "box": {
-            "x": box.x,
-            "y": box.y,
-            "z": box.z,
-            "wall": box.wall,
-            "base_thickness": box.base_thickness,
-            "corner_fillet": box.corner_fillet,
-            "flat_inside": box.flat_inside,
-            "easy_clean": box.easy_clean,
-            "easy_clean_style": box.easy_clean_style,
-            "easy_clean_radius": box.easy_clean_radius,
-            "standard_base": box.standard_base,
-        },
+        # Version 2 only when B4B is on, so an older Wavefinity build rejects a
+        # B4B design outright instead of silently loading it as an ordinary bin.
+        "version": 2 if b4b.enabled else 1,
+        "box": box_block,
         "label": label,
         "label_position": label_position(label_location),
         "scoop": bool(scoop),
@@ -1553,15 +1698,29 @@ def design_to_dict(
 def design_from_dict(
     data: dict, *, validate_layout: bool = True
 ) -> tuple[BoxSpec, Layout, str, str, str, bool]:
-    if data.get("version", 1) != 1:
+    if data.get("version", 1) not in (1, 2):
         raise ValueError(f"unsupported design version {data.get('version')!r}")
     raw = data["box"]
+    b4b_raw = raw.get("b4b")
+    b4b = B4BSpec()
+    if isinstance(b4b_raw, dict) and bool(b4b_raw.get("enabled", False)):
+        b4b = B4BSpec(
+            enabled=True,
+            lid=bool(b4b_raw.get("lid", True)),
+            secure_lid=bool(b4b_raw.get("secure_lid", True)),
+            latch_count=str(b4b_raw.get("latch_count", "auto")),
+            latch_strength=str(b4b_raw.get("latch_strength", "standard")),
+            lid_headroom_mm=float(b4b_raw.get("lid_headroom_mm", 1.0)),
+            label_text=str(b4b_raw.get("label_text", "")),
+            label_location=str(b4b_raw.get("label_location", "none")),
+            stacking=bool(b4b_raw.get("stacking", False)),
+        ).normalised()
     x, y = float(raw["x"]), float(raw["y"])
     # Brief browser builds stored a requested usable size plus the wall
     # allowance. Recover the user's 8 mm modular choice when those designs are
     # reopened; every BoxSpec remains grid-locked after migration.
     if bool(raw.get("interior_sizing", False)):
-        wall = float(raw.get("wall", 0.8))
+        wall = float(raw.get("wall", DEFAULT_WALL))
         wall_depth = wall * math.sqrt(1.0 + max_wave_slope() ** 2)
         allowance = WAVE_MATING_GAP + 2.0 * wall_depth + 2.0 * WAVE_AMPLITUDE
         x = max(GRID_PITCH, round((x - allowance) / GRID_PITCH) * GRID_PITCH)
@@ -1569,17 +1728,40 @@ def design_from_dict(
     easy_clean_style = str(raw.get("easy_clean_style", "bevel"))
     if easy_clean_style not in {"bevel", "curve"}:
         easy_clean_style = "bevel"
+    raw_wall = float(raw.get("wall", DEFAULT_WALL))
+    if not math.isfinite(raw_wall) or not MIN_WALL <= raw_wall <= MAX_WALL:
+        raise ValueError(
+            f"wall thickness must be between {MIN_WALL:g} and {MAX_WALL:g} mm"
+        )
+    standard_walls = (
+        bool(raw["standard_walls"])
+        if "standard_walls" in raw
+        else math.isclose(raw_wall, DEFAULT_WALL, abs_tol=1e-9)
+    )
+    wall = DEFAULT_WALL if standard_walls else raw_wall
     box = BoxSpec(
         x, y, float(raw["z"]),
-        float(raw.get("wall", 0.8)),
+        wall,
         float(raw.get("corner_fillet", 0.6)),
         flat_inside=float(raw.get("flat_inside", 0.0)),
-        base_thickness=float(raw.get("base_thickness", raw.get("wall", 0.8))),
+        base_thickness=float(raw.get("base_thickness", raw.get("wall", DEFAULT_WALL))),
         easy_clean=bool(raw.get("easy_clean", False)),
         standard_base=bool(raw.get("standard_base", True)),
         easy_clean_radius=float(raw.get("easy_clean_radius", EASY_CLEAN_RADIUS)),
         easy_clean_style=easy_clean_style,
+        standard_walls=standard_walls,
+        b4b=b4b,
     )
+    if b4b.enabled:
+        # A B4B interior is reserved for child bins: no interior features, mode
+        # forced fused, Easy Clean / flat-inside normalised off.  Nothing to
+        # resolve or validate in the layout.
+        box = replace(box, easy_clean=False, flat_inside=0.0)
+        layout = Layout((), "fused", EDITOR_SNAP)
+        validate_b4b_design(box)
+        label = str(data.get("label", ""))
+        location = label_position(data.get("label_position", "bottom"))
+        return (box, layout, label, str(data.get("part_name", "")), location, False)
     layout = layout_from_dict(data.get("layout", {}))
     base_z = base_height(box, layout.mode)
     layout = replace(layout, features=tuple(

@@ -18,7 +18,7 @@ from ._registry import (
 )
 NEST_CHAMFER = 2.0
 NEST_TOP_ROUND = 1.0
-NEST_FINGER_WIDTH = 25.4
+NEST_FINGER_WIDTH = 25.0
 NEST_PUSH_AREA = 30.0
 NEST_PUSH_DEPTH = 4.0
 NEST_ASSISTS = {"none", "finger_grasp", "push_out"}
@@ -283,11 +283,11 @@ def _nest_push_support(
     options=(
         OptionDefinition("Fit clearance", "clearance", "0.6"),
         OptionDefinition("Soften outline", "smoothing", "0"),
-        OptionDefinition("Depth", "depth", "", editor=False),
+        OptionDefinition("Object thickness", "depth", "8", editor=False),
         OptionDefinition("Outline wall", "rim", "", editor=False),
         OptionDefinition("Lift assist", "lift_assist", "finger_grasp", "enum", False),
         OptionDefinition("Finger locations", "finger_position", "sides", "enum", False),
-        OptionDefinition("Finger width", "finger_width", "25.4", editor=False),
+        OptionDefinition("Finger width", "finger_width", "25", editor=False),
         OptionDefinition("Push position", "push_position", "right", "enum", False),
         OptionDefinition("Push area", "push_area", "30", editor=False),
         OptionDefinition("Push depth", "push_depth", "4", editor=False),

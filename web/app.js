@@ -71,6 +71,9 @@ const state = {
   kindRequest: 0,
   fitRequest: 0,
   nestPhotoRequest: 0,
+  // Rectified upload used only as an aligned tracing reference in the 2D view.
+  // It deliberately stays out of saved design files.
+  nestPhoto: null,
   nudgeFeedback: null,
 };
 
@@ -86,6 +89,9 @@ const COLORS = {
   // Floor lettering keeps the colour the single floor label always had, so a
   // text interior part reads as writing rather than as another holder.
   text: "#315766",
+  // B4B parts get their own colour family, distinct from interior features.
+  b4b_rail: "#8ea8b2", b4b_lid: "#7fa9b6", b4b_hinge: "#5f8794",
+  b4b_latch: "#c98a4a", b4b_stack: "#9d86c8", b4b_label: "#315766",
 };
 const INSERT_TINT = "#c2a075";
 const INSERT_TINT_MIX = .5;
@@ -414,6 +420,10 @@ function syncForm() {
   }
   $("#z").value = fmt(box.z);
   $("#standard-base").checked = box.standard_base !== false;
+  const wallRules = state.catalog?.wall_rules || {};
+  $("#standard-walls").checked = box.standard_walls !== false;
+  $("#wall-thickness").value = fmt(box.wall ?? wallRules.default_mm ?? 0.8);
+  $("#wall-thickness-setting").hidden = $("#standard-walls").checked;
   $("#easy-clean").checked = Boolean(box.easy_clean);
   $("#easy-clean-style").value = box.easy_clean_style || "bevel";
   $("#easy-clean-radius").value = fmt(box.easy_clean_radius ?? 2.0);
@@ -435,6 +445,7 @@ function syncForm() {
   $("#connector-bin-b-height").value = fmt(state.connector.bin_b_height ?? box.z);
   $("#different-height-bins").checked = Boolean(state.connector.different_heights);
   syncConnectorHeightControls();
+  syncB4BForm();
   updateInteriorModeVisibility();
   renderPlaced();
 }
@@ -463,10 +474,11 @@ function autoAdjustConnectorFields() {
   // outer face. That reach is set by the seam, not by the drop, so it is a
   // floor under the drop-scaled thickness rather than a fraction of it - the
   // web is never thinner than this, however small the difference in height.
-  const wall = state.design?.box?.wall ?? 0.8;
+  const wallRules = state.catalog?.wall_rules || {};
+  const wall = state.design?.box?.wall ?? wallRules.default_mm ?? 0.8;
   const tolerance = number($("#connector-tolerance")?.value, 0.02);
-  const reach = wall * (rules.wall_depth_factor ?? 1.181)
-    + (rules.mating_gap_mm ?? 0.25)
+  const reach = wall * (wallRules.wall_depth_factor ?? rules.wall_depth_factor ?? 1.181)
+    + (wallRules.mating_gap_mm ?? rules.mating_gap_mm ?? 0.25)
     + tolerance
     - (rules.web_run_clearance_mm ?? 0.15);
 
@@ -516,6 +528,141 @@ function updateInteriorModeVisibility(reveal = false) {
   }
 }
 
+const B4B_DEFAULTS = {
+  enabled: false, lid: true, secure_lid: true, latch_count: "auto",
+  latch_strength: "standard", lid_headroom_mm: 1, label_text: "",
+  label_location: "none", stacking: false,
+};
+
+function b4bState() {
+  return { ...B4B_DEFAULTS, ...(state.design?.box?.b4b || {}) };
+}
+
+function b4bEnabled() {
+  return Boolean(state.design?.box?.b4b?.enabled);
+}
+
+// A B4B interior is reserved for child bins: hide the interior-parts workflow,
+// Easy Clean, the interior print mode and the Connect bins section entirely.
+function applyB4BVisibility() {
+  const on = b4bEnabled();
+  $("#b4b-panel").hidden = !on;
+  const hide = (sel, hidden) => { const el = $(sel); if (el) el.hidden = hidden; };
+  hide(".subheading-row", on);
+  hide(".palette-wrap", on);
+  hide(".support-editor", on && !state.draft);
+  const modeLabel = $("#mode-select")?.closest("label");
+  if (modeLabel) modeLabel.hidden = on;
+  const ecRow = $("#easy-clean")?.closest("label");
+  if (ecRow) ecRow.hidden = on;
+  hide("#easy-clean-style-setting", on || !$("#easy-clean")?.checked);
+  hide("#easy-clean-radius-setting", on || !$("#easy-clean")?.checked);
+  const connectorSection = document.querySelector('.control-section[data-section="connector"]');
+  if (connectorSection) connectorSection.hidden = on;
+  hide("#generate-all", on);
+  hide("#generate-connector", on);
+  const layoutTab = document.querySelector('.view-tab[data-view="2d"]');
+  if (layoutTab) layoutTab.hidden = on;
+  if (on && document.querySelector('.view-tab[data-view="2d"]')?.classList.contains("active")) {
+    document.querySelector('.view-tab[data-view="3d"]')?.click();
+  }
+  if (on) {
+    $("#b4b-lid-options").hidden = !$("#b4b-lid").checked;
+    $("#b4b-secure-options").hidden = !($("#b4b-lid").checked && $("#b4b-secure-lid").checked);
+  }
+}
+
+function syncB4BForm() {
+  const b4b = b4bState();
+  $("#b4b-enabled").checked = Boolean(b4b.enabled);
+  $("#b4b-lid").checked = b4b.lid !== false;
+  $("#b4b-secure-lid").checked = b4b.secure_lid !== false;
+  $("#b4b-stacking").checked = Boolean(b4b.stacking);
+  $("#b4b-lid-snugness").value = String(b4b.lid_headroom_mm ?? 1);
+  $("#b4b-latch-count").value = b4b.latch_count || "auto";
+  $("#b4b-latch-strength").value = b4b.latch_strength || "standard";
+  $("#b4b-label-text").value = b4b.label_text || "";
+  $("#b4b-label-location").value = b4b.label_location || "none";
+  const topOpt = $("#b4b-label-location").querySelector('option[value="top"]');
+  if (topOpt) topOpt.disabled = !$("#b4b-lid").checked;
+  applyB4BVisibility();
+}
+
+function readB4BForm(design) {
+  design.box = design.box || {};
+  const enabled = $("#b4b-enabled").checked;
+  if (!enabled) {
+    if (design.box.b4b) design.box.b4b = { ...B4B_DEFAULTS };
+    return;
+  }
+  const lid = $("#b4b-lid").checked;
+  const secure = lid && $("#b4b-secure-lid").checked;
+  let location = $("#b4b-label-location").value;
+  if (location === "top" && !lid) location = "none";
+  design.box.b4b = {
+    enabled: true,
+    lid,
+    secure_lid: secure,
+    latch_count: secure ? $("#b4b-latch-count").value : "auto",
+    latch_strength: $("#b4b-latch-strength").value,
+    lid_headroom_mm: parseFloat($("#b4b-lid-snugness").value) || 1,
+    label_text: $("#b4b-label-text").value,
+    label_location: location,
+    stacking: lid && $("#b4b-stacking").checked,
+  };
+}
+
+function renderB4BReadout() {
+  if (!b4bEnabled()) return;
+  const b4b = state.preview?.b4b;
+  const capLine = $("#b4b-capacity-line");
+  const heightLine = $("#b4b-child-height");
+  const grew = $("#b4b-grew");
+  const hardware = $("#b4b-hardware");
+  if (!b4b) {
+    capLine.textContent = "Fits bins totaling — units";
+    heightLine.textContent = "Maximum bin height: — mm";
+    grew.hidden = true;
+    hardware.textContent = "Hardware: —";
+    return;
+  }
+  capLine.textContent = b4b.capacity_text;
+  heightLine.textContent = b4b.max_child_height_text;
+  if (b4b.grew) {
+    grew.hidden = false;
+    grew.textContent =
+      `Grown to ${b4b.outer_mm[0]} x ${b4b.outer_mm[1]} mm ` +
+      `(${b4b.outer_units[0]} x ${b4b.outer_units[1]} units) to fit the interior and hardware.`;
+  } else {
+    grew.hidden = true;
+  }
+  if (b4b.secure_lid && b4b.hardware) {
+    hardware.textContent =
+      `Hardware: ${b4b.hardware.hinge_qty} x ${b4b.hardware.hinge_screw} hinge pins, ` +
+      `${b4b.hardware.latch_qty} x ${b4b.hardware.latch_screw} latch pins, no nuts`;
+    hardware.hidden = false;
+  } else {
+    hardware.hidden = true;
+  }
+}
+
+async function toggleB4B(wantEnabled) {
+  if (wantEnabled && state.design?.layout?.features?.length) {
+    const ok = window.confirm(
+      "Turning on Bin for Bins clears the interior parts - the B4B interior is " +
+      "reserved for child bins. Continue?");
+    if (!ok) { $("#b4b-enabled").checked = false; return; }
+    state.design.layout.features = [];
+    state.selected = null;
+    state.draft = null;
+  }
+  if (wantEnabled) {
+    state.design.layout.mode = "fused";
+    state.design.box.easy_clean = false;
+  }
+  changedDesign();
+}
+
 function updateDesignFromForm() {
   const design = state.design;
   const snapSize = (value, fallback) => {
@@ -552,6 +699,20 @@ function updateDesignFromForm() {
   );
   design.box.standard_base = $("#standard-base").checked;
   if (design.box.standard_base) design.box.base_thickness = 0.6;
+  const previousWall = design.box.wall;
+  const wallRules = state.catalog?.wall_rules || {};
+  const defaultWall = wallRules.default_mm ?? 0.8;
+  const minWall = wallRules.min_mm ?? 0.4;
+  const maxWall = wallRules.max_mm ?? 2.0;
+  design.box.standard_walls = $("#standard-walls").checked;
+  design.box.wall = design.box.standard_walls
+    ? defaultWall
+    : Math.max(minWall, Math.min(maxWall, number(
+        $("#wall-thickness").value,
+        design.box.wall ?? defaultWall,
+      )));
+  $("#wall-thickness").value = fmt(design.box.wall);
+  if (design.box.wall !== previousWall) autoAdjustConnectorFields();
   design.box.easy_clean = $("#easy-clean").checked;
   design.box.easy_clean_style = ($("#easy-clean-style") && $("#easy-clean-style").value) || "bevel";
   if (design.layout?.mode !== "fused" && design.box.easy_clean_style === "curve") {
@@ -589,6 +750,8 @@ function updateDesignFromForm() {
     position: 0,
     axis: "y",
   };
+  readB4BForm(design);
+  applyB4BVisibility();
 }
 
 const saveOutputPreference = debounce(output => {
@@ -647,7 +810,7 @@ function updatePreviewHelp(view) {
   const el = $("#preview-help");
   if (!el) return;
   el.textContent = view === "2d"
-    ? "Use Arrow keys or drag to move (Arrow: 1 mm, Shift: 10 mm, Ctrl: 0.1 mm). Snug Holder also has a proportional resize corner and round rotation handle."
+    ? "Drag a Snug Holder outline point to reshape it. Drag inside to move; use the square to resize and circle to rotate."
     : "Drag to rotate, use the wheel to zoom, or double-click to reset.";
 }
 
@@ -743,10 +906,12 @@ const commitNudge = debounce(async () => {
 // and the flat-inside band does not touch this rectangle, so the plain formula
 // is exact.
 function binInsideExtent(box) {
-  const WAVE_AMPLITUDE = 0.4, WAVE_LENGTH = 4.0, WAVE_MATING_GAP = 0.25;
-  const slope = (WAVE_AMPLITUDE * 2 * Math.PI) / WAVE_LENGTH;
-  const wallDepth = number(box.wall, 0.8) * Math.sqrt(1 + slope * slope);
-  const trim = WAVE_MATING_GAP + 2 * wallDepth + 2 * WAVE_AMPLITUDE;
+  const rules = state.catalog?.wall_rules || {};
+  const wallDepth = number(box.wall, rules.default_mm ?? 0.8)
+    * (rules.wall_depth_factor ?? 1.181);
+  const trim = (rules.mating_gap_mm ?? 0.25)
+    + 2 * wallDepth
+    + 2 * (rules.wave_amplitude_mm ?? 0.4);
   return [Math.max(1, number(box.x) - trim), Math.max(1, number(box.y) - trim)];
 }
 
@@ -755,7 +920,11 @@ function getInsideDimension(axis, val) {
   if (state.preview?.dimensions?.[key] != null && state.design?.box?.[axis] === val) {
     return state.preview.dimensions[key];
   }
-  const box = state.design?.box || { x: val, y: val, wall: 0.8 };
+  const box = state.design?.box || {
+    x: val,
+    y: val,
+    wall: state.catalog?.wall_rules?.default_mm ?? 0.8,
+  };
   const tempBox = { ...box, [axis]: val };
   const extents = binInsideExtent(tempBox);
   return Math.floor(axis === "x" ? extents[0] : extents[1]);
@@ -886,8 +1055,9 @@ function wireControls() {
     $("#advanced-build-settings").hidden = !event.target.checked;
   });
 
-  ["#x-size", "#y-size", "#z", "#base-thickness", "#part-name"]
+  ["#x-size", "#y-size", "#z", "#base-thickness", "#wall-thickness", "#part-name"]
     .forEach(selector => $(selector).addEventListener("input", () => {
+      if (selector === "#wall-thickness") state.binResizePending = true;
       state.canGenerate = false;
       updateGenerateAvailability();
       changedDesign();
@@ -904,6 +1074,18 @@ function wireControls() {
     }
     changedDesign();
   });
+  $("#standard-walls").addEventListener("change", () => {
+    const isStandard = $("#standard-walls").checked;
+    const rules = state.catalog?.wall_rules || {};
+    $("#wall-thickness-setting").hidden = isStandard;
+    if (isStandard) {
+      $("#wall-thickness").value = fmt(rules.default_mm ?? 0.8);
+    } else if (!$("#wall-thickness").value) {
+      $("#wall-thickness").value = fmt(state.design?.box?.wall ?? rules.default_mm ?? 0.8);
+    }
+    state.binResizePending = true;
+    changedDesign();
+  });
   $("#easy-clean").addEventListener("change", () => {
     syncEasyCleanControls();
     changedDesign();
@@ -916,6 +1098,16 @@ function wireControls() {
     });
   }
   $("#easy-clean-radius").addEventListener("input", changedDesign);
+
+  $("#b4b-enabled").addEventListener("change", () => toggleB4B($("#b4b-enabled").checked));
+  ["#b4b-lid", "#b4b-secure-lid", "#b4b-stacking"].forEach(sel =>
+    $(sel).addEventListener("change", () => { syncB4BForm(); changedDesign(); }));
+  ["#b4b-lid-snugness", "#b4b-latch-count", "#b4b-latch-strength", "#b4b-label-location"]
+    .forEach(sel => $(sel).addEventListener("change", changedDesign));
+  $("#b4b-label-text").addEventListener("input", () => {
+    state.canGenerate = false; updateGenerateAvailability(); changedDesign();
+  });
+
   ["#x-size", "#y-size"].forEach(selector => {
     const axis = selector === "#x-size" ? "x" : "y";
     const input = $(selector);
@@ -1387,21 +1579,24 @@ function renderDraftFields() {
     const fingerPosition = String(one.options?.finger_position ?? state.draftResolvedOptions?.finger_position ?? "sides");
     const pushPosition = String(one.options?.push_position ?? state.draftResolvedOptions?.push_position ?? "right");
     const selected = (value, actual) => value === actual ? "selected" : "";
-    html += `<label>Lift assist
+    const liftAssist = `<label>Lift assist
       <select data-draft="option:lift_assist">
         <option value="finger_grasp" ${selected("finger_grasp", assist)}>Finger grasp</option>
         <option value="push_out" ${selected("push_out", assist)}>Push Out</option>
         <option value="none" ${selected("none", assist)}>No assist</option>
       </select>
     </label>`;
-    // Fit clearance / Soften outline are the two top-level fit numbers - keep
-    // them beside Lift assist rather than orphaned at the foot of the editor.
+    html += `<div class="draft-triple">`;
+    html += field("Object thickness", "option:depth",
+      fmt(one.options?.depth ?? state.draftResolvedOptions?.depth ?? 8),
+      { unit: "mm", step: "0.5", min: "0.5" });
     html += field("Fit clearance", "option:clearance",
-      fmt(one.options?.clearance ?? state.draftResolvedOptions?.clearance ?? 0.6), { unit: "mm", step: "0.1" });
+      fmt(one.options?.clearance ?? state.draftResolvedOptions?.clearance ?? 0.6), { unit: "mm", step: "0.1", min: "0" });
     html += field("Soften outline", "option:smoothing",
-      fmt(one.options?.smoothing ?? state.draftResolvedOptions?.smoothing ?? 0), { step: "1" });
+      fmt(one.options?.smoothing ?? state.draftResolvedOptions?.smoothing ?? 0), { step: "1", min: "0" });
+    html += `</div>`;
     if (assist === "finger_grasp") {
-      html += `<label>Finger grasp locations
+      html += `<div class="draft-triple">${liftAssist}<label>Finger grasps
         <select data-draft="option:finger_position">
           <option value="sides" ${selected("sides", fingerPosition)}>Sides (left/right)</option>
           <option value="top_bottom" ${selected("top_bottom", fingerPosition)}>Top/bottom</option>
@@ -1410,12 +1605,13 @@ function renderDraftFields() {
       </label>`;
       html += field(
         "Finger opening width", "option:finger_width",
-        fmt(one.options?.finger_width ?? state.draftResolvedOptions?.finger_width ?? 25.4),
+        fmt(one.options?.finger_width ?? state.draftResolvedOptions?.finger_width ?? 25),
         { unit: "mm", step: "1", min: "12", max: "40",
           tip: "The openings rotate with the photographed outline. Their edges curve gently down into the grasp instead of ending in a sharp corner." },
       );
+      html += `</div>`;
     } else if (assist === "push_out") {
-      html += `<div class="draft-triple">`;
+      html += `<div class="draft-triple">${liftAssist}`;
       html += `<label>Push at
         <select data-draft="option:push_position">
           <option value="right" ${selected("right", pushPosition)}>Right</option>
@@ -1436,6 +1632,8 @@ function renderDraftFields() {
           tip: "Most of the tool rests on a raised floor. Press the selected end into the lower area to lift the opposite end." },
       );
       html += `</div>`;
+    } else {
+      html += liftAssist;
     }
     html += `<div class="photo-upload wide">
       <label class="button secondary photo-button" for="nest-photo-input">Upload part photo</label>
@@ -1446,7 +1644,7 @@ function renderDraftFields() {
         <li>Part lies flat</li>
         <li>Plain, high-contrast background preferred</li>
       </ul></details>
-      ${one.contour ? `<p class="photo-measurement">Outline ready — move, rotate, or proportionally resize it in 2D.</p>` : ""}
+      ${one.contour ? `<p class="photo-measurement">Outline ready — drag its points over the photo in 2D to reshape it.</p>` : ""}
     </div>`;
   }
   if (info.flags.text) {
@@ -2278,6 +2476,18 @@ function readFileDataUrl(file) {
   });
 }
 
+function setNestPhotoReference(reference) {
+  if (!reference?.image || !Array.isArray(reference.bounds) || reference.bounds.length !== 4) {
+    state.nestPhoto = null;
+    return;
+  }
+  const image = new Image();
+  state.nestPhoto = { image, bounds: reference.bounds.map(value => number(value)) };
+  image.addEventListener("load", renderLayout2D, { once: true });
+  image.addEventListener("error", () => { state.nestPhoto = null; }, { once: true });
+  image.src = reference.image;
+}
+
 async function uploadNestPhoto(event) {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -2318,6 +2528,7 @@ async function uploadNestPhoto(event) {
     state.selected = result.selected;
     state.draftKind = "nest";
     state.draft = clone(state.design.layout.features[state.selected]);
+    setNestPhotoReference(result.reference);
     state.draftAutoCommit = true;
     state.drafts = {};
     syncForm();
@@ -3042,7 +3253,7 @@ async function deleteSupportAt(index) {
 
 function mutationControls() {
   return $$(
-    '#x-size, #y-size, #z, #standard-base, #base-thickness, #easy-clean, #easy-clean-style, #easy-clean-radius, #part-name, ' +
+    '#x-size, #y-size, #z, #standard-base, #base-thickness, #standard-walls, #wall-thickness, #easy-clean, #easy-clean-style, #easy-clean-radius, #part-name, ' +
     '#mode-select, ' +
     '#new-design, #open-design, #save-design'
   );
@@ -3252,6 +3463,7 @@ async function refreshPreview() {
     state.fitError = Boolean(result.feature_errors.length || result.draft_error);
     updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
     updateAutoExpandButton();
+    renderB4BReadout();
     renderPreview3D();
     renderLayout2D();
     renderPlaced();
@@ -4125,6 +4337,94 @@ function nestOutlineWorld(feature, softContour = null) {
   ]);
 }
 
+function nestLocalToWorld(feature, [x, y]) {
+  const cx = (feature.zone[0] + feature.zone[2]) / 2;
+  const cy = (feature.zone[1] + feature.zone[3]) / 2;
+  const angle = number(feature.rotation) * Math.PI / 180;
+  const scale = Math.max(.05, number(feature.scale, 1));
+  const cosine = Math.cos(angle), sine = Math.sin(angle);
+  return [
+    cx + scale * (number(x) * cosine - number(y) * sine),
+    cy + scale * (number(x) * sine + number(y) * cosine),
+  ];
+}
+
+function nestWorldToLocal(feature, [x, y]) {
+  const cx = (feature.zone[0] + feature.zone[2]) / 2;
+  const cy = (feature.zone[1] + feature.zone[3]) / 2;
+  const angle = -number(feature.rotation) * Math.PI / 180;
+  const scale = Math.max(.05, number(feature.scale, 1));
+  const dx = (x - cx) / scale, dy = (y - cy) / scale;
+  return [dx * Math.cos(angle) - dy * Math.sin(angle),
+    dx * Math.sin(angle) + dy * Math.cos(angle)];
+}
+
+function normalizeNestContour(feature) {
+  if (!feature?.contour?.length) return;
+  const xs = feature.contour.map(point => number(point[0]));
+  const ys = feature.contour.map(point => number(point[1]));
+  const offset = [(Math.min(...xs) + Math.max(...xs)) / 2,
+    (Math.min(...ys) + Math.max(...ys)) / 2];
+  if (Math.abs(offset[0]) < 1e-9 && Math.abs(offset[1]) < 1e-9) return;
+  const movedCentre = nestLocalToWorld(feature, offset);
+  feature.contour = feature.contour.map(([x, y]) => [number(x) - offset[0], number(y) - offset[1]]);
+  feature.zone = [movedCentre[0] - .5, movedCentre[1] - .5,
+    movedCentre[0] + .5, movedCentre[1] + .5];
+  if (state.nestPhoto?.bounds) {
+    const [x0, y0, x1, y1] = state.nestPhoto.bounds;
+    state.nestPhoto.bounds = [x0 - offset[0], y0 - offset[1],
+      x1 - offset[0], y1 - offset[1]];
+  }
+}
+
+function drawNestPhotoReference(context, feature, toCanvas) {
+  const reference = state.nestPhoto;
+  if (!reference?.image?.complete || !reference.image.naturalWidth || !feature?.contour?.length) return;
+  const [x0, y0, x1, y1] = reference.bounds;
+  const topLeft = toCanvas(nestLocalToWorld(feature, [x0, y1]));
+  const topRight = toCanvas(nestLocalToWorld(feature, [x1, y1]));
+  const bottomLeft = toCanvas(nestLocalToWorld(feature, [x0, y0]));
+  const width = reference.image.naturalWidth, height = reference.image.naturalHeight;
+  context.save();
+  context.globalAlpha = .55;
+  context.transform(
+    (topRight[0] - topLeft[0]) / width,
+    (topRight[1] - topLeft[1]) / width,
+    (bottomLeft[0] - topLeft[0]) / height,
+    (bottomLeft[1] - topLeft[1]) / height,
+    topLeft[0], topLeft[1],
+  );
+  context.drawImage(reference.image, 0, 0);
+  context.restore();
+}
+
+function drawNestContourHandles(context, feature, toCanvas) {
+  if (!feature?.contour?.length) return;
+  context.save();
+  context.fillStyle = "#ffffff";
+  context.strokeStyle = "#176e91";
+  context.lineWidth = 1.5;
+  for (const point of feature.contour) {
+    const [x, y] = toCanvas(nestLocalToWorld(feature, point));
+    context.beginPath();
+    context.arc(x, y, 3.5, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+  context.restore();
+}
+
+function hitNestContourPoint(feature, world) {
+  if (!feature?.contour?.length || !state.layoutTransform) return null;
+  let closest = null, distance = 10;
+  feature.contour.forEach((point, index) => {
+    const at = nestLocalToWorld(feature, point);
+    const pixels = Math.hypot(world[0] - at[0], world[1] - at[1]) * state.layoutTransform.scale;
+    if (pixels < distance) { closest = index; distance = pixels; }
+  });
+  return closest;
+}
+
 function drawClosedPath(context, points, toCanvas) {
   const path = new Path2D();
   points.forEach((point, index) => {
@@ -4377,6 +4677,13 @@ function renderLayout2D() {
     context.font = "11px Segoe UI";
     context.fillText(reserved.name, reservedCenter[0], reservedCenter[1]);
   }
+  if (state.selected !== null) {
+    const saved = state.design.layout.features[state.selected];
+    const active = state.layoutDrag?.index === state.selected
+      ? state.layoutDrag.feature
+      : (state.draft?.kind === "nest" ? state.draft : saved);
+    if (active?.kind === "nest") drawNestPhotoReference(context, active, toCanvas);
+  }
   const invalid = new Set(state.preview.invalid_feature_indexes || []);
   layoutFeatures().forEach((feature, index) => {
     const zonePath = worldRect(feature.zone);
@@ -4386,7 +4693,10 @@ function renderLayout2D() {
     context.strokeStyle = index === state.selected ? "#176e91" : shade(color, .72);
     context.lineWidth = index === state.selected ? 3 : 1.2;
     if (feature.kind === "nest" && feature.contour) {
-      const outline = drawClosedPath(context, nestOutlineWorld(feature, state.preview.nest_soft_contours?.[index]), toCanvas);
+      const editingPoint = state.layoutDrag?.index === index && state.layoutDrag?.mode === "point";
+      const outline = drawClosedPath(context, nestOutlineWorld(
+        feature, editingPoint ? null : state.preview.nest_soft_contours?.[index]
+      ), toCanvas);
       context.fillStyle = color + "35";
       context.fill(outline);
       context.stroke(outline);
@@ -4554,6 +4864,7 @@ function renderLayout2D() {
         context.fillStyle = "#237fa6";
         context.beginPath(); context.arc(rotate[0], rotate[1], 6, 0, Math.PI * 2); context.fill();
         context.strokeStyle = "white"; context.stroke();
+        drawNestContourHandles(context, feature, toCanvas);
       }
     }
   });
@@ -4567,7 +4878,11 @@ function renderLayout2D() {
     context.lineWidth = 2;
     context.setLineDash([6, 3]);
     if (state.draft.kind === "nest" && state.draft.contour) {
-      const outline = drawClosedPath(context, nestOutlineWorld(state.draft, state.preview.draft_soft_contour), toCanvas);
+      const liveDraft = state.layoutDrag?.feature || state.draft;
+      const softContour = state.layoutDrag?.mode === "point" ? null : state.preview.draft_soft_contour;
+      const outline = drawClosedPath(context, nestOutlineWorld(liveDraft, softContour), toCanvas);
+      context.fillStyle = draftColor + "18";
+      context.strokeStyle = draftColor;
       context.fill(outline); context.stroke(outline);
     } else if (state.draft.kind !== "nest") {
       // Same as a placed support: fill the floor it really covers, outline the
@@ -4657,6 +4972,7 @@ function hitFeature(world) {
     const feat = (state.draft && state.draft.kind === features[selIndex].kind) ? state.draft : features[selIndex];
     const zone = feat.zone;
     if (feat.kind === "nest" && feat.contour) {
+      if (hitNestContourPoint(feat, world) !== null) return selIndex;
       if (state.layoutTransform) {
         const cx = (zone[0] + zone[2]) / 2;
         const handles = [[zone[2], zone[1]], [cx, zone[3] + 8]];
@@ -4747,9 +5063,14 @@ function wireLayoutInteraction() {
     const rotatePixels = Math.hypot((world[0] - rotatePoint[0]) * state.layoutTransform.scale, (world[1] - rotatePoint[1]) * state.layoutTransform.scale);
     const centre = [(zone[0] + zone[2]) / 2, (zone[1] + zone[3]) / 2];
     const resizable = Boolean(partInfo(feature.kind)?.flags?.size || feature.kind === "nest");
+    const contourPoint = feature.kind === "nest" ? hitNestContourPoint(feature, world) : null;
     state.layoutDrag = {
       index, feature, original: clone(feature),
-      mode: feature.kind === "nest" && rotatePixels < 14 ? "rotate" : (resizable && handlePixels < 14) ? "resize" : "move",
+      mode: contourPoint !== null ? "point"
+        : feature.kind === "nest" && rotatePixels < 14 ? "rotate"
+          : (resizable && handlePixels < 14) ? "resize" : "move",
+      contourPoint,
+      photoBounds: state.nestPhoto?.bounds ? [...state.nestPhoto.bounds] : null,
       start: world,
       centre,
       startAngle: Math.atan2(world[1] - centre[1], world[0] - centre[0]),
@@ -4764,7 +5085,10 @@ function wireLayoutInteraction() {
     const pitch = state.design.layout.mode === "cartridge" ? 8 : 1;
     const snap = value => Math.round(value / pitch) * pitch;
     const original = drag.original.zone;
-    if (drag.mode === "move") {
+    if (drag.mode === "point") {
+      drag.feature.contour[drag.contourPoint] = nestWorldToLocal(drag.feature, world);
+      normalizeNestContour(drag.feature);
+    } else if (drag.mode === "move") {
       const width = original[2] - original[0], depth = original[3] - original[1];
       const cx = snap(drag.centre[0] + world[0] - drag.start[0]);
       const cy = snap(drag.centre[1] + world[1] - drag.start[1]);
@@ -4801,6 +5125,7 @@ function wireLayoutInteraction() {
     }
     const applied = await applySupport(drag.index);
     if (!applied) {
+      if (drag.photoBounds && state.nestPhoto) state.nestPhoto.bounds = drag.photoBounds;
       state.draft = clone(state.design.layout.features[drag.index]);
       renderDraftFields();
       refreshDraft();
@@ -4919,6 +5244,14 @@ function designHasChanges() {
   visibleDesign.box.base_thickness = visibleDesign.box.standard_base
     ? 0.6
     : number($("#base-thickness").value, visibleDesign.box.base_thickness ?? 0.6);
+  const wallRules = state.catalog?.wall_rules || {};
+  visibleDesign.box.standard_walls = $("#standard-walls").checked;
+  visibleDesign.box.wall = visibleDesign.box.standard_walls
+    ? (wallRules.default_mm ?? 0.8)
+    : Math.max(wallRules.min_mm ?? 0.4, Math.min(
+        wallRules.max_mm ?? 2.0,
+        number($("#wall-thickness").value, visibleDesign.box.wall ?? wallRules.default_mm ?? 0.8),
+      ));
   visibleDesign.part_name = $("#part-name").value;
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
@@ -4943,6 +5276,7 @@ async function openDesign(event) {
     const parsed = JSON.parse(await file.text());
     const result = await api("/api/design/validate", { design: parsed });
     state.design = result.design;
+    state.nestPhoto = null;
     state.cleanDesign = clone(state.design);
     state.drafts = {};
     state.history = [];
@@ -4965,6 +5299,7 @@ async function newDesign() {
   if (!beginDesignMutation()) return;
   const previousDesign = clone(state.design);
   state.design = clone(state.catalog.defaults.design);
+  state.nestPhoto = null;
   state.cleanDesign = clone(state.design);
   state.binResizePending = false;
   recordHistory(previousDesign);
@@ -5379,6 +5714,7 @@ async function init() {
     state.catalog = catalog;
     state.serverInstance = catalog.instance;
     state.design = clone(catalog.defaults.design);
+    state.nestPhoto = null;
     state.cleanDesign = clone(state.design);
     state.output = catalog.preferences?.output || catalog.defaults.output;
     state.keepLog = catalog.preferences?.keep_log !== undefined ? Boolean(catalog.preferences.keep_log) : true;
