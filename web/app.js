@@ -1568,7 +1568,6 @@ function renderDraftFields() {
       repeatFieldsHtml += field(option.label, `option:${option.key}`, shown, fo);
     }
 
-    html += `<div class="editor-group"><span class="editor-group-label">${info.kind === "divider" ? "Grid" : info.flags.qty ? "Repeats" : "Orientation"}</span>`;
     if (info.kind === "divider") {
       // Two quantities instead of one direction: walls across X and walls
       // across Y, together making a grid of compartments.
@@ -1578,54 +1577,55 @@ function renderDraftFields() {
         : (one.along === "y" ? legacyN : 0);
       const gy = (opt.count_y != null && opt.count_y !== "") ? opt.count_y
         : (one.along === "x" ? legacyN : 0);
-      html += `<div class="pair">
-        <label title="Walls dividing the bin left to right (across X). 0 for none.">Qty X<input type="number" min="0" step="1" data-draft="option:count_x" value="${gx}" placeholder="0"></label>
-        <label title="Walls dividing the bin front to back (across Y). 0 for none.">Qty Y<input type="number" min="0" step="1" data-draft="option:count_y" value="${gy}" placeholder="0"></label>
-      </div>`;
-    } else if (info.flags.qty) {
-      html += `<div class="pair"><label>Quantity<div class="input-with-button">
-        <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
-        ${["cradle", "slot"].includes(info.kind) ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
-      </div></label>${repeatFieldsHtml}</div>`;
-      if (info.kind === "cradle") {
-        const item = one.item || starterItem();
-        const first = item.segments[0] || { length: 40, diameter: 6 };
-        const tip = "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.";
-        html += `<div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div>`;
+      html += `<label title="Walls dividing the bin left to right (across X). 0 for none.">Qty X<input type="number" min="0" step="1" data-draft="option:count_x" value="${gx}" placeholder="0"></label>
+        <label title="Walls dividing the bin front to back (across Y). 0 for none.">Qty Y<input type="number" min="0" step="1" data-draft="option:count_y" value="${gy}" placeholder="0"></label>`;
+    } else {
+      html += `<div class="editor-group"><span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`;
+      if (info.flags.qty) {
+        html += `<div class="pair"><label>Quantity<div class="input-with-button">
+          <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
+          ${["cradle", "slot"].includes(info.kind) ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
+        </div></label>${repeatFieldsHtml}</div>`;
+        if (info.kind === "cradle") {
+          const item = one.item || starterItem();
+          const first = item.segments[0] || { length: 40, diameter: 6 };
+          const tip = "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.";
+          html += `<div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div>`;
+        }
+      } else if (repeatFieldsHtml) {
+        html += `<div class="pair">${repeatFieldsHtml}</div>`;
       }
-    } else if (repeatFieldsHtml) {
-      html += `<div class="pair">${repeatFieldsHtml}</div>`;
+      if (info.flags.alternate) {
+        html += toggle("alternate_ends", "Alternate ends",
+          "Places every second trough near the opposite end of the bin; each trough becomes a separate body.",
+          one.alternate_ends === true, { wide: true });
+      }
+      if (info.flags.along && !["divider", "bore"].includes(info.kind)) {
+        html += `<fieldset><legend>Runs along</legend><div class="segmented two">
+          <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
+          <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
+        </div></fieldset>`;
+      }
+      if (info.flags.alternate && (info.kind !== "cradle" || one.alternate_ends === true)) {
+        // One field, two readings. Alternate ends on: the clearance kept at each
+        // run end (writes end_margin). Off: a signed slide of the whole row along
+        // the bin (writes run_offset). Each key keeps its own last value.
+        const alternating = one.alternate_ends === true;
+        const key = alternating ? "end_margin" : "run_offset";
+        const label = alternating ? "% from end" : "Offset from center";
+        const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
+        const shown = explicit
+          ? one.options[key]
+          : alternating
+          ? state.draftResolvedOptions?.end_margin ?? 10
+          : 0;
+        const tip = alternating
+          ? "Share of the run kept clear at each end. Larger pulls the alternating troughs toward the middle; smaller pushes them to the ends."
+          : "Slides the trough along the bin from centre, as a share of the room to the wall. Positive one way, negative the other; 0 stays centred.";
+        html += field(label, `option:${key}`, fmt(shown), { step: "1", tip });
+      }
+      html += `</div>`;
     }
-    if (info.flags.alternate) {
-      html += toggle("alternate_ends", "Alternate ends",
-        "Places every second trough near the opposite end of the bin; each trough becomes a separate body.",
-        one.alternate_ends === true, { wide: true });
-    }
-    if (info.flags.along && !["divider", "bore"].includes(info.kind)) {
-      html += `<fieldset><legend>Runs along</legend><div class="segmented two">
-        <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
-        <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
-      </div></fieldset>`;
-    }
-    if (info.flags.alternate && (info.kind !== "cradle" || one.alternate_ends === true)) {
-      // One field, two readings. Alternate ends on: the clearance kept at each
-      // run end (writes end_margin). Off: a signed slide of the whole row along
-      // the bin (writes run_offset). Each key keeps its own last value.
-      const alternating = one.alternate_ends === true;
-      const key = alternating ? "end_margin" : "run_offset";
-      const label = alternating ? "% from end" : "Offset from center";
-      const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
-      const shown = explicit
-        ? one.options[key]
-        : alternating
-        ? state.draftResolvedOptions?.end_margin ?? 10
-        : 0;
-      const tip = alternating
-        ? "Share of the run kept clear at each end. Larger pulls the alternating troughs toward the middle; smaller pushes them to the ends."
-        : "Slides the trough along the bin from centre, as a share of the room to the wall. Positive one way, negative the other; 0 stays centred.";
-      html += field(label, `option:${key}`, fmt(shown), { step: "1", tip });
-    }
-    html += `</div>`;
   }
   if (info.flags.item && !["bore", "cradle"].includes(one.kind)) {
     // A bore's Diameter / Profile / Clearance are drawn in the "Hole" group above.
@@ -1712,7 +1712,6 @@ function renderDraftFields() {
       opt.slope_base === true || (opt.bottom_angle !== undefined && Number(opt.bottom_angle) !== 0)
     );
 
-    html += `<div class="editor-group">`;
     html += plainCheckbox("option:slope_base", "Slope base", hasSlope, {
       wide: true,
       help: "Tilts the tool-slot bottoms so tools rest at an angle instead of flat.",
@@ -1743,9 +1742,7 @@ function renderDraftFields() {
       }
       html += `</div></div>`;
     }
-    html += `</div>`;
 
-    html += `<div class="editor-group">`;
     html += plainCheckbox("enabled", "Curved scoop", Boolean(scoopConfig), {
       wide: true,
       dataAttribute: "data-divider-scoop-enabled",
@@ -1759,10 +1756,8 @@ function renderDraftFields() {
         tip: "Every Divider compartment gets the same Scoop depth and starts at its front floor edge.",
       });
     }
-    html += `</div>`;
 
     const hasLabels = opt.label_divisions === true;
-    html += `<div class="editor-group">`;
     html += plainCheckbox("option:label_divisions", "Label divisions", hasLabels, {
       wide: true,
       help: "Add text labels to each division slot.",
@@ -1808,7 +1803,6 @@ function renderDraftFields() {
       }
       html += `</table>`;
     }
-    html += `</div>`;
   }
   // The auto-size buttons sit at the very bottom of the editor.
   if (!(one.kind === "text" && one.options?.level === "rim")) {

@@ -238,7 +238,8 @@ input[type="number"]::-webkit-inner-spin-button {
    it doesn't read as a border inside a border. */
 .draft-fields .editor-group > .editor-toggle { border: 0; background: none; padding: 2px 0; }
 .draft-fields .inline-help { grid-column: 1 / -1; margin: 0; font-size: 11px; color: var(--muted); line-height: 1.4; }
-.draft-fields .division-table { width: 100%; border-collapse: collapse; }
+.draft-fields .checkbox-row { margin: 4px 0 2px; }
+.draft-fields .division-table { grid-column: 1 / -1; width: 100%; border-collapse: collapse; }
 .draft-fields .division-table td { padding: 3px 6px 3px 0; vertical-align: middle; }
 .draft-fields .division-table td:first-child { width: 1.6em; font-weight: 600; font-size: 12px; color: var(--muted); text-align: right; padding-right: 8px; }
 .draft-fields .division-table input { width: 100%; margin: 0; }
