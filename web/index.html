@@ -32,8 +32,8 @@
         </div>
         <div class="section-body">
           <div class="field-grid three">
-            <label>Width <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
-            <label>Length <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
+            <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
+            <label><span id="y-size-label">Length</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
             <label>Height <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
           </div>
           <div class="mode-and-bin-options">
@@ -60,7 +60,9 @@
           <label class="checkbox-row inline-option b4b-toggle"><span>Bin for Bins (B4B)?</span><input id="b4b-enabled" type="checkbox"></label>
           <div id="b4b-panel" class="b4b-panel" hidden>
             <div id="b4b-capacity" class="b4b-capacity">
-              <strong id="b4b-capacity-line">Fits bins totaling — units</strong>
+              <strong id="b4b-capacity-line">Inside capacity: — units</strong>
+              <span id="b4b-case-outside" class="muted">Case body outside: — mm</span>
+              <span id="b4b-envelope" class="muted">Complete assembled envelope: — mm</span>
               <span id="b4b-child-height" class="muted">Maximum bin height: — mm</span>
               <span id="b4b-grew" class="field-error" hidden></span>
             </div>

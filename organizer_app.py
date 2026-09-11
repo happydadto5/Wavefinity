@@ -1038,9 +1038,9 @@ def _b4b_log_note(summary: dict) -> str:
         bits.append("no lid")
     if summary["secure_lid"]:
         bits.append(f"{summary['latch_count']} latch/{summary['latch_strength']}")
-        hw = summary.get("hardware", {})
-        if hw.get("hinge_screw"):
-            bits.append(f"{hw['hinge_screw']} pins")
+        bom = summary.get("hardware_bom", [])
+        if bom:
+            bits.append("; ".join(bom))
     if summary["stacking"]:
         bits.append("stacking")
     if summary["label_location"] != "none":
@@ -1695,9 +1695,10 @@ def design_to_dict(
             "stacking": b4b.stacking,
         }
     return {
-        # Version 2 only when B4B is on, so an older Wavefinity build rejects a
-        # B4B design outright instead of silently loading it as an ordinary bin.
-        "version": 2 if b4b.enabled else 1,
+        # Version 3 only when B4B is on. Version 3 changes B4B x/y from the
+        # physical outside to the exact requested child field, so older builds
+        # reject a B4B design instead of silently loading it as an ordinary bin.
+        "version": 3 if b4b.enabled else 1,
         "box": box_block,
         "label": label,
         "label_position": label_position(label_location),
@@ -1710,7 +1711,8 @@ def design_to_dict(
 def design_from_dict(
     data: dict, *, validate_layout: bool = True
 ) -> tuple[BoxSpec, Layout, str, str, str, bool]:
-    if data.get("version", 1) not in (1, 2):
+    design_version = data.get("version", 1)
+    if design_version not in (1, 2, 3):
         raise ValueError(f"unsupported design version {data.get('version')!r}")
     raw = data["box"]
     b4b_raw = raw.get("b4b")
@@ -1731,6 +1733,21 @@ def design_from_dict(
             stacking=bool(b4b_raw.get("stacking", False)),
         )
     x, y = float(raw["x"]), float(raw["y"])
+    if b4b.enabled and design_version == 2:
+        # Deterministic schema migration: v2 stored physical case X/Y and used
+        # the reduced old rail capacity.  v3 stores that exact old capacity as
+        # the requested child field.  Never guess semantics from dimensions.
+        old_wall = float(raw.get("wall", DEFAULT_WALL))
+        old_wall_depth = old_wall * math.sqrt(1.0 + max_wave_slope() ** 2)
+        old_slack = 2.0 * (WAVE_MATING_GAP + old_wall_depth) / GRID_PITCH
+        x = max(
+            GRID_PITCH,
+            math.floor(round(x / GRID_PITCH) - old_slack + 1e-6) * GRID_PITCH,
+        )
+        y = max(
+            GRID_PITCH,
+            math.floor(round(y / GRID_PITCH) - old_slack + 1e-6) * GRID_PITCH,
+        )
     # Brief browser builds stored a requested usable size plus the wall
     # allowance. Recover the user's 8 mm modular choice when those designs are
     # reopened; every BoxSpec remains grid-locked after migration.
@@ -1784,8 +1801,8 @@ def design_from_dict(
             easy_clean=bool(raw.get("easy_clean", False)),
             flat_inside=float(raw.get("flat_inside", 0.0) or 0.0),
         )
-        # Normalize legacy no-lid data and adopt the actual B4B size so reopened
-        # and saved designs show what will print.
+        # Normalize legacy no-lid data and adopt any required child-field growth
+        # so reopened and saved designs show the exact capacity that will print.
         box = replace(
             box, easy_clean=False, flat_inside=0.0, b4b=box.b4b.normalised()
         )

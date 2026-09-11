@@ -1,11 +1,9 @@
-"""B4B (Bin for Bins) - a Wavefinity container mode.
+"""B4B (Bin for Bins) - a Wavefinity carrying-case mode.
 
-A B4B is an ordinary Wavefinity bin whose interior is reserved for a field of
-child Wavefinity bins.  Its outer X/Y stay exactly on the 8 mm lattice so it
-still shares the global wave phase with every other bin; a lower internal
-*mating rail* presents the same authoritative wave one mating gap outside the
-child field, so perimeter child bins interlock with the B4B exactly as they
-would with a neighbouring bin.
+For B4B, ``BoxSpec.x/y`` are the requested child-bin field dimensions.  The
+authoritative inner mating wall is built around that exact field and the case
+wall grows outward from it.  The physical case footprint is therefore derived
+and intentionally does not promise ordinary external Wavefinity interlock.
 
 This module owns every B4B tuning constant and every B4B geometry builder.  It
 imports engine primitives; nothing in the engine imports it, so there is no
@@ -20,7 +18,7 @@ import math
 
 import numpy as np
 import trimesh
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
 from shapely.affinity import translate as translate_polygon
 
 from organizer_engine import (
@@ -37,8 +35,7 @@ from organizer_engine import (
     max_wave_slope,
     text_outline,
     text_prism,
-    wavy_cavity_polygon,
-    wavy_outer_polygon,
+    wave_value,
 )
 from organizer_geometry import (
     _extrude_polygon,
@@ -52,15 +49,17 @@ from organizer_geometry import (
 # --------------------------------------------------------------------------- #
 # tuning constants - centralised, conservative first-print defaults
 # --------------------------------------------------------------------------- #
-# Interlock rail
-B4B_RAIL_HEIGHT = 4.0            # rail height above the internal floor top
-B4B_RAIL_CORNER_FILLET = 0.6
+# B4B wall corner treatment.  The child-compatible wavy faces are never
+# buffered; only their corner joins receive this small printable rounding.
+B4B_WALL_CORNER_FILLET = 0.6
 
 # Effective base / stacking
 B4B_MIN_FLOOR_SKIN = 0.8        # printable floor left under a stack recess
 B4B_STACK_RECESS_DEPTH = 2.0    # female recess depth == male boss height
 B4B_STACK_BOSS_DIAMETER = 5.0
 B4B_STACK_FEMALE_RADIAL_CLEARANCE = 0.25
+B4B_STACK_SOCKET_DEPTH = 1.6
+B4B_STACK_SOCKET_INTERFERENCE = 0.08
 B4B_STACK_INSET_FRACTION = 0.16  # locator centre inset from each outer edge
 B4B_STACK_INSET_MIN = 4.0
 B4B_STACK_MIN_FOOTPRINT_UNITS = 3  # smallest box that still gets four locators
@@ -97,10 +96,10 @@ B4B_HINGE_WIDTH_FRACTION = 0.16
 # the outer (far) segment is the printed thread-forming lug.  The minimum is set
 # so that lug is never thinner than B4B_M3_THREAD_ENGAGE_MIN:
 #   (12/3) - 0.35 = 3.65 mm >= 3.0 mm.
-B4B_HINGE_WIDTH_MIN = 12.0
+B4B_HINGE_WIDTH_MIN = 10.0
 B4B_HINGE_WIDTH_MAX = 24.0
 B4B_HINGE_KNUCKLE_RADIUS = 3.1   # encloses the clear bore with a printable wall
-B4B_HINGE_AXIAL_GAP = 0.35       # running gap between body and lid knuckles
+B4B_HINGE_AXIAL_GAP = 0.20       # running gap between body and lid knuckles
 B4B_HINGE_CLEAR_KEEPOUT = 1.0    # extra gap from a wall's corner tangent
 
 # Latches (secure lid only)
@@ -127,59 +126,92 @@ B4B_LATCH_PROFILES = {
     },
 }
 
-# Minimum outer X for a secure lid: two printable hinge assemblies plus corner
-# keep-outs, quantised up to a whole grid unit.
-B4B_SECURE_MIN_X = (
-    math.ceil(
-        (2.0 * B4B_HINGE_WIDTH_MIN + 4.0 * CORNER_INSET + WAVE_MATING_GAP - 1e-9)
-        / GRID_PITCH
-    )
-    * GRID_PITCH
-)
-# Minimum outer X to force two latches.
-B4B_TWO_LATCH_MIN_X = (
-    math.ceil(
-        (2.0 * B4B_LATCH_WIDTH_MIN + 3.0 * B4B_LATCH_MUTUAL_CLEARANCE - 1e-9)
-        / GRID_PITCH
-    )
-    * GRID_PITCH
-)
+# Minimum requested child-field widths.  Hardware reinforcement grows outward;
+# it may grow the child field only when the hardware genuinely needs more span.
+B4B_SECURE_MIN_FIELD_X = 3 * GRID_PITCH
+B4B_TWO_LATCH_MIN_FIELD_X = 5 * GRID_PITCH
 
 _EPS = 1e-6
 
 
 # --------------------------------------------------------------------------- #
-# capacity + effective box
+# child-field semantics + derived physical case
 # --------------------------------------------------------------------------- #
-def _axis_capacity(axis_mm: float, wall_depth: float) -> int:
-    """Whole child units that fit one outer axis - the paper formula.
+@dataclass(frozen=True)
+class B4BLayout:
+    """One source of truth for every derived B4B plan-view datum."""
 
-    ``C = floor(N - 2*(gap + D)/G)`` with ``N`` the outer axis in whole units
-    and ``D`` the axis-depth-equivalent wall.  Not hard-coded to ``N - 1`` so a
-    future wall or wave change stays valid.
-    """
-    n = round(axis_mm / GRID_PITCH)
-    slack = 2.0 * (WAVE_MATING_GAP + wall_depth) / GRID_PITCH
-    return int(math.floor(n - slack + _EPS))
+    target_child_x: float
+    target_child_y: float
+    inner_half_x: float
+    inner_half_y: float
+    outer_half_x: float
+    outer_half_y: float
+    inner_mating_polygon: Polygon
+    outer_structural_polygon: Polygon
+    case_bounds: tuple[float, float, float, float]
+
+    @property
+    def case_size(self) -> tuple[float, float]:
+        x0, y0, x1, y1 = self.case_bounds
+        return x1 - x0, y1 - y0
+
+    def front_wall_y(self, x: float) -> float:
+        return -self.outer_half_y + wave_value(x)
+
+    def rear_wall_y(self, x: float) -> float:
+        return self.outer_half_y + wave_value(x)
 
 
-def b4b_capacity_units(box: BoxSpec) -> tuple[int, int]:
-    """``(units_x, units_y)`` of child Wavefinity footprint the B4B holds.
-
-    Computed on the *effective* box, so any auto-grow for hardware or a 1-unit
-    minimum is already reflected.
-    """
+@lru_cache(maxsize=64)
+def b4b_layout(box: BoxSpec) -> B4BLayout:
+    """Resolve the exact child field and its outward-built case wall."""
     eff = b4b_effective_box(box)
-    return (
-        _axis_capacity(eff.x, eff.wall_depth),
-        _axis_capacity(eff.y, eff.wall_depth),
+    inner_half_x = eff.x / 2.0 + WAVE_MATING_GAP / 2.0
+    inner_half_y = eff.y / 2.0 + WAVE_MATING_GAP / 2.0
+    inner_tx = inner_half_x - CORNER_INSET
+    inner_ty = inner_half_y - CORNER_INSET
+    inner = Polygon(_wall_points(inner_half_x, inner_half_y, inner_tx, inner_ty))
+    if not inner.is_valid:
+        inner = inner.buffer(0)
+    if not isinstance(inner, Polygon) or not inner.is_valid:
+        raise RuntimeError("B4B inner mating outline is not a valid single polygon")
+    inner = _rounded(inner, B4B_WALL_CORNER_FILLET)
+
+    outer_half_x = inner_half_x + eff.wall_depth
+    outer_half_y = inner_half_y + eff.wall_depth
+    outer_tx = outer_half_x - CORNER_INSET
+    outer_ty = outer_half_y - CORNER_INSET
+    outer = Polygon(_wall_points(outer_half_x, outer_half_y, outer_tx, outer_ty))
+    if not outer.is_valid:
+        outer = outer.buffer(0)
+    if not isinstance(outer, Polygon) or not outer.is_valid:
+        raise RuntimeError("B4B outer structural outline is not a valid single polygon")
+    outer = _rounded(outer, B4B_WALL_CORNER_FILLET)
+    if not outer.buffer(_EPS).contains(inner):
+        raise RuntimeError("B4B outward wall does not contain its inner mating face")
+    return B4BLayout(
+        target_child_x=eff.x,
+        target_child_y=eff.y,
+        inner_half_x=inner_half_x,
+        inner_half_y=inner_half_y,
+        outer_half_x=outer_half_x,
+        outer_half_y=outer_half_y,
+        inner_mating_polygon=inner,
+        outer_structural_polygon=outer,
+        case_bounds=tuple(float(v) for v in outer.bounds),
     )
 
 
+def b4b_capacity_units(box: BoxSpec) -> tuple[int, int]:
+    """Exact requested child-field units after any visible auto-growth."""
+    eff = b4b_effective_box(box)
+    return round(eff.x / GRID_PITCH), round(eff.y / GRID_PITCH)
+
+
 def b4b_capacity_mm(box: BoxSpec) -> tuple[float, float]:
-    """Nominal child field in mm: ``capacity_units * GRID_PITCH`` per axis."""
-    cx, cy = b4b_capacity_units(box)
-    return cx * GRID_PITCH, cy * GRID_PITCH
+    eff = b4b_effective_box(box)
+    return eff.x, eff.y
 
 
 def b4b_effective_base_thickness(box: BoxSpec) -> float:
@@ -198,30 +230,21 @@ def b4b_effective_base_thickness(box: BoxSpec) -> float:
 def b4b_effective_box(box: BoxSpec) -> BoxSpec:
     """The BoxSpec every B4B builder uses.
 
-    Identical to the user's box except for auto-grown X/Y (1-unit minimum,
-    secure-lid hardware, forced two latches) and any stacking base
+    Identical to the user's child-field request except for genuinely required
+    hardware/stacking growth and any stacking base
     reinforcement.  Easy Clean and the flat-inside band are forced off because
     they alter the floor/perimeter the child bins must seat on.
     """
     b4b = box.b4b.normalised()
     x, y, z = box.x, box.y, box.z
 
-    # 1-unit interior minimum on both axes.
-    guard = 0
-    while _axis_capacity(x, box.wall_depth) < 1 and guard < 64:
-        x += GRID_PITCH
-        guard += 1
-    guard = 0
-    while _axis_capacity(y, box.wall_depth) < 1 and guard < 64:
-        y += GRID_PITCH
-        guard += 1
-
-    # Secure-lid hardware needs a minimum outer X.
+    # Secure-lid hardware needs enough requested field width for two compact
+    # rear hinges.  The exterior reinforcement itself grows outward.
     if b4b.secure_lid:
-        while x < B4B_SECURE_MIN_X - _EPS:
+        while x < B4B_SECURE_MIN_FIELD_X - _EPS:
             x += GRID_PITCH
         if b4b.latch_count == "2":
-            while x < B4B_TWO_LATCH_MIN_X - _EPS:
+            while x < B4B_TWO_LATCH_MIN_FIELD_X - _EPS:
                 x += GRID_PITCH
         z = max(z, B4B_LATCHED_MIN_HEIGHT)
 
@@ -270,7 +293,7 @@ def b4b_max_child_height(box: BoxSpec) -> float:
 
 
 # --------------------------------------------------------------------------- #
-# mating rail
+# authoritative inner mating wall
 # --------------------------------------------------------------------------- #
 def b4b_mating_polygon(box: BoxSpec) -> Polygon:
     """Inward-facing wave the child field's perimeter bins mate to.
@@ -281,37 +304,11 @@ def b4b_mating_polygon(box: BoxSpec) -> Polygon:
     Baseline half-extent per axis is ``C*G/2 + gap/2``, exactly one axis gap
     outside a child field whose perimeter wall baseline is ``C*G/2 - gap/2``.
     """
-    eff = b4b_effective_box(box)
-    cx, cy = _axis_capacity(eff.x, eff.wall_depth), _axis_capacity(eff.y, eff.wall_depth)
-    if cx < 1 or cy < 1:
-        raise ValueError("B4B interior is smaller than one child unit")
-    half_x = cx * GRID_PITCH / 2.0 + WAVE_MATING_GAP / 2.0
-    half_y = cy * GRID_PITCH / 2.0 + WAVE_MATING_GAP / 2.0
-    tx = half_x - CORNER_INSET
-    ty = half_y - CORNER_INSET
-    polygon = Polygon(_wall_points(half_x, half_y, tx, ty))
-    if not polygon.is_valid:
-        polygon = polygon.buffer(0)
-    if not isinstance(polygon, Polygon) or not polygon.is_valid:
-        raise RuntimeError("B4B mating outline is not a valid single polygon")
-    return _rounded(polygon, B4B_RAIL_CORNER_FILLET)
+    return b4b_layout(box).inner_mating_polygon
 
 
-def b4b_rail_ring_polygon(box: BoxSpec) -> Polygon:
-    """Plan-view material of the lower mating rail: the ring between the normal
-    cavity outline and the mating outline."""
-    eff = b4b_effective_box(box)
-    cavity = wavy_cavity_polygon(eff)
-    mating = b4b_mating_polygon(box)
-    if not cavity.buffer(_EPS).contains(mating):
-        raise ValueError(
-            "B4B mating rail would not fit inside the main cavity for this "
-            "size/wall; grow the box or reduce the wall"
-        )
-    ring = cavity.difference(mating)
-    if ring.is_empty or ring.area <= 0.0:
-        raise ValueError("B4B mating rail ring is empty")
-    return ring
+def b4b_outer_polygon(box: BoxSpec) -> Polygon:
+    return b4b_layout(box).outer_structural_polygon
 
 
 # --------------------------------------------------------------------------- #
@@ -332,6 +329,9 @@ class B4BHardwarePlan:
     latch_centers_x: tuple[float, ...]
     latch_width: float
     latch_screw_length_mm: int
+    catch_screw_length_mm: int
+    catch_axis_y: float
+    catch_axis_z: float
     strength_profile: dict
     nuts: int = 0
 
@@ -343,7 +343,10 @@ class B4BHardwarePlan:
             )
         if self.latch_count_resolved:
             lines.append(
-                f"{self.latch_count_resolved} x M3x{self.latch_screw_length_mm} latch pins"
+                f"{self.latch_count_resolved} x M3x{self.latch_screw_length_mm} latch pivots"
+            )
+            lines.append(
+                f"{self.latch_count_resolved} x M3x{self.catch_screw_length_mm} catch pins"
             )
         lines.append("No nuts")
         return lines
@@ -413,9 +416,10 @@ def _latch_screw_stack(latch_width: float, ear_thickness: float) -> tuple[float,
     return clear_span, _latch_lug_thickness(ear_thickness)
 
 
-def _front_span(eff: BoxSpec) -> float:
+def _front_span(box: BoxSpec) -> float:
     """Usable straight run of the front wall between corner tangents."""
-    return 2.0 * (eff.half_x - CORNER_INSET)
+    layout = b4b_layout(box)
+    return 2.0 * (layout.outer_half_x - CORNER_INSET)
 
 
 def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
@@ -435,30 +439,41 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
             latch_centers_x=(),
             latch_width=0.0,
             latch_screw_length_mm=0,
+            catch_screw_length_mm=0,
+            catch_axis_y=0.0,
+            catch_axis_z=0.0,
             strength_profile=profile,
         )
 
+    layout = b4b_layout(box)
+    case_x, _case_y = layout.case_size
     # Hinges: two, symmetric, near the quarter points, clamped to corner keep-outs.
     hinge_width = min(
         B4B_HINGE_WIDTH_MAX,
-        max(B4B_HINGE_WIDTH_MIN, B4B_HINGE_WIDTH_FRACTION * eff.x),
+        max(B4B_HINGE_WIDTH_MIN, B4B_HINGE_WIDTH_FRACTION * case_x),
     )
-    limit = eff.half_x - CORNER_INSET - B4B_HINGE_CLEAR_KEEPOUT - hinge_width / 2.0
-    centre = min(max(eff.x / 4.0, hinge_width / 2.0 + 1.0), max(limit, 1.0))
+    limit = layout.outer_half_x - CORNER_INSET - hinge_width / 2.0
+    centre = min(max(eff.x / 4.0, hinge_width / 2.0), max(limit, hinge_width / 2.0))
     hinge_centers_x = (-centre, centre)
-    hinge_axis_y = eff.half_y + WAVE_AMPLITUDE + B4B_HINGE_KNUCKLE_RADIUS + 0.6
-    # axis at the lid-underside height, just behind the rear wall: the lid swings
-    # back clear of the wavy wall without a tall, fragile tower.
-    hinge_axis_z = b4b_lid_underside_z(box)
+    rear_faces = [
+        layout.rear_wall_y(cx + dx)
+        for cx in hinge_centers_x
+        for dx in (-hinge_width / 2.0, 0.0, hinge_width / 2.0)
+    ]
+    hinge_axis_y = max(rear_faces) + B4B_HINGE_KNUCKLE_RADIUS + 0.45
+    # The round barrel is exactly flush with the broad lid top plane.
+    hinge_axis_z = (
+        b4b_lid_underside_z(box) + B4B_LID_SKIN - B4B_HINGE_KNUCKLE_RADIUS
+    )
     h_span, h_lug = _hinge_screw_stack(hinge_width)
     hinge_screw = _screw_for_stack(h_span, h_lug, "hinge")
 
     # Latches: front, 1 / 2 / Auto.
     latch_width = min(
         B4B_LATCH_WIDTH_MAX,
-        max(B4B_LATCH_WIDTH_MIN, B4B_LATCH_WIDTH_FRACTION * eff.x),
+        max(B4B_LATCH_WIDTH_MIN, B4B_LATCH_WIDTH_FRACTION * case_x),
     )
-    span = _front_span(eff)
+    span = _front_span(box)
     two_fit = (2.0 * latch_width + 3.0 * B4B_LATCH_MUTUAL_CLEARANCE) <= span + _EPS
     if b4b.latch_count == "1":
         resolved = 1
@@ -473,6 +488,18 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         latch_centers_x = (-third, third)
     l_span, l_lug = _latch_screw_stack(latch_width, profile["pad_wall"])
     latch_screw = _screw_for_stack(l_span, l_lug, "latch")
+    lever_w = latch_width - 2.0 * B4B_HINGE_AXIAL_GAP
+    catch_ear_t = max(profile["pad_wall"], B4B_M3_THREAD_ENGAGE_MIN + 1.0)
+    catch_span = catch_ear_t + lever_w + 2.0 * B4B_HINGE_AXIAL_GAP
+    catch_screw = _screw_for_stack(catch_span, catch_ear_t, "catch")
+    front_faces = [
+        layout.front_wall_y(cx + dx)
+        for cx in latch_centers_x
+        for dx in (-latch_width / 2.0, 0.0, latch_width / 2.0)
+    ]
+    hook_outer_r = B4B_M3_NOMINAL / 2.0 + 0.35 + 1.6
+    catch_axis_y = min(front_faces) - hook_outer_r - 0.45
+    catch_axis_z = eff.z - max(6.5, profile["pad_height"] * 0.65)
 
     return B4BHardwarePlan(
         hinge_count=B4B_HINGE_COUNT,
@@ -485,6 +512,9 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         latch_centers_x=latch_centers_x,
         latch_width=latch_width,
         latch_screw_length_mm=latch_screw,
+        catch_screw_length_mm=catch_screw,
+        catch_axis_y=catch_axis_y,
+        catch_axis_z=catch_axis_z,
         strength_profile=profile,
     )
 
@@ -541,28 +571,18 @@ def _stack_recesses(box: BoxSpec) -> list[trimesh.Trimesh]:
 
 
 def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
-    """The B4B body: normal Wavefinity outer shell (no Easy Clean, no flat
-    band, no interior lock bumps) unioned with the lower mating rail, hinge
-    towers and latch pads, less any stack recesses."""
+    """Flat-floor child field inside a wall grown outward from its mating face."""
     eff = b4b_effective_box(box)
     floor_z = eff.base_thickness
     plan = b4b_hardware_plan(box)
+    layout = b4b_layout(box)
 
-    envelope = _extrude_polygon(wavy_outer_polygon(eff), eff.z)
+    envelope = _extrude_polygon(layout.outer_structural_polygon, eff.z)
     cavity = _extrude_polygon(
-        wavy_cavity_polygon(eff), eff.z - floor_z + 1.0
+        layout.inner_mating_polygon, eff.z - floor_z + 1.0
     )
     cavity.apply_translation((0.0, 0.0, floor_z))
-    shell = difference([envelope, cavity])
-
-    # Start the rail just inside the floor so the union is a single solid, not
-    # two shells meeting face to face.  The downward overlap is bounded by the
-    # available floor thickness so nothing is ever placed below z=0, even on a
-    # thin custom base.
-    overlap = min(0.6, max(0.0, floor_z * 0.5))
-    rail = _extrude_polygon(b4b_rail_ring_polygon(box), B4B_RAIL_HEIGHT + overlap)
-    rail.apply_translation((0.0, 0.0, floor_z - overlap))
-    body = union([shell, rail])
+    body = difference([envelope, cavity])
 
     if plan.hinge_count:
         for tower in _hinge_body_parts(box, plan):
@@ -589,18 +609,19 @@ def _skirt_polygons(eff: BoxSpec) -> tuple[Polygon, Polygon]:
     clearance - a constant-gap wavy channel, the same phase trick the rail
     uses - so the lid locates without a press fit."""
     clr = B4B_LID_SEAT_CLEARANCE
-    tx = eff.half_x - CORNER_INSET
-    ty = eff.half_y - CORNER_INSET
-    inner = Polygon(_wall_points(eff.half_x + clr, eff.half_y + clr, tx, ty))
+    layout = b4b_layout(eff)
+    tx = layout.outer_half_x - CORNER_INSET
+    ty = layout.outer_half_y - CORNER_INSET
+    inner = Polygon(_wall_points(layout.outer_half_x + clr, layout.outer_half_y + clr, tx, ty))
     outer = Polygon(
         _wall_points(
-            eff.half_x + clr + B4B_LID_SKIRT_WALL,
-            eff.half_y + clr + B4B_LID_SKIRT_WALL,
+            layout.outer_half_x + clr + B4B_LID_SKIRT_WALL,
+            layout.outer_half_y + clr + B4B_LID_SKIRT_WALL,
             tx, ty,
         )
     )
-    inner = _rounded(inner, B4B_RAIL_CORNER_FILLET)
-    outer = _rounded(outer, B4B_RAIL_CORNER_FILLET)
+    inner = _rounded(inner, B4B_WALL_CORNER_FILLET)
+    outer = _rounded(outer, B4B_WALL_CORNER_FILLET)
     return outer, inner
 
 
@@ -634,9 +655,11 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
     # latches and the rear carries hinges, and a skirt lapping down past the rim
     # there would clash with that hardware.  The side runs are wavy, so they
     # still locate the lid on both axes without a snap.
+    layout = b4b_layout(box)
+    case_x, _case_y = layout.case_size
     side_clip = trimesh.creation.box(
-        extents=(eff.x * 4.0,
-                 2.0 * (eff.half_y - CORNER_INSET - 2.0),
+        extents=(case_x * 4.0,
+                 2.0 * (layout.outer_half_y - CORNER_INSET - 2.0),
                  skirt_h + 20.0)
     )
     side_clip.apply_translation((0.0, 0.0, skirt_bottom + skirt_h / 2.0))
@@ -652,8 +675,7 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
             lid = union([lid, ear])
 
     if eff.b4b.stacking:
-        for boss in _stack_bosses(box):
-            lid = union([lid, boss])
+        lid = difference([lid, *_stack_lid_sockets(box)])
 
     lid.remove_unreferenced_vertices()
     lid.merge_vertices()
@@ -679,39 +701,42 @@ def _chamfered_boss(radius: float, height: float, chamfer: float) -> trimesh.Tri
     return boss
 
 
-def _stack_bosses(box: BoxSpec) -> list[trimesh.Trimesh]:
+def _stack_lid_sockets(box: BoxSpec) -> list[trimesh.Trimesh]:
     eff = b4b_effective_box(box)
     top_z = b4b_lid_underside_z(box) + B4B_LID_SKIN
+    radius = B4B_STACK_BOSS_DIAMETER / 2.0 - B4B_STACK_SOCKET_INTERFERENCE
     solids: list[trimesh.Trimesh] = []
     for cx, cy in _stack_locator_centres(eff):
-        boss = _chamfered_boss(
+        cutter = trimesh.creation.cylinder(
+            radius=radius, height=B4B_STACK_SOCKET_DEPTH + 0.5, sections=48
+        )
+        cutter.apply_translation(
+            (cx, cy, top_z - B4B_STACK_SOCKET_DEPTH / 2.0 + 0.25)
+        )
+        solids.append(cutter)
+    return solids
+
+
+def _stack_pegs(box: BoxSpec) -> list[trimesh.Trimesh]:
+    """Four separately printed pegs, shown installed in assembly-space preview."""
+    eff = b4b_effective_box(box)
+    top_z = b4b_lid_underside_z(box) + B4B_LID_SKIN
+    total_h = B4B_STACK_SOCKET_DEPTH + B4B_STACK_RECESS_DEPTH
+    solids: list[trimesh.Trimesh] = []
+    for cx, cy in _stack_locator_centres(eff):
+        peg = _chamfered_boss(
             B4B_STACK_BOSS_DIAMETER / 2.0,
-            B4B_STACK_RECESS_DEPTH,
+            total_h,
             B4B_STACK_BOSS_CHAMFER,
         )
-        # embed the base slightly into the lid skin so the union is one solid
-        boss.apply_translation((cx, cy, top_z - 0.4))
-        solids.append(boss)
+        peg.apply_translation((cx, cy, top_z - B4B_STACK_SOCKET_DEPTH))
+        solids.append(peg)
     return solids
 
 
 # --------------------------------------------------------------------------- #
-# hinge geometry (integrated knuckles + teardrop M3 bore)
+# hinge geometry (integrated knuckles + clean round M3 bore)
 # --------------------------------------------------------------------------- #
-def _teardrop_profile_yz(radius: float) -> Polygon:
-    """A printable horizontal-hole section: the lower ~270 deg of a circle
-    closed by an upward roof to an apex, drawn in a (y, z) plane."""
-    pts = [
-        (radius * math.cos(a), radius * math.sin(a))
-        for a in np.linspace(math.radians(135.0), math.radians(405.0), 60)
-    ]
-    pts.append((0.0, radius * 1.7))
-    poly = Polygon(pts)
-    if not poly.is_valid:
-        poly = poly.buffer(0)
-    return poly
-
-
 def _round_profile_yz(radius: float) -> Polygon:
     return Polygon(
         [
@@ -721,10 +746,9 @@ def _round_profile_yz(radius: float) -> Polygon:
     )
 
 
-def _x_cylinder(radius: float, length: float, teardrop: bool = True) -> trimesh.Trimesh:
+def _x_cylinder(radius: float, length: float) -> trimesh.Trimesh:
     """A bore/knuckle solid whose axis is world X, centred on the origin."""
-    prof = _teardrop_profile_yz(radius) if teardrop else _round_profile_yz(radius)
-    return _extrude_yz_profile(prof, length)
+    return _extrude_yz_profile(_round_profile_yz(radius), length)
 
 
 def _hinge_seg(plan: B4BHardwarePlan) -> float:
@@ -733,23 +757,18 @@ def _hinge_seg(plan: B4BHardwarePlan) -> float:
 
 def _knuckle(cx: float, axis_y: float, axis_z: float, width: float,
              radius: float) -> trimesh.Trimesh:
-    k = _x_cylinder(radius, width, teardrop=False)
+    k = _x_cylinder(radius, width)
     k.apply_translation((cx, axis_y, axis_z))
     return k
 
 
 def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """Two rear towers per hinge (the outer thirds of a three-knuckle hinge):
-    a local thickening of the rear wall carried up to the pin axis, plus the
-    round knuckle.  The near tower takes a clearance bore, the far one a pilot
-    so the M3 threads in with no nut.  Integrated into the body."""
+    """Compact upper-wall rear knuckles on >=45-degree printable gussets."""
     eff = b4b_effective_box(box)
+    layout = b4b_layout(box)
     seg = _hinge_seg(plan)
     kw = seg - B4B_HINGE_AXIAL_GAP
     r = B4B_HINGE_KNUCKLE_RADIUS
-    y0 = eff.half_y - eff.wall_depth
-    y1 = plan.hinge_axis_y + r
-    z1 = plan.hinge_axis_z
     parts: list[trimesh.Trimesh] = []
     for cx in plan.hinge_centers_x:
         for side, bore_r, bore_len_frac in (
@@ -757,9 +776,27 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
             (+1.0, B4B_M3_PILOT / 2.0, 1.0),        # far: pilot, contained
         ):
             kx = cx + side * seg
-            block = trimesh.creation.box(extents=(kw, y1 - y0, z1))
-            block.apply_translation((kx, (y0 + y1) / 2.0, z1 / 2.0))
-            tower = union([block, _knuckle(kx, plan.hinge_axis_y, plan.hinge_axis_z, kw, r)])
+            wall_y = layout.rear_wall_y(kx)
+            root_y = wall_y - min(0.6, eff.wall_depth * 0.55)
+            lower_touch_y = plan.hinge_axis_y - 0.65 * r
+            outward_run = max(0.1, lower_touch_y - root_y)
+            root_z = max(
+                eff.z - 7.0,
+                plan.hinge_axis_z - r - outward_run / math.tan(math.radians(50.0)),
+            )
+            gusset_profile = Polygon([
+                (root_y, root_z),
+                (root_y, eff.z + 0.35),
+                (plan.hinge_axis_y + r, plan.hinge_axis_z + 0.45 * r),
+                (plan.hinge_axis_y + 0.35 * r, plan.hinge_axis_z - 0.75 * r),
+                (lower_touch_y, plan.hinge_axis_z - r),
+            ])
+            gusset = _extrude_yz_profile(gusset_profile, kw)
+            gusset.apply_translation((kx, 0.0, 0.0))
+            tower = union([
+                gusset,
+                _knuckle(kx, plan.hinge_axis_y, plan.hinge_axis_z, kw, r),
+            ])
             bore = _x_cylinder(bore_r, seg * bore_len_frac + 1.0)
             bx = kx if side > 0 else kx - 0.5
             bore.apply_translation((bx, plan.hinge_axis_y, plan.hinge_axis_z))
@@ -771,23 +808,32 @@ def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
     """The centre knuckle per hinge, hanging from the lid rear edge to the pin
     axis and bored for clearance.  Distinct solid sharing the pin with the two
     body towers."""
-    eff = b4b_effective_box(box)
     underside_z = b4b_lid_underside_z(box)
+    layout = b4b_layout(box)
     seg = _hinge_seg(plan)
     kw = seg - B4B_HINGE_AXIAL_GAP
     r = B4B_HINGE_KNUCKLE_RADIUS
-    y_back = eff.half_y + WAVE_AMPLITUDE
     z_hi = underside_z + B4B_LID_SKIN
-    z_lo = min(plan.hinge_axis_z - r, underside_z - 0.8)
     parts: list[trimesh.Trimesh] = []
     for cx in plan.hinge_centers_x:
-        block = trimesh.creation.box(
-            extents=(kw, plan.hinge_axis_y - y_back + r, z_hi - z_lo)
+        lid_back = (
+            layout.rear_wall_y(cx) + B4B_LID_SEAT_CLEARANCE
+            + B4B_LID_SKIRT_WALL
         )
-        block.apply_translation(
-            (cx, (y_back + plan.hinge_axis_y + r) / 2.0, (z_hi + z_lo) / 2.0)
-        )
-        tab = union([block, _knuckle(cx, plan.hinge_axis_y, plan.hinge_axis_z, kw, r)])
+        root_y = lid_back - 0.5
+        tab_profile = Polygon([
+            (root_y, underside_z - 0.8),
+            (root_y, z_hi),
+            (plan.hinge_axis_y, z_hi),
+            (plan.hinge_axis_y + r, plan.hinge_axis_z),
+            (plan.hinge_axis_y, plan.hinge_axis_z - r),
+        ])
+        tab_bridge = _extrude_yz_profile(tab_profile, kw)
+        tab_bridge.apply_translation((cx, 0.0, 0.0))
+        tab = union([
+            tab_bridge,
+            _knuckle(cx, plan.hinge_axis_y, plan.hinge_axis_z, kw, r),
+        ])
         bore = _x_cylinder(B4B_M3_CLEAR_BORE / 2.0, kw + 1.0)
         bore.apply_translation((cx, plan.hinge_axis_y, plan.hinge_axis_z))
         parts.append(difference([tab, bore]))
@@ -795,100 +841,101 @@ def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
 
 
 # --------------------------------------------------------------------------- #
-# latch geometry (rotating printed hook on an M3 pivot, reinforced catch)
-#
-# Coordinate scheme, all latches on the front (-Y) wall, per latch centre cx:
-#   y_wall   body front outer crest
-#   catch pad stands off the wall; a catch lip projects forward with a flat
-#     underside at z_catch for positive engagement
-#   the pivot axis sits forward of the lip, just below the lid underside; two
-#     lid ears hang to it and the separate lever hooks back under the lip.
+# latch geometry: lid lever on an M3 pivot, engaging a second M3 cross-pin in
+# compact body receiver ears.  All roots follow the derived local front wall.
 # --------------------------------------------------------------------------- #
 def _latch_frame(eff: BoxSpec, plan: B4BHardwarePlan) -> dict:
     prof = plan.strength_profile
     underside_z = b4b_lid_underside_z_from_eff(eff)
-    y_wall = -(eff.half_y + WAVE_AMPLITUDE)
-    pad_out = prof["pad_wall"]
-    lip_front = y_wall - pad_out - prof["hook_depth"] - 1.0
+    hook_outer_r = B4B_M3_NOMINAL / 2.0 + 0.35 + max(1.4, prof["hook_depth"] * 0.6)
+    pivot_r = B4B_M3_CLEAR_BORE / 2.0 + 1.6
+    axis_y = plan.catch_axis_y - (
+        hook_outer_r - prof["lever_thickness"] / 2.0 + 0.5
+    )
     return {
         "prof": prof,
-        "y_wall": y_wall,
-        "pad_out": pad_out,
-        "lip_front": lip_front,
-        "z_catch": eff.z - prof["catch_thickness"],
-        "axis_y": lip_front - 2.5,
-        "axis_z": underside_z - 1.0,
+        "axis_y": axis_y,
+        "axis_z": underside_z + B4B_LID_SKIN - pivot_r,
+        "catch_axis_y": plan.catch_axis_y,
+        "catch_axis_z": plan.catch_axis_z,
+        "hook_outer_r": hook_outer_r,
         "underside_z": underside_z,
         "ear_t": prof["pad_wall"],
     }
 
 
 def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """A reinforced catch pad + forward catch lip on the front exterior, plus a
-    closed-position retention bump.
-
-    The ``detent`` profile value is realised as a small ridge on the pad's
-    forward face.  It clears the lever completely in the fully-closed pose (no
-    static interference), but the descending-arc of the lever arm has to flex
-    past it to open - a genuine, hand-releasable over-a-bump retention that is
-    firmer for Standard (0.45 mm) than Lightweight (0.25 mm).  No spring, no
-    separate hardware.
-    """
+    """Two small upper-wall ears carrying the metal M3 catch cross-pin."""
     eff = b4b_effective_box(box)
+    layout = b4b_layout(box)
     f = _latch_frame(eff, plan)
     prof = f["prof"]
-    detent = float(prof.get("detent", 0.0))
     parts: list[trimesh.Trimesh] = []
-    pad_w = plan.latch_width + 2.0 * prof["pad_wall"]
-    pad_y0 = f["y_wall"] - f["pad_out"]
-    pad_y1 = f["y_wall"] + 2.0
     lever_w = plan.latch_width - 2.0 * B4B_HINGE_AXIAL_GAP
+    ear_t = max(prof["pad_wall"], B4B_M3_THREAD_ENGAGE_MIN + 1.0)
+    boss_r = B4B_M3_CLEAR_BORE / 2.0 + 1.6
     for cx in plan.latch_centers_x:
-        pad = trimesh.creation.box(
-            extents=(pad_w, pad_y1 - pad_y0, prof["pad_height"])
-        )
-        pad.apply_translation(
-            (cx, (pad_y0 + pad_y1) / 2.0, eff.z - prof["pad_height"] / 2.0)
-        )
-        lip = trimesh.creation.box(
-            extents=(plan.latch_width, pad_y0 - f["lip_front"], prof["catch_thickness"])
-        )
-        lip.apply_translation(
-            (cx, (pad_y0 + f["lip_front"]) / 2.0, eff.z - prof["catch_thickness"] / 2.0)
-        )
-        solid = union([pad, lip])
-        if detent > _EPS:
-            # ridge on the pad face (-Y), at the height the opening arm sweeps
-            # through, standing proud by `detent`
-            bump = trimesh.creation.box(
-                extents=(lever_w * 0.7, detent + 0.4, 2.4)
+        inner_face = lever_w / 2.0 + B4B_HINGE_AXIAL_GAP
+        for side, bore_r, width in (
+            (-1.0, B4B_M3_CLEAR_BORE / 2.0, ear_t),
+            (+1.0, B4B_M3_PILOT / 2.0, ear_t),
+        ):
+            ex = cx + side * (inner_face + width / 2.0)
+            wall_y = layout.front_wall_y(ex)
+            root_y = wall_y + min(0.6, eff.wall_depth * 0.55)
+            root_z = max(
+                eff.z - 8.0,
+                plan.catch_axis_z - boss_r
+                - (root_y - plan.catch_axis_y) / math.tan(math.radians(50.0)),
             )
-            bump.apply_translation(
-                (cx, pad_y0 - (detent + 0.4) / 2.0 + 0.2, f["z_catch"])
+            support_profile = Polygon([
+                (root_y, eff.z + 0.25),
+                (root_y, root_z),
+                (plan.catch_axis_y + 0.65 * boss_r, plan.catch_axis_z - boss_r),
+                (plan.catch_axis_y - boss_r, plan.catch_axis_z - 0.45 * boss_r),
+                (plan.catch_axis_y - boss_r, plan.catch_axis_z + boss_r),
+            ])
+            support = _extrude_yz_profile(support_profile, width)
+            support.apply_translation((ex, 0.0, 0.0))
+            boss = _knuckle(
+                ex, plan.catch_axis_y, plan.catch_axis_z, width, boss_r
             )
-            solid = union([solid, bump])
-        parts.append(solid)
+            ear = union([support, boss])
+            bore = _x_cylinder(bore_r, width + 2.0)
+            bore.apply_translation((ex, plan.catch_axis_y, plan.catch_axis_z))
+            parts.append(difference([ear, bore]))
     return parts
 
 
 def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
     """Two pivot ears per latch, hanging from the lid front to the pivot axis."""
     eff = b4b_effective_box(box)
+    layout = b4b_layout(box)
     f = _latch_frame(eff, plan)
     parts: list[trimesh.Trimesh] = []
     ear_t = f["ear_t"]
     lug_t = _latch_lug_thickness(ear_t)   # far ear is a real thread-forming lug
     top = f["underside_z"] + B4B_LID_SKIN
-    z0 = f["axis_z"] - 3.0
-    y0 = f["axis_y"] - 2.0
-    y1 = f["y_wall"] - f["pad_out"] + 1.0   # reach back to just past the pad face
+    boss_r = B4B_M3_CLEAR_BORE / 2.0 + 1.6
     for cx in plan.latch_centers_x:
         inner_face = plan.latch_width / 2.0 + B4B_HINGE_AXIAL_GAP
         # -X ear: head bearing + clearance bore, runs right through.
         near_t = ear_t
         near_x = cx - (inner_face + near_t / 2.0)
-        near = trimesh.creation.box(extents=(near_t, y1 - y0, top - z0))
-        near.apply_translation((near_x, (y0 + y1) / 2.0, (z0 + top) / 2.0))
+        near_wall = (
+            layout.front_wall_y(near_x) - B4B_LID_SEAT_CLEARANCE
+            - B4B_LID_SKIRT_WALL
+        )
+        near_profile = Polygon([
+            (near_wall + 0.5, f["underside_z"] - 0.8),
+            (near_wall + 0.5, top),
+            (f["axis_y"] - boss_r, top),
+            (f["axis_y"] - boss_r, f["axis_z"] - boss_r),
+            (f["axis_y"] + 0.5 * boss_r, f["axis_z"] - boss_r),
+        ])
+        near = _extrude_yz_profile(near_profile, near_t)
+        near.apply_translation((near_x, 0.0, 0.0))
+        near = union([near, _knuckle(near_x, f["axis_y"], f["axis_z"], near_t, boss_r)])
         near_bore = _x_cylinder(B4B_M3_CLEAR_BORE / 2.0, near_t + 2.0)
         near_bore.apply_translation((near_x, f["axis_y"], f["axis_z"]))
         parts.append(difference([near, near_bore]))
@@ -896,8 +943,20 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
         # thread engagement thick; pilot bored right through so the screw
         # self-retains with no nut.
         far_x = cx + inner_face + lug_t / 2.0
-        far = trimesh.creation.box(extents=(lug_t, y1 - y0, top - z0))
-        far.apply_translation((far_x, (y0 + y1) / 2.0, (z0 + top) / 2.0))
+        far_wall = (
+            layout.front_wall_y(far_x) - B4B_LID_SEAT_CLEARANCE
+            - B4B_LID_SKIRT_WALL
+        )
+        far_profile = Polygon([
+            (far_wall + 0.5, f["underside_z"] - 0.8),
+            (far_wall + 0.5, top),
+            (f["axis_y"] - boss_r, top),
+            (f["axis_y"] - boss_r, f["axis_z"] - boss_r),
+            (f["axis_y"] + 0.5 * boss_r, f["axis_z"] - boss_r),
+        ])
+        far = _extrude_yz_profile(far_profile, lug_t)
+        far.apply_translation((far_x, 0.0, 0.0))
+        far = union([far, _knuckle(far_x, f["axis_y"], f["axis_z"], lug_t, boss_r)])
         pilot = _x_cylinder(B4B_M3_PILOT / 2.0, lug_t + 2.0)
         pilot.apply_translation((far_x, f["axis_y"], f["axis_z"]))
         parts.append(difference([far, pilot]))
@@ -916,28 +975,28 @@ def make_b4b_latches(box: BoxSpec) -> list[trimesh.Trimesh]:
     lever_w = plan.latch_width - 2.0 * B4B_HINGE_AXIAL_GAP
     levers: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
-        arm_top = f["axis_z"] + prof["lever_thickness"] / 2.0
-        arm_bottom = f["z_catch"] - prof["catch_thickness"] - 1.0
-        arm = trimesh.creation.box(
-            extents=(lever_w, prof["lever_thickness"], arm_top - arm_bottom)
+        pivot_r = B4B_M3_CLEAR_BORE / 2.0 + 1.6
+        hook_inner_r = B4B_M3_NOMINAL / 2.0 + 0.35
+        hook_outer_r = f["hook_outer_r"]
+        pivot_disc = Point(f["axis_y"], f["axis_z"]).buffer(pivot_r, quad_segs=24)
+        hook_disc = Point(f["catch_axis_y"], f["catch_axis_z"]).buffer(
+            hook_outer_r, quad_segs=24
         )
-        arm.apply_translation(
-            (cx, f["axis_y"], (arm_top + arm_bottom) / 2.0)
+        profile = pivot_disc.union(hook_disc).convex_hull
+        hook_bore = Point(f["catch_axis_y"], f["catch_axis_z"]).buffer(
+            hook_inner_r, quad_segs=24
         )
-        boss = _x_cylinder(B4B_M3_CLEAR_BORE / 2.0 + 1.6, lever_w, teardrop=False)
-        boss.apply_translation((cx, f["axis_y"], f["axis_z"]))
+        opening = Polygon([
+            (f["catch_axis_y"], f["catch_axis_z"] - hook_inner_r * 0.7),
+            (f["catch_axis_y"] + hook_outer_r * 2.5, f["catch_axis_z"] - hook_inner_r * 0.7),
+            (f["catch_axis_y"] + hook_outer_r * 2.5, f["catch_axis_z"] + hook_inner_r * 0.7),
+            (f["catch_axis_y"], f["catch_axis_z"] + hook_inner_r * 0.7),
+        ])
+        profile = profile.difference(hook_bore.union(opening))
+        lever = _extrude_yz_profile(profile, lever_w)
+        lever.apply_translation((cx, 0.0, 0.0))
         bore = _x_cylinder(B4B_M3_CLEAR_BORE / 2.0, lever_w + 4.0)
         bore.apply_translation((cx, f["axis_y"], f["axis_z"]))
-        # hook tooth: from the arm back face toward the body, under the lip
-        tooth_y0 = f["axis_y"] + prof["lever_thickness"] / 2.0 - 0.4
-        tooth_y1 = f["lip_front"] + prof["hook_depth"]
-        tooth = trimesh.creation.box(
-            extents=(lever_w, tooth_y1 - tooth_y0, prof["catch_thickness"])
-        )
-        tooth.apply_translation(
-            (cx, (tooth_y0 + tooth_y1) / 2.0, f["z_catch"] - prof["catch_thickness"] / 2.0)
-        )
-        lever = union([arm, boss, tooth])
         lever = difference([lever, bore])
         levers.append(lever)
     return levers
@@ -996,6 +1055,12 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
             ("hinge", _hinge_screw_stack(plan.hinge_width), plan.hinge_screw_length_mm),
             ("latch", _latch_screw_stack(plan.latch_width, plan.strength_profile["pad_wall"]),
              plan.latch_screw_length_mm),
+            ("catch", (
+                max(plan.strength_profile["pad_wall"], B4B_M3_THREAD_ENGAGE_MIN + 1.0)
+                + plan.latch_width - 2.0 * B4B_HINGE_AXIAL_GAP
+                + 2.0 * B4B_HINGE_AXIAL_GAP,
+                max(plan.strength_profile["pad_wall"], B4B_M3_THREAD_ENGAGE_MIN + 1.0),
+            ), plan.catch_screw_length_mm),
         ):
             beyond_stack = screw - span
             engage = min(beyond_stack, lug)
@@ -1122,8 +1187,10 @@ def validate_b4b_design(
     if cx < 1 or cy < 1:
         raise ValueError("B4B interior is smaller than one child unit even after auto-grow")
 
-    # mating polygon strictly inside the cavity (raises with an actionable message)
-    b4b_rail_ring_polygon(box)
+    layout = b4b_layout(box)
+    wall = layout.outer_structural_polygon.difference(layout.inner_mating_polygon)
+    if wall.is_empty or wall.area <= 0.0:
+        raise ValueError("B4B outward structural wall is empty")
 
     if b4b.secure_lid:
         plan = b4b_hardware_plan(box)
@@ -1133,6 +1200,8 @@ def validate_b4b_design(
             raise ValueError("hinge pin length did not resolve to an allowed M3 length")
         if plan.latch_screw_length_mm not in B4B_SCREW_LENGTHS:
             raise ValueError("latch pin length did not resolve to an allowed M3 length")
+        if plan.catch_screw_length_mm not in B4B_SCREW_LENGTHS:
+            raise ValueError("catch pin length did not resolve to an allowed M3 length")
         if b4b.latch_count == "2" and plan.latch_count_resolved != 2:
             raise ValueError("two latches were requested but do not fit this width")
 
@@ -1151,9 +1220,38 @@ def b4b_summary(box: BoxSpec) -> dict:
     cx, cy = b4b_capacity_units(box)
     mx, my = b4b_capacity_mm(box)
     plan = b4b_hardware_plan(box)
+    layout = b4b_layout(box)
+    case_x, case_y = layout.case_size
+    lid_outer = _skirt_polygons(eff)[0] if b4b.lid else layout.outer_structural_polygon
+    min_x, min_y, max_x, max_y = (
+        min(layout.case_bounds[0], lid_outer.bounds[0]),
+        min(layout.case_bounds[1], lid_outer.bounds[1]),
+        max(layout.case_bounds[2], lid_outer.bounds[2]),
+        max(layout.case_bounds[3], lid_outer.bounds[3]),
+    )
+    top_z = b4b_lid_underside_z(box) + B4B_LID_SKIN if b4b.lid else eff.z
+    if b4b.secure_lid:
+        f = _latch_frame(eff, plan)
+        hinge_min_x = min(cx - plan.hinge_width / 2.0 for cx in plan.hinge_centers_x)
+        hinge_max_x = max(cx + plan.hinge_width / 2.0 for cx in plan.hinge_centers_x)
+        ear_t = max(plan.strength_profile["pad_wall"], B4B_M3_THREAD_ENGAGE_MIN + 1.0)
+        latch_min_x = min(cx - plan.latch_width / 2.0 - ear_t for cx in plan.latch_centers_x)
+        latch_max_x = max(cx + plan.latch_width / 2.0 + ear_t for cx in plan.latch_centers_x)
+        min_x = min(min_x, hinge_min_x, latch_min_x)
+        max_x = max(max_x, hinge_max_x, latch_max_x)
+        min_y = min(min_y, f["axis_y"] - (B4B_M3_CLEAR_BORE / 2.0 + 1.6))
+        max_y = max(max_y, plan.hinge_axis_y + B4B_HINGE_KNUCKLE_RADIUS)
+        top_z = max(top_z, plan.hinge_axis_z + B4B_HINGE_KNUCKLE_RADIUS)
+    if b4b.stacking:
+        top_z += B4B_STACK_RECESS_DEPTH
     summary: dict = {
-        "outer_mm": [eff.x, eff.y, eff.z],
-        "outer_units": [round(eff.x / GRID_PITCH), round(eff.y / GRID_PITCH)],
+        "field_mm": [eff.x, eff.y, eff.z],
+        "field_units": [round(eff.x / GRID_PITCH), round(eff.y / GRID_PITCH)],
+        "outer_mm": [round(case_x, 3), round(case_y, 3), eff.z],
+        "case_outer_mm": [round(case_x, 3), round(case_y, 3), eff.z],
+        "assembled_envelope_mm": [
+            round(max_x - min_x, 3), round(max_y - min_y, 3), round(top_z, 3)
+        ],
         "grew": b4b_grew(box),
         "capacity_units": [cx, cy],
         "capacity_mm": [round(mx, 2), round(my, 2)],
@@ -1166,7 +1264,7 @@ def b4b_summary(box: BoxSpec) -> dict:
         "label_location": b4b.label_location if b4b.label_text.strip() else "none",
         "label_text": b4b.label_text,
         "capacity_text": (
-            f"Fits bins totaling {cx} x {cy} units ({mx:g} x {my:g} mm)"
+            f"Inside capacity: {mx:g} x {my:g} mm - {cx} x {cy} units"
         ),
         "max_child_height_text": f"Maximum bin height: {b4b_max_child_height(box):g} mm",
     }
@@ -1178,6 +1276,8 @@ def b4b_summary(box: BoxSpec) -> dict:
             "hinge_qty": plan.hinge_count,
             "latch_screw": f"M3x{plan.latch_screw_length_mm}",
             "latch_qty": plan.latch_count_resolved,
+            "catch_screw": f"M3x{plan.catch_screw_length_mm}",
+            "catch_qty": plan.latch_count_resolved,
             "nuts": 0,
         }
         summary["hardware_bom"] = plan.screw_bom()
@@ -1189,7 +1289,7 @@ def b4b_summary(box: BoxSpec) -> dict:
 
 
 def b4b_body_with_features(box: BoxSpec) -> trimesh.Trimesh:
-    """The B4B body exactly as it will print: shell + rail + hardware, plus the
+    """The B4B body exactly as it will print: flat floor + wall + hardware, plus the
     slide-in front-label channel frame when that label is selected.
 
     Preview and export both go through here so they can never disagree about
@@ -1214,7 +1314,7 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
     geometry: list = []
     eff = b4b_effective_box(box)
     body = b4b_body_with_features(box)
-    geometry.extend(_mesh_preview_geometry(body, "b4b_rail"))
+    geometry.extend(_mesh_preview_geometry(body, "b4b_body"))
     if eff.b4b.label_location == "front" and eff.b4b.label_text.strip():
         geometry.extend(
             _mesh_preview_geometry(make_b4b_front_label_plate(box), "b4b_label")
@@ -1227,6 +1327,9 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
     if eff.b4b.secure_lid:
         for lever in make_b4b_latches(box):
             geometry.extend(_mesh_preview_geometry(lever, "b4b_latch"))
+    if eff.b4b.stacking:
+        for peg in _stack_pegs(box):
+            geometry.extend(_mesh_preview_geometry(peg, "b4b_stack"))
     return tuple(geometry)
 
 
@@ -1276,7 +1379,6 @@ def _top_surface_keepouts(eff: BoxSpec) -> list[Polygon]:
     if not (eff.b4b.stacking and eff.b4b.lid):
         return []
     r = B4B_STACK_BOSS_DIAMETER / 2.0 + B4B_STACK_FEMALE_RADIAL_CLEARANCE + B4B_TOP_LABEL_MARGIN
-    from shapely.geometry import Point
     return [Point(cx, cy).buffer(r, quad_segs=24) for cx, cy in _stack_locator_centres(eff)]
 
 
@@ -1287,10 +1389,11 @@ def b4b_top_label_outline(box: BoxSpec):
     eff = b4b_effective_box(box)
     if not eff.b4b.lid:
         raise ValueError("a top label needs the lid enabled")
-    # The label lives on the lid, which spans the full outer footprint.
-    avail_w = eff.x - 2.0 * B4B_TOP_LABEL_MARGIN
-    avail_h = eff.y / 3.0
-    label_cy = -eff.y / 6.0
+    # The label lives on the derived lid footprint, not the child field.
+    case_x, case_y = b4b_layout(box).case_size
+    avail_w = case_x - 2.0 * B4B_TOP_LABEL_MARGIN
+    avail_h = case_y / 3.0
+    label_cy = -case_y / 6.0
     keepouts = _top_surface_keepouts(eff)
 
     def clear_rect(w: float, h: float) -> bool:
@@ -1348,16 +1451,17 @@ def b4b_front_label_geometry(box: BoxSpec):
     """
     eff = b4b_effective_box(box)
     plan = b4b_hardware_plan(box)
-    y_wall = -(eff.half_y + WAVE_AMPLITUDE)
-    span = _front_span(eff)
+    layout = b4b_layout(box)
+    y_wall = min(layout.front_wall_y(x) for x in plan.latch_centers_x or (0.0,))
+    span = _front_span(box)
 
     frame_w = span - 4.0
     # vertical band: below the latch pads (or below the rim if passive)
     if plan.latch_count_resolved:
-        clear_below = plan.strength_profile["pad_height"] + 2.0
+        receiver_r = B4B_M3_CLEAR_BORE / 2.0 + 1.6
+        top_z = plan.catch_axis_z - receiver_r - 2.0
     else:
-        clear_below = 4.0
-    top_z = eff.z - clear_below
+        top_z = eff.z - 4.0
     height = B4B_FRONT_LABEL_HEIGHT
     bottom_z = top_z - height
     if frame_w < 30.0 or bottom_z < 3.0:
@@ -1449,12 +1553,16 @@ def _print_pose(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
     """
     m = mesh.copy()
     if kind == "latch":
-        # lay the lever on its broad face
+        # lay the lever on its broad face: the hook profile is extruded along
+        # local X, so that axis (not Y) must roll onto the bed's Z.
         m.apply_transform(
-            trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
+            trimesh.transformations.rotation_matrix(math.pi / 2.0, (0.0, 1.0, 0.0))
         )
-    # "lid" prints outer-face up as modelled; "body"/"plate" are already a good
-    # pose - orientation unchanged.
+    elif kind == "lid":
+        # broad, flat top face on the bed; skirt and hardware build upward
+        m.apply_transform(
+            trimesh.transformations.rotation_matrix(math.pi, (1.0, 0.0, 0.0))
+        )
     return m
 
 
@@ -1517,6 +1625,10 @@ def b4b_build_parts(box: BoxSpec) -> list[tuple[str, trimesh.Trimesh]]:
     if b4b.secure_lid:
         for i, lever in enumerate(make_b4b_latches(box), start=1):
             groups.append([(f"B4B Latch {i}", _print_pose(lever, "latch"))])
+
+    if b4b.stacking:
+        for i, peg in enumerate(_stack_pegs(box), start=1):
+            groups.append([(f"B4B Stacking Peg {i}", _print_pose(peg, "peg"))])
 
     if b4b.label_location == "front" and b4b.label_text.strip():
         _frame, plate, centre = b4b_front_label_geometry(box)

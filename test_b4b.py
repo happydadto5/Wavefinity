@@ -1,10 +1,10 @@
 """Focused tests for B4B (Bin for Bins)."""
 
-import math
 import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 from shapely.geometry import Polygon
 
 from organizer_engine import (
@@ -13,7 +13,6 @@ from organizer_engine import (
     B4BSpec,
     BoxSpec,
     nested_clearance,
-    wavy_cavity_polygon,
     wavy_outer_polygon,
 )
 from organizer_inserts import Feature, Layout, Zone
@@ -58,7 +57,7 @@ class B4BSpecTests(unittest.TestCase):
 
 
 class B4BCapacityTests(unittest.TestCase):
-    def test_formula_matches_implementation(self):
+    def test_selected_dimensions_are_exact_child_field(self):
         for wall in CASE_WALLS:
             for ux in (2, 4, 6, 8, 10):
                 for uy in (2, 6, 10):
@@ -66,34 +65,33 @@ class B4BCapacityTests(unittest.TestCase):
                         x=ux * GRID_PITCH, y=uy * GRID_PITCH, z=40, wall=wall,
                         b4b=B4BSpec(enabled=True, secure_lid=False, lid=False),
                     )
-                    eff = b4b.b4b_effective_box(box)
-                    cx, cy = b4b.b4b_capacity_units(box)
-                    d = eff.wall_depth
-                    for axis, cap in ((eff.x, cx), (eff.y, cy)):
-                        n = round(axis / GRID_PITCH)
-                        want = math.floor(n - 2 * (WAVE_MATING_GAP + d) / GRID_PITCH + 1e-6)
-                        self.assertEqual(cap, want)
-                        self.assertGreaterEqual(cap, 1)
+                    self.assertEqual(b4b.b4b_capacity_units(box), (ux, uy))
+                    self.assertEqual(
+                        b4b.b4b_capacity_mm(box),
+                        (ux * GRID_PITCH, uy * GRID_PITCH),
+                    )
 
-    def test_standard_wall_yields_outer_units_minus_one(self):
+    def test_32_by_48_means_four_by_six_child_field(self):
+        box = BoxSpec(x=32, y=48, z=40, b4b=B4BSpec(enabled=True))
+        self.assertEqual(b4b.b4b_capacity_units(box), (4, 6))
+        self.assertEqual(b4b.b4b_capacity_mm(box), (32, 48))
+
+    def test_wall_thickness_changes_case_outside_not_capacity(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
-        self.assertEqual(b4b.b4b_capacity_units(box), (7, 5))
-        self.assertEqual(b4b.b4b_capacity_mm(box), (56.0, 40.0))
-
-    def test_capacity_uses_wall_depth_not_raw_wall(self):
-        # a thicker wall reduces capacity via wall_depth, per the paper formula
-        thin = b4b.b4b_capacity_units(
-            BoxSpec(x=96, y=96, z=40, wall=0.4, b4b=B4BSpec(enabled=True, lid=False))
-        )
-        thick = b4b.b4b_capacity_units(
-            BoxSpec(x=96, y=96, z=40, wall=2.0, b4b=B4BSpec(enabled=True, lid=False))
-        )
-        self.assertLessEqual(thick[0], thin[0])
+        thin = b4b.b4b_layout(BoxSpec(
+            x=64, y=48, z=40, wall=0.4, b4b=B4BSpec(enabled=True)
+        ))
+        thick = b4b.b4b_layout(BoxSpec(
+            x=64, y=48, z=40, wall=2.0, b4b=B4BSpec(enabled=True)
+        ))
+        self.assertEqual(b4b.b4b_capacity_units(box), (8, 6))
+        self.assertGreater(thick.case_size[0], thin.case_size[0])
+        self.assertGreater(thick.case_size[1], thin.case_size[1])
 
     def test_auto_grow_tiny_box_for_one_unit_and_hinges(self):
         box = BoxSpec(x=16, y=16, z=24, b4b=B4BSpec(enabled=True))
         eff = b4b.b4b_effective_box(box)
-        self.assertGreaterEqual(eff.x, b4b.B4B_SECURE_MIN_X)
+        self.assertGreaterEqual(eff.x, b4b.B4B_SECURE_MIN_FIELD_X)
         self.assertTrue(b4b.b4b_grew(box))
         cx, cy = b4b.b4b_capacity_units(box)
         self.assertGreaterEqual(min(cx, cy), 1)
@@ -116,28 +114,21 @@ class B4BCapacityTests(unittest.TestCase):
         )
 
 
-class B4BRailTests(unittest.TestCase):
-    def test_outer_polygon_identical_to_ordinary_box(self):
-        plain = BoxSpec(x=64, y=48, z=40)
-        b = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
-        self.assertAlmostEqual(
-            wavy_outer_polygon(plain).symmetric_difference(
-                wavy_outer_polygon(b4b.b4b_effective_box(b))
-            ).area,
-            0.0,
-            places=6,
-        )
-
-    def test_mating_polygon_inside_cavity_all_walls(self):
-        from organizer_engine import wavy_cavity_polygon
-
+class B4BWallTests(unittest.TestCase):
+    def test_outer_wall_is_derived_outward_from_inner_mating_face(self):
         for wall in CASE_WALLS:
             box = BoxSpec(x=80, y=64, z=40, wall=wall, b4b=B4BSpec(enabled=True))
-            eff = b4b.b4b_effective_box(box)
+            layout = b4b.b4b_layout(box)
             self.assertTrue(
-                wavy_cavity_polygon(eff).buffer(1e-6).contains(
-                    b4b.b4b_mating_polygon(box)
+                layout.outer_structural_polygon.buffer(1e-6).contains(
+                    layout.inner_mating_polygon
                 )
+            )
+            self.assertGreater(
+                layout.outer_structural_polygon.difference(
+                    layout.inner_mating_polygon
+                ).area,
+                1.0,
             )
 
     def test_perimeter_child_field_mates_at_the_wavefinity_gap(self):
@@ -146,20 +137,27 @@ class B4BRailTests(unittest.TestCase):
         child_field = BoxSpec(x=cx * GRID_PITCH, y=cy * GRID_PITCH, z=20)
         child_outer = wavy_outer_polygon(child_field)
         mating = b4b.b4b_mating_polygon(box)
-        ring = b4b.b4b_rail_ring_polygon(box)
         # the child field's outer wave sits inside the mating outline, sharing
         # phase - it barely pokes past it only where corner rounding differs
         self.assertLess(child_outer.difference(mating).area, 1.0)
-        # and it does not bite into the rail material
-        self.assertLess(child_outer.intersection(ring).area, 1.0)
         # boundary-to-boundary separation is the ordinary Wavefinity mating gap
         gap = child_outer.exterior.distance(mating.exterior)
         self.assertGreater(gap, nested_clearance() - 0.05)
         self.assertLess(gap, WAVE_MATING_GAP + 0.05)
 
-    def test_rail_ring_is_real_material(self):
-        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
-        self.assertGreater(b4b.b4b_rail_ring_polygon(box).area, 50.0)
+    def test_body_has_flat_floor_and_full_height_perimeter_wall(self):
+        box = BoxSpec(x=32, y=48, z=30, base_thickness=0.8,
+                      b4b=B4BSpec(enabled=True, secure_lid=False))
+        body = b4b.make_b4b_body(box)
+        layout = b4b.b4b_layout(box)
+        self.assertAlmostEqual(body.bounds[0][2], 0.0, places=5)
+        # The cavity begins at one flat Z plane; the perimeter is structural
+        # wall all the way up rather than a short raised floor ring.
+        wall_band = layout.outer_structural_polygon.difference(
+            layout.inner_mating_polygon
+        )
+        p = wall_band.representative_point()
+        self.assertTrue(body.contains([[p.x, p.y, box.z - 1.0]])[0])
 
 
 class B4BHardwareTests(unittest.TestCase):
@@ -169,6 +167,31 @@ class B4BHardwareTests(unittest.TestCase):
         self.assertAlmostEqual(plan.hinge_centers_x[0], -plan.hinge_centers_x[1])
         self.assertIn(plan.hinge_screw_length_mm, b4b.B4B_SCREW_LENGTHS)
         self.assertIn(plan.latch_screw_length_mm, b4b.B4B_SCREW_LENGTHS)
+        self.assertIn(plan.catch_screw_length_mm, b4b.B4B_SCREW_LENGTHS)
+
+    def test_hinges_are_flush_and_body_gussets_stay_near_top(self):
+        box = BoxSpec(x=32, y=48, z=30, base_thickness=0.8,
+                      b4b=B4BSpec(enabled=True))
+        plan = b4b.b4b_hardware_plan(box)
+        lid_top = b4b.b4b_lid_underside_z(box) + b4b.B4B_LID_SKIN
+        self.assertLessEqual(
+            plan.hinge_axis_z + b4b.B4B_HINGE_KNUCKLE_RADIUS,
+            lid_top + 1e-6,
+        )
+        for part in b4b._hinge_body_parts(box, plan):
+            self.assertGreater(part.bounds[0][2], box.z - 8.1)
+
+    def test_body_latch_is_compact_cross_pin_receiver(self):
+        box = BoxSpec(x=32, y=48, z=30, base_thickness=0.8,
+                      b4b=B4BSpec(enabled=True))
+        plan = b4b.b4b_hardware_plan(box)
+        ears = b4b._latch_body_parts(box, plan)
+        self.assertEqual(len(ears), 2 * plan.latch_count_resolved)
+        self.assertTrue(all(ear.bounds[0][2] > box.z - 8.1 for ear in ears))
+        self.assertLess(
+            b4b.b4b_layout(box).case_bounds[1] - min(e.bounds[0][1] for e in ears),
+            9.0,
+        )
 
     def test_latch_auto_one_when_narrow_two_when_wide(self):
         narrow = b4b.b4b_hardware_plan(
@@ -270,6 +293,28 @@ class B4BGeometryTests(unittest.TestCase):
         # recess does not pierce the effective base
         skin = eff.base_thickness - b4b.B4B_STACK_RECESS_DEPTH
         self.assertGreaterEqual(skin, b4b.B4B_MIN_FLOOR_SKIN - 1e-6)
+        lid = b4b.make_b4b_lid(box)
+        lid_top = b4b.b4b_lid_underside_z(box) + b4b.B4B_LID_SKIN
+        self.assertLessEqual(lid.bounds[1][2], lid_top + 1e-5)
+        names = [name for name, _mesh in b4b.b4b_build_parts(box)]
+        self.assertEqual(sum(name.startswith("B4B Stacking Peg") for name in names), 4)
+
+    def test_latch_lever_prints_flat_on_its_broad_face(self):
+        # The lever's hook profile is a broad, flat extrusion end-cap; printed
+        # it must rest on that whole face (no support under a curved edge).
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, secure_lid=True))
+        names_and_meshes = b4b.b4b_build_parts(box)
+        levers = [mesh for name, mesh in names_and_meshes if "Latch" in name]
+        self.assertTrue(levers)
+        for lever in levers:
+            zmin = lever.bounds[0][2]
+            on_plate = np.all(np.isclose(lever.vertices[lever.faces][:, :, 2], zmin, atol=1e-3), axis=1)
+            bottom_faces = lever.faces[on_plate]
+            v = lever.vertices[bottom_faces]
+            area = 0.5 * np.linalg.norm(
+                np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0]), axis=1
+            ).sum()
+            self.assertGreater(area, 20.0)
 
 
 class B4BValidationTests(unittest.TestCase):
@@ -316,7 +361,7 @@ class B4BValidationTests(unittest.TestCase):
 
 
 class B4BSerializationTests(unittest.TestCase):
-    def test_v2_roundtrip_retains_every_option(self):
+    def test_v3_roundtrip_retains_every_option_and_field_size(self):
         box = BoxSpec(
             x=64, y=48, z=40,
             b4b=B4BSpec(
@@ -326,7 +371,7 @@ class B4BSerializationTests(unittest.TestCase):
             ),
         )
         data = design_to_dict(box, Layout((), "fused"))
-        self.assertEqual(data["version"], 2)
+        self.assertEqual(data["version"], 3)
         back, layout, *_ = design_from_dict(data)
         self.assertEqual(back.b4b, box.b4b)
         self.assertEqual(len(layout.features), 0)
@@ -341,7 +386,20 @@ class B4BSerializationTests(unittest.TestCase):
 
     def test_enabling_b4b_bumps_version(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
-        self.assertEqual(design_to_dict(box, Layout((), "fused"))["version"], 2)
+        self.assertEqual(design_to_dict(box, Layout((), "fused"))["version"], 3)
+
+    def test_v2_physical_dimensions_migrate_to_old_child_capacity(self):
+        data = {
+            "version": 2,
+            "box": {
+                "x": 64, "y": 48, "z": 40, "wall": 0.8,
+                "b4b": {"enabled": True, "secure_lid": False},
+            },
+            "layout": {"mode": "fused", "features": []},
+        }
+        back, *_ = design_from_dict(data)
+        self.assertEqual((back.x, back.y), (56, 40))
+        self.assertEqual(b4b.b4b_capacity_units(back), (7, 5))
 
 
 class B4BGenerationTests(unittest.TestCase):
@@ -364,7 +422,7 @@ class B4BGenerationTests(unittest.TestCase):
             self.assertTrue(out.is_file())
             self.assertTrue(out.name.startswith("B4B 64x48x40"))
             log = Path(res["log_file"]).read_text()
-            self.assertIn("B4B 7x5 units", log)
+            self.assertIn("B4B 8x6 units", log)
 
     def test_filename_distinct_from_ordinary_bin(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))

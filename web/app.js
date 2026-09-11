@@ -90,7 +90,7 @@ const COLORS = {
   // text interior part reads as writing rather than as another holder.
   text: "#315766",
   // B4B parts get their own colour family, distinct from interior features.
-  b4b_rail: "#8ea8b2", b4b_lid: "#7fa9b6", b4b_hinge: "#5f8794",
+  b4b_body: "#8ea8b2", b4b_lid: "#7fa9b6", b4b_hinge: "#5f8794",
   b4b_latch: "#c98a4a", b4b_stack: "#9d86c8", b4b_label: "#315766",
 };
 const INSERT_TINT = "#c2a075";
@@ -588,6 +588,8 @@ function b4bEnabled() {
 // Easy Clean, the interior print mode and the Connect bins section entirely.
 function applyB4BVisibility() {
   const on = b4bEnabled();
+  $("#x-size-label").textContent = on ? "Bin field Width" : "Width";
+  $("#y-size-label").textContent = on ? "Bin field Length" : "Length";
   $("#b4b-panel").hidden = !on;
   const hide = (sel, hidden) => { const el = $(sel); if (el) el.hidden = hidden; };
   hide(".subheading-row", on);
@@ -691,29 +693,38 @@ function renderB4BReadout() {
   const b4b = state.preview?.b4b;
   const capLine = $("#b4b-capacity-line");
   const heightLine = $("#b4b-child-height");
+  const caseLine = $("#b4b-case-outside");
+  const envelopeLine = $("#b4b-envelope");
   const grew = $("#b4b-grew");
   const hardware = $("#b4b-hardware");
   if (!b4b) {
-    capLine.textContent = "Fits bins totaling — units";
+    capLine.textContent = "Inside capacity: — units";
     heightLine.textContent = "Maximum bin height: — mm";
+    caseLine.textContent = "Case body outside: — mm";
+    envelopeLine.textContent = "Complete assembled envelope: — mm";
     grew.hidden = true;
     hardware.textContent = "Hardware: —";
     return;
   }
   capLine.textContent = b4b.capacity_text;
   heightLine.textContent = b4b.max_child_height_text;
+  caseLine.textContent = `Case body outside: ${b4b.case_outer_mm[0]} x ${b4b.case_outer_mm[1]} mm`;
+  envelopeLine.textContent =
+    `Complete assembled envelope: ${b4b.assembled_envelope_mm[0]} x ` +
+    `${b4b.assembled_envelope_mm[1]} x ${b4b.assembled_envelope_mm[2]} mm`;
   if (b4b.grew) {
     grew.hidden = false;
     grew.textContent =
-      `Grown to ${b4b.outer_mm[0]} x ${b4b.outer_mm[1]} x ${b4b.outer_mm[2]} mm ` +
-      `(${b4b.outer_units[0]} x ${b4b.outer_units[1]} units) to fit the interior and hardware.`;
+      `Bin field grown to ${b4b.field_mm[0]} x ${b4b.field_mm[1]} x ${b4b.field_mm[2]} mm ` +
+      `(${b4b.field_units[0]} x ${b4b.field_units[1]} units) for the selected hardware.`;
   } else {
     grew.hidden = true;
   }
   if (b4b.secure_lid && b4b.hardware) {
     hardware.textContent =
       `Hardware: ${b4b.hardware.hinge_qty} x ${b4b.hardware.hinge_screw} hinge pins, ` +
-      `${b4b.hardware.latch_qty} x ${b4b.hardware.latch_screw} latch pins, no nuts`;
+      `${b4b.hardware.latch_qty} x ${b4b.hardware.latch_screw} latch pivots, ` +
+      `${b4b.hardware.catch_qty} x ${b4b.hardware.catch_screw} catch pins, no nuts`;
     hardware.hidden = false;
   } else {
     hardware.hidden = true;

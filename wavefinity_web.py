@@ -116,8 +116,8 @@ from organizer_app import (
     validate_customization_clearance,
 )
 from organizer_b4b import (
-    B4B_RAIL_HEIGHT,
     b4b_effective_box,
+    b4b_mating_polygon,
     b4b_preview_parts,
     b4b_summary,
     validate_b4b_design,
@@ -428,7 +428,6 @@ def catalog_payload() -> dict[str, Any]:
         },
         "b4b_rules": {
             "grid_pitch_mm": GRID_PITCH,
-            "rail_height_mm": B4B_RAIL_HEIGHT,
             "lid_headroom_choices_mm": list(B4B_LID_HEADROOM_CHOICES),
             "latch_counts": list(B4B_LATCH_COUNTS),
             "latch_strengths": list(B4B_LATCH_STRENGTHS),
@@ -840,8 +839,10 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             b4b_block = None
 
-    bounds = layout_zone(eff, "fused")
-    cavity = wavy_cavity_polygon(eff)
+    # B4B x/y are the exact child field.  Its physical case outline is derived
+    # separately and is reported in b4b_summary.
+    bounds = Zone(-eff.x / 2.0, -eff.y / 2.0, eff.x / 2.0, eff.y / 2.0)
+    cavity = b4b_mating_polygon(box)
     return {
         "design": design_to_dict(adopted, Layout((), "fused", EDITOR_SNAP),
                                  "", part_name, "bottom", False),
@@ -856,9 +857,9 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "invalid_feature_indexes": [],
         "draft_error": None,
         "dimensions": {
-            "size": (f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm B4B - "
-                     f"fits {b4b_block['capacity_units'][0]} x "
-                     f"{b4b_block['capacity_units'][1]} child units"
+            "size": (f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm B4B child field - "
+                     f"case outside {b4b_block['case_outer_mm'][0]:g} x "
+                     f"{b4b_block['case_outer_mm'][1]:g} mm"
                      if b4b_block else f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm B4B"),
             "inside_x": b4b_block["capacity_mm"][0] if b4b_block else None,
             "inside_y": b4b_block["capacity_mm"][1] if b4b_block else None,
