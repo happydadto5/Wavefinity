@@ -539,6 +539,24 @@ def b4b_lid_underside_z(box: BoxSpec) -> float:
     return b4b_lid_underside_z_from_eff(b4b_effective_box(box))
 
 
+def b4b_rim_z_from_eff(eff: BoxSpec) -> float:
+    """Z of the body's top rim.
+
+    The rim *is* the lid seat: the wall rises to the lid underside datum so the
+    lid plate lands flat on a full-perimeter rim.  A wall that stopped at
+    ``eff.z`` would leave the lid floating on its hardware, with the locating
+    skirt as the only thing bridging the gap - and no room inside the footprint
+    for that skirt to bridge it without driving into the wall.
+    """
+    if eff.b4b.lid:
+        return b4b_lid_underside_z_from_eff(eff)
+    return eff.z
+
+
+def b4b_rim_z(box: BoxSpec) -> float:
+    return b4b_rim_z_from_eff(b4b_effective_box(box))
+
+
 # --------------------------------------------------------------------------- #
 # body
 # --------------------------------------------------------------------------- #
@@ -577,9 +595,10 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     plan = b4b_hardware_plan(box)
     layout = b4b_layout(box)
 
-    envelope = _extrude_polygon(layout.outer_structural_polygon, eff.z)
+    rim_z = b4b_rim_z_from_eff(eff)
+    envelope = _extrude_polygon(layout.outer_structural_polygon, rim_z)
     cavity = _extrude_polygon(
-        layout.inner_mating_polygon, eff.z - floor_z + 1.0
+        layout.inner_mating_polygon, rim_z - floor_z + 1.0
     )
     cavity.apply_translation((0.0, 0.0, floor_z))
     body = difference([envelope, cavity])
@@ -603,20 +622,70 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
 # lid
 # --------------------------------------------------------------------------- #
 def _skirt_polygons(eff: BoxSpec) -> tuple[Polygon, Polygon]:
-    """(outer, inner) plan outlines of the locating skirt.
+    """(outer, inner) plan outlines of the locating spigot.
 
-    The skirt hangs underneath the lid and sits inside the body wall.  Both
-    faces are therefore inset from the body's outer structural outline; this
-    keeps the locating feature from enlarging the lid footprint."""
+    The spigot drops into the cavity mouth, so it is measured from the *inner
+    mating* face, not the outer one.  Measuring it from the outer face put its
+    outer 0.65 mm inside the wall band itself, which is solid body - the lid
+    then could not close at all, and past ~112 mm of case the resulting overlap
+    tripped the validator and B4B stopped generating entirely.
+
+    Keeping it inside the mating face also leaves the lid footprint exactly the
+    body footprint, so B4Bs still sit side by side on the 8 mm lattice.
+    """
     clr = B4B_LID_SEAT_CLEARANCE
     layout = b4b_layout(eff)
-    outer = layout.outer_structural_polygon.buffer(-clr)
+    outer = layout.inner_mating_polygon.buffer(-clr)
     inner = outer.buffer(-B4B_LID_SKIRT_WALL)
     if outer.is_empty or inner.is_empty:
         raise RuntimeError("B4B lid locating skirt collapsed inside the body wall")
     if not isinstance(outer, Polygon) or not isinstance(inner, Polygon):
         raise RuntimeError("B4B lid locating skirt must remain a single polygon")
     return outer, inner
+
+
+def _skirt_lap(eff: BoxSpec) -> float:
+    """How far the spigot may hang below the rim.
+
+    It drops into the cavity mouth, where the tallest child bin is waiting, so
+    the lap is capped by the headroom actually above that child - never by
+    ``B4B_LID_SKIRT_LAP`` alone.
+    """
+    clearance_above_child = b4b_rim_z_from_eff(eff) - (eff.base_thickness + eff.z)
+    return max(0.0, min(B4B_LID_SKIRT_LAP, clearance_above_child - B4B_LID_SEAT_CLEARANCE))
+
+
+def _hardware_bridges(
+    hardware: list[trimesh.Trimesh], layout: B4BLayout, underside_z: float
+) -> list[trimesh.Trimesh]:
+    """Blocks that tie each lid-side hinge knuckle / latch ear to the plate.
+
+    The hardware roots stand clear of the body's outer face, so in plan they
+    miss the plate entirely and the lid exports as one loose piece per fitting.
+    Each bridge spans that gap inside the hardware's own X slot - the slot the
+    body's interleaved hardware deliberately leaves empty - and only within the
+    plate's own Z band, which is above the rim and therefore clear of the body.
+    """
+    bridges: list[trimesh.Trimesh] = []
+    z0, z1 = underside_z, underside_z + B4B_LID_SKIN
+    for part in hardware:
+        (x0, y0, _z0), (x1, y1, _z1) = part.bounds
+        front = 0.5 * (y0 + y1) < 0.0
+        # reach past the deepest wave trough so the bridge always lands on plate
+        target = layout.outer_half_y - WAVE_AMPLITUDE - 1.0
+        # bite into the fitting rather than stopping on its tangent plane: a
+        # face-to-face touch unions into two components, not one solid
+        bite = 0.6
+        near, far = (y1 - bite, -target) if front else (y0 + bite, target)
+        lo, hi = min(near, far), max(near, far)
+        if hi - lo <= _EPS:
+            continue
+        block = trimesh.creation.box(extents=(x1 - x0, hi - lo, z1 - z0))
+        block.apply_translation((
+            0.5 * (x0 + x1), 0.5 * (lo + hi), 0.5 * (z0 + z1),
+        ))
+        bridges.append(block)
+    return bridges
 
 
 def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
@@ -635,38 +704,42 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
     outer, inner = _skirt_polygons(eff)
     layout = b4b_layout(eff)
 
-    # the plate reaches a little below the underside datum so it fuses into the
-    # skirt, hinge tabs and latch ears as one connected solid
-    plate = _extrude_polygon(layout.outer_structural_polygon, B4B_LID_SKIN + 0.8)
-    plate.apply_translation((0.0, 0.0, underside_z - 0.8))
+    # The plate sits *on* the rim - it must not reach below the underside datum,
+    # because the wall now rises to exactly that datum and any dip would bury
+    # the plate edge in solid body around the whole perimeter.
+    plate = _extrude_polygon(layout.outer_structural_polygon, B4B_LID_SKIN)
+    plate.apply_translation((0.0, 0.0, underside_z))
 
-    skirt_ring = outer.difference(inner)
-    skirt_top = underside_z
-    skirt_bottom = eff.z - B4B_LID_SKIRT_LAP
-    skirt_h = skirt_top - skirt_bottom
-    skirt = _extrude_polygon(skirt_ring, skirt_h)
-    skirt.apply_translation((0.0, 0.0, skirt_bottom))
-    # Keep the locating skirt to the two X-side walls only: the front carries
-    # latches and the rear carries hinges, and a skirt lapping down past the rim
-    # there would clash with that hardware.  The side runs are wavy, so they
-    # still locate the lid on both axes without a snap.
-    case_x, _case_y = layout.case_size
-    side_clip = trimesh.creation.box(
-        extents=(case_x * 4.0,
-                 2.0 * (layout.outer_half_y - CORNER_INSET - 2.0),
-                 skirt_h + 20.0)
-    )
-    side_clip.apply_translation((0.0, 0.0, skirt_bottom + skirt_h / 2.0))
-    skirt = _intersection([skirt, side_clip])
+    lid = plate
+    skirt_h = _skirt_lap(eff)
+    if skirt_h >= 0.4:
+        skirt_ring = outer.difference(inner)
+        skirt_bottom = underside_z - skirt_h
+        skirt = _extrude_polygon(skirt_ring, skirt_h)
+        skirt.apply_translation((0.0, 0.0, skirt_bottom))
+        # Keep the locating spigot to the two X-side walls only: the front
+        # carries latches and the rear carries hinges, and a spigot dropping
+        # past the rim there would clash with that hardware.  The side runs are
+        # wavy, so they still locate the lid on both axes without a snap.
+        case_x, _case_y = layout.case_size
+        side_clip = trimesh.creation.box(
+            extents=(case_x * 4.0,
+                     2.0 * (layout.outer_half_y - CORNER_INSET - 2.0),
+                     skirt_h + 20.0)
+        )
+        side_clip.apply_translation((0.0, 0.0, skirt_bottom + skirt_h / 2.0))
+        skirt = _intersection([skirt, side_clip])
+        lid = union([plate, skirt])
 
-    lid = union([plate, skirt])
-
+    hardware: list[trimesh.Trimesh] = []
     if plan.hinge_count:
-        for knuckle in _hinge_lid_parts(box, plan):
-            lid = union([lid, knuckle])
+        hardware.extend(_hinge_lid_parts(box, plan))
     if plan.latch_count_resolved:
-        for ear in _latch_lid_parts(box, plan):
-            lid = union([lid, ear])
+        hardware.extend(_latch_lid_parts(box, plan))
+    for part in hardware:
+        lid = union([lid, part])
+    for bridge in _hardware_bridges(hardware, layout, underside_z):
+        lid = union([lid, bridge])
 
     if eff.b4b.stacking:
         lid = difference([lid, *_stack_lid_sockets(box)])
@@ -980,11 +1053,16 @@ def make_b4b_latches(box: BoxSpec) -> list[trimesh.Trimesh]:
         hook_bore = Point(f["catch_axis_y"], f["catch_axis_z"]).buffer(
             hook_inner_r, quad_segs=24
         )
+        # The mouth is what the pin snaps through, so its width *is* the snap
+        # force.  Size it off the profile's detent so "lightweight" and
+        # "standard" actually differ: a fixed fraction of the bore gave both
+        # the same 0.41 mm interference no matter which strength was chosen.
+        mouth_half = max(0.4, (B4B_M3_NOMINAL - prof["detent"]) / 2.0)
         opening = Polygon([
-            (f["catch_axis_y"], f["catch_axis_z"] - hook_inner_r * 0.7),
-            (f["catch_axis_y"] + hook_outer_r * 2.5, f["catch_axis_z"] - hook_inner_r * 0.7),
-            (f["catch_axis_y"] + hook_outer_r * 2.5, f["catch_axis_z"] + hook_inner_r * 0.7),
-            (f["catch_axis_y"], f["catch_axis_z"] + hook_inner_r * 0.7),
+            (f["catch_axis_y"], f["catch_axis_z"] - mouth_half),
+            (f["catch_axis_y"] + hook_outer_r * 2.5, f["catch_axis_z"] - mouth_half),
+            (f["catch_axis_y"] + hook_outer_r * 2.5, f["catch_axis_z"] + mouth_half),
+            (f["catch_axis_y"], f["catch_axis_z"] + mouth_half),
         ])
         profile = profile.difference(hook_bore.union(opening))
         lever = _extrude_yz_profile(profile, lever_w)

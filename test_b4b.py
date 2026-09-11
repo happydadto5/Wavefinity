@@ -187,7 +187,14 @@ class B4BHardwareTests(unittest.TestCase):
         plan = b4b.b4b_hardware_plan(box)
         ears = b4b._latch_body_parts(box, plan)
         self.assertEqual(len(ears), 2 * plan.latch_count_resolved)
-        self.assertTrue(all(ear.bounds[0][2] > box.z - 8.1 for ear in ears))
+        # A draw latch's catch has to sit below the seat far enough for the hook
+        # to wrap it and pull down, so the receiver reaches deeper than a hinge
+        # knuckle does: the draw depth plus the boss that carries the cross pin,
+        # and no further.
+        draw_depth = max(6.5, plan.strength_profile["pad_height"] * 0.65)
+        boss_r = b4b.B4B_M3_CLEAR_BORE / 2.0 + 1.6
+        floor = box.z - (draw_depth + boss_r) - 0.1
+        self.assertTrue(all(ear.bounds[0][2] > floor for ear in ears))
         self.assertLess(
             b4b.b4b_layout(box).case_bounds[1] - min(e.bounds[0][1] for e in ears),
             9.0,
@@ -270,9 +277,14 @@ class B4BGeometryTests(unittest.TestCase):
         eff = b4b.b4b_effective_box(box)
         body_outline = b4b.b4b_layout(eff).outer_structural_polygon
         skirt_outer, skirt_inner = b4b._skirt_polygons(eff)
+        # The plate is what must stay on the lattice footprint.  Hinge knuckles
+        # and latch ears stand proud of it in Y on both body and lid by design,
+        # so measuring the whole lid mesh in Y measures the hardware, not the
+        # plate.  X is the axis B4Bs sit side by side on, and nothing may widen
+        # the lid there.
         lid = b4b.make_b4b_lid(box)
-        self.assertTrue(np.all(lid.bounds[0][:2] >= np.array(body_outline.bounds[:2]) - 1e-6))
-        self.assertTrue(np.all(lid.bounds[1][:2] <= np.array(body_outline.bounds[2:]) + 1e-6))
+        self.assertAlmostEqual(lid.bounds[0][0], body_outline.bounds[0], places=5)
+        self.assertAlmostEqual(lid.bounds[1][0], body_outline.bounds[2], places=5)
         self.assertTrue(body_outline.buffer(1e-6).contains(skirt_outer))
         self.assertTrue(skirt_outer.buffer(1e-6).contains(skirt_inner))
 
