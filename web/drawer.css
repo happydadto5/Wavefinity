@@ -1,0 +1,154 @@
+/* Drawer layout mode. Everything is scoped to the mode or to dl- classes so
+   the bin editor's own styles are untouched. */
+
+/* In the mode the sidebar shows only the drawer panel, and the bin editor's
+   chrome (placed parts, its error panel, footer, design file buttons) steps
+   aside. */
+body.drawer-mode .controls > :not(#drawer-panel),
+body.drawer-mode .placed-block,
+body.drawer-mode #error-panel,
+body.drawer-mode .workspace-footer,
+body.drawer-mode #preview-state,
+body.drawer-mode #new-design,
+body.drawer-mode #save-design,
+body.drawer-mode .header-actions .file-button { display: none !important; }
+
+.drawer-panel { min-height: 100%; display: flex; flex-direction: column; }
+.drawer-panel > .control-section { flex: none; }
+
+.dl-card {
+  margin: 10px 12px 0; padding: 12px 14px 14px; background: var(--panel);
+  border: 1px solid var(--line-dark); border-left: 3px solid var(--teal); border-radius: 11px;
+}
+.dl-drawer-row { display: flex; gap: 8px; align-items: end; margin-bottom: 10px; }
+.dl-drawer-row label { flex: 1; font-size: 12px; font-weight: 700; color: var(--muted); }
+.dl-drawer-row select { font-size: 14px; font-weight: 650; color: var(--ink); }
+.button.dl-small { padding: 7px 10px; font-size: 12px; }
+.dl-note { margin: 8px 0 0; font-size: 11px; color: var(--muted); line-height: 1.45; }
+.dl-warning { color: #8a4e12; }
+.dl-details { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.dl-details summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--teal-dark); }
+.dl-details[open] summary { margin-bottom: 8px; }
+.dl-details .field-grid { margin-top: 6px; }
+.dl-details .button-row { margin-top: 10px; }
+.dl-subhead { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 0; font-size: 12px; }
+.dl-link {
+  border: 0; background: none; color: var(--teal-dark); font-weight: 700; font-size: 12px; cursor: pointer;
+  padding: 2px 0; text-decoration: underline; text-underline-offset: 2px;
+}
+#dl-keepouts { margin: 8px 0 12px; }
+.dl-keepout { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 6px; align-items: end; margin-bottom: 6px; }
+.dl-keepout label { font-size: 10px; color: var(--muted); }
+.dl-keepout input { margin-top: 2px; padding: 6px 7px; }
+.dl-keepout button { border: 0; background: none; color: var(--danger); font-size: 15px; cursor: pointer; padding: 7px 4px; }
+
+.dl-auto-button { font-size: 15px; }
+.dl-options { display: grid; gap: 8px 12px; grid-template-columns: 1fr 1fr; margin-top: 12px; }
+.dl-options .checkbox-row { margin: 2px 0; }
+.dl-candidates { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 8px; }
+.dl-candidate {
+  display: flex; flex-direction: column; gap: 3px; padding: 7px; border: 1px solid var(--line-dark);
+  border-radius: 9px; background: white; cursor: pointer; text-align: left;
+}
+.dl-candidate:hover { border-color: var(--teal); }
+.dl-candidate.active { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(20,108,112,.2); background: #f3faf9; }
+.dl-candidate canvas { width: 100%; height: auto; aspect-ratio: 264 / 152; border-radius: 5px; margin-bottom: 3px; }
+.dl-candidate strong { font-size: 12px; }
+.dl-candidate small { color: var(--muted); font-size: 11px; line-height: 1.35; }
+.dl-unfit { margin: 10px 0 0; font-size: 11px; color: var(--danger); line-height: 1.45; }
+
+.dl-stats { display: grid; gap: 9px; margin-bottom: 14px; }
+.dl-stat { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 10px; font-size: 12px; align-items: baseline; line-height: 1.4; }
+.dl-stat > span { color: var(--muted); font-weight: 700; }
+.dl-stat strong { font-size: 15px; }
+.dl-stat small { display: block; color: var(--muted); font-size: 11px; }
+.dl-stat strong + small { display: inline; }
+.dl-meter { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 4px; }
+.dl-meter span { display: block; height: 100%; background: var(--teal); }
+.dl-problems {
+  margin: 0; padding: 8px 10px 8px 26px; border: 1px solid #e0aaa5; border-radius: 7px;
+  background: #fff4f2; color: #7e302b; font-size: 11px; line-height: 1.5;
+}
+.dl-problems li.height { color: #8a4e12; }
+
+.dl-inv-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin-bottom: 10px; }
+.dl-inv-tools input, .dl-inv-tools select { margin: 0; padding: 7px 8px; font-size: 12px; }
+.dl-inv-list { display: grid; gap: 6px; }
+.dl-bin {
+  display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto auto auto; align-items: center; gap: 8px;
+  padding: 6px 6px 6px 6px; border: 1px solid var(--line); border-radius: 9px; background: white;
+}
+.dl-bin[draggable="true"] { cursor: grab; }
+.dl-bin:hover { border-color: var(--line-dark); }
+.dl-bin.selected { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(20,108,112,.18); }
+.dl-bin.all-placed { background: #f7f9f9; }
+.dl-bin.all-placed .dl-bin-main strong { color: var(--muted); }
+.dl-bin.unprinted { opacity: .62; }
+.dl-bin.too-tall { border-color: #e0aaa5; }
+.dl-swatch {
+  width: 38px; height: 38px; border-radius: 7px; display: grid; place-items: center;
+  font-size: 11px; font-weight: 800; border: 1px solid rgba(23,37,45,.2);
+}
+.dl-bin-main { display: flex; flex-direction: column; min-width: 0; }
+.dl-bin-main strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-bin-main small { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-bin-main .dl-flags { color: #8a4e12; font-weight: 650; }
+.dl-placed { font-size: 12px; font-weight: 750; text-align: center; line-height: 1.1; min-width: 38px; }
+.dl-placed small { display: block; font-size: 10px; font-weight: 500; color: var(--muted); }
+.dl-qty { display: inline-flex; align-items: center; border: 1px solid var(--line-dark); border-radius: 7px; overflow: hidden; background: white; }
+.dl-qty button { border: 0; background: white; width: 24px; height: 28px; cursor: pointer; font-size: 15px; font-weight: 700; color: var(--teal-dark); }
+.dl-qty button:hover:not(:disabled) { background: var(--teal-soft); }
+.dl-qty button:disabled { color: var(--line-dark); cursor: default; }
+.dl-qty span { min-width: 22px; text-align: center; font-size: 12px; font-weight: 750; }
+.dl-place {
+  border: 1px solid var(--teal); background: var(--teal-soft); color: var(--teal-dark); border-radius: 7px;
+  padding: 6px 9px; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.dl-place:disabled { border-color: var(--line); background: #f3f5f5; color: var(--line-dark); cursor: default; }
+.dl-more { border: 0; background: none; font-size: 13px; cursor: pointer; color: var(--muted); padding: 4px 2px; }
+.dl-bin-details {
+  margin: -4px 0 2px; padding: 10px 12px; border: 1px solid var(--line); border-top: 0;
+  border-radius: 0 0 9px 9px; background: #fbfcfc;
+}
+.dl-bin-details .field-grid { margin-bottom: 8px; }
+.dl-bin-details p { margin: 6px 0 10px; font-size: 11px; color: var(--muted); line-height: 1.5; word-break: break-word; }
+.dl-empty {
+  padding: 14px; border: 1px dashed var(--line-dark); border-radius: 8px; color: var(--muted);
+  font-size: 12px; text-align: center; line-height: 1.5;
+}
+
+.dl-savebar {
+  position: sticky; bottom: 0; margin-top: auto; padding: 10px 14px 12px; background: white;
+  border-top: 1px solid var(--line-dark); box-shadow: 0 -6px 16px rgba(30,51,61,.06); z-index: 2;
+}
+.drawer-panel > .control-section:last-of-type { margin-bottom: 12px; }
+.dl-file-button {
+  display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 6px;
+  background: #eef2f2; color: var(--muted); padding: 7px 9px; font-size: 11px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0 0 8px;
+}
+.dl-file-button:hover { border-color: var(--line-dark); color: var(--ink); }
+.dl-save-row { display: flex; align-items: center; gap: 8px; }
+.dl-save-row .checkbox-row { margin: 0; }
+.dl-save-status { flex: 1; min-width: 0; font-size: 11px; color: var(--muted); }
+.dl-save-status.error { color: var(--danger); font-weight: 650; }
+.dl-save-status.dirty { color: #8a4e12; font-weight: 650; }
+
+/* The drawer canvas and its floating controls. */
+.canvas-wrap[data-canvas="drawer"] { background: radial-gradient(circle at 50% 40%, #fff 0, #f6f7f5 60%, #eceeea 100%); }
+#drawer-canvas.panning { cursor: grabbing; }
+.dl-tilt-control input[type="range"] { width: 104px; margin: 0; accent-color: var(--teal); }
+.dl-tilt-control, .dl-empty-control { padding: 6px 10px; }
+.dl-empty-control input { margin: 0; accent-color: var(--teal); }
+.dl-selection {
+  position: absolute; top: 16px; right: 16px; z-index: 3; width: min(250px, calc(100% - 32px));
+  padding: 10px 12px; border: 2px solid var(--teal); border-radius: 10px; background: rgba(243,250,249,.96);
+  box-shadow: 0 6px 18px rgba(20,51,61,.14); display: flex; flex-direction: column; gap: 2px; font-size: 13px;
+}
+.dl-selection span { color: var(--muted); font-size: 11px; }
+.dl-selection-actions { display: flex; gap: 6px; margin-top: 7px; }
+.dl-selection-actions button {
+  flex: 1; border: 1px solid var(--line-dark); border-radius: 6px; background: white;
+  padding: 6px; font-size: 12px; font-weight: 650; cursor: pointer;
+}
+.dl-selection-actions button:hover { background: var(--teal-soft); border-color: var(--teal); }

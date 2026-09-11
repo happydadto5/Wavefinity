@@ -76,6 +76,32 @@ typed — B4B growing the bin field, stacking raising the wall and floor — it
 says so in plain language in a note under the control that caused it, and it
 never writes the new value back into the field the user is typing in.
 
+**Drawer layout is a mode, not a panel.** The *Drawer layout* tab beside 3D and
+2D swaps the whole screen: the inventory and its tools take the sidebar, the
+drawer takes the workspace, and the bin editor's chrome (placed parts, the
+design file buttons) steps aside. Undo, Redo and Ctrl+Z act on the drawer while
+it is showing. Its sidebar keeps the same blast-radius order: the *drawer*
+card (size and fit) first, then *Auto layout* with its options directly under
+the button, then *Space & spacers*, then the *Inventory* you work from, with
+saving pinned to the bottom.
+
+**The drawer is always seen from its front.** It is not a free 3D camera. The
+only view controls are how steeply you look down (*Top*, *Angled*, *Low* and a
+tilt slider), pan (drag the floor, or right-drag) and zoom (wheel, −/+,
+*Fit*). Keeping the front at the bottom of the screen is what makes "a short
+bin behind a tall one" visible, and it means dragging a bin up always moves it
+back.
+
+**Colour means height.** Bins run from light (short) to dark (tall) teal, B4B
+cases purple, spacers and shims sand. A bin shows its name, or its size when it
+has none. Red is a real fault (overlap, sticking out, too tall for the drawer);
+a dashed orange outline is the softer height-order warning.
+
+**Auto layout offers; it does not decide.** It applies the best arrangement and
+lists the others as clickable cards, each with its fill, height clashes and
+connector count, and Undo steps back. A layout that bends the height rule is
+offered only when the rule is what left bins out.
+
 ---
 
 ## Quick start
@@ -244,6 +270,58 @@ or a different browser rather than resetting every launch. The browser API is
 same-origin only, accepts JSON only, and applies a restrictive
 content-security policy so an unrelated web page cannot invoke local file
 generation.
+
+### Drawer layout
+
+**Drawer layout** (the tab beside *3D preview* and *2D layout*) fits the bins
+you have printed into a real drawer. It works from the **inventory file** in
+the save location, `<folder name> bins.md` — the same file *Keep log* has
+always written — so each folder has its own inventory, like its generated files.
+
+- **The inventory file** is a Markdown table, one row per bin design, with an
+  **ID**, a **Kind** (bin, B4B case, spacer, shim, added by hand), a **Name**
+  and a **Qty**. Qty is how many copies you have *printed*. Generating is not
+  printing, so a superseded version can be set to 0 and it drops out of the
+  list. Under the table, a `## Drawer layout` JSON block holds the drawers and
+  where each copy sits. Rows stay hand-editable; keep the IDs. An older
+  seven-column log is upgraded the first time it is saved, and a one-off `.bak`
+  copy is left beside it. Every save re-reads the file and merges, so a bin
+  generated while the layout is open is never lost.
+- **Drawers.** Set each drawer's inside width, depth and height. *Drawer
+  settings* holds the name; the **fit clearance** (total slack per axis, at
+  least 0.6 mm for the wave crests); whether the 8 mm grid sits against the
+  front-left corner or is centred; which way bin X runs; and **keep-out zones**
+  (slide rails, screw heads, a rounded corner). Several drawers share one
+  inventory, and a copy placed in one drawer is not available to another.
+- **Bins never turn a quarter turn on their own.** Left walls mate with right,
+  and front with back; a bin turned 90 degrees meets its neighbours crest to
+  crest. *Bin width (X) runs front ↔ back* turns every bin in a drawer together
+  instead, which keeps every seam matched.
+- **Placing.** Drag a bin from the inventory onto the drawer, double-click it,
+  or press **Place** to drop it in the best free spot. Drag placed bins to move
+  them: they snap to the 8 mm grid and refuse overlaps, keep-outs and the
+  drawer edge. Drag one off the drawer to take it out. Keys: the arrows move one
+  unit, **L** locks, **Delete** takes out, **F** fits the view, **Esc**
+  deselects.
+- **Auto layout** arranges the drawer. *Arrange* either moves everything not
+  locked, or only adds new bins around the rest. *Tall bins* keeps tall bins
+  always behind shorter ones (the default), behind them when possible, or
+  anywhere. It returns up to five arrangements — Tidy rows, Tight fit, Columns,
+  Most bins and, if the height rule left bins out, Fits more — and names
+  anything that did not fit.
+- **Space & spacers** reports how full the grid is, the empty area, what is
+  left at each edge, the **largest empty gap** (with *Design a bin for it*,
+  which opens the bin editor at that size), how many connectors the layout
+  needs for each height pair, and any problems. **Make spacers** fills the
+  drawer. Empty grid cells become ordinary open spacer bins, which mate and
+  take connectors like any bin. The strips between the grid and the drawer
+  walls become flat shims, split to the *Longest piece* your bed can print.
+  Files go to the save location and rows go into the inventory. Spare copies of
+  a matching spacer already in the inventory are used first.
+- **Saving.** *Auto-save* (on by default) writes the layout after every change.
+  Turn it off to save with **Save layout** (or Ctrl+S). Qty, names and
+  hand-added bins always save straight away, because they are the inventory.
+  The layout is recalled automatically every time you open the tab.
 
 ### Using the browser editor
 
@@ -884,15 +962,23 @@ layered implementation:
 | `organizer_inserts/` | Item/layout model, authoritative feature registry, per-feature builders, Divider compartments, and fused/removable assembly. | No. |
 | `organizer_app.py` | CLI, exporters and design persistence. Legacy palette constants are generated from the feature registry. | Yes, for CLI subcommands. |
 | `wavefinity_web.py` | The local HTTP service — see [The browser service](#the-browser-service). | Yes, the default UI launch target. |
+| `organizer_inventory.py` | The drawer inventory file (`<folder> bins.md`): parsing, legacy upgrade, merge-saves, bin logging. | No. |
+| `organizer_drawer.py` | Drawer layout: grid fit, drawer report, auto-layout packer, spacer planning and export, and its `/api/drawer/*` routes. | No. |
 | `test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest`. |
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
 | `test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest`. |
+| `test_drawer.py` | Inventory file, auto layout and spacer regressions. | Only via `python -m unittest`. |
 
 `web/index.html`, `web/styles.css`, `web/feature-icons.js` and `web/app.js` are
 plain dependency-free frontend files with no build step. Icon artwork lives in
 `feature-icons.js`; the feature registry supplies stable icon identifiers.
 `app.js` holds the stateful editor and preview coordination, while all printable
-geometry still comes from the Python service.
+geometry still comes from the Python service. Drawer layout mode lives apart in
+`web/drawer-model.js` (data, saving, undo), `web/drawer-view.js` (the drawer
+canvas) and `web/drawer-panel.js` (its sidebar), styled by `web/drawer.css`.
+It borrows app.js's small helpers, but app.js knows nothing about it beyond the
+tab. The page's content-security policy refuses inline `style=""` attributes,
+so the drawer files set colours through the DOM.
 
 `TESTING.md` was the historical test log, now moved to the untracked `archive/`
 folder. We no longer maintain or keep this testing log updated.

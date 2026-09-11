@@ -97,6 +97,7 @@ from organizer_inserts import (
     text_of,
 )
 from photo_nest import photo_outline_from_data
+from organizer_drawer import drawer_routes
 from organizer_app import (
     APP_DIR,
     DEFAULT_SAMPLE_BOXES,
@@ -1574,6 +1575,8 @@ POST_ROUTES = {
     "/api/browse-output-folder": browse_output_folder_payload,
     "/api/browse-slicer-path": browse_slicer_path_payload,
     "/api/show-log": show_log_payload,
+    # Drawer layout view: inventory file, auto layout, spacers.
+    **drawer_routes(GEOMETRY_LOCK, DEFAULT_OUTPUT),
 }
 
 

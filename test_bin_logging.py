@@ -53,7 +53,7 @@ class TestBinLogging(unittest.TestCase):
 
             content = log_file.read_text(encoding="utf-8")
             self.assertIn("# My Drawer Bins", content)
-            self.assertIn("| Date | File | X (mm) | Y (mm) | Z (mm) | Label | Interior Part(s) |", content)
+            self.assertIn("| ID | Date | Kind | Name | X (mm) | Y (mm) | Z (mm) | Qty | File | Label | Interior Part(s) |", content)
             self.assertIn("Box 40 x 48 x 40.3mf", content)
             self.assertIn("| 40 | 48 | 40 |", content)
             self.assertIn("| TOOLS |", content)

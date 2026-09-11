@@ -78,6 +78,7 @@ from organizer_stack import (
     stack_summary,
     validate_stack_design,
 )
+from organizer_inventory import append_bin
 from organizer_inserts import (
     BASE_PLATE,
     CARTRIDGE_PITCH,
@@ -1248,9 +1249,11 @@ def generate_organizer_files(
             out_files.append(Path(str(result["box"]["output"])))
         if "insert" in result and isinstance(result["insert"], dict) and "output" in result["insert"]:
             out_files.append(Path(str(result["insert"]["output"])))
+        # The requested box, not the stack-shortened body: the inventory (and
+        # the drawer layout reading it) needs the closed height, as typed.
         log_file = log_bin_to_folder(
             output_dir,
-            box,
+            stack_request,
             layout,
             generated_files=out_files,
             label=label,
@@ -1315,16 +1318,12 @@ def log_bin_to_folder(
     scoop: bool = False,
     b4b_note: str = "",
 ) -> Path:
-    """Record a generated/printed bin in '<folder name> bins.md' in output_dir.
+    """Record a generated bin as a new row of the drawer inventory,
+    '<folder name> bins.md' in output_dir (see organizer_inventory).
 
-    ``b4b_note``, when set, replaces the Interior Part(s) cell so a B4B row is
-    distinguishable without changing the log's column schema.
+    ``b4b_note``, when set, replaces the Interior Part(s) cell and marks the
+    row as a B4B case.
     """
-    output_dir = Path(output_dir).expanduser().resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    folder_name = output_dir.name
-    log_file = output_dir / f"{folder_name} bins.md"
-
     if generated_files:
         file_names = ", ".join(dict.fromkeys(p.name for p in generated_files))
     else:
@@ -1347,35 +1346,15 @@ def log_bin_to_folder(
 
     interior_text = b4b_note or summarize_interior_parts(layout, scoop=scoop)
 
-    file_names = file_names.replace("|", "/")
-    label_text = label_text.replace("|", "/")
-    interior_text = interior_text.replace("|", "/")
-
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    row = f"| {now_str} | {file_names} | {box.x:g} | {box.y:g} | {box.z:g} | {label_text} | {interior_text} |\n"
-
-    header = (
-        f"# {folder_name} Bins\n\n"
-        "| Date | File | X (mm) | Y (mm) | Z (mm) | Label | Interior Part(s) |\n"
-        "| --- | --- | --- | --- | --- | --- | --- |\n"
+    return append_bin(
+        output_dir,
+        file=file_names,
+        x=box.x, y=box.y, z=box.z,
+        label="" if label_text == "-" else label_text,
+        interior=interior_text,
+        name=clean_label(part_name) or tidy_label or (floor_texts[0] if floor_texts else ""),
+        kind="b4b" if b4b_note else "bin",
     )
-
-    if not log_file.exists():
-        log_file.write_text(header + row, encoding="utf-8")
-    else:
-        content = log_file.read_text(encoding="utf-8")
-        if "| Date |" not in content or "| --- |" not in content:
-            if not content.endswith("\n"):
-                content += "\n"
-            content += "\n" + header + row
-            log_file.write_text(content, encoding="utf-8")
-        else:
-            if not content.endswith("\n"):
-                content += "\n"
-            content += row
-            log_file.write_text(content, encoding="utf-8")
-
-    return log_file
 
 
 

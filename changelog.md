@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-09-11 — Drawer layout: fit your printed bins into a real drawer
+
+- New **Drawer layout** tab beside 3D and 2D. The inventory takes the left side
+  and the drawer the right. The drawer is seen from its front, with tilt (Top /
+  Angled / Low), pan and zoom rather than a free 3D camera.
+- The log is now a real **inventory**: `<folder> bins.md` gains ID, Kind, Name
+  and Qty (copies printed). An old log upgrades on its first save, with a
+  `.bak` kept. The layout is saved in the same file and recalled whenever the
+  tab opens. It auto-saves by default, or you can save by hand.
+- **Drawers** have a size, fit clearance, grid position, bin direction and
+  keep-out zones. Several drawers share one inventory.
+- **Auto layout** keeps tall bins behind short ones, rewards bins that share
+  whole walls, leaves locked bins alone, and offers several arrangements to pick
+  from.
+- **Space & spacers** shows fill, empty area, edge strips, the largest gap
+  (with *Design a bin for it*), the connectors needed, and any problems. **Make
+  spacers** saves spacer bins and edge shims, adds them to the inventory and
+  places them.
+- Bins cannot be quarter-turned in a drawer. Checked against the engine's own
+  outlines, a bin turned 90° collides with its neighbours. A drawer can turn all
+  of its bins together instead.
+
 ## 2026-09-11 — Stackable bins, and a UI ordered by what changes what
 
 - **Stackable bins**, in two styles, chosen from a new *Stacking* control at the

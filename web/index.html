@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Wavefinity</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/drawer.css">
 </head>
 <body>
   <header class="app-header">
@@ -192,6 +193,7 @@
           <button id="generate-connector" class="button secondary">Generate Connector</button>
         </div>
       </section>
+      <div id="drawer-panel" class="drawer-panel" hidden></div>
     </aside>
 
     <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="Resize controls" aria-orientation="vertical" tabindex="0"></div>
@@ -202,6 +204,7 @@
           <div class="view-tabs" role="tablist">
             <button class="view-tab active" data-view="3d" role="tab" aria-selected="true">3D preview</button>
             <button class="view-tab" data-view="2d" role="tab" aria-selected="false">2D layout</button>
+            <button class="view-tab" data-view="drawer" role="tab" aria-selected="false">Drawer layout</button>
           </div>
         </div>
         <div class="preview-hint"><span id="preview-state">Building preview…</span></div>
@@ -253,6 +256,10 @@
           </div>
         </div>
         <div id="layout-help" class="layout-hint">Use Arrow keys or drag to move</div>
+      </div>
+      <!-- Drawer layout mode: web/drawer-*.js fills this and the #drawer-panel sidebar. -->
+      <div class="canvas-wrap" data-canvas="drawer">
+        <canvas id="drawer-canvas" role="img" aria-label="Drawer layout"></canvas>
       </div>
       <aside class="placed-block" aria-label="Placed parts">
         <h3>placed parts</h3>
@@ -315,5 +322,8 @@
   </div>
   <script src="/feature-icons.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/drawer-model.js" defer></script>
+  <script src="/drawer-view.js" defer></script>
+  <script src="/drawer-panel.js" defer></script>
 </body>
 </html>
