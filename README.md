@@ -53,7 +53,7 @@ supplies the font outlines for floor labels.
 
 ## Developer & AI coding guidelines
 
-All instructions for coding agents (OpenAI, Anthropic, Google) and human contributors are centralized here and in [speed.md](speed.md). Do not create tool-specific instructions elsewhere; refer to this section.
+All instructions for coding agents (OpenAI, Anthropic, Google) and human contributors are centralized here. Do not create tool-specific instructions elsewhere.
 
 ### 1. User communication preferences
 - **Operate in "caveman mode"**: Keep messages simple, plain, and short.
@@ -66,15 +66,90 @@ All instructions for coding agents (OpenAI, Anthropic, Google) and human contrib
 - Commit once and push to cloud (`origin/main`) after every completed task so the live hosted app ([Wavefinity on Render](https://wavefinity.onrender.com/)) stays up to date.
 - Avoid micro-checkpoint churn.
 
-### 3. Fast vibe-coding & testing policy ([speed.md](speed.md))
-Authoritative policy: [speed.md](speed.md). Summary:
+### 3. Fast vibe-coding & testing policy
 
-- **Default rule: NO TESTING.** Implement first, reason carefully about the changed code, inspect the diff, and move on.
-- The fact that code is *new* does **not** justify testing.
-- **Class A (small/local tweaks)** and **Class B (moderate/contained logic)**: **NO testing.** No unit tests, no dev server launches, no browser checks, no screenshots.
-- **Class C (major high-blast-radius changes only)**: Testing is permitted *only* when changing shared project contracts across multiple features (e.g. core wave profile, `BoxSpec` semantics, global registry/export). Even then, keep testing minimal (max 1 full-suite run).
-- **No test bureaucracy**: No `TESTING.md`, test logs, matrices, or test-count summaries.
-- When in doubt: **DO NOT TEST.** Reason through the code statically.
+#### Purpose & Core Rule
+Wavefinity development has accumulated too much process around testing, test design, repeated verification, large acceptance matrices, and multi-pass review. That work often consumes more time than implementation and has not been a reliable predictor of defects that later matter.
+
+> **Implement first, reason carefully about the changed code, inspect the diff, and move on. Do not test unless the change is a genuine high-blast-radius heavy lift.**
+
+Existing tests stay in the repository as a dormant safety net for true heavy lifts; they are not deleted. But routine work no longer triggers test execution or new-test creation.
+
+#### The default rule: NO TESTING
+Unless the task qualifies as a **Major / Heavy-Lift / High-Blast-Radius** change under Class C below, the coding agent should NOT:
+- run the unit-test suite;
+- run a targeted unit test;
+- create a new regression test;
+- start the development server merely to check the change;
+- perform browser automation or manual browser click-throughs;
+- take screenshots for visual verification;
+- create acceptance matrices;
+- perform random-input sweeps;
+- perform exhaustive parameter combinations;
+- create a test plan;
+- create or update a testing log/report;
+- perform repeated "one more verification" passes after the implementation is already understood.
+
+For normal work, **static reasoning is the verification method**:
+1. read the relevant existing implementation;
+2. make the smallest correct change;
+3. inspect the changed code and surrounding call path;
+4. inspect the diff for unintended edits;
+5. update directly affected documentation only when needed;
+6. commit/push the completed unit of work;
+7. stop.
+
+Do not invent testing work to fill time or increase confidence cosmetically.
+
+#### Change classification
+
+**Class A — Small/localized change: NO TESTING**
+- *Examples:* wording, labels, tooltips, descriptions; CSS/layout/spacing/appearance; moving or hiding a UI control; changing a default; changing a field range or step when the effect is local and understood; a known bug fix with a clear cause and narrow fix; a small local refactor; changing one feature's local geometry/math without altering shared primitives; a contained frontend handler fix; documentation changes; removing dead local code; renaming a variable/function/control; adding a small contained option to one feature; changing B4B-only behavior that remains inside the B4B path and does not alter shared Wavefinity behavior.
+- *Action:* implement, inspect, commit. No tests. No browser. No server.
+
+**Class B — Moderate but bounded change: STILL NO TESTING**
+- *Examples:* adding genuinely new logic that is confined to one feature; changing a feature plus its directly paired UI/API wiring; adding a new setting with serialization that is contained to one feature and has obvious defaults/backward behavior; several-file work where every changed file belongs to one coherent feature path; a new geometry helper used only by one feature; a new UI interaction whose state flow is local and directly traceable; a meaningful bug fix that touches multiple functions but does not alter shared project contracts.
+- The fact that code is **new** does NOT make testing necessary.
+- *Action:* implement, trace the affected path, inspect the diff, commit. No tests by default. If uncertain, the first response is **more careful code reading/reasoning**, not automatic test creation.
+
+**Class C — Major / Heavy-Lift / High-Blast-Radius change: TESTING PERMITTED**
+Testing is justified only when the change creates a realistic possibility of breaking significant portions of Wavefinity **outside the feature being worked on**.
+- *Qualifying criteria:* touches shared box/wave/grid geometry used by many features; changes global mating/interlock rules; changes `BoxSpec` or central data models affecting many consumers; changes saved-design schema/versioning or broad save/load compatibility; changes core generation/export behavior across normal bins and multiple feature types; changes shared layout/assembly/registry infrastructure; restructures module/package boundaries; replaces a major subsystem; changes security/request boundaries; touches many otherwise unrelated feature paths.
+- *High-risk areas:* `organizer_engine.py` shared primitives/specs; `organizer_inserts/_core.py`, `_layout.py`, `_assembly.py`, `_registry.py`; broad save/load/generation paths in `organizer_app.py`; broad API contracts in `wavefinity_web.py`; global state synchronization in `web/app.js`; common 3MF/export placement logic; versioned design serialization.
+- *Note:* A large line count does not make work major (a 500-line isolated feature can be Class B; a 5-line edit to shared grid invariants can be Class C).
+
+#### Testing rules for a qualifying Class C major change
+- **Do not begin with a giant test plan**: Identify the 3–8 concrete cross-project risks actually at stake.
+- **Prefer existing tests**: Do not duplicate existing coverage. Add a new test only if the change is Class C AND an important cross-project invariant is uncovered.
+- **Full-suite limit**: Focused/shared-contract tests during implementation; **one full-suite run at the end, maximum** (or max two for a behavior-preserving structural refactor: one baseline before, one after).
+- **Browser/manual verification**: Only when the risky behavior lives in the browser and cannot be established from code inspection; small surgical check only; no screenshot QA for routine styling.
+- **No mechanical/geometry sweeps** unless geometry mechanics are central to the Class C change.
+
+#### Existing tests & no test bureaucracy
+- Do not delete existing tests.
+- Do not update tests unless intended behavior knowingly invalidates the old assertion. Do not run it unless the task is Class C.
+- Stop producing test bureaucracy: No `TESTING.md`, per-session test logs, final testing summaries, screenshots proving each control works, or multi-case matrices.
+
+#### Faster design and implementation workflow
+- **No plan for routine work**: Inspect and implement directly for Class A and most Class B tasks. Only plan if the user explicitly asks or if work is Class C architecture.
+- **Read proportionally**: Read the affected file/function and direct callers, not the whole repository.
+- **Prefer smallest implementation**: Reuse existing patterns, avoid single-consumer abstractions, don't generalize for hypothetical future features.
+- **Known bug beats hypothetical bug**: Fix the actual cause, inspect direct consequences, stop.
+- **No endless review loops**: One strong implementation/review pass is enough.
+- **Make low-level decisions and continue**: Don't stop for user approval on non-product low-level details.
+- **Keep scope closed**: No unsolicited cleanups, refactorings, or neighboring improvements.
+
+#### Quick decision rule
+Before doing any testing, ask:
+> **Could this change realistically break multiple unrelated existing parts of Wavefinity outside the feature I am changing?**
+- **No** → DO NOT TEST.
+- **Maybe, but only because the code is new** → DO NOT TEST. Read/reason more carefully.
+- **Yes, because I am changing a shared project contract or architecture with broad consumers** → Class C; perform minimal risk-directed testing.
+When in doubt, default to **NO TESTING**.
+
+#### Definition of done
+- **Class A/B**: Requested behavior implemented, code path reasoned through, diff verified, directly affected docs updated only if needed, coherent task committed & pushed. **No tests run merely for reassurance.**
+- **Class C**: Above plus the smallest verification set covering the named broad-risk contracts.
 
 ### Using the browser UI
 
