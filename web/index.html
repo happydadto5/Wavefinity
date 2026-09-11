@@ -12,6 +12,7 @@
     <div class="brand-group">
       <h1>Wavefinity <small class="brand-author">by happydadto5</small></h1>
       <button id="about-btn" class="button secondary" type="button" title="Learn about Wavefinity">About</button>
+      <button id="spaces-btn" class="button secondary" type="button" title="Your spaces: start a new one or open another">Spaces</button>
     </div>
     <div class="header-actions">
       <button id="connection" class="connection" title="Reload the app and Python engine">Starting…</button>
@@ -316,6 +317,51 @@
       </div>
     </div>
   </dialog>
+  <dialog id="welcome-dialog" class="welcome-dialog" aria-labelledby="welcome-title">
+    <div id="welcome-home">
+      <div class="welcome-header">
+        <h2 id="welcome-title">Welcome to Wavefinity</h2>
+        <button id="welcome-close" class="button secondary" type="button" aria-label="Close">✕</button>
+      </div>
+      <p class="welcome-lead">Wavefinity designs 3D-printed bins sized to the space they live in.</p>
+      <ol class="welcome-steps">
+        <li><strong>Set up a space</strong>A drawer you already have, or a box Wavefinity designs for you. Each space gets a name, its inside size and its own folder.</li>
+        <li><strong>Design bins to fill it</strong>Every bin you generate is saved in the space's folder.</li>
+        <li><strong>Keep track of what's inside</strong>The space's inventory file lists every bin, and the Space tab shows where each one sits.</li>
+      </ol>
+      <div class="welcome-actions">
+        <button id="welcome-new" class="button primary" type="button">New space…</button>
+        <button id="welcome-open" class="button secondary" type="button">Open a space folder…</button>
+        <button id="welcome-plain" class="button secondary" type="button" title="Save bins to a folder without keeping an inventory">Just make bins, no inventory…</button>
+      </div>
+      <h3 class="welcome-section-title">Recent spaces</h3>
+      <ul id="welcome-recent" class="welcome-recent"></ul>
+    </div>
+    <form id="space-form" class="space-form" hidden novalidate>
+      <div class="welcome-header">
+        <h2>New space</h2>
+      </div>
+      <p class="space-folder">Folder <span id="space-folder"></span> <button id="space-folder-change" class="link-button" type="button">Change</button></p>
+      <label id="space-name-row" class="space-field">Name<input id="space-name" type="text" maxlength="80" placeholder="e.g. Tool chest, drawer 2"></label>
+      <fieldset class="space-kinds">
+        <legend>What is it?</legend>
+        <label class="space-kind"><input type="radio" name="space-kind" value="drawer" checked><span><strong>Drawer</strong>A drawer you already have. Wavefinity fits bins into it.</span></label>
+        <label class="space-kind"><input type="radio" name="space-kind" value="box"><span><strong>Box</strong>A Bin for Bins case Wavefinity designs. You give its inside size.</span></label>
+        <label class="space-kind"><input type="radio" name="space-kind" value="none"><span><strong>No inventory</strong>Just save bins in this folder. Nothing is tracked.</span></label>
+      </fieldset>
+      <div id="space-size" class="space-size">
+        <label class="space-field"><span><span id="space-x-label">Width (X)</span> <span class="unit">mm</span></span><input id="space-x" type="number" min="1" step="any" inputmode="decimal"></label>
+        <label class="space-field"><span><span id="space-y-label">Depth (Y)</span> <span class="unit">mm</span></span><input id="space-y" type="number" min="1" step="any" inputmode="decimal"></label>
+        <label class="space-field"><span><span id="space-z-label">Height (Z)</span> <span class="unit">mm</span></span><input id="space-z" type="number" min="1" step="any" inputmode="decimal"></label>
+      </div>
+      <p id="space-note" class="space-note"></p>
+      <p id="space-error" class="field-error" role="alert" hidden></p>
+      <div class="button-row space-buttons">
+        <button id="space-back" class="button secondary" type="button">Back</button>
+        <button id="space-create" class="button primary" type="submit">Create space</button>
+      </div>
+    </form>
+  </dialog>
   <div id="update-banner" class="update-banner" role="status" hidden>
     <span>The Python engine restarted with new code. The page you're looking at is out of sync.</span>
     <button id="update-banner-reload" class="button primary" type="button">Reload now</button>
@@ -325,5 +371,6 @@
   <script src="/drawer-model.js" defer></script>
   <script src="/drawer-view.js" defer></script>
   <script src="/drawer-panel.js" defer></script>
+  <script src="/spaces.js" defer></script>
 </body>
 </html>

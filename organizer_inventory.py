@@ -48,6 +48,9 @@ MAX_QTY = 999
 # A generated bin is not a printed one.  Until the Layout view's setting says
 # otherwise, new rows start at Qty 0 and are marked printed by hand.
 DEFAULT_NEW_BIN_QTY = 0
+# A space is one save folder: a drawer the bins are fitted into, or a box - a
+# Bin for Bins case whose inside is the space.
+SPACE_KINDS = ("drawer", "box")
 
 _HEADER_KEYS = {
     "id": "id", "date": "date", "kind": "kind", "name": "name",
@@ -257,9 +260,9 @@ def _compact_json(value: Any, level: int = 0) -> str:
     return "[\n" + ",\n".join(items) + "\n" + end + "]"
 
 
-def render_inventory(folder_name: str, bins: list[dict[str, Any]], layout: dict | None) -> str:
+def render_inventory(title: str, bins: list[dict[str, Any]], layout: dict | None) -> str:
     parts = [
-        f"# {folder_name} Bins\n",
+        f"# {title} Bins\n",
         "One row per bin design. **Qty** is how many copies you have printed "
         "(0 = not printed). Edit rows freely, but keep each row's ID.\n",
         "| " + " | ".join(title for _, title in COLUMNS) + " |",
@@ -282,13 +285,20 @@ def _read(path: Path) -> dict[str, Any]:
     return parse_inventory(path.read_text(encoding="utf-8"))
 
 
+def _title(path: Path, layout: dict | None) -> str:
+    """The space's name, else the folder's."""
+    space = layout.get("space") if isinstance(layout, dict) else None
+    name = str(space.get("name") or "").strip() if isinstance(space, dict) else ""
+    return name or path.parent.name
+
+
 def _write(path: Path, bins: list[dict[str, Any]], layout: dict | None, legacy: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     backup = path.with_name(path.name + ".bak")
     if legacy and path.is_file() and not backup.exists():
         shutil.copy2(path, backup)
     temp = path.with_name(path.name + ".tmp")
-    temp.write_text(render_inventory(path.parent.name, bins, layout), encoding="utf-8")
+    temp.write_text(render_inventory(_title(path, layout), bins, layout), encoding="utf-8")
     temp.replace(path)
 
 
@@ -454,3 +464,38 @@ def append_bin(
         })
         _write(path, bins, current["layout"], current["legacy"])
     return path
+
+
+def create_space(
+    output_dir: Path | str, *, name: str, kind: str, x: float, y: float, z: float,
+) -> dict[str, Any]:
+    """Start a folder's inventory as a named space.
+
+    The space goes in the layout block with one drawer the size of its inside,
+    so the Layout view opens ready to fill it.  A box's inside is a B4B child
+    field the bins sit in wall to wall, so it asks for no extra clearance.
+    """
+    name = str(name or "").strip()[:80]
+    if not name:
+        raise ValueError("a space needs a name")
+    if kind not in SPACE_KINDS:
+        raise ValueError(f"a space is one of {', '.join(SPACE_KINDS)}")
+    size = [_number(value) for value in (x, y, z)]
+    if min(size) <= 0:
+        raise ValueError("a space needs its inside X, Y and Z in mm")
+    path = inventory_path(output_dir)
+    with INVENTORY_LOCK:
+        current = _read(path)
+        layout = current["layout"] if isinstance(current["layout"], dict) else {}
+        if isinstance(layout.get("space"), dict):
+            raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
+        layout["version"] = 1
+        layout["space"] = {"name": name, "kind": kind, "x": size[0], "y": size[1], "z": size[2]}
+        if not layout.get("drawers"):
+            layout["drawers"] = [{
+                "id": "d1", "name": name, "width": size[0], "depth": size[1], "height": size[2],
+                "clearance": 0.0 if kind == "box" else 1.0, "keepouts": [], "placements": [],
+            }]
+            layout["active"] = "d1"
+        _write(path, current["bins"], layout, current["legacy"])
+        return _payload(path, _read(path))

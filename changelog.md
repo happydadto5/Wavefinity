@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-11 — Welcome screen and spaces
+
+- **A welcome screen opens with the app.** It explains the idea (set up a
+  space, design bins to fill it, keep track of what's inside) and lists your
+  **recent spaces** for one-click reopening. The **Spaces** button brings it
+  back any time.
+- **Each save folder is one space**, named by you: a **drawer** you already
+  have, or a **box** — a Bin for Bins case whose inside size you give. Its
+  inventory file is created with the space, and the Space tab opens ready to
+  fill it. A box goes straight to the B4B designer at that inside size.
+- **No inventory** is an option too: bins are saved to the folder and nothing
+  is logged.
+- Picking a Save Location that has no inventory yet asks whether it is a new
+  space.
+
 ## 2026-09-11 — Stacks in the drawer, planned bins, connectors and print map
 
 - The inventory records **how each bin was printed to stack** (none, snap-on

@@ -10,7 +10,8 @@ from organizer_drawer import (
     spacer_frame,
 )
 from organizer_engine import BoxSpec, wavy_cavity_polygon, wavy_outer_polygon
-from organizer_inventory import append_bin, inventory_path, load_inventory, save_inventory
+from organizer_inventory import append_bin, create_space, inventory_path, load_inventory, save_inventory
+from organizer_spaces import space_routes
 
 LEGACY = """# My Drawer Bins
 
@@ -54,6 +55,26 @@ class InventoryFileTests(unittest.TestCase):
             self.assertEqual([b["id"] for b in again["bins"]], ["B1", "B2", "B3"])
             self.assertEqual(again["bins"][0]["qty"], 2)
             self.assertEqual(again["layout"]["drawers"][0]["placements"][0]["bin"], "B1")
+
+    def test_a_new_space_starts_its_inventory_and_is_remembered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Garage"
+            prefs = {}
+            routes = space_routes(Path(tmp), lambda: dict(prefs), lambda update: prefs.update(update) or dict(prefs))
+            made = routes["/api/space/create"]({"output": str(folder), "name": "Screw box", "kind": "box", "x": 96, "y": 48, "z": 40})
+            self.assertEqual(made["space"]["space"], {"name": "Screw box", "kind": "box", "x": 96.0, "y": 48.0, "z": 40.0})
+            self.assertEqual(made["recent"][0]["name"], "Screw box")
+            drawer = load_inventory(folder)["layout"]["drawers"][0]
+            self.assertEqual((drawer["name"], drawer["width"], drawer["depth"], drawer["height"]), ("Screw box", 96.0, 48.0, 40.0))
+            append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20)
+            self.assertTrue(inventory_path(folder).read_text(encoding="utf-8").startswith("# Screw box Bins"))
+            with self.assertRaises(ValueError):
+                create_space(folder, name="Again", kind="drawer", x=1, y=1, z=1)
+
+            plain = Path(tmp) / "Loose"
+            done = routes["/api/space/no-inventory"]({"output": str(plain)})
+            self.assertTrue(done["space"]["no_inventory"])
+            self.assertEqual([one["kind"] for one in done["recent"]], ["none", "box"])
 
 
 class AutoLayoutTests(unittest.TestCase):

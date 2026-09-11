@@ -709,7 +709,8 @@ DP.renderSave = () => {
   dlSet("#dl-autosave", Boolean(settings.autosave), "checked");
   const file = $("#dl-file");
   const name = (DL.file || "").split(/[\\/]/).pop();
-  file.textContent = name ? `📁 ${name}` : "📁 Choose a save location";
+  const space = DL.layout.space?.name;
+  file.textContent = space ? `📁 ${space} · ${name}` : name ? `📁 ${name}` : "📁 Choose a save location";
   file.title = `${DL.file || ""}\nClick to change the save location - each folder has its own inventory.`;
   const status = $("#dl-save-status");
   let text = "";

@@ -892,7 +892,9 @@ async function selectOutputFolder() {
       state.output = result.folder;
       if (input) input.value = result.folder;
       saveOutputPreference(result.folder);
-      toast(`Selected: ${result.folder}`);
+      // A folder with no inventory yet is a new space: spaces.js asks about it.
+      if (typeof SP !== "undefined") await SP.afterPick(result.folder);
+      else toast(`Selected: ${result.folder}`);
     }
   } catch (error) {
     toast(error.message, true);
@@ -5900,6 +5902,9 @@ async function init() {
     updateHistoryButtons();
     clearDraftSelection();
     await refreshPreview();
+    // The welcome screen (spaces.js) waits for the catalog and first preview.
+    state.ready = true;
+    window.dispatchEvent(new Event("wavefinity:ready"));
   } catch (error) {
     $("#connection").textContent = "Engine unavailable";
     $("#connection").classList.remove("ready");

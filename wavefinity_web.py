@@ -98,6 +98,7 @@ from organizer_inserts import (
 )
 from photo_nest import photo_outline_from_data
 from organizer_drawer import drawer_routes
+from organizer_spaces import space_routes
 from organizer_app import (
     APP_DIR,
     DEFAULT_SAMPLE_BOXES,
@@ -1577,6 +1578,8 @@ POST_ROUTES = {
     "/api/show-log": show_log_payload,
     # Drawer layout view: inventory file, auto layout, spacers.
     **drawer_routes(GEOMETRY_LOCK, DEFAULT_OUTPUT, detect_bambu_studio, launch_slicer),
+    # Welcome screen: spaces, recent spaces, no-inventory folders.
+    **space_routes(DEFAULT_OUTPUT, load_preferences, save_preferences),
 }
 
 
