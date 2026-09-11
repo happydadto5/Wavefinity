@@ -894,9 +894,10 @@ GitHub before reporting that the work is finished.**
 **One prompt may become one cohesive commit.** Keep all code, tests, and
 documentation needed to complete that prompt together; do not split a single
 request into artificial commits just to make the history look smaller. When a
-prompt is complete and its tests pass, commit and push it so the history has a
-clear entry and the work is backed up. Separate unrelated prompts into separate
-commits when practical. No feature branches or pull requests are needed for
+prompt is complete, commit and push it so the history has a clear entry and the
+work is backed up; tests are not a completion gate except for the rare Class C
+changes defined above. Separate unrelated prompts into separate commits when
+practical. No feature branches or pull requests are needed for
 this local workflow:
 
 ```powershell
@@ -909,10 +910,11 @@ Add a dated entry to [changelog.md](changelog.md) for user-facing changes.
 Do NOT log to `TESTING.md` — that file is retired and archived.
 
 **Do not be obsessed with testing** (see the section of that name near the top).
-Short version: tweaking code, UI, defaults, styling, small refactors — **STOP all testing**
-and do not test at all; read the change and reason it through. Writing genuinely new
-logic — do one small targeted check (a script or a single focused test) to make sure the
-new code works; do not run the full suite or the browser.
+Short version: tweaking code, UI, defaults, styling, small refactors, and ordinary
+new feature logic — **STOP all testing** and do not test at all; read the change and
+reason it through. Only a genuine Class C shared-contract or architecture change
+earns minimal risk-directed checks. Never run the full suite or browser for routine
+work.
 
 **Write commit messages that say why.** The history is the record. A message
 that explains the reasoning is worth more here than a tidy branch structure.
@@ -957,9 +959,9 @@ unpleasant to resolve by hand. Small, frequent, pushed commits keep that from
 happening.
 
 If a push is rejected because someone else pushed first, `git pull --rebase`
-then push again. If that surfaces a real conflict, resolve it and **re-run the
-full suite** before pushing — a merged file that imports cleanly can still be
-geometrically wrong, and only the tests will tell you.
+then push again. If that surfaces a real conflict, resolve it, inspect the merged
+diff, and continue under the same Class A/B/C testing rule. Do not automatically
+run the full suite just because a rebase occurred.
 
 Also worth knowing before editing: the **traps** section below, and that
 `.venv/`, `__pycache__/` and `generated/` are gitignored and should stay that
