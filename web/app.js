@@ -370,6 +370,7 @@ function syncRimLabelFromFeatures() {
   }
   state.design.label = rimText;
   state.design.label_position = rimText ? rimSide : "bottom";
+  if (rimText) seedPartNameFromLabel(rimText);
 }
 
 function syncEasyCleanControls() {
@@ -471,6 +472,12 @@ function syncForm() {
   $("#base-thickness").value = fmt(box.base_thickness ?? 0.6);
   $("#base-thickness-setting").hidden = $("#standard-base").checked;
   syncEasyCleanControls();
+  if (!state.design.part_name || !state.design.part_name.trim()) {
+    const labelCandidate = state.design.label || state.design.b4b?.label_text || state.design.layout?.features?.find(f => f.kind === "text")?.options?.text;
+    if (labelCandidate && !SIZE_LIKE_TEXT.test(labelCandidate)) {
+      state.design.part_name = labelCandidate.trim();
+    }
+  }
   $("#part-name").value = state.design.part_name || "";
   const scoopEl = $("#scoop");
   if (scoopEl) scoopEl.checked = Boolean(state.design.scoop);
@@ -1292,6 +1299,7 @@ function wireControls() {
       changedDesign();
     }));
   $("#b4b-label-text").addEventListener("input", () => {
+    seedPartNameFromLabel($("#b4b-label-text").value);
     state.canGenerate = false; updateGenerateAvailability(); changedDesign();
   });
   $("#b4b-label-enabled").addEventListener("change", () => {
@@ -2227,6 +2235,7 @@ function renderDraftFields() {
     const idx = parseInt(input.dataset.divisionIndex, 10);
     labels[idx] = input.value;
     state.draft.options.division_labels = labels;
+    seedPartNameFromLabel(input.value);
     renderLayout2D();
     refreshDraftSoon();
   }));
@@ -2869,7 +2878,10 @@ function updateDraftFromFields(event) {
   if (info.flags.text) {
     const fields = $("#draft-fields");
     const said = $('[data-draft="option:text"]', fields);
-    if (said) one.options.text = said.value;
+    if (said) {
+      one.options.text = said.value;
+      seedPartNameFromText(one);
+    }
     one.options.level = get("option:level") === "rim" ? "rim" : "base";
     if (one.options.level === "rim") {
       one.options.rim_side = get("option:rim_side") || one.options.rim_side || "back";
@@ -3165,19 +3177,23 @@ const SIZE_LIKE_TEXT = /^\s*\d+(\.\d+)?\s*(mm)?\s*$/i;
 // The first real piece of lettering fills in a blank Part Name, once. After
 // that the two are independent: renaming either never touches the other, so a
 // bin can say "M3" on the floor and still save as "Driver rack".
-//
+function seedPartNameFromLabel(said) {
+  const partInput = $("#part-name");
+  if (!partInput || partInput.value.trim() !== "") return;
+  const tidy = String(said ?? "").trim();
+  if (!tidy || SIZE_LIKE_TEXT.test(tidy)) return;
+  partInput.value = tidy;
+  if (state.design) state.design.part_name = tidy;
+}
+
 // "Real" means the user typed it. A text part starts life with placeholder
 // lettering so it is valid and visible the moment it is added, and naming
 // every file after that placeholder would be worse than leaving it blank.
 function seedPartNameFromText(one) {
   if (!one || one.kind !== "text") return;
-  const partInput = $("#part-name");
-  if (!partInput || partInput.value.trim() !== "") return;
   const said = String(one.options?.text ?? "").trim();
-  if (!said || SIZE_LIKE_TEXT.test(said)) return;
   if (said === String(state.draftStartingText ?? "").trim()) return;
-  partInput.value = said;
-  state.design.part_name = said;
+  seedPartNameFromLabel(said);
 }
 
 // Where /api/feature/apply should land the current draft:
@@ -5581,11 +5597,46 @@ function setItemStatus(id, status, text) {
   if (statusSpan) statusSpan.textContent = text;
 }
 
+function showBinNameRequiredDialog() {
+  const dialog = $("#bin-name-dialog");
+  const partInput = $("#part-name");
+  if (!dialog || typeof dialog.showModal !== "function") {
+    alert("Bins must have a name");
+    if (partInput) {
+      partInput.focus();
+      partInput.select();
+    }
+    return;
+  }
+  const onDone = () => {
+    if (partInput) {
+      partInput.focus();
+      partInput.select();
+    }
+  };
+  dialog.addEventListener("close", onDone, { once: true });
+  if (!dialog.open) {
+    dialog.showModal();
+    $("#bin-name-dialog-ok")?.focus();
+  }
+}
+
+function checkPartNamePresent(target = "bin") {
+  if (target === "connector") return true;
+  const val = ($("#part-name")?.value || "").trim();
+  if (!val) {
+    showBinNameRequiredDialog();
+    return false;
+  }
+  return true;
+}
+
 async function generateParts(target) {
   if (state.designMutationBusy || isGenerating) {
     toast("Finish the current action before generating files.", true);
     return;
   }
+  if (!checkPartNamePresent(target)) return;
   if ((target === "all" || target === "bin") && !state.canGenerate) {
     toast("Resolve the highlighted issue before generating.", true);
     return;
@@ -5739,6 +5790,7 @@ async function generate(path, selector) {
 }
 
 async function printModel(target = "bin") {
+  if (!checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
     toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
     return;
@@ -5918,8 +5970,22 @@ function wireAboutDialog() {
   }
 }
 
+function wireBinNameDialog() {
+  const dialog = $("#bin-name-dialog");
+  const okBtn = $("#bin-name-dialog-ok");
+  if (okBtn && dialog) {
+    okBtn.addEventListener("click", () => dialog.close());
+  }
+  if (dialog) {
+    dialog.addEventListener("click", (e) => {
+      if (e.target === dialog) dialog.close();
+    });
+  }
+}
+
 async function init() {
   wireAboutDialog();
+  wireBinNameDialog();
   try {
     const catalog = await api("/api/catalog");
     state.catalog = catalog;
