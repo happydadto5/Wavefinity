@@ -1815,6 +1815,34 @@ class InsertEditorTests(unittest.TestCase):
         )
         self.assertTrue(built)
 
+    def test_starter_part_builds_on_a_short_bin(self) -> None:
+        # A starter sized to fill a short bin used to land in the strip a side
+        # connector's arms need, so adding one raised "must stay below N mm so
+        # a connector can seat" the instant it appeared - an error for doing
+        # nothing but clicking Add, on a bin the app itself accepted.
+        for kind in ("pocket", "post", "slot", "steps"):
+            for z in (12.0, 16.0, 24.0, 30.0):
+                with self.subTest(kind=kind, z=z):
+                    spec = BoxSpec(16.0, 16.0, z)
+                    feature = organizer_app.default_feature(spec, kind)
+                    built = build_features(
+                        spec, [feature], organizer_app.base_height(spec, "fused")
+                    )
+                    self.assertTrue(built)
+
+    def test_starter_part_keeps_full_size_on_a_roomy_bin(self) -> None:
+        # The connector-safe inset must only bite on bins small enough to need
+        # it; a roomy bin keeps the established 16 mm starter footprint.
+        spec = BoxSpec(64.0, 48.0, 40.0)
+        for kind in ("pocket", "post"):
+            with self.subTest(kind=kind):
+                feature = organizer_app.default_feature(spec, kind)
+                self.assertEqual(feature.zone.width, 16.0)
+                self.assertEqual(feature.zone.depth, 16.0)
+        self.assertEqual(
+            organizer_app.default_feature(spec, "post").options["diameter"], 12.0
+        )
+
     def test_switching_to_cartridge_resnaps_existing_supports(self) -> None:
         spec = BoxSpec(64.0, 64.0, 40.0)
         original = organizer_app.Feature("pocket", organizer_app.Zone(-8, -8, 8, 8))

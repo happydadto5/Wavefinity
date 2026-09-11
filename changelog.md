@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-09-10 — B4B lid seats properly; starter parts fit short bins
+
+- **The B4B lid could not close.** The case wall stopped short of where the lid
+  sits, and the locating skirt that bridged the gap was driven into the wall
+  itself. Past roughly 112 mm of case the overlap grew large enough that B4B
+  refused to generate at all. The wall now rises to meet the lid, so the rim is
+  a real seat and the lid lands flat on it.
+- **The secure lid exported as seven loose pieces** — the plate plus every hinge
+  knuckle and latch ear — which would have come off the print bed as separate
+  parts. They are now tied into one solid.
+- **The inside is now as deep as the capacity readout promises.** It used to be
+  short by the floor thickness, or by nearly 3 mm with stacking on.
+- **Lightweight and Standard latches now actually differ.** Both used to need
+  the same force to snap shut; the detent setting had no effect on the shape.
+- **Latch levers print flat**, resting on a full face instead of an edge, so
+  they need no supports.
+- **Adding a part to a short bin no longer errors.** A new pocket, post, slot or
+  steps started out filling the bin, which put it in the strip a side connector
+  needs, so it failed the moment it appeared. Starters now keep clear of that
+  strip on small bins and are unchanged on roomy ones.
+
 ## 2026-09-10 — Bin for Bins (B4B) container mode
 
 - New **Bin for Bins (B4B)?** checkbox near the top of *Build your bin*. It turns

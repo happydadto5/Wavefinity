@@ -72,6 +72,7 @@ from organizer_b4b import (
 from organizer_inserts import (
     BASE_PLATE,
     CARTRIDGE_PITCH,
+    CONNECTOR_EDGE_KEEP_OUT,
     EDITOR_SNAP,
     FEATURE_BUILDERS,
     INSERT_CLEARANCE,
@@ -1496,6 +1497,36 @@ def run_command(args: argparse.Namespace) -> dict[str, object]:
     raise RuntimeError(f"unsupported command: {args.command}")
 
 
+def _starter_span(
+    available: float, wanted: float, mode: str = "fused", snap: float = EDITOR_SNAP
+) -> float:
+    """Largest starter span that keeps a new holder out of the connector strip.
+
+    A starter sized to fill a small bin lands in the edge strip a side
+    connector's arms need, and the draft then fails the instant the part is
+    added - the user gets an error for doing nothing but clicking Add, on a bin
+    the app itself called valid.  Backing the starter off to the connector-safe
+    span keeps it buildable; dragging it out to the wall afterwards is a
+    deliberate act and still earns the same explanatory error.
+
+    Cartridge mode is left alone: its grid is already inset clear of the strip,
+    so insetting again would only shrink the cell the part is meant to fill.
+
+    Bins too small for a useful connector-safe span are left alone too, so they
+    still report why rather than starting with a part too small to see.
+    """
+    span = min(wanted, available)
+    if mode == "cartridge":
+        return span
+    safe = available - 2.0 * CONNECTOR_EDGE_KEEP_OUT
+    if span < safe - 1e-9:      # strictly clear, never sitting on the line
+        return span
+    stepped = math.floor(safe / snap) * snap
+    if stepped >= safe - 1e-9:          # strictly inside, never on the line
+        stepped -= snap
+    return stepped if stepped >= 4.0 else span
+
+
 def default_feature(
     box: BoxSpec,
     kind: str,
@@ -1560,20 +1591,26 @@ def default_feature(
         # the established 12 mm default unchanged.
         run_limit = bounds.width if along == "x" else bounds.depth
         across_limit = bounds.depth if along == "x" else bounds.width
-        diameter = min(12.0, run_limit, across_limit)
-        run = min(16.0, run_limit)
-        across = min(16.0, across_limit)
+        run = _starter_span(run_limit, 16.0, mode)
+        across = _starter_span(across_limit, 16.0, mode)
+        # The peg has to fit the zone it actually got, not the bin, and needs
+        # material around it - sizing it to the bare span left a 12 mm peg in a
+        # 12 mm zone, or worse, a peg wider than the zone once that snapped
+        # down.  A cartridge peg is meant to fill its cell, so it keeps the
+        # bare span.
+        margin = 0.0 if mode == "cartridge" else MIN_FEATURE_GAP
+        diameter = min(12.0, run - margin, across - margin)
         width, depth = ((run, across) if along == "x" else (across, run))
         feature_options = {"diameter": diameter, "height": 16.0, "taper": 0.4}
     elif kind == "slot":
-        run = min(32.0, bounds.width if along == "x" else bounds.depth)
+        run = _starter_span(bounds.width if along == "x" else bounds.depth, 32.0, mode)
         # One explicit starter slot with a snug 8 mm Base. Raising Quantity in
         # the editor grows this axis automatically.
-        across = min(8.0, bounds.depth if along == "x" else bounds.width)
+        across = _starter_span(bounds.depth if along == "x" else bounds.width, 8.0, mode)
         width, depth = ((run, across) if along == "x" else (across, run))
     elif kind == "steps":
-        run = min(32.0, bounds.width if along == "x" else bounds.depth)
-        across = min(32.0, bounds.depth if along == "x" else bounds.width)
+        run = _starter_span(bounds.width if along == "x" else bounds.depth, 32.0, mode)
+        across = _starter_span(bounds.depth if along == "x" else bounds.width, 32.0, mode)
         width, depth = ((run, across) if along == "x" else (across, run))
     elif kind == "scoop":
         along = "x"
@@ -1587,7 +1624,8 @@ def default_feature(
         feature_options = {"text": "label", "auto": True, "quarter_turns": 0,
                            "raised": False, "depth": TEXT_DEPTH}
     else:
-        width, depth = min(16.0, bounds.width), min(16.0, bounds.depth)
+        width = _starter_span(bounds.width, 16.0, mode)
+        depth = _starter_span(bounds.depth, 16.0, mode)
     raw = Zone(-width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0)
     one_zone = snapped_zone(raw, box, mode)
     if kind == "scoop":
