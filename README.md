@@ -51,31 +51,30 @@ python -m venv .venv
 Those ten pins are the whole dependency list. `matplotlib` is not optional — it
 supplies the font outlines for floor labels.
 
-## Do not be obsessed with testing
+## Developer & AI coding guidelines
 
-We do NOT need to be obsessed with testing. STOP all unnecessary testing.
-In this project, tests and manual click-throughs have caught almost zero real defects. Time spent on them is mostly wasted. The rules:
+All instructions for coding agents (OpenAI, Anthropic, Google) and human contributors are centralized here and in [speed.md](speed.md). Do not create tool-specific instructions elsewhere; refer to this section.
 
-**Tweaking existing code, adjusting UI, moving a button, changing a default,
-renaming, small refactors, wording, styling — STOP ALL TESTING.** No unit test, no
-`unittest` run, no starting the app, no browser checks. Read the change, reason it
-through, and move on. If you find yourself opening a screenshot to check a
-CSS tweak, stop.
+### 1. User communication preferences
+- **Operate in "caveman mode"**: Keep messages simple, plain, and short.
+- **User is NOT a programmer**: Avoid code jargon, technical implementation details, and long explanations unless explicitly asked.
+- **Show progress**: Give the user a clear, general sense of progress by stating the steps in layman's terms.
 
-**Writing genuinely new code or new logic — do one small, targeted check that proves
-it works.** Write one focused test or run one targeted check to make sure the new code
-actually functions. Not the full test suite. Not the browser. One targeted check, then done.
+### 2. Commit & push workflow
+- Make all changes needed for one coherent task.
+- Review the diff once.
+- Commit once and push to cloud (`origin/main`) after every completed task so the live hosted app ([Wavefinity on Render](https://wavefinity.onrender.com/)) stays up to date.
+- Avoid micro-checkpoint churn.
 
-**We no longer keep or update `TESTING.md`.** It has been moved into the untracked `archive/`
-folder. Do not log test runs to any file.
+### 3. Fast vibe-coding & testing policy ([speed.md](speed.md))
+Authoritative policy: [speed.md](speed.md). Summary:
 
-**When in doubt: DO NOT TEST.** Treat uncertain work as a tweak and stop.
-Only run one focused check when it is unquestionably new logic that needs
-proof it runs at all.
-
-### Cloud deployments & updates
-
-All code gets committed and pushed to the cloud (`origin/main`) after every change so the live hosted app ([Wavefinity on Render](https://wavefinity.onrender.com/)) stays up to date.
+- **Default rule: NO TESTING.** Implement first, reason carefully about the changed code, inspect the diff, and move on.
+- The fact that code is *new* does **not** justify testing.
+- **Class A (small/local tweaks)** and **Class B (moderate/contained logic)**: **NO testing.** No unit tests, no dev server launches, no browser checks, no screenshots.
+- **Class C (major high-blast-radius changes only)**: Testing is permitted *only* when changing shared project contracts across multiple features (e.g. core wave profile, `BoxSpec` semantics, global registry/export). Even then, keep testing minimal (max 1 full-suite run).
+- **No test bureaucracy**: No `TESTING.md`, test logs, matrices, or test-count summaries.
+- When in doubt: **DO NOT TEST.** Reason through the code statically.
 
 ### Using the browser UI
 
