@@ -1727,7 +1727,7 @@ def design_from_dict(
             latch_strength=str(b4b_raw.get("latch_strength", "standard")),
             lid_headroom_mm=float(b4b_raw.get("lid_headroom_mm", 1.0)),
             label_text=str(b4b_raw.get("label_text", "")),
-            label_location=str(b4b_raw.get("label_location", "none")),
+            label_location=str(b4b_raw.get("label_location", "top")),
             stacking=bool(b4b_raw.get("stacking", False)),
         )
     x, y = float(raw["x"]), float(raw["y"])
@@ -1784,11 +1784,13 @@ def design_from_dict(
             easy_clean=bool(raw.get("easy_clean", False)),
             flat_inside=float(raw.get("flat_inside", 0.0) or 0.0),
         )
-        # Validation passed on the raw spec; normalising a valid B4BSpec now is
-        # fine and gives the geometry layer the clean combination it expects.
+        # Normalize legacy no-lid data and adopt the actual B4B size so reopened
+        # and saved designs show what will print.
         box = replace(
             box, easy_clean=False, flat_inside=0.0, b4b=box.b4b.normalised()
         )
+        from organizer_b4b import b4b_effective_box
+        box = b4b_effective_box(box)
         layout = Layout((), "fused", EDITOR_SNAP)
         label = str(data.get("label", ""))
         location = label_position(data.get("label_position", "bottom"))

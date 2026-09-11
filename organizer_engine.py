@@ -274,7 +274,7 @@ class B4BSpec:
     latch_strength: str = "standard"   # lightweight | standard
     lid_headroom_mm: float = 1.0       # UI: Lid snugness
     label_text: str = ""
-    label_location: str = "none"       # none | top | front
+    label_location: str = "top"        # none | top | front
     stacking: bool = False
 
     def __post_init__(self) -> None:
@@ -300,18 +300,17 @@ class B4BSpec:
             raise ValueError(f"lid snugness must be one of {allowed} mm")
 
     def normalised(self) -> "B4BSpec":
-        """Cross-field cleanup: a dependent setting off whenever its parent is.
+        """Return the coherent B4B configuration used by geometry.
 
-        Applied at the design/UI boundary so the geometry layer never sees an
-        impossible combination (secure lid without a lid, top label without a
-        lid, stacking without a lid, hardware while the lid is passive).
+        Enabled B4B designs always have a lid. Older no-lid files reopen as a
+        Lid Only design; dependent hardware and stacking settings stay off.
+        Label location is a stored preference, not a request for geometry
+        while the label text is blank.
         """
-        lid = self.lid
-        secure = self.secure_lid and lid
-        stacking = self.stacking and lid
-        location = self.label_location
-        if location == "top" and not lid:
-            location = "none"
+        legacy_lid = bool(self.lid)
+        lid = True if self.enabled else legacy_lid
+        secure = bool(self.secure_lid) and legacy_lid
+        stacking = bool(self.stacking) and legacy_lid
         latch_count = self.latch_count if secure else "auto"
         latch_strength = self.latch_strength
         return B4BSpec(
@@ -322,7 +321,7 @@ class B4BSpec:
             latch_strength=latch_strength,
             lid_headroom_mm=self.lid_headroom_mm,
             label_text=self.label_text,
-            label_location=location,
+            label_location=self.label_location,
             stacking=stacking,
         )
 

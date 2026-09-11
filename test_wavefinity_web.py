@@ -58,6 +58,24 @@ def _text_feature(said, auto=False, zone=(-20.0, -6.0, 20.0, 6.0), **options):
 
 
 class WebApplicationTests(unittest.TestCase):
+    def test_b4b_blank_label_preference_keeps_preview_intact(self):
+        for location in ("top", "front"):
+            with self.subTest(location=location):
+                design = default_design()
+                design["box"].update({
+                    "x": 64.0, "y": 48.0, "z": 40.0,
+                    "b4b": {
+                        "enabled": True, "lid": True, "secure_lid": True,
+                        "latch_count": "auto", "latch_strength": "standard",
+                        "lid_headroom_mm": 1.0, "label_text": "",
+                        "label_location": location, "stacking": False,
+                    },
+                })
+                preview = preview_payload({"design": design})
+                self.assertTrue(preview["fits"], preview["message"])
+                self.assertTrue(preview["geometry"])
+                self.assertEqual(preview["b4b"]["label_location"], "none")
+
     def test_catalog_exposes_every_interior_part_and_safe_default_design(self):
         catalog = catalog_payload()
         parts = {part["kind"]: part for part in catalog["parts"]}

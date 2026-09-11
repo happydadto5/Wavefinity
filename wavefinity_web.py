@@ -805,10 +805,9 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     case to render it."""
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     eff = b4b_effective_box(box)
-    # The design the browser adopts carries the *effective* grown footprint so
-    # Width/Length show what will actually print and save. The derived stacking
-    # base thickness is deliberately NOT surfaced as a manual value - only X/Y.
-    adopted = replace(box, x=eff.x, y=eff.y)
+    # The browser adopts every effective printable dimension so its fields
+    # always match what will print and save.
+    adopted = replace(box, x=eff.x, y=eff.y, z=eff.z)
     message = ""
     geometry: list[dict[str, Any]] = []
     b4b_block: dict[str, Any] | None = None
@@ -822,6 +821,20 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
             ]
     except Exception as error:  # surface the real, actionable message
         message = str(error)
+        # A bad optional label must not erase the body/lid/latch preview.
+        if box.b4b.label_text.strip() and box.b4b.label_location in {"top", "front"}:
+            try:
+                label_free = replace(
+                    box,
+                    b4b=replace(box.b4b, label_text="", label_location="none"),
+                )
+                with GEOMETRY_LOCK:
+                    geometry = [
+                        {"points": points, "kind": kind, "normal": normal, "layer": layer}
+                        for points, kind, normal, layer in b4b_preview_parts(label_free)
+                    ]
+            except Exception:
+                pass
         try:
             b4b_block = b4b_summary(box)
         except Exception:

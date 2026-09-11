@@ -45,14 +45,15 @@ class B4BSpecTests(unittest.TestCase):
         for good in (0.5, 1.0, 2.0):
             self.assertEqual(B4BSpec(lid_headroom_mm=good).lid_headroom_mm, good)
 
-    def test_normalised_drops_dependents_when_lid_off(self):
+    def test_legacy_nolid_normalises_to_lid_only(self):
         n = B4BSpec(
             enabled=True, lid=False, secure_lid=True, stacking=True,
             label_location="top", latch_count="2",
         ).normalised()
+        self.assertTrue(n.lid)
         self.assertFalse(n.secure_lid)
         self.assertFalse(n.stacking)
-        self.assertEqual(n.label_location, "none")
+        self.assertEqual(n.label_location, "top")
         self.assertEqual(n.latch_count, "auto")
 
 
@@ -96,6 +97,14 @@ class B4BCapacityTests(unittest.TestCase):
         self.assertTrue(b4b.b4b_grew(box))
         cx, cy = b4b.b4b_capacity_units(box)
         self.assertGreaterEqual(min(cx, cy), 1)
+
+    def test_latched_lid_grows_to_printable_minimum_height(self):
+        latched = BoxSpec(x=64, y=48, z=12, b4b=B4BSpec(enabled=True))
+        lid_only = BoxSpec(
+            x=64, y=48, z=12, b4b=B4BSpec(enabled=True, secure_lid=False),
+        )
+        self.assertEqual(b4b.b4b_effective_box(latched).z, b4b.B4B_LATCHED_MIN_HEIGHT)
+        self.assertEqual(b4b.b4b_effective_box(lid_only).z, 12)
 
     def test_stacking_reinforces_base_only_when_on(self):
         plain = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
@@ -238,6 +247,17 @@ class B4BGeometryTests(unittest.TestCase):
         names = [n for n, _ in b4b.b4b_build_parts(box)]
         self.assertEqual(names, ["B4B Body", "B4B Lid"])
 
+    def test_blank_label_preference_creates_no_label_parts(self):
+        for location in ("top", "front"):
+            with self.subTest(location=location):
+                box = BoxSpec(
+                    x=64, y=48, z=40,
+                    b4b=B4BSpec(enabled=True, label_location=location),
+                )
+                names = [name for name, _mesh in b4b.b4b_build_parts(box)]
+                self.assertFalse(any("Label" in name for name in names))
+                self.assertEqual(b4b.b4b_summary(box)["label_location"], "none")
+
     def test_stacking_has_four_symmetric_locators(self):
         box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True, stacking=True))
         eff = b4b.b4b_effective_box(box)
@@ -267,12 +287,13 @@ class B4BValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             b4b.validate_b4b_design(box, flat_inside=0.5)
 
-    def test_normalisation_enforces_lid_dependencies(self):
+    def test_legacy_nolid_normalisation_keeps_lid_only(self):
         n = B4BSpec(
             enabled=True, lid=False, secure_lid=True, stacking=True,
             label_location="top",
         ).normalised()
-        self.assertEqual(n.label_location, "none")
+        self.assertTrue(n.lid)
+        self.assertEqual(n.label_location, "top")
         self.assertFalse(n.secure_lid)
         self.assertFalse(n.stacking)
 
@@ -288,9 +309,10 @@ class B4BValidationTests(unittest.TestCase):
             "layout": {"mode": "fused", "features": []},
         }
         box, *_ = design_from_dict(data)
+        self.assertTrue(box.b4b.lid)
         self.assertFalse(box.b4b.secure_lid)
         self.assertFalse(box.b4b.stacking)
-        self.assertEqual(box.b4b.label_location, "none")
+        self.assertEqual(box.b4b.label_location, "top")
 
 
 class B4BSerializationTests(unittest.TestCase):
@@ -349,7 +371,7 @@ class B4BGenerationTests(unittest.TestCase):
         self.assertNotIn("Box 64", b4b_filename(box))
         self.assertTrue(b4b_filename(box).startswith("B4B "))
 
-    def test_passive_and_nolid_object_sets(self):
+    def test_passive_and_legacy_nolid_object_sets(self):
         with tempfile.TemporaryDirectory() as d:
             passive = generate_organizer_files(
                 BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, secure_lid=False)),
@@ -360,7 +382,7 @@ class B4BGenerationTests(unittest.TestCase):
                 BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, lid=False)),
                 Layout((), "fused"), Path(d), part_name="nolid",
             )
-            self.assertEqual(nolid["object_names"], ["B4B Body"])
+            self.assertEqual(nolid["object_names"], ["B4B Body", "B4B Lid"])
 
 
 if __name__ == "__main__":

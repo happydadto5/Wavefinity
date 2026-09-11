@@ -404,8 +404,7 @@ function syncEasyCleanControls() {
   }
 }
 
-function populateWallChoices(box) {
-  const select = $("#wall-thickness");
+function populateWallChoices(box, select = $("#wall-thickness")) {
   const rules = state.catalog?.wall_rules || {};
   const fallbackLabels = [
     "Very thin (experimental)", "Thin", "Light", "Standard",
@@ -573,8 +572,9 @@ function updateInteriorModeVisibility(reveal = false) {
 const B4B_DEFAULTS = {
   enabled: false, lid: true, secure_lid: true, latch_count: "auto",
   latch_strength: "standard", lid_headroom_mm: 1, label_text: "",
-  label_location: "none", stacking: false,
+  label_location: "top", stacking: false,
 };
+const B4B_LATCHED_MIN_HEIGHT = 16;
 
 function b4bState() {
   return { ...B4B_DEFAULTS, ...(state.design?.box?.b4b || {}) };
@@ -600,6 +600,10 @@ function applyB4BVisibility() {
   if (modeLabel) modeLabel.hidden = on;
   const ecRow = $("#easy-clean")?.closest("label");
   if (ecRow) ecRow.hidden = on;
+  const wallsRow = $("#standard-walls")?.closest("label");
+  if (wallsRow) wallsRow.hidden = on;
+  hide("#wall-thickness-setting", on || $("#standard-walls")?.checked);
+  hide("#thin-wall-warning", on || $("#standard-walls")?.checked);
   hide("#easy-clean-style-setting", on || !$("#easy-clean")?.checked);
   hide("#easy-clean-radius-setting", on || !$("#easy-clean")?.checked);
   const connectorSection = document.querySelector('.control-section[data-section="connector"]');
@@ -612,45 +616,29 @@ function applyB4BVisibility() {
     document.querySelector('.view-tab[data-view="3d"]')?.click();
   }
   if (on) {
-    $("#b4b-lid-options").hidden = !$("#b4b-lid").checked;
-    $("#b4b-secure-options").hidden = !($("#b4b-lid").checked && $("#b4b-secure-lid").checked);
+    $("#b4b-secure-options").hidden = $("#b4b-lid-type").value !== "latched";
   }
 }
 
-// Form -> form: enforce the B4B option dependencies directly on the controls
-// from their own current values, so a user edit is never overwritten from
-// stale state. `changed` is the selector the user just toggled, if any.
-function normalizeB4BDependentControls(changed) {
-  const lid = $("#b4b-lid").checked;
-  if (!lid) {
-    // no lid => no secure lid, no stacking, no top label
-    $("#b4b-secure-lid").checked = false;
-    $("#b4b-stacking").checked = false;
-    if ($("#b4b-label-location").value === "top") {
-      $("#b4b-label-location").value = "none";
-    }
-  }
-  const secure = lid && $("#b4b-secure-lid").checked;
-  // passive lid => no hinge/latch controls
-  $("#b4b-secure-lid").disabled = !lid;
-  $("#b4b-stacking").disabled = !lid;
+function normalizeB4BDependentControls() {
+  const secure = $("#b4b-lid-type").value === "latched";
   $("#b4b-latch-count").disabled = !secure;
   $("#b4b-latch-strength").disabled = !secure;
-  const topOpt = $("#b4b-label-location").querySelector('option[value="top"]');
-  if (topOpt) topOpt.disabled = !lid;
 }
 
 function syncB4BForm() {
   const b4b = b4bState();
   $("#b4b-enabled").checked = Boolean(b4b.enabled);
-  $("#b4b-lid").checked = b4b.lid !== false;
-  $("#b4b-secure-lid").checked = b4b.secure_lid !== false;
+  $("#b4b-lid-type").value = b4b.lid !== false && b4b.secure_lid !== false
+    ? "latched" : "lid_only";
   $("#b4b-stacking").checked = Boolean(b4b.stacking);
   $("#b4b-lid-snugness").value = String(b4b.lid_headroom_mm ?? 1);
   $("#b4b-latch-count").value = b4b.latch_count || "auto";
   $("#b4b-latch-strength").value = b4b.latch_strength || "standard";
   $("#b4b-label-text").value = b4b.label_text || "";
-  $("#b4b-label-location").value = b4b.label_location || "none";
+  $("#b4b-label-location").value = b4b.label_location === "front" ? "front" : "top";
+  populateWallChoices(state.design.box, $("#b4b-wall-thickness"));
+  $("#b4b-wall-thickness").value = fmt(state.design.box.wall);
   normalizeB4BDependentControls();
   applyB4BVisibility();
 }
@@ -667,21 +655,35 @@ function readB4BForm(design) {
   design.box.easy_clean = false;
   design.box.flat_inside = 0;
   if (design.layout) design.layout.mode = "fused";
-  const lid = $("#b4b-lid").checked;
-  const secure = lid && $("#b4b-secure-lid").checked;
-  let location = $("#b4b-label-location").value;
-  if (location === "top" && !lid) location = "none";
+  const secure = $("#b4b-lid-type").value === "latched";
+  const wallRules = state.catalog?.wall_rules || {};
+  const defaultWall = wallRules.default_mm ?? 0.8;
+  const wall = Math.max(wallRules.min_mm ?? 0.2, Math.min(
+    wallRules.max_mm ?? 2.4,
+    number($("#b4b-wall-thickness").value, design.box.wall ?? defaultWall),
+  ));
+  design.box.wall = wall;
+  design.box.standard_walls = Math.abs(wall - defaultWall) < 1e-9;
+  $("#wall-thickness").value = fmt(wall);
   design.box.b4b = {
     enabled: true,
-    lid,
+    lid: true,
     secure_lid: secure,
     latch_count: secure ? $("#b4b-latch-count").value : "auto",
     latch_strength: $("#b4b-latch-strength").value,
     lid_headroom_mm: parseFloat($("#b4b-lid-snugness").value) || 1,
     label_text: $("#b4b-label-text").value,
-    label_location: location,
-    stacking: lid && $("#b4b-stacking").checked,
+    label_location: $("#b4b-label-location").value,
+    stacking: $("#b4b-stacking").checked,
   };
+}
+
+function enforceB4BMinimumHeight(design = state.design, flash = true) {
+  const b4b = design?.box?.b4b;
+  if (!b4b?.enabled || !b4b.secure_lid || design.box.z >= B4B_LATCHED_MIN_HEIGHT) return;
+  design.box.z = B4B_LATCHED_MIN_HEIGHT;
+  $("#z").value = fmt(design.box.z);
+  if (flash) flashField($("#z"));
 }
 
 function renderB4BReadout() {
@@ -703,7 +705,7 @@ function renderB4BReadout() {
   if (b4b.grew) {
     grew.hidden = false;
     grew.textContent =
-      `Grown to ${b4b.outer_mm[0]} x ${b4b.outer_mm[1]} mm ` +
+      `Grown to ${b4b.outer_mm[0]} x ${b4b.outer_mm[1]} x ${b4b.outer_mm[2]} mm ` +
       `(${b4b.outer_units[0]} x ${b4b.outer_units[1]} units) to fit the interior and hardware.`;
   } else {
     grew.hidden = true;
@@ -735,6 +737,9 @@ async function toggleB4B(wantEnabled) {
     state.design.layout.mode = "fused";
     state.design.box.easy_clean = false;
   }
+  readB4BForm(state.design);
+  enforceB4BMinimumHeight();
+  applyB4BVisibility();
   changedDesign();
 }
 
@@ -826,6 +831,7 @@ function updateDesignFromForm() {
     axis: "y",
   };
   readB4BForm(design);
+  enforceB4BMinimumHeight(design);
   applyB4BVisibility();
 }
 
@@ -1201,19 +1207,18 @@ function wireControls() {
   $("#easy-clean-radius").addEventListener("input", changedDesign);
 
   $("#b4b-enabled").addEventListener("change", () => toggleB4B($("#b4b-enabled").checked));
-  ["#b4b-lid", "#b4b-secure-lid", "#b4b-stacking"].forEach(sel =>
+  ["#b4b-lid-type", "#b4b-stacking"].forEach(sel =>
     $(sel).addEventListener("change", () => {
-      // Commit the user's new click FIRST (form -> state), THEN apply the
-      // dependent-option rules and visibility. Never run syncB4BForm here: it
-      // is state -> form and would restore the old value over the click.
-      normalizeB4BDependentControls(sel);
+      normalizeB4BDependentControls();
       readB4BForm(state.design);
+      enforceB4BMinimumHeight();
       applyB4BVisibility();
       changedDesign();
     }));
-  ["#b4b-lid-snugness", "#b4b-latch-count", "#b4b-latch-strength", "#b4b-label-location"]
+  ["#b4b-wall-thickness", "#b4b-lid-snugness", "#b4b-latch-count", "#b4b-latch-strength", "#b4b-label-location"]
     .forEach(sel => $(sel).addEventListener("change", () => {
       readB4BForm(state.design);
+      enforceB4BMinimumHeight();
       changedDesign();
     }));
   $("#b4b-label-text").addEventListener("input", () => {
@@ -1363,11 +1368,6 @@ function wireControls() {
       event.preventDefault();
       restoreHistory(true);
     }
-  });
-  window.addEventListener("beforeunload", event => {
-    if (!state.design || !designHasChanges()) return;
-    event.preventDefault();
-    event.returnValue = "";
   });
   $("#connection").addEventListener("click", () => location.reload(true));
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
@@ -3520,14 +3520,15 @@ async function refreshPreview() {
     if (request !== state.previewRequest) return;
     const grownX = result.design?.box?.x !== state.design?.box?.x;
     const grownY = result.design?.box?.y !== state.design?.box?.y;
+    const grownZ = result.design?.box?.z !== state.design?.box?.z;
     state.preview = result;
     state.design = result.design;
     checkBinSizeChange();
-    // A B4B that auto-grew its footprint comes back with the effective X/Y as
-    // the real design dimensions: adopt them into the controls and flash the
-    // fields that the engine adjusted.
+    // A B4B preview returns its effective printable dimensions. Adopt them
+    // into the controls and flash every field the engine adjusted.
     if (grownX) flashField($("#x-size"));
     if (grownY) flashField($("#y-size"));
+    if (grownZ) flashField($("#z"));
     const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
     $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
     $("#preview-state").classList.toggle("status-error", Boolean(previewHasErrors));
@@ -5334,6 +5335,7 @@ async function saveDesign() {
     // visible draft explicitly so an immediate Save cannot download the older
     // server copy while the new value is still waiting in that pause.
     await commitVisibleDraft();
+    updateDesignFromForm();
     const body = JSON.stringify(state.design, null, 2) + "\n";
     const blob = new Blob([body], { type: "application/json" });
     const link = document.createElement("a");
@@ -5372,6 +5374,10 @@ function designHasChanges() {
         number($("#wall-thickness").value, visibleDesign.box.wall ?? wallRules.default_mm ?? 0.8),
       ));
   visibleDesign.part_name = $("#part-name").value;
+  if ($("#b4b-enabled").checked) {
+    readB4BForm(visibleDesign);
+    enforceB4BMinimumHeight(visibleDesign, false);
+  }
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
   const index = draftCommitIndex();

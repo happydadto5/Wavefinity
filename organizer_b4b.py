@@ -70,6 +70,9 @@ B4B_LID_SKIN = 1.6              # lid top plate thickness
 B4B_LID_SKIRT_WALL = 2.0       # locating skirt wall thickness
 B4B_LID_SEAT_CLEARANCE = 0.30  # lateral clearance, skirt inner face to body
 B4B_LID_SKIRT_LAP = 4.0        # how far the skirt laps down past the body rim
+# A latched lid needs a printable body wall below its latch pad, independent
+# of the selected latch strength.
+B4B_LATCHED_MIN_HEIGHT = 16.0
 
 # M3 hardware (no nuts, no inserts)
 B4B_M3_NOMINAL = 3.0
@@ -201,7 +204,7 @@ def b4b_effective_box(box: BoxSpec) -> BoxSpec:
     they alter the floor/perimeter the child bins must seat on.
     """
     b4b = box.b4b.normalised()
-    x, y = box.x, box.y
+    x, y, z = box.x, box.y, box.z
 
     # 1-unit interior minimum on both axes.
     guard = 0
@@ -220,6 +223,7 @@ def b4b_effective_box(box: BoxSpec) -> BoxSpec:
         if b4b.latch_count == "2":
             while x < B4B_TWO_LATCH_MIN_X - _EPS:
                 x += GRID_PITCH
+        z = max(z, B4B_LATCHED_MIN_HEIGHT)
 
     # Stacking needs a footprint wide enough that the four corner locators do
     # not run into each other (see _stack_locator_centres): enforce the minimum
@@ -234,6 +238,7 @@ def b4b_effective_box(box: BoxSpec) -> BoxSpec:
         box,
         x=x,
         y=y,
+        z=z,
         base_thickness=base_thickness,
         easy_clean=False,
         easy_clean_style="bevel",
@@ -248,6 +253,7 @@ def b4b_grew(box: BoxSpec) -> bool:
     return not (
         math.isclose(eff.x, box.x)
         and math.isclose(eff.y, box.y)
+        and math.isclose(eff.z, box.z)
         and math.isclose(eff.base_thickness, box.base_thickness)
     )
 
@@ -1090,26 +1096,15 @@ def validate_b4b_design(
     """Deterministic, actionable checks.  Raises ``ValueError`` on the first
     problem; never swallows a geometry error behind a generic message.
 
-    Cross-field contradictions are checked on the *raw* ``box.b4b`` first, so a
-    saved/imported design that carries an impossible combination
-    (``lid=false`` with ``secure_lid``/``stacking``/``label_location='top'``)
-    fails with an actionable message instead of being silently rewritten by
-    ``normalised()``.  The rest of the checks run on the normalised spec - the
-    same one the geometry is built from.  ``deep=True`` additionally runs the
+    Older no-lid files are normalized to Lid Only for the editable B4B model.
+    The remaining checks run on that normalized spec - the same one the
+    geometry is built from. ``deep=True`` additionally runs the
     sampled moving-part and thread checks (:func:`_validate_b4b_mechanics`); it
     builds meshes, so callers on the preview hot path leave it off.
     """
     raw = box.b4b
     if not raw.enabled:
         raise ValueError("validate_b4b_design called on a non-B4B design")
-    # Authoritative data must be rejected as supplied, before normalisation.
-    if raw.secure_lid and not raw.lid:
-        raise ValueError("secure lid (hinges & latches) needs the lid enabled")
-    if raw.stacking and not raw.lid:
-        raise ValueError("stacking needs the lid enabled")
-    if raw.label_location == "top" and not raw.lid:
-        raise ValueError("a top label needs the lid enabled")
-
     b4b = raw.normalised()
     if layout_feature_count:
         raise ValueError(
@@ -1168,7 +1163,7 @@ def b4b_summary(box: BoxSpec) -> dict:
         "secure_lid": b4b.secure_lid,
         "lid_headroom_mm": b4b.lid_headroom_mm,
         "stacking": b4b.stacking,
-        "label_location": b4b.label_location,
+        "label_location": b4b.label_location if b4b.label_text.strip() else "none",
         "label_text": b4b.label_text,
         "capacity_text": (
             f"Fits bins totaling {cx} x {cy} units ({mx:g} x {my:g} mm)"
@@ -1201,7 +1196,8 @@ def b4b_body_with_features(box: BoxSpec) -> trimesh.Trimesh:
     whether the frame is present.
     """
     body = make_b4b_body(box)
-    if b4b_effective_box(box).b4b.label_location == "front":
+    b4b = b4b_effective_box(box).b4b
+    if b4b.label_location == "front" and b4b.label_text.strip():
         frame, _plate, _centre = b4b_front_label_geometry(box)
         body = union([body, frame])
         body.remove_unreferenced_vertices()
@@ -1219,7 +1215,7 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
     eff = b4b_effective_box(box)
     body = b4b_body_with_features(box)
     geometry.extend(_mesh_preview_geometry(body, "b4b_rail"))
-    if eff.b4b.label_location == "front":
+    if eff.b4b.label_location == "front" and eff.b4b.label_text.strip():
         geometry.extend(
             _mesh_preview_geometry(make_b4b_front_label_plate(box), "b4b_label")
         )
@@ -1522,7 +1518,7 @@ def b4b_build_parts(box: BoxSpec) -> list[tuple[str, trimesh.Trimesh]]:
         for i, lever in enumerate(make_b4b_latches(box), start=1):
             groups.append([(f"B4B Latch {i}", _print_pose(lever, "latch"))])
 
-    if b4b.label_location == "front":
+    if b4b.label_location == "front" and b4b.label_text.strip():
         _frame, plate, centre = b4b_front_label_geometry(box)
         groups.append(
             [("B4B Front Label", _print_pose(translated(plate, centre), "plate"))]

@@ -64,18 +64,24 @@
               <span id="b4b-child-height" class="muted">Maximum bin height: — mm</span>
               <span id="b4b-grew" class="field-error" hidden></span>
             </div>
-            <label class="checkbox-row inline-option"><span>Lid</span><input id="b4b-lid" type="checkbox" checked></label>
-            <div id="b4b-lid-options" class="b4b-subgroup">
-              <label class="inline-select">Lid snugness
-                <select id="b4b-lid-snugness">
-                  <option value="0.5">0.5 mm — Tight</option>
-                  <option value="1" selected>1.0 mm — Standard</option>
-                  <option value="2">2.0 mm — Loose</option>
-                </select>
-              </label>
-              <label class="checkbox-row inline-option"><span>Hinges &amp; latches (secure lid)</span><input id="b4b-secure-lid" type="checkbox" checked></label>
-              <label class="checkbox-row inline-option"><span>Stacking</span><input id="b4b-stacking" type="checkbox"></label>
-              <div id="b4b-secure-options" class="b4b-subgroup">
+            <label class="inline-select">Wall thickness
+              <select id="b4b-wall-thickness"><option value="0.8">0.8 mm — Standard</option></select>
+            </label>
+            <label class="inline-select">Lid type
+              <select id="b4b-lid-type">
+                <option value="lid_only">Lid Only</option>
+                <option value="latched" selected>Latched Lid</option>
+              </select>
+            </label>
+            <label class="inline-select">Lid snugness
+              <select id="b4b-lid-snugness">
+                <option value="0.5">0.5 mm — Tight</option>
+                <option value="1" selected>1.0 mm — Standard</option>
+                <option value="2">2.0 mm — Loose</option>
+              </select>
+            </label>
+            <label class="checkbox-row inline-option"><span>Stacking</span><input id="b4b-stacking" type="checkbox"></label>
+            <div id="b4b-secure-options" class="b4b-subgroup">
                 <label class="inline-select">Latches
                   <select id="b4b-latch-count">
                     <option value="auto" selected>Auto</option>
@@ -90,13 +96,11 @@
                   </select>
                 </label>
                 <div id="b4b-hardware" class="muted b4b-hardware">Hardware: —</div>
-              </div>
             </div>
             <label>Label text<input id="b4b-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE"></label>
             <label class="inline-select">Label location
               <select id="b4b-label-location">
-                <option value="none" selected>None</option>
-                <option value="top">Top</option>
+                <option value="top" selected>Top</option>
                 <option value="front">Front</option>
               </select>
             </label>
