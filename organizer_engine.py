@@ -262,6 +262,36 @@ B4B_LATCH_STRENGTHS = ("lightweight", "standard")
 B4B_LABEL_LOCATIONS = ("none", "top", "front")
 
 
+STACK_MODES = ("none", "lid", "direct")
+
+
+@dataclass(frozen=True)
+class StackSpec:
+    """How a bin joins the bin above and below it.
+
+    ``none``   - an ordinary open bin.
+    ``lid``    - a snap-in lid closes the bin and its top face becomes the seat
+                 the next bin sits in.  The lid is printed as its own part.
+    ``direct`` - no lid: the next bin's stepped base snaps straight into this
+                 bin's mouth.
+
+    Serialised as ``box.stack``; inert on ``none`` so an ordinary bin is
+    untouched.
+    """
+
+    mode: str = "none"
+
+    def __post_init__(self) -> None:
+        if self.mode not in STACK_MODES:
+            raise ValueError(
+                f"stacking mode must be one of {', '.join(STACK_MODES)}"
+            )
+
+    @property
+    def enabled(self) -> bool:
+        return self.mode != "none"
+
+
 @dataclass(frozen=True)
 class B4BSpec:
     """User-facing B4B settings.  Serialised as ``box.b4b``; harmless defaults
@@ -342,10 +372,12 @@ class BoxSpec:
     # UI/save-state intent only. ``wall`` remains the authoritative geometry
     # value so existing positional callers and CLI custom walls keep working.
     standard_walls: bool = True
-    # B4B (Bin for Bins) container settings.  Last field, ``default_factory`` so
-    # every existing positional ``BoxSpec(...)`` call is unaffected and an
+    # B4B (Bin for Bins) container settings.  Trailing ``default_factory`` field
+    # so every existing positional ``BoxSpec(...)`` call is unaffected and an
     # ordinary bin carries a disabled, inert B4BSpec.
     b4b: B4BSpec = field(default_factory=B4BSpec)
+    # Stacking, same reasoning: trailing and inert unless switched on.
+    stack: StackSpec = field(default_factory=StackSpec)
 
     def __post_init__(self) -> None:
         values = {
@@ -965,6 +997,17 @@ def make_box(
     shell = difference([envelope, cavity])
     bumps = make_wall_lock_bumps(spec)
     result = union([shell, *bumps]) if bumps else shell
+    if getattr(getattr(spec, "stack", None), "enabled", False):
+        # Imported here: organizer_stack builds on the engine, not the other way
+        # round, so importing it at module scope would close a cycle.
+        from organizer_stack import stack_body_adders, stack_body_cutters
+
+        cutters = stack_body_cutters(spec)
+        if cutters:
+            result = difference([result, *cutters])
+        adders = stack_body_adders(spec)
+        if adders:
+            result = union([result, *adders])
     if spec.easy_clean and blocked_walls:
         # Manifold's multi-solid union can leave a non-manifold seam where
         # adjacent wall sweeps meet at a corner; fusing each wall in turn is

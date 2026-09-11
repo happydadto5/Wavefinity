@@ -31,6 +31,22 @@
           </div>
         </div>
         <div class="section-body">
+          <div class="bin-type-row">
+            <label>Bin type
+              <select id="bin-type">
+                <option value="single" selected>Single bin</option>
+                <option value="b4b">Bin for Bins (B4B)</option>
+              </select>
+            </label>
+            <label id="stack-mode-row">Stacking
+              <select id="stack-mode">
+                <option value="none" selected>None — open bin</option>
+                <option value="lid">Snap-on lid — stack on the lid</option>
+                <option value="direct">Direct snap — bin into bin</option>
+              </select>
+            </label>
+            <span id="stack-note" class="stack-note" hidden></span>
+          </div>
           <div class="field-grid three">
             <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
             <label><span id="y-size-label">Length</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
@@ -57,7 +73,6 @@
             <label id="easy-clean-radius-setting" class="inline-number" hidden><span id="easy-clean-radius-label">Bevel</span> <span class="unit">mm</span><input id="easy-clean-radius" type="number" min="0.1" step="0.1"></label>
           </div>
 
-          <label class="checkbox-row inline-option b4b-toggle"><span>Bin for Bins (B4B)?</span><input id="b4b-enabled" type="checkbox"></label>
           <div id="b4b-panel" class="b4b-panel" hidden>
             <div id="b4b-capacity" class="b4b-capacity">
               <strong id="b4b-capacity-line">Inside capacity: — units</strong>
@@ -66,9 +81,6 @@
               <span id="b4b-child-height" class="muted">Maximum bin height: — mm</span>
               <span id="b4b-grew" class="field-error" hidden></span>
             </div>
-            <label class="inline-select">Wall thickness
-              <select id="b4b-wall-thickness"><option value="0.8">0.8 mm — Standard</option></select>
-            </label>
             <label class="inline-select">Lid type
               <select id="b4b-lid-type">
                 <option value="lid_only">Lid Only</option>
@@ -82,7 +94,6 @@
                 <option value="2">2.0 mm — Loose</option>
               </select>
             </label>
-            <label class="checkbox-row inline-option"><span>Stacking</span><input id="b4b-stacking" type="checkbox"></label>
             <div id="b4b-secure-options" class="b4b-subgroup">
                 <label class="inline-select">Latches
                   <select id="b4b-latch-count">
@@ -99,6 +110,7 @@
                 </label>
                 <div id="b4b-hardware" class="muted b4b-hardware">Hardware: —</div>
             </div>
+            <label class="checkbox-row inline-option"><span>Stacking?</span><input id="b4b-stacking" type="checkbox"></label>
             <label>Label text<input id="b4b-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE"></label>
             <label class="inline-select">Label location
               <select id="b4b-label-location">
@@ -107,8 +119,6 @@
               </select>
             </label>
           </div>
-
-          <label>Part Name (For file)<input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack"></label>
 
           <div class="subheading-row">
             <div><h2>Interior parts</h2></div>
@@ -156,15 +166,18 @@
       </section>
 
       <section class="output-panel">
+        <label class="part-name-row">Part name <span class="unit">for file</span>
+          <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
+        </label>
         <div class="save-location-row">
           <div class="save-location-group">
             <label for="output-folder">Save Location:</label>
             <input id="output-folder" type="text" readonly title="Click to select folder">
           </div>
           <div class="log-controls-group">
-            <label class="keep-log-label" for="keep-log">
-              <input id="keep-log" type="checkbox" checked>
+            <label class="checkbox-row" for="keep-log">
               <span>Keep log</span>
+              <input id="keep-log" type="checkbox" checked>
             </label>
             <button type="button" id="show-log-button" class="button secondary" title="Show bins.md log file in WordPad">Show Log</button>
           </div>
@@ -211,14 +224,14 @@
             </div>
           </div>
           <div class="camera-controls-row">
-            <div class="camera-options">
-              <div class="camera-views-row">
-                <button type="button" data-preview-mode="standard" class="active">Standard</button>
-                <button type="button" data-preview-mode="xray">Xray</button>
-                <button type="button" data-preview-mode="bin">Bin</button>
-                <button type="button" data-preview-mode="interior">Interior</button>
-              </div>
-            </div>
+            <label class="canvas-select">Show
+              <select id="preview-mode">
+                <option value="standard" selected>Standard</option>
+                <option value="xray">Xray</option>
+                <option value="bin">Bin</option>
+                <option value="interior">Interior</option>
+              </select>
+            </label>
           </div>
         </div>
         <div id="dimensions" class="dimension-guides" aria-label="Bin dimensions">
@@ -231,12 +244,12 @@
         <canvas id="preview-2d" role="img" aria-label="Top-down layout preview" aria-describedby="preview-help layout-help"></canvas>
         <div class="camera-controls layout-controls" aria-label="2D orientation controls">
           <div class="camera-controls-row">
-            <div class="camera-views">
-              <div class="camera-views-row">
-                <button type="button" data-layout-orientation="match3d" class="active">Match 3D</button>
-                <button type="button" data-layout-orientation="topup">Top Up</button>
-              </div>
-            </div>
+            <label class="canvas-select">Orientation
+              <select id="layout-orientation">
+                <option value="match3d" selected>Match 3D</option>
+                <option value="topup">Top Up</option>
+              </select>
+            </label>
           </div>
         </div>
         <div id="layout-help" class="layout-hint">Use Arrow keys or drag to move</div>

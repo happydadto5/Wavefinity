@@ -19,6 +19,7 @@ from organizer_engine import (
     B4BSpec,
     BoxSpec,
     ConnectorSpec,
+    StackSpec,
     DEFAULT_BASE_THICKNESS,
     DEFAULT_WALL,
     EASY_CLEAN_RADIUS,
@@ -68,6 +69,14 @@ from organizer_b4b import (
     b4b_effective_box,
     b4b_summary,
     validate_b4b_design,
+)
+from organizer_stack import (
+    make_stack_lid,
+    stack_effective_box,
+    stack_enabled,
+    stack_spec,
+    stack_summary,
+    validate_stack_design,
 )
 from organizer_inserts import (
     BASE_PLATE,
@@ -380,6 +389,15 @@ def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
     name = f"Box {box.x:g} x {box.y:g} x {box.z:g}"
     if not math.isclose(box.wall, DEFAULT_WALL, abs_tol=1e-9):
         name += f" Wall {box.wall:g}mm"
+    tidy = clean_label(part)
+    if tidy:
+        name += f" {tidy}"
+    return name + suffix
+
+
+def stack_lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+    """``Stack Lid 16 x 48 Driver Rack.3mf`` - the bin's own snap-in lid."""
+    name = f"Stack Lid {box.x:g} x {box.y:g}"
     tidy = clean_label(part)
     if tidy:
         name += f" {tidy}"
@@ -1082,6 +1100,16 @@ def generate_organizer_files(
             box, output_dir, part_name,
             auto_timestamp=auto_timestamp, keep_log=keep_log,
         )
+    # Stacking rewrites the box before anything is built: a thicker wall to hold
+    # the snap groove, a floor deep enough to contain the stepped base, and - in
+    # lid mode - a body shortened so the closed bin is the height that was
+    # typed.  Everything downstream, interior parts included, sees that box.
+    # The request is kept for anything the user should recognise - the reported
+    # height and the filename are the height they asked for, not the body the
+    # lid is bolted onto.
+    validate_stack_design(box)
+    stack_request = box
+    box = stack_effective_box(box)
     rim_feature = next((one for one in layout.features if is_text(one) and one.options.get("level") == "rim"), None)
     if rim_feature is not None:
         label = text_of(rim_feature)
@@ -1135,7 +1163,7 @@ def generate_organizer_files(
         body = make_fused_box(box, layout.features, make_box(box))
         if scoop:
             body = union([body, make_scoop(box)])
-        output = _resolve_file(box_filename, box, part_name)
+        output = _resolve_file(box_filename, stack_request, part_name)
         # The rim label's ledge is part of the body, so it goes on before the
         # floor text is sunk into it.
         inlays = list(texts)
@@ -1159,7 +1187,7 @@ def generate_organizer_files(
             "text_objects": written,
         }
     else:
-        box_output = _resolve_file(box_filename, box, part_name)
+        box_output = _resolve_file(box_filename, stack_request, part_name)
         plain_box = make_box(box)
         insert = (
             make_cartridge_insert(box, layout.features)
@@ -1208,6 +1236,12 @@ def generate_organizer_files(
         text_report(box, one, text_surface) for one in layout.features if is_text(one)
     ]
     result["customizations"] = {"scoop": scoop, "label_position": location}
+    if stack_spec(stack_request).mode == "lid":
+        lid_output = _resolve_file(stack_lid_filename, stack_request, part_name)
+        export_mesh(make_stack_lid(stack_request), lid_output, "stack_lid")
+        result["stack_lid"] = _part_result(lid_output, None)
+    if stack_enabled(stack_request):
+        result["stack"] = stack_summary(stack_request)
     if keep_log:
         out_files: list[Path] = []
         if "box" in result and isinstance(result["box"], dict) and "output" in result["box"]:
@@ -1732,11 +1766,16 @@ def design_to_dict(
             "label_location": b4b.label_location,
             "stacking": b4b.stacking,
         }
+    stack = getattr(box, "stack", None) or StackSpec()
+    if stack.enabled:
+        box_block["stack"] = {"mode": stack.mode}
     return {
         # Version 3 only when B4B is on. Version 3 changes B4B x/y from the
         # physical outside to the exact requested child field, so older builds
         # reject a B4B design instead of silently loading it as an ordinary bin.
-        "version": 3 if b4b.enabled else 1,
+        # Version 4 carries stacking, whose Z means the closed height rather
+        # than the body, so an older build must reject it for the same reason.
+        "version": 4 if stack.enabled else (3 if b4b.enabled else 1),
         "box": box_block,
         "label": label,
         "label_position": label_position(label_location),
@@ -1750,9 +1789,13 @@ def design_from_dict(
     data: dict, *, validate_layout: bool = True
 ) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     design_version = data.get("version", 1)
-    if design_version not in (1, 2, 3):
+    if design_version not in (1, 2, 3, 4):
         raise ValueError(f"unsupported design version {data.get('version')!r}")
     raw = data["box"]
+    stack_raw = raw.get("stack")
+    stack = StackSpec()
+    if isinstance(stack_raw, dict) and stack_raw.get("mode"):
+        stack = StackSpec(mode=str(stack_raw["mode"]))
     b4b_raw = raw.get("b4b")
     b4b = B4BSpec()
     if isinstance(b4b_raw, dict) and bool(b4b_raw.get("enabled", False)):
@@ -1821,6 +1864,7 @@ def design_from_dict(
         easy_clean_style=easy_clean_style,
         standard_walls=standard_walls,
         b4b=b4b,
+        stack=stack,
     )
     if b4b.enabled:
         # A B4B interior is reserved for child bins.  Imported/saved JSON is

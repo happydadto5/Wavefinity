@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-09-11 — Stackable bins, and a UI ordered by what changes what
+
+- **Stackable bins**, in two styles, chosen from a new *Stacking* control at the
+  top of the panel:
+  - **Snap-on lid** — the bin gets its own printed lid. The lid clicks into the
+    bin mouth and its top face is recessed, and that recess is the seat the next
+    bin's stepped foot drops into.
+  - **Direct snap** — no lid at all. The next bin's stepped foot clicks straight
+    into this bin's mouth.
+- **The height you type is the height you get.** Switching stacking on never
+  makes the finished bin taller: in lid mode the lid's own plate is taken out of
+  the bin body to pay for itself. The readout also tells you what each bin adds
+  to a stack, which is less than its own height by however far it sinks into the
+  bin below.
+- **The wall and floor are set for you.** A snap groove needs material behind
+  it, so stacking raises a thin wall to 1.2 mm, and raises the floor enough to
+  contain the stepped foot. Both are stated in plain language under the control.
+- **Bin type is now the first thing on the page**, with Stacking beside it, since
+  both change what every setting under them means.
+- Settings that belong together now sit together: B4B's duplicate wall-thickness
+  select is gone (it wrote back into the main one), and *Part name* moved to the
+  output panel with *Save Location* and the generate buttons.
+- One-of-several settings are selects rather than rows of big buttons — the 3D
+  *Show* modes and the 2D *Orientation* toggle were button rows and are now
+  dropdowns. See the new **UI design elements** section in the README.
+
 ## 2026-09-10 — B4B lid seats properly; starter parts fit short bins
 
 - **The B4B lid could not close.** The case wall stopped short of where the lid

@@ -1280,7 +1280,7 @@ class WebServerTests(unittest.TestCase):
         self.assertNotIn(b"Label your bin", body)
         self.assertNotIn(b"Rim label", body)
         self.assertIn(b"Interior parts", body)
-        self.assertIn(b"Part Name (For file)", body)
+        self.assertIn(b'id="part-name"', body)
         self.assertIn(b"Connect bins", body)
         self.assertIn(b"Save Location:", body)
         self.assertIn(b'id="print-bin"', body)
@@ -1305,12 +1305,15 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b"support-layout-dialog", body)
         self.assertNotIn(b"Add curved scoop", body)
         self.assertNotIn(b"Fixed 5 mm lettering on a shelf", body)
-        # The interior print-mode dropdown is a universal setting: it sits above
-        # the Part Name, which in turn sits above the interior parts section.
-        self.assertLess(body.index(b'id="mode-select"'), body.index(b"Part Name (For file)"))
-        self.assertLess(body.index(b"Part Name (For file)"), body.index(b"<h2>Interior parts</h2>"))
+        # Bin type comes first: it decides what every control under it means,
+        # so it sits above the size fields and everything else.
+        self.assertLess(body.index(b'id="bin-type"'), body.index(b'id="x-size"'))
+        self.assertLess(body.index(b'id="x-size"'), body.index(b'id="mode-select"'))
+        self.assertLess(body.index(b'id="mode-select"'), body.index(b"<h2>Interior parts</h2>"))
         self.assertLess(body.index(b"<h2>Interior parts</h2>"), body.index(b"Connect bins"))
         self.assertLess(body.index(b"Connect bins"), body.index(b"Save Location:"))
+        # Part name names the output file, so it lives with the output controls.
+        self.assertLess(body.index(b"Connect bins"), body.index(b'id="part-name"'))
         # The palette itself is the "add another part" affordance now - there is
         # no separate button. Editing a part shows Save / Delete Part below its
         # settings.
@@ -1319,10 +1322,13 @@ class WebServerTests(unittest.TestCase):
         self.assertLess(body.index(b'id="save-part"'), body.index(b'id="delete-part"'))
         self.assertLess(body.index(b'id="delete-part"'), body.index(b'id="draft-fields"'))
         self.assertIn(b'id="mode-select"', body)
-        self.assertIn(b'data-preview-mode="standard"', body)
-        self.assertIn(b'data-preview-mode="xray"', body)
-        self.assertIn(b'data-preview-mode="bin"', body)
-        self.assertIn(b'data-preview-mode="interior"', body)
+        # One-of-several settings are selects, not rows of toggle buttons.
+        self.assertIn(b'id="preview-mode"', body)
+        self.assertIn(b'id="layout-orientation"', body)
+        for value in (b"standard", b"xray", b"bin", b"interior"):
+            self.assertIn(b'value="%s"' % value, body)
+        self.assertNotIn(b"data-preview-mode", body)
+        self.assertNotIn(b"data-layout-orientation", body)
         status, _headers, body = self.get("/app.js")
         self.assertEqual(status, 200)
         self.assertIn(b"refreshPreview", body)

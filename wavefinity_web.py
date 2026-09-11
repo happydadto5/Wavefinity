@@ -122,6 +122,12 @@ from organizer_b4b import (
     b4b_summary,
     validate_b4b_design,
 )
+from organizer_stack import (
+    stack_effective_box,
+    stack_enabled,
+    stack_summary,
+    validate_stack_design,
+)
 
 
 WEB_ROOT = APP_DIR / "web"
@@ -887,6 +893,14 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     selected = payload.get("selected")
     if not isinstance(selected, int) or isinstance(selected, bool):
         selected = None
+    # Stacking rewrites the box the same way generation does, so the preview is
+    # of the bin that would actually be printed - shorter body, thicker wall.
+    stack_request = box
+    stack_block = None
+    if stack_enabled(box):
+        validate_stack_design(box)
+        stack_block = stack_summary(box)
+        box = stack_effective_box(box)
     with GEOMETRY_LOCK:
         scene = preview_geometry(
             box, label, layout.features, layout.mode, label_location, scoop, draft,
@@ -904,8 +918,9 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     resolved = replace(layout, features=_features_from_preview(layout, scene))
     return {
         "design": design_to_dict(
-            box, resolved, label, part_name, label_location, scoop
+            stack_request, resolved, label, part_name, label_location, scoop
         ),
+        "stack": stack_block,
         "label_outline": scene["label_outline"],
         "label_meta": scene["label_meta"],
         "text_meta": scene["text_meta"],

@@ -336,8 +336,7 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .log-controls-group { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
 .log-controls-group .button { flex-shrink: 0; padding: 9px 12px; }
-.keep-log-label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink); user-select: none; margin: 0; flex-shrink: 0; }
-.keep-log-label input[type="checkbox"] { margin: 0; cursor: pointer; accent-color: var(--teal); }
+.log-controls-group .checkbox-row { margin: 0; flex-shrink: 0; }
 .print-button-wrap { position: relative; display: flex; align-items: center; margin-top: 10px; margin-bottom: 7px; width: 100%; }
 .print-button-wrap .print-button { margin: 0; width: 100%; padding-right: 115px; display: flex; align-items: center; justify-content: center; gap: 7px; }
 .print-button-wrap .print-button::before { content: "🖨️"; font-size: 14px; }
@@ -404,14 +403,19 @@ input[type="number"]::-webkit-inner-spin-button {
 .canvas-wrap canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 .camera-controls { position: absolute; top: 16px; left: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 2; }
 .camera-controls-row { display: flex; gap: 8px; }
-.camera-views, .camera-options, .zoom-controls { display: flex; overflow: hidden; border: 1px solid var(--line-dark); border-radius: 9px; background: rgba(255,255,255,.94); box-shadow: 0 3px 12px rgba(30,51,61,.08); backdrop-filter: blur(6px); align-self: flex-start; }
-.camera-views, .camera-options { flex-direction: column; }
+.camera-views, .zoom-controls, .canvas-select { display: flex; overflow: hidden; border: 1px solid var(--line-dark); border-radius: 9px; background: rgba(255,255,255,.94); box-shadow: 0 3px 12px rgba(30,51,61,.08); backdrop-filter: blur(6px); align-self: flex-start; }
+.camera-views { flex-direction: column; }
 .camera-views-row { display: flex; }
 .camera-views-row:not(:last-child) { border-bottom: 1px solid var(--line); }
 .camera-controls button { min-width: 53px; border: 0; border-right: 1px solid var(--line); padding: 10px 13px; background: transparent; cursor: pointer; color: var(--muted); font-size: 15px; font-weight: 700; flex: 1; text-align: center; white-space: nowrap; }
-.camera-options button { min-width: 92px; padding: 12.5px 8px; font-size: 16px; }
 .camera-controls button:last-child { border-right: 0; }
 .camera-controls button:hover, .camera-controls button.active { background: var(--teal-soft); color: var(--teal-dark); }
+/* A setting that lives over the canvas: same floating chrome as the view
+   buttons beside it, but a select, because it picks one of several states
+   rather than firing an action. */
+.canvas-select { align-items: center; gap: 8px; padding: 0 10px; font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.canvas-select select { margin: 0; border: 0; background: transparent; padding: 9px 4px 9px 0; font-size: 13px; font-weight: 700; color: var(--teal-dark); cursor: pointer; }
+.canvas-select select:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .zoom-controls button { font-size: 22px; line-height: 1; padding: 10px 14px; min-width: 44px; }
 .dimension-guides { display: none; }
 .dimension-guides span { position: absolute; display: flex; align-items: center; gap: 6px; text-shadow: 0 1px 2px white; }
@@ -692,4 +696,40 @@ dialog:not([open]) { display: none; }
 }
 .b4b-capacity strong { font-size: 0.95rem; }
 .b4b-hardware { font-size: 0.82rem; }
-.b4b-toggle span { font-weight: 600; }
+/* Bin type is the first thing on the page because it decides what every
+   control under it means - X/Y become a child-bin field, the interior parts
+   workflow disappears, connectors stop applying. It is a select, not a
+   checkbox, because the two kinds are peers rather than an option bolted onto
+   the ordinary bin. */
+.bin-type-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  margin: 0 0 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--line-dark);
+  border-left: 3px solid var(--teal);
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+.bin-type-row > label {
+  display: block;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.bin-type-row select {
+  margin-top: 5px;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+}
+.stack-note {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--teal-dark);
+}
+.part-name-row { display: block; margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink); }
+.part-name-row input { margin-top: 4px; }

@@ -29,6 +29,55 @@ See [changelog.md](changelog.md) for dated implementation changes.
 
 ---
 
+## UI design elements
+
+The control panel is ordered by **blast radius**: a setting sits above
+everything whose meaning it can change.
+
+**The top card decides what the thing is.** *Bin type* and *Stacking* are the
+first two controls on the page, in their own bordered card, because both change
+what every control beneath them means — bin type turns X/Y into a child-bin
+field and retires interior parts and connectors; stacking rewrites the wall,
+the floor and the body height. Nothing that reads the bin's dimensions should
+be read before these are settled. Pegboard mounting, when it arrives, is a
+third select in this same card: it answers the same question — how this bin
+joins the world around it — and it is not an interior part.
+
+**Kind versus modifier.** Bin type is the *kind* of object (Single bin, Bin for
+Bins). Stacking is a *modifier* on it — a stackable bin is still an ordinary
+bin with interior parts, it has just gained a lid and a stepped foot. Keeping
+them as separate controls is what lets a stackable bin keep its cradles and
+bores; folding stacking into the bin-type list would have implied it was a
+different kind of object that loses them.
+
+**Controls follow their meaning, not their mechanism.**
+
+- A **select** is for choosing one of several named states — *Lid type*,
+  *Latch strength*, *Show*, *Orientation*, *Stacking*. This holds even at two
+  options: a row of big buttons for a two-state setting reads as two actions,
+  and gives no clue the two are exclusive.
+- A **checkbox** is for a genuine on/off with no second state worth naming —
+  *Standard base?*, *Stacking?* inside B4B, *Keep log*.
+- A **button** is for something that *happens* — *Generate*, *Reset*, *Top*,
+  *Show Log*. Nothing that merely records a preference is a button.
+
+Checkbox rows put the label first and the box on the right, everywhere.
+
+**Settings that belong together live together.** A dependent control sits
+directly under the control that reveals it (*Standard walls?* → *Wall
+thickness* → the thin-wall warning). One setting has exactly one control: B4B
+used to carry its own duplicate wall-thickness select that wrote back into the
+main one, and that duplicate is gone. Anything naming the output file —
+*Part name* — lives in the output panel beside *Save Location* and the generate
+buttons, not in the middle of the build form.
+
+**Automatic changes are shown, never silent.** When the app overrides what was
+typed — B4B growing the bin field, stacking raising the wall and floor — it
+says so in plain language in a note under the control that caused it, and it
+never writes the new value back into the field the user is typing in.
+
+---
+
 ## Quick start
 
 Double-click `Launch_Organizer_UI.vbs`. It starts Wavefinity without showing a

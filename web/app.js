@@ -602,10 +602,10 @@ function applyB4BVisibility() {
   if (modeLabel) modeLabel.hidden = on;
   const ecRow = $("#easy-clean")?.closest("label");
   if (ecRow) ecRow.hidden = on;
-  const wallsRow = $("#standard-walls")?.closest("label");
-  if (wallsRow) wallsRow.hidden = on;
-  hide("#wall-thickness-setting", on || $("#standard-walls")?.checked);
-  hide("#thin-wall-warning", on || $("#standard-walls")?.checked);
+  // Wall thickness is one setting in one place: B4B uses the same control the
+  // ordinary bin does rather than a second copy inside its own panel.
+  hide("#wall-thickness-setting", $("#standard-walls")?.checked);
+  hide("#thin-wall-warning", $("#standard-walls")?.checked);
   hide("#easy-clean-style-setting", on || !$("#easy-clean")?.checked);
   hide("#easy-clean-radius-setting", on || !$("#easy-clean")?.checked);
   const connectorSection = document.querySelector('.control-section[data-section="connector"]');
@@ -620,6 +620,7 @@ function applyB4BVisibility() {
   if (on) {
     $("#b4b-secure-options").hidden = $("#b4b-lid-type").value !== "latched";
   }
+  applyStackVisibility();
 }
 
 function normalizeB4BDependentControls() {
@@ -630,7 +631,7 @@ function normalizeB4BDependentControls() {
 
 function syncB4BForm() {
   const b4b = b4bState();
-  $("#b4b-enabled").checked = Boolean(b4b.enabled);
+  $("#bin-type").value = b4b.enabled ? "b4b" : "single";
   $("#b4b-lid-type").value = b4b.lid !== false && b4b.secure_lid !== false
     ? "latched" : "lid_only";
   $("#b4b-stacking").checked = Boolean(b4b.stacking);
@@ -639,15 +640,49 @@ function syncB4BForm() {
   $("#b4b-latch-strength").value = b4b.latch_strength || "standard";
   $("#b4b-label-text").value = b4b.label_text || "";
   $("#b4b-label-location").value = b4b.label_location === "front" ? "front" : "top";
-  populateWallChoices(state.design.box, $("#b4b-wall-thickness"));
-  $("#b4b-wall-thickness").value = fmt(state.design.box.wall);
   normalizeB4BDependentControls();
+  $("#stack-mode").value = stackMode();
   applyB4BVisibility();
+}
+
+function stackMode() {
+  return state.design?.box?.stack?.mode || "none";
+}
+
+// Stacking and B4B are different answers to the same question - how this bin
+// joins the one above it - so only one of them is offered at a time.
+function applyStackVisibility() {
+  const b4b = b4bEnabled();
+  const row = $("#stack-mode-row");
+  if (row) row.hidden = b4b;
+  const note = $("#stack-note");
+  if (!note) return;
+  const info = state.preview?.stack;
+  if (b4b || !info || !info.enabled) {
+    note.hidden = true;
+    return;
+  }
+  const bits = [
+    `Finished bin ${fmt(info.closed_height_mm)} mm tall — exactly the height you set.`,
+    `Each bin adds ${fmt(info.pitch_mm)} mm to a stack.`,
+  ];
+  if (info.wall_raised) bits.push(`Wall set to ${fmt(info.wall_mm)} mm so the snap has material to grip.`);
+  if (info.base_raised) bits.push(`Base set to ${fmt(info.base_mm)} mm to hold the stepped foot.`);
+  if (info.parts.length > 1) bits.push(`Prints as ${info.parts.join(" + ")}.`);
+  note.textContent = bits.join(" ");
+  note.hidden = false;
+}
+
+function readStackForm(design) {
+  design.box = design.box || {};
+  const mode = b4bEnabled() ? "none" : ($("#stack-mode")?.value || "none");
+  if (mode === "none") delete design.box.stack;
+  else design.box.stack = { mode };
 }
 
 function readB4BForm(design) {
   design.box = design.box || {};
-  const enabled = $("#b4b-enabled").checked;
+  const enabled = $("#bin-type").value === "b4b";
   if (!enabled) {
     if (design.box.b4b) design.box.b4b = { ...B4B_DEFAULTS };
     return;
@@ -658,15 +693,6 @@ function readB4BForm(design) {
   design.box.flat_inside = 0;
   if (design.layout) design.layout.mode = "fused";
   const secure = $("#b4b-lid-type").value === "latched";
-  const wallRules = state.catalog?.wall_rules || {};
-  const defaultWall = wallRules.default_mm ?? 0.8;
-  const wall = Math.max(wallRules.min_mm ?? 0.2, Math.min(
-    wallRules.max_mm ?? 2.4,
-    number($("#b4b-wall-thickness").value, design.box.wall ?? defaultWall),
-  ));
-  design.box.wall = wall;
-  design.box.standard_walls = Math.abs(wall - defaultWall) < 1e-9;
-  $("#wall-thickness").value = fmt(wall);
   design.box.b4b = {
     enabled: true,
     lid: true,
@@ -738,7 +764,7 @@ async function toggleB4B(wantEnabled) {
       const ok = window.confirm(
         "Turning on Bin for Bins clears the interior parts - the B4B interior " +
         "is reserved for child bins. Continue?");
-      if (!ok) { $("#b4b-enabled").checked = false; return; }
+      if (!ok) { $("#bin-type").value = "single"; return; }
       state.design.layout.features = [];
     }
     // An unsaved draft, a selection, or a pending debounced draft action must
@@ -747,6 +773,7 @@ async function toggleB4B(wantEnabled) {
     clearDraftSelection();
     state.design.layout.mode = "fused";
     state.design.box.easy_clean = false;
+    delete state.design.box.stack;
   }
   readB4BForm(state.design);
   enforceB4BMinimumHeight();
@@ -842,6 +869,7 @@ function updateDesignFromForm() {
     axis: "y",
   };
   readB4BForm(design);
+  readStackForm(design);
   enforceB4BMinimumHeight(design);
   applyB4BVisibility();
 }
@@ -1097,13 +1125,13 @@ function setCameraView(view) {
 
 function setPreviewMode(mode) {
   state.previewMode = mode;
-  $$('[data-preview-mode]').forEach(button => button.classList.toggle("active", button.dataset.previewMode === mode));
+  $("#preview-mode").value = mode;
   renderPreview3D();
 }
 
 function wireCameraControls() {
   $$('[data-camera-view]').forEach(button => button.addEventListener("click", () => setCameraView(button.dataset.cameraView)));
-  $$('[data-preview-mode]').forEach(button => button.addEventListener("click", () => setPreviewMode(button.dataset.previewMode)));
+  $("#preview-mode").addEventListener("change", event => setPreviewMode(event.target.value));
   $$('[data-camera-zoom]').forEach(button => button.addEventListener("click", () => {
     state.camera.zoom = Math.max(.35, Math.min(4, state.camera.zoom * (button.dataset.cameraZoom === "in" ? 1.2 : 1 / 1.2)));
     renderPreview3D();
@@ -1112,8 +1140,7 @@ function wireCameraControls() {
 
 function setLayoutOrientation(orientation) {
   state.layoutOrientation = orientation;
-  $$('[data-layout-orientation]').forEach(button =>
-    button.classList.toggle("active", button.dataset.layoutOrientation === orientation));
+  $("#layout-orientation").value = orientation;
   renderLayout2D();
 }
 
@@ -1139,8 +1166,8 @@ function activatePreviewView(view) {
 function wireControls() {
   wireSidebar();
   wireCameraControls();
-  $$('[data-layout-orientation]').forEach(button =>
-    button.addEventListener("click", () => setLayoutOrientation(button.dataset.layoutOrientation)));
+  $("#layout-orientation").addEventListener("change",
+    event => setLayoutOrientation(event.target.value));
   $$("button.section-heading").forEach(button => button.addEventListener("click", () => {
     const section = button.closest(".control-section");
     section.classList.toggle("open");
@@ -1217,7 +1244,12 @@ function wireControls() {
   }
   $("#easy-clean-radius").addEventListener("input", changedDesign);
 
-  $("#b4b-enabled").addEventListener("change", () => toggleB4B($("#b4b-enabled").checked));
+  $("#bin-type").addEventListener("change", () => toggleB4B($("#bin-type").value === "b4b"));
+  $("#stack-mode").addEventListener("change", () => {
+    readStackForm(state.design);
+    applyStackVisibility();
+    changedDesign();
+  });
   ["#b4b-lid-type", "#b4b-stacking"].forEach(sel =>
     $(sel).addEventListener("change", () => {
       normalizeB4BDependentControls();
@@ -1226,7 +1258,7 @@ function wireControls() {
       applyB4BVisibility();
       changedDesign();
     }));
-  ["#b4b-wall-thickness", "#b4b-lid-snugness", "#b4b-latch-count", "#b4b-latch-strength", "#b4b-label-location"]
+  ["#b4b-lid-snugness", "#b4b-latch-count", "#b4b-latch-strength", "#b4b-label-location"]
     .forEach(sel => $(sel).addEventListener("change", () => {
       readB4BForm(state.design);
       enforceB4BMinimumHeight();
@@ -3595,6 +3627,7 @@ async function refreshPreview() {
     updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
     updateAutoExpandButton();
     renderB4BReadout();
+    applyStackVisibility();
     renderPreview3D();
     renderLayout2D();
     renderPlaced();
@@ -5385,7 +5418,7 @@ function designHasChanges() {
         number($("#wall-thickness").value, visibleDesign.box.wall ?? wallRules.default_mm ?? 0.8),
       ));
   visibleDesign.part_name = $("#part-name").value;
-  if ($("#b4b-enabled").checked) {
+  if ($("#bin-type").value === "b4b") {
     readB4BForm(visibleDesign);
     enforceB4BMinimumHeight(visibleDesign, false);
   }
