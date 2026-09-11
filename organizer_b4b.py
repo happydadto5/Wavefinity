@@ -605,23 +605,17 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
 def _skirt_polygons(eff: BoxSpec) -> tuple[Polygon, Polygon]:
     """(outer, inner) plan outlines of the locating skirt.
 
-    Inner face follows the body outer wave offset straight out by the seat
-    clearance - a constant-gap wavy channel, the same phase trick the rail
-    uses - so the lid locates without a press fit."""
+    The skirt hangs underneath the lid and sits inside the body wall.  Both
+    faces are therefore inset from the body's outer structural outline; this
+    keeps the locating feature from enlarging the lid footprint."""
     clr = B4B_LID_SEAT_CLEARANCE
     layout = b4b_layout(eff)
-    tx = layout.outer_half_x - CORNER_INSET
-    ty = layout.outer_half_y - CORNER_INSET
-    inner = Polygon(_wall_points(layout.outer_half_x + clr, layout.outer_half_y + clr, tx, ty))
-    outer = Polygon(
-        _wall_points(
-            layout.outer_half_x + clr + B4B_LID_SKIRT_WALL,
-            layout.outer_half_y + clr + B4B_LID_SKIRT_WALL,
-            tx, ty,
-        )
-    )
-    inner = _rounded(inner, B4B_WALL_CORNER_FILLET)
-    outer = _rounded(outer, B4B_WALL_CORNER_FILLET)
+    outer = layout.outer_structural_polygon.buffer(-clr)
+    inner = outer.buffer(-B4B_LID_SKIRT_WALL)
+    if outer.is_empty or inner.is_empty:
+        raise RuntimeError("B4B lid locating skirt collapsed inside the body wall")
+    if not isinstance(outer, Polygon) or not isinstance(inner, Polygon):
+        raise RuntimeError("B4B lid locating skirt must remain a single polygon")
     return outer, inner
 
 
@@ -639,10 +633,11 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
 
     underside_z = b4b_lid_underside_z(box)
     outer, inner = _skirt_polygons(eff)
+    layout = b4b_layout(eff)
 
     # the plate reaches a little below the underside datum so it fuses into the
     # skirt, hinge tabs and latch ears as one connected solid
-    plate = _extrude_polygon(outer, B4B_LID_SKIN + 0.8)
+    plate = _extrude_polygon(layout.outer_structural_polygon, B4B_LID_SKIN + 0.8)
     plate.apply_translation((0.0, 0.0, underside_z - 0.8))
 
     skirt_ring = outer.difference(inner)
@@ -655,7 +650,6 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
     # latches and the rear carries hinges, and a skirt lapping down past the rim
     # there would clash with that hardware.  The side runs are wavy, so they
     # still locate the lid on both axes without a snap.
-    layout = b4b_layout(box)
     case_x, _case_y = layout.case_size
     side_clip = trimesh.creation.box(
         extents=(case_x * 4.0,
@@ -1222,7 +1216,7 @@ def b4b_summary(box: BoxSpec) -> dict:
     plan = b4b_hardware_plan(box)
     layout = b4b_layout(box)
     case_x, case_y = layout.case_size
-    lid_outer = _skirt_polygons(eff)[0] if b4b.lid else layout.outer_structural_polygon
+    lid_outer = layout.outer_structural_polygon
     min_x, min_y, max_x, max_y = (
         min(layout.case_bounds[0], lid_outer.bounds[0]),
         min(layout.case_bounds[1], lid_outer.bounds[1]),

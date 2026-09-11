@@ -265,6 +265,17 @@ class B4BGeometryTests(unittest.TestCase):
         lid = b4b.make_b4b_lid(box)
         self.assertLess(intersection_volume(body, lid) / 1000.0, 0.25)
 
+    def test_lid_plate_never_exceeds_body_footprint(self):
+        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
+        eff = b4b.b4b_effective_box(box)
+        body_outline = b4b.b4b_layout(eff).outer_structural_polygon
+        skirt_outer, skirt_inner = b4b._skirt_polygons(eff)
+        lid = b4b.make_b4b_lid(box)
+        self.assertTrue(np.all(lid.bounds[0][:2] >= np.array(body_outline.bounds[:2]) - 1e-6))
+        self.assertTrue(np.all(lid.bounds[1][:2] <= np.array(body_outline.bounds[2:]) + 1e-6))
+        self.assertTrue(body_outline.buffer(1e-6).contains(skirt_outer))
+        self.assertTrue(skirt_outer.buffer(1e-6).contains(skirt_inner))
+
     def test_passive_lid_has_no_hardware(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, secure_lid=False))
         names = [n for n, _ in b4b.b4b_build_parts(box)]
