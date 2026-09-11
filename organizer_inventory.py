@@ -34,18 +34,25 @@ INVENTORY_LOCK = threading.RLock()
 LAYOUT_HEADING = "## Drawer layout"
 COLUMNS = (
     ("id", "ID"), ("date", "Date"), ("kind", "Kind"), ("name", "Name"),
-    ("x", "X (mm)"), ("y", "Y (mm)"), ("z", "Z (mm)"), ("qty", "Qty"),
-    ("file", "File"), ("label", "Label"), ("interior", "Interior Part(s)"),
+    ("x", "X (mm)"), ("y", "Y (mm)"), ("z", "Z (mm)"), ("stack", "Stack"),
+    ("qty", "Qty"), ("file", "File"), ("label", "Label"), ("interior", "Interior Part(s)"),
 )
 # bin: generated here.  b4b: a Bin for Bins case.  spacer/shim: made by the
 # Layout view to fill a drawer.  manual: typed in for a bin printed elsewhere.
 KINDS = ("bin", "b4b", "spacer", "shim", "manual")
-EDITABLE = ("name", "qty", "x", "y", "z")
+# How the bin was printed to stack: not at all, with a snap-on lid, or snapping
+# straight into the bin below.  Z is always the closed height either way.
+STACK_MODES = ("none", "lid", "direct")
+EDITABLE = ("name", "qty", "x", "y", "z", "stack")
 MAX_QTY = 999
+# A generated bin is not a printed one.  Until the Layout view's setting says
+# otherwise, new rows start at Qty 0 and are marked printed by hand.
+DEFAULT_NEW_BIN_QTY = 0
 
 _HEADER_KEYS = {
     "id": "id", "date": "date", "kind": "kind", "name": "name",
-    "x": "x", "y": "y", "z": "z", "qty": "qty", "quantity": "qty",
+    "x": "x", "y": "y", "z": "z", "stack": "stack", "stacking": "stack",
+    "qty": "qty", "quantity": "qty",
     "file": "file", "label": "label", "interior part(s)": "interior",
     "interior": "interior",
 }
@@ -126,12 +133,14 @@ def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
         kind = infer_kind(file, interior)
     name = _text(raw.get("name")) if "name" in raw else infer_name(file, label)
     qty = raw.get("qty")
+    stack = _text(raw.get("stack")).lower()
     return {
         "id": _text(raw.get("id")),
         "date": _text(raw.get("date")),
         "kind": kind,
         "name": name,
         "x": x, "y": y, "z": z,
+        "stack": stack if stack in STACK_MODES else "none",
         "qty": max(0, min(MAX_QTY, int(_number(qty, 1)))) if _text(qty) else 1,
         "file": file,
         "label": label,
@@ -229,6 +238,7 @@ def _row(one: dict[str, Any]) -> str:
         **one,
         "x": f"{float(one['x']):g}", "y": f"{float(one['y']):g}", "z": f"{float(one['z']):g}",
         "qty": str(int(one["qty"])),
+        "stack": "" if one.get("stack", "none") == "none" else one["stack"],
     }
     return "| " + " | ".join(_cell(values.get(key, "")) for key, _ in COLUMNS) + " |"
 
@@ -283,16 +293,28 @@ def _write(path: Path, bins: list[dict[str, Any]], layout: dict | None, legacy: 
 
 
 def _prune_layout(layout: dict | None, bins: list[dict[str, Any]]) -> dict | None:
-    """Drop placements whose bin row is gone or whose copy was never printed."""
+    """Drop placements whose bin row is gone.
+
+    A copy numbered past the printed Qty stays: it is a *planned* bin, placed
+    before it is printed.  A bin stacked on a dropped one takes its place, so a
+    stack closes up instead of floating.
+    """
     if not isinstance(layout, dict):
         return layout
-    qty = {one["id"]: int(one["qty"]) for one in bins}
+    known = {one["id"] for one in bins}
     for drawer in layout.get("drawers", []) or []:
-        if isinstance(drawer, dict):
-            drawer["placements"] = [
-                one for one in drawer.get("placements", []) or []
-                if isinstance(one, dict) and int(one.get("copy", 0)) < qty.get(one.get("bin"), 0)
-            ]
+        if not isinstance(drawer, dict):
+            continue
+        placements = [one for one in drawer.get("placements", []) or [] if isinstance(one, dict)]
+        for gone in [one for one in placements if one.get("bin") not in known]:
+            key = f"{gone.get('bin')}:{int(gone.get('copy', 0))}"
+            for above in placements:
+                if above.get("on") == key:
+                    above.pop("on", None)
+                    for field in ("on", "gx", "gy", "locked"):
+                        if field in gone:
+                            above[field] = gone[field]
+        drawer["placements"] = [one for one in placements if one.get("bin") in known]
     return layout
 
 
@@ -320,6 +342,11 @@ def _clean_bin(raw: dict[str, Any], *, partial: bool) -> dict[str, Any]:
             continue
         if key == "name":
             clean["name"] = str(raw["name"] or "").strip()[:80]
+        elif key == "stack":
+            mode = str(raw["stack"] or "none").strip().lower()
+            if mode not in STACK_MODES:
+                raise ValueError(f"stacking must be one of {', '.join(STACK_MODES)}")
+            clean["stack"] = mode
         elif key == "qty":
             clean["qty"] = max(0, min(MAX_QTY, int(_number(raw["qty"], 0))))
         else:
@@ -375,6 +402,7 @@ def save_inventory(
                 "kind": kind if kind in KINDS else "manual",
                 "name": clean.get("name", ""),
                 "x": clean["x"], "y": clean["y"], "z": clean["z"],
+                "stack": clean.get("stack", "none"),
                 "qty": clean.get("qty", 1),
                 "file": str(raw.get("file") or ""),
                 "label": str(raw.get("label") or ""),
@@ -397,19 +425,28 @@ def append_bin(
     interior: str = "",
     name: str = "",
     kind: str = "bin",
-    qty: int = 1,
+    stack: str = "none",
+    qty: int | None = None,
 ) -> Path:
-    """Log one generated bin as a new row, keeping everything else intact."""
+    """Log one generated bin as a new row, keeping everything else intact.
+
+    Without an explicit ``qty`` the row takes the Layout view's *new bins
+    count as printed* setting, stored in the file's layout block.
+    """
     path = inventory_path(output_dir)
     with INVENTORY_LOCK:
         current = _read(path)
         bins = current["bins"]
+        if qty is None:
+            settings = (current["layout"] or {}).get("settings") or {}
+            qty = 1 if settings.get("new_bins_printed", DEFAULT_NEW_BIN_QTY) else 0
         bins.append({
             "id": next_bin_id(bins),
             "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "kind": kind if kind in KINDS else "bin",
             "name": name,
             "x": float(x), "y": float(y), "z": float(z),
+            "stack": stack if stack in STACK_MODES else "none",
             "qty": max(0, int(qty)),
             "file": file,
             "label": label,

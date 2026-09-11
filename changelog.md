@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-09-11 — Stacks in the drawer, planned bins, connectors and print map
+
+- The inventory records **how each bin was printed to stack** (none, snap-on
+  lid, direct snap), and the Layout view shows it.
+- **Stacks snap together in the drawer.** Drop a stackable bin on a same-size
+  bin of the same style and it lands on top, sides aligned. Each drawer's
+  **max height** limits bins and stacks alike. Auto layout can build stacks
+  itself.
+- **Plan first:** place copies you have not printed yet. They are drawn faded,
+  listed under *To print*, and turned real with *Mark printed*. Newly
+  generated bins now start at Qty 0 (optional).
+- **Make connectors** writes every connector a layout needs, with counts.
+  **Print spacers & connectors** opens them in Bambu Studio. **Print map**
+  prints a plan of the drawer.
+- New options: 4 mm half-unit snap; a height check that counts only the bin
+  right in front; keeping big gaps open instead of filling them with spacers.
+- Fixes: dragging a bin onto a tall stack no longer counts as dragging it off
+  the drawer; an edge shim that no longer fits a resized drawer is flagged; X
+  spacers no longer count toward connectors.
+
+## 2026-09-11 — X spacers, interlocking shims, removing bins
+
+- **Spacers are no longer bins.** An empty patch of drawer now gets an open
+  frame: the outside is a bin's wavy wall, so it still nests with the bins
+  beside it (and takes a connector), and the inside is one big X brace with no
+  floor, or a row of X's when the patch is long and thin. 15 mm tall by default,
+  adjustable.
+- **Edge shims interlock too.** The side facing the bins carries the same wave;
+  the side against the drawer wall stays flat.
+- **Remove a bin from the inventory** with the new ✕ on its row.
+
 ## 2026-09-11 — Drawer layout: fit your printed bins into a real drawer
 
 - New **Drawer layout** tab beside 3D and 2D. The inventory takes the left side

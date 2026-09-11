@@ -1354,6 +1354,7 @@ def log_bin_to_folder(
         interior=interior_text,
         name=clean_label(part_name) or tidy_label or (floor_texts[0] if floor_texts else ""),
         kind="b4b" if b4b_note else "bin",
+        stack=getattr(getattr(box, "stack", None), "mode", "none"),
     )
 
 

@@ -7,7 +7,9 @@ from organizer_drawer import (
     drawer_report,
     generate_spacers,
     plan_spacers,
+    spacer_frame,
 )
+from organizer_engine import BoxSpec, wavy_cavity_polygon, wavy_outer_polygon
 from organizer_inventory import append_bin, inventory_path, load_inventory, save_inventory
 
 LEGACY = """# My Drawer Bins
@@ -68,15 +70,53 @@ class AutoLayoutTests(unittest.TestCase):
         self.assertEqual(report["height_issues"], 0)
 
 
+class StackTests(unittest.TestCase):
+    def test_stackable_bins_snap_into_stacks_as_tall_as_the_drawer_takes(self):
+        bins = [
+            {**_bin("B1", 16, 16, 30, qty=3), "stack": "direct"},
+            _bin("B2", 16, 16, 20),
+        ]
+        layout = _layout(4 * 8 + 1, 4 * 8 + 1, height=60)
+        best = auto_layout(layout, bins)["candidates"][0]
+        stacked = [p for p in best["placements"] if "on" in p]
+        self.assertEqual(len(stacked), 1)      # 30 + (30 - 3) = 57 <= 60; a third would not fit
+        self.assertEqual(best["stats"]["placed"], 4)
+        layout["drawers"][0]["placements"] = best["placements"]
+        report = drawer_report(layout["drawers"][0], bins)
+        self.assertEqual(report["stacks"], 1)
+        self.assertEqual([p for p in report["problems"] if p["type"] != "height"], [])
+
+    def test_a_bin_not_printed_to_stack_is_flagged_on_a_stack(self):
+        bins = [{**_bin("B1", 16, 16, 30), "stack": "lid"}, _bin("B2", 16, 16, 20)]
+        layout = _layout(4 * 8 + 1, 4 * 8 + 1, placements=[
+            {"bin": "B1", "copy": 0, "gx": 0, "gy": 0}, {"bin": "B2", "copy": 0, "on": "B1:0"},
+        ])
+        report = drawer_report(layout["drawers"][0], bins)
+        self.assertTrue(any(p["type"] == "stack" for p in report["problems"]))
+
+
 class SpacerTests(unittest.TestCase):
-    def test_edges_get_shims_and_empty_cells_get_spacer_bins(self):
+    def test_edges_get_wavy_shims_and_empty_cells_get_spacers(self):
         bins = [_bin("B1", 16, 16, 40)]
         layout = _layout(4 * 8 + 1 + 5.0, 3 * 8 + 1, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
-        plan = plan_spacers(layout["drawers"][0], bins, {"fill": "all", "height": 20})
+        plan = plan_spacers(layout["drawers"][0], bins, {"fill": "all"})
+        self.assertEqual(plan["height"], 15)
         self.assertEqual([s["side"] for s in plan["shims"]], ["right"])
-        self.assertAlmostEqual(plan["shims"][0]["w"], 5.0 - 0.375, places=3)
+        shim = plan["shims"][0]
+        # flat against the drawer wall; wave crests reach just past the grid edge (32.5)
+        self.assertAlmostEqual(shim["x"] + shim["w"], 37.5, places=6)
+        self.assertTrue(32.1 < shim["x"] < 32.5, shim["x"])
         covered = sum(c["w"] * c["d"] for c in plan["cells"])
         self.assertEqual(covered, 4 * 3 - 4)
+
+    def test_an_x_spacer_is_an_open_braced_frame_with_a_bins_outline(self):
+        spec = BoxSpec(48, 32, 15)
+        mesh = spacer_frame(48, 32, 15)
+        self.assertTrue(mesh.is_watertight)
+        self.assertAlmostEqual(mesh.bounds[1][2] - mesh.bounds[0][2], 15, places=3)
+        ring = wavy_outer_polygon(spec).area - wavy_cavity_polygon(spec).area
+        self.assertGreater(mesh.volume, ring * 15)                          # wall plus braces
+        self.assertLess(mesh.volume, wavy_outer_polygon(spec).area * 15 * 0.35)  # open, no floor
 
     def test_generated_shims_join_the_inventory_and_the_drawer(self):
         with tempfile.TemporaryDirectory() as tmp:

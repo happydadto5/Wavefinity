@@ -1576,7 +1576,7 @@ POST_ROUTES = {
     "/api/browse-slicer-path": browse_slicer_path_payload,
     "/api/show-log": show_log_payload,
     # Drawer layout view: inventory file, auto layout, spacers.
-    **drawer_routes(GEOMETRY_LOCK, DEFAULT_OUTPUT),
+    **drawer_routes(GEOMETRY_LOCK, DEFAULT_OUTPUT, detect_bambu_studio, launch_slicer),
 }
 
 

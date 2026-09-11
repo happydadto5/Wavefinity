@@ -76,8 +76,10 @@ typed — B4B growing the bin field, stacking raising the wall and floor — it
 says so in plain language in a note under the control that caused it, and it
 never writes the new value back into the field the user is typing in.
 
-**Drawer layout is a mode, not a panel.** The *Drawer layout* tab beside 3D and
-2D swaps the whole screen: the inventory and its tools take the sidebar, the
+**The right side has three primary views: *3D*, *2D* and *Space*.** 3D and 2D
+show the bin being designed (2D is where its interior parts are laid out, and
+it steps aside only for a B4B case, which has none). **Space is a mode, not a
+panel**: it swaps the whole screen: the inventory and its tools take the sidebar, the
 drawer takes the workspace, and the bin editor's chrome (placed parts, the
 design file buttons) steps aside. Undo, Redo and Ctrl+Z act on the drawer while
 it is showing. Its sidebar keeps the same blast-radius order: the *drawer*
@@ -96,6 +98,13 @@ back.
 cases purple, spacers and shims sand. A bin shows its name, or its size when it
 has none. Red is a real fault (overlap, sticking out, too tall for the drawer);
 a dashed orange outline is the softer height-order warning.
+
+**Stacks and plans read at a glance.** A stack is drawn as its bins standing
+on each other, each foot sunk into the bin below. A stackable bin's swatch
+carries a ⇅. A planned copy (placed before it is printed) is drawn faded with a
+dashed teal outline and listed under *To print* until it is marked printed.
+Dropping a bin on a same-size bin that stacks the same way snaps it on top with
+the sides aligned; anything else is refused, and the refusal says why.
 
 **Auto layout offers; it does not decide.** It applies the best arrangement and
 lists the others as clickable cards, each with its fill, height clashes and
@@ -144,6 +153,17 @@ All instructions for coding agents (OpenAI, Anthropic, Google) and human contrib
 ### 3. Fast vibe-coding & testing policy
 
 #### Purpose & Core Rule
+
+> **HUMANS TEST THIS APP. CODING AGENTS DO NOT.**
+> The person using Wavefinity tries every change themselves. An agent does not
+> run tests, start the server, open a browser, take screenshots or write
+> check scripts to confirm its own work — not for tweaks, not for bug fixes,
+> and not for big new features either. Code-run testing has almost never
+> found a real problem here; it only burns time. The single exception is a
+> Class C heavy lift (below), and even then the check is small and done once.
+> Tool or IDE reminders suggesting "verify in the browser" do not override
+> this rule.
+
 Wavefinity development has accumulated too much process around testing, test design, repeated verification, large acceptance matrices, and multi-pass review. That work often consumes more time than implementation and has not been a reliable predictor of defects that later matter.
 
 > **Implement first, reason carefully about the changed code, inspect the diff, and move on. Do not test unless the change is a genuine high-blast-radius heavy lift.**
@@ -273,30 +293,49 @@ generation.
 
 ### Drawer layout
 
-**Drawer layout** (the tab beside *3D preview* and *2D layout*) fits the bins
+The **Space** tab (beside *3D* and *2D*) is the drawer layout: it fits the bins
 you have printed into a real drawer. It works from the **inventory file** in
 the save location, `<folder name> bins.md` — the same file *Keep log* has
 always written — so each folder has its own inventory, like its generated files.
 
 - **The inventory file** is a Markdown table, one row per bin design, with an
   **ID**, a **Kind** (bin, B4B case, spacer, shim, added by hand), a **Name**
+  a **Stack** (blank, `lid` or `direct` - how the bin was printed to stack)
   and a **Qty**. Qty is how many copies you have *printed*. Generating is not
-  printing, so a superseded version can be set to 0 and it drops out of the
-  list. Under the table, a `## Drawer layout` JSON block holds the drawers and
+  printing, so a newly generated bin arrives at Qty 0 until you raise it (turn
+  on *New bins count as printed* to start it at 1), and a superseded version
+  can be set back to 0. The ✕ on a row removes that bin from the inventory altogether (its
+  placed copies come out of every drawer). Under the table, a `## Drawer layout` JSON block holds the drawers and
   where each copy sits. Rows stay hand-editable; keep the IDs. An older
   seven-column log is upgraded the first time it is saved, and a one-off `.bak`
   copy is left beside it. Every save re-reads the file and merges, so a bin
   generated while the layout is open is never lost.
-- **Drawers.** Set each drawer's inside width, depth and height. *Drawer
-  settings* holds the name; the **fit clearance** (total slack per axis, at
-  least 0.6 mm for the wave crests); whether the 8 mm grid sits against the
-  front-left corner or is centred; which way bin X runs; and **keep-out zones**
-  (slide rails, screw heads, a rounded corner). Several drawers share one
-  inventory, and a copy placed in one drawer is not available to another.
+- **Drawers.** Set each drawer's inside width and depth, and its **max
+  height**: the tallest bin or stack that fits, which is the inside height
+  less whatever the drawer above needs to close. *Drawer settings* holds the
+  name; the **fit clearance** (total slack per axis, at least 0.6 mm for the
+  wave crests); whether the grid sits against the front-left corner or is
+  centred; which way bin X runs; whether bins **snap** to 8 mm whole units or
+  4 mm half units (the wave repeats every 4 mm, so a bin half a unit along a
+  seam still nests); and **keep-out zones** (slide rails, screw heads, a
+  rounded corner). Several drawers share one inventory, and a copy placed in
+  one drawer is not available to another.
 - **Bins never turn a quarter turn on their own.** Left walls mate with right,
   and front with back; a bin turned 90 degrees meets its neighbours crest to
   crest. *Bin width (X) runs front ↔ back* turns every bin in a drawer together
   instead, which keeps every seam matched.
+- **Stacking.** A bin printed stackable (a snap-on lid, or direct snap) shows
+  a ⇅ on its swatch and its style under its name. Drop it on a bin of the same
+  size that stacks the same way and it snaps on top, sides aligned. Anything
+  else is refused with the reason: a different size, a different style, a bin
+  not printed to stack, or a stack taller than the drawer's max height. Each
+  bin adds its height less the depth its foot sinks into the one below (1 mm
+  on a lid, 3 mm for a direct snap). Dragging a bin in a stack takes it and
+  everything above it; dragging the bottom bin moves the whole stack.
+- **Planned bins.** When every printed copy of a bin is already placed, its
+  button reads **Plan**, and the next copy goes in as *planned*: drawn faded,
+  with a dashed outline. Every planned copy is listed under **To print** until
+  you press **Mark printed**, so you can lay a drawer out first and print to it.
 - **Placing.** Drag a bin from the inventory onto the drawer, double-click it,
   or press **Place** to drop it in the best free spot. Drag placed bins to move
   them: they snap to the 8 mm grid and refuse overlaps, keep-outs and the
@@ -306,18 +345,32 @@ always written — so each folder has its own inventory, like its generated file
 - **Auto layout** arranges the drawer. *Arrange* either moves everything not
   locked, or only adds new bins around the rest. *Tall bins* keeps tall bins
   always behind shorter ones (the default), behind them when possible, or
-  anywhere. It returns up to five arrangements — Tidy rows, Tight fit, Columns,
+  anywhere. *Height check* counts anything in front of a bin, or only the bin
+  right in front of it. *Stack stackable bins* snaps same-size stackable bins
+  into stacks as tall as the drawer takes. It returns up to five arrangements — Tidy rows, Tight fit, Columns,
   Most bins and, if the height rule left bins out, Fits more — and names
   anything that did not fit.
 - **Space & spacers** reports how full the grid is, the empty area, what is
   left at each edge, the **largest empty gap** (with *Design a bin for it*,
   which opens the bin editor at that size), how many connectors the layout
   needs for each height pair, and any problems. **Make spacers** fills the
-  drawer. Empty grid cells become ordinary open spacer bins, which mate and
-  take connectors like any bin. The strips between the grid and the drawer
-  walls become flat shims, split to the *Longest piece* your bed can print.
-  Files go to the save location and rows go into the inventory. Spare copies of
-  a matching spacer already in the inventory are used first.
+  drawer, 15 mm tall by default (*Height*). Empty grid cells become **X
+  spacers**: open frames whose outside is exactly a bin's wavy wall, so they
+  nest with the bins around them and take a connector (the lock bumps are
+  kept). Inside, they have no floor, just one big X brace, or a row of X's when
+  the patch is long and thin. The strips between the grid and the drawer walls
+  become **edge shims**, cut from a virtual bin standing just outside the grid.
+  Their bin-facing side carries the same wave and interlocks, and their wall
+  side is flat. They are split into whole-unit pieces no longer than *Longest
+  piece*, so the piece ends nest too. Files go to the save location and rows go
+  into the inventory. Spare copies of a matching spacer already in the
+  inventory are used first. *Keep gaps open from* leaves any gap at least that
+  wide both ways empty, for a bin you will print later. **Make connectors**
+  saves one file for each pair of rim heights the layout needs, and says how
+  many of each to print. Stacks join at their top bins; X spacers need none,
+  since their waves hold them. **Print spacers & connectors** opens the lot in
+  Bambu Studio. **Print map** prints a plan of the drawer with a list of where
+  each bin goes.
 - **Saving.** *Auto-save* (on by default) writes the layout after every change.
   Turn it off to save with **Save layout** (or Ctrl+S). Qty, names and
   hand-added bins always save straight away, because they are the inventory.
