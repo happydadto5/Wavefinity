@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-11 — Space view in 3D; UI wording cleanup
+
+- **The Space view is now 3D**: a camera looking into the drawer, with bins
+  drawn as boxes in perspective. It has presets (Look in, Overhead, Low), an
+  Angle slider, a Turn of up to 30° either way, pan and zoom, but no free spin,
+  so the drawer's front always faces you. The printed map is still a flat plan.
+- **Shorter, consistent labels**: Width / Length / Height for B4B too;
+  Interior print mode; Standard base, Standard walls, Easy clean (no question
+  marks); Edge style with Bevel size / Curve radius; Different heights, A
+  height / B height, Tolerance, Length; Part name, Save location, Show log;
+  Placed parts; Slope °, Crossbars, X count / Y count; Width direction; and
+  Width / Length / Height when adding a bin by hand.
+- **B4B label controls appear only after ticking Add label.** Off saves no
+  label; text you typed is kept for the session in case you switch it back on.
+- **No more stranded fields**: Text location shares its row with the text (or
+  the rim shelf); Slot Rack's Quantity and Runs along share a row; Photo Nest's
+  Push Out settings sit in two rows of two.
+
 ## 2026-09-11 — Welcome screen and spaces
 
 - **A welcome screen opens with the app.** It explains the idea (set up a

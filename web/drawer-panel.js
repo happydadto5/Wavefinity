@@ -53,10 +53,10 @@ DP.build = () => {
           <label>Name<input id="dl-name" type="text" maxlength="40"></label>
           <label>Fit clearance <span class="unit">mm</span><input id="dl-clearance" type="number" min="0.6" step="0.1" title="Total slack per axis so the bins drop in. At least 0.6 mm for the wave crests."></label>
           <label>Grid sits<select id="dl-anchor"><option value="front-left">Against front-left corner</option><option value="center">Centred</option></select></label>
-          <label>Bin width (X) runs<select id="dl-axis"><option value="x">Left ↔ right</option><option value="y">Front ↔ back</option></select></label>
+          <label>Width direction<select id="dl-axis"><option value="x">Width left ↔ right</option><option value="y">Width front ↔ back</option></select></label>
           <label>Snap to<select id="dl-snap" title="The wave repeats every 4 mm, so bins may also sit half a unit along from each other"><option value="8">8 mm - whole units</option><option value="4">4 mm - half units</option></select></label>
         </div>
-        <p class="dl-note">Bins never turn sideways on their own: a quarter-turned bin's waves clash with its neighbours. <em>Bin width runs</em> turns every bin in this drawer together, which is safe.</p>
+        <p class="dl-note">Bins never turn sideways on their own: a quarter-turned bin's waves clash with its neighbours. <em>Width direction</em> turns every bin in this drawer together, which is safe.</p>
         <div class="dl-subhead"><strong>Keep-out zones</strong><button type="button" id="dl-keepout-add" class="dl-link">+ Add</button></div>
         <p class="dl-note">Slide rails, screw heads, a rounded corner - anywhere bins must not go. Measured in mm from the inside front-left corner.</p>
         <div id="dl-keepouts"></div>
@@ -143,9 +143,9 @@ DP.build = () => {
             <label>Qty printed<input id="dl-add-qty" type="number" min="0" step="1" value="1"></label>
             <label>Stacking<select id="dl-add-stack">${STACK_OPTIONS}</select></label></div>
           <div class="field-grid three">
-            <label>X <span class="unit">mm</span><input id="dl-add-x" type="number" min="1" step="8" value="32"></label>
-            <label>Y <span class="unit">mm</span><input id="dl-add-y" type="number" min="1" step="8" value="48"></label>
-            <label>Z <span class="unit">mm</span><input id="dl-add-z" type="number" min="1" step="1" value="40" title="Closed height, lid included"></label>
+            <label>Width <span class="unit">mm</span><input id="dl-add-x" type="number" min="1" step="8" value="32"></label>
+            <label>Length <span class="unit">mm</span><input id="dl-add-y" type="number" min="1" step="8" value="48"></label>
+            <label>Height <span class="unit">mm</span><input id="dl-add-z" type="number" min="1" step="1" value="40" title="Closed height, lid included"></label>
           </div>
           <div class="button-row"><button type="button" id="dl-add" class="button secondary">Add to inventory</button></div>
         </details>
@@ -685,9 +685,9 @@ DP.renderInventory = (force = false) => {
           <label>Stacking<select data-field="stack">${STACK_OPTIONS.replace(`value="${one.stack}"`, `value="${one.stack}" selected`)}</select></label>
         </div>
         <div class="field-grid three">
-          <label>X <span class="unit">mm</span><input type="number" data-field="x" min="1" step="8" value="${fmt(one.x)}"></label>
-          <label>Y <span class="unit">mm</span><input type="number" data-field="y" min="1" step="8" value="${fmt(one.y)}"></label>
-          <label>Z <span class="unit">mm</span><input type="number" data-field="z" min="1" step="1" value="${fmt(one.z)}" title="Closed height, lid included"></label>
+          <label>Width <span class="unit">mm</span><input type="number" data-field="x" min="1" step="8" value="${fmt(one.x)}"></label>
+          <label>Length <span class="unit">mm</span><input type="number" data-field="y" min="1" step="8" value="${fmt(one.y)}"></label>
+          <label>Height <span class="unit">mm</span><input type="number" data-field="z" min="1" step="1" value="${fmt(one.z)}" title="Closed height, lid included"></label>
         </div>
         <p>${DL.stackable(one) ? `Adds ${fmt(DL.pitch(one))} mm to a stack (its foot sinks ${fmt(DL.stackSteps[one.stack])} mm into the bin below).<br>` : ""}${one.file ? `File: ${escapeHtml(one.file)}<br>` : ""}${one.label ? `Label: ${escapeHtml(one.label)}<br>` : ""}${one.interior ? `Inside: ${escapeHtml(one.interior)}<br>` : ""}${escapeHtml(one.id)}${one.date ? ` · logged ${escapeHtml(one.date)}` : ""}</p>
         <div class="button-row">

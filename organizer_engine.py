@@ -341,7 +341,9 @@ class B4BSpec:
         lid = True if self.enabled else legacy_lid
         secure = bool(self.secure_lid) and legacy_lid
         stacking = bool(self.stacking) and legacy_lid
-        latch_count = self.latch_count if secure else "auto"
+        # Latch count is always derived from box size now; an explicit "1"/"2"
+        # saved by an older file is no longer a supported override.
+        latch_count = "auto"
         latch_strength = self.latch_strength
         return B4BSpec(
             enabled=self.enabled,

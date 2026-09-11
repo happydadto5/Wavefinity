@@ -129,7 +129,6 @@ B4B_LATCH_PROFILES = {
 # Minimum requested child-field widths.  Hardware reinforcement grows outward;
 # it may grow the child field only when the hardware genuinely needs more span.
 B4B_SECURE_MIN_FIELD_X = 3 * GRID_PITCH
-B4B_TWO_LATCH_MIN_FIELD_X = 5 * GRID_PITCH
 
 _EPS = 1e-6
 
@@ -243,9 +242,6 @@ def b4b_effective_box(box: BoxSpec) -> BoxSpec:
     if b4b.secure_lid:
         while x < B4B_SECURE_MIN_FIELD_X - _EPS:
             x += GRID_PITCH
-        if b4b.latch_count == "2":
-            while x < B4B_TWO_LATCH_MIN_FIELD_X - _EPS:
-                x += GRID_PITCH
         z = max(z, B4B_LATCHED_MIN_HEIGHT)
 
     # Stacking needs a footprint wide enough that the four corner locators do
@@ -468,19 +464,15 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
     h_span, h_lug = _hinge_screw_stack(hinge_width)
     hinge_screw = _screw_for_stack(h_span, h_lug, "hinge")
 
-    # Latches: front, 1 / 2 / Auto.
+    # Latches: front, count derived from the available span - one when two
+    # would not fit clear of each other, otherwise two.
     latch_width = min(
         B4B_LATCH_WIDTH_MAX,
         max(B4B_LATCH_WIDTH_MIN, B4B_LATCH_WIDTH_FRACTION * case_x),
     )
     span = _front_span(box)
     two_fit = (2.0 * latch_width + 3.0 * B4B_LATCH_MUTUAL_CLEARANCE) <= span + _EPS
-    if b4b.latch_count == "1":
-        resolved = 1
-    elif b4b.latch_count == "2":
-        resolved = 2
-    else:
-        resolved = 2 if two_fit else 1
+    resolved = 2 if two_fit else 1
     if resolved == 1:
         latch_centers_x = (0.0,)
     else:
@@ -830,7 +822,7 @@ def _knuckle(cx: float, axis_y: float, axis_z: float, width: float,
 
 
 def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """Compact upper-wall rear knuckles on >=45-degree printable gussets."""
+    """Compact upper-wall rear knuckles on 45-degree printable gussets."""
     eff = b4b_effective_box(box)
     layout = b4b_layout(box)
     seg = _hinge_seg(plan)
@@ -849,7 +841,7 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
             outward_run = max(0.1, lower_touch_y - root_y)
             root_z = max(
                 eff.z - 7.0,
-                plan.hinge_axis_z - r - outward_run / math.tan(math.radians(50.0)),
+                plan.hinge_axis_z - r - outward_run / math.tan(math.radians(45.0)),
             )
             gusset_profile = Polygon([
                 (root_y, root_z),
@@ -1274,8 +1266,6 @@ def validate_b4b_design(
             raise ValueError("latch pin length did not resolve to an allowed M3 length")
         if plan.catch_screw_length_mm not in B4B_SCREW_LENGTHS:
             raise ValueError("catch pin length did not resolve to an allowed M3 length")
-        if b4b.latch_count == "2" and plan.latch_count_resolved != 2:
-            raise ValueError("two latches were requested but do not fit this width")
 
     if deep:
         _validate_b4b_mechanics(box)

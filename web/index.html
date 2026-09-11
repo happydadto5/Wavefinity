@@ -55,18 +55,18 @@
             <label>Height <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
           </div>
           <div class="mode-and-bin-options">
-            <label>Interior parts print as
+            <label>Interior print mode
               <select id="mode-select"></select>
             </label>
-            <label class="checkbox-row inline-option"><span>Standard base?</span><input id="standard-base" type="checkbox" checked></label>
+            <label class="checkbox-row inline-option"><span>Standard base</span><input id="standard-base" type="checkbox" checked></label>
             <label id="base-thickness-setting" class="inline-number" hidden>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1" value="0.6"></label>
-            <label class="checkbox-row inline-option"><span>Standard walls?</span><input id="standard-walls" type="checkbox" checked></label>
+            <label class="checkbox-row inline-option"><span>Standard walls</span><input id="standard-walls" type="checkbox" checked></label>
             <label id="wall-thickness-setting" class="inline-select" hidden>Wall thickness
               <select id="wall-thickness"><option value="0.8">0.8 mm — Standard</option></select>
             </label>
             <span id="thin-wall-warning" class="wall-warning" hidden>Very thin — may not print reliably with standard nozzle/slicer settings.</span>
-            <label class="checkbox-row inline-option"><span>Easy Clean?</span><input id="easy-clean" type="checkbox"></label>
-            <label id="easy-clean-style-setting" class="inline-select" hidden>Clean Edge
+            <label class="checkbox-row inline-option"><span>Easy clean</span><input id="easy-clean" type="checkbox"></label>
+            <label id="easy-clean-style-setting" class="inline-select" hidden>Edge style
               <select id="easy-clean-style">
                 <option value="bevel" selected>Bevel</option>
                 <option value="curve">Curve</option>
@@ -82,6 +82,7 @@
               <span id="b4b-envelope" class="muted">Complete assembled envelope: — mm</span>
               <span id="b4b-child-height" class="muted">Maximum bin height: — mm</span>
               <span id="b4b-grew" class="field-error" hidden></span>
+              <div id="b4b-hardware" class="muted b4b-hardware">Hardware: —</div>
             </div>
             <label class="inline-select">Lid type
               <select id="b4b-lid-type">
@@ -97,24 +98,17 @@
               </select>
             </label>
             <div id="b4b-secure-options" class="b4b-subgroup">
-                <label class="inline-select">Latches
-                  <select id="b4b-latch-count">
-                    <option value="auto" selected>Auto</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                  </select>
-                </label>
                 <label class="inline-select">Latch strength
                   <select id="b4b-latch-strength">
                     <option value="lightweight">Lightweight</option>
                     <option value="standard" selected>Standard</option>
                   </select>
                 </label>
-                <div id="b4b-hardware" class="muted b4b-hardware">Hardware: —</div>
             </div>
-            <label class="checkbox-row inline-option"><span>Stacking?</span><input id="b4b-stacking" type="checkbox"></label>
-            <label>Label text<input id="b4b-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE"></label>
-            <label class="inline-select">Label location
+            <label class="checkbox-row inline-option"><span>Stacking</span><input id="b4b-stacking" type="checkbox"></label>
+            <label class="checkbox-row inline-option"><span>Add label</span><input id="b4b-label-enabled" type="checkbox"></label>
+            <label id="b4b-label-text-row" hidden>Label text<input id="b4b-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE"></label>
+            <label id="b4b-label-location-row" class="inline-select" hidden>Label location
               <select id="b4b-label-location">
                 <option value="top" selected>Top</option>
                 <option value="front">Front</option>
@@ -150,30 +144,30 @@
         <div class="section-heading no-toggle">
           <span>Connect bins</span>
           <label class="checkbox-row heading-check" for="different-height-bins">
-            <span>Different height bins?</span>
+            <span>Different heights</span>
             <input id="different-height-bins" type="checkbox">
           </label>
         </div>
         <div class="section-body">
           <div id="connector-bin-heights" class="field-grid two" hidden>
-            <label>Bin A <span class="unit">mm</span><input id="connector-bin-a-height" type="number" min="2" step="1"></label>
-            <label>Bin B <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>
+            <label>A height <span class="unit">mm</span><input id="connector-bin-a-height" type="number" min="2" step="1"></label>
+            <label>B height <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>
           </div>
           <div id="connector-settings" class="field-grid three" hidden>
-            <label>Connector tolerance <span class="unit">mm</span><input id="connector-tolerance" type="number" min="0" max="1" step="0.01"></label>
-            <label>Connector length <span class="unit">mm</span><input id="connector-length" type="number" min="2" step="0.1"></label>
+            <label>Tolerance <span class="unit">mm</span><input id="connector-tolerance" type="number" min="0" max="1" step="0.01"></label>
+            <label>Length <span class="unit">mm</span><input id="connector-length" type="number" min="2" step="0.1"></label>
             <label>Arm thickness <span class="unit">mm</span><input id="connector-arm-thickness" type="number" min="0.5" max="10" step="0.1"></label>
           </div>
         </div>
       </section>
 
       <section class="output-panel">
-        <label class="part-name-row">Part name <span class="unit">for file</span>
+        <label class="part-name-row">Part name
           <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
         </label>
         <div class="save-location-row">
           <div class="save-location-group">
-            <label for="output-folder">Save Location:</label>
+            <label for="output-folder">Save location</label>
             <input id="output-folder" type="text" readonly title="Click to select folder">
           </div>
           <div class="log-controls-group">
@@ -181,7 +175,7 @@
               <span>Keep log</span>
               <input id="keep-log" type="checkbox" checked>
             </label>
-            <button type="button" id="show-log-button" class="button secondary" title="Show bins.md log file in WordPad">Show Log</button>
+            <button type="button" id="show-log-button" class="button secondary" title="Show bins.md log file in WordPad">Show log</button>
           </div>
         </div>
         <div class="print-button-wrap">
@@ -263,7 +257,7 @@
         <canvas id="drawer-canvas" role="img" aria-label="Drawer layout"></canvas>
       </div>
       <aside class="placed-block" aria-label="Placed parts">
-        <h3>placed parts</h3>
+        <h3>Placed parts</h3>
         <div id="placed-supports" class="placed-supports"></div>
       </aside>
       <div id="error-panel" class="error-panel" hidden></div>

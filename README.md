@@ -57,7 +57,7 @@ different kind of object that loses them.
   options: a row of big buttons for a two-state setting reads as two actions,
   and gives no clue the two are exclusive.
 - A **checkbox** is for a genuine on/off with no second state worth naming —
-  *Standard base?*, *Stacking?* inside B4B, *Keep log*.
+  *Standard base*, *Stacking* and *Add label* inside B4B, *Keep log*.
 - A **button** is for something that *happens* — *Generate*, *Reset*, *Top*,
   *Show Log*. Nothing that merely records a preference is a button.
 
@@ -87,12 +87,16 @@ card (size and fit) first, then *Auto layout* with its options directly under
 the button, then *Space & spacers*, then the *Inventory* you work from, with
 saving pinned to the bottom.
 
-**The drawer is always seen from its front.** It is not a free 3D camera. The
-only view controls are how steeply you look down (*Top*, *Angled*, *Low* and a
-tilt slider), pan (drag the floor, or right-drag) and zoom (wheel, −/+,
-*Fit*). Keeping the front at the bottom of the screen is what makes "a short
-bin behind a tall one" visible, and it means dragging a bin up always moves it
-back.
+**The drawer is seen through a camera looking into it.** It is a real 3D
+view: bins are boxes in perspective, showing their tops, their fronts and the
+sides that face you. But it is not a free orbit. The camera always stands in
+front of the drawer and above it. You get presets (*Look in*, *Overhead*,
+*Low*), an *Angle* slider for how steeply you look down, a *Turn* of up to 30°
+to either side, pan (drag the floor, or right-drag) and zoom (wheel, −/+,
+*Fit*). It never spins round or looks from underneath, so the front of the
+drawer is always nearest you. That is what makes "a short bin behind a tall
+one" visible, and it means dragging a bin away from you always moves it back.
+The printed map stays a flat, numbered plan.
 
 **Colour means height.** Bins run from light (short) to dark (tall) teal, B4B
 cases purple, spacers and shims sand. A bin shows its name, or its size when it
@@ -322,7 +326,7 @@ always written — so each folder has its own inventory, like its generated file
   one drawer is not available to another.
 - **Bins never turn a quarter turn on their own.** Left walls mate with right,
   and front with back; a bin turned 90 degrees meets its neighbours crest to
-  crest. *Bin width (X) runs front ↔ back* turns every bin in a drawer together
+  crest. *Width direction: Width front ↔ back* turns every bin in a drawer together
   instead, which keeps every seam matched.
 - **Stacking.** A bin printed stackable (a snap-on lid, or direct snap) shows
   a ⇅ on its swatch and its style under its name. Drop it on a bin of the same

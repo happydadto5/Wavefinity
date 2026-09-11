@@ -400,7 +400,7 @@ function syncEasyCleanControls() {
   const currentStyle = ($("#easy-clean-style") && $("#easy-clean-style").value) || "bevel";
   const labelEl = $("#easy-clean-radius-label");
   if (labelEl) {
-    labelEl.textContent = currentStyle === "bevel" ? "Bevel" : "Curve";
+    labelEl.textContent = currentStyle === "bevel" ? "Bevel size" : "Curve radius";
   }
 }
 
@@ -588,8 +588,6 @@ function b4bEnabled() {
 // Easy Clean, the interior print mode and the Connect bins section entirely.
 function applyB4BVisibility() {
   const on = b4bEnabled();
-  $("#x-size-label").textContent = on ? "Bin field Width" : "Width";
-  $("#y-size-label").textContent = on ? "Bin field Length" : "Length";
   $("#b4b-panel").hidden = !on;
   const hide = (sel, hidden) => { const el = $(sel); if (el) el.hidden = hidden; };
   hide(".subheading-row", on);
@@ -619,13 +617,16 @@ function applyB4BVisibility() {
   }
   if (on) {
     $("#b4b-secure-options").hidden = $("#b4b-lid-type").value !== "latched";
+    // The label's text and location only exist once Add label is ticked.
+    const labelled = $("#b4b-label-enabled").checked;
+    hide("#b4b-label-text-row", !labelled);
+    hide("#b4b-label-location-row", !labelled);
   }
   applyStackVisibility();
 }
 
 function normalizeB4BDependentControls() {
   const secure = $("#b4b-lid-type").value === "latched";
-  $("#b4b-latch-count").disabled = !secure;
   $("#b4b-latch-strength").disabled = !secure;
 }
 
@@ -636,9 +637,17 @@ function syncB4BForm() {
     ? "latched" : "lid_only";
   $("#b4b-stacking").checked = Boolean(b4b.stacking);
   $("#b4b-lid-snugness").value = String(b4b.lid_headroom_mm ?? 1);
-  $("#b4b-latch-count").value = b4b.latch_count || "auto";
   $("#b4b-latch-strength").value = b4b.latch_strength || "standard";
-  $("#b4b-label-text").value = b4b.label_text || "";
+  // Add label follows the design's label text. Text typed and then switched
+  // off stays in the (hidden) field for this session, so switching back on
+  // does not mean retyping it.
+  const labelText = String(b4b.label_text || "");
+  if (labelText.trim()) {
+    $("#b4b-label-enabled").checked = true;
+    $("#b4b-label-text").value = labelText;
+  } else if ($("#b4b-label-text").value.trim()) {
+    $("#b4b-label-enabled").checked = false;
+  }
   $("#b4b-label-location").value = b4b.label_location === "front" ? "front" : "top";
   normalizeB4BDependentControls();
   $("#stack-mode").value = stackMode();
@@ -697,10 +706,10 @@ function readB4BForm(design) {
     enabled: true,
     lid: true,
     secure_lid: secure,
-    latch_count: secure ? $("#b4b-latch-count").value : "auto",
+    latch_count: "auto",
     latch_strength: $("#b4b-latch-strength").value,
     lid_headroom_mm: parseFloat($("#b4b-lid-snugness").value) || 1,
-    label_text: $("#b4b-label-text").value,
+    label_text: $("#b4b-label-enabled").checked ? $("#b4b-label-text").value : "",
     label_location: $("#b4b-label-location").value,
     stacking: $("#b4b-stacking").checked,
   };
@@ -712,6 +721,24 @@ function enforceB4BMinimumHeight(design = state.design, flash = true) {
   design.box.z = B4B_LATCHED_MIN_HEIGHT;
   $("#z").value = fmt(design.box.z);
   if (flash) flashField($("#z"));
+}
+
+function groupB4BHardware(hardware) {
+  // Merge hinge/latch/catch screws by length - it doesn't matter which part
+  // uses which screw, just how many of each length to have on hand.
+  const byLength = new Map();
+  const add = (qty, screw) => {
+    if (!qty) return;
+    const length = parseInt(String(screw).split("x")[1], 10);
+    byLength.set(length, (byLength.get(length) || 0) + qty);
+  };
+  add(hardware.hinge_qty, hardware.hinge_screw);
+  add(hardware.latch_qty, hardware.latch_screw);
+  add(hardware.catch_qty, hardware.catch_screw);
+  return [...byLength.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([length, qty]) => `${qty} M3 (${length}mm)`)
+    .join(", ");
 }
 
 function renderB4BReadout() {
@@ -747,10 +774,8 @@ function renderB4BReadout() {
     grew.hidden = true;
   }
   if (b4b.secure_lid && b4b.hardware) {
-    hardware.textContent =
-      `Hardware: ${b4b.hardware.hinge_qty} x ${b4b.hardware.hinge_screw} hinge pins, ` +
-      `${b4b.hardware.latch_qty} x ${b4b.hardware.latch_screw} latch pivots, ` +
-      `${b4b.hardware.catch_qty} x ${b4b.hardware.catch_screw} catch pins, no nuts`;
+    const latches = b4b.latch_count === 1 ? "1 latch" : `${b4b.latch_count} latches`;
+    hardware.textContent = `${latches} — Hardware: ${groupB4BHardware(b4b.hardware)}`;
     hardware.hidden = false;
   } else {
     hardware.hidden = true;
@@ -1260,13 +1285,18 @@ function wireControls() {
       applyB4BVisibility();
       changedDesign();
     }));
-  ["#b4b-lid-snugness", "#b4b-latch-count", "#b4b-latch-strength", "#b4b-label-location"]
+  ["#b4b-lid-snugness", "#b4b-latch-strength", "#b4b-label-location"]
     .forEach(sel => $(sel).addEventListener("change", () => {
       readB4BForm(state.design);
       enforceB4BMinimumHeight();
       changedDesign();
     }));
   $("#b4b-label-text").addEventListener("input", () => {
+    state.canGenerate = false; updateGenerateAvailability(); changedDesign();
+  });
+  $("#b4b-label-enabled").addEventListener("change", () => {
+    readB4BForm(state.design);
+    applyB4BVisibility();
     state.canGenerate = false; updateGenerateAvailability(); changedDesign();
   });
 
@@ -1692,7 +1722,10 @@ function plainCheckbox(key, title, on, options = {}) {
   </label>`;
 }
 
-function textPlacementFields(levelKey, sideKey, level, side = "back") {
+// Text location and whatever sits beside it share one row: the rim shelf
+// side when the text is on the rim, otherwise `companion` (the text itself),
+// so the location is never left on a half-empty row.
+function textPlacementFields(levelKey, sideKey, level, side = "back", companion = "") {
   const sides = [["front", "Front"], ["back", "Back"], ["left", "Left"], ["right", "Right"]];
   const pickedSide = sides.some(([value]) => value === side) ? side : "back";
   let html = `<label>Text location<select data-draft="${escapeHtml(levelKey)}">
@@ -1703,6 +1736,8 @@ function textPlacementFields(levelKey, sideKey, level, side = "back") {
     html += `<label>Rim shelf<select data-draft="${escapeHtml(sideKey)}">
       ${sides.map(([value, label]) => `<option value="${value}" ${pickedSide === value ? "selected" : ""}>${label}</option>`).join("")}
     </select></label>`;
+  } else {
+    html += companion;
   }
   return `<div class="pair">${html}</div>`;
 }
@@ -1768,7 +1803,8 @@ function renderDraftFields() {
       );
       html += `</div>`;
     } else if (assist === "push_out") {
-      html += `<div class="draft-triple">${liftAssist}`;
+      // Four controls: two rows of two, not three and a stranded fourth.
+      html += `<div class="pair">${liftAssist}`;
       html += `<label>Push at
         <select data-draft="option:push_position">
           <option value="right" ${selected("right", pushPosition)}>Right</option>
@@ -1806,12 +1842,12 @@ function renderDraftFields() {
   }
   if (info.flags.text) {
     const textLevel = one.options?.level === "rim" ? "rim" : "base";
+    const textInput = `<input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">`;
     html += textPlacementFields(
       "option:level", "option:rim_side", textLevel, one.options?.rim_side,
+      textLevel === "rim" ? "" : `<label>Text${textInput}</label>`,
     );
-    html += `<label class="wide">What it says
-      <input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">
-    </label>`;
+    if (textLevel === "rim") html += `<label class="wide">Text${textInput}</label>`;
     if (textLevel === "base") {
       const capShown = one.options?.cap_height ?? state.draftResolvedOptions?.cap_height ?? "";
       const depthShown = one.options?.depth ?? state.draftResolvedOptions?.depth ?? 0.4;
@@ -1889,8 +1925,8 @@ function renderDraftFields() {
           ${field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" })}
           ${field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
           ${optionField("height", "Height", { unit: "mm", step: "0.5" })}
-          ${gridField("columns", "X Qty")}
-          ${gridField("rows", "Y Qty")}
+          ${gridField("columns", "X count")}
+          ${gridField("rows", "Y count")}
         </div>
       </div>`;
 
@@ -1941,15 +1977,24 @@ function renderDraftFields() {
         : (one.along === "y" ? legacyN : 0);
       const gy = (opt.count_y != null && opt.count_y !== "") ? opt.count_y
         : (one.along === "x" ? legacyN : 0);
-      html += `<label title="Walls dividing the bin left to right (across X). 0 for none.">Qty X<input type="number" min="0" step="1" data-draft="option:count_x" value="${gx}" placeholder="0"></label>
-        <label title="Walls dividing the bin front to back (across Y). 0 for none.">Qty Y<input type="number" min="0" step="1" data-draft="option:count_y" value="${gy}" placeholder="0"></label>`;
+      html += `<label title="Walls dividing the bin left to right (across X). 0 for none.">X count<input type="number" min="0" step="1" data-draft="option:count_x" value="${gx}" placeholder="0"></label>
+        <label title="Walls dividing the bin front to back (across Y). 0 for none.">Y count<input type="number" min="0" step="1" data-draft="option:count_y" value="${gy}" placeholder="0"></label>`;
     } else {
       html += `<div class="editor-group"><span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`;
+      const runsAlong = info.flags.along && !["divider", "bore"].includes(info.kind)
+        ? `<fieldset><legend>Runs along</legend><div class="segmented two">
+          <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
+          <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
+        </div></fieldset>`
+        : "";
+      // A part with no spacing field of its own (Slot Rack) would leave
+      // Quantity alone on its row: Runs along takes the second column instead.
+      const alongInPair = Boolean(info.flags.qty && !repeatFieldsHtml && runsAlong);
       if (info.flags.qty) {
         html += `<div class="pair"><label>Quantity<div class="input-with-button">
           <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
           ${["cradle", "slot"].includes(info.kind) ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
-        </div></label>${repeatFieldsHtml}</div>`;
+        </div></label>${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
         if (info.kind === "cradle") {
           const item = one.item || starterItem();
           const first = item.segments[0] || { length: 40, diameter: 6 };
@@ -1964,12 +2009,7 @@ function renderDraftFields() {
           "Places every second trough near the opposite end of the bin; each trough becomes a separate body.",
           one.alternate_ends === true, { wide: true });
       }
-      if (info.flags.along && !["divider", "bore"].includes(info.kind)) {
-        html += `<fieldset><legend>Runs along</legend><div class="segmented two">
-          <label><input type="radio" name="draft-along" value="x" ${one.along === "x" ? "checked" : ""}><span>X direction</span></label>
-          <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
-        </div></fieldset>`;
-      }
+      if (runsAlong && !alongInPair) html += runsAlong;
       if (info.flags.alternate && (info.kind !== "cradle" || one.alternate_ends === true)) {
         // One field, two readings. Alternate ends on: the clearance kept at each
         // run end (writes end_margin). Off: a signed slide of the whole row along
@@ -2023,7 +2063,7 @@ function renderDraftFields() {
     // for this loop.
     if (info.kind === "bore") continue;
     // Nest's fit numbers ride beside Lift assist; Text's letter size/depth ride
-    // under "What it says".
+    // with the Text field.
     if (info.kind === "nest" && (option.key === "clearance" || option.key === "smoothing")) continue;
     if (info.kind === "text" && (option.key === "cap_height" || option.key === "depth")) continue;
     // Rendered by the divider bottom-slope block below, on its own and only
@@ -2087,14 +2127,14 @@ function renderDraftFields() {
       const angleNum = number(angleVal, 0);
       const useBars = angleNum !== 0 && opt.minimal_bottom === true;
       html += `<div class="pair divider-slope-options"><div class="divider-slope-fields">`;
-      html += field("Degree °", "option:bottom_angle", angleVal, { step: "1" });
+      html += field("Slope", "option:bottom_angle", angleVal, { step: "1", unit: "°" });
       if (angleNum !== 0) {
         if (useBars) {
           const explicitBars = Object.prototype.hasOwnProperty.call(opt, "bottom_supports");
           const bars = explicitBars
             ? opt.bottom_supports
             : state.draftResolvedOptions?.bottom_supports ?? 3;
-          html += field("Number of crossbars", "option:bottom_supports", bars, { step: "1" });
+          html += field("Crossbars", "option:bottom_supports", bars, { step: "1" });
         }
       }
       html += `</div><div class="divider-slope-toggles">`;
@@ -3003,7 +3043,7 @@ function updateDraftFromFields(event) {
   // the Angle field for round/square only).
   if ((changed === "profile" || changed === "option:angle") && one.kind === "bore") renderDraftFields();
   if (changed === "option:lift_assist" && one.kind === "nest") renderDraftFields();
-  // Ticking Use support crossbars reveals (or hides) Number of crossbars.
+  // Ticking Use support crossbars reveals (or hides) Crossbars.
   if (changed === "option:minimal_bottom") renderDraftFields();
   if (changed === "option:level") renderDraftFields();
   if (one.kind === "divider" && (

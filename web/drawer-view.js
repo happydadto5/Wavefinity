@@ -2,39 +2,64 @@
 
 // Drawer layout mode - the drawer canvas.
 //
-// Not a free 3D camera: the drawer is always seen from its front, and the only
-// view controls are how steeply you look down (Top -> Low), pan and zoom. That
-// keeps "front of the drawer" at the bottom of the screen, which is what the
-// height rule (never a short bin behind a tall one) is about. The projection
-// is a tilt about the drawer's left-right axis, so every bin face is a plain
-// screen rectangle and a stack is just boxes drawn on top of each other.
+// A camera looking into the drawer, not a free orbit. It always stands in
+// front of the drawer and above it, looking in: you choose how steeply (Angle,
+// from low to overhead), turn a little to either side (Turn, up to 30°), pan
+// and zoom - but never spin it round or look from underneath, so the front of
+// the drawer is always the side nearest you. Bins are real boxes in
+// perspective: their tops, the fronts and the sides that face you, lit from
+// above.
 
 const DV = {
-  view: { tilt: 35, zoom: 1, panX: 0, panY: 0 },
-  PRESETS: { top: 0, angled: 35, low: 62 },
+  view: { tilt: 48, turn: 0, zoom: 1, panX: 0, panY: 0 },
+  LIMITS: { tilt: [22, 86], turn: [-30, 30], zoom: [0.5, 6] },
+  PRESETS: { look: { tilt: 48, turn: 0 }, overhead: { tilt: 86, turn: 0 }, low: { tilt: 26, turn: 0 } },
   hits: [],
   drag: null,
   pan: null,
   hover: null,
   drop: null,
   dragBin: null,
-  frame: null,
+  cam: null,
 };
 
 try {
-  const saved = JSON.parse(localStorage.getItem("wavefinity-drawer-view") || "{}");
+  const saved = JSON.parse(localStorage.getItem("wavefinity-drawer-camera") || "{}");
   if (Number.isFinite(saved.tilt)) DV.view.tilt = saved.tilt;
+  if (Number.isFinite(saved.turn)) DV.view.turn = saved.turn;
 } catch (_error) {}
 DV.saveView = debounce(() => {
-  try { localStorage.setItem("wavefinity-drawer-view", JSON.stringify({ tilt: DV.view.tilt })); } catch (_error) {}
+  try { localStorage.setItem("wavefinity-drawer-camera", JSON.stringify({ tilt: DV.view.tilt, turn: DV.view.turn })); } catch (_error) {}
 }, 300);
 
-DV.setTilt = tilt => {
-  DV.view.tilt = Math.max(0, Math.min(70, Number(tilt) || 0));
-  const slider = $("#dl-tilt");
-  if (slider) slider.value = String(Math.round(DV.view.tilt));
-  $$("[data-dl-view]").forEach(button => button.classList.toggle(
-    "active", DV.PRESETS[button.dataset.dlView] === Math.round(DV.view.tilt)));
+const dvClamp = (value, [low, high]) => Math.max(low, Math.min(high, Number(value) || 0));
+const V3 = {
+  add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
+  sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+  scale: (a, s) => [a[0] * s, a[1] * s, a[2] * s],
+  dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  norm: a => { const length = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / length, a[1] / length, a[2] / length]; },
+};
+
+// ------------------------------------------------------------------ camera
+
+DV.syncControls = () => {
+  const tilt = $("#dl-tilt");
+  const turn = $("#dl-turn");
+  if (tilt) tilt.value = String(Math.round(DV.view.tilt));
+  if (turn) turn.value = String(Math.round(DV.view.turn));
+  $$("[data-dl-view]").forEach(button => {
+    const preset = DV.PRESETS[button.dataset.dlView];
+    button.classList.toggle("active", Boolean(preset)
+      && Math.round(DV.view.tilt) === preset.tilt && Math.round(DV.view.turn) === preset.turn);
+  });
+};
+
+DV.setView = ({ tilt = DV.view.tilt, turn = DV.view.turn } = {}) => {
+  DV.view.tilt = dvClamp(tilt, DV.LIMITS.tilt);
+  DV.view.turn = dvClamp(turn, DV.LIMITS.turn);
+  DV.syncControls();
   DV.saveView();
   DV.render();
 };
@@ -44,64 +69,124 @@ DV.fit = () => {
   DV.render();
 };
 
+DV.size = () => {
+  const box = $("#drawer-canvas")?.getBoundingClientRect();
+  return box ? [box.width, box.height] : [0, 0];
+};
+
+// Zoom about a screen point: the floor point under it stays put.
 DV.zoomBy = (factor, sx = null, sy = null) => {
-  const frame = DV.frame;
-  const next = Math.max(0.4, Math.min(8, DV.view.zoom * factor));
-  const applied = next / DV.view.zoom;
-  if (frame && sx !== null) {
-    DV.view.panX += (sx - frame.cx) * (1 - applied);
-    DV.view.panY += (sy - frame.cy) * (1 - applied);
+  const [width, height] = DV.size();
+  if (!DL.layout || !width) return;
+  const drawer = DL.drawer();
+  const before = sx === null ? null : DV.camera(width, height, drawer).onPlane(sx, sy, 0);
+  DV.view.zoom = dvClamp(DV.view.zoom * factor, DV.LIMITS.zoom);
+  if (before) {
+    const after = DV.camera(width, height, drawer).onPlane(sx, sy, 0);
+    if (after) {
+      DV.view.panX += before[0] - after[0];
+      DV.view.panY += before[1] - after[1];
+    }
   }
-  DV.view.zoom = next;
+  DV.clampPan(drawer);
   DV.render();
 };
 
-DV.frameFor = (width, height, drawer, tiltDeg = DV.view.tilt, view = DV.view) => {
-  const tilt = tiltDeg * Math.PI / 180;
-  const c = Math.cos(tilt);
-  const sn = Math.sin(tilt);
+DV.clampPan = drawer => {
+  DV.view.panX = Math.max(-drawer.width * 0.6, Math.min(drawer.width * 0.6, DV.view.panX));
+  DV.view.panY = Math.max(-drawer.depth * 0.6, Math.min(drawer.depth * 0.6, DV.view.panY));
+};
+
+// A perspective camera standing in front of and above the drawer, aimed at
+// its middle. At zoom 1 it stands just far enough back to frame the whole
+// drawer; zooming walks it in, never below the drawer's rim.
+DV.camera = (width, height, drawer, view = DV.view) => {
   const W = drawer.width;
   const D = drawer.depth;
   const H = drawer.height;
-  const margin = 46;
+  const tilt = view.tilt * Math.PI / 180;
+  const turn = view.turn * Math.PI / 180;
+  const away = [Math.sin(turn) * Math.cos(tilt), -Math.cos(turn) * Math.cos(tilt), Math.sin(tilt)];
+  const focal = (height / 2) / Math.tan(17 * Math.PI / 180);   // a 34° field of view
+  const margin = 36;
   const footer = 30;
-  const base = Math.max(0.02, Math.min(
-    (width - 2 * margin) / W,
-    (height - 2 * margin - footer) / (D * c + H * sn),
-  ));
-  const s = base * view.zoom;
-  const cx = width / 2 + view.panX;
-  const cy = (height - footer) / 2 + view.panY;
-  return {
-    s, c, sn, W, D, H, cx, cy,
-    project: (x, y, z) => [cx + (x - W / 2) * s, cy + ((D / 2 - y) * c - (z - H / 2) * sn) * s],
-    unproject: (sx, sy, z = 0) => [
-      (sx - cx) / s + W / 2,
-      D / 2 - ((sy - cy) / s + (z - H / 2) * sn) / c,
-    ],
+  const halfW = Math.max(40, width / 2 - margin);
+  const halfH = Math.max(40, (height - footer) / 2 - margin);
+  const cx = width / 2;
+  const cy = (height - footer) / 2;
+  const basis = (target, dist) => {
+    const f = V3.scale(away, -1);
+    const r = V3.norm(V3.cross(f, [0, 0, 1]));
+    return { eye: V3.add(target, V3.scale(away, dist)), f, r, u: V3.cross(r, f) };
   };
+  const corners = [];
+  for (const x of [0, W]) for (const y of [0, D]) for (const z of [0, H]) corners.push([x, y, z]);
+  const home = [W / 2, D / 2, H / 3];
+  let fit = 1.6 * Math.hypot(W, D, H);
+  for (let pass = 0; pass < 5; pass += 1) {
+    const b = basis(home, fit);
+    let need = 0;
+    for (const corner of corners) {
+      const v = V3.sub(corner, b.eye);
+      const depth = V3.dot(v, b.f);
+      if (depth <= 1) { need = 2; break; }
+      need = Math.max(need,
+        Math.abs(focal * V3.dot(v, b.r) / depth) / halfW,
+        Math.abs(focal * V3.dot(v, b.u) / depth) / halfH);
+    }
+    fit *= need || 1;
+  }
+  const target = [home[0] + view.panX, home[1] + view.panY, home[2]];
+  // Never let a close zoom put the lens inside the drawer.
+  const lowest = (H * 1.25 + 25 - target[2]) / Math.max(0.2, away[2]);
+  const b = basis(target, Math.max(fit / view.zoom, lowest));
+  const project = point => {
+    const v = V3.sub(point, b.eye);
+    const depth = Math.max(0.5, V3.dot(v, b.f));
+    return [cx + focal * V3.dot(v, b.r) / depth, cy - focal * V3.dot(v, b.u) / depth];
+  };
+  const onPlane = (sx, sy, z = 0) => {
+    const ray = V3.norm(V3.add(b.f, V3.add(V3.scale(b.r, (sx - cx) / focal), V3.scale(b.u, -(sy - cy) / focal))));
+    if (Math.abs(ray[2]) < 1e-6) return null;
+    const t = (z - b.eye[2]) / ray[2];
+    return t > 0 ? V3.add(b.eye, V3.scale(ray, t)) : null;
+  };
+  return { W, D, H, eye: b.eye, project, onPlane };
 };
+
+// ------------------------------------------------------------------ colour
 
 DV.heightRange = () => {
   const heights = DL.bins.filter(one => !DL.isSpacer(one)).map(one => Number(one.z));
   return heights.length ? [Math.min(...heights), Math.max(...heights)] : [0, 1];
 };
 
-// Short bins light, tall bins dark, so height order reads at a glance.
+// Short bins light, tall bins dark, so height order reads at a glance. `top`,
+// `front` and `ink` stay plain colour strings for the panel's swatches.
 DV.binColor = (one, range) => {
-  if (one.kind === "spacer") return { top: "#dcd5c4", front: "#c5bca7", ink: "#4d4636" };
-  if (one.kind === "shim") return { top: "#cdbf9f", front: "#b3a582", ink: "#4d4636" };
-  const t = range[1] > range[0] ? (one.z - range[0]) / (range[1] - range[0]) : 0.5;
-  const b4b = one.kind === "b4b";
-  const hue = b4b ? 262 : 188 - t * 6;
-  const sat = b4b ? 28 : 30 + t * 22;
-  const light = 85 - t * 42;
+  let hue, sat, light;
+  if (one.kind === "spacer") [hue, sat, light] = [43, 20, 82];
+  else if (one.kind === "shim") [hue, sat, light] = [42, 28, 72];
+  else {
+    const t = range[1] > range[0] ? (one.z - range[0]) / (range[1] - range[0]) : 0.5;
+    const b4b = one.kind === "b4b";
+    hue = b4b ? 262 : 188 - t * 6;
+    sat = b4b ? 28 : 30 + t * 22;
+    light = 85 - t * 42;
+  }
   return {
+    hue, sat, light,
     top: `hsl(${hue} ${sat}% ${light}%)`,
     front: `hsl(${hue} ${sat}% ${light - 13}%)`,
     ink: light < 60 ? "#ffffff" : "#17252d",
   };
 };
+
+DV.tone = (color, delta) => `hsl(${color.hue} ${color.sat}% ${Math.max(8, Math.min(97, color.light + delta))}%)`;
+
+// How much light each face gets: tops brightest, then the front, the sides
+// and the back.
+DV.FACE_TONE = { top: 0, front: -11, back: -20, left: -17, right: -15 };
 
 DV.hatch = (ctx, color) => {
   const tile = document.createElement("canvas");
@@ -133,6 +218,8 @@ DV.fitText = (ctx, text, maxWidth) => {
   return cut.length > 1 ? `${cut}…` : "";
 };
 
+// ------------------------------------------------------------------ scene
+
 // Layers (bottom first) for bins standing on a stack or on the floor.
 DV.layersFor = (bins, keys, start) => {
   let top = 0;
@@ -143,8 +230,8 @@ DV.layersFor = (bins, keys, start) => {
   });
 };
 
-// What to draw: every footprint in the drawer, with a drag or drop shown
-// where it would land.
+// Everything standing in the drawer, as columns of boxes, with a drag or
+// drop shown where it would land.
 DV.entries = (drawer, grid) => {
   const step = grid.step;
   const box = (gx, gy, w, d) => ({ x0: grid.ox + gx * step, y0: grid.oy + gy * step, x1: grid.ox + (gx + w) * step, y1: grid.oy + (gy + d) * step });
@@ -169,7 +256,57 @@ DV.entries = (drawer, grid) => {
     const mode = drag?.outside ? "leaving" : ghost.valid ? "ghost" : "invalid";
     entries.push({ key: "__ghost", ...where, layers: DV.layersFor(bins, keys, start), mode, ghost: true });
   }
-  return entries.sort((a, b) => b.y0 - a.y0 || a.x0 - b.x0 || Number(Boolean(a.ghost)) - Number(Boolean(b.ghost)));
+  return entries;
+};
+
+// Which of two columns to paint first. Footprints never overlap, so a plane
+// between them always exists; the column on the far side of that plane from
+// the camera cannot hide the other one, so it is painted first.
+DV.fartherFirst = (a, b, eye) => {
+  if (a.x1 <= b.x0 + 1e-6) return eye[0] > a.x1;
+  if (b.x1 <= a.x0 + 1e-6) return eye[0] < a.x0;
+  if (a.y1 <= b.y0 + 1e-6) return eye[1] > a.y1;
+  if (b.y1 <= a.y0 + 1e-6) return eye[1] < a.y0;
+  if (a.ghost || b.ghost) return Boolean(b.ghost);    // a drag preview over a bin draws last
+  return null;
+};
+
+DV.paintOrder = (entries, eye) => {
+  const count = entries.length;
+  const next = Array.from({ length: count }, () => []);
+  const waiting = new Array(count).fill(0);
+  for (let i = 0; i < count; i += 1) {
+    for (let j = i + 1; j < count; j += 1) {
+      const first = DV.fartherFirst(entries[i], entries[j], eye);
+      if (first === null) continue;
+      const [a, b] = first ? [i, j] : [j, i];
+      next[a].push(b);
+      waiting[b] += 1;
+    }
+  }
+  const distance = entry => Math.hypot((entry.x0 + entry.x1) / 2 - eye[0], (entry.y0 + entry.y1) / 2 - eye[1]);
+  const done = new Array(count).fill(false);
+  const ready = [];
+  for (let i = 0; i < count; i += 1) if (!waiting[i]) ready.push(i);
+  const order = [];
+  while (order.length < count) {
+    if (!ready.length) {
+      // A cycle (it takes odd shapes to make one): break it at the farthest.
+      let pick = -1;
+      for (let i = 0; i < count; i += 1) if (!done[i] && (pick < 0 || distance(entries[i]) > distance(entries[pick]))) pick = i;
+      ready.push(pick);
+    }
+    ready.sort((a, b) => distance(entries[b]) - distance(entries[a]));
+    const index = ready.shift();
+    if (done[index]) continue;
+    done[index] = true;
+    order.push(entries[index]);
+    for (const after of next[index]) {
+      waiting[after] -= 1;
+      if (waiting[after] <= 0 && !done[after]) ready.push(after);
+    }
+  }
+  return order;
 };
 
 DV.render = () => {
@@ -185,197 +322,190 @@ DV.render = () => {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, box.width, box.height);
   const drawer = DL.drawer();
-  DV.frame = DV.frameFor(box.width, box.height, drawer);
-  DV.hits = DV.paint(ctx, drawer, DV.frame, { labels: true, interactive: true });
+  DV.cam = DV.camera(box.width, box.height, drawer);
+  DV.hits = DV.paintScene(ctx, drawer, DV.cam);
   DV.renderSelection();
 };
 
-// Draw one drawer into a 2D context through a frame. Returns hit rectangles.
-DV.paint = (ctx, drawer, F, { labels = true, interactive = false } = {}) => {
+DV.paintScene = (ctx, drawer, cam) => {
   const grid = DL.grid(drawer);
-  const P = F.project;
-  const tilted = F.sn > 0.01;
   const step = grid.step;
-  const level = (x0, y0, x1, y1, z) => {
-    const [ax, ay] = P(x0, y1, z);
-    const [bx, by] = P(x1, y0, z);
-    return [ax, ay, bx - ax, by - ay];
+  const { W, D, H, eye } = cam;
+  const shape = points => {
+    const screen = points.map(cam.project);
+    ctx.beginPath();
+    screen.forEach(([x, y], index) => (index ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    return screen;
   };
-  const upright = (x0, x1, y, z0, z1) => {
-    const [ax, ay] = P(x0, y, z1);
-    const [bx, by] = P(x1, y, z0);
-    return [ax, ay, bx - ax, by - ay];
+  const face = (points, fill, stroke = null, width = 1) => {
+    const screen = shape(points);
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.stroke(); }
+    return screen;
   };
-  const fill = (rect, style, stroke = null, width = 1) => {
-    ctx.fillStyle = style;
-    ctx.fillRect(...rect);
-    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = width; ctx.strokeRect(...rect); }
-  };
+  const flat = (x0, y0, x1, y1, z = 0) => [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
+  const walls = [
+    { inside: eye[1] < D, points: [[0, D, 0], [W, D, 0], [W, D, H], [0, D, H]], tone: "#e2d7c2" },
+    { inside: eye[0] > 0, points: [[0, 0, 0], [0, D, 0], [0, D, H], [0, 0, H]], tone: "#dcd1bb" },
+    { inside: eye[0] < W, points: [[W, 0, 0], [W, D, 0], [W, D, H], [W, 0, H]], tone: "#d9cdb6" },
+    { inside: eye[1] > 0, points: [[0, 0, 0], [W, 0, 0], [W, 0, H], [0, 0, H]], tone: "#e0d5c0" },
+  ];
 
-  // Drawer: back wall, floor, the strips the grid cannot use, grid lines.
-  if (tilted) fill(upright(0, F.W, F.D, 0, F.H), "#e3d9c5", "rgba(120,100,70,.35)");
-  fill(level(0, 0, F.W, F.D, 0), "#f1ebdf", "rgba(120,100,70,.55)", 1.2);
+  // The drawer: floor, then the inside faces of the walls you can see.
+  face(flat(0, 0, W, D), "#f1ebdf", "rgba(120,100,70,.5)", 1.2);
+  walls.filter(wall => wall.inside).forEach(wall => face(wall.points, wall.tone, "rgba(120,100,70,.35)"));
+
+  // On the floor: the strips the grid cannot use, grid lines, keep-outs.
   const gx1 = grid.ox + grid.cols * step;
   const gy1 = grid.oy + grid.rows * step;
   const hatch = DV.hatch(ctx, "rgba(150,130,95,.35)");
-  [[0, 0, grid.ox, F.D], [gx1, 0, F.W, F.D], [grid.ox, 0, gx1, grid.oy], [grid.ox, gy1, gx1, F.D]]
-    .forEach(([x0, y0, x1, y1]) => { if (x1 - x0 > 0.05 && y1 - y0 > 0.05) fill(level(x0, y0, x1, y1, 0), hatch); });
-  if (F.s * step >= 4) {
-    ctx.lineWidth = 1;
-    for (const [every, tone] of [[step, "rgba(120,100,70,.10)"], [DL.UNIT, "rgba(120,100,70,.18)"]]) {
-      if (every === step && step === DL.UNIT) continue;
-      ctx.strokeStyle = tone;
-      ctx.beginPath();
-      for (let x = 0; x <= grid.cols * step + 1e-6; x += every) {
-        const [sx, ya] = P(grid.ox + x, grid.oy, 0);
-        const [, yb] = P(grid.ox + x, gy1, 0);
-        ctx.moveTo(sx, ya); ctx.lineTo(sx, yb);
-      }
-      for (let y = 0; y <= grid.rows * step + 1e-6; y += every) {
-        const [xa, sy] = P(grid.ox, grid.oy + y, 0);
-        const [xb] = P(gx1, grid.oy + y, 0);
-        ctx.moveTo(xa, sy); ctx.lineTo(xb, sy);
-      }
-      ctx.stroke();
-    }
+  [[0, 0, grid.ox, D], [gx1, 0, W, D], [grid.ox, 0, gx1, grid.oy], [grid.ox, gy1, gx1, D]]
+    .forEach(([x0, y0, x1, y1]) => { if (x1 - x0 > 0.05 && y1 - y0 > 0.05) face(flat(x0, y0, x1, y1), hatch); });
+  const line = (a, b) => { const [ax, ay] = cam.project(a); const [bx, by] = cam.project(b); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); };
+  ctx.lineWidth = 1;
+  for (const [every, tone] of [[step, "rgba(120,100,70,.10)"], [DL.UNIT, "rgba(120,100,70,.2)"]]) {
+    if (every === step && step === DL.UNIT) continue;
+    ctx.strokeStyle = tone;
+    ctx.beginPath();
+    for (let x = 0; x <= grid.cols * step + 1e-6; x += every) line([grid.ox + x, grid.oy, 0], [grid.ox + x, gy1, 0]);
+    for (let y = 0; y <= grid.rows * step + 1e-6; y += every) line([grid.ox, grid.oy + y, 0], [gx1, grid.oy + y, 0]);
+    ctx.stroke();
   }
-
   const keepHatch = DV.hatch(ctx, "rgba(168,68,61,.55)");
-  (drawer.keepouts || []).forEach(zone => fill(level(zone.x, zone.y, zone.x + zone.w, zone.y + zone.d, 0), keepHatch, "rgba(168,68,61,.7)"));
+  (drawer.keepouts || []).forEach(zone => face(flat(zone.x, zone.y, zone.x + zone.w, zone.y + zone.d), keepHatch, "rgba(168,68,61,.7)"));
 
   // Empty cells, and the largest empty spot the report found.
-  if (interactive && DL.layout.settings.show_empty) {
+  if (DL.layout.settings.show_empty) {
     const taken = DL.blockedCells(drawer, grid);
     DL.items(drawer).forEach(item => {
       for (let r = item.gy; r < item.gy + item.d; r += 1) for (let c = item.gx; c < item.gx + item.w; c += 1) taken.add(`${c},${r}`);
     });
-    ctx.fillStyle = "rgba(47,150,110,.13)";
     const inset = Math.min(0.6, step / 10);
+    ctx.fillStyle = "rgba(47,150,110,.14)";
     for (let r = 0; r < grid.rows; r += 1) for (let c = 0; c < grid.cols; c += 1) {
-      if (!taken.has(`${c},${r}`)) ctx.fillRect(...level(grid.ox + c * step + inset, grid.oy + r * step + inset, grid.ox + (c + 1) * step - inset, grid.oy + (r + 1) * step - inset, 0));
+      if (taken.has(`${c},${r}`)) continue;
+      shape(flat(grid.ox + c * step + inset, grid.oy + r * step + inset, grid.ox + (c + 1) * step - inset, grid.oy + (r + 1) * step - inset));
+      ctx.fill();
     }
     const spot = DL.report?.largest;
     if (spot && !DV.drag && DL.report.grid?.step === step) {
-      const rect = level(grid.ox + spot.gx * step, grid.oy + spot.gy * step, grid.ox + (spot.gx + spot.w) * step, grid.oy + (spot.gy + spot.d) * step, 0);
+      const x0 = grid.ox + spot.gx * step, y0 = grid.oy + spot.gy * step;
+      const x1 = grid.ox + (spot.gx + spot.w) * step, y1 = grid.oy + (spot.gy + spot.d) * step;
       ctx.save();
       ctx.setLineDash([5, 4]);
-      ctx.strokeStyle = "rgba(31,107,69,.8)";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(...rect);
+      face(flat(x0, y0, x1, y1), null, "rgba(31,107,69,.8)", 1.5);
       ctx.restore();
-      if (rect[2] > 60 && rect[3] > 16) {
+      const [ax] = cam.project([x0, (y0 + y1) / 2, 0]);
+      const [bx] = cam.project([x1, (y0 + y1) / 2, 0]);
+      const [mx, my] = cam.project([(x0 + x1) / 2, (y0 + y1) / 2, 0]);
+      if (Math.abs(bx - ax) > 70) {
         ctx.fillStyle = "rgba(31,107,69,.9)";
         ctx.font = "600 11px 'Segoe UI', system-ui, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(`${fmt(spot.w_mm)} × ${fmt(spot.d_mm)} free`, rect[0] + rect[2] / 2, rect[1] + rect[3] / 2);
+        ctx.fillText(`${fmt(spot.w_mm)} × ${fmt(spot.d_mm)} free`, mx, my);
       }
     }
   }
 
-  // Footprints back to front; within one, layers bottom to top.
+  // Bins, far columns first; within a column, layers bottom to top.
   const range = DV.heightRange();
-  const problems = interactive ? DV.problemKeys() : new Map();
+  const problems = DV.problemKeys();
   const hits = [];
-  const inset = Math.min(1.5, 0.7 / F.s);
-  for (const entry of DV.entries(drawer, grid)) {
-    if (!interactive && entry.ghost) continue;
+  const inset = 0.35;
+  for (const entry of DV.paintOrder(DV.entries(drawer, grid), eye)) {
     const x0 = entry.x0 + inset, x1 = entry.x1 - inset, y0 = entry.y0 + inset, y1 = entry.y1 - inset;
-    const rects = [];
+    const keys = entry.layers.map(layer => layer.key);
+    const pick = entry.ghost ? null
+      : DL.selected && keys.includes(DL.selected) ? DL.selected
+        : DV.hover && keys.includes(DV.hover) ? DV.hover : null;
+    let topFace = null;
+    let topInk = "#17252d";
+    let topPlanned = false;
     entry.layers.forEach((layer, index) => {
       const one = layer.bin;
-      const color = DV.binColor(one, range);
-      const planned = layer.key !== "__drop" && layer.key.includes(":") && DL.isPlanned({ bin: one.id, copy: Number(layer.key.split(":")[1]) });
+      const { z0, z1 } = layer;
+      const planned = !entry.ghost && DL.isPlanned({ bin: one.id, copy: Number(layer.key.split(":")[1]) });
       const problem = problems.get(layer.key);
-      let top = color.top, front = color.front, stroke = "rgba(23,37,45,.5)", ink = color.ink;
-      if (entry.mode === "invalid" || problem === "error") { top = "#f2bcb6"; front = "#d9918a"; stroke = "#a8443d"; ink = "#5e1f1b"; }
-      ctx.globalAlpha = entry.mode === "leaving" ? 0.35 : entry.mode === "ghost" ? 0.8 : planned ? 0.55 : 1;
-      const frontRect = tilted ? upright(x0, x1, y0, layer.z0, layer.z1) : null;
-      const topRect = level(x0, y0, x1, y1, layer.z1);
-      if (frontRect) fill(frontRect, front, stroke);
-      fill(topRect, top, stroke);
-      if (planned) {
-        ctx.save();
-        ctx.globalAlpha = 1;
-        ctx.setLineDash([4, 3]);
-        ctx.strokeStyle = "#146c70";
-        ctx.lineWidth = 1.5;
-        if (frontRect) ctx.strokeRect(...frontRect);
-        ctx.strokeRect(...topRect);
-        ctx.restore();
-      }
-      if (problem === "height") {
-        ctx.save();
-        ctx.setLineDash([4, 3]);
-        ctx.strokeStyle = "#c8741f";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(topRect[0] + 1, topRect[1] + 1, topRect[2] - 2, topRect[3] - 2);
-        ctx.restore();
-      }
+      let color = DV.binColor(one, range);
+      if (entry.mode === "invalid" || problem === "error") color = { ...color, hue: 5, sat: 62, light: 83, ink: "#5e1f1b" };
+      ctx.globalAlpha = entry.mode === "leaving" ? 0.35 : entry.mode === "ghost" ? 0.78 : planned ? 0.55 : 1;
+      const faces = [];
+      if (eye[1] < y0) faces.push(["front", [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]]]);
+      if (eye[1] > y1) faces.push(["back", [[x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]]]);
+      if (eye[0] < x0) faces.push(["left", [[x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]]]);
+      if (eye[0] > x1) faces.push(["right", [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]]]);
+      faces.push(["top", flat(x0, y0, x1, y1, z1)]);
+      const stroke = entry.mode === "invalid" || problem === "error" ? "#a8443d" : "rgba(23,37,45,.45)";
+      const screens = faces.map(([side, points]) => ({ side, screen: face(points, DV.tone(color, DV.FACE_TONE[side]), stroke) }));
       ctx.globalAlpha = 1;
-      rects.push({ layer, frontRect, topRect, ink, planned, last: index === entry.layers.length - 1 });
-    });
-    const last = rects[rects.length - 1];
-    if (interactive && !entry.ghost) {
-      const keys = entry.layers.map(layer => layer.key);
-      const pick = DL.selected && keys.includes(DL.selected) ? DL.selected : DV.hover && keys.includes(DV.hover) ? DV.hover : null;
-      if (pick) {
-        const chosen = rects.find(r => r.layer.key === pick);
-        const outline = chosen.frontRect
-          ? [chosen.topRect[0], (chosen.last ? chosen.topRect : chosen.frontRect)[1], chosen.topRect[2], chosen.frontRect[1] + chosen.frontRect[3] - (chosen.last ? chosen.topRect : chosen.frontRect)[1]]
-          : chosen.topRect;
-        ctx.strokeStyle = pick === DL.selected ? "#146c70" : "rgba(20,108,112,.6)";
-        ctx.lineWidth = pick === DL.selected ? 3 : 2;
-        ctx.strokeRect(outline[0] - 1, outline[1] - 1, outline[2] + 2, outline[3] + 2);
+      if (planned || problem === "height") {
+        ctx.save();
+        ctx.setLineDash([4, 3]);
+        ctx.strokeStyle = planned ? "#146c70" : "#c8741f";
+        ctx.lineWidth = planned ? 1.5 : 2;
+        screens.forEach(({ screen }) => { ctx.beginPath(); screen.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.stroke(); });
+        ctx.restore();
       }
-    }
-    if (labels) DV.drawLabel(ctx, entry, last.topRect, last.ink, last.planned);
+      if (pick === layer.key) {
+        ctx.strokeStyle = pick === DL.selected ? "#146c70" : "rgba(20,108,112,.6)";
+        ctx.lineWidth = pick === DL.selected ? 2.6 : 1.8;
+        screens.forEach(({ screen }) => { ctx.beginPath(); screen.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.stroke(); });
+      }
+      if (index === entry.layers.length - 1) {
+        topFace = screens[screens.length - 1].screen;
+        topInk = color.light + DV.FACE_TONE.top < 60 ? "#ffffff" : color.ink;
+        topPlanned = planned;
+      }
+      if (!entry.ghost) hits.push({ key: layer.key, grid: !entry.shim, z: z1, polys: screens.map(s => s.screen) });
+    });
+    if (topFace) DV.drawLabel(ctx, entry, topFace, topInk, topPlanned);
     const base = entry.item?.chain[0];
-    if (base?.locked && last.topRect[2] > 18 && last.topRect[3] > 14) {
+    if (base?.locked && topFace) {
+      const [lx, ly] = topFace[3];
       ctx.font = "10px 'Segoe UI Emoji', sans-serif";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
-      ctx.fillText("🔒", last.topRect[0] + 3, last.topRect[1] + 2);
-    }
-    if (!entry.ghost) {
-      rects.forEach(r => hits.push({ key: r.layer.key, grid: !entry.shim, rects: r.frontRect ? (r.last ? [r.topRect, r.frontRect] : [r.frontRect]) : (r.last ? [r.topRect] : []) }));
+      ctx.fillText("🔒", lx + 3, ly + 2);
     }
   }
 
-  // The drawer's front wall, see-through, then its rim and the labels.
-  if (tilted) fill(upright(0, F.W, 0, 0, F.H), "rgba(227,217,197,.28)");
-  ctx.strokeStyle = "rgba(120,100,70,.55)";
-  ctx.lineWidth = 1.2;
-  ctx.strokeRect(...level(0, 0, F.W, F.D, F.H));
+  // Walls between you and the drawer, see-through; then every rim.
+  walls.filter(wall => !wall.inside).forEach(wall => face(wall.points, "rgba(224,213,192,.3)", "rgba(120,100,70,.45)"));
+  ctx.strokeStyle = "rgba(110,90,60,.7)";
+  ctx.lineWidth = 1.4;
+  face(flat(0, 0, W, D, H), null, "rgba(110,90,60,.6)", 1.4);
   ctx.beginPath();
-  [[0, 0], [F.W, 0], [0, F.D], [F.W, F.D]].forEach(([x, y]) => {
-    const [ax, ay] = P(x, y, 0);
-    const [bx, by] = P(x, y, F.H);
-    ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
-  });
+  [[0, 0], [W, 0], [0, D], [W, D]].forEach(([x, y]) => line([x, y, 0], [x, y, H]));
   ctx.stroke();
-  const [fx, fy] = P(F.W / 2, 0, 0);
+  const [fx, fy] = cam.project([W / 2, 0, 0]);
   ctx.fillStyle = "#66757d";
   ctx.font = "700 11px 'Segoe UI', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  ctx.fillText(`FRONT · ${fmt(F.W)} mm wide · ${fmt(F.D)} deep · ${fmt(F.H)} max height`, fx, fy + 8);
+  ctx.fillText(`FRONT · ${fmt(W)} mm wide · ${fmt(D)} deep · ${fmt(H)} max height`, fx, fy + 10);
   return hits;
 };
 
-DV.drawLabel = (ctx, entry, rect, ink, planned) => {
-  const [x, y, w, h] = rect;
+// Name (or size) on the top of each column; a second line when there is room.
+DV.drawLabel = (ctx, entry, topFace, ink, planned) => {
+  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const [p0, p1, p2, p3] = topFace;           // front-left, front-right, back-right, back-left
+  const width = Math.hypot(...mid(p1, p2).map((v, i) => v - mid(p0, p3)[i]));
+  const height = Math.hypot(...mid(p3, p2).map((v, i) => v - mid(p0, p1)[i]));
+  const [cx, cy] = mid(mid(p0, p2), mid(p1, p3));
   const top = entry.layers[entry.layers.length - 1].bin;
   const primary = top.kind === "shim" ? "Shim" : DL.label(top);
-  const size = Math.min(14, h * 0.34, w / Math.max(3, primary.length * 0.56));
+  const size = Math.min(14, height * 0.36, width / Math.max(3, primary.length * 0.56));
   if (size < 7) return;
   ctx.fillStyle = planned ? "#0d5356" : ink;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = `650 ${size}px 'Segoe UI', system-ui, sans-serif`;
-  const twoLines = h > size * 2.7 && top.kind !== "shim";
-  const cy = y + h / 2 - (twoLines ? size * 0.45 : 0);
-  ctx.fillText(DV.fitText(ctx, primary, w - 6), x + w / 2, cy);
+  const twoLines = height > size * 2.7 && top.kind !== "shim";
+  const y = cy - (twoLines ? size * 0.45 : 0);
+  ctx.fillText(DV.fitText(ctx, primary, width - 6), cx, y);
   if (twoLines) {
     const small = Math.max(7, size * 0.78);
     ctx.font = `500 ${small}px 'Segoe UI', system-ui, sans-serif`;
@@ -384,7 +514,7 @@ DV.drawLabel = (ctx, entry, rect, ink, planned) => {
       ? `${entry.layers.length}-high stack · ${fmt(stackHeight)} tall`
       : planned ? `planned · ${fmt(top.z)} tall`
         : top.name ? `${fmt(top.x)}×${fmt(top.y)} · ${fmt(top.z)} tall` : `${fmt(top.z)} mm tall`;
-    ctx.fillText(DV.fitText(ctx, detail, w - 6), x + w / 2, cy + size * 1.05);
+    ctx.fillText(DV.fitText(ctx, detail, width - 6), cx, y + size * 1.05);
   }
 };
 
@@ -413,11 +543,23 @@ DV.renderSelection = () => {
     </div>`;
 };
 
+// ------------------------------------------------------------------ picking
+
+DV.inside = ([x, y], points) => {
+  let hit = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const [xi, yi] = points[i];
+    const [xj, yj] = points[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+};
+
 DV.hitAt = (sx, sy, skip = null) => {
   for (let index = DV.hits.length - 1; index >= 0; index -= 1) {
     const hit = DV.hits[index];
     if (skip?.has(hit.key)) continue;
-    if (hit.rects.some(([x, y, w, h]) => sx >= x && sx <= x + w && sy >= y && sy <= y + h)) return hit;
+    if (hit.polys.some(poly => DV.inside([sx, sy], poly))) return hit;
   }
   return null;
 };
@@ -432,8 +574,9 @@ DV.cellUnder = (bins, sx, sy) => {
   const drawer = DL.drawer();
   const grid = DL.grid(drawer);
   const [w, d] = DL.cells(bins[0], drawer);
-  const [x, y] = DV.frame.unproject(sx, sy, DL.stackHeight(bins));
-  return [Math.round((x - grid.ox) / grid.step - w / 2), Math.round((y - grid.oy) / grid.step - d / 2)];
+  const point = DV.cam.onPlane(sx, sy, DL.stackHeight(bins)) || DV.cam.onPlane(sx, sy, 0);
+  if (!point) return [-999, -999];
+  return [Math.round((point[0] - grid.ox) / grid.step - w / 2), Math.round((point[1] - grid.oy) / grid.step - d / 2)];
 };
 
 // If the pointer is over a stack these bins can snap onto, that stack. The
@@ -447,31 +590,35 @@ DV.stackTarget = (bins, sx, sy, skip) => {
   return fit.ok ? { target: item, refusal: "" } : { target: null, refusal: fit.reason };
 };
 
+// ------------------------------------------------------------------ input
+
 DV.wire = () => {
   const canvas = $("#drawer-canvas");
   canvas.addEventListener("contextmenu", event => event.preventDefault());
   canvas.addEventListener("pointerdown", event => {
-    if (!DL.layout || !DV.frame) return;
+    if (!DL.layout || !DV.cam) return;
     const [sx, sy] = DV.point(event);
     canvas.setPointerCapture(event.pointerId);
     const hit = event.button === 0 ? DV.hitAt(sx, sy) : null;
     if (hit) {
       DL.selected = hit.key;
       const chain = hit.grid && DL.stackOf(hit.key);
-      if (chain) {
+      const start = DV.cam.onPlane(sx, sy, hit.z);
+      if (chain && start) {
         const moving = chain.slice(chain.findIndex(p => DL.key(p) === hit.key));
         const drawer = DL.drawer();
         const gx = DL.toCell(chain[0].gx, drawer);
         const gy = DL.toCell(chain[0].gy, drawer);
         DV.drag = {
           key: hit.key, keys: new Set(moving.map(DL.key)), bins: moving.map(p => DL.bin(p.bin)),
-          sx, sy, gx0: gx, gy0: gy, gx, gy, moved: false, valid: true, outside: false,
+          sx, sy, plane: hit.z, start, gx0: gx, gy0: gy, gx, gy, moved: false, valid: true, outside: false,
           target: null, locked: Boolean(chain[0].locked),
         };
       }
     } else {
       if (event.button === 0) DL.selected = null;
-      DV.pan = { sx, sy, panX: DV.view.panX, panY: DV.view.panY };
+      const start = DV.cam.onPlane(sx, sy, 0);
+      if (start) DV.pan = { cam: DV.cam, start, panX: DV.view.panX, panY: DV.view.panY };
       canvas.classList.add("panning");
     }
     DL.emit();
@@ -485,15 +632,16 @@ DV.wire = () => {
         if (!drag.warned) { toast("This stack is locked. Unlock it (L) to move it."); drag.warned = true; }
         return;
       }
+      const point = DV.cam.onPlane(sx, sy, drag.plane);
+      if (!point) return;
       drag.moved = true;
-      const F = DV.frame;
       const step = DL.grid().step;
-      drag.gx = drag.gx0 + Math.round((sx - drag.sx) / F.s / step);
-      drag.gy = drag.gy0 + Math.round(-(sy - drag.sy) / (F.s * F.c) / step);
-      // Off the drawer means off every bin too: pointing at the top of a tall
-      // stack projects "behind" the drawer at the dragged bin's own height.
-      const [x, y] = F.unproject(sx, sy, DL.stackHeight(drag.bins));
-      drag.outside = !DV.hitAt(sx, sy, drag.keys) && (x < -12 || y < -12 || x > F.W + 12 || y > F.D + 12);
+      drag.gx = drag.gx0 + Math.round((point[0] - drag.start[0]) / step);
+      drag.gy = drag.gy0 + Math.round((point[1] - drag.start[1]) / step);
+      // Off the drawer means off every bin too, so pointing at a tall stack
+      // never counts as throwing a bin away.
+      drag.outside = !DV.hitAt(sx, sy, drag.keys)
+        && (point[0] < -12 || point[1] < -12 || point[0] > DV.cam.W + 12 || point[1] > DV.cam.D + 12);
       const { target, refusal } = DV.stackTarget(drag.bins, sx, sy, drag.keys);
       drag.target = target;
       if (target) Object.assign(drag, { valid: true, reason: "" });
@@ -504,8 +652,11 @@ DV.wire = () => {
       canvas.style.cursor = drag.outside ? "no-drop" : "grabbing";
       DV.render();
     } else if (DV.pan) {
-      DV.view.panX = DV.pan.panX + sx - DV.pan.sx;
-      DV.view.panY = DV.pan.panY + sy - DV.pan.sy;
+      const point = DV.pan.cam.onPlane(sx, sy, 0);
+      if (!point) return;
+      DV.view.panX = DV.pan.panX - (point[0] - DV.pan.start[0]);
+      DV.view.panY = DV.pan.panY - (point[1] - DV.pan.start[1]);
+      DV.clampPan(DL.drawer());
       DV.render();
     } else {
       const hit = DV.hitAt(sx, sy);
@@ -557,7 +708,7 @@ DV.wire = () => {
   // Dropping a bin dragged from the inventory list: onto the floor, or onto a
   // stack it can snap onto.
   canvas.addEventListener("dragover", event => {
-    if (!DV.dragBin || !DV.frame) return;
+    if (!DV.dragBin || !DV.cam) return;
     event.preventDefault();
     const [sx, sy] = DV.point(event);
     const bins = [DV.dragBin];
@@ -637,13 +788,13 @@ DV.buildOverlay = () => {
   const wrap = $('.canvas-wrap[data-canvas="drawer"]');
   if (!wrap || $("#dl-tilt")) return;
   wrap.insertAdjacentHTML("beforeend", `
-    <div class="camera-controls dl-view-controls" aria-label="Drawer view controls">
+    <div class="camera-controls dl-view-controls" aria-label="Drawer camera">
       <div class="camera-controls-row">
         <div class="camera-views"><div class="camera-views-row">
-          <button type="button" data-dl-view="top" title="Straight down">Top</button>
-          <button type="button" data-dl-view="angled" title="Looking in from the front">Angled</button>
+          <button type="button" data-dl-view="look" title="Standing at the drawer, looking in">Look in</button>
+          <button type="button" data-dl-view="overhead" title="Almost straight down, like a plan">Overhead</button>
           <button type="button" data-dl-view="low" title="Low, as if crouched at the drawer - shows what hides behind what">Low</button>
-          <button type="button" data-dl-view="fit" title="Fit the drawer to the view (F)">Fit</button>
+          <button type="button" data-dl-view="fit" title="Frame the whole drawer again (F)">Fit</button>
         </div></div>
         <div class="zoom-controls">
           <button type="button" data-dl-zoom="out" aria-label="Zoom out">−</button>
@@ -651,18 +802,20 @@ DV.buildOverlay = () => {
         </div>
       </div>
       <div class="camera-controls-row">
-        <label class="canvas-select dl-tilt-control">Tilt <input id="dl-tilt" type="range" min="0" max="70" step="1"></label>
+        <label class="canvas-select dl-tilt-control" title="How steeply you look down into the drawer">Angle <input id="dl-tilt" type="range" min="${DV.LIMITS.tilt[0]}" max="${DV.LIMITS.tilt[1]}" step="1"></label>
+        <label class="canvas-select dl-tilt-control" title="Step a little to the left or right of the drawer">Turn <input id="dl-turn" type="range" min="${DV.LIMITS.turn[0]}" max="${DV.LIMITS.turn[1]}" step="1"></label>
         <label class="canvas-select dl-empty-control">Empty cells <input id="dl-show-empty" type="checkbox"></label>
       </div>
     </div>
     <div id="dl-selection" class="dl-selection" hidden></div>
     <div class="layout-hint dl-hint">Drag bins to move · drop on a same-size stackable bin to stack · drag off the drawer to take out · drag the floor to pan · wheel zooms · L locks · Del removes</div>`);
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
-    if (button.dataset.dlView === "fit") DV.fit(); else DV.setTilt(DV.PRESETS[button.dataset.dlView]);
+    if (button.dataset.dlView === "fit") DV.fit(); else DV.setView(DV.PRESETS[button.dataset.dlView]);
   }));
   $$("[data-dl-zoom]").forEach(button => button.addEventListener("click",
     () => DV.zoomBy(button.dataset.dlZoom === "in" ? 1.2 : 1 / 1.2)));
-  $("#dl-tilt").addEventListener("input", event => DV.setTilt(event.target.value));
+  $("#dl-tilt").addEventListener("input", event => DV.setView({ tilt: event.target.value }));
+  $("#dl-turn").addEventListener("input", event => DV.setView({ turn: event.target.value }));
   $("#dl-show-empty").addEventListener("change", event => DL.change(
     () => { DL.layout.settings.show_empty = event.target.checked; }, { history: false }));
   $("#dl-selection").addEventListener("click", event => {
@@ -673,22 +826,70 @@ DV.buildOverlay = () => {
     if (action === "remove") DL.removePlacement(DL.selected);
     if (action === "printed") DL.markPrinted(DL.bin(found.placement.bin));
   });
-  DV.setTilt(DV.view.tilt);
+  DV.syncControls();
 };
 
-// A printable map of the active drawer: a top-down plan and a list of what
-// goes where, measured from the inside front-left corner.
+// ------------------------------------------------------------------ print map
+
+// A plain top-down plan of the active drawer for printing: numbered footprints
+// that match the list under it, front of the drawer at the bottom.
+DV.planImage = (drawer, width = 1400) => {
+  const grid = DL.grid(drawer);
+  const pad = 30;
+  const s = (width - 2 * pad) / drawer.width;
+  const height = Math.round(drawer.depth * s + 2 * pad);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  const at = (x, y) => [pad + x * s, pad + (drawer.depth - y) * s];
+  const rect = (x0, y0, x1, y1) => { const [ax, ay] = at(x0, y1); return [ax, ay, (x1 - x0) * s, (y1 - y0) * s]; };
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#f1ebdf";
+  ctx.fillRect(...rect(0, 0, drawer.width, drawer.depth));
+  ctx.strokeStyle = "rgba(120,100,70,.18)";
+  ctx.beginPath();
+  for (let x = 0; x <= grid.cols * grid.step + 1e-6; x += DL.UNIT) { const [ax, ay] = at(grid.ox + x, grid.oy); const [, by] = at(grid.ox + x, grid.oy + grid.rows * grid.step); ctx.moveTo(ax, ay); ctx.lineTo(ax, by); }
+  for (let y = 0; y <= grid.rows * grid.step + 1e-6; y += DL.UNIT) { const [ax, ay] = at(grid.ox, grid.oy + y); const [bx] = at(grid.ox + grid.cols * grid.step, grid.oy + y); ctx.moveTo(ax, ay); ctx.lineTo(bx, ay); }
+  ctx.stroke();
+  const keepHatch = DV.hatch(ctx, "rgba(168,68,61,.6)");
+  (drawer.keepouts || []).forEach(zone => { ctx.fillStyle = keepHatch; ctx.fillRect(...rect(zone.x, zone.y, zone.x + zone.w, zone.y + zone.d)); });
+  const range = DV.heightRange();
+  const items = DL.items(drawer);
+  items.forEach((item, index) => {
+    const x0 = grid.ox + item.gx * grid.step;
+    const y0 = grid.oy + item.gy * grid.step;
+    const box = rect(x0, y0, x0 + item.w * grid.step, y0 + item.d * grid.step);
+    const top = item.bins[item.bins.length - 1];
+    ctx.fillStyle = DV.binColor(top, range).top;
+    ctx.fillRect(...box);
+    ctx.strokeStyle = "#17252d";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(...box);
+    ctx.fillStyle = "#17252d";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const size = Math.max(10, Math.min(20, box[3] * 0.28, box[2] / 6));
+    ctx.font = `700 ${size}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.fillText(`${index + 1}`, box[0] + box[2] / 2, box[1] + box[3] / 2 - size * 0.55);
+    ctx.font = `500 ${Math.max(9, size * 0.7)}px 'Segoe UI', system-ui, sans-serif`;
+    const text = `${DL.label(top)}${item.bins.length > 1 ? ` ×${item.bins.length}` : ""}`;
+    ctx.fillText(DV.fitText(ctx, text, box[2] - 6), box[0] + box[2] / 2, box[1] + box[3] / 2 + size * 0.55);
+  });
+  drawer.placements.filter(DL.isShim).forEach(p => {
+    ctx.fillStyle = "#cdbf9f";
+    ctx.fillRect(...rect(p.x, p.y, p.x + p.w, p.y + p.d));
+  });
+  ctx.strokeStyle = "#6b5d3a";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(...rect(0, 0, drawer.width, drawer.depth));
+  return canvas.toDataURL("image/png");
+};
+
 DV.printMap = () => {
   const drawer = DL.drawer();
   const grid = DL.grid(drawer);
-  const canvas = document.createElement("canvas");
-  canvas.width = 1400;
-  canvas.height = Math.round(1400 * (drawer.depth + 60) / (drawer.width + 60));
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const F = DV.frameFor(canvas.width, canvas.height, drawer, 0, { zoom: 1, panX: 0, panY: 0 });
-  DV.paint(ctx, drawer, F, { labels: true, interactive: false });
   const rows = DL.items(drawer).map((item, index) => {
     const top = item.bins[item.bins.length - 1];
     const x = grid.ox + item.gx * grid.step;
@@ -707,7 +908,7 @@ DV.printMap = () => {
   }
   sheet.innerHTML = `<h1>${escapeHtml(drawer.name)}</h1>
     <p>${fmt(drawer.width)} × ${fmt(drawer.depth)} mm inside, ${fmt(drawer.height)} mm max height. Front of the drawer at the bottom.</p>
-    <img alt="Drawer map" src="${canvas.toDataURL("image/png")}">
+    <img alt="Drawer map" src="${DV.planImage(drawer)}">
     <table><thead><tr><th>#</th><th>Bin</th><th>Size</th><th>Where (front-left corner, mm)</th><th>Stacking</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   document.body.classList.add("dl-printing");
   const done = () => { document.body.classList.remove("dl-printing"); window.removeEventListener("afterprint", done); };

@@ -210,16 +210,24 @@ class B4BHardwareTests(unittest.TestCase):
         self.assertEqual(narrow.latch_count_resolved, 1)
         self.assertEqual(wide.latch_count_resolved, 2)
 
-    def test_explicit_latches_positions(self):
+    def test_auto_latches_positions(self):
         one = b4b.b4b_hardware_plan(
-            BoxSpec(x=96, y=48, z=40, b4b=B4BSpec(enabled=True, latch_count="1"))
+            BoxSpec(x=32, y=48, z=40, b4b=B4BSpec(enabled=True))
         )
         two = b4b.b4b_hardware_plan(
-            BoxSpec(x=96, y=48, z=40, b4b=B4BSpec(enabled=True, latch_count="2"))
+            BoxSpec(x=96, y=48, z=40, b4b=B4BSpec(enabled=True))
         )
         self.assertEqual(one.latch_centers_x, (0.0,))
         self.assertEqual(len(two.latch_centers_x), 2)
         self.assertAlmostEqual(two.latch_centers_x[0], -two.latch_centers_x[1])
+
+    def test_manual_latch_count_no_longer_honoured(self):
+        """latch_count is derived from box size only; a stored "1"/"2" from an
+        older saved file is superseded by the auto calculation."""
+        wide = b4b.b4b_hardware_plan(
+            BoxSpec(x=96, y=48, z=40, b4b=B4BSpec(enabled=True, latch_count="1"))
+        )
+        self.assertEqual(wide.latch_count_resolved, 2)
 
     def test_strength_profiles_differ_structurally(self):
         light = b4b.B4B_LATCH_PROFILES["lightweight"]
