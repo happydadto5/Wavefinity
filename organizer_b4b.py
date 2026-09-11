@@ -1394,7 +1394,8 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
     if eff.b4b.lid:
         lid = make_b4b_lid(box)
         if eff.b4b.label_location == "top" and eff.b4b.label_text.strip():
-            lid, _inlay = _apply_top_label(box, lid)
+            lid, inlay = _apply_top_label(box, lid)
+            geometry.extend(_mesh_preview_geometry(inlay, "b4b_label"))
         geometry.extend(_mesh_preview_geometry(lid, "b4b_lid"))
     if eff.b4b.secure_lid:
         for lever in make_b4b_latches(box):
