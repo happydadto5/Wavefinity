@@ -1,17 +1,26 @@
 # Fix B4B hardware redesign
 
-Status: review in progress. This document is intentionally design-first; do not implement the hinge/latch/handle changes until the open decisions are resolved.
+Status: rear-hinge direction locked; detailed geometry still to be implemented and validated. This document is design-first. Do not move to latch/handle implementation until the rear hinge geometry is proven across the supported B4B range.
 
 ## Phase 1 — Rear hinge review
 
 ### Goal
-Redesign the B4B rear hinges so they look proportional on small and large cases, add strength through elegant load-spreading geometry rather than bulky blocks, use normal kit fasteners, and remain fully support-free. The B4B body prints upright. The lid must print upside down.
+Redesign the B4B rear hinges so they look proportional on small and large cases, gain strength through elegant load-spreading geometry instead of bulky external blocks, use ordinary metric kit fasteners, and remain fully support-free. The B4B body prints upright. The lid prints upside down.
 
 The supplied Rugged Box Light STLs are visual/mechanical references only. Do not copy their case geometry. For this phase, use them only to study hinge proportions, hinge-root/load-path treatment, compactness, and support-free construction.
 
+## Confirmed design decisions
+
+1. **Fastener size is never a user option.** B4B chooses M2 or M3 automatically behind the scenes.
+2. **Every B4B uses exactly two rear hinges.** No single-hinge fallback.
+3. **B4B has a meaningful minimum footprint around 50 x 50 mm.** Because Wavefinity X/Y dimensions live on an 8 mm grid, use a minimum entered child field of **48 x 48 mm (6U x 6U)**. At the normal 0.8 mm wall this produces a physical B4B envelope of roughly **50.94 x 50.94 mm**, which matches the intended “about 50 x 50” minimum almost exactly.
+4. **The lid only needs about 120 degrees of opening.** Do not design for 180-degree fold-flat motion.
+5. **Keep the no-nut/no-insert strategy.** The screw passes through clearance-bored moving members and thread-forms into the far printed ear.
+6. **Use ordinary socket-head M2/M3 screws from common assortment kits.** Do not require button-head, countersunk, shoulder screws, metal pins, or special hardware.
+
 ## What is wrong with the current hinge design
 
-### 1. The current math is M3-first rather than case-scale-first
+### 1. Current math is M3-first rather than case-scale-first
 The current design has one global M3 hardware profile:
 - M3 nominal 3.0 mm
 - 3.4 mm rotating clearance bore
@@ -23,124 +32,313 @@ The current design has one global M3 hardware profile:
 
 The same head-driven boss radius is used for every hinge/latch pivot. With the current support-free octagonal section, that resolves to a boss radius of about 3.88 mm. The hinge axis is then placed `boss_radius + 0.45` behind the rear-wall crest and the boss reaches about another 4.11 mm outward. Result: the current hinge envelope can project roughly 8.4 mm behind the wall before considering its visual root treatment.
 
-That absolute size is not unreasonable on a large rugged case, but it is far too large on the small B4B sizes Wavefinity permits.
+That absolute size is reasonable on a large rugged case, but it is much too large on a roughly 51 mm B4B.
 
-### 2. The minimum hinge width dominates almost every small/medium B4B
+### 2. The minimum hinge width dominates small/medium B4Bs
 Current hinge width is:
 `clamp(0.16 * case_x, 12.5 mm, 24 mm)`
 
 The 12.5 mm floor remains active until the case is roughly 78 mm wide. The reinforced root pad adds 2 mm on each end, making the minimum reinforced envelope 16.5 mm per hinge.
 
-At the default 0.8 mm wall, the current two-hinge fit math forces a secure B4B child field to approximately 40 mm (5 Wavefinity units) before the two reinforced hinges fit. A roughly 5U-square B4B is only about 43 mm physically wide, so each 12.5 mm hinge is about 29% of the case width and the ~8.4 mm rear projection is about 20% of that scale. This is the main reason the hardware looks enormous.
+On the minimum B4B, each hinge therefore occupies an excessive fraction of the rear edge. The continuous percentage scaling is mostly irrelevant because the hard M3-derived minimum dominates.
 
-### 3. Continuous percentage scaling is the wrong primary rule for a bolted hinge
-The hinge width currently scales continuously with case width, but the fastener comes in discrete real sizes and lengths. This produces a geometry-first screw selection rather than a screw-profile-first design.
+### 3. Screw-head size is incorrectly controlling the whole hinge
+The current hinge effectively sizes every pivot section around the M3 head-bearing requirement. That is the wrong structural decomposition.
 
-The redesign should define discrete hardware profiles around real kit screws, then let root reinforcement/placement scale with the case. Initial candidate profiles to evaluate:
-- Compact: M2, likely around an M2x8 hinge pin.
-- Standard: M3, likely around M3x10 or M3x12 depending the final three-knuckle stack.
+Separate the jobs:
+- rotating knuckle/ear size is driven by clearance bore + printable shell;
+- far thread-forming ear is driven by pilot + thread engagement + printable shell;
+- only the near head-bearing area needs local material sized around the screw head;
+- the wall root gains strength by spreading load into more rear-wall area, not by making the whole pivot a large head-sized barrel.
 
-Do not finalize those values until the complete motion/screw-engagement geometry is checked.
+### 4. The root is structurally thoughtful but visually too much like an external bracket
+The present design correctly avoids attaching a hinge to a thin wall by creating an exterior root web, gussets, fillets, and end chamfers. Mechanically that is sensible.
 
-### 4. The current hinge root is structurally thoughtful but visually too much like an external bracket
-The present design correctly tries to avoid hanging a hinge from a thin wall: it creates an exterior structural root web, gussets it into the barrel, fillets the internal corners, and chamfers the ends. Mechanically that is sensible.
+Visually it reads as a large block/gusset/barrel assembly stuck onto a thin box.
 
-The problem is the resulting visual language: the hinge reads as a large block/gusset/barrel assembly attached behind a thin box.
+The preferred design language is **elegant strength**:
+- compact pivot hardware;
+- a narrow rib or web leaving the pivot;
+- reinforcement that widens gradually as it reaches the rear wall;
+- a shallow side chamfer/gusset carrying the load into more wall area;
+- no broad blunt rectangular pad unless strength calculations genuinely require one.
 
-The reference case uses a better visual principle: the hinge appears to grow out of the case edge. Narrow hinge ears/ribs carry load farther into the wall, while the pivot region stays compact. The root transition is tapered/chamfered rather than a broad rectangular pad.
+### 5. Hinge position should be driven by a 120-degree motion sweep
+Current rear-axis Y is effectively based on `rear_crest + boss_radius + 0.45`.
 
-### 5. The hinge itself should become slimmer, not merely have a smaller root web
-The current design makes every pivot section large enough to accommodate the M3 head footprint. That is unnecessarily conservative visually.
+The new hinge axis must instead be solved from actual geometry:
+- closed-lid clearance;
+- lid rear-edge thickness;
+- body rim/rear wall;
+- knuckle envelope;
+- approximately 120-degree opening;
+- small manufacturing/running clearance.
 
-For the redesign, separate the jobs:
-- rotating knuckle/ear size should be driven by bore diameter + printable shell;
-- thread-forming terminal ear should be driven by pilot + required thread engagement + shell;
-- screw-head bearing area should be local to the head-bearing end, not force the entire hinge barrel to use the same large radial section;
-- the wall root should gain strength by spreading into the rear wall, not by pushing the whole pivot farther out.
+The pivot should be placed **as close to the rear wall as the 120-degree sweep permits**. Excessive rear protrusion is a design failure, not an acceptable consequence of boss sizing.
 
-### 6. Hinge position should be driven by sweep clearance and proportions, not boss radius
-Current rear-axis Y is effectively based on `rear_crest + boss_radius + 0.45`. The new axis location should instead be solved from the actual lid/body opening sweep with a small clearance margin.
+If a small support-free relief/chamfer on the rear lid edge allows the axis to move inward substantially, prefer that over moving the whole hinge farther backward.
 
-If needed, add a small support-free relief/chamfer at the rear lid edge so the pivot can tuck closer to the case without collision. This is preferable to moving a large barrel farther behind the wall.
+## Minimum B4B rule
 
-Also review X placement. Current centers are derived near `eff.x / 4` and become crowded toward the middle on the smallest allowed secure case. The supplied reference places compact hinge groups farther toward the outer portions of the edge. Once the hinge envelopes are smaller, prefer a stable, balanced outer-third placement subject to corner keep-outs.
+B4B mode should reject/disable dimensions below **48 x 48 mm child field** rather than auto-growing tiny bins merely to make hardware fit.
 
-## Proposed hinge design direction
+Important distinction:
+- 48 x 48 mm is the entered B4B child field.
+- The actual exterior is slightly larger because the wall grows outward and the wave has amplitude.
+- With the standard 0.8 mm wall, the calculated physical envelope is about 50.94 mm square.
 
-### Body side
-Prefer two slim hinge ears per hinge group rather than two full-size barrel bosses. Each ear should:
-- project only as far as required for pin/sweep clearance;
-- have a compact support-free/teardrop horizontal pin bore;
-- blend into a narrow vertical or diagonal rib on the rear wall;
-- use a modest 45-degree-or-shallower shoulder/chamfer to spread load into more wall area;
-- avoid a wide rectangular pad unless a localized wall-strength calculation proves one is needed.
+Therefore the redesign target is:
 
-The intent is “elegant strength”: a small hinge with a longer load path into the wall, not a big hinge with a big block behind it.
+**Two complete support-free hinges must fit cleanly on a 48 mm-wide child field without any hardware-driven X growth.**
 
-### Lid side
-Use one compact center knuckle/ear between the two body ears. Keep it visually close to the lid edge. Because the lid prints upside down, its print-space underside must remain self-supporting. A faceted/D-shaped external section and the existing support-free bore concept are acceptable even if the visible outer portions are rounded/filleted.
+Do not retain the current behavior where secure-lid hardware can silently grow the user’s child field to make oversized hinges fit.
 
-### Support-free rule
-No generated B4B part may require slicer supports.
-- Body upright: all hinge-root undersides <= 45 degrees from printable support, or vertical.
-- Lid upside down: hinge features must build upward from the bed-facing lid top/edge without unsupported shelves.
-- Horizontal screw bores should retain a self-supporting roof profile rather than relying on a perfect round bridge.
-- Do not trade support-free printing away merely to imitate the reference STL.
+## Automatic M2/M3 architecture
 
-## Hardware scaling direction
-
-Recommended architecture: introduce a hardware profile object rather than M3 constants embedded throughout hinge/latch/handle math. The same profile can later be reused by latches.
+Replace hard-coded M3 assumptions with a reusable internal hardware profile object. The user never sees this selection.
 
 Candidate fields:
 - nominal screw diameter
 - clearance bore
 - printed pilot
 - minimum thread engagement
-- head clearance / head-bearing geometry
+- head diameter / head clearance
 - permitted standard screw lengths
 - axial running gap
-- minimum printed shell around clearance bore
-- minimum printed shell around pilot
+- minimum printed shell around the clearance bore
+- minimum printed shell around the pilot
+- preferred local head-bearing wall
+- maximum acceptable screw protrusion
 
-Recommended user behavior, pending decision:
-- default `Auto` hardware selection;
-- M2 for compact B4Bs;
-- M3 for larger/heavier B4Bs;
-- optionally allow an advanced M2/M3 override if desired.
+### Verified standard screw-head envelope
+Ordinary ISO-style socket-head screws are approximately:
+- M2 head diameter: 3.8 mm
+- M3 head diameter: 5.5 mm
 
-Do not choose the M2/M3 threshold solely from X width. Consider at least case footprint/size so a long or deep carrying case is not given tiny hardware merely because one axis is short.
+Provide a small printed clearance margin around those values, but **do not propagate the head diameter into the whole hinge barrel**.
 
-## Screw-length review
-The current screw-selection algorithm is good in principle: choose from a fixed kit set and prove minimum thread engagement. Keep that behavior.
+### Common kit lengths to target
+Use a short common list that matches normal assortments:
+- M2: 6, 8, 10, 12, 16 mm
+- M3: 6, 8, 10, 12, 16, 20 mm
 
-Change the design philosophy so hinge axial geometry is intentionally compatible with common screw lengths rather than continuously scaling first and accepting whatever screw happens to fit. Candidate hinge pins should land on common lengths such as M2x8 and M3x10/M3x12. Final choices must be verified against the actual ear/knuckle stack.
+For the redesigned hinge, strongly prefer pins in the 8–12 mm range. A compact B4B hinge that needs a 20–30 mm pin is probably geometrically wrong.
 
-The current maximum allowed screw protrusion of 6 mm is too permissive for the redesigned hardware. Target a screw that terminates inside or approximately flush with the printed terminal ear; allow only a small tolerance beyond the far face if required.
+### Initial profile targets for geometry work
+These are prototype targets, not final print-calibrated values:
 
-## Reference-STL observations relevant to rear hinges
-The reference case is much larger than many Wavefinity B4Bs, so its absolute hardware dimensions must not be copied. Its useful lessons are proportional and structural:
-- hinge groups are relatively narrow compared with the case edge;
-- the pivot hardware is visually tucked into the edge rather than mounted on a large stand-off block;
-- load is carried into the wall through narrow ribs/ears and tapered transitions;
-- the fastener/pivot feature does not force the entire surrounding structure to become one huge cylindrical boss.
+**M2 compact profile**
+- nominal: 2.0 mm
+- clearance bore: about 2.3 mm
+- printed thread-forming pilot: start around 1.7 mm and validate physically
+- target thread engagement: roughly 2.4–2.8 mm
+- local head clearance: about 4.1–4.2 mm
+- preferred screw: M2x8 / M2x10, M2x12 only if required
 
-Approximate reference proportions from the supplied lid STL: one hinge group spans roughly 17 mm on a ~218 mm edge (about 8% of the edge), while the hardware stand-off is under ~9 mm on a ~191 mm case depth (about 5%). These are design-language references, not target dimensions.
+**M3 standard profile**
+- nominal: 3.0 mm
+- clearance bore: 3.4 mm
+- printed pilot: 2.6 mm unless physical testing proves a better value
+- minimum thread engagement: 3.0 mm
+- local head clearance: about 6.0 mm
+- preferred screw: M3x10 / M3x12, M3x16 only if required
 
-By comparison, the current B4B minimum 12.5 mm hinge on a ~43 mm minimum secure case is ~29% of the edge, which explains the disproportion even though the absolute hinge size is not wildly different from the rugged-box reference.
+### Automatic selection philosophy
+M2 is not simply “small X”; M3 is not simply “large X.” Selection should consider the overall case being carried.
 
-## Open decisions before hinge geometry is finalized
-1. Should hardware choice be `Auto` only, or `Auto / M2 / M3` with an advanced manual override?
-2. Must every secure B4B always have two rear hinges, or may the very smallest size use one centered hinge rather than auto-growing the case?
-3. Required opening angle: must the lid fold approximately 180 degrees flat behind the case, or is roughly 110–120 degrees sufficient? This directly controls how tightly the pivot can be tucked into the rear wall.
-4. Confirm fastener strategy: keep the current no-nut/no-insert approach, with the screw clearance-bored through the moving pieces and thread-forming into the far printed ear?
-5. Confirm ordinary socket-head screws from common M2/M3 assortment kits are the baseline, rather than requiring button-head, countersunk, shoulder screws, or a metal hinge pin.
+Recommended implementation approach:
+1. First solve a compact M2 hinge candidate.
+2. Use M2 only when the case is within a compact load envelope.
+3. Promote to M3 for larger/deeper/taller cases even if one axis is narrow.
+4. Once the geometry is finalized, reduce this to one deterministic helper so preview/export/BOM all agree.
 
-## Next hinge-review step after decisions
-After the open decisions are answered:
-1. define the M2/M3 hardware profiles and exact standard screw lengths;
-2. derive compact ear/knuckle dimensions from those profiles;
-3. derive the closest collision-free hinge axis from an opening-angle sweep;
-4. derive root rib/chamfer geometry that spreads load into the rear wall without a bulky pad;
-5. calculate placement/fit across the supported B4B size range;
-6. verify upright-body and upside-down-lid support-free constraints;
-7. only then move to latch redesign, carrying the same hardware/proportion rules forward.
+A practical starting envelope to test is:
+- M2 only when both child-field plan dimensions are <= 96 mm and B4B child height is <= 64 mm;
+- M3 otherwise.
+
+This threshold is intentionally provisional. Validate it against hinge proportions, resulting part mass/capacity, and the final root geometry before locking it. The final user experience remains completely automatic either way.
+
+## New hinge geometry direction
+
+### Three-knuckle layout remains appropriate
+Keep the basic two-body-ear + one-lid-center-ear hinge arrangement. It gives a straightforward screw path, avoids loose hardware besides the screw, and provides two bearing regions on the body.
+
+But redesign each region independently instead of extruding one oversized common boss shape.
+
+### Body-side ears
+Each hinge group should have two slim body ears.
+
+For each ear:
+- size the pivot section from bore + shell, not screw-head diameter;
+- use the existing self-supporting horizontal bore concept or an improved equivalent;
+- keep the pin axis close to the wall;
+- flow the ear into a diagonal/trapezoidal rib;
+- widen that rib modestly as it meets the rear wall;
+- chamfer/taper the rib ends in plan so there is no blunt rectangular root;
+- preserve the child-field cavity exactly — reinforcement grows outward only.
+
+The near ear receives a **local head-bearing flare/pad** around the screw head. That local flare may be larger than the rest of the ear, but it should be short in the axial direction and visually integrated.
+
+The far ear becomes the thread-forming lug. It needs enough axial length for thread engagement but does not need head-sized radial geometry.
+
+### Lid-side center ear
+The center ear should be compact and close to the lid edge.
+
+Strength should flow into the lid through a shallow triangular/trapezoidal arm that reaches inward into the lid plate. Avoid a large vertical tab whose width/height is dictated by the old boss.
+
+Because the lid prints upside down:
+- the bed-facing top plate must provide the starting support;
+- all added hinge-root faces must build upward from it;
+- no hidden horizontal shelf may appear once the lid is flipped into print orientation;
+- a 45-degree-or-shallower transition is preferred where the root leaves the plate.
+
+### Root reinforcement visual target
+From side/rear view, the hinge should look approximately like:
+- compact pin barrel/ear near the rear edge;
+- a short neck;
+- a shallow diagonal reinforcement into the wall;
+- reinforcement fading into the wall over a larger area than the pivot itself.
+
+Do **not** make the chamfer huge. The strength comes from creating a continuous load path and eliminating the sharp peel point, not from covering half the rear wall with a triangular block.
+
+## Hinge width and X placement
+
+Stop using `0.16 * case_x` as the primary dimensional rule.
+
+Instead:
+1. derive the minimum axial stack from the selected screw family and required thread engagement;
+2. keep the moving gaps fixed by print tolerance;
+3. derive the hinge group width from that stack;
+4. optionally allow modest root-width growth on larger cases without enlarging the pivot itself.
+
+Place the two hinge groups toward the outer thirds of the rear edge, while maintaining:
+- corner tangent keep-out;
+- root-chamfer room;
+- equal symmetry;
+- enough material between each hinge and the nearest corner;
+- enough center spacing that the roots do not visually merge.
+
+The reference STL is useful here only as a proportion cue: its hinge groups are a small percentage of the rear edge and visually sit toward the outer portions, rather than clustering near the middle.
+
+## Rear protrusion target
+
+The final rear projection should be a derived result of the 120-degree sweep, not a fixed boss-based stand-off.
+
+Desired behavior:
+- M2 hinge on the minimum case should look tucked into the rear edge, not like a backpack attached to it.
+- M3 should still remain compact because only its local head-bearing zone grows to head size.
+- the root reinforcement may spread along/down the wall but should not significantly increase Y protrusion.
+
+Add an explicit validation/report value for maximum rear hardware projection beyond the local rear-wall crest. This makes future regressions visible.
+
+## Support-free print rules
+
+No B4B hinge geometry may require slicer supports.
+
+### Body upright
+- horizontal pin bores need a self-supporting roof;
+- root undersides must be vertical or supported by <=45-degree transitions;
+- no underside shelf below the barrel;
+- no decorative fillet may create a hidden downward overhang beyond the project limit.
+
+### Lid upside down
+Evaluate support in **print space**, not assembly space.
+- hinge root must grow from the bed-facing lid top/edge;
+- center ear and arm must remain self-supporting when flipped;
+- horizontal bore roof direction must flip correctly;
+- no underside detail may depend on support from the body because the lid is printed separately.
+
+## Screw termination rule
+
+The current 6 mm permitted screw protrusion is much too generous for the redesigned compact hardware.
+
+New target:
+- choose the shortest standard screw that reaches the required thread engagement;
+- ideally terminate within the far ear;
+- allow approximately flush or at most a very small controlled protrusion;
+- do not accept a long screw simply because it technically satisfies minimum engagement.
+
+The BOM should report the automatically selected hardware clearly, e.g. `2 x M2x8 hinge pins` or `2 x M3x10 hinge pins`.
+
+## Required validation before hinge phase is complete
+
+Validate at minimum:
+
+1. **48 x 48 mm minimum B4B**
+   - exactly two hinges;
+   - no hardware-driven case growth;
+   - proportions visually reasonable;
+   - full ~120-degree motion;
+   - support-free body and lid.
+
+2. **Hardware-family transition cases**
+   - case immediately below M2->M3 threshold;
+   - case immediately above threshold;
+   - no abrupt grotesque visual jump;
+   - BOM and geometry select the same profile.
+
+3. **Long narrow case**
+   - verifies that overall case size/load can promote M3 even if rear width is relatively small.
+
+4. **Large B4B**
+   - M3 remains strong without continuously ballooning pivot diameter/width;
+   - root reinforcement scales modestly rather than hardware becoming enormous.
+
+5. **Motion sweep**
+   - closed state clears;
+   - intermediate angles clear;
+   - ~120-degree open state clears;
+   - hard stop, if intentionally designed, contacts broad printable surfaces rather than screw threads or a thin edge.
+
+6. **Printability**
+   - body upright without supports;
+   - lid upside down without supports;
+   - all horizontal bores self-support;
+   - no bridge exceeds the project’s support-free bridge target.
+
+7. **Structural path**
+   - hinge forces enter a reinforced rear-wall zone;
+   - no load depends on a tiny Boolean overlap with a 0.2–0.8 mm wall;
+   - thread-forming far lug has family-specific minimum engagement;
+   - local head pad leaves adequate plastic outside the screw-head footprint.
+
+8. **Envelope regression check**
+   - record hinge group width;
+   - record maximum rear projection;
+   - record root wall coverage;
+   - compare these values across representative sizes so future changes cannot silently return to the oversized current design.
+
+## Reference-STL lesson to preserve
+
+Do not copy dimensions. Preserve only the useful design principles:
+- small hinge groups relative to the case edge;
+- pivot tucked close to the edge;
+- strength carried away from the pivot through ribs/tapered transitions;
+- hardware head size does not dictate the scale of the entire hinge assembly;
+- attachment looks integrated into the case rather than bolted onto an external block.
+
+## Next implementation step
+
+The rear hinge design is sufficiently specified to move from review into geometry work without additional user questions.
+
+Next work should:
+1. add internal M2/M3 hardware profiles;
+2. enforce the 48 x 48 mm B4B minimum;
+3. replace current hardware-driven auto-growth for hinge fit;
+4. derive compact three-knuckle axial stacks around short standard screws;
+5. solve the hinge Y-axis location from the 120-degree opening sweep;
+6. create the narrow-ear + tapered-root body geometry;
+7. create the upside-down-printable lid center ear/root;
+8. validate representative minimum/transition/large cases;
+9. review the result visually before proceeding to latch redesign.
+
+## Later phases
+
+After the rear hinge design is accepted, redesign the latches and front folding handle using the same principles:
+- automatic M2/M3 hardware where appropriate;
+- compact pivots;
+- local head-bearing reinforcement only;
+- tapered load paths;
+- minimal protrusion;
+- no supports;
+- proportions tied to the case rather than one universal rugged-case-scale fitting.
