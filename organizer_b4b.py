@@ -4006,7 +4006,7 @@ def _print_pose(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
     """Assembly-space -> a support-minimising *orientation* only.
 
     No drop-to-plate and no recentring happen here: that is done once per print
-    group in :func:`_pack_print_groups`, so parts that must stay registered
+    object in :func:`_pack_print_objects`, so parts that must stay registered
     (the lid and its top inlay) keep their exact relative coordinates.
     """
     m = mesh.copy()
@@ -4042,21 +4042,21 @@ def _print_pose(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
     return m
 
 
-def _pack_print_groups(
-    groups: list[list[tuple[str, trimesh.Trimesh]]]
-) -> list[tuple[str, trimesh.Trimesh]]:
-    """Lay independent print groups out in a row on the build plane.
+def _pack_print_objects(
+    objects: list[tuple[str, list[tuple[str, trimesh.Trimesh]]]]
+) -> list[tuple[str, list[tuple[str, trimesh.Trimesh]]]]:
+    """Lay independent print objects out in a row on the build plane.
 
-    Each *group* is a list of named meshes that share one rigid transform (the
-    lid + its top-label inlay are one group, so the inlay stays registered in
-    the lid pocket).  Groups are packed left to right along +X with
+    Each object is its own Bambu top-level object.  Its named meshes share one
+    rigid transform (the lid + top-label inlay and front-label plate + text
+    stay registered).  Objects are packed left to right along +X with
     ``B4B_PRINT_PART_GAP`` between them, each centred on Y=0 and dropped so its
-    lowest point sits on z=0.  No two groups overlap.
+    lowest point sits on z=0.  No two objects overlap.
     """
-    packed: list[tuple[str, trimesh.Trimesh]] = []
+    packed: list[tuple[str, list[tuple[str, trimesh.Trimesh]]]] = []
     x_cursor = 0.0
-    for group in groups:
-        meshes = [m for _n, m in group]
+    for object_name, parts in objects:
+        meshes = [m for _n, m in parts]
         mins = np.min([m.bounds[0] for m in meshes], axis=0)
         maxs = np.max([m.bounds[1] for m in meshes], axis=0)
         offset = (
@@ -4064,57 +4064,62 @@ def _pack_print_groups(
             -0.5 * float(mins[1] + maxs[1]),
             -float(mins[2]),
         )
-        for name, mesh in group:
+        packed_parts: list[tuple[str, trimesh.Trimesh]] = []
+        for name, mesh in parts:
             mesh.apply_translation(offset)
-            packed.append((name, mesh))
+            packed_parts.append((name, mesh))
+        packed.append((object_name, packed_parts))
         x_cursor += float(maxs[0] - mins[0]) + B4B_PRINT_PART_GAP
     return packed
 
 
-def b4b_build_parts(box: BoxSpec) -> list[tuple[str, trimesh.Trimesh]]:
-    """Every printable B4B object, named, oriented and packed on the build
-    plane so nothing overlaps.  Screws are never emitted as geometry.
+def b4b_build_print_objects(
+    box: BoxSpec,
+) -> list[tuple[str, list[tuple[str, trimesh.Trimesh]]]]:
+    """B4B top-level print objects, named, oriented and packed on the bed.
 
-    The lid and its flush top-label inlay are treated as one print group: the
-    same transform is applied to both, so the inlay stays exactly registered in
-    the lid pocket in the exported 3MF.
+    Multi-part objects retain their required registration: the lid and its
+    flush top-label inlay, or the front-label plate and text.  Every other
+    object has one independently movable mesh.  Screws are never emitted.
     """
     eff = b4b_effective_box(box)
     b4b = eff.b4b
     validate_b4b_design(box, deep=True)
 
-    groups: list[list[tuple[str, trimesh.Trimesh]]] = []
+    objects: list[tuple[str, list[tuple[str, trimesh.Trimesh]]]] = []
 
     body = b4b_body_with_features(box)
-    groups.append([("B4B Body", _print_pose(body, "body"))])
+    objects.append(("B4B Body", [("B4B Body", _print_pose(body, "body"))]))
 
     if b4b.lid:
         lid = make_b4b_lid(box)
         top_inlay = None
         if b4b.label_location == "top" and b4b.label_text.strip():
             lid, top_inlay = _apply_top_label(box, lid)
-        lid_group = [("B4B Lid", _print_pose(lid, "lid"))]
+        lid_parts = [("B4B Lid", _print_pose(lid, "lid"))]
         if top_inlay is not None:
-            lid_group.append(("B4B Top Label", _print_pose(top_inlay, "lid")))
-        groups.append(lid_group)
+            lid_parts.append(("B4B Top Label", _print_pose(top_inlay, "lid")))
+        objects.append(("B4B Lid", lid_parts))
 
     handle = make_b4b_handle(box)
     if handle is not None:
-        groups.append([("B4B Handle", _print_pose(handle, "handle"))])
+        objects.append(("B4B Handle", [("B4B Handle", _print_pose(handle, "handle"))]))
 
     if b4b.secure_lid:
         for i, lever in enumerate(make_b4b_latches(box), start=1):
-            groups.append([(f"B4B Latch {i}", _print_pose(lever, "latch"))])
+            name = f"B4B Latch {i}"
+            objects.append((name, [(name, _print_pose(lever, "latch"))]))
 
     if b4b.stacking:
         for i, peg in enumerate(_stack_pegs(box), start=1):
-            groups.append([(f"B4B Stacking Peg {i}", _print_pose(peg, "peg"))])
+            name = f"B4B Stacking Peg {i}"
+            objects.append((name, [(name, _print_pose(peg, "peg"))]))
 
     if b4b.label_location == "front" and b4b.label_text.strip():
         _frame, plate, text, centre = b4b_front_label_geometry(box)
         # Rotated together so the plate and its lettering stay registered:
         # printed flat on its back, text facing up.
-        groups.append([
+        objects.append(("B4B Front Label", [
             (
                 "B4B Front Label Plate",
                 _print_pose(translated(plate, centre), "label"),
@@ -4123,6 +4128,15 @@ def b4b_build_parts(box: BoxSpec) -> list[tuple[str, trimesh.Trimesh]]:
                 "B4B Front Label Text",
                 _print_pose(translated(text, centre), "label"),
             ),
-        ])
+        ]))
 
-    return _pack_print_groups(groups)
+    return _pack_print_objects(objects)
+
+
+def b4b_build_parts(box: BoxSpec) -> list[tuple[str, trimesh.Trimesh]]:
+    """Compatibility view of :func:`b4b_build_print_objects` as flat parts."""
+    return [
+        part
+        for _object_name, parts in b4b_build_print_objects(box)
+        for part in parts
+    ]

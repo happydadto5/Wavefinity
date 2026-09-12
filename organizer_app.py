@@ -64,10 +64,11 @@ from organizer_engine import (
     union,
     validate_side_fit,
     validate_3mf,
-    export_assembly_3mf,
+    export_object_groups_3mf,
+    validate_object_groups_3mf,
 )
 from organizer_b4b import (
-    b4b_build_parts,
+    b4b_build_print_objects,
     b4b_effective_box,
     b4b_summary,
     validate_b4b_design,
@@ -1062,12 +1063,20 @@ def generate_b4b_files(
     auto_timestamp: bool = False,
     keep_log: bool = False,
 ) -> dict[str, object]:
-    """Dedicated B4B export: one assembly 3MF holding every printable object
-    (body, lid, latches, labels) already in print orientation.  Never routed
-    through ``make_fused_box`` and never carries a side connector."""
+    """Dedicated B4B export with independently placeable print objects.
+
+    Registered two-colour geometry remains multi-part: the front label or the
+    lid plus its top inlay.  Never routed through ``make_fused_box`` and never
+    carries a side connector.
+    """
     validate_b4b_design(box)
     summary = b4b_summary(box)
-    parts = b4b_build_parts(box)
+    print_objects = b4b_build_print_objects(box)
+    parts = [
+        part
+        for _object_name, object_parts in print_objects
+        for part in object_parts
+    ]
 
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1085,12 +1094,10 @@ def generate_b4b_files(
     # lettering parts open on the second filament slot
     filaments = {
         name: 2 for name, _ in parts
-        if name in ("B4B Top Label", "B4B Front Label")
+        if name in ("B4B Top Label", "B4B Front Label Text")
     }
-    written = export_assembly_3mf(parts, target, filaments)
-    # every B4B file is an assembly (one grouping object, one build item), so
-    # pass all names as ``multipart`` to get the assembly-aware structural check
-    report = validate_3mf(target, len(parts), multipart=tuple(written))
+    written = export_object_groups_3mf(print_objects, target, filaments)
+    report = validate_object_groups_3mf(target, print_objects, filaments)
 
     result: dict[str, object] = {
         "mode": "b4b",

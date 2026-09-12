@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-12 — B4B 3MF pieces can move separately
+
+- B4B 3MF exports now open with the body, lid, handle, latches and stacking
+  pegs as separately movable top-level objects. A front label stays together
+  as its plate plus second-colour text; a top label stays with its lid.
+
 ## 2026-09-12 — B4B compact folding-handle scale and closed pivot eyes
 
 - The front folding handle now scales with the child-bin field: compact cases
