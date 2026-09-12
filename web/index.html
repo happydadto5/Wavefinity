@@ -111,19 +111,25 @@
                     <option value="true">Stackable</option>
                   </select>
                 </label>
-                <label id="b4b-handle-row" class="inline-select" style="grid-column:1;grid-row:3" title="A folding bail on the front wall, on two screws into the case body">
+                <label id="b4b-handle-row" class="inline-select" style="grid-column:1;grid-row:3">
                   <span id="b4b-handle-label">Carrying handle</span>
                   <select id="b4b-handle">
                     <option value="false" selected>No handle</option>
-                    <option value="true">Add handle</option>
+                    <option id="b4b-handle-add-option" value="true">Add handle</option>
                   </select>
                 </label>
-                <span id="b4b-handle-note" class="b4b-blocked-note" style="grid-column:2;grid-row:3" hidden></span>
+                <label id="b4b-latch-count-row" class="inline-select" style="grid-column:2;grid-row:3"># of latches
+                  <select id="b4b-latch-count">
+                    <option value="auto" selected>Auto</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                  </select>
+                </label>
                 <label class="inline-select" style="grid-column:3;grid-row:3">Label
                   <select id="b4b-label-location">
                     <option value="none" selected>No label</option>
                     <option value="top">Top</option>
-                    <option value="front">Front</option>
+                    <option id="b4b-label-front-option" value="front">Front</option>
                   </select>
                 </label>
                 <label id="b4b-label-text-row" style="grid-column:1 / span 2;grid-row:4" hidden>Label text

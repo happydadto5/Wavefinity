@@ -98,7 +98,7 @@ const COLORS = {
   // text interior part reads as writing rather than as another holder.
   text: "#315766",
   // B4B parts get their own colour family, distinct from interior features.
-  b4b_body: "#8ea8b2", b4b_lid: "#7fa9b6", b4b_hinge: "#5f8794",
+  b4b_body: "#8ea8b2", b4b_lid: "#6c909b", b4b_hinge: "#5f8794",
   b4b_latch: "#c98a4a", b4b_stack: "#9d86c8", b4b_label: "#315766",
   b4b_handle: "#6b9aa7",
 };
@@ -798,15 +798,26 @@ function applyB4BVisibility() {
     // and a case actually big enough to carry a hand.
     const blocked = b4bHandleBlockedReason();
     const handleSelect = $("#b4b-handle");
-    handleSelect.disabled = Boolean(blocked);
+    const addOption = $("#b4b-handle-add-option");
+    if (addOption) {
+      addOption.disabled = Boolean(blocked);
+      addOption.textContent = blocked || "Add handle";
+    }
     if (blocked) handleSelect.value = "false";
-    const label = $("#b4b-handle-label");
-    if (label) label.classList.toggle("b4b-unavailable", Boolean(blocked));
-    const note = $("#b4b-handle-note");
-    if (note) note.textContent = blocked || "";
-    hide("#b4b-handle-note", !blocked);
+
+    // Latches only exist on a latched lid.
+    hide("#b4b-latch-count-row", $("#b4b-lid-type").value !== "latched");
+
+    const labelBlocked = b4bFrontLabelBlockedReason();
+    const frontOption = $("#b4b-label-front-option");
+    if (frontOption) {
+      frontOption.disabled = Boolean(labelBlocked);
+      frontOption.textContent = labelBlocked || "Front";
+    }
+    const labelSelect = $("#b4b-label-location");
+    if (labelBlocked && labelSelect.value === "front") labelSelect.value = "none";
     // Label text only exists once a location other than "No label" is chosen.
-    hide("#b4b-label-text-row", $("#b4b-label-location").value === "none");
+    hide("#b4b-label-text-row", labelSelect.value === "none");
   }
   applyStackVisibility();
 }
@@ -820,9 +831,18 @@ function b4bHandleBlockedReason() {
   return b4b.handle_blocked_reason || "This B4B is too small for a handle.";
 }
 
+// Same reasoning as b4bHandleBlockedReason: the server derives this from the
+// real front wall, so the UI only repeats its answer.
+function b4bFrontLabelBlockedReason() {
+  const b4b = state.preview?.b4b;
+  if (!b4b || b4b.front_label_available !== false) return "";
+  return b4b.front_label_blocked_reason || "Not enough size for a front label.";
+}
+
 function normalizeB4BDependentControls() {
   const secure = $("#b4b-lid-type").value === "latched";
   if (!secure) $("#b4b-handle").value = "false";
+  if (!secure) $("#b4b-latch-count").value = "auto";
 }
 
 function syncB4BForm() {
@@ -832,6 +852,7 @@ function syncB4BForm() {
     ? "latched" : "lid_only";
   $("#b4b-stacking").value = String(Boolean(b4b.stacking));
   $("#b4b-handle").value = String(Boolean(b4b.handle) && b4b.secure_lid !== false);
+  $("#b4b-latch-count").value = ["1", "2"].includes(b4b.latch_count) ? b4b.latch_count : "auto";
   $("#b4b-lid-snugness").value = String(b4b.lid_headroom_mm ?? 1);
   // Label text follows the design's saved text. Text typed and then switched
   // to No label stays in the (hidden) field for this session, so switching
@@ -959,9 +980,9 @@ function readB4BForm(design) {
     enabled: true,
     lid: true,
     secure_lid: secure,
-    // Latch count and strength are both derived from the case now. The saved
-    // strength rides along untouched so an older design still round-trips.
-    latch_count: "auto",
+    // Latch count is user-configurable (Auto/1/2); strength is still derived
+    // from the case, so the saved value rides along untouched.
+    latch_count: secure ? $("#b4b-latch-count").value : "auto",
     latch_strength: b4bState().latch_strength || "standard",
     lid_headroom_mm: parseFloat($("#b4b-lid-snugness").value) || 1,
     label_text: $("#b4b-label-location").value === "none" ? "" : $("#b4b-label-text").value,
@@ -1051,7 +1072,7 @@ function groupB4BHardware(hardware) {
   const family = hardware.family || "M3";
   return [...byLength.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([length, qty]) => `${qty} ${family} × ${length} mm`)
+    .map(([length, qty]) => `Qty ${qty} - ${family} - ${length} mm`)
     .join(", ");
 }
 
@@ -1086,7 +1107,7 @@ function renderB4BReadout() {
     grew.hidden = false;
   }
   const screws = groupB4BHardware(b4b.hardware || {});
-  hardware.textContent = screws ? `Hardware: ${screws} — no nuts` : "Hardware: None";
+  hardware.textContent = screws ? `Hardware: ${screws}` : "Hardware: None";
 }
 
 async function toggleB4B(wantEnabled) {
@@ -1673,7 +1694,7 @@ function wireControls() {
     applyStackVisibility();
     changedDesign();
   });
-  ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location"].forEach(sel =>
+  ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location", "#b4b-latch-count"].forEach(sel =>
     $(sel).addEventListener("change", () => {
       normalizeB4BDependentControls();
       readB4BForm(state.design);
@@ -3869,7 +3890,7 @@ function mutationControls() {
   return $$(
     '#x-size, #y-size, #z, #standard-base, #base-thickness, #standard-walls, #wall-thickness, #easy-clean, #easy-clean-style, #easy-clean-radius, #part-name, ' +
     '#mode-select, ' +
-    '#b4b-part-name, #b4b-stacking, #b4b-handle, #b4b-label-location, ' +
+    '#b4b-part-name, #b4b-stacking, #b4b-handle, #b4b-label-location, #b4b-latch-count, ' +
     '#new-design, #open-design, #save-design'
   );
 }
@@ -4434,9 +4455,14 @@ function paintBackdrop(context, width, height) {
   context.fillRect(0, 0, width, height);
 }
 
-function drawContactShadow(context, box, camera, project) {
+// `outerXY`, when given, overrides the shadow's footprint with the true
+// case exterior - see draw3DDimensions for why box.x/box.y alone are wrong
+// for B4B. Callers suppress the shadow outright (pass no box) for a view
+// that isn't actually sitting on the ground, such as B4B's isolated Lid.
+function drawContactShadow(context, box, camera, project, outerXY) {
   if (!box) return;
-  const hx = number(box.x) / 2, hy = number(box.y) / 2;
+  const hx = (outerXY ? number(outerXY[0]) : number(box.x)) / 2;
+  const hy = (outerXY ? number(outerXY[1]) : number(box.y)) / 2;
   if (!(hx > 0) || !(hy > 0)) return;
   const base = [[-hx, -hy, 0], [hx, -hy, 0], [hx, hy, 0], [-hx, hy, 0]]
     .map(point => project(iso(point, camera)));
@@ -4638,7 +4664,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   const originX = width / 2 - midX * scale;
   const originY = height / 2 - midY * scale;
   faces.sort((a, b) => a.depth - b.depth || a.layer - b.layer);
-  drawContactShadow(context, state.design?.box, camera, project);
+  drawContactShadow(context, b4bShadowBox(), camera, project, b4bAssembledEnvelope());
   context.lineJoin = "round";
   let penFill = "", penStroke = "", penWidth = -1;
   for (let index = 0; index < faces.length; index += 1) {
@@ -4688,7 +4714,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   }
   drawUsableFloor(context, geometry, camera, project);
   drawBoreAxes(context, boreAxes, camera, project);
-  draw3DDimensions(context, state.design?.box, camera, project, state.preview?.b4b?.case_outer_mm);
+  draw3DDimensions(context, state.design?.box, camera, project, b4bAssembledEnvelope());
 }
 
 // A line up the centre of every hole in a leaned bore, arrow-tipped, so it's
@@ -4793,17 +4819,20 @@ function checkBinSizeChange() {
   state.lastBoxSize = current;
 }
 
-// `outerXY`, when given, overrides the width/depth guides' extent and label
-// with the true case exterior - B4B's box.x/box.y are the child field, not
-// the printed case outline, so the dimension overlay would otherwise both
-// mislabel the case and fail to reach its drawn edges. See fix3d.md.
-function draw3DDimensions(context, box, camera, project, outerXY) {
+// `outerXYZ`, when given, overrides the guides' extent and labels with the
+// true assembled envelope - B4B's box.x/y/z are the child field, not the
+// printed case (and for height, not even the full assembly: closed-lid
+// height alone ignores hinge knuckles, and stacking pegs stand proud of
+// that again), so the dimension overlay would otherwise mislabel the case
+// and fail to reach its drawn edges on every axis. See fix3d.md.
+function draw3DDimensions(context, box, camera, project, outerXYZ) {
   if (!box) return;
-  const outerX = outerXY ? number(outerXY[0]) : number(box.x);
-  const outerY = outerXY ? number(outerXY[1]) : number(box.y);
+  const outerX = outerXYZ ? number(outerXYZ[0]) : number(box.x);
+  const outerY = outerXYZ ? number(outerXYZ[1]) : number(box.y);
+  const outerZ = outerXYZ ? number(outerXYZ[2]) : number(box.z);
   const hx = outerX / 2;
   const hy = outerY / 2;
-  const hz = number(box.z);
+  const hz = outerZ;
   if (hx <= 0 || hy <= 0 || hz <= 0) return;
 
   const yawRad = camera.yaw * Math.PI / 180;
@@ -4895,7 +4924,7 @@ function draw3DDimensions(context, box, camera, project, outerXY) {
     sBot,
     sTop,
     heightNormal,
-    `Height ${fmt(box.z)} mm`,
+    `Height ${fmt(outerZ)} mm`,
     gap,
     over
   );
@@ -4999,8 +5028,7 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
 
 let glRenderer = null;
 let glInitAttempted = false;
-let glWasLost = false;
-let glBuffersCache = null; // { geometry, b4b, buffers }
+let glBuffersCache = null; // { source, b4b, generation, buffers }
 const XRAY_ALPHA = 0.3;
 
 function ensurePreviewGL() {
@@ -5081,48 +5109,91 @@ function renderPreview3D() {
   checkBinSizeChange();
   const overlayCanvas = $("#preview-3d");
   const solidCanvas = $("#preview-3d-solid");
+  // B4B ships its geometry as compact mesh groups (state.preview.meshes) -
+  // "geometry" is always [] for a B4B response, only kept for response-shape
+  // compatibility. See organizer_b4b.b4b_preview_meshes.
+  const b4b = b4bEnabled();
   const geometry = state.preview.geometry || [];
+  const meshes = state.preview.meshes || [];
   const renderer = ensurePreviewGL();
   if (!renderer || renderer.lost) {
-    if (renderer?.lost) glWasLost = true;
     if (solidCanvas) solidCanvas.hidden = true;
-    drawGeometryLegacy2D(overlayCanvas, geometry, state.camera);
+    // The legacy 2D fallback only ever understood the per-face format, and
+    // never shipped for B4B before compact transport existed; give it the
+    // one geometry shape it knows rather than teaching it a second one for
+    // a path that only runs when WebGL itself is unavailable.
+    drawGeometryLegacy2D(overlayCanvas, b4b ? meshesToLegacyFaces(meshes) : geometry, state.camera);
     return;
   }
-  if (glWasLost) {
-    // The buffers a lost context made are gone with it; a restored context
-    // starts empty and must rebuild rather than redraw stale handles.
-    glBuffersCache = null;
-    glWasLost = false;
-  }
   if (solidCanvas) solidCanvas.hidden = false;
-  renderPreview3DGL(renderer, overlayCanvas, geometry, state.camera);
+  renderPreview3DGL(renderer, overlayCanvas, b4b, geometry, meshes, state.camera);
 }
 
-function renderPreview3DGL(renderer, overlayCanvas, fullGeometry, camera) {
+// The legacy painter only ever spoke the per-face format; B4B's compact
+// mesh groups need expanding back into that shape for it. Only reached when
+// WebGL itself is unavailable, so this never runs on the normal path.
+function meshesToLegacyFaces(meshes) {
+  const faces = [];
+  for (const mesh of meshes) {
+    const { positions, normals, kind, layer, owner } = mesh;
+    const triangleCount = (positions.length / 9) | 0;
+    for (let t = 0; t < triangleCount; t += 1) {
+      const at = t * 9;
+      faces.push({
+        points: [
+          [positions[at], positions[at + 1], positions[at + 2]],
+          [positions[at + 3], positions[at + 4], positions[at + 5]],
+          [positions[at + 6], positions[at + 7], positions[at + 8]],
+        ],
+        normal: [normals[t * 3], normals[t * 3 + 1], normals[t * 3 + 2]],
+        kind, layer, owner,
+      });
+    }
+  }
+  return faces;
+}
+
+function renderPreview3DGL(renderer, overlayCanvas, b4b, fullGeometry, meshes, camera) {
   const { context, width, height } = canvasSize(overlayCanvas);
   context.clearRect(0, 0, width, height);
   state.previewSupportPolygons = [];
-  const b4b = b4bEnabled();
-  if (!fullGeometry.length) {
+  const hasContent = b4b ? meshes.length > 0 : fullGeometry.length > 0;
+  if (!hasContent) {
     window.Preview3DGL.draw(renderer, null, window.Preview3DGL.computeFrame(camera, null, width, height), width, height, []);
     context.fillStyle = "#8b989e";
     context.textAlign = "center";
     context.fillText("No geometry", width / 2, height / 2);
     return;
   }
-  const boreAxes = fullGeometry.filter(face => face.kind?.endsWith("bore_axis"));
-  const solidGeometry = boreAxes.length
+  // Neither bore axes, the usable-floor rectangle nor placed-part hit-test
+  // polygons apply to B4B (it has no bores, no "floor" kind, and no
+  // interior-part editing - see _reject_if_b4b), so the overlay gets an
+  // empty face list for it rather than a parallel code path.
+  const boreAxes = b4b ? [] : fullGeometry.filter(face => face.kind?.endsWith("bore_axis"));
+  const solidGeometry = b4b ? [] : (boreAxes.length
     ? fullGeometry.filter(face => !face.kind?.endsWith("bore_axis"))
-    : fullGeometry;
+    : fullGeometry);
   const classify = currentPreviewClassify();
-  if (!glBuffersCache || glBuffersCache.geometry !== fullGeometry || glBuffersCache.b4b !== b4b) {
+  const source = b4b ? meshes : fullGeometry;
+  // Keyed on renderer.generation, not on having observed `lost` at some
+  // point: loss and restore can both happen between two redraws (nothing
+  // requires a repaint while the context is actually down), so `lost`
+  // alone can never be relied on to have been seen. `generation` instead
+  // advances exactly once per successful restore and stays put otherwise,
+  // so this always notices when the cached buffers belong to a context
+  // that no longer exists - regardless of when the redraw that discovers
+  // it happens to run.
+  if (
+    !glBuffersCache || glBuffersCache.source !== source || glBuffersCache.b4b !== b4b
+    || glBuffersCache.generation !== renderer.generation
+  ) {
     if (glBuffersCache) window.Preview3DGL.disposeBuffers(renderer.gl, glBuffersCache.buffers);
+    const groupNames = currentPreviewGroups();
     glBuffersCache = {
-      geometry: fullGeometry, b4b,
-      buffers: window.Preview3DGL.buildBuffers(
-        renderer.gl, solidGeometry, currentPreviewGroups(), classify, kindColor
-      ),
+      source, b4b, generation: renderer.generation,
+      buffers: b4b
+        ? window.Preview3DGL.buildBuffersFromMeshes(renderer.gl, meshes, groupNames, kindColor)
+        : window.Preview3DGL.buildBuffers(renderer.gl, solidGeometry, groupNames, classify, kindColor),
     };
   }
   const buffers = glBuffersCache.buffers;
@@ -5153,10 +5224,27 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
     state.previewSupportPolygons.push(face.points.map(point => project(iso(point, camera))));
   }
   const box = state.design?.box;
-  drawContactShadow(context, box, camera, project);
+  drawContactShadow(context, b4bShadowBox(), camera, project, b4bAssembledEnvelope());
   drawUsableFloor(context, solidGeometry, camera, project);
   drawBoreAxes(context, boreAxes, camera, project);
-  draw3DDimensions(context, box, camera, project, state.preview?.b4b?.case_outer_mm);
+  draw3DDimensions(context, box, camera, project, b4bAssembledEnvelope());
+}
+
+// B4B's assembled_envelope_mm accounts for hinge/latch/handle/stacking
+// projection on every axis (see b4b_summary), unlike box.x/y/z which are
+// the child field. Used to correct both the dimension guides and the
+// contact shadow's footprint so they track the physical case.
+function b4bAssembledEnvelope() {
+  return state.preview?.b4b?.assembled_envelope_mm;
+}
+
+// The contact shadow represents something resting on the ground. That's
+// true for the whole assembly and for an isolated Base, but not for an
+// isolated Lid - it is normally shown up on its hinges, not sitting flat -
+// so a full-case shadow under it would be a footprint nothing is casting.
+function b4bShadowBox() {
+  if (b4bEnabled() && state.b4bView === "lid") return null;
+  return state.design?.box;
 }
 
 function pointInPolygon([x, y], polygon) {

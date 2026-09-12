@@ -397,9 +397,9 @@ class B4BSpec:
         secure = bool(self.secure_lid) and legacy_lid
         stacking = bool(self.stacking) and legacy_lid
         handle = bool(self.handle) and secure
-        # Latch count and strength are both derived from the case now; an
-        # explicit value saved by an older file is no longer an override.
-        latch_count = "auto"
+        # Latch count is user-configurable (Auto/1/2); strength is still
+        # derived from the case, not an override.
+        latch_count = self.latch_count
         latch_strength = self.latch_strength
         return B4BSpec(
             enabled=self.enabled,

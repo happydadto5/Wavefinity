@@ -154,16 +154,13 @@
     return shader;
   }
 
-  function init(canvas) {
-    let gl = null;
-    try {
-      gl = canvas.getContext("webgl2", { antialias: true, alpha: true, depth: true })
-        || canvas.getContext("webgl", { antialias: true, alpha: true, depth: true })
-        || canvas.getContext("experimental-webgl", { antialias: true, alpha: true, depth: true });
-    } catch (error) {
-      gl = null;
-    }
-    if (!gl) return null;
+  // Compiles the program and looks up every attribute/uniform location fresh.
+  // Used both at init and after a restored context, since a lost context
+  // takes every GPU-side object with it - the old WebGLProgram and every
+  // location gl.getAttribLocation/getUniformLocation returned are meaningless
+  // once the context comes back, even though the JS WebGLRenderingContext
+  // object and canvas are unchanged. Returns null on failure.
+  function buildProgram(gl) {
     let program;
     try {
       const vertexShader = compileShader(gl, gl.VERTEX_SHADER, VERTEX_SRC);
@@ -178,8 +175,8 @@
     } catch (error) {
       return null;
     }
-    const renderer = {
-      canvas, gl, program,
+    return {
+      program,
       attribs: {
         position: gl.getAttribLocation(program, "aPosition"),
         normal: gl.getAttribLocation(program, "aNormal"),
@@ -196,59 +193,85 @@
         farCam: gl.getUniformLocation(program, "uFarCam"),
         alpha: gl.getUniformLocation(program, "uAlpha"),
       },
-      lost: false,
+    };
+  }
+
+  function init(canvas) {
+    let gl = null;
+    try {
+      gl = canvas.getContext("webgl2", { antialias: true, alpha: true, depth: true })
+        || canvas.getContext("webgl", { antialias: true, alpha: true, depth: true })
+        || canvas.getContext("experimental-webgl", { antialias: true, alpha: true, depth: true });
+    } catch (error) {
+      gl = null;
+    }
+    if (!gl) return null;
+    const built = buildProgram(gl);
+    if (!built) return null;
+    // `generation` counts successful (re)builds of the GL program, starting
+    // at 1. Buffers are tied to whichever context generation created them,
+    // so the caller keys its buffer cache on this number rather than on
+    // `lost`: a call to renderPreview3D() is not guaranteed to happen while
+    // `lost` is briefly true (loss and restore can both fire between two
+    // redraws), and in that case `lost` alone would never signal that the
+    // cached buffers - built by a since-destroyed context - are now dead.
+    const renderer = {
+      canvas, gl, program: built.program, attribs: built.attribs, uniforms: built.uniforms,
+      lost: false, generation: 1,
     };
     canvas.addEventListener("webglcontextlost", event => {
       event.preventDefault();
       renderer.lost = true;
     });
     canvas.addEventListener("webglcontextrestored", () => {
+      // The restored context is empty: no program, no buffers. Rebuild the
+      // program here so the renderer is immediately usable again; GPU
+      // buffers are the caller's responsibility (it rebuilds them once it
+      // sees `generation` has advanced).
+      const rebuilt = buildProgram(gl);
+      if (!rebuilt) {
+        // Leave `lost` true: a context that comes back but won't compile is
+        // no more usable than one that never came back, and the caller
+        // already has a working 2D fallback for exactly this case.
+        return;
+      }
+      renderer.program = rebuilt.program;
+      renderer.attribs = rebuilt.attribs;
+      renderer.uniforms = rebuilt.uniforms;
       renderer.lost = false;
+      renderer.generation += 1;
     });
     return renderer;
   }
 
-  // Builds one interleaved GPU buffer per named group (exactly two groups:
-  // ["bin","interior"] for an ordinary bin, ["base","lid"] for B4B).
-  // `classify(face)` returns which group a face belongs to, or a falsy value
-  // to drop it (annotation-only faces such as bore axes should already be
-  // filtered out by the caller). Rebuilding this is the only geometry-change
-  // cost; camera/mode changes never call it again.
-  function buildBuffers(gl, geometry, groupNames, classify, kindColor) {
-    const LAYER_EPSILON = 0.01; // mm - see the "layer" field's docstring
-    const raw = new Map(groupNames.map(name => [name, { positions: [], normals: [], colors: [] }]));
-    const aabb = new Map(groupNames.map(name => [name, {
-      min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity],
-    }]));
-    const colorCache = new Map();
-    for (const face of geometry) {
-      const group = classify(face);
-      if (!raw.has(group)) continue;
-      const bucket = raw.get(group);
-      const box = aabb.get(group);
-      let hex = colorCache.get(face.kind);
-      if (!hex) { hex = kindColor(face.kind); colorCache.set(face.kind, hex); }
-      const r = parseInt(hex.slice(1, 3), 16) / 255;
-      const g = parseInt(hex.slice(3, 5), 16) / 255;
-      const b = parseInt(hex.slice(5, 7), 16) / 255;
-      const normal = face.normal;
-      const [nx, ny, nz] = normal;
-      const bias = (face.layer || 0) * LAYER_EPSILON;
-      const points = face.points;
-      const tris = points.length === 3 ? [[0, 1, 2]] : triangulatePolygon(points, normal);
-      for (const tri of tris) {
-        for (const idx of tri) {
-          const p = points[idx];
-          const px = p[0] + nx * bias, py = p[1] + ny * bias, pz = p[2] + nz * bias;
-          bucket.positions.push(px, py, pz);
-          bucket.normals.push(nx, ny, nz);
-          bucket.colors.push(r, g, b);
-          if (px < box.min[0]) box.min[0] = px; if (px > box.max[0]) box.max[0] = px;
-          if (py < box.min[1]) box.min[1] = py; if (py > box.max[1]) box.max[1] = py;
-          if (pz < box.min[2]) box.min[2] = pz; if (pz > box.max[2]) box.max[2] = pz;
-        }
-      }
-    }
+  const LAYER_EPSILON = 0.01; // mm - see the "layer" field's docstring
+
+  function emptyBucket() { return { positions: [], normals: [], colors: [] }; }
+  function emptyAabb() { return { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }; }
+
+  function pushVertex(bucket, box, px, py, pz, nx, ny, nz, r, g, b) {
+    bucket.positions.push(px, py, pz);
+    bucket.normals.push(nx, ny, nz);
+    bucket.colors.push(r, g, b);
+    if (px < box.min[0]) box.min[0] = px; if (px > box.max[0]) box.max[0] = px;
+    if (py < box.min[1]) box.min[1] = py; if (py > box.max[1]) box.max[1] = py;
+    if (pz < box.min[2]) box.min[2] = pz; if (pz > box.max[2]) box.max[2] = pz;
+  }
+
+  function hexToUnit(hex) {
+    return [
+      parseInt(hex.slice(1, 3), 16) / 255,
+      parseInt(hex.slice(3, 5), 16) / 255,
+      parseInt(hex.slice(5, 7), 16) / 255,
+    ];
+  }
+
+  // Uploads each group's interleaved GPU buffer and unions their bounds into
+  // an overall AABB. Shared tail for buildBuffers() and
+  // buildBuffersFromMeshes() - everything before this differs only in how
+  // the two transports get walked into the same {positions,normals,colors}
+  // buckets.
+  function finalizeGroups(gl, raw, aabb, groupNames) {
     const groups = {};
     const allMin = [Infinity, Infinity, Infinity], allMax = [-Infinity, -Infinity, -Infinity];
     for (const name of groupNames) {
@@ -271,10 +294,7 @@
       gl.bufferData(gl.ARRAY_BUFFER, interleaved, gl.STATIC_DRAW);
       const box = aabb.get(name);
       const empty = vertexCount === 0;
-      groups[name] = {
-        buffer, vertexCount,
-        aabb: empty ? null : box,
-      };
+      groups[name] = { buffer, vertexCount, aabb: empty ? null : box };
       if (!empty) {
         for (let axis = 0; axis < 3; axis += 1) {
           if (box.min[axis] < allMin[axis]) allMin[axis] = box.min[axis];
@@ -285,6 +305,77 @@
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
     const allAabb = allMin[0] === Infinity ? null : { min: allMin, max: allMax };
     return { groups, allAabb };
+  }
+
+  // Builds one interleaved GPU buffer per named group (exactly two groups:
+  // ["bin","interior"] for an ordinary bin, ["base","lid"] for B4B).
+  // `classify(face)` returns which group a face belongs to, or a falsy value
+  // to drop it (annotation-only faces such as bore axes should already be
+  // filtered out by the caller). Rebuilding this is the only geometry-change
+  // cost; camera/mode changes never call it again.
+  //
+  // This is the one-JSON-object-per-face transport ordinary bins use.
+  // B4B uses buildBuffersFromMeshes() instead - see its own comment.
+  function buildBuffers(gl, geometry, groupNames, classify, kindColor) {
+    const raw = new Map(groupNames.map(name => [name, emptyBucket()]));
+    const aabb = new Map(groupNames.map(name => [name, emptyAabb()]));
+    const colorCache = new Map();
+    for (const face of geometry) {
+      const group = classify(face);
+      if (!raw.has(group)) continue;
+      const bucket = raw.get(group);
+      const box = aabb.get(group);
+      let hex = colorCache.get(face.kind);
+      if (!hex) { hex = kindColor(face.kind); colorCache.set(face.kind, hex); }
+      const [r, g, b] = hexToUnit(hex);
+      const normal = face.normal;
+      const [nx, ny, nz] = normal;
+      const bias = (face.layer || 0) * LAYER_EPSILON;
+      const points = face.points;
+      const tris = points.length === 3 ? [[0, 1, 2]] : triangulatePolygon(points, normal);
+      for (const tri of tris) {
+        for (const idx of tri) {
+          const p = points[idx];
+          pushVertex(bucket, box, p[0] + nx * bias, p[1] + ny * bias, p[2] + nz * bias, nx, ny, nz, r, g, b);
+        }
+      }
+    }
+    return finalizeGroups(gl, raw, aabb, groupNames);
+  }
+
+  // B4B's compact transport (organizer_b4b.b4b_preview_meshes): one entry
+  // per (kind, owner, layer) group, with flat positions/normals arrays
+  // instead of one object per face - see that function's docstring for why.
+  // Every entry is already flat-shaded triangles (one normal per triangle in
+  // `normals`, expanded to all three corners here), so unlike buildBuffers()
+  // this never needs triangulatePolygon().
+  function buildBuffersFromMeshes(gl, meshes, groupNames, kindColor) {
+    const raw = new Map(groupNames.map(name => [name, emptyBucket()]));
+    const aabb = new Map(groupNames.map(name => [name, emptyAabb()]));
+    const colorCache = new Map();
+    for (const mesh of meshes) {
+      const bucket = raw.get(mesh.owner);
+      if (!bucket) continue;
+      const box = aabb.get(mesh.owner);
+      let hex = colorCache.get(mesh.kind);
+      if (!hex) { hex = kindColor(mesh.kind); colorCache.set(mesh.kind, hex); }
+      const [r, g, b] = hexToUnit(hex);
+      const bias = (mesh.layer || 0) * LAYER_EPSILON;
+      const positions = mesh.positions, normals = mesh.normals;
+      const triangleCount = (positions.length / 9) | 0;
+      for (let t = 0; t < triangleCount; t += 1) {
+        const nx = normals[t * 3], ny = normals[t * 3 + 1], nz = normals[t * 3 + 2];
+        for (let corner = 0; corner < 3; corner += 1) {
+          const at = t * 9 + corner * 3;
+          pushVertex(
+            bucket, box,
+            positions[at] + nx * bias, positions[at + 1] + ny * bias, positions[at + 2] + nz * bias,
+            nx, ny, nz, r, g, b
+          );
+        }
+      }
+    }
+    return finalizeGroups(gl, raw, aabb, groupNames);
   }
 
   function disposeBuffers(gl, buffers) {
@@ -324,9 +415,18 @@
         }
       }
     }
-    const spanX = Math.max(1e-6, maxVX - minVX);
-    const spanY = Math.max(1e-6, maxVY - minVY);
-    const scale = Math.min((width * 0.75) / spanX, (height * 0.75) / spanY) * camera.zoom;
+    // Scale from the AABB's own diagonal, not from its currently-projected
+    // span: the diagonal is the same number at every yaw/elevation, so a
+    // rotation can move the model's projected centre and outline but never
+    // its size on screen. Using the rotated span here (as an earlier version
+    // did) meant a corner-on view had a wider silhouette than a face-on one
+    // and the "fit 75% of the canvas" rule would rescale the model to
+    // compensate - exactly the visible grow/shrink-while-spinning bug this
+    // is fixing. The diagonal is also each axis's worst case, so framing to
+    // it never clips a spin the span-based version would have allowed.
+    const dx = max[0] - min[0], dy = max[1] - min[1], dz = max[2] - min[2];
+    const diagonal = Math.max(1e-6, Math.hypot(dx, dy, dz));
+    const scale = (Math.min(width, height) * 0.75 / diagonal) * camera.zoom;
     const pad = Math.max(1e-3, (maxVF - minVF) * 0.05 + 1e-3);
     return {
       right, up, forward, scale,
@@ -391,5 +491,7 @@
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
   }
 
-  window.Preview3DGL = { init, buildBuffers, disposeBuffers, computeFrame, draw, triangulatePolygon };
+  window.Preview3DGL = {
+    init, buildBuffers, buildBuffersFromMeshes, disposeBuffers, computeFrame, draw, triangulatePolygon,
+  };
 })();

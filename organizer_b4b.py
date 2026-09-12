@@ -1064,8 +1064,13 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         profile, profile.clear_span, profile.far_lug, "hinge"
     )
 
-    # ---- front latches: one authoritative width threshold ------------------ #
-    latch_count = 1 if eff.x <= B4B_LATCH_TWO_ABOVE_FIELD_X + _EPS else 2
+    # ---- front latches: user override, else one authoritative width threshold #
+    if eff.b4b.latch_count == "1":
+        latch_count = 1
+    elif eff.b4b.latch_count == "2":
+        latch_count = 2
+    else:
+        latch_count = 1 if eff.x <= B4B_LATCH_TWO_ABOVE_FIELD_X + _EPS else 2
     latch_centers_x = _root_centres(
         layout, eff.x / 6.0, profile.latch_root_width, latch_count
     )
@@ -1189,6 +1194,28 @@ class B4BHandlePlan:
         return self.axis_z - self.drop
 
 
+def b4b_handle_min_width(box: BoxSpec) -> float:
+    """Smallest child X (mm), rounded up to a whole mm, that lets this B4B's
+    front wall carry a handle.
+
+    Binary search over the real front-wall fit check rather than a
+    hard-coded width rule, so it tracks wall thickness, latch layout, and
+    every other geometry input the same way ``b4b_handle_width_fit`` does.
+    """
+    lo, hi = 1.0, max(box.x, B4B_HANDLE_GRIP_MIN)
+    while not b4b_handle_width_fit(replace(box, x=hi))[0]:
+        hi *= 2.0
+        if hi > 5000.0:
+            break
+    for _ in range(40):
+        mid = (lo + hi) / 2.0
+        if b4b_handle_width_fit(replace(box, x=mid))[0]:
+            hi = mid
+        else:
+            lo = mid
+    return math.ceil(hi - 1e-6)
+
+
 def b4b_handle_eligibility(box: BoxSpec) -> tuple[bool, str]:
     """``(eligible, reason)`` - why this case can or cannot carry a bail.
 
@@ -1201,10 +1228,8 @@ def b4b_handle_eligibility(box: BoxSpec) -> tuple[bool, str]:
         return False, "Handle requires a secure lid."
     fits, required, available = b4b_handle_width_fit(box)
     if not fits:
-        return False, (
-            f"Handle needs at least {B4B_HANDLE_GRIP_MIN:g} mm of clear grip "
-            f"width."
-        )
+        min_width = b4b_handle_min_width(box)
+        return False, f"Minimum size must be {min_width:g} mm wide."
     axis_z = b4b_rim_z_from_eff(eff) - B4B_HANDLE_RIM_DROP
     available_drop = axis_z - B4B_HANDLE_BOTTOM_MARGIN - B4B_HANDLE_BAND / 2.0
     if min(B4B_HANDLE_DROP, available_drop) + _EPS < B4B_HANDLE_DROP_MIN:
@@ -3068,6 +3093,9 @@ def b4b_summary(box: BoxSpec) -> dict:
             bom.append("No nuts")
     summary["handle_available"] = handle_ok
     summary["handle_blocked_reason"] = handle_why
+    label_ok, label_why = b4b_front_label_eligibility(box)
+    summary["front_label_available"] = label_ok
+    summary["front_label_blocked_reason"] = label_why
     return summary
 
 
@@ -3131,6 +3159,35 @@ def b4b_preview_parts(box: BoxSpec) -> list[tuple[list, str, tuple, int, str]]:
     ``"lid"``.  Dimensionally true; microdetail such as thread pilots is
     omitted."""
     return list(_b4b_preview_geometry(box))
+
+
+def b4b_preview_meshes(box: BoxSpec) -> list[dict]:
+    """Compact GPU-ready preview transport: one entry per (kind, owner,
+    layer) group, carrying flat ``positions``/``normals`` arrays instead of
+    one JSON object per triangle.
+
+    A B4B case routinely runs past 100k triangles, where serialising and
+    parsing ``b4b_preview_parts``'s one-dict-per-face format is itself most
+    of the preview's load cost - repeating ``kind``/``normal``/``layer``/
+    ``owner`` on every triangle instead of once per group. ``normals`` holds
+    one normal per triangle (not per vertex): every B4B preview face is
+    mesh-derived and already a flat-shaded triangle, so the three corners in
+    ``positions`` at index ``9*i .. 9*i+9`` all share ``normals[3*i .. 3*i+3]``
+    and the browser expands it per vertex when building its GPU buffer.
+    """
+    groups: dict[tuple[str, str, int], dict[str, list[float]]] = {}
+    for points, kind, normal, layer, owner in _b4b_preview_geometry(box):
+        bucket = groups.setdefault((kind, owner, layer), {"positions": [], "normals": []})
+        for corner in points:
+            bucket["positions"].extend(corner)
+        bucket["normals"].extend(normal)
+    return [
+        {
+            "kind": kind, "owner": owner, "layer": layer,
+            "positions": bucket["positions"], "normals": bucket["normals"],
+        }
+        for (kind, owner, layer), bucket in groups.items()
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -3245,17 +3302,15 @@ def _apply_top_label(box: BoxSpec, lid: trimesh.Trimesh):
     return _weld(difference([lid, pocket])), inlay
 
 
-def b4b_front_label_geometry(box: BoxSpec):
-    """``(frame_solid, plate_solid, plate_centre_xyz)`` for the slide-in front
-    label.  The frame is unioned into the body; the plate is a separate part
-    that slides in from the +X end against an end stop, with a finger notch at
-    the -X end.  It sits in the clear band below the latch pads and never
-    consumes the child-bin interior.
+def b4b_front_label_fit(box: BoxSpec) -> tuple[bool, float, float, float]:
+    """``(fits, frame_w, top_z, bottom_z)`` for the slide-in front label
+    channel, computed against the same real front-wall geometry
+    ``b4b_front_label_geometry`` builds from, so the UI's eligibility check
+    and the actual build can never disagree.
     """
     eff = b4b_effective_box(box)
     plan = b4b_hardware_plan(box)
     layout = b4b_layout(box)
-    y_wall = min(layout.front_wall_y(x) for x in plan.latch_centers_x or (0.0,))
     span = _front_span(box)
 
     frame_w = span - 4.0
@@ -3279,9 +3334,34 @@ def b4b_front_label_geometry(box: BoxSpec):
             top_z,
             handle.root_bottom_z - B4B_LABEL_KEEPOUT,
         )
+    bottom_z = top_z - B4B_FRONT_LABEL_HEIGHT
+    return frame_w >= 30.0 and bottom_z >= 3.0, frame_w, top_z, bottom_z
+
+
+def b4b_front_label_eligibility(box: BoxSpec) -> tuple[bool, str]:
+    """``(eligible, reason)`` - whether this case's front wall can carry a
+    slide-in label, mirroring ``b4b_handle_eligibility``'s shape so the UI
+    can gate both controls the same way."""
+    fits, _frame_w, _top_z, _bottom_z = b4b_front_label_fit(box)
+    if fits:
+        return True, ""
+    return False, "Not enough size for a front label."
+
+
+def b4b_front_label_geometry(box: BoxSpec):
+    """``(frame_solid, plate_solid, plate_centre_xyz)`` for the slide-in front
+    label.  The frame is unioned into the body; the plate is a separate part
+    that slides in from the +X end against an end stop, with a finger notch at
+    the -X end.  It sits in the clear band below the latch pads and never
+    consumes the child-bin interior.
+    """
+    eff = b4b_effective_box(box)
+    plan = b4b_hardware_plan(box)
+    layout = b4b_layout(box)
+    y_wall = min(layout.front_wall_y(x) for x in plan.latch_centers_x or (0.0,))
+    fits, frame_w, top_z, bottom_z = b4b_front_label_fit(box)
     height = B4B_FRONT_LABEL_HEIGHT
-    bottom_z = top_z - height
-    if frame_w < 30.0 or bottom_z < 3.0:
+    if not fits:
         raise ValueError(
             "not enough clear front-wall area for a slide-in label; use a top "
             "label, a taller box, or turn latches off"

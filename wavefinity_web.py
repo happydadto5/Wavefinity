@@ -131,7 +131,7 @@ from organizer_b4b import (
     B4B_STACK_MIN_BASE,
     b4b_effective_box,
     b4b_mating_polygon,
-    b4b_preview_parts,
+    b4b_preview_meshes,
     b4b_summary,
     validate_b4b_design,
 )
@@ -850,17 +850,19 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # always match what will print and save.
     adopted = replace(box, x=eff.x, y=eff.y, z=eff.z)
     message = ""
-    geometry: list[dict[str, Any]] = []
+    # B4B routinely runs past 100k triangles, where a per-face JSON object
+    # (the "geometry" ordinary bins use) is itself most of what the browser
+    # has to parse just to show a preview - so B4B ships the compact
+    # grouped-flat-array transport instead (see b4b_preview_meshes) and
+    # leaves "geometry" empty, only for response-shape compatibility with
+    # the ordinary-bin payload.
+    meshes: list[dict[str, Any]] = []
     b4b_block: dict[str, Any] | None = None
     try:
         with GEOMETRY_LOCK:
             validate_b4b_design(box)
             b4b_block = b4b_summary(box)
-            geometry = [
-                {"points": points, "kind": kind, "normal": normal,
-                 "layer": layer, "owner": owner}
-                for points, kind, normal, layer, owner in b4b_preview_parts(box)
-            ]
+            meshes = b4b_preview_meshes(box)
     except Exception as error:  # surface the real, actionable message
         message = str(error)
         # A bad optional label must not erase the body/lid/latch preview.
@@ -871,12 +873,7 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
                     b4b=replace(box.b4b, label_text="", label_location="none"),
                 )
                 with GEOMETRY_LOCK:
-                    geometry = [
-                        {"points": points, "kind": kind, "normal": normal,
-                         "layer": layer, "owner": owner}
-                        for points, kind, normal, layer, owner
-                        in b4b_preview_parts(label_free)
-                    ]
+                    meshes = b4b_preview_meshes(label_free)
             except Exception:
                 pass
         try:
@@ -895,7 +892,8 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "label_outline": [],
         "label_meta": None,
         "text_meta": [],
-        "geometry": geometry,
+        "geometry": [],
+        "meshes": meshes,
         "fits": not message,
         "message": message,
         "feature_errors": [],
