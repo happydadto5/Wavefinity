@@ -3368,6 +3368,15 @@ B4B_FRONT_LABEL_BOTTOM_DEFAULT = 3.0    # preferred standoff off the case floor 
                                          # purely a visual preference
 B4B_FRONT_LABEL_BOTTOM_MIN = 0.6        # true floor limit the holder may drop to
                                          # when the insertion corridor needs the room
+# Two small retention bumps just inside the open top, so the seated plate
+# doesn't rely on friction alone to stay put.  Each reaches slightly further
+# into the plate's own running clearance than the rest of the channel, so
+# the plate's back face flexes past it on the last bit of its way down and
+# is caught underneath once seated.
+B4B_FRONT_LABEL_RETENTION_REACH = 0.35  # how far a bump pinches into the running
+                                         # clearance - a light push to pass, not a fight
+B4B_FRONT_LABEL_RETENTION_H = 1.2       # vertical extent of one bump
+B4B_FRONT_LABEL_RETENTION_W = 2.5       # bump width across X
 
 
 def _b4b_front_label_bottom_z(insertion_ceiling_z: float, plate_h: float) -> float | None:
@@ -3560,12 +3569,14 @@ def b4b_front_label_geometry(box: BoxSpec):
     """``(frame_solid, plate_solid, text_solid, plate_centre_xyz)`` for the
     compact top-loading front label.
 
-    The frame (holder) is unioned into the body from three members - a left
-    channel, a right channel and a ramped bottom stop - built directly on a
-    locally flattened patch of the real front wall, never a separate
-    rectangular backing slab.  There is no continuous top member (the plate
-    drops straight in), no end-stop, no snap detent, and no finger notch.
-    The plate and its lettering are sized from the actual text outline,
+    The frame (holder) is unioned into the body from a left channel, a right
+    channel, a ramped bottom stop, and a small retention bump in each
+    channel just inside the open top - all built directly on a locally
+    flattened patch of the real front wall, never a separate rectangular
+    backing slab.  There is no continuous top member (the plate drops
+    straight in) and no finger notch; the bumps are the only thing that
+    keeps a seated plate from sliding back out.  The plate and its
+    lettering are sized from the actual text outline,
     never grown past ``B4B_FRONT_LABEL_CAP_IDEAL``, and the whole holder is
     capped at ``B4B_FRONT_LABEL_MAX_WIDTH_FRACTION`` of the case width: text
     shrinks to fit before the holder is ever allowed to grow.
@@ -3720,8 +3731,27 @@ def b4b_front_label_geometry(box: BoxSpec):
         ))
         return difference([leg, slot])
 
+    def _retention_bump(side: float) -> trimesh.Trimesh:
+        """A small nub on the flattened wall, just inside the open top,
+        that pinches the plate's back face over the last bit of its
+        downward travel and then sits above its seated top edge.  Like the
+        patch's own attachment to the wall, it is nudged ``embed`` past
+        ``flat_back_y`` so the union always finds real volumetric overlap,
+        never a bare face touch."""
+        bump_w = min(B4B_FRONT_LABEL_RETENTION_W, plate_w / 4.0)
+        bump_h = min(B4B_FRONT_LABEL_RETENTION_H, plate_h * 0.3)
+        reach = B4B_FRONT_LABEL_RETENTION_REACH
+        bump = trimesh.creation.box(extents=(bump_w, reach + embed, bump_h))
+        bump.apply_translation((
+            side * plate_w / 4.0,
+            flat_back_y + (embed - reach) / 2.0,
+            holder_top_z - bump_h / 2.0,
+        ))
+        return bump
+
     frame = _weld(union([
         patch, wedge, bottom_lip, _side_channel(-1.0), _side_channel(1.0),
+        _retention_bump(-1.0), _retention_bump(1.0),
     ]))
 
     plate = trimesh.creation.box(extents=(plate_w, plate_t, plate_h))
