@@ -11,7 +11,8 @@ Two same-mode interfaces:
 
 Both modes step the bottom of the bin inward, but their 1 mm and 3 mm feet are
 not interchangeable.  Lid bins stack on lid bins and direct bins stack on
-direct bins.  Both use the same segmented snap profile at the bin mouth.
+direct bins.  Direct stacking keeps its segmented mouth snap.  Lid retention
+uses separate, lighter lock-bump-style points near the rim.
 
 The height the user types is the *stack module height* - the distance between
 the seating datums of consecutive bins.  The interlocking foot extends the
@@ -32,7 +33,9 @@ from organizer_engine import (
     BoxSpec,
     DEFAULT_BASE_THICKNESS,
     DEFAULT_WALL,
+    LOCK_RUN,
     StackSpec,
+    _lock_profile,
     wavy_cavity_polygon,
     wavy_outer_polygon,
 )
@@ -73,6 +76,16 @@ STACK_PROFILE_POINTS = 192
 STACK_DETENT_MAX_LENGTH = 14.0
 STACK_DETENT_GAP = 6.0
 STACK_CORNER_CLEARANCE = 3.0
+
+# Lid retention borrows the side connector's printable lock profile, but not
+# its physical lock points.  These snaps sit above the connector locks and at
+# wall centres, between their half-wave lattice positions.  Their 0.12 mm
+# interference is intentionally much lighter than the connector's 0.35 mm.
+LID_LOCK_INTERFERENCE = 0.12
+LID_LOCK_CLEARANCE = 0.08
+LID_LOCK_DROP = 1.5
+LID_LOCK_EMBED = 0.20
+LID_FOUR_SNAP_MIN_SPAN = 40.0
 
 _EPS = 1e-6
 _PROFILE_EPS = 0.02
@@ -287,11 +300,91 @@ def _snap_grooves(eff: BoxSpec) -> list[trimesh.Trimesh]:
     return _segmented_profile(groove, eff, bottom, top)
 
 
+def _lid_lock_masks(eff: BoxSpec) -> list[Polygon]:
+    """Two centred points on small lids, one per side on larger lids."""
+    plug = _plug_polygon(eff)
+    outer = wavy_outer_polygon(eff)
+    min_x, min_y, max_x, max_y = plug.bounds
+    out_min_x, out_min_y, out_max_x, out_max_y = outer.bounds
+    half_run = LOCK_RUN / 2.0
+    overlap = 1.0
+    pad = STACK_FIT + LID_LOCK_INTERFERENCE + LID_LOCK_CLEARANCE + 0.5
+
+    horizontal = [
+        shapely_box(-half_run, max_y - overlap, half_run, out_max_y + pad),
+        shapely_box(-half_run, out_min_y - pad, half_run, min_y + overlap),
+    ]
+    vertical = [
+        shapely_box(max_x - overlap, -half_run, out_max_x + pad, half_run),
+        shapely_box(out_min_x - pad, -half_run, min_x + overlap, half_run),
+    ]
+    if max(eff.x, eff.y) >= LID_FOUR_SNAP_MIN_SPAN:
+        return [*horizontal, *vertical]
+    return horizontal if eff.x >= eff.y else vertical
+
+
+def _lid_lock_profile(
+    protrusion: float, rim: float, clearance: float = 0.0,
+) -> list[tuple[float, float]]:
+    """The connector lock's 45-degree profile moved to the lid snap height."""
+    profile = _lock_profile(
+        protrusion, clearance=clearance, embed=LID_LOCK_EMBED,
+    )
+    flat_centre = (profile[1][1] + profile[2][1]) / 2.0
+    shift = rim - LID_LOCK_DROP - flat_centre
+    return [(t, z + shift) for t, z in profile]
+
+
+def _clip_lid_locks(
+    solid: trimesh.Trimesh,
+    eff: BoxSpec,
+    profile: list[tuple[float, float]],
+) -> list[trimesh.Trimesh]:
+    z0 = min(z for _, z in profile)
+    z1 = max(z for _, z in profile)
+    pieces: list[trimesh.Trimesh] = []
+    for polygon in _lid_lock_masks(eff):
+        mask = _extrude_polygon(polygon, z1 - z0 + 2.0 * _PROFILE_EPS)
+        mask.apply_translation((0.0, 0.0, z0 - _PROFILE_EPS))
+        piece = intersection([solid, mask])
+        if len(piece.faces):
+            pieces.append(piece)
+    return pieces
+
+
+def _lid_lock_bumps(eff: BoxSpec, rim: float) -> list[trimesh.Trimesh]:
+    """Small discrete bumps on the lid plug."""
+    profile = _lid_lock_profile(
+        STACK_FIT + LID_LOCK_INTERFERENCE, rim,
+    )
+    plug = _plug_polygon(eff)
+    solid = _profile_loft(
+        [plug.buffer(t) for t, _ in profile],
+        [z for _, z in profile],
+    )
+    return _clip_lid_locks(solid, eff, profile)
+
+
+def _lid_lock_notches(eff: BoxSpec) -> list[trimesh.Trimesh]:
+    """Matching discrete recesses in the body wall."""
+    profile = _lid_lock_profile(
+        LID_LOCK_INTERFERENCE,
+        eff.z,
+        clearance=LID_LOCK_CLEARANCE,
+    )
+    cavity = wavy_cavity_polygon(eff)
+    solid = _profile_loft(
+        [cavity.buffer(t) for t, _ in profile],
+        [z for _, z in profile],
+    )
+    return _clip_lid_locks(solid, eff, profile)
+
+
 # --------------------------------------------------------------------------- #
 # body features
 # --------------------------------------------------------------------------- #
 def stack_body_cutters(eff: BoxSpec) -> list[trimesh.Trimesh]:
-    """Solids subtracted from the bin body: the base step and the snap groove.
+    """Solids subtracted from the bin body: base step and retention recesses.
 
     ``eff`` must already be the effective box - these are cut at its rim.
     """
@@ -313,7 +406,10 @@ def stack_body_cutters(eff: BoxSpec) -> list[trimesh.Trimesh]:
     )
     cutters.append(difference([shell, keep]))
 
-    cutters.extend(_snap_grooves(eff))
+    if stack_spec(eff).mode == "lid":
+        cutters.extend(_lid_lock_notches(eff))
+    else:
+        cutters.extend(_snap_grooves(eff))
     return cutters
 
 
@@ -352,7 +448,7 @@ def make_stack_lid(box: BoxSpec) -> trimesh.Trimesh:
     plug = _extrude_polygon(plug_outline, STACK_PLUG_DEPTH)
     plug.apply_translation((0.0, 0.0, rim - STACK_PLUG_DEPTH))
 
-    lid = union([*plate_parts, plug, *_snap_beads(eff, rim)])
+    lid = union([*plate_parts, plug, *_lid_lock_bumps(eff, rim)])
 
     # The seat: a recess in the top face the next bin's stepped base drops into,
     # exactly as deep as that step is tall, so the bin above lands on the lid's
@@ -427,7 +523,11 @@ def validate_stack_design(box: BoxSpec) -> None:
     if stack_spec(box).mode == "lid":
         if stack_lid_rise(eff) - STACK_SEAT_DEPTH < STACK_MIN_FLOOR_SKIN - _EPS:
             raise ValueError("the stacking lid does not leave enough material under its seat")
-        if STACK_PLUG_DEPTH - STACK_BEAD_DROP < STACK_SNAP_RAMP - _EPS:
-            raise ValueError("the stacking lid plug is too short for its printable snap ramp")
+        bump_profile = _lid_lock_profile(
+            STACK_FIT + LID_LOCK_INTERFERENCE, eff.z,
+        )
+        if min(z for _, z in bump_profile) < eff.z - STACK_PLUG_DEPTH - _EPS:
+            raise ValueError("the stacking lid plug is too short for its lock points")
+    else:
+        _groove_band(eff)
     _plug_polygon(eff)
-    _groove_band(eff)

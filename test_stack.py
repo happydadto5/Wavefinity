@@ -122,16 +122,27 @@ class StackGeometryTests(unittest.TestCase):
                         plug.exterior.distance(mouth.exterior), 0.1
                     )
 
-    def test_lid_seats_clean_but_still_has_to_click_past_the_bead(self):
+    def test_lid_seats_clicks_lightly_and_stays_support_free(self):
         box = BoxSpec(x=48, y=32, z=40, stack=StackSpec(mode="lid"))
         body = make_box(st.stack_effective_box(box))
         lid = st.make_stack_lid(box)
-        # seated: the bead is in the groove, so nothing is interfering
+        # seated: the points are in their notches, so nothing is interfering
         self.assertLess(intersection_volume(body, lid) / 1000.0, 0.02)
-        # part way in: the bead is still riding the wall - that is the snap
+        # part way in: the points are still riding the wall - that is the snap
         mid = lid.copy()
         mid.apply_translation((0.0, 0.0, 0.9))
-        self.assertGreater(intersection_volume(body, mid) / 1000.0, 0.005)
+        interference = intersection_volume(body, mid) / 1000.0
+        self.assertGreater(interference, 0.0001)
+        self.assertLess(interference, 0.005)
+
+        # Both bump and notch reuse the connector's support-free 45-degree form.
+        for protrusion, clearance in (
+            (st.STACK_FIT + st.LID_LOCK_INTERFERENCE, 0.0),
+            (st.LID_LOCK_INTERFERENCE, st.LID_LOCK_CLEARANCE),
+        ):
+            profile = st._lid_lock_profile(protrusion, 0.0, clearance)
+            for (t0, z0), (t1, z1) in zip(profile, profile[1:]):
+                self.assertGreaterEqual(abs(z1 - z0) + 1e-9, abs(t1 - t0))
 
     def test_a_bin_stacks_on_the_closed_lid_without_fouling_it(self):
         box = BoxSpec(x=48, y=32, z=40, stack=StackSpec(mode="lid"))
@@ -167,15 +178,27 @@ class StackGeometryTests(unittest.TestCase):
                 eff = st.stack_effective_box(box)
                 run = st._outline_run(st._plug_polygon(eff), st.wavy_outer_polygon(eff))
                 self.assertGreaterEqual(st.stack_foot_flare_height(eff), run)
-                self.assertGreaterEqual(st.STACK_SNAP_RAMP, st.STACK_FIT + st.STACK_SNAP)
-                self.assertGreaterEqual(st.STACK_SNAP_RELEASE, st.STACK_BEAD)
-                self.assertGreaterEqual(len(st._detent_masks(eff)), 4)
                 if mode == "lid":
                     self.assertGreaterEqual(st.stack_lid_rise(eff), st.stack_foot_flare_height(eff))
                     self.assertGreaterEqual(
                         st.stack_lid_rise(eff) - st.STACK_SEAT_DEPTH,
                         st.STACK_MIN_FLOOR_SKIN,
                     )
+                    for protrusion, clearance in (
+                        (st.STACK_FIT + st.LID_LOCK_INTERFERENCE, 0.0),
+                        (st.LID_LOCK_INTERFERENCE, st.LID_LOCK_CLEARANCE),
+                    ):
+                        profile = st._lid_lock_profile(protrusion, 0.0, clearance)
+                        for (t0, z0), (t1, z1) in zip(profile, profile[1:]):
+                            self.assertGreaterEqual(
+                                abs(z1 - z0) + 1e-9, abs(t1 - t0),
+                            )
+                else:
+                    self.assertGreaterEqual(
+                        st.STACK_SNAP_RAMP, st.STACK_FIT + st.STACK_SNAP,
+                    )
+                    self.assertGreaterEqual(st.STACK_SNAP_RELEASE, st.STACK_BEAD)
+                    self.assertGreaterEqual(len(st._detent_masks(eff)), 4)
 
 
 class StackValidationTests(unittest.TestCase):

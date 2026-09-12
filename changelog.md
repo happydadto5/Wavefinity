@@ -10,6 +10,9 @@
 - Feet and plug-down lids now flare at 45° or shallower. Retention uses short,
   symmetric ramped detents and printable matching grooves instead of abrupt
   full-perimeter ledges. Lid/direct mixing remains intentionally unsupported.
+- Lid retention now uses 2 light, discrete lock points on small bins and 4 on
+  larger bins. They use the connector lock's support-free ramp profile but sit
+  at separate locations; side connectors and direct stacking are unchanged.
 
 ## 2026-09-11 — Space view in 3D; UI wording cleanup
 

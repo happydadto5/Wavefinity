@@ -14,7 +14,7 @@ This document is implementation guidance for an LLM. It is not a request for bro
    - `direct` — bin snaps directly into the bin below
 2. Stacking must remain support-free to print.
 3. Direct snap requires at least a 1.2 mm wall.
-4. Lid mode also requires at least a 1.2 mm body wall because the lid uses the same snap groove in the bin mouth.
+4. Lid mode also requires at least a 1.2 mm body wall for its separate, light lock-point notches near the bin rim.
 5. Selecting either stacking mode must visibly change the actual user settings rather than silently generating a different effective model:
    - uncheck `Standard walls`
    - expose `Wall thickness`
@@ -311,7 +311,7 @@ Tasks:
 5. Keep all mating XY clearances derived from shared helpers so the lid plug, direct plug, groove and seat cannot drift independently.
 6. Re-evaluate whether the current 3.8 mm direct base and 1.8 mm lid-mode base are still necessary after geometry redesign.
 7. If retaining a large base minimum, expose it in the user settings as described above.
-8. Prefer segmented snap detents over a continuous full perimeter bead unless there is a deliberate reason not to.
+8. Lid retention uses 2 centred lock-bump-style points on small bins and 4 on larger bins, separate from both the connector locks and the unchanged direct-stack snap.
 
 ## Phase 4 — Decide and enforce same-mode versus mixed-mode compatibility
 
