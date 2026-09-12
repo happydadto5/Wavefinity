@@ -120,6 +120,14 @@ B4B_RUNNING_GAP = 0.30
 # stacks below are designed to produce zero tail; this is the acceptance limit.
 B4B_SCREW_MAX_TAIL = 0.5
 
+# Shallow socket-head counterbore in the head-side (near) ear of every screw
+# stack.  The head sits in the bottom ~0.5 mm of this pocket rather than
+# bearing fully proud on the bare clearance bore, so it positively locates
+# and cannot wander against the bore edge - without disappearing into the
+# ear or reviving the old one-sided head-bearing boss.
+B4B_HEAD_POCKET_DIAMETRAL_CLEARANCE = 0.20
+B4B_HEAD_RECESS_DEPTH = 0.50
+
 
 @dataclass(frozen=True)
 class HardwareProfile:
@@ -176,8 +184,17 @@ class HardwareProfile:
 
     @property
     def clear_span(self) -> float:
-        """Clearance-bored stack the screw crosses before its lug."""
-        return self.near_ear + self.mid_member + 2.0 * B4B_RUNNING_GAP
+        """Clearance-bored stack the screw crosses before its lug.
+
+        The head seats ``B4B_HEAD_RECESS_DEPTH`` inside the near ear's outer
+        face rather than on it, so the screw starts that much further into
+        the stack and this many fewer millimetres of clearance-bored material
+        remain between the head and the terminal lug.
+        """
+        return (
+            self.near_ear - B4B_HEAD_RECESS_DEPTH
+            + self.mid_member + 2.0 * B4B_RUNNING_GAP
+        )
 
     @property
     def catch_inner_radius(self) -> float:
@@ -192,17 +209,30 @@ class HardwareProfile:
         return (self.pilot if terminal else self.clear_bore) / 2.0
 
     @property
+    def head_pocket_diameter(self) -> float:
+        """Printed counterbore diameter - the physical head plus running clearance."""
+        return self.head_diameter + B4B_HEAD_POCKET_DIAMETRAL_CLEARANCE
+
+    @property
+    def head_pocket_radius(self) -> float:
+        return self.head_pocket_diameter / 2.0
+
+    @property
     def head_bearing_margin(self) -> float:
-        """Actual head-bearing material on the uniform outer barrels."""
+        """Actual head-bearing material on the uniform outer barrels.
+
+        Measured against the head *pocket*, not the bare head: the pocket is
+        what actually gets cut into the barrel's near ear.
+        """
         radius = min(self.pivot_radius, self.catch_radius)
-        return radius * _SUPPORT_FREE_INSCRIBED - self.head_diameter / 2.0
+        return radius * _SUPPORT_FREE_INSCRIBED - self.head_pocket_diameter / 2.0
 
     @property
     def required_uniform_radius(self) -> float:
-        """Smallest uniform ear radius that protects both bore and screw head."""
+        """Smallest uniform ear radius that protects both bore and head pocket."""
         return max(
             self.clear_bore / 2.0 + self.bore_shell,
-            (self.head_diameter / 2.0 + self.head_bearing_min)
+            (self.head_pocket_diameter / 2.0 + self.head_bearing_min)
             / _SUPPORT_FREE_INSCRIBED,
         )
 
@@ -216,8 +246,8 @@ B4B_HW_M2 = HardwareProfile(
     head_diameter=4.0,
     head_bearing_min=0.2,
     lengths=(6, 8, 10, 12, 16),
-    pivot_radius=2.4,
-    catch_radius=2.4,
+    pivot_radius=2.45,
+    catch_radius=2.45,
     bore_shell=1.2,
     near_ear=2.2,
     mid_member=2.6,
@@ -249,8 +279,8 @@ B4B_HW_M3 = HardwareProfile(
     head_diameter=5.7,
     head_bearing_min=0.2,
     lengths=(6, 8, 10, 12, 16, 20),
-    pivot_radius=3.2,
-    catch_radius=3.2,
+    pivot_radius=3.32,
+    catch_radius=3.32,
     bore_shell=1.3,
     near_ear=2.8,
     mid_member=3.2,
@@ -366,7 +396,8 @@ B4B_HANDLE_FORK_WIDTH = (
     + 2.0 * B4B_RUNNING_GAP
 )
 B4B_HANDLE_FORK_CLEAR_SPAN = (
-    B4B_HANDLE_NEAR_EAR + B4B_HANDLE_EYE_BAND + 2.0 * B4B_RUNNING_GAP
+    B4B_HANDLE_NEAR_EAR - B4B_HEAD_RECESS_DEPTH
+    + B4B_HANDLE_EYE_BAND + 2.0 * B4B_RUNNING_GAP
 )
 B4B_HANDLE_TAPER_RUN = 8.0         # vertical run of that taper
 B4B_HANDLE_EYE_RADIUS = 2.9
@@ -1834,13 +1865,33 @@ def _pivot_section(
 def _ear_solid(
     *, section: Polygon, thickness: float, x_centre: float,
     bore_r: float, axis_y: float, axis_z: float,
+    head_recess_r: float | None = None,
+    head_recess_depth: float = 0.0,
+    head_recess_side: int = 0,
 ) -> trimesh.Trimesh:
-    """One printed ear with a uniform outer barrel and a round screw bore."""
+    """One printed ear with a uniform outer barrel and a round screw bore.
+
+    When ``head_recess_side`` is +/-1, a shallow cylindrical counterbore is
+    also cut into that outer face (+1 = the +X face, -1 = the -X face) so a
+    socket-head screw seats slightly recessed instead of bearing on the bare
+    clearance bore.  The counterbore's shoulder sits exactly
+    ``head_recess_depth`` inside that face; it opens through the face with a
+    small overcut so the boolean does not leave a whisker-thin web there.
+    """
     ear = _extrude_yz_profile(section, thickness)
     ear.apply_translation((x_centre, 0.0, 0.0))
     bore = _round_bore(bore_r, thickness + 3.0)
     bore.apply_translation((x_centre, axis_y, axis_z))
-    return difference([ear, bore])
+    cutters = [bore]
+    if head_recess_side and head_recess_r is not None and head_recess_depth > 0.0:
+        side = float(head_recess_side)
+        overcut = 0.1
+        face_x = x_centre + side * thickness / 2.0
+        pocket_x = face_x - side * (head_recess_depth - overcut) / 2.0
+        pocket = _round_bore(head_recess_r, head_recess_depth + overcut)
+        pocket.apply_translation((pocket_x, axis_y, axis_z))
+        cutters.append(pocket)
+    return difference([ear, *cutters])
 
 
 def _gusset(
@@ -1901,6 +1952,9 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
         )
         solid = _intersection([root, keeper])
         bottom_z = max(0.6, plan.hinge_root_top_z - profile.hinge_root_height)
+        # The outboard screw-head side, matching _stack_positions's own "out"
+        # convention: only that (non-terminal) ear gets the head pocket.
+        out_x = 1.0 if cx >= 0.0 else -1.0
         for ex, thickness, terminal in (
             (near_x, profile.near_ear, False),
             (far_x, profile.far_lug, True),
@@ -1935,6 +1989,9 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                     bore_r=profile.bore_radius(terminal),
                     axis_y=plan.hinge_axis_y,
                     axis_z=plan.hinge_axis_z,
+                    head_recess_r=None if terminal else profile.head_pocket_radius,
+                    head_recess_depth=0.0 if terminal else B4B_HEAD_RECESS_DEPTH,
+                    head_recess_side=0 if terminal else int(out_x),
                 ),
             ])
         parts.append(difference([solid, cavity]))
@@ -2024,6 +2081,7 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
         )
         solid = _intersection([root, keeper])
         bottom_z = max(0.6, plan.latch_root_top_z - profile.latch_root_height)
+        out_x = 1.0 if cx >= 0.0 else -1.0
         for ex, thickness, terminal in (
             (near_x, profile.near_ear, False),
             (far_x, profile.far_lug, True),
@@ -2058,6 +2116,9 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                     bore_r=profile.bore_radius(terminal),
                     axis_y=plan.catch_axis_y,
                     axis_z=plan.catch_axis_z,
+                    head_recess_r=None if terminal else profile.head_pocket_radius,
+                    head_recess_depth=0.0 if terminal else B4B_HEAD_RECESS_DEPTH,
+                    head_recess_side=0 if terminal else int(out_x),
                 ),
             ])
         relief_half = (
@@ -2092,6 +2153,7 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
     parts: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
         near_x, _mid_x, far_x = _stack_positions(cx, profile)
+        out_x = 1.0 if cx >= 0.0 else -1.0
         for ex, thickness, terminal in (
             (near_x, profile.near_ear, False),
             (far_x, profile.far_lug, True),
@@ -2125,6 +2187,9 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
                     bore_r=profile.bore_radius(terminal),
                     axis_y=plan.pivot_axis_y,
                     axis_z=plan.pivot_axis_z,
+                    head_recess_r=None if terminal else profile.head_pocket_radius,
+                    head_recess_depth=0.0 if terminal else B4B_HEAD_RECESS_DEPTH,
+                    head_recess_side=0 if terminal else int(out_x),
                 )
             )
     return parts
@@ -2431,6 +2496,7 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
             z_hi=plan.root_top_z,
         )
         solid = _intersection([root, keeper])
+        out_x = 1.0 if cx >= 0.0 else -1.0
         for ex, thickness, terminal in (
             (near_x, B4B_HANDLE_NEAR_EAR, False),
             (far_x, B4B_HANDLE_FAR_LUG, True),
@@ -2464,6 +2530,9 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
                     bore_r=profile.bore_radius(terminal),
                     axis_y=plan.axis_y,
                     axis_z=plan.axis_z,
+                    head_recess_r=None if terminal else profile.head_pocket_radius,
+                    head_recess_depth=0.0 if terminal else B4B_HEAD_RECESS_DEPTH,
+                    head_recess_side=0 if terminal else int(out_x),
                 ),
             ])
         # the bail nests between the ears, so the root is two buttresses with a
