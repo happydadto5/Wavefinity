@@ -100,7 +100,7 @@ const COLORS = {
   // B4B parts get their own colour family, distinct from interior features.
   b4b_body: "#8ea8b2", b4b_lid: "#6c909b", b4b_hinge: "#5f8794",
   b4b_latch: "#c98a4a", b4b_stack: "#9d86c8", b4b_label: "#315766",
-  b4b_handle: "#6b9aa7",
+  b4b_label_text: "#e8efef", b4b_handle: "#6b9aa7",
 };
 const INSERT_TINT = "#c2a075";
 const INSERT_TINT_MIX = .5;

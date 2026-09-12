@@ -3109,7 +3109,7 @@ def b4b_body_with_features(box: BoxSpec) -> trimesh.Trimesh:
     body = make_b4b_body(box)
     b4b = b4b_effective_box(box).b4b
     if b4b.label_location == "front" and b4b.label_text.strip():
-        frame, _plate, _centre = b4b_front_label_geometry(box)
+        frame, _plate, _text, _centre = b4b_front_label_geometry(box)
         body = _weld(union([body, frame]))
     return body
 
@@ -3125,10 +3125,17 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
     body = b4b_body_with_features(box)
     geometry.extend(_mesh_preview_geometry(body, "b4b_body", owner="base"))
     if eff.b4b.label_location == "front" and eff.b4b.label_text.strip():
-        # Plugs into the body's front channel frame - a base part.
+        # Plugs into the body's front channel frame - a base part.  Shown
+        # installed in its holder, not laid flat as it prints.
+        _frame, front_plate, front_text, front_centre = b4b_front_label_geometry(box)
         geometry.extend(
             _mesh_preview_geometry(
-                make_b4b_front_label_plate(box), "b4b_label", owner="base"
+                translated(front_plate, front_centre), "b4b_label", owner="base"
+            )
+        )
+        geometry.extend(
+            _mesh_preview_geometry(
+                translated(front_text, front_centre), "b4b_label_text", owner="base"
             )
         )
     if eff.b4b.lid:
@@ -3195,10 +3202,25 @@ def b4b_preview_meshes(box: BoxSpec) -> list[dict]:
 # --------------------------------------------------------------------------- #
 B4B_TOP_LABEL_CAP_IDEAL = 8.0
 B4B_TOP_LABEL_MARGIN = 2.5
-B4B_FRONT_LABEL_HEIGHT = 16.0
-B4B_FRONT_LABEL_PLATE_T = 1.4
+
+# Compact slide-in front label.  The plate is sized from the lettering, not
+# from a fixed footprint, so most of these are targets and margins rather
+# than dimensions: ``b4b_front_label_geometry`` measures the actual text
+# outline and builds the plate only slightly larger than it.
+B4B_FRONT_LABEL_CAP_IDEAL = 12.0        # target cap height when space allows
+B4B_FRONT_LABEL_PLATE_T = 1.4           # plate thickness
+B4B_FRONT_LABEL_MARGIN_X = 2.0          # plate margin each side of the text
+B4B_FRONT_LABEL_MARGIN_Y = 1.75         # plate margin above/below the text
+# Fit clearance between the plate and its holder channel, defined once as a
+# *per-side* value and used consistently everywhere below - opposing faces
+# (top/bottom rails, the plate ends, the plate's two broad faces) end up
+# ``2 * B4B_FRONT_LABEL_CLEAR`` apart.
 B4B_FRONT_LABEL_CLEAR = 0.35
-B4B_FRONT_LABEL_CAP_IDEAL = 6.0
+B4B_FRONT_LABEL_RAIL = 1.6              # top/bottom capture rail thickness
+B4B_FRONT_LABEL_ENDSTOP = 2.0           # closed end-stop wall thickness
+B4B_FRONT_LABEL_MAX_WIDTH_FRACTION = 0.5  # holder <= this fraction of the case width
+B4B_FRONT_LABEL_DETENT_BUMP = 0.35      # snap-detent protrusion past the fit clearance
+B4B_FRONT_LABEL_DETENT_RAMP = 0.5       # keeps the detent's dome shallower than 45 deg
 
 
 def _fit_text_outline(text: str, avail_w: float, avail_h: float, ideal_cap: float):
@@ -3303,17 +3325,22 @@ def _apply_top_label(box: BoxSpec, lid: trimesh.Trimesh):
 
 
 def b4b_front_label_fit(box: BoxSpec) -> tuple[bool, float, float, float]:
-    """``(fits, frame_w, top_z, bottom_z)`` for the slide-in front label
-    channel, computed against the same real front-wall geometry
-    ``b4b_front_label_geometry`` builds from, so the UI's eligibility check
-    and the actual build can never disagree.
+    """``(fits, avail_w, top_z, bottom_z)`` - the clear front-wall envelope
+    the slide-in label holder may occupy, computed against the same real
+    hardware geometry ``b4b_front_label_geometry`` builds from, so the UI's
+    eligibility check and the actual build can never disagree.
+
+    ``avail_w`` already carries the <= 50% of the case width cap.  The
+    holder itself is then sized down from this envelope by the text it has
+    to carry - it is never grown to fill the envelope.
     """
     eff = b4b_effective_box(box)
     plan = b4b_hardware_plan(box)
     layout = b4b_layout(box)
     span = _front_span(box)
+    case_x, _case_y = layout.case_size
 
-    frame_w = span - 4.0
+    avail_w = min(span - 4.0, B4B_FRONT_LABEL_MAX_WIDTH_FRACTION * case_x)
     # vertical band: below the latch pads (or below the rim if passive)
     if plan.latch_count_resolved:
         receiver_r = plan.profile.catch_radius
@@ -3329,113 +3356,177 @@ def b4b_front_label_fit(box: BoxSpec) -> tuple[bool, float, float, float]:
     if handle is not None:
         # The folded U frames the label rather than covering it: the readable
         # area is the clear opening between the arms, under the pivot forks.
-        frame_w = min(frame_w, handle.clear_grip - 2.0 * B4B_LABEL_KEEPOUT)
+        avail_w = min(avail_w, handle.clear_grip - 2.0 * B4B_LABEL_KEEPOUT)
         top_z = min(
             top_z,
             handle.root_bottom_z - B4B_LABEL_KEEPOUT,
         )
-    bottom_z = top_z - B4B_FRONT_LABEL_HEIGHT
-    return frame_w >= 30.0 and bottom_z >= 3.0, frame_w, top_z, bottom_z
+    bottom_z = 3.0
+    min_h = (
+        2.0 * B4B_FRONT_LABEL_RAIL + 2.0 * B4B_FRONT_LABEL_CLEAR
+        + 2.0 * B4B_FRONT_LABEL_MARGIN_Y + TEXT_CAP_HEIGHT_MIN
+    )
+    min_w = (
+        B4B_FRONT_LABEL_ENDSTOP + 2.0 * B4B_FRONT_LABEL_CLEAR
+        + 2.0 * B4B_FRONT_LABEL_MARGIN_X + 6.0
+    )
+    fits = avail_w >= min_w and (top_z - bottom_z) >= min_h
+    return fits, avail_w, top_z, bottom_z
 
 
 def b4b_front_label_eligibility(box: BoxSpec) -> tuple[bool, str]:
     """``(eligible, reason)`` - whether this case's front wall can carry a
     slide-in label, mirroring ``b4b_handle_eligibility``'s shape so the UI
     can gate both controls the same way."""
-    fits, _frame_w, _top_z, _bottom_z = b4b_front_label_fit(box)
+    fits, _avail_w, _top_z, _bottom_z = b4b_front_label_fit(box)
     if fits:
         return True, ""
     return False, "Not enough size for a front label."
 
 
 def b4b_front_label_geometry(box: BoxSpec):
-    """``(frame_solid, plate_solid, plate_centre_xyz)`` for the slide-in front
-    label.  The frame is unioned into the body; the plate is a separate part
-    that slides in from the +X end against an end stop, with a finger notch at
-    the -X end.  It sits in the clear band below the latch pads and never
-    consumes the child-bin interior.
+    """``(frame_solid, plate_solid, text_solid, plate_centre_xyz)`` for the
+    compact slide-in front label.
+
+    The frame (holder) is unioned into the body; the plate is a separate part
+    that slides in from the -X end and seats against a closed +X end stop,
+    captured top and bottom by printed rails, with a snap detent so it does
+    not slide back out on its own.  The plate and its lettering are sized
+    from the actual text outline - never from the case width - and the whole
+    holder is capped at ``B4B_FRONT_LABEL_MAX_WIDTH_FRACTION`` of the case
+    width: text shrinks to fit before the holder is ever allowed to grow.
+
+    The lettering is a flush two-part inlay: ``plate_solid`` carries a
+    shallow pocket on its readable face and ``text_solid`` is the separate,
+    identically-shaped object that fills it, so a slicer can print the two in
+    different filaments.
     """
     eff = b4b_effective_box(box)
     plan = b4b_hardware_plan(box)
     layout = b4b_layout(box)
     y_wall = min(layout.front_wall_y(x) for x in plan.latch_centers_x or (0.0,))
-    fits, frame_w, top_z, bottom_z = b4b_front_label_fit(box)
-    height = B4B_FRONT_LABEL_HEIGHT
+    fits, avail_w, top_z, bottom_z = b4b_front_label_fit(box)
     if not fits:
         raise ValueError(
             "not enough clear front-wall area for a slide-in label; use a top "
             "label, a taller box, or turn latches off"
         )
+    if not eff.b4b.label_text.strip():
+        raise ValueError("label text is empty")
 
-    rail = 1.6                       # channel lip that captures the plate
-    channel_t = B4B_FRONT_LABEL_PLATE_T + 2.0 * B4B_FRONT_LABEL_CLEAR
+    rail = B4B_FRONT_LABEL_RAIL
+    clear = B4B_FRONT_LABEL_CLEAR
+    endstop = B4B_FRONT_LABEL_ENDSTOP
+    plate_t = B4B_FRONT_LABEL_PLATE_T
+
+    # Fit the lettering to the largest space the envelope could ever offer,
+    # then size the plate to the text (plus a small margin) - never the
+    # other way around.
+    max_plate_w = avail_w - endstop - 2.0 * clear
+    max_plate_h = (top_z - bottom_z) - 2.0 * rail - 2.0 * clear
+    max_text_w = max_plate_w - 2.0 * B4B_FRONT_LABEL_MARGIN_X
+    max_text_h = max_plate_h - 2.0 * B4B_FRONT_LABEL_MARGIN_Y
+    outline = _fit_text_outline(
+        eff.b4b.label_text, max_text_w, max_text_h, B4B_FRONT_LABEL_CAP_IDEAL
+    )
+    tminx, tminy, tmaxx, tmaxy = outline.bounds
+    plate_w = (tmaxx - tminx) + 2.0 * B4B_FRONT_LABEL_MARGIN_X
+    plate_h = (tmaxy - tminy) + 2.0 * B4B_FRONT_LABEL_MARGIN_Y
+
+    holder_w = plate_w + endstop + 2.0 * clear
+    holder_h = plate_h + 2.0 * rail + 2.0 * clear
+    channel_t = plate_t + 2.0 * clear
     depth = channel_t + 1.4          # + back wall
-    endstop = 2.0
+    mid_z = (top_z + bottom_z) / 2.0
     # Embed the frame block a little into the front wall so union() fuses it
     # into the body as one connected solid (never just a face-to-face touch).
     embed = min(0.8, max(0.3, eff.wall_depth * 0.5))
 
-    outer = trimesh.creation.box(extents=(frame_w, depth + embed, height))
+    outer = trimesh.creation.box(extents=(holder_w, depth + embed, holder_h))
     outer.apply_translation(
-        (0.0, y_wall - depth / 2.0 + embed / 2.0, (top_z + bottom_z) / 2.0)
+        (0.0, y_wall - depth / 2.0 + embed / 2.0, mid_z)
     )
-    # hollow the channel, open on the +X face, closed by an end stop on -X...
-    # actually: end stop on +X far side, slide in from -X (finger) - keep it
-    # symmetrical and simple: channel open on -X, stop on +X.
+    # Hollow the channel: open on the -X face (insertion), closed by an end
+    # stop on +X.  The channel is only ``channel_t`` (~2 mm) deep, so the top
+    # rail's ceiling bridges a couple of millimetres, not the holder's whole
+    # length - well within an unsupported FDM bridge, no roof chamfer needed.
     slot = trimesh.creation.box(
-        extents=(frame_w, channel_t, height - 2.0 * rail)
+        extents=(holder_w, channel_t, holder_h - 2.0 * rail)
     )
     slot.apply_translation(
         (-endstop,
          y_wall - depth + 1.4 + channel_t / 2.0,
-         (top_z + bottom_z) / 2.0)
+         mid_z)
     )
     frame = difference([outer, slot])
 
-    plate_w = frame_w - endstop - 2.0 * B4B_FRONT_LABEL_CLEAR
-    plate_h = height - 2.0 * rail - 2.0 * B4B_FRONT_LABEL_CLEAR
-    plate = trimesh.creation.box(
-        extents=(plate_w, B4B_FRONT_LABEL_PLATE_T, plate_h)
-    )
+    plate = trimesh.creation.box(extents=(plate_w, plate_t, plate_h))
     # finger notch on the -X insertion edge so it pulls out without tools
+    notch_w = min(4.0, plate_w * 0.35)
     notch = trimesh.creation.box(
-        extents=(4.0, B4B_FRONT_LABEL_PLATE_T + 2.0, plate_h * 0.5)
+        extents=(notch_w, plate_t + 2.0, plate_h * 0.5)
     )
-    notch.apply_translation((-plate_w / 2.0 + 1.0, 0.0, 0.0))
+    notch.apply_translation((-plate_w / 2.0 + notch_w / 2.0, 0.0, 0.0))
     plate = difference([plate, notch])
-    if eff.b4b.label_text.strip():
-        outline = _fit_text_outline(
-            eff.b4b.label_text, plate_w - 8.0, plate_h - 2.0, B4B_FRONT_LABEL_CAP_IDEAL
-        )
-        # Explicit datums.  The plate is centred on the origin, so its readable
-        # (-Y) face is at y = -PLATE_T/2.  The engraving cutter must start on
-        # that face and bite inward (+Y) by TEXT_DEPTH, with a small overlap so
-        # the boolean always removes material.
-        front_face_y = -B4B_FRONT_LABEL_PLATE_T / 2.0
-        overlap = 0.1
-        engrave = text_prism(outline, top_z=0.0, depth=TEXT_DEPTH)  # z in [-TEXT_DEPTH, 0]
-        # +90 deg about X: extrude axis (-Z) -> +Y, glyph height (+Y) -> +Z upright
-        engrave.apply_transform(
-            trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
-        )
-        centre = engrave.bounds.mean(axis=0)
-        engrave.apply_translation((-centre[0], 0.0, -centre[2]))   # centre on the plate face
-        y_min = float(engrave.bounds[0][1])
-        engrave.apply_translation((0.0, (front_face_y - overlap) - y_min, 0.0))
-        plate = difference([plate, engrave])
+
+    # Flush two-part text inlay: a shallow pocket on the readable (-Y) face,
+    # filled by a separately-printable solid of the identical shape.
+    front_face_y = -plate_t / 2.0
+    overlap = 0.1
+    letters = text_prism(outline, top_z=0.0, depth=TEXT_DEPTH)  # z in [-TEXT_DEPTH, 0]
+    # +90 deg about X: extrude axis (-Z) -> +Y, glyph height (+Y) -> +Z upright
+    letters.apply_transform(
+        trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
+    )
+    centre = letters.bounds.mean(axis=0)
+    letters.apply_translation((-centre[0], 0.0, -centre[2]))   # centre on the plate face
+    y_min = float(letters.bounds[0][1])
+    # The fill piece sits exactly flush with the plate's face; the cutter is
+    # nudged 0.1 mm proud of it so the boolean always removes material cleanly.
+    text_solid = translated(letters, (0.0, front_face_y - y_min, 0.0))
+    pocket = translated(letters, (0.0, (front_face_y - overlap) - y_min, 0.0))
+    plate = difference([plate, pocket])
+
+    # Snap detent: a small printed dome on the frame's end-stop wall and a
+    # matching shallow dimple on the plate, so the plate seats with a click
+    # and cannot slide out on its own.  A sphere squashed on any combination
+    # of axes stays a smooth ellipsoid, which always prints as a
+    # self-supporting dome, so the only real constraint is keeping its Y
+    # radius well inside the plate's own thickness rather than piercing it.
+    stand = B4B_FRONT_LABEL_DETENT_BUMP
+    ramp = B4B_FRONT_LABEL_DETENT_RAMP
+    detent_rx = clear + stand           # protrusion past the plate's rest line
+    detent_ry = min(0.4, plate_t * 0.3)  # stays well inside the thin plate
+    detent_rz = 2.0 * ramp
+    detent_x = holder_w / 2.0 - endstop
+    detent_y = y_wall - depth + 1.4 + channel_t / 2.0
+    dome = trimesh.creation.icosphere(subdivisions=2, radius=1.0)
+    dome.apply_scale((detent_rx, detent_ry, detent_rz))
+    dome.apply_translation((detent_x, detent_y, mid_z))
+    frame = _weld(union([frame, dome]))
+    dimple = trimesh.creation.icosphere(subdivisions=2, radius=1.0)
+    dimple.apply_scale((detent_rx + 0.1, detent_ry + 0.1, detent_rz + 0.1))
+    dimple.apply_translation((plate_w / 2.0, 0.0, 0.0))
+    plate = difference([plate, dimple])
 
     plate_centre = (
         -endstop / 2.0,
-        y_wall - depth + 1.4 + B4B_FRONT_LABEL_CLEAR + B4B_FRONT_LABEL_PLATE_T / 2.0,
-        (top_z + bottom_z) / 2.0,
+        y_wall - depth + 1.4 + clear + plate_t / 2.0,
+        mid_z,
     )
-    return frame, plate, plate_centre
+    return frame, plate, text_solid, plate_centre
 
 
 def make_b4b_front_label_plate(box: BoxSpec) -> trimesh.Trimesh:
-    """The slide-in plate alone, positioned in assembly space."""
-    _frame, plate, centre = b4b_front_label_geometry(box)
+    """The slide-in plate alone (background only), positioned in assembly space."""
+    _frame, plate, _text, centre = b4b_front_label_geometry(box)
     return translated(plate, centre)
+
+
+def make_b4b_front_label_text(box: BoxSpec) -> trimesh.Trimesh:
+    """The flush lettering inlay alone, registered to the plate's pocket."""
+    _frame, _plate, text, centre = b4b_front_label_geometry(box)
+    return translated(text, centre)
 
 
 # --------------------------------------------------------------------------- #
@@ -3467,6 +3558,14 @@ def _print_pose(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
         # The roll is negative so the
         # wall-facing side lands on the bed and the softened exposed edge
         # finishes upward.
+        m.apply_transform(
+            trimesh.transformations.rotation_matrix(-math.pi / 2.0, (1.0, 0.0, 0.0))
+        )
+    elif kind == "label":
+        # The plate's readable (-Y) face carries the text pocket and its back
+        # is +Y.  Rolling -90 degrees about X sends back (+Y) to -Z (down, on
+        # the bed) and the text face to +Z (up), so the label prints flat on
+        # its back with the lettering facing upward.
         m.apply_transform(
             trimesh.transformations.rotation_matrix(-math.pi / 2.0, (1.0, 0.0, 0.0))
         )
@@ -3542,9 +3641,18 @@ def b4b_build_parts(box: BoxSpec) -> list[tuple[str, trimesh.Trimesh]]:
             groups.append([(f"B4B Stacking Peg {i}", _print_pose(peg, "peg"))])
 
     if b4b.label_location == "front" and b4b.label_text.strip():
-        _frame, plate, centre = b4b_front_label_geometry(box)
-        groups.append(
-            [("B4B Front Label", _print_pose(translated(plate, centre), "plate"))]
-        )
+        _frame, plate, text, centre = b4b_front_label_geometry(box)
+        # Rotated together so the plate and its lettering stay registered:
+        # printed flat on its back, text facing up.
+        groups.append([
+            (
+                "B4B Front Label Plate",
+                _print_pose(translated(plate, centre), "label"),
+            ),
+            (
+                "B4B Front Label Text",
+                _print_pose(translated(text, centre), "label"),
+            ),
+        ])
 
     return _pack_print_groups(groups)
