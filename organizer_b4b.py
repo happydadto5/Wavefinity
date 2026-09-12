@@ -379,32 +379,71 @@ B4B_LATCH_MAX_PROJECTION = {"M2": 6.0, "M3": 9.0}
 # A U/bail on the *body* front wall.  The lid carries no handle load at all, so
 # the carry force goes straight into the case shell instead of through the lid,
 # the latches and the rear hinges - and the lid top stays free for stacking.
-B4B_HANDLE_PROFILE = B4B_HW_M3     # handle hardware is M3 only
-B4B_HANDLE_GRIP_MIN = 72.0         # below this it is not an adult handle
-B4B_HANDLE_GRIP_MAX = 95.0         # a hand does not benefit from more
-B4B_HANDLE_GRIP_FRACTION = 0.75    # of the child field width, then clamped
-B4B_HANDLE_BAND = 6.5              # in-plane band width of the lower U
-B4B_HANDLE_EYE_BAND = 5.4          # tapered band at the pivot eye
-# The fork's own axial stack.  It is NOT the hinge/latch stack: the rotating
-# member here is the 5.4 mm handle eye, not a 3.2 mm lid ear, so the fork is
-# 12.0 mm wide and its near ear is 2.6 mm.  Reusing the hinge stack put the
-# eye straight through both ears.
-B4B_HANDLE_NEAR_EAR = 2.6
-B4B_HANDLE_FAR_LUG = 3.4
-B4B_HANDLE_FORK_WIDTH = (
-    B4B_HANDLE_NEAR_EAR + B4B_HANDLE_EYE_BAND + B4B_HANDLE_FAR_LUG
-    + 2.0 * B4B_RUNNING_GAP
-)
-B4B_HANDLE_FORK_CLEAR_SPAN = (
-    B4B_HANDLE_NEAR_EAR - B4B_HEAD_RECESS_DEPTH
-    + B4B_HANDLE_EYE_BAND + 2.0 * B4B_RUNNING_GAP
-)
-B4B_HANDLE_TAPER_RUN = 8.0         # vertical run of that taper
-B4B_HANDLE_EYE_RADIUS = 2.9
-B4B_HANDLE_THICKNESS = 2.0 * B4B_HANDLE_EYE_RADIUS   # 5.8 front-to-back
-B4B_HANDLE_CORNER_RADIUS = 7.5     # lower U centreline radius
-B4B_HANDLE_DROP = 29.0             # preferred pivot axis to grip centre
-B4B_HANDLE_DROP_MIN = 26.0
+#
+# The handle is NOT a fixed adult-size fitting bolted onto every case.  Every
+# in-plane dimension below is resolved once per case, from the child-field X,
+# by :func:`b4b_handle_dimensions` into a :class:`HandleDimensions`, and every
+# builder consumes that resolved object - never these raw constants directly -
+# so a small B4B gets a small handle on small (M2) hardware and a large B4B
+# gets a full-size handle on M3, with nothing hard-coded in between.
+#
+# Hardware family for a handled case is decided on the *handled* thresholds
+# below, separately from the ordinary no-handle thresholds, because a handle
+# pivot's own eye/fork stack is smaller than a hinge or latch stack at the same
+# nominal size.
+B4B_HANDLE_M2_MAX_FIELD_XY = 120.0
+B4B_HANDLE_M2_MAX_FIELD_Z = 64.0
+
+# Linear scale ramp: child-field X at or below the low end gives the smallest
+# handle, at or above the high end gives the largest, ordinary lerp in between.
+B4B_HANDLE_SCALE_X_MIN = 96.0
+B4B_HANDLE_SCALE_X_MAX = 200.0
+
+# Visible in-plane band width of the lower U grip/arms.
+B4B_HANDLE_BAND_MIN = 4.5
+B4B_HANDLE_BAND_MAX = 8.0
+# Front-to-back arm thickness.  Deliberately not equal to the band: a compact
+# handle stays a slim ~4 mm deep even though its visible band is wider.
+B4B_HANDLE_THICKNESS_MIN = 4.0
+B4B_HANDLE_THICKNESS_MAX = 6.0
+
+# Clear grip (open space between the two arms), as a fraction of child-field X
+# between an absolute floor and ceiling.  No fixed 72 mm adult-hand minimum:
+# a small case gets a small, honestly-scaled handle instead.
+B4B_HANDLE_GRIP_FRACTION = 0.58
+B4B_HANDLE_GRIP_ABS_MIN = 36.0
+B4B_HANDLE_GRIP_ABS_MAX = 105.0
+
+# Lower-U centreline corner radius, proportional to the band rather than fixed.
+B4B_HANDLE_CORNER_FRACTION = 1.20
+B4B_HANDLE_CORNER_MIN = 5.0
+B4B_HANDLE_CORNER_MAX = 9.0
+
+# Pivot axis to grip centreline, proportional to child-field X.
+B4B_HANDLE_DROP_FRACTION = 0.22
+B4B_HANDLE_DROP_ABS_MIN = 18.0
+B4B_HANDLE_DROP_ABS_MAX = 36.0
+# Minimum actual drop a handle is eligible on - proportional to the resolved
+# band rather than one fixed number, since a compact handle's arms are
+# themselves shorter.
+B4B_HANDLE_MIN_DROP_FLOOR = 16.0
+B4B_HANDLE_MIN_DROP_BAND_FACTOR = 3.0
+
+# Radial plastic shell kept around the pivot clearance bore.  The eye is sized
+# from this and the resolved hardware family's own bore, not from a fixed
+# outer radius, so it may legitimately bulge past the arm's own thickness -
+# that is intentional: the eye's job is to close completely around the bore.
+B4B_HANDLE_EYE_RADIAL_SHELL = 1.20
+# Minimum vertical overlap between an arm and its pivot eye once unioned, so
+# the eye visibly grows out of the arm instead of merely touching it.
+B4B_HANDLE_EYE_OVERLAP = 2.0
+
+# Vertical run over which each arm tapers from the full band down to the eye
+# band, proportional to the resolved band.
+B4B_HANDLE_TAPER_RUN_FACTOR = 1.5
+B4B_HANDLE_TAPER_RUN_MIN = 6.0
+B4B_HANDLE_TAPER_RUN_MAX = 10.0
+
 B4B_HANDLE_WALL_CLEAR = 0.6        # folded running gap to the wall crest
 B4B_HANDLE_BOTTOM_MARGIN = 4.0     # clear run above the case bottom
 B4B_HANDLE_RIM_DROP = 8.0          # pivot axis below the rim/lid-seat datum
@@ -418,10 +457,6 @@ B4B_HANDLE_MAX_PROJECTION = 7.25   # folded hardware envelope
 # flat: it is the bail's print bed.
 B4B_HANDLE_EDGE_CHAMFER = 1.0
 B4B_HANDLE_EDGE_STEPS = 4
-B4B_HANDLE_FORK_ROOT_WIDTH = 16.0
-B4B_HANDLE_ROOT_ABOVE = 6.0        # root reach above the pivot centre
-B4B_HANDLE_ROOT_BELOW = 12.0       # and below it
-B4B_HANDLE_ROOT_DEPTH = 3.0        # inner mating face -> outer reinforcement
 
 # --- front interactions ---------------------------------------------------- #
 B4B_FRONT_ROOT_SEPARATION = 1.0    # visible normal wall between root regions
@@ -528,12 +563,20 @@ def b4b_hardware_family(box: BoxSpec) -> HardwareProfile:
 
     Deterministic and consulted from a single place, so the preview, the
     exported geometry, the validation report and the BOM can never disagree
-    about which kit the user needs.  A handled case is all-M3 on purpose: one
-    driver, one bag of screws, one BOM line, rather than M2 hinges and latches
-    with M3 handle pivots.
+    about which kit the user needs.  Hinges, latches and the handle pivot
+    always share one family - never M2 hinges with an M3 handle - but a
+    handled case is checked against its own (larger) size threshold, because
+    the handle's own eye/fork stack is smaller than a hinge or latch stack at
+    the same nominal size.
     """
     b4b = box.b4b.normalised()
     if b4b.handle:
+        if (
+            box.x <= B4B_HANDLE_M2_MAX_FIELD_XY + _EPS
+            and box.y <= B4B_HANDLE_M2_MAX_FIELD_XY + _EPS
+            and box.z <= B4B_HANDLE_M2_MAX_FIELD_Z + _EPS
+        ):
+            return B4B_HW_M2
         return B4B_HW_M3
     if (
         box.x <= B4B_HW_M2_MAX_FIELD_XY + _EPS
@@ -599,16 +642,131 @@ def _root_centres(
     return (-centre, centre)
 
 
+def _lerp(lo: float, hi: float, t: float) -> float:
+    return lo + (hi - lo) * t
+
+
+def _clamp01(t: float) -> float:
+    return 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+
+
 def b4b_handle_grip_target(child_x: float) -> float:
     """Clear grip this case *wants*, before asking whether it fits.
 
-    A hand is a hand whatever the case measures, so the grip follows the case
-    only between an adult minimum and an ergonomic cap; past the cap a larger
-    B4B keeps the same grip instead of spreading the bail to the corners.
+    Purely proportional to the child field between an absolute floor and an
+    ergonomic ceiling - no fixed adult-hand minimum, so a small case gets a
+    small, honestly-scaled handle instead of a full-size one; past the
+    ceiling a larger B4B keeps the same grip instead of spreading the bail to
+    the corners.
     """
     return min(
-        B4B_HANDLE_GRIP_MAX,
-        max(B4B_HANDLE_GRIP_MIN, B4B_HANDLE_GRIP_FRACTION * child_x),
+        B4B_HANDLE_GRIP_ABS_MAX,
+        max(B4B_HANDLE_GRIP_ABS_MIN, B4B_HANDLE_GRIP_FRACTION * child_x),
+    )
+
+
+def _handle_pivot_stack(profile: HardwareProfile) -> tuple[float, float, float]:
+    """``(near_ear, eye_band, far_lug)`` for the handle's own pivot stack.
+
+    Not the ordinary hinge/latch stack: the rotating member here is the
+    handle eye, sized from the resolved family's own clearance bore, not from
+    that family's ``mid_member`` (a lid ear or latch lever).  A compact M2
+    handle gets a compact M2-specific stack; M3 keeps the original
+    proven handle stack.
+    """
+    if profile.name == "M2":
+        return 2.20, 3.20, 2.60
+    return 2.60, 5.40, 3.40
+
+
+def _handle_root_dims(profile: HardwareProfile) -> tuple[float, float, float, float]:
+    """``(root_width, root_above, root_below, root_depth)`` for the body fork
+    root, scaled to match the resolved handle hardware family."""
+    if profile.name == "M2":
+        return 12.0, 4.5, 9.0, 2.6
+    return 16.0, 6.0, 12.0, 3.0
+
+
+@dataclass(frozen=True)
+class HandleDimensions:
+    """Every folding-handle dimension, resolved once from the child field and
+    hardware family.  Every handle builder reads this instead of recomputing
+    its own scale, so the geometry cannot drift out of proportion with itself.
+    """
+
+    band: float
+    thickness: float
+    eye_band: float
+    eye_radius: float
+    corner_radius: float
+    target_grip: float
+    target_drop: float
+    min_drop: float
+    near_ear: float
+    far_lug: float
+    fork_width: float
+    fork_clear_span: float
+    root_width: float
+    root_above: float
+    root_below: float
+    root_depth: float
+    taper_run: float
+
+
+def b4b_handle_dimensions(box: BoxSpec, profile: HardwareProfile) -> HandleDimensions:
+    """Resolve every handle dimension for this case and hardware family.
+
+    Child-field X is the stable scaling input - a few millimetres of exterior
+    wall growth must not make the handle unexpectedly jump in size.  Below
+    ``B4B_HANDLE_SCALE_X_MIN`` the handle is at its smallest; at or above
+    ``B4B_HANDLE_SCALE_X_MAX`` it is at its largest; ordinary linear
+    interpolation in between.
+    """
+    eff = b4b_effective_box(box)
+    scale = _clamp01(
+        (eff.x - B4B_HANDLE_SCALE_X_MIN)
+        / (B4B_HANDLE_SCALE_X_MAX - B4B_HANDLE_SCALE_X_MIN)
+    )
+    band = _lerp(B4B_HANDLE_BAND_MIN, B4B_HANDLE_BAND_MAX, scale)
+    thickness = _lerp(B4B_HANDLE_THICKNESS_MIN, B4B_HANDLE_THICKNESS_MAX, scale)
+    corner_radius = min(
+        B4B_HANDLE_CORNER_MAX,
+        max(B4B_HANDLE_CORNER_MIN, B4B_HANDLE_CORNER_FRACTION * band),
+    )
+    target_drop = min(
+        B4B_HANDLE_DROP_ABS_MAX,
+        max(B4B_HANDLE_DROP_ABS_MIN, B4B_HANDLE_DROP_FRACTION * eff.x),
+    )
+    min_drop = max(B4B_HANDLE_MIN_DROP_FLOOR, B4B_HANDLE_MIN_DROP_BAND_FACTOR * band)
+    taper_run = min(
+        B4B_HANDLE_TAPER_RUN_MAX,
+        max(B4B_HANDLE_TAPER_RUN_MIN, B4B_HANDLE_TAPER_RUN_FACTOR * band),
+    )
+    near_ear, eye_band, far_lug = _handle_pivot_stack(profile)
+    fork_width = near_ear + eye_band + far_lug + 2.0 * B4B_RUNNING_GAP
+    fork_clear_span = (
+        near_ear - B4B_HEAD_RECESS_DEPTH + eye_band + 2.0 * B4B_RUNNING_GAP
+    )
+    eye_radius = profile.clear_bore / 2.0 + B4B_HANDLE_EYE_RADIAL_SHELL
+    root_width, root_above, root_below, root_depth = _handle_root_dims(profile)
+    return HandleDimensions(
+        band=band,
+        thickness=thickness,
+        eye_band=eye_band,
+        eye_radius=eye_radius,
+        corner_radius=corner_radius,
+        target_grip=b4b_handle_grip_target(eff.x),
+        target_drop=target_drop,
+        min_drop=min_drop,
+        near_ear=near_ear,
+        far_lug=far_lug,
+        fork_width=fork_width,
+        fork_clear_span=fork_clear_span,
+        root_width=root_width,
+        root_above=root_above,
+        root_below=root_below,
+        root_depth=root_depth,
+        taper_run=taper_run,
     )
 
 
@@ -620,10 +778,13 @@ def b4b_handle_width_fit(box: BoxSpec) -> tuple[bool, float, float]:
     and what is left has to span the target clear grip plus one band width.
     """
     layout = b4b_layout(box)
+    eff = b4b_effective_box(box)
+    profile = b4b_hardware_family(eff)
+    dims = b4b_handle_dimensions(box, profile)
     max_pivot_span = _usable_front_span(layout) - 2.0 * (
-        B4B_HANDLE_FORK_WIDTH / 2.0 + B4B_ROOT_CORNER_CLEARANCE
+        dims.fork_width / 2.0 + B4B_ROOT_CORNER_CLEARANCE
     )
-    required = b4b_handle_grip_target(b4b_effective_box(box).x) + B4B_HANDLE_BAND
+    required = dims.target_grip + dims.band
     return max_pivot_span + _EPS >= required, required, max_pivot_span
 
 
@@ -1206,6 +1367,12 @@ class B4BHandlePlan:
     root_top_z: float
     root_bottom_z: float
     screw_length_mm: int
+    near_ear: float
+    far_lug: float
+    fork_width: float
+    fork_clear_span: float
+    taper_run: float
+    min_drop: float
 
     @property
     def projection(self) -> float:
@@ -1260,9 +1427,11 @@ def b4b_handle_eligibility(box: BoxSpec) -> tuple[bool, str]:
     if not fits:
         min_width = b4b_handle_min_width(box)
         return False, f"Minimum width must be {min_width:g} mm."
+    profile = b4b_hardware_family(eff)
+    dims = b4b_handle_dimensions(box, profile)
     axis_z = b4b_rim_z_from_eff(eff) - B4B_HANDLE_RIM_DROP
-    available_drop = axis_z - B4B_HANDLE_BOTTOM_MARGIN - B4B_HANDLE_BAND / 2.0
-    if min(B4B_HANDLE_DROP, available_drop) + _EPS < B4B_HANDLE_DROP_MIN:
+    available_drop = axis_z - B4B_HANDLE_BOTTOM_MARGIN - dims.band / 2.0
+    if min(dims.target_drop, available_drop) + _EPS < dims.min_drop:
         return False, "Handle needs more front-wall height."
     return True, ""
 
@@ -1285,33 +1454,34 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
         )
 
     layout = b4b_layout(box)
-    profile = B4B_HANDLE_PROFILE
-    clear_grip = b4b_handle_grip_target(eff.x)
-    pivot_span = clear_grip + B4B_HANDLE_BAND
+    profile = b4b_hardware_family(eff)
+    dims = b4b_handle_dimensions(box, profile)
+    clear_grip = dims.target_grip
+    pivot_span = clear_grip + dims.band
     half = pivot_span / 2.0
 
-    fork_half = B4B_HANDLE_FORK_WIDTH / 2.0
+    fork_half = dims.fork_width / 2.0
     front_crest = min(
         _wall_extreme_y(layout, -half - fork_half, half + fork_half, -1.0),
         _wall_extreme_y(layout, -half, half, -1.0),
     )
-    axis_y = front_crest - (B4B_HANDLE_EYE_RADIUS + B4B_HANDLE_WALL_CLEAR)
+    axis_y = front_crest - (dims.eye_radius + B4B_HANDLE_WALL_CLEAR)
     axis_z = b4b_rim_z_from_eff(eff) - B4B_HANDLE_RIM_DROP
-    available_drop = axis_z - B4B_HANDLE_BOTTOM_MARGIN - B4B_HANDLE_BAND / 2.0
-    drop = min(B4B_HANDLE_DROP, available_drop)
+    available_drop = axis_z - B4B_HANDLE_BOTTOM_MARGIN - dims.band / 2.0
+    drop = min(dims.target_drop, available_drop)
 
-    root_out = _root_outward(B4B_HANDLE_ROOT_DEPTH, eff.wall_depth)
+    root_out = _root_outward(dims.root_depth, eff.wall_depth)
     root_face_y = front_crest - root_out
-    root_top_z = axis_z + B4B_HANDLE_ROOT_ABOVE
-    root_bottom_z = max(1.0, axis_z - B4B_HANDLE_ROOT_BELOW)
+    root_top_z = axis_z + dims.root_above
+    root_bottom_z = max(1.0, axis_z - dims.root_below)
 
     # Stow detents sit near the lower corners of the folded U, where the arms
     # are long enough to flex over them at a light finger force.
-    detent_z = axis_z - drop + B4B_HANDLE_CORNER_RADIUS
-    detent_cx = half - B4B_HANDLE_BAND / 2.0
+    detent_z = axis_z - drop + dims.corner_radius
+    detent_cx = half - dims.band / 2.0
 
     screw = _screw_for_stack(
-        profile, B4B_HANDLE_FORK_CLEAR_SPAN, B4B_HANDLE_FAR_LUG, "handle pivot"
+        profile, dims.fork_clear_span, dims.far_lug, "handle pivot"
     )
     return B4BHandlePlan(
         profile=profile,
@@ -1319,11 +1489,11 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
         centers_x=(-half, half),
         clear_grip=clear_grip,
         drop=drop,
-        band=B4B_HANDLE_BAND,
-        eye_band=B4B_HANDLE_EYE_BAND,
-        thickness=B4B_HANDLE_THICKNESS,
-        eye_radius=B4B_HANDLE_EYE_RADIUS,
-        corner_radius=B4B_HANDLE_CORNER_RADIUS,
+        band=dims.band,
+        eye_band=dims.eye_band,
+        thickness=dims.thickness,
+        eye_radius=dims.eye_radius,
+        corner_radius=dims.corner_radius,
         axis_y=axis_y,
         axis_z=axis_z,
         front_crest=front_crest,
@@ -1333,11 +1503,17 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
         detent_bump=B4B_HANDLE_DETENT_BUMP,
         detent_centers_x=(-detent_cx, detent_cx),
         detent_z=detent_z,
-        root_width=B4B_HANDLE_FORK_ROOT_WIDTH,
+        root_width=dims.root_width,
         root_face_y=root_face_y,
         root_top_z=root_top_z,
         root_bottom_z=root_bottom_z,
         screw_length_mm=screw,
+        near_ear=dims.near_ear,
+        far_lug=dims.far_lug,
+        fork_width=dims.fork_width,
+        fork_clear_span=dims.fork_clear_span,
+        taper_run=dims.taper_run,
+        min_drop=dims.min_drop,
     )
 
 
@@ -1723,19 +1899,23 @@ def _lid_root_profile(
     ])
 
 
-def _handle_fork_positions(centre_x: float) -> tuple[float, float]:
+def _handle_fork_positions(
+    plan: "B4BHandlePlan", centre_x: float
+) -> tuple[float, float]:
     """``(near_ear_x, far_lug_x)`` for one handle fork.
 
     Unlike a hinge or latch stack, this is laid out about the *eye* rather than
     about the group centre: ``centre_x`` is the pivot axis, the eye sits on it,
     and the two ears stand off it by one running gap each.  The near (head)
     ear is outboard and the thread-forming lug faces the case centre, so both
-    screws go in from the sides and the middle of the case stays clean.
+    screws go in from the sides and the middle of the case stays clean.  Reads
+    the resolved plan's own pivot stack rather than a fixed M3 global, so a
+    compact M2 handle gets its compact fork spacing.
     """
     out = 1.0 if centre_x >= 0.0 else -1.0
-    inner = B4B_HANDLE_EYE_BAND / 2.0 + B4B_RUNNING_GAP
-    near = centre_x + out * (inner + B4B_HANDLE_NEAR_EAR / 2.0)
-    far = centre_x - out * (inner + B4B_HANDLE_FAR_LUG / 2.0)
+    inner = plan.eye_band / 2.0 + B4B_RUNNING_GAP
+    near = centre_x + out * (inner + plan.near_ear / 2.0)
+    far = centre_x - out * (inner + plan.far_lug / 2.0)
     return near, far
 
 
@@ -2363,13 +2543,20 @@ def _softened_slab(
 
 
 def _handle_centreline(plan: B4BHandlePlan):
-    """The U's centreline path, arms plus a real radiused lower corner."""
+    """The U's centreline path, arms plus a real radiused lower corner.
+
+    Each arm's tip runs ``B4B_HANDLE_EYE_OVERLAP`` past the pivot axis rather
+    than stopping exactly on it, so the arm and the pivot eye - unioned onto
+    it separately in :func:`make_b4b_handle` - genuinely overlap in 3D
+    instead of merely touching tangent-to-tangent.
+    """
     from shapely.geometry import LineString
 
     half = plan.pivot_span / 2.0
     grip_z = plan.grip_z
     r = plan.corner_radius
-    pts = [(-half, plan.axis_z), (-half, grip_z + r)]
+    tip_z = plan.axis_z + B4B_HANDLE_EYE_OVERLAP
+    pts = [(-half, tip_z), (-half, grip_z + r)]
     steps = 12
     for i in range(steps + 1):
         a = math.pi + (math.pi / 2.0) * (i / steps)
@@ -2378,16 +2565,20 @@ def _handle_centreline(plan: B4BHandlePlan):
     for i in range(steps + 1):
         a = -math.pi / 2.0 + (math.pi / 2.0) * (i / steps)
         pts.append((half - r + r * math.cos(a), grip_z + r + r * math.sin(a)))
-    pts.append((half, plan.axis_z))
+    pts.append((half, tip_z))
     return LineString(pts)
 
 
 def b4b_handle_outline(plan: B4BHandlePlan) -> Polygon:
-    """X/Z outline of the bail: straight arms, broad lower radii, straight grip.
+    """X/Z outline of the U's grip/arms: straight arms, broad lower radii,
+    straight grip.
 
-    Cross-section is constant through grip and arms and thickens only locally
-    at the pivot eyes, which is what keeps a printed bail looking like one
-    clean piece instead of two bosses joined by a strip.
+    Cross-section is constant through grip and arms and only tapers, near its
+    top, from the full band down to the eye band - it stops/tapers *into* the
+    pivot zone rather than trying to be the pivot eye itself.  The complete,
+    closed eye solid is unioned on separately in :func:`make_b4b_handle`, so
+    this outline is never responsible for the round bore's surrounding
+    plastic and can never clip it.
     """
     band = plan.band / 2.0
     outline = _handle_centreline(plan).buffer(
@@ -2395,15 +2586,16 @@ def b4b_handle_outline(plan: B4BHandlePlan) -> Polygon:
     )
     if not isinstance(outline, Polygon) or not outline.is_valid:
         raise RuntimeError("the B4B handle outline did not resolve")
-    # Taper the band down to the eye width over the top run, so a compact M3
+    # Taper the band down to the eye width over the top run, so the resolved
     # pivot stack fits without thinning the part a hand actually holds.  The
     # taper is symmetric about each arm's own centreline - narrowing only the
     # outer edges would leave the inner face full width and drive the arm
     # straight into the fork's thread-forming lug.
     half = plan.pivot_span / 2.0
     eye = plan.eye_band / 2.0
-    z_hi = plan.axis_z + plan.eye_radius + 2.0
-    z_lo = plan.axis_z - B4B_HANDLE_TAPER_RUN
+    tip_z = plan.axis_z + B4B_HANDLE_EYE_OVERLAP
+    z_hi = tip_z + 0.5
+    z_lo = plan.axis_z - plan.taper_run
     keeper = Polygon([
         (-half - band, -1e4), (half + band, -1e4),
         (half + band, z_lo), (-half - band, z_lo),
@@ -2423,9 +2615,14 @@ def b4b_handle_outline(plan: B4BHandlePlan) -> Polygon:
 def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
     """The folding bail, in assembly space, shown stowed against the front wall.
 
-    One flat-printed U.  The outline is extruded through the handle thickness,
-    the two pivot eyes are capped with the same support-free section every other
-    B4B barrel uses, and the carry-stop heels stand proud of them.
+    One flat-printed U.  The grip/arms are extruded from the outline through
+    the handle thickness; at each pivot a *complete*, separately-built closed
+    eye - the same support-free section every other B4B barrel uses - is
+    unioned onto the arm with real 3D overlap.  The round clearance bore is
+    only cut once every solid (arms, eyes, carry-stop heels) is unioned into
+    one piece, so the bore can never be clipped down to a partial C-shape by
+    an earlier intersection - it is always subtracted from finished plastic
+    that already fully surrounds it.
     """
     plan = b4b_handle_plan(box)
     if plan is None:
@@ -2438,29 +2635,19 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
     )
     slab.apply_translation((0.0, plan.axis_y, 0.0))
 
-    # above the axis the part is the pivot eye, so keep only what lies inside
-    # the support-free barrel section; below it the arms run straight down
-    barrel = _extrude_yz_profile(
-        support_free_profile_yz(plan.eye_radius), plan.pivot_span + 4.0 * plan.band
-    )
-    barrel.apply_translation((0.0, plan.axis_y, plan.axis_z))
-    lower = trimesh.creation.box(
-        extents=(
-            plan.pivot_span + 6.0 * plan.band,
-            plan.thickness + 4.0,
-            2.0 * plan.axis_z,
-        )
-    )
-    lower.apply_translation((0.0, plan.axis_y, 0.0))
-    handle = _intersection([slab, union([barrel, lower])])
-
+    eyes: list[trimesh.Trimesh] = []
     stops: list[trimesh.Trimesh] = []
     bores: list[trimesh.Trimesh] = []
     pockets: list[trimesh.Trimesh] = []
     heel_r = plan.eye_radius + plan.wall_clear
     for cx in plan.centers_x:
+        eye = _extrude_yz_profile(
+            support_free_profile_yz(plan.eye_radius), plan.eye_band
+        )
+        eye.apply_translation((cx, plan.axis_y, plan.axis_z))
+        eyes.append(eye)
         stops.append(_handle_stop_heel(plan, cx, heel_r))
-        bore = _round_bore(plan.profile.clear_bore / 2.0, plan.eye_band + 4.0)
+        bore = _round_bore(plan.profile.clear_bore / 2.0, plan.eye_band + 2.0)
         bore.apply_translation((cx, plan.axis_y, plan.axis_z))
         bores.append(bore)
     for cx in plan.detent_centers_x:
@@ -2472,7 +2659,7 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
             (cx, plan.axis_y + plan.eye_radius, plan.detent_z)
         )
         pockets.append(pocket)
-    handle = union([handle, *stops])
+    handle = union([slab, *eyes, *stops])
     return _weld(difference([handle, *bores, *pockets]))
 
 
@@ -2515,7 +2702,7 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
     profile = plan.profile
     parts: list[trimesh.Trimesh] = []
     for cx in plan.centers_x:
-        near_x, far_x = _handle_fork_positions(cx)
+        near_x, far_x = _handle_fork_positions(plan, cx)
         half = plan.root_width / 2.0 + 1.0
         cavity = _cavity_prism(box, cx - half, cx + half)
         height = plan.root_top_z - plan.root_bottom_z
@@ -2541,8 +2728,8 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
         solid = _intersection([root, keeper])
         out_x = 1.0 if cx >= 0.0 else -1.0
         for ex, thickness, terminal in (
-            (near_x, B4B_HANDLE_NEAR_EAR, False),
-            (far_x, B4B_HANDLE_FAR_LUG, True),
+            (near_x, plan.near_ear, False),
+            (far_x, plan.far_lug, True),
         ):
             section = _filleted(
                 _gusset(
@@ -2583,7 +2770,7 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
             half_bottom=plan.band / 2.0 + B4B_HW_RELIEF_CLEARANCE,
             z_top=plan.root_top_z + 2.0,
             z_ramp_top=plan.axis_z,
-            z_ramp_bottom=plan.axis_z - B4B_HANDLE_TAPER_RUN,
+            z_ramp_bottom=plan.axis_z - plan.taper_run,
             z_bottom=plan.root_bottom_z - 2.0,
             crest_y=plan.front_crest,
             face_y=plan.root_face_y,
@@ -2599,14 +2786,15 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
         )
         pad.apply_translation((cx, plan.front_crest + 0.6, plan.axis_z))
         # The fork's root deliberately overlaps its own ears for strength (and
-        # spans well above and below the pivot axis - see B4B_HANDLE_ROOT_ABOVE
-        # / _BELOW), so the near ear's head pocket is only authoritative once
-        # it is cut from the finished fork, root and heel pad together.
+        # spans well above and below the pivot axis - see the resolved plan's
+        # own root_above/root_below), so the near ear's head pocket is only
+        # authoritative once it is cut from the finished fork, root and heel
+        # pad together.
         head_cut = _head_recess_cutter(
             radius=profile.head_pocket_radius,
             depth=B4B_HEAD_RECESS_DEPTH,
             x_centre=near_x,
-            thickness=B4B_HANDLE_NEAR_EAR,
+            thickness=plan.near_ear,
             axis_y=plan.axis_y,
             axis_z=plan.axis_z,
             side=int(out_x),
@@ -2725,8 +2913,8 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
     if handle is not None:
         paths.append((
             "handle pivot",
-            B4B_HANDLE_FORK_CLEAR_SPAN,
-            B4B_HANDLE_FAR_LUG,
+            handle.fork_clear_span,
+            handle.far_lug,
             handle.screw_length_mm,
         ))
     for what, span, lug, screw in paths:
@@ -2957,15 +3145,15 @@ def validate_b4b_design(
                 "the handle screw did not resolve to an allowed "
                 f"{handle.profile.name} length"
             )
-        if handle.clear_grip + _EPS < B4B_HANDLE_GRIP_MIN:
+        if handle.clear_grip + _EPS < B4B_HANDLE_GRIP_ABS_MIN:
             raise ValueError(
                 f"the handle gives only {handle.clear_grip:.1f} mm of clear "
-                f"grip (need {B4B_HANDLE_GRIP_MIN:g} mm)"
+                f"grip (need {B4B_HANDLE_GRIP_ABS_MIN:g} mm)"
             )
-        if handle.drop + _EPS < B4B_HANDLE_DROP_MIN:
+        if handle.drop + _EPS < handle.min_drop:
             raise ValueError(
                 f"the handle drops only {handle.drop:.1f} mm below its pivots "
-                f"(need {B4B_HANDLE_DROP_MIN:g} mm for fingers)"
+                f"(need {handle.min_drop:.1f} mm for fingers)"
             )
         if handle.projection > B4B_HANDLE_MAX_PROJECTION + _EPS:
             raise ValueError(

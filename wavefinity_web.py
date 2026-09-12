@@ -124,7 +124,7 @@ from organizer_app import (
     validate_customization_clearance,
 )
 from organizer_b4b import (
-    B4B_HANDLE_GRIP_MIN,
+    B4B_HANDLE_GRIP_ABS_MIN,
     B4B_LATCHED_MIN_HEIGHT,
     B4B_MIN_FIELD_XY,
     B4B_MIN_WALL,
@@ -472,7 +472,7 @@ def catalog_payload() -> dict[str, Any]:
             "wall_choices": [
                 {"value": value, "label": label} for value, label in B4B_WALL_PRESETS
             ],
-            "handle_min_grip_mm": B4B_HANDLE_GRIP_MIN,
+            "handle_min_grip_mm": B4B_HANDLE_GRIP_ABS_MIN,
             "stack_min_base_mm": B4B_STACK_MIN_BASE,
         },
         "setting_interactions": [
