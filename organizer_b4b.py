@@ -1258,7 +1258,7 @@ def b4b_handle_eligibility(box: BoxSpec) -> tuple[bool, str]:
     fits, required, available = b4b_handle_width_fit(box)
     if not fits:
         min_width = b4b_handle_min_width(box)
-        return False, f"Minimum size must be {min_width:g} mm wide."
+        return False, f"Minimum width must be {min_width:g} mm."
     axis_z = b4b_rim_z_from_eff(eff) - B4B_HANDLE_RIM_DROP
     available_drop = axis_z - B4B_HANDLE_BOTTOM_MARGIN - B4B_HANDLE_BAND / 2.0
     if min(B4B_HANDLE_DROP, available_drop) + _EPS < B4B_HANDLE_DROP_MIN:
