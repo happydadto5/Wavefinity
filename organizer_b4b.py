@@ -350,8 +350,8 @@ B4B_PRINT_PART_GAP = 8.0
 # Stacking boss self-locating lead-in (a real printed taper, not a claim).
 B4B_STACK_BOSS_CHAMFER = 0.6
 
-# --- rear hinges (exactly two on every secure lid) ------------------------- #
-B4B_HINGE_COUNT = 2
+# --- rear hinges (one or two based on case width) --------------------------- #
+B4B_HINGE_THRESHOLD_MM = 160.0
 # Lid opening requirement.  This is a case lid, not a fold-flat box.
 B4B_LID_OPEN_ANGLE = 120.0
 B4B_SWEEP_STEP_DEG = 5.0
@@ -1057,9 +1057,10 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
     fillet = min(B4B_HW_FILLET, 0.5 * B4B_LID_FITTING_DROP, 0.3 * profile.pivot_radius)
     wall_depth = eff.wall_depth
 
-    # ---- rear hinges: exactly two, nominally at +/- child_x/4 -------------- #
+    # ---- rear hinges: one or two based on width, nominally at +/- child_x/4 -- #
+    hinge_count = 2 if eff.x > B4B_HINGE_THRESHOLD_MM else 1
     hinge_centers_x = _root_centres(
-        layout, eff.x / 4.0, profile.hinge_root_width, B4B_HINGE_COUNT
+        layout, eff.x / 4.0, profile.hinge_root_width, hinge_count
     )
     hinge_half = profile.hinge_root_width / 2.0
     rear_crest = max(
@@ -1141,7 +1142,7 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
 
     return B4BHardwarePlan(
         profile=profile,
-        hinge_count=B4B_HINGE_COUNT,
+        hinge_count=hinge_count,
         hinge_centers_x=hinge_centers_x,
         hinge_width=profile.group_width,
         hinge_screw_length_mm=hinge_screw,
