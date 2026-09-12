@@ -3455,7 +3455,7 @@ def b4b_front_label_geometry(box: BoxSpec):
     )
     slot.apply_translation(
         (-endstop,
-         y_wall - depth + 1.4 + channel_t / 2.0,
+         y_wall - 1.4 - channel_t / 2.0,
          mid_z)
     )
     frame = difference([outer, slot])
@@ -3499,7 +3499,7 @@ def b4b_front_label_geometry(box: BoxSpec):
     detent_ry = min(0.4, plate_t * 0.3)  # stays well inside the thin plate
     detent_rz = 2.0 * ramp
     detent_x = holder_w / 2.0 - endstop
-    detent_y = y_wall - depth + 1.4 + channel_t / 2.0
+    detent_y = y_wall - 1.4 - channel_t / 2.0
     dome = trimesh.creation.icosphere(subdivisions=2, radius=1.0)
     dome.apply_scale((detent_rx, detent_ry, detent_rz))
     dome.apply_translation((detent_x, detent_y, mid_z))
@@ -3511,7 +3511,7 @@ def b4b_front_label_geometry(box: BoxSpec):
 
     plate_centre = (
         -endstop / 2.0,
-        y_wall - depth + 1.4 + clear + plate_t / 2.0,
+        y_wall - 1.4 - channel_t / 2.0,
         mid_z,
     )
     return frame, plate, text_solid, plate_centre
