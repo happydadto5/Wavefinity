@@ -1122,7 +1122,6 @@ async function toggleB4B(wantEnabled) {
       if (!ok) { $("#bin-type").value = "single"; return; }
       state.design.layout.features = [];
     }
-    const raisedAxes = [];
     for (const [axis, label] of [["x", "Width"], ["y", "Length"]]) {
       if (number(state.design.box[axis], 0) < B4B_MIN_FIELD - 1e-9) {
         state.design.box[axis] = B4B_MIN_FIELD;
@@ -1131,14 +1130,7 @@ async function toggleB4B(wantEnabled) {
           formatDimField(axis);
           flashField(input);
         }
-        raisedAxes.push(label);
       }
-    }
-    if (raisedAxes.length && sizeNote) {
-      sizeNote.textContent =
-        `B4B needs at least ${B4B_MIN_FIELD} × ${B4B_MIN_FIELD} mm. ` +
-        `${raisedAxes.join(" and ")} set to ${B4B_MIN_FIELD} mm.`;
-      sizeNote.hidden = false;
     }
     // An unsaved draft, a selection, or a pending debounced draft action must
     // not survive into B4B mode and later reinsert a part. clearDraftSelection
