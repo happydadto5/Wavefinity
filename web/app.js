@@ -452,9 +452,18 @@ function syncWallControls() {
   const rules = state.catalog?.wall_rules || {};
   $("#standard-walls").disabled = stacking;
   $("#wall-thickness-setting").hidden = standard;
+  // Warn on the thinnest wall a new design can actually be given. This used to
+  // compare against rules.min_mm, which is the validation floor (0.2) and is no
+  // longer offered - so the warning could never fire on the 0.4 mm prototype
+  // preset it exists for.
+  const thinnest = number(
+    (Array.isArray(rules.choices) && rules.choices.length
+      ? rules.choices[0].value
+      : 0.4),
+    0.4,
+  );
   $("#thin-wall-warning").hidden = stacking || standard || Math.abs(
-    number($("#wall-thickness").value, rules.default_mm ?? 0.8)
-      - (rules.min_mm ?? 0.2)
+    number($("#wall-thickness").value, rules.default_mm ?? 0.8) - thinnest
   ) > 1e-9;
 }
 
@@ -903,11 +912,11 @@ function renderB4BReadout() {
   envelopeLine.textContent =
     `Complete assembled envelope: ${b4b.assembled_envelope_mm[0]} x ` +
     `${b4b.assembled_envelope_mm[1]} x ${b4b.assembled_envelope_mm[2]} mm`;
-  if (b4b.grew) {
+  if (b4b.base_thickened) {
     grew.hidden = false;
     grew.textContent =
-      `Bin field grown to ${b4b.field_mm[0]} x ${b4b.field_mm[1]} x ${b4b.field_mm[2]} mm ` +
-      `(${b4b.field_units[0]} x ${b4b.field_units[1]} units).`;
+      `Base thickened to ${b4b.effective_base_thickness_mm} mm so the stacking ` +
+      `recesses keep a printable floor. Bin field is unchanged.`;
   } else {
     grew.hidden = true;
   }

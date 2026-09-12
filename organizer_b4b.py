@@ -63,7 +63,6 @@ B4B_STACK_SOCKET_DEPTH = 1.6
 B4B_STACK_SOCKET_INTERFERENCE = 0.08
 B4B_STACK_INSET_FRACTION = 0.16  # locator centre inset from each outer edge
 B4B_STACK_INSET_MIN = 4.0
-B4B_STACK_MIN_FOOTPRINT_UNITS = 3  # smallest box that still gets four locators
 
 # Lid
 B4B_LID_SKIN = 1.6              # passive lid top plate thickness
@@ -297,7 +296,6 @@ B4B_MIN_WALL = 1.2
 # at the inner mating face, crosses the whole local wall band and grows
 # outward to the profile's ``*_root_depth``.
 B4B_HW_CLEARANCE = 0.6            # static gap, body fitting to lid fitting
-B4B_HW_ROOT_TAPER = 45.0          # plan-view and underside root fade, degrees
 # A root is two tapered buttresses under its two ears, not a slab: the moving
 # member (latch lever, handle bail) nests in the relief between them.  This is
 # the running gap left around that member when the relief is cut.
@@ -343,7 +341,6 @@ B4B_HINGE_MAX_PROJECTION = {"M2": 5.75, "M3": 7.0}
 B4B_LATCH_TWO_ABOVE_FIELD_X = 96.0
 B4B_LATCH_RELEASE_ANGLE = 25.0   # hook must be off the pin by here
 B4B_LATCH_OPEN_ANGLE = 75.0      # full sampled swing
-B4B_LATCH_BODY_CLEARANCE = 0.8   # running gap, swinging lever to the body
 B4B_LATCH_DETENT = 0.20          # hook-mouth interference against the pin
 B4B_LATCH_MAX_PROJECTION = {"M2": 6.0, "M3": 9.0}
 
@@ -357,6 +354,19 @@ B4B_HANDLE_GRIP_MAX = 95.0         # a hand does not benefit from more
 B4B_HANDLE_GRIP_FRACTION = 0.75    # of the child field width, then clamped
 B4B_HANDLE_BAND = 6.5              # in-plane band width of the lower U
 B4B_HANDLE_EYE_BAND = 5.4          # tapered band at the pivot eye
+# The fork's own axial stack.  It is NOT the hinge/latch stack: the rotating
+# member here is the 5.4 mm handle eye, not a 3.2 mm lid ear, so the fork is
+# 12.0 mm wide and its near ear is 2.6 mm.  Reusing the hinge stack put the
+# eye straight through both ears.
+B4B_HANDLE_NEAR_EAR = 2.6
+B4B_HANDLE_FAR_LUG = 3.4
+B4B_HANDLE_FORK_WIDTH = (
+    B4B_HANDLE_NEAR_EAR + B4B_HANDLE_EYE_BAND + B4B_HANDLE_FAR_LUG
+    + 2.0 * B4B_RUNNING_GAP
+)
+B4B_HANDLE_FORK_CLEAR_SPAN = (
+    B4B_HANDLE_NEAR_EAR + B4B_HANDLE_EYE_BAND + 2.0 * B4B_RUNNING_GAP
+)
 B4B_HANDLE_TAPER_RUN = 8.0         # vertical run of that taper
 B4B_HANDLE_EYE_RADIUS = 2.9
 B4B_HANDLE_THICKNESS = 2.0 * B4B_HANDLE_EYE_RADIUS   # 5.8 front-to-back
@@ -372,8 +382,10 @@ B4B_HANDLE_DETENT = 0.20           # stow detent interference
 B4B_HANDLE_DETENT_BUMP = 0.35      # body bump height
 B4B_HANDLE_DETENT_RAMP = 0.5
 B4B_HANDLE_MAX_PROJECTION = 7.25   # folded, including the local head flare
+# Softening on the exposed perimeter edge.  The opposite face stays perfectly
+# flat: it is the bail's print bed.
 B4B_HANDLE_EDGE_CHAMFER = 1.0
-B4B_HANDLE_FILLET = 1.6
+B4B_HANDLE_EDGE_STEPS = 4
 B4B_HANDLE_FORK_ROOT_WIDTH = 16.0
 B4B_HANDLE_ROOT_ABOVE = 6.0        # root reach above the pivot centre
 B4B_HANDLE_ROOT_BELOW = 12.0       # and below it
@@ -576,10 +588,8 @@ def b4b_handle_width_fit(box: BoxSpec) -> tuple[bool, float, float]:
     and what is left has to span the target clear grip plus one band width.
     """
     layout = b4b_layout(box)
-    profile = B4B_HANDLE_PROFILE
-    fork = profile.group_width
     max_pivot_span = _usable_front_span(layout) - 2.0 * (
-        fork / 2.0 + B4B_ROOT_CORNER_CLEARANCE
+        B4B_HANDLE_FORK_WIDTH / 2.0 + B4B_ROOT_CORNER_CLEARANCE
     )
     required = b4b_handle_grip_target(b4b_effective_box(box).x) + B4B_HANDLE_BAND
     return max_pivot_span + _EPS >= required, required, max_pivot_span
@@ -628,14 +638,25 @@ def b4b_effective_box(box: BoxSpec) -> BoxSpec:
 
 
 def b4b_grew(box: BoxSpec) -> bool:
-    """Whether the effective box differs from what the user entered."""
+    """Whether anything about the effective box differs from the request.
+
+    The child field is authoritative and is never touched, so the only thing
+    this can still report is the stacking base: a recessed underside needs a
+    printable floor skin beneath it.  That changes no child dimension and no
+    capacity, and it is reported as what it is rather than as the box having
+    been resized.
+    """
     eff = b4b_effective_box(box)
-    return not (
+    if not (
         math.isclose(eff.x, box.x)
         and math.isclose(eff.y, box.y)
         and math.isclose(eff.z, box.z)
-        and math.isclose(eff.base_thickness, box.base_thickness)
-    )
+    ):
+        raise RuntimeError(
+            "B4B changed the requested child field - the effective box must "
+            "never resize X, Y or Z"
+        )
+    return not math.isclose(eff.base_thickness, box.base_thickness)
 
 
 def b4b_max_child_height(box: BoxSpec) -> float:
@@ -1201,7 +1222,7 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
     pivot_span = clear_grip + B4B_HANDLE_BAND
     half = pivot_span / 2.0
 
-    fork_half = profile.group_width / 2.0
+    fork_half = B4B_HANDLE_FORK_WIDTH / 2.0
     front_crest = min(
         _wall_extreme_y(layout, -half - fork_half, half + fork_half, -1.0),
         _wall_extreme_y(layout, -half, half, -1.0),
@@ -1222,10 +1243,7 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
     detent_cx = half - B4B_HANDLE_BAND / 2.0
 
     screw = _screw_for_stack(
-        profile,
-        profile.near_ear + B4B_HANDLE_EYE_BAND + 2.0 * B4B_RUNNING_GAP,
-        profile.far_lug,
-        "handle pivot",
+        profile, B4B_HANDLE_FORK_CLEAR_SPAN, B4B_HANDLE_FAR_LUG, "handle pivot"
     )
     return B4BHandlePlan(
         profile=profile,
@@ -1669,6 +1687,22 @@ def _lid_root_profile(
     ])
 
 
+def _handle_fork_positions(centre_x: float) -> tuple[float, float]:
+    """``(near_ear_x, far_lug_x)`` for one handle fork.
+
+    Unlike a hinge or latch stack, this is laid out about the *eye* rather than
+    about the group centre: ``centre_x`` is the pivot axis, the eye sits on it,
+    and the two ears stand off it by one running gap each.  The near (head)
+    ear is outboard and the thread-forming lug faces the case centre, so both
+    screws go in from the sides and the middle of the case stays clean.
+    """
+    out = 1.0 if centre_x >= 0.0 else -1.0
+    inner = B4B_HANDLE_EYE_BAND / 2.0 + B4B_RUNNING_GAP
+    near = centre_x + out * (inner + B4B_HANDLE_NEAR_EAR / 2.0)
+    far = centre_x - out * (inner + B4B_HANDLE_FAR_LUG / 2.0)
+    return near, far
+
+
 def _stack_positions(
     centre_x: float, profile: HardwareProfile
 ) -> tuple[float, float, float]:
@@ -1752,9 +1786,9 @@ def _root_taper_prism(
 
 
 def _relief_cutter(
-    *, half_top: float, half_bottom: float, z_top: float, z_ramp_top: float,
-    z_ramp_bottom: float, z_bottom: float, crest_y: float, face_y: float,
-    outward_sign: float,
+    *, centre_x: float, half_top: float, half_bottom: float, z_top: float,
+    z_ramp_top: float, z_ramp_bottom: float, z_bottom: float, crest_y: float,
+    face_y: float, outward_sign: float,
 ) -> trimesh.Trimesh:
     """The running slot a moving member nests in, cut through a root.
 
@@ -1781,7 +1815,9 @@ def _relief_cutter(
     cutter = _extrude_xz_profile(Polygon(pts), depth)
     # the helper centres its extrusion on Y=0, so slide the slot so it starts at
     # the wall crest and runs outward past the root's face
-    cutter.apply_translation((0.0, crest_y + outward_sign * depth / 2.0, 0.0))
+    cutter.apply_translation(
+        (centre_x, crest_y + outward_sign * depth / 2.0, 0.0)
+    )
     return cutter
 
 
@@ -2040,6 +2076,7 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
             profile.mid_member / 2.0 + B4B_RUNNING_GAP + B4B_HW_RELIEF_CLEARANCE
         )
         relief = _relief_cutter(
+            centre_x=cx,
             half_top=relief_half,
             half_bottom=relief_half,
             z_top=plan.latch_root_top_z + 1.0,
@@ -2183,8 +2220,12 @@ def make_b4b_latches(box: BoxSpec) -> list[trimesh.Trimesh]:
     outline = b4b_latch_lever_profile(plan)
     levers: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
+        # The strap is the stack's middle member, so it sits where the stack
+        # puts it - not on the group centre.  Centring it on the group left it
+        # touching the far lug on one side and 0.6 mm clear on the other.
+        _near_x, mid_x, _far_x = _stack_positions(cx, plan.profile)
         lever = _extrude_yz_profile(outline, plan.profile.mid_member)
-        lever.apply_translation((cx, 0.0, 0.0))
+        lever.apply_translation((mid_x, 0.0, 0.0))
         levers.append(lever)
     return levers
 
@@ -2192,6 +2233,61 @@ def make_b4b_latches(box: BoxSpec) -> list[trimesh.Trimesh]:
 # --------------------------------------------------------------------------- #
 # folding front handle
 # --------------------------------------------------------------------------- #
+def _handle_bore_profile(radius: float, roof_sign: float) -> Polygon:
+    """Teardrop section for the bail's pivot bore.
+
+    The bore runs on world X like every other B4B pivot, but the bail prints on
+    its broad face, so its print-up direction is world *Y*, not Z.  The shared
+    helper draws its ridge along the section's second axis, so it is turned a
+    quarter turn here; extruding it unturned left the ridge lying sideways and
+    the bore with a plain unsupported round roof.
+    """
+    from shapely.affinity import rotate as rotate_polygon
+
+    return rotate_polygon(
+        support_free_bore_profile_yz(radius, 1.0),
+        -90.0 * roof_sign,
+        origin=(0.0, 0.0),
+    )
+
+
+def _softened_slab(
+    outline: Polygon, thickness: float, chamfer: float, up: float
+) -> trimesh.Trimesh:
+    """The bail's section, with its exposed perimeter edge broken back.
+
+    A carried part should not present a square extruded edge to the hand.  The
+    softening is applied to one face only so the other stays a broad flat
+    printing surface, and it is built as short 45-degree treads rather than a
+    single draft so every face remains either vertical or flat - nothing here
+    may introduce a down-facing overhang.
+    """
+    steps = max(1, B4B_HANDLE_EDGE_STEPS)
+    lo, hi = -thickness / 2.0, thickness / 2.0
+    layers = [_extrude_polygon(outline, thickness - chamfer)]
+    layers[0].apply_translation((0.0, 0.0, lo if up > 0 else lo + chamfer))
+    for i in range(1, steps + 1):
+        inset = chamfer * i / steps
+        ring = outline.buffer(-inset, join_style=1, quad_segs=12)
+        if ring.is_empty or not isinstance(ring, Polygon):
+            break
+        tread = chamfer / steps
+        base = (hi - chamfer + (i - 1) * tread) if up > 0 else (lo + chamfer - i * tread)
+        layer = _extrude_polygon(ring, tread + 1e-3)
+        layer.apply_translation((0.0, 0.0, base))
+        layers.append(layer)
+    solid = union(layers) if len(layers) > 1 else layers[0]
+    # the stack was built in X/Y/Z; roll it so the outline lands on X/Z and the
+    # thickness runs across Y, the way the bail sits on the case
+    solid.apply_transform(np.asarray([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]))
+    return solid
+
+
 def _handle_centreline(plan: B4BHandlePlan):
     """The U's centreline path, arms plus a real radiused lower corner."""
     from shapely.geometry import LineString
@@ -2225,18 +2321,25 @@ def b4b_handle_outline(plan: B4BHandlePlan) -> Polygon:
     )
     if not isinstance(outline, Polygon) or not outline.is_valid:
         raise RuntimeError("the B4B handle outline did not resolve")
-    # taper the band down to the eye width over the top run, so a compact M3
-    # pivot stack fits without thinning the part a hand actually holds
+    # Taper the band down to the eye width over the top run, so a compact M3
+    # pivot stack fits without thinning the part a hand actually holds.  The
+    # taper is symmetric about each arm's own centreline - narrowing only the
+    # outer edges would leave the inner face full width and drive the arm
+    # straight into the fork's thread-forming lug.
     half = plan.pivot_span / 2.0
     eye = plan.eye_band / 2.0
     z_hi = plan.axis_z + plan.eye_radius + 2.0
     z_lo = plan.axis_z - B4B_HANDLE_TAPER_RUN
     keeper = Polygon([
         (-half - band, -1e4), (half + band, -1e4),
-        (half + band, z_lo), (half + eye, plan.axis_z),
-        (half + eye, z_hi), (-half - eye, z_hi),
-        (-half - eye, plan.axis_z), (-half - band, z_lo),
+        (half + band, z_lo), (-half - band, z_lo),
     ])
+    for cx in plan.centers_x:
+        keeper = keeper.union(Polygon([
+            (cx - band, z_lo), (cx + band, z_lo),
+            (cx + eye, plan.axis_z), (cx + eye, z_hi),
+            (cx - eye, z_hi), (cx - eye, plan.axis_z),
+        ]))
     trimmed = outline.intersection(keeper)
     if isinstance(trimmed, Polygon) and trimmed.is_valid and not trimmed.is_empty:
         outline = trimmed
@@ -2254,7 +2357,11 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
     if plan is None:
         return None
     outline = b4b_handle_outline(plan)
-    slab = _extrude_xz_profile(outline, plan.thickness)
+    # The bail prints with its wall-facing side on the bed, so the exposed side
+    # is the one that gets the edge softening.
+    slab = _softened_slab(
+        outline, plan.thickness, B4B_HANDLE_EDGE_CHAMFER, up=-1.0
+    )
     slab.apply_translation((0.0, plan.axis_y, 0.0))
 
     # above the axis the part is the pivot eye, so keep only what lies inside
@@ -2280,7 +2387,7 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
     for cx in plan.centers_x:
         stops.append(_handle_stop_heel(plan, cx, heel_r))
         bore = _extrude_yz_profile(
-            support_free_bore_profile_yz(plan.profile.clear_bore / 2.0, 1.0),
+            _handle_bore_profile(plan.profile.clear_bore / 2.0, -1.0),
             plan.eye_band + 4.0,
         )
         bore.apply_translation((cx, plan.axis_y, plan.axis_z))
@@ -2336,7 +2443,7 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
     parts: list[trimesh.Trimesh] = []
     for cx in plan.centers_x:
         out = 1.0 if cx >= 0.0 else -1.0
-        near_x, _mid_x, far_x = _stack_positions(cx, profile)
+        near_x, far_x = _handle_fork_positions(cx)
         half = plan.root_width / 2.0 + 1.0
         cavity = _cavity_prism(box, cx - half, cx + half)
         height = plan.root_top_z - plan.root_bottom_z
@@ -2361,8 +2468,8 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
         )
         solid = _intersection([root, keeper])
         for ex, thickness, terminal in (
-            (near_x, profile.near_ear, False),
-            (far_x, profile.far_lug, True),
+            (near_x, B4B_HANDLE_NEAR_EAR, False),
+            (far_x, B4B_HANDLE_FAR_LUG, True),
         ):
             section = _filleted(
                 _gusset(
@@ -2398,6 +2505,7 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
         # the bail nests between the ears, so the root is two buttresses with a
         # running slot between them, never a slab across the whole wall contact
         relief = _relief_cutter(
+            centre_x=cx,
             half_top=plan.eye_band / 2.0 + B4B_RUNNING_GAP,
             half_bottom=plan.band / 2.0 + B4B_HW_RELIEF_CLEARANCE,
             z_top=plan.root_top_z + 2.0,
@@ -2419,8 +2527,13 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
         pad.apply_translation((cx, plan.front_crest + 0.6, plan.axis_z))
         parts.append(union([solid, pad]))
     for cx in plan.detent_centers_x:
-        bump = trimesh.creation.icosphere(subdivisions=2, radius=1.6)
-        bump.apply_scale((1.0, (plan.wall_clear + plan.detent_bump) / 1.6, 1.0))
+        # Radius comes from the ramp requirement, not from taste: the bump has
+        # to rise its full height over at least this much run so the arm rides
+        # on a slope shallower than 45 degrees instead of hitting a step.
+        stand = plan.wall_clear + plan.detent_bump
+        radius = max(2.0 * B4B_HANDLE_DETENT_RAMP, stand + B4B_HANDLE_DETENT_RAMP)
+        bump = trimesh.creation.icosphere(subdivisions=2, radius=radius)
+        bump.apply_scale((1.0, stand / radius, 1.0))
         bump.apply_translation((cx, plan.front_crest, plan.detent_z))
         parts.append(bump)
     return parts
@@ -2492,6 +2605,12 @@ def _sweep_intersection_cc(
 # construction everywhere; this allowance exists because mesh booleans on a
 # wavy case leave slivers, never to give a real clash somewhere to hide.
 B4B_NOISE_CC = 0.05
+# The only interference a stowed bail may show is its two stow detents.  This
+# is an *absolute* ceiling on that, checked alongside the swept comparison:
+# a baseline comparison on its own cannot see a rotation-invariant clash,
+# because an eye buried in its own fork overlaps by the same amount at every
+# angle and therefore never looks like motion adding interference.
+B4B_HANDLE_STOWED_CEIL_CC = 0.02
 
 
 def _validate_b4b_mechanics(box: BoxSpec) -> None:
@@ -2520,8 +2639,8 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
     if handle is not None:
         paths.append((
             "handle pivot",
-            handle.profile.near_ear + handle.eye_band + 2.0 * B4B_RUNNING_GAP,
-            handle.profile.far_lug,
+            B4B_HANDLE_FORK_CLEAR_SPAN,
+            B4B_HANDLE_FAR_LUG,
             handle.screw_length_mm,
         ))
     for what, span, lug, screw in paths:
@@ -2569,6 +2688,13 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
         stowed = _sweep_intersection_cc(
             bail, body, handle.axis_y, handle.axis_z, angles_deg=(0.0,)
         )
+        if stowed > B4B_HANDLE_STOWED_CEIL_CC:
+            raise ValueError(
+                f"the stowed handle interferes with the case by "
+                f"{stowed:.3f} cc (allowance "
+                f"{B4B_HANDLE_STOWED_CEIL_CC:.2f} cc for the stow detents "
+                f"alone); the bail must fold onto clearance, not into its forks"
+            )
         if worst > stowed + B4B_NOISE_CC:
             raise ValueError(
                 f"the carrying handle strikes the case while folding out "
@@ -2708,16 +2834,18 @@ def validate_b4b_design(
             f"({round(min_x / GRID_PITCH)}U x {round(min_y / GRID_PITCH)}U); "
             f"{box.x:g} x {box.y:g} mm is too small to carry the hardware"
         )
-    if box.wall + _EPS < B4B_MIN_WALL:
+    min_wall = b4b_required_min_wall(box)
+    if box.wall + _EPS < min_wall:
         raise ValueError(
-            f"a B4B wall is at least {B4B_MIN_WALL:g} mm - this design is set "
+            f"a B4B wall is at least {min_wall:g} mm - this design is set "
             f"to {box.wall:g} mm; raise the wall before regenerating"
         )
-    if b4b.secure_lid and box.z + _EPS < B4B_LATCHED_MIN_HEIGHT:
+    min_height = b4b_secure_min_height()
+    if b4b.secure_lid and box.z + _EPS < min_height:
         raise ValueError(
-            f"a latched B4B lid needs at least "
-            f"{B4B_LATCHED_MIN_HEIGHT:g} mm of bin height; this design is "
-            f"{box.z:g} mm - use Lid Only or a taller B4B"
+            f"a latched B4B lid needs at least {min_height:g} mm of bin "
+            f"height; this design is {box.z:g} mm - use Lid Only or a taller "
+            f"B4B"
         )
 
     cx, cy = b4b_capacity_units(box)
@@ -2861,6 +2989,13 @@ def validate_b4b_design(
                         f"this B4B is too wide for a centred bail and its "
                         f"latches at once"
                     )
+        detent = profile.nominal - profile.hook_mouth
+        if abs(detent - B4B_LATCH_DETENT) > 0.05 + _EPS:
+            raise ValueError(
+                f"the {profile.name} hook mouth gives {detent:.2f} mm of pin "
+                f"interference, away from the {B4B_LATCH_DETENT:.2f} mm detent "
+                f"the latch is tuned around (band 0.15-0.25 mm)"
+            )
         _validate_latch_release(plan)
 
     if deep:
@@ -2903,7 +3038,12 @@ def b4b_summary(box: BoxSpec) -> dict:
         min_y = min(min_y, plan.pivot_axis_y - flare_out)
         max_y = max(max_y, plan.hinge_axis_y + flare_out)
         top_z = max(top_z, plan.hinge_axis_z + plan.profile.pivot_radius)
-    handle = b4b_handle_plan(box)
+    # The readout has to survive a design the geometry would refuse, because
+    # reporting *why* the handle cannot be fitted is most of its job: raising
+    # here would leave the UI with no summary at all and therefore nothing to
+    # explain itself with.
+    handle_ok, handle_why = b4b_handle_eligibility(box)
+    handle = b4b_handle_plan(box) if (b4b.handle and handle_ok) else None
     if handle is not None:
         # The bail folds against the front wall, so it costs depth, not height:
         # a handled case still stacks.
@@ -2920,7 +3060,7 @@ def b4b_summary(box: BoxSpec) -> dict:
         "assembled_envelope_mm": [
             round(max_x - min_x, 3), round(max_y - min_y, 3), round(top_z, 3)
         ],
-        "grew": b4b_grew(box),
+        "base_thickened": b4b_grew(box),
         "capacity_units": [cx, cy],
         "capacity_mm": [round(mx, 2), round(my, 2)],
         "max_child_height_mm": round(b4b_max_child_height(box), 2),
@@ -2930,6 +3070,7 @@ def b4b_summary(box: BoxSpec) -> dict:
         "lid_headroom_mm": b4b.lid_headroom_mm,
         "stacking": b4b.stacking,
         "handle": handle is not None,
+        "handle_requested": b4b.handle,
         "label_location": b4b.label_location if b4b.label_text.strip() else "none",
         "label_text": b4b.label_text,
         "capacity_text": (
@@ -2990,8 +3131,8 @@ def b4b_summary(box: BoxSpec) -> dict:
         bom.insert(max(0, len(bom) - 1) if bom else 0, line)
         if not bom or bom[-1] != "No nuts":
             bom.append("No nuts")
-    summary["handle_available"] = b4b_handle_eligibility(box)[0]
-    summary["handle_blocked_reason"] = b4b_handle_eligibility(box)[1]
+    summary["handle_available"] = handle_ok
+    summary["handle_blocked_reason"] = handle_why
     return summary
 
 
@@ -3297,12 +3438,14 @@ def _print_pose(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
             trimesh.transformations.rotation_matrix(math.pi, (1.0, 0.0, 0.0))
         )
     elif kind == "handle":
-        # lay the bail on its broad face: the U outline is extruded along local
-        # Y, so that axis rolls onto the bed's Z, the lower radii become plain
-        # 2D outline geometry and only the pivot bores stay horizontal - and
-        # those are teardropped for exactly this pose
+        # Lay the bail on its broad face.  The U outline runs across local Y,
+        # so that axis rolls onto the bed's Z, the lower radii become plain 2D
+        # outline geometry and only the pivot bores stay horizontal - and those
+        # are teardropped for exactly this pose.  The roll is negative so the
+        # wall-facing side lands on the bed and the softened exposed edge
+        # finishes upward.
         m.apply_transform(
-            trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
+            trimesh.transformations.rotation_matrix(-math.pi / 2.0, (1.0, 0.0, 0.0))
         )
     return m
 

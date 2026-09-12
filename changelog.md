@@ -37,6 +37,14 @@
   1.2 mm. Saved designs keep whatever wall they were made with.
 - Front labels now sit inside the folded handle, which frames them rather than
   covering them.
+- The bail's exposed edge is broken back so a loaded case does not hang off a
+  square extruded corner; the other face stays flat for printing.
+- The "very thin wall" warning works again. It was keyed to a 0.2 mm value that
+  is no longer offered, so it never appeared on the 0.4 mm prototype preset it
+  exists for.
+- Turning on stacking now says the *base* was thickened, which is what actually
+  happens. It used to report that the bin field had been grown, which was both
+  wrong and the one thing B4B no longer does.
 
 ## 2026-09-12 — Stack height and support-free snap correction
 
