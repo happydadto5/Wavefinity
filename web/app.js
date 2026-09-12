@@ -3952,14 +3952,39 @@ function faceLighting(normal) {
   return Math.max(0.42, Math.min(1.2, light));
 }
 
+// Lighting is a smooth function of a face normal, and every face of one flat
+// surface shares it, so the shaded colour repeats over and over. Quantise the
+// multiplier and memoise the result: per-face regex, parseInt and string
+// building become a map lookup, which on a mesh preview is the difference
+// between a fluid spin and a slideshow. 128 steps over the 0.42-1.2 range is
+// under one part in 255 - below what a screen can show.
+const SHADE_STEPS = 128;
+const shadeCache = new Map();
+
+function shadedColor(kind, normal) {
+  const step = Math.round(faceLighting(normal) * SHADE_STEPS);
+  const key = `${kind}|${step}`;
+  let hit = shadeCache.get(key);
+  if (hit === undefined) {
+    hit = shade(kindColor(kind), step / SHADE_STEPS);
+    shadeCache.set(key, hit);
+  }
+  return hit;
+}
+
 // Opaque neutral ground so the object has something to sit against, plus a soft
 // contact shadow projected from the model's base rectangle - cheap grounding,
 // no ray tracing.
+let backdropCache = null;
+
 function paintBackdrop(context, width, height) {
-  const bg = context.createLinearGradient(0, 0, 0, height);
-  bg.addColorStop(0, "#eef1f2");
-  bg.addColorStop(1, "#dfe4e5");
-  context.fillStyle = bg;
+  if (!backdropCache || backdropCache.context !== context || backdropCache.height !== height) {
+    const bg = context.createLinearGradient(0, 0, 0, height);
+    bg.addColorStop(0, "#eef1f2");
+    bg.addColorStop(1, "#dfe4e5");
+    backdropCache = { context, height, bg };
+  }
+  context.fillStyle = backdropCache.bg;
   context.fillRect(0, 0, width, height);
 }
 
@@ -4023,6 +4048,11 @@ function canvasSize(canvas) {
   return { context, width, height };
 }
 
+// A B4B preview is one triangle per mesh face - well over a hundred thousand of
+// them on a big case. At that size the painter loop is the whole cost of a
+// spin, so it is written flat: no per-face object spread, no closures, no
+// throwaway arrays, no string colour maths, and back faces are dropped before
+// anything is projected. The picture it paints is the same one as before.
 function drawGeometry(canvas, geometry, camera) {
   const { context, width, height } = canvasSize(canvas);
   paintBackdrop(context, width, height);
@@ -4039,8 +4069,12 @@ function drawGeometry(canvas, geometry, camera) {
   if (boreAxes.length) geometry = geometry.filter(face => !face.kind?.endsWith("bore_axis"));
   const vector = cameraVector(camera);
   const yawRad = camera.yaw * Math.PI / 180;
-  const camX = -Math.sin(yawRad);
-  const camY = -Math.cos(yawRad);
+  const elevationRad = camera.elevation * Math.PI / 180;
+  const cosYaw = Math.cos(yawRad), sinYaw = Math.sin(yawRad);
+  const cosEl = Math.cos(elevationRad), sinEl = Math.sin(elevationRad);
+  const camX = -sinYaw;
+  const camY = -cosYaw;
+  const vx = vector[0], vy = vector[1], vz = vector[2];
 
   const isBinFace = kind =>
     kind === "outside" || kind === "inside" || kind === "rim" || kind === "floor" ||
@@ -4077,19 +4111,37 @@ function drawGeometry(canvas, geometry, camera) {
     return false;
   };
 
-  const faces = geometry.map(face => {
-    const points = face.points.map(point => iso(point, camera));
-    const depth = face.points.reduce((sum, point) => sum + dot(point, vector), 0) / face.points.length;
-    const facing = dot(face.normal, vector);
-    return { ...face, projected: points, depth, facing };
-  }).filter(face => {
-    const isBin = isBinFace(face.kind);
-    const mode = state.previewMode || "standard";
-    if (mode === "bin" && !isBin) return false;
-    if (mode === "interior" && isBin) return false;
-    if (mode === "xray" && isBin && isFacingSide(face)) return false;
-    return face.facing > 0 || face.kind === "label_hole";
-  });
+  // Cull first, project second: a back face costs one dot product instead of
+  // an iso() call per corner.
+  const mode = state.previewMode || "standard";
+  const faces = [];
+  for (let index = 0; index < geometry.length; index += 1) {
+    const face = geometry[index];
+    const kind = face.kind;
+    const normal = face.normal;
+    const facing = normal[0] * vx + normal[1] * vy + normal[2] * vz;
+    if (facing <= 0 && kind !== "label_hole") continue;
+    const isBin = isBinFace(kind);
+    if (mode === "bin" && !isBin) continue;
+    if (mode === "interior" && isBin) continue;
+    if (mode === "xray" && isBin && isFacingSide(face)) continue;
+    const points = face.points;
+    const corners = points.length;
+    const projected = new Float64Array(corners * 2);
+    let depth = 0;
+    for (let at = 0; at < corners; at += 1) {
+      const point = points[at];
+      const px = point[0], py = point[1], pz = point[2];
+      const forward = px * sinYaw + py * cosYaw;
+      projected[at * 2] = px * cosYaw - py * sinYaw;
+      projected[at * 2 + 1] = -forward * sinEl - pz * cosEl;
+      depth += px * vx + py * vy + pz * vz;
+    }
+    faces.push({
+      kind, normal, points, projected, corners,
+      depth: depth / corners, layer: number(face.layer),
+    });
+  }
   if (!faces.length) return;
   // Lettering sits flush on one big surface (the floor, or the top-label
   // ledge). The painter sort compares face centroids, so a glyph near the edge
@@ -4111,41 +4163,73 @@ function drawGeometry(canvas, geometry, camera) {
       // and a text part arrives on layer 0 like every other holder - under the
       // floor's own layer 1, which would paint straight over it. Lift it onto
       // the layer the floor label has always used.
-      if (number(face.layer) < 2) face.layer = 2;
+      if (face.layer < 2) face.layer = 2;
     }
   }
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const face of faces) for (const point of face.projected) {
-    minX = Math.min(minX, point[0]); maxX = Math.max(maxX, point[0]);
-    minY = Math.min(minY, point[1]); maxY = Math.max(maxY, point[1]);
+  for (const face of faces) {
+    const flat = face.projected;
+    for (let at = 0; at < flat.length; at += 2) {
+      const x = flat[at], y = flat[at + 1];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
   }
   const spanX = Math.max(1e-8, maxX - minX), spanY = Math.max(1e-8, maxY - minY);
   const scale = Math.min((width * 0.75) / spanX, (height * 0.75) / spanY) * camera.zoom;
   const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
   const project = point => [width / 2 + (point[0] - midX) * scale, height / 2 + (point[1] - midY) * scale];
-  faces.sort((a, b) => a.depth - b.depth || number(a.layer) - number(b.layer));
+  const originX = width / 2 - midX * scale;
+  const originY = height / 2 - midY * scale;
+  faces.sort((a, b) => a.depth - b.depth || a.layer - b.layer);
   drawContactShadow(context, state.design?.box, camera, project);
   context.lineJoin = "round";
-  for (const face of faces) {
-    const points = face.projected.map(project);
-    if (points.length < 3) continue;
-    if (/^(feature_|insert_|draft_)/.test(face.kind)) state.previewSupportPolygons.push(points);
+  let penFill = "", penStroke = "", penWidth = -1;
+  for (let index = 0; index < faces.length; index += 1) {
+    const face = faces[index];
+    const flat = face.projected;
+    const corners = face.corners;
+    if (corners < 3) continue;
+    let x = originX + flat[0] * scale, y = originY + flat[1] * scale;
+    let lowX = x, highX = x, lowY = y, highY = y;
     context.beginPath();
-    context.moveTo(points[0][0], points[0][1]);
-    points.slice(1).forEach(point => context.lineTo(point[0], point[1]));
+    context.moveTo(x, y);
+    for (let at = 1; at < corners; at += 1) {
+      x = originX + flat[at * 2] * scale;
+      y = originY + flat[at * 2 + 1] * scale;
+      if (x < lowX) lowX = x; else if (x > highX) highX = x;
+      if (y < lowY) lowY = y; else if (y > highY) highY = y;
+      context.lineTo(x, y);
+    }
     context.closePath();
-    const base = kindColor(face.kind);
-    context.fillStyle = shade(base, faceLighting(face.normal));
+    const kind = face.kind;
+    const isDraft = kind.startsWith("draft_");
+    if (isDraft || kind.startsWith("feature_") || kind.startsWith("insert_")) {
+      const polygon = new Array(corners);
+      for (let at = 0; at < corners; at += 1) {
+        polygon[at] = [originX + flat[at * 2] * scale, originY + flat[at * 2 + 1] * scale];
+      }
+      state.previewSupportPolygons.push(polygon);
+    }
+    const fill = shadedColor(kind, face.normal);
+    if (fill !== penFill) { context.fillStyle = fill; penFill = fill; }
     context.fill();
-    const isDraft = face.kind.startsWith("draft_");
     // Match the seam stroke to the fill first so internal triangulation stops
     // reading as a wireframe, then lay only a whisper of darker contrast where
     // surfaces actually meet.
-    context.strokeStyle = context.fillStyle;
-    context.lineWidth = .8;
+    if (fill !== penStroke) { context.strokeStyle = fill; penStroke = fill; }
+    if (penWidth !== 0.8) { context.lineWidth = 0.8; penWidth = 0.8; }
     context.stroke();
-    context.strokeStyle = isDraft ? "rgba(196,131,20,.45)" : "rgba(18,32,38,.08)";
-    context.lineWidth = isDraft ? .6 : .35;
+    // A face smaller than the seam stroke is already entirely covered by it, so
+    // the contrast pass would land on pixels it has just painted. Skipping it
+    // there costs nothing visible and is most of a mesh preview.
+    if (highX - lowX < 0.6 && highY - lowY < 0.6) continue;
+    const ink = isDraft ? "rgba(196,131,20,.45)" : "rgba(18,32,38,.08)";
+    const inkWidth = isDraft ? 0.6 : 0.35;
+    if (ink !== penStroke) { context.strokeStyle = ink; penStroke = ink; }
+    if (penWidth !== inkWidth) { context.lineWidth = inkWidth; penWidth = inkWidth; }
     context.stroke();
   }
   drawUsableFloor(context, geometry, camera, project);
@@ -4486,17 +4570,29 @@ function wireSupportLayoutDialog() {
 
 function wireSceneInteraction(canvas, camera, render) {
   let drag = null;
+  // A pointer reports far faster than the screen refreshes, and a mesh preview
+  // repaint is expensive. Coalesce to one repaint per frame, always with the
+  // camera as it stands when that frame runs: the same picture, without
+  // queueing up work the screen will never show.
+  let framePending = false;
+  const repaint = () => {
+    if (framePending) return;
+    framePending = true;
+    requestAnimationFrame(() => { framePending = false; render(); });
+  };
   canvas.addEventListener("pointerdown", event => {
     drag = { x: event.clientX, y: event.clientY, yaw: camera.yaw, elevation: camera.elevation, moved: false };
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener("pointermove", event => {
     if (!drag) return;
-    if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4) drag.moved = true;
-    $$('[data-camera-view]').forEach(button => button.classList.remove("active"));
+    if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4) {
+      drag.moved = true;
+      $$('[data-camera-view]').forEach(button => button.classList.remove("active"));
+    }
     camera.yaw = drag.yaw + (event.clientX - drag.x) * .45;
     camera.elevation = Math.max(8, Math.min(89, drag.elevation - (event.clientY - drag.y) * .35));
-    render();
+    repaint();
   });
   canvas.addEventListener("pointerup", event => {
     const clickedSupport = drag && !drag.moved && clickedPreviewSupport(canvas, event);
@@ -4510,7 +4606,7 @@ function wireSceneInteraction(canvas, camera, render) {
   canvas.addEventListener("wheel", event => {
     event.preventDefault();
     camera.zoom = Math.max(.35, Math.min(4, camera.zoom * Math.exp(-event.deltaY * .001)));
-    render();
+    repaint();
   }, { passive: false });
   canvas.addEventListener("dblclick", () => {
     setCameraView("reset");

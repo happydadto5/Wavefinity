@@ -319,6 +319,25 @@
     </div>
   </dialog>
   <dialog id="welcome-dialog" class="welcome-dialog" aria-labelledby="welcome-title">
+    <div id="welcome-resume" hidden>
+      <div class="welcome-header">
+        <h2>Welcome back</h2>
+        <button id="welcome-resume-close" class="button secondary" type="button" aria-label="Close">&#10005;</button>
+      </div>
+      <p class="welcome-lead">You were last designing for <strong id="welcome-resume-name"></strong>.</p>
+      <div class="welcome-resume-card">
+        <span id="welcome-resume-icon" class="welcome-recent-icon" aria-hidden="true"></span>
+        <span class="welcome-recent-text">
+          <span id="welcome-resume-meta"></span>
+          <small id="welcome-resume-folder"></small>
+        </span>
+      </div>
+      <div class="welcome-actions">
+        <button id="welcome-resume-continue" class="button primary" type="button">Keep designing here</button>
+        <button id="welcome-resume-switch" class="button secondary" type="button">Use a different space&#8230;</button>
+      </div>
+      <p id="welcome-resume-countdown" class="welcome-countdown" role="status"></p>
+    </div>
     <div id="welcome-home">
       <div class="welcome-header">
         <h2 id="welcome-title">Welcome to Wavefinity</h2>

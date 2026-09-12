@@ -844,12 +844,15 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     cavity.apply_translation((0.0, 0.0, floor_z))
     body = difference([envelope, cavity])
 
+    # One n-way union, not one call per fitting: each separate boolean would
+    # re-walk the whole wavy case.
+    hardware: list[trimesh.Trimesh] = []
     if plan.hinge_count:
-        for tower in _hinge_body_parts(box, plan):
-            body = union([body, tower])
+        hardware.extend(_hinge_body_parts(box, plan))
     if plan.latch_count_resolved:
-        for pad in _latch_body_parts(box, plan):
-            body = union([body, pad])
+        hardware.extend(_latch_body_parts(box, plan))
+    if hardware:
+        body = union([body, *hardware])
 
     if eff.b4b.stacking and eff.b4b.lid:
         body = difference([body, *_stack_recesses(box)])
@@ -943,8 +946,8 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
         hardware.extend(_hinge_lid_parts(box, plan))
     if plan.latch_count_resolved:
         hardware.extend(_latch_lid_parts(box, plan))
-    for part in hardware:
-        lid = union([lid, part])
+    if hardware:
+        lid = union([lid, *hardware])
 
     if eff.b4b.stacking:
         lid = difference([lid, *_stack_lid_sockets(box)])
@@ -1153,18 +1156,34 @@ def _filleted(profile: Polygon, radius: float) -> Polygon:
     return closed
 
 
-def _cavity_prism(box: BoxSpec) -> trimesh.Trimesh:
+def _cavity_prism(
+    box: BoxSpec, x0: float | None = None, x1: float | None = None
+) -> trimesh.Trimesh:
     """The child-field cavity, as a cutter.
 
     Root webs are built reaching well inside the case and then trimmed on this,
     so they meet the authoritative inner mating face exactly at every point of
     the wave without ever stealing child-bin volume.
+
+    A hardware group only ever needs the slice of cavity behind its own span, so
+    callers pass that X window: the full cavity is a wavy prism of some sixteen
+    thousand triangles, and cutting four root webs against all of it is most of
+    the time a B4B preview takes to build.
     """
     eff = b4b_effective_box(box)
     layout = b4b_layout(box)
     floor_z = eff.base_thickness
     top = b4b_rim_z_from_eff(eff) + 40.0
-    cavity = _extrude_polygon(layout.inner_mating_polygon, top - floor_z)
+    outline = layout.inner_mating_polygon
+    if x0 is not None and x1 is not None:
+        reach = layout.outer_half_y + 10.0
+        window = Polygon([(x0, -reach), (x1, -reach), (x1, reach), (x0, reach)])
+        outline = outline.intersection(window)
+        if outline.is_empty:
+            raise RuntimeError("a B4B hardware group sits outside the case")
+        if not isinstance(outline, Polygon):
+            outline = max(outline.geoms, key=lambda part: part.area)
+    cavity = _extrude_polygon(outline, top - floor_z)
     cavity.apply_translation((0.0, 0.0, floor_z))
     return cavity
 
@@ -1253,9 +1272,10 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
     kw = seg - B4B_HINGE_AXIAL_GAP
     r = plan.boss_radius
     fillet = plan.fillet_radius
-    cavity = _cavity_prism(box)
     parts: list[trimesh.Trimesh] = []
     for cx in plan.hinge_centers_x:
+        half = plan.hinge_pad_width / 2.0 + 1.0
+        cavity = _cavity_prism(box, cx - half, cx + half)
         pad_prof = _pad_profile(
             box,
             outward_sign=1.0,
@@ -1425,9 +1445,10 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
     boss_r = plan.boss_radius
     ear_t = plan.catch_ear_thickness
     fillet = plan.fillet_radius
-    cavity = _cavity_prism(box)
     parts: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
+        half = plan.latch_pad_width / 2.0 + 1.0
+        cavity = _cavity_prism(box, cx - half, cx + half)
         pad_prof = _pad_profile(
             box,
             outward_sign=-1.0,

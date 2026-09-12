@@ -314,7 +314,9 @@ DV.render = () => {
   const canvas = $("#drawer-canvas");
   const box = canvas.getBoundingClientRect();
   if (!box.width || !box.height) return;
-  const dpr = window.devicePixelRatio || 1;
+  // Beyond 2x the extra pixels cost real time and show nothing: a 3x screen
+  // would otherwise ask for nine times the fill of a 1x one.
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
   const pixelW = Math.round(box.width * dpr);
   const pixelH = Math.round(box.height * dpr);
   if (canvas.width !== pixelW || canvas.height !== pixelH) { canvas.width = pixelW; canvas.height = pixelH; }
@@ -325,6 +327,16 @@ DV.render = () => {
   DV.cam = DV.camera(box.width, box.height, drawer);
   DV.hits = DV.paintScene(ctx, drawer, DV.cam);
   DV.renderSelection();
+};
+
+// One repaint per frame while dragging, panning or hovering. Pointer events
+// arrive far faster than the screen refreshes and every repaint redraws the
+// whole drawer, so the extra ones are work the screen never shows.
+DV.framePending = false;
+DV.paint = () => {
+  if (DV.framePending) return;
+  DV.framePending = true;
+  requestAnimationFrame(() => { DV.framePending = false; DV.render(); });
 };
 
 DV.paintScene = (ctx, drawer, cam) => {
@@ -539,7 +551,6 @@ DV.renderSelection = () => {
     <div class="dl-selection-actions">
       ${planned ? `<button type="button" data-sel="printed" title="You have printed this one">Mark printed</button>` : ""}
       ${chain ? `<button type="button" data-sel="lock" title="Locked stacks stay put when you drag or run Auto layout (L)">${chain[0].locked ? "Unlock" : "Lock"}</button>` : ""}
-      <button type="button" data-sel="remove" title="Take it out of the drawer (Delete)">Take out</button>
     </div>`;
 };
 
@@ -650,14 +661,14 @@ DV.wire = () => {
         Object.assign(drag, { valid: fit.ok, reason: fit.ok ? "" : refusal || fit.reason });
       }
       canvas.style.cursor = drag.outside ? "no-drop" : "grabbing";
-      DV.render();
+      DV.paint();
     } else if (DV.pan) {
       const point = DV.pan.cam.onPlane(sx, sy, 0);
       if (!point) return;
       DV.view.panX = DV.pan.panX - (point[0] - DV.pan.start[0]);
       DV.view.panY = DV.pan.panY - (point[1] - DV.pan.start[1]);
       DV.clampPan(DL.drawer());
-      DV.render();
+      DV.paint();
     } else {
       const hit = DV.hitAt(sx, sy);
       const key = hit?.key || null;
@@ -667,7 +678,7 @@ DV.wire = () => {
         const found = key && DL.findPlacement(key);
         const one = found && DL.bin(found.placement.bin);
         canvas.title = one ? `${DL.label(one)} - ${DL.sizeText(one)}${DL.stackable(one) ? ` · ${DL.stackName(one.stack)}` : ""}${DL.isPlanned(found.placement) ? " (planned)" : ""}` : "";
-        DV.render();
+        DV.paint();
       }
     }
   });
@@ -718,7 +729,7 @@ DV.wire = () => {
     const next = { bin: DV.dragBin, gx, gy, target, valid: fit.ok, reason: fit.ok ? "" : refusal || fit.reason };
     if (DV.drop?.gx !== next.gx || DV.drop?.gy !== next.gy || DV.drop?.target !== next.target) {
       DV.drop = next;
-      DV.render();
+      DV.paint();
     }
   });
   canvas.addEventListener("dragleave", () => { DV.drop = null; DV.render(); });
@@ -823,7 +834,6 @@ DV.buildOverlay = () => {
     const found = DL.selected && DL.findPlacement(DL.selected);
     if (!action || !found) return;
     if (action === "lock") DL.toggleLock(DL.selected);
-    if (action === "remove") DL.removePlacement(DL.selected);
     if (action === "printed") DL.markPrinted(DL.bin(found.placement.bin));
   });
   DV.syncControls();

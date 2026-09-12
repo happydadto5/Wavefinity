@@ -12,6 +12,7 @@ import re
 import sys
 from typing import Iterable
 
+import numpy as np
 import trimesh
 
 from organizer_engine import (
@@ -527,20 +528,41 @@ def _bore_axis_geometry(
     ]
 
 
+# A preview pixel covers roughly a tenth of a millimetre of model even at full
+# zoom, so a micron is far below anything the browser can draw.  Rounding there
+# costs nothing visible and makes the payload it has to parse much smaller.
+PREVIEW_DECIMALS = 3
+# A triangle this small is a boolean sliver, not a surface: a millionth of a
+# preview pixel.  Its neighbours already tile the shape it sits in.
+PREVIEW_MIN_FACE_AREA = 1e-4
+
+
 def _mesh_preview_geometry(mesh, kind: str) -> list[tuple]:
-    """Convert a finished holder mesh into camera-independent preview faces."""
+    """Convert a finished holder mesh into camera-independent preview faces.
+
+    A B4B case runs to well over a hundred thousand triangles, so this works in
+    numpy rather than per vertex in Python, drops slivers too small to paint,
+    and rounds to the micron.  Same picture; a fraction of the build time and of
+    the JSON the browser then has to parse.
+    """
     preview_kind = mesh.metadata.get("wavefinity_preview_kind")
     if preview_kind and "invalid" not in kind and "conflict" not in kind:
         kind = f"{kind}_{preview_kind}"
-    geometry = []
-    for triangle, normal in zip(mesh.triangles, mesh.face_normals):
-        geometry.append((
-            [tuple(float(value) for value in point) for point in triangle],
-            kind,
-            tuple(float(value) for value in normal),
-            0,
-        ))
-    return geometry
+    triangles = np.asarray(mesh.triangles, dtype=float)
+    if not len(triangles):
+        return []
+    keep = np.asarray(mesh.area_faces, dtype=float) > PREVIEW_MIN_FACE_AREA
+    corners = np.round(triangles[keep], PREVIEW_DECIMALS).tolist()
+    normals = np.round(
+        np.asarray(mesh.face_normals, dtype=float)[keep], PREVIEW_DECIMALS
+    ).tolist()
+    # numpy has already produced plain lists; re-wrapping several hundred
+    # thousand of them in tuples costs more than everything else here put
+    # together, and nothing downstream needs them to be tuples.
+    return [
+        (triangle, kind, normal, 0)
+        for triangle, normal in zip(corners, normals)
+    ]
 
 
 def _customization_zones(

@@ -9,7 +9,12 @@
 // number, clone, state, activatePreviewView, syncForm, changedDesign ...) and
 // the Layout view's DL / DP.
 
-const SP = { recent: [], setup: null, busy: false };
+const SP = { recent: [], setup: null, busy: false, resume: null, ticker: null };
+
+// How long the resume screen waits before carrying on in the space you were
+// last in.  Long enough to read and stop, short enough that the common case -
+// open the app, keep working where you were - costs nothing.
+const SP_RESUME_SECONDS = 10;
 
 const SP_KINDS = {
   drawer: { icon: "🗄️", label: "Drawer" },
@@ -35,6 +40,71 @@ SP.open = async (view = "home", info = null) => {
 };
 
 SP.close = () => { if (SP.dialog().open) SP.dialog().close(); };
+
+// ------------------------------------------------------------------ resume
+
+// On launch, a folder that already holds a space does not need the full
+// welcome: it needs one question.  Anything the user does - a key, a click,
+// another button - stops the clock, so the countdown can only ever act on
+// someone who has walked away or is happy to carry on.
+SP.launch = async () => {
+  let info = null;
+  try {
+    const data = await api("/api/space/inspect", { output: state.output });
+    SP.recent = data.recent || [];
+    info = data.space;
+  } catch (error) {
+    toast(error.message, true);
+  }
+  if (!info || !info.exists || info.missing || info.no_inventory) return SP.open();
+  SP.showResume(info);
+  if (!SP.dialog().open) SP.dialog().showModal();
+  SP.countdown(info);
+};
+
+SP.showResume = info => {
+  SP.resume = info;
+  $("#welcome-home").hidden = true;
+  $("#space-form").hidden = true;
+  $("#welcome-resume").hidden = false;
+  const space = info.space || {};
+  const kind = SP_KINDS[space.kind] || SP_KINDS.drawer;
+  $("#welcome-resume-icon").textContent = kind.icon;
+  $("#welcome-resume-name").textContent = space.name || info.folder_name;
+  $("#welcome-resume-meta").textContent = [
+    kind.label,
+    space.x ? SP.sizeText([space.x, space.y, space.z]) : "",
+  ].filter(Boolean).join(" · ");
+  $("#welcome-resume-folder").textContent = info.folder;
+  $("#welcome-resume-folder").title = info.folder;
+  $("#welcome-resume-continue").focus();
+};
+
+SP.stopCountdown = (note = "") => {
+  if (SP.ticker) clearInterval(SP.ticker);
+  SP.ticker = null;
+  const button = $("#welcome-resume-continue");
+  if (button) button.textContent = "Keep designing here";
+  const line = $("#welcome-resume-countdown");
+  if (line) line.textContent = note;
+};
+
+SP.countdown = info => {
+  SP.stopCountdown();
+  let left = SP_RESUME_SECONDS;
+  const paint = () => {
+    $("#welcome-resume-continue").textContent = `Keep designing here (${left})`;
+    $("#welcome-resume-countdown").textContent =
+      `Carrying on here in ${left} second${left === 1 ? "" : "s"} - press a key or click to stay on this screen.`;
+  };
+  paint();
+  SP.ticker = setInterval(() => {
+    left -= 1;
+    if (left > 0) return paint();
+    SP.stopCountdown();
+    SP.run(() => SP.openSpace(info, { quiet: true }));
+  }, 1000);
+};
 
 // One request at a time; errors become a toast.
 SP.run = async task => {
@@ -73,8 +143,10 @@ SP.afterPick = folder => SP.run(() => SP.route(folder));
 // ------------------------------------------------------------------ home
 
 SP.showHome = () => {
+  SP.stopCountdown();
   $("#welcome-home").hidden = false;
   $("#space-form").hidden = true;
+  $("#welcome-resume").hidden = true;
   SP.renderRecent();
 };
 
@@ -112,8 +184,10 @@ SP.snap = mm => {
 };
 
 SP.showSetup = info => {
+  SP.stopCountdown();
   SP.setup = info;
   $("#welcome-home").hidden = true;
+  $("#welcome-resume").hidden = true;
   $("#space-form").hidden = false;
   $("#space-folder").textContent = info.folder;
   $("#space-folder").title = info.folder;
@@ -203,12 +277,13 @@ SP.useFolder = async (folder, keepLog) => {
   }
 };
 
-SP.openSpace = async info => {
+SP.openSpace = async (info, { quiet = false } = {}) => {
   const data = await api("/api/space/open", { output: info.folder });
   SP.recent = data.recent || [];
   await SP.useFolder(info.folder, true);
   SP.close();
-  toast(`Opened ${info.space?.name || info.folder_name}.`);
+  const name = info.space?.name || info.folder_name;
+  toast(quiet ? `Carrying on in ${name}.` : `Opened ${name}.`);
 };
 
 SP.usePlain = async info => {
@@ -255,6 +330,20 @@ SP.designBox = space => {
 SP.wire = () => {
   $("#spaces-btn").addEventListener("click", () => SP.open());
   $("#welcome-close").addEventListener("click", SP.close);
+  $("#welcome-resume-close").addEventListener("click", SP.close);
+  $("#welcome-resume-continue").addEventListener("click", () => {
+    SP.stopCountdown();
+    if (SP.resume) SP.run(() => SP.openSpace(SP.resume));
+  });
+  $("#welcome-resume-switch").addEventListener("click", SP.showHome);
+  // A deliberate action - a key or a click - cancels the auto-continue.  Mouse
+  // movement deliberately does not: a cursor resting over the dialog would
+  // otherwise stop the clock the user is relying on.
+  const stay = () => SP.stopCountdown("Staying on this screen - pick where to work.");
+  ["keydown", "pointerdown"].forEach(type =>
+    SP.dialog().addEventListener(type, stay, { passive: true })
+  );
+  SP.dialog().addEventListener("close", () => SP.stopCountdown());
   SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
   const pickThen = go => () => SP.run(async () => {
     const folder = await SP.pickFolder();
@@ -288,5 +377,5 @@ SP.wire = () => {
 };
 
 SP.wire();
-if (state.ready) SP.open();
-else window.addEventListener("wavefinity:ready", () => SP.open(), { once: true });
+if (state.ready) SP.launch();
+else window.addEventListener("wavefinity:ready", () => SP.launch(), { once: true });
