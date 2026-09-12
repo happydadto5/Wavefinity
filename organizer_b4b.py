@@ -1862,6 +1862,31 @@ def _pivot_section(
     return translate_polygon(support_free_profile_yz(radius), axis_y, axis_z)
 
 
+def _head_recess_cutter(
+    *, radius: float, depth: float, x_centre: float, thickness: float,
+    axis_y: float, axis_z: float, side: int,
+) -> trimesh.Trimesh:
+    """The shallow cylindrical socket-head counterbore for one ear's outer face.
+
+    ``side`` is +1 to open through the ear's +X face, -1 for its -X face.  The
+    shoulder sits exactly ``depth`` inside that face; a small overcut beyond
+    the face keeps the boolean from leaving a whisker-thin web there.
+
+    This is a standalone cutter, not something folded into one ear's own
+    extrusion, precisely so a caller can subtract it from a FINISHED hardware
+    group after every root/ear union - a root deliberately built to overlap
+    and reinforce its ear can otherwise refill a pocket cut only inside that
+    ear's own solid.
+    """
+    s = float(side)
+    overcut = 0.1
+    face_x = x_centre + s * thickness / 2.0
+    pocket_x = face_x - s * (depth - overcut) / 2.0
+    cutter = _round_bore(radius, depth + overcut)
+    cutter.apply_translation((pocket_x, axis_y, axis_z))
+    return cutter
+
+
 def _ear_solid(
     *, section: Polygon, thickness: float, x_centre: float,
     bore_r: float, axis_y: float, axis_z: float,
@@ -1874,9 +1899,9 @@ def _ear_solid(
     When ``head_recess_side`` is +/-1, a shallow cylindrical counterbore is
     also cut into that outer face (+1 = the +X face, -1 = the -X face) so a
     socket-head screw seats slightly recessed instead of bearing on the bare
-    clearance bore.  The counterbore's shoulder sits exactly
-    ``head_recess_depth`` inside that face; it opens through the face with a
-    small overcut so the boolean does not leave a whisker-thin web there.
+    clearance bore.  This is only safe when nothing is unioned onto this ear
+    afterward - a caller whose root deliberately overlaps the ear must instead
+    cut :func:`_head_recess_cutter` from the finished, unioned group.
     """
     ear = _extrude_yz_profile(section, thickness)
     ear.apply_translation((x_centre, 0.0, 0.0))
@@ -1884,13 +1909,11 @@ def _ear_solid(
     bore.apply_translation((x_centre, axis_y, axis_z))
     cutters = [bore]
     if head_recess_side and head_recess_r is not None and head_recess_depth > 0.0:
-        side = float(head_recess_side)
-        overcut = 0.1
-        face_x = x_centre + side * thickness / 2.0
-        pocket_x = face_x - side * (head_recess_depth - overcut) / 2.0
-        pocket = _round_bore(head_recess_r, head_recess_depth + overcut)
-        pocket.apply_translation((pocket_x, axis_y, axis_z))
-        cutters.append(pocket)
+        cutters.append(_head_recess_cutter(
+            radius=head_recess_r, depth=head_recess_depth,
+            x_centre=x_centre, thickness=thickness,
+            axis_y=axis_y, axis_z=axis_z, side=head_recess_side,
+        ))
     return difference([ear, *cutters])
 
 
@@ -1989,12 +2012,22 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                     bore_r=profile.bore_radius(terminal),
                     axis_y=plan.hinge_axis_y,
                     axis_z=plan.hinge_axis_z,
-                    head_recess_r=None if terminal else profile.head_pocket_radius,
-                    head_recess_depth=0.0 if terminal else B4B_HEAD_RECESS_DEPTH,
-                    head_recess_side=0 if terminal else int(out_x),
                 ),
             ])
-        parts.append(difference([solid, cavity]))
+        # Cut the near ear's head pocket from the FINISHED, unioned group, not
+        # just from that one ear's own solid: the root is built to overlap and
+        # reinforce the ear, and a root that still fills the pocket's Y/Z
+        # region at this X would refill a hole cut only inside the ear.
+        head_cut = _head_recess_cutter(
+            radius=profile.head_pocket_radius,
+            depth=B4B_HEAD_RECESS_DEPTH,
+            x_centre=near_x,
+            thickness=profile.near_ear,
+            axis_y=plan.hinge_axis_y,
+            axis_z=plan.hinge_axis_z,
+            side=int(out_x),
+        )
+        parts.append(difference([solid, cavity, head_cut]))
     return parts
 
 
@@ -2116,9 +2149,6 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                     bore_r=profile.bore_radius(terminal),
                     axis_y=plan.catch_axis_y,
                     axis_z=plan.catch_axis_z,
-                    head_recess_r=None if terminal else profile.head_pocket_radius,
-                    head_recess_depth=0.0 if terminal else B4B_HEAD_RECESS_DEPTH,
-                    head_recess_side=0 if terminal else int(out_x),
                 ),
             ])
         relief_half = (
@@ -2136,7 +2166,19 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
             face_y=plan.latch_root_face_y,
             outward_sign=-1.0,
         )
-        parts.append(difference([solid, cavity, relief]))
+        # Same reasoning as the rear hinge: the catch root is built to overlap
+        # its own ears, so the near ear's head pocket is only authoritative
+        # once it is cut from the fully unioned receiver.
+        head_cut = _head_recess_cutter(
+            radius=profile.head_pocket_radius,
+            depth=B4B_HEAD_RECESS_DEPTH,
+            x_centre=near_x,
+            thickness=profile.near_ear,
+            axis_y=plan.catch_axis_y,
+            axis_z=plan.catch_axis_z,
+            side=int(out_x),
+        )
+        parts.append(difference([solid, cavity, relief, head_cut]))
     return parts
 
 
@@ -2530,9 +2572,6 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
                     bore_r=profile.bore_radius(terminal),
                     axis_y=plan.axis_y,
                     axis_z=plan.axis_z,
-                    head_recess_r=None if terminal else profile.head_pocket_radius,
-                    head_recess_depth=0.0 if terminal else B4B_HEAD_RECESS_DEPTH,
-                    head_recess_side=0 if terminal else int(out_x),
                 ),
             ])
         # the bail nests between the ears, so the root is two buttresses with a
@@ -2558,7 +2597,20 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
             extents=(plan.eye_band, 1.2, B4B_HANDLE_STOP_FACE)
         )
         pad.apply_translation((cx, plan.front_crest + 0.6, plan.axis_z))
-        parts.append(union([solid, pad]))
+        # The fork's root deliberately overlaps its own ears for strength (and
+        # spans well above and below the pivot axis - see B4B_HANDLE_ROOT_ABOVE
+        # / _BELOW), so the near ear's head pocket is only authoritative once
+        # it is cut from the finished fork, root and heel pad together.
+        head_cut = _head_recess_cutter(
+            radius=profile.head_pocket_radius,
+            depth=B4B_HEAD_RECESS_DEPTH,
+            x_centre=near_x,
+            thickness=B4B_HANDLE_NEAR_EAR,
+            axis_y=plan.axis_y,
+            axis_z=plan.axis_z,
+            side=int(out_x),
+        )
+        parts.append(difference([union([solid, pad]), head_cut]))
     for cx in plan.detent_centers_x:
         # Radius comes from the ramp requirement, not from taste: the bump has
         # to rise its full height over at least this much run so the arm rides
@@ -3287,16 +3339,25 @@ B4B_TOP_LABEL_MARGIN = 2.5
 # rather than dimensions: ``b4b_front_label_geometry`` measures the actual
 # text outline and builds the plate only slightly larger than it.  The
 # plate drops in from above and rides down between two side channels onto
-# a closed floor - there is no end-stop, snap detent, or finger notch, so
-# nothing here relies on friction to keep the plate seated.
+# a closed, ramped bottom stop - there is no end-stop, snap detent, or
+# finger notch, so nothing here relies on friction to keep the plate seated.
 B4B_FRONT_LABEL_CAP_IDEAL = 10.0        # preferred cap height - never grown past this
 B4B_FRONT_LABEL_PLATE_T = 1.0           # plate thickness
 B4B_FRONT_LABEL_MARGIN_X = 2.0          # plate margin each side of the text
 B4B_FRONT_LABEL_MARGIN_Y = 1.75         # plate margin above/below the text
-# Fit clearance between the plate and its holder channel, defined once as a
-# *per-side* value and used consistently everywhere below.
-B4B_FRONT_LABEL_CLEAR = 0.35
-B4B_FRONT_LABEL_RAIL = 1.6              # bottom floor thickness + side lip size
+# Running clearance between the plate and the channel it rides in, defined
+# once as a *per-side* value: the plate sits centred with this much air to
+# the flat wall behind it and to the retaining lip in front of it.
+B4B_FRONT_LABEL_CLEAR = 0.25
+# Total outward projection of the whole holder, measured from the locally
+# flattened wall face - not derived from the plate/clearance stack, so the
+# holder never balloons just because the plate got thinner or thicker.
+B4B_FRONT_LABEL_HOLDER_DEPTH = 3.0
+# Side channel: a structural leg attached to the flattened wall, with a
+# front lip overlapping the plate's edge so it must be lifted clear of the
+# lip rather than pulled straight out the front.
+B4B_FRONT_LABEL_SIDE_LEG_W = 2.0        # total X width of one side channel
+B4B_FRONT_LABEL_SIDE_OVERLAP = 1.0      # how far its lip reaches onto the plate
 B4B_FRONT_LABEL_MAX_WIDTH_FRACTION = 0.5  # holder <= this fraction of the case width
 # Clear vertical corridor that must exist above the holder's open top so the
 # whole plate can be lifted straight out (or dropped straight in) without
@@ -3448,15 +3509,14 @@ def b4b_front_label_fit(box: BoxSpec) -> tuple[bool, float, float, float]:
             handle.root_bottom_z - B4B_LABEL_KEEPOUT,
         )
     bottom_z = 3.0
-    rail = B4B_FRONT_LABEL_RAIL
-    clear = B4B_FRONT_LABEL_CLEAR
+    side_margin = B4B_FRONT_LABEL_SIDE_LEG_W - B4B_FRONT_LABEL_SIDE_OVERLAP
     # Generic placeholders (not the actual label text) used only to answer
     # "could any readable label ever fit here", so the UI can gate the
     # control before the user has typed anything.
     min_plate_w = 6.0 + 2.0 * B4B_FRONT_LABEL_MARGIN_X
     min_plate_h = TEXT_CAP_HEIGHT_MIN + 2.0 * B4B_FRONT_LABEL_MARGIN_Y
-    min_w = min_plate_w + 2.0 * clear
-    min_holder_top_z = bottom_z + rail + min_plate_h
+    min_w = min_plate_w + 2.0 * side_margin
+    min_holder_top_z = bottom_z + B4B_FRONT_LABEL_HOLDER_DEPTH + min_plate_h
     fits = (
         avail_w >= min_w
         and (insertion_ceiling_z - min_holder_top_z)
@@ -3479,14 +3539,15 @@ def b4b_front_label_geometry(box: BoxSpec):
     """``(frame_solid, plate_solid, text_solid, plate_centre_xyz)`` for the
     compact top-loading front label.
 
-    The frame (holder) is unioned into the body: a closed floor plus two
-    side channels the plate drops straight down into from above, with the
-    top left completely open.  Nothing relies on friction to hold it in -
-    there is no end-stop, snap detent, or finger notch.  The plate and its
-    lettering are sized from the actual text outline, never grown past
-    ``B4B_FRONT_LABEL_CAP_IDEAL``, and the whole holder is capped at
-    ``B4B_FRONT_LABEL_MAX_WIDTH_FRACTION`` of the case width: text shrinks to
-    fit before the holder is ever allowed to grow.
+    The frame (holder) is unioned into the body from three members - a left
+    channel, a right channel and a ramped bottom stop - built directly on a
+    locally flattened patch of the real front wall, never a separate
+    rectangular backing slab.  There is no continuous top member (the plate
+    drops straight in), no end-stop, no snap detent, and no finger notch.
+    The plate and its lettering are sized from the actual text outline,
+    never grown past ``B4B_FRONT_LABEL_CAP_IDEAL``, and the whole holder is
+    capped at ``B4B_FRONT_LABEL_MAX_WIDTH_FRACTION`` of the case width: text
+    shrinks to fit before the holder is ever allowed to grow.
 
     Before settling on a size, the fit is checked against the real vertical
     insertion corridor: the clear space above the holder's open top (up to
@@ -3503,9 +3564,7 @@ def b4b_front_label_geometry(box: BoxSpec):
     different filaments.
     """
     eff = b4b_effective_box(box)
-    plan = b4b_hardware_plan(box)
     layout = b4b_layout(box)
-    y_wall = min(layout.front_wall_y(x) for x in plan.latch_centers_x or (0.0,))
     fits, avail_w, insertion_ceiling_z, bottom_z = b4b_front_label_fit(box)
     if not fits:
         raise ValueError(
@@ -3516,9 +3575,12 @@ def b4b_front_label_geometry(box: BoxSpec):
     if not text:
         raise ValueError("label text is empty")
 
-    rail = B4B_FRONT_LABEL_RAIL
     clear = B4B_FRONT_LABEL_CLEAR
     plate_t = B4B_FRONT_LABEL_PLATE_T
+    leg_w = B4B_FRONT_LABEL_SIDE_LEG_W
+    side_overlap = B4B_FRONT_LABEL_SIDE_OVERLAP
+    side_margin = leg_w - side_overlap
+    holder_depth = B4B_FRONT_LABEL_HOLDER_DEPTH
 
     # Fit the lettering to the widest space the envelope could ever offer,
     # then shrink the cap height step by step until the resulting plate
@@ -3526,7 +3588,7 @@ def b4b_front_label_geometry(box: BoxSpec):
     # holder sits as low as it is allowed to (``bottom_z``), which is always
     # the best case for that corridor, so if it fails there it fails
     # everywhere and the text must shrink instead.
-    max_plate_w = avail_w - 2.0 * clear
+    max_plate_w = avail_w - 2.0 * side_margin
     max_text_w = max_plate_w - 2.0 * B4B_FRONT_LABEL_MARGIN_X
     cap = B4B_FRONT_LABEL_CAP_IDEAL
     solved = None
@@ -3538,7 +3600,7 @@ def b4b_front_label_geometry(box: BoxSpec):
         if text_w <= max_text_w:
             plate_w = text_w + 2.0 * B4B_FRONT_LABEL_MARGIN_X
             plate_h = text_h + 2.0 * B4B_FRONT_LABEL_MARGIN_Y
-            holder_top_z = bottom_z + rail + plate_h
+            holder_top_z = bottom_z + holder_depth + plate_h
             if (
                 insertion_ceiling_z - holder_top_z
                 >= plate_h + B4B_FRONT_LABEL_INSERT_CLEARANCE
@@ -3554,53 +3616,99 @@ def b4b_front_label_geometry(box: BoxSpec):
         )
     outline, plate_w, plate_h = solved
 
-    holder_w = plate_w + 2.0 * clear
-    channel_t = plate_t + 2.0 * clear
-    depth = channel_t + 1.4          # + back wall, ~3 mm total projection
-    holder_bottom_z = bottom_z
-    holder_top_z = bottom_z + rail + plate_h
-    holder_h = holder_top_z - holder_bottom_z
-    mid_z = (holder_top_z + holder_bottom_z) / 2.0
-    # Embed the frame block a little into the front wall so union() fuses it
-    # into the body as one connected solid (never just a face-to-face touch).
+    holder_w = plate_w + 2.0 * side_margin
+    seat_z = bottom_z + holder_depth        # top of the bottom stop = plate's resting Z
+    holder_top_z = seat_z + plate_h         # open top = top of the seated plate
+
+    # The real B4B wall is wavy (a printable interlock texture); the label
+    # needs a flat backing instead, so fill the wave valleys - only across
+    # this holder's own footprint, never touching the child-bin mating face
+    # or the rest of the wall - out to the most outward point the wave
+    # reaches over that span.  Every other member below is built against
+    # this flat reference, not the raw wavy exterior.
+    flat_back_y = _wall_extreme_y(layout, -holder_w / 2.0, holder_w / 2.0, -1.0)
+    # Guaranteed inside solid wall material for every x in the span (the
+    # wave's shallowest possible point, plus a small margin) - never as deep
+    # as the inner mating face, so child-bin capacity is untouched.
+    wall_patch_inner_y = -layout.outer_half_y + WAVE_AMPLITUDE + 0.3
+    # Nudge new-part-to-patch attachments a little past ``flat_back_y`` so
+    # union() always finds real volumetric overlap, never a bare face touch.
     embed = min(0.8, max(0.3, eff.wall_depth * 0.5))
 
-    outer = trimesh.creation.box(extents=(holder_w, depth + embed, holder_h))
-    outer.apply_translation(
-        (0.0, y_wall - depth / 2.0 + embed / 2.0, mid_z)
-    )
-    # Hollow the channel: completely open on top (insertion), closed at the
-    # bottom by the un-cut ``rail`` band of "outer" left below it.  It runs
-    # the whole holder width so the label reads edge to edge; the two side
-    # channels that actually capture the plate are added back next.
-    channel = trimesh.creation.box(extents=(holder_w, channel_t, plate_h))
-    channel.apply_translation(
-        (0.0, y_wall - 1.4 - channel_t / 2.0, bottom_z + rail + plate_h / 2.0)
-    )
-    frame = difference([outer, channel])
+    plate_back_y = flat_back_y - clear
+    plate_front_y = plate_back_y - plate_t
+    capture_lip_back_y = plate_front_y - clear
+    holder_front_y = flat_back_y - holder_depth
+    channel_t = plate_back_y - plate_front_y + 2.0 * clear  # == 2*clear + plate_t
 
-    # Left and right side channels: thin ribs bridging the channel's front
-    # opening at the plate's own edges, running its full height, so the
-    # plate must be lifted clear of them rather than pulled straight out the
-    # front - unlike a friction-fit slide, nothing here depends on how
-    # snugly the plate happens to sit.
-    lip_w = min(rail, plate_w * 0.2)
-    lip_y = min(1.0, channel_t * 0.6)
-    for side in (-1.0, 1.0):
-        lip = trimesh.creation.box(extents=(lip_w, lip_y, plate_h))
-        lip.apply_translation((
-            side * (plate_w / 2.0 - lip_w / 2.0),
-            y_wall - depth + lip_y / 2.0,
-            bottom_z + rail + plate_h / 2.0,
+    patch = trimesh.creation.box(extents=(
+        holder_w, wall_patch_inner_y - flat_back_y, holder_top_z - bottom_z,
+    ))
+    patch.apply_translation((
+        0.0,
+        (wall_patch_inner_y + flat_back_y) / 2.0,
+        (holder_top_z + bottom_z) / 2.0,
+    ))
+
+    # Ramped bottom stop: a plain wedge, vertical against the flat patch and
+    # rising outward at exactly 45 degrees to its front-top tip, so the
+    # underside is a single self-supporting slope rather than a horizontal,
+    # unsupported shelf - the body prints upright and this needs no support.
+    wedge_profile = Polygon([
+        (flat_back_y + embed, seat_z),
+        (holder_front_y, seat_z),
+        (flat_back_y + embed, bottom_z),
+    ])
+    wedge = _extrude_yz_profile(wedge_profile, holder_w)
+
+    # The seat alone only stops the plate falling further down; a front lip
+    # is needed too, so the plate's bottom edge can't bow or be pulled
+    # straight out the front either.  It sits directly on the wedge's own
+    # flat top, which already reaches out to ``holder_front_y``, so this
+    # needs no support of its own.
+    bottom_lip_h = side_overlap
+    bottom_lip = trimesh.creation.box(extents=(
+        holder_w, capture_lip_back_y - holder_front_y, bottom_lip_h,
+    ))
+    bottom_lip.apply_translation((
+        0.0,
+        (capture_lip_back_y + holder_front_y) / 2.0,
+        seat_z + bottom_lip_h / 2.0,
+    ))
+
+    def _side_channel(side: float) -> trimesh.Trimesh:
+        """One left/right channel: a leg attached to the flat patch with a
+        front lip overlapping ``side_overlap`` of the plate's edge, so the
+        plate must be lifted clear of it rather than pulled straight out the
+        front - unlike a friction-fit slide, nothing depends on how snugly
+        it happens to sit."""
+        leg_centre_x = side * (plate_w / 2.0 - side_overlap + leg_w / 2.0)
+        leg_depth = (flat_back_y + embed) - holder_front_y
+        leg = trimesh.creation.box(extents=(leg_w, leg_depth, plate_h))
+        leg.apply_translation((
+            leg_centre_x,
+            (flat_back_y + embed + holder_front_y) / 2.0,
+            (seat_z + holder_top_z) / 2.0,
         ))
-        frame = _weld(union([frame, lip]))
+        slot_centre_x = side * (plate_w / 2.0 - side_overlap / 2.0)
+        slot = trimesh.creation.box(extents=(side_overlap, channel_t, plate_h))
+        slot.apply_translation((
+            slot_centre_x,
+            (flat_back_y + capture_lip_back_y) / 2.0,
+            (seat_z + holder_top_z) / 2.0,
+        ))
+        return difference([leg, slot])
+
+    frame = _weld(union([
+        patch, wedge, bottom_lip, _side_channel(-1.0), _side_channel(1.0),
+    ]))
 
     plate = trimesh.creation.box(extents=(plate_w, plate_t, plate_h))
 
     # Flush two-part text inlay: a shallow pocket on the readable (-Y) face,
     # filled by a separately-printable solid of the identical shape.
     front_face_y = -plate_t / 2.0
-    overlap = 0.1
+    inlay_overlap = 0.1
     letters = text_prism(outline, top_z=0.0, depth=TEXT_DEPTH)  # z in [-TEXT_DEPTH, 0]
     # +90 deg about X: extrude axis (-Z) -> +Y, glyph height (+Y) -> +Z upright
     letters.apply_transform(
@@ -3612,13 +3720,13 @@ def b4b_front_label_geometry(box: BoxSpec):
     # The fill piece sits exactly flush with the plate's face; the cutter is
     # nudged 0.1 mm proud of it so the boolean always removes material cleanly.
     text_solid = translated(letters, (0.0, front_face_y - y_min, 0.0))
-    pocket = translated(letters, (0.0, (front_face_y - overlap) - y_min, 0.0))
+    pocket = translated(letters, (0.0, (front_face_y - inlay_overlap) - y_min, 0.0))
     plate = difference([plate, pocket])
 
     plate_centre = (
         0.0,
-        y_wall - 1.4 - channel_t / 2.0,
-        bottom_z + rail + plate_h / 2.0,
+        flat_back_y - clear - plate_t / 2.0,
+        seat_z + plate_h / 2.0,
     )
     return frame, plate, text_solid, plate_centre
 
