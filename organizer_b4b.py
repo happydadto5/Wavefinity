@@ -1195,25 +1195,23 @@ class B4BHandlePlan:
 
 
 def b4b_handle_min_width(box: BoxSpec) -> float:
-    """Smallest child X (mm), rounded up to a whole mm, that lets this B4B's
-    front wall carry a handle.
+    """Smallest valid child-field X (a whole GRID_PITCH multiple) that lets
+    this B4B's front wall carry a handle.
 
-    Binary search over the real front-wall fit check rather than a
+    Scans the real front-wall fit check over legal grid widths rather than a
     hard-coded width rule, so it tracks wall thickness, latch layout, and
     every other geometry input the same way ``b4b_handle_width_fit`` does.
+    Child-field X/Y live on the same GRID_PITCH lattice as BoxSpec enforces,
+    so every probed width must be a whole GRID_PITCH multiple - never an
+    arbitrary float - or BoxSpec's own grid validation rejects it.
     """
-    lo, hi = 1.0, max(box.x, B4B_HANDLE_GRIP_MIN)
-    while not b4b_handle_width_fit(replace(box, x=hi))[0]:
-        hi *= 2.0
-        if hi > 5000.0:
-            break
-    for _ in range(40):
-        mid = (lo + hi) / 2.0
-        if b4b_handle_width_fit(replace(box, x=mid))[0]:
-            hi = mid
-        else:
-            lo = mid
-    return math.ceil(hi - 1e-6)
+    first_units = max(1, math.ceil(B4B_MIN_FIELD_XY / GRID_PITCH))
+    max_units = math.floor(5000.0 / GRID_PITCH)
+    for units in range(first_units, max_units + 1):
+        candidate = float(units) * GRID_PITCH
+        if b4b_handle_width_fit(replace(box, x=candidate))[0]:
+            return candidate
+    raise ValueError("could not find a valid B4B width for the carrying handle")
 
 
 def b4b_handle_eligibility(box: BoxSpec) -> tuple[bool, str]:
