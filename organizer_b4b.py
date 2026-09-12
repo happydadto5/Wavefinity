@@ -306,8 +306,9 @@ B4B_HW_M3 = HardwareProfile(
 
 # --- deterministic family selection ---------------------------------------- #
 # One rule in one helper, so preview, export, validation and BOM cannot
-# disagree.  A handled case is intentionally all-M3 rather than M2 hinges and
-# latches with M3 handle pivots: one kit, one driver, one BOM line.
+# disagree.  A handled case intentionally uses one family throughout: compact
+# cases use M2 for hinges, latches and handle pivots; larger ones use M3.  That
+# still means one kit, one driver and one BOM line per case.
 B4B_HW_M2_MAX_FIELD_XY = 96.0
 B4B_HW_M2_MAX_FIELD_Z = 64.0
 

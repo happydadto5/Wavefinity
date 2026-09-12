@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-12 — B4B compact folding-handle scale and closed pivot eyes
+
+- The front folding handle now scales with the child-bin field: compact cases
+  get a lighter 4.5 mm band and short hand opening, growing smoothly to an
+  8 mm band on a 200 mm case instead of receiving one adult-size handle.
+- Handled B4Bs now use one matching screw family throughout: M2 through a
+  120 x 120 x 64 mm child field, otherwise M3. The matching handle pivot
+  stacks resolve to M2x8 or M3x12 screws from the real geometry.
+- Each printed handle end now has its own complete closed pivot eye with a
+  true round screw hole and at least 1.2 mm of surrounding plastic. The body
+  fork/root design and support-free print orientation stay the same.
+
 ## 2026-09-12 — B4B hinge and latch refinement
 
 - Hinge, latch, catch and handle-fork supports now bite into the real nearby
@@ -14,7 +26,7 @@
 ## 2026-09-12 — B4B hardware redesign: compact hinges, strap latches, folding front handle
 
 - **Hardware size is chosen for you, and it is no longer always M3.** Small
-  cases get a compact M2 family, larger or handled ones get M3, from one rule
+  cases get a compact M2 family, larger cases get M3, from one rule
   that preview, export, validation and the parts list all read. A 48 mm case
   now takes M2x8 screws throughout instead of M3 hardware sized for a case
   three times bigger.
@@ -35,10 +47,9 @@
   into the case body, and **stacking and the handle work together**. It folds
   flat with 0.6 mm of clearance, holds itself stowed on two light detents, and
   swings out to a 95° stop against broad printed faces.
-- **A handle is offered only when the case can really take one**, with at least
-  72 mm of clear grip and 26 mm of finger room — roughly a 96 mm wide, 40 mm
-  tall case and up. Where it will not fit, the box says which dimension is
-  short instead of disabling the option silently.
+- **A handle is offered only when the case can really take one**, using its
+  resolved scaled grip and drop. Where it will not fit, the box says which
+  dimension is short instead of disabling the option silently.
 - **B4B no longer resizes your box behind your back.** Bin fields, heights and
   depths used to grow until the old hardware fit. Now the minimum is a stated
   48 x 48 mm field, a 16 mm height for a latched lid and a 1.2 mm wall, and

@@ -1,6 +1,6 @@
-# Fix B4B hardware redesign — authoritative dimensional implementation specification
+# Fix B4B hardware redesign — superseded design record
 
-Status: **design complete; implementation-ready.** This document is intended to remove design discretion from the coding LLM. The coding LLM should review the geometry for mathematical/boolean feasibility, concur or identify a concrete impossibility, and then implement this specification. It should **not** independently redesign the hardware, rescale parts by taste, choose different screw families, add new user options, or substitute percentage-based geometry unless this document explicitly calls for it.
+Status: **superseded for folding-handle sizing and hardware selection.** The current authoritative implementation is `organizer_b4b.py`: it keeps one hardware family per case, uses M2 for handled fields through 120 x 120 x 64 mm, resolves the bail from child-field X, and builds complete closed pivot eyes around true round bores. The historical M3-only, 72 mm-grip, 26 mm-drop, X96-first-handle and fixed-dimension statements below must not be restored. Other retained mechanical design context remains historical reference only.
 
 The only expected post-implementation tuning is physical-print calibration of: printed thread-forming pilot diameter, tiny detent interference, and at most +/-0.05 mm running-fit adjustments. Those calibration values must remain centralized constants. Everything else below is the intended first-build design.
 
