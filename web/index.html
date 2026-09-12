@@ -222,16 +222,20 @@
               <button type="button" data-camera-zoom="out" aria-label="Zoom out">−</button>
               <button type="button" data-camera-zoom="in" aria-label="Zoom in">+</button>
             </div>
+            <div class="rotate-controls" aria-label="Spin the preview">
+              <button type="button" data-camera-rotate="left" title="Click: 15°  ·  Shift-click: 2°" aria-label="Spin left">⟲</button>
+              <button type="button" data-camera-rotate="down" title="Click: 15°  ·  Shift-click: 2°" aria-label="Tilt down">▾</button>
+              <button type="button" data-camera-rotate="up" title="Click: 15°  ·  Shift-click: 2°" aria-label="Tilt up">▴</button>
+              <button type="button" data-camera-rotate="right" title="Click: 15°  ·  Shift-click: 2°" aria-label="Spin right">⟳</button>
+            </div>
           </div>
           <div class="camera-controls-row">
-            <label class="canvas-select">Show
-              <select id="preview-mode">
-                <option value="standard" selected>Standard</option>
-                <option value="xray">Xray</option>
-                <option value="bin">Bin</option>
-                <option value="interior">Interior</option>
-              </select>
-            </label>
+            <div class="mode-controls" aria-label="Show">
+              <button type="button" class="active" data-camera-mode="standard">Standard</button>
+              <button type="button" data-camera-mode="xray">Xray</button>
+              <button type="button" data-camera-mode="bin">Bin</button>
+              <button type="button" data-camera-mode="interior">Interior</button>
+            </div>
           </div>
         </div>
         <div id="dimensions" class="dimension-guides" aria-label="Bin dimensions">

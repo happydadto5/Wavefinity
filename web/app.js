@@ -408,22 +408,25 @@ function syncEasyCleanControls() {
 
 function populateWallChoices(box, select = $("#wall-thickness")) {
   const rules = state.catalog?.wall_rules || {};
+  const stacking = (box?.stack?.mode || "none") !== "none";
+  const stackMin = stacking ? number(state.catalog?.stack_rules?.min_wall_mm, 1.2) : -Infinity;
   const fallbackLabels = [
     "Very thin (experimental)", "Thin", "Light", "Standard",
     "Reinforced", "Strong", "Extra strong", "Very strong",
     "Heavy duty", "Very heavy duty", "Extra heavy duty", "Maximum thickness",
   ];
-  const choices = Array.isArray(rules.choices) && rules.choices.length
+  const allChoices = Array.isArray(rules.choices) && rules.choices.length
     ? rules.choices
     : Array.from({ length: 12 }, (_, index) => {
         const value = 0.2 + index * 0.2;
         return { value, label: fallbackLabels[index] };
       });
+  const choices = allChoices.filter(choice => number(choice.value) >= stackMin - 1e-9);
   const wall = number(box?.wall, rules.default_mm ?? 0.8);
   const value = fmt(wall);
   const isDiscrete = choices.some(choice => fmt(choice.value) === value);
   const legacyValue = isDiscrete ? "" : value;
-  const signature = JSON.stringify({ choices, legacyValue });
+  const signature = JSON.stringify({ choices, legacyValue, stackMin });
   if (select.dataset.choices !== signature) {
     select.replaceChildren(...choices.map(choice => new Option(
       `${number(choice.value).toFixed(1)} mm — ${choice.label}`,
@@ -440,15 +443,18 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
 
 function syncWallControls() {
   const standard = $("#standard-walls").checked;
+  const stacking = stackMode() !== "none";
   const rules = state.catalog?.wall_rules || {};
+  $("#standard-walls").disabled = stacking;
   $("#wall-thickness-setting").hidden = standard;
-  $("#thin-wall-warning").hidden = standard || Math.abs(
+  $("#thin-wall-warning").hidden = stacking || standard || Math.abs(
     number($("#wall-thickness").value, rules.default_mm ?? 0.8)
       - (rules.min_mm ?? 0.2)
   ) > 1e-9;
 }
 
 function syncForm() {
+  normalizeStackSettings(state.design);
   const { box, layout } = state.design;
   ensureRimFeatureInLayout();
   syncRimLabelFromFeatures();
@@ -472,6 +478,7 @@ function syncForm() {
   $("#easy-clean-radius").value = fmt(box.easy_clean_radius ?? 2.0);
   $("#base-thickness").value = fmt(box.base_thickness ?? 0.6);
   $("#base-thickness-setting").hidden = $("#standard-base").checked;
+  syncStackDependencyControls();
   syncEasyCleanControls();
   if (!state.design.part_name || !state.design.part_name.trim()) {
     const labelCandidate = state.design.label || state.design.b4b?.label_text || state.design.layout?.features?.find(f => f.kind === "text")?.options?.text;
@@ -673,26 +680,86 @@ function stackMode() {
   return state.design?.box?.stack?.mode || "none";
 }
 
+function stackRuleValues(mode = stackMode()) {
+  const rules = state.catalog?.stack_rules || {};
+  return {
+    minWall: number(rules.min_wall_mm, 1.2),
+    defaultWall: number(rules.default_wall_mm, state.catalog?.wall_rules?.default_mm ?? 0.8),
+    defaultBase: number(rules.default_base_mm, 0.6),
+    minBase: number(rules.base_min_mm?.[mode], mode === "direct" ? 3.8 : 1.8),
+  };
+}
+
+function normalizeStackSettings(design, { restoreDefaults = false, flash = false } = {}) {
+  const box = design?.box;
+  if (!box) return;
+  const mode = box.stack?.mode || "none";
+  const values = stackRuleValues(mode);
+  const changed = [];
+  const set = (key, value, selector) => {
+    if (box[key] === value) return;
+    box[key] = value;
+    if (selector) changed.push(selector);
+  };
+  if (mode !== "none") {
+    set("standard_walls", false, "#standard-walls");
+    if (number(box.wall, values.defaultWall) < values.minWall) {
+      set("wall", values.minWall, "#wall-thickness");
+    }
+    set("standard_base", false, "#standard-base");
+    if (number(box.base_thickness, values.defaultBase) < values.minBase) {
+      set("base_thickness", values.minBase, "#base-thickness");
+    }
+  } else if (restoreDefaults) {
+    set("standard_walls", true, "#standard-walls");
+    set("wall", values.defaultWall, "#wall-thickness");
+    set("standard_base", true, "#standard-base");
+    set("base_thickness", values.defaultBase, "#base-thickness");
+  }
+  if (flash) changed.forEach(selector => {
+    const field = $(selector);
+    if (field) flashField(field);
+  });
+}
+
+function syncStackDependencyControls() {
+  const mode = stackMode();
+  const stacking = mode !== "none";
+  const values = stackRuleValues(mode);
+  $("#standard-base").disabled = stacking;
+  $("#base-thickness").min = fmt(stacking ? values.minBase : 0.4);
+  if (stacking) {
+    $("#base-thickness-setting").hidden = false;
+    $("#wall-thickness-setting").hidden = false;
+  }
+}
+
 // Stacking and B4B are different answers to the same question - how this bin
 // joins the one above it - so only one of them is offered at a time.
 function applyStackVisibility() {
   const b4b = b4bEnabled();
+  const mode = stackMode();
   const row = $("#stack-mode-row");
   if (row) row.hidden = b4b;
   const note = $("#stack-note");
   if (!note) return;
   const info = state.preview?.stack;
-  if (b4b || !info || !info.enabled) {
+  if (b4b || mode === "none") {
     note.hidden = true;
     return;
   }
+  const values = stackRuleValues(mode);
+  const moduleHeight = info?.mode === mode
+    ? info.module_height_mm
+    : state.design?.box?.z;
   const bits = [
-    `Finished bin ${fmt(info.closed_height_mm)} mm tall — exactly the height you set.`,
-    `Each bin adds ${fmt(info.pitch_mm)} mm to a stack.`,
+    `Stacking requires at least ${fmt(values.minWall)} mm walls and a ${fmt(values.minBase)} mm base.`,
+    `Stack height contribution: ${fmt(moduleHeight)} mm${mode === "lid" ? " including lid" : ""}.`,
   ];
-  if (info.wall_raised) bits.push(`Wall set to ${fmt(info.wall_mm)} mm so the snap has material to grip.`);
-  if (info.base_raised) bits.push(`Base set to ${fmt(info.base_mm)} mm to hold the stepped foot.`);
-  if (info.parts.length > 1) bits.push(`Prints as ${info.parts.join(" + ")}.`);
+  if (info?.mode === mode) {
+    bits.push(`Detached closed part: ${fmt(info.closed_height_mm)} mm including the ${fmt(info.engagement_mm)} mm interlock.`);
+    if (info.parts.length > 1) bits.push(`Prints as ${info.parts.join(" + ")}.`);
+  }
   note.textContent = bits.join(" ");
   note.hidden = false;
 }
@@ -856,18 +923,25 @@ function updateDesignFromForm() {
       autoAdjustConnectorFields();
     }
   }
+  const currentStackMode = stackMode();
+  const stackValues = stackRuleValues(currentStackMode);
   design.box.base_thickness = number(
     $("#base-thickness").value,
     design.box.base_thickness ?? 0.6,
   );
-  design.box.standard_base = $("#standard-base").checked;
+  if (currentStackMode !== "none") {
+    design.box.base_thickness = Math.max(stackValues.minBase, design.box.base_thickness);
+  }
+  design.box.standard_base = currentStackMode === "none" && $("#standard-base").checked;
   if (design.box.standard_base) design.box.base_thickness = 0.6;
   const previousWall = design.box.wall;
   const wallRules = state.catalog?.wall_rules || {};
   const defaultWall = wallRules.default_mm ?? 0.8;
-  const minWall = wallRules.min_mm ?? 0.2;
+  const minWall = currentStackMode === "none"
+    ? wallRules.min_mm ?? 0.2
+    : stackValues.minWall;
   const maxWall = wallRules.max_mm ?? 2.4;
-  design.box.standard_walls = $("#standard-walls").checked;
+  design.box.standard_walls = currentStackMode === "none" && $("#standard-walls").checked;
   design.box.wall = design.box.standard_walls
     ? defaultWall
     : Math.max(minWall, Math.min(maxWall, number(
@@ -978,7 +1052,7 @@ function updatePreviewHelp(view) {
   if (!el) return;
   el.textContent = view === "2d"
     ? "Drag a Snug Holder outline point to reshape it. Drag inside to move; use the square to resize and circle to rotate."
-    : "Drag to rotate, use the wheel to zoom, or double-click to reset.";
+    : "Drag to spin, or click the arrows for a 15° step (shift-click for 2°). Wheel to zoom, double-click to reset.";
 }
 
 let pendingDesignHistory = null;
@@ -1170,18 +1244,34 @@ function setCameraView(view) {
   renderPreview3D();
 }
 
+// A click-to-spin alternative to dragging: 15 degrees a step, or 2 with
+// shift held for lining something up precisely.
+function rotateCameraStep(direction, fine) {
+  const step = fine ? 2 : 15;
+  const camera = state.camera;
+  if (direction === "left") camera.yaw -= step;
+  else if (direction === "right") camera.yaw += step;
+  else if (direction === "up") camera.elevation = Math.max(-89, Math.min(89, camera.elevation + step));
+  else if (direction === "down") camera.elevation = Math.max(-89, Math.min(89, camera.elevation - step));
+  $$('[data-camera-view]').forEach(button => button.classList.remove("active"));
+  renderPreview3D();
+}
+
 function setPreviewMode(mode) {
   state.previewMode = mode;
-  $("#preview-mode").value = mode;
+  $$('[data-camera-mode]').forEach(button => button.classList.toggle("active", button.dataset.cameraMode === mode));
   renderPreview3D();
 }
 
 function wireCameraControls() {
   $$('[data-camera-view]').forEach(button => button.addEventListener("click", () => setCameraView(button.dataset.cameraView)));
-  $("#preview-mode").addEventListener("change", event => setPreviewMode(event.target.value));
+  $$('[data-camera-mode]').forEach(button => button.addEventListener("click", () => setPreviewMode(button.dataset.cameraMode)));
   $$('[data-camera-zoom]').forEach(button => button.addEventListener("click", () => {
     state.camera.zoom = Math.max(.35, Math.min(4, state.camera.zoom * (button.dataset.cameraZoom === "in" ? 1.2 : 1 / 1.2)));
     renderPreview3D();
+  }));
+  $$('[data-camera-rotate]').forEach(button => button.addEventListener("click", event => {
+    rotateCameraStep(button.dataset.cameraRotate, event.shiftKey);
   }));
 }
 
@@ -1245,6 +1335,11 @@ function wireControls() {
       changedDesign();
     }));
   $("#standard-base").addEventListener("change", () => {
+    if (stackMode() !== "none") {
+      normalizeStackSettings(state.design);
+      syncForm();
+      return;
+    }
     const isStandard = $("#standard-base").checked;
     $("#base-thickness-setting").hidden = isStandard;
     if (!isStandard) {
@@ -1257,6 +1352,11 @@ function wireControls() {
     changedDesign();
   });
   $("#standard-walls").addEventListener("change", () => {
+    if (stackMode() !== "none") {
+      normalizeStackSettings(state.design);
+      syncForm();
+      return;
+    }
     const isStandard = $("#standard-walls").checked;
     const rules = state.catalog?.wall_rules || {};
     const select = $("#wall-thickness");
@@ -1293,7 +1393,13 @@ function wireControls() {
 
   $("#bin-type").addEventListener("change", () => toggleB4B($("#bin-type").value === "b4b"));
   $("#stack-mode").addEventListener("change", () => {
+    const previous = stackMode();
     readStackForm(state.design);
+    normalizeStackSettings(state.design, {
+      restoreDefaults: previous !== "none" && stackMode() === "none",
+      flash: true,
+    });
+    syncForm();
     applyStackVisibility();
     changedDesign();
   });
@@ -4594,7 +4700,15 @@ function wireSceneInteraction(canvas, camera, render) {
     requestAnimationFrame(() => { framePending = false; render(); });
   };
   canvas.addEventListener("pointerdown", event => {
-    drag = { x: event.clientX, y: event.clientY, yaw: camera.yaw, elevation: camera.elevation, moved: false };
+    // Degrees per pixel scale to the canvas itself (as TinkerCAD's orbit
+    // does) so a drag spins the model by the same feel regardless of how
+    // wide the preview panel happens to be - a drag clear across it is
+    // about one full turn.
+    drag = {
+      x: event.clientX, y: event.clientY, yaw: camera.yaw, elevation: camera.elevation, moved: false,
+      yawPerPixel: 360 / Math.max(200, canvas.clientWidth),
+      elevationPerPixel: 240 / Math.max(200, canvas.clientHeight),
+    };
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener("pointermove", event => {
@@ -4603,8 +4717,8 @@ function wireSceneInteraction(canvas, camera, render) {
       drag.moved = true;
       $$('[data-camera-view]').forEach(button => button.classList.remove("active"));
     }
-    camera.yaw = drag.yaw + (event.clientX - drag.x) * .45;
-    camera.elevation = Math.max(8, Math.min(89, drag.elevation - (event.clientY - drag.y) * .35));
+    camera.yaw = drag.yaw + (event.clientX - drag.x) * drag.yawPerPixel;
+    camera.elevation = Math.max(-89, Math.min(89, drag.elevation - (event.clientY - drag.y) * drag.elevationPerPixel));
     repaint();
   });
   canvas.addEventListener("pointerup", event => {
