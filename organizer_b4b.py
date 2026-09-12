@@ -3360,14 +3360,16 @@ B4B_FRONT_LABEL_HOLDER_DEPTH = 3.0
 B4B_FRONT_LABEL_SIDE_LEG_W = 2.0        # total X width of one side channel
 B4B_FRONT_LABEL_SIDE_OVERLAP = 1.0      # how far its lip reaches onto the plate
 B4B_FRONT_LABEL_MAX_WIDTH_FRACTION = 0.5  # holder <= this fraction of the case width
-# Clear vertical corridor that must exist above the holder's open top so the
-# whole plate can be lifted straight out (or dropped straight in) without
-# fouling the latch/handle hardware above it.
+# Clear vertical gap that must exist above the seated plate's top edge so it
+# can be dropped straight in without fouling the latch/handle hardware above
+# it. The retention bumps mean the plate is meant to seat once and stay -
+# unlike a full lift-out design, this only has to clear the plate itself
+# going in, not a whole extra plate height of travel above that.
 B4B_FRONT_LABEL_INSERT_CLEARANCE = 2.0
 B4B_FRONT_LABEL_BOTTOM_DEFAULT = 3.0    # preferred standoff off the case floor -
                                          # purely a visual preference
-B4B_FRONT_LABEL_BOTTOM_MIN = 0.6        # true floor limit the holder may drop to
-                                         # when the insertion corridor needs the room
+B4B_FRONT_LABEL_BOTTOM_MIN = 0.0        # the case floor itself - the holder may sit
+                                         # flush with it when the corridor needs the room
 # Two small retention bumps just inside the open top, so the seated plate
 # doesn't rely on friction alone to stay put.  Each reaches slightly further
 # into the plate's own running clearance than the rest of the channel, so
@@ -3385,9 +3387,14 @@ def _b4b_front_label_bottom_z(insertion_ceiling_z: float, plate_h: float) -> flo
     required insertion corridor above the holder, otherwise as low as the
     case floor allows - down to ``B4B_FRONT_LABEL_BOTTOM_MIN`` - to buy back
     headroom. ``None`` if even the lowest position can't clear the corridor,
-    i.e. the plate must shrink further before a position exists at all."""
+    i.e. the plate must shrink further before a position exists at all.
+
+    The corridor only needs to fit the plate itself plus
+    ``B4B_FRONT_LABEL_INSERT_CLEARANCE`` above it - e.g. a 35 mm box with
+    ~14 mm of clear front wall below its lowest hardware can still take a
+    label shrunk to the readable minimum."""
     required_span = (
-        B4B_FRONT_LABEL_HOLDER_DEPTH + 2.0 * plate_h
+        B4B_FRONT_LABEL_HOLDER_DEPTH + plate_h
         + B4B_FRONT_LABEL_INSERT_CLEARANCE
     )
     bottom_z = min(
@@ -3584,9 +3591,10 @@ def b4b_front_label_geometry(box: BoxSpec):
     Before settling on a size, the fit is checked against the real vertical
     insertion corridor: the clear space above the holder's open top (up to
     ``insertion_ceiling_z``, the lowest latch/handle obstruction) must be at
-    least one more plate height plus ``B4B_FRONT_LABEL_INSERT_CLEARANCE``, so
-    the whole plate can be lifted straight out (or dropped straight in)
-    without fouling that hardware.  The holder first tries its preferred
+    least ``B4B_FRONT_LABEL_INSERT_CLEARANCE``, so the plate can be dropped
+    straight in without fouling that hardware - the retention bumps hold it
+    once seated, so it no longer needs a whole extra plate height of travel
+    above it just to be lifted back out.  The holder first tries its preferred
     standoff off the case floor and, if that alone doesn't leave enough
     headroom, drops as low as ``B4B_FRONT_LABEL_BOTTOM_MIN`` to buy back the
     difference - only once that's exhausted does the ideal 10 mm cap height
