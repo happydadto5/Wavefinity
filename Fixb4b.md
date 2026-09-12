@@ -1,721 +1,1056 @@
-# Fix B4B hardware redesign — final implementation plan
+# Fix B4B hardware redesign — authoritative dimensional implementation specification
 
-Status: **design review complete; implementation-ready.** The remaining uncertainty is ordinary physical calibration (printed pilot size, detent feel, and small tolerance tuning), not product architecture. Do not reopen the basic hinge/latch/handle concepts unless prototype evidence shows a real failure.
+Status: **design complete; implementation-ready.** This document is intended to remove design discretion from the coding LLM. The coding LLM should review the geometry for mathematical/boolean feasibility, concur or identify a concrete impossibility, and then implement this specification. It should **not** independently redesign the hardware, rescale parts by taste, choose different screw families, add new user options, or substitute percentage-based geometry unless this document explicitly calls for it.
 
-This document is implementation guidance for an LLM. The supplied Rugged Box Light STLs are visual/mechanical references only. Do not copy their case geometry or absolute dimensions. Preserve the useful design language: compact hardware, clean proportions, rounded/tapered transitions, minimal protrusion, and parts that look integrated into the case rather than bolted onto large external blocks.
+The only expected post-implementation tuning is physical-print calibration of: printed thread-forming pilot diameter, tiny detent interference, and at most +/-0.05 mm running-fit adjustments. Those calibration values must remain centralized constants. Everything else below is the intended first-build design.
+
+The supplied Rugged Box Light STLs are visual/mechanical references only. Do not copy their absolute dimensions or case geometry. Preserve their useful design language: clean compact hardware, thin folding parts, rounded/tapered load paths, minimal projection, and hardware that looks grown from the case rather than attached as large blocks.
+
+---
 
 # 1. Authoritative product rules
 
-1. B4B is a carrying/storage case, not merely a normal bin with hardware added.
-2. Minimum entered B4B child field is **48 x 48 mm (6U x 6U)**. With the new 1.2 mm B4B wall this produces a physical case around 51.9 mm square. Do not silently grow smaller requested child fields to make hardware fit.
-3. B4B wall minimum/default is **1.2 mm**.
-4. Every secure B4B uses exactly **two rear hinges**.
-5. Lid opening requirement is approximately **120 degrees**. Do not design for 180-degree fold-flat motion.
-6. Fastener diameter is never a user setting. Hardware is selected automatically.
-7. Use ordinary socket-head metric screws from common assortment kits. No nuts, heat-set inserts, shoulder screws, or specialty hinge pins.
-8. Screws pass through clearance-bored moving members and thread-form into the far printed ear/lug.
-9. Body prints upright. Lid prints upside down. Separate latch levers and the handle print flat on deliberate broad faces. **No B4B part may require slicer supports.**
-10. Design language is **elegant strength**: compact pivots, local head reinforcement only, modest tapered ribs/chamfers, real load paths, and minimum external projection.
-11. The carrying handle is a **folding front handle attached to the body**, never a top handle attached to the lid.
-12. A handle is a carrying feature and therefore requires a **secure lid/latches**. Do not allow a handled B4B with a passive/unsecured lid.
-13. Do not auto-grow B4B X/Y/Z merely to make hinges, latches, or handle hardware fit. Enforce minimums or disable incompatible options with an actionable explanation.
-14. B4B stacking may still increase effective base/floor thickness when structurally required for the stacking recess. That is not permission to change the user's child-field X/Y/Z.
+1. B4B is a carrying/storage case, not merely a normal Wavefinity bin with hardware added.
+2. Entered B4B X/Y are the authoritative child-bin field dimensions.
+3. Minimum child field is exactly **48.00 x 48.00 mm (6U x 6U)**.
+4. B4B X/Y/Z must never silently grow merely to make hinges, latches, or a handle fit.
+5. B4B wall minimum/default is exactly **1.20 mm**.
+6. Every secure B4B has exactly **two rear hinges**.
+7. Secure-lid minimum entered child height is **16.00 mm**. Reject/disable a secure lid below this rather than silently increasing Z.
+8. Lid opening requirement is **120.00 degrees nominal**. Validate the complete sweep from closed through 120 degrees.
+9. Fastener diameter is never exposed to the user.
+10. Hardware family is selected automatically from one authoritative helper.
+11. Ordinary metric socket-head cap screws are used. No nuts, heat-set inserts, shoulder screws, rivets, specialty hinge pins, or user-supplied metal rods.
+12. Screws pass through clearance-bored moving members and thread-form into the far printed lug.
+13. Body prints upright.
+14. Lid prints upside down.
+15. Latch levers print flat on one broad face.
+16. Handle prints flat on one broad face.
+17. **No B4B part may require slicer supports.**
+18. Carrying handle is a folding **front/body-mounted** U/bail. No top handle remains.
+19. A handle requires a secure lid and latches.
+20. A handled B4B uses M3 hardware for the whole case.
+21. Stacking and the front handle are compatible unless an actual geometry collision is found.
+22. The design language is **elegant strength**: compact pivots, local screw-head reinforcement only, tapered roots, real load paths, restrained projection, and no giant rectangular mounting pads.
 
-# 2. Wall-thickness policy — B4B and ordinary bins
+---
 
-## 2.1 B4B wall minimum/default
+# 2. Existing global Wavefinity geometry that remains authoritative
 
-Use **1.2 mm as both the B4B minimum and default wall**.
+Unless another section below explicitly replaces a value, retain these existing Wavefinity fundamentals:
 
-A 0.8 mm wall can probably survive with enough local reinforcement, but it is the wrong baseline for a repeatedly opened, latched, hinged and carried case. With a nominal 0.4 mm nozzle, 1.2 mm is roughly a three-line wall and gives materially better stiffness and peel resistance.
+- grid pitch: **8.00 mm**;
+- wave length: **4.00 mm**;
+- wave amplitude: **0.40 mm**;
+- wave mating gap: **0.25 mm**;
+- corner inset: **1.00 mm**;
+- B4B lid seat clearance: **0.15 mm**;
+- passive lid skin: **1.60 mm**;
+- secure lid skin: **2.40 mm**;
+- lid locating skirt wall: **2.00 mm**;
+- nominal skirt lap: **4.00 mm**, still capped by available headroom as current code does;
+- support-free horizontal bore roofs: reuse the existing proven teardrop/self-supporting construction, parameterized by the new bore radius;
+- support-free bridge upper bound: **3.00 mm**.
 
-B4B preserves the authoritative inner child field and grows structural wall material outward, so the capacity cost is effectively zero. Moving the minimum 48 x 48 child field from 0.8 to 1.2 wall only increases physical X/Y by about 0.94 mm total per axis.
+Do not re-phase the waves, change the child-field semantics, or buffer the authoritative mating wall in a way that breaks Wavefinity phase compatibility.
 
-When entering B4B from a thinner ordinary bin, promote the visible/effective wall to 1.2 automatically. Preserve any thicker user choice.
+For reference, with a 1.20 mm B4B wall:
 
-## 2.2 Simplified wall presets
+- max wave slope = `0.4 * 2*pi/4 = 0.62831853`;
+- wall depth = `1.20 * sqrt(1 + slope^2) = 1.41721 mm`;
+- 48.00 mm child field physical exterior is approximately **51.88442 mm** in X/Y using the current B4B outward-wall math.
 
-For newly selected ordinary-bin wall values, expose only:
+---
 
-- **0.4 mm — Very thin / prototype**
-- **0.8 mm — Standard**
-- **1.2 mm — Strong**
-- **1.6 mm — Heavy**
-- **2.0 mm — Extra heavy**
-- **2.4 mm — Maximum**
+# 3. Wall-thickness policy for ordinary bins and B4B
 
-Do not add 0.5, 1.0, 1.5, etc. Exact extrusion width is slicer-dependent and those values only recreate an unnecessarily large option list.
+## 3.1 New ordinary-bin choices
 
-Ordinary bins remain 0.8 mm by default. B4B always exposes **Wall thickness** directly and offers only 1.2 / 1.6 / 2.0 / 2.4.
+Expose only:
 
-The engine may continue accepting legacy non-preset values for compatibility. Ordinary saved designs with values such as 0.6, 1.0 or 1.4 should reopen unchanged; UI may show `Legacy/Custom X mm` until the user chooses a current preset.
+- **0.40 mm — Very thin / prototype**
+- **0.80 mm — Standard**
+- **1.20 mm — Strong**
+- **1.60 mm — Heavy**
+- **2.00 mm — Extra heavy**
+- **2.40 mm — Maximum**
 
-For an old B4B saved below 1.2 mm, structural safety wins over preserving a newly generated weak case: the file may be read for compatibility, but regeneration/editing must clearly require/promote the B4B wall to at least 1.2 rather than silently exporting the old weak wall.
+Do not add 0.50 / 1.00 / 1.50 or retain a 0.20-step selector for newly chosen values.
 
-## 2.3 Mode-required minimum wall
+Ordinary-bin default remains **0.80 mm**.
 
-Centralize one `required_min_wall(mode/options)` concept instead of scattering special cases:
+Legacy saved ordinary bins with non-preset values remain loadable and geometrically unchanged. UI may display `Legacy/Custom X.XX mm` until the user selects a current preset.
 
-- ordinary non-stacking bin: UI minimum 0.4;
-- direct-snap stacking: minimum 1.2;
-- lid stacking: minimum 1.2 when the snap/groove load path requires it;
-- B4B: minimum 1.2.
+## 3.2 B4B choices
 
-Enabling a strength-requiring mode promotes a thinner wall to 1.2. Never silently reduce a thicker choice.
+B4B always shows Wall thickness directly. Allowed new selections:
 
-Where the browser maintains transient session state, remember the user's previous ordinary-bin wall when the mode itself forced a promotion. If the user turns that strength-requiring mode back off without manually changing wall thickness in the meantime, restore the prior ordinary-bin wall/default. If the user explicitly changed the wall while the mode was active, preserve the explicit choice.
+- **1.20 mm — Standard B4B / Strong**
+- **1.60 mm — Heavy**
+- **2.00 mm — Extra heavy**
+- **2.40 mm — Maximum**
 
-# 3. Eliminate silent B4B size growth
+Default = **1.20 mm**.
 
-The current `b4b_effective_box()` grows X until old reinforced hinges/handle fit and raises Z to the old latch minimum. That behavior must be removed for hardware fit.
+Entering B4B from a thinner ordinary bin promotes the active wall to 1.20 mm. Preserve any value already >=1.20 mm.
 
-New rule:
+An old saved B4B below 1.20 mm may be read for migration, but any new regeneration/edit must require/promote the design to at least 1.20 mm with a visible explanation.
 
-- X/Y are the requested child field and remain authoritative.
-- Minimum B4B child field is 48 x 48; below that, reject/disable B4B rather than grow it.
-- Keep a secure-lid minimum height of **at least the current 16 mm floor** unless the new latch geometry proves a higher minimum is required. Enforce the final minimum in validation/UI; do not silently increase Z.
-- Handle eligibility is derived from actual width/height available. If it does not fit, handle is unavailable; the case remains valid.
-- Stacking may still increase effective base thickness to preserve floor skin under recesses, but not child X/Y/Z.
+## 3.3 Mode-required minimum helper
 
-Delete/replace any loops whose purpose is “keep growing until hardware fits.”
+Centralize one helper such as `required_min_wall(mode/options)`:
 
-# 4. Shared automatic hardware profiles
+- ordinary non-stacking: 0.40;
+- direct-snap stacking: 1.20;
+- lid stacking: 1.20 where the snap/groove load path requires it;
+- B4B: 1.20.
 
-Replace hard-coded M3 assumptions with a reusable internal hardware profile used by hinges/latches and consulted by the handle plan.
+When a mode forces a promotion, remember the prior ordinary-bin wall in transient UI state. If the user later disables that mode without manually editing wall thickness while the mode was active, restore the prior wall. If the user manually changed the wall while the mode was active, preserve the explicit choice.
 
-Recommended fields:
+---
 
-- name / nominal diameter;
-- clearance bore;
-- printed thread-forming pilot;
-- minimum thread engagement;
-- socket-head diameter/clearance;
-- permitted standard screw lengths;
-- running gap;
-- minimum shell around clearance bore;
-- minimum shell around pilot;
-- local head-bearing margin;
-- maximum screw protrusion.
+# 4. Remove all silent B4B hardware-driven size growth
 
-## 4.1 M2 compact profile
+Delete/replace any logic that repeatedly grows X/Y or silently increases Z until old hardware fits.
 
-Initial values to implement and physically calibrate:
+Authoritative behavior:
 
-- nominal: 2.0 mm;
-- clearance bore: about 2.3 mm;
-- printed pilot: about 1.7 mm initially;
-- **minimum engagement: 2.4 mm**;
-- local socket-head clearance: about 4.1–4.2 mm;
-- standard lengths: 6 / 8 / 10 / 12 / 16 mm;
-- prefer 8 or 10 mm pivots when possible.
+- X/Y remain exactly the requested child field.
+- X <48 or Y <48 => B4B unavailable/invalid.
+- secure lid with child height <16.00 => unavailable/invalid.
+- handle fit is an eligibility result; never an X/Y/Z growth request.
+- stacking may still increase effective base thickness enough to preserve the required floor skin below stacking recesses; this does **not** authorize changes to child X/Y/Z.
 
-## 4.2 M3 standard profile
+The existing `b4b_effective_box()` should become an effective-material/base normalizer, not a hardware-driven dimension mutator.
 
-Initial values:
+---
 
-- nominal: 3.0 mm;
-- clearance bore: 3.4 mm;
-- printed pilot: 2.6 mm initially;
-- **minimum engagement: 3.0 mm**;
-- local socket-head clearance: about 6.0 mm;
-- standard lengths: 6 / 8 / 10 / 12 / 16 / 20 mm;
-- prefer 10 or 12 mm pivots when possible.
+# 5. Exact hardware profiles
 
-Ordinary socket-head heads are roughly 3.8 mm diameter for M2 and 5.5 mm for M3. **Only the short local head-bearing region needs head-sized plastic.** Never let screw-head diameter determine the entire hinge/latch/handle pivot envelope.
+Create a single immutable `HardwareProfile` or equivalent and make preview, generation, validation, and BOM consume the same resolved profile.
 
-## 4.3 First-implementation automatic selection rule
+All dimensions below are exact first-build nominal values.
 
-Make this deterministic so preview/export/BOM cannot disagree:
+## 5.1 M2 compact
 
-- if handle is enabled -> **M3 for the entire B4B**;
-- otherwise M2 when child-field X <= 96 mm **and** child-field Y <= 96 mm **and** child height <= 64 mm;
-- otherwise M3.
+- family name: `M2`
+- nominal diameter: **2.00 mm**
+- rotating clearance bore: **2.30 mm**
+- printed thread-forming pilot: **1.70 mm**
+- minimum thread engagement: **2.40 mm**
+- socket-head nominal diameter reference: 3.80 mm
+- printed head clearance diameter: **4.20 mm**
+- local head-bearing radial margin outside head-clearance circle: **0.50 mm**
+- resulting local head-bearing flare radius: **2.60 mm**
+- standard screw lengths: **6 / 8 / 10 / 12 / 16 mm**
+- standard moving axial gap: **0.30 mm**
+- minimum radial shell around rotating clearance bore: **1.20 mm**
+- general compact pivot outer radius: **2.40 mm**
+- maximum screw protrusion beyond far lug: **0.50 mm**
 
-This is the first implementation rule, not a user setting. Physical load testing may later move the thresholds, but do not invent a different rule in separate call paths.
+Physical calibration allowance after first prints:
 
-Prefer one hardware family for the entire case. A handled case is intentionally all-M3 rather than M2 hinges/latches plus M3 handle pivots.
+- pilot may move from 1.70 by at most +/-0.10 without redesign;
+- clearance bore may move from 2.30 by at most +/-0.05 if printer fit requires it.
 
-## 4.4 Screw selection
+## 5.2 M3 standard
 
-For every pivot/catch:
+- family name: `M3`
+- nominal diameter: **3.00 mm**
+- rotating clearance bore: **3.40 mm**
+- printed thread-forming pilot: **2.60 mm**
+- minimum thread engagement: **3.00 mm**
+- socket-head nominal diameter reference: 5.50 mm
+- printed head clearance diameter: **6.00 mm**
+- local head-bearing radial margin outside head-clearance circle: **0.60 mm**
+- resulting local head-bearing flare radius: **3.60 mm**
+- standard screw lengths: **6 / 8 / 10 / 12 / 16 / 20 mm**
+- standard moving axial gap: **0.30 mm**
+- minimum radial shell around rotating clearance bore: **1.30 mm**
+- general compact pivot outer radius: **3.00 mm**
+- maximum screw protrusion beyond far lug: **0.50 mm**
 
-1. calculate the true clearance-bored stack;
-2. calculate physical far-lug thickness;
-3. choose the **shortest allowed standard screw** that achieves minimum family-specific thread engagement;
-4. prefer termination inside or flush with the far lug;
-5. maximum acceptable protrusion past the far face: **0.5 mm**;
-6. if no standard screw works, change the geometry rather than accepting a long exposed tail.
+Physical calibration allowance after first prints:
 
-BOM must name the actual family/length used.
+- pilot may move from 2.60 by at most +/-0.10 without redesign;
+- clearance bore may move from 3.40 by at most +/-0.05 if needed.
 
-# 5. Rear hinge redesign
+## 5.3 Automatic family selector
 
-## 5.1 Current failure
+One helper only:
 
-The current hinge is M3-first: one universal head-driven boss, a 12.5 mm hard minimum width, and large external root web/pads. This makes small B4Bs look like thin organizer boxes with rugged-case hardware bolted on.
+1. if handle enabled => M3;
+2. otherwise M2 when child X <=96.00 **and** child Y <=96.00 **and** child height <=64.00;
+3. otherwise M3.
 
-The existing concept of two body ears plus one lid center ear is mechanically good. Keep that topology but completely resize/re-root it.
+Do not create separate hinge/latch selectors.
 
-## 5.2 Body ears
+## 5.4 Screw selector
 
-Each of the exactly two hinge groups gets two slim body ears:
+For each screw path:
 
-- pivot section size = selected clearance bore + printable shell;
-- near ear gets a short local head-bearing flare only;
-- far ear is the thread-forming lug;
-- axis is tucked as close to the rear wall as the motion sweep permits;
-- a short neck leaves the pivot and flows into a shallow diagonal/trapezoidal rib;
-- rib widens modestly as it meets the wall;
-- root fades into rear wall with plan-view chamfers/tapers, not a broad rectangular pad;
-- reinforcement grows outward only and never steals child-field capacity.
+1. compute actual clearance stack from near entry face through all clearance members and running gaps;
+2. compute actual far-lug thickness;
+3. iterate permitted family lengths shortest-first;
+4. require `length - clearance_stack >= minimum_thread_engagement`;
+5. require `length - clearance_stack - far_lug <=0.50`;
+6. choose first passing length;
+7. if none passes, report a geometry design error. Do not accept an exposed long tail.
 
-A local reinforced/root wall thickness around 2.4–3.0 mm total is acceptable when needed; taper it back into the 1.2+ shell.
+---
 
-## 5.3 Lid center ear
+# 6. Rear hinge — exact first-build geometry
 
-Use one compact center ear close to the rear lid edge. Carry load into the secure lid plate through a shallow triangular/trapezoidal arm reaching inward into the plate. Avoid the old oversized vertical tab.
+Exactly two hinges for every secure B4B.
 
-The lid prints upside down. Evaluate geometry in print space:
+## 6.1 Axial stack
 
-- root grows from the bed-facing lid top/edge;
-- horizontal bore uses the roof direction appropriate to the flipped lid;
-- no unsupported shelf;
-- transitions are vertical or <=45 degrees where they would otherwise overhang.
+### M2 hinge
 
-## 5.4 Axis placement and 120-degree sweep
+Along X from the outboard screw-head side toward the case center:
 
-Stop deriving hinge Y from `boss_radius + fixed_offset`.
+- near body ear: **2.20 mm**
+- running gap: **0.30 mm**
+- lid center ear: **2.60 mm**
+- running gap: **0.30 mm**
+- far body thread-forming lug: **2.60 mm**
 
-Solve the closest collision-free axis from:
+Total hinge-group axial width = **8.00 mm**.
 
-- closed lid/body geometry;
-- lid rear edge thickness;
-- body rim/rear wall;
-- actual knuckle envelope;
-- running clearances;
-- sampled lid motion from 0 through approximately 120 degrees.
+Clearance stack before far lug = 2.20 +0.30 +2.60 +0.30 = **5.40 mm**.
 
-A small support-free relief/chamfer on the rear lid edge is preferable to moving the entire hinge farther behind the case.
+Use **M2x8** by design:
 
-## 5.5 Axial width and X placement
+- thread penetration = 8.00 -5.40 = **2.60 mm**;
+- lug = 2.60 mm;
+- exposed tail = **0.00 mm**.
 
-Stop using percentage-of-case-width as the primary hinge width rule.
+### M3 hinge
 
-Derive the three-knuckle stack from:
+Along X:
 
-- selected hardware profile;
-- running gaps;
-- minimum far-lug engagement;
-- near local head-bearing geometry.
+- near body ear: **2.80 mm**
+- running gap: **0.30 mm**
+- lid center ear: **3.20 mm**
+- running gap: **0.30 mm**
+- far body thread-forming lug: **3.40 mm**
 
-Place the two hinges symmetrically toward the outer thirds while preserving corner keep-outs and visible separation between roots.
+Total = **10.00 mm**.
 
-## 5.6 Hinge targets and validation
+Clearance stack = 2.80 +0.30 +3.20 +0.30 = **6.60 mm**.
 
-Design targets, subject to collision-free sweep:
+Use **M3x10** by design:
 
-- M2 hinge maximum rear projection preferably <= about 5.5 mm beyond local wall crest;
-- M3 hinge preferably <= about 6.5–7 mm;
-- no root web should be the feature that sets excessive projection.
+- thread penetration = **3.40 mm**;
+- lug = 3.40 mm;
+- tail = **0.00 mm**.
 
-Validate/report:
+The general selector still verifies these results rather than hard-coding BOM strings.
 
-- exactly two hinges at 48 x 48 minimum child field;
-- no hardware-driven X growth;
-- hinge group width;
-- max rear projection;
-- root coverage;
-- screw family/length;
-- engagement and <=0.5 mm protrusion;
-- closed clearance;
-- sampled motion to ~120 degrees;
-- upright-body and upside-down-lid support-free geometry;
-- watertight solids.
+## 6.2 Pivot radial geometry
 
-# 6. Front latch redesign
+M2:
 
-## 6.1 Current failure
+- normal ear/center-ear pivot radius = **2.40 mm**;
+- near-ear local head-bearing flare radius = **2.60 mm** only around the short head-bearing end.
 
-The current latch repeats the universal-M3-boss problem twice: large lid pivot ears, large body catch ears, broad pads, and a bulbous lever made from large circular ends. Its reinforced envelope and front projection are wildly disproportionate on a ~52 mm B4B.
+M3:
 
-Retain the basic mechanism but redesign every printed part around the selected hardware family.
+- normal pivot radius = **3.00 mm**;
+- near-ear local head-bearing flare radius = **3.60 mm** only around the head-bearing end.
 
-## 6.2 Mechanism to keep
+Do not enlarge the lid center ear or far lug to the head-bearing radius.
 
-Retain:
+Use the existing support-free faceted outer profile concept rather than a fully round horizontal barrel if a round underside would violate support-free print rules.
 
-- folding lever pivoted from the lid;
-- metal screw-shank catch pin on the body;
-- near clearance ear + far thread-forming ear at both pivot and catch;
-- positive hook capture around the metal catch pin.
+## 6.3 Rear axis Y starting position
 
-The screw shank remains the wear surface. No printed catch pin, nut or insert.
+For each hinge group determine the maximum local rear wall crest across that hinge/root X envelope.
 
-## 6.3 Body catch receiver
+First-build axis offset from that crest:
 
-Replace broad pad/giant bosses with compact ears:
+- M2: `2.40 +0.35 =` **2.75 mm** behind rear crest;
+- M3: `3.00 +0.35 =` **3.35 mm** behind rear crest.
 
-- radial size from bore + shell;
-- local head flare only on near ear;
-- far ear thick enough for family-specific thread engagement;
-- catch pin only as far from wall as lever/hook clearance requires;
-- each ear flows into the 1.2+ wall through a modest triangular/trapezoidal root;
-- root tapers in X/Z rather than ending as a large block;
-- all upright-print undersides remain vertical or <=45 degrees;
-- child field remains untouched.
+Expected nominal maximum pivot projection:
 
-## 6.4 Lid pivot receiver
+- M2: 2.75 +2.40 = **5.15 mm**;
+- M3: 3.35 +3.00 = **6.35 mm**;
 
-Use two compact ears at the front lid edge with the lever between them:
+excluding the short head flare if it locally exceeds this.
 
-- pivot close to lid/front wall;
-- local head flare only on near ear;
-- far ear thread-forming lug;
-- shallow tapered arms into secure lid plate;
-- mechanism visually remains at the lid seam;
-- support-free horizontal bore roof must be correct for the upside-down lid print orientation.
+Do not move the axis farther out preemptively.
 
-## 6.5 Lever
+## 6.4 Rear axis Z
 
-Replace the old convex-hull/two-large-disc form with a **thin folding strap** inspired by the reference latch:
+Retain the useful print relationship:
 
-- compact rounded pivot end;
-- flat/slightly tapered strap body;
-- modest finger lip at lower edge;
-- integrated hook around catch screw;
-- controlled fillets at pivot/strap/hook stress transitions;
-- no large bulb at either end.
+`hinge_axis_z = secure_lid_top_z - normal_pivot_radius`.
 
-The lever prints flat on one broad face. Its pivot hole is vertical in that print orientation and can be round.
+Thus the upper flat/tangent region of the lid-side knuckle remains aligned with the broad lid top when the lid is flipped for printing.
 
-Hook behavior:
+## 6.5 Opening sweep and rear-lid relief
 
-- closing rotation guides hook onto pin;
-- modest detent/interference provides tactile retention;
-- one-finger lift releases it;
-- ordinary lid-opening force does not naturally self-release it;
-- avoid a deep C-hook that needs large elastic flex every cycle;
-- no sharp internal hook-mouth corner.
+Validate lid positions every **5.00 degrees** from 0 through 120 inclusive.
 
-## 6.6 Latch count — deterministic first implementation
+If the starting Y location collides during sweep:
 
-Retire user-facing latch count/strength complexity for new designs except where legacy data must remain readable.
+1. first introduce a support-free **45-degree rear lid relief/chamfer**, maximum relief depth **1.20 mm**;
+2. grow relief only enough to clear the sweep;
+3. only if 1.20 mm relief is insufficient may the axis move rearward;
+4. rearward movement must be the minimum required and quantized in **0.05 mm** increments;
+5. if M2 rear projection exceeds **5.75 mm** or M3 exceeds **7.00 mm**, flag for design review instead of silently accepting a backpack-like hinge.
 
-First implementation:
+This is an algorithm, not an invitation to redesign the hinge.
 
-- child-field X <= **96 mm** -> **one centered latch**;
-- child-field X > **96 mm** -> **two latches**.
+## 6.6 Hinge X placement
 
-For two latches, target approximately one-third/two-thirds positions, i.e. centers near `+/- front_width/6` from case center, adjusted only enough for true corner/root keep-outs.
+Nominal hinge centers:
 
-Do not decide count from whether two old-style giant pads happen to fit. The compact redesign must fit its intended count. If prototype closure testing later proves the 96 mm transition should move, change one authoritative threshold constant.
+`x = +/- child_x / 4`.
 
-Retire `Lightweight / Standard` latch strength as a new user choice. Use one robust proportional profile per selected M2/M3 hardware family. Preserve legacy fields only for file migration/compatibility.
+Root/corner clearance check:
 
-## 6.7 Latch projection target
+- minimum root-to-corner-tangent clearance: **2.00 mm**.
 
-- M2 compact latch: target roughly **5–6 mm maximum closed projection** beyond local front-wall crest;
-- M3 latch: remain **under about 9 mm**, preferably less;
-- root reinforcement must not be the reason projection grows.
+If the nominal center violates that clearance, shift the affected symmetric pair inward by the minimum amount needed. Never shift outward. Preserve symmetry.
 
-Keep latch mechanism high at the lid seam. Lower/central front remains available for the handle.
+At the 48 mm minimum, nominal centers are exactly **+/-12.00 mm**.
 
-## 6.8 Latch validation
+## 6.7 Hinge root geometry
 
-Validate explicitly; do not rely on appearance alone:
+M2:
 
-- closed lever/catch relationship;
-- intended tiny detent/contact only, no broad rubbing;
-- opening sweep from closed through full release/open angle;
-- hook clears catch after release;
-- lever does not hit body, lid, handle or handle roots;
-- one/two-latch placement is deterministic and symmetric;
-- body upright support-free;
-- lid upside down support-free;
-- lever flat support-free;
-- screw family/length/engagement/protrusion;
-- max front projection;
-- total latch/root envelope width;
-- pivot/catch distance from wall crest;
-- lever vertical extent below seam;
-- watertight solids.
+- pivot group width: 8.00;
+- wall-contact/root width: **11.00 mm**;
+- root coverage below the local top/rim zone: **8.00 mm**;
+- target local total structural depth from inner mating face through outer reinforcement: **2.60 mm**.
 
-# 7. Folding front handle redesign
+M3:
 
-## 7.1 Replace, do not adapt, the current top handle
+- pivot group width: 10.00;
+- wall-contact/root width: **13.60 mm**;
+- root coverage below top/rim zone: **10.00 mm**;
+- target local total structural depth: **3.00 mm**.
 
-The current handle architecture is wrong for the requested product. It creates a large fixed arch on the lid, drills handle screws into the lid plate, thickens the lid so it becomes the thread-forming handle lug, and conflicts with stacking.
+Implementation:
 
-Remove that structural assumption completely.
+- pivot neck begins at group width;
+- root widens linearly to wall-contact width;
+- plan-view end transitions are 45-degree or shallower chamfers/tapers;
+- Y/Z root underside also remains 45 degrees or shallower;
+- extra depth grows outward only;
+- no rectangular pad extending the full root envelope.
 
-The new handle attaches to the **B4B body/front wall**. The lid carries no handle load. Carrying force goes directly into the case shell rather than through the lid, latches and rear hinges.
+---
 
-Required consequences:
+# 7. Front latch — exact first-build geometry
 
-- remove handle-driven lid thickening;
-- remove handle screw bores from lid;
-- stacking and handle are no longer mutually exclusive;
-- never auto-grow X/Y/Z for handle fit;
-- handle roots become body hardware;
-- handle remains one separately printed part;
-- handle requires secure lid/latches.
+The old `Lightweight/Standard` design choice is retired for new designs. Geometry is determined by M2/M3 family.
 
-## 7.2 Reference-handle design language
+## 7.1 Latch count
 
-The reference handle is roughly 99 mm along its pivot span, ~27.6 mm U reach/drop and ~7 mm thick. Do not copy those numbers. Preserve:
+- child X <= **96.00 mm** => exactly **one centered latch**;
+- child X > **96.00 mm** => exactly **two latches**.
 
-- one clean U/bail;
-- rounded pivot eyes at the two open ends;
-- broad smooth lower radii;
-- simple straight arms and grip;
-- restrained local pivot thickening;
-- compact folded state;
-- no decorative complexity.
+One latch center = `x=0`.
 
-## 7.3 Orientation and motion
+Two latch centers = `x = +/- child_x/6` nominally.
 
-Mount the handle centered on the front wall. The two pivot eyes are collinear on one horizontal X-axis.
+If a true root/corner collision exists, move the pair symmetrically inward only as much as needed while maintaining at least **2.00 mm** root-to-corner-tangent clearance.
 
-- **Stowed:** U hangs downward, nearly flat against front wall.
-- **Carry:** U rotates outward to a broad mechanical stop.
-- Initial stop target: **95 degrees** from stowed. Small tuning within roughly 90–100 degrees is acceptable only if required for comfortable clearance.
-- Do not permit 180-degree rotation.
-- Normal assembled preview shows the handle stowed.
+Do not change the 96 mm threshold in different code paths.
 
-The handle must not depend on screw threads/head as its rotation stop.
+## 7.2 Latch pivot and catch axial stacks
 
-## 7.4 Handle shape and ergonomic targets
+Use the same compact screw-stack philosophy for both the lid pivot and body catch.
 
-Single-piece U/bail:
+### M2 latch pivot/catch stack
 
-- straight arms from pivot eyes;
-- large-radius lower transitions;
-- straight lower grip;
-- rounded exterior edges and generous internal radii;
-- local pivot-eye reinforcement only;
-- no oversized circular end bosses.
+Along X:
 
-Initial physical targets:
+- near clearance ear: **2.20 mm**
+- gap: **0.30 mm**
+- lever or exposed catch span corresponding to lever width: **2.60 mm**
+- gap: **0.30 mm**
+- far thread lug: **2.60 mm**
 
-- in-plane band width: **6–7 mm**;
-- front-to-back thickness folded: **5.5–6 mm**;
-- minimum clear grip width: **72 mm**;
-- preferred clear grip: **85–95 mm**;
-- cap useful clear grip around **105 mm** rather than growing indefinitely;
-- U drop from pivot axis to grip: **26–32 mm**, use as much of this range as available.
+Total = **8.00 mm**.
 
-Keep cross-section approximately constant through grip/arms and thicken only locally around pivot eyes.
+Use **M2x8**. Clearance span=5.40; engagement=2.60; tail=0.00.
 
-Target total folded front projection around **6–7 mm or less** from local front-wall crest, including running clearance.
+### M3 latch pivot/catch stack
 
-## 7.5 Handle eligibility — never grow the case
+- near clearance ear: **2.80 mm**
+- gap: **0.30 mm**
+- lever/exposed center span: **3.20 mm**
+- gap: **0.30 mm**
+- far thread lug: **3.40 mm**
 
-A real adult handle does not belong on a 48–52 mm-wide minimum B4B.
+Total = **10.00 mm**.
 
-Calculate handle eligibility from actual geometry:
+Use **M3x10**. Clearance span=6.60; engagement=3.40; tail=0.00.
 
-- available front width after corner and pivot-root keep-outs;
-- actual pivot-fork envelopes;
-- true clear grip >=72 mm;
-- vertical front-wall space below latch zone;
-- achievable U drop >=26 mm;
-- minimum **4 mm bottom margin** above the base/floor edge;
-- latch and label keep-outs.
+## 7.3 Lid pivot ear radial geometry
 
-The width threshold will likely land around 88–96 mm child-field width, but **derive and round it to the next valid 8 mm grid size from actual geometry**. Do not hard-code the estimate instead of solving the geometry.
+M2:
 
-Likewise derive minimum handle-capable height. If the case is too narrow or short:
+- normal pivot radius: **2.40 mm**;
+- local near-ear head flare radius: **2.60 mm**.
 
-- handle is unavailable/unchecked;
-- explain why concisely;
-- do not change case dimensions;
-- saved impossible handled designs fail validation with an actionable message.
+M3:
 
-## 7.6 Pivot architecture
+- normal pivot radius: **3.00 mm**;
+- local head flare radius: **3.60 mm**.
 
-Use two compact body forks, one at each handle end.
+## 7.4 Body catch-ear radial geometry
 
-Each fork:
+These ears do not need to be as radially large as the rotating pivot region.
 
-- near body ear: clearance bore + short local socket-head bearing flare;
-- handle eye: clearance bore and rotates between ears;
-- far body ear: M3 thread-forming pilot;
-- one M3 socket-head screw passes through near ear -> handle eye -> far ear;
-- shortest valid M3 screw, prefer M3x10 or M3x12, M3x16 only if genuinely needed;
-- screw ends inside/flush or <=0.5 mm beyond far ear.
+M2 body catch ear normal radius: **2.20 mm**.
 
-Mirror screw direction for clean assembly: **left pivot screw head faces the left/outboard side; right pivot screw head faces the right/outboard side.** Thread-forming far ears therefore face toward the center of the case. This keeps both screw heads accessible from the sides and keeps the visual center clean.
+M3 body catch ear normal radius: **2.70 mm**.
 
-The screw remains stationary relative to body; handle rotates around the screw shank.
+Near catch ear still gets the same local family head-bearing flare (2.60 M2 / 3.60 M3) only where the screw head bears.
 
-## 7.7 Body-side handle roots
+## 7.5 Pivot/catch position relative to front wall
 
-These roots carry the full loaded case and may spread farther than latch roots, but must still look integrated.
+Determine the minimum local front-wall Y crest across the full latch/root X envelope.
 
-Each pivot fork:
+Outward distances from that crest:
 
-- only as far in front of wall as rotation requires;
-- tapered into 1.2+ wall through narrow vertical/diagonal reinforcement;
-- spreads load above/below pivot over meaningful wall height;
-- local reinforced/root wall thickness around **2.4–3.0 mm total** is acceptable;
-- all extra material grows outward;
-- lower transitions vertical or <=45 degrees for upright printing;
-- no broad rectangular mounting plate;
-- no intrusion into child field.
+### M2
 
-## 7.8 Folded clearance and anti-rattle
+- lid pivot axis: **2.85 mm** outward = 2.40 radius +0.45 running space;
+- body catch axis: **2.60 mm** outward = 2.20 radius +0.40 running space.
 
-Handle lies close to front shell without rubbing the wavy wall.
+### M3
 
-- use about **0.6 mm initial running clearance** to the highest relevant wall crest, then tune if physical prints show unnecessary looseness;
-- do not create a thick flat backing pad merely to make the wall planar;
-- add two small symmetric low-force stow detents near lower arms/corners;
-- initial detent interference: **0.20 mm** (acceptable physical-tuning band about 0.15–0.25);
-- approach/release faces <=45 degrees;
-- grip remains finger-accessible from below when stowed.
+- lid pivot axis: **3.45 mm** outward = 3.00 +0.45;
+- body catch axis: **3.10 mm** outward = 2.70 +0.40.
 
-No user setting for detent force.
+These are first-build positions. Do not add arbitrary extra standoff.
 
-## 7.9 Carry stop
+Expected normal closed projection near pivot:
 
-Use broad printed heel/stop surfaces at both pivots:
+- M2 ~5.25 mm before the short local head flare;
+- M3 ~6.45 mm before the short local head flare.
 
-- target ~95-degree deployed angle;
-- stop loads broad plastic faces, never screw head/thread or a thin edge;
-- stop geometry support-free in body and handle print orientations;
-- include stop in sweep/collision validation.
+## 7.6 Pivot/catch Z spacing
 
-## 7.10 Interaction with latches
+Set pivot Z from the secure lid top/ear print relationship:
 
-Latches stay high at lid seam; handle pivots stay below them.
+`pivot_axis_z = secure_lid_top_z - pivot_radius`.
 
-Validate one- and two-latch cases so:
+Catch-axis vertical drop from pivot:
 
-- latch sweep never strikes stowed/deployed handle;
-- handle sweep never strikes latch receivers/levers;
-- two latch roots do not merge accidentally into handle roots;
-- one centered latch remains clear of the central upper portion of the folded U;
-- impossible shallow combinations disable handle rather than distort either mechanism.
+- M2: **9.00 mm**;
+- M3: **10.50 mm**.
 
-## 7.11 Interaction with front labels
+Thus:
 
-When handle is enabled, use the **open interior of the folded U** as preferred front-label zone.
+`catch_axis_z = pivot_axis_z - family_draw`.
 
-- label layout accounts for handle outline, pivot roots and latch keep-outs;
-- auto-fit/scale label into clear central area when possible;
-- if it cannot fit, report clearly or direct user to top label rather than overlap;
-- handle should visually frame, not cover, front label.
+Do not use old latch strength pad-height values.
 
-## 7.12 Interaction with stacking
+## 7.7 Lever section
 
-Front handle and B4B stacking are compatible in principle because the handle no longer occupies the lid top.
+Axial extrusion width is already fixed by the stack:
 
-Remove the old normalization rule that disables handle when stacking is selected. Reject only a real geometry collision, not an architectural assumption from the old top handle.
+- M2 lever X width: **2.60 mm**;
+- M3 lever X width: **3.20 mm**.
 
-## 7.13 Handle print orientation
+In the Y/Z outline:
 
-Handle prints separately on one broad face.
+M2:
 
-In this pose the pivot bores are horizontal. Use the same support-free/teardrop roof principle as other horizontal bores.
+- strap body thickness normal to its centerline: **2.00 mm**;
+- pivot end outer radius: **2.40 mm**;
+- catch pin inner clearance radius: **1.25 mm** (`M2/2 +0.25`);
+- hook wall radial thickness: **1.40 mm**;
+- hook outer radius: **2.65 mm**;
+- hook mouth clear height: **1.80 mm**;
+- effective pin-mouth interference: **0.20 mm** versus 2.00 mm pin;
+- lead-in chamfer/run at hook mouth: **0.60 mm**;
+- finger-lip outward extension beyond strap: **1.20 mm**;
+- finger-lip vertical length: **2.50 mm**.
+
+M3:
+
+- strap body thickness: **2.40 mm**;
+- pivot end outer radius: **3.00 mm**;
+- catch inner clearance radius: **1.75 mm** (`M3/2 +0.25`);
+- hook wall radial thickness: **1.60 mm**;
+- hook outer radius: **3.35 mm**;
+- hook mouth clear height: **2.80 mm**;
+- effective pin-mouth interference: **0.20 mm** versus 3.00 mm pin;
+- lead-in chamfer/run: **0.80 mm**;
+- finger-lip outward extension: **1.50 mm**;
+- finger-lip vertical length: **3.00 mm**.
+
+Use controlled fillets at the pivot-to-strap and strap-to-hook internal stress transitions:
+
+- M2 fillet radius: **0.80 mm**;
+- M3 fillet radius: **1.00 mm**.
+
+Do not fillet the print-bed face in a way that loses a broad flat printing surface.
+
+## 7.8 Latch root geometry
+
+M2:
+
+- total wall-contact root width: **10.80 mm**;
+- vertical root coverage: **9.00 mm**;
+- target local structural depth: **2.60 mm**.
+
+M3:
+
+- total wall-contact root width: **13.40 mm**;
+- vertical root coverage: **11.00 mm**;
+- target local structural depth: **3.00 mm**.
+
+The root tapers from the ear stack into this wall-contact area. No broad rectangular receiver pad.
+
+## 7.9 Latch movement validation
+
+Closed pose = 0 degrees.
+
+Validate lever sweep in **5-degree increments from 0 through 75 degrees open**.
 
 Requirements:
 
-- broad flat print face;
-- no support under lower U radii;
-- pivot bores self-supporting;
-- edge rounds/fillets do not create hidden down-facing overhangs;
-- one watertight solid.
+- closed state has only intentional hook/pin detent contact;
+- no broad body rubbing;
+- by **25 degrees** open, the hook must be geometrically released from the catch pin;
+- 25 through75 degrees must remain collision-free against body, lid, handle, and handle roots;
+- latch must not self-release merely from upward lid load in closed position.
 
-Body pivot forks print upright with support-free horizontal bores and no bridge spanning both ears.
+If tiny physical detent force needs tuning, only the **0.20 mm** mouth interference may move within **0.15–0.25 mm** after print testing. Do not alter the overall latch architecture to tune feel.
 
-## 7.14 Handle validation
+---
 
-Validate:
+# 8. Folding front handle — exact first-build geometry
 
-- smallest geometry-derived handle-capable B4B;
-- case one grid step below threshold remains valid but handle unavailable;
-- >=72 mm true clear grip;
-- large B4B grip span capped ergonomically;
-- stowed wall clearance/detents;
-- folded projection target;
-- sampled sweep from 0 to stop angle;
-- no body/latch/label collision;
-- carry stop contacts intended broad faces;
-- all-hardware M3 promotion when handle enabled;
-- exact screw lengths/engagement/protrusion;
-- support-free body + handle;
-- root load path into 1.2+ wall;
-- watertight solid;
-- regression metrics: pivot span, clear grip, U drop, band width/thickness, folded projection, root projection, screw dimensions.
+Handle is M3 only and promotes entire case hardware family to M3.
 
-# 8. B4B UI and saved-data behavior
+## 8.1 Handle shape
 
-## 8.1 New-design controls
+Single-piece U/bail, centered on front wall.
 
-For new B4B designs:
+Nominal lower arm/grip in-plane band width: **6.50 mm**.
 
-- Wall thickness always visible: 1.2 / 1.6 / 2.0 / 2.4;
-- hardware size never visible;
-- rear hinge count never visible: always two on secure lid;
-- latch strength removed from normal UI;
-- latch count automatic;
-- handle checkbox only enabled when secure lid is enabled and current dimensions can support the handle;
-- stacking and handle may coexist;
-- no UI operation silently grows child X/Y/Z to make hardware fit.
+Front-to-back handle thickness when stowed: **5.80 mm**.
 
-## 8.2 Legacy fields
+Near each pivot, taper the in-plane arm/eye axial width from 6.50 down to **5.40 mm** over a vertical run of **8.00 mm**. This narrower top section is what allows a compact M3x12 pivot stack.
 
-Keep old fields readable as needed to load prior designs, but new geometry is authoritative:
+Pivot-eye Y/Z outer radius around the horizontal X-axis bore: **2.90 mm**.
 
-- legacy latch strength may be read/migrated but new designs use automatic family profile;
-- old top-handle data maps to the new front-handle intent, subject to fit validation;
-- old handled+stacking designs no longer need handle stripped merely because stacking is on;
-- old sub-1.2 B4B wall must be surfaced as requiring the new minimum before regeneration.
+Pivot clearance bore: **3.40 mm** support-free horizontal profile.
 
-If schema semantics materially change, increment the saved-design version and perform deterministic migration; do not infer version from dimensions.
+Lower corner centerline radius: **7.50 mm**.
 
-# 9. Specific current-code architecture to replace
+Preferred pivot-axis-to-grip-center drop: **29.00 mm**.
 
-The implementation should explicitly remove old assumptions instead of leaving dead behavior:
+Minimum permitted drop: **26.00 mm**.
 
-1. Replace global M3-only constants/logic with `HardwareProfile` (or equivalent) and one authoritative selector.
-2. Update `B4BHardwarePlan` to carry selected profile/family and remove assumptions that BOM strings are always M3.
-3. Replace `_screw_for_stack()` hard-coded M3 engagement/protrusion logic with profile-driven values and <=0.5 mm protrusion.
-4. Remove old `B4B_HW_BOSS_RADIUS` as a universal hinge/latch size. Head diameter may size only local head-bearing flares.
-5. Remove `_hinge_width_for_case()` percentage/fixed-min architecture and derive hinge stack from hardware.
-6. Remove secure-lid X-growth loop in `b4b_effective_box()`; enforce 48 mm minimum and actual geometry fit instead.
-7. Remove silent `z = max(z, B4B_LATCHED_MIN_HEIGHT)` behavior; validate/UI-gate minimum secure height.
-8. Retire `B4B_LATCH_PROFILES` Lightweight/Standard as a user-facing geometry choice; replace with family-proportional latch dimensions.
-9. Replace old reinforced latch pad/boss architecture and bulbous lever.
-10. Replace old top-arch `B4BHandlePlan` fields with front-bail plan fields: pivot centers/span, clear grip, drop, band width, thickness, eye geometry, wall clearance, stop angle, detent geometry, screw length.
-11. Remove `_handle_arch()`, `_handle_span()`, `_handle_fits()` logic built around a lid-mounted arch.
-12. Remove handle X-growth loop from `b4b_effective_box()`.
-13. Remove handle-driven `B4B_HANDLE_LID_SKIN` path from `b4b_lid_skin_from_eff()`.
-14. Remove `_handle_lid_bores()` and all handle drilling from `make_b4b_lid()`.
-15. Add handle pivot-fork body geometry to `make_b4b_body()` when handle is enabled.
-16. Rewrite `make_b4b_handle()` as separate front U/bail and preview it in folded pose.
-17. Remove normalization that disables handle merely because stacking is enabled.
-18. Make handle enablement force secure lid and M3 case hardware before any hinge/latch/handle plan is resolved.
-19. Add actual handle eligibility and sweep validation rather than growth.
-20. Add projection/width/BOM metrics to B4B summary/validation so oversized regressions are visible.
+Do not increase drop above 29.00 merely because a case is tall; a hand does not benefit from indefinite growth.
 
-# 10. Support-free invariants
+Exposed front/back perimeter edge treatment: use a maximum **1.00 mm 45-degree chamfer** or equivalent support-free softening on non-bed edges. Preserve one truly broad flat print face.
 
-No implementation is acceptable if it needs slicer supports.
+## 8.2 Handle pivot screw stack
 
-## Body upright
+Each of two pivot forks, along X from outboard screw head toward case center:
 
-- all horizontal hinge/latch/handle-root bores use self-supporting roof geometry;
-- no hidden underside shelves;
-- root/gusset undersides vertical or <=45 degrees;
-- no unsupported bridge between fork ears;
-- exterior aesthetic fillets may not create down-facing unsupported arcs.
+- near body ear: **2.60 mm**
+- running gap: **0.30 mm**
+- handle eye axial thickness: **5.40 mm**
+- running gap: **0.30 mm**
+- far body thread lug: **3.40 mm**
 
-## Lid upside down
+Total = **12.00 mm**.
 
-- hinge/latch roots build from bed-facing lid plate/edge;
-- horizontal bores use flipped roof orientation;
-- no feature relies on assembled body for support;
-- top surface remains suitable for stacking/printing.
+Clearance stack =2.60 +0.30 +5.40 +0.30 = **8.60 mm**.
 
-## Latch lever flat
+Use **M3x12**:
 
-- broad face down;
-- pivot bore vertical in print pose;
+- thread penetration = 12.00 -8.60 = **3.40 mm**;
+- lug =3.40;
+- tail =0.00.
+
+Screw direction is mirrored:
+
+- left pivot head faces left/outboard;
+- right pivot head faces right/outboard;
+- both far thread-forming lugs face inward toward case center.
+
+## 8.3 Handle fork radial geometry
+
+Normal body fork pivot radius around X-axis: **3.00 mm**.
+
+Near-ear local head-bearing flare radius: **3.60 mm** only around head region.
+
+Handle eye outer radius: **2.90 mm**.
+
+## 8.4 Stowed Y position / wall clearance
+
+When stowed, handle rear surface must clear the highest relevant front-wall crest by exactly **0.60 mm nominal**.
+
+Therefore initial handle pivot-axis outward distance from the local front crest is:
+
+`2.90 +0.60 =` **3.50 mm**.
+
+Nominal handle eye frontmost projection =3.50 +2.90 = **6.40 mm**.
+
+The local M3 screw-head flare may project up to approximately 3.50 +3.60 = **7.10 mm** at the short head-bearing region. This is acceptable; do not enlarge the entire fork to 7.10 mm projection.
+
+Physical clearance tuning after first print may move 0.60 to **0.55–0.70 mm** only if needed.
+
+## 8.5 Handle X span and exact eligibility algorithm
+
+Define:
+
+- family fork axial envelope width = **12.00 mm**;
+- minimum fork/root-to-corner-tangent clearance = **2.00 mm** each side;
+- lower arm/grip band width = **6.50 mm**.
+
+Determine the usable straight-ish front span from the same B4B front-wall/corner geometry already used by hardware planning.
+
+Maximum pivot-center span available:
+
+`max_pivot_span = usable_front_span - 2*(12.00/2 + 2.00)`
+
+which simplifies to:
+
+`max_pivot_span = usable_front_span -16.00`.
+
+Target clear grip:
+
+`target_clear_grip = clamp(0.75 * child_x, 72.00, 95.00)`.
+
+Required pivot-center span:
+
+`required_pivot_span = target_clear_grip + 6.50`.
+
+Eligibility requires:
+
+`max_pivot_span >= required_pivot_span`.
+
+If not, handle is unavailable. Do not reduce the clear grip below72.00 and do not enlarge the case.
+
+For the current 1.20 wall geometry this should naturally make **96 mm child X the first grid-valid width** that supports a >=72 mm grip. The implementation must derive this from the formula and include a regression assertion that 88 mm does not fit while 96 mm does. Do not merely hard-code `if x>=96` without validating the geometry formula.
+
+When eligible:
+
+- pivot span = `required_pivot_span`, not the maximum available span;
+- handle remains ergonomically centered instead of spreading to case edges;
+- once target clear grip reaches95.00, larger cases retain that capped grip.
+
+## 8.6 Handle Z placement and height eligibility
+
+Pivot center nominally sits **8.00 mm below the body rim/lid-seat datum**.
+
+Preferred drop to grip center =29.00.
+
+Grip half-width vertically =6.50/2 = **3.25 mm**.
+
+Required exterior bottom margin from lowest handle geometry to case bottom = **4.00 mm**.
+
+Available drop calculation:
+
+`available_drop = pivot_axis_z - 4.00 - 3.25`.
+
+Use:
+
+`handle_drop = min(29.00, available_drop)`.
+
+Handle is eligible only if `handle_drop >=26.00`.
+
+This makes the geometric minimum rim height:
+
+`8.00 +26.00 +3.25 +4.00 = 41.25 mm`.
+
+Do not convert this into an arbitrary child-height constant; calculate against actual rim Z, base thickness, and lid/headroom datums. With typical base/headroom values a ~40 mm child-height B4B should be near the minimum handle-capable height, which is intentional.
+
+## 8.7 Lower U geometry
+
+Arms descend vertically from pivot regions until the lower 7.50 mm centerline corner radii begin.
+
+The lower grip is horizontal and centered.
+
+Clear grip is measured between the **inner faces of the two vertical arms**, not pivot centers and not outside-to-outside width.
+
+Nominal clear grip must match the target formula above to within **0.01 mm** mathematically before mesh tessellation.
+
+## 8.8 Handle body roots
+
+Each body fork root:
+
+- fork axial envelope at pivot: **12.00 mm**;
+- wall-contact/root X width: **16.00 mm**;
+- total vertical wall coverage: **18.00 mm**;
+- root extends **6.00 mm above** pivot center and **12.00 mm below** pivot center before fading completely into normal wall;
+- target local total structural depth from inner mating face through outer reinforcement: **3.00 mm**;
+- all added material outward only;
+- X taper from16.00 wall contact to12.00 fork envelope;
+- lower Y/Z transitions no steeper than45 degrees;
+- no rectangular 16 x18 slab left visually exposed: perimeter must taper/chamfer into wall.
+
+These roots are intentionally stronger/larger than latch roots because they carry the entire case.
+
+## 8.9 Stow detents
+
+Use two symmetric detents near the lower arms/corner region.
+
+Each body bump:
+
+- outward bump height: **0.35 mm**;
+- matching handle pocket depth: **0.15 mm**;
+- resulting nominal interference: **0.20 mm**;
+- ramp run: **0.50 mm** minimum, producing a ramp shallower than45 degrees;
+- detents symmetric left/right.
+
+Physical tuning band: interference 0.15–0.25 only.
+
+The grip must remain finger-accessible from below when stowed; do not add a separate finger tab.
+
+## 8.10 Carry stop
+
+Deployed stop angle = exactly **95.00 degrees from stowed** for first build.
+
+At each pivot use a broad heel/stop contact face:
+
+- minimum contact length in Y/Z section: **2.50 mm**;
+- extruded across at least the **5.40 mm** handle-eye axial width;
+- minimum nominal contact area therefore >= **13.50 mm^2** per pivot.
+
+Stop must load printed plastic faces, not screw head/thread or a knife edge.
+
+Validate handle every **5 degrees from0 through90**, plus exact **95 degrees**.
+
+If the nominal stop produces a real collision at 95, geometry should be corrected around the stop/root. Do not casually choose a different angle. A post-print ergonomic change may later move the single centralized stop-angle constant within90–100 degrees.
+
+---
+
+# 9. Front interactions — latches, handle, labels
+
+## 9.1 Latch/handle
+
+Latches live high at lid seam. Handle pivots are 8.00 mm below rim and toward the outer front region.
+
+Validate both latch-count modes against handle stowed and deployed sweeps.
+
+No merging of latch and handle roots by accident. If envelopes approach, preserve at least **1.00 mm visible normal-wall separation** between finished tapered root regions whenever geometry allows. If a mathematically unavoidable overlap occurs on a valid dimension, report it for design review rather than silently unioning into one giant bracket.
+
+## 9.2 Front label
+
+With handle enabled, preferred front-label zone is the open center of the folded U.
+
+Keep-outs:
+
+- handle arms/grip outline plus **1.00 mm** label clearance;
+- handle root/fork envelopes plus1.00;
+- latch envelopes plus1.00.
+
+Auto-fit label into remaining central opening. Never let label geometry intersect moving hardware.
+
+If requested front label cannot fit at minimum readable size, report the fit failure or steer user to top label. Do not move the handle or latches just to preserve a label.
+
+## 9.3 Stacking
+
+Remove any normalization that disables handle simply because stacking is on.
+
+Handle is front/body mounted; stacking features remain on top/bottom. Only a demonstrated geometry collision may invalidate the combination.
+
+---
+
+# 10. Print-orientation requirements
+
+## 10.1 Body upright
+
+- hinge/latch/handle-fork horizontal bores use existing self-supporting teardrop roof construction;
+- no unsupported horizontal shelf under any pivot;
+- gusset/root underside slopes <=45 degrees from vertical build support;
+- no bridge spanning fork ears;
+- decorative fillets may not create hidden unsupported downward arcs.
+
+## 10.2 Lid upside down
+
+- hinge and latch roots grow from bed-facing lid plate/edge;
+- horizontal bore roof orientation flips correctly;
+- no geometry assumes body support during printing;
+- retain broad lid-top bed contact compatible with stacking geometry.
+
+## 10.3 Latch lever flat
+
+- one broad face fully bed-capable;
+- pivot hole vertical in print pose and may be circular;
 - hook outline support-free;
-- no support trapped in hook mouth.
+- no trapped support requirement inside hook mouth.
 
-## Handle flat
+## 10.4 Handle flat
 
-- broad face down;
-- pivot bores horizontal but self-supporting;
-- U radii and edge rounds support-free;
-- one watertight solid.
+- one broad face fully bed-capable;
+- horizontal X-axis pivot bores use teardrop/self-supporting roof;
+- lower U radii are simply 2D outline geometry extruded through thickness and need no support;
+- exposed-edge softening must preserve flat bed face.
 
-Retain the existing support-free bridge discipline; a horizontal bridge around 3 mm is an upper bound, not a target to increase casually.
+---
 
-# 11. Focused validation matrix
+# 11. UI behavior
 
-Do not expand into a broad slow test campaign. Use geometry assertions/sweeps and a small representative matrix because these are mechanically consequential changes.
+New B4B UI:
 
-Required representative cases:
+- child X/Y minimum48;
+- wall always visible, choices1.2/1.6/2.0/2.4;
+- hardware family hidden;
+- rear hinge count hidden/fixed at2 when secure;
+- latch strength hidden/removed;
+- latch count hidden/automatic;
+- handle checkbox enabled only if secure lid is on and exact handle eligibility passes;
+- if dimensions no longer support a previously checked handle, uncheck/disable it with concise visible reason;
+- stacking + handle allowed;
+- no UI action silently grows X/Y/Z for hardware.
 
-1. **48 x 48 minimum B4B, 1.2 wall, secure lid, no handle**
-   - two hinges;
-   - one latch;
-   - M2 if height <=64;
-   - no X/Y/Z growth;
-   - support-free;
-   - proportional projections.
+Suggested handle-disabled reasons should be factual and dimensional, e.g.:
 
-2. **M2/M3 threshold cases**
-   - immediately below and above each relevant 96/64 boundary;
-   - preview/export/BOM same family.
+- `Handle needs at least 72 mm of clear grip width.`
+- `Handle needs more front-wall height.`
+- `Handle requires a secure lid.`
 
-3. **96 mm front-width case and next grid step above**
-   - one latch at <=96;
-   - two latches above 96;
-   - symmetric placement, no collision.
+Do not expose engineering dimensions or M2/M3 decisions unless in an advanced report/BOM.
 
-4. **Smallest handle-capable case and one grid step below**
-   - below: handle unavailable, B4B remains valid;
-   - at threshold: >=72 mm clear grip, all hardware M3, secure lid required.
+---
 
-5. **Handle + one latch**
-   - stowed/deployed sweep clear.
+# 12. Saved-design migration
 
-6. **Handle + two latches**
-   - all sweeps clear, roots remain visually distinct.
+- preserve deterministic version-based migration;
+- old latch strength/count fields may be read but normalize new geometry to the automatic rules above;
+- old top-handle boolean maps to new front-handle intent, then passes exact eligibility validation;
+- old handled+stacking design keeps handle if geometry now allows it;
+- old B4B below1.20 wall must surface/promote the new minimum before regeneration;
+- if schema semantics change materially, bump design version;
+- never infer old/new semantics from dimensions alone.
 
-7. **Handle + stacking**
-   - no old top-handle conflict remains.
+---
 
-8. **Large B4B**
-   - hardware does not balloon continuously with case size;
-   - handle grip capped around ergonomic max;
-   - M3 hardware remains compact.
+# 13. Current code architecture to replace
 
-9. **Long/narrow and tall cases**
-   - automatic hardware selector responds to total case/load envelope;
-   - no placement assumptions based only on X.
+The implementing LLM should specifically inspect and replace these old assumptions:
 
-For moving mechanisms, sample enough intermediate angles to catch collision, not only endpoints.
+1. global M3-only pivot constants;
+2. universal `B4B_HW_BOSS_RADIUS` used for every pivot member;
+3. old 12.5+ mm hinge percentage/min-width logic;
+4. secure-lid X-growth loop;
+5. silent latch-driven Z growth;
+6. `Lightweight/Standard` latch geometry as a new user choice;
+7. old large latch pads/bosses;
+8. old bulbous convex-hull lever;
+9. top-arch `B4BHandlePlan`;
+10. `_handle_arch()`, `_handle_span()`, `_handle_fits()`;
+11. handle X-growth loop;
+12. handle-driven lid thickness;
+13. handle lid screw bores;
+14. stacking=>handle-off normalization;
+15. BOM strings assuming M3.
 
-# 12. Implementation sequence
+Replace with:
 
-1. Implement simplified wall preset policy, mode-required minimums, and B4B 1.2 wall default/minimum.
-2. Enforce 48 x 48 B4B minimum and remove silent hardware-driven X/Y/Z growth.
-3. Introduce shared M2/M3 hardware profiles and deterministic family selector; handle => secure lid + all-M3.
-4. Convert screw selection/BOM to profile-driven standard lengths and <=0.5 mm protrusion.
-5. Implement compact rear hinges and validate full ~120-degree lid sweep.
-6. Implement compact front catch/pivot ears and flat strap latch lever.
-7. Implement deterministic latch count: <=96 mm X one centered; >96 mm X two near one-third/two-thirds.
-8. Delete old top-handle/lid-thickening/handle-vs-stacking architecture.
-9. Implement front U/bail handle, compact body forks, mirrored screw heads, ~95-degree stop and light stow detents.
-10. Implement geometry-derived handle width/height eligibility without case growth.
-11. Reconcile front labels with latch/handle keep-outs and folded-U label zone.
-12. Add authoritative projection/width/hardware/BOM metrics.
-13. Run only the focused validation matrix above and visually inspect the representative meshes/previews.
-14. Remove dead constants/functions and update saved-design migration/UI copy.
+- central M2/M3 profile object;
+- one family selector;
+- exact profile-driven screw selector;
+- exact hinge plans above;
+- exact latch plans above;
+- front-handle plan with span/drop/root/stop/detent fields;
+- body handle forks;
+- motion-sweep validators;
+- explicit projection/root metrics.
 
-# 13. Final acceptance criteria
+---
 
-The redesign is complete only when all of the following are true:
+# 14. Authoritative validation tolerances
 
-- B4B begins at 48 x 48 child field and 1.2 wall without silent hardware growth;
-- secure lid always has two proportional rear hinges;
-- hinge opens ~120 degrees without collision;
-- latches are slim, lie close to front, and count automatically by one authoritative rule;
-- handle is a front folding U/bail attached to the body, not lid;
-- handle requires secure lid, fits only where a real adult grip fits, and never grows the case;
-- handle-capable cases use all-M3 hardware automatically;
-- stacking and front handle coexist;
-- no part requires slicer support;
-- hardware heads enlarge only local bearing regions, not entire bosses;
-- roots spread load through tapered/chamfered geometry rather than large blocks;
-- screws use normal assortment lengths, meet engagement, and have <=0.5 mm exposed tail;
-- minimum/transition/large representative cases look intentional rather than scaled copies of one rugged-case fitting;
-- preview, export, validation and BOM all read the same resolved geometry/hardware plan;
-- focused tests/sweeps cover the mechanical changes without returning to broad low-value test expansion.
+Moving-part collision checks should not use large allowances that can hide a real clash.
 
-At that point do not continue redesigning for aesthetics by guesswork. Print representative minimum, handle-threshold and larger cases; only physical failures or clearly visible proportion problems should drive another geometry iteration.
+Use:
+
+- intended running gaps as modeled: typically **0.30 mm axial**, 0.35–0.60 positional clearances as specified;
+- boolean/intersection numerical noise allowance: **0.05 cc maximum** only where existing mesh booleans require a volume tolerance;
+- physical geometry clearance must be positive by construction rather than relying on the 0.05 cc allowance.
+
+Screw acceptance:
+
+- engagement >= family minimum;
+- tail <=0.50 mm;
+- preferred exact stacks above should normally produce zero tail.
+
+Projection regression ceilings requiring explicit review if exceeded:
+
+- M2 rear hinge: **5.75 mm**;
+- M3 rear hinge: **7.00 mm**;
+- M2 closed latch: **6.00 mm**;
+- M3 closed latch: **8.00 mm** normal target, absolute review ceiling **9.00 mm**;
+- handle body/eye normal folded projection: **7.25 mm** including local head flare.
+
+If a generated model exceeds a review ceiling, fail validation or emit a clearly surfaced engineering error. Do not silently accept bulkier geometry.
+
+---
+
+# 15. Focused validation matrix
+
+Do not return to broad low-value testing. These changes are a major mechanical redesign, so run the focused representative matrix below.
+
+## 15.1 Minimum B4B
+
+48x48, wall1.20, secure, child height <=64, no handle:
+
+- M2;
+- exactly2 hinges at +/-12 nominal centers;
+- one centered latch;
+- M2x8 hinge pins;
+- M2x8 latch pivot/catch;
+- no X/Y/Z growth;
+- all support-free;
+- lid sweep 0..120 by5 degrees;
+- latch sweep0..75 by5 degrees;
+- projections within limits.
+
+## 15.2 Hardware thresholds
+
+Test immediately below/at/above:
+
+- X96;
+- Y96;
+- Z64.
+
+All call paths must resolve the same family.
+
+## 15.3 Latch-count transition
+
+- X96 => one latch;
+- next grid step X104 => two latches at nominal +/-17.333... mm before any necessary symmetric keep-out adjustment.
+
+## 15.4 Handle width threshold
+
+With1.20 wall and otherwise handle-compatible geometry:
+
+- child X88 => exact formula must fail >=72 clear grip requirement;
+- child X96 => exact formula must pass;
+- at X96 target clear grip =72.00 and required pivot span =78.50 mm.
+
+## 15.5 Handle height threshold
+
+Create one case with rim height just below41.25 => handle unavailable.
+
+Create one at/above41.25 => drop at least26.00 and handle available if width passes.
+
+## 15.6 Handle motions
+
+At smallest handle-capable case and a larger case:
+
+- stowed clear wall by nominal0.60;
+- detents engage;
+- sweep0..90 by5 plus95;
+- stop contacts broad faces;
+- no latch collision;
+- no label collision for a valid fitted label;
+- M3x12 pivot screws;
+- all case hardware M3.
+
+## 15.7 Two-latch + handle
+
+Use X>96:
+
+- two latches;
+- handle M3;
+- all sweeps independent and collision-free;
+- root regions remain visually separated.
+
+## 15.8 Handle + stacking
+
+- no top-handle conflict;
+- stacking base/lid remains functional;
+- handle does not alter stacking normalization except hardware family/secure requirement.
+
+## 15.9 Large B4B
+
+- M3 hardware remains fixed compact dimensions rather than scaling continuously;
+- clear grip caps at95.00;
+- handle does not widen to fill case;
+- root widths remain fixed first-build dimensions unless an explicit structural rule says otherwise.
+
+---
+
+# 16. Implementation sequence
+
+1. Simplify wall presets and implement B4B1.20 minimum/default.
+2. Remove all hardware-driven X/Y/Z growth.
+3. Enforce 48x48 minimum and16.00 secure-lid height minimum.
+4. Add exact M2/M3 profiles and selector.
+5. Add exact screw selector.
+6. Rewrite rear hinge plan/geometry to exact stacks/radii/root values above.
+7. Implement 5-degree lid sweep and relief-first collision resolution.
+8. Rewrite latch count/profile/stack/lever/root geometry exactly as above.
+9. Implement latch sweep/release validation.
+10. Delete top-handle/lid-handle architecture.
+11. Add exact front-handle eligibility/span/drop formulas.
+12. Add exact M3x12 handle pivots, body forks, roots,0.20 detents,95-degree stop.
+13. Reconcile front-label keep-outs.
+14. Remove stacking=>handle-off behavior.
+15. Make BOM/profile reporting authoritative.
+16. Add projection/root/clearance metrics.
+17. Run focused validation matrix only.
+18. Remove dead constants/functions and update schema/UI migration.
+
+---
+
+# 17. Coding-LLM review instruction
+
+Before implementation, the coding LLM should perform one short feasibility review of this specification against the current code and report only:
+
+- any exact dimension/formula here that is mathematically impossible with the existing authoritative Wavefinity wall/lid datums;
+- any Boolean construction that cannot represent the specified geometry without changing topology;
+- any direct contradiction between two exact requirements.
+
+It should **not** reopen choices merely because another design could also work.
+
+If no contradiction exists, implement the plan as written.
+
+If a contradiction exists, preserve the product intent and change the smallest possible dimensional item, documenting:
+
+1. specified value;
+2. why it is impossible;
+3. replacement value;
+4. exact downstream effect.
+
+No unreported dimensional improvisation.
+
+---
+
+# 18. Final acceptance criteria
+
+Implementation is accepted when:
+
+- B4B minimum is48x48 at1.20 wall;
+- no hardware-driven X/Y/Z growth remains;
+- secure lid minimum height is validated, not auto-grown;
+- secure cases always have2 compact rear hinges;
+- hinge stacks resolve to M2x8 or M3x10 using the exact first-build stacks;
+- lid opens through120 degrees without collision;
+- one/two latch rule is exactly96 mm transition;
+- latch stacks resolve to M2x8 or M3x10;
+- latch lever is thin strap/hook, not bulbous old form;
+- handle is front/body folding U, not top arch;
+- handle width formula rejects88 and accepts96 at1.20 wall;
+- handle requires >=72 clear grip and >=26 drop;
+- handle pivots use mirrored M3x12 screws;
+- handle has0.60 wall clearance,0.20 detents,95-degree stop;
+- handle root loads enter a3.00 mm local structural zone with tapered geometry;
+- stacking and handle coexist;
+- all parts are support-free in mandated orientations;
+- screw engagement/tails pass exact limits;
+- projection ceilings pass;
+- preview/export/validation/BOM all consume the same resolved plan;
+- coding model did not add new user hardware/strength options;
+- only centralized physical-calibration constants remain tunable after first prints.
+
+At that point stop redesigning in software. Print the minimum M2 case, the smallest handle-capable M3 case, and one larger two-latch M3 case. Only actual print/fit/load evidence should justify changing the centralized calibration values or reopening a structural dimension.
