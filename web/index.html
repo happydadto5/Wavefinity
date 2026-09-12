@@ -202,6 +202,10 @@
       </div>
       <div class="canvas-wrap active" data-canvas="3d">
         <canvas id="preview-3d" role="img" aria-label="3D design preview" aria-describedby="preview-help"></canvas>
+        <div id="preview-wait" class="preview-wait" hidden aria-live="polite">
+          <span class="preview-wait-spinner" aria-hidden="true"></span>
+          <span id="preview-wait-text">Updating design…</span>
+        </div>
         <div class="camera-controls" aria-label="3D view controls">
           <div class="camera-controls-row">
             <div class="camera-views">

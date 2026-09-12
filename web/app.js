@@ -77,6 +77,9 @@ const state = {
   nudgeFeedback: null,
 };
 
+let previewWaitTimer = null;
+let previewSlowTimer = null;
+
 const VERSION_POLL_MS = 5000;
 
 const COLORS = {
@@ -3807,8 +3810,50 @@ function renderPlaced() {
   }
 }
 
+function clearPreviewWaitTimers() {
+  if (previewWaitTimer !== null) clearTimeout(previewWaitTimer);
+  if (previewSlowTimer !== null) clearTimeout(previewSlowTimer);
+  previewWaitTimer = null;
+  previewSlowTimer = null;
+}
+
+function beginPreviewWait(requestId) {
+  clearPreviewWaitTimers();
+  const wrapper = $('[data-canvas="3d"]');
+  const notice = $("#preview-wait");
+  const text = $("#preview-wait-text");
+  if (!wrapper || !notice || !text) return;
+
+  // Keep an already-visible notice up across edits while the newest preview
+  // replaces the old one; only restart its wording and slow-build timer.
+  if (!notice.hidden) text.textContent = "Updating design…";
+  previewWaitTimer = setTimeout(() => {
+    if (requestId !== state.previewRequest) return;
+    notice.hidden = false;
+    wrapper.classList.add("preview-recalculating");
+    previewWaitTimer = null;
+  }, 175);
+  previewSlowTimer = setTimeout(() => {
+    if (requestId !== state.previewRequest) return;
+    notice.hidden = false;
+    wrapper.classList.add("preview-recalculating");
+    text.textContent = "Rebuilding geometry…";
+    previewSlowTimer = null;
+  }, 1500);
+}
+
+function endPreviewWait(requestId) {
+  if (requestId !== state.previewRequest) return;
+  clearPreviewWaitTimers();
+  const wrapper = $('[data-canvas="3d"]');
+  const notice = $("#preview-wait");
+  if (notice) notice.hidden = true;
+  if (wrapper) wrapper.classList.remove("preview-recalculating");
+}
+
 async function refreshPreview() {
   const request = ++state.previewRequest;
+  beginPreviewWait(request);
   state.canGenerate = false;
   updateGenerateAvailability();
   $("#preview-state").textContent = "Building preview…";
@@ -3826,6 +3871,7 @@ async function refreshPreview() {
     }
     const result = await api("/api/preview", payload);
     if (request !== state.previewRequest) return;
+    endPreviewWait(request);
     const grownX = result.design?.box?.x !== state.design?.box?.x;
     const grownY = result.design?.box?.y !== state.design?.box?.y;
     const grownZ = result.design?.box?.z !== state.design?.box?.z;
@@ -3898,6 +3944,7 @@ async function refreshPreview() {
     renderPlaced();
   } catch (error) {
     if (request !== state.previewRequest) return;
+    endPreviewWait(request);
     $("#preview-state").textContent = "Preview could not build";
     $("#preview-state").classList.remove("status-ok");
     $("#preview-state").classList.add("status-error");
