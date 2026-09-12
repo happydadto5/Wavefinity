@@ -3363,6 +3363,27 @@ B4B_FRONT_LABEL_MAX_WIDTH_FRACTION = 0.5  # holder <= this fraction of the case 
 # whole plate can be lifted straight out (or dropped straight in) without
 # fouling the latch/handle hardware above it.
 B4B_FRONT_LABEL_INSERT_CLEARANCE = 2.0
+B4B_FRONT_LABEL_BOTTOM_DEFAULT = 3.0    # preferred standoff off the case floor -
+                                         # purely a visual preference
+B4B_FRONT_LABEL_BOTTOM_MIN = 0.6        # true floor limit the holder may drop to
+                                         # when the insertion corridor needs the room
+
+
+def _b4b_front_label_bottom_z(insertion_ceiling_z: float, plate_h: float) -> float | None:
+    """The ``bottom_z`` to seat a ``plate_h``-tall plate at: the preferred
+    standoff (``B4B_FRONT_LABEL_BOTTOM_DEFAULT``) if that already leaves the
+    required insertion corridor above the holder, otherwise as low as the
+    case floor allows - down to ``B4B_FRONT_LABEL_BOTTOM_MIN`` - to buy back
+    headroom. ``None`` if even the lowest position can't clear the corridor,
+    i.e. the plate must shrink further before a position exists at all."""
+    required_span = (
+        B4B_FRONT_LABEL_HOLDER_DEPTH + 2.0 * plate_h
+        + B4B_FRONT_LABEL_INSERT_CLEARANCE
+    )
+    bottom_z = min(
+        B4B_FRONT_LABEL_BOTTOM_DEFAULT, insertion_ceiling_z - required_span
+    )
+    return bottom_z if bottom_z >= B4B_FRONT_LABEL_BOTTOM_MIN else None
 
 
 def _fit_text_outline(text: str, avail_w: float, avail_h: float, ideal_cap: float):
@@ -3477,9 +3498,11 @@ def b4b_front_label_fit(box: BoxSpec) -> tuple[bool, float, float, float]:
     ``insertion_ceiling_z`` is the lowest obstruction above the holder (latch
     catch/root, its underside taper, or a folded handle's root) - the plate
     plus its whole vertical travel must clear this on the way in or out.
-    ``bottom_z`` is the fixed floor the holder's closed bottom channel sits
-    on; the holder is never grown to fill this envelope - the text shrinks
-    to fit it instead, per ``b4b_front_label_geometry``.
+    ``bottom_z`` is where the holder's closed bottom channel sits - normally
+    ``B4B_FRONT_LABEL_BOTTOM_DEFAULT`` off the case floor, but dropped as low
+    as ``B4B_FRONT_LABEL_BOTTOM_MIN`` when the box needs the extra headroom;
+    the holder is never grown to fill this envelope - the text shrinks to
+    fit it instead, per ``b4b_front_label_geometry``.
     """
     eff = b4b_effective_box(box)
     plan = b4b_hardware_plan(box)
@@ -3508,7 +3531,6 @@ def b4b_front_label_fit(box: BoxSpec) -> tuple[bool, float, float, float]:
             insertion_ceiling_z,
             handle.root_bottom_z - B4B_LABEL_KEEPOUT,
         )
-    bottom_z = 3.0
     side_margin = B4B_FRONT_LABEL_SIDE_LEG_W - B4B_FRONT_LABEL_SIDE_OVERLAP
     # Generic placeholders (not the actual label text) used only to answer
     # "could any readable label ever fit here", so the UI can gate the
@@ -3516,13 +3538,11 @@ def b4b_front_label_fit(box: BoxSpec) -> tuple[bool, float, float, float]:
     min_plate_w = 6.0 + 2.0 * B4B_FRONT_LABEL_MARGIN_X
     min_plate_h = TEXT_CAP_HEIGHT_MIN + 2.0 * B4B_FRONT_LABEL_MARGIN_Y
     min_w = min_plate_w + 2.0 * side_margin
-    min_holder_top_z = bottom_z + B4B_FRONT_LABEL_HOLDER_DEPTH + min_plate_h
-    fits = (
-        avail_w >= min_w
-        and (insertion_ceiling_z - min_holder_top_z)
-        >= min_plate_h + B4B_FRONT_LABEL_INSERT_CLEARANCE
+    bottom_z = _b4b_front_label_bottom_z(insertion_ceiling_z, min_plate_h)
+    fits = avail_w >= min_w and bottom_z is not None
+    return fits, avail_w, insertion_ceiling_z, (
+        bottom_z if bottom_z is not None else B4B_FRONT_LABEL_BOTTOM_MIN
     )
-    return fits, avail_w, insertion_ceiling_z, bottom_z
 
 
 def b4b_front_label_eligibility(box: BoxSpec) -> tuple[bool, str]:
@@ -3554,9 +3574,12 @@ def b4b_front_label_geometry(box: BoxSpec):
     ``insertion_ceiling_z``, the lowest latch/handle obstruction) must be at
     least one more plate height plus ``B4B_FRONT_LABEL_INSERT_CLEARANCE``, so
     the whole plate can be lifted straight out (or dropped straight in)
-    without fouling that hardware.  If the ideal 10 mm cap height cannot
-    clear that corridor the text shrinks - down to the project's minimum
-    readable size - before the front label is rejected for this box.
+    without fouling that hardware.  The holder first tries its preferred
+    standoff off the case floor and, if that alone doesn't leave enough
+    headroom, drops as low as ``B4B_FRONT_LABEL_BOTTOM_MIN`` to buy back the
+    difference - only once that's exhausted does the ideal 10 mm cap height
+    give way, shrinking down to the project's minimum readable size, before
+    the front label is rejected for this box.
 
     The lettering is a flush two-part inlay: ``plate_solid`` carries a
     shallow pocket on its readable face and ``text_solid`` is the separate,
@@ -3565,7 +3588,7 @@ def b4b_front_label_geometry(box: BoxSpec):
     """
     eff = b4b_effective_box(box)
     layout = b4b_layout(box)
-    fits, avail_w, insertion_ceiling_z, bottom_z = b4b_front_label_fit(box)
+    fits, avail_w, insertion_ceiling_z, _bottom_z = b4b_front_label_fit(box)
     if not fits:
         raise ValueError(
             "not enough clear front-wall area for a top-loading label; use a "
@@ -3585,8 +3608,8 @@ def b4b_front_label_geometry(box: BoxSpec):
     # Fit the lettering to the widest space the envelope could ever offer,
     # then shrink the cap height step by step until the resulting plate
     # actually leaves a clear vertical insertion corridor above it - the
-    # holder sits as low as it is allowed to (``bottom_z``), which is always
-    # the best case for that corridor, so if it fails there it fails
+    # holder drops as low as ``_b4b_front_label_bottom_z`` allows, which is
+    # always the best case for that corridor, so if it fails there it fails
     # everywhere and the text must shrink instead.
     max_plate_w = avail_w - 2.0 * side_margin
     max_text_w = max_plate_w - 2.0 * B4B_FRONT_LABEL_MARGIN_X
@@ -3600,12 +3623,9 @@ def b4b_front_label_geometry(box: BoxSpec):
         if text_w <= max_text_w:
             plate_w = text_w + 2.0 * B4B_FRONT_LABEL_MARGIN_X
             plate_h = text_h + 2.0 * B4B_FRONT_LABEL_MARGIN_Y
-            holder_top_z = bottom_z + holder_depth + plate_h
-            if (
-                insertion_ceiling_z - holder_top_z
-                >= plate_h + B4B_FRONT_LABEL_INSERT_CLEARANCE
-            ):
-                solved = (outline, plate_w, plate_h)
+            plate_bottom_z = _b4b_front_label_bottom_z(insertion_ceiling_z, plate_h)
+            if plate_bottom_z is not None:
+                solved = (outline, plate_w, plate_h, plate_bottom_z)
                 break
         cap -= 0.5
     if solved is None:
@@ -3614,7 +3634,7 @@ def b4b_front_label_geometry(box: BoxSpec):
             "above the holder; use a top label, a taller box, or turn "
             "latches off"
         )
-    outline, plate_w, plate_h = solved
+    outline, plate_w, plate_h, bottom_z = solved
 
     holder_w = plate_w + 2.0 * side_margin
     seat_z = bottom_z + holder_depth        # top of the bottom stop = plate's resting Z
