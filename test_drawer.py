@@ -97,10 +97,10 @@ class StackTests(unittest.TestCase):
             {**_bin("B1", 16, 16, 30, qty=3), "stack": "direct"},
             _bin("B2", 16, 16, 20),
         ]
-        layout = _layout(4 * 8 + 1, 4 * 8 + 1, height=60)
+        layout = _layout(4 * 8 + 1, 4 * 8 + 1, height=63)
         best = auto_layout(layout, bins)["candidates"][0]
         stacked = [p for p in best["placements"] if "on" in p]
-        self.assertEqual(len(stacked), 1)      # 30 + (30 - 3) = 57 <= 60; a third would not fit
+        self.assertEqual(len(stacked), 1)      # 33 mm envelope + one 30 mm module; a third would not fit
         self.assertEqual(best["stats"]["placed"], 4)
         layout["drawers"][0]["placements"] = best["placements"]
         report = drawer_report(layout["drawers"][0], bins)

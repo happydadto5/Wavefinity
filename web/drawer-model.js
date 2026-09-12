@@ -165,9 +165,11 @@ DL.cells = (one, drawer = DL.drawer()) => {
 DL.toCell = (units, drawer = DL.drawer()) => Math.round(Number(units) * DL.grid(drawer).perUnit);
 DL.toUnits = (cell, drawer = DL.drawer()) => cell / DL.grid(drawer).perUnit;
 
-// What a bin adds standing on another: its height less the foot that sinks in.
-DL.pitch = one => Number(one.z) - (DL.stackSteps[one.stack] ?? 0);
-DL.stackHeight = bins => bins.reduce((sum, one, index) => sum + (index ? DL.pitch(one) : Number(one.z)), 0);
+// Inventory Z is the seating-datum module height. The top interlock remains
+// exposed on the physical envelope of the first/detached part.
+DL.pitch = one => Number(one.z);
+DL.partHeight = one => Number(one.z) + (DL.stackSteps[one.stack] ?? 0);
+DL.stackHeight = bins => bins.reduce((sum, one, index) => sum + (index ? DL.pitch(one) : DL.partHeight(one)), 0);
 
 // Why `upper` cannot snap onto `lower`, or "" if it can.
 DL.stackRefusal = (upper, lower) => {
@@ -206,7 +208,7 @@ DL.items = (drawer = DL.drawer()) => DL.chains(drawer).map(chain => {
   const layers = chain.map((p, index) => {
     const one = bins[index];
     const bottom = index ? top - (DL.stackSteps[one.stack] ?? 0) : 0;
-    top = bottom + Number(one.z);
+    top = bottom + DL.partHeight(one);
     return { p, bin: one, key: DL.key(p), z0: bottom, z1: top };
   });
   return {

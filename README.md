@@ -38,8 +38,9 @@ everything whose meaning it can change.
 first two controls on the page, in their own bordered card, because both change
 what every control beneath them means — bin type turns X/Y into a child-bin
 field and retires interior parts and connectors; stacking rewrites the wall,
-the floor and the body height. Nothing that reads the bin's dimensions should
-be read before these are settled. Pegboard mounting, when it arrives, is a
+the floor and the body envelope. The selected wall/base values are shown and
+saved; they are never silent generation-only overrides. Nothing that reads the
+bin's dimensions should be read before these are settled. Pegboard mounting, when it arrives, is a
 third select in this same card: it answers the same question — how this bin
 joins the world around it — and it is not an interior part.
 
@@ -332,10 +333,13 @@ always written — so each folder has its own inventory, like its generated file
   a ⇅ on its swatch and its style under its name. Drop it on a bin of the same
   size that stacks the same way and it snaps on top, sides aligned. Anything
   else is refused with the reason: a different size, a different style, a bin
-  not printed to stack, or a stack taller than the drawer's max height. Each
-  bin adds its height less the depth its foot sinks into the one below (1 mm
-  on a lid, 3 mm for a direct snap). Dragging a bin in a stack takes it and
-  everything above it; dragging the bottom bin moves the whole stack.
+  not printed to stack, or a stack taller than the drawer's max height. Lid and
+  direct interfaces are intentionally same-mode only. The Height field is the
+  module contribution: a 50 mm bin adds exactly 50 mm. Its detached physical
+  envelope also includes the exposed interlock (1 mm on a lid, 3 mm for a
+  direct snap), which the drawer clearance check includes. Dragging a bin in a
+  stack takes it and everything above it; dragging the bottom bin moves the
+  whole stack.
 - **Planned bins.** When every printed copy of a bin is already placed, its
   button reads **Plan**, and the next copy goes in as *planned*: drawn faded,
   with a dashed outline. Every planned copy is listed under **To print** until

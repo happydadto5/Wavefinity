@@ -1,5 +1,6 @@
 """Focused tests for stackable bins."""
 
+from pathlib import Path
 import unittest
 
 from organizer_engine import (
@@ -12,6 +13,7 @@ from organizer_engine import (
 from organizer_inserts import Layout
 from organizer_app import design_from_dict, design_to_dict
 import organizer_stack as st
+from wavefinity_web import catalog_payload
 
 
 SIZES = [(48, 32, 40), (16, 16, 24), (96, 64, 60), (24, 24, 16)]
@@ -30,57 +32,66 @@ class StackSpecTests(unittest.TestCase):
 
 
 class StackHeightTests(unittest.TestCase):
-    def test_closed_height_is_always_what_was_asked(self):
-        # The whole promise: turning stacking on never changes how tall the
-        # finished bin is.  In lid mode the lid plate is taken out of the body
-        # to pay for itself.
+    def test_requested_height_is_the_exact_stack_pitch(self):
         for mode in ("lid", "direct"):
             for (x, y, z) in SIZES:
                 with self.subTest(mode=mode, size=(x, y, z)):
                     box = BoxSpec(x=x, y=y, z=z, stack=StackSpec(mode=mode))
-                    self.assertAlmostEqual(st.stack_closed_height(box), z, places=6)
+                    self.assertAlmostEqual(st.stack_module_height(box), z, places=6)
+                    self.assertAlmostEqual(st.stack_pitch(box), z, places=6)
+                    self.assertAlmostEqual(
+                        st.stack_closed_height(box), z + st.stack_step_depth(box), places=6,
+                    )
 
-    def test_lid_mode_shortens_the_body_direct_does_not(self):
+    def test_body_and_lid_share_one_module_datum(self):
         box = BoxSpec(x=48, y=32, z=40, stack=StackSpec(mode="lid"))
         self.assertAlmostEqual(
-            st.stack_effective_box(box).z, 40 - st.STACK_LID_SKIN, places=6
+            st.stack_effective_box(box).z + st.stack_lid_rise(box),
+            40 + st.STACK_SEAT_DEPTH,
+            places=6,
         )
         direct = BoxSpec(x=48, y=32, z=40, stack=StackSpec(mode="direct"))
-        self.assertAlmostEqual(st.stack_effective_box(direct).z, 40, places=6)
+        self.assertAlmostEqual(
+            st.stack_effective_box(direct).z, 40 + st.STACK_PLUG_DEPTH, places=6,
+        )
 
-    def test_pitch_is_shorter_than_the_bin_by_its_engagement(self):
+    def test_two_nominal_50_mm_modules_contribute_100_mm(self):
         for mode in ("lid", "direct"):
-            box = BoxSpec(x=48, y=32, z=40, stack=StackSpec(mode=mode))
-            self.assertAlmostEqual(
-                st.stack_pitch(box),
-                st.stack_closed_height(box) - st.stack_step_depth(box),
-                places=6,
-            )
-            self.assertLess(st.stack_pitch(box), box.z)
+            box = BoxSpec(x=48, y=32, z=50, stack=StackSpec(mode=mode))
+            self.assertAlmostEqual(2.0 * st.stack_pitch(box), 100.0, places=6)
 
 
 class StackAutoSettingsTests(unittest.TestCase):
-    def test_thin_wall_is_raised_for_the_snap_groove(self):
+    def test_stack_settings_are_visible_legal_values(self):
         box = BoxSpec(x=48, y=32, z=40, wall=0.8, stack=StackSpec(mode="direct"))
-        self.assertAlmostEqual(st.stack_effective_box(box).wall, st.STACK_MIN_WALL)
+        legal = st.normalize_stack_settings(box)
+        self.assertAlmostEqual(legal.wall, st.STACK_MIN_WALL)
+        self.assertAlmostEqual(legal.base_thickness, 3.8)
+        self.assertFalse(legal.standard_walls)
+        self.assertFalse(legal.standard_base)
         self.assertTrue(st.stack_grew(box))
 
-    def test_a_thick_enough_wall_is_left_alone(self):
-        box = BoxSpec(x=48, y=32, z=40, wall=1.6, stack=StackSpec(mode="direct"))
-        self.assertAlmostEqual(st.stack_effective_box(box).wall, 1.6)
-
-    def test_floor_grows_to_contain_the_stepped_base(self):
-        # The step is cut out of the floor plate - a plug that fits the mouth
-        # above has no wall left by definition - so the floor has to be deeper
-        # than the step or the cut would sever the walls from the base.
+    def test_user_values_above_stack_minimums_are_preserved(self):
         for mode in ("lid", "direct"):
             with self.subTest(mode=mode):
-                box = BoxSpec(x=48, y=32, z=40, stack=StackSpec(mode=mode))
-                eff = st.stack_effective_box(box)
-                self.assertGreaterEqual(
-                    eff.base_thickness,
-                    st.stack_step_depth(box) + st.STACK_MIN_FLOOR_SKIN - 1e-9,
+                minimum = st.stack_step_depth(BoxSpec(stack=StackSpec(mode=mode))) + st.STACK_MIN_FLOOR_SKIN
+                box = BoxSpec(
+                    x=48, y=32, z=40, wall=1.6, base_thickness=minimum + 0.7,
+                    standard_walls=False, standard_base=False, stack=StackSpec(mode=mode),
                 )
+                legal = st.normalize_stack_settings(box)
+                self.assertEqual(legal.wall, 1.6)
+                self.assertEqual(legal.base_thickness, minimum + 0.7)
+
+    def test_catalog_and_browser_enforce_visible_dependencies(self):
+        rules = catalog_payload()["stack_rules"]
+        self.assertEqual(rules["min_wall_mm"], 1.2)
+        self.assertEqual(rules["base_min_mm"], {"lid": 1.8, "direct": 3.8})
+        app = (Path(__file__).parent / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function normalizeStackSettings", app)
+        self.assertIn('restoreDefaults: previous !== "none"', app)
+        self.assertIn('$("#standard-walls").disabled = stacking', app)
+        self.assertIn('$("#standard-base").disabled = stacking', app)
 
 
 class StackGeometryTests(unittest.TestCase):
@@ -131,6 +142,41 @@ class StackGeometryTests(unittest.TestCase):
         self.assertLess(intersection_volume(upper, lid) / 1000.0, 0.25)
         self.assertLess(intersection_volume(upper, body) / 1000.0, 0.02)
 
+    def test_direct_bins_seat_cleanly_and_click_during_insertion(self):
+        box = BoxSpec(x=48, y=32, z=40, stack=StackSpec(mode="direct"))
+        body = make_box(st.stack_effective_box(box))
+        upper = body.copy()
+        upper.apply_translation((0.0, 0.0, st.stack_pitch(box)))
+        self.assertLess(intersection_volume(body, upper) / 1000.0, 0.03)
+        partial = upper.copy()
+        partial.apply_translation((0.0, 0.0, 0.9))
+        self.assertGreater(intersection_volume(body, partial) / 1000.0, 0.005)
+
+    def test_direct_snap_and_groove_share_the_same_seated_z(self):
+        box = BoxSpec(x=48, y=32, z=40, stack=StackSpec(mode="direct"))
+        eff = st.stack_effective_box(box)
+        lower_peak = eff.z - st.STACK_BEAD_DROP
+        upper_peak = st.stack_pitch(box) + st.stack_step_depth(box) - st.STACK_BEAD_DROP
+        self.assertAlmostEqual(lower_peak, upper_peak, places=6)
+
+    def test_print_profiles_are_45_degrees_or_shallower_and_segmented(self):
+        for mode in ("lid", "direct"):
+            with self.subTest(mode=mode):
+                box = BoxSpec(x=48, y=32, z=40, wall=2.4,
+                              standard_walls=False, stack=StackSpec(mode=mode))
+                eff = st.stack_effective_box(box)
+                run = st._outline_run(st._plug_polygon(eff), st.wavy_outer_polygon(eff))
+                self.assertGreaterEqual(st.stack_foot_flare_height(eff), run)
+                self.assertGreaterEqual(st.STACK_SNAP_RAMP, st.STACK_FIT + st.STACK_SNAP)
+                self.assertGreaterEqual(st.STACK_SNAP_RELEASE, st.STACK_BEAD)
+                self.assertGreaterEqual(len(st._detent_masks(eff)), 4)
+                if mode == "lid":
+                    self.assertGreaterEqual(st.stack_lid_rise(eff), st.stack_foot_flare_height(eff))
+                    self.assertGreaterEqual(
+                        st.stack_lid_rise(eff) - st.STACK_SEAT_DEPTH,
+                        st.STACK_MIN_FLOOR_SKIN,
+                    )
+
 
 class StackValidationTests(unittest.TestCase):
     def test_b4b_and_bin_stacking_are_not_both_offered(self):
@@ -160,9 +206,27 @@ class StackSerializationTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 box = BoxSpec(x=48, y=32, z=40, stack=StackSpec(mode=mode))
                 data = design_to_dict(box, Layout((), "fused"))
-                self.assertEqual(data["version"], 4)
+                self.assertEqual(data["version"], 5)
+                self.assertFalse(data["box"]["standard_walls"])
+                self.assertFalse(data["box"]["standard_base"])
+                self.assertGreaterEqual(data["box"]["wall"], st.STACK_MIN_WALL)
+                self.assertGreaterEqual(
+                    data["box"]["base_thickness"], st.stack_base_minimum(box),
+                )
                 back, *_ = design_from_dict(data)
                 self.assertEqual(back.stack.mode, mode)
+
+    def test_v4_closed_height_migrates_without_changing_old_geometry(self):
+        for mode in ("lid", "direct"):
+            with self.subTest(mode=mode):
+                old = design_to_dict(
+                    BoxSpec(x=48, y=32, z=40, stack=StackSpec(mode=mode)), Layout(),
+                )
+                old["version"] = 4
+                old["box"]["z"] = 40
+                migrated, *_ = design_from_dict(old)
+                self.assertEqual(migrated.z, 40 - st.stack_step_depth(migrated))
+                self.assertAlmostEqual(st.stack_closed_height(migrated), 40, places=6)
 
     def test_an_ordinary_bin_carries_no_stack_block(self):
         data = design_to_dict(BoxSpec(x=48, y=32, z=40), Layout((), "fused"))

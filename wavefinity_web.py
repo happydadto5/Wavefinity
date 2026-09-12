@@ -37,6 +37,7 @@ from organizer_engine import (
     B4B_LABEL_LOCATIONS,
     B4B_LID_HEADROOM_CHOICES,
     GRID_PITCH,
+    DEFAULT_BASE_THICKNESS,
     DEFAULT_WALL,
     DEFAULT_ARM_THICKNESS,
     DIFFERING_FULL_DROP,
@@ -125,6 +126,10 @@ from organizer_b4b import (
     validate_b4b_design,
 )
 from organizer_stack import (
+    STACK_MIN_FLOOR_SKIN,
+    STACK_MIN_WALL,
+    STACK_PLUG_DEPTH,
+    STACK_SEAT_DEPTH,
     stack_effective_box,
     stack_enabled,
     stack_summary,
@@ -433,6 +438,15 @@ def catalog_payload() -> dict[str, Any]:
             "wall_depth_factor": math.sqrt(1.0 + max_wave_slope() ** 2),
             "wave_amplitude_mm": WAVE_AMPLITUDE,
             "mating_gap_mm": WAVE_MATING_GAP,
+        },
+        "stack_rules": {
+            "min_wall_mm": STACK_MIN_WALL,
+            "default_wall_mm": DEFAULT_WALL,
+            "default_base_mm": DEFAULT_BASE_THICKNESS,
+            "base_min_mm": {
+                "lid": STACK_SEAT_DEPTH + STACK_MIN_FLOOR_SKIN,
+                "direct": STACK_PLUG_DEPTH + STACK_MIN_FLOOR_SKIN,
+            },
         },
         "b4b_rules": {
             "grid_pitch_mm": GRID_PITCH,
@@ -895,8 +909,8 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     selected = payload.get("selected")
     if not isinstance(selected, int) or isinstance(selected, bool):
         selected = None
-    # Stacking rewrites the box the same way generation does, so the preview is
-    # of the bin that would actually be printed - shorter body, thicker wall.
+    # Stacking derives the printable body from the visible legal settings and
+    # the requested module-height datum.
     stack_request = box
     stack_block = None
     if stack_enabled(box):

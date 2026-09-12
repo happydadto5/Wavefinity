@@ -73,9 +73,11 @@ from organizer_b4b import (
 )
 from organizer_stack import (
     make_stack_lid,
+    normalize_stack_settings,
     stack_effective_box,
     stack_enabled,
     stack_spec,
+    stack_step_depth,
     stack_summary,
     validate_stack_design,
 )
@@ -1271,8 +1273,8 @@ def generate_organizer_files(
             out_files.append(Path(str(result["box"]["output"])))
         if "insert" in result and isinstance(result["insert"], dict) and "output" in result["insert"]:
             out_files.append(Path(str(result["insert"]["output"])))
-        # The requested box, not the stack-shortened body: the inventory (and
-        # the drawer layout reading it) needs the closed height, as typed.
+        # Inventory stores the requested stack-module height.  The drawer adds
+        # the exposed top engagement depth when checking physical clearance.
         log_file = log_bin_to_folder(
             output_dir,
             stack_request,
@@ -1739,6 +1741,7 @@ def design_to_dict(
     ``text`` interior parts - one per label, any number of them - so there is
     nothing for it here.
     """
+    box = normalize_stack_settings(box)
     b4b = box.b4b.normalised()
     box_block = {
         "x": box.x,
@@ -1776,9 +1779,9 @@ def design_to_dict(
         # Version 3 only when B4B is on. Version 3 changes B4B x/y from the
         # physical outside to the exact requested child field, so older builds
         # reject a B4B design instead of silently loading it as an ordinary bin.
-        # Version 4 carries stacking, whose Z means the closed height rather
-        # than the body, so an older build must reject it for the same reason.
-        "version": 4 if stack.enabled else (3 if b4b.enabled else 1),
+        # Version 4 carried stacking with Z as detached closed height. Version
+        # 5 makes Z the authoritative stack-module/pitch height.
+        "version": 5 if stack.enabled else (3 if b4b.enabled else 1),
         "box": box_block,
         "label": label,
         "label_position": label_position(label_location),
@@ -1792,7 +1795,7 @@ def design_from_dict(
     data: dict, *, validate_layout: bool = True
 ) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     design_version = data.get("version", 1)
-    if design_version not in (1, 2, 3, 4):
+    if design_version not in (1, 2, 3, 4, 5):
         raise ValueError(f"unsupported design version {data.get('version')!r}")
     raw = data["box"]
     stack_raw = raw.get("stack")
@@ -1856,8 +1859,13 @@ def design_from_dict(
         else math.isclose(raw_wall, DEFAULT_WALL, abs_tol=1e-9)
     )
     wall = DEFAULT_WALL if standard_walls else raw_wall
+    requested_z = float(raw["z"])
+    # Preserve v4 physical geometry exactly: its Z was the detached closed
+    # height, which equals the v5 module height plus the engagement depth.
+    if design_version == 4 and stack.enabled:
+        requested_z -= stack_step_depth(BoxSpec(stack=stack))
     box = BoxSpec(
-        x, y, float(raw["z"]),
+        x, y, requested_z,
         wall,
         float(raw.get("corner_fillet", 0.6)),
         flat_inside=float(raw.get("flat_inside", 0.0)),
@@ -1870,6 +1878,7 @@ def design_from_dict(
         b4b=b4b,
         stack=stack,
     )
+    box = normalize_stack_settings(box)
     if b4b.enabled:
         # A B4B interior is reserved for child bins.  Imported/saved JSON is
         # authoritative user data: if it still carries interior features, a

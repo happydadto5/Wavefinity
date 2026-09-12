@@ -19,7 +19,8 @@ Placements
   repeats every 4 mm, so a bin shifted half a unit along a seam still nests.
 * Stacked: ``on`` names the placement directly below (``"B3:0"``).  Only a
   stackable bin of the same footprint and the same stacking style can snap
-  onto another; each one adds its height less the depth its foot sinks in.
+  onto another; each one adds its requested module height.  The exposed top
+  interlock remains part of the stack's physical drawer-height envelope.
 * Free, for an edge shim: ``x``/``y``/``w``/``d`` in mm from the drawer's
   inside front-left corner, plus the ``side`` it lines.
 
@@ -186,9 +187,13 @@ def bin_cells(one: dict[str, Any], drawer: dict[str, Any]) -> tuple[int, int]:
 
 
 def stack_pitch(one: dict[str, Any]) -> float:
-    """What a bin adds when it stands on another: its closed height less the
-    depth its stepped foot sinks into the one below."""
-    return float(one["z"]) - STACK_STEPS.get(one.get("stack", "none"), 0.0)
+    """What a bin adds between consecutive stack seating datums."""
+    return float(one["z"])
+
+
+def stack_part_height(one: dict[str, Any]) -> float:
+    """Detached physical height, including the interlocking foot depth."""
+    return float(one["z"]) + STACK_STEPS.get(one.get("stack", "none"), 0.0)
 
 
 def _key(placement: dict[str, Any]) -> str:
@@ -264,7 +269,7 @@ def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict
             if not (_close(one["x"], below["x"]) and _close(one["y"], below["y"])):
                 issues.append(f"{_label(one)} is not the same size as {_label(below)} under it")
             bottom = top - STACK_STEPS.get(mode, 0.0)
-        top = bottom + float(one["z"])
+        top = bottom + stack_part_height(one)
         layers.append({
             "key": _key(placement), "bin": placement["bin"], "copy": int(placement.get("copy", 0)),
             "z0": bottom, "z1": top, "planned": int(placement.get("copy", 0)) >= int(one["qty"]),
@@ -591,11 +596,11 @@ def _build_stacks(singles: list[dict[str, Any]], max_height: float) -> list[dict
         current: list[dict] = []
         height = 0.0
         for single in members:
-            added = float(single["row"]["z"]) if not current else stack_pitch(single["row"])
+            added = stack_part_height(single["row"]) if not current else stack_pitch(single["row"])
             if current and height + added > max_height + 1e-6:
                 items.append(_merge(current, height))
                 current, height = [], 0.0
-                added = float(single["row"]["z"])
+                added = stack_part_height(single["row"])
             current.append(single)
             height += added
         if current:

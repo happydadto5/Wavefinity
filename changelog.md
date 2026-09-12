@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-12 — Stack height and support-free snap correction
+
+- Height now means stack-module contribution: two nominal 50 mm modules add
+  exactly 100 mm between their seating datums. Detached height separately
+  includes the exposed 1 mm lid or 3 mm direct interlock.
+- Stacking visibly selects and saves its required custom wall and base values;
+  turning stacking off restores the ordinary 0.8 mm wall and 0.6 mm base.
+- Feet and plug-down lids now flare at 45° or shallower. Retention uses short,
+  symmetric ramped detents and printable matching grooves instead of abrupt
+  full-perimeter ledges. Lid/direct mixing remains intentionally unsupported.
+
 ## 2026-09-11 — Space view in 3D; UI wording cleanup
 
 - **The Space view is now 3D**: a camera looking into the drawer, with bins

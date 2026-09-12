@@ -375,19 +375,21 @@ Avoid unrelated changes.
 
 # Final acceptance checklist
 
-- [ ] Stacking `none` produces the unchanged ordinary 0.8 mm standard-wall bin.
-- [ ] Selecting `lid` visibly switches the design to custom walls >=1.2 mm.
-- [ ] Selecting `direct` visibly switches the design to custom walls >=1.2 mm.
-- [ ] User cannot create/save a stacking design below 1.2 mm wall.
-- [ ] Turning stacking off restores standard walls at 0.8 mm.
-- [ ] Any required nonstandard base thickness is visible in the form and saved design.
-- [ ] Lid snaps into the receiving body with intended clearance/interference.
-- [ ] Lid top seat receives the intended upper-bin base without collision.
-- [ ] Direct upper bin seats into lower bin without unintended collision.
-- [ ] Direct snap bead and groove align in both XY and Z.
-- [ ] Body stack foot prints base-down without unsupported abrupt ledges.
-- [ ] Lid prints plug-down without unsupported abrupt ledges.
-- [ ] Snap bead/groove profiles are support-free by construction, not merely hoped to slice.
-- [ ] Height/pitch language is consistent in code, UI, tests, reports and saved design semantics.
-- [ ] Two nominal 50 mm stack modules contribute 100 mm according to the chosen stack datum.
-- [ ] Mixed-mode compatibility is either explicitly implemented/tested or explicitly not promised.
+- [x] Stacking `none` produces the unchanged ordinary 0.8 mm standard-wall bin.
+- [x] Selecting `lid` visibly switches the design to custom walls >=1.2 mm.
+- [x] Selecting `direct` visibly switches the design to custom walls >=1.2 mm.
+- [x] User cannot create/save a stacking design below 1.2 mm wall.
+- [x] Turning stacking off restores standard walls at 0.8 mm.
+- [x] Any required nonstandard base thickness is visible in the form and saved design.
+- [x] Lid snaps into the receiving body with intended clearance/interference.
+- [x] Lid top seat receives the intended upper-bin base without collision.
+- [x] Direct upper bin seats into lower bin without unintended collision.
+- [x] Direct snap bead and groove align in both XY and Z.
+- [x] Body stack foot prints base-down without unsupported abrupt ledges.
+- [x] Lid prints plug-down without unsupported abrupt ledges.
+- [x] Snap bead/groove profiles are support-free by construction, not merely hoped to slice.
+- [x] Height/pitch language is consistent in code, UI, tests, reports and saved design semantics.
+- [x] Two nominal 50 mm stack modules contribute 100 mm according to the chosen stack datum.
+- [x] Mixed-mode compatibility is either explicitly implemented/tested or explicitly not promised.
+
+Implemented 2026-09-12. Compatibility is deliberately same-mode only: lid-on-lid and direct-on-direct.

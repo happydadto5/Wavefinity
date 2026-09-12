@@ -662,7 +662,7 @@ DP.renderInventory = (force = false) => {
     const placeTitle = freePrinted > 0 ? "Put one in the best free spot" : "Every printed copy is placed - place one more as planned, to print later";
     return `
       <div class="dl-bin ${classes}" data-bin="${escapeHtml(one.id)}" draggable="${canPlace}" title="${canPlace ? "Drag into the drawer, or double-click to place" : ""}">
-        <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${fmt(one.z)} mm tall">${fmt(one.z)}${DL.stackable(one) ? "<i>⇅</i>" : ""}</span>
+        <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${DL.stackable(one) ? `${fmt(one.z)} mm stack module; ${fmt(DL.partHeight(one))} mm detached` : `${fmt(one.z)} mm tall`}">${fmt(one.z)}${DL.stackable(one) ? "<i>⇅</i>" : ""}</span>
         <span class="dl-bin-main">
           <strong>${escapeHtml(DL.label(one))}</strong>
           <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units</small>
@@ -687,9 +687,9 @@ DP.renderInventory = (force = false) => {
         <div class="field-grid three">
           <label>Width <span class="unit">mm</span><input type="number" data-field="x" min="1" step="8" value="${fmt(one.x)}"></label>
           <label>Length <span class="unit">mm</span><input type="number" data-field="y" min="1" step="8" value="${fmt(one.y)}"></label>
-          <label>Height <span class="unit">mm</span><input type="number" data-field="z" min="1" step="1" value="${fmt(one.z)}" title="Closed height, lid included"></label>
+          <label>Height <span class="unit">mm</span><input type="number" data-field="z" min="1" step="1" value="${fmt(one.z)}" title="${DL.stackable(one) ? "Stack module height" : "Finished height"}"></label>
         </div>
-        <p>${DL.stackable(one) ? `Adds ${fmt(DL.pitch(one))} mm to a stack (its foot sinks ${fmt(DL.stackSteps[one.stack])} mm into the bin below).<br>` : ""}${one.file ? `File: ${escapeHtml(one.file)}<br>` : ""}${one.label ? `Label: ${escapeHtml(one.label)}<br>` : ""}${one.interior ? `Inside: ${escapeHtml(one.interior)}<br>` : ""}${escapeHtml(one.id)}${one.date ? ` · logged ${escapeHtml(one.date)}` : ""}</p>
+        <p>${DL.stackable(one) ? `Adds ${fmt(DL.pitch(one))} mm to a stack; detached height is ${fmt(DL.partHeight(one))} mm including its interlock.<br>` : ""}${one.file ? `File: ${escapeHtml(one.file)}<br>` : ""}${one.label ? `Label: ${escapeHtml(one.label)}<br>` : ""}${one.interior ? `Inside: ${escapeHtml(one.interior)}<br>` : ""}${escapeHtml(one.id)}${one.date ? ` · logged ${escapeHtml(one.date)}` : ""}</p>
         <div class="button-row">
           ${planned ? `<button type="button" class="button secondary dl-small" data-act="printed">Mark ${planned} printed</button>` : ""}
           <button type="button" class="button danger dl-small" data-act="delete">Remove from inventory</button>

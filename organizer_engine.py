@@ -1011,11 +1011,29 @@ def make_box(
         from organizer_stack import stack_body_adders, stack_body_cutters
 
         cutters = stack_body_cutters(spec)
+        # Manifold handles the tapered, segmented cuts more reliably one at a
+        # time.  A cutter that tapers to the exterior can leave zero-volume
+        # triangulation scraps; the printable body is the sole volume.
+        for cutter in cutters:
+            result = difference([result, cutter])
         if cutters:
-            result = difference([result, *cutters])
+            solids = [
+                one for one in result.split(only_watertight=False)
+                if len(one.faces) > 12
+            ]
+            if len(solids) != 1:
+                raise RuntimeError("stack body cuts did not leave one printable solid")
+            result = solids[0]
         adders = stack_body_adders(spec)
         if adders:
             result = union([result, *adders])
+            solids = [
+                one for one in result.split(only_watertight=False)
+                if len(one.faces) > 12
+            ]
+            if len(solids) != 1:
+                raise RuntimeError("stack snap detents did not join the body")
+            result = solids[0]
     if spec.easy_clean and blocked_walls:
         # Manifold's multi-solid union can leave a non-manifold seam where
         # adjacent wall sweeps meet at a corner; fusing each wall in turn is
@@ -1025,7 +1043,7 @@ def make_box(
             # never cross the fixed exterior mating envelope on thin walls.
             result = union([result, intersection([fillet, envelope])])
     result.remove_unreferenced_vertices()
-    if not spec.easy_clean:
+    if not spec.easy_clean and not getattr(getattr(spec, "stack", None), "enabled", False):
         result.merge_vertices()
     return result
 
