@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-12 — B4B hinge and latch refinement
+
+- Hinge, latch, catch and handle-fork supports now bite into the real nearby
+  wavy wall before the cavity trim, so each ear has a direct wall load path.
+- Removed the one-sided head collars. Each hinge, latch and catch stack now has
+  matching outside barrel sizes, sized for the real M2/M3 socket-head bearing.
+- Hinge, latch, catch and handle pivot holes are now round. Their small roofs
+  bridge normally, while the outer barrels keep their support-free profile.
+
 ## 2026-09-12 — B4B hardware redesign: compact hinges, strap latches, folding front handle
 
 - **Hardware size is chosen for you, and it is no longer always M3.** Small
@@ -7,9 +16,9 @@
   that preview, export, validation and the parts list all read. A 48 mm case
   now takes M2x8 screws throughout instead of M3 hardware sized for a case
   three times bigger.
-- **Rear hinges are compact.** Two slim ears on a tapered root, the screw head
-  bearing on a short local flare instead of the whole knuckle being head-sized.
-  Rear projection is 5.15 mm on M2 and 6.35 mm on M3, down from about 8.4 mm.
+- **Rear hinges are compact.** Two slim ears on a tapered root, with a matching
+  outside barrel across the whole pivot stack. Rear projection is 5.15 mm on
+  M2 and 6.55 mm on M3, down from about 8.4 mm.
   The lid opens through a verified 120°, checked every 5°.
 - **The latch is a thin folding strap**, not the old two-disc blob: a rounded
   pivot end, a flat body, an integrated hook around the catch screw and a small

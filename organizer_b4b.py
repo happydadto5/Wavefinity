@@ -136,9 +136,8 @@ class HardwareProfile:
     clear_bore: float          # rotating / through member
     pilot: float               # printed thread-forming terminal lug
     engage_min: float          # minimum real thread bite
-    head_clear: float          # printed socket-head clearance diameter
-    head_edge_margin: float    # nominal material outboard of that circle
-    head_flare_radius: float   # the resulting short local bearing flare
+    head_diameter: float       # maximum physical socket-head outside diameter
+    head_bearing_min: float    # minimum solid material around that head
     lengths: tuple[int, ...]   # permitted standard kit lengths, mm
     pivot_radius: float        # ordinary hinge knuckle / latch pivot ear
     catch_radius: float        # body catch ear - carries no rotation
@@ -194,16 +193,18 @@ class HardwareProfile:
 
     @property
     def head_bearing_margin(self) -> float:
-        """Material actually left outboard of the head, at the section's
-        thinnest radial direction.
+        """Actual head-bearing material on the uniform outer barrels."""
+        radius = min(self.pivot_radius, self.catch_radius)
+        return radius * _SUPPORT_FREE_INSCRIBED - self.head_diameter / 2.0
 
-        The flare has to be the same faceted section as everything else or it
-        would not print support-free, and a faceted section is thinner than its
-        nominal radius on the 45-degree facets.  So the real margin is smaller
-        than the nominal ``head_edge_margin`` used to derive the radius; this
-        is the number validation checks.
-        """
-        return self.head_flare_radius * _SUPPORT_FREE_INSCRIBED - self.head_clear / 2.0
+    @property
+    def required_uniform_radius(self) -> float:
+        """Smallest uniform ear radius that protects both bore and screw head."""
+        return max(
+            self.clear_bore / 2.0 + self.bore_shell,
+            (self.head_diameter / 2.0 + self.head_bearing_min)
+            / _SUPPORT_FREE_INSCRIBED,
+        )
 
 
 B4B_HW_M2 = HardwareProfile(
@@ -212,12 +213,11 @@ B4B_HW_M2 = HardwareProfile(
     clear_bore=2.3,
     pilot=1.7,
     engage_min=2.4,
-    head_clear=4.2,
-    head_edge_margin=0.5,
-    head_flare_radius=2.6,
+    head_diameter=4.0,
+    head_bearing_min=0.2,
     lengths=(6, 8, 10, 12, 16),
     pivot_radius=2.4,
-    catch_radius=2.2,
+    catch_radius=2.4,
     bore_shell=1.2,
     near_ear=2.2,
     mid_member=2.6,
@@ -246,12 +246,11 @@ B4B_HW_M3 = HardwareProfile(
     clear_bore=3.4,
     pilot=2.6,
     engage_min=3.0,
-    head_clear=6.0,
-    head_edge_margin=0.6,
-    head_flare_radius=3.6,
+    head_diameter=5.7,
+    head_bearing_min=0.2,
     lengths=(6, 8, 10, 12, 16, 20),
-    pivot_radius=3.0,
-    catch_radius=2.7,
+    pivot_radius=3.2,
+    catch_radius=3.2,
     bore_shell=1.3,
     near_ear=2.8,
     mid_member=3.2,
@@ -334,9 +333,7 @@ B4B_HINGE_CENTRE_GAP = 4.0       # clear run between the two hinge roots
 # is not enough may the axis move rearward at all.
 B4B_LID_RELIEF_MAX = 1.2
 B4B_HINGE_AXIS_STEP = 0.05       # quantum for any forced rearward move
-# Review ceilings on the *normal* pivot envelope.  Section 6.3 of the design
-# spec excludes the short local head flare from the projection figure, so these
-# do too; the flare projection is reported separately as its own metric.
+# Review ceilings on the actual uniform pivot envelope.
 B4B_HINGE_MAX_PROJECTION = {"M2": 5.75, "M3": 7.0}
 
 # --- front latches --------------------------------------------------------- #
@@ -385,7 +382,7 @@ B4B_HANDLE_STOP_FACE = 2.5         # minimum Y/Z contact length at the stop
 B4B_HANDLE_DETENT = 0.20           # stow detent interference
 B4B_HANDLE_DETENT_BUMP = 0.35      # body bump height
 B4B_HANDLE_DETENT_RAMP = 0.5
-B4B_HANDLE_MAX_PROJECTION = 7.25   # folded, including the local head flare
+B4B_HANDLE_MAX_PROJECTION = 7.25   # folded hardware envelope
 # Softening on the exposed perimeter edge.  The opposite face stays perfectly
 # flat: it is the bail's print bed.
 B4B_HANDLE_EDGE_CHAMFER = 1.0
@@ -737,12 +734,7 @@ class B4BHardwarePlan:
 
     @property
     def hinge_projection(self) -> float:
-        """Rear projection of the *normal* pivot envelope past the wall crest.
-
-        The short local head-bearing flare is reported separately by
-        :attr:`hinge_flare_projection`: it is one narrow band at the outboard
-        end of one ear, and letting it set the headline figure is exactly the
-        "hardware bolted on" look the compact redesign exists to remove.
+        """Rear projection of the uniform pivot envelope past the wall crest.
 
         Measured along Y, which is the direction the projection is in.  The
         support-free section has a *vertical face* at each Y extreme, so it
@@ -752,13 +744,6 @@ class B4BHardwarePlan:
         """
         return (
             self.hinge_axis_y - self.hinge_rear_crest + self.profile.pivot_radius
-        )
-
-    @property
-    def hinge_flare_projection(self) -> float:
-        return (
-            self.hinge_axis_y - self.hinge_rear_crest
-            + self.profile.head_flare_radius
         )
 
     @property
@@ -850,6 +835,30 @@ def _wall_extreme_y(
     if outward_sign > 0.0:
         return max(layout.rear_wall_y(float(v)) for v in xs)
     return min(layout.front_wall_y(float(v)) for v in xs)
+
+
+def _local_wall_crest_for_ear(
+    layout: B4BLayout, x_centre: float, ear_thickness: float, outward_sign: float
+) -> float:
+    """Wall crest over one ear's true axial width, not its whole root span."""
+    half = ear_thickness / 2.0
+    return _wall_extreme_y(layout, x_centre - half, x_centre + half, outward_sign)
+
+
+def _ear_wall_anchor_y(
+    layout: B4BLayout, x_centre: float, ear_thickness: float,
+    outward_sign: float, wall_depth: float,
+) -> float:
+    """Anchor a gusset inside its local structural wall band.
+
+    The cavity trim remains authoritative. This deliberate bite therefore
+    gives every ear a real wall load path without spending child-bin capacity.
+    """
+    crest = _local_wall_crest_for_ear(
+        layout, x_centre, ear_thickness, outward_sign
+    )
+    bite = min(0.7, 0.5 * wall_depth)
+    return crest - outward_sign * bite
 
 
 def _root_outward(profile_depth: float, wall_depth: float) -> float:
@@ -1163,13 +1172,13 @@ class B4BHandlePlan:
 
     @property
     def projection(self) -> float:
-        """Folded projection past the front wall crest, at the head flare.
+        """Folded projection past the front wall crest, at the handle eye.
 
         Measured along Y like every other projection: the support-free section
         presents a vertical face at its Y extremes, so it reaches its nominal
         radius and no further.
         """
-        return self.front_crest - self.axis_y + self.profile.head_flare_radius
+        return self.front_crest - self.axis_y + self.eye_radius
 
     @property
     def eye_projection(self) -> float:
@@ -1551,41 +1560,9 @@ def support_free_profile_yz(radius: float) -> Polygon:
     ])
 
 
-def support_free_bore_profile_yz(radius: float, roof_sign: float) -> Polygon:
-    """Teardrop section for a horizontal X-axis bore.
-
-    A round horizontal hole has an unsupported roof; this replaces it with two
-    45-degree facets meeting at a ridge, so the bore closes itself.
-    ``roof_sign`` is the *print-up* direction in assembly space: +1 for the
-    body, which prints upright, and -1 for the lid, which is rolled 180 degrees
-    about X so its assembly -Z faces the nozzle.  The inscribed diameter is
-    untouched, so a clearance bore still passes the screw and a pilot still has
-    full-depth material to thread-form into.
-    """
-    # Built as one clean ring rather than a Boolean union of a disc and a
-    # triangle: a union leaves near-duplicate points at the tangents, and the
-    # slivers they make do not extrude to a solid volume.
-    start = math.pi * 0.75                      # the +Y tangent point
-    sweep = math.pi * 1.5                       # the 270 degrees below the roof
-    points = [
-        (radius * math.cos(a), roof_sign * radius * math.sin(a))
-        for a in np.linspace(start, start + sweep, 48)
-    ]
-    points.append((0.0, roof_sign * radius * math.sqrt(2.0)))
-    if roof_sign < 0.0:
-        points.reverse()
-    tear = Polygon(points)
-    if not tear.is_valid:
-        raise RuntimeError("support-free bore section did not resolve")
-    return tear
-
-
-def _support_free_bore(
-    radius: float, length: float, roof_sign: float
-) -> trimesh.Trimesh:
-    return _extrude_yz_profile(
-        support_free_bore_profile_yz(radius, roof_sign), length
-    )
+def _round_bore(radius: float, length: float) -> trimesh.Trimesh:
+    """True circular X-axis bore for small bridged M2/M3 hardware holes."""
+    return _extrude_yz_profile(Point(0.0, 0.0).buffer(radius, quad_segs=32), length)
 
 
 def _weld(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
@@ -1833,30 +1810,12 @@ def _pivot_section(
 
 def _ear_solid(
     *, section: Polygon, thickness: float, x_centre: float,
-    bore_r: float, roof_sign: float, axis_y: float, axis_z: float,
-    flare: float = 0.0, flare_out: float = 1.0,
+    bore_r: float, axis_y: float, axis_z: float,
 ) -> trimesh.Trimesh:
-    """One printed ear: its section extruded to thickness, bored, optionally
-    with the short local screw-head flare on its outboard face.
-
-    Only that short flare is head-sized.  Letting the head diameter set the
-    whole pivot envelope is exactly what made the old hardware look like rugged
-    case fittings bolted to a small organiser box.
-    """
+    """One printed ear with a uniform outer barrel and a round screw bore."""
     ear = _extrude_yz_profile(section, thickness)
     ear.apply_translation((x_centre, 0.0, 0.0))
-    if flare > 0.0:
-        pad_len = min(1.2, thickness - 0.6)
-        if pad_len > 0.2:
-            pad = _extrude_yz_profile(
-                support_free_profile_yz(flare), pad_len
-            )
-            pad.apply_translation((
-                x_centre + flare_out * (thickness - pad_len) / 2.0,
-                axis_y, axis_z,
-            ))
-            ear = union([ear, pad])
-    bore = _support_free_bore(bore_r, thickness + 3.0, roof_sign)
+    bore = _round_bore(bore_r, thickness + 3.0)
     bore.apply_translation((x_centre, axis_y, axis_z))
     return difference([ear, bore])
 
@@ -1880,18 +1839,12 @@ def _gusset(
 
 
 def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """One compact rear hinge per centre: two slim body ears on a tapered root.
-
-    The near ear carries the screw head on a short local flare, the far ear is
-    the printed thread-forming lug, and the lid's centre ear runs between them
-    on the same pin.
-    """
+    """One compact rear hinge per centre: two body ears on a tapered root."""
     eff = b4b_effective_box(box)
     layout = b4b_layout(box)
     profile = plan.profile
     parts: list[trimesh.Trimesh] = []
     for cx in plan.hinge_centers_x:
-        out = 1.0 if cx >= 0.0 else -1.0
         near_x, _mid_x, far_x = _stack_positions(cx, profile)
         half = plan.hinge_root_width / 2.0 + 1.0
         cavity = _cavity_prism(box, cx - half, cx + half)
@@ -1922,7 +1875,9 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
         ):
             section = _filleted(
                 _gusset(
-                    root_y=plan.hinge_root_face_y - 0.8,
+                    root_y=_ear_wall_anchor_y(
+                        layout, ex, thickness, 1.0, eff.wall_depth
+                    ),
                     root_z=min(plan.hinge_root_top_z - 1.0, bottom_z + 1.0),
                     top_z=plan.hinge_root_top_z,
                     axis_y=plan.hinge_axis_y,
@@ -1945,11 +1900,8 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                     thickness=thickness,
                     x_centre=ex,
                     bore_r=profile.bore_radius(terminal),
-                    roof_sign=1.0,          # the body prints upright
                     axis_y=plan.hinge_axis_y,
                     axis_z=plan.hinge_axis_z,
-                    flare=0.0 if terminal else profile.head_flare_radius,
-                    flare_out=out,
                 ),
             ])
         parts.append(difference([solid, cavity]))
@@ -1996,7 +1948,6 @@ def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
                 thickness=profile.mid_member,
                 x_centre=mid_x,
                 bore_r=profile.clear_bore / 2.0,
-                roof_sign=-1.0,     # the lid prints rolled 180 degrees about X
                 axis_y=plan.hinge_axis_y,
                 axis_z=plan.hinge_axis_z,
             )
@@ -2011,11 +1962,11 @@ def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
 def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
     """One compact catch receiver per latch: two ears on a tapered root, with
     the lever's running slot relieved between them."""
+    eff = b4b_effective_box(box)
     layout = b4b_layout(box)
     profile = plan.profile
     parts: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
-        out = 1.0 if cx >= 0.0 else -1.0
         near_x, _mid_x, far_x = _stack_positions(cx, profile)
         half = plan.latch_root_width / 2.0 + 1.0
         cavity = _cavity_prism(box, cx - half, cx + half)
@@ -2046,7 +1997,9 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
         ):
             section = _filleted(
                 _gusset(
-                    root_y=plan.latch_root_face_y + 0.8,
+                    root_y=_ear_wall_anchor_y(
+                        layout, ex, thickness, -1.0, eff.wall_depth
+                    ),
                     root_z=min(plan.latch_root_top_z - 1.0, bottom_z + 1.0),
                     top_z=plan.latch_root_top_z,
                     axis_y=plan.catch_axis_y,
@@ -2069,11 +2022,8 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                     thickness=thickness,
                     x_centre=ex,
                     bore_r=profile.bore_radius(terminal),
-                    roof_sign=1.0,
                     axis_y=plan.catch_axis_y,
                     axis_z=plan.catch_axis_z,
-                    flare=0.0 if terminal else profile.head_flare_radius,
-                    flare_out=out,
                 ),
             ])
         relief_half = (
@@ -2107,7 +2057,6 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
     r = profile.pivot_radius
     parts: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
-        out = 1.0 if cx >= 0.0 else -1.0
         near_x, _mid_x, far_x = _stack_positions(cx, profile)
         for ex, thickness, terminal in (
             (near_x, profile.near_ear, False),
@@ -2140,11 +2089,8 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
                     thickness=thickness,
                     x_centre=ex,
                     bore_r=profile.bore_radius(terminal),
-                    roof_sign=-1.0,
                     axis_y=plan.pivot_axis_y,
                     axis_z=plan.pivot_axis_z,
-                    flare=0.0 if terminal else profile.head_flare_radius,
-                    flare_out=out,
                 )
             )
     return parts
@@ -2237,24 +2183,6 @@ def make_b4b_latches(box: BoxSpec) -> list[trimesh.Trimesh]:
 # --------------------------------------------------------------------------- #
 # folding front handle
 # --------------------------------------------------------------------------- #
-def _handle_bore_profile(radius: float, roof_sign: float) -> Polygon:
-    """Teardrop section for the bail's pivot bore.
-
-    The bore runs on world X like every other B4B pivot, but the bail prints on
-    its broad face, so its print-up direction is world *Y*, not Z.  The shared
-    helper draws its ridge along the section's second axis, so it is turned a
-    quarter turn here; extruding it unturned left the ridge lying sideways and
-    the bore with a plain unsupported round roof.
-    """
-    from shapely.affinity import rotate as rotate_polygon
-
-    return rotate_polygon(
-        support_free_bore_profile_yz(radius, 1.0),
-        -90.0 * roof_sign,
-        origin=(0.0, 0.0),
-    )
-
-
 def _softened_slab(
     outline: Polygon, thickness: float, chamfer: float, up: float
 ) -> trimesh.Trimesh:
@@ -2390,10 +2318,7 @@ def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
     heel_r = plan.eye_radius + plan.wall_clear
     for cx in plan.centers_x:
         stops.append(_handle_stop_heel(plan, cx, heel_r))
-        bore = _extrude_yz_profile(
-            _handle_bore_profile(plan.profile.clear_bore / 2.0, -1.0),
-            plan.eye_band + 4.0,
-        )
+        bore = _round_bore(plan.profile.clear_bore / 2.0, plan.eye_band + 4.0)
         bore.apply_translation((cx, plan.axis_y, plan.axis_z))
         bores.append(bore)
     for cx in plan.detent_centers_x:
@@ -2443,10 +2368,11 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
     plan = b4b_handle_plan(box)
     if plan is None:
         return []
+    eff = b4b_effective_box(box)
+    layout = b4b_layout(box)
     profile = plan.profile
     parts: list[trimesh.Trimesh] = []
     for cx in plan.centers_x:
-        out = 1.0 if cx >= 0.0 else -1.0
         near_x, far_x = _handle_fork_positions(cx)
         half = plan.root_width / 2.0 + 1.0
         cavity = _cavity_prism(box, cx - half, cx + half)
@@ -2477,7 +2403,9 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
         ):
             section = _filleted(
                 _gusset(
-                    root_y=plan.root_face_y + 0.8,
+                    root_y=_ear_wall_anchor_y(
+                        layout, ex, thickness, -1.0, eff.wall_depth
+                    ),
                     root_z=plan.root_bottom_z + 1.0,
                     top_z=plan.root_top_z,
                     axis_y=plan.axis_y,
@@ -2499,11 +2427,8 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
                     thickness=thickness,
                     x_centre=ex,
                     bore_r=profile.bore_radius(terminal),
-                    roof_sign=1.0,
                     axis_y=plan.axis_y,
                     axis_z=plan.axis_z,
-                    flare=0.0 if terminal else profile.head_flare_radius,
-                    flare_out=out,
                 ),
             ])
         # the bail nests between the ears, so the root is two buttresses with a
@@ -2898,16 +2823,23 @@ def validate_b4b_design(
         if plan.hinge_count != B4B_HINGE_COUNT:
             raise ValueError("a secure B4B lid needs exactly two hinges")
         # --- printability and structure, not merely "it resolved to a number"
-        if profile.head_bearing_margin <= 0.0:
+        if profile.head_bearing_margin + _EPS < profile.head_bearing_min:
             raise ValueError(
-                f"a {profile.name} head would overhang its bearing flare; the "
-                f"{profile.head_flare_radius:.2f} mm flare is too small for a "
-                f"{profile.head_clear:.1f} mm head"
+                f"a {profile.name} head has only {profile.head_bearing_margin:.2f} mm "
+                f"of bearing on the uniform barrel (need "
+                f"{profile.head_bearing_min:.2f} mm)"
             )
-        bridge = 2.0 * B4B_SUPPORT_FREE_FLAT * profile.head_flare_radius
+        if min(profile.pivot_radius, profile.catch_radius) + _EPS < profile.required_uniform_radius:
+            raise ValueError(
+                f"the {profile.name} uniform barrel is too small for its bore "
+                "shell or screw-head bearing"
+            )
+        bridge = 2.0 * B4B_SUPPORT_FREE_FLAT * max(
+            profile.pivot_radius, profile.catch_radius
+        )
         if bridge > B4B_SUPPORT_FREE_BRIDGE_MAX + _EPS:
             raise ValueError(
-                f"the support-free flare section would bridge {bridge:.2f} mm "
+                f"the largest support-free hardware barrel would bridge {bridge:.2f} mm "
                 f"unsupported (limit {B4B_SUPPORT_FREE_BRIDGE_MAX:.1f} mm)"
             )
         for what, centres, width in (
@@ -3032,15 +2964,15 @@ def b4b_summary(box: BoxSpec) -> dict:
     if b4b.secure_lid:
         # Measured off the authoritative reinforced envelopes, so the quoted
         # assembled size cannot understate the printed hardware.
-        flare_out = plan.profile.head_flare_radius
+        hardware_radius = plan.profile.pivot_radius
         for centres, width in (
             (plan.hinge_centers_x, plan.hinge_root_width),
             (plan.latch_centers_x, plan.latch_root_width),
         ):
             min_x = min(min_x, min(c - width / 2.0 for c in centres))
             max_x = max(max_x, max(c + width / 2.0 for c in centres))
-        min_y = min(min_y, plan.pivot_axis_y - flare_out)
-        max_y = max(max_y, plan.hinge_axis_y + flare_out)
+        min_y = min(min_y, plan.pivot_axis_y - hardware_radius)
+        max_y = max(max_y, plan.hinge_axis_y + hardware_radius)
         top_z = max(top_z, plan.hinge_axis_z + plan.profile.pivot_radius)
     # The readout has to survive a design the geometry would refuse, because
     # reporting *why* the handle cannot be fitted is most of its job: raising
@@ -3051,7 +2983,7 @@ def b4b_summary(box: BoxSpec) -> dict:
     if handle is not None:
         # The bail folds against the front wall, so it costs depth, not height:
         # a handled case still stacks.
-        min_y = min(min_y, handle.axis_y - handle.profile.head_flare_radius)
+        min_y = min(min_y, handle.axis_y - handle.eye_radius)
         min_x = min(min_x, handle.centers_x[0] - handle.root_width / 2.0)
         max_x = max(max_x, handle.centers_x[1] + handle.root_width / 2.0)
     if b4b.stacking:
@@ -3101,7 +3033,6 @@ def b4b_summary(box: BoxSpec) -> dict:
         # rather than only in somebody's eye.
         summary["metrics"] = {
             "hinge_projection_mm": round(plan.hinge_projection, 3),
-            "hinge_flare_projection_mm": round(plan.hinge_flare_projection, 3),
             "hinge_group_width_mm": round(plan.hinge_width, 3),
             "hinge_root_width_mm": round(plan.hinge_root_width, 3),
             "latch_projection_mm": round(plan.latch_projection, 3),
@@ -3444,8 +3375,8 @@ def _print_pose(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
     elif kind == "handle":
         # Lay the bail on its broad face.  The U outline runs across local Y,
         # so that axis rolls onto the bed's Z, the lower radii become plain 2D
-        # outline geometry and only the pivot bores stay horizontal - and those
-        # are teardropped for exactly this pose.  The roll is negative so the
+        # outline geometry and only the small round pivot bores stay horizontal.
+        # The roll is negative so the
         # wall-facing side lands on the bed and the softened exposed edge
         # finishes upward.
         m.apply_transform(
