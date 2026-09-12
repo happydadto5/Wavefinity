@@ -3591,7 +3591,8 @@ const SIZE_LIKE_TEXT = /^\s*\d+(\.\d+)?\s*(mm)?\s*$/i;
 // bin can say "M3" on the floor and still save as "Driver rack".
 function seedPartNameFromLabel(said) {
   const partInput = $("#part-name");
-  if (!partInput || partInput.value.trim() !== "") return;
+  if (!partInput) return;
+  if (partInput.value.trim() !== "" && document.activeElement === partInput) return;
   const tidy = String(said ?? "").trim();
   if (!tidy || SIZE_LIKE_TEXT.test(tidy)) return;
   partInput.value = tidy;
