@@ -306,10 +306,10 @@ B4B_HW_M3 = HardwareProfile(
 
 # --- deterministic family selection ---------------------------------------- #
 # One rule in one helper, so preview, export, validation and BOM cannot
-# disagree.  A handled case intentionally uses one family throughout: compact
-# cases use M2 for hinges, latches and handle pivots; larger ones use M3.  That
-# still means one kit, one driver and one BOM line per case.
-B4B_HW_M2_MAX_FIELD_XY = 96.0
+# disagree.  Compact B4Bs through 120 x 120 x 64 use M2; larger B4Bs use M3.
+# One family is used across hinges, latches and handle, so handle on or off
+# does not change the family: one kit, one driver and one BOM line per case.
+B4B_HW_M2_MAX_FIELD_XY = 120.0
 B4B_HW_M2_MAX_FIELD_Z = 64.0
 
 # --- minimum case ---------------------------------------------------------- #
@@ -388,13 +388,6 @@ B4B_LATCH_MAX_PROJECTION = {"M2": 6.0, "M3": 9.0}
 # so a small B4B gets a small handle on small (M2) hardware and a large B4B
 # gets a full-size handle on M3, with nothing hard-coded in between.
 #
-# Hardware family for a handled case is decided on the *handled* thresholds
-# below, separately from the ordinary no-handle thresholds, because a handle
-# pivot's own eye/fork stack is smaller than a hinge or latch stack at the same
-# nominal size.
-B4B_HANDLE_M2_MAX_FIELD_XY = 120.0
-B4B_HANDLE_M2_MAX_FIELD_Z = 64.0
-
 # Linear scale ramp: child-field X at or below the low end gives the smallest
 # handle, at or above the high end gives the largest, ordinary lerp in between.
 B4B_HANDLE_SCALE_X_MIN = 96.0
@@ -564,21 +557,10 @@ def b4b_hardware_family(box: BoxSpec) -> HardwareProfile:
 
     Deterministic and consulted from a single place, so the preview, the
     exported geometry, the validation report and the BOM can never disagree
-    about which kit the user needs.  Hinges, latches and the handle pivot
-    always share one family - never M2 hinges with an M3 handle - but a
-    handled case is checked against its own (larger) size threshold, because
-    the handle's own eye/fork stack is smaller than a hinge or latch stack at
-    the same nominal size.
+    about which kit the user needs.  Compact B4Bs through 120 x 120 x 64 use
+    M2; larger B4Bs use M3.  One family is used across hinges, latches and
+    handle, so handle on or off does not change the family.
     """
-    b4b = box.b4b.normalised()
-    if b4b.handle:
-        if (
-            box.x <= B4B_HANDLE_M2_MAX_FIELD_XY + _EPS
-            and box.y <= B4B_HANDLE_M2_MAX_FIELD_XY + _EPS
-            and box.z <= B4B_HANDLE_M2_MAX_FIELD_Z + _EPS
-        ):
-            return B4B_HW_M2
-        return B4B_HW_M3
     if (
         box.x <= B4B_HW_M2_MAX_FIELD_XY + _EPS
         and box.y <= B4B_HW_M2_MAX_FIELD_XY + _EPS
@@ -748,7 +730,10 @@ def b4b_handle_dimensions(box: BoxSpec, profile: HardwareProfile) -> HandleDimen
     fork_clear_span = (
         near_ear - B4B_HEAD_RECESS_DEPTH + eye_band + 2.0 * B4B_RUNNING_GAP
     )
-    eye_radius = profile.clear_bore / 2.0 + B4B_HANDLE_EYE_RADIAL_SHELL
+    eye_radius = (
+        profile.clear_bore / 2.0
+        + B4B_HANDLE_EYE_RADIAL_SHELL
+    ) / _SUPPORT_FREE_INSCRIBED
     root_width, root_above, root_below, root_depth = _handle_root_dims(profile)
     return HandleDimensions(
         band=band,
@@ -2719,7 +2704,7 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
         keeper = _root_taper_prism(
             centre_x=cx,
             root_width=plan.root_width,
-            group_width=profile.group_width,
+            group_width=plan.fork_width,
             outward_sign=-1.0,
             crest_y=plan.front_crest,
             face_y=plan.root_face_y,
