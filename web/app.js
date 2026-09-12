@@ -812,7 +812,7 @@ function applyB4BVisibility() {
     const frontOption = $("#b4b-label-front-option");
     if (frontOption) {
       frontOption.disabled = Boolean(labelBlocked);
-      frontOption.textContent = labelBlocked || "Front";
+      frontOption.textContent = labelBlocked ? `- Front label - (Not available - ${labelBlocked})` : "Front";
     }
     const labelSelect = $("#b4b-label-location");
     if (labelBlocked && labelSelect.value === "front") labelSelect.value = "none";
