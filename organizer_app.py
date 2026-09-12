@@ -1081,7 +1081,15 @@ def _b4b_log_note(summary: dict) -> str:
     else:
         bits.append("no lid")
     if summary["secure_lid"]:
-        bits.append(f"{summary['latch_count']} latch/{summary['latch_strength']}")
+        # Latch count and hardware family are both derived from the case now,
+        # so report what was resolved rather than a setting nobody chose.
+        count = summary["latch_count"]
+        bits.append(
+            f"{count} latch" if count == 1 else f"{count} latches"
+        )
+        family = summary.get("hardware_family")
+        if family:
+            bits.append(f"{family} hardware")
         bom = summary.get("hardware_bom", [])
         if bom:
             bits.append("; ".join(bom))
@@ -1771,6 +1779,7 @@ def design_to_dict(
             "label_location": b4b.label_location,
             "stacking": b4b.stacking,
             "handle": b4b.handle,
+            "version": b4b.version,
         }
     stack = getattr(box, "stack", None) or StackSpec()
     if stack.enabled:
@@ -1818,7 +1827,13 @@ def design_from_dict(
             label_text=str(b4b_raw.get("label_text", "")),
             label_location=str(b4b_raw.get("label_location", "top")),
             stacking=bool(b4b_raw.get("stacking", False)),
-            handle=bool(b4b_raw.get("handle", True)),
+            # A pre-v2 ``handle`` meant a fixed arch on the lid top, and it was
+            # on by default.  The bail that replaced it is body hardware with
+            # real size requirements, so an old file carries the *intent*
+            # forward and validation decides whether this case can keep it -
+            # never inferred from the dimensions themselves.
+            handle=bool(b4b_raw.get("handle", False)),
+            version=int(b4b_raw.get("version", 1)),
         )
     x, y = float(raw["x"]), float(raw["y"])
     if b4b.enabled and design_version == 2:

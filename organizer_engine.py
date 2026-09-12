@@ -98,6 +98,28 @@ DEFAULT_WALL = 0.8
 MIN_WALL = 0.2
 MAX_WALL = 2.4
 WALL_STEP = 0.2
+# The wall thicknesses a *new* design may be given, and what each one is for.
+# Exact extrusion width is slicer-dependent, so offering 0.5/1.0/1.5 as well
+# only recreates a long list of choices that print identically; these six are
+# the ones that mean something different on a 0.4 mm nozzle.
+#
+# ``MIN_WALL``/``WALL_STEP`` stay as the *validation* floor and quantum, so a
+# saved design carrying 0.6 or 1.4 still loads and regenerates unchanged - the
+# UI simply shows it as a legacy value until the user picks a current preset.
+WALL_PRESETS = (
+    (0.4, "Very thin / prototype"),
+    (0.8, "Standard"),
+    (1.2, "Strong"),
+    (1.6, "Heavy"),
+    (2.0, "Extra heavy"),
+    (2.4, "Maximum"),
+)
+# B4B is a carried, latched, repeatedly opened case, so it starts where an
+# ordinary bin's "Strong" does and never goes below it.
+B4B_WALL_PRESETS = tuple(
+    choice for choice in WALL_PRESETS if choice[0] >= 1.2 - 1e-9
+)
+B4B_DEFAULT_WALL = 1.2
 DEFAULT_BASE_THICKNESS = 0.6
 DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner
@@ -257,9 +279,19 @@ SCOOP_CURVE_SEGMENTS = 32
 # tuning lives in ``organizer_b4b.py``; this dataclass is only the saved intent.
 # --------------------------------------------------------------------------- #
 B4B_LID_HEADROOM_CHOICES = (0.5, 1.0, 2.0)   # UI: Lid snugness (Tight/Standard/Loose)
+# Latch count and latch strength are both derived from the case now - the count
+# from one authoritative width threshold, the geometry from the automatically
+# selected screw family.  Both tuples survive only so an older saved design
+# still parses; neither is offered as a new choice.
 B4B_LATCH_COUNTS = ("auto", "1", "2")
 B4B_LATCH_STRENGTHS = ("lightweight", "standard")
 B4B_LABEL_LOCATIONS = ("none", "top", "front")
+# Saved-design schema version for B4B intent.  Bumped when the meaning of a
+# field changes rather than inferred from dimensions: v2 moved the carrying
+# handle from a lid-top arch to a folding front bail, so a v1 ``handle: true``
+# is an *intent* that must be re-validated against the new eligibility rules
+# instead of being trusted.
+B4B_SCHEMA_VERSION = 2
 
 
 STACK_MODES = ("none", "lid", "direct")
@@ -300,13 +332,14 @@ class B4BSpec:
     enabled: bool = False
     lid: bool = True
     secure_lid: bool = True
-    latch_count: str = "auto"          # auto | 1 | 2
-    latch_strength: str = "standard"   # lightweight | standard
+    latch_count: str = "auto"          # legacy only; derived from case width
+    latch_strength: str = "standard"   # legacy only; derived from screw family
     lid_headroom_mm: float = 1.0       # UI: Lid snugness
     label_text: str = ""
     label_location: str = "top"        # none | top | front
     stacking: bool = False
-    handle: bool = True                # carrying handle bolted to the lid top
+    handle: bool = False               # folding U/bail on the body front wall
+    version: int = B4B_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         if self.latch_count not in B4B_LATCH_COUNTS:
@@ -338,16 +371,21 @@ class B4BSpec:
         Label location is a stored preference, not a request for geometry
         while the label text is blank.
 
-        A handle stands proud of the lid top, which is the face the next case
-        in a stack sits on, so the two cannot both be fitted: stacking wins.
+        The carrying handle is a folding bail on the *body* front wall, so it
+        no longer competes with stacking for the lid top and the two may be
+        selected together.  It does still require a secure lid: a handle is a
+        promise that the case can be picked up and carried, and a passive lid
+        would simply fall off.  Whether the case is actually big enough to
+        carry one is geometry, answered by ``b4b_handle_eligibility``, not
+        something this dataclass can decide.
         """
         legacy_lid = bool(self.lid)
         lid = True if self.enabled else legacy_lid
         secure = bool(self.secure_lid) and legacy_lid
         stacking = bool(self.stacking) and legacy_lid
-        handle = bool(self.handle) and lid and not stacking
-        # Latch count is always derived from box size now; an explicit "1"/"2"
-        # saved by an older file is no longer a supported override.
+        handle = bool(self.handle) and secure
+        # Latch count and strength are both derived from the case now; an
+        # explicit value saved by an older file is no longer an override.
         latch_count = "auto"
         latch_strength = self.latch_strength
         return B4BSpec(
@@ -361,6 +399,7 @@ class B4BSpec:
             label_location=self.label_location,
             stacking=stacking,
             handle=handle,
+            version=B4B_SCHEMA_VERSION,
         )
 
 

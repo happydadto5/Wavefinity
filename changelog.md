@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-09-12 — B4B hardware redesign: compact hinges, strap latches, folding front handle
+
+- **Hardware size is chosen for you, and it is no longer always M3.** Small
+  cases get a compact M2 family, larger or handled ones get M3, from one rule
+  that preview, export, validation and the parts list all read. A 48 mm case
+  now takes M2x8 screws throughout instead of M3 hardware sized for a case
+  three times bigger.
+- **Rear hinges are compact.** Two slim ears on a tapered root, the screw head
+  bearing on a short local flare instead of the whole knuckle being head-sized.
+  Rear projection is 5.15 mm on M2 and 6.35 mm on M3, down from about 8.4 mm.
+  The lid opens through a verified 120°, checked every 5°.
+- **The latch is a thin folding strap**, not the old two-disc blob: a rounded
+  pivot end, a flat body, an integrated hook around the catch screw and a small
+  finger lip. Closed projection is 5.25 mm on M2, 6.45 mm on M3.
+- **Latch count is automatic and exact**: one centred latch at or below 96 mm
+  of bin width, two above it.
+- **Latch strength is gone as a setting.** It did not need to be a choice — the
+  geometry now follows the selected screw family.
+- **The carrying handle is a folding bail on the front wall.** It used to be a
+  fixed arch bolted through the lid, which meant the lid carried the whole
+  weight of a loaded case and could not be stacked. Now the load goes straight
+  into the case body, and **stacking and the handle work together**. It folds
+  flat with 0.6 mm of clearance, holds itself stowed on two light detents, and
+  swings out to a 95° stop against broad printed faces.
+- **A handle is offered only when the case can really take one**, with at least
+  72 mm of clear grip and 26 mm of finger room — roughly a 96 mm wide, 40 mm
+  tall case and up. Where it will not fit, the box says which dimension is
+  short instead of disabling the option silently.
+- **B4B no longer resizes your box behind your back.** Bin fields, heights and
+  depths used to grow until the old hardware fit. Now the minimum is a stated
+  48 x 48 mm field, a 16 mm height for a latched lid and a 1.2 mm wall, and
+  anything smaller is refused with a reason rather than quietly enlarged.
+- **Wall thicknesses are six meaningful presets** (0.4 / 0.8 / 1.2 / 1.6 / 2.0 /
+  2.4 mm) instead of twelve 0.2 mm steps that print identically. B4B starts at
+  1.2 mm. Saved designs keep whatever wall they were made with.
+- Front labels now sit inside the folded handle, which frames them rather than
+  covering them.
+
 ## 2026-09-12 — Stack height and support-free snap correction
 
 - Height now means stack-module contribution: two nominal 50 mm modules add

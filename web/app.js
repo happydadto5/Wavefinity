@@ -408,32 +408,37 @@ function syncEasyCleanControls() {
 
 function populateWallChoices(box, select = $("#wall-thickness")) {
   const rules = state.catalog?.wall_rules || {};
+  // One place decides the floor a mode *requires*. Stacking and B4B both carry
+  // real load paths through the wall; an ordinary bin does not.
   const stacking = (box?.stack?.mode || "none") !== "none";
   const stackMin = stacking ? number(state.catalog?.stack_rules?.min_wall_mm, 1.2) : -Infinity;
-  const fallbackLabels = [
-    "Very thin (experimental)", "Thin", "Light", "Standard",
-    "Reinforced", "Strong", "Extra strong", "Very strong",
-    "Heavy duty", "Very heavy duty", "Extra heavy duty", "Maximum thickness",
-  ];
+  const b4bMin = box?.b4b?.enabled ? B4B_MIN_WALL : -Infinity;
+  const modeMin = Math.max(stackMin, b4bMin);
   const allChoices = Array.isArray(rules.choices) && rules.choices.length
     ? rules.choices
-    : Array.from({ length: 12 }, (_, index) => {
-        const value = 0.2 + index * 0.2;
-        return { value, label: fallbackLabels[index] };
-      });
-  const choices = allChoices.filter(choice => number(choice.value) >= stackMin - 1e-9);
+    : [
+        { value: 0.4, label: "Very thin / prototype" },
+        { value: 0.8, label: "Standard" },
+        { value: 1.2, label: "Strong" },
+        { value: 1.6, label: "Heavy" },
+        { value: 2.0, label: "Extra heavy" },
+        { value: 2.4, label: "Maximum" },
+      ];
+  const choices = allChoices.filter(choice => number(choice.value) >= modeMin - 1e-9);
   const wall = number(box?.wall, rules.default_mm ?? 0.8);
   const value = fmt(wall);
   const isDiscrete = choices.some(choice => fmt(choice.value) === value);
   const legacyValue = isDiscrete ? "" : value;
-  const signature = JSON.stringify({ choices, legacyValue, stackMin });
+  const signature = JSON.stringify({ choices, legacyValue, modeMin });
   if (select.dataset.choices !== signature) {
     select.replaceChildren(...choices.map(choice => new Option(
       `${number(choice.value).toFixed(1)} mm — ${choice.label}`,
       fmt(choice.value),
     )));
     if (legacyValue) {
-      select.add(new Option(`${legacyValue} mm — Existing custom`, legacyValue));
+      // A saved design keeps whatever wall it was made with: the preset list is
+      // what a *new* choice may be, not a migration of existing geometry.
+      select.add(new Option(`${legacyValue} mm — Legacy/Custom`, legacyValue));
     }
     select.dataset.choices = signature;
   }
@@ -587,9 +592,13 @@ function updateInteriorModeVisibility(reveal = false) {
 const B4B_DEFAULTS = {
   enabled: false, lid: true, secure_lid: true, latch_count: "auto",
   latch_strength: "standard", lid_headroom_mm: 1, label_text: "",
-  label_location: "top", stacking: false, handle: true,
+  label_location: "top", stacking: false, handle: false,
 };
+// Product minimums. Nothing here ever edits the entered field: a B4B that is
+// too small for its hardware is reported as too small, not quietly grown.
 const B4B_LATCHED_MIN_HEIGHT = 16;
+const B4B_MIN_FIELD = 48;
+const B4B_MIN_WALL = 1.2;
 
 function b4bState() {
   return { ...B4B_DEFAULTS, ...(state.design?.box?.b4b || {}) };
@@ -631,13 +640,17 @@ function applyB4BVisibility() {
     document.querySelector('.view-tab[data-view="3d"]')?.click();
   }
   if (on) {
-    // A handle stands proud of the lid top, which is the face the next case in
-    // a stack sits on, so the two cannot both be fitted.
-    const stacked = $("#b4b-stacking").checked;
-    $("#b4b-handle").disabled = stacked;
-    if (stacked) $("#b4b-handle").checked = false;
-    hide("#b4b-handle-note", !stacked);
-    $("#b4b-secure-options").hidden = $("#b4b-lid-type").value !== "latched";
+    // The handle is front-mounted body hardware now, so stacking is no longer
+    // a reason to refuse it. What it does still need is a lid that latches,
+    // and a case actually big enough to carry a hand.
+    const secure = $("#b4b-lid-type").value === "latched";
+    const blocked = b4bHandleBlockedReason();
+    $("#b4b-handle").disabled = Boolean(blocked);
+    if (blocked) $("#b4b-handle").checked = false;
+    const note = $("#b4b-handle-note");
+    if (note) note.textContent = blocked || "";
+    hide("#b4b-handle-note", !blocked);
+    $("#b4b-secure-options").hidden = !secure;
     // The label's text and location only exist once Add label is ticked.
     const labelled = $("#b4b-label-enabled").checked;
     hide("#b4b-label-text-row", !labelled);
@@ -646,9 +659,18 @@ function applyB4BVisibility() {
   applyStackVisibility();
 }
 
+// The server resolves handle eligibility from the real front wall, so the UI
+// simply repeats its answer rather than keeping a second copy of the rule.
+function b4bHandleBlockedReason() {
+  if ($("#b4b-lid-type").value !== "latched") return "Handle requires a secure lid.";
+  const b4b = state.preview?.b4b;
+  if (!b4b || b4b.handle_available !== false) return "";
+  return b4b.handle_blocked_reason || "This B4B is too small for a handle.";
+}
+
 function normalizeB4BDependentControls() {
   const secure = $("#b4b-lid-type").value === "latched";
-  $("#b4b-latch-strength").disabled = !secure;
+  if (!secure) $("#b4b-handle").checked = false;
 }
 
 function syncB4BForm() {
@@ -657,9 +679,8 @@ function syncB4BForm() {
   $("#b4b-lid-type").value = b4b.lid !== false && b4b.secure_lid !== false
     ? "latched" : "lid_only";
   $("#b4b-stacking").checked = Boolean(b4b.stacking);
-  $("#b4b-handle").checked = Boolean(b4b.handle) && !b4b.stacking;
+  $("#b4b-handle").checked = Boolean(b4b.handle) && b4b.secure_lid !== false;
   $("#b4b-lid-snugness").value = String(b4b.lid_headroom_mm ?? 1);
-  $("#b4b-latch-strength").value = b4b.latch_strength || "standard";
   // Add label follows the design's label text. Text typed and then switched
   // off stays in the (hidden) field for this session, so switching back on
   // does not mean retyping it.
@@ -788,22 +809,52 @@ function readB4BForm(design) {
     enabled: true,
     lid: true,
     secure_lid: secure,
+    // Latch count and strength are both derived from the case now. The saved
+    // strength rides along untouched so an older design still round-trips.
     latch_count: "auto",
-    latch_strength: $("#b4b-latch-strength").value,
+    latch_strength: b4bState().latch_strength || "standard",
     lid_headroom_mm: parseFloat($("#b4b-lid-snugness").value) || 1,
     label_text: $("#b4b-label-enabled").checked ? $("#b4b-label-text").value : "",
     label_location: $("#b4b-label-location").value,
     stacking: $("#b4b-stacking").checked,
-    handle: $("#b4b-handle").checked && !$("#b4b-stacking").checked,
+    // The bail folds against the front wall, so it no longer competes with
+    // stacking for the lid top - but it still needs a lid that latches shut.
+    handle: $("#b4b-handle").checked && secure,
   };
 }
 
-function enforceB4BMinimumHeight(design = state.design, flash = true) {
+// The wall is the one B4B value a mode may still promote: it is structural,
+// it grows outward, and it costs no capacity. X/Y/Z are the user's and stay
+// the user's - if they will not carry the hardware we say so instead.
+function enforceB4BMinimums(design = state.design, flash = true) {
   const b4b = design?.box?.b4b;
-  if (!b4b?.enabled || !b4b.secure_lid || design.box.z >= B4B_LATCHED_MIN_HEIGHT) return;
-  design.box.z = B4B_LATCHED_MIN_HEIGHT;
-  $("#z").value = fmt(design.box.z);
-  if (flash) flashField($("#z"));
+  if (!b4b?.enabled) return;
+  if (number(design.box.wall, 0.8) < B4B_MIN_WALL - 1e-9) {
+    design.box.wall = B4B_MIN_WALL;
+    design.box.standard_walls = false;
+    const sel = $("#wall-thickness");
+    if (sel) {
+      populateWallChoices(design.box, sel);
+      sel.value = fmt(B4B_MIN_WALL);
+      if (flash) flashField(sel);
+    }
+  }
+}
+
+// Why this design cannot be generated as entered, in the user's terms. Never a
+// silent correction: the list is what the readout shows.
+function b4bLimitProblems(design = state.design) {
+  const box = design?.box;
+  const b4b = box?.b4b;
+  if (!b4b?.enabled) return [];
+  const problems = [];
+  if (number(box.x, 0) < B4B_MIN_FIELD - 1e-9 || number(box.y, 0) < B4B_MIN_FIELD - 1e-9) {
+    problems.push(`A B4B holds at least ${B4B_MIN_FIELD} x ${B4B_MIN_FIELD} mm of bins.`);
+  }
+  if (b4b.secure_lid && number(box.z, 0) < B4B_LATCHED_MIN_HEIGHT - 1e-9) {
+    problems.push(`A latched lid needs at least ${B4B_LATCHED_MIN_HEIGHT} mm of bin height.`);
+  }
+  return problems;
 }
 
 function groupB4BHardware(hardware) {
@@ -819,9 +870,12 @@ function groupB4BHardware(hardware) {
   add(hardware.latch_qty, hardware.latch_screw);
   add(hardware.catch_qty, hardware.catch_screw);
   add(hardware.handle_qty, hardware.handle_screw);
+  // The whole case is one screw family, chosen automatically - so name it once
+  // rather than assuming it is always M3.
+  const family = hardware.family || "M3";
   return [...byLength.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([length, qty]) => `${qty} M3 (${length}mm)`)
+    .map(([length, qty]) => `${qty} ${family} (${length}mm)`)
     .join(", ");
 }
 
@@ -853,9 +907,15 @@ function renderB4BReadout() {
     grew.hidden = false;
     grew.textContent =
       `Bin field grown to ${b4b.field_mm[0]} x ${b4b.field_mm[1]} x ${b4b.field_mm[2]} mm ` +
-      `(${b4b.field_units[0]} x ${b4b.field_units[1]} units) for the selected hardware.`;
+      `(${b4b.field_units[0]} x ${b4b.field_units[1]} units).`;
   } else {
     grew.hidden = true;
+  }
+  // Minimums are reported, never applied behind the user's back.
+  const problems = b4bLimitProblems();
+  if (problems.length) {
+    grew.textContent = problems.join(" ");
+    grew.hidden = false;
   }
   if ((b4b.secure_lid || b4b.handle) && b4b.hardware) {
     const bits = [];
@@ -888,7 +948,7 @@ async function toggleB4B(wantEnabled) {
     delete state.design.box.stack;
   }
   readB4BForm(state.design);
-  enforceB4BMinimumHeight();
+  enforceB4BMinimums();
   applyB4BVisibility();
   changedDesign();
 }
@@ -989,7 +1049,7 @@ function updateDesignFromForm() {
   };
   readB4BForm(design);
   readStackForm(design);
-  enforceB4BMinimumHeight(design);
+  enforceB4BMinimums(design);
   applyB4BVisibility();
 }
 
@@ -1407,14 +1467,14 @@ function wireControls() {
     $(sel).addEventListener("change", () => {
       normalizeB4BDependentControls();
       readB4BForm(state.design);
-      enforceB4BMinimumHeight();
+      enforceB4BMinimums();
       applyB4BVisibility();
       changedDesign();
     }));
-  ["#b4b-lid-snugness", "#b4b-latch-strength", "#b4b-label-location"]
+  ["#b4b-lid-snugness", "#b4b-label-location"]
     .forEach(sel => $(sel).addEventListener("change", () => {
       readB4BForm(state.design);
-      enforceB4BMinimumHeight();
+      enforceB4BMinimums();
       changedDesign();
     }));
   $("#b4b-label-text").addEventListener("input", () => {
@@ -5701,7 +5761,7 @@ function designHasChanges() {
   visibleDesign.part_name = $("#part-name").value;
   if ($("#bin-type").value === "b4b") {
     readB4BForm(visibleDesign);
-    enforceB4BMinimumHeight(visibleDesign, false);
+    enforceB4BMinimums(visibleDesign, false);
   }
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;

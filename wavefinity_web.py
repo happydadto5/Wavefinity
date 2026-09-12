@@ -32,10 +32,14 @@ import numpy as np
 
 from organizer_engine import (
     BASE_UNIT,
+    B4B_DEFAULT_WALL,
     B4B_LATCH_COUNTS,
     B4B_LATCH_STRENGTHS,
     B4B_LABEL_LOCATIONS,
     B4B_LID_HEADROOM_CHOICES,
+    B4B_SCHEMA_VERSION,
+    B4B_WALL_PRESETS,
+    WALL_PRESETS,
     GRID_PITCH,
     DEFAULT_BASE_THICKNESS,
     DEFAULT_WALL,
@@ -119,6 +123,10 @@ from organizer_app import (
     validate_customization_clearance,
 )
 from organizer_b4b import (
+    B4B_HANDLE_GRIP_MIN,
+    B4B_LATCHED_MIN_HEIGHT,
+    B4B_MIN_FIELD_XY,
+    B4B_MIN_WALL,
     b4b_effective_box,
     b4b_mating_polygon,
     b4b_preview_parts,
@@ -418,22 +426,11 @@ def catalog_payload() -> dict[str, Any]:
             "min_mm": MIN_WALL,
             "max_mm": MAX_WALL,
             "step_mm": WALL_STEP,
+            # What a *new* design may be given.  MIN_WALL/WALL_STEP stay as
+            # the validation floor and quantum, so a saved design carrying a
+            # non-preset wall still loads and regenerates unchanged.
             "choices": [
-                {"value": round(MIN_WALL + index * WALL_STEP, 1), "label": label}
-                for index, label in enumerate((
-                    "Very thin (experimental)",
-                    "Thin",
-                    "Light",
-                    "Standard",
-                    "Reinforced",
-                    "Strong",
-                    "Extra strong",
-                    "Very strong",
-                    "Heavy duty",
-                    "Very heavy duty",
-                    "Extra heavy duty",
-                    "Maximum thickness",
-                ))
+                {"value": value, "label": label} for value, label in WALL_PRESETS
             ],
             "wall_depth_factor": math.sqrt(1.0 + max_wave_slope() ** 2),
             "wave_amplitude_mm": WAVE_AMPLITUDE,
@@ -451,9 +448,20 @@ def catalog_payload() -> dict[str, Any]:
         "b4b_rules": {
             "grid_pitch_mm": GRID_PITCH,
             "lid_headroom_choices_mm": list(B4B_LID_HEADROOM_CHOICES),
+            # Latch count and strength are derived from the case; both lists
+            # remain only so an older saved design still parses.
             "latch_counts": list(B4B_LATCH_COUNTS),
             "latch_strengths": list(B4B_LATCH_STRENGTHS),
             "label_locations": list(B4B_LABEL_LOCATIONS),
+            "schema_version": B4B_SCHEMA_VERSION,
+            "min_field_mm": B4B_MIN_FIELD_XY,
+            "min_secure_height_mm": B4B_LATCHED_MIN_HEIGHT,
+            "min_wall_mm": B4B_MIN_WALL,
+            "default_wall_mm": B4B_DEFAULT_WALL,
+            "wall_choices": [
+                {"value": value, "label": label} for value, label in B4B_WALL_PRESETS
+            ],
+            "handle_min_grip_mm": B4B_HANDLE_GRIP_MIN,
         },
         "setting_interactions": [
             {

@@ -82,22 +82,8 @@ B4B_LID_SKIRT_LAP = 4.0        # how far the skirt laps down past the body rim
 # of the selected latch strength.
 B4B_LATCHED_MIN_HEIGHT = 16.0
 
-# M3 hardware (no nuts, no inserts)
-B4B_M3_NOMINAL = 3.0
-B4B_M3_CLEAR_BORE = 3.4        # rotating knuckle / pivot clearance hole
-B4B_M3_PILOT = 2.6            # thread-forming terminal pilot
-B4B_M3_THREAD_ENGAGE_MIN = 3.0
-B4B_M3_HEAD_CLEAR = 6.0
-# The screw head bears straight on printed plastic with no washer, so every
-# head-bearing boss must leave real material outboard of the head footprint,
-# not merely clear it.  This is that margin, and it is what sizes
-# ``B4B_HW_BOSS_RADIUS`` - the head clearance is never a dead declaration.
-B4B_M3_HEAD_EDGE_MARGIN = 0.7
-B4B_SCREW_LENGTHS = (12, 16, 20, 25, 30)   # allowed kit lengths, mm
-B4B_M3_MAX_PROTRUSION = 6.0
-
 # --- support-free integrated hardware -------------------------------------- #
-# Every integrated hinge/latch barrel has its axis on world X and prints
+# Every integrated hinge/latch/handle barrel has its axis on world X and prints
 # horizontally: the body upright, the lid flipped 180 degrees about X.  A full
 # round barrel therefore always presents a lower arc steeper than the
 # support-free limit, whichever way up it goes, so B4B uses a faceted section
@@ -116,23 +102,206 @@ B4B_SUPPORT_FREE_BRIDGE_MAX = 3.0
 _SUPPORT_FREE_INSCRIBED = (1.0 + B4B_SUPPORT_FREE_FLAT) / math.sqrt(2.0)
 _SUPPORT_FREE_CIRCUM = math.sqrt(1.0 + B4B_SUPPORT_FREE_FLAT ** 2)
 
-# One boss size for every M3 pivot: derived so even the section's thinnest
-# radial direction still leaves ``B4B_M3_HEAD_EDGE_MARGIN`` outboard of the
-# head.  Hinge knuckles, latch pivot ears and catch receivers all use it.
-B4B_HW_BOSS_RADIUS = (
-    B4B_M3_HEAD_CLEAR / 2.0 + B4B_M3_HEAD_EDGE_MARGIN
-) / _SUPPORT_FREE_INSCRIBED
+# --- automatic hardware profiles ------------------------------------------- #
+# Hardware size is never a user setting.  One family is selected for the whole
+# case by :func:`b4b_hardware_family` and every hinge, latch, catch and handle
+# pivot is proportioned from the profile it resolves to.  Ordinary socket-head
+# metric screws from a common assortment kit; no nuts, no inserts, no shoulder
+# screws, no specialty hinge pins.
+#
+# The running gap between any two printed parts that must move against each
+# other.  0.20 mm was a boolean gap, not a printed one: at FDM tolerances the
+# two faces fuse and the joint has to be broken free.
+B4B_RUNNING_GAP = 0.30
+# Maximum screw tail past the far face of its thread-forming lug.  The exact
+# stacks below are designed to produce zero tail; this is the acceptance limit.
+B4B_SCREW_MAX_TAIL = 0.5
+
+
+@dataclass(frozen=True)
+class HardwareProfile:
+    """One metric screw family and every B4B dimension derived from it.
+
+    Exact first-build values.  Only the three physical-calibration fields -
+    ``pilot``, ``clear_bore`` and the detent interferences held elsewhere - are
+    expected to move after test prints, and they move here, once, for every
+    fitting at the same time.
+    """
+
+    name: str
+    nominal: float
+    clear_bore: float          # rotating / through member
+    pilot: float               # printed thread-forming terminal lug
+    engage_min: float          # minimum real thread bite
+    head_clear: float          # printed socket-head clearance diameter
+    head_edge_margin: float    # nominal material outboard of that circle
+    head_flare_radius: float   # the resulting short local bearing flare
+    lengths: tuple[int, ...]   # permitted standard kit lengths, mm
+    pivot_radius: float        # ordinary hinge knuckle / latch pivot ear
+    catch_radius: float        # body catch ear - carries no rotation
+    bore_shell: float          # minimum printed shell around the clearance bore
+    # exact axial stacks (outboard screw head -> case centre)
+    near_ear: float
+    mid_member: float          # lid centre ear / latch lever / catch span
+    far_lug: float
+    # latch
+    latch_draw: float          # pivot axis down to catch axis
+    pivot_standoff: float      # lid latch pivot axis, outward of front crest
+    catch_standoff: float      # body catch axis, outward of front crest
+    hinge_standoff: float      # hinge axis, outward of rear crest
+    strap_thickness: float
+    hook_wall: float
+    hook_mouth: float
+    hook_lead_in: float
+    lip_out: float
+    lip_length: float
+    lever_fillet: float
+    # roots
+    hinge_root_width: float
+    hinge_root_height: float
+    hinge_root_depth: float    # inner mating face -> outer reinforcement
+    latch_root_width: float
+    latch_root_height: float
+    latch_root_depth: float
+
+    @property
+    def group_width(self) -> float:
+        """Total axial width of a pivot stack."""
+        return (
+            self.near_ear + self.mid_member + self.far_lug
+            + 2.0 * B4B_RUNNING_GAP
+        )
+
+    @property
+    def clear_span(self) -> float:
+        """Clearance-bored stack the screw crosses before its lug."""
+        return self.near_ear + self.mid_member + 2.0 * B4B_RUNNING_GAP
+
+    @property
+    def catch_inner_radius(self) -> float:
+        """Hook bore that rides on the catch screw shank."""
+        return self.nominal / 2.0 + 0.25
+
+    @property
+    def hook_outer_radius(self) -> float:
+        return self.catch_inner_radius + self.hook_wall
+
+    def bore_radius(self, terminal: bool) -> float:
+        return (self.pilot if terminal else self.clear_bore) / 2.0
+
+    @property
+    def head_bearing_margin(self) -> float:
+        """Material actually left outboard of the head, at the section's
+        thinnest radial direction.
+
+        The flare has to be the same faceted section as everything else or it
+        would not print support-free, and a faceted section is thinner than its
+        nominal radius on the 45-degree facets.  So the real margin is smaller
+        than the nominal ``head_edge_margin`` used to derive the radius; this
+        is the number validation checks.
+        """
+        return self.head_flare_radius * _SUPPORT_FREE_INSCRIBED - self.head_clear / 2.0
+
+
+B4B_HW_M2 = HardwareProfile(
+    name="M2",
+    nominal=2.0,
+    clear_bore=2.3,
+    pilot=1.7,
+    engage_min=2.4,
+    head_clear=4.2,
+    head_edge_margin=0.5,
+    head_flare_radius=2.6,
+    lengths=(6, 8, 10, 12, 16),
+    pivot_radius=2.4,
+    catch_radius=2.2,
+    bore_shell=1.2,
+    near_ear=2.2,
+    mid_member=2.6,
+    far_lug=2.6,
+    latch_draw=9.0,
+    pivot_standoff=2.85,
+    catch_standoff=2.6,
+    hinge_standoff=2.75,
+    strap_thickness=2.0,
+    hook_wall=1.4,
+    hook_mouth=1.8,
+    hook_lead_in=0.6,
+    lip_out=1.2,
+    lip_length=2.5,
+    lever_fillet=0.8,
+    hinge_root_width=11.0,
+    hinge_root_height=8.0,
+    hinge_root_depth=2.6,
+    latch_root_width=10.8,
+    latch_root_height=9.0,
+    latch_root_depth=2.6,
+)
+B4B_HW_M3 = HardwareProfile(
+    name="M3",
+    nominal=3.0,
+    clear_bore=3.4,
+    pilot=2.6,
+    engage_min=3.0,
+    head_clear=6.0,
+    head_edge_margin=0.6,
+    head_flare_radius=3.6,
+    lengths=(6, 8, 10, 12, 16, 20),
+    pivot_radius=3.0,
+    catch_radius=2.7,
+    bore_shell=1.3,
+    near_ear=2.8,
+    mid_member=3.2,
+    far_lug=3.4,
+    latch_draw=10.5,
+    pivot_standoff=3.45,
+    catch_standoff=3.1,
+    hinge_standoff=3.35,
+    strap_thickness=2.4,
+    hook_wall=1.6,
+    hook_mouth=2.8,
+    hook_lead_in=0.8,
+    lip_out=1.5,
+    lip_length=3.0,
+    lever_fillet=1.0,
+    hinge_root_width=13.6,
+    hinge_root_height=10.0,
+    hinge_root_depth=3.0,
+    latch_root_width=13.4,
+    latch_root_height=11.0,
+    latch_root_depth=3.0,
+)
+
+# --- deterministic family selection ---------------------------------------- #
+# One rule in one helper, so preview, export, validation and BOM cannot
+# disagree.  A handled case is intentionally all-M3 rather than M2 hinges and
+# latches with M3 handle pivots: one kit, one driver, one BOM line.
+B4B_HW_M2_MAX_FIELD_XY = 96.0
+B4B_HW_M2_MAX_FIELD_Z = 64.0
+
+# --- minimum case ---------------------------------------------------------- #
+# A B4B is a carrying case, not a bin with hardware bolted on.  Below this the
+# hardware would be the product, so B4B is refused rather than grown.
+B4B_MIN_FIELD_XY = 48.0
+# A secure lid still needs a printable body wall below its catch receiver.
+B4B_LATCHED_MIN_HEIGHT = 16.0
+# B4B wall floor and default.  A repeatedly opened, latched, hinged and carried
+# case is the wrong place for a two-line wall; 1.2 mm is roughly three lines on
+# a nominal 0.4 mm nozzle.  The child field stays authoritative, so the extra
+# material grows outward and costs no capacity.
+B4B_MIN_WALL = 1.2
 
 # --- hardware reinforcement ------------------------------------------------ #
-# Hinge and latch loads must not run through a sub-millimetre overlap with a
-# user-selected wall.  Each hardware group sits on its own exterior root web
-# that starts at the inner mating face, crosses the whole local wall band and
-# grows outward; these dimensions are deliberately independent of ``wall``.
-B4B_HW_ROOT_MIN_THICKNESS = 3.0   # local wall + web at a root, at any wall
-B4B_HW_PAD_MARGIN_X = 2.0         # web beyond the fitting envelope, each end
-B4B_HW_PAD_HEIGHT = 10.0          # how far the web runs down the wall
+# Hinge, latch and handle loads must not run through a sub-millimetre overlap
+# with the user's wall.  Each group sits on its own exterior root that starts
+# at the inner mating face, crosses the whole local wall band and grows
+# outward to the profile's ``*_root_depth``.
 B4B_HW_CLEARANCE = 0.6            # static gap, body fitting to lid fitting
-B4B_HINGE_WEB = 1.6               # hinge web outboard of the outer wall face
+B4B_HW_ROOT_TAPER = 45.0          # plan-view and underside root fade, degrees
+# A root is two tapered buttresses under its two ears, not a slab: the moving
+# member (latch lever, handle bail) nests in the relief between them.  This is
+# the running gap left around that member when the relief is cut.
+B4B_HW_RELIEF_CLEARANCE = 0.5
 
 # Lid-side roots: the fitting grows out of the plate through an arm that is
 # part of its own section, not a block tacked on afterwards.
@@ -140,11 +309,9 @@ B4B_LID_ROOT_BITE = 1.0           # how far the arm overlaps the fitting
 B4B_LID_ROOT_REACH = 4.0          # run into the plate, away from its edge
 B4B_LID_FITTING_DROP = 1.6        # how far a lid fitting hangs below the plate
 
-# Every hardware section is filleted where it meets the plate or the root web
-# it grows from: a square internal corner is where a printed bracket cracks
-# off.  Derived from the fitting itself so it tracks the hardware, and capped
-# so the arc can never eat the drop below the plate or crowd the M3 bore.
-B4B_HW_FILLET = 1.2
+# Every hardware section is filleted where it meets the plate or the root it
+# grows from: a square internal corner is where a printed bracket cracks off.
+B4B_HW_FILLET = 1.0
 
 # Print-bed layout: parts are packed in a row, none overlapping.
 B4B_PRINT_PART_GAP = 8.0
@@ -152,83 +319,69 @@ B4B_PRINT_PART_GAP = 8.0
 # Stacking boss self-locating lead-in (a real printed taper, not a claim).
 B4B_STACK_BOSS_CHAMFER = 0.6
 
-# Hinges (exactly two, rear wall)
+# --- rear hinges (exactly two on every secure lid) ------------------------- #
 B4B_HINGE_COUNT = 2
-B4B_HINGE_WIDTH_FRACTION = 0.16
-# The running gap between every pair of printed parts that must move against
-# each other - hinge knuckles, and the latch lever against its receiver ears.
-# 0.20 mm was a boolean gap, not a printed one: at FDM tolerances the two faces
-# fuse and the joint has to be broken free.
-B4B_HINGE_AXIAL_GAP = 0.35
-# The hinge is three axial segments; the outer (far) one is the printed
-# thread-forming lug.  Rather than hard-coding a width and hoping the lug lands
-# clear of B4B_M3_THREAD_ENGAGE_MIN, the minimum width is *derived* from a lug
-# thickness that carries real margin over that floor.
-B4B_HINGE_LUG_TARGET = 3.8
-B4B_HINGE_WIDTH_MIN = math.ceil(
-    2.0 * 3.0 * (B4B_HINGE_LUG_TARGET + B4B_HINGE_AXIAL_GAP)
-) / 2.0                          # 12.5 mm -> a 3.82 mm lug
-B4B_HINGE_WIDTH_MAX = 24.0
-B4B_HINGE_CLEAR_KEEPOUT = 1.0    # extra gap from a wall's corner tangent
-B4B_HINGE_CENTRE_GAP = 4.0       # clear run between the two hinge root webs
+# Lid opening requirement.  This is a case lid, not a fold-flat box.
+B4B_LID_OPEN_ANGLE = 120.0
+B4B_SWEEP_STEP_DEG = 5.0
+# Hinge centres are nominally +/- child_x/4, pulled inward only far enough to
+# keep this much root clear of the wall's corner tangent.
+B4B_ROOT_CORNER_CLEARANCE = 2.0
+B4B_HINGE_CENTRE_GAP = 4.0       # clear run between the two hinge roots
+# Rear lid relief is the first response to a sweep collision; only if this much
+# is not enough may the axis move rearward at all.
+B4B_LID_RELIEF_MAX = 1.2
+B4B_HINGE_AXIS_STEP = 0.05       # quantum for any forced rearward move
+# Review ceilings on the *normal* pivot envelope.  Section 6.3 of the design
+# spec excludes the short local head flare from the projection figure, so these
+# do too; the flare projection is reported separately as its own metric.
+B4B_HINGE_MAX_PROJECTION = {"M2": 5.75, "M3": 7.0}
 
-# Latches (secure lid only)
-B4B_LATCH_WIDTH_FRACTION = 0.14
-B4B_LATCH_WIDTH_MIN = 12.0
-B4B_LATCH_WIDTH_MAX = 22.0
-B4B_LATCH_MUTUAL_CLEARANCE = 6.0
-B4B_LATCH_DRAW_MIN = 6.5         # shallowest useful draw below the lid seat
+# --- front latches --------------------------------------------------------- #
+# Deterministic count from one authoritative threshold, never "however many
+# old-style pads happened to fit".
+B4B_LATCH_TWO_ABOVE_FIELD_X = 96.0
+B4B_LATCH_RELEASE_ANGLE = 25.0   # hook must be off the pin by here
+B4B_LATCH_OPEN_ANGLE = 75.0      # full sampled swing
 B4B_LATCH_BODY_CLEARANCE = 0.8   # running gap, swinging lever to the body
-B4B_LATCH_PROFILES = {
-    # lever_thickness  - where the pivot sits relative to the hook
-    # hook_depth       - how far the hook wraps the catch pin
-    # catch_thickness  - exterior receiver web behind the catch boss
-    # pad_wall         - printed ear thickness each side of the lever
-    # pad_height       - how far below the lid seat the catch pin sits
-    # detent           - snap interference at the hook mouth
-    "lightweight": {
-        "lever_thickness": 3.0,
-        "hook_depth": 1.8,
-        "catch_thickness": 2.4,
-        "pad_wall": 2.0,
-        "pad_height": 8.0,
-        "detent": 0.25,
-    },
-    "standard": {
-        "lever_thickness": 4.2,
-        "hook_depth": 3.0,
-        "catch_thickness": 3.6,
-        "pad_wall": 3.2,
-        "pad_height": 11.0,
-        "detent": 0.45,
-    },
-}
+B4B_LATCH_DETENT = 0.20          # hook-mouth interference against the pin
+B4B_LATCH_MAX_PROJECTION = {"M2": 6.0, "M3": 9.0}
 
-# Carrying handle: a printed arch bolted flat to the lid top with two M3
-# screws, the same kit and the same no-nut, thread-forming fixing every other
-# B4B fitting uses.  A handled lid is made thick enough to *be* the
-# thread-forming lug, so nothing hangs below it into the child bins headroom
-# and nothing stands above it to spoil the flat face the lid prints on.
-B4B_HANDLE_LID_SKIN = B4B_HINGE_LUG_TARGET
-B4B_HANDLE_EDGE_INSET = 3.0        # feet stay this far in from the lid edge
-B4B_HANDLE_SPAN_MAX = 160.0        # a grip wider than this helps nobody
-B4B_HANDLE_MIN_OPENING = 14.0      # narrower than this is not a handle
-B4B_HANDLE_UPRIGHT_FRACTION = 0.10
-B4B_HANDLE_UPRIGHT_MIN = 5.0
-B4B_HANDLE_UPRIGHT_MAX = 10.0
-B4B_HANDLE_DEPTH_FRACTION = 0.16   # across Y
-B4B_HANDLE_DEPTH_MIN = 12.0
-B4B_HANDLE_DEPTH_MAX = 22.0
-B4B_HANDLE_FOOT_WALL = 2.2         # material each side of the screw in a foot
-B4B_HANDLE_FOOT_MIN = 6.0
-B4B_HANDLE_SCREW_SLACK = 0.2       # how far the screw may pass the plate
-# A hand is a hand whatever the case measures, so the grip is clamped to a
-# comfortable band rather than scaled freely.
-B4B_HANDLE_GRIP_CLEAR_MIN = 24.0
-B4B_HANDLE_GRIP_CLEAR_MAX = 34.0
-B4B_HANDLE_GRIP_MIN = 7.0
-B4B_HANDLE_GRIP_MAX = 12.0
+# --- folding front handle -------------------------------------------------- #
+# A U/bail on the *body* front wall.  The lid carries no handle load at all, so
+# the carry force goes straight into the case shell instead of through the lid,
+# the latches and the rear hinges - and the lid top stays free for stacking.
+B4B_HANDLE_PROFILE = B4B_HW_M3     # handle hardware is M3 only
+B4B_HANDLE_GRIP_MIN = 72.0         # below this it is not an adult handle
+B4B_HANDLE_GRIP_MAX = 95.0         # a hand does not benefit from more
+B4B_HANDLE_GRIP_FRACTION = 0.75    # of the child field width, then clamped
+B4B_HANDLE_BAND = 6.5              # in-plane band width of the lower U
+B4B_HANDLE_EYE_BAND = 5.4          # tapered band at the pivot eye
+B4B_HANDLE_TAPER_RUN = 8.0         # vertical run of that taper
+B4B_HANDLE_EYE_RADIUS = 2.9
+B4B_HANDLE_THICKNESS = 2.0 * B4B_HANDLE_EYE_RADIUS   # 5.8 front-to-back
+B4B_HANDLE_CORNER_RADIUS = 7.5     # lower U centreline radius
+B4B_HANDLE_DROP = 29.0             # preferred pivot axis to grip centre
+B4B_HANDLE_DROP_MIN = 26.0
+B4B_HANDLE_WALL_CLEAR = 0.6        # folded running gap to the wall crest
+B4B_HANDLE_BOTTOM_MARGIN = 4.0     # clear run above the case bottom
+B4B_HANDLE_RIM_DROP = 8.0          # pivot axis below the rim/lid-seat datum
+B4B_HANDLE_STOP_ANGLE = 95.0       # deployed carry stop
+B4B_HANDLE_STOP_FACE = 2.5         # minimum Y/Z contact length at the stop
+B4B_HANDLE_DETENT = 0.20           # stow detent interference
+B4B_HANDLE_DETENT_BUMP = 0.35      # body bump height
+B4B_HANDLE_DETENT_RAMP = 0.5
+B4B_HANDLE_MAX_PROJECTION = 7.25   # folded, including the local head flare
+B4B_HANDLE_EDGE_CHAMFER = 1.0
 B4B_HANDLE_FILLET = 1.6
+B4B_HANDLE_FORK_ROOT_WIDTH = 16.0
+B4B_HANDLE_ROOT_ABOVE = 6.0        # root reach above the pivot centre
+B4B_HANDLE_ROOT_BELOW = 12.0       # and below it
+B4B_HANDLE_ROOT_DEPTH = 3.0        # inner mating face -> outer reinforcement
+
+# --- front interactions ---------------------------------------------------- #
+B4B_FRONT_ROOT_SEPARATION = 1.0    # visible normal wall between root regions
+B4B_LABEL_KEEPOUT = 1.0            # label clearance around moving hardware
 
 _EPS = 1e-6
 
@@ -326,96 +479,123 @@ def b4b_effective_base_thickness(box: BoxSpec) -> float:
     return requested
 
 
-def _hinge_width_for_case(case_x: float) -> float:
+def b4b_hardware_family(box: BoxSpec) -> HardwareProfile:
+    """The one hardware family this whole case uses.
+
+    Deterministic and consulted from a single place, so the preview, the
+    exported geometry, the validation report and the BOM can never disagree
+    about which kit the user needs.  A handled case is all-M3 on purpose: one
+    driver, one bag of screws, one BOM line, rather than M2 hinges and latches
+    with M3 handle pivots.
+    """
+    b4b = box.b4b.normalised()
+    if b4b.handle:
+        return B4B_HW_M3
+    if (
+        box.x <= B4B_HW_M2_MAX_FIELD_XY + _EPS
+        and box.y <= B4B_HW_M2_MAX_FIELD_XY + _EPS
+        and box.z <= B4B_HW_M2_MAX_FIELD_Z + _EPS
+    ):
+        return B4B_HW_M2
+    return B4B_HW_M3
+
+
+def b4b_required_min_wall(box: BoxSpec) -> float:
+    """The wall a mode *requires*, never a reduction of a thicker choice.
+
+    One helper so the promotion rule lives in a single place: B4B and the
+    stacking load paths need real material, an ordinary non-stacking bin does
+    not, and nothing here may ever push a user's thicker wall back down.
+    """
+    if box.b4b.enabled:
+        return B4B_MIN_WALL
+    stack = getattr(box, "stack", None)
+    if stack is not None and getattr(stack, "mode", "none") != "none":
+        return B4B_MIN_WALL
+    return 0.0
+
+
+def b4b_min_field(box: BoxSpec) -> tuple[float, float]:
+    """Smallest child field B4B will build, per axis.
+
+    A flat product rule, not a hardware-fit search: below this the hinges,
+    latches and handle would *be* the product.  B4B is refused rather than
+    grown, so the entered field always survives into the geometry.
+    """
+    return B4B_MIN_FIELD_XY, B4B_MIN_FIELD_XY
+
+
+def b4b_secure_min_height() -> float:
+    """Smallest entered child height a secure lid is offered on."""
+    return B4B_LATCHED_MIN_HEIGHT
+
+
+def _usable_front_span(layout: "B4BLayout") -> float:
+    """Straight run of the front wall between the two corner tangents."""
+    return 2.0 * (layout.outer_half_x - CORNER_INSET)
+
+
+def _root_centres(
+    layout: "B4BLayout", nominal: float, root_width: float, count: int
+) -> tuple[float, ...]:
+    """Symmetric hardware centres at ``+/- nominal``, pulled *inward* only.
+
+    Hardware never shifts outward and never breaks symmetry: the only reason a
+    centre moves at all is to keep its root clear of the wall's corner tangent.
+    """
+    if count == 1:
+        return (0.0,)
+    limit = (
+        layout.outer_half_x - CORNER_INSET
+        - B4B_ROOT_CORNER_CLEARANCE - root_width / 2.0
+    )
+    centre = min(nominal, limit)
+    if centre <= root_width / 2.0 + B4B_HINGE_CENTRE_GAP / 2.0:
+        centre = root_width / 2.0 + B4B_HINGE_CENTRE_GAP / 2.0
+    return (-centre, centre)
+
+
+def b4b_handle_grip_target(child_x: float) -> float:
+    """Clear grip this case *wants*, before asking whether it fits.
+
+    A hand is a hand whatever the case measures, so the grip follows the case
+    only between an adult minimum and an ergonomic cap; past the cap a larger
+    B4B keeps the same grip instead of spreading the bail to the corners.
+    """
     return min(
-        B4B_HINGE_WIDTH_MAX,
-        max(B4B_HINGE_WIDTH_MIN, B4B_HINGE_WIDTH_FRACTION * case_x),
+        B4B_HANDLE_GRIP_MAX,
+        max(B4B_HANDLE_GRIP_MIN, B4B_HANDLE_GRIP_FRACTION * child_x),
     )
 
 
-def _hinge_pad_half_width(hinge_width: float) -> float:
-    """Half the reinforced hinge envelope: the knuckle span plus its root web."""
-    return hinge_width / 2.0 + B4B_HW_PAD_MARGIN_X
+def b4b_handle_width_fit(box: BoxSpec) -> tuple[bool, float, float]:
+    """``(fits, required_pivot_span, max_pivot_span)`` for the front bail.
 
-
-def _reinforced_hinges_fit(child_x: float, wall_depth: float) -> bool:
-    """Whether two *reinforced* rear hinges fit the case a child field of
-    ``child_x`` produces, honouring both keep-outs.
-
-    Deliberately a pure function of the requested field and the wall: it runs
-    inside :func:`b4b_effective_box`, which every layout/plan call depends on,
-    so it must not reach back through :func:`b4b_layout`.
+    Pure geometry against the real front wall, not a hard-coded width rule: the
+    two pivot forks each need half their axial envelope plus a corner keep-out,
+    and what is left has to span the target clear grip plus one band width.
     """
-    outer_half_x = child_x / 2.0 + WAVE_MATING_GAP / 2.0 + wall_depth
-    case_x = 2.0 * (outer_half_x + WAVE_AMPLITUDE)
-    pad_half = _hinge_pad_half_width(_hinge_width_for_case(case_x))
-    room = outer_half_x - CORNER_INSET - B4B_HINGE_CLEAR_KEEPOUT
-    return room + _EPS >= 2.0 * pad_half + B4B_HINGE_CENTRE_GAP / 2.0
-
-
-def _handle_arch(case_x: float) -> tuple[float, float]:
-    """(upright thickness, foot length) for a handle on a case this wide."""
-    upright = min(
-        B4B_HANDLE_UPRIGHT_MAX,
-        max(B4B_HANDLE_UPRIGHT_MIN, B4B_HANDLE_UPRIGHT_FRACTION * case_x),
+    layout = b4b_layout(box)
+    profile = B4B_HANDLE_PROFILE
+    fork = profile.group_width
+    max_pivot_span = _usable_front_span(layout) - 2.0 * (
+        fork / 2.0 + B4B_ROOT_CORNER_CLEARANCE
     )
-    return upright, max(
-        upright + 4.0, B4B_M3_CLEAR_BORE + 2.0 * B4B_HANDLE_FOOT_WALL
-    )
-
-
-def _handle_span(case_x: float) -> float:
-    """Screw-centre span of the handle a case this wide can carry.
-
-    The feet stand as far apart as the lid allows, so the hand opening is as
-    large as the case can give it.
-    """
-    _upright, foot = _handle_arch(case_x)
-    reach = case_x / 2.0 - CORNER_INSET - B4B_HANDLE_EDGE_INSET
-    return min(B4B_HANDLE_SPAN_MAX, 2.0 * (reach - foot / 2.0))
-
-
-def _handle_fits(child_x: float, wall_depth: float) -> bool:
-    """Whether a case built on this child field leaves a usable hand opening.
-
-    Like :func:`_reinforced_hinges_fit` this is a pure function of the request
-    and the wall, because it runs inside :func:`b4b_effective_box`.  It takes
-    the pessimistic case width - the wave only ever makes the real one wider -
-    so it never promises a handle the geometry cannot then build.
-    """
-    case_x = 2.0 * (child_x / 2.0 + WAVE_MATING_GAP / 2.0 + wall_depth)
-    _upright, foot = _handle_arch(case_x)
-    return _handle_span(case_x) + _EPS >= foot + B4B_HANDLE_MIN_OPENING
-
-
-def b4b_secure_min_field_x(wall: float = 0.8) -> float:
-    """Smallest requested child-field X a secure lid can be built on.
-
-    Derived by fit from the real reinforced hardware rather than kept as a
-    magic constant that can drift away from the geometry it is meant to
-    guarantee: grow by one grid step until two hinge root webs sit clear of
-    both the corner tangent keep-out and each other.
-    """
-    wall_depth = BoxSpec(wall=wall).wall_depth
-    x = GRID_PITCH
-    while not _reinforced_hinges_fit(x, wall_depth):
-        x += GRID_PITCH
-    return x
+    required = b4b_handle_grip_target(b4b_effective_box(box).x) + B4B_HANDLE_BAND
+    return max_pivot_span + _EPS >= required, required, max_pivot_span
 
 
 def b4b_lid_skin_from_eff(eff: BoxSpec) -> float:
     """Authoritative lid top-plate thickness.
 
     A secure lid carries its hinge and latch roots in this plate, so it is
-    thicker than a passive one, and a handled lid is thicker again: the plate
-    is what the handle screws thread into, and it carries the whole weight of
-    the case.  Every lid datum - plate, top Z, hinge axis, latch pivot,
-    stacking socket roof, label pocket, envelope summary - reads this one
-    helper so they can never drift apart.
+    thicker than a passive one.  The handle is no longer part of this decision:
+    it mounts to the body front wall and puts no load into the lid at all, so
+    a handled lid is exactly a secure lid.  Every lid datum - plate, top Z,
+    hinge axis, latch pivot, stacking socket roof, label pocket, envelope
+    summary - reads this one helper so they cannot drift apart.
     """
     b4b = eff.b4b.normalised()
-    if b4b.handle:
-        return B4B_HANDLE_LID_SKIN
     return B4B_SECURE_LID_SKIN if b4b.secure_lid else B4B_LID_SKIN
 
 
@@ -426,43 +606,20 @@ def b4b_lid_skin(box: BoxSpec) -> float:
 def b4b_effective_box(box: BoxSpec) -> BoxSpec:
     """The BoxSpec every B4B builder uses.
 
-    Identical to the user's child-field request except for genuinely required
-    hardware/stacking growth and any stacking base
-    reinforcement.  Easy Clean and the flat-inside band are forced off because
-    they alter the floor/perimeter the child bins must seat on.
+    An effective-*material* normaliser, not a dimension mutator.  The entered
+    child field is authoritative and survives untouched: X, Y and Z are never
+    grown to make a hinge, a latch or a handle fit.  A field that cannot carry
+    the hardware is reported by validation and gated in the UI instead.
+
+    The only thing that still moves is base thickness, and only far enough to
+    leave a printable floor skin under a stacking recess - which changes no
+    child dimension.  Easy Clean and the flat-inside band are forced off
+    because they alter the floor and perimeter the child bins seat on.
     """
     b4b = box.b4b.normalised()
-    x, y, z = box.x, box.y, box.z
-
-    # Secure-lid hardware needs enough requested field width for two *reinforced*
-    # rear hinges that clear the corner tangents and each other.  The webs
-    # themselves grow outward; only a genuine fit failure grows the child field.
-    if b4b.secure_lid:
-        while not _reinforced_hinges_fit(x, box.wall_depth):
-            x += GRID_PITCH
-        z = max(z, B4B_LATCHED_MIN_HEIGHT)
-
-    # A handle needs its two feet far enough apart to get a hand between them.
-    # Grow rather than refuse, the same way a latched lid grows a short box.
-    if b4b.handle:
-        while not _handle_fits(x, box.wall_depth):
-            x += GRID_PITCH
-
-    # Stacking needs a footprint wide enough that the four corner locators do
-    # not run into each other (see _stack_locator_centres): enforce the minimum
-    # so B4B_STACK_MIN_FOOTPRINT_UNITS is a live constraint, not a comment.
-    if b4b.stacking and b4b.lid:
-        floor = B4B_STACK_MIN_FOOTPRINT_UNITS * GRID_PITCH
-        x = max(x, floor)
-        y = max(y, floor)
-
-    base_thickness = b4b_effective_base_thickness(box)
     return replace(
         box,
-        x=x,
-        y=y,
-        z=z,
-        base_thickness=base_thickness,
+        base_thickness=b4b_effective_base_thickness(box),
         easy_clean=False,
         easy_clean_style="bevel",
         flat_inside=0.0,
@@ -516,134 +673,142 @@ def b4b_outer_polygon(box: BoxSpec) -> Polygon:
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class B4BHardwarePlan:
-    """Every hinge/latch dimension, resolved once.  Preview, export, BOM and
-    validation all read this so they cannot disagree."""
+    """Every hinge/latch dimension, resolved once from one hardware profile.
 
+    Preview, export, BOM and validation all read this, so they cannot disagree
+    about which family the case uses or where a pivot sits.
+    """
+
+    profile: HardwareProfile
     hinge_count: int
     hinge_centers_x: tuple[float, ...]
     hinge_width: float
     hinge_screw_length_mm: int
     hinge_axis_y: float
     hinge_axis_z: float
+    hinge_rear_crest: float
+    hinge_root_width: float
+    hinge_root_top_z: float
+    hinge_root_face_y: float
+    lid_rear_relief: float
     latch_count_resolved: int
     latch_centers_x: tuple[float, ...]
-    latch_width: float
     latch_screw_length_mm: int
     catch_screw_length_mm: int
+    pivot_axis_y: float
+    pivot_axis_z: float
     catch_axis_y: float
     catch_axis_z: float
-    strength_profile: dict
-    # every head-bearing boss on the case is this one derived size
-    boss_radius: float = 0.0
+    latch_front_crest: float
+    latch_root_width: float
+    latch_root_top_z: float
+    latch_root_face_y: float
     fillet_radius: float = 0.0
-    # rear hinge root web
-    hinge_web: float = 0.0
-    hinge_pad_width: float = 0.0
-    hinge_pad_face_y: float = 0.0
-    hinge_pad_top_z: float = 0.0
-    hinge_lug_thickness: float = 0.0
-    # front latch / catch receiver
-    latch_web: float = 0.0
-    latch_pad_width: float = 0.0
-    latch_pad_face_y: float = 0.0
-    latch_pad_top_z: float = 0.0
-    latch_pad_bottom_z: float = 0.0
-    catch_root_z: float = 0.0
-    catch_ear_thickness: float = 0.0
-    lever_width: float = 0.0
-    hook_outer_r: float = 0.0
-    pivot_axis_y: float = 0.0
-    pivot_axis_z: float = 0.0
-    nuts: int = 0
+
+    # -- derived reporting ------------------------------------------------- #
+    @property
+    def family(self) -> str:
+        return self.profile.name
+
+    @property
+    def hinge_projection(self) -> float:
+        """Rear projection of the *normal* pivot envelope past the wall crest.
+
+        The short local head-bearing flare is reported separately by
+        :attr:`hinge_flare_projection`: it is one narrow band at the outboard
+        end of one ear, and letting it set the headline figure is exactly the
+        "hardware bolted on" look the compact redesign exists to remove.
+
+        Measured along Y, which is the direction the projection is in.  The
+        support-free section has a *vertical face* at each Y extreme, so it
+        reaches exactly its nominal radius there; ``_SUPPORT_FREE_CIRCUM``
+        describes the diagonal to a facet join and would overstate this by
+        about 6%.
+        """
+        return (
+            self.hinge_axis_y - self.hinge_rear_crest + self.profile.pivot_radius
+        )
+
+    @property
+    def hinge_flare_projection(self) -> float:
+        return (
+            self.hinge_axis_y - self.hinge_rear_crest
+            + self.profile.head_flare_radius
+        )
+
+    @property
+    def latch_projection(self) -> float:
+        """Closed front projection: the lever's pivot end is the outermost
+        normal feature, and the hook sits inboard of it by design."""
+        return (
+            self.latch_front_crest - self.pivot_axis_y + self.profile.pivot_radius
+        )
 
     def screw_bom(self) -> list[str]:
         lines: list[str] = []
+        fam = self.profile.name
         if self.hinge_count:
             lines.append(
-                f"{self.hinge_count} x M3x{self.hinge_screw_length_mm} hinge pins"
+                f"{self.hinge_count} x {fam}x{self.hinge_screw_length_mm} hinge pins"
             )
         if self.latch_count_resolved:
             lines.append(
-                f"{self.latch_count_resolved} x M3x{self.latch_screw_length_mm} latch pivots"
+                f"{self.latch_count_resolved} x {fam}x{self.latch_screw_length_mm} "
+                f"latch pivots"
             )
             lines.append(
-                f"{self.latch_count_resolved} x M3x{self.catch_screw_length_mm} catch pins"
+                f"{self.latch_count_resolved} x {fam}x{self.catch_screw_length_mm} "
+                f"catch pins"
             )
         lines.append("No nuts")
         return lines
 
 
-def _screw_for_stack(clear_span_mm: float, lug_thickness_mm: float, what: str) -> int:
-    """Authoritative kit-screw choice for a pivot: the screw enters at the
-    head-bearing face, crosses ``clear_span_mm`` of clearance-bored material
-    (ears/knuckles + running gaps), then thread-forms into a terminal lug of
-    ``lug_thickness_mm``.
+def _screw_for_stack(
+    profile: HardwareProfile, clear_span_mm: float, lug_thickness_mm: float, what: str
+) -> int:
+    """Authoritative kit-screw choice for one pivot.
 
-    Returns the smallest ``B4B_SCREW_LENGTHS`` entry that gives at least
-    ``B4B_M3_THREAD_ENGAGE_MIN`` of thread bite without exceeding
-    ``B4B_M3_MAX_PROTRUSION`` past the far face of the lug.  Raises with an
-    actionable message when the kit has no such screw - never a silent
-    over-long fallback that validation cannot see.
+    The screw enters at the head-bearing face, crosses ``clear_span_mm`` of
+    clearance-bored material (ears and running gaps), then thread-forms into a
+    terminal lug ``lug_thickness_mm`` thick.  Returns the shortest permitted
+    length for the family that reaches the minimum engagement without leaving
+    more than ``B4B_SCREW_MAX_TAIL`` past the far face.
 
-    Real thread engagement can never exceed the physical lug thickness, so a
-    lug thinner than the minimum is a constant/geometry bug and is rejected
-    here rather than papered over by a long screw.
+    The exact stacks in the profiles are designed so the answer is a zero-tail
+    screw - M2x8, M3x10, M3x12 for the handle.  This still *derives* that
+    rather than hard-coding it, so a later change to an ear thickness cannot
+    silently leave the BOM wrong.
+
+    Real thread engagement can never exceed the lug, so a lug thinner than the
+    family minimum is a geometry bug and is rejected here rather than papered
+    over with a longer screw.
     """
-    if lug_thickness_mm + _EPS < B4B_M3_THREAD_ENGAGE_MIN:
+    if lug_thickness_mm + _EPS < profile.engage_min:
         raise ValueError(
             f"the {what} terminal lug is only {lug_thickness_mm:.2f} mm thick - "
-            f"less than the {B4B_M3_THREAD_ENGAGE_MIN:.1f} mm minimum thread "
-            f"engagement; widen the hardware"
+            f"less than the {profile.engage_min:.1f} mm minimum {profile.name} "
+            f"thread engagement; widen the hardware"
         )
-    need_min = clear_span_mm + B4B_M3_THREAD_ENGAGE_MIN
-    for length in B4B_SCREW_LENGTHS:
-        if length + _EPS < need_min:
+    for length in profile.lengths:
+        beyond = length - clear_span_mm
+        if beyond + _EPS < profile.engage_min:
             continue
-        protrusion = length - clear_span_mm - lug_thickness_mm
-        if protrusion <= B4B_M3_MAX_PROTRUSION + _EPS:
+        if beyond - lug_thickness_mm <= B4B_SCREW_MAX_TAIL + _EPS:
             return length
-    allowed = ", ".join(f"M3x{n}" for n in B4B_SCREW_LENGTHS)
+        break
+    allowed = ", ".join(f"{profile.name}x{n}" for n in profile.lengths)
     raise ValueError(
-        f"no kit screw ({allowed}) spans the {what} pivot: needs "
-        f"{need_min:.1f} mm for {B4B_M3_THREAD_ENGAGE_MIN:.1f} mm of thread "
-        f"engagement across a {clear_span_mm:.1f} mm clearance stack; "
-        f"adjust the hardware profile or the B4B size"
+        f"no kit screw ({allowed}) fits the {what} pivot: a "
+        f"{clear_span_mm:.2f} mm clearance stack into a {lug_thickness_mm:.2f} mm "
+        f"lug needs at least {profile.engage_min:.1f} mm of thread with no more "
+        f"than {B4B_SCREW_MAX_TAIL:.1f} mm of tail"
     )
-
-
-def _latch_lug_thickness(ear_thickness: float) -> float:
-    """Terminal (far) latch-ear thickness: the profile pad wall, but never less
-    than enough for the minimum M3 thread engagement plus a printable skin."""
-    return max(ear_thickness, B4B_M3_THREAD_ENGAGE_MIN + 1.0)
-
-
-def _hinge_screw_stack(hinge_width: float) -> tuple[float, float]:
-    """(clearance span, terminal-lug thickness) for a three-knuckle hinge pin,
-    mirroring the geometry built by :func:`_hinge_body_parts`.
-
-    ``B4B_HINGE_WIDTH_MIN`` is derived so the lug this returns always clears
-    ``B4B_HINGE_LUG_TARGET``, not merely ``B4B_M3_THREAD_ENGAGE_MIN``."""
-    seg = hinge_width / 3.0
-    kw = seg - B4B_HINGE_AXIAL_GAP
-    clear_span = 2.0 * kw + 2.0 * B4B_HINGE_AXIAL_GAP   # near knuckle + gap + centre + gap
-    return clear_span, kw
-
-
-def _latch_screw_stack(latch_width: float, ear_thickness: float) -> tuple[float, float]:
-    """(clearance span, terminal-lug thickness) for a latch pivot pin,
-    mirroring the ears in :func:`_latch_lid_parts` and the lever in
-    :func:`make_b4b_latches`.  The head bears on the near-ear outer face; the
-    clearance stack is near ear + running gap + lever + running gap; the screw
-    then thread-forms into the far lug.
-    """
-    clear_span = ear_thickness + latch_width + 2.0 * B4B_HINGE_AXIAL_GAP
-    return clear_span, _latch_lug_thickness(ear_thickness)
 
 
 def _front_span(box: BoxSpec) -> float:
     """Usable straight run of the front wall between corner tangents."""
-    layout = b4b_layout(box)
-    return 2.0 * (layout.outer_half_x - CORNER_INSET)
+    return _usable_front_span(b4b_layout(box))
 
 
 def _wall_extreme_y(
@@ -651,8 +816,8 @@ def _wall_extreme_y(
 ) -> float:
     """Outermost Y the named wall reaches anywhere across ``[x0, x1]``.
 
-    Hardware roots are flat slabs across a run of a wavy wall, so they have to
-    be referenced to the wall's crest over that whole run, not to the wave value
+    Hardware roots sit across a run of a wavy wall, so they have to be
+    referenced to the wall's crest over that whole run, not to the wave value
     at one sample point.
     """
     steps = max(9, int(abs(x1 - x0) * 4.0) + 1)
@@ -662,263 +827,430 @@ def _wall_extreme_y(
     return min(layout.front_wall_y(float(v)) for v in xs)
 
 
+def _root_outward(profile_depth: float, wall_depth: float) -> float:
+    """How far a root's outer face stands beyond the local wall crest.
+
+    The profile states a *total* structural depth measured from the inner
+    mating face, so the reinforcement is whatever that target has left over
+    after the user's wall - and it grows outward only, never into the field.
+    """
+    return max(0.0, profile_depth - wall_depth)
+
+
+def _lid_rear_section(
+    layout: B4BLayout, underside_z: float, skin: float, relief: float
+) -> Polygon:
+    """Y/Z outline of the lid's rear edge band, with its relief chamfer.
+
+    Only the plate matters for the opening sweep: the lid's own hinge ear is
+    centred on the axis and therefore cannot move relative to the body.
+    """
+    crest = layout.outer_half_y + WAVE_AMPLITUDE
+    inner = -crest
+    top = underside_z + skin
+    if relief <= 0.0:
+        return Polygon([
+            (inner, underside_z), (crest, underside_z),
+            (crest, top), (inner, top),
+        ])
+    # a 45-degree support-free relief taken off the rear-bottom corner
+    r = min(relief, skin - 0.4)
+    return Polygon([
+        (inner, underside_z), (crest - r, underside_z),
+        (crest, underside_z + r), (crest, top), (inner, top),
+    ])
+
+
+def _body_rear_section(
+    layout: B4BLayout, rim_z: float, root_face_y: float, root_top_z: float,
+    root_bottom_z: float,
+) -> Polygon:
+    """Y/Z outline of everything on the body the opening lid could strike."""
+    crest = layout.outer_half_y + WAVE_AMPLITUDE
+    shell = Polygon([
+        (-crest - 10.0, 0.0), (crest, 0.0), (crest, rim_z), (-crest - 10.0, rim_z),
+    ])
+    if root_face_y <= crest + _EPS or root_top_z <= root_bottom_z:
+        return shell
+    rib = Polygon([
+        (crest, root_bottom_z), (root_face_y, root_bottom_z),
+        (root_face_y, root_top_z), (crest, root_top_z),
+    ])
+    merged = shell.union(rib)
+    return merged if isinstance(merged, Polygon) else shell
+
+
+def _sweep_clear_2d(
+    moving: Polygon, fixed: Polygon, axis_y: float, axis_z: float,
+    angles_deg: tuple[float, ...],
+) -> bool:
+    """Whether ``moving`` clears ``fixed`` at every sampled opening angle.
+
+    A cheap plan-space proof used to *place* the hinge axis.  The full
+    mesh-level sweep in :func:`_validate_b4b_mechanics` still runs at
+    generation time; this only has to be right enough to choose a datum.
+    """
+    from shapely.affinity import rotate as rotate_polygon
+
+    for deg in angles_deg:
+        if deg == 0.0:
+            continue
+        turned = rotate_polygon(
+            moving, -deg, origin=(axis_y, axis_z), use_radians=False
+        )
+        if turned.intersection(fixed).area > 1e-4:
+            return False
+    return True
+
+
+def _sweep_angles(limit: float, step: float = B4B_SWEEP_STEP_DEG) -> tuple[float, ...]:
+    """``0, step, 2*step, ... limit`` inclusive of both ends."""
+    n = int(math.ceil(limit / step))
+    out = [min(i * step, limit) for i in range(n + 1)]
+    if abs(out[-1] - limit) > _EPS:
+        out.append(limit)
+    return tuple(out)
+
+
+def _solve_hinge_axis(
+    layout: B4BLayout, profile: HardwareProfile, *, rear_crest: float,
+    underside_z: float, skin: float, axis_z: float, root_face_y: float,
+    root_top_z: float, root_bottom_z: float,
+) -> tuple[float, float]:
+    """``(axis_y, rear_lid_relief)`` for a collision-free 120-degree opening.
+
+    Relief first, axis movement last: a small support-free chamfer on the rear
+    lid edge is always preferable to pushing the whole hinge further behind the
+    case, which is what made the old hardware look like a backpack.  The axis
+    only moves if the full permitted relief is still not enough, and then by
+    the smallest quantised step that clears the sweep.
+    """
+    angles = _sweep_angles(B4B_LID_OPEN_ANGLE)
+    axis_y = rear_crest + profile.hinge_standoff
+    body = _body_rear_section(
+        layout, underside_z, root_face_y, root_top_z, root_bottom_z
+    )
+    relief = 0.0
+    while relief <= B4B_LID_RELIEF_MAX + _EPS:
+        lid = _lid_rear_section(layout, underside_z, skin, relief)
+        if _sweep_clear_2d(lid, body, axis_y, axis_z, angles):
+            return axis_y, relief
+        relief += 0.2
+    relief = B4B_LID_RELIEF_MAX
+    lid = _lid_rear_section(layout, underside_z, skin, relief)
+    limit = rear_crest + profile.hinge_standoff + 4.0
+    while axis_y <= limit:
+        if _sweep_clear_2d(lid, body, axis_y, axis_z, angles):
+            return axis_y, relief
+        axis_y += B4B_HINGE_AXIS_STEP
+    raise ValueError(
+        "the B4B lid cannot be opened to "
+        f"{B4B_LID_OPEN_ANGLE:g} degrees without striking the body; the rear "
+        "hinge geometry needs design review"
+    )
+
+
+def _inactive_plan(profile: HardwareProfile) -> B4BHardwarePlan:
+    return B4BHardwarePlan(
+        profile=profile,
+        hinge_count=0,
+        hinge_centers_x=(),
+        hinge_width=0.0,
+        hinge_screw_length_mm=0,
+        hinge_axis_y=0.0,
+        hinge_axis_z=0.0,
+        hinge_rear_crest=0.0,
+        hinge_root_width=0.0,
+        hinge_root_top_z=0.0,
+        hinge_root_face_y=0.0,
+        lid_rear_relief=0.0,
+        latch_count_resolved=0,
+        latch_centers_x=(),
+        latch_screw_length_mm=0,
+        catch_screw_length_mm=0,
+        pivot_axis_y=0.0,
+        pivot_axis_z=0.0,
+        catch_axis_y=0.0,
+        catch_axis_z=0.0,
+        latch_front_crest=0.0,
+        latch_root_width=0.0,
+        latch_root_top_z=0.0,
+        latch_root_face_y=0.0,
+    )
+
+
 def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
     eff = b4b_effective_box(box)
-    b4b = eff.b4b
-    profile = B4B_LATCH_PROFILES[b4b.latch_strength]
-
-    if not b4b.secure_lid:
-        return B4BHardwarePlan(
-            hinge_count=0,
-            hinge_centers_x=(),
-            hinge_width=0.0,
-            hinge_screw_length_mm=0,
-            hinge_axis_y=0.0,
-            hinge_axis_z=0.0,
-            latch_count_resolved=0,
-            latch_centers_x=(),
-            latch_width=0.0,
-            latch_screw_length_mm=0,
-            catch_screw_length_mm=0,
-            catch_axis_y=0.0,
-            catch_axis_z=0.0,
-            strength_profile=profile,
-        )
+    profile = b4b_hardware_family(eff)
+    if not eff.b4b.secure_lid:
+        return _inactive_plan(profile)
 
     layout = b4b_layout(box)
-    case_x, _case_y = layout.case_size
     skin = b4b_lid_skin_from_eff(eff)
     underside_z = b4b_lid_underside_z_from_eff(eff)
-    boss_r = B4B_HW_BOSS_RADIUS
-    boss_out = boss_r * _SUPPORT_FREE_CIRCUM      # widest radial reach of the
-                                                  # support-free boss section
-    fillet = min(
-        B4B_HW_FILLET, 0.5 * B4B_LID_FITTING_DROP, 0.25 * boss_r
+    lid_top_z = underside_z + skin
+    fillet = min(B4B_HW_FILLET, 0.5 * B4B_LID_FITTING_DROP, 0.3 * profile.pivot_radius)
+    wall_depth = eff.wall_depth
+
+    # ---- rear hinges: exactly two, nominally at +/- child_x/4 -------------- #
+    hinge_centers_x = _root_centres(
+        layout, eff.x / 4.0, profile.hinge_root_width, B4B_HINGE_COUNT
     )
-
-    # ---- hinges: two, symmetric, clear of the corners and of each other ----
-    hinge_width = _hinge_width_for_case(case_x)
-    pad_half = _hinge_pad_half_width(hinge_width)
-    hinge_pad_width = 2.0 * pad_half
-    # b4b_effective_box has already grown the field until both keep-outs can be
-    # met, so this window is never empty; clamp anyway rather than trust it.
-    centre_min = pad_half + B4B_HINGE_CENTRE_GAP / 2.0
-    centre_max = layout.outer_half_x - CORNER_INSET - B4B_HINGE_CLEAR_KEEPOUT - pad_half
-    centre = min(max(eff.x / 4.0, centre_min), max(centre_max, centre_min))
-    hinge_centers_x = (-centre, centre)
-
-    hinge_web = max(B4B_HINGE_WEB, B4B_HW_ROOT_MIN_THICKNESS - eff.wall_depth)
+    hinge_half = profile.hinge_root_width / 2.0
     rear_crest = max(
-        _wall_extreme_y(layout, cx - pad_half, cx + pad_half, +1.0)
+        _wall_extreme_y(layout, cx - hinge_half, cx + hinge_half, +1.0)
         for cx in hinge_centers_x
     )
-    hinge_pad_face_y = rear_crest + hinge_web
-    hinge_axis_y = rear_crest + boss_r + 0.45
-    # The barrel's flat +Z facet is exactly flush with the broad lid top plane,
-    # so on the flipped lid it prints straight onto the bed.
-    hinge_axis_z = underside_z + skin - boss_r
-    # The root web has to stay clear of the lid-side knuckle it interleaves
-    # with; the gussets carry the load from the web up to the barrels.
-    hinge_pad_top_z = min(
-        eff.z + 0.35,
-        underside_z - 1.0,
-        hinge_axis_z - boss_out - B4B_HW_CLEARANCE,
+    hinge_root_out = _root_outward(profile.hinge_root_depth, wall_depth)
+    hinge_root_face_y = rear_crest + hinge_root_out
+    # The axis sits at the lid plate band so the knuckle's upper flat lands on
+    # the bed when the lid is printed upside down.
+    hinge_axis_z = lid_top_z - profile.pivot_radius
+    # The root has to stop short of wherever the lid-side knuckle reaches back
+    # over it, or the closed lid would rest on its own reinforcement.
+    inboard = max(0.0, profile.hinge_standoff - hinge_root_out)
+    reach_down = math.sqrt(
+        max(0.0, profile.pivot_radius ** 2 - inboard ** 2)
     )
-    h_span, h_lug = _hinge_screw_stack(hinge_width)
-    hinge_screw = _screw_for_stack(h_span, h_lug, "hinge")
+    hinge_root_top_z = min(
+        underside_z - 1.0, hinge_axis_z - reach_down - B4B_HW_CLEARANCE
+    )
+    hinge_root_bottom_z = max(1.0, hinge_root_top_z - profile.hinge_root_height)
+    hinge_axis_y, lid_relief = _solve_hinge_axis(
+        layout, profile,
+        rear_crest=rear_crest,
+        underside_z=underside_z,
+        skin=skin,
+        axis_z=hinge_axis_z,
+        root_face_y=hinge_root_face_y,
+        root_top_z=hinge_root_top_z,
+        root_bottom_z=hinge_root_bottom_z,
+    )
+    hinge_screw = _screw_for_stack(
+        profile, profile.clear_span, profile.far_lug, "hinge"
+    )
 
-    # ---- latches: front, count derived from the available span ----
-    latch_width = min(
-        B4B_LATCH_WIDTH_MAX,
-        max(B4B_LATCH_WIDTH_MIN, B4B_LATCH_WIDTH_FRACTION * case_x),
+    # ---- front latches: one authoritative width threshold ------------------ #
+    latch_count = 1 if eff.x <= B4B_LATCH_TWO_ABOVE_FIELD_X + _EPS else 2
+    latch_centers_x = _root_centres(
+        layout, eff.x / 6.0, profile.latch_root_width, latch_count
     )
-    lever_w = latch_width - 2.0 * B4B_HINGE_AXIAL_GAP
-    catch_ear_t = max(profile["pad_wall"], B4B_M3_THREAD_ENGAGE_MIN + 1.0)
-    latch_pad_width = latch_width + 2.0 * catch_ear_t + 2.0 * B4B_HW_PAD_MARGIN_X
-    # Two latches only when two *reinforced* receivers fit clear of each other
-    # and of the corners - the bare lever width is not the envelope any more.
-    span = _front_span(box)
-    half_pad = latch_pad_width / 2.0
-    centre_min = half_pad + B4B_LATCH_MUTUAL_CLEARANCE / 2.0
-    centre_max = span / 2.0 - half_pad - B4B_LATCH_MUTUAL_CLEARANCE / 2.0
-    if centre_max + _EPS >= centre_min:
-        resolved = 2
-        centre_l = min(max(span / 6.0, centre_min), centre_max)
-        latch_centers_x = (-centre_l, centre_l)
-    else:
-        resolved = 1
-        latch_centers_x = (0.0,)
-    # ``catch_thickness`` is the exterior receiver web behind the catch boss -
-    # the one dimension that makes Standard a structurally stronger receiver
-    # than Lightweight rather than just a differently placed one.
-    latch_web = max(
-        profile["catch_thickness"], B4B_HW_ROOT_MIN_THICKNESS - eff.wall_depth
-    )
+    latch_half = profile.latch_root_width / 2.0
     front_crest = min(
-        _wall_extreme_y(
-            layout, cx - latch_pad_width / 2.0, cx + latch_pad_width / 2.0, -1.0
-        )
+        _wall_extreme_y(layout, cx - latch_half, cx + latch_half, -1.0)
         for cx in latch_centers_x
     )
-    latch_pad_face_y = front_crest - latch_web
-    latch_pad_top_z = min(eff.z + 0.35, underside_z - 1.0)
-
-    hook_outer_r = B4B_M3_NOMINAL / 2.0 + 0.35 + max(1.4, profile["hook_depth"] * 0.6)
-    # The hook swings in front of the receiver web, never against it.
-    catch_axis_y = latch_pad_face_y - hook_outer_r - B4B_LATCH_BODY_CLEARANCE
-    pivot_axis_y = catch_axis_y - (
-        hook_outer_r - profile["lever_thickness"] / 2.0 + 0.5
+    pivot_axis_z = lid_top_z - profile.pivot_radius
+    catch_axis_z = pivot_axis_z - profile.latch_draw
+    pivot_axis_y = front_crest - profile.pivot_standoff
+    catch_axis_y = front_crest - profile.catch_standoff
+    latch_root_out = _root_outward(profile.latch_root_depth, wall_depth)
+    latch_root_face_y = front_crest - latch_root_out
+    # Same rule as the hinge: the root stops below the lid's pivot ear so the
+    # lever swings on running clearance instead of rubbing its own receiver.
+    pivot_inboard = max(0.0, profile.pivot_standoff - latch_root_out)
+    pivot_down = math.sqrt(
+        max(0.0, profile.pivot_radius ** 2 - pivot_inboard ** 2)
     )
-    pivot_axis_z = underside_z + skin - boss_r
-    # The lid pivot ear and the body catch ear interleave in X, so the catch
-    # must hang far enough below the pivot boss that the two never meet.
-    clear_draw = eff.z - (pivot_axis_z - 2.0 * boss_out - B4B_HW_CLEARANCE)
-    draw = max(B4B_LATCH_DRAW_MIN, profile["pad_height"] * 0.8, clear_draw)
-    catch_axis_z = eff.z - draw
-    latch_pad_bottom_z = _pad_bottom_z(
-        latch_pad_top_z, abs(latch_pad_face_y), layout.outer_half_y
+    latch_root_top_z = min(
+        underside_z - 1.0, pivot_axis_z - pivot_down - B4B_HW_CLEARANCE
     )
-    # Where the receiver bracket meets the web.  The catch boss hangs below
-    # the web, so the bracket's underside runs down and outward to it: the root
-    # must sit at least one horizontal run *above* the boss for that plane to
-    # stay at 45 degrees and print with no support.
-    catch_run = 0.8 + hook_outer_r + B4B_LATCH_BODY_CLEARANCE
-    catch_root_z = max(
-        catch_axis_z - 0.5 * boss_r + catch_run, latch_pad_bottom_z + 1.0
-    )
-    if catch_root_z > latch_pad_top_z - 0.5:
+    if latch_root_top_z - profile.latch_root_height < 0.5:
         raise ValueError(
-            "the latch receiver cannot reach its root web without overhanging; "
-            "use a taller B4B or the lightweight latch"
+            f"a {eff.z:g} mm B4B is too short for a secure lid: the latch "
+            f"receiver needs {profile.latch_root_height:.0f} mm of front wall "
+            f"below the lid seam; use at least "
+            f"{B4B_LATCHED_MIN_HEIGHT:g} mm of bin height"
         )
-
-    l_span, l_lug = _latch_screw_stack(latch_width, profile["pad_wall"])
-    latch_screw = _screw_for_stack(l_span, l_lug, "latch")
-    catch_span = catch_ear_t + lever_w + 2.0 * B4B_HINGE_AXIAL_GAP
-    catch_screw = _screw_for_stack(catch_span, catch_ear_t, "catch")
+    latch_screw = _screw_for_stack(
+        profile, profile.clear_span, profile.far_lug, "latch pivot"
+    )
+    catch_screw = _screw_for_stack(
+        profile, profile.clear_span, profile.far_lug, "catch"
+    )
 
     return B4BHardwarePlan(
+        profile=profile,
         hinge_count=B4B_HINGE_COUNT,
         hinge_centers_x=hinge_centers_x,
-        hinge_width=hinge_width,
+        hinge_width=profile.group_width,
         hinge_screw_length_mm=hinge_screw,
         hinge_axis_y=hinge_axis_y,
         hinge_axis_z=hinge_axis_z,
-        latch_count_resolved=resolved,
+        hinge_rear_crest=rear_crest,
+        hinge_root_width=profile.hinge_root_width,
+        hinge_root_top_z=hinge_root_top_z,
+        hinge_root_face_y=hinge_root_face_y,
+        lid_rear_relief=lid_relief,
+        latch_count_resolved=latch_count,
         latch_centers_x=latch_centers_x,
-        latch_width=latch_width,
         latch_screw_length_mm=latch_screw,
         catch_screw_length_mm=catch_screw,
-        catch_axis_y=catch_axis_y,
-        catch_axis_z=catch_axis_z,
-        strength_profile=profile,
-        boss_radius=boss_r,
-        fillet_radius=fillet,
-        hinge_web=hinge_web,
-        hinge_pad_width=hinge_pad_width,
-        hinge_pad_face_y=hinge_pad_face_y,
-        hinge_pad_top_z=hinge_pad_top_z,
-        hinge_lug_thickness=h_lug,
-        latch_web=latch_web,
-        latch_pad_width=latch_pad_width,
-        latch_pad_face_y=latch_pad_face_y,
-        latch_pad_top_z=latch_pad_top_z,
-        latch_pad_bottom_z=latch_pad_bottom_z,
-        catch_root_z=catch_root_z,
-        catch_ear_thickness=catch_ear_t,
-        lever_width=lever_w,
-        hook_outer_r=hook_outer_r,
         pivot_axis_y=pivot_axis_y,
         pivot_axis_z=pivot_axis_z,
+        catch_axis_y=catch_axis_y,
+        catch_axis_z=catch_axis_z,
+        latch_front_crest=front_crest,
+        latch_root_width=profile.latch_root_width,
+        latch_root_top_z=latch_root_top_z,
+        latch_root_face_y=latch_root_face_y,
+        fillet_radius=fillet,
     )
 
 
 # --------------------------------------------------------------------------- #
-# carrying handle
+# folding front handle
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class B4BHandlePlan:
-    """Every carrying-handle dimension, resolved once.
+    """Every folding-bail dimension, resolved once.
 
-    The handle is a printed arch bolted flat to the lid top with two M3 screws,
-    the same kit and the same no-nut, thread-forming fixing every other B4B
-    fitting uses.  Its span and depth follow the case; the hand opening does
-    not, because a hand is a hand whatever the case measures.
+    The handle is a single printed U pivoted on two forks that grow out of the
+    *body* front wall.  The lid carries none of its load, so a carried case
+    hangs from the shell rather than from the lid, the latches and the rear
+    hinges - and the lid top stays clear for stacking.
     """
 
-    span: float                 # between the two screw centres
+    profile: HardwareProfile
+    pivot_span: float          # between the two screw centres
     centers_x: tuple[float, float]
-    foot_length: float
-    foot_height: float
-    upright: float
-    depth: float                # across Y
-    grip_clear: float           # clear height under the grip
-    grip_thickness: float
-    fillet: float
-    top_z: float                # lid top: the handle stands on it
+    clear_grip: float          # between the inner faces of the two arms
+    drop: float                # pivot axis to grip centreline
+    band: float                # in-plane band width of the lower U
+    eye_band: float            # tapered band at the pivot eye
+    thickness: float           # front-to-back, folded
+    eye_radius: float
+    corner_radius: float
+    axis_y: float
+    axis_z: float
+    front_crest: float
+    wall_clear: float
+    stop_angle: float
+    detent_interference: float
+    detent_bump: float
+    detent_centers_x: tuple[float, float]
+    detent_z: float
+    root_width: float
+    root_face_y: float
+    root_top_z: float
+    root_bottom_z: float
     screw_length_mm: int
 
     @property
-    def height(self) -> float:
-        """How far the finished handle stands above the lid top."""
-        return self.foot_height + self.grip_clear + self.grip_thickness
+    def projection(self) -> float:
+        """Folded projection past the front wall crest, at the head flare.
+
+        Measured along Y like every other projection: the support-free section
+        presents a vertical face at its Y extremes, so it reaches its nominal
+        radius and no further.
+        """
+        return self.front_crest - self.axis_y + self.profile.head_flare_radius
+
+    @property
+    def eye_projection(self) -> float:
+        return self.front_crest - self.axis_y + self.eye_radius
+
+    @property
+    def grip_z(self) -> float:
+        return self.axis_z - self.drop
+
+
+def b4b_handle_eligibility(box: BoxSpec) -> tuple[bool, str]:
+    """``(eligible, reason)`` - why this case can or cannot carry a bail.
+
+    Derived from the actual front wall every time, never from a remembered
+    width rule, and it never asks for the case to grow: a B4B that cannot take
+    a handle is still a perfectly good B4B.
+    """
+    eff = b4b_effective_box(box)
+    if not eff.b4b.secure_lid:
+        return False, "Handle requires a secure lid."
+    fits, required, available = b4b_handle_width_fit(box)
+    if not fits:
+        return False, (
+            f"Handle needs at least {B4B_HANDLE_GRIP_MIN:g} mm of clear grip "
+            f"width."
+        )
+    axis_z = b4b_rim_z_from_eff(eff) - B4B_HANDLE_RIM_DROP
+    available_drop = axis_z - B4B_HANDLE_BOTTOM_MARGIN - B4B_HANDLE_BAND / 2.0
+    if min(B4B_HANDLE_DROP, available_drop) + _EPS < B4B_HANDLE_DROP_MIN:
+        return False, "Handle needs more front-wall height."
+    return True, ""
 
 
 def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
-    """Resolve the handle, or ``None`` when this design has none.
+    """Resolve the bail, or ``None`` when this design has none.
 
-    Raises with an actionable message when a handle is asked for on a case too
-    narrow to carry one, rather than quietly leaving it off a design that says
-    it has one.
+    Raises with an actionable message when a handle is asked for on a case that
+    cannot carry one, rather than quietly leaving it off a design that says it
+    has one.
     """
     eff = b4b_effective_box(box)
     if not eff.b4b.handle:
         return None
-    layout = b4b_layout(box)
-    case_x, case_y = layout.case_size
-    skin = b4b_lid_skin_from_eff(eff)
-
-    upright, foot_length = _handle_arch(case_x)
-    span = _handle_span(case_x)
-    if span < foot_length + B4B_HANDLE_MIN_OPENING:
+    eligible, reason = b4b_handle_eligibility(box)
+    if not eligible:
         raise ValueError(
-            f"a {case_x:.0f} mm wide case is too narrow for a carrying handle; "
-            f"turn the handle off or use a wider B4B"
+            f"this B4B cannot take a carrying handle: {reason.rstrip('.')}; "
+            f"turn the handle off, or use a wider or taller B4B"
         )
-    depth = min(
-        B4B_HANDLE_DEPTH_MAX,
-        max(B4B_HANDLE_DEPTH_MIN, B4B_HANDLE_DEPTH_FRACTION * case_y),
+
+    layout = b4b_layout(box)
+    profile = B4B_HANDLE_PROFILE
+    clear_grip = b4b_handle_grip_target(eff.x)
+    pivot_span = clear_grip + B4B_HANDLE_BAND
+    half = pivot_span / 2.0
+
+    fork_half = profile.group_width / 2.0
+    front_crest = min(
+        _wall_extreme_y(layout, -half - fork_half, half + fork_half, -1.0),
+        _wall_extreme_y(layout, -half, half, -1.0),
     )
-    depth = min(depth, max(6.0, case_y - 2.0 * B4B_HANDLE_EDGE_INSET))
-    opening = span - upright
-    grip_clear = min(
-        B4B_HANDLE_GRIP_CLEAR_MAX,
-        max(B4B_HANDLE_GRIP_CLEAR_MIN, 0.3 * opening),
-    )
-    grip_thickness = min(
-        B4B_HANDLE_GRIP_MAX, max(B4B_HANDLE_GRIP_MIN, 0.09 * span)
-    )
-    # The plate itself is the thread-forming lug, so the foot is sized to use
-    # up the rest of the shortest kit screw and leave nothing poking through.
-    foot_height = max(
-        B4B_HANDLE_FOOT_MIN, B4B_SCREW_LENGTHS[0] - skin - B4B_HANDLE_SCREW_SLACK
-    )
-    screw = _screw_for_stack(foot_height, skin, "handle")
-    fillet = min(
-        B4B_HANDLE_FILLET,
-        0.3 * min(grip_thickness, upright, foot_height),
+    axis_y = front_crest - (B4B_HANDLE_EYE_RADIUS + B4B_HANDLE_WALL_CLEAR)
+    axis_z = b4b_rim_z_from_eff(eff) - B4B_HANDLE_RIM_DROP
+    available_drop = axis_z - B4B_HANDLE_BOTTOM_MARGIN - B4B_HANDLE_BAND / 2.0
+    drop = min(B4B_HANDLE_DROP, available_drop)
+
+    root_out = _root_outward(B4B_HANDLE_ROOT_DEPTH, eff.wall_depth)
+    root_face_y = front_crest - root_out
+    root_top_z = axis_z + B4B_HANDLE_ROOT_ABOVE
+    root_bottom_z = max(1.0, axis_z - B4B_HANDLE_ROOT_BELOW)
+
+    # Stow detents sit near the lower corners of the folded U, where the arms
+    # are long enough to flex over them at a light finger force.
+    detent_z = axis_z - drop + B4B_HANDLE_CORNER_RADIUS
+    detent_cx = half - B4B_HANDLE_BAND / 2.0
+
+    screw = _screw_for_stack(
+        profile,
+        profile.near_ear + B4B_HANDLE_EYE_BAND + 2.0 * B4B_RUNNING_GAP,
+        profile.far_lug,
+        "handle pivot",
     )
     return B4BHandlePlan(
-        span=span,
-        centers_x=(-span / 2.0, span / 2.0),
-        foot_length=foot_length,
-        foot_height=foot_height,
-        upright=upright,
-        depth=depth,
-        grip_clear=grip_clear,
-        grip_thickness=grip_thickness,
-        fillet=fillet,
-        top_z=b4b_lid_underside_z_from_eff(eff) + skin,
+        profile=profile,
+        pivot_span=pivot_span,
+        centers_x=(-half, half),
+        clear_grip=clear_grip,
+        drop=drop,
+        band=B4B_HANDLE_BAND,
+        eye_band=B4B_HANDLE_EYE_BAND,
+        thickness=B4B_HANDLE_THICKNESS,
+        eye_radius=B4B_HANDLE_EYE_RADIUS,
+        corner_radius=B4B_HANDLE_CORNER_RADIUS,
+        axis_y=axis_y,
+        axis_z=axis_z,
+        front_crest=front_crest,
+        wall_clear=B4B_HANDLE_WALL_CLEAR,
+        stop_angle=B4B_HANDLE_STOP_ANGLE,
+        detent_interference=B4B_HANDLE_DETENT,
+        detent_bump=B4B_HANDLE_DETENT_BUMP,
+        detent_centers_x=(-detent_cx, detent_cx),
+        detent_z=detent_z,
+        root_width=B4B_HANDLE_FORK_ROOT_WIDTH,
+        root_face_y=root_face_y,
+        root_top_z=root_top_z,
+        root_bottom_z=root_bottom_z,
         screw_length_mm=screw,
     )
 
@@ -1014,6 +1346,10 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
         hardware.extend(_hinge_body_parts(box, plan))
     if plan.latch_count_resolved:
         hardware.extend(_latch_body_parts(box, plan))
+    # The handle is body hardware now: its forks grow out of the front wall, so
+    # a carried case hangs from the shell rather than from the lid, the latches
+    # and the rear hinges.
+    hardware.extend(_handle_body_parts(box))
     if hardware:
         body = union([body, *hardware])
 
@@ -1112,9 +1448,8 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
     if hardware:
         lid = union([lid, *hardware])
 
-    handle = b4b_handle_plan(box)
-    if handle is not None:
-        lid = difference([lid, *_handle_lid_bores(handle, skin)])
+    if plan.lid_rear_relief > 0.0:
+        lid = difference([lid, _lid_rear_relief_cutter(box, plan)])
 
     if eff.b4b.stacking:
         lid = difference([lid, *_stack_lid_sockets(box)])
@@ -1177,25 +1512,6 @@ def _stack_pegs(box: BoxSpec) -> list[trimesh.Trimesh]:
 # --------------------------------------------------------------------------- #
 # hinge geometry (integrated knuckles + clean round M3 bore)
 # --------------------------------------------------------------------------- #
-def _round_profile_yz(radius: float) -> Polygon:
-    return Polygon(
-        [
-            (radius * math.cos(a), radius * math.sin(a))
-            for a in np.linspace(0.0, 2.0 * math.pi, 60, endpoint=False)
-        ]
-    )
-
-
-def _x_cylinder(radius: float, length: float) -> trimesh.Trimesh:
-    """A round solid whose axis is world X, centred on the origin.
-
-    Only correct for the separately printed latch lever, which is posed with
-    that axis standing on the bed.  Anything that stays horizontal in print
-    must use the support-free primitives below instead.
-    """
-    return _extrude_yz_profile(_round_profile_yz(radius), length)
-
-
 def support_free_profile_yz(radius: float) -> Polygon:
     """Section of a horizontal X-axis boss that prints without support.
 
@@ -1211,10 +1527,6 @@ def support_free_profile_yz(radius: float) -> Polygon:
         (radius, -h), (radius, h), (h, radius), (-h, radius),
         (-radius, h), (-radius, -h), (-h, -radius), (h, -radius),
     ])
-
-
-def _support_free_boss(radius: float, length: float) -> trimesh.Trimesh:
-    return _extrude_yz_profile(support_free_profile_yz(radius), length)
 
 
 def support_free_bore_profile_yz(radius: float, roof_sign: float) -> Polygon:
@@ -1252,31 +1564,6 @@ def _support_free_bore(
     return _extrude_yz_profile(
         support_free_bore_profile_yz(radius, roof_sign), length
     )
-
-
-def _hinge_seg(plan: B4BHardwarePlan) -> float:
-    return plan.hinge_width / 3.0
-
-
-def _knuckle(cx: float, axis_y: float, axis_z: float, width: float,
-             radius: float) -> trimesh.Trimesh:
-    k = _support_free_boss(radius, width)
-    k.apply_translation((cx, axis_y, axis_z))
-    return k
-
-
-# --------------------------------------------------------------------------- #
-# hardware root reinforcement
-# --------------------------------------------------------------------------- #
-def _pad_bottom_z(pad_top_z: float, face_u: float, outer_half: float) -> float:
-    """Bottom of a root web's outward face.
-
-    The web's underside is one continuous 45-degree plane running from that
-    bottom edge back down into the wall, so the bottom may not sit so low that
-    the taper leaves the case before it reaches solid wall.
-    """
-    reach = face_u - (outer_half - WAVE_AMPLITUDE)
-    return max(pad_top_z - B4B_HW_PAD_HEIGHT, min(reach, pad_top_z - 2.0))
 
 
 def _weld(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
@@ -1355,154 +1642,6 @@ def _cavity_prism(
     return cavity
 
 
-def _pad_profile(
-    box: BoxSpec, *, outward_sign: float, face_y: float, pad_top_z: float
-) -> Polygon:
-    """Y/Z section of the exterior root web under one hardware group.
-
-    Starts well inside the inner mating face - the caller trims it there on the
-    cavity - crosses the whole local wall band whatever ``wall`` the user chose,
-    and grows outward to the fitting, so hinge torque and latch pull enter a
-    dedicated structural zone instead of a fraction of a millimetre of Boolean
-    overlap with a thin wall.  The underside is a single 45-degree taper back
-    into the wall, so the body still prints upright with no support.
-    """
-    layout = b4b_layout(box)
-    # an outward coordinate, so front and rear share one construction
-    face_u = abs(face_y)
-    deep_u = layout.inner_half_y - WAVE_AMPLITUDE - 1.0
-    bottom_u_z = _pad_bottom_z(pad_top_z, face_u, layout.outer_half_y)
-    run = face_u - deep_u
-    profile = Polygon([
-        (outward_sign * deep_u, pad_top_z),
-        (outward_sign * face_u, pad_top_z),
-        (outward_sign * face_u, bottom_u_z),
-        (outward_sign * deep_u, bottom_u_z - run),
-    ])
-    lo_y, hi_y = sorted((outward_sign * deep_u, outward_sign * face_u))
-    profile = profile.intersection(
-        Polygon([
-            (lo_y - 1.0, 0.0), (hi_y + 1.0, 0.0),
-            (hi_y + 1.0, pad_top_z), (lo_y - 1.0, pad_top_z),
-        ])
-    )
-    if profile.is_empty or not isinstance(profile, Polygon):
-        raise RuntimeError("a B4B hardware root web collapsed")
-    return profile
-
-
-def _pad_end_chamfers(
-    *,
-    x_centre: float,
-    half_width: float,
-    face_y: float,
-    outward_sign: float,
-    web: float,
-    z_top: float,
-) -> list[trimesh.Trimesh]:
-    """Cutters that taper a root web back into the wall at both ends.
-
-    A rib that stops square on a wall concentrates peel right at its end face.
-    Each end is chamfered at 45 degrees in plan, from the web face back to the
-    wall crest, so the reinforcement fades out instead of stopping dead.  The
-    run is capped by the margin the web carries beyond its fitting, so a thick
-    web on a thin wall can never chamfer into the knuckles it supports.
-    """
-    run = min(web, B4B_HW_PAD_MARGIN_X - 0.3)
-    if run <= 0.05:
-        return []
-    face_u = abs(face_y)
-    big = 200.0
-    cutters: list[trimesh.Trimesh] = []
-    for sx in (-1.0, 1.0):
-        x_end = x_centre + sx * half_width
-        # the cut line, in (x, outward) space, through (x_end - sx*run, face)
-        # and (x_end, face - run); everything beyond it goes
-        corners_u = (face_u - run - big, face_u + big)
-        pts = []
-        for u in corners_u:
-            pts.append((x_end + sx * (face_u - run - u), outward_sign * u))
-        for u in reversed(corners_u):
-            pts.append((x_end + sx * (face_u - run - u + 2.0 * big), outward_sign * u))
-        cutter = _extrude_polygon(Polygon(pts), z_top + 20.0)
-        cutter.apply_translation((0.0, 0.0, -10.0))
-        cutters.append(cutter)
-    return cutters
-
-
-def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """One reinforced rear hinge per centre: a root web through the full wall
-    band, two filleted gussets rising from it, and the two support-free body
-    knuckles."""
-    eff = b4b_effective_box(box)
-    seg = _hinge_seg(plan)
-    kw = seg - B4B_HINGE_AXIAL_GAP
-    r = plan.boss_radius
-    fillet = plan.fillet_radius
-    parts: list[trimesh.Trimesh] = []
-    for cx in plan.hinge_centers_x:
-        half = plan.hinge_pad_width / 2.0 + 1.0
-        cavity = _cavity_prism(box, cx - half, cx + half)
-        pad_prof = _pad_profile(
-            box,
-            outward_sign=1.0,
-            face_y=plan.hinge_pad_face_y,
-            pad_top_z=plan.hinge_pad_top_z,
-        )
-        pad = _extrude_yz_profile(pad_prof, plan.hinge_pad_width)
-        pad.apply_translation((cx, 0.0, 0.0))
-        solid = pad
-        bores: list[trimesh.Trimesh] = []
-        for side, bore_r in (
-            (-1.0, B4B_M3_CLEAR_BORE / 2.0),   # near: head bears here
-            (1.0, B4B_M3_PILOT / 2.0),         # far: thread-forming lug
-        ):
-            kx = cx + side * seg
-            root_y = plan.hinge_pad_face_y - 0.8      # bite into the web
-            touch_y = plan.hinge_axis_y
-            run = touch_y - root_y
-            touch_lo_z = plan.hinge_axis_z - 0.5 * r
-            # the gusset underside is one plane no shallower than 45 degrees,
-            # and it starts inside the root web rather than on the wall skin
-            root_z = min(plan.hinge_pad_top_z - 1.5, touch_lo_z - run)
-            gusset_profile = Polygon([
-                (root_y, root_z),
-                (root_y, eff.z + 0.35),
-                (touch_y, plan.hinge_axis_z + 0.5 * r),
-                (touch_y, touch_lo_z),
-            ])
-            # Fillet the gusset against the web and the barrel as one section:
-            # the knuckle load crosses those two internal corners, and a square
-            # corner there is where the fitting would crack off the case.
-            tower = _filleted(
-                gusset_profile.union(
-                    translate_polygon(
-                        support_free_profile_yz(r),
-                        plan.hinge_axis_y,
-                        plan.hinge_axis_z,
-                    )
-                ).union(pad_prof),
-                fillet,
-            )
-            knuckle = _extrude_yz_profile(tower, kw)
-            knuckle.apply_translation((kx, 0.0, 0.0))
-            solid = union([solid, knuckle])
-            # the body prints upright, so its bore roof faces assembly +Z
-            bore = _support_free_bore(bore_r, kw + 2.0, 1.0)
-            bore.apply_translation((kx, plan.hinge_axis_y, plan.hinge_axis_z))
-            bores.append(bore)
-        chamfers = _pad_end_chamfers(
-            x_centre=cx,
-            half_width=plan.hinge_pad_width / 2.0,
-            face_y=plan.hinge_pad_face_y,
-            outward_sign=1.0,
-            web=plan.hinge_web,
-            z_top=plan.hinge_pad_top_z,
-        )
-        parts.append(difference([solid, cavity, *chamfers, *bores]))
-    return parts
-
-
 def _lid_root_profile(
     layout: B4BLayout,
     *,
@@ -1530,26 +1669,268 @@ def _lid_root_profile(
     ])
 
 
+def _stack_positions(
+    centre_x: float, profile: HardwareProfile
+) -> tuple[float, float, float]:
+    """``(near_ear_x, mid_member_x, far_lug_x)`` centres for one pivot stack.
+
+    The stack is laid out from the *outboard* screw-head side toward the case
+    centre, so on a symmetric pair both heads face outward and both
+    thread-forming lugs face in.  One driver, both sides, and the visual centre
+    of the case stays clean.
+    """
+    out = 1.0 if centre_x >= 0.0 else -1.0
+    half = profile.group_width / 2.0
+    near = centre_x + out * (half - profile.near_ear / 2.0)
+    mid = centre_x + out * (
+        half - profile.near_ear - B4B_RUNNING_GAP - profile.mid_member / 2.0
+    )
+    far = centre_x - out * (half - profile.far_lug / 2.0)
+    return near, mid, far
+
+
+def _root_profile_yz(
+    box: BoxSpec, *, outward_sign: float, face_y: float, top_z: float, height: float
+) -> Polygon:
+    """Y/Z section of the exterior root under one hardware group.
+
+    Starts well inside the inner mating face - the caller trims it there on the
+    cavity - crosses the whole local wall band whatever wall the user chose,
+    and grows outward to the profile's structural depth, so hinge torque, latch
+    pull and carry load enter a dedicated zone instead of a fraction of a
+    millimetre of Boolean overlap with a thin wall.  The underside is a single
+    45-degree taper back into the wall, so the body still prints upright with
+    no support.
+    """
+    layout = b4b_layout(box)
+    face_u = abs(face_y)
+    deep_u = layout.inner_half_y - WAVE_AMPLITUDE - 1.0
+    bottom_u_z = max(0.6, top_z - height)
+    run = face_u - deep_u
+    s = outward_sign
+    profile = Polygon([
+        (s * deep_u, top_z),
+        (s * face_u, top_z),
+        (s * face_u, bottom_u_z),
+        (s * deep_u, bottom_u_z - run),
+    ])
+    lo_y, hi_y = sorted((s * deep_u, s * face_u))
+    profile = profile.intersection(
+        Polygon([
+            (lo_y - 1.0, 0.0), (hi_y + 1.0, 0.0),
+            (hi_y + 1.0, top_z), (lo_y - 1.0, top_z),
+        ])
+    )
+    if profile.is_empty or not isinstance(profile, Polygon):
+        raise RuntimeError("a B4B hardware root collapsed")
+    return profile
+
+
+def _root_taper_prism(
+    *, centre_x: float, root_width: float, group_width: float,
+    outward_sign: float, crest_y: float, face_y: float, z_lo: float, z_hi: float,
+) -> trimesh.Trimesh:
+    """Plan-view keeper that fades a root from its wall contact to its pivot.
+
+    The root is full ``root_width`` where it meets the wall and narrows to the
+    pivot group's own width at its outer face.  A rib that stops square on a
+    wall concentrates peel right at its end face; this is the taper that lets
+    the reinforcement fade out instead of stopping dead, and it is what keeps
+    the finished hardware from reading as a rectangular pad bolted on.
+    """
+    rw = root_width / 2.0
+    gw = group_width / 2.0
+    deep = crest_y - outward_sign * 40.0
+    pts = [
+        (centre_x - rw, deep), (centre_x + rw, deep),
+        (centre_x + rw, crest_y), (centre_x + gw, face_y),
+        (centre_x - gw, face_y), (centre_x - rw, crest_y),
+    ]
+    prism = _extrude_polygon(Polygon(pts), z_hi - z_lo + 2.0)
+    prism.apply_translation((0.0, 0.0, z_lo - 1.0))
+    return prism
+
+
+def _relief_cutter(
+    *, half_top: float, half_bottom: float, z_top: float, z_ramp_top: float,
+    z_ramp_bottom: float, z_bottom: float, crest_y: float, face_y: float,
+    outward_sign: float,
+) -> trimesh.Trimesh:
+    """The running slot a moving member nests in, cut through a root.
+
+    A hardware root is two tapered buttresses under its two ears, never a slab
+    across the full wall contact: the latch strap and the folded handle bail
+    both swing in the space between the ears, and a root that bridged them
+    would foul the very part it is supposed to carry.
+
+    The slot follows the moving member's own taper rather than stepping: the
+    bail's arms widen from the eye band to the full grip band as they descend,
+    so the buttresses flare apart over exactly that run and never leave either
+    an unsupported ledge or a shoulder for an arm to catch on.
+    """
+    pts = [
+        (-half_bottom, z_bottom), (half_bottom, z_bottom),
+        (half_bottom, z_ramp_bottom),
+        (half_top, z_ramp_top),
+        (half_top, z_top),
+        (-half_top, z_top),
+        (-half_top, z_ramp_top),
+        (-half_bottom, z_ramp_bottom),
+    ]
+    depth = abs(face_y - crest_y) + 6.0
+    cutter = _extrude_xz_profile(Polygon(pts), depth)
+    # the helper centres its extrusion on Y=0, so slide the slot so it starts at
+    # the wall crest and runs outward past the root's face
+    cutter.apply_translation((0.0, crest_y + outward_sign * depth / 2.0, 0.0))
+    return cutter
+
+
+def _pivot_section(
+    profile: HardwareProfile, radius: float, axis_y: float, axis_z: float
+) -> Polygon:
+    return translate_polygon(support_free_profile_yz(radius), axis_y, axis_z)
+
+
+def _ear_solid(
+    *, section: Polygon, thickness: float, x_centre: float,
+    bore_r: float, roof_sign: float, axis_y: float, axis_z: float,
+    flare: float = 0.0, flare_out: float = 1.0,
+) -> trimesh.Trimesh:
+    """One printed ear: its section extruded to thickness, bored, optionally
+    with the short local screw-head flare on its outboard face.
+
+    Only that short flare is head-sized.  Letting the head diameter set the
+    whole pivot envelope is exactly what made the old hardware look like rugged
+    case fittings bolted to a small organiser box.
+    """
+    ear = _extrude_yz_profile(section, thickness)
+    ear.apply_translation((x_centre, 0.0, 0.0))
+    if flare > 0.0:
+        pad_len = min(1.2, thickness - 0.6)
+        if pad_len > 0.2:
+            pad = _extrude_yz_profile(
+                support_free_profile_yz(flare), pad_len
+            )
+            pad.apply_translation((
+                x_centre + flare_out * (thickness - pad_len) / 2.0,
+                axis_y, axis_z,
+            ))
+            ear = union([ear, pad])
+    bore = _support_free_bore(bore_r, thickness + 3.0, roof_sign)
+    bore.apply_translation((x_centre, axis_y, axis_z))
+    return difference([ear, bore])
+
+
+def _gusset(
+    *, root_y: float, root_z: float, top_z: float, axis_y: float, axis_z: float,
+    radius: float,
+) -> Polygon:
+    """Y/Z web carrying a pivot barrel down onto its root.
+
+    The underside is one plane no shallower than 45 degrees and it starts
+    inside the root rather than on the wall skin, so the body still prints
+    upright with nothing hanging in air.
+    """
+    return Polygon([
+        (root_y, root_z),
+        (root_y, top_z),
+        (axis_y, axis_z + 0.5 * radius),
+        (axis_y, axis_z - 0.5 * radius),
+    ])
+
+
+def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
+    """One compact rear hinge per centre: two slim body ears on a tapered root.
+
+    The near ear carries the screw head on a short local flare, the far ear is
+    the printed thread-forming lug, and the lid's centre ear runs between them
+    on the same pin.
+    """
+    eff = b4b_effective_box(box)
+    layout = b4b_layout(box)
+    profile = plan.profile
+    parts: list[trimesh.Trimesh] = []
+    for cx in plan.hinge_centers_x:
+        out = 1.0 if cx >= 0.0 else -1.0
+        near_x, _mid_x, far_x = _stack_positions(cx, profile)
+        half = plan.hinge_root_width / 2.0 + 1.0
+        cavity = _cavity_prism(box, cx - half, cx + half)
+        root_prof = _root_profile_yz(
+            box,
+            outward_sign=1.0,
+            face_y=plan.hinge_root_face_y,
+            top_z=plan.hinge_root_top_z,
+            height=profile.hinge_root_height,
+        )
+        root = _extrude_yz_profile(root_prof, plan.hinge_root_width)
+        root.apply_translation((cx, 0.0, 0.0))
+        keeper = _root_taper_prism(
+            centre_x=cx,
+            root_width=plan.hinge_root_width,
+            group_width=profile.group_width,
+            outward_sign=1.0,
+            crest_y=plan.hinge_rear_crest,
+            face_y=plan.hinge_root_face_y,
+            z_lo=0.0,
+            z_hi=plan.hinge_root_top_z,
+        )
+        solid = _intersection([root, keeper])
+        bottom_z = max(0.6, plan.hinge_root_top_z - profile.hinge_root_height)
+        for ex, thickness, terminal in (
+            (near_x, profile.near_ear, False),
+            (far_x, profile.far_lug, True),
+        ):
+            section = _filleted(
+                _gusset(
+                    root_y=plan.hinge_root_face_y - 0.8,
+                    root_z=min(plan.hinge_root_top_z - 1.0, bottom_z + 1.0),
+                    top_z=plan.hinge_root_top_z,
+                    axis_y=plan.hinge_axis_y,
+                    axis_z=plan.hinge_axis_z,
+                    radius=profile.pivot_radius,
+                )
+                .union(
+                    _pivot_section(
+                        profile, profile.pivot_radius,
+                        plan.hinge_axis_y, plan.hinge_axis_z,
+                    )
+                )
+                .union(root_prof),
+                plan.fillet_radius,
+            )
+            solid = union([
+                solid,
+                _ear_solid(
+                    section=section,
+                    thickness=thickness,
+                    x_centre=ex,
+                    bore_r=profile.bore_radius(terminal),
+                    roof_sign=1.0,          # the body prints upright
+                    axis_y=plan.hinge_axis_y,
+                    axis_z=plan.hinge_axis_z,
+                    flare=0.0 if terminal else profile.head_flare_radius,
+                    flare_out=out,
+                ),
+            ])
+        parts.append(difference([solid, cavity]))
+    return parts
+
+
 def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """The centre knuckle per hinge: barrel, the tab that drops to it, and the
-    filleted arm that roots the whole fitting into the lid plate."""
+    """The centre ear per hinge: one compact knuckle close to the rear lid edge,
+    carried into the plate on a shallow arm rather than an oversized tab."""
     eff = b4b_effective_box(box)
     underside_z = b4b_lid_underside_z(box)
     skin = b4b_lid_skin_from_eff(eff)
     layout = b4b_layout(box)
-    seg = _hinge_seg(plan)
-    kw = seg - B4B_HINGE_AXIAL_GAP
-    r = plan.boss_radius
+    profile = plan.profile
+    r = profile.pivot_radius
     z_hi = underside_z + skin
     parts: list[trimesh.Trimesh] = []
     for cx in plan.hinge_centers_x:
-        lid_back = (
-            layout.rear_wall_y(cx) + B4B_LID_SEAT_CLEARANCE
-            + B4B_LID_SKIRT_WALL
-        )
-        # never inboard of the body root web: the two must not touch anywhere
-        root_y = max(lid_back - 0.5, plan.hinge_pad_face_y + B4B_HW_CLEARANCE)
-        tab_profile = Polygon([
+        _near_x, mid_x, _far_x = _stack_positions(cx, profile)
+        root_y = layout.rear_wall_y(mid_x) - 0.4
+        tab = Polygon([
             (root_y, underside_z - B4B_LID_FITTING_DROP),
             (root_y, z_hi),
             (plan.hinge_axis_y, z_hi),
@@ -1563,294 +1944,516 @@ def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
             underside_z=underside_z,
             skin=skin,
         )
-        barrel = translate_polygon(
-            support_free_profile_yz(r), plan.hinge_axis_y, plan.hinge_axis_z
-        )
         section = _filleted(
-            tab_profile.union(barrel).union(arm), plan.fillet_radius
+            tab.union(
+                _pivot_section(profile, r, plan.hinge_axis_y, plan.hinge_axis_z)
+            ).union(arm),
+            plan.fillet_radius,
         )
-        # Exactly the knuckle width, never wider: outboard of the plate edge
-        # this Z band is the body barrel interleaved on the same pin, so a
-        # root that spread sideways there would jam the closed lid.
-        tab = _extrude_yz_profile(section, kw)
-        tab.apply_translation((cx, 0.0, 0.0))
-        # the lid prints rolled 180 degrees about X, so its bore roof is -Z
-        bore = _support_free_bore(B4B_M3_CLEAR_BORE / 2.0, kw + 1.0, -1.0)
-        bore.apply_translation((cx, plan.hinge_axis_y, plan.hinge_axis_z))
-        parts.append(difference([tab, bore]))
+        parts.append(
+            _ear_solid(
+                section=section,
+                thickness=profile.mid_member,
+                x_centre=mid_x,
+                bore_r=profile.clear_bore / 2.0,
+                roof_sign=-1.0,     # the lid prints rolled 180 degrees about X
+                axis_y=plan.hinge_axis_y,
+                axis_z=plan.hinge_axis_z,
+            )
+        )
     return parts
 
 
 # --------------------------------------------------------------------------- #
-# latch geometry: lid lever on an M3 pivot, engaging a second M3 cross-pin in
-# compact body receiver ears.  All roots follow the derived local front wall.
+# front latch: a thin folding strap pivoted on the lid, hooking a metal catch
+# screw carried in compact body ears.  The screw shank is the wear surface.
 # --------------------------------------------------------------------------- #
-def _latch_frame(eff: BoxSpec, plan: B4BHardwarePlan) -> dict:
-    """Thin reader over the hardware plan.
-
-    Every latch datum is resolved once in :func:`b4b_hardware_plan`; nothing
-    here recomputes one, so the lever, the receiver, the sweep check and the
-    summary cannot disagree about where the pivot is.
-    """
-    return {
-        "prof": plan.strength_profile,
-        "axis_y": plan.pivot_axis_y,
-        "axis_z": plan.pivot_axis_z,
-        "catch_axis_y": plan.catch_axis_y,
-        "catch_axis_z": plan.catch_axis_z,
-        "hook_outer_r": plan.hook_outer_r,
-        "underside_z": b4b_lid_underside_z_from_eff(eff),
-        "ear_t": plan.strength_profile["pad_wall"],
-        "boss_r": plan.boss_radius,
-    }
-
-
 def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """One reinforced front receiver per latch: the catch-pin ears standing on
-    an exterior web whose thickness is the profile catch_thickness."""
-    eff = b4b_effective_box(box)
-    boss_r = plan.boss_radius
-    ear_t = plan.catch_ear_thickness
-    fillet = plan.fillet_radius
+    """One compact catch receiver per latch: two ears on a tapered root, with
+    the lever's running slot relieved between them."""
+    layout = b4b_layout(box)
+    profile = plan.profile
     parts: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
-        half = plan.latch_pad_width / 2.0 + 1.0
+        out = 1.0 if cx >= 0.0 else -1.0
+        near_x, _mid_x, far_x = _stack_positions(cx, profile)
+        half = plan.latch_root_width / 2.0 + 1.0
         cavity = _cavity_prism(box, cx - half, cx + half)
-        pad_prof = _pad_profile(
+        root_prof = _root_profile_yz(
             box,
             outward_sign=-1.0,
-            face_y=plan.latch_pad_face_y,
-            pad_top_z=plan.latch_pad_top_z,
+            face_y=plan.latch_root_face_y,
+            top_z=plan.latch_root_top_z,
+            height=profile.latch_root_height,
         )
-        pad = _extrude_yz_profile(pad_prof, plan.latch_pad_width)
-        pad.apply_translation((cx, 0.0, 0.0))
-        solid = pad
-        inner_face = plan.lever_width / 2.0 + B4B_HINGE_AXIAL_GAP
-        bores: list[trimesh.Trimesh] = []
-        for side, bore_r in (
-            (-1.0, B4B_M3_CLEAR_BORE / 2.0),   # near: head bears here
-            (1.0, B4B_M3_PILOT / 2.0),         # far: thread-forming lug
+        root = _extrude_yz_profile(root_prof, plan.latch_root_width)
+        root.apply_translation((cx, 0.0, 0.0))
+        keeper = _root_taper_prism(
+            centre_x=cx,
+            root_width=plan.latch_root_width,
+            group_width=profile.group_width,
+            outward_sign=-1.0,
+            crest_y=plan.latch_front_crest,
+            face_y=plan.latch_root_face_y,
+            z_lo=0.0,
+            z_hi=plan.latch_root_top_z,
+        )
+        solid = _intersection([root, keeper])
+        bottom_z = max(0.6, plan.latch_root_top_z - profile.latch_root_height)
+        for ex, thickness, terminal in (
+            (near_x, profile.near_ear, False),
+            (far_x, profile.far_lug, True),
         ):
-            ex = cx + side * (inner_face + ear_t / 2.0)
-            root_y = plan.latch_pad_face_y + 0.8       # bite into the web
-            touch_y = plan.catch_axis_y
-            touch_lo_z = plan.catch_axis_z - 0.5 * boss_r
-            root_z = plan.catch_root_z
-            support_profile = Polygon([
-                (root_y, root_z),
-                (root_y, eff.z + 0.35),
-                (touch_y, plan.catch_axis_z + 0.5 * boss_r),
-                (touch_y, touch_lo_z),
-            ])
-            ear = _filleted(
-                support_profile.union(
-                    translate_polygon(
-                        support_free_profile_yz(boss_r),
-                        plan.catch_axis_y,
-                        plan.catch_axis_z,
+            section = _filleted(
+                _gusset(
+                    root_y=plan.latch_root_face_y + 0.8,
+                    root_z=min(plan.latch_root_top_z - 1.0, bottom_z + 1.0),
+                    top_z=plan.latch_root_top_z,
+                    axis_y=plan.catch_axis_y,
+                    axis_z=plan.catch_axis_z,
+                    radius=profile.catch_radius,
+                )
+                .union(
+                    _pivot_section(
+                        profile, profile.catch_radius,
+                        plan.catch_axis_y, plan.catch_axis_z,
                     )
-                ).union(pad_prof),
-                fillet,
+                )
+                .union(root_prof),
+                plan.fillet_radius,
             )
             solid = union([
                 solid,
-                translated(_extrude_yz_profile(ear, ear_t), (ex, 0.0, 0.0)),
+                _ear_solid(
+                    section=section,
+                    thickness=thickness,
+                    x_centre=ex,
+                    bore_r=profile.bore_radius(terminal),
+                    roof_sign=1.0,
+                    axis_y=plan.catch_axis_y,
+                    axis_z=plan.catch_axis_z,
+                    flare=0.0 if terminal else profile.head_flare_radius,
+                    flare_out=out,
+                ),
             ])
-            bore = _support_free_bore(bore_r, ear_t + 2.0, 1.0)
-            bore.apply_translation((ex, plan.catch_axis_y, plan.catch_axis_z))
-            bores.append(bore)
-        chamfers = _pad_end_chamfers(
-            x_centre=cx,
-            half_width=plan.latch_pad_width / 2.0,
-            face_y=plan.latch_pad_face_y,
-            outward_sign=-1.0,
-            web=plan.latch_web,
-            z_top=plan.latch_pad_top_z,
+        relief_half = (
+            profile.mid_member / 2.0 + B4B_RUNNING_GAP + B4B_HW_RELIEF_CLEARANCE
         )
-        parts.append(difference([solid, cavity, *chamfers, *bores]))
+        relief = _relief_cutter(
+            half_top=relief_half,
+            half_bottom=relief_half,
+            z_top=plan.latch_root_top_z + 1.0,
+            z_ramp_top=bottom_z,
+            z_ramp_bottom=bottom_z,
+            z_bottom=bottom_z - 1.0,
+            crest_y=plan.latch_front_crest,
+            face_y=plan.latch_root_face_y,
+            outward_sign=-1.0,
+        )
+        parts.append(difference([solid, cavity, relief]))
     return parts
 
 
 def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """Two pivot ears per latch, rooted into the lid plate through a filleted
-    arm rather than hung off its edge."""
+    """Two compact pivot ears per latch at the front lid edge, with the lever
+    between them, rooted into the plate on a shallow tapered arm."""
     eff = b4b_effective_box(box)
     layout = b4b_layout(box)
-    f = _latch_frame(eff, plan)
-    parts: list[trimesh.Trimesh] = []
-    ear_t = f["ear_t"]
-    lug_t = _latch_lug_thickness(ear_t)   # far ear is a real thread-forming lug
+    profile = plan.profile
     skin = b4b_lid_skin_from_eff(eff)
-    top = f["underside_z"] + skin
-    boss_r = plan.boss_radius
+    underside_z = b4b_lid_underside_z_from_eff(eff)
+    top = underside_z + skin
+    r = profile.pivot_radius
+    parts: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
-        inner_face = plan.latch_width / 2.0 + B4B_HINGE_AXIAL_GAP
-        for side, thickness, bore_r in (
-            (-1.0, ear_t, B4B_M3_CLEAR_BORE / 2.0),
-            (1.0, lug_t, B4B_M3_PILOT / 2.0),
+        out = 1.0 if cx >= 0.0 else -1.0
+        near_x, _mid_x, far_x = _stack_positions(cx, profile)
+        for ex, thickness, terminal in (
+            (near_x, profile.near_ear, False),
+            (far_x, profile.far_lug, True),
         ):
-            ex = cx + side * (inner_face + thickness / 2.0)
-            wall_root = (
-                layout.front_wall_y(ex) - B4B_LID_SEAT_CLEARANCE
-                - B4B_LID_SKIRT_WALL + 0.5
-            )
-            # stand clear of the body receiver web: the arm, not a near miss
-            # against the case, is what ties this ear to the plate
-            root_y = min(wall_root, plan.latch_pad_face_y - B4B_HW_CLEARANCE)
-            profile = Polygon([
-                (root_y, f["underside_z"] - B4B_LID_FITTING_DROP),
+            root_y = layout.front_wall_y(ex) + 0.4
+            arm_profile = Polygon([
+                (root_y, underside_z - B4B_LID_FITTING_DROP),
                 (root_y, top),
-                (f["axis_y"] - boss_r, top),
-                (f["axis_y"] - boss_r, f["axis_z"] - boss_r),
-                (f["axis_y"] + 0.5 * boss_r, f["axis_z"] - boss_r),
+                (plan.pivot_axis_y, top),
+                (plan.pivot_axis_y - r, plan.pivot_axis_z),
+                (plan.pivot_axis_y, plan.pivot_axis_z - r),
             ])
             arm = _lid_root_profile(
                 layout,
                 outward_sign=-1.0,
                 fitting_inner_y=root_y,
-                underside_z=f["underside_z"],
+                underside_z=underside_z,
                 skin=skin,
             )
-            boss = translate_polygon(
-                support_free_profile_yz(boss_r), f["axis_y"], f["axis_z"]
-            )
             section = _filleted(
-                profile.union(boss).union(arm), plan.fillet_radius
+                arm_profile.union(
+                    _pivot_section(profile, r, plan.pivot_axis_y, plan.pivot_axis_z)
+                ).union(arm),
+                plan.fillet_radius,
             )
-            # Exactly the ear thickness: the lever swings in the slot beside
-            # it and the body catch ear interleaves on the other side, so a
-            # wider root here would rub one of them.
-            ear = _extrude_yz_profile(section, thickness)
-            ear.apply_translation((ex, 0.0, 0.0))
-            # the lid prints rolled 180 degrees about X, so its bore roof is -Z
-            bore = _support_free_bore(bore_r, thickness + 2.0, -1.0)
-            bore.apply_translation((ex, f["axis_y"], f["axis_z"]))
-            parts.append(difference([ear, bore]))
+            parts.append(
+                _ear_solid(
+                    section=section,
+                    thickness=thickness,
+                    x_centre=ex,
+                    bore_r=profile.bore_radius(terminal),
+                    roof_sign=-1.0,
+                    axis_y=plan.pivot_axis_y,
+                    axis_z=plan.pivot_axis_z,
+                    flare=0.0 if terminal else profile.head_flare_radius,
+                    flare_out=out,
+                )
+            )
     return parts
 
 
+def b4b_latch_lever_profile(plan: B4BHardwarePlan) -> Polygon:
+    """Y/Z outline of one folding latch strap, in the closed pose.
+
+    A thin strap, not the old convex hull of two large discs: a compact rounded
+    pivot end, a flat body, an integrated hook around the catch screw and a
+    modest finger lip at the lower edge.  The mouth is sized so the pin snaps
+    through a real interference and the jaws root in filleted corners rather
+    than square ones.
+    """
+    from shapely.geometry import LineString
+
+    profile = plan.profile
+    pivot = (plan.pivot_axis_y, plan.pivot_axis_z)
+    catch = (plan.catch_axis_y, plan.catch_axis_z)
+    hook_r = profile.hook_outer_radius
+    inner_r = profile.catch_inner_radius
+
+    strap = LineString([pivot, catch]).buffer(
+        profile.strap_thickness / 2.0, cap_style=2, join_style=1, quad_segs=16
+    )
+    body = (
+        Point(*pivot).buffer(profile.pivot_radius, quad_segs=32)
+        .union(strap)
+        .union(Point(*catch).buffer(hook_r, quad_segs=32))
+    )
+
+    # finger lip: a short flange below the hook, standing proud of the strap so
+    # a fingertip can find it, but kept inside the hook's own radius so it never
+    # sets the closed projection
+    lip_out_y = plan.catch_axis_y - (profile.strap_thickness / 2.0 + profile.lip_out)
+    lip_in_y = plan.catch_axis_y + profile.strap_thickness / 2.0
+    lip_top = plan.catch_axis_z - hook_r * 0.5
+    lip_bottom = plan.catch_axis_z - hook_r - profile.lip_length
+    lo_y, hi_y = sorted((lip_out_y, lip_in_y))
+    body = body.union(
+        Polygon([
+            (lo_y, lip_bottom), (hi_y, lip_bottom),
+            (hi_y, lip_top), (lo_y, lip_top),
+        ])
+    )
+
+    # the mouth opens toward the case, so closing rotation guides the hook onto
+    # the pin and ordinary lid load pulls the upper jaw down onto it
+    mouth = profile.hook_mouth / 2.0
+    lead = mouth + profile.hook_lead_in
+    reach = hook_r * 2.5
+    opening = Polygon([
+        (plan.catch_axis_y, plan.catch_axis_z - mouth),
+        (plan.catch_axis_y + reach, plan.catch_axis_z - lead),
+        (plan.catch_axis_y + reach, plan.catch_axis_z + lead),
+        (plan.catch_axis_y, plan.catch_axis_z + mouth),
+    ])
+    body = body.difference(
+        Point(*catch).buffer(inner_r, quad_segs=32).union(opening)
+    )
+    if not isinstance(body, Polygon) or not body.is_valid:
+        raise RuntimeError("the B4B latch strap outline did not resolve")
+    # the jaws root at the mouth in two square internal corners, and that is
+    # exactly where a hook snapped over a pin cracks
+    body = _filleted(body, min(profile.lever_fillet, 0.4 * mouth))
+    return body.difference(
+        Point(*pivot).buffer(profile.clear_bore / 2.0, quad_segs=32)
+    )
+
+
 def make_b4b_latches(box: BoxSpec) -> list[trimesh.Trimesh]:
-    """The rotating hook levers, one per resolved latch, in assembly space
-    (closed).  Each is exported as its own printable object."""
-    eff = b4b_effective_box(box)
+    """The folding straps, one per resolved latch, in assembly space (closed).
+    Each is exported as its own printable object, flat on a broad face."""
     plan = b4b_hardware_plan(box)
     if not plan.latch_count_resolved:
         return []
-    f = _latch_frame(eff, plan)
-    prof = f["prof"]
-    lever_w = plan.lever_width
+    outline = b4b_latch_lever_profile(plan)
     levers: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
-        # the lever prints on its broad face, so round sections here are right
-        pivot_r = plan.boss_radius
-        hook_inner_r = B4B_M3_NOMINAL / 2.0 + 0.35
-        hook_outer_r = f["hook_outer_r"]
-        pivot_disc = Point(f["axis_y"], f["axis_z"]).buffer(pivot_r, quad_segs=24)
-        hook_disc = Point(f["catch_axis_y"], f["catch_axis_z"]).buffer(
-            hook_outer_r, quad_segs=24
-        )
-        profile = pivot_disc.union(hook_disc).convex_hull
-        hook_bore = Point(f["catch_axis_y"], f["catch_axis_z"]).buffer(
-            hook_inner_r, quad_segs=24
-        )
-        # The mouth is what the pin snaps through, so its width *is* the snap
-        # force.  Size it off the profile's detent so "lightweight" and
-        # "standard" actually differ: a fixed fraction of the bore gave both
-        # the same 0.41 mm interference no matter which strength was chosen.
-        mouth_half = max(0.4, (B4B_M3_NOMINAL - prof["detent"]) / 2.0)
-        opening = Polygon([
-            (f["catch_axis_y"], f["catch_axis_z"] - mouth_half),
-            (f["catch_axis_y"] + hook_outer_r * 2.5, f["catch_axis_z"] - mouth_half),
-            (f["catch_axis_y"] + hook_outer_r * 2.5, f["catch_axis_z"] + mouth_half),
-            (f["catch_axis_y"], f["catch_axis_z"] + mouth_half),
-        ])
-        profile = profile.difference(hook_bore.union(opening))
-        # The two jaws root at the mouth in a pair of square internal corners,
-        # and that is exactly where a hook snapped over a pin cracks.  Fillet
-        # them; the radius is taken off the mouth so it can never close it.
-        profile = _filleted(profile, min(plan.fillet_radius, 0.4 * mouth_half))
-        lever = _extrude_yz_profile(profile, lever_w)
+        lever = _extrude_yz_profile(outline, plan.profile.mid_member)
         lever.apply_translation((cx, 0.0, 0.0))
-        bore = _x_cylinder(B4B_M3_CLEAR_BORE / 2.0, lever_w + 4.0)
-        bore.apply_translation((cx, f["axis_y"], f["axis_z"]))
-        lever = difference([lever, bore])
         levers.append(lever)
     return levers
 
 
-def _handle_lid_bores(plan: B4BHandlePlan, skin: float) -> list[trimesh.Trimesh]:
-    """Pilot holes through the lid plate for the handle screws.
+# --------------------------------------------------------------------------- #
+# folding front handle
+# --------------------------------------------------------------------------- #
+def _handle_centreline(plan: B4BHandlePlan):
+    """The U's centreline path, arms plus a real radiused lower corner."""
+    from shapely.geometry import LineString
 
-    The plate is the thread-forming lug - a handled lid is made thick enough to
-    be one (see :func:`b4b_lid_skin_from_eff`), so nothing hangs below it into
-    the child bins' headroom and nothing stands above it to spoil the flat face
-    the lid prints on.  The holes are on the print axis, so they need no
-    teardrop of their own.
+    half = plan.pivot_span / 2.0
+    grip_z = plan.grip_z
+    r = plan.corner_radius
+    pts = [(-half, plan.axis_z), (-half, grip_z + r)]
+    steps = 12
+    for i in range(steps + 1):
+        a = math.pi + (math.pi / 2.0) * (i / steps)
+        pts.append((-half + r + r * math.cos(a), grip_z + r + r * math.sin(a)))
+    pts.append((half - r, grip_z))
+    for i in range(steps + 1):
+        a = -math.pi / 2.0 + (math.pi / 2.0) * (i / steps)
+        pts.append((half - r + r * math.cos(a), grip_z + r + r * math.sin(a)))
+    pts.append((half, plan.axis_z))
+    return LineString(pts)
+
+
+def b4b_handle_outline(plan: B4BHandlePlan) -> Polygon:
+    """X/Z outline of the bail: straight arms, broad lower radii, straight grip.
+
+    Cross-section is constant through grip and arms and thickens only locally
+    at the pivot eyes, which is what keeps a printed bail looking like one
+    clean piece instead of two bosses joined by a strip.
     """
-    bores: list[trimesh.Trimesh] = []
-    for cx in plan.centers_x:
-        bore = trimesh.creation.cylinder(
-            radius=B4B_M3_PILOT / 2.0, height=skin + 2.0, sections=32
-        )
-        bore.apply_translation((cx, 0.0, plan.top_z - skin / 2.0))
-        bores.append(bore)
-    return bores
+    band = plan.band / 2.0
+    outline = _handle_centreline(plan).buffer(
+        band, cap_style=2, join_style=1, quad_segs=24
+    )
+    if not isinstance(outline, Polygon) or not outline.is_valid:
+        raise RuntimeError("the B4B handle outline did not resolve")
+    # taper the band down to the eye width over the top run, so a compact M3
+    # pivot stack fits without thinning the part a hand actually holds
+    half = plan.pivot_span / 2.0
+    eye = plan.eye_band / 2.0
+    z_hi = plan.axis_z + plan.eye_radius + 2.0
+    z_lo = plan.axis_z - B4B_HANDLE_TAPER_RUN
+    keeper = Polygon([
+        (-half - band, -1e4), (half + band, -1e4),
+        (half + band, z_lo), (half + eye, plan.axis_z),
+        (half + eye, z_hi), (-half - eye, z_hi),
+        (-half - eye, plan.axis_z), (-half - band, z_lo),
+    ])
+    trimmed = outline.intersection(keeper)
+    if isinstance(trimmed, Polygon) and trimmed.is_valid and not trimmed.is_empty:
+        outline = trimmed
+    return outline
 
 
 def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
-    """The carrying handle, in assembly space, standing on the lid top.
+    """The folding bail, in assembly space, shown stowed against the front wall.
 
-    One extruded arch: feet, uprights and a grip bar, filleted inside and
-    rounded outside.  It prints on its broad face, so every wall of that
-    silhouette stands square to the bed and none of it needs support; only the
-    two screw holes run horizontally in that pose, and those are teardropped.
+    One flat-printed U.  The outline is extruded through the handle thickness,
+    the two pivot eyes are capped with the same support-free section every other
+    B4B barrel uses, and the carry-stop heels stand proud of them.
     """
     plan = b4b_handle_plan(box)
     if plan is None:
         return None
-    half = plan.span / 2.0
-    foot = plan.foot_length / 2.0
-    post = plan.upright / 2.0
-    z1 = plan.foot_height
-    z2 = z1 + plan.grip_clear
-    z3 = z2 + plan.grip_thickness
+    outline = b4b_handle_outline(plan)
+    slab = _extrude_xz_profile(outline, plan.thickness)
+    slab.apply_translation((0.0, plan.axis_y, 0.0))
 
-    def rect(x0: float, z0: float, x1: float, z_top: float) -> Polygon:
-        return Polygon([(x0, z0), (x1, z0), (x1, z_top), (x0, z_top)])
-
-    profile = (
-        rect(-half - foot, 0.0, -half + foot, z1)
-        .union(rect(half - foot, 0.0, half + foot, z1))
-        .union(rect(-half - post, z1, -half + post, z2))
-        .union(rect(half - post, z1, half + post, z2))
-        .union(rect(-half - post, z2, half + post, z3))
+    # above the axis the part is the pivot eye, so keep only what lies inside
+    # the support-free barrel section; below it the arms run straight down
+    barrel = _extrude_yz_profile(
+        support_free_profile_yz(plan.eye_radius), plan.pivot_span + 4.0 * plan.band
     )
-    if not isinstance(profile, Polygon) or not profile.is_valid:
-        raise RuntimeError("the B4B handle outline did not resolve")
-    # Fillet where the uprights meet the feet and the grip - the two corners a
-    # carried case loads - then round the outside so there are no sharp edges
-    # in the hand.
-    profile = _rounded(_filleted(profile, plan.fillet), plan.fillet)
-
-    handle = _extrude_xz_profile(profile, plan.depth)
-    handle.apply_translation((0.0, 0.0, plan.top_z))
-    bores: list[trimesh.Trimesh] = []
-    for cx in plan.centers_x:
-        # Printed on its side, this hole lies horizontal with assembly +Y
-        # facing the nozzle, so it is roofed that way.  The section is the same
-        # teardrop the case hardware uses; here its two axes read as X and Y.
-        bore = _extrude_polygon(
-            support_free_bore_profile_yz(B4B_M3_CLEAR_BORE / 2.0, 1.0),
-            plan.foot_height + 2.0,
+    barrel.apply_translation((0.0, plan.axis_y, plan.axis_z))
+    lower = trimesh.creation.box(
+        extents=(
+            plan.pivot_span + 6.0 * plan.band,
+            plan.thickness + 4.0,
+            2.0 * plan.axis_z,
         )
-        bore.apply_translation((cx, 0.0, plan.top_z - 1.0))
+    )
+    lower.apply_translation((0.0, plan.axis_y, 0.0))
+    handle = _intersection([slab, union([barrel, lower])])
+
+    stops: list[trimesh.Trimesh] = []
+    bores: list[trimesh.Trimesh] = []
+    pockets: list[trimesh.Trimesh] = []
+    heel_r = plan.eye_radius + plan.wall_clear
+    for cx in plan.centers_x:
+        stops.append(_handle_stop_heel(plan, cx, heel_r))
+        bore = _extrude_yz_profile(
+            support_free_bore_profile_yz(plan.profile.clear_bore / 2.0, 1.0),
+            plan.eye_band + 4.0,
+        )
+        bore.apply_translation((cx, plan.axis_y, plan.axis_z))
         bores.append(bore)
-    return _weld(difference([handle, *bores]))
+    for cx in plan.detent_centers_x:
+        depth = max(0.05, plan.detent_bump - plan.detent_interference)
+        pocket = trimesh.creation.box(
+            extents=(plan.band * 0.7, 2.0 * depth, 3.0)
+        )
+        pocket.apply_translation(
+            (cx, plan.axis_y + plan.eye_radius, plan.detent_z)
+        )
+        pockets.append(pocket)
+    handle = union([handle, *stops])
+    return _weld(difference([handle, *bores, *pockets]))
+
+
+def _handle_stop_heel(
+    plan: B4BHandlePlan, cx: float, heel_r: float
+) -> trimesh.Trimesh:
+    """A broad printed heel at one pivot, sized to land flat on its body stop.
+
+    The stop has to load real plastic faces: never the screw head, never the
+    thread, and never a knife edge.  The heel stands just proud of the eye and
+    is carried right across the eye's axial width, so the contact patch is the
+    whole face rather than a corner.
+    """
+    tang = B4B_HANDLE_STOP_FACE / 2.0
+    ang = math.radians(plan.stop_angle)
+    # at stow the heel points nearly straight up; the deployed stop angle is
+    # what brings its flat face round onto the body pad
+    cy, cz = math.cos(ang), math.sin(ang)
+    ny, nz = -math.sin(ang), math.cos(ang)
+    base = plan.eye_radius - 0.6
+    pts = [
+        (plan.axis_y + base * cy + tang * ny, plan.axis_z + base * cz + tang * nz),
+        (plan.axis_y + base * cy - tang * ny, plan.axis_z + base * cz - tang * nz),
+        (plan.axis_y + heel_r * cy - tang * ny, plan.axis_z + heel_r * cz - tang * nz),
+        (plan.axis_y + heel_r * cy + tang * ny, plan.axis_z + heel_r * cz + tang * nz),
+    ]
+    heel = _extrude_yz_profile(Polygon(pts), plan.eye_band)
+    heel.apply_translation((cx, 0.0, 0.0))
+    return heel
+
+
+def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
+    """The two body pivot forks, their roots, the carry stops and the stow
+    detents - all on the front wall, none of it on the lid."""
+    plan = b4b_handle_plan(box)
+    if plan is None:
+        return []
+    profile = plan.profile
+    parts: list[trimesh.Trimesh] = []
+    for cx in plan.centers_x:
+        out = 1.0 if cx >= 0.0 else -1.0
+        near_x, _mid_x, far_x = _stack_positions(cx, profile)
+        half = plan.root_width / 2.0 + 1.0
+        cavity = _cavity_prism(box, cx - half, cx + half)
+        height = plan.root_top_z - plan.root_bottom_z
+        root_prof = _root_profile_yz(
+            box,
+            outward_sign=-1.0,
+            face_y=plan.root_face_y,
+            top_z=plan.root_top_z,
+            height=height,
+        )
+        root = _extrude_yz_profile(root_prof, plan.root_width)
+        root.apply_translation((cx, 0.0, 0.0))
+        keeper = _root_taper_prism(
+            centre_x=cx,
+            root_width=plan.root_width,
+            group_width=profile.group_width,
+            outward_sign=-1.0,
+            crest_y=plan.front_crest,
+            face_y=plan.root_face_y,
+            z_lo=0.0,
+            z_hi=plan.root_top_z,
+        )
+        solid = _intersection([root, keeper])
+        for ex, thickness, terminal in (
+            (near_x, profile.near_ear, False),
+            (far_x, profile.far_lug, True),
+        ):
+            section = _filleted(
+                _gusset(
+                    root_y=plan.root_face_y + 0.8,
+                    root_z=plan.root_bottom_z + 1.0,
+                    top_z=plan.root_top_z,
+                    axis_y=plan.axis_y,
+                    axis_z=plan.axis_z,
+                    radius=profile.pivot_radius,
+                )
+                .union(
+                    _pivot_section(
+                        profile, profile.pivot_radius, plan.axis_y, plan.axis_z
+                    )
+                )
+                .union(root_prof),
+                B4B_HW_FILLET,
+            )
+            solid = union([
+                solid,
+                _ear_solid(
+                    section=section,
+                    thickness=thickness,
+                    x_centre=ex,
+                    bore_r=profile.bore_radius(terminal),
+                    roof_sign=1.0,
+                    axis_y=plan.axis_y,
+                    axis_z=plan.axis_z,
+                    flare=0.0 if terminal else profile.head_flare_radius,
+                    flare_out=out,
+                ),
+            ])
+        # the bail nests between the ears, so the root is two buttresses with a
+        # running slot between them, never a slab across the whole wall contact
+        relief = _relief_cutter(
+            half_top=plan.eye_band / 2.0 + B4B_RUNNING_GAP,
+            half_bottom=plan.band / 2.0 + B4B_HW_RELIEF_CLEARANCE,
+            z_top=plan.root_top_z + 2.0,
+            z_ramp_top=plan.axis_z,
+            z_ramp_bottom=plan.axis_z - B4B_HANDLE_TAPER_RUN,
+            z_bottom=plan.root_bottom_z - 2.0,
+            crest_y=plan.front_crest,
+            face_y=plan.root_face_y,
+            outward_sign=-1.0,
+        )
+        solid = difference([solid, cavity, relief])
+        # The flat the deployed heel lands on.  At the stop angle the heel
+        # has swung round to point straight at the wall, so the pad sits level
+        # with the pivot axis - and it only fills the wave's troughs back to
+        # the local crest, so it costs no projection at all.
+        pad = trimesh.creation.box(
+            extents=(plan.eye_band, 1.2, B4B_HANDLE_STOP_FACE)
+        )
+        pad.apply_translation((cx, plan.front_crest + 0.6, plan.axis_z))
+        parts.append(union([solid, pad]))
+    for cx in plan.detent_centers_x:
+        bump = trimesh.creation.icosphere(subdivisions=2, radius=1.6)
+        bump.apply_scale((1.0, (plan.wall_clear + plan.detent_bump) / 1.6, 1.0))
+        bump.apply_translation((cx, plan.front_crest, plan.detent_z))
+        parts.append(bump)
+    return parts
 
 
 # --------------------------------------------------------------------------- #
 # validation
 # --------------------------------------------------------------------------- #
+def _lid_rear_relief_cutter(
+    box: BoxSpec, plan: B4BHardwarePlan
+) -> trimesh.Trimesh:
+    """The 45-degree relief taken off the rear lid edge when the sweep needs it.
+
+    Relief is always the first answer to an opening collision: shaving a
+    fraction of a millimetre off an edge nobody sees is better than pushing the
+    whole hinge further behind the case, which is what makes a slim box look
+    like it is wearing a backpack.
+    """
+    eff = b4b_effective_box(box)
+    layout = b4b_layout(box)
+    underside_z = b4b_lid_underside_z_from_eff(eff)
+    r = min(plan.lid_rear_relief, b4b_lid_skin_from_eff(eff) - 0.4)
+    crest = layout.outer_half_y + WAVE_AMPLITUDE + 2.0
+    profile = Polygon([
+        (crest - r, underside_z - 0.01),
+        (crest + 4.0, underside_z - 0.01),
+        (crest + 4.0, underside_z + r),
+        (crest, underside_z + r),
+    ])
+    case_x, _case_y = layout.case_size
+    return _extrude_yz_profile(profile, case_x + 40.0)
+
+
 def _sweep_intersection_cc(
     moving: trimesh.Trimesh,
     fixed: trimesh.Trimesh,
@@ -1885,6 +2488,12 @@ def _sweep_intersection_cc(
     return worst
 
 
+# Boolean/intersection numerical noise only.  Physical clearance is positive by
+# construction everywhere; this allowance exists because mesh booleans on a
+# wavy case leave slivers, never to give a real clash somewhere to hide.
+B4B_NOISE_CC = 0.05
+
+
 def _validate_b4b_mechanics(box: BoxSpec) -> None:
     """Sampled moving-part and thread-retention checks - run at generation time,
     not on every keystroke.  Deterministic (fixed sample angles); not a full
@@ -1892,36 +2501,46 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
     eff = b4b_effective_box(box)
     b4b = eff.b4b
     plan = b4b_hardware_plan(box)
+    profile = plan.profile
 
-    # 1-2. printed terminal-lug thread engagement + screw protrusion.
-    # Physical engagement is min(screw beyond the clearance stack, lug thickness)
-    # - a screw longer than the lug threads only as far as the lug is thick.
+    # 1. every screw path: real thread engagement and no exposed tail.
+    # Physical engagement is min(screw beyond the clearance stack, lug
+    # thickness) - a screw longer than the lug threads only as far as the lug.
+    paths: list[tuple[str, float, float, int]] = []
     if b4b.secure_lid:
-        for what, (span, lug), screw in (
-            ("hinge", _hinge_screw_stack(plan.hinge_width), plan.hinge_screw_length_mm),
-            ("latch", _latch_screw_stack(plan.latch_width, plan.strength_profile["pad_wall"]),
+        paths += [
+            ("hinge", profile.clear_span, profile.far_lug,
+             plan.hinge_screw_length_mm),
+            ("latch pivot", profile.clear_span, profile.far_lug,
              plan.latch_screw_length_mm),
-            ("catch", (
-                plan.catch_ear_thickness + plan.lever_width
-                + 2.0 * B4B_HINGE_AXIAL_GAP,
-                plan.catch_ear_thickness,
-            ), plan.catch_screw_length_mm),
-        ):
-            beyond_stack = screw - span
-            engage = min(beyond_stack, lug)
-            if engage < B4B_M3_THREAD_ENGAGE_MIN - _EPS:
-                raise ValueError(
-                    f"{what} pin threads only {engage:.2f} mm into its "
-                    f"{lug:.2f} mm lug (need {B4B_M3_THREAD_ENGAGE_MIN:.1f} mm)"
-                )
-            protrusion = beyond_stack - lug
-            if protrusion > B4B_M3_MAX_PROTRUSION + _EPS:
-                raise ValueError(
-                    f"{what} pin protrudes {protrusion:.1f} mm past its lug "
-                    f"(limit {B4B_M3_MAX_PROTRUSION:.1f} mm)"
-                )
+            ("catch", profile.clear_span, profile.far_lug,
+             plan.catch_screw_length_mm),
+        ]
+    handle = b4b_handle_plan(box)
+    if handle is not None:
+        paths.append((
+            "handle pivot",
+            handle.profile.near_ear + handle.eye_band + 2.0 * B4B_RUNNING_GAP,
+            handle.profile.far_lug,
+            handle.screw_length_mm,
+        ))
+    for what, span, lug, screw in paths:
+        fam = handle.profile if what == "handle pivot" else profile
+        beyond = screw - span
+        engage = min(beyond, lug)
+        if engage < fam.engage_min - _EPS:
+            raise ValueError(
+                f"the {what} screw threads only {engage:.2f} mm into its "
+                f"{lug:.2f} mm lug (need {fam.engage_min:.1f} mm)"
+            )
+        tail = beyond - lug
+        if tail > B4B_SCREW_MAX_TAIL + _EPS:
+            raise ValueError(
+                f"the {what} screw leaves a {tail:.2f} mm tail past its lug "
+                f"(limit {B4B_SCREW_MAX_TAIL:.1f} mm)"
+            )
 
-    # 11. actual generated solids are watertight single volumes.
+    # 2. actual generated solids are watertight single volumes.
     body = b4b_body_with_features(box)
     if not body.is_watertight or body.volume <= 0.0:
         raise ValueError("B4B body did not generate as a watertight solid")
@@ -1933,89 +2552,119 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
         if not lid.is_watertight or lid.volume <= 0.0:
             raise ValueError("B4B lid did not generate as a watertight solid")
 
-    # A bolted-on handle is static, so it needs no sweep - only proof that it
-    # generates as one solid and stands *on* the lid rather than into it.
-    if lid is not None:
-        handle = make_b4b_handle(box)
-        if handle is not None:
-            from organizer_engine import intersection_volume
-
-            if not handle.is_watertight or handle.volume <= 0.0:
-                raise ValueError("the B4B handle did not generate as a watertight solid")
-            overlap = intersection_volume(handle, lid) / 1000.0
-            if overlap > 0.05:
+    # 3. the handle: one solid, stowed clear of the wall, and swept to its stop.
+    if handle is not None:
+        bail = make_b4b_handle(box)
+        if bail is None or not bail.is_watertight or bail.volume <= 0.0:
+            raise ValueError("the B4B handle did not generate as a watertight solid")
+        # Deploying swings the bail's grip away from the wall, which about
+        # world +X is the negative rotation - the same handedness the lid and
+        # the latch straps open on.
+        angles = tuple(
+            -a for a in _sweep_angles(90.0) + (handle.stop_angle,) if a > 0.0
+        )
+        worst = _sweep_intersection_cc(
+            bail, body, handle.axis_y, handle.axis_z, angles_deg=angles
+        )
+        stowed = _sweep_intersection_cc(
+            bail, body, handle.axis_y, handle.axis_z, angles_deg=(0.0,)
+        )
+        if worst > stowed + B4B_NOISE_CC:
+            raise ValueError(
+                f"the carrying handle strikes the case while folding out "
+                f"(overlap {worst:.3f} cc vs {stowed:.3f} cc stowed); the "
+                f"pivot forks or the carry stop need design review"
+            )
+        if lid is not None:
+            lid_hit = _sweep_intersection_cc(
+                bail, lid, handle.axis_y, handle.axis_z, angles_deg=angles
+            )
+            if lid_hit > B4B_NOISE_CC:
                 raise ValueError(
-                    f"the handle cuts into the lid rather than bolting to it "
-                    f"(overlap {overlap:.3f} cc)"
+                    f"the carrying handle fouls the lid ({lid_hit:.3f} cc); the "
+                    f"handle must clear the lid seam through its whole sweep"
                 )
 
     if not b4b.secure_lid:
         return
 
-    # Tolerances (cc).  These are geometry/boolean-noise bounds, NOT room for a
-    # real mechanical clash: the assembled closed state has a small, expected
-    # overlap (interleaved hinge knuckles, seated skirt, the latch detent
-    # ridge), and what the sweep must show is that motion does not add
-    # interference beyond boolean noise on top of that baseline.
-    NOISE_CC = 0.05                       # motion may not add more than this
-    # The lever swings on real printed running clearance - B4B_LATCH_BODY_CLEARANCE
-    # across the receiver web and B4B_HINGE_AXIAL_GAP against the catch ears - so
-    # it must not touch the body at all when closed, only boolean noise.
-    LATCH_CLOSED_CEIL_CC = 0.05
-    # Same standard for the lid: the knuckles interleave on running gaps and
-    # the spigot drops into a clearance fit, so a closed lid rests on its rim
-    # and touches nothing else.
-    LID_CLOSED_CEIL_CC = 0.05
-
-    # 3-4. latch rotation about its pivot (the front-label frame is already
-    # unioned into `body`).  A rigid rotating hook necessarily grazes the lip
-    # through the release band, which is therefore not sampled; what must hold
-    # is (a) the closed pose only touches at the detent, and (b) once past
-    # release the lever is fully clear.  Opening is the -X-handed rotation.
-    f = _latch_frame(eff, plan)
+    # 4. latch rotation about its pivot.  Opening swings the strap's lower end
+    # away from the case and up, which about world +X is the negative rotation.
+    # What must hold is (a) the closed pose touches only at the intended
+    # detent, (b) the hook is off the pin by the release angle, and (c) nothing
+    # rubs after that.
     for lever in make_b4b_latches(box):
         closed = _sweep_intersection_cc(
-            lever, body, f["axis_y"], f["axis_z"], angles_deg=(0.0,)
+            lever, body, plan.pivot_axis_y, plan.pivot_axis_z, angles_deg=(0.0,)
         )
-        if closed > LATCH_CLOSED_CEIL_CC:
+        if closed > B4B_NOISE_CC:
             raise ValueError(
-                f"a latch lever touches the body's catch receiver when closed "
-                f"(overlap {closed:.3f} cc, allowance {LATCH_CLOSED_CEIL_CC:.2f} cc); "
+                f"a latch strap touches the body's catch receiver when closed "
+                f"(overlap {closed:.3f} cc, allowance {B4B_NOISE_CC:.2f} cc); "
                 f"it must swing on clearance, not rub"
             )
-        open_worst = _sweep_intersection_cc(
-            lever, body, f["axis_y"], f["axis_z"], angles_deg=(-45.0, -60.0, -75.0)
+        released = tuple(
+            -a for a in _sweep_angles(B4B_LATCH_OPEN_ANGLE)
+            if a + _EPS >= B4B_LATCH_RELEASE_ANGLE
         )
-        if open_worst > closed + NOISE_CC:
+        worst = _sweep_intersection_cc(
+            lever, body, plan.pivot_axis_y, plan.pivot_axis_z,
+            angles_deg=released,
+        )
+        if worst > closed + B4B_NOISE_CC:
             raise ValueError(
-                f"a latch lever does not swing clear of the body when open "
-                f"(overlap {open_worst:.3f} cc vs {closed:.3f} cc closed); "
-                f"reduce the hook depth or grow the B4B"
+                f"a latch strap does not swing clear of the body once released "
+                f"(overlap {worst:.3f} cc vs {closed:.3f} cc closed); reduce "
+                f"the hook depth or use a larger B4B"
             )
 
-    # 5-6. lid opening sweep about the hinge axis through the usable range.  A
-    # clean rotation with no snap feature: motion must not add interference
-    # beyond noise on top of the seated-closed baseline.
+    # 5. the hook is geometrically off the pin by the release angle.
+    _validate_latch_release(plan)
+
+    # 6. lid opening sweep about the hinge axis, every 5 degrees to 120.
     if lid is not None:
         closed = _sweep_intersection_cc(
             lid, body, plan.hinge_axis_y, plan.hinge_axis_z, angles_deg=(0.0,)
         )
-        if closed > LID_CLOSED_CEIL_CC:
+        if closed > B4B_NOISE_CC:
             raise ValueError(
                 f"the closed lid binds against the body "
-                f"(overlap {closed:.3f} cc, allowance {LID_CLOSED_CEIL_CC:.2f} cc); "
+                f"(overlap {closed:.3f} cc, allowance {B4B_NOISE_CC:.2f} cc); "
                 f"it must seat on its rim, not jam on its hardware"
             )
-        open_worst = _sweep_intersection_cc(
-            lid, body, plan.hinge_axis_y, plan.hinge_axis_z,
-            angles_deg=(-15.0, -35.0, -60.0, -85.0, -100.0),
+        angles = tuple(-a for a in _sweep_angles(B4B_LID_OPEN_ANGLE) if a > 0.0)
+        worst = _sweep_intersection_cc(
+            lid, body, plan.hinge_axis_y, plan.hinge_axis_z, angles_deg=angles
         )
-        if open_worst > closed + NOISE_CC:
+        if worst > closed + B4B_NOISE_CC:
             raise ValueError(
-                f"the lid collides with the body while opening "
-                f"(overlap {open_worst:.3f} cc vs {closed:.3f} cc closed); "
-                f"check the hinge placement"
+                f"the lid collides with the body while opening to "
+                f"{B4B_LID_OPEN_ANGLE:g} degrees (overlap {worst:.3f} cc vs "
+                f"{closed:.3f} cc closed); check the hinge placement"
             )
+
+
+def _validate_latch_release(plan: B4BHardwarePlan) -> None:
+    """The hook must actually be off the pin by the release angle.
+
+    A rigid hook on a rigid pin is a two-circle problem, so this is solved
+    exactly rather than sampled: at the release angle the hook bore's centre
+    must have moved far enough that the pin is outside the captured bore.
+    """
+    profile = plan.profile
+    dy = plan.catch_axis_y - plan.pivot_axis_y
+    dz = plan.catch_axis_z - plan.pivot_axis_z
+    ang = math.radians(-B4B_LATCH_RELEASE_ANGLE)
+    moved_y = dy * math.cos(ang) - dz * math.sin(ang)
+    moved_z = dy * math.sin(ang) + dz * math.cos(ang)
+    travel = math.hypot(moved_y - dy, moved_z - dz)
+    need = profile.catch_inner_radius + profile.nominal / 2.0
+    if travel + _EPS < need:
+        raise ValueError(
+            f"the latch hook is still on its pin at "
+            f"{B4B_LATCH_RELEASE_ANGLE:g} degrees open (travelled "
+            f"{travel:.2f} mm, needs {need:.2f} mm); increase the latch draw"
+        )
 
 
 def validate_b4b_design(
@@ -2030,11 +2679,11 @@ def validate_b4b_design(
     """Deterministic, actionable checks.  Raises ``ValueError`` on the first
     problem; never swallows a geometry error behind a generic message.
 
-    Older no-lid files are normalized to Lid Only for the editable B4B model.
-    The remaining checks run on that normalized spec - the same one the
-    geometry is built from. ``deep=True`` additionally runs the
-    sampled moving-part and thread checks (:func:`_validate_b4b_mechanics`); it
-    builds meshes, so callers on the preview hot path leave it off.
+    Nothing here grows the design.  A field, a height or a wall that cannot
+    carry the hardware is reported as exactly that, so the UI can gate the
+    option instead of silently handing back a different box than the one the
+    user asked for.  ``deep=True`` additionally runs the sampled moving-part
+    and thread checks; it builds meshes, so preview callers leave it off.
     """
     raw = box.b4b
     if not raw.enabled:
@@ -2052,9 +2701,28 @@ def validate_b4b_design(
     if flat_inside:
         raise ValueError("the flat-inside band is incompatible with B4B")
 
+    min_x, min_y = b4b_min_field(box)
+    if box.x + _EPS < min_x or box.y + _EPS < min_y:
+        raise ValueError(
+            f"a B4B child field is at least {min_x:g} x {min_y:g} mm "
+            f"({round(min_x / GRID_PITCH)}U x {round(min_y / GRID_PITCH)}U); "
+            f"{box.x:g} x {box.y:g} mm is too small to carry the hardware"
+        )
+    if box.wall + _EPS < B4B_MIN_WALL:
+        raise ValueError(
+            f"a B4B wall is at least {B4B_MIN_WALL:g} mm - this design is set "
+            f"to {box.wall:g} mm; raise the wall before regenerating"
+        )
+    if b4b.secure_lid and box.z + _EPS < B4B_LATCHED_MIN_HEIGHT:
+        raise ValueError(
+            f"a latched B4B lid needs at least "
+            f"{B4B_LATCHED_MIN_HEIGHT:g} mm of bin height; this design is "
+            f"{box.z:g} mm - use Lid Only or a taller B4B"
+        )
+
     cx, cy = b4b_capacity_units(box)
     if cx < 1 or cy < 1:
-        raise ValueError("B4B interior is smaller than one child unit even after auto-grow")
+        raise ValueError("B4B interior is smaller than one child unit")
 
     layout = b4b_layout(box)
     wall = layout.outer_structural_polygon.difference(layout.inner_mating_polygon)
@@ -2062,69 +2730,138 @@ def validate_b4b_design(
         raise ValueError("B4B outward structural wall is empty")
 
     if b4b.handle:
+        eligible, reason = b4b_handle_eligibility(box)
+        if not eligible:
+            raise ValueError(
+                f"this B4B cannot carry a handle: {reason.rstrip('.')}"
+            )
         handle = b4b_handle_plan(box)
         if handle is None:
             raise ValueError("the handle did not resolve for this B4B")
-        if handle.screw_length_mm not in B4B_SCREW_LENGTHS:
-            raise ValueError("handle screw length did not resolve to an allowed M3 length")
-        if handle.span < handle.foot_length + B4B_HANDLE_MIN_OPENING:
-            raise ValueError("the handle has no usable hand opening on this B4B")
+        if handle.screw_length_mm not in handle.profile.lengths:
+            raise ValueError(
+                "the handle screw did not resolve to an allowed "
+                f"{handle.profile.name} length"
+            )
+        if handle.clear_grip + _EPS < B4B_HANDLE_GRIP_MIN:
+            raise ValueError(
+                f"the handle gives only {handle.clear_grip:.1f} mm of clear "
+                f"grip (need {B4B_HANDLE_GRIP_MIN:g} mm)"
+            )
+        if handle.drop + _EPS < B4B_HANDLE_DROP_MIN:
+            raise ValueError(
+                f"the handle drops only {handle.drop:.1f} mm below its pivots "
+                f"(need {B4B_HANDLE_DROP_MIN:g} mm for fingers)"
+            )
+        if handle.projection > B4B_HANDLE_MAX_PROJECTION + _EPS:
+            raise ValueError(
+                f"the folded handle stands {handle.projection:.2f} mm off the "
+                f"front wall (review ceiling {B4B_HANDLE_MAX_PROJECTION:g} mm)"
+            )
 
     if b4b.secure_lid:
         eff = b4b_effective_box(box)
         plan = b4b_hardware_plan(box)
-        if plan.hinge_count != 2:
+        profile = plan.profile
+        if plan.hinge_count != B4B_HINGE_COUNT:
             raise ValueError("a secure B4B lid needs exactly two hinges")
-        # --- printability and structure, not just "it resolved to a number" ---
-        bearing = plan.boss_radius * _SUPPORT_FREE_INSCRIBED
-        need_bearing = B4B_M3_HEAD_CLEAR / 2.0 + B4B_M3_HEAD_EDGE_MARGIN
-        if bearing + _EPS < need_bearing:
+        # --- printability and structure, not merely "it resolved to a number"
+        if profile.head_bearing_margin <= 0.0:
             raise ValueError(
-                f"an M3 head bears on only {bearing:.2f} mm of boss (need "
-                f"{need_bearing:.2f} mm: {B4B_M3_HEAD_CLEAR:.1f} mm head plus "
-                f"{B4B_M3_HEAD_EDGE_MARGIN:.1f} mm of edge margin)"
+                f"a {profile.name} head would overhang its bearing flare; the "
+                f"{profile.head_flare_radius:.2f} mm flare is too small for a "
+                f"{profile.head_clear:.1f} mm head"
             )
-        bridge = 2.0 * B4B_SUPPORT_FREE_FLAT * plan.boss_radius
+        bridge = 2.0 * B4B_SUPPORT_FREE_FLAT * profile.head_flare_radius
         if bridge > B4B_SUPPORT_FREE_BRIDGE_MAX + _EPS:
             raise ValueError(
-                f"the support-free boss section would bridge {bridge:.2f} mm "
+                f"the support-free flare section would bridge {bridge:.2f} mm "
                 f"unsupported (limit {B4B_SUPPORT_FREE_BRIDGE_MAX:.1f} mm)"
             )
-        if plan.hinge_lug_thickness + _EPS < B4B_HINGE_LUG_TARGET:
-            raise ValueError(
-                f"the hinge thread-forming lug is {plan.hinge_lug_thickness:.2f} mm, "
-                f"below the {B4B_HINGE_LUG_TARGET:.1f} mm safety target"
-            )
-        pad_half = plan.hinge_pad_width / 2.0
-        reach = max(abs(cx) for cx in plan.hinge_centers_x) + pad_half
-        corner_limit = (
-            layout.outer_half_x - CORNER_INSET - B4B_HINGE_CLEAR_KEEPOUT
-        )
-        if reach > corner_limit + _EPS:
-            raise ValueError(
-                f"a reinforced hinge reaches {reach - corner_limit:.2f} mm into "
-                f"the rear corner keep-out; grow the B4B"
-            )
-        centre_gap = 2.0 * min(abs(cx) for cx in plan.hinge_centers_x) - plan.hinge_pad_width
-        if centre_gap + _EPS < B4B_HINGE_CENTRE_GAP:
-            raise ValueError(
-                f"the two hinge root webs are only {centre_gap:.2f} mm apart "
-                f"(need {B4B_HINGE_CENTRE_GAP:.1f} mm)"
-            )
-        for what, web in (("hinge", plan.hinge_web), ("latch", plan.latch_web)):
-            root_t = eff.wall_depth + web
-            if root_t + _EPS < B4B_HW_ROOT_MIN_THICKNESS:
+        for what, centres, width in (
+            ("hinge", plan.hinge_centers_x, plan.hinge_root_width),
+            ("latch", plan.latch_centers_x, plan.latch_root_width),
+        ):
+            reach = max(abs(c) for c in centres) + width / 2.0
+            limit = layout.outer_half_x - CORNER_INSET - B4B_ROOT_CORNER_CLEARANCE
+            if reach > limit + _EPS:
                 raise ValueError(
-                    f"the {what} root is only {root_t:.2f} mm thick (need "
-                    f"{B4B_HW_ROOT_MIN_THICKNESS:.1f} mm); hardware strength "
-                    f"must not follow the wall setting"
+                    f"a {what} root reaches {reach - limit:.2f} mm into the "
+                    f"corner keep-out; this B4B is too narrow for its hardware"
                 )
-        if plan.hinge_screw_length_mm not in B4B_SCREW_LENGTHS:
-            raise ValueError("hinge pin length did not resolve to an allowed M3 length")
-        if plan.latch_screw_length_mm not in B4B_SCREW_LENGTHS:
-            raise ValueError("latch pin length did not resolve to an allowed M3 length")
-        if plan.catch_screw_length_mm not in B4B_SCREW_LENGTHS:
-            raise ValueError("catch pin length did not resolve to an allowed M3 length")
+        if len(plan.hinge_centers_x) == 2:
+            gap = (
+                2.0 * min(abs(c) for c in plan.hinge_centers_x)
+                - plan.hinge_root_width
+            )
+            if gap + _EPS < B4B_HINGE_CENTRE_GAP:
+                raise ValueError(
+                    f"the two hinge roots are only {gap:.2f} mm apart "
+                    f"(need {B4B_HINGE_CENTRE_GAP:.1f} mm)"
+                )
+        for what, target in (
+            ("hinge", profile.hinge_root_depth),
+            ("latch", profile.latch_root_depth),
+        ):
+            if eff.wall_depth > target + _EPS:
+                continue
+            if _root_outward(target, eff.wall_depth) <= 0.0:
+                raise ValueError(
+                    f"the {what} root adds no reinforcement over a "
+                    f"{eff.wall:g} mm wall; hardware strength must not follow "
+                    f"the wall setting"
+                )
+        ceiling = B4B_HINGE_MAX_PROJECTION[profile.name]
+        if plan.hinge_projection > ceiling + _EPS:
+            raise ValueError(
+                f"the rear hinge stands {plan.hinge_projection:.2f} mm off the "
+                f"wall (review ceiling {ceiling:g} mm); it would read as "
+                f"hardware bolted on rather than grown from the case"
+            )
+        ceiling = B4B_LATCH_MAX_PROJECTION[profile.name]
+        if plan.latch_projection > ceiling + _EPS:
+            raise ValueError(
+                f"the closed latch stands {plan.latch_projection:.2f} mm off "
+                f"the front wall (review ceiling {ceiling:g} mm)"
+            )
+        for what, length in (
+            ("hinge", plan.hinge_screw_length_mm),
+            ("latch pivot", plan.latch_screw_length_mm),
+            ("catch", plan.catch_screw_length_mm),
+        ):
+            if length not in profile.lengths:
+                raise ValueError(
+                    f"the {what} screw did not resolve to an allowed "
+                    f"{profile.name} length"
+                )
+        # The two front mechanisms must stay visually and physically distinct.
+        # They live at different heights *and* different X, so a real clash
+        # needs both envelopes to overlap - comparing one axis alone would
+        # condemn every handled case, since the latch always sits above the
+        # pivots and that is exactly the intended arrangement.
+        if b4b.handle:
+            handle = b4b_handle_plan(box)
+            if handle is not None:
+                latch_lo = plan.latch_root_top_z - profile.latch_root_height
+                z_gap = max(
+                    latch_lo - handle.root_top_z,
+                    handle.root_bottom_z - plan.latch_root_top_z,
+                )
+                x_gap = min(
+                    abs(lc - hc) - (plan.latch_root_width + handle.root_width) / 2.0
+                    for lc in plan.latch_centers_x
+                    for hc in handle.centers_x
+                )
+                if max(z_gap, x_gap) + _EPS < B4B_FRONT_ROOT_SEPARATION:
+                    raise ValueError(
+                        f"the latch and handle roots would merge into one "
+                        f"bracket on the front wall (closest approach "
+                        f"{max(z_gap, x_gap):.2f} mm, need "
+                        f"{B4B_FRONT_ROOT_SEPARATION:g} mm of clear wall); "
+                        f"this B4B is too wide for a centred bail and its "
+                        f"latches at once"
+                    )
+        _validate_latch_release(plan)
 
     if deep:
         _validate_b4b_mechanics(box)
@@ -2156,21 +2893,23 @@ def b4b_summary(box: BoxSpec) -> dict:
     if b4b.secure_lid:
         # Measured off the authoritative reinforced envelopes, so the quoted
         # assembled size cannot understate the printed hardware.
-        boss_out = plan.boss_radius * _SUPPORT_FREE_CIRCUM
-        hinge_min_x = min(cx - plan.hinge_pad_width / 2.0 for cx in plan.hinge_centers_x)
-        hinge_max_x = max(cx + plan.hinge_pad_width / 2.0 for cx in plan.hinge_centers_x)
-        latch_min_x = min(cx - plan.latch_pad_width / 2.0 for cx in plan.latch_centers_x)
-        latch_max_x = max(cx + plan.latch_pad_width / 2.0 for cx in plan.latch_centers_x)
-        min_x = min(min_x, hinge_min_x, latch_min_x)
-        max_x = max(max_x, hinge_max_x, latch_max_x)
-        min_y = min(min_y, plan.pivot_axis_y - boss_out)
-        max_y = max(max_y, plan.hinge_axis_y + boss_out)
-        top_z = max(top_z, plan.hinge_axis_z + plan.boss_radius)
+        flare_out = plan.profile.head_flare_radius
+        for centres, width in (
+            (plan.hinge_centers_x, plan.hinge_root_width),
+            (plan.latch_centers_x, plan.latch_root_width),
+        ):
+            min_x = min(min_x, min(c - width / 2.0 for c in centres))
+            max_x = max(max_x, max(c + width / 2.0 for c in centres))
+        min_y = min(min_y, plan.pivot_axis_y - flare_out)
+        max_y = max(max_y, plan.hinge_axis_y + flare_out)
+        top_z = max(top_z, plan.hinge_axis_z + plan.profile.pivot_radius)
     handle = b4b_handle_plan(box)
     if handle is not None:
-        top_z = max(top_z, handle.top_z + handle.height)
-        min_x = min(min_x, handle.centers_x[0] - handle.foot_length / 2.0)
-        max_x = max(max_x, handle.centers_x[1] + handle.foot_length / 2.0)
+        # The bail folds against the front wall, so it costs depth, not height:
+        # a handled case still stacks.
+        min_y = min(min_y, handle.axis_y - handle.profile.head_flare_radius)
+        min_x = min(min_x, handle.centers_x[0] - handle.root_width / 2.0)
+        max_x = max(max_x, handle.centers_x[1] + handle.root_width / 2.0)
     if b4b.stacking:
         top_z += B4B_STACK_RECESS_DEPTH
     summary: dict = {
@@ -2199,31 +2938,60 @@ def b4b_summary(box: BoxSpec) -> dict:
         "max_child_height_text": f"Maximum bin height: {b4b_max_child_height(box):g} mm",
     }
     if b4b.secure_lid:
+        fam = plan.profile.name
         summary["latch_count"] = plan.latch_count_resolved
-        summary["latch_strength"] = b4b.latch_strength
+        summary["hardware_family"] = fam
         summary["hardware"] = {
-            "hinge_screw": f"M3x{plan.hinge_screw_length_mm}",
+            "family": fam,
+            "hinge_screw": f"{fam}x{plan.hinge_screw_length_mm}",
             "hinge_qty": plan.hinge_count,
-            "latch_screw": f"M3x{plan.latch_screw_length_mm}",
+            "latch_screw": f"{fam}x{plan.latch_screw_length_mm}",
             "latch_qty": plan.latch_count_resolved,
-            "catch_screw": f"M3x{plan.catch_screw_length_mm}",
+            "catch_screw": f"{fam}x{plan.catch_screw_length_mm}",
             "catch_qty": plan.latch_count_resolved,
             "nuts": 0,
         }
         summary["hardware_bom"] = plan.screw_bom()
+        # Authoritative regression metrics: a bulkier redesign shows up here
+        # rather than only in somebody's eye.
+        summary["metrics"] = {
+            "hinge_projection_mm": round(plan.hinge_projection, 3),
+            "hinge_flare_projection_mm": round(plan.hinge_flare_projection, 3),
+            "hinge_group_width_mm": round(plan.hinge_width, 3),
+            "hinge_root_width_mm": round(plan.hinge_root_width, 3),
+            "latch_projection_mm": round(plan.latch_projection, 3),
+            "latch_root_width_mm": round(plan.latch_root_width, 3),
+            "lid_rear_relief_mm": round(plan.lid_rear_relief, 3),
+            "head_bearing_margin_mm": round(plan.profile.head_bearing_margin, 3),
+        }
     else:
         summary["latch_count"] = 0
+        summary["hardware_family"] = plan.profile.name
         summary["hardware"] = {"nuts": 0}
         summary["hardware_bom"] = []
+        summary["metrics"] = {}
     if handle is not None:
-        summary["hardware"]["handle_screw"] = f"M3x{handle.screw_length_mm}"
+        fam = handle.profile.name
+        summary["hardware"]["handle_screw"] = f"{fam}x{handle.screw_length_mm}"
         summary["hardware"]["handle_qty"] = 2
+        summary["metrics"].update({
+            "handle_pivot_span_mm": round(handle.pivot_span, 3),
+            "handle_clear_grip_mm": round(handle.clear_grip, 3),
+            "handle_drop_mm": round(handle.drop, 3),
+            "handle_band_mm": round(handle.band, 3),
+            "handle_thickness_mm": round(handle.thickness, 3),
+            "handle_projection_mm": round(handle.projection, 3),
+            "handle_root_width_mm": round(handle.root_width, 3),
+            "handle_stop_angle_deg": handle.stop_angle,
+        })
         bom = summary["hardware_bom"]
-        line = f"2 x M3x{handle.screw_length_mm} handle screws"
+        line = f"2 x {fam}x{handle.screw_length_mm} handle pivots"
         # keep "No nuts" last, as the reassurance it is
         bom.insert(max(0, len(bom) - 1) if bom else 0, line)
         if not bom or bom[-1] != "No nuts":
             bom.append("No nuts")
+    summary["handle_available"] = b4b_handle_eligibility(box)[0]
+    summary["handle_blocked_reason"] = b4b_handle_eligibility(box)[1]
     return summary
 
 
@@ -2314,9 +3082,11 @@ def _fit_text_outline(text: str, avail_w: float, avail_h: float, ideal_cap: floa
 
 def _top_surface_keepouts(eff: BoxSpec) -> list[Polygon]:
     """Plan-view regions on the lid top the label must avoid: every stacking
-    boss (all four, not one row) plus a margin.  Hinge knuckles and latch ears
-    sit outboard at the rim, below the top plate, so they do not intrude on the
-    central label band; the bosses are the real keep-outs."""
+    boss (all four, not one row) plus a margin.
+
+    Hinge knuckles and latch ears sit outboard at the rim, below the top plate,
+    and the carrying handle now folds against the front wall rather than
+    straddling the lid, so the bosses are the only real keep-outs left."""
     keepouts: list[Polygon] = []
     if eff.b4b.stacking and eff.b4b.lid:
         r = (
@@ -2328,14 +3098,6 @@ def _top_surface_keepouts(eff: BoxSpec) -> list[Polygon]:
             Point(cx, cy).buffer(r, quad_segs=24)
             for cx, cy in _stack_locator_centres(eff)
         )
-    handle = b4b_handle_plan(eff)
-    if handle is not None:
-        hx = handle.foot_length / 2.0 + B4B_TOP_LABEL_MARGIN
-        hy = handle.depth / 2.0 + B4B_TOP_LABEL_MARGIN
-        for cx in handle.centers_x:
-            keepouts.append(Polygon([
-                (cx - hx, -hy), (cx + hx, -hy), (cx + hx, hy), (cx - hx, hy),
-            ]))
     return keepouts
 
 
@@ -2351,19 +3113,6 @@ def b4b_top_label_outline(box: BoxSpec):
     avail_w = case_x - 2.0 * B4B_TOP_LABEL_MARGIN
     avail_h = case_y / 3.0
     label_cy = -case_y / 6.0
-    handle = b4b_handle_plan(eff)
-    if handle is not None:
-        # The handle straddles the middle of the lid, so the label takes the
-        # clear strip in front of it rather than shrinking to nothing under it.
-        front = -case_y / 2.0 + B4B_TOP_LABEL_MARGIN
-        back = -handle.depth / 2.0 - B4B_TOP_LABEL_MARGIN
-        avail_h = back - front
-        label_cy = (front + back) / 2.0
-        if avail_h < TEXT_CAP_HEIGHT_MIN:
-            raise ValueError(
-                "there is no clear space on the lid for a top label beside the "
-                "handle; use a front label, or turn the handle off"
-            )
     keepouts = _top_surface_keepouts(eff)
 
     def clear_rect(w: float, h: float) -> bool:
@@ -2428,14 +3177,24 @@ def b4b_front_label_geometry(box: BoxSpec):
     frame_w = span - 4.0
     # vertical band: below the latch pads (or below the rim if passive)
     if plan.latch_count_resolved:
-        receiver_r = plan.boss_radius * _SUPPORT_FREE_CIRCUM
-        # clear of both the catch boss and the receiver web's 45-degree taper
+        receiver_r = plan.profile.catch_radius
+        # clear of the catch ears and of the root's 45-degree underside taper
         top_z = min(
-            plan.catch_axis_z - receiver_r - 2.0,
-            plan.latch_pad_bottom_z - plan.latch_web - 1.0,
+            plan.catch_axis_z - receiver_r - B4B_LABEL_KEEPOUT,
+            plan.latch_root_top_z - plan.profile.latch_root_height
+            - B4B_LABEL_KEEPOUT,
         )
     else:
         top_z = eff.z - 4.0
+    handle = b4b_handle_plan(box)
+    if handle is not None:
+        # The folded U frames the label rather than covering it: the readable
+        # area is the clear opening between the arms, under the pivot forks.
+        frame_w = min(frame_w, handle.clear_grip - 2.0 * B4B_LABEL_KEEPOUT)
+        top_z = min(
+            top_z,
+            handle.root_bottom_z - B4B_LABEL_KEEPOUT,
+        )
     height = B4B_FRONT_LABEL_HEIGHT
     bottom_z = top_z - height
     if frame_w < 30.0 or bottom_z < 3.0:
@@ -2538,9 +3297,10 @@ def _print_pose(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
             trimesh.transformations.rotation_matrix(math.pi, (1.0, 0.0, 0.0))
         )
     elif kind == "handle":
-        # lay the arch on its broad face: its silhouette is extruded along
-        # local Y, so that axis rolls onto the bed's Z and every wall of the
-        # arch stands square to the bed
+        # lay the bail on its broad face: the U outline is extruded along local
+        # Y, so that axis rolls onto the bed's Z, the lower radii become plain
+        # 2D outline geometry and only the pivot bores stay horizontal - and
+        # those are teardropped for exactly this pose
         m.apply_transform(
             trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
         )

@@ -54,7 +54,7 @@ different kind of object that loses them.
 **Controls follow their meaning, not their mechanism.**
 
 - A **select** is for choosing one of several named states — *Lid type*,
-  *Latch strength*, *Show*, *Orientation*, *Stacking*. This holds even at two
+  *Lid snugness*, *Show*, *Orientation*, *Stacking*. This holds even at two
   options: a row of big buttons for a two-state setting reads as two actions,
   and gives no clue the two are exclusive.
 - A **checkbox** is for a genuine on/off with no second state worth naming —
