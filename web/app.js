@@ -4524,6 +4524,54 @@ const isBinFace = kind =>
   kind === "outside" || kind === "inside" || kind === "rim" || kind === "floor" ||
   kind === "top_label_ledge" || kind === "label" || kind === "label_hole";
 
+// Which cardinal side of the bin the camera is looking from, by yaw alone
+// (elevation only affects pitch, not which wall is nearest). Shared by the
+// legacy Xray cull and the WebGL cutaway-buffer builder so both remove
+// exactly the same wall.
+function cameraFacingSide(camera = state.camera) {
+  const yaw = number(camera?.yaw, 45) * Math.PI / 180;
+  const camX = -Math.sin(yaw);
+  const camY = -Math.cos(yaw);
+  if (Math.abs(camX) >= Math.abs(camY)) return camX > 0 ? "x+" : "x-";
+  return camY > 0 ? "y+" : "y-";
+}
+
+// A face counts as "on" the facing side either by its normal pointing
+// strongly that way (catches near-planar wall faces directly) or, failing
+// that, by its centroid sitting out past the 0.45-of-halfwidth band (catches
+// bevelled/gusseted faces whose normal alone wouldn't clear the threshold).
+// Both checks and both thresholds are load-bearing - see the legacy 2D
+// painter this was extracted from.
+function faceOnBinSide(face, side) {
+  const [nx, ny] = face.normal;
+  if (side === "x+" && nx > 0.3) return true;
+  if (side === "x-" && nx < -0.3) return true;
+  if (side === "y+" && ny > 0.3) return true;
+  if (side === "y-" && ny < -0.3) return true;
+  if (!face.points?.length) return false;
+  let sumX = 0, sumY = 0;
+  for (const point of face.points) {
+    sumX += point[0];
+    sumY += point[1];
+  }
+  const avgX = sumX / face.points.length;
+  const avgY = sumY / face.points.length;
+  const box = state.design?.box;
+  const hx = box ? number(box.x) / 2 : 1;
+  const hy = box ? number(box.y) / 2 : 1;
+  switch (side) {
+    case "x+": return avgX > hx * 0.45;
+    case "x-": return avgX < -hx * 0.45;
+    case "y+": return avgY > hy * 0.45;
+    case "y-": return avgY < -hy * 0.45;
+    default: return false;
+  }
+}
+
+function isFacingBinWall(face, camera = state.camera) {
+  return isBinFace(face.kind) && faceOnBinSide(face, cameraFacingSide(camera));
+}
+
 // Legacy full 2D-canvas painter. Used only as a fallback when WebGL is
 // unavailable (see renderPreview3D) - the primary path is the depth-buffered
 // WebGL renderer in preview3d-webgl.js, which this file no longer needs to
@@ -4548,40 +4596,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   const elevationRad = camera.elevation * Math.PI / 180;
   const cosYaw = Math.cos(yawRad), sinYaw = Math.sin(yawRad);
   const cosEl = Math.cos(elevationRad), sinEl = Math.sin(elevationRad);
-  const camX = -sinYaw;
-  const camY = -cosYaw;
   const vx = vector[0], vy = vector[1], vz = vector[2];
-
-  const isFacingSide = (face) => {
-    let sideX = 0, sideY = 0;
-    if (Math.abs(camX) >= Math.abs(camY)) {
-      sideX = camX > 0 ? 1 : -1;
-    } else {
-      sideY = camY > 0 ? 1 : -1;
-    }
-    const nx = face.normal[0], ny = face.normal[1];
-    if (sideX !== 0) {
-      if (sideX > 0 ? nx > 0.3 : nx < -0.3) return true;
-    }
-    if (sideY !== 0) {
-      if (sideY > 0 ? ny > 0.3 : ny < -0.3) return true;
-    }
-    let sumX = 0, sumY = 0;
-    for (const pt of face.points) {
-      sumX += pt[0];
-      sumY += pt[1];
-    }
-    const avgX = sumX / face.points.length;
-    const avgY = sumY / face.points.length;
-    const box = state.design?.box;
-    const hx = box ? number(box.x) / 2 : 1;
-    const hy = box ? number(box.y) / 2 : 1;
-    if (sideX > 0 && avgX > hx * 0.45) return true;
-    if (sideX < 0 && avgX < -hx * 0.45) return true;
-    if (sideY > 0 && avgY > hy * 0.45) return true;
-    if (sideY < 0 && avgY < -hy * 0.45) return true;
-    return false;
-  };
 
   // Cull first, project second: a back face costs one dot product instead of
   // an iso() call per corner.
@@ -4596,7 +4611,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
     const isBin = isBinFace(kind);
     if (mode === "bin" && !isBin) continue;
     if (mode === "interior" && isBin) continue;
-    if (mode === "xray" && isBin && isFacingSide(face)) continue;
+    if (mode === "xray" && isFacingBinWall(face, camera)) continue;
     const points = face.points;
     const corners = points.length;
     const projected = new Float64Array(corners * 2);
@@ -5020,8 +5035,7 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
 
 let glRenderer = null;
 let glInitAttempted = false;
-let glBuffersCache = null; // { source, b4b, generation, buffers }
-const XRAY_ALPHA = 0.3;
+let glBuffersCache = null; // { source, b4b, generation, buffers, xray }
 
 function ensurePreviewGL() {
   if (glInitAttempted) return glRenderer;
@@ -5066,9 +5080,12 @@ function currentPreviewClassify() {
 }
 
 // Which groups draw (and at what alpha) for the current mode, and which
-// group's bounds the camera frames to. Xray shows the interior at full
-// opacity with the shell drawn translucent over it - a deterministic
-// depth-tested blend rather than the old per-triangle camera-facing cull.
+// group's bounds the camera frames to. Standard/Xray/Bin/Interior are pure
+// visibility modes over the SAME complete geometry, so they all frame to the
+// complete model's AABB - switching between them must never re-fit the
+// camera to whatever happens to still be visible. (Xray's camera-facing wall
+// cutaway is a buffer swap done separately in renderPreview3DGL(); the passes
+// below already describe its fully-opaque bin+interior result.)
 function currentPreviewPasses(buffers) {
   if (b4bEnabled()) {
     const view = state.b4bView;
@@ -5085,16 +5102,10 @@ function currentPreviewPasses(buffers) {
   }
   const mode = state.previewMode || "standard";
   if (mode === "bin") {
-    return { passes: [{ group: "bin", alpha: 1 }], aabb: buffers.groups.bin?.aabb, visible: new Set(["bin"]) };
+    return { passes: [{ group: "bin", alpha: 1 }], aabb: buffers.allAabb, visible: new Set(["bin"]) };
   }
   if (mode === "interior") {
-    return { passes: [{ group: "interior", alpha: 1 }], aabb: buffers.groups.interior?.aabb, visible: new Set(["interior"]) };
-  }
-  if (mode === "xray") {
-    return {
-      passes: [{ group: "interior", alpha: 1 }, { group: "bin", alpha: XRAY_ALPHA }],
-      aabb: buffers.allAabb, visible: new Set(["bin", "interior"]),
-    };
+    return { passes: [{ group: "interior", alpha: 1 }], aabb: buffers.allAabb, visible: new Set(["interior"]) };
   }
   return {
     passes: [{ group: "bin", alpha: 1 }, { group: "interior", alpha: 1 }],
@@ -5185,20 +5196,45 @@ function renderPreview3DGL(renderer, overlayCanvas, b4b, fullGeometry, meshes, c
     !glBuffersCache || glBuffersCache.source !== source || glBuffersCache.b4b !== b4b
     || glBuffersCache.generation !== renderer.generation
   ) {
-    if (glBuffersCache) window.Preview3DGL.disposeBuffers(renderer.gl, glBuffersCache.buffers);
+    if (glBuffersCache) {
+      window.Preview3DGL.disposeBuffers(renderer.gl, glBuffersCache.buffers);
+      if (glBuffersCache.xray?.buffers) window.Preview3DGL.disposeBuffers(renderer.gl, glBuffersCache.xray.buffers);
+    }
     const groupNames = currentPreviewGroups();
     glBuffersCache = {
       source, b4b, generation: renderer.generation,
       buffers: b4b
         ? window.Preview3DGL.buildBuffersFromMeshes(renderer.gl, meshes, groupNames, kindColor)
         : window.Preview3DGL.buildBuffers(renderer.gl, solidGeometry, groupNames, classify, kindColor),
+      xray: null,
     };
   }
   const buffers = glBuffersCache.buffers;
   const chosen = currentPreviewPasses(buffers);
+  let drawBuffers = buffers;
+
+  // Xray's cutaway wall is a separate, lazily-built buffer over the SAME
+  // complete geometry - never a rebuild of the normal buffer, and never a
+  // reason to re-fit the camera (both aabb and frame below still come from
+  // the complete, unfiltered `buffers`). Only four side variants exist, so
+  // one cached buffer per current facing side is enough to keep spinning
+  // smooth without rebuilding on every frame.
+  if (!b4b && state.previewMode === "xray") {
+    const side = cameraFacingSide(camera);
+    if (!glBuffersCache.xray || glBuffersCache.xray.side !== side) {
+      if (glBuffersCache.xray?.buffers) window.Preview3DGL.disposeBuffers(renderer.gl, glBuffersCache.xray.buffers);
+      const xrayGeometry = solidGeometry.filter(face => !isFacingBinWall(face, camera));
+      glBuffersCache.xray = {
+        side,
+        buffers: window.Preview3DGL.buildBuffers(renderer.gl, xrayGeometry, currentPreviewGroups(), classify, kindColor),
+      };
+    }
+    drawBuffers = glBuffersCache.xray.buffers;
+  }
+
   const aabb = chosen.aabb || buffers.allAabb;
   const frame = window.Preview3DGL.computeFrame(camera, aabb, width, height);
-  window.Preview3DGL.draw(renderer, buffers, frame, width, height, chosen.passes);
+  window.Preview3DGL.draw(renderer, drawBuffers, frame, width, height, chosen.passes);
   drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, frame, classify, chosen.visible);
 }
 
