@@ -1,5 +1,6 @@
 """Focused tests for B4B (Bin for Bins)."""
 
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -72,7 +73,8 @@ class B4BCapacityTests(unittest.TestCase):
                     )
 
     def test_32_by_48_means_four_by_six_child_field(self):
-        box = BoxSpec(x=32, y=48, z=40, b4b=B4BSpec(enabled=True))
+        # a passive lid asks nothing of the field, so 32x48 stays 32x48
+        box = BoxSpec(x=32, y=48, z=40, b4b=B4BSpec(enabled=True, secure_lid=False))
         self.assertEqual(b4b.b4b_capacity_units(box), (4, 6))
         self.assertEqual(b4b.b4b_capacity_mm(box), (32, 48))
 
@@ -91,7 +93,7 @@ class B4BCapacityTests(unittest.TestCase):
     def test_auto_grow_tiny_box_for_one_unit_and_hinges(self):
         box = BoxSpec(x=16, y=16, z=24, b4b=B4BSpec(enabled=True))
         eff = b4b.b4b_effective_box(box)
-        self.assertGreaterEqual(eff.x, b4b.B4B_SECURE_MIN_FIELD_X)
+        self.assertGreaterEqual(eff.x, b4b.b4b_secure_min_field_x(box.wall))
         self.assertTrue(b4b.b4b_grew(box))
         cx, cy = b4b.b4b_capacity_units(box)
         self.assertGreaterEqual(min(cx, cy), 1)
@@ -169,36 +171,39 @@ class B4BHardwareTests(unittest.TestCase):
         self.assertIn(plan.latch_screw_length_mm, b4b.B4B_SCREW_LENGTHS)
         self.assertIn(plan.catch_screw_length_mm, b4b.B4B_SCREW_LENGTHS)
 
-    def test_hinges_are_flush_and_body_gussets_stay_near_top(self):
+    def test_hinges_are_flush_and_body_hardware_stays_in_the_upper_wall(self):
         box = BoxSpec(x=32, y=48, z=30, base_thickness=0.8,
                       b4b=B4BSpec(enabled=True))
+        eff = b4b.b4b_effective_box(box)
         plan = b4b.b4b_hardware_plan(box)
-        lid_top = b4b.b4b_lid_underside_z(box) + b4b.B4B_LID_SKIN
-        self.assertLessEqual(
-            plan.hinge_axis_z + b4b.B4B_HINGE_KNUCKLE_RADIUS,
-            lid_top + 1e-6,
-        )
+        lid_top = b4b.b4b_lid_underside_z(box) + b4b.b4b_lid_skin(box)
+        # the barrel's +Z facet is flat and exactly flush with the lid top, so
+        # the flipped lid prints straight onto the bed
+        self.assertLessEqual(plan.hinge_axis_z + plan.boss_radius, lid_top + 1e-6)
         for part in b4b._hinge_body_parts(box, plan):
-            self.assertGreater(part.bounds[0][2], box.z - 8.1)
+            self.assertGreater(part.bounds[0][2], eff.z * 0.3)
 
-    def test_body_latch_is_compact_cross_pin_receiver(self):
+    def test_body_latch_is_one_reinforced_cross_pin_receiver(self):
         box = BoxSpec(x=32, y=48, z=30, base_thickness=0.8,
                       b4b=B4BSpec(enabled=True))
+        eff = b4b.b4b_effective_box(box)
         plan = b4b.b4b_hardware_plan(box)
-        ears = b4b._latch_body_parts(box, plan)
-        self.assertEqual(len(ears), 2 * plan.latch_count_resolved)
-        # A draw latch's catch has to sit below the seat far enough for the hook
-        # to wrap it and pull down, so the receiver reaches deeper than a hinge
-        # knuckle does: the draw depth plus the boss that carries the cross pin,
-        # and no further.
-        draw_depth = max(6.5, plan.strength_profile["pad_height"] * 0.65)
-        boss_r = b4b.B4B_M3_CLEAR_BORE / 2.0 + 1.6
-        floor = box.z - (draw_depth + boss_r) - 0.1
-        self.assertTrue(all(ear.bounds[0][2] > floor for ear in ears))
-        self.assertLess(
-            b4b.b4b_layout(box).case_bounds[1] - min(e.bounds[0][1] for e in ears),
-            9.0,
-        )
+        receivers = b4b._latch_body_parts(box, plan)
+        # one solid per latch now: both ears stand on a shared root web
+        self.assertEqual(len(receivers), plan.latch_count_resolved)
+        boss_out = plan.boss_radius * b4b._SUPPORT_FREE_CIRCUM
+        for r in receivers:
+            self.assertTrue(r.is_watertight)
+            # the catch pin hangs below the seat only as far as the hook needs
+            self.assertGreater(
+                plan.catch_axis_z - boss_out, eff.z - 14.0
+            )
+            # root web and all, the receiver stays in the upper wall
+            self.assertGreater(r.bounds[0][2], eff.z * 0.3)
+            # and stands proud of the front wall only by its web and boss
+            self.assertGreater(
+                r.bounds[0][1], plan.catch_axis_y - boss_out - 0.1
+            )
 
     def test_latch_auto_one_when_narrow_two_when_wide(self):
         narrow = b4b.b4b_hardware_plan(
@@ -234,6 +239,28 @@ class B4BHardwareTests(unittest.TestCase):
         std = b4b.B4B_LATCH_PROFILES["standard"]
         self.assertGreater(std["hook_depth"], light["hook_depth"])
         self.assertGreater(std["pad_wall"], light["pad_wall"])
+        self.assertGreater(std["catch_thickness"], light["catch_thickness"])
+
+    def test_catch_thickness_is_a_live_receiver_dimension(self):
+        """Standard must buy a thicker receiver web, not just a moved one."""
+        def plan_for(strength):
+            return b4b.b4b_hardware_plan(BoxSpec(
+                x=80, y=64, z=40,
+                b4b=B4BSpec(enabled=True, latch_strength=strength),
+            ))
+        light, std = plan_for("lightweight"), plan_for("standard")
+        self.assertGreater(std.latch_web, light.latch_web)
+        self.assertAlmostEqual(
+            std.latch_web, b4b.B4B_LATCH_PROFILES["standard"]["catch_thickness"]
+        )
+        # and the web really is thicker material on the printed body
+        def receiver_volume(strength):
+            box = BoxSpec(x=80, y=64, z=40,
+                          b4b=B4BSpec(enabled=True, latch_strength=strength))
+            plan = b4b.b4b_hardware_plan(box)
+            return sum(r.volume for r in b4b._latch_body_parts(box, plan))
+        self.assertGreater(receiver_volume("standard"),
+                           receiver_volume("lightweight"))
 
 
 class B4BLidHeadroomTests(unittest.TestCase):
@@ -325,7 +352,7 @@ class B4BGeometryTests(unittest.TestCase):
         skin = eff.base_thickness - b4b.B4B_STACK_RECESS_DEPTH
         self.assertGreaterEqual(skin, b4b.B4B_MIN_FLOOR_SKIN - 1e-6)
         lid = b4b.make_b4b_lid(box)
-        lid_top = b4b.b4b_lid_underside_z(box) + b4b.B4B_LID_SKIN
+        lid_top = b4b.b4b_lid_underside_z(box) + b4b.b4b_lid_skin(box)
         self.assertLessEqual(lid.bounds[1][2], lid_top + 1e-5)
         names = [name for name, _mesh in b4b.b4b_build_parts(box)]
         self.assertEqual(sum(name.startswith("B4B Stacking Peg") for name in names), 4)
@@ -346,6 +373,183 @@ class B4BGeometryTests(unittest.TestCase):
                 np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0]), axis=1
             ).sum()
             self.assertGreater(area, 20.0)
+
+
+class B4BSupportFreeHardwareTests(unittest.TestCase):
+    """The integrated hinge/latch hardware must print with no support in the
+    orientation b4b_build_parts emits, and its loads must land in a real
+    structural zone rather than a sliver of the wall the user chose."""
+
+    def test_boss_section_never_overhangs_worse_than_45_degrees(self):
+        r = b4b.B4B_HW_BOSS_RADIUS
+        profile = b4b.support_free_profile_yz(r)
+        miny, minz, maxy, maxz = profile.bounds
+        # symmetric in Z: the same section serves the upright body and the
+        # lid, which prints rolled 180 degrees about X
+        self.assertAlmostEqual(maxz, -minz, places=9)
+        self.assertAlmostEqual(maxy, -miny, places=9)
+        coords = list(profile.exterior.coords)
+        flats = []
+        for (y0, z0), (y1, z1) in zip(coords, coords[1:]):
+            dy, dz = y1 - y0, z1 - z0
+            if abs(dy) < 1e-9:
+                continue                       # vertical face: always printable
+            if abs(dz) < 1e-9:
+                flats.append(abs(dy))          # a bridge, and it is bounded
+                continue
+            self.assertGreaterEqual(
+                abs(dz) / abs(dy), 1.0 - 1e-9,
+                "a boss facet is shallower than 45 degrees",
+            )
+        self.assertTrue(flats)
+        self.assertLessEqual(max(flats), b4b.B4B_SUPPORT_FREE_BRIDGE_MAX)
+
+    def test_bore_section_roofs_itself_and_keeps_its_inscribed_bore(self):
+        r = b4b.B4B_M3_CLEAR_BORE / 2.0
+        for roof in (1.0, -1.0):
+            with self.subTest(roof=roof):
+                profile = b4b.support_free_bore_profile_yz(r, roof)
+                miny, minz, maxy, maxz = profile.bounds
+                ridge, floor = (maxz, -minz) if roof > 0 else (-minz, maxz)
+                self.assertAlmostEqual(ridge, r * math.sqrt(2.0), places=3)
+                self.assertAlmostEqual(floor, r, places=2)
+                # the screw still passes: full inscribed diameter, untouched
+                self.assertGreaterEqual(maxy - miny, 2.0 * r - 0.02)
+
+    def test_body_and_lid_bores_roof_toward_their_own_print_direction(self):
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
+        plan = b4b.b4b_hardware_plan(box)
+        r = b4b.B4B_M3_CLEAR_BORE / 2.0
+        probe = r * 1.2                    # past the round wall, inside the roof
+        seg = b4b._hinge_seg(plan)
+        cx = plan.hinge_centers_x[0]
+        # body prints upright: the roof, and so the void, is on assembly +Z
+        body_near = b4b._hinge_body_parts(box, plan)[0]
+        kx = cx - seg
+        self.assertFalse(
+            body_near.contains([[kx, plan.hinge_axis_y, plan.hinge_axis_z + probe]])[0]
+        )
+        self.assertTrue(
+            body_near.contains([[kx, plan.hinge_axis_y, plan.hinge_axis_z - probe]])[0]
+        )
+        # lid prints rolled 180 degrees, so its roof is on assembly -Z
+        lid_tab = b4b._hinge_lid_parts(box, plan)[0]
+        self.assertFalse(
+            lid_tab.contains([[cx, plan.hinge_axis_y, plan.hinge_axis_z - probe]])[0]
+        )
+        self.assertTrue(
+            lid_tab.contains([[cx, plan.hinge_axis_y, plan.hinge_axis_z + probe]])[0]
+        )
+
+    def test_head_bearing_bosses_keep_their_m3_edge_margin(self):
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
+        plan = b4b.b4b_hardware_plan(box)
+        bearing = plan.boss_radius * b4b._SUPPORT_FREE_INSCRIBED
+        self.assertGreaterEqual(
+            bearing,
+            b4b.B4B_M3_HEAD_CLEAR / 2.0 + b4b.B4B_M3_HEAD_EDGE_MARGIN - 1e-9,
+        )
+
+    def test_hinge_lug_carries_margin_over_the_engagement_floor(self):
+        for ux in (5, 8, 12, 16):
+            box = BoxSpec(x=ux * GRID_PITCH, y=48, z=40, b4b=B4BSpec(enabled=True))
+            plan = b4b.b4b_hardware_plan(box)
+            with self.subTest(ux=ux):
+                self.assertGreaterEqual(
+                    plan.hinge_lug_thickness, b4b.B4B_HINGE_LUG_TARGET - 1e-9
+                )
+                self.assertGreater(
+                    plan.hinge_lug_thickness, b4b.B4B_M3_THREAD_ENGAGE_MIN + 0.5
+                )
+
+    def test_hinges_clear_the_corners_and_each_other_after_auto_growth(self):
+        for wall in CASE_WALLS:
+            for ux in (2, 5, 8, 14):
+                box = BoxSpec(x=ux * GRID_PITCH, y=48, z=40, wall=wall,
+                              b4b=B4BSpec(enabled=True))
+                plan = b4b.b4b_hardware_plan(box)
+                layout = b4b.b4b_layout(box)
+                half = plan.hinge_pad_width / 2.0
+                with self.subTest(wall=wall, ux=ux):
+                    reach = max(abs(c) for c in plan.hinge_centers_x) + half
+                    self.assertLessEqual(
+                        reach,
+                        layout.outer_half_x - 1.0 - b4b.B4B_HINGE_CLEAR_KEEPOUT + 1e-9,
+                    )
+                    gap = 2.0 * min(abs(c) for c in plan.hinge_centers_x) - 2.0 * half
+                    self.assertGreaterEqual(gap, b4b.B4B_HINGE_CENTRE_GAP - 1e-9)
+
+    def test_hardware_root_does_not_follow_the_wall_setting(self):
+        for wall in (0.2, 0.4, 0.8, 2.0):
+            box = BoxSpec(x=64, y=48, z=40, wall=wall, b4b=B4BSpec(enabled=True))
+            eff = b4b.b4b_effective_box(box)
+            plan = b4b.b4b_hardware_plan(box)
+            layout = b4b.b4b_layout(box)
+            with self.subTest(wall=wall):
+                for web in (plan.hinge_web, plan.latch_web):
+                    self.assertGreaterEqual(
+                        eff.wall_depth + web,
+                        b4b.B4B_HW_ROOT_MIN_THICKNESS - 1e-9,
+                    )
+                # and the web is really there on the printed body, outboard of
+                # a wall that may be only 0.2 mm thick
+                body = b4b.make_b4b_body(box)
+                cx = plan.hinge_centers_x[0]
+                probe = [
+                    cx,
+                    layout.rear_wall_y(cx) + plan.hinge_web * 0.5,
+                    plan.hinge_pad_top_z - 1.0,
+                ]
+                self.assertTrue(body.contains([probe])[0])
+
+    def test_latch_lever_swings_clear_of_its_receiver(self):
+        """The lever must never rub the ears that carry the catch pin."""
+        from organizer_engine import intersection_volume
+
+        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
+        plan = b4b.b4b_hardware_plan(box)
+        # planar: the hook passes in front of the receiver web on real clearance
+        self.assertAlmostEqual(
+            plan.latch_pad_face_y - (plan.catch_axis_y + plan.hook_outer_r),
+            b4b.B4B_LATCH_BODY_CLEARANCE,
+            places=6,
+        )
+        # axial: a printed running gap each side, not a boolean one
+        self.assertGreaterEqual(b4b.B4B_HINGE_AXIAL_GAP, 0.3)
+        self.assertAlmostEqual(
+            plan.latch_width - plan.lever_width,
+            2.0 * b4b.B4B_HINGE_AXIAL_GAP,
+            places=6,
+        )
+        # and nothing actually touches when closed
+        body = b4b.b4b_body_with_features(box)
+        for lever in b4b.make_b4b_latches(box):
+            self.assertLess(intersection_volume(lever, body) / 1000.0, 0.05)
+
+    def test_lid_spigot_is_a_firm_running_fit_not_a_loose_one(self):
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
+        eff = b4b.b4b_effective_box(box)
+        mating = b4b.b4b_mating_polygon(box)
+        skirt_outer, _inner = b4b._skirt_polygons(eff)
+        gap = mating.exterior.distance(skirt_outer.exterior)
+        self.assertAlmostEqual(gap, b4b.B4B_LID_SEAT_CLEARANCE, places=2)
+        self.assertLessEqual(b4b.B4B_LID_SEAT_CLEARANCE, 0.2)
+        self.assertGreaterEqual(b4b.B4B_LID_SEAT_CLEARANCE, 0.1)
+
+    def test_secure_lid_plate_is_thicker_than_a_passive_one(self):
+        secure = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
+        passive = BoxSpec(x=64, y=48, z=40,
+                          b4b=B4BSpec(enabled=True, secure_lid=False))
+        self.assertEqual(b4b.b4b_lid_skin(passive), b4b.B4B_LID_SKIN)
+        self.assertEqual(b4b.b4b_lid_skin(secure), b4b.B4B_SECURE_LID_SKIN)
+        self.assertGreater(b4b.B4B_SECURE_LID_SKIN, b4b.B4B_LID_SKIN)
+        # every lid datum reads that one helper
+        lid = b4b.make_b4b_lid(secure)
+        self.assertAlmostEqual(
+            lid.bounds[1][2],
+            b4b.b4b_lid_underside_z(secure) + b4b.B4B_SECURE_LID_SKIN,
+            places=5,
+        )
 
 
 class B4BValidationTests(unittest.TestCase):
