@@ -603,8 +603,8 @@ const B4B_DEFAULTS = {
   latch_strength: "standard", lid_headroom_mm: 1, label_text: "",
   label_location: "top", stacking: false, handle: false,
 };
-// Product minimums. Nothing here ever edits the entered field: a B4B that is
-// too small for its hardware is reported as too small, not quietly grown.
+// Product minimums. Switching to B4B grows undersized field axes to 48 mm;
+// height stays user-controlled and is reported if it cannot carry a latched lid.
 const B4B_LATCHED_MIN_HEIGHT = 16;
 const B4B_MIN_FIELD = 48;
 const B4B_MIN_WALL = 1.2;
@@ -832,9 +832,8 @@ function readB4BForm(design) {
   };
 }
 
-// The wall is the one B4B value a mode may still promote: it is structural,
-// it grows outward, and it costs no capacity. X/Y/Z are the user's and stay
-// the user's - if they will not carry the hardware we say so instead.
+// The wall is promoted whenever B4B needs it. The child field is promoted on
+// the explicit type switch; height stays user-controlled.
 function enforceB4BMinimums(design = state.design, flash = true) {
   const b4b = design?.box?.b4b;
   if (!b4b?.enabled) return;
@@ -920,7 +919,7 @@ function renderB4BReadout() {
   } else {
     grew.hidden = true;
   }
-  // Minimums are reported, never applied behind the user's back.
+  // Remaining limits, such as those on older saved designs, are reported here.
   const problems = b4bLimitProblems();
   if (problems.length) {
     grew.textContent = problems.join(" ");
@@ -939,6 +938,8 @@ function renderB4BReadout() {
 }
 
 async function toggleB4B(wantEnabled) {
+  const sizeNote = $("#b4b-size-note");
+  if (sizeNote) sizeNote.hidden = true;
   if (wantEnabled) {
     // Placed interior parts need an explicit confirmation before they go.
     if (state.design?.layout?.features?.length) {
@@ -947,6 +948,24 @@ async function toggleB4B(wantEnabled) {
         "is reserved for child bins. Continue?");
       if (!ok) { $("#bin-type").value = "single"; return; }
       state.design.layout.features = [];
+    }
+    const raisedAxes = [];
+    for (const [axis, label] of [["x", "Width"], ["y", "Length"]]) {
+      if (number(state.design.box[axis], 0) < B4B_MIN_FIELD - 1e-9) {
+        state.design.box[axis] = B4B_MIN_FIELD;
+        const input = $(`#${axis}-size`);
+        if (input) {
+          formatDimField(axis);
+          flashField(input);
+        }
+        raisedAxes.push(label);
+      }
+    }
+    if (raisedAxes.length && sizeNote) {
+      sizeNote.textContent =
+        `B4B needs at least ${B4B_MIN_FIELD} × ${B4B_MIN_FIELD} mm. ` +
+        `${raisedAxes.join(" and ")} set to ${B4B_MIN_FIELD} mm.`;
+      sizeNote.hidden = false;
     }
     // An unsaved draft, a selection, or a pending debounced draft action must
     // not survive into B4B mode and later reinsert a part. clearDraftSelection
