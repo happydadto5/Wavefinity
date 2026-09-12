@@ -133,11 +133,17 @@ B4B_HW_PAD_HEIGHT = 10.0          # how far the web runs down the wall
 B4B_HW_CLEARANCE = 0.6            # static gap, body fitting to lid fitting
 B4B_HINGE_WEB = 1.6               # hinge web outboard of the outer wall face
 
-# Lid-side roots: the fitting must be tied into the plate by a real block, not
-# a face-to-face touch that merely reads as connected.
-B4B_BRIDGE_BITE = 1.0             # how far the block bites into the fitting
-B4B_BRIDGE_X_MARGIN = 2.0         # block wider than the fitting, each end
-B4B_BRIDGE_REACH = 4.0            # extra run into the plate, away from its edge
+# Lid-side roots: the fitting grows out of the plate through an arm that is
+# part of its own section, not a block tacked on afterwards.
+B4B_LID_ROOT_BITE = 1.0           # how far the arm overlaps the fitting
+B4B_LID_ROOT_REACH = 4.0          # run into the plate, away from its edge
+B4B_LID_FITTING_DROP = 1.6        # how far a lid fitting hangs below the plate
+
+# Every hardware section is filleted where it meets the plate or the root web
+# it grows from: a square internal corner is where a printed bracket cracks
+# off.  Derived from the fitting itself so it tracks the hardware, and capped
+# so the arc can never eat the drop below the plate or crowd the M3 bore.
+B4B_HW_FILLET = 1.2
 
 # Print-bed layout: parts are packed in a row, none overlapping.
 B4B_PRINT_PART_GAP = 8.0
@@ -456,6 +462,7 @@ class B4BHardwarePlan:
     strength_profile: dict
     # every head-bearing boss on the case is this one derived size
     boss_radius: float = 0.0
+    fillet_radius: float = 0.0
     # rear hinge root web
     hinge_web: float = 0.0
     hinge_pad_width: float = 0.0
@@ -612,6 +619,9 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
     boss_r = B4B_HW_BOSS_RADIUS
     boss_out = boss_r * _SUPPORT_FREE_CIRCUM      # widest radial reach of the
                                                   # support-free boss section
+    fillet = min(
+        B4B_HW_FILLET, 0.5 * B4B_LID_FITTING_DROP, 0.25 * boss_r
+    )
 
     # ---- hinges: two, symmetric, clear of the corners and of each other ----
     hinge_width = _hinge_width_for_case(case_x)
@@ -730,6 +740,7 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
         catch_axis_z=catch_axis_z,
         strength_profile=profile,
         boss_radius=boss_r,
+        fillet_radius=fillet,
         hinge_web=hinge_web,
         hinge_pad_width=hinge_pad_width,
         hinge_pad_face_y=hinge_pad_face_y,
@@ -843,9 +854,7 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     if eff.b4b.stacking and eff.b4b.lid:
         body = difference([body, *_stack_recesses(box)])
 
-    body.remove_unreferenced_vertices()
-    body.merge_vertices()
-    return body
+    return _weld(body)
 
 
 # --------------------------------------------------------------------------- #
@@ -883,47 +892,6 @@ def _skirt_lap(eff: BoxSpec) -> float:
     """
     clearance_above_child = b4b_rim_z_from_eff(eff) - (eff.base_thickness + eff.z)
     return max(0.0, min(B4B_LID_SKIRT_LAP, clearance_above_child - B4B_LID_SEAT_CLEARANCE))
-
-
-def _hardware_bridges(
-    hardware: list[trimesh.Trimesh],
-    layout: B4BLayout,
-    underside_z: float,
-    skin: float,
-) -> list[trimesh.Trimesh]:
-    """Blocks that tie each lid-side hinge knuckle / latch ear to the plate.
-
-    The hardware roots stand clear of the body's outer face, so in plan they
-    miss the plate entirely and the lid exports as one loose piece per fitting.
-    Each bridge spans that gap inside the hardware's own X slot - the slot the
-    body's interleaved hardware deliberately leaves empty - and only within the
-    plate's own Z band, which is above the rim and therefore clear of the body.
-    """
-    bridges: list[trimesh.Trimesh] = []
-    z0, z1 = underside_z, underside_z + skin
-    for part in hardware:
-        (x0, y0, _z0), (x1, y1, _z1) = part.bounds
-        front = 0.5 * (y0 + y1) < 0.0
-        # reach well past the deepest wave trough so the root lands on plate
-        # rather than entering it at its edge
-        target = layout.outer_half_y - WAVE_AMPLITUDE - 1.0 - B4B_BRIDGE_REACH
-        # bite into the fitting rather than stopping on its tangent plane: a
-        # face-to-face touch unions into two components, not one solid
-        bite = B4B_BRIDGE_BITE
-        near, far = (y1 - bite, -target) if front else (y0 + bite, target)
-        lo, hi = min(near, far), max(near, far)
-        if hi - lo <= _EPS:
-            continue
-        # the plate Z band is above the rim, so the body is nowhere near it and
-        # the root is free to be wider than the fitting it carries
-        x0 -= B4B_BRIDGE_X_MARGIN
-        x1 += B4B_BRIDGE_X_MARGIN
-        block = trimesh.creation.box(extents=(x1 - x0, hi - lo, z1 - z0))
-        block.apply_translation((
-            0.5 * (x0 + x1), 0.5 * (lo + hi), 0.5 * (z0 + z1),
-        ))
-        bridges.append(block)
-    return bridges
 
 
 def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
@@ -977,15 +945,11 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
         hardware.extend(_latch_lid_parts(box, plan))
     for part in hardware:
         lid = union([lid, part])
-    for bridge in _hardware_bridges(hardware, layout, underside_z, skin):
-        lid = union([lid, bridge])
 
     if eff.b4b.stacking:
         lid = difference([lid, *_stack_lid_sockets(box)])
 
-    lid.remove_unreferenced_vertices()
-    lid.merge_vertices()
-    return lid
+    return _weld(lid)
 
 
 def _chamfered_boss(radius: float, height: float, chamfer: float) -> trimesh.Trimesh:
@@ -1145,6 +1109,50 @@ def _pad_bottom_z(pad_top_z: float, face_u: float, outer_half: float) -> float:
     return max(pad_top_z - B4B_HW_PAD_HEIGHT, min(reach, pad_top_z - 2.0))
 
 
+def _weld(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Collapse boolean noise so a finished part survives the 3MF writer.
+
+    Where a 45-degree root taper grazes the wave, the boolean engine leaves the
+    odd pair of vertices a micron apart.  They are harmless in memory, but the
+    exporter merges on rounded coordinates, and merging one of those pairs
+    tears the solid into two components and fails mesh validation.  Merge them
+    here, on our own terms, and drop the degenerate triangles that fall out -
+    never at the cost of a mesh that was watertight before.
+    """
+    before = mesh.is_watertight
+    welded = mesh.copy()
+    welded.merge_vertices(digits_vertex=5)
+    welded.update_faces(welded.nondegenerate_faces(height=1e-6))
+    welded.update_faces(welded.unique_faces())
+    welded.remove_unreferenced_vertices()
+    if before and not welded.is_watertight:
+        return mesh
+    return welded
+
+
+def _filleted(profile: Polygon, radius: float) -> Polygon:
+    """Round every re-entrant corner of a hardware section to ``radius``.
+
+    A morphological *closing* - dilate then erode - adds material in internal
+    corners and leaves external ones exactly as drawn, which is what a fillet
+    is.  Sharp internal corners are where a printed bracket cracks off its
+    wall, so every hardware section is filleted against the plate or the root
+    web it grows out of, not merely unioned onto it.
+
+    The arc it leaves is tangent to both faces, so its slope never leaves the
+    range between them: filleting two faces that are each at least 45 degrees
+    can never introduce a shallower overhang.
+    """
+    if radius <= 0.0:
+        return profile
+    closed = profile.buffer(radius, join_style=1, quad_segs=12).buffer(
+        -radius, join_style=1, quad_segs=12
+    )
+    if closed.is_empty or not isinstance(closed, Polygon) or not closed.is_valid:
+        return profile
+    return closed
+
+
 def _cavity_prism(box: BoxSpec) -> trimesh.Trimesh:
     """The child-field cavity, as a cutter.
 
@@ -1161,26 +1169,18 @@ def _cavity_prism(box: BoxSpec) -> trimesh.Trimesh:
     return cavity
 
 
-def _reinforcement_pad(
-    box: BoxSpec,
-    *,
-    x_centre: float,
-    x_width: float,
-    outward_sign: float,
-    face_y: float,
-    pad_top_z: float,
-    cavity: trimesh.Trimesh,
-) -> trimesh.Trimesh:
-    """Exterior root web under one hardware group.
+def _pad_profile(
+    box: BoxSpec, *, outward_sign: float, face_y: float, pad_top_z: float
+) -> Polygon:
+    """Y/Z section of the exterior root web under one hardware group.
 
-    Starts at the inner mating face, crosses the whole local wall band whatever
-    ``wall`` the user chose, and grows outward to the fitting - so hinge torque
-    and latch pull enter a dedicated structural zone instead of a fraction of a
-    millimetre of Boolean overlap with a thin wall.  The underside is a single
-    45-degree taper back into the wall, so the body still prints upright with no
-    support, and nothing projects inward past the mating face.
+    Starts well inside the inner mating face - the caller trims it there on the
+    cavity - crosses the whole local wall band whatever ``wall`` the user chose,
+    and grows outward to the fitting, so hinge torque and latch pull enter a
+    dedicated structural zone instead of a fraction of a millimetre of Boolean
+    overlap with a thin wall.  The underside is a single 45-degree taper back
+    into the wall, so the body still prints upright with no support.
     """
-    eff = b4b_effective_box(box)
     layout = b4b_layout(box)
     # an outward coordinate, so front and rear share one construction
     face_u = abs(face_y)
@@ -1202,41 +1202,80 @@ def _reinforcement_pad(
     )
     if profile.is_empty or not isinstance(profile, Polygon):
         raise RuntimeError("a B4B hardware root web collapsed")
-    pad = _extrude_yz_profile(profile, x_width)
-    pad.apply_translation((x_centre, 0.0, 0.0))
-    return difference([pad, cavity])
+    return profile
+
+
+def _pad_end_chamfers(
+    *,
+    x_centre: float,
+    half_width: float,
+    face_y: float,
+    outward_sign: float,
+    web: float,
+    z_top: float,
+) -> list[trimesh.Trimesh]:
+    """Cutters that taper a root web back into the wall at both ends.
+
+    A rib that stops square on a wall concentrates peel right at its end face.
+    Each end is chamfered at 45 degrees in plan, from the web face back to the
+    wall crest, so the reinforcement fades out instead of stopping dead.  The
+    run is capped by the margin the web carries beyond its fitting, so a thick
+    web on a thin wall can never chamfer into the knuckles it supports.
+    """
+    run = min(web, B4B_HW_PAD_MARGIN_X - 0.3)
+    if run <= 0.05:
+        return []
+    face_u = abs(face_y)
+    big = 200.0
+    cutters: list[trimesh.Trimesh] = []
+    for sx in (-1.0, 1.0):
+        x_end = x_centre + sx * half_width
+        # the cut line, in (x, outward) space, through (x_end - sx*run, face)
+        # and (x_end, face - run); everything beyond it goes
+        corners_u = (face_u - run - big, face_u + big)
+        pts = []
+        for u in corners_u:
+            pts.append((x_end + sx * (face_u - run - u), outward_sign * u))
+        for u in reversed(corners_u):
+            pts.append((x_end + sx * (face_u - run - u + 2.0 * big), outward_sign * u))
+        cutter = _extrude_polygon(Polygon(pts), z_top + 20.0)
+        cutter.apply_translation((0.0, 0.0, -10.0))
+        cutters.append(cutter)
+    return cutters
 
 
 def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
     """One reinforced rear hinge per centre: a root web through the full wall
-    band, two gussets rising from it, and the two support-free body knuckles."""
+    band, two filleted gussets rising from it, and the two support-free body
+    knuckles."""
     eff = b4b_effective_box(box)
     seg = _hinge_seg(plan)
     kw = seg - B4B_HINGE_AXIAL_GAP
     r = plan.boss_radius
+    fillet = plan.fillet_radius
     cavity = _cavity_prism(box)
     parts: list[trimesh.Trimesh] = []
     for cx in plan.hinge_centers_x:
-        solid = _reinforcement_pad(
+        pad_prof = _pad_profile(
             box,
-            x_centre=cx,
-            x_width=plan.hinge_pad_width,
-            outward_sign=+1.0,
+            outward_sign=1.0,
             face_y=plan.hinge_pad_face_y,
             pad_top_z=plan.hinge_pad_top_z,
-            cavity=cavity,
         )
+        pad = _extrude_yz_profile(pad_prof, plan.hinge_pad_width)
+        pad.apply_translation((cx, 0.0, 0.0))
+        solid = pad
         bores: list[trimesh.Trimesh] = []
         for side, bore_r in (
             (-1.0, B4B_M3_CLEAR_BORE / 2.0),   # near: head bears here
-            (+1.0, B4B_M3_PILOT / 2.0),        # far: thread-forming lug
+            (1.0, B4B_M3_PILOT / 2.0),         # far: thread-forming lug
         ):
             kx = cx + side * seg
             root_y = plan.hinge_pad_face_y - 0.8      # bite into the web
             touch_y = plan.hinge_axis_y
             run = touch_y - root_y
             touch_lo_z = plan.hinge_axis_z - 0.5 * r
-            # the gusset's underside is one plane no shallower than 45 degrees,
+            # the gusset underside is one plane no shallower than 45 degrees,
             # and it starts inside the root web rather than on the wall skin
             root_z = min(plan.hinge_pad_top_z - 1.5, touch_lo_z - run)
             gusset_profile = Polygon([
@@ -1245,25 +1284,68 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                 (touch_y, plan.hinge_axis_z + 0.5 * r),
                 (touch_y, touch_lo_z),
             ])
-            gusset = _extrude_yz_profile(gusset_profile, kw)
-            gusset.apply_translation((kx, 0.0, 0.0))
-            solid = union([
-                solid,
-                gusset,
-                _knuckle(kx, plan.hinge_axis_y, plan.hinge_axis_z, kw, r),
-            ])
+            # Fillet the gusset against the web and the barrel as one section:
+            # the knuckle load crosses those two internal corners, and a square
+            # corner there is where the fitting would crack off the case.
+            tower = _filleted(
+                gusset_profile.union(
+                    translate_polygon(
+                        support_free_profile_yz(r),
+                        plan.hinge_axis_y,
+                        plan.hinge_axis_z,
+                    )
+                ).union(pad_prof),
+                fillet,
+            )
+            knuckle = _extrude_yz_profile(tower, kw)
+            knuckle.apply_translation((kx, 0.0, 0.0))
+            solid = union([solid, knuckle])
             # the body prints upright, so its bore roof faces assembly +Z
-            bore = _support_free_bore(bore_r, kw + 2.0, +1.0)
+            bore = _support_free_bore(bore_r, kw + 2.0, 1.0)
             bore.apply_translation((kx, plan.hinge_axis_y, plan.hinge_axis_z))
             bores.append(bore)
-        parts.append(difference([solid, *bores]))
+        chamfers = _pad_end_chamfers(
+            x_centre=cx,
+            half_width=plan.hinge_pad_width / 2.0,
+            face_y=plan.hinge_pad_face_y,
+            outward_sign=1.0,
+            web=plan.hinge_web,
+            z_top=plan.hinge_pad_top_z,
+        )
+        parts.append(difference([solid, cavity, *chamfers, *bores]))
     return parts
 
 
+def _lid_root_profile(
+    layout: B4BLayout,
+    *,
+    outward_sign: float,
+    fitting_inner_y: float,
+    underside_z: float,
+    skin: float,
+) -> Polygon:
+    """Y/Z section of the arm that carries a lid fitting into the top plate.
+
+    The fitting itself stands outboard of the case, so on its own it lands
+    beside the plate rather than in it.  This arm reaches back under the plate,
+    inside the plate own Z band, and is unioned into the fitting section before
+    filleting - so the fitting grows out of the plate through a rounded root
+    instead of being tacked onto its edge by a connectivity block.
+    """
+    reach = outward_sign * (
+        layout.outer_half_y - WAVE_AMPLITUDE - 1.0 - B4B_LID_ROOT_REACH
+    )
+    bite = fitting_inner_y + outward_sign * B4B_LID_ROOT_BITE
+    lo, hi = sorted((reach, bite))
+    return Polygon([
+        (lo, underside_z), (hi, underside_z),
+        (hi, underside_z + skin), (lo, underside_z + skin),
+    ])
+
+
 def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """The centre knuckle per hinge, hanging from the lid rear edge to the pin
-    axis and bored for clearance.  Distinct solid sharing the pin with the two
-    body towers."""
+    """The centre knuckle per hinge: barrel, the tab that drops to it, and the
+    filleted arm that roots the whole fitting into the lid plate."""
     eff = b4b_effective_box(box)
     underside_z = b4b_lid_underside_z(box)
     skin = b4b_lid_skin_from_eff(eff)
@@ -1278,21 +1360,33 @@ def _hinge_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
             layout.rear_wall_y(cx) + B4B_LID_SEAT_CLEARANCE
             + B4B_LID_SKIRT_WALL
         )
-        # never inboard of the body's root web: the two must not touch anywhere
+        # never inboard of the body root web: the two must not touch anywhere
         root_y = max(lid_back - 0.5, plan.hinge_pad_face_y + B4B_HW_CLEARANCE)
         tab_profile = Polygon([
-            (root_y, underside_z - 0.8),
+            (root_y, underside_z - B4B_LID_FITTING_DROP),
             (root_y, z_hi),
             (plan.hinge_axis_y, z_hi),
             (plan.hinge_axis_y + r, plan.hinge_axis_z),
             (plan.hinge_axis_y, plan.hinge_axis_z - r),
         ])
-        tab_bridge = _extrude_yz_profile(tab_profile, kw)
-        tab_bridge.apply_translation((cx, 0.0, 0.0))
-        tab = union([
-            tab_bridge,
-            _knuckle(cx, plan.hinge_axis_y, plan.hinge_axis_z, kw, r),
-        ])
+        arm = _lid_root_profile(
+            layout,
+            outward_sign=1.0,
+            fitting_inner_y=root_y,
+            underside_z=underside_z,
+            skin=skin,
+        )
+        barrel = translate_polygon(
+            support_free_profile_yz(r), plan.hinge_axis_y, plan.hinge_axis_z
+        )
+        section = _filleted(
+            tab_profile.union(barrel).union(arm), plan.fillet_radius
+        )
+        # Exactly the knuckle width, never wider: outboard of the plate edge
+        # this Z band is the body barrel interleaved on the same pin, so a
+        # root that spread sideways there would jam the closed lid.
+        tab = _extrude_yz_profile(section, kw)
+        tab.apply_translation((cx, 0.0, 0.0))
         # the lid prints rolled 180 degrees about X, so its bore roof is -Z
         bore = _support_free_bore(B4B_M3_CLEAR_BORE / 2.0, kw + 1.0, -1.0)
         bore.apply_translation((cx, plan.hinge_axis_y, plan.hinge_axis_z))
@@ -1326,27 +1420,28 @@ def _latch_frame(eff: BoxSpec, plan: B4BHardwarePlan) -> dict:
 
 def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
     """One reinforced front receiver per latch: the catch-pin ears standing on
-    an exterior web whose thickness is the profile's ``catch_thickness``."""
+    an exterior web whose thickness is the profile catch_thickness."""
     eff = b4b_effective_box(box)
     boss_r = plan.boss_radius
     ear_t = plan.catch_ear_thickness
+    fillet = plan.fillet_radius
     cavity = _cavity_prism(box)
     parts: list[trimesh.Trimesh] = []
     for cx in plan.latch_centers_x:
-        solid = _reinforcement_pad(
+        pad_prof = _pad_profile(
             box,
-            x_centre=cx,
-            x_width=plan.latch_pad_width,
             outward_sign=-1.0,
             face_y=plan.latch_pad_face_y,
             pad_top_z=plan.latch_pad_top_z,
-            cavity=cavity,
         )
+        pad = _extrude_yz_profile(pad_prof, plan.latch_pad_width)
+        pad.apply_translation((cx, 0.0, 0.0))
+        solid = pad
         inner_face = plan.lever_width / 2.0 + B4B_HINGE_AXIAL_GAP
         bores: list[trimesh.Trimesh] = []
         for side, bore_r in (
             (-1.0, B4B_M3_CLEAR_BORE / 2.0),   # near: head bears here
-            (+1.0, B4B_M3_PILOT / 2.0),        # far: thread-forming lug
+            (1.0, B4B_M3_PILOT / 2.0),         # far: thread-forming lug
         ):
             ex = cx + side * (inner_face + ear_t / 2.0)
             root_y = plan.latch_pad_face_y + 0.8       # bite into the web
@@ -1359,22 +1454,38 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                 (touch_y, plan.catch_axis_z + 0.5 * boss_r),
                 (touch_y, touch_lo_z),
             ])
-            support = _extrude_yz_profile(support_profile, ear_t)
-            support.apply_translation((ex, 0.0, 0.0))
+            ear = _filleted(
+                support_profile.union(
+                    translate_polygon(
+                        support_free_profile_yz(boss_r),
+                        plan.catch_axis_y,
+                        plan.catch_axis_z,
+                    )
+                ).union(pad_prof),
+                fillet,
+            )
             solid = union([
                 solid,
-                support,
-                _knuckle(ex, plan.catch_axis_y, plan.catch_axis_z, ear_t, boss_r),
+                translated(_extrude_yz_profile(ear, ear_t), (ex, 0.0, 0.0)),
             ])
-            bore = _support_free_bore(bore_r, ear_t + 2.0, +1.0)
+            bore = _support_free_bore(bore_r, ear_t + 2.0, 1.0)
             bore.apply_translation((ex, plan.catch_axis_y, plan.catch_axis_z))
             bores.append(bore)
-        parts.append(difference([solid, *bores]))
+        chamfers = _pad_end_chamfers(
+            x_centre=cx,
+            half_width=plan.latch_pad_width / 2.0,
+            face_y=plan.latch_pad_face_y,
+            outward_sign=-1.0,
+            web=plan.latch_web,
+            z_top=plan.latch_pad_top_z,
+        )
+        parts.append(difference([solid, cavity, *chamfers, *bores]))
     return parts
 
 
 def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimesh]:
-    """Two pivot ears per latch, hanging from the lid front to the pivot axis."""
+    """Two pivot ears per latch, rooted into the lid plate through a filleted
+    arm rather than hung off its edge."""
     eff = b4b_effective_box(box)
     layout = b4b_layout(box)
     f = _latch_frame(eff, plan)
@@ -1386,29 +1497,45 @@ def _latch_lid_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trimes
     boss_r = plan.boss_radius
     for cx in plan.latch_centers_x:
         inner_face = plan.latch_width / 2.0 + B4B_HINGE_AXIAL_GAP
-        for side, thickness, bore_r, roof in (
-            (-1.0, ear_t, B4B_M3_CLEAR_BORE / 2.0, -1.0),
-            (+1.0, lug_t, B4B_M3_PILOT / 2.0, -1.0),
+        for side, thickness, bore_r in (
+            (-1.0, ear_t, B4B_M3_CLEAR_BORE / 2.0),
+            (1.0, lug_t, B4B_M3_PILOT / 2.0),
         ):
             ex = cx + side * (inner_face + thickness / 2.0)
             wall_root = (
                 layout.front_wall_y(ex) - B4B_LID_SEAT_CLEARANCE
                 - B4B_LID_SKIRT_WALL + 0.5
             )
-            # stand clear of the body's receiver web: the hardware bridge, not
-            # a near miss against the case, is what ties this to the plate
+            # stand clear of the body receiver web: the arm, not a near miss
+            # against the case, is what ties this ear to the plate
             root_y = min(wall_root, plan.latch_pad_face_y - B4B_HW_CLEARANCE)
             profile = Polygon([
-                (root_y, f["underside_z"] - 0.8),
+                (root_y, f["underside_z"] - B4B_LID_FITTING_DROP),
                 (root_y, top),
                 (f["axis_y"] - boss_r, top),
                 (f["axis_y"] - boss_r, f["axis_z"] - boss_r),
                 (f["axis_y"] + 0.5 * boss_r, f["axis_z"] - boss_r),
             ])
-            ear = _extrude_yz_profile(profile, thickness)
+            arm = _lid_root_profile(
+                layout,
+                outward_sign=-1.0,
+                fitting_inner_y=root_y,
+                underside_z=f["underside_z"],
+                skin=skin,
+            )
+            boss = translate_polygon(
+                support_free_profile_yz(boss_r), f["axis_y"], f["axis_z"]
+            )
+            section = _filleted(
+                profile.union(boss).union(arm), plan.fillet_radius
+            )
+            # Exactly the ear thickness: the lever swings in the slot beside
+            # it and the body catch ear interleaves on the other side, so a
+            # wider root here would rub one of them.
+            ear = _extrude_yz_profile(section, thickness)
             ear.apply_translation((ex, 0.0, 0.0))
-            ear = union([ear, _knuckle(ex, f["axis_y"], f["axis_z"], thickness, boss_r)])
-            bore = _support_free_bore(bore_r, thickness + 2.0, roof)
+            # the lid prints rolled 180 degrees about X, so its bore roof is -Z
+            bore = _support_free_bore(bore_r, thickness + 2.0, -1.0)
             bore.apply_translation((ex, f["axis_y"], f["axis_z"]))
             parts.append(difference([ear, bore]))
     return parts
@@ -1450,6 +1577,10 @@ def make_b4b_latches(box: BoxSpec) -> list[trimesh.Trimesh]:
             (f["catch_axis_y"], f["catch_axis_z"] + mouth_half),
         ])
         profile = profile.difference(hook_bore.union(opening))
+        # The two jaws root at the mouth in a pair of square internal corners,
+        # and that is exactly where a hook snapped over a pin cracks.  Fillet
+        # them; the radius is taken off the mouth so it can never close it.
+        profile = _filleted(profile, min(plan.fillet_radius, 0.4 * mouth_half))
         lever = _extrude_yz_profile(profile, lever_w)
         lever.apply_translation((cx, 0.0, 0.0))
         bore = _x_cylinder(B4B_M3_CLEAR_BORE / 2.0, lever_w + 4.0)
@@ -1557,7 +1688,10 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
     # across the receiver web and B4B_HINGE_AXIAL_GAP against the catch ears - so
     # it must not touch the body at all when closed, only boolean noise.
     LATCH_CLOSED_CEIL_CC = 0.05
-    LID_CLOSED_CEIL_CC = 0.35            # knuckle interleave + skirt seat
+    # Same standard for the lid: the knuckles interleave on running gaps and
+    # the spigot drops into a clearance fit, so a closed lid rests on its rim
+    # and touches nothing else.
+    LID_CLOSED_CEIL_CC = 0.05
 
     # 3-4. latch rotation about its pivot (the front-label frame is already
     # unioned into `body`).  A rigid rotating hook necessarily grazes the lip
@@ -1594,8 +1728,9 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
         )
         if closed > LID_CLOSED_CEIL_CC:
             raise ValueError(
-                f"the closed lid statically interferes with the body "
-                f"(overlap {closed:.3f} cc, allowance {LID_CLOSED_CEIL_CC:.2f} cc)"
+                f"the closed lid binds against the body "
+                f"(overlap {closed:.3f} cc, allowance {LID_CLOSED_CEIL_CC:.2f} cc); "
+                f"it must seat on its rim, not jam on its hardware"
             )
         open_worst = _sweep_intersection_cc(
             lid, body, plan.hinge_axis_y, plan.hinge_axis_z,
@@ -1805,9 +1940,7 @@ def b4b_body_with_features(box: BoxSpec) -> trimesh.Trimesh:
     b4b = b4b_effective_box(box).b4b
     if b4b.label_location == "front" and b4b.label_text.strip():
         frame, _plate, _centre = b4b_front_label_geometry(box)
-        body = union([body, frame])
-        body.remove_unreferenced_vertices()
-        body.merge_vertices()
+        body = _weld(union([body, frame]))
     return body
 
 
@@ -1946,7 +2079,7 @@ def _apply_top_label(box: BoxSpec, lid: trimesh.Trimesh):
     top_z = b4b_lid_underside_z(box) + b4b_lid_skin(box)
     pocket = text_prism(outline, top_z, depth=TEXT_DEPTH)
     inlay = text_prism(outline, top_z, depth=TEXT_DEPTH)
-    return difference([lid, pocket]), inlay
+    return _weld(difference([lid, pocket])), inlay
 
 
 def b4b_front_label_geometry(box: BoxSpec):

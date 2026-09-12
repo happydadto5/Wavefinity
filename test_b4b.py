@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
 
 from organizer_engine import (
     GRID_PITCH,
@@ -299,13 +299,14 @@ class B4BGeometryTests(unittest.TestCase):
                             f"{name}/{pname} is multi-component",
                         )
 
-    def test_body_and_lid_barely_touch_when_closed(self):
+    def test_body_and_lid_do_not_touch_when_closed(self):
         from organizer_engine import intersection_volume
 
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
         body = b4b.make_b4b_body(box)
         lid = b4b.make_b4b_lid(box)
-        self.assertLess(intersection_volume(body, lid) / 1000.0, 0.25)
+        # the lid seats on its rim; the interleaved knuckles run on clearance
+        self.assertLess(intersection_volume(body, lid) / 1000.0, 0.05)
 
     def test_lid_plate_never_exceeds_body_footprint(self):
         box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
@@ -552,6 +553,164 @@ class B4BSupportFreeHardwareTests(unittest.TestCase):
         )
 
 
+def _airborne_overhangs(mesh):
+    """(total area, worst-sloped face area) of down-facing surface that is not
+    sitting on the bed, split into flat bridges and true overhangs.
+
+    A face at 45 degrees or steeper from horizontal prints unsupported; a flat
+    down-facing face is a bridge, which is fine only while it is short.
+    """
+    normals = mesh.face_normals
+    areas = mesh.area_faces
+    centres = mesh.vertices[mesh.faces].mean(axis=1)
+    airborne = centres[:, 2] > mesh.bounds[0][2] + 1e-3
+    down = normals[:, 2] < -1e-9
+    slope = np.degrees(np.arccos(np.clip(-normals[:, 2], 0.0, 1.0)))
+    bridge = airborne & down & (slope < 5.0)
+    sloped = airborne & down & (slope >= 5.0) & (slope < 44.9)
+    return float(areas[bridge].sum()), float(areas[sloped].sum())
+
+
+class B4BPrintabilityTests(unittest.TestCase):
+    """b4b_build_parts must emit parts that print as they stand: the body
+    upright, the lid rolled onto its flat top, the levers on their broad face,
+    and no supports anywhere."""
+
+    SIZES = ((64, 48, 40, 0.8), (64, 48, 16, 0.2), (80, 64, 50, 2.0))
+
+    def test_nothing_needs_support_in_the_printed_pose(self):
+        for x, y, z, wall in self.SIZES:
+            box = BoxSpec(x=x, y=y, z=z, wall=wall, b4b=B4BSpec(enabled=True))
+            plan = b4b.b4b_hardware_plan(box)
+            kw = plan.hinge_width / 3.0 - b4b.B4B_HINGE_AXIAL_GAP
+            flat = 2.0 * b4b.B4B_SUPPORT_FREE_FLAT * plan.boss_radius
+            # the only flat down-facing faces the body may carry are the
+            # bottom facets of its bosses: four hinge knuckles and two catch
+            # ears per latch, each no wider than the bounded bridge
+            boss_width = (
+                4.0 * kw
+                + 2.0 * plan.latch_count_resolved * plan.catch_ear_thickness
+            )
+            # a fillet that closes a gap narrower than itself leaves a sloped
+            # lip, and that lip can never be longer than the fillet diameter
+            closure = 2.0 * plan.fillet_radius * boss_width
+            with self.subTest(size=(x, y, z, wall)):
+                bridge, sloped = _airborne_overhangs(b4b.b4b_body_with_features(box))
+                self.assertLessEqual(bridge, flat * boss_width)
+                self.assertLessEqual(sloped, closure, "body has a real overhang")
+                # flipped, every boss facet that was flat on the bed now faces
+                # the nozzle, so the lid carries essentially nothing
+                lid = b4b._print_pose(b4b.make_b4b_lid(box), "lid")
+                bridge, sloped = _airborne_overhangs(lid)
+                self.assertLessEqual(bridge + sloped, 2.0, "lid needs support")
+                for lever in b4b.make_b4b_latches(box):
+                    bridge, sloped = _airborne_overhangs(
+                        b4b._print_pose(lever, "latch")
+                    )
+                    self.assertLessEqual(bridge + sloped, 0.5)
+
+    def test_lid_prints_top_down_on_one_completely_flat_face(self):
+        for x, y, z, wall in self.SIZES:
+            box = BoxSpec(x=x, y=y, z=z, wall=wall, b4b=B4BSpec(enabled=True))
+            skin = b4b.b4b_lid_skin(box)
+            top_z = b4b.b4b_lid_underside_z(box) + skin
+            lid = b4b.make_b4b_lid(box)
+            with self.subTest(size=(x, y, z, wall)):
+                # nothing anywhere on the lid stands above the top plate: the
+                # hinge barrels and latch bosses are flush with it by design
+                self.assertAlmostEqual(lid.bounds[1][2], top_z, places=5)
+                posed = b4b._print_pose(lid, "lid")
+                zmin = posed.bounds[0][2]
+                on_bed = np.all(
+                    np.isclose(posed.vertices[posed.faces][:, :, 2], zmin, atol=1e-3),
+                    axis=1,
+                )
+                v = posed.vertices[posed.faces[on_bed]]
+                area = 0.5 * np.linalg.norm(
+                    np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0]), axis=1
+                ).sum()
+                plate = b4b.b4b_layout(box).outer_structural_polygon.area
+                self.assertGreater(area, 0.9 * plate)
+
+    def test_closed_lid_rests_on_its_rim_and_touches_nothing_else(self):
+        from organizer_engine import intersection_volume
+
+        for x, y, z, wall in self.SIZES:
+            box = BoxSpec(x=x, y=y, z=z, wall=wall, b4b=B4BSpec(enabled=True))
+            with self.subTest(size=(x, y, z, wall)):
+                overlap = intersection_volume(
+                    b4b.make_b4b_body(box), b4b.make_b4b_lid(box)
+                ) / 1000.0
+                self.assertLess(overlap, 0.05)
+
+
+class B4BFilletTests(unittest.TestCase):
+    """Hardware is filleted where it grows out of the lid plate or the body
+    root web - a square internal corner is where a printed bracket cracks."""
+
+    def test_fillet_helper_adds_material_only_in_internal_corners(self):
+        ell = Polygon([(0, 0), (10, 0), (10, 4), (4, 4), (4, 10), (0, 10)])
+        rounded = b4b._filleted(ell, 1.0)
+        self.assertGreater(rounded.area, ell.area)
+        # the internal corner is filled...
+        self.assertTrue(rounded.contains(Point(4.2, 4.2)))
+        # ...with an arc, not a square block
+        self.assertFalse(rounded.contains(Point(4.9, 4.9)))
+        # and every external corner survives untouched
+        for corner in ((0.01, 0.01), (9.99, 0.01), (9.99, 3.99), (0.01, 9.99)):
+            self.assertTrue(rounded.contains(Point(*corner)))
+
+    def test_every_hardware_family_is_filleted_at_its_root(self):
+        """Each builder must put material in its internal corners - compare
+        each fitting against the same fitting built with no fillet at all."""
+        from dataclasses import replace
+
+        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
+        plan = b4b.b4b_hardware_plan(box)
+        self.assertGreater(plan.fillet_radius, 0.4)
+        square = replace(plan, fillet_radius=0.0)
+        for name, builder in (
+            ("body hinge", b4b._hinge_body_parts),
+            ("lid hinge", b4b._hinge_lid_parts),
+            ("body latch", b4b._latch_body_parts),
+            ("lid latch", b4b._latch_lid_parts),
+        ):
+            with self.subTest(name):
+                rounded = sum(p.volume for p in builder(box, plan))
+                sharp = sum(p.volume for p in builder(box, square))
+                self.assertGreater(rounded, sharp)
+
+    def test_root_web_ends_taper_back_into_the_wall(self):
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
+        plan = b4b.b4b_hardware_plan(box)
+        body = b4b.make_b4b_body(box)
+        cx = plan.hinge_centers_x[1]
+        half = plan.hinge_pad_width / 2.0
+        run = min(plan.hinge_web, b4b.B4B_HW_PAD_MARGIN_X - 0.3)
+        self.assertGreater(run, 0.5)
+        y = plan.hinge_pad_face_y - 0.05
+        z = plan.hinge_pad_top_z - 1.0
+        # the very end of the web is chamfered away at 45 degrees in plan...
+        self.assertFalse(body.contains([[cx + half - 0.1, y, z]])[0])
+        # ...and one run in, the web is at full thickness
+        self.assertTrue(body.contains([[cx + half - run - 0.5, y, z]])[0])
+
+    def test_latch_jaw_roots_are_filleted(self):
+        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
+        plan = b4b.b4b_hardware_plan(box)
+        lever = b4b.make_b4b_latches(box)[0]
+        self.assertTrue(lever.is_watertight)
+        self.assertEqual(len(lever.split(only_watertight=False)), 1)
+        # the mouth still opens: the fillet may never close the snap gap
+        prof = plan.strength_profile
+        mouth = max(0.8, b4b.B4B_M3_NOMINAL - prof["detent"])
+        probe = plan.catch_axis_y + plan.hook_outer_r * 1.2
+        self.assertFalse(
+            lever.contains([[plan.latch_centers_x[0], probe, plan.catch_axis_z]])[0]
+        )
+        self.assertGreater(mouth, 2.0)
+
+
 class B4BValidationTests(unittest.TestCase):
     def test_rejects_interior_features(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
@@ -608,7 +767,11 @@ class B4BSerializationTests(unittest.TestCase):
         data = design_to_dict(box, Layout((), "fused"))
         self.assertEqual(data["version"], 3)
         back, layout, *_ = design_from_dict(data)
-        self.assertEqual(back.b4b, box.b4b)
+        # latch_count is derived from the box, not stored: a saved "2" comes
+        # back as "auto" (see test_manual_latch_count_no_longer_honoured), so
+        # what must round-trip exactly is the normalised design.
+        self.assertEqual(back.b4b, box.b4b.normalised())
+        self.assertEqual(back.b4b.latch_count, "auto")
         self.assertEqual(len(layout.features), 0)
         self.assertEqual(layout.mode, "fused")
 
