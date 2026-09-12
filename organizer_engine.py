@@ -306,6 +306,7 @@ class B4BSpec:
     label_text: str = ""
     label_location: str = "top"        # none | top | front
     stacking: bool = False
+    handle: bool = True                # carrying handle bolted to the lid top
 
     def __post_init__(self) -> None:
         if self.latch_count not in B4B_LATCH_COUNTS:
@@ -336,11 +337,15 @@ class B4BSpec:
         Lid Only design; dependent hardware and stacking settings stay off.
         Label location is a stored preference, not a request for geometry
         while the label text is blank.
+
+        A handle stands proud of the lid top, which is the face the next case
+        in a stack sits on, so the two cannot both be fitted: stacking wins.
         """
         legacy_lid = bool(self.lid)
         lid = True if self.enabled else legacy_lid
         secure = bool(self.secure_lid) and legacy_lid
         stacking = bool(self.stacking) and legacy_lid
+        handle = bool(self.handle) and lid and not stacking
         # Latch count is always derived from box size now; an explicit "1"/"2"
         # saved by an older file is no longer a supported override.
         latch_count = "auto"
@@ -355,6 +360,7 @@ class B4BSpec:
             label_text=self.label_text,
             label_location=self.label_location,
             stacking=stacking,
+            handle=handle,
         )
 
 

@@ -1767,6 +1767,7 @@ def design_to_dict(
             "label_text": b4b.label_text,
             "label_location": b4b.label_location,
             "stacking": b4b.stacking,
+            "handle": b4b.handle,
         }
     stack = getattr(box, "stack", None) or StackSpec()
     if stack.enabled:
@@ -1814,6 +1815,7 @@ def design_from_dict(
             label_text=str(b4b_raw.get("label_text", "")),
             label_location=str(b4b_raw.get("label_location", "top")),
             stacking=bool(b4b_raw.get("stacking", False)),
+            handle=bool(b4b_raw.get("handle", True)),
         )
     x, y = float(raw["x"]), float(raw["y"])
     if b4b.enabled and design_version == 2:

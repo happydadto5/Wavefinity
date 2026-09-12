@@ -92,6 +92,7 @@ const COLORS = {
   // B4B parts get their own colour family, distinct from interior features.
   b4b_body: "#8ea8b2", b4b_lid: "#7fa9b6", b4b_hinge: "#5f8794",
   b4b_latch: "#c98a4a", b4b_stack: "#9d86c8", b4b_label: "#315766",
+  b4b_handle: "#6b9aa7",
 };
 const INSERT_TINT = "#c2a075";
 const INSERT_TINT_MIX = .5;
@@ -579,7 +580,7 @@ function updateInteriorModeVisibility(reveal = false) {
 const B4B_DEFAULTS = {
   enabled: false, lid: true, secure_lid: true, latch_count: "auto",
   latch_strength: "standard", lid_headroom_mm: 1, label_text: "",
-  label_location: "top", stacking: false,
+  label_location: "top", stacking: false, handle: true,
 };
 const B4B_LATCHED_MIN_HEIGHT = 16;
 
@@ -623,6 +624,12 @@ function applyB4BVisibility() {
     document.querySelector('.view-tab[data-view="3d"]')?.click();
   }
   if (on) {
+    // A handle stands proud of the lid top, which is the face the next case in
+    // a stack sits on, so the two cannot both be fitted.
+    const stacked = $("#b4b-stacking").checked;
+    $("#b4b-handle").disabled = stacked;
+    if (stacked) $("#b4b-handle").checked = false;
+    hide("#b4b-handle-note", !stacked);
     $("#b4b-secure-options").hidden = $("#b4b-lid-type").value !== "latched";
     // The label's text and location only exist once Add label is ticked.
     const labelled = $("#b4b-label-enabled").checked;
@@ -643,6 +650,7 @@ function syncB4BForm() {
   $("#b4b-lid-type").value = b4b.lid !== false && b4b.secure_lid !== false
     ? "latched" : "lid_only";
   $("#b4b-stacking").checked = Boolean(b4b.stacking);
+  $("#b4b-handle").checked = Boolean(b4b.handle) && !b4b.stacking;
   $("#b4b-lid-snugness").value = String(b4b.lid_headroom_mm ?? 1);
   $("#b4b-latch-strength").value = b4b.latch_strength || "standard";
   // Add label follows the design's label text. Text typed and then switched
@@ -719,6 +727,7 @@ function readB4BForm(design) {
     label_text: $("#b4b-label-enabled").checked ? $("#b4b-label-text").value : "",
     label_location: $("#b4b-label-location").value,
     stacking: $("#b4b-stacking").checked,
+    handle: $("#b4b-handle").checked && !$("#b4b-stacking").checked,
   };
 }
 
@@ -742,6 +751,7 @@ function groupB4BHardware(hardware) {
   add(hardware.hinge_qty, hardware.hinge_screw);
   add(hardware.latch_qty, hardware.latch_screw);
   add(hardware.catch_qty, hardware.catch_screw);
+  add(hardware.handle_qty, hardware.handle_screw);
   return [...byLength.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([length, qty]) => `${qty} M3 (${length}mm)`)
@@ -780,9 +790,12 @@ function renderB4BReadout() {
   } else {
     grew.hidden = true;
   }
-  if (b4b.secure_lid && b4b.hardware) {
-    const latches = b4b.latch_count === 1 ? "1 latch" : `${b4b.latch_count} latches`;
-    hardware.textContent = `${latches} — Hardware: ${groupB4BHardware(b4b.hardware)}`;
+  if ((b4b.secure_lid || b4b.handle) && b4b.hardware) {
+    const bits = [];
+    if (b4b.secure_lid) bits.push(b4b.latch_count === 1 ? "1 latch" : `${b4b.latch_count} latches`);
+    if (b4b.handle) bits.push("handle");
+    const screws = groupB4BHardware(b4b.hardware);
+    hardware.textContent = `${bits.join(" + ")}${screws ? ` — Hardware: ${screws}` : ""}`;
     hardware.hidden = false;
   } else {
     hardware.hidden = true;
@@ -1284,7 +1297,7 @@ function wireControls() {
     applyStackVisibility();
     changedDesign();
   });
-  ["#b4b-lid-type", "#b4b-stacking"].forEach(sel =>
+  ["#b4b-lid-type", "#b4b-stacking", "#b4b-handle"].forEach(sel =>
     $(sel).addEventListener("change", () => {
       normalizeB4BDependentControls();
       readB4BForm(state.design);

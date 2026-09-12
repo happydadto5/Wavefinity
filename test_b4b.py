@@ -64,7 +64,8 @@ class B4BCapacityTests(unittest.TestCase):
                 for uy in (2, 6, 10):
                     box = BoxSpec(
                         x=ux * GRID_PITCH, y=uy * GRID_PITCH, z=40, wall=wall,
-                        b4b=B4BSpec(enabled=True, secure_lid=False, lid=False),
+                        b4b=B4BSpec(enabled=True, secure_lid=False, lid=False,
+                                    handle=False),
                     )
                     self.assertEqual(b4b.b4b_capacity_units(box), (ux, uy))
                     self.assertEqual(
@@ -74,7 +75,8 @@ class B4BCapacityTests(unittest.TestCase):
 
     def test_32_by_48_means_four_by_six_child_field(self):
         # a passive lid asks nothing of the field, so 32x48 stays 32x48
-        box = BoxSpec(x=32, y=48, z=40, b4b=B4BSpec(enabled=True, secure_lid=False))
+        box = BoxSpec(x=32, y=48, z=40,
+                      b4b=B4BSpec(enabled=True, secure_lid=False, handle=False))
         self.assertEqual(b4b.b4b_capacity_units(box), (4, 6))
         self.assertEqual(b4b.b4b_capacity_mm(box), (32, 48))
 
@@ -324,10 +326,16 @@ class B4BGeometryTests(unittest.TestCase):
         self.assertTrue(body_outline.buffer(1e-6).contains(skirt_outer))
         self.assertTrue(skirt_outer.buffer(1e-6).contains(skirt_inner))
 
-    def test_passive_lid_has_no_hardware(self):
+    def test_passive_lid_has_no_hinges_or_latches(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, secure_lid=False))
         names = [n for n, _ in b4b.b4b_build_parts(box)]
-        self.assertEqual(names, ["B4B Body", "B4B Lid"])
+        # a passive lid still carries the handle, which is its own fitting
+        self.assertEqual(names, ["B4B Body", "B4B Lid", "B4B Handle"])
+        bare = BoxSpec(x=64, y=48, z=40,
+                       b4b=B4BSpec(enabled=True, secure_lid=False, handle=False))
+        self.assertEqual(
+            [n for n, _ in b4b.b4b_build_parts(bare)], ["B4B Body", "B4B Lid"]
+        )
 
     def test_blank_label_preference_creates_no_label_parts(self):
         for location in ("top", "front"):
@@ -537,12 +545,17 @@ class B4BSupportFreeHardwareTests(unittest.TestCase):
         self.assertLessEqual(b4b.B4B_LID_SEAT_CLEARANCE, 0.2)
         self.assertGreaterEqual(b4b.B4B_LID_SEAT_CLEARANCE, 0.1)
 
-    def test_secure_lid_plate_is_thicker_than_a_passive_one(self):
-        secure = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
-        passive = BoxSpec(x=64, y=48, z=40,
-                          b4b=B4BSpec(enabled=True, secure_lid=False))
+    def test_lid_plate_thickens_with_what_it_has_to_carry(self):
+        def spec(**kw):
+            return BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, **kw))
+        passive = spec(secure_lid=False, handle=False)
+        secure = spec(handle=False)
+        handled = spec()
         self.assertEqual(b4b.b4b_lid_skin(passive), b4b.B4B_LID_SKIN)
         self.assertEqual(b4b.b4b_lid_skin(secure), b4b.B4B_SECURE_LID_SKIN)
+        # a handled lid is the thread-forming lug for its own screws
+        self.assertEqual(b4b.b4b_lid_skin(handled), b4b.B4B_HANDLE_LID_SKIN)
+        self.assertGreater(b4b.B4B_HANDLE_LID_SKIN, b4b.B4B_SECURE_LID_SKIN)
         self.assertGreater(b4b.B4B_SECURE_LID_SKIN, b4b.B4B_LID_SKIN)
         # every lid datum reads that one helper
         lid = b4b.make_b4b_lid(secure)
@@ -711,6 +724,156 @@ class B4BFilletTests(unittest.TestCase):
         self.assertGreater(mouth, 2.0)
 
 
+class B4BHandleTests(unittest.TestCase):
+    """The carrying handle: a printed arch bolted to the lid top with two M3
+    screws, on by default, that must not cost the lid its flat printed face."""
+
+    def test_on_by_default_and_off_when_the_case_is_stacked(self):
+        self.assertTrue(B4BSpec().handle)
+        plain = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
+        stacked = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True, stacking=True))
+        self.assertIsNotNone(b4b.b4b_handle_plan(plain))
+        # the next case in a stack sits on the lid top, where the handle is
+        self.assertFalse(B4BSpec(enabled=True, stacking=True).normalised().handle)
+        self.assertIsNone(b4b.b4b_handle_plan(stacked))
+        self.assertNotIn("B4B Handle", [n for n, _m in b4b.b4b_build_parts(stacked)])
+        self.assertIn("B4B Handle", [n for n, _m in b4b.b4b_build_parts(plain)])
+
+    def test_handle_scales_with_the_case(self):
+        plans = []
+        for ux in (5, 8, 12, 20):
+            box = BoxSpec(x=ux * GRID_PITCH, y=64, z=40, b4b=B4BSpec(enabled=True))
+            plans.append(b4b.b4b_handle_plan(box))
+        for smaller, larger in zip(plans, plans[1:]):
+            self.assertGreater(larger.span, smaller.span)
+            self.assertGreaterEqual(larger.foot_length, smaller.foot_length)
+            self.assertGreaterEqual(larger.grip_thickness, smaller.grip_thickness)
+        # a hand is a hand, so the opening under the grip stays in its band
+        for plan in plans:
+            self.assertGreaterEqual(plan.grip_clear, b4b.B4B_HANDLE_GRIP_CLEAR_MIN)
+            self.assertLessEqual(plan.grip_clear, b4b.B4B_HANDLE_GRIP_CLEAR_MAX)
+            self.assertGreaterEqual(
+                plan.span - plan.upright, b4b.B4B_HANDLE_MIN_OPENING
+            )
+
+    def test_handle_stays_on_the_lid_and_off_the_corners(self):
+        for ux, uy in ((5, 4), (10, 8), (20, 12)):
+            box = BoxSpec(x=ux * GRID_PITCH, y=uy * GRID_PITCH, z=40,
+                          b4b=B4BSpec(enabled=True))
+            plan = b4b.b4b_handle_plan(box)
+            case_x, case_y = b4b.b4b_layout(box).case_size
+            with self.subTest(ux=ux, uy=uy):
+                reach = abs(plan.centers_x[1]) + plan.foot_length / 2.0
+                self.assertLessEqual(reach, case_x / 2.0 - 1.0 + 1e-9)
+                self.assertLessEqual(plan.depth / 2.0, case_y / 2.0 - 1.0)
+
+    def test_a_narrow_case_grows_rather_than_refusing_a_handle(self):
+        box = BoxSpec(x=16, y=32, z=30,
+                      b4b=B4BSpec(enabled=True, secure_lid=False))
+        self.assertTrue(b4b.b4b_grew(box))
+        self.assertGreaterEqual(b4b.b4b_effective_box(box).x, 40.0)
+        # and turning the handle off leaves the small case exactly as asked
+        plain = BoxSpec(x=16, y=32, z=30,
+                        b4b=B4BSpec(enabled=True, secure_lid=False, handle=False))
+        self.assertEqual(b4b.b4b_effective_box(plain).x, 16)
+        self.assertIsNone(b4b.b4b_handle_plan(plain))
+
+    def test_handle_bolts_to_the_plate_with_no_nut_and_nothing_hanging_below(self):
+        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
+        plan = b4b.b4b_handle_plan(box)
+        skin = b4b.b4b_lid_skin(box)
+        # the plate itself is the thread-forming lug, so it is thick enough
+        self.assertEqual(skin, b4b.B4B_HANDLE_LID_SKIN)
+        self.assertGreaterEqual(skin, b4b.B4B_M3_THREAD_ENGAGE_MIN)
+        self.assertIn(plan.screw_length_mm, b4b.B4B_SCREW_LENGTHS)
+        # the screw is consumed by the foot and the plate, so nothing pokes
+        # through into the child bins
+        protrusion = plan.screw_length_mm - plan.foot_height - skin
+        self.assertLessEqual(protrusion, b4b.B4B_HANDLE_SCREW_SLACK + 1e-9)
+        self.assertGreaterEqual(plan.screw_length_mm - plan.foot_height, skin - 1e-9)
+        # and the lid is drilled for it
+        lid = b4b.make_b4b_lid(box)
+        for cx in plan.centers_x:
+            self.assertFalse(lid.contains([[cx, 0.0, plan.top_z - skin / 2.0]])[0])
+
+    def test_handle_stands_on_the_lid_rather_than_cutting_into_it(self):
+        from organizer_engine import intersection_volume
+
+        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
+        handle = b4b.make_b4b_handle(box)
+        lid = b4b.make_b4b_lid(box)
+        self.assertTrue(handle.is_watertight)
+        self.assertEqual(len(handle.split(only_watertight=False)), 1)
+        self.assertLess(intersection_volume(handle, lid) / 1000.0, 0.05)
+        plan = b4b.b4b_handle_plan(box)
+        self.assertAlmostEqual(float(handle.bounds[0][2]), plan.top_z, places=5)
+
+    def test_handle_prints_flat_with_no_support(self):
+        for ux in (5, 10, 20):
+            box = BoxSpec(x=ux * GRID_PITCH, y=64, z=40, b4b=B4BSpec(enabled=True))
+            posed = b4b._print_pose(b4b.make_b4b_handle(box), "handle")
+            with self.subTest(ux=ux):
+                bridge, sloped = _airborne_overhangs(posed)
+                self.assertLessEqual(bridge + sloped, 0.5)
+                zmin = posed.bounds[0][2]
+                on_bed = np.all(
+                    np.isclose(posed.vertices[posed.faces][:, :, 2], zmin, atol=1e-3),
+                    axis=1,
+                )
+                v = posed.vertices[posed.faces[on_bed]]
+                area = 0.5 * np.linalg.norm(
+                    np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0]), axis=1
+                ).sum()
+                self.assertGreater(area, 200.0)
+
+    def test_a_handled_lid_still_prints_on_one_flat_face(self):
+        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
+        lid = b4b.make_b4b_lid(box)
+        top_z = b4b.b4b_lid_underside_z(box) + b4b.b4b_lid_skin(box)
+        self.assertAlmostEqual(lid.bounds[1][2], top_z, places=5)
+        posed = b4b._print_pose(lid, "lid")
+        zmin = posed.bounds[0][2]
+        on_bed = np.all(
+            np.isclose(posed.vertices[posed.faces][:, :, 2], zmin, atol=1e-3), axis=1
+        )
+        v = posed.vertices[posed.faces[on_bed]]
+        area = 0.5 * np.linalg.norm(
+            np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0]), axis=1
+        ).sum()
+        self.assertGreater(area, 0.9 * b4b.b4b_layout(box).outer_structural_polygon.area)
+
+    def test_top_label_moves_in_front_of_the_handle(self):
+        spec = dict(enabled=True, label_text="FASTENERS", label_location="top")
+        handled = BoxSpec(x=96, y=80, z=40, b4b=B4BSpec(**spec))
+        plain = BoxSpec(x=96, y=80, z=40, b4b=B4BSpec(handle=False, **spec))
+        plan = b4b.b4b_handle_plan(handled)
+        with_handle = b4b.b4b_top_label_outline(handled)
+        without = b4b.b4b_top_label_outline(plain)
+        # clear of the handle footprint, and further forward than it would be
+        self.assertLess(with_handle.bounds[3], -plan.depth / 2.0)
+        self.assertLess(with_handle.bounds[3], without.bounds[3])
+        self.assertIn("B4B Top Label", [n for n, _m in b4b.b4b_build_parts(handled)])
+
+    def test_summary_reports_the_handle_and_its_screws(self):
+        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(enabled=True))
+        summary = b4b.b4b_summary(box)
+        plan = b4b.b4b_handle_plan(box)
+        self.assertTrue(summary["handle"])
+        self.assertEqual(summary["hardware"]["handle_qty"], 2)
+        self.assertEqual(summary["hardware"]["handle_screw"], f"M3x{plan.screw_length_mm}")
+        self.assertIn(f"2 x M3x{plan.screw_length_mm} handle screws", summary["hardware_bom"])
+        self.assertEqual(summary["hardware_bom"][-1], "No nuts")
+        # the arch is part of what the finished case measures
+        self.assertGreaterEqual(
+            summary["assembled_envelope_mm"][2], plan.top_z + plan.height - 1e-6
+        )
+        off = b4b.b4b_summary(BoxSpec(x=80, y=64, z=40,
+                                      b4b=B4BSpec(enabled=True, handle=False)))
+        self.assertFalse(off["handle"])
+        self.assertNotIn("handle_qty", off["hardware"])
+        self.assertLess(off["assembled_envelope_mm"][2], summary["assembled_envelope_mm"][2])
+
+
 class B4BValidationTests(unittest.TestCase):
     def test_rejects_interior_features(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
@@ -762,6 +925,7 @@ class B4BSerializationTests(unittest.TestCase):
                 enabled=True, lid=True, secure_lid=True, latch_count="2",
                 latch_strength="lightweight", lid_headroom_mm=2.0,
                 label_text="Fasteners", label_location="front", stacking=True,
+                handle=False,
             ),
         )
         data = design_to_dict(box, Layout((), "fused"))
@@ -814,7 +978,8 @@ class B4BGenerationTests(unittest.TestCase):
             self.assertEqual(res["mode"], "b4b")
             self.assertEqual(
                 res["object_names"],
-                ["B4B Body", "B4B Lid", "B4B Top Label", "B4B Latch 1", "B4B Latch 2"],
+                ["B4B Body", "B4B Lid", "B4B Top Label", "B4B Handle",
+                 "B4B Latch 1", "B4B Latch 2"],
             )
             out = Path(res["output"])
             self.assertTrue(out.is_file())
@@ -833,12 +998,16 @@ class B4BGenerationTests(unittest.TestCase):
                 BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, secure_lid=False)),
                 Layout((), "fused"), Path(d),
             )
-            self.assertEqual(passive["object_names"], ["B4B Body", "B4B Lid"])
+            self.assertEqual(
+                passive["object_names"], ["B4B Body", "B4B Lid", "B4B Handle"]
+            )
             nolid = generate_organizer_files(
                 BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, lid=False)),
                 Layout((), "fused"), Path(d), part_name="nolid",
             )
-            self.assertEqual(nolid["object_names"], ["B4B Body", "B4B Lid"])
+            self.assertEqual(
+                nolid["object_names"], ["B4B Body", "B4B Lid", "B4B Handle"]
+            )
 
 
 if __name__ == "__main__":

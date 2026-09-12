@@ -39,6 +39,7 @@ from organizer_engine import (
 )
 from organizer_geometry import (
     _extrude_polygon,
+    _extrude_xz_profile,
     _extrude_yz_profile,
     difference,
     intersection as _intersection,
@@ -203,6 +204,32 @@ B4B_LATCH_PROFILES = {
     },
 }
 
+# Carrying handle: a printed arch bolted flat to the lid top with two M3
+# screws, the same kit and the same no-nut, thread-forming fixing every other
+# B4B fitting uses.  A handled lid is made thick enough to *be* the
+# thread-forming lug, so nothing hangs below it into the child bins headroom
+# and nothing stands above it to spoil the flat face the lid prints on.
+B4B_HANDLE_LID_SKIN = B4B_HINGE_LUG_TARGET
+B4B_HANDLE_EDGE_INSET = 3.0        # feet stay this far in from the lid edge
+B4B_HANDLE_SPAN_MAX = 160.0        # a grip wider than this helps nobody
+B4B_HANDLE_MIN_OPENING = 14.0      # narrower than this is not a handle
+B4B_HANDLE_UPRIGHT_FRACTION = 0.10
+B4B_HANDLE_UPRIGHT_MIN = 5.0
+B4B_HANDLE_UPRIGHT_MAX = 10.0
+B4B_HANDLE_DEPTH_FRACTION = 0.16   # across Y
+B4B_HANDLE_DEPTH_MIN = 12.0
+B4B_HANDLE_DEPTH_MAX = 22.0
+B4B_HANDLE_FOOT_WALL = 2.2         # material each side of the screw in a foot
+B4B_HANDLE_FOOT_MIN = 6.0
+B4B_HANDLE_SCREW_SLACK = 0.2       # how far the screw may pass the plate
+# A hand is a hand whatever the case measures, so the grip is clamped to a
+# comfortable band rather than scaled freely.
+B4B_HANDLE_GRIP_CLEAR_MIN = 24.0
+B4B_HANDLE_GRIP_CLEAR_MAX = 34.0
+B4B_HANDLE_GRIP_MIN = 7.0
+B4B_HANDLE_GRIP_MAX = 12.0
+B4B_HANDLE_FILLET = 1.6
+
 _EPS = 1e-6
 
 
@@ -326,6 +353,41 @@ def _reinforced_hinges_fit(child_x: float, wall_depth: float) -> bool:
     return room + _EPS >= 2.0 * pad_half + B4B_HINGE_CENTRE_GAP / 2.0
 
 
+def _handle_arch(case_x: float) -> tuple[float, float]:
+    """(upright thickness, foot length) for a handle on a case this wide."""
+    upright = min(
+        B4B_HANDLE_UPRIGHT_MAX,
+        max(B4B_HANDLE_UPRIGHT_MIN, B4B_HANDLE_UPRIGHT_FRACTION * case_x),
+    )
+    return upright, max(
+        upright + 4.0, B4B_M3_CLEAR_BORE + 2.0 * B4B_HANDLE_FOOT_WALL
+    )
+
+
+def _handle_span(case_x: float) -> float:
+    """Screw-centre span of the handle a case this wide can carry.
+
+    The feet stand as far apart as the lid allows, so the hand opening is as
+    large as the case can give it.
+    """
+    _upright, foot = _handle_arch(case_x)
+    reach = case_x / 2.0 - CORNER_INSET - B4B_HANDLE_EDGE_INSET
+    return min(B4B_HANDLE_SPAN_MAX, 2.0 * (reach - foot / 2.0))
+
+
+def _handle_fits(child_x: float, wall_depth: float) -> bool:
+    """Whether a case built on this child field leaves a usable hand opening.
+
+    Like :func:`_reinforced_hinges_fit` this is a pure function of the request
+    and the wall, because it runs inside :func:`b4b_effective_box`.  It takes
+    the pessimistic case width - the wave only ever makes the real one wider -
+    so it never promises a handle the geometry cannot then build.
+    """
+    case_x = 2.0 * (child_x / 2.0 + WAVE_MATING_GAP / 2.0 + wall_depth)
+    _upright, foot = _handle_arch(case_x)
+    return _handle_span(case_x) + _EPS >= foot + B4B_HANDLE_MIN_OPENING
+
+
 def b4b_secure_min_field_x(wall: float = 0.8) -> float:
     """Smallest requested child-field X a secure lid can be built on.
 
@@ -345,11 +407,16 @@ def b4b_lid_skin_from_eff(eff: BoxSpec) -> float:
     """Authoritative lid top-plate thickness.
 
     A secure lid carries its hinge and latch roots in this plate, so it is
-    thicker than a passive one.  Every lid datum - plate, top Z, hinge axis,
-    latch pivot, stacking socket roof, label pocket, envelope summary - reads
-    this one helper so they can never drift apart.
+    thicker than a passive one, and a handled lid is thicker again: the plate
+    is what the handle screws thread into, and it carries the whole weight of
+    the case.  Every lid datum - plate, top Z, hinge axis, latch pivot,
+    stacking socket roof, label pocket, envelope summary - reads this one
+    helper so they can never drift apart.
     """
-    return B4B_SECURE_LID_SKIN if eff.b4b.normalised().secure_lid else B4B_LID_SKIN
+    b4b = eff.b4b.normalised()
+    if b4b.handle:
+        return B4B_HANDLE_LID_SKIN
+    return B4B_SECURE_LID_SKIN if b4b.secure_lid else B4B_LID_SKIN
 
 
 def b4b_lid_skin(box: BoxSpec) -> float:
@@ -374,6 +441,12 @@ def b4b_effective_box(box: BoxSpec) -> BoxSpec:
         while not _reinforced_hinges_fit(x, box.wall_depth):
             x += GRID_PITCH
         z = max(z, B4B_LATCHED_MIN_HEIGHT)
+
+    # A handle needs its two feet far enough apart to get a hand between them.
+    # Grow rather than refuse, the same way a latched lid grows a short box.
+    if b4b.handle:
+        while not _handle_fits(x, box.wall_depth):
+            x += GRID_PITCH
 
     # Stacking needs a footprint wide enough that the four corner locators do
     # not run into each other (see _stack_locator_centres): enforce the minimum
@@ -761,6 +834,96 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
 
 
 # --------------------------------------------------------------------------- #
+# carrying handle
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class B4BHandlePlan:
+    """Every carrying-handle dimension, resolved once.
+
+    The handle is a printed arch bolted flat to the lid top with two M3 screws,
+    the same kit and the same no-nut, thread-forming fixing every other B4B
+    fitting uses.  Its span and depth follow the case; the hand opening does
+    not, because a hand is a hand whatever the case measures.
+    """
+
+    span: float                 # between the two screw centres
+    centers_x: tuple[float, float]
+    foot_length: float
+    foot_height: float
+    upright: float
+    depth: float                # across Y
+    grip_clear: float           # clear height under the grip
+    grip_thickness: float
+    fillet: float
+    top_z: float                # lid top: the handle stands on it
+    screw_length_mm: int
+
+    @property
+    def height(self) -> float:
+        """How far the finished handle stands above the lid top."""
+        return self.foot_height + self.grip_clear + self.grip_thickness
+
+
+def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
+    """Resolve the handle, or ``None`` when this design has none.
+
+    Raises with an actionable message when a handle is asked for on a case too
+    narrow to carry one, rather than quietly leaving it off a design that says
+    it has one.
+    """
+    eff = b4b_effective_box(box)
+    if not eff.b4b.handle:
+        return None
+    layout = b4b_layout(box)
+    case_x, case_y = layout.case_size
+    skin = b4b_lid_skin_from_eff(eff)
+
+    upright, foot_length = _handle_arch(case_x)
+    span = _handle_span(case_x)
+    if span < foot_length + B4B_HANDLE_MIN_OPENING:
+        raise ValueError(
+            f"a {case_x:.0f} mm wide case is too narrow for a carrying handle; "
+            f"turn the handle off or use a wider B4B"
+        )
+    depth = min(
+        B4B_HANDLE_DEPTH_MAX,
+        max(B4B_HANDLE_DEPTH_MIN, B4B_HANDLE_DEPTH_FRACTION * case_y),
+    )
+    depth = min(depth, max(6.0, case_y - 2.0 * B4B_HANDLE_EDGE_INSET))
+    opening = span - upright
+    grip_clear = min(
+        B4B_HANDLE_GRIP_CLEAR_MAX,
+        max(B4B_HANDLE_GRIP_CLEAR_MIN, 0.3 * opening),
+    )
+    grip_thickness = min(
+        B4B_HANDLE_GRIP_MAX, max(B4B_HANDLE_GRIP_MIN, 0.09 * span)
+    )
+    # The plate itself is the thread-forming lug, so the foot is sized to use
+    # up the rest of the shortest kit screw and leave nothing poking through.
+    foot_height = max(
+        B4B_HANDLE_FOOT_MIN, B4B_SCREW_LENGTHS[0] - skin - B4B_HANDLE_SCREW_SLACK
+    )
+    screw = _screw_for_stack(foot_height, skin, "handle")
+    fillet = min(
+        B4B_HANDLE_FILLET,
+        0.3 * min(grip_thickness, upright, foot_height),
+    )
+    return B4BHandlePlan(
+        span=span,
+        centers_x=(-span / 2.0, span / 2.0),
+        foot_length=foot_length,
+        foot_height=foot_height,
+        upright=upright,
+        depth=depth,
+        grip_clear=grip_clear,
+        grip_thickness=grip_thickness,
+        fillet=fillet,
+        top_z=b4b_lid_underside_z_from_eff(eff) + skin,
+        screw_length_mm=screw,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # lid datums
 # --------------------------------------------------------------------------- #
 def b4b_internal_floor_z(box: BoxSpec) -> float:
@@ -948,6 +1111,10 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
         hardware.extend(_latch_lid_parts(box, plan))
     if hardware:
         lid = union([lid, *hardware])
+
+    handle = b4b_handle_plan(box)
+    if handle is not None:
+        lid = difference([lid, *_handle_lid_bores(handle, skin)])
 
     if eff.b4b.stacking:
         lid = difference([lid, *_stack_lid_sockets(box)])
@@ -1611,6 +1778,76 @@ def make_b4b_latches(box: BoxSpec) -> list[trimesh.Trimesh]:
     return levers
 
 
+def _handle_lid_bores(plan: B4BHandlePlan, skin: float) -> list[trimesh.Trimesh]:
+    """Pilot holes through the lid plate for the handle screws.
+
+    The plate is the thread-forming lug - a handled lid is made thick enough to
+    be one (see :func:`b4b_lid_skin_from_eff`), so nothing hangs below it into
+    the child bins' headroom and nothing stands above it to spoil the flat face
+    the lid prints on.  The holes are on the print axis, so they need no
+    teardrop of their own.
+    """
+    bores: list[trimesh.Trimesh] = []
+    for cx in plan.centers_x:
+        bore = trimesh.creation.cylinder(
+            radius=B4B_M3_PILOT / 2.0, height=skin + 2.0, sections=32
+        )
+        bore.apply_translation((cx, 0.0, plan.top_z - skin / 2.0))
+        bores.append(bore)
+    return bores
+
+
+def make_b4b_handle(box: BoxSpec) -> trimesh.Trimesh | None:
+    """The carrying handle, in assembly space, standing on the lid top.
+
+    One extruded arch: feet, uprights and a grip bar, filleted inside and
+    rounded outside.  It prints on its broad face, so every wall of that
+    silhouette stands square to the bed and none of it needs support; only the
+    two screw holes run horizontally in that pose, and those are teardropped.
+    """
+    plan = b4b_handle_plan(box)
+    if plan is None:
+        return None
+    half = plan.span / 2.0
+    foot = plan.foot_length / 2.0
+    post = plan.upright / 2.0
+    z1 = plan.foot_height
+    z2 = z1 + plan.grip_clear
+    z3 = z2 + plan.grip_thickness
+
+    def rect(x0: float, z0: float, x1: float, z_top: float) -> Polygon:
+        return Polygon([(x0, z0), (x1, z0), (x1, z_top), (x0, z_top)])
+
+    profile = (
+        rect(-half - foot, 0.0, -half + foot, z1)
+        .union(rect(half - foot, 0.0, half + foot, z1))
+        .union(rect(-half - post, z1, -half + post, z2))
+        .union(rect(half - post, z1, half + post, z2))
+        .union(rect(-half - post, z2, half + post, z3))
+    )
+    if not isinstance(profile, Polygon) or not profile.is_valid:
+        raise RuntimeError("the B4B handle outline did not resolve")
+    # Fillet where the uprights meet the feet and the grip - the two corners a
+    # carried case loads - then round the outside so there are no sharp edges
+    # in the hand.
+    profile = _rounded(_filleted(profile, plan.fillet), plan.fillet)
+
+    handle = _extrude_xz_profile(profile, plan.depth)
+    handle.apply_translation((0.0, 0.0, plan.top_z))
+    bores: list[trimesh.Trimesh] = []
+    for cx in plan.centers_x:
+        # Printed on its side, this hole lies horizontal with assembly +Y
+        # facing the nozzle, so it is roofed that way.  The section is the same
+        # teardrop the case hardware uses; here its two axes read as X and Y.
+        bore = _extrude_polygon(
+            support_free_bore_profile_yz(B4B_M3_CLEAR_BORE / 2.0, 1.0),
+            plan.foot_height + 2.0,
+        )
+        bore.apply_translation((cx, 0.0, plan.top_z - 1.0))
+        bores.append(bore)
+    return _weld(difference([handle, *bores]))
+
+
 # --------------------------------------------------------------------------- #
 # validation
 # --------------------------------------------------------------------------- #
@@ -1695,6 +1932,22 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
             lid, _inlay = _apply_top_label(box, lid)
         if not lid.is_watertight or lid.volume <= 0.0:
             raise ValueError("B4B lid did not generate as a watertight solid")
+
+    # A bolted-on handle is static, so it needs no sweep - only proof that it
+    # generates as one solid and stands *on* the lid rather than into it.
+    if lid is not None:
+        handle = make_b4b_handle(box)
+        if handle is not None:
+            from organizer_engine import intersection_volume
+
+            if not handle.is_watertight or handle.volume <= 0.0:
+                raise ValueError("the B4B handle did not generate as a watertight solid")
+            overlap = intersection_volume(handle, lid) / 1000.0
+            if overlap > 0.05:
+                raise ValueError(
+                    f"the handle cuts into the lid rather than bolting to it "
+                    f"(overlap {overlap:.3f} cc)"
+                )
 
     if not b4b.secure_lid:
         return
@@ -1808,6 +2061,15 @@ def validate_b4b_design(
     if wall.is_empty or wall.area <= 0.0:
         raise ValueError("B4B outward structural wall is empty")
 
+    if b4b.handle:
+        handle = b4b_handle_plan(box)
+        if handle is None:
+            raise ValueError("the handle did not resolve for this B4B")
+        if handle.screw_length_mm not in B4B_SCREW_LENGTHS:
+            raise ValueError("handle screw length did not resolve to an allowed M3 length")
+        if handle.span < handle.foot_length + B4B_HANDLE_MIN_OPENING:
+            raise ValueError("the handle has no usable hand opening on this B4B")
+
     if b4b.secure_lid:
         eff = b4b_effective_box(box)
         plan = b4b_hardware_plan(box)
@@ -1904,6 +2166,11 @@ def b4b_summary(box: BoxSpec) -> dict:
         min_y = min(min_y, plan.pivot_axis_y - boss_out)
         max_y = max(max_y, plan.hinge_axis_y + boss_out)
         top_z = max(top_z, plan.hinge_axis_z + plan.boss_radius)
+    handle = b4b_handle_plan(box)
+    if handle is not None:
+        top_z = max(top_z, handle.top_z + handle.height)
+        min_x = min(min_x, handle.centers_x[0] - handle.foot_length / 2.0)
+        max_x = max(max_x, handle.centers_x[1] + handle.foot_length / 2.0)
     if b4b.stacking:
         top_z += B4B_STACK_RECESS_DEPTH
     summary: dict = {
@@ -1923,6 +2190,7 @@ def b4b_summary(box: BoxSpec) -> dict:
         "secure_lid": b4b.secure_lid,
         "lid_headroom_mm": b4b.lid_headroom_mm,
         "stacking": b4b.stacking,
+        "handle": handle is not None,
         "label_location": b4b.label_location if b4b.label_text.strip() else "none",
         "label_text": b4b.label_text,
         "capacity_text": (
@@ -1947,6 +2215,15 @@ def b4b_summary(box: BoxSpec) -> dict:
         summary["latch_count"] = 0
         summary["hardware"] = {"nuts": 0}
         summary["hardware_bom"] = []
+    if handle is not None:
+        summary["hardware"]["handle_screw"] = f"M3x{handle.screw_length_mm}"
+        summary["hardware"]["handle_qty"] = 2
+        bom = summary["hardware_bom"]
+        line = f"2 x M3x{handle.screw_length_mm} handle screws"
+        # keep "No nuts" last, as the reassurance it is
+        bom.insert(max(0, len(bom) - 1) if bom else 0, line)
+        if not bom or bom[-1] != "No nuts":
+            bom.append("No nuts")
     return summary
 
 
@@ -1985,6 +2262,9 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
             lid, inlay = _apply_top_label(box, lid)
             geometry.extend(_mesh_preview_geometry(inlay, "b4b_label"))
         geometry.extend(_mesh_preview_geometry(lid, "b4b_lid"))
+    handle = make_b4b_handle(box)
+    if handle is not None:
+        geometry.extend(_mesh_preview_geometry(handle, "b4b_handle"))
     if eff.b4b.secure_lid:
         for lever in make_b4b_latches(box):
             geometry.extend(_mesh_preview_geometry(lever, "b4b_latch"))
@@ -2037,10 +2317,26 @@ def _top_surface_keepouts(eff: BoxSpec) -> list[Polygon]:
     boss (all four, not one row) plus a margin.  Hinge knuckles and latch ears
     sit outboard at the rim, below the top plate, so they do not intrude on the
     central label band; the bosses are the real keep-outs."""
-    if not (eff.b4b.stacking and eff.b4b.lid):
-        return []
-    r = B4B_STACK_BOSS_DIAMETER / 2.0 + B4B_STACK_FEMALE_RADIAL_CLEARANCE + B4B_TOP_LABEL_MARGIN
-    return [Point(cx, cy).buffer(r, quad_segs=24) for cx, cy in _stack_locator_centres(eff)]
+    keepouts: list[Polygon] = []
+    if eff.b4b.stacking and eff.b4b.lid:
+        r = (
+            B4B_STACK_BOSS_DIAMETER / 2.0
+            + B4B_STACK_FEMALE_RADIAL_CLEARANCE
+            + B4B_TOP_LABEL_MARGIN
+        )
+        keepouts.extend(
+            Point(cx, cy).buffer(r, quad_segs=24)
+            for cx, cy in _stack_locator_centres(eff)
+        )
+    handle = b4b_handle_plan(eff)
+    if handle is not None:
+        hx = handle.foot_length / 2.0 + B4B_TOP_LABEL_MARGIN
+        hy = handle.depth / 2.0 + B4B_TOP_LABEL_MARGIN
+        for cx in handle.centers_x:
+            keepouts.append(Polygon([
+                (cx - hx, -hy), (cx + hx, -hy), (cx + hx, hy), (cx - hx, hy),
+            ]))
+    return keepouts
 
 
 def b4b_top_label_outline(box: BoxSpec):
@@ -2055,6 +2351,19 @@ def b4b_top_label_outline(box: BoxSpec):
     avail_w = case_x - 2.0 * B4B_TOP_LABEL_MARGIN
     avail_h = case_y / 3.0
     label_cy = -case_y / 6.0
+    handle = b4b_handle_plan(eff)
+    if handle is not None:
+        # The handle straddles the middle of the lid, so the label takes the
+        # clear strip in front of it rather than shrinking to nothing under it.
+        front = -case_y / 2.0 + B4B_TOP_LABEL_MARGIN
+        back = -handle.depth / 2.0 - B4B_TOP_LABEL_MARGIN
+        avail_h = back - front
+        label_cy = (front + back) / 2.0
+        if avail_h < TEXT_CAP_HEIGHT_MIN:
+            raise ValueError(
+                "there is no clear space on the lid for a top label beside the "
+                "handle; use a front label, or turn the handle off"
+            )
     keepouts = _top_surface_keepouts(eff)
 
     def clear_rect(w: float, h: float) -> bool:
@@ -2228,6 +2537,13 @@ def _print_pose(mesh: trimesh.Trimesh, kind: str) -> trimesh.Trimesh:
         m.apply_transform(
             trimesh.transformations.rotation_matrix(math.pi, (1.0, 0.0, 0.0))
         )
+    elif kind == "handle":
+        # lay the arch on its broad face: its silhouette is extruded along
+        # local Y, so that axis rolls onto the bed's Z and every wall of the
+        # arch stands square to the bed
+        m.apply_transform(
+            trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
+        )
     return m
 
 
@@ -2286,6 +2602,10 @@ def b4b_build_parts(box: BoxSpec) -> list[tuple[str, trimesh.Trimesh]]:
         if top_inlay is not None:
             lid_group.append(("B4B Top Label", _print_pose(top_inlay, "lid")))
         groups.append(lid_group)
+
+    handle = make_b4b_handle(box)
+    if handle is not None:
+        groups.append([("B4B Handle", _print_pose(handle, "handle"))])
 
     if b4b.secure_lid:
         for i, lever in enumerate(make_b4b_latches(box), start=1):
