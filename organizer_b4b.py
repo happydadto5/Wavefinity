@@ -1847,19 +1847,28 @@ def _ear_solid(
 
 def _gusset(
     *, root_y: float, root_z: float, top_z: float, axis_y: float, axis_z: float,
-    radius: float,
+    radius: float, outward_sign: float,
 ) -> Polygon:
-    """Y/Z web carrying a pivot barrel down onto its root.
+    """Support-free Y/Z web carrying a body-mounted pivot barrel into its root.
 
-    The underside is one plane no shallower than 45 degrees and it starts
-    inside the root rather than on the wall skin, so the body still prints
-    upright with nothing hanging in air.
+    The web reaches the outboard endpoint of the barrel's complete lower flat
+    and guarantees an underside slope of at least 45 degrees.
     """
+    h = B4B_SUPPORT_FREE_FLAT * radius
+
+    # Outboard endpoint of the barrel's lowest horizontal flat.
+    support_y = axis_y + outward_sign * h
+    support_z = axis_z - radius
+
+    # Ensure the underside from root to barrel rises at >= 45 degrees.
+    run = abs(support_y - root_y)
+    printable_root_z = min(root_z, support_z - run)
+
     return Polygon([
-        (root_y, root_z),
+        (root_y, printable_root_z),
         (root_y, top_z),
         (axis_y, axis_z + 0.5 * radius),
-        (axis_y, axis_z - 0.5 * radius),
+        (support_y, support_z),
     ])
 
 
@@ -1908,6 +1917,7 @@ def _hinge_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                     axis_y=plan.hinge_axis_y,
                     axis_z=plan.hinge_axis_z,
                     radius=profile.pivot_radius,
+                    outward_sign=1.0,
                 )
                 .union(
                     _pivot_section(
@@ -2030,6 +2040,7 @@ def _latch_body_parts(box: BoxSpec, plan: B4BHardwarePlan) -> list[trimesh.Trime
                     axis_y=plan.catch_axis_y,
                     axis_z=plan.catch_axis_z,
                     radius=profile.catch_radius,
+                    outward_sign=-1.0,
                 )
                 .union(
                     _pivot_section(
@@ -2436,6 +2447,7 @@ def _handle_body_parts(box: BoxSpec) -> list[trimesh.Trimesh]:
                     axis_y=plan.axis_y,
                     axis_z=plan.axis_z,
                     radius=profile.pivot_radius,
+                    outward_sign=-1.0,
                 )
                 .union(
                     _pivot_section(

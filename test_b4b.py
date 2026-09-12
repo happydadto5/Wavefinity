@@ -257,6 +257,52 @@ class B4BPrintabilityTests(unittest.TestCase):
                 self.assertLess(overlap, 0.05)
 
 
+class B4BGussetTests(unittest.TestCase):
+    """The gusset carrying a body-mounted pivot barrel into its root must
+    reach the barrel's complete lower flat, with no unsupported overhang."""
+
+    def test_body_gusset_supports_lower_barrel_flat(self):
+        for radius in (
+            b4b.B4B_HW_M2.pivot_radius,
+            b4b.B4B_HW_M3.pivot_radius,
+        ):
+            for outward_sign in (-1.0, 1.0):
+                axis_y = 10.0 * outward_sign
+                axis_z = 20.0
+                root_y = 6.0 * outward_sign
+                requested_root_z = 16.0
+
+                gusset = b4b._gusset(
+                    root_y=root_y,
+                    root_z=requested_root_z,
+                    top_z=22.0,
+                    axis_y=axis_y,
+                    axis_z=axis_z,
+                    radius=radius,
+                    outward_sign=outward_sign,
+                )
+
+                h = b4b.B4B_SUPPORT_FREE_FLAT * radius
+                support_y = axis_y + outward_sign * h
+                support_z = axis_z - radius
+
+                self.assertLess(
+                    gusset.exterior.distance(Point(support_y, support_z)),
+                    1e-6,
+                )
+
+                root_points = [
+                    z for y, z in gusset.exterior.coords
+                    if abs(y - root_y) < 1e-7
+                ]
+                effective_root_z = min(root_points)
+
+                run = abs(support_y - root_y)
+                rise = support_z - effective_root_z
+
+                self.assertGreaterEqual(rise + 1e-7, run)
+
+
 class B4BFilletTests(unittest.TestCase):
     """Hardware is filleted where it grows out of the lid plate or the body
     root web - a square internal corner is where a printed bracket cracks."""
