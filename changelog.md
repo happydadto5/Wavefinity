@@ -8,6 +8,8 @@
   matching outside barrel sizes, sized for the real M2/M3 socket-head bearing.
 - Hinge, latch, catch and handle pivot holes are now round. Their small roofs
   bridge normally, while the outer barrels keep their support-free profile.
+- Small B4B lids now validate with one hinge; wider lids use two. Validation
+  also catches any mismatch between the resolved hinge count and its locations.
 
 ## 2026-09-12 — B4B hardware redesign: compact hinges, strap latches, folding front handle
 

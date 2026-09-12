@@ -3165,8 +3165,16 @@ def validate_b4b_design(
         eff = b4b_effective_box(box)
         plan = b4b_hardware_plan(box)
         profile = plan.profile
-        if plan.hinge_count != B4B_HINGE_COUNT:
-            raise ValueError("a secure B4B lid needs exactly two hinges")
+        if plan.hinge_count not in (1, 2):
+            raise ValueError(
+                f"a secure B4B lid must resolve to one or two hinges; "
+                f"got {plan.hinge_count}"
+            )
+        if len(plan.hinge_centers_x) != plan.hinge_count:
+            raise ValueError(
+                f"B4B hinge plan is inconsistent: hinge_count={plan.hinge_count}, "
+                f"but {len(plan.hinge_centers_x)} hinge centers were generated"
+            )
         # --- printability and structure, not merely "it resolved to a number"
         if profile.head_bearing_margin + _EPS < profile.head_bearing_min:
             raise ValueError(
