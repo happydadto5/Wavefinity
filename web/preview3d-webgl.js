@@ -196,7 +196,13 @@
     };
   }
 
-  function init(canvas) {
+  // `onContextRestored`, if given, is called after a lost context has been
+  // successfully rebuilt (program relinked, `generation` advanced) - the
+  // caller's hook to request a redraw, since restoration itself does not
+  // imply one. Kept as a plain callback rather than this module calling
+  // the application's renderPreview3D() directly, so it has no knowledge
+  // of app.js's render function.
+  function init(canvas, { onContextRestored } = {}) {
     let gl = null;
     try {
       gl = canvas.getContext("webgl2", { antialias: true, alpha: true, depth: true })
@@ -240,6 +246,7 @@
       renderer.uniforms = rebuilt.uniforms;
       renderer.lost = false;
       renderer.generation += 1;
+      onContextRestored?.();
     });
     return renderer;
   }

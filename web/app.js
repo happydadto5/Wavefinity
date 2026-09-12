@@ -5029,7 +5029,13 @@ function ensurePreviewGL() {
   const canvas = $("#preview-3d-solid");
   if (canvas && window.Preview3DGL) {
     try {
-      glRenderer = window.Preview3DGL.init(canvas);
+      glRenderer = window.Preview3DGL.init(canvas, {
+        // Restoration rebuilds the program and advances `generation` but
+        // does not itself trigger a redraw - without this, the view stays
+        // blank after a genuine context loss until something else happens
+        // to call renderPreview3D() (rotate, zoom, resize, a new preview).
+        onContextRestored: () => requestAnimationFrame(renderPreview3D),
+      });
     } catch (error) {
       glRenderer = null;
     }
