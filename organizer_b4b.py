@@ -57,6 +57,10 @@ B4B_WALL_CORNER_FILLET = 0.6
 # Effective base / stacking
 B4B_MIN_FLOOR_SKIN = 0.8        # printable floor left under a stack recess
 B4B_STACK_RECESS_DEPTH = 2.0    # female recess depth == male boss height
+# The one place this expression is written.  The UI reads it from the catalog
+# rather than duplicating the arithmetic, and the geometry below reads this
+# name rather than the two constants, so the two can never drift apart.
+B4B_STACK_MIN_BASE = B4B_STACK_RECESS_DEPTH + B4B_MIN_FLOOR_SKIN
 B4B_STACK_BOSS_DIAMETER = 5.0
 B4B_STACK_FEMALE_RADIAL_CLEARANCE = 0.25
 B4B_STACK_SOCKET_DEPTH = 1.6
@@ -481,13 +485,13 @@ def b4b_capacity_mm(box: BoxSpec) -> tuple[float, float]:
 def b4b_effective_base_thickness(box: BoxSpec) -> float:
     """Base thickness B4B geometry actually uses.
 
-    ``max(requested, stack_recess_depth + min_floor_skin)`` when stacking is on,
-    otherwise the requested value.  Never redefines the normal Standard Base.
+    ``max(requested, B4B_STACK_MIN_BASE)`` when stacking is on, otherwise the
+    requested value.  Never redefines the normal Standard Base.
     """
     b4b = box.b4b.normalised()
     requested = box.base_thickness
     if b4b.stacking and b4b.lid:
-        return max(requested, B4B_STACK_RECESS_DEPTH + B4B_MIN_FLOOR_SKIN)
+        return max(requested, B4B_STACK_MIN_BASE)
     return requested
 
 

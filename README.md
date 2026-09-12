@@ -340,16 +340,16 @@ always written — so each folder has its own inventory, like its generated file
   direct snap), which the drawer clearance check includes. Dragging a bin in a
   stack takes it and everything above it; dragging the bottom bin moves the
   whole stack.
-- **Planned bins.** When every printed copy of a bin is already placed, its
-  button reads **Plan**, and the next copy goes in as *planned*: drawn faded,
-  with a dashed outline. Every planned copy is listed under **To print** until
-  you press **Mark printed**, so you can lay a drawer out first and print to it.
-- **Placing.** Drag a bin from the inventory onto the drawer, double-click it,
-  or press **Place** to drop it in the best free spot. Drag placed bins to move
-  them: they snap to the 8 mm grid and refuse overlaps, keep-outs and the
-  drawer edge. Drag one off the drawer to take it out. Keys: the arrows move one
-  unit, **L** locks, **Delete** takes out, **F** fits the view, **Esc**
-  deselects.
+- **Planned bins.** When every printed copy of a bin is already placed, the
+  next copy goes in as *planned* instead: drawn faded, with a dashed outline.
+  Every planned copy is listed under **To print** until you press **Mark
+  printed**, so you can lay a drawer out first and print to it.
+- **Placing.** Drag a bin from the inventory onto the drawer, or double-click
+  it to drop it in the best free spot. Drag placed bins to move them: they
+  snap to the 8 mm grid and refuse overlaps, keep-outs and the drawer edge.
+  Drag one off the drawer, or select it and press **Delete**, to take it out.
+  Keys: the arrows move one unit, **L** locks, **Delete** takes out, **F** fits
+  the view, **Esc** deselects.
 - **Auto layout** arranges the drawer. *Arrange* either moves everything not
   locked, or only adds new bins around the rest. *Tall bins* keeps tall bins
   always behind shorter ones (the default), behind them when possible, or
@@ -379,10 +379,14 @@ always written — so each folder has its own inventory, like its generated file
   since their waves hold them. **Print spacers & connectors** opens the lot in
   Bambu Studio. **Print map** prints a plan of the drawer with a list of where
   each bin goes.
-- **Saving.** *Auto-save* (on by default) writes the layout after every change.
-  Turn it off to save with **Save layout** (or Ctrl+S). Qty, names and
+- **Saving.** *Auto-save* (on by default) writes the layout after a change, but
+  no more than once every 5 minutes while you keep editing - leaving the tab
+  or closing auto-saves right away regardless. Turn auto-save off and the
+  **Save layout** button (or Ctrl+S) appears in its place. Qty, names and
   hand-added bins always save straight away, because they are the inventory.
-  The layout is recalled automatically every time you open the tab.
+  The layout is recalled automatically every time you open the tab. **Save
+  location** shows the current folder and opens the folder picker, the same
+  as the main editor's.
 
 ### Using the browser editor
 

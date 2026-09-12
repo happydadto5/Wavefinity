@@ -449,6 +449,86 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
   if (box?.standard_walls === false) select.dataset.customValue = value;
 }
 
+// The base value a stacking mode *requires*, or -Infinity when nothing forces
+// it.  Ordinary lid/direct stacking and B4B stacking are the only two things
+// that do; the two never apply at once (B4B and ordinary stacking are
+// mutually exclusive), so one helper covers both without a conflict.
+function baseRequiredMin(box) {
+  if (box?.b4b?.enabled) {
+    return box.b4b.stacking
+      ? number(state.catalog?.b4b_rules?.stack_min_base_mm, 2.8)
+      : -Infinity;
+  }
+  const mode = box?.stack?.mode || "none";
+  if (mode === "none") return -Infinity;
+  return number(
+    state.catalog?.stack_rules?.base_min_mm?.[mode],
+    mode === "direct" ? 3.8 : 1.8,
+  );
+}
+
+function baseRequiredLabel(box) {
+  if (box?.b4b?.enabled) return "Required for stacking";
+  const mode = box?.stack?.mode || "none";
+  if (mode === "direct") return "Required for direct stacking";
+  if (mode === "lid") return "Required for lid stacking";
+  return "";
+}
+
+function populateBaseChoices(box, select = $("#base-thickness")) {
+  const rules = state.catalog?.base_rules || {};
+  const modeMin = baseRequiredMin(box);
+  const allChoices = Array.isArray(rules.choices) && rules.choices.length
+    ? rules.choices
+    : [
+        { value: 0.4, label: "Very thin" },
+        { value: 0.6, label: "Good" },
+        { value: 0.8, label: "Heavy" },
+        { value: 1.0, label: "Extra Heavy" },
+        { value: 1.2, label: "Maximum" },
+      ];
+  // A mode floor above the highest preset (B4B's 2.8, ordinary direct's 3.8)
+  // filters every ordinary preset out, which is the point: the control must
+  // not sit at a base the geometry cannot use.
+  const choices = allChoices.filter(choice => number(choice.value) >= modeMin - 1e-9);
+  const requiredLabel = baseRequiredLabel(box);
+  const needsRequiredOption = Number.isFinite(modeMin) && requiredLabel
+    && !choices.some(choice => Math.abs(number(choice.value) - modeMin) < 1e-9);
+  const base = number(box?.base_thickness, rules.default_mm ?? 0.6);
+  const value = fmt(base);
+  const knownValues = choices.map(choice => fmt(choice.value));
+  if (needsRequiredOption) knownValues.push(fmt(modeMin));
+  const legacyValue = knownValues.includes(value) ? "" : value;
+  const signature = JSON.stringify({ choices, needsRequiredOption, modeMin, legacyValue });
+  if (select.dataset.choices !== signature) {
+    select.replaceChildren(...choices.map(choice => new Option(
+      `${number(choice.value).toFixed(1)} mm — ${choice.label}`,
+      fmt(choice.value),
+    )));
+    if (needsRequiredOption) {
+      select.add(new Option(`${fmt(modeMin)} mm — ${requiredLabel}`, fmt(modeMin)));
+    }
+    if (legacyValue) {
+      // A saved design keeps whatever base it was made with: the preset list
+      // is what a *new* choice may be, not a migration of existing geometry.
+      select.add(new Option(`${legacyValue} mm — Saved/custom`, legacyValue));
+    }
+    select.dataset.choices = signature;
+  }
+  select.value = value;
+}
+
+function syncBaseControls() {
+  const b4bOn = b4bEnabled();
+  const standard = $("#standard-base").checked;
+  const stacking = stackMode() !== "none";
+  $("#standard-base").disabled = stacking;
+  // B4B always shows the explicit control (Standard base is hidden entirely
+  // in that mode - see applyB4BVisibility); an ordinary ungrown stacking mode
+  // also forces it visible.
+  $("#base-thickness-setting").hidden = b4bOn ? false : (standard && !stacking);
+}
+
 function syncWallControls() {
   const standard = $("#standard-walls").checked;
   const stacking = stackMode() !== "none";
@@ -493,8 +573,8 @@ function syncForm() {
   $("#easy-clean").checked = Boolean(box.easy_clean);
   $("#easy-clean-style").value = box.easy_clean_style || "bevel";
   $("#easy-clean-radius").value = fmt(box.easy_clean_radius ?? 2.0);
-  $("#base-thickness").value = fmt(box.base_thickness ?? 0.6);
-  $("#base-thickness-setting").hidden = $("#standard-base").checked;
+  populateBaseChoices(box);
+  syncBaseControls();
   syncStackDependencyControls();
   syncEasyCleanControls();
   if (!state.design.part_name || !state.design.part_name.trim()) {
@@ -620,6 +700,34 @@ function b4bEnabled() {
   return Boolean(state.design?.box?.b4b?.enabled);
 }
 
+// The shared Wall/Base thickness controls live in .mode-and-bin-options by
+// default (the ordinary bin's home for them) and move into row 1 of the B4B
+// Options grid while B4B is active. One element, one id, each - moving it
+// keeps everything (listeners, dataset state) intact; there is never a second
+// copy to keep in sync.
+function positionSharedThicknessControls(on) {
+  const grid = $(".b4b-options-grid");
+  const home = $(".mode-and-bin-options");
+  if (!grid || !home) return;
+  const wall = $("#wall-thickness-setting");
+  const base = $("#base-thickness-setting");
+  if (on) {
+    if (wall && wall.parentElement !== grid) grid.appendChild(wall);
+    if (base && base.parentElement !== grid) grid.appendChild(base);
+  } else {
+    // Restore just after "Standard walls"/"Standard base" so the pair still
+    // reads together for the ordinary bin.
+    const wallAnchor = $("#standard-walls")?.closest("label");
+    const baseAnchor = $("#standard-base")?.closest("label");
+    if (wall && wall.parentElement !== home && wallAnchor) {
+      wallAnchor.insertAdjacentElement("afterend", wall);
+    }
+    if (base && base.parentElement !== home && baseAnchor) {
+      baseAnchor.insertAdjacentElement("afterend", base);
+    }
+  }
+}
+
 // A B4B interior is reserved for child bins: hide the interior-parts workflow,
 // Easy Clean, the interior print mode and the Connect bins section entirely.
 function applyB4BVisibility() {
@@ -636,10 +744,16 @@ function applyB4BVisibility() {
   if (modeLabel) modeLabel.hidden = on;
   const ecRow = $("#easy-clean")?.closest("label");
   if (ecRow) ecRow.hidden = on;
-  // Wall thickness is one setting in one place: B4B uses the same control the
-  // ordinary bin does rather than a second copy inside its own panel.
-  hide("#wall-thickness-setting", $("#standard-walls")?.checked);
+  // B4B has no Standard base/walls: it always shows the explicit control, on
+  // its own 1.2 mm+ / preset floor rather than the ordinary bin's defaults.
+  const standardBaseRow = $("#standard-base")?.closest("label");
+  if (standardBaseRow) standardBaseRow.hidden = on;
+  const standardWallsRow = $("#standard-walls")?.closest("label");
+  if (standardWallsRow) standardWallsRow.hidden = on;
+  positionSharedThicknessControls(on);
+  hide("#wall-thickness-setting", on ? false : $("#standard-walls")?.checked);
   hide("#thin-wall-warning", $("#standard-walls")?.checked);
+  hide("#base-thickness-setting", on ? false : $("#standard-base")?.checked);
   hide("#easy-clean-style-setting", on || !$("#easy-clean")?.checked);
   hide("#easy-clean-radius-setting", on || !$("#easy-clean")?.checked);
   const connectorSection = document.querySelector('.control-section[data-section="connector"]');
@@ -651,22 +765,31 @@ function applyB4BVisibility() {
   if (on && document.querySelector('.view-tab[data-view="2d"]')?.classList.contains("active")) {
     document.querySelector('.view-tab[data-view="3d"]')?.click();
   }
+  // B4B dimensions are the child field, not the outside of the case - say so.
+  const xLabel = $("#x-size-label");
+  const yLabel = $("#y-size-label");
+  const zLabel = $("#z-size-label");
+  if (xLabel) xLabel.textContent = on ? "Width (Inside)" : "Width";
+  if (yLabel) yLabel.textContent = on ? "Length (Inside)" : "Length";
+  if (zLabel) zLabel.textContent = on ? "Height (Inside)" : "Height";
+  // One Name field: B4B's own, or the ordinary Part name row - never both.
+  const partNameRow = $(".part-name-row");
+  if (partNameRow) partNameRow.hidden = on;
   if (on) {
     // The handle is front-mounted body hardware now, so stacking is no longer
     // a reason to refuse it. What it does still need is a lid that latches,
     // and a case actually big enough to carry a hand.
-    const secure = $("#b4b-lid-type").value === "latched";
     const blocked = b4bHandleBlockedReason();
-    $("#b4b-handle").disabled = Boolean(blocked);
-    if (blocked) $("#b4b-handle").checked = false;
+    const handleSelect = $("#b4b-handle");
+    handleSelect.disabled = Boolean(blocked);
+    if (blocked) handleSelect.value = "false";
+    const label = $("#b4b-handle-label");
+    if (label) label.classList.toggle("b4b-unavailable", Boolean(blocked));
     const note = $("#b4b-handle-note");
     if (note) note.textContent = blocked || "";
     hide("#b4b-handle-note", !blocked);
-    $("#b4b-secure-options").hidden = !secure;
-    // The label's text and location only exist once Add label is ticked.
-    const labelled = $("#b4b-label-enabled").checked;
-    hide("#b4b-label-text-row", !labelled);
-    hide("#b4b-label-location-row", !labelled);
+    // Label text only exists once a location other than "No label" is chosen.
+    hide("#b4b-label-text-row", $("#b4b-label-location").value === "none");
   }
   applyStackVisibility();
 }
@@ -682,7 +805,7 @@ function b4bHandleBlockedReason() {
 
 function normalizeB4BDependentControls() {
   const secure = $("#b4b-lid-type").value === "latched";
-  if (!secure) $("#b4b-handle").checked = false;
+  if (!secure) $("#b4b-handle").value = "false";
 }
 
 function syncB4BForm() {
@@ -690,20 +813,20 @@ function syncB4BForm() {
   $("#bin-type").value = b4b.enabled ? "b4b" : "single";
   $("#b4b-lid-type").value = b4b.lid !== false && b4b.secure_lid !== false
     ? "latched" : "lid_only";
-  $("#b4b-stacking").checked = Boolean(b4b.stacking);
-  $("#b4b-handle").checked = Boolean(b4b.handle) && b4b.secure_lid !== false;
+  $("#b4b-stacking").value = String(Boolean(b4b.stacking));
+  $("#b4b-handle").value = String(Boolean(b4b.handle) && b4b.secure_lid !== false);
   $("#b4b-lid-snugness").value = String(b4b.lid_headroom_mm ?? 1);
-  // Add label follows the design's label text. Text typed and then switched
-  // off stays in the (hidden) field for this session, so switching back on
-  // does not mean retyping it.
+  // Label text follows the design's saved text. Text typed and then switched
+  // to No label stays in the (hidden) field for this session, so switching
+  // back to Top/Front does not mean retyping it.
   const labelText = String(b4b.label_text || "");
   if (labelText.trim()) {
-    $("#b4b-label-enabled").checked = true;
     $("#b4b-label-text").value = labelText;
-  } else if ($("#b4b-label-text").value.trim()) {
-    $("#b4b-label-enabled").checked = false;
+    $("#b4b-label-location").value = b4b.label_location === "front" ? "front" : "top";
+  } else {
+    $("#b4b-label-location").value = "none";
   }
-  $("#b4b-label-location").value = b4b.label_location === "front" ? "front" : "top";
+  $("#b4b-part-name").value = state.design?.part_name || "";
   normalizeB4BDependentControls();
   $("#stack-mode").value = stackMode();
   applyB4BVisibility();
@@ -758,9 +881,7 @@ function normalizeStackSettings(design, { restoreDefaults = false, flash = false
 function syncStackDependencyControls() {
   const mode = stackMode();
   const stacking = mode !== "none";
-  const values = stackRuleValues(mode);
   $("#standard-base").disabled = stacking;
-  $("#base-thickness").min = fmt(stacking ? values.minBase : 0.4);
   if (stacking) {
     $("#base-thickness-setting").hidden = false;
     $("#wall-thickness-setting").hidden = false;
@@ -826,12 +947,13 @@ function readB4BForm(design) {
     latch_count: "auto",
     latch_strength: b4bState().latch_strength || "standard",
     lid_headroom_mm: parseFloat($("#b4b-lid-snugness").value) || 1,
-    label_text: $("#b4b-label-enabled").checked ? $("#b4b-label-text").value : "",
-    label_location: $("#b4b-label-location").value,
-    stacking: $("#b4b-stacking").checked,
+    label_text: $("#b4b-label-location").value === "none" ? "" : $("#b4b-label-text").value,
+    label_location: $("#b4b-label-location").value === "none"
+      ? "top" : $("#b4b-label-location").value,
+    stacking: $("#b4b-stacking").value === "true",
     // The bail folds against the front wall, so it no longer competes with
     // stacking for the lid top - but it still needs a lid that latches shut.
-    handle: $("#b4b-handle").checked && secure,
+    handle: $("#b4b-handle").value === "true" && secure,
   };
 }
 
@@ -850,6 +972,32 @@ function enforceB4BMinimums(design = state.design, flash = true) {
       if (flash) flashField(sel);
     }
   }
+}
+
+// Session-only memory of the base the user had chosen before B4B stacking
+// forced it to the required floor, so turning stacking back off restores it
+// instead of leaving the design at a value nobody actually chose.
+let b4bPreStackBase = null;
+
+// B4B stacking needs a printable floor under its recesses. Unlike the wall
+// (a floor with headroom above it), this is one exact required value, so it
+// is saved directly rather than merely validated after the fact.
+function normalizeB4BBaseForStacking(design = state.design) {
+  const box = design?.box;
+  const b4b = box?.b4b;
+  if (!b4b?.enabled) return;
+  const required = number(state.catalog?.b4b_rules?.stack_min_base_mm, 2.8);
+  if (b4b.stacking) {
+    if (b4bPreStackBase == null) {
+      b4bPreStackBase = number(box.base_thickness, 0.6);
+    }
+    box.base_thickness = required;
+  } else if (b4bPreStackBase != null) {
+    box.base_thickness = b4bPreStackBase;
+    b4bPreStackBase = null;
+  }
+  populateBaseChoices(box);
+  syncBaseControls();
 }
 
 // Why this design cannot be generated as entered, in the user's terms. Never a
@@ -886,7 +1034,7 @@ function groupB4BHardware(hardware) {
   const family = hardware.family || "M3";
   return [...byLength.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([length, qty]) => `${qty} ${family} (${length}mm)`)
+    .map(([length, qty]) => `${qty} ${family} × ${length} mm`)
     .join(", ");
 }
 
@@ -894,26 +1042,18 @@ function renderB4BReadout() {
   if (!b4bEnabled()) return;
   const b4b = state.preview?.b4b;
   const capLine = $("#b4b-capacity-line");
-  const heightLine = $("#b4b-child-height");
-  const caseLine = $("#b4b-case-outside");
-  const envelopeLine = $("#b4b-envelope");
   const grew = $("#b4b-grew");
   const hardware = $("#b4b-hardware");
   if (!b4b) {
-    capLine.textContent = "Inside capacity: — units";
-    heightLine.textContent = "Maximum bin height: — mm";
-    caseLine.textContent = "Case body outside: — mm";
-    envelopeLine.textContent = "Complete assembled envelope: — mm";
+    capLine.textContent = "Inside capacity: —";
     grew.hidden = true;
     hardware.textContent = "Hardware: —";
     return;
   }
-  capLine.textContent = b4b.capacity_text;
-  heightLine.textContent = b4b.max_child_height_text;
-  caseLine.textContent = `Case body outside: ${b4b.case_outer_mm[0]} x ${b4b.case_outer_mm[1]} mm`;
-  envelopeLine.textContent =
-    `Complete assembled envelope: ${b4b.assembled_envelope_mm[0]} x ` +
-    `${b4b.assembled_envelope_mm[1]} x ${b4b.assembled_envelope_mm[2]} mm`;
+  capLine.textContent =
+    `Inside capacity: ${b4b.capacity_mm[0]} × ${b4b.capacity_mm[1]} × ` +
+    `${b4b.max_child_height_mm} mm — ${b4b.capacity_units[0]} × ` +
+    `${b4b.capacity_units[1]} units`;
   if (b4b.base_thickened) {
     grew.hidden = false;
     grew.textContent =
@@ -928,16 +1068,8 @@ function renderB4BReadout() {
     grew.textContent = problems.join(" ");
     grew.hidden = false;
   }
-  if ((b4b.secure_lid || b4b.handle) && b4b.hardware) {
-    const bits = [];
-    if (b4b.secure_lid) bits.push(b4b.latch_count === 1 ? "1 latch" : `${b4b.latch_count} latches`);
-    if (b4b.handle) bits.push("handle");
-    const screws = groupB4BHardware(b4b.hardware);
-    hardware.textContent = `${bits.join(" + ")}${screws ? ` — Hardware: ${screws}` : ""}`;
-    hardware.hidden = false;
-  } else {
-    hardware.hidden = true;
-  }
+  const screws = groupB4BHardware(b4b.hardware || {});
+  hardware.textContent = screws ? `Hardware: ${screws} — no nuts` : "Hardware: None";
 }
 
 async function toggleB4B(wantEnabled) {
@@ -1014,6 +1146,7 @@ function updateDesignFromForm() {
       autoAdjustConnectorFields();
     }
   }
+  const b4bOn = b4bEnabled();
   const currentStackMode = stackMode();
   const stackValues = stackRuleValues(currentStackMode);
   design.box.base_thickness = number(
@@ -1023,7 +1156,10 @@ function updateDesignFromForm() {
   if (currentStackMode !== "none") {
     design.box.base_thickness = Math.max(stackValues.minBase, design.box.base_thickness);
   }
-  design.box.standard_base = currentStackMode === "none" && $("#standard-base").checked;
+  // B4B always shows its own explicit thickness controls (Standard base/walls
+  // are hidden, not merely unchecked), so the underlying checkbox state must
+  // never override the value the B4B select actually shows.
+  design.box.standard_base = !b4bOn && currentStackMode === "none" && $("#standard-base").checked;
   if (design.box.standard_base) design.box.base_thickness = 0.6;
   const previousWall = design.box.wall;
   const wallRules = state.catalog?.wall_rules || {};
@@ -1032,7 +1168,7 @@ function updateDesignFromForm() {
     ? wallRules.min_mm ?? 0.2
     : stackValues.minWall;
   const maxWall = wallRules.max_mm ?? 2.4;
-  design.box.standard_walls = currentStackMode === "none" && $("#standard-walls").checked;
+  design.box.standard_walls = !b4bOn && currentStackMode === "none" && $("#standard-walls").checked;
   design.box.wall = design.box.standard_walls
     ? defaultWall
     : Math.max(minWall, Math.min(maxWall, number(
@@ -1421,6 +1557,11 @@ function wireControls() {
         state.binResizePending = true;
         syncWallControls();
       }
+      if (selector === "#base-thickness") {
+        $(selector).dataset.customValue = $(selector).value;
+        state.binResizePending = true;
+        syncBaseControls();
+      }
       state.canGenerate = false;
       updateGenerateAvailability();
       changedDesign();
@@ -1432,14 +1573,23 @@ function wireControls() {
       return;
     }
     const isStandard = $("#standard-base").checked;
-    $("#base-thickness-setting").hidden = isStandard;
-    if (!isStandard) {
-      if (!$("#base-thickness").value) {
-        $("#base-thickness").value = fmt(state.design?.box?.base_thickness ?? 0.6);
+    const rules = state.catalog?.base_rules || {};
+    const select = $("#base-thickness");
+    const defaultValue = fmt(rules.default_mm ?? 0.6);
+    if (isStandard) {
+      if (select.value && select.value !== defaultValue) {
+        select.dataset.customValue = select.value;
       }
-    } else {
-      $("#base-thickness").value = "0.6";
+      select.value = defaultValue;
+    } else if (
+      select.dataset.customValue
+      && [...select.options].some(option => option.value === select.dataset.customValue)
+    ) {
+      select.value = select.dataset.customValue;
+    } else if (!select.value) {
+      select.value = fmt(state.design?.box?.base_thickness ?? rules.default_mm ?? 0.6);
     }
+    syncBaseControls();
     changedDesign();
   });
   $("#standard-walls").addEventListener("change", () => {
@@ -1494,7 +1644,7 @@ function wireControls() {
     applyStackVisibility();
     changedDesign();
   });
-  ["#b4b-lid-type", "#b4b-stacking", "#b4b-handle"].forEach(sel =>
+  ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location"].forEach(sel =>
     $(sel).addEventListener("change", () => {
       normalizeB4BDependentControls();
       readB4BForm(state.design);
@@ -1502,19 +1652,29 @@ function wireControls() {
       applyB4BVisibility();
       changedDesign();
     }));
-  ["#b4b-lid-snugness", "#b4b-label-location"]
-    .forEach(sel => $(sel).addEventListener("change", () => {
-      readB4BForm(state.design);
-      enforceB4BMinimums();
-      changedDesign();
-    }));
+  $("#b4b-stacking").addEventListener("change", () => {
+    normalizeB4BDependentControls();
+    readB4BForm(state.design);
+    normalizeB4BBaseForStacking(state.design);
+    enforceB4BMinimums();
+    applyB4BVisibility();
+    changedDesign();
+  });
+  $("#b4b-lid-snugness").addEventListener("change", () => {
+    readB4BForm(state.design);
+    enforceB4BMinimums();
+    changedDesign();
+  });
   $("#b4b-label-text").addEventListener("input", () => {
     seedPartNameFromLabel($("#b4b-label-text").value);
     state.canGenerate = false; updateGenerateAvailability(); changedDesign();
   });
-  $("#b4b-label-enabled").addEventListener("change", () => {
-    readB4BForm(state.design);
-    applyB4BVisibility();
+  // The B4B Name field is design.part_name under a different label: mirror
+  // into the existing #part-name input, which every other codepath already
+  // reads (checkPartNamePresent, updateDesignFromForm, designHasChanges).
+  $("#b4b-part-name").addEventListener("input", () => {
+    $("#part-name").value = $("#b4b-part-name").value;
+    if (state.design) state.design.part_name = $("#b4b-part-name").value;
     state.canGenerate = false; updateGenerateAvailability(); changedDesign();
   });
 
@@ -3393,6 +3553,8 @@ function seedPartNameFromLabel(said) {
   const tidy = String(said ?? "").trim();
   if (!tidy || SIZE_LIKE_TEXT.test(tidy)) return;
   partInput.value = tidy;
+  const b4bInput = $("#b4b-part-name");
+  if (b4bInput) b4bInput.value = tidy;
   if (state.design) state.design.part_name = tidy;
 }
 
@@ -3678,6 +3840,7 @@ function mutationControls() {
   return $$(
     '#x-size, #y-size, #z, #standard-base, #base-thickness, #standard-walls, #wall-thickness, #easy-clean, #easy-clean-style, #easy-clean-radius, #part-name, ' +
     '#mode-select, ' +
+    '#b4b-part-name, #b4b-stacking, #b4b-handle, #b4b-label-location, ' +
     '#new-design, #open-design, #save-design'
   );
 }
@@ -5821,12 +5984,13 @@ function designHasChanges() {
   visibleDesign.box.x = snapSize($("#x-size").value, visibleDesign.box.x);
   visibleDesign.box.y = snapSize($("#y-size").value, visibleDesign.box.y);
   visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
-  visibleDesign.box.standard_base = $("#standard-base").checked;
+  const visibleB4B = $("#bin-type").value === "b4b";
+  visibleDesign.box.standard_base = !visibleB4B && $("#standard-base").checked;
   visibleDesign.box.base_thickness = visibleDesign.box.standard_base
     ? 0.6
     : number($("#base-thickness").value, visibleDesign.box.base_thickness ?? 0.6);
   const wallRules = state.catalog?.wall_rules || {};
-  visibleDesign.box.standard_walls = $("#standard-walls").checked;
+  visibleDesign.box.standard_walls = !visibleB4B && $("#standard-walls").checked;
   visibleDesign.box.wall = visibleDesign.box.standard_walls
     ? (wallRules.default_mm ?? 0.8)
     : Math.max(wallRules.min_mm ?? 0.2, Math.min(
@@ -5834,7 +5998,7 @@ function designHasChanges() {
         number($("#wall-thickness").value, visibleDesign.box.wall ?? wallRules.default_mm ?? 0.8),
       ));
   visibleDesign.part_name = $("#part-name").value;
-  if ($("#bin-type").value === "b4b") {
+  if (visibleB4B) {
     readB4BForm(visibleDesign);
     enforceB4BMinimums(visibleDesign, false);
   }

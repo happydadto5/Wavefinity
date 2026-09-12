@@ -32,6 +32,7 @@ import numpy as np
 
 from organizer_engine import (
     BASE_UNIT,
+    BASE_PRESETS,
     B4B_DEFAULT_WALL,
     B4B_LATCH_COUNTS,
     B4B_LATCH_STRENGTHS,
@@ -127,6 +128,7 @@ from organizer_b4b import (
     B4B_LATCHED_MIN_HEIGHT,
     B4B_MIN_FIELD_XY,
     B4B_MIN_WALL,
+    B4B_STACK_MIN_BASE,
     b4b_effective_box,
     b4b_mating_polygon,
     b4b_preview_parts,
@@ -436,6 +438,15 @@ def catalog_payload() -> dict[str, Any]:
             "wave_amplitude_mm": WAVE_AMPLITUDE,
             "mating_gap_mm": WAVE_MATING_GAP,
         },
+        "base_rules": {
+            "default_mm": DEFAULT_BASE_THICKNESS,
+            # What a *new* design may be given.  A saved design carrying a
+            # non-preset value still loads and regenerates unchanged; the UI
+            # shows it as a legacy value until the user picks a current preset.
+            "choices": [
+                {"value": value, "label": label} for value, label in BASE_PRESETS
+            ],
+        },
         "stack_rules": {
             "min_wall_mm": STACK_MIN_WALL,
             "default_wall_mm": DEFAULT_WALL,
@@ -462,6 +473,7 @@ def catalog_payload() -> dict[str, Any]:
                 {"value": value, "label": label} for value, label in B4B_WALL_PRESETS
             ],
             "handle_min_grip_mm": B4B_HANDLE_GRIP_MIN,
+            "stack_min_base_mm": B4B_STACK_MIN_BASE,
         },
         "setting_interactions": [
             {

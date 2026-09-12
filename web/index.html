@@ -53,16 +53,21 @@
           <div class="field-grid three">
             <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
             <label><span id="y-size-label">Length</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
-            <label>Height <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
+            <label><span id="z-size-label">Height</span> <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
           </div>
           <div class="mode-and-bin-options">
             <label>Interior print mode
               <select id="mode-select"></select>
             </label>
             <label class="checkbox-row inline-option"><span>Standard base</span><input id="standard-base" type="checkbox" checked></label>
-            <label id="base-thickness-setting" class="inline-number" hidden>Base thickness <span class="unit">mm</span><input id="base-thickness" type="number" min="0.4" step="0.1" value="0.6"></label>
+            <!-- Row position styles are only used once B4B relocates this
+                 element into .b4b-options-grid; they are inert here since
+                 .mode-and-bin-options is not a grid container. -->
+            <label id="base-thickness-setting" class="inline-select" style="grid-column:3;grid-row:1" hidden>Base thickness
+              <select id="base-thickness"><option value="0.6">0.6 mm — Good</option></select>
+            </label>
             <label class="checkbox-row inline-option"><span>Standard walls</span><input id="standard-walls" type="checkbox" checked></label>
-            <label id="wall-thickness-setting" class="inline-select" hidden>Wall thickness
+            <label id="wall-thickness-setting" class="inline-select" style="grid-column:2;grid-row:1" hidden>Wall thickness
               <select id="wall-thickness"><option value="0.8">0.8 mm — Standard</option></select>
             </label>
             <span id="thin-wall-warning" class="wall-warning" hidden>Very thin — may not print reliably with standard nozzle/slicer settings.</span>
@@ -77,39 +82,63 @@
           </div>
 
           <div id="b4b-panel" class="b4b-panel" hidden>
-            <div id="b4b-capacity" class="b4b-capacity">
-              <strong id="b4b-capacity-line">Inside capacity: — units</strong>
-              <span id="b4b-case-outside" class="muted">Case body outside: — mm</span>
-              <span id="b4b-envelope" class="muted">Complete assembled envelope: — mm</span>
-              <span id="b4b-child-height" class="muted">Maximum bin height: — mm</span>
-              <span id="b4b-grew" class="field-error" hidden></span>
-              <div id="b4b-hardware" class="muted b4b-hardware">Hardware: —</div>
+            <div class="b4b-card">
+              <h3 class="b4b-card-title">Options</h3>
+              <div class="b4b-options-grid">
+                <label style="grid-column:1;grid-row:1">Name
+                  <input id="b4b-part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
+                </label>
+                <!-- Wall thickness (col 2) and Base thickness (col 3) are the
+                     same single shared controls the ordinary bin uses; JS
+                     relocates them here while B4B is active. See
+                     positionSharedThicknessControls() in app.js. -->
+                <label class="inline-select" style="grid-column:1;grid-row:2">Lid type
+                  <select id="b4b-lid-type">
+                    <option value="lid_only">Lid Only</option>
+                    <option value="latched" selected>Latched Lid</option>
+                  </select>
+                </label>
+                <label class="inline-select" style="grid-column:2;grid-row:2">Lid snugness
+                  <select id="b4b-lid-snugness">
+                    <option value="0.5">0.5 mm — Tight</option>
+                    <option value="1" selected>1.0 mm — Standard</option>
+                    <option value="2">2.0 mm — Loose</option>
+                  </select>
+                </label>
+                <label class="inline-select" style="grid-column:3;grid-row:2">Stacking
+                  <select id="b4b-stacking">
+                    <option value="false" selected>Not stackable</option>
+                    <option value="true">Stackable</option>
+                  </select>
+                </label>
+                <label id="b4b-handle-row" class="inline-select" style="grid-column:1;grid-row:3" title="A folding bail on the front wall, on two screws into the case body">
+                  <span id="b4b-handle-label">Carrying handle</span>
+                  <select id="b4b-handle">
+                    <option value="false" selected>No handle</option>
+                    <option value="true">Add handle</option>
+                  </select>
+                </label>
+                <span id="b4b-handle-note" class="b4b-blocked-note" style="grid-column:2;grid-row:3" hidden></span>
+                <label class="inline-select" style="grid-column:3;grid-row:3">Label
+                  <select id="b4b-label-location">
+                    <option value="none" selected>No label</option>
+                    <option value="top">Top</option>
+                    <option value="front">Front</option>
+                  </select>
+                </label>
+                <label id="b4b-label-text-row" style="grid-column:1 / span 2;grid-row:4" hidden>Label text
+                  <input id="b4b-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE">
+                </label>
+              </div>
             </div>
-            <label class="inline-select">Lid type
-              <select id="b4b-lid-type">
-                <option value="lid_only">Lid Only</option>
-                <option value="latched" selected>Latched Lid</option>
-              </select>
-            </label>
-            <label class="inline-select">Lid snugness
-              <select id="b4b-lid-snugness">
-                <option value="0.5">0.5 mm — Tight</option>
-                <option value="1" selected>1.0 mm — Standard</option>
-                <option value="2">2.0 mm — Loose</option>
-              </select>
-            </label>
-            <div id="b4b-secure-options" class="b4b-subgroup" hidden></div>
-            <label class="checkbox-row inline-option"><span>Stacking</span><input id="b4b-stacking" type="checkbox"></label>
-            <label id="b4b-handle-row" class="checkbox-row inline-option" title="A folding bail on the front wall, on two screws into the case body"><span>Carrying handle</span><input id="b4b-handle" type="checkbox"></label>
-            <span id="b4b-handle-note" class="stack-note" hidden></span>
-            <label class="checkbox-row inline-option"><span>Add label</span><input id="b4b-label-enabled" type="checkbox"></label>
-            <label id="b4b-label-text-row" hidden>Label text<input id="b4b-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE"></label>
-            <label id="b4b-label-location-row" class="inline-select" hidden>Label location
-              <select id="b4b-label-location">
-                <option value="top" selected>Top</option>
-                <option value="front">Front</option>
-              </select>
-            </label>
+            <div class="b4b-card">
+              <h3 class="b4b-card-title">Information</h3>
+              <div id="b4b-capacity" class="b4b-capacity">
+                <strong id="b4b-capacity-line">Inside capacity: — units</strong>
+                <div id="b4b-hardware" class="muted b4b-hardware">Hardware: —</div>
+                <span id="b4b-grew" class="field-error" hidden></span>
+              </div>
+            </div>
           </div>
 
           <div class="subheading-row">
@@ -163,15 +192,15 @@
         </label>
         <div class="save-location-row">
           <div class="save-location-group">
-            <label for="output-folder">Save location</label>
-            <input id="output-folder" type="text" readonly title="Click to select folder">
-          </div>
-          <div class="log-controls-group">
-            <label class="checkbox-row" for="keep-log">
-              <span>Keep log</span>
-              <input id="keep-log" type="checkbox" checked>
-            </label>
-            <button type="button" id="show-log-button" class="button secondary" title="Show bins.md log file in WordPad">Show log</button>
+            <label for="output-folder">Space Location</label>
+            <div class="save-location-input-wrap">
+              <input id="output-folder" type="text" readonly title="Click to select folder">
+              <button type="button" id="output-folder-picker" class="folder-picker-button" title="Select folder" aria-label="Select folder">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                  <path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
         <div class="print-button-wrap">

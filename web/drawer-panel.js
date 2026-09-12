@@ -153,13 +153,24 @@ DP.build = () => {
     </section>
 
     <section class="dl-savebar" aria-label="Saving">
-      <button type="button" id="dl-file" class="dl-file-button" title="Change the save location - each folder has its own inventory"></button>
+      <div class="save-location-row">
+        <div class="save-location-group">
+          <label for="dl-output-folder">Space Location</label>
+          <div class="save-location-input-wrap">
+            <input id="dl-output-folder" type="text" readonly title="Click to select folder - each folder has its own inventory">
+            <button type="button" id="dl-output-folder-picker" class="folder-picker-button" title="Select folder" aria-label="Select folder">
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                <path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
       <div class="dl-save-row">
         <label class="checkbox-row" title="Save the layout to the inventory file after every change"><span>Auto-save</span><input id="dl-autosave" type="checkbox"></label>
         <span id="dl-save-status" class="dl-save-status" role="status"></span>
         <button type="button" id="dl-map" class="button secondary dl-small" title="Print a map of this drawer and where each bin goes (Ctrl+P)">Print map</button>
-        <button type="button" id="dl-open-file" class="button secondary dl-small" title="Open the inventory file">Open file</button>
-        <button type="button" id="dl-save" class="button primary dl-small">Save layout</button>
+        <button type="button" id="dl-save" class="button primary dl-small" hidden>Save layout</button>
       </div>
     </section>`;
   DP.wire();
@@ -324,15 +335,19 @@ DP.wire = () => {
     if (event.target.checked) DL.save(); else DL.emit();
   });
   $("#dl-save").addEventListener("click", () => DL.save());
-  $("#dl-open-file").addEventListener("click", async () => {
-    try {
-      if (!DL.exists) await DL.save();
-      await api("/api/show-log", { output: DL.output ?? DL.folder() });
-    } catch (error) {
-      toast(error.message, true);
+  const outputFolderEl = $("#dl-output-folder");
+  outputFolderEl.addEventListener("click", () => DP.changeFolder());
+  outputFolderEl.addEventListener("keydown", event => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      DP.changeFolder();
     }
   });
-  $("#dl-file").addEventListener("click", () => DP.changeFolder());
+  $('label[for="dl-output-folder"]').addEventListener("click", event => {
+    event.preventDefault();
+    DP.changeFolder();
+  });
+  $("#dl-output-folder-picker")?.addEventListener("click", () => DP.changeFolder());
 };
 
 DP.onInventoryClick = event => {
@@ -340,8 +355,7 @@ DP.onInventoryClick = event => {
   const one = row && DL.bin(row.dataset.bin);
   if (!one) return;
   const action = event.target.closest("[data-act]")?.dataset.act;
-  if (action === "place") DL.quickPlace(one);
-  else if (action === "more") {
+  if (action === "more") {
     if (DP.open.has(one.id)) DP.open.delete(one.id); else DP.open.add(one.id);
     DP.renderInventory(true);
   } else if (action === "qty+") DL.editBins({ bin_updates: [{ id: one.id, qty: one.qty + 1 }] });
@@ -566,7 +580,7 @@ DP.renderStats = () => {
   const planned = Object.values(report.planned || {}).reduce((sum, n) => sum + n, 0);
   const problems = report.problems;
   box.innerHTML = `
-    <div class="dl-stat"><span>Filled</span><div><strong>${report.fill}%</strong> <small>${report.cells.used} of ${report.cells.total} cells · ${dlPlural(report.placed, "bin")}${report.stacks ? ` in ${dlPlural(report.stacks, "stack")} and singles` : ""}${planned ? ` · ${planned} planned` : ""}</small>
+    <div class="dl-stat"><span>Filled</span><div><strong>${report.fill}%</strong> <small>${report.cells.used} of ${report.cells.total} cells${planned ? ` · ${planned} planned` : ""}</small>
       <div class="dl-meter"><span></span></div></div></div>
     <div class="dl-stat"><span>Empty</span><div>${report.cells.free ? `${report.free_mm2.toLocaleString()} mm² of grid` : "No empty grid cells"}
       <small>${edges.length ? `Edges: ${edges.join(", ")}` : "No spare strip at the edges"}</small></div></div>
@@ -658,8 +672,6 @@ DP.renderInventory = (force = false) => {
       one.qty <= 0 ? "unprinted" : "", tooTall ? "too-tall" : "",
     ].filter(Boolean).join(" ");
     const open = DP.open.has(one.id);
-    const placeLabel = freePrinted > 0 ? "Place" : "Plan";
-    const placeTitle = freePrinted > 0 ? "Put one in the best free spot" : "Every printed copy is placed - place one more as planned, to print later";
     return `
       <div class="dl-bin ${classes}" data-bin="${escapeHtml(one.id)}" draggable="${canPlace}" title="${canPlace ? "Drag into the drawer, or double-click to place" : ""}">
         <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${DL.stackable(one) ? `${fmt(one.z)} mm stack module; ${fmt(DL.partHeight(one))} mm detached` : `${fmt(one.z)} mm tall`}">${fmt(one.z)}${DL.stackable(one) ? "<i>⇅</i>" : ""}</span>
@@ -674,7 +686,6 @@ DP.renderInventory = (force = false) => {
           <span>${one.qty}</span>
           <button type="button" data-act="qty+" aria-label="One more printed">+</button>
         </span>
-        <button type="button" class="dl-place${freePrinted > 0 ? "" : " plan"}" data-act="place" ${canPlace ? "" : "disabled"} title="${placeTitle}">${placeLabel}</button>
         <button type="button" class="dl-more" data-act="more" aria-expanded="${open}" title="Details">${open ? "▴" : "▾"}</button>
         <button type="button" class="dl-remove" data-act="delete" title="Remove from the inventory" aria-label="Remove ${escapeHtml(DL.label(one))} from the inventory">✕</button>
       </div>
@@ -707,11 +718,7 @@ DP.renderInventory = (force = false) => {
 DP.renderSave = () => {
   const settings = DL.layout.settings;
   dlSet("#dl-autosave", Boolean(settings.autosave), "checked");
-  const file = $("#dl-file");
-  const name = (DL.file || "").split(/[\\/]/).pop();
-  const space = DL.layout.space?.name;
-  file.textContent = space ? `📁 ${space} · ${name}` : name ? `📁 ${name}` : "📁 Choose a save location";
-  file.title = `${DL.file || ""}\nClick to change the save location - each folder has its own inventory.`;
+  dlSet("#dl-output-folder", DL.output ?? DL.folder(), "value");
   const status = $("#dl-save-status");
   let text = "";
   let tone = "";
@@ -723,7 +730,9 @@ DP.renderSave = () => {
   else text = settings.autosave ? "Saves as you go" : "Up to date";
   status.textContent = text;
   status.className = `dl-save-status ${tone}`;
-  $("#dl-save").disabled = DL.saving || (!DL.dirty && DL.saveState !== "error");
+  const save = $("#dl-save");
+  save.hidden = Boolean(settings.autosave);
+  save.disabled = DL.saving || (!DL.dirty && DL.saveState !== "error");
 };
 
 // ------------------------------------------------------------------ mode

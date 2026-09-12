@@ -1185,13 +1185,16 @@ class DividerScoopTests(unittest.TestCase):
             division_level="base",
             division_labels=["A", "B", "C", "D"],
         )
-        solids = build_features(self.box, [feature], self.base_z)
+        # Base-level labels are floor inlays now (set into the base, not
+        # embossed on top of it), so they come from build_texts rather than
+        # riding along in the divider's own solids.
+        texts = inserts.build_texts(self.box, [feature], self.base_z)
         cells = inserts.divider_cells(self.box, feature, self.base_z)
-        labels = solids[2:2 + len(cells)]
-        self.assertEqual(len(labels), len(cells))
-        for label, cell in zip(labels, cells):
+        self.assertEqual(len(texts), len(cells))
+        for (_label, solid, raised), cell in zip(texts, cells):
+            self.assertFalse(raised)
             clear_band_start = (cell.zone.y0 + cell.zone.y1) / 2.0
-            self.assertGreaterEqual(label.bounds[0][1], clear_band_start - 1e-6)
+            self.assertGreaterEqual(solid.bounds[0][1], clear_band_start - 1e-6)
 
     def test_scoop_wins_over_an_old_conflicting_sloped_bottom(self) -> None:
         feature = Feature(

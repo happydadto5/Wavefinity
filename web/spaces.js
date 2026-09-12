@@ -262,7 +262,8 @@ SP.useFolder = async (folder, keepLog) => {
   state.output = folder;
   $("#output-folder").value = folder;
   state.keepLog = keepLog;
-  $("#keep-log").checked = keepLog;
+  const keepLogEl = $("#keep-log");
+  if (keepLogEl) keepLogEl.checked = keepLog;
   api("/api/preferences", { keep_log: keepLog }).catch(() => {});
   if (typeof DL === "undefined") return;
   // The Layout view holds the old folder's inventory: save it, then re-read.

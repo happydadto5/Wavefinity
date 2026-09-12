@@ -121,6 +121,19 @@ B4B_WALL_PRESETS = tuple(
 )
 B4B_DEFAULT_WALL = 1.2
 DEFAULT_BASE_THICKNESS = 0.6
+# Base thickness presets, same reasoning as WALL_PRESETS: a short list of
+# choices that print differently, not a free numeric field.  A design saved
+# with any other base value still loads and regenerates unchanged; the UI
+# shows it as a legacy value until the user picks a current preset.  Modes
+# that need more than the maximum preset here (stacking, B4B) add their own
+# required value dynamically rather than widening this list.
+BASE_PRESETS = (
+    (0.4, "Very thin"),
+    (0.6, "Good"),
+    (0.8, "Heavy"),
+    (1.0, "Extra Heavy"),
+    (1.2, "Maximum"),
+)
 DEFAULT_CORNER_FILLET = 0.6   # rounding applied where two wavy walls meet
 CORNER_INSET = 1.0            # walls stop this far short of the nominal corner
 # Locked in after the physical tolerance print: these are no longer tuning

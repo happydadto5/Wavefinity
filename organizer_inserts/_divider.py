@@ -198,9 +198,13 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
     solids.extend(_divider_sloped_bottoms(
         box, spec_feature, options, along, centres, height, base_z,
     ))
-    div_texts = divider_division_texts(box, spec_feature, base_z)
-    for _text_label, text_solid, _raised in div_texts:
-        solids.append(text_solid)
+    # A rim-level label rides on its own welded shelf, which has to be fused
+    # to the divider here to print as one piece. A base-level label is an
+    # inlay sunk into the floor instead - build_texts/apply_texts cut its
+    # pocket and write it as its own object, so it is left out of this list.
+    for _text_label, text_solid, raised in divider_division_texts(box, spec_feature, base_z):
+        if raised:
+            solids.append(text_solid)
     solids.extend(_divider_scoops(box, spec_feature, base_z))
     return solids
 
@@ -251,8 +255,12 @@ def _build_divider_grid(
         box, spec_feature, options, slope_along, slope_centres, height, base_z,
         run_splits=slope_run_splits,
     ))
-    for _label, text_solid, _raised in divider_division_texts(box, spec_feature, base_z):
-        solids.append(text_solid)
+    # See build_divider: only a rim-level label's welded shelf belongs in the
+    # divider's own solids. A base-level label is a floor inlay left for
+    # build_texts/apply_texts to cut and write as its own object.
+    for _label, text_solid, raised in divider_division_texts(box, spec_feature, base_z):
+        if raised:
+            solids.append(text_solid)
     return solids
 
 
@@ -386,10 +394,10 @@ def _divider_grid_texts(
                 outline, xoff=(x0 + x1) / 2.0, yoff=(y0 + y1) / 2.0
             )
             try:
-                solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH, raised=True)
+                solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH)
             except Exception:
                 continue
-            results.append((text, solid, True))
+            results.append((text, solid, False))
     return results
 
 
@@ -756,8 +764,8 @@ def divider_division_texts(
         outline = affinity.translate(outline, xoff=cx, yoff=cy)
 
         try:
-            solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH, raised=True)
-            results.append((text, solid, True))
+            solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH)
+            results.append((text, solid, False))
         except Exception:
             continue
 

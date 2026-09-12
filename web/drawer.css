@@ -100,11 +100,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-qty button:hover:not(:disabled) { background: var(--teal-soft); }
 .dl-qty button:disabled { color: var(--line-dark); cursor: default; }
 .dl-qty span { min-width: 22px; text-align: center; font-size: 12px; font-weight: 750; }
-.dl-place {
-  border: 1px solid var(--teal); background: var(--teal-soft); color: var(--teal-dark); border-radius: 7px;
-  padding: 6px 9px; font-size: 12px; font-weight: 700; cursor: pointer;
-}
-.dl-place:disabled { border-color: var(--line); background: #f3f5f5; color: var(--line-dark); cursor: default; }
 .dl-more { border: 0; background: none; font-size: 13px; cursor: pointer; color: var(--muted); padding: 4px 2px; }
 .dl-remove {
   border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 13px;
@@ -127,12 +122,7 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
   border-top: 1px solid var(--line-dark); box-shadow: 0 -6px 16px rgba(30,51,61,.06); z-index: 2;
 }
 .drawer-panel > .control-section:last-of-type { margin-bottom: 12px; }
-.dl-file-button {
-  display: block; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 6px;
-  background: #eef2f2; color: var(--muted); padding: 7px 9px; font-size: 11px; cursor: pointer;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0 0 8px;
-}
-.dl-file-button:hover { border-color: var(--line-dark); color: var(--ink); }
+.dl-savebar .save-location-row { margin-bottom: 8px; }
 .dl-save-row { display: flex; align-items: center; gap: 8px; }
 .dl-save-row .checkbox-row { margin: 0; }
 .dl-save-status { flex: 1; min-width: 0; font-size: 11px; color: var(--muted); }
@@ -147,7 +137,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
   padding: 2px 3px; border-radius: 4px; background: var(--teal); color: white;
 }
 .dl-placed small { white-space: nowrap; }
-.dl-place.plan { border-style: dashed; background: white; }
 .dl-planned-note { color: var(--teal-dark) !important; font-weight: 650; }
 .dl-todo {
   margin: 0 0 10px; padding: 9px 11px; border: 1px dashed var(--teal); border-radius: 8px;

@@ -402,7 +402,17 @@ DL.save = async () => {
     if (DL.saveAgain) { DL.saveAgain = false; DL.save(); }
   }
 };
-DL.saveSoon = debounce(() => DL.save(), 700);
+// Don't write on every keystroke: wait for a lull, then hold off saving again
+// until at least AUTOSAVE_MIN_INTERVAL has passed since the last save.
+const AUTOSAVE_MIN_INTERVAL = 5 * 60 * 1000;
+let dlSaveTimer = null;
+DL.saveSoon = () => {
+  if (dlSaveTimer) return;
+  const elapsed = DL.savedAt ? Date.now() - DL.savedAt.getTime() : Infinity;
+  const wait = Math.max(700, AUTOSAVE_MIN_INTERVAL - elapsed);
+  dlSaveTimer = setTimeout(() => { dlSaveTimer = null; if (DL.dirty) DL.save(); }, wait);
+};
+DL.saveSoon.cancel = () => { clearTimeout(dlSaveTimer); dlSaveTimer = null; };
 
 // Bin rows (Qty, name, sizes, stacking, hand-added bins) always save straight
 // away - they are the inventory, not the layout. The layout rides along only
