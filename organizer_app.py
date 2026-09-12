@@ -503,11 +503,11 @@ def _prism_geometry(zone: Zone, z0: float, z1: float, kind: str) -> list[tuple]:
     c = (zone.x1, zone.y1)
     d = (zone.x0, zone.y1)
     return [
-        ([(*a, z0), (*b, z0), (*b, z1), (*a, z1)], kind, (0.0, -1.0, 0.0), 0),
-        ([(*b, z0), (*c, z0), (*c, z1), (*b, z1)], kind, (1.0, 0.0, 0.0), 0),
-        ([(*c, z0), (*d, z0), (*d, z1), (*c, z1)], kind, (0.0, 1.0, 0.0), 0),
-        ([(*d, z0), (*a, z0), (*a, z1), (*d, z1)], kind, (-1.0, 0.0, 0.0), 0),
-        ([(*a, z1), (*b, z1), (*c, z1), (*d, z1)], kind, (0.0, 0.0, 1.0), 0),
+        ([(*a, z0), (*b, z0), (*b, z1), (*a, z1)], kind, (0.0, -1.0, 0.0), 0, None),
+        ([(*b, z0), (*c, z0), (*c, z1), (*b, z1)], kind, (1.0, 0.0, 0.0), 0, None),
+        ([(*c, z0), (*d, z0), (*d, z1), (*c, z1)], kind, (0.0, 1.0, 0.0), 0, None),
+        ([(*d, z0), (*a, z0), (*a, z1), (*d, z1)], kind, (-1.0, 0.0, 0.0), 0, None),
+        ([(*a, z1), (*b, z1), (*c, z1), (*d, z1)], kind, (0.0, 0.0, 1.0), 0, None),
     ]
 
 
@@ -525,7 +525,7 @@ def _bore_axis_geometry(
         return []
     return [
         ([tuple(float(v) for v in point) for point in polyline],
-         kind, (0.0, 0.0, 1.0), 9)
+         kind, (0.0, 0.0, 1.0), 9, None)
         for polyline in axes
     ]
 
@@ -539,13 +539,19 @@ PREVIEW_DECIMALS = 3
 PREVIEW_MIN_FACE_AREA = 1e-4
 
 
-def _mesh_preview_geometry(mesh, kind: str) -> list[tuple]:
+def _mesh_preview_geometry(
+    mesh, kind: str, owner: str | None = None
+) -> list[tuple]:
     """Convert a finished holder mesh into camera-independent preview faces.
 
     A B4B case runs to well over a hundred thousand triangles, so this works in
     numpy rather than per vertex in Python, drops slivers too small to paint,
     and rounds to the micron.  Same picture; a fraction of the build time and of
     the JSON the browser then has to parse.
+
+    ``owner`` is the physical part ("base"/"lid") a face belongs to. It is
+    only ever passed by the B4B preview walk, which knows which source mesh
+    each face came from; ordinary-bin geometry leaves it ``None``.
     """
     preview_kind = mesh.metadata.get("wavefinity_preview_kind")
     if preview_kind and "invalid" not in kind and "conflict" not in kind:
@@ -562,7 +568,7 @@ def _mesh_preview_geometry(mesh, kind: str) -> list[tuple]:
     # thousand of them in tuples costs more than everything else here put
     # together, and nothing downstream needs them to be tuples.
     return [
-        (triangle, kind, normal, 0)
+        (triangle, kind, normal, 0, owner)
         for triangle, normal in zip(corners, normals)
     ]
 
@@ -695,7 +701,7 @@ def preview_geometry(
     outer, cavity = preview_rings(box)
     floor_z, rim_z = box.base_thickness, box.z
     geometry: list[tuple[list[tuple[float, float, float]], str,
-                         tuple[float, float, float], int]] = []
+                         tuple[float, float, float], int, str | None]] = []
 
     count = len(outer)
     for index in range(count):
@@ -706,15 +712,15 @@ def preview_geometry(
         inward = (-run[1], run[0], 0.0)
         geometry.append(([(a[0], a[1], 0.0), (b[0], b[1], 0.0),
                           (b[0], b[1], rim_z), (a[0], a[1], rim_z)],
-                         "outside", outward, 0))
+                         "outside", outward, 0, None))
         geometry.append(([(c[0], c[1], floor_z), (d[0], d[1], floor_z),
                           (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
-                         "inside", inward, 0))
+                         "inside", inward, 0, None))
         geometry.append(([(a[0], a[1], rim_z), (b[0], b[1], rim_z),
                           (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
-                         "rim", (0.0, 0.0, 1.0), 0))
+                         "rim", (0.0, 0.0, 1.0), 0, None))
     geometry.append(([(*point, floor_z) for point in cavity],
-                     "floor", (0.0, 0.0, 1.0), 1))
+                     "floor", (0.0, 0.0, 1.0), 1, None))
 
     tidy = clean_label(label)
     location = label_position(label_location)
@@ -897,10 +903,10 @@ def preview_geometry(
             ]
             for piece in pieces:
                 geometry.append(([(x, y, box.z) for x, y in piece.exterior.coords],
-                                 "label", (0.0, 0.0, 1.0), 2))
+                                 "label", (0.0, 0.0, 1.0), 2, None))
                 for ring in piece.interiors:
                     geometry.append(([(x, y, box.z) for x, y in ring.coords],
-                                     "label_hole", (0.0, 0.0, 1.0), 3))
+                                     "label_hole", (0.0, 0.0, 1.0), 3, None))
 
     inside_x, inside_y = box.usable_inside
     return {

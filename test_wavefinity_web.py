@@ -1228,6 +1228,27 @@ class WebApplicationTests(unittest.TestCase):
         self.assertNotIn('divider: \'<rect x="4"', app_js)
         self.assertLess(index_html.index("/feature-icons.js"), index_html.index("/app.js"))
 
+    def test_3d_preview_has_ordinary_and_b4b_mode_controls_and_a_gl_renderer(self):
+        # fix3d.md: B4B gets its own All/Base/Lid group instead of Standard/
+        # Xray/Bin/Interior, the two groups never share a name, and the
+        # shared WebGL renderer loads before app.js can reference it.
+        root = Path(__file__).resolve().parent
+        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        gl_js = (root / "web" / "preview3d-webgl.js").read_text(encoding="utf-8")
+        self.assertIn('id="ordinary-preview-modes"', index_html)
+        self.assertIn('id="b4b-preview-modes"', index_html)
+        for mode in ("standard", "xray", "bin", "interior"):
+            self.assertIn(f'data-camera-mode="{mode}"', index_html)
+        for view in ("all", "base", "lid"):
+            self.assertIn(f'data-b4b-view="{view}"', index_html)
+        self.assertLess(
+            index_html.index("/preview3d-webgl.js"), index_html.index("/app.js")
+        )
+        self.assertIn("window.Preview3DGL", gl_js)
+        self.assertIn("Preview3DGL.init", app_js)
+        self.assertIn("drawGeometryLegacy2D", app_js)
+
 
 class WebServerTests(unittest.TestCase):
     @classmethod

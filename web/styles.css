@@ -436,7 +436,15 @@ input[type="number"]::-webkit-inner-spin-button {
   to { opacity: 1; transform: scale(1); filter: blur(0); }
 }
 .canvas-wrap canvas { width: 100%; height: 100%; display: block; touch-action: none; }
-.canvas-wrap.preview-recalculating #preview-3d { opacity: .88; }
+/* The solid-geometry WebGL pass sits under the 2D overlay canvas (dimension
+   guides, bore axes, the usable-floor rectangle, the contact shadow, and the
+   invisible hit-test polygons for placed parts). #preview-3d stays the
+   pointer/drag target and the transparent top layer; when WebGL is
+   unavailable it falls back to painting everything itself instead. */
+#preview-3d-solid { position: absolute; inset: 0; pointer-events: none; }
+#preview-3d { position: relative; background: transparent; }
+.canvas-wrap.preview-recalculating #preview-3d,
+.canvas-wrap.preview-recalculating #preview-3d-solid { opacity: .88; }
 .preview-wait {
   position: absolute;
   top: 16px;

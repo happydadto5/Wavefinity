@@ -1434,7 +1434,7 @@ class BinCustomizationTests(unittest.TestCase):
     def test_preview_shows_and_reserves_both_customizations(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
         geometry = organizer_app.preview_geometry(spec, "M3", (), "fused", "top", True)
-        kinds = [kind for _points, kind, _normal, _layer in geometry["geometry"]]
+        kinds = [kind for _points, kind, _normal, _layer, _owner in geometry["geometry"]]
         self.assertIn("top_label_ledge", kinds)
         self.assertIn("scoop", kinds)
         self.assertEqual(
@@ -1703,7 +1703,7 @@ class InsertEditorTests(unittest.TestCase):
         feature = organizer_app.default_feature(spec, "bore")
         geometry = organizer_app.preview_geometry(spec, features=[feature])
         faces = [
-            points for points, kind, _normal, _layer in geometry["geometry"]
+            points for points, kind, _normal, _layer, _owner in geometry["geometry"]
             if kind == "feature_bore"
         ]
         self.assertGreater(len(faces), 5)
@@ -1725,7 +1725,7 @@ class InsertEditorTests(unittest.TestCase):
         self.assertTrue(geometry["feature_errors"])
         self.assertIn(
             "feature_invalid",
-            [kind for _points, kind, _normal, _layer in geometry["geometry"]],
+            [kind for _points, kind, _normal, _layer, _owner in geometry["geometry"]],
         )
 
     def test_every_guided_interior_part_choice_starts_with_valid_geometry(self) -> None:
@@ -1740,7 +1740,8 @@ class InsertEditorTests(unittest.TestCase):
             self.assertFalse(geometry["feature_errors"], kind)
             self.assertTrue(
                 any(face_kind == f"feature_{kind}"
-                    for _points, face_kind, _normal, _layer in geometry["geometry"]),
+                    for _points, face_kind, _normal, _layer, _owner
+                    in geometry["geometry"]),
                 kind,
             )
 
@@ -2087,7 +2088,7 @@ class InsertFormPreviewTests(unittest.TestCase):
 
     def kinds(self, mode: str) -> dict[str, int]:
         counted: dict[str, int] = {}
-        for _points, kind, _normal, _layer in organizer_app.preview_geometry(
+        for _points, kind, _normal, _layer, _owner in organizer_app.preview_geometry(
             self.spec, "", (), mode
         )["geometry"]:
             counted[kind] = counted.get(kind, 0) + 1
@@ -2129,7 +2130,7 @@ class InsertFormPreviewTests(unittest.TestCase):
         one = organizer_app.default_feature(self.spec, "post")
         for mode, prefix in (("fused", "feature_"), ("separate", "insert_")):
             kinds = {
-                kind for _p, kind, _n, _l in organizer_app.preview_geometry(
+                kind for _p, kind, _n, _l, _o in organizer_app.preview_geometry(
                     self.spec, "", (one,), mode
                 )["geometry"]
             }

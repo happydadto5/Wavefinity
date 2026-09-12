@@ -857,8 +857,9 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
             validate_b4b_design(box)
             b4b_block = b4b_summary(box)
             geometry = [
-                {"points": points, "kind": kind, "normal": normal, "layer": layer}
-                for points, kind, normal, layer in b4b_preview_parts(box)
+                {"points": points, "kind": kind, "normal": normal,
+                 "layer": layer, "owner": owner}
+                for points, kind, normal, layer, owner in b4b_preview_parts(box)
             ]
     except Exception as error:  # surface the real, actionable message
         message = str(error)
@@ -871,8 +872,10 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 )
                 with GEOMETRY_LOCK:
                     geometry = [
-                        {"points": points, "kind": kind, "normal": normal, "layer": layer}
-                        for points, kind, normal, layer in b4b_preview_parts(label_free)
+                        {"points": points, "kind": kind, "normal": normal,
+                         "layer": layer, "owner": owner}
+                        for points, kind, normal, layer, owner
+                        in b4b_preview_parts(label_free)
                     ]
             except Exception:
                 pass
@@ -944,8 +947,9 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         )
     bounds = layout_zone(box, layout.mode)
     geometry = [
-        {"points": points, "kind": kind, "normal": normal, "layer": layer}
-        for points, kind, normal, layer in scene["geometry"]
+        {"points": points, "kind": kind, "normal": normal,
+         "layer": layer, "owner": owner}
+        for points, kind, normal, layer, owner in scene["geometry"]
     ]
     cavity = wavy_cavity_polygon(box)
     # An auto text part finds its own spot during the preview, so the design
@@ -1077,8 +1081,9 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 pass
         return {
             "geometry": [
-                {"points": points, "kind": kind, "normal": normal, "layer": layer}
-                for points, kind, normal, layer in geometry
+                {"points": points, "kind": kind, "normal": normal,
+                 "layer": layer, "owner": owner}
+                for points, kind, normal, layer, owner in geometry
             ],
             "feature": feature_to_dict(one, layout.mode),
             "resolved_options": {},
@@ -1113,8 +1118,9 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_{one.kind}"))
     result = {
         "geometry": [
-            {"points": points, "kind": kind, "normal": normal, "layer": layer}
-            for points, kind, normal, layer in geometry
+            {"points": points, "kind": kind, "normal": normal,
+             "layer": layer, "owner": owner}
+            for points, kind, normal, layer, owner in geometry
         ],
         "feature": feature_to_dict(one, layout.mode),
         "resolved_options": shown,

@@ -3095,33 +3095,41 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
     geometry: list = []
     eff = b4b_effective_box(box)
     body = b4b_body_with_features(box)
-    geometry.extend(_mesh_preview_geometry(body, "b4b_body"))
+    geometry.extend(_mesh_preview_geometry(body, "b4b_body", owner="base"))
     if eff.b4b.label_location == "front" and eff.b4b.label_text.strip():
+        # Plugs into the body's front channel frame - a base part.
         geometry.extend(
-            _mesh_preview_geometry(make_b4b_front_label_plate(box), "b4b_label")
+            _mesh_preview_geometry(
+                make_b4b_front_label_plate(box), "b4b_label", owner="base"
+            )
         )
     if eff.b4b.lid:
         lid = make_b4b_lid(box)
         if eff.b4b.label_location == "top" and eff.b4b.label_text.strip():
             lid, inlay = _apply_top_label(box, lid)
-            geometry.extend(_mesh_preview_geometry(inlay, "b4b_label"))
-        geometry.extend(_mesh_preview_geometry(lid, "b4b_lid"))
+            # Fused into the lid mesh itself - a lid part.
+            geometry.extend(_mesh_preview_geometry(inlay, "b4b_label", owner="lid"))
+        geometry.extend(_mesh_preview_geometry(lid, "b4b_lid", owner="lid"))
     handle = make_b4b_handle(box)
     if handle is not None:
-        geometry.extend(_mesh_preview_geometry(handle, "b4b_handle"))
+        # Folds against the front wall - body-mounted hardware.
+        geometry.extend(_mesh_preview_geometry(handle, "b4b_handle", owner="base"))
     if eff.b4b.secure_lid:
         for lever in make_b4b_latches(box):
-            geometry.extend(_mesh_preview_geometry(lever, "b4b_latch"))
+            # Lid-mounted moving parts.
+            geometry.extend(_mesh_preview_geometry(lever, "b4b_latch", owner="lid"))
     if eff.b4b.stacking:
         for peg in _stack_pegs(box):
-            geometry.extend(_mesh_preview_geometry(peg, "b4b_stack"))
+            # Locating pegs stand proud of the lid's own top surface.
+            geometry.extend(_mesh_preview_geometry(peg, "b4b_stack", owner="lid"))
     return tuple(geometry)
 
 
-def b4b_preview_parts(box: BoxSpec) -> list[tuple[list, str, tuple, int]]:
+def b4b_preview_parts(box: BoxSpec) -> list[tuple[list, str, tuple, int, str]]:
     """Preview geometry in the ``preview_geometry`` tuple format:
-    ``(points, kind, normal, layer)``.  Dimensionally true; microdetail such as
-    thread pilots is omitted."""
+    ``(points, kind, normal, layer, owner)``, where ``owner`` is ``"base"`` or
+    ``"lid"``.  Dimensionally true; microdetail such as thread pilots is
+    omitted."""
     return list(_b4b_preview_geometry(box))
 
 

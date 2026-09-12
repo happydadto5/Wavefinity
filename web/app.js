@@ -65,6 +65,11 @@ const state = {
   designMutationBusy: false,
   canGenerate: true,
   previewMode: "standard",
+  // B4B's own All/Base/Lid preview state - see applyB4BVisibility() and
+  // setB4BView(). Separate from previewMode because the two mean different
+  // things (Standard/Xray/Bin/Interior classify ordinary-bin geometry by
+  // kind; All/Base/Lid classify B4B geometry by physical part ownership).
+  b4bView: "all",
   history: [],
   future: [],
   serverInstance: null,
@@ -736,6 +741,18 @@ function applyB4BVisibility() {
   const hide = (sel, hidden) => { const el = $(sel); if (el) el.hidden = hidden; };
   hide(".subheading-row", on);
   hide(".palette-wrap", on);
+  // B4B shows its own All/Base/Lid group instead of the ordinary bin's
+  // Standard/Xray/Bin/Interior buttons - the two mean different things and
+  // are never both meaningful at once.
+  hide("#ordinary-preview-modes", on);
+  hide("#b4b-preview-modes", !on);
+  if (on && !["all", "base", "lid"].includes(state.b4bView)) {
+    state.b4bView = "all";
+  }
+  if (on) {
+    $$('[data-b4b-view]').forEach(button =>
+      button.classList.toggle("active", button.dataset.b4bView === state.b4bView));
+  }
   // Unconditional when B4B is on: a leftover draft must never keep the interior
   // editor visible while B4B owns the interior. Off-B4B visibility is managed by
   // the draft workflow elsewhere, so only force-hide here.
@@ -1490,9 +1507,21 @@ function setPreviewMode(mode) {
   renderPreview3D();
 }
 
+// B4B's All/Base/Lid group visibility, distinct from ordinary previewMode -
+// see the state.b4bView comment. Never calls the backend: it only changes
+// which already-loaded GPU buffer groups get drawn and re-frames the camera
+// to whichever part is now showing.
+function setB4BView(view) {
+  if (!["all", "base", "lid"].includes(view)) view = "all";
+  state.b4bView = view;
+  $$('[data-b4b-view]').forEach(button => button.classList.toggle("active", button.dataset.b4bView === view));
+  renderPreview3D();
+}
+
 function wireCameraControls() {
   $$('[data-camera-view]').forEach(button => button.addEventListener("click", () => setCameraView(button.dataset.cameraView)));
   $$('[data-camera-mode]').forEach(button => button.addEventListener("click", () => setPreviewMode(button.dataset.cameraMode)));
+  $$('[data-b4b-view]').forEach(button => button.addEventListener("click", () => setB4BView(button.dataset.b4bView)));
   $$('[data-camera-zoom]').forEach(button => button.addEventListener("click", () => {
     state.camera.zoom = Math.max(.35, Math.min(4, state.camera.zoom * (button.dataset.cameraZoom === "in" ? 1.2 : 1 / 1.2)));
     renderPreview3D();
@@ -4470,7 +4499,19 @@ function canvasSize(canvas) {
 // spin, so it is written flat: no per-face object spread, no closures, no
 // throwaway arrays, no string colour maths, and back faces are dropped before
 // anything is projected. The picture it paints is the same one as before.
-function drawGeometry(canvas, geometry, camera) {
+// An ordinary bin's own geometry vs. everything a user has placed inside it -
+// shared with the WebGL path's group classification so Standard/Xray/Bin/
+// Interior mean the same thing whichever renderer is drawing them.
+const isBinFace = kind =>
+  kind === "outside" || kind === "inside" || kind === "rim" || kind === "floor" ||
+  kind === "top_label_ledge" || kind === "label" || kind === "label_hole";
+
+// Legacy full 2D-canvas painter. Used only as a fallback when WebGL is
+// unavailable (see renderPreview3D) - the primary path is the depth-buffered
+// WebGL renderer in preview3d-webgl.js, which this file no longer needs to
+// keep pixel-identical to, though it still shares isBinFace/iso/project and
+// the shading/colour helpers below.
+function drawGeometryLegacy2D(canvas, geometry, camera) {
   const { context, width, height } = canvasSize(canvas);
   paintBackdrop(context, width, height);
   state.previewSupportPolygons = [];
@@ -4492,10 +4533,6 @@ function drawGeometry(canvas, geometry, camera) {
   const camX = -sinYaw;
   const camY = -cosYaw;
   const vx = vector[0], vy = vector[1], vz = vector[2];
-
-  const isBinFace = kind =>
-    kind === "outside" || kind === "inside" || kind === "rim" || kind === "floor" ||
-    kind === "top_label_ledge" || kind === "label" || kind === "label_hole";
 
   const isFacingSide = (face) => {
     let sideX = 0, sideY = 0;
@@ -4651,7 +4688,7 @@ function drawGeometry(canvas, geometry, camera) {
   }
   drawUsableFloor(context, geometry, camera, project);
   drawBoreAxes(context, boreAxes, camera, project);
-  draw3DDimensions(context, state.design?.box, camera, project);
+  draw3DDimensions(context, state.design?.box, camera, project, state.preview?.b4b?.case_outer_mm);
 }
 
 // A line up the centre of every hole in a leaned bore, arrow-tipped, so it's
@@ -4756,10 +4793,16 @@ function checkBinSizeChange() {
   state.lastBoxSize = current;
 }
 
-function draw3DDimensions(context, box, camera, project) {
+// `outerXY`, when given, overrides the width/depth guides' extent and label
+// with the true case exterior - B4B's box.x/box.y are the child field, not
+// the printed case outline, so the dimension overlay would otherwise both
+// mislabel the case and fail to reach its drawn edges. See fix3d.md.
+function draw3DDimensions(context, box, camera, project, outerXY) {
   if (!box) return;
-  const hx = number(box.x) / 2;
-  const hy = number(box.y) / 2;
+  const outerX = outerXY ? number(outerXY[0]) : number(box.x);
+  const outerY = outerXY ? number(outerXY[1]) : number(box.y);
+  const hx = outerX / 2;
+  const hy = outerY / 2;
   const hz = number(box.z);
   if (hx <= 0 || hy <= 0 || hz <= 0) return;
 
@@ -4803,7 +4846,7 @@ function draw3DDimensions(context, box, camera, project) {
     widthDim.sA,
     widthDim.sB,
     widthDim.normal,
-    `Width ${fmt(box.x)} mm`,
+    `Width ${fmt(outerX)} mm`,
     gap,
     over
   );
@@ -4817,7 +4860,7 @@ function draw3DDimensions(context, box, camera, project) {
     depthDim.sA,
     depthDim.sB,
     depthDim.normal,
-    `Depth ${fmt(box.y)} mm`,
+    `Depth ${fmt(outerY)} mm`,
     gap,
     over
   );
@@ -4954,10 +4997,166 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
   context.restore();
 }
 
+let glRenderer = null;
+let glInitAttempted = false;
+let glWasLost = false;
+let glBuffersCache = null; // { geometry, b4b, buffers }
+const XRAY_ALPHA = 0.3;
+
+function ensurePreviewGL() {
+  if (glInitAttempted) return glRenderer;
+  glInitAttempted = true;
+  const canvas = $("#preview-3d-solid");
+  if (canvas && window.Preview3DGL) {
+    try {
+      glRenderer = window.Preview3DGL.init(canvas);
+    } catch (error) {
+      glRenderer = null;
+    }
+  }
+  return glRenderer;
+}
+
+// B4B classifies preview faces by which physical part they belong to - an
+// explicit `owner` field the backend attaches to every B4B face (see
+// fix3d.md) - rather than guessing from `kind`, which B4B's own kinds
+// (b4b_body/b4b_lid/...) were never meaningful input for. Anything without
+// an owner (should not happen for B4B geometry) defaults to base so it is
+// never silently dropped from every view.
+function classifyB4BFace(face) {
+  return face.owner === "lid" ? "lid" : "base";
+}
+
+function classifyOrdinaryFace(face) {
+  return isBinFace(face.kind) ? "bin" : "interior";
+}
+
+function currentPreviewGroups() {
+  return b4bEnabled() ? ["base", "lid"] : ["bin", "interior"];
+}
+
+function currentPreviewClassify() {
+  return b4bEnabled() ? classifyB4BFace : classifyOrdinaryFace;
+}
+
+// Which groups draw (and at what alpha) for the current mode, and which
+// group's bounds the camera frames to. Xray shows the interior at full
+// opacity with the shell drawn translucent over it - a deterministic
+// depth-tested blend rather than the old per-triangle camera-facing cull.
+function currentPreviewPasses(buffers) {
+  if (b4bEnabled()) {
+    const view = state.b4bView;
+    if (view === "base") {
+      return { passes: [{ group: "base", alpha: 1 }], aabb: buffers.groups.base?.aabb, visible: new Set(["base"]) };
+    }
+    if (view === "lid") {
+      return { passes: [{ group: "lid", alpha: 1 }], aabb: buffers.groups.lid?.aabb, visible: new Set(["lid"]) };
+    }
+    return {
+      passes: [{ group: "base", alpha: 1 }, { group: "lid", alpha: 1 }],
+      aabb: buffers.allAabb, visible: new Set(["base", "lid"]),
+    };
+  }
+  const mode = state.previewMode || "standard";
+  if (mode === "bin") {
+    return { passes: [{ group: "bin", alpha: 1 }], aabb: buffers.groups.bin?.aabb, visible: new Set(["bin"]) };
+  }
+  if (mode === "interior") {
+    return { passes: [{ group: "interior", alpha: 1 }], aabb: buffers.groups.interior?.aabb, visible: new Set(["interior"]) };
+  }
+  if (mode === "xray") {
+    return {
+      passes: [{ group: "interior", alpha: 1 }, { group: "bin", alpha: XRAY_ALPHA }],
+      aabb: buffers.allAabb, visible: new Set(["bin", "interior"]),
+    };
+  }
+  return {
+    passes: [{ group: "bin", alpha: 1 }, { group: "interior", alpha: 1 }],
+    aabb: buffers.allAabb, visible: new Set(["bin", "interior"]),
+  };
+}
+
 function renderPreview3D() {
   if (!state.preview) return;
   checkBinSizeChange();
-  drawGeometry($("#preview-3d"), state.preview.geometry, state.camera);
+  const overlayCanvas = $("#preview-3d");
+  const solidCanvas = $("#preview-3d-solid");
+  const geometry = state.preview.geometry || [];
+  const renderer = ensurePreviewGL();
+  if (!renderer || renderer.lost) {
+    if (renderer?.lost) glWasLost = true;
+    if (solidCanvas) solidCanvas.hidden = true;
+    drawGeometryLegacy2D(overlayCanvas, geometry, state.camera);
+    return;
+  }
+  if (glWasLost) {
+    // The buffers a lost context made are gone with it; a restored context
+    // starts empty and must rebuild rather than redraw stale handles.
+    glBuffersCache = null;
+    glWasLost = false;
+  }
+  if (solidCanvas) solidCanvas.hidden = false;
+  renderPreview3DGL(renderer, overlayCanvas, geometry, state.camera);
+}
+
+function renderPreview3DGL(renderer, overlayCanvas, fullGeometry, camera) {
+  const { context, width, height } = canvasSize(overlayCanvas);
+  context.clearRect(0, 0, width, height);
+  state.previewSupportPolygons = [];
+  const b4b = b4bEnabled();
+  if (!fullGeometry.length) {
+    window.Preview3DGL.draw(renderer, null, window.Preview3DGL.computeFrame(camera, null, width, height), width, height, []);
+    context.fillStyle = "#8b989e";
+    context.textAlign = "center";
+    context.fillText("No geometry", width / 2, height / 2);
+    return;
+  }
+  const boreAxes = fullGeometry.filter(face => face.kind?.endsWith("bore_axis"));
+  const solidGeometry = boreAxes.length
+    ? fullGeometry.filter(face => !face.kind?.endsWith("bore_axis"))
+    : fullGeometry;
+  const classify = currentPreviewClassify();
+  if (!glBuffersCache || glBuffersCache.geometry !== fullGeometry || glBuffersCache.b4b !== b4b) {
+    if (glBuffersCache) window.Preview3DGL.disposeBuffers(renderer.gl, glBuffersCache.buffers);
+    glBuffersCache = {
+      geometry: fullGeometry, b4b,
+      buffers: window.Preview3DGL.buildBuffers(
+        renderer.gl, solidGeometry, currentPreviewGroups(), classify, kindColor
+      ),
+    };
+  }
+  const buffers = glBuffersCache.buffers;
+  const chosen = currentPreviewPasses(buffers);
+  const aabb = chosen.aabb || buffers.allAabb;
+  const frame = window.Preview3DGL.computeFrame(camera, aabb, width, height);
+  window.Preview3DGL.draw(renderer, buffers, frame, width, height, chosen.passes);
+  drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, frame, classify, chosen.visible);
+}
+
+// Everything that is not solid geometry: the contact shadow, the usable-
+// floor rectangle, bore-axis arrows, dimension guides, and the (invisible)
+// hit-test polygons clickedPreviewSupport() uses to tell a click on a placed
+// part from a click on empty canvas. Drawn on the transparent 2D canvas
+// layered over the WebGL solid pass, using the same camera frame so
+// everything lines up with it pixel-for-pixel.
+function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, frame, classify, visibleGroups) {
+  const vector = cameraVector(camera);
+  const project = point => [
+    width / 2 + (point[0] - frame.midX) * frame.scale,
+    height / 2 + (point[1] - frame.midY) * frame.scale,
+  ];
+  for (const face of solidGeometry) {
+    const kind = face.kind;
+    const isSupport = kind.startsWith("draft_") || kind.startsWith("feature_") || kind.startsWith("insert_");
+    if (!isSupport || !visibleGroups.has(classify(face))) continue;
+    if (dot(face.normal, vector) <= 0) continue;
+    state.previewSupportPolygons.push(face.points.map(point => project(iso(point, camera))));
+  }
+  const box = state.design?.box;
+  drawContactShadow(context, box, camera, project);
+  drawUsableFloor(context, solidGeometry, camera, project);
+  drawBoreAxes(context, boreAxes, camera, project);
+  draw3DDimensions(context, box, camera, project, state.preview?.b4b?.case_outer_mm);
 }
 
 function pointInPolygon([x, y], polygon) {

@@ -187,6 +187,57 @@ class B4BGeometryTests(unittest.TestCase):
         self.assertTrue(skirt_outer.buffer(1e-6).contains(skirt_inner))
 
 
+class B4BPreviewOwnershipTests(unittest.TestCase):
+    """The 3D preview's All/Base/Lid split relies on every B4B preview face
+    carrying an explicit ``owner`` - "base" or "lid" - rather than being
+    guessed client-side from its ``kind``. See fix3d.md."""
+
+    def test_every_face_is_owned_and_both_groups_are_non_empty(self):
+        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(
+            enabled=True, lid=True, secure_lid=True, stacking=True,
+        ))
+        parts = b4b.b4b_preview_parts(box)
+        self.assertTrue(parts)
+        owners = {owner for _points, _kind, _normal, _layer, owner in parts}
+        self.assertEqual(owners, {"base", "lid"})
+        by_owner: dict[str, int] = {"base": 0, "lid": 0}
+        for _points, _kind, _normal, _layer, owner in parts:
+            by_owner[owner] += 1
+        self.assertGreater(by_owner["base"], 0)
+        self.assertGreater(by_owner["lid"], 0)
+
+    def test_front_label_is_base_owned_top_label_is_lid_owned(self):
+        front = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(
+            enabled=True, lid=True, label_text="ABC", label_location="front",
+        ))
+        front_owners = {
+            owner for _points, kind, _normal, _layer, owner
+            in b4b.b4b_preview_parts(front) if kind == "b4b_label"
+        }
+        self.assertEqual(front_owners, {"base"})
+
+        top = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(
+            enabled=True, lid=True, label_text="ABC", label_location="top",
+        ))
+        top_owners = {
+            owner for _points, kind, _normal, _layer, owner
+            in b4b.b4b_preview_parts(top) if kind == "b4b_label"
+        }
+        self.assertEqual(top_owners, {"lid"})
+
+    def test_latches_are_lid_owned_body_is_base_owned(self):
+        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(
+            enabled=True, lid=True, secure_lid=True,
+        ))
+        parts = b4b.b4b_preview_parts(box)
+        self.assertTrue(any(kind == "b4b_latch" for _p, kind, _n, _l, _o in parts))
+        for _points, kind, _normal, _layer, owner in parts:
+            if kind == "b4b_latch":
+                self.assertEqual(owner, "lid")
+            if kind == "b4b_body":
+                self.assertEqual(owner, "base")
+
+
 class B4BPrintabilityTests(unittest.TestCase):
     """b4b_build_parts must emit parts that print as they stand: the body
     upright, the lid rolled onto its flat top, the levers on their broad face,
