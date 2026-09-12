@@ -14,6 +14,7 @@ from typing import Iterable
 
 import numpy as np
 import trimesh
+from shapely.geometry import MultiPolygon, Polygon
 
 from organizer_engine import (
     BASE_UNIT,
@@ -530,6 +531,40 @@ def _bore_axis_geometry(
     ]
 
 
+def _valid_preview_floor_ring(
+    cavity: Iterable[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Return a simple ring for triangulating the preview floor.
+
+    preview_rings() intentionally returns matched coarse outer/cavity
+    samples so the vertical wall quads can be stitched point-for-point.
+    On narrow bins the raw cavity walk can make a tiny self-intersection
+    at a corner.  That is harmless for the wall-strip preview but it must
+    not be handed to the browser as one polygon for triangulation.
+    """
+    polygon = Polygon(cavity)
+
+    if not polygon.is_valid:
+        polygon = polygon.buffer(0)
+
+    if isinstance(polygon, MultiPolygon):
+        polygon = max(polygon.geoms, key=lambda one: one.area)
+
+    if (
+        not isinstance(polygon, Polygon)
+        or polygon.is_empty
+        or not polygon.is_valid
+    ):
+        raise RuntimeError("preview floor did not produce a valid polygon")
+
+    # Shapely closes exterior.coords by repeating the first point.
+    # The browser triangulator expects an open vertex list.
+    return [
+        (float(x), float(y))
+        for x, y in list(polygon.exterior.coords)[:-1]
+    ]
+
+
 # A preview pixel covers roughly a tenth of a millimetre of model even at full
 # zoom, so a micron is far below anything the browser can draw.  Rounding there
 # costs nothing visible and makes the payload it has to parse much smaller.
@@ -699,6 +734,7 @@ def preview_geometry(
         base_z=base_height(box, mode), mode=mode,
     )
     outer, cavity = preview_rings(box)
+    floor_cavity = _valid_preview_floor_ring(cavity)
     floor_z, rim_z = box.base_thickness, box.z
     geometry: list[tuple[list[tuple[float, float, float]], str,
                          tuple[float, float, float], int, str | None]] = []
@@ -719,7 +755,7 @@ def preview_geometry(
         geometry.append(([(a[0], a[1], rim_z), (b[0], b[1], rim_z),
                           (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
                          "rim", (0.0, 0.0, 1.0), 0, None))
-    geometry.append(([(*point, floor_z) for point in cavity],
+    geometry.append(([(*point, floor_z) for point in floor_cavity],
                      "floor", (0.0, 0.0, 1.0), 1, None))
 
     tidy = clean_label(label)
