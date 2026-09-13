@@ -63,6 +63,13 @@ const state = {
   connector: {},
   layoutDrag: null,
   layoutTransform: null,
+  // Interactive dimension-label handles, rebuilt every overlay render - not
+  // part of any saved design. hitDimensionHandle() reads these to let a drag
+  // on a Width/Depth/Height label resize the bin directly (see fix3d.md).
+  previewDimensionHandles: [],
+  layoutDimensionHandles: [],
+  dimensionDrag: null,
+  dimensionHover: null,
   // The 2D layout normally uses the same heading as the 3D camera.  Users can
   // instead pin it to the conventional top-up plan view.
   layoutOrientation: "match3d",
@@ -1244,15 +1251,22 @@ async function changeBinType() {
   changedDesign();
 }
 
+// Shared by typed Width/Length/Height edits and by dragging their dimension
+// labels (see hitDimensionHandle/commitDimensionDrag), so both paths always
+// land on the same legal value: X/Y snap to the catalog base unit and clamp
+// to [unit, max_box_size]; Z rounds to whole millimetres with a 2mm floor.
+function normalizeBinDimension(axis, requestedValue, fallback) {
+  const value = number(requestedValue, fallback);
+  if (axis === "z") return Math.max(2, Math.round(value));
+  const unit = state.catalog.base_unit;
+  const max = Math.floor((state.catalog.max_box_size || 350) / unit) * unit;
+  return Math.min(max, Math.max(unit, Math.round(value / unit) * unit));
+}
+
 function updateDesignFromForm() {
   const design = state.design;
-  const snapSize = (value, fallback) => {
-    const unit = state.catalog.base_unit;
-    const max = Math.floor((state.catalog.max_box_size || 350) / unit) * unit;
-    return Math.min(max, Math.max(unit, Math.round(number(value, fallback) / unit) * unit));
-  };
-  const newBoxX = snapSize($("#x-size").value, design.box.x);
-  const newBoxY = snapSize($("#y-size").value, design.box.y);
+  const newBoxX = normalizeBinDimension("x", $("#x-size").value, design.box.x);
+  const newBoxY = normalizeBinDimension("y", $("#y-size").value, design.box.y);
   design.box.x = newBoxX;
   design.box.y = newBoxY;
   const prevBoxZ = design.box.z;
@@ -4951,6 +4965,7 @@ function checkBinSizeChange() {
 // that again), so the dimension overlay would otherwise mislabel the case
 // and fail to reach its drawn edges on every axis. See fix3d.md.
 function draw3DDimensions(context, box, camera, project, outerXYZ) {
+  state.previewDimensionHandles = [];
   if (!box) return;
   const outerX = outerXYZ ? number(outerXYZ[0]) : number(box.x);
   const outerY = outerXYZ ? number(outerXYZ[1]) : number(box.y);
@@ -4959,6 +4974,10 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
   const hy = outerY / 2;
   const hz = outerZ;
   if (hx <= 0 || hy <= 0 || hz <= 0) return;
+  // B4B's labels show the assembled envelope, not the box.x/y/z field the
+  // Width/Length/Height controls actually edit - dragging one would silently
+  // resize the wrong thing, so B4B keeps these display-only (see fix3d.md).
+  const draggable = !outerXYZ;
 
   const yawRad = camera.yaw * Math.PI / 180;
   const camX = -Math.sin(yawRad);
@@ -5002,7 +5021,8 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     widthDim.normal,
     `Width ${fmt(outerX)} mm`,
     gap,
-    over
+    over,
+    draggable ? { view: "3d", axis: "x", value: outerX } : null
   );
 
   // 2. Depth (along Y on front ground)
@@ -5016,7 +5036,8 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     depthDim.normal,
     `Depth ${fmt(outerY)} mm`,
     gap,
-    over
+    over,
+    draggable ? { view: "3d", axis: "y", value: outerY } : null
   );
 
   // 3. Height (vertical Z edge on the leftmost corner of the bin)
@@ -5051,11 +5072,16 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     heightNormal,
     `Height ${fmt(outerZ)} mm`,
     gap,
-    over
+    over,
+    draggable ? { view: "3d", axis: "z", value: outerZ } : null
   );
 }
 
-function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, gap, over) {
+// `handle`, when given, registers a canvas-space hit region around the drawn
+// label into state.previewDimensionHandles/layoutDimensionHandles so a
+// pointerdown on the label can start a resize drag instead of orbiting the
+// camera or moving a feature - see hitDimensionHandle().
+function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, gap, over, handle = null) {
   const dx = pEnd[0] - pStart[0];
   const dy = pEnd[1] - pStart[1];
   const span = Math.hypot(dx, dy);
@@ -5124,13 +5150,19 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
   const bh = 18;
   const r = 5;
 
+  const active = handle && (
+    (state.dimensionHover?.view === handle.view && state.dimensionHover?.axis === handle.axis) ||
+    (state.dimensionDrag?.view === handle.view && state.dimensionDrag?.axis === handle.axis)
+  );
+
   // Subtle drop shadow for badge
   context.shadowColor = "rgba(18, 38, 46, 0.25)";
   context.shadowBlur = 6;
   context.shadowOffsetY = 2;
 
-  // Dark HUD pill badge
-  context.fillStyle = "rgba(18, 38, 46, 0.90)";
+  // Dark HUD pill badge - a touch darker/bolder while draggable and under
+  // the pointer, so the label reads as grabbable without adding clutter.
+  context.fillStyle = active ? "rgba(10, 24, 30, 0.95)" : "rgba(18, 38, 46, 0.90)";
   context.beginPath();
   if (context.roundRect) {
     context.roundRect(-bw / 2, -bh / 2, bw, bh, r);
@@ -5140,8 +5172,8 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
   context.fill();
 
   context.shadowColor = "transparent";
-  context.strokeStyle = "rgba(105, 172, 168, 0.70)";
-  context.lineWidth = 1;
+  context.strokeStyle = active ? "rgba(146, 214, 209, 0.95)" : "rgba(105, 172, 168, 0.70)";
+  context.lineWidth = active ? 1.5 : 1;
   context.stroke();
 
   // Crisp text
@@ -5149,6 +5181,43 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
   context.fillText(label, 0, 0.5);
 
   context.restore();
+
+  if (handle) {
+    // Generous hit region around the label itself (not the whole dimension
+    // line) - padded well past the visible pill so it's an easy grab target,
+    // and rotated the same as the badge so it stays aligned to the label at
+    // any camera yaw.
+    const padHit = 9;
+    const halfW = bw / 2 + padHit;
+    const halfH = Math.max(14, bh / 2 + padHit);
+    const cos = Math.cos(textAngle), sin = Math.sin(textAngle);
+    const corners = [[-halfW, -halfH], [halfW, -halfH], [halfW, halfH], [-halfW, halfH]]
+      .map(([lx, ly]) => [mid[0] + lx * cos - ly * sin, mid[1] + lx * sin + ly * cos]);
+    const xs = corners.map(point => point[0]);
+    const ys = corners.map(point => point[1]);
+    const hitBox = {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+    };
+    let screenAxisX = dx / span, screenAxisY = dy / span;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      if (dx < 0) { screenAxisX = -screenAxisX; screenAxisY = -screenAxisY; }
+    } else if (dy > 0) {
+      screenAxisX = -screenAxisX; screenAxisY = -screenAxisY;
+    }
+    const target = handle.view === "3d" ? state.previewDimensionHandles : state.layoutDimensionHandles;
+    target.push({
+      view: handle.view,
+      axis: handle.axis,
+      hitBox,
+      screenAxis: [screenAxisX, screenAxisY],
+      pixelSpan: span,
+      value: handle.value,
+      labelCenter: mid,
+    });
+  }
 }
 
 let glRenderer = null;
@@ -5375,11 +5444,12 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
     if (dot(face.normal, vector) <= 0) continue;
     state.previewSupportPolygons.push(face.points.map(point => project(iso(point, camera))));
   }
-  const box = state.design?.box;
+  const box = dimensionDragBoxOverride(state.design?.box, "3d");
   drawContactShadow(context, b4bShadowBox(), camera, project, b4bAssembledEnvelope());
   drawUsableFloor(context, solidGeometry, camera, project);
   drawBoreAxes(context, boreAxes, camera, project);
   draw3DDimensions(context, box, camera, project, b4bAssembledEnvelope());
+  drawDimensionGhost3D(context, camera, project);
 }
 
 // B4B's assembled_envelope_mm accounts for hinge/latch/handle/stacking
@@ -5424,6 +5494,172 @@ function wireSupportLayoutDialog() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Drag-to-resize dimension labels (Width/Depth/Height in 3D, Width/Depth in
+// 2D). See fix3d.md - the labels are direct manipulation of the same
+// box.x/y/z the sidebar fields edit, not a second sizing system.
+// ---------------------------------------------------------------------------
+
+function canvasPointFromEvent(canvas, event) {
+  const bounds = canvas.getBoundingClientRect();
+  return [event.clientX - bounds.left, event.clientY - bounds.top];
+}
+
+function hitDimensionHandle(view, point) {
+  const handles = view === "3d" ? state.previewDimensionHandles : state.layoutDimensionHandles;
+  for (let index = handles.length - 1; index >= 0; index--) {
+    const handle = handles[index];
+    const box = handle.hitBox;
+    if (point[0] >= box.x && point[0] <= box.x + box.width &&
+        point[1] >= box.y && point[1] <= box.y + box.height) {
+      return handle;
+    }
+  }
+  return null;
+}
+
+// The box a dimension guide should currently draw/label with: the live drag
+// candidate for the axis being dragged in this view, otherwise the real
+// design. Keeps solid geometry untouched during the drag (see item 8 of
+// fix3d.md) while the label and ghost outline update every frame.
+function dimensionDragBoxOverride(box, view) {
+  const drag = state.dimensionDrag;
+  if (!box || !drag || drag.view !== view) return box;
+  return { ...box, [drag.axis]: drag.currentValue };
+}
+
+function pickResizeCursor(handle) {
+  const [ax, ay] = handle.screenAxis;
+  return Math.abs(ax) >= Math.abs(ay) ? "ew-resize" : "ns-resize";
+}
+
+function beginDimensionDrag(view, handle, canvas, event) {
+  state.dimensionDrag = {
+    view,
+    axis: handle.axis,
+    pointerId: event.pointerId,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startValue: handle.value,
+    currentValue: handle.value,
+    originalDesign: clone(state.design),
+    screenAxis: handle.screenAxis,
+    pixelSpan: handle.pixelSpan,
+  };
+  state.dimensionHover = null;
+  canvas.style.cursor = pickResizeCursor(handle);
+  try { canvas.setPointerCapture(event.pointerId); } catch (_error) {}
+}
+
+// Applies only to the transient drag/sidebar-field state - state.design.box
+// itself is untouched until commitDimensionDrag() lands on pointerup.
+function updateDimensionDrag(clientX, clientY) {
+  const drag = state.dimensionDrag;
+  if (!drag) return;
+  const dx = clientX - drag.startClientX;
+  const dy = clientY - drag.startClientY;
+  const projectedPixels = dx * drag.screenAxis[0] + dy * drag.screenAxis[1];
+  const pixelsPerMm = drag.pixelSpan / Math.max(1e-6, drag.startValue);
+  const requested = drag.startValue + projectedPixels / pixelsPerMm;
+  drag.currentValue = normalizeBinDimension(drag.axis, requested, drag.startValue);
+  const field = drag.axis === "x" ? "#x-size" : drag.axis === "y" ? "#y-size" : "#z";
+  const input = $(field);
+  if (input && document.activeElement !== input) input.value = fmt(drag.currentValue);
+}
+
+function releaseDimensionPointerCapture(canvas, pointerId) {
+  canvas.style.cursor = "";
+  try { if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId); } catch (_error) {}
+}
+
+// One completed drag = one Undo entry (see item 12 of fix3d.md) - the same
+// design-change path a typed Width/Length/Height edit uses, so manual-size
+// and auto-grow semantics stay identical between mouse and keyboard.
+function commitDimensionDrag(canvas) {
+  const drag = state.dimensionDrag;
+  if (!drag) return;
+  state.dimensionDrag = null;
+  releaseDimensionPointerCapture(canvas, drag.pointerId);
+  if (drag.currentValue === drag.startValue) return;
+  const previousDesign = drag.originalDesign;
+  state.design.box[drag.axis] = drag.currentValue;
+  if (drag.axis !== "z") {
+    formatDimField(drag.axis);
+    markBinAxisManual(drag.axis);
+  }
+  state.canGenerate = false;
+  updateGenerateAvailability();
+  changedDesign(previousDesign);
+}
+
+function cancelDimensionDrag(canvas) {
+  const drag = state.dimensionDrag;
+  if (!drag) return;
+  state.dimensionDrag = null;
+  releaseDimensionPointerCapture(canvas, drag.pointerId);
+  state.design = drag.originalDesign;
+  syncForm();
+}
+
+function updateDimensionHover(view, handle, canvas) {
+  const prev = state.dimensionHover;
+  const changed = (prev?.view !== handle?.view) || (prev?.axis !== handle?.axis);
+  state.dimensionHover = handle;
+  canvas.style.cursor = handle ? pickResizeCursor(handle) : "";
+  return changed;
+}
+
+function drawDimensionGhost3D(context, camera, project) {
+  const drag = state.dimensionDrag;
+  if (!drag || drag.view !== "3d" || !state.design?.box) return;
+  const box = dimensionDragBoxOverride(state.design.box, "3d");
+  const hx = number(box.x) / 2, hy = number(box.y) / 2, hz = number(box.z);
+  if (hx <= 0 || hy <= 0 || hz <= 0) return;
+  const corners3d = [
+    [-hx, -hy, 0], [hx, -hy, 0], [hx, hy, 0], [-hx, hy, 0],
+    [-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz],
+  ];
+  const s = corners3d.map(point => project(iso(point, camera)));
+  const edges = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]];
+  context.save();
+  context.strokeStyle = "rgba(31, 107, 112, 0.85)";
+  context.lineWidth = 1.25;
+  context.setLineDash([5, 4]);
+  for (const [a, b] of edges) {
+    context.beginPath();
+    context.moveTo(s[a][0], s[a][1]);
+    context.lineTo(s[b][0], s[b][1]);
+    context.stroke();
+  }
+  context.restore();
+}
+
+function drawDimensionGhost2D(context, toCanvas, bounds) {
+  const drag = state.dimensionDrag;
+  if (!drag || drag.view !== "2d") return;
+  const cx = (bounds[0] + bounds[2]) / 2, cy = (bounds[1] + bounds[3]) / 2;
+  const ratio = drag.currentValue / Math.max(1e-6, drag.startValue);
+  let halfX = (bounds[2] - bounds[0]) / 2, halfY = (bounds[3] - bounds[1]) / 2;
+  if (drag.axis === "x") halfX *= ratio;
+  if (drag.axis === "y") halfY *= ratio;
+  const corners = [
+    [cx - halfX, cy - halfY], [cx + halfX, cy - halfY],
+    [cx + halfX, cy + halfY], [cx - halfX, cy + halfY],
+  ];
+  context.save();
+  context.strokeStyle = "rgba(31, 107, 112, 0.85)";
+  context.lineWidth = 1.5;
+  context.setLineDash([6, 4]);
+  context.beginPath();
+  corners.forEach((point, index) => {
+    const c = toCanvas(point);
+    index === 0 ? context.moveTo(c[0], c[1]) : context.lineTo(c[0], c[1]);
+  });
+  context.closePath();
+  context.stroke();
+  context.restore();
+}
+
 function wireSceneInteraction(canvas, camera, render) {
   let drag = null;
   // A pointer reports far faster than the screen refreshes, and a mesh preview
@@ -5437,6 +5673,17 @@ function wireSceneInteraction(canvas, camera, render) {
     requestAnimationFrame(() => { framePending = false; render(); });
   };
   canvas.addEventListener("pointerdown", event => {
+    // A dimension label always wins over orbit - hit-test it first so a
+    // drag that starts on "Width 96 mm" resizes the bin instead of spinning
+    // the camera (see fix3d.md, item 5).
+    if (!state.designMutationBusy && !b4bEnabled()) {
+      const handle = hitDimensionHandle("3d", canvasPointFromEvent(canvas, event));
+      if (handle) {
+        beginDimensionDrag("3d", handle, canvas, event);
+        repaint();
+        return;
+      }
+    }
     // Degrees per pixel scale to the canvas itself (as TinkerCAD's orbit
     // does) so a drag spins the model by the same feel regardless of how
     // wide the preview panel happens to be - a drag clear across it is
@@ -5449,7 +5696,18 @@ function wireSceneInteraction(canvas, camera, render) {
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener("pointermove", event => {
-    if (!drag) return;
+    if (state.dimensionDrag) {
+      updateDimensionDrag(event.clientX, event.clientY);
+      repaint();
+      return;
+    }
+    if (!drag) {
+      if (!b4bEnabled()) {
+        const handle = hitDimensionHandle("3d", canvasPointFromEvent(canvas, event));
+        if (updateDimensionHover("3d", handle, canvas)) repaint();
+      }
+      return;
+    }
     if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4) {
       drag.moved = true;
       $$('[data-camera-view]').forEach(button => button.classList.remove("active"));
@@ -5459,6 +5717,11 @@ function wireSceneInteraction(canvas, camera, render) {
     repaint();
   });
   canvas.addEventListener("pointerup", event => {
+    if (state.dimensionDrag) {
+      commitDimensionDrag(canvas);
+      repaint();
+      return;
+    }
     const clickedSupport = drag && !drag.moved && clickedPreviewSupport(canvas, event);
     drag = null;
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
@@ -5466,6 +5729,13 @@ function wireSceneInteraction(canvas, camera, render) {
       const dialog = $("#support-layout-dialog");
       if (!dialog.open) dialog.showModal();
     }
+  });
+  canvas.addEventListener("pointercancel", () => {
+    if (state.dimensionDrag) {
+      cancelDimensionDrag(canvas);
+      repaint();
+    }
+    drag = null;
   });
   canvas.addEventListener("wheel", event => {
     event.preventDefault();
@@ -5617,11 +5887,17 @@ function drawClosedPath(context, points, toCanvas) {
   return path;
 }
 
-function drawDimensionLine(context, start, end, label, vertical = false) {
+// `handle`, when given, registers a canvas-space hit region around the label
+// into state.layoutDimensionHandles - see hitDimensionHandle().
+function drawDimensionLine(context, start, end, label, vertical = false, handle = null) {
   context.save();
-  context.strokeStyle = "#496873";
+  const active = handle && (
+    (state.dimensionHover?.view === handle.view && state.dimensionHover?.axis === handle.axis) ||
+    (state.dimensionDrag?.view === handle.view && state.dimensionDrag?.axis === handle.axis)
+  );
+  context.strokeStyle = active ? "#237fa6" : "#496873";
   context.fillStyle = "#496873";
-  context.lineWidth = 1;
+  context.lineWidth = active ? 1.5 : 1;
   context.font = "700 11px Segoe UI";
   context.textAlign = "center";
   context.textBaseline = "middle";
@@ -5642,11 +5918,45 @@ function drawDimensionLine(context, start, end, label, vertical = false) {
   context.translate(middle[0], middle[1]);
   if (vertical) context.rotate(-Math.PI / 2);
   const textWidth = context.measureText(label).width;
-  context.fillStyle = "rgba(248,250,249,.92)";
+  context.fillStyle = active ? "rgba(230,245,248,.96)" : "rgba(248,250,249,.92)";
   context.fillRect(-textWidth / 2 - 5, -8, textWidth + 10, 16);
+  context.strokeStyle = active ? "#237fa6" : "transparent";
+  if (active) context.strokeRect(-textWidth / 2 - 5, -8, textWidth + 10, 16);
   context.fillStyle = "#496873";
   context.fillText(label, 0, 0);
   context.restore();
+
+  if (handle) {
+    const padHit = 9;
+    const halfW = textWidth / 2 + 5 + padHit;
+    const halfH = Math.max(14, 8 + padHit);
+    const rot = vertical ? -Math.PI / 2 : 0;
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    const corners = [[-halfW, -halfH], [halfW, -halfH], [halfW, halfH], [-halfW, halfH]]
+      .map(([lx, ly]) => [middle[0] + lx * cos - ly * sin, middle[1] + lx * sin + ly * cos]);
+    const xs = corners.map(point => point[0]);
+    const ys = corners.map(point => point[1]);
+    const dx = end[0] - start[0], dy = end[1] - start[1];
+    const span = Math.hypot(dx, dy);
+    let screenAxisX = dx / span, screenAxisY = dy / span;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      if (dx < 0) { screenAxisX = -screenAxisX; screenAxisY = -screenAxisY; }
+    } else if (dy > 0) {
+      screenAxisX = -screenAxisX; screenAxisY = -screenAxisY;
+    }
+    state.layoutDimensionHandles.push({
+      view: "2d",
+      axis: handle.axis,
+      hitBox: {
+        x: Math.min(...xs), y: Math.min(...ys),
+        width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys),
+      },
+      screenAxis: [screenAxisX, screenAxisY],
+      pixelSpan: span,
+      value: handle.value,
+      labelCenter: middle,
+    });
+  }
 }
 
 function renderLayoutText(context, feature, toCanvas, scale, isDraft = false) {
@@ -5777,6 +6087,7 @@ function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
 
 function renderLayout2D() {
   if (!state.preview) return;
+  state.layoutDimensionHandles = [];
   const canvas = $("#preview-2d");
   const { context, width, height } = canvasSize(canvas);
   context.clearRect(0, 0, width, height);
@@ -6104,8 +6415,10 @@ function renderLayout2D() {
   };
   const widthLine = offsetOutside(toCanvas([bounds[0], bounds[3]]), toCanvas([bounds[2], bounds[3]]));
   const depthLine = offsetOutside(toCanvas([bounds[0], bounds[1]]), toCanvas([bounds[0], bounds[3]]));
-  drawDimensionLine(context, ...widthLine, `Width ${fmt(state.design.box.x)} mm`);
-  drawDimensionLine(context, ...depthLine, `Depth ${fmt(state.design.box.y)} mm`);
+  const displayBox = dimensionDragBoxOverride(state.design.box, "2d");
+  drawDimensionGhost2D(context, toCanvas, bounds);
+  drawDimensionLine(context, ...widthLine, `Width ${fmt(displayBox.x)} mm`, false, { axis: "x", value: displayBox.x });
+  drawDimensionLine(context, ...depthLine, `Depth ${fmt(displayBox.y)} mm`, false, { axis: "y", value: displayBox.y });
 
   const binBottom = Math.max(...[
     toCanvas([bounds[0], bounds[1]])[1], toCanvas([bounds[2], bounds[1]])[1],
@@ -6195,9 +6508,23 @@ function wireLayoutInteraction() {
   // Tracks whether the pointer is still down after an awaited "keep this part?"
   // prompt - if the user lifted their finger to answer it, there's no drag.
   let pointerActive = false;
-  canvas.addEventListener("pointercancel", () => { pointerActive = false; });
+  canvas.addEventListener("pointercancel", () => {
+    pointerActive = false;
+    if (state.dimensionDrag?.view === "2d") {
+      cancelDimensionDrag(canvas);
+      renderLayout2D();
+    }
+  });
   canvas.addEventListener("pointerdown", async event => {
     if (!state.layoutTransform || state.designMutationBusy) return;
+    // A dimension label always wins over ordinary feature selection/move/
+    // resize - hit-test it first (see fix3d.md, item 5).
+    const handle = hitDimensionHandle("2d", canvasPointFromEvent(canvas, event));
+    if (handle) {
+      beginDimensionDrag("2d", handle, canvas, event);
+      renderLayout2D();
+      return;
+    }
     pointerActive = true;
     const world = layoutPoint(event);
     let index = hitFeature(world);
@@ -6261,6 +6588,16 @@ function wireLayoutInteraction() {
     try { canvas.setPointerCapture(event.pointerId); } catch (_error) {}
   });
   canvas.addEventListener("pointermove", event => {
+    if (state.dimensionDrag?.view === "2d") {
+      updateDimensionDrag(event.clientX, event.clientY);
+      renderLayout2D();
+      return;
+    }
+    if (!state.layoutDrag) {
+      const handle = state.layoutTransform ? hitDimensionHandle("2d", canvasPointFromEvent(canvas, event)) : null;
+      if (updateDimensionHover("2d", handle, canvas)) renderLayout2D();
+      return;
+    }
     const drag = state.layoutDrag;
     if (!drag || !state.layoutTransform) return;
     const world = layoutPoint(event);
@@ -6292,6 +6629,11 @@ function wireLayoutInteraction() {
   });
   canvas.addEventListener("pointerup", async event => {
     pointerActive = false;
+    if (state.dimensionDrag?.view === "2d") {
+      commitDimensionDrag(canvas);
+      renderLayout2D();
+      return;
+    }
     const drag = state.layoutDrag;
     if (!drag) return;
     state.layoutDrag = null;
@@ -6416,13 +6758,8 @@ async function saveDesign() {
 
 function designHasChanges() {
   const visibleDesign = clone(state.design);
-  const snapSize = (value, fallback) => {
-    const unit = state.catalog.base_unit;
-    const max = Math.floor((state.catalog.max_box_size || 350) / unit) * unit;
-    return Math.min(max, Math.max(unit, Math.round(number(value, fallback) / unit) * unit));
-  };
-  visibleDesign.box.x = snapSize($("#x-size").value, visibleDesign.box.x);
-  visibleDesign.box.y = snapSize($("#y-size").value, visibleDesign.box.y);
+  visibleDesign.box.x = normalizeBinDimension("x", $("#x-size").value, visibleDesign.box.x);
+  visibleDesign.box.y = normalizeBinDimension("y", $("#y-size").value, visibleDesign.box.y);
   visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
   const visibleB4B = $("#bin-type").value === "b4b";
   visibleDesign.box.standard_base = !visibleB4B && $("#standard-base").checked;
