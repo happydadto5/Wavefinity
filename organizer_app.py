@@ -727,7 +727,8 @@ def validate_customization_clearance(
         # A default divider's zone can span most of the floor even though its
         # actual printed wall is a narrow strip - judge the customization
         # keep-outs against what is really built, not the editor's drag zone.
-        footprint = feature_footprint(box, one, base_z) if mode == "fused" else one.zone
+        # Always use the actual footprint, regardless of fused vs removable mode.
+        footprint = feature_footprint(box, one, base_z)
         for name, zone in _customization_zones(
             box, label, label_location, scoop, mode
         ):
@@ -839,8 +840,9 @@ def preview_geometry(
     draft_error = None
     if draft is not None:
         if not (is_text(draft) and draft.options.get("level") == "rim"):
+            draft_customization_footprint = feature_footprint(box, draft, base_z)
             conflict = next(
-                (name for name, zone in reserved if draft.zone.overlaps(zone, MIN_FEATURE_GAP)),
+                (name for name, zone in reserved if draft_customization_footprint.overlaps(zone, MIN_FEATURE_GAP)),
                 None,
             )
             if conflict is not None:
@@ -891,11 +893,12 @@ def preview_geometry(
         # Same actual-footprint rule as validate_customization_clearance(): a
         # default divider's zone can span the floor even though its printed
         # wall is a narrow strip, so judge against what is really built.
-        # ``occupied`` already holds this feature's footprint (or ``one.zone``
-        # in non-fused modes), computed the same way just above.
-        footprint = occupied[feature_index]
+        # Use the actual footprint regardless of mode (do not reuse ``occupied``
+        # which intentionally keeps full zones in non-fused mode for feature-vs-
+        # feature layout, not customization collision).
+        customization_footprint = feature_footprint(box, one, base_z)
         conflict = next(
-            (name for name, zone in reserved if footprint.overlaps(zone, MIN_FEATURE_GAP)),
+            (name for name, zone in reserved if customization_footprint.overlaps(zone, MIN_FEATURE_GAP)),
             None,
         )
         if conflict is not None:
