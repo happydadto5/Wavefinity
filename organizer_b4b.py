@@ -19,6 +19,7 @@ import math
 import numpy as np
 import trimesh
 from shapely.geometry import Point, Polygon
+from shapely.affinity import scale as scale_polygon
 from shapely.affinity import translate as translate_polygon
 
 from organizer_engine import (
@@ -3837,6 +3838,13 @@ def b4b_front_label_geometry(box: BoxSpec):
             "latches off"
         )
     outline, plate_w, plate_h, bottom_z = solved
+
+    # The front label is read from outside the case.  Its face is turned onto
+    # the print bed below, so reflect the flat text outline across its vertical
+    # centreline before it is wrapped onto the front face.  Without this, the
+    # removable printed label reads backwards even though the preview face is
+    # in the right place.
+    outline = scale_polygon(outline, xfact=-1.0, yfact=1.0, origin=(0.0, 0.0))
 
     holder_w = plate_w + 2.0 * side_margin
     seat_z = bottom_z + holder_depth        # top of the bottom stop = plate's resting Z

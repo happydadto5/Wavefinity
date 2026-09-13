@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-12 — B4B front label lettering direction
+
+- Front-label lettering is mirrored correctly for the printed removable plate,
+  so labels read normally when installed on the case.
+
 ## 2026-09-12 — Public-host safety ceiling
 
 - Bin width and length are capped at 350 mm. The 8 mm grid makes 344 mm the
