@@ -123,8 +123,8 @@ def _divider_scoops(
 
 
 @feature(
-    "divider", title="Divider", display="Divider — split the bin",
-    description="A straight wall that splits the floor into compartments.",
+    "divider", title="Dividers", display="Dividers — split the bin",
+    description="Interior walls that split the bin into compartments.",
     capabilities=("qty", "along"),
     options=(
         OptionDefinition("Width", "thickness", "1.6"),
