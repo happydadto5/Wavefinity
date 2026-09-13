@@ -6873,11 +6873,17 @@ function watchServerVersion() {
     } catch (_error) {
       return; // A blip shouldn't flip the banner - only a confirmed different instance should.
     }
-    if (health.api_compat === state.apiCompat) {
+    if (health.instance === state.serverInstance) return;
+    if (state.runtime.hosted && health.api_compat === state.apiCompat) {
       state.serverInstance = health.instance;
       return;
     }
-    $("#connection").textContent = "Update requires reload";
+    const incompatibleHosted = state.runtime.hosted;
+    $("#connection").textContent = incompatibleHosted ? "Update requires reload" : "Engine restarted";
+    const message = $("#update-banner span");
+    if (message) message.textContent = incompatibleHosted
+      ? "Wavefinity was updated. This update requires the page to reload before you continue."
+      : "Wavefinity restarted. Reload to use the current code.";
     $("#connection").classList.remove("ready");
     $("#connection").classList.add("stale");
     $("#update-banner").hidden = false;

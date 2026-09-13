@@ -9,6 +9,7 @@ const SP_KINDS = {
 };
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
+const FOLDER_METADATA_VERSION = 2;
 
 const spSame = (a, b) => {
   const tidy = path => String(path || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -72,9 +73,9 @@ SP.applyFolder = async (info, { reset = true } = {}) => {
 SP.readMetadata = async handle => {
   const read = async name => {
     const raw = await WFFileSystem.readText(handle, name);
-    if (!raw) return null;
-    try { return JSON.parse(raw); }
-    catch (_error) { throw new Error(`${name} could not be read.`); }
+    if (raw === null) return { exists: false, data: null };
+    try { return { exists: true, data: JSON.parse(raw) }; }
+    catch (_error) { return { exists: true, error: "invalid-json" }; }
   };
   return { current: await read(FOLDER_METADATA), legacy: await read(LEGACY_METADATA) };
 };
@@ -86,7 +87,40 @@ SP.validSpace = raw => {
     name: String(raw.name || "").trim(),
     x: Number(raw.x), y: Number(raw.y), z: Number(raw.z),
   };
-  return [space.x, space.y, space.z].every(value => value > 0) ? space : null;
+  return [space.x, space.y, space.z].every(value => Number.isFinite(value) && value > 0) ? space : null;
+};
+
+SP.classifyMetadata = record => {
+  if (!record?.exists) return { status: "missing" };
+  if (record.error || !record.data || typeof record.data !== "object" || Array.isArray(record.data)) {
+    return { status: "invalid" };
+  }
+  const current = record.data;
+  if (Number(current.version) > FOLDER_METADATA_VERSION) return { status: "unsupported" };
+  if (current.version !== FOLDER_METADATA_VERSION) return { status: "invalid" };
+  if (current.folder_mode === "design") return { status: "design" };
+  if (current.folder_mode === "space") {
+    const space = SP.validSpace(current.space);
+    return space ? { status: "space", space } : { status: "invalid-space" };
+  }
+  return { status: "invalid" };
+};
+
+SP.classifyLegacyMetadata = record => {
+  if (!record?.exists) return { status: "missing" };
+  if (record.error || !record.data || typeof record.data !== "object" || Array.isArray(record.data)) {
+    return { status: "invalid" };
+  }
+  const space = SP.validSpace(record.data);
+  if (space) return { status: "space", space };
+  if (record.data.kind === "none") return { status: "design" };
+  return { status: "invalid" };
+};
+
+SP.metadataError = status => {
+  if (status === "unsupported") return new Error("This folder contains Wavefinity metadata from a newer version. The file was left unchanged.");
+  if (status === "invalid-space") return new Error("This folder's Space information is incomplete or damaged. Nothing was changed.");
+  return new Error("This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged.");
 };
 
 SP.writeMetadata = async (handle, mode, space = null) => {
@@ -122,6 +156,8 @@ SP.addInventoryBin = async entry => {
 
 SP.inspectHosted = async folder => {
   const { current, legacy } = await SP.readMetadata(folder.handle);
+  const currentState = SP.classifyMetadata(current);
+  const legacyState = SP.classifyLegacyMetadata(legacy);
   const inventoryText = await WFFileSystem.readText(folder.handle, `${folder.name} bins.md`) || "";
   let inventorySpace = null;
   if (inventoryText) {
@@ -132,16 +168,32 @@ SP.inspectHosted = async folder => {
     inventorySpace = SP.validSpace(data.layout?.space);
   }
 
-  let mode = "design";
-  let space = inventorySpace;
-  if (space) mode = "space";
-  else if (current?.folder_mode === "space") {
-    space = SP.validSpace(current.space);
-    if (space) mode = "space";
-  } else if (current?.folder_mode === "design") mode = "design";
-  else {
-    space = SP.validSpace(legacy);
-    if (space) mode = "space";
+  let mode;
+  let space = null;
+  let shouldWriteMetadata = false;
+  if (inventorySpace) {
+    mode = "space";
+    space = inventorySpace;
+    shouldWriteMetadata = ["missing", "design", "space"].includes(currentState.status);
+  } else if (currentState.status === "space") {
+    mode = "space";
+    space = currentState.space;
+  } else if (currentState.status === "design") {
+    mode = "design";
+  } else if (!["missing"].includes(currentState.status)) {
+    throw SP.metadataError(currentState.status);
+  } else if (legacyState.status === "space") {
+    mode = "space";
+    space = legacyState.space;
+    shouldWriteMetadata = true;
+  } else if (legacyState.status === "design") {
+    mode = "design";
+    shouldWriteMetadata = true;
+  } else if (legacyState.status !== "missing") {
+    throw SP.metadataError(legacyState.status);
+  } else {
+    mode = "design";
+    shouldWriteMetadata = true;
   }
 
   if (mode === "space" && space && !inventorySpace) {
@@ -152,7 +204,7 @@ SP.inspectHosted = async folder => {
     });
     await WFFileSystem.writeText(folder.handle, `${folder.name} bins.md`, result.inventory_text);
   }
-  await SP.writeMetadata(folder.handle, mode, space);
+  if (shouldWriteMetadata) await SP.writeMetadata(folder.handle, mode, space);
   return {
     folder: folder.name,
     folder_name: folder.name,
@@ -214,22 +266,28 @@ SP.chooseFolder = () => SP.run(async () => {
   if (folder) await SP.afterPick(folder);
 });
 
-SP.chooseFolderThenSetup = () => SP.run(async () => {
-  if (!SP.hasFolder()) {
-    const folder = await SP.pickFolder();
-    if (!folder) return;
-    await SP.afterPick(folder);
-  }
+SP.continueSpaceSetup = info => {
+  if (info?.folder_mode === "space") return SP.showResume(info);
   if (!SP.canPersistSpace()) return SP.showFolderAccessNeeded();
   SP.showSetup();
+};
+
+SP.chooseFolderThenSetup = () => SP.run(async () => {
+  if (SP.hasFolder()) {
+    if (state.folderMode === "space") return SP.open();
+    return SP.continueSpaceSetup(null);
+  }
+  const folder = await SP.pickFolder();
+  if (!folder) return;
+  const info = await SP.afterPick(folder);
+  SP.continueSpaceSetup(info);
 });
 
 SP.changeFolderThenSetup = () => SP.run(async () => {
   const folder = await SP.pickFolder();
   if (!folder) return;
-  await SP.afterPick(folder);
-  if (!SP.canPersistSpace()) return SP.showFolderAccessNeeded();
-  SP.showSetup();
+  const info = await SP.afterPick(folder);
+  SP.continueSpaceSetup(info);
 });
 
 // ------------------------------------------------------------ welcome/manage
@@ -350,7 +408,7 @@ SP.create = async () => {
   const name = $("#space-name").value.trim();
   let [x, y, z] = SP.readSize();
   if (!name) return SP.fail("Give the Space a name.", "#space-name");
-  if (![x, y, z].every(value => value > 0)) return SP.fail("Enter the inside width, depth and height in mm.", "#space-x");
+  if (![x, y, z].every(value => Number.isFinite(value) && value > 0)) return SP.fail("Enter the inside width, depth and height in mm.", "#space-x");
   if (kind === "box") [x, y] = [SP.snap(x), SP.snap(y)];
 
   let info;

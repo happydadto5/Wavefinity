@@ -49,8 +49,8 @@ MAX_QTY = 999
 # A generated bin is not a printed one.  Until the Layout view's setting says
 # otherwise, new rows start at Qty 0 and are marked printed by hand.
 DEFAULT_NEW_BIN_QTY = 0
-# A space is one save folder: a drawer the bins are fitted into, or a box - a
-# Bin for Bins case whose inside is the space.
+# A Space is one physical drawer or storage box. Its inventory is stored in
+# the selected Wavefinity save folder.
 SPACE_KINDS = ("drawer", "box")
 
 _HEADER_KEYS = {

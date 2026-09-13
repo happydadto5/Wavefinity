@@ -109,7 +109,7 @@ from organizer_inserts import (
 from photo_nest import photo_outline_from_data
 from organizer_drawer import drawer_routes
 from organizer_inventory import create_space_text
-from organizer_spaces import space_routes
+from organizer_spaces import folder_mode, space_routes
 from organizer_app import (
     APP_DIR,
     DEFAULT_SAMPLE_BOXES,
@@ -525,7 +525,6 @@ def catalog_payload() -> dict[str, Any]:
             "design": default_design(),
             # A Render path is implementation detail, never a user's folder.
             "output": "" if HOSTED else str(DEFAULT_OUTPUT),
-            "keep_log": True,
             "connector": {
                 "tolerance": LOCKED_TOLERANCE,
                 "height": LOCKED_CONNECTOR_HEIGHT,
@@ -702,8 +701,6 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
         update["output"] = str(payload["output"])
     if "slicer_path" in payload:
         update["slicer_path"] = str(payload["slicer_path"]) if payload["slicer_path"] else ""
-    if "keep_log" in payload:
-        update["keep_log"] = bool(payload["keep_log"])
     return {"preferences": save_preferences(update)}
 
 
@@ -1476,7 +1473,8 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     output = _generation_output(payload)
     auto_timestamp = bool(payload.get("auto_timestamp", False))
-    keep_log = bool(payload.get("keep_log", True))
+    requested_inventory = bool(payload.get("keep_log", False))
+    keep_log = requested_inventory if HOSTED else folder_mode(output, load_preferences()) == "space"
     with GEOMETRY_LOCK:
         result = generate_organizer_files(
             box, layout, output, label, part_name, label_location, scoop,
@@ -1484,7 +1482,7 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             keep_log=keep_log and not HOSTED,
         )
     reply = _generation_reply(result=result, output=output)
-    if HOSTED and keep_log:
+    if HOSTED and requested_inventory:
         reply["inventory_bin"] = inventory_bin_record(
             box, layout, _extract_generated_files(result), label,
             part_name, scoop,

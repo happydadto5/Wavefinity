@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from organizer_engine import BoxSpec
 from organizer_inserts import Feature, Item, Layout, Segment, Zone
@@ -104,14 +105,33 @@ class TestBinLogging(unittest.TestCase):
             self.assertIn("| TEST |", content)
             self.assertIn("| 32 | 32 | 32 |", content)
 
-    def test_wavefinity_web_preferences_keep_log(self):
-        res = wavefinity_web.preferences_payload({"keep_log": False})
-        self.assertIn("preferences", res)
-        self.assertFalse(res["preferences"].get("keep_log", True))
+    def test_generation_defaults_to_no_inventory_and_uses_folder_mode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            design_folder = Path(tmpdir) / "Designs"
+            design_folder.mkdir()
+            design = wavefinity_web.default_design()
+            with (
+                patch.object(wavefinity_web, "HOSTED", False),
+                patch.object(wavefinity_web, "load_preferences", return_value={}),
+                patch.object(wavefinity_web, "generate_organizer_files", return_value={}) as generate,
+            ):
+                wavefinity_web.generate_payload({"design": design, "output": str(design_folder)})
+                self.assertFalse(generate.call_args.kwargs["keep_log"])
 
-        # Restore
-        wavefinity_web.preferences_payload({"keep_log": True})
-        self.assertTrue(wavefinity_web.load_preferences().get("keep_log", True))
+                (design_folder / ".wavefinity.json").write_text(
+                    '{"version":2,"folder_mode":"space","space":{"name":"Tools","kind":"drawer","x":100,"y":80,"z":40}}',
+                    encoding="utf-8",
+                )
+                wavefinity_web.generate_payload({
+                    "design": design, "output": str(design_folder), "keep_log": False,
+                })
+                self.assertTrue(generate.call_args.kwargs["keep_log"])
+
+    def test_keep_log_is_not_an_active_preference(self):
+        with patch.object(wavefinity_web, "save_preferences", return_value={"output": "kept"}) as save:
+            result = wavefinity_web.preferences_payload({"keep_log": True})
+        self.assertEqual(result["preferences"], {"output": "kept"})
+        save.assert_called_once_with({})
 
 
 if __name__ == "__main__":

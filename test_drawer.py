@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 from organizer_drawer import (
@@ -20,7 +21,7 @@ from organizer_inventory import (
     save_inventory,
     save_inventory_text,
 )
-from organizer_spaces import space_routes
+from organizer_spaces import FolderMetadataError, space_routes
 
 LEGACY = """# My Drawer Bins
 
@@ -95,6 +96,81 @@ class InventoryFileTests(unittest.TestCase):
         loaded = load_inventory_text(saved["inventory_text"], title="Top Drawer")
         self.assertEqual(loaded["layout"]["space"]["name"], "Top Drawer")
         self.assertEqual(loaded["bins"][0]["name"], "Bits")
+
+
+class FolderMigrationTests(unittest.TestCase):
+    @staticmethod
+    def routes(tmp, prefs=None):
+        prefs = {} if prefs is None else prefs
+        routes = space_routes(Path(tmp), lambda: dict(prefs), lambda update: prefs.update(update) or dict(prefs))
+        return routes, prefs
+
+    def test_empty_folder_becomes_design_without_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Designs"
+            routes, _prefs = self.routes(tmp)
+            result = routes["/api/folder/use"]({"output": str(folder)})
+            self.assertEqual(result["folder"]["folder_mode"], "design")
+            self.assertEqual(json.loads((folder / ".wavefinity.json").read_text())["folder_mode"], "design")
+            self.assertFalse(inventory_path(folder).exists())
+
+    def test_legacy_space_and_design_markers_migrate_additively(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            routes, prefs = self.routes(tmp)
+            drawer = Path(tmp) / "Drawer"
+            drawer.mkdir()
+            legacy_space = {"name": "Tools", "kind": "drawer", "x": 120, "y": 80, "z": 40}
+            (drawer / ".wavefinity-space.json").write_text(json.dumps(legacy_space), encoding="utf-8")
+            result = routes["/api/folder/use"]({"output": str(drawer)})
+            self.assertEqual(result["folder"]["folder_mode"], "space")
+            self.assertEqual(result["folder"]["space"]["x"], 120.0)
+            self.assertEqual(json.loads((drawer / ".wavefinity.json").read_text())["space"]["name"], "Tools")
+
+            plain = Path(tmp) / "Plain"
+            plain.mkdir()
+            (plain / ".wavefinity-space.json").write_text('{"kind":"none"}', encoding="utf-8")
+            self.assertEqual(routes["/api/folder/use"]({"output": str(plain)})["folder"]["folder_mode"], "design")
+
+            preferred = Path(tmp) / "Preferred"
+            preferred.mkdir()
+            prefs["no_inventory_folders"] = [str(preferred)]
+            self.assertEqual(routes["/api/folder/use"]({"output": str(preferred)})["folder"]["folder_mode"], "design")
+
+    def test_inventory_space_beats_safe_contrary_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Drawer"
+            folder.mkdir()
+            create_space(folder, name="Hardware", kind="drawer", x=100, y=80, z=40)
+            inventory_before = inventory_path(folder).read_bytes()
+            (folder / ".wavefinity.json").write_text('{"version":2,"folder_mode":"design"}', encoding="utf-8")
+            (folder / ".wavefinity-space.json").write_text('{"kind":"none"}', encoding="utf-8")
+            routes, _prefs = self.routes(tmp)
+            result = routes["/api/folder/use"]({"output": str(folder)})
+            self.assertEqual(result["folder"]["folder_mode"], "space")
+            self.assertEqual(result["folder"]["space"]["name"], "Hardware")
+            self.assertEqual(inventory_path(folder).read_bytes(), inventory_before)
+            self.assertEqual(json.loads((folder / ".wavefinity.json").read_text())["folder_mode"], "space")
+
+    def test_damaged_or_unsupported_metadata_is_never_rewritten(self):
+        cases = {
+            "bad-json": "{broken",
+            "future": '{"version":99,"folder_mode":"space","space":{"kind":"drawer","x":1,"y":1,"z":1}}',
+            "bad-mode": '{"version":2,"folder_mode":"something_future"}',
+            "bad-space": '{"version":2,"folder_mode":"space","space":{"kind":"drawer","x":1,"y":1}}',
+            "infinite-space": '{"version":2,"folder_mode":"space","space":{"kind":"drawer","x":1e999,"y":1,"z":1}}',
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            routes, _prefs = self.routes(tmp)
+            for name, content in cases.items():
+                with self.subTest(name=name):
+                    folder = Path(tmp) / name
+                    folder.mkdir()
+                    metadata = folder / ".wavefinity.json"
+                    metadata.write_text(content, encoding="utf-8")
+                    before = metadata.read_bytes()
+                    with self.assertRaises(FolderMetadataError):
+                        routes["/api/folder/use"]({"output": str(folder)})
+                    self.assertEqual(metadata.read_bytes(), before)
 
 
 class AutoLayoutTests(unittest.TestCase):

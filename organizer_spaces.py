@@ -9,6 +9,7 @@ readable and are migrated additively.
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any, Callable
@@ -18,18 +19,35 @@ from organizer_inventory import create_space, load_inventory
 MAX_RECENT = 8
 METADATA_FILE = ".wavefinity.json"
 LEGACY_METADATA_FILE = ".wavefinity-space.json"
+METADATA_VERSION = 2
+
+
+class FolderMetadataError(ValueError):
+    """The folder contains metadata that must not be guessed at or replaced."""
 
 
 def _same(a: Any, b: Any) -> bool:
     return os.path.normcase(os.path.normpath(str(a))) == os.path.normcase(os.path.normpath(str(b)))
 
 
-def _json_file(path: Path) -> dict[str, Any] | None:
+def _json_file(path: Path, *, strict: bool = False) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+    except FileNotFoundError:
         return None
+    except (json.JSONDecodeError, OSError) as error:
+        if strict:
+            raise FolderMetadataError(
+                "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
+            ) from error
+        return None
+    if not isinstance(data, dict):
+        if strict:
+            raise FolderMetadataError(
+                "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
+            )
+        return None
+    return data
 
 
 def _space(raw: Any) -> dict[str, Any] | None:
@@ -39,7 +57,7 @@ def _space(raw: Any) -> dict[str, Any] | None:
         size = [float(raw[axis]) for axis in ("x", "y", "z")]
     except (KeyError, TypeError, ValueError):
         return None
-    if min(size) <= 0:
+    if not all(math.isfinite(value) and value > 0 for value in size):
         return None
     return {
         "kind": raw["kind"],
@@ -55,26 +73,49 @@ def _folder_state(folder: Path, prefs: dict[str, Any]) -> tuple[str, dict[str, A
     if inventory_space:
         return "space", inventory_space
 
-    metadata = _json_file(folder / METADATA_FILE) or {}
-    metadata_space = _space(metadata.get("space"))
-    if metadata.get("folder_mode") == "space" and metadata_space:
-        return "space", metadata_space
-    if metadata.get("folder_mode") == "design":
-        return "design", None
+    metadata_path = folder / METADATA_FILE
+    metadata = _json_file(metadata_path, strict=metadata_path.exists())
+    if metadata is not None:
+        version = metadata.get("version")
+        if isinstance(version, (int, float)) and version > METADATA_VERSION:
+            raise FolderMetadataError(
+                "This folder contains Wavefinity metadata from a newer version. The file was left unchanged."
+            )
+        if version != METADATA_VERSION:
+            raise FolderMetadataError(
+                "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
+            )
+        if metadata.get("folder_mode") == "design":
+            return "design", None
+        if metadata.get("folder_mode") == "space":
+            metadata_space = _space(metadata.get("space"))
+            if metadata_space:
+                return "space", metadata_space
+            raise FolderMetadataError(
+                "This folder's Space information is incomplete or damaged. Nothing was changed."
+            )
+        raise FolderMetadataError(
+            "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
+        )
 
-    legacy = _json_file(folder / LEGACY_METADATA_FILE) or {}
-    legacy_space = _space(legacy)
-    if legacy_space:
-        return "space", legacy_space
-    if legacy.get("kind") == "none":
-        return "design", None
+    legacy_path = folder / LEGACY_METADATA_FILE
+    legacy = _json_file(legacy_path, strict=legacy_path.exists())
+    if legacy is not None:
+        legacy_space = _space(legacy)
+        if legacy_space:
+            return "space", legacy_space
+        if legacy.get("kind") == "none":
+            return "design", None
+        raise FolderMetadataError(
+            "This folder contains legacy Wavefinity metadata that this version cannot safely read. The file was left unchanged."
+        )
     if any(_same(folder, one) for one in prefs.get("no_inventory_folders") or []):
         return "design", None
     return "design", None
 
 
 def _write_metadata(folder: Path, mode: str, space: dict[str, Any] | None = None) -> None:
-    payload: dict[str, Any] = {"version": 2, "folder_mode": mode}
+    payload: dict[str, Any] = {"version": METADATA_VERSION, "folder_mode": mode}
     if mode == "space" and space:
         payload["space"] = space
     target = folder / METADATA_FILE
@@ -84,11 +125,25 @@ def _write_metadata(folder: Path, mode: str, space: dict[str, Any] | None = None
 
 
 def _migrate_metadata(folder: Path, mode: str, space: dict[str, Any] | None = None) -> None:
-    """Never replace metadata that exists but cannot be understood."""
+    """Only rewrite absent or positively recognized current metadata."""
     target = folder / METADATA_FILE
-    if target.exists() and _json_file(target) is None:
-        return
+    if target.exists():
+        try:
+            metadata = _json_file(target, strict=True)
+            if metadata.get("version") != METADATA_VERSION:
+                return
+            if metadata.get("folder_mode") not in {"design", "space"}:
+                return
+            if metadata.get("folder_mode") == "space" and not _space(metadata.get("space")):
+                return
+        except FolderMetadataError:
+            return
     _write_metadata(folder, mode, space)
+
+
+def folder_mode(folder: Path, prefs: dict[str, Any]) -> str:
+    """Inventory authority for local generation."""
+    return _folder_state(folder, prefs)[0]
 
 
 def describe(folder: Path, prefs: dict[str, Any], *, migrate: bool = False) -> dict[str, Any]:
@@ -183,9 +238,9 @@ def space_routes(
     def create(payload):
         target = folder(payload)
         target.mkdir(parents=True, exist_ok=True)
-        metadata_path = target / METADATA_FILE
-        if metadata_path.exists() and _json_file(metadata_path) is None:
-            raise ValueError("this folder's .wavefinity.json file could not be read; it was left untouched")
+        mode, existing_space = _folder_state(target, load_preferences())
+        if mode == "space":
+            raise ValueError(f"this folder already holds the space {(existing_space or {}).get('name')!r}")
         result = create_space(
             target, name=payload.get("name"), kind=payload.get("kind"),
             x=payload.get("x"), y=payload.get("y"), z=payload.get("z"),
