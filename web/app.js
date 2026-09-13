@@ -2517,11 +2517,13 @@ function renderDraftFields() {
         : (one.along === "y" ? legacyN : 0);
       const gy = (opt.count_y != null && opt.count_y !== "") ? opt.count_y
         : (one.along === "x" ? legacyN : 0);
+      const shownGx = (number(gx, 0) === 0) ? "" : gx;
+      const shownGy = (number(gy, 0) === 0) ? "" : gy;
       const shownThickness = opt.thickness ?? state.draftResolvedOptions?.thickness ?? 1.6;
       const shownHeight = opt.height ?? state.draftResolvedOptions?.height ?? "";
       html += `<div class="editor-group divider-layout"><span class="editor-group-label">Divider layout</span><div class="pair">
-        ${field("X count", "option:count_x", gx, { min: "0", step: "1", tip: "Walls dividing the bin left to right. 0 for none." })}
-        ${field("Y count", "option:count_y", gy, { min: "0", step: "1", tip: "Walls dividing the bin front to back. 0 for none." })}
+        ${field("X count", "option:count_x", shownGx, { min: "0", step: "1", tip: "Walls dividing the bin left to right. 0 for none." })}
+        ${field("Y count", "option:count_y", shownGy, { min: "0", step: "1", tip: "Walls dividing the bin front to back. 0 for none." })}
         ${field("Wall thickness", "option:thickness", shownThickness, { unit: "mm", step: "0.5" })}
         ${field("Height", "option:height", shownHeight, { unit: "mm", step: "0.5" })}
       </div></div>`;
@@ -2765,6 +2767,7 @@ function renderDraftFields() {
   if (!(one.kind === "text" && one.options?.level === "rim")) {
     html += renderFitActions(one);
   }
+  const activeDraft = document.activeElement?.dataset?.draft;
   $("#draft-fields").innerHTML = html;
   const photoInput = $("#nest-photo-input", $("#draft-fields"));
   if (photoInput) photoInput.addEventListener("change", uploadNestPhoto);
@@ -2775,6 +2778,10 @@ function renderDraftFields() {
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateDraftFromFields);
   });
+  if (activeDraft) {
+    const el = $(`[data-draft="${activeDraft}"]`, $("#draft-fields"));
+    if (el) el.focus();
+  }
   const dividerAngle = $('[data-draft="option:bottom_angle"]', $("#draft-fields"));
   if (dividerAngle) dividerAngle.addEventListener("focus", () => dividerAngle.select());
   $$('input[data-division-index]', $("#draft-fields")).forEach(input => input.addEventListener("input", () => {
