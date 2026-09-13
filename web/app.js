@@ -434,6 +434,34 @@ function syncEasyCleanControls() {
   }
 }
 
+function populateLiftGrabberChoices() {
+  const rules = state.catalog?.lift_grabbers || {};
+  const sizeSelect = $("#lift-grabber-size");
+  const locationSelect = $("#lift-grabber-location");
+  if (sizeSelect && !sizeSelect.options.length) {
+    for (const choice of rules.sizes || []) {
+      const opt = document.createElement("option");
+      opt.value = choice.value;
+      opt.textContent = choice.label;
+      sizeSelect.appendChild(opt);
+    }
+  }
+  if (locationSelect && !locationSelect.options.length) {
+    for (const choice of rules.locations || []) {
+      const opt = document.createElement("option");
+      opt.value = choice.value;
+      opt.textContent = choice.label;
+      locationSelect.appendChild(opt);
+    }
+  }
+}
+
+function syncLiftGrabberControls() {
+  const enabled = Boolean($("#lift-grabbers")?.checked);
+  if ($("#lift-grabber-size-setting")) $("#lift-grabber-size-setting").hidden = !enabled;
+  if ($("#lift-grabber-location-setting")) $("#lift-grabber-location-setting").hidden = !enabled;
+}
+
 function populateWallChoices(box, select = $("#wall-thickness")) {
   const rules = state.catalog?.wall_rules || {};
   // One place decides the floor a mode *requires*. Stacking and B4B both carry
@@ -602,6 +630,11 @@ function syncForm() {
   syncBaseControls();
   syncStackDependencyControls();
   syncEasyCleanControls();
+  populateLiftGrabberChoices();
+  $("#lift-grabbers").checked = Boolean(box.lift_grabbers?.enabled);
+  $("#lift-grabber-size").value = box.lift_grabbers?.size || "medium";
+  $("#lift-grabber-location").value = box.lift_grabbers?.location || "sides";
+  syncLiftGrabberControls();
   if (!state.design.part_name || !state.design.part_name.trim()) {
     const labelCandidate = state.design.label || state.design.b4b?.label_text || state.design.layout?.features?.find(f => f.kind === "text")?.options?.text;
     if (labelCandidate && !SIZE_LIKE_TEXT.test(labelCandidate)) {
@@ -712,6 +745,26 @@ const B4B_DEFAULTS = {
   latch_strength: "standard", lid_headroom_mm: 1, label_text: "",
   label_location: "top", stacking: false, handle: false,
 };
+const LIFT_GRABBER_DEFAULTS = { enabled: false, size: "medium", location: "sides" };
+
+// Shared by updateDesignFromForm() and designHasChanges() so both compute the
+// same box.lift_grabbers from the live form. Mirrors readB4BForm/readStackForm:
+// only resets an *existing* key to defaults when off, so a design that never
+// touched this feature keeps no key at all and stays byte-identical to what
+// the server would save (design_to_dict omits the block while disabled).
+function readLiftGrabberForm(design) {
+  design.box = design.box || {};
+  const enabled = Boolean($("#lift-grabbers")?.checked);
+  if (!enabled) {
+    if (design.box.lift_grabbers) design.box.lift_grabbers = { ...LIFT_GRABBER_DEFAULTS };
+    return;
+  }
+  design.box.lift_grabbers = {
+    enabled: true,
+    size: $("#lift-grabber-size")?.value || "medium",
+    location: $("#lift-grabber-location")?.value || "sides",
+  };
+}
 // Product minimums. Switching to B4B grows undersized field axes to 48 mm;
 // height stays user-controlled and is reported if it cannot carry a latched lid.
 const B4B_LATCHED_MIN_HEIGHT = 16;
@@ -1265,6 +1318,7 @@ function updateDesignFromForm() {
   design.part_name = $("#part-name").value;
   const scoopEl = $("#scoop");
   if (scoopEl) design.scoop = scoopEl.checked;
+  readLiftGrabberForm(design);
   syncRimLabelFromFeatures();
   const newOutput = $("#output-folder").value.trim();
   if (!state.runtime.hosted && newOutput !== state.output) {
@@ -1739,6 +1793,13 @@ function wireControls() {
     });
   }
   $("#easy-clean-radius").addEventListener("input", changedDesign);
+
+  $("#lift-grabbers").addEventListener("change", () => {
+    syncLiftGrabberControls();
+    changedDesign();
+  });
+  $("#lift-grabber-size").addEventListener("change", changedDesign);
+  $("#lift-grabber-location").addEventListener("change", changedDesign);
 
   $("#bin-type").addEventListener("change", changeBinType);
   ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location", "#b4b-latch-count"].forEach(sel =>
@@ -3937,6 +3998,7 @@ async function deleteSupportAt(index) {
 function mutationControls() {
   return $$(
     '#x-size, #y-size, #z, #standard-base, #base-thickness, #standard-walls, #wall-thickness, #easy-clean, #easy-clean-style, #easy-clean-radius, #part-name, ' +
+    '#lift-grabbers, #lift-grabber-size, #lift-grabber-location, ' +
     '#mode-select, ' +
     '#b4b-part-name, #b4b-stacking, #b4b-handle, #b4b-label-location, #b4b-latch-count, ' +
     '#new-design, #open-design, #save-design'
@@ -6382,6 +6444,7 @@ function designHasChanges() {
   }
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
+  readLiftGrabberForm(visibleDesign);
   const index = draftCommitIndex();
   if (state.draft && state.draftAutoCommit && (
     index === null ||

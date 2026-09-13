@@ -490,6 +490,21 @@ def catalog_payload() -> dict[str, Any]:
             "handle_min_grip_mm": B4B_HANDLE_GRIP_ABS_MIN,
             "stack_min_base_mm": B4B_STACK_MIN_BASE,
         },
+        "lift_grabbers": {
+            "default_size": "medium",
+            "default_location": "sides",
+            "sizes": [
+                {"value": "small", "label": "Small"},
+                {"value": "medium", "label": "Medium"},
+                {"value": "large", "label": "Large"},
+                {"value": "xl", "label": "XL"},
+            ],
+            "locations": [
+                {"value": "sides", "label": "Sides (left/right)"},
+                {"value": "front_back", "label": "Front/back"},
+                {"value": "both", "label": "Both"},
+            ],
+        },
         "setting_interactions": [
             {
                 "feature": definition.kind,

@@ -25,13 +25,20 @@ from shapely.affinity import translate as translate_polygon
 from organizer_engine import (
     CORNER_INSET,
     GRID_PITCH,
+    LOCK_EMBED,
+    LOCK_SAFE_SKIN,
+    LIFT_GRABBER_FLOOR_CLEARANCE,
+    LIFT_GRABBER_RIM_CLEARANCE,
+    LIFT_GRABBER_WALL_MARGIN,
     TEXT_CAP_HEIGHT_MIN,
     TEXT_DEPTH,
     WAVE_AMPLITUDE,
     WAVE_MATING_GAP,
     B4BSpec,
     BoxSpec,
+    _lift_grabber_profile,
     _rounded,
+    _sample_count,
     _wall_points,
     max_wave_slope,
     text_outline,
@@ -42,6 +49,7 @@ from organizer_geometry import (
     _extrude_polygon,
     _extrude_xz_profile,
     _extrude_yz_profile,
+    _sweep_profile,
     difference,
     intersection as _intersection,
     translated,
@@ -1573,6 +1581,106 @@ def _stack_recesses(box: BoxSpec) -> list[trimesh.Trimesh]:
     return solids
 
 
+# --------------------------------------------------------------------------- #
+# lift grabbers (B4B inner mating wall)
+# --------------------------------------------------------------------------- #
+_B4B_GRABBER_WALL_PAIRS = {"+x": "left/right", "-x": "left/right",
+                           "+y": "front/back", "-y": "front/back"}
+
+
+def _b4b_wall_face_table(
+    layout: "B4BLayout",
+) -> dict[str, tuple[str, float, float, tuple[float, float]]]:
+    """B4B inner-mating-wall faces, in the same shape as the ordinary bin's
+    ``organizer_engine._wall_face_table`` - grabbers must root against the
+    authoritative child-facing wall, never the outer case polygon."""
+    return {
+        "+x": ("y", layout.inner_half_y, layout.inner_half_x, (-1.0, 0.0)),
+        "-x": ("y", layout.inner_half_y, -layout.inner_half_x, (1.0, 0.0)),
+        "+y": ("x", layout.inner_half_x, layout.inner_half_y, (0.0, -1.0)),
+        "-y": ("x", layout.inner_half_x, -layout.inner_half_y, (0.0, 1.0)),
+    }
+
+
+def _b4b_grabber_wall_path(
+    layout: "B4BLayout", wall: str, width: float
+) -> tuple[list[tuple[float, float]], tuple[float, float]]:
+    run_axis, _wave_half, face, inward = _b4b_wall_face_table(layout)[wall]
+    half_width = width / 2.0
+    ss = np.linspace(-half_width, half_width, _sample_count(width))
+    if run_axis == "y":
+        path = [(face + wave_value(float(s)), float(s)) for s in ss]
+    else:
+        path = [(float(s), face + wave_value(float(s))) for s in ss]
+    return path, inward
+
+
+def validate_b4b_lift_grabbers(box: BoxSpec) -> None:
+    """Lift grabbers must fit the B4B's own inner mating wall and clear the
+    lid's locating skirt.  Child field size, outer case size, hinge/latch/
+    handle geometry and stacking recesses are untouched by this feature."""
+    grabbers = box.lift_grabbers
+    if not grabbers.enabled:
+        return
+    eff = b4b_effective_box(box)
+    layout = b4b_layout(eff)
+    dims = grabbers.dimensions
+    faces = _b4b_wall_face_table(layout)
+    needed = dims.width + LIFT_GRABBER_WALL_MARGIN
+    checked_pairs: set[str] = set()
+    for wall in grabbers.walls:
+        pair = _B4B_GRABBER_WALL_PAIRS[wall]
+        if pair in checked_pairs:
+            continue
+        _run_axis, wave_half, _face, _inward = faces[wall]
+        available = 2.0 * (wave_half - CORNER_INSET)
+        if available < needed:
+            checked_pairs.add(pair)
+            raise ValueError(
+                f"{grabbers.size_label} lift grabbers do not fit on "
+                f"this B4B's {pair} walls. Choose a smaller size, a "
+                "different location, or make the case larger."
+            )
+    rim_z = b4b_rim_z_from_eff(eff)
+    bottom_z = rim_z - LIFT_GRABBER_RIM_CLEARANCE - dims.height
+    if bottom_z < eff.base_thickness + LIFT_GRABBER_FLOOR_CLEARANCE:
+        raise ValueError(
+            f"{grabbers.size_label} lift grabbers require a taller B4B."
+        )
+    if eff.b4b.lid:
+        # The locating skirt laps at most B4B_LID_SKIRT_LAP below the rim; the
+        # grabber's fixed 8 mm rim clearance keeps clear of it with margin, but
+        # assert it rather than trust the arithmetic silently.
+        skirt_bottom = rim_z - _skirt_lap(eff)
+        if bottom_z + dims.height > skirt_bottom - 2.0:
+            raise ValueError(
+                f"{grabbers.size_label} lift grabbers are too close to "
+                "the lid's locating skirt; choose a smaller size or a taller "
+                "B4B."
+            )
+
+
+def make_b4b_lift_grabbers(box: BoxSpec) -> list[trimesh.Trimesh]:
+    """Small support-free internal finger ledges on the B4B's inner mating
+    wall, near the top of the case."""
+    grabbers = box.lift_grabbers
+    if not grabbers.enabled:
+        return []
+    validate_b4b_lift_grabbers(box)
+    eff = b4b_effective_box(box)
+    layout = b4b_layout(eff)
+    dims = grabbers.dimensions
+    rim_z = b4b_rim_z_from_eff(eff)
+    bottom_z = rim_z - LIFT_GRABBER_RIM_CLEARANCE - dims.height
+    embed = min(LOCK_EMBED, eff.wall_depth - LOCK_SAFE_SKIN)
+    profile = _lift_grabber_profile(dims, embed)
+    return [
+        translated(_sweep_profile(path, inward, profile), (0.0, 0.0, bottom_z))
+        for wall in grabbers.walls
+        for path, inward in [_b4b_grabber_wall_path(layout, wall, dims.width)]
+    ]
+
+
 def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     """Flat-floor child field inside a wall grown outward from its mating face."""
     eff = b4b_effective_box(box)
@@ -1599,6 +1707,7 @@ def make_b4b_body(box: BoxSpec) -> trimesh.Trimesh:
     # a carried case hangs from the shell rather than from the lid, the latches
     # and the rear hinges.
     hardware.extend(_handle_body_parts(box))
+    hardware.extend(make_b4b_lift_grabbers(box))
     if hardware:
         body = union([body, *hardware])
 
@@ -3117,6 +3226,8 @@ def validate_b4b_design(
     wall = layout.outer_structural_polygon.difference(layout.inner_mating_polygon)
     if wall.is_empty or wall.area <= 0.0:
         raise ValueError("B4B outward structural wall is empty")
+
+    validate_b4b_lift_grabbers(box)
 
     if b4b.handle:
         eligible, reason = b4b_handle_eligibility(box)

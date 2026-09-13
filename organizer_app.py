@@ -22,6 +22,7 @@ from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
     StackSpec,
+    LiftGrabberSpec,
     DEFAULT_BASE_THICKNESS,
     DEFAULT_WALL,
     EASY_CLEAN_RADIUS,
@@ -48,6 +49,9 @@ from organizer_engine import (
     make_top_label_ledge,
     make_top_labelled_box,
     make_labelled_box,
+    make_lift_grabbers,
+    lift_grabber_keep_outs,
+    lift_grabber_summary,
     placed_label_outline,
     preview_rings,
     make_box,
@@ -625,6 +629,8 @@ def _customization_zones(
         zones.append(
             ("scoop", Zone(*scoop_keep_out(box, _scoop_floor_bounds(box, mode)).bounds))
         )
+    for name, polygon in lift_grabber_keep_outs(box):
+        zones.append((name, Zone(*polygon.bounds)))
     return zones
 
 
@@ -774,6 +780,9 @@ def preview_geometry(
             )
         )
         geometry.extend(_mesh_preview_geometry(scoop_mesh, "scoop"))
+    if box.lift_grabbers.enabled:
+        for grabber_mesh in make_lift_grabbers(box):
+            geometry.extend(_mesh_preview_geometry(grabber_mesh, "lift_grabber"))
 
     plate = insert_plate_solid(box, mode)
     if plate is not None:
@@ -1846,6 +1855,13 @@ def design_to_dict(
     stack = getattr(box, "stack", None) or StackSpec()
     if stack.enabled:
         box_block["stack"] = {"mode": stack.mode}
+    grabbers = getattr(box, "lift_grabbers", None) or LiftGrabberSpec()
+    if grabbers.enabled:
+        box_block["lift_grabbers"] = {
+            "enabled": True,
+            "size": grabbers.size,
+            "location": grabbers.location,
+        }
     return {
         # Version 3 only when B4B is on. Version 3 changes B4B x/y from the
         # physical outside to the exact requested child field, so older builds
@@ -1873,6 +1889,14 @@ def design_from_dict(
     stack = StackSpec()
     if isinstance(stack_raw, dict) and stack_raw.get("mode"):
         stack = StackSpec(mode=str(stack_raw["mode"]))
+    grabbers_raw = raw.get("lift_grabbers")
+    lift_grabbers = LiftGrabberSpec()
+    if isinstance(grabbers_raw, dict) and bool(grabbers_raw.get("enabled", False)):
+        lift_grabbers = LiftGrabberSpec(
+            enabled=True,
+            size=str(grabbers_raw.get("size", "medium")),
+            location=str(grabbers_raw.get("location", "sides")),
+        )
     b4b_raw = raw.get("b4b")
     b4b = B4BSpec()
     if isinstance(b4b_raw, dict) and bool(b4b_raw.get("enabled", False)):
@@ -1954,6 +1978,7 @@ def design_from_dict(
         standard_walls=standard_walls,
         b4b=b4b,
         stack=stack,
+        lift_grabbers=lift_grabbers,
     )
     box = normalize_stack_settings(box)
     if b4b.enabled:

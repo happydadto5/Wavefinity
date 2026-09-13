@@ -232,6 +232,15 @@ class Layout:
         # Import locally to keep the shared core independent at module load time.
         from ._layout import check_layout
 
+        if self.mode != "fused" and box.lift_grabbers.enabled:
+            # A removable/cartridge insert spans the full bin opening; internal
+            # grabbers narrow that opening, so it could not physically be
+            # inserted or withdrawn. Fused holders grow from the floor and are
+            # unaffected.
+            raise ValueError(
+                "Lift grabbers narrow the bin opening and are not compatible "
+                "with this removable interior mode."
+            )
         bounds = layout_zone(box, self.mode)
         # Fused holders stand on the bin floor; that is the only mode whose
         # Spacing is judged on real footprints at the top of the bin floor.

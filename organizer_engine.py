@@ -417,6 +417,72 @@ class B4BSpec:
         )
 
 
+LIFT_GRABBER_SIZES = ("small", "medium", "large", "xl")
+LIFT_GRABBER_LOCATIONS = ("sides", "front_back", "both")
+# How far below the rim the grabber's top sits.  Clears ordinary connector
+# lock geometry (top ``LOCK_TOP_BELOW_RIM`` = 4 mm below rim), the rim label
+# ledge, stack snap/groove geometry, and a B4B lid skirt.
+LIFT_GRABBER_RIM_CLEARANCE = 8.0
+LIFT_GRABBER_FLOOR_CLEARANCE = 2.0     # required gap above the effective floor
+LIFT_GRABBER_WALL_MARGIN = 4.0         # extra along-wall room beyond the width
+
+
+@dataclass(frozen=True)
+class LiftGrabberDimensions:
+    """One size preset: along-wall width, inward projection, total height."""
+
+    width: float
+    projection: float
+    height: float
+
+
+LIFT_GRABBER_DIMENSIONS: dict[str, LiftGrabberDimensions] = {
+    "small":  LiftGrabberDimensions(8.0, 3.0, 4.5),
+    "medium": LiftGrabberDimensions(12.0, 4.0, 5.5),
+    "large":  LiftGrabberDimensions(18.0, 5.0, 6.5),
+    "xl":     LiftGrabberDimensions(24.0, 6.0, 7.5),
+}
+
+
+@dataclass(frozen=True)
+class LiftGrabberSpec:
+    """Optional small internal finger ledges near the top of a bin, so it can
+    be lifted when neighbouring bins block the outside walls.  Default off;
+    inert for every existing design."""
+
+    enabled: bool = False
+    size: str = "medium"
+    location: str = "sides"
+
+    def __post_init__(self) -> None:
+        if self.size not in LIFT_GRABBER_SIZES:
+            raise ValueError(
+                f"lift grabber size must be one of {', '.join(LIFT_GRABBER_SIZES)}"
+            )
+        if self.location not in LIFT_GRABBER_LOCATIONS:
+            raise ValueError(
+                "lift grabber location must be one of "
+                f"{', '.join(LIFT_GRABBER_LOCATIONS)}"
+            )
+
+    @property
+    def dimensions(self) -> LiftGrabberDimensions:
+        return LIFT_GRABBER_DIMENSIONS[self.size]
+
+    @property
+    def walls(self) -> tuple[str, ...]:
+        """Interior wall names this configuration grows a grabber on."""
+        if self.location == "sides":
+            return ("+x", "-x")
+        if self.location == "front_back":
+            return ("+y", "-y")
+        return ("+x", "-x", "+y", "-y")
+
+    @property
+    def size_label(self) -> str:
+        return "XL" if self.size == "xl" else self.size.capitalize()
+
+
 @dataclass(frozen=True)
 class BoxSpec:
     x: float = MIN_JOINABLE_SIZE
@@ -439,6 +505,9 @@ class BoxSpec:
     b4b: B4BSpec = field(default_factory=B4BSpec)
     # Stacking, same reasoning: trailing and inert unless switched on.
     stack: StackSpec = field(default_factory=StackSpec)
+    # Internal lift grabbers, same reasoning: trailing and inert unless
+    # switched on. Available to every bin type, not just B4B.
+    lift_grabbers: LiftGrabberSpec = field(default_factory=LiftGrabberSpec)
 
     def __post_init__(self) -> None:
         values = {
@@ -1006,6 +1075,167 @@ def make_wall_lock_bumps(spec: BoxSpec) -> list[trimesh.Trimesh]:
 
 
 # --------------------------------------------------------------------------- #
+# lift grabbers
+# --------------------------------------------------------------------------- #
+_LIFT_GRABBER_WALL_LABELS = {
+    "+x": "right", "-x": "left", "+y": "back", "-y": "front",
+}
+
+
+def _wall_face_table(
+    spec: BoxSpec,
+) -> dict[str, tuple[str, float, float, tuple[float, float]]]:
+    """Interior wall faces keyed by name: ``(run axis, half-reach along the
+    wall, face position on the perpendicular axis, inward unit vector)``."""
+    depth = spec.wall_depth
+    return {
+        "+x": ("y", spec.half_y, spec.half_x - depth, (-1.0, 0.0)),
+        "-x": ("y", spec.half_y, -(spec.half_x - depth), (1.0, 0.0)),
+        "+y": ("x", spec.half_x, spec.half_y - depth, (0.0, -1.0)),
+        "-y": ("x", spec.half_x, -(spec.half_y - depth), (0.0, 1.0)),
+    }
+
+
+def _lift_grabber_wall_path(
+    spec: BoxSpec, wall: str, width: float
+) -> tuple[list[tuple[float, float]], tuple[float, float]]:
+    """Centre-line of one grabber on the interior face of ``wall``, following
+    the true wavy wall exactly like a wall lock bump does."""
+    run_axis, _wave_half, face, inward = _wall_face_table(spec)[wall]
+    half_width = width / 2.0
+    ss = np.linspace(-half_width, half_width, _sample_count(width))
+    if run_axis == "y":
+        path = [(face + wave_value(float(s)), float(s)) for s in ss]
+    else:
+        path = [(float(s), face + wave_value(float(s))) for s in ss]
+    return path, inward
+
+
+def _lift_grabber_profile(
+    dims: LiftGrabberDimensions, embed: float
+) -> list[tuple[float, float]]:
+    """Wedge/hook section, ``t`` growing away from the face it sits on, ``z``
+    relative to the grabber's own bottom (0.0).
+
+    The underside ramps inward at exactly 45 degrees from the wall face out to
+    the full projection - support-free in either build orientation - then
+    rises vertically to a solid, supported top.
+    """
+    ramp_z = dims.projection
+    top_z = dims.height
+    if top_z <= ramp_z:
+        raise ValueError("lift grabber height must exceed its projection")
+    return [
+        (-embed, 0.0),
+        (0.0, 0.0),
+        (dims.projection, ramp_z),
+        (dims.projection, top_z),
+        (-embed, top_z),
+    ]
+
+
+def validate_lift_grabbers(box: BoxSpec) -> None:
+    """Check an ordinary bin's lift grabber settings fit this box.
+
+    B4B bins are validated separately, against the B4B inner mating wall and
+    lid skirt (see ``organizer_b4b.validate_b4b_lift_grabbers``).
+    """
+    grabbers = box.lift_grabbers
+    if not grabbers.enabled:
+        return
+    if getattr(getattr(box, "b4b", None), "enabled", False):
+        return
+    dims = grabbers.dimensions
+    faces = _wall_face_table(box)
+    needed = dims.width + LIFT_GRABBER_WALL_MARGIN
+    checked_pairs: set[str] = set()
+    for wall in grabbers.walls:
+        pair = "left/right" if wall in ("+x", "-x") else "front/back"
+        if pair in checked_pairs:
+            continue
+        _run_axis, wave_half, _face, _inward = faces[wall]
+        available = 2.0 * (wave_half - CORNER_INSET)
+        if available < needed:
+            checked_pairs.add(pair)
+            raise ValueError(
+                f"{grabbers.size_label} lift grabbers do not fit on "
+                f"this bin's {pair} walls. Choose a smaller size, a "
+                "different location, or make the bin larger."
+            )
+    bottom_z = box.z - LIFT_GRABBER_RIM_CLEARANCE - dims.height
+    if bottom_z < box.base_thickness + LIFT_GRABBER_FLOOR_CLEARANCE:
+        raise ValueError(
+            f"{grabbers.size_label} lift grabbers require a taller bin."
+        )
+
+
+def make_lift_grabbers(spec: BoxSpec, rim_z: float | None = None) -> list[trimesh.Trimesh]:
+    """Small support-free internal finger ledges near the top of the bin.
+
+    ``rim_z`` lets callers with an effective body (e.g. stacking) place the
+    grabbers below the *actual* physical rim rather than ``spec.z``.
+    """
+    grabbers = spec.lift_grabbers
+    if not grabbers.enabled:
+        return []
+    validate_lift_grabbers(spec)
+    dims = grabbers.dimensions
+    rim = spec.z if rim_z is None else rim_z
+    bottom_z = rim - LIFT_GRABBER_RIM_CLEARANCE - dims.height
+    embed = min(LOCK_EMBED, spec.wall_depth - LOCK_SAFE_SKIN)
+    profile = _lift_grabber_profile(dims, embed)
+    return [
+        translated(_sweep_profile(path, inward, profile), (0.0, 0.0, bottom_z))
+        for wall in grabbers.walls
+        for path, inward in [_lift_grabber_wall_path(spec, wall, dims.width)]
+    ]
+
+
+def lift_grabber_keep_outs(box: BoxSpec) -> list[tuple[str, Polygon]]:
+    """Conservative floor-plan keep-outs, one per active grabber wall.
+
+    Reserves the whole 2D column under each grabber (along-wall width plus
+    1 mm, inward reach plus 1 mm) rather than doing per-height collision
+    testing against interior parts.
+    """
+    grabbers = box.lift_grabbers
+    if not grabbers.enabled:
+        return []
+    dims = grabbers.dimensions
+    half_width = (dims.width + 1.0) / 2.0
+    reach = dims.projection + 1.0
+    faces = _wall_face_table(box)
+    zones: list[tuple[str, Polygon]] = []
+    for wall in grabbers.walls:
+        run_axis, _wave_half, face, inward = faces[wall]
+        inward_x, inward_y = inward
+        if run_axis == "y":
+            x0, x1 = sorted((face, face + inward_x * reach))
+            y0, y1 = -half_width, half_width
+        else:
+            x0, x1 = -half_width, half_width
+            y0, y1 = sorted((face, face + inward_y * reach))
+        name = f"lift grabber ({_LIFT_GRABBER_WALL_LABELS[wall]})"
+        zones.append((name, shapely_box(x0, y0, x1, y1)))
+    return zones
+
+
+def lift_grabber_summary(box: BoxSpec) -> dict | None:
+    """Readout for the preview panel and generation result; ``None`` when off."""
+    grabbers = box.lift_grabbers
+    if not grabbers.enabled:
+        return None
+    location_labels = {
+        "sides": "sides", "front_back": "front/back", "both": "both",
+    }
+    return {
+        "size": grabbers.size,
+        "location": grabbers.location,
+        "label": f"{grabbers.size_label} — {location_labels[grabbers.location]}",
+    }
+
+
+# --------------------------------------------------------------------------- #
 # parts
 # --------------------------------------------------------------------------- #
 def flat_cavity_polygon(spec: BoxSpec) -> Polygon:
@@ -1061,7 +1291,9 @@ def make_box(
         cavity.apply_translation((0.0, 0.0, spec.base_thickness))
     shell = difference([envelope, cavity])
     bumps = make_wall_lock_bumps(spec)
-    result = union([shell, *bumps]) if bumps else shell
+    grabbers = make_lift_grabbers(spec)
+    additions = [*bumps, *grabbers]
+    result = union([shell, *additions]) if additions else shell
     if getattr(getattr(spec, "stack", None), "enabled", False):
         # Imported here: organizer_stack builds on the engine, not the other way
         # round, so importing it at module scope would close a cycle.
