@@ -1154,6 +1154,22 @@ def _place_lift_grabber(
     return result
 
 
+def _lift_grabber_embed_depth(spec: BoxSpec) -> float:
+    """Maximum hidden root depth for a flat-faced lift grabber, measured
+    inward-negative from the nominal cavity face (see ``make_lift_grabbers``).
+
+    The grabber is anchored to that nominal face rather than following the
+    wave, but the exterior wall carries the same wave and can swing inward by
+    ``WAVE_AMPLITUDE`` at a trough - that amplitude has to be reserved ahead
+    of ``LOCK_SAFE_SKIN`` so a flat root can never break through the exterior
+    skin, on top of the ``WAVE_AMPLITUDE`` already reserved so the root
+    reaches past the cavity's own wave.  Shared by :func:`validate_lift_grabbers`
+    and :func:`make_lift_grabbers` so the two can never drift apart.
+    """
+    max_for_exterior_skin = spec.wall_depth - WAVE_AMPLITUDE - LOCK_SAFE_SKIN
+    return min(WAVE_AMPLITUDE + LOCK_EMBED, max_for_exterior_skin)
+
+
 def lift_grabber_min_wall() -> float:
     """Smallest wall thickness whose root bite meets ``LIFT_GRABBER_MIN_ROOT_BITE``.
 
@@ -1161,8 +1177,12 @@ def lift_grabber_min_wall() -> float:
     are switched on over a wall that would otherwise fail
     :func:`validate_lift_grabbers` - never forcing every grabber design to one
     fixed preset, and never touching a legacy wall that already clears it.
+
+    A flat root sits between two wavy boundaries, so the wall needs room for
+    both: the cavity's wave amplitude, the real required root bite, the
+    exterior wave's amplitude, and the exterior safety skin.
     """
-    wall_depth = WAVE_AMPLITUDE + LIFT_GRABBER_MIN_ROOT_BITE + LOCK_SAFE_SKIN
+    wall_depth = 2.0 * WAVE_AMPLITUDE + LIFT_GRABBER_MIN_ROOT_BITE + LOCK_SAFE_SKIN
     return wall_depth / math.sqrt(1.0 + max_wave_slope() ** 2)
 
 
@@ -1178,7 +1198,7 @@ def validate_lift_grabbers(box: BoxSpec) -> None:
     if getattr(getattr(box, "b4b", None), "enabled", False):
         return
     dims = grabbers.dimensions
-    embed = min(WAVE_AMPLITUDE + LOCK_EMBED, box.wall_depth - LOCK_SAFE_SKIN)
+    embed = _lift_grabber_embed_depth(box)
     root_bite = embed - WAVE_AMPLITUDE
     if root_bite < LIFT_GRABBER_MIN_ROOT_BITE - 1e-9:
         raise ValueError(
@@ -1222,12 +1242,12 @@ def make_lift_grabbers(spec: BoxSpec, rim_z: float | None = None) -> list[trimes
     dims = grabbers.dimensions
     rim = spec.z if rim_z is None else rim_z
     bottom_z = rim - LIFT_GRABBER_RIM_CLEARANCE - dims.height
-    # A grabber with a straight, non-wavy visible edge no longer tracks the
-    # wall's own surface, so its hidden root must reach past the wave's full
-    # amplitude (not just LOCK_EMBED's ordinary safety margin) to reliably
-    # find solid material at every point along its width - capped, as ever,
-    # well short of the exterior skin.
-    embed = min(WAVE_AMPLITUDE + LOCK_EMBED, spec.wall_depth - LOCK_SAFE_SKIN)
+    # The straight grabber root has two independent constraints: it must
+    # reach outward past the cavity's full wave amplitude so it stays fused
+    # to real wall material across its entire width, and it must stop
+    # inward of the exterior wave's worst-case trough by LOCK_SAFE_SKIN.
+    # _lift_grabber_embed_depth() owns that calculation.
+    embed = _lift_grabber_embed_depth(spec)
     local = _lift_grabber_bulge_mesh(dims, embed)
     faces = _wall_face_table(spec)
     return [

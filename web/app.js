@@ -742,9 +742,10 @@ function readLiftGrabberForm(design) {
 // Lift grabbers need a real bite into the wall, not just wave clearance on
 // paper - a very thin wall fails that check server-side. Rather than reject
 // the combination, bump the wall preset up to the first one that clears it
-// (normally Standard) whenever grabbers are switched on over too thin a
-// wall. A wall that already clears it - including a legacy value like
-// 0.6 mm - is left exactly as the user set it.
+// (normally Strong, since Standard's 0.8 mm is no longer enough) whenever
+// grabbers are switched on over too thin a wall. A wall that already clears
+// it - including a legacy value like 1.4 mm - is left exactly as the user
+// set it.
 function promoteWallForLiftGrabbers() {
   const select = $("#wall-thickness");
   if (!select) return;
