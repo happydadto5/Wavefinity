@@ -73,6 +73,7 @@ B4B_STACK_MIN_BASE = B4B_STACK_RECESS_DEPTH + B4B_MIN_FLOOR_SKIN
 B4B_STACK_BOSS_DIAMETER = 5.0
 B4B_STACK_FEMALE_RADIAL_CLEARANCE = 0.25
 B4B_STACK_SOCKET_DEPTH = 1.6
+B4B_STACK_SOCKET_MIN_SKIN = 0.8  # printable lid skin left beneath a stacking socket
 B4B_STACK_SOCKET_INTERFERENCE = 0.08
 B4B_STACK_INSET_FRACTION = 0.16  # locator centre inset from each outer edge
 B4B_STACK_INSET_MIN = 4.0
@@ -794,7 +795,10 @@ def b4b_lid_skin_from_eff(eff: BoxSpec) -> float:
     summary - reads this one helper so they cannot drift apart.
     """
     b4b = eff.b4b.normalised()
-    return B4B_SECURE_LID_SKIN if b4b.secure_lid else B4B_LID_SKIN
+    skin = B4B_SECURE_LID_SKIN if b4b.secure_lid else B4B_LID_SKIN
+    if b4b.stacking:
+        skin = max(skin, B4B_STACK_SOCKET_DEPTH + B4B_STACK_SOCKET_MIN_SKIN)
+    return skin
 
 
 def b4b_lid_skin(box: BoxSpec) -> float:
@@ -3204,6 +3208,17 @@ def validate_b4b_design(
             f"height; this design is {box.z:g} mm - use Lid Only or a taller "
             f"B4B"
         )
+
+    if b4b.lid and b4b.stacking:
+        eff = b4b_effective_box(box)
+        lid_skin = b4b_lid_skin_from_eff(eff)
+        remaining = lid_skin - B4B_STACK_SOCKET_DEPTH
+        if remaining + _EPS < B4B_STACK_SOCKET_MIN_SKIN:
+            raise ValueError(
+                f"the B4B lid skin ({lid_skin:g} mm) leaves only "
+                f"{remaining:.2f} mm beneath the {B4B_STACK_SOCKET_DEPTH:g} mm "
+                f"stacking socket (need {B4B_STACK_SOCKET_MIN_SKIN:g} mm)"
+            )
 
     cx, cy = b4b_capacity_units(box)
     if cx < 1 or cy < 1:

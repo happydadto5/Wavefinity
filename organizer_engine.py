@@ -262,6 +262,7 @@ TEXT_CAP_HEIGHT_MIN = 5.0      # auto letter height will shrink to here, no furt
 TEXT_CAP_HEIGHT_FLOOR = 5.0    # no text smaller than the readable automatic minimum
 TEXT_DEPTH = 0.4               # how deep the label is sunk into the floor,
                                # leaving DEFAULT_BASE_THICKNESS - TEXT_DEPTH beneath it
+TEXT_MIN_BACKING = 0.2         # minimum solid material a recessed label must leave behind it
 TEXT_MARGIN = 1.0              # clear space between the label and the cavity wall
 TEXT_FONT_FAMILY = "DejaVu Sans"
 TEXT_FONT_WEIGHT = "bold"
@@ -2182,6 +2183,25 @@ def placed_label_outline(
     return translate_polygon(outline, xoff=placement.x, yoff=placement.y)
 
 
+def require_text_backing(
+    surface_thickness: float, depth: float, what: str = "recessed text",
+) -> None:
+    """Reject a recessed label that would leave no material behind it.
+
+    Shared by the floor label, the general text feature and divider labels so
+    the same rule applies everywhere text is sunk into a surface rather than
+    stood proud on it.
+    """
+    remaining = surface_thickness - depth
+    if remaining < TEXT_MIN_BACKING - 1e-9:
+        raise ValueError(
+            f"{what} {depth:g} mm deep leaves only {remaining:.2f} mm behind it "
+            f"on a {surface_thickness:.2f} mm surface; needs at least "
+            f"{TEXT_MIN_BACKING:g} mm of backing. Make it shallower, thicken "
+            f"the surface, or stand it proud instead"
+        )
+
+
 def text_prism(
     outline: Polygon | MultiPolygon,
     top_z: float,
@@ -2225,8 +2245,7 @@ def make_floor_label(
     """
     outline = placed_label_outline(box, label, occupied)
     top_z = box.base_thickness if top_z is None else top_z
-    if top_z < TEXT_DEPTH:
-        raise ValueError(f"label depth {TEXT_DEPTH:g} mm exceeds its floor thickness")
+    require_text_backing(top_z, TEXT_DEPTH, what="floor label")
     return text_prism(outline, top_z)
 
 

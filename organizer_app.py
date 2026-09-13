@@ -164,6 +164,27 @@ def rim_label_side(value: str) -> str | None:
     return "back" if position == "top" else position
 
 
+def validate_stack_rim_label(box: BoxSpec, label: str, label_location: str) -> None:
+    """A rim label ledge and stacking geometry both need the same mouth.
+
+    The rim-label ledge occupies the top ``TOP_LABEL_LEDGE_DEPTH`` inside the
+    bin, and stacking geometry - lid or direct - has to enter that same
+    mouth. Shared by generation and preview so they can never disagree.
+    "bottom" (floor text) is not a rim label and is always compatible.
+    """
+    if not clean_label(label):
+        return
+    if rim_label_side(label_location) is None:
+        return
+    if stack_spec(box).mode == "none":
+        return
+    raise ValueError(
+        "a rim label (top/front/back/left/right) cannot be combined with "
+        "stacking - the label ledge and the stacking interface both need "
+        "the bin mouth. Remove the rim label or turn stacking off"
+    )
+
+
 # --- guided part palette ---------------------------------------------------
 #
 # Compatibility views for existing CLI/browser callers. Their source of truth
@@ -712,6 +733,7 @@ def preview_geometry(
     if rim_feature is not None:
         label = text_of(rim_feature)
         label_location = str(rim_feature.options.get("rim_side", "back"))
+    validate_stack_rim_label(box, label, label_location)
 
     features = resolve_text_features(
         box, features,
@@ -1104,10 +1126,12 @@ def generate_b4b_files(
         "hardware_bom": summary.get("hardware_bom", []),
     }
     if keep_log:
+        envelope = summary["assembled_envelope_mm"]
         log_file = log_bin_to_folder(
             output_dir, b4b_effective_box(box), Layout((), "fused", EDITOR_SNAP),
             generated_files=[target], label="", part_name=part_name,
             b4b_note=_b4b_log_note(summary),
+            physical_size_mm=(envelope[0], envelope[1], envelope[2]),
         )
         result["log_file"] = str(log_file)
     return result
@@ -1186,6 +1210,7 @@ def generate_organizer_files(
     if rim_feature is not None:
         label = text_of(rim_feature)
         label_location = str(rim_feature.options.get("rim_side", "back"))
+    validate_stack_rim_label(stack_request, label, label_location)
     layout = replace(
         layout,
         features=resolve_text_features(
@@ -1387,10 +1412,21 @@ def inventory_bin_record(
     part_name: str = "",
     scoop: bool = False,
     b4b_note: str = "",
+    physical_size_mm: tuple[float, float, float] | None = None,
 ) -> dict[str, object]:
-    """Build the one inventory row used by local and browser-owned folders."""
+    """Build the one inventory row used by local and browser-owned folders.
+
+    ``physical_size_mm`` lets a caller override the printed physical
+    footprint reported for space/drawer planning - a B4B case's real
+    assembled envelope, not its child-bin field - without touching ``box``.
+    Ordinary bins continue using ``box.x/y/z`` when no override is supplied.
+    """
     if box.b4b.enabled and not b4b_note:
-        b4b_note = _b4b_log_note(b4b_summary(box))
+        b4b_summary_data = b4b_summary(box)
+        b4b_note = _b4b_log_note(b4b_summary_data)
+        if physical_size_mm is None:
+            envelope = b4b_summary_data["assembled_envelope_mm"]
+            physical_size_mm = (envelope[0], envelope[1], envelope[2])
         box = b4b_effective_box(box)
         layout = Layout((), "fused", EDITOR_SNAP)
     if generated_files:
@@ -1415,9 +1451,14 @@ def inventory_bin_record(
 
     interior_text = b4b_note or summarize_interior_parts(layout, scoop=scoop)
 
+    if physical_size_mm is not None:
+        phys_x, phys_y, phys_z = physical_size_mm
+    else:
+        phys_x, phys_y, phys_z = box.x, box.y, box.z
+
     return {
         "file": file_names,
-        "x": box.x, "y": box.y, "z": box.z,
+        "x": phys_x, "y": phys_y, "z": phys_z,
         "label": "" if label_text == "-" else label_text,
         "interior": interior_text,
         "name": clean_label(part_name) or tidy_label or (floor_texts[0] if floor_texts else ""),
@@ -1435,10 +1476,12 @@ def log_bin_to_folder(
     part_name: str = "",
     scoop: bool = False,
     b4b_note: str = "",
+    physical_size_mm: tuple[float, float, float] | None = None,
 ) -> Path:
     """Record a generated bin in the save folder's inventory."""
     return append_bin(output_dir, **inventory_bin_record(
         box, layout, generated_files, label, part_name, scoop, b4b_note,
+        physical_size_mm,
     ))
 
 

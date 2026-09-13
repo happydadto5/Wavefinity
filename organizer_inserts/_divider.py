@@ -6,9 +6,10 @@ import trimesh
 from shapely import affinity
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 from organizer_engine import (
-    BoxSpec, TOP_LABEL_CAP_HEIGHT, TOP_LABEL_LEDGE_DEPTH, TOP_LABEL_MARGIN,
-    WAVE_AMPLITUDE, _rounded, flat_cavity_polygon, text_outline, text_prism,
-    wavy_cavity_polygon, build_scoop_region,
+    BoxSpec, TEXT_DEPTH, TOP_LABEL_CAP_HEIGHT, TOP_LABEL_LEDGE_DEPTH,
+    TOP_LABEL_MARGIN, WAVE_AMPLITUDE, _rounded, flat_cavity_polygon,
+    require_text_backing, text_outline, text_prism, wavy_cavity_polygon,
+    build_scoop_region,
 )
 from organizer_geometry import (
     _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile,
@@ -43,7 +44,7 @@ BOTTOM_EMBED = 0.4
 BOTTOM_CROSSBAR_THICKNESS = 2.4
 BOTTOM_CROSSBAR_CHAMFER = 1.0
 RIB_THICKNESS = 1.6
-DIVISION_TEXT_DEPTH = 0.6
+DIVISION_TEXT_DEPTH = TEXT_DEPTH
 # Clear gap kept between a base-level (floor) division label and whatever bounds
 # its compartment - a divider wall face, or the bin's own wall. The bin side
 # includes the wave's inward swing so a full-span divider's label still clears
@@ -554,6 +555,7 @@ def _divider_grid_texts(
         outline = affinity.translate(
             outline, xoff=(x0 + x1) / 2.0, yoff=(y0 + y1) / 2.0
         )
+        require_text_backing(z, DIVISION_TEXT_DEPTH, what="division label")
         try:
             solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH)
         except Exception:
@@ -926,6 +928,7 @@ def divider_division_texts(
         cy = (label_y0 + label_y1) / 2.0
         outline = affinity.translate(outline, xoff=cx, yoff=cy)
 
+        require_text_backing(z, DIVISION_TEXT_DEPTH, what="division label")
         try:
             solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH)
             results.append((text, solid, False))

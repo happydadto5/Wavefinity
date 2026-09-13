@@ -5,7 +5,10 @@ from dataclasses import replace
 import trimesh
 from shapely import affinity
 from shapely.geometry import Polygon
-from organizer_engine import BoxSpec, TEXT_CAP_HEIGHT_FLOOR, TEXT_CAP_HEIGHT_IDEAL, TEXT_DEPTH, text_outline, text_prism
+from organizer_engine import (
+    BoxSpec, TEXT_CAP_HEIGHT_FLOOR, TEXT_CAP_HEIGHT_IDEAL, TEXT_DEPTH,
+    require_text_backing, text_outline, text_prism,
+)
 from ._core import EDITOR_SNAP, Feature, Zone, layout_zone, snapped_zone
 from ._registry import (
     OPTION_TYPES, OptionDefinition, SettingInteraction, defaults, feature,
@@ -155,12 +158,8 @@ def build_text(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     raised = text_is_raised(spec_feature)
     if depth <= 0.0:
         raise ValueError("text depth must be positive")
-    if not raised and depth > base_z + 1e-9:
-        raise ValueError(
-            f"sunk text {depth:g} mm deep needs {depth:g} mm of floor beneath it; "
-            f"this one has {base_z:.2f} mm. Make it shallower, thicken the base, "
-            f"or set it to stand proud instead"
-        )
+    if not raised:
+        require_text_backing(base_z, depth, what="sunk text")
     if raised and base_z + depth > box.z + 1e-9:
         raise ValueError("raised text must stay inside the bin")
     return [text_prism(outline, base_z, depth, raised)]
