@@ -172,6 +172,36 @@ class FolderMigrationTests(unittest.TestCase):
                         routes["/api/folder/use"]({"output": str(folder)})
                     self.assertEqual(metadata.read_bytes(), before)
 
+    def test_bad_recent_folder_is_isolated_and_does_not_replace_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            good = Path(tmp) / "Good"
+            bad = Path(tmp) / "Bad"
+            bad.mkdir()
+            metadata = bad / ".wavefinity.json"
+            metadata.write_text('{"version":99,"folder_mode":"design"}', encoding="utf-8")
+            before = metadata.read_bytes()
+            prefs = {
+                "output": str(Path(tmp) / "Original"),
+                "recent_folders": [{"folder": str(bad), "name": "Broken folder"}],
+            }
+            routes, prefs = self.routes(tmp, prefs)
+
+            result = routes["/api/folder/use"]({"output": str(good)})
+            broken = next(one for one in result["recent"] if one["folder"] == str(bad))
+            self.assertTrue(broken["invalid"])
+            self.assertEqual(result["folder"]["folder"], str(good.resolve()))
+            self.assertEqual(metadata.read_bytes(), before)
+
+            saved_output = prefs["output"]
+            with self.assertRaises(FolderMetadataError):
+                routes["/api/space/open"]({"output": str(bad)})
+            self.assertEqual(prefs["output"], saved_output)
+            self.assertEqual(metadata.read_bytes(), before)
+
+            result = routes["/api/space/forget"]({"output": str(bad)})
+            self.assertFalse(any(one["folder"] == str(bad) for one in result["recent"]))
+            self.assertEqual(metadata.read_bytes(), before)
+
 
 class AutoLayoutTests(unittest.TestCase):
     def test_everything_fits_without_overlap_and_tall_bins_stand_behind(self):

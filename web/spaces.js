@@ -305,13 +305,14 @@ SP.renderRecent = () => {
     return;
   }
   list.innerHTML = SP.recent.map((one, index) => {
+    const unavailable = one.missing || one.invalid;
     const space = one.folder_mode === "space";
     const kind = SP_KINDS[one.kind];
-    const meta = [space ? `${kind?.label || "Space"} · SPACE` : "Design folder", SP.sizeText(one.size), one.missing ? "folder not found" : ""]
+    const meta = [one.invalid ? "metadata unavailable" : space ? `${kind?.label || "Space"} · SPACE` : "Design folder", SP.sizeText(one.size), one.missing ? "folder not found" : ""]
       .filter(Boolean).join(" · ");
     const current = spSame(one.folder, state.output) ? " <em>current</em>" : "";
-    return `<li class="welcome-recent-item${one.missing ? " missing" : ""}">
-      <button type="button" class="welcome-recent-open" data-index="${index}" title="${escapeHtml(one.folder)}"${one.missing ? " disabled" : ""}>
+    return `<li class="welcome-recent-item${unavailable ? " missing" : ""}">
+      <button type="button" class="welcome-recent-open" data-index="${index}" title="${escapeHtml(one.folder)}"${unavailable ? " disabled" : ""}>
         <span class="welcome-recent-icon" aria-hidden="true">${space ? kind?.icon || "📦" : "📁"}</span>
         <span class="welcome-recent-text"><span><strong>${escapeHtml(one.name)}</strong>${current}</span>
           <small>${escapeHtml(meta)}</small><small>${escapeHtml(one.folder)}</small></span>

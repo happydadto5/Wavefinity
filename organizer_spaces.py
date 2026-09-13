@@ -197,11 +197,24 @@ def space_routes(
         saved = prefs.get("recent_folders")
         if not isinstance(saved, list):
             saved = prefs.get("recent_spaces") or []
-        return [
-            _recent_entry(describe(Path(one["folder"]), prefs))
-            for one in saved
-            if isinstance(one, dict) and one.get("folder")
-        ]
+        entries = []
+        for one in saved:
+            if not isinstance(one, dict) or not one.get("folder"):
+                continue
+            target = Path(one["folder"])
+            try:
+                entries.append(_recent_entry(describe(target, prefs)))
+            except FolderMetadataError:
+                entries.append({
+                    "folder": str(target),
+                    "name": one.get("name") or target.name,
+                    "folder_mode": one.get("folder_mode"),
+                    "kind": one.get("kind"),
+                    "size": one.get("size"),
+                    "missing": not target.is_dir(),
+                    "invalid": True,
+                })
+        return entries
 
     def reply(target: Path | None) -> dict[str, Any]:
         prefs = load_preferences()
@@ -213,8 +226,9 @@ def space_routes(
         }
 
     def remember(target: Path) -> None:
-        prefs = save_preferences({"output": str(target)})
+        prefs = load_preferences()
         info = describe(target, prefs, migrate=True)
+        prefs = save_preferences({"output": str(target)})
         saved = prefs.get("recent_folders")
         if not isinstance(saved, list):
             saved = prefs.get("recent_spaces") or []
