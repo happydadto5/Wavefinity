@@ -259,6 +259,8 @@ input[type="number"]::-webkit-inner-spin-button {
 .draft-fields .division-grid { table-layout: fixed; }
 .draft-fields .division-grid td { width: auto; font-weight: 400; font-size: inherit; color: inherit; text-align: left; padding: 3px 3px 3px 0; }
 .draft-fields .division-grid td:first-child { width: auto; text-align: left; padding-right: 3px; }
+.draft-fields div.division-grid { display: grid; grid-template-columns: repeat(var(--division-columns), minmax(0, 1fr)); grid-template-rows: repeat(var(--division-rows), minmax(36px, auto)); gap: 3px; }
+.draft-fields div.division-grid input { min-width: 0; height: 100%; }
 /* Bore editor: a bold heading on the left, its fields wrapping on the right.
    The heading shares the field-label font metrics so its text top sits level
    with the top of the first field's label ("Width" / "Diameter"). */
@@ -455,6 +457,9 @@ input[type="number"]::-webkit-inner-spin-button {
    unavailable it falls back to painting everything itself instead. */
 #preview-3d-solid { position: absolute; inset: 0; pointer-events: none; }
 #preview-3d { position: relative; background: transparent; }
+.divider-edit-breadcrumb { position: absolute; top: 16px; right: 16px; z-index: 2; border: 1px solid var(--line); border-radius: 999px; padding: 7px 11px; background: rgba(255,255,255,.94); color: var(--teal-dark); box-shadow: 0 1px 5px rgba(20,48,58,.12); cursor: pointer; font-size: 11px; font-weight: 700; }
+.divider-edit-breadcrumb:hover, .divider-edit-breadcrumb:focus-visible { border-color: var(--teal); background: var(--teal-soft); }
+.divider-edit-breadcrumb[hidden] { display: none; }
 .canvas-wrap.preview-recalculating #preview-3d,
 .canvas-wrap.preview-recalculating #preview-3d-solid { opacity: .88; }
 .preview-wait {

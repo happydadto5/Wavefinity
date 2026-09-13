@@ -21,6 +21,8 @@ from ._divider_cells import (
     _even_centres,
     divider_cells,
     divider_grid_counts,
+    divider_grid_edges,
+    divider_owner_matrix,
     divider_scoop_targets,
     normalize_divider_scoop,
 )
@@ -139,6 +141,7 @@ def _divider_scoops(
         OptionDefinition("Division level", "division_level", "base", "enum", False),
         OptionDefinition("Division side", "division_side", "back", "enum", False),
         OptionDefinition("Division labels", "division_labels", (), "json", False),
+        OptionDefinition("Compartment spans", "compartment_spans", (), "json", False),
         OptionDefinition("Compartment Scoop", "scoop", {}, "json", False),
     ), order=60,
 )
@@ -226,6 +229,11 @@ def _build_divider_grid(
     angle = float(options.get("angle", 0.0) or 0.0)
     if thickness <= 0.0 or height <= 0.0 or base_z + height > box.z + 1e-9:
         raise ValueError("divider thickness and height must fit inside the bin")
+    if options.get("compartment_spans"):
+        return _build_custom_divider_grid(
+            box, spec_feature, base_z, options, grid_x, grid_y,
+            thickness, height, angle,
+        )
     full_span = spec_feature.full_span
     solids: list[trimesh.Trimesh] = []
     # Walls that divide X run along Y; walls that divide Y run along X.
@@ -259,6 +267,117 @@ def _build_divider_grid(
     # divider's own solids. A base-level label is a floor inlay left for
     # build_texts/apply_texts to cut and write as its own object.
     for _label, text_solid, raised in divider_division_texts(box, spec_feature, base_z):
+        if raised:
+            solids.append(text_solid)
+    return solids
+
+
+def _wall_runs(present: list[bool], edges: list[float]) -> list[tuple[float, float]]:
+    """Combine adjacent surviving atomic wall segments into long runs."""
+    runs: list[tuple[float, float]] = []
+    start: int | None = None
+    for index, survives in enumerate([*present, False]):
+        if survives and start is None:
+            start = index
+        elif not survives and start is not None:
+            runs.append((edges[start], edges[index]))
+            start = None
+    return runs
+
+
+def _clip_wall_to_runs(
+    walls: list[trimesh.Trimesh], along: str,
+    runs: list[tuple[float, float]], outer_bounds: tuple[float, float],
+) -> list[trimesh.Trimesh]:
+    """Clip an established full-span wall to its surviving run intervals."""
+    pieces: list[trimesh.Trimesh] = []
+    for wall in walls:
+        bounds = wall.bounds
+        for lo, hi in runs:
+            clip_lo = bounds[0].copy() - 0.5
+            clip_hi = bounds[1].copy() + 0.5
+            axis = 0 if along == "x" else 1
+            clip_lo[axis] = bounds[0][axis] - 0.5 if math.isclose(lo, outer_bounds[0]) else lo
+            clip_hi[axis] = bounds[1][axis] + 0.5 if math.isclose(hi, outer_bounds[1]) else hi
+            extents = clip_hi - clip_lo
+            if any(value <= 0.0 for value in extents):
+                continue
+            clip = trimesh.creation.box(extents=extents)
+            clip.apply_translation((clip_lo + clip_hi) / 2.0)
+            piece = intersection([wall.copy(), clip])
+            if piece.faces.shape[0]:
+                pieces.append(piece)
+    return pieces
+
+
+def _custom_grid_wall(
+    box: BoxSpec, spec_feature: Feature, along: str, centre: float,
+    runs: list[tuple[float, float]], thickness: float, height: float,
+    angle: float, base_z: float,
+) -> list[trimesh.Trimesh]:
+    """Build one original grid line, retaining only its surviving runs."""
+    if not runs:
+        return []
+    if spec_feature.full_span:
+        whole = _one_grid_wall(
+            box, spec_feature, along, centre, thickness, height, angle,
+            base_z, True,
+        )
+        outer_bounds = (
+            (spec_feature.zone.x0, spec_feature.zone.x1)
+            if along == "x" else
+            (spec_feature.zone.y0, spec_feature.zone.y1)
+        )
+        return _clip_wall_to_runs(whole, along, runs, outer_bounds)
+
+    half_t = thickness / 2.0
+    solids: list[trimesh.Trimesh] = []
+    for lo, hi in runs:
+        wall_zone = (
+            Zone(lo, centre - half_t, hi, centre + half_t)
+            if along == "x" else
+            Zone(centre - half_t, lo, centre + half_t, hi)
+        )
+        one = replace(spec_feature, zone=wall_zone, along=along)
+        solids.extend(_divider_wall(box, one, thickness, height, angle, base_z))
+    return solids
+
+
+def _build_custom_divider_grid(
+    box: BoxSpec, spec_feature: Feature, base_z: float, options: dict,
+    grid_x: int, grid_y: int, thickness: float, height: float, angle: float,
+) -> list[trimesh.Trimesh]:
+    """Build only boundaries between the saved logical rectangles."""
+    cells = divider_cells(box, spec_feature, base_z)
+    rows, columns = grid_y + 1, grid_x + 1
+    owner = divider_owner_matrix(cells, rows, columns)
+    x_edges, y_edges = divider_grid_edges(spec_feature.zone, grid_x, grid_y)
+    solids: list[trimesh.Trimesh] = []
+
+    for line in range(1, columns):
+        runs = _wall_runs([
+            owner[row][line - 1] != owner[row][line] for row in range(rows)
+        ], y_edges)
+        solids.extend(_custom_grid_wall(
+            box, spec_feature, "y", x_edges[line], runs,
+            thickness, height, angle, base_z,
+        ))
+    for line in range(1, rows):
+        runs = _wall_runs([
+            owner[line - 1][column] != owner[line][column]
+            for column in range(columns)
+        ], x_edges)
+        solids.extend(_custom_grid_wall(
+            box, spec_feature, "x", y_edges[line], runs,
+            thickness, height, angle, base_z,
+        ))
+
+    solids.extend(_custom_divider_sloped_bottoms(
+        box, spec_feature, options, cells, rows, columns, height, base_z,
+    ))
+    for _label, text_solid, raised in divider_division_texts(
+        box, spec_feature, base_z,
+    ):
         if raised:
             solids.append(text_solid)
     return solids
@@ -319,6 +438,60 @@ def _divider_sloped_bottoms(
     return solids
 
 
+def _custom_divider_sloped_bottoms(
+    box: BoxSpec, spec_feature: Feature, options: dict,
+    cells: tuple[DividerCell, ...], rows: int, columns: int,
+    height: float, base_z: float,
+) -> list[trimesh.Trimesh]:
+    """Give each logical rectangle one slope with only its real edge supports."""
+    angle = float(options.get("bottom_angle", 0.0) or 0.0)
+    if angle == 0.0 and _option_flag(options.get("slope_base")):
+        if spec_feature.options.get("bottom_angle") in (None, ""):
+            angle = 20.0
+    if not angle:
+        return []
+    raw_supports = options.get("bottom_supports", 3)
+    supports = int(round(float(raw_supports))) if raw_supports not in (None, "") else 3
+    reverse = _option_flag(options.get("reverse_bottom"))
+    alternate = _option_flag(options.get("alternate_bottom"))
+    minimal = _option_flag(options.get("minimal_bottom"))
+    along = spec_feature.along if spec_feature.along in ("x", "y") else "x"
+    x_edges, y_edges = divider_grid_edges(spec_feature.zone, columns - 1, rows - 1)
+    solids: list[trimesh.Trimesh] = []
+    for index, cell in enumerate(cells):
+        slope_zone = Zone(
+            x_edges[cell.column], y_edges[cell.row],
+            x_edges[cell.column_end], y_edges[cell.row_end],
+        )
+        if along == "x":
+            edge_walls = (
+                cell.row > 0 or spec_feature.full_span,
+                cell.row_end < rows or spec_feature.full_span,
+            )
+            wall_extensions = (
+                cell.row == 0 and spec_feature.full_span,
+                cell.row_end == rows and spec_feature.full_span,
+            )
+        else:
+            edge_walls = (
+                cell.column > 0 or spec_feature.full_span,
+                cell.column_end < columns or spec_feature.full_span,
+            )
+            wall_extensions = (
+                cell.column == 0 and spec_feature.full_span,
+                cell.column_end == columns and spec_feature.full_span,
+            )
+        pieces = _divider_support_bottoms(
+            box, slope_zone, along, [], height, base_z, angle,
+            reverse ^ (alternate and index % 2 == 1), False, minimal,
+            supports, False, None, edge_walls, wall_extensions,
+        )
+        for solid in pieces:
+            solid.metadata["wavefinity_preview_kind"] = "slope"
+        solids.extend(pieces)
+    return solids
+
+
 def _bottom_slot_bounds(
     zone: Zone, along: str, centres: Iterable[float],
 ) -> list[tuple[float, float]]:
@@ -344,60 +517,48 @@ def _divider_grid_texts(
     corner: cell ``(row, col)`` takes ``labels[row * (grid_x + 1) + col]``.
     """
     options = spec_feature.options or {}
-    zone = spec_feature.zone
-    thickness = float(options.get("thickness", RIB_THICKNESS) or RIB_THICKNESS)
-    height = float(options.get("height", connector_keep_out(box) - base_z)
-                   or (connector_keep_out(box) - base_z))
-    x_edges = [zone.x0, *_even_centres(zone.x0, zone.x1, grid_x), zone.x1]
-    y_edges = [zone.y0, *_even_centres(zone.y0, zone.y1, grid_y), zone.y1]
-    n_cols, n_rows = len(x_edges) - 1, len(y_edges) - 1
+    n_cols = grid_x + 1
     level = str(options.get("division_level", "base")).strip().lower()
     if level == "rim":
         return _divider_grid_rim_texts(box, spec_feature, base_z, labels)
     z = base_z
 
     results: list[tuple[str, trimesh.Trimesh, bool]] = []
-    for row in range(n_rows):
-        for col in range(n_cols):
-            idx = row * n_cols + col
-            if idx >= len(labels):
-                continue
-            text = str(labels[idx] or "").strip()
-            if not text:
-                continue
-            x0 = x_edges[col] + (0.0 if col == 0 else thickness / 2.0) + DIVISION_TEXT_MARGIN
-            x1 = x_edges[col + 1] - (0.0 if col == n_cols - 1 else thickness / 2.0) - DIVISION_TEXT_MARGIN
-            y0 = y_edges[row] + (0.0 if row == 0 else thickness / 2.0) + DIVISION_TEXT_MARGIN
-            y1 = y_edges[row + 1] - (0.0 if row == n_rows - 1 else thickness / 2.0) - DIVISION_TEXT_MARGIN
-            if level == "base" and isinstance(options.get("scoop"), dict):
-                # Every Divider Scoop occupies the low-Y half (or less) of its
-                # compartment. Keep floor lettering wholly in the guaranteed
-                # untouched high-Y band.
-                y0 = (y0 + y1) / 2.0
-            cell_w, cell_d = max(1.0, x1 - x0), max(1.0, y1 - y0)
-            try:
-                probe = text_outline(text, 10.0)
-            except Exception:
-                continue
-            bx0, by0, bx1, by1 = probe.bounds
-            pw, ph = bx1 - bx0, by1 - by0
-            if pw <= 0 or ph <= 0:
-                continue
-            avail_w = max(0.5, cell_w - 0.4)
-            avail_d = max(0.5, cell_d - 0.4)
-            cap = max(2.5, min(avail_d, avail_w / (pw / 10.0)))
-            try:
-                outline = text_outline(text, cap)
-            except Exception:
-                continue
-            outline = affinity.translate(
-                outline, xoff=(x0 + x1) / 2.0, yoff=(y0 + y1) / 2.0
-            )
-            try:
-                solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH)
-            except Exception:
-                continue
-            results.append((text, solid, False))
+    for cell in divider_cells(box, spec_feature, base_z):
+        idx = cell.row * n_cols + cell.column
+        if idx >= len(labels):
+            continue
+        text = str(labels[idx] or "").strip()
+        if not text:
+            continue
+        x0, x1 = cell.zone.x0 + DIVISION_TEXT_MARGIN, cell.zone.x1 - DIVISION_TEXT_MARGIN
+        y0, y1 = cell.zone.y0 + DIVISION_TEXT_MARGIN, cell.zone.y1 - DIVISION_TEXT_MARGIN
+        if level == "base" and isinstance(options.get("scoop"), dict):
+            y0 = (y0 + y1) / 2.0
+        cell_w, cell_d = max(1.0, x1 - x0), max(1.0, y1 - y0)
+        try:
+            probe = text_outline(text, 10.0)
+        except Exception:
+            continue
+        bx0, by0, bx1, by1 = probe.bounds
+        pw, ph = bx1 - bx0, by1 - by0
+        if pw <= 0 or ph <= 0:
+            continue
+        avail_w = max(0.5, cell_w - 0.4)
+        avail_d = max(0.5, cell_d - 0.4)
+        cap = max(2.5, min(avail_d, avail_w / (pw / 10.0)))
+        try:
+            outline = text_outline(text, cap)
+        except Exception:
+            continue
+        outline = affinity.translate(
+            outline, xoff=(x0 + x1) / 2.0, yoff=(y0 + y1) / 2.0
+        )
+        try:
+            solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH)
+        except Exception:
+            continue
+        results.append((text, solid, False))
     return results
 
 
@@ -457,10 +618,12 @@ def _divider_grid_rim_texts(
 
     picked: list[tuple[str, DividerCell, float]] = []
     shared_cap = DIVISION_CAP_MAX
-    for idx, cell in enumerate(cells):
-        if idx >= len(labels):
-            break
-        text = str(labels[idx] or "").strip()
+    grid_x, _grid_y = divider_grid_counts(options)
+    for cell in cells:
+        label_index = cell.row * (grid_x + 1) + cell.column
+        if label_index >= len(labels):
+            continue
+        text = str(labels[label_index] or "").strip()
         if not text:
             continue
         across = cell.zone.depth if side in ("top", "bottom") else cell.zone.width
@@ -808,6 +971,8 @@ def _divider_support_bottoms(
     base_z: float, angle: float, reverse: bool, alternate: bool,
     minimal: bool, supports: int, full_span: bool = False,
     run_splits: list[float] | None = None,
+    cross_edge_walls: tuple[bool, bool] | None = None,
+    cross_wall_extensions: tuple[bool, bool] | None = None,
 ) -> list[trimesh.Trimesh]:
     """Sloped support under each tool slot so a tool rests tilted, not flat.
 
@@ -889,11 +1054,19 @@ def _divider_support_bottoms(
             # bin's); a bare-floor divider's outermost slot has an open end.
             lo_is_edge = math.isclose(c_lo, edge_lo, abs_tol=1e-6)
             hi_is_edge = math.isclose(c_hi, edge_hi, abs_tol=1e-6)
-            floating = full_span or (not lo_is_edge and not hi_is_edge)
+            if cross_edge_walls is None:
+                lo_has_wall = full_span or not lo_is_edge
+                hi_has_wall = full_span or not hi_is_edge
+            else:
+                lo_has_wall, hi_has_wall = cross_edge_walls
+            floating = lo_has_wall and hi_has_wall
             # Weld a floating crossbar into the bin's side wall where the slot
             # ends at the zone edge instead of at a divider wall.
-            span_lo = -wall_line if (lo_is_edge and full_span) else c_lo
-            span_hi = wall_line if (hi_is_edge and full_span) else c_hi
+            extend_lo, extend_hi = cross_wall_extensions or (
+                lo_is_edge and full_span, hi_is_edge and full_span,
+            )
+            span_lo = -wall_line if extend_lo else c_lo
+            span_hi = wall_line if extend_hi else c_hi
             span_mid = (span_lo + span_hi) / 2.0
             half_span = (span_hi - span_lo) / 2.0
             for step in range(supports):

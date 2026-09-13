@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-13 — Rectangular Divider compartment merging
+
+- Divider grids can now combine and restore individual boundaries in the 2D editor.
+- Every resulting compartment stays rectangular; printed walls, scoops, slopes and division labels follow the merged layout.
+
 ## 2026-09-13 — Design folders with optional Space planning
 
 - Choosing a save folder now starts normal bin and storage-box design without

@@ -70,6 +70,9 @@ const state = {
   layoutDimensionHandles: [],
   dimensionDrag: null,
   dimensionHover: null,
+  dividerSegmentHits: [],
+  dividerSegmentHover: null,
+  dividerTopologyBusy: false,
   // The 2D layout normally uses the same heading as the 3D camera.  Users can
   // instead pin it to the conventional top-up plan view.
   layoutOrientation: "match3d",
@@ -1353,7 +1356,11 @@ async function showLog() {
 function updateNudgeUI() {
   const el = $("#layout-help");
   if (!el) return;
-  if (state.nudgeFeedback) {
+  if (state.dividerSegmentHover?.action === "blocked") {
+    el.textContent = "That merge would make an irregular compartment. Compartments must stay rectangular.";
+  } else if (state.dividerSegmentHits.length) {
+    el.textContent = "Click a divider segment to combine compartments. Click a dashed segment to restore it. Compartments stay rectangular.";
+  } else if (state.nudgeFeedback) {
     el.innerHTML = `<strong>Moved ${state.nudgeFeedback.amount}</strong> &nbsp;·&nbsp; Arrow: 1 mm | Shift: 10 mm | Ctrl: 0.1 mm`;
   } else {
     el.textContent = "Use Arrow keys or drag to move";
@@ -1606,6 +1613,32 @@ function setLayoutOrientation(orientation) {
   renderLayout2D();
 }
 
+function eligibleGridDividerIndexes() {
+  if (!state.design?.layout?.features || b4bEnabled()) return [];
+  return state.design.layout.features
+    .map((feature, index) => dividerEligibleClient(
+      index === state.selected && state.draft?.kind === "divider" ? state.draft : feature,
+    ) ? index : null)
+    .filter(Number.isInteger);
+}
+
+function updateDividerEditBreadcrumb() {
+  const button = $("#divider-edit-breadcrumb");
+  if (!button) return;
+  const in3d = $('.canvas-wrap[data-canvas="3d"]')?.classList.contains("active");
+  button.hidden = !in3d || eligibleGridDividerIndexes().length === 0;
+}
+
+async function openDividerSegmentEditor() {
+  const eligible = eligibleGridDividerIndexes();
+  if (!eligible.length) return;
+  const index = eligible.includes(state.selected) ? state.selected : eligible[0];
+  if (state.selected !== index) await selectedFeature(index);
+  if (state.selected !== index || state.draft?.kind !== "divider") return;
+  activatePreviewView("2d");
+  renderLayout2D();
+}
+
 function activatePreviewView(view) {
   if (view === "drawer" && state.folderMode !== "space") {
     if (typeof SP !== "undefined") SP.offerSpacePlanning();
@@ -1629,6 +1662,7 @@ function activatePreviewView(view) {
   void canvasWrap.offsetWidth;
   canvasWrap.classList.add("view-enter");
   updatePreviewHelp(view);
+  updateDividerEditBreadcrumb();
   if (view === "2d") updateNudgeUI();
   requestAnimationFrame(() => view === "3d" ? renderPreview3D() : renderLayout2D());
 }
@@ -1638,6 +1672,7 @@ function wireControls() {
   wireCameraControls();
   $("#layout-orientation").addEventListener("change",
     event => setLayoutOrientation(event.target.value));
+  $("#divider-edit-breadcrumb")?.addEventListener("click", openDividerSegmentEditor);
   $$("button.section-heading").forEach(button => button.addEventListener("click", () => {
     const section = button.closest(".control-section");
     section.classList.toggle("open");
@@ -2628,17 +2663,14 @@ function renderDraftFields() {
         }
       }
 
-      html += `<table class="division-table division-grid">`;
-      for (let r = 0; r < nRows; r++) {
-        html += `<tr>`;
-        for (let c = 0; c < nCols; c++) {
-          const idx = r * nCols + c;
-          const val = escapeHtml(String(divLabels[idx] || ""));
-          html += `<td><input type="text" data-division-index="${idx}" value="${val}"></td>`;
-        }
-        html += `</tr>`;
+      const topology = dividerCompartmentsClient(one);
+      html += `<div class="division-table division-grid" style="--division-columns:${nCols};--division-rows:${nRows}">`;
+      for (const cell of topology.cells) {
+        const idx = cell.row * nCols + cell.column;
+        const val = escapeHtml(String(divLabels[idx] || ""));
+        html += `<input type="text" data-division-index="${idx}" value="${val}" style="grid-column:${cell.column + 1} / span ${cell.columnSpan};grid-row:${cell.row + 1} / span ${cell.rowSpan}">`;
       }
-      html += `</table>`;
+      html += `</div>`;
     }
   }
   // The auto-size buttons sit at the very bottom of the editor.
@@ -3365,6 +3397,8 @@ function updateDraftFromFields(event) {
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
     const option = info.fields.find(entry => entry.key === key);
+    const previousGridCount = info.kind === "divider" && (key === "count_x" || key === "count_y")
+      ? Math.max(0, Math.round(number(one.options?.[key], 0))) : null;
     const raw = String(get(changed) ?? "").trim();
     if (raw === "") delete one.options[key];
     else {
@@ -3412,6 +3446,12 @@ function updateDraftFromFields(event) {
         one.options.count_x = Math.max(0, Math.round(number(one.options.count_x, 0)));
         one.options.count_y = Math.max(0, Math.round(number(one.options.count_y, 0)));
         one.count = null;
+      }
+      const nextGridCount = Math.max(0, Math.round(number(one.options[key], 0)));
+      if (previousGridCount !== nextGridCount && one.options.compartment_spans?.length) {
+        delete one.options.compartment_spans;
+        state.dividerSegmentHover = null;
+        toast("Custom compartment merges reset because the divider grid changed.");
       }
     }
     if (info.kind === "pocket" && key === "wall") {
@@ -4024,6 +4064,7 @@ function renderPlaced() {
       && !state.paletteBrowsing) {
     selectedFeature(0);
   }
+  updateDividerEditBreadcrumb();
 }
 
 function clearPreviewWaitTimers() {
@@ -5922,6 +5963,192 @@ function renderLayoutText(context, feature, toCanvas, scale, isDraft = false) {
   context.restore();
 }
 
+function dividerGridCountsClient(feature) {
+  const opt = feature?.options || {};
+  const along = feature?.along || "x";
+  const legacy = feature?.count == null ? 1 : Math.max(1, Math.round(number(feature.count, 1)));
+  let gx = number(opt.count_x, NaN);
+  if (!Number.isFinite(gx)) gx = along === "y" ? legacy : 0;
+  let gy = number(opt.count_y, NaN);
+  if (!Number.isFinite(gy)) gy = along === "x" ? legacy : 0;
+  return [Math.max(0, Math.round(gx)), Math.max(0, Math.round(gy))];
+}
+
+function dividerEligibleClient(feature) {
+  if (feature?.kind !== "divider") return false;
+  const [gx, gy] = dividerGridCountsClient(feature);
+  return gx > 1 || gy > 1 || (gx > 0 && gy > 0);
+}
+
+function dividerCompartmentsClient(feature) {
+  const [gx, gy] = dividerGridCountsClient(feature);
+  const columns = gx + 1, rows = gy + 1;
+  const [x0, y0, x1, y1] = feature.zone;
+  const xEdges = Array.from({ length: columns + 1 }, (_, index) => x0 + index * (x1 - x0) / columns);
+  const yEdges = Array.from({ length: rows + 1 }, (_, index) => y0 + index * (y1 - y0) / rows);
+  let raw = feature.options?.compartment_spans;
+  if (typeof raw === "string") {
+    try { raw = JSON.parse(raw); } catch { raw = []; }
+  }
+  if (!Array.isArray(raw)) raw = [];
+  const owner = Array.from({ length: rows }, () => Array(columns).fill(null));
+  const rectangles = [];
+  for (const span of raw) {
+    const row = Number(span?.row), column = Number(span?.column);
+    const rowSpan = Number(span?.row_span), columnSpan = Number(span?.column_span);
+    if (![row, column, rowSpan, columnSpan].every(Number.isInteger) ||
+        row < 0 || column < 0 || rowSpan < 1 || columnSpan < 1 ||
+        row + rowSpan > rows || column + columnSpan > columns) continue;
+    const cell = { row, column, rowSpan, columnSpan };
+    let overlaps = false;
+    for (let r = row; r < row + rowSpan; r++) {
+      for (let c = column; c < column + columnSpan; c++) overlaps ||= owner[r][c] !== null;
+    }
+    if (overlaps) continue;
+    rectangles.push(cell);
+    for (let r = row; r < row + rowSpan; r++) {
+      for (let c = column; c < column + columnSpan; c++) owner[r][c] = cell;
+    }
+  }
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      if (owner[row][column]) continue;
+      const cell = { row, column, rowSpan: 1, columnSpan: 1 };
+      rectangles.push(cell);
+      owner[row][column] = cell;
+    }
+  }
+  const thickness = number(feature.options?.thickness, 1.6);
+  rectangles.sort((a, b) => a.row - b.row || a.column - b.column);
+  for (const cell of rectangles) {
+    const rowEnd = cell.row + cell.rowSpan;
+    const columnEnd = cell.column + cell.columnSpan;
+    cell.zone = [
+      xEdges[cell.column] + (cell.column ? thickness / 2 : 0),
+      yEdges[cell.row] + (cell.row ? thickness / 2 : 0),
+      xEdges[columnEnd] - (columnEnd < columns ? thickness / 2 : 0),
+      yEdges[rowEnd] - (rowEnd < rows ? thickness / 2 : 0),
+    ];
+  }
+  return { gx, gy, rows, columns, xEdges, yEdges, cells: rectangles, owner };
+}
+
+function serializeDividerSpansClient(cells) {
+  return cells
+    .filter(cell => cell.rowSpan > 1 || cell.columnSpan > 1)
+    .map(cell => ({
+      row: cell.row, column: cell.column,
+      row_span: cell.rowSpan, column_span: cell.columnSpan,
+    }))
+    .sort((a, b) => a.row - b.row || a.column - b.column ||
+      a.row_span - b.row_span || a.column_span - b.column_span);
+}
+
+function dividerMergeClient(a, b) {
+  if (a.row === b.row && a.rowSpan === b.rowSpan &&
+      (a.column + a.columnSpan === b.column || b.column + b.columnSpan === a.column)) {
+    return {
+      row: a.row, column: Math.min(a.column, b.column), rowSpan: a.rowSpan,
+      columnSpan: a.columnSpan + b.columnSpan,
+    };
+  }
+  if (a.column === b.column && a.columnSpan === b.columnSpan &&
+      (a.row + a.rowSpan === b.row || b.row + b.rowSpan === a.row)) {
+    return {
+      row: Math.min(a.row, b.row), column: a.column,
+      rowSpan: a.rowSpan + b.rowSpan, columnSpan: a.columnSpan,
+    };
+  }
+  return null;
+}
+
+function dividerBoundarySegmentsClient(feature, featureIndex, toCanvas) {
+  if (!dividerEligibleClient(feature)) return [];
+  const topology = dividerCompartmentsClient(feature);
+  const hits = [];
+  const add = (orientation, line, segment, a, b, p0, p1) => {
+    const same = a === b;
+    const merged = same ? null : dividerMergeClient(a, b);
+    let operation0 = p0, operation1 = p1;
+    if (same) {
+      operation0 = orientation === "vertical"
+        ? [topology.xEdges[line], topology.yEdges[a.row]]
+        : [topology.xEdges[a.column], topology.yEdges[line]];
+      operation1 = orientation === "vertical"
+        ? [topology.xEdges[line], topology.yEdges[a.row + a.rowSpan]]
+        : [topology.xEdges[a.column + a.columnSpan], topology.yEdges[line]];
+    } else if (merged) {
+      operation0 = orientation === "vertical"
+        ? [topology.xEdges[line], topology.yEdges[merged.row]]
+        : [topology.xEdges[merged.column], topology.yEdges[line]];
+      operation1 = orientation === "vertical"
+        ? [topology.xEdges[line], topology.yEdges[merged.row + merged.rowSpan]]
+        : [topology.xEdges[merged.column + merged.columnSpan], topology.yEdges[line]];
+    }
+    hits.push({
+      featureIndex, orientation, line, segment, a, b,
+      action: same ? "split" : merged ? "merge" : "blocked", merged,
+      screen0: toCanvas(p0), screen1: toCanvas(p1),
+      operation0: toCanvas(operation0), operation1: toCanvas(operation1),
+    });
+  };
+  for (let line = 1; line < topology.columns; line++) {
+    for (let row = 0; row < topology.rows; row++) {
+      add("vertical", line, row, topology.owner[row][line - 1], topology.owner[row][line],
+        [topology.xEdges[line], topology.yEdges[row]],
+        [topology.xEdges[line], topology.yEdges[row + 1]]);
+    }
+  }
+  for (let line = 1; line < topology.rows; line++) {
+    for (let column = 0; column < topology.columns; column++) {
+      add("horizontal", line, column, topology.owner[line - 1][column], topology.owner[line][column],
+        [topology.xEdges[column], topology.yEdges[line]],
+        [topology.xEdges[column + 1], topology.yEdges[line]]);
+    }
+  }
+  return hits;
+}
+
+function sameDividerHit(a, b) {
+  return a === b || Boolean(a && b && a.featureIndex === b.featureIndex &&
+    a.orientation === b.orientation && a.line === b.line && a.segment === b.segment);
+}
+
+function renderDividerSegments(context, feature, featureIndex, toCanvas) {
+  const hits = dividerBoundarySegmentsClient(feature, featureIndex, toCanvas);
+  state.dividerSegmentHits.push(...hits);
+  for (const hit of hits) {
+    const hovered = sameDividerHit(hit, state.dividerSegmentHover);
+    context.save();
+    context.beginPath();
+    const start = hovered ? hit.operation0 : hit.screen0;
+    const end = hovered ? hit.operation1 : hit.screen1;
+    context.moveTo(start[0], start[1]); context.lineTo(end[0], end[1]);
+    context.lineWidth = hovered ? 5 : hit.action === "split" ? 1.5 : 2.5;
+    context.strokeStyle = hovered ? "#b07a22" : hit.action === "split" ? "rgba(49,87,102,.38)" : "#315766";
+    if (hit.action === "split" && !hovered) context.setLineDash([5, 5]);
+    context.stroke();
+    context.restore();
+  }
+}
+
+function distanceToDividerSegment(point, hit) {
+  const [x, y] = point, [x0, y0] = hit.screen0, [x1, y1] = hit.screen1;
+  const dx = x1 - x0, dy = y1 - y0;
+  const length2 = dx * dx + dy * dy || 1;
+  const t = Math.max(0, Math.min(1, ((x - x0) * dx + (y - y0) * dy) / length2));
+  return Math.hypot(x - (x0 + t * dx), y - (y0 + t * dy));
+}
+
+function hitDividerSegment(point) {
+  let best = null, distance = 8;
+  for (const hit of state.dividerSegmentHits) {
+    const next = distanceToDividerSegment(point, hit);
+    if (next <= distance) { best = hit; distance = next; }
+  }
+  return best;
+}
+
 function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
   const opt = feature.options || {};
   let labels = opt.division_labels;
@@ -5931,71 +6158,49 @@ function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
   }
   if (!Array.isArray(labels) || !labels.length) return;
 
-  const [z0, z1, z2, z3] = feature.zone;   // x0, y0, x1, y1
-  const thickness = number(opt.thickness, 1.6);
-  const along = feature.along || "x";
-  const legacyN = feature.count == null ? 1 : Math.max(1, number(feature.count, 1));
-  let gx = number(opt.count_x, NaN);
-  if (!Number.isFinite(gx)) gx = along === "y" ? legacyN : 0;
-  let gy = number(opt.count_y, NaN);
-  if (!Number.isFinite(gy)) gy = along === "x" ? legacyN : 0;
-  gx = Math.max(0, Math.round(gx));
-  gy = Math.max(0, Math.round(gy));
+  const topology = dividerCompartmentsClient(feature);
+  for (const cell of topology.cells) {
+    const idx = cell.row * topology.columns + cell.column;
+    if (idx >= labels.length) continue;
+    const text = String(labels[idx] || "").trim();
+    if (!text) continue;
 
-  const xEdges = [z0];
-  for (let i = 0; i < gx; i++) xEdges.push(z0 + (i + 1) * (z2 - z0) / (gx + 1));
-  xEdges.push(z2);
-  const yEdges = [z1];
-  for (let i = 0; i < gy; i++) yEdges.push(z1 + (i + 1) * (z3 - z1) / (gy + 1));
-  yEdges.push(z3);
-  const nCols = xEdges.length - 1;
-  const nRows = yEdges.length - 1;
-
-  for (let r = 0; r < nRows; r++) {
-    for (let c = 0; c < nCols; c++) {
-      const idx = r * nCols + c;
-      if (idx >= labels.length) continue;
-      const text = String(labels[idx] || "").trim();
-      if (!text) continue;
-
-      const x0 = xEdges[c] + (c === 0 ? 0 : thickness / 2);
-      const x1 = xEdges[c + 1] - (c === nCols - 1 ? 0 : thickness / 2);
-      let y0 = yEdges[r] + (r === 0 ? 0 : thickness / 2);
-      const y1 = yEdges[r + 1] - (r === nRows - 1 ? 0 : thickness / 2);
-      if (opt.scoop && typeof opt.scoop === "object" && opt.division_level !== "rim") {
-        y0 = (y0 + y1) / 2;
-      }
-      const cellW = Math.max(1, x1 - x0);
-      const cellD = Math.max(1, y1 - y0);
-
-      context.save();
-      context.font = 'bold 100px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif';
-      const refWidth = context.measureText(text).width || 100;
-      context.restore();
-
-      const aspect = (refWidth / 100) / 0.729;
-      const fitW = Math.max(0.1, cellW - 2) / Math.max(0.1, aspect);
-      const fitD = Math.max(0.1, cellD - 2) / 1.15;
-      const cap = Math.max(2.5, Math.min(fitW, fitD));
-
-      const fontSizePx = Math.max(6, (cap / 0.729) * scale);
-      const centerCanvas = toCanvas([(x0 + x1) / 2, (y0 + y1) / 2]);
-
-      context.save();
-      context.translate(centerCanvas[0], centerCanvas[1]);
-      context.font = `bold ${fontSizePx}px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif`;
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillStyle = "#1e4c5f";
-      context.fillText(text, 0, 0);
-      context.restore();
+    const [x0, rawY0, x1, y1] = cell.zone;
+    let y0 = rawY0;
+    if (opt.scoop && typeof opt.scoop === "object" && opt.division_level !== "rim") {
+      y0 = (y0 + y1) / 2;
     }
+    const cellW = Math.max(1, x1 - x0);
+    const cellD = Math.max(1, y1 - y0);
+
+    context.save();
+    context.font = 'bold 100px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif';
+    const refWidth = context.measureText(text).width || 100;
+    context.restore();
+
+    const aspect = (refWidth / 100) / 0.729;
+    const fitW = Math.max(0.1, cellW - 2) / Math.max(0.1, aspect);
+    const fitD = Math.max(0.1, cellD - 2) / 1.15;
+    const cap = Math.max(2.5, Math.min(fitW, fitD));
+
+    const fontSizePx = Math.max(6, (cap / 0.729) * scale);
+    const centerCanvas = toCanvas([(x0 + x1) / 2, (y0 + y1) / 2]);
+
+    context.save();
+    context.translate(centerCanvas[0], centerCanvas[1]);
+    context.font = `bold ${fontSizePx}px "DejaVu Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillStyle = "#1e4c5f";
+    context.fillText(text, 0, 0);
+    context.restore();
   }
 }
 
 function renderLayout2D() {
   if (!state.preview) return;
   state.layoutDimensionHandles = [];
+  state.dividerSegmentHits = [];
   const canvas = $("#preview-2d");
   const { context, width, height } = canvasSize(canvas);
   context.clearRect(0, 0, width, height);
@@ -6211,23 +6416,28 @@ function renderLayout2D() {
           ["true", "1", "yes", "on"].includes(String(opt.slope_base).toLowerCase()) ||
           Number(opt.bottom_angle) !== 0;
         if (slopeOn) {
-          context.save();
-          context.clip(worldRect(feature.zone));
-          context.strokeStyle = "#1f6b45";
-          context.lineWidth = 1.8;
-          context.globalAlpha = .78;
-          const [sx0, sy0, sx1, sy1] = feature.zone;
-          const span = Math.max(sx1 - sx0, sy1 - sy0);
-          for (let mark = -span; mark <= span * 2; mark += 8) {
-            const a = activeFeature.along === "y"
-              ? toCanvas([sx0, sy0 + mark])
-              : toCanvas([sx0 + mark, sy0]);
-            const b = activeFeature.along === "y"
-              ? toCanvas([sx1, sy1 + mark])
-              : toCanvas([sx1 + mark, sy1]);
-            context.beginPath(); context.moveTo(a[0], a[1]); context.lineTo(b[0], b[1]); context.stroke();
+          const slopeZones = activeFeature.options?.compartment_spans?.length
+            ? dividerCompartmentsClient(activeFeature).cells.map(cell => cell.zone)
+            : [activeFeature.zone];
+          for (const slopeZone of slopeZones) {
+            context.save();
+            context.clip(worldRect(slopeZone));
+            context.strokeStyle = "#1f6b45";
+            context.lineWidth = 1.8;
+            context.globalAlpha = .78;
+            const [sx0, sy0, sx1, sy1] = slopeZone;
+            const span = Math.max(sx1 - sx0, sy1 - sy0);
+            for (let mark = -span; mark <= span * 2; mark += 8) {
+              const a = activeFeature.along === "y"
+                ? toCanvas([sx0, sy0 + mark])
+                : toCanvas([sx0 + mark, sy0]);
+              const b = activeFeature.along === "y"
+                ? toCanvas([sx1, sy1 + mark])
+                : toCanvas([sx1 + mark, sy1]);
+              context.beginPath(); context.moveTo(a[0], a[1]); context.lineTo(b[0], b[1]); context.stroke();
+            }
+            context.restore();
           }
-          context.restore();
         }
         if (opt.label_divisions && opt.division_labels) {
           renderDividerDivisionLabels(context, activeFeature, toCanvas, scale);
@@ -6314,6 +6524,12 @@ function renderLayout2D() {
     }
     context.setLineDash([]);
   }
+  layoutFeatures().forEach((feature, index) => {
+    if (feature.kind !== "divider") return;
+    const activeFeature = index === state.selected && state.draft?.kind === "divider"
+      ? state.draft : feature;
+    renderDividerSegments(context, activeFeature, index, toCanvas);
+  });
   const offsetOutside = (start, end) => {
     const middle = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
     const length = Math.max(1, Math.hypot(middle[0] - width / 2, middle[1] - height / 2));
@@ -6360,6 +6576,7 @@ function renderLayout2D() {
     context.fillText(text, width / 2, hintY);
   }
   context.restore();
+  updateNudgeUI();
 }
 
 function layoutPoint(event) {
@@ -6411,6 +6628,89 @@ function hitFeature(world) {
   return null;
 }
 
+function dividerLabelsClient(feature) {
+  let labels = feature.options?.division_labels;
+  if (typeof labels === "string") {
+    try { labels = JSON.parse(labels); } catch { labels = labels.split(","); }
+  }
+  return Array.isArray(labels) ? [...labels] : [];
+}
+
+function promoteMergedDividerLabel(feature, merged, columns) {
+  const labels = dividerLabelsClient(feature);
+  const anchor = merged.row * columns + merged.column;
+  if (String(labels[anchor] || "").trim()) return;
+  const values = new Set();
+  for (let row = merged.row; row < merged.row + merged.rowSpan; row++) {
+    for (let column = merged.column; column < merged.column + merged.columnSpan; column++) {
+      const text = String(labels[row * columns + column] || "").trim();
+      if (text) values.add(text);
+    }
+  }
+  if (values.size === 1) {
+    labels[anchor] = [...values][0];
+    feature.options.division_labels = labels;
+  }
+}
+
+async function editDividerSegment(originalHit) {
+  if (state.dividerTopologyBusy) return;
+  state.dividerTopologyBusy = true;
+  try {
+    if (state.selected !== originalHit.featureIndex) {
+      await selectedFeature(originalHit.featureIndex);
+    }
+    if (state.selected !== originalHit.featureIndex || state.draft?.kind !== "divider") return;
+    const topology = dividerCompartmentsClient(state.draft);
+    const currentHit = dividerBoundarySegmentsClient(
+      state.draft, originalHit.featureIndex, point => point,
+    ).find(hit => hit.orientation === originalHit.orientation &&
+      hit.line === originalHit.line && hit.segment === originalHit.segment);
+    if (!currentHit) return;
+    if (currentHit.action === "blocked") {
+      state.dividerSegmentHover = originalHit;
+      updateNudgeUI();
+      toast("That merge would make an irregular compartment. Compartments must stay rectangular.");
+      return;
+    }
+
+    let cells;
+    if (currentHit.action === "merge") {
+      cells = topology.cells.filter(cell => cell !== currentHit.a && cell !== currentHit.b);
+      cells.push(currentHit.merged);
+      promoteMergedDividerLabel(state.draft, currentHit.merged, topology.columns);
+    } else {
+      const owner = currentHit.a;
+      cells = topology.cells.filter(cell => cell !== owner);
+      if (currentHit.orientation === "vertical") {
+        const leftWidth = currentHit.line - owner.column;
+        cells.push(
+          { row: owner.row, column: owner.column, rowSpan: owner.rowSpan, columnSpan: leftWidth },
+          { row: owner.row, column: currentHit.line, rowSpan: owner.rowSpan, columnSpan: owner.columnSpan - leftWidth },
+        );
+      } else {
+        const lowHeight = currentHit.line - owner.row;
+        cells.push(
+          { row: owner.row, column: owner.column, rowSpan: lowHeight, columnSpan: owner.columnSpan },
+          { row: currentHit.line, column: owner.column, rowSpan: owner.rowSpan - lowHeight, columnSpan: owner.columnSpan },
+        );
+      }
+    }
+
+    refreshDraftSoon.cancel();
+    state.draft.options ||= {};
+    state.draft.options.compartment_spans = serializeDividerSpansClient(cells);
+    state.draftAutoCommit = true;
+    state.dividerSegmentHover = null;
+    markDraftChanged();
+    renderDraftFields();
+    renderLayout2D();
+    await refreshDraft();
+  } finally {
+    state.dividerTopologyBusy = false;
+  }
+}
+
 function wireLayoutInteraction() {
   const canvas = $("#preview-2d");
   // Tracks whether the pointer is still down after an awaited "keep this part?"
@@ -6424,13 +6724,20 @@ function wireLayoutInteraction() {
     }
   });
   canvas.addEventListener("pointerdown", async event => {
-    if (!state.layoutTransform || state.designMutationBusy) return;
+    if (!state.layoutTransform || state.designMutationBusy || state.dividerTopologyBusy) return;
     // A dimension label always wins over ordinary feature selection/move/
     // resize - hit-test it first (see fix3d.md, item 5).
     const handle = hitDimensionHandle("2d", canvasPointFromEvent(canvas, event));
     if (handle) {
       beginDimensionDrag("2d", handle, canvas, event);
       renderLayout2D();
+      return;
+    }
+    const dividerHit = hitDividerSegment(canvasPointFromEvent(canvas, event));
+    if (dividerHit) {
+      pointerActive = false;
+      state.layoutDrag = null;
+      await editDividerSegment(dividerHit);
       return;
     }
     pointerActive = true;
@@ -6503,7 +6810,18 @@ function wireLayoutInteraction() {
     }
     if (!state.layoutDrag) {
       const handle = state.layoutTransform ? hitDimensionHandle("2d", canvasPointFromEvent(canvas, event)) : null;
-      if (updateDimensionHover("2d", handle, canvas)) renderLayout2D();
+      if (handle) {
+        state.dividerSegmentHover = null;
+        if (updateDimensionHover("2d", handle, canvas)) renderLayout2D();
+        return;
+      }
+      updateDimensionHover("2d", null, canvas);
+      const dividerHit = hitDividerSegment(canvasPointFromEvent(canvas, event));
+      if (!sameDividerHit(dividerHit, state.dividerSegmentHover)) {
+        state.dividerSegmentHover = dividerHit;
+        canvas.style.cursor = dividerHit?.action === "blocked" ? "not-allowed" : dividerHit ? "pointer" : "";
+        renderLayout2D();
+      }
       return;
     }
     const drag = state.layoutDrag;
@@ -6534,6 +6852,14 @@ function wireLayoutInteraction() {
       drag.feature.zone = [drag.centre[0] - width / 2, drag.centre[1] - depth / 2, drag.centre[0] + width / 2, drag.centre[1] + depth / 2];
     }
     renderLayout2D();
+  });
+  canvas.addEventListener("pointerleave", () => {
+    if (state.layoutDrag || state.dimensionDrag?.view === "2d") return;
+    if (state.dividerSegmentHover) {
+      state.dividerSegmentHover = null;
+      canvas.style.cursor = "";
+      renderLayout2D();
+    }
   });
   canvas.addEventListener("pointerup", async event => {
     pointerActive = false;
