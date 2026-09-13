@@ -48,6 +48,11 @@ SP.close = () => { if (SP.dialog().open) SP.dialog().close(); };
 // another button - stops the clock, so the countdown can only ever act on
 // someone who has walked away or is happy to carry on.
 SP.launch = async () => {
+  if (state.runtime?.hosted) {
+    SP.showHostedNewSpace();
+    if (!SP.dialog().open) SP.dialog().showModal();
+    return;
+  }
   let info = null;
   try {
     const data = await api("/api/space/inspect", { output: state.output });
@@ -124,6 +129,68 @@ SP.run = async task => {
 SP.pickFolder = async () => (await api("/api/browse-output-folder", { current: state.output })).folder || "";
 SP.inspect = async folder => (await api("/api/space/inspect", { output: folder })).space;
 
+SP.showHostedNewSpace = (metadata = null) => {
+  SP.stopCountdown();
+  const folder = state.browserFolder;
+  SP.setup = { hosted: true, folder: folder?.name || "", folder_name: folder?.name || "", metadata };
+  $("#welcome-home").hidden = true;
+  $("#welcome-resume").hidden = true;
+  $("#space-form").hidden = false;
+  $("#space-folder").textContent = folder?.name || "Select a folder...";
+  $("#space-folder").title = folder?.name || "";
+  $("#space-folder-change").textContent = folder ? "Change" : "Choose folder";
+  $("#space-back").hidden = true;
+  const space = metadata || {};
+  $("#space-name").value = space.name || folder?.name || "";
+  $$("input[name=\"space-kind\"]").forEach(radio => { radio.checked = radio.value === (space.kind || "drawer"); });
+  ["x", "y", "z"].forEach(axis => { $("#space-" + axis).value = space[axis] ?? ""; });
+  $("#space-error").hidden = true;
+  SP.syncSetup();
+  $("#space-create").disabled = !folder;
+  $("#space-create").textContent = metadata ? "Open space" : SP.kind() === "none" ? "Use this folder" : "Create space";
+  if (folder) $("#space-name").focus();
+};
+
+SP.chooseHostedFolder = async () => {
+  if (!window.WFFileSystem?.supportsDirectoryPicker()) {
+    state.browserFolder = { handle: null, name: "Browser downloads", fallback: true };
+    state.output = state.browserFolder.name;
+    SP.showHostedNewSpace();
+    toast("This browser uses Downloads instead of a chosen folder.");
+    return;
+  }
+  const handle = await WFFileSystem.pickDirectory();
+  if (!handle) return;
+  state.browserFolder = { handle, name: handle.name };
+  state.output = handle.name;
+  let metadata = null;
+  const raw = await WFFileSystem.readText(handle, ".wavefinity-space.json");
+  if (raw) {
+    try { metadata = JSON.parse(raw); } catch (_error) { toast("That folder has unreadable Wavefinity space details.", true); }
+  }
+  SP.showHostedNewSpace(metadata);
+};
+
+SP.createHosted = async () => {
+  const folder = state.browserFolder;
+  if (!folder) return SP.fail("Choose a folder first.", "#space-folder-change");
+  const kind = SP.kind();
+  const name = $("#space-name").value.trim() || folder.name;
+  let [x, y, z] = SP.readSize();
+  if (kind !== "none" && !name) return SP.fail("Give the space a name.", "#space-name");
+  if (kind !== "none" && ![x, y, z].every(value => value > 0)) return SP.fail("Enter the inside width, depth and height in mm.", "#space-x");
+  if (kind === "box") [x, y] = [SP.snap(x), SP.snap(y)];
+  const metadata = { version: 1, name, kind, x: kind === "none" ? null : x, y: kind === "none" ? null : y, z: kind === "none" ? null : z };
+  await WFFileSystem.writeText(folder.handle, ".wavefinity-space.json", JSON.stringify(metadata, null, 2));
+  await WFFileSystem.save("active", { handle: folder.handle, metadata });
+  state.output = folder.name;
+  state.keepLog = false;
+  syncForm();
+  SP.close();
+  if (kind === "box") SP.designBox(metadata);
+  else toast(`${name} is ready. Files will save in ${folder.name}.`, false, 6000);
+};
+
 // Where a chosen folder leads: its space, a no-inventory folder, or a new
 // space. `fresh` (New space) sets a no-inventory folder up as a space instead.
 SP.route = async (folder, { fresh = false } = {}) => {
@@ -138,7 +205,16 @@ SP.route = async (folder, { fresh = false } = {}) => {
 };
 
 // The Save Location picker hands every chosen folder here.
-SP.afterPick = folder => SP.run(() => SP.route(folder));
+SP.afterPick = async folder => {
+  if (!state.runtime?.hosted) return SP.run(() => SP.route(folder));
+  const raw = await WFFileSystem.readText(folder?.handle, ".wavefinity-space.json");
+  let metadata = null;
+  if (raw) {
+    try { metadata = JSON.parse(raw); } catch (_error) { toast("That folder has unreadable Wavefinity space details.", true); }
+  }
+  SP.showHostedNewSpace(metadata);
+  if (!SP.dialog().open) SP.dialog().showModal();
+};
 
 // ------------------------------------------------------------------ home
 
@@ -234,6 +310,7 @@ SP.fail = (message, selector) => {
 };
 
 SP.create = async () => {
+  if (state.runtime?.hosted) return SP.createHosted();
   const info = SP.setup;
   const kind = SP.kind();
   if (kind === "none") return SP.usePlain(info);
@@ -299,11 +376,11 @@ SP.usePlain = async info => {
 SP.designBox = space => {
   activatePreviewView("3d");
   if (state.designMutationBusy) {
-    toast(`${space.name} is ready. Set Bin type to Bin for Bins to design its case.`, false, 7000);
+    toast(`${space.name} is ready. Choose Bin for Bins under Let's design a to design its case.`, false, 7000);
     return;
   }
   if (designHasChanges() && !window.confirm(`Replace the current design with a Bin for Bins case for ${space.name}?`)) {
-    toast(`${space.name} is ready. Set Bin type to Bin for Bins when you want to design its case.`, false, 7000);
+    toast(`${space.name} is ready. Choose Bin for Bins under Let's design a when you want to design its case.`, false, 7000);
     return;
   }
   const previous = clone(state.design);
@@ -329,6 +406,23 @@ SP.designBox = space => {
 // ------------------------------------------------------------------ wiring
 
 SP.wire = () => {
+  if (state.runtime?.hosted) {
+    $("#spaces-btn").addEventListener("click", () => {
+      SP.showHostedNewSpace();
+      if (!SP.dialog().open) SP.dialog().showModal();
+    });
+    $("#welcome-close").addEventListener("click", SP.close);
+    $("#welcome-resume-close").addEventListener("click", SP.close);
+    SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
+    $("#space-folder-change").addEventListener("click", () => SP.run(SP.chooseHostedFolder));
+    $$("input[name=\"space-kind\"]").forEach(radio => radio.addEventListener("change", SP.syncSetup));
+    ["#space-x", "#space-y"].forEach(sel => $(sel).addEventListener("input", SP.noteSize));
+    $("#space-form").addEventListener("submit", event => {
+      event.preventDefault();
+      SP.run(SP.create);
+    });
+    return;
+  }
   $("#spaces-btn").addEventListener("click", () => SP.open());
   $("#welcome-close").addEventListener("click", SP.close);
   $("#welcome-resume-close").addEventListener("click", SP.close);

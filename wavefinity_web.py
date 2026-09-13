@@ -16,16 +16,18 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import secrets
 import subprocess
 import sys
 import threading
 import time
+import tempfile
 import uuid
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from urllib.request import urlopen
 
 import numpy as np
@@ -149,6 +151,7 @@ from organizer_stack import (
 
 WEB_ROOT = APP_DIR / "web"
 DEFAULT_OUTPUT = APP_DIR / "generated"
+HOSTED = os.environ.get("WAVEFINITY_DEPLOYMENT", "local").lower() == "hosted"
 SERVER_VERSION = "1"
 # Regenerated every time the process starts, so the frontend can tell a
 # fresh backend apart from the one it originally loaded against - even
@@ -158,6 +161,9 @@ GEOMETRY_LOCK = threading.RLock()
 PREFERENCES_FILE = APP_DIR / "wavefinity_prefs.json"
 PREFERENCES_LOCK = threading.RLock()
 PID_FILE = Path(os.environ.get("WAVEFINITY_PID_FILE", str(APP_DIR / "wavefinity.pid")))
+EXPORT_LOCK = threading.RLock()
+EXPORT_TTL_SECONDS = 15 * 60
+EXPORTS: dict[str, dict[str, Any]] = {}
 
 
 def default_design() -> dict[str, Any]:
@@ -487,9 +493,14 @@ def catalog_payload() -> dict[str, Any]:
             for definition in feature_definitions()
             for rule in setting_interactions(definition.kind)
         ],
+        "runtime": {
+            "hosted": HOSTED,
+            "filesystem": "browser" if HOSTED else "server",
+        },
         "defaults": {
             "design": default_design(),
-            "output": str(DEFAULT_OUTPUT),
+            # A Render path is implementation detail, never a user's folder.
+            "output": "" if HOSTED else str(DEFAULT_OUTPUT),
             "keep_log": True,
             "connector": {
                 "tolerance": LOCKED_TOLERANCE,
@@ -521,11 +532,11 @@ def catalog_payload() -> dict[str, Any]:
             "web_run_clearance_mm": DIFFERING_WEB_RUN_CLEARANCE,
             "wall_depth_factor": math.sqrt(1.0 + max_wave_slope() ** 2),
         },
-        "preferences": load_preferences(),
+        "preferences": {} if HOSTED else load_preferences(),
         "slicer": {
-            "available": (slicer_exe := detect_bambu_studio()) is not None,
-            "path": str(slicer_exe) if slicer_exe else None,
-            "name": slicer_name(slicer_exe),
+            "available": False if HOSTED else (slicer_exe := detect_bambu_studio()) is not None,
+            "path": None if HOSTED else str(slicer_exe) if slicer_exe else None,
+            "name": "Bambu Studio" if HOSTED else slicer_name(slicer_exe),
         },
     }
 
@@ -660,6 +671,8 @@ def launch_slicer(slicer_path: Path, files: list[Path]) -> None:
 
 
 def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if HOSTED:
+        return {"preferences": {}}
     update: dict[str, Any] = {}
     if "output" in payload:
         update["output"] = str(payload["output"])
@@ -672,6 +685,8 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def browse_slicer_path_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Open the native file chooser to select a slicer executable."""
+    if HOSTED:
+        raise ValueError("Slicer selection is available in the local Wavefinity app only.")
     try:
         filetypes = [
             ("Executable Files", "*.exe" if sys.platform == "win32" else "*"),
@@ -704,6 +719,8 @@ print(filedialog.askopenfilename(parent=root, title="Select Slicer Executable (e
 
 def browse_output_folder_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Open the native folder chooser for this local desktop app."""
+    if HOSTED:
+        raise ValueError("Choose a folder in your browser instead.")
     try:
         current = Path(str(payload.get("current") or DEFAULT_OUTPUT)).expanduser()
         initial = current if current.is_dir() else DEFAULT_OUTPUT
@@ -752,6 +769,8 @@ def open_log_with_wordpad(file_path: Path) -> None:
 
 def show_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Display the bins.md log in WordPad for the specified output folder."""
+    if HOSTED:
+        raise ValueError("Logs are saved to your chosen browser folder in hosted mode.")
     output_dir = Path(str(payload.get("output") or DEFAULT_OUTPUT)).expanduser().resolve()
     folder_name = output_dir.name
     expected_log = output_dir / f"{folder_name} bins.md"
@@ -1431,7 +1450,7 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
-    output = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
+    output = _generation_output(payload)
     auto_timestamp = bool(payload.get("auto_timestamp", False))
     keep_log = bool(payload.get("keep_log", True))
     with GEOMETRY_LOCK:
@@ -1440,7 +1459,7 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             auto_timestamp=auto_timestamp,
             keep_log=keep_log,
         )
-    return {"result": result, "output": str(output)}
+    return _generation_reply(result=result, output=output)
 
 
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1459,7 +1478,7 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
     bin_a_height = float(options.get("bin_a_height", box.z)) if different_heights else box.z
     bin_b_height = float(options.get("bin_b_height", box.z)) if different_heights else box.z
     length = float(options.get("length", LOCKED_CONNECTOR_LENGTH))
-    output_dir = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
+    output_dir = _generation_output(payload)
     output_dir.mkdir(parents=True, exist_ok=True)
     filename = connector_filename(
         connector,
@@ -1493,13 +1512,13 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         plan["web_thickness_mm"] = max(
             arm_thickness, DEFAULT_ARM_THICKNESS + differing_web_reach(box, connector)
         )
-    return {
+    reply = {
         "result": result,
-        "output": str(output_dir),
         "connector_plan": {
             k: (round(v, 3) if isinstance(v, float) else v) for k, v in plan.items()
         },
     }
+    return _generation_reply(result=result, output=output_dir, extra=reply)
 
 
 def sampler_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1509,7 +1528,7 @@ def sampler_payload(payload: dict[str, Any]) -> dict[str, Any]:
         tolerance=float(options.get("tolerance", LOCKED_TOLERANCE)),
         height=float(options.get("height", LOCKED_CONNECTOR_HEIGHT)),
     )
-    output_dir = Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
+    output_dir = _generation_output(payload)
     output_dir.mkdir(parents=True, exist_ok=True)
     with GEOMETRY_LOCK:
         result = generate_sampler(
@@ -1522,7 +1541,56 @@ def sampler_payload(payload: dict[str, Any]) -> dict[str, Any]:
             side_length=float(options.get("length", LOCKED_CONNECTOR_LENGTH)),
             flat_inside=box.flat_inside,
         )
-    return {"result": result, "output": str(output_dir)}
+    return _generation_reply(result=result, output=output_dir)
+
+
+def _generation_output(payload: dict[str, Any]) -> Path:
+    """A hosted export belongs in an isolated, short-lived server workspace."""
+    if HOSTED:
+        return Path(tempfile.mkdtemp(prefix="wavefinity-export-"))
+    return Path(payload.get("output") or DEFAULT_OUTPUT).expanduser().resolve()
+
+
+def _remove_export(record: dict[str, Any]) -> None:
+    shutil.rmtree(record["directory"], ignore_errors=True)
+
+
+def _clean_expired_exports() -> None:
+    now = time.monotonic()
+    expired = [token for token, record in EXPORTS.items() if record["expires"] <= now]
+    for token in expired:
+        _remove_export(EXPORTS.pop(token))
+
+
+def _generation_reply(*, result: Any, output: Path, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not HOSTED:
+        return {"result": result, "output": str(output), **(extra or {})}
+    files = _extract_generated_files(result)
+    if not files:
+        shutil.rmtree(output, ignore_errors=True)
+        raise RuntimeError("No files were generated.")
+    token = secrets.token_urlsafe(24)
+    names: dict[str, Path] = {}
+    for file_path in files:
+        name = file_path.name
+        if name in names:
+            raise RuntimeError("Generated files have duplicate names.")
+        names[name] = file_path
+    with EXPORT_LOCK:
+        _clean_expired_exports()
+        EXPORTS[token] = {
+            "directory": output,
+            "files": names,
+            "expires": time.monotonic() + EXPORT_TTL_SECONDS,
+        }
+    return {
+        "result": result,
+        "files": [
+            {"name": name, "url": f"/api/export/{token}/{quote(name)}"}
+            for name in names
+        ],
+        **(extra or {}),
+    }
 
 
 def _extract_generated_files(result_data: Any) -> list[Path]:
@@ -1549,6 +1617,8 @@ def _extract_generated_files(result_data: Any) -> list[Path]:
 
 
 def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if HOSTED:
+        raise ValueError("Hosted Wavefinity saves generated files to your selected folder instead.")
     target = str(payload.get("target", "bin"))
     if target == "connector":
         gen_result = connector_payload(payload)
@@ -1614,11 +1684,14 @@ POST_ROUTES = {
     "/api/browse-output-folder": browse_output_folder_payload,
     "/api/browse-slicer-path": browse_slicer_path_payload,
     "/api/show-log": show_log_payload,
-    # Drawer layout view: inventory file, auto layout, spacers.
-    **drawer_routes(GEOMETRY_LOCK, DEFAULT_OUTPUT, detect_bambu_studio, launch_slicer),
-    # Welcome screen: spaces, recent spaces, no-inventory folders.
-    **space_routes(DEFAULT_OUTPUT, load_preferences, save_preferences),
 }
+if not HOSTED:
+    POST_ROUTES.update({
+        # Drawer layout view: inventory file, auto layout, spacers.
+        **drawer_routes(GEOMETRY_LOCK, DEFAULT_OUTPUT, detect_bambu_studio, launch_slicer),
+        # Welcome screen: spaces, recent spaces, no-inventory folders.
+        **space_routes(DEFAULT_OUTPUT, load_preferences, save_preferences),
+    })
 
 
 class WavefinityServer(ThreadingHTTPServer):
@@ -1657,6 +1730,39 @@ class WavefinityHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/browse-slicer-path":
             self._send_json(browse_slicer_path_payload({}))
+            return
+        if path.startswith("/api/export/"):
+            pieces = path.split("/", 4)
+            if len(pieces) != 5:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            token, encoded_name = pieces[3], pieces[4]
+            name = unquote(encoded_name)
+            if not name or Path(name).name != name:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            with EXPORT_LOCK:
+                _clean_expired_exports()
+                record = EXPORTS.get(token)
+                file_path = record["files"].pop(name, None) if record else None
+                if record and not record["files"]:
+                    EXPORTS.pop(token, None)
+            if file_path is None or not file_path.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            try:
+                body = file_path.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", mimetypes.guess_type(name)[0] or "application/octet-stream")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(name)}")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(body)
+            finally:
+                if record and not record["files"]:
+                    _remove_export(record)
             return
         if path in {"/Brochure.md", "/brochure.md"}:
             brochure_file = APP_DIR / "Brochure.md"

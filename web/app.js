@@ -54,6 +54,8 @@ const state = {
   previewRequest: 0,
   draftRequest: 0,
   output: "",
+  runtime: { hosted: false, filesystem: "server" },
+  browserFolder: null,
   keepLog: true,
   connector: {},
   layoutDrag: null,
@@ -592,7 +594,9 @@ function syncForm() {
   const scoopEl = $("#scoop");
   if (scoopEl) scoopEl.checked = Boolean(state.design.scoop);
   $("#mode-select").value = layout.mode;
-  $("#output-folder").value = state.output;
+  $("#output-folder").value = state.runtime.hosted
+    ? (state.browserFolder?.name || "Select a folder...")
+    : state.output;
   const keepLogEl = $("#keep-log");
   if (keepLogEl) keepLogEl.checked = Boolean(state.keepLog);
   $("#connector-tolerance").value = fmt(state.connector.tolerance);
@@ -847,7 +851,7 @@ function normalizeB4BDependentControls() {
 
 function syncB4BForm() {
   const b4b = b4bState();
-  $("#bin-type").value = b4b.enabled ? "b4b" : "single";
+  $("#bin-type").value = binTypeFromDesign();
   $("#b4b-lid-type").value = b4b.lid !== false && b4b.secure_lid !== false
     ? "latched" : "lid_only";
   $("#b4b-stacking").value = String(Boolean(b4b.stacking));
@@ -866,12 +870,18 @@ function syncB4BForm() {
   }
   $("#b4b-part-name").value = state.design?.part_name || "";
   normalizeB4BDependentControls();
-  $("#stack-mode").value = stackMode();
   applyB4BVisibility();
 }
 
 function stackMode() {
   return state.design?.box?.stack?.mode || "none";
+}
+
+function binTypeFromDesign() {
+  if (b4bEnabled()) return "b4b";
+  if (stackMode() === "direct") return "stack-direct";
+  if (stackMode() === "lid") return "stack-lid";
+  return "single";
 }
 
 function stackRuleValues(mode = stackMode()) {
@@ -926,13 +936,9 @@ function syncStackDependencyControls() {
   }
 }
 
-// Stacking and B4B are different answers to the same question - how this bin
-// joins the one above it - so only one of them is offered at a time.
 function applyStackVisibility() {
   const b4b = b4bEnabled();
   const mode = stackMode();
-  const row = $("#stack-mode-row");
-  if (row) row.hidden = b4b;
   const note = $("#stack-note");
   if (!note) return;
   const info = state.preview?.stack;
@@ -958,7 +964,8 @@ function applyStackVisibility() {
 
 function readStackForm(design) {
   design.box = design.box || {};
-  const mode = b4bEnabled() ? "none" : ($("#stack-mode")?.value || "none");
+  const choice = $("#bin-type")?.value || "single";
+  const mode = choice === "stack-direct" ? "direct" : choice === "stack-lid" ? "lid" : "none";
   if (mode === "none") delete design.box.stack;
   else design.box.stack = { mode };
 }
@@ -1119,7 +1126,7 @@ async function toggleB4B(wantEnabled) {
       const ok = window.confirm(
         "Turning on Bin for Bins clears the interior parts - the B4B interior " +
         "is reserved for child bins. Continue?");
-      if (!ok) { $("#bin-type").value = "single"; return; }
+      if (!ok) { $("#bin-type").value = binTypeFromDesign(); return false; }
       state.design.layout.features = [];
     }
     for (const [axis, label] of [["x", "Width"], ["y", "Length"]]) {
@@ -1143,6 +1150,27 @@ async function toggleB4B(wantEnabled) {
   readB4BForm(state.design);
   enforceB4BMinimums();
   applyB4BVisibility();
+  changedDesign();
+  return true;
+}
+
+async function changeBinType() {
+  const previousStack = stackMode();
+  const wasB4B = b4bEnabled();
+  const requested = $("#bin-type").value;
+  if (requested === "b4b") {
+    await toggleB4B(true);
+    return;
+  }
+  if (wasB4B) {
+    state.design.box.b4b = { ...B4B_DEFAULTS };
+  }
+  readStackForm(state.design);
+  normalizeStackSettings(state.design, {
+    restoreDefaults: (previousStack !== "none" || wasB4B) && stackMode() === "none",
+    flash: true,
+  });
+  syncForm();
   changedDesign();
 }
 
@@ -1221,7 +1249,7 @@ function updateDesignFromForm() {
   if (scoopEl) design.scoop = scoopEl.checked;
   syncRimLabelFromFeatures();
   const newOutput = $("#output-folder").value.trim();
-  if (newOutput !== state.output) {
+  if (!state.runtime.hosted && newOutput !== state.output) {
     state.output = newOutput;
     saveOutputPreference(newOutput);
   }
@@ -1251,6 +1279,7 @@ function updateDesignFromForm() {
 }
 
 const saveOutputPreference = debounce(output => {
+  if (state.runtime.hosted) return;
   api("/api/preferences", { output }).catch(() => {});
 }, 500);
 
@@ -1263,6 +1292,23 @@ async function selectOutputFolder() {
   if (button) button.disabled = true;
   if (input) input.style.pointerEvents = "none";
   try {
+    if (state.runtime.hosted) {
+      if (!window.WFFileSystem?.supportsDirectoryPicker()) {
+        state.browserFolder = { handle: null, name: "Browser downloads", fallback: true };
+        state.output = state.browserFolder.name;
+        if (input) input.value = state.output;
+        toast("This browser uses Downloads instead of a chosen folder.");
+        return;
+      }
+      const handle = await WFFileSystem.pickDirectory();
+      if (!handle) return;
+      state.browserFolder = { handle, name: handle.name };
+      state.output = handle.name;
+      if (input) input.value = handle.name;
+      if (typeof SP !== "undefined") await SP.afterPick(handle);
+      else toast(`Selected: ${handle.name}`);
+      return;
+    }
     const result = await api("/api/browse-output-folder", { current: state.output });
     if (result.folder) {
       state.output = result.folder;
@@ -1674,18 +1720,7 @@ function wireControls() {
   }
   $("#easy-clean-radius").addEventListener("input", changedDesign);
 
-  $("#bin-type").addEventListener("change", () => toggleB4B($("#bin-type").value === "b4b"));
-  $("#stack-mode").addEventListener("change", () => {
-    const previous = stackMode();
-    readStackForm(state.design);
-    normalizeStackSettings(state.design, {
-      restoreDefaults: previous !== "none" && stackMode() === "none",
-      flash: true,
-    });
-    syncForm();
-    applyStackVisibility();
-    changedDesign();
-  });
+  $("#bin-type").addEventListener("change", changeBinType);
   ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location", "#b4b-latch-count"].forEach(sel =>
     $(sel).addEventListener("change", () => {
       normalizeB4BDependentControls();
@@ -6481,6 +6516,10 @@ async function generateParts(target) {
     return;
   }
   if (!checkPartNamePresent(target)) return;
+  if (state.runtime.hosted && !state.browserFolder) {
+    toast("Choose a folder before generating files.", true);
+    return;
+  }
   if ((target === "all" || target === "bin") && !state.canGenerate) {
     toast("Resolve the highlighted issue before generating.", true);
     return;
@@ -6553,7 +6592,7 @@ async function generateParts(target) {
       setItemStatus("bin", "generating", "Generating…");
       const binResult = await api("/api/generate", payload);
       saveOutput = binResult.output || saveOutput;
-      const binFiles = collectOutputs(binResult.result);
+      const binFiles = await saveGeneratedFiles(binResult);
       allFiles.push(...binFiles);
       setItemStatus("bin", "done", "Done");
     }
@@ -6567,7 +6606,7 @@ async function generateParts(target) {
         connectorPlan = connResult.connector_plan;
         renderConnectorReadout(connResult.connector_plan);
       }
-      const connFiles = collectOutputs(connResult.result);
+      const connFiles = await saveGeneratedFiles(connResult);
       allFiles.push(...connFiles);
       setItemStatus("connector", "done", "Done");
     }
@@ -6634,6 +6673,7 @@ async function generate(path, selector) {
 }
 
 async function printModel(target = "bin") {
+  if (state.runtime.hosted) return generateParts(b4bEnabled() ? "bin" : "all");
   if (!checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
     toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
@@ -6672,6 +6712,14 @@ function updateSlicerUI() {
   const printBtn = $("#print-bin");
   const wrap = $(".print-button-wrap");
   if (!printBtn) return;
+  if (state.runtime.hosted) {
+    if (wrap) wrap.hidden = false;
+    printBtn.hidden = false;
+    printBtn.textContent = "Generate to Folder";
+    printBtn.title = "Generate files into your selected folder";
+    $("#slicer-picker-button").hidden = true;
+    return;
+  }
   const slicer = state.slicer || {};
   if (slicer.available) {
     if (wrap) wrap.hidden = false;
@@ -6713,6 +6761,21 @@ function collectOutputs(value, found = []) {
   if (typeof value.output === "string") found.push(value.output.split(/[\\/]/).pop());
   Object.values(value).forEach(item => collectOutputs(item, found));
   return [...new Set(found)];
+}
+
+async function saveGeneratedFiles(result) {
+  if (!state.runtime.hosted) return collectOutputs(result.result);
+  const files = result.files || [];
+  if (!files.length) throw new Error("The server did not return any files to save.");
+  const folder = state.browserFolder;
+  const saved = [];
+  for (const file of files) {
+    const response = await fetch(file.url);
+    if (!response.ok) throw new Error(`Could not download ${file.name}.`);
+    await WFFileSystem.writeBlob(folder?.handle, file.name, await response.blob());
+    saved.push(file.name);
+  }
+  return saved;
 }
 
 function watchServerVersion() {
@@ -6833,19 +6896,24 @@ async function init() {
   try {
     const catalog = await api("/api/catalog");
     state.catalog = catalog;
+    state.runtime = catalog.runtime || { hosted: false, filesystem: "server" };
     state.serverInstance = catalog.instance;
     state.design = clone(catalog.defaults.design);
     state.nestPhoto = null;
     state.cleanDesign = clone(state.design);
-    state.output = catalog.preferences?.output || catalog.defaults.output;
-    state.keepLog = catalog.preferences?.keep_log !== undefined ? Boolean(catalog.preferences.keep_log) : true;
+    state.output = state.runtime.hosted ? "" : (catalog.preferences?.output || catalog.defaults.output);
+    state.keepLog = state.runtime.hosted ? false : (catalog.preferences?.keep_log !== undefined ? Boolean(catalog.preferences.keep_log) : true);
     state.connector = clone(catalog.defaults.connector);
     state.slicer = catalog.slicer || { available: false, path: null, name: "Bambu Studio" };
     updateSlicerUI();
+    if (state.runtime.hosted) {
+      const drawerTab = $('.view-tab[data-view="drawer"]');
+      if (drawerTab) drawerTab.hidden = true;
+    }
     renderCatalog();
     wireControls();
     syncForm();
-    $("#connection").textContent = "Local engine connected";
+    $("#connection").textContent = state.runtime.hosted ? "Hosted engine connected" : "Local engine connected";
     $("#connection").classList.add("ready");
     $("#connection").classList.remove("stale");
     watchServerVersion();

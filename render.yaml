@@ -12,3 +12,5 @@ services:
         value: "3.14.3"
       - key: WAVEFINITY_PID_FILE
         value: /tmp/wavefinity.pid
+      - key: WAVEFINITY_DEPLOYMENT
+        value: hosted

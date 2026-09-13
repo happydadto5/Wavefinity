@@ -34,27 +34,17 @@ See [changelog.md](changelog.md) for dated implementation changes.
 The control panel is ordered by **blast radius**: a setting sits above
 everything whose meaning it can change.
 
-**The top card decides what the thing is.** *Bin type* and *Stacking* are the
-first two controls on the page, in their own bordered card, because both change
-what every control beneath them means — bin type turns X/Y into a child-bin
-field and retires interior parts and connectors; stacking rewrites the wall,
-the floor and the body envelope. The selected wall/base values are shown and
-saved; they are never silent generation-only overrides. Nothing that reads the
-bin's dimensions should be read before these are settled. Pegboard mounting, when it arrives, is a
-third select in this same card: it answers the same question — how this bin
-joins the world around it — and it is not an interior part.
-
-**Kind versus modifier.** Bin type is the *kind* of object (Single bin, Bin for
-Bins). Stacking is a *modifier* on it — a stackable bin is still an ordinary
-bin with interior parts, it has just gained a lid and a stepped foot. Keeping
-them as separate controls is what lets a stackable bin keep its cradles and
-bores; folding stacking into the bin-type list would have implied it was a
-different kind of object that loses them.
+**The top selector decides what the thing is.** *Let’s design a* combines the
+ordinary bin, both stacking systems, and Bin for Bins. Stacked choices remain
+ordinary bins with interior parts; the selector still applies the required
+wall and floor settings. Bin for Bins turns X/Y into a child-bin field and
+retires interior parts and connectors. The selected wall/base values are shown
+and saved; they are never silent generation-only overrides.
 
 **Controls follow their meaning, not their mechanism.**
 
-- A **select** is for choosing one of several named states — *Lid type*,
-  *Lid snugness*, *Show*, *Orientation*, *Stacking*. This holds even at two
+- A **select** is for choosing one of several named states — *Let’s design a*,
+  *Lid type*, *Lid snugness*, *Show*, *Orientation*, *B4B Stacking*. This holds even at two
   options: a row of big buttons for a two-state setting reads as two actions,
   and gives no clue the two are exclusive.
 - A **checkbox** is for a genuine on/off with no second state worth naming —
@@ -254,7 +244,7 @@ When in doubt, default to **NO TESTING**.
 ### Using the browser UI
 
 The page is split between intent-based controls and a large responsive
-workspace. **Build your bin** contains the dimensions, print mode and interior
+workspace. The top design controls contain the dimensions, print mode and interior
 interior-part editor. **Customize your bin** contains the scoop and advanced
 physical settings. **Label your bin** contains the rim label and the part
 filename.

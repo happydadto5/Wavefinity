@@ -26,24 +26,14 @@
   <main class="app-shell" id="app-shell">
     <aside class="controls" aria-label="Bin controls">
       <section class="control-section open" data-section="build">
-        <div class="section-heading-wrap">
-          <div class="section-heading no-toggle">
-            <span>Build your bin</span>
-          </div>
-        </div>
         <div class="section-body">
           <div class="bin-type-row">
-            <label>Bin type
+            <label>Let's design a
               <select id="bin-type">
-                <option value="single" selected>Single bin</option>
-                <option value="b4b">Bin for Bins (B4B)</option>
-              </select>
-            </label>
-            <label id="stack-mode-row">Stacking
-              <select id="stack-mode">
-                <option value="none" selected>None — open bin</option>
-                <option value="lid">Snap-on lid — stack on the lid</option>
-                <option value="direct">Direct snap — bin into bin</option>
+                <option value="single" selected>Bin</option>
+                <option value="stack-direct">Bin (Stacked Bin to Bin)</option>
+                <option value="stack-lid">Bin (Stacked Lid to Bin)</option>
+                <option value="b4b">Bin for Bins</option>
               </select>
             </label>
             <span id="stack-note" class="stack-note" hidden></span>
@@ -172,7 +162,7 @@
 
       <section class="control-section open" data-section="connector">
         <div class="section-heading no-toggle">
-          <span>Connect bins</span>
+          <span>Connectors</span>
           <label class="checkbox-row heading-check" for="different-height-bins">
             <span>Different heights</span>
             <input id="different-height-bins" type="checkbox">
@@ -433,6 +423,7 @@
   </div>
   <script src="/feature-icons.js" defer></script>
   <script src="/preview3d-webgl.js" defer></script>
+  <script src="/browser-files.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/drawer-model.js" defer></script>
   <script src="/drawer-view.js" defer></script>
