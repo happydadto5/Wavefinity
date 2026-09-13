@@ -26,6 +26,7 @@ from ._divider_cells import (
     divider_owner_matrix,
     divider_scoop_targets,
     normalize_divider_scoop,
+    normalized_compartment_spans,
 )
 from ._registry import (
     OptionDefinition,
@@ -230,7 +231,10 @@ def _build_divider_grid(
     angle = float(options.get("angle", 0.0) or 0.0)
     if thickness <= 0.0 or height <= 0.0 or base_z + height > box.z + 1e-9:
         raise ValueError("divider thickness and height must fit inside the bin")
-    if options.get("compartment_spans"):
+    custom_spans = normalized_compartment_spans(
+        options.get("compartment_spans"), grid_y + 1, grid_x + 1,
+    )
+    if custom_spans:
         return _build_custom_divider_grid(
             box, spec_feature, base_z, options, grid_x, grid_y,
             thickness, height, angle,

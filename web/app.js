@@ -6184,6 +6184,14 @@ function dividerMergeClient(a, b) {
   return null;
 }
 
+function sameDividerCompartmentClient(a, b) {
+  return Boolean(a && b &&
+    a.row === b.row &&
+    a.column === b.column &&
+    a.rowSpan === b.rowSpan &&
+    a.columnSpan === b.columnSpan);
+}
+
 function dividerBoundarySegmentsClient(feature, featureIndex, toCanvas) {
   if (!dividerEligibleClient(feature)) return [];
   const topology = dividerCompartmentsClient(feature);
@@ -6799,12 +6807,14 @@ async function editDividerSegment(originalHit) {
 
     let cells;
     if (currentHit.action === "merge") {
-      cells = topology.cells.filter(cell => cell !== currentHit.a && cell !== currentHit.b);
+      cells = topology.cells.filter(cell =>
+        !sameDividerCompartmentClient(cell, currentHit.a) &&
+        !sameDividerCompartmentClient(cell, currentHit.b));
       cells.push(currentHit.merged);
       promoteMergedDividerLabel(state.draft, currentHit.merged, topology.columns);
     } else {
       const owner = currentHit.a;
-      cells = topology.cells.filter(cell => cell !== owner);
+      cells = topology.cells.filter(cell => !sameDividerCompartmentClient(cell, owner));
       if (currentHit.orientation === "vertical") {
         const leftWidth = currentHit.line - owner.column;
         cells.push(
