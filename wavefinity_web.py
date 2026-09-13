@@ -66,6 +66,7 @@ from organizer_engine import (
     WALL_STEP,
     BoxSpec,
     ConnectorSpec,
+    StackSpec,
     differing_connector_plan,
     differing_web_reach,
     lift_grabber_min_wall,
@@ -145,10 +146,8 @@ from organizer_b4b import (
     validate_b4b_design,
 )
 from organizer_stack import (
-    STACK_MIN_FLOOR_SKIN,
     STACK_MIN_WALL,
-    STACK_PLUG_DEPTH,
-    STACK_SEAT_DEPTH,
+    stack_base_minimum,
     stack_effective_box,
     stack_enabled,
     stack_summary,
@@ -178,6 +177,26 @@ EXPORTS: dict[str, dict[str, Any]] = {}
 def default_design() -> dict[str, Any]:
     box = BoxSpec(x=2 * BASE_UNIT, y=6 * BASE_UNIT, z=40.0)
     return design_to_dict(box, Layout((), "fused", EDITOR_SNAP))
+
+
+def _stack_base_min_by_wall() -> dict[str, dict[str, float]]:
+    """Required base thickness for every stacking wall step, by mode.
+
+    Minimum base thickness depends on wall thickness (the foot's flare has to
+    finish inside solid base material), so the browser cannot carry a fixed
+    number here - it has to read the same geometry stack_base_minimum() uses.
+    """
+    probe = BoxSpec(x=2 * BASE_UNIT, y=6 * BASE_UNIT, z=100.0)
+    table: dict[str, dict[str, float]] = {"lid": {}, "direct": {}}
+    steps = round((MAX_WALL - STACK_MIN_WALL) / WALL_STEP)
+    for i in range(steps + 1):
+        wall = round(STACK_MIN_WALL + i * WALL_STEP, 3)
+        for mode in ("lid", "direct"):
+            box = replace(
+                probe, wall=wall, standard_walls=False, stack=StackSpec(mode=mode),
+            )
+            table[mode][f"{wall:g}"] = round(stack_base_minimum(box), 3)
+    return table
 
 
 def load_preferences() -> dict[str, Any]:
@@ -477,10 +496,7 @@ def catalog_payload() -> dict[str, Any]:
             "min_wall_mm": STACK_MIN_WALL,
             "default_wall_mm": DEFAULT_WALL,
             "default_base_mm": DEFAULT_BASE_THICKNESS,
-            "base_min_mm": {
-                "lid": STACK_SEAT_DEPTH + STACK_MIN_FLOOR_SKIN,
-                "direct": STACK_PLUG_DEPTH + STACK_MIN_FLOOR_SKIN,
-            },
+            "base_min_by_wall_mm": _stack_base_min_by_wall(),
         },
         "b4b_rules": {
             "grid_pitch_mm": GRID_PITCH,

@@ -34,6 +34,7 @@ from organizer_engine import (
     DEFAULT_BASE_THICKNESS,
     DEFAULT_WALL,
     LOCK_RUN,
+    MIN_HEIGHT_ABOVE_BASE,
     StackSpec,
     _lock_profile,
     wavy_cavity_polygon,
@@ -66,6 +67,8 @@ STACK_SNAP = 0.30         # bead protrusion past the mouth face
 STACK_BEAD = 0.40         # groove depth: the snap plus seating clearance
 STACK_BEAD_DROP = 1.5     # bead centre below the rim it snaps under
 STACK_FIT = 0.25          # clearance per side on every sliding face
+STACK_LID_RIM_SEAT_WIDTH = 0.6      # flat bearing shoulder on the lid underside
+STACK_LID_RIM_SEAT_THICKNESS = 0.4  # its thickness, uses half the min stacking wall
 STACK_MIN_FLOOR_SKIN = 0.8   # floor left under the stepped base
 # A groove this deep needs wall behind it.  0.8 mm would leave 0.45 mm, which
 # splits; 1.2 mm leaves 0.85 mm, which holds.
@@ -115,6 +118,7 @@ def stack_lid_rise(box: BoxSpec) -> float:
         STACK_LID_SKIN,
         stack_foot_flare_height(wall_box),
         STACK_SEAT_DEPTH + STACK_MIN_FLOOR_SKIN,
+        STACK_LID_RIM_SEAT_THICKNESS + _lid_outer_flare_height(wall_box),
     )
 
 
@@ -129,10 +133,19 @@ def stack_step_depth(box: BoxSpec) -> float:
 
 
 def stack_base_minimum(box: BoxSpec) -> float:
-    """Visible/saved base thickness required by the selected stack foot."""
+    """Visible/saved base thickness required by the selected stack foot.
+
+    The foot's flare has to finish entirely inside solid base material before
+    the vertical cavity wall begins, or the floor/wall corner intersects the
+    taper before the outside has returned to full wall thickness.
+    """
     if not stack_enabled(box):
         return DEFAULT_BASE_THICKNESS
-    return stack_step_depth(box) + STACK_MIN_FLOOR_SKIN
+    wall_box = replace(
+        box, wall=max(box.wall, STACK_MIN_WALL), standard_walls=False,
+    )
+    flare = stack_foot_flare_height(wall_box)
+    return stack_step_depth(box) + max(STACK_MIN_FLOOR_SKIN, flare)
 
 
 def normalize_stack_settings(box: BoxSpec) -> BoxSpec:
@@ -222,6 +235,26 @@ def _outline_run(inner: Polygon, outer: Polygon) -> float:
 def stack_foot_flare_height(eff: BoxSpec) -> float:
     """Vertical run needed for a <=45 degree foot/lid flare."""
     run = _outline_run(_plug_polygon(eff), wavy_outer_polygon(eff))
+    return math.ceil((run + _EPS) * 100.0) / 100.0
+
+
+def _lid_rim_seat_outline(eff: BoxSpec) -> Polygon:
+    """Flat bearing shoulder on the lid underside that lands on the wall top.
+
+    Sized off the cavity, not the (already inset) plug, so it reaches out to
+    the wall regardless of the plug's own running clearance.
+    """
+    cavity = wavy_cavity_polygon(eff)
+    outer = wavy_outer_polygon(eff)
+    seat = cavity.buffer(STACK_LID_RIM_SEAT_WIDTH).intersection(outer)
+    if seat.is_empty or not isinstance(seat, Polygon):
+        raise ValueError("this bin is too small for the stacking lid rim seat")
+    return seat
+
+
+def _lid_outer_flare_height(eff: BoxSpec) -> float:
+    """Vertical run needed for the <=45 degree flare above the rim seat."""
+    run = _outline_run(_lid_rim_seat_outline(eff), wavy_outer_polygon(eff))
     return math.ceil((run + _EPS) * 100.0) / 100.0
 
 
@@ -431,18 +464,27 @@ def make_stack_lid(box: BoxSpec) -> trimesh.Trimesh:
 
     rim = eff.z
     rise = stack_lid_rise(eff)
-    flare_height = stack_foot_flare_height(eff)
     plug_outline = _plug_polygon(eff)
     outer = wavy_outer_polygon(eff)
 
-    # Official print orientation is plug-down.  The underside grows from the
-    # plug only above the body rim, never jumping to a horizontal ledge.
-    plate_parts = [_profile_loft(
-        [plug_outline, outer], [rim, rim + flare_height],
-    )]
-    if rise > flare_height + _EPS:
-        cap = _extrude_polygon(outer, rise - flare_height)
-        cap.apply_translation((0.0, 0.0, rim + flare_height))
+    # The lid has two independent jobs: a flat rim shoulder that carries the
+    # vertical stack load straight into the body wall, and (below, unioned in
+    # separately) a plug with its own running clearance.  The shoulder must
+    # never tighten or wedge that plug - it lives entirely above the rim.
+    rim_seat_outline = _lid_rim_seat_outline(eff)
+    outer_flare = _lid_outer_flare_height(eff)
+    rim_seat = _extrude_polygon(rim_seat_outline, STACK_LID_RIM_SEAT_THICKNESS)
+    rim_seat.apply_translation((0.0, 0.0, rim))
+
+    flare_start = rim + STACK_LID_RIM_SEAT_THICKNESS
+    flare_end = flare_start + outer_flare
+    flare = _profile_loft(
+        [rim_seat_outline, outer], [flare_start, flare_end],
+    )
+    plate_parts = [rim_seat, flare]
+    if rim + rise > flare_end + _EPS:
+        cap = _extrude_polygon(outer, rim + rise - flare_end)
+        cap.apply_translation((0.0, 0.0, flare_end))
         plate_parts.append(cap)
 
     plug = _extrude_polygon(plug_outline, STACK_PLUG_DEPTH)
@@ -513,7 +555,8 @@ def validate_stack_design(box: BoxSpec) -> None:
     # this the shortened body fails BoxSpec's own lock-bump minimum, and the
     # user would get told about lock bumps on a bin they never made short.
     floor = stack_base_minimum(box)
-    minimum = STACK_MIN_FLOOR_SKIN + 5.0 + stack_lid_rise(box)
+    step = stack_step_depth(box)
+    minimum = (floor - step) + MIN_HEIGHT_ABOVE_BASE + stack_lid_rise(box)
     if box.z < minimum - _EPS:
         raise ValueError(
             f"a stackable bin needs at least {minimum:g} mm of height - "

@@ -482,6 +482,27 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
   if (box?.standard_walls === false) select.dataset.customValue = value;
 }
 
+// Minimum base thickness depends on wall thickness (the foot's flare has to
+// finish inside solid base material before the wall begins), so the browser
+// carries a Python-generated table rather than one fixed number per mode. A
+// wall that falls between table entries takes the NEXT THICKER wall's
+// minimum - never the thinner one, which would under-report what the
+// geometry actually needs.
+function stackBaseMinForWall(mode, wall) {
+  const table = state.catalog?.stack_rules?.base_min_by_wall_mm?.[mode];
+  const fallback = mode === "direct" ? 3.8 : 1.8;
+  const entries = Object.entries(table || {})
+    .map(([w, v]) => ({ wall: number(w), min: number(v) }))
+    .filter(entry => Number.isFinite(entry.wall) && Number.isFinite(entry.min))
+    .sort((a, b) => a.wall - b.wall);
+  if (!entries.length) return fallback;
+  const wallValue = number(wall, entries[0].wall);
+  for (const entry of entries) {
+    if (wallValue <= entry.wall + 1e-9) return entry.min;
+  }
+  return entries[entries.length - 1].min;
+}
+
 // The base value a stacking mode *requires*, or -Infinity when nothing forces
 // it.  Ordinary lid/direct stacking and B4B stacking are the only two things
 // that do; the two never apply at once (B4B and ordinary stacking are
@@ -494,10 +515,7 @@ function baseRequiredMin(box) {
   }
   const mode = box?.stack?.mode || "none";
   if (mode === "none") return -Infinity;
-  return number(
-    state.catalog?.stack_rules?.base_min_mm?.[mode],
-    mode === "direct" ? 3.8 : 1.8,
-  );
+  return stackBaseMinForWall(mode, box?.wall);
 }
 
 function baseRequiredLabel(box) {
@@ -954,13 +972,13 @@ function binTypeFromDesign() {
   return "single";
 }
 
-function stackRuleValues(mode = stackMode()) {
+function stackRuleValues(mode = stackMode(), wall = state.design?.box?.wall) {
   const rules = state.catalog?.stack_rules || {};
   return {
     minWall: number(rules.min_wall_mm, 1.2),
     defaultWall: number(rules.default_wall_mm, state.catalog?.wall_rules?.default_mm ?? 0.8),
     defaultBase: number(rules.default_base_mm, 0.6),
-    minBase: number(rules.base_min_mm?.[mode], mode === "direct" ? 3.8 : 1.8),
+    minBase: stackBaseMinForWall(mode, wall),
   };
 }
 
@@ -968,7 +986,6 @@ function normalizeStackSettings(design, { restoreDefaults = false, flash = false
   const box = design?.box;
   if (!box) return;
   const mode = box.stack?.mode || "none";
-  const values = stackRuleValues(mode);
   const changed = [];
   const set = (key, value, selector) => {
     if (box[key] === value) return;
@@ -976,15 +993,20 @@ function normalizeStackSettings(design, { restoreDefaults = false, flash = false
     if (selector) changed.push(selector);
   };
   if (mode !== "none") {
+    const values = stackRuleValues(mode, box.wall);
     set("standard_walls", false, "#wall-thickness");
     if (number(box.wall, values.defaultWall) < values.minWall) {
       set("wall", values.minWall, "#wall-thickness");
     }
+    // The base minimum depends on the (possibly just-bumped) wall value, so
+    // it is resolved again after the wall is settled, never before.
+    const minBase = stackBaseMinForWall(mode, box.wall);
     set("standard_base", false, "#base-thickness");
-    if (number(box.base_thickness, values.defaultBase) < values.minBase) {
-      set("base_thickness", values.minBase, "#base-thickness");
+    if (number(box.base_thickness, values.defaultBase) < minBase) {
+      set("base_thickness", minBase, "#base-thickness");
     }
   } else if (restoreDefaults) {
+    const values = stackRuleValues(mode, box.wall);
     set("standard_walls", true, "#wall-thickness");
     set("wall", values.defaultWall, "#wall-thickness");
     set("standard_base", true, "#base-thickness");
@@ -1288,15 +1310,9 @@ function updateDesignFromForm() {
   }
   const b4bOn = b4bEnabled();
   const currentStackMode = stackMode();
-  const stackValues = stackRuleValues(currentStackMode);
-  const baseChoice = $("#base-thickness").value;
-  design.box.standard_base = !b4bOn && currentStackMode === "none" && baseChoice === "standard";
-  design.box.base_thickness = design.box.standard_base
-    ? number(state.catalog?.base_rules?.default_mm, 0.6)
-    : number(baseChoice, design.box.base_thickness ?? 0.6);
-  if (currentStackMode !== "none") {
-    design.box.base_thickness = Math.max(stackValues.minBase, design.box.base_thickness);
-  }
+  const stackValues = stackRuleValues(currentStackMode, design.box.wall);
+  // Wall is resolved before base: the required base depends on the *final*
+  // wall value, so it must be looked up after the wall choice is settled.
   const previousWall = design.box.wall;
   const wallRules = state.catalog?.wall_rules || {};
   const defaultWall = wallRules.default_mm ?? 0.8;
@@ -1314,6 +1330,15 @@ function updateDesignFromForm() {
       )));
   $("#wall-thickness").value = design.box.standard_walls ? "standard" : fmt(design.box.wall);
   if (design.box.wall !== previousWall) autoAdjustConnectorFields();
+  const baseChoice = $("#base-thickness").value;
+  design.box.standard_base = !b4bOn && currentStackMode === "none" && baseChoice === "standard";
+  design.box.base_thickness = design.box.standard_base
+    ? number(state.catalog?.base_rules?.default_mm, 0.6)
+    : number(baseChoice, design.box.base_thickness ?? 0.6);
+  if (currentStackMode !== "none") {
+    const minBase = stackBaseMinForWall(currentStackMode, design.box.wall);
+    design.box.base_thickness = Math.max(minBase, design.box.base_thickness);
+  }
   design.part_name = $("#part-name").value;
   const scoopEl = $("#scoop");
   if (scoopEl) design.scoop = scoopEl.checked;
