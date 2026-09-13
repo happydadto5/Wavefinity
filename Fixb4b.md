@@ -1,6 +1,6 @@
 # Fix B4B hardware redesign — superseded design record
 
-Status: **superseded for folding-handle sizing and hardware selection.** The current authoritative implementation is `organizer_b4b.py`: it keeps one hardware family per case, uses M2 for handled fields through 120 x 120 x 64 mm, resolves the bail from child-field X, and builds complete closed pivot eyes around true round bores. The historical M3-only, 72 mm-grip, 26 mm-drop, X96-first-handle and fixed-dimension statements below must not be restored. Other retained mechanical design context remains historical reference only.
+Status: **superseded for folding-handle sizing and hardware selection.** The current authoritative implementation is `organizer_b4b.py`: it keeps one hardware family per case, uses M2 for B4B fields through 120 x 120 x 64 mm, otherwise M3, resolves the bail from child-field X, and builds complete closed pivot eyes around true round bores. The historical M3-only, 72 mm-grip, 26 mm-drop, X96-first-handle and fixed-dimension statements below must not be restored. Other retained mechanical design context remains historical reference only.
 
 The only expected post-implementation tuning is physical-print calibration of: printed thread-forming pilot diameter, tiny detent interference, and at most +/-0.05 mm running-fit adjustments. Those calibration values must remain centralized constants. Everything else below is the intended first-build design.
 
