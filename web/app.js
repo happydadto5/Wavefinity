@@ -4978,10 +4978,11 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
   const hy = outerY / 2;
   const hz = outerZ;
   if (hx <= 0 || hy <= 0 || hz <= 0) return;
-  // B4B's labels show the assembled envelope, not the box.x/y/z field the
-  // Width/Length/Height controls actually edit - dragging one would silently
-  // resize the wrong thing, so B4B keeps these display-only (see fix3d.md).
-  const draggable = !outerXYZ;
+  // B4B's guides show the assembled envelope (outerX/Y/Z) but box.x/y/z is
+  // still the field a drag actually edits - each handle carries both: the
+  // envelope number to draw/scale the guide with, and the real field to
+  // start the drag from (see dimensionDisplayOverride/fix3d.md).
+  const editBox = { x: number(box.x), y: number(box.y), z: number(box.z) };
 
   const yawRad = camera.yaw * Math.PI / 180;
   const camX = -Math.sin(yawRad);
@@ -5026,7 +5027,7 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     `Width ${fmt(outerX)} mm`,
     gap,
     over,
-    draggable ? { view: "3d", axis: "x", value: outerX } : null
+    { view: "3d", axis: "x", value: editBox.x, displayValue: outerX }
   );
 
   // 2. Depth (along Y on front ground)
@@ -5041,7 +5042,7 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     `Depth ${fmt(outerY)} mm`,
     gap,
     over,
-    draggable ? { view: "3d", axis: "y", value: outerY } : null
+    { view: "3d", axis: "y", value: editBox.y, displayValue: outerY }
   );
 
   // 3. Height (vertical Z edge on the leftmost corner of the bin)
@@ -5077,7 +5078,7 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     `Height ${fmt(outerZ)} mm`,
     gap,
     over,
-    draggable ? { view: "3d", axis: "z", value: outerZ } : null
+    { view: "3d", axis: "z", value: editBox.z, displayValue: outerZ }
   );
 }
 
@@ -5219,6 +5220,7 @@ function renderDimensionGuide(context, pStart, pEnd, witA, witB, normal, label, 
       screenAxis: [screenAxisX, screenAxisY],
       pixelSpan: span,
       value: handle.value,
+      displayValue: handle.displayValue ?? handle.value,
       labelCenter: mid,
     });
   }
@@ -5452,8 +5454,9 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
   drawContactShadow(context, b4bShadowBox(), camera, project, b4bAssembledEnvelope());
   drawUsableFloor(context, solidGeometry, camera, project);
   drawBoreAxes(context, boreAxes, camera, project);
-  draw3DDimensions(context, box, camera, project, b4bAssembledEnvelope());
-  drawDimensionGhost3D(context, camera, project);
+  const outerXYZ = dimensionDisplayOverride(b4bAssembledEnvelope());
+  draw3DDimensions(context, box, camera, project, outerXYZ);
+  drawDimensionGhost3D(context, camera, project, box, outerXYZ);
 }
 
 // B4B's assembled_envelope_mm accounts for hinge/latch/handle/stacking
@@ -5532,6 +5535,24 @@ function dimensionDragBoxOverride(box, view) {
   return { ...box, [drag.axis]: drag.currentValue };
 }
 
+// B4B's guide labels/extent come from the server-computed assembled
+// envelope (outerXYZ), which does not recompute mid-drag (see item 8 of
+// fix3d.md - no geometry regeneration on every pointermove). During a B4B
+// drag this approximates the live envelope instead: the hinge/latch/handle
+// offset between the envelope and the edited field is basically constant
+// for a given axis, so envelope = edited field + (that offset at drag
+// start). Corrects itself to the exact server value once the drag commits
+// and a real preview lands.
+function dimensionDisplayOverride(outerXYZ) {
+  const drag = state.dimensionDrag;
+  if (!drag || drag.view !== "3d" || !outerXYZ) return outerXYZ;
+  const index = { x: 0, y: 1, z: 2 }[drag.axis];
+  const offset = drag.displayStartValue - drag.startValue;
+  const next = outerXYZ.slice();
+  next[index] = drag.currentValue + offset;
+  return next;
+}
+
 function pickResizeCursor(handle) {
   const [ax, ay] = handle.screenAxis;
   return Math.abs(ax) >= Math.abs(ay) ? "ew-resize" : "ns-resize";
@@ -5546,6 +5567,10 @@ function beginDimensionDrag(view, handle, canvas, event) {
     startClientY: event.clientY,
     startValue: handle.value,
     currentValue: handle.value,
+    // The guide is drawn/scaled to displayValue (B4B's assembled envelope,
+    // same as `value` everywhere else) - pixelsPerMm must use that, not the
+    // edited field, or the drag would run at the wrong speed for B4B.
+    displayStartValue: handle.displayValue,
     originalDesign: clone(state.design),
     screenAxis: handle.screenAxis,
     pixelSpan: handle.pixelSpan,
@@ -5563,7 +5588,7 @@ function updateDimensionDrag(clientX, clientY) {
   const dx = clientX - drag.startClientX;
   const dy = clientY - drag.startClientY;
   const projectedPixels = dx * drag.screenAxis[0] + dy * drag.screenAxis[1];
-  const pixelsPerMm = drag.pixelSpan / Math.max(1e-6, drag.startValue);
+  const pixelsPerMm = drag.pixelSpan / Math.max(1e-6, drag.displayStartValue);
   const requested = drag.startValue + projectedPixels / pixelsPerMm;
   drag.currentValue = normalizeBinDimension(drag.axis, requested, drag.startValue);
   const field = drag.axis === "x" ? "#x-size" : drag.axis === "y" ? "#y-size" : "#z";
@@ -5613,11 +5638,16 @@ function updateDimensionHover(view, handle, canvas) {
   return changed;
 }
 
-function drawDimensionGhost3D(context, camera, project) {
+// Mirrors draw3DDimensions' own outer-extent math so the ghost always
+// matches the guides it belongs to - the true assembled envelope for B4B,
+// box.x/y/z everywhere else.
+function drawDimensionGhost3D(context, camera, project, box, outerXYZ) {
   const drag = state.dimensionDrag;
-  if (!drag || drag.view !== "3d" || !state.design?.box) return;
-  const box = dimensionDragBoxOverride(state.design.box, "3d");
-  const hx = number(box.x) / 2, hy = number(box.y) / 2, hz = number(box.z);
+  if (!drag || drag.view !== "3d" || !box) return;
+  const outerX = outerXYZ ? number(outerXYZ[0]) : number(box.x);
+  const outerY = outerXYZ ? number(outerXYZ[1]) : number(box.y);
+  const outerZ = outerXYZ ? number(outerXYZ[2]) : number(box.z);
+  const hx = outerX / 2, hy = outerY / 2, hz = outerZ;
   if (hx <= 0 || hy <= 0 || hz <= 0) return;
   const corners3d = [
     [-hx, -hy, 0], [hx, -hy, 0], [hx, hy, 0], [-hx, hy, 0],
@@ -5680,7 +5710,7 @@ function wireSceneInteraction(canvas, camera, render) {
     // A dimension label always wins over orbit - hit-test it first so a
     // drag that starts on "Width 96 mm" resizes the bin instead of spinning
     // the camera (see fix3d.md, item 5).
-    if (!state.designMutationBusy && !b4bEnabled()) {
+    if (!state.designMutationBusy) {
       const handle = hitDimensionHandle("3d", canvasPointFromEvent(canvas, event));
       if (handle) {
         beginDimensionDrag("3d", handle, canvas, event);
@@ -5706,10 +5736,8 @@ function wireSceneInteraction(canvas, camera, render) {
       return;
     }
     if (!drag) {
-      if (!b4bEnabled()) {
-        const handle = hitDimensionHandle("3d", canvasPointFromEvent(canvas, event));
-        if (updateDimensionHover("3d", handle, canvas)) repaint();
-      }
+      const handle = hitDimensionHandle("3d", canvasPointFromEvent(canvas, event));
+      if (updateDimensionHover("3d", handle, canvas)) repaint();
       return;
     }
     if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4) {
@@ -5958,6 +5986,7 @@ function drawDimensionLine(context, start, end, label, vertical = false, handle 
       screenAxis: [screenAxisX, screenAxisY],
       pixelSpan: span,
       value: handle.value,
+      displayValue: handle.value,
       labelCenter: middle,
     });
   }
