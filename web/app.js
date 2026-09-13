@@ -1230,10 +1230,20 @@ async function changeBinType() {
 // Shared by typed Width/Length/Height edits and by dragging their dimension
 // labels (see hitDimensionHandle/commitDimensionDrag), so both paths always
 // land on the same legal value: X/Y snap to the catalog base unit and clamp
-// to [unit, max_box_size]; Z rounds to whole millimetres with a 2mm floor.
+// to [unit, max_box_size]; Z rounds to whole millimetres with a floor that
+// clears the base thickness by min_height_above_base_mm (BoxSpec requires it).
 function normalizeBinDimension(axis, requestedValue, fallback) {
   const value = number(requestedValue, fallback);
-  if (axis === "z") return Math.max(2, Math.round(value));
+  if (axis === "z") {
+    const base = number(
+      state.design?.box?.base_thickness,
+      state.catalog?.base_rules?.default_mm ?? 0.6
+    );
+    const minimum = Math.ceil(
+      base + number(state.catalog.min_height_above_base_mm, 5)
+    );
+    return Math.max(minimum, Math.round(value));
+  }
   const unit = state.catalog.base_unit;
   const max = Math.floor((state.catalog.max_box_size || 350) / unit) * unit;
   return Math.min(max, Math.max(unit, Math.round(value / unit) * unit));
@@ -1246,7 +1256,7 @@ function updateDesignFromForm() {
   design.box.x = newBoxX;
   design.box.y = newBoxY;
   const prevBoxZ = design.box.z;
-  design.box.z = number($("#z").value, design.box.z);
+  design.box.z = normalizeBinDimension("z", $("#z").value, design.box.z);
   checkBinSizeChange();
   if (design.box.z !== prevBoxZ) {
     const setAutoConnectorHeight = selector => {

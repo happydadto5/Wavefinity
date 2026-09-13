@@ -456,7 +456,7 @@ inlaid flush into a 7 mm-deep rear ledge at the rim, whose underside rises at 45
 degrees and prints without supports.
 
 The optional **curved scoop** spans the usable width at the front of the bin and
-rises halfway up the usable wall height, so a part sweeps forward and lifts out
+rises 60% up the usable wall height, so a part sweeps forward and lifts out
 over the low front lip — the opposite wall from the rim-label ledge. In
 removable modes it is part of the insert; in fused mode it is part of the box.
 An auto-placed text moves clear of the scoop strip, and the 2D editor shades the
@@ -654,7 +654,7 @@ to the wall lean.
 
 A divider can also tilt the **bottoms of the tool slots** it forms, so a
 tool rests at an angle without the wall itself leaning. `bottom_angle`
-(0–45°, default 0 — a plain flat bin bottom, so older designs are
+(0–75°, default 0 — a plain flat bin bottom, so older designs are
 unchanged) sets the rise, measured along the divider/tool direction: +X
 (toward the right) for a divider that runs along X, +Y (toward the back)
 along Y. `reverse_bottom` sends the rise the other way; `alternate_bottom`
@@ -931,11 +931,11 @@ note it "only contains geometry" — nothing is lost, and slicing is unaffected.
 
 - **Its zone is its size.** Drag a corner and the lettering scales to fill it.
   **Letter height** overrides that but is never allowed to overflow the box; a
-  box too small to hold the text at the **4 mm** minimum is refused, saying what
+  box too small to hold the text at the **5 mm** minimum is refused, saying what
   it needs.
 - **Place it for me** hands positioning back to the engine: stay centred where it
   fits, otherwise move beside whatever is in the way, then turn, then shrink (no
-  smaller than **7 mm** on that path). Dragging, resizing or turning it by hand
+  smaller than **5 mm** on that path). Dragging, resizing or turning it by hand
   switches that off, so it stays where you put it.
 - **Stand proud** puts the letters on top of the floor instead of sunk into it.
   Either way they remain their own part on filament 2.
@@ -1210,9 +1210,9 @@ these numbers look arbitrary and are not.
 | Lock bump | **0.35** proud, 1.0 tall, **1.2** long | on every wave extremum, so every **2.0** |
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |
 | Bump band | top **4.0** below the rim | |
-| Text letters | **10.0** ideal, **7.0** auto minimum, **4.0** floor | sunk **0.4**; a zone sizes it, a hand-set height is capped by that zone |
+| Text letters | **15.0** ideal, **5.0** auto minimum, **5.0** floor | sunk **0.4**; a zone sizes it, a hand-set height is capped by that zone |
 | Rim label | **5.0** letters, **7.0** ledge | flush at rim; 45-degree underside |
-| Scoop | **50%** of usable wall height | full usable width at front |
+| Scoop | **60%** of usable wall height | full usable width at front |
 
 Connector tolerance, length and height were chosen from a **printed five-clip fit
 plate** — the leftmost clip, read back from that 3MF as `side_clip_tol_0p020`.

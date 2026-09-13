@@ -220,8 +220,9 @@ def differing_connector_plan(
     drop = abs(height_a - height_b)
     fraction = differing_drop_fraction(drop)
     arm_thickness = connector.arm_thickness
-    grow = (DIFFERING_WEB_THICKNESS - arm_thickness) * fraction
-    if box is not None:
+    webbed = fraction > 0.0
+    grow = (DIFFERING_WEB_THICKNESS - arm_thickness) * fraction if webbed else 0.0
+    if webbed and box is not None:
         grow = max(grow, differing_web_reach(box, connector))
     return {
         "drop_mm": drop,
@@ -234,7 +235,7 @@ def differing_connector_plan(
         "shorter_bin": None if height_a == height_b else (
             "A" if height_a < height_b else "B"
         ),
-        "webbed": fraction > 0.0,
+        "webbed": webbed,
     }
 
 # --------------------------------------------------------------------------- #
@@ -498,6 +499,9 @@ class LiftGrabberSpec:
         return "XL" if self.size == "xl" else self.size.capitalize()
 
 
+MIN_HEIGHT_ABOVE_BASE = 5.0    # Z must clear the base by at least this, to fit the lock bump
+
+
 @dataclass(frozen=True)
 class BoxSpec:
     x: float = MIN_JOINABLE_SIZE
@@ -542,8 +546,11 @@ class BoxSpec:
             raise ValueError(
                 f"base thickness must be at least {TEXT_DEPTH:g} mm"
             )
-        if self.z < self.base_thickness + 5.0:
-            raise ValueError(f"box Z must be at least {self.base_thickness + 5.0:g} mm to fit the lock bump")
+        if self.z < self.base_thickness + MIN_HEIGHT_ABOVE_BASE:
+            raise ValueError(
+                f"box Z must be at least {self.base_thickness + MIN_HEIGHT_ABOVE_BASE:g} mm "
+                "to fit the lock bump"
+            )
         for name, value in (("X", self.x), ("Y", self.y)):
             if value < MIN_BOX_SIZE - 1e-9:
                 raise ValueError(
@@ -1838,7 +1845,7 @@ def top_label_outline(
     room_x = (inside_x if side in ("front", "back") else inside_y) - 2.0 * TOP_LABEL_MARGIN
     room_y = TOP_LABEL_LEDGE_DEPTH - 2.0 * TOP_LABEL_MARGIN
     width, height = maxx - minx, maxy - miny
-    if width > room_x + 1e-9 or height > TOP_LABEL_LEDGE_DEPTH + 1e-9:
+    if width > room_x + 1e-9 or height > room_y + 1e-9:
         raise ValueError(
             f"'{label}' will not fit on the rim label ledge: fixed "
             f"{TOP_LABEL_CAP_HEIGHT:g} mm letters need {width:.1f} x {height:.1f} mm "

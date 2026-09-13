@@ -59,6 +59,7 @@ from organizer_engine import (
     LOCKED_TOLERANCE,
     MAX_BOX_SIZE,
     MAX_WALL,
+    MIN_HEIGHT_ABOVE_BASE,
     MIN_WALL,
     WAVE_AMPLITUDE,
     WAVE_MATING_GAP,
@@ -435,6 +436,7 @@ def catalog_payload() -> dict[str, Any]:
         "build": SERVER_BUILD,
         "base_unit": BASE_UNIT,
         "max_box_size": MAX_BOX_SIZE,
+        "min_height_above_base_mm": MIN_HEIGHT_ABOVE_BASE,
         "modes": [
             {"value": "fused", "label": "Fused into box"},
             {"value": "separate", "label": "Removable insert"},
@@ -1517,43 +1519,63 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         arm_thickness=DEFAULT_ARM_THICKNESS,
     )
     different_heights = bool(options.get("different_heights", False))
-    bin_a_height = float(options.get("bin_a_height", box.z)) if different_heights else box.z
-    bin_b_height = float(options.get("bin_b_height", box.z)) if different_heights else box.z
+    requested_a = float(options.get("bin_a_height", box.z)) if different_heights else box.z
+    requested_b = float(options.get("bin_b_height", box.z)) if different_heights else box.z
     length = float(options.get("length", LOCKED_CONNECTOR_LENGTH))
+
+    # Direct-stack bins print with a taller body rim than the module height the
+    # user typed, because the stacking foot extends the body. Connector fit has
+    # to be validated - and built - against that real rim, not the request.
+    if box.stack.mode == "direct":
+        connector_box = stack_effective_box(box)
+        rim_a = stack_effective_box(replace(box, z=requested_a)).z
+        rim_b = stack_effective_box(replace(box, z=requested_b)).z
+    else:
+        connector_box = box
+        rim_a = requested_a
+        rim_b = requested_b
+
     output_dir = _generation_output(payload)
     output_dir.mkdir(parents=True, exist_ok=True)
+    # The filename still speaks in the module heights the user knows the bins
+    # by, not the physical rim heights.
     filename = connector_filename(
         connector,
         length=length,
-        bin_a_height=bin_a_height,
-        bin_b_height=bin_b_height,
+        bin_a_height=requested_a,
+        bin_b_height=requested_b,
         arm_thickness=arm_thickness,
         different_heights=different_heights,
-        wall=box.wall,
+        wall=connector_box.wall,
     )
     with GEOMETRY_LOCK:
         result = generate_side_file(
-            box,
+            connector_box,
             connector,
             output_dir / filename,
             "y",
             0.0,
             length,
-            bin_a_height,
-            bin_b_height,
+            rim_a,
+            rim_b,
             web_thickness=arm_thickness if different_heights else None,
             auto_adjust=False,
         )
     plan = differing_connector_plan(
-        connector, length, bin_a_height, bin_b_height, box
+        connector, length, rim_a, rim_b, connector_box
     )
     if different_heights:
         plan["length_mm"] = length
         # The web is never thinner than the inward reach, whatever the browser
-        # asked for, so report what was actually built.
-        plan["web_thickness_mm"] = max(
-            arm_thickness, DEFAULT_ARM_THICKNESS + differing_web_reach(box, connector)
-        )
+        # asked for, so report what was actually built - but only when a web
+        # was actually built. A 1-2 mm drop deliberately makes no web at all.
+        if plan["webbed"]:
+            plan["web_thickness_mm"] = max(
+                arm_thickness,
+                DEFAULT_ARM_THICKNESS + differing_web_reach(connector_box, connector),
+            )
+        else:
+            plan["web_thickness_mm"] = connector.arm_thickness
     reply = {
         "result": result,
         "connector_plan": {
