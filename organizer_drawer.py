@@ -44,13 +44,13 @@ import trimesh
 from organizer_app import connector_filename, generate_side_file
 from organizer_engine import (
     BASE_UNIT,
-    DEFAULT_ARM_THICKNESS,
     DEFAULT_WALL,
     LOCKED_CONNECTOR_LENGTH,
     WAVE_AMPLITUDE,
     WAVE_MATING_GAP,
     BoxSpec,
     ConnectorSpec,
+    differing_connector_plan,
     export_mesh,
     make_wall_lock_bumps,
     placed_outline,
@@ -337,24 +337,46 @@ def _largest_empty(free: np.ndarray) -> tuple[int, int, int, int, int]:
     return best
 
 
+def _connector_eligible(item: dict[str, Any]) -> bool:
+    """Whether this footprint's seam can take a side connector at all.
+
+    A B4B case has no bare wave wall to clip onto, and a stackable bin's
+    mouth is meant for the bin above, not a side clip - so neither should
+    ever get one, no matter how long the shared seam runs."""
+    if item["kind"] == "b4b":
+        return False
+    if item["top"].get("stack", "none") != "none":
+        return False
+    if item["kind"] in SPACER_KINDS:
+        return False
+    return True
+
+
 def _top_wall(item: dict[str, Any]) -> float:
-    """The wall a connector meets at the top of this footprint: stacking
-    raises a bin's wall to hold its snap groove."""
+    """The wall a connector meets at the top of this footprint.
+
+    Reads the actual wall the printed bin has when the inventory row
+    recorded it; only a legacy row with no Wall column falls back to the
+    old stacking-vs-ordinary guess."""
+    wall = item["top"].get("wall")
+    if isinstance(wall, (int, float)) and wall > 0:
+        return float(wall)
     return STACK_MIN_WALL if item["top"].get("stack", "none") != "none" else DEFAULT_WALL
 
 
 def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str, Any]], int]:
     """One connector per shared seam long enough to seat one, grouped by the
-    two rim heights it joins.  Stacks join at their top bins.  Returns the
-    groups and how many seams join walls of different thickness, which no
-    printed connector fits."""
+    two rim heights and wall thickness it joins.  Stacks join at their top
+    bins.  Returns the groups and how many seams join incompatible bins -
+    different wall thicknesses, or a seam too short for the reinforced
+    connector a height difference requires - which no printed connector
+    fits."""
     counts: dict[tuple[float, float, float], int] = {}
     mismatched = 0
     need = math.ceil(MIN_CONNECTOR_SEAM / step - 1e-9)
     for index, a in enumerate(items):
         for b in items[index + 1:]:
-            # X spacers nest by their waves alone; they never need a clip.
-            if a["kind"] in SPACER_KINDS or b["kind"] in SPACER_KINDS:
+            if not _connector_eligible(a) or not _connector_eligible(b):
                 continue
             if a["gx"] + a["w"] == b["gx"] or b["gx"] + b["w"] == a["gx"]:
                 overlap = min(a["gy"] + a["d"], b["gy"] + b["d"]) - max(a["gy"], b["gy"])
@@ -367,6 +389,12 @@ def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str
             wall_a, wall_b = _top_wall(a), _top_wall(b)
             if not math.isclose(wall_a, wall_b):
                 mismatched += 1
+                continue
+            plan = differing_connector_plan(
+                ConnectorSpec(), LOCKED_CONNECTOR_LENGTH, a["h"], b["h"],
+                BoxSpec(2 * UNIT, 6 * UNIT, max(a["h"], b["h"]), wall=wall_a),
+            )
+            if overlap * step + 1e-9 < max(MIN_CONNECTOR_SEAM, plan["length_mm"]):
                 continue
             key = (*sorted((round(a["h"], 2), round(b["h"], 2)), reverse=True), wall_a)
             counts[key] = counts.get(key, 0) + 1
@@ -705,7 +733,7 @@ def auto_layout(
         w, d = bin_cells(one, drawer)
         single = {
             "key": f"{bin_id}:{copy}", "bin": bin_id, "copy": copy, "row": one,
-            "w": w, "d": d, "h": float(one["z"]), "name": one.get("name", ""),
+            "w": w, "d": d, "h": stack_part_height(one), "name": one.get("name", ""),
             "kind": one.get("kind", "bin"),
         }
         if single["h"] > drawer["height"] + 1e-6:
@@ -1074,15 +1102,20 @@ def generate_connectors(
         high, low = group["heights"]
         wall = group["wall"]
         different = abs(high - low) > 1e-6
+        plan = differing_connector_plan(
+            connector, LOCKED_CONNECTOR_LENGTH, high, low,
+            BoxSpec(2 * UNIT, 6 * UNIT, high, wall=wall),
+        )
+        length = plan["length_mm"]
         name = connector_filename(
-            connector, length=LOCKED_CONNECTOR_LENGTH, bin_a_height=high, bin_b_height=low,
+            connector, length=length, bin_a_height=high, bin_b_height=low,
             different_heights=different, wall=wall,
         )
         try:
             generate_side_file(
                 BoxSpec(2 * UNIT, 6 * UNIT, high, wall=wall), connector, output_dir / name,
-                "y", 0.0, LOCKED_CONNECTOR_LENGTH, high, low,
-                web_thickness=DEFAULT_ARM_THICKNESS if different else None, auto_adjust=False,
+                "y", 0.0, length, high, low,
+                web_thickness=plan["web_thickness_mm"] if different else None, auto_adjust=False,
             )
         except ValueError as error:
             notes.append(f"{high:g} → {low:g} mm: {error}")
@@ -1090,8 +1123,8 @@ def generate_connectors(
         made.append({"file": name, "count": group["count"], "heights": [high, low]})
     if report["connector_mismatched"]:
         notes.append(
-            f"{report['connector_mismatched']} seam(s) join a stackable bin (1.2 mm wall) to an "
-            "ordinary one (0.8 mm) - no connector fits both."
+            f"{report['connector_mismatched']} seam(s) join bins with different wall "
+            "thicknesses; no single connector fits both."
         )
     return {"connectors": made, "notes": notes}
 

@@ -1488,6 +1488,11 @@ def inventory_bin_record(
     else:
         phys_x, phys_y, phys_z = box.x, box.y, box.z
 
+    if stack_enabled(box):
+        wall = stack_effective_box(box).wall
+    else:
+        wall = box.wall
+
     return {
         "file": file_names,
         "x": phys_x, "y": phys_y, "z": phys_z,
@@ -1496,6 +1501,7 @@ def inventory_bin_record(
         "name": clean_label(part_name) or tidy_label or (floor_texts[0] if floor_texts else ""),
         "kind": "b4b" if b4b_note else "bin",
         "stack": getattr(getattr(box, "stack", None), "mode", "none"),
+        "wall": wall,
     }
 
 

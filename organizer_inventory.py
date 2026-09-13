@@ -35,6 +35,7 @@ LAYOUT_HEADING = "## Drawer layout"
 COLUMNS = (
     ("id", "ID"), ("date", "Date"), ("kind", "Kind"), ("name", "Name"),
     ("x", "X (mm)"), ("y", "Y (mm)"), ("z", "Z (mm)"), ("stack", "Stack"),
+    ("wall", "Wall (mm)"),
     ("qty", "Qty"), ("file", "File"), ("label", "Label"), ("interior", "Interior Part(s)"),
 )
 # bin: generated here.  b4b: a Bin for Bins case.  spacer/shim: made by the
@@ -56,6 +57,7 @@ SPACE_KINDS = ("drawer", "box")
 _HEADER_KEYS = {
     "id": "id", "date": "date", "kind": "kind", "name": "name",
     "x": "x", "y": "y", "z": "z", "stack": "stack", "stacking": "stack",
+    "wall": "wall",
     "qty": "qty", "quantity": "qty",
     "file": "file", "label": "label", "interior part(s)": "interior",
     "interior": "interior",
@@ -138,6 +140,10 @@ def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
     name = _text(raw.get("name")) if "name" in raw else infer_name(file, label)
     qty = raw.get("qty")
     stack = _text(raw.get("stack")).lower()
+    wall_text = _text(raw.get("wall"))
+    wall = _number(wall_text) if wall_text else None
+    if wall is not None and wall <= 0:
+        wall = None
     return {
         "id": _text(raw.get("id")),
         "date": _text(raw.get("date")),
@@ -145,6 +151,7 @@ def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
         "name": name,
         "x": x, "y": y, "z": z,
         "stack": stack if stack in STACK_MODES else "none",
+        "wall": wall,
         "qty": max(0, min(MAX_QTY, int(_number(qty, 1)))) if _text(qty) else 1,
         "file": file,
         "label": label,
@@ -204,7 +211,7 @@ def parse_inventory(text: str) -> dict[str, Any]:
             mapped = [_header_key(cell) for cell in cells]
             if "x" in mapped and ("date" in mapped or "id" in mapped):
                 keys = mapped
-                legacy = legacy or "id" not in mapped or "qty" not in mapped
+                legacy = legacy or "id" not in mapped or "qty" not in mapped or "wall" not in mapped
             continue
         if all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells if cell):
             continue
@@ -238,11 +245,13 @@ def _cell(value: Any) -> str:
 
 
 def _row(one: dict[str, Any]) -> str:
+    wall = one.get("wall")
     values = {
         **one,
         "x": f"{float(one['x']):g}", "y": f"{float(one['y']):g}", "z": f"{float(one['z']):g}",
         "qty": str(int(one["qty"])),
         "stack": "" if one.get("stack", "none") == "none" else one["stack"],
+        "wall": f"{float(wall):g}" if wall else "",
     }
     return "| " + " | ".join(_cell(values.get(key, "")) for key, _ in COLUMNS) + " |"
 
@@ -415,6 +424,7 @@ def _merge_inventory(
         kind = str(raw.get("kind") or "manual")
         wanted = str(raw.get("id") or "")
         taken = {one["id"] for one in bins}
+        raw_wall = _number(raw.get("wall")) if _text(raw.get("wall")) else None
         bins.append({
             "id": wanted if re.fullmatch(r"B\d+", wanted) and wanted not in taken else next_bin_id(bins),
             "date": now,
@@ -422,6 +432,7 @@ def _merge_inventory(
             "name": clean.get("name", ""),
             "x": clean["x"], "y": clean["y"], "z": clean["z"],
             "stack": clean.get("stack", "none"),
+            "wall": raw_wall if raw_wall and raw_wall > 0 else None,
             "qty": clean.get("qty", 1),
             "file": str(raw.get("file") or ""),
             "label": str(raw.get("label") or ""),
@@ -479,6 +490,7 @@ def append_bin(
     name: str = "",
     kind: str = "bin",
     stack: str = "none",
+    wall: float | None = None,
     qty: int | None = None,
 ) -> Path:
     """Log one generated bin as a new row, keeping everything else intact.
@@ -500,6 +512,7 @@ def append_bin(
             "name": name,
             "x": float(x), "y": float(y), "z": float(z),
             "stack": stack if stack in STACK_MODES else "none",
+            "wall": float(wall) if wall and float(wall) > 0 else None,
             "qty": max(0, int(qty)),
             "file": file,
             "label": label,
