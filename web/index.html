@@ -284,12 +284,10 @@
         <canvas id="preview-2d" role="img" aria-label="Top-down layout preview" aria-describedby="preview-help layout-help"></canvas>
         <div class="camera-controls layout-controls" aria-label="2D orientation controls">
           <div class="camera-controls-row">
-            <label class="canvas-select">Orientation
-              <select id="layout-orientation">
-                <option value="match3d" selected>Match 3D</option>
-                <option value="topup">Top Up</option>
-              </select>
-            </label>
+            <div id="layout-orientation-controls" class="mode-controls" role="group" aria-label="2D orientation">
+              <button type="button" class="active" data-layout-orientation="match3d" aria-pressed="true">Match 3D</button>
+              <button type="button" data-layout-orientation="topup" aria-pressed="false">Top Up</button>
+            </div>
           </div>
         </div>
         <div id="layout-help" class="layout-hint">Use Arrow keys or drag to move</div>

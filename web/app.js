@@ -437,15 +437,9 @@ function syncLiftGrabberControls() {
   if ($("#lift-grabber-location-setting")) $("#lift-grabber-location-setting").hidden = !enabled;
 }
 
-function populateWallChoices(box, select = $("#wall-thickness")) {
+function wallPresetChoices() {
   const rules = state.catalog?.wall_rules || {};
-  // One place decides the floor a mode *requires*. Stacking and B4B both carry
-  // real load paths through the wall; an ordinary bin does not.
-  const stacking = (box?.stack?.mode || "none") !== "none";
-  const stackMin = stacking ? number(state.catalog?.stack_rules?.min_wall_mm, 1.2) : -Infinity;
-  const b4bMin = box?.b4b?.enabled ? B4B_MIN_WALL : -Infinity;
-  const modeMin = Math.max(stackMin, b4bMin);
-  const allChoices = Array.isArray(rules.choices) && rules.choices.length
+  return Array.isArray(rules.choices) && rules.choices.length
     ? rules.choices
     : [
         { value: 0.4, label: "Very thin / prototype" },
@@ -455,6 +449,17 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
         { value: 2.0, label: "Extra heavy" },
         { value: 2.4, label: "Maximum" },
       ];
+}
+
+function populateWallChoices(box, select = $("#wall-thickness")) {
+  const rules = state.catalog?.wall_rules || {};
+  // One place decides the floor a mode *requires*. Stacking and B4B both carry
+  // real load paths through the wall; an ordinary bin does not.
+  const stacking = (box?.stack?.mode || "none") !== "none";
+  const stackMin = stacking ? number(state.catalog?.stack_rules?.min_wall_mm, 1.2) : -Infinity;
+  const b4bMin = box?.b4b?.enabled ? B4B_MIN_WALL : -Infinity;
+  const modeMin = Math.max(stackMin, b4bMin);
+  const allChoices = wallPresetChoices();
   const choices = allChoices.filter(choice => number(choice.value) >= modeMin - 1e-9);
   const wall = number(box?.wall, rules.default_mm ?? 0.8);
   const value = fmt(wall);
@@ -1686,7 +1691,11 @@ function wireCameraControls() {
 
 function setLayoutOrientation(orientation) {
   state.layoutOrientation = orientation;
-  $("#layout-orientation").value = orientation;
+  $$('[data-layout-orientation]').forEach(button => {
+    const active = button.dataset.layoutOrientation === orientation;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
   renderLayout2D();
 }
 
@@ -1747,8 +1756,8 @@ function activatePreviewView(view) {
 function wireControls() {
   wireSidebar();
   wireCameraControls();
-  $("#layout-orientation").addEventListener("change",
-    event => setLayoutOrientation(event.target.value));
+  $$('[data-layout-orientation]').forEach(button =>
+    button.addEventListener("click", () => setLayoutOrientation(button.dataset.layoutOrientation)));
   $("#divider-edit-breadcrumb")?.addEventListener("click", openDividerSegmentEditor);
   $$("button.section-heading").forEach(button => button.addEventListener("click", () => {
     const section = button.closest(".control-section");
@@ -2175,6 +2184,26 @@ function field(label, key, value, options = {}) {
   </label>`;
 }
 
+// The Divider's own wall thickness is a real numeric option (no "standard"
+// sentinel like the bin wall), but it draws from the same preset catalog so
+// the two controls can never drift apart.
+function dividerThicknessField(value) {
+  const choices = wallPresetChoices();
+  const current = fmt(number(value, 1.6));
+  const isPreset = choices.some(choice => fmt(choice.value) === current);
+  const optionsHtml = choices.map(choice => {
+    const choiceValue = fmt(choice.value);
+    return `<option value="${choiceValue}" ${choiceValue === current ? "selected" : ""}>${number(choice.value).toFixed(1)} mm — ${escapeHtml(choice.label)}</option>`;
+  }).join("");
+  // A saved design keeps whatever thickness it was made with: the preset list
+  // is what a *new* choice may be, not a migration of existing geometry.
+  const customOption = isPreset ? ""
+    : `<option value="${current}" selected>${current} mm — Existing custom</option>`;
+  return `<label><span class="field-label">Wall thickness</span>
+    <select data-draft="option:thickness">${optionsHtml}${customOption}</select>
+  </label>`;
+}
+
 function scoopDepthField(key, value, options = {}) {
   return field("Scoop height", key, value, {
     unit: "% of bin height", step: "1", min: "1", max: "100",
@@ -2524,7 +2553,7 @@ function renderDraftFields() {
       html += `<div class="editor-group divider-layout"><span class="editor-group-label">Divider layout</span><div class="pair">
         ${field("X count", "option:count_x", shownGx, { min: "0", step: "1", tip: "Walls dividing the bin left to right. 0 for none." })}
         ${field("Y count", "option:count_y", shownGy, { min: "0", step: "1", tip: "Walls dividing the bin front to back. 0 for none." })}
-        ${field("Wall thickness", "option:thickness", shownThickness, { unit: "mm", step: "0.5" })}
+        ${dividerThicknessField(shownThickness)}
         ${field("Height", "option:height", shownHeight, { unit: "mm", step: "0.5" })}
       </div></div>`;
     } else {
