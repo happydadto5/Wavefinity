@@ -6048,31 +6048,60 @@ function dividerEligibleClient(feature) {
   return gx > 1 || gy > 1 || (gx > 0 && gy > 0);
 }
 
+function normalizeDividerSpansClient(feature, rows, columns) {
+  let raw = feature.options?.compartment_spans;
+  if (raw === undefined || raw === null || raw === "") return { valid: true, spans: [] };
+  if (typeof raw === "string") {
+    try { raw = JSON.parse(raw); } catch { return { valid: false, spans: [] }; }
+  }
+  if (!Array.isArray(raw)) return { valid: false, spans: [] };
+
+  const claimed = Array.from({ length: rows }, () => Array(columns).fill(false));
+  const spans = [];
+  for (const rawSpan of raw) {
+    if (!rawSpan || typeof rawSpan !== "object" || Array.isArray(rawSpan)) {
+      return { valid: false, spans: [] };
+    }
+    const values = [rawSpan.row, rawSpan.column, rawSpan.row_span, rawSpan.column_span];
+    if (!values.every(Number.isInteger)) return { valid: false, spans: [] };
+    const [row, column, rowSpan, columnSpan] = values;
+    if (row < 0 || column < 0 || rowSpan < 1 || columnSpan < 1 ||
+        row + rowSpan > rows || column + columnSpan > columns) {
+      return { valid: false, spans: [] };
+    }
+    if (rowSpan === 1 && columnSpan === 1) continue;
+    for (let oneRow = row; oneRow < row + rowSpan; oneRow++) {
+      for (let oneColumn = column; oneColumn < column + columnSpan; oneColumn++) {
+        if (claimed[oneRow][oneColumn]) return { valid: false, spans: [] };
+      }
+    }
+    const span = { row, column, rowSpan, columnSpan };
+    spans.push(span);
+    for (let oneRow = row; oneRow < row + rowSpan; oneRow++) {
+      for (let oneColumn = column; oneColumn < column + columnSpan; oneColumn++) {
+        claimed[oneRow][oneColumn] = true;
+      }
+    }
+  }
+  spans.sort((a, b) => a.row - b.row || a.column - b.column ||
+    a.rowSpan - b.rowSpan || a.columnSpan - b.columnSpan);
+  return { valid: true, spans };
+}
+
 function dividerCompartmentsClient(feature) {
   const [gx, gy] = dividerGridCountsClient(feature);
   const columns = gx + 1, rows = gy + 1;
   const [x0, y0, x1, y1] = feature.zone;
   const xEdges = Array.from({ length: columns + 1 }, (_, index) => x0 + index * (x1 - x0) / columns);
   const yEdges = Array.from({ length: rows + 1 }, (_, index) => y0 + index * (y1 - y0) / rows);
-  let raw = feature.options?.compartment_spans;
-  if (typeof raw === "string") {
-    try { raw = JSON.parse(raw); } catch { raw = []; }
-  }
-  if (!Array.isArray(raw)) raw = [];
+  const normalized = normalizeDividerSpansClient(feature, rows, columns);
   const owner = Array.from({ length: rows }, () => Array(columns).fill(null));
+  if (!normalized.valid) {
+    return { valid: false, gx, gy, rows, columns, xEdges, yEdges, cells: [], owner };
+  }
   const rectangles = [];
-  for (const span of raw) {
-    const row = Number(span?.row), column = Number(span?.column);
-    const rowSpan = Number(span?.row_span), columnSpan = Number(span?.column_span);
-    if (![row, column, rowSpan, columnSpan].every(Number.isInteger) ||
-        row < 0 || column < 0 || rowSpan < 1 || columnSpan < 1 ||
-        row + rowSpan > rows || column + columnSpan > columns) continue;
-    const cell = { row, column, rowSpan, columnSpan };
-    let overlaps = false;
-    for (let r = row; r < row + rowSpan; r++) {
-      for (let c = column; c < column + columnSpan; c++) overlaps ||= owner[r][c] !== null;
-    }
-    if (overlaps) continue;
+  for (const cell of normalized.spans) {
+    const { row, column, rowSpan, columnSpan } = cell;
     rectangles.push(cell);
     for (let r = row; r < row + rowSpan; r++) {
       for (let c = column; c < column + columnSpan; c++) owner[r][c] = cell;
@@ -6098,7 +6127,7 @@ function dividerCompartmentsClient(feature) {
       yEdges[rowEnd] - (rowEnd < rows ? thickness / 2 : 0),
     ];
   }
-  return { gx, gy, rows, columns, xEdges, yEdges, cells: rectangles, owner };
+  return { valid: true, gx, gy, rows, columns, xEdges, yEdges, cells: rectangles, owner };
 }
 
 function serializeDividerSpansClient(cells) {
@@ -6133,6 +6162,7 @@ function dividerMergeClient(a, b) {
 function dividerBoundarySegmentsClient(feature, featureIndex, toCanvas) {
   if (!dividerEligibleClient(feature)) return [];
   const topology = dividerCompartmentsClient(feature);
+  if (!topology.valid) return [];
   const hits = [];
   const add = (orientation, line, segment, a, b, p0, p1) => {
     const same = a === b;

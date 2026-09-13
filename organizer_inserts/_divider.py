@@ -273,38 +273,51 @@ def _build_divider_grid(
     return solids
 
 
-def _wall_runs(present: list[bool], edges: list[float]) -> list[tuple[float, float]]:
-    """Combine adjacent surviving atomic wall segments into long runs."""
-    runs: list[tuple[float, float]] = []
+def _wall_runs(present: list[bool]) -> list[tuple[int, int]]:
+    """Return start/end edge indexes for contiguous surviving segments."""
+    runs: list[tuple[int, int]] = []
     start: int | None = None
     for index, survives in enumerate([*present, False]):
         if survives and start is None:
             start = index
         elif not survives and start is not None:
-            runs.append((edges[start], edges[index]))
+            runs.append((start, index))
             start = None
     return runs
 
 
 def _clip_wall_to_runs(
     walls: list[trimesh.Trimesh], along: str,
-    runs: list[tuple[float, float]], outer_bounds: tuple[float, float],
+    runs: list[tuple[float, float, float, float]],
+    outer_bounds: tuple[float, float], base_z: float, height: float,
 ) -> list[trimesh.Trimesh]:
-    """Clip an established full-span wall to its surviving run intervals."""
+    """Clip a complete wall, letting joined endpoints follow crossing lean."""
     pieces: list[trimesh.Trimesh] = []
     for wall in walls:
         bounds = wall.bounds
-        for lo, hi in runs:
-            clip_lo = bounds[0].copy() - 0.5
-            clip_hi = bounds[1].copy() + 0.5
-            axis = 0 if along == "x" else 1
-            clip_lo[axis] = bounds[0][axis] - 0.5 if math.isclose(lo, outer_bounds[0]) else lo
-            clip_hi[axis] = bounds[1][axis] + 0.5 if math.isclose(hi, outer_bounds[1]) else hi
-            extents = clip_hi - clip_lo
-            if any(value <= 0.0 for value in extents):
+        run_axis = 0 if along == "x" else 1
+        cross_axis = 1 if along == "x" else 0
+        cross_width = bounds[1][cross_axis] - bounds[0][cross_axis] + 1.0
+        cross_centre = (bounds[0][cross_axis] + bounds[1][cross_axis]) / 2.0
+        for lo, hi, lo_shift, hi_shift in runs:
+            if math.isclose(lo, outer_bounds[0]):
+                lo, lo_shift = bounds[0][run_axis] - 0.5, 0.0
+            if math.isclose(hi, outer_bounds[1]):
+                hi, hi_shift = bounds[1][run_axis] + 0.5, 0.0
+            if hi <= lo:
                 continue
-            clip = trimesh.creation.box(extents=extents)
-            clip.apply_translation((clip_lo + clip_hi) / 2.0)
+            z0, z1 = base_z, base_z + height
+            profile = Polygon([
+                (lo, z0 - 0.5), (hi, z0 - 0.5), (hi, z0),
+                (hi + hi_shift, z1), (hi + hi_shift, z1 + 0.5),
+                (lo + lo_shift, z1 + 0.5), (lo + lo_shift, z1), (lo, z0),
+            ])
+            if along == "x":
+                clip = _extrude_xz_profile(profile, cross_width)
+                clip.apply_translation((0.0, cross_centre, 0.0))
+            else:
+                clip = _extrude_yz_profile(profile, cross_width)
+                clip.apply_translation((cross_centre, 0.0, 0.0))
             piece = intersection([wall.copy(), clip])
             if piece.faces.shape[0]:
                 pieces.append(piece)
@@ -312,36 +325,14 @@ def _clip_wall_to_runs(
 
 
 def _custom_grid_wall(
-    box: BoxSpec, spec_feature: Feature, along: str, centre: float,
-    runs: list[tuple[float, float]], thickness: float, height: float,
-    angle: float, base_z: float,
+    whole: list[trimesh.Trimesh], along: str,
+    runs: list[tuple[float, float, float, float]],
+    outer_bounds: tuple[float, float], base_z: float, height: float,
 ) -> list[trimesh.Trimesh]:
-    """Build one original grid line, retaining only its surviving runs."""
-    if not runs:
-        return []
-    if spec_feature.full_span:
-        whole = _one_grid_wall(
-            box, spec_feature, along, centre, thickness, height, angle,
-            base_z, True,
-        )
-        outer_bounds = (
-            (spec_feature.zone.x0, spec_feature.zone.x1)
-            if along == "x" else
-            (spec_feature.zone.y0, spec_feature.zone.y1)
-        )
-        return _clip_wall_to_runs(whole, along, runs, outer_bounds)
-
-    half_t = thickness / 2.0
-    solids: list[trimesh.Trimesh] = []
-    for lo, hi in runs:
-        wall_zone = (
-            Zone(lo, centre - half_t, hi, centre + half_t)
-            if along == "x" else
-            Zone(centre - half_t, lo, centre + half_t, hi)
-        )
-        one = replace(spec_feature, zone=wall_zone, along=along)
-        solids.extend(_divider_wall(box, one, thickness, height, angle, base_z))
-    return solids
+    """Clip one cached complete grid wall to its surviving runs."""
+    return _clip_wall_to_runs(
+        whole, along, runs, outer_bounds, base_z, height,
+    ) if runs else []
 
 
 def _build_custom_divider_grid(
@@ -354,24 +345,71 @@ def _build_custom_divider_grid(
     owner = divider_owner_matrix(cells, rows, columns)
     x_edges, y_edges = divider_grid_edges(spec_feature.zone, grid_x, grid_y)
     solids: list[trimesh.Trimesh] = []
-
-    for line in range(1, columns):
-        runs = _wall_runs([
-            owner[row][line - 1] != owner[row][line] for row in range(rows)
-        ], y_edges)
-        solids.extend(_custom_grid_wall(
-            box, spec_feature, "y", x_edges[line], runs,
-            thickness, height, angle, base_z,
-        ))
-    for line in range(1, rows):
-        runs = _wall_runs([
+    vertical_present = {
+        line: [owner[row][line - 1] != owner[row][line] for row in range(rows)]
+        for line in range(1, columns)
+    }
+    horizontal_present = {
+        line: [
             owner[line - 1][column] != owner[line][column]
             for column in range(columns)
-        ], x_edges)
-        solids.extend(_custom_grid_wall(
-            box, spec_feature, "x", y_edges[line], runs,
-            thickness, height, angle, base_z,
-        ))
+        ]
+        for line in range(1, rows)
+    }
+    vertical_walls = {
+        line: _one_grid_wall(
+            box, spec_feature, "y", x_edges[line], thickness, height, angle,
+            base_z, spec_feature.full_span,
+        )
+        for line in range(1, columns)
+        if any(vertical_present[line])
+    }
+    horizontal_walls = {
+        line: _one_grid_wall(
+            box, spec_feature, "x", y_edges[line], thickness, height, angle,
+            base_z, spec_feature.full_span,
+        )
+        for line in range(1, rows)
+        if any(horizontal_present[line])
+    }
+    lean = height * math.tan(math.radians(angle)) if angle else 0.0
+
+    def horizontal_touches(row_line: int, column_line: int) -> bool:
+        present = horizontal_present[row_line]
+        return present[column_line - 1] or present[column_line]
+
+    def vertical_touches(column_line: int, row_line: int) -> bool:
+        present = vertical_present[column_line]
+        return present[row_line - 1] or present[row_line]
+
+    for line in range(1, columns):
+        runs = [
+            (
+                y_edges[start], y_edges[end],
+                lean if start > 0 and horizontal_touches(start, line) else 0.0,
+                lean if end < rows and horizontal_touches(end, line) else 0.0,
+            )
+            for start, end in _wall_runs(vertical_present[line])
+        ]
+        if runs:
+            solids.extend(_custom_grid_wall(
+                vertical_walls[line], "y", runs,
+                (spec_feature.zone.y0, spec_feature.zone.y1), base_z, height,
+            ))
+    for line in range(1, rows):
+        runs = [
+            (
+                x_edges[start], x_edges[end],
+                lean if start > 0 and vertical_touches(start, line) else 0.0,
+                lean if end < columns and vertical_touches(end, line) else 0.0,
+            )
+            for start, end in _wall_runs(horizontal_present[line])
+        ]
+        if runs:
+            solids.extend(_custom_grid_wall(
+                horizontal_walls[line], "x", runs,
+                (spec_feature.zone.x0, spec_feature.zone.x1), base_z, height,
+            ))
 
     solids.extend(_custom_divider_sloped_bottoms(
         box, spec_feature, options, cells, rows, columns, height, base_z,

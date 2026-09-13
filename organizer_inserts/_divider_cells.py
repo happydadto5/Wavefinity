@@ -90,6 +90,8 @@ def normalized_compartment_spans(
             raise ValueError("divider compartment spans must use positive sizes")
         if row + row_span > rows or column + column_span > columns:
             raise ValueError("divider compartment span falls outside the grid")
+        if row_span == 1 and column_span == 1:
+            continue
         cells = {
             (one_row, one_column)
             for one_row in range(row, row + row_span)
@@ -98,8 +100,7 @@ def normalized_compartment_spans(
         if claimed.intersection(cells):
             raise ValueError("divider compartment spans must not overlap")
         claimed.update(cells)
-        if row_span > 1 or column_span > 1:
-            spans.append((row, column, row_span, column_span))
+        spans.append((row, column, row_span, column_span))
     return tuple(sorted(spans))
 
 
