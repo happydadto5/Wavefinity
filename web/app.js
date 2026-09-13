@@ -881,6 +881,16 @@ function applyB4BVisibility() {
     // Front label style is cosmetic to the removable front label only.
     hide("#b4b-front-label-style-row", labelSelect.value !== "front");
   }
+  // Lift grabbers protrude into the exact child-bin field B4B promises stays
+  // usable edge-to-edge, so B4B cannot offer them at all.
+  const grabberSizeSetting = $("#lift-grabber-size-setting");
+  const grabberSizeSelect = $("#lift-grabber-size");
+  if (grabberSizeSetting) grabberSizeSetting.hidden = on;
+  if (grabberSizeSelect) grabberSizeSelect.disabled = on;
+  if (on && grabberSizeSelect && grabberSizeSelect.value !== "no") {
+    grabberSizeSelect.value = "no";
+    syncLiftGrabberControls();
+  }
   applyStackVisibility();
 }
 

@@ -1433,7 +1433,7 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
         return trial, updated
 
     start_x, start_y = box.x, box.y
-    ceiling = 100.0 * BASE_UNIT
+    ceiling = math.floor(MAX_BOX_SIZE / BASE_UNIT) * BASE_UNIT
     floor_x, floor_y = start_x, start_y
     x, y = floor_x, floor_y
     result = fits(x, y)
@@ -1442,8 +1442,8 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
         y = round(y + BASE_UNIT)
         if x > ceiling:
             raise ValueError(
-                "this layout will not fit even in a very large bin - "
-                "remove or shrink a support"
+                "this layout will not fit within Wavefinity's maximum "
+                f"{ceiling:g} mm bin size - remove or shrink a support"
             )
         result = fits(x, y)
 

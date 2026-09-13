@@ -91,6 +91,7 @@ B4B_LID_SKIRT_WALL = 2.0       # locating skirt wall thickness
 # enough that the closed lid does not rattle on the spigot.
 B4B_LID_SEAT_CLEARANCE = 0.15
 B4B_LID_SKIRT_LAP = 4.0        # how far the skirt laps down past the body rim
+B4B_LID_SKIRT_MIN_LAP = 0.30   # smallest lap that still counts as a locating skirt
 # A latched lid needs a printable body wall below its latch pad, independent
 # of the selected latch strength.
 B4B_LATCHED_MIN_HEIGHT = 16.0
@@ -1605,48 +1606,18 @@ def _b4b_wall_face_table(
 
 
 def validate_b4b_lift_grabbers(box: BoxSpec) -> None:
-    """Lift grabbers must fit the B4B's own inner mating wall and clear the
-    lid's locating skirt.  Child field size, outer case size, hinge/latch/
-    handle geometry and stacking recesses are untouched by this feature."""
+    """Lift grabbers are incompatible with Bin for Bins.
+
+    They would protrude inward into the exact child-bin field B4B promises
+    stays usable edge-to-edge, so B4B refuses to generate with them enabled
+    rather than shrinking that field or moving child bins around them."""
     grabbers = box.lift_grabbers
     if not grabbers.enabled:
         return
-    eff = b4b_effective_box(box)
-    layout = b4b_layout(eff)
-    dims = grabbers.dimensions
-    faces = _b4b_wall_face_table(layout)
-    needed = dims.width + LIFT_GRABBER_WALL_MARGIN
-    checked_pairs: set[str] = set()
-    for wall in grabbers.walls:
-        pair = _B4B_GRABBER_WALL_PAIRS[wall]
-        if pair in checked_pairs:
-            continue
-        _run_axis, wave_half, _face, _inward = faces[wall]
-        available = 2.0 * (wave_half - CORNER_INSET)
-        if available < needed:
-            checked_pairs.add(pair)
-            raise ValueError(
-                f"{grabbers.size_label} lift grabbers do not fit on "
-                f"this B4B's {pair} walls. Choose a smaller size, a "
-                "different location, or make the case larger."
-            )
-    rim_z = b4b_rim_z_from_eff(eff)
-    bottom_z = rim_z - LIFT_GRABBER_RIM_CLEARANCE - dims.height
-    if bottom_z < eff.base_thickness + LIFT_GRABBER_FLOOR_CLEARANCE:
-        raise ValueError(
-            f"{grabbers.size_label} lift grabbers require a taller B4B."
-        )
-    if eff.b4b.lid:
-        # The locating skirt laps at most B4B_LID_SKIRT_LAP below the rim; the
-        # grabber's fixed 8 mm rim clearance keeps clear of it with margin, but
-        # assert it rather than trust the arithmetic silently.
-        skirt_bottom = rim_z - _skirt_lap(eff)
-        if bottom_z + dims.height > skirt_bottom - 2.0:
-            raise ValueError(
-                f"{grabbers.size_label} lift grabbers are too close to "
-                "the lid's locating skirt; choose a smaller size or a taller "
-                "B4B."
-            )
+    raise ValueError(
+        "Lift grabbers are not available on Bin for Bins because they would "
+        "protrude into the child-bin field."
+    )
 
 
 def make_b4b_lift_grabbers(box: BoxSpec) -> list[trimesh.Trimesh]:
@@ -1773,7 +1744,7 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
 
     lid = plate
     skirt_h = _skirt_lap(eff)
-    if skirt_h >= 0.4:
+    if skirt_h >= B4B_LID_SKIRT_MIN_LAP:
         skirt_ring = outer.difference(inner)
         skirt_bottom = underside_z - skirt_h
         skirt = _extrude_polygon(skirt_ring, skirt_h)
@@ -3218,6 +3189,17 @@ def validate_b4b_design(
                 f"the B4B lid skin ({lid_skin:g} mm) leaves only "
                 f"{remaining:.2f} mm beneath the {B4B_STACK_SOCKET_DEPTH:g} mm "
                 f"stacking socket (need {B4B_STACK_SOCKET_MIN_SKIN:g} mm)"
+            )
+
+    if b4b.lid and not b4b.secure_lid:
+        eff = b4b_effective_box(box)
+        lap = _skirt_lap(eff)
+        if lap + _EPS < B4B_LID_SKIRT_MIN_LAP:
+            raise ValueError(
+                f"this Lid Only B4B only has {lap:.2f} mm of locating skirt "
+                f"lap (need {B4B_LID_SKIRT_MIN_LAP:g} mm); the lid would sit "
+                "as a loose, unlocated flat plate - raise the bin height or "
+                "loosen the lid snugness"
             )
 
     cx, cy = b4b_capacity_units(box)

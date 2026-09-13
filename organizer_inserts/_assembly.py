@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from typing import Iterable
 
@@ -55,8 +56,13 @@ def build_features(
     than added to it. The exporter collects it through :func:`build_texts`;
     the preview asks for it here so it can draw it in place.
     """
+    from organizer_stack import STACK_PLUG_DEPTH, stack_enabled
+
     features = list(features)
     check_layout(box, features, bounds, base_z, mode)
+    max_feature_z = box.z
+    if stack_enabled(box):
+        max_feature_z = box.z - STACK_PLUG_DEPTH
     solids: list[trimesh.Trimesh] = []
     for one in features:
         made = FEATURE_BUILDERS[one.kind](box, one, base_z)
@@ -71,6 +77,18 @@ def build_features(
                 raise ValueError(
                     f"a {one.kind} exceeds its layout zone; reduce its size "
                     "or thickness option"
+                )
+        for solid in made:
+            if solid.bounds[1][2] > max_feature_z + 1e-6:
+                if stack_enabled(box):
+                    raise ValueError(
+                        f"a {one.kind} rises into the stacking interface; keep "
+                        f"interior parts below {max_feature_z:.1f} mm, reduce its "
+                        "height, or make the bin taller"
+                    )
+                raise ValueError(
+                    f"a {one.kind} rises above the bin rim; reduce its height "
+                    "or make the bin taller"
                 )
         whole = Zone.whole(box)
         touches_wall = (

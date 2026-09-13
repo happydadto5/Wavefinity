@@ -23,10 +23,12 @@ POCKET_FLOOR = 2.0         # solid floor thickness under a pocket recess
 
 @defaults("pocket")
 def pocket_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float]:
+    available_height = box.z - base_z
     if box.z <= 20.0:
-        default_height = box.z
+        target_height = box.z
     else:
-        default_height = min(box.z, max(20.0, round(0.40 * box.z, 1)))
+        target_height = max(20.0, round(0.40 * box.z, 1))
+    default_height = min(available_height, target_height)
     height = one.options.get("height", default_height)
     if "depth" in one.options and "height" not in one.options:
         height = max(height, one.options["depth"] + POCKET_FLOOR)
