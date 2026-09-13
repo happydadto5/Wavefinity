@@ -275,6 +275,11 @@ TEXT_FONT_WEIGHT = "bold"
 TOP_LABEL_LEDGE_DEPTH = 7.0
 TOP_LABEL_CAP_HEIGHT = 5.0
 TOP_LABEL_MARGIN = 1.0
+# The rim-label shelf used to sit flush with the rim, the same top-inside-wall
+# band a connector's arms drop into.  Default arms reach ``arm_depth`` below
+# the rim, so the shelf is kept clear of that whole zone rather than banning
+# the two features from combining.
+TOP_LABEL_CONNECTOR_CLEARANCE = 0.4
 SCOOP_HEIGHT_FRACTION = 0.6
 SCOOP_FLOOR_TOLERANCE = 0.4   # a scoop lower than this counts as flat floor
 SCOOP_CURVE_SEGMENTS = 32
@@ -429,6 +434,12 @@ LIFT_GRABBER_LOCATIONS = ("sides", "front_back", "both")
 LIFT_GRABBER_RIM_CLEARANCE = 8.0
 LIFT_GRABBER_FLOOR_CLEARANCE = 2.0     # required gap above the effective floor
 LIFT_GRABBER_WALL_MARGIN = 4.0         # extra along-wall room beyond the width
+# A grabber's hidden root has to actually bite into real wall material, not
+# just clear the wave amplitude on paper.  On a very thin wall the embed
+# formula in ``make_lift_grabbers`` caps out at (or near) the wave amplitude
+# itself, leaving next to nothing behind it - this is the least real bite a
+# grabber is allowed to root into.
+LIFT_GRABBER_MIN_ROOT_BITE = 0.2
 
 
 @dataclass(frozen=True)
@@ -1122,6 +1133,18 @@ def _place_lift_grabber(
     return result
 
 
+def lift_grabber_min_wall() -> float:
+    """Smallest wall thickness whose root bite meets ``LIFT_GRABBER_MIN_ROOT_BITE``.
+
+    The browser reads this to auto-promote the wall preset when lift grabbers
+    are switched on over a wall that would otherwise fail
+    :func:`validate_lift_grabbers` - never forcing every grabber design to one
+    fixed preset, and never touching a legacy wall that already clears it.
+    """
+    wall_depth = WAVE_AMPLITUDE + LIFT_GRABBER_MIN_ROOT_BITE + LOCK_SAFE_SKIN
+    return wall_depth / math.sqrt(1.0 + max_wave_slope() ** 2)
+
+
 def validate_lift_grabbers(box: BoxSpec) -> None:
     """Check an ordinary bin's lift grabber settings fit this box.
 
@@ -1134,6 +1157,14 @@ def validate_lift_grabbers(box: BoxSpec) -> None:
     if getattr(getattr(box, "b4b", None), "enabled", False):
         return
     dims = grabbers.dimensions
+    embed = min(WAVE_AMPLITUDE + LOCK_EMBED, box.wall_depth - LOCK_SAFE_SKIN)
+    root_bite = embed - WAVE_AMPLITUDE
+    if root_bite < LIFT_GRABBER_MIN_ROOT_BITE - 1e-9:
+        raise ValueError(
+            f"this wall is too thin for lift grabbers to root into "
+            f"({root_bite:.2f} mm of bite; {LIFT_GRABBER_MIN_ROOT_BITE:g} mm "
+            "needed). Choose a thicker wall."
+        )
     faces = _wall_face_table(box)
     needed = dims.width + LIFT_GRABBER_WALL_MARGIN
     checked_pairs: set[str] = set()
@@ -1755,6 +1786,16 @@ def _rim_label_side(side: str) -> str:
     return value
 
 
+def top_label_surface_z(box: BoxSpec) -> float:
+    """Top of the rim-label shelf: below the connector arms, not at the rim.
+
+    A standard connector's arms reach ``ConnectorSpec().arm_depth`` below the
+    rim on every wall, so a shelf flush with the rim would block them from
+    seating.  Dropping the shelf's top this far clears that zone completely.
+    """
+    return box.z - ConnectorSpec().arm_depth - TOP_LABEL_CONNECTOR_CLEARANCE
+
+
 def top_label_zone(box: BoxSpec, side: str = "back") -> Polygon:
     """Floor-plan area reserved by a rim-label ledge."""
     side = _rim_label_side(side)
@@ -1783,10 +1824,12 @@ def top_label_outline(
 ) -> Polygon | MultiPolygon:
     """Fixed 5 mm text, centred on the selected rim ledge."""
     side = _rim_label_side(side)
-    if box.z < TOP_LABEL_LEDGE_DEPTH - 1e-9:
+    surface_z = top_label_surface_z(box)
+    if surface_z - TOP_LABEL_LEDGE_DEPTH < box.base_thickness - 1e-9:
         raise ValueError(
-            f"a rim label needs a bin at least {TOP_LABEL_LEDGE_DEPTH:g} mm tall "
-            "for its 45-degree ledge"
+            f"this bin is too short for a rim label: the shelf needs "
+            f"{TOP_LABEL_LEDGE_DEPTH:g} mm below the connector-arm clearance "
+            f"at the rim, and this bin does not leave that much above its floor"
         )
     top_label_zone(box, side)
     outline = text_outline(label, TOP_LABEL_CAP_HEIGHT)
@@ -1825,14 +1868,15 @@ def make_top_label_ledge(box: BoxSpec, side: str = "back") -> trimesh.Trimesh:
     inside_x, inside_y = box.usable_inside
     envelope_polygon = wavy_outer_polygon(box)
     minx, miny, maxx, maxy = envelope_polygon.bounds
-    low_z = box.z - TOP_LABEL_LEDGE_DEPTH
+    top_z = top_label_surface_z(box)
+    low_z = top_z - TOP_LABEL_LEDGE_DEPTH
     if side in ("front", "back"):
         wall = (inside_y / 2.0) if side == "back" else (-inside_y / 2.0)
         inward = -1.0 if side == "back" else 1.0
         outer = maxy if side == "back" else miny
         profile = Polygon([
-            (wall + inward * TOP_LABEL_LEDGE_DEPTH, box.z),
-            (outer, box.z), (outer, low_z), (wall, low_z),
+            (wall + inward * TOP_LABEL_LEDGE_DEPTH, top_z),
+            (outer, top_z), (outer, low_z), (wall, low_z),
         ])
         ledge = _extrude_yz_profile(profile, maxx - minx)
     else:
@@ -1840,8 +1884,8 @@ def make_top_label_ledge(box: BoxSpec, side: str = "back") -> trimesh.Trimesh:
         inward = 1.0 if side == "left" else -1.0
         outer = minx if side == "left" else maxx
         profile = Polygon([
-            (wall + inward * TOP_LABEL_LEDGE_DEPTH, box.z),
-            (outer, box.z), (outer, low_z), (wall, low_z),
+            (wall + inward * TOP_LABEL_LEDGE_DEPTH, top_z),
+            (outer, top_z), (outer, low_z), (wall, low_z),
         ])
         ledge = _extrude_xz_profile(profile, maxy - miny)
     # Trim the ends back to just inside the wavy side walls.  Cutting a hair
@@ -1856,8 +1900,8 @@ def make_top_label_ledge(box: BoxSpec, side: str = "back") -> trimesh.Trimesh:
 
 
 def make_top_label(box: BoxSpec, label: str, side: str = "back") -> trimesh.Trimesh:
-    """The separate-colour inlay that finishes flush with the rim."""
-    return text_prism(top_label_outline(box, label, side), box.z)
+    """The separate-colour inlay that finishes flush with the shelf surface."""
+    return text_prism(top_label_outline(box, label, side), top_label_surface_z(box))
 
 
 def make_top_labelled_box(
@@ -2298,6 +2342,7 @@ def top_label_report(box: BoxSpec, label: str, side: str = "back") -> dict[str, 
         "rotated": normalized_side in ("left", "right"),
         "footprint_mm": [round(maxx - minx, 3), round(maxy - miny, 3)],
         "ledge_depth_mm": TOP_LABEL_LEDGE_DEPTH,
+        "ledge_surface_z_mm": round(top_label_surface_z(box), 3),
         "ledge_underside_degrees": 45.0,
         "depth_mm": TEXT_DEPTH,
     }

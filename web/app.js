@@ -738,6 +738,37 @@ function readLiftGrabberForm(design) {
     location: $("#lift-grabber-location")?.value || "sides",
   };
 }
+
+// Lift grabbers need a real bite into the wall, not just wave clearance on
+// paper - a very thin wall fails that check server-side. Rather than reject
+// the combination, bump the wall preset up to the first one that clears it
+// (normally Standard) whenever grabbers are switched on over too thin a
+// wall. A wall that already clears it - including a legacy value like
+// 0.6 mm - is left exactly as the user set it.
+function promoteWallForLiftGrabbers() {
+  const select = $("#wall-thickness");
+  if (!select) return;
+  const defaultWall = number(state.catalog?.wall_rules?.default_mm, 0.8);
+  const minWall = number(state.catalog?.lift_grabbers?.min_wall_mm, defaultWall);
+  const currentValue = select.value;
+  const currentWall = currentValue === "standard" ? defaultWall : number(currentValue, defaultWall);
+  if (currentWall >= minWall - 1e-9) return;
+  const candidates = [...select.options]
+    .map(option => ({
+      option,
+      wall: option.value === "standard" ? defaultWall : number(option.value, NaN),
+    }))
+    .filter(entry => Number.isFinite(entry.wall) && entry.wall >= minWall - 1e-9)
+    .sort((a, b) => a.wall - b.wall);
+  if (!candidates.length) return;
+  select.value = candidates[0].option.value;
+  if (select.value === "standard") {
+    delete select.dataset.customValue;
+  } else {
+    select.dataset.customValue = select.value;
+  }
+  flashField(select);
+}
 // Product minimums. Switching to B4B grows undersized field axes to 48 mm;
 // height stays user-controlled and is reported if it cannot carry a latched lid.
 const B4B_LATCHED_MIN_HEIGHT = 16;
@@ -1709,6 +1740,7 @@ function wireControls() {
     }));
   $("#lift-grabber-size").addEventListener("change", () => {
     syncLiftGrabberControls();
+    if ($("#lift-grabber-size").value !== "no") promoteWallForLiftGrabbers();
     changedDesign();
   });
   $("#lift-grabber-location").addEventListener("change", changedDesign);

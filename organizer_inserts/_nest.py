@@ -19,6 +19,11 @@ from ._registry import (
 NEST_CHAMFER = 2.0
 NEST_TOP_ROUND = 1.0
 NEST_FINGER_WIDTH = 25.0
+# Minimum solid wall left below a finger cutter's floor.  The requested finger
+# WIDTH is never shrunk to fit a short wall - only the cutter's vertical
+# reach is, so a 25 mm-wide opening on an 8 mm wall still opens the full 25 mm
+# across but stops 1.5 mm above the floor instead of cutting through it.
+NEST_FINGER_BOTTOM_SKIN = 1.5
 NEST_PUSH_AREA = 30.0
 NEST_PUSH_DEPTH = 4.0
 NEST_ASSISTS = {"none", "finger_grasp", "push_out"}
@@ -159,7 +164,10 @@ def _nest_finger_cutters(
     min_x, min_y, max_x, max_y = opening.bounds
     inside = opening.representative_point()
     reach = rim + NEST_CHAMFER + 3.0
-    radius = width / 2.0
+    horizontal_radius = width / 2.0
+    vertical_radius = min(horizontal_radius, wall_height - NEST_FINGER_BOTTOM_SKIN)
+    if vertical_radius <= 0.0:
+        raise ValueError("Snug Holder wall is too short for a finger grasp")
     cutters: list[trimesh.Trimesh] = []
 
     if position in {"sides", "both"}:
@@ -169,7 +177,11 @@ def _nest_finger_cutters(
         xs = _line_coordinates(crossing, 0)
         if len(xs) < 2:
             raise ValueError("Finger grasps could not find both sides of this outline")
-        profile = Point(float(inside.y), base_z + wall_height).buffer(radius, quad_segs=32)
+        centre = (float(inside.y), base_z + wall_height)
+        profile = affinity.scale(
+            Point(centre).buffer(1.0, quad_segs=32),
+            xfact=horizontal_radius, yfact=vertical_radius, origin=centre,
+        )
         for boundary, direction in ((min(xs), -1.0), (max(xs), 1.0)):
             start = boundary + direction * (rim + NEST_CHAMFER + 1.0)
             end = boundary - direction * 2.0
@@ -184,7 +196,11 @@ def _nest_finger_cutters(
         ys = _line_coordinates(crossing, 1)
         if len(ys) < 2:
             raise ValueError("Finger grasps could not find both ends of this outline")
-        profile = Point(float(inside.x), base_z + wall_height).buffer(radius, quad_segs=32)
+        centre = (float(inside.x), base_z + wall_height)
+        profile = affinity.scale(
+            Point(centre).buffer(1.0, quad_segs=32),
+            xfact=horizontal_radius, yfact=vertical_radius, origin=centre,
+        )
         for boundary, direction in ((min(ys), -1.0), (max(ys), 1.0)):
             start = boundary + direction * (rim + NEST_CHAMFER + 1.0)
             end = boundary - direction * 2.0

@@ -67,6 +67,7 @@ from organizer_engine import (
     ConnectorSpec,
     differing_connector_plan,
     differing_web_reach,
+    lift_grabber_min_wall,
     make_top_label,
     make_top_label_ledge,
     max_wave_slope,
@@ -495,6 +496,10 @@ def catalog_payload() -> dict[str, Any]:
         "lift_grabbers": {
             "default_size": "medium",
             "default_location": "sides",
+            # Smallest wall thickness whose grabber root actually bites into
+            # the wall; below this, the browser bumps a newly-enabled
+            # grabber's wall up to the next preset that clears it.
+            "min_wall_mm": round(lift_grabber_min_wall(), 3),
             "sizes": [
                 {"value": "small", "label": "Small"},
                 {"value": "medium", "label": "Medium"},

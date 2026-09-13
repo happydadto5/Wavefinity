@@ -58,10 +58,13 @@ from organizer_engine import (
     measure_lock,
     max_wave_slope,
     mesh_report,
+    scoop_dimensions,
     scoop_floor_zone,
     scoop_keep_out,
+    LIFT_GRABBER_RIM_CLEARANCE,
     top_label_outline,
     top_label_report,
+    top_label_surface_z,
     top_label_zone,
     translated,
     union,
@@ -183,6 +186,31 @@ def validate_stack_rim_label(box: BoxSpec, label: str, label_location: str) -> N
         "stacking - the label ledge and the stacking interface both need "
         "the bin mouth. Remove the rim label or turn stacking off"
     )
+
+
+def validate_scoop_lift_grabbers(box: BoxSpec, scoop: bool) -> None:
+    """A front scoop's rise and front-wall lift grabbers can occupy the same Z.
+
+    Shared by preview and generation so they can never disagree. Side-only
+    grabbers never conflict with the front scoop, so only the front wall
+    ("-y") is checked. This is a real Z-axis collision, not the 2D floor
+    footprint ``_customization_zones`` checks, so it has to be tested
+    separately from that.
+    """
+    if not scoop or not box.lift_grabbers.enabled:
+        return
+    if "-y" not in box.lift_grabbers.walls:
+        return
+    scoop_top = box.base_thickness + scoop_dimensions(box)[0]
+    grabber_bottom = (
+        box.z - LIFT_GRABBER_RIM_CLEARANCE - box.lift_grabbers.dimensions.height
+    )
+    if scoop_top > grabber_bottom:
+        raise ValueError(
+            "the front scoop rises into the front-wall lift grabbers. Choose "
+            "a smaller grabber size, use side-only grabbers, make the bin "
+            "taller, or disable the scoop"
+        )
 
 
 # --- guided part palette ---------------------------------------------------
@@ -734,6 +762,7 @@ def preview_geometry(
         label = text_of(rim_feature)
         label_location = str(rim_feature.options.get("rim_side", "back"))
     validate_stack_rim_label(box, label, label_location)
+    validate_scoop_lift_grabbers(box, scoop)
 
     features = resolve_text_features(
         box, features,
@@ -951,11 +980,12 @@ def preview_geometry(
                 [[float(x), float(y)] for x, y in piece.exterior.coords]
                 for piece in pieces
             ]
+            label_z = top_label_surface_z(box)
             for piece in pieces:
-                geometry.append(([(x, y, box.z) for x, y in piece.exterior.coords],
+                geometry.append(([(x, y, label_z) for x, y in piece.exterior.coords],
                                  "label", (0.0, 0.0, 1.0), 2, None))
                 for ring in piece.interiors:
-                    geometry.append(([(x, y, box.z) for x, y in ring.coords],
+                    geometry.append(([(x, y, label_z) for x, y in ring.coords],
                                      "label_hole", (0.0, 0.0, 1.0), 3, None))
 
     inside_x, inside_y = box.usable_inside
@@ -1013,6 +1043,7 @@ def generate_box_file(
     """
     tidy = clean_label(label)
     location = label_position(label_location)
+    validate_scoop_lift_grabbers(box, scoop)
     body = make_box(box)
     if scoop:
         body = union([body, make_scoop(box)])
@@ -1211,6 +1242,7 @@ def generate_organizer_files(
         label = text_of(rim_feature)
         label_location = str(rim_feature.options.get("rim_side", "back"))
     validate_stack_rim_label(stack_request, label, label_location)
+    validate_scoop_lift_grabbers(box, scoop)
     layout = replace(
         layout,
         features=resolve_text_features(

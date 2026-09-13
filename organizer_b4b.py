@@ -3851,9 +3851,14 @@ def b4b_front_label_fit(box: BoxSpec) -> tuple[bool, float, float, float]:
         # The folded U frames the label rather than covering it: the readable
         # area is the clear opening between the arms, under the pivot forks.
         avail_w = min(avail_w, handle.clear_grip - 2.0 * B4B_LABEL_KEEPOUT)
+        # The folded horizontal grip bar itself crosses the front wall lower
+        # than the pivot root does on a short handle - the holder has to clear
+        # that too, not just the root.
+        grip_bottom_z = handle.grip_z - handle.band / 2.0 - B4B_LABEL_KEEPOUT
         insertion_ceiling_z = min(
             insertion_ceiling_z,
             handle.root_bottom_z - B4B_LABEL_KEEPOUT,
+            grip_bottom_z,
         )
     side_margin = B4B_FRONT_LABEL_SIDE_LEG_W - B4B_FRONT_LABEL_SIDE_OVERLAP
     # Generic placeholders (not the actual label text) used only to answer
@@ -3876,6 +3881,11 @@ def b4b_front_label_eligibility(box: BoxSpec) -> tuple[bool, str]:
     fits, _avail_w, _ceiling_z, _bottom_z = b4b_front_label_fit(box)
     if fits:
         return True, ""
+    if b4b_handle_plan(box) is not None:
+        return False, (
+            "Not enough size for a front label: the folded handle's grip "
+            "leaves too little clear wall below it."
+        )
     return False, "Not enough size for a front label."
 
 
