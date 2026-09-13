@@ -4069,8 +4069,9 @@ def _b4b_wavy_front_label_plate_and_text(
         plate_w, plate_h, front_y, lambda x, z: front_y(x, z) + TEXT_DEPTH,
     )
     pocket_shell = _b4b_wavy_label_slab(
-        plate_w, plate_h, front_y,
-        lambda x, z: front_y(x, z) + TEXT_DEPTH + inlay_overlap,
+        plate_w, plate_h,
+        lambda x, z: front_y(x, z) - inlay_overlap,
+        lambda x, z: front_y(x, z) + TEXT_DEPTH - inlay_overlap,
     )
     text_solid = _intersection([text_mask, text_shell])
     pocket = _intersection([text_mask, pocket_shell])
