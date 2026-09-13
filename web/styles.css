@@ -115,6 +115,11 @@ input[type="number"]::-webkit-inner-spin-button {
   margin-left: 6px;
   cursor: pointer;
 }
+.draft-fields .field-label {
+  display: block;
+  min-height: 1.4em;
+  line-height: 1.4;
+}
 .unit { float: right; color: var(--muted); font-weight: 450; }
 .field-grid { display: grid; gap: 10px; }
 .field-grid.three { grid-template-columns: repeat(3, 1fr); }
@@ -219,6 +224,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .draft-fields .editor-toggle.wide { grid-column: 1 / -1; }
 /* Two toggles (or a toggle + its revealed field) sharing one row. */
 .draft-fields .toggle-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; align-items: center; }
+.draft-fields .toggle-grid fieldset { margin: 0; }
 /* A labelled cluster of related controls (Repeats, Slope base...). */
 .draft-fields .editor-group {
   grid-column: 1 / -1; display: grid; gap: 8px; margin: 2px 0;
