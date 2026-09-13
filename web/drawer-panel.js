@@ -138,13 +138,13 @@ DP.build = () => {
         <label class="checkbox-row dl-new-printed" title="Off: a newly generated bin starts at Qty 0 until you mark it printed. On: it counts as one printed copy straight away."><span>New bins count as printed</span><input id="dl-new-printed" type="checkbox"></label>
         <details class="dl-details" id="dl-add-details">
           <summary>+ Add a bin by hand</summary>
-          <p class="dl-note">For bins printed before logging, or elsewhere. Sizes round up to whole grid cells in a drawer.</p>
+          <p class="dl-note">For bins printed before logging, or elsewhere. Width, length and height snap to the same sizes a designed bin uses.</p>
           <div class="field-grid three"><label>Name<input id="dl-add-name" type="text" maxlength="80" placeholder="e.g. Hex keys"></label>
             <label>Qty printed<input id="dl-add-qty" type="number" min="0" step="1" value="1"></label>
             <label>Stacking<select id="dl-add-stack">${STACK_OPTIONS}</select></label></div>
           <div class="field-grid three">
-            <label>Width <span class="unit">mm</span><input id="dl-add-x" type="number" min="1" step="8" value="32"></label>
-            <label>Length <span class="unit">mm</span><input id="dl-add-y" type="number" min="1" step="8" value="48"></label>
+            <label>Width <span class="unit">mm</span><input id="dl-add-x" type="text" inputmode="numeric" value="32"></label>
+            <label>Length <span class="unit">mm</span><input id="dl-add-y" type="text" inputmode="numeric" value="48"></label>
             <label>Physical height <span class="unit">mm</span><input id="dl-add-z" type="number" min="1" step="1" value="40" title="Full printed height including lid/stacking foot"></label>
           </div>
           <div class="button-row"><button type="button" id="dl-add" class="button secondary">Add to inventory</button></div>
@@ -323,14 +323,52 @@ DP.wire = () => {
   });
   list.addEventListener("dragend", () => { DV.dragBin = null; DV.drop = null; DV.render(); });
 
+  // Width and length step/snap exactly like the normal design form's Width
+  // and Length (snapToUnit, from app.js) so a hand-added bin can't land on a
+  // size a designed bin never could.
+  const wireManualDimension = selector => {
+    const input = $(selector);
+    const unit = () => state.catalog.base_unit;
+    input.addEventListener("blur", () => {
+      input.value = String(snapToUnit(number(input.value, unit()), unit()));
+    });
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") { input.blur(); return; }
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      const delta = event.key === "ArrowUp" ? unit() : -unit();
+      input.value = String(snapToUnit(number(input.value, unit()) + delta, unit()));
+      input.select();
+    });
+    input.addEventListener("wheel", event => {
+      event.preventDefault();
+      const current = number(input.value, unit());
+      const delta = event.deltaY < 0 ? unit() : -unit();
+      const next = snapToUnit(current + delta, unit());
+      if (next === current && delta < 0) return;
+      input.value = String(next);
+    }, { passive: false });
+  };
+  wireManualDimension("#dl-add-x");
+  wireManualDimension("#dl-add-y");
+
   $("#dl-add").addEventListener("click", async () => {
     const stack = $("#dl-add-stack").value;
     const physicalZ = dlNum($("#dl-add-z").value, 0);
     const engagement = DL.stackSteps[stack] ?? 0;
+    // Height floors the same way the normal design form's Height does (see
+    // normalizeBinDimension in app.js), using the catalog's default base
+    // thickness since a hand-added bin has no design of its own to read one
+    // from. physicalZ of 0/blank stays 0 so the missing-height check below
+    // still fires instead of silently floating up to the minimum.
+    const moduleZ = physicalZ > 0
+      ? normalizeBinDimension("z", physicalZ - engagement, physicalZ - engagement,
+          { baseThickness: state.catalog?.base_rules?.default_mm })
+      : 0;
     const bin = {
       name: $("#dl-add-name").value.trim(),
       qty: Math.max(0, Math.round(dlNum($("#dl-add-qty").value, 1))),
-      x: dlNum($("#dl-add-x").value, 0), y: dlNum($("#dl-add-y").value, 0), z: physicalZ - engagement,
+      x: dlNum($("#dl-add-x").value, 0), y: dlNum($("#dl-add-y").value, 0), z: moduleZ,
       stack,
       kind: "manual",
     };

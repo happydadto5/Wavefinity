@@ -1270,16 +1270,19 @@ async function changeBinType() {
   changedDesign();
 }
 
-// Shared by typed Width/Length/Height edits and by dragging their dimension
-// labels (see hitDimensionHandle/commitDimensionDrag), so both paths always
-// land on the same legal value: X/Y snap to the catalog base unit and clamp
+// Shared by typed Width/Length/Height edits, by dragging their dimension
+// labels (see hitDimensionHandle/commitDimensionDrag), and by the manual
+// inventory "Add a bin by hand" form (see drawer-panel.js), so every path
+// lands on the same legal value: X/Y snap to the catalog base unit and clamp
 // to [unit, max_box_size]; Z rounds to whole millimetres with a floor that
-// clears the base thickness by min_height_above_base_mm (BoxSpec requires it).
-function normalizeBinDimension(axis, requestedValue, fallback) {
+// clears the base thickness by min_height_above_base_mm (BoxSpec requires
+// it). `baseThickness` lets a caller with no open design (manual inventory)
+// supply its own floor instead of reading state.design.
+function normalizeBinDimension(axis, requestedValue, fallback, { baseThickness } = {}) {
   const value = number(requestedValue, fallback);
   if (axis === "z") {
     const base = number(
-      state.design?.box?.base_thickness,
+      baseThickness ?? state.design?.box?.base_thickness,
       state.catalog?.base_rules?.default_mm ?? 0.6
     );
     const minimum = Math.ceil(
@@ -1289,7 +1292,14 @@ function normalizeBinDimension(axis, requestedValue, fallback) {
   }
   const unit = state.catalog.base_unit;
   const max = Math.floor((state.catalog.max_box_size || 350) / unit) * unit;
-  return Math.min(max, Math.max(unit, Math.round(value / unit) * unit));
+  return Math.min(max, snapToUnit(value, unit));
+}
+
+// The exact X/Y rounding rule normal Width/Length arrow keys, wheel and blur
+// all use, and now the manual inventory form too: nearest whole catalog
+// unit, floored at one unit.
+function snapToUnit(value, unit) {
+  return Math.max(unit, Math.round(value / unit) * unit);
 }
 
 function updateDesignFromForm() {
@@ -1869,7 +1879,7 @@ function wireControls() {
       const previousDesign = clone(state.design);
       const unit = state.catalog.base_unit;
       const rawVal = number(input.value, state.design.box[axis]);
-      const snapped = Math.max(unit, Math.round(rawVal / unit) * unit);
+      const snapped = snapToUnit(rawVal, unit);
       const prev = state.design.box[axis];
       if (snapped !== prev) markBinAxisManual(axis);
       state.design.box[axis] = snapped;
@@ -1890,7 +1900,7 @@ function wireControls() {
         const unit = state.catalog.base_unit;
         const current = number(input.value, state.design.box[axis]);
         const delta = event.key === "ArrowUp" ? unit : -unit;
-        const next = Math.max(unit, Math.round((current + delta) / unit) * unit);
+        const next = snapToUnit(current + delta, unit);
         markBinAxisManual(axis);
         input.value = String(next);
         input.select();
@@ -1906,7 +1916,7 @@ function wireControls() {
       const unit = state.catalog.base_unit;
       const current = number(input.value, state.design.box[axis]);
       const delta = event.deltaY < 0 ? unit : -unit;
-      const next = Math.max(unit, Math.round((current + delta) / unit) * unit);
+      const next = snapToUnit(current + delta, unit);
       if (next === current && delta < 0) return;
       markBinAxisManual(axis);
       state.design.box[axis] = next;
