@@ -40,19 +40,11 @@ from shapely.affinity import rotate as rotate_polygon, translate as translate_po
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 from shapely.ops import unary_union
 
-from organizer_easy_clean import (
-    EASY_CLEAN_RADIUS,
-    easy_clean_profile,
-    easy_clean_settings,
-)
 from organizer_geometry import (
-    _align_ring,
     _cleaned,
     _extrude_polygon,
     _extrude_xz_profile,
     _extrude_yz_profile,
-    _loft_cavity,
-    _resampled_ring,
     _sweep_profile,
     difference,
     intersection,
@@ -503,10 +495,7 @@ class BoxSpec:
     corner_fillet: float = DEFAULT_CORNER_FILLET
     flat_inside: float = 0.0   # mm of flat-walled band rising from the floor
     base_thickness: float = DEFAULT_BASE_THICKNESS
-    easy_clean: bool = False
     standard_base: bool = True
-    easy_clean_radius: float = EASY_CLEAN_RADIUS
-    easy_clean_style: str = "bevel"
     # UI/save-state intent only. ``wall`` remains the authoritative geometry
     # value so existing positional callers and CLI custom walls keep working.
     standard_walls: bool = True
@@ -525,7 +514,6 @@ class BoxSpec:
             "X": self.x, "Y": self.y, "Z": self.z,
             "wall": self.wall, "corner fillet": self.corner_fillet,
             "base thickness": self.base_thickness,
-            "easy clean radius": self.easy_clean_radius,
         }
         for name, value in values.items():
             if not math.isfinite(value) or value <= 0:
@@ -534,7 +522,6 @@ class BoxSpec:
             raise ValueError(
                 f"wall thickness must be between {MIN_WALL:g} and {MAX_WALL:g} mm"
             )
-        easy_clean_settings(self.easy_clean_style, self.easy_clean_radius)
         if not 0.0 <= self.flat_inside <= 1.0:
             raise ValueError("flat inside must be between 0 and 1 mm")
         if self.flat_inside > 0.0 and self.base_thickness + self.flat_inside >= self.z:
@@ -888,128 +875,6 @@ def mating_clearance(
             f"stand on the grid as placed"
         )
     return first.distance(second)
-
-
-def _easy_clean_profile(spec: BoxSpec) -> list[tuple[float, float]]:
-    """Box adapter for the reusable Easy Clean floor-to-wall profile."""
-    # A straight lower band must cover the full excursion of the cavity above
-    # it.  Otherwise the troughs left beside a straight fillet form a second,
-    # wavy dirt-catching groove at the floor.
-    embed = 2.0 * WAVE_AMPLITUDE + 0.2
-    return easy_clean_profile(
-        spec.base_thickness,
-        easy_clean_settings(spec.easy_clean_style, spec.easy_clean_radius),
-        embed,
-    )
-
-
-def _easy_clean_fillets(
-    spec: BoxSpec,
-    blocked_walls: Iterable[tuple[str, float, float]] = (),
-) -> list[trimesh.Trimesh]:
-    """Return fillet sweeps, omitting intervals occupied by interior parts.
-
-    Wall labels are ``+x``, ``-x``, ``+y`` and ``-y``; the interval is measured
-    along that wall's y or x axis respectively.
-    """
-    blocked: dict[str, list[tuple[float, float]]] = {name: [] for name in ("+x", "-x", "+y", "-y")}
-    for wall, low, high in blocked_walls:
-        if wall in blocked and high > low:
-            blocked[wall].append((low, high))
-    tx, ty = spec.half_x - CORNER_INSET, spec.half_y - CORNER_INSET
-    walls = (
-        ("+x", "y", spec.half_x - spec.wall_depth, ty, (-1.0, 0.0)),
-        ("-x", "y", -(spec.half_x - spec.wall_depth), ty, (1.0, 0.0)),
-        ("+y", "x", spec.half_y - spec.wall_depth, tx, (0.0, -1.0)),
-        ("-y", "x", -(spec.half_y - spec.wall_depth), tx, (0.0, 1.0)),
-    )
-    result: list[trimesh.Trimesh] = []
-    for name, axis, face, reach, inward in walls:
-        cuts = [(max(-reach, low), min(reach, high)) for low, high in blocked[name]]
-        cuts = sorted((low, high) for low, high in cuts if low < high)
-        cursor = -reach
-        free: list[tuple[float, float]] = []
-        for low, high in cuts:
-            if low > cursor:
-                free.append((cursor, low))
-            cursor = max(cursor, high)
-        if cursor < reach:
-            free.append((cursor, reach))
-        for low, high in free:
-            if high - low < 0.25:
-                continue
-            samples = np.linspace(low, high, max(4, _sample_count(high - low)))
-            if axis == "y":
-                path = [(face, float(s)) for s in samples]
-            else:
-                path = [(float(s), face) for s in samples]
-            result.append(_sweep_profile(path, inward, _easy_clean_profile(spec)))
-    return result
-
-
-def _easy_clean_cavity(spec: BoxSpec) -> trimesh.Trimesh:
-    """Cavity with a straight, rounded lower band that blends into the wave.
-
-    The first radius is the constant floor-to-wall round.  The next radius
-    eases from the straight wall into the normal wave, so there is no ledge at
-    the top for debris to collect on.
-    """
-    settings = easy_clean_settings(spec.easy_clean_style, spec.easy_clean_radius)
-    radius = settings.radius
-    floor_z = spec.base_thickness
-    blend_top = floor_z + 2.0 * radius
-    if blend_top >= spec.z:
-        raise ValueError(
-            "easy clean needs room for its curve and smooth wall transition; "
-            "reduce the curve or increase Z"
-        )
-
-    flat = flat_cavity_polygon(spec)
-    floor = flat.buffer(-radius, join_style=1, quad_segs=16)
-    if not isinstance(floor, Polygon) or floor.is_empty or floor.area <= 0.0:
-        raise ValueError("easy clean curve is too large for this bin")
-
-    wave = wavy_cavity_polygon(spec)
-    # The full-resolution rounded outline carries many duplicate-near corner
-    # samples.  Half the normal wall sampling is still finer than a printable
-    # layer while keeping this otherwise tall, multi-ring cavity lightweight.
-    count = max(128, math.ceil(wave.length * SAMPLES_PER_MM / 2.0))
-    wave_points = _resampled_ring(wave, count)
-    flat_points = _align_ring(wave_points, _resampled_ring(flat, count))
-    floor_points = _align_ring(wave_points, _resampled_ring(floor, count))
-
-    # A circular fillet reaches the straight wall at one radius.  Cosine easing
-    # then starts and finishes tangent to both walls, rather than making a
-    # horizontal shelf where the normal wave resumes.
-    rings: list[np.ndarray] = []
-    heights: list[float] = []
-    if settings.style == "bevel":
-        rings.append(floor_points)
-        heights.append(floor_z)
-        rings.append(flat_points)
-        heights.append(floor_z + radius)
-    else:
-        # Ten evenly spaced arc sections are finer than a typical print layer at
-        # the default 2 mm radius.  Sampling the angle (rather than the horizontal
-        # inset) keeps those sections evenly distributed and avoids a needlessly
-        # dense exported mesh.
-        curve_steps = 10
-        for step in range(curve_steps + 1):
-            angle = math.pi * step / (2.0 * curve_steps)
-            fraction = 1.0 - math.cos(angle)
-            rings.append(floor_points + fraction * (flat_points - floor_points))
-            heights.append(floor_z + radius * math.sin(angle))
-
-    blend_steps = 10
-    for step in range(1, blend_steps + 1):
-        fraction = step / blend_steps
-        eased = 0.5 - 0.5 * math.cos(math.pi * fraction)
-        rings.append(flat_points + eased * (wave_points - flat_points))
-        heights.append(floor_z + radius + radius * fraction)
-
-    rings.append(wave_points)
-    heights.append(spec.z + 1.0)
-    return _loft_cavity(rings, heights)
 
 
 # --------------------------------------------------------------------------- #
@@ -1384,10 +1249,7 @@ def flat_cavity_polygon(spec: BoxSpec) -> Polygon:
     )
 
 
-def make_box(
-    spec: BoxSpec,
-    blocked_walls: Iterable[tuple[str, float, float]] = (),
-) -> trimesh.Trimesh:
+def make_box(spec: BoxSpec) -> trimesh.Trimesh:
     # Architecture guard: a B4B has its own body builder (organizer_b4b.
     # make_b4b_body).  If a B4B spec reaches the ordinary path a route was
     # missed - fail loudly rather than silently print a plain box.
@@ -1395,11 +1257,8 @@ def make_box(
         raise ValueError(
             "B4B BoxSpec must use the dedicated B4B builder, not make_box()"
         )
-    blocked_walls = tuple(blocked_walls)
     envelope = _extrude_polygon(wavy_outer_polygon(spec), spec.z)
-    if spec.easy_clean and not blocked_walls:
-        cavity = _easy_clean_cavity(spec)
-    elif spec.flat_inside > 0.0:
+    if spec.flat_inside > 0.0:
         # The cavity is two stacked prisms: a straight-sided one sitting on the
         # floor, and the wavy one above it.  What that leaves behind is a band
         # of wall with flat faces for the first flat_inside mm, which is the
@@ -1451,16 +1310,8 @@ def make_box(
             if len(solids) != 1:
                 raise RuntimeError("stack snap detents did not join the body")
             result = solids[0]
-    if spec.easy_clean and blocked_walls:
-        # Manifold's multi-solid union can leave a non-manifold seam where
-        # adjacent wall sweeps meet at a corner; fusing each wall in turn is
-        # equivalent geometry and keeps the exported bin watertight.
-        for fillet in _easy_clean_fillets(spec, blocked_walls):
-            # Additive fillets may bury deeply for a clean lower wall, but may
-            # never cross the fixed exterior mating envelope on thin walls.
-            result = union([result, intersection([fillet, envelope])])
     result.remove_unreferenced_vertices()
-    if not spec.easy_clean and not getattr(getattr(spec, "stack", None), "enabled", False):
+    if not getattr(getattr(spec, "stack", None), "enabled", False):
         result.merge_vertices()
     return result
 

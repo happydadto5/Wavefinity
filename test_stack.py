@@ -89,9 +89,9 @@ class StackAutoSettingsTests(unittest.TestCase):
         self.assertEqual(rules["base_min_mm"], {"lid": 1.8, "direct": 3.8})
         app = (Path(__file__).parent / "web" / "app.js").read_text(encoding="utf-8")
         self.assertIn("function normalizeStackSettings", app)
-        self.assertIn('restoreDefaults: previous !== "none"', app)
-        self.assertIn('$("#standard-walls").disabled = stacking', app)
-        self.assertIn('$("#standard-base").disabled = stacking', app)
+        self.assertIn('restoreDefaults: (previousStack !== "none" || wasB4B)', app)
+        self.assertIn('set("standard_walls", false, "#wall-thickness")', app)
+        self.assertIn('set("standard_base", false, "#base-thickness")', app)
 
 
 class StackGeometryTests(unittest.TestCase):

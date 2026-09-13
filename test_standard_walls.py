@@ -111,24 +111,6 @@ class StandardWallsTests(unittest.TestCase):
                 bin_a_height=40.0, bin_b_height=24.0,
             ), 0.01)
 
-    def test_easy_clean_extremes_stay_watertight_and_inside_envelope(self) -> None:
-        for wall in (MIN_WALL, MAX_WALL):
-            for style in ("bevel", "curve"):
-                spec = BoxSpec(
-                    32.0, 48.0, 24.0, wall=wall, standard_walls=False,
-                    easy_clean=True, easy_clean_style=style,
-                )
-                exterior = wavy_outer_polygon(spec).buffer(1e-5)
-                for mesh in (
-                    make_box(spec),
-                    make_box(spec, (("+x", -3.0, 3.0),)),
-                ):
-                    self.assertTrue(mesh.is_watertight)
-                    self.assertTrue(all(
-                        exterior.covers(Point(float(x), float(y)))
-                        for x, y in mesh.vertices[:, :2]
-                    ))
-
     def test_flat_divider_and_removable_insert_work_at_extremes(self) -> None:
         for wall in (MIN_WALL, MAX_WALL):
             flat = BoxSpec(

@@ -192,6 +192,18 @@ class WebApplicationTests(unittest.TestCase):
         legacy_box, *_ = design_from_dict(legacy)
         self.assertEqual(legacy_box.base_thickness, 0.8)
 
+    def test_obsolete_easy_clean_keys_are_ignored(self):
+        design = default_design()
+        design["box"].update({
+            "easy_clean": True,
+            "easy_clean_style": "curve",
+            "easy_clean_radius": 4.0,
+        })
+        box, layout, label, part, location, scoop = design_from_dict(design)
+        self.assertFalse(hasattr(box, "easy_clean"))
+        saved = wavefinity_web.design_to_dict(box, layout, label, part, location, scoop)
+        self.assertNotIn("easy_clean", saved["box"])
+
     def test_brief_interior_sizing_designs_migrate_back_to_the_modular_grid(self):
         design = default_design()
         design["box"].update({"x": 18.93962, "y": 50.93962, "interior_sizing": True})
@@ -1291,7 +1303,7 @@ class WebServerTests(unittest.TestCase):
         status, headers, body = self.get("/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
-        self.assertIn(b"Build your bin", body)
+        self.assertIn(b"Design a:", body)
         self.assertNotIn(b'id="advanced-settings"', body)
         self.assertNotIn(b'id="advanced-build-settings"', body)
         self.assertIn(b"Base thickness", body)
@@ -1303,7 +1315,7 @@ class WebServerTests(unittest.TestCase):
         self.assertNotIn(b"Rim label", body)
         self.assertIn(b"Interior parts", body)
         self.assertIn(b'id="part-name"', body)
-        self.assertIn(b"Connect bins", body)
+        self.assertIn(b"Connectors", body)
         self.assertIn(b">Save folder</label>", body)
         self.assertIn(b'id="print-bin"', body)
         self.assertIn(b">Print to Bambu Studio</button>", body)
@@ -1316,7 +1328,15 @@ class WebServerTests(unittest.TestCase):
         self.assertNotIn(b"generate-sampler", body)
         self.assertNotIn(b"Generate sampler", body)
         self.assertIn(b'id="generation-dialog"', body)
-        self.assertIn(b"Different heights", body)
+        self.assertIn(b"Bin heights", body)
+        self.assertIn(b'id="connector-height-mode"', body)
+        self.assertIn(b'id="base-thickness"', body)
+        self.assertIn(b'id="wall-thickness"', body)
+        self.assertIn(b'id="lift-grabber-size"', body)
+        self.assertNotIn(b'id="standard-base"', body)
+        self.assertNotIn(b'id="standard-walls"', body)
+        self.assertNotIn(b'id="different-height-bins"', body)
+        self.assertNotIn(b'id="easy-clean"', body)
         self.assertIn(b"connector-bin-a-height", body)
         self.assertIn(b"connector-arm-thickness", body)
         self.assertIn(b">A height <", body)
@@ -1332,10 +1352,10 @@ class WebServerTests(unittest.TestCase):
         self.assertLess(body.index(b'id="bin-type"'), body.index(b'id="x-size"'))
         self.assertLess(body.index(b'id="x-size"'), body.index(b'id="mode-select"'))
         self.assertLess(body.index(b'id="mode-select"'), body.index(b"<h2>Interior parts</h2>"))
-        self.assertLess(body.index(b"<h2>Interior parts</h2>"), body.index(b"Connect bins"))
-        self.assertLess(body.index(b"Connect bins"), body.index(b">Save folder</label>"))
+        self.assertLess(body.index(b"<h2>Interior parts</h2>"), body.index(b"Connectors"))
+        self.assertLess(body.index(b"Connectors"), body.index(b">Save folder</label>"))
         # Part name names the output file, so it lives with the output controls.
-        self.assertLess(body.index(b"Connect bins"), body.index(b'id="part-name"'))
+        self.assertLess(body.index(b"Connectors"), body.index(b'id="part-name"'))
         # The palette itself is the "add another part" affordance now - there is
         # no separate button. Editing a part shows Save / Delete Part below its
         # settings.
@@ -1344,12 +1364,11 @@ class WebServerTests(unittest.TestCase):
         self.assertLess(body.index(b'id="save-part"'), body.index(b'id="delete-part"'))
         self.assertLess(body.index(b'id="delete-part"'), body.index(b'id="draft-fields"'))
         self.assertIn(b'id="mode-select"', body)
-        # One-of-several settings are selects, not rows of toggle buttons.
-        self.assertIn(b'id="preview-mode"', body)
+        # Print mode and 2D orientation are selects; preview filters are buttons.
+        self.assertIn(b'id="ordinary-preview-modes"', body)
         self.assertIn(b'id="layout-orientation"', body)
         for value in (b"standard", b"xray", b"bin", b"interior"):
-            self.assertIn(b'value="%s"' % value, body)
-        self.assertNotIn(b"data-preview-mode", body)
+            self.assertIn(b'data-camera-mode="%s"' % value, body)
         self.assertNotIn(b"data-layout-orientation", body)
         status, _headers, body = self.get("/app.js")
         self.assertEqual(status, 200)

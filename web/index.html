@@ -28,7 +28,7 @@
       <section class="control-section open" data-section="build">
         <div class="section-body">
           <div class="bin-type-row">
-            <label>Let's design a
+            <label><span>Design a:</span>
               <select id="bin-type">
                 <option value="single" selected>Bin</option>
                 <option value="stack-direct">Bin (Stacked Bin to Bin)</option>
@@ -45,34 +45,23 @@
             <label><span id="z-size-label">Height</span> <span class="unit">mm</span><input id="z" type="number" min="2" step="1"></label>
           </div>
           <div class="mode-and-bin-options">
-            <label>Interior print mode
+            <label class="compact-select">Interior print mode
               <select id="mode-select"></select>
             </label>
-            <label class="checkbox-row inline-option"><span>Standard base</span><input id="standard-base" type="checkbox" checked></label>
             <!-- Row position styles are only used once B4B relocates this
                  element into .b4b-options-grid; they are inert here since
                  .mode-and-bin-options is not a grid container. -->
-            <label id="base-thickness-setting" class="inline-select" style="grid-column:3;grid-row:1" hidden>Base thickness
-              <select id="base-thickness"><option value="0.6">0.6 mm — Good</option></select>
+            <label id="base-thickness-setting" class="inline-select compact-select" style="grid-column:3;grid-row:1">Base
+              <select id="base-thickness"><option value="standard">Standard</option></select>
             </label>
-            <label class="checkbox-row inline-option"><span>Standard walls</span><input id="standard-walls" type="checkbox" checked></label>
-            <label id="wall-thickness-setting" class="inline-select" style="grid-column:2;grid-row:1" hidden>Wall thickness
-              <select id="wall-thickness"><option value="0.8">0.8 mm — Standard</option></select>
+            <label id="wall-thickness-setting" class="inline-select compact-select" style="grid-column:2;grid-row:1">Walls
+              <select id="wall-thickness"><option value="standard">Standard</option></select>
             </label>
             <span id="thin-wall-warning" class="wall-warning" hidden>Very thin — may not print reliably with standard nozzle/slicer settings.</span>
-            <label class="checkbox-row inline-option"><span>Easy clean</span><input id="easy-clean" type="checkbox"></label>
-            <label id="easy-clean-style-setting" class="inline-select" hidden>Edge style
-              <select id="easy-clean-style">
-                <option value="bevel" selected>Bevel</option>
-                <option value="curve">Curve</option>
-              </select>
-            </label>
-            <label id="easy-clean-radius-setting" class="inline-number" hidden><span id="easy-clean-radius-label">Bevel</span> <span class="unit">mm</span><input id="easy-clean-radius" type="number" min="0.1" step="0.1"></label>
-            <label class="checkbox-row inline-option" title="Adds small finger ledges inside the bin so it can be lifted when neighboring bins block the outside walls."><span>Lift grabbers</span><input id="lift-grabbers" type="checkbox"></label>
-            <label id="lift-grabber-size-setting" class="inline-select" hidden>Grabber size
+            <label id="lift-grabber-size-setting" class="inline-select compact-select" title="Adds small finger ledges inside the bin so it can be lifted when neighboring bins block the outside walls.">Lift Grabbers
               <select id="lift-grabber-size"></select>
             </label>
-            <label id="lift-grabber-location-setting" class="inline-select" hidden>Grabber location
+            <label id="lift-grabber-location-setting" class="inline-select compact-select" hidden>Grabber location
               <select id="lift-grabber-location"></select>
             </label>
           </div>
@@ -176,9 +165,12 @@
       <section class="control-section open" data-section="connector">
         <div class="section-heading no-toggle">
           <span>Connectors</span>
-          <label class="checkbox-row heading-check" for="different-height-bins">
-            <span>Different heights</span>
-            <input id="different-height-bins" type="checkbox">
+          <label class="heading-select" for="connector-height-mode">
+            <span>Bin heights</span>
+            <select id="connector-height-mode">
+              <option value="same">Same</option>
+              <option value="different">Different</option>
+            </select>
           </label>
         </div>
         <div class="section-body">

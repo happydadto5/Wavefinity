@@ -1025,7 +1025,6 @@ layered implementation:
 | File | Role | Entry point? |
 |---|---|---|
 | `organizer_geometry.py` | Feature-neutral booleans, extrusion, sweep, ring alignment and loft helpers. | No. |
-| `organizer_easy_clean.py` | Reusable Easy Clean settings, validation and floor-to-wall profile math. | No. |
 | `organizer_engine.py` | Wavy boxes, connectors, labels, mesh validation and 3MF/STL export. It re-exports established geometry helper names for compatibility. | No. |
 | `organizer_inserts/` | Item/layout model, authoritative feature registry, per-feature builders, Divider compartments, and fused/removable assembly. | No. |
 | `organizer_app.py` | CLI, exporters and design persistence. Legacy palette constants are generated from the feature registry. | Yes, for CLI subcommands. |
@@ -1051,8 +1050,8 @@ so the drawer files set colours through the DOM.
 `TESTING.md` was the historical test log, now moved to the untracked `archive/`
 folder. We no longer maintain or keep this testing log updated.
 
-Dependencies run one way: shared geometry and Easy Clean math sit at the bottom;
-the engine and insert package consume them; the app consumes both; the web
+Dependencies run one way: shared geometry sits at the bottom; the engine and
+insert package consume it; the app consumes both; the web
 service consumes the app. Nothing imports back upward.
 
 Two things worth knowing before tidying anything up:

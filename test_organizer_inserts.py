@@ -2349,6 +2349,13 @@ class LayoutModelTests(unittest.TestCase):
         del data["features"][0]["alternate_ends"]
         self.assertFalse(layout_from_dict(data).features[0].alternate_ends)
 
+    def test_old_steps_with_auto_quantity_load_as_three(self) -> None:
+        data = layout_to_dict(Layout((Feature(
+            "steps", Zone(-20, -20, 20, 20), count=3,
+        ),)))
+        data["features"][0]["count"] = None
+        self.assertEqual(layout_from_dict(data).features[0].count, 3)
+
     def test_only_cradles_can_alternate_ends(self) -> None:
         with self.assertRaisesRegex(ValueError, "only a cradle"):
             Feature("bore", Zone(-10, -10, 10, 10), DRIVER, alternate_ends=True)

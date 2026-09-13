@@ -25,7 +25,6 @@ from organizer_engine import (
     LiftGrabberSpec,
     DEFAULT_BASE_THICKNESS,
     DEFAULT_WALL,
-    EASY_CLEAN_RADIUS,
     GRID_PITCH,
     MAX_WALL,
     MIN_WALL,
@@ -237,20 +236,6 @@ def add_box_arguments(parser: argparse.ArgumentParser, prefix: str = "") -> None
         type=float, default=0.0,
         help="0-1 mm: height of a flat-walled band rising from the floor",
     )
-    parser.add_argument(
-        f"--{option}easy-clean", dest=f"{destination}easy_clean",
-        action="store_true", default=False,
-    )
-    parser.add_argument(
-        f"--{option}easy-clean-style", dest=f"{destination}easy_clean_style",
-        choices=("bevel", "curve"), default="bevel",
-    )
-    parser.add_argument(
-        f"--{option}easy-clean-radius", dest=f"{destination}easy_clean_radius",
-        type=float, default=EASY_CLEAN_RADIUS,
-    )
-
-
 def add_connector_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tolerance", type=float, default=LOCKED_TOLERANCE)
     parser.add_argument("--height", type=float, default=LOCKED_CONNECTOR_HEIGHT)
@@ -354,9 +339,6 @@ def _box_spec(args: argparse.Namespace, prefix: str = "") -> BoxSpec:
         wall=getattr(args, f"{key}wall"),
         flat_inside=getattr(args, f"{key}flat_inside"),
         base_thickness=getattr(args, f"{key}base_thickness"),
-        easy_clean=getattr(args, f"{key}easy_clean", False),
-        easy_clean_style=getattr(args, f"{key}easy_clean_style", "bevel"),
-        easy_clean_radius=getattr(args, f"{key}easy_clean_radius", EASY_CLEAN_RADIUS),
         standard_walls=math.isclose(
             getattr(args, f"{key}wall"), DEFAULT_WALL, abs_tol=1e-9
         ),
@@ -1184,7 +1166,6 @@ def generate_organizer_files(
             box,
             layout_feature_count=len(layout.features),
             layout_mode=layout.mode,
-            easy_clean=box.easy_clean,
             flat_inside=box.flat_inside,
         )
         return generate_b4b_files(
@@ -1556,10 +1537,7 @@ def run_command(args: argparse.Namespace) -> dict[str, object]:
             saved_box.base_thickness
             if args.base_thickness is None
             else args.base_thickness,
-            easy_clean=saved_box.easy_clean if getattr(args, "easy_clean", None) is None else args.easy_clean,
             standard_base=saved_box.standard_base,
-            easy_clean_radius=saved_box.easy_clean_radius if getattr(args, "easy_clean_radius", None) is None else args.easy_clean_radius,
-            easy_clean_style=saved_box.easy_clean_style if getattr(args, "easy_clean_style", None) is None else args.easy_clean_style,
             standard_walls=(
                 saved_box.standard_walls
                 if args.wall is None
@@ -1830,9 +1808,6 @@ def design_to_dict(
         "base_thickness": box.base_thickness,
         "corner_fillet": box.corner_fillet,
         "flat_inside": box.flat_inside,
-        "easy_clean": box.easy_clean,
-        "easy_clean_style": box.easy_clean_style,
-        "easy_clean_radius": box.easy_clean_radius,
         "standard_base": box.standard_base,
         "standard_walls": bool(box.standard_walls) and math.isclose(
             box.wall, DEFAULT_WALL, abs_tol=1e-9
@@ -1948,9 +1923,6 @@ def design_from_dict(
         allowance = WAVE_MATING_GAP + 2.0 * wall_depth + 2.0 * WAVE_AMPLITUDE
         x = max(GRID_PITCH, round((x - allowance) / GRID_PITCH) * GRID_PITCH)
         y = max(GRID_PITCH, round((y - allowance) / GRID_PITCH) * GRID_PITCH)
-    easy_clean_style = str(raw.get("easy_clean_style", "bevel"))
-    if easy_clean_style not in {"bevel", "curve"}:
-        easy_clean_style = "bevel"
     raw_wall = float(raw.get("wall", DEFAULT_WALL))
     if not math.isfinite(raw_wall) or not MIN_WALL <= raw_wall <= MAX_WALL:
         raise ValueError(
@@ -1973,10 +1945,7 @@ def design_from_dict(
         float(raw.get("corner_fillet", 0.6)),
         flat_inside=float(raw.get("flat_inside", 0.0)),
         base_thickness=float(raw.get("base_thickness", raw.get("wall", DEFAULT_WALL))),
-        easy_clean=bool(raw.get("easy_clean", False)),
         standard_base=bool(raw.get("standard_base", True)),
-        easy_clean_radius=float(raw.get("easy_clean_radius", EASY_CLEAN_RADIUS)),
-        easy_clean_style=easy_clean_style,
         standard_walls=standard_walls,
         b4b=b4b,
         stack=stack,
@@ -1986,7 +1955,7 @@ def design_from_dict(
     if b4b.enabled:
         # A B4B interior is reserved for child bins.  Imported/saved JSON is
         # authoritative user data: if it still carries interior features, a
-        # non-fused mode, Easy Clean or the flat-inside band, that is a real
+        # non-fused mode or the flat-inside band, that is a real
         # conflict and must fail with an actionable message - never a silent
         # discard.  The UI's own conversion clears these before saving, so
         # well-formed B4B JSON passes straight through.
@@ -1997,14 +1966,11 @@ def design_from_dict(
             box,
             layout_feature_count=len(raw_features),
             layout_mode=raw_mode,
-            easy_clean=bool(raw.get("easy_clean", False)),
             flat_inside=float(raw.get("flat_inside", 0.0) or 0.0),
         )
         # Normalize legacy no-lid data and adopt any required child-field growth
         # so reopened and saved designs show the exact capacity that will print.
-        box = replace(
-            box, easy_clean=False, flat_inside=0.0, b4b=box.b4b.normalised()
-        )
+        box = replace(box, flat_inside=0.0, b4b=box.b4b.normalised())
         from organizer_b4b import b4b_effective_box
         box = b4b_effective_box(box)
         layout = Layout((), "fused", EDITOR_SNAP)

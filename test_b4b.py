@@ -347,8 +347,6 @@ class B4BValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             b4b.validate_b4b_design(box, layout_mode="separate")
         with self.assertRaises(ValueError):
-            b4b.validate_b4b_design(box, easy_clean=True)
-        with self.assertRaises(ValueError):
             b4b.validate_b4b_design(box, flat_inside=0.5)
 
     def test_legacy_nolid_normalisation_keeps_lid_only(self):

@@ -1292,8 +1292,6 @@ def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
     _reject_if_b4b(payload, "changing the interior-parts print mode")
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     new_mode = str(payload["mode"])
-    if new_mode != "fused" and box.easy_clean_style == "curve":
-        box = replace(box, easy_clean_style="bevel")
     converted = convert_layout_mode(box, layout.features, new_mode)
     validate_customization_clearance(
         box, converted.features, label, label_location, scoop, converted.mode

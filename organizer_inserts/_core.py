@@ -133,11 +133,6 @@ class Zone:
     def whole(spec: BoxSpec) -> "Zone":
         """Everything a straight-sided insert can occupy in this bin."""
         clear_x, clear_y = spec.usable_inside
-        if spec.easy_clean:
-            clear_x -= 2.0 * spec.easy_clean_radius
-            clear_y -= 2.0 * spec.easy_clean_radius
-            if clear_x <= 0 or clear_y <= 0:
-                raise ValueError("this bin is too small for an insert with easy clean")
         return Zone(-clear_x / 2.0, -clear_y / 2.0, clear_x / 2.0, clear_y / 2.0)
 
     @staticmethod
@@ -411,9 +406,13 @@ def layout_from_dict(data: dict) -> Layout:
         coords = [float(value) for value in raw["zone"]]
         if len(coords) != 4:
             raise ValueError("a saved feature zone needs four coordinates")
+        kind = str(raw["kind"])
+        raw_count = raw.get("count")
+        count = 3 if kind == "steps" and raw_count is None else (
+            None if raw_count is None else int(raw_count)
+        )
         made.append(Feature(
-            str(raw["kind"]), Zone(*coords), item,
-            None if raw.get("count") is None else int(raw["count"]),
+            kind, Zone(*coords), item, count,
             str(raw.get("along", "x")), dict(raw.get("options", {})),
             bool(raw.get("full_span", False)),
             bool(raw.get("wedge", True)),

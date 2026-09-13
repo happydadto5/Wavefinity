@@ -456,7 +456,7 @@ SP.designBox = space => {
   state.nestPhoto = null;
   state.drafts = {};
   const { box, layout } = state.design;
-  Object.assign(box, { x: space.x, y: space.y, z: space.z, easy_clean: false });
+  Object.assign(box, { x: space.x, y: space.y, z: space.z });
   delete box.stack;
   box.b4b = { ...B4B_DEFAULTS, enabled: true };
   layout.features = [];

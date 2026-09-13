@@ -811,15 +811,13 @@ def b4b_effective_box(box: BoxSpec) -> BoxSpec:
 
     The only thing that still moves is base thickness, and only far enough to
     leave a printable floor skin under a stacking recess - which changes no
-    child dimension.  Easy Clean and the flat-inside band are forced off
-    because they alter the floor and perimeter the child bins seat on.
+    child dimension.  The flat-inside band is forced off because it alters
+    the floor and perimeter the child bins seat on.
     """
     b4b = box.b4b.normalised()
     return replace(
         box,
         base_thickness=b4b_effective_base_thickness(box),
-        easy_clean=False,
-        easy_clean_style="bevel",
         flat_inside=0.0,
         b4b=b4b,
     )
@@ -3160,7 +3158,6 @@ def validate_b4b_design(
     *,
     layout_feature_count: int = 0,
     layout_mode: str = "fused",
-    easy_clean: bool = False,
     flat_inside: float = 0.0,
     deep: bool = False,
 ) -> None:
@@ -3184,8 +3181,6 @@ def validate_b4b_design(
         )
     if layout_mode != "fused":
         raise ValueError("a B4B layout mode must be 'fused'")
-    if easy_clean:
-        raise ValueError("Easy Clean is incompatible with B4B")
     if flat_inside:
         raise ValueError("the flat-inside band is incompatible with B4B")
 
