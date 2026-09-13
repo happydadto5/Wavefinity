@@ -1389,8 +1389,7 @@ def summarize_interior_parts(layout: Layout, scoop: bool = False) -> str:
     return ", ".join(parts) if parts else "None"
 
 
-def log_bin_to_folder(
-    output_dir: Path,
+def inventory_bin_record(
     box: BoxSpec,
     layout: Layout,
     generated_files: list[Path] | None = None,
@@ -1398,13 +1397,12 @@ def log_bin_to_folder(
     part_name: str = "",
     scoop: bool = False,
     b4b_note: str = "",
-) -> Path:
-    """Record a generated bin as a new row of the drawer inventory,
-    '<folder name> bins.md' in output_dir (see organizer_inventory).
-
-    ``b4b_note``, when set, replaces the Interior Part(s) cell and marks the
-    row as a B4B case.
-    """
+) -> dict[str, object]:
+    """Build the one inventory row used by local and browser-owned folders."""
+    if box.b4b.enabled and not b4b_note:
+        b4b_note = _b4b_log_note(b4b_summary(box))
+        box = b4b_effective_box(box)
+        layout = Layout((), "fused", EDITOR_SNAP)
     if generated_files:
         file_names = ", ".join(dict.fromkeys(p.name for p in generated_files))
     else:
@@ -1427,16 +1425,31 @@ def log_bin_to_folder(
 
     interior_text = b4b_note or summarize_interior_parts(layout, scoop=scoop)
 
-    return append_bin(
-        output_dir,
-        file=file_names,
-        x=box.x, y=box.y, z=box.z,
-        label="" if label_text == "-" else label_text,
-        interior=interior_text,
-        name=clean_label(part_name) or tidy_label or (floor_texts[0] if floor_texts else ""),
-        kind="b4b" if b4b_note else "bin",
-        stack=getattr(getattr(box, "stack", None), "mode", "none"),
-    )
+    return {
+        "file": file_names,
+        "x": box.x, "y": box.y, "z": box.z,
+        "label": "" if label_text == "-" else label_text,
+        "interior": interior_text,
+        "name": clean_label(part_name) or tidy_label or (floor_texts[0] if floor_texts else ""),
+        "kind": "b4b" if b4b_note else "bin",
+        "stack": getattr(getattr(box, "stack", None), "mode", "none"),
+    }
+
+
+def log_bin_to_folder(
+    output_dir: Path,
+    box: BoxSpec,
+    layout: Layout,
+    generated_files: list[Path] | None = None,
+    label: str = "",
+    part_name: str = "",
+    scoop: bool = False,
+    b4b_note: str = "",
+) -> Path:
+    """Record a generated bin in the save folder's inventory."""
+    return append_bin(output_dir, **inventory_bin_record(
+        box, layout, generated_files, label, part_name, scoop, b4b_note,
+    ))
 
 
 

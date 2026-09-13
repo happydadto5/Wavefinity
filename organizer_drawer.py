@@ -58,7 +58,14 @@ from organizer_engine import (
     wavy_outer_polygon,
 )
 from organizer_geometry import _extrude_polygon, difference, union
-from organizer_inventory import INVENTORY_LOCK, load_inventory, next_bin_id, save_inventory
+from organizer_inventory import (
+    INVENTORY_LOCK,
+    load_inventory,
+    load_inventory_text,
+    next_bin_id,
+    save_inventory,
+    save_inventory_text,
+)
 from organizer_stack import STACK_MIN_WALL, STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
 
 UNIT = BASE_UNIT
@@ -1128,6 +1135,7 @@ def drawer_routes(
     default_output: Path,
     detect_slicer: Callable | None = None,
     launch_slicer: Callable | None = None,
+    hosted: bool = False,
 ) -> dict[str, Callable[[dict], dict]]:
     """POST handlers for the browser service, keyed by path."""
 
@@ -1139,6 +1147,11 @@ def drawer_routes(
         return {**result, "stack_steps": STACK_STEPS}
 
     def load(payload):
+        if hosted:
+            return with_rules(load_inventory_text(
+                payload.get("inventory_text") or "",
+                title=str(payload.get("inventory_title") or "Wavefinity"),
+            ))
         return with_rules(load_inventory(folder(payload)))
 
     def save(payload):
@@ -1149,6 +1162,12 @@ def drawer_routes(
         }
         if "layout" in payload and payload["layout"] is not None:
             changes["layout"] = payload["layout"]
+        if hosted:
+            return with_rules(save_inventory_text(
+                payload.get("inventory_text") or "",
+                title=str(payload.get("inventory_title") or "Wavefinity"),
+                **changes,
+            ))
         return with_rules(save_inventory(folder(payload), **changes))
 
     def report(payload):
@@ -1161,14 +1180,20 @@ def drawer_routes(
         return auto_layout(payload["layout"], payload.get("bins") or [], payload.get("drawer_id"), payload.get("options"))
 
     def spacers(payload):
+        if hosted:
+            raise ValueError("Hosted spacer files are not available yet. The Space layout and inventory are fully usable.")
         with geometry_lock:
             return with_rules(generate_spacers(folder(payload), payload["layout"], payload.get("drawer_id"), payload.get("options")))
 
     def connectors(payload):
+        if hosted:
+            raise ValueError("Hosted Space connectors are not available yet. Generate connectors from the normal designer.")
         with geometry_lock:
             return generate_connectors(folder(payload), payload["layout"], payload.get("bins") or [], payload.get("drawer_id"))
 
     def send_to_slicer(payload):
+        if hosted:
+            raise ValueError("Hosted Wavefinity saves files to your folder instead of opening a local slicer.")
         if detect_slicer is None or launch_slicer is None:
             raise ValueError("printing is not available here")
         with geometry_lock:

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-13 — Design folders with optional Space planning
+
+- Choosing a save folder now starts normal bin and storage-box design without
+  forcing inventory or drawer setup.
+- A folder can explicitly enable one Drawer or Box Space; its metadata,
+  inventory and layout persist locally or in the browser-owned hosted folder.
+- Legacy Space/no-inventory folders migrate additively to `.wavefinity.json`.
+- Compatible backend deployments no longer interrupt an open browser page.
+- Project moderators are documented while owner approval remains required.
+
 ## 2026-09-12 — B4B front label lettering direction
 
 - Front-label lettering is mirrored correctly for the printed removable plate,

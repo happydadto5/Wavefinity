@@ -155,7 +155,7 @@ DP.build = () => {
     <section class="dl-savebar" aria-label="Saving">
       <div class="save-location-row">
         <div class="save-location-group">
-          <label for="dl-output-folder">Space Location</label>
+          <label for="dl-output-folder">Save folder</label>
           <div class="save-location-input-wrap">
             <input id="dl-output-folder" type="text" readonly title="Click to select folder - each folder has its own inventory">
             <button type="button" id="dl-output-folder-picker" class="folder-picker-button" title="Select folder" aria-label="Select folder">
@@ -175,6 +175,15 @@ DP.build = () => {
     </section>`;
   DP.wire();
   DV.buildOverlay();
+  if (state.runtime.hosted) {
+    ["#dl-sp-make", "#dl-connectors", "#dl-print"].forEach(selector => {
+      const button = $(selector);
+      if (button) {
+        button.disabled = true;
+        button.title = "Use the normal designer to generate downloadable files in hosted Wavefinity.";
+      }
+    });
+  }
 };
 
 // ------------------------------------------------------------------ wiring
@@ -646,7 +655,7 @@ DP.renderInventory = (force = false) => {
   const bins = DP.filteredBins();
   if (!DL.bins.length) {
     list.innerHTML = `<div class="dl-empty">${DL.loaded
-      ? "No bins in this folder's inventory yet.<br>Generate a bin with <strong>Keep log</strong> on, or add one by hand below."
+      ? "No bins in this Space inventory yet.<br>Generate a bin in this folder, or add one by hand below."
       : "Loading the inventory…"}</div>`;
     return;
   }
@@ -726,7 +735,7 @@ DP.renderSave = () => {
   else if (DL.saveState === "error") { text = "Not saved"; tone = "error"; }
   else if (DL.dirty && !settings.autosave) { text = "Unsaved changes"; tone = "dirty"; }
   else if (DL.savedAt && DL.saveState === "saved") text = `Saved ${DL.savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
-  else if (!DL.exists) text = "No inventory file yet";
+  else if (!DL.exists) text = "Inventory starts with the first bin";
   else text = settings.autosave ? "Saves as you go" : "Up to date";
   status.textContent = text;
   status.className = `dl-save-status ${tone}`;

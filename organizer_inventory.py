@@ -1,6 +1,6 @@
-"""The drawer inventory file: ``<folder name> bins.md`` in the save folder.
+"""The optional Space inventory file: ``<folder name> bins.md`` in the save folder.
 
-Every bin Wavefinity generates is appended here, and the Drawer layout view
+Every bin generated for a Space-enabled folder is appended here, and the Space layout view
 reads and writes the same file, so one place records what has been printed and
 where it lives.  The file has two parts:
 
@@ -340,10 +340,29 @@ def _payload(path: Path, data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _text_payload(text: str, title: str, data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "file": "",
+        "folder": "",
+        "exists": bool(str(text or "").strip()),
+        "bins": data["bins"],
+        "layout": data["layout"],
+        "warnings": data["warnings"],
+        "inventory_text": render_inventory(title, data["bins"], data["layout"]),
+    }
+
+
 def load_inventory(output_dir: Path | str) -> dict[str, Any]:
     path = inventory_path(output_dir)
     with INVENTORY_LOCK:
         return _payload(path, _read(path))
+
+
+def load_inventory_text(text: str, *, title: str = "Wavefinity") -> dict[str, Any]:
+    """Read browser-owned inventory text without inventing a server path."""
+    raw = str(text or "")
+    with INVENTORY_LOCK:
+        return _text_payload(raw, str(title or "Wavefinity"), parse_inventory(raw))
 
 
 def _clean_bin(raw: dict[str, Any], *, partial: bool) -> dict[str, Any]:
@@ -372,57 +391,80 @@ def _clean_bin(raw: dict[str, Any], *, partial: bool) -> dict[str, Any]:
     return clean
 
 
-def save_inventory(
-    output_dir: Path | str,
-    *,
+def _merge_inventory(
+    current: dict[str, Any], *,
     layout: Any = _KEEP,
     bin_updates: Iterable[dict[str, Any]] = (),
     new_bins: Iterable[dict[str, Any]] = (),
     delete_ids: Iterable[str] = (),
-) -> dict[str, Any]:
-    """Merge changes into the file on disk and return the fresh contents.
-
-    Only the named rows change; rows added by the generator in the meantime
-    survive.  ``layout`` replaces the layout block when given.
-    """
-    path = inventory_path(output_dir)
+) -> tuple[list[dict[str, Any]], dict | None]:
     if layout is not _KEEP and layout is not None and not isinstance(layout, dict):
         raise ValueError("drawer layout must be an object")
+    bins = current["bins"]
+    by_id = {one["id"]: one for one in bins}
+    for update in bin_updates or ():
+        target = by_id.get(str(update.get("id", "")))
+        if target is None:
+            raise ValueError(f"no bin {update.get('id')!r} in the inventory")
+        target.update(_clean_bin(update, partial=True))
+    gone = {str(one) for one in delete_ids or ()}
+    bins = [one for one in bins if one["id"] not in gone]
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    for raw in new_bins or ():
+        clean = _clean_bin(raw, partial=False)
+        kind = str(raw.get("kind") or "manual")
+        wanted = str(raw.get("id") or "")
+        taken = {one["id"] for one in bins}
+        bins.append({
+            "id": wanted if re.fullmatch(r"B\d+", wanted) and wanted not in taken else next_bin_id(bins),
+            "date": now,
+            "kind": kind if kind in KINDS else "manual",
+            "name": clean.get("name", ""),
+            "x": clean["x"], "y": clean["y"], "z": clean["z"],
+            "stack": clean.get("stack", "none"),
+            "qty": clean.get("qty", 1),
+            "file": str(raw.get("file") or ""),
+            "label": str(raw.get("label") or ""),
+            "interior": str(raw.get("interior") or ""),
+        })
+    chosen = current["layout"] if layout is _KEEP else layout
+    return bins, _prune_layout(chosen, bins)
+
+
+def save_inventory(
+    output_dir: Path | str, *, layout: Any = _KEEP,
+    bin_updates: Iterable[dict[str, Any]] = (),
+    new_bins: Iterable[dict[str, Any]] = (),
+    delete_ids: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Merge changes into the file on disk and return the fresh contents."""
+    path = inventory_path(output_dir)
     with INVENTORY_LOCK:
         current = _read(path)
-        bins = current["bins"]
-        by_id = {one["id"]: one for one in bins}
-        for update in bin_updates or ():
-            target = by_id.get(str(update.get("id", "")))
-            if target is None:
-                raise ValueError(f"no bin {update.get('id')!r} in the inventory")
-            target.update(_clean_bin(update, partial=True))
-        gone = {str(one) for one in delete_ids or ()}
-        bins = [one for one in bins if one["id"] not in gone]
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        for raw in new_bins or ():
-            clean = _clean_bin(raw, partial=False)
-            kind = str(raw.get("kind") or "manual")
-            # A caller may choose the ID up front (spacers are placed before
-            # they are saved); any clash falls back to the next free one.
-            wanted = str(raw.get("id") or "")
-            taken = {one["id"] for one in bins}
-            bins.append({
-                "id": wanted if re.fullmatch(r"B\d+", wanted) and wanted not in taken else next_bin_id(bins),
-                "date": now,
-                "kind": kind if kind in KINDS else "manual",
-                "name": clean.get("name", ""),
-                "x": clean["x"], "y": clean["y"], "z": clean["z"],
-                "stack": clean.get("stack", "none"),
-                "qty": clean.get("qty", 1),
-                "file": str(raw.get("file") or ""),
-                "label": str(raw.get("label") or ""),
-                "interior": str(raw.get("interior") or ""),
-            })
-        chosen = current["layout"] if layout is _KEEP else layout
-        chosen = _prune_layout(chosen, bins)
+        bins, chosen = _merge_inventory(
+            current, layout=layout, bin_updates=bin_updates,
+            new_bins=new_bins, delete_ids=delete_ids,
+        )
         _write(path, bins, chosen, current["legacy"])
         return _payload(path, _read(path))
+
+
+def save_inventory_text(
+    text: str, *, title: str = "Wavefinity", layout: Any = _KEEP,
+    bin_updates: Iterable[dict[str, Any]] = (),
+    new_bins: Iterable[dict[str, Any]] = (),
+    delete_ids: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Merge changes into browser-owned text and return replacement text."""
+    raw = str(text or "")
+    with INVENTORY_LOCK:
+        current = parse_inventory(raw)
+        bins, chosen = _merge_inventory(
+            current, layout=layout, bin_updates=bin_updates,
+            new_bins=new_bins, delete_ids=delete_ids,
+        )
+        rendered = render_inventory(str(title or "Wavefinity"), bins, chosen)
+        return _text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered))
 
 
 def append_bin(
@@ -500,3 +542,34 @@ def create_space(
             layout["active"] = "d1"
         _write(path, current["bins"], layout, current["legacy"])
         return _payload(path, _read(path))
+
+
+def create_space_text(
+    text: str, *, title: str, name: str, kind: str,
+    x: float, y: float, z: float,
+) -> dict[str, Any]:
+    """Create Space inventory while the browser remains the file owner."""
+    name = str(name or "").strip()[:80]
+    if not name:
+        raise ValueError("a space needs a name")
+    if kind not in SPACE_KINDS:
+        raise ValueError(f"a space is one of {', '.join(SPACE_KINDS)}")
+    size = [_number(value) for value in (x, y, z)]
+    if min(size) <= 0:
+        raise ValueError("a space needs its inside X, Y and Z in mm")
+    raw = str(text or "")
+    with INVENTORY_LOCK:
+        current = parse_inventory(raw)
+        layout = current["layout"] if isinstance(current["layout"], dict) else {}
+        if isinstance(layout.get("space"), dict):
+            raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
+        layout["version"] = 1
+        layout["space"] = {"name": name, "kind": kind, "x": size[0], "y": size[1], "z": size[2]}
+        if not layout.get("drawers"):
+            layout["drawers"] = [{
+                "id": "d1", "name": name, "width": size[0], "depth": size[1], "height": size[2],
+                "clearance": 0.0 if kind == "box" else 1.0, "keepouts": [], "placements": [],
+            }]
+            layout["active"] = "d1"
+        rendered = render_inventory(str(title or name), current["bins"], layout)
+        return _text_payload(rendered, str(title or name), parse_inventory(rendered))

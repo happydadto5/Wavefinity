@@ -56,7 +56,10 @@ const state = {
   output: "",
   runtime: { hosted: false, filesystem: "server" },
   browserFolder: null,
-  keepLog: true,
+  folderSelected: false,
+  folderMode: "design",
+  activeSpace: null,
+  keepLog: false,
   connector: {},
   layoutDrag: null,
   layoutTransform: null,
@@ -75,6 +78,7 @@ const state = {
   history: [],
   future: [],
   serverInstance: null,
+  apiCompat: null,
   kindRequest: 0,
   fitRequest: 0,
   nestPhotoRequest: 0,
@@ -88,6 +92,20 @@ let previewWaitTimer = null;
 let previewSlowTimer = null;
 
 const VERSION_POLL_MS = 5000;
+
+function setFolderState(mode = "design", space = null) {
+  state.folderMode = mode === "space" ? "space" : "design";
+  state.activeSpace = state.folderMode === "space" ? (space || null) : null;
+  state.keepLog = state.folderMode === "space";
+  const indicator = $("#active-space-indicator");
+  if (indicator) {
+    const kind = state.activeSpace?.kind === "box" ? "Box" : "Drawer";
+    indicator.textContent = state.activeSpace
+      ? `Space: ${state.activeSpace.name || "Unnamed"} · ${kind}`
+      : "";
+    indicator.hidden = !state.activeSpace;
+  }
+}
 
 const COLORS = {
   outside: "#8ea8b2", inside: "#c9d9dc", rim: "#6f8f99", floor: "#b9a97e",
@@ -597,8 +615,7 @@ function syncForm() {
   $("#output-folder").value = state.runtime.hosted
     ? (state.browserFolder?.name || "Select a folder...")
     : state.output;
-  const keepLogEl = $("#keep-log");
-  if (keepLogEl) keepLogEl.checked = Boolean(state.keepLog);
+  setFolderState(state.folderMode, state.activeSpace);
   $("#connector-tolerance").value = fmt(state.connector.tolerance);
   $("#connector-length").value = fmt(state.connector.length);
   const armThicknessEl = $("#connector-arm-thickness");
@@ -1254,14 +1271,6 @@ function updateDesignFromForm() {
     state.output = newOutput;
     saveOutputPreference(newOutput);
   }
-  const keepLogEl = $("#keep-log");
-  if (keepLogEl) {
-    const newKeepLog = keepLogEl.checked;
-    if (newKeepLog !== state.keepLog) {
-      state.keepLog = newKeepLog;
-      api("/api/preferences", { keep_log: newKeepLog }).catch(() => {});
-    }
-  }
   state.connector = {
     tolerance: number($("#connector-tolerance").value, state.connector.tolerance),
     length: number($("#connector-length").value, state.connector.length),
@@ -1297,6 +1306,8 @@ async function selectOutputFolder() {
       if (!window.WFFileSystem?.supportsDirectoryPicker()) {
         state.browserFolder = { handle: null, name: "Browser downloads", fallback: true };
         state.output = state.browserFolder.name;
+        state.folderSelected = true;
+        setFolderState("design");
         if (input) input.value = state.output;
         toast("This browser uses Downloads instead of a chosen folder.");
         return;
@@ -1306,7 +1317,7 @@ async function selectOutputFolder() {
       state.browserFolder = { handle, name: handle.name };
       state.output = handle.name;
       if (input) input.value = handle.name;
-      if (typeof SP !== "undefined") await SP.afterPick(handle);
+      if (typeof SP !== "undefined") await SP.afterPick(state.browserFolder);
       else toast(`Selected: ${handle.name}`);
       return;
     }
@@ -1315,7 +1326,7 @@ async function selectOutputFolder() {
       state.output = result.folder;
       if (input) input.value = result.folder;
       saveOutputPreference(result.folder);
-      // A folder with no inventory yet is a new space: spaces.js asks about it.
+      // spaces.js detects optional Space metadata; a new folder stays design-only.
       if (typeof SP !== "undefined") await SP.afterPick(result.folder);
       else toast(`Selected: ${result.folder}`);
     }
@@ -1598,6 +1609,14 @@ function setLayoutOrientation(orientation) {
 }
 
 function activatePreviewView(view) {
+  if (view === "drawer" && state.folderMode !== "space") {
+    if (typeof SP !== "undefined") SP.offerSpacePlanning();
+    return;
+  }
+  if (view === "drawer" && state.runtime.hosted && !state.browserFolder?.handle) {
+    if (typeof SP !== "undefined") SP.showFolderAccessNeeded();
+    return;
+  }
   const tab = $(`.view-tab[data-view="${view}"]`);
   const canvasWrap = $(`.canvas-wrap[data-canvas="${view}"]`);
   if (!tab || !canvasWrap) return;
@@ -6595,6 +6614,9 @@ async function generateParts(target) {
       const binResult = await api("/api/generate", payload);
       saveOutput = binResult.output || saveOutput;
       const binFiles = await saveGeneratedFiles(binResult);
+      if (binResult.inventory_bin && state.folderMode === "space" && typeof SP !== "undefined") {
+        await SP.addInventoryBin(binResult.inventory_bin);
+      }
       allFiles.push(...binFiles);
       setItemStatus("bin", "done", "Done");
     }
@@ -6788,8 +6810,11 @@ function watchServerVersion() {
     } catch (_error) {
       return; // A blip shouldn't flip the banner - only a confirmed different instance should.
     }
-    if (health.instance === state.serverInstance) return;
-    $("#connection").textContent = "Engine updated";
+    if (health.api_compat === state.apiCompat) {
+      state.serverInstance = health.instance;
+      return;
+    }
+    $("#connection").textContent = "Update requires reload";
     $("#connection").classList.remove("ready");
     $("#connection").classList.add("stale");
     $("#update-banner").hidden = false;
@@ -6900,18 +6925,15 @@ async function init() {
     state.catalog = catalog;
     state.runtime = catalog.runtime || { hosted: false, filesystem: "server" };
     state.serverInstance = catalog.instance;
+    state.apiCompat = catalog.api_compat;
     state.design = clone(catalog.defaults.design);
     state.nestPhoto = null;
     state.cleanDesign = clone(state.design);
     state.output = state.runtime.hosted ? "" : (catalog.preferences?.output || catalog.defaults.output);
-    state.keepLog = state.runtime.hosted ? false : (catalog.preferences?.keep_log !== undefined ? Boolean(catalog.preferences.keep_log) : true);
+    setFolderState("design");
     state.connector = clone(catalog.defaults.connector);
     state.slicer = catalog.slicer || { available: false, path: null, name: "Bambu Studio" };
     updateSlicerUI();
-    if (state.runtime.hosted) {
-      const drawerTab = $('.view-tab[data-view="drawer"]');
-      if (drawerTab) drawerTab.hidden = true;
-    }
     renderCatalog();
     wireControls();
     syncForm();

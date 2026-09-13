@@ -10,7 +10,16 @@ from organizer_drawer import (
     spacer_frame,
 )
 from organizer_engine import BoxSpec, wavy_cavity_polygon, wavy_outer_polygon
-from organizer_inventory import append_bin, create_space, inventory_path, load_inventory, save_inventory
+from organizer_inventory import (
+    append_bin,
+    create_space,
+    create_space_text,
+    inventory_path,
+    load_inventory,
+    load_inventory_text,
+    save_inventory,
+    save_inventory_text,
+)
 from organizer_spaces import space_routes
 
 LEGACY = """# My Drawer Bins
@@ -62,7 +71,9 @@ class InventoryFileTests(unittest.TestCase):
             prefs = {}
             routes = space_routes(Path(tmp), lambda: dict(prefs), lambda update: prefs.update(update) or dict(prefs))
             made = routes["/api/space/create"]({"output": str(folder), "name": "Screw box", "kind": "box", "x": 96, "y": 48, "z": 40})
-            self.assertEqual(made["space"]["space"], {"name": "Screw box", "kind": "box", "x": 96.0, "y": 48.0, "z": 40.0})
+            self.assertEqual(made["folder"]["space"], {"name": "Screw box", "kind": "box", "x": 96.0, "y": 48.0, "z": 40.0})
+            self.assertEqual(made["folder"]["folder_mode"], "space")
+            self.assertTrue((folder / ".wavefinity.json").is_file())
             self.assertEqual(made["recent"][0]["name"], "Screw box")
             drawer = load_inventory(folder)["layout"]["drawers"][0]
             self.assertEqual((drawer["name"], drawer["width"], drawer["depth"], drawer["height"]), ("Screw box", 96.0, 48.0, 40.0))
@@ -72,9 +83,18 @@ class InventoryFileTests(unittest.TestCase):
                 create_space(folder, name="Again", kind="drawer", x=1, y=1, z=1)
 
             plain = Path(tmp) / "Loose"
-            done = routes["/api/space/no-inventory"]({"output": str(plain)})
-            self.assertTrue(done["space"]["no_inventory"])
-            self.assertEqual([one["kind"] for one in done["recent"]], ["none", "box"])
+            done = routes["/api/folder/use"]({"output": str(plain)})
+            self.assertEqual(done["folder"]["folder_mode"], "design")
+            self.assertEqual([one["folder_mode"] for one in done["recent"]], ["design", "space"])
+
+    def test_browser_inventory_text_uses_the_same_parser_and_writer(self):
+        made = create_space_text("", title="Top Drawer", name="Top Drawer", kind="drawer", x=420, y=350, z=65)
+        saved = save_inventory_text(made["inventory_text"], title="Top Drawer", new_bins=[{
+            "name": "Bits", "x": 32, "y": 48, "z": 30, "qty": 0,
+        }])
+        loaded = load_inventory_text(saved["inventory_text"], title="Top Drawer")
+        self.assertEqual(loaded["layout"]["space"]["name"], "Top Drawer")
+        self.assertEqual(loaded["bins"][0]["name"], "Bits")
 
 
 class AutoLayoutTests(unittest.TestCase):

@@ -187,7 +187,7 @@
         </label>
         <div class="save-location-row">
           <div class="save-location-group">
-            <label for="output-folder">Space Location</label>
+            <label for="output-folder">Save folder</label>
             <div class="save-location-input-wrap">
               <input id="output-folder" type="text" readonly title="Click to select folder">
               <button type="button" id="output-folder-picker" class="folder-picker-button" title="Select folder" aria-label="Select folder">
@@ -195,8 +195,9 @@
                   <path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
                 </svg>
               </button>
-              <button type="button" id="spaces-btn" class="button secondary" title="Your spaces: start a new one or open another" aria-label="Open spaces">Spaces</button>
+              <button type="button" id="spaces-btn" class="button secondary" title="Optional drawer or box planning" aria-label="Open Space planning">Spaces</button>
             </div>
+            <small id="active-space-indicator" class="active-space-indicator" hidden></small>
           </div>
         </div>
         <div class="print-button-wrap">
@@ -359,7 +360,7 @@
         <h2>Welcome back</h2>
         <button id="welcome-resume-close" class="button secondary" type="button" aria-label="Close">&#10005;</button>
       </div>
-      <p class="welcome-lead">You were last designing for <strong id="welcome-resume-name"></strong>.</p>
+      <p class="welcome-lead">Continue organizing: <strong id="welcome-resume-name"></strong></p>
       <div class="welcome-resume-card">
         <span id="welcome-resume-icon" class="welcome-recent-icon" aria-hidden="true"></span>
         <span class="welcome-recent-text">
@@ -368,41 +369,55 @@
         </span>
       </div>
       <div class="welcome-actions">
-        <button id="welcome-resume-continue" class="button primary" type="button">Keep designing here</button>
-        <button id="welcome-resume-switch" class="button secondary" type="button">Use a different space&#8230;</button>
+        <button id="welcome-resume-continue" class="button primary" type="button">Open Space layout</button>
+        <button id="welcome-resume-switch" class="button secondary" type="button">Choose another folder&#8230;</button>
       </div>
-      <p id="welcome-resume-countdown" class="welcome-countdown" role="status"></p>
     </div>
     <div id="welcome-home">
       <div class="welcome-header">
         <h2 id="welcome-title">Welcome to Wavefinity</h2>
         <button id="welcome-close" class="button secondary" type="button" aria-label="Close">✕</button>
       </div>
-      <p class="welcome-lead">Wavefinity designs 3D-printed bins sized to the space they live in.</p>
-      <ol class="welcome-steps">
-        <li><strong>Set up a space</strong>A drawer you already have, or a box Wavefinity designs for you. Each space gets a name, its inside size and its own folder.</li>
-        <li><strong>Design bins to fill it</strong>Every bin you generate is saved in the space's folder.</li>
-        <li><strong>Keep track of what's inside</strong>The space's inventory file lists every bin, and the Space tab shows where each one sits.</li>
-      </ol>
+      <p class="welcome-lead">Design bins and storage boxes, then save them to a folder.</p>
       <div class="welcome-actions">
-        <button id="welcome-new" class="button primary" type="button">New space…</button>
-        <button id="welcome-open" class="button secondary" type="button">Open a space folder…</button>
-        <button id="welcome-plain" class="button secondary" type="button" title="Save bins to a folder without keeping an inventory">Just make bins, no inventory…</button>
+        <button id="welcome-new" class="button primary" type="button">Choose a save folder&#8230;</button>
       </div>
-      <h3 class="welcome-section-title">Recent spaces</h3>
+      <div class="welcome-secondary">
+        <h3>Organizing a drawer or box?</h3>
+        <p>Wavefinity can keep track of the bins you design and help lay them out inside a drawer or storage box.</p>
+        <button id="welcome-open" class="button secondary" type="button">Set up Space planning&#8230;</button>
+      </div>
+      <h3 class="welcome-section-title">Recent folders</h3>
       <ul id="welcome-recent" class="welcome-recent"></ul>
+    </div>
+    <div id="space-optional" hidden>
+      <div class="welcome-header">
+        <h2>Space planning is optional</h2>
+      </div>
+      <p class="welcome-lead">This folder is currently being used just for designing and saving bins.</p>
+      <p>If you want, Wavefinity can also keep an inventory of the bins in this folder and help lay them out inside a drawer or box.</p>
+      <div class="welcome-actions">
+        <button id="space-optional-setup" class="button primary" type="button">Set up Space planning</button>
+        <button id="space-optional-not-now" class="button secondary" type="button">Not now</button>
+      </div>
+    </div>
+    <div id="space-unsupported" hidden>
+      <div class="welcome-header"><h2>Space planning needs folder access</h2></div>
+      <p class="welcome-lead">Wavefinity needs permission to reopen and update the inventory stored with your designs.</p>
+      <p>You can still design and download bins normally in this browser.</p>
+      <div class="welcome-actions"><button id="space-unsupported-close" class="button primary" type="button">Keep designing</button></div>
     </div>
     <form id="space-form" class="space-form" hidden novalidate>
       <div class="welcome-header">
-        <h2>New space</h2>
+        <h2>Set up Space planning</h2>
       </div>
-      <p class="space-folder">Folder <span id="space-folder"></span> <button id="space-folder-change" class="link-button" type="button">Change</button></p>
+      <p>A Space is the physical drawer or box you want to organize. Once enabled, bins generated in this folder are inventoried automatically.</p>
+      <p class="space-folder">Save folder <span id="space-folder"></span> <button id="space-folder-change" class="link-button" type="button">Change</button></p>
       <label id="space-name-row" class="space-field">Name<input id="space-name" type="text" maxlength="80" placeholder="e.g. Tool chest, drawer 2"></label>
       <fieldset class="space-kinds">
-        <legend>What is it?</legend>
-        <label class="space-kind"><input type="radio" name="space-kind" value="drawer" checked><span><strong>Drawer</strong>A drawer you already have. Wavefinity fits bins into it.</span></label>
-        <label class="space-kind"><input type="radio" name="space-kind" value="box"><span><strong>Box</strong>A Bin for Bins case Wavefinity designs. You give its inside size.</span></label>
-        <label class="space-kind"><input type="radio" name="space-kind" value="none"><span><strong>No inventory</strong>Just save bins in this folder. Nothing is tracked.</span></label>
+        <legend>What are you organizing?</legend>
+        <label class="space-kind"><input type="radio" name="space-kind" value="drawer" checked><span><strong>Drawer</strong>A drawer you already have.</span></label>
+        <label class="space-kind"><input type="radio" name="space-kind" value="box"><span><strong>Box</strong>A Bin for Bins storage box Wavefinity can design.</span></label>
       </fieldset>
       <div id="space-size" class="space-size">
         <label class="space-field"><span><span id="space-x-label">Width (X)</span> <span class="unit">mm</span></span><input id="space-x" type="number" min="1" step="any" inputmode="decimal"></label>
@@ -413,13 +428,13 @@
       <p id="space-error" class="field-error" role="alert" hidden></p>
       <div class="button-row space-buttons">
         <button id="space-back" class="button secondary" type="button">Back</button>
-        <button id="space-create" class="button primary" type="submit">Create space</button>
+        <button id="space-create" class="button primary" type="submit">Enable Space planning</button>
       </div>
     </form>
   </dialog>
   <div id="update-banner" class="update-banner" role="status" hidden>
-    <span>The Python engine restarted with new code. The page you're looking at is out of sync.</span>
-    <button id="update-banner-reload" class="button primary" type="button">Reload now</button>
+    <span>Wavefinity was updated. This update requires the page to reload before you continue.</span>
+    <button id="update-banner-reload" class="button primary" type="button">Reload</button>
   </div>
   <script src="/feature-icons.js" defer></script>
   <script src="/preview3d-webgl.js" defer></script>

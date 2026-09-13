@@ -108,6 +108,7 @@ from organizer_inserts import (
 )
 from photo_nest import photo_outline_from_data
 from organizer_drawer import drawer_routes
+from organizer_inventory import create_space_text
 from organizer_spaces import space_routes
 from organizer_app import (
     APP_DIR,
@@ -123,6 +124,7 @@ from organizer_app import (
     design_to_dict,
     generate_organizer_files,
     generate_side_file,
+    inventory_bin_record,
     parse_sizes,
     preview_geometry,
     validate_customization_clearance,
@@ -158,10 +160,9 @@ HOSTED = (
     or os.environ.get("RENDER", "").lower() == "true"
 )
 SERVER_VERSION = "1"
-# Regenerated every time the process starts, so the frontend can tell a
-# fresh backend apart from the one it originally loaded against - even
-# when SERVER_VERSION itself wasn't bumped for a given code change.
+API_COMPAT_VERSION = 1
 SERVER_INSTANCE = uuid.uuid4().hex
+SERVER_BUILD = os.environ.get("RENDER_GIT_COMMIT", SERVER_VERSION)[:12]
 GEOMETRY_LOCK = threading.RLock()
 PREFERENCES_FILE = APP_DIR / "wavefinity_prefs.json"
 PREFERENCES_LOCK = threading.RLock()
@@ -428,6 +429,8 @@ def catalog_payload() -> dict[str, Any]:
     return {
         "version": SERVER_VERSION,
         "instance": SERVER_INSTANCE,
+        "api_compat": API_COMPAT_VERSION,
+        "build": SERVER_BUILD,
         "base_unit": BASE_UNIT,
         "max_box_size": MAX_BOX_SIZE,
         "modes": [
@@ -790,7 +793,7 @@ def show_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
             log_file = candidates[0]
 
     if log_file is None or not log_file.is_file():
-        raise FileNotFoundError(f"No log file found in '{output_dir}'. Generate a bin first with 'Keep log' enabled.")
+        raise FileNotFoundError(f"No inventory file found in '{output_dir}'. Enable Space planning and generate a bin first.")
 
     open_log_with_wordpad(log_file)
     return {"file": str(log_file)}
@@ -1463,9 +1466,24 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         result = generate_organizer_files(
             box, layout, output, label, part_name, label_location, scoop,
             auto_timestamp=auto_timestamp,
-            keep_log=keep_log,
+            keep_log=keep_log and not HOSTED,
         )
-    return _generation_reply(result=result, output=output)
+    reply = _generation_reply(result=result, output=output)
+    if HOSTED and keep_log:
+        reply["inventory_bin"] = inventory_bin_record(
+            box, layout, _extract_generated_files(result), label,
+            part_name, scoop,
+        )
+    return reply
+
+
+def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return create_space_text(
+        payload.get("inventory_text") or "",
+        title=str(payload.get("inventory_title") or payload.get("name") or "Wavefinity"),
+        name=payload.get("name"), kind=payload.get("kind"),
+        x=payload.get("x"), y=payload.get("y"), z=payload.get("z"),
+    )
 
 
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1690,12 +1708,17 @@ POST_ROUTES = {
     "/api/browse-output-folder": browse_output_folder_payload,
     "/api/browse-slicer-path": browse_slicer_path_payload,
     "/api/show-log": show_log_payload,
+    "/api/space/create-text": create_space_text_payload,
 }
+POST_ROUTES.update({
+    **drawer_routes(
+        GEOMETRY_LOCK, DEFAULT_OUTPUT, detect_bambu_studio, launch_slicer,
+        hosted=HOSTED,
+    ),
+})
 if not HOSTED:
     POST_ROUTES.update({
-        # Drawer layout view: inventory file, auto layout, spacers.
-        **drawer_routes(GEOMETRY_LOCK, DEFAULT_OUTPUT, detect_bambu_studio, launch_slicer),
-        # Welcome screen: spaces, recent spaces, no-inventory folders.
+        # Local save-folder selection and optional Space setup.
         **space_routes(DEFAULT_OUTPUT, load_preferences, save_preferences),
     })
 
@@ -1729,7 +1752,11 @@ class WavefinityHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/health":
-            self._send_json({"ok": True, "version": SERVER_VERSION, "instance": SERVER_INSTANCE})
+            self._send_json({
+                "ok": True, "version": SERVER_VERSION,
+                "instance": SERVER_INSTANCE, "api_compat": API_COMPAT_VERSION,
+                "build": SERVER_BUILD,
+            })
             return
         if path == "/api/catalog":
             self._send_json(catalog_payload())

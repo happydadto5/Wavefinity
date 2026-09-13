@@ -1286,6 +1286,7 @@ class WebServerTests(unittest.TestCase):
         health = json.loads(body)
         self.assertTrue(health["ok"])
         self.assertTrue(health["instance"])
+        self.assertEqual(health["api_compat"], 1)
         self.assertEqual(health["instance"], catalog_payload()["instance"])
         status, headers, body = self.get("/")
         self.assertEqual(status, 200)
@@ -1303,7 +1304,7 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b"Interior parts", body)
         self.assertIn(b'id="part-name"', body)
         self.assertIn(b"Connect bins", body)
-        self.assertIn(b">Space Location</label>", body)
+        self.assertIn(b">Save folder</label>", body)
         self.assertIn(b'id="print-bin"', body)
         self.assertIn(b">Print to Bambu Studio</button>", body)
         self.assertIn(b'id="generate-all"', body)
@@ -1332,7 +1333,7 @@ class WebServerTests(unittest.TestCase):
         self.assertLess(body.index(b'id="x-size"'), body.index(b'id="mode-select"'))
         self.assertLess(body.index(b'id="mode-select"'), body.index(b"<h2>Interior parts</h2>"))
         self.assertLess(body.index(b"<h2>Interior parts</h2>"), body.index(b"Connect bins"))
-        self.assertLess(body.index(b"Connect bins"), body.index(b">Space Location</label>"))
+        self.assertLess(body.index(b"Connect bins"), body.index(b">Save folder</label>"))
         # Part name names the output file, so it lives with the output controls.
         self.assertLess(body.index(b"Connect bins"), body.index(b'id="part-name"'))
         # The palette itself is the "add another part" affordance now - there is
@@ -1596,9 +1597,8 @@ class StaleProcessReplacementTests(unittest.TestCase):
         self.assertFalse(replaced)
 
     def test_two_separately_started_processes_report_different_instances(self):
-        # SERVER_INSTANCE is regenerated per process, not per code version, so
-        # the frontend's staleness banner (web/app.js watchServerVersion)
-        # fires on *any* restart, not just ones that bumped SERVER_VERSION.
+        # Process identity remains observable, but the frontend only asks for
+        # a reload when API_COMPAT_VERSION changes.
         first_port, second_port = _free_port(), _free_port()
         first = self._spawn_real_server(first_port)
         second = self._spawn_real_server(second_port)

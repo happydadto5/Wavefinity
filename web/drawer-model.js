@@ -346,6 +346,10 @@ DL.detach = (drawer, placement) => {
 
 DL.folder = () => state.output || "";
 
+DL.inventoryCall = (path, payload = {}, options = {}) => state.runtime.hosted
+  ? SP.inventoryRequest(path, payload, options)
+  : api(path, { output: DL.output ?? DL.folder(), ...payload });
+
 DL.adopt = data => {
   DL.bins = data.bins || DL.bins;
   DL.file = data.file || DL.file;
@@ -354,7 +358,7 @@ DL.adopt = data => {
 
 DL.load = async () => {
   const output = DL.folder();
-  const data = await api("/api/drawer/load", { output });
+  const data = await DL.inventoryCall("/api/drawer/load", {}, { write: false });
   const sameFolder = DL.output === output;
   DL.output = output;
   DL.exists = data.exists;
@@ -386,7 +390,7 @@ DL.save = async () => {
   DL.emit();
   const sent = DL.snapshot();
   try {
-    const data = await api("/api/drawer/save", { output: DL.output ?? DL.folder(), layout: DL.layout });
+    const data = await DL.inventoryCall("/api/drawer/save", { layout: DL.layout });
     DL.adopt(data);
     DL.exists = true;
     if (DL.snapshot() === sent) DL.dirty = false;
@@ -418,10 +422,10 @@ DL.saveSoon.cancel = () => { clearTimeout(dlSaveTimer); dlSaveTimer = null; };
 // away - they are the inventory, not the layout. The layout rides along only
 // when auto-save is on.
 DL.editBins = async changes => {
-  const payload = { output: DL.output ?? DL.folder(), ...changes };
+  const payload = { ...changes };
   if (DL.layout.settings.autosave) payload.layout = DL.layout;
   try {
-    const data = await api("/api/drawer/save", payload);
+    const data = await DL.inventoryCall("/api/drawer/save", payload);
     DL.adopt(data);
     DL.exists = true;
     const removed = DL.prune();

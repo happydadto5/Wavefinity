@@ -48,7 +48,7 @@ and saved; they are never silent generation-only overrides.
   options: a row of big buttons for a two-state setting reads as two actions,
   and gives no clue the two are exclusive.
 - A **checkbox** is for a genuine on/off with no second state worth naming —
-  *Standard base*, *Stacking* and *Add label* inside B4B, *Keep log*.
+  *Standard base*, *Stacking* and *Add label* inside B4B.
 - A **button** is for something that *happens* — *Generate*, *Reset*, *Top*,
   *Show Log*. Nothing that merely records a preference is a button.
 
@@ -67,7 +67,7 @@ typed — B4B growing the bin field, stacking raising the wall and floor — it
 says so in plain language in a note under the control that caused it, and it
 never writes the new value back into the field the user is typing in.
 
-**The right side has three primary views: *3D*, *2D* and *Space*.** 3D and 2D
+**The right side has three primary views: *3D*, *2D* and optional *Space*.** 3D and 2D
 show the bin being designed (2D is where its interior parts are laid out, and
 it steps aside only for a B4B case, which has none). **Space is a mode, not a
 panel**: it swaps the whole screen: the inventory and its tools take the sidebar, the
@@ -286,12 +286,13 @@ same-origin only, accepts JSON only, and applies a restrictive
 content-security policy so an unrelated web page cannot invoke local file
 generation.
 
-### Drawer layout
+### Optional Space planning
 
-The **Space** tab (beside *3D* and *2D*) is the drawer layout: it fits the bins
-you have printed into a real drawer. It works from the **inventory file** in
-the save location, `<folder name> bins.md` — the same file *Keep log* has
-always written — so each folder has its own inventory, like its generated files.
+The **Space** tab (beside *3D* and *2D*) is optional. A normal design folder can
+hold any mixture of bins, B4Bs, connectors and interior parts without inventory
+or physical dimensions. When the user explicitly enables Space planning, that
+folder additionally represents one real drawer or storage box. Generated bins
+then enter `<folder name> bins.md`, and the Space view lays them out.
 
 - **The inventory file** is a Markdown table, one row per bin design, with an
   **ID**, a **Kind** (bin, B4B case, spacer, shim, added by hand), a **Name**
@@ -516,6 +517,9 @@ default and is never exposed to the network.
 | `POST /api/connector` | Generate a connector. |
 | `POST /api/sampler` | Generate the fit sampler. |
 | `POST /api/preferences` | Persist sticky per-machine settings (currently the output folder) to `wavefinity_prefs.json`. |
+| `POST /api/folder/use` | Select or restore a local design folder and its optional Space metadata. |
+| `POST /api/drawer/load`, `/api/drawer/save` | Read and update inventory/layout from a local path or browser-supplied text. |
+| `POST /api/space/create-text` | Let hosted browsers initialize Space inventory without giving the server a client path. |
 
 **Security boundary**, since the service writes files: loopback binding
 only; POST routes require `application/json` and reject a foreign `Origin`;
@@ -526,8 +530,17 @@ are capped at 25 MB; no cookies, accounts, credentials or telemetry. The
 output-folder field intentionally lets the local user pick any writable
 path — that is application function, not a sandbox escape. Mesh boolean
 operations run behind a process-wide lock, serializing geometry work rather
-than risking concurrent calls into the mesh backend — fine for one local
-user, not a multi-user server design.
+than risking concurrent calls into the mesh backend. Hosted exports use isolated
+temporary folders and never expose the server filesystem; the browser owns its
+chosen save folder and supplies inventory text to the same Python inventory
+engine used locally.
+
+**Save folders and Spaces are separate ideas.** Every chosen folder gets an
+additive `.wavefinity.json` marker. `folder_mode: "design"` is the normal
+default and keeps no inventory. `folder_mode: "space"` adds one physical drawer
+or storage box, inventory, and layout planning without restricting any design
+type. Legacy inventory, `.wavefinity-space.json`, `kind: "none"`, and
+`no_inventory_folders` markers remain migration inputs and are not deleted.
 
 **Known limitations:** no standalone browser/DOM test suite yet — Python API
 contracts and JavaScript syntax are covered by `test_wavefinity_web.py` and
@@ -1076,7 +1089,12 @@ Non-Python files:
 ## Working on this
 
 This project is developed locally, mostly by prompting an LLM. GitHub is a
-**backup and a record of what changed** — it is not a review gate.
+**backup, public contribution point, and record of what changed**. Outside
+contributions use pull requests; the repository owner gives final approval.
+
+Project moderators are **@happydadto5** and trusted collaborator
+**@xdkaplan (adkaplan)**. The protected `main` rules keep @happydadto5 as the
+final approval authority.
 
 **After completing an implementation, commit all changes and push them to
 GitHub before reporting that the work is finished.**
@@ -1126,16 +1144,16 @@ that window by hand and relaunch. A browser tab has no way to tell it is
 talking to code from before your last edit, so silently reattaching to an
 old process would serve stale code with no visible sign anything was wrong.
 
-**A page that outlives the backend it loaded against says so.** The server
-generates a random instance id on every start (`SERVER_INSTANCE`, separate
-from `SERVER_VERSION`, so any restart is caught even without a version bump)
-and returns it from `/api/health`. The browser polls that every 5 seconds; if
-the id it gets back ever differs from the one it loaded with, the connection
-indicator turns amber ("Engine updated") and a banner offers **Reload now**.
-This is the backstop for the rare case the paragraph above can't fix on its
-own - a genuine service whose process could not be identified - so an
-editing session never runs silently stale for more than a few seconds
-either way.
+**A page reloads only for an incompatible API change.** `/api/health` returns
+the random process instance, build, and `API_COMPAT_VERSION`. The browser polls
+every 5 seconds. A routine restart or compatible Render deployment silently
+adopts the new instance. Only a changed API compatibility version shows the
+reload banner; increase it deliberately when an older loaded frontend cannot
+safely use the new backend.
+
+Render Auto-Deploy may be disabled in the Render dashboard when GitHub pushes
+should not immediately change the live site. Manual deployment needs no special
+session-pinning system because compatible open pages continue working.
 
 ### If more than one person is working in the repo
 
