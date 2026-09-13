@@ -750,7 +750,7 @@ function updateInteriorModeVisibility(reveal = false) {
 const B4B_DEFAULTS = {
   enabled: false, lid: true, secure_lid: true, latch_count: "auto",
   latch_strength: "standard", lid_headroom_mm: 1, label_text: "",
-  label_location: "top", stacking: false, handle: false,
+  label_location: "top", front_label_style: "flat", stacking: false, handle: false,
 };
 const LIFT_GRABBER_DEFAULTS = { enabled: false, size: "medium", location: "sides" };
 
@@ -899,6 +899,8 @@ function applyB4BVisibility() {
     if (labelBlocked && labelSelect.value === "front") labelSelect.value = "none";
     // Label text only exists once a location other than "No label" is chosen.
     hide("#b4b-label-text-row", labelSelect.value === "none");
+    // Front label style is cosmetic to the removable front label only.
+    hide("#b4b-front-label-style-row", labelSelect.value !== "front");
   }
   applyStackVisibility();
 }
@@ -945,6 +947,7 @@ function syncB4BForm() {
   } else {
     $("#b4b-label-location").value = "none";
   }
+  $("#b4b-front-label-style").value = b4b.front_label_style === "wavy" ? "wavy" : "flat";
   $("#b4b-part-name").value = state.design?.part_name || "";
   normalizeB4BDependentControls();
   applyB4BVisibility();
@@ -1072,6 +1075,7 @@ function readB4BForm(design) {
     label_text: $("#b4b-label-location").value === "none" ? "" : $("#b4b-label-text").value,
     label_location: $("#b4b-label-location").value === "none"
       ? "top" : $("#b4b-label-location").value,
+    front_label_style: $("#b4b-front-label-style")?.value || "flat",
     stacking: $("#b4b-stacking").value === "true",
     // The bail folds against the front wall, so it no longer competes with
     // stacking for the lid top - but it still needs a lid that latches shut.
@@ -1816,7 +1820,7 @@ function wireControls() {
   $("#lift-grabber-location").addEventListener("change", changedDesign);
 
   $("#bin-type").addEventListener("change", changeBinType);
-  ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location", "#b4b-latch-count"].forEach(sel =>
+  ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location", "#b4b-latch-count", "#b4b-front-label-style"].forEach(sel =>
     $(sel).addEventListener("change", () => {
       normalizeB4BDependentControls();
       readB4BForm(state.design);
@@ -4014,7 +4018,7 @@ function mutationControls() {
     '#x-size, #y-size, #z, #standard-base, #base-thickness, #standard-walls, #wall-thickness, #easy-clean, #easy-clean-style, #easy-clean-radius, #part-name, ' +
     '#lift-grabbers, #lift-grabber-size, #lift-grabber-location, ' +
     '#mode-select, ' +
-    '#b4b-part-name, #b4b-stacking, #b4b-handle, #b4b-label-location, #b4b-latch-count, ' +
+    '#b4b-part-name, #b4b-stacking, #b4b-handle, #b4b-label-location, #b4b-latch-count, #b4b-front-label-style, ' +
     '#new-design, #open-design, #save-design'
   );
 }

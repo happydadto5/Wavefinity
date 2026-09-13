@@ -12,10 +12,13 @@ from shapely.geometry import Point, Polygon
 
 from organizer_engine import (
     GRID_PITCH,
+    TEXT_DEPTH,
+    WAVE_AMPLITUDE,
     WAVE_MATING_GAP,
     B4BSpec,
     BoxSpec,
     nested_clearance,
+    wave_value,
     wavy_outer_polygon,
 )
 from organizer_inserts import Layout
@@ -39,13 +42,21 @@ class B4BSpecTests(unittest.TestCase):
         self.assertEqual(BoxSpec(64, 48, 40).units, (8, 6))
 
     def test_enum_and_snugness_validation(self):
-        for bad in ("latch_count", "latch_strength", "label_location"):
+        for bad in ("latch_count", "latch_strength", "label_location", "front_label_style"):
             with self.assertRaises(ValueError):
                 B4BSpec(**{bad: "nope"})
         with self.assertRaises(ValueError):
             B4BSpec(lid_headroom_mm=1.5)
         for good in (0.5, 1.0, 2.0):
             self.assertEqual(B4BSpec(lid_headroom_mm=good).lid_headroom_mm, good)
+
+    def test_front_label_style_default_and_choices(self):
+        self.assertEqual(B4BSpec().front_label_style, "flat")
+        self.assertEqual(B4BSpec(front_label_style="flat").front_label_style, "flat")
+        self.assertEqual(B4BSpec(front_label_style="wavy").front_label_style, "wavy")
+        self.assertEqual(
+            B4BSpec(front_label_style="wavy").normalised().front_label_style, "wavy",
+        )
 
     def test_legacy_nolid_normalises_to_lid_only(self):
         n = B4BSpec(
@@ -363,6 +374,25 @@ class B4BSerializationTests(unittest.TestCase):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
         self.assertEqual(design_to_dict(box, Layout((), "fused"))["version"], 3)
 
+    def test_front_label_style_round_trips(self):
+        box = BoxSpec(x=64, y=48, z=40, wall=1.2, b4b=B4BSpec(
+            enabled=True, label_text="NUTS", label_location="front",
+            front_label_style="wavy",
+        ))
+        data = design_to_dict(box, Layout((), "fused"))
+        self.assertEqual(data["box"]["b4b"]["front_label_style"], "wavy")
+        back, *_ = design_from_dict(data)
+        self.assertEqual(back.b4b.front_label_style, "wavy")
+
+    def test_old_design_missing_front_label_style_loads_flat(self):
+        box = BoxSpec(x=64, y=48, z=40, wall=1.2, b4b=B4BSpec(
+            enabled=True, label_text="NUTS", label_location="front",
+        ))
+        data = design_to_dict(box, Layout((), "fused"))
+        del data["box"]["b4b"]["front_label_style"]
+        back, *_ = design_from_dict(data)
+        self.assertEqual(back.b4b.front_label_style, "flat")
+
 
 class B4BGenerationTests(unittest.TestCase):
     def test_filename_distinct_from_ordinary_bin(self):
@@ -507,6 +537,189 @@ class B4B3MFHierarchyTests(unittest.TestCase):
         self.assertEqual(hierarchy["components"], {})
         self._assert_direct(hierarchy, "B4B Body")
         self._assert_direct(hierarchy, "B4B Lid")
+
+
+def _front_label_box(style: str = "flat", text: str = "FRONT", **overrides) -> BoxSpec:
+    b4b_kwargs = dict(
+        enabled=True, label_text=text, label_location="front",
+        front_label_style=style,
+    )
+    b4b_kwargs.update(overrides.pop("b4b", {}))
+    return BoxSpec(
+        x=overrides.pop("x", 64), y=overrides.pop("y", 64),
+        z=overrides.pop("z", 50), wall=overrides.pop("wall", 1.2),
+        b4b=B4BSpec(**b4b_kwargs), **overrides,
+    )
+
+
+class B4BFrontLabelRetentionRemovedTests(unittest.TestCase):
+    """The removable front label has no retention feature of any kind."""
+
+    def test_retention_constants_are_gone(self):
+        for name in (
+            "B4B_FRONT_LABEL_RETENTION_REACH",
+            "B4B_FRONT_LABEL_RETENTION_H",
+            "B4B_FRONT_LABEL_RETENTION_W",
+        ):
+            self.assertFalse(hasattr(b4b, name), name)
+
+    def test_frame_is_smaller_without_retention_bumps(self):
+        # The frame is exactly patch + wedge + bottom_lip + two side channels
+        # now; removing two bumps can only shrink or leave unchanged the
+        # holder's own bounding volume, never grow it.
+        frame, _plate, _text, _centre = b4b.b4b_front_label_geometry(
+            _front_label_box("flat")
+        )
+        self.assertTrue(frame.is_watertight)
+
+
+class B4BFrontLabelInsertCorridorTests(unittest.TestCase):
+    """With no retention feature, the plate must be free to lift all the way
+    out, not just drop in once - see ``_b4b_front_label_bottom_z``."""
+
+    def test_geometry_succeeds_exactly_when_eligibility_says_so(self):
+        for z in (16, 20, 24, 30, 40, 55):
+            box = _front_label_box("flat", z=z)
+            eligible, _reason = b4b.b4b_front_label_eligibility(box)
+            if eligible:
+                b4b.b4b_front_label_geometry(box)  # must not raise
+            else:
+                with self.assertRaises(ValueError):
+                    b4b.b4b_front_label_geometry(box)
+
+
+class B4BFrontLabelFlatRegressionTests(unittest.TestCase):
+    def test_flat_plate_is_a_plain_rectangular_slab(self):
+        _frame, plate, text, _centre = b4b.b4b_front_label_geometry(
+            _front_label_box("flat")
+        )
+        self.assertTrue(plate.is_watertight)
+        self.assertGreater(plate.volume, 0.0)
+        self.assertTrue(text.is_watertight)
+        self.assertGreater(text.volume, 0.0)
+        # Every vertex not inside the shallow text pocket sits on one of the
+        # two exact flat planes of a plain box.
+        front_y = plate.bounds[0][1]
+        back_y = plate.bounds[1][1]
+        ys = np.unique(np.round(plate.vertices[:, 1], 6))
+        self.assertTrue(np.isclose(ys.max(), back_y))
+        self.assertTrue(np.isclose(ys.min(), front_y))
+
+
+class B4BFrontLabelWavyGeometryTests(unittest.TestCase):
+    def setUp(self):
+        self.box = _front_label_box("wavy")
+        self.frame, self.plate, self.text, self.centre = b4b.b4b_front_label_geometry(
+            self.box
+        )
+
+    def test_watertight_and_positive_volume(self):
+        self.assertTrue(self.plate.is_watertight)
+        self.assertGreater(self.plate.volume, 0.0)
+        self.assertTrue(self.frame.is_watertight)
+
+    def test_back_is_perfectly_planar(self):
+        back_y = self.plate.bounds[1][1]
+        back_vertices = self.plate.vertices[
+            self.plate.vertices[:, 1] > back_y - 1e-6
+        ]
+        self.assertGreater(len(back_vertices), 0)
+        self.assertTrue(np.allclose(back_vertices[:, 1], back_y, atol=1e-6))
+
+    def test_rectangular_perimeter_stays_flat(self):
+        plate_w = self.plate.bounds[1][0] - self.plate.bounds[0][0]
+        plate_h = self.plate.bounds[1][2] - self.plate.bounds[0][2]
+        front_y = b4b._b4b_wavy_front_y(plate_w, plate_h, b4b.B4B_FRONT_LABEL_PLATE_T)
+        flat_y = -b4b.B4B_FRONT_LABEL_PLATE_T / 2.0
+        half_w, half_h = plate_w / 2.0, plate_h / 2.0
+        # Right at every edge and at the flat border, the wave contributes
+        # nothing: the outline is the exact same rectangle Flat style uses.
+        for x, z in (
+            (half_w - 0.05, 0.0), (-half_w + 0.05, 0.0),
+            (0.0, half_h - 0.05), (0.0, -half_h + 0.05),
+            (half_w - b4b.B4B_FRONT_LABEL_FLAT_BORDER, 0.0),
+        ):
+            self.assertAlmostEqual(front_y(x, z), flat_y, places=6)
+
+    def test_centre_face_carries_the_exact_wavefinity_wave(self):
+        plate_w = self.plate.bounds[1][0] - self.plate.bounds[0][0]
+        plate_h = self.plate.bounds[1][2] - self.plate.bounds[0][2]
+        front_y = b4b._b4b_wavy_front_y(plate_w, plate_h, b4b.B4B_FRONT_LABEL_PLATE_T)
+        flat_y = -b4b.B4B_FRONT_LABEL_PLATE_T / 2.0
+        for x in np.linspace(-plate_w / 4.0, plate_w / 4.0, 7):
+            self.assertAlmostEqual(
+                front_y(float(x), 0.0), flat_y + wave_value(float(x)), places=6,
+            )
+
+    def test_peak_to_peak_matches_wave_amplitude(self):
+        span = self.plate.bounds[1][1] - self.plate.bounds[0][1]
+        # Back is fixed at +plate_t/2; the front's deepest excursion reaches
+        # roughly plate_t/2 + WAVE_AMPLITUDE below it once sampling finds a
+        # near-extremum, so the full peak-to-peak span is close to
+        # plate_t + WAVE_AMPLITUDE (never more).
+        self.assertLessEqual(span, b4b.B4B_FRONT_LABEL_PLATE_T + WAVE_AMPLITUDE + 1e-6)
+        self.assertGreater(span, b4b.B4B_FRONT_LABEL_PLATE_T)
+
+
+class B4BFrontLabelWavyTextTests(unittest.TestCase):
+    def test_text_solid_is_nonempty_and_registered(self):
+        _frame, plate, text, _centre = b4b.b4b_front_label_geometry(
+            _front_label_box("wavy")
+        )
+        self.assertTrue(text.is_watertight)
+        self.assertGreater(text.volume, 0.0)
+        self.assertTrue(plate.is_watertight)
+        self.assertGreater(plate.volume, 0.0)
+        # The text sits inside the plate's own footprint and just past its
+        # deepest front excursion, never floating clear of the plate.
+        self.assertGreaterEqual(
+            text.bounds[0][1] + 1e-6, plate.bounds[0][1],
+        )
+        self.assertLessEqual(text.bounds[1][1], plate.bounds[1][1] + 1e-6)
+
+    def test_short_text_does_not_restart_the_wave_phase(self):
+        # A short label still reads the wave at true case-relative X=0 - the
+        # same phase a long label or the surrounding wall itself would see.
+        _frame, plate, _text, _centre = b4b.b4b_front_label_geometry(
+            _front_label_box("wavy", text="I")
+        )
+        plate_w = plate.bounds[1][0] - plate.bounds[0][0]
+        plate_h = plate.bounds[1][2] - plate.bounds[0][2]
+        front_y = b4b._b4b_wavy_front_y(plate_w, plate_h, b4b.B4B_FRONT_LABEL_PLATE_T)
+        self.assertAlmostEqual(
+            front_y(0.0, 0.0), -b4b.B4B_FRONT_LABEL_PLATE_T / 2.0 + wave_value(0.0),
+            places=6,
+        )
+
+
+class B4BFrontLabelPrintPoseTests(unittest.TestCase):
+    """Required: both styles must print flat-back-down, text-side-up,
+    through the exact path used for real export."""
+
+    def _label_parts(self, style: str) -> dict:
+        objects = b4b.b4b_build_print_objects(_front_label_box(style))
+        parts = dict(next(
+            parts for name, parts in objects if name == "B4B Front Label"
+        ))
+        return parts
+
+    def test_flat_and_wavy_print_back_down_text_up(self):
+        for style in ("flat", "wavy"):
+            with self.subTest(style=style):
+                parts = self._label_parts(style)
+                plate = parts["B4B Front Label Plate"]
+                text = parts["B4B Front Label Text"]
+                # Flat back on the build plate.
+                self.assertAlmostEqual(float(plate.bounds[0][2]), 0.0, places=6)
+                # Lettering sits above the back, flush with (never past) the
+                # plate's own top/visible face - not against the plate.
+                self.assertGreater(float(text.bounds[0][2]), 0.0)
+                self.assertLessEqual(
+                    float(text.bounds[1][2]), float(plate.bounds[1][2]) + 1e-6,
+                )
+                self.assertAlmostEqual(
+                    float(text.bounds[1][2]), float(plate.bounds[1][2]), places=3,
+                )
 
 
 if __name__ == "__main__":

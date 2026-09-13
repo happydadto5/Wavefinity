@@ -1848,6 +1848,7 @@ def design_to_dict(
             "lid_headroom_mm": b4b.lid_headroom_mm,
             "label_text": b4b.label_text,
             "label_location": b4b.label_location,
+            "front_label_style": b4b.front_label_style,
             "stacking": b4b.stacking,
             "handle": b4b.handle,
             "version": b4b.version,
@@ -1912,6 +1913,7 @@ def design_from_dict(
             lid_headroom_mm=float(b4b_raw.get("lid_headroom_mm", 1.0)),
             label_text=str(b4b_raw.get("label_text", "")),
             label_location=str(b4b_raw.get("label_location", "top")),
+            front_label_style=str(b4b_raw.get("front_label_style", "flat")),
             stacking=bool(b4b_raw.get("stacking", False)),
             # A pre-v2 ``handle`` meant a fixed arch on the lid top, and it was
             # on by default.  The bail that replaced it is body hardware with

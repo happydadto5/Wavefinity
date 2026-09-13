@@ -3634,15 +3634,20 @@ B4B_TOP_LABEL_MARGIN = 2.5
 # rather than dimensions: ``b4b_front_label_geometry`` measures the actual
 # text outline and builds the plate only slightly larger than it.  The
 # plate drops in from above and rides down between two side channels onto
-# a closed, ramped bottom stop - there is no end-stop, snap detent, or
-# finger notch, so nothing here relies on friction to keep the plate seated.
+# a closed, ramped bottom stop, and lifts straight back out the same way -
+# there is no end-stop, snap detent, or finger notch, and no retention
+# feature of any kind.  It relies on gravity, the bottom stop and the side
+# channels alone; it is meant to slide in and back out freely, not to seat
+# once and stay.
 B4B_FRONT_LABEL_CAP_IDEAL = 10.0        # preferred cap height - never grown past this
 B4B_FRONT_LABEL_PLATE_T = 1.0           # plate thickness
 B4B_FRONT_LABEL_MARGIN_X = 2.0          # plate margin each side of the text
 B4B_FRONT_LABEL_MARGIN_Y = 1.75         # plate margin above/below the text
 # Running clearance between the plate and the channel it rides in, defined
 # once as a *per-side* value: the plate sits centred with this much air to
-# the flat wall behind it and to the retaining lip in front of it.
+# the flat wall behind it and to the retaining lip in front of it.  This is
+# ordinary running clearance, not a fit meant to compensate for the absence
+# of a retention feature.
 B4B_FRONT_LABEL_CLEAR = 0.25
 # Total outward projection of the whole holder, measured from the locally
 # flattened wall face - not derived from the plate/clearance stack, so the
@@ -3654,41 +3659,43 @@ B4B_FRONT_LABEL_HOLDER_DEPTH = 3.0
 B4B_FRONT_LABEL_SIDE_LEG_W = 2.0        # total X width of one side channel
 B4B_FRONT_LABEL_SIDE_OVERLAP = 1.0      # how far its lip reaches onto the plate
 B4B_FRONT_LABEL_MAX_WIDTH_FRACTION = 0.5  # holder <= this fraction of the case width
-# Clear vertical gap that must exist above the seated plate's top edge so it
-# can be dropped straight in without fouling the latch/handle hardware above
-# it. The retention bumps mean the plate is meant to seat once and stay -
-# unlike a full lift-out design, this only has to clear the plate itself
-# going in, not a whole extra plate height of travel above that.
+# Clear vertical gap that must exist above the plate's fully-inserted top edge
+# so a full lift-out and re-insertion never fouls the latch/handle hardware
+# above it. There is no retention feature holding the plate seated, so the
+# corridor must clear a full plate height of travel, not just the plate
+# dropping in once - see ``_b4b_front_label_bottom_z``.
 B4B_FRONT_LABEL_INSERT_CLEARANCE = 2.0
 B4B_FRONT_LABEL_BOTTOM_DEFAULT = 3.0    # preferred standoff off the case floor -
                                          # purely a visual preference
 B4B_FRONT_LABEL_BOTTOM_MIN = 0.0        # the case floor itself - the holder may sit
                                          # flush with it when the corridor needs the room
-# Two small retention bumps just inside the open top, so the seated plate
-# doesn't rely on friction alone to stay put.  Each reaches slightly further
-# into the plate's own running clearance than the rest of the channel, so
-# the plate's back face flexes past it on the last bit of its way down and
-# is caught underneath once seated.
-B4B_FRONT_LABEL_RETENTION_REACH = 0.35  # how far a bump pinches into the running
-                                         # clearance - a light push to pass, not a fight
-B4B_FRONT_LABEL_RETENTION_H = 1.2       # vertical extent of one bump
-B4B_FRONT_LABEL_RETENTION_W = 2.5       # bump width across X
+# The flat, planar border every removable front label style keeps around its
+# whole rectangular perimeter, so both Flat and Wavy slide into the exact same
+# holder: the side channels, bottom stop and running clearance above only ever
+# see a plain flat-sided rectangle, whatever the visible face does in the
+# middle. See ``_b4b_wavy_label_blank``.
+B4B_FRONT_LABEL_FLAT_BORDER = 1.5
+B4B_FRONT_LABEL_WAVE_BLEND = 0.85        # transition width between flat border and full wave
 
 
 def _b4b_front_label_bottom_z(insertion_ceiling_z: float, plate_h: float) -> float | None:
     """The ``bottom_z`` to seat a ``plate_h``-tall plate at: the preferred
     standoff (``B4B_FRONT_LABEL_BOTTOM_DEFAULT``) if that already leaves the
-    required insertion corridor above the holder, otherwise as low as the
-    case floor allows - down to ``B4B_FRONT_LABEL_BOTTOM_MIN`` - to buy back
-    headroom. ``None`` if even the lowest position can't clear the corridor,
-    i.e. the plate must shrink further before a position exists at all.
+    required insertion/removal corridor above the holder, otherwise as low as
+    the case floor allows - down to ``B4B_FRONT_LABEL_BOTTOM_MIN`` - to buy
+    back headroom. ``None`` if even the lowest position can't clear the
+    corridor, i.e. the plate must shrink further before a position exists at
+    all.
 
-    The corridor only needs to fit the plate itself plus
-    ``B4B_FRONT_LABEL_INSERT_CLEARANCE`` above it - e.g. a 35 mm box with
-    ~14 mm of clear front wall below its lowest hardware can still take a
-    label shrunk to the readable minimum."""
+    There is no retention feature holding the seated plate in place, so this
+    is a true lift-out design: the plate must be free to travel a full extra
+    plate height above its seated position (to clear the side channels
+    entirely) as well as drop that same plate height in on the way down -
+    one ``plate_h`` for the seated plate itself, one more for the travel,
+    plus ``B4B_FRONT_LABEL_INSERT_CLEARANCE`` of working clearance above
+    that."""
     required_span = (
-        B4B_FRONT_LABEL_HOLDER_DEPTH + plate_h
+        B4B_FRONT_LABEL_HOLDER_DEPTH + 2.0 * plate_h
         + B4B_FRONT_LABEL_INSERT_CLEARANCE
     )
     bottom_z = min(
@@ -3866,39 +3873,226 @@ def b4b_front_label_eligibility(box: BoxSpec) -> tuple[bool, str]:
     return False, "Not enough size for a front label."
 
 
+# --------------------------------------------------------------------------- #
+# front label styles: flat / wavy
+# --------------------------------------------------------------------------- #
+def _b4b_wave_mask_1d(t: float, half_span: float, flat_border: float, blend: float) -> float:
+    """0 within ``flat_border`` of +/-``half_span``, 1.0 once ``blend`` past
+    that, eased smoothly in between - one axis of the 2D mask that keeps the
+    Wavy label's whole rectangular perimeter flat."""
+    edge_dist = half_span - abs(t)
+    if edge_dist <= flat_border:
+        return 0.0
+    if edge_dist >= flat_border + blend:
+        return 1.0
+    frac = (edge_dist - flat_border) / blend
+    return 0.5 - 0.5 * math.cos(math.pi * frac)
+
+
+def _b4b_wavy_front_y(plate_w: float, plate_h: float, plate_t: float):
+    """The Wavy style's front-face height function ``front_y(x, z)``.
+
+    Exactly the B4B/Wavefinity front-wall wave (``wave_value``, unmodified)
+    in the centre of the plate, blending out within
+    ``B4B_FRONT_LABEL_FLAT_BORDER`` of every edge to the same flat face the
+    Flat style uses - so, viewed straight on, the Wavy label's outline is the
+    identical rectangle and its side/top/bottom edges are perfectly flat,
+    exactly where the side channels and bottom lip touch it.  The plate is
+    centred on the case's own X=0, the same datum ``wave_value`` measures
+    from, so the wave picked up here is in true phase with the surrounding
+    front wall - never a restarted cycle at the label's own edge.
+    """
+    half_w, half_h = plate_w / 2.0, plate_h / 2.0
+    border = B4B_FRONT_LABEL_FLAT_BORDER
+    blend = B4B_FRONT_LABEL_WAVE_BLEND
+    base_y = -plate_t / 2.0
+
+    def front_y(x: float, z: float) -> float:
+        mask = (
+            _b4b_wave_mask_1d(x, half_w, border, blend)
+            * _b4b_wave_mask_1d(z, half_h, border, blend)
+        )
+        return base_y + wave_value(x) * mask
+
+    return front_y
+
+
+def _b4b_wavy_label_slab(plate_w: float, plate_h: float, outer_fn, inner_fn) -> trimesh.Trimesh:
+    """A watertight solid between two ``(x, z) -> y`` height functions over the
+    rectangular ``plate_w`` x ``plate_h`` footprint: ``outer_fn`` toward -Y,
+    ``inner_fn`` toward +Y.  One shared builder for the plain-backed plate
+    blank (``inner_fn`` constant) and the thin wavy-faced text inlay/pocket
+    shells (``inner_fn`` riding the same wave as ``outer_fn``, offset by a
+    fixed depth) - both need the identical grid/side-wall topology.
+    """
+    half_w, half_h = plate_w / 2.0, plate_h / 2.0
+    nx = max(2, _sample_count(plate_w))
+    nz = max(2, _sample_count(plate_h))
+    xs = np.linspace(-half_w, half_w, nx)
+    zs = np.linspace(-half_h, half_h, nz)
+
+    outer = np.empty((nx, nz, 3))
+    inner = np.empty((nx, nz, 3))
+    for i, x in enumerate(xs):
+        for j, z in enumerate(zs):
+            outer[i, j] = (x, outer_fn(float(x), float(z)), z)
+            inner[i, j] = (x, inner_fn(float(x), float(z)), z)
+
+    def idx(surface: int, i: int, j: int) -> int:
+        return surface * nx * nz + i * nz + j
+
+    vertices = np.concatenate([outer.reshape(-1, 3), inner.reshape(-1, 3)])
+    faces: list[tuple[int, int, int]] = []
+
+    def quad(a: int, b: int, c: int, d: int) -> None:
+        faces.append((a, b, c))
+        faces.append((a, c, d))
+
+    for i in range(nx - 1):
+        for j in range(nz - 1):
+            quad(idx(0, i, j), idx(0, i + 1, j), idx(0, i + 1, j + 1), idx(0, i, j + 1))
+            quad(idx(1, i, j), idx(1, i, j + 1), idx(1, i + 1, j + 1), idx(1, i + 1, j))
+    for j in range(nz - 1):
+        quad(idx(0, 0, j), idx(0, 0, j + 1), idx(1, 0, j + 1), idx(1, 0, j))
+        quad(idx(0, nx - 1, j), idx(1, nx - 1, j), idx(1, nx - 1, j + 1), idx(0, nx - 1, j + 1))
+    for i in range(nx - 1):
+        quad(idx(0, i, 0), idx(1, i, 0), idx(1, i + 1, 0), idx(0, i + 1, 0))
+        quad(idx(0, i, nz - 1), idx(0, i + 1, nz - 1), idx(1, i + 1, nz - 1), idx(1, i, nz - 1))
+
+    mesh = trimesh.Trimesh(
+        vertices=vertices, faces=np.asarray(faces, dtype=np.int64), process=True,
+    )
+    mesh.merge_vertices()
+    trimesh.repair.fix_winding(mesh)
+    if mesh.volume < 0:
+        mesh.invert()
+    if not (mesh.is_watertight and mesh.is_winding_consistent):
+        raise RuntimeError("wavy label slab is not a clean solid")
+    return mesh
+
+
+def _b4b_wavy_label_blank(plate_w: float, plate_h: float) -> trimesh.Trimesh:
+    """The Wavy plate blank, before its text pocket: a flat rectangular back,
+    the exact Wavefinity wave in the centre of the front face, and a flat
+    rectangular perimeter everywhere else - see ``_b4b_wavy_front_y``."""
+    plate_t = B4B_FRONT_LABEL_PLATE_T
+    front_y = _b4b_wavy_front_y(plate_w, plate_h, plate_t)
+    return _b4b_wavy_label_slab(plate_w, plate_h, front_y, lambda _x, _z: plate_t / 2.0)
+
+
+def _b4b_text_extrusion_mask(outline, y_lo: float, y_hi: float) -> trimesh.Trimesh:
+    """A solid spanning ``[y_lo, y_hi]`` in Y over ``outline``'s glyph
+    footprint, centred at local (x=0, z=0) - identical placement to the Flat
+    style's lettering (see ``_b4b_flat_front_label_plate_and_text``), just
+    extruded deep enough to cut all the way through a thin wavy shell."""
+    depth = y_hi - y_lo
+    letters = text_prism(outline, top_z=0.0, depth=depth)  # z in [-depth, 0]
+    # +90 deg about X: extrude axis (-Z) -> +Y, glyph height (+Y) -> +Z upright
+    letters.apply_transform(
+        trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
+    )
+    centre = letters.bounds.mean(axis=0)
+    letters.apply_translation((-centre[0], 0.0, -centre[2]))
+    y_min = float(letters.bounds[0][1])
+    return translated(letters, (0.0, y_lo - y_min, 0.0))
+
+
+def _b4b_flat_front_label_plate_and_text(
+    outline, plate_w: float, plate_h: float,
+) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
+    """Flat style: today's plain rectangular plate with a flush two-part
+    lettering inlay on its readable (-Y) face - unchanged geometry."""
+    plate_t = B4B_FRONT_LABEL_PLATE_T
+    plate = trimesh.creation.box(extents=(plate_w, plate_t, plate_h))
+
+    front_face_y = -plate_t / 2.0
+    inlay_overlap = 0.1
+    letters = text_prism(outline, top_z=0.0, depth=TEXT_DEPTH)  # z in [-TEXT_DEPTH, 0]
+    # +90 deg about X: extrude axis (-Z) -> +Y, glyph height (+Y) -> +Z upright
+    letters.apply_transform(
+        trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
+    )
+    centre = letters.bounds.mean(axis=0)
+    letters.apply_translation((-centre[0], 0.0, -centre[2]))   # centre on the plate face
+    y_min = float(letters.bounds[0][1])
+    # The fill piece sits exactly flush with the plate's face; the cutter is
+    # nudged 0.1 mm proud of it so the boolean always removes material cleanly.
+    text_solid = translated(letters, (0.0, front_face_y - y_min, 0.0))
+    pocket = translated(letters, (0.0, (front_face_y - inlay_overlap) - y_min, 0.0))
+    plate = difference([plate, pocket])
+    return plate, text_solid
+
+
+def _b4b_wavy_front_label_plate_and_text(
+    outline, plate_w: float, plate_h: float,
+) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
+    """Wavy style: the same flush two-part inlay as Flat, but both plate and
+    text follow the exact B4B/Wavefinity wave in the centre of the visible
+    face.  The text is cut from, and fills, that identical wavy surface (a
+    thin shell intersected with the glyph outline), so it is flush wherever
+    the wave actually sits - never floating over a crest or buried in a
+    trough - and remains a separate flush inlay for two-colour printing."""
+    plate_t = B4B_FRONT_LABEL_PLATE_T
+    inlay_overlap = 0.1
+    blank = _b4b_wavy_label_blank(plate_w, plate_h)
+    front_y = _b4b_wavy_front_y(plate_w, plate_h, plate_t)
+    # Comfortably spans every possible front_y() value (+/- WAVE_AMPLITUDE
+    # around -plate_t/2) through the deepest pocket offset, with margin.
+    y_lo = -plate_t / 2.0 - WAVE_AMPLITUDE - 0.2
+    y_hi = plate_t / 2.0 + TEXT_DEPTH + inlay_overlap + 0.2
+    text_mask = _b4b_text_extrusion_mask(outline, y_lo, y_hi)
+
+    text_shell = _b4b_wavy_label_slab(
+        plate_w, plate_h, front_y, lambda x, z: front_y(x, z) + TEXT_DEPTH,
+    )
+    pocket_shell = _b4b_wavy_label_slab(
+        plate_w, plate_h, front_y,
+        lambda x, z: front_y(x, z) + TEXT_DEPTH + inlay_overlap,
+    )
+    text_solid = _intersection([text_mask, text_shell])
+    pocket = _intersection([text_mask, pocket_shell])
+    plate = difference([blank, pocket])
+    return plate, text_solid
+
+
 def b4b_front_label_geometry(box: BoxSpec):
     """``(frame_solid, plate_solid, text_solid, plate_centre_xyz)`` for the
     compact top-loading front label.
 
     The frame (holder) is unioned into the body from a left channel, a right
-    channel, a ramped bottom stop, and a small retention bump in each
-    channel just inside the open top - all built directly on a locally
+    channel, and a ramped bottom stop - all built directly on a locally
     flattened patch of the real front wall, never a separate rectangular
     backing slab.  There is no continuous top member (the plate drops
-    straight in) and no finger notch; the bumps are the only thing that
-    keeps a seated plate from sliding back out.  The plate and its
+    straight in) and no finger notch, snap detent, or retention feature of
+    any kind: the plate is meant to slide freely in and back out, held only
+    by gravity, the bottom stop and the side channels.  The plate and its
     lettering are sized from the actual text outline,
     never grown past ``B4B_FRONT_LABEL_CAP_IDEAL``, and the whole holder is
     capped at ``B4B_FRONT_LABEL_MAX_WIDTH_FRACTION`` of the case width: text
     shrinks to fit before the holder is ever allowed to grow.
 
     Before settling on a size, the fit is checked against the real vertical
-    insertion corridor: the clear space above the holder's open top (up to
-    ``insertion_ceiling_z``, the lowest latch/handle obstruction) must be at
-    least ``B4B_FRONT_LABEL_INSERT_CLEARANCE``, so the plate can be dropped
-    straight in without fouling that hardware - the retention bumps hold it
-    once seated, so it no longer needs a whole extra plate height of travel
-    above it just to be lifted back out.  The holder first tries its preferred
-    standoff off the case floor and, if that alone doesn't leave enough
-    headroom, drops as low as ``B4B_FRONT_LABEL_BOTTOM_MIN`` to buy back the
-    difference - only once that's exhausted does the ideal 10 mm cap height
-    give way, shrinking down to the project's minimum readable size, before
-    the front label is rejected for this box.
+    insertion/removal corridor: the clear space above the holder's open top
+    (up to ``insertion_ceiling_z``, the lowest latch/handle obstruction) must
+    fit a full plate height of travel above the seated plate, plus
+    ``B4B_FRONT_LABEL_INSERT_CLEARANCE`` of working clearance - since nothing
+    holds the plate seated, it must be free to lift all the way clear of the
+    side channels, not just drop in once.  The holder first tries its
+    preferred standoff off the case floor and, if that alone doesn't leave
+    enough headroom, drops as low as ``B4B_FRONT_LABEL_BOTTOM_MIN`` to buy
+    back the difference - only once that's exhausted does the ideal 10 mm cap
+    height give way, shrinking down to the project's minimum readable size,
+    before the front label is rejected for this box.
 
-    The lettering is a flush two-part inlay: ``plate_solid`` carries a
-    shallow pocket on its readable face and ``text_solid`` is the separate,
-    identically-shaped object that fills it, so a slicer can print the two in
-    different filaments.
+    ``box.b4b.front_label_style`` picks the plate's visible face: ``"flat"``
+    (default) is an ordinary flat rectangular plate; ``"wavy"`` carries the
+    exact B4B/Wavefinity front-wall wave across the centre of its face while
+    staying perfectly flat around its whole rectangular perimeter, so it
+    slides into the exact same holder - see ``_b4b_wavy_front_label_plate_and_text``.
+    Either way the lettering is a flush two-part inlay: ``plate_solid``
+    carries a shallow pocket on its readable face and ``text_solid`` is the
+    separate, identically-shaped object that fills it, so a slicer can print
+    the two in different filaments.
     """
     eff = b4b_effective_box(box)
     layout = b4b_layout(box)
@@ -4040,48 +4234,14 @@ def b4b_front_label_geometry(box: BoxSpec):
         ))
         return difference([leg, slot])
 
-    def _retention_bump(side: float) -> trimesh.Trimesh:
-        """A small nub on the flattened wall, just inside the open top,
-        that pinches the plate's back face over the last bit of its
-        downward travel and then sits above its seated top edge.  Like the
-        patch's own attachment to the wall, it is nudged ``embed`` past
-        ``flat_back_y`` so the union always finds real volumetric overlap,
-        never a bare face touch."""
-        bump_w = min(B4B_FRONT_LABEL_RETENTION_W, plate_w / 4.0)
-        bump_h = min(B4B_FRONT_LABEL_RETENTION_H, plate_h * 0.3)
-        reach = B4B_FRONT_LABEL_RETENTION_REACH
-        bump = trimesh.creation.box(extents=(bump_w, reach + embed, bump_h))
-        bump.apply_translation((
-            side * plate_w / 4.0,
-            flat_back_y + (embed - reach) / 2.0,
-            holder_top_z - bump_h / 2.0,
-        ))
-        return bump
-
     frame = _weld(union([
         patch, wedge, bottom_lip, _side_channel(-1.0), _side_channel(1.0),
-        _retention_bump(-1.0), _retention_bump(1.0),
     ]))
 
-    plate = trimesh.creation.box(extents=(plate_w, plate_t, plate_h))
-
-    # Flush two-part text inlay: a shallow pocket on the readable (-Y) face,
-    # filled by a separately-printable solid of the identical shape.
-    front_face_y = -plate_t / 2.0
-    inlay_overlap = 0.1
-    letters = text_prism(outline, top_z=0.0, depth=TEXT_DEPTH)  # z in [-TEXT_DEPTH, 0]
-    # +90 deg about X: extrude axis (-Z) -> +Y, glyph height (+Y) -> +Z upright
-    letters.apply_transform(
-        trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
-    )
-    centre = letters.bounds.mean(axis=0)
-    letters.apply_translation((-centre[0], 0.0, -centre[2]))   # centre on the plate face
-    y_min = float(letters.bounds[0][1])
-    # The fill piece sits exactly flush with the plate's face; the cutter is
-    # nudged 0.1 mm proud of it so the boolean always removes material cleanly.
-    text_solid = translated(letters, (0.0, front_face_y - y_min, 0.0))
-    pocket = translated(letters, (0.0, (front_face_y - inlay_overlap) - y_min, 0.0))
-    plate = difference([plate, pocket])
+    if eff.b4b.front_label_style == "wavy":
+        plate, text_solid = _b4b_wavy_front_label_plate_and_text(outline, plate_w, plate_h)
+    else:
+        plate, text_solid = _b4b_flat_front_label_plate_and_text(outline, plate_w, plate_h)
 
     plate_centre = (
         0.0,

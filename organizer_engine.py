@@ -300,6 +300,9 @@ B4B_LID_HEADROOM_CHOICES = (0.5, 1.0, 2.0)   # UI: Lid snugness (Tight/Standard/
 B4B_LATCH_COUNTS = ("auto", "1", "2")
 B4B_LATCH_STRENGTHS = ("lightweight", "standard")
 B4B_LABEL_LOCATIONS = ("none", "top", "front")
+# Cosmetic style of the removable front label only; meaningless for the top
+# label or when there is no label at all.
+B4B_FRONT_LABEL_STYLES = ("flat", "wavy")
 # Saved-design schema version for B4B intent.  Bumped when the meaning of a
 # field changes rather than inferred from dimensions: v2 moved the carrying
 # handle from a lid-top arch to a folding front bail, so a v1 ``handle: true``
@@ -351,6 +354,8 @@ class B4BSpec:
     lid_headroom_mm: float = 1.0       # UI: Lid snugness
     label_text: str = ""
     label_location: str = "top"        # none | top | front
+    front_label_style: str = "flat"    # flat | wavy; meaningful only when
+                                        # label_location == "front"
     stacking: bool = False
     handle: bool = False               # folding U/bail on the body front wall
     version: int = B4B_SCHEMA_VERSION
@@ -367,6 +372,11 @@ class B4BSpec:
         if self.label_location not in B4B_LABEL_LOCATIONS:
             raise ValueError(
                 f"label location must be one of {', '.join(B4B_LABEL_LOCATIONS)}"
+            )
+        if self.front_label_style not in B4B_FRONT_LABEL_STYLES:
+            raise ValueError(
+                "front label style must be one of "
+                f"{', '.join(B4B_FRONT_LABEL_STYLES)}"
             )
         if not math.isfinite(self.lid_headroom_mm) or self.lid_headroom_mm <= 0:
             raise ValueError("lid snugness (headroom) must be a positive number")
@@ -411,6 +421,7 @@ class B4BSpec:
             lid_headroom_mm=self.lid_headroom_mm,
             label_text=self.label_text,
             label_location=self.label_location,
+            front_label_style=self.front_label_style,
             stacking=stacking,
             handle=handle,
             version=B4B_SCHEMA_VERSION,
