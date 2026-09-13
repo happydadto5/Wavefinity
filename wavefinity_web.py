@@ -153,7 +153,10 @@ from organizer_stack import (
 
 WEB_ROOT = APP_DIR / "web"
 DEFAULT_OUTPUT = APP_DIR / "generated"
-HOSTED = os.environ.get("WAVEFINITY_DEPLOYMENT", "local").lower() == "hosted"
+HOSTED = (
+    os.environ.get("WAVEFINITY_DEPLOYMENT", "local").lower() == "hosted"
+    or os.environ.get("RENDER", "").lower() == "true"
+)
 SERVER_VERSION = "1"
 # Regenerated every time the process starts, so the frontend can tell a
 # fresh backend apart from the one it originally loaded against - even
@@ -1942,7 +1945,7 @@ def main(argv: list[str] | None = None) -> int:
         loopback = False
     if not loopback and not HOSTED:
         raise RuntimeError(
-            "refusing a public network bind unless WAVEFINITY_DEPLOYMENT=hosted"
+            "refusing a public network bind outside hosted deployment mode"
         )
     requested_url = f"http://{args.host}:{args.port}/"
     try:

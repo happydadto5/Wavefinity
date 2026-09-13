@@ -4,9 +4,9 @@
 
 - Bin width and length are capped at 350 mm. The 8 mm grid makes 344 mm the
   largest selectable size.
-- Public network startup now refuses to run in local-desktop mode. Render and
-  Docker explicitly start hosted mode, which keeps server files and native
-  slicer controls private.
+- Public network startup now refuses to run in local-desktop mode. Render is
+  detected automatically, and Docker explicitly starts hosted mode. Both keep
+  server files and native slicer controls private.
 
 ## 2026-09-12 — B4B 3MF pieces can move separately
 
