@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from organizer_inventory import create_space, load_inventory
+from organizer_inventory import create_space, legacy_layout_space, load_inventory
 
 MAX_RECENT = 8
 METADATA_FILE = ".wavefinity.json"
@@ -69,7 +69,7 @@ def _space(raw: Any) -> dict[str, Any] | None:
 def _folder_state(folder: Path, prefs: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
     inventory = load_inventory(folder)
     layout = inventory["layout"] if isinstance(inventory["layout"], dict) else {}
-    inventory_space = _space(layout.get("space"))
+    inventory_space = _space(layout.get("space")) or _space(legacy_layout_space(layout))
     if inventory_space:
         return "space", inventory_space
 

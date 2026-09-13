@@ -60,6 +60,7 @@ from organizer_engine import (
 from organizer_geometry import _extrude_polygon, difference, union
 from organizer_inventory import (
     INVENTORY_LOCK,
+    legacy_layout_space,
     load_inventory,
     load_inventory_text,
     next_bin_id,
@@ -1190,10 +1191,16 @@ def drawer_routes(
 
     def load(payload):
         if hosted:
-            return with_rules(load_inventory_text(
+            result = load_inventory_text(
                 payload.get("inventory_text") or "",
                 title=str(payload.get("inventory_title") or "Wavefinity"),
-            ))
+            )
+            layout = result.get("layout")
+            if isinstance(layout, dict) and not isinstance(layout.get("space"), dict):
+                inferred = legacy_layout_space(layout)
+                if inferred:
+                    result = {**result, "layout": {**layout, "space": inferred}}
+            return with_rules(result)
         return with_rules(load_inventory(folder(payload)))
 
     def save(payload):

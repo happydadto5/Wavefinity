@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import math
 from pathlib import Path
 import re
 import shutil
@@ -520,6 +521,36 @@ def append_bin(
         })
         _write(path, bins, current["layout"], current["legacy"])
     return path
+
+
+def legacy_layout_space(layout: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Recover a Space's identity from a pre-``layout.space`` drawer layout.
+
+    Older inventories held drawers, an active drawer and placements without
+    the newer top-level ``space`` block. That is still a real Space: derive
+    one from its drawer (the active one when there is a choice), so the
+    folder is recognized without losing or re-entering anything.
+    """
+    if not isinstance(layout, dict):
+        return None
+    drawers = layout.get("drawers")
+    if not isinstance(drawers, list) or not drawers:
+        return None
+    active_id = layout.get("active")
+    chosen = next(
+        (one for one in drawers if isinstance(one, dict) and one.get("id") == active_id),
+        None,
+    ) or next((one for one in drawers if isinstance(one, dict)), None)
+    if not isinstance(chosen, dict):
+        return None
+    try:
+        size = [float(chosen[axis]) for axis in ("width", "depth", "height")]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) and value > 0 for value in size):
+        return None
+    name = str(chosen.get("name") or "").strip()[:80] or "Drawer"
+    return {"kind": "drawer", "name": name, "x": size[0], "y": size[1], "z": size[2]}
 
 
 def create_space(
