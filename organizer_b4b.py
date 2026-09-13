@@ -35,7 +35,8 @@ from organizer_engine import (
     WAVE_MATING_GAP,
     B4BSpec,
     BoxSpec,
-    _lift_grabber_profile,
+    _lift_grabber_bulge_mesh,
+    _place_lift_grabber,
     _rounded,
     _sample_count,
     _wall_points,
@@ -1601,19 +1602,6 @@ def _b4b_wall_face_table(
     }
 
 
-def _b4b_grabber_wall_path(
-    layout: "B4BLayout", wall: str, width: float
-) -> tuple[list[tuple[float, float]], tuple[float, float]]:
-    run_axis, _wave_half, face, inward = _b4b_wall_face_table(layout)[wall]
-    half_width = width / 2.0
-    ss = np.linspace(-half_width, half_width, _sample_count(width))
-    if run_axis == "y":
-        path = [(face + wave_value(float(s)), float(s)) for s in ss]
-    else:
-        path = [(float(s), face + wave_value(float(s))) for s in ss]
-    return path, inward
-
-
 def validate_b4b_lift_grabbers(box: BoxSpec) -> None:
     """Lift grabbers must fit the B4B's own inner mating wall and clear the
     lid's locating skirt.  Child field size, outer case size, hinge/latch/
@@ -1671,12 +1659,17 @@ def make_b4b_lift_grabbers(box: BoxSpec) -> list[trimesh.Trimesh]:
     dims = grabbers.dimensions
     rim_z = b4b_rim_z_from_eff(eff)
     bottom_z = rim_z - LIFT_GRABBER_RIM_CLEARANCE - dims.height
-    embed = min(LOCK_EMBED, eff.wall_depth - LOCK_SAFE_SKIN)
-    profile = _lift_grabber_profile(dims, embed)
+    # See organizer_engine.make_lift_grabbers: a straight, non-wavy grabber
+    # needs its hidden root to reach past the wave's full amplitude, not
+    # just the ordinary small safety margin, to reliably find solid B4B
+    # wall material at every point along its width.
+    embed = min(WAVE_AMPLITUDE + LOCK_EMBED, eff.wall_depth - LOCK_SAFE_SKIN)
+    local = _lift_grabber_bulge_mesh(dims, embed)
+    faces = _b4b_wall_face_table(layout)
     return [
-        translated(_sweep_profile(path, inward, profile), (0.0, 0.0, bottom_z))
+        _place_lift_grabber(local, run_axis, face, inward, bottom_z)
         for wall in grabbers.walls
-        for path, inward in [_b4b_grabber_wall_path(layout, wall, dims.width)]
+        for run_axis, _wave_half, face, inward in [faces[wall]]
     ]
 
 

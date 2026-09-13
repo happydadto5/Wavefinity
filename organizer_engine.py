@@ -448,10 +448,10 @@ class LiftGrabberDimensions:
 
 
 LIFT_GRABBER_DIMENSIONS: dict[str, LiftGrabberDimensions] = {
-    "small":  LiftGrabberDimensions(8.0, 3.0, 4.5),
-    "medium": LiftGrabberDimensions(12.0, 4.0, 5.5),
-    "large":  LiftGrabberDimensions(18.0, 5.0, 6.5),
-    "xl":     LiftGrabberDimensions(24.0, 6.0, 7.5),
+    "small":  LiftGrabberDimensions(10.0, 1.5, 5.0),
+    "medium": LiftGrabberDimensions(15.0, 2.0, 7.0),
+    "large":  LiftGrabberDimensions(20.0, 2.7, 9.0),
+    "xl":     LiftGrabberDimensions(26.0, 3.5, 11.0),
 }
 
 
@@ -1107,42 +1107,153 @@ def _wall_face_table(
     }
 
 
-def _lift_grabber_wall_path(
-    spec: BoxSpec, wall: str, width: float
-) -> tuple[list[tuple[float, float]], tuple[float, float]]:
-    """Centre-line of one grabber on the interior face of ``wall``, following
-    the true wavy wall exactly like a wall lock bump does."""
-    run_axis, _wave_half, face, inward = _wall_face_table(spec)[wall]
-    half_width = width / 2.0
-    ss = np.linspace(-half_width, half_width, _sample_count(width))
-    if run_axis == "y":
-        path = [(face + wave_value(float(s)), float(s)) for s in ss]
-    else:
-        path = [(float(s), face + wave_value(float(s))) for s in ss]
-    return path, inward
+def _lift_grabber_height_curve(z: float, dims: LiftGrabberDimensions) -> float:
+    """Inward reach at height ``z`` (0 at the grabber's own bottom): 0 at
+    ``z = 0``, ``dims.projection`` at the vertical midpoint, 0 again at
+    ``z = dims.height`` - tangent-flat (zero slope) at both ends, so the
+    bulge blends into the wall with no ramp or step anywhere."""
+    return dims.projection * math.sin(math.pi * z / dims.height) ** 2
 
 
 def _lift_grabber_profile(
     dims: LiftGrabberDimensions, embed: float
 ) -> list[tuple[float, float]]:
-    """Wedge/hook section, ``t`` growing away from the face it sits on, ``z``
-    relative to the grabber's own bottom (0.0).
+    """Smooth bulge section, ``t`` growing away from the wall's flat,
+    non-wavy face, ``z`` relative to the grabber's own bottom (0.0).
 
-    The underside ramps inward at exactly 45 degrees from the wall face out to
-    the full projection - support-free in either build orientation - then
-    rises vertically to a solid, supported top.
+    A small rounded rise molded into the wall - not a wedge, ramp, ledge, or
+    hook.  Sampled from ``_lift_grabber_height_curve``, which is
+    tangent-flat at both ``z = 0`` and ``z = dims.height``: the exposed
+    shape reaches its full inward projection only at the vertical midpoint
+    and eases smoothly back to flush with the wall at top and bottom, never
+    presenting a ramp, ledge, or undercut.  The loop closes through a small
+    embedded root behind the wall face - see ``make_lift_grabbers`` for why
+    that root must reach deeper than a grabber that simply followed the
+    wavy wall would need.
     """
-    ramp_z = dims.projection
-    top_z = dims.height
-    if top_z <= ramp_z:
-        raise ValueError("lift grabber height must exceed its projection")
-    return [
-        (-embed, 0.0),
-        (0.0, 0.0),
-        (dims.projection, ramp_z),
-        (dims.projection, top_z),
-        (-embed, top_z),
+    samples = 16
+    bulge = [
+        (_lift_grabber_height_curve(float(z), dims), float(z))
+        for z in np.linspace(0.0, dims.height, samples)
     ]
+    return [(-embed, 0.0), *bulge, (-embed, dims.height)]
+
+
+def _lift_grabber_width_ease(s: float, half_width: float, cap_radius: float) -> float:
+    """1.0 through the middle of the wall span, easing smoothly to 0.0 over
+    the last ``cap_radius`` mm at either end.
+
+    This is what keeps the grabber from looking like a rectangular plate
+    when viewed from the front: its left/right ends blend gently into the
+    flat wall (a capsule footprint) instead of stopping abruptly."""
+    edge_dist = half_width - abs(s)
+    if edge_dist >= cap_radius:
+        return 1.0
+    if edge_dist <= 0.0:
+        return 0.0
+    return math.sin(math.pi / 2.0 * (edge_dist / cap_radius)) ** 2
+
+
+def _lift_grabber_bulge_mesh(
+    dims: LiftGrabberDimensions, embed: float
+) -> trimesh.Trimesh:
+    """The grabber's local solid, built directly rather than swept: ``s``
+    runs along the wall in ``[-width/2, width/2]``, ``t`` is the inward
+    reach from the wall's flat, non-wavy face, ``z`` is vertical in
+    ``[0, height]``.
+
+    The exposed (outer) surface is ``_lift_grabber_height_curve(z)`` scaled
+    by ``_lift_grabber_width_ease(s)``, so the bulge tapers smoothly to zero
+    on all four sides - top, bottom, and both ends - reading as a small
+    rounded lump rather than a plate.  The embedded (inner/root) surface is
+    a plain flat plane at ``t = -embed`` across the whole footprint,
+    independent of the visible taper, so the root stays reliably deep for
+    the union with the real wavy wall regardless of where along the width
+    it lands - see ``make_lift_grabbers``.
+
+    Built once per size in this local frame and placed against each
+    concrete wall by ``_place_lift_grabber`` - shared unchanged between
+    ordinary bins and B4B.
+    """
+    half_width = dims.width / 2.0
+    cap_radius = min(dims.width / 4.0, 3.0)
+    ns, nz = 20, 16
+    ss = np.linspace(-half_width, half_width, ns)
+    zs = np.linspace(0.0, dims.height, nz)
+
+    outer = np.empty((ns, nz, 3))
+    inner = np.empty((ns, nz, 3))
+    for i, s in enumerate(ss):
+        ease = _lift_grabber_width_ease(float(s), half_width, cap_radius)
+        for j, z in enumerate(zs):
+            reach = _lift_grabber_height_curve(float(z), dims) * ease
+            outer[i, j] = (s, reach, z)
+            inner[i, j] = (s, -embed, z)
+
+    def idx(surface: int, i: int, j: int) -> int:
+        return surface * ns * nz + i * nz + j
+
+    vertices = np.concatenate([outer.reshape(-1, 3), inner.reshape(-1, 3)])
+    faces: list[tuple[int, int, int]] = []
+
+    def quad(a: int, b: int, c: int, d: int) -> None:
+        faces.append((a, b, c))
+        faces.append((a, c, d))
+
+    for i in range(ns - 1):
+        for j in range(nz - 1):
+            quad(idx(0, i, j), idx(0, i + 1, j), idx(0, i + 1, j + 1), idx(0, i, j + 1))
+            quad(idx(1, i, j), idx(1, i, j + 1), idx(1, i + 1, j + 1), idx(1, i + 1, j))
+    for j in range(nz - 1):
+        quad(idx(0, 0, j), idx(0, 0, j + 1), idx(1, 0, j + 1), idx(1, 0, j))
+        quad(idx(0, ns - 1, j), idx(1, ns - 1, j), idx(1, ns - 1, j + 1), idx(0, ns - 1, j + 1))
+    for i in range(ns - 1):
+        quad(idx(0, i, 0), idx(1, i, 0), idx(1, i + 1, 0), idx(0, i + 1, 0))
+        quad(idx(0, i, nz - 1), idx(0, i + 1, nz - 1), idx(1, i + 1, nz - 1), idx(1, i, nz - 1))
+
+    mesh = trimesh.Trimesh(
+        vertices=vertices, faces=np.asarray(faces, dtype=np.int64), process=True,
+    )
+    mesh.merge_vertices()
+    trimesh.repair.fix_winding(mesh)
+    if mesh.volume < 0:
+        mesh.invert()
+    if not (mesh.is_watertight and mesh.is_winding_consistent):
+        raise RuntimeError("lift grabber bulge is not a clean solid")
+    return mesh
+
+
+def _place_lift_grabber(
+    local: trimesh.Trimesh, run_axis: str, face: float,
+    inward: tuple[float, float], bottom_z: float,
+) -> trimesh.Trimesh:
+    """Map a local ``(s, t, z)`` grabber solid onto one concrete, always
+    axis-aligned wall (walls only ever run along world X or Y - never
+    diagonally - so this is a plain axis remap, not an arbitrary rotation).
+    """
+    inward_x, inward_y = inward
+    if run_axis == "y":
+        matrix = np.array([
+            [0.0, inward_x, 0.0, face],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, bottom_z],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+    else:
+        matrix = np.array([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, inward_y, 0.0, face],
+            [0.0, 0.0, 1.0, bottom_z],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+    result = local.copy()
+    result.apply_transform(matrix)
+    # A "-x"/"-y" wall's mapping mirrors the local frame (inward_x/y == +1),
+    # which flips the transformed mesh's effective winding; restore it so
+    # every placed grabber is consistently outward-facing for the union.
+    if result.volume < 0:
+        result.invert()
+    return result
 
 
 def validate_lift_grabbers(box: BoxSpec) -> None:
@@ -1193,12 +1304,18 @@ def make_lift_grabbers(spec: BoxSpec, rim_z: float | None = None) -> list[trimes
     dims = grabbers.dimensions
     rim = spec.z if rim_z is None else rim_z
     bottom_z = rim - LIFT_GRABBER_RIM_CLEARANCE - dims.height
-    embed = min(LOCK_EMBED, spec.wall_depth - LOCK_SAFE_SKIN)
-    profile = _lift_grabber_profile(dims, embed)
+    # A grabber with a straight, non-wavy visible edge no longer tracks the
+    # wall's own surface, so its hidden root must reach past the wave's full
+    # amplitude (not just LOCK_EMBED's ordinary safety margin) to reliably
+    # find solid material at every point along its width - capped, as ever,
+    # well short of the exterior skin.
+    embed = min(WAVE_AMPLITUDE + LOCK_EMBED, spec.wall_depth - LOCK_SAFE_SKIN)
+    local = _lift_grabber_bulge_mesh(dims, embed)
+    faces = _wall_face_table(spec)
     return [
-        translated(_sweep_profile(path, inward, profile), (0.0, 0.0, bottom_z))
+        _place_lift_grabber(local, run_axis, face, inward, bottom_z)
         for wall in grabbers.walls
-        for path, inward in [_lift_grabber_wall_path(spec, wall, dims.width)]
+        for run_axis, _wave_half, face, inward in [faces[wall]]
     ]
 
 
