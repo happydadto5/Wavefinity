@@ -507,6 +507,10 @@ input[type="number"]::-webkit-inner-spin-button {
 .camera-controls button { min-width: 53px; border: 0; border-right: 1px solid var(--line); padding: 10px 13px; background: transparent; cursor: pointer; color: var(--muted); font-size: 15px; font-weight: 700; flex: 1; text-align: center; white-space: nowrap; }
 .camera-controls button:last-child { border-right: 0; }
 .camera-controls button:hover, .camera-controls button.active { background: var(--teal-soft); color: var(--teal-dark); }
+/* Bin/Interior default to visible, so turning either off is the exception -
+   flag it with the same light-red treatment already used for error-panel. */
+.mode-controls button.mode-toggle-off { background: #fff4f2; color: #7e302b; }
+.mode-controls button.mode-toggle-off:hover { background: #ffe5e1; color: #7e302b; }
 /* A setting that lives over the canvas: same floating chrome as the view
    buttons beside it, but a select, because it picks one of several states
    rather than firing an action. */

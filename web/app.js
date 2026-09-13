@@ -79,11 +79,16 @@ const state = {
   previewSupportPolygons: [],
   designMutationBusy: false,
   canGenerate: true,
-  previewMode: "standard",
+  // Bin/Interior/Xray are independent on/off switches, not one exclusive
+  // mode - each button flips only its own state (see setPreviewToggle()).
+  binVisible: true,
+  interiorVisible: true,
+  xrayOn: false,
   // B4B's own All/Base/Lid preview state - see applyB4BVisibility() and
-  // setB4BView(). Separate from previewMode because the two mean different
-  // things (Standard/Xray/Bin/Interior classify ordinary-bin geometry by
-  // kind; All/Base/Lid classify B4B geometry by physical part ownership).
+  // setB4BView(). Separate from the bin/interior/xray flags above because the
+  // two mean different things (Bin/Interior/Xray classify ordinary-bin
+  // geometry by kind; All/Base/Lid classify B4B geometry by physical part
+  // ownership).
   b4bView: "all",
   history: [],
   future: [],
@@ -837,8 +842,8 @@ function applyB4BVisibility() {
   hide(".subheading-row", on);
   hide(".palette-wrap", on);
   // B4B shows its own All/Base/Lid group instead of the ordinary bin's
-  // Standard/Xray/Bin/Interior buttons - the two mean different things and
-  // are never both meaningful at once.
+  // Bin/Interior/Xray toggles - the two mean different things and are never
+  // both meaningful at once.
   hide("#ordinary-preview-modes", on);
   hide("#b4b-preview-modes", !on);
   if (on && !["all", "base", "lid"].includes(state.b4bView)) {
@@ -1659,14 +1664,27 @@ function rotateCameraStep(direction, fine) {
   renderPreview3D();
 }
 
-function setPreviewMode(mode) {
-  state.previewMode = mode;
-  $$('[data-camera-mode]').forEach(button => button.classList.toggle("active", button.dataset.cameraMode === mode));
+// Bin/Interior/Xray each toggle their own state only - see the state.binVisible
+// comment. Bin and Interior are ON by default, so their button shows the light
+// red "off" treatment only when turned off; Xray is OFF by default, so its
+// button shows the active/blue treatment only when turned on.
+const PREVIEW_TOGGLE_KEYS = { bin: "binVisible", interior: "interiorVisible", xray: "xrayOn" };
+function setPreviewToggle(name, on) {
+  const key = PREVIEW_TOGGLE_KEYS[name];
+  if (!key) return;
+  state[key] = on;
+  const button = $(`[data-camera-toggle="${name}"]`);
+  if (button) {
+    button.setAttribute("aria-pressed", String(on));
+    const offIsNormal = name === "xray";
+    button.classList.toggle("mode-toggle-off", !offIsNormal && !on);
+    button.classList.toggle("active", offIsNormal && on);
+  }
   renderPreview3D();
 }
 
-// B4B's All/Base/Lid group visibility, distinct from ordinary previewMode -
-// see the state.b4bView comment. Never calls the backend: it only changes
+// B4B's All/Base/Lid group visibility, distinct from the ordinary bin's
+// Bin/Interior/Xray toggles - see the state.b4bView comment. Never calls the backend: it only changes
 // which already-loaded GPU buffer groups get drawn and re-frames the camera
 // to whichever part is now showing.
 function setB4BView(view) {
@@ -1678,7 +1696,11 @@ function setB4BView(view) {
 
 function wireCameraControls() {
   $$('[data-camera-view]').forEach(button => button.addEventListener("click", () => setCameraView(button.dataset.cameraView)));
-  $$('[data-camera-mode]').forEach(button => button.addEventListener("click", () => setPreviewMode(button.dataset.cameraMode)));
+  $$('[data-camera-toggle]').forEach(button => button.addEventListener("click", () => {
+    const name = button.dataset.cameraToggle;
+    const key = PREVIEW_TOGGLE_KEYS[name];
+    setPreviewToggle(name, !state[key]);
+  }));
   $$('[data-b4b-view]').forEach(button => button.addEventListener("click", () => setB4BView(button.dataset.b4bView)));
   $$('[data-camera-zoom]').forEach(button => button.addEventListener("click", () => {
     state.camera.zoom = Math.max(.35, Math.min(4, state.camera.zoom * (button.dataset.cameraZoom === "in" ? 1.2 : 1 / 1.2)));
@@ -4699,8 +4721,8 @@ function canvasSize(canvas) {
 // throwaway arrays, no string colour maths, and back faces are dropped before
 // anything is projected. The picture it paints is the same one as before.
 // An ordinary bin's own geometry vs. everything a user has placed inside it -
-// shared with the WebGL path's group classification so Standard/Xray/Bin/
-// Interior mean the same thing whichever renderer is drawing them.
+// shared with the WebGL path's group classification so Bin/Interior/Xray
+// mean the same thing whichever renderer is drawing them.
 const isBinFace = kind =>
   kind === "outside" || kind === "inside" || kind === "rim" || kind === "floor" ||
   kind === "top_label_ledge" || kind === "label" || kind === "label_hole";
@@ -4781,7 +4803,6 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
 
   // Cull first, project second: a back face costs one dot product instead of
   // an iso() call per corner.
-  const mode = state.previewMode || "standard";
   const faces = [];
   for (let index = 0; index < geometry.length; index += 1) {
     const face = geometry[index];
@@ -4790,9 +4811,9 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
     const facing = normal[0] * vx + normal[1] * vy + normal[2] * vz;
     if (facing <= 0 && kind !== "label_hole") continue;
     const isBin = isBinFace(kind);
-    if (mode === "bin" && !isBin) continue;
-    if (mode === "interior" && isBin) continue;
-    if (mode === "xray" && isFacingBinWall(face, camera)) continue;
+    if (isBin && !state.binVisible) continue;
+    if (!isBin && !state.interiorVisible) continue;
+    if (state.xrayOn && isFacingBinWall(face, camera)) continue;
     const points = face.points;
     const corners = points.length;
     const projected = new Float64Array(corners * 2);
@@ -4955,7 +4976,7 @@ function drawBoreAxes(context, boreAxes, camera, project) {
 // larger, so a tool as long as the bin can still be rejected for want of room;
 // this makes that gap visible. The margin between the two is tinted.
 function drawUsableFloor(context, geometry, camera, project) {
-  if (state.previewMode === "interior") return;
+  if (!state.binVisible) return;
   const box = state.design?.box;
   const floors = (geometry || []).filter(face => face.kind === "floor");
   if (!box || !floors.length) return;
@@ -5317,13 +5338,13 @@ function currentPreviewClassify() {
   return b4bEnabled() ? classifyB4BFace : classifyOrdinaryFace;
 }
 
-// Which groups draw (and at what alpha) for the current mode, and which
-// group's bounds the camera frames to. Standard/Xray/Bin/Interior are pure
-// visibility modes over the SAME complete geometry, so they all frame to the
-// complete model's AABB - switching between them must never re-fit the
-// camera to whatever happens to still be visible. (Xray's camera-facing wall
-// cutaway is a buffer swap done separately in renderPreview3DGL(); the passes
-// below already describe its fully-opaque bin+interior result.)
+// Which groups draw (and at what alpha), and which group's bounds the camera
+// frames to. Bin/Interior/Xray are independent pure-visibility toggles over
+// the SAME complete geometry, so they all frame to the complete model's
+// AABB - toggling any of them must never re-fit the camera to whatever
+// happens to still be visible. (Xray's camera-facing wall cutaway is a buffer
+// swap done separately in renderPreview3DGL(); the passes below already
+// describe its fully-opaque bin+interior result.)
 function currentPreviewPasses(buffers) {
   if (b4bEnabled()) {
     const view = state.b4bView;
@@ -5338,17 +5359,11 @@ function currentPreviewPasses(buffers) {
       aabb: buffers.allAabb, visible: new Set(["base", "lid"]),
     };
   }
-  const mode = state.previewMode || "standard";
-  if (mode === "bin") {
-    return { passes: [{ group: "bin", alpha: 1 }], aabb: buffers.allAabb, visible: new Set(["bin"]) };
-  }
-  if (mode === "interior") {
-    return { passes: [{ group: "interior", alpha: 1 }], aabb: buffers.allAabb, visible: new Set(["interior"]) };
-  }
-  return {
-    passes: [{ group: "bin", alpha: 1 }, { group: "interior", alpha: 1 }],
-    aabb: buffers.allAabb, visible: new Set(["bin", "interior"]),
-  };
+  const passes = [];
+  const visible = new Set();
+  if (state.binVisible) { passes.push({ group: "bin", alpha: 1 }); visible.add("bin"); }
+  if (state.interiorVisible) { passes.push({ group: "interior", alpha: 1 }); visible.add("interior"); }
+  return { passes, aabb: buffers.allAabb, visible };
 }
 
 function renderPreview3D() {
@@ -5457,7 +5472,7 @@ function renderPreview3DGL(renderer, overlayCanvas, b4b, fullGeometry, meshes, c
   // the complete, unfiltered `buffers`). Only four side variants exist, so
   // one cached buffer per current facing side is enough to keep spinning
   // smooth without rebuilding on every frame.
-  if (!b4b && state.previewMode === "xray") {
+  if (!b4b && state.xrayOn) {
     const side = cameraFacingSide(camera);
     if (!glBuffersCache.xray || glBuffersCache.xray.side !== side) {
       if (glBuffersCache.xray?.buffers) window.Preview3DGL.disposeBuffers(renderer.gl, glBuffersCache.xray.buffers);
