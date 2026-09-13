@@ -16,7 +16,7 @@
 
 const DL = {
   UNIT: 8,
-  stackSteps: { lid: 1, direct: 3 },   // replaced by the server's values on load
+  stackSteps: { lid: 1, direct: 3, b4b: 2 },   // replaced by the server's values on load
   active: false,
   loaded: false,
   exists: false,
@@ -132,8 +132,8 @@ DL.key = p => `${p.bin}:${p.copy ?? 0}`;
 DL.label = one => one.name || `${fmt(one.x)} × ${fmt(one.y)}`;
 DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
 DL.isSpacer = one => one?.kind === "spacer" || one?.kind === "shim";
-DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct");
-DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct snap" })[mode] || "Not stackable";
+DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
+DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct snap", b4b: "B4B stacking" })[mode] || "Not stackable";
 DL.isPlanned = p => (p.copy ?? 0) >= (Number(DL.bin(p.bin)?.qty) || 0);
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 DL.isShim = p => p.gx === undefined && p.on === undefined;
@@ -167,8 +167,8 @@ DL.toUnits = (cell, drawer = DL.drawer()) => cell / DL.grid(drawer).perUnit;
 
 // Inventory Z is the seating-datum module height. The top interlock remains
 // exposed on the physical envelope of the first/detached part.
-DL.pitch = one => Number(one.z);
-DL.partHeight = one => Number(one.z) + (DL.stackSteps[one.stack] ?? 0);
+DL.pitch = one => one.stack === "b4b" ? Number(one.z) - (DL.stackSteps.b4b ?? 0) : Number(one.z);
+DL.partHeight = one => one.stack === "b4b" ? Number(one.z) : Number(one.z) + (DL.stackSteps[one.stack] ?? 0);
 DL.stackHeight = bins => bins.reduce((sum, one, index) => sum + (index ? DL.pitch(one) : DL.partHeight(one)), 0);
 
 // Why `upper` cannot snap onto `lower`, or "" if it can.

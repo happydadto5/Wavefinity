@@ -619,6 +619,20 @@ class BoxSpec:
         return clear_x, clear_y
 
     @property
+    def usable_opening(self) -> tuple[float, float]:
+        """The user-facing "Inside" size: ``usable_inside`` minus room the lock
+        bumps' upper-band protrusion takes back on each side.
+
+        Fused floor features may still use the full ``usable_inside`` area
+        below the bump band; this is only what the general opening promises.
+        """
+        x, y = self.usable_inside
+        return (
+            max(0.0, x - 2.0 * LOCK_PROTRUSION),
+            max(0.0, y - 2.0 * LOCK_PROTRUSION),
+        )
+
+    @property
     def wall_depth(self) -> float:
         """Wall thickness measured along the axis, not along the surface normal.
 

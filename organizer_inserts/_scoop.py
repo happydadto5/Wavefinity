@@ -13,7 +13,14 @@ from organizer_engine import (
     build_scoop_region,
 )
 
-from ._core import EDITOR_SNAP, Feature, Zone, layout_zone, snapped_zone
+from ._core import (
+    EDITOR_SNAP,
+    Feature,
+    Zone,
+    connector_keep_out,
+    layout_zone,
+    snapped_zone,
+)
 from ._registry import (
     OptionDefinition,
     SettingInteraction,
@@ -32,6 +39,22 @@ SCOOP_MAX_DEPTH = 100.0
 class ScoopSettings:
     depth: float
     height: float
+
+
+def scoop_default_depth(box: BoxSpec, base_z: float) -> float:
+    """The largest legal default Scoop depth percent, capped by connector clearance."""
+    available = box.z - base_z
+    allowed_height = connector_keep_out(box) - base_z
+
+    if allowed_height <= 0:
+        raise ValueError(
+            "this bin is too short for a Scoop while leaving room for a connector"
+        )
+
+    return min(
+        SCOOP_DEFAULT_DEPTH,
+        allowed_height / available * 100.0,
+    )
 
 
 def scoop_settings(
@@ -53,7 +76,7 @@ def scoop_settings(
         height = float(options["height"])
         depth = height / available * 100.0
     else:
-        depth = SCOOP_DEFAULT_DEPTH
+        depth = scoop_default_depth(box, base_z)
         height = available * depth / 100.0
     if (
         not math.isfinite(height)
@@ -83,10 +106,11 @@ def scoop_zone(
 ) -> Zone:
     """The scoop is always full-width and starts at the front wall."""
     bounds = layout_zone(box, mode)
+    default_depth = scoop_default_depth(box, base_z)
     try:
-        depth_percent = float(one.options.get("depth", SCOOP_DEFAULT_DEPTH))
+        depth_percent = float(one.options.get("depth", default_depth))
     except (TypeError, ValueError):
-        depth_percent = SCOOP_DEFAULT_DEPTH
+        depth_percent = default_depth
     height = (box.z - base_z) * depth_percent / 100.0
     run = min(max(height, snap), bounds.depth / 2.0)
     return snapped_zone(
@@ -98,7 +122,7 @@ def scoop_zone(
 @defaults("scoop")
 def scoop_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float]:
     return {
-        "depth": SCOOP_DEFAULT_DEPTH,
+        "depth": scoop_default_depth(box, base_z),
     }
 
 

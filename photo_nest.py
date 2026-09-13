@@ -1,4 +1,4 @@
-"""Turn one overhead part photo on US letter paper into a scaled outline."""
+"""Turn one overhead part photo on a reference sheet into a scaled outline."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from shapely.geometry.polygon import orient
 
 LETTER_WIDTH_MM = 215.9
 LETTER_HEIGHT_MM = 279.4
+PAPER_SIZES_MM = {
+    "letter": (LETTER_WIDTH_MM, LETTER_HEIGHT_MM),
+    "a4": (210.0, 297.0),
+}
 WARP_PIXELS_PER_MM = 4.0
 MAX_IMAGE_PIXELS = 32_000_000
 MAX_UPLOAD_BYTES = 18_000_000
@@ -165,21 +169,29 @@ def detect_paper_corners(image: np.ndarray) -> np.ndarray:
         area = abs(float(cv2.contourArea(ordered)))
         ranked.append((area, ordered))
     if not ranked:
-        raise ValueError("paper missing: show all four corners of one 8.5 × 11 in sheet")
+        raise ValueError("paper missing: show all four corners of the selected reference sheet")
     return max(ranked, key=lambda entry: entry[0])[1]
+
+
+def _paper_size_mm(paper_size: str) -> tuple[float, float]:
+    if paper_size not in PAPER_SIZES_MM:
+        raise ValueError(f"paper size must be one of {', '.join(PAPER_SIZES_MM)}")
+    return PAPER_SIZES_MM[paper_size]
 
 
 def perspective_transform_inputs(
     points: Iterable[Iterable[float]], pixels_per_mm: float = WARP_PIXELS_PER_MM,
+    paper_size: str = "letter",
 ) -> tuple[np.ndarray, np.ndarray, tuple[int, int]]:
-    """Validated source/destination points used for the letter-paper homography."""
+    """Validated source/destination points used for the reference-sheet homography."""
     source = validate_paper_corners(points)
+    paper_width_mm, paper_height_mm = _paper_size_mm(paper_size)
     horizontal = (np.linalg.norm(source[1] - source[0]) + np.linalg.norm(source[2] - source[3])) / 2.0
     vertical = (np.linalg.norm(source[2] - source[1]) + np.linalg.norm(source[3] - source[0])) / 2.0
     if horizontal > vertical:
         source = source[[1, 2, 3, 0]]
-    width = max(2, int(round(LETTER_WIDTH_MM * pixels_per_mm)))
-    height = max(2, int(round(LETTER_HEIGHT_MM * pixels_per_mm)))
+    width = max(2, int(round(paper_width_mm * pixels_per_mm)))
+    height = max(2, int(round(paper_height_mm * pixels_per_mm)))
     destination = np.array(
         [[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]],
         dtype=np.float32,
@@ -190,8 +202,9 @@ def perspective_transform_inputs(
 def correct_perspective(
     image: np.ndarray, points: Iterable[Iterable[float]],
     pixels_per_mm: float = WARP_PIXELS_PER_MM,
+    paper_size: str = "letter",
 ) -> np.ndarray:
-    source, destination, size = perspective_transform_inputs(points, pixels_per_mm)
+    source, destination, size = perspective_transform_inputs(points, pixels_per_mm, paper_size)
     transform = cv2.getPerspectiveTransform(source, destination)
     condition = float(np.linalg.cond(transform))
     if not math.isfinite(condition) or condition > 1e8:
@@ -323,9 +336,10 @@ def _reference_crop(
     return data_url, bounds
 
 
-def extract_photo_outline(image: np.ndarray) -> PhotoOutline:
+def extract_photo_outline(image: np.ndarray, paper_size: str = "letter") -> PhotoOutline:
+    _paper_size_mm(paper_size)
     corners = detect_paper_corners(image)
-    rectified = correct_perspective(image, corners)
+    rectified = correct_perspective(image, corners, paper_size=paper_size)
     _mask, pixels = segment_object(rectified)
     contour = contour_to_millimetres(pixels)
     reference_image, reference_bounds = _reference_crop(
@@ -343,5 +357,7 @@ def extract_photo_outline(image: np.ndarray) -> PhotoOutline:
     )
 
 
-def photo_outline_from_data(data_url: str, mime_type: str = "") -> PhotoOutline:
-    return extract_photo_outline(decode_image_data(data_url, mime_type))
+def photo_outline_from_data(
+    data_url: str, mime_type: str = "", paper_size: str = "letter",
+) -> PhotoOutline:
+    return extract_photo_outline(decode_image_data(data_url, mime_type), paper_size)

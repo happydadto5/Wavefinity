@@ -145,7 +145,7 @@ DP.build = () => {
           <div class="field-grid three">
             <label>Width <span class="unit">mm</span><input id="dl-add-x" type="number" min="1" step="8" value="32"></label>
             <label>Length <span class="unit">mm</span><input id="dl-add-y" type="number" min="1" step="8" value="48"></label>
-            <label>Height <span class="unit">mm</span><input id="dl-add-z" type="number" min="1" step="1" value="40" title="Closed height, lid included"></label>
+            <label>Physical height <span class="unit">mm</span><input id="dl-add-z" type="number" min="1" step="1" value="40" title="Full printed height including lid/stacking foot"></label>
           </div>
           <div class="button-row"><button type="button" id="dl-add" class="button secondary">Add to inventory</button></div>
         </details>
@@ -324,14 +324,17 @@ DP.wire = () => {
   list.addEventListener("dragend", () => { DV.dragBin = null; DV.drop = null; DV.render(); });
 
   $("#dl-add").addEventListener("click", async () => {
+    const stack = $("#dl-add-stack").value;
+    const physicalZ = dlNum($("#dl-add-z").value, 0);
+    const engagement = DL.stackSteps[stack] ?? 0;
     const bin = {
       name: $("#dl-add-name").value.trim(),
       qty: Math.max(0, Math.round(dlNum($("#dl-add-qty").value, 1))),
-      x: dlNum($("#dl-add-x").value, 0), y: dlNum($("#dl-add-y").value, 0), z: dlNum($("#dl-add-z").value, 0),
-      stack: $("#dl-add-stack").value,
+      x: dlNum($("#dl-add-x").value, 0), y: dlNum($("#dl-add-y").value, 0), z: physicalZ - engagement,
+      stack,
       kind: "manual",
     };
-    if (!(bin.x > 0 && bin.y > 0 && bin.z > 0)) { toast("Enter the bin's X, Y and Z in mm.", true); return; }
+    if (!(bin.x > 0 && bin.y > 0 && bin.z > 0)) { toast("Enter the bin's X, Y and physical height in mm.", true); return; }
     if (await DL.editBins({ new_bins: [bin] })) {
       $("#dl-add-name").value = "";
       toast(`Added ${bin.name || `${fmt(bin.x)} × ${fmt(bin.y)}`} to the inventory.`);
@@ -428,13 +431,20 @@ DP.designSpot = () => {
   const previous = clone(state.design);
   state.design.box.x = x;
   state.design.box.y = y;
-  if (state.design.box.z > drawer.height) state.design.box.z = Math.floor(drawer.height);
+  const mode = stackMode();
+  const engagement = DL.stackSteps[mode] ?? 0;
+  const maxModuleHeight = drawer.height - engagement;
+  let heightNote = `Keep it ${fmt(drawer.height)} mm tall or less.`;
+  if (state.design.box.z > maxModuleHeight) state.design.box.z = Math.floor(maxModuleHeight);
+  if (engagement > 0) {
+    heightNote = `Keep module height at ${fmt(Math.floor(maxModuleHeight))} mm or less so the ${fmt(engagement)} mm stacking foot fits within this drawer's ${fmt(drawer.height)} mm height.`;
+  }
   syncForm();
   state.binResizePending = true;
   state.canGenerate = false;
   updateGenerateAvailability();
   changedDesign(previous);
-  toast(`Bin set to ${fmt(x)} × ${fmt(y)} mm to fill the gap in ${drawer.name}. Keep it ${fmt(drawer.height)} mm tall or less.`, false, 6000);
+  toast(`Bin set to ${fmt(x)} × ${fmt(y)} mm to fill the gap in ${drawer.name}. ${heightNote}`, false, 6000);
 };
 
 // ------------------------------------------------------------------ rendering

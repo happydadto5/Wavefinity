@@ -96,7 +96,6 @@ from organizer_inserts import (
     CONNECTOR_EDGE_KEEP_OUT,
     EDITOR_SNAP,
     FEATURE_BUILDERS,
-    INSERT_CLEARANCE,
     TEXT_KIND,
     _cradle_rib_thickness,
     LIBRARY,
@@ -438,7 +437,10 @@ def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
 
 def stack_lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
     """``Stack Lid 16 x 48 Driver Rack.3mf`` - the bin's own snap-in lid."""
+    effective = stack_effective_box(box)
     name = f"Stack Lid {box.x:g} x {box.y:g}"
+    if not math.isclose(effective.wall, DEFAULT_WALL, abs_tol=1e-9):
+        name += f" Wall {effective.wall:g}mm"
     tidy = clean_label(part)
     if tidy:
         name += f" {tidy}"
@@ -670,13 +672,7 @@ def _scoop_floor_bounds(
 ) -> tuple[float, float, float, float] | None:
     if mode == "fused":
         return None
-    bounds = layout_zone(box, mode)
-    return (
-        bounds.x0 + INSERT_CLEARANCE,
-        bounds.y0 + INSERT_CLEARANCE,
-        bounds.x1 - INSERT_CLEARANCE,
-        bounds.y1 - INSERT_CLEARANCE,
-    )
+    return insert_footprint(box, mode).bounds
 
 
 def _removable_scoop(box: BoxSpec, mode: str):
@@ -988,7 +984,7 @@ def preview_geometry(
                     geometry.append(([(x, y, label_z) for x, y in ring.coords],
                                      "label_hole", (0.0, 0.0, 1.0), 3, None))
 
-    inside_x, inside_y = box.usable_inside
+    inside_x, inside_y = box.usable_opening
     return {
         "geometry": geometry,
         "fits": fits,
@@ -1453,14 +1449,17 @@ def inventory_bin_record(
     assembled envelope, not its child-bin field - without touching ``box``.
     Ordinary bins continue using ``box.x/y/z`` when no override is supplied.
     """
-    if box.b4b.enabled and not b4b_note:
-        b4b_summary_data = b4b_summary(box)
-        b4b_note = _b4b_log_note(b4b_summary_data)
-        if physical_size_mm is None:
-            envelope = b4b_summary_data["assembled_envelope_mm"]
-            physical_size_mm = (envelope[0], envelope[1], envelope[2])
-        box = b4b_effective_box(box)
-        layout = Layout((), "fused", EDITOR_SNAP)
+    b4b_stack_mode = None
+    if box.b4b.enabled:
+        b4b_stack_mode = "b4b" if box.b4b.stacking else "none"
+        if not b4b_note:
+            b4b_summary_data = b4b_summary(box)
+            b4b_note = _b4b_log_note(b4b_summary_data)
+            if physical_size_mm is None:
+                envelope = b4b_summary_data["assembled_envelope_mm"]
+                physical_size_mm = (envelope[0], envelope[1], envelope[2])
+            box = b4b_effective_box(box)
+            layout = Layout((), "fused", EDITOR_SNAP)
     if generated_files:
         file_names = ", ".join(dict.fromkeys(p.name for p in generated_files))
     else:
@@ -1500,7 +1499,11 @@ def inventory_bin_record(
         "interior": interior_text,
         "name": clean_label(part_name) or tidy_label or (floor_texts[0] if floor_texts else ""),
         "kind": "b4b" if b4b_note else "bin",
-        "stack": getattr(getattr(box, "stack", None), "mode", "none"),
+        "stack": (
+            b4b_stack_mode
+            if b4b_stack_mode is not None
+            else getattr(getattr(box, "stack", None), "mode", "none")
+        ),
         "wall": wall,
     }
 

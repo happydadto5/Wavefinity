@@ -292,11 +292,13 @@ def _fit_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
 
 def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Extract one contour and replace the design interior with its new bin."""
-    box, layout, label, part_name, label_location, scoop = design_from_dict(
+    request_box, layout, label, part_name, label_location, scoop = design_from_dict(
         payload["design"], validate_layout=False
     )
+    box = _interior_work_box(request_box)
     outline = photo_outline_from_data(
-        str(payload.get("image", "")), str(payload.get("mime_type", ""))
+        str(payload.get("image", "")), str(payload.get("mime_type", "")),
+        str(payload.get("paper_size", "letter")),
     )
     supplied = dict(payload.get("options", {}))
     # Wall thickness, object thickness and retrieval choices are stored with
@@ -318,7 +320,12 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         contour=outline.contour,
     )
     one = fitted_nest_feature(starter, (0.0, 0.0))
-    box = _fit_photo_nest_box(box, one, layout.mode)
+    grown = _fit_photo_nest_box(box, one, layout.mode)
+    request_box = replace(
+        request_box, x=grown.x, y=grown.y,
+        z=request_box.z + (grown.z - box.z),
+    )
+    box = _interior_work_box(request_box)
     updated = Layout((one,), layout.mode, layout.snap)
     updated.validate(box)
     validate_customization_clearance(
@@ -329,7 +336,7 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
                        layout_zone(box, layout.mode), layout.mode)
     result = {
         "design": design_to_dict(
-            box, updated, label, part_name, label_location, scoop,
+            request_box, updated, label, part_name, label_location, scoop,
         ),
         "selected": 0,
         "outline": {"width": outline.width, "depth": outline.depth},
@@ -824,6 +831,21 @@ def _design(raw: dict[str, Any]) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     return design_from_dict(raw)
 
 
+def _interior_work_box(box: BoxSpec) -> BoxSpec:
+    """The printable body interior-feature math should size against.
+
+    A stackable request's module-height ``box`` is not what gets printed: lid
+    stacking makes the body shorter, direct stacking makes it 3 mm taller.
+    preview/export already build against ``stack_effective_box`` - every
+    editor path that fits or validates interior geometry has to use the same
+    body, or a part can pass Add/Edit/Fit and then fail preview/export.
+    """
+    if not stack_enabled(box):
+        return box
+    validate_stack_design(box)
+    return stack_effective_box(box)
+
+
 def _reject_if_b4b(payload: dict[str, Any], what: str) -> None:
     """Guard routes that assume a normal box + interior layout.  A B4B interior
     is reserved for child bins and B4B v1 does not use the side connector."""
@@ -1063,6 +1085,7 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     _reject_if_b4b(payload, "adding interior parts")
     box, layout, *_ = _design(payload["design"])
+    box = _interior_work_box(box)
     kind = str(payload["kind"])
     try:
         definition = feature_definition(kind)
@@ -1111,6 +1134,7 @@ def _divider_cells_payload(
 def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     _reject_if_b4b(payload, "editing interior parts")
     box, layout, label, _part, label_location, scoop = _design(payload["design"])
+    box = _interior_work_box(box)
     one = _feature_from_json(payload["feature"], layout.mode)
     if one.kind == "divider":
         one = normalize_divider_scoop(
@@ -1185,6 +1209,7 @@ def feature_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
     contents size (pocket, steps, photo nest, divider, text).
     """
     box, layout, *_ = _design(payload["design"])
+    box = _interior_work_box(box)
     one = _feature_from_json(payload["feature"], layout.mode)
     base_z = base_height(box, layout.mode)
     size = feature_min_footprint(box, one, base_z)
@@ -1205,7 +1230,8 @@ def feature_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     _reject_if_b4b(payload, "adding interior parts")
-    box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    box = _interior_work_box(request_box)
     one = _feature_from_json(payload["feature"], layout.mode)
     if one.kind == "divider":
         one = normalize_divider_scoop(
@@ -1215,7 +1241,14 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if not one.contour:
             raise ValueError("upload a part photo before adding a Snug Holder")
         one = fitted_nest_feature(one, one.zone.centre)
-        box = _fit_photo_nest_box(box, one, layout.mode)
+        grown = _fit_photo_nest_box(box, one, layout.mode)
+        # x/y map straight across; z is an effective-body figure, so only its
+        # growth (not its raw value) is carried back into the module height.
+        request_box = replace(
+            request_box, x=grown.x, y=grown.y,
+            z=request_box.z + (grown.z - box.z),
+        )
+        box = _interior_work_box(request_box)
     else:
         if one.kind == "text" and not one.options.get("auto"):
             one = auto_grow_text_feature(one, box, layout.mode)
@@ -1270,7 +1303,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         )
     return {
         "design": design_to_dict(
-            box, updated, label, part_name, label_location, scoop,
+            request_box, updated, label, part_name, label_location, scoop,
         ),
         "selected": selected,
     }
@@ -1297,14 +1330,15 @@ def delete_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
     _reject_if_b4b(payload, "changing the interior-parts print mode")
-    box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    box = _interior_work_box(request_box)
     new_mode = str(payload["mode"])
     converted = convert_layout_mode(box, layout.features, new_mode)
     validate_customization_clearance(
         box, converted.features, label, label_location, scoop, converted.mode
     )
     return {"design": design_to_dict(
-        box, converted, label, part_name, label_location, scoop,
+        request_box, converted, label, part_name, label_location, scoop,
     )}
 
 
@@ -1325,9 +1359,10 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     The current size is always the floor: this operation only grows. A larger
     bin is valid user intent and is never silently tightened around its parts.
     """
-    box, layout, label, part_name, label_location, scoop = design_from_dict(
+    request_box, layout, label, part_name, label_location, scoop = design_from_dict(
         payload["design"], validate_layout=False
     )
+    box = _interior_work_box(request_box)
     mode = layout.mode
     originals = list(layout.features)
     if not originals:
@@ -1466,11 +1501,14 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
             trial, updated.features, base_height(trial, mode),
             layout_zone(trial, mode), mode,
         )
+    # Growth here is X/Y only - the saved design keeps the requested module Z,
+    # never the effective work box's printable Z.
+    saved_box = replace(request_box, x=trial.x, y=trial.y)
     return {
         "design": design_to_dict(
-            trial, updated, label, part_name, label_location, scoop,
+            saved_box, updated, label, part_name, label_location, scoop,
         ),
-        "box": {"x": trial.x, "y": trial.y, "z": trial.z},
+        "box": {"x": saved_box.x, "y": saved_box.y, "z": saved_box.z},
         "grew": (trial.x > start_x or trial.y > start_y),
         "changed": (trial.x != start_x or trial.y != start_y),
     }

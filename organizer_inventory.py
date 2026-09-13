@@ -44,7 +44,7 @@ KINDS = ("bin", "b4b", "spacer", "shim", "manual")
 # How the bin was printed to stack: not at all, with a snap-on lid, or snapping
 # straight into the bin below. For stackable bins Z is the requested module
 # contribution; the drawer derives the detached envelope from the interface.
-STACK_MODES = ("none", "lid", "direct")
+STACK_MODES = ("none", "lid", "direct", "b4b")
 EDITABLE = ("name", "qty", "x", "y", "z", "stack")
 MAX_QTY = 999
 # A generated bin is not a printed one.  Until the Layout view's setting says

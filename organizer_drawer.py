@@ -66,6 +66,7 @@ from organizer_inventory import (
     save_inventory,
     save_inventory_text,
 )
+from organizer_b4b import B4B_STACK_RECESS_DEPTH
 from organizer_stack import STACK_MIN_WALL, STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
 
 UNIT = BASE_UNIT
@@ -82,7 +83,11 @@ MIN_RIB_SPAN = 10.0             # narrower than this inside, a frame needs no br
 MIN_CONNECTOR_SEAM = 16.0       # mm of shared wall a connector needs
 HEIGHT_TOLERANCE = 0.5          # mm; "taller" means taller by more than this
 # How far a stacked bin's foot sinks into the one below, by stacking style.
-STACK_STEPS = {"lid": STACK_SEAT_DEPTH, "direct": STACK_PLUG_DEPTH}
+STACK_STEPS = {
+    "lid": STACK_SEAT_DEPTH,
+    "direct": STACK_PLUG_DEPTH,
+    "b4b": B4B_STACK_RECESS_DEPTH,
+}
 
 DRAWER_DEFAULTS: dict[str, Any] = {
     "name": "Drawer", "width": 400.0, "depth": 300.0, "height": 60.0,
@@ -195,11 +200,15 @@ def bin_cells(one: dict[str, Any], drawer: dict[str, Any]) -> tuple[int, int]:
 
 def stack_pitch(one: dict[str, Any]) -> float:
     """What a bin adds between consecutive stack seating datums."""
+    if one.get("stack") == "b4b":
+        return float(one["z"]) - B4B_STACK_RECESS_DEPTH
     return float(one["z"])
 
 
 def stack_part_height(one: dict[str, Any]) -> float:
     """Detached physical height, including the interlocking foot depth."""
+    if one.get("stack") == "b4b":
+        return float(one["z"])
     return float(one["z"]) + STACK_STEPS.get(one.get("stack", "none"), 0.0)
 
 
@@ -622,7 +631,7 @@ def _build_stacks(singles: list[dict[str, Any]], max_height: float) -> list[dict
     items = []
     for single in singles:
         one = single["row"]
-        if one.get("stack", "none") in STACK_STEPS and one.get("kind") not in ("b4b", *SPACER_KINDS):
+        if one.get("stack", "none") in STACK_STEPS and one.get("kind") not in SPACER_KINDS:
             groups.setdefault((round(float(one["x"]), 2), round(float(one["y"]), 2), one["stack"]), []).append(single)
         else:
             items.append(single)

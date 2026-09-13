@@ -13,6 +13,7 @@ from organizer_geometry import _extrude_polygon, difference, intersection, union
 
 from organizer_engine import (
     BoxSpec,
+    LOCK_PROTRUSION,
     _rounded,
     flat_cavity_polygon,
     label_placement,
@@ -223,22 +224,28 @@ def insert_footprint(box: BoxSpec, mode: str = "separate") -> Polygon:
     A box with a flat lower wall band uses that lower profile because the plate
     sits inside the band.  Cartridge inserts retain their reusable rectangular
     cell footprint.
+
+    Both removable modes pull in by ``INSERT_CLEARANCE + LOCK_PROTRUSION``: the
+    lock bumps stand proud of the cavity line only in the upper wall band, so a
+    removable part's passage has to clear their tips too, on top of its normal
+    running clearance.
     """
+    passage_clearance = INSERT_CLEARANCE + LOCK_PROTRUSION
     if mode == "separate":
         cavity = (
             flat_cavity_polygon(box)
             if box.flat_inside > 0.0
             else wavy_cavity_polygon(box)
         )
-        footprint = cavity.buffer(-INSERT_CLEARANCE)
+        footprint = cavity.buffer(-passage_clearance)
         if not isinstance(footprint, Polygon) or footprint.is_empty:
             raise ValueError("this bin is too small for a removable insert")
         return footprint
     bounds = layout_zone(box, mode)
     return _rounded(
         shapely_box(
-            bounds.x0 + INSERT_CLEARANCE, bounds.y0 + INSERT_CLEARANCE,
-            bounds.x1 - INSERT_CLEARANCE, bounds.y1 - INSERT_CLEARANCE,
+            bounds.x0 + passage_clearance, bounds.y0 + passage_clearance,
+            bounds.x1 - passage_clearance, bounds.y1 - passage_clearance,
         ),
         1.0,
     )

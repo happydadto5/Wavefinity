@@ -2334,8 +2334,14 @@ function renderDraftFields() {
     html += `<div class="photo-upload wide">
       <label class="button secondary photo-button" for="nest-photo-input">Upload part photo</label>
       <input id="nest-photo-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+      <label>Reference paper
+        <select id="nest-paper-size">
+          <option value="letter" ${selected("letter", state.nestPaperSize || "letter")}>US Letter — 8.5 × 11 in</option>
+          <option value="a4" ${selected("a4", state.nestPaperSize || "letter")}>A4 — 210 × 297 mm</option>
+        </select>
+      </label>
       <details><summary>Photo requirements</summary><ul>
-        <li>Entire 8.5 × 11 in sheet visible</li>
+        <li>Entire selected reference sheet visible</li>
         <li>Camera directly overhead</li>
         <li>Part lies flat</li>
         <li>Plain, high-contrast background preferred</li>
@@ -2736,6 +2742,10 @@ function renderDraftFields() {
   $("#draft-fields").innerHTML = html;
   const photoInput = $("#nest-photo-input", $("#draft-fields"));
   if (photoInput) photoInput.addEventListener("change", uploadNestPhoto);
+  const paperSizeSelect = $("#nest-paper-size", $("#draft-fields"));
+  if (paperSizeSelect) paperSizeSelect.addEventListener("change", () => {
+    state.nestPaperSize = paperSizeSelect.value;
+  });
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateDraftFromFields);
   });
@@ -3210,7 +3220,7 @@ async function uploadNestPhoto(event) {
   const draft = state.draft;
   const request = ++state.nestPhotoRequest;
   let mutationStarted = false;
-  $("#draft-status").textContent = "Finding letter paper and tracing the part…";
+  $("#draft-status").textContent = "Finding the reference sheet and tracing the part…";
   try {
     const image = await readFileDataUrl(file);
     // The file picker stays open while the browser reads it. If the user
@@ -3225,6 +3235,7 @@ async function uploadNestPhoto(event) {
       design: state.design,
       image,
       mime_type: mimeType,
+      paper_size: state.nestPaperSize || "letter",
       options: state.draft?.options || {},
     });
     state.design = result.design;
