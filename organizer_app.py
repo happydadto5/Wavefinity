@@ -720,13 +720,18 @@ def validate_customization_clearance(
     if rim_feature is not None:
         label = text_of(rim_feature)
         label_location = str(rim_feature.options.get("rim_side", "back"))
+    base_z = base_height(box, mode)
     for index, one in enumerate(features):
         if is_text(one) and one.options.get("level") == "rim":
             continue
+        # A default divider's zone can span most of the floor even though its
+        # actual printed wall is a narrow strip - judge the customization
+        # keep-outs against what is really built, not the editor's drag zone.
+        footprint = feature_footprint(box, one, base_z) if mode == "fused" else one.zone
         for name, zone in _customization_zones(
             box, label, label_location, scoop, mode
         ):
-            if one.zone.overlaps(zone, MIN_FEATURE_GAP):
+            if footprint.overlaps(zone, MIN_FEATURE_GAP):
                 raise ValueError(
                     f"interior part {index + 1} ({one.kind}) overlaps the {name}; "
                     "move or resize the part in the 2D layout"
@@ -883,8 +888,14 @@ def preview_geometry(
             continue
         if selected is not None and feature_index == selected and draft is not None:
             continue
+        # Same actual-footprint rule as validate_customization_clearance(): a
+        # default divider's zone can span the floor even though its printed
+        # wall is a narrow strip, so judge against what is really built.
+        # ``occupied`` already holds this feature's footprint (or ``one.zone``
+        # in non-fused modes), computed the same way just above.
+        footprint = occupied[feature_index]
         conflict = next(
-            (name for name, zone in reserved if one.zone.overlaps(zone, MIN_FEATURE_GAP)),
+            (name for name, zone in reserved if footprint.overlaps(zone, MIN_FEATURE_GAP)),
             None,
         )
         if conflict is not None:
