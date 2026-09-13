@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-12 — Public-host safety ceiling
+
+- Bin width and length are capped at 350 mm. The 8 mm grid makes 344 mm the
+  largest selectable size.
+- Public network startup now refuses to run in local-desktop mode. Render and
+  Docker explicitly start hosted mode, which keeps server files and native
+  slicer controls private.
+
 ## 2026-09-12 — B4B 3MF pieces can move separately
 
 - B4B 3MF exports now open with the body, lid, handle, latches and stacking

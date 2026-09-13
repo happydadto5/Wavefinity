@@ -85,6 +85,7 @@ SAMPLES_PER_MM = 16
 # meet a box of a different size, so they are rejected.
 GRID_PITCH = 2.0 * WAVE_LENGTH   # 8.0
 MIN_BOX_SIZE = GRID_PITCH        # 8.0 - one grid step
+MAX_BOX_SIZE = 350.0             # public-service resource ceiling for X and Y
 BASE_UNIT = GRID_PITCH           # one unit is one grid step, so sizes are whole
                                  # numbers of units: 1, 2, 3 ... = 8, 16, 24 mm
 
@@ -468,6 +469,10 @@ class BoxSpec:
             if value < MIN_BOX_SIZE - 1e-9:
                 raise ValueError(
                     f"box {name} must be at least {MIN_BOX_SIZE:.0f} mm"
+                )
+            if value > MAX_BOX_SIZE + 1e-9:
+                raise ValueError(
+                    f"box {name} must be {MAX_BOX_SIZE:.0f} mm or smaller"
                 )
             units = value / GRID_PITCH
             if abs(units - round(units)) > 1e-6:

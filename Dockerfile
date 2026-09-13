@@ -15,7 +15,8 @@ ENV HOME=/home/user \
     PATH="/home/user/.local/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     MPLCONFIGDIR=/tmp/matplotlib \
-    WAVEFINITY_PID_FILE=/tmp/wavefinity.pid
+    WAVEFINITY_PID_FILE=/tmp/wavefinity.pid \
+    WAVEFINITY_DEPLOYMENT=hosted
 
 WORKDIR /app
 

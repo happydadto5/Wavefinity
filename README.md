@@ -1178,6 +1178,7 @@ these numbers look arbitrary and are not.
 | Mating gap | **0.25** | between two neighbouring walls |
 | Size grid | **8.0** | box X and Y must be whole multiples |
 | Minimum box | **8.0** | one grid step |
+| Maximum requested X/Y | **350.0** | the 8 mm grid makes 344 mm the largest valid size |
 | One "unit" | **8.0** | so 1, 2, 3 units = 8, 16, 24 mm |
 | Smallest box that clips on both sides | **16.0** | derived, not hard-coded |
 | Wall | **0.8** | independent of the floor |

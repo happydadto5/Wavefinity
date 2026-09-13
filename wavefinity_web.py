@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+import ipaddress
 import json
 import math
 import mimetypes
@@ -55,6 +56,7 @@ from organizer_engine import (
     LOCKED_CONNECTOR_HEIGHT,
     LOCKED_CONNECTOR_LENGTH,
     LOCKED_TOLERANCE,
+    MAX_BOX_SIZE,
     MAX_WALL,
     MIN_WALL,
     WAVE_AMPLITUDE,
@@ -424,6 +426,7 @@ def catalog_payload() -> dict[str, Any]:
         "version": SERVER_VERSION,
         "instance": SERVER_INSTANCE,
         "base_unit": BASE_UNIT,
+        "max_box_size": MAX_BOX_SIZE,
         "modes": [
             {"value": "fused", "label": "Fused into box"},
             {"value": "separate", "label": "Removable insert"},
@@ -1933,6 +1936,14 @@ def _replace_stale_process(requested_url: str, host: str, port: int) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    try:
+        loopback = args.host.lower() == "localhost" or ipaddress.ip_address(args.host).is_loopback
+    except ValueError:
+        loopback = False
+    if not loopback and not HOSTED:
+        raise RuntimeError(
+            "refusing a public network bind unless WAVEFINITY_DEPLOYMENT=hosted"
+        )
     requested_url = f"http://{args.host}:{args.port}/"
     try:
         server = make_server(args.host, args.port)

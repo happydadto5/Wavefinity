@@ -1178,7 +1178,8 @@ function updateDesignFromForm() {
   const design = state.design;
   const snapSize = (value, fallback) => {
     const unit = state.catalog.base_unit;
-    return Math.max(unit, Math.round(number(value, fallback) / unit) * unit);
+    const max = Math.floor((state.catalog.max_box_size || 350) / unit) * unit;
+    return Math.min(max, Math.max(unit, Math.round(number(value, fallback) / unit) * unit));
   };
   const newBoxX = snapSize($("#x-size").value, design.box.x);
   const newBoxY = snapSize($("#y-size").value, design.box.y);
@@ -6336,7 +6337,8 @@ function designHasChanges() {
   const visibleDesign = clone(state.design);
   const snapSize = (value, fallback) => {
     const unit = state.catalog.base_unit;
-    return Math.max(unit, Math.round(number(value, fallback) / unit) * unit);
+    const max = Math.floor((state.catalog.max_box_size || 350) / unit) * unit;
+    return Math.min(max, Math.max(unit, Math.round(number(value, fallback) / unit) * unit));
   };
   visibleDesign.box.x = snapSize($("#x-size").value, visibleDesign.box.x);
   visibleDesign.box.y = snapSize($("#y-size").value, visibleDesign.box.y);
