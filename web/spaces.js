@@ -511,7 +511,7 @@ SP.wire = () => {
   $("#space-optional-setup").addEventListener("click", SP.showSetup);
   $("#welcome-resume-continue").addEventListener("click", () => {
     SP.close();
-    activatePreviewView("drawer");
+    activatePreviewView("3d");
   });
   $("#welcome-resume-switch").addEventListener("click", SP.chooseFolder);
   $("#space-folder-change").addEventListener("click", SP.changeFolderThenSetup);
