@@ -671,11 +671,14 @@ class B4BFrontLabelWavyTextTests(unittest.TestCase):
         self.assertTrue(plate.is_watertight)
         self.assertGreater(plate.volume, 0.0)
         # The text sits inside the plate's own footprint and just past its
-        # deepest front excursion, never floating clear of the plate.
+        # deepest front excursion, never floating clear of the plate.  The
+        # boolean cut boundary lands within a few hundredths of a micron of
+        # the analytic surface, so the tolerance here is generous relative to
+        # that noise while still far tighter than anything print-relevant.
         self.assertGreaterEqual(
-            text.bounds[0][1] + 1e-6, plate.bounds[0][1],
+            text.bounds[0][1] + 1e-3, plate.bounds[0][1],
         )
-        self.assertLessEqual(text.bounds[1][1], plate.bounds[1][1] + 1e-6)
+        self.assertLessEqual(text.bounds[1][1], plate.bounds[1][1] + 1e-3)
 
     def test_short_text_does_not_restart_the_wave_phase(self):
         # A short label still reads the wave at true case-relative X=0 - the
@@ -712,14 +715,96 @@ class B4BFrontLabelPrintPoseTests(unittest.TestCase):
                 # Flat back on the build plate.
                 self.assertAlmostEqual(float(plate.bounds[0][2]), 0.0, places=6)
                 # Lettering sits above the back, flush with (never past) the
-                # plate's own top/visible face - not against the plate.
+                # plate's own top/visible face - not against the plate.  A
+                # few hundredths of a micron of boolean-cut noise is fine;
+                # anything print-relevant is orders of magnitude bigger.
                 self.assertGreater(float(text.bounds[0][2]), 0.0)
                 self.assertLessEqual(
-                    float(text.bounds[1][2]), float(plate.bounds[1][2]) + 1e-6,
+                    float(text.bounds[1][2]), float(plate.bounds[1][2]) + 1e-3,
                 )
                 self.assertAlmostEqual(
                     float(text.bounds[1][2]), float(plate.bounds[1][2]), places=3,
                 )
+
+
+class B4BWavyLabelZSamplesTests(unittest.TestCase):
+    """``_b4b_wavy_label_z_samples`` replaces the flat per-mm Z grid with one
+    tied to the border/blend topology - see ``_b4b_wave_mask_1d``."""
+
+    def test_starts_and_ends_at_half_height(self):
+        zs = b4b._b4b_wavy_label_z_samples(12.0)
+        self.assertAlmostEqual(float(zs[0]), -6.0, places=6)
+        self.assertAlmostEqual(float(zs[-1]), 6.0, places=6)
+
+    def test_includes_centreline(self):
+        zs = b4b._b4b_wavy_label_z_samples(12.0)
+        self.assertTrue(np.any(np.isclose(zs, 0.0)))
+
+    def test_strictly_increasing(self):
+        zs = b4b._b4b_wavy_label_z_samples(12.0)
+        self.assertTrue(np.all(np.diff(zs) > 0))
+
+    def test_symmetric_around_zero(self):
+        zs = b4b._b4b_wavy_label_z_samples(12.0)
+        self.assertTrue(np.allclose(zs, -zs[::-1]))
+
+    def test_represents_border_and_blend_transition(self):
+        zs = b4b._b4b_wavy_label_z_samples(12.0)
+        half_h = 6.0
+        border = b4b.B4B_FRONT_LABEL_FLAT_BORDER
+        blend = b4b.B4B_FRONT_LABEL_WAVE_BLEND
+        # The flat-border/blend boundary and the far end of the blend, both
+        # sides of the centreline.
+        for expected in (half_h - border, half_h - border - blend):
+            self.assertTrue(np.any(np.isclose(zs, expected, atol=1e-6)))
+            self.assertTrue(np.any(np.isclose(zs, -expected, atol=1e-6)))
+
+    def test_sample_count_does_not_scale_with_height(self):
+        # Unlike the old per-mm grid, the row count is set by the fixed
+        # border/blend constants, not by plate height.
+        counts = {len(b4b._b4b_wavy_label_z_samples(h)) for h in (8.0, 12.0, 20.0, 40.0)}
+        self.assertEqual(len(counts), 1)
+        (count,) = counts
+        self.assertLess(count, 20)
+        self.assertGreater(count, 5)
+
+
+class B4BWavyLabelMeshComplexityTests(unittest.TestCase):
+    """The Z-topology sampling must cut triangle count without losing any
+    visible geometry - see ``_b4b_wavy_label_z_samples``."""
+
+    def test_blank_mesh_is_efficient_and_correct(self):
+        plate_w, plate_h = 40.0, 12.0
+        blank = b4b._b4b_wavy_label_blank(plate_w, plate_h)
+
+        self.assertTrue(blank.is_watertight)
+        self.assertGreater(blank.volume, 0.0)
+        self.assertLess(len(blank.faces), 100_000)
+        # X sampling is deliberately left at full per-mm density, so it still
+        # dominates the triangle count; the win is against the old per-mm Z
+        # grid this replaces - at least a 5x cut in row count for a 12 mm
+        # label, so at least roughly that much fewer triangles too.
+        old_nz = max(2, b4b._sample_count(plate_h))
+        new_nz = len(b4b._b4b_wavy_label_z_samples(plate_h))
+        self.assertLess(new_nz * 5, old_nz)
+
+        back_y = blank.bounds[1][1]
+        back_vertices = blank.vertices[blank.vertices[:, 1] > back_y - 1e-6]
+        self.assertGreater(len(back_vertices), 0)
+        self.assertTrue(np.allclose(back_vertices[:, 1], back_y, atol=1e-6))
+
+        front_y = b4b._b4b_wavy_front_y(plate_w, plate_h, b4b.B4B_FRONT_LABEL_PLATE_T)
+        flat_y = -b4b.B4B_FRONT_LABEL_PLATE_T / 2.0
+        half_w, half_h = plate_w / 2.0, plate_h / 2.0
+        for x, z in (
+            (half_w - 0.05, 0.0), (-half_w + 0.05, 0.0),
+            (0.0, half_h - 0.05), (0.0, -half_h + 0.05),
+        ):
+            self.assertAlmostEqual(front_y(x, z), flat_y, places=6)
+        for x in np.linspace(-plate_w / 4.0, plate_w / 4.0, 5):
+            self.assertAlmostEqual(
+                front_y(float(x), 0.0), flat_y + wave_value(float(x)), places=6,
+            )
 
 
 if __name__ == "__main__":

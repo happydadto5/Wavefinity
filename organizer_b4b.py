@@ -3920,6 +3920,31 @@ def _b4b_wavy_front_y(plate_w: float, plate_h: float, plate_t: float):
     return front_y
 
 
+def _b4b_wavy_label_z_samples(plate_h: float) -> np.ndarray:
+    """Z rows needed to describe the Wavy label's flat borders and cosine
+    blend transitions (see ``_b4b_wave_mask_1d``) - unlike X, where the wave
+    itself varies and needs ``_sample_count``'s full per-mm density, the face
+    is Z-invariant everywhere except the two ``B4B_FRONT_LABEL_WAVE_BLEND``
+    bands just inside each edge: exactly flat within
+    ``B4B_FRONT_LABEL_FLAT_BORDER`` of the edge, and exactly the constant
+    full-wave shape for the rest of the middle.  Only those two blend bands
+    need intermediate samples to approximate their cosine ease."""
+    half_h = plate_h / 2.0
+    border = B4B_FRONT_LABEL_FLAT_BORDER
+    blend = B4B_FRONT_LABEL_WAVE_BLEND
+    # Distances in from the edge where the mask has a breakpoint: right at
+    # the edge, at the flat-border/blend boundary, through the blend in
+    # sixths, and at the blend's inner edge (mask == 1.0 from there on in).
+    edge_distances = (
+        [0.0, border]
+        + [border + blend * k / 6.0 for k in range(1, 6)]
+        + [border + blend]
+    )
+    offsets = sorted({min(max(half_h - d, 0.0), half_h) for d in edge_distances})
+    samples = sorted({-half_h, 0.0, half_h} | {o for o in offsets} | {-o for o in offsets})
+    return np.array(samples, dtype=float)
+
+
 def _b4b_wavy_label_slab(plate_w: float, plate_h: float, outer_fn, inner_fn) -> trimesh.Trimesh:
     """A watertight solid between two ``(x, z) -> y`` height functions over the
     rectangular ``plate_w`` x ``plate_h`` footprint: ``outer_fn`` toward -Y,
@@ -3928,11 +3953,11 @@ def _b4b_wavy_label_slab(plate_w: float, plate_h: float, outer_fn, inner_fn) -> 
     shells (``inner_fn`` riding the same wave as ``outer_fn``, offset by a
     fixed depth) - both need the identical grid/side-wall topology.
     """
-    half_w, half_h = plate_w / 2.0, plate_h / 2.0
+    half_w = plate_w / 2.0
     nx = max(2, _sample_count(plate_w))
-    nz = max(2, _sample_count(plate_h))
     xs = np.linspace(-half_w, half_w, nx)
-    zs = np.linspace(-half_h, half_h, nz)
+    zs = _b4b_wavy_label_z_samples(plate_h)
+    nz = len(zs)
 
     outer = np.empty((nx, nz, 3))
     inner = np.empty((nx, nz, 3))
