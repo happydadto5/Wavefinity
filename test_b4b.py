@@ -1,7 +1,11 @@
 """Focused tests for B4B (Bin for Bins)."""
 
 import math
+from pathlib import Path
+import tempfile
 import unittest
+import zipfile
+from xml.etree import ElementTree
 
 import numpy as np
 from shapely.geometry import Point, Polygon
@@ -19,6 +23,7 @@ from organizer_app import (
     b4b_filename,
     design_from_dict,
     design_to_dict,
+    generate_b4b_files,
 )
 import organizer_b4b as b4b
 
@@ -364,6 +369,144 @@ class B4BGenerationTests(unittest.TestCase):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
         self.assertNotIn("Box 64", b4b_filename(box))
         self.assertTrue(b4b_filename(box).startswith("B4B "))
+
+
+class B4B3MFHierarchyTests(unittest.TestCase):
+    """B4B exports retain only deliberate multi-part Bambu objects."""
+
+    @staticmethod
+    def _local(node) -> str:
+        return node.tag.rsplit("}", 1)[-1]
+
+    def _export_hierarchy(
+        self, b4b_spec: B4BSpec, x: float = 128, y: float = 80, z: float = 64,
+    ) -> dict[str, object]:
+        box = BoxSpec(x=x, y=y, z=z, wall=1.2, b4b=b4b_spec)
+        with tempfile.TemporaryDirectory() as directory:
+            result = generate_b4b_files(box, Path(directory), "Hierarchy")
+            with zipfile.ZipFile(result["output"]) as archive:
+                model_file = next(
+                    name for name in archive.namelist()
+                    if name.lower().endswith(".model")
+                )
+                root = ElementTree.fromstring(archive.read(model_file))
+                config = ElementTree.fromstring(
+                    archive.read("Metadata/model_settings.config")
+                )
+
+        resources = next(node for node in root if self._local(node) == "resources")
+        build = next(node for node in root if self._local(node) == "build")
+        objects = {
+            node.get("id"): node
+            for node in resources
+            if self._local(node) == "object"
+        }
+        top: dict[str, dict[str, object]] = {}
+        for item in build:
+            if self._local(item) != "item":
+                continue
+            obj = objects[item.get("objectid")]
+            children = [
+                objects[child.get("objectid")].get("name")
+                for child in obj.iter()
+                if self._local(child) == "component"
+            ]
+            top[obj.get("name")] = {
+                "mesh": any(self._local(child) == "mesh" for child in obj),
+                "children": children,
+            }
+
+        components = {
+            node.get("name"): [
+                objects[child.get("objectid")].get("name")
+                for child in node.iter()
+                if self._local(child) == "component"
+            ]
+            for node in objects.values()
+            if any(self._local(child) == "components" for child in node)
+        }
+        filaments: dict[str, int] = {}
+        for config_object in config.iter():
+            if self._local(config_object) != "object":
+                continue
+            default_slot = 1
+            for meta in config_object:
+                if self._local(meta) == "metadata" and meta.get("key") == "extruder":
+                    default_slot = int(meta.get("value", "1"))
+            for part in config_object:
+                if self._local(part) != "part":
+                    continue
+                name, slot = "", default_slot
+                for meta in part:
+                    if self._local(meta) != "metadata":
+                        continue
+                    if meta.get("key") == "name":
+                        name = meta.get("value", "")
+                    elif meta.get("key") == "extruder":
+                        slot = int(meta.get("value", "1"))
+                if name:
+                    filaments[name] = slot
+        return {"top": top, "components": components, "filaments": filaments}
+
+    def _assert_direct(self, hierarchy, name: str) -> None:
+        part = hierarchy["top"][name]
+        self.assertTrue(part["mesh"], name)
+        self.assertEqual(part["children"], [], name)
+
+    def test_secure_unlabelled_b4b_has_only_direct_print_objects(self):
+        hierarchy = self._export_hierarchy(B4BSpec(
+            enabled=True, secure_lid=True, handle=True, label_location="top",
+        ), x=200, y=120, z=80)
+        self.assertGreater(len(hierarchy["top"]), 1)
+        self.assertEqual(hierarchy["components"], {})
+        self._assert_direct(hierarchy, "B4B Body")
+        self._assert_direct(hierarchy, "B4B Lid")
+        self._assert_direct(hierarchy, "B4B Handle")
+        latches = [name for name in hierarchy["top"] if name.startswith("B4B Latch ")]
+        self.assertTrue(latches)
+        for name in latches:
+            self._assert_direct(hierarchy, name)
+
+    def test_front_label_is_the_only_registered_multipart_object(self):
+        hierarchy = self._export_hierarchy(B4BSpec(
+            enabled=True, secure_lid=True, label_text="NUTS", label_location="front",
+        ))
+        self.assertEqual(hierarchy["components"], {
+            "B4B Front Label": [
+                "B4B Front Label Plate", "B4B Front Label Text",
+            ],
+        })
+        self._assert_direct(hierarchy, "B4B Body")
+        self._assert_direct(hierarchy, "B4B Lid")
+        for name in hierarchy["top"]:
+            if name.startswith("B4B Latch "):
+                self._assert_direct(hierarchy, name)
+        self.assertEqual(hierarchy["filaments"]["B4B Front Label Plate"], 1)
+        self.assertEqual(hierarchy["filaments"]["B4B Front Label Text"], 2)
+
+    def test_top_label_is_registered_with_its_lid_only(self):
+        hierarchy = self._export_hierarchy(B4BSpec(
+            enabled=True, secure_lid=True, label_text="NUTS", label_location="top",
+        ))
+        self.assertEqual(hierarchy["components"], {
+            "B4B Lid": ["B4B Lid", "B4B Top Label"],
+        })
+        self.assertEqual(hierarchy["top"]["B4B Lid"]["children"], [
+            "B4B Lid", "B4B Top Label",
+        ])
+        self._assert_direct(hierarchy, "B4B Body")
+        for name in hierarchy["top"]:
+            if name.startswith("B4B Latch "):
+                self._assert_direct(hierarchy, name)
+        self.assertEqual(hierarchy["filaments"]["B4B Top Label"], 2)
+
+    def test_lid_only_b4b_has_no_unneeded_components_object(self):
+        hierarchy = self._export_hierarchy(B4BSpec(
+            enabled=True, secure_lid=False, label_location="top",
+        ))
+        self.assertEqual(hierarchy["components"], {})
+        self._assert_direct(hierarchy, "B4B Body")
+        self._assert_direct(hierarchy, "B4B Lid")
 
 
 if __name__ == "__main__":
