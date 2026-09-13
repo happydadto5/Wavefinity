@@ -1091,6 +1091,10 @@ This project is developed locally, mostly by prompting an LLM. GitHub is a
 **After completing an implementation, commit all changes and push them to
 GitHub before reporting that the work is finished.**
 
+**When given an implementation plan, review it first.** Understand what it
+does and confirm that the execution is sound before beginning. If it is sound,
+implement the plan and commit the completed code.
+
 **One prompt may become one cohesive commit.** Keep all code, tests, and
 documentation needed to complete that prompt together; do not split a single
 request into artificial commits just to make the history look smaller. When a
