@@ -21,6 +21,7 @@ from organizer_inventory import (
     inventory_path,
     load_inventory,
     load_inventory_text,
+    render_inventory,
     save_inventory,
     save_inventory_text,
 )
@@ -350,6 +351,58 @@ class BoundaryTests(unittest.TestCase):
         grid = drawer_grid(drawer)
         self.assertLess(grid["cols"], 12)
 
+    @staticmethod
+    def _write_space(folder, kind, drawer_extra=None):
+        folder.mkdir(parents=True, exist_ok=True)
+        layout = {
+            "version": 1, "active": "d1",
+            "space": {"kind": kind, "name": folder.name, "x": 96, "y": 48, "z": 40},
+            "drawers": [{
+                "id": "d1", "name": folder.name, "width": 96, "depth": 48, "height": 40,
+                "clearance": 0.0 if kind == "box" else 1.0, "keepouts": [], "placements": [],
+                **(drawer_extra or {}),
+            }],
+        }
+        inventory_path(folder).write_text(render_inventory(folder.name, [], layout), encoding="utf-8")
+
+    def test_an_existing_box_space_missing_boundary_migrates_to_mating_on_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Case"
+            self._write_space(folder, "box")
+            loaded = load_inventory(folder)
+            drawer = loaded["layout"]["drawers"][0]
+            self.assertEqual(drawer["boundary"], "mating")
+            # And it keeps its exact interior capacity once migrated.
+            grid = drawer_grid(normalise_drawer(drawer))
+            self.assertEqual((grid["cols"], grid["rows"]), (12, 6))
+
+    def test_an_existing_plain_drawer_space_missing_boundary_migrates_to_wall_on_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Drawer"
+            self._write_space(folder, "drawer")
+            loaded = load_inventory(folder)
+            self.assertEqual(loaded["layout"]["drawers"][0]["boundary"], "wall")
+
+    def test_an_already_explicit_boundary_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Case2"
+            self._write_space(folder, "box", drawer_extra={"boundary": "wall"})
+            loaded = load_inventory(folder)
+            self.assertEqual(loaded["layout"]["drawers"][0]["boundary"], "wall")
+
+    def test_hosted_browser_text_migrates_an_existing_box_space_too(self):
+        layout = {
+            "version": 1, "active": "d1",
+            "space": {"kind": "box", "name": "Case", "x": 96, "y": 48, "z": 40},
+            "drawers": [{
+                "id": "d1", "name": "Case", "width": 96, "depth": 48, "height": 40,
+                "clearance": 0.0, "keepouts": [], "placements": [],
+            }],
+        }
+        text = render_inventory("Case", [], layout)
+        loaded = load_inventory_text(text, title="Case")
+        self.assertEqual(loaded["layout"]["drawers"][0]["boundary"], "mating")
+
 
 class OpenSpaceTests(unittest.TestCase):
     def test_two_distinct_openings_are_reported_largest_first(self):
@@ -372,6 +425,20 @@ class OpenSpaceTests(unittest.TestCase):
         bins = [_bin("B1", 16, 16, 20)]
         layout = _layout(2 * 8 + 1, 2 * 8 + 1, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
         report = drawer_report(layout["drawers"][0], bins)
+        self.assertEqual(report["opens"], [])
+
+    def test_a_sub_bin_width_sliver_is_not_offered_as_an_open_space(self):
+        # A 3x4-cell (4 mm snap) grid with a 2x4-cell bin in it leaves a
+        # genuine 1x4-cell (4 x 16 mm) strip - real free area, but narrower
+        # than the smallest normal bin (one 8 mm unit) in every direction.
+        bins = [_bin("B1", 8, 16, 20)]
+        drawer = {
+            "id": "d1", "name": "Drawer 1", "width": 14.0, "depth": 18.0, "height": 40,
+            "clearance": 1.0, "anchor": "front-left", "bin_axis": "x", "snap": 4,
+            "keepouts": [], "placements": [{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}],
+        }
+        report = drawer_report(drawer, bins)
+        self.assertGreater(report["cells"]["free"], 0)
         self.assertEqual(report["opens"], [])
 
 

@@ -1231,6 +1231,15 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn('divider_slope: "#1f6b45"', app_js)
         self.assertNotIn('changed === "option:bottom_angle" ||', app_js)
 
+    def test_auto_layout_candidate_cards_omit_fill_percent_and_connector_count(self):
+        root = Path(__file__).resolve().parent
+        drawer_panel_js = (root / "web" / "drawer-panel.js").read_text(encoding="utf-8")
+        self.assertIn("${c.stats.placed} of ${c.stats.wanted} bins", drawer_panel_js)
+        self.assertIn("height clash", drawer_panel_js)
+        self.assertNotIn("% full", drawer_panel_js)
+        self.assertNotIn("stats.fill", drawer_panel_js)
+        self.assertNotIn("stats.connectors", drawer_panel_js)
+
     def test_feature_icons_are_separate_and_loaded_before_the_app(self):
         root = Path(__file__).resolve().parent
         app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
