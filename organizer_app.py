@@ -1422,7 +1422,7 @@ def summarize_interior_parts(layout: Layout, scoop: bool = False) -> str:
         elif kind == "nest":
             opts = getattr(feature, "options", {}) or {}
             is_photo = bool(opts.get("photo") or getattr(feature, "contour", None) is not None)
-            name = "Snug Holder" if is_photo else "Nest"
+            name = "Photo Nest" if is_photo else "Nest"
         elif kind == "pocket":
             name = "Pocket"
         elif kind == "bore":
@@ -1775,6 +1775,18 @@ def default_feature(
                         else (across, required_length))
     elif kind == "nest":
         width, depth = min(8.0, bounds.width), min(8.0, bounds.depth)
+        # A brand-new (not yet photographed) Photo Nest must show the new-
+        # scan defaults immediately - Recessed, Auto-size, Automatic finger
+        # access - so the editor never displays a holder style the upload it
+        # is about to trigger will not actually build. Tool thickness is
+        # deliberately left unset here: it is the one measurement the user
+        # has to supply, and must never be shown as though already measured.
+        feature_options = {
+            "holder_style": "recessed",
+            "cavity_depth_mode": "auto",
+            "auto_size": True,
+            "lift_assist": "auto",
+        }
     elif kind == "divider":
         # Wall to wall on its own run axis by default, and spread across
         # the bin's whole other axis too - room for count > 1 to divide the

@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-09-14 — Photo Nest review fixes: legacy geometry, Tool thickness, Replace Photo
+
+- A design saved before Holder style existed now regenerates its exact old
+  Raised Wall (fixed outside foot, old finger-cutout placement) instead of
+  silently picking up the new adaptive buttress and access planner - verified
+  bit-for-bit identical to the pre-rewrite geometry.
+- A brand-new Photo Nest draft now shows Recessed/Auto-size/Automatic access
+  immediately, and Tool thickness is never invented: uploading a photo waits
+  for it to be entered instead of quietly building at a fabricated 8 mm.
+- **Replace photo** now changes only the outline - Holder style, cavity
+  depth/mode, finger access, Auto-size and Tool thickness all survive, so it
+  can no longer reset a manually chosen bin size back to Auto.
+- A Manual cavity depth clamped down by a thinner Tool thickness is now
+  actually saved at the clamped value, so raising Tool thickness again does
+  not spring the depth back to its old, too-large number.
+- Push Out's adaptive buttress and required footprint now agree (both use
+  Tool thickness plus Push Out's own deck depth); a very thin Raised Wall
+  can no longer grow a buttress taller than the wall itself.
+- The 2D layout now draws the resolved access plan's own scoop/notch markers
+  and surfaces its warning; keyboard nudging a Nest now turns off Auto-size
+  the same way dragging it already did.
+- Scan-tuning's candidate trace and its reference photo now stay one
+  consistent pair while tuning, so a sensitivity/cleanup change that shifts
+  the traced outline's own centre no longer looks displaced from the photo.
+- The normal scan flow no longer shows an A4 choice (Letter only, matching
+  the spec); A4 remains supported for any caller that still asks for it.
+  User-facing text now says "Photo Nest" consistently instead of "Snug Holder".
+
 ## 2026-09-14 — Photo Nest: Recessed Cavity, automatic access, and Auto-size
 
 - Photo Nest now defaults to a **Recessed Cavity** (a solid deck with the

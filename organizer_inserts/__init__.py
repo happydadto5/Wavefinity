@@ -113,6 +113,7 @@ from ._nest import (
     NEST_PUSH_DEPTH,
     NEST_PUSH_POSITIONS,
     build_nest,
+    clamp_nest_feature_options,
     fitted_nest_feature,
     nest_access_preview,
     nest_contour_polygon,

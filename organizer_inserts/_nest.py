@@ -9,7 +9,7 @@ from shapely.geometry import LineString, Point, Polygon, box as shapely_box
 from shapely.ops import unary_union
 from organizer_engine import BoxSpec
 from organizer_geometry import (
-    _extrude_polygon, _extrude_yz_profile,
+    _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile,
     difference, union,
 )
 from ._core import Feature, Zone
@@ -25,6 +25,14 @@ NEST_TOP_ROUND_OUTER = 1.0
 NEST_TOP_ROUND_INNER = 0.5
 NEST_INSIDE_RELIEF_MAX = 0.6
 NEST_LEAD_IN_MAX = 0.8
+# A design saved before holder_style existed must keep its exact old physical
+# geometry when it regenerates - the old fixed 2 mm outside foot, the old
+# shared top round, and the old fixed-axis finger-cutout placement - even
+# though it now *resolves* to holder_style "raised_wall" for display and new
+# defaults. Only an explicitly stored holder_style opts into the new adaptive
+# buttress and the new tool-relative access planner.
+LEGACY_NEST_CHAMFER = 2.0
+LEGACY_NEST_TOP_ROUND = 1.0
 NEST_FINGER_WIDTH = 25.0
 NEST_AUTO_WIDTH_MIN = 18.0
 NEST_AUTO_WIDTH_MAX = 30.0
@@ -107,6 +115,13 @@ def nest_contour_polygon(one: Feature, include_clearance: bool = False) -> Polyg
 # --- option resolution (works from the raw stored options alone, no BoxSpec
 # needed - matches how ``rim`` has always been read directly) -----------------
 
+def _is_legacy_nest(one: Feature) -> bool:
+    """True for a design saved before holder_style existed. Its Raised Wall
+    geometry and finger-cutout placement must stay exactly what they always
+    were, not silently pick up the new adaptive buttress or access planner."""
+    return "holder_style" not in one.options
+
+
 def _resolved_tool_thickness(one: Feature) -> float:
     """``tool_thickness``, falling back to the legacy ``depth`` key so an
     older Raised Wall design keeps its physical wall height unchanged."""
@@ -133,11 +148,30 @@ def _resolved_cavity_depth(one: Feature, tool_thickness: float) -> float:
 
 
 def _resolved_finger_settings(one: Feature) -> tuple[str, str, float | None]:
-    assist = str(one.options.get("lift_assist", "auto"))
+    # A legacy design's own historical default was "Finger grasp" (there was
+    # no Automatic yet); only a design that has ever seen holder_style
+    # defaults to the new "auto".
+    default_assist = "finger_grasp" if _is_legacy_nest(one) else "auto"
+    assist = str(one.options.get("lift_assist", default_assist))
     locations = str(one.options.get("finger_position", "sides"))
     width = one.options.get("finger_width")
     width = float(width) if width is not None else None
     return assist, locations, width
+
+
+def _line_coordinates(geometry, axis: int) -> list[float]:
+    """Coordinates from any Shapely line/boundary intersection - used only by
+    the legacy finger-cutout placement, which predates the access planner."""
+    if geometry.is_empty:
+        return []
+    if hasattr(geometry, "geoms"):
+        values: list[float] = []
+        for part in geometry.geoms:
+            values.extend(_line_coordinates(part, axis))
+        return values
+    if hasattr(geometry, "coords"):
+        return [float(point[axis]) for point in geometry.coords]
+    return []
 
 
 def _nest_access_mode(assist: str) -> str:
@@ -177,8 +211,10 @@ def _automatic_finger_width(one: Feature) -> float:
 
 def _raised_wall_outer_foot(wall_height: float) -> float:
     """Adaptive structural buttress: bigger on a taller wall, clamped to a
-    sane printable range."""
-    return min(NEST_OUTER_FOOT_MAX, max(NEST_OUTER_FOOT_MIN, 0.35 * wall_height))
+    sane printable range, and never taller than the wall itself - a very
+    thin Raised Wall does not need (or have room for) a 2 mm buttress."""
+    target = min(NEST_OUTER_FOOT_MAX, max(NEST_OUTER_FOOT_MIN, 0.35 * wall_height))
+    return min(target, wall_height)
 
 
 # --- the one authoritative Nest access planner --------------------------------
@@ -424,40 +460,106 @@ def resolve_nest_access_plan(
     )
 
 
+def _legacy_finger_positions(opening: Polygon, position: str) -> list[tuple[float, float]]:
+    """The old fixed local-axis crossing placement, preview-only re-creation
+    (no tangent/normal, no cutter geometry) so a legacy design's 2D indicator
+    still shows roughly where its notches actually fall."""
+    min_x, min_y, max_x, max_y = opening.bounds
+    inside = opening.representative_point()
+    reach = max(max_x - min_x, max_y - min_y) + 10.0
+    points: list[tuple[float, float]] = []
+    if position in {"sides", "both"}:
+        crossing = opening.boundary.intersection(LineString([
+            (min_x - reach, inside.y), (max_x + reach, inside.y)
+        ]))
+        xs = _line_coordinates(crossing, 0)
+        if len(xs) >= 2:
+            points.append((min(xs), float(inside.y)))
+            points.append((max(xs), float(inside.y)))
+    if position in {"top_bottom", "both"}:
+        crossing = opening.boundary.intersection(LineString([
+            (inside.x, min_y - reach), (inside.x, max_y + reach)
+        ]))
+        ys = _line_coordinates(crossing, 1)
+        if len(ys) >= 2:
+            points.append((float(inside.x), min(ys)))
+            points.append((float(inside.x), max(ys)))
+    return points
+
+
 def nest_access_preview(one: Feature) -> dict | None:
     """Lightweight, informational 2D metadata for the resolved access plan -
     world-space points only; the browser draws no geometry from this."""
     if not one.contour:
         return None
     holder_style = _resolved_holder_style(one)
+    legacy = _is_legacy_nest(one)
     assist, locations, width = _resolved_finger_settings(one)
-    local = _nest_local_polygon(one, include_clearance=True)
-    plan = resolve_nest_access_plan(local, _nest_access_mode(assist), locations, width)
     radians = math.radians(one.rotation)
     cos_r, sin_r = math.cos(radians), math.sin(radians)
     cx, cy = one.zone.centre
-    world_points = []
-    for point in plan.points:
-        x, y = point.position
-        world_points.append({
-            "x": x * cos_r - y * sin_r + cx,
-            "y": x * sin_r + y * cos_r + cy,
-        })
+
+    def to_world(local_points: list[tuple[float, float]]) -> list[dict]:
+        return [
+            {"x": x * cos_r - y * sin_r + cx, "y": x * sin_r + y * cos_r + cy}
+            for x, y in local_points
+        ]
+
+    if holder_style == "raised_wall":
+        tool_thickness = _resolved_tool_thickness(one)
+        push_depth = float(one.options.get("push_depth", NEST_PUSH_DEPTH)) if assist == "push_out" else 0.0
+        wall_height = tool_thickness + push_depth
+        empty = {"style": "none", "holder_style": holder_style, "width": 0.0,
+                 "points": [], "warning": None}
+        if assist in {"push_out", "none"}:
+            return empty
+        # Spec section 21: a very low Automatic Raised Wall may resolve to no
+        # notch at all - the preview must agree, or it would promise a notch
+        # the actual builder never cuts. This rule is new architecture only;
+        # a legacy design's old behaviour never skipped for a short wall.
+        if not legacy and assist == "auto" and wall_height <= 4.0:
+            return empty
+        if legacy:
+            local_opening = _nest_local_polygon(one, include_clearance=True)
+            local_points = _legacy_finger_positions(local_opening, locations)
+            return {
+                "style": "finger_grasp" if local_points else "none",
+                "holder_style": holder_style,
+                "width": width if width is not None else NEST_FINGER_WIDTH,
+                "points": to_world(local_points),
+                "warning": None,
+            }
+
+    local = _nest_local_polygon(one, include_clearance=True)
+    plan = resolve_nest_access_plan(local, _nest_access_mode(assist), locations, width)
     return {
         "style": plan.style,
         "holder_style": holder_style,
         "width": plan.width,
-        "points": world_points,
+        "points": to_world([point.position for point in plan.points]),
         "warning": plan.warning,
     }
+
+
+def _raised_wall_height_for_sizing(one: Feature) -> float:
+    """The same effective wall height the builder itself will use - Tool
+    thickness, plus Push Out's own deck depth when that assist is active -
+    so the footprint used for fitting/auto-sizing never falls short of what
+    build_nest actually constructs (spec/finding: Push Out's adaptive
+    buttress must be sized from wall_height, not raw tool_thickness)."""
+    tool_thickness = _resolved_tool_thickness(one)
+    assist, _locations, _width = _resolved_finger_settings(one)
+    push_depth = float(one.options.get("push_depth", NEST_PUSH_DEPTH)) if assist == "push_out" else 0.0
+    return tool_thickness + push_depth
 
 
 def nest_required_zone(one: Feature) -> Zone:
     """Tight axis-aligned footprint enclosing the finished holder.
 
-    Raised Wall: the cleared cavity, its wall and its adaptive outside
-    buttress. Recessed: the cleared cavity together with any finger scoops,
-    since a scoop can reach past the plain contour, buffered by the
+    Raised Wall: the cleared cavity, its wall and its outside foot - the old
+    fixed 2 mm foot for a legacy design, the new adaptive buttress for an
+    explicit one. Recessed: the cleared cavity together with any finger
+    scoops, since a scoop can reach past the plain contour, buffered by the
     structural rim.
     """
     rim = float(one.options.get("rim", 3.0))
@@ -479,8 +581,10 @@ def nest_required_zone(one: Feature) -> Zone:
         outer = footprint.buffer(rim, join_style="round")
     else:
         cavity = nest_contour_polygon(one, include_clearance=True)
-        tool_thickness = _resolved_tool_thickness(one)
-        outer_foot = _raised_wall_outer_foot(tool_thickness)
+        if _is_legacy_nest(one):
+            outer_foot = LEGACY_NEST_CHAMFER
+        else:
+            outer_foot = _raised_wall_outer_foot(_raised_wall_height_for_sizing(one))
         outer = cavity.buffer(rim, join_style="round").buffer(outer_foot, join_style="round")
     min_x, min_y, max_x, max_y = outer.bounds
     return Zone(float(min_x), float(min_y), float(max_x), float(max_y))
@@ -506,7 +610,14 @@ def nest_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, obje
     cavity_mode = str(one.options.get("cavity_depth_mode", "auto"))
     cavity_depth = _resolved_cavity_depth(one, tool_thickness)
     assist, locations, width = _resolved_finger_settings(one)
-    auto_width = _automatic_finger_width(one) if one.contour else NEST_FINGER_WIDTH
+    # A legacy design's own historical default finger width was the fixed
+    # 25 mm constant, never the newer tool-relative automatic formula - an
+    # old nest that never explicitly stored finger_width must keep exactly
+    # the notch size it always had.
+    if _is_legacy_nest(one):
+        auto_width = NEST_FINGER_WIDTH
+    else:
+        auto_width = _automatic_finger_width(one) if one.contour else NEST_FINGER_WIDTH
     return {
         "clearance": 0.6,
         "tool_thickness": tool_thickness,
@@ -562,6 +673,38 @@ def resolve_nest_settings(box: BoxSpec, one: Feature, base_z: float) -> dict[str
     return options
 
 
+def clamp_nest_feature_options(one: Feature) -> tuple[Feature, list[str]]:
+    """Persist any clamp that would otherwise only be resolved in memory - a
+    Manual cavity depth now exceeding a thinner Tool thickness, or Push Out
+    left set while switching to Recessed - into the Feature's own stored
+    options, with a plain-language warning to show once. Without this, the
+    stored (un-clamped) value would spring back the moment Tool thickness
+    increases again."""
+    if one.kind != "nest" or not one.contour:
+        return one, []
+    warnings: list[str] = []
+    options = dict(one.options)
+    tool_thickness = _resolved_tool_thickness(one)
+    holder_style = _resolved_holder_style(one)
+    cavity_mode = str(options.get("cavity_depth_mode", "auto"))
+    if cavity_mode == "manual" and options.get("cavity_depth") is not None:
+        stored = float(options["cavity_depth"])
+        if math.isfinite(stored) and stored > tool_thickness > 0.0:
+            options["cavity_depth"] = tool_thickness
+            warnings.append("Cavity depth was reduced to match the thinner tool thickness.")
+    default_assist = "finger_grasp" if _is_legacy_nest(one) else "auto"
+    assist = str(options.get("lift_assist", default_assist))
+    if assist == "push_out" and holder_style == "recessed":
+        options["lift_assist"] = "auto"
+        warnings.append(
+            "Push Out is available only for Raised Wall holders. "
+            "Finger access was changed to Automatic."
+        )
+    if not warnings:
+        return one, []
+    return replace(one, options=options), warnings
+
+
 def _nest_transform_mesh(mesh: trimesh.Trimesh, one: Feature) -> trimesh.Trimesh:
     """Rotate a local nest detail with its outline, then place it in the layout."""
     if one.rotation:
@@ -581,7 +724,7 @@ def _oriented_notch_cutter(
     horizontal_radius = width / 2.0
     vertical_radius = min(horizontal_radius, wall_height - NEST_FINGER_BOTTOM_SKIN)
     if vertical_radius <= 0.0:
-        raise ValueError("Snug Holder wall is too short for a finger grasp")
+        raise ValueError("Photo Nest wall is too short for a finger grasp")
     reach = rim + NEST_OUTER_FOOT_MAX + 8.0
     centre = (0.0, base_z + wall_height)
     profile = affinity.scale(
@@ -598,6 +741,110 @@ def _oriented_notch_cutter(
     cutter.apply_transform(trimesh.transformations.rotation_matrix(math.radians(angle), (0.0, 0.0, 1.0)))
     cutter.apply_translation((point.position[0], point.position[1], 0.0))
     return cutter
+
+
+def _legacy_nest_finger_cutters(
+    one: Feature, opening: Polygon, wall_height: float, width: float,
+    position: str, base_z: float, rim: float,
+) -> list[trimesh.Trimesh]:
+    """The exact pre-holder_style U-shaped notch placement: fixed local-axis
+    crossings through the outline's representative point, not the newer
+    tool-relative access planner. Kept unchanged so a legacy design's
+    physical geometry never moves."""
+    min_x, min_y, max_x, max_y = opening.bounds
+    inside = opening.representative_point()
+    reach = rim + LEGACY_NEST_CHAMFER + 3.0
+    horizontal_radius = width / 2.0
+    vertical_radius = min(horizontal_radius, wall_height - NEST_FINGER_BOTTOM_SKIN)
+    if vertical_radius <= 0.0:
+        raise ValueError("Photo Nest wall is too short for a finger grasp")
+    cutters: list[trimesh.Trimesh] = []
+
+    if position in {"sides", "both"}:
+        crossing = opening.boundary.intersection(LineString([
+            (min_x - reach, inside.y), (max_x + reach, inside.y)
+        ]))
+        xs = _line_coordinates(crossing, 0)
+        if len(xs) < 2:
+            raise ValueError("Finger grasps could not find both sides of this outline")
+        centre = (float(inside.y), base_z + wall_height)
+        profile = affinity.scale(
+            Point(centre).buffer(1.0, quad_segs=32),
+            xfact=horizontal_radius, yfact=vertical_radius, origin=centre,
+        )
+        for boundary, direction in ((min(xs), -1.0), (max(xs), 1.0)):
+            start = boundary + direction * (rim + LEGACY_NEST_CHAMFER + 1.0)
+            end = boundary - direction * 2.0
+            cutter = _extrude_yz_profile(profile, abs(end - start))
+            cutter.apply_translation(((start + end) / 2.0, 0.0, 0.0))
+            cutters.append(_nest_transform_mesh(cutter, one))
+
+    if position in {"top_bottom", "both"}:
+        crossing = opening.boundary.intersection(LineString([
+            (inside.x, min_y - reach), (inside.x, max_y + reach)
+        ]))
+        ys = _line_coordinates(crossing, 1)
+        if len(ys) < 2:
+            raise ValueError("Finger grasps could not find both ends of this outline")
+        centre = (float(inside.x), base_z + wall_height)
+        profile = affinity.scale(
+            Point(centre).buffer(1.0, quad_segs=32),
+            xfact=horizontal_radius, yfact=vertical_radius, origin=centre,
+        )
+        for boundary, direction in ((min(ys), -1.0), (max(ys), 1.0)):
+            start = boundary + direction * (rim + LEGACY_NEST_CHAMFER + 1.0)
+            end = boundary - direction * 2.0
+            cutter = _extrude_xz_profile(profile, abs(end - start))
+            cutter.apply_translation((0.0, (start + end) / 2.0, 0.0))
+            cutters.append(_nest_transform_mesh(cutter, one))
+    return cutters
+
+
+def _legacy_nest_rounded_wall(
+    opening: Polygon, rim: float, height: float, base_z: float,
+) -> trimesh.Trimesh:
+    """The exact pre-holder_style Raised Wall: a fixed 2 mm outside foot and
+    one shared top round, applied to both faces alike. Kept unchanged so a
+    legacy design's physical geometry never moves."""
+    outer = opening.buffer(rim, join_style="round")
+    top_round = min(LEGACY_NEST_TOP_ROUND, rim * 0.4, height * 0.25)
+    straight_height = height - top_round
+    outside: list[trimesh.Trimesh] = []
+
+    straight = _extrude_polygon(outer, straight_height)
+    straight.apply_translation((0.0, 0.0, base_z))
+    outside.append(straight)
+
+    chamfer_steps = 8
+    layer = LEGACY_NEST_CHAMFER / chamfer_steps
+    for index in range(chamfer_steps):
+        grow = LEGACY_NEST_CHAMFER - index * layer
+        disk = _extrude_polygon(outer.buffer(grow, join_style="round"), layer)
+        disk.apply_translation((0.0, 0.0, base_z + index * layer))
+        outside.append(disk)
+
+    inside: list[trimesh.Trimesh] = []
+    bore = _extrude_polygon(opening, height + 2.0)
+    bore.apply_translation((0.0, 0.0, base_z - 1.0))
+    inside.append(bore)
+    top_steps = 8
+    layer = top_round / top_steps
+    for index in range(top_steps):
+        rise = (index + 1) * layer
+        inset = top_round - math.sqrt(max(0.0, top_round ** 2 - rise ** 2))
+        top_outer = outer.buffer(-inset, join_style="round")
+        top_inner = opening.buffer(inset, join_style="round")
+        if top_outer.is_empty or top_inner.is_empty or not top_outer.contains(top_inner):
+            raise ValueError("Outline wall is too thin for its rounded top")
+        disk = _extrude_polygon(top_outer, layer)
+        disk.apply_translation((0.0, 0.0, base_z + straight_height + index * layer))
+        outside.append(disk)
+        cut = _extrude_polygon(top_inner, layer + 0.02)
+        cut.apply_translation((
+            0.0, 0.0, base_z + straight_height + index * layer - 0.01
+        ))
+        inside.append(cut)
+    return difference([union(outside), union(inside)])
 
 
 def _nest_rounded_wall(
@@ -752,9 +999,9 @@ def _nest_finger_scoops(
 
 
 @feature(
-    "nest", title="Snug Holder",
-    display="Snug Holder — A custom snug holder based on your photo",
-    description="A custom snug holder based on your photo.",
+    "nest", title="Photo Nest",
+    display="Photo Nest — a custom holder built from your photo",
+    description="A custom holder built from your photo.",
     capabilities=("photo",),
     options=(
         OptionDefinition("Fit clearance", "clearance", "0.6"),
@@ -846,14 +1093,21 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             deck = difference([deck, union(scoops)])
         return [deck]
 
-    # Raised Wall.
+    # Raised Wall. A design saved before holder_style existed keeps its exact
+    # old wall (fixed foot, shared top round) and old finger-cutout placement
+    # (fixed local-axis crossings) - only an explicit holder_style opts into
+    # the new adaptive buttress and tool-relative access planner.
+    legacy = _is_legacy_nest(spec_feature)
     wall_height = tool_thickness + (push_depth if assist == "push_out" else 0.0)
     if wall_height > available + 1e-9:
         raise ValueError(
             f"Wall height {wall_height:g} mm must be between 0 and {available:.1f} mm "
             f"above the printable floor"
         )
-    wall = _nest_rounded_wall(world_opening, rim, wall_height, base_z)
+    wall = (
+        _legacy_nest_rounded_wall(world_opening, rim, wall_height, base_z) if legacy
+        else _nest_rounded_wall(world_opening, rim, wall_height, base_z)
+    )
 
     if assist == "push_out":
         deck = _nest_push_support(
@@ -862,6 +1116,16 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         wall = union([wall, deck])
     elif assist == "none":
         pass
+    elif legacy:
+        # The old code always attempted a cutout for "finger_grasp" and never
+        # had an "auto" state; legacy's own default_assist already maps a
+        # missing lift_assist to "finger_grasp" (see _resolved_finger_settings).
+        if assist == "finger_grasp":
+            cutters = _legacy_nest_finger_cutters(
+                spec_feature, local_opening, wall_height, finger_width,
+                finger_position, base_z, rim,
+            )
+            wall = difference([wall, union(cutters)])
     elif assist == "auto" and wall_height <= 4.0:
         pass  # A very low Raised Wall may resolve to no notch - that is valid.
     else:  # "finger_grasp" (Custom), or "auto" on a tall-enough wall.

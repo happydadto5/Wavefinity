@@ -92,6 +92,7 @@ from organizer_inserts import (
     feature_definition,
     feature_definitions,
     feature_min_footprint,
+    clamp_nest_feature_options,
     fitted_nest_feature,
     nest_access_preview,
     nest_contour_polygon,
@@ -402,6 +403,20 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         payload["design"], validate_layout=False
     )
     box = _interior_work_box(request_box)
+    existing = next(
+        (one for one in layout.features if one.kind == "nest" and one.contour), None
+    )
+    supplied = dict(payload.get("options", {}))
+    if existing is None:
+        # New scan: Tool thickness is the one measurement the user actually
+        # has to supply, and must never be invented. Fail fast, before the
+        # (fallible, comparatively expensive) image analysis even runs.
+        measured = supplied.get("tool_thickness", supplied.get("depth"))
+        if measured in (None, ""):
+            raise ValueError("enter the tool's thickness before generating a Photo Nest")
+        tool_thickness = float(measured)
+        if not math.isfinite(tool_thickness) or tool_thickness <= 0.0:
+            raise ValueError("Tool thickness must be a positive number")
     corners_raw = payload.get("paper_corners")
     corners = (
         [[float(v) for v in point] for point in corners_raw]
@@ -413,29 +428,37 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         float(payload.get("sensitivity", 50.0)), float(payload.get("cleanup", 50.0)),
         corners,
     )
-    supplied = dict(payload.get("options", {}))
-    # Tool thickness and holder choices are stored with the outline so they
-    # survive later moves, turns and resizing. A brand-new scan always
-    # defaults to Recessed Cavity, automatic 60% cavity depth, automatic
-    # finger access and automatic bin sizing (spec section 2).
-    options = {
-        "clearance": float(supplied.get("clearance", 0.6)),
-        "tool_thickness": float(supplied.get("tool_thickness", supplied.get("depth", 8.0))),
-        "rim": 3.0,
-        "smoothing": float(supplied.get("smoothing", 0.0)),
-        "holder_style": str(supplied.get("holder_style", "recessed")),
-        "cavity_depth_mode": "auto",
-        "auto_size": True,
-        "lift_assist": str(supplied.get("lift_assist", "auto")),
-        "finger_position": str(supplied.get("finger_position", "sides")),
-        "push_position": str(supplied.get("push_position", "right")),
-        "push_area": float(supplied.get("push_area", 30.0)),
-        "push_depth": float(supplied.get("push_depth", 4.0)),
-    }
-    starter = Feature(
-        "nest", Zone(-0.5, -0.5, 0.5, 0.5), options=options,
-        contour=outline.contour, source_contour=outline.contour,
-    )
+    if existing is not None:
+        # Replace Photo: this Nest already exists with its own settings -
+        # change only the outline. Holder style, cavity depth/mode, finger
+        # access, Auto-size and Tool thickness must all survive untouched,
+        # or replacing a blurry photo of the same tool would silently reset
+        # choices the user already made (including shrinking a manually
+        # sized bin back to Auto).
+        starter = replace(existing, contour=outline.contour, source_contour=outline.contour)
+    else:
+        # A brand-new scan always defaults to Recessed Cavity, automatic 60%
+        # cavity depth, automatic finger access and automatic bin sizing
+        # (spec section 2).
+        options = {
+            "clearance": float(supplied.get("clearance", 0.6)),
+            "tool_thickness": tool_thickness,
+            "rim": 3.0,
+            "smoothing": float(supplied.get("smoothing", 0.0)),
+            "holder_style": "recessed",
+            "cavity_depth_mode": "auto",
+            "auto_size": True,
+            "lift_assist": "auto",
+            "finger_position": "sides",
+            "push_position": "right",
+            "push_area": 30.0,
+            "push_depth": 4.0,
+        }
+        starter = Feature(
+            "nest", Zone(-0.5, -0.5, 0.5, 0.5), options=options,
+            contour=outline.contour, source_contour=outline.contour,
+        )
+    starter, nest_warnings = clamp_nest_feature_options(starter)
     grown, one = _sized_photo_nest_box(box, starter, layout.mode)
     request_box = replace(
         request_box, x=grown.x, y=grown.y,
@@ -457,6 +480,7 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "selected": 0,
         "outline": {"width": outline.width, "depth": outline.depth},
         "access": nest_access_preview(one),
+        "warnings": nest_warnings,
     }
     if outline.reference_image and outline.reference_bounds:
         result["reference"] = {
@@ -1389,9 +1413,11 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         one = normalize_divider_scoop(
             box, one, base_height(box, layout.mode)
         )
+    nest_warnings: list[str] = []
     if one.kind == "nest":
         if not one.contour:
-            raise ValueError("upload a part photo before adding a Snug Holder")
+            raise ValueError("upload a part photo before adding a Photo Nest")
+        one, nest_warnings = clamp_nest_feature_options(one)
         grown, one = _sized_photo_nest_box(box, one, layout.mode)
         # x/y map straight across; z is an effective-body figure, so only its
         # growth or shrink (not its raw value) is carried back into the
@@ -1416,10 +1442,10 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     index = payload.get("index")
     existing = list(layout.features)
     if one.kind != "nest" and any(item.kind == "nest" and item.contour for item in existing):
-        raise ValueError("a Snug Holder bin contains only its one custom cavity")
+        raise ValueError("a Photo Nest bin contains only its one custom cavity")
     if index is None:
         if one.kind == "nest" and existing:
-            raise ValueError("a Snug Holder is one custom cavity; start a new photo bin to replace these interior parts")
+            raise ValueError("a Photo Nest is one custom cavity; start a new photo bin to replace these interior parts")
         one = _first_open_position(
             one, box, layout, label, label_location, scoop
         )
@@ -1437,7 +1463,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
             )
         existing[selected] = one
     if one.kind == "nest" and len(existing) != 1:
-        raise ValueError("a Snug Holder design can contain only its one custom cavity")
+        raise ValueError("a Photo Nest design can contain only its one custom cavity")
     # Auto-placed text finds its own spot, so resolve before judging overlaps -
     # otherwise a second one is refused for sitting on the first at the
     # placeholder zone it has not been moved out of yet.
@@ -1458,6 +1484,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
             request_box, updated, label, part_name, label_location, scoop,
         ),
         "selected": selected,
+        "warnings": nest_warnings,
     }
 
 

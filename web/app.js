@@ -116,6 +116,9 @@ const state = {
   nestRetraceRequest: 0,
   nestPaperCorners: null,       // four draggable handles, image-pixel space, for recovery
   nestOutlineTool: "select",    // "select" | "add-point" | "delete-point"
+  nestPendingUpload: null,      // { dataUrl, mimeType } waiting on Tool thickness
+  nestAccessWarningShown: null, // last access-planner warning already toasted
+  nestAcceptedPhotoSnapshot: null, // the true accepted photo, saved while tuning shows a candidate's own crop
   nudgeFeedback: null,
 };
 
@@ -1514,7 +1517,7 @@ function updatePreviewHelp(view) {
   const el = $("#preview-help");
   if (!el) return;
   el.textContent = view === "2d"
-    ? "Drag a Snug Holder outline point to reshape it. Drag inside to move; use the square to resize and circle to rotate."
+    ? "Drag a Photo Nest outline point to reshape it. Drag inside to move; use the square to resize and circle to rotate."
     : "Drag to spin, or click the arrows for a 15° step (shift-click for 2°). Wheel to zoom, double-click to reset.";
 }
 
@@ -2402,13 +2405,20 @@ function renderNestFields(one) {
   const isPushOut = assist === "push_out";
   const fingerPosition = String(val("finger_position", "sides"));
   const cavityMode = String(val("cavity_depth_mode", "auto"));
-  const toolThickness = number(val("tool_thickness", val("depth", 8)), 8);
+  // Tool thickness is the one measurement the user actually has to supply -
+  // show it blank (never a fabricated "8") until it is explicitly stored,
+  // even though every other computed default below still needs some number
+  // to illustrate against.
+  const hasMeasuredThickness = opt.tool_thickness != null || opt.depth != null;
+  const toolThickness = number(opt.tool_thickness ?? opt.depth ?? resolved.tool_thickness, 8);
   let html = "";
 
   // Tool.
   html += `<div class="draft-triple">`;
-  html += field("Tool thickness", "option:tool_thickness", fmt(toolThickness),
-    { unit: "mm", step: "0.5", min: "0.5" });
+  html += field("Tool thickness", "option:tool_thickness",
+    hasMeasuredThickness ? fmt(toolThickness) : "",
+    { unit: "mm", step: "0.5", min: "0.5", placeholder: "required",
+      tip: "The one measurement Wavefinity cannot work out from the photo." });
   html += field("Fit clearance", "option:clearance", fmt(val("clearance", 0.6)),
     { unit: "mm", step: "0.1", min: "0" });
   html += field("Soften outline", "option:smoothing", fmt(val("smoothing", 0)),
@@ -2498,14 +2508,8 @@ function renderNestFields(one) {
   html += `<div class="photo-upload wide">`;
   html += `<label class="button secondary photo-button" for="nest-photo-input">${one.contour ? "Replace photo" : "Upload part photo"}</label>
     <input id="nest-photo-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
-    <label>Reference paper
-      <select id="nest-paper-size">
-        <option value="letter" ${selected("letter", state.nestPaperSize || "letter")}>US Letter — 8.5 × 11 in</option>
-        <option value="a4" ${selected("a4", state.nestPaperSize || "letter")}>A4 — 210 × 297 mm</option>
-      </select>
-    </label>
     <details><summary>Photo requirements</summary><ul>
-      <li>Entire selected reference sheet visible</li>
+      <li>Entire US Letter (8.5 × 11 in) reference sheet visible</li>
       <li>Camera directly overhead</li>
       <li>Part lies flat</li>
       <li>Plain, high-contrast background preferred</li>
@@ -2968,10 +2972,6 @@ function renderDraftFields() {
   $("#draft-fields").innerHTML = html;
   const photoInput = $("#nest-photo-input", $("#draft-fields"));
   if (photoInput) photoInput.addEventListener("change", uploadNestPhoto);
-  const paperSizeSelect = $("#nest-paper-size", $("#draft-fields"));
-  if (paperSizeSelect) paperSizeSelect.addEventListener("change", () => {
-    state.nestPaperSize = paperSizeSelect.value;
-  });
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateDraftFromFields);
   });
@@ -3165,6 +3165,7 @@ function wireNestFieldActions() {
     state.nestCleanup = 50;
     state.nestCandidateContour = null;
     state.nestTuneStatus = "";
+    _restoreAcceptedNestPhoto();
     renderDraftFields();
     renderLayout2D();
   });
@@ -3215,6 +3216,26 @@ async function resetNestOutline() {
 
 // Debounced live retrace: segmentation + cleanup only, on the already-
 // rectified reference sheet - paper detection never repeats per slider move.
+// Every retrace re-centres its new contour around its own new bounding box
+// (contour_to_millimetres always does this), so the candidate's own local
+// origin can shift a little relative to the accepted outline's - drawing it
+// with the accepted photo's old registration can then look displaced from
+// the actual photographed tool. Keep the candidate and its own reference
+// photo crop as one consistent pair while tuning, and restore the true
+// accepted photo the moment the candidate is abandoned instead of accepted.
+function _snapshotAcceptedNestPhoto() {
+  if (state.nestAcceptedPhotoSnapshot === undefined || state.nestAcceptedPhotoSnapshot === null) {
+    state.nestAcceptedPhotoSnapshot = state.nestPhoto
+      ? { image: state.nestPhoto.image, bounds: [...state.nestPhoto.bounds] } : false;
+  }
+}
+
+function _restoreAcceptedNestPhoto() {
+  if (state.nestAcceptedPhotoSnapshot) state.nestPhoto = state.nestAcceptedPhotoSnapshot;
+  else if (state.nestAcceptedPhotoSnapshot === false) state.nestPhoto = null;
+  state.nestAcceptedPhotoSnapshot = null;
+}
+
 const requestNestRetrace = debounce(async () => {
   const rectified = state.nestRectifiedImage;
   const draft = state.draft;
@@ -3230,13 +3251,17 @@ const requestNestRetrace = debounce(async () => {
       cleanup: state.nestCleanup,
     });
     if (request !== state.nestRetraceRequest || state.draft !== draft) return;
+    _snapshotAcceptedNestPhoto();
     state.nestCandidateContour = result.contour;
+    if (result.reference) setNestPhotoReference(result.reference);
     state.nestTuneStatus = `Candidate: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm — press Use this trace to accept.`;
   } catch (error) {
     if (request !== state.nestRetraceRequest) return;
     // Failed retrace is non-destructive (spec section 34): keep the accepted
-    // outline exactly as it was and just report why the candidate failed.
+    // outline and its photo registration exactly as they were, and just
+    // report why the candidate failed.
     state.nestCandidateContour = null;
+    _restoreAcceptedNestPhoto();
     state.nestTuneStatus = `Could not retrace at this setting: ${error.message}`;
   }
   renderDraftFields();
@@ -3250,6 +3275,9 @@ async function acceptNestTrace() {
   const candidate = state.nestCandidateContour.map(point => [...point]);
   state.nestCandidateContour = null;
   state.nestTuneStatus = "";
+  // The candidate's own reference photo (already swapped in by the retrace
+  // that produced it) is now the accepted registration - keep it.
+  state.nestAcceptedPhotoSnapshot = null;
   await commitNestContourEdit(index, candidate, { source_contour: candidate.map(point => [...point]) });
 }
 
@@ -3283,6 +3311,7 @@ async function acceptNestPaperCorners() {
     setNestPhotoReference(result.reference);
     if (result.rectified_image) state.nestRectifiedImage = { dataUrl: result.rectified_image, mimeType: "image/jpeg" };
     state.nestPaperCorners = null;
+    state.nestPendingUpload = null;
     state.draftAutoCommit = true;
     state.drafts = {};
     syncForm();
@@ -3290,7 +3319,8 @@ async function acceptNestPaperCorners() {
     await refreshPreview();
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
-    toast(`Snug Holder ready: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm outline.`);
+    toast(`Photo Nest ready: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm outline.`);
+    for (const warning of result.warnings || []) toast(warning, true, 6500);
   } catch (error) {
     $("#draft-status").textContent = error.message;
     $("#draft-status").classList.add("error");
@@ -3641,6 +3671,12 @@ function setNestPhotoReference(reference) {
   image.src = reference.image;
 }
 
+function _nestMeasuredThickness(options) {
+  const raw = options?.tool_thickness ?? options?.depth;
+  const value = number(raw, NaN);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 async function uploadNestPhoto(event) {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -3656,19 +3692,39 @@ async function uploadNestPhoto(event) {
     return;
   }
   const input = event.target;
+  const image = await readFileDataUrl(file);
+  input.value = "";
+  if (state.draft?.kind !== "nest" || state.draftKind !== "nest") return;
+  state.nestPendingUpload = { dataUrl: image, mimeType };
+  if (_nestMeasuredThickness(state.draft?.options) == null) {
+    // Tracing may start once a photo exists, but the one measurement the
+    // user actually has to supply is Tool thickness - hold the analysis
+    // until it is entered instead of inventing a value (spec section 5).
+    $("#draft-status").textContent = "Photo ready — enter Tool thickness above to finish tracing.";
+    $("#draft-status").classList.remove("error");
+    renderDraftFields();
+    return;
+  }
+  await runNestPhotoUpload();
+}
+
+// Runs the deferred upload once a photo is waiting and Tool thickness is
+// known - either right away (thickness was already entered) or the moment
+// it is typed afterward (see the option:tool_thickness handler).
+async function runNestPhotoUpload() {
+  const pending = state.nestPendingUpload;
+  if (!pending || state.draft?.kind !== "nest") return;
+  const { dataUrl: image, mimeType } = pending;
   const draft = state.draft;
   const request = ++state.nestPhotoRequest;
   let mutationStarted = false;
   $("#draft-status").textContent = "Finding the reference sheet and tracing the part…";
   try {
-    const image = await readFileDataUrl(file);
-    // The file picker stays open while the browser reads it. If the user
-    // chose another palette part meanwhile, never let this old photo replace
-    // that newer design choice (a Photo Nest replaces the whole layout).
     if (request !== state.nestPhotoRequest || state.draft !== draft ||
         state.draftKind !== "nest") return;
     if (!beginDesignMutation()) return;
     mutationStarted = true;
+    state.nestPendingUpload = null;
     const previousDesign = clone(state.design);
     state.nestOriginalImage = { dataUrl: image, mimeType };
     state.nestSensitivity = 50;
@@ -3701,13 +3757,15 @@ async function uploadNestPhoto(event) {
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
     $('.view-tab[data-view="2d"]').click();
-    toast(`Snug Holder ready: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm outline.`);
+    toast(`Photo Nest ready: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm outline.`);
+    for (const warning of result.warnings || []) toast(warning, true, 6500);
   } catch (error) {
     $("#draft-status").textContent = error.message;
     $("#draft-status").classList.add("error");
     // Automatic paper detection failed: offer manual corner recovery over the
     // same original photo instead of asking the user to upload again.
     if (/paper missing|paper detection/i.test(error.message)) {
+      state.nestPendingUpload = { dataUrl: image, mimeType };
       state.nestPaperCorners = [
         { xPct: 10, yPct: 10 }, { xPct: 90, yPct: 10 },
         { xPct: 90, yPct: 90 }, { xPct: 10, yPct: 90 },
@@ -3718,7 +3776,6 @@ async function uploadNestPhoto(event) {
       toast(error.message, true, 6500);
     }
   } finally {
-    input.value = "";
     if (mutationStarted) finishDesignMutation();
   }
 }
@@ -4023,6 +4080,11 @@ function updateDraftFromFields(event) {
     if (one.kind === "nest" && one.contour
         && ["clearance", "rim", "smoothing", "tool_thickness", "cavity_depth"].includes(key)) {
       syncNestZone(one);
+    }
+    // A photo was waiting only on this measurement - finish tracing it now.
+    if (one.kind === "nest" && key === "tool_thickness" && state.nestPendingUpload
+        && _nestMeasuredThickness(one.options) != null) {
+      runNestPhotoUpload();
     }
   }
   if (one.kind === "cradle" && (
@@ -4401,6 +4463,7 @@ async function applySupport(index) {
     updateSelectionButtons();
     await refreshPreview();
     refreshDraft();
+    for (const warning of result.warnings || []) toast(warning, true, 6500);
     return true;
   } catch (error) {
     toast(error.message, true, 5000);
@@ -4683,6 +4746,13 @@ async function refreshPreview() {
     state.preview = result;
     state.design = result.design;
     checkBinSizeChange();
+    // Surface the access planner's own warning (spec section 46) once per
+    // distinct message, not on every preview refresh.
+    const accessWarning = (result.draft_nest_access || result.nest_access?.[state.selected])?.warning;
+    if (accessWarning && accessWarning !== state.nestAccessWarningShown) {
+      toast(accessWarning, true, 6500);
+    }
+    state.nestAccessWarningShown = accessWarning || null;
     // A B4B preview returns its effective printable dimensions. Adopt them
     // into the controls and flash every field the engine adjusted.
     if (grownX) flashField($("#x-size"));
@@ -6364,6 +6434,28 @@ function drawNestContourHandles(context, feature, toCanvas) {
   context.restore();
 }
 
+// Informational-only markers for the server's resolved access plan (spec
+// section 46) - a small ring for each point, filled for a scoop (Recessed),
+// hollow for a notch (Raised Wall). Draws nothing when access is off, and
+// nothing when the plan could not place anything (its warning covers that).
+function drawNestAccessIndicators(context, access, toCanvas) {
+  if (!access || access.style !== "finger_grasp" || !access.points?.length) return;
+  const filled = access.holder_style === "recessed";
+  context.save();
+  context.strokeStyle = "#1f7a4d";
+  context.fillStyle = "#1f7a4d55";
+  context.lineWidth = 1.5;
+  const radius = Math.max(3, Math.min(10, (access.width || 20) / 2 * (state.layoutTransform?.scale || 1)));
+  for (const point of access.points) {
+    const [x, y] = toCanvas([point.x, point.y]);
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    if (filled) context.fill();
+    context.stroke();
+  }
+  context.restore();
+}
+
 function hitNestContourPoint(feature, world) {
   if (!feature?.contour?.length || !state.layoutTransform) return null;
   let closest = null, distance = 10;
@@ -6955,6 +7047,9 @@ function renderLayout2D() {
         context.stroke(drawClosedPath(context, candidateWorld, toCanvas));
         context.restore();
       }
+      // Informational-only indicators for the resolved finger-access plan -
+      // a scoop footprint on Recessed, a notch location on Raised Wall.
+      drawNestAccessIndicators(context, state.preview?.nest_access?.[index], toCanvas);
     } else {
       // A fused cradle, post or divider fills less of its zone than the zone
       // itself, and the rest is floor a neighbour may use. Fill what the part
@@ -7630,6 +7725,13 @@ function handleLayoutArrowKeys(event) {
     if (autoField) autoField.checked = false;
   }
   if (feature.kind === "nest") {
+    if (feature.options?.auto_size === true) {
+      const cx = (feature.zone[0] + feature.zone[2]) / 2, cy = (feature.zone[1] + feature.zone[3]) / 2;
+      if (Math.abs(cx) > 0.5 || Math.abs(cy) > 0.5) {
+        feature.options.auto_size = false;
+        toast("Automatic bin sizing turned off because the bin size or layout was manually changed.");
+      }
+    }
     syncNestZone(feature);
   }
 
