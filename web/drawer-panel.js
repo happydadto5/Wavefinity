@@ -145,7 +145,7 @@ DP.build = () => {
           <div class="field-grid three">
             <label>Width <span class="unit">mm</span><input id="dl-add-x" type="text" inputmode="numeric" value="32"></label>
             <label>Length <span class="unit">mm</span><input id="dl-add-y" type="text" inputmode="numeric" value="48"></label>
-            <label>Physical height <span class="unit">mm</span><input id="dl-add-z" type="number" min="1" step="1" value="40" title="Full printed height including lid/stacking foot"></label>
+            <label>Physical height <span class="unit">mm</span><input id="dl-add-z" type="text" inputmode="numeric" value="40" title="Full printed height including lid/stacking foot"></label>
           </div>
           <div class="button-row"><button type="button" id="dl-add" class="button secondary">Add to inventory</button></div>
         </details>
@@ -323,34 +323,72 @@ DP.wire = () => {
   });
   list.addEventListener("dragend", () => { DV.dragBin = null; DV.drop = null; DV.render(); });
 
-  // Width and length step/snap exactly like the normal design form's Width
-  // and Length (snapToUnit, from app.js) so a hand-added bin can't land on a
-  // size a designed bin never could.
-  const wireManualDimension = selector => {
+  // Width and Length consume the exact same authoritative rule the normal
+  // design form's Width/Length ultimately clamp to - normalizeBinDimension,
+  // from app.js - including its maximum, not just the minimum-unit snapping
+  // snapToUnit alone gives. A hand-added bin can then never land on a size
+  // (including too large) a designed bin never could.
+  const wireManualDimension = (selector, axis) => {
     const input = $(selector);
-    const unit = () => state.catalog.base_unit;
+    const normalize = value => normalizeBinDimension(axis, value, value);
     input.addEventListener("blur", () => {
-      input.value = String(snapToUnit(number(input.value, unit()), unit()));
+      input.value = String(normalize(number(input.value, state.catalog.base_unit)));
     });
     input.addEventListener("keydown", event => {
       if (event.key === "Enter") { input.blur(); return; }
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
       event.preventDefault();
-      const delta = event.key === "ArrowUp" ? unit() : -unit();
-      input.value = String(snapToUnit(number(input.value, unit()) + delta, unit()));
+      const unit = state.catalog.base_unit;
+      const delta = event.key === "ArrowUp" ? unit : -unit;
+      input.value = String(normalize(number(input.value, unit) + delta));
       input.select();
     });
     input.addEventListener("wheel", event => {
       event.preventDefault();
-      const current = number(input.value, unit());
-      const delta = event.deltaY < 0 ? unit() : -unit();
-      const next = snapToUnit(current + delta, unit());
+      const unit = state.catalog.base_unit;
+      const current = number(input.value, unit);
+      const delta = event.deltaY < 0 ? unit : -unit;
+      const next = normalize(current + delta);
       if (next === current && delta < 0) return;
       input.value = String(next);
     }, { passive: false });
   };
-  wireManualDimension("#dl-add-x");
-  wireManualDimension("#dl-add-y");
+  wireManualDimension("#dl-add-x", "x");
+  wireManualDimension("#dl-add-y", "y");
+
+  // Physical height is the full printed height (including any lid/stacking
+  // foot); stored/normal-bin Z is the module contribution alone. Convert to
+  // module, apply the exact same floor normal Height uses
+  // (normalizeBinDimension("z", ...)), then convert back - so the field
+  // itself visibly corrects on blur/arrow/wheel instead of only silently
+  // changing what gets saved when Add is clicked.
+  (() => {
+    const input = $("#dl-add-z");
+    const engagement = () => DL.stackSteps[$("#dl-add-stack").value] ?? 0;
+    const normalize = physical => normalizeBinDimension(
+      "z", physical - engagement(), physical - engagement(),
+      { baseThickness: state.catalog?.base_rules?.default_mm },
+    ) + engagement();
+    input.addEventListener("blur", () => {
+      input.value = String(normalize(number(input.value, engagement() + 1)));
+    });
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") { input.blur(); return; }
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      const delta = event.key === "ArrowUp" ? 1 : -1;
+      input.value = String(normalize(number(input.value, engagement() + 1) + delta));
+      input.select();
+    });
+    input.addEventListener("wheel", event => {
+      event.preventDefault();
+      const current = number(input.value, engagement() + 1);
+      const delta = event.deltaY < 0 ? 1 : -1;
+      const next = normalize(current + delta);
+      if (next === current && delta < 0) return;
+      input.value = String(next);
+    }, { passive: false });
+  })();
 
   $("#dl-add").addEventListener("click", async () => {
     const stack = $("#dl-add-stack").value;

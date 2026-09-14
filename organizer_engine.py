@@ -639,7 +639,7 @@ class BoxSpec:
         Shifting the outline by this much keeps the true perpendicular wall at
         or above ``wall`` everywhere on the wave.
         """
-        return self.wall * math.sqrt(1.0 + max_wave_slope() ** 2)
+        return wall_depth_for(self.wall)
 
 
 @dataclass(frozen=True)
@@ -677,6 +677,16 @@ class ConnectorSpec:
 # --------------------------------------------------------------------------- #
 def max_wave_slope() -> float:
     return WAVE_AMPLITUDE * 2.0 * math.pi / WAVE_LENGTH
+
+
+def wall_depth_for(wall: float) -> float:
+    """``BoxSpec.wall_depth``'s formula, standalone.
+
+    Lets a caller that builds wavy geometry without a full ``BoxSpec`` -
+    a spacer filler, whose x/y need not be the 8 mm-grid size a normal bin's
+    ``BoxSpec`` requires - use the exact same wall-thickness math.
+    """
+    return wall * math.sqrt(1.0 + max_wave_slope() ** 2)
 
 
 def nested_clearance() -> float:
@@ -829,28 +839,48 @@ def preview_rings(
     return outer, cavity
 
 
-def wavy_outer_polygon(spec: BoxSpec) -> Polygon:
-    tx, ty = spec.half_x - CORNER_INSET, spec.half_y - CORNER_INSET
-    polygon = Polygon(_wall_points(spec.half_x, spec.half_y, tx, ty))
+def wavy_rect_outer(half_x: float, half_y: float, corner_fillet: float = DEFAULT_CORNER_FILLET) -> Polygon:
+    """The same wavy outline ``wavy_outer_polygon`` builds, from raw half-
+    extents instead of a ``BoxSpec`` - so a caller whose x/y is not the 8 mm
+    grid size a normal bin's ``BoxSpec`` requires (a spacer filler) can still
+    build the identical, correctly-phased wave. ``wave_value`` depends only
+    on position relative to this shape's own centre (see its docstring), so
+    the result mates with a neighbour exactly as a validated box's would,
+    provided this shape ends up centred on a valid grid placement - true for
+    any grid cell, whatever it measures.
+    """
+    tx, ty = half_x - CORNER_INSET, half_y - CORNER_INSET
+    polygon = Polygon(_wall_points(half_x, half_y, tx, ty))
     if not polygon.is_valid:
         polygon = polygon.buffer(0)
     if not isinstance(polygon, Polygon) or not polygon.is_valid:
         raise RuntimeError("wavy box outline is not a valid single polygon")
-    return _rounded(polygon, spec.corner_fillet)
+    return _rounded(polygon, corner_fillet)
 
 
-def wavy_cavity_polygon(spec: BoxSpec) -> Polygon:
-    """Interior outline: the outer walls shifted straight in by ``wall_depth``."""
-    depth = spec.wall_depth
-    tx, ty = spec.half_x - CORNER_INSET, spec.half_y - CORNER_INSET
-    polygon = Polygon(
-        _wall_points(spec.half_x - depth, spec.half_y - depth, tx, ty)
-    )
+def wavy_outer_polygon(spec: BoxSpec) -> Polygon:
+    return wavy_rect_outer(spec.half_x, spec.half_y, spec.corner_fillet)
+
+
+def wavy_rect_cavity(
+    half_x: float, half_y: float, wall_depth: float,
+    corner_fillet: float = DEFAULT_CORNER_FILLET, wall: float = DEFAULT_WALL,
+) -> Polygon:
+    """The same interior outline ``wavy_cavity_polygon`` builds - the outer
+    walls shifted straight in by ``wall_depth`` - from raw half-extents. See
+    ``wavy_rect_outer`` for why this needs no 8 mm-grid-sized ``BoxSpec``."""
+    tx, ty = half_x - CORNER_INSET, half_y - CORNER_INSET
+    polygon = Polygon(_wall_points(half_x - wall_depth, half_y - wall_depth, tx, ty))
     if not polygon.is_valid:
         polygon = polygon.buffer(0)
     if not isinstance(polygon, Polygon) or not polygon.is_valid:
         raise RuntimeError("wavy cavity outline is not a valid single polygon")
-    return _rounded(polygon, max(0.2, spec.corner_fillet - spec.wall))
+    return _rounded(polygon, max(0.2, corner_fillet - wall))
+
+
+def wavy_cavity_polygon(spec: BoxSpec) -> Polygon:
+    """Interior outline: the outer walls shifted straight in by ``wall_depth``."""
+    return wavy_rect_cavity(spec.half_x, spec.half_y, spec.wall_depth, spec.corner_fillet, spec.wall)
 
 
 def placed_outline(
@@ -948,17 +978,17 @@ def _lock_profile(
     ]
 
 
-def _wall_lock_paths(
-    spec: BoxSpec,
+def _rect_wall_lock_paths(
+    half_x: float, half_y: float, wall_depth: float,
 ) -> list[tuple[list[tuple[float, float]], tuple[float, float]]]:
     """Bump centre-lines on the interior face of all four walls, plus the
-    inward direction each bump grows in."""
-    depth = spec.wall_depth
+    inward direction each bump grows in - from raw half-extents. See
+    ``wavy_rect_outer`` for why this needs no 8 mm-grid-sized ``BoxSpec``."""
     walls = (
-        ("y", spec.half_y, spec.half_x - depth, (-1.0, 0.0)),   # +X wall
-        ("y", spec.half_y, -(spec.half_x - depth), (1.0, 0.0)),  # -X wall
-        ("x", spec.half_x, spec.half_y - depth, (0.0, -1.0)),    # +Y wall
-        ("x", spec.half_x, -(spec.half_y - depth), (0.0, 1.0)),  # -Y wall
+        ("y", half_y, half_x - wall_depth, (-1.0, 0.0)),   # +X wall
+        ("y", half_y, -(half_x - wall_depth), (1.0, 0.0)),  # -X wall
+        ("x", half_x, half_y - wall_depth, (0.0, -1.0)),    # +Y wall
+        ("x", half_x, -(half_y - wall_depth), (0.0, 1.0)),  # -Y wall
     )
     paths: list[tuple[list[tuple[float, float]], tuple[float, float]]] = []
     for run_axis, wave_half, face, inward in walls:
@@ -973,14 +1003,27 @@ def _wall_lock_paths(
     return paths
 
 
-def make_wall_lock_bumps(spec: BoxSpec) -> list[trimesh.Trimesh]:
-    """Small chamfered bumps standing proud of each wall's interior face."""
-    embed = min(LOCK_EMBED, spec.wall_depth - LOCK_SAFE_SKIN)
+def _wall_lock_paths(
+    spec: BoxSpec,
+) -> list[tuple[list[tuple[float, float]], tuple[float, float]]]:
+    return _rect_wall_lock_paths(spec.half_x, spec.half_y, spec.wall_depth)
+
+
+def make_wall_lock_bumps_raw(half_x: float, half_y: float, wall_depth: float, z: float) -> list[trimesh.Trimesh]:
+    """Small chamfered bumps standing proud of each wall's interior face -
+    from raw half-extents. See ``wavy_rect_outer`` for why this needs no
+    8 mm-grid-sized ``BoxSpec``."""
+    embed = min(LOCK_EMBED, wall_depth - LOCK_SAFE_SKIN)
     profile = _lock_profile(LOCK_PROTRUSION, embed=embed)
     return [
-        translated(_sweep_profile(path, inward, profile), (0.0, 0.0, spec.z))
-        for path, inward in _wall_lock_paths(spec)
+        translated(_sweep_profile(path, inward, profile), (0.0, 0.0, z))
+        for path, inward in _rect_wall_lock_paths(half_x, half_y, wall_depth)
     ]
+
+
+def make_wall_lock_bumps(spec: BoxSpec) -> list[trimesh.Trimesh]:
+    """Small chamfered bumps standing proud of each wall's interior face."""
+    return make_wall_lock_bumps_raw(spec.half_x, spec.half_y, spec.wall_depth, spec.z)
 
 
 # --------------------------------------------------------------------------- #

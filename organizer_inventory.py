@@ -207,22 +207,39 @@ def _migrate_drawer_boundaries(layout: dict[str, Any] | None) -> None:
     already existed, and organizer_drawer.normalise_drawer defaults an absent
     one to "wall" - a hard-wall clearance floor that silently shrinks an old
     Box/B4B's exact interior (see organizer_drawer.BOUNDARIES). Migrate only
-    the Space's own primary drawer (the active one, or the first) from
-    ``layout.space.kind``; any other drawer in the layout, and any drawer
-    that already carries an explicit valid boundary, is left untouched. The
-    mutation is in place, so a save right after loading persists it.
+    the Space's own primary drawer from ``layout.space.kind``; any other
+    drawer in the layout, and any drawer that already carries an explicit
+    valid boundary, is left untouched. The mutation is in place, so a save
+    right after loading persists it.
+
+    ``layout.active`` is deliberately NOT used to find that drawer - it is
+    just whichever one the UI last had selected, and can point anywhere in a
+    multi-drawer layout. Instead: the drawer ``create_space`` always creates
+    a Box/Drawer Space with (``id == "d1"``) if it still exists, else the one
+    drawer whose own width/depth/height still match the Space's own recorded
+    size, else - deterministically, not UI state - the first drawer.
     """
     if not isinstance(layout, dict):
         return
     space = layout.get("space")
-    drawers = layout.get("drawers")
-    if not isinstance(space, dict) or not isinstance(drawers, list) or not drawers:
+    drawers = [d for d in (layout.get("drawers") or []) if isinstance(d, dict)]
+    if not isinstance(space, dict) or not drawers:
         return
     target = "mating" if space.get("kind") == "box" else "wall"
-    active_id = layout.get("active")
-    primary = next((d for d in drawers if isinstance(d, dict) and d.get("id") == active_id), None)
-    primary = primary or next((d for d in drawers if isinstance(d, dict)), None)
-    if isinstance(primary, dict) and primary.get("boundary") not in ("wall", "mating"):
+    primary = next((d for d in drawers if d.get("id") == "d1"), None)
+    if primary is None:
+        want = tuple(_number(space.get(axis), float("nan")) for axis in ("x", "y", "z"))
+        if all(math.isfinite(value) for value in want):
+            primary = next(
+                (d for d in drawers if all(
+                    math.isfinite(_number(d.get(key), float("nan")))
+                    and abs(_number(d.get(key)) - value) < 0.05
+                    for key, value in zip(("width", "depth", "height"), want)
+                )),
+                None,
+            )
+    primary = primary or drawers[0]
+    if primary.get("boundary") not in ("wall", "mating"):
         primary["boundary"] = target
 
 

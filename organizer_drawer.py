@@ -64,10 +64,11 @@ from organizer_engine import (
     ConnectorSpec,
     differing_connector_plan,
     export_mesh,
-    make_wall_lock_bumps,
+    make_wall_lock_bumps_raw,
     placed_outline,
-    wavy_cavity_polygon,
-    wavy_outer_polygon,
+    wall_depth_for,
+    wavy_rect_cavity,
+    wavy_rect_outer,
 )
 from organizer_geometry import _extrude_polygon, difference, union
 from organizer_inventory import (
@@ -359,28 +360,33 @@ def _two_largest_empty(free: np.ndarray, min_cells: int = 1) -> list[tuple[int, 
     """Up to two distinct, non-overlapping maximal empty rectangles that could
     actually take a normal bin - real bin-placement openings, largest first.
 
-    The second is the largest rectangle in whatever the first one does not
-    cover, so the pair can never be two overlapping or near-duplicate views
-    of the same opening. A rectangle narrower than ``min_cells`` in either
-    direction - too small for even the smallest normal bin, which is always
-    at least one Wavefinity unit - is not a real bin-placement opportunity:
-    it is discarded (not padded out with a smaller one) and the search
-    continues in what is left.
+    The rectangle search itself is constrained to ``min_cells`` wide and
+    tall (see ``_largest_empty``), so a genuinely large but too-narrow
+    region - too small for even the smallest normal bin, which is always at
+    least one Wavefinity unit - is never even a candidate. It is not found
+    and then discarded: doing that first could zero out cells a real, valid,
+    smaller opening elsewhere also needed before ever considering it. The
+    second opening is the largest valid rectangle in whatever the first did
+    not cover, so the pair can never overlap or be near-duplicates.
     """
     rects: list[tuple[int, int, int, int]] = []
     remaining = free.copy()
-    while len(rects) < 2:
-        area, gx, gy, w, d = _largest_empty(remaining)
+    for _ in range(2):
+        area, gx, gy, w, d = _largest_empty(remaining, min_cells)
         if area <= 0:
             break
+        rects.append((gx, gy, w, d))
         remaining[gy:gy + d, gx:gx + w] = False
-        if w >= min_cells and d >= min_cells:
-            rects.append((gx, gy, w, d))
     return rects
 
 
-def _largest_empty(free: np.ndarray) -> tuple[int, int, int, int, int]:
-    """(area, gx, gy, w, d) of the largest all-True rectangle."""
+def _largest_empty(free: np.ndarray, min_cells: int = 1) -> tuple[int, int, int, int, int]:
+    """(area, gx, gy, w, d) of the largest all-True rectangle at least
+    ``min_cells`` wide AND tall - not simply the largest rectangle of any
+    shape. A candidate narrower than that in either direction is never
+    considered a candidate at all, so it can never be chosen over (or,
+    if removed first, accidentally destroy) a smaller valid rectangle.
+    """
     rows, cols = free.shape
     best = (0, 0, 0, 0, 0)
     heights = [0] * cols
@@ -393,9 +399,11 @@ def _largest_empty(free: np.ndarray) -> tuple[int, int, int, int, int]:
             start = col
             while stack and stack[-1][1] >= height:
                 left, tall = stack.pop()
-                area = tall * (col - left)
-                if area > best[0]:
-                    best = (area, left, row - tall + 1, col - left, tall)
+                width = col - left
+                if tall >= min_cells and width >= min_cells:
+                    area = tall * width
+                    if area > best[0]:
+                        best = (area, left, row - tall + 1, width, tall)
                 start = left
             stack.append((start, height))
     return best
@@ -888,7 +896,6 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
     drawer = normalise_drawer(raw_drawer)
     grid = drawer_grid(drawer)
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
-    per_unit = _per_unit(drawer)
     fill = options.get("fill", "all")
     if fill not in SPACER_FILLS:
         fill = "all"
@@ -913,22 +920,20 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
                 free[gy:gy + d, gx:gx + w] = False
                 notes.append(f"Left a {w * step:g} × {d * step:g} mm gap open.")
                 continue
-            # An X-braced spacer is genuinely wavy on all four sides so it
-            # mates with a neighbour on any of them, and that wave is only
-            # generated for a GRID_PITCH (8 mm) reference box (BoxSpec) -
-            # unlike an edge-facing spacer, there is no flat side here to trim
-            # a smaller real size down from. On a 4 mm-snap drawer an odd
-            # cell left over is therefore a real manufacturability sliver, not
-            # a "must be a whole unit" preference.
-            w, d = min(w - w % per_unit, longest), min(d - d % per_unit, longest)
-            if not w or not d:
+            # An X-braced spacer fills the real free region, whatever its
+            # size - it is not confined to the 8 mm grid an ordinary bin's
+            # BoxSpec requires (see spacer_frame/_spacer_fits). Only a
+            # genuine manufacturability floor - is there room left for a
+            # cavity once both walls are subtracted? - can still reject it.
+            w, d = min(w, longest), min(d, longest)
+            if not _spacer_fits(w * step, d * step):
                 free[gy:gy + max(d, 1), gx:gx + max(w, 1)] = False
                 slivers += 1
                 continue
             free[gy:gy + d, gx:gx + w] = False
             cells.append({"gx": gx, "gy": gy, "w": w, "d": d})
         if slivers:
-            notes.append(f"{slivers} gap{'s' if slivers != 1 else ''} only 4 mm wide left open - too narrow for a fully wavy spacer frame on every side.")
+            notes.append(f"{slivers} gap{'s' if slivers != 1 else ''} too narrow for a printable spacer frame.")
 
     edges = []
     if fill in ("all", "edges") and rows and cols:
@@ -1033,25 +1038,50 @@ def _rib(a: tuple[float, float], b: tuple[float, float]) -> Polygon:
     return LineString([(ax - ux, ay - uy), (bx + ux, by + uy)]).buffer(RIB_WIDTH / 2.0, cap_style="flat")
 
 
+def _spacer_fits(w_mm: float, d_mm: float) -> bool:
+    """Whether a genuine printable spacer cavity exists at this size.
+
+    The same physical inequality ``BoxSpec`` itself enforces for a normal bin
+    ("wall thickness leaves no cavity") - checked directly here, since a
+    spacer's own x/y need not be a multiple of the 8 mm grid a bin's
+    ``BoxSpec`` requires. This is a real geometric floor, not "must be a
+    whole Wavefinity unit": at Wavefinity's default wall thickness it allows
+    a spacer only a few mm wide, so a normal 4 mm or 8 mm grid cell is never
+    rejected by it in practice.
+    """
+    depth = wall_depth_for(DEFAULT_WALL)
+    return depth * 2.0 < min(w_mm, d_mm) - WAVE_MATING_GAP - 2.0 * WAVE_AMPLITUDE
+
+
 def spacer_frame(x: float, y: float, z: float) -> trimesh.Trimesh:
-    """A bespoke spacer for one empty patch of grid.
+    """A bespoke spacer for one empty patch of grid, at its real size - not
+    confined to the 8 mm grid an ordinary bin's ``BoxSpec`` requires.
 
     The outside is exactly a bin's wavy wall, so it nests with the bins on
     every side and takes a connector like one (the lock bumps are kept).  The
     inside is open - no floor - and braced by one big X, or a row of X's when
     the patch is long and thin so no brace runs at a shallow angle.
+
+    Built from raw half-extents rather than a ``BoxSpec`` (see
+    ``wavy_rect_outer``): the wave only depends on position relative to this
+    shape's own centre, so it mates correctly with a neighbour once the
+    finished part sits on the grid, whatever this spacer itself measures -
+    exactly like a normal bin's own standalone, reusable part file.
     """
-    spec = BoxSpec(x, y, z)
-    envelope = _extrude_polygon(wavy_outer_polygon(spec), z)
-    opening = _extrude_polygon(wavy_cavity_polygon(spec), z + 2.0)
+    half_x, half_y = x / 2.0 - WAVE_MATING_GAP / 2.0, y / 2.0 - WAVE_MATING_GAP / 2.0
+    depth = wall_depth_for(DEFAULT_WALL)
+    outer = wavy_rect_outer(half_x, half_y)
+    cavity = wavy_rect_cavity(half_x, half_y, depth)
+    envelope = _extrude_polygon(outer, z)
+    opening = _extrude_polygon(cavity, z + 2.0)
     opening.apply_translation((0.0, 0.0, -1.0))
     solids = [difference([envelope, opening])]
-    solids += [_extrude_polygon(brace, z) for brace in spacer_braces(spec)]
-    solids += make_wall_lock_bumps(spec)
+    solids += [_extrude_polygon(brace, z) for brace in spacer_braces(outer, cavity.bounds)]
+    solids += make_wall_lock_bumps_raw(half_x, half_y, depth, z)
     return union(solids)
 
 
-def spacer_braces(spec: BoxSpec) -> list[Polygon]:
+def spacer_braces(outer: Polygon, cavity_bounds: tuple[float, float, float, float]) -> list[Polygon]:
     """The X braces inside a spacer frame, each strip clipped to the outside
     wall.
 
@@ -1059,8 +1089,7 @@ def spacer_braces(spec: BoxSpec) -> list[Polygon]:
     X's would enclose the openings as holes, and a many-holed outline does not
     extrude to a reliable solid.
     """
-    outer = wavy_outer_polygon(spec)
-    x0, y0, x1, y1 = wavy_cavity_polygon(spec).bounds
+    x0, y0, x1, y1 = cavity_bounds
     span_x, span_y = x1 - x0, y1 - y0
     if min(span_x, span_y) < MIN_RIB_SPAN:
         return []

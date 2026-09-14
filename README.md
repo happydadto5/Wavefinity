@@ -102,9 +102,10 @@ Dropping a bin on a same-size bin that stacks the same way snaps it on top with
 the sides aligned; anything else is refused, and the refusal says why.
 
 **Auto layout offers; it does not decide.** It applies the best arrangement and
-lists the others as clickable cards, each with its fill, height clashes and
-connector count, and Undo steps back. A layout that bends the height rule is
-offered only when the rule is what left bins out.
+lists the others as clickable cards, each showing bins placed against how many
+were wanted, any stack count, and height clashes or "tall bins at the back",
+and Undo steps back. A layout that bends the height rule is offered only when
+the rule is what left bins out.
 
 ---
 
@@ -362,9 +363,14 @@ then enter `<folder name> bins.md`, and the Space view lays them out.
   between the grid and the drawer walls become **edge-facing spacers**, cut
   from a virtual bin standing just outside the grid: wavy and interlocking on
   the bin-facing side, flat on the wall side, and sized to the drawer's real
-  leftover millimetres rather than rounded up to a whole 8 mm unit. A long
-  edge is still split into whole-unit pieces no longer than *Longest piece*,
-  so the piece ends nest too. Files go to the save location and rows go into
+  leftover millimetres. Neither kind of spacer is forced onto the whole 8 mm
+  grid a normal bin's own size must be - on a drawer that snaps to 4 mm, a
+  genuine 4 mm-wide leftover, edge or interior, is filled at its real size.
+  Only a genuine manufacturability floor - is there still room for a cavity
+  once both walls are subtracted? - rejects a spacer as too narrow to print.
+  A long edge is still split into whole-unit pieces no longer than *Longest
+  piece*, so the piece ends nest too. Files go to the save location and rows
+  go into
   the inventory as the one Spacer kind; a folder saved before this
   distinction existed still loads its old edge-shim rows and quietly
   rewrites them as spacers the next time it saves. Spare copies of a matching
