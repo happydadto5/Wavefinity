@@ -7359,11 +7359,15 @@ function setItemStatus(id, status, text) {
   if (statusSpan) statusSpan.textContent = text;
 }
 
-function showBinNameRequiredDialog() {
+function showBinNameRequiredDialog(title, message) {
   const dialog = $("#bin-name-dialog");
   const partInput = $("#part-name");
+  const titleEl = $("#bin-name-dialog-title");
+  const messageEl = $("#bin-name-dialog-message");
+  if (titleEl) titleEl.textContent = title || "Bins must have a name";
+  if (messageEl) messageEl.textContent = message || "Bins must have a name before you can generate or print.";
   if (!dialog || typeof dialog.showModal !== "function") {
-    alert("Bins must have a name");
+    alert(message || "Bins must have a name");
     if (partInput) {
       partInput.focus();
       partInput.select();
@@ -7381,6 +7385,14 @@ function showBinNameRequiredDialog() {
     dialog.showModal();
     $("#bin-name-dialog-ok")?.focus();
   }
+}
+
+function showFilenameConflictDialog(names) {
+  const list = names.join(", ");
+  showBinNameRequiredDialog(
+    "This name is already used",
+    `A file named "${list}" already exists in your chosen folder. Please label the bin with a different name, then generate again.`
+  );
 }
 
 function checkPartNamePresent(target = "bin") {
@@ -7654,6 +7666,16 @@ async function saveGeneratedFiles(result) {
   const files = result.files || [];
   if (!files.length) throw new Error("The server did not return any files to save.");
   const folder = state.browserFolder;
+  if (folder?.handle) {
+    const conflicts = [];
+    for (const file of files) {
+      if (await WFFileSystem.fileExists(folder.handle, file.name)) conflicts.push(file.name);
+    }
+    if (conflicts.length) {
+      showFilenameConflictDialog(conflicts);
+      throw new Error("Give the bin a different name to avoid overwriting an existing file.");
+    }
+  }
   const saved = [];
   for (const file of files) {
     const response = await fetch(file.url);
