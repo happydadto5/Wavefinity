@@ -209,6 +209,56 @@ class FolderMigrationTests(unittest.TestCase):
             self.assertEqual(inventory_path(folder).read_bytes(), inventory_before)
             self.assertEqual(json.loads((folder / ".wavefinity.json").read_text())["folder_mode"], "space")
 
+    def test_legacy_box_space_beats_a_stale_current_design_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Garage"
+            folder.mkdir()
+            # A current "design" marker is not a positive Space identity and
+            # must not hide a genuine legacy Box recorded alongside it.
+            (folder / ".wavefinity.json").write_text('{"version":2,"folder_mode":"design"}', encoding="utf-8")
+            (folder / ".wavefinity-space.json").write_text(
+                json.dumps({"name": "Screws", "kind": "box", "x": 96, "y": 48, "z": 40}), encoding="utf-8",
+            )
+            routes, _prefs = self.routes(tmp)
+            result = routes["/api/folder/use"]({"output": str(folder)})["folder"]
+            self.assertEqual(result["folder_mode"], "space")
+            self.assertEqual(result["space"], {"name": "Screws", "kind": "box", "x": 96.0, "y": 48.0, "z": 40.0})
+            self.assertTrue(result["inventory"])
+            written = json.loads((folder / ".wavefinity.json").read_text())
+            self.assertEqual(written["folder_mode"], "space")
+            self.assertTrue(written["inventory"])
+            self.assertEqual(written["space"]["kind"], "box")
+
+    def test_legacy_space_beats_a_stale_design_marker_even_with_inventory_off(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Bench"
+            folder.mkdir()
+            (folder / ".wavefinity.json").write_text(
+                '{"version":2,"folder_mode":"design","inventory":false}', encoding="utf-8",
+            )
+            (folder / ".wavefinity-space.json").write_text(
+                json.dumps({"name": "Bits", "kind": "drawer", "x": 120, "y": 80, "z": 40}), encoding="utf-8",
+            )
+            routes, _prefs = self.routes(tmp)
+            result = routes["/api/folder/use"]({"output": str(folder)})["folder"]
+            self.assertEqual(result["folder_mode"], "space")
+            self.assertEqual(result["space"]["kind"], "drawer")
+            # Space always requires inventory, overriding the stale opt-out.
+            self.assertTrue(result["inventory"])
+
+    def test_current_design_wins_over_legacy_none_and_keeps_its_own_inventory_choice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Plain2"
+            folder.mkdir()
+            (folder / ".wavefinity.json").write_text(
+                '{"version":2,"folder_mode":"design","inventory":false}', encoding="utf-8",
+            )
+            (folder / ".wavefinity-space.json").write_text('{"kind":"none"}', encoding="utf-8")
+            routes, _prefs = self.routes(tmp)
+            result = routes["/api/folder/use"]({"output": str(folder)})["folder"]
+            self.assertEqual(result["folder_mode"], "design")
+            self.assertFalse(result["inventory"])
+
     def test_damaged_or_unsupported_metadata_is_never_rewritten(self):
         cases = {
             "bad-json": "{broken",

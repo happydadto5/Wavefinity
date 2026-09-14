@@ -179,6 +179,21 @@ SP.inspectHosted = async folder => {
   // only considered as a last resort further down.
   const genuineInventorySpace = inventorySpace && !inventorySpaceInferred;
 
+  // Damaged/future current metadata stops the folder outright, before
+  // anything falls through to the legacy file.
+  if (!["missing", "design", "space"].includes(currentState.status)) {
+    throw SP.metadataError(currentState.status);
+  }
+  // Legacy is only actually consulted once nothing more authoritative
+  // (an explicit layout.space, or current metadata already saying "space")
+  // has settled things - and once consulted, a damaged legacy file must
+  // stop the folder too, not be silently skipped just because a stale
+  // current "design" marker happens to be sitting next to it.
+  const legacyMatters = !genuineInventorySpace && currentState.status !== "space";
+  if (legacyMatters && legacyState.status === "invalid") {
+    throw SP.metadataError(legacyState.status);
+  }
+
   let mode;
   let space = null;
   let inventory = true;
@@ -190,22 +205,21 @@ SP.inspectHosted = async folder => {
   } else if (currentState.status === "space") {
     mode = "space";
     space = currentState.space;
+  } else if (legacyState.status === "space") {
+    // A stale or absent current "design" marker must not hide a genuine
+    // legacy Space identity - a current "design" marker is not a positive
+    // Space identity, only current "space" metadata (handled above) is.
+    mode = "space";
+    space = legacyState.space;
+    shouldWriteMetadata = true;
   } else if (currentState.status === "design") {
     mode = "design";
     // A folder saved before this preference existed keeps inventory on by default.
     inventory = currentState.inventory === null ? true : currentState.inventory;
     shouldWriteMetadata = currentState.inventory === null;
-  } else if (!["missing"].includes(currentState.status)) {
-    throw SP.metadataError(currentState.status);
-  } else if (legacyState.status === "space") {
-    mode = "space";
-    space = legacyState.space;
-    shouldWriteMetadata = true;
   } else if (legacyState.status === "design") {
     mode = "design";
     shouldWriteMetadata = true;
-  } else if (legacyState.status !== "missing") {
-    throw SP.metadataError(legacyState.status);
   } else if (inventorySpace) {
     // No authoritative metadata anywhere: fall back to the layout-only
     // inference (always "drawer" - there is no Box concept for it to recover).

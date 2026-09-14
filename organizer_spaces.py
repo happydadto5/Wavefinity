@@ -90,13 +90,22 @@ def _folder_state(folder: Path, prefs: dict[str, Any]) -> tuple[str, dict[str, A
     """Returns ``(folder_mode, space, inventory_enabled)``. Inventory and Space
     are independent except that Space always requires inventory on.
 
-    Precedence, most authoritative first: an explicit ``layout.space``; the
-    current ``.wavefinity.json``; the legacy ``.wavefinity-space.json``; and
-    only when none of those exist at all, ``legacy_layout_space`` - a lossy
-    reconstruction from the drawer layout alone that can only ever guess
-    "drawer" (there is no Box concept for it to recover). That must never be
-    allowed to override a genuine Box identity recorded in either metadata
-    file, so it is checked last, not first.
+    Precedence, most authoritative first:
+
+    1. an explicit ``layout.space``;
+    2. current ``.wavefinity.json`` recording ``folder_mode: "space"``;
+    3. legacy ``.wavefinity-space.json`` recording a Drawer/Box Space;
+    4. current ``.wavefinity.json`` recording ``folder_mode: "design"``
+       (defines the Design state and its inventory setting);
+    5. legacy ``.wavefinity-space.json`` recording ``kind: "none"`` (Design);
+    6. ``legacy_layout_space`` - a lossy reconstruction from the drawer layout
+       alone that can only ever guess "drawer" (there is no Box concept for
+       it to recover).
+
+    A current ``design`` marker is not a positive Space identity and must
+    never hide a genuine legacy Space, so both metadata files are read and
+    validated before the classification is decided - the current file is
+    never allowed to short-circuit past a legacy one that outranks it.
     """
     inventory = load_inventory(folder)
     layout = inventory["layout"] if isinstance(inventory["layout"], dict) else {}
@@ -106,6 +115,7 @@ def _folder_state(folder: Path, prefs: dict[str, Any]) -> tuple[str, dict[str, A
 
     metadata_path = folder / METADATA_FILE
     metadata = _json_file(metadata_path, strict=metadata_path.exists())
+    design_result: tuple[str, None, bool] | None = None
     if metadata is not None:
         version = metadata.get("version")
         if isinstance(version, (int, float)) and version > METADATA_VERSION:
@@ -116,10 +126,6 @@ def _folder_state(folder: Path, prefs: dict[str, Any]) -> tuple[str, dict[str, A
             raise FolderMetadataError(
                 "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
             )
-        if metadata.get("folder_mode") == "design":
-            explicit = _explicit_inventory(metadata)
-            enabled = explicit if explicit is not None else _default_inventory(folder, prefs)
-            return "design", None, enabled
         if metadata.get("folder_mode") == "space":
             metadata_space = _space(metadata.get("space"))
             if metadata_space:
@@ -127,21 +133,35 @@ def _folder_state(folder: Path, prefs: dict[str, Any]) -> tuple[str, dict[str, A
             raise FolderMetadataError(
                 "This folder's Space information is incomplete or damaged. Nothing was changed."
             )
-        raise FolderMetadataError(
-            "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
-        )
+        if metadata.get("folder_mode") == "design":
+            explicit = _explicit_inventory(metadata)
+            enabled = explicit if explicit is not None else _default_inventory(folder, prefs)
+            design_result = ("design", None, enabled)
+        else:
+            raise FolderMetadataError(
+                "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
+            )
 
     legacy_path = folder / LEGACY_METADATA_FILE
     legacy = _json_file(legacy_path, strict=legacy_path.exists())
     if legacy is not None:
         legacy_space = _space(legacy)
         if legacy_space:
+            # Outranks a stale/absent current "design" marker, but current
+            # "space" metadata already returned above and never reaches here.
             return "space", legacy_space, True
-        if legacy.get("kind") == "none":
-            return "design", None, _default_inventory(folder, prefs)
-        raise FolderMetadataError(
-            "This folder contains legacy Wavefinity metadata that this version cannot safely read. The file was left unchanged."
-        )
+        if legacy.get("kind") != "none":
+            raise FolderMetadataError(
+                "This folder contains legacy Wavefinity metadata that this version cannot safely read. The file was left unchanged."
+            )
+        # legacy "kind: none" is just Design - the current metadata's own
+        # design result (if any) still wins so its inventory choice survives.
+
+    if design_result is not None:
+        return design_result
+    if legacy is not None:
+        # legacy was read above and, having reached here, was "kind: none".
+        return "design", None, _default_inventory(folder, prefs)
 
     # No authoritative Space identity anywhere - only now fall back to a
     # lossy reconstruction from the drawer layout alone, which can only ever
@@ -172,8 +192,11 @@ def _write_metadata(
 def _migrate_metadata(
     folder: Path, mode: str, space: dict[str, Any] | None = None, inventory: bool = True,
 ) -> None:
-    """Only rewrite metadata that is absent, or valid but silent about
-    inventory (a folder saved before this preference existed)."""
+    """Only rewrite metadata that does not already, positively, say what this
+    resolves to - so a stale/incomplete record (a "design" marker a legacy
+    Space has just outranked, or old "design" metadata silent about
+    inventory) migrates once, deterministically, and an already-correct file
+    is left untouched."""
     target = folder / METADATA_FILE
     if target.exists():
         try:
@@ -184,7 +207,12 @@ def _migrate_metadata(
                 return
             if metadata.get("folder_mode") == "space" and not _space(metadata.get("space")):
                 return
-            if _explicit_inventory(metadata) is not None:
+            if mode == "space":
+                if metadata.get("folder_mode") == "space" and _space(metadata.get("space")) == space:
+                    return
+                # else: stored "design" (or a differing space) - a legacy
+                # identity just took over, fall through and rewrite it.
+            elif metadata.get("folder_mode") == "design" and _explicit_inventory(metadata) is not None:
                 return
         except FolderMetadataError:
             return
