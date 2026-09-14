@@ -270,10 +270,10 @@ SP.useHostedFolder = async folder => {
   await SP.applyFolder(info, { reset: false });
   SP.close();
   toast(folder.fallback
-    ? "This browser will download files normally. Persistent Space planning needs folder access."
+    ? "Downloads still work. Inventory and Space planning need desktop Chrome or Edge with folder access allowed."
     : info.folder_mode === "space"
     ? `Opened ${info.space.name || folder.name}.`
-    : `Saving designs to ${folder.name}.`);
+    : `Saving designs to ${folder.name}.`, false, folder.fallback ? 7000 : 3200);
   return info;
 };
 

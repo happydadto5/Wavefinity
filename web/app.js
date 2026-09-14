@@ -140,7 +140,7 @@ function setFolderState(mode = "design", space = null, inventory = undefined) {
     toggle.checked = state.inventoryEnabled;
     toggle.disabled = !state.folderSelected || state.folderMode === "space" || !canPersistInventory;
     toggle.title = !canPersistInventory
-      ? "This browser can't keep a persistent inventory file without folder access - files still save normally."
+      ? "Inventory and Space planning need folder access. Use desktop Chrome or Edge and allow access when asked; downloads still work here."
       : state.folderMode === "space"
         ? "Space planning needs this folder's inventory turned on."
         : "Add each generated bin and B4B to this folder's inventory file";
@@ -1435,7 +1435,7 @@ async function selectOutputFolder() {
         // an inventory file - the opt-out default, not the normal one.
         setFolderState("design", null, false);
         if (input) input.value = state.output;
-        toast("This browser uses Downloads instead of a chosen folder.");
+        toast("Downloads still work. Inventory and Space planning need desktop Chrome or Edge with folder access allowed.", false, 7000);
         return;
       }
       const handle = await WFFileSystem.pickDirectory();

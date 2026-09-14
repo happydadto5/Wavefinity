@@ -5,6 +5,8 @@
 - Unsaved bin-design changes now trigger the browser's leave-page warning.
 - Hosted browsers without folder access keep inventory off while downloading
   generated files normally.
+- Their warning now names the unavailable Inventory and Space features and
+  explains how to enable them with a supported desktop browser.
 - About Wavefinity now explains that small printed connectors lock neighboring
   bins together across their shared seam.
 
