@@ -258,7 +258,9 @@ SP.pickFolder = async () => {
       state.browserFolder = fallback;
       state.output = fallback.name;
       state.folderSelected = true;
-      setFolderState("design");
+      // No persistent directory handle here, so there is nowhere to keep
+      // an inventory file - the opt-out default, not the normal one.
+      setFolderState("design", null, false);
       syncForm();
       toast("This browser will download files normally. Persistent Space planning needs folder access.");
       return fallback;
@@ -289,9 +291,12 @@ SP.chooseFolder = () => SP.run(async () => {
 });
 
 // The opt-out checkbox beside the save folder. Space always keeps inventory
-// on, so the control is disabled while a Space is active (see setFolderState).
+// on, and a hosted download-only fallback has no folder to keep one in, so
+// the control is disabled in both cases (see setFolderState) - these checks
+// just guard against a stray change event reaching here anyway.
 SP.setInventory = enabled => SP.run(async () => {
   if (!SP.hasFolder() || state.folderMode === "space") return;
+  if (state.runtime.hosted && !state.browserFolder?.handle) return;
   if (state.runtime.hosted) {
     await SP.writeMetadata(state.browserFolder?.handle, "design", null, enabled);
   } else {

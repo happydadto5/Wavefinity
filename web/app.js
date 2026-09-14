@@ -111,11 +111,18 @@ let previewSlowTimer = null;
 
 const VERSION_POLL_MS = 5000;
 
-function setFolderState(mode = "design", space = null, inventory = true) {
+// `inventory` is the folder's real setting and should be passed explicitly by
+// anything that knows it (a fresh /api/folder/use or SP.inspectHosted reply,
+// or an explicit new/fallback folder that has never had a setting). Leaving it
+// `undefined` - as a routine syncForm() refresh does - preserves whatever is
+// already in state.inventoryEnabled instead of silently resetting it: the
+// third argument is data about a folder, not a reset-to-default action.
+function setFolderState(mode = "design", space = null, inventory = undefined) {
   state.folderMode = mode === "space" ? "space" : "design";
   state.activeSpace = state.folderMode === "space" ? (space || null) : null;
+  const resolvedInventory = inventory === undefined ? state.inventoryEnabled : Boolean(inventory);
   // Space always keeps inventory - it is what the layout is built from.
-  state.inventoryEnabled = state.folderMode === "space" ? true : Boolean(inventory);
+  state.inventoryEnabled = state.folderMode === "space" ? true : resolvedInventory;
   state.keepLog = state.inventoryEnabled;
   const indicator = $("#active-space-indicator");
   if (indicator) {
@@ -125,10 +132,18 @@ function setFolderState(mode = "design", space = null, inventory = true) {
       : "";
     indicator.hidden = !state.activeSpace;
   }
+  // A hosted folder with no persistent directory handle (the download-only
+  // fallback) has nowhere to keep an inventory file, whatever the checkbox says.
+  const canPersistInventory = !state.runtime.hosted || Boolean(state.browserFolder?.handle);
   const toggle = $("#folder-inventory-toggle");
   if (toggle) {
     toggle.checked = state.inventoryEnabled;
-    toggle.disabled = !state.folderSelected || state.folderMode === "space";
+    toggle.disabled = !state.folderSelected || state.folderMode === "space" || !canPersistInventory;
+    toggle.title = !canPersistInventory
+      ? "This browser can't keep a persistent inventory file without folder access - files still save normally."
+      : state.folderMode === "space"
+        ? "Space planning needs this folder's inventory turned on."
+        : "Add each generated bin and B4B to this folder's inventory file";
   }
 }
 
@@ -658,7 +673,8 @@ function syncForm() {
   $("#output-folder").value = state.runtime.hosted
     ? (state.browserFolder?.name || "Select a folder...")
     : state.output;
-  setFolderState(state.folderMode, state.activeSpace);
+  // A routine form refresh must not touch the folder's inventory setting.
+  setFolderState(state.folderMode, state.activeSpace, state.inventoryEnabled);
   $("#connector-tolerance").value = fmt(state.connector.tolerance);
   $("#connector-length").value = fmt(state.connector.length);
   const armThicknessEl = $("#connector-arm-thickness");
@@ -1415,7 +1431,9 @@ async function selectOutputFolder() {
         state.browserFolder = { handle: null, name: "Browser downloads", fallback: true };
         state.output = state.browserFolder.name;
         state.folderSelected = true;
-        setFolderState("design");
+        // No persistent directory handle here, so there is nowhere to keep
+        // an inventory file - the opt-out default, not the normal one.
+        setFolderState("design", null, false);
         if (input) input.value = state.output;
         toast("This browser uses Downloads instead of a chosen folder.");
         return;
