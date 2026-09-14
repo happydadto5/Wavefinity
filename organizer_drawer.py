@@ -59,6 +59,7 @@ from organizer_engine import (
     DEFAULT_WALL,
     LOCKED_CONNECTOR_LENGTH,
     WAVE_AMPLITUDE,
+    WAVE_LENGTH,
     WAVE_MATING_GAP,
     BoxSpec,
     ConnectorSpec,
@@ -1063,21 +1064,30 @@ def spacer_frame(x: float, y: float, z: float) -> trimesh.Trimesh:
     the patch is long and thin so no brace runs at a shallow angle.
 
     Built from raw half-extents rather than a ``BoxSpec`` (see
-    ``wavy_rect_outer``): the wave only depends on position relative to this
-    shape's own centre, so it mates correctly with a neighbour once the
-    finished part sits on the grid, whatever this spacer itself measures -
-    exactly like a normal bin's own standalone, reusable part file.
+    ``wavy_rect_outer``). A normal bin's own centre always lands on the
+    global wave lattice by construction (its size is always a whole 8 mm
+    unit); a spacer's real placement centre does not, whenever its size is
+    "4 mod 8" on a 4 mm-snap drawer - its grid corner is always on the
+    lattice, but corner + size/2 is not. ``phase_x``/``phase_y`` below are
+    exactly that centre's own offset from the lattice on each axis, so the
+    wave this reusable file shows once actually placed on the grid still
+    matches a neighbouring bin's along every seam, whatever this spacer
+    itself measures. The correction depends only on x/y's own parity (mod
+    ``WAVE_LENGTH``), never on where a particular copy is placed - grid
+    corners are always lattice-aligned - so one file per (x, y, z) remains
+    correctly reusable at any position.
     """
     half_x, half_y = x / 2.0 - WAVE_MATING_GAP / 2.0, y / 2.0 - WAVE_MATING_GAP / 2.0
+    phase_x, phase_y = (x / 2.0) % WAVE_LENGTH, (y / 2.0) % WAVE_LENGTH
     depth = wall_depth_for(DEFAULT_WALL)
-    outer = wavy_rect_outer(half_x, half_y)
-    cavity = wavy_rect_cavity(half_x, half_y, depth)
+    outer = wavy_rect_outer(half_x, half_y, phase_x=phase_x, phase_y=phase_y)
+    cavity = wavy_rect_cavity(half_x, half_y, depth, phase_x=phase_x, phase_y=phase_y)
     envelope = _extrude_polygon(outer, z)
     opening = _extrude_polygon(cavity, z + 2.0)
     opening.apply_translation((0.0, 0.0, -1.0))
     solids = [difference([envelope, opening])]
     solids += [_extrude_polygon(brace, z) for brace in spacer_braces(outer, cavity.bounds)]
-    solids += make_wall_lock_bumps_raw(half_x, half_y, depth, z)
+    solids += make_wall_lock_bumps_raw(half_x, half_y, depth, z, phase_x=phase_x, phase_y=phase_y)
     return union(solids)
 
 
@@ -1322,11 +1332,17 @@ def drawer_routes(
                 title=str(payload.get("inventory_title") or "Wavefinity"),
             )
             layout = result.get("layout")
+            space_inferred = False
             if isinstance(layout, dict) and not isinstance(layout.get("space"), dict):
                 inferred = legacy_layout_space(layout)
                 if inferred:
+                    # A lossy reconstruction from the drawer layout alone,
+                    # which can only ever guess "drawer" - never let it look
+                    # like an authoritative space to the caller (it must not
+                    # outrank real Box metadata; see SP.inspectHosted).
                     result = {**result, "layout": {**layout, "space": inferred}}
-            return with_rules(result)
+                    space_inferred = True
+            return {**with_rules(result), "space_inferred": space_inferred}
         return with_rules(load_inventory(folder(payload)))
 
     def save(payload):

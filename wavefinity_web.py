@@ -113,7 +113,7 @@ from organizer_inserts import (
 from photo_nest import photo_outline_from_data
 from organizer_drawer import drawer_routes
 from organizer_inventory import create_space_text
-from organizer_spaces import folder_mode, space_routes
+from organizer_spaces import inventory_enabled, space_routes
 from organizer_app import (
     APP_DIR,
     DEFAULT_SAMPLE_BOXES,
@@ -1535,7 +1535,7 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     output = _generation_output(payload)
     auto_timestamp = bool(payload.get("auto_timestamp", False))
     requested_inventory = bool(payload.get("keep_log", False))
-    keep_log = requested_inventory if HOSTED else folder_mode(output, load_preferences()) == "space"
+    keep_log = requested_inventory if HOSTED else inventory_enabled(output, load_preferences())
     with GEOMETRY_LOCK:
         result = generate_organizer_files(
             box, layout, output, label, part_name, label_location, scoop,

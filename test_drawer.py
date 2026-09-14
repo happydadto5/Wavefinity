@@ -4,6 +4,8 @@ import unittest
 import json
 from pathlib import Path
 
+from shapely import affinity
+
 from organizer_drawer import (
     auto_layout,
     drawer_grid,
@@ -12,8 +14,17 @@ from organizer_drawer import (
     normalise_drawer,
     plan_spacers,
     spacer_frame,
+    wavy_rect_outer,
 )
-from organizer_engine import BoxSpec, wavy_cavity_polygon, wavy_outer_polygon
+from organizer_engine import (
+    BoxSpec,
+    WAVE_LENGTH,
+    WAVE_MATING_GAP,
+    nested_clearance,
+    placed_outline,
+    wavy_cavity_polygon,
+    wavy_outer_polygon,
+)
 from organizer_inventory import (
     append_bin,
     create_space,
@@ -109,14 +120,55 @@ class FolderMigrationTests(unittest.TestCase):
         routes = space_routes(Path(tmp), lambda: dict(prefs), lambda update: prefs.update(update) or dict(prefs))
         return routes, prefs
 
-    def test_empty_folder_becomes_design_without_inventory(self):
+    def test_empty_folder_becomes_design_with_inventory_on_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Designs"
             routes, _prefs = self.routes(tmp)
             result = routes["/api/folder/use"]({"output": str(folder)})
             self.assertEqual(result["folder"]["folder_mode"], "design")
-            self.assertEqual(json.loads((folder / ".wavefinity.json").read_text())["folder_mode"], "design")
+            self.assertTrue(result["folder"]["inventory"])
+            written = json.loads((folder / ".wavefinity.json").read_text())
+            self.assertEqual(written["folder_mode"], "design")
+            self.assertTrue(written["inventory"])
+            # Inventory is enabled, but the file itself is only created lazily,
+            # the first time there is something to log.
             self.assertFalse(inventory_path(folder).exists())
+
+    def test_old_design_metadata_migrates_to_inventory_on(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "OldDesign"
+            folder.mkdir()
+            (folder / ".wavefinity.json").write_text('{"version":2,"folder_mode":"design"}', encoding="utf-8")
+            routes, _prefs = self.routes(tmp)
+            result = routes["/api/folder/use"]({"output": str(folder)})
+            self.assertEqual(result["folder"]["folder_mode"], "design")
+            self.assertTrue(result["folder"]["inventory"])
+            self.assertTrue(json.loads((folder / ".wavefinity.json").read_text())["inventory"])
+
+    def test_inventory_can_be_turned_off_and_back_on_explicitly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Bench"
+            routes, _prefs = self.routes(tmp)
+            routes["/api/folder/use"]({"output": str(folder)})
+
+            off = routes["/api/folder/inventory"]({"output": str(folder), "inventory": False})
+            self.assertFalse(off["folder"]["inventory"])
+            self.assertFalse(json.loads((folder / ".wavefinity.json").read_text())["inventory"])
+            # Reopening the folder preserves the opt-out.
+            self.assertFalse(routes["/api/folder/use"]({"output": str(folder)})["folder"]["inventory"])
+
+            on = routes["/api/folder/inventory"]({"output": str(folder), "inventory": True})
+            self.assertTrue(on["folder"]["inventory"])
+
+    def test_space_requires_inventory_and_rejects_turning_it_off(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Drawer2"
+            folder.mkdir()
+            create_space(folder, name="X", kind="drawer", x=40, y=40, z=40)
+            routes, _prefs = self.routes(tmp)
+            routes["/api/folder/use"]({"output": str(folder)})
+            with self.assertRaises(ValueError):
+                routes["/api/folder/inventory"]({"output": str(folder), "inventory": False})
 
     def test_legacy_space_and_design_markers_migrate_additively(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -138,7 +190,9 @@ class FolderMigrationTests(unittest.TestCase):
             preferred = Path(tmp) / "Preferred"
             preferred.mkdir()
             prefs["no_inventory_folders"] = [str(preferred)]
-            self.assertEqual(routes["/api/folder/use"]({"output": str(preferred)})["folder"]["folder_mode"], "design")
+            preferred_result = routes["/api/folder/use"]({"output": str(preferred)})["folder"]
+            self.assertEqual(preferred_result["folder_mode"], "design")
+            self.assertFalse(preferred_result["inventory"])
 
     def test_inventory_space_beats_safe_contrary_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -259,6 +313,38 @@ class SpacerTests(unittest.TestCase):
         self.assertTrue(32.1 < edge["x"] < 32.5, edge["x"])
         covered = sum(c["w"] * c["d"] for c in plan["cells"])
         self.assertEqual(covered, 4 * 3 - 4)
+
+    def test_a_non_8mm_interior_spacer_carries_the_global_wave_phase(self):
+        # A normal bin's own centre always lands on the global wave lattice
+        # (its size is always a whole 8 mm unit). A spacer whose size is
+        # "4 mod 8" on a 4 mm-snap drawer does NOT get that for free: its
+        # grid corner is lattice-aligned, but corner + size/2 is not, so its
+        # wave is half a cycle out of phase unless corrected - crest against
+        # trough instead of matched. This checks the corrected geometry
+        # actually mates with a real neighbouring bin: same clearance a
+        # same-wall-sharing pair of ordinary bins would show, not a collision.
+        z = 20.0
+        bin_spec = BoxSpec(16, 16, z)
+        bin_centre = (8.0, 8.0)  # bin occupies grid x in [0, 16], y in [0, 16]
+        bin_outline = placed_outline(bin_spec, bin_centre)
+
+        # A spacer immediately to the left, sharing the vertical seam at
+        # x = 0: grid x in [-16, 0], y in [0, 4]. Its Y size (4 mm) is what
+        # governs its left/right-wall phase, since those walls run along Y.
+        sx, sy = 16.0, 4.0
+        spacer_centre = (-8.0, 2.0)
+        half_x, half_y = sx / 2.0 - WAVE_MATING_GAP / 2.0, sy / 2.0 - WAVE_MATING_GAP / 2.0
+        phase_x, phase_y = (sx / 2.0) % WAVE_LENGTH, (sy / 2.0) % WAVE_LENGTH
+        self.assertAlmostEqual(phase_y, 2.0, places=6, msg="test setup should exercise a half-cycle correction")
+
+        corrected = affinity.translate(wavy_rect_outer(half_x, half_y, phase_x=phase_x, phase_y=phase_y), *spacer_centre)
+        self.assertTrue(corrected.intersection(bin_outline).is_empty)
+        self.assertAlmostEqual(corrected.distance(bin_outline), nested_clearance(), places=3)
+
+        # The uncorrected (phase 0) geometry is the bug this guards against:
+        # it should actually collide with the neighbouring bin.
+        uncorrected = affinity.translate(wavy_rect_outer(half_x, half_y), *spacer_centre)
+        self.assertGreater(uncorrected.intersection(bin_outline).area, 0.01)
 
     def test_edge_spacer_covers_a_non_8mm_run_on_a_4mm_snap_drawer(self):
         # 23 rows of 4 mm = 92 mm - not a multiple of 8, so BoxSpec (8 mm

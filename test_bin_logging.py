@@ -105,7 +105,7 @@ class TestBinLogging(unittest.TestCase):
             self.assertIn("| TEST |", content)
             self.assertIn("| 32 | 32 | 32 |", content)
 
-    def test_generation_defaults_to_no_inventory_and_uses_folder_mode(self):
+    def test_generation_defaults_to_inventory_on_independent_of_space(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             design_folder = Path(tmpdir) / "Designs"
             design_folder.mkdir()
@@ -115,11 +115,22 @@ class TestBinLogging(unittest.TestCase):
                 patch.object(wavefinity_web, "load_preferences", return_value={}),
                 patch.object(wavefinity_web, "generate_organizer_files", return_value={}) as generate,
             ):
+                # A brand-new normal folder keeps inventory by default now.
+                wavefinity_web.generate_payload({"design": design, "output": str(design_folder)})
+                self.assertTrue(generate.call_args.kwargs["keep_log"])
+
+                # An explicit opt-out in the folder's own metadata disables it.
+                (design_folder / ".wavefinity.json").write_text(
+                    '{"version":2,"folder_mode":"design","inventory":false}',
+                    encoding="utf-8",
+                )
                 wavefinity_web.generate_payload({"design": design, "output": str(design_folder)})
                 self.assertFalse(generate.call_args.kwargs["keep_log"])
 
+                # Space mode always keeps inventory on, whatever the request asks.
                 (design_folder / ".wavefinity.json").write_text(
-                    '{"version":2,"folder_mode":"space","space":{"name":"Tools","kind":"drawer","x":100,"y":80,"z":40}}',
+                    '{"version":2,"folder_mode":"space","inventory":true,'
+                    '"space":{"name":"Tools","kind":"drawer","x":100,"y":80,"z":40}}',
                     encoding="utf-8",
                 )
                 wavefinity_web.generate_payload({

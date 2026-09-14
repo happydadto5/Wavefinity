@@ -1,8 +1,13 @@
 """Optional Space planning layered on ordinary Wavefinity save folders.
 
-Every selected folder gets ``.wavefinity.json``. ``folder_mode=design`` is
-the default and keeps no inventory. ``folder_mode=space`` adds one physical
-drawer or box plus the existing inventory/layout file. Legacy markers remain
+Every selected folder gets ``.wavefinity.json``. Inventory and Space are
+independent: ``inventory`` (default ``true``) is whether generated bins/B4Bs
+are logged to ``<folder name> bins.md``, and ``folder_mode`` is ``design`` or
+``space`` depending on whether the folder also represents one physical
+drawer or box. ``folder_mode=space`` always implies ``inventory=true`` - a
+Space cannot operate without the inventory its layout depends on. Legacy
+markers (an old ``design`` marker with no ``inventory`` field, the historical
+``no_inventory_folders`` preference, ``.wavefinity-space.json``) remain
 readable and are migrated additively.
 """
 
@@ -66,12 +71,38 @@ def _space(raw: Any) -> dict[str, Any] | None:
     }
 
 
-def _folder_state(folder: Path, prefs: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+def _explicit_inventory(metadata: dict[str, Any] | None) -> bool | None:
+    """A metadata file's own recorded choice, or None if it never said."""
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get("inventory")
+    return value if isinstance(value, bool) else None
+
+
+def _default_inventory(folder: Path, prefs: dict[str, Any]) -> bool:
+    """New folders, and old ones that never explicitly opted out, keep inventory."""
+    if any(_same(folder, one) for one in prefs.get("no_inventory_folders") or []):
+        return False
+    return True
+
+
+def _folder_state(folder: Path, prefs: dict[str, Any]) -> tuple[str, dict[str, Any] | None, bool]:
+    """Returns ``(folder_mode, space, inventory_enabled)``. Inventory and Space
+    are independent except that Space always requires inventory on.
+
+    Precedence, most authoritative first: an explicit ``layout.space``; the
+    current ``.wavefinity.json``; the legacy ``.wavefinity-space.json``; and
+    only when none of those exist at all, ``legacy_layout_space`` - a lossy
+    reconstruction from the drawer layout alone that can only ever guess
+    "drawer" (there is no Box concept for it to recover). That must never be
+    allowed to override a genuine Box identity recorded in either metadata
+    file, so it is checked last, not first.
+    """
     inventory = load_inventory(folder)
     layout = inventory["layout"] if isinstance(inventory["layout"], dict) else {}
-    inventory_space = _space(layout.get("space")) or _space(legacy_layout_space(layout))
-    if inventory_space:
-        return "space", inventory_space
+    explicit_space = _space(layout.get("space"))
+    if explicit_space:
+        return "space", explicit_space, True
 
     metadata_path = folder / METADATA_FILE
     metadata = _json_file(metadata_path, strict=metadata_path.exists())
@@ -86,11 +117,13 @@ def _folder_state(folder: Path, prefs: dict[str, Any]) -> tuple[str, dict[str, A
                 "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
             )
         if metadata.get("folder_mode") == "design":
-            return "design", None
+            explicit = _explicit_inventory(metadata)
+            enabled = explicit if explicit is not None else _default_inventory(folder, prefs)
+            return "design", None, enabled
         if metadata.get("folder_mode") == "space":
             metadata_space = _space(metadata.get("space"))
             if metadata_space:
-                return "space", metadata_space
+                return "space", metadata_space, True
             raise FolderMetadataError(
                 "This folder's Space information is incomplete or damaged. Nothing was changed."
             )
@@ -103,19 +136,31 @@ def _folder_state(folder: Path, prefs: dict[str, Any]) -> tuple[str, dict[str, A
     if legacy is not None:
         legacy_space = _space(legacy)
         if legacy_space:
-            return "space", legacy_space
+            return "space", legacy_space, True
         if legacy.get("kind") == "none":
-            return "design", None
+            return "design", None, _default_inventory(folder, prefs)
         raise FolderMetadataError(
             "This folder contains legacy Wavefinity metadata that this version cannot safely read. The file was left unchanged."
         )
-    if any(_same(folder, one) for one in prefs.get("no_inventory_folders") or []):
-        return "design", None
-    return "design", None
+
+    # No authoritative Space identity anywhere - only now fall back to a
+    # lossy reconstruction from the drawer layout alone, which can only ever
+    # infer "drawer" (there is no historical way to recover "box" from it).
+    inferred_space = _space(legacy_layout_space(layout))
+    if inferred_space:
+        return "space", inferred_space, True
+    return "design", None, _default_inventory(folder, prefs)
 
 
-def _write_metadata(folder: Path, mode: str, space: dict[str, Any] | None = None) -> None:
-    payload: dict[str, Any] = {"version": METADATA_VERSION, "folder_mode": mode}
+def _write_metadata(
+    folder: Path, mode: str, space: dict[str, Any] | None = None, inventory: bool = True,
+) -> None:
+    payload: dict[str, Any] = {
+        "version": METADATA_VERSION,
+        "folder_mode": mode,
+        # A Space's layout depends on the inventory, so it is never optional here.
+        "inventory": True if mode == "space" else bool(inventory),
+    }
     if mode == "space" and space:
         payload["space"] = space
     target = folder / METADATA_FILE
@@ -124,8 +169,11 @@ def _write_metadata(folder: Path, mode: str, space: dict[str, Any] | None = None
     temp.replace(target)
 
 
-def _migrate_metadata(folder: Path, mode: str, space: dict[str, Any] | None = None) -> None:
-    """Only rewrite absent or positively recognized current metadata."""
+def _migrate_metadata(
+    folder: Path, mode: str, space: dict[str, Any] | None = None, inventory: bool = True,
+) -> None:
+    """Only rewrite metadata that is absent, or valid but silent about
+    inventory (a folder saved before this preference existed)."""
     target = folder / METADATA_FILE
     if target.exists():
         try:
@@ -136,26 +184,33 @@ def _migrate_metadata(folder: Path, mode: str, space: dict[str, Any] | None = No
                 return
             if metadata.get("folder_mode") == "space" and not _space(metadata.get("space")):
                 return
+            if _explicit_inventory(metadata) is not None:
+                return
         except FolderMetadataError:
             return
-    _write_metadata(folder, mode, space)
+    _write_metadata(folder, mode, space, inventory)
 
 
 def folder_mode(folder: Path, prefs: dict[str, Any]) -> str:
-    """Inventory authority for local generation."""
+    """Space status for a folder - independent of whether inventory is kept."""
     return _folder_state(folder, prefs)[0]
+
+
+def inventory_enabled(folder: Path, prefs: dict[str, Any]) -> bool:
+    """Inventory authority for local generation - independent of Space status."""
+    return _folder_state(folder, prefs)[2]
 
 
 def describe(folder: Path, prefs: dict[str, Any], *, migrate: bool = False) -> dict[str, Any]:
     """Describe a save folder without confusing it with its optional Space."""
-    mode, space = _folder_state(folder, prefs)
+    mode, space, inventory = _folder_state(folder, prefs)
     if migrate and folder.is_dir():
         try:
-            inventory = load_inventory(folder)
-            layout = inventory["layout"] if isinstance(inventory["layout"], dict) else {}
+            inv = load_inventory(folder)
+            layout = inv["layout"] if isinstance(inv["layout"], dict) else {}
             if mode == "space" and space and not _space(layout.get("space")):
                 create_space(folder, **space)
-            _migrate_metadata(folder, mode, space)
+            _migrate_metadata(folder, mode, space, inventory)
         except OSError:
             pass
     inventory_exists = bool(load_inventory(folder)["exists"])
@@ -165,9 +220,10 @@ def describe(folder: Path, prefs: dict[str, Any], *, migrate: bool = False) -> d
         "missing": not folder.is_dir(),
         "folder_mode": mode,
         "space": space,
+        "inventory": inventory,
         # Compatibility for a page loaded before the folder-mode API shipped.
         "exists": inventory_exists,
-        "no_inventory": mode == "design",
+        "no_inventory": not inventory,
     }
 
 
@@ -177,6 +233,7 @@ def _recent_entry(info: dict[str, Any]) -> dict[str, Any]:
         "folder": info["folder"],
         "name": space.get("name") or info["folder_name"],
         "folder_mode": info["folder_mode"],
+        "inventory": info["inventory"],
         "kind": space.get("kind"),
         "size": [space["x"], space["y"], space["z"]] if space else None,
         "missing": info["missing"],
@@ -244,15 +301,36 @@ def space_routes(
     def use_folder(payload):
         target = folder(payload)
         target.mkdir(parents=True, exist_ok=True)
-        mode, space = _folder_state(target, load_preferences())
-        _migrate_metadata(target, mode, space)
+        mode, space, inventory = _folder_state(target, load_preferences())
+        _migrate_metadata(target, mode, space, inventory)
+        remember(target)
+        return reply(target)
+
+    def set_inventory(payload):
+        target = folder(payload)
+        if not target.is_dir():
+            raise ValueError("that save folder could not be found")
+        prefs = load_preferences()
+        mode, space, _current = _folder_state(target, prefs)
+        inventory = bool(payload.get("inventory", True))
+        if mode == "space" and not inventory:
+            raise ValueError("Space planning needs this folder's inventory turned on.")
+        _write_metadata(target, mode, space, inventory)
+        # Keep the legacy preference in step, in case anything still reads it.
+        kept = [
+            one for one in (prefs.get("no_inventory_folders") or [])
+            if not _same(one, target)
+        ]
+        if not inventory:
+            kept.append(str(target))
+        save_preferences({"no_inventory_folders": kept})
         remember(target)
         return reply(target)
 
     def create(payload):
         target = folder(payload)
         target.mkdir(parents=True, exist_ok=True)
-        mode, existing_space = _folder_state(target, load_preferences())
+        mode, existing_space, _existing_inventory = _folder_state(target, load_preferences())
         if mode == "space":
             raise ValueError(f"this folder already holds the space {(existing_space or {}).get('name')!r}")
         result = create_space(
@@ -286,8 +364,10 @@ def space_routes(
     return {
         "/api/space/inspect": inspect,
         "/api/folder/use": use_folder,
+        "/api/folder/inventory": set_inventory,
         "/api/space/create": create,
         "/api/space/open": open_folder,
-        "/api/space/no-inventory": use_folder,
+        # Compatibility alias for the historical explicit opt-out route.
+        "/api/space/no-inventory": lambda payload: set_inventory({**payload, "inventory": False}),
         "/api/space/forget": forget,
     }

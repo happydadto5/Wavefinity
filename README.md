@@ -287,13 +287,24 @@ same-origin only, accepts JSON only, and applies a restrictive
 content-security policy so an unrelated web page cannot invoke local file
 generation.
 
-### Optional Space planning
+### Inventory, and optional Space planning
 
-The **Space** tab (beside *3D* and *2D*) is optional. A normal design folder can
-hold any mixture of bins, B4Bs, connectors and interior parts without inventory
-or physical dimensions. When the user explicitly enables Space planning, that
-folder additionally represents one real drawer or storage box. Generated bins
-then enter `<folder name> bins.md`, and the Space view lays them out.
+Every selected save folder keeps an inventory by default: generating a bin,
+a B4B, or Bin for Bins case adds it to `<folder name> bins.md`. A checkbox
+beside the save folder, *Keep inventory for this folder*, lets a user turn
+that off for a normal folder - files still save normally, but nothing new is
+logged. Turning it off never deletes an existing inventory file, and turning
+it back on resumes logging to the same file.
+
+The **Space** tab (beside *3D* and *2D*) is a separate, optional layer: when
+the user explicitly enables Space planning, the folder additionally represents
+one real drawer or storage box, and the Space view lays out its inventory in
+it. A folder can already hold a full inventory of bins before Space is ever
+turned on - enabling Space adds layout information to that same inventory
+file rather than starting a second one, so nothing already generated is lost
+or needs re-adding. Because a Space's layout depends on the inventory it
+places, enabling Space always keeps inventory on and the checkbox is disabled
+while it is active.
 
 - **The inventory file** is a Markdown table, one row per bin design, with an
   **ID**, a **Kind** (bin, B4B case, spacer, added by hand), a **Name**
@@ -368,9 +379,12 @@ then enter `<folder name> bins.md`, and the Space view lays them out.
   genuine 4 mm-wide leftover, edge or interior, is filled at its real size.
   Only a genuine manufacturability floor - is there still room for a cavity
   once both walls are subtracted? - rejects a spacer as too narrow to print.
-  A long edge is still split into whole-unit pieces no longer than *Longest
-  piece*, so the piece ends nest too. Files go to the save location and rows
-  go into
+  A long edge is still split into pieces no longer than *Longest piece*,
+  each covering its own real share of the run exactly (the last piece can be
+  a genuine leftover shorter than a full grid cell), built oversized enough
+  to satisfy the wave engine's own grid requirement and trimmed back down to
+  its true length, so the piece ends still nest correctly. Files go to the
+  save location and rows go into
   the inventory as the one Spacer kind; a folder saved before this
   distinction existed still loads its old edge-shim rows and quietly
   rewrites them as spacers the next time it saves. Spare copies of a matching
@@ -529,7 +543,8 @@ default and is never exposed to the network.
 | `POST /api/connector` | Generate a connector. |
 | `POST /api/sampler` | Generate the fit sampler. |
 | `POST /api/preferences` | Persist sticky per-machine settings (currently the output folder) to `wavefinity_prefs.json`. |
-| `POST /api/folder/use` | Select or restore a local design folder and its optional Space metadata. |
+| `POST /api/folder/use` | Select or restore a local design folder, its inventory setting and optional Space metadata. |
+| `POST /api/folder/inventory` | Explicitly turn a local folder's inventory logging on or off. |
 | `POST /api/drawer/load`, `/api/drawer/save` | Read and update inventory/layout from a local path or browser-supplied text. |
 | `POST /api/space/create-text` | Let hosted browsers initialize Space inventory without giving the server a client path. |
 
@@ -547,12 +562,19 @@ temporary folders and never expose the server filesystem; the browser owns its
 chosen save folder and supplies inventory text to the same Python inventory
 engine used locally.
 
-**Save folders and Spaces are separate ideas.** Every chosen folder gets an
-additive `.wavefinity.json` marker. `folder_mode: "design"` is the normal
-default and keeps no inventory. `folder_mode: "space"` adds one physical drawer
-or storage box, inventory, and layout planning without restricting any design
-type. Legacy inventory, `.wavefinity-space.json`, `kind: "none"`, and
-`no_inventory_folders` markers remain migration inputs and are not deleted.
+**Save folders, inventory and Spaces are three separate ideas.** Every chosen
+folder gets an additive `.wavefinity.json` marker holding two independent
+settings: `inventory` (default `true`) is whether generated bins/B4Bs are
+logged, and `folder_mode` (`"design"` or `"space"`) is whether the folder also
+represents one physical drawer or storage box. `folder_mode: "space"` always
+implies `inventory: true` - a Space's layout depends on the inventory it
+places. A normal `"design"` folder can have inventory on (the default for a
+new folder) or explicitly off (`/api/folder/inventory`, mirrored by the
+frontend's *Keep inventory for this folder* checkbox). Legacy inventory,
+`.wavefinity-space.json`, `kind: "none"`, and the historical
+`no_inventory_folders` preference remain migration inputs - read once to
+decide a folder's first `inventory` value, then superseded by the explicit
+field - and are not deleted.
 
 **Known limitations:** no standalone browser/DOM test suite yet — Python API
 contracts and JavaScript syntax are covered by `test_wavefinity_web.py` and

@@ -66,7 +66,7 @@ SP.applyFolder = async (info, { reset = true } = {}) => {
   if (reset) await SP.resetDrawer();
   state.output = info.folder;
   state.folderSelected = true;
-  setFolderState(info.folder_mode, info.space);
+  setFolderState(info.folder_mode, info.space, info.inventory);
   syncForm();
 };
 
@@ -100,10 +100,11 @@ SP.classifyMetadata = record => {
   const current = record.data;
   if (Number(current.version) > FOLDER_METADATA_VERSION) return { status: "unsupported" };
   if (current.version !== FOLDER_METADATA_VERSION) return { status: "invalid" };
-  if (current.folder_mode === "design") return { status: "design" };
+  const explicitInventory = typeof current.inventory === "boolean" ? current.inventory : null;
+  if (current.folder_mode === "design") return { status: "design", inventory: explicitInventory };
   if (current.folder_mode === "space") {
     const space = SP.validSpace(current.space);
-    return space ? { status: "space", space } : { status: "invalid-space" };
+    return space ? { status: "space", space, inventory: true } : { status: "invalid-space" };
   }
   return { status: "invalid" };
 };
@@ -125,16 +126,17 @@ SP.metadataError = status => {
   return new Error("This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged.");
 };
 
-SP.writeMetadata = async (handle, mode, space = null) => {
+SP.writeMetadata = async (handle, mode, space = null, inventory = true) => {
   if (!handle) return;
-  const metadata = { version: 2, folder_mode: mode };
+  // A Space's layout depends on the inventory, so it is never optional here.
+  const metadata = { version: 2, folder_mode: mode, inventory: mode === "space" ? true : Boolean(inventory) };
   if (mode === "space" && space) metadata.space = space;
   await WFFileSystem.writeText(handle, FOLDER_METADATA, JSON.stringify(metadata, null, 2));
 };
 
 SP.inventoryRequest = async (path, extra = {}, { write = true } = {}) => {
   const folder = state.browserFolder;
-  if (!folder?.handle) throw new Error("Space planning needs folder access so Wavefinity can keep its inventory with your designs.");
+  if (!folder?.handle) throw new Error("Keeping an inventory needs folder access so Wavefinity can save it with your designs.");
   const inventoryText = await WFFileSystem.readText(folder.handle, SP.inventoryFilename()) || "";
   const data = await api(path, {
     inventory_text: inventoryText,
@@ -162,18 +164,26 @@ SP.inspectHosted = async folder => {
   const legacyState = SP.classifyLegacyMetadata(legacy);
   const inventoryText = await WFFileSystem.readText(folder.handle, `${folder.name} bins.md`) || "";
   let inventorySpace = null;
+  let inventorySpaceInferred = false;
   if (inventoryText) {
     const data = await api("/api/drawer/load", {
       inventory_text: inventoryText,
       inventory_title: folder.name,
     });
     inventorySpace = SP.validSpace(data.layout?.space);
+    inventorySpaceInferred = Boolean(data.space_inferred);
   }
+  // An explicit layout.space is authoritative. One the server had to infer
+  // from the drawer layout alone (no layout.space at all) can only ever
+  // guess "drawer" - it must not outrank real Box metadata below, so it is
+  // only considered as a last resort further down.
+  const genuineInventorySpace = inventorySpace && !inventorySpaceInferred;
 
   let mode;
   let space = null;
+  let inventory = true;
   let shouldWriteMetadata = false;
-  if (inventorySpace) {
+  if (genuineInventorySpace) {
     mode = "space";
     space = inventorySpace;
     shouldWriteMetadata = ["missing", "design", "space"].includes(currentState.status);
@@ -182,6 +192,9 @@ SP.inspectHosted = async folder => {
     space = currentState.space;
   } else if (currentState.status === "design") {
     mode = "design";
+    // A folder saved before this preference existed keeps inventory on by default.
+    inventory = currentState.inventory === null ? true : currentState.inventory;
+    shouldWriteMetadata = currentState.inventory === null;
   } else if (!["missing"].includes(currentState.status)) {
     throw SP.metadataError(currentState.status);
   } else if (legacyState.status === "space") {
@@ -193,12 +206,18 @@ SP.inspectHosted = async folder => {
     shouldWriteMetadata = true;
   } else if (legacyState.status !== "missing") {
     throw SP.metadataError(legacyState.status);
+  } else if (inventorySpace) {
+    // No authoritative metadata anywhere: fall back to the layout-only
+    // inference (always "drawer" - there is no Box concept for it to recover).
+    mode = "space";
+    space = inventorySpace;
+    shouldWriteMetadata = true;
   } else {
     mode = "design";
     shouldWriteMetadata = true;
   }
 
-  if (mode === "space" && space && !inventorySpace) {
+  if (mode === "space" && space && !genuineInventorySpace) {
     const result = await api("/api/space/create-text", {
       inventory_text: inventoryText,
       inventory_title: space.name || folder.name,
@@ -206,12 +225,13 @@ SP.inspectHosted = async folder => {
     });
     await WFFileSystem.writeText(folder.handle, `${folder.name} bins.md`, result.inventory_text);
   }
-  if (shouldWriteMetadata) await SP.writeMetadata(folder.handle, mode, space);
+  if (shouldWriteMetadata) await SP.writeMetadata(folder.handle, mode, space, inventory);
   return {
     folder: folder.name,
     folder_name: folder.name,
     folder_mode: mode,
     space,
+    inventory: mode === "space" ? true : inventory,
     missing: false,
   };
 };
@@ -266,6 +286,20 @@ SP.afterPick = async folder => {
 SP.chooseFolder = () => SP.run(async () => {
   const folder = await SP.pickFolder();
   if (folder) await SP.afterPick(folder);
+});
+
+// The opt-out checkbox beside the save folder. Space always keeps inventory
+// on, so the control is disabled while a Space is active (see setFolderState).
+SP.setInventory = enabled => SP.run(async () => {
+  if (!SP.hasFolder() || state.folderMode === "space") return;
+  if (state.runtime.hosted) {
+    await SP.writeMetadata(state.browserFolder?.handle, "design", null, enabled);
+  } else {
+    await api("/api/folder/inventory", { output: state.output, inventory: enabled });
+  }
+  state.inventoryEnabled = enabled;
+  state.keepLog = enabled;
+  toast(enabled ? "Keeping inventory for this folder." : "Inventory turned off for this folder.");
 });
 
 SP.continueSpaceSetup = info => {
@@ -445,7 +479,7 @@ SP.create = async () => {
     const space = result.layout.space;
     await SP.writeMetadata(folder.handle, "space", space);
     await WFFileSystem.save("active", { handle: folder.handle });
-    info = { folder: folder.name, folder_name: folder.name, folder_mode: "space", space };
+    info = { folder: folder.name, folder_name: folder.name, folder_mode: "space", space, inventory: true };
   } else {
     const data = await api("/api/space/create", { output: state.output, name, kind, x, y, z });
     SP.recent = data.recent || [];
@@ -535,6 +569,7 @@ SP.wire = () => {
     SP.cancelResumeAutoContinue();
     SP.chooseFolder();
   });
+  $("#folder-inventory-toggle")?.addEventListener("change", event => SP.setInventory(event.target.checked));
   $("#space-folder-change").addEventListener("click", SP.changeFolderThenSetup);
   $("#space-back").addEventListener("click", SP.offerSpacePlanning);
   $("#welcome-recent").addEventListener("click", event => {

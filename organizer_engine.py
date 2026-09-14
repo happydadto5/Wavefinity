@@ -773,6 +773,8 @@ def _wall_points(
     tangent_x: float,
     tangent_y: float,
     points_per_cycle: float | None = None,
+    phase_x: float = 0.0,
+    phase_y: float = 0.0,
 ) -> list[tuple[float, float]]:
     """Counter-clockwise outline: four wavy walls joined by corner chords.
 
@@ -783,6 +785,18 @@ def _wall_points(
     long wall and a short one on the same box come out equally smooth - the
     preview uses this to get a coarse ring it can draw quickly without a
     fixed point budget starving whichever pair of walls is longer.
+
+    ``phase_x``/``phase_y`` shift the wave sampled on the front/back walls
+    (which run along X) and the left/right walls (which run along Y)
+    respectively.  A normal, validly grid-sized ``BoxSpec`` always leaves
+    these at 0: its own centre is guaranteed to land on the global 4 mm wave
+    lattice (``GRID_PITCH``/``BASE_UNIT`` are chosen exactly so this holds),
+    so evaluating the wave in this shape's own local frame already equals
+    the shared global wave. A caller whose real placement centre will NOT be
+    on that lattice - a spacer sized to a genuine, non-8-mm-multiple free
+    region - passes the centre's own offset from the lattice here instead,
+    so the wave this shape shows once actually placed still matches its
+    neighbours' along every seam (see ``organizer_drawer.spacer_frame``).
     """
     if points_per_cycle is None:
         count_x = _sample_count(2.0 * tangent_x)
@@ -793,10 +807,10 @@ def _wall_points(
     xs = np.linspace(-tangent_x, tangent_x, count_x)
     ys = np.linspace(-tangent_y, tangent_y, count_y)
     points: list[tuple[float, float]] = []
-    points += [(float(s), -half_y + wave_value(float(s))) for s in xs]
-    points += [(half_x + wave_value(float(s)), float(s)) for s in ys]
-    points += [(float(s), half_y + wave_value(float(s))) for s in xs[::-1]]
-    points += [(-half_x + wave_value(float(s)), float(s)) for s in ys[::-1]]
+    points += [(float(s), -half_y + wave_value(float(s) + phase_x)) for s in xs]
+    points += [(half_x + wave_value(float(s) + phase_y), float(s)) for s in ys]
+    points += [(float(s), half_y + wave_value(float(s) + phase_x)) for s in xs[::-1]]
+    points += [(-half_x + wave_value(float(s) + phase_y), float(s)) for s in ys[::-1]]
     return points
 
 
@@ -839,18 +853,25 @@ def preview_rings(
     return outer, cavity
 
 
-def wavy_rect_outer(half_x: float, half_y: float, corner_fillet: float = DEFAULT_CORNER_FILLET) -> Polygon:
+def wavy_rect_outer(
+    half_x: float, half_y: float, corner_fillet: float = DEFAULT_CORNER_FILLET,
+    phase_x: float = 0.0, phase_y: float = 0.0,
+) -> Polygon:
     """The same wavy outline ``wavy_outer_polygon`` builds, from raw half-
     extents instead of a ``BoxSpec`` - so a caller whose x/y is not the 8 mm
     grid size a normal bin's ``BoxSpec`` requires (a spacer filler) can still
-    build the identical, correctly-phased wave. ``wave_value`` depends only
-    on position relative to this shape's own centre (see its docstring), so
-    the result mates with a neighbour exactly as a validated box's would,
-    provided this shape ends up centred on a valid grid placement - true for
-    any grid cell, whatever it measures.
+    build the identical, correctly-phased wave.
+
+    A normal ``BoxSpec``'s own centre always lands on the global wave
+    lattice, so its local wave already equals the shared global one and
+    ``phase_x``/``phase_y`` stay 0. A shape whose real placement centre will
+    NOT land on that lattice - a spacer sized to a genuine non-8-mm-multiple
+    free region - must pass its centre's own offset from the lattice (see
+    ``_wall_points``) so the wave still matches a neighbour's along every
+    seam once it is actually placed.
     """
     tx, ty = half_x - CORNER_INSET, half_y - CORNER_INSET
-    polygon = Polygon(_wall_points(half_x, half_y, tx, ty))
+    polygon = Polygon(_wall_points(half_x, half_y, tx, ty, phase_x=phase_x, phase_y=phase_y))
     if not polygon.is_valid:
         polygon = polygon.buffer(0)
     if not isinstance(polygon, Polygon) or not polygon.is_valid:
@@ -865,12 +886,14 @@ def wavy_outer_polygon(spec: BoxSpec) -> Polygon:
 def wavy_rect_cavity(
     half_x: float, half_y: float, wall_depth: float,
     corner_fillet: float = DEFAULT_CORNER_FILLET, wall: float = DEFAULT_WALL,
+    phase_x: float = 0.0, phase_y: float = 0.0,
 ) -> Polygon:
     """The same interior outline ``wavy_cavity_polygon`` builds - the outer
     walls shifted straight in by ``wall_depth`` - from raw half-extents. See
-    ``wavy_rect_outer`` for why this needs no 8 mm-grid-sized ``BoxSpec``."""
+    ``wavy_rect_outer`` for why this needs no 8 mm-grid-sized ``BoxSpec``,
+    and for what ``phase_x``/``phase_y`` correct for."""
     tx, ty = half_x - CORNER_INSET, half_y - CORNER_INSET
-    polygon = Polygon(_wall_points(half_x - wall_depth, half_y - wall_depth, tx, ty))
+    polygon = Polygon(_wall_points(half_x - wall_depth, half_y - wall_depth, tx, ty, phase_x=phase_x, phase_y=phase_y))
     if not polygon.is_valid:
         polygon = polygon.buffer(0)
     if not isinstance(polygon, Polygon) or not polygon.is_valid:
@@ -980,25 +1003,32 @@ def _lock_profile(
 
 def _rect_wall_lock_paths(
     half_x: float, half_y: float, wall_depth: float,
+    phase_x: float = 0.0, phase_y: float = 0.0,
 ) -> list[tuple[list[tuple[float, float]], tuple[float, float]]]:
     """Bump centre-lines on the interior face of all four walls, plus the
     inward direction each bump grows in - from raw half-extents. See
-    ``wavy_rect_outer`` for why this needs no 8 mm-grid-sized ``BoxSpec``."""
+    ``wavy_rect_outer`` for why this needs no 8 mm-grid-sized ``BoxSpec``,
+    and for what ``phase_x``/``phase_y`` correct for: the bump lattice sits
+    on the same wave extrema the wall surface does, so it needs the same
+    shift, applied to both the wave itself and the lattice positions it
+    hangs bumps from.
+    """
     walls = (
-        ("y", half_y, half_x - wall_depth, (-1.0, 0.0)),   # +X wall
-        ("y", half_y, -(half_x - wall_depth), (1.0, 0.0)),  # -X wall
-        ("x", half_x, half_y - wall_depth, (0.0, -1.0)),    # +Y wall
-        ("x", half_x, -(half_y - wall_depth), (0.0, 1.0)),  # -Y wall
+        ("y", half_y, half_x - wall_depth, (-1.0, 0.0), phase_y),   # +X wall
+        ("y", half_y, -(half_x - wall_depth), (1.0, 0.0), phase_y),  # -X wall
+        ("x", half_x, half_y - wall_depth, (0.0, -1.0), phase_x),    # +Y wall
+        ("x", half_x, -(half_y - wall_depth), (0.0, 1.0), phase_x),  # -Y wall
     )
     paths: list[tuple[list[tuple[float, float]], tuple[float, float]]] = []
-    for run_axis, wave_half, face, inward in walls:
-        for centre in lock_positions(wave_half - CORNER_INSET - LOCK_CORNER_CLEAR):
+    for run_axis, wave_half, face, inward, phase in walls:
+        for base_centre in lock_positions(wave_half - CORNER_INSET - LOCK_CORNER_CLEAR):
+            centre = base_centre - phase
             lo, hi = centre - LOCK_RUN / 2.0, centre + LOCK_RUN / 2.0
             ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
             if run_axis == "y":
-                path = [(face + wave_value(float(s)), float(s)) for s in ss]
+                path = [(face + wave_value(float(s) + phase), float(s)) for s in ss]
             else:
-                path = [(float(s), face + wave_value(float(s))) for s in ss]
+                path = [(float(s), face + wave_value(float(s) + phase)) for s in ss]
             paths.append((path, inward))
     return paths
 
@@ -1009,15 +1039,19 @@ def _wall_lock_paths(
     return _rect_wall_lock_paths(spec.half_x, spec.half_y, spec.wall_depth)
 
 
-def make_wall_lock_bumps_raw(half_x: float, half_y: float, wall_depth: float, z: float) -> list[trimesh.Trimesh]:
+def make_wall_lock_bumps_raw(
+    half_x: float, half_y: float, wall_depth: float, z: float,
+    phase_x: float = 0.0, phase_y: float = 0.0,
+) -> list[trimesh.Trimesh]:
     """Small chamfered bumps standing proud of each wall's interior face -
     from raw half-extents. See ``wavy_rect_outer`` for why this needs no
-    8 mm-grid-sized ``BoxSpec``."""
+    8 mm-grid-sized ``BoxSpec``, and for what ``phase_x``/``phase_y`` correct
+    for."""
     embed = min(LOCK_EMBED, wall_depth - LOCK_SAFE_SKIN)
     profile = _lock_profile(LOCK_PROTRUSION, embed=embed)
     return [
         translated(_sweep_profile(path, inward, profile), (0.0, 0.0, z))
-        for path, inward in _rect_wall_lock_paths(half_x, half_y, wall_depth)
+        for path, inward in _rect_wall_lock_paths(half_x, half_y, wall_depth, phase_x=phase_x, phase_y=phase_y)
     ]
 
 

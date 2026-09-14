@@ -59,6 +59,9 @@ const state = {
   folderSelected: false,
   folderMode: "design",
   activeSpace: null,
+  // Whether this folder logs generated bins/B4Bs to its inventory file - the
+  // default for any folder, independent of whether Space planning is on.
+  inventoryEnabled: true,
   keepLog: false,
   connector: {},
   layoutDrag: null,
@@ -108,10 +111,12 @@ let previewSlowTimer = null;
 
 const VERSION_POLL_MS = 5000;
 
-function setFolderState(mode = "design", space = null) {
+function setFolderState(mode = "design", space = null, inventory = true) {
   state.folderMode = mode === "space" ? "space" : "design";
   state.activeSpace = state.folderMode === "space" ? (space || null) : null;
-  state.keepLog = state.folderMode === "space";
+  // Space always keeps inventory - it is what the layout is built from.
+  state.inventoryEnabled = state.folderMode === "space" ? true : Boolean(inventory);
+  state.keepLog = state.inventoryEnabled;
   const indicator = $("#active-space-indicator");
   if (indicator) {
     const kind = state.activeSpace?.kind === "box" ? "Box" : "Drawer";
@@ -119,6 +124,11 @@ function setFolderState(mode = "design", space = null) {
       ? `Space: ${state.activeSpace.name || "Unnamed"} · ${kind}`
       : "";
     indicator.hidden = !state.activeSpace;
+  }
+  const toggle = $("#folder-inventory-toggle");
+  if (toggle) {
+    toggle.checked = state.inventoryEnabled;
+    toggle.disabled = !state.folderSelected || state.folderMode === "space";
   }
 }
 
@@ -7442,7 +7452,7 @@ async function generateParts(target) {
       const binResult = await api("/api/generate", payload);
       saveOutput = binResult.output || saveOutput;
       const binFiles = await saveGeneratedFiles(binResult);
-      if (binResult.inventory_bin && state.folderMode === "space" && typeof SP !== "undefined") {
+      if (binResult.inventory_bin && state.inventoryEnabled && typeof SP !== "undefined") {
         await SP.addInventoryBin(binResult.inventory_bin);
       }
       allFiles.push(...binFiles);
