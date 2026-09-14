@@ -93,8 +93,10 @@ from organizer_inserts import (
     feature_definitions,
     feature_min_footprint,
     fitted_nest_feature,
+    nest_access_preview,
     nest_contour_polygon,
     nest_smoothed_contour,
+    resolve_nest_settings,
     layout_from_dict,
     layout_to_dict,
     layout_zone,
@@ -110,7 +112,7 @@ from organizer_inserts import (
     snapped_zone,
     text_of,
 )
-from photo_nest import photo_outline_from_data
+from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from organizer_drawer import drawer_routes
 from organizer_inventory import create_space_text
 from organizer_spaces import inventory_enabled, space_routes
@@ -281,20 +283,40 @@ def _feature_from_json(raw: dict[str, Any], mode: str) -> Feature:
     return layout.features[0]
 
 
+NEST_TOOL_TOP_CLEARANCE = 1.0  # mm of clear air above the tool's own top
+
+
+def _nest_effective_z_requirement(
+    box: BoxSpec, mode: str, base_z: float, resolved: dict[str, Any],
+) -> float:
+    """The smallest interior work-box Z this Nest can legally use: enough for
+    the printable structural minimum, 1 mm of air above the tool's own top,
+    and whatever the resolved holder geometry itself rises to."""
+    tool_thickness = float(resolved["tool_thickness"])
+    if str(resolved["holder_style"]) == "recessed":
+        geometry_top = base_z + float(resolved["cavity_depth"])
+    else:
+        push_depth = (
+            float(resolved["push_depth"]) if str(resolved["lift_assist"]) == "push_out" else 0.0
+        )
+        geometry_top = base_z + tool_thickness + push_depth
+    tool_top_requirement = base_z + tool_thickness + NEST_TOOL_TOP_CLEARANCE
+    structural_minimum = base_z + MIN_HEIGHT_ABOVE_BASE
+    return max(structural_minimum, tool_top_requirement, geometry_top)
+
+
 def _fit_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
-    """Grow an 8 mm-grid bin until its floor contains the Photo Nest.
+    """Legacy grow-only sizing, for a design saved before Auto-size existed.
 
     The current dimensions are floors: uploading or editing a smaller outline
     must not undo a larger bin the user deliberately chose.
     """
+    resolved = resolve_nest_settings(box, one, base_height(box, mode))
     required_x = 2.0 * max(abs(one.zone.x0), abs(one.zone.x1))
     required_y = 2.0 * max(abs(one.zone.y0), abs(one.zone.y1))
     x = max(box.x, BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
     y = max(box.y, BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
-    depth = float(one.options.get("depth", 8.0))
-    assist = str(one.options.get("lift_assist", "finger_grasp"))
-    push_depth = float(one.options.get("push_depth", 4.0)) if assist == "push_out" else 0.0
-    z = max(box.z, base_height(box, mode) + depth + push_depth)
+    z = max(box.z, _nest_effective_z_requirement(box, mode, base_height(box, mode), resolved))
     for _attempt in range(200):
         trial = replace(box, x=float(x), y=float(y), z=float(z))
         bounds = layout_zone(trial, mode)
@@ -309,37 +331,112 @@ def _fit_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
     raise ValueError("the photographed outline is too large for a printable bin")
 
 
+def _auto_size_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
+    """New Auto-size: the smallest legal bin that holds the fitted, centred
+    Nest - X and Y may grow or shrink, then Z is set to exactly what the
+    resolved holder geometry needs."""
+    resolved = resolve_nest_settings(box, one, base_height(box, mode))
+    required_x = 2.0 * max(abs(one.zone.x0), abs(one.zone.x1))
+    required_y = 2.0 * max(abs(one.zone.y0), abs(one.zone.y1))
+    x = max(BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
+    y = max(BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
+    z = _nest_effective_z_requirement(box, mode, base_height(box, mode), resolved)
+    trial: BoxSpec | None = None
+    for _attempt in range(400):
+        trial = replace(box, x=float(x), y=float(y), z=float(z))
+        bounds = layout_zone(trial, mode)
+        grow_x = one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
+        grow_y = one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6
+        if not grow_x and not grow_y:
+            break
+        if grow_x:
+            x += BASE_UNIT
+        if grow_y:
+            y += BASE_UNIT
+    else:
+        raise ValueError("the photographed outline is too large for a printable bin")
+    for axis in ("x", "y"):
+        while True:
+            try:
+                candidate = replace(trial, **{axis: getattr(trial, axis) - BASE_UNIT})
+            except ValueError:
+                break
+            bounds = layout_zone(candidate, mode)
+            if (one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
+                    or one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6):
+                break
+            trial = candidate
+    return trial
+
+
+def _sized_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> tuple[BoxSpec, Feature]:
+    """Apply this Nest's sizing policy: new Auto grows, shrinks and recentres
+    around the fitted outline; Manual never resizes, and reports a plain fit
+    error instead; legacy (no stored preference) only ever grows, unchanged
+    from before Auto-size existed."""
+    resolved = resolve_nest_settings(box, one, base_height(box, mode))
+    auto_size = resolved.get("auto_size")
+    if auto_size is True:
+        one = fitted_nest_feature(one, (0.0, 0.0))
+        return _auto_size_photo_nest_box(box, one, mode), one
+    if auto_size is False:
+        one = fitted_nest_feature(one, one.zone.centre)
+        base_z = base_height(box, mode)
+        bounds = layout_zone(box, mode)
+        z_required = _nest_effective_z_requirement(box, mode, base_z, resolved)
+        if (one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
+                or one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6
+                or z_required > box.z + 1e-6):
+            raise ValueError(
+                "This Photo Nest no longer fits its bin. Use “Fit bin to tool” "
+                "below, or turn Automatic bin sizing back on."
+            )
+        return box, one
+    one = fitted_nest_feature(one, one.zone.centre)
+    return _fit_photo_nest_box(box, one, mode), one
+
+
 def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Extract one contour and replace the design interior with its new bin."""
     request_box, layout, label, part_name, label_location, scoop = design_from_dict(
         payload["design"], validate_layout=False
     )
     box = _interior_work_box(request_box)
+    corners_raw = payload.get("paper_corners")
+    corners = (
+        [[float(v) for v in point] for point in corners_raw]
+        if isinstance(corners_raw, list) and len(corners_raw) == 4 else None
+    )
     outline = photo_outline_from_data(
         str(payload.get("image", "")), str(payload.get("mime_type", "")),
         str(payload.get("paper_size", "letter")),
+        float(payload.get("sensitivity", 50.0)), float(payload.get("cleanup", 50.0)),
+        corners,
     )
     supplied = dict(payload.get("options", {}))
-    # Wall thickness, object thickness and retrieval choices are stored with
-    # the outline so they survive later moves, turns and resizing.
+    # Tool thickness and holder choices are stored with the outline so they
+    # survive later moves, turns and resizing. A brand-new scan always
+    # defaults to Recessed Cavity, automatic 60% cavity depth, automatic
+    # finger access and automatic bin sizing (spec section 2).
     options = {
         "clearance": float(supplied.get("clearance", 0.6)),
-        "depth": float(supplied.get("depth", 8.0)),
+        "tool_thickness": float(supplied.get("tool_thickness", supplied.get("depth", 8.0))),
         "rim": 3.0,
         "smoothing": float(supplied.get("smoothing", 0.0)),
-        "lift_assist": str(supplied.get("lift_assist", "finger_grasp")),
+        "holder_style": str(supplied.get("holder_style", "recessed")),
+        "cavity_depth_mode": "auto",
+        "auto_size": True,
+        "lift_assist": str(supplied.get("lift_assist", "auto")),
         "finger_position": str(supplied.get("finger_position", "sides")),
-        "finger_width": float(supplied.get("finger_width", 25.0)),
         "push_position": str(supplied.get("push_position", "right")),
         "push_area": float(supplied.get("push_area", 30.0)),
         "push_depth": float(supplied.get("push_depth", 4.0)),
     }
     starter = Feature(
         "nest", Zone(-0.5, -0.5, 0.5, 0.5), options=options,
-        contour=outline.contour,
+        contour=outline.contour, source_contour=outline.contour,
     )
-    one = fitted_nest_feature(starter, (0.0, 0.0))
-    grown = _fit_photo_nest_box(box, one, layout.mode)
+    grown, one = _sized_photo_nest_box(box, starter, layout.mode)
     request_box = replace(
         request_box, x=grown.x, y=grown.y,
         z=request_box.z + (grown.z - box.z),
@@ -359,7 +456,30 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         "selected": 0,
         "outline": {"width": outline.width, "depth": outline.depth},
+        "access": nest_access_preview(one),
     }
+    if outline.reference_image and outline.reference_bounds:
+        result["reference"] = {
+            "image": outline.reference_image,
+            "bounds": list(outline.reference_bounds),
+        }
+    if outline.rectified_image:
+        # Kept only in the browser's own session state for later retracing -
+        # never written into the saved design.
+        result["rectified_image"] = outline.rectified_image
+    return result
+
+
+def nest_retrace_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Re-tune an already-rectified reference sheet without repeating paper
+    detection or perspective correction. Purely informational: the caller
+    decides whether/when to accept the candidate outline it returns."""
+    outline = retrace_outline_from_rectified(
+        str(payload.get("rectified_image", "")), str(payload.get("mime_type", "image/jpeg")),
+        float(payload.get("sensitivity", 50.0)), float(payload.get("cleanup", 50.0)),
+    )
+    result = {"outline": {"width": outline.width, "depth": outline.depth},
+              "contour": [list(point) for point in outline.contour]}
     if outline.reference_image and outline.reference_bounds:
         result["reference"] = {
             "image": outline.reference_image,
@@ -1002,6 +1122,8 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "feature_outlines": [],
         "nest_soft_contours": [],
         "draft_soft_contour": None,
+        "nest_access": [],
+        "draft_nest_access": None,
     }
 
 
@@ -1093,6 +1215,16 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ],
         "draft_soft_contour": (
             [list(point) for point in nest_smoothed_contour(draft)]
+            if draft is not None and draft.kind == "nest" and draft.contour else None
+        ),
+        # Informational-only 2D indicators for the resolved finger-access plan
+        # - a notch location on Raised Wall, a scoop footprint on Recessed.
+        "nest_access": [
+            (nest_access_preview(one) if one.kind == "nest" and one.contour else None)
+            for one in layout.features
+        ],
+        "draft_nest_access": (
+            nest_access_preview(draft)
             if draft is not None and draft.kind == "nest" and draft.contour else None
         ),
     }
@@ -1193,7 +1325,11 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         one = placed[-1]
     elif one.kind == "text":
         one = auto_grow_text_feature(one, box, layout.mode)
-    shown = resolved_options(box, one, base_height(box, layout.mode))
+    shown = (
+        resolve_nest_settings(box, one, base_height(box, layout.mode))
+        if one.kind == "nest" else
+        resolved_options(box, one, base_height(box, layout.mode))
+    )
     with GEOMETRY_LOCK:
         solids = build_features(
             box, [one], base_height(box, layout.mode),
@@ -1256,10 +1392,10 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if one.kind == "nest":
         if not one.contour:
             raise ValueError("upload a part photo before adding a Snug Holder")
-        one = fitted_nest_feature(one, one.zone.centre)
-        grown = _fit_photo_nest_box(box, one, layout.mode)
+        grown, one = _sized_photo_nest_box(box, one, layout.mode)
         # x/y map straight across; z is an effective-body figure, so only its
-        # growth (not its raw value) is carried back into the module height.
+        # growth or shrink (not its raw value) is carried back into the
+        # module height.
         request_box = replace(
             request_box, x=grown.x, y=grown.y,
             z=request_box.z + (grown.z - box.z),
@@ -1792,6 +1928,7 @@ POST_ROUTES = {
     "/api/feature/apply": apply_feature_payload,
     "/api/feature/delete": delete_feature_payload,
     "/api/nest/photo": photo_nest_payload,
+    "/api/nest/retrace": nest_retrace_payload,
     "/api/layout/mode": mode_payload,
     "/api/layout/expand": expand_layout_payload,
     "/api/generate": generate_payload,

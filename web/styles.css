@@ -68,6 +68,20 @@ button { color: inherit; }
 .photo-upload details { grid-column: 1 / -1; }
 .photo-upload summary { font-size: 11px; font-weight: 650; color: var(--teal-dark); cursor: pointer; }
 .photo-measurement { grid-column: 1 / -1; margin: 0; color: var(--teal-dark); font-size: 11px; font-weight: 650; }
+.photo-upload .field-hint { grid-column: 1 / -1; margin: -4px 0 0; color: var(--muted); font-size: 10px; font-weight: 500; }
+.photo-upload .field-warning { grid-column: 1 / -1; margin: 0; color: #a3453e; font-size: 11px; font-weight: 650; }
+.photo-upload > label { grid-column: 1 / -1; }
+.photo-upload .nest-cavity-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.photo-upload fieldset.wide { grid-column: 1 / -1; border: 0; padding: 0; margin: 0; }
+.photo-upload fieldset.wide legend { font-size: 11px; font-weight: 650; color: var(--teal-dark); padding: 0; margin-bottom: 3px; }
+.nest-corner-editor { grid-column: 1 / -1; position: relative; max-width: 100%; line-height: 0; touch-action: none; }
+.nest-corner-editor img { max-width: 100%; border-radius: 6px; display: block; }
+.nest-corner-handle {
+  position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  border-radius: 50%; background: rgba(224, 122, 57, .85); border: 2px solid white;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35); cursor: grab; touch-action: none;
+}
+.nest-corner-handle:active { cursor: grabbing; }
 
 .app-shell { display: grid; grid-template-columns: minmax(420px, var(--sidebar-width)) 8px minmax(420px, 1fr); height: calc(100vh - 79px); }
 .app-shell.sidebar-collapsed { grid-template-columns: 0 0 minmax(420px, 1fr); }

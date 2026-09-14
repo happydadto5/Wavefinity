@@ -103,6 +103,19 @@ const state = {
   // Rectified upload used only as an aligned tracing reference in the 2D view.
   // It deliberately stays out of saved design files.
   nestPhoto: null,
+  // Scan-tuning session state, kept only in the browser - never saved into
+  // the design. The original upload lets Tune scanned outline and paper-
+  // corner recovery work without asking the user to choose the file again.
+  nestOriginalImage: null,   // { dataUrl, mimeType }
+  nestRectifiedImage: null,  // { dataUrl, mimeType } - full rectified sheet, for retracing
+  nestSensitivity: 50,
+  nestCleanup: 50,
+  nestPhotoOpacity: 45,
+  nestCandidateContour: null,   // a not-yet-accepted retrace, drawn dashed
+  nestTuneStatus: "",
+  nestRetraceRequest: 0,
+  nestPaperCorners: null,       // four draggable handles, image-pixel space, for recovery
+  nestOutlineTool: "select",    // "select" | "add-point" | "delete-point"
   nudgeFeedback: null,
 };
 
@@ -1330,12 +1343,17 @@ function snapToUnit(value, unit) {
 
 function updateDesignFromForm() {
   const design = state.design;
+  const prevBoxX = design.box.x;
+  const prevBoxY = design.box.y;
   const newBoxX = normalizeBinDimension("x", $("#x-size").value, design.box.x);
   const newBoxY = normalizeBinDimension("y", $("#y-size").value, design.box.y);
   design.box.x = newBoxX;
   design.box.y = newBoxY;
   const prevBoxZ = design.box.z;
   design.box.z = normalizeBinDimension("z", $("#z").value, design.box.z);
+  if (design.box.x !== prevBoxX || design.box.y !== prevBoxY || design.box.z !== prevBoxZ) {
+    turnOffNestAutoSizeForManualEdit();
+  }
   checkBinSizeChange();
   if (design.box.z !== prevBoxZ) {
     const setAutoConnectorHeight = selector => {
@@ -2371,6 +2389,167 @@ function dividerScoopDefaultDepth() {
   return scoop?.fields?.find(field => field.key === "depth")?.default ?? "";
 }
 
+// Photo Nest's editor: Tool, Holder, Finger access, Raised Wall advanced,
+// Fit, Bin and Outline (spec section 45). Broken out of renderDraftFields
+// only because it is long, not because it is reused elsewhere.
+function renderNestFields(one) {
+  const opt = one.options || {};
+  const resolved = state.draftResolvedOptions || {};
+  const val = (key, fallback) => (opt[key] !== undefined && opt[key] !== null ? opt[key] : (resolved[key] ?? fallback));
+  const selected = (value, actual) => value === actual ? "selected" : "";
+  const holderStyle = String(val("holder_style", "raised_wall"));
+  const assist = String(val("lift_assist", "auto"));
+  const isPushOut = assist === "push_out";
+  const fingerPosition = String(val("finger_position", "sides"));
+  const cavityMode = String(val("cavity_depth_mode", "auto"));
+  const toolThickness = number(val("tool_thickness", val("depth", 8)), 8);
+  let html = "";
+
+  // Tool.
+  html += `<div class="draft-triple">`;
+  html += field("Tool thickness", "option:tool_thickness", fmt(toolThickness),
+    { unit: "mm", step: "0.5", min: "0.5" });
+  html += field("Fit clearance", "option:clearance", fmt(val("clearance", 0.6)),
+    { unit: "mm", step: "0.1", min: "0" });
+  html += field("Soften outline", "option:smoothing", fmt(val("smoothing", 0)),
+    { unit: "mm", step: "1", min: "0",
+      tip: "Rounds off small jags in the accepted outline. Different from Scan edge cleanup below, which affects tracing itself." });
+  html += `</div>`;
+
+  // Holder.
+  html += `<label class="wide">Holder
+    <select data-draft="option:holder_style">
+      <option value="recessed" ${selected("recessed", holderStyle)}>Recessed Cavity</option>
+      <option value="raised_wall" ${selected("raised_wall", holderStyle)}>Raised Wall</option>
+    </select>
+  </label>`;
+  if (holderStyle === "recessed") {
+    const autoCavity = 0.6 * toolThickness;
+    const cavityDepth = cavityMode === "manual" ? number(val("cavity_depth", autoCavity), autoCavity) : autoCavity;
+    html += `<div class="pair">`;
+    html += field("Cavity depth", "option:cavity_depth", fmt(cavityDepth), {
+      unit: "mm", step: "0.1", min: "0.1",
+      tip: "Editing this switches to Manual so later Tool thickness changes stop recalculating it.",
+    });
+    html += `<div class="nest-cavity-status">
+      <span class="field-label">${cavityMode === "manual" ? "Manual" : "Auto — 60% of tool thickness"}</span>
+      <button type="button" class="button secondary" data-action="nest-cavity-auto" ${cavityMode === "manual" ? "" : "disabled"}>Reset to 60%</button>
+    </div>`;
+    html += `</div>`;
+  }
+
+  // Finger access.
+  html += `<label class="wide">Finger access
+    <select data-draft="option:lift_assist">
+      <option value="auto" ${selected("auto", isPushOut ? "" : assist)}>Automatic</option>
+      <option value="none" ${selected("none", assist)}>Off</option>
+      <option value="finger_grasp" ${selected("finger_grasp", assist)}>Custom</option>
+    </select>
+  </label>`;
+  if (assist === "finger_grasp") {
+    html += `<div class="pair">`;
+    html += `<label>Location
+      <select data-draft="option:finger_position">
+        <option value="sides" ${selected("sides", fingerPosition)}>Sides</option>
+        <option value="top_bottom" ${selected("top_bottom", fingerPosition)}>Ends</option>
+        <option value="both" ${selected("both", fingerPosition)}>Both</option>
+      </select>
+    </label>`;
+    html += field("Finger width", "option:finger_width",
+      fmt(val("finger_width", resolved.finger_width ?? 25)),
+      { unit: "mm", step: "1", min: "12", max: "40" });
+    html += `</div>`;
+  }
+
+  // Raised Wall advanced.
+  if (holderStyle === "raised_wall") {
+    html += `<details class="wide nest-advanced" ${isPushOut ? "open" : ""}><summary>Raised Wall advanced</summary>`;
+    html += toggle("nest-push-out", "Push Out",
+      "Raises the tool on a shaped floor with one selected end low, for pressing the opposite end up. Replaces Finger access while on.",
+      isPushOut);
+    if (isPushOut) {
+      html += `<div class="pair">`;
+      html += `<label>Push at
+        <select data-draft="option:push_position">
+          <option value="right" ${selected("right", val("push_position", "right"))}>Right</option>
+          <option value="left" ${selected("left", val("push_position", "right"))}>Left</option>
+          <option value="top" ${selected("top", val("push_position", "right"))}>Top</option>
+          <option value="bottom" ${selected("bottom", val("push_position", "right"))}>Bottom</option>
+        </select>
+      </label>`;
+      html += field("Push area", "option:push_area", fmt(val("push_area", 30)),
+        { unit: "%", step: "5", min: "15", max: "40" });
+      html += field("Push depth", "option:push_depth", fmt(val("push_depth", 4)),
+        { unit: "mm", step: "0.5", min: "2", max: "8" });
+      html += `</div>`;
+    }
+    html += `</details>`;
+  }
+
+  // Bin. Read straight from the stored option, never the resolved fallback:
+  // a legacy design with no stored preference must show as off here, not as
+  // on just because it happens to behave in a similar grow-only way.
+  html += toggle("option:auto_size", "Automatically size bin to tool",
+    "Grows or shrinks the bin's Width, Length and Height to fit this Nest and keeps it centred. "
+    + "Turn off to size the bin by hand with the usual Width/Length/Height controls.",
+    opt.auto_size === true, { wide: true });
+
+  // Outline.
+  html += `<div class="photo-upload wide">`;
+  html += `<label class="button secondary photo-button" for="nest-photo-input">${one.contour ? "Replace photo" : "Upload part photo"}</label>
+    <input id="nest-photo-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+    <label>Reference paper
+      <select id="nest-paper-size">
+        <option value="letter" ${selected("letter", state.nestPaperSize || "letter")}>US Letter — 8.5 × 11 in</option>
+        <option value="a4" ${selected("a4", state.nestPaperSize || "letter")}>A4 — 210 × 297 mm</option>
+      </select>
+    </label>
+    <details><summary>Photo requirements</summary><ul>
+      <li>Entire selected reference sheet visible</li>
+      <li>Camera directly overhead</li>
+      <li>Part lies flat</li>
+      <li>Plain, high-contrast background preferred</li>
+    </ul></details>`;
+  if (one.contour) {
+    html += `<p class="photo-measurement">Outline ready — drag its points over the photo in 2D to reshape it.</p>`;
+    html += `<fieldset class="wide"><legend>Outline editor</legend><div class="segmented three">
+      <label><input type="radio" name="nest-outline-tool" value="select" ${state.nestOutlineTool === "select" ? "checked" : ""}><span>Select/Edit</span></label>
+      <label><input type="radio" name="nest-outline-tool" value="add-point" ${state.nestOutlineTool === "add-point" ? "checked" : ""}><span>Add Point</span></label>
+      <label><input type="radio" name="nest-outline-tool" value="delete-point" ${state.nestOutlineTool === "delete-point" ? "checked" : ""}><span>Delete Point</span></label>
+    </div></fieldset>`;
+    html += `<button type="button" class="button secondary" data-action="nest-reset-outline">Reset outline</button>`;
+  }
+  if (state.nestPhoto) {
+    html += field("Photo opacity", "nest-photo-opacity", state.nestPhotoOpacity,
+      { unit: "%", step: "5", min: "0", max: "100", dataAttribute: "data-nest-opacity" });
+  }
+  if (state.nestRectifiedImage) {
+    html += `<details class="wide"><summary>Tune scanned outline</summary>`;
+    html += field("Object sensitivity", "nest-sensitivity", state.nestSensitivity,
+      { step: "1", min: "0", max: "100", dataAttribute: "data-nest-tune" });
+    html += `<p class="field-hint">Less object ← → More object</p>`;
+    html += field("Edge cleanup", "nest-cleanup", state.nestCleanup,
+      { step: "1", min: "0", max: "100", dataAttribute: "data-nest-tune" });
+    html += `<p class="field-hint">More detail ← → Smoother</p>`;
+    html += `<div class="pair">
+      <button type="button" class="button secondary" data-action="nest-tune-reset">Reset sliders</button>
+      <button type="button" class="button" data-action="nest-tune-accept" ${state.nestCandidateContour ? "" : "disabled"}>Use this trace</button>
+    </div>`;
+    if (state.nestTuneStatus) html += `<p class="field-hint">${escapeHtml(state.nestTuneStatus)}</p>`;
+    html += `</details>`;
+  }
+  if (state.nestPaperCorners && state.nestOriginalImage) {
+    html += `<p class="field-warning">Adjust paper corners — automatic detection failed. Drag each handle onto a corner of the reference sheet.</p>`;
+    html += `<div class="nest-corner-editor" id="nest-corner-editor">
+      <img src="${state.nestOriginalImage.dataUrl}" draggable="false">
+      ${state.nestPaperCorners.map((corner, index) => `<div class="nest-corner-handle" data-corner-index="${index}" style="left:${corner.xPct}%;top:${corner.yPct}%"></div>`).join("")}
+    </div>`;
+    html += `<button type="button" class="button" data-action="nest-corners-accept">Use these corners</button>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
 function renderDraftFields() {
   if (!state.draft) return;
   const info = partInfo();
@@ -2391,84 +2570,7 @@ function renderDraftFields() {
     html += scoopDepthField("option:depth", shown);
   }
   if (one.kind === "nest") {
-    const assist = String(one.options?.lift_assist ?? state.draftResolvedOptions?.lift_assist ?? "finger_grasp");
-    const fingerPosition = String(one.options?.finger_position ?? state.draftResolvedOptions?.finger_position ?? "sides");
-    const pushPosition = String(one.options?.push_position ?? state.draftResolvedOptions?.push_position ?? "right");
-    const selected = (value, actual) => value === actual ? "selected" : "";
-    const liftAssist = `<label>Lift assist
-      <select data-draft="option:lift_assist">
-        <option value="finger_grasp" ${selected("finger_grasp", assist)}>Finger grasp</option>
-        <option value="push_out" ${selected("push_out", assist)}>Push out</option>
-        <option value="none" ${selected("none", assist)}>No assist</option>
-      </select>
-    </label>`;
-    html += `<div class="draft-triple">`;
-    html += field("Object thickness", "option:depth",
-      fmt(one.options?.depth ?? state.draftResolvedOptions?.depth ?? 8),
-      { unit: "mm", step: "0.5", min: "0.5" });
-    html += field("Fit clearance", "option:clearance",
-      fmt(one.options?.clearance ?? state.draftResolvedOptions?.clearance ?? 0.6), { unit: "mm", step: "0.1", min: "0" });
-    html += field("Soften outline", "option:smoothing",
-      fmt(one.options?.smoothing ?? state.draftResolvedOptions?.smoothing ?? 0), { unit: "mm", step: "1", min: "0" });
-    html += `</div>`;
-    if (assist === "finger_grasp") {
-      html += `<div class="draft-triple">${liftAssist}<label>Finger grasps
-        <select data-draft="option:finger_position">
-          <option value="sides" ${selected("sides", fingerPosition)}>Sides (left/right)</option>
-          <option value="top_bottom" ${selected("top_bottom", fingerPosition)}>Top/bottom</option>
-          <option value="both" ${selected("both", fingerPosition)}>Both</option>
-        </select>
-      </label>`;
-      html += field(
-        "Finger opening width", "option:finger_width",
-        fmt(one.options?.finger_width ?? state.draftResolvedOptions?.finger_width ?? 25),
-        { unit: "mm", step: "1", min: "12", max: "40",
-          tip: "The openings rotate with the photographed outline. Their edges curve gently down into the grasp instead of ending in a sharp corner." },
-      );
-      html += `</div>`;
-    } else if (assist === "push_out") {
-      // Four controls: two rows of two, not three and a stranded fourth.
-      html += `<div class="pair">${liftAssist}`;
-      html += `<label>Push at
-        <select data-draft="option:push_position">
-          <option value="right" ${selected("right", pushPosition)}>Right</option>
-          <option value="left" ${selected("left", pushPosition)}>Left</option>
-          <option value="top" ${selected("top", pushPosition)}>Top</option>
-          <option value="bottom" ${selected("bottom", pushPosition)}>Bottom</option>
-        </select>
-      </label>`;
-      html += field(
-        "Push area", "option:push_area",
-        fmt(one.options?.push_area ?? state.draftResolvedOptions?.push_area ?? 30),
-        { unit: "%", step: "5", min: "15", max: "40" },
-      );
-      html += field(
-        "Push depth", "option:push_depth",
-        fmt(one.options?.push_depth ?? state.draftResolvedOptions?.push_depth ?? 4),
-        { unit: "mm", step: "0.5", min: "2", max: "8",
-          tip: "Most of the tool rests on a raised floor. Press the selected end into the lower area to lift the opposite end." },
-      );
-      html += `</div>`;
-    } else {
-      html += liftAssist;
-    }
-    html += `<div class="photo-upload wide">
-      <label class="button secondary photo-button" for="nest-photo-input">Upload part photo</label>
-      <input id="nest-photo-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
-      <label>Reference paper
-        <select id="nest-paper-size">
-          <option value="letter" ${selected("letter", state.nestPaperSize || "letter")}>US Letter — 8.5 × 11 in</option>
-          <option value="a4" ${selected("a4", state.nestPaperSize || "letter")}>A4 — 210 × 297 mm</option>
-        </select>
-      </label>
-      <details><summary>Photo requirements</summary><ul>
-        <li>Entire selected reference sheet visible</li>
-        <li>Camera directly overhead</li>
-        <li>Part lies flat</li>
-        <li>Plain, high-contrast background preferred</li>
-      </ul></details>
-      ${one.contour ? `<p class="photo-measurement">Outline ready — drag its points over the photo in 2D to reshape it.</p>` : ""}
-    </div>`;
+    html += renderNestFields(one);
   }
   if (info.flags.text) {
     const textLevel = one.options?.level === "rim" ? "rim" : "base";
@@ -3012,6 +3114,190 @@ function renderDraftFields() {
     updateSelectionButtons();
     refreshDraftSoon();
   }));
+  if (state.draft?.kind === "nest") wireNestFieldActions();
+}
+
+// Photo Nest's own buttons/sliders - separated out because they carry their
+// own session-only state (tuning sliders, the candidate trace, paper-corner
+// recovery) that no other feature kind touches.
+function wireNestFieldActions() {
+  const fields = $("#draft-fields");
+  const pushOut = $('[data-draft="nest-push-out"]', fields);
+  if (pushOut) pushOut.addEventListener("change", () => {
+    markDraftChanged();
+    state.draft.options ||= {};
+    state.draft.options.lift_assist = pushOut.checked ? "push_out" : "auto";
+    state.draftAutoCommit = true;
+    renderDraftFields();
+    updateSelectionButtons();
+    refreshDraftSoon();
+  });
+  const cavityAuto = $('[data-action="nest-cavity-auto"]', fields);
+  if (cavityAuto) cavityAuto.addEventListener("click", () => {
+    markDraftChanged();
+    state.draft.options ||= {};
+    delete state.draft.options.cavity_depth;
+    state.draft.options.cavity_depth_mode = "auto";
+    state.draftAutoCommit = true;
+    renderDraftFields();
+    updateSelectionButtons();
+    refreshDraftSoon();
+  });
+  const resetOutline = $('[data-action="nest-reset-outline"]', fields);
+  if (resetOutline) resetOutline.addEventListener("click", resetNestOutline);
+  $$('input[name="nest-outline-tool"]', fields).forEach(input => input.addEventListener("change", () => {
+    state.nestOutlineTool = input.value;
+    renderLayout2D();
+  }));
+  const opacity = $("[data-nest-opacity]", fields);
+  if (opacity) opacity.addEventListener("input", () => {
+    state.nestPhotoOpacity = number(opacity.value, 45);
+    renderLayout2D();
+  });
+  $$("[data-nest-tune]", fields).forEach(input => input.addEventListener("input", () => {
+    state.nestSensitivity = number($('[data-nest-tune="nest-sensitivity"]', fields)?.value, state.nestSensitivity);
+    state.nestCleanup = number($('[data-nest-tune="nest-cleanup"]', fields)?.value, state.nestCleanup);
+    requestNestRetrace();
+  }));
+  const tuneReset = $('[data-action="nest-tune-reset"]', fields);
+  if (tuneReset) tuneReset.addEventListener("click", () => {
+    state.nestSensitivity = 50;
+    state.nestCleanup = 50;
+    state.nestCandidateContour = null;
+    state.nestTuneStatus = "";
+    renderDraftFields();
+    renderLayout2D();
+  });
+  const tuneAccept = $('[data-action="nest-tune-accept"]', fields);
+  if (tuneAccept) tuneAccept.addEventListener("click", acceptNestTrace);
+  const cornersAccept = $('[data-action="nest-corners-accept"]', fields);
+  if (cornersAccept) cornersAccept.addEventListener("click", acceptNestPaperCorners);
+  wireNestCornerHandles();
+}
+
+function wireNestCornerHandles() {
+  const editor = $("#nest-corner-editor");
+  if (!editor) return;
+  let dragIndex = null;
+  const move = event => {
+    if (dragIndex === null) return;
+    const rect = editor.getBoundingClientRect();
+    const point = event.touches ? event.touches[0] : event;
+    const xPct = Math.min(100, Math.max(0, ((point.clientX - rect.left) / rect.width) * 100));
+    const yPct = Math.min(100, Math.max(0, ((point.clientY - rect.top) / rect.height) * 100));
+    state.nestPaperCorners[dragIndex] = { xPct, yPct };
+    const handle = $(`[data-corner-index="${dragIndex}"]`, editor);
+    if (handle) { handle.style.left = `${xPct}%`; handle.style.top = `${yPct}%`; }
+    event.preventDefault();
+  };
+  const stop = () => { dragIndex = null; };
+  $$(".nest-corner-handle", editor).forEach(handle => {
+    handle.addEventListener("pointerdown", event => {
+      dragIndex = Number(handle.dataset.cornerIndex);
+      handle.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+  });
+  editor.addEventListener("pointermove", move);
+  editor.addEventListener("pointerup", stop);
+  editor.addEventListener("pointerleave", stop);
+}
+
+async function resetNestOutline() {
+  const one = state.draft;
+  const index = draftCommitIndex();
+  if (!one || one.kind !== "nest" || !Number.isInteger(index)) return;
+  const baseline = one.source_contour || one.contour;
+  if (!baseline) return;
+  state.nestCandidateContour = null;
+  await commitNestContourEdit(index, baseline.map(point => [...point]));
+}
+
+// Debounced live retrace: segmentation + cleanup only, on the already-
+// rectified reference sheet - paper detection never repeats per slider move.
+const requestNestRetrace = debounce(async () => {
+  const rectified = state.nestRectifiedImage;
+  const draft = state.draft;
+  if (!rectified || !draft || draft.kind !== "nest") return;
+  const request = ++state.nestRetraceRequest;
+  state.nestTuneStatus = "Retracing…";
+  renderDraftFields();
+  try {
+    const result = await api("/api/nest/retrace", {
+      rectified_image: rectified.dataUrl,
+      mime_type: rectified.mimeType,
+      sensitivity: state.nestSensitivity,
+      cleanup: state.nestCleanup,
+    });
+    if (request !== state.nestRetraceRequest || state.draft !== draft) return;
+    state.nestCandidateContour = result.contour;
+    state.nestTuneStatus = `Candidate: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm — press Use this trace to accept.`;
+  } catch (error) {
+    if (request !== state.nestRetraceRequest) return;
+    // Failed retrace is non-destructive (spec section 34): keep the accepted
+    // outline exactly as it was and just report why the candidate failed.
+    state.nestCandidateContour = null;
+    state.nestTuneStatus = `Could not retrace at this setting: ${error.message}`;
+  }
+  renderDraftFields();
+  renderLayout2D();
+}, 300);
+
+async function acceptNestTrace() {
+  const one = state.draft;
+  const index = draftCommitIndex();
+  if (!one || one.kind !== "nest" || !state.nestCandidateContour || !Number.isInteger(index)) return;
+  const candidate = state.nestCandidateContour.map(point => [...point]);
+  state.nestCandidateContour = null;
+  state.nestTuneStatus = "";
+  await commitNestContourEdit(index, candidate, { source_contour: candidate.map(point => [...point]) });
+}
+
+async function acceptNestPaperCorners() {
+  const draft = state.draft;
+  const original = state.nestOriginalImage;
+  const corners = state.nestPaperCorners;
+  if (!draft || !original || !corners) return;
+  const img = new Image();
+  img.src = original.dataUrl;
+  await (img.decode ? img.decode().catch(() => {}) : Promise.resolve());
+  const width = img.naturalWidth || 1, height = img.naturalHeight || 1;
+  const paperCorners = corners.map(c => [c.xPct / 100 * width, c.yPct / 100 * height]);
+  if (!beginDesignMutation()) return;
+  const previousDesign = clone(state.design);
+  try {
+    $("#draft-status").textContent = "Correcting perspective and tracing the part…";
+    const result = await api("/api/nest/photo", {
+      design: state.design,
+      image: original.dataUrl,
+      mime_type: original.mimeType,
+      paper_size: state.nestPaperSize || "letter",
+      options: state.draft?.options || {},
+      paper_corners: paperCorners,
+    });
+    state.design = result.design;
+    recordHistory(previousDesign);
+    state.selected = result.selected;
+    state.draftKind = "nest";
+    state.draft = clone(state.design.layout.features[state.selected]);
+    setNestPhotoReference(result.reference);
+    if (result.rectified_image) state.nestRectifiedImage = { dataUrl: result.rectified_image, mimeType: "image/jpeg" };
+    state.nestPaperCorners = null;
+    state.draftAutoCommit = true;
+    state.drafts = {};
+    syncForm();
+    renderDraftFields();
+    await refreshPreview();
+    $("#draft-status").textContent = "";
+    $("#draft-status").classList.remove("error");
+    toast(`Snug Holder ready: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm outline.`);
+  } catch (error) {
+    $("#draft-status").textContent = error.message;
+    $("#draft-status").classList.add("error");
+    toast(error.message, true, 6500);
+  } finally {
+    finishDesignMutation();
+  }
 }
 
 // A divider builds from its thickness option, not from the footprint drawn
@@ -3299,6 +3585,31 @@ function applyResizedZone(one, cx, cy, width, depth) {
   if (depthField && Math.abs(depth - prevD) >= 0.05) { depthField.value = fmt(depth); flashField(depthField); }
 }
 
+// A manual bin size or layout edit turns Automatic bin sizing off for any
+// Photo Nest in the design (spec section 29) - it never silently fights a
+// size the user just typed. Only the new explicit "true" is affected; a
+// legacy design with no stored preference keeps its historical grow-only
+// behaviour, and an already-Manual Nest is already what this asks for.
+function turnOffNestAutoSizeForManualEdit() {
+  const candidates = [];
+  if (state.draft?.kind === "nest") candidates.push(state.draft);
+  for (const feature of state.design?.layout?.features || []) {
+    if (feature.kind === "nest" && feature !== state.draft) candidates.push(feature);
+  }
+  let turnedOff = false;
+  for (const one of candidates) {
+    one.options ||= {};
+    if (one.options.auto_size === true) {
+      one.options.auto_size = false;
+      turnedOff = true;
+    }
+  }
+  if (turnedOff) {
+    toast("Automatic bin sizing turned off because the bin size or layout was manually changed.");
+    if (state.draft?.kind === "nest") renderDraftFields();
+  }
+}
+
 function syncNestZone(one) {
   if (!one?.contour?.length) return;
   const cx = (one.zone[0] + one.zone[2]) / 2;
@@ -3359,12 +3670,20 @@ async function uploadNestPhoto(event) {
     if (!beginDesignMutation()) return;
     mutationStarted = true;
     const previousDesign = clone(state.design);
+    state.nestOriginalImage = { dataUrl: image, mimeType };
+    state.nestSensitivity = 50;
+    state.nestCleanup = 50;
+    state.nestCandidateContour = null;
+    state.nestTuneStatus = "";
+    state.nestPaperCorners = null;
     const result = await api("/api/nest/photo", {
       design: state.design,
       image,
       mime_type: mimeType,
       paper_size: state.nestPaperSize || "letter",
       options: state.draft?.options || {},
+      sensitivity: state.nestSensitivity,
+      cleanup: state.nestCleanup,
     });
     state.design = result.design;
     recordHistory(previousDesign);
@@ -3372,6 +3691,8 @@ async function uploadNestPhoto(event) {
     state.draftKind = "nest";
     state.draft = clone(state.design.layout.features[state.selected]);
     setNestPhotoReference(result.reference);
+    state.nestRectifiedImage = result.rectified_image
+      ? { dataUrl: result.rectified_image, mimeType: "image/jpeg" } : null;
     state.draftAutoCommit = true;
     state.drafts = {};
     syncForm();
@@ -3384,7 +3705,18 @@ async function uploadNestPhoto(event) {
   } catch (error) {
     $("#draft-status").textContent = error.message;
     $("#draft-status").classList.add("error");
-    toast(error.message, true, 6500);
+    // Automatic paper detection failed: offer manual corner recovery over the
+    // same original photo instead of asking the user to upload again.
+    if (/paper missing|paper detection/i.test(error.message)) {
+      state.nestPaperCorners = [
+        { xPct: 10, yPct: 10 }, { xPct: 90, yPct: 10 },
+        { xPct: 90, yPct: 90 }, { xPct: 10, yPct: 90 },
+      ];
+      renderDraftFields();
+      toast("Automatic paper detection failed. Adjust the corners below.", true, 6500);
+    } else {
+      toast(error.message, true, 6500);
+    }
   } finally {
     input.value = "";
     if (mutationStarted) finishDesignMutation();
@@ -3510,9 +3842,23 @@ function updateDraftFromFields(event) {
     else delete one.options.angle_towards;
   }
   if (one.kind === "nest") {
-    for (const key of ["lift_assist", "finger_position", "push_position"]) {
+    for (const key of ["lift_assist", "finger_position", "push_position", "holder_style"]) {
       const value = get(`option:${key}`);
       if (value !== undefined) one.options[key] = value;
+    }
+    // Switching Holder resets whatever the previous style's advanced/Push
+    // Out state was, so a stale push_out never survives a jump to Recessed.
+    if (changed === "option:holder_style" && one.options.holder_style === "recessed"
+        && one.options.lift_assist === "push_out") {
+      one.options.lift_assist = "auto";
+    }
+    // Only write auto_size when its own checkbox was the thing that changed -
+    // it is a three-way stored preference (true/false/legacy-missing), and
+    // any other field edit must leave "missing" as missing rather than
+    // silently upgrading a legacy design to full Auto-size.
+    if (changed === "option:auto_size") {
+      const autoSizeBox = $('[data-draft="option:auto_size"]', $("#draft-fields"));
+      one.options.auto_size = autoSizeBox?.checked === true;
     }
   }
   // Text carries the only options that are not numbers: what it says, and its
@@ -3588,7 +3934,8 @@ function updateDraftFromFields(event) {
       !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom",
         "slope_base", "bottom_mode", "slope_construction", "label_divisions", "division_level", "division_side", "division_labels",
         "level", "rim_side",
-        "lift_assist", "finger_position", "push_position", "angle_towards"]
+        "lift_assist", "finger_position", "push_position", "angle_towards",
+        "holder_style", "auto_size"]
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
     const option = info.fields.find(entry => entry.key === key);
@@ -3668,7 +4015,13 @@ function updateDraftFromFields(event) {
         if (wallField.value !== nextWall) { wallField.value = nextWall; flashField(wallField); }
       }
     }
-    if (one.kind === "nest" && one.contour && ["clearance", "rim", "smoothing"].includes(key)) {
+    if (one.kind === "nest" && key === "cavity_depth" && raw !== "") {
+      // A hand-typed cavity depth means Manual; it stops following Tool
+      // thickness until Reset to 60% is pressed.
+      one.options.cavity_depth_mode = "manual";
+    }
+    if (one.kind === "nest" && one.contour
+        && ["clearance", "rim", "smoothing", "tool_thickness", "cavity_depth"].includes(key)) {
       syncNestZone(one);
     }
   }
@@ -3711,7 +4064,7 @@ function updateDraftFromFields(event) {
   // Switching a bore's profile swaps which fields show (locked hex-bit size,
   // the Angle field for round/square only).
   if ((changed === "profile" || changed === "option:angle") && one.kind === "bore") renderDraftFields();
-  if (changed === "option:lift_assist" && one.kind === "nest") renderDraftFields();
+  if ((changed === "option:lift_assist" || changed === "option:holder_style") && one.kind === "nest") renderDraftFields();
   if (changed === "option:level") renderDraftFields();
   if (one.kind === "divider" && (
     changed === "option:bottom_mode" || changed === "option:slope_construction" || changed === "option:label_divisions" ||
@@ -4452,7 +4805,8 @@ function renderFitActions(one) {
     rows.push(`<button type="button" class="button" data-action="fill-part" hidden>Fill the bin</button>`);
   }
   if (kind !== "scoop") {
-    rows.push(`<button type="button" class="button" data-action="grow-bin" hidden>Grow the bin</button>`);
+    const label = kind === "nest" ? "Fit bin to tool" : "Grow the bin";
+    rows.push(`<button type="button" class="button" data-action="grow-bin" hidden>${label}</button>`);
   }
   if (!rows.length) return "";
   return `<div class="fit-actions">${rows.join("")}</div>`;
@@ -5956,6 +6310,14 @@ function normalizeNestContour(feature) {
   if (Math.abs(offset[0]) < 1e-9 && Math.abs(offset[1]) < 1e-9) return;
   const movedCentre = nestLocalToWorld(feature, offset);
   feature.contour = feature.contour.map(([x, y]) => [number(x) - offset[0], number(y) - offset[1]]);
+  // source_contour lives in the same local frame as contour - carry it
+  // through the same shift, or a later Reset Outline would restore a
+  // baseline offset from where it should be.
+  if (feature.source_contour?.length) {
+    feature.source_contour = feature.source_contour.map(
+      ([x, y]) => [number(x) - offset[0], number(y) - offset[1]]
+    );
+  }
   feature.zone = [movedCentre[0] - .5, movedCentre[1] - .5,
     movedCentre[0] + .5, movedCentre[1] + .5];
   if (state.nestPhoto?.bounds) {
@@ -5974,7 +6336,7 @@ function drawNestPhotoReference(context, feature, toCanvas) {
   const bottomLeft = toCanvas(nestLocalToWorld(feature, [x0, y0]));
   const width = reference.image.naturalWidth, height = reference.image.naturalHeight;
   context.save();
-  context.globalAlpha = .55;
+  context.globalAlpha = Math.min(1, Math.max(0, number(state.nestPhotoOpacity, 45) / 100));
   context.transform(
     (topRight[0] - topLeft[0]) / width,
     (topRight[1] - topLeft[1]) / width,
@@ -6011,6 +6373,56 @@ function hitNestContourPoint(feature, world) {
     if (pixels < distance) { closest = index; distance = pixels; }
   });
   return closest;
+}
+
+// Nearest point on the contour's boundary to a world-space click, within
+// ~12 screen pixels - used by the Add Point tool to find which segment to
+// split. Returns the segment's first vertex index and the projected point
+// in the outline's own local (pre-rotation/placement) coordinates.
+function hitNestContourSegment(feature, world) {
+  if (!feature?.contour?.length || !state.layoutTransform) return null;
+  const scale = state.layoutTransform.scale;
+  const count = feature.contour.length;
+  let closest = null, distance = 12;
+  for (let i = 0; i < count; i++) {
+    const a = nestLocalToWorld(feature, feature.contour[i]);
+    const b = nestLocalToWorld(feature, feature.contour[(i + 1) % count]);
+    const abx = b[0] - a[0], aby = b[1] - a[1];
+    const lengthSq = abx * abx + aby * aby;
+    let t = lengthSq > 1e-9 ? ((world[0] - a[0]) * abx + (world[1] - a[1]) * aby) / lengthSq : 0;
+    t = Math.max(0, Math.min(1, t));
+    const projected = [a[0] + t * abx, a[1] + t * aby];
+    const pixels = Math.hypot(world[0] - projected[0], world[1] - projected[1]) * scale;
+    if (pixels < distance) { closest = { index: i, world: projected }; distance = pixels; }
+  }
+  return closest ? { index: closest.index, local: nestWorldToLocal(feature, closest.world) } : null;
+}
+
+// Add Point / Delete Point / Reset Outline all go through here: apply the
+// edited contour as the selected Nest's new draft and commit it exactly like
+// any other field edit - the server validates the polygon and access plan,
+// and an invalid result is rejected and the previous contour restored,
+// exactly as dragging a point already does.
+async function commitNestContourEdit(index, newContour, extra = {}) {
+  markDraftChanged();
+  const updated = clone(
+    state.selected === index && state.draft ? state.draft : state.design.layout.features[index]
+  );
+  updated.contour = newContour;
+  Object.assign(updated, extra);
+  normalizeNestContour(updated);
+  state.draft = updated;
+  state.selected = index;
+  state.draftKind = "nest";
+  state.draftAutoCommit = true;
+  renderDraftFields();
+  renderLayout2D();
+  const applied = await applySupport(index);
+  if (!applied) {
+    state.draft = clone(state.design.layout.features[index]);
+    renderDraftFields();
+    renderLayout2D();
+  }
 }
 
 function drawClosedPath(context, points, toCanvas) {
@@ -6532,6 +6944,17 @@ function renderLayout2D() {
       context.fillStyle = color + "35";
       context.fill(outline);
       context.stroke(outline);
+      // A not-yet-accepted scan-tuning retrace draws dashed over the
+      // accepted (solid) outline - see spec section 35.
+      if (index === state.selected && state.nestCandidateContour?.length) {
+        const candidateWorld = state.nestCandidateContour.map(point => nestLocalToWorld(feature, point));
+        context.save();
+        context.setLineDash([6, 4]);
+        context.strokeStyle = "#237fa6";
+        context.lineWidth = 2;
+        context.stroke(drawClosedPath(context, candidateWorld, toCanvas));
+        context.restore();
+      }
     } else {
       // A fused cradle, post or divider fills less of its zone than the zone
       // itself, and the rest is floor a neighbour may use. Fill what the part
@@ -7009,6 +7432,27 @@ function wireLayoutInteraction() {
       const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
       if (autoField) autoField.checked = false;
     }
+    if (feature.kind === "nest" && feature.contour
+        && (state.nestOutlineTool === "add-point" || state.nestOutlineTool === "delete-point")) {
+      pointerActive = false;
+      if (state.nestOutlineTool === "add-point") {
+        const hit = hitNestContourSegment(feature, world);
+        if (hit) {
+          const contour = feature.contour.map(point => [...point]);
+          contour.splice(hit.index + 1, 0, hit.local);
+          await commitNestContourEdit(index, contour);
+        }
+      } else {
+        const pointIndex = hitNestContourPoint(feature, world);
+        if (pointIndex !== null && feature.contour.length > 3) {
+          const contour = feature.contour.filter((_point, i) => i !== pointIndex);
+          await commitNestContourEdit(index, contour);
+        } else if (pointIndex !== null) {
+          toast("A Photo Nest outline needs at least three points.", true);
+        }
+      }
+      return;
+    }
     const zone = feature.zone;
     const handlePixels = Math.hypot((world[0] - zone[2]) * state.layoutTransform.scale, (world[1] - zone[1]) * state.layoutTransform.scale);
     const rotatePoint = [(zone[0] + zone[2]) / 2, zone[3] + 8];
@@ -7102,6 +7546,14 @@ function wireLayoutInteraction() {
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     if (typeof drag.index !== "number") return;   // not a feature drag - nothing to apply
     state.draft = drag.feature;
+    if (drag.mode === "move" && drag.feature.kind === "nest" && drag.feature.options?.auto_size === true) {
+      const zone = drag.feature.zone;
+      const cx = (zone[0] + zone[2]) / 2, cy = (zone[1] + zone[3]) / 2;
+      if (Math.abs(cx) > 0.5 || Math.abs(cy) > 0.5) {
+        drag.feature.options.auto_size = false;
+        toast("Automatic bin sizing turned off because the bin size or layout was manually changed.");
+      }
+    }
     if (drag.mode === "resize" && drag.feature.kind !== "nest") {
       // Resizing by the blue corner is just as intentional as typing Width or
       // Length. Preserve both axes from later contents-driven auto fitting.

@@ -583,7 +583,11 @@ cradle/bore parts at once) serializes a large triangle payload to
 the browser; camera motion stays client-side and fast regardless, but the
 initial load is heavier. **Save design** relies on the browser's own
 download prompt, which some browser-automation tools cannot observe as an
-event — a real browser session shows it normally.
+event — a real browser session shows it normally. Photo Nest's automatic
+finger-access search and its 2D access indicators are new and interactive QA
+on real photographed tools (especially irregular/concave outlines that need
+its boundary-sampling fallback) remains manual, same as the rest of the
+browser UI.
 
 ---
 
@@ -622,33 +626,62 @@ When an interior part does not fit, its editor offers **Grow the bin** and the
 same growth normally happens automatically. The bin grows on the 8 mm grid to
 hold every part at its real footprint. It never shrinks an already-large bin.
 
-**Snug Holder — A custom snug holder based on your photo** creates a raised cookie-cutter wall from a JPG, JPEG, PNG,
-or WEBP photo. Put one flat part on an 8.5 × 11 in sheet, keep all four paper
-corners visible, and photograph it directly overhead. Wavefinity corrects the
-paper to 215.9 × 279.4 mm, isolates the outside silhouette, cleans camera
-noise, and stores only the closed millimetre contour — never the source image.
-The 2D layout draws the softened silhouette — the same one the printed wall
-gets — and provides move, proportional-resize, and rotation handles. **Fit
-clearance** sets the gap between the wall and the part, and **Soften outline**
-rounds off small inward and outward details so the wall does not have to trace
-every jag. The wall's thickness and containment height are fixed printable
-defaults. It grows from the bin floor in fused mode or from the fitted plate in
-removable-insert mode. Every wall gets a substantial 2 mm-high 45-degree outside
-foot and a gentle rounded top.
+**Photo Nest — a custom holder built from your photo.** Put one flat tool on an
+8.5 × 11 in (or A4) sheet, keep all four paper corners visible, photograph it
+directly overhead, and upload the photo. Wavefinity corrects the paper to its
+true size, traces the tool's outline, and asks for one number: **Tool
+thickness**. As soon as both are ready it builds a complete, practical,
+printable bin in seconds — no other choice is required. Missing paper, severe
+perspective, an edge-touching part, multiple parts, and unusably small/noisy
+outlines are rejected with a specific correction; if automatic paper detection
+fails, four draggable corner handles appear over the original photo so the
+shot can be corrected without uploading again. The retired measured/segment
+Nest format is rejected explicitly rather than silently reinterpreted.
 
-**Lift assist** defaults to **Finger grasp**. It cuts a pair of one-inch rounded
-openings at the part-relative sides; the dropdown can instead use top/bottom or
-both pairs, and the openings rotate with the outline. The rounded U-shaped edge
-drops visibly into each opening so fingers do not land on a sharp wall top.
-**Push Out** instead raises the tool on a shaped floor while leaving one selected
-end low: choose the press end, the percent used as the low push area, and its
-depth. Pressing there pivots the opposite end up. **No assist** leaves the plain
-continuous wall. Only one assist can be active. The outer bin width and depth
-grow as needed to enclose it on the 8 mm grid, but a larger bin the user already
-chose is never pulled smaller. Missing paper, severe perspective, an edge-touching part, multiple
-parts, and unusably small/noisy outlines are rejected with a specific
-correction. The retired measured/segment Nest format is rejected explicitly
-rather than silently reinterpreted.
+A new scan defaults to **Recessed Cavity**: a solid deck fills the fitted area
+and the tool's own shape is cut down to the ordinary printable floor, with a
+small automatic lead-in so the tool drops in without catching an edge. Cavity
+depth defaults to **60% of Tool thickness** and stays in that Auto mode -
+recalculating whenever Tool thickness changes - until it is hand-edited, which
+switches it to Manual (with a **Reset to 60%** button to switch back); a
+Manual depth is clamped to Tool thickness if that later gets thinner.
+**Raised Wall** remains available: a contour-following wall grows from the
+floor, with an adaptive exterior buttress sized to its own height (rather than
+one fixed foot) and a gentle top round, broader outside than in.
+
+**Finger access** defaults to **Automatic**: one Python search finds a safe
+pair of opposing openings (or falls back to one, or to none with a warning) -
+spherical scoops cut into a Recessed deck, rounded U-notches cut into a
+Raised Wall. **Off** leaves the holder plain. **Custom** exposes Sides / Ends
+/ Both and a 12-40 mm opening width. **Push Out**, raising the tool on a
+shaped floor with one end left low to press up, remains an advanced
+Raised-Wall-only option; switching to Recessed while it is active turns
+Finger access back to Automatic instead.
+
+**Automatic bin sizing** is on by default: the bin's Width, Length and Height
+grow or shrink to the smallest size that fits the holder, centred, every time
+the outline, Tool thickness, Holder or Finger access changes. Typing a bin
+size, or dragging the Nest off-centre, turns it off for that design ("Fit bin
+to tool" then does the same fit as a one-off); turning it back on recentres
+and resizes again. A design saved before Auto-size existed keeps its old
+grow-only behaviour unchanged.
+
+The 2D layout draws the softened silhouette - the same one the printed part
+gets - with move, proportional-resize and rotation handles, plus an outline
+editor: drag a point directly, **Add Point** (click near an edge) and
+**Delete Point** (click a point, minimum three left), and **Reset outline**
+to return to the most recently accepted scan. A collapsed **Tune scanned
+outline** panel offers Object sensitivity and Edge cleanup sliders (both
+default to the setting that reproduces the original trace); a slider shows
+its retraced candidate dashed over the accepted outline without changing
+anything until **Use this trace** accepts it, and a tuning attempt that fails
+to produce a valid outline leaves the accepted one untouched. **Fit
+clearance** sets the gap between the holder and the part, and **Soften
+outline** rounds off small inward and outward details - a separate pass from
+Edge cleanup, which affects tracing itself. **Photo opacity** dims the
+reference photo behind the outline in the browser only; it disappears, along
+with the tuning and paper-corner tools, once a design is reopened without its
+original photo, since the photo itself is never saved.
 
 Cradle holders also offer **Alternate ends** (off by default): when enabled,
 every second repeated tool sits near the opposite end of the run axis, leaving
@@ -660,7 +693,7 @@ effect when only one tool fits.
 | Holder | Purpose | Optional `key=value` settings |
 |---|---|---|
 | `cradle` | Half-round troughs along X or Y - `spacing` 0 joins the row into one shared body, higher values split it. No fit clearance; wall thickness auto-scales with the tool | `spacing`, `floor_gap` |
-| `nest` | Photo-scaled rounded wall on the bin floor or removable insert, with Finger grasp (default), Push Out, or no lift assist. `depth` (containment height) and `rim` (thickness) are fixed | `clearance`, `smoothing`, `lift_assist`, `finger_position`, `finger_width`, `push_position`, `push_area`, `push_depth` |
+| `nest` | Photo-traced Photo Nest: a Recessed Cavity deck (default) or a Raised Wall, on the bin floor or removable insert, with Automatic (default), Off, or Custom finger access, or Push Out (Raised Wall only). `rim` (thickness) is fixed | `clearance`, `smoothing`, `tool_thickness`, `holder_style`, `cavity_depth`, `cavity_depth_mode`, `auto_size`, `lift_assist`, `finger_position`, `finger_width`, `push_position`, `push_area`, `push_depth` |
 | `bore` | Round, hex or square holes for items standing up | `depth`, `height`, `wall`, `columns`, `rows` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
 | `divider` | One or more straight or leaning subdividing walls along X or Y, with optional sloped tool-slot bottoms | `height`, `thickness`, `angle`, `spacing`, `bottom_angle`, `reverse_bottom`, `alternate_bottom`, `minimal_bottom`, `bottom_supports` |

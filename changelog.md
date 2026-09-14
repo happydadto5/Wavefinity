@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-09-14 — Photo Nest: Recessed Cavity, automatic access, and Auto-size
+
+- Photo Nest now defaults to a **Recessed Cavity** (a solid deck with the
+  tool's shape cut to the floor, with an automatic lead-in) instead of a
+  Raised Wall, with cavity depth defaulting to 60% of the new **Tool
+  thickness** field and staying in that Auto mode until hand-edited. Raised
+  Wall remains available, with an adaptive exterior buttress (scaled to wall
+  height instead of one fixed foot) and a top round broader outside than in.
+- Finger access defaults to **Automatic**: one Python search finds a safe
+  pair of opposing openings on the traced outline (or one, or none with a
+  warning), used for both Recessed scoops and Raised Wall notches. Off and
+  Custom (Sides/Ends/Both, 12-40 mm) remain available; Push Out stays a
+  Raised-Wall-only advanced option.
+- **Automatic bin sizing** grows or shrinks the bin to the smallest size that
+  fits the holder, centred, whenever the outline or its settings change.
+  Typing a bin size or dragging the Nest off-centre turns it off for that
+  design; a design saved before this existed keeps its old grow-only sizing.
+- The 2D editor gained **Add Point**, **Delete Point** and **Reset outline**,
+  a collapsed **Tune scanned outline** panel (Object sensitivity and Edge
+  cleanup sliders with a dashed candidate preview), a **Photo opacity**
+  slider, and manual paper-corner recovery when automatic detection fails.
+- Existing saved Photo Nests are unaffected: a missing `holder_style` still
+  means Raised Wall, and `tool_thickness` still falls back to the old `depth`
+  value, so a reopened design keeps its original physical size.
+
 ## 2026-09-14 — New-user safety and connector clarity
 
 - Unsaved bin-design changes now trigger the browser's leave-page warning.

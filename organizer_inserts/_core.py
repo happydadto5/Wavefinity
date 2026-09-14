@@ -178,6 +178,11 @@ class Feature:
     contour: tuple[tuple[float, float], ...] | None = None
     rotation: float = 0.0
     scale: float = 1.0
+    # The most recently accepted scan baseline - what Reset Outline restores.
+    # ``None`` means either a brand-new Photo Nest not yet accepted, or a
+    # legacy save from before this field existed (Reset then falls back to
+    # the current ``contour`` as its own baseline).
+    source_contour: tuple[tuple[float, float], ...] | None = None
 
     def __post_init__(self) -> None:
         if not self.kind:
@@ -199,6 +204,11 @@ class Feature:
             if (len(self.contour) < 3 or not polygon.is_valid
                     or polygon.is_empty or polygon.area <= 0.0):
                 raise ValueError("a photo nest needs one valid closed contour")
+        if self.source_contour is not None:
+            polygon = Polygon(self.source_contour)
+            if (len(self.source_contour) < 3 or not polygon.is_valid
+                    or polygon.is_empty or polygon.area <= 0.0):
+                raise ValueError("a photo nest's source contour must be one valid closed outline")
 
 
 @dataclass(frozen=True)
@@ -378,6 +388,10 @@ def layout_to_dict(layout: Layout) -> dict:
                 "contour": [list(point) for point in one.contour] if one.contour else None,
                 "rotation": one.rotation,
                 "scale": one.scale,
+                "source_contour": (
+                    [list(point) for point in one.source_contour]
+                    if one.source_contour else None
+                ),
             }
             for one in layout.features
         ],
@@ -421,6 +435,8 @@ def layout_from_dict(data: dict) -> Layout:
              if raw.get("contour") else None),
             float(raw.get("rotation", 0.0)),
             float(raw.get("scale", 1.0)),
+            (tuple((float(point[0]), float(point[1])) for point in raw["source_contour"])
+             if raw.get("source_contour") else None),
         ))
     return Layout(tuple(made), str(data.get("mode", "fused")),
                   float(data.get("snap", EDITOR_SNAP)))

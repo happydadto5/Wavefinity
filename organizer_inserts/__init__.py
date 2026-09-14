@@ -105,20 +105,22 @@ from ._cradle import (
     cradle_min_footprint,
 )
 from ._nest import (
+    HOLDER_STYLES,
     NEST_ASSISTS,
-    NEST_CHAMFER,
     NEST_FINGER_POSITIONS,
     NEST_FINGER_WIDTH,
     NEST_PUSH_AREA,
     NEST_PUSH_DEPTH,
     NEST_PUSH_POSITIONS,
-    NEST_TOP_ROUND,
     build_nest,
     fitted_nest_feature,
+    nest_access_preview,
     nest_contour_polygon,
     nest_defaults,
     nest_required_zone,
     nest_smoothed_contour,
+    resolve_nest_access_plan,
+    resolve_nest_settings,
 )
 from ._bore import (
     BORE_CLEARANCE,

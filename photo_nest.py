@@ -28,6 +28,8 @@ ACCEPTED_IMAGE_TYPES = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
+SENSITIVITY_DEFAULT = 50.0
+CLEANUP_DEFAULT = 50.0
 
 
 def _cross2(a: np.ndarray, b: np.ndarray) -> float:
@@ -42,6 +44,34 @@ class PhotoOutline:
     paper_corners: tuple[tuple[float, float], ...]
     reference_image: str | None = None
     reference_bounds: tuple[float, float, float, float] | None = None
+    # The full rectified Letter-sheet image, for later retracing without
+    # repeating paper detection or perspective correction. Kept only in
+    # browser session state - never written into a saved design.
+    rectified_image: str | None = None
+
+
+def _resolve_threshold(otsu: float, sensitivity: float) -> float:
+    """Object sensitivity (0-100, 50 = automatic) as a segmentation threshold."""
+    sensitivity = max(0.0, min(100.0, float(sensitivity)))
+    auto_threshold = max(14.0, min(70.0, float(otsu)))
+    offset = (sensitivity - 50.0) * 0.4
+    return max(8.0, min(90.0, auto_threshold - offset))
+
+
+def _cleanup_scales(cleanup: float) -> tuple[float, float, float, float]:
+    """``(open_mm, close_mm, blur_sigma_mm, approx_epsilon_mm)`` at this Edge
+    cleanup setting (0-100, more detail to smoother). 50 reproduces the
+    original fixed pipeline exactly."""
+    cleanup = max(0.0, min(100.0, float(cleanup)))
+    t = cleanup / 100.0
+    return (0.25 + 0.80 * t, 0.55 + 1.40 * t, 0.10 + 0.36 * t, 0.15 + 0.40 * t)
+
+
+def _encode_jpeg_data_url(image: np.ndarray, quality: int = 86) -> str:
+    ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    if not ok:
+        raise ValueError("the selected photo could not be prepared for outline editing")
+    return "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
 
 
 def decode_image_data(data_url: str, mime_type: str = "") -> np.ndarray:
@@ -213,20 +243,24 @@ def correct_perspective(
                                borderMode=cv2.BORDER_REPLICATE)
 
 
-def clean_outline_mask(mask: np.ndarray, pixels_per_mm: float) -> np.ndarray:
+def clean_outline_mask(
+    mask: np.ndarray, pixels_per_mm: float, cleanup: float = CLEANUP_DEFAULT,
+) -> np.ndarray:
     """Remove camera specks and smooth sub-millimetre mask stair-steps."""
+    open_mm, close_mm, blur_sigma_mm, _epsilon_mm = _cleanup_scales(cleanup)
     binary = (mask > 0).astype(np.uint8) * 255
-    small = max(3, int(round(0.65 * pixels_per_mm)) | 1)
-    large = max(3, int(round(1.25 * pixels_per_mm)) | 1)
+    small = max(3, int(round(open_mm * pixels_per_mm)) | 1)
+    large = max(3, int(round(close_mm * pixels_per_mm)) | 1)
     binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, np.ones((small, small), np.uint8))
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((large, large), np.uint8))
-    sigma = max(0.6, 0.28 * pixels_per_mm)
+    sigma = max(0.6, blur_sigma_mm * pixels_per_mm)
     blurred = cv2.GaussianBlur(binary, (0, 0), sigma)
     return (blurred >= 127).astype(np.uint8) * 255
 
 
 def segment_object(
     rectified: np.ndarray, pixels_per_mm: float = WARP_PIXELS_PER_MM,
+    sensitivity: float = SENSITIVITY_DEFAULT, cleanup: float = CLEANUP_DEFAULT,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return the single cleaned foreground component and its outside contour."""
     lab = cv2.cvtColor(rectified, cv2.COLOR_BGR2LAB).astype(np.float32)
@@ -242,9 +276,9 @@ def segment_object(
     distance = np.linalg.norm(lab - background, axis=2)
     distance8 = np.clip(distance, 0, 255).astype(np.uint8)
     otsu, _ = cv2.threshold(distance8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    threshold = max(14.0, min(70.0, float(otsu)))
+    threshold = _resolve_threshold(float(otsu), sensitivity)
     raw = (distance > threshold).astype(np.uint8) * 255
-    raw = clean_outline_mask(raw, pixels_per_mm)
+    raw = clean_outline_mask(raw, pixels_per_mm, cleanup)
 
     count, labels, stats, _centres = cv2.connectedComponentsWithStats(raw, 8)
     components = []
@@ -271,7 +305,8 @@ def segment_object(
     if not contours:
         raise ValueError("outline too small or noisy: use a closer, sharper photo")
     outside = max(contours, key=cv2.contourArea)
-    epsilon = max(1.0, 0.35 * pixels_per_mm)
+    _open_mm, _close_mm, _blur_mm, approx_epsilon_mm = _cleanup_scales(cleanup)
+    epsilon = max(1.0, approx_epsilon_mm * pixels_per_mm)
     outside = cv2.approxPolyDP(outside, epsilon, True)
     return chosen, outside[:, 0, :].astype(np.float64)
 
@@ -323,10 +358,7 @@ def _reference_crop(
     x1 = min(rectified.shape[1], int(max_px[0]) + padding + 1)
     y1 = min(rectified.shape[0], int(max_px[1]) + padding + 1)
     crop = rectified[y0:y1, x0:x1]
-    ok, encoded = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 86])
-    if not ok:
-        raise ValueError("the selected photo could not be prepared for outline editing")
-    data_url = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+    data_url = _encode_jpeg_data_url(crop)
     bounds = (
         round(x0 / pixels_per_mm - centre_x, 3),
         round(-y1 / pixels_per_mm - centre_y, 3),
@@ -336,11 +368,57 @@ def _reference_crop(
     return data_url, bounds
 
 
-def extract_photo_outline(image: np.ndarray, paper_size: str = "letter") -> PhotoOutline:
+def extract_photo_outline(
+    image: np.ndarray, paper_size: str = "letter",
+    sensitivity: float = SENSITIVITY_DEFAULT, cleanup: float = CLEANUP_DEFAULT,
+    paper_corners: Iterable[Iterable[float]] | None = None,
+) -> PhotoOutline:
+    """Full scan: paper detection (or supplied corners), perspective
+    correction, segmentation, cleanup and contour extraction."""
     _paper_size_mm(paper_size)
-    corners = detect_paper_corners(image)
+    corners = (
+        validate_paper_corners(paper_corners) if paper_corners is not None
+        else detect_paper_corners(image)
+    )
     rectified = correct_perspective(image, corners, paper_size=paper_size)
-    _mask, pixels = segment_object(rectified)
+    _mask, pixels = segment_object(rectified, WARP_PIXELS_PER_MM, sensitivity, cleanup)
+    contour = contour_to_millimetres(pixels)
+    reference_image, reference_bounds = _reference_crop(
+        rectified, pixels, WARP_PIXELS_PER_MM
+    )
+    rectified_image = _encode_jpeg_data_url(rectified, quality=80)
+    polygon = Polygon(contour)
+    min_x, min_y, max_x, max_y = polygon.bounds
+    return PhotoOutline(
+        contour,
+        round(max_x - min_x, 3),
+        round(max_y - min_y, 3),
+        tuple((round(float(x), 3), round(float(y), 3)) for x, y in corners),
+        reference_image,
+        reference_bounds,
+        rectified_image,
+    )
+
+
+def photo_outline_from_data(
+    data_url: str, mime_type: str = "", paper_size: str = "letter",
+    sensitivity: float = SENSITIVITY_DEFAULT, cleanup: float = CLEANUP_DEFAULT,
+    paper_corners: Iterable[Iterable[float]] | None = None,
+) -> PhotoOutline:
+    return extract_photo_outline(
+        decode_image_data(data_url, mime_type), paper_size, sensitivity, cleanup, paper_corners,
+    )
+
+
+def retrace_outline_from_rectified(
+    data_url: str, mime_type: str = "image/jpeg",
+    sensitivity: float = SENSITIVITY_DEFAULT, cleanup: float = CLEANUP_DEFAULT,
+) -> PhotoOutline:
+    """Re-tune an already-rectified reference sheet: segmentation, cleanup and
+    contour extraction only - paper detection and perspective correction are
+    not repeated for every slider adjustment."""
+    rectified = decode_image_data(data_url, mime_type or "image/jpeg")
+    _mask, pixels = segment_object(rectified, WARP_PIXELS_PER_MM, sensitivity, cleanup)
     contour = contour_to_millimetres(pixels)
     reference_image, reference_bounds = _reference_crop(
         rectified, pixels, WARP_PIXELS_PER_MM
@@ -351,13 +429,8 @@ def extract_photo_outline(image: np.ndarray, paper_size: str = "letter") -> Phot
         contour,
         round(max_x - min_x, 3),
         round(max_y - min_y, 3),
-        tuple((round(float(x), 3), round(float(y), 3)) for x, y in corners),
+        (),
         reference_image,
         reference_bounds,
+        None,
     )
-
-
-def photo_outline_from_data(
-    data_url: str, mime_type: str = "", paper_size: str = "letter",
-) -> PhotoOutline:
-    return extract_photo_outline(decode_image_data(data_url, mime_type), paper_size)

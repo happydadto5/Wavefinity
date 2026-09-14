@@ -524,13 +524,20 @@ def _feature_height(box: BoxSpec, one: Feature, base_z: float) -> float:
         depth = options.get("depth", min(one.item.length * 0.4, box.z - base_z - 2.0))
         return base_z + options.get("height", depth + 2.0)
     if one.kind == "nest":
-        depth = float(options.get("depth", 8.0))
+        tool_thickness = float(options.get("tool_thickness", options.get("depth", 8.0)))
+        if options.get("holder_style", "raised_wall") == "recessed":
+            cavity_depth = (
+                float(options.get("cavity_depth", 0.6 * tool_thickness))
+                if options.get("cavity_depth_mode", "auto") == "manual"
+                else 0.6 * tool_thickness
+            )
+            return base_z + min(cavity_depth, tool_thickness)
         lift = (
             float(options.get("push_depth", 4.0))
-            if options.get("lift_assist", "finger_grasp") == "push_out"
+            if options.get("lift_assist", "auto") == "push_out"
             else 0.0
         )
-        return base_z + depth + lift
+        return base_z + tool_thickness + lift
     if one.kind == "divider":
         return base_z + options.get("height", connector_keep_out(box) - base_z)
     return base_z + options.get("height", 12.0)
