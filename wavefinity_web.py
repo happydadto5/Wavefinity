@@ -1570,7 +1570,7 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
     connector = ConnectorSpec(
         tolerance=tolerance,
         height=height,
-        arm_thickness=DEFAULT_ARM_THICKNESS,
+        arm_thickness=arm_thickness,
     )
     different_heights = bool(options.get("different_heights", False))
     requested_a = float(options.get("bin_a_height", box.z)) if different_heights else box.z
@@ -1626,7 +1626,7 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if plan["webbed"]:
             plan["web_thickness_mm"] = max(
                 arm_thickness,
-                DEFAULT_ARM_THICKNESS + differing_web_reach(connector_box, connector),
+                arm_thickness + differing_web_reach(connector_box, connector),
             )
         else:
             plan["web_thickness_mm"] = connector.arm_thickness

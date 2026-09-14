@@ -510,6 +510,10 @@ DP.designSpot = () => {
   const mode = stackMode();
   const engagement = DL.stackSteps[mode] ?? 0;
   const maxModuleHeight = drawer.height - engagement;
+  if (maxModuleHeight <= 0) {
+    toast(`This gap is too short: the ${fmt(engagement)} mm stacking foot alone is taller than ${drawer.name}'s ${fmt(drawer.height)} mm height. Switch to a single bin (no stacking) or pick a taller drawer.`, true, 8000);
+    return;
+  }
   let heightNote = `Keep it ${fmt(drawer.height)} mm tall or less.`;
   if (state.design.box.z > maxModuleHeight) state.design.box.z = Math.floor(maxModuleHeight);
   if (engagement > 0) {
