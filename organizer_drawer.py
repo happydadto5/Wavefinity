@@ -1,9 +1,14 @@
 """Drawer layout: fitting printed bins into a real drawer.
 
-Pure 2D planning on the bin grid, plus the geometry it owns - the spacers and
-shims that fill whatever the bins leave, and the connectors a layout needs.
-Drawer coordinates: x runs left to right, y runs from the front (0) to the
-back, z is height.  The Layout view draws the front at the bottom.
+Pure 2D planning on the bin grid, plus the geometry it owns - the spacers
+that fill whatever the bins leave, and the connectors a layout needs.  There
+is one filler part, the Spacer: an open X-braced frame for a whole empty
+patch of grid, or (when it instead lines the strip between the grid and the
+drawer wall) a solid piece that is wavy on its bin-facing side and flat on
+its wall-facing side.  Both are ``kind: "spacer"``; only the placement shape
+and an internal ``boundary`` tag ("" or "edge") tell them apart.  Drawer
+coordinates: x runs left to right, y runs from the front (0) to the back, z
+is height.  The Layout view draws the front at the bottom.
 
 Bins never turn a quarter turn inside a drawer.  Left walls mate with right
 walls and front with back; a bin turned 90 degrees meets its neighbours crest
@@ -21,11 +26,18 @@ Placements
   stackable bin of the same footprint and the same stacking style can snap
   onto another; each one adds its requested module height.  The exposed top
   interlock remains part of the stack's physical drawer-height envelope.
-* Free, for an edge shim: ``x``/``y``/``w``/``d`` in mm from the drawer's
-  inside front-left corner, plus the ``side`` it lines.
+* Free, for an edge-facing spacer: ``x``/``y``/``w``/``d`` in mm from the
+  drawer's inside front-left corner, plus the ``side`` it lines.  Its width
+  across the wall is the drawer's real leftover play, not rounded to a grid
+  unit - a physically genuine residual, not a whole-8-mm footprint.
 
 A copy numbered past its row's printed Qty is *planned*: placed before it is
 printed, so a drawer can be designed first and printed to.
+
+Legacy inventories used a separate ``kind: "shim"`` for the edge-facing
+piece; ``organizer_inventory._normalise`` migrates it to ``spacer`` with
+``boundary: "edge"`` the moment a file is read, so nothing below this line
+ever sees the old kind.
 """
 
 from __future__ import annotations
@@ -76,7 +88,7 @@ SNAPS = (8.0, 4.0)
 CREST = WAVE_AMPLITUDE - WAVE_MATING_GAP / 2.0
 # Total slack per axis a drawer needs just to take the crests at both walls.
 MIN_CLEARANCE = 2.0 * CREST
-MIN_SHIM = 1.2                  # thinnest shim worth printing, at a wave trough
+MIN_EDGE_SPACER = 1.2           # thinnest edge spacer worth printing, at a wave trough
 MIN_SPACER_HEIGHT = 6.0         # a spacer frame still needs room for its lock bumps
 DEFAULT_SPACER_HEIGHT = 15.0
 RIB_WIDTH = 1.6                 # the X brace inside a spacer: four 0.4 mm lines
@@ -93,15 +105,24 @@ STACK_STEPS = {
 DRAWER_DEFAULTS: dict[str, Any] = {
     "name": "Drawer", "width": 400.0, "depth": 300.0, "height": 60.0,
     "clearance": 1.0, "anchor": "front-left", "bin_axis": "x", "snap": 8.0,
+    "boundary": "wall",
 }
 ANCHORS = ("front-left", "center")
+# A drawer's four sides are a real hard wall (the normal case, needing slack
+# for the outermost bins' wave crests) or a B4B/Box's own Wavefinity-mating
+# boundary, which is already the correct interlocking surface and needs no
+# extra hard-wall slack added on top of it.
+BOUNDARIES = ("wall", "mating")
 HEIGHT_RULES = ("strict", "prefer", "ignore")
 HEIGHT_REACHES = ("column", "adjacent")
 SPACER_FILLS = ("all", "edges", "cells")
 SIDES = ("left", "right", "front", "back")
 # Low filler nobody reaches for: spacers take room but are never counted for
-# or against the height rule.
-SPACER_KINDS = ("spacer", "shim")
+# or against the height rule.  A 1-tuple because inventories are migrated to
+# the unified "spacer" kind the moment they load (organizer_inventory); kept
+# as a tuple, not a bare comparison, since every call site already reads
+# ``in SPACER_KINDS``.
+SPACER_KINDS = ("spacer",)
 
 
 # ---------------------------------------------------------------- drawer model
@@ -123,7 +144,16 @@ def normalise_drawer(raw: dict[str, Any]) -> dict[str, Any]:
     drawer = {**DRAWER_DEFAULTS, **raw}
     for key in ("width", "depth", "height"):
         drawer[key] = _positive(drawer[key], key)
-    drawer["clearance"] = max(MIN_CLEARANCE, float(drawer.get("clearance") or 0.0))
+    if drawer.get("boundary") not in BOUNDARIES:
+        drawer["boundary"] = "wall"
+    requested_clearance = float(drawer.get("clearance") or 0.0)
+    # A hard drawer wall always gets the slack the outermost bins' wave
+    # crests need. A B4B/Box's own mating boundary is already the correct
+    # interlocking surface - flooring its clearance the same way would
+    # silently eat a real 8 mm row or column from its exact interior.
+    drawer["clearance"] = (
+        requested_clearance if drawer["boundary"] == "mating" else max(MIN_CLEARANCE, requested_clearance)
+    )
     if drawer["anchor"] not in ANCHORS:
         drawer["anchor"] = "front-left"
     if drawer["bin_axis"] not in ("x", "y"):
@@ -325,6 +355,26 @@ def _height_issues(items: list[dict[str, Any]], reach: str = "column") -> list[t
     return issues
 
 
+def _two_largest_empty(free: np.ndarray) -> list[tuple[int, int, int, int]]:
+    """Up to two distinct, non-overlapping maximal empty rectangles - real
+    bin-placement openings, largest first.
+
+    The second is the largest rectangle in whatever the first one does not
+    cover, so the pair can never be two overlapping or near-duplicate views
+    of the same opening. Only genuine gaps count: an opening with no area is
+    dropped rather than padded out with a second, smaller one.
+    """
+    rects: list[tuple[int, int, int, int]] = []
+    remaining = free.copy()
+    for _ in range(2):
+        area, gx, gy, w, d = _largest_empty(remaining)
+        if area <= 0:
+            break
+        rects.append((gx, gy, w, d))
+        remaining[gy:gy + d, gx:gx + w] = False
+    return rects
+
+
 def _largest_empty(free: np.ndarray) -> tuple[int, int, int, int, int]:
     """(area, gx, gy, w, d) of the largest all-True rectangle."""
     rows, cols = free.shape
@@ -431,17 +481,18 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     chains, loose = _chains(drawer, by_id)
     for placement in loose:
         problems.append({"type": "floating", "keys": [_key(placement)], "message": f"{_label(by_id[placement['bin']])} is stacked on nothing"})
-    # Edge shims were cut for the drawer as it was; resizing it, moving the
-    # grid or changing the snap can leave one across the grid or the wall.
+    # Edge-facing spacers were cut for the drawer as it was; resizing it,
+    # moving the grid or changing the snap can leave one across the grid or
+    # the wall.
     inset = CREST + 0.05
     grid_box = {"x": grid["ox"] + inset, "y": grid["oy"] + inset, "w": cols * step - 2 * inset, "d": rows * step - 2 * inset}
     for placement in drawer["placements"]:
         if "gx" in placement or "on" in placement or placement.get("bin") not in by_id:
             continue
-        shim = {key: float(placement.get(key, 0.0)) for key in ("x", "y", "w", "d")}
-        if (_overlaps(shim, grid_box) or shim["x"] < -0.1 or shim["y"] < -0.1
-                or shim["x"] + shim["w"] > drawer["width"] + 0.1 or shim["y"] + shim["d"] > drawer["depth"] + 0.1):
-            problems.append({"type": "shim", "keys": [_key(placement)], "message": "An edge shim no longer fits this drawer - take the spacers out and make them again"})
+        edge = {key: float(placement.get(key, 0.0)) for key in ("x", "y", "w", "d")}
+        if (_overlaps(edge, grid_box) or edge["x"] < -0.1 or edge["y"] < -0.1
+                or edge["x"] + edge["w"] > drawer["width"] + 0.1 or edge["y"] + edge["d"] > drawer["depth"] + 0.1):
+            problems.append({"type": "edge_spacer", "keys": [_key(placement)], "message": "An edge spacer no longer fits this drawer - take the spacers out and make them again"})
     items = [_stack_item(chain, drawer, by_id) for chain in chains]
     per_unit = _per_unit(drawer)
     for index, item in enumerate(items):
@@ -478,8 +529,8 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     blocked_cells = int(blocked.sum())
     usable = rows * cols - blocked_cells
     free = (owner < 0) & ~blocked
-    area, lx, ly, lw, ld = _largest_empty(free) if rows and cols else (0, 0, 0, 0, 0)
-    shim_area = sum(
+    opens = _two_largest_empty(free) if rows and cols else []
+    edge_area = sum(
         float(p.get("w", 0)) * float(p.get("d", 0))
         for p in drawer["placements"] if "gx" not in p and "on" not in p and p.get("bin") in by_id
     )
@@ -494,8 +545,14 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         "cells": {"total": usable, "used": used, "free": int(free.sum()), "blocked": blocked_cells},
         "fill": round(100.0 * used / usable, 1) if usable else 0.0,
         "free_mm2": round(float(free.sum()) * step * step),
-        "edge_mm2": round(max(0.0, drawer["width"] * drawer["depth"] - rows * cols * step * step - shim_area)),
-        "largest": {"gx": lx, "gy": ly, "w": lw, "d": ld, "w_mm": lw * step, "d_mm": ld * step} if area else None,
+        "edge_mm2": round(max(0.0, drawer["width"] * drawer["depth"] - rows * cols * step * step - edge_area)),
+        # Up to the two largest genuine bin-placement openings, largest
+        # first - real usable rectangles, not a statistic. mm is authoritative;
+        # the browser divides by 8 for the user-facing Wavefinity-unit line.
+        "opens": [
+            {"gx": gx, "gy": gy, "w": w, "d": d, "w_mm": w * step, "d_mm": d * step}
+            for gx, gy, w, d in opens
+        ],
         "connectors": connectors,
         "connector_total": sum(one["count"] for one in connectors),
         "connector_mismatched": mismatched,
@@ -504,7 +561,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         "placed": sum(len(item["layers"]) for item in items),
         "stacks": sum(1 for item in items if len(item["layers"]) > 1),
         "planned": planned,
-        "shims": sum(1 for p in drawer["placements"] if "gx" not in p and "on" not in p),
+        "edge_spacers": sum(1 for p in drawer["placements"] if "gx" not in p and "on" not in p),
     }
 
 
@@ -706,7 +763,7 @@ def auto_layout(
     dropped_spacers = 0
     for placement in drawer["placements"]:
         if placement.get("bin") in by_id and "gx" not in placement and "on" not in placement:
-            keep_placements.append(placement)          # edge shims stay where they are
+            keep_placements.append(placement)          # edge-facing spacers stay where they are
     for chain in chains:
         base = chain[0]
         if mode == "fill" or only or (keep_locked and base.get("locked")):
@@ -723,7 +780,10 @@ def auto_layout(
 
     wanted: list[tuple[str, int]] = list(loose_copies)
     for one in bins:
-        if one.get("kind") == "shim":
+        # An edge-facing spacer has a free placement the grid packer below
+        # cannot produce, so it is never a candidate here - it keeps the spot
+        # plan_spacers cut it for, regardless of include_spacers.
+        if one.get("kind") == "spacer" and one.get("boundary") == "edge":
             continue
         if one.get("kind") == "spacer" and not include_spacers and not only:
             continue
@@ -813,8 +873,9 @@ def auto_layout(
 
 
 def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options: dict[str, Any] | None = None) -> dict[str, Any]:
-    """What it takes to fill a drawer: X spacers for empty grid patches and
-    wavy-faced shims for the strips between the grid and the drawer walls.
+    """What it takes to fill a drawer: X-braced spacers for empty grid patches
+    and wavy-faced, flat-backed spacers for the strips between the grid and
+    the drawer walls.
 
     ``leave_open`` (mm) keeps any gap at least that wide in both directions
     empty - room for a bin not printed yet.
@@ -860,7 +921,7 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
         if slivers:
             notes.append(f"{slivers} gap{'s' if slivers != 1 else ''} only 4 mm wide left open - no spacer is that thin.")
 
-    shims = []
+    edges = []
     if fill in ("all", "edges") and rows and cols:
         wall = drawer["clearance"] / 2.0
         taken = {p.get("side") for p in drawer["placements"] if "gx" not in p and "on" not in p and p.get("bin") in by_id}
@@ -869,28 +930,28 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
             play = grid[f"gap_{side}"] - wall
             if side in taken or play < 0.05:
                 continue
-            pieces = _shim_outlines(drawer, grid, side, longest)
+            pieces = _edge_spacer_outlines(drawer, grid, side, longest)
             across = 0 if side in ("left", "right") else 1
-            # The bin-facing side is wavy, so the shim is thinnest at a trough.
+            # The bin-facing side is wavy, so the piece is thinnest at a trough.
             thinnest = min(
                 (piece.bounds[2 + across] - piece.bounds[across] for piece in pieces), default=0.0,
             ) - 2.0 * WAVE_AMPLITUDE
-            if thinnest < MIN_SHIM:
-                notes.append(f"{side.capitalize()} edge: {play:.1f} mm of play - too thin for a printed shim.")
+            if thinnest < MIN_EDGE_SPACER:
+                notes.append(f"{side.capitalize()} edge: {play:.1f} mm of play - too thin for a printed spacer.")
                 continue
             boxes = []
             for piece in pieces:
                 x0, y0, x1, y1 = piece.bounds
                 boxes.append({"x": x0, "y": y0, "w": x1 - x0, "d": y1 - y0, "side": side, "outline": piece})
             if any(_overlaps(one, zone) for one in boxes for zone in drawer["keepouts"]):
-                notes.append(f"{side.capitalize()} edge shim skipped - a keep-out zone is in the way.")
+                notes.append(f"{side.capitalize()} edge spacer skipped - a keep-out zone is in the way.")
                 continue
-            shims.extend(boxes)
-    return {"drawer": drawer, "height": height, "cells": cells, "shims": shims, "notes": notes}
+            edges.extend(boxes)
+    return {"drawer": drawer, "height": height, "cells": cells, "edges": edges, "notes": notes}
 
 
-def _shim_outlines(drawer: dict[str, Any], grid: dict[str, Any], side: str, longest: int) -> list[Polygon]:
-    """One side's edge-shim pieces, as outlines in drawer coordinates.
+def _edge_spacer_outlines(drawer: dict[str, Any], grid: dict[str, Any], side: str, longest: int) -> list[Polygon]:
+    """One side's edge-facing spacer pieces, as outlines in drawer coordinates.
 
     Each piece is cut from a virtual 16 mm bin standing just outside the grid,
     so its grid-facing side is the real wave and nests with the bins exactly
@@ -931,8 +992,8 @@ def _overlaps(a: dict[str, float], b: dict[str, float]) -> bool:
     return a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"] and a["y"] < b["y"] + b["d"] and b["y"] < a["y"] + a["d"]
 
 
-def spacer_filename(kind: str, x: float, y: float, z: float) -> str:
-    return f"{'Spacer' if kind == 'spacer' else 'Shim'} {x:g} x {y:g} x {z:g}.3mf"
+def spacer_filename(x: float, y: float, z: float) -> str:
+    return f"Spacer {x:g} x {y:g} x {z:g}.3mf"
 
 
 def _rib(a: tuple[float, float], b: tuple[float, float]) -> Polygon:
@@ -990,8 +1051,9 @@ def spacer_braces(spec: BoxSpec) -> list[Polygon]:
     return [one for one in braces if one.geom_type == "Polygon" and one.area > 0.01]
 
 
-def shim_mesh(outline: Polygon, z: float) -> trimesh.Trimesh:
-    """An edge shim: its outline extruded, centred on the origin for printing."""
+def edge_spacer_mesh(outline: Polygon, z: float) -> trimesh.Trimesh:
+    """An edge-facing spacer: its outline extruded, centred on the origin for
+    printing."""
     x0, y0, x1, y1 = outline.bounds
     return _extrude_polygon(affinity.translate(outline, -(x0 + x1) / 2.0, -(y0 + y1) / 2.0), z)
 
@@ -1015,7 +1077,7 @@ def generate_spacers(
         plan = plan_spacers(raw, bins, options)
         drawer, height = plan["drawer"], plan["height"]
         step = drawer["snap"]
-        if not plan["cells"] and not plan["shims"]:
+        if not plan["cells"] and not plan["edges"]:
             return {**inventory, "layout": layout, "generated": [], "reused": 0, "placed": 0,
                     "notes": plan["notes"] or ["Nothing left to fill."]}
 
@@ -1024,15 +1086,19 @@ def generate_spacers(
             for one in layout.get("drawers") or [] if isinstance(one, dict)
             for p in one.get("placements") or [] if isinstance(p, dict)
         }
+        # ``variant`` is grouping/geometry-choice detail, never persisted as
+        # ``kind`` - every generated row below is ``kind: "spacer"``; only its
+        # ``boundary`` ("" for a grid-cell frame, "edge" for a wall-facing
+        # piece) tells the two shapes apart, for reuse matching and rendering.
         groups: dict[tuple, list[dict]] = {}
         for cell in plan["cells"]:
             size = (cell["w"] * step, cell["d"] * step)
             bx, by = (size[1], size[0]) if drawer["bin_axis"] == "y" else size
-            groups.setdefault(("spacer", bx, by, height), []).append(cell)
-        # A left and a right shim of the same size are one part turned round:
-        # the odd wave makes opposite walls the same shape.
-        for shim in plan["shims"]:
-            groups.setdefault(("shim", round(shim["w"], 2), round(shim["d"], 2), height), []).append(shim)
+            groups.setdefault(("cell", bx, by, height), []).append(cell)
+        # A left and a right edge spacer of the same size are one part turned
+        # round: the odd wave makes opposite walls the same shape.
+        for edge in plan["edges"]:
+            groups.setdefault(("edge", round(edge["w"], 2), round(edge["d"], 2), height), []).append(edge)
 
         rows = [dict(one) for one in bins]
         updates: dict[str, dict] = {}
@@ -1040,10 +1106,12 @@ def generate_spacers(
         generated, reused = [], 0
         new_placements = []
         output_dir.mkdir(parents=True, exist_ok=True)
-        for (kind, bx, by, bz), spots in groups.items():
+        for (variant, bx, by, bz), spots in groups.items():
+            boundary = "" if variant == "cell" else "edge"
             matches = [
                 one for one in rows
-                if one.get("kind") == kind and _close(one["x"], bx) and _close(one["y"], by) and _close(one["z"], bz)
+                if one.get("kind") == "spacer" and one.get("boundary", "") == boundary
+                and _close(one["x"], bx) and _close(one["y"], by) and _close(one["z"], bz)
             ]
             copies = [
                 (one["id"], copy) for one in matches for copy in range(int(one["qty"]))
@@ -1052,9 +1120,9 @@ def generate_spacers(
             reused += min(len(copies), len(spots))
             shortfall = len(spots) - len(copies)
             if shortfall > 0:
-                name = spacer_filename(kind, bx, by, bz)
-                mesh = spacer_frame(bx, by, bz) if kind == "spacer" else shim_mesh(spots[0]["outline"], bz)
-                export_mesh(mesh, output_dir / name, "Spacer" if kind == "spacer" else "Shim")
+                name = spacer_filename(bx, by, bz)
+                mesh = spacer_frame(bx, by, bz) if variant == "cell" else edge_spacer_mesh(spots[0]["outline"], bz)
+                export_mesh(mesh, output_dir / name, "Spacer")
                 generated.append(name)
                 if matches:
                     target = matches[0]
@@ -1063,17 +1131,18 @@ def generate_spacers(
                     updates[target["id"]] = {"id": target["id"], "qty": target["qty"]}
                 else:
                     target = {
-                        "id": next_bin_id(rows), "kind": kind, "qty": shortfall,
-                        "name": "X spacer" if kind == "spacer" else "Edge shim",
+                        "id": next_bin_id(rows), "kind": "spacer", "boundary": boundary, "qty": shortfall,
+                        "name": "X spacer" if variant == "cell" else "Edge spacer",
                         "x": bx, "y": by, "z": bz, "file": name,
-                        "interior": "Open X-braced spacer frame" if kind == "spacer" else "Edge shim, wavy on the bin side",
+                        "interior": "Open X-braced spacer frame" if variant == "cell"
+                            else "Edge spacer, wavy on the bin side, flat on the wall side",
                     }
                     start = 0
                     rows.append(target)
                     new_rows.append(target)
                 copies += [(target["id"], start + n) for n in range(shortfall)]
             for spot, (bin_id, copy) in zip(spots, copies):
-                if kind == "spacer":
+                if variant == "cell":
                     new_placements.append({
                         "bin": bin_id, "copy": copy, "locked": False,
                         "gx": _units(spot["gx"], drawer), "gy": _units(spot["gy"], drawer),
@@ -1148,7 +1217,7 @@ def print_spacers_and_connectors(
     launch_slicer: Callable,
     slicer_path: str | None = None,
 ) -> dict[str, Any]:
-    """Open one drawer's spacers, shims and connectors in the slicer together."""
+    """Open one drawer's spacers and connectors in the slicer together."""
     output_dir = Path(output_dir).expanduser().resolve()
     drawer = find_drawer(layout, drawer_id)
     by_id = {one["id"]: one for one in bins}

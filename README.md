@@ -90,7 +90,7 @@ one" visible, and it means dragging a bin away from you always moves it back.
 The printed map stays a flat, numbered plan.
 
 **Colour means height.** Bins run from light (short) to dark (tall) teal, B4B
-cases purple, spacers and shims sand. A bin shows its name, or its size when it
+cases purple, spacers sand. A bin shows its name, or its size when it
 has none. Red is a real fault (overlap, sticking out, too tall for the drawer);
 a dashed orange outline is the softer height-order warning.
 
@@ -295,7 +295,7 @@ folder additionally represents one real drawer or storage box. Generated bins
 then enter `<folder name> bins.md`, and the Space view lays them out.
 
 - **The inventory file** is a Markdown table, one row per bin design, with an
-  **ID**, a **Kind** (bin, B4B case, spacer, shim, added by hand), a **Name**
+  **ID**, a **Kind** (bin, B4B case, spacer, added by hand), a **Name**
   a **Stack** (blank, `lid` or `direct` - how the bin was printed to stack)
   and a **Qty**. Qty is how many copies you have *printed*. Generating is not
   printing, so a newly generated bin arrives at Qty 0 until you raise it (turn
@@ -349,22 +349,28 @@ then enter `<folder name> bins.md`, and the Space view lays them out.
   into stacks as tall as the drawer takes. It returns up to five arrangements — Tidy rows, Tight fit, Columns,
   Most bins and, if the height rule left bins out, Fits more — and names
   anything that did not fit.
-- **Space & spacers** reports how full the grid is, the empty area, what is
-  left at each edge, the **largest empty gap** (with *Design a bin for it*,
-  which opens the bin editor at that size), how many connectors the layout
-  needs for each height pair, and any problems. **Make spacers** fills the
-  drawer, 15 mm tall by default (*Height*). Empty grid cells become **X
-  spacers**: open frames whose outside is exactly a bin's wavy wall, so they
-  nest with the bins around them and take a connector (the lock bumps are
-  kept). Inside, they have no floor, just one big X brace, or a row of X's when
-  the patch is long and thin. The strips between the grid and the drawer walls
-  become **edge shims**, cut from a virtual bin standing just outside the grid.
-  Their bin-facing side carries the same wave and interlocks, and their wall
-  side is flat. They are split into whole-unit pieces no longer than *Longest
-  piece*, so the piece ends nest too. Files go to the save location and rows go
-  into the inventory. Spare copies of a matching spacer already in the
-  inventory are used first. *Keep gaps open from* leaves any gap at least that
-  wide both ways empty, for a bin you will print later. **Make connectors**
+- **Space & spacers.** The drawer view itself shows the one or two biggest
+  open rectangles a bin could still go into, each as both a millimetre size
+  and a Wavefinity-unit size (*Design a bin for it* sends the primary one to
+  the bin editor); the left panel covers connector and layout problems
+  instead of restating those as a summary. **Make spacers** fills the drawer,
+  15 mm tall by default (*Height*). There is one filler part, the **Spacer**.
+  Empty grid cells become **X spacers**: open frames whose outside is exactly
+  a bin's wavy wall, so they nest with the bins around them and take a
+  connector (the lock bumps are kept) - inside, they have no floor, just one
+  big X brace, or a row of X's when the patch is long and thin. The strips
+  between the grid and the drawer walls become **edge-facing spacers**, cut
+  from a virtual bin standing just outside the grid: wavy and interlocking on
+  the bin-facing side, flat on the wall side, and sized to the drawer's real
+  leftover millimetres rather than rounded up to a whole 8 mm unit. A long
+  edge is still split into whole-unit pieces no longer than *Longest piece*,
+  so the piece ends nest too. Files go to the save location and rows go into
+  the inventory as the one Spacer kind; a folder saved before this
+  distinction existed still loads its old edge-shim rows and quietly
+  rewrites them as spacers the next time it saves. Spare copies of a matching
+  spacer already in the inventory are used first. *Keep gaps open from*
+  leaves any gap at least that wide both ways empty, for a bin you will print
+  later. **Make connectors**
   saves one file for each pair of rim heights the layout needs, and says how
   many of each to print. Stacks join at their top bins; X spacers need none,
   since their waves hold them. **Print spacers & connectors** opens the lot in

@@ -1,3 +1,4 @@
+import re
 import tempfile
 import unittest
 import json
@@ -5,8 +6,10 @@ from pathlib import Path
 
 from organizer_drawer import (
     auto_layout,
+    drawer_grid,
     drawer_report,
     generate_spacers,
+    normalise_drawer,
     plan_spacers,
     spacer_frame,
 )
@@ -243,16 +246,16 @@ class StackTests(unittest.TestCase):
 
 
 class SpacerTests(unittest.TestCase):
-    def test_edges_get_wavy_shims_and_empty_cells_get_spacers(self):
+    def test_edges_get_wavy_flat_backed_spacers_and_empty_cells_get_x_spacers(self):
         bins = [_bin("B1", 16, 16, 40)]
         layout = _layout(4 * 8 + 1 + 5.0, 3 * 8 + 1, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
         plan = plan_spacers(layout["drawers"][0], bins, {"fill": "all"})
         self.assertEqual(plan["height"], 15)
-        self.assertEqual([s["side"] for s in plan["shims"]], ["right"])
-        shim = plan["shims"][0]
+        self.assertEqual([s["side"] for s in plan["edges"]], ["right"])
+        edge = plan["edges"][0]
         # flat against the drawer wall; wave crests reach just past the grid edge (32.5)
-        self.assertAlmostEqual(shim["x"] + shim["w"], 37.5, places=6)
-        self.assertTrue(32.1 < shim["x"] < 32.5, shim["x"])
+        self.assertAlmostEqual(edge["x"] + edge["w"], 37.5, places=6)
+        self.assertTrue(32.1 < edge["x"] < 32.5, edge["x"])
         covered = sum(c["w"] * c["d"] for c in plan["cells"])
         self.assertEqual(covered, 4 * 3 - 4)
 
@@ -265,7 +268,7 @@ class SpacerTests(unittest.TestCase):
         self.assertGreater(mesh.volume, ring * 15)                          # wall plus braces
         self.assertLess(mesh.volume, wavy_outer_polygon(spec).area * 15 * 0.35)  # open, no floor
 
-    def test_generated_shims_join_the_inventory_and_the_drawer(self):
+    def test_generated_edge_spacers_join_the_inventory_and_the_drawer(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Shop"
             append_bin(folder, file="Box 16 x 16 x 40.3mf", x=16, y=16, z=40)
@@ -273,9 +276,82 @@ class SpacerTests(unittest.TestCase):
             made = generate_spacers(folder, layout, "d1", {"fill": "edges", "height": 12})
             self.assertEqual(len(made["generated"]), 1)
             self.assertTrue((folder / made["generated"][0]).is_file())
-            shim = next(b for b in made["bins"] if b["kind"] == "shim")
+            # One unified kind - an edge-facing spacer is told apart only by
+            # its "edge" boundary tag, never a separate "shim" kind.
+            edge = next(b for b in made["bins"] if b["kind"] == "spacer" and b.get("boundary") == "edge")
             placements = made["layout"]["drawers"][0]["placements"]
-            self.assertTrue(any(p["bin"] == shim["id"] and p["side"] == "right" for p in placements))
+            self.assertTrue(any(p["bin"] == edge["id"] and p["side"] == "right" for p in placements))
+
+    def test_legacy_shim_rows_load_as_spacers_and_never_resave_as_shim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Old Shop"
+            folder.mkdir(parents=True)
+            path = inventory_path(folder)
+            path.write_text(
+                "# Old Shop Bins\n\n"
+                "| ID | Date | Kind | Name | X (mm) | Y (mm) | Z (mm) | Stack | Wall (mm) | Qty | File | Label | Interior Part(s) |\n"
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+                "| B1 | 2024-01-01 00:00 | shim | Edge shim | 16 | 250 | 15 | | | 1 | Shim 16 x 250 x 15.3mf | | Edge shim, wavy on the bin side |\n",
+                encoding="utf-8",
+            )
+            loaded = load_inventory(folder)
+            legacy = loaded["bins"][0]
+            self.assertEqual(legacy["kind"], "spacer")
+            self.assertEqual(legacy["boundary"], "edge")
+            self.assertEqual((legacy["x"], legacy["y"], legacy["z"]), (16, 250, 15))
+            # Any save (even one touching an unrelated row) normalises it.
+            # Its historical name/file text is free-form data describing a
+            # real file already on disk and is left alone; only the Kind
+            # column - the thing that made it a second data model - changes.
+            saved = save_inventory(folder, bin_updates=[{"id": "B1", "qty": 1}])
+            self.assertEqual(saved["bins"][0]["kind"], "spacer")
+            self.assertEqual(saved["bins"][0]["boundary"], "edge")
+            kind_column = re.search(r"\|\s*shim\s*\|", path.read_text(encoding="utf-8"), re.I)
+            self.assertIsNone(kind_column, "a Kind cell still literally says shim")
+
+
+class BoundaryTests(unittest.TestCase):
+    def test_a_box_space_keeps_its_exact_grid_capacity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Case"
+            made = create_space(folder, name="Screw box", kind="box", x=96, y=48, z=40)
+            drawer = made["layout"]["drawers"][0]
+            self.assertEqual(drawer["boundary"], "mating")
+            grid = drawer_grid(normalise_drawer(drawer))
+            # A hard-wall drawer of this exact size would lose a column to the
+            # crest clearance; a B4B/Box mating boundary must not.
+            self.assertEqual((grid["cols"], grid["rows"]), (12, 6))
+            self.assertEqual(grid["gap_left"] + grid["gap_right"], 0)
+
+    def test_a_plain_drawer_still_gets_hard_wall_clearance(self):
+        drawer = normalise_drawer({"width": 96, "depth": 48, "height": 40, "clearance": 0})
+        self.assertEqual(drawer["boundary"], "wall")
+        grid = drawer_grid(drawer)
+        self.assertLess(grid["cols"], 12)
+
+
+class OpenSpaceTests(unittest.TestCase):
+    def test_two_distinct_openings_are_reported_largest_first(self):
+        # A drawer with one bin in the middle leaves two separate gaps, one
+        # each side - not a bounding box around both, and not the same gap
+        # reported twice.
+        bins = [_bin("B1", 16, 24, 20)]
+        layout = _layout(6 * 8 + 1, 3 * 8 + 1, placements=[{"bin": "B1", "copy": 0, "gx": 2, "gy": 0}])
+        report = drawer_report(layout["drawers"][0], bins)
+        opens = report["opens"]
+        self.assertEqual(len(opens), 2)
+        self.assertGreaterEqual(opens[0]["w"] * opens[0]["d"], opens[1]["w"] * opens[1]["d"])
+        left, right = opens[0], opens[1]
+        if left["gx"] > right["gx"]:
+            left, right = right, left
+        self.assertLessEqual(left["gx"] + left["w"], right["gx"])
+        self.assertEqual(left["w_mm"], left["w"] * 8)
+
+    def test_a_full_drawer_reports_no_open_space(self):
+        bins = [_bin("B1", 16, 16, 20)]
+        layout = _layout(2 * 8 + 1, 2 * 8 + 1, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
+        report = drawer_report(layout["drawers"][0], bins)
+        self.assertEqual(report["opens"], [])
 
 
 if __name__ == "__main__":

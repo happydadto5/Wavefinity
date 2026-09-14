@@ -165,8 +165,7 @@ DV.heightRange = () => {
 // `front` and `ink` stay plain colour strings for the panel's swatches.
 DV.binColor = (one, range) => {
   let hue, sat, light;
-  if (one.kind === "spacer") [hue, sat, light] = [43, 20, 82];
-  else if (one.kind === "shim") [hue, sat, light] = [42, 28, 72];
+  if (one.kind === "spacer") [hue, sat, light] = one.boundary === "edge" ? [42, 28, 72] : [43, 20, 82];
   else {
     const t = range[1] > range[0] ? (one.z - range[0]) / (range[1] - range[0]) : 0.5;
     const b4b = one.kind === "b4b";
@@ -241,9 +240,9 @@ DV.entries = (drawer, grid) => {
     const layers = item.layers.filter(layer => !drag?.keys.has(layer.key));
     if (layers.length) entries.push({ key: item.key, item, ...box(item.gx, item.gy, item.w, item.d), layers, mode: "" });
   }
-  for (const p of drawer.placements.filter(DL.isShim)) {
+  for (const p of drawer.placements.filter(DL.isEdgePlacement)) {
     const one = DL.bin(p.bin);
-    if (one) entries.push({ key: DL.key(p), x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.d, layers: [{ bin: one, key: DL.key(p), z0: 0, z1: Number(one.z) }], mode: "", shim: true });
+    if (one) entries.push({ key: DL.key(p), x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.d, layers: [{ bin: one, key: DL.key(p), z0: 0, z1: Number(one.z) }], mode: "", edge: true });
   }
   const ghost = drag || DV.drop;
   if (ghost) {
@@ -400,24 +399,30 @@ DV.paintScene = (ctx, drawer, cam) => {
       shape(flat(grid.ox + c * step + inset, grid.oy + r * step + inset, grid.ox + (c + 1) * step - inset, grid.oy + (r + 1) * step - inset));
       ctx.fill();
     }
-    const spot = DL.report?.largest;
-    if (spot && !DV.drag && DL.report.grid?.step === step) {
-      const x0 = grid.ox + spot.gx * step, y0 = grid.oy + spot.gy * step;
-      const x1 = grid.ox + (spot.gx + spot.w) * step, y1 = grid.oy + (spot.gy + spot.d) * step;
-      ctx.save();
-      ctx.setLineDash([5, 4]);
-      face(flat(x0, y0, x1, y1), null, "rgba(31,107,69,.8)", 1.5);
-      ctx.restore();
-      const [ax] = cam.project([x0, (y0 + y1) / 2, 0]);
-      const [bx] = cam.project([x1, (y0 + y1) / 2, 0]);
-      const [mx, my] = cam.project([(x0 + x1) / 2, (y0 + y1) / 2, 0]);
-      if (Math.abs(bx - ax) > 70) {
-        ctx.fillStyle = "rgba(31,107,69,.9)";
-        ctx.font = "600 11px 'Segoe UI', system-ui, sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(`${fmt(spot.w_mm)} × ${fmt(spot.d_mm)} free`, mx, my);
-      }
+    // Up to the two biggest genuine bin-placement openings the report found
+    // (see DP.renderOpenSpaces for their mm/unit read-out); the primary one
+    // also gets an on-canvas label.
+    const opens = DL.report?.opens;
+    if (opens && !DV.drag && DL.report.grid?.step === step) {
+      opens.forEach((spot, index) => {
+        const x0 = grid.ox + spot.gx * step, y0 = grid.oy + spot.gy * step;
+        const x1 = grid.ox + (spot.gx + spot.w) * step, y1 = grid.oy + (spot.gy + spot.d) * step;
+        ctx.save();
+        ctx.setLineDash([5, 4]);
+        face(flat(x0, y0, x1, y1), null, index === 0 ? "rgba(31,107,69,.8)" : "rgba(31,107,69,.5)", 1.5);
+        ctx.restore();
+        if (index > 0) return;
+        const [ax] = cam.project([x0, (y0 + y1) / 2, 0]);
+        const [bx] = cam.project([x1, (y0 + y1) / 2, 0]);
+        const [mx, my] = cam.project([(x0 + x1) / 2, (y0 + y1) / 2, 0]);
+        if (Math.abs(bx - ax) > 70) {
+          ctx.fillStyle = "rgba(31,107,69,.9)";
+          ctx.font = "600 11px 'Segoe UI', system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(`${fmt(spot.w_mm)} × ${fmt(spot.d_mm)} free`, mx, my);
+        }
+      });
     }
   }
 
@@ -470,7 +475,7 @@ DV.paintScene = (ctx, drawer, cam) => {
         topInk = color.light + DV.FACE_TONE.top < 60 ? "#ffffff" : color.ink;
         topPlanned = planned;
       }
-      if (!entry.ghost) hits.push({ key: layer.key, grid: !entry.shim, z: z1, polys: screens.map(s => s.screen) });
+      if (!entry.ghost) hits.push({ key: layer.key, grid: !entry.edge, z: z1, polys: screens.map(s => s.screen) });
     });
     if (topFace) DV.drawLabel(ctx, entry, topFace, topInk, topPlanned);
     const base = entry.item?.chain[0];
@@ -508,14 +513,14 @@ DV.drawLabel = (ctx, entry, topFace, ink, planned) => {
   const height = Math.hypot(...mid(p3, p2).map((v, i) => v - mid(p0, p1)[i]));
   const [cx, cy] = mid(mid(p0, p2), mid(p1, p3));
   const top = entry.layers[entry.layers.length - 1].bin;
-  const primary = top.kind === "shim" ? "Shim" : DL.label(top);
+  const primary = top.kind === "spacer" && top.boundary === "edge" ? "Spacer" : DL.label(top);
   const size = Math.min(14, height * 0.36, width / Math.max(3, primary.length * 0.56));
   if (size < 7) return;
   ctx.fillStyle = planned ? "#0d5356" : ink;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = `650 ${size}px 'Segoe UI', system-ui, sans-serif`;
-  const twoLines = height > size * 2.7 && top.kind !== "shim";
+  const twoLines = height > size * 2.7 && !(top.kind === "spacer" && top.boundary === "edge");
   const y = cy - (twoLines ? size * 0.45 : 0);
   ctx.fillText(DV.fitText(ctx, primary, width - 6), cx, y);
   if (twoLines) {
@@ -819,6 +824,7 @@ DV.buildOverlay = () => {
       </div>
     </div>
     <div id="dl-selection" class="dl-selection" hidden></div>
+    <div id="dl-open-spaces" class="dl-open-spaces"></div>
     <div class="layout-hint dl-hint">Drag bins to move · drop on a same-size stackable bin to stack · drag off the drawer to take out · drag the floor to pan · wheel zooms · L locks · Del removes</div>`);
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
     if (button.dataset.dlView === "fit") DV.fit(); else DV.setView(DV.PRESETS[button.dataset.dlView]);
@@ -887,7 +893,7 @@ DV.planImage = (drawer, width = 1400) => {
     const text = `${DL.label(top)}${item.bins.length > 1 ? ` ×${item.bins.length}` : ""}`;
     ctx.fillText(DV.fitText(ctx, text, box[2] - 6), box[0] + box[2] / 2, box[1] + box[3] / 2 + size * 0.55);
   });
-  drawer.placements.filter(DL.isShim).forEach(p => {
+  drawer.placements.filter(DL.isEdgePlacement).forEach(p => {
     ctx.fillStyle = "#cdbf9f";
     ctx.fillRect(...rect(p.x, p.y, p.x + p.w, p.y + p.d));
   });

@@ -8,8 +8,8 @@
 // server by id, so a bin generated while this view is open is never lost.
 //
 // A placement is on the grid (gx/gy in 8 mm units, halves allowed on a 4 mm
-// drawer), stacked (`on` names the placement below), or a free edge shim
-// (x/y/w/d mm). A copy numbered past its bin's printed Qty is *planned*.
+// drawer), stacked (`on` names the placement below), or a free edge-facing
+// spacer (x/y/w/d mm). A copy numbered past its bin's printed Qty is *planned*.
 //
 // Uses the page's global helpers from app.js: $, $$, api, toast, clone, fmt,
 // debounce, escapeHtml and state.output.
@@ -78,6 +78,7 @@ DL.defaultDrawer = (name, from = null) => ({
   anchor: from?.anchor ?? "front-left",
   bin_axis: from?.bin_axis ?? "x",
   snap: from?.snap ?? 8,
+  boundary: from?.boundary ?? "wall",
   keepouts: [],
   placements: [],
 });
@@ -131,16 +132,26 @@ DL.bin = id => DL.bins.find(one => one.id === id);
 DL.key = p => `${p.bin}:${p.copy ?? 0}`;
 DL.label = one => one.name || `${fmt(one.x)} × ${fmt(one.y)}`;
 DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
-DL.isSpacer = one => one?.kind === "spacer" || one?.kind === "shim";
+// The user-facing Wavefinity unit is always 8 mm, independent of a drawer's
+// own internal grid snap (4 or 8 mm) - see the "8 mm size grid" section of
+// README.md. The one place this conversion belongs.
+DL.mmToUnits = mm => fmt(mm / 8);
+DL.isSpacer = one => one?.kind === "spacer";
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
 DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct snap", b4b: "B4B stacking" })[mode] || "Not stackable";
 DL.isPlanned = p => (p.copy ?? 0) >= (Number(DL.bin(p.bin)?.qty) || 0);
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
-DL.isShim = p => p.gx === undefined && p.on === undefined;
+// A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
+DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
 
+// A B4B/Box's own mating boundary is already the correct interlocking
+// surface (see organizer_drawer.normalise_drawer) and needs no extra
+// hard-wall slack; only a real drawer wall floors clearance at 0.55 mm.
 DL.grid = (drawer = DL.drawer()) => {
   const step = Number(drawer.snap) === 4 ? 4 : 8;
-  const slack = Math.max(0.55, Number(drawer.clearance) || 0);
+  const slack = drawer.boundary === "mating"
+    ? Math.max(0, Number(drawer.clearance) || 0)
+    : Math.max(0.55, Number(drawer.clearance) || 0);
   const usableX = drawer.width - slack;
   const usableY = drawer.depth - slack;
   const cols = Math.max(0, Math.floor(usableX / step + 1e-6));

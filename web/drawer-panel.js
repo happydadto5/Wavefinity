@@ -90,8 +90,8 @@ DP.build = () => {
       </div>
     </section>
 
-    <section class="control-section open dl-section" aria-label="Space, spacers and connectors">
-      <div class="section-heading no-toggle"><span>Space, spacers &amp; connectors</span></div>
+    <section class="control-section open dl-section" aria-label="Spacers and connectors">
+      <div class="section-heading no-toggle"><span>Spacers &amp; connectors</span></div>
       <div class="section-body">
         <div id="dl-stats" class="dl-stats"></div>
         <div class="field-grid two">
@@ -100,15 +100,15 @@ DP.build = () => {
             <option value="edges">Edge strips only</option>
             <option value="cells">Empty cells only</option>
           </select></label>
-          <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the X spacers and edge shims are"></label>
+          <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
           <label>Longest piece <span class="unit">mm</span><input id="dl-sp-max" type="number" min="16" step="1" title="Split anything longer so it fits your print bed"></label>
           <label>Keep gaps open from <span class="unit">mm</span><input id="dl-sp-open" type="number" min="0" step="8" title="Gaps at least this wide both ways stay empty, for a bin you will print later. 0 fills everything."></label>
         </div>
         <div class="dl-action-grid">
-          <button type="button" id="dl-sp-make" class="button secondary" title="Open X-braced spacers for empty cells and wavy-faced shims for the edges: saved, added to the inventory and placed">Make spacers</button>
+          <button type="button" id="dl-sp-make" class="button secondary" title="Open X-braced spacers for empty cells and flat-backed spacers for the edges: saved, added to the inventory and placed">Make spacers</button>
           <button type="button" id="dl-sp-remove" class="button secondary" title="Take this drawer's spacers out (they stay in the inventory)">Take spacers out</button>
           <button type="button" id="dl-connectors" class="button secondary" title="Save a file for every connector this layout needs, with how many to print">Make connectors</button>
-          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers, shims and connectors in Bambu Studio">Print spacers &amp; connectors</button>
+          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and connectors in Bambu Studio">Print spacers &amp; connectors</button>
         </div>
       </div>
     </section>
@@ -279,7 +279,7 @@ DP.wire = () => {
     const card = event.target.closest("[data-candidate]");
     if (card) DL.applyCandidate(Number(card.dataset.candidate));
   });
-  $("#dl-stats").addEventListener("click", event => {
+  $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", event => {
     if (event.target.closest("#dl-design-spot")) DP.designSpot();
   });
   $("#dl-sp-make").addEventListener("click", () => DL.makeSpacers());
@@ -459,7 +459,7 @@ DP.changeFolder = async () => {
 
 // Send the largest empty spot to the bin editor as a new bin's size.
 DP.designSpot = () => {
-  const spot = DL.report?.largest;
+  const spot = DL.report?.opens?.[0];
   if (!spot) return;
   if (typeof b4bEnabled === "function" && b4bEnabled()) { toast("Set Bin type to Single bin first, then try again.", true); return; }
   const drawer = DL.drawer();
@@ -495,6 +495,7 @@ DP.update = () => {
   DP.renderDrawer();
   DP.renderAuto();
   DP.renderStats();
+  DP.renderOpenSpaces();
   DP.renderTodo();
   DP.renderInventory();
   DP.renderSave();
@@ -526,7 +527,7 @@ DP.renderDrawer = () => {
   dlSet("#dl-snap", String(Number(drawer.snap) === 4 ? 4 : 8));
   $("#dl-drawer-delete").disabled = DL.layout.drawers.length < 2;
   const grid = DL.grid(drawer);
-  const wall = Math.max(0.55, drawer.clearance) / 2;
+  const wall = (drawer.boundary === "mating" ? Math.max(0, drawer.clearance) : Math.max(0.55, drawer.clearance)) / 2;
   const edges = [["left", grid.gapLeft], ["right", grid.gapRight], ["front", grid.gapFront], ["back", grid.gapBack]]
     .map(([side, gap]) => [side, gap - wall]).filter(([, play]) => play >= 0.1)
     .map(([side, play]) => `${side} ${play.toFixed(1)} mm`);
@@ -623,31 +624,34 @@ DP.renderStats = () => {
   const report = DL.report;
   const warnings = DL.warnings.map(text => `<p class="dl-note dl-warning">${escapeHtml(text)}</p>`).join("");
   if (!report) { box.innerHTML = warnings || `<p class="dl-note">Measuring…</p>`; return; }
-  const drawer = DL.drawer();
-  const wall = Math.max(0.55, drawer.clearance) / 2;
-  const shimmed = new Set(drawer.placements.filter(p => p.side).map(p => p.side));
-  const edges = ["left", "right", "front", "back"]
-    .map(side => [side, report.grid[`gap_${side}`] - wall])
-    .filter(([, play]) => play >= 0.1)
-    .map(([side, play]) => `${side} ${play.toFixed(1)} mm${shimmed.has(side) ? " (shimmed)" : ""}`);
-  const mixed = report.connectors.filter(c => c.heights[0] !== c.heights[1]);
-  const same = report.connectors.filter(c => c.heights[0] === c.heights[1]).reduce((sum, c) => sum + c.count, 0);
-  const spot = report.largest;
-  const [spotX, spotY] = spot && drawer.bin_axis === "y" ? [spot.d_mm, spot.w_mm] : [spot?.w_mm, spot?.d_mm];
-  const planned = Object.values(report.planned || {}).reduce((sum, n) => sum + n, 0);
+  // Fill/empty/largest-gap/connector-count summaries used to live here; they
+  // were numbers nobody acted on. The two live open-space rectangles now show
+  // on the drawer view itself (DP.renderOpenSpaces), next to the layout they
+  // describe. Only actionable problems and warnings stay in this panel.
   const problems = report.problems;
   box.innerHTML = `
-    <div class="dl-stat"><span>Filled</span><div><strong>${report.fill}%</strong> <small>${report.cells.used} of ${report.cells.total} cells${planned ? ` · ${planned} planned` : ""}</small>
-      <div class="dl-meter"><span></span></div></div></div>
-    <div class="dl-stat"><span>Empty</span><div>${report.cells.free ? `${report.free_mm2.toLocaleString()} mm² of grid` : "No empty grid cells"}
-      <small>${edges.length ? `Edges: ${edges.join(", ")}` : "No spare strip at the edges"}</small></div></div>
-    ${spot ? `<div class="dl-stat"><span>Largest gap</span><div>${fmt(spotX)} × ${fmt(spotY)} mm <small>as a bin's X × Y</small>
-      <button type="button" id="dl-design-spot" class="dl-link" title="Open the bin editor with this size">Design a bin for it</button></div></div>` : ""}
-    <div class="dl-stat"><span>Connectors</span><div>${report.connector_total ? `${report.connector_total} <small>${same} same-height${mixed.length ? `; mixed: ${mixed.map(c => `${fmt(c.heights[0])}→${fmt(c.heights[1])} ×${c.count}`).join(", ")}` : ""}${report.connector_mismatched ? `; ${report.connector_mismatched} seam(s) join different wall thicknesses and cannot take one` : ""}</small>` : "None yet - bins need shared walls of 16 mm or more"}</div></div>
     ${problems.length ? `<ul class="dl-problems">${problems.slice(0, 8).map(p => `<li class="${p.type === "height" ? "height" : ""}">${escapeHtml(p.message)}</li>`).join("")}${problems.length > 8 ? `<li>…and ${problems.length - 8} more</li>` : ""}</ul>` : ""}
     ${warnings}`;
-  const meter = $(".dl-meter span", box);
-  if (meter) meter.style.width = `${Math.min(100, report.fill)}%`;
+};
+
+// The one or two biggest genuine bin-placement openings, shown right on the
+// drawer view (see the matching dashed outlines in DV.render) instead of as
+// a left-panel statistic. Always both mm and the user-facing 8 mm unit.
+DP.renderOpenSpaces = () => {
+  const box = $("#dl-open-spaces");
+  if (!box) return;
+  const opens = DL.report?.opens;
+  if (!opens) { box.innerHTML = ""; return; }
+  if (!opens.length) { box.innerHTML = `<p class="dl-note">No open space left for another bin.</p>`; return; }
+  const drawer = DL.drawer();
+  box.innerHTML = opens.map((spot, index) => {
+    const [wMm, dMm] = drawer.bin_axis === "y" ? [spot.d_mm, spot.w_mm] : [spot.w_mm, spot.d_mm];
+    return `<div class="dl-open-spot">
+      <span>${index === 0 ? "Largest open space" : "Next open space"}</span>
+      <div>${fmt(wMm)} × ${fmt(dMm)} mm<small>${DL.mmToUnits(wMm)} × ${DL.mmToUnits(dMm)} units</small></div>
+      ${index === 0 ? `<button type="button" id="dl-design-spot" class="dl-link" title="Open the bin editor with this size">Design a bin for it</button>` : ""}
+    </div>`;
+  }).join("");
 };
 
 // Bins placed before they were printed, across every drawer: the print list.
@@ -683,7 +687,7 @@ DP.filteredBins = () => {
     name: (a, b) => DL.label(a).localeCompare(DL.label(b), undefined, { numeric: true }),
     newest: (a, b) => Number(b.id.slice(1)) - Number(a.id.slice(1)),
   };
-  // Spacers and shims sink below real bins whatever the sort.
+  // Spacers sink below real bins whatever the sort.
   return list.sort((a, b) => Number(DL.isSpacer(a)) - Number(DL.isSpacer(b)) || sorters[DP.filter.sort](a, b));
 };
 
@@ -709,7 +713,8 @@ DP.renderInventory = (force = false) => {
   }
   if (!bins.length) { list.innerHTML = `<div class="dl-empty">No bins match.</div>`; return; }
   const range = DV.heightRange();
-  const kinds = { b4b: "B4B case", spacer: "X spacer", shim: "Edge shim", manual: "Added by hand" };
+  const kinds = { b4b: "B4B case", manual: "Added by hand" };
+  const kindLabel = one => one.kind === "spacer" ? (one.boundary === "edge" ? "Edge spacer" : "X spacer") : kinds[one.kind];
   list.innerHTML = bins.map(one => {
     const placed = DL.placedCount(one.id);
     const planned = DL.plannedCount(one.id);
@@ -717,10 +722,10 @@ DP.renderInventory = (force = false) => {
     const units = value => fmt(value * DL.grid(drawer).step / DL.UNIT);
     const tooTall = one.z > drawer.height + 1e-6;
     const freePrinted = one.qty - (placed - planned);
-    const canPlace = !tooTall && one.kind !== "shim";
+    const canPlace = !tooTall && !(one.kind === "spacer" && one.boundary === "edge");
     const color = DV.binColor(one, range);
     const flags = [
-      DL.stackable(one) ? DL.stackName(one.stack) : "", kinds[one.kind],
+      DL.stackable(one) ? DL.stackName(one.stack) : "", kindLabel(one),
       tooTall ? `Taller than ${drawer.name}` : "", one.qty <= 0 ? "Not printed" : "",
     ].filter(Boolean);
     const holding = DL.drawersHolding(one.id);

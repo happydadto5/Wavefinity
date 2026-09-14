@@ -38,10 +38,14 @@ COLUMNS = (
     ("x", "X (mm)"), ("y", "Y (mm)"), ("z", "Z (mm)"), ("stack", "Stack"),
     ("wall", "Wall (mm)"),
     ("qty", "Qty"), ("file", "File"), ("label", "Label"), ("interior", "Interior Part(s)"),
+    ("boundary", "Boundary"),
 )
-# bin: generated here.  b4b: a Bin for Bins case.  spacer/shim: made by the
-# Layout view to fill a drawer.  manual: typed in for a bin printed elsewhere.
-KINDS = ("bin", "b4b", "spacer", "shim", "manual")
+# bin: generated here.  b4b: a Bin for Bins case.  spacer: made by the Layout
+# view to fill a drawer - a plain grid-filling frame, or (boundary "edge") a
+# piece cut flat against the drawer wall on one side.  manual: typed in for a
+# bin printed elsewhere.  Older inventories used a separate "shim" kind for
+# what is now an edge-facing spacer; see the migration in ``_normalise``.
+KINDS = ("bin", "b4b", "spacer", "manual")
 # How the bin was printed to stack: not at all, with a snap-on lid, or snapping
 # straight into the bin below. For stackable bins Z is the requested module
 # contribution; the drawer derives the detached envelope from the interface.
@@ -61,7 +65,7 @@ _HEADER_KEYS = {
     "wall": "wall",
     "qty": "qty", "quantity": "qty",
     "file": "file", "label": "label", "interior part(s)": "interior",
-    "interior": "interior",
+    "interior": "interior", "boundary": "boundary",
 }
 _KEEP = object()
 
@@ -136,8 +140,17 @@ def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
     label = _text(raw.get("label"))
     interior = _text(raw.get("interior"))
     kind = _text(raw.get("kind")).lower()
-    if kind not in KINDS:
+    boundary = _text(raw.get("boundary")).lower()
+    if kind != "shim" and kind not in KINDS:
         kind = infer_kind(file, interior)
+    if kind == "shim":
+        # Legacy inventories used a separate "shim" kind for what is now an
+        # edge-facing Spacer. Fold it into the unified kind on load, so
+        # nothing downstream ever sees "shim" again and the next save writes
+        # a plain spacer row instead.
+        kind, boundary = "spacer", "edge"
+    if boundary not in ("", "edge"):
+        boundary = ""
     name = _text(raw.get("name")) if "name" in raw else infer_name(file, label)
     qty = raw.get("qty")
     stack = _text(raw.get("stack")).lower()
@@ -149,6 +162,7 @@ def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
         "id": _text(raw.get("id")),
         "date": _text(raw.get("date")),
         "kind": kind,
+        "boundary": boundary,
         "name": name,
         "x": x, "y": y, "z": z,
         "stack": stack if stack in STACK_MODES else "none",
@@ -423,6 +437,7 @@ def _merge_inventory(
     for raw in new_bins or ():
         clean = _clean_bin(raw, partial=False)
         kind = str(raw.get("kind") or "manual")
+        boundary = str(raw.get("boundary") or "")
         wanted = str(raw.get("id") or "")
         taken = {one["id"] for one in bins}
         raw_wall = _number(raw.get("wall")) if _text(raw.get("wall")) else None
@@ -430,6 +445,7 @@ def _merge_inventory(
             "id": wanted if re.fullmatch(r"B\d+", wanted) and wanted not in taken else next_bin_id(bins),
             "date": now,
             "kind": kind if kind in KINDS else "manual",
+            "boundary": boundary if boundary == "edge" else "",
             "name": clean.get("name", ""),
             "x": clean["x"], "y": clean["y"], "z": clean["z"],
             "stack": clean.get("stack", "none"),
@@ -581,7 +597,9 @@ def create_space(
         if not layout.get("drawers"):
             layout["drawers"] = [{
                 "id": "d1", "name": name, "width": size[0], "depth": size[1], "height": size[2],
-                "clearance": 0.0 if kind == "box" else 1.0, "keepouts": [], "placements": [],
+                "clearance": 0.0 if kind == "box" else 1.0,
+                "boundary": "mating" if kind == "box" else "wall",
+                "keepouts": [], "placements": [],
             }]
             layout["active"] = "d1"
         _write(path, current["bins"], layout, current["legacy"])
@@ -612,7 +630,9 @@ def create_space_text(
         if not layout.get("drawers"):
             layout["drawers"] = [{
                 "id": "d1", "name": name, "width": size[0], "depth": size[1], "height": size[2],
-                "clearance": 0.0 if kind == "box" else 1.0, "keepouts": [], "placements": [],
+                "clearance": 0.0 if kind == "box" else 1.0,
+                "boundary": "mating" if kind == "box" else "wall",
+                "keepouts": [], "placements": [],
             }]
             layout["active"] = "d1"
         rendered = render_inventory(str(title or name), current["bins"], layout)
