@@ -200,6 +200,32 @@ def next_bin_id(bins: Iterable[dict[str, Any]]) -> str:
     return f"B{max(numbers) + 1}"
 
 
+def _migrate_drawer_boundaries(layout: dict[str, Any] | None) -> None:
+    """Fill in a missing drawer ``boundary`` from the authoritative Space kind.
+
+    A Space's ``boundary`` ("wall" or "mating") was added after Box Spaces
+    already existed, and organizer_drawer.normalise_drawer defaults an absent
+    one to "wall" - a hard-wall clearance floor that silently shrinks an old
+    Box/B4B's exact interior (see organizer_drawer.BOUNDARIES). Migrate only
+    the Space's own primary drawer (the active one, or the first) from
+    ``layout.space.kind``; any other drawer in the layout, and any drawer
+    that already carries an explicit valid boundary, is left untouched. The
+    mutation is in place, so a save right after loading persists it.
+    """
+    if not isinstance(layout, dict):
+        return
+    space = layout.get("space")
+    drawers = layout.get("drawers")
+    if not isinstance(space, dict) or not isinstance(drawers, list) or not drawers:
+        return
+    target = "mating" if space.get("kind") == "box" else "wall"
+    active_id = layout.get("active")
+    primary = next((d for d in drawers if isinstance(d, dict) and d.get("id") == active_id), None)
+    primary = primary or next((d for d in drawers if isinstance(d, dict)), None)
+    if isinstance(primary, dict) and primary.get("boundary") not in ("wall", "mating"):
+        primary["boundary"] = target
+
+
 def parse_inventory(text: str) -> dict[str, Any]:
     """Split the file into bin rows and the layout block.
 
@@ -248,6 +274,7 @@ def parse_inventory(text: str) -> dict[str, Any]:
                 layout = parsed if isinstance(parsed, dict) else None
             except json.JSONDecodeError as error:
                 warnings.append(f"the drawer layout block could not be read ({error.msg}); it will be rewritten on the next save")
+    _migrate_drawer_boundaries(layout)
     return {"bins": bins, "layout": layout, "warnings": warnings, "legacy": legacy}
 
 

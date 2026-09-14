@@ -570,8 +570,8 @@ DP.renderAuto = () => {
       <button type="button" class="dl-candidate${index === DL.candidateIndex ? " active" : ""}" data-candidate="${index}" title="${escapeHtml(c.description)}">
         <canvas width="264" height="152" data-thumb="${index}"></canvas>
         <strong>${escapeHtml(c.name)}${index === 0 ? " · best" : ""}</strong>
-        <small>${c.stats.placed} of ${c.stats.wanted} bins · ${c.stats.fill}% full${c.stats.stacks ? ` · ${dlPlural(c.stats.stacks, "stack")}` : ""}</small>
-        <small>${c.stats.height_issues ? dlPlural(c.stats.height_issues, "height clash", "height clashes") : "Tall bins at the back"} · ${dlPlural(c.stats.connectors, "connector")}</small>
+        <small>${c.stats.placed} of ${c.stats.wanted} bins${c.stats.stacks ? ` · ${dlPlural(c.stats.stacks, "stack")}` : ""}</small>
+        <small>${c.stats.height_issues ? dlPlural(c.stats.height_issues, "height clash", "height clashes") : "Tall bins at the back"}</small>
       </button>`).join("")}</div>
     ${active?.unplaced.length ? `<p class="dl-unfit">Didn't fit: ${names(active.unplaced)}</p>` : ""}
     ${DL.skipped.length ? `<p class="dl-unfit">Left out: ${names(DL.skipped)}</p>` : ""}

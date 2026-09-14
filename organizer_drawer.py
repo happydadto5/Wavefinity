@@ -355,23 +355,27 @@ def _height_issues(items: list[dict[str, Any]], reach: str = "column") -> list[t
     return issues
 
 
-def _two_largest_empty(free: np.ndarray) -> list[tuple[int, int, int, int]]:
-    """Up to two distinct, non-overlapping maximal empty rectangles - real
-    bin-placement openings, largest first.
+def _two_largest_empty(free: np.ndarray, min_cells: int = 1) -> list[tuple[int, int, int, int]]:
+    """Up to two distinct, non-overlapping maximal empty rectangles that could
+    actually take a normal bin - real bin-placement openings, largest first.
 
     The second is the largest rectangle in whatever the first one does not
     cover, so the pair can never be two overlapping or near-duplicate views
-    of the same opening. Only genuine gaps count: an opening with no area is
-    dropped rather than padded out with a second, smaller one.
+    of the same opening. A rectangle narrower than ``min_cells`` in either
+    direction - too small for even the smallest normal bin, which is always
+    at least one Wavefinity unit - is not a real bin-placement opportunity:
+    it is discarded (not padded out with a smaller one) and the search
+    continues in what is left.
     """
     rects: list[tuple[int, int, int, int]] = []
     remaining = free.copy()
-    for _ in range(2):
+    while len(rects) < 2:
         area, gx, gy, w, d = _largest_empty(remaining)
         if area <= 0:
             break
-        rects.append((gx, gy, w, d))
         remaining[gy:gy + d, gx:gx + w] = False
+        if w >= min_cells and d >= min_cells:
+            rects.append((gx, gy, w, d))
     return rects
 
 
@@ -529,7 +533,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     blocked_cells = int(blocked.sum())
     usable = rows * cols - blocked_cells
     free = (owner < 0) & ~blocked
-    opens = _two_largest_empty(free) if rows and cols else []
+    opens = _two_largest_empty(free, _per_unit(drawer)) if rows and cols else []
     edge_area = sum(
         float(p.get("w", 0)) * float(p.get("d", 0))
         for p in drawer["placements"] if "gx" not in p and "on" not in p and p.get("bin") in by_id
@@ -899,7 +903,7 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
         free = ~_blocked(drawer, grid)
         for item in _grid_items(drawer, by_id):
             free[max(0, item["gy"]):max(0, item["gy"] + item["d"]), max(0, item["gx"]):max(0, item["gx"] + item["w"])] = False
-        longest = max(1, int(max_length // UNIT)) * per_unit
+        longest = max(1, int(max_length // step))
         slivers = 0
         while True:
             area, gx, gy, w, d = _largest_empty(free)
@@ -909,8 +913,13 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
                 free[gy:gy + d, gx:gx + w] = False
                 notes.append(f"Left a {w * step:g} × {d * step:g} mm gap open.")
                 continue
-            # A spacer is a whole number of 8 mm units: on a 4 mm drawer an odd
-            # cell left over is a sliver nothing printable fits.
+            # An X-braced spacer is genuinely wavy on all four sides so it
+            # mates with a neighbour on any of them, and that wave is only
+            # generated for a GRID_PITCH (8 mm) reference box (BoxSpec) -
+            # unlike an edge-facing spacer, there is no flat side here to trim
+            # a smaller real size down from. On a 4 mm-snap drawer an odd
+            # cell left over is therefore a real manufacturability sliver, not
+            # a "must be a whole unit" preference.
             w, d = min(w - w % per_unit, longest), min(d - d % per_unit, longest)
             if not w or not d:
                 free[gy:gy + max(d, 1), gx:gx + max(w, 1)] = False
@@ -919,13 +928,13 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
             free[gy:gy + d, gx:gx + w] = False
             cells.append({"gx": gx, "gy": gy, "w": w, "d": d})
         if slivers:
-            notes.append(f"{slivers} gap{'s' if slivers != 1 else ''} only 4 mm wide left open - no spacer is that thin.")
+            notes.append(f"{slivers} gap{'s' if slivers != 1 else ''} only 4 mm wide left open - too narrow for a fully wavy spacer frame on every side.")
 
     edges = []
     if fill in ("all", "edges") and rows and cols:
         wall = drawer["clearance"] / 2.0
         taken = {p.get("side") for p in drawer["placements"] if "gx" not in p and "on" not in p and p.get("bin") in by_id}
-        longest = max(1, int(max_length // UNIT))
+        longest = max(1, int(max_length // step))
         for side in SIDES:
             play = grid[f"gap_{side}"] - wall
             if side in taken or play < 0.05:
@@ -953,10 +962,18 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
 def _edge_spacer_outlines(drawer: dict[str, Any], grid: dict[str, Any], side: str, longest: int) -> list[Polygon]:
     """One side's edge-facing spacer pieces, as outlines in drawer coordinates.
 
-    Each piece is cut from a virtual 16 mm bin standing just outside the grid,
-    so its grid-facing side is the real wave and nests with the bins exactly
-    as a neighbouring bin would; the far side is trimmed flat to the drawer
-    wall.  Pieces are whole units long, so their ends nest with each other.
+    Each piece is cut from a virtual bin standing just outside the grid, so
+    its grid-facing side is the real wave and nests with the bins exactly as
+    a neighbouring bin would; the far side is trimmed flat to the drawer
+    wall.  The run is split into pieces of up to ``longest`` grid cells so
+    the piece ends nest with each other - but the split covers the drawer's
+    real length exactly, down to the last cell.  ``BoxSpec`` only accepts a
+    whole 8 mm (``UNIT``) length, so a piece whose true length is an odd
+    number of 4 mm cells is built on the next whole-unit size up and trimmed
+    back down to its real bounds with the same keep-box technique already
+    used for the across-wall side; the discarded overhang sits past the real
+    segment's ends, where the wave is unused, so nothing about the kept wave
+    is distorted.
     """
     wall = drawer["clearance"] / 2.0
     step = grid["step"]
@@ -964,27 +981,38 @@ def _edge_spacer_outlines(drawer: dict[str, Any], grid: dict[str, Any], side: st
     ox, oy = grid["ox"], grid["oy"]
     far_x = drawer["width"] - wall - ox
     far_y = drawer["depth"] - wall - oy
-    run = int((back if side in ("left", "right") else right) // UNIT)
-    count = math.ceil(run / longest) if run else 0
-    outlines, start = [], 0
+    run_cells = grid["rows"] if side in ("left", "right") else grid["cols"]
+    count = math.ceil(run_cells / longest) if run_cells else 0
+    outlines, start_cells = [], 0
     for index in range(count):
-        units = run // count + (1 if index < run % count else 0)
-        middle = (start + units / 2.0) * UNIT
-        length = units * UNIT
+        cells = run_cells // count + (1 if index < run_cells % count else 0)
+        seg_start = start_cells * step
+        seg_len = cells * step
+        # The real segment, exactly - never rounded to a whole 8 mm unit.
+        built_len = math.ceil(seg_len / UNIT - 1e-9) * UNIT
+        # Anchor the (possibly padded) virtual box's start on the real
+        # segment's own start - both are already on the wave's 4 mm lattice
+        # (multiples of ``step``), so the resulting centre is too, even when
+        # the segment's own true midpoint would not be.
+        middle = seg_start + built_len / 2.0
         if side == "right":
-            spec, centre, keep = BoxSpec(2 * UNIT, length), (right + UNIT, middle), shape_box(0, -1e4, far_x, 1e4)
+            spec, centre = BoxSpec(2 * UNIT, built_len), (right + UNIT, middle)
+            keep = shape_box(0, seg_start, far_x, seg_start + seg_len)
         elif side == "left":
-            spec, centre, keep = BoxSpec(2 * UNIT, length), (-UNIT, middle), shape_box(wall - ox, -1e4, UNIT, 1e4)
+            spec, centre = BoxSpec(2 * UNIT, built_len), (-UNIT, middle)
+            keep = shape_box(wall - ox, seg_start, UNIT, seg_start + seg_len)
         elif side == "back":
-            spec, centre, keep = BoxSpec(length, 2 * UNIT), (middle, back + UNIT), shape_box(-1e4, 0, 1e4, far_y)
+            spec, centre = BoxSpec(built_len, 2 * UNIT), (middle, back + UNIT)
+            keep = shape_box(seg_start, 0, seg_start + seg_len, far_y)
         else:
-            spec, centre, keep = BoxSpec(length, 2 * UNIT), (middle, -UNIT), shape_box(-1e4, wall - oy, 1e4, UNIT)
+            spec, centre = BoxSpec(built_len, 2 * UNIT), (middle, -UNIT)
+            keep = shape_box(seg_start, wall - oy, seg_start + seg_len, UNIT)
         piece = placed_outline(spec, centre).intersection(keep)
         if piece.geom_type != "Polygon" and not piece.is_empty:
             piece = max(piece.geoms, key=lambda part: part.area)
         if not piece.is_empty and piece.area > 0.01:
             outlines.append(affinity.translate(piece, ox, oy))
-        start += units
+        start_cells += cells
     return outlines
 
 

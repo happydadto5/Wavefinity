@@ -259,6 +259,27 @@ class SpacerTests(unittest.TestCase):
         covered = sum(c["w"] * c["d"] for c in plan["cells"])
         self.assertEqual(covered, 4 * 3 - 4)
 
+    def test_edge_spacer_covers_a_non_8mm_run_on_a_4mm_snap_drawer(self):
+        # 23 rows of 4 mm = 92 mm - not a multiple of 8, so BoxSpec (8 mm
+        # grid only) can't be built at exactly this length; the piece must
+        # still cover the real run, not round down to 88 mm.
+        raw_drawer = {
+            "id": "d1", "name": "Drawer 1", "width": 100.0, "depth": 93.0, "height": 60,
+            "clearance": 1.0, "anchor": "front-left", "bin_axis": "x", "snap": 4,
+            "keepouts": [], "placements": [{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}],
+        }
+        bins = [_bin("B1", 16, 16, 40)]
+        grid = drawer_grid(normalise_drawer(raw_drawer))
+        run_mm = grid["rows"] * grid["step"]
+        self.assertNotEqual(run_mm % 8, 0, "test setup should exercise a non-8mm run")
+        plan = plan_spacers(raw_drawer, bins, {"fill": "edges"})
+        right = sorted((e for e in plan["edges"] if e["side"] == "right"), key=lambda e: e["y"])
+        self.assertTrue(right)
+        self.assertAlmostEqual(right[0]["y"], grid["oy"], places=6)
+        self.assertAlmostEqual(right[-1]["y"] + right[-1]["d"], grid["oy"] + run_mm, places=6)
+        for a, b in zip(right, right[1:]):
+            self.assertAlmostEqual(a["y"] + a["d"], b["y"], places=6)
+
     def test_an_x_spacer_is_an_open_braced_frame_with_a_bins_outline(self):
         spec = BoxSpec(48, 32, 15)
         mesh = spacer_frame(48, 32, 15)
