@@ -11,13 +11,13 @@ Tired of clunky drawer grids and wasting spools of filament just to get organize
 
 ## 🎯 The Mission: Why Wavefinity?
 
-Traditional modular storage systems are great, but they come with common headaches: heavy grid bases that eat print time, massive filament waste, loose-fitting containers, and rigid sizing. 
+Traditional modular storage systems are great, but they come with common headaches: heavy grid bases that eat print time, massive filament waste, loose-fitting containers, and rigid sizing.
 
 Wavefinity was built to rethink modular organization:
 
 - **Save Massive Filament:** Say goodbye to excessive plastic. Wavefinity minimizes print material while keeping high structural strength.
 - **Zero Grids Needed:** No more spending 20 hours printing base plates just to fill a drawer.
-- **Bins That Lock Together:** Positive interlocking mechanisms ensure your bins stay firmly connected and organized, even when you yank the drawer open.
+- **Bins That Lock Together:** Small reusable staple connectors bridge neighboring bins so they stay firmly connected and organized, even when you yank the drawer open.
 - **Highly Customizable Insets:** Tailor compartments, dividers, and holder insets precisely to the tools and parts you own.
 - **Total Customization:** Adjust height, width, depth, wall thickness, and dividers directly in the app.
 
@@ -26,10 +26,10 @@ Wavefinity was built to rethink modular organization:
 ## ✨ Major Features
 
 ### 🚫 1. No Grids Required
-Unlike older grid-bound systems, Wavefinity bins interlock directly with each other. Place them anywhere, expand in any direction, and reconfigure on the fly without printing extra base grids.
+Unlike older grid-bound systems, Wavefinity needs no base plate. Place bins anywhere, expand in any direction, and use small reusable connectors across shared seams to lock neighboring bins together.
 
-### 🔒 2. Direct-Locking Bins
-Bins snap securely together side-by-side. Your layout stays solid and rattle-free inside toolboxes, drawers, or on shelves.
+### 🔒 2. Connector-Locked Bins
+Print a small staple connector and press it over the shared seam between two bins. The connector holds them securely side-by-side, keeping the layout solid and rattle-free inside toolboxes, drawers, or on shelves.
 
 ### ⚡ 3. Ultra-Efficient Filament Profiles
 Engineered geometry optimizes strength where you need it and sheds unnecessary weight where you don't. Print faster, finish sooner, and use fewer spools.

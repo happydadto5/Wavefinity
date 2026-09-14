@@ -2039,6 +2039,12 @@ function wireControls() {
       restoreHistory(true);
     }
   });
+  window.addEventListener("beforeunload", event => {
+    if (designHasChanges()) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
   $("#connection").addEventListener("click", () => location.reload(true));
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
   $("#print-bin").addEventListener("click", () => printModel("bin"));

@@ -251,13 +251,27 @@ SP.inspectHosted = async folder => {
 };
 
 SP.useHostedFolder = async folder => {
-  const info = await SP.inspectHosted(folder);
+  // A download-only fallback is not a folder: there is no handle to inspect,
+  // no metadata to restore, and nowhere to keep inventory. Treating it like a
+  // chosen folder would make inspectHosted() default inventory back on.
+  const info = folder?.handle
+    ? await SP.inspectHosted(folder)
+    : {
+        folder: folder.name,
+        folder_name: folder.name,
+        folder_mode: "design",
+        space: null,
+        inventory: false,
+        missing: false,
+      };
   await SP.resetDrawer();
   state.browserFolder = folder;
   await WFFileSystem.save("active", { handle: folder.handle });
   await SP.applyFolder(info, { reset: false });
   SP.close();
-  toast(info.folder_mode === "space"
+  toast(folder.fallback
+    ? "This browser will download files normally. Persistent Space planning needs folder access."
+    : info.folder_mode === "space"
     ? `Opened ${info.space.name || folder.name}.`
     : `Saving designs to ${folder.name}.`);
   return info;
@@ -268,16 +282,7 @@ SP.useHostedFolder = async folder => {
 SP.pickFolder = async () => {
   if (state.runtime.hosted) {
     if (!window.WFFileSystem?.supportsDirectoryPicker()) {
-      const fallback = { handle: null, name: "Browser downloads", fallback: true };
-      state.browserFolder = fallback;
-      state.output = fallback.name;
-      state.folderSelected = true;
-      // No persistent directory handle here, so there is nowhere to keep
-      // an inventory file - the opt-out default, not the normal one.
-      setFolderState("design", null, false);
-      syncForm();
-      toast("This browser will download files normally. Persistent Space planning needs folder access.");
-      return fallback;
+      return { handle: null, name: "Browser downloads", fallback: true };
     }
     const handle = await WFFileSystem.pickDirectory();
     return handle ? { handle, name: handle.name } : null;

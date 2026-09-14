@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-14 — New-user safety and connector clarity
+
+- Unsaved bin-design changes now trigger the browser's leave-page warning.
+- Hosted browsers without folder access keep inventory off while downloading
+  generated files normally.
+- About Wavefinity now explains that small printed connectors lock neighboring
+  bins together across their shared seam.
+
 ## 2026-09-13 — Rectangular Divider compartment merging
 
 - Divider grids can now combine and restore individual boundaries in the 2D editor.
