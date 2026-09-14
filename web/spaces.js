@@ -2,7 +2,8 @@
 
 // A save folder is always available for normal design work. Space planning is
 // an optional capability layered on that folder, never a design type.
-const SP = { recent: [], setup: null, busy: false, resume: null };
+const SP = { recent: [], setup: null, busy: false, resume: null, resumeTimer: null };
+const RESUME_AUTOCONTINUE_SECONDS = 10;
 const SP_KINDS = {
   drawer: { icon: "🗄️", label: "Drawer" },
   box: { icon: "📦", label: "Box" },
@@ -19,6 +20,7 @@ const spSame = (a, b) => {
 SP.dialog = () => $("#welcome-dialog");
 SP.close = () => { if (SP.dialog().open) SP.dialog().close(); };
 SP.showOnly = id => {
+  SP.cancelResumeAutoContinue();
   ["welcome-home", "welcome-resume", "space-optional", "space-unsupported", "space-form"]
     .forEach(one => { $("#" + one).hidden = one !== id; });
 };
@@ -272,17 +274,6 @@ SP.continueSpaceSetup = info => {
   SP.showSetup();
 };
 
-SP.chooseFolderThenSetup = () => SP.run(async () => {
-  if (SP.hasFolder()) {
-    if (state.folderMode === "space") return SP.open();
-    return SP.continueSpaceSetup(null);
-  }
-  const folder = await SP.pickFolder();
-  if (!folder) return;
-  const info = await SP.afterPick(folder);
-  SP.continueSpaceSetup(info);
-});
-
 SP.changeFolderThenSetup = () => SP.run(async () => {
   const folder = await SP.pickFolder();
   if (!folder) return;
@@ -333,6 +324,36 @@ SP.showResume = info => {
   $("#welcome-resume-folder").textContent = info.folder;
   $("#welcome-resume-folder").title = info.folder;
   SP.showDialog();
+  SP.armResumeAutoContinue();
+};
+
+// Left alone, the resume prompt continues on its own after ~10 seconds - the
+// same thing Continue does, landing in Design. Anything that dismisses or
+// replaces this screen (the buttons below, the dialog's own close - Escape,
+// backdrop, the X - or showing a different screen) cancels it first, so a
+// stale timer can never fire after the user has moved on.
+SP.cancelResumeAutoContinue = () => {
+  clearInterval(SP.resumeTimer);
+  SP.resumeTimer = null;
+  const button = $("#welcome-resume-continue");
+  if (button) button.textContent = "Open Space";
+};
+
+SP.armResumeAutoContinue = () => {
+  SP.cancelResumeAutoContinue();
+  let remaining = RESUME_AUTOCONTINUE_SECONDS;
+  const button = $("#welcome-resume-continue");
+  SP.resumeTimer = setInterval(() => {
+    remaining -= 1;
+    if (remaining <= 0) { SP.confirmResume(); return; }
+    if (button) button.textContent = `Open Space (${remaining})`;
+  }, 1000);
+};
+
+SP.confirmResume = () => {
+  SP.cancelResumeAutoContinue();
+  SP.close();
+  activatePreviewView("3d");
 };
 
 SP.offerSpacePlanning = () => {
@@ -506,14 +527,14 @@ SP.wire = () => {
   ["#welcome-close", "#welcome-resume-close", "#space-optional-not-now", "#space-unsupported-close"]
     .forEach(sel => $(sel)?.addEventListener("click", SP.close));
   SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
+  SP.dialog().addEventListener("close", SP.cancelResumeAutoContinue);
   $("#welcome-new").addEventListener("click", SP.chooseFolder);
-  $("#welcome-open").addEventListener("click", SP.chooseFolderThenSetup);
   $("#space-optional-setup").addEventListener("click", SP.showSetup);
-  $("#welcome-resume-continue").addEventListener("click", () => {
-    SP.close();
-    activatePreviewView("3d");
+  $("#welcome-resume-continue").addEventListener("click", SP.confirmResume);
+  $("#welcome-resume-switch").addEventListener("click", () => {
+    SP.cancelResumeAutoContinue();
+    SP.chooseFolder();
   });
-  $("#welcome-resume-switch").addEventListener("click", SP.chooseFolder);
   $("#space-folder-change").addEventListener("click", SP.changeFolderThenSetup);
   $("#space-back").addEventListener("click", SP.offerSpacePlanning);
   $("#welcome-recent").addEventListener("click", event => {
