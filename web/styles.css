@@ -862,6 +862,23 @@ input[type="number"]::-webkit-inner-spin-button {
 .toast { position: fixed; right: 22px; bottom: 22px; max-width: min(440px, calc(100vw - 44px)); padding: 12px 15px; border-radius: 8px; background: #16333d; color: white; box-shadow: var(--shadow); font-size: 13px; opacity: 0; transform: translateY(12px); pointer-events: none; transition: .2s; z-index: 10; white-space: pre-line; }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.error { background: #7f302c; }
+.toast.prominent {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  width: min(560px, calc(100vw - 40px));
+  box-sizing: border-box;
+  padding: 20px 24px;
+  border: 2px solid rgba(255,255,255,.7);
+  border-radius: 12px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  transform: translate(-50%, calc(-50% + 12px));
+}
+.toast.prominent.show { transform: translate(-50%, -50%); }
 
 dialog:not([open]) { display: none; }
 

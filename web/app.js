@@ -322,10 +322,11 @@ async function api(path, payload = null) {
 }
 
 let toastTimer;
-function toast(message, error = false, hold = 3200) {
+function toast(message, error = false, hold = 3200, style = "") {
   const node = $("#toast");
   node.textContent = message;
   node.classList.toggle("error", error);
+  node.classList.toggle("prominent", style === "prominent");
   node.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => node.classList.remove("show"), hold);
@@ -3379,6 +3380,7 @@ function endNestCornerPointer(event, cancelled = false) {
   if (!point || !Array.isArray(state.nestPaperCorners)) return;
   if (interaction.index === null) state.nestPaperCorners.push(point);
   else state.nestPaperCorners[interaction.index] = point;
+  if (state.nestPaperCorners.length >= 1) state.nestCornerTipDismissed = true;
   state.nestCornerError = "";
   syncNest2DWorkspace();
   if (state.nestPaperCorners.length === 4) {
@@ -3615,7 +3617,10 @@ async function runNestTrace(paperCorners) {
       state.nestCornerBusy = false;
       state.nestCornerError = error.message;
       syncNest2DWorkspace();
-      toast("Automatic paper detection failed. Click the four paper corners in 2D.", true, 6500);
+      toast(
+        "Automatic paper detection failed. Click the four paper corners in 2D.",
+        true, 8500, "prominent",
+      );
     } else {
       toast(error.message, true, 6500);
     }
