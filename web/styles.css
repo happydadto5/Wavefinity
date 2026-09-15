@@ -253,6 +253,7 @@ button { color: inherit; }
   z-index: 1;
 }
 
+#nest-paper-outline line,
 #nest-paper-outline polyline,
 #nest-paper-outline polygon {
   fill: none;

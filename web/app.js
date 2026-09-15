@@ -3291,10 +3291,11 @@ function renderNestPaperOutline(corners) {
         sides.push({ a, b, length: dx * dx + dy * dy });
       }
     }
-    const points = sides.sort((one, two) => one.length - two.length).slice(0, 2)
-      .flatMap(side => [corners[side.a], corners[side.b]])
-      .map(corner => `${corner.xPct},${corner.yPct}`).join(" ");
-    outline.innerHTML = `<polyline points="${points}"></polyline>`;
+    const outside = sides.sort((one, two) => one.length - two.length).slice(0, 2);
+    outline.innerHTML = outside.map(side => {
+      const a = corners[side.a], b = corners[side.b];
+      return `<line x1="${a.xPct}" y1="${a.yPct}" x2="${b.xPct}" y2="${b.yPct}"></line>`;
+    }).join("");
     return;
   }
   const center = corners.reduce((sum, corner) => ({
@@ -3551,12 +3552,43 @@ const requestNestRetrace = debounce(async () => {
 async function acceptNestTrace() {
   const one = state.draft;
   const index = draftCommitIndex();
-  if (!one || one.kind !== "nest" || !state.nestCandidateContour || !Number.isInteger(index)) return;
-  const candidate = state.nestCandidateContour.map(point => [...point]);
+  if (!one || one.kind !== "nest" || !state.nestCandidateContour) return;
+  let candidate = state.nestCandidateContour.map(point => [...point]);
   const candidateCenter = state.nestCandidateCenterMm;
   state.nestCandidateContour = null;
   state.nestCandidateCenterMm = null;
   state.nestTuneStatus = "";
+  if (!Number.isInteger(index)) {
+    if (one.contour || !state.nestTraceResult) return;
+    const pending = {
+      contour: candidate,
+      source_contour: null,
+      zone: [-.5, -.5, .5, .5],
+      rotation: 0,
+      scale: 1,
+    };
+    normalizeNestContour(pending);
+    candidate = pending.contour;
+    const xs = candidate.map(point => point[0]);
+    const ys = candidate.map(point => point[1]);
+    state.nestTraceResult.contour = candidate;
+    state.nestTraceResult.outline = {
+      width: Math.max(...xs) - Math.min(...xs),
+      depth: Math.max(...ys) - Math.min(...ys),
+    };
+    if (state.nestTraceResult.reference && state.nestPhoto?.bounds) {
+      state.nestTraceResult.reference.bounds = [...state.nestPhoto.bounds];
+    }
+    if (candidateCenter) {
+      state.nestTraceResult.trace_center_mm = candidateCenter;
+      state.nestAcceptedCenterMm = candidateCenter;
+    }
+    state.nestTuneStatus = "Adjusted outline accepted.";
+    syncNest2DWorkspace();
+    renderLayout2D();
+    await finishPhotoNestIfReady();
+    return;
+  }
   await commitNestContourEdit(index, candidate, { source_contour: candidate.map(point => [...point]) });
   // The committed contour re-centres around its own new bounding box
   // (normalizeNestContour, inside commitNestContourEdit) - which for an
@@ -3592,6 +3624,8 @@ async function runNestTrace(paperCorners) {
     state.nestPaperCorners = null;
     state.nestCornerError = "";
     state.nestCornerBusy = false;
+    state.nestAcceptedCenterMm = result.trace_center_mm || null;
+    setNestPhotoReference(result.reference);
     if (_nestMeasuredThickness(draft.options) == null) {
       $("#draft-status").textContent = "Photo traced — enter Tool thickness above to finish.";
     }
@@ -6748,6 +6782,48 @@ function drawNestContourHandles(context, feature, toCanvas) {
   context.restore();
 }
 
+function drawPendingNestTrace(context, width, height) {
+  const trace = state.nestTraceResult;
+  if (state.draft?.kind !== "nest" || state.draft.contour || !trace?.contour?.length) return false;
+  const accepted = trace.contour;
+  const candidate = state.nestCandidateContour;
+  const all = candidate?.length ? [...accepted, ...candidate] : accepted;
+  const xs = all.map(point => number(point[0]));
+  const ys = all.map(point => number(point[1]));
+  if (state.nestPhoto?.bounds) {
+    const [x0, y0, x1, y1] = state.nestPhoto.bounds;
+    xs.push(x0, x1);
+    ys.push(y0, y1);
+  }
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const spanX = Math.max(1, maxX - minX), spanY = Math.max(1, maxY - minY);
+  const pad = Math.max(24, Math.min(width, height) * .08);
+  const scale = Math.min((width - 2 * pad) / spanX, (height - 2 * pad) / spanY);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const toCanvas = ([x, y]) => [
+    width / 2 + (number(x) - cx) * scale,
+    height / 2 - (number(y) - cy) * scale,
+  ];
+  const pending = { contour: accepted, zone: [-.5, -.5, .5, .5], rotation: 0, scale: 1 };
+  drawNestPhotoReference(context, pending, toCanvas);
+  const drawOutline = (points, color, dashed = false) => {
+    const path = drawClosedPath(context, points, toCanvas);
+    context.save();
+    context.strokeStyle = "rgba(255,255,255,.95)";
+    context.lineWidth = 8;
+    context.stroke(path);
+    if (dashed) context.setLineDash([6, 4]);
+    context.strokeStyle = color;
+    context.lineWidth = dashed ? 4 : 3;
+    context.stroke(path);
+    context.restore();
+  };
+  drawOutline(accepted, "#145d76");
+  if (candidate?.length) drawOutline(candidate, "#007ca8", true);
+  return true;
+}
+
 // Informational-only markers for the server's resolved access plan (spec
 // section 46) - a small ring for each point, filled for a scoop (Recessed),
 // hollow for a notch (Raised Wall). Draws nothing when access is off, and
@@ -7248,6 +7324,7 @@ function renderLayout2D() {
   const canvas = $("#preview-2d");
   const { context, width, height } = canvasSize(canvas);
   context.clearRect(0, 0, width, height);
+  if (drawPendingNestTrace(context, width, height)) return;
   const bounds = state.preview.layout_bounds;
   const worldWidth = bounds[2] - bounds[0], worldHeight = bounds[3] - bounds[1];
   const layoutYaw = (state.layoutOrientation === "topup" ? 0 : state.camera.yaw) * Math.PI / 180;
