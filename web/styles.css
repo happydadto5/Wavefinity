@@ -1171,7 +1171,7 @@ dialog:not([open]) { display: none; }
   .workspace-toolbar { align-items: flex-start; }
   .icon-button span { display: none; }
   .camera-controls { top: 10px; left: 10px; }
-  .placed-block { top: 62px; right: 10px; width: min(280px, calc(100% - 20px)); }
+  .workspace > .placed-block { top: 62px; right: 10px; width: min(280px, calc(100% - 20px)); }
   .camera-controls button { padding: 6px; }
   .preview-hint span:last-child { display: none; }
   .workspace-footer { display: block; }
