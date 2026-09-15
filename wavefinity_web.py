@@ -1348,9 +1348,20 @@ def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         mode=layout.mode,
         item=item,
     )
-    # Defaults are values to display, not values the user explicitly chose.
-    # Keeping them out of ``one.options`` preserves the builder's dependency
-    # cascade: for example, a pocket depth continues to follow an edited height.
+    if one.kind == "nest":
+        # A fresh draft is new-format, not a legacy Raised Wall waiting to be
+        # upgraded after upload. Seed the choices the UI already promises so
+        # the before-photo controls and the generated holder cannot disagree.
+        one = replace(one, options={
+            **one.options,
+            "holder_style": "recessed",
+            "cavity_depth_mode": "auto",
+            "auto_size": True,
+            "lift_assist": "auto",
+        })
+    # Ordinary defaults are display values, not explicit choices. Keeping them
+    # out of ``one.options`` preserves dependency cascades; Nest is the one
+    # exception because holder_style also separates new saves from legacy ones.
     result = {
         "feature": feature_to_dict(one, layout.mode),
         "resolved_options": resolved_options(

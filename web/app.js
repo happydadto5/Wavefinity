@@ -2107,6 +2107,27 @@ function cancelPendingDraftWork() {
   state.draftRequest += 1;
 }
 
+function resetNestPhotoSession() {
+  state.nestPhoto = null;
+  state.nestOriginalImage = null;
+  state.nestRectifiedImage = null;
+  state.nestSensitivity = 50;
+  state.nestCleanup = 50;
+  state.nestPhotoOpacity = 45;
+  state.nestCandidateContour = null;
+  state.nestCandidateCenterMm = null;
+  state.nestAcceptedCenterMm = null;
+  state.nestTuneStatus = "";
+  state.nestTraceResult = null;
+  state.nestPaperCorners = null;
+  state.nestCornerError = "";
+  state.nestCornerBusy = false;
+  state.nestCornerTipDismissed = false;
+  state.nestOutlineTool = "select";
+  state.nestAccessWarningShown = null;
+  hideNestCornerMagnifier();
+}
+
 // Nothing selected, nothing shown as a live draft - the state on first load
 // and after New/Open/a delete/a mode switch with nothing selected. A
 // palette button never doubles as "still working on the last shape you
@@ -3206,8 +3227,9 @@ function syncNest2DWorkspace() {
     }
 
     const corners = state.nestPaperCorners;
-    $("#nest-corner-count").textContent =
-      `${corners.length} of 4 corners selected`;
+    $("#nest-corner-count").textContent = state.nestCornerBusy
+      ? "Checking selected corners…"
+      : `${corners.length} of 4 corners selected`;
 
     const markers = $("#nest-corner-markers");
     markers.innerHTML = corners.map((corner, index) =>
@@ -3325,11 +3347,11 @@ function beginNestCornerPointer(event, index = null) {
   const point = nestCornerPoint(event);
   if (!point) return;
   event.preventDefault();
-  nestCornerPointer = { id: event.pointerId, index, magnifying: false };
+  nestCornerPointer = { id: event.pointerId, index, magnifying: false, point };
   nestCornerHoldTimer = setTimeout(() => {
     if (!nestCornerPointer || nestCornerPointer.id !== event.pointerId) return;
     nestCornerPointer.magnifying = true;
-    showNestCornerMagnifier(nestCornerPoint(event) || point);
+    showNestCornerMagnifier(nestCornerPointer.point);
   }, 350);
 }
 
@@ -3337,6 +3359,7 @@ function moveNestCornerPointer(event) {
   if (!nestCornerPointer || nestCornerPointer.id !== event.pointerId) return;
   const point = nestCornerPoint(event);
   if (!point) return;
+  nestCornerPointer.point = point;
   if (nestCornerPointer.index !== null) {
     state.nestPaperCorners[nestCornerPointer.index] = point;
     state.nestCornerError = "";
@@ -3374,24 +3397,18 @@ function wireNest2DControls() {
 
   $("#nest-sensitivity-range")?.addEventListener("input", event => {
     state.nestSensitivity = number(event.target.value, 50);
-    syncNest2DWorkspace();
-    requestNestRetrace();
+    queueNestRetrace();
   });
 
   $("#nest-cleanup-range")?.addEventListener("input", event => {
     state.nestCleanup = number(event.target.value, 50);
-    syncNest2DWorkspace();
-    requestNestRetrace();
+    queueNestRetrace();
   });
 
   $("#nest-scan-defaults")?.addEventListener("click", () => {
     state.nestSensitivity = 50;
     state.nestCleanup = 50;
-    state.nestCandidateContour = null;
-    state.nestCandidateCenterMm = null;
-    state.nestTuneStatus = "Restoring default scan settings…";
-    syncNest2DWorkspace();
-    requestNestRetrace();
+    queueNestRetrace("Restoring default scan settings…");
   });
 
   $("#nest-scan-apply")?.addEventListener("click", acceptNestTrace);
@@ -3428,6 +3445,18 @@ function wireNest2DControls() {
   window.addEventListener("pointermove", moveNestCornerPointer);
   window.addEventListener("pointerup", event => endNestCornerPointer(event));
   window.addEventListener("pointercancel", event => endNestCornerPointer(event, true));
+}
+
+function queueNestRetrace(status = "Retracing…") {
+  // The visible sliders no longer describe the old candidate. Remove it at
+  // once so Apply can never accept an outline from the previous settings
+  // during the debounce or while the replacement is still being calculated.
+  state.nestCandidateContour = null;
+  state.nestCandidateCenterMm = null;
+  state.nestTuneStatus = status;
+  syncNest2DWorkspace();
+  renderLayout2D();
+  requestNestRetrace();
 }
 
 // Photo Nest's own sidebar buttons - separated out because they carry
@@ -3631,7 +3660,7 @@ async function finishPhotoNestIfReady() {
     $('.view-tab[data-view="2d"]').click();
     setLayoutOrientation("topup");
     toast(`Photo Nest ready: ${fmt(trace.outline.width)} × ${fmt(trace.outline.depth)} mm outline.`);
-    for (const warning of result.warnings || []) toast(warning, true, 6500);
+    for (const warning of result.warnings || []) toast(warning, false, 6500);
   } catch (error) {
     $("#draft-status").textContent = error.message;
     $("#draft-status").classList.add("error");
@@ -3990,9 +4019,12 @@ function setNestPhotoReference(reference) {
     return;
   }
   const image = new Image();
-  state.nestPhoto = { image, bounds: reference.bounds.map(value => number(value)) };
+  const photo = { image, bounds: reference.bounds.map(value => number(value)) };
+  state.nestPhoto = photo;
   image.addEventListener("load", renderLayout2D, { once: true });
-  image.addEventListener("error", () => { state.nestPhoto = null; }, { once: true });
+  image.addEventListener("error", () => {
+    if (state.nestPhoto === photo) state.nestPhoto = null;
+  }, { once: true });
   image.src = reference.image;
 }
 
@@ -4005,6 +4037,9 @@ function _nestMeasuredThickness(options) {
 async function uploadNestPhoto(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+  const input = event.target;
+  input.value = "";
+  const uploadRequest = ++state.nestTraceRequest;
   const extension = file.name.split(".").pop()?.toLowerCase();
   const mimeByExtension = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
   const mimeType = file.type || mimeByExtension[extension];
@@ -4016,26 +4051,22 @@ async function uploadNestPhoto(event) {
     toast("The photo must be smaller than 17 MB.", true, 5000);
     return;
   }
-  const input = event.target;
-  const image = await readFileDataUrl(file);
-  input.value = "";
-  if (state.draft?.kind !== "nest" || state.draftKind !== "nest") return;
+  let image;
+  try {
+    image = await readFileDataUrl(file);
+  } catch (error) {
+    toast(error.message, true, 5000);
+    return;
+  }
+  if (uploadRequest !== state.nestTraceRequest
+      || state.draft?.kind !== "nest" || state.draftKind !== "nest") return;
   $('.view-tab[data-view="2d"]')?.click();
   setLayoutOrientation("topup");
   // Choosing a photo starts analysis immediately - Tool thickness is a
   // separate field the user can fill in while it runs (spec section 1).
   // Whichever finishes last triggers finalization (finishPhotoNestIfReady).
+  resetNestPhotoSession();
   state.nestOriginalImage = { dataUrl: image, mimeType };
-  state.nestSensitivity = 50;
-  state.nestCleanup = 50;
-  state.nestCandidateContour = null;
-  state.nestCandidateCenterMm = null;
-  state.nestTuneStatus = "";
-  state.nestPaperCorners = null;
-  state.nestCornerError = "";
-  state.nestCornerBusy = false;
-  state.nestCornerTipDismissed = false;
-  state.nestTraceResult = null;
   renderDraftFields();
   await runNestTrace();
 }
@@ -4555,9 +4586,9 @@ function draftCommitIndex() {
 // Saves the draft into the design as its own feature (or updates it in
 // place if it's already one) - the "auto add" half of the workflow: once a
 // draft is armed (state.draftAutoCommit), every valid edit lands here
-// instead of waiting for an explicit button click. Runs silently - no
-// button state, no toast, no field re-render - so it never interrupts
-// active typing; a failure (e.g. it now overlaps another support, which the
+// instead of waiting for an explicit button click. Normal success stays
+// silent so it never interrupts active typing; an automatic correction is
+// explained once, and a failure (e.g. overlap, which the
 // single-feature check above can't see) just shows in draft-status like any
 // other validation error.
 async function autoCommitDraft(request) {
@@ -4583,6 +4614,7 @@ async function autoCommitDraft(request) {
       state.draft = clone(state.design.layout.features[state.selected]);
     }
     if (state.draft?.kind === "nest") syncForm();
+    for (const warning of result.warnings || []) toast(warning, false, 6500);
     renderPlaced();
     updateSelectionButtons();
     return true;
@@ -4626,6 +4658,7 @@ async function commitVisibleDraft() {
   }
   state.draftResolvedOptions = {};
   if (state.draft?.kind === "nest") syncForm();
+  for (const warning of committed.warnings || []) toast(warning, false, 6500);
   renderDraftFields();
   renderPlaced();
   updateSelectionButtons();
@@ -4730,7 +4763,7 @@ async function applySupport(index) {
     updateSelectionButtons();
     await refreshPreview();
     refreshDraft();
-    for (const warning of result.warnings || []) toast(warning, true, 6500);
+    for (const warning of result.warnings || []) toast(warning, false, 6500);
     return true;
   } catch (error) {
     toast(error.message, true, 5000);
@@ -4761,6 +4794,7 @@ async function saveCurrentPart() {
     renderPlaced();
     await refreshPreview();
     toast("Part saved.");
+    for (const warning of result.warnings || []) toast(warning, false, 6500);
   } catch (error) {
     toast(error.message, true, 5000);
   } finally {
@@ -4773,6 +4807,7 @@ async function saveCurrentPart() {
 // to the 10-part palette.
 async function deleteCurrentPart() {
   if (!state.draft) return;
+  const deletingNest = state.draft.kind === "nest";
   const index = draftCommitIndex();
   state.paletteBrowsing = true;
   if (Number.isInteger(index)) {
@@ -4780,6 +4815,7 @@ async function deleteCurrentPart() {
     return;
   }
   // Never committed - nothing on the server to delete.
+  if (deletingNest) resetNestPhotoSession();
   clearDraftSelection();
   renderPlaced();
   refreshPreview();
@@ -4787,11 +4823,13 @@ async function deleteCurrentPart() {
 
 async function deleteSupportAt(index) {
   if (index === null || index === undefined || !beginDesignMutation()) return;
+  const deletingNest = state.design.layout.features[index]?.kind === "nest";
   let deleted = false;
   try {
     const previousDesign = clone(state.design);
     const result = await api("/api/feature/delete", { design: state.design, index });
     state.design = result.design;
+    if (deletingNest) resetNestPhotoSession();
     recordHistory(previousDesign);
     state.selected = null;
     clearDraftSelection();
@@ -8102,7 +8140,7 @@ async function openDesign(event) {
     const parsed = JSON.parse(await file.text());
     const result = await api("/api/design/validate", { design: parsed });
     state.design = result.design;
-    state.nestPhoto = null;
+    resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
     state.drafts = {};
     state.history = [];
@@ -8125,7 +8163,7 @@ async function newDesign() {
   if (!beginDesignMutation()) return;
   const previousDesign = clone(state.design);
   state.design = clone(state.catalog.defaults.design);
-  state.nestPhoto = null;
+  resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
   state.binResizePending = false;
   recordHistory(previousDesign);
@@ -8654,7 +8692,7 @@ async function init() {
     state.serverInstance = catalog.instance;
     state.apiCompat = catalog.api_compat;
     state.design = clone(catalog.defaults.design);
-    state.nestPhoto = null;
+    resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
     state.output = state.runtime.hosted ? "" : (catalog.preferences?.output || catalog.defaults.output);
     setFolderState("design");
