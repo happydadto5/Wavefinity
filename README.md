@@ -477,9 +477,10 @@ height follows that limit; an explicit unsafe height is refused at generation.
 Floor lettering is a **text** interior part, placed and checked like every other
 one — see [Text on the floor, and the rim label](#text-on-the-floor-and-the-rim-label).
 A bin may carry several. In removable modes each is inlaid into the insert plate
-rather than hidden under it. The **rim label** is separate: fixed 5 mm letters
-inlaid flush into a 7 mm-deep rear ledge at the rim, whose underside rises at 45
-degrees and prints without supports.
+rather than hidden under it. The **rim label** is separate: 5 mm letters when
+they fit, otherwise automatically smaller, inlaid flush into a 7 mm-deep rear
+ledge just below the rim. Its underside rises at 45 degrees and prints without
+supports.
 
 The optional **curved scoop** spans the usable width at the front of the bin and
 rises 60% up the usable wall height, so a part sweeps forward and lifts out
@@ -1019,12 +1020,13 @@ note it "only contains geometry" — nothing is lost, and slicing is unaffected.
   3MF object name has to be unique or the second silently replaces the first.
 
 The **rim label** is the one piece of lettering that is not an interior part: it
-sits on a shelf at the rear rim, so it has no floor zone to drag. Fixed **5 mm**
-letter height on a **7 mm** front-to-back shelf, still a 0.4 mm-deep flush inlay
-and its own part on filament 2; the shelf's underside rises 7 mm over its 7 mm
-run, an exact 45-degree self-supporting slope. Leave **Rim label** empty for none. One
-that cannot fit at its fixed size is rejected with a clear message rather than
-silently shrunk.
+sits on a shelf just below the rear rim, so it has no floor zone to drag. It
+targets **5 mm** letters on a **7 mm** front-to-back shelf, automatically
+shrinking only when needed; a warning appears below **4 mm**. It remains a
+0.4 mm-deep flush inlay and its own part on filament 2; the shelf's underside
+rises 7 mm over its 7 mm run, an exact 45-degree self-supporting slope. Its
+3.4 mm rim clearance leaves room for the stacking foot or lid. Leave **Rim
+label** empty for none.
 
 **The part name alone names the file**: `Box 48 x 48 x 40 Driver rack.3mf`.
 Lettering does not appear in it — with several labels there is no answer to which
@@ -1280,7 +1282,7 @@ these numbers look arbitrary and are not.
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |
 | Bump band | top **4.0** below the rim | |
 | Text letters | **15.0** ideal, **5.0** auto minimum, **5.0** floor | sunk **0.4**; a zone sizes it, a hand-set height is capped by that zone |
-| Rim label | **5.0** letters, **7.0** ledge | flush at rim; 45-degree underside |
+| Rim label | **5.0** target letters, **7.0** ledge | auto-shrinks; warns below 4.0 mm; 45-degree underside |
 | Scoop | **60%** of usable wall height | full usable width at front |
 
 Connector tolerance, length and height were chosen from a **printed five-clip fit

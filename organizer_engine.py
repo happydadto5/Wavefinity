@@ -268,19 +268,18 @@ TEXT_MARGIN = 1.0              # clear space between the label and the cavity wa
 TEXT_FONT_FAMILY = "DejaVu Sans"
 TEXT_FONT_WEIGHT = "bold"
 
-# A rim label is deliberately a fixed physical feature rather than an
-# automatically-scaled floor label.  The 7 mm ledge leaves one millimetre of
-# breathing room either side of the requested 5 mm letters.  Its underside
-# rises 7 mm over the same 7 mm run: exactly 45 degrees and printable without
-# support.
+# A rim label targets 5 mm letters, then scales down only when the selected
+# shelf is too short. Its 7 mm ledge leaves one millimetre of breathing room
+# either side, and the underside rises 7 mm over the same run: exactly 45
+# degrees and printable without support.
 TOP_LABEL_LEDGE_DEPTH = 7.0
 TOP_LABEL_CAP_HEIGHT = 5.0
+TOP_LABEL_CAP_HEIGHT_WARNING = 4.0
 TOP_LABEL_MARGIN = 1.0
-# The rim-label shelf used to sit flush with the rim, the same top-inside-wall
-# band a connector's arms drop into.  Default arms reach ``arm_depth`` below
-# the rim, so the shelf is kept clear of that whole zone rather than banning
-# the two features from combining.
-TOP_LABEL_CONNECTOR_CLEARANCE = 0.4
+# Both stack modes and the stack lid enter the bin mouth by 3 mm. Keep the
+# shelf just below that plug with a 0.4 mm gap, so it stays near the rim while
+# still leaving room to close or stack the bin.
+TOP_LABEL_RIM_CLEARANCE = 3.4
 SCOOP_HEIGHT_FRACTION = 0.6
 SCOOP_FLOOR_TOLERANCE = 0.4   # a scoop lower than this counts as flat floor
 SCOOP_CURVE_SEGMENTS = 32
@@ -1905,13 +1904,8 @@ def _rim_label_side(side: str) -> str:
 
 
 def top_label_surface_z(box: BoxSpec) -> float:
-    """Top of the rim-label shelf: below the connector arms, not at the rim.
-
-    A standard connector's arms reach ``ConnectorSpec().arm_depth`` below the
-    rim on every wall, so a shelf flush with the rim would block them from
-    seating.  Dropping the shelf's top this far clears that zone completely.
-    """
-    return box.z - ConnectorSpec().arm_depth - TOP_LABEL_CONNECTOR_CLEARANCE
+    """Top of the rim-label shelf, just below the stack/lid mouth clearance."""
+    return box.z - TOP_LABEL_RIM_CLEARANCE
 
 
 def top_label_zone(box: BoxSpec, side: str = "back") -> Polygon:
@@ -1937,32 +1931,31 @@ def top_label_zone(box: BoxSpec, side: str = "back") -> Polygon:
                        inside_x / 2.0, inside_y / 2.0)
 
 
-def top_label_outline(
+def _top_label_fit(
     box: BoxSpec, label: str, side: str = "back"
-) -> Polygon | MultiPolygon:
-    """Fixed 5 mm text, centred on the selected rim ledge."""
+) -> tuple[float, Polygon | MultiPolygon]:
+    """Return the largest rim-label cap height and outline that fit its shelf."""
     side = _rim_label_side(side)
     surface_z = top_label_surface_z(box)
     if surface_z - TOP_LABEL_LEDGE_DEPTH < box.base_thickness - 1e-9:
         raise ValueError(
             f"this bin is too short for a rim label: the shelf needs "
-            f"{TOP_LABEL_LEDGE_DEPTH:g} mm below the connector-arm clearance "
+            f"{TOP_LABEL_LEDGE_DEPTH:g} mm below the rim clearance "
             f"at the rim, and this bin does not leave that much above its floor"
         )
     top_label_zone(box, side)
-    outline = text_outline(label, TOP_LABEL_CAP_HEIGHT)
-    minx, miny, maxx, maxy = outline.bounds
+    probe = text_outline(label, TOP_LABEL_CAP_HEIGHT)
+    minx, miny, maxx, maxy = probe.bounds
     inside_x, inside_y = box.usable_inside
     room_x = (inside_x if side in ("front", "back") else inside_y) - 2.0 * TOP_LABEL_MARGIN
     room_y = TOP_LABEL_LEDGE_DEPTH - 2.0 * TOP_LABEL_MARGIN
     width, height = maxx - minx, maxy - miny
-    if width > room_x + 1e-9 or height > room_y + 1e-9:
-        raise ValueError(
-            f"'{label}' will not fit on the rim label ledge: fixed "
-            f"{TOP_LABEL_CAP_HEIGHT:g} mm letters need {width:.1f} x {height:.1f} mm "
-            f"and the ledge gives {room_x:.1f} x {room_y:.1f} mm. Use a shorter "
-            "label or a larger box"
-        )
+    if width <= 0.0 or height <= 0.0:
+        raise ValueError(f"'{label}' has no printable outline")
+    cap_height = TOP_LABEL_CAP_HEIGHT * min(1.0, room_x / width, room_y / height)
+    if cap_height <= 0.0:
+        raise ValueError(f"'{label}' has no room on the rim label ledge")
+    outline = text_outline(label, cap_height)
     turn = {"back": 0.0, "front": 180.0, "left": 90.0, "right": -90.0}[side]
     if turn:
         outline = rotate_polygon(outline, turn, origin=(0.0, 0.0))
@@ -1973,7 +1966,15 @@ def top_label_outline(
         "right": (inside_x / 2.0 - TOP_LABEL_LEDGE_DEPTH / 2.0, 0.0),
     }
     xoff, yoff = offsets[side]
-    return translate_polygon(outline, xoff=xoff, yoff=yoff)
+    return cap_height, translate_polygon(outline, xoff=xoff, yoff=yoff)
+
+
+def top_label_outline(
+    box: BoxSpec, label: str, side: str = "back"
+) -> Polygon | MultiPolygon:
+    """Rim-label text, reduced from 5 mm only when its shelf needs it."""
+    _cap_height, outline = _top_label_fit(box, label, side)
+    return outline
 
 
 def make_top_label_ledge(box: BoxSpec, side: str = "back") -> trimesh.Trimesh:
@@ -2450,13 +2451,13 @@ def label_report(
 
 def top_label_report(box: BoxSpec, label: str, side: str = "back") -> dict[str, object]:
     normalized_side = _rim_label_side(side)
-    outline = top_label_outline(box, label, normalized_side)
+    cap_height, outline = _top_label_fit(box, label, normalized_side)
     minx, miny, maxx, maxy = outline.bounds
-    return {
+    report = {
         "label": label,
         "position": "top" if normalized_side == "back" else normalized_side,
         "side": normalized_side,
-        "cap_height_mm": TOP_LABEL_CAP_HEIGHT,
+        "cap_height_mm": round(cap_height, 3),
         "rotated": normalized_side in ("left", "right"),
         "footprint_mm": [round(maxx - minx, 3), round(maxy - miny, 3)],
         "ledge_depth_mm": TOP_LABEL_LEDGE_DEPTH,
@@ -2464,6 +2465,12 @@ def top_label_report(box: BoxSpec, label: str, side: str = "back") -> dict[str, 
         "ledge_underside_degrees": 45.0,
         "depth_mm": TEXT_DEPTH,
     }
+    if cap_height < TOP_LABEL_CAP_HEIGHT_WARNING - 1e-9:
+        report["warning"] = (
+            f"'{label}' was reduced to {cap_height:.1f} mm letters. "
+            f"Below {TOP_LABEL_CAP_HEIGHT_WARNING:g} mm may be hard to read."
+        )
+    return report
 
 
 def mesh_report(name: str, mesh: trimesh.Trimesh) -> dict[str, object]:

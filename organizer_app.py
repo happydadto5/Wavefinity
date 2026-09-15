@@ -166,27 +166,6 @@ def rim_label_side(value: str) -> str | None:
     return "back" if position == "top" else position
 
 
-def validate_stack_rim_label(box: BoxSpec, label: str, label_location: str) -> None:
-    """A rim label ledge and stacking geometry both need the same mouth.
-
-    The rim-label ledge occupies the top ``TOP_LABEL_LEDGE_DEPTH`` inside the
-    bin, and stacking geometry - lid or direct - has to enter that same
-    mouth. Shared by generation and preview so they can never disagree.
-    "bottom" (floor text) is not a rim label and is always compatible.
-    """
-    if not clean_label(label):
-        return
-    if rim_label_side(label_location) is None:
-        return
-    if stack_spec(box).mode == "none":
-        return
-    raise ValueError(
-        "a rim label (top/front/back/left/right) cannot be combined with "
-        "stacking - the label ledge and the stacking interface both need "
-        "the bin mouth. Remove the rim label or turn stacking off"
-    )
-
-
 def validate_scoop_lift_grabbers(box: BoxSpec, scoop: bool) -> None:
     """A front scoop's rise and front-wall lift grabbers can occupy the same Z.
 
@@ -770,7 +749,6 @@ def preview_geometry(
     if rim_feature is not None:
         label = text_of(rim_feature)
         label_location = str(rim_feature.options.get("rim_side", "back"))
-    validate_stack_rim_label(box, label, label_location)
     validate_scoop_lift_grabbers(box, scoop)
 
     features = resolve_text_features(
@@ -987,8 +965,14 @@ def preview_geometry(
     side = rim_label_side(location)
     if tidy and side:
         try:
+            label_info = top_label_report(box, tidy, side)
             outline = top_label_outline(box, tidy, side)
-            label_meta = {"location": location, "side": side}
+            label_meta = {
+                "location": location,
+                "side": side,
+                "cap_height": label_info["cap_height_mm"],
+                "warning": label_info.get("warning"),
+            }
         except ValueError as error:
             fits, message, outline = False, str(error), None
         if outline is not None:
@@ -1258,7 +1242,6 @@ def generate_organizer_files(
     if rim_feature is not None:
         label = text_of(rim_feature)
         label_location = str(rim_feature.options.get("rim_side", "back"))
-    validate_stack_rim_label(stack_request, label, label_location)
     validate_scoop_lift_grabbers(box, scoop)
     layout = replace(
         layout,

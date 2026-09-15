@@ -8,8 +8,8 @@ from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 from organizer_engine import (
     BoxSpec, TEXT_DEPTH, TOP_LABEL_CAP_HEIGHT, TOP_LABEL_LEDGE_DEPTH,
     TOP_LABEL_MARGIN, WAVE_AMPLITUDE, _rounded, flat_cavity_polygon,
-    require_text_backing, text_outline, text_prism, wavy_cavity_polygon,
-    build_scoop_region,
+    require_text_backing, text_outline, text_prism, top_label_surface_z,
+    wavy_cavity_polygon, build_scoop_region,
 )
 from organizer_geometry import (
     _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile,
@@ -59,7 +59,7 @@ DIVISION_SHELF_DEPTH = TOP_LABEL_LEDGE_DEPTH
 DIVISION_SHELF_EMBED = 0.6
 DIVISION_SHELF_TEXT_MARGIN = TOP_LABEL_MARGIN
 DIVISION_CAP_MAX = TOP_LABEL_CAP_HEIGHT
-DIVISION_CAP_MIN = 2.5
+DIVISION_SHELF_MIN_DEPTH = 2.5
 
 
 @defaults("divider")
@@ -647,7 +647,7 @@ def _divider_grid_rim_texts(
 
     This is the Divider-cell adapter for the Text part's Rim Level behavior:
     a 7 mm shelf, 45-degree underside, flush inlay, and letters no larger than
-    the same fixed 5 mm rim-label size.
+    the same 5 mm target size.
     """
     options = spec_feature.options or {}
     side = str(options.get("division_side", "back")).strip().lower()
@@ -656,7 +656,6 @@ def _divider_grid_rim_texts(
         side = "top"
     height = float(options.get("height", connector_keep_out(box) - base_z)
                    or (connector_keep_out(box) - base_z))
-    z_top = base_z + height
     cells = divider_cells(box, spec_feature, base_z)
     max_depth = min(DIVISION_SHELF_DEPTH, max(2.0, height - 1.0))
 
@@ -673,7 +672,7 @@ def _divider_grid_rim_texts(
         across = cell.zone.depth if side in ("top", "bottom") else cell.zone.width
         along = cell.zone.width if side in ("top", "bottom") else cell.zone.depth
         depth_here = min(max_depth, across - 1.0)
-        if depth_here < DIVISION_CAP_MIN:
+        if depth_here < DIVISION_SHELF_MIN_DEPTH:
             continue
         try:
             probe = text_outline(text, 10.0)
@@ -695,7 +694,9 @@ def _divider_grid_rim_texts(
         picked.append((text, cell, depth_here))
     if not picked:
         return []
-    shared_cap = max(DIVISION_CAP_MIN, min(DIVISION_CAP_MAX, shared_cap))
+    shared_cap = min(DIVISION_CAP_MAX, shared_cap)
+    if shared_cap <= 0.0:
+        return []
 
     results: list[tuple[str, trimesh.Trimesh, bool]] = []
     for text, cell, depth_here in picked:
@@ -719,6 +720,7 @@ def _divider_grid_rim_texts(
             turn = 90.0 if side == "left" else -90.0
         if hi <= lo:
             continue
+        z_top = min(top_label_surface_z(box), base_z + height + depth_here)
         try:
             shelf = _division_shelf_solid(
                 edge, edge_axis, lo, hi, inward, z_top, depth_here,
@@ -757,7 +759,6 @@ def _division_side_shelves(
     side = {"front": "bottom", "back": "top"}.get(side, side)
     if side not in ("left", "right", "top", "bottom"):
         side = "top"
-    z_top = base_z + height
     max_depth = min(DIVISION_SHELF_DEPTH, max(2.0, height - 1.0))
     # Whether this side's edge runs the same way as the divider walls (so the
     # shelf lands right on a crest) or across them (so it bridges crest to
@@ -798,7 +799,7 @@ def _division_side_shelves(
             continue
         _edge, _axis, span_lo, span_hi, _inward = geom(slot_lo, slot_hi)
         depth_here = min(max_depth, (slot_hi - slot_lo) - 1.0) if on_crest else max_depth
-        if depth_here < DIVISION_CAP_MIN:
+        if depth_here < DIVISION_SHELF_MIN_DEPTH:
             continue
         try:
             probe = text_outline(text, 10.0)
@@ -815,7 +816,9 @@ def _division_side_shelves(
         picked.append((text, slot_lo, slot_hi, depth_here))
     if not picked:
         return []
-    shared_cap = max(DIVISION_CAP_MIN, min(DIVISION_CAP_MAX, shared_cap))
+    shared_cap = min(DIVISION_CAP_MAX, shared_cap)
+    if shared_cap <= 0.0:
+        return []
 
     results: list[tuple[str, trimesh.Trimesh, bool]] = []
     for text, slot_lo, slot_hi, depth_here in picked:
@@ -827,6 +830,7 @@ def _division_side_shelves(
             # Weld the bridging ledge into the walls it spans between.
             lo = span_lo - thickness / 2.0
             hi = span_hi + thickness / 2.0
+        z_top = min(top_label_surface_z(box), base_z + height + depth_here)
         try:
             shelf = _division_shelf_solid(
                 edge, edge_axis, lo, hi, inward, z_top, depth_here, embed,

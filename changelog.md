@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-15 — Higher, fitting rim labels
+
+- Rim-label shelves now sit just under the rim, leaving the small clearance a
+  stack or lid needs instead of dropping deep into the bin.
+- Rim-label text starts at 5 mm and automatically scales down to fit. A plain
+  warning appears below 4 mm instead of rejecting the label.
+- Divider rim labels use the same fit-first sizing, so long division names no
+  longer spill over their shelves.
+
 ## 2026-09-14 — Photo Nest: trace immediately, keep pre-scan choices, exact legacy sizing
 
 - Choosing a photo now starts tracing immediately; Tool thickness can be

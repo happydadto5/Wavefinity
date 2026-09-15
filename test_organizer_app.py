@@ -1302,7 +1302,7 @@ class FloorLabelTests(unittest.TestCase):
 
 
 class BinCustomizationTests(unittest.TestCase):
-    def test_top_label_is_fixed_five_mm_on_a_seven_mm_ledge(self) -> None:
+    def test_top_label_uses_five_mm_when_it_fits_on_a_seven_mm_ledge(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
         report = top_label_report(spec, "M3")
         outline = top_label_outline(spec, "M3")
@@ -1315,13 +1315,14 @@ class BinCustomizationTests(unittest.TestCase):
 
     def test_top_label_ledge_and_inlay_are_clean_flush_solids(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
+        report = top_label_report(spec, "M3")
         ledge = make_top_label_ledge(spec)
         inlay = make_top_label(spec, "M3")
         pocketed, installed = make_top_labelled_box(spec, "M3")
         self.assertTrue(ledge.is_volume)
-        self.assertAlmostEqual(ledge.bounds[0][2], spec.z - 7.0)
-        self.assertAlmostEqual(ledge.bounds[1][2], spec.z)
-        self.assertAlmostEqual(inlay.bounds[1][2], spec.z)
+        self.assertAlmostEqual(ledge.bounds[0][2], report["ledge_surface_z_mm"] - 7.0)
+        self.assertAlmostEqual(ledge.bounds[1][2], report["ledge_surface_z_mm"])
+        self.assertAlmostEqual(inlay.bounds[1][2], report["ledge_surface_z_mm"])
         self.assertTrue(pocketed.is_volume)
         self.assertLess(intersection_volume(pocketed, installed), 0.01)
 

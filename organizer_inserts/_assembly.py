@@ -17,6 +17,7 @@ from organizer_engine import (
     _rounded,
     flat_cavity_polygon,
     label_placement,
+    top_label_surface_z,
     wavy_cavity_polygon,
 )
 
@@ -139,8 +140,22 @@ def build_features(
             or one.zone.y0 <= whole.y0 + CONNECTOR_EDGE_KEEP_OUT
             or one.zone.y1 >= whole.y1 - CONNECTOR_EDGE_KEEP_OUT
         )
-        if touches_wall and not (one.kind == "nest" and one.contour) and any(
-            solid.bounds[1][2] > connector_keep_out(box) + 1e-6 for solid in made
+        # A Divider's rim-label shelf follows the same near-rim clearance as a
+        # Text shelf. It may enter the connector band, but never the stack/lid
+        # plug space; ordinary wall-touching features keep the connector rule.
+        divider_rim_shelf = (
+            one.kind == "divider"
+            and str(one.options.get("division_level", "base")).lower() == "rim"
+        )
+        clears_stack_lid = all(
+            solid.bounds[1][2] <= top_label_surface_z(box) + 1e-6
+            for solid in made
+        )
+        if (
+            touches_wall
+            and not (one.kind == "nest" and one.contour)
+            and any(solid.bounds[1][2] > connector_keep_out(box) + 1e-6 for solid in made)
+            and not (divider_rim_shelf and clears_stack_lid)
         ):
             raise ValueError(
                 f"a {one.kind} touching the wall must stay below "

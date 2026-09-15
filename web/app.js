@@ -2411,16 +2411,13 @@ function plainCheckbox(key, title, on, options = {}) {
 // Text location and whatever sits beside it share one row: the rim shelf
 // side when the text is on the rim, otherwise `companion` (the text itself),
 // so the location is never left on a half-empty row.
-function textPlacementFields(levelKey, sideKey, level, side = "back", companion = "", rimDisabled = false) {
+function textPlacementFields(levelKey, sideKey, level, side = "back", companion = "") {
   const sides = [["front", "Front"], ["back", "Back"], ["left", "Left"], ["right", "Right"]];
   const pickedSide = sides.some(([value]) => value === side) ? side : "back";
   let html = `<label>Text location<select data-draft="${escapeHtml(levelKey)}">
     <option value="base" ${level === "base" ? "selected" : ""}>On base</option>
-    <option value="rim" ${level === "rim" ? "selected" : ""} ${rimDisabled ? "disabled" : ""}>Rim level${rimDisabled ? " (unavailable while stacking)" : ""}</option>
+    <option value="rim" ${level === "rim" ? "selected" : ""}>Rim level</option>
   </select></label>`;
-  if (rimDisabled && level === "rim") {
-    html += `<p class="field-warning wide">A rim-level label can't be combined with stacking — turn stacking off or move this text to the base.</p>`;
-  }
   if (level === "rim") {
     html += `<label>Rim shelf<select data-draft="${escapeHtml(sideKey)}">
       ${sides.map(([value, label]) => `<option value="${value}" ${pickedSide === value ? "selected" : ""}>${label}</option>`).join("")}
@@ -2659,7 +2656,6 @@ function renderDraftFields() {
     html += textPlacementFields(
       "option:level", "option:rim_side", textLevel, one.options?.rim_side,
       textLevel === "rim" ? "" : `<label>Text${textInput}</label>`,
-      stackMode() !== "none",
     );
     if (textLevel === "rim") html += `<label class="wide">Text${textInput}</label>`;
     if (textLevel === "base") {
@@ -5097,6 +5093,11 @@ async function refreshPreview() {
       toast(accessWarning, true, 6500);
     }
     state.nestAccessWarningShown = accessWarning || null;
+    const rimLabelWarning = result.label_meta?.warning || null;
+    if (rimLabelWarning && rimLabelWarning !== state.rimLabelWarningShown) {
+      toast(rimLabelWarning, false, 6500);
+    }
+    state.rimLabelWarningShown = rimLabelWarning;
     // A B4B preview returns its effective printable dimensions. Adopt them
     // into the controls and flash every field the engine adjusted.
     if (grownX) flashField($("#x-size"));
