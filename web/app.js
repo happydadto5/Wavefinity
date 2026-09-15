@@ -3201,10 +3201,12 @@ function syncNest2DWorkspace() {
     $("#nest-corner-count").textContent =
       `${corners.length} of 4 corners selected`;
 
-    $("#nest-corner-markers").innerHTML = corners.map(corner => `
-      <span class="nest-corner-marker"
-            style="left:${corner.xPct}%;top:${corner.yPct}%"></span>
-    `).join("");
+    const markers = $("#nest-corner-markers");
+    markers.innerHTML = corners.map(() => '<span class="nest-corner-marker"></span>').join("");
+    $$(".nest-corner-marker", markers).forEach((marker, index) => {
+      marker.style.left = `${corners[index].xPct}%`;
+      marker.style.top = `${corners[index].yPct}%`;
+    });
 
     $("#nest-corners-clear").disabled = state.nestCornerBusy;
     $("#nest-corner-error").textContent = state.nestCornerError || "";
