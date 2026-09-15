@@ -3559,7 +3559,14 @@ async function acceptNestTrace() {
   state.nestCandidateCenterMm = null;
   state.nestTuneStatus = "";
   if (!Number.isInteger(index)) {
-    if (one.contour || !state.nestTraceResult) return;
+    if (one.contour || !state.nestTraceResult) {
+      // The part was placed (or the trace result vanished) in the moment
+      // between retracing and pressing Apply - the edit above can no longer
+      // land anywhere, so say so instead of silently dropping it.
+      state.nestTuneStatus = "Could not apply the adjusted outline - please retrace.";
+      renderLayout2D();
+      return;
+    }
     const pending = {
       contour: candidate,
       source_contour: null,
