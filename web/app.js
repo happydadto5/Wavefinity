@@ -103,7 +103,7 @@ const state = {
   // It deliberately stays out of saved design files.
   nestPhoto: null,
   // Scan-tuning session state, kept only in the browser - never saved into
-  // the design. The original upload lets Tune scanned outline and paper-
+  // the design. The original upload lets Scan controls and paper-
   // corner recovery work without asking the user to choose the file again.
   nestOriginalImage: null,   // { dataUrl, mimeType }
   nestRectifiedImage: null,  // { dataUrl, mimeType } - full rectified sheet, for retracing
@@ -118,7 +118,8 @@ const state = {
   nestRetraceRequest: 0,
   nestTraceRequest: 0,
   nestTraceResult: null,        // a completed trace phase waiting on Tool thickness to finalize
-  nestPaperCorners: null,       // four draggable handles, image-pixel space, for recovery
+  nestPaperCorners: null, // null = no recovery; []..4 = corners clicked in 2D recovery
+  nestCornerError: "",
   nestOutlineTool: "select",    // "select" | "add-point" | "delete-point"
   nestAccessWarningShown: null, // last access-planner warning already toasted
   nudgeFeedback: null,
@@ -1839,6 +1840,7 @@ function activatePreviewView(view) {
 function wireControls() {
   wireSidebar();
   wireCameraControls();
+  wireNest2DControls();
   $$('[data-layout-orientation]').forEach(button =>
     button.addEventListener("click", () => setLayoutOrientation(button.dataset.layoutOrientation)));
   $("#divider-edit-breadcrumb")?.addEventListener("click", openDividerSegmentEditor);
@@ -2128,12 +2130,27 @@ function clearDraftSelection(resetLocks = true) {
   updateDraftStatusColor(null);
   updateInteriorModeVisibility();
   updateSelectionButtons();
+  syncNest2DWorkspace();
 }
 
 function pickKind(kind) {
   state.paletteBrowsing = false;
   updateInteriorModeVisibility(true);
   selectKind(kind);
+}
+
+function syncDraftEditorIdentity(kind, info) {
+  const isNest = kind === "nest";
+  const title = $("#draft-title");
+  const description = $("#draft-description");
+
+  title.textContent = info.title;
+  description.textContent = info.description;
+
+  title.hidden = isNest;
+  description.hidden = isNest;
+
+  $(".support-editor")?.classList.toggle("nest-editor", isNest);
 }
 
 async function selectKind(kind, reset = false) {
@@ -2157,8 +2174,7 @@ async function selectKind(kind, reset = false) {
   $(".support-editor").hidden = false;
   $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === kind));
   const info = partInfo(kind);
-  $("#draft-title").textContent = info.title;
-  $("#draft-description").textContent = info.description;
+  syncDraftEditorIdentity(kind, info);
   updateSelectionButtons();
   if (!reset && state.draft?.kind === kind) {
     renderDraftFields();
@@ -2249,8 +2265,7 @@ async function selectedFeature(index, force = false) {
   $(".support-editor").hidden = false;
   $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === state.draftKind));
   const info = partInfo();
-  $("#draft-title").textContent = info.title;
-  $("#draft-description").textContent = info.description;
+  syncDraftEditorIdentity(state.draftKind, info);
   renderDraftFields();
   renderPlaced();
   updateSelectionButtons();
@@ -2416,47 +2431,87 @@ function renderNestFields(one) {
   const toolThickness = number(opt.tool_thickness ?? opt.depth ?? resolved.tool_thickness, 8);
   let html = "";
 
-  // Tool.
-  html += `<div class="draft-triple">`;
-  html += field("Tool thickness", "option:tool_thickness",
+  html += `<div class="photo-upload wide">
+    <label class="button secondary photo-button" for="nest-photo-input">
+      ${one.contour ? "Replace photo" : "Upload part photo"}
+    </label>
+    <input id="nest-photo-input"
+           type="file"
+           accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+    <details>
+      <summary>Photo requirements</summary>
+      <ul>
+        <li>Entire US Letter (8.5 × 11 in) reference sheet visible</li>
+        <li>Camera directly overhead</li>
+        <li>Part lies flat</li>
+        <li>Plain, high-contrast background preferred</li>
+      </ul>
+    </details>
+  </div>`;
+
+  const autoCavity = 0.6 * toolThickness;
+  const cavityDepth = cavityMode === "manual"
+    ? number(val("cavity_depth", autoCavity), autoCavity)
+    : autoCavity;
+  const cavityUnavailable = !hasMeasuredThickness && cavityMode !== "manual";
+
+  html += `<div class="nest-primary-row">`;
+
+  html += field(
+    "Tool thickness",
+    "option:tool_thickness",
     hasMeasuredThickness ? fmt(toolThickness) : "",
-    { unit: "mm", step: "0.5", min: "0.5", placeholder: "required",
-      tip: "The one measurement Wavefinity cannot work out from the photo." });
-  html += field("Fit clearance", "option:clearance", fmt(val("clearance", 0.6)),
-    { unit: "mm", step: "0.1", min: "0" });
-  html += field("Soften outline", "option:smoothing", fmt(val("smoothing", 0)),
-    { unit: "mm", step: "1", min: "0",
-      tip: "Rounds off small jags in the accepted outline. Different from Scan edge cleanup below, which affects tracing itself." });
+    {
+      unit: "mm",
+      step: "0.5",
+      min: "0.5",
+      placeholder: "required",
+      tip: "The one measurement Wavefinity cannot work out from the photo.",
+    },
+  );
+
+  if (holderStyle === "recessed") {
+    html += `<div class="nest-cavity-column">`;
+
+    html += field(
+      "Cavity depth",
+      "option:cavity_depth",
+      cavityUnavailable ? "" : fmt(cavityDepth),
+      {
+        unit: "mm",
+        step: "0.1",
+        min: "0.1",
+        placeholder: cavityUnavailable ? "needs Tool thickness" : undefined,
+        tip: "Editing this switches to Manual so later Tool thickness changes stop recalculating it.",
+      },
+    );
+
+    html += `<div class="nest-cavity-status">
+      <span>${cavityMode === "manual"
+        ? "Manual"
+        : cavityUnavailable
+          ? "Needs Tool thickness"
+          : "Auto — 60%"}</span>
+      <button type="button"
+              class="button secondary"
+              data-action="nest-cavity-auto"
+              ${cavityMode === "manual" ? "" : "disabled"}>
+        Reset to 60%
+      </button>
+    </div>`;
+
+    html += `</div>`;
+  }
+
   html += `</div>`;
 
   // Holder.
-  html += `<label class="wide">Holder
+  html += `<label class="wide">Nest type
     <select data-draft="option:holder_style">
       <option value="recessed" ${selected("recessed", holderStyle)}>Recessed Cavity</option>
       <option value="raised_wall" ${selected("raised_wall", holderStyle)}>Raised Wall</option>
     </select>
   </label>`;
-  if (holderStyle === "recessed") {
-    const autoCavity = 0.6 * toolThickness;
-    const cavityDepth = cavityMode === "manual" ? number(val("cavity_depth", autoCavity), autoCavity) : autoCavity;
-    // In Auto mode, Cavity depth is 60% of Tool thickness - with no real
-    // thickness yet, that number is not a measurement either, so show it
-    // as unavailable rather than a fabricated figure (e.g. "4.8 mm").
-    const cavityUnavailable = !hasMeasuredThickness && cavityMode !== "manual";
-    html += `<div class="pair">`;
-    html += field("Cavity depth", "option:cavity_depth",
-      cavityUnavailable ? "" : fmt(cavityDepth), {
-        unit: "mm", step: "0.1", min: "0.1",
-        placeholder: cavityUnavailable ? "needs Tool thickness" : undefined,
-        tip: "Editing this switches to Manual so later Tool thickness changes stop recalculating it.",
-      });
-    html += `<div class="nest-cavity-status">
-      <span class="field-label">${cavityMode === "manual" ? "Manual"
-        : cavityUnavailable ? "Unavailable until Tool thickness is entered" : "Auto — 60% of tool thickness"}</span>
-      <button type="button" class="button secondary" data-action="nest-cavity-auto" ${cavityMode === "manual" ? "" : "disabled"}>Reset to 60%</button>
-    </div>`;
-    html += `</div>`;
-  }
 
   // Finger access.
   html += `<label class="wide">Finger access
@@ -2506,6 +2561,29 @@ function renderNestFields(one) {
     html += `</details>`;
   }
 
+  html += `<div class="pair nest-fit-row">`;
+
+  html += field(
+    "Fit clearance",
+    "option:clearance",
+    fmt(val("clearance", 0.6)),
+    { unit: "mm", step: "0.1", min: "0" },
+  );
+
+  html += field(
+    "Soften outline",
+    "option:smoothing",
+    fmt(val("smoothing", 0)),
+    {
+      unit: "mm",
+      step: "1",
+      min: "0",
+      tip: "Rounds off small jags in the accepted outline.",
+    },
+  );
+
+  html += `</div>`;
+
   // Bin. Read straight from the stored option, never the resolved fallback:
   // a legacy design with no stored preference must show as off here, not as
   // on just because it happens to behave in a similar grow-only way.
@@ -2515,15 +2593,6 @@ function renderNestFields(one) {
     opt.auto_size === true, { wide: true });
 
   // Outline.
-  html += `<div class="photo-upload wide">`;
-  html += `<label class="button secondary photo-button" for="nest-photo-input">${one.contour ? "Replace photo" : "Upload part photo"}</label>
-    <input id="nest-photo-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
-    <details><summary>Photo requirements</summary><ul>
-      <li>Entire US Letter (8.5 × 11 in) reference sheet visible</li>
-      <li>Camera directly overhead</li>
-      <li>Part lies flat</li>
-      <li>Plain, high-contrast background preferred</li>
-    </ul></details>`;
   if (one.contour) {
     html += `<p class="photo-measurement">Outline ready — drag its points over the photo in 2D to reshape it.</p>`;
     html += `<fieldset class="wide"><legend>Outline editor</legend><div class="segmented three">
@@ -2533,34 +2602,6 @@ function renderNestFields(one) {
     </div></fieldset>`;
     html += `<button type="button" class="button secondary" data-action="nest-reset-outline">Reset outline</button>`;
   }
-  if (state.nestPhoto) {
-    html += field("Photo opacity", "nest-photo-opacity", state.nestPhotoOpacity,
-      { unit: "%", step: "5", min: "0", max: "100", dataAttribute: "data-nest-opacity" });
-  }
-  if (state.nestRectifiedImage) {
-    html += `<details class="wide"><summary>Tune scanned outline</summary>`;
-    html += field("Object sensitivity", "nest-sensitivity", state.nestSensitivity,
-      { step: "1", min: "0", max: "100", dataAttribute: "data-nest-tune" });
-    html += `<p class="field-hint">Less object ← → More object</p>`;
-    html += field("Edge cleanup", "nest-cleanup", state.nestCleanup,
-      { step: "1", min: "0", max: "100", dataAttribute: "data-nest-tune" });
-    html += `<p class="field-hint">More detail ← → Smoother</p>`;
-    html += `<div class="pair">
-      <button type="button" class="button secondary" data-action="nest-tune-reset">Reset sliders</button>
-      <button type="button" class="button" data-action="nest-tune-accept" ${state.nestCandidateContour ? "" : "disabled"}>Use this trace</button>
-    </div>`;
-    if (state.nestTuneStatus) html += `<p class="field-hint">${escapeHtml(state.nestTuneStatus)}</p>`;
-    html += `</details>`;
-  }
-  if (state.nestPaperCorners && state.nestOriginalImage) {
-    html += `<p class="field-warning">Adjust paper corners — automatic detection failed. Drag each handle onto a corner of the reference sheet.</p>`;
-    html += `<div class="nest-corner-editor" id="nest-corner-editor">
-      <img src="${state.nestOriginalImage.dataUrl}" draggable="false">
-      ${state.nestPaperCorners.map((corner, index) => `<div class="nest-corner-handle" data-corner-index="${index}" style="left:${corner.xPct}%;top:${corner.yPct}%"></div>`).join("")}
-    </div>`;
-    html += `<button type="button" class="button" data-action="nest-corners-accept">Use these corners</button>`;
-  }
-  html += `</div>`;
   return html;
 }
 
@@ -2571,10 +2612,10 @@ function renderDraftFields() {
   const zone = one.zone;
   const width = zone[2] - zone[0];
   const depth = zone[3] - zone[1];
-  // The bore editor carries its own "Base" / "Hole" headings, so the grey
-  // panel blurb just wastes space there.
+  // Bore and Photo Nest carry their own identity inside their controls, so the
+  // grey panel blurb just wastes space there.
   const descEl = $("#draft-description");
-  if (descEl) descEl.hidden = one.kind === "bore";
+  if (descEl) descEl.hidden = one.kind === "bore" || one.kind === "nest";
   let html = "";
   // Keys pulled up into the "Repeats" cluster, so the body loop skips them.
   const repeatKeys = new Set();
@@ -2980,6 +3021,7 @@ function renderDraftFields() {
   }
   const activeDraft = document.activeElement?.dataset?.draft;
   $("#draft-fields").innerHTML = html;
+  syncNest2DWorkspace();
   const photoInput = $("#nest-photo-input", $("#draft-fields"));
   if (photoInput) photoInput.addEventListener("change", uploadNestPhoto);
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
@@ -3127,9 +3169,139 @@ function renderDraftFields() {
   if (state.draft?.kind === "nest") wireNestFieldActions();
 }
 
-// Photo Nest's own buttons/sliders - separated out because they carry their
-// own session-only state (tuning sliders, the candidate trace, paper-corner
-// recovery) that no other feature kind touches.
+function syncNest2DWorkspace() {
+  const wrap = $('.canvas-wrap[data-canvas="2d"]');
+  if (!wrap) return;
+
+  const canvas = $("#preview-2d");
+  const layoutControls = $(".layout-controls", wrap);
+  const scanPanel = $("#nest-scan-controls");
+  const recovery = $("#nest-corner-recovery");
+
+  const isNest = state.draft?.kind === "nest";
+  const recoveryActive =
+    isNest
+    && Array.isArray(state.nestPaperCorners)
+    && Boolean(state.nestOriginalImage);
+
+  recovery.hidden = !recoveryActive;
+  canvas.hidden = recoveryActive;
+  if (layoutControls) layoutControls.hidden = recoveryActive;
+
+  if (recoveryActive) {
+    scanPanel.hidden = true;
+
+    const image = $("#nest-corner-image");
+    if (image.src !== state.nestOriginalImage.dataUrl) {
+      image.src = state.nestOriginalImage.dataUrl;
+    }
+
+    const corners = state.nestPaperCorners;
+    $("#nest-corner-count").textContent =
+      `${corners.length} of 4 corners selected`;
+
+    $("#nest-corner-markers").innerHTML = corners.map(corner => `
+      <span class="nest-corner-marker"
+            style="left:${corner.xPct}%;top:${corner.yPct}%"></span>
+    `).join("");
+
+    $("#nest-corners-use").disabled = corners.length !== 4;
+    $("#nest-corner-error").textContent = state.nestCornerError || "";
+    return;
+  }
+
+  const showScan =
+    isNest
+    && Boolean(state.nestRectifiedImage);
+
+  scanPanel.hidden = !showScan;
+
+  if (!showScan) return;
+
+  const opacity = $("#nest-photo-opacity-range");
+  const sensitivity = $("#nest-sensitivity-range");
+  const cleanup = $("#nest-cleanup-range");
+
+  opacity.value = String(state.nestPhotoOpacity);
+  sensitivity.value = String(state.nestSensitivity);
+  cleanup.value = String(state.nestCleanup);
+
+  $("#nest-photo-opacity-value").textContent =
+    `${Math.round(state.nestPhotoOpacity)}%`;
+  $("#nest-sensitivity-value").textContent =
+    String(Math.round(state.nestSensitivity));
+  $("#nest-cleanup-value").textContent =
+    String(Math.round(state.nestCleanup));
+
+  $("#nest-scan-apply").disabled = !state.nestCandidateContour;
+  $("#nest-scan-status").textContent = state.nestTuneStatus || "";
+}
+
+function wireNest2DControls() {
+  $("#nest-photo-opacity-range")?.addEventListener("input", event => {
+    state.nestPhotoOpacity = number(event.target.value, 45);
+    syncNest2DWorkspace();
+    renderLayout2D();
+  });
+
+  $("#nest-sensitivity-range")?.addEventListener("input", event => {
+    state.nestSensitivity = number(event.target.value, 50);
+    syncNest2DWorkspace();
+    requestNestRetrace();
+  });
+
+  $("#nest-cleanup-range")?.addEventListener("input", event => {
+    state.nestCleanup = number(event.target.value, 50);
+    syncNest2DWorkspace();
+    requestNestRetrace();
+  });
+
+  $("#nest-scan-defaults")?.addEventListener("click", () => {
+    state.nestSensitivity = 50;
+    state.nestCleanup = 50;
+    state.nestCandidateContour = null;
+    state.nestCandidateCenterMm = null;
+    state.nestTuneStatus = "Restoring default scan settings…";
+    syncNest2DWorkspace();
+    requestNestRetrace();
+  });
+
+  $("#nest-scan-apply")?.addEventListener("click", acceptNestTrace);
+
+  $("#nest-corners-clear")?.addEventListener("click", () => {
+    state.nestPaperCorners = [];
+    state.nestCornerError = "";
+    syncNest2DWorkspace();
+  });
+
+  $("#nest-corners-use")?.addEventListener("click", acceptNestPaperCorners);
+
+  $("#nest-corner-image")?.addEventListener("click", event => {
+    if (!Array.isArray(state.nestPaperCorners)
+        || state.nestPaperCorners.length >= 4) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const xPct = Math.max(
+      0,
+      Math.min(100, (event.clientX - rect.left) / rect.width * 100),
+    );
+    const yPct = Math.max(
+      0,
+      Math.min(100, (event.clientY - rect.top) / rect.height * 100),
+    );
+
+    state.nestPaperCorners.push({ xPct, yPct });
+    state.nestCornerError = "";
+    syncNest2DWorkspace();
+  });
+}
+
+// Photo Nest's own sidebar buttons - separated out because they carry
+// session-only state that no other feature kind touches.
 function wireNestFieldActions() {
   const fields = $("#draft-fields");
   const pushOut = $('[data-draft="nest-push-out"]', fields);
@@ -3159,59 +3331,6 @@ function wireNestFieldActions() {
     state.nestOutlineTool = input.value;
     renderLayout2D();
   }));
-  const opacity = $("[data-nest-opacity]", fields);
-  if (opacity) opacity.addEventListener("input", () => {
-    state.nestPhotoOpacity = number(opacity.value, 45);
-    renderLayout2D();
-  });
-  $$("[data-nest-tune]", fields).forEach(input => input.addEventListener("input", () => {
-    state.nestSensitivity = number($('[data-nest-tune="nest-sensitivity"]', fields)?.value, state.nestSensitivity);
-    state.nestCleanup = number($('[data-nest-tune="nest-cleanup"]', fields)?.value, state.nestCleanup);
-    requestNestRetrace();
-  }));
-  const tuneReset = $('[data-action="nest-tune-reset"]', fields);
-  if (tuneReset) tuneReset.addEventListener("click", () => {
-    state.nestSensitivity = 50;
-    state.nestCleanup = 50;
-    state.nestCandidateContour = null;
-    state.nestCandidateCenterMm = null;
-    state.nestTuneStatus = "";
-    renderDraftFields();
-    renderLayout2D();
-  });
-  const tuneAccept = $('[data-action="nest-tune-accept"]', fields);
-  if (tuneAccept) tuneAccept.addEventListener("click", acceptNestTrace);
-  const cornersAccept = $('[data-action="nest-corners-accept"]', fields);
-  if (cornersAccept) cornersAccept.addEventListener("click", acceptNestPaperCorners);
-  wireNestCornerHandles();
-}
-
-function wireNestCornerHandles() {
-  const editor = $("#nest-corner-editor");
-  if (!editor) return;
-  let dragIndex = null;
-  const move = event => {
-    if (dragIndex === null) return;
-    const rect = editor.getBoundingClientRect();
-    const point = event.touches ? event.touches[0] : event;
-    const xPct = Math.min(100, Math.max(0, ((point.clientX - rect.left) / rect.width) * 100));
-    const yPct = Math.min(100, Math.max(0, ((point.clientY - rect.top) / rect.height) * 100));
-    state.nestPaperCorners[dragIndex] = { xPct, yPct };
-    const handle = $(`[data-corner-index="${dragIndex}"]`, editor);
-    if (handle) { handle.style.left = `${xPct}%`; handle.style.top = `${yPct}%`; }
-    event.preventDefault();
-  };
-  const stop = () => { dragIndex = null; };
-  $$(".nest-corner-handle", editor).forEach(handle => {
-    handle.addEventListener("pointerdown", event => {
-      dragIndex = Number(handle.dataset.cornerIndex);
-      handle.setPointerCapture?.(event.pointerId);
-      event.preventDefault();
-    });
-  });
-  editor.addEventListener("pointermove", move);
-  editor.addEventListener("pointerup", stop);
-  editor.addEventListener("pointerleave", stop);
 }
 
 async function resetNestOutline() {
@@ -3240,7 +3359,7 @@ const requestNestRetrace = debounce(async () => {
   if (!rectified || !draft || draft.kind !== "nest") return;
   const request = ++state.nestRetraceRequest;
   state.nestTuneStatus = "Retracing…";
-  renderDraftFields();
+  syncNest2DWorkspace();
   try {
     const result = await api("/api/nest/retrace", {
       rectified_image: rectified.dataUrl,
@@ -3254,7 +3373,7 @@ const requestNestRetrace = debounce(async () => {
     const delta = [candidateCenter[0] - accepted[0], candidateCenter[1] - accepted[1]];
     state.nestCandidateContour = result.contour.map(([x, y]) => [x + delta[0], y + delta[1]]);
     state.nestCandidateCenterMm = candidateCenter;
-    state.nestTuneStatus = `Candidate: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm — press Use this trace to accept.`;
+    state.nestTuneStatus = `Candidate: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm — press Apply adjusted outline to accept.`;
   } catch (error) {
     if (request !== state.nestRetraceRequest) return;
     // Failed retrace is non-destructive (spec section 34): keep the accepted
@@ -3264,7 +3383,7 @@ const requestNestRetrace = debounce(async () => {
     state.nestCandidateCenterMm = null;
     state.nestTuneStatus = `Could not retrace at this setting: ${error.message}`;
   }
-  renderDraftFields();
+  syncNest2DWorkspace();
   renderLayout2D();
 }, 300);
 
@@ -3283,6 +3402,7 @@ async function acceptNestTrace() {
   // already-self-centred raw candidate lands exactly back on the candidate's
   // own trace centre, so that becomes the new accepted stable-frame centre.
   if (candidateCenter) state.nestAcceptedCenterMm = candidateCenter;
+  syncNest2DWorkspace();
 }
 
 // Runs the trace-only phase (spec section 1): paper detection/correction (or
@@ -3309,6 +3429,8 @@ async function runNestTrace(paperCorners) {
     state.nestRectifiedImage = result.rectified_image
       ? { dataUrl: result.rectified_image, mimeType: "image/jpeg" } : state.nestRectifiedImage;
     state.nestPaperCorners = null;
+    state.nestCornerError = "";
+    syncNest2DWorkspace();
     if (_nestMeasuredThickness(draft.options) == null) {
       $("#draft-status").textContent = "Photo traced — enter Tool thickness above to finish.";
     }
@@ -3318,15 +3440,17 @@ async function runNestTrace(paperCorners) {
     if (request !== state.nestTraceRequest) return;
     $("#draft-status").textContent = error.message;
     $("#draft-status").classList.add("error");
-    // Automatic paper detection failed: offer manual corner recovery over
-    // the same original photo instead of asking the user to upload again.
-    if (/paper missing|paper detection/i.test(error.message)) {
-      state.nestPaperCorners = [
-        { xPct: 10, yPct: 10 }, { xPct: 90, yPct: 10 },
-        { xPct: 90, yPct: 90 }, { xPct: 10, yPct: 90 },
-      ];
-      renderDraftFields();
-      toast("Automatic paper detection failed. Adjust the corners below.", true, 6500);
+    if (paperCorners) {
+      // The user supplied four corners but Python still rejected them.
+      // Keep those points visible so they can clear/retry without re-uploading.
+      state.nestCornerError = error.message;
+      syncNest2DWorkspace();
+      toast(error.message, true, 6500);
+    } else if (/paper missing|paper detection/i.test(error.message)) {
+      state.nestPaperCorners = [];
+      state.nestCornerError = error.message;
+      syncNest2DWorkspace();
+      toast("Automatic paper detection failed. Click the four paper corners in 2D.", true, 6500);
     } else {
       toast(error.message, true, 6500);
     }
@@ -3369,6 +3493,7 @@ async function finishPhotoNestIfReady() {
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
     $('.view-tab[data-view="2d"]').click();
+    setLayoutOrientation("topup");
     toast(`Photo Nest ready: ${fmt(trace.outline.width)} × ${fmt(trace.outline.depth)} mm outline.`);
     for (const warning of result.warnings || []) toast(warning, true, 6500);
   } catch (error) {
@@ -3381,15 +3506,24 @@ async function finishPhotoNestIfReady() {
 }
 
 async function acceptNestPaperCorners() {
-  const draft = state.draft;
   const original = state.nestOriginalImage;
   const corners = state.nestPaperCorners;
-  if (!draft || !original || !corners) return;
+
+  if (!original || !Array.isArray(corners) || corners.length !== 4) return;
+
   const img = new Image();
   img.src = original.dataUrl;
   await (img.decode ? img.decode().catch(() => {}) : Promise.resolve());
-  const width = img.naturalWidth || 1, height = img.naturalHeight || 1;
-  const paperCorners = corners.map(c => [c.xPct / 100 * width, c.yPct / 100 * height]);
+
+  const width = img.naturalWidth || 1;
+  const height = img.naturalHeight || 1;
+
+  const paperCorners = corners.map(corner => [
+    corner.xPct / 100 * width,
+    corner.yPct / 100 * height,
+  ]);
+
+  state.nestCornerError = "";
   await runNestTrace(paperCorners);
 }
 
@@ -3758,6 +3892,8 @@ async function uploadNestPhoto(event) {
   const image = await readFileDataUrl(file);
   input.value = "";
   if (state.draft?.kind !== "nest" || state.draftKind !== "nest") return;
+  $('.view-tab[data-view="2d"]')?.click();
+  setLayoutOrientation("topup");
   // Choosing a photo starts analysis immediately - Tool thickness is a
   // separate field the user can fill in while it runs (spec section 1).
   // Whichever finishes last triggers finalization (finishPhotoNestIfReady).
@@ -3768,6 +3904,7 @@ async function uploadNestPhoto(event) {
   state.nestCandidateCenterMm = null;
   state.nestTuneStatus = "";
   state.nestPaperCorners = null;
+  state.nestCornerError = "";
   state.nestTraceResult = null;
   renderDraftFields();
   await runNestTrace();

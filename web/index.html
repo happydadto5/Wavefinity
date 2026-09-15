@@ -285,6 +285,98 @@
       </div>
       <div class="canvas-wrap" data-canvas="2d">
         <canvas id="preview-2d" role="img" aria-label="Top-down layout preview" aria-describedby="preview-help layout-help"></canvas>
+        <div id="nest-scan-controls" class="nest-scan-controls" hidden>
+          <div class="nest-scan-controls-title">Scan controls</div>
+
+          <label class="nest-scan-range">
+            <span>
+              <strong>Photo opacity</strong>
+              <output id="nest-photo-opacity-value">45%</output>
+            </span>
+            <input id="nest-photo-opacity-range"
+                   type="range"
+                   min="0"
+                   max="100"
+                   step="1"
+                   value="45">
+          </label>
+
+          <label class="nest-scan-range">
+            <span>
+              <strong>Object sensitivity</strong>
+              <output id="nest-sensitivity-value">50</output>
+            </span>
+            <input id="nest-sensitivity-range"
+                   type="range"
+                   min="0"
+                   max="100"
+                   step="1"
+                   value="50">
+            <small><span>Less object</span><span>More object</span></small>
+          </label>
+
+          <label class="nest-scan-range">
+            <span>
+              <strong>Edge cleanup</strong>
+              <output id="nest-cleanup-value">50</output>
+            </span>
+            <input id="nest-cleanup-range"
+                   type="range"
+                   min="0"
+                   max="100"
+                   step="1"
+                   value="50">
+            <small><span>More detail</span><span>Smoother</span></small>
+          </label>
+
+          <div class="nest-scan-actions">
+            <button id="nest-scan-defaults"
+                    type="button"
+                    class="button secondary">
+              Restore scan defaults
+            </button>
+            <button id="nest-scan-apply"
+                    type="button"
+                    class="button primary"
+                    disabled>
+              Apply adjusted outline
+            </button>
+          </div>
+
+          <div id="nest-scan-status" class="nest-scan-status"></div>
+        </div>
+
+        <div id="nest-corner-recovery" class="nest-corner-recovery" hidden>
+          <div class="nest-corner-recovery-header">
+            <strong>Select the paper corners</strong>
+            <p>Click the four corners of the paper. You can click them in any order. Order does not matter.</p>
+            <span id="nest-corner-count">0 of 4 corners selected</span>
+          </div>
+
+          <div id="nest-corner-image-wrap" class="nest-corner-image-wrap">
+            <img id="nest-corner-image"
+                 alt="Uploaded photo for selecting the four paper corners"
+                 draggable="false">
+            <div id="nest-corner-markers" aria-hidden="true"></div>
+          </div>
+
+          <div class="nest-corner-actions">
+            <button id="nest-corners-clear"
+                    type="button"
+                    class="button secondary">
+              Clear corners
+            </button>
+            <button id="nest-corners-use"
+                    type="button"
+                    class="button primary"
+                    disabled>
+              Use selected corners
+            </button>
+          </div>
+
+          <div id="nest-corner-error" class="field-error"></div>
+        </div>
+
         <div class="camera-controls layout-controls" aria-label="2D orientation controls">
           <div class="camera-controls-row">
             <div id="layout-orientation-controls" class="mode-controls" role="group" aria-label="2D orientation">

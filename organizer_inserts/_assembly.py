@@ -44,6 +44,21 @@ from ._text import (
 from ._divider import divider_division_texts
 
 
+def _nest_recessed_deck_footprint(box: BoxSpec, mode: str) -> Polygon:
+    """Physical area a Recessed Photo Nest deck should fill."""
+    if mode == "fused":
+        return (
+            flat_cavity_polygon(box)
+            if box.flat_inside > 0.0
+            else wavy_cavity_polygon(box)
+        )
+    if mode == "separate":
+        return insert_footprint(box, "separate")
+    if mode == "cartridge":
+        return insert_footprint(box, "cartridge")
+    raise ValueError(f"unknown layout mode {mode!r}")
+
+
 def build_features(
     box: BoxSpec, features: Iterable[Feature], base_z: float,
     bounds: Zone | None = None, mode: str = "fused",
@@ -66,8 +81,34 @@ def build_features(
         max_feature_z = box.z - STACK_PLUG_DEPTH
     solids: list[trimesh.Trimesh] = []
     for one in features:
-        made = FEATURE_BUILDERS[one.kind](box, one, base_z)
+        recessed_deck_footprint = None
+
+        if (
+            one.kind == "nest"
+            and one.contour
+            and one.options.get("holder_style") == "recessed"
+        ):
+            recessed_deck_footprint = _nest_recessed_deck_footprint(box, mode)
+            made = FEATURE_BUILDERS[one.kind](
+                box,
+                one,
+                base_z,
+                deck_footprint=recessed_deck_footprint,
+            )
+        else:
+            made = FEATURE_BUILDERS[one.kind](box, one, base_z)
+
         reach = _feature_reach(box, one, base_z)
+
+        if recessed_deck_footprint is not None:
+            x0, y0, x1, y1 = recessed_deck_footprint.bounds
+            epsilon = 0.01
+            reach = Zone(
+                float(x0) - epsilon,
+                float(y0) - epsilon,
+                float(x1) + epsilon,
+                float(y1) + epsilon,
+            )
         for solid in made:
             if (
                 solid.bounds[0][0] < reach.x0 - 1e-5

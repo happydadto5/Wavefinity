@@ -633,9 +633,11 @@ true size, traces the tool's outline, and asks for one number: **Tool
 thickness**. As soon as both are ready it builds a complete, practical,
 printable bin in seconds — no other choice is required. Missing paper, severe
 perspective, an edge-touching part, multiple parts, and unusably small/noisy
-outlines are rejected with a specific correction; if automatic paper detection
-fails, four draggable corner handles appear over the original photo so the
-shot can be corrected without uploading again. The retired measured/segment
+outlines are rejected with a specific correction. If automatic paper detection
+fails, Wavefinity switches to the 2D view and shows the original photo. Click
+all four paper corners in any order; Wavefinity orders and validates them
+automatically and retries the same photo without requiring another upload.
+The retired measured/segment
 Nest format is rejected explicitly rather than silently reinterpreted.
 
 A new scan defaults to **Recessed Cavity**: a solid deck fills the fitted area
@@ -670,16 +672,16 @@ The 2D layout draws the softened silhouette - the same one the printed part
 gets - with move, proportional-resize and rotation handles, plus an outline
 editor: drag a point directly, **Add Point** (click near an edge) and
 **Delete Point** (click a point, minimum three left), and **Reset outline**
-to return to the most recently accepted scan. A collapsed **Tune scanned
-outline** panel offers Object sensitivity and Edge cleanup sliders (both
-default to the setting that reproduces the original trace); a slider shows
+to return to the most recently accepted scan. **Photo opacity**, **Object
+sensitivity** and **Edge cleanup** are available in the 2D **Scan controls**
+panel (the scan settings default to reproducing the original trace); a slider shows
 its retraced candidate dashed over the accepted outline without changing
-anything until **Use this trace** accepts it, and a tuning attempt that fails
+anything until **Apply adjusted outline** accepts it, and a tuning attempt that fails
 to produce a valid outline leaves the accepted one untouched. **Fit
 clearance** sets the gap between the holder and the part, and **Soften
 outline** rounds off small inward and outward details - a separate pass from
-Edge cleanup, which affects tracing itself. **Photo opacity** dims the
-reference photo behind the outline in the browser only; it disappears, along
+Edge cleanup, which affects tracing itself. Photo opacity dims the reference
+photo behind the outline in the browser only; it disappears, along
 with the tuning and paper-corner tools, once a design is reopened without its
 original photo, since the photo itself is never saved.
 

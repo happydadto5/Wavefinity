@@ -975,9 +975,13 @@ def _nest_push_support(
     return _nest_transform_mesh(deck, one)
 
 
-def _nest_recessed_deck(zone: Zone, cavity_depth: float, base_z: float) -> trimesh.Trimesh:
-    """The solid rectangular deck filling the fitted Nest zone."""
-    deck = _extrude_polygon(shapely_box(zone.x0, zone.y0, zone.x1, zone.y1), cavity_depth)
+def _nest_recessed_deck(
+    footprint: Polygon,
+    cavity_depth: float,
+    base_z: float,
+) -> trimesh.Trimesh:
+    """Solid Recessed deck filling the bin/insert's physical usable footprint."""
+    deck = _extrude_polygon(footprint, cavity_depth)
     deck.apply_translation((0.0, 0.0, base_z))
     return deck
 
@@ -1042,7 +1046,13 @@ def _nest_finger_scoops(
         OptionDefinition("Photo marker", "photo", False, "boolean", False),
     ), order=20,
 )
-def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
+def build_nest(
+    box: BoxSpec,
+    spec_feature: Feature,
+    base_z: float,
+    *,
+    deck_footprint: Polygon | None = None,
+) -> list[trimesh.Trimesh]:
     """A finished holder that traces one photographed outline: a solid
     Recessed Cavity deck by default, or a Raised Wall on request.
     """
@@ -1106,7 +1116,8 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
         plan = resolve_nest_access_plan(
             local_opening, _nest_access_mode(assist), finger_position, finger_width,
         )
-        deck = _nest_recessed_deck(spec_feature.zone, cavity_depth, base_z)
+        physical_deck = deck_footprint if deck_footprint is not None else spec_feature.zone.polygon
+        deck = _nest_recessed_deck(physical_deck, cavity_depth, base_z)
         cutter = _nest_recessed_cavity_cutter(world_opening, cavity_depth, base_z)
         deck = difference([deck, cutter])
         if plan.style == "finger_grasp":
