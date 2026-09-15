@@ -4941,10 +4941,8 @@ function updateSelectionButtons() {
   // only while a part is open for editing.
   const draftActions = $("#draft-actions");
   if (draftActions) draftActions.hidden = !editing;
-  const placedBlock = $(".placed-block");
-  if (placedBlock) {
-    placedBlock.hidden = !state.design?.layout?.features?.length;
-  }
+  const hasPlaced = !!state.design?.layout?.features?.length;
+  $$(".placed-block").forEach(placedBlock => { placedBlock.hidden = !hasPlaced; });
   $("#save-part").disabled = busy || !state.draft;
   $("#delete-part").disabled = busy || !state.draft;
   const hasPhotoNest = state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour);
@@ -4971,11 +4969,12 @@ function updateDraftStatusColor(hasError) {
 function renderPlaced() {
   if (!state.design) return;
   const features = state.design.layout.features;
-  const container = $("#placed-supports");
-  if (!features.length) {
-    container.innerHTML = '<div class="placed-empty">No interior parts yet. Pick a shape above.</div>';
-  } else {
-    container.innerHTML = features.map((one, index) => {
+  // Painted in two spots: the floating box over the 3D/2D view, and the
+  // matching list in the left settings panel - same markup, same handlers.
+  const containers = $$("#placed-supports, #placed-supports-panel");
+  const markup = !features.length
+    ? '<div class="placed-empty">No interior parts yet. Pick a shape above.</div>'
+    : features.map((one, index) => {
       const width = one.zone[2] - one.zone[0];
       const depth = one.zone[3] - one.zone[1];
       const isRim = one.kind === "text" && one.options?.level === "rim";
@@ -4991,13 +4990,16 @@ function renderPlaced() {
         <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this interior part" aria-label="Delete ${title}">✕</button>
       </div>`;
     }).join("");
+  containers.forEach(container => {
+    container.innerHTML = markup;
+    if (!features.length) return;
     $$(".placed-item-select", container).forEach(button => button.addEventListener("click", async () => {
       const index = Number(button.dataset.index);
       await selectedFeature(index);
       if (state.selected === index) activatePreviewView("2d");
     }));
     $$(".placed-item-delete", container).forEach(button => button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
-  }
+  });
   $("#support-count").textContent = `${features.length} placed`;
   const summaryEl = $("#design-summary");
   if (summaryEl) {

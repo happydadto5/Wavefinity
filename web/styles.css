@@ -616,6 +616,10 @@ input[type="number"]::-webkit-inner-spin-button {
   backdrop-filter: blur(8px);
 }
 .placed-block h3 { margin: 0 0 10px; font-size: 13px; }
+.placed-block-panel {
+  position: static; width: auto; max-height: none; margin: 10px 0 0;
+  backdrop-filter: none;
+}
 .placed-supports { display: grid; gap: 5px; }
 .placed-empty { border: 1px dashed var(--line-dark); border-radius: 7px; padding: 12px; color: var(--muted); text-align: center; font-size: 12px; }
 .placed-item { border: 1px solid var(--line); border-radius: 8px; background: white; display: flex; justify-content: space-between; align-items: stretch; gap: 0; }
