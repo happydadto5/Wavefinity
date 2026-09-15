@@ -3295,8 +3295,15 @@ function showNestCornerMagnifier(point) {
   if (!magnifier || !image || !state.nestOriginalImage) return;
   const rect = image.getBoundingClientRect();
   const size = 144;
+  const border = 3;
+  const zoom = 4;
+  const lensCenter = (size - border * 2) / 2;
+  const sourceX = point.xPct / 100 * rect.width;
+  const sourceY = point.yPct / 100 * rect.height;
   magnifier.style.backgroundImage = `url("${state.nestOriginalImage.dataUrl}")`;
-  magnifier.style.backgroundPosition = `${point.xPct}% ${point.yPct}%`;
+  magnifier.style.backgroundSize = `${rect.width * zoom}px ${rect.height * zoom}px`;
+  magnifier.style.backgroundPosition =
+    `${lensCenter - sourceX * zoom}px ${lensCenter - sourceY * zoom}px`;
   magnifier.style.left = `${Math.max(6, Math.min(rect.width - size - 6, point.xPct / 100 * rect.width + 18))}px`;
   magnifier.style.top = `${Math.max(6, Math.min(rect.height - size - 6, point.yPct / 100 * rect.height + 18))}px`;
   magnifier.hidden = false;
