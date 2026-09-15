@@ -48,6 +48,11 @@ class PhotoOutline:
     # repeating paper detection or perspective correction. Kept only in
     # browser session state - never written into a saved design.
     rectified_image: str | None = None
+    # The contour's own centre in the rectified sheet's stable millimetre
+    # frame - lets the browser translate a later retrace's differently
+    # centred contour back into the currently accepted one's frame, so the
+    # two (and the reference photo) stay one consistent physical overlay.
+    trace_center_mm: tuple[float, float] | None = None
 
 
 def _resolve_threshold(otsu: float, sensitivity: float) -> float:
@@ -313,7 +318,12 @@ def segment_object(
 
 def contour_to_millimetres(
     pixels: np.ndarray, pixels_per_mm: float = WARP_PIXELS_PER_MM,
-) -> tuple[tuple[float, float], ...]:
+) -> tuple[tuple[tuple[float, float], ...], tuple[float, float]]:
+    """The contour, centred on its own bounding box as always, plus that
+    centre in the rectified sheet's own stable millimetre frame - the same
+    frame on every trace of the same rectified image, so a browser can
+    compare two traces' centres directly (see spec: one stable coordinate
+    frame for scan tuning)."""
     polygon, centre_x, centre_y = _contour_polygon_millimetres(pixels, pixels_per_mm)
     points = tuple(
         (round(float(x - centre_x), 3), round(float(y - centre_y), 3))
@@ -321,7 +331,7 @@ def contour_to_millimetres(
     )
     if len(points) < 3 or len(points) > 500:
         raise ValueError("outline too small or noisy: simplify the background and retake the photo")
-    return points
+    return points, (round(float(centre_x), 3), round(float(centre_y), 3))
 
 
 def _contour_polygon_millimetres(
@@ -382,7 +392,7 @@ def extract_photo_outline(
     )
     rectified = correct_perspective(image, corners, paper_size=paper_size)
     _mask, pixels = segment_object(rectified, WARP_PIXELS_PER_MM, sensitivity, cleanup)
-    contour = contour_to_millimetres(pixels)
+    contour, trace_center_mm = contour_to_millimetres(pixels)
     reference_image, reference_bounds = _reference_crop(
         rectified, pixels, WARP_PIXELS_PER_MM
     )
@@ -397,6 +407,7 @@ def extract_photo_outline(
         reference_image,
         reference_bounds,
         rectified_image,
+        trace_center_mm,
     )
 
 
@@ -419,7 +430,7 @@ def retrace_outline_from_rectified(
     not repeated for every slider adjustment."""
     rectified = decode_image_data(data_url, mime_type or "image/jpeg")
     _mask, pixels = segment_object(rectified, WARP_PIXELS_PER_MM, sensitivity, cleanup)
-    contour = contour_to_millimetres(pixels)
+    contour, trace_center_mm = contour_to_millimetres(pixels)
     reference_image, reference_bounds = _reference_crop(
         rectified, pixels, WARP_PIXELS_PER_MM
     )
@@ -433,4 +444,5 @@ def retrace_outline_from_rectified(
         reference_image,
         reference_bounds,
         None,
+        trace_center_mm,
     )

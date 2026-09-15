@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-09-14 — Photo Nest: trace immediately, keep pre-scan choices, exact legacy sizing
+
+- Choosing a photo now starts tracing immediately; Tool thickness can be
+  typed while it runs, and whichever finishes last finalizes the Nest. A new
+  `/api/nest/trace` phase never touches the design, Tool thickness, or bin
+  sizing - only the small finalize step that follows does.
+- A choice made on the draft before the photo finishes (Raised Wall, Manual
+  bin sizing, Manual cavity depth, Custom finger access, and more) now
+  survives the first scan instead of being silently overwritten by the
+  new-scan defaults.
+- A new-format Photo Nest with a traced outline now refuses to build without
+  a real, positive Tool thickness, in generation, preview, and reopening a
+  saved design alike - never a quiet 8 mm. A true legacy design (no stored
+  Holder style) is unaffected and keeps its old fallback.
+- Editing an unrelated Nest setting can no longer stamp a missing Holder
+  style onto a legacy design; only deliberately changing Holder does.
+- A true legacy design's bin-height requirement is exactly what it always
+  was again (no new 1 mm tool-top clearance) when it grows to fit.
+- Dragging a Width/Length/Height dimension handle now turns off Photo Nest
+  Auto-size, same as typing the field already did.
+- Replace Photo now uses the bin's current on-screen Nest settings, not a
+  possibly-stale last-saved copy, so a just-changed setting can't be lost.
+- Scan-tuning's candidate trace is now translated into the accepted
+  outline's own stable coordinate frame instead of swapping the displayed
+  photo, so the accepted outline, the candidate, and the photo all line up
+  as one real overlay at once.
+- The Photo Nest workflow's own documentation now says US Letter only,
+  matching the UI (A4 remains supported underneath).
+
 ## 2026-09-14 — Photo Nest review fixes: legacy geometry, Tool thickness, Replace Photo
 
 - A design saved before Holder style existed now regenerates its exact old

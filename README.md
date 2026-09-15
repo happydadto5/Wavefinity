@@ -626,9 +626,9 @@ When an interior part does not fit, its editor offers **Grow the bin** and the
 same growth normally happens automatically. The bin grows on the 8 mm grid to
 hold every part at its real footprint. It never shrinks an already-large bin.
 
-**Photo Nest — a custom holder built from your photo.** Put one flat tool on an
-8.5 × 11 in (or A4) sheet, keep all four paper corners visible, photograph it
-directly overhead, and upload the photo. Wavefinity corrects the paper to its
+**Photo Nest — a custom holder built from your photo.** Put one flat tool on a
+US Letter (8.5 × 11 in) sheet, keep all four paper corners visible, photograph
+it directly overhead, and upload the photo. Wavefinity corrects the paper to its
 true size, traces the tool's outline, and asks for one number: **Tool
 thickness**. As soon as both are ready it builds a complete, practical,
 printable bin in seconds — no other choice is required. Missing paper, severe

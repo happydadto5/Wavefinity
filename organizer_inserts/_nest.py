@@ -122,6 +122,27 @@ def _is_legacy_nest(one: Feature) -> bool:
     return "holder_style" not in one.options
 
 
+# Public alias - the web layer needs this to keep legacy Z sizing exact too.
+is_legacy_nest = _is_legacy_nest
+
+
+def require_measured_tool_thickness(one: Feature) -> None:
+    """A new-format Photo Nest (one that has ever had holder_style stored)
+    with a traced contour must have a real, positive Tool thickness. The
+    internal 8 mm fallback in _resolved_tool_thickness is only for a true
+    legacy design (never had holder_style) or a new-format draft with no
+    contour yet (nothing has been measured or built yet either way)."""
+    if _is_legacy_nest(one) or not one.contour:
+        return
+    raw = one.options.get("tool_thickness", one.options.get("depth"))
+    try:
+        value = float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        value = None
+    if value is None or not math.isfinite(value) or value <= 0.0:
+        raise ValueError("Enter Tool thickness before generating this Photo Nest.")
+
+
 def _resolved_tool_thickness(one: Feature) -> float:
     """``tool_thickness``, falling back to the legacy ``depth`` key so an
     older Raised Wall design keeps its physical wall height unchanged."""
@@ -1025,6 +1046,7 @@ def build_nest(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     """A finished holder that traces one photographed outline: a solid
     Recessed Cavity deck by default, or a Raised Wall on request.
     """
+    require_measured_tool_thickness(spec_feature)
     options = resolve_nest_settings(box, spec_feature, base_z)
     clearance = options["clearance"]
     tool_thickness = float(options["tool_thickness"])

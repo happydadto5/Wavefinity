@@ -94,9 +94,11 @@ from organizer_inserts import (
     feature_min_footprint,
     clamp_nest_feature_options,
     fitted_nest_feature,
+    is_legacy_nest,
     nest_access_preview,
     nest_contour_polygon,
     nest_smoothed_contour,
+    require_measured_tool_thickness,
     resolve_nest_settings,
     layout_from_dict,
     layout_to_dict,
@@ -306,6 +308,19 @@ def _nest_effective_z_requirement(
     return max(structural_minimum, tool_top_requirement, geometry_top)
 
 
+def _legacy_nest_z_requirement(box: BoxSpec, mode: str, resolved: dict[str, Any]) -> float:
+    """The exact historical grow-only Z requirement for a true legacy Nest
+    (no stored holder_style): base_z + its depth, plus Push Out's own deck
+    depth when active. No new 1 mm tool-top clearance, no structural-minimum
+    floor beyond whatever the box already is - that policy is new-format
+    only and must not change a legacy design's sizing just because it is
+    edited or re-applied."""
+    base_z = base_height(box, mode)
+    tool_thickness = float(resolved["tool_thickness"])
+    push_depth = float(resolved["push_depth"]) if str(resolved["lift_assist"]) == "push_out" else 0.0
+    return base_z + tool_thickness + push_depth
+
+
 def _fit_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
     """Legacy grow-only sizing, for a design saved before Auto-size existed.
 
@@ -317,7 +332,11 @@ def _fit_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
     required_y = 2.0 * max(abs(one.zone.y0), abs(one.zone.y1))
     x = max(box.x, BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
     y = max(box.y, BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
-    z = max(box.z, _nest_effective_z_requirement(box, mode, base_height(box, mode), resolved))
+    z_requirement = (
+        _legacy_nest_z_requirement(box, mode, resolved) if is_legacy_nest(one)
+        else _nest_effective_z_requirement(box, mode, base_height(box, mode), resolved)
+    )
+    z = max(box.z, z_requirement)
     for _attempt in range(200):
         trial = replace(box, x=float(x), y=float(y), z=float(z))
         bounds = layout_zone(trial, mode)
@@ -397,26 +416,12 @@ def _sized_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> tuple[BoxSpe
     return _fit_photo_nest_box(box, one, mode), one
 
 
-def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Extract one contour and replace the design interior with its new bin."""
-    request_box, layout, label, part_name, label_location, scoop = design_from_dict(
-        payload["design"], validate_layout=False
-    )
-    box = _interior_work_box(request_box)
-    existing = next(
-        (one for one in layout.features if one.kind == "nest" and one.contour), None
-    )
-    supplied = dict(payload.get("options", {}))
-    if existing is None:
-        # New scan: Tool thickness is the one measurement the user actually
-        # has to supply, and must never be invented. Fail fast, before the
-        # (fallible, comparatively expensive) image analysis even runs.
-        measured = supplied.get("tool_thickness", supplied.get("depth"))
-        if measured in (None, ""):
-            raise ValueError("enter the tool's thickness before generating a Photo Nest")
-        tool_thickness = float(measured)
-        if not math.isfinite(tool_thickness) or tool_thickness <= 0.0:
-            raise ValueError("Tool thickness must be a positive number")
+def nest_trace_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Trace-only phase (spec section 1): paper detection/correction,
+    segmentation and contour extraction. Independent of any design - it does
+    not require Tool thickness, and never modifies a design, resizes a bin,
+    or builds Nest geometry. Manual paper-corner recovery also calls this,
+    with explicit corners in place of automatic detection."""
     corners_raw = payload.get("paper_corners")
     corners = (
         [[float(v) for v in point] for point in corners_raw]
@@ -428,59 +433,10 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         float(payload.get("sensitivity", 50.0)), float(payload.get("cleanup", 50.0)),
         corners,
     )
-    if existing is not None:
-        # Replace Photo: this Nest already exists with its own settings -
-        # change only the outline. Holder style, cavity depth/mode, finger
-        # access, Auto-size and Tool thickness must all survive untouched,
-        # or replacing a blurry photo of the same tool would silently reset
-        # choices the user already made (including shrinking a manually
-        # sized bin back to Auto).
-        starter = replace(existing, contour=outline.contour, source_contour=outline.contour)
-    else:
-        # A brand-new scan always defaults to Recessed Cavity, automatic 60%
-        # cavity depth, automatic finger access and automatic bin sizing
-        # (spec section 2).
-        options = {
-            "clearance": float(supplied.get("clearance", 0.6)),
-            "tool_thickness": tool_thickness,
-            "rim": 3.0,
-            "smoothing": float(supplied.get("smoothing", 0.0)),
-            "holder_style": "recessed",
-            "cavity_depth_mode": "auto",
-            "auto_size": True,
-            "lift_assist": "auto",
-            "finger_position": "sides",
-            "push_position": "right",
-            "push_area": 30.0,
-            "push_depth": 4.0,
-        }
-        starter = Feature(
-            "nest", Zone(-0.5, -0.5, 0.5, 0.5), options=options,
-            contour=outline.contour, source_contour=outline.contour,
-        )
-    starter, nest_warnings = clamp_nest_feature_options(starter)
-    grown, one = _sized_photo_nest_box(box, starter, layout.mode)
-    request_box = replace(
-        request_box, x=grown.x, y=grown.y,
-        z=request_box.z + (grown.z - box.z),
-    )
-    box = _interior_work_box(request_box)
-    updated = Layout((one,), layout.mode, layout.snap)
-    updated.validate(box)
-    validate_customization_clearance(
-        box, updated.features, label, label_location, scoop, updated.mode
-    )
-    with GEOMETRY_LOCK:
-        build_features(box, updated.features, base_height(box, layout.mode),
-                       layout_zone(box, layout.mode), layout.mode)
     result = {
-        "design": design_to_dict(
-            request_box, updated, label, part_name, label_location, scoop,
-        ),
-        "selected": 0,
+        "contour": [list(point) for point in outline.contour],
         "outline": {"width": outline.width, "depth": outline.depth},
-        "access": nest_access_preview(one),
-        "warnings": nest_warnings,
+        "trace_center_mm": list(outline.trace_center_mm) if outline.trace_center_mm else None,
     }
     if outline.reference_image and outline.reference_bounds:
         result["reference"] = {
@@ -502,14 +458,115 @@ def nest_retrace_payload(payload: dict[str, Any]) -> dict[str, Any]:
         str(payload.get("rectified_image", "")), str(payload.get("mime_type", "image/jpeg")),
         float(payload.get("sensitivity", 50.0)), float(payload.get("cleanup", 50.0)),
     )
-    result = {"outline": {"width": outline.width, "depth": outline.depth},
-              "contour": [list(point) for point in outline.contour]}
+    result = {
+        "outline": {"width": outline.width, "depth": outline.depth},
+        "contour": [list(point) for point in outline.contour],
+        "trace_center_mm": list(outline.trace_center_mm) if outline.trace_center_mm else None,
+    }
     if outline.reference_image and outline.reference_bounds:
         result["reference"] = {
             "image": outline.reference_image,
             "bounds": list(outline.reference_bounds),
         }
     return result
+
+
+def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Finalize (create or update) the Photo Nest from an ALREADY-TRACED
+    contour - see nest_trace_payload for the separate, design-independent
+    tracing phase this depends on. Never decodes or retraces a photo."""
+    request_box, layout, label, part_name, label_location, scoop = design_from_dict(
+        payload["design"], validate_layout=False
+    )
+    box = _interior_work_box(request_box)
+
+    contour_raw = payload.get("contour")
+    if not isinstance(contour_raw, list) or len(contour_raw) < 3:
+        raise ValueError("no traced outline was supplied")
+    contour = tuple((float(point[0]), float(point[1])) for point in contour_raw)
+    source_raw = payload.get("source_contour", contour_raw)
+    source_contour = tuple((float(point[0]), float(point[1])) for point in source_raw)
+
+    saved_existing = next(
+        (one for one in layout.features if one.kind == "nest" and one.contour), None
+    )
+    # Replace Photo: prefer the browser's own live draft over the last-saved
+    # copy - a debounced auto-save may not have caught up with the newest
+    # setting yet, and starting the photo operation must not lose it.
+    live_raw = payload.get("feature")
+    live_feature = None
+    if isinstance(live_raw, dict):
+        candidate = _feature_from_json(live_raw, layout.mode)
+        if candidate.kind == "nest" and candidate.contour:
+            live_feature = candidate
+    existing = live_feature if live_feature is not None else saved_existing
+
+    supplied = dict(payload.get("options", {}))
+    if existing is None:
+        # New scan: Tool thickness is the one measurement the user actually
+        # has to supply, and must never be invented.
+        measured = supplied.get("tool_thickness", supplied.get("depth"))
+        if measured in (None, ""):
+            raise ValueError("enter the tool's thickness before generating a Photo Nest")
+        tool_thickness = float(measured)
+        if not math.isfinite(tool_thickness) or tool_thickness <= 0.0:
+            raise ValueError("Tool thickness must be a positive number")
+        # A brand-new scan defaults to Recessed Cavity, automatic 60% cavity
+        # depth, automatic finger access and automatic bin sizing (spec
+        # section 2) - but ONLY when the user has not already chosen
+        # otherwise on the draft before the scan finished.
+        options = {
+            "clearance": float(supplied.get("clearance", 0.6)),
+            "tool_thickness": tool_thickness,
+            "rim": 3.0,
+            "smoothing": float(supplied.get("smoothing", 0.0)),
+            "holder_style": str(supplied.get("holder_style", "recessed")),
+            "cavity_depth_mode": str(supplied.get("cavity_depth_mode", "auto")),
+            "auto_size": bool(supplied["auto_size"]) if "auto_size" in supplied else True,
+            "lift_assist": str(supplied.get("lift_assist", "auto")),
+            "finger_position": str(supplied.get("finger_position", "sides")),
+            "push_position": str(supplied.get("push_position", "right")),
+            "push_area": float(supplied.get("push_area", 30.0)),
+            "push_depth": float(supplied.get("push_depth", 4.0)),
+        }
+        if supplied.get("cavity_depth") not in (None, ""):
+            options["cavity_depth"] = float(supplied["cavity_depth"])
+        if supplied.get("finger_width") not in (None, ""):
+            options["finger_width"] = float(supplied["finger_width"])
+        starter = Feature(
+            "nest", Zone(-0.5, -0.5, 0.5, 0.5), options=options,
+            contour=contour, source_contour=source_contour,
+        )
+    else:
+        # Replace Photo: change only the outline. Holder style, cavity
+        # depth/mode, finger access, Auto-size, Tool thickness, rotation and
+        # scale all survive untouched, or replacing a blurry photo of the
+        # same tool would silently reset choices the user already made
+        # (including shrinking a manually sized bin back to Auto).
+        starter = replace(existing, contour=contour, source_contour=source_contour)
+    starter, nest_warnings = clamp_nest_feature_options(starter)
+    grown, one = _sized_photo_nest_box(box, starter, layout.mode)
+    request_box = replace(
+        request_box, x=grown.x, y=grown.y,
+        z=request_box.z + (grown.z - box.z),
+    )
+    box = _interior_work_box(request_box)
+    updated = Layout((one,), layout.mode, layout.snap)
+    updated.validate(box)
+    validate_customization_clearance(
+        box, updated.features, label, label_location, scoop, updated.mode
+    )
+    with GEOMETRY_LOCK:
+        build_features(box, updated.features, base_height(box, layout.mode),
+                       layout_zone(box, layout.mode), layout.mode)
+    return {
+        "design": design_to_dict(
+            request_box, updated, label, part_name, label_location, scoop,
+        ),
+        "selected": 0,
+        "access": nest_access_preview(one),
+        "warnings": nest_warnings,
+    }
 
 
 def _first_open_position(
@@ -1954,6 +2011,7 @@ POST_ROUTES = {
     "/api/feature/fit": feature_fit_payload,
     "/api/feature/apply": apply_feature_payload,
     "/api/feature/delete": delete_feature_payload,
+    "/api/nest/trace": nest_trace_payload,
     "/api/nest/photo": photo_nest_payload,
     "/api/nest/retrace": nest_retrace_payload,
     "/api/layout/mode": mode_payload,

@@ -99,7 +99,6 @@ const state = {
   apiCompat: null,
   kindRequest: 0,
   fitRequest: 0,
-  nestPhotoRequest: 0,
   // Rectified upload used only as an aligned tracing reference in the 2D view.
   // It deliberately stays out of saved design files.
   nestPhoto: null,
@@ -111,14 +110,17 @@ const state = {
   nestSensitivity: 50,
   nestCleanup: 50,
   nestPhotoOpacity: 45,
-  nestCandidateContour: null,   // a not-yet-accepted retrace, drawn dashed
+  nestCandidateContour: null,   // a not-yet-accepted retrace, drawn dashed - already
+                                 // translated into the accepted outline's own stable frame
+  nestCandidateCenterMm: null,  // that candidate's own trace_center_mm, pre-translation
+  nestAcceptedCenterMm: null,   // the accepted outline's trace_center_mm, stable rectified-sheet frame
   nestTuneStatus: "",
   nestRetraceRequest: 0,
+  nestTraceRequest: 0,
+  nestTraceResult: null,        // a completed trace phase waiting on Tool thickness to finalize
   nestPaperCorners: null,       // four draggable handles, image-pixel space, for recovery
   nestOutlineTool: "select",    // "select" | "add-point" | "delete-point"
-  nestPendingUpload: null,      // { dataUrl, mimeType } waiting on Tool thickness
   nestAccessWarningShown: null, // last access-planner warning already toasted
-  nestAcceptedPhotoSnapshot: null, // the true accepted photo, saved while tuning shows a candidate's own crop
   nudgeFeedback: null,
 };
 
@@ -2094,7 +2096,8 @@ function cancelPendingDraftWork() {
   pendingNudgeHistory = null;
   state.kindRequest += 1;
   state.fitRequest += 1;
-  state.nestPhotoRequest += 1;
+  state.nestTraceRequest += 1;
+  state.nestRetraceRequest += 1;
   state.draftRequest += 1;
 }
 
@@ -2436,13 +2439,20 @@ function renderNestFields(one) {
   if (holderStyle === "recessed") {
     const autoCavity = 0.6 * toolThickness;
     const cavityDepth = cavityMode === "manual" ? number(val("cavity_depth", autoCavity), autoCavity) : autoCavity;
+    // In Auto mode, Cavity depth is 60% of Tool thickness - with no real
+    // thickness yet, that number is not a measurement either, so show it
+    // as unavailable rather than a fabricated figure (e.g. "4.8 mm").
+    const cavityUnavailable = !hasMeasuredThickness && cavityMode !== "manual";
     html += `<div class="pair">`;
-    html += field("Cavity depth", "option:cavity_depth", fmt(cavityDepth), {
-      unit: "mm", step: "0.1", min: "0.1",
-      tip: "Editing this switches to Manual so later Tool thickness changes stop recalculating it.",
-    });
+    html += field("Cavity depth", "option:cavity_depth",
+      cavityUnavailable ? "" : fmt(cavityDepth), {
+        unit: "mm", step: "0.1", min: "0.1",
+        placeholder: cavityUnavailable ? "needs Tool thickness" : undefined,
+        tip: "Editing this switches to Manual so later Tool thickness changes stop recalculating it.",
+      });
     html += `<div class="nest-cavity-status">
-      <span class="field-label">${cavityMode === "manual" ? "Manual" : "Auto — 60% of tool thickness"}</span>
+      <span class="field-label">${cavityMode === "manual" ? "Manual"
+        : cavityUnavailable ? "Unavailable until Tool thickness is entered" : "Auto — 60% of tool thickness"}</span>
       <button type="button" class="button secondary" data-action="nest-cavity-auto" ${cavityMode === "manual" ? "" : "disabled"}>Reset to 60%</button>
     </div>`;
     html += `</div>`;
@@ -3164,8 +3174,8 @@ function wireNestFieldActions() {
     state.nestSensitivity = 50;
     state.nestCleanup = 50;
     state.nestCandidateContour = null;
+    state.nestCandidateCenterMm = null;
     state.nestTuneStatus = "";
-    _restoreAcceptedNestPhoto();
     renderDraftFields();
     renderLayout2D();
   });
@@ -3217,25 +3227,13 @@ async function resetNestOutline() {
 // Debounced live retrace: segmentation + cleanup only, on the already-
 // rectified reference sheet - paper detection never repeats per slider move.
 // Every retrace re-centres its new contour around its own new bounding box
-// (contour_to_millimetres always does this), so the candidate's own local
-// origin can shift a little relative to the accepted outline's - drawing it
-// with the accepted photo's old registration can then look displaced from
-// the actual photographed tool. Keep the candidate and its own reference
-// photo crop as one consistent pair while tuning, and restore the true
-// accepted photo the moment the candidate is abandoned instead of accepted.
-function _snapshotAcceptedNestPhoto() {
-  if (state.nestAcceptedPhotoSnapshot === undefined || state.nestAcceptedPhotoSnapshot === null) {
-    state.nestAcceptedPhotoSnapshot = state.nestPhoto
-      ? { image: state.nestPhoto.image, bounds: [...state.nestPhoto.bounds] } : false;
-  }
-}
-
-function _restoreAcceptedNestPhoto() {
-  if (state.nestAcceptedPhotoSnapshot) state.nestPhoto = state.nestAcceptedPhotoSnapshot;
-  else if (state.nestAcceptedPhotoSnapshot === false) state.nestPhoto = null;
-  state.nestAcceptedPhotoSnapshot = null;
-}
-
+// (contour_to_millimetres always does this), so a candidate's own local
+// origin can differ a little from the accepted outline's. Rather than
+// swapping the displayed photo to match the candidate (which would make the
+// still-visible accepted outline look wrong against it), translate the
+// candidate into the accepted outline's own stable frame using both traces'
+// trace_center_mm, so accepted outline, candidate outline and photo all sit
+// in one consistent physical frame at once.
 const requestNestRetrace = debounce(async () => {
   const rectified = state.nestRectifiedImage;
   const draft = state.draft;
@@ -3251,9 +3249,11 @@ const requestNestRetrace = debounce(async () => {
       cleanup: state.nestCleanup,
     });
     if (request !== state.nestRetraceRequest || state.draft !== draft) return;
-    _snapshotAcceptedNestPhoto();
-    state.nestCandidateContour = result.contour;
-    if (result.reference) setNestPhotoReference(result.reference);
+    const accepted = state.nestAcceptedCenterMm || [0, 0];
+    const candidateCenter = result.trace_center_mm || accepted;
+    const delta = [candidateCenter[0] - accepted[0], candidateCenter[1] - accepted[1]];
+    state.nestCandidateContour = result.contour.map(([x, y]) => [x + delta[0], y + delta[1]]);
+    state.nestCandidateCenterMm = candidateCenter;
     state.nestTuneStatus = `Candidate: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm — press Use this trace to accept.`;
   } catch (error) {
     if (request !== state.nestRetraceRequest) return;
@@ -3261,7 +3261,7 @@ const requestNestRetrace = debounce(async () => {
     // outline and its photo registration exactly as they were, and just
     // report why the candidate failed.
     state.nestCandidateContour = null;
-    _restoreAcceptedNestPhoto();
+    state.nestCandidateCenterMm = null;
     state.nestTuneStatus = `Could not retrace at this setting: ${error.message}`;
   }
   renderDraftFields();
@@ -3273,12 +3273,111 @@ async function acceptNestTrace() {
   const index = draftCommitIndex();
   if (!one || one.kind !== "nest" || !state.nestCandidateContour || !Number.isInteger(index)) return;
   const candidate = state.nestCandidateContour.map(point => [...point]);
+  const candidateCenter = state.nestCandidateCenterMm;
   state.nestCandidateContour = null;
+  state.nestCandidateCenterMm = null;
   state.nestTuneStatus = "";
-  // The candidate's own reference photo (already swapped in by the retrace
-  // that produced it) is now the accepted registration - keep it.
-  state.nestAcceptedPhotoSnapshot = null;
   await commitNestContourEdit(index, candidate, { source_contour: candidate.map(point => [...point]) });
+  // The committed contour re-centres around its own new bounding box
+  // (normalizeNestContour, inside commitNestContourEdit) - which for an
+  // already-self-centred raw candidate lands exactly back on the candidate's
+  // own trace centre, so that becomes the new accepted stable-frame centre.
+  if (candidateCenter) state.nestAcceptedCenterMm = candidateCenter;
+}
+
+// Runs the trace-only phase (spec section 1): paper detection/correction (or
+// supplied corners), segmentation and contour extraction. Independent of any
+// design - never touches Tool thickness, the bin, or Nest geometry. Whoever
+// finishes last between this and Tool thickness triggers finalization.
+async function runNestTrace(paperCorners) {
+  const original = state.nestOriginalImage;
+  const draft = state.draft;
+  if (!original || !draft || draft.kind !== "nest") return;
+  const request = ++state.nestTraceRequest;
+  $("#draft-status").textContent = "Finding the reference sheet and tracing the part…";
+  $("#draft-status").classList.remove("error");
+  try {
+    const result = await api("/api/nest/trace", {
+      image: original.dataUrl,
+      mime_type: original.mimeType,
+      sensitivity: state.nestSensitivity,
+      cleanup: state.nestCleanup,
+      paper_corners: paperCorners,
+    });
+    if (request !== state.nestTraceRequest || state.draft !== draft) return;
+    state.nestTraceResult = result;
+    state.nestRectifiedImage = result.rectified_image
+      ? { dataUrl: result.rectified_image, mimeType: "image/jpeg" } : state.nestRectifiedImage;
+    state.nestPaperCorners = null;
+    if (_nestMeasuredThickness(draft.options) == null) {
+      $("#draft-status").textContent = "Photo traced — enter Tool thickness above to finish.";
+    }
+    renderDraftFields();
+    await finishPhotoNestIfReady();
+  } catch (error) {
+    if (request !== state.nestTraceRequest) return;
+    $("#draft-status").textContent = error.message;
+    $("#draft-status").classList.add("error");
+    // Automatic paper detection failed: offer manual corner recovery over
+    // the same original photo instead of asking the user to upload again.
+    if (/paper missing|paper detection/i.test(error.message)) {
+      state.nestPaperCorners = [
+        { xPct: 10, yPct: 10 }, { xPct: 90, yPct: 10 },
+        { xPct: 90, yPct: 90 }, { xPct: 10, yPct: 90 },
+      ];
+      renderDraftFields();
+      toast("Automatic paper detection failed. Adjust the corners below.", true, 6500);
+    } else {
+      toast(error.message, true, 6500);
+    }
+  }
+}
+
+// Whichever of tracing / Tool thickness finishes last calls this. Does
+// nothing until both a completed trace and a measured Tool thickness exist;
+// never decodes or retraces the photo itself (spec section 1).
+async function finishPhotoNestIfReady() {
+  const trace = state.nestTraceResult;
+  const draft = state.draft;
+  if (!trace || !draft || draft.kind !== "nest") return;
+  if (_nestMeasuredThickness(draft.options) == null) return;
+  if (!beginDesignMutation()) return;
+  const previousDesign = clone(state.design);
+  try {
+    const payload = {
+      design: state.design,
+      contour: trace.contour,
+      options: draft.options || {},
+    };
+    // Replacing an existing photo: send the live draft too, so a setting
+    // changed since the last debounced save is not lost (spec section 7).
+    if (draft.contour) payload.feature = draft;
+    const result = await api("/api/nest/photo", payload);
+    state.design = result.design;
+    recordHistory(previousDesign);
+    state.selected = result.selected;
+    state.draftKind = "nest";
+    state.draft = clone(state.design.layout.features[state.selected]);
+    setNestPhotoReference(trace.reference);
+    state.nestAcceptedCenterMm = trace.trace_center_mm || null;
+    state.nestTraceResult = null;
+    state.draftAutoCommit = true;
+    state.drafts = {};
+    syncForm();
+    renderDraftFields();
+    await refreshPreview();
+    $("#draft-status").textContent = "";
+    $("#draft-status").classList.remove("error");
+    $('.view-tab[data-view="2d"]').click();
+    toast(`Photo Nest ready: ${fmt(trace.outline.width)} × ${fmt(trace.outline.depth)} mm outline.`);
+    for (const warning of result.warnings || []) toast(warning, true, 6500);
+  } catch (error) {
+    $("#draft-status").textContent = error.message;
+    $("#draft-status").classList.add("error");
+    toast(error.message, true, 6500);
+  } finally {
+    finishDesignMutation();
+  }
 }
 
 async function acceptNestPaperCorners() {
@@ -3291,43 +3390,7 @@ async function acceptNestPaperCorners() {
   await (img.decode ? img.decode().catch(() => {}) : Promise.resolve());
   const width = img.naturalWidth || 1, height = img.naturalHeight || 1;
   const paperCorners = corners.map(c => [c.xPct / 100 * width, c.yPct / 100 * height]);
-  if (!beginDesignMutation()) return;
-  const previousDesign = clone(state.design);
-  try {
-    $("#draft-status").textContent = "Correcting perspective and tracing the part…";
-    const result = await api("/api/nest/photo", {
-      design: state.design,
-      image: original.dataUrl,
-      mime_type: original.mimeType,
-      paper_size: state.nestPaperSize || "letter",
-      options: state.draft?.options || {},
-      paper_corners: paperCorners,
-    });
-    state.design = result.design;
-    recordHistory(previousDesign);
-    state.selected = result.selected;
-    state.draftKind = "nest";
-    state.draft = clone(state.design.layout.features[state.selected]);
-    setNestPhotoReference(result.reference);
-    if (result.rectified_image) state.nestRectifiedImage = { dataUrl: result.rectified_image, mimeType: "image/jpeg" };
-    state.nestPaperCorners = null;
-    state.nestPendingUpload = null;
-    state.draftAutoCommit = true;
-    state.drafts = {};
-    syncForm();
-    renderDraftFields();
-    await refreshPreview();
-    $("#draft-status").textContent = "";
-    $("#draft-status").classList.remove("error");
-    toast(`Photo Nest ready: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm outline.`);
-    for (const warning of result.warnings || []) toast(warning, true, 6500);
-  } catch (error) {
-    $("#draft-status").textContent = error.message;
-    $("#draft-status").classList.add("error");
-    toast(error.message, true, 6500);
-  } finally {
-    finishDesignMutation();
-  }
+  await runNestTrace(paperCorners);
 }
 
 // A divider builds from its thickness option, not from the footprint drawn
@@ -3695,89 +3758,19 @@ async function uploadNestPhoto(event) {
   const image = await readFileDataUrl(file);
   input.value = "";
   if (state.draft?.kind !== "nest" || state.draftKind !== "nest") return;
-  state.nestPendingUpload = { dataUrl: image, mimeType };
-  if (_nestMeasuredThickness(state.draft?.options) == null) {
-    // Tracing may start once a photo exists, but the one measurement the
-    // user actually has to supply is Tool thickness - hold the analysis
-    // until it is entered instead of inventing a value (spec section 5).
-    $("#draft-status").textContent = "Photo ready — enter Tool thickness above to finish tracing.";
-    $("#draft-status").classList.remove("error");
-    renderDraftFields();
-    return;
-  }
-  await runNestPhotoUpload();
-}
-
-// Runs the deferred upload once a photo is waiting and Tool thickness is
-// known - either right away (thickness was already entered) or the moment
-// it is typed afterward (see the option:tool_thickness handler).
-async function runNestPhotoUpload() {
-  const pending = state.nestPendingUpload;
-  if (!pending || state.draft?.kind !== "nest") return;
-  const { dataUrl: image, mimeType } = pending;
-  const draft = state.draft;
-  const request = ++state.nestPhotoRequest;
-  let mutationStarted = false;
-  $("#draft-status").textContent = "Finding the reference sheet and tracing the part…";
-  try {
-    if (request !== state.nestPhotoRequest || state.draft !== draft ||
-        state.draftKind !== "nest") return;
-    if (!beginDesignMutation()) return;
-    mutationStarted = true;
-    state.nestPendingUpload = null;
-    const previousDesign = clone(state.design);
-    state.nestOriginalImage = { dataUrl: image, mimeType };
-    state.nestSensitivity = 50;
-    state.nestCleanup = 50;
-    state.nestCandidateContour = null;
-    state.nestTuneStatus = "";
-    state.nestPaperCorners = null;
-    const result = await api("/api/nest/photo", {
-      design: state.design,
-      image,
-      mime_type: mimeType,
-      paper_size: state.nestPaperSize || "letter",
-      options: state.draft?.options || {},
-      sensitivity: state.nestSensitivity,
-      cleanup: state.nestCleanup,
-    });
-    state.design = result.design;
-    recordHistory(previousDesign);
-    state.selected = result.selected;
-    state.draftKind = "nest";
-    state.draft = clone(state.design.layout.features[state.selected]);
-    setNestPhotoReference(result.reference);
-    state.nestRectifiedImage = result.rectified_image
-      ? { dataUrl: result.rectified_image, mimeType: "image/jpeg" } : null;
-    state.draftAutoCommit = true;
-    state.drafts = {};
-    syncForm();
-    renderDraftFields();
-    await refreshPreview();
-    $("#draft-status").textContent = "";
-    $("#draft-status").classList.remove("error");
-    $('.view-tab[data-view="2d"]').click();
-    toast(`Photo Nest ready: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm outline.`);
-    for (const warning of result.warnings || []) toast(warning, true, 6500);
-  } catch (error) {
-    $("#draft-status").textContent = error.message;
-    $("#draft-status").classList.add("error");
-    // Automatic paper detection failed: offer manual corner recovery over the
-    // same original photo instead of asking the user to upload again.
-    if (/paper missing|paper detection/i.test(error.message)) {
-      state.nestPendingUpload = { dataUrl: image, mimeType };
-      state.nestPaperCorners = [
-        { xPct: 10, yPct: 10 }, { xPct: 90, yPct: 10 },
-        { xPct: 90, yPct: 90 }, { xPct: 10, yPct: 90 },
-      ];
-      renderDraftFields();
-      toast("Automatic paper detection failed. Adjust the corners below.", true, 6500);
-    } else {
-      toast(error.message, true, 6500);
-    }
-  } finally {
-    if (mutationStarted) finishDesignMutation();
-  }
+  // Choosing a photo starts analysis immediately - Tool thickness is a
+  // separate field the user can fill in while it runs (spec section 1).
+  // Whichever finishes last triggers finalization (finishPhotoNestIfReady).
+  state.nestOriginalImage = { dataUrl: image, mimeType };
+  state.nestSensitivity = 50;
+  state.nestCleanup = 50;
+  state.nestCandidateContour = null;
+  state.nestCandidateCenterMm = null;
+  state.nestTuneStatus = "";
+  state.nestPaperCorners = null;
+  state.nestTraceResult = null;
+  renderDraftFields();
+  await runNestTrace();
 }
 
 function markDraftChanged() {
@@ -3899,9 +3892,20 @@ function updateDraftFromFields(event) {
     else delete one.options.angle_towards;
   }
   if (one.kind === "nest") {
-    for (const key of ["lift_assist", "finger_position", "push_position", "holder_style"]) {
+    for (const key of ["lift_assist", "finger_position", "push_position"]) {
       const value = get(`option:${key}`);
       if (value !== undefined) one.options[key] = value;
+    }
+    // holder_style is a legacy-compatibility marker: absence of it means a
+    // true legacy Photo Nest that must keep its exact old geometry. A Nest
+    // that has never had one stored must not silently acquire it just
+    // because some unrelated field changed - only a deliberate Holder edit
+    // (or a Nest that already has one, i.e. every new-format Nest) may
+    // create/update it.
+    const holderStyleValue = get("option:holder_style");
+    if (holderStyleValue !== undefined && (changed === "option:holder_style"
+        || Object.prototype.hasOwnProperty.call(one.options, "holder_style"))) {
+      one.options.holder_style = holderStyleValue;
     }
     // Switching Holder resets whatever the previous style's advanced/Push
     // Out state was, so a stale push_out never survives a jump to Recessed.
@@ -4081,10 +4085,10 @@ function updateDraftFromFields(event) {
         && ["clearance", "rim", "smoothing", "tool_thickness", "cavity_depth"].includes(key)) {
       syncNestZone(one);
     }
-    // A photo was waiting only on this measurement - finish tracing it now.
-    if (one.kind === "nest" && key === "tool_thickness" && state.nestPendingUpload
+    // The trace may already be done and waiting only on this measurement.
+    if (one.kind === "nest" && key === "tool_thickness" && state.nestTraceResult
         && _nestMeasuredThickness(one.options) != null) {
-      runNestPhotoUpload();
+      finishPhotoNestIfReady();
     }
   }
   if (one.kind === "cradle" && (
@@ -6144,6 +6148,10 @@ function commitDimensionDrag(canvas) {
     formatDimField(drag.axis);
     markBinAxisManual(drag.axis);
   }
+  // A dragged X/Y/Z dimension handle is exactly as deliberate as typing the
+  // field - it must turn off Photo Nest Auto-size the same way (see
+  // updateDesignFromForm / turnOffNestAutoSizeForManualEdit).
+  turnOffNestAutoSizeForManualEdit();
   state.canGenerate = false;
   updateGenerateAvailability();
   changedDesign(previousDesign);

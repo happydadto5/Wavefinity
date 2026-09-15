@@ -115,11 +115,13 @@ from ._nest import (
     build_nest,
     clamp_nest_feature_options,
     fitted_nest_feature,
+    is_legacy_nest,
     nest_access_preview,
     nest_contour_polygon,
     nest_defaults,
     nest_required_zone,
     nest_smoothed_contour,
+    require_measured_tool_thickness,
     resolve_nest_access_plan,
     resolve_nest_settings,
 )
