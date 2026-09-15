@@ -3837,16 +3837,6 @@ function turnOffNestAutoSizeForManualEdit() {
   }
 }
 
-function syncNestZone(one) {
-  if (!one?.contour?.length) return;
-  const cx = (one.zone[0] + one.zone[2]) / 2;
-  const cy = (one.zone[1] + one.zone[3]) / 2;
-  // The server owns the exact outline calculation: it includes smoothing and
-  // the reinforced outside foot. Keep only a valid centre placeholder here;
-  // /api/feature/apply refits the authoritative footprint before saving.
-  one.zone = [cx - .5, cy - .5, cx + .5, cy + .5];
-}
-
 function readFileDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -4217,10 +4207,6 @@ function updateDraftFromFields(event) {
       // A hand-typed cavity depth means Manual; it stops following Tool
       // thickness until Reset to 60% is pressed.
       one.options.cavity_depth_mode = "manual";
-    }
-    if (one.kind === "nest" && one.contour
-        && ["clearance", "rim", "smoothing", "tool_thickness", "cavity_depth"].includes(key)) {
-      syncNestZone(one);
     }
     // The trace may already be done and waiting only on this measurement.
     if (one.kind === "nest" && key === "tool_thickness" && state.nestTraceResult
@@ -7753,11 +7739,9 @@ function wireLayoutInteraction() {
     } else if (drag.feature.kind === "nest" && drag.mode === "rotate") {
       const angle = Math.atan2(world[1] - drag.centre[1], world[0] - drag.centre[0]);
       drag.feature.rotation = Math.round(number(drag.original.rotation) + (angle - drag.startAngle) * 180 / Math.PI);
-      syncNestZone(drag.feature);
     } else if (drag.feature.kind === "nest") {
       const radius = Math.hypot(world[0] - drag.centre[0], world[1] - drag.centre[1]);
       drag.feature.scale = Math.max(.1, number(drag.original.scale, 1) * radius / drag.startRadius);
-      syncNestZone(drag.feature);
     } else {
       const width = Math.max(pitch, snap(2 * Math.abs(world[0] - drag.centre[0])));
       const depth = Math.max(pitch, snap(2 * Math.abs(world[1] - drag.centre[1])));
@@ -7877,7 +7861,6 @@ function handleLayoutArrowKeys(event) {
         toast("Automatic bin sizing turned off because the bin size or layout was manually changed.");
       }
     }
-    syncNestZone(feature);
   }
 
   state.nudgeFeedback = {

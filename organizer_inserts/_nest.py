@@ -1096,11 +1096,6 @@ def build_nest(
     if push_depth < 2.0 or push_depth > 8.0:
         raise ValueError("Push depth must be between 2 and 8 mm")
 
-    fitted = fitted_nest_feature(spec_feature)
-    if (abs(fitted.zone.width - spec_feature.zone.width) > 1e-4
-            or abs(fitted.zone.depth - spec_feature.zone.depth) > 1e-4):
-        raise ValueError("Photo Nest footprint is stale; update the outline or measurements")
-
     local_opening = _nest_local_polygon(spec_feature, include_clearance=True)
     world_opening = nest_contour_polygon(spec_feature, include_clearance=True)
     available = box.z - base_z
