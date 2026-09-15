@@ -111,26 +111,31 @@ button { color: inherit; }
 
 .nest-scan-controls {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  inset: 0 0 0 auto;
   z-index: 3;
-  width: min(360px, calc(100% - 32px));
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .96);
-  box-shadow: 0 4px 18px rgba(20, 48, 58, .14);
+  box-sizing: border-box;
+  width: 40%;
+  padding: 12px;
+  overflow-y: auto;
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: rgba(255, 255, 255, .98);
+  box-shadow: -3px 0 12px rgba(20, 48, 58, .10);
+}
+
+.canvas-wrap.nest-scan-active #preview-2d {
+  width: 60%;
 }
 
 .nest-scan-controls-title {
-  margin-bottom: 12px;
-  font-size: 14px;
+  margin-bottom: 8px;
+  font-size: 13px;
   font-weight: 760;
 }
 
 .nest-scan-range {
   display: block;
-  margin: 0 0 14px;
+  margin: 0 0 9px;
 }
 
 .nest-scan-range > span,
@@ -148,8 +153,8 @@ button { color: inherit; }
 
 .nest-scan-range input[type="range"] {
   width: 100%;
-  height: 34px;
-  margin: 4px 0 1px;
+  height: 26px;
+  margin: 2px 0 0;
   accent-color: var(--teal);
   cursor: pointer;
 }
@@ -162,8 +167,13 @@ button { color: inherit; }
 
 .nest-scan-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.nest-scan-actions .button {
+  padding: 8px 10px;
+  font-size: 12px;
 }
 
 .nest-scan-status {
@@ -246,10 +256,10 @@ button { color: inherit; }
 #nest-paper-outline polyline,
 #nest-paper-outline polygon {
   fill: none;
-  stroke: #21875b;
-  stroke-width: 0.6;
+  stroke: #08764a;
+  stroke-width: 3;
   vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 0 2px white);
+  filter: drop-shadow(0 0 2px white) drop-shadow(0 0 2px white);
 }
 
 .nest-corner-marker {
@@ -371,10 +381,8 @@ button { color: inherit; }
   }
 
   .nest-scan-controls {
-    left: 12px;
-    right: 12px;
-    top: 12px;
-    width: auto;
+    inset: 0 0 0 auto;
+    width: 40%;
   }
 }
 

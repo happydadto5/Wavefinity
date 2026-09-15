@@ -3187,10 +3187,15 @@ function syncNest2DWorkspace() {
     isNest
     && Array.isArray(state.nestPaperCorners)
     && Boolean(state.nestOriginalImage);
+  const showScan =
+    isNest
+    && Boolean(state.nestRectifiedImage)
+    && !recoveryActive;
 
   recovery.hidden = !recoveryActive;
   canvas.hidden = recoveryActive;
   if (layoutControls) layoutControls.hidden = recoveryActive;
+  wrap.classList.toggle("nest-scan-active", showScan);
 
   if (recoveryActive) {
     scanPanel.hidden = true;
@@ -3219,10 +3224,6 @@ function syncNest2DWorkspace() {
     return;
   }
 
-  const showScan =
-    isNest
-    && Boolean(state.nestRectifiedImage);
-
   scanPanel.hidden = !showScan;
 
   if (!showScan) return;
@@ -3249,8 +3250,13 @@ function syncNest2DWorkspace() {
 function renderNestPaperOutline(corners) {
   const outline = $("#nest-paper-outline");
   if (!outline) return;
-  if (corners.length < 3) {
+  if (corners.length < 2) {
     outline.innerHTML = "";
+    return;
+  }
+  if (corners.length === 2) {
+    const points = corners.map(corner => `${corner.xPct},${corner.yPct}`).join(" ");
+    outline.innerHTML = `<polyline points="${points}"></polyline>`;
     return;
   }
   if (corners.length === 3) {
@@ -7300,16 +7306,31 @@ function renderLayout2D() {
       ), toCanvas);
       context.fillStyle = color + "35";
       context.fill(outline);
-      context.stroke(outline);
+      if (index === state.selected && state.nestRectifiedImage) {
+        context.save();
+        context.strokeStyle = "rgba(255,255,255,.95)";
+        context.lineWidth = 7;
+        context.stroke(outline);
+        context.strokeStyle = "#145d76";
+        context.lineWidth = 3;
+        context.stroke(outline);
+        context.restore();
+      } else {
+        context.stroke(outline);
+      }
       // A not-yet-accepted scan-tuning retrace draws dashed over the
       // accepted (solid) outline - see spec section 35.
       if (index === state.selected && state.nestCandidateContour?.length) {
         const candidateWorld = state.nestCandidateContour.map(point => nestLocalToWorld(feature, point));
+        const candidatePath = drawClosedPath(context, candidateWorld, toCanvas);
         context.save();
+        context.strokeStyle = "rgba(255,255,255,.95)";
+        context.lineWidth = 8;
+        context.stroke(candidatePath);
         context.setLineDash([6, 4]);
-        context.strokeStyle = "#237fa6";
-        context.lineWidth = 2;
-        context.stroke(drawClosedPath(context, candidateWorld, toCanvas));
+        context.strokeStyle = "#007ca8";
+        context.lineWidth = 4;
+        context.stroke(candidatePath);
         context.restore();
       }
       // Informational-only indicators for the resolved finger-access plan -
