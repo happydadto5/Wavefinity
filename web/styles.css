@@ -617,8 +617,8 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .placed-block h3 { margin: 0 0 10px; font-size: 13px; }
 .placed-block-panel {
-  position: static; width: auto; max-height: none; margin: 10px 0 0;
-  backdrop-filter: none;
+  position: static; width: auto; max-height: none; margin: 10px 0 0; padding: 0;
+  border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none;
 }
 .placed-supports { display: grid; gap: 5px; }
 .placed-empty { border: 1px dashed var(--line-dark); border-radius: 7px; padding: 12px; color: var(--muted); text-align: center; font-size: 12px; }
