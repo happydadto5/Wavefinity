@@ -215,7 +215,7 @@ button { color: inherit; }
   max-width: min(1100px, 100%);
   max-height: calc(100% - 150px);
   line-height: 0;
-  cursor: crosshair;
+  cursor: pointer;
 }
 
 #nest-corner-image {
@@ -234,22 +234,24 @@ button { color: inherit; }
 
 .nest-corner-marker {
   position: absolute;
-  width: 20px;
-  height: 20px;
-  margin: -10px 0 0 -10px;
-  border: 2px solid #e66f2d;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  border: 3px solid #21875b;
   border-radius: 50%;
-  background: transparent;
+  background: rgba(255,255,255,.22);
   box-shadow:
     0 0 0 2px white,
-    0 0 0 3px rgba(0, 0, 0, .45);
+    0 1px 5px rgba(0,0,0,.5);
+  z-index: 2;
+  pointer-events: none;
 }
 
 .nest-corner-marker::before,
 .nest-corner-marker::after {
   content: "";
   position: absolute;
-  background: #e66f2d;
+  background: #21875b;
   box-shadow: 0 0 0 1px white;
 }
 

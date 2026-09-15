@@ -120,6 +120,7 @@ const state = {
   nestTraceResult: null,        // a completed trace phase waiting on Tool thickness to finalize
   nestPaperCorners: null, // null = no recovery; []..4 = corners clicked in 2D recovery
   nestCornerError: "",
+  nestCornerBusy: false,
   nestOutlineTool: "select",    // "select" | "add-point" | "delete-point"
   nestAccessWarningShown: null, // last access-planner warning already toasted
   nudgeFeedback: null,
@@ -3205,7 +3206,7 @@ function syncNest2DWorkspace() {
             style="left:${corner.xPct}%;top:${corner.yPct}%"></span>
     `).join("");
 
-    $("#nest-corners-use").disabled = corners.length !== 4;
+    $("#nest-corners-clear").disabled = state.nestCornerBusy;
     $("#nest-corner-error").textContent = state.nestCornerError || "";
     return;
   }
@@ -3269,16 +3270,16 @@ function wireNest2DControls() {
   $("#nest-scan-apply")?.addEventListener("click", acceptNestTrace);
 
   $("#nest-corners-clear")?.addEventListener("click", () => {
+    if (state.nestCornerBusy) return;
     state.nestPaperCorners = [];
     state.nestCornerError = "";
     syncNest2DWorkspace();
   });
 
-  $("#nest-corners-use")?.addEventListener("click", acceptNestPaperCorners);
-
   $("#nest-corner-image")?.addEventListener("click", event => {
     if (!Array.isArray(state.nestPaperCorners)
-        || state.nestPaperCorners.length >= 4) {
+        || state.nestPaperCorners.length >= 4
+        || state.nestCornerBusy) {
       return;
     }
 
@@ -3297,6 +3298,11 @@ function wireNest2DControls() {
     state.nestPaperCorners.push({ xPct, yPct });
     state.nestCornerError = "";
     syncNest2DWorkspace();
+    if (state.nestPaperCorners.length === 4) {
+      state.nestCornerBusy = true;
+      syncNest2DWorkspace();
+      void acceptNestPaperCorners();
+    }
   });
 }
 
@@ -3430,11 +3436,15 @@ async function runNestTrace(paperCorners) {
       ? { dataUrl: result.rectified_image, mimeType: "image/jpeg" } : state.nestRectifiedImage;
     state.nestPaperCorners = null;
     state.nestCornerError = "";
-    syncNest2DWorkspace();
+    state.nestCornerBusy = false;
     if (_nestMeasuredThickness(draft.options) == null) {
       $("#draft-status").textContent = "Photo traced — enter Tool thickness above to finish.";
     }
     renderDraftFields();
+    activatePreviewView("2d");
+    setLayoutOrientation("topup");
+    syncNest2DWorkspace();
+    renderLayout2D();
     await finishPhotoNestIfReady();
   } catch (error) {
     if (request !== state.nestTraceRequest) return;
@@ -3443,11 +3453,13 @@ async function runNestTrace(paperCorners) {
     if (paperCorners) {
       // The user supplied four corners but Python still rejected them.
       // Keep those points visible so they can clear/retry without re-uploading.
+      state.nestCornerBusy = false;
       state.nestCornerError = error.message;
       syncNest2DWorkspace();
       toast(error.message, true, 6500);
     } else if (/paper missing|paper detection/i.test(error.message)) {
       state.nestPaperCorners = [];
+      state.nestCornerBusy = false;
       state.nestCornerError = error.message;
       syncNest2DWorkspace();
       toast("Automatic paper detection failed. Click the four paper corners in 2D.", true, 6500);
@@ -3524,6 +3536,8 @@ async function acceptNestPaperCorners() {
   ]);
 
   state.nestCornerError = "";
+  state.nestCornerBusy = true;
+  syncNest2DWorkspace();
   await runNestTrace(paperCorners);
 }
 
@@ -3895,6 +3909,7 @@ async function uploadNestPhoto(event) {
   state.nestTuneStatus = "";
   state.nestPaperCorners = null;
   state.nestCornerError = "";
+  state.nestCornerBusy = false;
   state.nestTraceResult = null;
   renderDraftFields();
   await runNestTrace();
