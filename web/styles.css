@@ -216,6 +216,7 @@ button { color: inherit; }
   max-height: calc(100% - 150px);
   line-height: 0;
   cursor: pointer;
+  touch-action: none;
 }
 
 #nest-corner-image {
@@ -232,6 +233,25 @@ button { color: inherit; }
   pointer-events: none;
 }
 
+#nest-paper-outline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+#nest-paper-outline polyline,
+#nest-paper-outline polygon {
+  fill: none;
+  stroke: #21875b;
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 2px white);
+}
+
 .nest-corner-marker {
   position: absolute;
   width: 24px;
@@ -244,7 +264,54 @@ button { color: inherit; }
     0 0 0 2px white,
     0 1px 5px rgba(0,0,0,.5);
   z-index: 2;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.nest-corner-marker:active {
+  cursor: grabbing;
+}
+
+#nest-corner-magnifier {
+  position: absolute;
+  width: 144px;
+  height: 144px;
+  border: 3px solid #21875b;
+  border-radius: 50%;
+  box-shadow: 0 2px 12px rgba(0,0,0,.42), 0 0 0 2px white;
+  background-color: white;
+  background-repeat: no-repeat;
+  background-size: 400% 400%;
   pointer-events: none;
+  z-index: 4;
+}
+
+.nest-corner-tip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: min(310px, calc(100% - 20px));
+  padding: 9px 30px 9px 10px;
+  border: 1px solid #21875b;
+  border-radius: 7px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 1px 5px rgba(0,0,0,.22);
+  color: #14553a;
+  font-size: 12px;
+  line-height: 1.35;
+  z-index: 3;
+}
+
+.nest-corner-tip button {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  border: 0;
+  background: transparent;
+  color: #14553a;
+  cursor: pointer;
+  font-size: 19px;
+  line-height: 1;
 }
 
 .nest-corner-marker::before,

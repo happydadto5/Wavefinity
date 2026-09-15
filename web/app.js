@@ -121,6 +121,7 @@ const state = {
   nestPaperCorners: null, // null = no recovery; []..4 = corners clicked in 2D recovery
   nestCornerError: "",
   nestCornerBusy: false,
+  nestCornerTipDismissed: false,
   nestOutlineTool: "select",    // "select" | "add-point" | "delete-point"
   nestAccessWarningShown: null, // last access-planner warning already toasted
   nudgeFeedback: null,
@@ -128,6 +129,8 @@ const state = {
 
 let previewWaitTimer = null;
 let previewSlowTimer = null;
+let nestCornerPointer = null;
+let nestCornerHoldTimer = null;
 
 const VERSION_POLL_MS = 5000;
 
@@ -3202,14 +3205,17 @@ function syncNest2DWorkspace() {
       `${corners.length} of 4 corners selected`;
 
     const markers = $("#nest-corner-markers");
-    markers.innerHTML = corners.map(() => '<span class="nest-corner-marker"></span>').join("");
+    markers.innerHTML = corners.map((corner, index) =>
+      `<span class="nest-corner-marker" data-corner-index="${index}"></span>`).join("");
     $$(".nest-corner-marker", markers).forEach((marker, index) => {
       marker.style.left = `${corners[index].xPct}%`;
       marker.style.top = `${corners[index].yPct}%`;
     });
+    renderNestPaperOutline(corners);
 
     $("#nest-corners-clear").disabled = state.nestCornerBusy;
     $("#nest-corner-error").textContent = state.nestCornerError || "";
+    $("#nest-corner-tip").hidden = state.nestCornerTipDismissed || state.nestCornerBusy;
     return;
   }
 
@@ -3238,6 +3244,112 @@ function syncNest2DWorkspace() {
 
   $("#nest-scan-apply").disabled = !state.nestCandidateContour;
   $("#nest-scan-status").textContent = state.nestTuneStatus || "";
+}
+
+function renderNestPaperOutline(corners) {
+  const outline = $("#nest-paper-outline");
+  if (!outline) return;
+  if (corners.length < 3) {
+    outline.innerHTML = "";
+    return;
+  }
+  if (corners.length === 3) {
+    const sides = [];
+    for (let a = 0; a < corners.length; a += 1) {
+      for (let b = a + 1; b < corners.length; b += 1) {
+        const dx = corners[a].xPct - corners[b].xPct;
+        const dy = corners[a].yPct - corners[b].yPct;
+        sides.push({ a, b, length: dx * dx + dy * dy });
+      }
+    }
+    const points = sides.sort((one, two) => one.length - two.length).slice(0, 2)
+      .flatMap(side => [corners[side.a], corners[side.b]])
+      .map(corner => `${corner.xPct},${corner.yPct}`).join(" ");
+    outline.innerHTML = `<polyline points="${points}"></polyline>`;
+    return;
+  }
+  const center = corners.reduce((sum, corner) => ({
+    xPct: sum.xPct + corner.xPct / corners.length,
+    yPct: sum.yPct + corner.yPct / corners.length,
+  }), { xPct: 0, yPct: 0 });
+  const points = [...corners]
+    .sort((one, two) => Math.atan2(one.yPct - center.yPct, one.xPct - center.xPct)
+      - Math.atan2(two.yPct - center.yPct, two.xPct - center.xPct))
+    .map(corner => `${corner.xPct},${corner.yPct}`).join(" ");
+  outline.innerHTML = `<polygon points="${points}"></polygon>`;
+}
+
+function nestCornerPoint(event) {
+  const image = $("#nest-corner-image");
+  const rect = image.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  return {
+    xPct: Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)),
+    yPct: Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100)),
+  };
+}
+
+function showNestCornerMagnifier(point) {
+  const magnifier = $("#nest-corner-magnifier");
+  const image = $("#nest-corner-image");
+  if (!magnifier || !image || !state.nestOriginalImage) return;
+  const rect = image.getBoundingClientRect();
+  const size = 144;
+  magnifier.style.backgroundImage = `url("${state.nestOriginalImage.dataUrl}")`;
+  magnifier.style.backgroundPosition = `${point.xPct}% ${point.yPct}%`;
+  magnifier.style.left = `${Math.max(6, Math.min(rect.width - size - 6, point.xPct / 100 * rect.width + 18))}px`;
+  magnifier.style.top = `${Math.max(6, Math.min(rect.height - size - 6, point.yPct / 100 * rect.height + 18))}px`;
+  magnifier.hidden = false;
+}
+
+function hideNestCornerMagnifier() {
+  const magnifier = $("#nest-corner-magnifier");
+  if (magnifier) magnifier.hidden = true;
+}
+
+function beginNestCornerPointer(event, index = null) {
+  if (state.nestCornerBusy || !Array.isArray(state.nestPaperCorners)) return;
+  const point = nestCornerPoint(event);
+  if (!point) return;
+  event.preventDefault();
+  nestCornerPointer = { id: event.pointerId, index, magnifying: false };
+  nestCornerHoldTimer = setTimeout(() => {
+    if (!nestCornerPointer || nestCornerPointer.id !== event.pointerId) return;
+    nestCornerPointer.magnifying = true;
+    showNestCornerMagnifier(nestCornerPoint(event) || point);
+  }, 350);
+}
+
+function moveNestCornerPointer(event) {
+  if (!nestCornerPointer || nestCornerPointer.id !== event.pointerId) return;
+  const point = nestCornerPoint(event);
+  if (!point) return;
+  if (nestCornerPointer.index !== null) {
+    state.nestPaperCorners[nestCornerPointer.index] = point;
+    state.nestCornerError = "";
+    syncNest2DWorkspace();
+  }
+  if (nestCornerPointer.magnifying) showNestCornerMagnifier(point);
+}
+
+function endNestCornerPointer(event, cancelled = false) {
+  if (!nestCornerPointer || nestCornerPointer.id !== event.pointerId) return;
+  clearTimeout(nestCornerHoldTimer);
+  const interaction = nestCornerPointer;
+  nestCornerPointer = null;
+  hideNestCornerMagnifier();
+  if (cancelled) return;
+  const point = nestCornerPoint(event);
+  if (!point || !Array.isArray(state.nestPaperCorners)) return;
+  if (interaction.index === null) state.nestPaperCorners.push(point);
+  else state.nestPaperCorners[interaction.index] = point;
+  state.nestCornerError = "";
+  syncNest2DWorkspace();
+  if (state.nestPaperCorners.length === 4) {
+    state.nestCornerBusy = true;
+    syncNest2DWorkspace();
+    void acceptNestPaperCorners();
+  }
 }
 
 function wireNest2DControls() {
@@ -3275,37 +3387,34 @@ function wireNest2DControls() {
     if (state.nestCornerBusy) return;
     state.nestPaperCorners = [];
     state.nestCornerError = "";
+    hideNestCornerMagnifier();
     syncNest2DWorkspace();
   });
 
-  $("#nest-corner-image")?.addEventListener("click", event => {
+  $("#nest-corner-tip-close")?.addEventListener("click", () => {
+    state.nestCornerTipDismissed = true;
+    syncNest2DWorkspace();
+  });
+
+  $("#nest-corner-markers")?.addEventListener("pointerdown", event => {
+    const marker = event.target.closest(".nest-corner-marker");
+    if (!marker) return;
+    event.stopPropagation();
+    beginNestCornerPointer(event, Number(marker.dataset.cornerIndex));
+  });
+
+  $("#nest-corner-image")?.addEventListener("pointerdown", event => {
     if (!Array.isArray(state.nestPaperCorners)
         || state.nestPaperCorners.length >= 4
         || state.nestCornerBusy) {
       return;
     }
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-
-    const xPct = Math.max(
-      0,
-      Math.min(100, (event.clientX - rect.left) / rect.width * 100),
-    );
-    const yPct = Math.max(
-      0,
-      Math.min(100, (event.clientY - rect.top) / rect.height * 100),
-    );
-
-    state.nestPaperCorners.push({ xPct, yPct });
-    state.nestCornerError = "";
-    syncNest2DWorkspace();
-    if (state.nestPaperCorners.length === 4) {
-      state.nestCornerBusy = true;
-      syncNest2DWorkspace();
-      void acceptNestPaperCorners();
-    }
+    beginNestCornerPointer(event);
   });
+
+  window.addEventListener("pointermove", moveNestCornerPointer);
+  window.addEventListener("pointerup", event => endNestCornerPointer(event));
+  window.addEventListener("pointercancel", event => endNestCornerPointer(event, true));
 }
 
 // Photo Nest's own sidebar buttons - separated out because they carry
@@ -3912,6 +4021,7 @@ async function uploadNestPhoto(event) {
   state.nestPaperCorners = null;
   state.nestCornerError = "";
   state.nestCornerBusy = false;
+  state.nestCornerTipDismissed = false;
   state.nestTraceResult = null;
   renderDraftFields();
   await runNestTrace();
