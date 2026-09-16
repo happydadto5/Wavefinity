@@ -427,6 +427,8 @@ A future ordinary `layout.feature` is interior content and does not belong.
 | B4B container configuration | Yes |
 | Label enabled/type/location/style | Yes |
 | Actual label text | **No — blank** |
+| Edge Mount side/projection/thickness/screw settings | Yes |
+| Edge Mount label text | **No — blank** |
 | Part/Bin name | **No — blank** |
 | Interior print/layout mode | Yes |
 | Divider or divider label | No |
@@ -1082,6 +1084,58 @@ one would stand for the whole file. The first label you actually type seeds a
 blank **Part Name** once (a bare size like `8` or `12mm` never does); after that
 the two are independent, so a bin can say `M3` on the floor and still save as
 `Driver rack`. Characters a filesystem would object to are stripped.
+
+### Edge Mount
+
+**Edge Mount modifies an ordinary bin; it is not a bin type, an interior
+part, or a second bin-generation path.** It is available for a normal Bin
+and for both Stacked Bin-to-Bin and Stacked Lid-to-Bin, and it is hidden (but
+preserved in the saved design) while B4B is selected, since B4B uses a
+separate body architecture. It lets a normal bin hang vertically outside a
+cart, table, shelf or workbench: one selected wall (**Front** `-Y`, **Back**
+`+Y`, **Left** `-X`, **Right** `+X` - the same convention the rim label
+uses) faces the support. That one **side** setting controls both
+subsections at once - there are no separate mounting-side and label-side
+choices.
+
+- **Projecting Label** - a thin horizontal plate, flush with the top rim,
+  cantilevered outward from the top of the selected wall like a diving
+  board, so it can rest over the top edge of a cart or table. It is not a
+  hook, clamp, gusset or mounting feature. **Plate length** is either Full
+  Side (the wall's real wavy-envelope span) or Text Length (the fitted text
+  plus a 2 mm margin on every side, never wider than Full Side). Projection
+  (5-200 mm) and thickness (0.8-6.0 mm) are configurable, with 25/50/75 mm
+  and 1.2/2.0/3.0 mm presets. Lettering reuses the ordinary text engine:
+  Inlaid/Flush (default, 0.4 mm deep, needs the usual minimum backing) or
+  Raised. Text starts at a 5 mm cap height and only shrinks - never below
+  4 mm - to fit the plate; if it still will not fit at 4 mm, generation
+  refuses with a plain explanation rather than truncating or enlarging the
+  plate. **Flip text** turns the reading direction 180 degrees for mounting
+  on the underside of a surface.
+- **Screw Mounting** - 1-4 round screw holes through the selected wall
+  (default 2, arranged Horizontal or Vertical, default Horizontal), each
+  paired with a larger round driver-access passage that opens from the
+  *opposite* wall and crosses the cavity to reach it - so a screwdriver can
+  follow the screw in from the far side. Both holes are always round; there
+  are no teardrops, countersinks or counterbores. Default screw diameter is
+  4 mm; default driver-access diameter is Auto = `max(8 mm, 2x screw
+  diameter)`, or a custom 2-20 mm value. The first (or only) hole centres
+  12.7 mm (1/2 in) below the top rim by default (**Distance below top**);
+  additional holes use Auto spacing (evenly fit, up to 20 mm apart) or an
+  exact custom spacing. A pattern that cannot fit - too close to a corner,
+  too close to the floor, or two access holes too close together - is
+  refused with the reason, never silently shrunk, reduced or repositioned.
+  Screw Mounting cannot share its mounting or opposite wall with a Lift
+  Grabber; enabling both on conflicting walls is refused.
+
+The plate's projection is real geometry but is not part of the bin's
+nominal X/Y footprint, inventory dimensions or Space planning - those keep
+using the ordinary bin size. A removable/cartridge insert is never drilled,
+since it can simply be lifted out before the bin is mounted; the fused
+access passage does clear any fused interior holder material blocking its
+path, since that material cannot be removed. Edge Mount's own label is
+independent of floor Text parts, the rim label, and B4B/divider labels -
+none of those are migrated or replaced.
 
 ---
 

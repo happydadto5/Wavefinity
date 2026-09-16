@@ -61,15 +61,18 @@ from organizer_engine import (
     MAX_WALL,
     MIN_HEIGHT_ABOVE_BASE,
     MIN_WALL,
+    TEXT_DEPTH,
     WAVE_AMPLITUDE,
     WAVE_MATING_GAP,
     WALL_STEP,
     BoxSpec,
     ConnectorSpec,
+    LidSpec,
     StackSpec,
     differing_connector_plan,
     differing_web_reach,
     lift_grabber_min_wall,
+    lid_enabled,
     make_top_label,
     make_top_label_ledge,
     max_wave_slope,
@@ -134,6 +137,7 @@ from organizer_app import (
     generate_organizer_files,
     generate_side_file,
     inventory_bin_record,
+    lid_label_regions,
     parse_sizes,
     preview_geometry,
     validate_customization_clearance,
@@ -150,13 +154,55 @@ from organizer_b4b import (
     b4b_summary,
     validate_b4b_design,
 )
+from organizer_base_trim import (
+    BASE_TRIM_BED_EDGE_MARGIN,
+    BASE_TRIM_DEFAULT_BED_X,
+    BASE_TRIM_DEFAULT_BED_Y,
+    BASE_TRIM_DEFAULT_HEIGHT,
+    BASE_TRIM_DEFAULT_WIDTH,
+    BASE_TRIM_JOIN_LABELS,
+    BASE_TRIM_JOIN_TYPES,
+    BASE_TRIM_MAX_HEIGHT,
+    BASE_TRIM_MAX_WIDTH,
+    BASE_TRIM_MIN_HEIGHT,
+    BASE_TRIM_MIN_WIDTH,
+    BASE_TRIM_OUTER_TAPER,
+    base_trim_design_to_dict,
+    base_trim_enabled,
+    base_trim_from_design,
+    base_trim_inner_polygon,
+    base_trim_summary,
+    generate_base_trim_files,
+    make_base_trim_pieces,
+)
 from organizer_stack import (
     STACK_MIN_WALL,
+    make_lid_parts,
     stack_base_minimum,
     stack_effective_box,
     stack_enabled,
     stack_summary,
     validate_stack_design,
+)
+from organizer_edge_mount import (
+    EDGE_HOLE_DEFAULT_SCREW_DIAMETER,
+    EDGE_HOLE_DEFAULT_TOP_OFFSET,
+    EDGE_HOLE_MAX_ACCESS_DIAMETER,
+    EDGE_HOLE_MAX_COUNT,
+    EDGE_HOLE_MAX_SCREW_DIAMETER,
+    EDGE_HOLE_MIN_ACCESS_DIAMETER,
+    EDGE_HOLE_MIN_COUNT,
+    EDGE_HOLE_MIN_SCREW_DIAMETER,
+    EDGE_LABEL_DEFAULT_PROJECTION,
+    EDGE_LABEL_DEFAULT_THICKNESS,
+    EDGE_LABEL_MAX_PROJECTION,
+    EDGE_LABEL_MAX_TEXT_DEPTH,
+    EDGE_LABEL_MAX_THICKNESS,
+    EDGE_LABEL_MIN_PROJECTION,
+    EDGE_LABEL_MIN_TEXT_DEPTH,
+    EDGE_LABEL_MIN_THICKNESS,
+    EDGE_LABEL_PROJECTION_PRESETS,
+    EDGE_LABEL_THICKNESS_PRESETS,
 )
 
 
@@ -198,7 +244,9 @@ def _stack_base_min_by_wall() -> dict[str, dict[str, float]]:
         wall = round(STACK_MIN_WALL + i * WALL_STEP, 3)
         for mode in ("lid", "direct"):
             box = replace(
-                probe, wall=wall, standard_walls=False, stack=StackSpec(mode=mode),
+                probe, wall=wall, standard_walls=False,
+                stack=StackSpec(mode="direct") if mode == "direct" else StackSpec(),
+                lid=LidSpec(enabled=True, stackable=True) if mode == "lid" else LidSpec(),
             )
             table[mode][f"{wall:g}"] = round(stack_base_minimum(box), 3)
     return table
@@ -718,6 +766,14 @@ def catalog_payload() -> dict[str, Any]:
             "default_base_mm": DEFAULT_BASE_THICKNESS,
             "base_min_by_wall_mm": _stack_base_min_by_wall(),
         },
+        "lid_rules": {
+            "thicknesses": ["thin", "medium", "thick"],
+            "handle_types": ["knob", "pull"],
+            "handle_sizes": ["small", "medium", "large"],
+            "handle_positions": ["left", "right", "front", "back", "middle"],
+            "label_styles": ["flush", "raised"],
+            "label_orientations": ["horizontal", "vertical"],
+        },
         "b4b_rules": {
             "grid_pitch_mm": GRID_PITCH,
             "lid_headroom_choices_mm": list(B4B_LID_HEADROOM_CHOICES),
@@ -738,6 +794,23 @@ def catalog_payload() -> dict[str, Any]:
             "handle_min_grip_mm": B4B_HANDLE_GRIP_ABS_MIN,
             "stack_min_base_mm": B4B_STACK_MIN_BASE,
         },
+        "base_trim_rules": {
+            "unit_mm": BASE_UNIT,
+            "default_width_mm": BASE_TRIM_DEFAULT_WIDTH,
+            "default_height_mm": BASE_TRIM_DEFAULT_HEIGHT,
+            "min_width_mm": BASE_TRIM_MIN_WIDTH,
+            "max_width_mm": BASE_TRIM_MAX_WIDTH,
+            "min_height_mm": BASE_TRIM_MIN_HEIGHT,
+            "max_height_mm": BASE_TRIM_MAX_HEIGHT,
+            "outer_taper_mm": BASE_TRIM_OUTER_TAPER,
+            "default_bed_x_mm": BASE_TRIM_DEFAULT_BED_X,
+            "default_bed_y_mm": BASE_TRIM_DEFAULT_BED_Y,
+            "bed_edge_margin_mm": BASE_TRIM_BED_EDGE_MARGIN,
+            "join_types": [
+                {"value": value, "label": BASE_TRIM_JOIN_LABELS[value]}
+                for value in BASE_TRIM_JOIN_TYPES
+            ],
+        },
         "lift_grabbers": {
             "default_size": "medium",
             "default_location": "sides",
@@ -756,6 +829,52 @@ def catalog_payload() -> dict[str, Any]:
                 {"value": "front_back", "label": "Front/back"},
                 {"value": "both", "label": "Both"},
             ],
+        },
+        "edge_mount": {
+            "sides": [
+                {"value": "front", "label": "Front"},
+                {"value": "back", "label": "Back"},
+                {"value": "left", "label": "Left"},
+                {"value": "right", "label": "Right"},
+            ],
+            "projection_choices": [
+                {"value": value, "label": f"{value:g} mm — {name}"}
+                for value, name in EDGE_LABEL_PROJECTION_PRESETS
+            ],
+            "thickness_choices": [
+                {"value": value, "label": f"{value:g} mm — {name}"}
+                for value, name in EDGE_LABEL_THICKNESS_PRESETS
+            ],
+            "defaults": {
+                "side": "front",
+                "label_enabled": False,
+                "label_text": "",
+                "label_projection_mm": EDGE_LABEL_DEFAULT_PROJECTION,
+                "label_length_mode": "full",
+                "label_thickness_mm": EDGE_LABEL_DEFAULT_THICKNESS,
+                "label_raised": False,
+                "label_text_depth_mm": TEXT_DEPTH,
+                "label_flip": False,
+                "holes_enabled": False,
+                "hole_count": 2,
+                "hole_orientation": "horizontal",
+                "screw_diameter_mm": EDGE_HOLE_DEFAULT_SCREW_DIAMETER,
+                "access_diameter_mm": None,
+                "top_offset_mm": EDGE_HOLE_DEFAULT_TOP_OFFSET,
+                "hole_spacing_mm": None,
+            },
+            "min_projection_mm": EDGE_LABEL_MIN_PROJECTION,
+            "max_projection_mm": EDGE_LABEL_MAX_PROJECTION,
+            "min_thickness_mm": EDGE_LABEL_MIN_THICKNESS,
+            "max_thickness_mm": EDGE_LABEL_MAX_THICKNESS,
+            "min_text_depth_mm": EDGE_LABEL_MIN_TEXT_DEPTH,
+            "max_text_depth_mm": EDGE_LABEL_MAX_TEXT_DEPTH,
+            "min_screw_diameter_mm": EDGE_HOLE_MIN_SCREW_DIAMETER,
+            "max_screw_diameter_mm": EDGE_HOLE_MAX_SCREW_DIAMETER,
+            "min_access_diameter_mm": EDGE_HOLE_MIN_ACCESS_DIAMETER,
+            "max_access_diameter_mm": EDGE_HOLE_MAX_ACCESS_DIAMETER,
+            "min_hole_count": EDGE_HOLE_MIN_COUNT,
+            "max_hole_count": EDGE_HOLE_MAX_COUNT,
         },
         "setting_interactions": [
             {
@@ -953,6 +1072,20 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
         update["output"] = str(payload["output"])
     if "slicer_path" in payload:
         update["slicer_path"] = str(payload["slicer_path"]) if payload["slicer_path"] else ""
+    if "default_join_mode" in payload:
+        value = str(payload["default_join_mode"])
+        if value not in {"side", "base_trim"}:
+            raise ValueError("Join bins with must be Side connectors or Base Trim.")
+        update["default_join_mode"] = value
+    for key, label in (
+        ("base_trim_bed_x_mm", "Bed X"),
+        ("base_trim_bed_y_mm", "Bed Y"),
+    ):
+        if key in payload:
+            value = float(payload[key])
+            if not math.isfinite(value) or value <= 2.0 * BASE_TRIM_BED_EDGE_MARGIN:
+                raise ValueError(f"{label} must leave a positive printable area after edge clearance.")
+            update[key] = value
     return {"preferences": save_preferences(update)}
 
 
@@ -1067,6 +1200,79 @@ def _design(raw: dict[str, Any]) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     return design_from_dict(raw)
 
 
+def _is_base_trim_design(raw: Any) -> bool:
+    return isinstance(raw, dict) and raw.get("design_kind") == "base_trim"
+
+
+def _base_trim_preview_meshes(spec) -> list[dict[str, Any]]:
+    """Compact assembled-position mesh transport for every physical piece."""
+    positions: list[float] = []
+    normals: list[float] = []
+    for _piece, mesh in make_base_trim_pieces(spec):
+        triangles = np.asarray(mesh.triangles, dtype=float)
+        if not len(triangles):
+            continue
+        keep = np.asarray(mesh.area_faces, dtype=float) > 1e-4
+        positions.extend(np.round(triangles[keep], 3).reshape(-1).tolist())
+        normals.extend(np.round(np.asarray(mesh.face_normals)[keep], 3).reshape(-1).tolist())
+    if not positions:
+        return []
+    return [{
+        "kind": "base_trim",
+        "owner": "bin",
+        "layer": 0,
+        "positions": positions,
+        "normals": normals,
+    }]
+
+
+def _base_trim_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw = payload["design"]
+    spec = base_trim_from_design(raw)
+    part_name = str(raw.get("part_name") or "")
+    canonical = base_trim_design_to_dict(spec, part_name)
+    canonical["base_trim"]["auto_size"] = bool(
+        isinstance(raw.get("base_trim"), dict) and raw["base_trim"].get("auto_size")
+    )
+    with GEOMETRY_LOCK:
+        summary = base_trim_summary(spec)
+        meshes = _base_trim_preview_meshes(spec)
+    inner = base_trim_inner_polygon(spec)
+    outer_x, outer_y = summary["outer_mm"]
+    return {
+        "design": canonical,
+        "base_trim": summary,
+        "label_outline": [],
+        "label_meta": None,
+        "text_meta": [],
+        "geometry": [],
+        "meshes": meshes,
+        "fits": True,
+        "message": "",
+        "feature_errors": [],
+        "invalid_feature_indexes": [],
+        "draft_error": None,
+        "dimensions": {
+            "size": (
+                f"{outer_x:g} X {outer_y:g} X {spec.height_mm:g} mm Base Trim; "
+                f"field {spec.units[0]}U x {spec.units[1]}U"
+            ),
+            "inside_x": spec.field_x,
+            "inside_y": spec.field_y,
+        },
+        "layout_bounds": [-outer_x / 2.0, -outer_y / 2.0, outer_x / 2.0, outer_y / 2.0],
+        "cavity_outline": [[float(x), float(y)] for x, y in inner.exterior.coords],
+        "customization_zones": [],
+        "feature_footprints": [],
+        "draft_footprint": None,
+        "feature_outlines": [],
+        "nest_soft_contours": [],
+        "draft_soft_contour": None,
+        "nest_access": [],
+        "draft_nest_access": None,
+    }
+
+
 def _interior_work_box(box: BoxSpec) -> BoxSpec:
     """The printable body interior-feature math should size against.
 
@@ -1076,7 +1282,7 @@ def _interior_work_box(box: BoxSpec) -> BoxSpec:
     editor path that fits or validates interior geometry has to use the same
     body, or a part can pass Add/Edit/Fit and then fail preview/export.
     """
-    if not stack_enabled(box):
+    if not stack_enabled(box) and not lid_enabled(box):
         return box
     validate_stack_design(box)
     return stack_effective_box(box)
@@ -1228,6 +1434,8 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if _is_base_trim_design(payload.get("design")):
+        return _base_trim_preview_payload(payload)
     if isinstance(payload.get("design"), dict):
         box_raw = payload["design"].get("box", {})
         b4b_raw = box_raw.get("b4b") if isinstance(box_raw, dict) else None
@@ -1243,7 +1451,7 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # the requested module-height datum.
     stack_request = box
     stack_block = None
-    if stack_enabled(box):
+    if stack_enabled(box) or lid_enabled(box):
         validate_stack_design(box)
         stack_block = stack_summary(box)
         box = stack_effective_box(box)
@@ -1252,6 +1460,13 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
             box, label, layout.features, layout.mode, label_location, scoop, draft,
             selected=selected,
         )
+        if lid_enabled(stack_request):
+            lid, lid_texts = make_lid_parts(
+                stack_request, lid_label_regions(stack_request, layout),
+            )
+            scene["geometry"].extend(_mesh_preview_geometry(lid, "lid"))
+            for _text, mesh, _raised in lid_texts:
+                scene["geometry"].extend(_mesh_preview_geometry(mesh, "lid_label"))
     bounds = layout_zone(box, layout.mode)
     geometry = [
         {"points": points, "kind": kind, "normal": normal,
@@ -1328,6 +1543,18 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
             if draft is not None and draft.kind == "nest" and draft.contour else None
         ),
     }
+
+
+def validate_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw = payload["design"]
+    if _is_base_trim_design(raw):
+        spec = base_trim_from_design(raw)
+        design = base_trim_design_to_dict(spec, str(raw.get("part_name") or ""))
+        design["base_trim"]["auto_size"] = bool(
+            isinstance(raw.get("base_trim"), dict) and raw["base_trim"].get("auto_size")
+        )
+        return {"design": design}
+    return {"design": design_to_dict(*_design(raw))}
 
 
 def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1804,6 +2031,18 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_design = payload["design"]
+    if _is_base_trim_design(raw_design):
+        spec = base_trim_from_design(raw_design)
+        output = _generation_output(payload)
+        with GEOMETRY_LOCK:
+            result = generate_base_trim_files(
+                spec,
+                output,
+                str(raw_design.get("part_name") or ""),
+                auto_timestamp=bool(payload.get("auto_timestamp", False)),
+            )
+        return _generation_reply(result=result, output=output)
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     output = _generation_output(payload)
     auto_timestamp = bool(payload.get("auto_timestamp", False))
@@ -1834,8 +2073,12 @@ def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("join_mode") == "base_trim":
+        raise ValueError("Side connectors are turned off while bins are set to use a Base Trim.")
     _reject_if_b4b(payload, "the side connector")
     box, *_ = _design(payload["design"])
+    if lid_enabled(box):
+        raise ValueError("Side connectors are unavailable while this bin has a lid.")
     options = payload.get("connector", {})
     tolerance = float(options.get("tolerance", LOCKED_TOLERANCE))
     height = float(options.get("height", LOCKED_CONNECTOR_HEIGHT))
@@ -2025,13 +2268,29 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # build has the part on the plate to link bins together - but never for a
     # B4B, whose lid controls the rim and which does not use the connector.
     design = payload.get("design")
+    is_base_trim = _is_base_trim_design(design)
     is_b4b = (
         isinstance(design, dict)
         and isinstance(design.get("box"), dict)
         and isinstance(design["box"].get("b4b"), dict)
         and design["box"]["b4b"].get("enabled")
     )
-    if target not in {"connector", "sampler"} and not is_b4b:
+    has_lid = (
+        isinstance(design, dict)
+        and isinstance(design.get("box"), dict)
+        and isinstance(design["box"].get("lid"), dict)
+        and design["box"]["lid"].get("enabled")
+    )
+    join_mode = str(payload.get("join_mode") or "side")
+    if join_mode not in {"side", "base_trim"}:
+        raise ValueError("Join bins with must be Side connectors or Base Trim.")
+    if (
+        target not in {"connector", "sampler"}
+        and not is_b4b
+        and not has_lid
+        and not is_base_trim
+        and join_mode == "side"
+    ):
         connector_files = _extract_generated_files(connector_payload(payload))
         files.extend(connector_files)
 
@@ -2056,9 +2315,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 POST_ROUTES = {
     "/api/preview": preview_payload,
-    "/api/design/validate": lambda payload: {
-        "design": design_to_dict(*_design(payload["design"]))
-    },
+    "/api/design/validate": validate_design_payload,
     "/api/feature/default": default_feature_payload,
     "/api/feature/draft": draft_payload,
     "/api/feature/fit": feature_fit_payload,

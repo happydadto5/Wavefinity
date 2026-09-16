@@ -31,9 +31,8 @@
             <label><span>Design a:</span>
               <select id="bin-type">
                 <option value="single" selected>Bin</option>
-                <option value="stack-direct">Bin (Stacked Bin to Bin)</option>
-                <option value="stack-lid">Bin (Stacked Lid to Bin)</option>
                 <option value="b4b">Bin for Bins</option>
+                <option value="base-trim">Base Trim</option>
               </select>
             </label>
             <label class="part-name-row"><span id="part-name-label">Bin Name</span>
@@ -42,7 +41,7 @@
             <span id="stack-note" class="stack-note" hidden></span>
             <span id="b4b-size-note" class="stack-note" hidden></span>
           </div>
-          <div class="field-grid three">
+          <div id="ordinary-size-row" class="field-grid three">
             <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
             <label><span id="y-size-label">Length</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
             <label><span id="z-size-label">Height</span><input id="z" type="text" inputmode="numeric"></label>
@@ -70,6 +69,108 @@
             <label id="lift-grabber-location-setting" class="inline-select compact-select" hidden>Grabber location
               <select id="lift-grabber-location"></select>
             </label>
+          </div>
+
+          <div id="edge-mount-panel" class="b4b-panel" hidden>
+            <div class="b4b-card">
+              <h3 class="b4b-card-title">Edge Mount</h3>
+              <div class="field-grid three">
+                <label class="inline-select">Mounting side
+                  <select id="edge-mount-side">
+                    <option value="front">Front</option>
+                    <option value="back">Back</option>
+                    <option value="left">Left</option>
+                    <option value="right">Right</option>
+                  </select>
+                </label>
+                <label class="checkbox-row"><span>Projecting Label</span><input id="edge-mount-label-enabled" type="checkbox"></label>
+                <label class="checkbox-row"><span>Screw Mounting</span><input id="edge-mount-holes-enabled" type="checkbox"></label>
+              </div>
+
+              <div id="edge-mount-label-panel" hidden>
+                <h4 class="b4b-card-title">Projecting Label</h4>
+                <div class="field-grid three">
+                  <label style="grid-column:1 / span 2">Label text
+                    <input id="edge-mount-label-text" type="text" maxlength="40" placeholder="e.g. PRUNER">
+                  </label>
+                  <label class="inline-select">Plate length
+                    <select id="edge-mount-label-length-mode">
+                      <option value="full">Full Side</option>
+                      <option value="text">Text Length</option>
+                    </select>
+                  </label>
+                  <label class="inline-select">Projection
+                    <select id="edge-mount-label-projection"></select>
+                  </label>
+                  <label id="edge-mount-label-projection-custom-row" hidden>Projection mm
+                    <input id="edge-mount-label-projection-mm" type="number" min="5" max="200" step="1">
+                  </label>
+                  <label class="inline-select">Plate thickness
+                    <select id="edge-mount-label-thickness"></select>
+                  </label>
+                  <label id="edge-mount-label-thickness-custom-row" hidden>Thickness mm
+                    <input id="edge-mount-label-thickness-mm" type="number" min="0.8" max="6" step="0.1">
+                  </label>
+                  <label class="inline-select">Label style
+                    <select id="edge-mount-label-style">
+                      <option value="flush">Inlaid / Flush</option>
+                      <option value="raised">Raised</option>
+                    </select>
+                  </label>
+                  <label>Text depth mm
+                    <input id="edge-mount-label-depth" type="number" min="0.2" max="2" step="0.1">
+                  </label>
+                  <label class="checkbox-row"><span>Flip text</span><input id="edge-mount-label-flip" type="checkbox"></label>
+                </div>
+                <p class="inline-help">Projects from the top of the mounting wall so the label can rest over the top edge of a cart, table, or shelf.</p>
+              </div>
+
+              <div id="edge-mount-holes-panel" hidden>
+                <h4 class="b4b-card-title">Screw Mounting</h4>
+                <div class="field-grid three">
+                  <label class="inline-select">Number of screws
+                    <select id="edge-mount-hole-count">
+                      <option value="1">1</option>
+                      <option value="2" selected>2</option>
+                      <option value="3">3</option>
+                      <option value="4">4</option>
+                    </select>
+                  </label>
+                  <label id="edge-mount-hole-orientation-row" class="inline-select">Pattern
+                    <select id="edge-mount-hole-orientation">
+                      <option value="horizontal">Horizontal</option>
+                      <option value="vertical">Vertical</option>
+                    </select>
+                  </label>
+                  <label>Screw hole Ø mm
+                    <input id="edge-mount-screw-diameter" type="number" min="1" max="12" step="0.1">
+                  </label>
+                  <label class="inline-select">Driver access Ø
+                    <select id="edge-mount-access-mode">
+                      <option value="auto">Auto</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </label>
+                  <span id="edge-mount-access-auto-note" class="muted">Auto: 8 mm</span>
+                  <label id="edge-mount-access-custom-row" hidden>Access Ø mm
+                    <input id="edge-mount-access-diameter" type="number" min="2" max="20" step="0.1">
+                  </label>
+                  <label title="Measured from the top rim to the center of the upper screw hole.">Distance below top mm
+                    <input id="edge-mount-top-offset" type="number" min="0.1" step="0.1">
+                  </label>
+                  <label class="inline-select">Hole spacing
+                    <select id="edge-mount-spacing-mode">
+                      <option value="auto">Auto</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </label>
+                  <label id="edge-mount-spacing-custom-row" hidden>Spacing mm
+                    <input id="edge-mount-spacing-mm" type="number" min="0.1" step="0.1">
+                  </label>
+                </div>
+                <p class="inline-help">The small holes go through the mounting wall. Larger round access passages come from the opposite wall so a screwdriver can reach each screw.</p>
+              </div>
+            </div>
           </div>
 
           <div id="b4b-panel" class="b4b-panel" hidden>
@@ -141,9 +242,91 @@
             </div>
           </div>
 
+          <div id="base-trim-panel" class="base-trim-panel" hidden>
+            <div class="b4b-card">
+              <h3 class="b4b-card-title">Field size</h3>
+              <div class="base-trim-grid">
+                <label class="base-trim-size-row">Field width
+                  <span><input id="base-trim-x-units" type="number" min="1" max="150" step="1"> units</span>
+                  <span id="base-trim-x-mm" class="base-trim-unit-readout">160 mm</span>
+                </label>
+                <label class="base-trim-size-row">Field length
+                  <span><input id="base-trim-y-units" type="number" min="1" max="150" step="1"> units</span>
+                  <span id="base-trim-y-mm" class="base-trim-unit-readout">80 mm</span>
+                </label>
+              </div>
+            </div>
+            <div class="b4b-card">
+              <h3 class="b4b-card-title">Trim</h3>
+              <div class="field-grid three">
+                <label>Trim width <span class="unit">mm</span><input id="base-trim-width" type="number" min="4" max="20" step="0.5" value="6"></label>
+                <label>Trim height <span class="unit">mm</span><input id="base-trim-height" type="number" min="4" max="20" step="0.5" value="6"></label>
+                <label>Section joint<select id="base-trim-joint">
+                  <option value="snap">Snap tabs</option>
+                  <option value="dovetail">Sliding dovetail</option>
+                  <option value="puzzle">Puzzle joint</option>
+                </select></label>
+              </div>
+            </div>
+            <div class="b4b-card">
+              <h3 class="b4b-card-title">Printer bed</h3>
+              <div class="field-grid two">
+                <label>Bed X <span class="unit">mm</span><input id="base-trim-bed-x" type="number" min="21" step="1" value="256"></label>
+                <label>Bed Y <span class="unit">mm</span><input id="base-trim-bed-y" type="number" min="21" step="1" value="256"></label>
+              </div>
+              <p id="base-trim-printable" class="muted">Printable area after 10 mm edge clearance: 236 × 236 mm</p>
+              <button id="base-trim-auto-size" type="button" class="button secondary">Auto size from Space</button>
+            </div>
+            <div class="b4b-card">
+              <h3 class="b4b-card-title">Information</h3>
+              <div id="base-trim-summary" class="base-trim-summary muted"></div>
+            </div>
+          </div>
+
           <div class="subheading-row">
-            <div><h2>Interior parts</h2></div>
+            <div><h2>Parts &amp; options</h2></div>
             <span id="support-count" class="count-badge">0 placed</span>
+          </div>
+          <div id="lid-option" class="lid-option-card">
+            <div class="lid-option-heading">
+              <div><strong>Lid &amp; Stacking</strong><span>Bin-level part</span></div>
+              <button id="lid-option-toggle" type="button" class="button secondary">Add</button>
+            </div>
+            <div id="lid-option-panel" hidden>
+              <label>Configuration
+                <select id="lid-configuration">
+                  <option value="stackable_bin">Stackable Bin</option>
+                  <option value="stackable_lid">Stackable Lid</option>
+                  <option value="handled_lid">Handled Lid</option>
+                </select>
+              </label>
+              <div id="lid-physical-options" class="field-grid three" hidden>
+                <label>Lid thickness<select id="lid-thickness">
+                  <option value="thin">Thin</option><option value="medium">Medium</option><option value="thick">Thick</option>
+                </select></label>
+                <label id="lid-handle-type-row">Handle<select id="lid-handle-type">
+                  <option value="knob">Knob</option><option value="pull">Pull</option>
+                </select></label>
+                <label id="lid-handle-size-row">Handle size<select id="lid-handle-size">
+                  <option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option>
+                </select></label>
+                <label id="lid-handle-position-row">Handle position<select id="lid-handle-position">
+                  <option value="left">Left</option><option value="right">Right</option><option value="front">Front</option><option value="back">Back</option><option value="middle">Middle</option>
+                </select></label>
+                <label>Label<select id="lid-label-enabled">
+                  <option value="false">Off</option><option value="true">On</option>
+                </select></label>
+                <label id="lid-label-orientation-row">Orientation<select id="lid-label-orientation">
+                  <option value="horizontal">Horizontal</option><option value="vertical">Vertical</option>
+                </select></label>
+                <label id="lid-label-style-row">Style<select id="lid-label-style">
+                  <option value="flush">Level with top</option><option value="raised">Raised</option>
+                </select></label>
+              </div>
+              <label id="lid-label-text-row" hidden>Text<input id="lid-label-text" type="text" maxlength="80" placeholder="e.g. SCREWS"></label>
+              <div id="lid-division-labels" hidden></div>
+              <p id="lid-option-note" class="inline-help"></p>
+            </div>
           </div>
           <div class="palette-wrap">
             <div id="support-palette" class="support-palette" role="list"></div>
@@ -182,6 +365,12 @@
           </label>
         </div>
         <div class="section-body">
+          <label class="inline-select">Join bins with
+            <select id="bin-join-mode">
+              <option value="side">Side connectors</option>
+              <option value="base_trim">Base Trim</option>
+            </select>
+          </label>
           <div id="connector-bin-heights" class="field-grid two" hidden>
             <label>A height <span class="unit">mm</span><input id="connector-bin-a-height" type="number" min="2" step="1"></label>
             <label>B height <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>

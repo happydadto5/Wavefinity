@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-16 — Edge Mount modifier
+
+- Added Edge Mount, an optional modifier for an ordinary bin (normal Bin,
+  Stacked Bin-to-Bin, or Stacked Lid-to-Bin) that lets it mount vertically to
+  the outside face of a cart, table, shelf or workbench. One selected wall
+  (Front/Back/Left/Right, the same convention the rim label uses) can carry a
+  **Projecting Label**: a thin horizontal plate cantilevered outward from the
+  top of that wall, flush with the rim, with Full Side or Text Length sizing
+  and inlaid or raised lettering reusing the existing text engine. The same
+  wall can carry **Screw Mounting**: 1-4 round screw holes through it, each
+  paired with a larger round driver-access passage opening from the opposite
+  wall so a screwdriver can reach the screw from the far side. Both
+  subsections are independent and can be used alone or together. Geometry,
+  validation and planning live in the new `organizer_edge_mount.py`; the box
+  model only carries the trailing, inert-by-default `BoxSpec.edge_mount`
+  field, so every existing design and script is unaffected.
+
 ## 2026-09-15 — Bin-following parts stay synchronized
 
 - Changing bin Width, Length, height, or wall thickness now updates the

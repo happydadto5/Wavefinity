@@ -309,6 +309,8 @@ B4B_FRONT_LABEL_STYLES = ("flat", "wavy")
 B4B_SCHEMA_VERSION = 2
 
 
+# ``lid`` remains accepted only as a legacy in-memory/import value. New saved
+# designs keep vertical stacking (``direct``) separate from their LidSpec.
 STACK_MODES = ("none", "lid", "direct")
 
 
@@ -337,6 +339,79 @@ class StackSpec:
     @property
     def enabled(self) -> bool:
         return self.mode != "none"
+
+
+LID_THICKNESSES = ("thin", "medium", "thick")
+LID_LABEL_STYLES = ("flush", "raised")
+LID_LABEL_ORIENTATIONS = ("horizontal", "vertical")
+LID_HANDLE_TYPES = ("knob", "pull")
+LID_HANDLE_SIZES = ("small", "medium", "large")
+LID_HANDLE_POSITIONS = ("left", "right", "front", "back", "middle")
+
+
+@dataclass(frozen=True)
+class LidSpec:
+    """Ordinary-bin lid intent. B4B owns its separate lid system."""
+
+    enabled: bool = False
+    stackable: bool = False
+    thickness: str = "thin"
+    label_enabled: bool = False
+    label_style: str = "flush"
+    label_orientation: str = "horizontal"
+    label_text: str = ""
+    division_labels: tuple[str, ...] = ()
+    handle_type: str = "knob"
+    handle_size: str = "medium"
+    handle_position: str = "middle"
+
+    def __post_init__(self) -> None:
+        choices = (
+            (self.thickness, LID_THICKNESSES, "lid thickness"),
+            (self.label_style, LID_LABEL_STYLES, "lid label style"),
+            (self.label_orientation, LID_LABEL_ORIENTATIONS, "lid label orientation"),
+            (self.handle_type, LID_HANDLE_TYPES, "lid handle type"),
+            (self.handle_size, LID_HANDLE_SIZES, "lid handle size"),
+            (self.handle_position, LID_HANDLE_POSITIONS, "lid handle position"),
+        )
+        for value, allowed, name in choices:
+            if value not in allowed:
+                raise ValueError(f"{name} must be one of {', '.join(allowed)}")
+        if self.stackable and not self.enabled:
+            raise ValueError("a stackable lid must be enabled")
+        if self.stackable and self.label_style == "raised" and self.label_enabled:
+            raise ValueError("a stackable lid cannot use raised lettering")
+
+
+def lid_spec(box: "BoxSpec") -> LidSpec:
+    spec = getattr(box, "lid", None) or LidSpec()
+    # Compatibility for callers that still construct StackSpec(mode="lid")
+    # directly. Serialization migrates this to a real LidSpec.
+    if getattr(getattr(box, "stack", None), "mode", "none") == "lid" and not spec.enabled:
+        return LidSpec(enabled=True, stackable=True)
+    return spec
+
+
+def lid_enabled(box: "BoxSpec") -> bool:
+    return lid_spec(box).enabled
+
+
+def lid_stackable(box: "BoxSpec") -> bool:
+    spec = lid_spec(box)
+    return spec.enabled and spec.stackable
+
+
+def lid_has_handle(box: "BoxSpec") -> bool:
+    spec = lid_spec(box)
+    return spec.enabled and not spec.stackable
+
+
+def direct_stack_enabled(box: "BoxSpec") -> bool:
+    return getattr(getattr(box, "stack", None), "mode", "none") == "direct"
+
+
+def vertical_stack_enabled(box: "BoxSpec") -> bool:
+    return direct_stack_enabled(box) or lid_stackable(box)
 
 
 @dataclass(frozen=True)
@@ -504,6 +579,37 @@ MIN_HEIGHT_ABOVE_BASE = 5.0    # Z must clear the base by at least this, to fit 
 
 
 @dataclass(frozen=True)
+class EdgeMountSpec:
+    """Optional modifier that lets an ordinary bin mount vertically to the
+    outside face of a cart, table, shelf or workbench.  Default off; inert
+    for every existing design.  Geometry, validation and planning live in
+    ``organizer_edge_mount.py`` - this is only the saved shape of the data."""
+
+    side: str = "front"
+
+    label_enabled: bool = False
+    label_text: str = ""
+    label_projection_mm: float = 50.0
+    label_length_mode: str = "full"       # "full" | "text"
+    label_thickness_mm: float = 2.0
+    label_raised: bool = False
+    label_text_depth_mm: float = TEXT_DEPTH
+    label_flip: bool = False
+
+    holes_enabled: bool = False
+    hole_count: int = 2
+    hole_orientation: str = "horizontal"  # "horizontal" | "vertical"
+    screw_diameter_mm: float = 4.0
+    access_diameter_mm: float | None = None
+    top_offset_mm: float = 12.7
+    hole_spacing_mm: float | None = None
+
+    @property
+    def active(self) -> bool:
+        return self.label_enabled or self.holes_enabled
+
+
+@dataclass(frozen=True)
 class BoxSpec:
     x: float = MIN_JOINABLE_SIZE
     y: float = MIN_JOINABLE_SIZE
@@ -525,6 +631,11 @@ class BoxSpec:
     # Internal lift grabbers, same reasoning: trailing and inert unless
     # switched on. Available to every bin type, not just B4B.
     lift_grabbers: LiftGrabberSpec = field(default_factory=LiftGrabberSpec)
+    lid: LidSpec = field(default_factory=LidSpec)
+    # Edge Mount modifier (projecting label + screw mounting), same reasoning:
+    # trailing and inert unless switched on. Last so every older positional
+    # BoxSpec call keeps its meaning.
+    edge_mount: EdgeMountSpec = field(default_factory=EdgeMountSpec)
 
     def __post_init__(self) -> None:
         values = {
@@ -1432,7 +1543,7 @@ def make_box(spec: BoxSpec) -> trimesh.Trimesh:
     grabbers = make_lift_grabbers(spec)
     additions = [*bumps, *grabbers]
     result = union([shell, *additions]) if additions else shell
-    if getattr(getattr(spec, "stack", None), "enabled", False):
+    if vertical_stack_enabled(spec) or lid_enabled(spec):
         # Imported here: organizer_stack builds on the engine, not the other way
         # round, so importing it at module scope would close a cycle.
         from organizer_stack import stack_body_adders, stack_body_cutters
@@ -1462,7 +1573,7 @@ def make_box(spec: BoxSpec) -> trimesh.Trimesh:
                 raise RuntimeError("stack snap detents did not join the body")
             result = solids[0]
     result.remove_unreferenced_vertices()
-    if not getattr(getattr(spec, "stack", None), "enabled", False):
+    if not vertical_stack_enabled(spec) and not lid_enabled(spec):
         result.merge_vertices()
     return result
 

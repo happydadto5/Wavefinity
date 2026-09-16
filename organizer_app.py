@@ -21,6 +21,8 @@ from organizer_engine import (
     B4BSpec,
     BoxSpec,
     ConnectorSpec,
+    EdgeMountSpec,
+    LidSpec,
     StackSpec,
     LiftGrabberSpec,
     DEFAULT_BASE_THICKNESS,
@@ -51,6 +53,9 @@ from organizer_engine import (
     make_lift_grabbers,
     lift_grabber_keep_outs,
     lift_grabber_summary,
+    lid_enabled,
+    lid_spec,
+    lid_stackable,
     placed_label_outline,
     preview_rings,
     make_box,
@@ -68,10 +73,16 @@ from organizer_engine import (
     top_label_zone,
     translated,
     union,
+    difference,
     validate_side_fit,
     validate_3mf,
     export_object_groups_3mf,
     validate_object_groups_3mf,
+)
+from organizer_edge_mount import (
+    apply_edge_mount_structure,
+    edge_mount_summary,
+    edge_mount_text_object,
 )
 from organizer_b4b import (
     b4b_build_print_objects,
@@ -80,6 +91,7 @@ from organizer_b4b import (
     validate_b4b_design,
 )
 from organizer_stack import (
+    make_lid_parts,
     make_stack_lid,
     normalize_stack_settings,
     stack_effective_box,
@@ -109,6 +121,7 @@ from organizer_inserts import (
     build_features,
     build_texts,
     connector_keep_out,
+    divider_cells,
     feature_footprint,
     feature_definitions,
     insert_footprint,
@@ -414,16 +427,44 @@ def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
     return name + suffix
 
 
-def stack_lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
-    """``Stack Lid 16 x 48 Driver Rack.3mf`` - the bin's own snap-in lid."""
+def lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+    """The ordinary bin's matching removable lid."""
     effective = stack_effective_box(box)
-    name = f"Stack Lid {box.x:g} x {box.y:g}"
+    name = f"{'Stack Lid' if lid_stackable(box) else 'Handled Lid'} {box.x:g} x {box.y:g}"
     if not math.isclose(effective.wall, DEFAULT_WALL, abs_tol=1e-9):
         name += f" Wall {effective.wall:g}mm"
     tidy = clean_label(part)
     if tidy:
         name += f" {tidy}"
     return name + suffix
+
+
+def stack_lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+    """Compatibility name for callers of the former stack-only helper."""
+    return lid_filename(box, part, suffix)
+
+
+def lid_label_regions(
+    box: BoxSpec, layout: Layout,
+) -> list[tuple[str, tuple[float, float, float, float]]]:
+    """Resolve lid labels from the Divider's authoritative compartments."""
+    spec = lid_spec(box)
+    if not spec.label_enabled:
+        return []
+    divider = next((one for one in layout.features if one.kind == "divider"), None)
+    if divider is None:
+        return []
+    cells = divider_cells(stack_effective_box(box), divider, base_height(stack_effective_box(box), layout.mode))
+    columns = max((cell.column_end for cell in cells), default=0)
+    labels = list(spec.division_labels)
+    regions: list[tuple[str, tuple[float, float, float, float]]] = []
+    for cell in cells:
+        index = cell.row * columns + cell.column
+        text = labels[index] if index < len(labels) else ""
+        regions.append((str(text or ""), (
+            cell.zone.x0, cell.zone.y0, cell.zone.x1, cell.zone.y1,
+        )))
+    return regions
 
 
 def insert_filename(
@@ -766,24 +807,36 @@ def preview_geometry(
     geometry: list[tuple[list[tuple[float, float, float]], str,
                          tuple[float, float, float], int, str | None]] = []
 
-    count = len(outer)
-    for index in range(count):
-        a, b = outer[index], outer[(index + 1) % count]
-        c, d = cavity[index], cavity[(index + 1) % count]
-        run = (b[0] - a[0], b[1] - a[1])
-        outward = (run[1], -run[0], 0.0)
-        inward = (-run[1], run[0], 0.0)
-        geometry.append(([(a[0], a[1], 0.0), (b[0], b[1], 0.0),
-                          (b[0], b[1], rim_z), (a[0], a[1], rim_z)],
-                         "outside", outward, 0, None))
-        geometry.append(([(c[0], c[1], floor_z), (d[0], d[1], floor_z),
-                          (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
-                         "inside", inward, 0, None))
-        geometry.append(([(a[0], a[1], rim_z), (b[0], b[1], rim_z),
-                          (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
-                         "rim", (0.0, 0.0, 1.0), 0, None))
-    geometry.append(([(*point, floor_z) for point in floor_cavity],
-                     "floor", (0.0, 0.0, 1.0), 1, None))
+    if box.edge_mount.active:
+        # The fast wall/floor/rim quads below approximate the shell; they
+        # cannot show a hole. Edge Mount changes the shell's real geometry
+        # (a projecting plate, screw holes, driver-access passages), so this
+        # rare case swaps in the same accurate solid body export uses -
+        # still drawn through the ordinary mesh-preview path, so no renderer
+        # change is needed. Interior fused features are not baked into this
+        # preview body, so a fused holder crossing the access tunnel is not
+        # shown breached here the way the final export breaches it.
+        edge_body = apply_edge_mount_structure(box, make_box(box))
+        geometry.extend(_mesh_preview_geometry(edge_body, "outside"))
+    else:
+        count = len(outer)
+        for index in range(count):
+            a, b = outer[index], outer[(index + 1) % count]
+            c, d = cavity[index], cavity[(index + 1) % count]
+            run = (b[0] - a[0], b[1] - a[1])
+            outward = (run[1], -run[0], 0.0)
+            inward = (-run[1], run[0], 0.0)
+            geometry.append(([(a[0], a[1], 0.0), (b[0], b[1], 0.0),
+                              (b[0], b[1], rim_z), (a[0], a[1], rim_z)],
+                             "outside", outward, 0, None))
+            geometry.append(([(c[0], c[1], floor_z), (d[0], d[1], floor_z),
+                              (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
+                             "inside", inward, 0, None))
+            geometry.append(([(a[0], a[1], rim_z), (b[0], b[1], rim_z),
+                              (d[0], d[1], rim_z), (c[0], c[1], rim_z)],
+                             "rim", (0.0, 0.0, 1.0), 0, None))
+        geometry.append(([(*point, floor_z) for point in floor_cavity],
+                         "floor", (0.0, 0.0, 1.0), 1, None))
 
     tidy = clean_label(label)
     location = label_position(label_location)
@@ -989,6 +1042,17 @@ def preview_geometry(
                     geometry.append(([(x, y, label_z) for x, y in ring.coords],
                                      "label_hole", (0.0, 0.0, 1.0), 3, None))
 
+    edge_mount_meta = None
+    if box.edge_mount.active:
+        edge_mount_meta = edge_mount_summary(box)
+        try:
+            edge_text = edge_mount_text_object(box)
+        except ValueError:
+            edge_text = None
+        if edge_text is not None:
+            _edge_label, edge_mesh, _edge_raised = edge_text
+            geometry.extend(_mesh_preview_geometry(edge_mesh, "label"))
+
     inside_x, inside_y = box.usable_opening
     return {
         "geometry": geometry,
@@ -1001,6 +1065,7 @@ def preview_geometry(
         "customization_zones": tuple(reserved),
         "label_outline": label_outline_coords,
         "label_meta": label_meta,
+        "edge_mount": edge_mount_meta,
         # Where each text interior part ended up, so the browser can show the
         # resolved letter height an auto or zone-fitted one landed on.
         "text_meta": tuple(
@@ -1299,7 +1364,19 @@ def generate_organizer_files(
         if tidy:
             body, ledge_inlay = make_top_labelled_box(box, tidy, body, side)
             inlays.append((tidy, ledge_inlay, False))
+        # Edge Mount's plate and screw/access cuts apply to the completed
+        # shell (fused features, scoop and the rim ledge already on it), so
+        # the driver-access cut also clears any fused geometry blocking it.
+        body = apply_edge_mount_structure(box, body)
         reported = apply_texts(body, texts)
+        edge_text = edge_mount_text_object(box)
+        if edge_text is not None:
+            _edge_label, edge_mesh, edge_raised = edge_text
+            if not edge_raised:
+                reported = difference([reported, edge_mesh])
+                reported.remove_unreferenced_vertices()
+                reported.merge_vertices()
+            inlays.append(edge_text)
         output_dir.mkdir(parents=True, exist_ok=True)
         if inlays:
             written = export_text_body_3mf(
@@ -1330,18 +1407,31 @@ def generate_organizer_files(
         )
         reported_insert = apply_texts(insert, texts)
         output_dir.mkdir(parents=True, exist_ok=True)
-        # The rim label belongs to the box; the floor text belongs to the
-        # insert it is sunk into.
+        # The rim label and Edge Mount belong to the box; the floor text
+        # belongs to the insert it is sunk into. Edge Mount's plate/cuts
+        # apply to the box shell only - never to the removable insert.
+        body = plain_box
+        box_inlays: list[tuple[str, trimesh.Trimesh, bool]] = []
         if tidy:
-            pocketed_box, box_inlay = make_top_labelled_box(box, tidy, plain_box, side)
-            export_labelled_box(
-                pocketed_box, box_inlay, box_output,
-                box_output.stem, tidy,
+            body, box_inlay = make_top_labelled_box(box, tidy, body, side)
+            box_inlays.append((tidy, box_inlay, False))
+        body = apply_edge_mount_structure(box, body)
+        edge_text = edge_mount_text_object(box)
+        if edge_text is not None:
+            _edge_label, edge_mesh, edge_raised = edge_text
+            if not edge_raised:
+                body = difference([body, edge_mesh])
+                body.remove_unreferenced_vertices()
+                body.merge_vertices()
+            box_inlays.append(edge_text)
+        reported_box = body
+        if box_inlays:
+            export_text_body_3mf(
+                reported_box, [(name, mesh) for name, mesh, _raised in box_inlays],
+                box_output, box_output.stem,
             )
-            reported_box = pocketed_box
         else:
-            export_mesh(plain_box, box_output, "wavy_box")
-            reported_box = plain_box
+            export_mesh(reported_box, box_output, "wavy_box")
         if texts:
             written = export_text_body_3mf(
                 reported_insert, [(name, mesh) for name, mesh, _raised in texts],
@@ -1365,10 +1455,23 @@ def generate_organizer_files(
         text_report(box, one, text_surface) for one in layout.features if is_text(one)
     ]
     result["customizations"] = {"scoop": scoop, "label_position": location}
-    if stack_spec(stack_request).mode == "lid":
-        lid_output = _resolve_file(stack_lid_filename, stack_request, part_name)
-        export_mesh(make_stack_lid(stack_request), lid_output, "stack_lid")
-        result["stack_lid"] = _part_result(lid_output, None)
+    if box.edge_mount.active:
+        result["edge_mount"] = edge_mount_summary(box)
+    if lid_enabled(stack_request):
+        lid_output = _resolve_file(lid_filename, stack_request, part_name)
+        lid, lid_texts = make_lid_parts(
+            stack_request, lid_label_regions(stack_request, layout),
+        )
+        if lid_texts:
+            written = export_text_body_3mf(
+                lid, [(text, mesh) for text, mesh, _raised in lid_texts],
+                lid_output, "lid",
+            )
+        else:
+            written = []
+            export_mesh(lid, lid_output, "lid")
+        result["lid"] = _part_result(lid_output, None)
+        result["lid"]["text_objects"] = written
     if stack_enabled(stack_request):
         result["stack"] = stack_summary(stack_request)
     if keep_log:
@@ -1377,6 +1480,8 @@ def generate_organizer_files(
             out_files.append(Path(str(result["box"]["output"])))
         if "insert" in result and isinstance(result["insert"], dict) and "output" in result["insert"]:
             out_files.append(Path(str(result["insert"]["output"])))
+        if "lid" in result and isinstance(result["lid"], dict) and "output" in result["lid"]:
+            out_files.append(Path(str(result["lid"]["output"])))
         # Inventory stores the requested stack-module height.  The drawer adds
         # the exposed top engagement depth when checking physical clearance.
         log_file = log_bin_to_folder(
@@ -1491,7 +1596,7 @@ def inventory_bin_record(
     else:
         phys_x, phys_y, phys_z = box.x, box.y, box.z
 
-    if stack_enabled(box):
+    if stack_enabled(box) or lid_enabled(box):
         wall = stack_effective_box(box).wall
     else:
         wall = box.wall
@@ -1506,7 +1611,10 @@ def inventory_bin_record(
         "stack": (
             b4b_stack_mode
             if b4b_stack_mode is not None
-            else getattr(getattr(box, "stack", None), "mode", "none")
+            else (
+                "lid" if lid_stackable(box)
+                else getattr(getattr(box, "stack", None), "mode", "none")
+            )
         ),
         "wall": wall,
     }
@@ -1902,6 +2010,11 @@ def design_to_dict(
     ``text`` interior parts - one per label, any number of them - so there is
     nothing for it here.
     """
+    # Canonicalize the former stack.mode="lid" representation. It remains
+    # readable, but new files always carry a dedicated lid block.
+    legacy_lid = lid_spec(box)
+    if getattr(box.stack, "mode", "none") == "lid":
+        box = replace(box, stack=StackSpec(), lid=legacy_lid)
     box = normalize_stack_settings(box)
     b4b = box.b4b.normalised()
     box_block = {
@@ -1934,8 +2047,23 @@ def design_to_dict(
             "version": b4b.version,
         }
     stack = getattr(box, "stack", None) or StackSpec()
-    if stack.enabled:
+    if stack.mode == "direct":
         box_block["stack"] = {"mode": stack.mode}
+    lid = lid_spec(box)
+    if lid.enabled:
+        box_block["lid"] = {
+            "enabled": True,
+            "stackable": lid.stackable,
+            "thickness": lid.thickness,
+            "label_enabled": lid.label_enabled,
+            "label_style": lid.label_style,
+            "label_orientation": lid.label_orientation,
+            "label_text": lid.label_text,
+            "division_labels": list(lid.division_labels),
+            "handle_type": lid.handle_type,
+            "handle_size": lid.handle_size,
+            "handle_position": lid.handle_position,
+        }
     grabbers = getattr(box, "lift_grabbers", None) or LiftGrabberSpec()
     if grabbers.enabled:
         box_block["lift_grabbers"] = {
@@ -1943,13 +2071,34 @@ def design_to_dict(
             "size": grabbers.size,
             "location": grabbers.location,
         }
+    edge_mount = getattr(box, "edge_mount", None) or EdgeMountSpec()
+    if edge_mount.active:
+        box_block["edge_mount"] = {
+            "side": edge_mount.side,
+            "label_enabled": edge_mount.label_enabled,
+            "label_text": edge_mount.label_text,
+            "label_projection_mm": edge_mount.label_projection_mm,
+            "label_length_mode": edge_mount.label_length_mode,
+            "label_thickness_mm": edge_mount.label_thickness_mm,
+            "label_raised": edge_mount.label_raised,
+            "label_text_depth_mm": edge_mount.label_text_depth_mm,
+            "label_flip": edge_mount.label_flip,
+            "holes_enabled": edge_mount.holes_enabled,
+            "hole_count": edge_mount.hole_count,
+            "hole_orientation": edge_mount.hole_orientation,
+            "screw_diameter_mm": edge_mount.screw_diameter_mm,
+            "access_diameter_mm": edge_mount.access_diameter_mm,
+            "top_offset_mm": edge_mount.top_offset_mm,
+            "hole_spacing_mm": edge_mount.hole_spacing_mm,
+        }
     return {
         # Version 3 only when B4B is on. Version 3 changes B4B x/y from the
         # physical outside to the exact requested child field, so older builds
         # reject a B4B design instead of silently loading it as an ordinary bin.
         # Version 4 carried stacking with Z as detached closed height. Version
-        # 5 makes Z the authoritative stack-module/pitch height.
-        "version": 5 if stack.enabled else (3 if b4b.enabled else 1),
+        # 5 makes Z the authoritative stack-module/pitch height. Version 6
+        # separates ordinary lids from direct vertical stacking.
+        "version": 6 if (stack.mode == "direct" or lid.enabled) else (3 if b4b.enabled else 1),
         "box": box_block,
         "label": label,
         "label_position": label_position(label_location),
@@ -1963,13 +2112,35 @@ def design_from_dict(
     data: dict, *, validate_layout: bool = True
 ) -> tuple[BoxSpec, Layout, str, str, str, bool]:
     design_version = data.get("version", 1)
-    if design_version not in (1, 2, 3, 4, 5):
+    if design_version not in (1, 2, 3, 4, 5, 6):
         raise ValueError(f"unsupported design version {data.get('version')!r}")
     raw = data["box"]
     stack_raw = raw.get("stack")
     stack = StackSpec()
+    legacy_stack_mode = "none"
     if isinstance(stack_raw, dict) and stack_raw.get("mode"):
-        stack = StackSpec(mode=str(stack_raw["mode"]))
+        legacy_stack_mode = str(stack_raw["mode"])
+        if legacy_stack_mode != "lid":
+            stack = StackSpec(mode=legacy_stack_mode)
+    lid_raw = raw.get("lid")
+    lid = LidSpec(enabled=True, stackable=True) if legacy_stack_mode == "lid" else LidSpec()
+    if isinstance(lid_raw, dict) and bool(lid_raw.get("enabled", False)):
+        raw_labels = lid_raw.get("division_labels", ())
+        if not isinstance(raw_labels, (list, tuple)):
+            raise ValueError("lid division labels must be a list")
+        lid = LidSpec(
+            enabled=True,
+            stackable=bool(lid_raw.get("stackable", False)),
+            thickness=str(lid_raw.get("thickness", "thin")),
+            label_enabled=bool(lid_raw.get("label_enabled", False)),
+            label_style=str(lid_raw.get("label_style", "flush")),
+            label_orientation=str(lid_raw.get("label_orientation", "horizontal")),
+            label_text=str(lid_raw.get("label_text", "")),
+            division_labels=tuple(str(value or "") for value in raw_labels),
+            handle_type=str(lid_raw.get("handle_type", "knob")),
+            handle_size=str(lid_raw.get("handle_size", "medium")),
+            handle_position=str(lid_raw.get("handle_position", "middle")),
+        )
     grabbers_raw = raw.get("lift_grabbers")
     lift_grabbers = LiftGrabberSpec()
     if isinstance(grabbers_raw, dict) and bool(grabbers_raw.get("enabled", False)):
@@ -1977,6 +2148,29 @@ def design_from_dict(
             enabled=True,
             size=str(grabbers_raw.get("size", "medium")),
             location=str(grabbers_raw.get("location", "sides")),
+        )
+    edge_mount_raw = raw.get("edge_mount")
+    edge_mount = EdgeMountSpec()
+    if isinstance(edge_mount_raw, dict):
+        access_raw = edge_mount_raw.get("access_diameter_mm")
+        spacing_raw = edge_mount_raw.get("hole_spacing_mm")
+        edge_mount = EdgeMountSpec(
+            side=str(edge_mount_raw.get("side", "front")),
+            label_enabled=bool(edge_mount_raw.get("label_enabled", False)),
+            label_text=str(edge_mount_raw.get("label_text", "")),
+            label_projection_mm=float(edge_mount_raw.get("label_projection_mm", 50.0)),
+            label_length_mode=str(edge_mount_raw.get("label_length_mode", "full")),
+            label_thickness_mm=float(edge_mount_raw.get("label_thickness_mm", 2.0)),
+            label_raised=bool(edge_mount_raw.get("label_raised", False)),
+            label_text_depth_mm=float(edge_mount_raw.get("label_text_depth_mm", TEXT_DEPTH)),
+            label_flip=bool(edge_mount_raw.get("label_flip", False)),
+            holes_enabled=bool(edge_mount_raw.get("holes_enabled", False)),
+            hole_count=int(edge_mount_raw.get("hole_count", 2)),
+            hole_orientation=str(edge_mount_raw.get("hole_orientation", "horizontal")),
+            screw_diameter_mm=float(edge_mount_raw.get("screw_diameter_mm", 4.0)),
+            access_diameter_mm=(float(access_raw) if access_raw is not None else None),
+            top_offset_mm=float(edge_mount_raw.get("top_offset_mm", 12.7)),
+            hole_spacing_mm=(float(spacing_raw) if spacing_raw is not None else None),
         )
     b4b_raw = raw.get("b4b")
     b4b = B4BSpec()
@@ -2044,8 +2238,8 @@ def design_from_dict(
     requested_z = float(raw["z"])
     # Preserve v4 physical geometry exactly: its Z was the detached closed
     # height, which equals the v5 module height plus the engagement depth.
-    if design_version == 4 and stack.enabled:
-        requested_z -= stack_step_depth(BoxSpec(stack=stack))
+    if design_version == 4 and (stack.enabled or lid.stackable):
+        requested_z -= stack_step_depth(BoxSpec(stack=stack, lid=lid))
     box = BoxSpec(
         x, y, requested_z,
         wall,
@@ -2057,9 +2251,13 @@ def design_from_dict(
         b4b=b4b,
         stack=stack,
         lift_grabbers=lift_grabbers,
+        lid=lid,
+        edge_mount=edge_mount,
     )
     box = normalize_stack_settings(box)
     if b4b.enabled:
+        if lid.enabled or stack.enabled:
+            raise ValueError("Bin for Bins cannot use the ordinary Lid & Stacking part")
         # A B4B interior is reserved for child bins.  Imported/saved JSON is
         # authoritative user data: if it still carries interior features, a
         # non-fused mode or the flat-inside band, that is a real

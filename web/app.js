@@ -66,6 +66,10 @@ const state = {
   inventoryEnabled: true,
   keepLog: false,
   connector: {},
+  joinMode: "side",
+  lastOrdinaryDesign: null,
+  lastBaseTrimDesign: null,
+  baseTrimSourceLayout: null,
   layoutDrag: null,
   layoutTransform: null,
   // Interactive dimension-label handles, rebuilt every overlay render - not
@@ -194,6 +198,7 @@ const COLORS = {
   b4b_body: "#8ea8b2", b4b_lid: "#6c909b", b4b_hinge: "#5f8794",
   b4b_latch: "#c98a4a", b4b_stack: "#9d86c8", b4b_label: "#315766",
   b4b_label_text: "#e8efef", b4b_handle: "#6b9aa7",
+  base_trim: "#397f87",
 };
 const INSERT_TINT = "#c2a075";
 const INSERT_TINT_MIX = .5;
@@ -549,6 +554,148 @@ function syncLiftGrabberControls() {
   if ($("#lift-grabber-location-setting")) $("#lift-grabber-location-setting").hidden = !enabled;
 }
 
+function populateEdgeMountChoices() {
+  const rules = state.catalog?.edge_mount || {};
+  const projectionSelect = $("#edge-mount-label-projection");
+  const thicknessSelect = $("#edge-mount-label-thickness");
+  if (projectionSelect && !projectionSelect.options.length) {
+    for (const choice of rules.projection_choices || []) {
+      projectionSelect.add(new Option(choice.label, choice.value));
+    }
+    projectionSelect.add(new Option("Custom", "custom"));
+  }
+  if (thicknessSelect && !thicknessSelect.options.length) {
+    for (const choice of rules.thickness_choices || []) {
+      thicknessSelect.add(new Option(choice.label, choice.value));
+    }
+    thicknessSelect.add(new Option("Custom", "custom"));
+  }
+}
+
+// Mirrors readLiftGrabberForm/readB4BForm: only resets an *existing* key to
+// defaults when both subsections are off, so a design that never touched
+// Edge Mount keeps no key at all and design_to_dict omits the block while
+// disabled. Both subsections' fields are always preserved together so
+// toggling one off never erases the other's settings.
+function readEdgeMountForm(design) {
+  design.box = design.box || {};
+  const labelEnabled = Boolean($("#edge-mount-label-enabled")?.checked);
+  const holesEnabled = Boolean($("#edge-mount-holes-enabled")?.checked);
+  if (!labelEnabled && !holesEnabled) {
+    if (design.box.edge_mount) design.box.edge_mount = { ...EDGE_MOUNT_DEFAULTS };
+    return;
+  }
+  const current = { ...EDGE_MOUNT_DEFAULTS, ...(design.box.edge_mount || {}) };
+  const projectionSelect = $("#edge-mount-label-projection");
+  const projection = projectionSelect?.value === "custom"
+    ? number($("#edge-mount-label-projection-mm")?.value, current.label_projection_mm)
+    : number(projectionSelect?.value, current.label_projection_mm);
+  const thicknessSelect = $("#edge-mount-label-thickness");
+  const thickness = thicknessSelect?.value === "custom"
+    ? number($("#edge-mount-label-thickness-mm")?.value, current.label_thickness_mm)
+    : number(thicknessSelect?.value, current.label_thickness_mm);
+  const accessMode = $("#edge-mount-access-mode")?.value || "auto";
+  const spacingMode = $("#edge-mount-spacing-mode")?.value || "auto";
+  design.box.edge_mount = {
+    side: $("#edge-mount-side")?.value || "front",
+    label_enabled: labelEnabled,
+    label_text: $("#edge-mount-label-text")?.value || "",
+    label_projection_mm: projection,
+    label_length_mode: $("#edge-mount-label-length-mode")?.value || "full",
+    label_thickness_mm: thickness,
+    label_raised: $("#edge-mount-label-style")?.value === "raised",
+    label_text_depth_mm: number($("#edge-mount-label-depth")?.value, current.label_text_depth_mm),
+    label_flip: Boolean($("#edge-mount-label-flip")?.checked),
+    holes_enabled: holesEnabled,
+    hole_count: number($("#edge-mount-hole-count")?.value, current.hole_count),
+    hole_orientation: $("#edge-mount-hole-orientation")?.value || "horizontal",
+    screw_diameter_mm: number($("#edge-mount-screw-diameter")?.value, current.screw_diameter_mm),
+    access_diameter_mm: accessMode === "custom"
+      ? number($("#edge-mount-access-diameter")?.value, resolvedEdgeMountAccessDiameter(current))
+      : null,
+    top_offset_mm: number($("#edge-mount-top-offset")?.value, current.top_offset_mm),
+    hole_spacing_mm: spacingMode === "custom"
+      ? number($("#edge-mount-spacing-mm")?.value, current.hole_spacing_mm || EDGE_MOUNT_DEFAULTS.top_offset_mm)
+      : null,
+  };
+}
+
+// Python remains authoritative for real validation/geometry; this is only
+// for the immediate "Auto: X mm" readout while typing.
+function resolvedEdgeMountAccessDiameter(edgeMount) {
+  if (edgeMount.access_diameter_mm !== null && edgeMount.access_diameter_mm !== undefined) {
+    return number(edgeMount.access_diameter_mm, 8);
+  }
+  return Math.max(8, number(edgeMount.screw_diameter_mm, 4) * 2);
+}
+
+function syncEdgeMountControls() {
+  const edgeMount = { ...EDGE_MOUNT_DEFAULTS, ...(state.design?.box?.edge_mount || {}) };
+  if ($("#edge-mount-side")) $("#edge-mount-side").value = edgeMount.side;
+  if ($("#edge-mount-label-enabled")) $("#edge-mount-label-enabled").checked = edgeMount.label_enabled;
+  if ($("#edge-mount-holes-enabled")) $("#edge-mount-holes-enabled").checked = edgeMount.holes_enabled;
+  if ($("#edge-mount-label-text")) $("#edge-mount-label-text").value = edgeMount.label_text;
+  if ($("#edge-mount-label-length-mode")) $("#edge-mount-label-length-mode").value = edgeMount.label_length_mode;
+  if ($("#edge-mount-label-style")) $("#edge-mount-label-style").value = edgeMount.label_raised ? "raised" : "flush";
+  if ($("#edge-mount-label-depth")) $("#edge-mount-label-depth").value = fmt(edgeMount.label_text_depth_mm);
+  if ($("#edge-mount-label-flip")) $("#edge-mount-label-flip").checked = edgeMount.label_flip;
+  if ($("#edge-mount-hole-count")) $("#edge-mount-hole-count").value = String(edgeMount.hole_count);
+  if ($("#edge-mount-hole-orientation")) $("#edge-mount-hole-orientation").value = edgeMount.hole_orientation;
+  if ($("#edge-mount-screw-diameter")) $("#edge-mount-screw-diameter").value = fmt(edgeMount.screw_diameter_mm);
+  if ($("#edge-mount-top-offset")) $("#edge-mount-top-offset").value = fmt(edgeMount.top_offset_mm);
+
+  const projectionSelect = $("#edge-mount-label-projection");
+  if (projectionSelect) {
+    const known = [...projectionSelect.options].some(
+      option => option.value !== "custom" && number(option.value) === number(edgeMount.label_projection_mm)
+    );
+    projectionSelect.value = known ? fmt(edgeMount.label_projection_mm) : "custom";
+    if ($("#edge-mount-label-projection-custom-row")) {
+      $("#edge-mount-label-projection-custom-row").hidden = known;
+    }
+    if ($("#edge-mount-label-projection-mm")) $("#edge-mount-label-projection-mm").value = fmt(edgeMount.label_projection_mm);
+  }
+  const thicknessSelect = $("#edge-mount-label-thickness");
+  if (thicknessSelect) {
+    const known = [...thicknessSelect.options].some(
+      option => option.value !== "custom" && number(option.value) === number(edgeMount.label_thickness_mm)
+    );
+    thicknessSelect.value = known ? fmt(edgeMount.label_thickness_mm) : "custom";
+    if ($("#edge-mount-label-thickness-custom-row")) {
+      $("#edge-mount-label-thickness-custom-row").hidden = known;
+    }
+    if ($("#edge-mount-label-thickness-mm")) $("#edge-mount-label-thickness-mm").value = fmt(edgeMount.label_thickness_mm);
+  }
+  const accessMode = edgeMount.access_diameter_mm === null || edgeMount.access_diameter_mm === undefined ? "auto" : "custom";
+  if ($("#edge-mount-access-mode")) $("#edge-mount-access-mode").value = accessMode;
+  if ($("#edge-mount-access-custom-row")) $("#edge-mount-access-custom-row").hidden = accessMode !== "custom";
+  if ($("#edge-mount-access-diameter")) {
+    $("#edge-mount-access-diameter").value = fmt(
+      accessMode === "custom" ? edgeMount.access_diameter_mm : resolvedEdgeMountAccessDiameter(edgeMount)
+    );
+  }
+  if ($("#edge-mount-access-auto-note")) {
+    $("#edge-mount-access-auto-note").hidden = accessMode === "custom";
+    $("#edge-mount-access-auto-note").textContent = `Auto: ${fmt(resolvedEdgeMountAccessDiameter(edgeMount))} mm`;
+  }
+  const spacingMode = edgeMount.hole_spacing_mm === null || edgeMount.hole_spacing_mm === undefined ? "auto" : "custom";
+  if ($("#edge-mount-spacing-mode")) $("#edge-mount-spacing-mode").value = spacingMode;
+  if ($("#edge-mount-spacing-custom-row")) $("#edge-mount-spacing-custom-row").hidden = spacingMode !== "custom";
+  if (spacingMode === "custom" && $("#edge-mount-spacing-mm")) {
+    $("#edge-mount-spacing-mm").value = fmt(edgeMount.hole_spacing_mm);
+  }
+
+  if ($("#edge-mount-label-panel")) $("#edge-mount-label-panel").hidden = !edgeMount.label_enabled;
+  if ($("#edge-mount-holes-panel")) $("#edge-mount-holes-panel").hidden = !edgeMount.holes_enabled;
+  if ($("#edge-mount-hole-orientation-row")) $("#edge-mount-hole-orientation-row").hidden = number(edgeMount.hole_count) <= 1;
+}
+
+function applyEdgeMountVisibility() {
+  const panel = $("#edge-mount-panel");
+  if (!panel) return;
+  panel.hidden = b4bEnabled() || baseTrimEnabled();
+}
+
 function wallPresetChoices() {
   const rules = state.catalog?.wall_rules || {};
   return Array.isArray(rules.choices) && rules.choices.length
@@ -567,7 +714,8 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
   const rules = state.catalog?.wall_rules || {};
   // One place decides the floor a mode *requires*. Stacking and B4B both carry
   // real load paths through the wall; an ordinary bin does not.
-  const stacking = (box?.stack?.mode || "none") !== "none";
+  const stacking = (box?.stack?.mode || "none") === "direct" || Boolean(box?.lid?.enabled && box.lid.stackable);
+  const hasLid = Boolean(box?.lid?.enabled);
   const stackMin = stacking ? number(state.catalog?.stack_rules?.min_wall_mm, 1.2) : -Infinity;
   const b4bMin = box?.b4b?.enabled ? B4B_MIN_WALL : -Infinity;
   const modeMin = Math.max(stackMin, b4bMin);
@@ -575,7 +723,7 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
   const choices = allChoices.filter(choice => number(choice.value) >= modeMin - 1e-9);
   const wall = number(box?.wall, rules.default_mm ?? 0.8);
   const value = fmt(wall);
-  const standard = box?.standard_walls !== false && !stacking && !box?.b4b?.enabled;
+  const standard = box?.standard_walls !== false && !stacking && !hasLid && !box?.b4b?.enabled;
   const standardValue = fmt(rules.default_mm ?? 0.8);
   const numericChoices = choices.filter(choice => fmt(choice.value) !== standardValue);
   const isDiscrete = numericChoices.some(choice => fmt(choice.value) === value);
@@ -583,7 +731,7 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
   const signature = JSON.stringify({ numericChoices, customValue, modeMin, standard });
   if (select.dataset.choices !== signature) {
     select.replaceChildren();
-    if (!stacking && !box?.b4b?.enabled) select.add(new Option("Standard", "standard"));
+    if (!stacking && !hasLid && !box?.b4b?.enabled) select.add(new Option("Standard", "standard"));
     select.append(...numericChoices.map(choice => new Option(
       `${number(choice.value).toFixed(1)} mm — ${choice.label}`,
       fmt(choice.value),
@@ -630,14 +778,16 @@ function baseRequiredMin(box) {
       ? number(state.catalog?.b4b_rules?.stack_min_base_mm, 2.8)
       : -Infinity;
   }
-  const mode = box?.stack?.mode || "none";
+  const mode = (box?.stack?.mode || "none") === "direct"
+    ? "direct" : box?.lid?.enabled && box.lid.stackable ? "lid" : "none";
   if (mode === "none") return -Infinity;
   return stackBaseMinForWall(mode, box?.wall);
 }
 
 function baseRequiredLabel(box) {
   if (box?.b4b?.enabled) return "Required for stacking";
-  const mode = box?.stack?.mode || "none";
+  const mode = (box?.stack?.mode || "none") === "direct"
+    ? "direct" : box?.lid?.enabled && box.lid.stackable ? "lid" : "none";
   if (mode === "direct") return "Required for direct stacking";
   if (mode === "lid") return "Required for lid stacking";
   return "";
@@ -664,8 +814,8 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
     && !choices.some(choice => Math.abs(number(choice.value) - modeMin) < 1e-9);
   const base = number(box?.base_thickness, rules.default_mm ?? 0.6);
   const value = fmt(base);
-  const standard = box?.standard_base !== false && !box?.b4b?.enabled
-    && (box?.stack?.mode || "none") === "none";
+  const verticalStack = (box?.stack?.mode || "none") === "direct" || Boolean(box?.lid?.enabled && box.lid.stackable);
+  const standard = box?.standard_base !== false && !box?.b4b?.enabled && !verticalStack;
   const standardValue = fmt(rules.default_mm ?? 0.6);
   const numericChoices = choices.filter(choice => fmt(choice.value) !== standardValue);
   const knownValues = numericChoices.map(choice => fmt(choice.value));
@@ -674,7 +824,7 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
   const signature = JSON.stringify({ numericChoices, needsRequiredOption, modeMin, customValue, standard });
   if (select.dataset.choices !== signature) {
     select.replaceChildren();
-    if (!box?.b4b?.enabled && (box?.stack?.mode || "none") === "none") {
+    if (!box?.b4b?.enabled && !verticalStack) {
       select.add(new Option("Standard", "standard"));
     }
     select.append(...numericChoices.map(choice => new Option(
@@ -699,7 +849,7 @@ function syncBaseControls() {
 }
 
 function syncWallControls() {
-  const stacking = stackMode() !== "none";
+  const stacking = stackMode() !== "none" || Boolean(state.design?.box?.lid?.enabled);
   const rules = state.catalog?.wall_rules || {};
   $("#wall-thickness-setting").hidden = false;
   // Warn on the thinnest wall a new design can actually be given. This used to
@@ -718,6 +868,13 @@ function syncWallControls() {
 }
 
 function syncForm() {
+  applyBaseTrimVisibility();
+  applyEdgeMountVisibility();
+  if (baseTrimEnabled()) {
+    syncBaseTrimForm();
+    syncJoiningControls();
+    return;
+  }
   normalizeStackSettings(state.design);
   const { box, layout } = state.design;
   ensureRimFeatureInLayout();
@@ -746,6 +903,8 @@ function syncForm() {
   $("#lift-grabber-size").value = box.lift_grabbers?.enabled ? (box.lift_grabbers?.size || "medium") : "no";
   $("#lift-grabber-location").value = box.lift_grabbers?.location || "sides";
   syncLiftGrabberControls();
+  populateEdgeMountChoices();
+  syncEdgeMountControls();
   if (!state.design.part_name || !state.design.part_name.trim()) {
     const labelCandidate = state.design.label || state.design.b4b?.label_text || state.design.layout?.features?.find(f => f.kind === "text")?.options?.text;
     if (labelCandidate && !SIZE_LIKE_TEXT.test(labelCandidate)) {
@@ -775,7 +934,9 @@ function syncForm() {
   $("#connector-bin-b-height").value = fmt(state.connector.bin_b_height ?? box.z);
   $("#connector-height-mode").value = state.connector.different_heights ? "different" : "same";
   syncConnectorHeightControls();
+  syncLidForm();
   syncB4BForm();
+  syncJoiningControls();
   updateInteriorModeVisibility();
   renderPlaced();
 }
@@ -863,7 +1024,253 @@ const B4B_DEFAULTS = {
   latch_strength: "standard", lid_headroom_mm: 1, label_enabled: false, label_text: "",
   label_location: "top", front_label_style: "flat", stacking: false, handle: false,
 };
+const BASE_TRIM_DEFAULTS = {
+  width_mm: 6,
+  height_mm: 6,
+  join_type: "snap",
+  bed_x_mm: 256,
+  bed_y_mm: 256,
+};
 const LIFT_GRABBER_DEFAULTS = { enabled: false, size: "medium", location: "sides" };
+const EDGE_MOUNT_DEFAULTS = {
+  side: "front",
+  label_enabled: false,
+  label_text: "",
+  label_projection_mm: 50,
+  label_length_mode: "full",
+  label_thickness_mm: 2,
+  label_raised: false,
+  label_text_depth_mm: 0.4,
+  label_flip: false,
+  holes_enabled: false,
+  hole_count: 2,
+  hole_orientation: "horizontal",
+  screw_diameter_mm: 4,
+  access_diameter_mm: null,
+  top_offset_mm: 12.7,
+  hole_spacing_mm: null,
+};
+
+function baseTrimEnabled(design = state.design) {
+  return design?.design_kind === "base_trim";
+}
+
+function baseTrimRules() {
+  return { ...BASE_TRIM_DEFAULTS, ...(state.catalog?.base_trim_rules || {}) };
+}
+
+function storedPreference(key, fallback) {
+  if (!state.runtime.hosted) return state.catalog?.preferences?.[key] ?? fallback;
+  try {
+    const raw = localStorage.getItem(`wavefinity-${key.replaceAll("_", "-")}`);
+    return raw === null ? fallback : raw;
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function saveSimplePreference(key, value) {
+  if (state.runtime.hosted) {
+    try { localStorage.setItem(`wavefinity-${key.replaceAll("_", "-")}`, String(value)); } catch (_error) {}
+    return;
+  }
+  api("/api/preferences", { [key]: value }).catch(() => {});
+  if (state.catalog?.preferences) state.catalog.preferences[key] = value;
+}
+
+function makeBaseTrimDesign(fieldX = null, fieldY = null) {
+  const rules = baseTrimRules();
+  const unit = number(rules.unit_mm, state.catalog?.base_unit ?? 8);
+  const fallback = state.lastOrdinaryDesign?.box || state.catalog?.defaults?.design?.box || { x: 16, y: 48 };
+  const legal = value => Math.max(unit, Math.min(1200, Math.round(number(value, unit) / unit) * unit));
+  const bedX = number(storedPreference("base_trim_bed_x_mm", rules.default_bed_x_mm ?? 256), 256);
+  const bedY = number(storedPreference("base_trim_bed_y_mm", rules.default_bed_y_mm ?? 256), 256);
+  return {
+    version: 6,
+    design_kind: "base_trim",
+    box: {
+      x: legal(fieldX ?? fallback.x),
+      y: legal(fieldY ?? fallback.y),
+      z: number(rules.default_height_mm, 6),
+    },
+    base_trim: {
+      version: 1,
+      width_mm: number(rules.default_width_mm, 6),
+      join_type: "snap",
+      bed_x_mm: bedX,
+      bed_y_mm: bedY,
+      auto_size: false,
+    },
+    part_name: "",
+    layout: { version: 1, mode: "fused", snap: 1, features: [] },
+  };
+}
+
+function baseTrimState(design = state.design) {
+  const rules = baseTrimRules();
+  return {
+    version: 1,
+    width_mm: number(design?.base_trim?.width_mm, rules.default_width_mm ?? 6),
+    height_mm: number(design?.box?.z, rules.default_height_mm ?? 6),
+    join_type: design?.base_trim?.join_type || "snap",
+    bed_x_mm: number(design?.base_trim?.bed_x_mm, rules.default_bed_x_mm ?? 256),
+    bed_y_mm: number(design?.base_trim?.bed_y_mm, rules.default_bed_y_mm ?? 256),
+    auto_size: Boolean(design?.base_trim?.auto_size),
+  };
+}
+
+function renderBaseTrimReadout() {
+  if (!baseTrimEnabled()) return;
+  const unit = number(state.catalog?.base_trim_rules?.unit_mm, 8);
+  const trim = baseTrimState();
+  const ux = Math.round(number(state.design.box.x, unit) / unit);
+  const uy = Math.round(number(state.design.box.y, unit) / unit);
+  $("#base-trim-x-mm").textContent = `${fmt(ux * unit)} mm`;
+  $("#base-trim-y-mm").textContent = `${fmt(uy * unit)} mm`;
+  const margin = number(state.catalog?.base_trim_rules?.bed_edge_margin_mm, 10);
+  const effectiveX = trim.bed_x_mm - 2 * margin;
+  const effectiveY = trim.bed_y_mm - 2 * margin;
+  $("#base-trim-printable").textContent = `Printable area after ${fmt(margin)} mm edge clearance: ${fmt(effectiveX)} × ${fmt(effectiveY)} mm`;
+  const summary = state.preview?.base_trim;
+  const outer = summary?.outer_mm || [
+    state.design.box.x + number(state.catalog?.wall_rules?.mating_gap_mm, .25) + 2 * trim.width_mm,
+    state.design.box.y + number(state.catalog?.wall_rules?.mating_gap_mm, .25) + 2 * trim.width_mm,
+  ];
+  const pieces = summary?.piece_count;
+  const join = summary?.join_label || ({ snap: "Snap tabs", dovetail: "Sliding dovetail", puzzle: "Puzzle joint" })[trim.join_type];
+  $("#base-trim-summary").innerHTML = [
+    `<div><strong>Inside field:</strong> ${ux}U × ${uy}U — ${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm</div>`,
+    `<div><strong>Outside footprint:</strong> ${fmt(outer[0])} × ${fmt(outer[1])} mm</div>`,
+    `<div><strong>Printable area:</strong> ${fmt(effectiveX)} × ${fmt(effectiveY)} mm</div>`,
+    `<div><strong>Pieces:</strong> ${pieces ?? "—"}${pieces > 1 ? ` — ${escapeHtml(join)}` : ""}</div>`,
+  ].join("");
+}
+
+function readBaseTrimForm(design = state.design) {
+  const unit = number(state.catalog?.base_trim_rules?.unit_mm, 8);
+  const unitsX = Math.max(1, Math.min(150, Math.round(number($("#base-trim-x-units").value, design.box.x / unit))));
+  const unitsY = Math.max(1, Math.min(150, Math.round(number($("#base-trim-y-units").value, design.box.y / unit))));
+  design.box.x = unitsX * unit;
+  design.box.y = unitsY * unit;
+  design.box.z = number($("#base-trim-height").value, design.box.z);
+  design.base_trim = {
+    version: 1,
+    width_mm: number($("#base-trim-width").value, design.base_trim?.width_mm ?? 6),
+    join_type: $("#base-trim-joint").value,
+    bed_x_mm: number($("#base-trim-bed-x").value, design.base_trim?.bed_x_mm ?? 256),
+    bed_y_mm: number($("#base-trim-bed-y").value, design.base_trim?.bed_y_mm ?? 256),
+    auto_size: Boolean(design.base_trim?.auto_size),
+  };
+  design.part_name = $("#part-name").value;
+  renderBaseTrimReadout();
+  return design;
+}
+
+function syncBaseTrimForm() {
+  const unit = number(state.catalog?.base_trim_rules?.unit_mm, 8);
+  const trim = baseTrimState();
+  $("#bin-type").value = "base-trim";
+  $("#base-trim-x-units").value = Math.round(state.design.box.x / unit);
+  $("#base-trim-y-units").value = Math.round(state.design.box.y / unit);
+  $("#base-trim-width").value = fmt(trim.width_mm);
+  $("#base-trim-height").value = fmt(trim.height_mm);
+  $("#base-trim-joint").value = trim.join_type;
+  $("#base-trim-bed-x").value = fmt(trim.bed_x_mm);
+  $("#base-trim-bed-y").value = fmt(trim.bed_y_mm);
+  $("#part-name").value = state.design.part_name || "";
+  $("#output-folder").value = state.runtime.hosted
+    ? (state.browserFolder?.name || "Select a folder...")
+    : state.output;
+  setFolderState(state.folderMode, state.activeSpace, state.inventoryEnabled, state.keepBinDefaults, state.spaceBinDefaults);
+  const source = typeof DL !== "undefined" && DL.baseTrimSource ? DL.baseTrimSource() : { ok: false, message: "Create and arrange bins in Space first." };
+  const auto = $("#base-trim-auto-size");
+  auto.disabled = !source.ok;
+  auto.title = source.ok ? "Size the field from the active Space" : source.message;
+  renderBaseTrimReadout();
+}
+
+function applyBaseTrimVisibility() {
+  const on = baseTrimEnabled();
+  const hide = (selector, hidden) => { const element = $(selector); if (element) element.hidden = hidden; };
+  hide("#base-trim-panel", !on);
+  hide("#ordinary-size-row", on);
+  hide(".mode-and-bin-options", on);
+  hide(".subheading-row", on);
+  hide("#lid-option", on);
+  hide(".palette-wrap", on);
+  hide(".placed-block-panel", on);
+  if (on) hide(".support-editor", true);
+  const connectorSection = document.querySelector('.control-section[data-section="connector"]');
+  if (connectorSection) connectorSection.hidden = on;
+  hide("#generate-all", on);
+  hide("#generate-connector", on);
+  hide("#generate-bin", false);
+  const inventory = $("#folder-inventory-toggle")?.closest("label");
+  if (inventory) inventory.hidden = on;
+  hide("#ordinary-preview-modes", on);
+  hide("#b4b-preview-modes", true);
+  hide("#b4b-panel", true);
+  const layoutTab = document.querySelector('.view-tab[data-view="2d"]');
+  if (layoutTab) layoutTab.hidden = false;
+  $("#part-name-label").textContent = on ? "Base Trim Name" : "Bin Name";
+  $("#generate-bin").textContent = on ? "Generate Base Trim" : "Generate Bin";
+  $("#print-bin").textContent = on
+    ? (state.runtime.hosted ? "Generate Base Trim" : "Print Base Trim")
+    : (state.runtime.hosted ? "Generate to Folder" : "Print to Bambu Studio");
+}
+
+function persistJoinMode() {
+  saveSimplePreference("default_join_mode", state.joinMode);
+}
+
+function syncJoiningControls() {
+  if (baseTrimEnabled()) state.joinMode = "base_trim";
+  if (!["side", "base_trim"].includes(state.joinMode)) state.joinMode = "side";
+  const select = $("#bin-join-mode");
+  if (select) select.value = state.joinMode;
+  const connectorless = state.joinMode === "base_trim";
+  const heightMode = $("#connector-height-mode")?.closest("label");
+  if (heightMode) heightMode.hidden = connectorless;
+  if (connectorless) {
+    $("#connector-bin-heights").hidden = true;
+    $("#connector-settings").hidden = true;
+  } else {
+    syncConnectorHeightControls();
+  }
+  if (!baseTrimEnabled() && !b4bEnabled()) {
+    $("#generate-all").hidden = false;
+    $("#generate-all").textContent = connectorless ? "Generate Bin" : "Generate Bin and Connectors";
+    $("#generate-bin").hidden = connectorless;
+    $("#generate-connector").hidden = connectorless;
+  }
+}
+
+async function autoSizeBaseTrimFromSpace() {
+  const source = typeof DL !== "undefined" && DL.baseTrimSource ? DL.baseTrimSource() : { ok: false, message: "Create and arrange bins in Space first." };
+  if (!source.ok) {
+    toast(source.message, true, 6500);
+    return;
+  }
+  await startBaseTrimFromSpace(source);
+}
+
+async function startBaseTrimFromSpace(source) {
+  if (!source?.ok) {
+    toast(source?.message || "Base Trim auto-size needs an arranged rectangle of bins.", true, 6500);
+    return;
+  }
+  if (!baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
+  state.design = makeBaseTrimDesign(source.field_x_mm, source.field_y_mm);
+  state.design.base_trim.auto_size = true;
+  state.baseTrimSourceLayout = clone(source.items || []);
+  state.joinMode = "base_trim";
+  persistJoinMode();
+  clearDraftSelection();
+  syncForm();
+  activatePreviewView("2d");
+  await refreshPreview();
+  toast(`Base Trim sized to ${source.units_x}U × ${source.units_y}U — ${fmt(source.field_x_mm)} × ${fmt(source.field_y_mm)} mm.`);
+}
 
 // Shared by updateDesignFromForm() and designHasChanges() so both compute the
 // same box.lift_grabbers from the live form. Mirrors readB4BForm/readStackForm:
@@ -959,6 +1366,7 @@ function applyB4BVisibility() {
   $("#b4b-panel").hidden = !on;
   const hide = (sel, hidden) => { const el = $(sel); if (el) el.hidden = hidden; };
   hide(".subheading-row", on);
+  hide("#lid-option", on);
   hide(".palette-wrap", on);
   // B4B shows its own All/Base/Lid group instead of the ordinary bin's
   // Bin/Interior/Xray toggles - the two mean different things and are never
@@ -1091,13 +1499,129 @@ function syncB4BForm() {
 }
 
 function stackMode() {
-  return state.design?.box?.stack?.mode || "none";
+  if ((state.design?.box?.stack?.mode || "none") === "direct") return "direct";
+  return state.design?.box?.lid?.enabled && state.design.box.lid.stackable ? "lid" : "none";
+}
+
+const LID_DEFAULTS = {
+  enabled: false, stackable: false, thickness: "thin",
+  label_enabled: false, label_style: "flush", label_orientation: "horizontal",
+  label_text: "", division_labels: [], handle_type: "knob",
+  handle_size: "medium", handle_position: "middle",
+};
+
+function lidState(design = state.design) {
+  return { ...LID_DEFAULTS, ...(design?.box?.lid || {}) };
+}
+
+function lidPartActive(design = state.design) {
+  return (design?.box?.stack?.mode || "none") === "direct" || Boolean(design?.box?.lid?.enabled);
+}
+
+function lidConfiguration(design = state.design) {
+  if ((design?.box?.stack?.mode || "none") === "direct") return "stackable_bin";
+  if (design?.box?.lid?.enabled) return design.box.lid.stackable ? "stackable_lid" : "handled_lid";
+  return "stackable_bin";
+}
+
+function lidDivider(design = state.design) {
+  return design?.layout?.features?.find(one => one.kind === "divider") || null;
+}
+
+function lidDivisionLabelsMeaningful(design = state.design) {
+  return Boolean(design?.box?.lid?.enabled && design.box.lid.label_enabled && lidDivider(design) &&
+    (design.box.lid.division_labels || []).some(value => String(value || "").trim()));
+}
+
+function dividerLockedByLidLabels(design = state.design) {
+  return lidDivisionLabelsMeaningful(design);
+}
+
+function dividerLockMessage() {
+  return "This divider layout is being used by the lid labels. Clear the lid compartment labels before changing the divider layout.";
+}
+
+function dividerLabelsForLid(divider) {
+  let labels = divider?.options?.division_labels;
+  if (typeof labels === "string") {
+    try { labels = JSON.parse(labels); } catch { labels = labels.split(","); }
+  }
+  return Array.isArray(labels) ? [...labels] : [];
+}
+
+function renderLidLabelEditor() {
+  const holder = $("#lid-division-labels");
+  const textRow = $("#lid-label-text-row");
+  if (!holder || !textRow) return;
+  const lid = lidState();
+  const divider = lidDivider();
+  const enabled = lid.enabled && lid.label_enabled;
+  textRow.hidden = !enabled || Boolean(divider);
+  holder.hidden = !enabled || !divider;
+  if (!enabled || !divider) {
+    holder.replaceChildren();
+    return;
+  }
+  const topology = dividerCompartmentsClient(divider);
+  const labels = Array.isArray(lid.division_labels) ? lid.division_labels : [];
+  holder.innerHTML = `<span class="field-label">Compartment labels</span><div class="division-table division-grid" style="--division-columns:${topology.columns};--division-rows:${topology.rows}">
+    ${topology.cells.map(cell => {
+      const index = cell.row * topology.columns + cell.column;
+      return `<input type="text" data-lid-division-index="${index}" value="${escapeHtml(String(labels[index] || ""))}" style="grid-column:${cell.column + 1} / span ${cell.columnSpan};grid-row:${cell.row + 1} / span ${cell.rowSpan}">`;
+    }).join("")}</div>`;
+  $$('[data-lid-division-index]', holder).forEach(input => input.addEventListener("input", () => {
+    const previous = clone(state.design);
+    const values = Array.isArray(state.design.box.lid.division_labels)
+      ? [...state.design.box.lid.division_labels] : [];
+    values[Number(input.dataset.lidDivisionIndex)] = input.value;
+    state.design.box.lid.division_labels = values;
+    seedPartNameFromLabel(input.value);
+    changedDesign(previous);
+  }));
+}
+
+function syncLidForm() {
+  const active = lidPartActive();
+  const lid = lidState();
+  const config = lidConfiguration();
+  $("#lid-option-panel").hidden = !active;
+  $("#lid-option-toggle").textContent = active ? "Remove" : "Add";
+  $("#lid-configuration").value = config;
+  $("#lid-thickness").value = lid.thickness;
+  $("#lid-handle-type").value = lid.handle_type;
+  $("#lid-handle-size").value = lid.handle_size;
+  $("#lid-handle-position").value = lid.handle_position;
+  $("#lid-label-enabled").value = String(Boolean(lid.label_enabled));
+  $("#lid-label-orientation").value = lid.label_orientation;
+  $("#lid-label-style").value = lid.label_style;
+  $("#lid-label-text").value = lid.label_text || "";
+  const hasLid = config !== "stackable_bin";
+  const handled = config === "handled_lid";
+  $("#lid-physical-options").hidden = !hasLid;
+  ["#lid-handle-type-row", "#lid-handle-size-row", "#lid-handle-position-row"].forEach(selector => {
+    $(selector).hidden = !handled;
+  });
+  const labelOn = hasLid && lid.label_enabled;
+  $("#lid-label-orientation-row").hidden = !labelOn;
+  $("#lid-label-style-row").hidden = !labelOn;
+  const raised = [...$("#lid-label-style").options].find(option => option.value === "raised");
+  if (raised) raised.disabled = config === "stackable_lid";
+  if (config === "stackable_lid" && $("#lid-label-style").value === "raised") {
+    $("#lid-label-style").value = "flush";
+  }
+  const note = $("#lid-option-note");
+  note.textContent = config === "stackable_bin"
+    ? "No lid. This bin stacks directly into another matching bin."
+    : config === "stackable_lid"
+      ? "Handle and raised lettering are unavailable because the next bin needs a flat seating surface."
+      : "One removable handled lid. This bin is not stackable.";
+  renderLidLabelEditor();
+  applyStackVisibility();
 }
 
 function binTypeFromDesign() {
+  if (baseTrimEnabled()) return "base-trim";
   if (b4bEnabled()) return "b4b";
-  if (stackMode() === "direct") return "stack-direct";
-  if (stackMode() === "lid") return "stack-lid";
   return "single";
 }
 
@@ -1114,14 +1638,16 @@ function stackRuleValues(mode = stackMode(), wall = state.design?.box?.wall) {
 function normalizeStackSettings(design, { restoreDefaults = false, flash = false } = {}) {
   const box = design?.box;
   if (!box) return;
-  const mode = box.stack?.mode || "none";
+  const mode = (box.stack?.mode || "none") === "direct"
+    ? "direct" : box.lid?.enabled && box.lid.stackable ? "lid" : "none";
+  const hasLid = Boolean(box.lid?.enabled);
   const changed = [];
   const set = (key, value, selector) => {
     if (box[key] === value) return;
     box[key] = value;
     if (selector) changed.push(selector);
   };
-  if (mode !== "none") {
+  if (mode !== "none" || hasLid) {
     const values = stackRuleValues(mode, box.wall);
     set("standard_walls", false, "#wall-thickness");
     if (number(box.wall, values.defaultWall) < values.minWall) {
@@ -1129,10 +1655,12 @@ function normalizeStackSettings(design, { restoreDefaults = false, flash = false
     }
     // The base minimum depends on the (possibly just-bumped) wall value, so
     // it is resolved again after the wall is settled, never before.
-    const minBase = stackBaseMinForWall(mode, box.wall);
-    set("standard_base", false, "#base-thickness");
-    if (number(box.base_thickness, values.defaultBase) < minBase) {
-      set("base_thickness", minBase, "#base-thickness");
+    if (mode !== "none") {
+      const minBase = stackBaseMinForWall(mode, box.wall);
+      set("standard_base", false, "#base-thickness");
+      if (number(box.base_thickness, values.defaultBase) < minBase) {
+        set("base_thickness", minBase, "#base-thickness");
+      }
     }
   } else if (restoreDefaults) {
     const values = stackRuleValues(mode, box.wall);
@@ -1155,10 +1683,21 @@ function syncStackDependencyControls() {
 function applyStackVisibility() {
   const b4b = b4bEnabled();
   const mode = stackMode();
+  const hasLid = Boolean(state.design?.box?.lid?.enabled);
   const note = $("#stack-note");
   if (!note) return;
+  const connectorLocked = hasLid;
+  const connectorSection = document.querySelector('.control-section[data-section="connector"]');
+  if (connectorSection) connectorSection.hidden = b4b || baseTrimEnabled() || connectorLocked;
+  ["#generate-all", "#generate-connector"].forEach(selector => {
+    const element = $(selector);
+    if (element) element.hidden = b4b || baseTrimEnabled() || connectorLocked;
+  });
+  if (!baseTrimEnabled()) {
+    $("#generate-bin").textContent = hasLid ? "Generate Bin + Lid" : "Generate Bin";
+  }
   const info = state.preview?.stack;
-  if (b4b || mode === "none") {
+  if (b4b || (mode === "none" && !hasLid)) {
     note.hidden = true;
     return;
   }
@@ -1166,10 +1705,12 @@ function applyStackVisibility() {
   const moduleHeight = info?.mode === mode
     ? info.module_height_mm
     : state.design?.box?.z;
-  const bits = [
-    `Stacking requires at least ${fmt(values.minWall)} mm walls and a ${fmt(values.minBase)} mm base.`,
-    `Stack height contribution: ${fmt(moduleHeight)} mm${mode === "lid" ? " including lid" : ""}.`,
-  ];
+  const bits = mode === "none"
+    ? [`The handled lid uses at least ${fmt(values.minWall)} mm walls for its retention clips. It does not add stacking geometry.`]
+    : [
+        `Stacking requires at least ${fmt(values.minWall)} mm walls and a ${fmt(values.minBase)} mm base.`,
+        `Stack height contribution: ${fmt(moduleHeight)} mm${mode === "lid" ? " including lid" : ""}.`,
+      ];
   if (info?.mode === mode) {
     bits.push(`Detached closed part: ${fmt(info.closed_height_mm)} mm including the ${fmt(info.engagement_mm)} mm interlock.`);
     if (info.parts.length > 1) bits.push(`Prints as ${info.parts.join(" + ")}.`);
@@ -1180,10 +1721,37 @@ function applyStackVisibility() {
 
 function readStackForm(design) {
   design.box = design.box || {};
-  const choice = $("#bin-type")?.value || "single";
-  const mode = choice === "stack-direct" ? "direct" : choice === "stack-lid" ? "lid" : "none";
-  if (mode === "none") delete design.box.stack;
-  else design.box.stack = { mode };
+  if (!lidPartActive(design)) {
+    delete design.box.stack;
+    delete design.box.lid;
+    return;
+  }
+  const config = $("#lid-configuration")?.value || lidConfiguration(design);
+  const remembered = lidState(design);
+  if (config === "stackable_bin") {
+    design.box.stack = { mode: "direct" };
+    delete design.box.lid;
+    return;
+  }
+  delete design.box.stack;
+  const divider = lidDivider(design);
+  let divisionLabels = Array.isArray(remembered.division_labels) ? [...remembered.division_labels] : [];
+  if (divider && $("#lid-label-enabled").value === "true" && !divisionLabels.some(value => String(value || "").trim())) {
+    divisionLabels = dividerLabelsForLid(divider);
+  }
+  design.box.lid = {
+    enabled: true,
+    stackable: config === "stackable_lid",
+    thickness: $("#lid-thickness").value,
+    label_enabled: $("#lid-label-enabled").value === "true",
+    label_style: config === "stackable_lid" ? "flush" : $("#lid-label-style").value,
+    label_orientation: $("#lid-label-orientation").value,
+    label_text: $("#lid-label-text").value,
+    division_labels: divisionLabels,
+    handle_type: $("#lid-handle-type").value || remembered.handle_type,
+    handle_size: $("#lid-handle-size").value || remembered.handle_size,
+    handle_position: $("#lid-handle-position").value || remembered.handle_position,
+  };
 }
 
 function readB4BForm(design) {
@@ -1362,18 +1930,42 @@ async function toggleB4B(wantEnabled) {
     clearDraftSelection();
     state.design.layout.mode = "fused";
     delete state.design.box.stack;
+    delete state.design.box.lid;
   }
   readB4BForm(state.design);
   enforceB4BMinimums();
   applyB4BVisibility();
+  applyEdgeMountVisibility();
   changedDesign();
   return true;
 }
 
 async function changeBinType() {
+  const requested = $("#bin-type").value;
+  const wasBaseTrim = baseTrimEnabled();
+  if (requested === "base-trim") {
+    if (!wasBaseTrim) {
+      state.lastOrdinaryDesign = clone(state.design);
+      state.design = state.lastBaseTrimDesign
+        ? clone(state.lastBaseTrimDesign)
+        : makeBaseTrimDesign(state.design?.box?.x, state.design?.box?.y);
+    }
+    state.joinMode = "base_trim";
+    persistJoinMode();
+    clearDraftSelection();
+    syncForm();
+    changedDesign();
+    return;
+  }
+  if (wasBaseTrim) {
+    state.lastBaseTrimDesign = clone(state.design);
+    state.design = state.lastOrdinaryDesign
+      ? clone(state.lastOrdinaryDesign)
+      : freshDesignForCurrentFolder();
+    $("#bin-type").value = requested;
+  }
   const previousStack = stackMode();
   const wasB4B = b4bEnabled();
-  const requested = $("#bin-type").value;
   if (requested === "b4b") {
     await toggleB4B(true);
     return;
@@ -1424,6 +2016,18 @@ function snapToUnit(value, unit) {
 
 function updateDesignFromForm() {
   const design = state.design;
+  if (baseTrimEnabled(design)) {
+    readBaseTrimForm(design);
+    const newOutput = $("#output-folder").value.trim();
+    if (!state.runtime.hosted && newOutput !== state.output) {
+      state.output = newOutput;
+      saveOutputPreference(newOutput);
+    }
+    state.joinMode = "base_trim";
+    saveSimplePreference("base_trim_bed_x_mm", design.base_trim.bed_x_mm);
+    saveSimplePreference("base_trim_bed_y_mm", design.base_trim.bed_y_mm);
+    return;
+  }
   const prevBoxX = design.box.x;
   const prevBoxY = design.box.y;
   const newBoxX = normalizeBinDimension("x", $("#x-size").value, design.box.x);
@@ -1455,18 +2059,19 @@ function updateDesignFromForm() {
   }
   const b4bOn = b4bEnabled();
   const currentStackMode = stackMode();
+  const hasOrdinaryLid = Boolean(design.box.lid?.enabled);
   const stackValues = stackRuleValues(currentStackMode, design.box.wall);
   // Wall is resolved before base: the required base depends on the *final*
   // wall value, so it must be looked up after the wall choice is settled.
   const previousWall = design.box.wall;
   const wallRules = state.catalog?.wall_rules || {};
   const defaultWall = wallRules.default_mm ?? 0.8;
-  const minWall = currentStackMode === "none"
+  const minWall = currentStackMode === "none" && !hasOrdinaryLid
     ? wallRules.min_mm ?? 0.2
     : stackValues.minWall;
   const maxWall = wallRules.max_mm ?? 2.4;
   const wallChoice = $("#wall-thickness").value;
-  design.box.standard_walls = !b4bOn && currentStackMode === "none" && wallChoice === "standard";
+  design.box.standard_walls = !b4bOn && currentStackMode === "none" && !hasOrdinaryLid && wallChoice === "standard";
   design.box.wall = design.box.standard_walls
     ? defaultWall
     : Math.max(minWall, Math.min(maxWall, number(
@@ -1488,6 +2093,7 @@ function updateDesignFromForm() {
   const scoopEl = $("#scoop");
   if (scoopEl) design.scoop = scoopEl.checked;
   readLiftGrabberForm(design);
+  readEdgeMountForm(design);
   syncRimLabelFromFeatures();
   const newOutput = $("#output-folder").value.trim();
   if (!state.runtime.hosted && newOutput !== state.output) {
@@ -1667,6 +2273,7 @@ const commitNudge = debounce(async () => {
       index,
     });
     state.design = result.design;
+    state.baseTrimSourceLayout = null;
     recordHistory(historySnapshot);
     state.selected = result.selected;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
@@ -1973,7 +2580,53 @@ function wireControls() {
   });
   $("#lift-grabber-location").addEventListener("change", changedDesign);
 
+  const edgeMountChangeIds = [
+    "#edge-mount-side", "#edge-mount-label-enabled", "#edge-mount-holes-enabled",
+    "#edge-mount-label-length-mode", "#edge-mount-label-projection",
+    "#edge-mount-label-thickness", "#edge-mount-label-style", "#edge-mount-label-flip",
+    "#edge-mount-hole-count", "#edge-mount-hole-orientation", "#edge-mount-access-mode",
+    "#edge-mount-spacing-mode",
+  ];
+  edgeMountChangeIds.forEach(selector => $(selector)?.addEventListener("change", changedDesign));
+  const edgeMountInputIds = [
+    "#edge-mount-label-text", "#edge-mount-label-projection-mm", "#edge-mount-label-thickness-mm",
+    "#edge-mount-label-depth", "#edge-mount-screw-diameter", "#edge-mount-access-diameter",
+    "#edge-mount-top-offset", "#edge-mount-spacing-mm",
+  ];
+  edgeMountInputIds.forEach(selector => $(selector)?.addEventListener("input", changedDesign));
+
   $("#bin-type").addEventListener("change", changeBinType);
+  $("#lid-option-toggle").addEventListener("click", () => {
+    const previous = clone(state.design);
+    if (lidPartActive()) {
+      delete state.design.box.stack;
+      delete state.design.box.lid;
+      normalizeStackSettings(state.design, { restoreDefaults: true, flash: true });
+    } else {
+      state.design.box.stack = { mode: "direct" };
+    }
+    syncLidForm();
+    populateWallChoices(state.design.box);
+    populateBaseChoices(state.design.box);
+    changedDesign(previous);
+  });
+  ["#lid-configuration", "#lid-thickness", "#lid-handle-type", "#lid-handle-size",
+   "#lid-handle-position", "#lid-label-enabled", "#lid-label-orientation", "#lid-label-style"]
+    .forEach(selector => $(selector).addEventListener("change", () => {
+      const previous = clone(state.design);
+      readStackForm(state.design);
+      normalizeStackSettings(state.design);
+      syncLidForm();
+      populateWallChoices(state.design.box);
+      populateBaseChoices(state.design.box);
+      changedDesign(previous);
+    }));
+  $("#lid-label-text").addEventListener("input", () => {
+    const previous = clone(state.design);
+    readStackForm(state.design);
+    seedPartNameFromLabel($("#lid-label-text").value);
+    changedDesign(previous);
+  });
   ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location", "#b4b-latch-count", "#b4b-front-label-style"].forEach(sel =>
     $(sel).addEventListener("change", () => {
       normalizeB4BDependentControls();
@@ -2107,6 +2760,39 @@ function wireControls() {
     syncConnectorHeightControls();
     updateDesignFromForm();
   });
+  $("#bin-join-mode")?.addEventListener("change", event => {
+    state.joinMode = event.target.value === "base_trim" ? "base_trim" : "side";
+    persistJoinMode();
+    syncJoiningControls();
+  });
+  ["#base-trim-x-units", "#base-trim-y-units"].forEach((selector, index) => {
+    $(selector)?.addEventListener("input", event => {
+      const unit = number(state.catalog?.base_trim_rules?.unit_mm, 8);
+      const units = Math.max(1, Math.min(150, Math.round(number(event.target.value, 1))));
+      $(`#base-trim-${index === 0 ? "x" : "y"}-mm`).textContent = `${fmt(units * unit)} mm`;
+    });
+  });
+  ["#base-trim-bed-x", "#base-trim-bed-y"].forEach(selector => {
+    $(selector)?.addEventListener("input", () => {
+      const margin = number(state.catalog?.base_trim_rules?.bed_edge_margin_mm, 10);
+      const x = number($("#base-trim-bed-x").value, 256) - 2 * margin;
+      const y = number($("#base-trim-bed-y").value, 256) - 2 * margin;
+      $("#base-trim-printable").textContent = `Printable area after ${fmt(margin)} mm edge clearance: ${fmt(x)} × ${fmt(y)} mm`;
+    });
+  });
+  ["#base-trim-x-units", "#base-trim-y-units", "#base-trim-width", "#base-trim-height",
+    "#base-trim-joint", "#base-trim-bed-x", "#base-trim-bed-y"].forEach(selector => {
+    $(selector)?.addEventListener("change", () => {
+      if (!baseTrimEnabled()) return;
+      const previousDesign = clone(state.design);
+      if (selector === "#base-trim-x-units" || selector === "#base-trim-y-units") {
+        state.design.base_trim.auto_size = false;
+      }
+      readBaseTrimForm();
+      changedDesign(previousDesign);
+    });
+  });
+  $("#base-trim-auto-size")?.addEventListener("click", autoSizeBaseTrimFromSpace);
   // The folder icon covers both picking a save folder and Space planning -
   // SP.open() already offers recent/new folders before it gets to Space setup.
   const outputFolderEl = $("#output-folder");
@@ -5268,8 +5954,9 @@ async function refreshPreview() {
     formatDimField("x");
     formatDimField("y");
     formatHeightField();
-    $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(state.design.box.x)} mm`;
-    $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(state.design.box.y)} mm`;
+    const physical = result.base_trim?.outer_mm || [state.design.box.x, state.design.box.y];
+    $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(physical[0])} mm`;
+    $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(physical[1])} mm`;
     $(".dimension-height", $("#dimensions")).textContent = `Height ${fmt(state.design.box.z)} mm`;
     const messages = [result.message, ...result.feature_errors, result.draft_error].filter(Boolean);
     const actions = [];
@@ -5317,10 +6004,12 @@ async function refreshPreview() {
     updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
     updateAutoExpandButton();
     renderB4BReadout();
+    renderBaseTrimReadout();
     applyStackVisibility();
     renderPreview3D();
     renderLayout2D();
     renderPlaced();
+    applyBaseTrimVisibility();
   } catch (error) {
     if (request !== state.previewRequest) return;
     endPreviewWait(request);
@@ -5697,7 +6386,8 @@ function canvasSize(canvas) {
 // mean the same thing whichever renderer is drawing them.
 const isBinFace = kind =>
   kind === "outside" || kind === "inside" || kind === "rim" || kind === "floor" ||
-  kind === "top_label_ledge" || kind === "label" || kind === "label_hole";
+  kind === "top_label_ledge" || kind === "label" || kind === "label_hole" ||
+  kind === "base_trim";
 
 // Which cardinal side of the bin the camera is looking from, by yaw alone
 // (elevation only affects pitch, not which wall is nearest). Shared by the
@@ -6009,6 +6699,7 @@ function checkBinSizeChange() {
 function draw3DDimensions(context, box, camera, project, outerXYZ) {
   state.previewDimensionHandles = [];
   if (!box) return;
+  const interactive = !baseTrimEnabled();
   const outerX = outerXYZ ? number(outerXYZ[0]) : number(box.x);
   const outerY = outerXYZ ? number(outerXYZ[1]) : number(box.y);
   const outerZ = outerXYZ ? number(outerXYZ[2]) : number(box.z);
@@ -6065,7 +6756,7 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     `Width ${fmt(outerX)} mm`,
     gap,
     over,
-    { view: "3d", axis: "x", value: editBox.x, displayValue: outerX }
+    interactive ? { view: "3d", axis: "x", value: editBox.x, displayValue: outerX } : null
   );
 
   // 2. Depth (along Y on front ground)
@@ -6080,7 +6771,7 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     `Depth ${fmt(outerY)} mm`,
     gap,
     over,
-    { view: "3d", axis: "y", value: editBox.y, displayValue: outerY }
+    interactive ? { view: "3d", axis: "y", value: editBox.y, displayValue: outerY } : null
   );
 
   // 3. Height (vertical Z edge on the leftmost corner of the bin)
@@ -6116,7 +6807,7 @@ function draw3DDimensions(context, box, camera, project, outerXYZ) {
     `Height ${fmt(outerZ)} mm`,
     gap,
     over,
-    { view: "3d", axis: "z", value: editBox.z, displayValue: outerZ }
+    interactive ? { view: "3d", axis: "z", value: editBox.z, displayValue: outerZ } : null
   );
 }
 
@@ -6347,6 +7038,7 @@ function renderPreview3D() {
   // "geometry" is always [] for a B4B response, only kept for response-shape
   // compatibility. See organizer_b4b.b4b_preview_meshes.
   const b4b = b4bEnabled();
+  const compact = b4b || baseTrimEnabled();
   const geometry = state.preview.geometry || [];
   const meshes = state.preview.meshes || [];
   const renderer = ensurePreviewGL();
@@ -6356,11 +7048,11 @@ function renderPreview3D() {
     // never shipped for B4B before compact transport existed; give it the
     // one geometry shape it knows rather than teaching it a second one for
     // a path that only runs when WebGL itself is unavailable.
-    drawGeometryLegacy2D(overlayCanvas, b4b ? meshesToLegacyFaces(meshes) : geometry, state.camera);
+    drawGeometryLegacy2D(overlayCanvas, compact ? meshesToLegacyFaces(meshes) : geometry, state.camera);
     return;
   }
   if (solidCanvas) solidCanvas.hidden = false;
-  renderPreview3DGL(renderer, overlayCanvas, b4b, geometry, meshes, state.camera);
+  renderPreview3DGL(renderer, overlayCanvas, compact, geometry, meshes, state.camera);
 }
 
 // The legacy painter only ever spoke the per-face format; B4B's compact
@@ -6496,6 +7188,10 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
 // the child field. Used to correct both the dimension guides and the
 // contact shadow's footprint so they track the physical case.
 function b4bAssembledEnvelope() {
+  if (baseTrimEnabled()) {
+    const outer = state.preview?.base_trim?.outer_mm;
+    return outer ? [outer[0], outer[1], state.design?.box?.z] : null;
+  }
   return state.preview?.b4b?.assembled_envelope_mm;
 }
 
@@ -7598,6 +8294,96 @@ function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
   }
 }
 
+function renderBaseTrim2D(context, width, height) {
+  const summary = state.preview?.base_trim;
+  if (!summary) return;
+  const [outerX, outerY] = summary.outer_mm;
+  const [fieldX, fieldY] = summary.field_mm;
+  const [unitsX, unitsY] = summary.field_units;
+  const [innerX, innerY] = summary.inner_half_mm;
+  const pad = Math.max(56, Math.min(width, height) * .1);
+  const scale = Math.min((width - 2 * pad) / outerX, (height - 2 * pad) / outerY);
+  const toCanvas = ([x, y]) => [width / 2 + x * scale, height / 2 - y * scale];
+  state.layoutTransform = { toCanvas, toWorld: () => [NaN, NaN], scale };
+
+  const outer = [
+    [-outerX / 2, -outerY / 2], [outerX / 2, -outerY / 2],
+    [outerX / 2, outerY / 2], [-outerX / 2, outerY / 2],
+  ];
+  const path = drawClosedPath(context, outer, toCanvas);
+  const innerPath = new Path2D();
+  (state.preview.cavity_outline || []).forEach((point, index) => {
+    const p = toCanvas(point);
+    index ? innerPath.lineTo(p[0], p[1]) : innerPath.moveTo(p[0], p[1]);
+  });
+  innerPath.closePath();
+  path.addPath(innerPath);
+  context.fillStyle = "rgba(57, 127, 135, .30)";
+  context.fill(path, "evenodd");
+  context.strokeStyle = "#397f87";
+  context.lineWidth = 2;
+  context.stroke(drawClosedPath(context, outer, toCanvas));
+  context.strokeStyle = "#245e65";
+  context.lineWidth = 1.5;
+  context.stroke(innerPath);
+
+  for (const item of state.baseTrimSourceLayout || []) {
+    const x0 = -fieldX / 2 + item.x;
+    const y0 = -fieldY / 2 + item.y;
+    const a = toCanvas([x0, y0]);
+    const b = toCanvas([x0 + item.w, y0 + item.d]);
+    context.fillStyle = "rgba(57, 127, 135, .07)";
+    context.strokeStyle = "rgba(57, 127, 135, .28)";
+    context.setLineDash([5, 4]);
+    context.fillRect(a[0], b[1], b[0] - a[0], a[1] - b[1]);
+    context.strokeRect(a[0], b[1], b[0] - a[0], a[1] - b[1]);
+  }
+  context.setLineDash([]);
+
+  const seamEnds = seam => {
+    if (seam.side === "front") return [[seam.coordinate, -outerY / 2], [seam.coordinate, -innerY]];
+    if (seam.side === "right") return [[outerX / 2, seam.coordinate], [innerX, seam.coordinate]];
+    if (seam.side === "back") return [[seam.coordinate, outerY / 2], [seam.coordinate, innerY]];
+    return [[-outerX / 2, seam.coordinate], [-innerX, seam.coordinate]];
+  };
+  summary.seams.forEach(seam => {
+    const [a, b] = seamEnds(seam).map(toCanvas);
+    context.strokeStyle = "#b46b38";
+    context.lineWidth = 1.5;
+    context.setLineDash([4, 3]);
+    context.beginPath(); context.moveTo(...a); context.lineTo(...b); context.stroke();
+    context.setLineDash([]);
+    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    context.fillStyle = "#b46b38";
+    context.beginPath(); context.arc(mid[0], mid[1], 3.5, 0, Math.PI * 2); context.fill();
+  });
+
+  if (!summary.one_piece) {
+    context.font = "700 10px Segoe UI";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillStyle = "#245e65";
+    summary.pieces.forEach(piece => {
+      if (!piece.clip_bounds) return;
+      const [x0, y0, x1, y1] = piece.clip_bounds;
+      const center = toCanvas([(Math.max(-outerX / 2, x0) + Math.min(outerX / 2, x1)) / 2,
+        (Math.max(-outerY / 2, y0) + Math.min(outerY / 2, y1)) / 2]);
+      context.fillText(String(piece.number), center[0], center[1]);
+    });
+  }
+
+  context.font = "700 12px Segoe UI";
+  context.textAlign = "center";
+  context.fillStyle = "#496873";
+  context.fillText(`${unitsX}U / ${fmt(fieldX)} mm`, width / 2, Math.max(16, height / 2 - innerY * scale - 20));
+  context.save();
+  context.translate(Math.max(16, width / 2 - innerX * scale - 24), height / 2);
+  context.rotate(-Math.PI / 2);
+  context.fillText(`${unitsY}U / ${fmt(fieldY)} mm`, 0, 0);
+  context.restore();
+  context.fillText(`Outside ${fmt(outerX)} × ${fmt(outerY)} mm`, width / 2, Math.min(height - 12, height / 2 + outerY * scale / 2 + 30));
+}
+
 function renderLayout2D() {
   if (!state.preview) return;
   state.layoutDimensionHandles = [];
@@ -7605,6 +8391,10 @@ function renderLayout2D() {
   const canvas = $("#preview-2d");
   const { context, width, height } = canvasSize(canvas);
   context.clearRect(0, 0, width, height);
+  if (baseTrimEnabled()) {
+    renderBaseTrim2D(context, width, height);
+    return;
+  }
   if (drawPendingNestTrace(context, width, height)) return;
   if (drawNestEditWorkspace(context, width, height)) return;
   const bounds = state.preview.layout_bounds;
@@ -8509,6 +9299,10 @@ async function saveDesign() {
 
 function designHasChanges() {
   const visibleDesign = clone(state.design);
+  if (baseTrimEnabled(visibleDesign)) {
+    readBaseTrimForm(visibleDesign);
+    return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
+  }
   visibleDesign.box.x = normalizeBinDimension("x", $("#x-size").value, visibleDesign.box.x);
   visibleDesign.box.y = normalizeBinDimension("y", $("#y-size").value, visibleDesign.box.y);
   visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
@@ -8533,6 +9327,7 @@ function designHasChanges() {
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
   readLiftGrabberForm(visibleDesign);
+  readEdgeMountForm(visibleDesign);
   const index = draftCommitIndex();
   if (state.draft && state.draftAutoCommit && (
     index === null ||
@@ -8553,7 +9348,13 @@ async function openDesign(event) {
   try {
     const parsed = JSON.parse(await file.text());
     const result = await api("/api/design/validate", { design: parsed });
+    if (baseTrimEnabled(result.design) && !baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
+    if (!baseTrimEnabled(result.design) && baseTrimEnabled()) state.lastBaseTrimDesign = clone(state.design);
     state.design = result.design;
+    if (baseTrimEnabled()) {
+      state.joinMode = "base_trim";
+      persistJoinMode();
+    }
     resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
     state.drafts = {};
@@ -8576,7 +9377,9 @@ async function newDesign() {
   if (designHasChanges() && !window.confirm("Start a new design and discard the current changes?")) return;
   if (!beginDesignMutation()) return;
   const previousDesign = clone(state.design);
-  state.design = freshDesignForCurrentFolder();
+  state.design = baseTrimEnabled(previousDesign)
+    ? makeBaseTrimDesign(previousDesign.box.x, previousDesign.box.y)
+    : freshDesignForCurrentFolder();
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
   state.binResizePending = false;
@@ -8695,6 +9498,7 @@ function checkPartNamePresent(target = "bin") {
 }
 
 async function generateParts(target) {
+  if (baseTrimEnabled() || (target === "all" && state.joinMode === "base_trim")) target = "bin";
   if (state.designMutationBusy || isGenerating) {
     toast("Finish the current action before generating files.", true);
     return;
@@ -8728,7 +9532,9 @@ async function generateParts(target) {
     dialogActions.hidden = true;
   }
 
-  const boxTitle = `Bin (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} × ${fmt(state.design.box.z)} mm)`;
+  const boxTitle = baseTrimEnabled()
+    ? `Base Trim (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm field)`
+    : `Bin (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} × ${fmt(state.design.box.z)} mm)`;
   const connTitle = `Connector (${fmt(state.design.box.z)} mm)`;
 
   const items = [];
@@ -8768,6 +9574,7 @@ async function generateParts(target) {
       design: clone(state.design),
       output: state.output,
       connector: state.connector,
+      join_mode: state.joinMode,
       keep_log: state.keepLog,
     };
 
@@ -8777,7 +9584,7 @@ async function generateParts(target) {
       const binResult = await api("/api/generate", payload);
       saveOutput = binResult.output || saveOutput;
       const binFiles = await saveGeneratedFiles(binResult);
-      await rememberGeneratedSpaceBin(payload.design);
+      if (!baseTrimEnabled(payload.design)) await rememberGeneratedSpaceBin(payload.design);
       if (binResult.inventory_bin && state.inventoryEnabled && typeof SP !== "undefined") {
         await SP.addInventoryBin(binResult.inventory_bin);
       }
@@ -8861,7 +9668,9 @@ async function generate(path, selector) {
 }
 
 async function printModel(target = "bin") {
-  if (state.runtime.hosted) return generateParts(b4bEnabled() ? "bin" : "all");
+  if (state.runtime.hosted) return generateParts(
+    b4bEnabled() || baseTrimEnabled() || state.joinMode === "base_trim" ? "bin" : "all"
+  );
   if (!checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
     toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
@@ -8880,11 +9689,14 @@ async function printModel(target = "bin") {
       design: clone(state.design),
       output: state.output,
       connector: state.connector,
+      join_mode: state.joinMode,
       target: target,
       keep_log: state.keepLog,
     };
     const result = await api("/api/print", payload);
-    if (target === "bin" || target === "all") await rememberGeneratedSpaceBin(payload.design);
+    if ((target === "bin" || target === "all") && !baseTrimEnabled(payload.design)) {
+      await rememberGeneratedSpaceBin(payload.design);
+    }
     const files = result.files || [];
     const fileNames = files.map(f => f.split(/[\\/]/).pop());
     toast(`Sent to ${slicerName}!\n${fileNames.join("\n")}`, false, 7000);
@@ -9105,6 +9917,8 @@ async function init() {
     const catalog = await api("/api/catalog");
     state.catalog = catalog;
     state.runtime = catalog.runtime || { hosted: false, filesystem: "server" };
+    const savedJoinMode = String(storedPreference("default_join_mode", "side"));
+    state.joinMode = ["side", "base_trim"].includes(savedJoinMode) ? savedJoinMode : "side";
     state.serverInstance = catalog.instance;
     state.apiCompat = catalog.api_compat;
     state.design = clone(catalog.defaults.design);

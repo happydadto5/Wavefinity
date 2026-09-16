@@ -1329,6 +1329,18 @@ dialog:not([open]) { display: none; }
 }
 .b4b-capacity strong { font-size: 0.95rem; }
 .b4b-hardware { font-size: 0.95rem; }
+/* Edge Mount reuses the B4B card/grid look; only its two collapsible
+   subsections and their help text need anything of their own. */
+#edge-mount-panel .b4b-card-title { margin-top: 6px; }
+#edge-mount-panel h4.b4b-card-title { margin-top: 10px; }
+#edge-mount-panel .inline-help {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+#edge-mount-panel .field-grid.three { align-items: end; }
+#edge-mount-access-auto-note { grid-column: span 1; align-self: center; }
 /* Bin type is the first thing on the page because it decides what every
    control under it means - X/Y become a child-bin field, the interior parts
    workflow disappears, connectors stop applying. It is a select, not a
@@ -1377,3 +1389,55 @@ dialog:not([open]) { display: none; }
   color: var(--muted);
 }
 .part-name-row input { margin: 0; flex: 1; font-size: 14px; font-weight: 650; color: var(--ink); }
+
+.base-trim-panel {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.lid-option-card {
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(42, 132, 142, 0.06);
+}
+
+.lid-option-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lid-option-heading div { display: grid; gap: 2px; }
+.lid-option-heading span { color: var(--muted); font-size: 0.75rem; }
+#lid-option-panel { display: grid; gap: 10px; margin-top: 10px; }
+#lid-division-labels { display: grid; gap: 6px; }
+#lid-division-labels .division-table { margin-top: 0; }
+.lid-option-card.disabled { opacity: 0.55; }
+.base-trim-panel[hidden] { display: none; }
+.base-trim-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.base-trim-size-row {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+}
+.base-trim-size-row > span:first-of-type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.base-trim-size-row input { width: 100%; }
+.base-trim-unit-readout { color: var(--teal-dark); font-weight: 700; }
+.base-trim-summary { display: grid; gap: 3px; line-height: 1.4; }
+@media (max-width: 420px) {
+  .base-trim-grid { grid-template-columns: 1fr; }
+}

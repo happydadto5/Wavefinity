@@ -108,6 +108,7 @@ DP.build = () => {
           <button type="button" id="dl-sp-make" class="button secondary" title="Open X-braced spacers for empty cells and flat-backed spacers for the edges: saved, added to the inventory and placed">Make spacers</button>
           <button type="button" id="dl-sp-remove" class="button secondary" title="Take this drawer's spacers out (they stay in the inventory)">Take spacers out</button>
           <button type="button" id="dl-connectors" class="button secondary" title="Save a file for every connector this layout needs, with how many to print">Make connectors</button>
+          <button type="button" id="dl-base-trim" class="button secondary" title="Create a Base Trim around one filled rectangular block of bins">Make Base Trim</button>
           <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and connectors in Bambu Studio">Print spacers &amp; connectors</button>
         </div>
       </div>
@@ -286,6 +287,14 @@ DP.wire = () => {
   $("#dl-sp-make").addEventListener("click", () => DL.makeSpacers());
   $("#dl-sp-remove").addEventListener("click", () => DL.removeSpacers());
   $("#dl-connectors").addEventListener("click", () => DL.makeConnectors());
+  $("#dl-base-trim").addEventListener("click", async () => {
+    const source = DL.baseTrimSource();
+    if (!source.ok) {
+      toast(source.message, true, 6500);
+      return;
+    }
+    await startBaseTrimFromSpace(source);
+  });
   $("#dl-print").addEventListener("click", () => DL.printDrawer());
   $("#dl-map").addEventListener("click", () => DV.printMap());
   $("#dl-todo").addEventListener("click", event => {
@@ -665,6 +674,7 @@ DP.renderStats = () => {
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
   label("#dl-sp-make", "Make spacers", "Making spacers…", "spacers");
   label("#dl-connectors", "Make connectors", "Making connectors…", "connectors");
+  label("#dl-base-trim", "Make Base Trim", "Making Base Trim…", "base_trim");
   label("#dl-print", "Print spacers & connectors", "Opening Bambu Studio…", "print");
   $("#dl-sp-remove").disabled = busy || !DL.drawer().placements.some(p => DL.isSpacer(DL.bin(p.bin)));
   const report = DL.report;

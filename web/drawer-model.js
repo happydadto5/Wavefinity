@@ -228,6 +228,59 @@ DL.items = (drawer = DL.drawer()) => DL.chains(drawer).map(chain => {
   };
 });
 
+// One authoritative Space-to-Base-Trim calculation. Stacks are already one
+// DL.items() footprint; free edge spacers never enter DL.items().
+DL.baseTrimSource = () => {
+  if (!DL.loaded || !DL.layout) {
+    return { ok: false, message: "Open a Space and arrange bins first." };
+  }
+  const drawer = DL.drawer();
+  const items = DL.items(drawer).filter(item => !DL.isSpacer(item.bins[0]));
+  if (!items.length) {
+    return { ok: false, message: "There are no arranged bins in the active Space." };
+  }
+  const minX = Math.min(...items.map(item => item.gx));
+  const minY = Math.min(...items.map(item => item.gy));
+  const maxX = Math.max(...items.map(item => item.gx + item.w));
+  const maxY = Math.max(...items.map(item => item.gy + item.d));
+  const occupied = new Set();
+  items.forEach(item => {
+    for (let x = item.gx; x < item.gx + item.w; x += 1) {
+      for (let y = item.gy; y < item.gy + item.d; y += 1) occupied.add(`${x},${y}`);
+    }
+  });
+  if (occupied.size !== (maxX - minX) * (maxY - minY)) {
+    return {
+      ok: false,
+      message: "Base Trim auto-size needs one filled rectangular block of bins. Rearrange the bins into a rectangle or set the Base Trim size manually.",
+    };
+  }
+  const step = DL.grid(drawer).step;
+  const fieldX = (maxX - minX) * step;
+  const fieldY = (maxY - minY) * step;
+  if (Math.abs(fieldX / DL.UNIT - Math.round(fieldX / DL.UNIT)) > 1e-9 ||
+      Math.abs(fieldY / DL.UNIT - Math.round(fieldY / DL.UNIT)) > 1e-9) {
+    return {
+      ok: false,
+      message: "The arranged block does not end on whole Wavefinity units. Arrange it as a whole-unit rectangle or size the Base Trim manually.",
+    };
+  }
+  return {
+    ok: true,
+    field_x_mm: fieldX,
+    field_y_mm: fieldY,
+    units_x: Math.round(fieldX / DL.UNIT),
+    units_y: Math.round(fieldY / DL.UNIT),
+    items: items.map(item => ({
+      x: (item.gx - minX) * step,
+      y: (item.gy - minY) * step,
+      w: item.w * step,
+      d: item.d * step,
+      label: DL.label(item.bins[0]),
+    })),
+  };
+};
+
 DL.placedCount = id => DL.layout.drawers.reduce(
   (sum, drawer) => sum + drawer.placements.filter(p => p.bin === id).length, 0);
 DL.plannedCount = id => {
