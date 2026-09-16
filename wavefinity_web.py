@@ -1404,6 +1404,12 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         one = normalize_divider_scoop(
             box, one, base_height(box, layout.mode)
         )
+        if one.full_span:
+            one = replace(one, zone=layout_zone(box, layout.mode))
+    elif one.kind == "scoop":
+        one = replace(one, zone=scoop_zone(
+            box, one, base_height(box, layout.mode), layout.mode, layout.snap
+        ))
     if one.kind == "text" and one.options.get("level") == "rim":
         geometry = []
         tidy = clean_label(text_of(one))
@@ -1508,6 +1514,8 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         one = normalize_divider_scoop(
             box, one, base_height(box, layout.mode)
         )
+        if one.full_span:
+            one = replace(one, zone=layout_zone(box, layout.mode))
     if one.kind == "nest":
         existing = list(layout.features)
         index = payload.get("index")
@@ -1537,10 +1545,14 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
             box, one, base_height(box, layout.mode), layout.mode, layout.snap
         ))
 
-    width, depth = one.zone.width, one.zone.depth
-    cx, cy = one.zone.centre
-    one = resized_feature(one, box, (width, depth), layout.mode, layout.snap)
-    one = moved_feature(one, box, (cx, cy), layout.mode, layout.snap)
+    # Full-span Dividers and Curved Scoops are derived from the bin, not from
+    # a user-draggable footprint. Keep their exact normalized zone instead of
+    # passing it through ordinary 1 mm resize/move snapping.
+    if not (one.kind == "scoop" or (one.kind == "divider" and one.full_span)):
+        width, depth = one.zone.width, one.zone.depth
+        cx, cy = one.zone.centre
+        one = resized_feature(one, box, (width, depth), layout.mode, layout.snap)
+        one = moved_feature(one, box, (cx, cy), layout.mode, layout.snap)
     index = payload.get("index")
     existing = list(layout.features)
     if any(item.kind == "nest" and item.contour for item in existing):

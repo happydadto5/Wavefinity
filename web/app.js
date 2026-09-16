@@ -1549,8 +1549,12 @@ const applyChangedDesign = debounce(() => {
   // parts keep the size the user chose; if the bin was made too small, the
   // automatic grow pass below restores enough room instead of trimming them.
   reflowDraftToBin(state.draft);
-  refreshPreview();
+  // Rebuild the selected part first. Divider and Curved Scoop footprints are
+  // derived from the bin, so previewing the resized bin before that rebuild
+  // can briefly validate their old footprint and show a false fit error.
+  // refreshDraft() finishes by refreshing the whole preview.
   if (state.draft) refreshDraft();
+  else refreshPreview();
   if (state.binResizePending &&
       (state.draft || state.design.layout.features.length)) {
     enforceBinMinimumSoon();

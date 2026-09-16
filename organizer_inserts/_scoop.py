@@ -14,12 +14,13 @@ from organizer_engine import (
 )
 
 from ._core import (
+    CARTRIDGE_PITCH,
     EDITOR_SNAP,
     Feature,
     Zone,
     connector_keep_out,
     layout_zone,
-    snapped_zone,
+    snap_value,
 )
 from ._registry import (
     OptionDefinition,
@@ -113,10 +114,12 @@ def scoop_zone(
         depth_percent = default_depth
     height = (box.z - base_z) * depth_percent / 100.0
     run = min(max(height, snap), bounds.depth / 2.0)
-    return snapped_zone(
-        Zone(bounds.x0, bounds.y0, bounds.x1, bounds.y0 + run),
-        box, mode, snap,
-    )
+    pitch = CARTRIDGE_PITCH if mode == "cartridge" else snap
+    run = min(bounds.depth, max(pitch, snap_value(run, pitch)))
+    # Width is not an editable size: the Scoop owns the exact bin width. Do
+    # not round that derived dimension through snapped_zone(), which can round
+    # a fractional usable width outward and falsely reject a valid custom wall.
+    return Zone(bounds.x0, bounds.y0, bounds.x1, bounds.y0 + run)
 
 
 @defaults("scoop")

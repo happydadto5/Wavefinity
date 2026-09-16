@@ -1822,7 +1822,11 @@ def default_feature(
         width = _starter_span(bounds.width, 16.0, mode)
         depth = _starter_span(bounds.depth, 16.0, mode)
     raw = Zone(-width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0)
-    one_zone = snapped_zone(raw, box, mode)
+    # Browser Dividers have no user-sized footprint: their zone is the exact
+    # bin floor and must keep following it when Width, Length, or wall depth
+    # changes. Snapping this derived zone can leave it stale or slightly
+    # short; ordinary parts still use the editor grid below.
+    one_zone = bounds if kind == "divider" else snapped_zone(raw, box, mode)
     if kind == "scoop":
         one = Feature(kind, one_zone, along=along, options=feature_options)
         one_zone = scoop_zone(
@@ -2080,8 +2084,18 @@ def design_from_dict(
     layout = layout_from_dict(data.get("layout", {}))
     base_z = base_height(box, layout.mode)
     layout = replace(layout, features=tuple(
+        replace(
+            normalize_divider_scoop(box, one, base_z),
+            zone=layout_zone(box, layout.mode),
+        )
+        if one.kind == "divider" and one.full_span else
         normalize_divider_scoop(box, one, base_z)
-        if one.kind == "divider" else one
+        if one.kind == "divider" else
+        replace(
+            one,
+            zone=scoop_zone(box, one, base_z, layout.mode, layout.snap),
+        )
+        if one.kind == "scoop" else one
         for one in layout.features
     ))
     label = str(data.get("label", ""))

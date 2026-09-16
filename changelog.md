@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-15 — Bin-following parts stay synchronized
+
+- Changing bin Width, Length, height, or wall thickness now updates the
+  selected part before validating the full preview, so fast wheel changes do
+  not expose a stale Divider or Curved Scoop footprint as a false error.
+- Full-span Dividers and Curved Scoops are normalized against the current bin
+  whenever a design is read, including unselected parts and reopened designs.
+
 ## 2026-09-15 — Clearer bin-size fields
 
 - Width and Length now read compactly as `64mm (8X 60mm inside)` after you
