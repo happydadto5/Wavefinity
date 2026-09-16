@@ -124,6 +124,9 @@ const state = {
   nestCornerTipDismissed: false,
   nestOutlineTool: "select",    // "select" | "add-point" | "delete-point"
   nestAccessWarningShown: null, // last access-planner warning already toasted
+  nestViewZoom: 1,              // dedicated outline-editor viewport zoom (1 = fitted)
+  nestViewPanX: 0,               // viewport pan, in canvas pixels, on top of the fit
+  nestViewPanY: 0,
   nudgeFeedback: null,
 };
 
@@ -2293,6 +2296,11 @@ async function selectedFeature(index, force = false) {
   state.selected = index;
   state.nudgeFeedback = null;
   updateNudgeUI();
+  // A fresh selection starts the outline editor's viewport fitted again,
+  // rather than carrying over whatever zoom/pan the previous part left set.
+  state.nestViewZoom = 1;
+  state.nestViewPanX = 0;
+  state.nestViewPanY = 0;
   state.draft = clone(state.design.layout.features[index]);
   state.draftTouched = false;
   state.draftAutoCommit = true;
@@ -2614,18 +2622,6 @@ function renderNestFields(one) {
     { unit: "mm", step: "0.1", min: "0" },
   );
 
-  html += field(
-    "Soften outline",
-    "option:smoothing",
-    fmt(val("smoothing", 0)),
-    {
-      unit: "mm",
-      step: "1",
-      min: "0",
-      tip: "Rounds off small jags in the accepted outline.",
-    },
-  );
-
   html += `</div>`;
 
   // Bin. Read straight from the stored option, never the resolved fallback:
@@ -2636,15 +2632,11 @@ function renderNestFields(one) {
     + "Turn off to size the bin by hand with the usual Width/Length/Height controls.",
     opt.auto_size === true, { wide: true });
 
-  // Outline.
+  // Outline shape (Soften outline, manual point editing, zoom/pan, Finish
+  // Editing) lives in the 2D view's own Outline editor panel now - editing
+  // the outline is done looking directly at it, not from this sidebar.
   if (one.contour) {
-    html += `<p class="photo-measurement">Outline ready — drag its points over the photo in 2D to reshape it.</p>`;
-    html += `<fieldset class="wide"><legend>Outline editor</legend><div class="segmented three">
-      <label><input type="radio" name="nest-outline-tool" value="select" ${state.nestOutlineTool === "select" ? "checked" : ""}><span>Select/Edit</span></label>
-      <label><input type="radio" name="nest-outline-tool" value="add-point" ${state.nestOutlineTool === "add-point" ? "checked" : ""}><span>Add Point</span></label>
-      <label><input type="radio" name="nest-outline-tool" value="delete-point" ${state.nestOutlineTool === "delete-point" ? "checked" : ""}><span>Delete Point</span></label>
-    </div></fieldset>`;
-    html += `<button type="button" class="button secondary" data-action="nest-reset-outline">Reset outline</button>`;
+    html += `<p class="photo-measurement">Outline ready — open the 2D view's Outline editor to reshape it.</p>`;
   }
   return html;
 }
@@ -3226,15 +3218,21 @@ function syncNest2DWorkspace() {
     isNest
     && Array.isArray(state.nestPaperCorners)
     && Boolean(state.nestOriginalImage);
-  const showScan =
-    isNest
-    && Boolean(state.nestRectifiedImage)
-    && !recoveryActive;
+  // The dedicated outline editor owns the canvas once there is an outline to
+  // show - a photo/scan session, or (a design reopened without its photo) an
+  // already-committed contour - not only while scan-tuning is active, so
+  // manual point editing, Soften outline and Finish Editing stay reachable
+  // either way. A brand new Nest with neither yet still gets the ordinary
+  // full-width bin view, matching its Choose Photo control in the sidebar.
+  const hasPhotoSession = isNest && !recoveryActive && Boolean(state.nestRectifiedImage);
+  const editingOutline = isNest && !recoveryActive
+    && (hasPhotoSession || Boolean(state.draft.contour?.length));
+  const hasContour = editingOutline && Boolean(state.draft.contour?.length);
 
   recovery.hidden = !recoveryActive;
   canvas.hidden = recoveryActive;
-  if (layoutControls) layoutControls.hidden = recoveryActive;
-  wrap.classList.toggle("nest-scan-active", showScan);
+  if (layoutControls) layoutControls.hidden = recoveryActive || editingOutline;
+  wrap.classList.toggle("nest-scan-active", editingOutline);
 
   if (recoveryActive) {
     scanPanel.hidden = true;
@@ -3264,26 +3262,45 @@ function syncNest2DWorkspace() {
     return;
   }
 
-  scanPanel.hidden = !showScan;
+  scanPanel.hidden = !editingOutline;
 
-  if (!showScan) return;
+  if (!editingOutline) return;
 
-  const opacity = $("#nest-photo-opacity-range");
-  const sensitivity = $("#nest-sensitivity-range");
-  const cleanup = $("#nest-cleanup-range");
+  const photoControls = $("#nest-scan-photo-controls");
+  if (photoControls) photoControls.hidden = !hasPhotoSession;
 
-  opacity.value = String(state.nestPhotoOpacity);
-  sensitivity.value = String(state.nestSensitivity);
-  cleanup.value = String(state.nestCleanup);
+  if (hasPhotoSession) {
+    const opacity = $("#nest-photo-opacity-range");
+    const sensitivity = $("#nest-sensitivity-range");
+    const cleanup = $("#nest-cleanup-range");
 
-  $("#nest-photo-opacity-value").textContent =
-    `${Math.round(state.nestPhotoOpacity)}%`;
-  $("#nest-sensitivity-value").textContent =
-    String(Math.round(state.nestSensitivity));
-  $("#nest-cleanup-value").textContent =
-    String(Math.round(state.nestCleanup));
+    opacity.value = String(state.nestPhotoOpacity);
+    sensitivity.value = String(state.nestSensitivity);
+    cleanup.value = String(state.nestCleanup);
 
-  $("#nest-scan-apply").disabled = !state.nestCandidateContour;
+    $("#nest-photo-opacity-value").textContent =
+      `${Math.round(state.nestPhotoOpacity)}%`;
+    $("#nest-sensitivity-value").textContent =
+      String(Math.round(state.nestSensitivity));
+    $("#nest-cleanup-value").textContent =
+      String(Math.round(state.nestCleanup));
+  }
+
+  const softenInput = $("#nest-soften-input");
+  if (softenInput && document.activeElement !== softenInput) {
+    softenInput.value = fmt(number(state.draft.options?.smoothing, 0));
+  }
+
+  const outlineTools = $("#nest-outline-tools");
+  if (outlineTools) outlineTools.hidden = !hasContour;
+  $$('input[name="nest-outline-tool"]').forEach(input => {
+    input.checked = input.value === state.nestOutlineTool;
+  });
+
+  const viewportTools = $("#nest-viewport-tools");
+  if (viewportTools) viewportTools.hidden = !hasContour;
+
+  $("#nest-scan-apply").disabled = !hasContour && !state.nestCandidateContour;
   $("#nest-scan-status").textContent = state.nestTuneStatus || "";
 }
 
@@ -3431,7 +3448,40 @@ function wireNest2DControls() {
     queueNestRetrace("Restoring default scan settings…");
   });
 
-  $("#nest-scan-apply")?.addEventListener("click", acceptNestTrace);
+  $("#nest-scan-apply")?.addEventListener("click", finishNestEditing);
+
+  // Soften outline lives in this panel now, not the sidebar, so it cannot
+  // use the generic data-draft wiring (scoped to #draft-fields) - commit it
+  // directly, the same way other one-off nest fields already do.
+  $("#nest-soften-input")?.addEventListener("input", event => {
+    if (state.draft?.kind !== "nest") return;
+    markDraftChanged();
+    state.draft.options ||= {};
+    const raw = event.target.value.trim();
+    if (raw === "") delete state.draft.options.smoothing;
+    else state.draft.options.smoothing = Math.max(0, number(raw, 0));
+    state.draftAutoCommit = true;
+    renderLayout2D();
+    refreshDraftSoon();
+  });
+
+  $$('input[name="nest-outline-tool"]').forEach(input => input.addEventListener("change", () => {
+    state.nestOutlineTool = input.value;
+    renderLayout2D();
+  }));
+
+  $("#nest-reset-outline")?.addEventListener("click", resetNestOutline);
+
+  $("#nest-zoom-in")?.addEventListener("click", () => nestZoomBy(1.4));
+  $("#nest-zoom-out")?.addEventListener("click", () => nestZoomBy(1 / 1.4));
+  $("#nest-zoom-fit")?.addEventListener("click", resetNestView);
+
+  $("#preview-2d")?.addEventListener("wheel", event => {
+    if (!isNestEditWorkspaceActive()) return;
+    event.preventDefault();
+    const point = canvasPointFromEvent(event.currentTarget, event);
+    nestZoomBy(Math.exp(-event.deltaY * .001), point);
+  }, { passive: false });
 
   $("#nest-corners-clear")?.addEventListener("click", () => {
     if (state.nestCornerBusy) return;
@@ -3504,12 +3554,6 @@ function wireNestFieldActions() {
     updateSelectionButtons();
     refreshDraftSoon();
   });
-  const resetOutline = $('[data-action="nest-reset-outline"]', fields);
-  if (resetOutline) resetOutline.addEventListener("click", resetNestOutline);
-  $$('input[name="nest-outline-tool"]', fields).forEach(input => input.addEventListener("change", () => {
-    state.nestOutlineTool = input.value;
-    renderLayout2D();
-  }));
 }
 
 async function resetNestOutline() {
@@ -3552,7 +3596,7 @@ const requestNestRetrace = debounce(async () => {
     const delta = [candidateCenter[0] - accepted[0], candidateCenter[1] - accepted[1]];
     state.nestCandidateContour = result.contour.map(([x, y]) => [x + delta[0], y + delta[1]]);
     state.nestCandidateCenterMm = candidateCenter;
-    state.nestTuneStatus = `Candidate: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm — press Apply adjusted outline to accept.`;
+    state.nestTuneStatus = `Candidate: ${fmt(result.outline.width)} × ${fmt(result.outline.depth)} mm — press Finish Editing to accept.`;
   } catch (error) {
     if (request !== state.nestRetraceRequest) return;
     // Failed retrace is non-destructive (spec section 34): keep the accepted
@@ -3565,6 +3609,20 @@ const requestNestRetrace = debounce(async () => {
   syncNest2DWorkspace();
   renderLayout2D();
 }, 300);
+
+// "Finish Editing": commit any pending scan-tuning candidate exactly as
+// Apply always did, then - once a real nest feature exists to show - leave
+// the dedicated outline editor and switch straight to the 3D view, which
+// already highlights the selected part live (spec: "Nested 2D Outline
+// Editing"). Still mid-trace (no Tool thickness yet)? There is nothing to
+// build yet, so stay in 2D instead of jumping to an empty selection.
+async function finishNestEditing() {
+  const one = state.draft;
+  if (!one || one.kind !== "nest") return;
+  if (state.nestCandidateContour) await acceptNestTrace();
+  if (!state.draft?.contour?.length) return;
+  activatePreviewView("3d");
+}
 
 async function acceptNestTrace() {
   const one = state.draft;
@@ -6858,6 +6916,123 @@ function drawPendingNestTrace(context, width, height) {
   return true;
 }
 
+// Whether the dedicated outline-editor workspace should own the 2D canvas
+// right now: an already-committed Photo Nest feature is open for editing.
+// The pre-commit "waiting on Tool thickness" case is handled above by
+// drawPendingNestTrace instead, since it has no manual-edit handles yet.
+function isNestEditWorkspaceActive() {
+  return state.draft?.kind === "nest" && Boolean(state.draft.contour?.length);
+}
+
+// The dedicated 2D outline editor (spec: "Nested 2D Outline Editing"): the
+// nest's own photo, outline and edit handles, fitted then zoomed/panned to
+// fill the whole canvas. None of the bin's walls, grid or other parts are
+// relevant to "what shape is this object?" and are deliberately not drawn
+// here - see renderLayout2D's early return. Reuses the ordinary
+// state.layoutTransform contract, so the existing point-drag and
+// hit-testing code keeps working unchanged at any zoom/pan.
+function drawNestEditWorkspace(context, width, height) {
+  if (!isNestEditWorkspaceActive()) return false;
+  const index = state.selected;
+  const dragging = state.layoutDrag?.mode === "point" && state.layoutDrag.index === index;
+  const feature = dragging ? state.layoutDrag.feature : state.draft;
+  const softContour = dragging ? null : state.preview?.nest_soft_contours?.[index];
+  const outlineWorld = nestOutlineWorld(feature, softContour);
+  // The viewport fit is taken from the stable committed draft, never the
+  // live drag copy - a point being dragged toward the current edge of the
+  // outline must not rescale the view out from under the pointer mid-drag.
+  const fitOutlineWorld = dragging ? nestOutlineWorld(state.draft, softContour) : outlineWorld;
+  const xs = fitOutlineWorld.map(point => point[0]);
+  const ys = fitOutlineWorld.map(point => point[1]);
+  if (state.nestPhoto?.bounds) {
+    const [x0, y0, x1, y1] = state.nestPhoto.bounds;
+    for (const corner of [[x0, y0], [x0, y1], [x1, y0], [x1, y1]]) {
+      const at = nestLocalToWorld(state.draft, corner);
+      xs.push(at[0]); ys.push(at[1]);
+    }
+  }
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const spanX = Math.max(1, maxX - minX), spanY = Math.max(1, maxY - minY);
+  const pad = Math.max(24, Math.min(width, height) * .08);
+  const fitScale = Math.min((width - 2 * pad) / spanX, (height - 2 * pad) / spanY);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  // Snapshot the pure (zoom-independent) fit so the zoom controls can
+  // convert a canvas point to world space and back without re-deriving it.
+  state.nestFit = { cx, cy, fitScale, width, height };
+  const zoom = Math.max(.5, Math.min(12, number(state.nestViewZoom, 1)));
+  const panX = number(state.nestViewPanX, 0), panY = number(state.nestViewPanY, 0);
+  const scale = fitScale * zoom;
+  const toCanvas = ([x, y]) => [
+    width / 2 + (number(x) - cx) * scale + panX,
+    height / 2 - (number(y) - cy) * scale + panY,
+  ];
+  const toWorld = ([px, py]) => [
+    cx + (px - width / 2 - panX) / scale,
+    cy - (py - height / 2 - panY) / scale,
+  ];
+  state.layoutTransform = { toCanvas, toWorld, scale };
+
+  drawNestPhotoReference(context, feature, toCanvas);
+
+  const outline = drawClosedPath(context, outlineWorld, toCanvas);
+  context.fillStyle = kindColor("nest") + "35";
+  context.fill(outline);
+  context.save();
+  context.strokeStyle = "rgba(255,255,255,.95)";
+  context.lineWidth = 7;
+  context.stroke(outline);
+  context.strokeStyle = "#145d76";
+  context.lineWidth = 3;
+  context.stroke(outline);
+  context.restore();
+
+  if (state.nestCandidateContour?.length) {
+    const candidateWorld = state.nestCandidateContour.map(point => nestLocalToWorld(feature, point));
+    const candidatePath = drawClosedPath(context, candidateWorld, toCanvas);
+    context.save();
+    context.strokeStyle = "rgba(255,255,255,.95)";
+    context.lineWidth = 8;
+    context.stroke(candidatePath);
+    context.setLineDash([6, 4]);
+    context.strokeStyle = "#007ca8";
+    context.lineWidth = 4;
+    context.stroke(candidatePath);
+    context.restore();
+  }
+
+  drawNestAccessIndicators(context, state.preview?.nest_access?.[index], toCanvas);
+  drawNestContourHandles(context, feature, toCanvas);
+  return true;
+}
+
+// Zoom the dedicated outline editor, keeping the world point under
+// canvasPoint (or the viewport centre, for the +/- buttons) fixed on
+// screen - this is what makes wheel-zoom feel centred on the cursor.
+// Purely a viewport change: never touches the contour itself.
+function nestZoomBy(factor, canvasPoint = null) {
+  if (!isNestEditWorkspaceActive() || !state.nestFit) return;
+  const fit = state.nestFit;
+  const point = canvasPoint || [fit.width / 2, fit.height / 2];
+  const oldZoom = Math.max(.5, Math.min(12, number(state.nestViewZoom, 1)));
+  const newZoom = Math.max(.5, Math.min(12, oldZoom * factor));
+  const oldScale = fit.fitScale * oldZoom;
+  const worldX = fit.cx + (point[0] - fit.width / 2 - number(state.nestViewPanX, 0)) / oldScale;
+  const worldY = fit.cy - (point[1] - fit.height / 2 - number(state.nestViewPanY, 0)) / oldScale;
+  const newScale = fit.fitScale * newZoom;
+  state.nestViewZoom = newZoom;
+  state.nestViewPanX = point[0] - fit.width / 2 - (worldX - fit.cx) * newScale;
+  state.nestViewPanY = point[1] - fit.height / 2 + (worldY - fit.cy) * newScale;
+  renderLayout2D();
+}
+
+function resetNestView() {
+  state.nestViewZoom = 1;
+  state.nestViewPanX = 0;
+  state.nestViewPanY = 0;
+  renderLayout2D();
+}
+
 // Informational-only markers for the server's resolved access plan (spec
 // section 46) - a small ring for each point, filled for a scoop (Recessed),
 // hollow for a notch (Raised Wall). Draws nothing when access is off, and
@@ -7359,6 +7534,7 @@ function renderLayout2D() {
   const { context, width, height } = canvasSize(canvas);
   context.clearRect(0, 0, width, height);
   if (drawPendingNestTrace(context, width, height)) return;
+  if (drawNestEditWorkspace(context, width, height)) return;
   const bounds = state.preview.layout_bounds;
   const worldWidth = bounds[2] - bounds[0], worldHeight = bounds[3] - bounds[1];
   const layoutYaw = (state.layoutOrientation === "topup" ? 0 : state.camera.yaw) * Math.PI / 180;
@@ -7929,6 +8105,20 @@ function wireLayoutInteraction() {
     pointerActive = true;
     const world = layoutPoint(event);
     let index = hitFeature(world);
+    // In the dedicated outline editor, a click that misses the outline/photo
+    // pans the view instead of deselecting - there is nothing else on this
+    // canvas to click, so a miss is never "click away to close".
+    if (index === null && isNestEditWorkspaceActive()) {
+      pointerActive = false;
+      state.layoutDrag = {
+        mode: "pan",
+        startCanvas: canvasPointFromEvent(canvas, event),
+        startPanX: state.nestViewPanX,
+        startPanY: state.nestViewPanY,
+      };
+      try { canvas.setPointerCapture(event.pointerId); } catch (_error) {}
+      return;
+    }
     if (index === null) {
       if (state.selected !== null) {
         if (!(await guardDraftSwitch())) return;
@@ -8033,6 +8223,13 @@ function wireLayoutInteraction() {
     }
     const drag = state.layoutDrag;
     if (!drag || !state.layoutTransform) return;
+    if (drag.mode === "pan") {
+      const point = canvasPointFromEvent(canvas, event);
+      state.nestViewPanX = drag.startPanX + (point[0] - drag.startCanvas[0]);
+      state.nestViewPanY = drag.startPanY + (point[1] - drag.startCanvas[1]);
+      renderLayout2D();
+      return;
+    }
     const world = layoutPoint(event);
     const pitch = state.design.layout.mode === "cartridge" ? 8 : 1;
     const snap = value => Math.round(value / pitch) * pitch;

@@ -288,60 +288,96 @@
       <div class="canvas-wrap" data-canvas="2d">
         <canvas id="preview-2d" role="img" aria-label="Top-down layout preview" aria-describedby="preview-help layout-help"></canvas>
         <div id="nest-scan-controls" class="nest-scan-controls" hidden>
-          <div class="nest-scan-controls-title">Scan controls</div>
+          <div class="nest-scan-controls-title">Outline editor</div>
 
-          <label class="nest-scan-range">
+          <div id="nest-scan-photo-controls">
+            <label class="nest-scan-range">
+              <span>
+                <strong>Photo opacity</strong>
+                <output id="nest-photo-opacity-value">45%</output>
+              </span>
+              <input id="nest-photo-opacity-range"
+                     type="range"
+                     min="0"
+                     max="100"
+                     step="1"
+                     value="45">
+            </label>
+
+            <label class="nest-scan-range">
+              <span>
+                <strong>Object sensitivity</strong>
+                <output id="nest-sensitivity-value">50</output>
+              </span>
+              <input id="nest-sensitivity-range"
+                     type="range"
+                     min="0"
+                     max="100"
+                     step="1"
+                     value="50">
+              <small><span>Less object</span><span>More object</span></small>
+            </label>
+
+            <label class="nest-scan-range">
+              <span>
+                <strong>Edge cleanup</strong>
+                <output id="nest-cleanup-value">50</output>
+              </span>
+              <input id="nest-cleanup-range"
+                     type="range"
+                     min="0"
+                     max="100"
+                     step="1"
+                     value="50">
+              <small><span>More detail</span><span>Smoother</span></small>
+            </label>
+
+            <div class="nest-scan-actions">
+              <button id="nest-scan-defaults"
+                      type="button"
+                      class="button secondary">
+                Restore scan defaults
+              </button>
+            </div>
+          </div>
+
+          <label class="nest-scan-number">
             <span>
-              <strong>Photo opacity</strong>
-              <output id="nest-photo-opacity-value">45%</output>
+              <strong>Soften outline</strong>
+              <span class="nest-scan-number-input">
+                <input id="nest-soften-input" type="number" min="0" step="1" value="0">
+                <span class="unit">mm</span>
+              </span>
             </span>
-            <input id="nest-photo-opacity-range"
-                   type="range"
-                   min="0"
-                   max="100"
-                   step="1"
-                   value="45">
+            <small>Rounds off small jags in the accepted outline. Feeds the 3D shape directly.</small>
           </label>
 
-          <label class="nest-scan-range">
-            <span>
-              <strong>Object sensitivity</strong>
-              <output id="nest-sensitivity-value">50</output>
-            </span>
-            <input id="nest-sensitivity-range"
-                   type="range"
-                   min="0"
-                   max="100"
-                   step="1"
-                   value="50">
-            <small><span>Less object</span><span>More object</span></small>
-          </label>
+          <div id="nest-outline-tools">
+            <div class="nest-scan-controls-title">Manual editing</div>
+            <small>Drag a point to move it, over the photo, at any zoom level.</small>
+            <fieldset><div class="segmented three">
+              <label><input type="radio" name="nest-outline-tool" value="select"><span>Select/Edit</span></label>
+              <label><input type="radio" name="nest-outline-tool" value="add-point"><span>Add Point</span></label>
+              <label><input type="radio" name="nest-outline-tool" value="delete-point"><span>Delete Point</span></label>
+            </div></fieldset>
+            <button id="nest-reset-outline" type="button" class="button secondary">Reset outline</button>
+          </div>
 
-          <label class="nest-scan-range">
-            <span>
-              <strong>Edge cleanup</strong>
-              <output id="nest-cleanup-value">50</output>
-            </span>
-            <input id="nest-cleanup-range"
-                   type="range"
-                   min="0"
-                   max="100"
-                   step="1"
-                   value="50">
-            <small><span>More detail</span><span>Smoother</span></small>
-          </label>
+          <div id="nest-viewport-tools">
+            <div class="nest-scan-controls-title">Viewport</div>
+            <div class="nest-zoom-controls">
+              <button id="nest-zoom-out" type="button" class="button secondary" aria-label="Zoom out">−</button>
+              <button id="nest-zoom-fit" type="button" class="button secondary">Fit</button>
+              <button id="nest-zoom-in" type="button" class="button secondary" aria-label="Zoom in">+</button>
+            </div>
+            <small>Mouse wheel zooms; drag empty space to pan.</small>
+          </div>
 
           <div class="nest-scan-actions">
-            <button id="nest-scan-defaults"
-                    type="button"
-                    class="button secondary">
-              Restore scan defaults
-            </button>
             <button id="nest-scan-apply"
                     type="button"
-                    class="button primary"
-                    disabled>
-              Apply adjusted outline
+                    class="button primary">
+              Finish Editing
             </button>
           </div>
 

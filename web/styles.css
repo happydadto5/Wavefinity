@@ -169,11 +169,75 @@ button { color: inherit; }
   display: grid;
   grid-template-columns: 1fr;
   gap: 6px;
+  margin-top: 4px;
 }
 
 .nest-scan-actions .button {
   padding: 8px 10px;
   font-size: 12px;
+}
+
+.nest-scan-number {
+  display: block;
+  margin: 12px 0 9px;
+}
+
+.nest-scan-number > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nest-scan-number-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nest-scan-number-input input {
+  width: 56px;
+}
+
+.nest-scan-number small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+#nest-outline-tools,
+#nest-viewport-tools {
+  margin: 12px 0;
+}
+
+#nest-outline-tools small,
+#nest-viewport-tools small {
+  display: block;
+  margin: 4px 0 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+#nest-outline-tools .button {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.nest-zoom-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.nest-zoom-controls .button {
+  padding: 6px 4px;
+  font-size: 13px;
+  font-weight: 760;
 }
 
 .nest-scan-status {
