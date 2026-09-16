@@ -1284,5 +1284,13 @@ dialog:not([open]) { display: none; }
   line-height: 1.45;
   color: var(--teal-dark);
 }
-.part-name-row { display: block; margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink); }
-.part-name-row input { margin-top: 4px; }
+.part-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.part-name-row input { margin: 0; flex: 1; font-size: 14px; font-weight: 650; color: var(--ink); }

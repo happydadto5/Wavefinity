@@ -928,9 +928,9 @@ function applyB4BVisibility() {
   if (xLabel) xLabel.textContent = on ? "Width (Inside)" : "Width";
   if (yLabel) yLabel.textContent = on ? "Length (Inside)" : "Length";
   if (zLabel) zLabel.textContent = on ? "Height (Inside)" : "Height";
-  // One Name field: B4B's own, or the ordinary Part name row - never both.
-  const partNameRow = $(".part-name-row");
-  if (partNameRow) partNameRow.hidden = on;
+  // One Name field for both bin kinds; only its label changes.
+  const partNameLabel = $("#part-name-label");
+  if (partNameLabel) partNameLabel.textContent = on ? "Bin for Bins Name" : "Bin Name";
   if (on) {
     // The handle is front-mounted body hardware now, so stacking is no longer
     // a reason to refuse it. What it does still need is a lid that latches,
@@ -1016,7 +1016,6 @@ function syncB4BForm() {
     $("#b4b-label-location").value = "none";
   }
   $("#b4b-front-label-style").value = b4b.front_label_style === "wavy" ? "wavy" : "flat";
-  $("#b4b-part-name").value = state.design?.part_name || "";
   normalizeB4BDependentControls();
   applyB4BVisibility();
 }
@@ -1914,14 +1913,6 @@ function wireControls() {
   });
   $("#b4b-label-text").addEventListener("input", () => {
     seedPartNameFromLabel($("#b4b-label-text").value);
-    state.canGenerate = false; updateGenerateAvailability(); changedDesign();
-  });
-  // The B4B Name field is design.part_name under a different label: mirror
-  // into the existing #part-name input, which every other codepath already
-  // reads (checkPartNamePresent, updateDesignFromForm, designHasChanges).
-  $("#b4b-part-name").addEventListener("input", () => {
-    $("#part-name").value = $("#b4b-part-name").value;
-    if (state.design) state.design.part_name = $("#b4b-part-name").value;
     state.canGenerate = false; updateGenerateAvailability(); changedDesign();
   });
 
@@ -4588,8 +4579,6 @@ function seedPartNameFromLabel(said) {
   const tidy = String(said ?? "").trim();
   if (!tidy || SIZE_LIKE_TEXT.test(tidy)) return;
   partInput.value = tidy;
-  const b4bInput = $("#b4b-part-name");
-  if (b4bInput) b4bInput.value = tidy;
   if (state.design) state.design.part_name = tidy;
 }
 
@@ -4893,7 +4882,7 @@ function mutationControls() {
     '#x-size, #y-size, #z, #base-thickness, #wall-thickness, #part-name, ' +
     '#lift-grabber-size, #lift-grabber-location, #connector-height-mode, ' +
     '#mode-select, ' +
-    '#b4b-part-name, #b4b-stacking, #b4b-handle, #b4b-label-location, #b4b-latch-count, #b4b-front-label-style, ' +
+    '#b4b-stacking, #b4b-handle, #b4b-label-location, #b4b-latch-count, #b4b-front-label-style, ' +
     '#new-design, #open-design, #save-design'
   );
 }

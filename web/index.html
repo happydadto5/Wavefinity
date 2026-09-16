@@ -36,6 +36,9 @@
                 <option value="b4b">Bin for Bins</option>
               </select>
             </label>
+            <label class="part-name-row"><span id="part-name-label">Bin Name</span>
+              <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
+            </label>
             <span id="stack-note" class="stack-note" hidden></span>
             <span id="b4b-size-note" class="stack-note" hidden></span>
           </div>
@@ -70,9 +73,6 @@
             <div class="b4b-card">
               <h3 class="b4b-card-title">Options</h3>
               <div class="b4b-options-grid">
-                <label style="grid-column:1;grid-row:1">Name
-                  <input id="b4b-part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
-                </label>
                 <!-- Wall thickness (col 2) and Base thickness (col 3) are the
                      same single shared controls the ordinary bin uses; JS
                      relocates them here while B4B is active. See
@@ -192,9 +192,6 @@
       </section>
 
       <section class="output-panel">
-        <label class="part-name-row">Part name
-          <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
-        </label>
         <div class="save-location-row">
           <div class="save-location-group">
             <label for="output-folder">Save folder</label>
