@@ -350,6 +350,7 @@ class B4BSpec:
     latch_count: str = "auto"          # legacy only; derived from case width
     latch_strength: str = "standard"   # legacy only; derived from screw family
     lid_headroom_mm: float = 1.0       # UI: Lid snugness
+    label_enabled: bool = False
     label_text: str = ""
     label_location: str = "top"        # none | top | front
     front_label_style: str = "flat"    # flat | wavy; meaningful only when
@@ -417,6 +418,7 @@ class B4BSpec:
             latch_count=latch_count,
             latch_strength=latch_strength,
             lid_headroom_mm=self.lid_headroom_mm,
+            label_enabled=self.label_enabled,
             label_text=self.label_text,
             label_location=self.label_location,
             front_label_style=self.front_label_style,

@@ -59,6 +59,8 @@ const state = {
   folderSelected: false,
   folderMode: "design",
   activeSpace: null,
+  keepBinDefaults: false,
+  spaceBinDefaults: null,
   // Whether this folder logs generated bins/B4Bs to its inventory file - the
   // default for any folder, independent of whether Space planning is on.
   inventoryEnabled: true,
@@ -143,9 +145,22 @@ const VERSION_POLL_MS = 5000;
 // `undefined` - as a routine syncForm() refresh does - preserves whatever is
 // already in state.inventoryEnabled instead of silently resetting it: the
 // third argument is data about a folder, not a reset-to-default action.
-function setFolderState(mode = "design", space = null, inventory = undefined) {
+function setFolderState(
+  mode = "design",
+  space = null,
+  inventory = undefined,
+  keepBinDefaults = undefined,
+  binDefaults = undefined,
+) {
   state.folderMode = mode === "space" ? "space" : "design";
   state.activeSpace = state.folderMode === "space" ? (space || null) : null;
+  if (state.folderMode === "space") {
+    state.keepBinDefaults = keepBinDefaults === undefined ? true : Boolean(keepBinDefaults);
+    state.spaceBinDefaults = binDefaults && typeof binDefaults === "object" ? clone(binDefaults) : null;
+  } else {
+    state.keepBinDefaults = false;
+    state.spaceBinDefaults = null;
+  }
   const resolvedInventory = inventory === undefined ? state.inventoryEnabled : Boolean(inventory);
   // Space always keeps inventory - it is what the layout is built from.
   state.inventoryEnabled = state.folderMode === "space" ? true : resolvedInventory;
@@ -197,6 +212,54 @@ const CAMERA_VIEWS = {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function plainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeDesignDefaults(current, remembered) {
+  if (!plainObject(current) || !plainObject(remembered)) return clone(remembered);
+  const merged = clone(current);
+  for (const [key, value] of Object.entries(remembered)) {
+    merged[key] = plainObject(value) && plainObject(merged[key])
+      ? mergeDesignDefaults(merged[key], value)
+      : clone(value);
+  }
+  return merged;
+}
+
+function spaceBinDefaultsFromDesign(design) {
+  const snapshot = clone(design);
+  snapshot.part_name = "";
+  snapshot.label = "";
+  snapshot.label_position = "bottom";
+  if (snapshot.box?.b4b) {
+    const oldText = String(snapshot.box.b4b.label_text || "").trim();
+    snapshot.box.b4b.label_enabled = Boolean(snapshot.box.b4b.label_enabled || oldText);
+    snapshot.box.b4b.label_text = "";
+  }
+  snapshot.layout = snapshot.layout || {};
+  snapshot.layout.features = (snapshot.layout.features || [])
+    .filter(feature => feature?.kind === "text" && feature.options?.level === "rim")
+    .slice(0, 1)
+    .map(feature => {
+      const copy = clone(feature);
+      copy.options = { ...(copy.options || {}), text: "" };
+      return copy;
+    });
+  return snapshot;
+}
+
+function freshDesignForCurrentFolder() {
+  const current = clone(state.catalog.defaults.design);
+  if (state.folderMode !== "space" || !state.keepBinDefaults || !state.spaceBinDefaults) return current;
+  return spaceBinDefaultsFromDesign(mergeDesignDefaults(current, state.spaceBinDefaults));
+}
+
+async function rememberGeneratedSpaceBin(design) {
+  if (state.folderMode !== "space" || !state.keepBinDefaults || typeof SP === "undefined") return;
+  await SP.updateBinDefaults({ snapshot: spaceBinDefaultsFromDesign(design) });
 }
 
 function pinDraftAxis(axis) {
@@ -697,7 +760,13 @@ function syncForm() {
     ? (state.browserFolder?.name || "Select a folder...")
     : state.output;
   // A routine form refresh must not touch the folder's inventory setting.
-  setFolderState(state.folderMode, state.activeSpace, state.inventoryEnabled);
+  setFolderState(
+    state.folderMode,
+    state.activeSpace,
+    state.inventoryEnabled,
+    state.keepBinDefaults,
+    state.spaceBinDefaults,
+  );
   $("#connector-tolerance").value = fmt(state.connector.tolerance);
   $("#connector-length").value = fmt(state.connector.length);
   const armThicknessEl = $("#connector-arm-thickness");
@@ -791,7 +860,7 @@ function updateInteriorModeVisibility(reveal = false) {
 
 const B4B_DEFAULTS = {
   enabled: false, lid: true, secure_lid: true, latch_count: "auto",
-  latch_strength: "standard", lid_headroom_mm: 1, label_text: "",
+  latch_strength: "standard", lid_headroom_mm: 1, label_enabled: false, label_text: "",
   label_location: "top", front_label_style: "flat", stacking: false, handle: false,
 };
 const LIFT_GRABBER_DEFAULTS = { enabled: false, size: "medium", location: "sides" };
@@ -1009,8 +1078,9 @@ function syncB4BForm() {
   // to No label stays in the (hidden) field for this session, so switching
   // back to Top/Front does not mean retyping it.
   const labelText = String(b4b.label_text || "");
-  if (labelText.trim()) {
-    $("#b4b-label-text").value = labelText;
+  const labelEnabled = Boolean(b4b.label_enabled || labelText.trim());
+  if (labelText.trim() || labelEnabled) $("#b4b-label-text").value = labelText;
+  if (labelEnabled) {
     $("#b4b-label-location").value = b4b.label_location === "front" ? "front" : "top";
   } else {
     $("#b4b-label-location").value = "none";
@@ -1137,6 +1207,7 @@ function readB4BForm(design) {
     latch_count: secure ? $("#b4b-latch-count").value : "auto",
     latch_strength: b4bState().latch_strength || "standard",
     lid_headroom_mm: parseFloat($("#b4b-lid-snugness").value) || 1,
+    label_enabled: $("#b4b-label-location").value !== "none",
     label_text: $("#b4b-label-location").value === "none" ? "" : $("#b4b-label-text").value,
     label_location: $("#b4b-label-location").value === "none"
       ? "top" : $("#b4b-label-location").value,
@@ -8505,7 +8576,7 @@ async function newDesign() {
   if (designHasChanges() && !window.confirm("Start a new design and discard the current changes?")) return;
   if (!beginDesignMutation()) return;
   const previousDesign = clone(state.design);
-  state.design = clone(state.catalog.defaults.design);
+  state.design = freshDesignForCurrentFolder();
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
   state.binResizePending = false;
@@ -8694,7 +8765,7 @@ async function generateParts(target) {
     await commitVisibleDraft();
 
     const payload = {
-      design: state.design,
+      design: clone(state.design),
       output: state.output,
       connector: state.connector,
       keep_log: state.keepLog,
@@ -8706,6 +8777,7 @@ async function generateParts(target) {
       const binResult = await api("/api/generate", payload);
       saveOutput = binResult.output || saveOutput;
       const binFiles = await saveGeneratedFiles(binResult);
+      await rememberGeneratedSpaceBin(payload.design);
       if (binResult.inventory_bin && state.inventoryEnabled && typeof SP !== "undefined") {
         await SP.addInventoryBin(binResult.inventory_bin);
       }
@@ -8805,13 +8877,14 @@ async function printModel(target = "bin") {
   try {
     await commitVisibleDraft();
     const payload = {
-      design: state.design,
+      design: clone(state.design),
       output: state.output,
       connector: state.connector,
       target: target,
       keep_log: state.keepLog,
     };
     const result = await api("/api/print", payload);
+    if (target === "bin" || target === "all") await rememberGeneratedSpaceBin(payload.design);
     const files = result.files || [];
     const fileNames = files.map(f => f.split(/[\\/]/).pop());
     toast(`Sent to ${slicerName}!\n${fileNames.join("\n")}`, false, 7000);

@@ -405,6 +405,52 @@ while it is active.
   location** shows the current folder and opens the folder picker, the same
   as the main editor's.
 
+## Parts and variables
+
+Wavefinity separates reusable **bin/shell intent** from **content placed inside
+the bin**. A future setting belongs in the reusable bin category when it changes
+the shell itself: mounting holes, exterior mounting, wall/base construction,
+lid/stacking, shell scoop, handles/grabbers, or bin-level label construction.
+A future ordinary `layout.feature` is interior content and does not belong.
+
+| Variable / feature | Space default? |
+|---|---|
+| Bin X/Y footprint | Yes |
+| Bin Z / height | Yes |
+| Wall thickness / Standard Walls | Yes |
+| Base thickness / Standard Base | Yes |
+| Bin/container type | Yes |
+| Stacking | Yes |
+| Lid configuration | Yes |
+| Handle / grabber / shell options | Yes |
+| Scoop / shell modifications | Yes |
+| B4B container configuration | Yes |
+| Label enabled/type/location/style | Yes |
+| Actual label text | **No — blank** |
+| Part/Bin name | **No — blank** |
+| Interior print/layout mode | Yes |
+| Divider or divider label | No |
+| Bore, cradle, post, pocket, slot, or steps | No |
+| Photo Nest / Nest | No |
+| Floor Text interior part | No |
+| Any future ordinary `layout.feature` | No |
+| Camera/view/editor/session state | No |
+| Connector-generation/session UI state | No |
+
+**Keep bin defaults** is per Space, never global. New and upgraded Spaces have
+it on but start with no snapshot, so New uses current Wavefinity defaults until
+a bin is successfully generated or printed. Editing, previewing, saving a
+design, generating only a connector, or opening an older design does not update
+the snapshot. Turning the option off keeps the stored snapshot; turning it back
+on resumes using it. New fields missing from an older snapshot come from the
+current Wavefinity defaults.
+
+The sanitized snapshot lives in the Space's `.wavefinity.json` folder metadata,
+now version 3. It copies the complete bin/shell configuration, blanks names and
+label wording, and discards interior content generically. A rim/bin label is the
+sole `layout.features` exception because it is shell-level label configuration;
+its configuration remains while its wording is cleared.
+
 ### Using the browser editor
 
 The browser editor is a three-step flow: **1. pick a shape** from the
@@ -546,6 +592,7 @@ default and is never exposed to the network.
 | `POST /api/preferences` | Persist sticky per-machine settings (currently the output folder) to `wavefinity_prefs.json`. |
 | `POST /api/folder/use` | Select or restore a local design folder, its inventory setting and optional Space metadata. |
 | `POST /api/folder/inventory` | Explicitly turn a local folder's inventory logging on or off. |
+| `POST /api/space/defaults` | Update a Space's Keep Defaults flag and/or sanitized bin snapshot. |
 | `POST /api/drawer/load`, `/api/drawer/save` | Read and update inventory/layout from a local path or browser-supplied text. |
 | `POST /api/space/create-text` | Let hosted browsers initialize Space inventory without giving the server a client path. |
 
@@ -564,10 +611,11 @@ chosen save folder and supplies inventory text to the same Python inventory
 engine used locally.
 
 **Save folders, inventory and Spaces are three separate ideas.** Every chosen
-folder gets an additive `.wavefinity.json` marker holding two independent
-settings: `inventory` (default `true`) is whether generated bins/B4Bs are
-logged, and `folder_mode` (`"design"` or `"space"`) is whether the folder also
-represents one physical drawer or storage box. `folder_mode: "space"` always
+folder gets an additive `.wavefinity.json` marker holding its folder mode,
+inventory choice, optional Space identity, and per-Space Keep Defaults state.
+`inventory` (default `true`) controls whether generated bins/B4Bs are logged;
+`folder_mode` (`"design"` or `"space"`) says whether the folder also represents
+one physical drawer or storage box. `folder_mode: "space"` always
 implies `inventory: true` - a Space's layout depends on the inventory it
 places. A normal `"design"` folder can have inventory on (the default for a
 new folder) or explicitly off (`/api/folder/inventory`, mirrored by the

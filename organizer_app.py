@@ -1925,6 +1925,7 @@ def design_to_dict(
             "latch_count": b4b.latch_count,
             "latch_strength": b4b.latch_strength,
             "lid_headroom_mm": b4b.lid_headroom_mm,
+            "label_enabled": b4b.label_enabled or bool(b4b.label_text.strip()),
             "label_text": b4b.label_text,
             "label_location": b4b.label_location,
             "front_label_style": b4b.front_label_style,
@@ -1983,6 +1984,7 @@ def design_from_dict(
         # Build the spec exactly as supplied - do NOT normalise yet.  Saved and
         # imported v2 JSON is authoritative user data: validate_b4b_design must
         # see any impossible combination before normalised() would rewrite it.
+        label_text = str(b4b_raw.get("label_text", ""))
         b4b = B4BSpec(
             enabled=True,
             lid=bool(b4b_raw.get("lid", True)),
@@ -1990,7 +1992,8 @@ def design_from_dict(
             latch_count=str(b4b_raw.get("latch_count", "auto")),
             latch_strength=str(b4b_raw.get("latch_strength", "standard")),
             lid_headroom_mm=float(b4b_raw.get("lid_headroom_mm", 1.0)),
-            label_text=str(b4b_raw.get("label_text", "")),
+            label_enabled=bool(b4b_raw.get("label_enabled", bool(label_text.strip()))),
+            label_text=label_text,
             label_location=str(b4b_raw.get("label_location", "top")),
             front_label_style=str(b4b_raw.get("front_label_style", "flat")),
             stacking=bool(b4b_raw.get("stacking", False)),

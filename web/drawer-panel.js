@@ -166,6 +166,7 @@ DP.build = () => {
           </div>
         </div>
       </div>
+      <label class="checkbox-row" title="New bins start with the bin settings from the last bin generated or printed in this Space. Interior parts and names start fresh."><span>Keep bin defaults</span><input id="dl-keep-bin-defaults" type="checkbox"></label>
       <div class="dl-save-row">
         <label class="checkbox-row" title="Save the layout to the inventory file after every change"><span>Auto-save</span><input id="dl-autosave" type="checkbox"></label>
         <span id="dl-save-status" class="dl-save-status" role="status"></span>
@@ -421,6 +422,9 @@ DP.wire = () => {
     DL.layout.settings.autosave = event.target.checked;
     DL.dirty = true;
     if (event.target.checked) DL.save(); else DL.emit();
+  });
+  $("#dl-keep-bin-defaults").addEventListener("change", event => {
+    SP.setKeepBinDefaults(event.target.checked);
   });
   $("#dl-save").addEventListener("click", () => DL.save());
   const outputFolderEl = $("#dl-output-folder");
@@ -821,6 +825,7 @@ DP.renderInventory = (force = false) => {
 
 DP.renderSave = () => {
   const settings = DL.layout.settings;
+  dlSet("#dl-keep-bin-defaults", Boolean(state.keepBinDefaults), "checked");
   dlSet("#dl-autosave", Boolean(settings.autosave), "checked");
   dlSet("#dl-output-folder", DL.output ?? DL.folder(), "value");
   const status = $("#dl-save-status");

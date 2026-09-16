@@ -10,7 +10,7 @@ const SP_KINDS = {
 };
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
-const FOLDER_METADATA_VERSION = 2;
+const FOLDER_METADATA_VERSION = 3;
 
 const spSame = (a, b) => {
   const tidy = path => String(path || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -66,7 +66,13 @@ SP.applyFolder = async (info, { reset = true } = {}) => {
   if (reset) await SP.resetDrawer();
   state.output = info.folder;
   state.folderSelected = true;
-  setFolderState(info.folder_mode, info.space, info.inventory);
+  setFolderState(
+    info.folder_mode,
+    info.space,
+    info.inventory,
+    info.keep_bin_defaults,
+    info.bin_defaults,
+  );
   syncForm();
 };
 
@@ -99,12 +105,22 @@ SP.classifyMetadata = record => {
   }
   const current = record.data;
   if (Number(current.version) > FOLDER_METADATA_VERSION) return { status: "unsupported" };
-  if (current.version !== FOLDER_METADATA_VERSION) return { status: "invalid" };
+  if (![2, FOLDER_METADATA_VERSION].includes(current.version)) return { status: "invalid" };
+  const needsMigration = current.version === 2;
   const explicitInventory = typeof current.inventory === "boolean" ? current.inventory : null;
-  if (current.folder_mode === "design") return { status: "design", inventory: explicitInventory };
+  if (current.folder_mode === "design") return { status: "design", inventory: explicitInventory, needsMigration };
   if (current.folder_mode === "space") {
     const space = SP.validSpace(current.space);
-    return space ? { status: "space", space, inventory: true } : { status: "invalid-space" };
+    if (!space) return { status: "invalid-space" };
+    if (needsMigration) {
+      return { status: "space", space, inventory: true, keep_bin_defaults: true, bin_defaults: null, needsMigration: true };
+    }
+    const keep = current.keep_bin_defaults === undefined ? true : current.keep_bin_defaults;
+    const defaults = current.bin_defaults === undefined ? null : current.bin_defaults;
+    if (typeof keep !== "boolean" || (defaults !== null && (typeof defaults !== "object" || Array.isArray(defaults)))) {
+      return { status: "invalid" };
+    }
+    return { status: "space", space, inventory: true, keep_bin_defaults: keep, bin_defaults: defaults, needsMigration: false };
   }
   return { status: "invalid" };
 };
@@ -126,12 +142,31 @@ SP.metadataError = status => {
   return new Error("This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged.");
 };
 
-SP.writeMetadata = async (handle, mode, space = null, inventory = true) => {
+SP.writeMetadata = async (handle, mode, space = null, inventory = true, changes = {}) => {
   if (!handle) return;
   // A Space's layout depends on the inventory, so it is never optional here.
-  const metadata = { version: 2, folder_mode: mode, inventory: mode === "space" ? true : Boolean(inventory) };
-  if (mode === "space" && space) metadata.space = space;
+  const metadata = { version: FOLDER_METADATA_VERSION, folder_mode: mode, inventory: mode === "space" ? true : Boolean(inventory) };
+  if (mode === "space" && space) {
+    let keep = true;
+    let defaults = null;
+    const { current } = await SP.readMetadata(handle);
+    const currentState = SP.classifyMetadata(current);
+    if (!["missing", "design", "space"].includes(currentState.status)) throw SP.metadataError(currentState.status);
+    if (currentState.status === "space") {
+      keep = currentState.keep_bin_defaults;
+      defaults = currentState.bin_defaults;
+    }
+    if (Object.hasOwn(changes, "keep_bin_defaults")) keep = Boolean(changes.keep_bin_defaults);
+    if (Object.hasOwn(changes, "bin_defaults")) defaults = changes.bin_defaults;
+    if (defaults !== null && (typeof defaults !== "object" || Array.isArray(defaults))) {
+      throw new Error("Bin defaults must be an object or null.");
+    }
+    metadata.space = space;
+    metadata.keep_bin_defaults = keep;
+    metadata.bin_defaults = defaults;
+  }
   await WFFileSystem.writeText(handle, FOLDER_METADATA, JSON.stringify(metadata, null, 2));
+  return metadata;
 };
 
 SP.inventoryRequest = async (path, extra = {}, { write = true } = {}) => {
@@ -197,14 +232,23 @@ SP.inspectHosted = async folder => {
   let mode;
   let space = null;
   let inventory = true;
+  let keepBinDefaults = true;
+  let binDefaults = null;
   let shouldWriteMetadata = false;
   if (genuineInventorySpace) {
     mode = "space";
     space = inventorySpace;
     shouldWriteMetadata = ["missing", "design", "space"].includes(currentState.status);
+    if (currentState.status === "space") {
+      keepBinDefaults = currentState.keep_bin_defaults;
+      binDefaults = currentState.bin_defaults;
+    }
   } else if (currentState.status === "space") {
     mode = "space";
     space = currentState.space;
+    keepBinDefaults = currentState.keep_bin_defaults;
+    binDefaults = currentState.bin_defaults;
+    shouldWriteMetadata = currentState.needsMigration;
   } else if (legacyState.status === "space") {
     // A stale or absent current "design" marker must not hide a genuine
     // legacy Space identity - a current "design" marker is not a positive
@@ -216,7 +260,7 @@ SP.inspectHosted = async folder => {
     mode = "design";
     // A folder saved before this preference existed keeps inventory on by default.
     inventory = currentState.inventory === null ? true : currentState.inventory;
-    shouldWriteMetadata = currentState.inventory === null;
+    shouldWriteMetadata = currentState.needsMigration || currentState.inventory === null;
   } else if (legacyState.status === "design") {
     mode = "design";
     shouldWriteMetadata = true;
@@ -239,13 +283,18 @@ SP.inspectHosted = async folder => {
     });
     await WFFileSystem.writeText(folder.handle, `${folder.name} bins.md`, result.inventory_text);
   }
-  if (shouldWriteMetadata) await SP.writeMetadata(folder.handle, mode, space, inventory);
+  if (shouldWriteMetadata) await SP.writeMetadata(folder.handle, mode, space, inventory, {
+    keep_bin_defaults: keepBinDefaults,
+    bin_defaults: binDefaults,
+  });
   return {
     folder: folder.name,
     folder_name: folder.name,
     folder_mode: mode,
     space,
     inventory: mode === "space" ? true : inventory,
+    keep_bin_defaults: mode === "space" ? keepBinDefaults : false,
+    bin_defaults: mode === "space" ? binDefaults : null,
     missing: false,
   };
 };
@@ -262,6 +311,8 @@ SP.useHostedFolder = async folder => {
         folder_mode: "design",
         space: null,
         inventory: false,
+        keep_bin_defaults: false,
+        bin_defaults: null,
         missing: false,
       };
   await SP.resetDrawer();
@@ -324,6 +375,36 @@ SP.setInventory = enabled => SP.run(async () => {
   state.inventoryEnabled = enabled;
   state.keepLog = enabled;
   toast(enabled ? "Keeping inventory for this folder." : "Inventory turned off for this folder.");
+});
+
+SP.updateBinDefaults = async (changes = {}) => {
+  if (state.folderMode !== "space") return;
+  const updates = {};
+  if (Object.hasOwn(changes, "enabled")) updates.keep_bin_defaults = Boolean(changes.enabled);
+  if (Object.hasOwn(changes, "snapshot")) updates.bin_defaults = changes.snapshot;
+  if (!Object.keys(updates).length) return;
+  let info;
+  if (state.runtime.hosted) {
+    info = await SP.writeMetadata(
+      state.browserFolder?.handle,
+      "space",
+      state.activeSpace,
+      true,
+      updates,
+    );
+  } else {
+    const data = await api("/api/space/defaults", { output: state.output, ...updates });
+    info = data.folder;
+  }
+  state.keepBinDefaults = Boolean(info.keep_bin_defaults);
+  state.spaceBinDefaults = info.bin_defaults && typeof info.bin_defaults === "object"
+    ? clone(info.bin_defaults) : null;
+  if (typeof DP !== "undefined" && DP.built) DP.renderSave();
+};
+
+SP.setKeepBinDefaults = enabled => SP.run(async () => {
+  await SP.updateBinDefaults({ enabled });
+  toast(enabled ? "Keeping bin defaults for this Space." : "Bin defaults turned off for this Space.");
 });
 
 SP.continueSpaceSetup = info => {
@@ -448,6 +529,7 @@ SP.showSetup = () => {
   $("#space-name").value = SP.setup.folder_name || "";
   $$('input[name="space-kind"]').forEach(radio => { radio.checked = radio.value === "drawer"; });
   ["x", "y", "z"].forEach(axis => { $("#space-" + axis).value = ""; });
+  $("#space-keep-defaults").checked = true;
   $("#space-error").hidden = true;
   SP.syncSetup();
   SP.showDialog();
@@ -487,6 +569,7 @@ SP.create = async () => {
   const kind = SP.kind();
   const name = $("#space-name").value.trim();
   let [x, y, z] = SP.readSize();
+  const keepBinDefaults = $("#space-keep-defaults").checked;
   if (!name) return SP.fail("Give the Space a name.", "#space-name");
   if (![x, y, z].every(value => Number.isFinite(value) && value > 0)) return SP.fail("Enter the inside width, depth and height in mm.", "#space-x");
   if (kind === "box") [x, y] = [SP.snap(x), SP.snap(y)];
@@ -501,11 +584,19 @@ SP.create = async () => {
     });
     await WFFileSystem.writeText(folder.handle, SP.inventoryFilename(), result.inventory_text);
     const space = result.layout.space;
-    await SP.writeMetadata(folder.handle, "space", space);
+    await SP.writeMetadata(folder.handle, "space", space, true, {
+      keep_bin_defaults: keepBinDefaults,
+      bin_defaults: null,
+    });
     await WFFileSystem.save("active", { handle: folder.handle });
-    info = { folder: folder.name, folder_name: folder.name, folder_mode: "space", space, inventory: true };
+    info = {
+      folder: folder.name, folder_name: folder.name, folder_mode: "space", space,
+      inventory: true, keep_bin_defaults: keepBinDefaults, bin_defaults: null,
+    };
   } else {
-    const data = await api("/api/space/create", { output: state.output, name, kind, x, y, z });
+    const data = await api("/api/space/create", {
+      output: state.output, name, kind, x, y, z, keep_bin_defaults: keepBinDefaults,
+    });
     SP.recent = data.recent || [];
     info = data.folder;
   }
