@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-15 — Clearer bin-size fields
+
+- Width and Length now read compactly as `64mm (8X 60mm inside)` after you
+  leave the field, keeping the full size, grid count, and usable inside size
+  visible without crowding the control.
+- Height now shows its `mm` after the number too.
+
 ## 2026-09-15 — Higher, fitting rim labels
 
 - Rim-label shelves now sit just under the rim, leaving the small clearance a

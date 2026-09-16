@@ -674,7 +674,11 @@ function syncForm() {
   } else {
     formatDimField("y");
   }
-  $("#z").value = fmt(box.z);
+  if (document.activeElement === $("#z")) {
+    $("#z").value = fmt(box.z);
+  } else {
+    formatHeightField();
+  }
   populateWallChoices(box);
   syncWallControls();
   populateBaseChoices(box);
@@ -1651,11 +1655,20 @@ function formatDimField(axis) {
   const val = state.design?.box?.[axis];
   if (val == null) return;
   const inside = getInsideDimension(axis, val);
-  // Blurred state shows mm + outer Wavefinity units + inside mm. The unit count
-  // is the integer number of whole grid steps, from the authoritative base unit.
+  // Blurred state keeps the whole fit story short enough to stay in the field.
+  // The unit count is the integer number of whole grid steps, from the
+  // authoritative base unit.
   const unit = state.catalog?.base_unit || 8;
   const units = Math.round(val / unit);
-  input.value = `${fmt(val)}mm (${units} unit${units === 1 ? "" : "s"}; ${inside} inside)`;
+  input.value = `${fmt(val)}mm (${units}X ${fmt(inside)}mm inside)`;
+}
+
+function formatHeightField() {
+  const input = $("#z");
+  if (!input || document.activeElement === input) return;
+  const val = state.design?.box?.z;
+  if (val == null) return;
+  input.value = `${fmt(val)}mm`;
 }
 
 function setSidebarCollapsed(collapsed) {
@@ -1979,6 +1992,23 @@ function wireControls() {
       updateGenerateAvailability();
       changedDesign(previousDesign);
     }, { passive: false });
+  });
+  const heightInput = $("#z");
+  heightInput.addEventListener("focus", () => {
+    heightInput.value = fmt(state.design.box.z);
+    heightInput.select();
+  });
+  heightInput.addEventListener("blur", () => {
+    const previousDesign = clone(state.design);
+    const next = normalizeBinDimension("z", heightInput.value, state.design.box.z);
+    const changed = next !== state.design.box.z;
+    state.design.box.z = next;
+    formatHeightField();
+    if (changed) {
+      state.canGenerate = false;
+      updateGenerateAvailability();
+      changedDesign(previousDesign);
+    }
   });
   $("#scoop")?.addEventListener("change", () => {
     const previousDesign = clone(state.design);
@@ -5109,6 +5139,7 @@ async function refreshPreview() {
     $("#preview-state").classList.toggle("status-ok", !previewHasErrors);
     formatDimField("x");
     formatDimField("y");
+    formatHeightField();
     $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(state.design.box.x)} mm`;
     $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(state.design.box.y)} mm`;
     $(".dimension-height", $("#dimensions")).textContent = `Height ${fmt(state.design.box.z)} mm`;
@@ -6488,6 +6519,8 @@ function commitDimensionDrag(canvas) {
   if (drag.axis !== "z") {
     formatDimField(drag.axis);
     markBinAxisManual(drag.axis);
+  } else {
+    formatHeightField();
   }
   // A dragged X/Y/Z dimension handle is exactly as deliberate as typing the
   // field - it must turn off Photo Nest Auto-size the same way (see
