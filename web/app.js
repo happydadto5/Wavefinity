@@ -4857,7 +4857,16 @@ async function deleteCurrentPart() {
 }
 
 async function deleteSupportAt(index) {
-  if (index === null || index === undefined || !beginDesignMutation()) return;
+  if (index === null || index === undefined) return;
+  const target = state.design.layout.features[index];
+  if (!target) return;
+  // Deleting a part other than the one open in the editor can throw away an
+  // unsaved edit underneath it - route through the same guard used to switch
+  // parts so that edit is saved (or the user confirms losing it) first.
+  if (state.draft && draftCommitIndex() !== index && !(await guardDraftSwitch())) return;
+  const title = partInfo(target.kind)?.title || "this interior part";
+  if (!window.confirm(`Delete ${title}? This can't be undone.`)) return;
+  if (!beginDesignMutation()) return;
   const deletingNest = state.design.layout.features[index]?.kind === "nest";
   let deleted = false;
   try {

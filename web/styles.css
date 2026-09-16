@@ -608,6 +608,11 @@ input[type="number"]::-webkit-inner-spin-button {
 .fit-actions .button:hover { background: #fbe6c4; border-color: #d7ab63; }
 .button-row { display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap; }
 .button-row.equal > * { flex: 1; }
+/* .placed-block is reused for two DOM copies of the same placed-parts list:
+   the floating box over the 3D/2D view, and the left-panel copy (which also
+   carries .placed-block-panel to reset floating-box styling below). Any new
+   rule meant only for the floating box must be scoped past .placed-block-panel
+   (e.g. ".workspace > .placed-block") or it will leak into the panel copy. */
 .placed-block {
   position: absolute; top: 70px; right: 16px; z-index: 3;
   width: clamp(220px, 28%, 340px); max-height: calc(100% - 132px); overflow: auto;
