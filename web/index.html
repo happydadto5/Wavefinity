@@ -51,19 +51,22 @@
             <label class="compact-select">Interior print mode
               <select id="mode-select"></select>
             </label>
-            <!-- Row position styles are only used once B4B relocates this
-                 element into .b4b-options-grid; they are inert here since
-                 .mode-and-bin-options is not a grid container. -->
-            <label id="base-thickness-setting" class="inline-select compact-select" style="grid-column:3;grid-row:1">Base
-              <select id="base-thickness"><option value="standard">Standard</option></select>
-            </label>
-            <label id="wall-thickness-setting" class="inline-select compact-select" style="grid-column:2;grid-row:1">Walls
-              <select id="wall-thickness"><option value="standard">Standard</option></select>
-            </label>
+            <!-- Base/Wall are the same shared controls the B4B panel uses;
+                 JS relocates them into .b4b-options-grid while B4B is active
+                 and back into this row otherwise. See
+                 positionSharedThicknessControls() in app.js. -->
+            <div id="thickness-grabber-row" class="thickness-grabber-row">
+              <label id="base-thickness-setting" class="inline-select compact-select">Base
+                <select id="base-thickness"><option value="standard">Standard</option></select>
+              </label>
+              <label id="wall-thickness-setting" class="inline-select compact-select">Walls
+                <select id="wall-thickness"><option value="standard">Standard</option></select>
+              </label>
+              <label id="lift-grabber-size-setting" class="inline-select compact-select" title="Adds small finger ledges inside the bin so it can be lifted when neighboring bins block the outside walls.">Lift Grabbers
+                <select id="lift-grabber-size"></select>
+              </label>
+            </div>
             <span id="thin-wall-warning" class="wall-warning" hidden>Very thin — may not print reliably with standard nozzle/slicer settings.</span>
-            <label id="lift-grabber-size-setting" class="inline-select compact-select" title="Adds small finger ledges inside the bin so it can be lifted when neighboring bins block the outside walls.">Lift Grabbers
-              <select id="lift-grabber-size"></select>
-            </label>
             <label id="lift-grabber-location-setting" class="inline-select compact-select" hidden>Grabber location
               <select id="lift-grabber-location"></select>
             </label>
@@ -196,18 +199,19 @@
           <div class="save-location-group">
             <label for="output-folder">Save folder</label>
             <div class="save-location-input-wrap">
-              <input id="output-folder" type="text" readonly title="Click to select folder">
-              <button type="button" id="output-folder-picker" class="folder-picker-button" title="Select folder" aria-label="Select folder">
+              <input id="output-folder" type="text" readonly title="Choose a save folder or open Space planning">
+              <button type="button" id="output-folder-picker" class="folder-picker-button" title="Choose a save folder or open Space planning" aria-label="Choose a save folder or open Space planning">
                 <svg viewBox="0 0 20 20" fill="currentColor" width="32" height="32" aria-hidden="true">
                   <path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
                 </svg>
               </button>
-              <button type="button" id="spaces-btn" class="button secondary" title="Optional drawer or box planning" aria-label="Open Space planning">Spaces</button>
             </div>
-            <small id="active-space-indicator" class="active-space-indicator" hidden></small>
-            <label class="checkbox-row folder-inventory-row" title="Add each generated bin and B4B to this folder's inventory file">
-              <span>Keep inventory for this folder</span>
-              <input id="folder-inventory-toggle" type="checkbox" checked>
+            <label class="inventory-select-row" title="Add each generated bin and B4B to this folder's inventory file">
+              <span class="sr-only">Inventory</span>
+              <select id="folder-inventory-toggle">
+                <option value="true">Keep Inventory</option>
+                <option value="false">Don't keep inventory</option>
+              </select>
             </label>
           </div>
         </div>

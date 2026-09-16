@@ -150,20 +150,12 @@ function setFolderState(mode = "design", space = null, inventory = undefined) {
   // Space always keeps inventory - it is what the layout is built from.
   state.inventoryEnabled = state.folderMode === "space" ? true : resolvedInventory;
   state.keepLog = state.inventoryEnabled;
-  const indicator = $("#active-space-indicator");
-  if (indicator) {
-    const kind = state.activeSpace?.kind === "box" ? "Box" : "Drawer";
-    indicator.textContent = state.activeSpace
-      ? `Space: ${state.activeSpace.name || "Unnamed"} · ${kind}`
-      : "";
-    indicator.hidden = !state.activeSpace;
-  }
   // A hosted folder with no persistent directory handle (the download-only
-  // fallback) has nowhere to keep an inventory file, whatever the checkbox says.
+  // fallback) has nowhere to keep an inventory file, whatever the dropdown says.
   const canPersistInventory = !state.runtime.hosted || Boolean(state.browserFolder?.handle);
   const toggle = $("#folder-inventory-toggle");
   if (toggle) {
-    toggle.checked = state.inventoryEnabled;
+    toggle.value = state.inventoryEnabled ? "true" : "false";
     toggle.disabled = !state.folderSelected || state.folderMode === "space" || !canPersistInventory;
     toggle.title = !canPersistInventory
       ? "Inventory and Space planning need folder access. Use desktop Chrome or Edge and allow access when asked; downloads still work here."
@@ -876,7 +868,7 @@ function b4bEnabled() {
 // copy to keep in sync.
 function positionSharedThicknessControls(on) {
   const grid = $(".b4b-options-grid");
-  const home = $(".mode-and-bin-options");
+  const home = $("#thickness-grabber-row");
   if (!grid || !home) return;
   const wall = $("#wall-thickness-setting");
   const base = $("#base-thickness-setting");
@@ -884,9 +876,10 @@ function positionSharedThicknessControls(on) {
     if (wall && wall.parentElement !== grid) grid.appendChild(wall);
     if (base && base.parentElement !== grid) grid.appendChild(base);
   } else {
-    const mode = $("#mode-select")?.closest("label");
-    if (base && base.parentElement !== home && mode) mode.insertAdjacentElement("afterend", base);
-    if (wall && wall.parentElement !== home && base) base.insertAdjacentElement("afterend", wall);
+    // Base and Wall always come back as the first two of the three columns,
+    // with Lift Grabbers (which never leaves this row) staying third.
+    if (base && base.parentElement !== home) home.insertBefore(base, home.firstChild);
+    if (wall && wall.parentElement !== home) home.insertBefore(wall, base ? base.nextSibling : home.firstChild);
   }
 }
 
@@ -2043,21 +2036,23 @@ function wireControls() {
     syncConnectorHeightControls();
     updateDesignFromForm();
   });
+  // The folder icon covers both picking a save folder and Space planning -
+  // SP.open() already offers recent/new folders before it gets to Space setup.
   const outputFolderEl = $("#output-folder");
   if (outputFolderEl) {
-    outputFolderEl.addEventListener("click", selectOutputFolder);
+    outputFolderEl.addEventListener("click", () => SP.open());
     outputFolderEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        selectOutputFolder();
+        SP.open();
       }
     });
   }
   $('label[for="output-folder"]')?.addEventListener("click", (e) => {
     e.preventDefault();
-    selectOutputFolder();
+    SP.open();
   });
-  $("#output-folder-picker")?.addEventListener("click", selectOutputFolder);
+  $("#output-folder-picker")?.addEventListener("click", () => SP.open());
   $("#show-log-button")?.addEventListener("click", showLog);
 
   const viewTabs = $$(".view-tab");
@@ -7005,7 +7000,9 @@ function drawNestEditWorkspace(context, width, height) {
     context.restore();
   }
 
-  drawNestAccessIndicators(context, state.preview?.nest_access?.[index], toCanvas);
+  // Access-plan markers (finger-grasp scoop/notch) are generated 3D-holder
+  // geometry, not part of "what shape is this object?" - they belong with
+  // the ordinary Nest/3D view, not this outline editor.
   drawNestContourHandles(context, feature, toCanvas);
   return true;
 }
@@ -8180,6 +8177,35 @@ function wireLayoutInteraction() {
           toast("A Photo Nest outline needs at least three points.", true);
         }
       }
+      return;
+    }
+    // The dedicated outline editor never moves, rotates or resizes the part
+    // itself - Select/Edit only drags an actual contour point; anything else,
+    // including a click inside the filled outline, pans the viewport instead.
+    if (isNestEditWorkspaceActive()) {
+      const contourPoint = hitNestContourPoint(feature, world);
+      if (contourPoint === null) {
+        pointerActive = false;
+        state.layoutDrag = {
+          mode: "pan",
+          startCanvas: canvasPointFromEvent(canvas, event),
+          startPanX: state.nestViewPanX,
+          startPanY: state.nestViewPanY,
+        };
+        try { canvas.setPointerCapture(event.pointerId); } catch (_error) {}
+        return;
+      }
+      state.layoutDrag = {
+        index, feature, original: clone(feature),
+        mode: "point",
+        contourPoint,
+        photoBounds: state.nestPhoto?.bounds ? [...state.nestPhoto.bounds] : null,
+        start: world,
+        centre: [(feature.zone[0] + feature.zone[2]) / 2, (feature.zone[1] + feature.zone[3]) / 2],
+        startAngle: 0,
+        startRadius: 1,
+      };
+      try { canvas.setPointerCapture(event.pointerId); } catch (_error) {}
       return;
     }
     const zone = feature.zone;

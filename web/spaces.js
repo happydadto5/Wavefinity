@@ -581,7 +581,6 @@ SP.launch = async () => {
 };
 
 SP.wire = () => {
-  $("#spaces-btn").addEventListener("click", SP.open);
   ["#welcome-close", "#welcome-resume-close", "#space-optional-not-now", "#space-unsupported-close"]
     .forEach(sel => $(sel)?.addEventListener("click", SP.close));
   SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
@@ -593,7 +592,7 @@ SP.wire = () => {
     SP.cancelResumeAutoContinue();
     SP.chooseFolder();
   });
-  $("#folder-inventory-toggle")?.addEventListener("change", event => SP.setInventory(event.target.checked));
+  $("#folder-inventory-toggle")?.addEventListener("change", event => SP.setInventory(event.target.value === "true"));
   $("#space-folder-change").addEventListener("click", SP.changeFolderThenSetup);
   $("#space-back").addEventListener("click", SP.offerSpacePlanning);
   $("#welcome-recent").addEventListener("click", event => {
