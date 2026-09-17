@@ -36,9 +36,18 @@
   rings keep four integral corners, split only straight rails as needed, and
   offer snap tabs, sliding dovetails, or puzzle joints with 0.2 mm clearance.
 - Added dedicated 2D/3D previews, saved-design validation, connectorless
-  generate/print behavior, persistent bed and join preferences, and Space
+  generate/print behavior, persistent printer-bed preferences, and Space
   auto-sizing for filled rectangular bin layouts. Base Trim never enters bin
   inventory.
+
+## 2026-09-17 — Base Trim completion fixes
+
+- Base Trim may generate or print without a name, always stays visible in 3D,
+  retains Snap tabs for every newly created trim, and keeps its Print Base Trim
+  action after changing slicers.
+- Split joints now sit in the wave-safe part of the trim and reject widths that
+  cannot retain structural skin around the cleared socket. The 2D marker now
+  distinguishes Snap, Sliding dovetail, and Puzzle joints.
 
 ## 2026-09-15 — Bin-following parts stay synchronized
 

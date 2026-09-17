@@ -62,6 +62,7 @@ BASE_TRIM_MAX_FIELD = 1200.0
 
 BASE_TRIM_JOINT_LENGTH = 4.0
 BASE_TRIM_JOINT_CLEARANCE = 0.20
+BASE_TRIM_JOINT_SKIN = 0.20
 BASE_TRIM_CORNER_LEG_MIN = 16.0
 
 
@@ -253,10 +254,21 @@ def _validate_values(spec: BaseTrimSpec) -> None:
 def _validate_split_joint(spec: BaseTrimSpec) -> None:
     if _one_piece(spec):
         return
-    available_top = spec.width_mm - BASE_TRIM_OUTER_TAPER
-    if available_top <= 2.0:
+    # A seam spans one whole wave cycle.  The safe cross-section is therefore
+    # the top width minus the wave's outward crest, not the nominal straight
+    # width. Include the female socket's clearance and leave a real skin on
+    # both faces rather than letting a narrow joint break into the mating wave.
+    safe_width = spec.width_mm - BASE_TRIM_OUTER_TAPER - WAVE_AMPLITUDE
+    if safe_width <= 0.0:
         raise ValueError(
             "The selected trim width is too small to keep material around split joints. "
+            "Increase Trim width or use a larger printer bed."
+        )
+    _min_x, min_y, _max_x, max_y = _joint_profile(spec).bounds
+    female_width = max_y - min_y + 2.0 * BASE_TRIM_JOINT_CLEARANCE
+    if female_width + 2.0 * BASE_TRIM_JOINT_SKIN > safe_width + 1e-9:
+        raise ValueError(
+            "The selected trim width is too small for this split joint after wave clearance. "
             "Increase Trim width or use a larger printer bed."
         )
 
@@ -432,13 +444,17 @@ def _seam_frame(
 ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
     inner_x, inner_y = spec.inner_half_extents
     top_width = spec.width_mm - BASE_TRIM_OUTER_TAPER
+    # The inner face swings a full +/- wave across every 4 mm seam. Centre the
+    # joint in the guaranteed material between the fixed outside face and the
+    # most outward inner crest, rather than in the nominal straight band.
+    wave_offset = WAVE_AMPLITUDE / 2.0
     if seam.side == "front":
-        return (seam.coordinate, -inner_y - top_width / 2.0), (1.0, 0.0), (0.0, 1.0)
+        return (seam.coordinate, -inner_y - top_width / 2.0 - wave_offset), (1.0, 0.0), (0.0, 1.0)
     if seam.side == "right":
-        return (inner_x + top_width / 2.0, seam.coordinate), (0.0, 1.0), (-1.0, 0.0)
+        return (inner_x + top_width / 2.0 + wave_offset, seam.coordinate), (0.0, 1.0), (-1.0, 0.0)
     if seam.side == "back":
-        return (seam.coordinate, inner_y + top_width / 2.0), (-1.0, 0.0), (0.0, -1.0)
-    return (-inner_x - top_width / 2.0, seam.coordinate), (0.0, -1.0), (1.0, 0.0)
+        return (seam.coordinate, inner_y + top_width / 2.0 + wave_offset), (-1.0, 0.0), (0.0, -1.0)
+    return (-inner_x - top_width / 2.0 - wave_offset, seam.coordinate), (0.0, -1.0), (1.0, 0.0)
 
 
 def _joint_profile(spec: BaseTrimSpec) -> Polygon:

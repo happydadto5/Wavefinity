@@ -307,6 +307,31 @@ trim is divided clockwise into four integral corners and only as many straight
 rails as the bed requires. The 2D view numbers the actual printable pieces and
 the 3D view shows them assembled.
 
+A Base Trim saves as version 6 with `design_kind: "base_trim"`. Its `box` holds
+the field X/Y and trim height; `base_trim` is version 1 and holds trim width,
+joint type, printer-bed X/Y, and `auto_size`. A fresh trim defaults to a 6 mm
+width and height, **Snap tabs**, and a 256 × 256 mm bed; only the two bed
+dimensions remain a machine preference. The empty fused `layout` block remains
+required for saved-design compatibility. A Base Trim name is optional.
+
+```json
+{
+  "version": 6,
+  "design_kind": "base_trim",
+  "box": {"x": 16, "y": 48, "z": 6},
+  "base_trim": {
+    "version": 1,
+    "width_mm": 6,
+    "join_type": "snap",
+    "bed_x_mm": 256,
+    "bed_y_mm": 256,
+    "auto_size": false
+  },
+  "part_name": "",
+  "layout": {"version": 1, "mode": "fused", "snap": 1, "features": []}
+}
+```
+
 ### Inventory, and optional Space planning
 
 Every selected save folder keeps an inventory by default: generating a bin,
@@ -1406,8 +1431,11 @@ these numbers look arbitrary and are not.
 | Connector position step | **4.0** | one whole wave; half a wave wants a mirrored part |
 | Base Trim field range | **8–1200** | whole 8 mm units on each axis |
 | Base Trim width / height | **4–20**, default **6** | each changes in 0.5 mm steps |
+| Base Trim default bed / effective P1S area | **256 / 236** | 10 mm is reserved at every edge |
 | Base Trim bed margin | **10.0 per edge** | subtracted from the declared printer bed |
 | Base Trim joint projection / clearance | **4.0 / 0.2** | only used when the ring must split |
+| Base Trim outer taper | **1.0 per side** | outside only |
+| Base Trim corner leg minimum | **16.0** | corners always print as one piece |
 | Mated wall clearance | **0.21** | 0.25 across the seam, measured perpendicular |
 | Lock bump | **0.35** proud, 1.0 tall, **1.2** long | on every wave extremum, so every **2.0** |
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |

@@ -1086,8 +1086,6 @@ function makeBaseTrimDesign(fieldX = null, fieldY = null) {
   const legal = value => Math.max(unit, Math.min(1200, Math.round(number(value, unit) / unit) * unit));
   const bedX = number(storedPreference("base_trim_bed_x_mm", rules.default_bed_x_mm ?? 256), 256);
   const bedY = number(storedPreference("base_trim_bed_y_mm", rules.default_bed_y_mm ?? 256), 256);
-  const savedJoint = String(storedPreference("base_trim_join_type", "snap"));
-  const joinType = ["snap", "dovetail", "puzzle"].includes(savedJoint) ? savedJoint : "snap";
   return {
     version: 6,
     design_kind: "base_trim",
@@ -1099,7 +1097,7 @@ function makeBaseTrimDesign(fieldX = null, fieldY = null) {
     base_trim: {
       version: 1,
       width_mm: number(rules.default_width_mm, 6),
-      join_type: joinType,
+      join_type: "snap",
       bed_x_mm: bedX,
       bed_y_mm: bedY,
       auto_size: false,
@@ -1135,15 +1133,12 @@ function renderBaseTrimReadout() {
   const effectiveY = trim.bed_y_mm - 2 * margin;
   $("#base-trim-printable").textContent = `Printable area after ${fmt(margin)} mm edge clearance: ${fmt(effectiveX)} × ${fmt(effectiveY)} mm`;
   const summary = state.preview?.base_trim;
-  const outer = summary?.outer_mm || [
-    state.design.box.x + number(state.catalog?.wall_rules?.mating_gap_mm, .25) + 2 * trim.width_mm,
-    state.design.box.y + number(state.catalog?.wall_rules?.mating_gap_mm, .25) + 2 * trim.width_mm,
-  ];
+  const outer = summary?.outer_mm;
   const pieces = summary?.piece_count;
   const join = summary?.join_label || ({ snap: "Snap tabs", dovetail: "Sliding dovetail", puzzle: "Puzzle joint" })[trim.join_type];
   $("#base-trim-summary").innerHTML = [
     `<div><strong>Inside field:</strong> ${ux}U × ${uy}U — ${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm</div>`,
-    `<div><strong>Outside footprint:</strong> ${fmt(outer[0])} × ${fmt(outer[1])} mm</div>`,
+    `<div><strong>Outside footprint:</strong> ${outer ? `${fmt(outer[0])} × ${fmt(outer[1])} mm` : "Calculating…"}</div>`,
     `<div><strong>Printable area:</strong> ${fmt(effectiveX)} × ${fmt(effectiveY)} mm</div>`,
     `<div><strong>Pieces:</strong> ${pieces ?? "—"}${pieces > 1 ? ` — ${escapeHtml(join)}` : ""}</div>`,
   ].join("");
@@ -2033,7 +2028,6 @@ function updateDesignFromForm() {
       saveOutputPreference(newOutput);
     }
     state.joinMode = "base_trim";
-    saveSimplePreference("base_trim_join_type", design.base_trim.join_type);
     saveSimplePreference("base_trim_bed_x_mm", design.base_trim.bed_x_mm);
     saveSimplePreference("base_trim_bed_y_mm", design.base_trim.bed_y_mm);
     return;
@@ -7053,7 +7047,7 @@ function currentPreviewPasses(buffers) {
   }
   const passes = [];
   const visible = new Set();
-  if (state.binVisible) { passes.push({ group: "bin", alpha: 1 }); visible.add("bin"); }
+  if (baseTrimEnabled() || state.binVisible) { passes.push({ group: "bin", alpha: 1 }); visible.add("bin"); }
   if (state.interiorVisible) { passes.push({ group: "interior", alpha: 1 }); visible.add("interior"); }
   return { passes, aabb: buffers.allAabb, visible };
 }
@@ -8384,7 +8378,22 @@ function renderBaseTrim2D(context, width, height) {
     context.setLineDash([]);
     const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     context.fillStyle = "#b46b38";
-    context.beginPath(); context.arc(mid[0], mid[1], 3.5, 0, Math.PI * 2); context.fill();
+    context.save();
+    context.translate(mid[0], mid[1]);
+    if (summary.join_type === "snap") {
+      context.fillRect(-4, -2, 8, 4);
+      context.fillRect(-1, -4, 2, 8);
+    } else if (summary.join_type === "dovetail") {
+      context.beginPath();
+      context.moveTo(-4, -3); context.lineTo(4, -5); context.lineTo(4, 5); context.lineTo(-4, 3);
+      context.closePath(); context.fill();
+    } else {
+      context.beginPath();
+      context.arc(-2, 0, 2.5, Math.PI / 2, Math.PI * 1.5);
+      context.arc(2, 0, 2.5, -Math.PI / 2, Math.PI / 2);
+      context.closePath(); context.fill();
+    }
+    context.restore();
   });
 
   if (!summary.one_piece) {
@@ -9541,7 +9550,7 @@ function showFilenameConflictDialog(names) {
 }
 
 function checkPartNamePresent(target = "bin") {
-  if (target === "connector") return true;
+  if (target === "connector" || baseTrimEnabled()) return true;
   const val = ($("#part-name")?.value || "").trim();
   if (!val) {
     showBinNameRequiredDialog();
@@ -9773,6 +9782,13 @@ function updateSlicerUI() {
     printBtn.textContent = "Generate to Folder";
     printBtn.title = "Generate files into your selected folder";
     $("#slicer-picker-button").hidden = true;
+    return;
+  }
+  if (baseTrimEnabled()) {
+    if (wrap) wrap.hidden = false;
+    printBtn.hidden = false;
+    printBtn.textContent = "Print Base Trim";
+    printBtn.title = "Send Base Trim parts directly to the selected slicer";
     return;
   }
   const slicer = state.slicer || {};
