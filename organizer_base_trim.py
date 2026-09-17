@@ -22,7 +22,6 @@ from organizer_app import clean_label
 from organizer_engine import (
     BASE_UNIT,
     WAVE_AMPLITUDE,
-    WAVE_LENGTH,
     WAVE_MATING_GAP,
     export_mesh,
     mesh_report,
@@ -63,7 +62,6 @@ BASE_TRIM_MAX_FIELD = 1200.0
 BASE_TRIM_JOINT_LENGTH = 4.0
 BASE_TRIM_JOINT_CLEARANCE = 0.20
 BASE_TRIM_JOINT_SKIN = 1.0
-BASE_TRIM_CORNER_LEG_MIN = 16.0
 
 
 @dataclass(frozen=True)
@@ -303,70 +301,73 @@ def make_base_trim_ring(spec: BaseTrimSpec) -> trimesh.Trimesh:
     return ring
 
 
-def _split_positions(length: float, max_span: float) -> list[float]:
-    count = max(1, math.ceil(length / max_span))
-    while True:
-        positions = [0.0]
-        for index in range(1, count):
-            raw = length * index / count
-            snapped = round(raw / WAVE_LENGTH) * WAVE_LENGTH
-            minimum = positions[-1] + WAVE_LENGTH
-            maximum = length - WAVE_LENGTH * (count - index)
-            positions.append(min(max(snapped, minimum), maximum))
-        positions.append(length)
-        if all(
-            positions[index + 1] - positions[index] <= max_span + 1e-6
-            for index in range(count)
-        ):
-            return positions
-        count += 1
+def _perimeter_point(
+    distance: float, outer_x: float, outer_y: float,
+) -> tuple[float, float, BaseTrimSeam, tuple[float, float]]:
+    """Return a point, seam, and clockwise tangent on the outer perimeter."""
+    perimeter = 2.0 * (outer_x + outer_y)
+    distance %= perimeter
+    half_x, half_y = outer_x / 2.0, outer_y / 2.0
+    if distance < outer_x:
+        return -half_x + distance, -half_y, BaseTrimSeam("front", -half_x + distance), (1.0, 0.0)
+    distance -= outer_x
+    if distance < outer_y:
+        return half_x, -half_y + distance, BaseTrimSeam("right", -half_y + distance), (0.0, 1.0)
+    distance -= outer_y
+    if distance < outer_x:
+        return half_x - distance, half_y, BaseTrimSeam("back", half_x - distance), (-1.0, 0.0)
+    distance -= outer_x
+    return -half_x, half_y - distance, BaseTrimSeam("left", half_y - distance), (0.0, -1.0)
 
 
-def _piece(
-    pieces: list[BaseTrimPiece], kind: str, label: str,
-    bounds: tuple[float, float, float, float],
-    start: BaseTrimSeam, end: BaseTrimSeam,
-) -> None:
-    pieces.append(BaseTrimPiece(len(pieces) + 1, kind, label, bounds, start, end))
-
-
-def _rail_pieces(
-    pieces: list[BaseTrimPiece], spec: BaseTrimSpec, side: str,
-    start_coordinate: float, direction: float, length: float,
-    outer_x: float, outer_y: float,
-) -> None:
-    if length <= 1e-6:
-        return
-    bed_x, bed_y = spec.effective_bed
-    cross = spec.width_mm + WAVE_AMPLITUDE
-    long_capacity = max(bed_x, bed_y)
-    short_capacity = min(bed_x, bed_y)
-    if cross > short_capacity + 1e-6:
-        long_capacity = short_capacity if cross <= max(bed_x, bed_y) + 1e-6 else 0.0
-    max_span = long_capacity - BASE_TRIM_JOINT_LENGTH
-    if max_span <= 0:
-        raise ValueError(
-            "The trim cross-section and joint cannot fit the declared printable area. "
-            "Increase the printer bed size."
-        )
-    marks = _split_positions(length, max_span)
+def _perimeter_piece(
+    start: float, end: float, outer_x: float, outer_y: float,
+) -> tuple[tuple[float, float, float, float], BaseTrimSeam, BaseTrimSeam, tuple[float, float]]:
+    """Make one contiguous perimeter arc's clipping box and seam details."""
+    perimeter = 2.0 * (outer_x + outer_y)
+    start_point = _perimeter_point(start, outer_x, outer_y)
+    end_point = _perimeter_point(end, outer_x, outer_y)
+    points = [start_point[:2], end_point[:2]]
+    for corner in (0.0, outer_x, outer_x + outer_y, 2.0 * outer_x + outer_y):
+        shifted = corner
+        while shifted <= start + 1e-9:
+            shifted += perimeter
+        if shifted < end - 1e-9:
+            points.append(_perimeter_point(shifted, outer_x, outer_y)[:2])
+    xs, ys = zip(*points)
     margin = 1.0
-    for index, (a, b) in enumerate(zip(marks, marks[1:]), 1):
-        c0 = start_coordinate + direction * a
-        c1 = start_coordinate + direction * b
-        low, high = sorted((c0, c1))
-        if side == "front":
-            bounds = (low, -outer_y / 2.0 - margin, high, 0.0)
-        elif side == "right":
-            bounds = (0.0, low, outer_x / 2.0 + margin, high)
-        elif side == "back":
-            bounds = (low, 0.0, high, outer_y / 2.0 + margin)
-        else:
-            bounds = (-outer_x / 2.0 - margin, low, 0.0, high)
-        _piece(
-            pieces, "rail", f"{side.title()} rail {index}", bounds,
-            BaseTrimSeam(side, c0), BaseTrimSeam(side, c1),
-        )
+    bounds = (min(xs) - margin, min(ys) - margin, max(xs) + margin, max(ys) + margin)
+    return bounds, start_point[2], end_point[2], end_point[3]
+
+
+def _planned_piece_fits(
+    bounds: tuple[float, float, float, float], tangent: tuple[float, float],
+    bed: tuple[float, float],
+) -> bool:
+    """Reserve the male key's outward projection before making the mesh."""
+    min_x, min_y, max_x, max_y = bounds
+    # The one-millimetre clipping margin is not part of the printed ring.
+    width = max_x - min_x - 2.0
+    depth = max_y - min_y - 2.0
+    if tangent[0]:
+        width += BASE_TRIM_JOINT_LENGTH
+    else:
+        depth += BASE_TRIM_JOINT_LENGTH
+    return _fits((width, depth), bed)
+
+
+def _partition_score(
+    cuts: list[float], outer_x: float, outer_y: float,
+) -> tuple[float, ...]:
+    """Prefer cuts on straight runs and as far as possible from corners."""
+    perimeter = 2.0 * (outer_x + outer_y)
+    corners = (0.0, outer_x, outer_x + outer_y, 2.0 * outer_x + outer_y)
+    clearances = [
+        min(min(abs(cut - corner), perimeter - abs(cut - corner)) for corner in corners)
+        for cut in cuts
+    ]
+    spans = [cuts[index + 1] - cuts[index] for index in range(len(cuts) - 1)]
+    return (min(clearances), min(spans), -max(spans))
 
 
 def plan_base_trim_pieces(spec: BaseTrimSpec) -> list[BaseTrimPiece]:
@@ -376,57 +377,42 @@ def plan_base_trim_pieces(spec: BaseTrimSpec) -> list[BaseTrimPiece]:
         return [BaseTrimPiece(1, "whole", "Complete Base Trim", None)]
 
     outer_x, outer_y = spec.outer_bottom_size
-    half_x, half_y = outer_x / 2.0, outer_y / 2.0
-    leg = max(BASE_TRIM_CORNER_LEG_MIN, spec.width_mm + BASE_TRIM_JOINT_LENGTH)
-    if outer_x < 2.0 * leg - 1e-6 or outer_y < 2.0 * leg - 1e-6:
-        raise ValueError(
-            "This split Base Trim is too short on one side to keep four integral corners. "
-            "Increase that field dimension or use a larger printer bed."
-        )
-    corner_size = (leg + BASE_TRIM_JOINT_LENGTH, leg)
-    if not _fits(corner_size, spec.effective_bed):
-        raise ValueError(
-            "An integral Base Trim corner cannot fit the declared printable area. "
-            "Increase the printer bed size or reduce Trim width."
-        )
+    perimeter = 2.0 * (outer_x + outer_y)
+    # A piece must leave room for one 4 mm male key. This is a lower bound,
+    # not an edge-by-edge slicing rule; candidates below use their real XY box.
+    smallest_bed_side = min(spec.effective_bed)
+    if smallest_bed_side <= BASE_TRIM_JOINT_LENGTH + 1e-6:
+        raise ValueError("The declared printable area is too small for a Base Trim joint.")
 
-    front_left = -half_x + leg
-    front_right = half_x - leg
-    side_front = -half_y + leg
-    side_back = half_y - leg
-    run_x = max(0.0, outer_x - 2.0 * leg)
-    run_y = max(0.0, outer_y - 2.0 * leg)
-    margin = 1.0
-    pieces: list[BaseTrimPiece] = []
-
-    _piece(
-        pieces, "corner", "Front-left corner",
-        (-half_x - margin, -half_y - margin, front_left, side_front),
-        BaseTrimSeam("left", side_front), BaseTrimSeam("front", front_left),
+    max_count = max(2, math.ceil(perimeter / (smallest_bed_side - BASE_TRIM_JOINT_LENGTH)) + 4)
+    for count in range(2, max_count + 1):
+        best: tuple[tuple[float, ...], list[BaseTrimPiece]] | None = None
+        # Equal-length perimeter arcs avoid tiny remainders. Shift their common
+        # origin through one arc so the deterministic search can move cuts away
+        # from corners without independently chopping each edge.
+        for phase_index in range(32):
+            phase = perimeter * phase_index / (32.0 * count)
+            cuts = [phase + perimeter * index / count for index in range(count + 1)]
+            planned: list[BaseTrimPiece] = []
+            for index, (start, end) in enumerate(zip(cuts, cuts[1:]), 1):
+                bounds, start_seam, end_seam, tangent = _perimeter_piece(start, end, outer_x, outer_y)
+                if not _planned_piece_fits(bounds, tangent, spec.effective_bed):
+                    break
+                planned.append(BaseTrimPiece(
+                    index, "perimeter", f"Perimeter section {index}", bounds,
+                    start_seam, end_seam,
+                ))
+            if len(planned) != count:
+                continue
+            score = _partition_score(cuts[:-1], outer_x, outer_y)
+            if best is None or score > best[0]:
+                best = score, planned
+        if best is not None:
+            return best[1]
+    raise ValueError(
+        "The Base Trim cannot be divided into printable perimeter sections for the declared bed. "
+        "Increase the printer bed size."
     )
-    _rail_pieces(pieces, spec, "front", front_left, 1.0, run_x, outer_x, outer_y)
-    _piece(
-        pieces, "corner", "Front-right corner",
-        (front_right, -half_y - margin, half_x + margin, side_front),
-        BaseTrimSeam("front", front_right), BaseTrimSeam("right", side_front),
-    )
-    _rail_pieces(pieces, spec, "right", side_front, 1.0, run_y, outer_x, outer_y)
-    _piece(
-        pieces, "corner", "Back-right corner",
-        (front_right, side_back, half_x + margin, half_y + margin),
-        BaseTrimSeam("right", side_back), BaseTrimSeam("back", front_right),
-    )
-    _rail_pieces(pieces, spec, "back", front_right, -1.0, run_x, outer_x, outer_y)
-    _piece(
-        pieces, "corner", "Back-left corner",
-        (-half_x - margin, side_back, front_left, half_y + margin),
-        BaseTrimSeam("back", front_left), BaseTrimSeam("left", side_back),
-    )
-    _rail_pieces(pieces, spec, "left", side_back, -1.0, run_y, outer_x, outer_y)
-    return [
-        BaseTrimPiece(index, one.kind, one.label, one.clip_bounds, one.start_seam, one.end_seam)
-        for index, one in enumerate(pieces, 1)
-    ]
 
 
 def _seam_frame(
@@ -574,7 +560,6 @@ def base_trim_summary(spec: BaseTrimSpec) -> dict:
         "join_label": BASE_TRIM_JOIN_LABELS[spec.join_type],
         "piece_count": len(pieces),
         "one_piece": len(pieces) == 1,
-        "corner_leg_mm": max(BASE_TRIM_CORNER_LEG_MIN, spec.width_mm + BASE_TRIM_JOINT_LENGTH),
         "seams": seams,
         "pieces": [
             {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-17 — Base Trim print-bed splitting
+
+- Oversized Base Trim now divides as a continuous perimeter, keeping corners
+  with adjoining straight runs whenever possible. It chooses the fewest
+  balanced printable pieces using the existing 10 mm bed-edge clearance.
+
 ## 2026-09-17 — Edge Mount moved into Parts
 
 - Moved Edge Mount from the permanent bin controls into the Parts palette and

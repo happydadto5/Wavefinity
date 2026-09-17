@@ -1451,7 +1451,6 @@ these numbers look arbitrary and are not.
 | Base Trim joint engagement / clearance | **4.0 / 0.20** | only used when the ring must split |
 | Base Trim split-joint structural skin | **1.0 mm minimum** | between cleared joint and each physical face |
 | Base Trim outer taper | **1.0 per side** | outside only |
-| Base Trim corner leg minimum | **16.0** | corners always print as one piece |
 | Mated wall clearance | **0.21** | 0.25 across the seam, measured perpendicular |
 | Lock bump | **0.35** proud, 1.0 tall, **1.2** long | on every wave extremum, so every **2.0** |
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |
