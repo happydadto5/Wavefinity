@@ -71,108 +71,6 @@
             </label>
           </div>
 
-          <div id="edge-mount-panel" class="b4b-panel" hidden>
-            <div class="b4b-card">
-              <h3 class="b4b-card-title">Edge Mount</h3>
-              <div class="field-grid three">
-                <label class="inline-select">Mounting side
-                  <select id="edge-mount-side">
-                    <option value="front">Front</option>
-                    <option value="back">Back</option>
-                    <option value="left">Left</option>
-                    <option value="right">Right</option>
-                  </select>
-                </label>
-                <label class="checkbox-row"><span>Projecting Label</span><input id="edge-mount-label-enabled" type="checkbox"></label>
-                <label class="checkbox-row"><span>Screw Mounting</span><input id="edge-mount-holes-enabled" type="checkbox"></label>
-              </div>
-
-              <div id="edge-mount-label-panel" hidden>
-                <h4 class="b4b-card-title">Projecting Label</h4>
-                <div class="field-grid three">
-                  <label style="grid-column:1 / span 2">Label text
-                    <input id="edge-mount-label-text" type="text" maxlength="40" placeholder="e.g. PRUNER">
-                  </label>
-                  <label class="inline-select">Plate length
-                    <select id="edge-mount-label-length-mode">
-                      <option value="full">Full Side</option>
-                      <option value="text">Text Length</option>
-                    </select>
-                  </label>
-                  <label class="inline-select">Projection
-                    <select id="edge-mount-label-projection"></select>
-                  </label>
-                  <label id="edge-mount-label-projection-custom-row" hidden>Projection mm
-                    <input id="edge-mount-label-projection-mm" type="number" min="5" max="200" step="1">
-                  </label>
-                  <label class="inline-select">Plate thickness
-                    <select id="edge-mount-label-thickness"></select>
-                  </label>
-                  <label id="edge-mount-label-thickness-custom-row" hidden>Thickness mm
-                    <input id="edge-mount-label-thickness-mm" type="number" min="0.8" max="6" step="0.1">
-                  </label>
-                  <label class="inline-select">Label style
-                    <select id="edge-mount-label-style">
-                      <option value="flush">Inlaid / Flush</option>
-                      <option value="raised">Raised</option>
-                    </select>
-                  </label>
-                  <label>Text depth mm
-                    <input id="edge-mount-label-depth" type="number" min="0.2" max="2" step="0.1">
-                  </label>
-                  <label class="checkbox-row"><span>Flip text</span><input id="edge-mount-label-flip" type="checkbox"></label>
-                </div>
-                <p class="inline-help">Projects from the top of the mounting wall so the label can rest over the top edge of a cart, table, or shelf.</p>
-              </div>
-
-              <div id="edge-mount-holes-panel" hidden>
-                <h4 class="b4b-card-title">Screw Mounting</h4>
-                <div class="field-grid three">
-                  <label class="inline-select">Number of screws
-                    <select id="edge-mount-hole-count">
-                      <option value="1">1</option>
-                      <option value="2" selected>2</option>
-                      <option value="3">3</option>
-                      <option value="4">4</option>
-                    </select>
-                  </label>
-                  <label id="edge-mount-hole-orientation-row" class="inline-select">Pattern
-                    <select id="edge-mount-hole-orientation">
-                      <option value="horizontal">Horizontal</option>
-                      <option value="vertical">Vertical</option>
-                    </select>
-                  </label>
-                  <label>Screw hole Ø mm
-                    <input id="edge-mount-screw-diameter" type="number" min="1" max="12" step="0.1">
-                  </label>
-                  <label class="inline-select">Driver access Ø
-                    <select id="edge-mount-access-mode">
-                      <option value="auto">Auto</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                  </label>
-                  <span id="edge-mount-access-auto-note" class="muted">Auto: 8 mm</span>
-                  <label id="edge-mount-access-custom-row" hidden>Access Ø mm
-                    <input id="edge-mount-access-diameter" type="number" min="2" max="20" step="0.1">
-                  </label>
-                  <label title="Measured from the top rim to the center of the upper screw hole.">Distance below top mm
-                    <input id="edge-mount-top-offset" type="number" min="0.1" step="0.1">
-                  </label>
-                  <label class="inline-select">Hole spacing
-                    <select id="edge-mount-spacing-mode">
-                      <option value="auto">Auto</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                  </label>
-                  <label id="edge-mount-spacing-custom-row" hidden>Spacing mm
-                    <input id="edge-mount-spacing-mm" type="number" min="0.1" step="0.1">
-                  </label>
-                </div>
-                <p class="inline-help">The small holes go through the mounting wall. Larger round access passages come from the opposite wall so a screwdriver can reach each screw.</p>
-              </div>
-            </div>
-          </div>
-
           <div id="b4b-panel" class="b4b-panel" hidden>
             <div class="b4b-card">
               <h3 class="b4b-card-title">Options</h3>
@@ -348,6 +246,104 @@
             </div>
             <p id="draft-description" class="muted"></p>
             <div id="draft-fields" class="draft-fields"></div>
+            <div id="edge-mount-editor" hidden>
+              <div class="field-grid three">
+                <label class="inline-select">Mounting side
+                  <select id="edge-mount-side">
+                    <option value="front">Front</option>
+                    <option value="back">Back</option>
+                    <option value="left">Left</option>
+                    <option value="right">Right</option>
+                  </select>
+                </label>
+                <label class="checkbox-row"><span>Projecting Label</span><input id="edge-mount-label-enabled" type="checkbox"></label>
+                <label class="checkbox-row"><span>Screw Mounting</span><input id="edge-mount-holes-enabled" type="checkbox"></label>
+              </div>
+
+              <div id="edge-mount-label-panel" hidden>
+                <h4 class="b4b-card-title">Projecting Label</h4>
+                <div class="field-grid three">
+                  <label style="grid-column:1 / span 2">Label text
+                    <input id="edge-mount-label-text" type="text" maxlength="40" placeholder="e.g. PRUNER">
+                  </label>
+                  <label class="inline-select">Plate length
+                    <select id="edge-mount-label-length-mode">
+                      <option value="full">Full Side</option>
+                      <option value="text">Text Length</option>
+                    </select>
+                  </label>
+                  <label class="inline-select">Projection
+                    <select id="edge-mount-label-projection"></select>
+                  </label>
+                  <label id="edge-mount-label-projection-custom-row" hidden>Projection mm
+                    <input id="edge-mount-label-projection-mm" type="number" min="5" max="200" step="1">
+                  </label>
+                  <label class="inline-select">Plate thickness
+                    <select id="edge-mount-label-thickness"></select>
+                  </label>
+                  <label id="edge-mount-label-thickness-custom-row" hidden>Thickness mm
+                    <input id="edge-mount-label-thickness-mm" type="number" min="0.8" max="6" step="0.1">
+                  </label>
+                  <label class="inline-select">Label style
+                    <select id="edge-mount-label-style">
+                      <option value="flush">Inlaid / Flush</option>
+                      <option value="raised">Raised</option>
+                    </select>
+                  </label>
+                  <label>Text depth mm
+                    <input id="edge-mount-label-depth" type="number" min="0.2" max="2" step="0.1">
+                  </label>
+                  <label class="checkbox-row"><span>Flip text</span><input id="edge-mount-label-flip" type="checkbox"></label>
+                </div>
+                <p class="inline-help">Projects from the top of the mounting wall so the label can rest over the top edge of a cart, table, or shelf.</p>
+              </div>
+
+              <div id="edge-mount-holes-panel" hidden>
+                <h4 class="b4b-card-title">Screw Mounting</h4>
+                <div class="field-grid three">
+                  <label class="inline-select">Number of screws
+                    <select id="edge-mount-hole-count">
+                      <option value="1">1</option>
+                      <option value="2" selected>2</option>
+                      <option value="3">3</option>
+                      <option value="4">4</option>
+                    </select>
+                  </label>
+                  <label id="edge-mount-hole-orientation-row" class="inline-select">Pattern
+                    <select id="edge-mount-hole-orientation">
+                      <option value="horizontal">Horizontal</option>
+                      <option value="vertical">Vertical</option>
+                    </select>
+                  </label>
+                  <label>Screw hole Ø mm
+                    <input id="edge-mount-screw-diameter" type="number" min="1" max="12" step="0.1">
+                  </label>
+                  <label class="inline-select">Driver access Ø
+                    <select id="edge-mount-access-mode">
+                      <option value="auto">Auto</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </label>
+                  <span id="edge-mount-access-auto-note" class="muted">Auto: 8 mm</span>
+                  <label id="edge-mount-access-custom-row" hidden>Access Ø mm
+                    <input id="edge-mount-access-diameter" type="number" min="2" max="20" step="0.1">
+                  </label>
+                  <label title="Measured from the top rim to the center of the upper screw hole.">Distance below top mm
+                    <input id="edge-mount-top-offset" type="number" min="0.1" step="0.1">
+                  </label>
+                  <label class="inline-select">Hole spacing
+                    <select id="edge-mount-spacing-mode">
+                      <option value="auto">Auto</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </label>
+                  <label id="edge-mount-spacing-custom-row" hidden>Spacing mm
+                    <input id="edge-mount-spacing-mm" type="number" min="0.1" step="0.1">
+                  </label>
+                </div>
+                <p class="inline-help">The small holes go through the mounting wall. Larger round access passages come from the opposite wall so a screwdriver can reach each screw.</p>
+              </div>
+            </div>
           </div>
 
         </div>

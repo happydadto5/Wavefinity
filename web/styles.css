@@ -575,6 +575,8 @@ input[type="number"]::-webkit-inner-spin-button {
   white-space: normal; overflow: hidden; text-overflow: ellipsis;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
+.support-choice-state { color: #1f6b45; font-size: 10px; font-weight: 800; }
+.support-choice.added { border-color: #7aa98d; background: #f3faf6; cursor: default; opacity: .82; }
 /* The part being edited always reads green - it's "the one you're working on",
    not a warning. Problems surface as red status text and in the preview panel,
    never by turning this chip or the editor red. */

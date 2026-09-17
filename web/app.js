@@ -40,6 +40,7 @@ const state = {
   // be back at the 10-part palette, so renderPlaced() must not helpfully re-open
   // a lone part for editing. Cleared the moment a part is picked or reopened.
   paletteBrowsing: false,
+  edgeMountEditing: false,
   // Which of the open draft's zone axes the user has set by hand. A pinned axis
   // is only ever grown to fit the part's contents, never shrunk back or
   // overwritten - a manual size always wins. Reset whenever a fresh draft loads.
@@ -191,6 +192,7 @@ const COLORS = {
   scoop: "#a9bec3", insert_base: "#c5ab83", invalid: "#c95f58",
   cradle: "#e59f54", nest: "#df8d5b", bore: "#6fb98f", post: "#51a5a1",
   divider: "#9d86c8", pocket: "#d4778c", slot: "#8b78cf", steps: "#4b8eb9",
+  edge_mount: "#c47b42",
   divider_slope: "#1f6b45",
   // Floor lettering keeps the colour the single floor label always had, so a
   // text interior part reads as writing rather than as another holder.
@@ -418,6 +420,19 @@ function partInfo(kind = state.draftKind) {
   return state.catalog.parts.find(part => part.kind === kind);
 }
 
+function editingEdgeMount() {
+  return state.edgeMountEditing === true;
+}
+
+function edgeMountActive(design = state.design) {
+  const one = design?.box?.edge_mount;
+  return Boolean(one?.label_enabled || one?.holes_enabled);
+}
+
+function placedPartCount() {
+  return (state.design?.layout?.features?.length || 0) + (edgeMountActive() ? 1 : 0);
+}
+
 function iconFor(kind) {
   const common = 'viewBox="0 0 32 32" aria-hidden="true"';
   const iconId = partInfo(kind)?.icon || kind;
@@ -476,6 +491,7 @@ function renderCatalog() {
       <span class="support-choice-copy">
         <strong>${escapeHtml(part.title)}</strong>
         <span class="support-choice-desc">${escapeHtml(part.description)}</span>
+        <span class="support-choice-state" hidden></span>
       </span>
     </button>
   `).join("");
@@ -691,10 +707,19 @@ function syncEdgeMountControls() {
   if ($("#edge-mount-hole-orientation-row")) $("#edge-mount-hole-orientation-row").hidden = number(edgeMount.hole_count) <= 1;
 }
 
-function applyEdgeMountVisibility() {
-  const panel = $("#edge-mount-panel");
-  if (!panel) return;
-  panel.hidden = b4bEnabled() || baseTrimEnabled();
+function syncEdgeMountEditorVisibility() {
+  const scratch = { box: { edge_mount: { ...EDGE_MOUNT_DEFAULTS, ...(state.design?.box?.edge_mount || {}) } } };
+  readEdgeMountForm(scratch);
+  const edgeMount = scratch.box.edge_mount || EDGE_MOUNT_DEFAULTS;
+  $("#edge-mount-label-panel").hidden = !$("#edge-mount-label-enabled").checked;
+  $("#edge-mount-holes-panel").hidden = !$("#edge-mount-holes-enabled").checked;
+  $("#edge-mount-label-projection-custom-row").hidden = $("#edge-mount-label-projection").value !== "custom";
+  $("#edge-mount-label-thickness-custom-row").hidden = $("#edge-mount-label-thickness").value !== "custom";
+  $("#edge-mount-access-custom-row").hidden = $("#edge-mount-access-mode").value !== "custom";
+  $("#edge-mount-access-auto-note").hidden = $("#edge-mount-access-mode").value === "custom";
+  $("#edge-mount-access-auto-note").textContent = `Auto: ${fmt(resolvedEdgeMountAccessDiameter(edgeMount))} mm`;
+  $("#edge-mount-spacing-custom-row").hidden = $("#edge-mount-spacing-mode").value !== "custom";
+  $("#edge-mount-hole-orientation-row").hidden = number($("#edge-mount-hole-count").value) <= 1;
 }
 
 function wallPresetChoices() {
@@ -870,7 +895,6 @@ function syncWallControls() {
 
 function syncForm() {
   applyBaseTrimVisibility();
-  applyEdgeMountVisibility();
   if (baseTrimEnabled()) {
     syncBaseTrimForm();
     syncJoiningControls();
@@ -905,7 +929,7 @@ function syncForm() {
   $("#lift-grabber-location").value = box.lift_grabbers?.location || "sides";
   syncLiftGrabberControls();
   populateEdgeMountChoices();
-  syncEdgeMountControls();
+  if (editingEdgeMount()) syncEdgeMountControls();
   if (!state.design.part_name || !state.design.part_name.trim()) {
     const labelCandidate = state.design.label || state.design.b4b?.label_text || state.design.layout?.features?.find(f => f.kind === "text")?.options?.text;
     if (labelCandidate && !SIZE_LIKE_TEXT.test(labelCandidate)) {
@@ -1937,7 +1961,6 @@ async function toggleB4B(wantEnabled) {
   readB4BForm(state.design);
   enforceB4BMinimums();
   applyB4BVisibility();
-  applyEdgeMountVisibility();
   changedDesign();
   return true;
 }
@@ -2095,7 +2118,7 @@ function updateDesignFromForm() {
   const scoopEl = $("#scoop");
   if (scoopEl) design.scoop = scoopEl.checked;
   readLiftGrabberForm(design);
-  readEdgeMountForm(design);
+  if (editingEdgeMount()) readEdgeMountForm(design);
   syncRimLabelFromFeatures();
   const newOutput = $("#output-folder").value.trim();
   if (!state.runtime.hosted && newOutput !== state.output) {
@@ -2588,13 +2611,19 @@ function wireControls() {
     "#edge-mount-hole-count", "#edge-mount-hole-orientation", "#edge-mount-access-mode",
     "#edge-mount-spacing-mode",
   ];
-  edgeMountChangeIds.forEach(selector => $(selector)?.addEventListener("change", changedDesign));
+  edgeMountChangeIds.forEach(selector => $(selector)?.addEventListener("change", () => {
+    syncEdgeMountEditorVisibility();
+    changedDesign();
+  }));
   const edgeMountInputIds = [
     "#edge-mount-label-text", "#edge-mount-label-projection-mm", "#edge-mount-label-thickness-mm",
     "#edge-mount-label-depth", "#edge-mount-screw-diameter", "#edge-mount-access-diameter",
     "#edge-mount-top-offset", "#edge-mount-spacing-mm",
   ];
-  edgeMountInputIds.forEach(selector => $(selector)?.addEventListener("input", changedDesign));
+  edgeMountInputIds.forEach(selector => $(selector)?.addEventListener("input", () => {
+    syncEdgeMountEditorVisibility();
+    changedDesign();
+  }));
 
   $("#bin-type").addEventListener("change", changeBinType);
   $("#lid-option-toggle").addEventListener("click", () => {
@@ -2925,6 +2954,7 @@ function clearDraftSelection(resetLocks = true) {
   state.draftIsNew = false;
   state.draftSourceIndex = null;
   state.draftTouched = false;
+  state.edgeMountEditing = false;
   state.pinnedZone = {};
   if (resetLocks) state.partZoneLocks = {};
   state.selected = null;
@@ -2932,6 +2962,8 @@ function clearDraftSelection(resetLocks = true) {
   updateNudgeUI();
   $$(".support-choice").forEach(button => button.classList.remove("active"));
   $(".support-editor").hidden = true;
+  $("#draft-fields").hidden = false;
+  $("#edge-mount-editor").hidden = true;
   $("#draft-status").textContent = "";
   $("#draft-status").classList.remove("error");
   updateDraftStatusColor(null);
@@ -2942,8 +2974,46 @@ function clearDraftSelection(resetLocks = true) {
 
 function pickKind(kind) {
   state.paletteBrowsing = false;
+  if (kind === "edge_mount") {
+    selectEdgeMount();
+    return;
+  }
   updateInteriorModeVisibility(true);
   selectKind(kind);
+}
+
+async function selectEdgeMount(fromPlaced = false) {
+  if (edgeMountActive() && !fromPlaced && !editingEdgeMount()) return;
+  if (state.draft && !(await guardDraftSwitch())) return;
+  cancelPendingDraftWork();
+  state.paletteBrowsing = false;
+  state.draft = null;
+  state.draftKind = "edge_mount";
+  state.draftAutoCommit = false;
+  state.draftIsNew = false;
+  state.draftSourceIndex = null;
+  state.draftTouched = false;
+  state.selected = null;
+  state.edgeMountEditing = true;
+  $(".support-editor").hidden = false;
+  $("#draft-fields").hidden = true;
+  $("#edge-mount-editor").hidden = false;
+  $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === "edge_mount"));
+  const info = partInfo("edge_mount");
+  syncDraftEditorIdentity("edge_mount", info);
+  populateEdgeMountChoices();
+  syncEdgeMountControls();
+  renderPlaced();
+  updateSelectionButtons();
+}
+
+function commitEdgeMountFormBeforeSwitch() {
+  if (!editingEdgeMount()) return;
+  const previousDesign = pendingDesignHistory || clone(state.design);
+  applyChangedDesign.cancel();
+  pendingDesignHistory = null;
+  updateDesignFromForm();
+  recordHistory(previousDesign);
 }
 
 function syncDraftEditorIdentity(kind, info) {
@@ -2970,6 +3040,10 @@ async function selectKind(kind, reset = false) {
   // give the user the chance to keep unsaved work first.
   const keepsSameDraft = !reset && state.draft?.kind === kind;
   if (!keepsSameDraft && !(await guardDraftSwitch())) return;
+  commitEdgeMountFormBeforeSwitch();
+  state.edgeMountEditing = false;
+  $("#draft-fields").hidden = false;
+  $("#edge-mount-editor").hidden = true;
   // The palette request is independent of preview/draft requests. Without its
   // own token, a slower earlier click could overwrite a newer shape choice.
   // A new palette choice also makes every pending edit to the prior draft
@@ -3052,7 +3126,11 @@ async function selectedFeature(index, force = false) {
   if (!force && index === state.selected) return;
   // Don't drop unsaved work on the part currently open without asking first.
   if (!force && !(await guardDraftSwitch())) return;
+  commitEdgeMountFormBeforeSwitch();
   cancelPendingDraftWork();
+  state.edgeMountEditing = false;
+  $("#draft-fields").hidden = false;
+  $("#edge-mount-editor").hidden = true;
   state.paletteBrowsing = false;
   state.selected = index;
   state.nudgeFeedback = null;
@@ -5655,6 +5733,7 @@ async function applySupport(index) {
 // draft that can't be saved (overlap, doesn't fit) keeps the editor open with
 // its error.
 async function saveCurrentPart() {
+  if (editingEdgeMount()) return saveEdgeMountPart();
   if (!state.draft || !beginDesignMutation()) return;
   try {
     const index = draftCommitIndex();
@@ -5679,10 +5758,35 @@ async function saveCurrentPart() {
   }
 }
 
+async function saveEdgeMountPart() {
+  if (!$("#edge-mount-label-enabled")?.checked && !$("#edge-mount-holes-enabled")?.checked) {
+    toast("Enable Projecting Label or Screw Mounting first.", true, 5000);
+    return;
+  }
+  if (!beginDesignMutation()) return;
+  try {
+    const previousDesign = clone(state.design);
+    readEdgeMountForm(state.design);
+    const result = await api("/api/design/validate", { design: state.design });
+    state.design = result.design;
+    recordHistory(previousDesign);
+    state.paletteBrowsing = true;
+    clearDraftSelection();
+    renderPlaced();
+    await refreshPreview();
+    toast("Part saved.");
+  } catch (error) {
+    toast(error.message, true, 5000);
+  } finally {
+    finishDesignMutation();
+  }
+}
+
 // "Delete Part": drop the part currently being edited - a placed one is
 // removed from the design, a brand-new draft is just discarded - then return
 // to the 10-part palette.
 async function deleteCurrentPart() {
+  if (editingEdgeMount()) return deleteEdgeMountPart();
   if (!state.draft) return;
   const deletingNest = state.draft.kind === "nest";
   const index = draftCommitIndex();
@@ -5696,6 +5800,38 @@ async function deleteCurrentPart() {
   clearDraftSelection();
   renderPlaced();
   refreshPreview();
+}
+
+async function deleteEdgeMountPart(fromPlaced = false) {
+  const active = edgeMountActive();
+  if (!active) {
+    applyChangedDesign.cancel();
+    pendingDesignHistory = null;
+    state.paletteBrowsing = true;
+    clearDraftSelection();
+    renderPlaced();
+    refreshPreview();
+    return;
+  }
+  if (fromPlaced && state.draft && !(await guardDraftSwitch())) return;
+  if (!window.confirm("Delete Edge Mount? This can't be undone.")) return;
+  if (!beginDesignMutation()) return;
+  try {
+    const previousDesign = clone(state.design);
+    state.design.box.edge_mount = { ...EDGE_MOUNT_DEFAULTS };
+    const result = await api("/api/design/validate", { design: state.design });
+    state.design = result.design;
+    recordHistory(previousDesign);
+    state.paletteBrowsing = true;
+    clearDraftSelection();
+    renderPlaced();
+    await refreshPreview();
+    toast("Edge Mount deleted.");
+  } catch (error) {
+    toast(error.message, true, 5000);
+  } finally {
+    finishDesignMutation();
+  }
 }
 
 async function deleteSupportAt(index) {
@@ -5799,23 +5935,38 @@ function updateSelectionButtons() {
   // only while a part is open for editing.
   const draftActions = $("#draft-actions");
   if (draftActions) draftActions.hidden = !editing;
-  const hasPlaced = !!state.design?.layout?.features?.length;
+  const hasPlaced = placedPartCount() > 0;
   $$(".placed-block").forEach(placedBlock => { placedBlock.hidden = !hasPlaced; });
-  $("#save-part").disabled = busy || !state.draft;
-  $("#delete-part").disabled = busy || !state.draft ||
+  $("#save-part").disabled = busy || (!state.draft && !editingEdgeMount());
+  $("#delete-part").disabled = busy || (!state.draft && !editingEdgeMount()) ||
     (state.draft?.kind === "divider" && dividerLockedByLidLabels());
   const hasPhotoNest = state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour);
   const replacingPhotoNest = hasPhotoNest && state.selected !== null &&
     state.design.layout.features[state.selected]?.kind === "nest";
   $$(".support-choice").forEach(button => {
-    button.disabled = busy || (hasPhotoNest && !replacingPhotoNest && button.dataset.kind !== "nest");
+    const isEdgeMount = button.dataset.kind === "edge_mount";
+    const alreadyAdded = isEdgeMount && edgeMountActive() && !editingEdgeMount();
+    button.disabled = busy || alreadyAdded ||
+      (hasPhotoNest && !replacingPhotoNest && button.dataset.kind !== "nest" && !isEdgeMount);
+    button.classList.toggle("added", alreadyAdded);
+    const stateLabel = $(".support-choice-state", button);
+    if (stateLabel) {
+      stateLabel.hidden = !alreadyAdded;
+      stateLabel.textContent = alreadyAdded ? "Added" : "";
+    }
+    if (isEdgeMount) {
+      const info = partInfo("edge_mount");
+      button.title = alreadyAdded
+        ? "Edge Mount already added. Reopen it under Placed parts."
+        : `${info.title} — ${info.description}`;
+    }
   });
   $$(".placed-item-select, .placed-item-delete").forEach(button => {
     const feature = state.design?.layout?.features?.[Number(button.dataset.index)];
     button.disabled = busy || (button.classList.contains("placed-item-delete") &&
       feature?.kind === "divider" && dividerLockedByLidLabels());
   });
-  $("#support-count").textContent = `${state.design?.layout.features.length || 0} placed`;
+  $("#support-count").textContent = `${placedPartCount()} placed`;
 }
 
 function updateDraftStatusColor(hasError) {
@@ -5832,12 +5983,11 @@ function updateDraftStatusColor(hasError) {
 function renderPlaced() {
   if (!state.design) return;
   const features = state.design.layout.features;
+  const edgeMount = state.design.box?.edge_mount;
   // Painted in two spots: the floating box over the 3D/2D view, and the
   // matching list in the left settings panel - same markup, same handlers.
   const containers = $$("#placed-supports, #placed-supports-panel");
-  const markup = !features.length
-    ? '<div class="placed-empty">No interior parts yet. Pick a shape above.</div>'
-    : features.map((one, index) => {
+  const featureMarkup = features.map((one, index) => {
       const width = one.zone[2] - one.zone[0];
       const depth = one.zone[3] - one.zone[1];
       const isRim = one.kind === "text" && one.options?.level === "rim";
@@ -5853,22 +6003,41 @@ function renderPlaced() {
         <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this interior part" aria-label="Delete ${title}">✕</button>
       </div>`;
     }).join("");
+  let edgeMountMarkup = "";
+  if (edgeMountActive()) {
+    const side = `${edgeMount.side || "front"}`;
+    const detail = edgeMount.label_enabled && edgeMount.holes_enabled
+      ? "Label + Screws"
+      : edgeMount.label_enabled ? "Label" : "Screws";
+    const specs = `${side.charAt(0).toUpperCase()}${side.slice(1)} · ${detail}`;
+    edgeMountMarkup = `<div class="placed-item ${editingEdgeMount() ? "selected status-valid" : ""}" data-kind="edge_mount" style="--support-color:${kindColor("edge_mount")}">
+      <button type="button" class="placed-item-select" data-kind="edge_mount">
+        <span class="placed-item-icon">${iconFor("edge_mount")}</span>
+        <span class="placed-item-copy"><strong>Edge Mount</strong><span>${escapeHtml(specs)}</span></span>
+      </button>
+      <button type="button" class="placed-item-delete" data-kind="edge_mount" title="Delete Edge Mount" aria-label="Delete Edge Mount">✕</button>
+    </div>`;
+  }
+  const markup = featureMarkup + edgeMountMarkup ||
+    '<div class="placed-empty">No parts yet. Pick a shape above.</div>';
   containers.forEach(container => {
     container.innerHTML = markup;
-    if (!features.length) return;
-    $$(".placed-item-select", container).forEach(button => button.addEventListener("click", async () => {
+    $$(".placed-item-select[data-index]", container).forEach(button => button.addEventListener("click", async () => {
       const index = Number(button.dataset.index);
       await selectedFeature(index);
       if (state.selected === index) activatePreviewView("2d");
     }));
-    $$(".placed-item-delete", container).forEach(button => button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
+    $$(".placed-item-delete[data-index]", container).forEach(button => button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
+    $(".placed-item-select[data-kind='edge_mount']", container)?.addEventListener("click", () => selectEdgeMount(true));
+    $(".placed-item-delete[data-kind='edge_mount']", container)?.addEventListener("click", () => deleteEdgeMountPart(true));
   });
-  $("#support-count").textContent = `${features.length} placed`;
+  const total = placedPartCount();
+  $("#support-count").textContent = `${total} placed`;
   const summaryEl = $("#design-summary");
   if (summaryEl) {
-    summaryEl.textContent = features.length
-      ? `${features.length} interior part${features.length === 1 ? "" : "s"} · ${state.design.layout.mode}`
-      : `No interior parts placed · ${state.design.layout.mode}`;
+    summaryEl.textContent = total
+      ? `${total} part${total === 1 ? "" : "s"} · ${state.design.layout.mode}`
+      : `No parts placed · ${state.design.layout.mode}`;
   }
 
   // With a single support there's nothing to choose between, so drop straight
@@ -9397,7 +9566,7 @@ function designHasChanges() {
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
   readLiftGrabberForm(visibleDesign);
-  readEdgeMountForm(visibleDesign);
+  if (editingEdgeMount()) readEdgeMountForm(visibleDesign);
   const index = draftCommitIndex();
   if (state.draft && state.draftAutoCommit && (
     index === null ||

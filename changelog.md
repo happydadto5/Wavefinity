@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-17 — Edge Mount moved into Parts
+
+- Moved Edge Mount from the permanent bin controls into the Parts palette and
+  Placed parts list while keeping its existing box-level geometry and saved
+  design format unchanged.
+
 ## 2026-09-16 — Lid & Stacking part
 
 - Moved direct stacking and stackable lids out of the top design selector and

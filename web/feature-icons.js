@@ -12,4 +12,5 @@ window.WavefinityFeatureIcons = Object.freeze({
   steps: '<path d="M4 25h24V10h-8v5h-8v5H4z"/>',
   scoop: '<path d="M4 9v16h24C20 25 14 18 14 9H4z"/>',
   text: '<path d="M6 7h20M16 7v18" stroke-linecap="round" stroke-linejoin="round"/>',
+  edge_mount: '<path d="M5 5v22M5 9h15v5H9v13M20 11h7v12h-7M23.5 15v4"/>',
 });

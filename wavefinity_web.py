@@ -723,6 +723,26 @@ def catalog_payload() -> dict[str, Any]:
         }
         for definition in feature_definitions()
     ]
+    parts.append({
+        "kind": "edge_mount",
+        "title": "Edge Mount",
+        "display": "Edge Mount",
+        "description": "Mount the bin to an edge using a projecting label and/or screw mounting.",
+        "icon": "edge_mount",
+        "flags": {
+            "qty": False,
+            "size": False,
+            "along": False,
+            "item": False,
+            "lean": False,
+            "alternate": False,
+            "photo": False,
+            "text": False,
+        },
+        "fields": [],
+        "options": [],
+        "capabilities": ["box_modifier"],
+    })
     return {
         "version": SERVER_VERSION,
         "instance": SERVER_INSTANCE,
