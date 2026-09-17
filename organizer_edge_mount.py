@@ -488,6 +488,44 @@ def _build_label_plate_mesh(box: BoxSpec, plan: dict[str, object]) -> trimesh.Tr
     return solid
 
 
+def apply_edge_mount_hole_cuts(
+    box: BoxSpec,
+    body: trimesh.Trimesh,
+    *,
+    cut_driver_passages: bool = True,
+) -> trimesh.Trimesh:
+    """Subtract Screw Mounting's small mounting holes and (by default) their
+    driver-access passages from ``body``.
+
+    This is the one place that geometry is built, so a caller with more than
+    one solid to cut - the bin shell, a fused holder, the scoop, the rim
+    ledge, a live draft - can cut each of them with the exact same cutters
+    export uses, rather than baking everything into one combined solid first.
+    ``(A union B) minus C`` and ``(A minus C) union (B minus C)`` are the same
+    shape for a shared cutter ``C``, so cutting each piece separately keeps
+    every piece's own preview identity (bin vs. interior-feature, its own
+    colour/category) while still showing exactly what export cuts away.
+
+    Returns ``body`` unchanged when Screw Mounting is off.
+    """
+    spec = box.edge_mount
+    if not spec.holes_enabled:
+        return body
+    side = _normalize_side(spec.side)
+    holes = edge_mount_hole_plan(box)
+    if not holes:
+        return body
+    cutters: list[trimesh.Trimesh] = []
+    for hole in holes:
+        cutters.extend(_hole_cutters(box, side, hole, cut_driver_passages))
+    cutter = union(cutters) if len(cutters) > 1 else cutters[0]
+    # difference() already cleans up after itself the safe way (organizer_
+    # geometry._cleaned() only keeps the clean copy when that does not break
+    # watertightness) - a further unguarded clean-up call here has, in
+    # practice, turned an otherwise-valid cut solid non-watertight.
+    return difference([body, cutter])
+
+
 def apply_edge_mount_structure(
     box: BoxSpec,
     body: trimesh.Trimesh,
@@ -508,18 +546,12 @@ def apply_edge_mount_structure(
     label_plan = edge_mount_label_plan(box)
     if label_plan is not None:
         plate = _build_label_plate_mesh(box, label_plan)
+        # union() already cleans up after itself (and only keeps the clean
+        # copy when that does not break watertightness) - an extra unguarded
+        # clean-up call here has, in practice, turned an otherwise-valid
+        # solid non-watertight and failed the boolean cut that follows.
         result = union([result, plate])
-    holes = edge_mount_hole_plan(box)
-    if holes:
-        side = _normalize_side(spec.side)
-        cutters: list[trimesh.Trimesh] = []
-        for hole in holes:
-            cutters.extend(_hole_cutters(box, side, hole, cut_driver_passages))
-        cutter = union(cutters) if len(cutters) > 1 else cutters[0]
-        result = difference([result, cutter])
-    result.remove_unreferenced_vertices()
-    result.merge_vertices()
-    return result
+    return apply_edge_mount_hole_cuts(box, result, cut_driver_passages=cut_driver_passages)
 
 
 def edge_mount_text_object(box: BoxSpec) -> tuple[str, trimesh.Trimesh, bool] | None:
