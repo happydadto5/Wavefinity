@@ -511,10 +511,10 @@ def _lid_handle(box: BoxSpec, top_z: float, outer: Polygon) -> trimesh.Trimesh:
     span_y = max(1.0, max_y - min_y - 2.0 * LID_HANDLE_EDGE_MARGIN)
     cx, cy = _handle_centre(box, span_x, span_y)
     if spec.handle_type == "knob":
-        diameter = _clamp(
+        diameter = min(min(span_x, span_y), _clamp(
             min(span_x, span_y) * LID_KNOB_SCALE[spec.handle_size],
             LID_KNOB_DIAMETER_LIMITS,
-        )
+        ))
         height = _clamp(
             diameter * LID_KNOB_HEIGHT_RATIO, LID_KNOB_HEIGHT_LIMITS,
         )
@@ -532,16 +532,18 @@ def _lid_handle(box: BoxSpec, top_z: float, outer: Polygon) -> trimesh.Trimesh:
     width = _clamp(
         available * LID_PULL_SCALE[spec.handle_size], LID_PULL_WIDTH_LIMITS,
     )
-    width = min(width, max(LID_PULL_WIDTH_LIMITS[0], available))
+    width = min(width, available)
     clearance = min(
         LID_PULL_CLEARANCE[spec.handle_size], max(4.0, min(span_x, span_y) * 0.28),
     )
     post_height = clearance + LID_PULL_BAR_THICKNESS
-    post_size = LID_PULL_BAR_DEPTH
+    cross_span = span_y if run_x else span_x
+    bar_depth = min(LID_PULL_BAR_DEPTH, max(1.0, cross_span * 0.5))
+    post_size = min(bar_depth, max(1.0, width / 3.0))
     bar_extents = (
-        (width, LID_PULL_BAR_DEPTH, LID_PULL_BAR_THICKNESS)
+        (width, bar_depth, LID_PULL_BAR_THICKNESS)
         if run_x else
-        (LID_PULL_BAR_DEPTH, width, LID_PULL_BAR_THICKNESS)
+        (bar_depth, width, LID_PULL_BAR_THICKNESS)
     )
     bar = trimesh.creation.box(extents=bar_extents)
     bar.apply_translation((cx, cy, top_z + clearance + LID_PULL_BAR_THICKNESS / 2.0))
@@ -555,6 +557,86 @@ def _lid_handle(box: BoxSpec, top_z: float, outer: Polygon) -> trimesh.Trimesh:
         support.apply_translation((px, py, top_z))
         supports.append(support)
     return union([bar, *supports])
+
+
+def lid_handle_height(box: BoxSpec) -> float:
+    if not lid_has_handle(box):
+        return 0.0
+    outer = wavy_outer_polygon(stack_effective_box(box))
+    min_x, min_y, max_x, max_y = outer.bounds
+    span_x = max(1.0, max_x - min_x - 2.0 * LID_HANDLE_EDGE_MARGIN)
+    span_y = max(1.0, max_y - min_y - 2.0 * LID_HANDLE_EDGE_MARGIN)
+    spec = lid_spec(box)
+    if spec.handle_type == "knob":
+        diameter = min(min(span_x, span_y), _clamp(
+            min(span_x, span_y) * LID_KNOB_SCALE[spec.handle_size],
+            LID_KNOB_DIAMETER_LIMITS,
+        ))
+        return _clamp(diameter * LID_KNOB_HEIGHT_RATIO, LID_KNOB_HEIGHT_LIMITS)
+    clearance = min(
+        LID_PULL_CLEARANCE[spec.handle_size], max(4.0, min(span_x, span_y) * 0.28),
+    )
+    return clearance + LID_PULL_BAR_THICKNESS
+
+
+def _lid_handle_keepout(
+    box: BoxSpec, outer: Polygon,
+) -> tuple[float, float, float, float]:
+    """Conservative XY rectangle labels must stay out of."""
+    spec = lid_spec(box)
+    min_x, min_y, max_x, max_y = outer.bounds
+    span_x = max(1.0, max_x - min_x - 2.0 * LID_HANDLE_EDGE_MARGIN)
+    span_y = max(1.0, max_y - min_y - 2.0 * LID_HANDLE_EDGE_MARGIN)
+    cx, cy = _handle_centre(box, span_x, span_y)
+    if spec.handle_type == "knob":
+        diameter = min(min(span_x, span_y), _clamp(
+            min(span_x, span_y) * LID_KNOB_SCALE[spec.handle_size],
+            LID_KNOB_DIAMETER_LIMITS,
+        ))
+        half_x = half_y = diameter / 2.0 + 1.0
+    else:
+        run_x = spec.handle_position in ("front", "back") or (
+            spec.handle_position == "middle" and span_x >= span_y
+        )
+        available = span_x if run_x else span_y
+        width = min(
+            _clamp(available * LID_PULL_SCALE[spec.handle_size], LID_PULL_WIDTH_LIMITS),
+            available,
+        )
+        cross_span = span_y if run_x else span_x
+        bar_depth = min(LID_PULL_BAR_DEPTH, max(1.0, cross_span * 0.5))
+        half_x = (width / 2.0 + 1.0) if run_x else (bar_depth / 2.0 + 1.0)
+        half_y = (bar_depth / 2.0 + 1.0) if run_x else (width / 2.0 + 1.0)
+    return cx - half_x, cy - half_y, cx + half_x, cy + half_y
+
+
+def _regions_avoiding_handle(
+    box: BoxSpec,
+    outer: Polygon,
+    regions: list[tuple[str, tuple[float, float, float, float]]],
+) -> list[tuple[str, tuple[float, float, float, float]]]:
+    if not lid_has_handle(box):
+        return regions
+    hx0, hy0, hx1, hy1 = _lid_handle_keepout(box, outer)
+    safe: list[tuple[str, tuple[float, float, float, float]]] = []
+    for text, (x0, y0, x1, y1) in regions:
+        if hx1 <= x0 or hx0 >= x1 or hy1 <= y0 or hy0 >= y1:
+            safe.append((text, (x0, y0, x1, y1)))
+            continue
+        candidates = [
+            (x0, y0, min(x1, hx0), y1),
+            (max(x0, hx1), y0, x1, y1),
+            (x0, y0, x1, min(y1, hy0)),
+            (x0, max(y0, hy1), x1, y1),
+        ]
+        legal = [region for region in candidates if
+                 region[2] - region[0] > 2.0 * LID_LABEL_MARGIN and
+                 region[3] - region[1] > 2.0 * LID_LABEL_MARGIN]
+        if not legal:
+            raise ValueError(f"lid label '{text}' has no space beside the handle")
+        best = max(legal, key=lambda region: (region[2] - region[0]) * (region[3] - region[1]))
+        safe.append((text, best))
+    return safe
 
 
 def _lid_text_parts(
@@ -647,7 +729,9 @@ def make_lid_parts(
     if lid_spec(eff).label_enabled and not regions:
         safe = plug_outline if lid_stackable(eff) else outer
         regions = [(lid_spec(eff).label_text, tuple(float(v) for v in safe.bounds))]
-    labels = _lid_text_parts(eff, rim + rise, regions)
+    regions = _regions_avoiding_handle(eff, outer, regions)
+    label_surface = rim + rise - (STACK_SEAT_DEPTH if lid_stackable(eff) else 0.0)
+    labels = _lid_text_parts(eff, label_surface, regions)
     sunk = [mesh for _text, mesh, raised in labels if not raised]
     if sunk:
         lid = difference([lid, union(sunk) if len(sunk) > 1 else sunk[0]])
@@ -662,7 +746,7 @@ def make_stack_lid(box: BoxSpec) -> trimesh.Trimesh:
 
 def stack_closed_height(box: BoxSpec) -> float:
     """Detached physical envelope, including the interlocking foot depth."""
-    return stack_effective_box(box).z + stack_lid_rise(box)
+    return stack_effective_box(box).z + stack_lid_rise(box) + lid_handle_height(box)
 
 
 def stack_module_height(box: BoxSpec) -> float:

@@ -95,6 +95,7 @@ from organizer_stack import (
     make_lid_parts,
     make_stack_lid,
     normalize_stack_settings,
+    stack_closed_height,
     stack_effective_box,
     stack_enabled,
     stack_spec,
@@ -1621,6 +1622,8 @@ def inventory_bin_record(
         phys_x, phys_y, phys_z = physical_size_mm
     else:
         phys_x, phys_y, phys_z = box.x, box.y, box.z
+        if lid_enabled(box) and not lid_stackable(box):
+            phys_z = stack_closed_height(box)
 
     if stack_enabled(box) or lid_enabled(box):
         wall = stack_effective_box(box).wall

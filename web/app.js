@@ -187,6 +187,7 @@ function setFolderState(
 const COLORS = {
   outside: "#8ea8b2", inside: "#c9d9dc", rim: "#6f8f99", floor: "#b9a97e",
   label: "#315766", label_hole: "#e8efef", top_label_ledge: "#7799a3",
+  lid: "#6c909b", lid_label: "#e8efef",
   scoop: "#a9bec3", insert_base: "#c5ab83", invalid: "#c95f58",
   cradle: "#e59f54", nest: "#df8d5b", bore: "#6fb98f", post: "#51a5a1",
   divider: "#9d86c8", pocket: "#d4778c", slot: "#8b78cf", steps: "#4b8eb9",
@@ -716,7 +717,7 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
   // real load paths through the wall; an ordinary bin does not.
   const stacking = (box?.stack?.mode || "none") === "direct" || Boolean(box?.lid?.enabled && box.lid.stackable);
   const hasLid = Boolean(box?.lid?.enabled);
-  const stackMin = stacking ? number(state.catalog?.stack_rules?.min_wall_mm, 1.2) : -Infinity;
+  const stackMin = (stacking || hasLid) ? number(state.catalog?.stack_rules?.min_wall_mm, 1.2) : -Infinity;
   const b4bMin = box?.b4b?.enabled ? B4B_MIN_WALL : -Infinity;
   const modeMin = Math.max(stackMin, b4bMin);
   const allChoices = wallPresetChoices();
@@ -1240,10 +1241,11 @@ function syncJoiningControls() {
     syncConnectorHeightControls();
   }
   if (!baseTrimEnabled() && !b4bEnabled()) {
-    $("#generate-all").hidden = false;
+    const connectorLocked = Boolean(state.design?.box?.lid?.enabled);
+    $("#generate-all").hidden = connectorLocked;
     $("#generate-all").textContent = connectorless ? "Generate Bin" : "Generate Bin and Connectors";
-    $("#generate-bin").hidden = connectorless;
-    $("#generate-connector").hidden = connectorless;
+    $("#generate-bin").hidden = connectorless && !connectorLocked;
+    $("#generate-connector").hidden = connectorless || connectorLocked;
   }
 }
 
@@ -1578,6 +1580,8 @@ function renderLidLabelEditor() {
     values[Number(input.dataset.lidDivisionIndex)] = input.value;
     state.design.box.lid.division_labels = values;
     seedPartNameFromLabel(input.value);
+    if (state.draft?.kind === "divider") renderDraftFields();
+    updateSelectionButtons();
     changedDesign(previous);
   }));
 }
@@ -1601,7 +1605,8 @@ function syncLidForm() {
   const handled = config === "handled_lid";
   $("#lid-physical-options").hidden = !hasLid;
   ["#lid-handle-type-row", "#lid-handle-size-row", "#lid-handle-position-row"].forEach(selector => {
-    $(selector).hidden = !handled;
+    $(selector).hidden = !hasLid;
+    $("select", $(selector)).disabled = !handled;
   });
   const labelOn = hasLid && lid.label_enabled;
   $("#lid-label-orientation-row").hidden = !labelOn;
@@ -1738,14 +1743,16 @@ function readStackForm(design) {
   delete design.box.stack;
   const divider = lidDivider(design);
   let divisionLabels = Array.isArray(remembered.division_labels) ? [...remembered.division_labels] : [];
-  if (divider && $("#lid-label-enabled").value === "true" && !divisionLabels.some(value => String(value || "").trim())) {
+  const labelEnabled = $("#lid-label-enabled").value === "true";
+  if (!labelEnabled) divisionLabels = [];
+  if (divider && labelEnabled && !divisionLabels.some(value => String(value || "").trim())) {
     divisionLabels = dividerLabelsForLid(divider);
   }
   design.box.lid = {
     enabled: true,
     stackable: config === "stackable_lid",
     thickness: $("#lid-thickness").value,
-    label_enabled: $("#lid-label-enabled").value === "true",
+    label_enabled: labelEnabled,
     label_style: config === "stackable_lid" ? "flush" : $("#lid-label-style").value,
     label_orientation: $("#lid-label-orientation").value,
     label_text: $("#lid-label-text").value,
@@ -2962,6 +2969,10 @@ function syncDraftEditorIdentity(kind, info) {
 }
 
 async function selectKind(kind, reset = false) {
+  if (kind === "divider" && dividerLockedByLidLabels()) {
+    toast(dividerLockMessage(), true, 6500);
+    return;
+  }
   // Re-picking the shape already open keeps the same draft, so there is nothing
   // to lose - skip the guard in that case. Anything else replaces the draft, so
   // give the user the chance to keep unsaved work first.
@@ -3814,6 +3825,10 @@ function renderDraftFields() {
   }
   const activeDraft = document.activeElement?.dataset?.draft;
   $("#draft-fields").innerHTML = html;
+  if (one.kind === "divider" && dividerLockedByLidLabels()) {
+    $$('input, select, button', $("#draft-fields")).forEach(control => { control.disabled = true; });
+    $("#draft-status").textContent = dividerLockMessage();
+  }
   syncNest2DWorkspace();
   const photoInput = $("#nest-photo-input", $("#draft-fields"));
   if (photoInput) photoInput.addEventListener("change", uploadNestPhoto);
@@ -5695,6 +5710,10 @@ async function deleteSupportAt(index) {
   if (index === null || index === undefined) return;
   const target = state.design.layout.features[index];
   if (!target) return;
+  if (target.kind === "divider" && dividerLockedByLidLabels()) {
+    toast(dividerLockMessage(), true, 6500);
+    return;
+  }
   // Deleting a part other than the one open in the editor can throw away an
   // unsaved edit underneath it - route through the same guard used to switch
   // parts so that edit is saved (or the user confirms losing it) first.
@@ -5728,6 +5747,8 @@ function mutationControls() {
     '#x-size, #y-size, #z, #base-thickness, #wall-thickness, #part-name, ' +
     '#lift-grabber-size, #lift-grabber-location, #connector-height-mode, ' +
     '#mode-select, ' +
+    '#lid-option-toggle, #lid-configuration, #lid-thickness, #lid-handle-type, #lid-handle-size, ' +
+    '#lid-handle-position, #lid-label-enabled, #lid-label-orientation, #lid-label-style, #lid-label-text, ' +
     '#b4b-stacking, #b4b-handle, #b4b-label-location, #b4b-latch-count, #b4b-front-label-style, ' +
     '#new-design, #open-design, #save-design'
   );
@@ -5768,6 +5789,7 @@ function finishDesignMutation() {
   state.designMutationBusy = false;
   setMutationSurfacesInert(false);
   mutationControls().forEach(control => control.disabled = false);
+  syncLidForm();
   updateSelectionButtons();
   updateHistoryButtons();
   updateGenerateAvailability();
@@ -5788,14 +5810,19 @@ function updateSelectionButtons() {
   const hasPlaced = !!state.design?.layout?.features?.length;
   $$(".placed-block").forEach(placedBlock => { placedBlock.hidden = !hasPlaced; });
   $("#save-part").disabled = busy || !state.draft;
-  $("#delete-part").disabled = busy || !state.draft;
+  $("#delete-part").disabled = busy || !state.draft ||
+    (state.draft?.kind === "divider" && dividerLockedByLidLabels());
   const hasPhotoNest = state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour);
   const replacingPhotoNest = hasPhotoNest && state.selected !== null &&
     state.design.layout.features[state.selected]?.kind === "nest";
   $$(".support-choice").forEach(button => {
     button.disabled = busy || (hasPhotoNest && !replacingPhotoNest && button.dataset.kind !== "nest");
   });
-  $$(".placed-item-select, .placed-item-delete").forEach(button => button.disabled = busy);
+  $$(".placed-item-select, .placed-item-delete").forEach(button => {
+    const feature = state.design?.layout?.features?.[Number(button.dataset.index)];
+    button.disabled = busy || (button.classList.contains("placed-item-delete") &&
+      feature?.kind === "divider" && dividerLockedByLidLabels());
+  });
   $("#support-count").textContent = `${state.design?.layout.features.length || 0} placed`;
 }
 
@@ -6389,7 +6416,7 @@ function canvasSize(canvas) {
 const isBinFace = kind =>
   kind === "outside" || kind === "inside" || kind === "rim" || kind === "floor" ||
   kind === "top_label_ledge" || kind === "label" || kind === "label_hole" ||
-  kind === "base_trim";
+  kind === "lid" || kind === "lid_label" || kind === "base_trim";
 
 // Which cardinal side of the bin the camera is looking from, by yaw alone
 // (elevation only affects pitch, not which wall is nearest). Shared by the
@@ -8884,6 +8911,10 @@ function promoteMergedDividerLabel(feature, merged, columns) {
 }
 
 async function editDividerSegment(originalHit) {
+  if (dividerLockedByLidLabels()) {
+    toast(dividerLockMessage(), true, 6500);
+    return;
+  }
   if (state.dividerTopologyBusy) return;
   state.dividerTopologyBusy = true;
   try {
@@ -9019,6 +9050,11 @@ function wireLayoutInteraction() {
         ? state.draft
         : state.design.layout.features[index]
     );
+    if (feature.kind === "divider" && dividerLockedByLidLabels()) {
+      pointerActive = false;
+      toast(dividerLockMessage(), true, 6500);
+      return;
+    }
     // Moving or resizing lettering by hand is a placement decision, so it
     // stops placing itself - otherwise the next preview would put it straight
     // back where the engine wanted it and the drag would look broken.
@@ -9241,6 +9277,10 @@ function handleLayoutArrowKeys(event) {
     state.draftAutoCommit = true;
   }
   const feature = state.draft;
+  if (feature.kind === "divider" && dividerLockedByLidLabels()) {
+    toast(dividerLockMessage(), true, 6500);
+    return;
+  }
   const z = feature.zone;
   const roundCoord = val => Math.round(val * 1000) / 1000;
   feature.zone = [
@@ -9331,6 +9371,9 @@ function designHasChanges() {
   if (visibleB4B) {
     readB4BForm(visibleDesign);
     enforceB4BMinimums(visibleDesign, false);
+  } else {
+    readStackForm(visibleDesign);
+    normalizeStackSettings(visibleDesign);
   }
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
@@ -9679,7 +9722,8 @@ async function generate(path, selector) {
 
 async function printModel(target = "bin") {
   if (state.runtime.hosted) return generateParts(
-    b4bEnabled() || baseTrimEnabled() || state.joinMode === "base_trim" ? "bin" : "all"
+    b4bEnabled() || baseTrimEnabled() || state.joinMode === "base_trim" ||
+      state.design?.box?.lid?.enabled ? "bin" : "all"
   );
   if (!checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {

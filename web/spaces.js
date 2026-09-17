@@ -628,6 +628,7 @@ SP.designBox = space => {
   const { box, layout } = state.design;
   Object.assign(box, { x: space.x, y: space.y, z: space.z });
   delete box.stack;
+  delete box.lid;
   box.b4b = { ...B4B_DEFAULTS, enabled: true };
   layout.features = [];
   layout.mode = "fused";

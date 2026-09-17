@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-16 — Lid & Stacking part
+
+- Moved direct stacking and stackable lids out of the top design selector and
+  into one optional ordinary-bin part, alongside a non-stackable handled lid.
+- Added lid thickness, relative knob/pull sizing and placement, flush/raised
+  labels, Divider-compartment labels, 2D/3D preview, separate 3MF export, saved
+  design migration, and Space inventory compatibility.
+- Disabled side connectors for lidded bins and locked Divider topology only
+  while meaningful compartment lid labels depend on it.
+
 ## 2026-09-16 — Edge Mount modifier
 
 - Added Edge Mount, an optional modifier for an ordinary bin (normal Bin,

@@ -35,11 +35,21 @@ The control panel is ordered by **blast radius**: a setting sits above
 everything whose meaning it can change.
 
 **The top selector decides what the thing is.** *Let’s design a* combines the
-ordinary bin, both stacking systems, and Bin for Bins. Stacked choices remain
-ordinary bins with interior parts; the selector still applies the required
-wall and floor settings. Bin for Bins turns X/Y into a child-bin field and
-retires interior parts and connectors. The selected wall/base values are shown
+ordinary bin, Bin for Bins, and Base Trim. Ordinary-bin stacking and removable
+lids live in the **Lid & Stacking** part instead of pretending to be separate
+bin types. Bin for Bins turns X/Y into a child-bin field and retires interior
+parts and connectors. Base Trim is a separate open-centre
+perimeter for a rectangular field of bins; it has no floor, interior parts,
+inventory entry, or side connector. The selected wall/base values are shown
 and saved; they are never silent generation-only overrides.
+
+**Lid & Stacking** offers three ordinary-bin configurations: **Stackable Bin**
+stacks directly with no lid, **Stackable Lid** closes the bin and keeps a flat
+seat for the next bin, and **Handled Lid** adds a knob or pull but does not
+stack. Lid labels may be flush or raised; stackable lids use flush labels only.
+A Divider can supply one lid label per compartment. Once any compartment lid
+label contains text, clear those labels before changing the Divider layout.
+Side connectors are unavailable while a lid is fitted.
 
 **Controls follow their meaning, not their mechanism.**
 
