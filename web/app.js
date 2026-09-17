@@ -2038,7 +2038,7 @@ function updateDesignFromForm() {
   design.box.y = newBoxY;
   const prevBoxZ = design.box.z;
   design.box.z = normalizeBinDimension("z", $("#z").value, design.box.z);
-  if (design.box.x !== prevBoxX || design.box.y !== prevBoxY || design.box.z !== prevBoxZ) {
+  if (design.box.x !== prevBoxX || design.box.y !== prevBoxY) {
     turnOffNestAutoSizeForManualEdit();
   }
   checkBinSizeChange();
@@ -3388,9 +3388,9 @@ function renderNestFields(one) {
   // Bin. Read straight from the stored option, never the resolved fallback:
   // a legacy design with no stored preference must show as off here, not as
   // on just because it happens to behave in a similar grow-only way.
-  html += toggle("option:auto_size", "Automatically size bin to tool",
-    "Grows or shrinks the bin's Width, Length and Height to fit this Nest and keeps it centred. "
-    + "Turn off to size the bin by hand with the usual Width/Length/Height controls.",
+  html += toggle("option:auto_size", "Automatically size footprint to tool",
+    "Grows or shrinks the bin Width and Length to fit this Nest and keeps it centered. "
+    + "Bin Height stays at the height you set.",
     opt.auto_size === true, { wide: true });
 
   // Outline shape (Soften outline, manual point editing, zoom/pan, Finish
@@ -3400,6 +3400,23 @@ function renderNestFields(one) {
     html += `<p class="photo-measurement">Outline ready — open the 2D view's Outline editor to reshape it.</p>`;
   }
   return html;
+}
+
+// Informational-only readout of how far the draft's own built geometry rises
+// above the bin rim, straight from the preview's real mesh bounds - never
+// recomputed here. Only ever a note, never a warning: a legal fused holder
+// above the rim (Post, Cradle, Bore, Pocket, Slot, Steps, Raised-Wall Photo
+// Nest) still generates fine.
+function updateDraftOverhangNote() {
+  const note = $('[data-draft-overhang]', $("#draft-fields"));
+  if (!note) return;
+
+  const overhang = number(state.preview?.draft_overhang_mm, 0);
+
+  note.hidden = overhang <= 0.05;
+  note.textContent = note.hidden
+    ? ""
+    : `Extends ${fmt(overhang)} mm above rim`;
 }
 
 function renderDraftFields() {
@@ -3815,12 +3832,16 @@ function renderDraftFields() {
   if (!(one.kind === "text" && one.options?.level === "rim")) {
     html += renderFitActions(one);
   }
+  // Informational only - a legal fused part above the rim still generates
+  // fine. No checkbox, no warning styling; just a plain note of the fact.
+  html += `<p class="inline-help" data-draft-overhang hidden></p>`;
   const activeDraft = document.activeElement?.dataset?.draft;
   $("#draft-fields").innerHTML = html;
   if (one.kind === "divider" && dividerLockedByLidLabels()) {
     $$('input, select, button', $("#draft-fields")).forEach(control => { control.disabled = true; });
     $("#draft-status").textContent = dividerLockMessage();
   }
+  updateDraftOverhangNote();
   syncNest2DWorkspace();
   const photoInput = $("#nest-photo-input", $("#draft-fields"));
   if (photoInput) photoInput.addEventListener("change", uploadNestPhoto);
@@ -4858,11 +4879,12 @@ function applyResizedZone(one, cx, cy, width, depth) {
   if (depthField && Math.abs(depth - prevD) >= 0.05) { depthField.value = fmt(depth); flashField(depthField); }
 }
 
-// A manual bin size or layout edit turns Automatic bin sizing off for any
-// Photo Nest in the design (spec section 29) - it never silently fights a
-// size the user just typed. Only the new explicit "true" is affected; a
-// legacy design with no stored preference keeps its historical grow-only
-// behaviour, and an already-Manual Nest is already what this asks for.
+// A manual Width, Length, or layout edit turns Automatic footprint sizing off
+// for any Photo Nest in the design - it never silently fights a footprint the
+// user just typed. Height is independent: it never triggers this, and never
+// gets turned off by it. Only the new explicit "true" is affected; a legacy
+// design with no stored preference keeps its historical grow-only behaviour,
+// and an already-Manual Nest is already what this asks for.
 function turnOffNestAutoSizeForManualEdit() {
   const candidates = [];
   if (state.draft?.kind === "nest") candidates.push(state.draft);
@@ -4878,7 +4900,7 @@ function turnOffNestAutoSizeForManualEdit() {
     }
   }
   if (turnedOff) {
-    toast("Automatic bin sizing turned off because the bin size or layout was manually changed.");
+    toast("Automatic footprint sizing turned off because the bin size or layout was manually changed.");
     if (state.draft?.kind === "nest") renderDraftFields();
   }
 }
@@ -5950,6 +5972,7 @@ async function refreshPreview() {
     const grownZ = result.design?.box?.z !== state.design?.box?.z;
     state.preview = result;
     state.design = result.design;
+    updateDraftOverhangNote();
     checkBinSizeChange();
     // Surface the access planner's own warning (spec section 46) once per
     // distinct message, not on every preview refresh.
@@ -6089,7 +6112,7 @@ function renderFitActions(one) {
     rows.push(`<button type="button" class="button" data-action="fill-part" hidden>Fill the bin</button>`);
   }
   if (kind !== "scoop") {
-    const label = kind === "nest" ? "Fit bin to tool" : "Grow the bin";
+    const label = kind === "nest" ? "Fit footprint to tool" : "Grow the bin";
     rows.push(`<button type="button" class="button" data-action="grow-bin" hidden>${label}</button>`);
   }
   if (!rows.length) return "";
@@ -7374,10 +7397,13 @@ function commitDimensionDrag(canvas) {
   } else {
     formatHeightField();
   }
-  // A dragged X/Y/Z dimension handle is exactly as deliberate as typing the
-  // field - it must turn off Photo Nest Auto-size the same way (see
-  // updateDesignFromForm / turnOffNestAutoSizeForManualEdit).
-  turnOffNestAutoSizeForManualEdit();
+  // A dragged Width/Length handle is exactly as deliberate as typing the
+  // field - it must turn off Photo Nest Auto footprint sizing the same way
+  // (see updateDesignFromForm / turnOffNestAutoSizeForManualEdit). Height is
+  // independent and never disables it.
+  if (drag.axis !== "z") {
+    turnOffNestAutoSizeForManualEdit();
+  }
   state.canGenerate = false;
   updateGenerateAvailability();
   changedDesign(previousDesign);
@@ -9235,7 +9261,7 @@ function wireLayoutInteraction() {
       const cx = (zone[0] + zone[2]) / 2, cy = (zone[1] + zone[3]) / 2;
       if (Math.abs(cx) > 0.5 || Math.abs(cy) > 0.5) {
         drag.feature.options.auto_size = false;
-        toast("Automatic bin sizing turned off because the bin size or layout was manually changed.");
+        toast("Automatic footprint sizing turned off because the bin size or layout was manually changed.");
       }
     }
     if (drag.mode === "resize" && drag.feature.kind !== "nest") {
@@ -9322,7 +9348,7 @@ function handleLayoutArrowKeys(event) {
       const cx = (feature.zone[0] + feature.zone[2]) / 2, cy = (feature.zone[1] + feature.zone[3]) / 2;
       if (Math.abs(cx) > 0.5 || Math.abs(cy) > 0.5) {
         feature.options.auto_size = false;
-        toast("Automatic bin sizing turned off because the bin size or layout was manually changed.");
+        toast("Automatic footprint sizing turned off because the bin size or layout was manually changed.");
       }
     }
   }

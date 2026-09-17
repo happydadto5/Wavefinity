@@ -44,8 +44,6 @@ def build_slot(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
     if (depth <= 0.0 or thickness <= 0.0 or wall <= 0.0 or height <= 0.0
             or depth >= height or abs(angle) > 45.0):
         raise ValueError("slot depth, thickness, wall and height must be positive, depth must be less than height, and angle <= 45°")
-    if base_z + height > box.z + 1e-9:
-        raise ValueError("slot height must fit inside the bin")
     along = spec_feature.along
     run = zone.width if along == "x" else zone.depth
     across = zone.depth if along == "x" else zone.width

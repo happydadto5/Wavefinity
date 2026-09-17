@@ -110,6 +110,7 @@ from organizer_inserts import (
     CONNECTOR_EDGE_KEEP_OUT,
     EDITOR_SNAP,
     FEATURE_BUILDERS,
+    HEX_BIT_HOLD,
     TEXT_KIND,
     _cradle_rib_thickness,
     LIBRARY,
@@ -882,6 +883,8 @@ def preview_geometry(
     feature_errors = []
     invalid_feature_indexes = []
     conflicting_feature_indexes = []
+    feature_overhang_mm = [0.0 for _ in features]
+    draft_overhang_mm = 0.0
     reserved = _customization_zones(box, tidy, location, scoop, mode)
 
     occupied = [
@@ -970,9 +973,16 @@ def preview_geometry(
             tag = f"{part_kind}_{one.kind}"
 
         try:
-            for solid in build_features(
-                box, [one], base_z, layout_zone(box, mode), include_text=True
-            ):
+            built = build_features(
+                box, [one], base_z, layout_zone(box, mode), mode=mode,
+                include_text=True,
+            )
+            if built:
+                top_z = max(float(solid.bounds[1][2]) for solid in built)
+                feature_overhang_mm[feature_index] = round(
+                    max(0.0, top_z - box.z), 3,
+                )
+            for solid in built:
                 # Export never cuts a text object with the driver-access
                 # tunnel (it is a separate part cut in only at its own
                 # pocket), so leave text features out of this - every other
@@ -1003,7 +1013,11 @@ def preview_geometry(
             built = False
             try:
                 solids = build_features(box, [draft], base_z, layout_zone(box, mode),
-                                        include_text=True)
+                                        mode=mode, include_text=True)
+                if solids:
+                    draft_overhang_mm = round(max(
+                        0.0, max(float(s.bounds[1][2]) for s in solids) - box.z,
+                    ), 3)
                 for solid in solids:
                     if cut_draft:
                         solid = apply_edge_mount_hole_cuts(box, solid)
@@ -1020,8 +1034,13 @@ def preview_geometry(
                 ))
         else:
             try:
-                for solid in build_features(box, [draft], base_z, layout_zone(box, mode),
-                                            include_text=True):
+                solids = build_features(box, [draft], base_z, layout_zone(box, mode),
+                                        mode=mode, include_text=True)
+                if solids:
+                    draft_overhang_mm = round(max(
+                        0.0, max(float(s.bounds[1][2]) for s in solids) - box.z,
+                    ), 3)
+                for solid in solids:
                     if cut_draft:
                         solid = apply_edge_mount_hole_cuts(box, solid)
                     geometry.extend(_mesh_preview_geometry(solid, f"draft_{draft.kind}"))
@@ -1089,6 +1108,8 @@ def preview_geometry(
         "invalid_feature_indexes": tuple(invalid_feature_indexes),
         "conflicting_feature_indexes": tuple(conflicting_feature_indexes),
         "draft_error": draft_error,
+        "feature_overhang_mm": tuple(feature_overhang_mm),
+        "draft_overhang_mm": draft_overhang_mm,
         "customization_zones": tuple(reserved),
         "label_outline": label_outline_coords,
         "label_meta": label_meta,
@@ -1934,16 +1955,63 @@ def default_feature(
         diameter = min(12.0, run - margin, across - margin)
         width, depth = ((run, across) if along == "x" else (across, run))
         feature_options = {"diameter": diameter, "height": 16.0, "taper": 0.4}
+    elif kind == "bore":
+        # Same starter X/Y footprint a Bore always got falling through the
+        # generic branch below - only the fused-shallow-bin depth seeding is
+        # new here.
+        width = _starter_span(bounds.width, 16.0, mode)
+        depth = _starter_span(bounds.depth, 16.0, mode)
+        if mode == "fused":
+            base_z = box.base_thickness
+            available = box.z - base_z
+            if item.profile in HEX_BIT_HOLD:
+                natural_depth = HEX_BIT_HOLD[item.profile]
+            else:
+                natural_depth = item.length * 0.4
+            # The historical resolver would clamp Depth to (available - 2 mm);
+            # only step in when a shallow fused bin would actually shorten the
+            # bore's natural depth. Height is never stored here - it must keep
+            # deriving from Depth so angled-bore auto-growth still works.
+            if natural_depth > available - 2.0 + 1e-9:
+                feature_options["depth"] = natural_depth
+    elif kind == "pocket":
+        # Same generic starter footprint a Pocket always got - only the
+        # fused-shallow-bin height seeding is new here.
+        width = _starter_span(bounds.width, 16.0, mode)
+        depth = _starter_span(bounds.depth, 16.0, mode)
+        if mode == "fused":
+            base_z = box.base_thickness
+            available = box.z - base_z
+            natural_height = max(20.0, round(0.40 * box.z, 1))
+            if available + 1e-9 < natural_height:
+                feature_options["height"] = natural_height
     elif kind == "slot":
         run = _starter_span(bounds.width if along == "x" else bounds.depth, 32.0, mode)
         # One explicit starter slot with a snug 8 mm Base. Raising Quantity in
         # the editor grows this axis automatically.
         across = _starter_span(bounds.depth if along == "x" else bounds.width, 8.0, mode)
         width, depth = ((run, across) if along == "x" else (across, run))
+        if mode == "fused":
+            base_z = box.base_thickness
+            available = box.z - base_z
+            # The historical resolver clamps Depth to (available - 4 mm); only
+            # step in when a shallow fused bin would shorten the natural
+            # 14 mm depth. Height is never stored - it keeps deriving as
+            # Depth + 2 mm.
+            if available - 4.0 + 1e-9 < 14.0:
+                feature_options["depth"] = 14.0
     elif kind == "steps":
         run = _starter_span(bounds.width if along == "x" else bounds.depth, 32.0, mode)
         across = _starter_span(bounds.depth if along == "x" else bounds.width, 32.0, mode)
         width, depth = ((run, across) if along == "x" else (across, run))
+        if mode == "fused":
+            base_z = box.base_thickness
+            available = box.z - base_z
+            # The historical resolver clamps Height to (available - 2 mm);
+            # only step in when a shallow fused bin would shorten the
+            # natural 16 mm height.
+            if available - 2.0 + 1e-9 < 16.0:
+                feature_options["height"] = 16.0
     elif kind == "scoop":
         along = "x"
         scoop_height = (box.z - box.base_thickness) * 0.6
@@ -2020,7 +2088,7 @@ def convert_layout_mode(
     layout = Layout(converted, mode, EDITOR_SNAP)
     layout.validate(box)
     base_z = base_height(box, mode)
-    build_features(box, converted, base_z, layout_zone(box, mode))
+    build_features(box, converted, base_z, layout_zone(box, mode), mode=mode)
     return layout
 
 
