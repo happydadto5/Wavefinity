@@ -807,15 +807,37 @@ def preview_geometry(
     geometry: list[tuple[list[tuple[float, float, float]], str,
                          tuple[float, float, float], int, str | None]] = []
 
-    if box.edge_mount.active:
-        # The fast wall/floor/rim quads below approximate the shell; they
-        # cannot show a hole. Edge Mount changes the shell's real geometry
-        # (a projecting plate, screw holes, driver-access passages), so this
-        # rare case swaps in the same accurate solid body export uses -
-        # still drawn through the ordinary mesh-preview path, so no renderer
-        # change is needed. Interior fused features are not baked into this
-        # preview body, so a fused holder crossing the access tunnel is not
-        # shown breached here the way the final export breaches it.
+    tidy = clean_label(label)
+    location = label_position(label_location)
+    rim_side = rim_label_side(location)
+
+    # An actively-edited existing feature's committed (pre-edit) solid would
+    # otherwise be baked into the combined body below while its live draft is
+    # also drawn on top - two visible copies. Fall back to the plain shell in
+    # that one case; every other case (nothing selected, or a brand-new
+    # unplaced draft) reflects the real committed layout.
+    editing_existing_feature = selected is not None and draft is not None
+    combined_edge_mount_body = None
+    if mode == "fused" and box.edge_mount.active and not editing_existing_feature:
+        try:
+            pre_edge_body = make_fused_box(box, features, make_box(box))
+            if scoop:
+                pre_edge_body = union([pre_edge_body, make_scoop(box)])
+            if tidy and rim_side:
+                pre_edge_body, _ledge_inlay = make_top_labelled_box(
+                    box, tidy, pre_edge_body, rim_side
+                )
+            combined_edge_mount_body = apply_edge_mount_structure(box, pre_edge_body)
+        except Exception:
+            combined_edge_mount_body = None
+
+    if combined_edge_mount_body is not None:
+        # Same body export cuts the driver-access tunnel through: the normal
+        # shell, every committed fused feature, scoop and the rim ledge -
+        # so a fused holder crossing the tunnel shows breached here exactly
+        # as it will print.
+        geometry.extend(_mesh_preview_geometry(combined_edge_mount_body, "outside"))
+    elif box.edge_mount.active:
         edge_body = apply_edge_mount_structure(box, make_box(box))
         geometry.extend(_mesh_preview_geometry(edge_body, "outside"))
     else:
@@ -838,12 +860,11 @@ def preview_geometry(
         geometry.append(([(*point, floor_z) for point in floor_cavity],
                          "floor", (0.0, 0.0, 1.0), 1, None))
 
-    tidy = clean_label(label)
-    location = label_position(label_location)
-    rim_side = rim_label_side(location)
-    if tidy and rim_side:
+    # Already baked into combined_edge_mount_body when it exists - drawing
+    # them again here would double them up on an exactly coincident solid.
+    if tidy and rim_side and combined_edge_mount_body is None:
         geometry.extend(_mesh_preview_geometry(make_top_label_ledge(box, rim_side), "top_label_ledge"))
-    if scoop:
+    if scoop and combined_edge_mount_body is None:
         scoop_mesh = (
             make_scoop(box)
             if mode == "fused"
@@ -853,7 +874,11 @@ def preview_geometry(
             )
         )
         geometry.extend(_mesh_preview_geometry(scoop_mesh, "scoop"))
-    if box.lift_grabbers.enabled:
+    # make_box() already bakes lift grabbers into the shell it returns, and
+    # both the combined body and the plain Edge Mount fallback body above are
+    # built from make_box() - so only draw them separately when neither of
+    # those already included them.
+    if box.lift_grabbers.enabled and not box.edge_mount.active:
         for grabber_mesh in make_lift_grabbers(box):
             geometry.extend(_mesh_preview_geometry(grabber_mesh, "lift_grabber"))
 
@@ -954,23 +979,35 @@ def preview_geometry(
         else:
             tag = f"{part_kind}_{one.kind}"
 
-        try:
-            for solid in build_features(
-                box, [one], base_z, layout_zone(box, mode), include_text=True
-            ):
-                geometry.extend(
-                    _mesh_preview_geometry(solid, tag)
-                )
-        except Exception as error:
-            feature_errors.append(f"{one.kind}: {error}")
-            if feature_index not in invalid_feature_indexes:
-                invalid_feature_indexes.append(feature_index)
-            geometry.extend(_prism_geometry(
-                one.zone,
-                base_z,
-                min(box.z - 0.25, _feature_height(box, one, base_z)),
-                f"{part_kind}_invalid",
-            ))
+        # A valid, non-text fused feature is already part of
+        # combined_edge_mount_body (make_fused_box built it in); rendering it
+        # again here would leave a second, exactly coincident copy on top.
+        # Text is never part of that body - build_features() there excludes
+        # it the same way make_fused_box() does at export - and an invalid or
+        # conflicting feature still needs its own highlighted mesh.
+        skip_committed_mesh = (
+            combined_edge_mount_body is not None
+            and not is_invalid and not is_conflicting
+            and not is_text(one)
+        )
+        if not skip_committed_mesh:
+            try:
+                for solid in build_features(
+                    box, [one], base_z, layout_zone(box, mode), include_text=True
+                ):
+                    geometry.extend(
+                        _mesh_preview_geometry(solid, tag)
+                    )
+            except Exception as error:
+                feature_errors.append(f"{one.kind}: {error}")
+                if feature_index not in invalid_feature_indexes:
+                    invalid_feature_indexes.append(feature_index)
+                geometry.extend(_prism_geometry(
+                    one.zone,
+                    base_z,
+                    min(box.z - 0.25, _feature_height(box, one, base_z)),
+                    f"{part_kind}_invalid",
+                ))
         geometry.extend(_bore_axis_geometry(
             box, one, base_z, f"{part_kind}_bore_axis"
         ))
