@@ -153,6 +153,17 @@ def base_trim_from_design(data: dict) -> BaseTrimSpec:
             f"Unsupported Base Trim version {raw_trim.get('version')!r}; "
             f"expected {BASE_TRIM_SCHEMA_VERSION}."
         )
+    raw_layout = data.get("layout")
+    if not isinstance(raw_layout, dict) or (
+        raw_layout.get("version") != 1
+        or raw_layout.get("mode") != "fused"
+        or raw_layout.get("features") != []
+    ):
+        raise ValueError("Base Trim layout must be the empty fused layout.")
+    if "auto_size" in raw_trim and not isinstance(raw_trim["auto_size"], bool):
+        raise ValueError("Base Trim auto_size must be true or false.")
+    if "part_name" in data and not isinstance(data["part_name"], str):
+        raise ValueError("Base Trim name must be text.")
     spec = BaseTrimSpec(
         field_x=_number(raw_box.get("x"), "Field width"),
         field_y=_number(raw_box.get("y"), "Field length"),
@@ -228,6 +239,9 @@ def _validate_values(spec: BaseTrimSpec) -> None:
         raise ValueError(
             f"Trim height must be {BASE_TRIM_MIN_HEIGHT:g}-{BASE_TRIM_MAX_HEIGHT:g} mm."
         )
+    for value, label in ((spec.width_mm, "Trim width"), (spec.height_mm, "Trim height")):
+        if not math.isclose(value * 2.0, round(value * 2.0), abs_tol=1e-9):
+            raise ValueError(f"{label} must change in 0.5 mm steps.")
     if spec.join_type not in BASE_TRIM_JOIN_TYPES:
         raise ValueError("Section joint must be Snap tabs, Sliding dovetail, or Puzzle joint.")
     if spec.bed_x_mm <= 2.0 * BASE_TRIM_BED_EDGE_MARGIN:
@@ -239,12 +253,6 @@ def _validate_values(spec: BaseTrimSpec) -> None:
 def _validate_split_joint(spec: BaseTrimSpec) -> None:
     if _one_piece(spec):
         return
-    if spec.join_type == "snap" and (spec.width_mm < 5.0 or spec.height_mm < 5.0):
-        raise ValueError(
-            f"The {spec.width_mm:g} mm-wide by {spec.height_mm:g} mm-high trim is too small "
-            "for Snap tabs when the Base Trim is split. Increase Trim width/height "
-            "or use a larger printer bed."
-        )
     available_top = spec.width_mm - BASE_TRIM_OUTER_TAPER
     if available_top <= 2.0:
         raise ValueError(
@@ -466,6 +474,15 @@ def _joint_solid(spec: BaseTrimSpec, seam: BaseTrimSeam, female: bool) -> trimes
     profile = _joint_profile(spec)
     if female:
         profile = profile.buffer(BASE_TRIM_JOINT_CLEARANCE, join_style=2)
+    else:
+        # Let every male key overlap its parent section by a small root. A
+        # face-only contact at the cut plane is not a dependable printable
+        # union, while this does not increase the advertised 4 mm projection.
+        min_x, min_y, _, max_y = profile.bounds
+        profile = unary_union([
+            profile,
+            polygon_box(min_x - 0.25, min_y, min_x + 0.05, max_y),
+        ])
     origin, tangent, lateral = _seam_frame(spec, seam)
     world = affinity.affine_transform(
         profile,
@@ -599,12 +616,15 @@ def generate_base_trim_files(
         targets = [path.with_name(f"{path.stem} {timestamp}{path.suffix}") for path in targets]
     parts = []
     for (plan, mesh), target in zip(made, targets):
-        export_mesh(mesh, target, f"base_trim_part_{plan.index:02d}")
+        exported = mesh.copy()
+        centre = (exported.bounds[0] + exported.bounds[1]) / 2.0
+        exported.apply_translation((-centre[0], -centre[1], -exported.bounds[0][2]))
+        export_mesh(exported, target, f"base_trim_part_{plan.index:02d}")
         parts.append({
             "number": plan.index,
             "name": plan.label,
             "output": str(target),
-            "mesh": mesh_report(f"base_trim_part_{plan.index:02d}", mesh),
+            "mesh": mesh_report(f"base_trim_part_{plan.index:02d}", exported),
         })
     return {
         "mode": "base_trim",

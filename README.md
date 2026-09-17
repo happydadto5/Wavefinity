@@ -287,6 +287,16 @@ same-origin only, accepts JSON only, and applies a restrictive
 content-security policy so an unrelated web page cannot invoke local file
 generation.
 
+**Base Trim** uses whole 8 mm field units and preserves the same global wave
+phase as the bins it surrounds. Its inside follows the outside wave of the bin
+field plus half the normal mating gap. Set trim width and height independently,
+choose snap tabs, a sliding dovetail, or a puzzle joint, and enter the real
+printer-bed dimensions. The app reserves 10 mm at every bed edge. A trim that
+fits that printable area in either orientation exports as one ring; a larger
+trim is divided clockwise into four integral corners and only as many straight
+rails as the bed requires. The 2D view numbers the actual printable pieces and
+the 3D view shows them assembled.
+
 ### Inventory, and optional Space planning
 
 Every selected save folder keeps an inventory by default: generating a bin,
@@ -396,6 +406,10 @@ while it is active.
   since their waves hold them. **Print spacers & connectors** opens the lot in
   Bambu Studio. **Print map** prints a plan of the drawer with a list of where
   each bin goes.
+- **Make Base Trim** uses the minimum bounding rectangle around one completely
+  filled rectangular block of placed bins. Stacks count once and free edge
+  spacers do not enlarge the field. Irregular or half-unit bounds are refused
+  with a direct explanation; manual Base Trim sizing remains available.
 - **Saving.** *Auto-save* (on by default) writes the layout after a change, but
   no more than once every 5 minutes while you keep editing - leaving the tab
   or closing auto-saves right away regardless. Turn auto-save off and the
@@ -1199,6 +1213,7 @@ layered implementation:
 |---|---|---|
 | `organizer_geometry.py` | Feature-neutral booleans, extrusion, sweep, ring alignment and loft helpers. | No. |
 | `organizer_engine.py` | Wavy boxes, connectors, labels, mesh validation and 3MF/STL export. It re-exports established geometry helper names for compatibility. | No. |
+| `organizer_base_trim.py` | Isolated Base Trim validation, global-phase ring geometry, bed-aware splitting, section joints and export. | No. |
 | `organizer_inserts/` | Item/layout model, authoritative feature registry, per-feature builders, Divider compartments, and fused/removable assembly. | No. |
 | `organizer_app.py` | CLI, exporters and design persistence. Legacy palette constants are generated from the feature registry. | Yes, for CLI subcommands. |
 | `wavefinity_web.py` | The local HTTP service — see [The browser service](#the-browser-service). | Yes, the default UI launch target. |
@@ -1379,6 +1394,10 @@ these numbers look arbitrary and are not.
 | **Connector length** | **12.0** | **locked** |
 | **Connector height** | **9.6** | **locked**; cap 1.2, arms 1.0 thick |
 | Connector position step | **4.0** | one whole wave; half a wave wants a mirrored part |
+| Base Trim field range | **8–1200** | whole 8 mm units on each axis |
+| Base Trim width / height | **4–20**, default **6** | each changes in 0.5 mm steps |
+| Base Trim bed margin | **10.0 per edge** | subtracted from the declared printer bed |
+| Base Trim joint projection / clearance | **4.0 / 0.2** | only used when the ring must split |
 | Mated wall clearance | **0.21** | 0.25 across the seam, measured perpendicular |
 | Lock bump | **0.35** proud, 1.0 tall, **1.2** long | on every wave extremum, so every **2.0** |
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |

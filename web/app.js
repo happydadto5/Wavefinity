@@ -1085,6 +1085,8 @@ function makeBaseTrimDesign(fieldX = null, fieldY = null) {
   const legal = value => Math.max(unit, Math.min(1200, Math.round(number(value, unit) / unit) * unit));
   const bedX = number(storedPreference("base_trim_bed_x_mm", rules.default_bed_x_mm ?? 256), 256);
   const bedY = number(storedPreference("base_trim_bed_y_mm", rules.default_bed_y_mm ?? 256), 256);
+  const savedJoint = String(storedPreference("base_trim_join_type", "snap"));
+  const joinType = ["snap", "dovetail", "puzzle"].includes(savedJoint) ? savedJoint : "snap";
   return {
     version: 6,
     design_kind: "base_trim",
@@ -1096,7 +1098,7 @@ function makeBaseTrimDesign(fieldX = null, fieldY = null) {
     base_trim: {
       version: 1,
       width_mm: number(rules.default_width_mm, 6),
-      join_type: "snap",
+      join_type: joinType,
       bed_x_mm: bedX,
       bed_y_mm: bedY,
       auto_size: false,
@@ -2024,6 +2026,7 @@ function updateDesignFromForm() {
       saveOutputPreference(newOutput);
     }
     state.joinMode = "base_trim";
+    saveSimplePreference("base_trim_join_type", design.base_trim.join_type);
     saveSimplePreference("base_trim_bed_x_mm", design.base_trim.bed_x_mm);
     saveSimplePreference("base_trim_bed_y_mm", design.base_trim.bed_y_mm);
     return;
@@ -2273,7 +2276,6 @@ const commitNudge = debounce(async () => {
       index,
     });
     state.design = result.design;
-    state.baseTrimSourceLayout = null;
     recordHistory(historySnapshot);
     state.selected = result.selected;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
@@ -8366,8 +8368,14 @@ function renderBaseTrim2D(context, width, height) {
     summary.pieces.forEach(piece => {
       if (!piece.clip_bounds) return;
       const [x0, y0, x1, y1] = piece.clip_bounds;
-      const center = toCanvas([(Math.max(-outerX / 2, x0) + Math.min(outerX / 2, x1)) / 2,
-        (Math.max(-outerY / 2, y0) + Math.min(outerY / 2, y1)) / 2]);
+      const label = String(piece.label || "").toLowerCase();
+      let worldX = (Math.max(-outerX / 2, x0) + Math.min(outerX / 2, x1)) / 2;
+      let worldY = (Math.max(-outerY / 2, y0) + Math.min(outerY / 2, y1)) / 2;
+      if (label.startsWith("front")) worldY = (-outerY / 2 - innerY) / 2;
+      if (label.startsWith("back")) worldY = (outerY / 2 + innerY) / 2;
+      if (label.startsWith("right")) worldX = (outerX / 2 + innerX) / 2;
+      if (label.startsWith("left")) worldX = (-outerX / 2 - innerX) / 2;
+      const center = toCanvas([worldX, worldY]);
       context.fillText(String(piece.number), center[0], center[1]);
     });
   }
@@ -9351,6 +9359,7 @@ async function openDesign(event) {
     if (baseTrimEnabled(result.design) && !baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
     if (!baseTrimEnabled(result.design) && baseTrimEnabled()) state.lastBaseTrimDesign = clone(state.design);
     state.design = result.design;
+    state.baseTrimSourceLayout = null;
     if (baseTrimEnabled()) {
       state.joinMode = "base_trim";
       persistJoinMode();
@@ -9380,6 +9389,7 @@ async function newDesign() {
   state.design = baseTrimEnabled(previousDesign)
     ? makeBaseTrimDesign(previousDesign.box.x, previousDesign.box.y)
     : freshDesignForCurrentFolder();
+  state.baseTrimSourceLayout = null;
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
   state.binResizePending = false;

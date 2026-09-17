@@ -1077,6 +1077,11 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if value not in {"side", "base_trim"}:
             raise ValueError("Join bins with must be Side connectors or Base Trim.")
         update["default_join_mode"] = value
+    if "base_trim_join_type" in payload:
+        value = str(payload["base_trim_join_type"])
+        if value not in BASE_TRIM_JOIN_TYPES:
+            raise ValueError("Base Trim joint must be Snap tabs, Sliding dovetail, or Puzzle joint.")
+        update["base_trim_join_type"] = value
     for key, label in (
         ("base_trim_bed_x_mm", "Bed X"),
         ("base_trim_bed_y_mm", "Bed Y"),

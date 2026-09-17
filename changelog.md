@@ -17,6 +17,19 @@
   model only carries the trailing, inert-by-default `BoxSpec.edge_mount`
   field, so every existing design and script is unaffected.
 
+## 2026-09-16 — Modular Base Trim
+
+- Added Base Trim as a separate open-centre design type with whole-unit field
+  sizing, globally phased Wavefinity inside walls, independent trim width and
+  height, and a 1 mm-per-side outer taper.
+- Added printer-bed-aware one-piece or clockwise modular export. Oversized
+  rings keep four integral corners, split only straight rails as needed, and
+  offer snap tabs, sliding dovetails, or puzzle joints with 0.2 mm clearance.
+- Added dedicated 2D/3D previews, saved-design validation, connectorless
+  generate/print behavior, persistent bed and join preferences, and Space
+  auto-sizing for filled rectangular bin layouts. Base Trim never enters bin
+  inventory.
+
 ## 2026-09-15 — Bin-following parts stay synchronized
 
 - Changing bin Width, Length, height, or wall thickness now updates the
