@@ -1212,9 +1212,7 @@ function applyBaseTrimVisibility() {
   if (layoutTab) layoutTab.hidden = false;
   $("#part-name-label").textContent = on ? "Base Trim Name" : "Bin Name";
   $("#generate-bin").textContent = on ? "Generate Base Trim" : "Generate Bin";
-  $("#print-bin").textContent = on
-    ? (state.runtime.hosted ? "Generate Base Trim" : "Print Base Trim")
-    : (state.runtime.hosted ? "Generate to Folder" : "Print to Bambu Studio");
+  updatePrimaryPrintButtonLabel();
 }
 
 function persistJoinMode() {
@@ -7045,9 +7043,16 @@ function currentPreviewPasses(buffers) {
       aabb: buffers.allAabb, visible: new Set(["base", "lid"]),
     };
   }
+  if (baseTrimEnabled()) {
+    return {
+      passes: [{ group: "bin", alpha: 1 }],
+      aabb: buffers.allAabb,
+      visible: new Set(["bin"]),
+    };
+  }
   const passes = [];
   const visible = new Set();
-  if (baseTrimEnabled() || state.binVisible) { passes.push({ group: "bin", alpha: 1 }); visible.add("bin"); }
+  if (state.binVisible) { passes.push({ group: "bin", alpha: 1 }); visible.add("bin"); }
   if (state.interiorVisible) { passes.push({ group: "interior", alpha: 1 }); visible.add("interior"); }
   return { passes, aabb: buffers.allAabb, visible };
 }
@@ -7159,7 +7164,7 @@ function renderPreview3DGL(renderer, overlayCanvas, b4b, fullGeometry, meshes, c
   // the complete, unfiltered `buffers`). Only four side variants exist, so
   // one cached buffer per current facing side is enough to keep spinning
   // smooth without rebuilding on every frame.
-  if (!b4b && state.xrayOn) {
+  if (!b4b && !baseTrimEnabled() && state.xrayOn) {
     const side = cameraFacingSide(camera);
     if (!glBuffersCache.xray || glBuffersCache.xray.side !== side) {
       if (glBuffersCache.xray?.buffers) window.Preview3DGL.disposeBuffers(renderer.gl, glBuffersCache.xray.buffers);
@@ -8317,6 +8322,26 @@ function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
   }
 }
 
+function drawBaseTrimJointMarker(context, seam, midpoint, joinType) {
+  context.save();
+  context.translate(midpoint[0], midpoint[1]);
+  if (seam.side === "right" || seam.side === "left") context.rotate(Math.PI / 2);
+  if (joinType === "snap") {
+    context.fillRect(-4, -2, 8, 4);
+    context.fillRect(-1, -4, 2, 8);
+  } else if (joinType === "dovetail") {
+    context.beginPath();
+    context.moveTo(-4, -3); context.lineTo(4, -5); context.lineTo(4, 5); context.lineTo(-4, 3);
+    context.closePath(); context.fill();
+  } else {
+    context.beginPath();
+    context.arc(-2, 0, 2.5, Math.PI / 2, Math.PI * 1.5);
+    context.arc(2, 0, 2.5, -Math.PI / 2, Math.PI / 2);
+    context.closePath(); context.fill();
+  }
+  context.restore();
+}
+
 function renderBaseTrim2D(context, width, height) {
   const summary = state.preview?.base_trim;
   if (!summary) return;
@@ -8369,7 +8394,7 @@ function renderBaseTrim2D(context, width, height) {
     if (seam.side === "back") return [[seam.coordinate, outerY / 2], [seam.coordinate, innerY]];
     return [[-outerX / 2, seam.coordinate], [-innerX, seam.coordinate]];
   };
-  summary.seams.forEach(seam => {
+  if (!summary.one_piece) summary.seams.forEach(seam => {
     const [a, b] = seamEnds(seam).map(toCanvas);
     context.strokeStyle = "#b46b38";
     context.lineWidth = 1.5;
@@ -8378,22 +8403,7 @@ function renderBaseTrim2D(context, width, height) {
     context.setLineDash([]);
     const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     context.fillStyle = "#b46b38";
-    context.save();
-    context.translate(mid[0], mid[1]);
-    if (summary.join_type === "snap") {
-      context.fillRect(-4, -2, 8, 4);
-      context.fillRect(-1, -4, 2, 8);
-    } else if (summary.join_type === "dovetail") {
-      context.beginPath();
-      context.moveTo(-4, -3); context.lineTo(4, -5); context.lineTo(4, 5); context.lineTo(-4, 3);
-      context.closePath(); context.fill();
-    } else {
-      context.beginPath();
-      context.arc(-2, 0, 2.5, Math.PI / 2, Math.PI * 1.5);
-      context.arc(2, 0, 2.5, -Math.PI / 2, Math.PI / 2);
-      context.closePath(); context.fill();
-    }
-    context.restore();
+    drawBaseTrimJointMarker(context, seam, mid, summary.join_type);
   });
 
   if (!summary.one_piece) {
@@ -9772,23 +9782,30 @@ async function printModel(target = "bin") {
   }
 }
 
-function updateSlicerUI() {
+function updatePrimaryPrintButtonLabel() {
   const printBtn = $("#print-bin");
   const wrap = $(".print-button-wrap");
   if (!printBtn) return;
+  if (baseTrimEnabled()) {
+    if (wrap) wrap.hidden = false;
+    printBtn.hidden = false;
+    if (state.runtime.hosted) {
+      printBtn.textContent = "Generate Base Trim";
+      printBtn.title = "Generate all Base Trim pieces into your selected folder";
+      $("#slicer-picker-button").hidden = true;
+    } else {
+      const slicer = state.slicer || {};
+      printBtn.textContent = "Print Base Trim";
+      printBtn.title = `Send all Base Trim pieces directly to ${slicer.name || "Bambu Studio"}`;
+    }
+    return;
+  }
   if (state.runtime.hosted) {
     if (wrap) wrap.hidden = false;
     printBtn.hidden = false;
     printBtn.textContent = "Generate to Folder";
     printBtn.title = "Generate files into your selected folder";
     $("#slicer-picker-button").hidden = true;
-    return;
-  }
-  if (baseTrimEnabled()) {
-    if (wrap) wrap.hidden = false;
-    printBtn.hidden = false;
-    printBtn.textContent = "Print Base Trim";
-    printBtn.title = "Send Base Trim parts directly to the selected slicer";
     return;
   }
   const slicer = state.slicer || {};
@@ -9803,6 +9820,10 @@ function updateSlicerUI() {
     printBtn.textContent = `Print to ${slicer.name || "Bambu Studio"}`;
     printBtn.title = "Bambu Studio is not installed - click 'Change slicer' to locate executable";
   }
+}
+
+function updateSlicerUI() {
+  updatePrimaryPrintButtonLabel();
 }
 
 async function browseSlicer() {

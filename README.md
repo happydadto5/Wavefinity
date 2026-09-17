@@ -34,14 +34,14 @@ See [changelog.md](changelog.md) for dated implementation changes.
 The control panel is ordered by **blast radius**: a setting sits above
 everything whose meaning it can change.
 
-**The top selector decides what the thing is.** *Let’s design a* combines the
-ordinary bin, Bin for Bins, and Base Trim. Ordinary-bin stacking and removable
-lids live in the **Lid & Stacking** part instead of pretending to be separate
-bin types. Bin for Bins turns X/Y into a child-bin field and retires interior
-parts and connectors. Base Trim is a separate open-centre
-perimeter for a rectangular field of bins; it has no floor, interior parts,
-inventory entry, or side connector. The selected wall/base values are shown
-and saved; they are never silent generation-only overrides.
+**The top selector decides what the thing is.** *Let’s design a* offers **Bin**,
+the normal design; **Bin for Bins**, a separate child-bin container
+architecture; and **Base Trim**, a separate open-centre perimeter for a
+rectangular field of bins. Lid & Stacking is a bin-level option, not a
+top-selector design type. Bin for Bins retires interior parts and connectors;
+Base Trim has no floor, interior parts, inventory entry, or side connector. The
+selected wall/base values are shown and saved; they are never silent
+generation-only overrides.
 
 **Lid & Stacking** offers three ordinary-bin configurations: **Stackable Bin**
 stacks directly with no lid, **Stackable Lid** closes the bin and keeps a flat
@@ -297,22 +297,36 @@ same-origin only, accepts JSON only, and applies a restrictive
 content-security policy so an unrelated web page cannot invoke local file
 generation.
 
-**Base Trim** uses whole 8 mm field units and preserves the same global wave
-phase as the bins it surrounds. Its inside follows the outside wave of the bin
-field plus half the normal mating gap. Set trim width and height independently,
-choose snap tabs, a sliding dovetail, or a puzzle joint, and enter the real
-printer-bed dimensions. The app reserves 10 mm at every bed edge. A trim that
-fits that printable area in either orientation exports as one ring; a larger
-trim is divided clockwise into four integral corners and only as many straight
-rails as the bed requires. The 2D view numbers the actual printable pieces and
-the 3D view shows them assembled.
+### Base Trim
 
-A Base Trim saves as version 6 with `design_kind: "base_trim"`. Its `box` holds
-the field X/Y and trim height; `base_trim` is version 1 and holds trim width,
-joint type, printer-bed X/Y, and `auto_size`. A fresh trim defaults to a 6 mm
-width and height, **Snap tabs**, and a 256 × 256 mm bed; only the two bed
-dimensions remain a machine preference. The empty fused `layout` block remains
-required for saved-design compatibility. A Base Trim name is optional.
+**Base Trim** is an open-centre rectangular perimeter ring, not a tray: there
+is no bottom beneath the bins. Its X/Y values describe the enclosed Wavefinity
+bin field in whole 8 mm units, independently of ordinary-bin wall thickness.
+The inner wall is the existing globally phased Wavefinity mating wave; internal
+bin seams are not encoded into the trim, so bins may be rearranged later as
+long as they still fill that same rectangular field. The clean outer wall is
+rectangular and tapers inward by 1 mm per side from bottom to top.
+
+A new trim defaults to 6 mm width, 6 mm height, and **Snap tabs**. Width and
+height range from 4–20 mm in 0.5 mm steps. The default printer bed is 256 × 256
+mm; Wavefinity reserves 10 mm from each edge, leaving a 236 × 236 mm effective
+area. Bed X/Y remain machine preferences, but the selected joint does not:
+every new trim starts with Snap tabs.
+
+A ring that fits the effective bed in either orientation prints as one piece
+with no joints. Larger rings split automatically: all four corners remain
+integral and only straight rails split as needed. The choices are **Snap tabs**,
+**Sliding dovetail**, and **Puzzle joint**. *Auto size from Space* accepts one
+completely filled rectangular block and uses its dimensions only. A Base Trim
+is never inventory, and choosing Base Trim joining suppresses separate side
+connector generation; ordinary bins retain side connectors when *Side
+connectors* is selected. A Base Trim name is optional.
+
+Base Trim deliberately does **not** use `BoxSpec`. It saves as version 6 with
+`design_kind: "base_trim"`: `box.x` and `box.y` are enclosed field dimensions,
+and `box.z` is trim height. `base_trim` stores the perimeter settings. The empty
+fused `layout` block is structural saved-design compatibility only—Base Trim
+does not accept interior parts.
 
 ```json
 {
@@ -1430,10 +1444,11 @@ these numbers look arbitrary and are not.
 | **Connector height** | **9.6** | **locked**; cap 1.2, arms 1.0 thick |
 | Connector position step | **4.0** | one whole wave; half a wave wants a mirrored part |
 | Base Trim field range | **8–1200** | whole 8 mm units on each axis |
-| Base Trim width / height | **4–20**, default **6** | each changes in 0.5 mm steps |
-| Base Trim default bed / effective P1S area | **256 / 236** | 10 mm is reserved at every edge |
-| Base Trim bed margin | **10.0 per edge** | subtracted from the declared printer bed |
-| Base Trim joint projection / clearance | **4.0 / 0.2** | only used when the ring must split |
+| Base Trim unit | **8.0** | enclosed field step |
+| Base Trim default width / height | **6.0 / 6.0** | new trim defaults |
+| Base Trim width / height range / step | **4–20 / 0.5** | millimetres |
+| Base Trim default bed / effective area | **256 × 256 / 236 × 236** | 10 mm is reserved at each edge |
+| Base Trim joint engagement / clearance | **4.0 / 0.20** | only used when the ring must split |
 | Base Trim outer taper | **1.0 per side** | outside only |
 | Base Trim corner leg minimum | **16.0** | corners always print as one piece |
 | Mated wall clearance | **0.21** | 0.25 across the seam, measured perpendicular |

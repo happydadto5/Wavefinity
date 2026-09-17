@@ -254,10 +254,11 @@ def _validate_values(spec: BaseTrimSpec) -> None:
 def _validate_split_joint(spec: BaseTrimSpec) -> None:
     if _one_piece(spec):
         return
-    # A seam spans one whole wave cycle.  The safe cross-section is therefore
-    # the top width minus the wave's outward crest, not the nominal straight
-    # width. Include the female socket's clearance and leave a real skin on
-    # both faces rather than letting a narrow joint break into the mating wave.
+    # A seam spans one whole authoritative 4 mm wave cycle. The safe
+    # cross-section is consequently the tapered top width minus the real
+    # outward crest, not the nominal straight width. The centered frame below
+    # gives each face half of the remaining material, reaching a 1 mm skin
+    # automatically whenever the chosen trim is wide enough.
     safe_width = spec.width_mm - BASE_TRIM_OUTER_TAPER - WAVE_AMPLITUDE
     if safe_width <= 0.0:
         raise ValueError(
@@ -267,9 +268,11 @@ def _validate_split_joint(spec: BaseTrimSpec) -> None:
     _min_x, min_y, _max_x, max_y = _joint_profile(spec).bounds
     female_width = max_y - min_y + 2.0 * BASE_TRIM_JOINT_CLEARANCE
     if female_width + 2.0 * BASE_TRIM_JOINT_SKIN > safe_width + 1e-9:
+        joint = BASE_TRIM_JOIN_LABELS[spec.join_type]
         raise ValueError(
-            "The selected trim width is too small for this split joint after wave clearance. "
-            "Increase Trim width or use a larger printer bed."
+            f"The {spec.width_mm:g} mm-wide Base Trim is too narrow for {joint} when "
+            "the trim is split. Increase Trim width, choose another joint, or use a "
+            "larger printer bed."
         )
 
 
