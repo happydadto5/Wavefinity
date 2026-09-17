@@ -116,6 +116,7 @@ class BaseTrimPiece:
     clip_bounds: tuple[float, float, float, float] | None
     start_seam: BaseTrimSeam | None = None
     end_seam: BaseTrimSeam | None = None
+    clip_regions: tuple[tuple[float, float, float, float], ...] | None = None
 
 
 def base_trim_enabled(data: dict) -> bool:
@@ -320,24 +321,71 @@ def _perimeter_point(
     return -half_x, half_y - distance, BaseTrimSeam("left", half_y - distance), (0.0, -1.0)
 
 
+def _perimeter_runs(
+    start: float, end: float, outer_x: float, outer_y: float,
+) -> list[tuple[str, float, float]]:
+    """Return exactly the clockwise straight-side runs in one perimeter arc."""
+    perimeter = 2.0 * (outer_x + outer_y)
+    side_limits = (outer_x, outer_x + outer_y, 2.0 * outer_x + outer_y, perimeter)
+    sides = ("front", "right", "back", "left")
+    current = start
+    runs: list[tuple[str, float, float]] = []
+    while current < end - 1e-9:
+        local = current % perimeter
+        side_index = next(index for index, limit in enumerate(side_limits) if local < limit - 1e-9)
+        boundary = current - local + side_limits[side_index]
+        stop = min(end, boundary)
+        start_point = _perimeter_point(current, outer_x, outer_y)
+        end_point = _perimeter_point(stop, outer_x, outer_y)
+        coordinate_a = start_point[0] if sides[side_index] in {"front", "back"} else start_point[1]
+        coordinate_b = end_point[0] if sides[side_index] in {"front", "back"} else end_point[1]
+        runs.append((sides[side_index], min(coordinate_a, coordinate_b), max(coordinate_a, coordinate_b)))
+        current = stop
+    return runs
+
+
+def _run_clip_regions(
+    runs: list[tuple[str, float, float]], outer_x: float, outer_y: float,
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Give each requested perimeter run its own half-ring clipping rectangle."""
+    half_x, half_y = outer_x / 2.0, outer_y / 2.0
+    margin = 1.0
+    regions = []
+    for side, low, high in runs:
+        if side == "front":
+            regions.append((low - margin, -half_y - margin, high + margin, margin))
+        elif side == "right":
+            regions.append((-margin, low - margin, half_x + margin, high + margin))
+        elif side == "back":
+            regions.append((low - margin, -margin, high + margin, half_y + margin))
+        else:
+            regions.append((-half_x - margin, low - margin, margin, high + margin))
+    return tuple(regions)
+
+
 def _perimeter_piece(
     start: float, end: float, outer_x: float, outer_y: float,
-) -> tuple[tuple[float, float, float, float], BaseTrimSeam, BaseTrimSeam, tuple[float, float]]:
-    """Make one contiguous perimeter arc's clipping box and seam details."""
-    perimeter = 2.0 * (outer_x + outer_y)
+) -> tuple[
+    tuple[float, float, float, float], BaseTrimSeam, BaseTrimSeam,
+    tuple[float, float], tuple[tuple[float, float, float, float], ...],
+]:
+    """Plan one exact contiguous perimeter arc and its tight XY bounds."""
     start_point = _perimeter_point(start, outer_x, outer_y)
     end_point = _perimeter_point(end, outer_x, outer_y)
+    runs = _perimeter_runs(start, end, outer_x, outer_y)
+    regions = _run_clip_regions(runs, outer_x, outer_y)
     points = [start_point[:2], end_point[:2]]
-    for corner in (0.0, outer_x, outer_x + outer_y, 2.0 * outer_x + outer_y):
-        shifted = corner
-        while shifted <= start + 1e-9:
-            shifted += perimeter
-        if shifted < end - 1e-9:
-            points.append(_perimeter_point(shifted, outer_x, outer_y)[:2])
+    for side, low, high in runs:
+        if side in {"front", "back"}:
+            y = -outer_y / 2.0 if side == "front" else outer_y / 2.0
+            points.extend(((low, y), (high, y)))
+        else:
+            x = outer_x / 2.0 if side == "right" else -outer_x / 2.0
+            points.extend(((x, low), (x, high)))
     xs, ys = zip(*points)
     margin = 1.0
     bounds = (min(xs) - margin, min(ys) - margin, max(xs) + margin, max(ys) + margin)
-    return bounds, start_point[2], end_point[2], end_point[3]
+    return bounds, start_point[2], end_point[2], end_point[3], regions
 
 
 def _planned_piece_fits(
@@ -370,6 +418,58 @@ def _partition_score(
     return (min(clearances), min(spans), -max(spans))
 
 
+def _search_starts(outer_x: float, outer_y: float) -> list[float]:
+    """Use independent straight-run seam starts, including corner fallbacks."""
+    limits = (0.0, outer_x, outer_x + outer_y, 2.0 * outer_x + outer_y, 2.0 * (outer_x + outer_y))
+    result = set(limits[:-1])
+    for low, high in zip(limits, limits[1:]):
+        for index in range(1, 17):
+            result.add(low + (high - low) * index / 17.0)
+    return sorted(result)
+
+
+def _furthest_piece_ends(
+    start: float, limit: float, outer_x: float, outer_y: float,
+    bed: tuple[float, float],
+) -> list[float]:
+    """Find the bed-limit crossing on each following straight run."""
+    perimeter = 2.0 * (outer_x + outer_y)
+    corners = (0.0, outer_x, outer_x + outer_y, 2.0 * outer_x + outer_y, perimeter)
+    ends: list[float] = []
+    base = math.floor(start / perimeter) * perimeter
+    for corner in corners[1:]:
+        boundary = base + corner
+        if boundary <= start + 1e-9:
+            boundary += perimeter
+        if boundary >= limit - 1e-9:
+            break
+        bounds, _start_seam, _end_seam, tangent, _regions = _perimeter_piece(
+            start, boundary, outer_x, outer_y,
+        )
+        if _planned_piece_fits(bounds, tangent, bed):
+            ends.append(boundary)
+            continue
+        low, high = start, boundary
+        for _ in range(32):
+            middle = (low + high) / 2.0
+            bounds, _start_seam, _end_seam, tangent, _regions = _perimeter_piece(
+                start, middle, outer_x, outer_y,
+            )
+            if _planned_piece_fits(bounds, tangent, bed):
+                low = middle
+            else:
+                high = middle
+        if low > start + 1e-6:
+            ends.append(low)
+        return ends
+    bounds, _start_seam, _end_seam, tangent, _regions = _perimeter_piece(
+        start, limit, outer_x, outer_y,
+    )
+    if _planned_piece_fits(bounds, tangent, bed):
+        ends.append(limit)
+    return ends
+
+
 def plan_base_trim_pieces(spec: BaseTrimSpec) -> list[BaseTrimPiece]:
     _validate_values(spec)
     _validate_split_joint(spec)
@@ -378,33 +478,52 @@ def plan_base_trim_pieces(spec: BaseTrimSpec) -> list[BaseTrimPiece]:
 
     outer_x, outer_y = spec.outer_bottom_size
     perimeter = 2.0 * (outer_x + outer_y)
-    # A piece must leave room for one 4 mm male key. This is a lower bound,
-    # not an edge-by-edge slicing rule; candidates below use their real XY box.
     smallest_bed_side = min(spec.effective_bed)
     if smallest_bed_side <= BASE_TRIM_JOINT_LENGTH + 1e-6:
         raise ValueError("The declared printable area is too small for a Base Trim joint.")
-
     max_count = max(2, math.ceil(perimeter / (smallest_bed_side - BASE_TRIM_JOINT_LENGTH)) + 4)
     for count in range(2, max_count + 1):
         best: tuple[tuple[float, ...], list[BaseTrimPiece]] | None = None
-        # Equal-length perimeter arcs avoid tiny remainders. Shift their common
-        # origin through one arc so the deterministic search can move cuts away
-        # from corners without independently chopping each edge.
-        for phase_index in range(32):
-            phase = perimeter * phase_index / (32.0 * count)
-            cuts = [phase + perimeter * index / count for index in range(count + 1)]
-            planned: list[BaseTrimPiece] = []
-            for index, (start, end) in enumerate(zip(cuts, cuts[1:]), 1):
-                bounds, start_seam, end_seam, tangent = _perimeter_piece(start, end, outer_x, outer_y)
-                if not _planned_piece_fits(bounds, tangent, spec.effective_bed):
-                    break
+        for start in _search_starts(outer_x, outer_y):
+            target = start + perimeter
+
+            def build(current: float, remaining: int) -> list[float] | None:
+                if remaining == 1:
+                    bounds, _start_seam, _end_seam, tangent, _regions = _perimeter_piece(
+                        current, target, outer_x, outer_y,
+                    )
+                    return [target] if _planned_piece_fits(bounds, tangent, spec.effective_bed) else None
+                choices = _furthest_piece_ends(
+                    current, target, outer_x, outer_y, spec.effective_bed,
+                )
+                ideal = current + (target - current) / remaining
+                bounds, _start_seam, _end_seam, tangent, _regions = _perimeter_piece(
+                    current, ideal, outer_x, outer_y,
+                )
+                if _planned_piece_fits(bounds, tangent, spec.effective_bed):
+                    choices.append(ideal)
+                for end in sorted(set(choices), key=lambda value: abs(value - ideal)):
+                    if end >= target - 1e-6:
+                        continue
+                    rest = build(end, remaining - 1)
+                    if rest is not None:
+                        return [end, *rest]
+                return None
+
+            ends = build(start, count)
+            if ends is None:
+                continue
+            cuts = [start, *ends]
+            planned = []
+            for index, (piece_start, piece_end) in enumerate(zip(cuts, cuts[1:]), 1):
+                bounds, start_seam, end_seam, _tangent, regions = _perimeter_piece(
+                    piece_start, piece_end, outer_x, outer_y,
+                )
                 planned.append(BaseTrimPiece(
                     index, "perimeter", f"Perimeter section {index}", bounds,
-                    start_seam, end_seam,
+                    start_seam, end_seam, regions,
                 ))
-            if len(planned) != count:
-                continue
-            score = _partition_score(cuts[:-1], outer_x, outer_y)
+            score = _partition_score([cut % perimeter for cut in cuts[:-1]], outer_x, outer_y)
             if best is None or score > best[0]:
                 best = score, planned
         if best is not None:
@@ -504,9 +623,10 @@ def _joint_solid(spec: BaseTrimSpec, seam: BaseTrimSeam, female: bool) -> trimes
 
 
 def _piece_clip(spec: BaseTrimSpec, piece: BaseTrimPiece) -> trimesh.Trimesh:
-    if piece.clip_bounds is None:
+    if not piece.clip_regions:
         raise ValueError("A split Base Trim piece is missing its clipping bounds.")
-    clip = _extrude_polygon(polygon_box(*piece.clip_bounds), spec.height_mm + 2.0)
+    profile = unary_union([polygon_box(*region) for region in piece.clip_regions])
+    clip = _extrude_polygon(profile, spec.height_mm + 2.0)
     clip.apply_translation((0.0, 0.0, -1.0))
     return clip
 
@@ -567,6 +687,7 @@ def base_trim_summary(spec: BaseTrimSpec) -> dict:
                 "label": one.label,
                 "kind": one.kind,
                 "clip_bounds": list(one.clip_bounds) if one.clip_bounds else None,
+                "clip_regions": [list(region) for region in one.clip_regions] if one.clip_regions else None,
             }
             for one in pieces
         ],
