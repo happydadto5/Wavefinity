@@ -45,8 +45,8 @@
 - Base Trim may generate or print without a name, always stays visible in 3D,
   retains Snap tabs for every newly created trim, and keeps its Print Base Trim
   action after changing slicers.
-- Split joints now sit in the wave-safe part of the trim and reject widths that
-  cannot retain structural skin around the cleared socket. The 2D marker now
+- Split-joint scaling now preserves a 1 mm structural skin around the cleared
+  socket. The 2D marker now
   distinguishes Snap, Sliding dovetail, and Puzzle joints.
 
 ## 2026-09-15 — Bin-following parts stay synchronized

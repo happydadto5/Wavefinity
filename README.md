@@ -1449,6 +1449,7 @@ these numbers look arbitrary and are not.
 | Base Trim width / height range / step | **4–20 / 0.5** | millimetres |
 | Base Trim default bed / effective area | **256 × 256 / 236 × 236** | 10 mm is reserved at each edge |
 | Base Trim joint engagement / clearance | **4.0 / 0.20** | only used when the ring must split |
+| Base Trim split-joint structural skin | **1.0 mm minimum** | between cleared joint and each physical face |
 | Base Trim outer taper | **1.0 per side** | outside only |
 | Base Trim corner leg minimum | **16.0** | corners always print as one piece |
 | Mated wall clearance | **0.21** | 0.25 across the seam, measured perpendicular |

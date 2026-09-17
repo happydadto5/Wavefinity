@@ -62,7 +62,7 @@ BASE_TRIM_MAX_FIELD = 1200.0
 
 BASE_TRIM_JOINT_LENGTH = 4.0
 BASE_TRIM_JOINT_CLEARANCE = 0.20
-BASE_TRIM_JOINT_SKIN = 0.20
+BASE_TRIM_JOINT_SKIN = 1.0
 BASE_TRIM_CORNER_LEG_MIN = 16.0
 
 
@@ -254,20 +254,7 @@ def _validate_values(spec: BaseTrimSpec) -> None:
 def _validate_split_joint(spec: BaseTrimSpec) -> None:
     if _one_piece(spec):
         return
-    # A seam spans one whole authoritative 4 mm wave cycle. The safe
-    # cross-section is consequently the tapered top width minus the real
-    # outward crest, not the nominal straight width. The centered frame below
-    # gives each face half of the remaining material, reaching a 1 mm skin
-    # automatically whenever the chosen trim is wide enough.
-    safe_width = spec.width_mm - BASE_TRIM_OUTER_TAPER - WAVE_AMPLITUDE
-    if safe_width <= 0.0:
-        raise ValueError(
-            "The selected trim width is too small to keep material around split joints. "
-            "Increase Trim width or use a larger printer bed."
-        )
-    _min_x, min_y, _max_x, max_y = _joint_profile(spec).bounds
-    female_width = max_y - min_y + 2.0 * BASE_TRIM_JOINT_CLEARANCE
-    if female_width + 2.0 * BASE_TRIM_JOINT_SKIN > safe_width + 1e-9:
+    if _joint_max_profile_width(spec) < 1.6 - 1e-9:
         joint = BASE_TRIM_JOIN_LABELS[spec.join_type]
         raise ValueError(
             f"The {spec.width_mm:g} mm-wide Base Trim is too narrow for {joint} when "
@@ -460,14 +447,20 @@ def _seam_frame(
     return (-inner_x - top_width / 2.0 - wave_offset, seam.coordinate), (0.0, -1.0), (1.0, 0.0)
 
 
+def _joint_max_profile_width(spec: BaseTrimSpec) -> float:
+    """Width left after the wave, female clearance, and both structural skins."""
+    safe_width = spec.width_mm - BASE_TRIM_OUTER_TAPER - WAVE_AMPLITUDE
+    return safe_width - 2.0 * BASE_TRIM_JOINT_SKIN - 2.0 * BASE_TRIM_JOINT_CLEARANCE
+
+
 def _joint_profile(spec: BaseTrimSpec) -> Polygon:
     length = BASE_TRIM_JOINT_LENGTH
-    available = spec.width_mm - BASE_TRIM_OUTER_TAPER
+    max_width = _joint_max_profile_width(spec)
     if spec.join_type == "snap":
-        width = min(3.0, spec.width_mm - 2.0, available - 1.0)
+        detent = 0.30
+        width = min(3.0, spec.width_mm - 2.0, max_width - 2.0 * detent)
         base = polygon_box(0.0, -width / 2.0, length, width / 2.0)
         lead = 0.60
-        detent = 0.30
         bumps = [
             Polygon([(length - lead, sign * width / 2.0),
                      (length, sign * (width / 2.0 + detent)),
@@ -476,13 +469,13 @@ def _joint_profile(spec: BaseTrimSpec) -> Polygon:
         ]
         return unary_union([base, *bumps])
     if spec.join_type == "dovetail":
-        scale = min(1.0, max(0.1, (available - 2.0) / 3.4))
+        scale = min(1.0, max_width / 3.4)
         neck, head = 2.4 * scale, 3.4 * scale
         return Polygon([
             (0.0, -neck / 2.0), (length, -head / 2.0),
             (length, head / 2.0), (0.0, neck / 2.0),
         ])
-    scale = min(1.0, max(0.1, (available - 2.0) / 3.4))
+    scale = min(1.0, max_width / 3.4)
     neck, head = 2.4 * scale, 3.4 * scale
     neck_shape = polygon_box(0.0, -neck / 2.0, length - head / 2.0, neck / 2.0)
     head_shape = Point(length - head / 2.0, 0.0).buffer(head / 2.0, quad_segs=16)
