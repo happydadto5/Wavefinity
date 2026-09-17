@@ -429,8 +429,13 @@ function edgeMountActive(design = state.design) {
   return Boolean(one?.label_enabled || one?.holes_enabled);
 }
 
+function edgeMountAvailable(design = state.design) {
+  return !baseTrimEnabled(design) && !Boolean(design?.box?.b4b?.enabled);
+}
+
 function placedPartCount() {
-  return (state.design?.layout?.features?.length || 0) + (edgeMountActive() ? 1 : 0);
+  return (state.design?.layout?.features?.length || 0) +
+    (edgeMountAvailable() && edgeMountActive() ? 1 : 0);
 }
 
 function iconFor(kind) {
@@ -2983,6 +2988,7 @@ function pickKind(kind) {
 }
 
 async function selectEdgeMount(fromPlaced = false) {
+  if (!edgeMountAvailable()) return;
   if (edgeMountActive() && !fromPlaced && !editingEdgeMount()) return;
   if (state.draft && !(await guardDraftSwitch())) return;
   cancelPendingDraftWork();
@@ -6004,7 +6010,7 @@ function renderPlaced() {
       </div>`;
     }).join("");
   let edgeMountMarkup = "";
-  if (edgeMountActive()) {
+  if (edgeMountAvailable() && edgeMountActive()) {
     const side = `${edgeMount.side || "front"}`;
     const detail = edgeMount.label_enabled && edgeMount.holes_enabled
       ? "Label + Screws"
@@ -6046,7 +6052,7 @@ function renderPlaced() {
   // triggers falls through here instead of looping. Suppressed right after an
   // explicit Save / Delete Part, when the user asked to be back at the palette.
   if (features.length === 1 && state.selected === null && !state.draft
-      && !state.paletteBrowsing) {
+      && !editingEdgeMount() && !state.paletteBrowsing) {
     selectedFeature(0);
   }
   updateDividerEditBreadcrumb();
