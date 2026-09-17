@@ -2169,7 +2169,14 @@ class ResolvedOptionTests(unittest.TestCase):
         self.assertGreater(float(deep.bounds[1][2]), float(shallow.bounds[1][2]))
 
     def test_a_refused_parameter_says_which_numbers_disagree(self) -> None:
-        one = self.photo_nest(depth=40.0)
+        # A Raised Wall taller than the rim is a legitimate Fused holder now
+        # (spec: shallow-fused-above-rim); a Recessed Cavity still genuinely
+        # depends on the material actually above the floor in every mode, so
+        # it remains the one that reports the disagreeing numbers here.
+        one = self.photo_nest(
+            holder_style="recessed", cavity_depth_mode="manual",
+            tool_thickness=40.0, cavity_depth=40.0,
+        )
         with self.assertRaises(ValueError) as caught:
             build_features(
                 self.spec,
