@@ -22,8 +22,12 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Current main has Correction 1 appended after an incomplete implementation review. The correction must be completed and reviewed before dependent fixes are implemented.
 
 ## Fix 005 — Space Type Card Images
-- **Status:** Initial design
-- **Notes:** Reserved for the coordinated Drawer / Surface / Portable Storage rendered onboarding card images and their placement into the completed Space onboarding screen. This work is being handled in a separate planning thread and depends on the Fix 004 screen structure.
+- **Status:** Ready for implementation
+- **Fix file:** `/fixes/fix-005.md`
+- **Planning thread:** `Space Card Images Plan #5`
+- **Planned implementation thread:** `Space Card Images Imp #5`
+- **Implementation model:** Low / Low
+- **Notes:** Drawer, B4B, and Vanity rendered assets were committed to `/images` in commit `371366190b8a959e49bda8a9c419659d14533276`. Current main contains the required `.type-card` Create New Space screen structure, so this fix is limited to wiring those assets into the existing cards plus responsive card styling; it must not alter Fix 004 Space logic.
 
 ## Fix 006 — Portable Space Identity
 - **Status:** Initial design
