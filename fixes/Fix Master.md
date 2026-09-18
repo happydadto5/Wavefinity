@@ -16,13 +16,13 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Implementation outbrief is present in the fix file. Final completion must be determined by outside ChatGPT review before the fix file is deleted.
 
 ## Fix 004 — Space Onboarding Redesign
-- **Status:** Needs remediation work
+- **Status:** Needs remediation work — Correction 2
 - **Fix file:** `/fixes/fix-004.md`
 - **Implementation thread:** `Space Onboarding Redesign Imp #4`
-- **Notes:** Current main has Correction 1 appended after an incomplete implementation review. The correction must be completed and reviewed before dependent fixes are implemented.
+- **Notes:** Correction 1 rework was reviewed on current main and remains materially incomplete. Correction 2 is appended with the remaining structural, onboarding, Space Info, spacer geometry/generation, and UI/data-contract repairs required before final review.
 
 ## Fix 005 — Space Type Card Images
-- **Status:** Ready for implementation
+- **Status:** Blocked by Fix 004 completion
 - **Fix file:** `/fixes/fix-005.md`
 - **Planning thread:** `Space Card Images Plan #5`
 - **Planned implementation thread:** `Space Card Images Imp #5`
