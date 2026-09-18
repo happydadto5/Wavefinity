@@ -708,7 +708,8 @@
       </div>
       <p class="welcome-lead">Select a folder to start designing.</p>
       <div class="welcome-actions">
-        <button id="welcome-new" class="button primary" type="button">Choose a folder&#8230;</button>
+        <button id="welcome-create" class="button primary" type="button">Create New Space</button>
+        <button id="welcome-open" class="button secondary" type="button">Open Existing Space</button>
       </div>
       <h3 class="welcome-section-title">Recent folders</h3>
       <ul id="welcome-recent" class="welcome-recent"></ul>
@@ -739,7 +740,8 @@
       <fieldset class="space-kinds">
         <legend>What are you organizing?</legend>
         <label class="space-kind"><input type="radio" name="space-kind" value="drawer" checked><span><strong>Drawer</strong>A drawer you already have.</span></label>
-        <label class="space-kind"><input type="radio" name="space-kind" value="box"><span><strong>Box</strong>A Bin for Bins storage box Wavefinity can design.</span></label>
+        <label class="space-kind"><input type="radio" name="space-kind" value="surface"><span><strong>Surface</strong>A flat surface or shelf.</span></label>
+        <label class="space-kind"><input type="radio" name="space-kind" value="portable"><span><strong>Portable Storage</strong>A Bin for Bins box.</span></label>
       </fieldset>
       <div id="space-size" class="space-size">
         <label class="space-field"><span><span id="space-x-label">Width (X)</span> <span class="unit">mm</span></span><input id="space-x" type="number" min="1" step="any" inputmode="decimal"></label>

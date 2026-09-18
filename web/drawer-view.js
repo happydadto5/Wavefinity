@@ -502,6 +502,28 @@ DV.paintScene = (ctx, drawer, cam) => {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.fillText(`FRONT · ${fmt(W)} mm wide · ${fmt(D)} deep · ${fmt(H)} max height`, fx, fy + 10);
+  // Draw spacer candidates
+  if (DL.spacerPlan) {
+    DL.spacerPlan.forEach(c => {
+      const selected = DL.spacerSelected && DL.spacerSelected.has(c.id);
+      const tone = selected ? "rgba(90, 160, 255, 0.4)" : "rgba(120, 100, 70, 0.15)";
+      const stroke = selected ? "rgba(50, 100, 200, 0.8)" : "rgba(120, 100, 70, 0.4)";
+      ctx.setLineDash(selected ? [] : [4, 4]);
+      c.placements.forEach(p => {
+        // Draw the candidate box
+        const x = p.x !== undefined ? p.x : grid.ox + p.gx * step;
+        const y = p.y !== undefined ? p.y : grid.oy + p.gy * step;
+        const w = p.w !== undefined ? p.w : DL.bin(p.bin).x;
+        const d = p.d !== undefined ? p.d : DL.bin(p.bin).y;
+        const z = DL.bin(p.bin).z;
+        const p1 = [x, y, 0], p2 = [x + w, y, 0], p3 = [x + w, y + d, 0], p4 = [x, y + d, 0];
+        const screenPoly = face([p1, p2, p3, p4], tone, stroke, 2);
+        hits.push({ key: c.id, polys: [screenPoly], candidate: true, z: 0 });
+      });
+      ctx.setLineDash([]);
+    });
+  }
+
   return hits;
 };
 
@@ -616,6 +638,11 @@ DV.wire = () => {
     const [sx, sy] = DV.point(event);
     canvas.setPointerCapture(event.pointerId);
     const hit = event.button === 0 ? DV.hitAt(sx, sy) : null;
+    if (hit && hit.candidate) {
+      DL.toggleSpacerCandidate(hit.key);
+      DV.paint();
+      return;
+    }
     if (hit) {
       DL.selected = hit.key;
       const chain = hit.grid && DL.stackOf(hit.key);

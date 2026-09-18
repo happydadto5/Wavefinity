@@ -178,7 +178,7 @@ DP.build = () => {
   DP.wire();
   DV.buildOverlay();
   if (state.runtime.hosted) {
-    ["#dl-sp-make", "#dl-connectors", "#dl-print"].forEach(selector => {
+    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print", "#dl-connectors"].forEach(selector => {
       const button = $(selector);
       if (button) {
         button.disabled = true;
@@ -271,10 +271,10 @@ DP.wire = () => {
   setting("#dl-auto-stack", "auto", "stack_bins", node => node.checked);
   setting("#dl-auto-locked", "auto", "keep_locked", node => node.checked);
   setting("#dl-auto-spacers", "auto", "include_spacers", node => node.checked);
-  setting("#dl-sp-fill", "spacers", "fill", node => node.value);
+  setting("#dl-sp-flexible", "spacers", "flexible", node => node.checked);
   setting("#dl-sp-height", "spacers", "height", node => Math.max(6, dlNum(node.value, 15)));
   setting("#dl-sp-max", "spacers", "max_length", node => Math.max(16, dlNum(node.value, 250)));
-  setting("#dl-sp-open", "spacers", "leave_open", node => Math.max(0, dlNum(node.value, 0)));
+  
   setting("#dl-new-printed", null, "new_bins_printed", node => node.checked);
   $("#dl-auto").addEventListener("click", () => DL.runAuto());
   $("#dl-candidates").addEventListener("click", event => {
@@ -284,8 +284,17 @@ DP.wire = () => {
   $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", event => {
     if (event.target.closest("#dl-design-spot")) DP.designSpot();
   });
-  $("#dl-sp-make").addEventListener("click", () => DL.makeSpacers());
-  $("#dl-sp-remove").addEventListener("click", () => DL.removeSpacers());
+  
+  
+    $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
+  $("#dl-sp-generate").addEventListener("click", () => DL.generateSelectedSpacers());
+  $("#dl-sp-print").addEventListener("click", () => {
+    // Assuming UI has a way to get selection, or we print all rows
+    const rows = DL.spacerPrintRows();
+    const selection = {};
+    rows.forEach(r => selection[r.bin.id] = r.toPrint);
+    DL.printSelectedSpacers(selection);
+  });
   $("#dl-connectors").addEventListener("click", () => DL.makeConnectors());
   $("#dl-base-trim").addEventListener("click", async () => {
     const source = DL.baseTrimSource();
@@ -570,8 +579,19 @@ DP.renderDrawer = () => {
   if (dlChanged("drawers", JSON.stringify(DL.layout.drawers.map(one => [one.id, one.name])) + DL.layout.active)) {
     select.innerHTML = DL.layout.drawers.map(one =>
       `<option value="${escapeHtml(one.id)}">${escapeHtml(one.name)}</option>`).join("");
-    select.value = drawer.id;
+    select.value = DL.layout.active;
   }
+  
+  // Hide drawer selector if only one drawer in a typed Space.
+  const isTypedSpace = state.folderMode === "space" && state.activeSpace;
+  const row = select.closest(".dl-drawer-row");
+  if (row) {
+    if (isTypedSpace && DL.layout.drawers.length === 1) row.style.display = "none";
+    else row.style.display = "";
+  }
+  const addBtn = $("#dl-drawer-add");
+  if (addBtn) addBtn.style.display = isTypedSpace ? "none" : "";
+
   dlSet("#dl-width", fmt(drawer.width));
   dlSet("#dl-depth", fmt(drawer.depth));
   dlSet("#dl-height", fmt(drawer.height));
@@ -666,17 +686,18 @@ DP.drawThumb = (canvas, candidate) => {
 DP.renderStats = () => {
   const box = $("#dl-stats");
   const spacers = DL.layout.settings.spacers;
-  dlSet("#dl-sp-fill", spacers.fill);
+  dlSet("#dl-sp-flexible", Boolean(spacers.flexible), "checked");
   dlSet("#dl-sp-height", fmt(spacers.height));
   dlSet("#dl-sp-max", fmt(spacers.max_length));
-  dlSet("#dl-sp-open", fmt(spacers.leave_open));
+  
   const busy = Boolean(DL.busy);
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
-  label("#dl-sp-make", "Make spacers", "Making spacers…", "spacers");
+  label("#dl-sp-plan", "Plan / Update Spacers", "Planning…", "spacers");
+  label("#dl-sp-generate", "Generate Selected Spacers", "Generating…", "spacers");
   label("#dl-connectors", "Make connectors", "Making connectors…", "connectors");
   label("#dl-base-trim", "Make Base Trim", "Making Base Trim…", "base_trim");
-  label("#dl-print", "Print spacers & connectors", "Opening Bambu Studio…", "print");
-  $("#dl-sp-remove").disabled = busy || !DL.drawer().placements.some(p => DL.isSpacer(DL.bin(p.bin)));
+  label("#dl-sp-print", "Print Spacers", "Printing…", "print");
+  
   const report = DL.report;
   const warnings = DL.warnings.map(text => `<p class="dl-note dl-warning">${escapeHtml(text)}</p>`).join("");
   if (!report) { box.innerHTML = warnings || `<p class="dl-note">Measuring…</p>`; return; }
@@ -838,6 +859,17 @@ DP.renderSave = () => {
   dlSet("#dl-keep-bin-defaults", Boolean(state.keepBinDefaults), "checked");
   dlSet("#dl-autosave", Boolean(settings.autosave), "checked");
   dlSet("#dl-output-folder", DL.output ?? DL.folder(), "value");
+  if (state.activeSpace && state.activeSpace.name) {
+    const parent = $("#dl-output-folder").closest(".save-location-group");
+    if (parent) {
+      parent.innerHTML = `<div class="space-info-compact">
+        <strong>${escapeHtml(state.activeSpace.name)}</strong>
+        <span style="opacity: 0.7">(${state.activeSpace.kind})</span>
+        <button type="button" class="link-button" onclick="api('/api/space/show-folder', {folder: DL.output ?? DL.folder()})" title="Show folder">Show Folder</button>
+        <button type="button" class="link-button" onclick="DP.changeFolder()" title="Change folder">Change folder</button>
+      </div>`;
+    }
+  }
   const status = $("#dl-save-status");
   let text = "";
   let tone = "";

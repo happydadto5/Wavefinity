@@ -668,18 +668,41 @@ DL.toggleLock = key => DL.change(() => {
   if (chain) chain[0].locked = !chain[0].locked;
 });
 
-DL.makeSpacers = () => DL.busyWith("spacers", async () => {
-  const before = DL.snapshot();
+DL.planSpacers = () => DL.busyWith("spacers", async () => {
   const result = await api("/api/drawer/spacers", {
     output: DL.output ?? DL.folder(), layout: DL.layout,
     drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
   });
+  DL.spacerPlan = result.candidates || [];
+  DL.spacerSelected = new Set((result.selected || []).map(c => c.id));
+  DL.spacerPlanSignature = DL.signature();
+  DL.emit();
+});
+
+DL.toggleSpacerCandidate = id => {
+  if (!DL.spacerPlan) return;
+  if (DL.spacerSelected.has(id)) DL.spacerSelected.delete(id);
+  else DL.spacerSelected.add(id);
+  DL.emit();
+};
+
+DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
+  if (!DL.spacerPlan) return;
+  const before = DL.snapshot();
+  const selection = DL.spacerPlan.filter(c => DL.spacerSelected.has(c.id));
+  const result = await api("/api/drawer/spacers/generate", {
+    output: DL.output ?? DL.folder(), layout: DL.layout,
+    drawer_id: DL.layout.active, candidates: selection,
+  });
   DL.adopt(result);
   DL.normaliseLayout(result.layout);
   if (DL.snapshot() !== before) { DL.history.push(before); DL.future = []; }
+  DL.spacerPlan = null;
+  DL.spacerSelected = new Set();
   DL.dirty = false;
   DL.saveState = "saved";
   DL.savedAt = new Date();
+  
   const made = result.generated?.length || 0;
   const bits = [];
   if (result.placed) bits.push(`${result.placed} spacer${result.placed === 1 ? "" : "s"} placed`);
@@ -688,6 +711,41 @@ DL.makeSpacers = () => DL.busyWith("spacers", async () => {
   toast([bits.join(", ") || "Nothing to fill", ...(result.notes || [])].join("\n"), false, 7000);
   DL.requestReport();
 });
+
+DL.spacerPrintRows = () => {
+  const drawer = DL.drawer();
+  if (!drawer) return [];
+  const spacers = drawer.placements.map(p => DL.bin(p.bin)).filter(DL.isSpacer);
+  const groups = new Map();
+  spacers.forEach(b => {
+    groups.set(b.id, (groups.get(b.id) || 0) + 1);
+  });
+  return Array.from(groups.entries()).map(([id, qty]) => {
+    const bin = DL.bin(id);
+    const printed = bin.printed || 0;
+    return { bin, qty, printed, toPrint: Math.max(0, qty - printed) };
+  });
+};
+
+DL.printSelectedSpacers = async (selection) => {
+  if (Object.keys(selection).length === 0) return;
+  await api("/api/drawer/print-spacers", {
+    output: DL.output ?? DL.folder(), 
+    selection: selection,
+    slicer_path: state.slicer?.path || null,
+  });
+  
+  // Mark as printed
+  const updates = [];
+  for (const [id, count] of Object.entries(selection)) {
+    const bin = DL.bin(id);
+    if (bin && count > 0) updates.push({ id, qty: (bin.printed || 0) + count });
+  }
+  if (updates.length > 0) {
+    await DL.editBins({ bin_updates: updates });
+  }
+  toast("Sent to slicer and marked as printed.");
+};
 
 DL.removeSpacers = () => DL.change(() => {
   const drawer = DL.drawer();

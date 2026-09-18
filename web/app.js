@@ -259,10 +259,38 @@ function spaceBinDefaultsFromDesign(design) {
   return snapshot;
 }
 
+function applySpaceSizingDefaults(design) {
+  if (state.folderMode !== "space" || !state.activeSpace) return design;
+  const kind = state.activeSpace.kind;
+  const space = state.activeSpace;
+  const unit = state.catalog?.base_unit || 8;
+  
+  // Clip starting footprint if space is too small
+  const defaultUnits = 4;
+  const spaceXUnits = Math.floor(space.x / unit);
+  const spaceYUnits = Math.floor(space.y / unit);
+  const startX = Math.min(defaultUnits, Math.max(1, spaceXUnits));
+  const startY = Math.min(defaultUnits, Math.max(1, spaceYUnits));
+  design.box.x = startX * unit;
+  design.box.y = startY * unit;
+
+  if (kind === "drawer") {
+    design.box.z = Math.max(10, space.z - 3);
+  } else if (kind === "surface") {
+    design.box.z = space.trim_size || 15; // default trim height
+  } else if (kind === "portable" || kind === "box") { // Handle legacy box
+    design.box.z = space.z;
+  }
+  return design;
+}
+
 function freshDesignForCurrentFolder() {
   const current = clone(state.catalog.defaults.design);
-  if (state.folderMode !== "space" || !state.keepBinDefaults || !state.spaceBinDefaults) return current;
-  return spaceBinDefaultsFromDesign(mergeDesignDefaults(current, state.spaceBinDefaults));
+  if (state.folderMode !== "space" || !state.keepBinDefaults || !state.spaceBinDefaults) {
+    return applySpaceSizingDefaults(current);
+  }
+  const merged = spaceBinDefaultsFromDesign(mergeDesignDefaults(current, state.spaceBinDefaults));
+  return applySpaceSizingDefaults(merged);
 }
 
 async function rememberGeneratedSpaceBin(design) {

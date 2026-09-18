@@ -745,7 +745,9 @@ def catalog_payload() -> dict[str, Any]:
         "options": [],
         "capabilities": ["box_modifier"],
     })
+    import sys
     return {
+        "platform": sys.platform,
         "version": SERVER_VERSION,
         "instance": SERVER_INSTANCE,
         "api_compat": API_COMPAT_VERSION,
@@ -1147,6 +1149,27 @@ print(filedialog.askopenfilename(parent=root, title="Select Slicer Executable (e
     if selected:
         save_preferences({"slicer_path": selected})
     return {"slicer_path": selected or None}
+
+
+def show_folder_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Open the native file explorer to the specified folder."""
+    if HOSTED:
+        raise ValueError("Cannot open native folders in hosted mode.")
+    folder = Path(str(payload.get("folder") or "")).expanduser()
+    if not folder.is_dir():
+        raise FileNotFoundError(f"Folder not found: {folder}")
+    try:
+        import sys
+        import subprocess
+        if sys.platform == "win32":
+            os.startfile(folder)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", folder], check=False)
+        else:
+            subprocess.run(["xdg-open", folder], check=False)
+    except Exception as e:
+        raise RuntimeError(f"Could not open folder: {e}")
+    return {"ok": True}
 
 
 def browse_output_folder_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2370,6 +2393,7 @@ POST_ROUTES = {
     "/api/sampler": sampler_payload,
     "/api/print": print_payload,
     "/api/preferences": preferences_payload,
+    "/api/space/show-folder": show_folder_payload,
     "/api/browse-output-folder": browse_output_folder_payload,
     "/api/browse-slicer-path": browse_slicer_path_payload,
     "/api/show-log": show_log_payload,

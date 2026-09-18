@@ -677,7 +677,8 @@ SP.wire = () => {
     .forEach(sel => $(sel)?.addEventListener("click", SP.close));
   SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
   SP.dialog().addEventListener("close", SP.cancelResumeAutoContinue);
-  $("#welcome-new").addEventListener("click", SP.chooseFolder);
+  $("#welcome-create").addEventListener("click", () => SP.showSetup("create"));
+  $("#welcome-open").addEventListener("click", () => SP.chooseFolder("open"));
   $("#space-optional-setup").addEventListener("click", SP.showSetup);
   $("#welcome-resume-continue").addEventListener("click", SP.confirmResume);
   $("#welcome-resume-switch").addEventListener("click", () => {
