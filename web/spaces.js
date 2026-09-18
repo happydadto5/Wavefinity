@@ -999,8 +999,13 @@ SP.wire = () => {
     // Route back to whichever flow actually opened this prompt - the
     // untyped flow must never fall into typed SP.create(), which expects a
     // Space form/name/type that was never filled in - see Fix 004
-    // Correction 9.A.
+    // Correction 9.A. Transition off the collision prompt onto a stable
+    // screen *before* clearing the state it depends on, so a cancelled
+    // replacement folder picker never leaves a dead collision prompt on
+    // screen with its target already erased - see Fix 004 Correction 10.B.
     const origin = SP.collisionOrigin;
+    if (origin === "untyped") SP.showTypeCards();
+    else { SP.showOnly("space-form"); SP.showDialog(); }
     SP.collisionFolder = null;
     SP.collisionData = null;
     SP.collisionOrigin = null;
@@ -1024,6 +1029,16 @@ SP.wire = () => {
   if (confYes) confYes.addEventListener("click", SP.configureFolder);
   const confNo = document.getElementById("space-configure-no");
   if (confNo) confNo.addEventListener("click", () => SP.run(SP.useUntypedFolder));
+  const confChoose = document.getElementById("space-configure-choose");
+  if (confChoose) confChoose.addEventListener("click", () => SP.run(async () => {
+    // Transition to a stable screen before clearing the selected target and
+    // asking for another folder, so a cancelled picker never leaves the
+    // user on a dead configure prompt referring to a cleared folder - see
+    // Fix 004 Correction 10.A.
+    SP.showHome();
+    SP.configureData = null;
+    await SP.openExisting();
+  }));
 
   const welcomeRecent = document.getElementById("welcome-recent");
   if (welcomeRecent) welcomeRecent.addEventListener("click", event => {

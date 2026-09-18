@@ -38,7 +38,7 @@ DP.build = () => {
   $("#drawer-panel").innerHTML = `
     <section class="dl-card" aria-label="Drawer">
       <div class="dl-drawer-row">
-        <label>Drawer<select id="dl-drawer"></select></label>
+        <label id="dl-drawer-label-row"><span id="dl-drawer-label">Drawer</span><select id="dl-drawer"></select></label>
         <button type="button" id="dl-drawer-add" class="button secondary dl-small" title="Add another drawer; it shares this inventory">+ Drawer</button>
       </div>
       <div class="field-grid three">
@@ -629,6 +629,20 @@ DP.renderDrawer = () => {
   }
   const addBtn = $("#dl-drawer-add");
   if (addBtn) addBtn.style.display = isTypedSpace ? "none" : "";
+  // A typed Space keeps one physical drawer; a preserved selector with more
+  // than one only ever holds legacy/previous drawers carried over from
+  // before this folder became a typed Space - label it clearly rather than
+  // showing an ordinary unlabeled "Drawer" selector - see Fix 004
+  // Correction 10.C. Never renamed here: only the selector's own label.
+  const drawerLabel = $("#dl-drawer-label");
+  if (drawerLabel) {
+    const legacyMultiDrawer = isTypedSpace && DL.layout.drawers.length > 1;
+    drawerLabel.textContent = legacyMultiDrawer ? "Previous drawers" : "Drawer";
+    const labelRow = $("#dl-drawer-label-row");
+    if (labelRow) labelRow.title = legacyMultiDrawer
+      ? "Legacy drawers from before this folder became this Space. This Space keeps one physical drawer; new drawers can't be added here."
+      : "";
+  }
 
   dlSet("#dl-width", fmt(drawer.width));
   dlSet("#dl-depth", fmt(drawer.depth));
