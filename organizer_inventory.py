@@ -60,7 +60,7 @@ MAX_QTY = 999
 DEFAULT_NEW_BIN_QTY = 0
 # A Space is one physical drawer or storage box. Its inventory is stored in
 # the selected Wavefinity save folder.
-SPACE_KINDS = ("drawer", "box")
+SPACE_KINDS = ("drawer", "surface", "portable", "box")
 
 _HEADER_KEYS = {
     "id": "id", "date": "date", "kind": "kind", "name": "name",
@@ -644,8 +644,8 @@ def create_space(
         if not layout.get("drawers"):
             layout["drawers"] = [{
                 "id": "d1", "name": name, "width": size[0], "depth": size[1], "height": size[2],
-                "clearance": 0.0 if kind == "box" else 1.0,
-                "boundary": "mating" if kind == "box" else "wall",
+                "clearance": 0.0 if kind in ("box", "portable", "surface") else 1.0,
+                "boundary": "mating" if kind in ("box", "portable") else "wall",
                 "keepouts": [], "placements": [],
             }]
             layout["active"] = "d1"
@@ -677,10 +677,49 @@ def create_space_text(
         if not layout.get("drawers"):
             layout["drawers"] = [{
                 "id": "d1", "name": name, "width": size[0], "depth": size[1], "height": size[2],
-                "clearance": 0.0 if kind == "box" else 1.0,
-                "boundary": "mating" if kind == "box" else "wall",
+                "clearance": 0.0 if kind in ("box", "portable", "surface") else 1.0,
+                "boundary": "mating" if kind in ("box", "portable") else "wall",
                 "keepouts": [], "placements": [],
             }]
             layout["active"] = "d1"
         rendered = render_inventory(str(title or name), current["bins"], layout)
         return _text_payload(rendered, str(title or name), parse_inventory(rendered))
+
+
+def update_space(
+    output_dir: Path | str, *, name: str, kind: str, x: float, y: float, z: float,
+) -> dict[str, Any]:
+    name = str(name or "").strip()[:80]
+    if not name:
+        raise ValueError("a space needs a name")
+    if kind not in SPACE_KINDS:
+        raise ValueError(f"a space is one of {', '.join(SPACE_KINDS)}")
+    size = [_number(value) for value in (x, y, z)]
+    if min(size) <= 0:
+        raise ValueError("a space needs its inside X, Y and Z in mm")
+    path = inventory_path(output_dir)
+    with INVENTORY_LOCK:
+        current = _read(path)
+        layout = current["layout"] if isinstance(current["layout"], dict) else {}
+        if not isinstance(layout.get("space"), dict):
+            return create_space(output_dir, name=name, kind=kind, x=x, y=y, z=z)
+        
+        layout["space"] = {"name": name, "kind": kind, "x": size[0], "y": size[1], "z": size[2]}
+        
+        drawers = layout.get("drawers")
+        if isinstance(drawers, list) and len(drawers) > 0:
+            primary = next((d for d in drawers if isinstance(d, dict) and d.get("id") == "d1"), drawers[0])
+            if isinstance(primary, dict):
+                primary["name"] = name
+                primary["width"] = size[0]
+                primary["depth"] = size[1]
+                primary["height"] = size[2]
+                if kind in ("box", "portable"):
+                    primary["clearance"] = 0.0
+                    primary["boundary"] = "mating"
+                else:
+                    primary["clearance"] = 1.0 if kind == "drawer" else 0.0
+                    primary["boundary"] = "wall"
+
+        _write(path, current["bins"], layout, current["legacy"])
+        return _payload(path, _read(path))

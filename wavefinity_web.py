@@ -1152,10 +1152,14 @@ print(filedialog.askopenfilename(parent=root, title="Select Slicer Executable (e
 
 
 def show_folder_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Open the native file explorer to the specified folder."""
+    """Open the native file explorer to the trusted current save folder."""
     if HOSTED:
         raise ValueError("Cannot open native folders in hosted mode.")
-    folder = Path(str(payload.get("folder") or "")).expanduser()
+    prefs = load_preferences()
+    folder_str = prefs.get("output")
+    if not folder_str:
+        raise ValueError("No active folder is set.")
+    folder = Path(str(folder_str)).expanduser()
     if not folder.is_dir():
         raise FileNotFoundError(f"Folder not found: {folder}")
     try:
