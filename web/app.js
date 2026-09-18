@@ -1055,12 +1055,20 @@ const B4B_DEFAULTS = {
   label_location: "top", front_label_style: "flat", stacking: false, handle: false,
 };
 const BASE_TRIM_DEFAULTS = {
-  width_mm: 6,
-  height_mm: 6,
-  join_type: "snap",
+  width_mm: 7.5,
+  height_mm: 7.5,
+  join_type: "drop_in",
   bed_x_mm: 256,
   bed_y_mm: 256,
 };
+const BASE_TRIM_SIZE_PRESETS = [6.5, 7.5, 10, 15, 20];
+
+function baseTrimPresetValue(trim) {
+  const same = Math.abs(trim.width_mm - trim.height_mm) < 1e-9;
+  return same && BASE_TRIM_SIZE_PRESETS.some(v => Math.abs(v - trim.width_mm) < 1e-9)
+    ? String(trim.width_mm)
+    : null;
+}
 const LIFT_GRABBER_DEFAULTS = { enabled: false, size: "medium", location: "sides" };
 const EDGE_MOUNT_DEFAULTS = {
   side: "front",
@@ -1121,12 +1129,12 @@ function makeBaseTrimDesign(fieldX = null, fieldY = null) {
     box: {
       x: legal(fieldX ?? fallback.x),
       y: legal(fieldY ?? fallback.y),
-      z: number(rules.default_height_mm, 6),
+      z: number(rules.default_height_mm, 7.5),
     },
     base_trim: {
       version: 1,
-      width_mm: number(rules.default_width_mm, 6),
-      join_type: "snap",
+      width_mm: number(rules.default_width_mm, 7.5),
+      join_type: "drop_in",
       bed_x_mm: bedX,
       bed_y_mm: bedY,
       auto_size: false,
@@ -1140,9 +1148,9 @@ function baseTrimState(design = state.design) {
   const rules = baseTrimRules();
   return {
     version: 1,
-    width_mm: number(design?.base_trim?.width_mm, rules.default_width_mm ?? 6),
-    height_mm: number(design?.box?.z, rules.default_height_mm ?? 6),
-    join_type: design?.base_trim?.join_type || "snap",
+    width_mm: number(design?.base_trim?.width_mm, rules.default_width_mm ?? 7.5),
+    height_mm: number(design?.box?.z, rules.default_height_mm ?? 7.5),
+    join_type: "drop_in",
     bed_x_mm: number(design?.base_trim?.bed_x_mm, rules.default_bed_x_mm ?? 256),
     bed_y_mm: number(design?.base_trim?.bed_y_mm, rules.default_bed_y_mm ?? 256),
     auto_size: Boolean(design?.base_trim?.auto_size),
@@ -1164,7 +1172,7 @@ function renderBaseTrimReadout() {
   const summary = state.preview?.base_trim;
   const outer = summary?.outer_mm;
   const pieces = summary?.piece_count;
-  const join = summary?.join_label || ({ snap: "Snap tabs", dovetail: "Sliding dovetail", puzzle: "Puzzle joint" })[trim.join_type];
+  const join = summary?.join_label || "Drop-in dovetail";
   $("#base-trim-summary").innerHTML = [
     `<div><strong>Inside field:</strong> ${ux}U × ${uy}U — ${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm</div>`,
     `<div><strong>Outside footprint:</strong> ${outer ? `${fmt(outer[0])} × ${fmt(outer[1])} mm` : "Calculating…"}</div>`,
@@ -1179,11 +1187,15 @@ function readBaseTrimForm(design = state.design) {
   const unitsY = Math.max(1, Math.min(150, Math.round(number($("#base-trim-y-units").value, design.box.y / unit))));
   design.box.x = unitsX * unit;
   design.box.y = unitsY * unit;
-  design.box.z = number($("#base-trim-height").value, design.box.z);
+  const sizeSelect = $("#base-trim-size");
+  const preset = sizeSelect && sizeSelect.value !== "__legacy__" ? number(sizeSelect.value, null) : null;
+  const width = preset != null ? preset : number(design.base_trim?.width_mm, design.box.z);
+  const height = preset != null ? preset : number(design.box.z, design.base_trim?.width_mm);
+  design.box.z = height;
   design.base_trim = {
     version: 1,
-    width_mm: number($("#base-trim-width").value, design.base_trim?.width_mm ?? 6),
-    join_type: $("#base-trim-joint").value,
+    width_mm: width,
+    join_type: "drop_in",
     bed_x_mm: number($("#base-trim-bed-x").value, design.base_trim?.bed_x_mm ?? 256),
     bed_y_mm: number($("#base-trim-bed-y").value, design.base_trim?.bed_y_mm ?? 256),
     auto_size: Boolean(design.base_trim?.auto_size),
@@ -1199,9 +1211,27 @@ function syncBaseTrimForm() {
   $("#bin-type").value = "base-trim";
   $("#base-trim-x-units").value = Math.round(state.design.box.x / unit);
   $("#base-trim-y-units").value = Math.round(state.design.box.y / unit);
-  $("#base-trim-width").value = fmt(trim.width_mm);
-  $("#base-trim-height").value = fmt(trim.height_mm);
-  $("#base-trim-joint").value = trim.join_type;
+  const sizeSelect = $("#base-trim-size");
+  if (sizeSelect) {
+    const legacyOption = sizeSelect.querySelector('option[value="__legacy__"]');
+    const preset = baseTrimPresetValue(trim);
+    if (preset != null) {
+      if (legacyOption) legacyOption.remove();
+      sizeSelect.value = preset;
+    } else {
+      const label = Math.abs(trim.width_mm - trim.height_mm) < 1e-9
+        ? `Legacy — ${fmt(trim.width_mm)} × ${fmt(trim.width_mm)} mm`
+        : `Legacy — ${fmt(trim.width_mm)} × ${fmt(trim.height_mm)} mm`;
+      let option = legacyOption;
+      if (!option) {
+        option = document.createElement("option");
+        option.value = "__legacy__";
+        sizeSelect.prepend(option);
+      }
+      option.textContent = label;
+      sizeSelect.value = "__legacy__";
+    }
+  }
   $("#base-trim-bed-x").value = fmt(trim.bed_x_mm);
   $("#base-trim-bed-y").value = fmt(trim.bed_y_mm);
   $("#part-name").value = state.design.part_name || "";
@@ -2815,8 +2845,8 @@ function wireControls() {
       $("#base-trim-printable").textContent = `Printable area after ${fmt(margin)} mm edge clearance: ${fmt(x)} × ${fmt(y)} mm`;
     });
   });
-  ["#base-trim-x-units", "#base-trim-y-units", "#base-trim-width", "#base-trim-height",
-    "#base-trim-joint", "#base-trim-bed-x", "#base-trim-bed-y"].forEach(selector => {
+  ["#base-trim-x-units", "#base-trim-y-units", "#base-trim-size",
+    "#base-trim-bed-x", "#base-trim-bed-y"].forEach(selector => {
     $(selector)?.addEventListener("change", () => {
       if (!baseTrimEnabled()) return;
       const previousDesign = clone(state.design);
@@ -2892,7 +2922,13 @@ function wireControls() {
   });
   $("#connection").addEventListener("click", () => location.reload(true));
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
-  $("#print-bin").addEventListener("click", () => printModel("bin"));
+  $("#print-bin").addEventListener("click", event => {
+    if (!state.runtime.hosted && baseTrimEnabled() && event.ctrlKey && event.shiftKey) {
+      printModel("base_trim_joint_test");
+      return;
+    }
+    printModel("bin");
+  });
   $("#generate-all")?.addEventListener("click", () => generateParts("all"));
   $("#generate-bin")?.addEventListener("click", () => generateParts("bin"));
   $("#generate-connector")?.addEventListener("click", () => generateParts("connector"));
@@ -8497,23 +8533,13 @@ function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
   }
 }
 
-function drawBaseTrimJointMarker(context, seam, midpoint, joinType) {
+function drawBaseTrimJointMarker(context, seam, midpoint) {
   context.save();
   context.translate(midpoint[0], midpoint[1]);
   if (seam.side === "right" || seam.side === "left") context.rotate(Math.PI / 2);
-  if (joinType === "snap") {
-    context.fillRect(-4, -2, 8, 4);
-    context.fillRect(-1, -4, 2, 8);
-  } else if (joinType === "dovetail") {
-    context.beginPath();
-    context.moveTo(-4, -3); context.lineTo(4, -5); context.lineTo(4, 5); context.lineTo(-4, 3);
-    context.closePath(); context.fill();
-  } else {
-    context.beginPath();
-    context.arc(-2, 0, 2.5, Math.PI / 2, Math.PI * 1.5);
-    context.arc(2, 0, 2.5, -Math.PI / 2, Math.PI / 2);
-    context.closePath(); context.fill();
-  }
+  context.beginPath();
+  context.moveTo(-4, -3); context.lineTo(4, -5); context.lineTo(4, 5); context.lineTo(-4, 3);
+  context.closePath(); context.fill();
   context.restore();
 }
 
@@ -8578,7 +8604,7 @@ function renderBaseTrim2D(context, width, height) {
     context.setLineDash([]);
     const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     context.fillStyle = "#b46b38";
-    drawBaseTrimJointMarker(context, seam, mid, summary.join_type);
+    drawBaseTrimJointMarker(context, seam, mid);
   });
 
   if (!summary.one_piece) {

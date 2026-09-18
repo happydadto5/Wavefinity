@@ -307,20 +307,45 @@ bin seams are not encoded into the trim, so bins may be rearranged later as
 long as they still fill that same rectangular field. The clean outer wall is
 rectangular and tapers inward by 1 mm per side from bottom to top.
 
-A new trim defaults to 6 mm width, 6 mm height, and **Snap tabs**. Width and
-height range from 4–20 mm in 0.5 mm steps. The default printer bed is 256 × 256
-mm; Wavefinity reserves 10 mm from each edge, leaving a 236 × 236 mm effective
-area. Bed X/Y remain machine preferences, but the selected joint does not:
-every new trim starts with Snap tabs.
+A new trim defaults to a square **Medium — 7.5 × 7.5 mm** size. Trim size is
+chosen from five named square presets, not free-form width/height fields:
+
+| Preset | Size |
+|---|---|
+| Small | 6.5 × 6.5 mm |
+| Medium (default) | 7.5 × 7.5 mm |
+| Large | 10 × 10 mm |
+| XL | 15 × 15 mm |
+| XXL | 20 × 20 mm |
+
+The default printer bed is 256 × 256 mm; Wavefinity reserves 10 mm from each
+edge, leaving a 236 × 236 mm effective area. Bed X/Y remain machine
+preferences.
 
 A ring that fits the effective bed in either orientation prints as one piece
 with no joints. Larger rings split automatically: all four corners remain
-integral and only straight rails split as needed. The choices are **Snap tabs**,
-**Sliding dovetail**, and **Puzzle joint**. *Auto size from Space* accepts one
-completely filled rectangular block and uses its dimensions only. A Base Trim
-is never inventory, and choosing Base Trim joining suppresses separate side
-connector generation; ordinary bins retain side connectors when *Side
-connectors* is selected. A Base Trim name is optional.
+integral and only straight rails split as needed. There is one section joint,
+support-free and printed flat: the **Drop-in dovetail**. It is a full-height
+vertical dovetail key that scales with trim size — split sections join by
+lifting one section, aligning the key over the mating opening, and lowering
+it straight down; once both pieces lie flat, the wider head resists
+horizontal pull-apart, so vertical removal is the only way apart. *Auto size
+from Space* accepts one completely filled rectangular block and uses its
+dimensions only. A Base Trim is never inventory, and choosing Base Trim
+joining suppresses separate side connector generation; ordinary bins retain
+side connectors when *Side connectors* is selected. A Base Trim name is
+optional.
+
+A design saved with an older Snap tabs / Sliding dovetail / Puzzle joint
+choice, or with non-preset or non-square width/height, still loads: the old
+join value normalizes in memory to Drop-in dovetail, and the size selector
+shows a temporary *Legacy — W × H mm* option until a preset is picked. It is
+never rewritten on disk just by opening it.
+
+**Maintainer note:** while a Base Trim design is open in the local app,
+Ctrl+Shift+click **Print to Bambu Studio** sends a small ~50 mm two-piece
+drop-in-joint sample instead of the normal trim, to physically check the fit
+before a full print. It is not a normal UI control.
 
 Base Trim deliberately does **not** use `BoxSpec`. It saves as version 6 with
 `design_kind: "base_trim"`: `box.x` and `box.y` are enclosed field dimensions,
@@ -332,11 +357,11 @@ does not accept interior parts.
 {
   "version": 6,
   "design_kind": "base_trim",
-  "box": {"x": 16, "y": 48, "z": 6},
+  "box": {"x": 16, "y": 48, "z": 7.5},
   "base_trim": {
     "version": 1,
-    "width_mm": 6,
-    "join_type": "snap",
+    "width_mm": 7.5,
+    "join_type": "drop_in",
     "bed_x_mm": 256,
     "bed_y_mm": 256,
     "auto_size": false
@@ -1445,10 +1470,10 @@ these numbers look arbitrary and are not.
 | Connector position step | **4.0** | one whole wave; half a wave wants a mirrored part |
 | Base Trim field range | **8–1200** | whole 8 mm units on each axis |
 | Base Trim unit | **8.0** | enclosed field step |
-| Base Trim default width / height | **6.0 / 6.0** | new trim defaults |
-| Base Trim width / height range / step | **4–20 / 0.5** | millimetres |
+| Base Trim size presets | **Small 6.5, Medium 7.5 (default), Large 10, XL 15, XXL 20** | square width = height |
+| Base Trim width / height range / step | **4–20 / 0.5** | millimetres; presets are the normal path, legacy values still load |
 | Base Trim default bed / effective area | **256 × 256 / 236 × 236** | 10 mm is reserved at each edge |
-| Base Trim joint engagement / clearance | **4.0 / 0.20** | only used when the ring must split |
+| Base Trim joint length / clearance | **0.55 × min(width, height) / 0.20** | one scaled drop-in dovetail; only used when the ring must split |
 | Base Trim split-joint structural skin | **1.0 mm minimum** | between cleared joint and each physical face |
 | Base Trim outer taper | **1.0 per side** | outside only |
 | Mated wall clearance | **0.21** | 0.25 across the seam, measured perpendicular |

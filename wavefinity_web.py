@@ -167,12 +167,14 @@ from organizer_base_trim import (
     BASE_TRIM_MIN_HEIGHT,
     BASE_TRIM_MIN_WIDTH,
     BASE_TRIM_OUTER_TAPER,
+    BASE_TRIM_SIZE_PRESETS,
     base_trim_design_to_dict,
     base_trim_enabled,
     base_trim_from_design,
     base_trim_inner_polygon,
     base_trim_summary,
     generate_base_trim_files,
+    generate_base_trim_joint_test_file,
     make_base_trim_pieces,
 )
 from organizer_stack import (
@@ -829,6 +831,10 @@ def catalog_payload() -> dict[str, Any]:
             "join_types": [
                 {"value": value, "label": BASE_TRIM_JOIN_LABELS[value]}
                 for value in BASE_TRIM_JOIN_TYPES
+            ],
+            "size_presets": [
+                {"key": key, "value_mm": value, "label": label}
+                for key, value, label in BASE_TRIM_SIZE_PRESETS
             ],
         },
         "lift_grabbers": {
@@ -2083,6 +2089,17 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return reply
 
 
+def base_trim_joint_test_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_design = payload["design"]
+    if not _is_base_trim_design(raw_design):
+        raise ValueError("The physical joint-fit sample needs a Base Trim design.")
+    spec = base_trim_from_design(raw_design)
+    output = _generation_output(payload)
+    with GEOMETRY_LOCK:
+        result = generate_base_trim_joint_test_file(spec, output, auto_timestamp=True)
+    return _generation_reply(result=result, output=output)
+
+
 def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return create_space_text(
         payload.get("inventory_text") or "",
@@ -2278,6 +2295,8 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         gen_result = connector_payload(payload)
     elif target == "sampler":
         gen_result = sampler_payload(payload)
+    elif target == "base_trim_joint_test":
+        gen_result = base_trim_joint_test_payload(payload)
     else:
         # For Bambu printing, always auto-save with timestamp if file exists or unnamed
         gen_result = generate_payload(dict(payload, auto_timestamp=True))

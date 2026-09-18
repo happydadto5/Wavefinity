@@ -157,13 +157,15 @@
             <div class="b4b-card">
               <h3 class="b4b-card-title">Trim</h3>
               <div class="field-grid three">
-                <label>Trim width <span class="unit">mm</span><input id="base-trim-width" type="number" min="4" max="20" step="0.5" value="6"></label>
-                <label>Trim height <span class="unit">mm</span><input id="base-trim-height" type="number" min="4" max="20" step="0.5" value="6"></label>
-                <label>Section joint<select id="base-trim-joint">
-                  <option value="snap">Snap tabs</option>
-                  <option value="dovetail">Sliding dovetail</option>
-                  <option value="puzzle">Puzzle joint</option>
-                </select></label>
+                <label>Trim size
+                  <select id="base-trim-size">
+                    <option value="6.5">Small — 6.5 × 6.5 mm</option>
+                    <option value="7.5" selected>Medium — 7.5 × 7.5 mm</option>
+                    <option value="10">Large — 10 × 10 mm</option>
+                    <option value="15">XL — 15 × 15 mm</option>
+                    <option value="20">XXL — 20 × 20 mm</option>
+                  </select>
+                </label>
               </div>
             </div>
             <div class="b4b-card">
