@@ -58,9 +58,13 @@ MAX_QTY = 999
 # A generated bin is not a printed one.  Until the Layout view's setting says
 # otherwise, new rows start at Qty 0 and are marked printed by hand.
 DEFAULT_NEW_BIN_QTY = 0
-# A Space is one physical drawer or storage box. Its inventory is stored in
-# the selected Wavefinity save folder.
-SPACE_KINDS = ("drawer", "surface", "portable", "box")
+# A Space is one physical drawer, surface, or portable case. Its inventory
+# is stored in the selected Wavefinity save folder. Legacy "box" is read for
+# migration only (see normalise_space_definition's allow_legacy) - it must
+# never be a normal writable current kind, or every caller that omits
+# allow_legacy (the default) would still silently accept and persist it.
+SPACE_KINDS = ("drawer", "surface", "portable")
+LEGACY_SPACE_KINDS = ("box",)
 
 _HEADER_KEYS = {
     "id": "id", "date": "date", "kind": "kind", "name": "name",
@@ -622,7 +626,7 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
     if not name:
         raise ValueError("a space needs a name")
     kind = str(raw.get("kind") or "")
-    if kind not in SPACE_KINDS and not (allow_legacy and kind == "box"):
+    if kind not in SPACE_KINDS and not (allow_legacy and kind in LEGACY_SPACE_KINDS):
         raise ValueError(f"a space is one of {', '.join(SPACE_KINDS)}")
     
     x, y, z = (_number(raw.get(axis)) for axis in ("x", "y", "z"))

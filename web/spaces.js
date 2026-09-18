@@ -24,7 +24,7 @@ SP.dialog = () => $("#welcome-dialog");
 SP.close = () => { if (SP.dialog().open) SP.dialog().close(); };
 SP.showOnly = id => {
   SP.cancelResumeAutoContinue();
-  ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-form", "space-configure-prompt", "space-collision-prompt"]
+  ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-form", "space-configure-prompt", "space-collision-prompt", "space-existing-inventory-prompt"]
     .forEach(one => { $("#" + one).hidden = one !== id; });
 };
 SP.showDialog = () => { if (!SP.dialog().open) SP.dialog().showModal(); };
@@ -51,7 +51,12 @@ SP.snap = mm => {
 };
 SP.hasFolder = () => Boolean(state.folderSelected);
 SP.canPersistSpace = () => !state.runtime.hosted || Boolean(state.browserFolder?.handle);
-SP.inventoryFilename = () => `${state.browserFolder?.name || "Wavefinity"} bins.md`;
+// The active folder's inventory filename. Create/Configure must use
+// SP.inventoryFilenameFor(folder) against the *selected target* instead -
+// this one only ever reflects whatever was already active, which is wrong
+// mid-Create before the new folder is activated - see Fix 004 Correction 7.A.
+SP.inventoryFilename = () => SP.inventoryFilenameFor(state.browserFolder);
+SP.inventoryFilenameFor = folder => `${folder?.name || "Wavefinity"} bins.md`;
 
 SP.resetDrawer = async () => {
   if (typeof DL === "undefined") return;
@@ -307,6 +312,10 @@ SP.inspectHosted = async folder => {
     missing: false,
     needs_setup: needsSetup,
     inventory_text: inventoryText,
+    // The browser-owned equivalent of local describe()'s inventory-exists
+    // flag, for the explicit Configure-vs-Choose-Another confirmation - see
+    // Fix 004 Correction 7.C.
+    exists: Boolean(inventoryText) || currentState.status !== "missing" || legacyState.status !== "missing",
   };
 };
 
@@ -552,6 +561,25 @@ SP.showTypeCards = () => {
   SP.showDialog();
 };
 
+// Drops any leftover selected-folder/collision/edit state from a previous
+// setup attempt before starting a genuinely new one, so a stale target
+// folder or Edit mode can never leak into the next Create - see Fix 004
+// Correction 7.F. Configure Existing intentionally does not call this: it
+// deliberately carries SP.configureData from the Configure prompt through
+// the type cards into the type-specific form.
+SP.clearSetupContext = () => {
+  SP.configureData = null;
+  SP.collisionFolder = null;
+  SP.collisionData = null;
+  SP.pendingConfigureFolder = null;
+  SP.isUpdate = false;
+};
+
+SP.beginCreateNew = () => {
+  SP.clearSetupContext();
+  SP.showTypeCards();
+};
+
 SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   SP.showOnly("space-form");
   // Every entry into setup explicitly states whether it is editing the
@@ -590,14 +618,16 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
 SP.startUntyped = async () => {
   const folder = await SP.pickFolder();
   if (!folder) return;
-  if (state.runtime.hosted) {
+  if (state.runtime.hosted && !folder.handle) {
+      // A download-only fallback has no handle to persist metadata into.
       await SP.useHostedFolder(folder);
-  } else {
-      const data = await api("/api/space/use-untyped", { output: folder });
-      SP.recent = data.recent || [];
-      await SP.applyFolder(data.folder);
-      SP.close();
+      return;
   }
+  // Reuses the same guarded write/collision path as the Configure prompt's
+  // "Use without a Space type" button, so this can never silently demote an
+  // already-configured typed Space either - see Fix 004 Correction 7.D.
+  SP.configureData = folder;
+  await SP.useUntypedFolder();
 };
 
 SP.create = async () => {
@@ -641,17 +671,30 @@ SP.create = async () => {
   const migrating = Boolean(SP.configureData);
 
   if (!migrating) {
-      let data;
-      if (state.runtime.hosted) {
-          data = await SP.inspectHosted(folder);
-      } else {
-          const resp = await api("/api/space/inspect", { output: folder });
-          data = resp.folder;
-      }
-      if (!data.needs_setup && data.folder_mode === "space") {
+      const data = state.runtime.hosted
+          ? await SP.inspectHosted(folder)
+          : (await api("/api/space/inspect", { output: folder })).folder;
+      // Any folder already classified as a Space - typed and ready, or
+      // still needing its one-time setup pass - must never be treated as a
+      // brand-new create target; it always collision-prompts instead, in
+      // both modes - see Fix 004 Correction 7.B.
+      if (data.folder_mode === "space") {
           SP.collisionFolder = folder;
+          SP.collisionData = data;
           SP.showOnly("space-collision-prompt");
           document.getElementById("space-collision-meta").textContent = `${data.space.name} (${data.space.kind})`;
+          SP.showDialog();
+          return;
+      }
+      // An existing untyped Wavefinity design/inventory folder must not be
+      // silently repurposed as this new Space - confirm explicitly, reusing
+      // the already-entered Space setup values - see Fix 004 Correction 7.C.
+      if (data.folder_mode === "design" && data.exists) {
+          SP.pendingConfigureFolder = folder;
+          SP.showOnly("space-existing-inventory-prompt");
+          document.getElementById("space-existing-inventory-meta").textContent =
+              state.runtime.hosted ? folder.name : String(folder);
+          SP.showDialog();
           return;
       }
   }
@@ -659,7 +702,9 @@ SP.create = async () => {
 
   let info;
   if (state.runtime.hosted) {
-    const inventoryText = await WFFileSystem.readText(folder.handle, SP.inventoryFilename()) || "";
+    // Read/write the *selected target's* inventory filename, never the
+    // previously-active folder's - see Fix 004 Correction 7.A.
+    const inventoryText = await WFFileSystem.readText(folder.handle, SP.inventoryFilenameFor(folder)) || "";
     let keepBinDefaults = true;
     let binDefaults = null;
     if (migrating) {
@@ -674,12 +719,15 @@ SP.create = async () => {
       inventory_text: inventoryText, inventory_title: name,
       name, kind, x, y, z, ...(trimSize ? { trim_size: trimSize } : {}),
     });
-    await WFFileSystem.writeText(folder.handle, SP.inventoryFilename(), result.inventory_text);
+    await WFFileSystem.writeText(folder.handle, SP.inventoryFilenameFor(folder), result.inventory_text);
     const space = result.layout.space;
     await SP.writeMetadata(folder.handle, "space", space, true, {
       keep_bin_defaults: keepBinDefaults,
       bin_defaults: binDefaults,
     });
+    // Activate the selected target folder itself, not whatever folder was
+    // previously active - see Fix 004 Correction 7.A.
+    state.browserFolder = folder;
     await WFFileSystem.save("active", { handle: folder.handle });
     info = {
       folder: folder.name, folder_name: folder.name, folder_mode: "space", space,
@@ -749,7 +797,11 @@ SP.designBox = space => {
 // Fix 004 Correction 6.A/E.
 SP.enterSetupFor = (folder, data) => {
     SP.configureData = folder;
-    if (data.space && ["drawer", "box", "portable"].includes(data.space.kind)) {
+    // Includes "surface" for recovery: a Surface created during an earlier
+    // incomplete v4 pass, missing setup_version, must still safely prefill
+    // instead of falling through to the generic Configure-vs-Untyped prompt
+    // - see Fix 004 Correction 7.I.
+    if (data.space && ["drawer", "surface", "box", "portable"].includes(data.space.kind)) {
         const kind = data.space.kind === "box" ? "portable" : data.space.kind;
         SP.showSetup(kind, data.space);
     } else {
@@ -775,11 +827,29 @@ SP.configureFolder = async () => {
 SP.useUntypedFolder = async () => {
     if (state.runtime.hosted) {
         const folder = SP.configureData;
+        const data = await SP.inspectHosted(folder);
+        // Never demote an already-configured typed Space just because "Use
+        // without a Space type" reached it - collision-prompt instead, the
+        // hosted equivalent of the local backend's refuse guard - see
+        // Fix 004 Correction 7.D.
+        if (data.folder_mode === "space") {
+            SP.configureData = null;
+            SP.collisionFolder = folder;
+            SP.collisionData = data;
+            SP.showOnly("space-collision-prompt");
+            document.getElementById("space-collision-meta").textContent = `${data.space.name} (${data.space.kind})`;
+            SP.showDialog();
+            return;
+        }
         await SP.writeMetadata(folder.handle, "design", null, true);
         SP.configureData = null;
         await SP.useHostedFolder(folder);
     } else {
         const data = await api("/api/space/use-untyped", { output: SP.configureData });
+        // Clear the selected-folder setup context now that it has been
+        // used, so a later Create New Space cannot accidentally reuse it -
+        // see Fix 004 Correction 7.F.
+        SP.configureData = null;
         SP.recent = data.recent || [];
         await SP.applyFolder(data.folder);
         SP.close();
@@ -854,7 +924,7 @@ SP.wire = () => {
   SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
   SP.dialog().addEventListener("close", SP.cancelResumeAutoContinue);
   const welcomeCreate = document.getElementById("welcome-create");
-  if (welcomeCreate) welcomeCreate.addEventListener("click", SP.showTypeCards);
+  if (welcomeCreate) welcomeCreate.addEventListener("click", SP.beginCreateNew);
   const welcomeOpen = document.getElementById("welcome-open");
   if (welcomeOpen) welcomeOpen.addEventListener("click", SP.openExisting);
   const welcomeResumeContinue = document.getElementById("welcome-resume-continue");
@@ -868,7 +938,7 @@ SP.wire = () => {
       el.addEventListener("click", () => SP.showSetup(el.dataset.kind));
   });
   const untypedStart = document.getElementById("space-untyped-start");
-  if (untypedStart) untypedStart.addEventListener("click", SP.startUntyped);
+  if (untypedStart) untypedStart.addEventListener("click", () => SP.run(SP.startUntyped));
   const spaceBack = document.getElementById("space-back");
   if (spaceBack) spaceBack.addEventListener("click", SP.showTypeCards);
   const spaceForm = document.getElementById("space-form");
@@ -877,17 +947,40 @@ SP.wire = () => {
     SP.run(SP.create);
   });
   const colOpen = document.getElementById("space-collision-open");
-  if (colOpen) colOpen.addEventListener("click", () => SP.afterPick(SP.collisionFolder));
-  const colChoose = document.getElementById("space-collision-choose");
-  if (colChoose) colChoose.addEventListener("click", () => {
+  if (colOpen) colOpen.addEventListener("click", () => SP.run(async () => {
+    // The collision prompt can be reached by a Space that still needs its
+    // one-time setup pass (needs_setup=true) - route into the same explicit
+    // setup flow rather than opening it as-is - see Fix 004 Correction 7.B.
+    const folder = SP.collisionFolder;
+    const data = SP.collisionData;
     SP.collisionFolder = null;
-    SP.create();
-  });
-  
+    SP.collisionData = null;
+    if (data?.needs_setup) SP.enterSetupFor(folder, data);
+    else await SP.afterPick(folder);
+  }));
+  const colChoose = document.getElementById("space-collision-choose");
+  if (colChoose) colChoose.addEventListener("click", () => SP.run(async () => {
+    SP.collisionFolder = null;
+    SP.collisionData = null;
+    await SP.create();
+  }));
+
+  const existingYes = document.getElementById("space-existing-inventory-yes");
+  if (existingYes) existingYes.addEventListener("click", () => SP.run(async () => {
+    SP.configureData = SP.pendingConfigureFolder;
+    SP.pendingConfigureFolder = null;
+    await SP.create();
+  }));
+  const existingNo = document.getElementById("space-existing-inventory-no");
+  if (existingNo) existingNo.addEventListener("click", () => SP.run(async () => {
+    SP.pendingConfigureFolder = null;
+    await SP.create();
+  }));
+
   const confYes = document.getElementById("space-configure-yes");
   if (confYes) confYes.addEventListener("click", SP.configureFolder);
   const confNo = document.getElementById("space-configure-no");
-  if (confNo) confNo.addEventListener("click", SP.useUntypedFolder);
+  if (confNo) confNo.addEventListener("click", () => SP.run(SP.useUntypedFolder));
 
   const welcomeRecent = document.getElementById("welcome-recent");
   if (welcomeRecent) welcomeRecent.addEventListener("click", event => {
@@ -1029,7 +1122,7 @@ SP.editSpace = () => {
 
 SP.newDrawerSpace = () => {
     if (!state.activeSpace) return;
-    SP.configureData = null; // Ensure we ask for a new folder
+    SP.clearSetupContext(); // Ensure we ask for a new folder, not stale state
     SP.showSetup("drawer", state.activeSpace);
     // Remove name for new
     document.getElementById("space-name").value = "";
@@ -1074,8 +1167,28 @@ SP.updateSpace = async () => {
     }
 
     if (state.runtime.hosted) {
-        state.activeSpace = Object.assign({}, state.activeSpace, { name: name, x: x, y: y, z: z }, trimSize ? { trim_size: trimSize } : {});
-        await SP.writeMetadata(state.browserFolder.handle, "space", state.activeSpace, true);
+        // Mirror local update semantics: the inventory's own layout.space is
+        // authoritative on reopen, so it must be updated together with
+        // metadata, through the same backend validation as local Edit -
+        // see Fix 004 Correction 7.E.
+        const folder = state.browserFolder;
+        const inventoryText = await WFFileSystem.readText(folder.handle, SP.inventoryFilenameFor(folder)) || "";
+        const result = await api("/api/space/configure-text", {
+          inventory_text: inventoryText, inventory_title: name,
+          name, kind: state.activeSpace.kind, x, y, z,
+          ...(trimSize ? { trim_size: trimSize } : {}),
+        });
+        await WFFileSystem.writeText(folder.handle, SP.inventoryFilenameFor(folder), result.inventory_text);
+        const space = result.layout.space;
+        const { current } = await SP.readMetadata(folder.handle);
+        const currentState = SP.classifyMetadata(current);
+        const keep = currentState.status === "space" ? currentState.keep_bin_defaults : true;
+        const defaults = currentState.status === "space" ? currentState.bin_defaults : null;
+        await SP.writeMetadata(folder.handle, "space", space, true, {
+          keep_bin_defaults: keep,
+          bin_defaults: defaults,
+        });
+        state.activeSpace = space;
     } else {
         const data = await api("/api/space/update", {
           output: state.output, name: name, x: x, y: y, z: z,
@@ -1129,11 +1242,11 @@ SP.crossTypeCheck = (designType) => {
             };
             
             const onContinue = () => { cleanup(); resolve(true); };
-            const onNew = () => { 
-                cleanup(); 
-                SP.configureData = null;
-                SP.showSetup(targetKind); 
-                resolve(false); 
+            const onNew = () => {
+                cleanup();
+                SP.clearSetupContext();
+                SP.showSetup(targetKind);
+                resolve(false);
             };
             
             btnContinue.addEventListener("click", onContinue);

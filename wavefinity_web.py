@@ -2128,6 +2128,9 @@ def base_trim_joint_test_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Hosted equivalent of a genuinely new typed Space - never accepts
+    legacy "box"; that only ever comes from configure_space_text_payload's
+    migration path (see Fix 004 Correction 7.H)."""
     raw_def = {
         "name": payload.get("name"), "kind": payload.get("kind"),
         "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z"),
@@ -2137,7 +2140,7 @@ def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return configure_space_text(
         payload.get("inventory_text") or "",
         title=str(payload.get("inventory_title") or payload.get("name") or "Wavefinity"),
-        raw_def=raw_def, mode="create", allow_legacy=True,
+        raw_def=raw_def, mode="create",
     )
 
 

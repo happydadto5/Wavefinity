@@ -356,14 +356,16 @@ def space_routes(
 
     def configure(payload):
         # A genuinely new typed Space: collision-protected, refuses a folder
-        # that already holds a configured typed Space.
+        # that already holds a configured typed Space. Never accepts legacy
+        # "box" - that only ever comes from the Configure Existing/migration
+        # path below - see Fix 004 Correction 7.H.
         target = folder(payload)
         target.mkdir(parents=True, exist_ok=True)
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
 
-        result = configure_space(target, raw_def=raw_def, mode="create", allow_legacy=True)
+        result = configure_space(target, raw_def=raw_def, mode="create")
         space = result["layout"]["space"]
         _write_metadata(target, "space", space, keep_bin_defaults=True)
         remember(target)
@@ -377,7 +379,10 @@ def space_routes(
         # replaces the Space definition in place and preserves everything
         # else (inventory rows, quantities, placements, drawers, generated
         # parts). Existing keep_bin_defaults/bin_defaults are preserved
-        # rather than reset.
+        # rather than reset. allow_legacy=True lets this path read a legacy
+        # "box" kind during migration, but the actual persisted kind is
+        # whatever the setup form chose (always "portable", never a new
+        # "box" - see Fix 004 Correction 7.H).
         target = folder(payload)
         if not target.is_dir():
             raise ValueError("save folder not found")

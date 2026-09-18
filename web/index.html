@@ -844,9 +844,21 @@
           <button id="space-collision-choose" class="button secondary" type="button">Choose another folder</button>
         </div>
       </div>
+
+      <div id="space-existing-inventory-prompt" hidden>
+        <div class="welcome-header">
+          <h2>Existing Wavefinity folder selected</h2>
+        </div>
+        <p class="welcome-lead">This folder already has Wavefinity designs, but it isn't set up as a Space yet.</p>
+        <p id="space-existing-inventory-meta" class="muted"></p>
+        <div class="welcome-actions">
+          <button id="space-existing-inventory-yes" class="button primary" type="button">Configure this existing folder as this Space</button>
+          <button id="space-existing-inventory-no" class="button secondary" type="button">Choose another folder</button>
+        </div>
+      </div>
     </dialog>
 
-    <dialog id="cross-type-warning-dialog" class="welcome-dialog" aria-modal="true" hidden>
+    <dialog id="cross-type-warning-dialog" class="welcome-dialog" aria-modal="true">
       <div class="welcome-header">
         <h2>Space kind mismatch</h2>
       </div>
