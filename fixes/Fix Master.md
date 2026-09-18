@@ -34,4 +34,5 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Fix file:** `/fixes/fix-006.md`
 - **Planning thread:** `Portable Space Identity Plan #6`
 - **Planned implementation thread:** `Portable Space Identity Imp #6`
-- **Notes:** Fully specified, but implementation is blocked until Fix 004 is complete on `origin/main`. Adds stable Space IDs, a per-user Space registry, rename recovery, and a folder-name-independent inventory filename.
+- **Implementation branch:** `fix6`
+- **Notes:** Fully specified, but implementation is blocked until Fix 004 is complete on `origin/main`. Fix 006 is the first fix using the per-fix branch workflow: after Fix 004 is accepted on `main`, create `fix6` from that current `origin/main` and perform all implementation/correction work there until outside review approves merge. Adds stable Space IDs, a per-user Space registry, rename recovery, and a folder-name-independent inventory filename.
