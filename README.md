@@ -166,11 +166,23 @@ instructions needed to perform that work.
 - **User is NOT a programmer**: Avoid code jargon, technical implementation details, and long explanations unless explicitly asked.
 - **Show progress**: Give the user a clear, general sense of progress by stating the steps in layman's terms.
 
-### 2. Commit & push workflow
-- Make all changes needed for one coherent task.
-- Review the diff once.
-- Commit once and push to cloud (`origin/main`) after every completed task so the live hosted app ([Wavefinity on Render](https://wavefinity.onrender.com/)) stays up to date.
-- Avoid micro-checkpoint churn.
+### 2. Branch, commit & push workflow
+
+Starting with **Fix 6**, Help Code implementation uses one branch per fix.
+
+- `main` is the accepted implementation line. Do not perform Help Code implementation directly on `main`.
+- Each fix uses a branch named exactly `fixN`, using the unpadded fix number: `fix6`, `fix9`, `fix10`, etc.
+- Before implementation, fetch `origin` and make sure the fix branch starts from the intended current `origin/main`. If a prerequisite fix is not yet complete on `main`, STOP rather than implementing against an incomplete base.
+- Coding agents work only on the assigned `fixN` branch. Never commit implementation work directly to `main`, force-push `main`, reset/rewrite `main`, or merge the fix into `main` themselves unless the Help Code handoff explicitly says the outside review is complete and authorizes that merge.
+- Make all changes needed for one coherent task, inspect the diff once, commit coherently, and push to `origin/fixN`. Avoid micro-checkpoint churn.
+- ChatGPT's outside completion review compares `fixN` against the then-current `main`.
+- If review returns **NO — NOT FULLY DONE**, continue corrections on the same `fixN` branch and push them there.
+- If review returns **YES — DONE**, merge the accepted fix into `main`, preferably as one squash-merged logical commit such as `Fix 006: <title>`, then delete the temporary fix branch when appropriate.
+- The permanent Fix Master ledger remains on `main`; completed individual fix files may still be deleted under the Help Code lifecycle.
+- If two active fixes touch the same files, do not blindly merge both. After the first fix reaches `main`, update the other branch from the new `main`, deliberately resolve any overlap/conflict, and have that updated branch reviewed against the new `main`.
+- If multiple local coding agents are active at once, do not make them share one working directory while switching branches; use separate clones or Git worktrees.
+
+The hosted app tracks `main`; work on a fix branch is intentionally isolated from the accepted/live line until outside review approves it.
 
 ### 3. Fast vibe-coding & testing policy
 
