@@ -1205,8 +1205,89 @@ dialog:not([open]) { display: none; }
 .space-size[hidden] { display: none; }
 .space-note { margin: 8px 0 0; min-height: 1.4em; font-size: 12px; color: var(--muted); }
 .space-buttons { justify-content: flex-end; margin-top: 16px; }
+.type-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+  margin-top: 4px;
+}
+.type-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, transform .05s;
+}
+.type-card:hover {
+  border-color: var(--teal);
+  box-shadow: 0 8px 20px rgba(30, 51, 61, .10);
+}
+.type-card:active {
+  transform: translateY(1px);
+}
+.type-card:focus-visible {
+  outline: 3px solid rgba(20, 108, 112, .28);
+  outline-offset: 2px;
+}
+.type-card-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  object-position: center;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+.type-card h3 {
+  margin: 12px 14px 4px;
+  font-size: 15px;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.type-card p {
+  flex: 1;
+  margin: 0 14px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
 @media (max-width: 620px) {
   .welcome-steps, .space-kinds, .space-size { grid-template-columns: 1fr; }
+  .type-cards {
+    grid-template-columns: 1fr;
+  }
+  .type-card {
+    display: grid;
+    grid-template-columns: minmax(116px, 36%) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    padding: 0;
+  }
+  .type-card-image {
+    grid-row: 1 / span 2;
+    width: 100%;
+    height: 100%;
+    min-height: 110px;
+    aspect-ratio: auto;
+    object-fit: cover;
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
+  }
+  .type-card h3 {
+    margin: 12px 12px 3px;
+  }
+  .type-card p {
+    margin: 0 12px 12px;
+  }
 }
 .about-dialog-content {
   overflow-y: auto;
