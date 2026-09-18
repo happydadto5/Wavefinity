@@ -5,12 +5,14 @@
 const SP = { recent: [], setup: null, busy: false, resume: null, resumeTimer: null };
 const RESUME_AUTOCONTINUE_SECONDS = 10;
 const SP_KINDS = {
+  portable: { icon: "🧰", label: "Portable Storage" },
+  surface: { icon: "🔲", label: "Surface" },
   drawer: { icon: "🗄️", label: "Drawer" },
   box: { icon: "📦", label: "Box" },
 };
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
-const FOLDER_METADATA_VERSION = 3;
+const FOLDER_METADATA_VERSION = 4;
 
 const spSame = (a, b) => {
   const tidy = path => String(path || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -21,7 +23,7 @@ SP.dialog = () => $("#welcome-dialog");
 SP.close = () => { if (SP.dialog().open) SP.dialog().close(); };
 SP.showOnly = id => {
   SP.cancelResumeAutoContinue();
-  ["welcome-home", "welcome-resume", "space-optional", "space-unsupported", "space-form"]
+  ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-form", "space-configure-prompt"]
     .forEach(one => { $("#" + one).hidden = one !== id; });
 };
 SP.showDialog = () => { if (!SP.dialog().open) SP.dialog().showModal(); };
@@ -89,7 +91,7 @@ SP.readMetadata = async handle => {
 };
 
 SP.validSpace = raw => {
-  if (!raw || !["drawer", "box"].includes(raw.kind)) return null;
+  if (!raw || !["drawer", "surface", "portable", "box"].includes(raw.kind)) return null;
   const space = {
     kind: raw.kind,
     name: String(raw.name || "").trim(),
@@ -422,12 +424,6 @@ SP.changeFolderThenSetup = () => SP.run(async () => {
 
 // ------------------------------------------------------------ welcome/manage
 
-SP.showHome = () => {
-  SP.showOnly("welcome-home");
-  SP.renderRecent();
-  SP.showDialog();
-};
-
 SP.renderRecent = () => {
   const list = $("#welcome-recent");
   if (!SP.recent.length) {
@@ -521,62 +517,93 @@ SP.open = () => {
 
 // ------------------------------------------------------------ setup
 
-SP.showSetup = () => {
-  SP.showOnly("space-form");
-  SP.setup = { folder: state.output, folder_name: state.browserFolder?.name || String(state.output).split(/[\\/]/).pop() };
-  $("#space-folder").textContent = SP.setup.folder_name;
-  $("#space-folder").title = state.output;
-  $("#space-name").value = SP.setup.folder_name || "";
-  $$('input[name="space-kind"]').forEach(radio => { radio.checked = radio.value === "drawer"; });
-  ["x", "y", "z"].forEach(axis => { $("#space-" + axis).value = ""; });
-  $("#space-keep-defaults").checked = true;
-  $("#space-error").hidden = true;
-  SP.syncSetup();
+
+SP.showHome = () => {
+  SP.showOnly("welcome-home");
+  SP.renderRecent();
+  const hasRecent = SP.recent.length > 0;
+  document.getElementById("welcome-recent-container").hidden = !hasRecent;
   SP.showDialog();
-  $("#space-name").focus();
-  $("#space-name").select();
 };
 
-SP.syncSetup = () => {
-  const kind = SP.kind();
-  const labels = kind === "box"
-    ? ["Inside width (X)", "Inside depth (Y)", "Inside height (Z)"]
-    : ["Inside width (X)", "Inside depth (Y)", "Inside height (Z)"];
-  ["#space-x-label", "#space-y-label", "#space-z-label"].forEach((sel, i) => { $(sel).textContent = labels[i]; });
-  $("#space-create").textContent = kind === "box" ? "Create Space and design the box" : "Enable Space planning";
-  SP.noteSize();
+SP.showTypeCards = () => {
+  SP.showOnly("space-type-cards");
+  SP.showDialog();
 };
 
-SP.noteSize = () => {
-  const kind = SP.kind();
-  const [x, y] = SP.readSize();
-  let note = kind === "drawer"
-    ? "Measure the inside dimensions of the drawer."
-    : "These are the usable inside dimensions of the storage box.";
-  if (kind === "box" && x > 0 && y > 0 && (SP.snap(x) !== x || SP.snap(y) !== y)) {
-    note = `Box insides use ${state.catalog?.base_unit || 8} mm steps, so this becomes ${fmt(SP.snap(x))} × ${fmt(SP.snap(y))} mm.`;
+SP.showSetup = (kind) => {
+  SP.showOnly("space-form");
+  SP.setupKind = kind;
+  document.querySelectorAll(".space-type-fields").forEach(el => el.hidden = true);
+  const field = document.getElementById(`space-fields-${kind}`);
+  if (field) field.hidden = false;
+  document.getElementById("space-name").value = "";
+  document.getElementById("space-error").hidden = true;
+  document.getElementById("space-note").textContent = "";
+  if (kind === 'drawer') {
+      document.getElementById('drawer-x').value = '';
+      document.getElementById('drawer-y').value = '';
+      document.getElementById('drawer-z').value = '';
+  } else if (kind === 'surface') {
+      document.getElementById('surface-x').value = '';
+      document.getElementById('surface-y').value = '';
+  } else if (kind === 'portable') {
+      document.getElementById('portable-x').value = '';
+      document.getElementById('portable-y').value = '';
+      document.getElementById('portable-z').value = '';
   }
-  $("#space-note").textContent = note;
+  SP.showDialog();
 };
 
-SP.fail = (message, selector) => {
-  $("#space-error").textContent = message;
-  $("#space-error").hidden = false;
-  $(selector)?.focus();
+SP.startUntyped = async () => {
+  const folder = await SP.pickFolder();
+  if (!folder) return;
+  if (state.runtime.hosted) {
+      await SP.useHostedFolder(folder);
+  } else {
+      const data = await api("/api/space/use-untyped", { output: folder });
+      SP.recent = data.recent || [];
+      await SP.applyFolder(data.folder);
+      SP.close();
+  }
 };
 
 SP.create = async () => {
-  const kind = SP.kind();
-  const name = $("#space-name").value.trim();
-  let [x, y, z] = SP.readSize();
-  const keepBinDefaults = $("#space-keep-defaults").checked;
+  const kind = SP.setupKind;
+  const name = document.getElementById("space-name").value.trim();
   if (!name) return SP.fail("Give the Space a name.", "#space-name");
-  if (![x, y, z].every(value => Number.isFinite(value) && value > 0)) return SP.fail("Enter the inside width, depth and height in mm.", "#space-x");
-  if (kind === "box") [x, y] = [SP.snap(x), SP.snap(y)];
+  
+  let x, y, z;
+  const unit = state.catalog?.base_unit || 8;
+  
+  if (kind === 'drawer') {
+      x = Number(document.getElementById('drawer-x').value);
+      y = Number(document.getElementById('drawer-y').value);
+      z = Number(document.getElementById('drawer-z').value);
+      if (![x, y, z].every(v => Number.isFinite(v) && v > 0)) return SP.fail("Enter valid mm dimensions.", "#drawer-x");
+  } else if (kind === 'surface') {
+      const wUnits = Number(document.getElementById('surface-x').value);
+      const dUnits = Number(document.getElementById('surface-y').value);
+      if (![wUnits, dUnits].every(v => Number.isFinite(v) && v > 0)) return SP.fail("Enter valid unit dimensions.", "#surface-x");
+      x = wUnits * unit;
+      y = dUnits * unit;
+      const trimPreset = document.getElementById('surface-trim').value;
+      z = trimPreset === 'small' ? 6.5 : (trimPreset === 'large' ? 10.0 : 7.5);
+  } else if (kind === 'portable') {
+      let rawX = Number(document.getElementById('portable-x').value);
+      let rawY = Number(document.getElementById('portable-y').value);
+      z = Number(document.getElementById('portable-z').value);
+      if (![rawX, rawY, z].every(v => Number.isFinite(v) && v > 0)) return SP.fail("Enter valid mm dimensions.", "#portable-x");
+      x = SP.snap(rawX);
+      y = SP.snap(rawY);
+  }
+
+  // Folder last
+  const folder = await SP.pickFolder();
+  if (!folder) return;
 
   let info;
   if (state.runtime.hosted) {
-    const folder = state.browserFolder;
     const inventoryText = await WFFileSystem.readText(folder.handle, SP.inventoryFilename()) || "";
     const result = await api("/api/space/create-text", {
       inventory_text: inventoryText, inventory_title: name,
@@ -585,17 +612,17 @@ SP.create = async () => {
     await WFFileSystem.writeText(folder.handle, SP.inventoryFilename(), result.inventory_text);
     const space = result.layout.space;
     await SP.writeMetadata(folder.handle, "space", space, true, {
-      keep_bin_defaults: keepBinDefaults,
+      keep_bin_defaults: true,
       bin_defaults: null,
     });
     await WFFileSystem.save("active", { handle: folder.handle });
     info = {
       folder: folder.name, folder_name: folder.name, folder_mode: "space", space,
-      inventory: true, keep_bin_defaults: keepBinDefaults, bin_defaults: null,
+      inventory: true, keep_bin_defaults: true, bin_defaults: null,
     };
   } else {
     const data = await api("/api/space/create", {
-      output: state.output, name, kind, x, y, z, keep_bin_defaults: keepBinDefaults,
+      output: folder, name, kind, x, y, z, keep_bin_defaults: true,
     });
     SP.recent = data.recent || [];
     info = data.folder;
@@ -603,109 +630,59 @@ SP.create = async () => {
 
   await SP.applyFolder(info);
   SP.close();
-  if (kind === "box") SP.designBox(info.space);
-  else {
-    activatePreviewView("drawer");
-    toast(`${name} is ready. New bins in this folder will be inventoried.`);
-  }
+  
+  if (kind === "portable") SP.designBox(info.space);
+  else if (kind === "surface") SP.designSurface(info.space);
+  else activatePreviewView("drawer");
 };
 
-SP.designBox = space => {
+SP.designSurface = space => {
   activatePreviewView("3d");
-  if (state.designMutationBusy) {
-    toast(`${space.name} is ready. Choose Bin for Bins when you want to design its case.`, false, 7000);
-    return;
-  }
-  if (designHasChanges() && !window.confirm(`Replace the current design with a Bin for Bins case for ${space.name}?`)) {
-    toast(`${space.name} is ready. Choose Bin for Bins when you want to design its case.`, false, 7000);
-    return;
-  }
-  const previous = clone(state.design);
-  clearDraftSelection();
   state.design = clone(state.catalog.defaults.design);
-  state.nestPhoto = null;
-  state.drafts = {};
   const { box, layout } = state.design;
   Object.assign(box, { x: space.x, y: space.y, z: space.z });
-  delete box.stack;
-  delete box.lid;
-  box.b4b = { ...B4B_DEFAULTS, enabled: true };
-  layout.features = [];
-  layout.mode = "fused";
+  box.base_trim = { enabled: true, trim_size: space.z === 6.5 ? 'small' : (space.z === 10.0 ? 'large' : 'medium') };
   state.design.part_name = space.name;
   syncForm();
-  readB4BForm(state.design);
-  enforceB4BMinimumHeight(state.design, false);
-  applyB4BVisibility();
-  changedDesign(previous);
-  toast(`Designing the box for ${space.name}: ${SP.sizeText([space.x, space.y, space.z])} inside.`, false, 6000);
+  toast(`Designing Surface: ${space.name}`);
 };
 
-// ------------------------------------------------------------ startup/wiring
-
-SP.launch = async () => {
-  if (state.runtime.hosted) {
-    try {
-      const saved = await WFFileSystem.load("active");
-      if (saved?.handle && await WFFileSystem.requestReadWritePermission(saved.handle)) {
-        await SP.useHostedFolder({ handle: saved.handle, name: saved.handle.name });
-        return;
-      }
-    } catch (_error) { /* The welcome screen offers a fresh folder choice. */ }
-    SP.showHome();
-    return;
-  }
-
-  if (!state.catalog?.preferences?.output) {
-    SP.showHome();
-    return;
-  }
-  try {
-    const data = await api("/api/space/inspect", { output: state.output });
-    SP.recent = data.recent || [];
-    if (!data.folder?.missing) {
-      await SP.applyFolder(data.folder);
-      if (data.folder.folder_mode === "space") SP.showResume(data.folder);
-      return;
+SP.openExisting = async () => {
+    const folder = await SP.pickFolder();
+    if (!folder) return;
+    let data;
+    if (state.runtime.hosted) {
+        data = await SP.inspectHosted(folder);
+    } else {
+        const resp = await api("/api/space/inspect", { output: folder });
+        data = resp.folder;
     }
-  } catch (error) { toast(error.message, true); }
-  SP.showHome();
+    
+    if (data.needs_setup) {
+        SP.configureData = folder;
+        SP.showOnly("space-configure-prompt");
+        SP.showDialog();
+    } else {
+        await SP.afterPick(folder);
+    }
 };
 
-SP.wire = () => {
-  ["#welcome-close", "#welcome-resume-close", "#space-optional-not-now", "#space-unsupported-close"]
-    .forEach(sel => $(sel)?.addEventListener("click", SP.close));
-  SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
-  SP.dialog().addEventListener("close", SP.cancelResumeAutoContinue);
-  $("#welcome-create").addEventListener("click", () => SP.showSetup("create"));
-  $("#welcome-open").addEventListener("click", () => SP.chooseFolder("open"));
-  $("#space-optional-setup").addEventListener("click", SP.showSetup);
-  $("#welcome-resume-continue").addEventListener("click", SP.confirmResume);
-  $("#welcome-resume-switch").addEventListener("click", () => {
-    SP.cancelResumeAutoContinue();
-    SP.chooseFolder();
-  });
-  $("#folder-inventory-toggle")?.addEventListener("change", event => SP.setInventory(event.target.value === "true"));
-  $("#space-folder-change").addEventListener("click", SP.changeFolderThenSetup);
-  $("#space-back").addEventListener("click", SP.offerSpacePlanning);
-  $("#welcome-recent").addEventListener("click", event => {
-    const forget = event.target.closest("[data-forget]");
-    const open = event.target.closest("[data-index]");
-    const one = SP.recent[Number(forget ? forget.dataset.forget : open?.dataset.index)];
-    if (!one) return;
-    if (forget) SP.run(async () => {
-      SP.recent = (await api("/api/space/forget", { output: one.folder })).recent || [];
-      SP.renderRecent();
-    });
-    else SP.run(() => SP.afterPick(one.folder));
-  });
-  $$('input[name="space-kind"]').forEach(radio => radio.addEventListener("change", SP.syncSetup));
-  ["#space-x", "#space-y"].forEach(sel => $(sel).addEventListener("input", SP.noteSize));
-  $("#space-form").addEventListener("submit", event => {
-    event.preventDefault();
-    SP.run(SP.create);
-  });
+SP.configureFolder = async () => {
+    SP.showTypeCards();
 };
+
+SP.useUntypedFolder = async () => {
+    if (state.runtime.hosted) {
+        await SP.useHostedFolder(SP.configureData);
+    } else {
+        const data = await api("/api/space/use-untyped", { output: SP.configureData });
+        SP.recent = data.recent || [];
+        await SP.applyFolder(data.folder);
+        SP.close();
+    }
+};
+
+
 
 const startSpaces = () => {
   SP.wire();
@@ -717,3 +694,52 @@ if (state.ready) {
 } else {
   window.addEventListener("wavefinity:ready", startSpaces, { once: true });
 }
+
+
+SP.wire = () => {
+  document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-form-close, #space-type-cards-close")
+    .forEach(el => el?.addEventListener("click", SP.close));
+  SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
+  SP.dialog().addEventListener("close", SP.cancelResumeAutoContinue);
+  const welcomeCreate = document.getElementById("welcome-create");
+  if (welcomeCreate) welcomeCreate.addEventListener("click", SP.showTypeCards);
+  const welcomeOpen = document.getElementById("welcome-open");
+  if (welcomeOpen) welcomeOpen.addEventListener("click", SP.openExisting);
+  const welcomeResumeContinue = document.getElementById("welcome-resume-continue");
+  if (welcomeResumeContinue) welcomeResumeContinue.addEventListener("click", SP.confirmResume);
+  const welcomeResumeSwitch = document.getElementById("welcome-resume-switch");
+  if (welcomeResumeSwitch) welcomeResumeSwitch.addEventListener("click", () => {
+    SP.cancelResumeAutoContinue();
+    SP.openExisting();
+  });
+  document.querySelectorAll(".type-card").forEach(el => {
+      el.addEventListener("click", () => SP.showSetup(el.dataset.kind));
+  });
+  const untypedStart = document.getElementById("space-untyped-start");
+  if (untypedStart) untypedStart.addEventListener("click", SP.startUntyped);
+  const spaceBack = document.getElementById("space-back");
+  if (spaceBack) spaceBack.addEventListener("click", SP.showTypeCards);
+  const spaceForm = document.getElementById("space-form");
+  if (spaceForm) spaceForm.addEventListener("submit", event => {
+    event.preventDefault();
+    SP.run(SP.create);
+  });
+  
+  const confYes = document.getElementById("space-configure-yes");
+  if (confYes) confYes.addEventListener("click", SP.configureFolder);
+  const confNo = document.getElementById("space-configure-no");
+  if (confNo) confNo.addEventListener("click", SP.useUntypedFolder);
+
+  const welcomeRecent = document.getElementById("welcome-recent");
+  if (welcomeRecent) welcomeRecent.addEventListener("click", event => {
+    const forget = event.target.closest("[data-forget]");
+    const open = event.target.closest("[data-index]");
+    const one = SP.recent[Number(forget ? forget.dataset.forget : open?.dataset.index)];
+    if (!one) return;
+    if (forget) SP.run(async () => {
+      SP.recent = (await api("/api/space/forget", { output: one.folder })).recent || [];
+      SP.renderRecent();
+    });
+    else SP.run(() => SP.afterPick(one.folder));
+  });
+};
