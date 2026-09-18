@@ -178,7 +178,7 @@ Starting with **Fix 6**, Help Code implementation uses one branch per fix.
 - ChatGPT's outside completion review compares `fixN` against the then-current `main`.
 - If review returns **NO — NOT FULLY DONE**, continue corrections on the same `fixN` branch and push them there.
 - If review returns **YES — DONE**, merge the accepted fix into `main`, preferably as one squash-merged logical commit such as `Fix 006: <title>`, then delete the temporary fix branch when appropriate.
-- The permanent Fix Master ledger remains on `main`; completed individual fix files may still be deleted under the Help Code lifecycle.
+- The permanent Fix Master ledger remains on `main` and is maintained there by ChatGPT. Coding agents on `fixN` branches must not edit `/fixes/Fix Master.md`; this avoids guaranteed conflicts between concurrent fix branches. Completed individual fix files may still be deleted under the Help Code lifecycle.
 - If two active fixes touch the same files, do not blindly merge both. After the first fix reaches `main`, update the other branch from the new `main`, deliberately resolve any overlap/conflict, and have that updated branch reviewed against the new `main`.
 - If multiple local coding agents are active at once, do not make them share one working directory while switching branches; use separate clones or Git worktrees.
 
