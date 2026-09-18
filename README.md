@@ -145,6 +145,22 @@ supplies the font outlines for floor labels.
 
 All instructions for coding agents (OpenAI, Anthropic, Google) and human contributors are centralized here. Do not create tool-specific instructions elsewhere.
 
+
+### Development handoff workflow
+
+Wavefinity is developed through a series of handoffs between **chat/planning LLMs**
+and **coding LLMs**. Project-wide rules and architecture live in this
+`README.md`; task-specific implementation instructions live in the
+`/fixes/` folder.
+
+A coding LLM must read this `README.md` for the general project rules and then
+read the requested fix file for the specific work it has been handed. If the
+human says **"read fix4"**, **"read fix 4"**, or uses equivalent shorthand, that
+means the corresponding zero-padded file in `/fixes/` — for example, fix 4
+means `/fixes/fix-004.md`. The human should not need to restate the fix
+instructions in chat; the fix file is the task handoff and should contain the
+instructions needed to perform that work.
+
 ### 1. User communication preferences
 - **Operate in "caveman mode"**: Keep messages simple, plain, and short.
 - **User is NOT a programmer**: Avoid code jargon, technical implementation details, and long explanations unless explicitly asked.
