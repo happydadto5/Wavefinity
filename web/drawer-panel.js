@@ -97,7 +97,6 @@ DP.build = () => {
         <div class="field-grid two">
           <label class="checkbox-row" style="grid-column: 1 / -1" title="Build serpentine springs into the edge spacers to absorb real-world tolerance"><span>Flexible fit (recommended)</span><input id="dl-sp-flexible" type="checkbox" checked></label>
           <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
-          <label>Longest piece <span class="unit">mm</span><input id="dl-sp-max" type="number" min="16" step="1" title="Split anything longer so it fits your print bed"></label>
         </div>
         <div class="dl-action-grid">
           <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the back and right walls">Plan / Update Spacers</button>
@@ -172,9 +171,11 @@ DP.build = () => {
       </div>
     </section>`;
   DP.wire();
-  // The dl-space-info-* buttons above did not exist yet when SP.wire() ran
-  // wireInfoButtons() at startup, so wire them again now that they do.
-  if (typeof wireInfoButtons === "function") wireInfoButtons();
+  // The dl-space-info-* buttons above did not exist at startup, when
+  // SP.wire() wired the normal "space-info" prefix - wire only this
+  // Drawer-panel prefix now that it exists, so neither button gets a
+  // duplicate listener.
+  if (typeof wireInfoButtons === "function") wireInfoButtons("dl-space-info");
   DV.buildOverlay();
   if (state.runtime.hosted) {
     ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print", "#dl-connectors"].forEach(selector => {
@@ -272,8 +273,7 @@ DP.wire = () => {
   setting("#dl-auto-spacers", "auto", "include_spacers", node => node.checked);
   setting("#dl-sp-flexible", "spacers", "flexible", node => node.checked);
   setting("#dl-sp-height", "spacers", "height", node => Math.max(6, dlNum(node.value, 15)));
-  setting("#dl-sp-max", "spacers", "max_length", node => Math.max(16, dlNum(node.value, 250)));
-  
+
   setting("#dl-new-printed", null, "new_bins_printed", node => node.checked);
   $("#dl-auto").addEventListener("click", () => DL.runAuto());
   $("#dl-candidates").addEventListener("click", event => {
@@ -726,8 +726,7 @@ DP.renderStats = () => {
   const spacers = DL.layout.settings.spacers;
   dlSet("#dl-sp-flexible", Boolean(spacers.flexible), "checked");
   dlSet("#dl-sp-height", fmt(spacers.height));
-  dlSet("#dl-sp-max", fmt(spacers.max_length));
-  
+
   const busy = Boolean(DL.busy);
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
   label("#dl-sp-plan", "Plan / Update Spacers", "Planning…", "spacers");

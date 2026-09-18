@@ -32,6 +32,9 @@ const DL = {
   candidateIndex: -1,
   skipped: [],
   autoNotes: [],
+  spacerPlan: null,
+  spacerSelected: new Set(),
+  spacerPlanSignature: null,
   busy: "",              // "auto" | "spacers" | "connectors" | "print" while a request runs
   dirty: false,
   saving: false,
@@ -58,7 +61,7 @@ DL.defaultSettings = () => ({
     mode: "rearrange", height_rule: "strict", height_reach: "column",
     keep_locked: true, include_spacers: false, stack_bins: true,
   },
-  spacers: { flexible: true, height: 15, max_length: 250 },
+  spacers: { flexible: true, height: 15 },
 });
 
 DL.newDrawerId = () => {
@@ -376,10 +379,31 @@ DL.change = (mutate, { history = true } = {}) => {
 
 DL.afterChange = () => {
   DL.dirty = true;
+  DL.clearSpacerPlan();
   if (!DL.layout.settings.autosave) DL.saveState = "idle";
   DL.emit();
   DL.requestReport();
   if (DL.layout.settings.autosave) DL.saveSoon();
+};
+
+// A fingerprint of everything a spacer plan is derived from: the active
+// drawer (placements, dimensions, keepouts, settings) and every bin's
+// size-relevant fields. Kept for reference; DL.clearSpacerPlan() below is
+// the actual invalidation mechanism (proactive, not signature-compared) -
+// see Fix 004 Correction 6.I.
+DL.spacerSignature = () => JSON.stringify([
+  DL.layout.active, DL.drawer(),
+  DL.bins.map(one => [one.id, one.kind, one.x, one.y, one.z, one.stack]),
+]);
+
+// Stale spacer proposals must never survive a layout/inventory change that
+// could invalidate them (placements, dimensions, keepouts, settings, the
+// active drawer, an auto-layout arrangement, or the bin inventory itself).
+// Toggling a candidate's own checkbox must not call this.
+DL.clearSpacerPlan = () => {
+  DL.spacerPlan = null;
+  DL.spacerSelected = new Set();
+  DL.spacerPlanSignature = null;
 };
 
 DL.restore = redo => {
@@ -492,6 +516,8 @@ DL.editBins = async changes => {
     const data = await DL.inventoryCall("/api/drawer/save", payload);
     DL.adopt(data);
     DL.exists = true;
+    // Bin sizes/kinds may have just changed underneath any spacer proposal.
+    DL.clearSpacerPlan();
     const removed = DL.prune();
     if (removed) {
       toast(`${removed} placed cop${removed === 1 ? "y" : "ies"} taken out of the drawers.`);
@@ -675,7 +701,7 @@ DL.planSpacers = () => DL.busyWith("spacers", async () => {
   });
   DL.spacerPlan = result.candidates || [];
   DL.spacerSelected = new Set((result.selected || []).map(c => c.id));
-  DL.spacerPlanSignature = DL.signature();
+  DL.spacerPlanSignature = DL.spacerSignature();
   DL.emit();
 });
 
@@ -714,7 +740,10 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
 
 // Spacers are free, edge-facing placements (no gx) - DL.items()/DL.chains()
 // only cover the grid, so groups are built straight from the active
-// drawer's placements instead.
+// drawer's placements instead. Two inventory rows can share identical
+// geometry (same file/size) - a group carries every member row, not just
+// one representative, and aggregates quantity/printed across all of them -
+// see Fix 004 Correction 6.L.
 DL.spacerPrintGroups = () => {
   const placements = DL.drawer().placements.filter(p => DL.isSpacer(DL.bin(p.bin)));
   const groups = new Map();
@@ -722,41 +751,56 @@ DL.spacerPrintGroups = () => {
     const b = DL.bin(p.bin);
     if (!b) return;
     const key = `${b.file}|${b.x}|${b.y}|${b.z}`;
-    if (!groups.has(key)) groups.set(key, { bin: b, layoutQty: 0 });
-    groups.get(key).layoutQty += 1;
+    if (!groups.has(key)) groups.set(key, { bin: b, memberIds: new Set(), layoutQty: 0 });
+    const group = groups.get(key);
+    group.memberIds.add(b.id);
+    group.layoutQty += 1;
   });
   return Array.from(groups.values()).map(g => {
-    const printed = Number(g.bin.qty) || 0;
-    return { bin: g.bin, qty: g.layoutQty, printed, toPrint: Math.max(0, g.layoutQty - printed) };
+    const members = Array.from(g.memberIds).map(id => DL.bin(id)).filter(Boolean);
+    const printed = members.reduce((sum, one) => sum + (Number(one.qty) || 0), 0);
+    return { bin: g.bin, members, qty: g.layoutQty, printed, toPrint: Math.max(0, g.layoutQty - printed) };
   });
 };
 
+// selection: { [group's representative bin id]: requested copy count }, as
+// built by DP.confirmSpacerPrint() from DL.spacerPrintGroups(). One real
+// file is sent per group; any newly-printed logical copies are then spread
+// across that group's own previously-unprinted member rows, and reprints
+// never increase the logical quantity in the drawer.
 DL.printSelectedSpacers = (selection) => DL.busyWith("print", async () => {
   if (Object.keys(selection).length === 0) return;
-  await api("/api/drawer/print-spacers", {
+  const result = await api("/api/drawer/print-spacers", {
     output: DL.output ?? DL.folder(),
     selection: selection,
     slicer_path: state.slicer?.path || null,
   });
 
+  const groups = DL.spacerPrintGroups();
   const updates = [];
   for (const [id, count] of Object.entries(selection)) {
-    const bin = DL.bin(id);
-    if (bin && count > 0) {
-      const printed = Number(bin.qty) || 0;
-      const layoutQty = DL.drawer().placements.filter(p => p.bin === id).length;
-      // reprints do not increase logical drawer quantity
-      // Only increase qty if printed is less than layoutQty, and we can only increase up to layoutQty.
-      const newPrinted = Math.min(layoutQty, printed + count);
-      if (newPrinted > printed) {
-        updates.push({ id, qty: newPrinted });
-      }
+    if (!(count > 0)) continue;
+    const group = groups.find(g => g.members.some(member => member.id === id));
+    if (!group) continue;
+    let remaining = count;
+    for (const member of group.members) {
+      if (remaining <= 0) break;
+      const ownPrinted = Number(member.qty) || 0;
+      const ownPlaced = DL.drawer().placements.filter(p => p.bin === member.id).length;
+      const ownShortfall = Math.max(0, ownPlaced - ownPrinted);
+      if (ownShortfall <= 0) continue;
+      const grant = Math.min(remaining, ownShortfall);
+      updates.push({ id: member.id, qty: ownPrinted + grant });
+      remaining -= grant;
     }
   }
   if (updates.length > 0) {
     await DL.editBins({ bin_updates: updates });
   }
-  toast("Sent to slicer.");
+  // launch_slicer opens the files but does not itself set Bambu Studio's
+  // per-object copy count - tell the user what to set it to.
+  const lines = Object.entries(result.counts || {}).map(([file, copyCount]) => `${copyCount} × ${file}`);
+  toast(["Opened in Bambu Studio - set copies to:", ...lines].join("\n"), false, 9000);
 });
 
 DL.removeSpacers = () => DL.change(() => {

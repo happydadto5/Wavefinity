@@ -94,6 +94,7 @@ MIN_CLEARANCE = 2.0 * CREST
 MIN_EDGE_SPACER = 1.2           # thinnest edge spacer worth printing, at a wave trough
 MIN_SPACER_HEIGHT = 6.0         # a spacer frame still needs room for its lock bumps
 DEFAULT_SPACER_HEIGHT = 15.0
+SPACER_CONTACT_TARGET = 28.0    # target contact width of a back/right spacer, mm
 RIB_WIDTH = 1.6                 # the X brace inside a spacer: four 0.4 mm lines
 MIN_RIB_SPAN = 10.0             # narrower than this inside, a frame needs no brace
 MIN_CONNECTOR_SEAM = 16.0       # mm of shared wall a connector needs
@@ -901,6 +902,44 @@ def auto_layout(
 # ---------------------------------------------------------------- spacers
 
 
+def _exposed_segments(comp: list[dict[str, Any]], side: str) -> list[tuple[int, int, int]]:
+    """Contiguous exposed boundary segments for one side of a connected
+    component, in grid cells: ``(edge, start, end)`` - the component's own
+    outer edge coordinate (x for "right", y for "back") and the
+    perpendicular ``[start, end)`` cell range it spans.
+
+    A row/column is only ever grouped with its neighbour when both share the
+    exact same edge, so a candidate can never bridge across a step in an
+    L-shaped or notched component - each genuinely separate run of the
+    boundary becomes its own segment.
+    """
+    span: dict[int, int] = {}
+    if side == "right":
+        for item in comp:
+            edge = item["gx"] + item["w"]
+            for row in range(item["gy"], item["gy"] + item["d"]):
+                span[row] = max(span.get(row, edge), edge)
+    else:
+        for item in comp:
+            edge = item["gy"] + item["d"]
+            for col in range(item["gx"], item["gx"] + item["w"]):
+                span[col] = max(span.get(col, edge), edge)
+    if not span:
+        return []
+    ordered = sorted(span)
+    segments: list[tuple[int, int, int]] = []
+    start = prev = ordered[0]
+    edge = span[ordered[0]]
+    for pos in ordered[1:]:
+        if pos == prev + 1 and span[pos] == edge:
+            prev = pos
+            continue
+        segments.append((edge, start, prev + 1))
+        start = prev = pos
+        edge = span[pos]
+    segments.append((edge, start, prev + 1))
+    return segments
+
 
 def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options: dict[str, Any] | None = None) -> dict[str, Any]:
     options = options or {}
@@ -909,7 +948,6 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
     flexible = options.get("flexible", True)
     height = min(drawer["height"], max(MIN_SPACER_HEIGHT, float(options.get("height") or DEFAULT_SPACER_HEIGHT)))
-    max_length = max(2 * UNIT, float(options.get("max_length") or 250.0))
     by_id = {one["id"]: one for one in bins}
     notes: list[str] = []
 
@@ -949,44 +987,56 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
                 
         for comp_idx, comp in enumerate(components):
             comp_area = sum(i["w"] * i["d"] for i in comp)
-            
-            # Right candidates
-            max_x = max(item["gx"] + item["w"] for item in comp)
-            right_items = [i for i in comp if i["gx"] + i["w"] == max_x]
-            min_y = min(i["gy"] for i in right_items)
-            max_y = max(i["gy"] + i["d"] for i in right_items)
-            gap_right = (drawer["width"] - grid["ox"] - (max_x * step)) - wall
-            if gap_right >= MIN_EDGE_SPACER:
-                px = grid["ox"] + max_x * step
-                py = grid["oy"] + min_y * step
-                w = gap_right
-                d = (max_y - min_y) * step
-                cid_right = f"right-{max_x}-{min_y}-{max_y}"
-                score = comp_area / (w * d) if w * d > 0 else 0
-                candidates.append({"id": cid_right, "placements": [{"bin": "spacer", "x": px, "y": py, "w": w, "d": d, "side": "right"}], "score": score, "axis": "x", "comp": comp_idx})
-                
-            # Back candidates
-            max_y_comp = max(item["gy"] + item["d"] for item in comp)
-            back_items = [i for i in comp if i["gy"] + i["d"] == max_y_comp]
-            min_x = min(i["gx"] for i in back_items)
-            max_x_comp = max(i["gx"] + i["w"] for i in back_items)
-            gap_back = (drawer["depth"] - grid["oy"] - (max_y_comp * step)) - wall
-            if gap_back >= MIN_EDGE_SPACER:
-                px = grid["ox"] + min_x * step
-                py = grid["oy"] + max_y_comp * step
-                w = (max_x_comp - min_x) * step
-                d = gap_back
-                cid_back = f"back-{min_x}-{max_x_comp}-{max_y_comp}"
-                score = comp_area / (w * d) if w * d > 0 else 0
-                candidates.append({"id": cid_back, "placements": [{"bin": "spacer", "x": px, "y": py, "w": w, "d": d, "side": "back"}], "score": score, "axis": "y", "comp": comp_idx})
 
-        # Filter overlaps / keepouts
+            def _make_candidate(side, edge, start, end):
+                # A short, deterministic, strategically placed contact
+                # piece - not the whole exposed run - per Fix 004: target
+                # ~28 mm of contact width, clipped to the segment itself
+                # when it is shorter, centred within it.
+                seg_lo = (grid["oy"] if side == "right" else grid["ox"]) + start * step
+                seg_hi = (grid["oy"] if side == "right" else grid["ox"]) + end * step
+                seg_len = seg_hi - seg_lo
+                contact = min(seg_len, SPACER_CONTACT_TARGET)
+                contact_start = seg_lo + (seg_len - contact) / 2.0
+                if side == "right":
+                    gap = (drawer["width"] - grid["ox"] - (edge * step)) - wall
+                    if gap < MIN_EDGE_SPACER or contact < MIN_EDGE_SPACER:
+                        return None
+                    px, py, w, d = grid["ox"] + edge * step, contact_start, gap, contact
+                    cid = f"right-{edge}-{start}-{end}"
+                else:
+                    gap = (drawer["depth"] - grid["oy"] - (edge * step)) - wall
+                    if gap < MIN_EDGE_SPACER or contact < MIN_EDGE_SPACER:
+                        return None
+                    px, py, w, d = contact_start, grid["oy"] + edge * step, contact, gap
+                    cid = f"back-{edge}-{start}-{end}"
+                placement = {"bin": "spacer", "x": px, "y": py, "w": w, "d": d, "side": side}
+                area = w * d
+                score = comp_area / area if area > 0 else 0
+                return {"id": cid, "placements": [placement], "score": score, "axis": "x" if side == "right" else "y", "comp": comp_idx}
+
+            for side in ("right", "back"):
+                for edge, start, end in _exposed_segments(comp, side):
+                    candidate = _make_candidate(side, edge, start, end)
+                    if candidate is not None:
+                        candidates.append(candidate)
+
+        # Reject a candidate that overlaps a keep-out, or another bin/
+        # component along its own physical path to the wall (never bridge
+        # through something real to reach it).
+        item_boxes = [
+            {"x": grid["ox"] + i["gx"] * step, "y": grid["oy"] + i["gy"] * step, "w": i["w"] * step, "d": i["d"] * step}
+            for i in items
+        ]
         valid_cands = []
         for cand in candidates:
             p = cand["placements"][0]
             edge = {"x": p["x"], "y": p["y"], "w": p["w"], "d": p["d"]}
-            if not any(_overlaps(edge, k) for k in drawer["keepouts"]):
-                valid_cands.append(cand)
+            if any(_overlaps(edge, k) for k in drawer["keepouts"]):
+                continue
+            if any(_overlaps(edge, box) for box in item_boxes):
+                continue
+            valid_cands.append(cand)
         candidates = valid_cands
         
         candidates.sort(key=lambda c: c["score"], reverse=True)
@@ -1054,39 +1104,59 @@ def _serpentine_flexure(w, d, side, flexible=True):
         horiz2 = shape_box(mid_x, d - pad_wall - web, w - web, d - pad_wall)
         return unary_union([bot_pad, top_pad, left_web, right_web, mid_web, horiz1, horiz2])
 
+def spacer_filename(side: str, w: float, d: float, height: float, flexible: bool) -> str:
+    """Deterministic from the real, unsnapped geometry - two decimals so
+    distinct gaps (12.1 vs 12.9 mm) never collide, and Flexible/Rigid never
+    share a name merely because their envelope came out the same size."""
+    variant = "Flex" if flexible else "Rigid"
+    return f"Spacer {variant} {side.capitalize()} {w:.2f}x{d:.2f}x{height:.2f}.3mf"
+
+
 def generate_spacers(request: dict[str, Any], output_dir: Path | str, generate_file: Callable[[str, trimesh.Trimesh], Path]) -> dict[str, Any]:
     options = request.get("options") or {}
     plan = plan_spacers(request.get("drawer") or {}, request.get("bins") or [], options)
     requested_ids = set(request.get("selected") or [])
     height = plan["height"]
     drawer = plan["drawer"]
-    
+    flexible = bool(options.get("flexible", True))
+
     generated = []
     notes = []
-    
+
     for cand in plan["candidates"]:
         cid = cand["id"]
         if cid in requested_ids:
             p = cand["placements"][0]
             side = p["side"]
-            w = p["w"]
-            d = p["d"]
-            
-            poly = _serpentine_flexure(w, d, side, options.get("flexible", True))
-            if poly.area == w * d:
+            # placement envelope/gap: where the measured gap lies in the
+            # drawer - the free placement x/y/w/d keeps describing this.
+            gap_w = p["w"]
+            gap_d = p["d"]
+
+            poly = _serpentine_flexure(gap_w, gap_d, side, flexible)
+            # printed physical part size: the actual generated mesh target,
+            # including the flexible preload when a real flexure was built -
+            # never the same thing as the measured gap above.
+            minx, miny, maxx, maxy = poly.bounds
+            part_w, part_d = maxx - minx, maxy - miny
+            rigid_fallback = flexible and math.isclose(part_w, gap_w, abs_tol=1e-6) and math.isclose(part_d, gap_d, abs_tol=1e-6)
+            if rigid_fallback:
                 notes.append(f"Gap too short for flexure; generated rigid spacer for {side}.")
-                
+
             mesh = _extrude_polygon(poly, height)
-            file_name = f"Spacer_{side}_{int(w)}x{int(d)}x{int(height)}.3mf"
+            is_flexible = flexible and not rigid_fallback
+            file_name = spacer_filename(side, part_w, part_d, height, is_flexible)
             out_path = generate_file(file_name, mesh)
-            
+
             generated.append({
                 "id": cid,
                 "file": file_name,
                 "placements": cand["placements"],
-                "w": w, "d": d, "h": height, "side": side
+                # actual printed part size - what inventory x/y/z records.
+                "w": part_w, "d": part_d, "h": height, "side": side,
+                "flexible": is_flexible,
             })
-            
+
     return {"generated": generated, "notes": notes}
 
 
@@ -1236,9 +1306,12 @@ def drawer_routes(
         if hosted:
             raise ValueError("Hosted spacer files are not available yet.")
         with geometry_lock:
+            # Authoritative, like generation: the browser need not (and the
+            # normal UI does not) send inventory rows for planning.
+            inv = load_inventory(folder(payload))
             return plan_spacers(
                 find_drawer(payload["layout"], payload.get("drawer_id")),
-                payload.get("bins") or [], payload.get("options"),
+                inv["bins"], payload.get("options"),
             )
 
     def spacers_generate(payload):
@@ -1271,7 +1344,7 @@ def drawer_routes(
                     "id": new_id,
                     "kind": "spacer",
                     "boundary": "edge",
-                    "name": "Flexible Spacer" if options.get("flexible", True) else "Rigid Spacer",
+                    "name": "Flexible Spacer" if gen.get("flexible") else "Rigid Spacer",
                     # Inventory x/y/z are physical mm, never Wavefinity unit counts.
                     "x": gen["w"], "y": gen["d"], "z": gen["h"],
                     "qty": 1,

@@ -2141,6 +2141,22 @@ def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def configure_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Hosted Configure Existing / migration: never rejected merely because
+    the browser-owned inventory text already carries a layout.space."""
+    raw_def = {
+        "name": payload.get("name"), "kind": payload.get("kind"),
+        "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z"),
+    }
+    if "trim_size" in payload:
+        raw_def["trim_size"] = payload["trim_size"]
+    return configure_space_text(
+        payload.get("inventory_text") or "",
+        title=str(payload.get("inventory_title") or payload.get("name") or "Wavefinity"),
+        raw_def=raw_def, mode="update", allow_legacy=True,
+    )
+
+
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("join_mode") == "base_trim":
         raise ValueError("Side connectors are turned off while bins are set to use a Base Trim.")
@@ -2407,6 +2423,7 @@ POST_ROUTES = {
     "/api/browse-slicer-path": browse_slicer_path_payload,
     "/api/show-log": show_log_payload,
     "/api/space/create-text": create_space_text_payload,
+    "/api/space/configure-text": configure_space_text_payload,
 }
 POST_ROUTES.update({
     **drawer_routes(

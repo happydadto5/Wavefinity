@@ -2,7 +2,7 @@
 
 // A save folder is always available for normal design work. Space planning is
 // an optional capability layered on that folder, never a design type.
-const SP = { recent: [], setup: null, busy: false, resume: null, resumeTimer: null };
+const SP = { recent: [], setup: null, busy: false, resume: null, resumeTimer: null, isUpdate: false };
 const RESUME_AUTOCONTINUE_SECONDS = 10;
 const SP_KINDS = {
   portable: { icon: "🧰", label: "Portable Storage" },
@@ -13,6 +13,7 @@ const SP_KINDS = {
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
 const FOLDER_METADATA_VERSION = 4;
+const SPACE_SETUP_VERSION = 1;
 
 const spSame = (a, b) => {
   const tidy = path => String(path || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -109,14 +110,17 @@ SP.classifyMetadata = record => {
   }
   const current = record.data;
   if (Number(current.version) > FOLDER_METADATA_VERSION) return { status: "unsupported" };
-  if (![2, FOLDER_METADATA_VERSION].includes(current.version)) return { status: "invalid" };
-  const needsMigration = current.version === 2;
+  // v2 and v3 are readable migration inputs, same as the local backend
+  // (organizer_spaces._folder_state); only v4 is the current, fully-set-up shape.
+  if (![2, 3, FOLDER_METADATA_VERSION].includes(current.version)) return { status: "invalid" };
+  const needsMigration = current.version !== FOLDER_METADATA_VERSION || current.setup_version !== SPACE_SETUP_VERSION;
   const explicitInventory = typeof current.inventory === "boolean" ? current.inventory : null;
   if (current.folder_mode === "design") return { status: "design", inventory: explicitInventory, needsMigration };
   if (current.folder_mode === "space") {
     const space = SP.validSpace(current.space);
     if (!space) return { status: "invalid-space" };
-    if (needsMigration) {
+    if (current.version === 2) {
+      // v2 predates keep_bin_defaults/bin_defaults entirely.
       return { status: "space", space, inventory: true, keep_bin_defaults: true, bin_defaults: null, needsMigration: true };
     }
     const keep = current.keep_bin_defaults === undefined ? true : current.keep_bin_defaults;
@@ -124,7 +128,7 @@ SP.classifyMetadata = record => {
     if (typeof keep !== "boolean" || (defaults !== null && (typeof defaults !== "object" || Array.isArray(defaults)))) {
       return { status: "invalid" };
     }
-    return { status: "space", space, inventory: true, keep_bin_defaults: keep, bin_defaults: defaults, needsMigration: false };
+    return { status: "space", space, inventory: true, keep_bin_defaults: keep, bin_defaults: defaults, needsMigration };
   }
   return { status: "invalid" };
 };
@@ -149,7 +153,10 @@ SP.metadataError = status => {
 SP.writeMetadata = async (handle, mode, space = null, inventory = true, changes = {}) => {
   if (!handle) return;
   // A Space's layout depends on the inventory, so it is never optional here.
-  const metadata = { version: FOLDER_METADATA_VERSION, folder_mode: mode, inventory: mode === "space" ? true : Boolean(inventory) };
+  const metadata = {
+    version: FOLDER_METADATA_VERSION, setup_version: SPACE_SETUP_VERSION,
+    folder_mode: mode, inventory: mode === "space" ? true : Boolean(inventory),
+  };
   if (mode === "space" && space) {
     let keep = true;
     let defaults = null;
@@ -197,6 +204,11 @@ SP.addInventoryBin = async entry => {
   }
 };
 
+// Read-only classification of a hosted folder's Space/Design status. Never
+// writes metadata or inventory - inspecting a folder must never silently
+// onboard/migrate it (see Fix 004 Correction 6.E). Only an explicit
+// Create/Configure Existing/Use Untyped action may write - see SP.create()
+// and SP.useUntypedFolder().
 SP.inspectHosted = async folder => {
   const { current, legacy } = await SP.readMetadata(folder.handle);
   const currentState = SP.classifyMetadata(current);
@@ -238,59 +250,52 @@ SP.inspectHosted = async folder => {
   let inventory = true;
   let keepBinDefaults = true;
   let binDefaults = null;
-  let shouldWriteMetadata = false;
+  let needsSetup = false;
   if (genuineInventorySpace) {
     mode = "space";
     space = inventorySpace;
-    shouldWriteMetadata = ["missing", "design", "space"].includes(currentState.status);
     if (currentState.status === "space") {
       keepBinDefaults = currentState.keep_bin_defaults;
       binDefaults = currentState.bin_defaults;
+      // Already valid current v4/setup_version-1 metadata: the inventory's
+      // own explicit layout.space is only the values source here, not a
+      // reason to force setup again - mirrors organizer_spaces._folder_state.
+      needsSetup = currentState.needsMigration;
+    } else {
+      needsSetup = true;
     }
   } else if (currentState.status === "space") {
     mode = "space";
     space = currentState.space;
     keepBinDefaults = currentState.keep_bin_defaults;
     binDefaults = currentState.bin_defaults;
-    shouldWriteMetadata = currentState.needsMigration;
+    needsSetup = currentState.needsMigration;
   } else if (legacyState.status === "space") {
     // A stale or absent current "design" marker must not hide a genuine
     // legacy Space identity - a current "design" marker is not a positive
     // Space identity, only current "space" metadata (handled above) is.
     mode = "space";
     space = legacyState.space;
-    shouldWriteMetadata = true;
+    needsSetup = true;
   } else if (currentState.status === "design") {
     mode = "design";
     // A folder saved before this preference existed keeps inventory on by default.
     inventory = currentState.inventory === null ? true : currentState.inventory;
-    shouldWriteMetadata = currentState.needsMigration || currentState.inventory === null;
+    needsSetup = currentState.needsMigration || currentState.inventory === null;
   } else if (legacyState.status === "design") {
     mode = "design";
-    shouldWriteMetadata = true;
+    needsSetup = true;
   } else if (inventorySpace) {
     // No authoritative metadata anywhere: fall back to the layout-only
     // inference (always "drawer" - there is no Box concept for it to recover).
     mode = "space";
     space = inventorySpace;
-    shouldWriteMetadata = true;
+    needsSetup = true;
   } else {
     mode = "design";
-    shouldWriteMetadata = true;
+    needsSetup = true;
   }
 
-  if (mode === "space" && space && !genuineInventorySpace) {
-    const result = await api("/api/space/create-text", {
-      inventory_text: inventoryText,
-      inventory_title: space.name || folder.name,
-      ...space,
-    });
-    await WFFileSystem.writeText(folder.handle, `${folder.name} bins.md`, result.inventory_text);
-  }
-  if (shouldWriteMetadata) await SP.writeMetadata(folder.handle, mode, space, inventory, {
-    keep_bin_defaults: keepBinDefaults,
-    bin_defaults: binDefaults,
-  });
   return {
     folder: folder.name,
     folder_name: folder.name,
@@ -300,6 +305,8 @@ SP.inspectHosted = async folder => {
     keep_bin_defaults: mode === "space" ? keepBinDefaults : false,
     bin_defaults: mode === "space" ? binDefaults : null,
     missing: false,
+    needs_setup: needsSetup,
+    inventory_text: inventoryText,
   };
 };
 
@@ -493,11 +500,23 @@ SP.confirmResume = () => {
   activatePreviewView("3d");
 };
 
-SP.offerSpacePlanning = () => {
+// The current folder isn't a typed Space yet (e.g. the user tried to switch
+// to the Drawer view). Route it through the same explicit setup flow as
+// Open Existing/Configure Existing, using only screens that actually exist -
+// the old "Space planning is optional" screen is gone, see Fix 004
+// Correction 6.B.
+SP.offerSpacePlanning = async () => {
   if (!SP.hasFolder()) return SP.showHome();
   if (!SP.canPersistSpace()) return SP.showFolderAccessNeeded();
-  SP.showOnly("space-optional");
-  SP.showDialog();
+  try {
+    const folder = state.runtime.hosted ? state.browserFolder : state.output;
+    const data = state.runtime.hosted
+        ? await SP.inspectHosted(folder)
+        : (await api("/api/space/inspect", { output: folder })).folder;
+    SP.enterSetupFor(folder, data);
+  } catch (error) {
+    toast(error.message, true, 6000);
+  }
 };
 
 SP.showFolderAccessNeeded = () => {
@@ -533,8 +552,13 @@ SP.showTypeCards = () => {
   SP.showDialog();
 };
 
-SP.showSetup = (kind, prefillSpace = null) => {
+SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   SP.showOnly("space-form");
+  // Every entry into setup explicitly states whether it is editing the
+  // current Space, so a stale Edit that was backed out of can never make a
+  // later Create/New Drawer Space silently call SP.updateSpace() - see
+  // Fix 004 Correction 6.F.
+  SP.isUpdate = update;
   SP.setupKind = kind;
   document.querySelectorAll(".space-type-fields").forEach(el => el.hidden = true);
   const field = document.getElementById(`space-fields-${kind}`);
@@ -611,8 +635,12 @@ SP.create = async () => {
   // Folder last
   const folder = SP.configureData || await SP.pickFolder();
   if (!folder) return;
+  // A folder already selected via SP.configureData (Open Existing ->
+  // needs setup, or Configure Existing) is an explicit migration of that
+  // folder, not a brand-new typed Space - see Fix 004 Correction 6.D.
+  const migrating = Boolean(SP.configureData);
 
-  if (!SP.configureData) {
+  if (!migrating) {
       let data;
       if (state.runtime.hosted) {
           data = await SP.inspectHosted(folder);
@@ -632,23 +660,33 @@ SP.create = async () => {
   let info;
   if (state.runtime.hosted) {
     const inventoryText = await WFFileSystem.readText(folder.handle, SP.inventoryFilename()) || "";
-    const result = await api("/api/space/create-text", {
+    let keepBinDefaults = true;
+    let binDefaults = null;
+    if (migrating) {
+      const { current } = await SP.readMetadata(folder.handle);
+      const currentState = SP.classifyMetadata(current);
+      if (currentState.status === "space") {
+        keepBinDefaults = currentState.keep_bin_defaults;
+        binDefaults = currentState.bin_defaults;
+      }
+    }
+    const result = await api(migrating ? "/api/space/configure-text" : "/api/space/create-text", {
       inventory_text: inventoryText, inventory_title: name,
       name, kind, x, y, z, ...(trimSize ? { trim_size: trimSize } : {}),
     });
     await WFFileSystem.writeText(folder.handle, SP.inventoryFilename(), result.inventory_text);
     const space = result.layout.space;
     await SP.writeMetadata(folder.handle, "space", space, true, {
-      keep_bin_defaults: true,
-      bin_defaults: null,
+      keep_bin_defaults: keepBinDefaults,
+      bin_defaults: binDefaults,
     });
     await WFFileSystem.save("active", { handle: folder.handle });
     info = {
       folder: folder.name, folder_name: folder.name, folder_mode: "space", space,
-      inventory: true, keep_bin_defaults: true, bin_defaults: null,
+      inventory: true, keep_bin_defaults: keepBinDefaults, bin_defaults: binDefaults,
     };
   } else {
-    const data = await api("/api/space/create", {
+    const data = await api(migrating ? "/api/space/configure" : "/api/space/create", {
       output: folder, name, kind, x, y, z, keep_bin_defaults: true,
       ...(trimSize ? { trim_size: trimSize } : {}),
     });
@@ -704,29 +742,30 @@ SP.designBox = space => {
   toast(`Designing Portable Storage: ${space.name}`);
 };
 
+// Enters the same explicit setup/migration screen for a folder that needs
+// the one-time setup pass: prefilled for a recognized legacy kind, else the
+// Configure-vs-Untyped prompt. Shared by SP.openExisting() and SP.launch()
+// so neither one silently migrates a folder it merely inspected - see
+// Fix 004 Correction 6.A/E.
+SP.enterSetupFor = (folder, data) => {
+    SP.configureData = folder;
+    if (data.space && ["drawer", "box", "portable"].includes(data.space.kind)) {
+        const kind = data.space.kind === "box" ? "portable" : data.space.kind;
+        SP.showSetup(kind, data.space);
+    } else {
+        SP.showOnly("space-configure-prompt");
+        SP.showDialog();
+    }
+};
+
 SP.openExisting = async () => {
     const folder = await SP.pickFolder();
     if (!folder) return;
-    let data;
-    if (state.runtime.hosted) {
-        data = await SP.inspectHosted(folder);
-    } else {
-        const resp = await api("/api/space/inspect", { output: folder });
-        data = resp.folder;
-    }
-    
-    if (data.needs_setup) {
-        SP.configureData = folder;
-        if (data.space && ["drawer", "box", "portable"].includes(data.space.kind)) {
-             let kind = data.space.kind === "box" ? "portable" : data.space.kind;
-             SP.showSetup(kind, data.space);
-        } else {
-             SP.showOnly("space-configure-prompt");
-             SP.showDialog();
-        }
-    } else {
-        await SP.afterPick(folder);
-    }
+    const data = state.runtime.hosted
+        ? await SP.inspectHosted(folder)
+        : (await api("/api/space/inspect", { output: folder })).folder;
+    if (data.needs_setup) SP.enterSetupFor(folder, data);
+    else await SP.afterPick(folder);
 };
 
 SP.configureFolder = async () => {
@@ -735,7 +774,10 @@ SP.configureFolder = async () => {
 
 SP.useUntypedFolder = async () => {
     if (state.runtime.hosted) {
-        await SP.useHostedFolder(SP.configureData);
+        const folder = SP.configureData;
+        await SP.writeMetadata(folder.handle, "design", null, true);
+        SP.configureData = null;
+        await SP.useHostedFolder(folder);
     } else {
         const data = await api("/api/space/use-untyped", { output: SP.configureData });
         SP.recent = data.recent || [];
@@ -745,6 +787,53 @@ SP.useUntypedFolder = async () => {
 };
 
 
+
+SP.fail = (message, selector) => {
+  $("#space-error").textContent = message;
+  $("#space-error").hidden = false;
+  $(selector)?.focus();
+};
+
+SP.launch = async () => {
+  if (state.runtime.hosted) {
+    try {
+      const saved = await WFFileSystem.load("active");
+      if (saved?.handle && await WFFileSystem.requestReadWritePermission(saved.handle)) {
+        const folder = { handle: saved.handle, name: saved.handle.name };
+        const data = await SP.inspectHosted(folder);
+        if (data.needs_setup) {
+          SP.enterSetupFor(folder, data);
+          return;
+        }
+        const info = await SP.useHostedFolder(folder);
+        if (info.folder_mode === "space") SP.showResume(info);
+        return;
+      }
+    } catch (_error) { /* The welcome screen offers a fresh folder choice. */ }
+    SP.showHome();
+    return;
+  }
+
+  if (!state.catalog?.preferences?.output) {
+    SP.showHome();
+    return;
+  }
+  try {
+    const output = state.catalog.preferences.output;
+    const resp = await api("/api/space/inspect", { output });
+    SP.recent = resp.recent || [];
+    const data = resp.folder;
+    if (!data || data.missing) { SP.showHome(); return; }
+    if (data.needs_setup) {
+      SP.enterSetupFor(output, data);
+      return;
+    }
+    await SP.applyFolder(data);
+    if (data.folder_mode === "space") SP.showResume(data);
+  } catch (_error) {
+    SP.showHome();
+  }
+};
 
 const startSpaces = () => {
   SP.wire();
@@ -811,6 +900,13 @@ SP.wire = () => {
       SP.renderRecent();
     });
     else SP.run(() => SP.afterPick(one.folder));
+  });
+
+  // Live Drawer/Portable readouts while the user types, not only when the
+  // setup screen first opens - see Fix 004 Correction 6.G.
+  ["drawer-x", "drawer-y", "drawer-z", "portable-x", "portable-y", "portable-z"].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.addEventListener("input", SP.updateReadouts);
   });
 };
 
@@ -928,8 +1024,7 @@ SP.showFolder = async () => {
 
 SP.editSpace = () => {
     if (!state.activeSpace) return;
-    SP.showSetup(state.activeSpace.kind === "box" ? "portable" : state.activeSpace.kind, state.activeSpace);
-    SP.isUpdate = true;
+    SP.showSetup(state.activeSpace.kind === "box" ? "portable" : state.activeSpace.kind, state.activeSpace, { update: true });
 };
 
 SP.newDrawerSpace = () => {
@@ -940,16 +1035,18 @@ SP.newDrawerSpace = () => {
     document.getElementById("space-name").value = "";
 };
 
-// Wire info buttons
-const wireInfoButtons = () => {
-    ["space-info", "dl-space-info"].forEach(prefix => {
-        const btnEdit = document.getElementById(prefix + "-edit");
-        if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
-        const btnShow = document.getElementById(prefix + "-show");
-        if (btnShow) btnShow.addEventListener("click", SP.showFolder);
-        const btnNew = document.getElementById(prefix + "-new-drawer");
-        if (btnNew) btnNew.addEventListener("click", SP.newDrawerSpace);
-    });
+// Wire the Space Info Edit/Show Folder/New Drawer Space buttons for one
+// prefix only, so the normal Design controls (wired once at startup) and
+// the Drawer panel's dynamically-built copy (wired once when DP.build()
+// creates it) never both attach a listener to the same button - see
+// Fix 004 Correction 6.M.
+const wireInfoButtons = (prefix = "space-info") => {
+    const btnEdit = document.getElementById(prefix + "-edit");
+    if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
+    const btnShow = document.getElementById(prefix + "-show");
+    if (btnShow) btnShow.addEventListener("click", SP.showFolder);
+    const btnNew = document.getElementById(prefix + "-new-drawer");
+    if (btnNew) btnNew.addEventListener("click", SP.newDrawerSpace);
 };
 
 SP.updateSpace = async () => {

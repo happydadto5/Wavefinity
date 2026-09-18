@@ -339,24 +339,56 @@ def space_routes(
         return reply(folder(payload))
 
     def use_folder(payload):
+        # The explicit "use this folder without a Space type" choice. May
+        # write v4/setup_version-1 Design metadata, but must never silently
+        # demote an already fully configured typed Space - see Fix 004
+        # Correction 6.C. Opening/remembering a folder without changing it
+        # is /api/space/open (open_folder) / /api/folder/use, not this.
         target = folder(payload)
         target.mkdir(parents=True, exist_ok=True)
         mode, space, inventory, _keep, _defaults, needs_setup = _folder_state(target, load_preferences())
+        if mode == "space" and not needs_setup:
+            raise ValueError(f"this folder already holds the space {(space or {}).get('name')!r}")
         if needs_setup or mode != "design":
             _write_metadata(target, "design", None, inventory)
         remember(target)
         return reply(target)
 
     def configure(payload):
+        # A genuinely new typed Space: collision-protected, refuses a folder
+        # that already holds a configured typed Space.
         target = folder(payload)
         target.mkdir(parents=True, exist_ok=True)
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
-        
+
         result = configure_space(target, raw_def=raw_def, mode="create", allow_legacy=True)
         space = result["layout"]["space"]
         _write_metadata(target, "space", space, keep_bin_defaults=True)
+        remember(target)
+        return reply(target)
+
+    def configure_migrate(payload):
+        # The user's explicit Configure Existing / migration choice for an
+        # already-selected folder: a v2/v3/legacy/inventory-derived Space, or
+        # a plain design/inventory folder. Never rejected merely because
+        # layout.space already exists - configure_space(mode="update")
+        # replaces the Space definition in place and preserves everything
+        # else (inventory rows, quantities, placements, drawers, generated
+        # parts). Existing keep_bin_defaults/bin_defaults are preserved
+        # rather than reset.
+        target = folder(payload)
+        if not target.is_dir():
+            raise ValueError("save folder not found")
+        _mode, _space, inventory, keep, defaults, _needs_setup = _folder_state(target, load_preferences())
+        raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
+        if "trim_size" in payload:
+            raw_def["trim_size"] = payload["trim_size"]
+
+        result = configure_space(target, raw_def=raw_def, mode="update", allow_legacy=True)
+        space = result["layout"]["space"]
+        _write_metadata(target, "space", space, inventory, keep_bin_defaults=keep, bin_defaults=defaults)
         remember(target)
         return reply(target)
 
@@ -438,10 +470,12 @@ def space_routes(
 
     return {
         "/api/space/inspect": inspect,
-        "/api/folder/use": use_folder,
+        # Open/remember only - never changes mode or rewrites metadata.
+        "/api/folder/use": open_folder,
+        # The explicit "use without a Space type" choice - may write.
         "/api/space/use-untyped": use_folder,
         "/api/space/create": configure,
-        "/api/space/configure": configure,
+        "/api/space/configure": configure_migrate,
         "/api/space/update": update,
         "/api/folder/inventory": set_inventory,
         "/api/space/defaults": set_bin_defaults,
