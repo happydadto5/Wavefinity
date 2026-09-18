@@ -1347,6 +1347,10 @@ async function startBaseTrimFromSpace(source) {
     toast(source?.message || "Base Trim auto-size needs an arranged rectangle of bins.", true, 6500);
     return;
   }
+  if (typeof SP !== "undefined" && SP.crossTypeCheck) {
+    const ok = await SP.crossTypeCheck("base-trim");
+    if (!ok) return;
+  }
   if (!baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
   state.design = makeBaseTrimDesign(source.field_x_mm, source.field_y_mm);
   state.design.base_trim.auto_size = true;
@@ -2034,6 +2038,10 @@ async function toggleB4B(wantEnabled) {
 
 async function changeBinType() {
   const requested = $("#bin-type").value;
+  if (typeof SP !== "undefined" && SP.crossTypeCheck) {
+    const ok = await SP.crossTypeCheck(requested);
+    if (!ok) { $("#bin-type").value = binTypeFromDesign(); return; }
+  }
   const wasBaseTrim = baseTrimEnabled();
   if (requested === "base-trim") {
     if (!wasBaseTrim) {

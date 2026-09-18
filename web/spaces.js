@@ -75,7 +75,8 @@ SP.applyFolder = async (info, { reset = true } = {}) => {
     info.keep_bin_defaults,
     info.bin_defaults,
   );
-  syncForm();\n  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
+  syncForm();
+  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
 };
 
 // ------------------------------------------------------------ browser files
@@ -97,6 +98,7 @@ SP.validSpace = raw => {
     name: String(raw.name || "").trim(),
     x: Number(raw.x), y: Number(raw.y), z: Number(raw.z),
   };
+  if (raw.kind === "surface" && raw.trim_size) space.trim_size = String(raw.trim_size);
   return [space.x, space.y, space.z].every(value => Number.isFinite(value) && value > 0) ? space : null;
 };
 
@@ -547,6 +549,11 @@ SP.showSetup = (kind, prefillSpace = null) => {
   } else if (kind === 'surface') {
       document.getElementById('surface-x').value = prefillSpace?.x ? prefillSpace.x / (state.catalog?.base_unit || 8) : '';
       document.getElementById('surface-y').value = prefillSpace?.y ? prefillSpace.y / (state.catalog?.base_unit || 8) : '';
+      const trimSelect = document.getElementById('surface-trim');
+      if (trimSelect) {
+        trimSelect.value = prefillSpace?.trim_size
+          || (prefillSpace?.z === 6.5 ? 'small' : prefillSpace?.z === 10 ? 'large' : 'medium');
+      }
   } else if (kind === "portable") {
       document.getElementById("portable-x").value = prefillSpace?.x || "";
       document.getElementById("portable-y").value = prefillSpace?.y || "";
@@ -569,14 +576,16 @@ SP.startUntyped = async () => {
   }
 };
 
-SP.create = async () => {\n  if (SP.isUpdate) return SP.updateSpace();
+SP.create = async () => {
+  if (SP.isUpdate) return SP.updateSpace();
   const kind = SP.setupKind;
   const name = document.getElementById("space-name").value.trim();
   if (!name) return SP.fail("Give the Space a name.", "#space-name");
   
   let x, y, z;
+  let trimSize = null;
   const unit = state.catalog?.base_unit || 8;
-  
+
   if (kind === 'drawer') {
       x = Number(document.getElementById('drawer-x').value);
       y = Number(document.getElementById('drawer-y').value);
@@ -588,8 +597,8 @@ SP.create = async () => {\n  if (SP.isUpdate) return SP.updateSpace();
       if (![wUnits, dUnits].every(v => Number.isFinite(v) && v > 0)) return SP.fail("Enter valid unit dimensions.", "#surface-x");
       x = wUnits * unit;
       y = dUnits * unit;
-      const trimPreset = document.getElementById('surface-trim').value;
-      z = trimPreset === 'small' ? 6.5 : (trimPreset === 'large' ? 10.0 : 7.5);
+      trimSize = document.getElementById('surface-trim').value;
+      z = trimSize === 'small' ? 6.5 : (trimSize === 'large' ? 10.0 : 7.5);
   } else if (kind === 'portable') {
       let rawX = Number(document.getElementById('portable-x').value);
       let rawY = Number(document.getElementById('portable-y').value);
@@ -625,7 +634,7 @@ SP.create = async () => {\n  if (SP.isUpdate) return SP.updateSpace();
     const inventoryText = await WFFileSystem.readText(folder.handle, SP.inventoryFilename()) || "";
     const result = await api("/api/space/create-text", {
       inventory_text: inventoryText, inventory_title: name,
-      name, kind, x, y, z,
+      name, kind, x, y, z, ...(trimSize ? { trim_size: trimSize } : {}),
     });
     await WFFileSystem.writeText(folder.handle, SP.inventoryFilename(), result.inventory_text);
     const space = result.layout.space;
@@ -641,6 +650,7 @@ SP.create = async () => {\n  if (SP.isUpdate) return SP.updateSpace();
   } else {
     const data = await api("/api/space/create", {
       output: folder, name, kind, x, y, z, keep_bin_defaults: true,
+      ...(trimSize ? { trim_size: trimSize } : {}),
     });
     SP.recent = data.recent || [];
     info = data.folder;
@@ -654,15 +664,44 @@ SP.create = async () => {\n  if (SP.isUpdate) return SP.updateSpace();
   else activatePreviewView("3d");
 };
 
+// Reuses the real Base Trim design path (makeBaseTrimDesign) rather than
+// building a second, incompatible "edge" design object - see Fix 004.
 SP.designSurface = space => {
   activatePreviewView("3d");
-  state.design = clone(state.catalog.defaults.design);
-  const { box, layout } = state.design;
-  Object.assign(box, { x: space.x, y: space.y, z: space.z });
-  box.base_trim = { enabled: true, trim_size: space.z === 6.5 ? 'small' : (space.z === 10.0 ? 'large' : 'medium') };
+  const trimPresets = { small: 6.5, medium: 7.5, large: 10.0 };
+  const trimSize = space.trim_size && trimPresets[space.trim_size] !== undefined
+    ? space.trim_size
+    : (space.z === 6.5 ? "small" : space.z === 10 ? "large" : "medium");
+  const trimValue = trimPresets[trimSize];
+  if (!baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
+  state.design = makeBaseTrimDesign(space.x, space.y);
+  state.design.base_trim.width_mm = trimValue;
+  state.design.box.z = trimValue;
   state.design.part_name = space.name;
-  syncForm();\n  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
+  state.joinMode = "base_trim";
+  persistJoinMode();
+  clearDraftSelection();
+  syncForm();
+  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
   toast(`Designing Surface: ${space.name}`);
+};
+
+// Reuses the ordinary bin -> B4B toggle machinery (toggleB4B/readB4BForm)
+// rather than forking B4B form logic - see Fix 004 ("Portable -> Bin for Bins").
+SP.designBox = space => {
+  activatePreviewView("3d");
+  if (!b4bEnabled()) state.lastOrdinaryDesign = clone(state.design);
+  state.design = clone(state.catalog.defaults.design);
+  state.design.box.x = space.x;
+  state.design.box.y = space.y;
+  state.design.box.z = normalizeBinDimension("z", space.z);
+  state.design.part_name = space.name;
+  clearDraftSelection();
+  syncForm();
+  $("#bin-type").value = "b4b";
+  toggleB4B(true);
+  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
+  toast(`Designing Portable Storage: ${space.name}`);
 };
 
 SP.openExisting = async () => {
@@ -719,7 +758,8 @@ if (state.ready) {
 }
 
 
-SP.wire = () => {\n  wireInfoButtons();
+SP.wire = () => {
+  wireInfoButtons();
   document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-form-close, #space-type-cards-close")
     .forEach(el => el?.addEventListener("click", SP.close));
   SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
@@ -851,9 +891,11 @@ SP.renderSpaceInfo = () => {
             const x = state.activeSpace.x;
             const y = state.activeSpace.y;
             const z = state.activeSpace.z;
-            let trim = "Medium";
-            if (z === 6.5) trim = "Small";
-            else if (z === 10) trim = "Large";
+            const trimLabels = { small: "Small", medium: "Medium", large: "Large" };
+            let trim = trimLabels[state.activeSpace.trim_size];
+            if (!trim) {
+                trim = z === 6.5 ? "Small" : z === 10 ? "Large" : "Medium";
+            }
             sizeText = (x/unit) + " × " + (y/unit) + " units (" + x + " × " + y + " mm), " + trim + " trim";
         } else if (kind === "portable" || kind === "box") {
             const x = state.activeSpace.x;
@@ -916,8 +958,9 @@ SP.updateSpace = async () => {
     if (!name) return SP.fail("Give the Space a name.", "#space-name");
     
     let x, y, z;
+    let trimSize = null;
     const unit = state.catalog?.base_unit || 8;
-    
+
     if (kind === "drawer") {
         x = Number(document.getElementById("drawer-x").value);
         y = Number(document.getElementById("drawer-y").value);
@@ -925,8 +968,8 @@ SP.updateSpace = async () => {
     } else if (kind === "surface") {
         x = Number(document.getElementById("surface-x").value) * unit;
         y = Number(document.getElementById("surface-y").value) * unit;
-        const t = document.getElementById("surface-trim").value;
-        z = t === "small" ? 6.5 : (t === "large" ? 10.0 : 7.5);
+        trimSize = document.getElementById("surface-trim").value;
+        z = trimSize === "small" ? 6.5 : (trimSize === "large" ? 10.0 : 7.5);
     } else if (kind === "portable") {
         x = SP.snap(Number(document.getElementById("portable-x").value));
         y = SP.snap(Number(document.getElementById("portable-y").value));
@@ -934,11 +977,14 @@ SP.updateSpace = async () => {
     }
 
     if (state.runtime.hosted) {
-        state.activeSpace = Object.assign({}, state.activeSpace, { name: name, x: x, y: y, z: z });
+        state.activeSpace = Object.assign({}, state.activeSpace, { name: name, x: x, y: y, z: z }, trimSize ? { trim_size: trimSize } : {});
         await SP.writeMetadata(state.browserFolder.handle, "space", state.activeSpace, true);
     } else {
-        const data = await api("/api/space/update", { output: state.output, name: name, x: x, y: y, z: z });
-        state.activeSpace = data.space;
+        const data = await api("/api/space/update", {
+          output: state.output, name: name, x: x, y: y, z: z,
+          ...(trimSize ? { trim_size: trimSize } : {}),
+        });
+        state.activeSpace = data.folder.space;
     }
     SP.isUpdate = false;
     SP.renderSpaceInfo();
@@ -958,7 +1004,7 @@ SP.updateSpace = async () => {
 
 // Cross-type warning
 SP.crossTypeCheck = (designType) => {
-    if (!state.activeSpace || state.folderMode !== "space") return false;
+    if (!state.activeSpace || state.folderMode !== "space") return Promise.resolve(true);
     const kind = state.activeSpace.kind;
     
     let warning = null;
@@ -1002,20 +1048,5 @@ SP.crossTypeCheck = (designType) => {
     return Promise.resolve(true);
 };
 
-// We intercept design-type changes.
-document.addEventListener("DOMContentLoaded", () => {
-    const dt = document.getElementById("design-type");
-    if (!dt) return;
-    let lastValue = dt.value;
-    dt.addEventListener("change", async (e) => {
-        const val = e.target.value;
-        const ok = await SP.crossTypeCheck(val);
-        if (!ok) {
-            e.target.value = lastValue;
-            // Need to dispatch event to revert UI in app.js
-            e.target.dispatchEvent(new Event("change"));
-        } else {
-            lastValue = val;
-        }
-    });
-});
+// The real design-type control is #bin-type (see changeBinType() in app.js),
+// which calls SP.crossTypeCheck() itself before switching into B4B/Base Trim.

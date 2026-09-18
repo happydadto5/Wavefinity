@@ -95,16 +95,17 @@ DP.build = () => {
       <div class="section-body">
         <div id="dl-stats" class="dl-stats"></div>
         <div class="field-grid two">
-          <label class="checkbox-row" style="grid-column: 1 / -1" title="Build serpentine springs into the edge spacers to absorb real-world tolerance"><span>Flexible fit (recommended)</span><input id="dl-sp-flex" type="checkbox" checked></label>
+          <label class="checkbox-row" style="grid-column: 1 / -1" title="Build serpentine springs into the edge spacers to absorb real-world tolerance"><span>Flexible fit (recommended)</span><input id="dl-sp-flexible" type="checkbox" checked></label>
           <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
           <label>Longest piece <span class="unit">mm</span><input id="dl-sp-max" type="number" min="16" step="1" title="Split anything longer so it fits your print bed"></label>
         </div>
         <div class="dl-action-grid">
-          <button type="button" id="dl-sp-plan" class="button secondary" title="Calculate spacer blocks">Plan</button>
-          <button type="button" id="dl-sp-generate" class="button secondary" title="Generate spacer STL files">Generate</button>
+          <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the back and right walls">Plan / Update Spacers</button>
+          <button type="button" id="dl-sp-generate" class="button secondary" title="Generate the selected spacer candidates">Generate Selected Spacers</button>
           <button type="button" id="dl-connectors" class="button secondary" title="Save a file for every connector this layout needs, with how many to print">Make connectors</button>
           <button type="button" id="dl-base-trim" class="button secondary" title="Create a Base Trim around one filled rectangular block of bins">Make Base Trim</button>
-          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and connectors in Bambu Studio">Print Spacers</button>
+          <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
+          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and connectors together in Bambu Studio">Print Drawer (All)</button>
         </div>
       </div>
     </section>
@@ -171,6 +172,9 @@ DP.build = () => {
       </div>
     </section>`;
   DP.wire();
+  // The dl-space-info-* buttons above did not exist yet when SP.wire() ran
+  // wireInfoButtons() at startup, so wire them again now that they do.
+  if (typeof wireInfoButtons === "function") wireInfoButtons();
   DV.buildOverlay();
   if (state.runtime.hosted) {
     ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print", "#dl-connectors"].forEach(selector => {
@@ -283,13 +287,12 @@ DP.wire = () => {
   
     $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
   $("#dl-sp-generate").addEventListener("click", () => DL.generateSelectedSpacers());
-  $("#dl-sp-print").addEventListener("click", () => {
-    // Assuming UI has a way to get selection, or we print all rows
-    const rows = DL.spacerPrintRows();
-    const selection = {};
-    rows.forEach(r => selection[r.bin.id] = r.toPrint);
-    DL.printSelectedSpacers(selection);
+  $("#dl-sp-print").addEventListener("click", () => DP.openSpacerPrintDialog());
+  $("#spacer-print-cancel").addEventListener("click", () => $("#spacer-print-dialog").close());
+  $("#spacer-print-dialog").addEventListener("click", event => {
+    if (event.target === $("#spacer-print-dialog")) $("#spacer-print-dialog").close();
   });
+  $("#spacer-print-confirm").addEventListener("click", () => DP.confirmSpacerPrint());
   $("#dl-connectors").addEventListener("click", () => DL.makeConnectors());
   $("#dl-base-trim").addEventListener("click", async () => {
     const source = DL.baseTrimSource();
@@ -542,6 +545,46 @@ DP.designSpot = () => {
   updateGenerateAvailability();
   changedDesign(previous);
   toast(`Bin set to ${fmt(x)} × ${fmt(y)} mm to fill the gap in ${drawer.name}. ${heightNote}`, false, 6000);
+};
+
+// Opens the grouped selection dialog before anything is sent to the slicer -
+// clicking Print Spacers… must never silently print every unprinted row.
+DP.openSpacerPrintDialog = () => {
+  const groups = DL.spacerPrintGroups();
+  if (!groups.length) { toast("No spacers placed in this drawer yet.", true); return; }
+  DP.spacerPrintGroups = groups;
+  const container = $("#spacer-print-table-container");
+  container.innerHTML = `
+    <table class="spacer-print-table">
+      <thead><tr><th></th><th>Size</th><th>Flexible/Rigid</th><th>Qty in drawer</th><th>Printed</th><th>Qty to print</th></tr></thead>
+      <tbody>${groups.map((g, index) => `
+        <tr data-group="${index}">
+          <td><input type="checkbox" data-sp-check ${g.toPrint > 0 ? "checked" : ""}></td>
+          <td>${fmt(g.bin.x)} × ${fmt(g.bin.y)} mm</td>
+          <td>${g.bin.name.includes("Rigid") ? "Rigid" : "Flexible"}</td>
+          <td>${g.qty}</td>
+          <td>${g.printed}</td>
+          <td><input type="number" data-sp-qty min="1" max="${g.qty}" value="${Math.max(1, g.toPrint || g.qty)}" ${g.toPrint > 0 ? "" : "disabled"}></td>
+        </tr>`).join("")}</tbody>
+    </table>`;
+  $$("[data-sp-check]", container).forEach(box => box.addEventListener("change", event => {
+    const qtyInput = event.target.closest("tr").querySelector("[data-sp-qty]");
+    qtyInput.disabled = !event.target.checked;
+  }));
+  $("#spacer-print-dialog").showModal();
+};
+
+DP.confirmSpacerPrint = () => {
+  const dialog = $("#spacer-print-dialog");
+  const selection = {};
+  $$("tr[data-group]", $("#spacer-print-table-container")).forEach(row => {
+    const group = DP.spacerPrintGroups[Number(row.dataset.group)];
+    const checked = row.querySelector("[data-sp-check]").checked;
+    const qty = dlNum(row.querySelector("[data-sp-qty]").value, 0);
+    if (checked && qty > 0) selection[group.bin.id] = qty;
+  });
+  dialog.close();
+  if (Object.keys(selection).length) DL.printSelectedSpacers(selection);
 };
 
 // ------------------------------------------------------------------ rendering

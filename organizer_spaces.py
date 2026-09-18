@@ -378,18 +378,51 @@ def space_routes(
         remember(target)
         return reply(target)
         
-    def show_folder(payload):
+    def set_inventory(payload):
         target = folder(payload)
-        if target.is_dir():
-            import sys
-            import subprocess
-            if sys.platform == "win32":
-                os.startfile(str(target))
-            elif sys.platform == "darwin":
-                subprocess.run(["open", str(target)])
-            else:
-                subprocess.run(["xdg-open", str(target)])
-        return {"success": True}
+        if not target.is_dir():
+            raise ValueError("that save folder could not be found")
+        prefs = load_preferences()
+        mode, space, _current, keep, defaults, _needs_setup = _folder_state(target, prefs)
+        inventory = bool(payload.get("inventory", True))
+        if mode == "space" and not inventory:
+            raise ValueError("Space planning needs this folder's inventory turned on.")
+        _write_metadata(target, mode, space, inventory, keep_bin_defaults=keep, bin_defaults=defaults)
+        # Keep the legacy preference in step, in case anything still reads it.
+        kept = [
+            one for one in (prefs.get("no_inventory_folders") or [])
+            if not _same(one, target)
+        ]
+        if not inventory:
+            kept.append(str(target))
+        save_preferences({"no_inventory_folders": kept})
+        remember(target)
+        return reply(target)
+
+    def set_bin_defaults(payload):
+        target = folder(payload)
+        if not target.is_dir():
+            raise ValueError("that save folder could not be found")
+        mode, space, inventory, keep, defaults, _needs_setup = _folder_state(target, load_preferences())
+        if mode != "space":
+            raise ValueError("bin defaults belong to a Space folder")
+        new_keep = bool(payload["keep_bin_defaults"]) if "keep_bin_defaults" in payload else keep
+        new_defaults = payload.get("bin_defaults") if "bin_defaults" in payload else defaults
+        if new_defaults is not None and not isinstance(new_defaults, dict):
+            raise ValueError("bin defaults must be an object or null")
+        _write_metadata(
+            target, mode, space, inventory,
+            keep_bin_defaults=new_keep, bin_defaults=new_defaults,
+        )
+        remember(target)
+        return reply(target)
+
+    def open_folder(payload):
+        target = folder(payload)
+        if not target.is_dir():
+            raise ValueError("that save folder could not be found")
+        remember(target)
+        return reply(target)
 
     def forget(payload):
         target = folder(payload)
@@ -406,9 +439,10 @@ def space_routes(
     return {
         "/api/space/inspect": inspect,
         "/api/folder/use": use_folder,
+        "/api/space/use-untyped": use_folder,
+        "/api/space/create": configure,
         "/api/space/configure": configure,
         "/api/space/update": update,
-        "/api/space/show": show_folder,
         "/api/folder/inventory": set_inventory,
         "/api/space/defaults": set_bin_defaults,
         "/api/space/open": open_folder,

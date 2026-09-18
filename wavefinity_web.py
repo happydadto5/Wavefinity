@@ -120,7 +120,7 @@ from organizer_inserts import (
 )
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from organizer_drawer import drawer_routes
-from organizer_inventory import create_space_text
+from organizer_inventory import configure_space_text
 from organizer_spaces import inventory_enabled, space_routes
 from organizer_app import (
     APP_DIR,
@@ -2128,11 +2128,16 @@ def base_trim_joint_test_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    return create_space_text(
+    raw_def = {
+        "name": payload.get("name"), "kind": payload.get("kind"),
+        "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z"),
+    }
+    if "trim_size" in payload:
+        raw_def["trim_size"] = payload["trim_size"]
+    return configure_space_text(
         payload.get("inventory_text") or "",
         title=str(payload.get("inventory_title") or payload.get("name") or "Wavefinity"),
-        name=payload.get("name"), kind=payload.get("kind"),
-        x=payload.get("x"), y=payload.get("y"), z=payload.get("z"),
+        raw_def=raw_def, mode="create", allow_legacy=True,
     )
 
 

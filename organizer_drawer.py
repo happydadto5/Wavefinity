@@ -51,6 +51,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 from shapely import affinity
 from shapely.geometry import LineString, Polygon
 from shapely.geometry import box as shape_box
+from shapely.ops import unary_union
 import trimesh
 
 from organizer_app import connector_filename, generate_side_file
@@ -71,7 +72,7 @@ from organizer_engine import (
     wavy_rect_cavity,
     wavy_rect_outer,
 )
-from organizer_geometry import _extrude_polygon, difference, union
+from organizer_geometry import _extrude_polygon
 from organizer_inventory import (
     INVENTORY_LOCK,
     legacy_layout_space,
@@ -255,6 +256,10 @@ def _label(one: dict[str, Any]) -> str:
 
 def _close(a: float, b: float) -> bool:
     return abs(float(a) - float(b)) < 0.05
+
+
+def _overlaps(a: dict[str, float], b: dict[str, float]) -> bool:
+    return a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"] and a["y"] < b["y"] + b["d"] and b["y"] < a["y"] + a["d"]
 
 
 def _blocked(drawer: dict[str, Any], grid: dict[str, Any]) -> np.ndarray:
@@ -494,18 +499,6 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     chains, loose = _chains(drawer, by_id)
     for placement in loose:
         problems.append({"type": "floating", "keys": [_key(placement)], "message": f"{_label(by_id[placement['bin']])} is stacked on nothing"})
-    # Edge-facing spacers were cut for the drawer as it was; resizing it,
-    # moving the grid or changing the snap can leave one across the grid or
-    # the wall.
-    inset = CREST + 0.05
-    grid_box = {"x": grid["ox"] + inset, "y": grid["oy"] + inset, "w": cols * step - 2 * inset, "d": rows * step - 2 * inset}
-    for placement in drawer["placements"]:
-        if "gx" in placement or "on" in placement or placement.get("bin") not in by_id:
-            continue
-        edge = {key: float(placement.get(key, 0.0)) for key in ("x", "y", "w", "d")}
-        if (_overlaps(edge, grid_box) or edge["x"] < -0.1 or edge["y"] < -0.1
-                or edge["x"] + edge["w"] > drawer["width"] + 0.1 or edge["y"] + edge["d"] > drawer["depth"] + 0.1):
-            problems.append({"type": "edge_spacer", "keys": [_key(placement)], "message": "An edge spacer no longer fits this drawer - take the spacers out and make them again"})
     items = [_stack_item(chain, drawer, by_id) for chain in chains]
     per_unit = _per_unit(drawer)
     for index, item in enumerate(items):
@@ -532,6 +525,29 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         for other in sorted({int(v) for v in region[region >= 0]}):
             problems.append({"type": "overlap", "keys": items[other]["keys"] + item["keys"], "message": f"{_label(by_id[items[other]['bin']])} and {_label(by_id[item['bin']])} overlap"})
         region[region < 0] = index
+    # Edge-facing spacers were cut for the drawer as it was; resizing it,
+    # moving the grid, changing the snap, or a since-placed bin/keep-out can
+    # leave one stuck outside the drawer or colliding with something real.
+    # Checked against the actual occupied/blocked cells (not the whole grid
+    # rectangle) - a back/right spacer legitimately reaches from a
+    # component's own edge to the real wall, and empty grid along the way is
+    # not a conflict.
+    for placement in drawer["placements"]:
+        if "gx" in placement or "on" in placement or placement.get("bin") not in by_id:
+            continue
+        edge = {key: float(placement.get(key, 0.0)) for key in ("x", "y", "w", "d")}
+        outside = (edge["x"] < -0.1 or edge["y"] < -0.1
+                   or edge["x"] + edge["w"] > drawer["width"] + 0.1 or edge["y"] + edge["d"] > drawer["depth"] + 0.1)
+        collides = False
+        if not outside:
+            ex0 = max(0, math.floor((edge["x"] - grid["ox"]) / step + 1e-6))
+            ey0 = max(0, math.floor((edge["y"] - grid["oy"]) / step + 1e-6))
+            ex1 = min(cols, math.ceil((edge["x"] + edge["w"] - grid["ox"]) / step - 1e-6))
+            ey1 = min(rows, math.ceil((edge["y"] + edge["d"] - grid["oy"]) / step - 1e-6))
+            if ex1 > ex0 and ey1 > ey0:
+                collides = bool(blocked[ey0:ey1, ex0:ex1].any() or (owner[ey0:ey1, ex0:ex1] >= 0).any())
+        if outside or collides:
+            problems.append({"type": "edge_spacer", "keys": [_key(placement)], "message": "An edge spacer no longer fits this drawer - take the spacers out and make them again"})
     issues = _height_issues(items, reach)
     for front, back in issues:
         problems.append({
@@ -941,11 +957,13 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
             max_y = max(i["gy"] + i["d"] for i in right_items)
             gap_right = (drawer["width"] - grid["ox"] - (max_x * step)) - wall
             if gap_right >= MIN_EDGE_SPACER:
+                px = grid["ox"] + max_x * step
+                py = grid["oy"] + min_y * step
                 w = gap_right
                 d = (max_y - min_y) * step
                 cid_right = f"right-{max_x}-{min_y}-{max_y}"
                 score = comp_area / (w * d) if w * d > 0 else 0
-                candidates.append({"id": cid_right, "placements": [{"bin": "spacer", "gx": max_x, "gy": min_y, "w": w, "d": d, "side": "right"}], "score": score, "axis": "x", "comp": comp_idx})
+                candidates.append({"id": cid_right, "placements": [{"bin": "spacer", "x": px, "y": py, "w": w, "d": d, "side": "right"}], "score": score, "axis": "x", "comp": comp_idx})
                 
             # Back candidates
             max_y_comp = max(item["gy"] + item["d"] for item in comp)
@@ -954,27 +972,20 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
             max_x_comp = max(i["gx"] + i["w"] for i in back_items)
             gap_back = (drawer["depth"] - grid["oy"] - (max_y_comp * step)) - wall
             if gap_back >= MIN_EDGE_SPACER:
+                px = grid["ox"] + min_x * step
+                py = grid["oy"] + max_y_comp * step
                 w = (max_x_comp - min_x) * step
                 d = gap_back
                 cid_back = f"back-{min_x}-{max_x_comp}-{max_y_comp}"
                 score = comp_area / (w * d) if w * d > 0 else 0
-                candidates.append({"id": cid_back, "placements": [{"bin": "spacer", "gx": min_x, "gy": max_y_comp, "w": w, "d": d, "side": "back"}], "score": score, "axis": "y", "comp": comp_idx})
+                candidates.append({"id": cid_back, "placements": [{"bin": "spacer", "x": px, "y": py, "w": w, "d": d, "side": "back"}], "score": score, "axis": "y", "comp": comp_idx})
 
         # Filter overlaps / keepouts
         valid_cands = []
         for cand in candidates:
             p = cand["placements"][0]
-            if p["side"] == "right":
-                px, py = grid["ox"] + p["gx"] * step, grid["oy"] + p["gy"] * step
-            else:
-                px, py = grid["ox"] + p["gx"] * step, grid["oy"] + p["gy"] * step
-            pw, pd = p["w"], p["d"]
-            overlap_keepout = False
-            for k in drawer["keepouts"]:
-                if max(px, k["x"]) < min(px+pw, k["x"]+k["w"]) and max(py, k["y"]) < min(py+pd, k["y"]+k["d"]):
-                    overlap_keepout = True
-                    break
-            if not overlap_keepout:
+            edge = {"x": p["x"], "y": p["y"], "w": p["w"], "d": p["d"]}
+            if not any(_overlaps(edge, k) for k in drawer["keepouts"]):
                 valid_cands.append(cand)
         candidates = valid_cands
         
@@ -1024,7 +1035,7 @@ def _serpentine_flexure(w, d, side, flexible=True):
         mid_web = shape_box(pad_bin, mid_y - web/2, w - pad_wall, mid_y + web/2)
         vert1 = shape_box(pad_bin, web, pad_bin + web, mid_y)
         vert2 = shape_box(w - pad_wall - web, mid_y, w - pad_wall, d - web)
-        return union([left_pad, right_pad, top_web, bot_web, mid_web, vert1, vert2])
+        return unary_union([left_pad, right_pad, top_web, bot_web, mid_web, vert1, vert2])
     else:
         if flexible: d += 0.5
         if not flexible or d < pad_bin + pad_wall + web * 3:
@@ -1041,7 +1052,7 @@ def _serpentine_flexure(w, d, side, flexible=True):
         mid_web = shape_box(mid_x - web/2, pad_bin, mid_x + web/2, d - pad_wall)
         horiz1 = shape_box(web, pad_bin, mid_x, pad_bin + web)
         horiz2 = shape_box(mid_x, d - pad_wall - web, w - web, d - pad_wall)
-        return union([bot_pad, top_pad, left_web, right_web, mid_web, horiz1, horiz2])
+        return unary_union([bot_pad, top_pad, left_web, right_web, mid_web, horiz1, horiz2])
 
 def generate_spacers(request: dict[str, Any], output_dir: Path | str, generate_file: Callable[[str, trimesh.Trimesh], Path]) -> dict[str, Any]:
     options = request.get("options") or {}
@@ -1079,62 +1090,206 @@ def generate_spacers(request: dict[str, Any], output_dir: Path | str, generate_f
     return {"generated": generated, "notes": notes}
 
 
+# ---------------------------------------------------------------- connectors
 
+
+def generate_connectors(
+    output_dir: Path | str,
+    layout: dict[str, Any],
+    bins: list[dict[str, Any]],
+    drawer_id: str | None = None,
+) -> dict[str, Any]:
+    """Print files for every connector a drawer's layout needs: one file per
+    pair of rim heights, with how many of it to print."""
+    output_dir = Path(output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report = drawer_report(find_drawer(layout, drawer_id), bins)
+    made, notes = [], []
+    connector = ConnectorSpec()
+    for group in report["connectors"]:
+        high, low = group["heights"]
+        wall = group["wall"]
+        different = abs(high - low) > 1e-6
+        plan = differing_connector_plan(
+            connector, LOCKED_CONNECTOR_LENGTH, high, low,
+            BoxSpec(2 * UNIT, 6 * UNIT, high, wall=wall),
+        )
+        length = plan["length_mm"]
+        name = connector_filename(
+            connector, length=length, bin_a_height=high, bin_b_height=low,
+            different_heights=different, wall=wall,
+        )
+        try:
+            generate_side_file(
+                BoxSpec(2 * UNIT, 6 * UNIT, high, wall=wall), connector, output_dir / name,
+                "y", 0.0, length, high, low,
+                web_thickness=plan["web_thickness_mm"] if different else None, auto_adjust=False,
+            )
+        except ValueError as error:
+            notes.append(f"{high:g} → {low:g} mm: {error}")
+            continue
+        made.append({"file": name, "count": group["count"], "heights": [high, low]})
+    if report["connector_mismatched"]:
+        notes.append(
+            f"{report['connector_mismatched']} seam(s) join bins with different wall "
+            "thicknesses; no single connector fits both."
+        )
+    return {"connectors": made, "notes": notes}
+
+
+def print_spacers_and_connectors(
+    output_dir: Path | str,
+    layout: dict[str, Any],
+    bins: list[dict[str, Any]],
+    drawer_id: str | None,
+    detect_slicer: Callable,
+    launch_slicer: Callable,
+    slicer_path: str | None = None,
+) -> dict[str, Any]:
+    """Open one drawer's spacers and connectors in the slicer together."""
+    output_dir = Path(output_dir).expanduser().resolve()
+    drawer = find_drawer(layout, drawer_id)
+    by_id = {one["id"]: one for one in bins}
+    counts: dict[str, int] = {}
+    for placement in drawer.get("placements") or []:
+        one = by_id.get(placement.get("bin"))
+        if one and one.get("kind") in SPACER_KINDS and one.get("file"):
+            counts[one["file"]] = counts.get(one["file"], 0) + 1
+    connectors = generate_connectors(output_dir, layout, bins, drawer_id)
+    for made in connectors["connectors"]:
+        counts[made["file"]] = counts.get(made["file"], 0) + made["count"]
+    files = [output_dir / name for name in counts if (output_dir / name).is_file()]
+    if not files:
+        raise ValueError("this drawer has no spacers or connectors to print yet")
+    slicer = detect_slicer(slicer_path)
+    if slicer is None or not Path(slicer).is_file():
+        raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
+    launch_slicer(Path(slicer), files)
+    return {"files": [str(path) for path in files], "counts": counts, "notes": connectors["notes"]}
+
+
+# ---------------------------------------------------------------- web routes
+
+
+def drawer_routes(
+    geometry_lock,
+    default_output: Path,
+    detect_slicer: Callable | None = None,
+    launch_slicer: Callable | None = None,
+    hosted: bool = False,
+) -> dict[str, Callable[[dict], dict]]:
+    """POST handlers for the browser service, keyed by path."""
+
+    def folder(payload: dict[str, Any]) -> Path:
+        return Path(str(payload.get("output") or default_output)).expanduser().resolve()
+
+    def with_rules(result: dict[str, Any]) -> dict[str, Any]:
+        # The view needs the stacking steps for live stack heights while dragging.
+        return {**result, "stack_steps": STACK_STEPS}
+
+    def load(payload):
+        if hosted:
+            result = load_inventory_text(
+                payload.get("inventory_text") or "",
+                title=str(payload.get("inventory_title") or "Wavefinity"),
+            )
+            layout = result.get("layout")
+            space_inferred = False
+            if isinstance(layout, dict) and not isinstance(layout.get("space"), dict):
+                inferred = legacy_layout_space(layout)
+                if inferred:
+                    # A lossy reconstruction from the drawer layout alone,
+                    # which can only ever guess "drawer" - never let it look
+                    # like an authoritative space to the caller (it must not
+                    # outrank real Space metadata; see SP.inspectHosted).
+                    result = {**result, "layout": {**layout, "space": inferred}}
+                    space_inferred = True
+            return {**with_rules(result), "space_inferred": space_inferred}
+        return with_rules(load_inventory(folder(payload)))
+
+    def save(payload):
+        changes: dict[str, Any] = {
+            "bin_updates": payload.get("bin_updates") or (),
+            "new_bins": payload.get("new_bins") or (),
+            "delete_ids": payload.get("delete_ids") or (),
+        }
+        if "layout" in payload and payload["layout"] is not None:
+            changes["layout"] = payload["layout"]
+        if hosted:
+            return with_rules(save_inventory_text(
+                payload.get("inventory_text") or "",
+                title=str(payload.get("inventory_title") or "Wavefinity"),
+                **changes,
+            ))
+        return with_rules(save_inventory(folder(payload), **changes))
+
+    def report(payload):
+        return drawer_report(
+            find_drawer(payload["layout"], payload.get("drawer_id")),
+            payload.get("bins") or [], payload.get("height_reach") or "column",
+        )
+
+    def auto(payload):
+        return auto_layout(payload["layout"], payload.get("bins") or [], payload.get("drawer_id"), payload.get("options"))
 
     def spacers(payload):
         if hosted:
             raise ValueError("Hosted spacer files are not available yet.")
         with geometry_lock:
-            return plan_spacers(payload["layout"], payload.get("bins") or [], payload.get("options"))
+            return plan_spacers(
+                find_drawer(payload["layout"], payload.get("drawer_id")),
+                payload.get("bins") or [], payload.get("options"),
+            )
 
     def spacers_generate(payload):
         if hosted:
             raise ValueError("Hosted spacer files are not available yet.")
-        with geometry_lock:
+        with geometry_lock, INVENTORY_LOCK:
             def generate_file(name, mesh):
                 out = folder(payload) / name
                 mesh.export(str(out))
                 return out
-            
+
             layout = payload["layout"]
             drawer = find_drawer(layout, payload.get("drawer_id"))
-            
-            from organizer_inventory import load_inventory, next_bin_id, save_inventory
             inv = load_inventory(folder(payload))
-            
             options = payload.get("options") or {}
-            
+
             request_for_gen = {
                 "drawer": drawer,
                 "bins": inv["bins"],
                 "options": options,
-                "selected": payload.get("selected", [])
+                "selected": payload.get("selected", []),
             }
             result = generate_spacers(request_for_gen, folder(payload), generate_file)
-            
-            import datetime
+
+            new_bins: list[dict[str, Any]] = []
+            bins_so_far = list(inv["bins"])
             for gen in result.get("generated", []):
-                new_id = next_bin_id(inv["bins"])
-                inv["bins"].append({
+                new_id = next_bin_id(bins_so_far)
+                row = {
                     "id": new_id,
-                    "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "kind": "spacer",
                     "boundary": "edge",
                     "name": "Flexible Spacer" if options.get("flexible", True) else "Rigid Spacer",
-                    "x": gen["w"] / 8.0, "y": gen["d"] / 8.0, "z": gen["h"],
+                    # Inventory x/y/z are physical mm, never Wavefinity unit counts.
+                    "x": gen["w"], "y": gen["d"], "z": gen["h"],
                     "qty": 1,
                     "file": gen["file"],
-                })
+                }
+                new_bins.append(row)
+                bins_so_far.append(row)
                 for p in gen["placements"]:
-                    p_copy = p.copy()
+                    p_copy = dict(p)
                     p_copy["bin"] = new_id
+                    p_copy.setdefault("copy", 0)
                     drawer.setdefault("placements", []).append(p_copy)
-                     
-            saved = save_inventory(folder(payload), layout=layout, bins=inv["bins"])
-            
+
+            saved = save_inventory(folder(payload), layout=layout, new_bins=new_bins)
+
             result["layout"] = saved["layout"]
             result["bins"] = saved["bins"]
-            
+
             return result
 
     def print_spacers_only(payload):
@@ -1143,25 +1298,27 @@ def generate_spacers(request: dict[str, Any], output_dir: Path | str, generate_f
         if detect_slicer is None or launch_slicer is None:
             raise ValueError("printing is not available here")
         with geometry_lock:
-            selection = payload.get("selection", {})
+            selection = payload.get("selection") or {}
             out_dir = folder(payload)
-            # Find the bin files
-            from organizer_inventory import load_inventory
             inv = load_inventory(out_dir)
-            files_to_print = []
+            files: list[Path] = []
+            counts: dict[str, int] = {}
             for b in inv["bins"]:
-                if b["id"] in selection and selection[b["id"]] > 0:
-                     qty = selection[b["id"]]
-                     path = out_dir / b["file"]
-                     if path.exists():
-                         files_to_print.append((path, qty))
-            
-            if files_to_print:
-                launch_slicer(payload.get("slicer_path"), files_to_print)
-            return {"ok": True}
+                count = selection.get(b["id"])
+                if count and int(count) > 0 and b.get("file"):
+                    path = out_dir / b["file"]
+                    if path.is_file():
+                        files.append(path)
+                        counts[b["file"]] = int(count)
+            if not files:
+                raise ValueError("Select at least one spacer to print.")
+            slicer = detect_slicer(payload.get("slicer_path"))
+            if slicer is None or not Path(slicer).is_file():
+                raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
+            launch_slicer(Path(slicer), files)
+            return {"files": [str(path) for path in files], "counts": counts, "notes": []}
 
     def connectors(payload):
-
         if hosted:
             raise ValueError("Hosted Space connectors are not available yet. Generate connectors from the normal designer.")
         with geometry_lock:

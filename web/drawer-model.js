@@ -58,7 +58,7 @@ DL.defaultSettings = () => ({
     mode: "rearrange", height_rule: "strict", height_reach: "column",
     keep_locked: true, include_spacers: false, stack_bins: true,
   },
-  spacers: { fill: "all", height: 15, max_length: 250, leave_open: 0 },
+  spacers: { flexible: true, height: 15, max_length: 250 },
 });
 
 DL.newDrawerId = () => {
@@ -712,10 +712,15 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
   DL.requestReport();
 });
 
+// Spacers are free, edge-facing placements (no gx) - DL.items()/DL.chains()
+// only cover the grid, so groups are built straight from the active
+// drawer's placements instead.
 DL.spacerPrintGroups = () => {
-  const spacers = DL.items().filter(i => DL.isSpacer(i.row)).map(i => i.row);
+  const placements = DL.drawer().placements.filter(p => DL.isSpacer(DL.bin(p.bin)));
   const groups = new Map();
-  spacers.forEach(b => {
+  placements.forEach(p => {
+    const b = DL.bin(p.bin);
+    if (!b) return;
     const key = `${b.file}|${b.x}|${b.y}|${b.z}`;
     if (!groups.has(key)) groups.set(key, { bin: b, layoutQty: 0 });
     groups.get(key).layoutQty += 1;
@@ -726,20 +731,20 @@ DL.spacerPrintGroups = () => {
   });
 };
 
-DL.printSelectedSpacers = async (selection) => {
+DL.printSelectedSpacers = (selection) => DL.busyWith("print", async () => {
   if (Object.keys(selection).length === 0) return;
   await api("/api/drawer/print-spacers", {
-    output: DL.output ?? DL.folder(), 
+    output: DL.output ?? DL.folder(),
     selection: selection,
     slicer_path: state.slicer?.path || null,
   });
-  
+
   const updates = [];
   for (const [id, count] of Object.entries(selection)) {
     const bin = DL.bin(id);
     if (bin && count > 0) {
       const printed = Number(bin.qty) || 0;
-      const layoutQty = DL.items().filter(i => i.bin === id).length;
+      const layoutQty = DL.drawer().placements.filter(p => p.bin === id).length;
       // reprints do not increase logical drawer quantity
       // Only increase qty if printed is less than layoutQty, and we can only increase up to layoutQty.
       const newPrinted = Math.min(layoutQty, printed + count);
@@ -752,7 +757,7 @@ DL.printSelectedSpacers = async (selection) => {
     await DL.editBins({ bin_updates: updates });
   }
   toast("Sent to slicer.");
-};
+});
 
 DL.removeSpacers = () => DL.change(() => {
   const drawer = DL.drawer();
