@@ -168,18 +168,21 @@ instructions needed to perform that work.
 
 ### 2. Branch, commit & push workflow
 
-Starting with **Fix 6**, Help Code implementation uses one branch per fix.
+Starting with **Fix 6**, complex/non-trivial work that enters the Help Code `/fixes` workflow uses **one temporary branch per fix in this same repository**. Use branches, not forks, for normal Help Code isolation.
+
+A fix may be planned, numbered, recorded in `/fixes/Fix Master.md`, and have its `/fixes/fix-###.md` specification committed on `main` before implementation is ready. That does **not** mean implementation may begin. The implementation branch is created only when all prerequisite fixes are accepted and present on current `origin/main`.
 
 - `main` is the accepted implementation line. Do not perform Help Code implementation directly on `main`.
 - Each fix uses a branch named exactly `fixN`, using the unpadded fix number: `fix6`, `fix9`, `fix10`, etc.
-- Before implementation, fetch `origin` and make sure the fix branch starts from the intended current `origin/main`. If a prerequisite fix is not yet complete on `main`, STOP rather than implementing against an incomplete base.
+- When implementation is actually ready to begin, fetch `origin` and create/switch to `fixN` from the then-current accepted `origin/main`. If a prerequisite fix is not yet complete on `main`, STOP rather than implementing against an incomplete base. Do not create a useful implementation history from a stale pre-prerequisite base.
 - Coding agents work only on the assigned `fixN` branch. Never commit implementation work directly to `main`, force-push `main`, reset/rewrite `main`, or merge the fix into `main` themselves unless the Help Code handoff explicitly says the outside review is complete and authorizes that merge.
 - Make all changes needed for one coherent task, inspect the diff once, commit coherently, and push to `origin/fixN`. Avoid micro-checkpoint churn.
 - ChatGPT's outside completion review compares `fixN` against the then-current `main`.
 - If review returns **NO — NOT FULLY DONE**, continue corrections on the same `fixN` branch and push them there.
 - If review returns **YES — DONE**, merge the accepted fix into `main`, preferably as one squash-merged logical commit such as `Fix 006: <title>`, then delete the temporary fix branch when appropriate.
 - The permanent Fix Master ledger remains on `main` and is maintained there by ChatGPT. Coding agents on `fixN` branches must not edit `/fixes/Fix Master.md`; this avoids guaranteed conflicts between concurrent fix branches. Completed individual fix files may still be deleted under the Help Code lifecycle.
-- If two active fixes touch the same files, prefer sequencing them when the overlap is substantial: finish/merge the earlier fix first, then start the later fix from the updated `main`. If they were already developed concurrently, after the first fix reaches `main`, fetch `origin` and merge the new `origin/main` into the remaining `fixN` branch, deliberately resolve any overlap/conflict there, push that branch, and have it reviewed again against the new `main`. Prefer this merge-forward approach over rebasing an already-pushed fix branch; it avoids history rewriting and force-pushes.
+- If two active fixes touch the same files, prefer sequencing them when the overlap is substantial: finish/merge the earlier fix first, then start the later fix from the updated `main`. If they were already developed concurrently, after the first fix reaches `main`, fetch `origin` and merge the new `origin/main` into the remaining `fixN` branch, deliberately resolve any overlap/conflict there, push that branch, and have it reviewed again against the new `main`. This is required even when Git reports no textual conflict if the earlier fix changed behavior or assumptions used by the remaining fix. Prefer this merge-forward approach over rebasing an already-pushed fix branch; it avoids history rewriting and force-pushes.
+- If another accepted fix lands on `main` while a `fixN` branch is still active, the active branch must incorporate the current `origin/main` before its final outside completion review whenever the new mainline change overlaps, affects a dependency, or could change the meaning of the fix. Do not declare the branch complete against an obsolete base.
 - If multiple local coding agents are active at once, do not make them share one working directory while switching branches; use separate clones or Git worktrees.
 
 The hosted app tracks `main`; work on a fix branch is intentionally isolated from the accepted/live line until outside review approves it.
