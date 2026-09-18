@@ -35,3 +35,9 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Planned implementation thread:** `Portable Space Identity Imp #6`
 - **Implementation branch:** `fix6`
 - **Notes:** Fully specified, but implementation is blocked until Fix 004 is complete on `origin/main`. Fix 006 is the first fix using the per-fix branch workflow: after Fix 004 is accepted on `main`, create `fix6` from that current `origin/main` and perform all implementation/correction work there until outside review approves merge. Adds stable Space IDs, a per-user Space registry, rename recovery, and a folder-name-independent inventory filename.
+
+## Fix 007 — Adaptive Edge Connectors
+- **Status:** Requirements questions
+- **Planning thread:** `Adaptive Edge Connectors Plan #7`
+- **Planned implementation thread:** `Adaptive Edge Connectors Imp #7`
+- **Notes:** Requirements gathering for expanded connector behavior: add three-way and four-way corner connectors, keep those corner connector types incompatible with variable height, ensure ordinary connectors derive fit from active bin wall thickness, and warn when a Space contains mixed wall thicknesses because connectors between different thicknesses are not supported. The current README already states that custom-wall connectors are generated for the selected wall thickness and are only for same-thickness bins; implementation details and warning behavior remain to be specified.
