@@ -95,21 +95,16 @@ DP.build = () => {
       <div class="section-body">
         <div id="dl-stats" class="dl-stats"></div>
         <div class="field-grid two">
-          <label>Fill<select id="dl-sp-fill">
-            <option value="all">Edges + empty cells</option>
-            <option value="edges">Edge strips only</option>
-            <option value="cells">Empty cells only</option>
-          </select></label>
+          <label class="checkbox-row" style="grid-column: 1 / -1" title="Build serpentine springs into the edge spacers to absorb real-world tolerance"><span>Flexible fit (recommended)</span><input id="dl-sp-flex" type="checkbox" checked></label>
           <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
           <label>Longest piece <span class="unit">mm</span><input id="dl-sp-max" type="number" min="16" step="1" title="Split anything longer so it fits your print bed"></label>
-          <label>Keep gaps open from <span class="unit">mm</span><input id="dl-sp-open" type="number" min="0" step="8" title="Gaps at least this wide both ways stay empty, for a bin you will print later. 0 fills everything."></label>
         </div>
         <div class="dl-action-grid">
-          <button type="button" id="dl-sp-make" class="button secondary" title="Open X-braced spacers for empty cells and flat-backed spacers for the edges: saved, added to the inventory and placed">Make spacers</button>
-          <button type="button" id="dl-sp-remove" class="button secondary" title="Take this drawer's spacers out (they stay in the inventory)">Take spacers out</button>
+          <button type="button" id="dl-sp-plan" class="button secondary" title="Calculate spacer blocks">Plan</button>
+          <button type="button" id="dl-sp-generate" class="button secondary" title="Generate spacer STL files">Generate</button>
           <button type="button" id="dl-connectors" class="button secondary" title="Save a file for every connector this layout needs, with how many to print">Make connectors</button>
           <button type="button" id="dl-base-trim" class="button secondary" title="Create a Base Trim around one filled rectangular block of bins">Make Base Trim</button>
-          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and connectors in Bambu Studio">Print spacers &amp; connectors</button>
+          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and connectors in Bambu Studio">Print Spacers</button>
         </div>
       </div>
     </section>
@@ -154,17 +149,17 @@ DP.build = () => {
     </section>
 
     <section class="dl-savebar" aria-label="Saving">
-      <div class="save-location-row">
-        <div class="save-location-group">
-          <label for="dl-output-folder">Save folder</label>
-          <div class="save-location-input-wrap">
-            <input id="dl-output-folder" type="text" readonly title="Click to select folder - each folder has its own inventory">
-            <button type="button" id="dl-output-folder-picker" class="folder-picker-button" title="Select folder" aria-label="Select folder">
-              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
-                <path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
-              </svg>
-            </button>
-          </div>
+      <div id="dl-space-info-block" class="space-info-card b4b-card" hidden style="margin-bottom: 16px;">
+        <h3 class="b4b-card-title">Space Info</h3>
+        <div class="space-info-details">
+          <strong id="dl-space-info-name"></strong>
+          <div id="dl-space-info-type"></div>
+          <div id="dl-space-info-size" class="muted"></div>
+        </div>
+        <div class="button-row" style="margin-top: 8px;">
+          <button id="dl-space-info-edit" class="button secondary" type="button">Edit</button>
+          <button id="dl-space-info-show" class="button secondary" type="button">Show Folder</button>
+          <button id="dl-space-info-new-drawer" class="button secondary" type="button" hidden>New Drawer Space</button>
         </div>
       </div>
       <label class="checkbox-row" title="New bins start with the bin settings from the last bin generated or printed in this Space. Interior parts and names start fresh."><span>Keep bin defaults</span><input id="dl-keep-bin-defaults" type="checkbox"></label>

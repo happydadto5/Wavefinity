@@ -689,10 +689,10 @@ DL.toggleSpacerCandidate = id => {
 DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
   if (!DL.spacerPlan) return;
   const before = DL.snapshot();
-  const selection = DL.spacerPlan.filter(c => DL.spacerSelected.has(c.id));
   const result = await api("/api/drawer/spacers/generate", {
     output: DL.output ?? DL.folder(), layout: DL.layout,
-    drawer_id: DL.layout.active, candidates: selection,
+    drawer_id: DL.layout.active, selected: Array.from(DL.spacerSelected),
+    options: DL.layout.settings.spacers,
   });
   DL.adopt(result);
   DL.normaliseLayout(result.layout);
@@ -712,18 +712,17 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
   DL.requestReport();
 });
 
-DL.spacerPrintRows = () => {
-  const drawer = DL.drawer();
-  if (!drawer) return [];
-  const spacers = drawer.placements.map(p => DL.bin(p.bin)).filter(DL.isSpacer);
+DL.spacerPrintGroups = () => {
+  const spacers = DL.items().filter(i => DL.isSpacer(i.row)).map(i => i.row);
   const groups = new Map();
   spacers.forEach(b => {
-    groups.set(b.id, (groups.get(b.id) || 0) + 1);
+    const key = `${b.file}|${b.x}|${b.y}|${b.z}`;
+    if (!groups.has(key)) groups.set(key, { bin: b, layoutQty: 0 });
+    groups.get(key).layoutQty += 1;
   });
-  return Array.from(groups.entries()).map(([id, qty]) => {
-    const bin = DL.bin(id);
-    const printed = bin.printed || 0;
-    return { bin, qty, printed, toPrint: Math.max(0, qty - printed) };
+  return Array.from(groups.values()).map(g => {
+    const printed = Number(g.bin.qty) || 0;
+    return { bin: g.bin, qty: g.layoutQty, printed, toPrint: Math.max(0, g.layoutQty - printed) };
   });
 };
 
@@ -735,16 +734,24 @@ DL.printSelectedSpacers = async (selection) => {
     slicer_path: state.slicer?.path || null,
   });
   
-  // Mark as printed
   const updates = [];
   for (const [id, count] of Object.entries(selection)) {
     const bin = DL.bin(id);
-    if (bin && count > 0) updates.push({ id, qty: (bin.printed || 0) + count });
+    if (bin && count > 0) {
+      const printed = Number(bin.qty) || 0;
+      const layoutQty = DL.items().filter(i => i.bin === id).length;
+      // reprints do not increase logical drawer quantity
+      // Only increase qty if printed is less than layoutQty, and we can only increase up to layoutQty.
+      const newPrinted = Math.min(layoutQty, printed + count);
+      if (newPrinted > printed) {
+        updates.push({ id, qty: newPrinted });
+      }
+    }
   }
   if (updates.length > 0) {
     await DL.editBins({ bin_updates: updates });
   }
-  toast("Sent to slicer and marked as printed.");
+  toast("Sent to slicer.");
 };
 
 DL.removeSpacers = () => DL.change(() => {

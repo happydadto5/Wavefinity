@@ -382,7 +382,20 @@
       </section>
 
       <section class="output-panel">
-        <div class="save-location-row">
+        <div id="space-info-block" class="space-info-card b4b-card" hidden style="margin-bottom: 16px;">
+          <h3 class="b4b-card-title">Space Info</h3>
+          <div class="space-info-details">
+            <strong id="space-info-name"></strong>
+            <div id="space-info-type"></div>
+            <div id="space-info-size" class="muted"></div>
+          </div>
+          <div class="button-row" style="margin-top: 8px;">
+            <button id="space-info-edit" class="button secondary" type="button">Edit</button>
+            <button id="space-info-show" class="button secondary" type="button">Show Folder</button>
+            <button id="space-info-new-drawer" class="button secondary" type="button" hidden>New Drawer Space</button>
+          </div>
+        </div>
+        <div id="save-location-row" class="save-location-row">
           <div class="save-location-group">
             <label for="output-folder">Save folder</label>
             <div class="save-location-input-wrap">
@@ -425,6 +438,7 @@
             <button class="view-tab" data-view="2d" role="tab" aria-selected="false" title="Lay out the interior parts of this bin">2D</button>
             <button class="view-tab" data-view="drawer" role="tab" aria-selected="false" title="Fit your printed bins into your drawers">Space</button>
           </div>
+          <span id="workspace-space-name" class="workspace-space-name" hidden></span>
         </div>
         <div class="preview-hint"><span id="preview-state">Building preview…</span></div>
       </div>
@@ -773,6 +787,10 @@
           <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="drawer-x" type="number" min="1" step="any"></label>
           <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="drawer-y" type="number" min="1" step="any"></label>
           <label class="space-field"><span>Usable height <span class="unit">mm</span></span><input id="drawer-z" type="number" min="1" step="any"></label>
+          <div id="drawer-readout" class="derived-readout" hidden>
+             <dt>Physical Size</dt><dd id="drawer-size-readout"></dd>
+             <dt>Wavefinity Capacity</dt><dd id="drawer-capacity-readout"></dd>
+          </div>
         </div>
 
         <div id="space-fields-surface" class="space-type-fields" hidden>
@@ -791,6 +809,9 @@
           <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="portable-x" type="number" min="1" step="any"></label>
           <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="portable-y" type="number" min="1" step="any"></label>
           <label class="space-field"><span>Usable inside height <span class="unit">mm</span></span><input id="portable-z" type="number" min="1" step="any"></label>
+          <div id="portable-readout" class="derived-readout" hidden>
+             <dt>Resolved Size</dt><dd id="portable-size-readout"></dd>
+          </div>
         </div>
 
         <p id="space-note" class="space-note"></p>
@@ -811,7 +832,31 @@
           <button id="space-configure-no" class="button secondary" type="button">Use this folder without a Space type</button>
         </div>
       </div>
+
+      <div id="space-collision-prompt" hidden>
+        <div class="welcome-header">
+          <h2>Folder already configured</h2>
+        </div>
+        <p class="welcome-lead">This folder is already set up as a Wavefinity Space.</p>
+        <p id="space-collision-meta" class="muted"></p>
+        <div class="welcome-actions">
+          <button id="space-collision-open" class="button primary" type="button">Open this Space</button>
+          <button id="space-collision-choose" class="button secondary" type="button">Choose another folder</button>
+        </div>
+      </div>
     </dialog>
+
+    <dialog id="cross-type-warning-dialog" class="welcome-dialog" aria-modal="true" hidden>
+      <div class="welcome-header">
+        <h2>Space kind mismatch</h2>
+      </div>
+      <p class="welcome-lead" id="cross-type-warning-text"></p>
+      <div class="welcome-actions">
+        <button id="cross-type-continue" class="button secondary" type="button">Continue in this Space</button>
+        <button id="cross-type-new" class="button primary" type="button">Create a New Space</button>
+      </div>
+    </dialog>
+
   <div id="update-banner" class="update-banner" role="status" hidden>
     <span>Wavefinity was updated. This update requires the page to reload before you continue.</span>
     <button id="update-banner-reload" class="button primary" type="button">Reload</button>

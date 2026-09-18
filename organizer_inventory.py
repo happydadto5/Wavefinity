@@ -616,74 +616,81 @@ def legacy_layout_space(layout: dict[str, Any] | None) -> dict[str, Any] | None:
     return {"kind": "drawer", "name": name, "x": size[0], "y": size[1], "z": size[2]}
 
 
-def create_space(
-    output_dir: Path | str, *, name: str, kind: str, x: float, y: float, z: float,
-) -> dict[str, Any]:
-    """Start a folder's inventory as a named space.
 
-    The space goes in the layout block with one drawer the size of its inside,
-    so the Layout view opens ready to fill it.  A box's inside is a B4B child
-    field the bins sit in wall to wall, so it asks for no extra clearance.
-    """
-    name = str(name or "").strip()[:80]
+def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = False) -> dict[str, Any]:
+    name = str(raw.get("name") or "").strip()[:80]
     if not name:
         raise ValueError("a space needs a name")
-    if kind not in SPACE_KINDS:
+    kind = str(raw.get("kind") or "")
+    if kind not in SPACE_KINDS and not (allow_legacy and kind == "box"):
         raise ValueError(f"a space is one of {', '.join(SPACE_KINDS)}")
-    size = [_number(value) for value in (x, y, z)]
-    if min(size) <= 0:
+    
+    x, y, z = (_number(raw.get(axis)) for axis in ("x", "y", "z"))
+    if min(x, y, z) <= 0:
         raise ValueError("a space needs its inside X, Y and Z in mm")
+        
+    result = {"name": name, "kind": kind, "x": x, "y": y, "z": z}
+    if kind == "surface" and "trim_size" in raw:
+        result["trim_size"] = str(raw["trim_size"])
+    return result
+
+def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> None:
+    layout["version"] = 1
+    layout["space"] = space_def
+    
+    kind = space_def["kind"]
+    x, y, z = space_def["x"], space_def["y"], space_def["z"]
+    
+    clearance = 0.0 if kind in ("portable", "box", "surface") else 1.0
+    boundary = "mating" if kind in ("portable", "box", "surface") else "wall"
+    
+    drawers = layout.setdefault("drawers", [])
+    primary = next((d for d in drawers if d.get("id") == "d1"), None)
+    if not primary:
+        primary = {
+            "id": "d1", 
+            "keepouts": [], 
+            "placements": []
+        }
+        drawers.insert(0, primary)
+        layout["active"] = "d1"
+        
+    primary["name"] = space_def["name"]
+    primary["width"] = x
+    primary["depth"] = y
+    primary["height"] = z
+    primary["clearance"] = clearance
+    primary["boundary"] = boundary
+
+
+def configure_space(
+    output_dir: Path | str, *, raw_def: dict[str, Any], mode: str = "create", allow_legacy: bool = False
+) -> dict[str, Any]:
+    space_def = normalise_space_definition(raw_def, allow_legacy=allow_legacy)
     path = inventory_path(output_dir)
     with INVENTORY_LOCK:
         current = _read(path)
         layout = current["layout"] if isinstance(current["layout"], dict) else {}
-        if isinstance(layout.get("space"), dict):
+        if mode == "create" and isinstance(layout.get("space"), dict):
             raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
-        layout["version"] = 1
-        layout["space"] = {"name": name, "kind": kind, "x": size[0], "y": size[1], "z": size[2]}
-        if not layout.get("drawers"):
-            layout["drawers"] = [{
-                "id": "d1", "name": name, "width": size[0], "depth": size[1], "height": size[2],
-                "clearance": 0.0 if kind in ("box", "portable", "surface") else 1.0,
-                "boundary": "mating" if kind in ("box", "portable") else "wall",
-                "keepouts": [], "placements": [],
-            }]
-            layout["active"] = "d1"
+        _setup_space_layout(layout, space_def)
         _write(path, current["bins"], layout, current["legacy"])
         return _payload(path, _read(path))
 
 
-def create_space_text(
-    text: str, *, title: str, name: str, kind: str,
-    x: float, y: float, z: float,
+def configure_space_text(
+    text: str, *, title: str, raw_def: dict[str, Any], mode: str = "create", allow_legacy: bool = False
 ) -> dict[str, Any]:
-    """Create Space inventory while the browser remains the file owner."""
-    name = str(name or "").strip()[:80]
-    if not name:
-        raise ValueError("a space needs a name")
-    if kind not in SPACE_KINDS:
-        raise ValueError(f"a space is one of {', '.join(SPACE_KINDS)}")
-    size = [_number(value) for value in (x, y, z)]
-    if min(size) <= 0:
-        raise ValueError("a space needs its inside X, Y and Z in mm")
+    space_def = normalise_space_definition(raw_def, allow_legacy=allow_legacy)
     raw = str(text or "")
     with INVENTORY_LOCK:
         current = parse_inventory(raw)
         layout = current["layout"] if isinstance(current["layout"], dict) else {}
-        if isinstance(layout.get("space"), dict):
+        if mode == "create" and isinstance(layout.get("space"), dict):
             raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
-        layout["version"] = 1
-        layout["space"] = {"name": name, "kind": kind, "x": size[0], "y": size[1], "z": size[2]}
-        if not layout.get("drawers"):
-            layout["drawers"] = [{
-                "id": "d1", "name": name, "width": size[0], "depth": size[1], "height": size[2],
-                "clearance": 0.0 if kind in ("box", "portable", "surface") else 1.0,
-                "boundary": "mating" if kind in ("box", "portable") else "wall",
-                "keepouts": [], "placements": [],
-            }]
-            layout["active"] = "d1"
-        rendered = render_inventory(str(title or name), current["bins"], layout)
-        return _text_payload(rendered, str(title or name), parse_inventory(rendered))
+        _setup_space_layout(layout, space_def)
+        rendered = render_inventory(str(title or space_def["name"]), current["bins"], layout)
+        return _text_payload(rendered, str(title or space_def["name"]), parse_inventory(rendered))
 
 
 def update_space(

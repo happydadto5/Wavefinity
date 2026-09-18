@@ -23,7 +23,7 @@ SP.dialog = () => $("#welcome-dialog");
 SP.close = () => { if (SP.dialog().open) SP.dialog().close(); };
 SP.showOnly = id => {
   SP.cancelResumeAutoContinue();
-  ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-form", "space-configure-prompt"]
+  ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-form", "space-configure-prompt", "space-collision-prompt"]
     .forEach(one => { $("#" + one).hidden = one !== id; });
 };
 SP.showDialog = () => { if (!SP.dialog().open) SP.dialog().showModal(); };
@@ -75,7 +75,7 @@ SP.applyFolder = async (info, { reset = true } = {}) => {
     info.keep_bin_defaults,
     info.bin_defaults,
   );
-  syncForm();
+  syncForm();\n  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
 };
 
 // ------------------------------------------------------------ browser files
@@ -531,27 +531,28 @@ SP.showTypeCards = () => {
   SP.showDialog();
 };
 
-SP.showSetup = (kind) => {
+SP.showSetup = (kind, prefillSpace = null) => {
   SP.showOnly("space-form");
   SP.setupKind = kind;
   document.querySelectorAll(".space-type-fields").forEach(el => el.hidden = true);
   const field = document.getElementById(`space-fields-${kind}`);
   if (field) field.hidden = false;
-  document.getElementById("space-name").value = "";
+  document.getElementById("space-name").value = prefillSpace?.name || "";
   document.getElementById("space-error").hidden = true;
   document.getElementById("space-note").textContent = "";
   if (kind === 'drawer') {
-      document.getElementById('drawer-x').value = '';
-      document.getElementById('drawer-y').value = '';
-      document.getElementById('drawer-z').value = '';
+      document.getElementById('drawer-x').value = prefillSpace?.x || '';
+      document.getElementById('drawer-y').value = prefillSpace?.y || '';
+      document.getElementById('drawer-z').value = prefillSpace?.z || '';
   } else if (kind === 'surface') {
-      document.getElementById('surface-x').value = '';
-      document.getElementById('surface-y').value = '';
-  } else if (kind === 'portable') {
-      document.getElementById('portable-x').value = '';
-      document.getElementById('portable-y').value = '';
-      document.getElementById('portable-z').value = '';
+      document.getElementById('surface-x').value = prefillSpace?.x ? prefillSpace.x / (state.catalog?.base_unit || 8) : '';
+      document.getElementById('surface-y').value = prefillSpace?.y ? prefillSpace.y / (state.catalog?.base_unit || 8) : '';
+  } else if (kind === "portable") {
+      document.getElementById("portable-x").value = prefillSpace?.x || "";
+      document.getElementById("portable-y").value = prefillSpace?.y || "";
+      document.getElementById("portable-z").value = prefillSpace?.z || "";
   }
+  SP.updateReadouts();
   SP.showDialog();
 };
 
@@ -568,7 +569,7 @@ SP.startUntyped = async () => {
   }
 };
 
-SP.create = async () => {
+SP.create = async () => {\n  if (SP.isUpdate) return SP.updateSpace();
   const kind = SP.setupKind;
   const name = document.getElementById("space-name").value.trim();
   if (!name) return SP.fail("Give the Space a name.", "#space-name");
@@ -599,8 +600,25 @@ SP.create = async () => {
   }
 
   // Folder last
-  const folder = await SP.pickFolder();
+  const folder = SP.configureData || await SP.pickFolder();
   if (!folder) return;
+
+  if (!SP.configureData) {
+      let data;
+      if (state.runtime.hosted) {
+          data = await SP.inspectHosted(folder);
+      } else {
+          const resp = await api("/api/space/inspect", { output: folder });
+          data = resp.folder;
+      }
+      if (!data.needs_setup && data.folder_mode === "space") {
+          SP.collisionFolder = folder;
+          SP.showOnly("space-collision-prompt");
+          document.getElementById("space-collision-meta").textContent = `${data.space.name} (${data.space.kind})`;
+          return;
+      }
+  }
+  SP.configureData = null;
 
   let info;
   if (state.runtime.hosted) {
@@ -633,7 +651,7 @@ SP.create = async () => {
   
   if (kind === "portable") SP.designBox(info.space);
   else if (kind === "surface") SP.designSurface(info.space);
-  else activatePreviewView("drawer");
+  else activatePreviewView("3d");
 };
 
 SP.designSurface = space => {
@@ -643,7 +661,7 @@ SP.designSurface = space => {
   Object.assign(box, { x: space.x, y: space.y, z: space.z });
   box.base_trim = { enabled: true, trim_size: space.z === 6.5 ? 'small' : (space.z === 10.0 ? 'large' : 'medium') };
   state.design.part_name = space.name;
-  syncForm();
+  syncForm();\n  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
   toast(`Designing Surface: ${space.name}`);
 };
 
@@ -660,8 +678,13 @@ SP.openExisting = async () => {
     
     if (data.needs_setup) {
         SP.configureData = folder;
-        SP.showOnly("space-configure-prompt");
-        SP.showDialog();
+        if (data.space && ["drawer", "box", "portable"].includes(data.space.kind)) {
+             let kind = data.space.kind === "box" ? "portable" : data.space.kind;
+             SP.showSetup(kind, data.space);
+        } else {
+             SP.showOnly("space-configure-prompt");
+             SP.showDialog();
+        }
     } else {
         await SP.afterPick(folder);
     }
@@ -696,7 +719,7 @@ if (state.ready) {
 }
 
 
-SP.wire = () => {
+SP.wire = () => {\n  wireInfoButtons();
   document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-form-close, #space-type-cards-close")
     .forEach(el => el?.addEventListener("click", SP.close));
   SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
@@ -724,6 +747,13 @@ SP.wire = () => {
     event.preventDefault();
     SP.run(SP.create);
   });
+  const colOpen = document.getElementById("space-collision-open");
+  if (colOpen) colOpen.addEventListener("click", () => SP.afterPick(SP.collisionFolder));
+  const colChoose = document.getElementById("space-collision-choose");
+  if (colChoose) colChoose.addEventListener("click", () => {
+    SP.collisionFolder = null;
+    SP.create();
+  });
   
   const confYes = document.getElementById("space-configure-yes");
   if (confYes) confYes.addEventListener("click", SP.configureFolder);
@@ -743,3 +773,249 @@ SP.wire = () => {
     else SP.run(() => SP.afterPick(one.folder));
   });
 };
+
+SP.updateReadouts = () => {
+    const unit = state.catalog?.base_unit || 8;
+    const kind = SP.setupKind;
+    if (kind === "drawer") {
+        const x = Number(document.getElementById("drawer-x").value);
+        const y = Number(document.getElementById("drawer-y").value);
+        const z = Number(document.getElementById("drawer-z").value);
+        if (x > 0 && y > 0 && z > 0) {
+            document.getElementById("drawer-readout").hidden = false;
+            document.getElementById("drawer-size-readout").textContent = `${x} × ${y} × ${z} mm`;
+            document.getElementById("drawer-capacity-readout").textContent = `${Math.floor(x/unit)} × ${Math.floor(y/unit)} units`;
+        } else {
+            document.getElementById("drawer-readout").hidden = true;
+        }
+    } else if (kind === "portable") {
+        const x = Number(document.getElementById("portable-x").value);
+        const y = Number(document.getElementById("portable-y").value);
+        const z = Number(document.getElementById("portable-z").value);
+        if (x > 0 && y > 0 && z > 0) {
+            document.getElementById("portable-readout").hidden = false;
+            const rx = SP.snap(x);
+            const ry = SP.snap(y);
+            document.getElementById("portable-size-readout").textContent = `${rx/unit} × ${ry/unit} units (${rx} × ${ry} mm)`;
+        } else {
+            document.getElementById("portable-readout").hidden = true;
+        }
+    }
+};
+
+SP.renderSpaceInfo = () => {
+    const isSpace = state.folderMode === "space" && state.activeSpace;
+    const wsName = document.getElementById("workspace-space-name");
+    if (wsName) {
+        if (isSpace) {
+            wsName.textContent = state.activeSpace.name;
+            wsName.hidden = false;
+        } else {
+            wsName.hidden = true;
+        }
+    }
+    
+    const infoBlocks = [
+        { prefix: "space-info", saveBlock: "save-location-row" },
+        { prefix: "dl-space-info", saveBlock: null }
+    ];
+    
+    infoBlocks.forEach(({prefix, saveBlock}) => {
+        const block = document.getElementById(prefix + "-block");
+        if (!block) return;
+        if (saveBlock) {
+            const saveEl = document.getElementById(saveBlock);
+            if (saveEl) saveEl.hidden = isSpace;
+        }
+        
+        if (!isSpace) {
+            block.hidden = true;
+            return;
+        }
+        
+        block.hidden = false;
+        document.getElementById(prefix + "-name").textContent = state.activeSpace.name;
+        
+        const kind = state.activeSpace.kind;
+        const kindLabel = SP_KINDS[kind]?.label || kind;
+        document.getElementById(prefix + "-type").textContent = kindLabel;
+        
+        let sizeText = "";
+        const unit = state.catalog?.base_unit || 8;
+        if (kind === "drawer") {
+            const x = state.activeSpace.x;
+            const y = state.activeSpace.y;
+            const z = state.activeSpace.z;
+            sizeText = x + " × " + y + " × " + z + " mm (" + Math.floor(x/unit) + " × " + Math.floor(y/unit) + " units)";
+        } else if (kind === "surface") {
+            const x = state.activeSpace.x;
+            const y = state.activeSpace.y;
+            const z = state.activeSpace.z;
+            let trim = "Medium";
+            if (z === 6.5) trim = "Small";
+            else if (z === 10) trim = "Large";
+            sizeText = (x/unit) + " × " + (y/unit) + " units (" + x + " × " + y + " mm), " + trim + " trim";
+        } else if (kind === "portable" || kind === "box") {
+            const x = state.activeSpace.x;
+            const y = state.activeSpace.y;
+            const z = state.activeSpace.z;
+            sizeText = (x/unit) + " × " + (y/unit) + " units (" + x + " × " + y + " mm) x " + z + " mm usable height";
+        }
+        document.getElementById(prefix + "-size").textContent = sizeText;
+        
+        const btnNew = document.getElementById(prefix + "-new-drawer");
+        if (btnNew) btnNew.hidden = kind !== "drawer";
+        
+        const btnShow = document.getElementById(prefix + "-show");
+        if (btnShow) btnShow.hidden = state.runtime.hosted;
+    });
+};
+
+SP.showFolder = async () => {
+    if (!state.output || state.runtime.hosted) return;
+    const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+    const isWin = navigator.platform.toUpperCase().indexOf("WIN") >= 0;
+    const fm = isMac ? "Finder" : (isWin ? "File Explorer" : "your file manager");
+    if (!confirm("Open this Space in " + fm + "?")) return;
+    try {
+        await api("/api/space/show-folder", { output: state.output });
+    } catch (e) {
+        toast("Failed to open folder: " + e.message, true);
+    }
+};
+
+SP.editSpace = () => {
+    if (!state.activeSpace) return;
+    SP.showSetup(state.activeSpace.kind === "box" ? "portable" : state.activeSpace.kind, state.activeSpace);
+    SP.isUpdate = true;
+};
+
+SP.newDrawerSpace = () => {
+    if (!state.activeSpace) return;
+    SP.configureData = null; // Ensure we ask for a new folder
+    SP.showSetup("drawer", state.activeSpace);
+    // Remove name for new
+    document.getElementById("space-name").value = "";
+};
+
+// Wire info buttons
+const wireInfoButtons = () => {
+    ["space-info", "dl-space-info"].forEach(prefix => {
+        const btnEdit = document.getElementById(prefix + "-edit");
+        if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
+        const btnShow = document.getElementById(prefix + "-show");
+        if (btnShow) btnShow.addEventListener("click", SP.showFolder);
+        const btnNew = document.getElementById(prefix + "-new-drawer");
+        if (btnNew) btnNew.addEventListener("click", SP.newDrawerSpace);
+    });
+};
+
+SP.updateSpace = async () => {
+    const kind = SP.setupKind;
+    const name = document.getElementById("space-name").value.trim();
+    if (!name) return SP.fail("Give the Space a name.", "#space-name");
+    
+    let x, y, z;
+    const unit = state.catalog?.base_unit || 8;
+    
+    if (kind === "drawer") {
+        x = Number(document.getElementById("drawer-x").value);
+        y = Number(document.getElementById("drawer-y").value);
+        z = Number(document.getElementById("drawer-z").value);
+    } else if (kind === "surface") {
+        x = Number(document.getElementById("surface-x").value) * unit;
+        y = Number(document.getElementById("surface-y").value) * unit;
+        const t = document.getElementById("surface-trim").value;
+        z = t === "small" ? 6.5 : (t === "large" ? 10.0 : 7.5);
+    } else if (kind === "portable") {
+        x = SP.snap(Number(document.getElementById("portable-x").value));
+        y = SP.snap(Number(document.getElementById("portable-y").value));
+        z = Number(document.getElementById("portable-z").value);
+    }
+
+    if (state.runtime.hosted) {
+        state.activeSpace = Object.assign({}, state.activeSpace, { name: name, x: x, y: y, z: z });
+        await SP.writeMetadata(state.browserFolder.handle, "space", state.activeSpace, true);
+    } else {
+        const data = await api("/api/space/update", { output: state.output, name: name, x: x, y: y, z: z });
+        state.activeSpace = data.space;
+    }
+    SP.isUpdate = false;
+    SP.renderSpaceInfo();
+    SP.close();
+    toast("Space updated.");
+    
+    if (kind === "drawer" && typeof DL !== "undefined" && DL.active) {
+        DL.drawer().width = x;
+        DL.drawer().depth = y;
+        DL.drawer().height = z;
+        DL.dirty = true;
+        DL.emit();
+    }
+};
+
+
+
+// Cross-type warning
+SP.crossTypeCheck = (designType) => {
+    if (!state.activeSpace || state.folderMode !== "space") return false;
+    const kind = state.activeSpace.kind;
+    
+    let warning = null;
+    let targetKind = null;
+    if (designType === "b4b" && (kind === "drawer" || kind === "surface")) {
+        warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. B4B is meant for Portable Storage.`;
+        targetKind = "portable";
+    } else if ((designType === "base-trim" || designType === "base_trim") && (kind === "drawer" || kind === "portable" || kind === "box")) {
+        warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. Base Trim is meant for Surface Spaces.`;
+        targetKind = "surface";
+    }
+    
+    if (warning) {
+        document.getElementById("cross-type-warning-text").textContent = warning;
+        const dialog = document.getElementById("cross-type-warning-dialog");
+        
+        return new Promise(resolve => {
+            const btnContinue = document.getElementById("cross-type-continue");
+            const btnNew = document.getElementById("cross-type-new");
+            
+            const cleanup = () => {
+                dialog.close();
+                btnContinue.removeEventListener("click", onContinue);
+                btnNew.removeEventListener("click", onNew);
+            };
+            
+            const onContinue = () => { cleanup(); resolve(true); };
+            const onNew = () => { 
+                cleanup(); 
+                SP.configureData = null;
+                SP.showSetup(targetKind); 
+                resolve(false); 
+            };
+            
+            btnContinue.addEventListener("click", onContinue);
+            btnNew.addEventListener("click", onNew);
+            dialog.showModal();
+        });
+    }
+    
+    return Promise.resolve(true);
+};
+
+// We intercept design-type changes.
+document.addEventListener("DOMContentLoaded", () => {
+    const dt = document.getElementById("design-type");
+    if (!dt) return;
+    let lastValue = dt.value;
+    dt.addEventListener("change", async (e) => {
+        const val = e.target.value;
+        const ok = await SP.crossTypeCheck(val);
+        if (!ok) {
+            e.target.value = lastValue;
+            // Need to dispatch event to revert UI in app.js
+            e.target.dispatchEvent(new Event("change"));
+        } else {
+            lastValue = val;
+        }
+    });
+});

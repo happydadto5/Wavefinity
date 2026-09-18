@@ -513,9 +513,8 @@ DV.paintScene = (ctx, drawer, cam) => {
         // Draw the candidate box
         const x = p.x !== undefined ? p.x : grid.ox + p.gx * step;
         const y = p.y !== undefined ? p.y : grid.oy + p.gy * step;
-        const w = p.w !== undefined ? p.w : DL.bin(p.bin).x;
-        const d = p.d !== undefined ? p.d : DL.bin(p.bin).y;
-        const z = DL.bin(p.bin).z;
+        const w = p.w !== undefined ? p.w : 8;
+        const d = p.d !== undefined ? p.d : 8;
         const p1 = [x, y, 0], p2 = [x + w, y, 0], p3 = [x + w, y + d, 0], p4 = [x, y + d, 0];
         const screenPoly = face([p1, p2, p3, p4], tone, stroke, 2);
         hits.push({ key: c.id, polys: [screenPoly], candidate: true, z: 0 });

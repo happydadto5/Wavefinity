@@ -277,7 +277,7 @@ function applySpaceSizingDefaults(design) {
   if (!state.pinnedZone?.y) design.box.y = startY * unit;
 
   if (kind === "drawer") {
-    design.box.z = normalizeBinDimension("z", space.z - (space.clearance || 1.0));
+    design.box.z = normalizeBinDimension("z", space.z - 3);
   } else if (kind === "surface") {
     const presets = { small: 6.5, medium: 7.5, large: 10.0 };
     design.box.z = presets[space.trim_size || "medium"] || 7.5;
@@ -285,8 +285,6 @@ function applySpaceSizingDefaults(design) {
     design.box.z = normalizeBinDimension("z", space.z);
   }
   
-  return design;
-}
   return design;
 }
 

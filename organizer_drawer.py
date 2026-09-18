@@ -903,60 +903,156 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
     if rows and cols:
         wall = drawer["clearance"] / 2.0
         
-        # Real connected components of bins
-        placements = [p for p in drawer["placements"] if "gx" in p and p.get("bin") in by_id]
-        import uuid
+        items = [i for i in _grid_items(drawer, by_id) if i["kind"] not in SPACER_KINDS]
         
-        if placements:
-            # Just group them all as one component for simple bounding box
-            min_gx = min(p["gx"] for p in placements)
-            min_gy = min(p["gy"] for p in placements)
-            
-            # w and d might not be explicitly there, assume 1 unit for now, wait we need actual widths
-            # To be robust, calculate bounding box:
-            max_gx = max(p["gx"] + p.get("w", 1) for p in placements)
-            max_gy = max(p["gy"] + p.get("d", 1) for p in placements)
-            
-            # Generate candidates
-            # right candidate
-            gap_right = (drawer["width"] - grid["ox"] - (max_gx * step)) - wall
-            if gap_right > 0.1:
-                w = gap_right
-                d = (max_gy - min_gy) * step
-                cid_right = str(uuid.uuid5(uuid.NAMESPACE_OID, f"right-{min_gx}-{min_gy}"))
-                if flexible: w += 0.5
-                candidates.append({"id": cid_right, "placements": [{"bin": "spacer", "gx": max_gx, "gy": min_gy, "w": w, "d": d, "side": "right"}]})
-                selected.append({"id": cid_right})
+        adj = {i: set() for i in range(len(items))}
+        for i, a in enumerate(items):
+            for j, b in enumerate(items[i+1:], i+1):
+                if max(a["gx"], b["gx"]) < min(a["gx"]+a["w"], b["gx"]+b["w"]) and (a["gy"]+a["d"] == b["gy"] or b["gy"]+b["d"] == a["gy"]):
+                    adj[i].add(j)
+                    adj[j].add(i)
+                elif max(a["gy"], b["gy"]) < min(a["gy"]+a["d"], b["gy"]+b["d"]) and (a["gx"]+a["w"] == b["gx"] or b["gx"]+b["w"] == a["gx"]):
+                    adj[i].add(j)
+                    adj[j].add(i)
+        
+        seen = set()
+        components = []
+        for i in range(len(items)):
+            if i not in seen:
+                comp = []
+                queue = [i]
+                seen.add(i)
+                while queue:
+                    curr = queue.pop(0)
+                    comp.append(curr)
+                    for neighbor in adj[curr]:
+                        if neighbor not in seen:
+                            seen.add(neighbor)
+                            queue.append(neighbor)
+                components.append([items[idx] for idx in comp])
                 
-            # back candidate
-            gap_back = (drawer["depth"] - grid["oy"] - (max_gy * step)) - wall
-            if gap_back > 0.1:
-                w = (max_gx - min_gx) * step
+        for comp_idx, comp in enumerate(components):
+            comp_area = sum(i["w"] * i["d"] for i in comp)
+            
+            # Right candidates
+            max_x = max(item["gx"] + item["w"] for item in comp)
+            right_items = [i for i in comp if i["gx"] + i["w"] == max_x]
+            min_y = min(i["gy"] for i in right_items)
+            max_y = max(i["gy"] + i["d"] for i in right_items)
+            gap_right = (drawer["width"] - grid["ox"] - (max_x * step)) - wall
+            if gap_right >= MIN_EDGE_SPACER:
+                w = gap_right
+                d = (max_y - min_y) * step
+                cid_right = f"right-{max_x}-{min_y}-{max_y}"
+                score = comp_area / (w * d) if w * d > 0 else 0
+                candidates.append({"id": cid_right, "placements": [{"bin": "spacer", "gx": max_x, "gy": min_y, "w": w, "d": d, "side": "right"}], "score": score, "axis": "x", "comp": comp_idx})
+                
+            # Back candidates
+            max_y_comp = max(item["gy"] + item["d"] for item in comp)
+            back_items = [i for i in comp if i["gy"] + i["d"] == max_y_comp]
+            min_x = min(i["gx"] for i in back_items)
+            max_x_comp = max(i["gx"] + i["w"] for i in back_items)
+            gap_back = (drawer["depth"] - grid["oy"] - (max_y_comp * step)) - wall
+            if gap_back >= MIN_EDGE_SPACER:
+                w = (max_x_comp - min_x) * step
                 d = gap_back
-                cid_back = str(uuid.uuid5(uuid.NAMESPACE_OID, f"back-{min_gx}-{min_gy}"))
-                if flexible: d += 0.5
-                candidates.append({"id": cid_back, "placements": [{"bin": "spacer", "gx": min_gx, "gy": max_gy, "w": w, "d": d, "side": "back"}]})
-                selected.append({"id": cid_back})
+                cid_back = f"back-{min_x}-{max_x_comp}-{max_y_comp}"
+                score = comp_area / (w * d) if w * d > 0 else 0
+                candidates.append({"id": cid_back, "placements": [{"bin": "spacer", "gx": min_x, "gy": max_y_comp, "w": w, "d": d, "side": "back"}], "score": score, "axis": "y", "comp": comp_idx})
+
+        # Filter overlaps / keepouts
+        valid_cands = []
+        for cand in candidates:
+            p = cand["placements"][0]
+            if p["side"] == "right":
+                px, py = grid["ox"] + p["gx"] * step, grid["oy"] + p["gy"] * step
+            else:
+                px, py = grid["ox"] + p["gx"] * step, grid["oy"] + p["gy"] * step
+            pw, pd = p["w"], p["d"]
+            overlap_keepout = False
+            for k in drawer["keepouts"]:
+                if max(px, k["x"]) < min(px+pw, k["x"]+k["w"]) and max(py, k["y"]) < min(py+pd, k["y"]+k["d"]):
+                    overlap_keepout = True
+                    break
+            if not overlap_keepout:
+                valid_cands.append(cand)
+        candidates = valid_cands
+        
+        candidates.sort(key=lambda c: c["score"], reverse=True)
+        restrained_x = set()
+        restrained_y = set()
+        for cand in candidates:
+            c_id = cand["comp"]
+            if cand["axis"] == "x":
+                if c_id not in restrained_x:
+                    selected.append({"id": cand["id"]})
+                    restrained_x.add(c_id)
+            else:
+                if c_id not in restrained_y:
+                    selected.append({"id": cand["id"]})
+                    restrained_y.add(c_id)
+            if len(restrained_x) == len(components) and len(restrained_y) == len(components) and len(selected) >= 2:
+                break
+            if len(selected) >= 4:
+                break
+                
+        for cand in candidates:
+            cand.pop("score", None)
+            cand.pop("axis", None)
+            cand.pop("comp", None)
 
     return {"drawer": drawer, "height": height, "candidates": candidates, "selected": selected, "notes": notes}
 
-def _serpentine_flexure(w, d, side):
-    # Generates a simple serpentine polygon. For time constraints, a simple box is returned.
-    # To meet real requirements, we use a basic S shape if possible.
+def _serpentine_flexure(w, d, side, flexible=True):
+    web = 1.5
+    pad_bin = 3.0
+    pad_wall = 2.0
+    
     if side == "right":
-        return Polygon([(0, 0), (w, 0), (w, d), (0, d)])
+        if flexible: w += 0.5
+        if not flexible or w < pad_bin + pad_wall + web * 3:
+            return shape_box(0, 0, w - (0.5 if flexible else 0), d)
+        
+        profile = wavy_rect_outer(10.0, d / 2.0)
+        profile = affinity.translate(profile, -profile.bounds[0], d / 2.0)
+        left_pad = profile.intersection(shape_box(0, 0, pad_bin, d))
+        right_pad = shape_box(w - pad_wall, 0, w, d)
+        
+        mid_y = d / 2.0
+        top_web = shape_box(pad_bin, d - web, w - pad_wall, d)
+        bot_web = shape_box(pad_bin, 0, w - pad_wall, web)
+        mid_web = shape_box(pad_bin, mid_y - web/2, w - pad_wall, mid_y + web/2)
+        vert1 = shape_box(pad_bin, web, pad_bin + web, mid_y)
+        vert2 = shape_box(w - pad_wall - web, mid_y, w - pad_wall, d - web)
+        return union([left_pad, right_pad, top_web, bot_web, mid_web, vert1, vert2])
     else:
-        return Polygon([(0, 0), (w, 0), (w, d), (0, d)])
+        if flexible: d += 0.5
+        if not flexible or d < pad_bin + pad_wall + web * 3:
+            return shape_box(0, 0, w, d - (0.5 if flexible else 0))
+            
+        profile = wavy_rect_outer(w / 2.0, 10.0)
+        profile = affinity.translate(profile, w / 2.0, -profile.bounds[1])
+        bot_pad = profile.intersection(shape_box(0, 0, w, pad_bin))
+        top_pad = shape_box(0, d - pad_wall, w, d)
+        
+        mid_x = w / 2.0
+        left_web = shape_box(0, pad_bin, web, d - pad_wall)
+        right_web = shape_box(w - web, pad_bin, w, d - pad_wall)
+        mid_web = shape_box(mid_x - web/2, pad_bin, mid_x + web/2, d - pad_wall)
+        horiz1 = shape_box(web, pad_bin, mid_x, pad_bin + web)
+        horiz2 = shape_box(mid_x, d - pad_wall - web, w - web, d - pad_wall)
+        return union([bot_pad, top_pad, left_web, right_web, mid_web, horiz1, horiz2])
 
 def generate_spacers(request: dict[str, Any], output_dir: Path | str, generate_file: Callable[[str, trimesh.Trimesh], Path]) -> dict[str, Any]:
-    plan = plan_spacers(request.get("drawer") or {}, request.get("bins") or [], request.get("options") or {})
+    options = request.get("options") or {}
+    plan = plan_spacers(request.get("drawer") or {}, request.get("bins") or [], options)
     requested_ids = set(request.get("selected") or [])
     height = plan["height"]
     drawer = plan["drawer"]
     
     generated = []
+    notes = []
     
-    # Real mesh generation
     for cand in plan["candidates"]:
         cid = cand["id"]
         if cid in requested_ids:
@@ -965,8 +1061,10 @@ def generate_spacers(request: dict[str, Any], output_dir: Path | str, generate_f
             w = p["w"]
             d = p["d"]
             
-            # Simple mesh for now
-            poly = _serpentine_flexure(w, d, side)
+            poly = _serpentine_flexure(w, d, side, options.get("flexible", True))
+            if poly.area == w * d:
+                notes.append(f"Gap too short for flexure; generated rigid spacer for {side}.")
+                
             mesh = _extrude_polygon(poly, height)
             file_name = f"Spacer_{side}_{int(w)}x{int(d)}x{int(height)}.3mf"
             out_path = generate_file(file_name, mesh)
@@ -978,7 +1076,7 @@ def generate_spacers(request: dict[str, Any], output_dir: Path | str, generate_f
                 "w": w, "d": d, "h": height, "side": side
             })
             
-    return {"generated": generated, "notes": ["Generated spacers."]}
+    return {"generated": generated, "notes": notes}
 
 
 
@@ -998,32 +1096,44 @@ def generate_spacers(request: dict[str, Any], output_dir: Path | str, generate_f
                 mesh.export(str(out))
                 return out
             
-            # generate_spacers -> need to call it and update inventory
-            result = generate_spacers(payload, folder(payload), generate_file)
-            from organizer_inventory import append_bin, load_inventory
-            
-            for gen in result.get("generated", []):
-                append_bin(
-                    folder(payload),
-                    file=gen["file"],
-                    x=gen["w"], y=gen["d"], z=gen["h"],
-                    name="Flexible Spacer" if gen["w"] % 1 != 0 else "Rigid Spacer",
-                    kind="spacer",
-                    qty=1
-                )
-            
-            # update layout with placed spacers
             layout = payload["layout"]
-            layout["placements"] = layout.get("placements", [])
-            for gen in result.get("generated", []):
-                for p in gen["placements"]:
-                     layout["placements"].append(p)
-                     
-            from organizer_inventory import save_inventory
-            inv = save_inventory(folder(payload), layout=layout)
+            drawer = find_drawer(layout, payload.get("drawer_id"))
             
-            result["layout"] = inv["layout"]
-            result["bins"] = inv["bins"]
+            from organizer_inventory import load_inventory, next_bin_id, save_inventory
+            inv = load_inventory(folder(payload))
+            
+            options = payload.get("options") or {}
+            
+            request_for_gen = {
+                "drawer": drawer,
+                "bins": inv["bins"],
+                "options": options,
+                "selected": payload.get("selected", [])
+            }
+            result = generate_spacers(request_for_gen, folder(payload), generate_file)
+            
+            import datetime
+            for gen in result.get("generated", []):
+                new_id = next_bin_id(inv["bins"])
+                inv["bins"].append({
+                    "id": new_id,
+                    "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "kind": "spacer",
+                    "boundary": "edge",
+                    "name": "Flexible Spacer" if options.get("flexible", True) else "Rigid Spacer",
+                    "x": gen["w"] / 8.0, "y": gen["d"] / 8.0, "z": gen["h"],
+                    "qty": 1,
+                    "file": gen["file"],
+                })
+                for p in gen["placements"]:
+                    p_copy = p.copy()
+                    p_copy["bin"] = new_id
+                    drawer.setdefault("placements", []).append(p_copy)
+                     
+            saved = save_inventory(folder(payload), layout=layout, bins=inv["bins"])
+            
+            result["layout"] = saved["layout"]
+            result["bins"] = saved["bins"]
             
             return result
 
