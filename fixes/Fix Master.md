@@ -16,10 +16,10 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Implementation outbrief is present in the fix file. Final completion must be determined by outside ChatGPT review before the fix file is deleted.
 
 ## Fix 004 — Space Onboarding Redesign
-- **Status:** Needs remediation work — Corrections 2, 3, and 4
+- **Status:** Needs remediation work — Correction 5
 - **Fix file:** `/fixes/fix-004.md`
 - **Implementation thread:** `Space Onboarding Redesign Imp #4`
-- **Notes:** Corrections 2 and 3 remain active. The coding thread reported completion, but no corresponding implementation commit reached `origin/main`; remote main still contains the Render-breaking missing `drawer_routes` structure and other Correction 2 defects. Correction 4 requires preserving the agent's local work, integrating current origin/main, completing Corrections 2/3, and pushing/verifying the implementation remotely before reporting completion.
+- **Notes:** Gemini pushed commit `5ce745b` and reported completion, but Render still fails at startup because `organizer_drawer.py` does not export module-level `drawer_routes`. Static review also found a stale `create_space_text` import, literal JavaScript `\\n` artifacts, Space API route mismatches, Drawer spacer DOM/function mismatches, invalid `save_inventory(..., bins=...)` usage, and Shapely/trimesh union misuse. Correction 5 consolidates the required repair for a fresh coding agent.
 
 ## Fix 005 — Space Type Card Images
 - **Status:** Blocked by Fix 004 completion
