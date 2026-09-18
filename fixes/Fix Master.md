@@ -21,12 +21,12 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Final implementation commit:** `8e7a7281ecc60d963dc54fe6bd38ef280e0c278b`
 - **Notes:** Final closure review accepted Fix 004 after Corrections 1–10. The finished work includes the new Create/Open Space onboarding flow, Drawer/Surface/Portable setup and defaults, safe v2/v3/legacy migration, Space Info/New Drawer Space behavior, cross-type warnings, restored Render-safe drawer route infrastructure, strategic/flexible spacer planning/generation/printing, and the final navigation/legacy-drawer cleanup. The individual `/fixes/fix-004.md` file was deleted after acceptance per Help Code protocol. No tests were run by ChatGPT during outside review.
 ## Fix 005 — Space Type Card Images
-- **Status:** Ready for implementation
+- **Status:** Work completed, ready for outside review
 - **Fix file:** `/fixes/fix-005.md`
 - **Planning thread:** `Space Card Images Plan #5`
-- **Planned implementation thread:** `Space Card Images Imp #5`
+- **Implementation thread:** `Space Card Images Imp #5`
 - **Implementation model:** Low / Low
-- **Notes:** Drawer, B4B, and Vanity rendered assets were committed to `/images` in commit `371366190b8a959e49bda8a9c419659d14533276`. Current main contains the required `.type-card` Create New Space screen structure, so this fix is limited to wiring those assets into the existing cards plus responsive card styling; it must not alter Fix 004 Space logic.
+- **Notes:** Replaced the emoji `.type-card-ill` illustration in each Create New Space type card (`web/index.html`) with the committed `/images/Drawer.png`, `/images/Vanity.png`, and `/images/B4B.png` assets (Drawer/Surface/Portable Storage respectively), keeping the existing button/text/click-handling untouched. Added `.type-cards`/`.type-card`/`.type-card-image` rules to `web/styles.css` in the existing Welcome screen: spaces section (4:3 image grid on desktop) and extended the existing `@media (max-width: 620px)` welcome/Space block with a stacked single-column card layout. No Space logic, `web/spaces.js` click wiring, or image assets were changed. Verified statically only (no tests written or run, server never started) per the fix's testing rule.
 
 ## Fix 006 — Portable Space Identity
 - **Status:** Ready to branch/implement
