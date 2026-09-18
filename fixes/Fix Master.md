@@ -16,10 +16,10 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Implementation outbrief is present in the fix file. Final completion must be determined by outside ChatGPT review before the fix file is deleted.
 
 ## Fix 004 — Space Onboarding Redesign
-- **Status:** Needs remediation work — Corrections 2 and 3
+- **Status:** Needs remediation work — Corrections 2, 3, and 4
 - **Fix file:** `/fixes/fix-004.md`
 - **Implementation thread:** `Space Onboarding Redesign Imp #4`
-- **Notes:** Correction 2 remains active. Render exposed an additional startup regression from the Correction 1 drawer rewrite: `drawer_routes`, connector generation, and combined drawer-print infrastructure were accidentally removed from module scope. Correction 3 restores that route/module structure while preserving the intended Fix 004 spacer redesign.
+- **Notes:** Corrections 2 and 3 remain active. The coding thread reported completion, but no corresponding implementation commit reached `origin/main`; remote main still contains the Render-breaking missing `drawer_routes` structure and other Correction 2 defects. Correction 4 requires preserving the agent's local work, integrating current origin/main, completing Corrections 2/3, and pushing/verifying the implementation remotely before reporting completion.
 
 ## Fix 005 — Space Type Card Images
 - **Status:** Blocked by Fix 004 completion
