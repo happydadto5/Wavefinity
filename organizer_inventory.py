@@ -628,7 +628,13 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
     kind = str(raw.get("kind") or "")
     if kind not in SPACE_KINDS and not (allow_legacy and kind in LEGACY_SPACE_KINDS):
         raise ValueError(f"a space is one of {', '.join(SPACE_KINDS)}")
-    
+    if kind in LEGACY_SPACE_KINDS:
+        # Legacy box is read for migration only - this function persists,
+        # so the migration wizard's own box -> Portable mapping is enforced
+        # here too, not left to every caller to remember - see Fix 004
+        # Correction 8.D.
+        kind = "portable"
+
     x, y, z = (_number(raw.get(axis)) for axis in ("x", "y", "z"))
     if min(x, y, z) <= 0:
         raise ValueError("a space needs its inside X, Y and Z in mm")

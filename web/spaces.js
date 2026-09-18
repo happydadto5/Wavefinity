@@ -133,7 +133,12 @@ SP.classifyMetadata = record => {
     if (typeof keep !== "boolean" || (defaults !== null && (typeof defaults !== "object" || Array.isArray(defaults)))) {
       return { status: "invalid" };
     }
-    return { status: "space", space, inventory: true, keep_bin_defaults: keep, bin_defaults: defaults, needsMigration };
+    // A stored legacy "box" identity always requires the explicit
+    // migration/setup pass, even inside an otherwise fully-valid v4 +
+    // setup_version-1 file left over from an earlier incomplete Fix 004
+    // build - see Fix 004 Correction 8.D.
+    const spaceNeedsMigration = needsMigration || space.kind === "box";
+    return { status: "space", space, inventory: true, keep_bin_defaults: keep, bin_defaults: defaults, needsMigration: spaceNeedsMigration };
   }
   return { status: "invalid" };
 };
@@ -300,6 +305,11 @@ SP.inspectHosted = async folder => {
     mode = "design";
     needsSetup = true;
   }
+
+  // A stored legacy "box" identity always requires the explicit
+  // migration/setup pass, whichever path above produced it - see Fix 004
+  // Correction 8.D.
+  if (mode === "space" && space?.kind === "box") needsSetup = true;
 
   return {
     folder: folder.name,
@@ -623,9 +633,23 @@ SP.startUntyped = async () => {
       await SP.useHostedFolder(folder);
       return;
   }
-  // Reuses the same guarded write/collision path as the Configure prompt's
-  // "Use without a Space type" button, so this can never silently demote an
-  // already-configured typed Space either - see Fix 004 Correction 7.D.
+  // Inspect first in both modes and never call Use Untyped on a folder
+  // already classified as a Space - fully configured *or* still needing
+  // its one-time setup pass - route it into the same collision prompt
+  // instead, mirroring hosted behavior exactly - see Fix 004 Correction 8.B.
+  const data = state.runtime.hosted
+      ? await SP.inspectHosted(folder)
+      : (await api("/api/space/inspect", { output: folder })).folder;
+  if (data.folder_mode === "space") {
+      SP.collisionFolder = folder;
+      SP.collisionData = data;
+      SP.showOnly("space-collision-prompt");
+      document.getElementById("space-collision-meta").textContent = `${data.space.name} (${data.space.kind})`;
+      SP.showDialog();
+      return;
+  }
+  // Reuses the same guarded write path as the Configure prompt's "Use
+  // without a Space type" button - see Fix 004 Correction 7.D.
   SP.configureData = folder;
   await SP.useUntypedFolder();
 };
@@ -904,18 +928,6 @@ SP.launch = async () => {
     SP.showHome();
   }
 };
-
-const startSpaces = () => {
-  SP.wire();
-  SP.launch();
-};
-
-if (state.ready) {
-  startSpaces();
-} else {
-  window.addEventListener("wavefinity:ready", startSpaces, { once: true });
-}
-
 
 SP.wire = () => {
   wireInfoButtons();
@@ -1260,3 +1272,20 @@ SP.crossTypeCheck = (designType) => {
 
 // The real design-type control is #bin-type (see changeBinType() in app.js),
 // which calls SP.crossTypeCheck() itself before switching into B4B/Base Trim.
+
+// Startup must come after every SP.* helper it (transitively) depends on -
+// SP.wire, wireInfoButtons, SP.updateReadouts, SP.renderSpaceInfo,
+// SP.crossTypeCheck, and everything SP.launch()/SP.wire() call - is defined,
+// so this stays the very last thing in the file. state.ready can already be
+// true by the time this script runs, which would otherwise call SP.wire()
+// before it exists - see Fix 004 Correction 8.A.
+const startSpaces = () => {
+  SP.wire();
+  SP.launch();
+};
+
+if (state.ready) {
+  startSpaces();
+} else {
+  window.addEventListener("wavefinity:ready", startSpaces, { once: true });
+}

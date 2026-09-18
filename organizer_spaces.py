@@ -128,9 +128,14 @@ def _folder_state(
             metadata_space = _space(metadata.get("space"))
             if metadata_space:
                 metadata_defaults = _metadata_space_defaults(metadata, int(version))
-                if explicit_space:
-                    return "space", explicit_space, True, *metadata_defaults, needs_setup
-                return "space", metadata_space, True, *metadata_defaults, needs_setup
+                chosen_space = explicit_space or metadata_space
+                # A stored legacy "box" identity always requires the
+                # explicit migration/setup pass, even inside an otherwise
+                # fully-valid v4 + setup_version-1 metadata file left over
+                # from an earlier incomplete Fix 004 build - see Fix 004
+                # Correction 8.D.
+                space_needs_setup = needs_setup or chosen_space.get("kind") == "box"
+                return "space", chosen_space, True, *metadata_defaults, space_needs_setup
             raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
         if metadata.get("folder_mode") == "design":
             explicit = _explicit_inventory(metadata)
@@ -250,7 +255,16 @@ def inventory_enabled(folder: Path, prefs: dict[str, Any]) -> bool:
 
 def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
     mode, space, inventory, keep_bin_defaults, bin_defaults, needs_setup = _folder_state(folder, prefs)
-    inventory_exists = bool(load_inventory(folder)["exists"])
+    # Any existing Wavefinity trace - inventory, current metadata, or legacy
+    # metadata - not just the inventory file, or a folder with metadata but
+    # no inventory yet is wrongly treated as brand new and skips the
+    # explicit Configure-vs-Choose-Another confirmation - matches hosted
+    # SP.inspectHosted()'s exists flag - see Fix 004 Correction 8.C.
+    wavefinity_exists = (
+        bool(load_inventory(folder)["exists"])
+        or (folder / METADATA_FILE).exists()
+        or (folder / LEGACY_METADATA_FILE).exists()
+    )
     return {
         "folder": str(folder),
         "folder_name": folder.name,
@@ -261,7 +275,7 @@ def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
         "keep_bin_defaults": keep_bin_defaults,
         "bin_defaults": bin_defaults,
         "needs_setup": needs_setup,
-        "exists": inventory_exists,
+        "exists": wavefinity_exists,
         "no_inventory": not inventory,
     }
 
@@ -340,14 +354,17 @@ def space_routes(
 
     def use_folder(payload):
         # The explicit "use this folder without a Space type" choice. May
-        # write v4/setup_version-1 Design metadata, but must never silently
-        # demote an already fully configured typed Space - see Fix 004
-        # Correction 6.C. Opening/remembering a folder without changing it
-        # is /api/space/open (open_folder) / /api/folder/use, not this.
+        # write v4/setup_version-1 Design metadata, but must never demote a
+        # folder already classified as a Space - fully configured *or* still
+        # needing its one-time setup pass. A Space that needs setup must go
+        # through the explicit migration/setup flow instead, never straight
+        # to Design - see Fix 004 Correction 8.B. Opening/remembering a
+        # folder without changing it is /api/space/open (open_folder) /
+        # /api/folder/use, not this.
         target = folder(payload)
         target.mkdir(parents=True, exist_ok=True)
         mode, space, inventory, _keep, _defaults, needs_setup = _folder_state(target, load_preferences())
-        if mode == "space" and not needs_setup:
+        if mode == "space":
             raise ValueError(f"this folder already holds the space {(space or {}).get('name')!r}")
         if needs_setup or mode != "design":
             _write_metadata(target, "design", None, inventory)
