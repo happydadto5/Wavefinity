@@ -2,7 +2,7 @@
 
 // A save folder is always available for normal design work. Space planning is
 // an optional capability layered on that folder, never a design type.
-const SP = { recent: [], setup: null, busy: false, resume: null, resumeTimer: null, isUpdate: false };
+const SP = { recent: [], setup: null, busy: false, resume: null, resumeTimer: null, isUpdate: false, collisionOrigin: null };
 const RESUME_AUTOCONTINUE_SECONDS = 10;
 const SP_KINDS = {
   portable: { icon: "🧰", label: "Portable Storage" },
@@ -372,9 +372,28 @@ SP.pickFolder = async () => {
   return data.folder || null;
 };
 
+// Safe for every caller (Recents, Open Existing, collision "Open this
+// Space", Choose Folder, etc.): a folder that still needs its one-time
+// setup pass - including a legacy box, v2/v3, or migration-needed Space -
+// is never applied/opened directly; it always goes through the explicit
+// setup/migration flow first - see Fix 004 Correction 9.B.
 SP.afterPick = async folder => {
   if (!folder) return null;
-  if (state.runtime.hosted) return SP.useHostedFolder(folder);
+  if (state.runtime.hosted) {
+    if (!folder.handle) return SP.useHostedFolder(folder); // download-only fallback
+    const inspected = await SP.inspectHosted(folder);
+    if (inspected.needs_setup) {
+      SP.enterSetupFor(folder, inspected);
+      return inspected;
+    }
+    return SP.useHostedFolder(folder);
+  }
+  const inspected = await api("/api/space/inspect", { output: folder });
+  SP.recent = inspected.recent || [];
+  if (inspected.folder?.needs_setup) {
+    SP.enterSetupFor(folder, inspected.folder);
+    return inspected.folder;
+  }
   const data = await api("/api/folder/use", { output: folder });
   SP.recent = data.recent || [];
   await SP.applyFolder(data.folder);
@@ -581,6 +600,7 @@ SP.clearSetupContext = () => {
   SP.configureData = null;
   SP.collisionFolder = null;
   SP.collisionData = null;
+  SP.collisionOrigin = null;
   SP.pendingConfigureFolder = null;
   SP.isUpdate = false;
 };
@@ -643,6 +663,7 @@ SP.startUntyped = async () => {
   if (data.folder_mode === "space") {
       SP.collisionFolder = folder;
       SP.collisionData = data;
+      SP.collisionOrigin = "untyped";
       SP.showOnly("space-collision-prompt");
       document.getElementById("space-collision-meta").textContent = `${data.space.name} (${data.space.kind})`;
       SP.showDialog();
@@ -705,6 +726,7 @@ SP.create = async () => {
       if (data.folder_mode === "space") {
           SP.collisionFolder = folder;
           SP.collisionData = data;
+          SP.collisionOrigin = "create";
           SP.showOnly("space-collision-prompt");
           document.getElementById("space-collision-meta").textContent = `${data.space.name} (${data.space.kind})`;
           SP.showDialog();
@@ -860,6 +882,7 @@ SP.useUntypedFolder = async () => {
             SP.configureData = null;
             SP.collisionFolder = folder;
             SP.collisionData = data;
+            SP.collisionOrigin = "untyped";
             SP.showOnly("space-collision-prompt");
             document.getElementById("space-collision-meta").textContent = `${data.space.name} (${data.space.kind})`;
             SP.showDialog();
@@ -967,14 +990,22 @@ SP.wire = () => {
     const data = SP.collisionData;
     SP.collisionFolder = null;
     SP.collisionData = null;
+    SP.collisionOrigin = null;
     if (data?.needs_setup) SP.enterSetupFor(folder, data);
     else await SP.afterPick(folder);
   }));
   const colChoose = document.getElementById("space-collision-choose");
   if (colChoose) colChoose.addEventListener("click", () => SP.run(async () => {
+    // Route back to whichever flow actually opened this prompt - the
+    // untyped flow must never fall into typed SP.create(), which expects a
+    // Space form/name/type that was never filled in - see Fix 004
+    // Correction 9.A.
+    const origin = SP.collisionOrigin;
     SP.collisionFolder = null;
     SP.collisionData = null;
-    await SP.create();
+    SP.collisionOrigin = null;
+    if (origin === "untyped") await SP.startUntyped();
+    else await SP.create();
   }));
 
   const existingYes = document.getElementById("space-existing-inventory-yes");
