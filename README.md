@@ -174,6 +174,25 @@ Starting with **Fix 6**, complex/non-trivial work that enters the Help Code `/fi
 
 A fix may be planned, numbered, recorded in `/fixes/Fix Master.md`, and have its `/fixes/fix-###.md` specification committed on `main` before implementation is ready. That does **not** mean implementation may begin. The implementation branch is created only when all prerequisite fixes are accepted and present on current `origin/main`.
 
+#### Mandatory remote-state gate — prevents stale-checkout implementation
+
+A coding agent must **never trust its local checkout, local Fix Master, or local `fixes/` directory as proof that a fix does or does not exist**. Local state may be stale even when the planner has already committed the complete handoff to GitHub.
+
+Before reading or implementing **every Help Code fix**, the coding agent must perform this gate in this order:
+
+1. Run `git fetch --prune origin`.
+2. Switch to local `main`.
+3. Fast-forward only: `git merge --ff-only origin/main`. Do not merge an old local `main` into `origin/main`, and do not continue after a failed fast-forward.
+4. Prove local `main` is exactly current remote main: `git rev-parse HEAD` must equal `git rev-parse origin/main`. If they differ, **STOP**.
+5. Prove the requested fix file exists on the **remote-tracking ref**, not merely locally: `git cat-file -e origin/main:fixes/fix-###.md`. If it does not exist there, **STOP and report that the remote handoff is missing**.
+6. Read the fix directly from current `origin/main` or the now-equal local `main`. Do not use a remembered, cached, copied, or previously opened version.
+7. Read current `origin/main:fixes/Fix Master.md` and confirm that the requested fix is not still in a planning/questions/blocked state. If the fix file and Fix Master disagree, **STOP and report the mismatch**; do not guess which is newer.
+8. Only after steps 1–7 succeed may the agent create/switch to `fixN` from that exact `origin/main` and begin implementation.
+
+If the agent says a fix file is missing or the ledger is stale, the **first response must be to repeat this remote-state gate**, not to conclude that the planner forgot to commit the plan. This rule applies even if the agent fetched recently or another fix was just completed.
+
+Planner-side handoff rule: before telling the user or coding agent to implement a new fix, ChatGPT must verify from the remote repository that (a) `/fixes/fix-###.md` exists on `origin/main`, (b) Fix Master shows the intended ready/active status, and (c) the remote file contains the final rechecked plan. A local draft, local commit, tool-side cached result, or earlier verification does not count. The user-facing handoff should explicitly say that the coding agent must run the remote-state gate before creating `fixN`.
+
 - `main` is the accepted implementation line. Do not perform Help Code implementation directly on `main`.
 - Each fix uses a branch named exactly `fixN`, using the unpadded fix number: `fix6`, `fix9`, `fix10`, etc.
 - When implementation is actually ready to begin, fetch `origin` and create/switch to `fixN` from the then-current accepted `origin/main`. If a prerequisite fix is not yet complete on `main`, STOP rather than implementing against an incomplete base. Do not create a useful implementation history from a stale pre-prerequisite base.
