@@ -33,7 +33,7 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Planning thread:** `Portable Space Identity Plan #6`
 - **Planned implementation thread:** `Portable Space Identity Imp #6`
 - **Implementation branch:** `fix6`
-- **Notes:** Fully specified, but implementation is blocked again while the reopened Fix 004 Correction 11 is completed and accepted. After Fix 004 is finally accepted, create `fix6` from that then-current `origin/main` and perform all implementation/correction work there until outside review approves merge. Adds stable Space IDs, a per-user Space registry, rename recovery, and a folder-name-independent inventory filename.
+- **Notes:** Final dependency audit completed against Fix 004 Correction 11A (`065d99e`). The Fix 006 plan was tightened for v4->v5 identity migration without re-onboarding, UUID preservation, active-ID startup recovery, duplicate-copy handling, uncapped Space registry vs capped Recents, identity-aware Forget, exact read-only/write inventory filename migration, hosted target-folder preservation, and failure ordering. Implementation remains blocked until Fix 004 receives outside **YES — DONE**; then create a fresh `fix6` branch from accepted `origin/main`.
 
 ## Fix 007 — Adaptive Edge Connectors
 - **Status:** Requirements questions
