@@ -1,0 +1,1072 @@
+# Fix 007 — Adaptive Edge Connectors
+
+FIRST: Sync your checkout with origin/main before reading this fix.
+
+Implementation thread title: **Adaptive Edge Connectors Imp #7**
+
+## Status / prerequisite
+
+**PLANNING COMPLETE AND RE-CHECKED AGAINST THE ACCEPTED POST-FIX-006 main. READY FOR IMPLEMENTATION.**
+
+Fix 006 is accepted, merged into main, and archived. This plan was re-read after that merge against the current Space identity/inventory behavior, including state.activeSpaceId, hosted inventory lookup, local DL.inventoryCall(), and Drawer reset behavior.
+
+Fix 008 is planned but has not started on a fix8 branch. Fix 007 and Fix 008 overlap web/index.html, web/app.js, and Space-facing UI. Use this sequence:
+
+1. Start/implement Fix 007 from current origin/main.
+2. Outside-review and integrate Fix 007.
+3. Re-audit/start Fix 008 from the resulting main.
+
+If Fix 008 is started before Fix 007 despite this ordering, STOP and coordinate the overlap instead of developing both blindly.
+
+The product decisions in this file are complete. Do not reopen them during implementation unless newer accepted code makes one literally impossible.
+
+---
+
+# Mandatory startup — remote-state gate
+
+**Do not inspect your current local `fixes/` folder and decide from that whether Fix 007 exists. Your checkout may be stale. The remote repository is authoritative.**
+
+Run this gate before reading or implementing the fix:
+
+1. `git fetch --prune origin`
+2. Switch to local `main`.
+3. `git merge --ff-only origin/main`
+   - If this fails, STOP. Do not merge, rebase, reset, or improvise around it.
+4. Compare:
+   - `git rev-parse HEAD`
+   - `git rev-parse origin/main`
+   These SHAs must be identical. If they are not identical, STOP.
+5. Prove Fix 007 exists on the remote-tracking branch:
+   - `git cat-file -e origin/main:fixes/fix-007.md`
+   If this command fails, STOP and report **"Fix 007 is missing from current origin/main after fetch"**. Do not infer anything from an older local copy.
+6. Read the current remote Fix Master and verify Fix 007 is ready:
+   - `git show origin/main:"fixes/Fix Master.md"`
+   The Fix 007 entry must say **Planning complete — ready for implementation** (or a later active implementation state). If it still says Requirements questions, blocked, or otherwise contradicts this file, STOP and report the mismatch.
+7. Read the actual current plan only after the gate succeeds:
+   - `git show origin/main:fixes/fix-007.md`
+   Then read current `README.md` and `AGENTS.md`.
+8. Confirm current `origin/main` contains the accepted Fix 006 Space-identity implementation, including stable `state.activeSpaceId`.
+9. Confirm no active `fix8` branch is simultaneously editing the overlapping connector/UI paths. At the final planning audit no `fix8` branch existed. If that has changed, STOP and sequence the fixes.
+10. Only now create branch exactly `fix7` from the verified current `origin/main`.
+11. Push `fix7` and set upstream tracking.
+12. Rename the coding thread to exactly **Adaptive Edge Connectors Imp #7** if supported.
+13. Do not edit `/fixes/Fix Master.md` on `fix7`. ChatGPT owns the permanent ledger on `main`.
+14. Never implement this fix on `main`. Never force-push or rewrite `main`.
+15. If an accepted overlapping change later lands on `main` while `fix7` is active, merge current `origin/main` into `fix7`, resolve deliberately, push, and have the final result reviewed again against current `main`.
+
+**Failure rule:** if you ever conclude "Fix 007 does not exist" or "Fix Master still says Requirements questions," repeat steps 1–7 before reporting that conclusion. A local stale checkout is not evidence about the repository.
+
+
+---
+
+# Testing decision
+
+**Limited targeted testing — beneficial.**
+
+Reason: this is mostly bounded connector work, but it introduces new 3D boolean geometry. A connector can look logically correct in code and still produce a non-watertight or non-exportable mesh. A few tiny geometry checks are high-signal and cheap.
+
+Do NOT:
+- run the full test suite;
+- create a new test plan;
+- create new test files;
+- add broad regression coverage;
+- run browser automation;
+- perform screenshot QA;
+- revive or repair unrelated test infrastructure.
+
+After implementation, perform only the small checks listed in Final verification. If the environment cannot run one of them without repair work, document that exact limitation and stop rather than reviving the environment.
+
+---
+
+# Product contract
+
+## A. Existing side connectors remain the normal two-bin connector
+
+The existing Side connector remains the default connector type.
+
+Its fit must continue to come automatically from the active bin's actual wall thickness. There is no separate user-editable connector wall-thickness field.
+
+Current code already does the important geometry correctly:
+- BoxSpec.wall is the active bin wall thickness.
+- BoxSpec.wall_depth derives the true normal-depth requirement.
+- connector_half_widths(box, connector) uses box.wall_depth.
+- make_side_connector() uses those half-widths.
+- connector_filename(..., wall=box.wall) already identifies non-standard wall thicknesses.
+
+Do not create a second thickness system. Preserve that path and make the automatic behavior clear in the UI.
+
+Side connectors continue to support the existing Same / Different bin-height behavior. Do not remove or weaken different-height side connectors.
+
+## B. Add a 3-Way Corner connector
+
+A 3-Way Corner connector joins three equal-height, equal-wall-thickness ordinary Wavefinity bins whose corners meet at one grid junction, with the fourth quadrant empty.
+
+The canonical generated shape uses the northwest, northeast, and southwest quadrants, leaving the southeast quadrant empty. The physical part is universal: the user rotates it on the bins to put the empty quadrant wherever needed. Do not add a separate orientation selector.
+
+It is a small top/rim connector. It does not run down the full height of the bins except for the same short connector-arm depth already used by a normal side connector.
+
+It does NOT support different bin heights.
+
+Corner connectors use the existing 16 mm MIN_JOINABLE_SIZE rule: the participating bin geometry must provide at least two Wavefinity units in both X and Y around the junction. An 8 mm one-unit bin remains valid, but it does not accept a corner connector.
+
+## C. Add a 4-Way Corner connector
+
+A 4-Way Corner connector joins four equal-height, equal-wall-thickness ordinary Wavefinity bins meeting at one grid junction, one bin in each quadrant.
+
+It is also a small top/rim connector using the existing connector cap/arm depth.
+
+It does NOT support different bin heights.
+
+## D. Corner connectors require equal wall thickness
+
+All participating bins for a 3-Way or 4-Way connector must use the same wall thickness.
+
+Wavefinity does not attempt to generate a transition connector between different wall thicknesses.
+
+A Space is still allowed to contain mixed wall thicknesses. Same-thickness bins inside that Space may still use connectors with each other.
+
+## E. Exact mixed-wall warning rule
+
+The user clarified this requirement specifically:
+
+**Warn when the user changes the Wall thickness control while working in a typed Space and that Space already contains at least one ordinary inventory bin with a known wall thickness different from the newly resolved wall thickness.**
+
+This is a warning, not a block.
+
+Use wording substantially like:
+
+"This Space already has bins with a different wall thickness. Connectors only fit bins with the same wall thickness. You can keep this thickness, but do not use one connector across different wall thicknesses."
+
+Rules:
+- Trigger only from a user-initiated change of the wall-thickness control.
+- Do not show the warning merely because a Space with mixed walls is opened.
+- Do not show it during initial page load/form synchronization.
+- Do not show it for automatic wall promotion caused internally by another feature.
+- Compare against ordinary inventory rows only: kind == "bin".
+- Ignore B4B rows and spacer rows because they do not use this connector system.
+- Ignore legacy inventory rows whose wall is missing, null, non-numeric, or non-positive. Never guess their wall thickness.
+- If every known ordinary-bin wall matches the new wall, do not warn.
+- If there are no ordinary bins with a known wall, do not warn.
+- Editing an existing design is not exempt: if its changed wall differs from existing ordinary bins in the Space, warn.
+- Keep the selected wall value after the warning; do not revert it and do not require confirmation.
+
+The comparison must use the final wall value Wavefinity resolved after its normal wall rules, not a stale previous value.
+
+---
+
+# Current-code checkpoints
+
+Reconfirm these after syncing to the accepted post-Fix-006 main. They are the implementation anchors for this plan.
+
+## organizer_engine.py
+- ConnectorSpec already owns tolerance, height, cap thickness, and arm thickness.
+- LOCKED_CONNECTOR_HEIGHT is 9.6 mm.
+- LOCKED_CONNECTOR_LENGTH is 12.0 mm.
+- WAVE_LENGTH is 4.0 mm.
+- CORNER_INSET is 1.0 mm.
+- MIN_JOINABLE_SIZE is 16.0 mm.
+- make_side_connector() is the authoritative side-clip geometry.
+- its nested corridor polygon currently contains the wall-following wave math that this fix should extract and share without changing side behavior.
+- connector_for_print() flips the connector cap-down for printing.
+
+## organizer_app.py
+- connector_filename() already adds the wall thickness to a custom-wall connector filename.
+- generate_side_file() builds, print-orients, validates, and exports a side connector.
+- inventory_bin_record() already saves wall into ordinary-bin inventory rows.
+
+## wavefinity_web.py
+- catalog defaults already expose the connector defaults to the browser.
+- connector_payload() owns /api/connector generation.
+- it already resolves direct-stack physical rim height before side-connector generation.
+- it already rejects B4B/lid use of side connectors.
+- print_payload() calls connector_payload() when a normal print includes a connector, so extending connector_payload() correctly also extends that print path.
+
+## web/app.js / web/index.html
+- the Connectors section currently has Join bins with = Side connectors / Base Trim.
+- Side connectors currently expose Same / Different bin heights.
+- state.connector is browser/session state, separate from the saved design.
+- generateParts("connector") and generateParts("all") already send state.connector to /api/connector.
+- #connector-derived already exists as the intended connector readout surface; renderConnectorReadout() is currently effectively blank.
+- the Wall control is #wall-thickness.
+- updateDesignFromForm() resolves state.design.box.wall and currently calls autoAdjustConnectorFields() when the wall changes.
+
+## inventory / Space
+- ordinary generated inventory rows already contain wall.
+- normalized legacy rows may have wall == null.
+- Fix 006 now supplies state.activeSpaceId as the stable identity of the active typed Space.
+- DL.bins is authoritative once the current inventory has been loaded.
+- DL.inventoryCall("/api/drawer/load", ..., write:false) already reads the inventory in both hosted and local modes without requiring a new inventory schema.
+- SP.applyFolder()/resetDrawer() clears stale Drawer state, including DL.output, when switching folders.
+- DL.bins is NOT guaranteed to be loaded merely because the user is on the 3D Design view. Do not assume it is.
+
+---
+
+# Implementation
+
+## 1. organizer_engine.py — build corner geometry from the proven side connector
+
+Do not create a second wall-fitting algorithm and do not copy the side connector's corridor/notch math.
+
+### 1.1 Update the module description
+
+Replace the statement that there is only one connector / no corner connector with a short description that Side, 3-Way Corner, and 4-Way Corner connectors share the same wall-following fit profile, while the compact corner types deliberately do not use the side connector's far-from-corner lock notches or variable-height web.
+
+### 1.2 Reuse the existing 16 mm minimum joinable wall
+
+Do not try to make a corner connector fit an 8 mm one-unit bin side.
+
+Current Wavefinity already defines MIN_JOINABLE_SIZE = 16 mm because the proven connector/lock system needs enough straight wall between the two physical corners. Use that same physical minimum for corner connectors.
+
+A 3-Way or 4-Way Corner connector requires the active bin to be at least MIN_JOINABLE_SIZE in both X and Y. If box.x or box.y is smaller, raise a clear ValueError such as:
+
+"Corner connectors need at least 16 mm (2 Wavefinity units) in both X and Y so the clip can clear the corners and engage the wall locks."
+
+Why this is deliberate:
+- the existing side connector already refuses a too-short wall rather than inventing weaker geometry;
+- a compact connector placed immediately beside the nominal corner runs into the perpendicular wall/corner chord, especially on thick walls;
+- 16 mm gives the corner connector room to start its hanging arms 4 mm away from the junction and still reach the existing lock lattice;
+- two corner connectors used at opposite ends of a 16 mm wall remain separated instead of overlapping.
+
+Do not change MIN_JOINABLE_SIZE or the global 8 mm bin-size rule. An 8 mm bin remains a valid bin; it simply does not accept this connector, just as a too-short wall already does not accept a normal Side connector.
+
+### 1.3 Add the small corner geometry constants
+
+Add near the existing connector constants:
+
+- CORNER_CONNECTOR_ARM_START = GRID_PITCH / 2.0
+  - current value: 4.0 mm from the grid junction;
+- CORNER_CONNECTOR_END = GRID_PITCH - CORNER_INSET
+  - current value: 7.0 mm from the grid junction.
+
+No separate corner tolerance, wall width, arm depth, lock pitch, or connector height is allowed.
+
+For the minimum 16 mm participating wall:
+- one corner connector's cap reaches from the junction out to 7 mm;
+- its hanging/gripping arm section exists only from 4 mm through 7 mm;
+- a connector at the opposite end mirrors this and reaches inward only to 9 mm;
+- therefore the two cap regions retain a 2 mm longitudinal gap;
+- the 4..7 mm arm section is far enough from the perpendicular wall to clear even the current maximum 2.4 mm wall, while still covering the first usable lock locations on the global lock lattice.
+
+### 1.4 Extract the existing wall-following corridor polygon helper
+
+The corner connector must use the exact same wall-thickness and wave-fitting math as the Side connector without copying that math.
+
+Inside the connector section of organizer_engine.py, extract the nested corridor polygon logic from make_side_connector() into a private module helper conceptually equivalent to:
+
+_connector_corridor_polygon(axis, geometry_coordinates, phase_offset, half_width)
+
+Required behavior:
+- axis is "x" or "y";
+- geometry_coordinates are the actual coordinates where the returned polygon is drawn;
+- phase_offset is added only when evaluating wave_value();
+- half_width is inner_hw or outer_hw;
+- preserve the exact near/far ordering and validity check currently used by make_side_connector().
+
+Then change make_side_connector() to call that helper for its body corridor and channel corridor.
+
+For the mature Side connector:
+- geometry coordinates remain local -length/2 .. +length/2;
+- phase_offset remains position;
+- output remains centered exactly as before.
+
+For a Corner connector:
+- geometry coordinates are already junction-relative coordinates;
+- phase_offset is 0.
+
+This is safe because every legal Wavefinity junction is on the same global wave phase: GRID_PITCH is 8 mm and WAVE_LENGTH is 4 mm.
+
+This refactor must be mechanical. It must not change Side connector output.
+
+### 1.5 Extract the existing arm/base clearance check
+
+The Side connector already rejects hanging arms that would collide with the base or flat-inside band on a shallow bin.
+
+Move only the existing band_top / arm_bottom validation into a private helper such as:
+
+_validate_connector_arm_clearance(box, connector, heights)
+
+Then:
+- call it from make_side_connector() at the exact same point with its existing two resolved heights;
+- call it from make_corner_connector() with (box.z,).
+
+Do not alter the Side thresholds or meaning.
+
+### 1.6 Generalize the existing notch builder instead of duplicating lock math
+
+Corner arms should use the same lock-notch profile as Side connectors once they are far enough from the corner.
+
+Refactor the current _arm_notches() internals into a lower-level private helper conceptually equivalent to:
+
+_connector_arm_notches(
+    connector,
+    axis,
+    geometry_start,
+    geometry_end,
+    phase_offset,
+    inner_hw,
+    z_offsets=None,
+)
+
+Required behavior:
+- geometry_start/end are coordinates in the returned connector mesh;
+- phase_offset maps those geometry coordinates to the global wave/lock lattice;
+- include any lock bump whose LOCK_RUN overlaps the requested geometry interval, matching the current Side behavior at connector ends;
+- use the existing _lock_profile(), LOCK_NOTCH_CLEARANCE, _sweep_profile(), wave_value(), and connector.arm_depth;
+- preserve the two arm signs and existing optional per-side Z offsets.
+
+Then retain a thin _arm_notches(...) wrapper for make_side_connector() if that keeps its call site readable:
+- Side geometry interval = -length/2 .. +length/2;
+- phase_offset = position;
+- existing z_offsets passed through unchanged.
+
+For Corner connector arms:
+- pass their actual junction-relative 4..7 mm or -7..-4 mm interval;
+- phase_offset = 0;
+- no Z offsets.
+
+Do not create a second lock profile or a corner-specific bump lattice.
+
+The mature Side output must remain behaviorally unchanged after this extraction.
+
+### 1.7 Add one corner-direction component
+
+Add a private helper conceptually equivalent to:
+
+_corner_connector_direction(box, connector, axis, direction)
+
+Validate axis in {"x","y"} and direction in {-1,+1}.
+
+For direction +1:
+- cap/bridge coordinates: 0.0 .. CORNER_CONNECTOR_END (0..7 mm);
+- hanging-arm coordinates: CORNER_CONNECTOR_ARM_START .. CORNER_CONNECTOR_END (4..7 mm).
+
+For direction -1:
+- mirror both intervals: -7..0 for the cap and -7..-4 for the arms.
+
+Build the component in two vertical layers.
+
+**Top cap/bridge**
+- compute inner_hw, outer_hw = connector_half_widths(box, connector);
+- build only the OUTER corridor polygon over the full 0..7 or -7..0 cap interval;
+- extrude it by connector.cap_thickness;
+- translate its bottom to z = connector.arm_depth.
+
+This is solid cap only. It deliberately crosses above the bin corner/junction, where it sits on top of the equal-height rims. There are no hanging arms beside the physical corner from 0..4 mm.
+
+**Hanging grip arms**
+- build the OUTER corridor over only 4..7 or -7..-4;
+- build the INNER channel over the same interval with the existing small longitudinal overtravel used by Side connector channels so both ends are open;
+- extrude body and channel only to connector.arm_depth;
+- subtract channel from body;
+- cut the shared lock notches from this arm section using the generalized notch helper above.
+
+Union the arm section with its cap/bridge and clean it using the existing connector cleanup path.
+
+Why the split matters:
+- the cap can safely bridge over a junction because it is above the rim;
+- hanging arms near 0..4 would collide with the perpendicular bin walls;
+- 4..7 leaves room for real Side-style lock engagement while clearing those perpendicular walls.
+
+### 1.8 Add make_corner_connector(box, connector, ways)
+
+Public signature:
+
+make_corner_connector(box: BoxSpec, connector: ConnectorSpec, ways: int) -> trimesh.Trimesh
+
+Behavior:
+- accept only ways == 3 or ways == 4;
+- reject box.x < MIN_JOINABLE_SIZE or box.y < MIN_JOINABLE_SIZE with the clear minimum-size message above;
+- call _validate_connector_arm_clearance(box, connector, (box.z,));
+- never accept bin_a_height, bin_b_height, different-height web, or auto-adjust inputs.
+
+For ways == 3, create exactly:
+- north component: axis "y", direction +1;
+- west component: axis "x", direction -1.
+
+Their cap/bridge portions overlap over the junction and northwest top area, forming one connected physical part. This canonical connector leaves the southeast quadrant open. The user rotates the printed part to put the empty quadrant where needed.
+
+For ways == 4, create exactly:
+- north: y,+1;
+- south: y,-1;
+- east: x,+1;
+- west: x,-1.
+
+The four cap/bridge portions overlap at the junction and form one connected cross-shaped cap with four locked wall grips.
+
+Union the components and return the normal cleaned/manifold result. Do not concatenate overlapping component meshes.
+
+This design shares the actual proven physical rules:
+- connector_half_widths() for automatic wall-thickness adaptation;
+- Side connector's wave corridor;
+- Side connector's lock-notch profile/lattice;
+- ConnectorSpec cap thickness, arm depth, and tolerance;
+- the same cap-down print orientation used later during export.
+
+### 1.9 Add seated corner-fit validation
+
+Add:
+
+installed_corner_boxes(box, ways)
+
+Use make_box(box), translated around junction (0,0):
+- NW = (-box.x/2, +box.y/2)
+- NE = (+box.x/2, +box.y/2)
+- SW = (-box.x/2, -box.y/2)
+- SE = (+box.x/2, -box.y/2)
+
+For ways == 3 use NW + NE + SW. For ways == 4 use all four.
+
+Add:
+
+validate_corner_fit(box, connector, clip, ways) -> float
+
+- seat the unflipped connector at (0, 0, box.z - connector.arm_depth);
+- sum intersection_volume() against the installed participating bins;
+- overlap > 0.01 mm^3 is a RuntimeError;
+- otherwise return the overlap.
+
+Do not waive this check because a mesh is watertight. A connector can be watertight and still collide with a bin.
+
+If the specified 4..7 mm arm geometry somehow fails this seated-fit check on current accepted code, fix the local corner component geometry; do not alter global bin corner/wave geometry, do not remove the check, and do not weaken the 16 mm minimum.
+
+### 1.10 Preserve Side connector output exactly
+
+No intended output change to make_side_connector(), connector_half_widths(), lock geometry, different-height web logic, or ordinary Side filenames is part of this fix.
+
+The required corridor, clearance, and notch refactors are sharing refactors only. Existing Side connector dimensions, phase, notches, web, return coordinates, and fit behavior must remain unchanged.
+
+
+---
+
+## 2. organizer_app.py — filenames, quantity, and export
+
+Import make_corner_connector and validate_corner_fit.
+
+### 2.1 Add corner_connector_filename(...)
+
+Create a separate helper rather than making the mature side connector filename logic harder to read.
+
+Required names:
+- Connector - 3-Way Corner.3mf
+- Connector - 4-Way Corner.3mf
+
+For a non-default wall, include the same wall wording convention as side connectors, for example:
+- Connector - 3-Way Corner - Wall 1.6mm.3mf
+
+For quantity > 1, also include xN, for example:
+- Connector - 4-Way Corner x4 - Wall 1.2mm.3mf
+
+The exact ordering of xN vs Wall may follow the existing filename helper style, but it must be deterministic and human-readable.
+
+### 2.2 Add a tiny copy-layout helper
+
+Corner quantity is a print convenience, not a change to connector geometry.
+
+Accept quantity from 1 through 20 inclusive. Reject non-integers and values outside that range.
+
+Given one connector already passed through connector_for_print():
+- obtain its X/Y bounds;
+- use a 4 mm gap between copies;
+- arrange N translated copies in a compact row/column grid with columns = ceil(sqrt(N));
+- combine the disconnected copies with trimesh.util.concatenate, not a boolean union;
+- the copies must not overlap.
+
+A disconnected multi-component print mesh is correct here: these are physically separate identical connector pieces placed on one plate.
+
+### 2.3 Add generate_corner_file(...)
+
+Suggested signature:
+
+generate_corner_file(box, connector, output_path, ways, quantity=1)
+
+Steps:
+1. validate ways and quantity;
+2. mesh = make_corner_connector(box, connector, ways);
+3. report = mesh_report("corner_connector", mesh);
+4. overlap = validate_corner_fit(box, connector, mesh, ways); do this on the single unflipped physical connector before making print copies;
+5. mesh = connector_for_print(mesh);
+6. if quantity > 1, arrange/concatenate print copies as above;
+7. export through the same export_mesh/3MF path used by generate_side_file();
+8. return _part_result(...) in the same style as generate_side_file(), including at least seated_overlap_mm3, ways, quantity, wall_mm, and print_orientation = "flat cap down".
+
+Do not skip validate_corner_fit() even if the mesh report says the connector is watertight. Watertight and physically collision-free are separate requirements.
+
+Do not add corner connectors to inventory. They are generated accessories, exactly like the existing side connector.
+
+---
+
+## 3. wavefinity_web.py — extend the existing connector API, do not add a new route
+
+### 3.1 Extend catalog connector defaults
+
+Add:
+- type: "side"
+- quantity: 1
+
+Keep all existing connector defaults.
+
+Do not bump the saved-design schema. Connector type/count remain connector-generation UI state, not part of the bin design JSON.
+
+### 3.2 Branch inside connector_payload()
+
+Read and normalize:
+- connector_type = str(options.get("type", "side"))
+- allowed values: "side", "three_way", "four_way"
+- raw quantity = options.get("quantity", 1)
+
+Reject an unknown connector type.
+
+For corner quantity, accept only an actual integer value from 1 through 20. Reject booleans, fractional numbers such as 2.5, numeric strings that do not round-trip cleanly as an integer, and values outside the range. Do not silently truncate with int(2.5) -> 2. A simple explicit helper/local validation is preferable.
+
+Keep the existing base-trim, B4B, and lid exclusions. Make their error text generic enough to say "connectors" where appropriate rather than falsely referring only to a side connector.
+
+Keep the existing BoxSpec parsing and direct-stack effective-box resolution.
+
+#### side
+For type == "side":
+- execute the existing path unchanged;
+- preserve Same / Different height support;
+- preserve differing_connector_plan;
+- preserve current length/web logic;
+- preserve current wall-derived filename.
+
+#### three_way / four_way
+For a corner type:
+- if options.different_heights is true, reject with a clear message: "3-Way and 4-Way Corner connectors require equal-height bins.";
+- ignore side-only A/B-height, variable length, and different-height web concepts after that validation;
+- **do not inherit hidden Side/Different settings**. Build the corner part from a fresh ConnectorSpec() using its canonical defaults. Do not pass the Side UI's tolerance, height, length, or arm-thickness values into that corner ConnectorSpec. In particular, a stale custom side arm thickness must never widen a corner connector;
+- use the resolved connector_box wall exactly as the side connector does. Wall thickness is the one connector dimension that adapts to the active bin;
+- use ways = 3 or 4;
+- validate quantity 1..20;
+- create the corner filename using connector_box.wall and quantity;
+- under GEOMETRY_LOCK call generate_corner_file(connector_box, connector, ..., ways, quantity);
+- return connector_plan containing at least:
+  - type: "three_way" or "four_way"
+  - quantity
+  - wall_mm: actual connector_box.wall
+  - requires_equal_height: true
+  - requires_same_wall: true
+  - printed_height_mm: the canonical corner connector.height
+  - webbed: false
+
+For the side path, also add type: "side", quantity: 1, wall_mm, and requires_same_wall: true to connector_plan without removing the existing differing-height plan fields. This gives the UI one consistent source for the wall-fit readout.
+
+### 3.3 Preserve print_payload()
+
+Do not create another print route.
+
+print_payload() already delegates accessory generation to connector_payload(). Once state.connector carries type/quantity, the selected connector type will automatically be what is generated beside a normal bin print.
+
+Keep Base Trim, B4B, and lid exclusions intact.
+
+---
+
+## 4. web/index.html — make the connector choice explicit
+
+Keep "Join bins with" as the high-level choice between Side connectors and Base Trim. Do not put 3-way/4-way inside that Base Trim selector; they are connector variants, not a third joining system.
+
+Inside the connector body add a new selector wrapped in a row that can be hidden when Base Trim is selected:
+
+Label: Connector type
+- Side
+- 3-Way Corner
+- 4-Way Corner
+
+Required ids:
+- row: #connector-type-row
+- select: #connector-type
+
+Wrap the existing "Bin heights" heading selector in an element that can be hidden cleanly for corner connectors. Recommended id:
+- #connector-height-wrap
+
+Add a corner-only quantity row:
+- row id: #corner-connector-quantity-row
+- label: Quantity
+- numeric input #corner-connector-quantity
+- min 1
+- max 20
+- step 1
+- default 1
+
+Use the existing #connector-derived readout for concise fit/help text rather than adding another permanent block.
+
+Do not expose:
+- connector wall thickness;
+- corner orientation;
+- corner height;
+- separate 3-way/4-way tolerances.
+
+---
+
+## 5. web/app.js — connector UI/state behavior
+
+### 5.1 State
+
+Extend state.connector defaults through the catalog, not a parallel global:
+- type defaults to "side"
+- quantity defaults to 1
+
+When updateDesignFromForm() rebuilds state.connector, preserve/read both fields:
+- type from #connector-type, normalized to side / three_way / four_way with side fallback;
+- quantity from #corner-connector-quantity, preserving an integer value for the API to validate.
+
+Also make the existing wall-triggered call to autoAdjustConnectorFields() conditional on connector type == "side". Corner geometry uses a fresh default ConnectorSpec on the backend and must not churn hidden Side/Different fields when wall thickness changes.
+
+Continue sending the resulting state.connector through the existing generation payload.
+
+### 5.2 Add one connector-mode synchronizer
+
+Create a focused helper such as syncConnectorTypeControls().
+
+When type == "side":
+- show #connector-height-wrap;
+- preserve the existing Same / Different height selector;
+- call existing syncConnectorHeightControls();
+- #corner-connector-quantity-row hidden;
+- existing side auto-adjust behavior remains active.
+
+When type == "three_way" or "four_way":
+- hide #connector-height-wrap;
+- force #connector-height-mode value to "same";
+- set state.connector.different_heights false when form state is read;
+- hide #connector-bin-heights;
+- hide the side-only #connector-settings block;
+- show #corner-connector-quantity-row;
+- do not run different-height auto-adjust calculations as if they applied to the corner part;
+- leave any previously typed side-only tolerance/length/arm values available for when the user switches back to Side, but understand that the backend deliberately ignores those hidden values for corner geometry and uses a fresh default ConnectorSpec().
+
+Call this helper from syncForm(), the #connector-type change handler, and syncJoiningControls().
+
+Be explicit about the existing call flow:
+- in syncForm(), set #connector-type.value from state.connector.type and #corner-connector-quantity.value from state.connector.quantity BEFORE synchronizing connector visibility;
+- replace the direct syncConnectorHeightControls() call in syncForm() with syncConnectorTypeControls();
+- in syncJoiningControls(), when join mode is Base Trim, hide #connector-type-row, #connector-height-wrap, #connector-bin-heights, #connector-settings, and #corner-connector-quantity-row;
+- when join mode is Side connectors, show #connector-type-row and call syncConnectorTypeControls() rather than calling syncConnectorHeightControls() directly;
+- preserve all existing B4B/lid rules that hide connector generation buttons.
+
+Do not create recursion between syncJoiningControls(), syncConnectorTypeControls(), and syncConnectorHeightControls(). The flow should be one-way: joining mode -> connector type -> side height controls when applicable.
+
+### 5.3 Wire the new controls into live connector state
+
+The current connector controls are wired explicitly in wireControls(); adding HTML is not enough.
+
+Add:
+- #connector-type change handler:
+  1. call syncConnectorTypeControls() so corner mode immediately hides/forces the Side-only controls;
+  2. call updateDesignFromForm() so state.connector.type and different_heights are current before any Generate/Print action;
+  3. refresh the connector readout.
+- #corner-connector-quantity input/change handler:
+  - call updateDesignFromForm() so state.connector.quantity changes immediately;
+  - refresh the connector readout;
+  - do not trigger a bin preview rebuild solely because quantity changed.
+
+Do not rely on some later unrelated design edit to copy these controls into state.connector. A user must be able to select 4-Way Corner, set Quantity 4, and immediately click Generate Connector or Print to Bambu Studio and have that exact request sent.
+
+Keep the existing Side connector listeners for tolerance, length, A/B heights, arm thickness, and height mode.
+
+### 5.4 Reuse renderConnectorReadout()
+
+Make the existing #connector-derived surface useful.
+
+Before generation, show live guidance based on the current resolved design wall:
+- Side: "Fits X mm bin walls. Use only with bins of the same wall thickness."
+- 3-Way Corner: "Fits X mm bin walls. Equal-height bins only; bins must be at least 16 mm in X and Y. Rotate the connector to put the open corner where needed."
+- 4-Way Corner: "Fits X mm bin walls. Equal-height bins only; bins must be at least 16 mm in X and Y."
+
+After generation, renderConnectorReadout(connector_plan) should use plan.wall_mm/type/quantity and keep the same message truthful.
+
+Do not imply that a corner connector adapts between two wall thicknesses. "Adaptive" means the generated part is sized from the active bin wall.
+
+### 5.5 Generation labels
+
+Use the selected type in the generation row/title where it improves clarity:
+- Side connector
+- 3-Way Corner connector
+- 4-Way Corner connector
+
+The existing Generate Connector and Generate Bin and Connectors buttons may keep their general button text; they act on the selected connector type.
+
+### 5.6 Mixed-wall Space warning
+
+Implement the warning as a small asynchronous helper, for example:
+
+maybeWarnSpaceWallMismatch(newWall)
+
+It must:
+1. return immediately unless state.folderMode == "space" and a folder is selected;
+2. obtain the current Space's ordinary inventory bins:
+   - if DL is loaded for the current output/folder, use DL.bins;
+   - otherwise perform a read-only existing inventory load through DL.inventoryCall("/api/drawer/load", {}, { write: false }) and use data.bins;
+   - do not call DL.load() just to show this warning because DL.load() also mutates Drawer layout UI state;
+3. filter to kind == "bin";
+4. convert wall to Number and keep only finite values > 0;
+5. compare with a small numeric tolerance, e.g. abs(existingWall - newWall) > 1e-6;
+6. if any known ordinary-bin wall differs, show the non-blocking warning toast;
+7. capture the current typed-Space identity before starting an asynchronous inventory read. Use state.activeSpaceId as the primary identity now that Fix 006 is accepted; if a transitional/legacy state somehow lacks it, fall back to the current folder identity. Immediately before showing the toast, confirm the user is still in that same Space and that state.design.box.wall still matches the wall value that was checked. If context changed, discard the stale warning;
+8. if inventory reading fails, do not block the wall change and do not replace it with a scary generic error; this warning is advisory.
+
+Do not add a new backend endpoint. The existing drawer/inventory read path already works in hosted and local modes.
+
+### 5.7 Trigger the warning only for an actual user wall change
+
+Do not put the warning unconditionally in updateDesignFromForm(), because that function also runs for programmatic form synchronization and unrelated edits.
+
+Use the existing #wall-thickness user event path to mark that one user wall edit needs a mismatch check. The check must run only after Wavefinity has resolved the final wall value.
+
+A robust pattern is:
+- set a small pending flag in the #wall-thickness input/change handler before changedDesign();
+- in the debounced applyChangedDesign() flow, after updateDesignFromForm() has resolved state.design.box.wall, consume and clear that flag;
+- call maybeWarnSpaceWallMismatch(state.design.box.wall) without blocking the design update.
+
+The flag must always be cleared after consumption, including when no Space is active. Also clear it on any early-return path in applyChangedDesign() (for example state.designMutationBusy) so a user wall edit can never leak into a later unrelated design change.
+
+This avoids warning on:
+- syncForm();
+- new/open design initialization;
+- stack/B4B/lid-driven automatic wall promotion;
+- other calls to updateDesignFromForm().
+
+If the accepted post-Fix-006 code now has a cleaner explicit "user changed wall" callback that already receives the final normalized wall, use it instead, but preserve these exact trigger semantics.
+
+---
+
+## 6. web/spaces.js / web/drawer-model.js — reuse inventory state, do not duplicate it
+
+Prefer no change here if web/app.js can safely use the existing DL.inventoryCall and DL.bins interfaces after Fix 006.
+
+If accepted Fix 006 moves the authoritative inventory-read helper, use that final helper.
+
+Do NOT:
+- add another Space inventory cache;
+- add wall thickness to Space metadata;
+- add a Space-wide mandatory wall setting;
+- rewrite inventory format;
+- make mixed thickness illegal.
+
+The warning is derived from existing ordinary-bin rows.
+
+---
+
+## 7. README.md — document the product behavior
+
+Update the connector documentation so it no longer says there is no corner connector.
+
+Document, concisely:
+- Side connector remains the normal two-bin connector and supports different heights.
+- All connector fit comes from the active bin wall thickness automatically.
+- 3-Way Corner joins three equal-height/equal-wall bins around one corner and is rotated to choose the empty quadrant.
+- 4-Way Corner joins four equal-height/equal-wall bins around one corner.
+- Corner connectors are top/rim parts, do not support different heights, and require at least 16 mm (2 Wavefinity units) in both X and Y.
+- A Space may contain mixed wall thicknesses, but one connector never bridges different wall thicknesses.
+- Wavefinity warns when the user changes wall thickness in a Space that already contains an ordinary bin with a different known wall.
+
+Do not expand this into a general Space redesign.
+
+---
+
+# Exact edge cases
+
+1. Standard 0.8 mm wall + Side:
+   existing side geometry and filename behavior stay normal.
+
+2. Custom 1.6 mm wall + Side:
+   connector channel uses the 1.6 mm BoxSpec wall automatically and filename includes Wall 1.6mm.
+
+3. Custom 1.6 mm wall + 3-Way:
+   all legs use the same 1.6 mm wall-derived connector_half_widths; filename identifies 1.6 mm.
+
+4. Custom 2.4 mm wall + 4-Way quantity 4:
+   produce one 3MF containing four separated 4-way connector copies; filename identifies quantity and wall.
+
+5. Corner type + Different heights submitted by a stale/malicious client:
+   backend rejects even if frontend would normally hide/force Same.
+
+6. Minimum 8 x 8 mm bins:
+   the bin remains legal, but 3-Way/4-Way Corner generation is rejected with the 16 mm minimum-joinable message. Do not invent a weaker special-case corner clip for one-unit bins.
+
+7. Mixed Space inventory [0.8, 1.2], user changes current Wall to 1.2:
+   warn because a known 0.8 bin differs.
+
+8. Space inventory [1.2, 1.2], user changes current Wall to 1.2:
+   no warning.
+
+9. Space inventory has old rows with wall missing:
+   ignore unknown rows; do not guess 0.8.
+
+10. Space inventory contains only B4B 1.2 plus ordinary bins 0.8, user chooses 0.8:
+    no warning due to B4B; compare kind == "bin" only.
+
+11. User opens an already-mixed Space without touching Wall:
+    no warning.
+
+12. Programmatic wall promotion changes the value:
+    no warning from this feature.
+
+13. User changes Wall and the inventory read fails:
+    keep the wall change; no blocker/modal.
+
+14. Mixed Space still permits same-thickness connector use:
+    do not globally disable Generate Connector.
+
+15. Three-way orientation:
+    no orientation setting. The canonical missing quadrant is rotated physically by the user.
+
+16. Base Trim / B4B / lid:
+    existing connector exclusions remain authoritative.
+
+17. User previously set Side/Different Arm thickness to 8 mm, then selects 3-Way Corner:
+    corner generation ignores that hidden side-only value and uses DEFAULT_ARM_THICKNESS.
+
+18. User changes Wall, then switches to another Space before the read-only inventory lookup returns:
+    discard the stale mismatch result; do not show a warning from the old Space.
+
+---
+
+# Scope exclusions
+
+Do not:
+- support connectors that transition between two wall thicknesses;
+- make wall thickness a Space-wide locked setting;
+- migrate or rewrite existing inventory solely for this feature;
+- change saved-design version;
+- change the global wave, mating gap, corner inset, lock bump, or lock-notch dimensions;
+- redesign side connector different-height geometry;
+- add variable-height 3-way or 4-way connectors;
+- auto-detect corner connector count from the Drawer/Space layout;
+- auto-detect which quadrant is missing;
+- add corner connectors to inventory;
+- change Base Trim behavior;
+- touch Fix 008 first-run behavior except where its eventual implementation must consume this accepted connector UI.
+
+---
+
+# Final verification
+
+This fix is Class B/bounded with one small geometry-risk allowance. No full suite.
+
+After static review of every changed file and the final diff:
+
+1. Existing side-connector preservation check:
+   run the existing narrow connector geometry test that verifies the connector notches align on both axes (or the closest renamed equivalent on the accepted base). Do not run the whole test file if the runner can target that one test.
+
+2. Direct corner-geometry/fit smoke:
+   in a one-off Python invocation, construct an ordinary legal BoxSpec and canonical ConnectorSpec, call make_corner_connector(..., 3) and make_corner_connector(..., 4), and confirm each result:
+   - is non-empty;
+   - has finite bounds;
+   - is watertight/manifold according to the project's normal mesh report/property;
+   - passes validate_corner_fit() against the actual installed 3-bin/4-bin arrangement with seated overlap <= 0.01 mm^3;
+   - survives connector_for_print();
+   - can be exported by the existing 3MF export path.
+
+3. Wall-adaptation and neighboring-corner smoke:
+   repeat corner generation at wall 0.8 and the maximum current wall 2.4 mm. Confirm the generated wall-gripping width changes and both parts remain valid/fit. At wall 2.4, take a 4-Way Corner connector and a copy translated by exactly MIN_JOINABLE_SIZE (16 mm) along X, then along Y; use intersection_volume() and confirm connectors at opposite ends of the minimum joinable wall do not overlap. Also statically confirm the side path still passes connector_box.wall into its filename and uses connector_half_widths(box,...).
+
+4. API validation smoke:
+   directly call the existing connector payload function or the smallest existing request-level check for:
+   - side connector;
+   - three_way quantity 1;
+   - four_way quantity 2;
+   - a corner request with different_heights=true, which must be rejected;
+   - a corner request from an 8 mm X or Y bin, which must be rejected with the minimum-size message.
+
+No browser automation is required for the advisory mixed-wall toast. Trace that event path statically and inspect the final diff.
+
+If any of these tiny checks fails because of the implementation, fix the implementation and rerun only the failed targeted check. If a check cannot run because the environment itself needs repair, record that exact limitation in the outbrief and do not revive unrelated infrastructure.
+
+---
+
+# Definition of done
+
+Fix 007 is ready for outside ChatGPT review only when all of the following are true:
+
+- Side connector remains default and its existing same/different-height behavior is preserved.
+- Side connector wall fit remains automatically derived from the active BoxSpec wall; no duplicate wall field exists.
+- 3-Way Corner connector exists as two perpendicular locked wall-grip arms beginning 4 mm from the junction, joined by cap-only bridges over the equal-height rims.
+- 4-Way Corner connector exists as four locked wall-grip arms beginning 4 mm from the junction, joined by one cross-shaped set of cap-only bridges over the equal-height rims.
+- Hanging arms do not extend into the 0..4 mm physical corner zone; only the top cap bridges that zone.
+- Corner generation explicitly rejects any active bin below the existing 16 mm MIN_JOINABLE_SIZE in either X or Y.
+- Opposite corner connectors do not overlap across the minimum 16 mm joinable wall, including at the current maximum 2.4 mm wall.
+- Corner hanging arms begin 4 mm from the junction, their cap bridges reach to the junction above the rims, and the arms reuse the existing lock-notch lattice.
+- Corner connectors pass the explicit seated collision check against the actual 3-bin/4-bin corner arrangement before export.
+- Corner connectors accept only equal-height use.
+- Corner connectors use a fresh default ConnectorSpec and cannot inherit stale hidden Side/Different arm/tolerance/length settings.
+- Corner connectors use the active wall thickness and are documented as same-wall-only.
+- Corner quantity 1..20 works and produces non-overlapping copies in one generated 3MF.
+- Connector UI clearly offers Side / 3-Way Corner / 4-Way Corner.
+- Type and quantity controls update state.connector immediately enough that Generate/Print cannot use stale values.
+- Base Trim hides the connector-type/quantity/height-specific controls.
+- Corner mode hides/disables variable-height controls.
+- The connector readout tells the user the wall thickness the generated connector fits.
+- In a typed Space, a user-initiated wall change warns only when an existing ordinary bin has a different known wall.
+- Mixed wall thickness remains allowed.
+- Unknown legacy wall values are ignored.
+- No saved-design schema or inventory schema changes were introduced.
+- Existing Base Trim, B4B, lid, and printing exclusions still work through their existing paths.
+- README connector documentation is current.
+- Only the limited targeted checks above were performed.
+- The final diff contains no unrelated cleanup.
+- The implementation is committed and pushed to origin/fix7.
+- The coding agent appends a concise implementation outbrief to this file on fix7, naming changed files, key behavior, targeted checks actually run/results, and commit SHA.
+- The coding agent does not edit Fix Master.
+
+After implementation, the user can say "check fix 7". ChatGPT performs the outside completion review itself against current main. Do not self-declare the fix accepted and do not merge it to main.
+
+---
+
+# Recommended implementation model
+
+- **Model family:** Medium
+- **Thinking/reasoning:** Medium
+- **Why:** The product and geometry decisions are now explicit, but implementation still spans shared connector geometry, backend generation, browser state, and Space inventory warning logic. A medium coding model with medium reasoning should be sufficient without paying for a top-tier architecture pass.
+
+---
+
+# Implementation outbrief
+
+Implemented on `fix7`.
+
+**Changed files:** `organizer_engine.py`, `organizer_app.py`, `wavefinity_web.py`, `web/index.html`, `web/app.js`, `README.md`.
+
+**Key behavior:**
+- Engine: corridor polygon, arm-clearance check and lock-notch builder extracted from the side connector and shared (side output unchanged). Added `make_corner_connector` (3-way/4-way: cap bridges to the junction, locked grip arms 4–7 mm out), `installed_corner_boxes`, `validate_corner_fit`, 16 mm minimum-size rejection.
+- App: `corner_connector_filename`, `arrange_connector_copies` (4 mm gap), `generate_corner_file` (quantity 1–20; multi-copy uses the relaxed multi-solid export check).
+- API: `connector_payload` branches on `type` (side / three_way / four_way); corner uses a fresh `ConnectorSpec()`, rejects different heights and bad quantity; plans carry type/quantity/wall_mm.
+- UI: Connector type selector, corner Quantity, connector readout, corner mode hides height controls, Base Trim hides all; advisory mixed-wall toast only on user Wall change (stale-Space guarded, ordinary `bin` rows with known wall only).
+
+**Checks run:** side notch tests (`test_notches_line_up_with_the_bumps_on_both_axes`, `test_the_lock_notches_mirror_about_the_connector_centre`) pass. Corner smoke at walls 0.8 and 2.4: 3-way and 4-way watertight, seated overlap ~0, print flip works, neighbouring copies 16 mm apart in X and Y have 0 overlap. Payload smoke: side, three_way, four_way x4 (3MF written), different_heights rejected, 8 mm bin rejected, quantity 2.5 / True rejected. `node --check web/app.js` passes. No browser checks; wall-warning path traced statically.
+
+**Commit:** 212da3340429eb0f84db40600efebec1ba873e16 (implementation) on `origin/fix7`.
+
+
+---
+
+# Correction 1 — clear stale wall-warning state and rejoin current main
+
+Outside review verdict: **NO — NOT FULLY DONE**
+
+The connector implementation is otherwise substantially aligned with Fix 007, but two items must be corrected before another completion review.
+
+## FIRST — merge current main into fix7
+
+The implementation branch is currently behind `origin/main` by the Help Code remote-state/protocol commits added after Fix 007 implementation began.
+
+Before changing code:
+
+1. `git fetch --prune origin`
+2. Stay on `fix7`.
+3. Merge current `origin/main` into `fix7` using the repository's normal merge-forward workflow.
+4. Preserve the current `main` versions of the Help Code remote-state rules in `README.md`, `AGENTS.md`, and the hardened startup block in this fix file.
+5. Do not edit `/fixes/Fix Master.md` manually. If the merge brings the current ledger onto the branch, leave it exactly as merged from `main`.
+6. Resolve any overlap deliberately and push the updated `fix7`.
+
+Do not rebase or force-push the already-pushed fix branch.
+
+## A. Prevent the mixed-wall warning flag from leaking across a cancelled debounce
+
+### Problem
+
+`pendingWallMismatchCheck` is set only by a user Wall change, which is correct.
+
+`applyChangedDesign()` clears the flag when its debounced callback actually runs, including the `state.designMutationBusy` early-return path.
+
+However, current `web/app.js` has three direct calls to:
+
+`applyChangedDesign.cancel()`
+
+at the current equivalents of:
+
+- `commitEdgeMountFormBeforeSwitch()`
+- the no-active-edge-mount branch of `deleteEdgeMountPart()`
+- `beginDesignMutation()`
+
+If one of those paths cancels the pending debounce before it runs, `pendingWallMismatchCheck` remains true. A later unrelated `changedDesign()` can then consume the stale flag and call `maybeWarnSpaceWallMismatch()`, producing a warning that was not caused by that later edit.
+
+That violates the Fix 007 contract: the warning must occur only as the consequence of the user's actual Wall change and the pending state must never leak into a later unrelated design change.
+
+### Exact correction
+
+In `web/app.js`, centralize cancellation of this debounce so the warning flag is always cleared.
+
+Add a tiny helper after `applyChangedDesign` is defined, conceptually:
+
+```js
+function cancelChangedDesignDebounce() {
+  applyChangedDesign.cancel();
+  pendingWallMismatchCheck = false;
+}
+```
+
+Then replace **every current direct call** to:
+
+```js
+applyChangedDesign.cancel();
+```
+
+with:
+
+```js
+cancelChangedDesignDebounce();
+```
+
+Do not move the existing `pendingDesignHistory = null` statements into this helper; those callers currently control history cleanup separately and their existing behavior must remain unchanged.
+
+Search the complete `web/app.js` after editing and confirm there are no remaining direct `applyChangedDesign.cancel()` call sites outside the helper itself.
+
+Do not change when the warning is armed. It must still be armed only from the user-driven `#wall-thickness` event path.
+
+## B. Make installed_corner_boxes reject invalid ways as specified
+
+The Fix 007 plan explicitly requires `installed_corner_boxes(box, ways)` to reject values other than 3 or 4.
+
+Current code effectively treats every value other than 3 as 4 because it slices with:
+
+```python
+[: 3 if ways == 3 else 4]
+```
+
+Correct this in `organizer_engine.py`:
+
+- before building/slicing the quadrant list, explicitly check `ways not in (3, 4)`;
+- raise the same clear `ValueError("corner connector must be 3-way or 4-way")` convention used by `make_corner_connector()`;
+- keep the canonical 3-way quadrant set NW + NE + SW and 4-way all four unchanged.
+
+This is a small defensive correction; do not redesign corner geometry.
+
+## Verification for Correction 1
+
+No broad test run is needed.
+
+After the correction:
+
+1. Run `node --check web/app.js`.
+2. Static-search `web/app.js` and confirm the only literal `applyChangedDesign.cancel()` is inside the new cancellation helper.
+3. Run a tiny direct Python check that `installed_corner_boxes(BoxSpec(...), 2)` and/or `ways=5` raises the required ValueError.
+4. Re-run only the existing targeted corner smoke if merging current `main` produced any code conflict in connector files. If the merge touched only protocol/docs and was clean, the previous geometry smoke remains sufficient.
+5. Inspect the final diff against current `main`; no unrelated changes.
+
+Append a concise Correction 1 outbrief here with:
+- files changed;
+- merge-forward result;
+- verification performed/results;
+- new branch-head commit SHA.
+
+Push `origin/fix7`, then the user can ask **check fix 7** again.
+
+## Correction 1 model recommendation
+
+- **Model family:** Low
+- **Thinking/reasoning:** Medium
+- **Why:** The defects and exact edits are already identified; the only care point is preserving current-main protocol changes during the merge-forward.
+
+
+## Correction 1 outbrief
+
+**Files changed:** `web/app.js`, `organizer_engine.py`.
+
+**Merge-forward:** `origin/main` merged into `fix7` cleanly (docs/protocol files only: README.md, AGENTS.md, Fix Master.md, fix-007.md); no conflicts, no connector code touched, so the earlier geometry smoke stands.
+
+**Changes:** added `cancelChangedDesignDebounce()` (cancels the debounce and clears `pendingWallMismatchCheck`) and replaced all three direct `applyChangedDesign.cancel()` calls; `installed_corner_boxes` now raises `ValueError("corner connector must be 3-way or 4-way")` for ways other than 3 or 4.
+
+**Verification:** `node --check web/app.js` passes; the only literal `applyChangedDesign.cancel()` is inside the helper; `installed_corner_boxes(..., 2)` and `(..., 5)` raise the required error and `3` still returns 3 bins.
+
+**Code commit:** 6be2ff75b761e2f299240174e57668b3c143cf9b
