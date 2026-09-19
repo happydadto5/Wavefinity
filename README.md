@@ -161,6 +161,8 @@ means `/fixes/fix-004.md`. The human should not need to restate the fix
 instructions in chat; the fix file is the task handoff and should contain the
 instructions needed to perform that work.
 
+**Help Code planning quality gate:** Every implementation plan must be comprehensive enough that a junior coding LLM can execute it without having to rediscover the intended architecture, product decisions, affected code paths, edge cases, or completion criteria. Name the relevant files/functions and give exact implementation direction or code-level structure whenever current code makes that reasonably possible; do not hand off a vague conceptual outline. After drafting any Help Code implementation plan, the planning assistant must re-read it against the current code and requirements. If that re-check finds any omission, contradiction, ambiguity, stale assumption, or unsafe implementation detail, revise the plan and perform another full re-check. Repeat until a complete re-check finds no material issues. Only then may the plan be marked ready for implementation.
+
 ### 1. User communication preferences
 - **Operate in "caveman mode"**: Keep messages simple, plain, and short.
 - **User is NOT a programmer**: Avoid code jargon, technical implementation details, and long explanations unless explicitly asked.

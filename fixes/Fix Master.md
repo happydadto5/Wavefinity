@@ -29,16 +29,29 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Final review confirmed Drawer/Surface/Portable Storage use the approved `/images/Drawer.png`, `/images/Vanity.png`, and `/images/B4B.png` assets, preserve the existing visible text and full-card button interaction, use decorative empty alt text, and add consistent responsive 4:3 card styling without changing Space logic. The individual `/fixes/fix-005.md` file was deleted after acceptance per Help Code protocol. No tests were run by ChatGPT during outside review.
 
 ## Fix 006 — Portable Space Identity
-- **Status:** Planning complete; blocked until Fix 004 Correction 12 targeted verification is completed and Fix 004 receives outside **YES — DONE**
+- **Status:** YES — DONE; accepted by outside ChatGPT review, ready to merge into `main`
 - **Fix file:** `/fixes/fix-006.md`
 - **Planning thread:** `Portable Space Identity Plan #6`
-- **Planned implementation thread:** `Portable Space Identity Imp #6`
+- **Implementation thread:** `Portable Space Identity Imp #6`
 - **Implementation branch:** `fix6`
-- **Testing class:** Class C risk-directed testing required
-- **Notes:** Final plan was rebuilt against current post-Correction-12 code (`be5ed7e3`) and the updated Help Code proportional testing policy. It now gives a single file-by-file implementation recipe for metadata v5/UUID identity, per-user preference migration with atomic registry mutation, active-ID startup recovery, same-parent rename recovery, duplicate-copy handling, uncapped registry vs capped Recents, identity-aware Forget, exact local/hosted inventory filename migration, hosted selected-handle preservation, Show Log resolver integration, failure ordering, and a named Class C verification gate. Fix 006 must start from the finally accepted post-Fix-004 `origin/main`; create `fix6` only after Fix 004 is closed.
+- **Accepted branch head:** `00b3588e80b2e2589925bd2c6278a84d037e008d`
+- **Correction 1 implementation commit:** `a9ccd74f0da2b7f8ab2381e973b61c564fcaded1`
+- **Correction 2 implementation commit:** `502f7ea7a87be002a74c2f100e474d67930e8761`
+- **Testing class:** Class C risk-directed testing completed
+- **Notes:** Outside review accepted the final Fix 006 implementation after two correction passes. Final verification covers durable typed-Space UUID identity, v4->v5 migration, canonical `Wavefinity bins.md`, profile registry/startup/rename recovery, duplicate-copy safety, identity-aware Forget, hosted identity preservation, Show Log resolver behavior, focused automated regressions, and the local browser smoke. Hosted File System Access smoke remains an explicitly documented environment limitation. Current `main` changes since the Fix 006 base affect only README Help-Code policy and Fix 007/008 planning/master files; they do not overlap Fix 006 runtime code. The accepted fix is ready for the normal merge-to-main lifecycle.
 
 ## Fix 007 — Adaptive Edge Connectors
 - **Status:** Requirements questions
 - **Planning thread:** `Adaptive Edge Connectors Plan #7`
 - **Planned implementation thread:** `Adaptive Edge Connectors Imp #7`
 - **Notes:** Requirements gathering for expanded connector behavior: add three-way and four-way corner connectors, keep those corner connector types incompatible with variable height, ensure ordinary connectors derive fit from active bin wall thickness, and warn when a Space contains mixed wall thicknesses because connectors between different thicknesses are not supported. The current README already states that custom-wall connectors are generated for the selected wall thickness and are only for same-thickness bins; implementation details and warning behavior remain to be specified.
+
+## Fix 008 — First Run Drawer
+- **Status:** Planning revised with user decisions; implementation blocked until Fix 006 is accepted and merged to `main`
+- **Fix file:** `/fixes/fix-008.md`
+- **Planning thread:** `First Run Drawer Plan #8`
+- **Planned implementation thread:** `First Run Drawer Imp #8`
+- **Planned implementation branch:** `fix8`
+- **Testing class:** Class B targeted UI/interaction verification
+- **Notes:** Created from a 25-point first-run audit of the Drawer Space workflow. User decisions recorded: no post-create Drawer-ready/tutorial card, and do not collapse Interior print mode/Base/Walls/Lift Grabbers. Scope remains clearer Space/measurement/folder copy, visible print requirement for bin names, missing Height unit, actionable empty Drawer/Inventory states, sensible empty-state action gating, and eliminating separate planner edits of canonical typed Drawer name/size. Connector behavior itself remains Fix 007 territory. Fix 008 must be rebased/re-audited against accepted Fix 006 because Fix 006 changes `web/spaces.js` startup/persistence contracts.
+
