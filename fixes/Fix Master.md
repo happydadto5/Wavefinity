@@ -20,13 +20,13 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Implementation thread:** `Space Onboarding Redesign Imp #4`
 - **Final implementation commit:** `8e7a7281ecc60d963dc54fe6bd38ef280e0c278b`
 - **Notes:** Final closure review accepted Fix 004 after Corrections 1–10. The finished work includes the new Create/Open Space onboarding flow, Drawer/Surface/Portable setup and defaults, safe v2/v3/legacy migration, Space Info/New Drawer Space behavior, cross-type warnings, restored Render-safe drawer route infrastructure, strategic/flexible spacer planning/generation/printing, and the final navigation/legacy-drawer cleanup. The individual `/fixes/fix-004.md` file was deleted after acceptance per Help Code protocol. No tests were run by ChatGPT during outside review.
+
 ## Fix 005 — Space Type Card Images
-- **Status:** Work completed, ready for outside review
-- **Fix file:** `/fixes/fix-005.md`
+- **Status:** Completed — accepted by outside ChatGPT review
 - **Planning thread:** `Space Card Images Plan #5`
 - **Implementation thread:** `Space Card Images Imp #5`
-- **Implementation model:** Low / Low
-- **Notes:** Replaced the emoji `.type-card-ill` illustration in each Create New Space type card (`web/index.html`) with the committed `/images/Drawer.png`, `/images/Vanity.png`, and `/images/B4B.png` assets (Drawer/Surface/Portable Storage respectively), keeping the existing button/text/click-handling untouched. Added `.type-cards`/`.type-card`/`.type-card-image` rules to `web/styles.css` in the existing Welcome screen: spaces section (4:3 image grid on desktop) and extended the existing `@media (max-width: 620px)` welcome/Space block with a stacked single-column card layout. No Space logic, `web/spaces.js` click wiring, or image assets were changed. Verified statically only (no tests written or run, server never started) per the fix's testing rule.
+- **Final implementation commit:** `32b0e3958cd2cc9e2cb6f37aa9cc8cb83bab9ebb`
+- **Notes:** Final review confirmed Drawer/Surface/Portable Storage use the approved `/images/Drawer.png`, `/images/Vanity.png`, and `/images/B4B.png` assets, preserve the existing visible text and full-card button interaction, use decorative empty alt text, and add consistent responsive 4:3 card styling without changing Space logic. The individual `/fixes/fix-005.md` file was deleted after acceptance per Help Code protocol. No tests were run by ChatGPT during outside review.
 
 ## Fix 006 — Portable Space Identity
 - **Status:** Ready to branch/implement
