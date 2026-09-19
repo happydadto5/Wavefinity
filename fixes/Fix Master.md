@@ -90,3 +90,12 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Implementation branch:** `fix11`
 - **Testing class:** Moderate UI/backend generation change — targeted connector/web coverage plus full test suite required
 - **Notes:** Remove the false Side-connectors-vs-Base-Trim chooser and the Side/3-Way/4-Way connector-type chooser. Same-height connector generation automatically creates one Side, one 3-Way Corner, and one 4-Way Corner file; different-height generation creates Side only. Existing physical corner eligibility remains, but an ineligible corner must not prevent a valid Side connector from being generated. Hosted folder generation and local Bambu Studio printing must use the same automatic bundle. Fix 011 overlaps Fix 010 in `web/index.html`, `web/app.js`, and `test_wavefinity_web.py`, so implementation starts only after Fix 010 is integrated into current `main`.
+
+## Fix 012 — Side Openings
+- **Status:** Planned — implement after Fix 011 is merged
+- **Planning thread:** `(12) Side Openings`
+- **Implementation thread:** `(12) Side Openings Imp`
+- **Implementation branch:** `fix12`
+- **Testing class:** Class C — targeted geometry/persistence/web coverage plus full test suite required
+- **Notes:** Add ordinary-bin finger-access wall openings as a bin-level option under the existing **Parts & options** section. The normal Wavefinity bin is built first and centered negative cutter solids remove selected Front/Back/Left/Right wall openings. Shape is Curved or Square; sizes are Small 8 mm, Medium 10 mm default, Large 15 mm, XL 20 mm; depth defaults to 100% toward the floor top; optional Top Support preserves a 4 mm bridge with a curved arch or 45° square roof. Each wall needs at least 2U/16 mm and keeps 4 mm corner shoulders, so invalid sizes are not offered. Ordinary-bin-only, with explicit compatibility rules for Lid/Stacking, rim labels, Edge Mount, and Lift Grabbers. Fix 012 is sequenced after Fix 011 because it overlaps the same browser/backend/test surfaces.
+
