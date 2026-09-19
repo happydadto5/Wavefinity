@@ -383,14 +383,15 @@ class WebApplicationTests(unittest.TestCase):
         self.assertTrue(preview["feature_outlines"][0])
         self.assertTrue(preview["nest_soft_contours"][0])
 
+        # Photo Nest auto-sizing now only grows the footprint (X/Y). A
+        # Raised Wall holder is allowed to rise above a shallow bin's rim,
+        # so Bin Height no longer auto-grows to fit a taller tool.
         feature["options"]["lift_assist"] = "none"
         feature["options"]["tool_thickness"] = 50.0
         taller = apply_feature_payload({
             "design": design, "feature": feature, "index": 0,
         })["design"]
-        self.assertGreaterEqual(
-            taller["box"]["z"], taller["box"]["base_thickness"] + 50.0
-        )
+        self.assertEqual(taller["box"]["z"], design["box"]["z"])
 
     def test_preview_softened_contour_follows_the_soften_outline_value(self):
         notched = PhotoOutline(

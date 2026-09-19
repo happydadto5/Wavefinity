@@ -2146,13 +2146,14 @@ class ResolvedOptionTests(unittest.TestCase):
 
     def test_pocket_height_and_rounding_rules(self) -> None:
         base = organizer_app.base_height(self.spec, "fused")
-        # 20mm bin: capped by the height actually available above the floor
-        # (box.z - base), which is always a little less than box.z itself -
-        # a pocket cannot reach past the bin's own floor.
+        # 20mm bin, fused mode: a fused pocket is now allowed to rise above
+        # the bin's rim, so its natural (unclamped) 20mm height is seeded
+        # directly rather than being capped by the floor-limited available
+        # space.
         box_20 = BoxSpec(64.0, 64.0, 20.0)
         feat_20 = organizer_app.default_feature(box_20, "pocket")
-        self.assertEqual(resolved_options(box_20, feat_20, base)["height"], 20.0 - base)
-        self.assertEqual(resolved_options(box_20, feat_20, base)["depth"], 20.0 - base - 2.0)
+        self.assertEqual(resolved_options(box_20, feat_20, base)["height"], 20.0)
+        self.assertEqual(resolved_options(box_20, feat_20, base)["depth"], 18.0)
 
         # 40mm bin: 40% is 16mm < 20mm minimum -> 20mm
         box_40 = BoxSpec(64.0, 64.0, 40.0)
@@ -2184,7 +2185,14 @@ class ResolvedOptionTests(unittest.TestCase):
         self.assertGreater(float(deep.bounds[1][2]), float(shallow.bounds[1][2]))
 
     def test_a_refused_parameter_says_which_numbers_disagree(self) -> None:
-        one = self.photo_nest(depth=40.0)
+        # A Raised Wall taller than the rim is a legitimate Fused holder now
+        # (spec: shallow-fused-above-rim); a Recessed Cavity still genuinely
+        # depends on the material actually above the floor in every mode, so
+        # it remains the one that reports the disagreeing numbers here.
+        one = self.photo_nest(
+            holder_style="recessed", cavity_depth_mode="manual",
+            tool_thickness=40.0, cavity_depth=40.0,
+        )
         with self.assertRaises(ValueError) as caught:
             build_features(
                 self.spec,

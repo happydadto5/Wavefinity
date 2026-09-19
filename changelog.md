@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-09-19 — Fused holders may rise above a shallow bin's rim
+
+- A shallow Fused bin (e.g. a 10 mm vanity-top organizer) can now carry
+  interior geometry taller than its own wall for Cradle, Bore, Post, Pocket,
+  Slot Rack, Steps, and a Raised-Wall Photo Nest - bin Height still means
+  wall height, this only lets specific holders' own geometry rise past it.
+  Divider, Curved Scoop, Text, and a Recessed Photo Nest stay height-bound in
+  every mode, and every part stays height-bound in Separate and Cartridge
+  mode. Stacking interfaces, an enabled lid, and the existing wall-touching
+  connector clearance are all still fully enforced ahead of this policy - a
+  conflicting part is refused, never silently clipped, and the bin is never
+  made taller automatically. The 3D editor shows a plain informational
+  "Extends N mm above rim" note when the part being edited legally does so;
+  there is no new checkbox.
+- Photo Nest's automatic sizing is now **footprint-only**: it grows or
+  shrinks Width and Length to fit the tool and keeps it centred, but never
+  touches Bin Height, which stays exactly what the user set (a manual Height
+  edit no longer turns it off, either). Renamed "Automatic bin sizing" to
+  "Automatic footprint sizing" and "Fit bin to tool" to "Fit footprint to
+  tool" to match. Legacy designs saved before Auto-size existed keep their
+  historical grow-only Z sizing unchanged.
+
 ## 2026-09-19 — Portable Space identity
 
 - Typed Spaces now carry a permanent `space_id` in `.wavefinity.json`

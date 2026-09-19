@@ -451,18 +451,19 @@ def _fit_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
 
 
 def _auto_size_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> BoxSpec:
-    """New Auto-size: the smallest legal bin that holds the fitted, centred
-    Nest - X and Y may grow or shrink, then Z is set to exactly what the
-    resolved holder geometry needs."""
-    resolved = resolve_nest_settings(box, one, base_height(box, mode))
+    """New Auto-size: the smallest legal X/Y footprint that holds the fitted,
+    centred Nest - Width and Length may grow or shrink, but the box's existing
+    Height is always preserved exactly. Height is user-controlled; a fused
+    Raised Wall taller than the rim is a layout-mode policy decision made
+    centrally in ``build_features``, not something footprint auto-sizing may
+    resolve by growing Z."""
+    trial: BoxSpec | None = None
     required_x = 2.0 * max(abs(one.zone.x0), abs(one.zone.x1))
     required_y = 2.0 * max(abs(one.zone.y0), abs(one.zone.y1))
     x = max(BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
     y = max(BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
-    z = _nest_effective_z_requirement(box, mode, base_height(box, mode), resolved)
-    trial: BoxSpec | None = None
     for _attempt in range(400):
-        trial = replace(box, x=float(x), y=float(y), z=float(z))
+        trial = replace(box, x=float(x), y=float(y))
         bounds = layout_zone(trial, mode)
         grow_x = one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
         grow_y = one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6
@@ -502,13 +503,32 @@ def _sized_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> tuple[BoxSpe
         one = fitted_nest_feature(one, one.zone.centre)
         base_z = base_height(box, mode)
         bounds = layout_zone(box, mode)
-        z_required = _nest_effective_z_requirement(box, mode, base_z, resolved)
-        if (one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
-                or one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6
-                or z_required > box.z + 1e-6):
+        xy_fails = (
+            one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6
+            or one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6
+        )
+        # A fused Raised Wall is allowed to rise above the rim, so its own
+        # height is not a fit failure there; Recessed always depends on real
+        # material above the floor, and any non-fused mode still clips to the
+        # bin, so both keep the Z check.
+        must_fit_z = (
+            mode != "fused"
+            or str(resolved["holder_style"]) == "recessed"
+        )
+        z_fails = False
+        if must_fit_z:
+            z_required = _nest_effective_z_requirement(box, mode, base_z, resolved)
+            z_fails = z_required > box.z + 1e-6
+        if xy_fails:
             raise ValueError(
-                "This Photo Nest no longer fits its bin. Use “Fit bin to tool” "
-                "below, or turn Automatic bin sizing back on."
+                "This Photo Nest no longer fits its bin. Use “Fit footprint to "
+                "tool” below, or turn Automatic footprint sizing back on."
+            )
+        if z_fails:
+            raise ValueError(
+                "This Photo Nest's holder no longer fits the bin's Height. "
+                "Increase Bin Height, or reduce the Tool thickness or other "
+                "measurement that controls its height."
             )
         return box, one
     one = fitted_nest_feature(one, one.zone.centre)
@@ -1590,6 +1610,8 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "feature_errors": scene["feature_errors"],
         "invalid_feature_indexes": scene["invalid_feature_indexes"],
         "draft_error": scene["draft_error"],
+        "feature_overhang_mm": scene["feature_overhang_mm"],
+        "draft_overhang_mm": scene["draft_overhang_mm"],
         "dimensions": {
             "size": scene["size_text"],
             "inside_x": scene.get("inside_x"),

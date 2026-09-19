@@ -1910,8 +1910,11 @@ class OtherHoldersTests(unittest.TestCase):
             "clearance": 0.0, "rim": 3.0,
             "depth": BIN.z - BIN.base_thickness + 0.1,
         })
-        with self.assertRaisesRegex(ValueError, "printable floor"):
-            build_features(BIN, [too_deep], BIN.base_thickness)
+        # A Raised Wall taller than the rim is a legitimate Fused-mode holder
+        # now (spec: shallow-fused-above-rim) - the central assembly policy,
+        # not this builder, is the one that still bounds it outside Fused.
+        with self.assertRaisesRegex(ValueError, "rises above the bin rim"):
+            build_features(BIN, [too_deep], BIN.base_thickness, mode="separate")
 
     def test_smoothing_removes_small_outline_details(self) -> None:
         detailed = photo_nest(contour=((-20, -8), (-4, -8), (-4, -2), (4, -2),

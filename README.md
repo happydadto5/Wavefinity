@@ -878,6 +878,23 @@ When an interior part does not fit, its editor offers **Grow the bin** and the
 same growth normally happens automatically. The bin grows on the 8 mm grid to
 hold every part at its real footprint. It never shrinks an already-large bin.
 
+**Bin Height means wall height, not interior part height.** A shallow bin -
+a 10 mm vanity-top organizer, say - can still carry useful interior geometry
+that rises above its own wall, but only under narrow conditions. In **Fused**
+mode, with no active stacking interface and no enabled lid, **Cradle**,
+**Bore**, **Post**, **Pocket**, **Slot Rack**, **Steps**, and a **Raised-Wall**
+Photo Nest may extend above the rim - a 30 mm post can stand as a ring holder
+on a 10 mm wall, for example. **Divider**, **Curved Scoop**, **Text**, and a
+**Recessed** Photo Nest always stay bounded by the bin, in every mode, because
+their geometry genuinely depends on the material above them. Every part in
+**Separate** or **Cartridge** mode stays height-bound too. Stacking, a lid,
+and the existing wall-touching connector clearance always win regardless of
+this policy - a tall holder that would collide with any of them is refused,
+never silently shrunk or clipped, and the bin is never made taller
+automatically to accommodate it. The 3D editor shows a plain informational
+note ("Extends N mm above rim") when the part being edited legally does so;
+there is no separate "allow above rim" setting.
+
 **Photo Nest — a custom holder built from your photo.** Put one flat tool on a
 US Letter (8.5 × 11 in) sheet, keep all four paper corners visible, photograph
 it directly overhead, and upload the photo. Wavefinity corrects the paper to its
@@ -912,13 +929,15 @@ shaped floor with one end left low to press up, remains an advanced
 Raised-Wall-only option; switching to Recessed while it is active turns
 Finger access back to Automatic instead.
 
-**Automatic bin sizing** is on by default: the bin's Width, Length and Height
-grow or shrink to the smallest size that fits the holder, centred, every time
-the outline, Tool thickness, Holder or Finger access changes. Typing a bin
-size, or dragging the Nest off-centre, turns it off for that design ("Fit bin
-to tool" then does the same fit as a one-off); turning it back on recentres
-and resizes again. A design saved before Auto-size existed keeps its old
-grow-only behaviour unchanged.
+**Automatic footprint sizing** is on by default: the bin's Width and Length
+grow or shrink to the smallest footprint that fits the holder, centred, every
+time the outline, Tool thickness, Holder or Finger access changes. It owns
+Width/Length only — Bin Height is always the height the user set, and a
+manual Height edit never turns it off. Typing a Width or Length, or dragging
+the Nest off-centre, turns it off for that design ("Fit footprint to tool"
+then does the same X/Y fit as a one-off); turning it back on recentres and
+resizes again. A design saved before Auto-size existed keeps its old
+grow-only behaviour unchanged, including its historical Z growth.
 
 The 2D layout draws the softened silhouette - the same one the printed part
 gets - with move, proportional-resize and rotation handles, plus an outline

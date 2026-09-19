@@ -17,6 +17,7 @@ from organizer_engine import (
     _rounded,
     flat_cavity_polygon,
     label_placement,
+    lid_enabled,
     top_label_surface_z,
     wavy_cavity_polygon,
 )
@@ -43,6 +44,32 @@ from ._text import (
     text_placed_outline,
 )
 from ._divider import divider_division_texts
+
+# Physical assembly policy, not a user-facing capability: only these feature
+# kinds may legitimately rise above the bin rim, and only when fused directly
+# into the bin with no stacking interface or lid to collide with. A shallow
+# vanity-style bin still needs its wall height to mean wall height - it is the
+# *interior* geometry of these specific holders that is allowed to be taller.
+_FUSED_ABOVE_RIM_KINDS = frozenset({
+    "cradle",
+    "bore",
+    "post",
+    "pocket",
+    "slot",
+    "steps",
+})
+
+
+def _allows_above_rim(one: Feature, mode: str) -> bool:
+    if mode != "fused":
+        return False
+    if one.kind == "nest":
+        return (
+            one.contour is not None
+            and str(one.options.get("holder_style", "raised_wall")).lower()
+                == "raised_wall"
+        )
+    return one.kind in _FUSED_ABOVE_RIM_KINDS
 
 
 def _nest_recessed_deck_footprint(box: BoxSpec, mode: str) -> Polygon:
@@ -122,13 +149,22 @@ def build_features(
                     "or thickness option"
                 )
         for solid in made:
-            if solid.bounds[1][2] > max_feature_z + 1e-6:
-                if stack_enabled(box):
+            top = solid.bounds[1][2]
+            if stack_enabled(box):
+                if top > max_feature_z + 1e-6:
                     raise ValueError(
                         f"a {one.kind} rises into the stacking interface; keep "
                         f"interior parts below {max_feature_z:.1f} mm, reduce its "
                         "height, or make the bin taller"
                     )
+            elif lid_enabled(box):
+                if top > box.z + 1e-6:
+                    raise ValueError(
+                        f"a {one.kind} rises above the bin rim and conflicts with "
+                        "the lid; reduce its height, remove the lid, or make the "
+                        "bin taller"
+                    )
+            elif top > box.z + 1e-6 and not _allows_above_rim(one, mode):
                 raise ValueError(
                     f"a {one.kind} rises above the bin rim; reduce its height "
                     "or make the bin taller"

@@ -1036,7 +1036,7 @@ def _nest_finger_scoops(
         OptionDefinition("Holder style", "holder_style", "raised_wall", "enum", False),
         OptionDefinition("Cavity depth", "cavity_depth", "", editor=False),
         OptionDefinition("Cavity depth mode", "cavity_depth_mode", "auto", "enum", False),
-        OptionDefinition("Automatic bin sizing", "auto_size", True, "boolean", False),
+        OptionDefinition("Automatic footprint sizing", "auto_size", True, "boolean", False),
         OptionDefinition("Finger access", "lift_assist", "auto", "enum", False),
         OptionDefinition("Finger locations", "finger_position", "sides", "enum", False),
         OptionDefinition("Finger width", "finger_width", "25", editor=False),
@@ -1127,11 +1127,9 @@ def build_nest(
     # the new adaptive buttress and tool-relative access planner.
     legacy = _is_legacy_nest(spec_feature)
     wall_height = tool_thickness + (push_depth if assist == "push_out" else 0.0)
-    if wall_height > available + 1e-9:
-        raise ValueError(
-            f"Wall height {wall_height:g} mm must be between 0 and {available:.1f} mm "
-            f"above the printable floor"
-        )
+    # A fused Raised Wall may legitimately rise above the rim now - the
+    # central assembly policy (_assembly.py's _allows_above_rim) is the one
+    # that still bounds it in Separate/Cartridge mode or against a lid/stack.
     wall = (
         _legacy_nest_rounded_wall(world_opening, rim, wall_height, base_z) if legacy
         else _nest_rounded_wall(world_opening, rim, wall_height, base_z)

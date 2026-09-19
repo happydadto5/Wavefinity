@@ -40,8 +40,8 @@ def build_steps(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trim
 
     if count < 1:
         raise ValueError("steps count must be at least 1")
-    if height <= 0.0 or base_z + height + lip > box.z + 1e-9:
-        raise ValueError("steps height must fit inside the bin")
+    if height <= 0.0:
+        raise ValueError("steps height must be positive")
 
     along = spec_feature.along
     if along == "x":
