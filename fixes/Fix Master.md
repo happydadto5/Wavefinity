@@ -88,12 +88,16 @@ This ledger was introduced after some earlier fixes already existed. The entries
 
 
 ## Fix 011 — Connector Auto-Generation
-- **Status:** READY TO IMPLEMENT from current `main`; Fix 010 merged and archived
+- **Status:** YES — DONE; merged into `main` and archived
+- **Archive file:** `/fixes/fix-011 archive.md`
 - **Planning thread:** `(11) Connector Auto-Generation`
 - **Implementation thread:** `Connector Auto-Generation Imp #11`
-- **Implementation branch:** `fix11`
-- **Testing class:** Moderate UI/backend generation change — targeted connector/web coverage plus full test suite required
-- **Notes:** Remove the false Side-connectors-vs-Base-Trim chooser and the Side/3-Way/4-Way connector-type chooser. Same-height connector generation automatically creates one Side, one 3-Way Corner, and one 4-Way Corner file; different-height generation creates Side only. Existing physical corner eligibility remains, but an ineligible corner must not prevent a valid Side connector from being generated. Hosted folder generation and local Bambu Studio printing must use the same automatic bundle. Fix 011 overlaps Fix 010 in `web/index.html`, `web/app.js`, and `test_wavefinity_web.py`, so implementation starts only after Fix 010 is integrated into current `main`.
+- **Implementation branch:** `claude/fix-11-3f5n9i`
+- **Accepted branch head:** `ad05fc673f7391716e5ab402ef448ca02561c31a`
+- **Merge PR:** #7
+- **Main integration commit:** `7c25b1d95843ba3b42788baa2af2ed5034822be3`
+- **Testing class:** Moderate UI/backend generation change — targeted web tests passed 92/92; full suite reported 613 passed, 1 skipped, and one environment-only missing-`rtree` error whose isolated test passed after installing `rtree`
+- **Notes:** Outside review accepted the implementation. The false Side-connectors-vs-Base-Trim and connector-type/quantity choices are removed. Same-height connector generation now automatically produces Side + 3-Way + 4-Way files when geometry is eligible; different-height generation produces Side only. Too-small corner geometry does not block a valid Side file. Hosted folder generation and local Bambu Studio printing use the same automatic bundle, while B4B, lid, and Base Trim capability exclusions remain intact.
 
 ## Fix 012 — Side Openings
 - **Status:** Planned — implement after Fix 011 is merged
