@@ -67,7 +67,6 @@ const state = {
   inventoryEnabled: true,
   keepLog: false,
   connector: {},
-  joinMode: "side",
   lastOrdinaryDesign: null,
   lastBaseTrimDesign: null,
   baseTrimSourceLayout: null,
@@ -323,7 +322,6 @@ function freshDesignForCurrentFolder() {
 
 async function loadFreshOrdinaryDesignForCurrentFolder() {
   state.design = freshDesignForCurrentFolder();
-  state.joinMode = "side";
   state.baseTrimSourceLayout = null;
   state.lastOrdinaryDesign = clone(state.design);
   resetNestPhotoSession();
@@ -977,7 +975,7 @@ function syncForm() {
   applyBaseTrimVisibility();
   if (baseTrimEnabled()) {
     syncBaseTrimForm();
-    syncJoiningControls();
+    syncConnectorSectionVisibility();
     return;
   }
   normalizeStackSettings(state.design);
@@ -1038,12 +1036,9 @@ function syncForm() {
   $("#connector-bin-a-height").value = fmt(state.connector.bin_a_height ?? box.z);
   $("#connector-bin-b-height").value = fmt(state.connector.bin_b_height ?? box.z);
   $("#connector-height-mode").value = state.connector.different_heights ? "different" : "same";
-  $("#connector-type").value = normalizeConnectorType(state.connector.type);
-  $("#corner-connector-quantity").value = state.connector.quantity ?? 1;
-  syncConnectorTypeControls();
   syncLidForm();
   syncB4BForm();
-  syncJoiningControls();
+  syncConnectorSectionVisibility();
   updateInteriorModeVisibility();
   renderPlaced();
 }
@@ -1110,54 +1105,56 @@ function syncConnectorHeightControls() {
   autoAdjustConnectorFields();
 }
 
-const CONNECTOR_TYPES = ["side", "three_way", "four_way"];
-const CONNECTOR_TYPE_NAMES = {
-  side: "Side connector", three_way: "3-Way Corner connector", four_way: "4-Way Corner connector",
-};
+// Mirrors organizer_engine.MIN_JOINABLE_SIZE; corner connectors below this
+// in either X or Y are physically impossible regardless of user choice.
+const MIN_CORNER_JOINABLE_MM = 16;
 
-function normalizeConnectorType(value) {
-  return CONNECTOR_TYPES.includes(value) ? value : "side";
-}
-
-function connectorTypeNow() {
-  return normalizeConnectorType($("#connector-type")?.value);
-}
-
-function syncConnectorTypeControls() {
-  const type = connectorTypeNow();
-  const corner = type !== "side";
+function syncConnectorSectionVisibility() {
+  const noConnectors = baseTrimEnabled() || b4bEnabled();
   const heightWrap = $("#connector-height-wrap");
-  if (heightWrap) heightWrap.hidden = corner;
-  $("#corner-connector-quantity-row").hidden = !corner;
-  if (corner) {
-    $("#connector-height-mode").value = "same";
+  if (noConnectors) {
+    if (heightWrap) heightWrap.hidden = true;
     $("#connector-bin-heights").hidden = true;
     $("#connector-settings").hidden = true;
-  } else {
-    syncConnectorHeightControls();
+    renderConnectorReadout();
+    return;
   }
+  if (heightWrap) heightWrap.hidden = false;
+  syncConnectorHeightControls();
   renderConnectorReadout();
+  const connectorLocked = Boolean(state.design?.box?.lid?.enabled);
+  $("#generate-all").hidden = connectorLocked;
+  $("#generate-all").textContent = "Generate Bin and Connectors";
+  $("#generate-bin").hidden = false;
+  $("#generate-connector").hidden = connectorLocked;
 }
 
 function renderConnectorReadout(plan = null) {
   const el = $("#connector-derived");
   if (!el) return;
-  if (baseTrimEnabled() || state.joinMode === "base_trim") {
+  if (baseTrimEnabled() || b4bEnabled()) {
     el.hidden = true;
     el.innerHTML = "";
     return;
   }
-  const type = plan?.type ? normalizeConnectorType(plan.type) : connectorTypeNow();
-  const wall = plan?.wall_mm ?? state.design?.box?.wall;
-  const fits = Number.isFinite(Number(wall)) ? `Fits ${fmt(Number(wall))} mm bin walls.` : "Fits the bin wall thickness.";
-  const corner = "Equal-height bins only; bins must be at least 16 mm in X and Y.";
-  const text = type === "side"
-    ? `${fits} Use only with bins of the same wall thickness.`
-    : type === "three_way"
-      ? `${fits} ${corner} Rotate the connector to put the open corner where needed.`
-      : `${fits} ${corner}`;
-  const count = type !== "side" && Number(plan?.quantity) > 1 ? ` Quantity: ${plan.quantity}.` : "";
-  el.textContent = text + count;
+  const different = plan
+    ? Boolean(plan.different_heights)
+    : $("#connector-height-mode").value === "different";
+  if (different) {
+    el.textContent = "Generates a Side connector only. 3-Way and 4-Way Corner connectors require equal-height bins.";
+    el.hidden = false;
+    return;
+  }
+  let text = "Generates Side, 3-Way Corner, and 4-Way Corner connectors. Connectors only fit bins with the same wall thickness.";
+  const x = Number(plan?.box_x_mm ?? state.design?.box?.x);
+  const y = Number(plan?.box_y_mm ?? state.design?.box?.y);
+  const cornersSkipped = Array.isArray(plan?.skipped_types) && plan.skipped_types.length > 0;
+  const tooSmall = cornersSkipped
+    || (Number.isFinite(x) && Number.isFinite(y) && (x < MIN_CORNER_JOINABLE_MM || y < MIN_CORNER_JOINABLE_MM));
+  if (tooSmall) {
+    text += ` Corner connectors require at least ${MIN_CORNER_JOINABLE_MM} mm in both X and Y; this bin is too small for them, so only the Side connector will be generated.`;
+  }
+  el.textContent = text;
   el.hidden = false;
 }
 
@@ -1412,37 +1409,6 @@ function applyBaseTrimVisibility() {
   updatePrimaryPrintButtonLabel();
 }
 
-function persistJoinMode() {
-  saveSimplePreference("default_join_mode", state.joinMode);
-}
-
-function syncJoiningControls() {
-  if (baseTrimEnabled()) state.joinMode = "base_trim";
-  if (!["side", "base_trim"].includes(state.joinMode)) state.joinMode = "side";
-  const select = $("#bin-join-mode");
-  if (select) select.value = state.joinMode;
-  const connectorless = state.joinMode === "base_trim";
-  const heightWrap = $("#connector-height-wrap");
-  if (connectorless) {
-    if (heightWrap) heightWrap.hidden = true;
-    $("#connector-type-row").hidden = true;
-    $("#corner-connector-quantity-row").hidden = true;
-    $("#connector-bin-heights").hidden = true;
-    $("#connector-settings").hidden = true;
-    renderConnectorReadout();
-  } else {
-    $("#connector-type-row").hidden = false;
-    syncConnectorTypeControls();
-  }
-  if (!baseTrimEnabled() && !b4bEnabled()) {
-    const connectorLocked = Boolean(state.design?.box?.lid?.enabled);
-    $("#generate-all").hidden = connectorLocked;
-    $("#generate-all").textContent = connectorless ? "Generate Bin" : "Generate Bin and Connectors";
-    $("#generate-bin").hidden = connectorless && !connectorLocked;
-    $("#generate-connector").hidden = connectorless || connectorLocked;
-  }
-}
-
 async function autoSizeBaseTrimFromSpace() {
   const source = typeof DL !== "undefined" && DL.baseTrimSource ? DL.baseTrimSource() : { ok: false, message: "Create and arrange bins in Space first." };
   if (!source.ok) {
@@ -1465,8 +1431,6 @@ async function startBaseTrimFromSpace(source) {
   state.design = makeBaseTrimDesign(source.field_x_mm, source.field_y_mm);
   state.design.base_trim.auto_size = true;
   state.baseTrimSourceLayout = clone(source.items || []);
-  state.joinMode = "base_trim";
-  persistJoinMode();
   clearDraftSelection();
   syncForm();
   activatePreviewView("2d");
@@ -2183,8 +2147,6 @@ async function changeBinType() {
         ? clone(state.lastBaseTrimDesign)
         : makeBaseTrimDesign(state.design?.box?.x, state.design?.box?.y);
     }
-    state.joinMode = "base_trim";
-    persistJoinMode();
     clearDraftSelection();
     syncForm();
     changedDesign();
@@ -2255,7 +2217,6 @@ function updateDesignFromForm() {
       state.output = newOutput;
       saveOutputPreference(newOutput);
     }
-    state.joinMode = "base_trim";
     saveSimplePreference("base_trim_bed_x_mm", design.base_trim.bed_x_mm);
     saveSimplePreference("base_trim_bed_y_mm", design.base_trim.bed_y_mm);
     return;
@@ -2311,7 +2272,7 @@ function updateDesignFromForm() {
         design.box.wall ?? defaultWall,
       )));
   $("#wall-thickness").value = design.box.standard_walls ? "standard" : fmt(design.box.wall);
-  if (design.box.wall !== previousWall && connectorTypeNow() === "side") autoAdjustConnectorFields();
+  if (design.box.wall !== previousWall) autoAdjustConnectorFields();
   const baseChoice = $("#base-thickness").value;
   design.box.standard_base = !b4bOn && currentStackMode === "none" && baseChoice === "standard";
   design.box.base_thickness = design.box.standard_base
@@ -2339,11 +2300,9 @@ function updateDesignFromForm() {
     height: state.connector.height,
     bin_a_height: number($("#connector-bin-a-height").value, state.design.box.z),
     bin_b_height: number($("#connector-bin-b-height").value, state.design.box.z),
-    different_heights: connectorTypeNow() === "side" && $("#connector-height-mode").value === "different",
+    different_heights: $("#connector-height-mode").value === "different",
     position: 0,
     axis: "y",
-    type: connectorTypeNow(),
-    quantity: number($("#corner-connector-quantity").value, 1),
   };
   readB4BForm(design);
   readStackForm(design);
@@ -2982,15 +2941,6 @@ function wireControls() {
       updateDesignFromForm();
     });
   });
-  $("#connector-type").addEventListener("change", () => {
-    syncConnectorTypeControls();
-    updateDesignFromForm();
-    renderConnectorReadout();
-  });
-  ["input", "change"].forEach(name => $("#corner-connector-quantity").addEventListener(name, () => {
-    updateDesignFromForm();
-    renderConnectorReadout();
-  }));
   $("#connector-height-mode").addEventListener("change", () => {
     if ($("#connector-height-mode").value === "different") {
       $("#connector-bin-a-height").value = fmt(state.design.box.z);
@@ -3000,11 +2950,7 @@ function wireControls() {
     }
     syncConnectorHeightControls();
     updateDesignFromForm();
-  });
-  $("#bin-join-mode")?.addEventListener("change", event => {
-    state.joinMode = event.target.value === "base_trim" ? "base_trim" : "side";
-    persistJoinMode();
-    syncJoiningControls();
+    renderConnectorReadout();
   });
   ["#base-trim-x-units", "#base-trim-y-units"].forEach((selector, index) => {
     $(selector)?.addEventListener("input", event => {
@@ -9832,10 +9778,6 @@ async function openDesign(event) {
     if (!baseTrimEnabled(result.design) && baseTrimEnabled()) state.lastBaseTrimDesign = clone(state.design);
     state.design = result.design;
     state.baseTrimSourceLayout = null;
-    if (baseTrimEnabled()) {
-      state.joinMode = "base_trim";
-      persistJoinMode();
-    }
     resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
     state.drafts = {};
@@ -9980,7 +9922,7 @@ function checkPartNamePresent(target = "bin") {
 }
 
 async function generateParts(target) {
-  if (baseTrimEnabled() || (target === "all" && state.joinMode === "base_trim")) target = "bin";
+  if (baseTrimEnabled()) target = "bin";
   if (state.designMutationBusy || isGenerating) {
     toast("Finish the current action before generating files.", true);
     return;
@@ -10017,9 +9959,9 @@ async function generateParts(target) {
   const boxTitle = baseTrimEnabled()
     ? `Base Trim (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm field)`
     : `Bin (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} × ${fmt(state.design.box.z)} mm)`;
-  const connTitle = connectorTypeNow() === "side"
-    ? `Connector (${fmt(state.design.box.z)} mm)`
-    : CONNECTOR_TYPE_NAMES[connectorTypeNow()];
+  const connTitle = state.connector.different_heights
+    ? "Side Connector"
+    : "Connectors (Side + 3-Way + 4-Way)";
 
   const items = [];
   if (target === "all" || target === "bin") {
@@ -10058,7 +10000,6 @@ async function generateParts(target) {
       design: clone(state.design),
       output: state.output,
       connector: state.connector,
-      join_mode: state.joinMode,
       keep_log: state.keepLog,
     };
 
@@ -10153,8 +10094,7 @@ async function generate(path, selector) {
 
 async function printModel(target = "bin") {
   if (state.runtime.hosted) return generateParts(
-    b4bEnabled() || baseTrimEnabled() || state.joinMode === "base_trim" ||
-      state.design?.box?.lid?.enabled ? "bin" : "all"
+    b4bEnabled() || baseTrimEnabled() || state.design?.box?.lid?.enabled ? "bin" : "all"
   );
   if (!checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
@@ -10174,7 +10114,6 @@ async function printModel(target = "bin") {
       design: clone(state.design),
       output: state.output,
       connector: state.connector,
-      join_mode: state.joinMode,
       target: target,
       keep_log: state.keepLog,
     };
@@ -10420,8 +10359,6 @@ async function init() {
     const catalog = await api("/api/catalog");
     state.catalog = catalog;
     state.runtime = catalog.runtime || { hosted: false, filesystem: "server" };
-    const savedJoinMode = String(storedPreference("default_join_mode", "side"));
-    state.joinMode = ["side", "base_trim"].includes(savedJoinMode) ? savedJoinMode : "side";
     state.serverInstance = catalog.instance;
     state.apiCompat = catalog.api_compat;
     state.design = clone(catalog.defaults.design);

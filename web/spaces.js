@@ -1140,8 +1140,6 @@ SP.designSurface = async space => {
   state.design.base_trim.width_mm = trimValue;
   state.design.box.z = trimValue;
   state.design.part_name = space.name;
-  state.joinMode = "base_trim";
-  persistJoinMode();
 
   clearDraftSelection();
   syncForm();
