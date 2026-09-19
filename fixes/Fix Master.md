@@ -29,13 +29,15 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Final review confirmed Drawer/Surface/Portable Storage use the approved `/images/Drawer.png`, `/images/Vanity.png`, and `/images/B4B.png` assets, preserve the existing visible text and full-card button interaction, use decorative empty alt text, and add consistent responsive 4:3 card styling without changing Space logic. The individual `/fixes/fix-005.md` file was deleted after acceptance per Help Code protocol. No tests were run by ChatGPT during outside review.
 
 ## Fix 006 — Portable Space Identity
-- **Status:** Planning complete; blocked until Fix 004 Correction 12 targeted verification is completed and Fix 004 receives outside **YES — DONE**
+- **Status:** NO — NOT FULLY DONE; outside review completed and Correction 1 appended on `fix6`
 - **Fix file:** `/fixes/fix-006.md`
 - **Planning thread:** `Portable Space Identity Plan #6`
-- **Planned implementation thread:** `Portable Space Identity Imp #6`
+- **Implementation thread:** `Portable Space Identity Imp #6`
 - **Implementation branch:** `fix6`
+- **Review target:** `2c3a157a3f001fa0a36d6a143fac6e552609c8a8`
+- **Correction 1 plan commit:** `45f07b367393c2dacbbc8b16115ca8c9eccc1077`
 - **Testing class:** Class C risk-directed testing required
-- **Notes:** Final plan was rebuilt against current post-Correction-12 code (`be5ed7e3`) and the updated Help Code proportional testing policy. It now gives a single file-by-file implementation recipe for metadata v5/UUID identity, per-user preference migration with atomic registry mutation, active-ID startup recovery, same-parent rename recovery, duplicate-copy handling, uncapped registry vs capped Recents, identity-aware Forget, exact local/hosted inventory filename migration, hosted selected-handle preservation, Show Log resolver integration, failure ordering, and a named Class C verification gate. Fix 006 must start from the finally accepted post-Fix-004 `origin/main`; create `fix6` only after Fix 004 is closed.
+- **Notes:** Core Fix 006 implementation is present, but outside review found four closure items: v2/v3 metadata must never donate a preexisting `space_id`; Recents/Inspect must not manufacture a new `last_seen`; hosted saved-ID mismatch must be rejected before inventory/metadata mutation or setup; and the required local browser smoke still needs to run or have an exact tooling limitation documented. Correction 1 also replaces one pre-existing stale inventory-header test dependency with a narrow Fix-006 canonical-filename regression. The one newer `main` commit is Fix 008 ledger-only planning and does not overlap Fix 006 runtime files.
 
 ## Fix 007 — Adaptive Edge Connectors
 - **Status:** Requirements questions
