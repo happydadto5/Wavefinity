@@ -163,7 +163,7 @@ DP.build = () => {
         <div class="button-row" style="margin-top: 8px;">
           <button id="dl-space-info-edit" class="button secondary" type="button">Edit</button>
           <button id="dl-space-info-show" class="button secondary" type="button">Show Folder</button>
-          <button id="dl-space-info-new-drawer" class="button secondary" type="button" hidden>New Drawer Space</button>
+          <button id="dl-space-info-new-space" class="button secondary" type="button" hidden>New Space</button>
         </div>
       </div>
       <label class="checkbox-row" title="New bins start with the bin settings from the last bin generated or printed in this Space. Interior parts and names start fresh."><span>Keep bin defaults</span><input id="dl-keep-bin-defaults" type="checkbox"></label>

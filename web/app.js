@@ -512,7 +512,7 @@ function placedPartCount() {
 }
 
 function iconFor(kind) {
-  const common = 'viewBox="0 0 32 32" aria-hidden="true"';
+  const common = 'viewBox="2 2 28 28" aria-hidden="true"';
   const iconId = partInfo(kind)?.icon || kind;
   const paths = window.WavefinityFeatureIcons || {};
   return `<svg ${common}>${paths[iconId] || paths.pocket || ""}</svg>`;
