@@ -29,16 +29,16 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Final review confirmed Drawer/Surface/Portable Storage use the approved `/images/Drawer.png`, `/images/Vanity.png`, and `/images/B4B.png` assets, preserve the existing visible text and full-card button interaction, use decorative empty alt text, and add consistent responsive 4:3 card styling without changing Space logic. The individual `/fixes/fix-005.md` file was deleted after acceptance per Help Code protocol. No tests were run by ChatGPT during outside review.
 
 ## Fix 006 — Portable Space Identity
-- **Status:** NO — NOT FULLY DONE; Correction 1 accepted on re-review, Correction 2 appended on `fix6`
+- **Status:** YES — DONE; accepted by outside ChatGPT review, ready to merge into `main`
 - **Fix file:** `/fixes/fix-006.md`
 - **Planning thread:** `Portable Space Identity Plan #6`
 - **Implementation thread:** `Portable Space Identity Imp #6`
 - **Implementation branch:** `fix6`
-- **Current review target:** `3ff62ce6e9535f5b9379356ea83f2e5d79009a32`
+- **Accepted branch head:** `00b3588e80b2e2589925bd2c6278a84d037e008d`
 - **Correction 1 implementation commit:** `a9ccd74f0da2b7f8ab2381e973b61c564fcaded1`
-- **Correction 2 plan commit:** `486f9dce6254a5825c7b7b0488810df9d5811986`
-- **Testing class:** Class C risk-directed testing required
-- **Notes:** Correction 1 successfully fixed v2/v3 ID trust, Recents last_seen stamping, hosted saved-ID pre-mutation validation, and the missing local browser-smoke closure. Re-review then found two remaining original-plan gaps: forgetting the currently-active typed Space is not durable across restart because legacy output fallback immediately re-registers it, and prepare_folder_for_open omits the plan-required final duplicate guard after generating a new UUID during v4->v5 migration. Correction 2 contains exact bounded repairs and focused regressions for both. Newer main commits remain Help-Code/Fix-008 administrative or README policy changes and do not overlap Fix 006 runtime files.
+- **Correction 2 implementation commit:** `502f7ea7a87be002a74c2f100e474d67930e8761`
+- **Testing class:** Class C risk-directed testing completed
+- **Notes:** Outside review accepted the final Fix 006 implementation after two correction passes. Final verification covers durable typed-Space UUID identity, v4->v5 migration, canonical `Wavefinity bins.md`, profile registry/startup/rename recovery, duplicate-copy safety, identity-aware Forget, hosted identity preservation, Show Log resolver behavior, focused automated regressions, and the local browser smoke. Hosted File System Access smoke remains an explicitly documented environment limitation. Current `main` changes since the Fix 006 base affect only README Help-Code policy and Fix 007/008 planning/master files; they do not overlap Fix 006 runtime code. The accepted fix is ready for the normal merge-to-main lifecycle.
 
 ## Fix 007 — Adaptive Edge Connectors
 - **Status:** Requirements questions
