@@ -5,15 +5,15 @@ Permanent Help Code ledger. After a fix receives **YES — DONE** and is integra
 This ledger was introduced after some earlier fixes already existed. The entries below reconstruct the currently visible/known fixes without inventing unavailable history.
 
 ## Fix 002 — Edge Trim Print-Bed Splitting
-- **Status:** Needs remediation work
-- **Fix file:** `/fixes/fix-002.md`
-- **Notes:** Correction 1 is present in the fix file; keep the existing exact-perimeter/minimum-piece requirements. Await remediation/review lifecycle.
+- **Status:** YES — DONE; integrated into `main` and archived
+- **Archive file:** `/fixes/fix-002 archive.md`
+- **Notes:** The earlier Correction 1 status was stale. Final outside review of current `main` confirmed the two documented material issues are resolved: perimeter pieces use exact side-run `clip_regions` rather than one rectangular approximation, and the minimum-piece search allows independently varying/unequal arc lengths while trying piece counts from smallest upward. The 10 mm-per-edge effective-bed rule and final actual-mesh fit check remain in place. No known Fix 002 issue remains.
 
 ## Fix 003 — Base Trim Drop-In Joint and Size Presets
-- **Status:** Work completed, ready for outside review
-- **Fix file:** `/fixes/fix-003.md`
+- **Status:** YES — DONE; integrated into `main` and archived
+- **Archive file:** `/fixes/fix-003 archive.md`
 - **Implementation thread:** `Base Trim Joint Imp #3`
-- **Notes:** Implementation outbrief is present in the fix file. Final completion must be determined by outside ChatGPT review; after **YES — DONE** and integration to `main`, rename the fix file to its `fix-### archive.md` form.
+- **Notes:** Final outside review of current `main` confirmed the requested Base Trim behavior is present: named square size presets with Medium 7.5 × 7.5 mm default, single drop-in dovetail joint with 0.20 mm clearance and legacy join normalization, and the hidden local Ctrl+Shift Print path producing the two-piece physical-fit sample through production geometry. No known Fix 003 issue remains.
 
 ## Fix 004 — Space Onboarding Redesign
 - **Status:** Closed by user
@@ -53,11 +53,12 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Testing class:** Class B — limited targeted connector/geometry checks completed
 - **Notes:** Outside review accepted Fix 007 after Correction 1. The implementation adds Side / 3-Way Corner / 4-Way Corner connector selection, equal-height/same-wall corner connectors using the existing lock lattice and 16 mm minimum joinable size, automatic connector fit from the active wall thickness, quantity 1–20 for corner parts, and a non-blocking mixed-wall warning only after an explicit Wall change in a typed Space. Correction 1 cleared stale warning state whenever the debounced design update is cancelled and made `installed_corner_boxes()` reject invalid way counts. The branch was merged forward to current `main` before final review.
 ## Fix 008 — First Run Drawer
-- **Status:** Outside review: NO — NOT FULLY DONE; Correction 1 did not execute the required live/automated UI verification and incorrectly substituted `PASS (read)`; Correction 2 added to `fix8`
-- **Fix file:** `/fixes/fix-008.md`
+- **Status:** YES — DONE; accepted by user, merged into `main`, and archived
+- **Archive file:** `/fixes/fix-008 archive.md`
 - **Planning thread:** `First Run Drawer Plan #8`
-- **Planned implementation thread:** `First Run Drawer Imp #8`
-- **Planned implementation branch:** `fix8`
-- **Testing class:** Class B targeted UI/interaction verification
-- **Notes:** Implementation still has no identified code defect from outside review. Correction 2 requires each targeted verification item to be genuinely exercised live or by an existing automated test; unavailable items must be marked `PENDING — USER LIVE VERIFICATION REQUIRED`, never `PASS (read)`. Fix 008 cannot be accepted while required items remain pending.
-
+- **Implementation thread:** `First Run Drawer Imp #8`
+- **Implementation branch:** `fix8`
+- **Merge PR:** #4
+- **Main integration commit:** `c705f60f7595cfe05f3deba4cc1df5b4671f9e56`
+- **Testing class:** Class B targeted UI/interaction verification was not completed live by the coding agent; user explicitly accepted closure with no known implementation issue
+- **Notes:** Outside code review found no known implementation defect. The coding agent could not perform live browser verification and initially substituted code-reading checks. After that limitation was made explicit, the user chose to accept and close Fix 008 rather than keep it open solely for live verification. The accepted implementation includes clearer first-run Drawer copy, visible Bin Name/Height cues, actionable empty Drawer/Inventory states, empty-state action gating, and typed single-drawer canonical name/size synchronization. No special post-create tutorial card was added and advanced Bin options remain visible per user decision.
