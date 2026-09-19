@@ -73,3 +73,11 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Testing class:** Class B — focused regression coverage / targeted existing tests
 - **Review verdict:** YES — DONE
 - **Notes:** Completed first-run/hosted reliability work. Final implementation separates committed Space authority from safe setup prefill data, preserves unrestricted “just get started” Design mode, starts onboarding before initial preview generation, adds the immediate startup cover, securely serves the three Space-card images from `/images/`, removes the fake “Browser downloads” folder path, preserves deliberate generated-file downloads, and makes hosted persistence capability/permission-driven across macOS, Linux, Android, and iOS/iPadOS. Targeted Space identity, static image/traversal, pseudo-folder regression, and JS syntax checks were added/run by the implementation agent and reviewed in code before merge. Individual Fix 009 file removed after completion; permanent history retained here.
+
+## Fix 010 — New Space Flow
+- **Status:** Planned / ready to implement
+- **Planning thread:** `New Space Flow Plan #10`
+- **Implementation thread:** `New Space Flow Imp #10`
+- **Implementation branch:** `fix10`
+- **Testing class:** Moderate UI/Space-routing change — focused web regression coverage plus full test script required
+- **Notes:** Compact the normal Interior Parts / Parts & options choice cards from 48 px to 34 px without shrinking the 34 × 34 SVG artwork, and tighten the feature-icon viewBox so the actual glyph is larger. Rename the Drawer-specific “New Drawer Space” action to “New Space” and route it through the existing three-image Drawer / Surface / Portable Storage chooser. Same-type repeat creation carries the current Space dimensions/trim with a blank new name; cross-type creation does not inherit dimensions. Preserve the existing folder-last create/collision/persistence path.
