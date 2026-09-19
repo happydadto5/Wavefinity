@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-19 — Portable Space identity
+
+- Typed Spaces now carry a permanent `space_id` in `.wavefinity.json`
+  (metadata v5; configured v4 Spaces gain one on open without re-onboarding).
+- Local preferences and a Space registry live in the user's OS profile;
+  a renamed Space folder is found again by ID, a moved one on Open Existing.
+- The inventory file is always `Wavefinity bins.md`; one old
+  `<folder name> bins.md` is migrated safely, ambiguous cases stop.
+
 ## 2026-09-17 — Base Trim print-bed splitting
 
 - Oversized Base Trim now divides as a continuous perimeter, keeping corners

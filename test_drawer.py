@@ -75,7 +75,7 @@ class InventoryFileTests(unittest.TestCase):
             append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts")
             text = inventory_path(folder).read_text(encoding="utf-8")
             self.assertIn("| ID | Date | Kind | Name |", text)
-            self.assertTrue(inventory_path(folder).with_name("My Drawer bins.md.bak").is_file())
+            self.assertTrue(inventory_path(folder).with_name("Wavefinity bins.md.bak").is_file())
             again = load_inventory(folder)
             self.assertEqual([b["id"] for b in again["bins"]], ["B1", "B2", "B3"])
             self.assertEqual(again["bins"][0]["qty"], 2)

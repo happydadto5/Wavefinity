@@ -90,6 +90,11 @@ _HEADER_KEYS = {
 _KEEP = object()
 
 
+def inventory_path(output_dir: Path | str) -> Path:
+    """The canonical inventory path only; runtime code uses the resolver."""
+    return Path(output_dir).expanduser().resolve() / INVENTORY_FILENAME
+
+
 class InventoryMigrationError(ValueError):
     """More than one plausible inventory file exists; nothing was changed."""
 

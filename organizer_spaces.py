@@ -489,9 +489,18 @@ def space_routes(
     default_output: Path,
     load_preferences: Callable[[], dict[str, Any]],
     save_preferences: Callable[[dict[str, Any]], dict[str, Any]],
-    mutate_preferences: Callable[[Callable[[dict[str, Any]], Any]], dict[str, Any]],
+    mutate_preferences: Callable[[Callable[[dict[str, Any]], Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Callable[[dict], dict]]:
-    """Local-folder handlers. Hosted folders remain owned by the browser."""
+    """Local-folder handlers. Hosted folders remain owned by the browser.
+
+    ``mutate_preferences`` is the atomic read-modify-write the app supplies;
+    without it a plain load/save pair stands in.
+    """
+    if mutate_preferences is None:
+        def mutate_preferences(mutator):
+            prefs = load_preferences()
+            result = mutator(prefs)
+            return save_preferences(result if isinstance(result, dict) else prefs)
 
     def folder(payload: dict[str, Any]) -> Path:
         return Path(str(payload.get("output") or default_output)).expanduser().resolve()

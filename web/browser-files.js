@@ -91,5 +91,23 @@ window.WFFileSystem = (() => {
     }
   };
 
-  return { supportsDirectoryPicker, pickDirectory, requestReadWritePermission, writeBlob, writeText, readText, fileExists, save, load };
+  // Hosted inventory migration needs to see, and remove, the old
+  // "<folder name> bins.md" - nothing else.
+  const listFilenames = async handle => {
+    if (!handle || !(await requestReadWritePermission(handle))) return [];
+    const names = [];
+    for await (const [name, entry] of handle.entries()) {
+      if (entry.kind === "file") names.push(name);
+    }
+    return names;
+  };
+
+  const removeFile = async (handle, filename) => {
+    if (!handle || !(await requestReadWritePermission(handle))) {
+      throw new Error("Wavefinity needs permission to update that folder.");
+    }
+    await handle.removeEntry(filename);
+  };
+
+  return { supportsDirectoryPicker, pickDirectory, requestReadWritePermission, writeBlob, writeText, readText, fileExists, listFilenames, removeFile, save, load };
 })();
