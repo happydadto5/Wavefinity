@@ -29,15 +29,16 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Final review confirmed Drawer/Surface/Portable Storage use the approved `/images/Drawer.png`, `/images/Vanity.png`, and `/images/B4B.png` assets, preserve the existing visible text and full-card button interaction, use decorative empty alt text, and add consistent responsive 4:3 card styling without changing Space logic. The individual `/fixes/fix-005.md` file was deleted after acceptance per Help Code protocol. No tests were run by ChatGPT during outside review.
 
 ## Fix 006 — Portable Space Identity
-- **Status:** NO — NOT FULLY DONE; outside review completed and Correction 1 appended on `fix6`
+- **Status:** NO — NOT FULLY DONE; Correction 1 accepted on re-review, Correction 2 appended on `fix6`
 - **Fix file:** `/fixes/fix-006.md`
 - **Planning thread:** `Portable Space Identity Plan #6`
 - **Implementation thread:** `Portable Space Identity Imp #6`
 - **Implementation branch:** `fix6`
-- **Review target:** `2c3a157a3f001fa0a36d6a143fac6e552609c8a8`
-- **Correction 1 plan commit:** `45f07b367393c2dacbbc8b16115ca8c9eccc1077`
+- **Current review target:** `3ff62ce6e9535f5b9379356ea83f2e5d79009a32`
+- **Correction 1 implementation commit:** `a9ccd74f0da2b7f8ab2381e973b61c564fcaded1`
+- **Correction 2 plan commit:** `486f9dce6254a5825c7b7b0488810df9d5811986`
 - **Testing class:** Class C risk-directed testing required
-- **Notes:** Core Fix 006 implementation is present, but outside review found four closure items: v2/v3 metadata must never donate a preexisting `space_id`; Recents/Inspect must not manufacture a new `last_seen`; hosted saved-ID mismatch must be rejected before inventory/metadata mutation or setup; and the required local browser smoke still needs to run or have an exact tooling limitation documented. Correction 1 also replaces one pre-existing stale inventory-header test dependency with a narrow Fix-006 canonical-filename regression. The one newer `main` commit is Fix 008 ledger-only planning and does not overlap Fix 006 runtime files.
+- **Notes:** Correction 1 successfully fixed v2/v3 ID trust, Recents last_seen stamping, hosted saved-ID pre-mutation validation, and the missing local browser-smoke closure. Re-review then found two remaining original-plan gaps: forgetting the currently-active typed Space is not durable across restart because legacy output fallback immediately re-registers it, and prepare_folder_for_open omits the plan-required final duplicate guard after generating a new UUID during v4->v5 migration. Correction 2 contains exact bounded repairs and focused regressions for both. Newer main commits remain Help-Code/Fix-008 administrative or README policy changes and do not overlap Fix 006 runtime files.
 
 ## Fix 007 — Adaptive Edge Connectors
 - **Status:** Requirements questions
