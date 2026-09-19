@@ -33,6 +33,7 @@ from wavefinity_web import (
     feature_fit_payload,
     make_server,
     mode_payload,
+    nest_trace_payload,
     photo_nest_payload,
     preview_payload,
 )
@@ -57,6 +58,23 @@ def _text_feature(said, auto=False, zone=(-20.0, -6.0, 20.0, 6.0), **options):
     }
 
 
+def _traced_photo_nest_payload(payload):
+    """photo_nest_payload() now only finalizes an already-traced contour
+    (see nest_trace_payload) - it never decodes/retraces a photo itself.
+    This runs both phases together, as the browser's own two-step flow
+    would, for tests that mock photo_outline_from_data and just want the
+    finished result."""
+    traced = nest_trace_payload({
+        "image": payload.get("image", ""),
+        "mime_type": payload.get("mime_type", ""),
+    })
+    finalize = {**payload, "contour": traced["contour"]}
+    result = photo_nest_payload(finalize)
+    result["reference"] = traced.get("reference")
+    result["trace_outline"] = traced["outline"]
+    return result
+
+
 class WebApplicationTests(unittest.TestCase):
     def test_b4b_blank_label_preference_keeps_preview_intact(self):
         for location in ("top", "front"):
@@ -64,6 +82,12 @@ class WebApplicationTests(unittest.TestCase):
                 design = default_design()
                 design["box"].update({
                     "x": 64.0, "y": 48.0, "z": 40.0,
+                    # B4B's minimum wall (a carried, latched case starts at
+                    # "Strong") is above the ordinary-bin default of 0.8 mm;
+                    # standard_walls=False is needed too, or the custom wall
+                    # value below is overridden back to the 0.8 mm default.
+                    "wall": 1.2,
+                    "standard_walls": False,
                     "b4b": {
                         "enabled": True, "lid": True, "secure_lid": True,
                         "latch_count": "auto", "latch_strength": "standard",
@@ -73,7 +97,10 @@ class WebApplicationTests(unittest.TestCase):
                 })
                 preview = preview_payload({"design": design})
                 self.assertTrue(preview["fits"], preview["message"])
-                self.assertTrue(preview["geometry"])
+                # B4B previews ship the compact grouped-flat-array transport
+                # ("meshes") instead of the per-face "geometry" ordinary bins
+                # use - "geometry" is always [] for a B4B preview by design.
+                self.assertTrue(preview["meshes"])
                 self.assertEqual(preview["b4b"]["label_location"], "none")
 
     def test_catalog_exposes_every_interior_part_and_safe_default_design(self):
@@ -82,7 +109,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(
             set(parts),
             {"divider", "post", "pocket", "bore", "cradle", "nest", "slot",
-             "steps", "scoop", "text"},
+             "steps", "scoop", "text", "edge_mount"},
         )
         self.assertEqual(parts["scoop"]["title"], "Curved Scoop")
         self.assertEqual(parts["scoop"]["icon"], "scoop")
@@ -112,7 +139,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertTrue(parts["cradle"]["flags"]["alternate"])
         self.assertFalse(parts["nest"]["flags"]["alternate"])
         self.assertTrue(parts["nest"]["flags"]["photo"])
-        self.assertEqual(parts["nest"]["title"], "Snug Holder")
+        self.assertEqual(parts["nest"]["title"], "Photo Nest")
         self.assertEqual(
             [field["label"] for field in parts["nest"]["fields"]],
             ["Fit clearance", "Soften outline"],
@@ -283,16 +310,26 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(response["resolved_options"]["count_x"], 1)
         self.assertEqual(response["resolved_options"]["count_y"], 0)
 
-    def test_photo_nest_defaults_include_finger_grasp_lift_assist(self):
+    def test_photo_nest_defaults_include_automatic_lift_assist(self):
         design = default_design()
         response = default_feature_payload({
             "design": design, "kind": "nest",
         })
         feature = response["feature"]
-        self.assertEqual(feature["options"], {})
+        # A brand-new (not yet photographed) Photo Nest shows the new-scan
+        # defaults immediately, so the editor never displays a holder style
+        # the upload it is about to trigger will not actually build - see
+        # organizer_app.default_feature()'s "nest" branch.
+        self.assertEqual(feature["options"], {
+            "holder_style": "recessed", "cavity_depth_mode": "auto",
+            "auto_size": True, "lift_assist": "auto",
+        })
         self.assertIsNone(feature["contour"])
         resolved = response["resolved_options"]
-        self.assertEqual(resolved["lift_assist"], "finger_grasp")
+        # A non-legacy nest's new-scan default is the literal "auto" choice
+        # (not a concrete "finger_grasp"/"push_out" pick) - only a legacy
+        # design predating the Automatic option defaults to "finger_grasp".
+        self.assertEqual(resolved["lift_assist"], "auto")
         self.assertEqual(resolved["finger_position"], "sides")
         self.assertEqual(resolved["finger_width"], 25.0)
         self.assertEqual(resolved["push_position"], "right")
@@ -306,10 +343,13 @@ class WebApplicationTests(unittest.TestCase):
             "data:image/jpeg;base64,dGVzdA==", (-50.0, -20.0, 50.0, 20.0),
         )
         with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
-            result = photo_nest_payload({
+            result = _traced_photo_nest_payload({
                 "design": default_design(), "image": "unused", "mime_type": "image/png",
                 "options": {
                     "clearance": 1.0, "depth": 9.0, "rim": 4.0,
+                    # Push Out needs a Raised Wall holder - with the default
+                    # Recessed style it is auto-corrected back to Automatic.
+                    "holder_style": "raised_wall",
                     "lift_assist": "push_out", "push_position": "left",
                     "push_area": 25.0, "push_depth": 5.0,
                 },
@@ -323,14 +363,20 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(feature["options"]["push_position"], "left")
         self.assertEqual(feature["options"]["push_area"], 25.0)
         self.assertEqual(feature["options"]["push_depth"], 5.0)
-        self.assertEqual(feature["options"]["depth"], 9.0)
+        # "depth" in the request maps to the stored "tool_thickness".
+        self.assertEqual(feature["options"]["tool_thickness"], 9.0)
         self.assertEqual(feature["contour"], [list(point) for point in outline.contour])
         self.assertNotIn("image", json.dumps(design).lower())
         self.assertEqual(result["reference"]["bounds"], [-50.0, -20.0, 50.0, 20.0])
         self.assertEqual(design["box"]["x"] % 8.0, 0.0)
         self.assertEqual(design["box"]["y"] % 8.0, 0.0)
-        self.assertGreaterEqual(design["box"]["x"], 16.0)
-        self.assertGreaterEqual(design["box"]["y"], 48.0)
+        # A from-scratch scan sizes the bin to what the traced photo actually
+        # needs, not to the arbitrary blank template it started from - it can
+        # shrink an axis the template overshot as freely as it grows one the
+        # template undershot. The one real invariant is that the outline
+        # (80 x 20 mm here) still fits inside the resulting grid bin.
+        self.assertGreaterEqual(design["box"]["x"], 80.0)
+        self.assertGreaterEqual(design["box"]["y"], 20.0)
         box, layout, *_ = design_from_dict(design)
         preview = preview_payload({"design": design})
         self.assertFalse(preview["feature_errors"])
@@ -338,7 +384,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertTrue(preview["nest_soft_contours"][0])
 
         feature["options"]["lift_assist"] = "none"
-        feature["options"]["depth"] = 50.0
+        feature["options"]["tool_thickness"] = 50.0
         taller = apply_feature_payload({
             "design": design, "feature": feature, "index": 0,
         })["design"]
@@ -353,8 +399,9 @@ class WebApplicationTests(unittest.TestCase):
             40.0, 16.0, ((0, 0), (1, 0), (1, 1), (0, 1)),
         )
         with patch.object(wavefinity_web, "photo_outline_from_data", return_value=notched):
-            design = photo_nest_payload({
+            design = _traced_photo_nest_payload({
                 "design": default_design(), "image": "x", "mime_type": "image/png",
+                "options": {"depth": 5.0},
             })["design"]
         sharp = preview_payload({"design": design})["nest_soft_contours"][0]
         self.assertEqual(len(sharp), len(notched.contour))
@@ -371,7 +418,10 @@ class WebApplicationTests(unittest.TestCase):
             76.0, 20.0, ((0, 0), (1, 0), (1, 1), (0, 1)),
         )
         with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
-            made = photo_nest_payload({"design": default_design(), "image": "unused", "mime_type": "image/png"})
+            made = _traced_photo_nest_payload({
+                "design": default_design(), "image": "unused", "mime_type": "image/png",
+                "options": {"depth": 5.0},
+            })
         feature = made["design"]["layout"]["features"][0]
         old_x = made["design"]["box"]["x"]
         feature["options"]["clearance"] = 5.0
@@ -385,8 +435,9 @@ class WebApplicationTests(unittest.TestCase):
             ((0, 0), (1, 0), (1, 1), (0, 1)),
         )
         with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
-            made = photo_nest_payload({
+            made = _traced_photo_nest_payload({
                 "design": default_design(), "image": "unused", "mime_type": "image/png",
+                "options": {"depth": 2.0},
             })
         feature = made["design"]["layout"]["features"][0]
         feature["options"]["clearance"] = 1.0
@@ -404,12 +455,19 @@ class WebApplicationTests(unittest.TestCase):
             76.0, 18.0, ((0, 0), (1, 0), (1, 1), (0, 1)),
         )
         with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
-            made = photo_nest_payload({"design": default_design(), "image": "unused", "mime_type": "image/png"})
+            made = _traced_photo_nest_payload({
+                "design": default_design(), "image": "unused", "mime_type": "image/png",
+                "options": {"depth": 5.0},
+            })
         original = made["design"]
         feature = original["layout"]["features"][0]
         feature["rotation"] = 90.0
         rotated = apply_feature_payload({"design": original, "feature": feature, "index": 0})["design"]
-        self.assertEqual(rotated["box"]["x"], original["box"]["x"])
+        # A 90-degree rotation swaps which axis the contour's long/short
+        # sides run along, so auto-sizing swaps box x/y to match - it does
+        # not just grow y while leaving x as it was.
+        self.assertEqual(rotated["box"]["y"], original["box"]["x"])
+        self.assertEqual(rotated["box"]["x"], original["box"]["y"])
         self.assertGreater(rotated["box"]["y"], original["box"]["y"])
         feature = rotated["layout"]["features"][0]
         feature["scale"] = 1.5
@@ -431,18 +489,24 @@ class WebApplicationTests(unittest.TestCase):
             )
 
     def test_add_update_delete_round_trip_uses_design_schema(self):
+        # A "divider" is full_span: its saved zone always snaps back to the
+        # bin's whole floor extent regardless of what is requested (it has
+        # no user-sized footprint), so it cannot exercise a zone edit
+        # surviving the round trip. "post" is an ordinary, user-sized part.
         design = default_design()
-        feature = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        design["box"]["x"] = 48.0
+        design["box"]["y"] = 48.0
+        feature = default_feature_payload({"design": design, "kind": "post"})["feature"]
         added = apply_feature_payload({"design": design, "feature": feature, "index": None})
         self.assertEqual(added["selected"], 0)
         self.assertEqual(len(added["design"]["layout"]["features"]), 1)
         updated_feature = added["design"]["layout"]["features"][0]
-        updated_feature["zone"] = [-5.0, -1.0, 5.0, 1.0]
+        updated_feature["zone"] = [-6.0, -6.0, 6.0, 6.0]
         updated = apply_feature_payload({
             "design": added["design"], "feature": updated_feature, "index": 0,
         })
         saved = updated["design"]["layout"]["features"][0]
-        self.assertEqual(saved["zone"][2] - saved["zone"][0], 10.0)
+        self.assertEqual(saved["zone"][2] - saved["zone"][0], 12.0)
         deleted = delete_feature_payload({"design": updated["design"], "index": 0})
         self.assertEqual(deleted["design"]["layout"]["features"], [])
 
@@ -504,6 +568,11 @@ class WebApplicationTests(unittest.TestCase):
         design = default_design()
         design["box"]["x"] = 96.0
         design["box"]["y"] = 96.0
+        # A "divider" is full_span, so its saved zone always follows the
+        # bin's whole floor extent (the assignment below is never honored) -
+        # tall enough that a 20-degree slope across that full ~93 mm run
+        # still fits under the divider's own resolved height.
+        design["box"]["z"] = 60.0
         feature = default_feature_payload({
             "design": design, "kind": "divider",
         })["feature"]
@@ -1220,8 +1289,14 @@ class WebApplicationTests(unittest.TestCase):
         root = Path(__file__).resolve().parent
         app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
         styles_css = (root / "web" / "styles.css").read_text(encoding="utf-8")
-        self.assertIn('plainCheckbox("option:slope_base", "Slope base"', app_js)
-        self.assertIn('dataAttribute: "data-divider-scoop-enabled"', app_js)
+        # Flat/Sloped/Curved-scoop bottom is one unified "Bottom" dropdown
+        # now, not a separate Slope base checkbox plus a separate
+        # scoop-enabled checkbox.
+        self.assertIn('data-draft="option:bottom_mode"', app_js)
+        self.assertIn(">Flat</option>", app_js)
+        self.assertIn(">Sloped</option>", app_js)
+        self.assertIn(">Curved scoop</option>", app_js)
+        self.assertIn('dataAttribute: "data-divider-scoop-depth"', app_js)
         self.assertIn('plainCheckbox("option:label_divisions", "Label divisions"', app_js)
         self.assertNotIn("Slot bottoms", app_js)
         self.assertNotIn("Compartment scoops", app_js)
@@ -1229,8 +1304,9 @@ class WebApplicationTests(unittest.TestCase):
         self.assertNotIn("data-divider-scoop-cell", app_js)
         self.assertNotIn("data-divider-scoop-all", app_js)
         self.assertNotIn("data-divider-scoop-none", app_js)
+        self.assertNotIn("data-divider-scoop-enabled", app_js)
         self.assertNotIn("divider-scoop-grid", styles_css)
-        self.assertIn('changed === "option:slope_base" && one.options.slope_base', app_js)
+        self.assertIn('one.options.slope_base = true;', app_js)
         self.assertIn('delete one.options.scoop;', app_js)
         self.assertIn('delete state.draft.options[key];', app_js)
         self.assertIn('textPlacementFields(', app_js)
@@ -1270,8 +1346,11 @@ class WebApplicationTests(unittest.TestCase):
         gl_js = (root / "web" / "preview3d-webgl.js").read_text(encoding="utf-8")
         self.assertIn('id="ordinary-preview-modes"', index_html)
         self.assertIn('id="b4b-preview-modes"', index_html)
-        for mode in ("standard", "xray", "bin", "interior"):
-            self.assertIn(f'data-camera-mode="{mode}"', index_html)
+        # The four mutually-exclusive camera modes were replaced by three
+        # independently toggleable Bin/Interior/Xray buttons - there is no
+        # separate "standard" mode any more.
+        for mode in ("bin", "interior", "xray"):
+            self.assertIn(f'data-camera-toggle="{mode}"', index_html)
         for view in ("all", "base", "lid"):
             self.assertIn(f'data-b4b-view="{view}"', index_html)
         self.assertLess(
@@ -1344,7 +1423,7 @@ class WebServerTests(unittest.TestCase):
         self.assertNotIn(b"Flat wall band", body)
         self.assertNotIn(b"Label your bin", body)
         self.assertNotIn(b"Rim label", body)
-        self.assertIn(b"Interior parts", body)
+        self.assertIn(b"Parts &amp; options", body)
         self.assertIn(b'id="part-name"', body)
         self.assertIn(b"Connectors", body)
         self.assertIn(b">Save folder</label>", body)
@@ -1382,11 +1461,14 @@ class WebServerTests(unittest.TestCase):
         # so it sits above the size fields and everything else.
         self.assertLess(body.index(b'id="bin-type"'), body.index(b'id="x-size"'))
         self.assertLess(body.index(b'id="x-size"'), body.index(b'id="mode-select"'))
-        self.assertLess(body.index(b'id="mode-select"'), body.index(b"<h2>Interior parts</h2>"))
-        self.assertLess(body.index(b"<h2>Interior parts</h2>"), body.index(b"Connectors"))
+        self.assertLess(body.index(b'id="mode-select"'), body.index(b"<h2>Parts &amp; options</h2>"))
+        self.assertLess(body.index(b"<h2>Parts &amp; options</h2>"), body.index(b"Connectors"))
         self.assertLess(body.index(b"Connectors"), body.index(b">Save folder</label>"))
-        # Part name names the output file, so it lives with the output controls.
-        self.assertLess(body.index(b"Connectors"), body.index(b'id="part-name"'))
+        # Part name now lives right with Bin type at the very top - naming the
+        # bin is the first thing a person does, not something buried with the
+        # output controls further down.
+        self.assertLess(body.index(b'id="bin-type"'), body.index(b'id="part-name"'))
+        self.assertLess(body.index(b'id="part-name"'), body.index(b'id="x-size"'))
         # The palette itself is the "add another part" affordance now - there is
         # no separate button. Editing a part shows Save / Delete Part below its
         # settings.
@@ -1397,10 +1479,15 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b'id="mode-select"', body)
         # Print mode and 2D orientation are selects; preview filters are buttons.
         self.assertIn(b'id="ordinary-preview-modes"', body)
-        self.assertIn(b'id="layout-orientation"', body)
-        for value in (b"standard", b"xray", b"bin", b"interior"):
-            self.assertIn(b'data-camera-mode="%s"' % value, body)
-        self.assertNotIn(b"data-layout-orientation", body)
+        self.assertIn(b'id="layout-orientation-controls"', body)
+        # The four mutually-exclusive camera modes were replaced by three
+        # independently toggleable Bin/Interior/Xray buttons.
+        for value in (b"bin", b"interior", b"xray"):
+            self.assertIn(b'data-camera-toggle="%s"' % value, body)
+        # 2D orientation (Match 3D / Top Up) is its own toggle group, using
+        # this same per-button attribute pattern.
+        self.assertIn(b'data-layout-orientation="match3d"', body)
+        self.assertIn(b'data-layout-orientation="topup"', body)
         status, _headers, body = self.get("/app.js")
         self.assertEqual(status, 200)
         self.assertIn(b"refreshPreview", body)
@@ -1418,7 +1505,7 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b"Upload part photo", body)
         self.assertIn(b".jpg,.jpeg,.png,.webp", body)
         self.assertIn(b"Camera directly overhead", body)
-        self.assertIn(b"syncNestZone", body)
+        self.assertIn(b"syncNest2DWorkspace", body)
         self.assertIn(b'"rotate"', body)
         # The part name is seeded once from the first real piece of lettering,
         # and the bespoke floor-label drag is gone - text is an interior part.
@@ -1427,7 +1514,10 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b"selectKind(kind);", body)
         self.assertIn(b"kindRequest", body)
         self.assertIn(b"fitRequest", body)
-        self.assertIn(b"nestPhotoRequest", body)
+        # The old single photo-upload request counter is now the two-phase
+        # trace/retrace request counters, matching the backend's own split
+        # of tracing (nest_trace_payload) from finalizing (photo_nest_payload).
+        self.assertIn(b"nestTraceRequest", body)
         self.assertIn(b"function clearDraftSelection", body)
         self.assertIn(b"placed-item-icon", body)
         self.assertNotIn(b"${index + 1}. ${title}", body)

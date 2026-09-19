@@ -2019,7 +2019,12 @@ def default_feature(
         margin = 0.0 if mode == "cartridge" else MIN_FEATURE_GAP
         diameter = min(12.0, run - margin, across - margin)
         width, depth = ((run, across) if along == "x" else (across, run))
-        feature_options = {"diameter": diameter, "height": 16.0, "taper": 0.4}
+        # A short bin cannot take the usual 16 mm peg either - the same
+        # "valid bin, instant error on Add" trap the width/depth clamp above
+        # already guards against, just along Z instead of X/Y.
+        usable_height = box.z - base_height(box, mode)
+        height = min(16.0, usable_height - MIN_FEATURE_GAP)
+        feature_options = {"diameter": diameter, "height": height, "taper": 0.4}
     elif kind == "slot":
         run = _starter_span(bounds.width if along == "x" else bounds.depth, 32.0, mode)
         # One explicit starter slot with a snug 8 mm Base. Raising Quantity in
@@ -2423,9 +2428,16 @@ def design_from_dict(
     if scoop:
         if (not any(one.kind == "scoop" for one in layout.features)
                 and not any(one.kind == "nest" and one.contour for one in layout.features)):
-            legacy_zone = Zone(*scoop_floor_zone(
-                box, _scoop_floor_bounds(box, layout.mode)
-            ).bounds)
+            # Seed the migrated Feature's zone the same way scoop_zone()
+            # normalizes every scoop on every later load (the loop above),
+            # not the unrelated physical-footprint math scoop_floor_zone()
+            # uses elsewhere - otherwise the two disagree and a design that
+            # migrates once keeps drifting a fraction of a millimetre on
+            # every subsequent save/reopen instead of landing on a fixed point.
+            legacy_zone = scoop_zone(
+                box, Feature("scoop", Zone(-1.0, -1.0, 1.0, 1.0)),
+                base_z, layout.mode, layout.snap,
+            )
             layout = replace(
                 layout,
                 features=layout.features + (Feature("scoop", legacy_zone),),

@@ -287,7 +287,11 @@ Name exact commands/checks when known, but do not turn the fix file into a testi
 - **Prefer existing tests.** Reuse them before writing new ones.
 - **Targeted first when obvious.** If one small test group directly covers the change, start there.
 - **Full suites are allowed.** A full existing automated suite is reasonable whenever it is fast enough, output is concise, and the extra regression coverage is worth the small token cost.
-- **Use quiet/concise output.** Avoid verbose logs unless diagnosing a failure.
+- **Use quiet/concise output.** Avoid verbose logs unless diagnosing a failure. Run the suite through
+  `python3 run_tests.py` (whole suite) or `python3 run_tests.py test_foo test_bar` (a subset) — it
+  prints one `PASS: N/N passed in Ys` line when everything passes, and only the failing test IDs plus
+  their tracebacks otherwise. A green run costs one line of output no matter how large the suite is;
+  `python -m unittest` directly is for when you need its own `-v`/`-k` flags while diagnosing a failure.
 - **New tests are optional, not automatic.** Add one only when it protects an important stable invariant and is worth the implementation/maintenance cost.
 - **Syntax/import checks are cheap** and encouraged when relevant.
 - **Browser/server driving is sparse.** Use it only for risks that cheaper automated checks cannot resolve.
@@ -1406,6 +1410,7 @@ layered implementation:
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
 | `test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest`. |
 | `test_drawer.py` | Inventory file, auto layout and spacer regressions. | Only via `python -m unittest`. |
+| `run_tests.py` | Compact test runner: one pass/fail summary line, full tracebacks only on failure. See [Testing rules](#testing-rules). | Yes — `python3 run_tests.py [module ...]`. |
 
 `web/index.html`, `web/styles.css`, `web/feature-icons.js` and `web/app.js` are
 plain dependency-free frontend files with no build step. Icon artwork lives in

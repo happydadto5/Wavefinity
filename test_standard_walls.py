@@ -18,6 +18,7 @@ from organizer_engine import (
     LOCK_SAFE_SKIN,
     MAX_WALL,
     MIN_WALL,
+    WALL_PRESETS,
     WALL_STEP,
     WAVE_AMPLITUDE,
     WAVE_LENGTH,
@@ -199,9 +200,15 @@ class StandardWallsTests(unittest.TestCase):
             (rules["min_mm"], rules["max_mm"], rules["step_mm"]),
             (MIN_WALL, MAX_WALL, WALL_STEP),
         )
-        self.assertEqual(tuple(choice["value"] for choice in rules["choices"]), WALL_CHOICES)
-        self.assertEqual(rules["choices"][0]["label"], "Very thin (experimental)")
-        self.assertEqual(rules["choices"][-1]["label"], "Maximum thickness")
+        # The UI's choice list is the curated WALL_PRESETS - the wall
+        # thicknesses that print differently on a typical nozzle - not every
+        # value the min/max/step validation quantum still accepts.
+        self.assertEqual(
+            tuple(choice["value"] for choice in rules["choices"]),
+            tuple(value for value, _label in WALL_PRESETS),
+        )
+        self.assertEqual(rules["choices"][0]["label"], WALL_PRESETS[0][1])
+        self.assertEqual(rules["choices"][-1]["label"], WALL_PRESETS[-1][1])
 
 
 if __name__ == "__main__":

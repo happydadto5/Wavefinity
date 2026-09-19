@@ -1,5 +1,6 @@
 import re
 import tempfile
+import threading
 import unittest
 import json
 from pathlib import Path
@@ -10,10 +11,10 @@ from organizer_drawer import (
     auto_layout,
     drawer_grid,
     drawer_report,
+    drawer_routes,
     generate_spacers,
     normalise_drawer,
     plan_spacers,
-    spacer_frame,
     wavy_rect_outer,
 )
 from organizer_engine import (
@@ -27,8 +28,8 @@ from organizer_engine import (
 )
 from organizer_inventory import (
     append_bin,
-    create_space,
-    create_space_text,
+    configure_space,
+    configure_space_text,
     inventory_path,
     load_inventory,
     load_inventory_text,
@@ -86,8 +87,11 @@ class InventoryFileTests(unittest.TestCase):
             folder = Path(tmp) / "Garage"
             prefs = {}
             routes = space_routes(Path(tmp), lambda: dict(prefs), lambda update: prefs.update(update) or dict(prefs))
-            made = routes["/api/space/create"]({"output": str(folder), "name": "Screw box", "kind": "box", "x": 96, "y": 48, "z": 40})
-            self.assertEqual(made["folder"]["space"], {"name": "Screw box", "kind": "box", "x": 96.0, "y": 48.0, "z": 40.0})
+            # A brand-new typed Space never accepts the legacy "box" kind
+            # directly - that only ever arrives via migration - so a new
+            # mating-boundary case is created as "portable".
+            made = routes["/api/space/create"]({"output": str(folder), "name": "Screw box", "kind": "portable", "x": 96, "y": 48, "z": 40})
+            self.assertEqual(made["folder"]["space"], {"name": "Screw box", "kind": "portable", "x": 96.0, "y": 48.0, "z": 40.0})
             self.assertEqual(made["folder"]["folder_mode"], "space")
             self.assertTrue((folder / ".wavefinity.json").is_file())
             self.assertEqual(made["recent"][0]["name"], "Screw box")
@@ -96,15 +100,21 @@ class InventoryFileTests(unittest.TestCase):
             append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20)
             self.assertTrue(inventory_path(folder).read_text(encoding="utf-8").startswith("# Screw box Bins"))
             with self.assertRaises(ValueError):
-                create_space(folder, name="Again", kind="drawer", x=1, y=1, z=1)
+                configure_space(folder, raw_def={"name": "Again", "kind": "drawer", "x": 1, "y": 1, "z": 1})
 
             plain = Path(tmp) / "Loose"
-            done = routes["/api/folder/use"]({"output": str(plain)})
+            # A never-created folder needs the explicit "no Space type"
+            # choice, which also creates it - /api/folder/use only opens a
+            # folder that already exists and has completed setup.
+            done = routes["/api/space/use-untyped"]({"output": str(plain)})
             self.assertEqual(done["folder"]["folder_mode"], "design")
-            self.assertEqual([one["folder_mode"] for one in done["recent"]], ["design", "space"])
+            self.assertEqual([one["folder_mode"] for one in done["recent"]], ["space", "design"])
 
     def test_browser_inventory_text_uses_the_same_parser_and_writer(self):
-        made = create_space_text("", title="Top Drawer", name="Top Drawer", kind="drawer", x=420, y=350, z=65)
+        made = configure_space_text(
+            "", title="Top Drawer",
+            raw_def={"name": "Top Drawer", "kind": "drawer", "x": 420, "y": 350, "z": 65},
+        )
         saved = save_inventory_text(made["inventory_text"], title="Top Drawer", new_bins=[{
             "name": "Bits", "x": 32, "y": 48, "z": 30, "qty": 0,
         }])
@@ -124,7 +134,10 @@ class FolderMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Designs"
             routes, _prefs = self.routes(tmp)
-            result = routes["/api/folder/use"]({"output": str(folder)})
+            # A never-before-seen folder always needs_setup=True; the "no
+            # Space type" choice is the explicit /api/space/use-untyped
+            # route - /api/folder/use only opens an already-settled folder.
+            result = routes["/api/space/use-untyped"]({"output": str(folder)})
             self.assertEqual(result["folder"]["folder_mode"], "design")
             self.assertTrue(result["folder"]["inventory"])
             written = json.loads((folder / ".wavefinity.json").read_text())
@@ -133,6 +146,10 @@ class FolderMigrationTests(unittest.TestCase):
             # Inventory is enabled, but the file itself is only created lazily,
             # the first time there is something to log.
             self.assertFalse(inventory_path(folder).exists())
+            # Now that setup is complete, reopening it is the plain open route.
+            self.assertEqual(
+                routes["/api/folder/use"]({"output": str(folder)})["folder"]["folder_mode"], "design",
+            )
 
     def test_old_design_metadata_migrates_to_inventory_on(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -140,7 +157,8 @@ class FolderMigrationTests(unittest.TestCase):
             folder.mkdir()
             (folder / ".wavefinity.json").write_text('{"version":2,"folder_mode":"design"}', encoding="utf-8")
             routes, _prefs = self.routes(tmp)
-            result = routes["/api/folder/use"]({"output": str(folder)})
+            # A v2 design marker still needs its one-time setup pass.
+            result = routes["/api/space/use-untyped"]({"output": str(folder)})
             self.assertEqual(result["folder"]["folder_mode"], "design")
             self.assertTrue(result["folder"]["inventory"])
             self.assertTrue(json.loads((folder / ".wavefinity.json").read_text())["inventory"])
@@ -149,7 +167,7 @@ class FolderMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Bench"
             routes, _prefs = self.routes(tmp)
-            routes["/api/folder/use"]({"output": str(folder)})
+            routes["/api/space/use-untyped"]({"output": str(folder)})
 
             off = routes["/api/folder/inventory"]({"output": str(folder), "inventory": False})
             self.assertFalse(off["folder"]["inventory"])
@@ -164,9 +182,10 @@ class FolderMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Drawer2"
             folder.mkdir()
-            create_space(folder, name="X", kind="drawer", x=40, y=40, z=40)
             routes, _prefs = self.routes(tmp)
-            routes["/api/folder/use"]({"output": str(folder)})
+            # The real production path for a genuinely new typed Space:
+            # /api/space/create writes current metadata and remembers it.
+            routes["/api/space/create"]({"output": str(folder), "name": "X", "kind": "drawer", "x": 40, "y": 40, "z": 40})
             with self.assertRaises(ValueError):
                 routes["/api/folder/inventory"]({"output": str(folder), "inventory": False})
 
@@ -177,7 +196,17 @@ class FolderMigrationTests(unittest.TestCase):
             drawer.mkdir()
             legacy_space = {"name": "Tools", "kind": "drawer", "x": 120, "y": 80, "z": 40}
             (drawer / ".wavefinity-space.json").write_text(json.dumps(legacy_space), encoding="utf-8")
-            result = routes["/api/folder/use"]({"output": str(drawer)})
+
+            # A legacy typed Space is only ever a candidate: it needs the
+            # explicit migration pass (/api/space/configure), never an
+            # automatic promotion from merely opening the folder.
+            inspected = routes["/api/space/inspect"]({"output": str(drawer)})["folder"]
+            self.assertEqual(inspected["folder_mode"], "space")
+            self.assertEqual(inspected["space_source"], "legacy_metadata")
+            self.assertTrue(inspected["needs_setup"])
+            result = routes["/api/space/configure"]({
+                "output": str(drawer), "name": "Tools", "kind": "drawer", "x": 120, "y": 80, "z": 40,
+            })
             self.assertEqual(result["folder"]["folder_mode"], "space")
             self.assertEqual(result["folder"]["space"]["x"], 120.0)
             self.assertEqual(json.loads((drawer / ".wavefinity.json").read_text())["space"]["name"], "Tools")
@@ -185,31 +214,46 @@ class FolderMigrationTests(unittest.TestCase):
             plain = Path(tmp) / "Plain"
             plain.mkdir()
             (plain / ".wavefinity-space.json").write_text('{"kind":"none"}', encoding="utf-8")
-            self.assertEqual(routes["/api/folder/use"]({"output": str(plain)})["folder"]["folder_mode"], "design")
+            self.assertEqual(
+                routes["/api/space/use-untyped"]({"output": str(plain)})["folder"]["folder_mode"], "design",
+            )
 
             preferred = Path(tmp) / "Preferred"
             preferred.mkdir()
             prefs["no_inventory_folders"] = [str(preferred)]
-            preferred_result = routes["/api/folder/use"]({"output": str(preferred)})["folder"]
+            preferred_result = routes["/api/space/use-untyped"]({"output": str(preferred)})["folder"]
             self.assertEqual(preferred_result["folder_mode"], "design")
             self.assertFalse(preferred_result["inventory"])
 
-    def test_inventory_space_beats_safe_contrary_metadata(self):
+    def test_inventory_layout_space_needs_explicit_migration_over_contrary_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Drawer"
             folder.mkdir()
-            create_space(folder, name="Hardware", kind="drawer", x=100, y=80, z=40)
+            configure_space(folder, raw_def={"name": "Hardware", "kind": "drawer", "x": 100, "y": 80, "z": 40})
             inventory_before = inventory_path(folder).read_bytes()
             (folder / ".wavefinity.json").write_text('{"version":2,"folder_mode":"design"}', encoding="utf-8")
             (folder / ".wavefinity-space.json").write_text('{"kind":"none"}', encoding="utf-8")
             routes, _prefs = self.routes(tmp)
-            result = routes["/api/folder/use"]({"output": str(folder)})
-            self.assertEqual(result["folder"]["folder_mode"], "space")
-            self.assertEqual(result["folder"]["space"]["name"], "Hardware")
+
+            # Merely inspecting the folder never rewrites the inventory, and
+            # an inventory-only candidate is never silently authoritative -
+            # it still needs the explicit migration pass, even though it is
+            # the only real Space information the folder has.
+            inspected = routes["/api/space/inspect"]({"output": str(folder)})["folder"]
+            self.assertEqual(inspected["folder_mode"], "space")
+            self.assertEqual(inspected["space"]["name"], "Hardware")
+            self.assertEqual(inspected["space_source"], "inventory_layout")
+            self.assertTrue(inspected["needs_setup"])
             self.assertEqual(inventory_path(folder).read_bytes(), inventory_before)
+
+            result = routes["/api/space/configure"]({
+                "output": str(folder), "name": "Hardware", "kind": "drawer", "x": 100, "y": 80, "z": 40,
+            })["folder"]
+            self.assertEqual(result["folder_mode"], "space")
+            self.assertEqual(result["space"]["name"], "Hardware")
             self.assertEqual(json.loads((folder / ".wavefinity.json").read_text())["folder_mode"], "space")
 
-    def test_legacy_box_space_beats_a_stale_current_design_marker(self):
+    def test_legacy_box_space_migrates_to_portable_over_a_stale_current_design_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Garage"
             folder.mkdir()
@@ -220,16 +264,27 @@ class FolderMigrationTests(unittest.TestCase):
                 json.dumps({"name": "Screws", "kind": "box", "x": 96, "y": 48, "z": 40}), encoding="utf-8",
             )
             routes, _prefs = self.routes(tmp)
-            result = routes["/api/folder/use"]({"output": str(folder)})["folder"]
+            inspected = routes["/api/space/inspect"]({"output": str(folder)})["folder"]
+            self.assertEqual(inspected["folder_mode"], "space")
+            self.assertEqual(inspected["space"], {"name": "Screws", "kind": "box", "x": 96.0, "y": 48.0, "z": 40.0})
+            self.assertEqual(inspected["space_source"], "legacy_metadata")
+            self.assertTrue(inspected["needs_setup"])
+
+            # The explicit migration pass always persists legacy "box" as
+            # "portable" - that mapping is enforced by configure_space()
+            # itself, never left to the caller.
+            result = routes["/api/space/configure"]({
+                "output": str(folder), "name": "Screws", "kind": "box", "x": 96, "y": 48, "z": 40,
+            })["folder"]
             self.assertEqual(result["folder_mode"], "space")
-            self.assertEqual(result["space"], {"name": "Screws", "kind": "box", "x": 96.0, "y": 48.0, "z": 40.0})
+            self.assertEqual(result["space"], {"name": "Screws", "kind": "portable", "x": 96.0, "y": 48.0, "z": 40.0})
             self.assertTrue(result["inventory"])
             written = json.loads((folder / ".wavefinity.json").read_text())
             self.assertEqual(written["folder_mode"], "space")
             self.assertTrue(written["inventory"])
-            self.assertEqual(written["space"]["kind"], "box")
+            self.assertEqual(written["space"]["kind"], "portable")
 
-    def test_legacy_space_beats_a_stale_design_marker_even_with_inventory_off(self):
+    def test_legacy_space_migration_requires_inventory_even_with_a_stale_opt_out(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Bench"
             folder.mkdir()
@@ -240,7 +295,14 @@ class FolderMigrationTests(unittest.TestCase):
                 json.dumps({"name": "Bits", "kind": "drawer", "x": 120, "y": 80, "z": 40}), encoding="utf-8",
             )
             routes, _prefs = self.routes(tmp)
-            result = routes["/api/folder/use"]({"output": str(folder)})["folder"]
+            inspected = routes["/api/space/inspect"]({"output": str(folder)})["folder"]
+            self.assertEqual(inspected["folder_mode"], "space")
+            self.assertEqual(inspected["space"]["kind"], "drawer")
+            self.assertEqual(inspected["space_source"], "legacy_metadata")
+
+            result = routes["/api/space/configure"]({
+                "output": str(folder), "name": "Bits", "kind": "drawer", "x": 120, "y": 80, "z": 40,
+            })["folder"]
             self.assertEqual(result["folder_mode"], "space")
             self.assertEqual(result["space"]["kind"], "drawer")
             # Space always requires inventory, overriding the stale opt-out.
@@ -255,7 +317,7 @@ class FolderMigrationTests(unittest.TestCase):
             )
             (folder / ".wavefinity-space.json").write_text('{"kind":"none"}', encoding="utf-8")
             routes, _prefs = self.routes(tmp)
-            result = routes["/api/folder/use"]({"output": str(folder)})["folder"]
+            result = routes["/api/space/use-untyped"]({"output": str(folder)})["folder"]
             self.assertEqual(result["folder_mode"], "design")
             self.assertFalse(result["inventory"])
 
@@ -294,7 +356,10 @@ class FolderMigrationTests(unittest.TestCase):
             }
             routes, prefs = self.routes(tmp, prefs)
 
-            result = routes["/api/folder/use"]({"output": str(good)})
+            # "good" is brand new, so its first open is the explicit
+            # "no Space type" choice - /api/folder/use only opens a folder
+            # whose setup is already complete.
+            result = routes["/api/space/use-untyped"]({"output": str(good)})
             broken = next(one for one in result["recent"] if one["folder"] == str(bad))
             self.assertTrue(broken["invalid"])
             self.assertEqual(result["folder"]["folder"], str(good.resolve()))
@@ -351,18 +416,23 @@ class StackTests(unittest.TestCase):
 
 
 class SpacerTests(unittest.TestCase):
-    def test_edges_get_wavy_flat_backed_spacers_and_empty_cells_get_x_spacers(self):
+    def test_edges_get_spacer_candidates_for_every_exposed_side(self):
+        # The unified edge-spacer design plans one short, deterministic
+        # contact-width candidate per exposed wall segment - never a full
+        # tiled "cover the whole run" set, and never an interior grid-cell
+        # filler (that older "X spacer" concept no longer exists).
         bins = [_bin("B1", 16, 16, 40)]
         layout = _layout(4 * 8 + 1 + 5.0, 3 * 8 + 1, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
         plan = plan_spacers(layout["drawers"][0], bins, {"fill": "all"})
         self.assertEqual(plan["height"], 15)
-        self.assertEqual([s["side"] for s in plan["edges"]], ["right"])
-        edge = plan["edges"][0]
-        # flat against the drawer wall; wave crests reach just past the grid edge (32.5)
-        self.assertAlmostEqual(edge["x"] + edge["w"], 37.5, places=6)
-        self.assertTrue(32.1 < edge["x"] < 32.5, edge["x"])
-        covered = sum(c["w"] * c["d"] for c in plan["cells"])
-        self.assertEqual(covered, 4 * 3 - 4)
+        sides = sorted(c["placements"][0]["side"] for c in plan["candidates"])
+        self.assertEqual(sides, ["back", "right"])
+        # A single simple component gets both its exposed sides auto-selected.
+        self.assertEqual({c["id"] for c in plan["selected"]}, {c["id"] for c in plan["candidates"]})
+        right = next(c["placements"][0] for c in plan["candidates"] if c["placements"][0]["side"] == "right")
+        # flat against the drawer wall; wave crests reach just past the grid edge.
+        self.assertAlmostEqual(right["x"] + right["w"], 37.5, places=6)
+        self.assertTrue(16.1 < right["x"] < 16.6, right["x"])
 
     def test_a_non_8mm_interior_spacer_carries_the_global_wave_phase(self):
         # A normal bin's own centre always lands on the global wave lattice
@@ -396,10 +466,14 @@ class SpacerTests(unittest.TestCase):
         uncorrected = affinity.translate(wavy_rect_outer(half_x, half_y), *spacer_centre)
         self.assertGreater(uncorrected.intersection(bin_outline).area, 0.01)
 
-    def test_edge_spacer_covers_a_non_8mm_run_on_a_4mm_snap_drawer(self):
+    def test_edge_spacer_plans_correctly_on_a_non_8mm_run_with_a_4mm_snap_drawer(self):
         # 23 rows of 4 mm = 92 mm - not a multiple of 8, so BoxSpec (8 mm
-        # grid only) can't be built at exactly this length; the piece must
-        # still cover the real run, not round down to 88 mm.
+        # grid only) can't be built at exactly this length; spacer planning
+        # must still produce sane, in-bounds geometry for the odd run
+        # instead of failing or silently rounding to the nearest 8 mm.
+        # (The candidate itself is now a short, fixed contact-width piece,
+        # never a set of pieces tiled across the whole run - see
+        # SPACER_CONTACT_TARGET / _make_candidate.)
         raw_drawer = {
             "id": "d1", "name": "Drawer 1", "width": 100.0, "depth": 93.0, "height": 60,
             "clearance": 1.0, "anchor": "front-left", "bin_axis": "x", "snap": 4,
@@ -410,35 +484,53 @@ class SpacerTests(unittest.TestCase):
         run_mm = grid["rows"] * grid["step"]
         self.assertNotEqual(run_mm % 8, 0, "test setup should exercise a non-8mm run")
         plan = plan_spacers(raw_drawer, bins, {"fill": "edges"})
-        right = sorted((e for e in plan["edges"] if e["side"] == "right"), key=lambda e: e["y"])
-        self.assertTrue(right)
-        self.assertAlmostEqual(right[0]["y"], grid["oy"], places=6)
-        self.assertAlmostEqual(right[-1]["y"] + right[-1]["d"], grid["oy"] + run_mm, places=6)
-        for a, b in zip(right, right[1:]):
-            self.assertAlmostEqual(a["y"] + a["d"], b["y"], places=6)
+        right = next(
+            c["placements"][0] for c in plan["candidates"] if c["placements"][0]["side"] == "right"
+        )
+        self.assertGreater(right["w"], 0)
+        self.assertGreater(right["d"], 0)
+        # The candidate sits inside the drawer, clear of the bin and the wall.
+        self.assertGreaterEqual(right["y"], grid["oy"])
+        self.assertLessEqual(right["y"] + right["d"], grid["oy"] + run_mm)
 
-    def test_an_x_spacer_is_an_open_braced_frame_with_a_bins_outline(self):
-        spec = BoxSpec(48, 32, 15)
-        mesh = spacer_frame(48, 32, 15)
+    def test_edge_spacer_mesh_is_a_watertight_flexure(self):
+        # spacer_frame() (an "open braced frame" mesh) no longer exists -
+        # generate_spacers() now always extrudes a serpentine-flexure
+        # polygon. This checks that primitive still produces valid,
+        # printable solid geometry at the requested height.
+        from organizer_drawer import _serpentine_flexure
+        from organizer_geometry import _extrude_polygon
+
+        poly = _serpentine_flexure(48, 32, "right", flexible=True)
+        mesh = _extrude_polygon(poly, 15)
         self.assertTrue(mesh.is_watertight)
         self.assertAlmostEqual(mesh.bounds[1][2] - mesh.bounds[0][2], 15, places=3)
-        ring = wavy_outer_polygon(spec).area - wavy_cavity_polygon(spec).area
-        self.assertGreater(mesh.volume, ring * 15)                          # wall plus braces
-        self.assertLess(mesh.volume, wavy_outer_polygon(spec).area * 15 * 0.35)  # open, no floor
 
     def test_generated_edge_spacers_join_the_inventory_and_the_drawer(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Shop"
             append_bin(folder, file="Box 16 x 16 x 40.3mf", x=16, y=16, z=40)
             layout = _layout(2 * 8 + 1 + 4.0, 2 * 8 + 1, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
-            made = generate_spacers(folder, layout, "d1", {"fill": "edges", "height": 12})
-            self.assertEqual(len(made["generated"]), 1)
-            self.assertTrue((folder / made["generated"][0]).is_file())
+            routes = drawer_routes(threading.RLock(), folder)
+            planned = routes["/api/drawer/spacers"]({
+                "output": str(folder), "layout": layout, "drawer_id": "d1",
+                "options": {"fill": "edges", "height": 12},
+            })
+            selected_ids = [c["id"] for c in planned["candidates"]]
+            self.assertTrue(selected_ids)
+            made = routes["/api/drawer/spacers/generate"]({
+                "output": str(folder), "layout": layout, "drawer_id": "d1",
+                "options": {"fill": "edges", "height": 12}, "selected": selected_ids,
+            })
+            self.assertEqual(len(made["generated"]), len(selected_ids))
+            for gen in made["generated"]:
+                self.assertTrue((folder / gen["file"]).is_file())
             # One unified kind - an edge-facing spacer is told apart only by
             # its "edge" boundary tag, never a separate "shim" kind.
-            edge = next(b for b in made["bins"] if b["kind"] == "spacer" and b.get("boundary") == "edge")
+            edges = [b for b in made["bins"] if b["kind"] == "spacer" and b.get("boundary") == "edge"]
+            self.assertTrue(edges)
             placements = made["layout"]["drawers"][0]["placements"]
-            self.assertTrue(any(p["bin"] == edge["id"] and p["side"] == "right" for p in placements))
+            self.assertTrue(any(p["bin"] == edges[0]["id"] for p in placements))
 
     def test_legacy_shim_rows_load_as_spacers_and_never_resave_as_shim(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -469,10 +561,13 @@ class SpacerTests(unittest.TestCase):
 
 
 class BoundaryTests(unittest.TestCase):
-    def test_a_box_space_keeps_its_exact_grid_capacity(self):
+    def test_a_portable_space_keeps_its_exact_grid_capacity(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Case"
-            made = create_space(folder, name="Screw box", kind="box", x=96, y=48, z=40)
+            # "portable" is the current mating-boundary kind; legacy "box"
+            # only ever arrives through migration, never a new Space - see
+            # normalise_space_definition()'s box -> portable mapping.
+            made = configure_space(folder, raw_def={"name": "Screw box", "kind": "portable", "x": 96, "y": 48, "z": 40})
             drawer = made["layout"]["drawers"][0]
             self.assertEqual(drawer["boundary"], "mating")
             grid = drawer_grid(normalise_drawer(drawer))
