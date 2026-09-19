@@ -466,7 +466,8 @@ def prepare_folder_for_open(target: Path, prefs: dict[str, Any]) -> dict[str, An
     if info["needs_setup"]:
         return info
     typed = info["folder_mode"] == "space"
-    if typed and info["space_id"]:
+    had_space_id = bool(info.get("space_id"))
+    if typed and had_space_id:
         _check_not_duplicate(info["space_id"], target, prefs)
     if info["inventory"]:
         resolve_inventory_path(target, migrate=True)
@@ -481,9 +482,24 @@ def prepare_folder_for_open(target: Path, prefs: dict[str, Any]) -> dict[str, An
     else:
         return info
     info = describe(target, prefs)
-    if typed and not info["space_id"]:
-        raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
+    if typed:
+        if not info["space_id"]:
+            raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
+        if not had_space_id:
+            # Final guard for a newly generated ID, before any registry change.
+            _check_not_duplicate(info["space_id"], target, prefs)
     return info
+
+
+def _output_is_forgotten_typed_space(target: Path, prefs: dict[str, Any]) -> bool:
+    """A current v5 typed Space whose ID is no longer registered was Forgotten;
+    a restart must not silently re-register it from the saved output path."""
+    info = describe(target, prefs)
+    if info["folder_mode"] != "space" or not info["space_id"]:
+        return False
+    if _metadata_version(target) != METADATA_VERSION:
+        return False
+    return info["space_id"] not in _space_registry(prefs)
 
 
 def space_routes(
@@ -674,6 +690,8 @@ def space_routes(
         if target is None or not target.is_dir():
             return {"folder": None, "space": None, "recent": recent(load_preferences())}
         target = target.resolve()
+        if not space_id and _output_is_forgotten_typed_space(target, prefs):
+            return {"folder": None, "space": None, "recent": recent(load_preferences())}
         info = describe(target, prefs)
         if not info["needs_setup"]:
             info = prepare_folder_for_open(target, prefs)

@@ -197,6 +197,35 @@ class SpaceIdentityTests(unittest.TestCase):
         self.assertEqual(len(self.prefs["space_registry"]), MAX_RECENT + 1)
         self.assertTrue((folders[gone] / ".wavefinity.json").is_file())
 
+    def test_forget_current_typed_space_stays_forgotten_after_restart(self):
+        folder = make_v4_space(self.tmp)
+        self.call("/api/folder/use", output=str(folder))
+        space_id = meta(folder)["space_id"]
+        self.call("/api/space/forget", space_id=space_id, output=str(folder))
+        self.assertNotIn(space_id, self.prefs["space_registry"])
+        self.assertIsNone(self.prefs["active_space_id"])
+        self.assertEqual(Path(self.prefs["output"]), folder)
+        self.assertTrue((folder / ".wavefinity.json").is_file())
+        self.assertTrue((folder / INVENTORY_FILENAME).is_file())
+
+        self.assertIsNone(self.call("/api/space/startup")["folder"])
+        self.assertNotIn(space_id, self.prefs["space_registry"])
+
+        self.call("/api/folder/use", output=str(folder))
+        self.assertIn(space_id, self.prefs["space_registry"])
+        self.assertEqual(self.call("/api/space/startup")["folder"]["space_id"], space_id)
+
+    def test_newly_generated_space_id_gets_final_duplicate_guard(self):
+        first = make_v4_space(self.tmp, "First")
+        self.call("/api/folder/use", output=str(first))
+        space_id = meta(first)["space_id"]
+        second = make_v4_space(self.tmp, "Second")
+        with patch("organizer_spaces._new_space_id", return_value=space_id):
+            with self.assertRaises(DuplicateSpaceError):
+                self.call("/api/folder/use", output=str(second))
+        self.assertEqual(Path(self.prefs["space_registry"][space_id]["folder"]), first)
+        self.assertEqual(Path(self.prefs["output"]), first)
+
     def test_v3_space_id_is_not_trusted_during_setup_migration(self):
         folder = self.tmp / "V3 Space"
         folder.mkdir()
