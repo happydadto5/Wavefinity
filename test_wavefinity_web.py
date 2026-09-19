@@ -1361,6 +1361,57 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn("Preview3DGL.init", app_js)
         self.assertIn("drawGeometryLegacy2D", app_js)
 
+    def test_compact_support_choice_cards_and_zoomed_icon_viewbox(self):
+        # Fix 010 Part A: the normal Interior Parts / Parts & options choice
+        # cards are ~30% shorter (48px -> 34px) without shrinking the 34x34
+        # SVG artwork, and the icon viewBox is tightened so the glyph fills
+        # more of the icon tile.
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        styles_css = (root / "web" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("min-height: 34px; max-height: 34px", styles_css)
+        self.assertNotIn("min-height: 48px; max-height: 48px", styles_css)
+        self.assertIn("width: 34px; height: 34px", styles_css)
+        self.assertIn('viewBox="2 2 28 28"', app_js)
+        self.assertNotIn('viewBox="0 0 32 32"', app_js)
+
+    def test_new_space_replaces_new_drawer_space_and_routes_through_type_cards(self):
+        # Fix 010 Parts B & C: "New Drawer Space" is renamed to "New Space"
+        # everywhere and always returns to the three-image type chooser
+        # instead of jumping straight into Drawer setup, carrying dimensions
+        # forward only for a same-type repeat.
+        root = Path(__file__).resolve().parent
+        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+        drawer_panel_js = (root / "web" / "drawer-panel.js").read_text(encoding="utf-8")
+        spaces_js = (root / "web" / "spaces.js").read_text(encoding="utf-8")
+
+        self.assertIn("New Space</button>", index_html)
+        self.assertIn('id="space-info-new-space"', index_html)
+        self.assertNotIn("New Drawer Space", index_html)
+
+        self.assertIn("New Space</button>", drawer_panel_js)
+        self.assertIn('id="dl-space-info-new-space"', drawer_panel_js)
+        self.assertNotIn("New Drawer Space", drawer_panel_js)
+
+        self.assertNotIn("New Drawer Space", spaces_js)
+        self.assertNotIn("SP.newDrawerSpace", spaces_js)
+        self.assertIn("SP.newSpace = () => {", spaces_js)
+        self.assertIn("SP.showTypeCards();", spaces_js)
+        self.assertNotIn('SP.showSetup("drawer", state.activeSpace)', spaces_js)
+
+        # The template clears the name and is only ever offered to its own
+        # matching type card - the existing prefill guard stays in place.
+        self.assertIn('template.name = "";', spaces_js)
+        self.assertIn(
+            "const candidateKind =\n"
+            "            candidate?.kind === \"box\" ? \"portable\" : candidate?.kind;",
+            spaces_js,
+        )
+        self.assertIn("SP.showSetup(kind, candidateKind === kind ? candidate : null);", spaces_js)
+
+        # New Space is offered for every typed Space, not only Drawer.
+        self.assertIn('const btnNew = document.getElementById(prefix + "-new-space");\n        if (btnNew) btnNew.hidden = false;', spaces_js)
+
 
 class WebServerTests(unittest.TestCase):
     @classmethod

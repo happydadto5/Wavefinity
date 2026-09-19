@@ -12,8 +12,9 @@ const SP = {
   resumeTimer: null,
   isUpdate: false,
   collisionOrigin: null,
-  // A read-only inventory/layout candidate offered to a matching type card.
-  // Never an active Space.
+  // A read-only setup candidate offered only to its matching type card.
+  // It may come from existing inventory/layout recovery or from an explicit
+  // New Space repeat-size template. It is never itself the active Space.
   setupPrefillSpace: null,
 };
 const RESUME_AUTOCONTINUE_SECONDS = 10;
@@ -857,7 +858,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   SP.showOnly("space-form");
   // Every entry into setup explicitly states whether it is editing the
   // current Space, so a stale Edit that was backed out of can never make a
-  // later Create/New Drawer Space silently call SP.updateSpace() - see
+  // later Create/New Space silently call SP.updateSpace() - see
   // Fix 004 Correction 6.F.
   SP.isUpdate = update;
   SP.setupKind = kind;
@@ -1539,8 +1540,8 @@ SP.renderSpaceInfo = () => {
         }
         document.getElementById(prefix + "-size").textContent = sizeText;
         
-        const btnNew = document.getElementById(prefix + "-new-drawer");
-        if (btnNew) btnNew.hidden = kind !== "drawer";
+        const btnNew = document.getElementById(prefix + "-new-space");
+        if (btnNew) btnNew.hidden = false;
         
         const btnShow = document.getElementById(prefix + "-show");
         if (btnShow) btnShow.hidden = state.runtime.hosted;
@@ -1565,15 +1566,21 @@ SP.editSpace = () => {
     SP.showSetup(state.activeSpace.kind === "box" ? "portable" : state.activeSpace.kind, state.activeSpace, { update: true });
 };
 
-SP.newDrawerSpace = () => {
+SP.newSpace = () => {
     if (!state.activeSpace) return;
-    SP.clearSetupContext(); // Ensure we ask for a new folder, not stale state
-    SP.showSetup("drawer", state.activeSpace);
-    // Remove name for new
-    document.getElementById("space-name").value = "";
+
+    const template = clone(state.activeSpace);
+    if (template.kind === "box") template.kind = "portable";
+    template.name = "";
+
+    // Clear stale folder/collision/edit state first, then install only the
+    // read-only repeat-size template for the type chooser.
+    SP.clearSetupContext();
+    SP.setupPrefillSpace = template;
+    SP.showTypeCards();
 };
 
-// Wire the Space Info Edit/Show Folder/New Drawer Space buttons for one
+// Wire the Space Info Edit/Show Folder/New Space buttons for one
 // prefix only, so the normal Design controls (wired once at startup) and
 // the Drawer panel's dynamically-built copy (wired once when DP.build()
 // creates it) never both attach a listener to the same button - see
@@ -1583,8 +1590,8 @@ const wireInfoButtons = (prefix = "space-info") => {
     if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
     const btnShow = document.getElementById(prefix + "-show");
     if (btnShow) btnShow.addEventListener("click", SP.showFolder);
-    const btnNew = document.getElementById(prefix + "-new-drawer");
-    if (btnNew) btnNew.addEventListener("click", SP.newDrawerSpace);
+    const btnNew = document.getElementById(prefix + "-new-space");
+    if (btnNew) btnNew.addEventListener("click", SP.newSpace);
 };
 
 SP.updateSpace = async () => {
