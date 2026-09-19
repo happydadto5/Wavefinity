@@ -67,7 +67,10 @@ class B4BSpecTests(unittest.TestCase):
         self.assertFalse(n.secure_lid)
         self.assertFalse(n.stacking)
         self.assertEqual(n.label_location, "top")
-        self.assertEqual(n.latch_count, "auto")
+        # Latch count is a user-configurable Auto/1/2 preference, not a
+        # legacy field normalised() resets - only lid/secure_lid/stacking
+        # (which genuinely depended on the removed no-lid state) are forced.
+        self.assertEqual(n.latch_count, "2")
 
 
 class B4BCapacityTests(unittest.TestCase):

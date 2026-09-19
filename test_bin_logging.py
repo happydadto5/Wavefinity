@@ -10,6 +10,7 @@ from organizer_app import (
     log_bin_to_folder,
     summarize_interior_parts,
 )
+from organizer_inventory import COLUMNS
 import wavefinity_web
 
 
@@ -54,7 +55,8 @@ class TestBinLogging(unittest.TestCase):
 
             content = log_file.read_text(encoding="utf-8")
             self.assertIn("# My Drawer Bins", content)
-            self.assertIn("| ID | Date | Kind | Name | X (mm) | Y (mm) | Z (mm) | Stack | Qty | File | Label | Interior Part(s) |", content)
+            header = "| " + " | ".join(label for _, label in COLUMNS) + " |"
+            self.assertIn(header, content)
             self.assertIn("Box 40 x 48 x 40.3mf", content)
             self.assertIn("| 40 | 48 | 40 |", content)
             self.assertIn("| TOOLS |", content)

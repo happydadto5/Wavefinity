@@ -2544,9 +2544,15 @@ if not HOSTED:
 
 
 class WavefinityServer(ThreadingHTTPServer):
-    # On Windows SO_REUSEADDR permits two live processes to bind the same
-    # address, which makes a second launcher split requests unpredictably.
-    allow_reuse_address = False
+    # On Windows, SO_REUSEADDR lets a socket bind a port another process is
+    # still actively LISTENing on, which would make a second launcher split
+    # requests with the stale one unpredictably - so it stays off there.
+    # On POSIX, SO_REUSEADDR carries no such risk: it only permits binding
+    # over a socket of this launcher's own past connections still winding
+    # down in TIME_WAIT, which is exactly what _replace_stale_process()'s
+    # own health-check requests leave behind, and a bare bind() without it
+    # can otherwise refuse the immediate relaunch for up to a minute.
+    allow_reuse_address = os.name != "nt"
 
 
 class WavefinityHandler(BaseHTTPRequestHandler):

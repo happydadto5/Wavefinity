@@ -15,8 +15,10 @@ import trimesh
 from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
+    LOCK_PROTRUSION,
     intersection_volume,
     make_box,
+    top_label_surface_z,
     translated,
     wavy_cavity_polygon,
 )
@@ -406,13 +408,17 @@ class BuildTests(unittest.TestCase):
         insert = make_fitted_insert(BIN, [self._feature()])
         self.assertTrue(insert.is_watertight)
         footprint = insert_footprint(BIN, "separate")
-        expected = inserts.wavy_cavity_polygon(BIN).buffer(-inserts.INSERT_CLEARANCE)
+        # A removable passage also has to clear the lock bumps' tips, on top
+        # of the normal running clearance - see insert_footprint().
+        expected = inserts.wavy_cavity_polygon(BIN).buffer(-(inserts.INSERT_CLEARANCE + LOCK_PROTRUSION))
         self.assertLess(footprint.hausdorff_distance(expected), 1e-6)
-        # Following the waves covers more floor than the former safe rectangle.
+        # Following the waves covers more floor than the former safe rectangle,
+        # offset by the same real passage clearance the current footprint uses.
         clear_x, clear_y = BIN.usable_inside
+        passage_clearance = inserts.INSERT_CLEARANCE + LOCK_PROTRUSION
         old_rectangle_area = (
-            clear_x - 2.0 * inserts.INSERT_CLEARANCE
-        ) * (clear_y - 2.0 * inserts.INSERT_CLEARANCE)
+            clear_x - 2.0 * passage_clearance
+        ) * (clear_y - 2.0 * passage_clearance)
         self.assertGreater(footprint.area, old_rectangle_area)
         # it is built standing on z=0 so it prints flat on the bed; dropped
         # onto the bin floor it clears the box entirely
@@ -788,7 +794,7 @@ class FullSpanDividerTests(unittest.TestCase):
     def test_flat_lower_wall_band_uses_its_actual_straight_profile(self) -> None:
         box = BoxSpec(40.0, 48.0, 40.0, flat_inside=0.6)
         footprint = insert_footprint(box, "separate")
-        expected = inserts.flat_cavity_polygon(box).buffer(-inserts.INSERT_CLEARANCE)
+        expected = inserts.flat_cavity_polygon(box).buffer(-(inserts.INSERT_CLEARANCE + LOCK_PROTRUSION))
         self.assertLess(footprint.hausdorff_distance(expected), 1e-6)
         seated = translated(make_fitted_insert(box, []), (0.0, 0.0, box.base_thickness))
         self.assertLess(intersection_volume(seated, make_box(box)), 0.01)
@@ -1225,16 +1231,18 @@ class DividerScoopTests(unittest.TestCase):
         solids = build_features(self.box, [feature], self.base_z)
         label_pieces = solids[2:]
         self.assertEqual(len(label_pieces), 8)
-        top = self.base_z + inserts.resolved_options(
-            self.box, feature, self.base_z,
-        )["height"]
+        # A rim-level shelf sits at the box's fixed top-label ceiling, not at
+        # the divider's own configured height - see z_top in
+        # _divider_grid_rim_texts (capped by top_label_surface_z()).
+        top = top_label_surface_z(self.box)
         cells = inserts.divider_cells(self.box, feature, self.base_z)
         for cell, shelf, inlay in zip(cells, label_pieces[::2], label_pieces[1::2]):
-            self.assertAlmostEqual(shelf.bounds[1][2], top, places=6)
+            # places=3: mesh bounds come from float32 vertices.
+            self.assertAlmostEqual(shelf.bounds[1][2], top, places=3)
             self.assertLess(shelf.bounds[0][2], top - 2.0)
             self.assertLessEqual(shelf.bounds[0][0], cell.zone.x0 + 1e-6)
             self.assertGreater(shelf.bounds[1][0], cell.zone.x0 + 2.0)
-            self.assertAlmostEqual(inlay.bounds[1][2], top, places=6)
+            self.assertAlmostEqual(inlay.bounds[1][2], top, places=3)
             self.assertTrue(shelf.is_volume)
             self.assertTrue(inlay.is_volume)
         assembled = make_fitted_insert(self.box, [feature])

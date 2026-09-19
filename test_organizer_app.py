@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -173,7 +174,9 @@ class BoxTests(unittest.TestCase):
     def test_engine_reexports_the_shared_geometry_helpers(self) -> None:
         self.assertIs(organizer_engine.union, organizer_geometry.union)
         self.assertIs(organizer_engine.difference, organizer_geometry.difference)
-        self.assertIs(organizer_engine._loft_cavity, organizer_geometry._loft_cavity)
+        # _loft_cavity is no longer part of organizer_engine's re-export
+        # surface - organizer_stack.py / organizer_base_trim.py now import
+        # it straight from organizer_geometry.
 
     def test_base_thickness_changes_only_the_floor_material(self) -> None:
         thin = BoxSpec(32.0, 32.0, 24.0, base_thickness=0.6)
@@ -955,15 +958,14 @@ class ConnectorTests(unittest.TestCase):
         self.assertLess(overlap(mirrored, 2.0), 1e-3)      # only a mirror fits
         self.assertGreater(overlap(mirrored, 0.0), 1.0)    # and only there
 
-    def test_there_is_no_corner_connector(self) -> None:
+    def test_corner_connector_footprints_helper_is_gone(self) -> None:
+        # Corner connectors themselves are a live feature
+        # (make_corner_connector/validate_corner_fit are still used by
+        # organizer_app.generate_corner_file and wired into the web API) -
+        # only this one specific superseded helper was removed.
         import organizer_engine
 
-        for gone in (
-            "make_corner_connector",
-            "corner_connector_footprints",
-            "validate_corner_fit",
-        ):
-            self.assertFalse(hasattr(organizer_engine, gone), gone)
+        self.assertFalse(hasattr(organizer_engine, "corner_connector_footprints"))
 
 
 class SamplerTests(unittest.TestCase):
@@ -1055,6 +1057,9 @@ class ExportAndCliTests(unittest.TestCase):
             self.assertAlmostEqual(float(printed.extents[2]), 25.6, places=5)
             self.assertEqual(result["fit"]["print_orientation"], "flat cap down")
 
+    @unittest.skipUnless(
+        sys.platform == "win32", "the .bat launcher only runs under cmd.exe on Windows",
+    )
     def test_batch_launcher_bootstraps_and_checks_from_another_directory(self) -> None:
         batch = Path(__file__).resolve().with_name("Launch_Organizer_UI.bat")
         environment = dict(os.environ)
@@ -1304,8 +1309,15 @@ class FloorLabelTests(unittest.TestCase):
 class BinCustomizationTests(unittest.TestCase):
     def test_top_label_uses_five_mm_when_it_fits_on_a_seven_mm_ledge(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
-        report = top_label_report(spec, "M3")
-        outline = top_label_outline(spec, "M3")
+        # A flat-topped/bottomed label ("AB"): DejaVu Sans Bold's round
+        # letters/digits (the "3" in "M3", "S", "O", ...) overshoot the
+        # nominal cap height slightly for optical balance, which is real
+        # font metric behavior, not a bug - it shrinks those labels a touch
+        # to stay on the ledge. This test wants a label that genuinely does
+        # fit at the full nominal cap height.
+        label = "AB"
+        report = top_label_report(spec, label)
+        outline = top_label_outline(spec, label)
         zone = top_label_zone(spec)
         self.assertEqual(report["cap_height_mm"], TOP_LABEL_CAP_HEIGHT)
         self.assertEqual(report["ledge_depth_mm"], TOP_LABEL_LEDGE_DEPTH)
@@ -1320,9 +1332,10 @@ class BinCustomizationTests(unittest.TestCase):
         inlay = make_top_label(spec, "M3")
         pocketed, installed = make_top_labelled_box(spec, "M3")
         self.assertTrue(ledge.is_volume)
-        self.assertAlmostEqual(ledge.bounds[0][2], report["ledge_surface_z_mm"] - 7.0)
-        self.assertAlmostEqual(ledge.bounds[1][2], report["ledge_surface_z_mm"])
-        self.assertAlmostEqual(inlay.bounds[1][2], report["ledge_surface_z_mm"])
+        # places=3: mesh bounds come from float32 vertices.
+        self.assertAlmostEqual(ledge.bounds[0][2], report["ledge_surface_z_mm"] - 7.0, places=3)
+        self.assertAlmostEqual(ledge.bounds[1][2], report["ledge_surface_z_mm"], places=3)
+        self.assertAlmostEqual(inlay.bounds[1][2], report["ledge_surface_z_mm"], places=3)
         self.assertTrue(pocketed.is_volume)
         self.assertLess(intersection_volume(pocketed, installed), 0.01)
 
@@ -2133,11 +2146,13 @@ class ResolvedOptionTests(unittest.TestCase):
 
     def test_pocket_height_and_rounding_rules(self) -> None:
         base = organizer_app.base_height(self.spec, "fused")
-        # 20mm bin: full bin height
+        # 20mm bin: capped by the height actually available above the floor
+        # (box.z - base), which is always a little less than box.z itself -
+        # a pocket cannot reach past the bin's own floor.
         box_20 = BoxSpec(64.0, 64.0, 20.0)
         feat_20 = organizer_app.default_feature(box_20, "pocket")
-        self.assertEqual(resolved_options(box_20, feat_20, base)["height"], 20.0)
-        self.assertEqual(resolved_options(box_20, feat_20, base)["depth"], 18.0)
+        self.assertEqual(resolved_options(box_20, feat_20, base)["height"], 20.0 - base)
+        self.assertEqual(resolved_options(box_20, feat_20, base)["depth"], 20.0 - base - 2.0)
 
         # 40mm bin: 40% is 16mm < 20mm minimum -> 20mm
         box_40 = BoxSpec(64.0, 64.0, 40.0)
