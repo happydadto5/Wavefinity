@@ -41,10 +41,14 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Outside review accepted the final implementation after two correction passes. The accepted Fix 006 runtime/product changes were integrated onto the then-current `main` while preserving newer Help Code/testing policy and Fix 007/008 planning work. The completed fix specification/outbrief is retained as `fix-006 archive.md`. Hosted File System Access smoke remains the documented environment limitation from implementation review.
 
 ## Fix 007 — Adaptive Edge Connectors
-- **Status:** Requirements questions
+- **Status:** Planning complete — ready for implementation
+- **Fix file:** `/fixes/fix-007.md`
 - **Planning thread:** `Adaptive Edge Connectors Plan #7`
 - **Planned implementation thread:** `Adaptive Edge Connectors Imp #7`
-- **Notes:** Requirements gathering for expanded connector behavior: add three-way and four-way corner connectors, keep those corner connector types incompatible with variable height, ensure ordinary connectors derive fit from active bin wall thickness, and warn when a Space contains mixed wall thicknesses because connectors between different thicknesses are not supported. The current README already states that custom-wall connectors are generated for the selected wall thickness and are only for same-thickness bins; implementation details and warning behavior remain to be specified.
+- **Planned implementation branch:** `fix7`
+- **Implementation model:** Medium / Medium
+- **Testing class:** Class B — limited targeted connector/geometry checks
+- **Notes:** Re-checked against the accepted post-Fix-006 `main`. Adds manually selected 3-Way and 4-Way Corner connectors for equal-height/same-wall bins, reusing the existing automatic wall-thickness fit and lock lattice. Corner connectors use the existing 16 mm minimum joinable size. Mixed wall thickness remains allowed in a Space; a non-blocking warning appears only when the user changes Wall and an existing ordinary bin has a different known wall. Fix 007 should be implemented/accepted before starting overlapping Fix 008 UI work.
 
 ## Fix 008 — First Run Drawer
 - **Status:** Planning revised with user decisions; implementation blocked until Fix 006 is accepted and merged to `main`
