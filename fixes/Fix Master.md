@@ -1,6 +1,6 @@
 # Wavefinity Fix Master
 
-Permanent Help Code ledger. Individual fix files may be deleted after final review, but entries here remain.
+Permanent Help Code ledger. After a fix receives **YES — DONE** and is integrated into `main`, rename its individual file to `fix-### archive.md`; never delete the completed fix record. Entries here remain permanently.
 
 This ledger was introduced after some earlier fixes already existed. The entries below reconstruct the currently visible/known fixes without inventing unavailable history.
 
@@ -13,7 +13,7 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Status:** Work completed, ready for outside review
 - **Fix file:** `/fixes/fix-003.md`
 - **Implementation thread:** `Base Trim Joint Imp #3`
-- **Notes:** Implementation outbrief is present in the fix file. Final completion must be determined by outside ChatGPT review before the fix file is deleted.
+- **Notes:** Implementation outbrief is present in the fix file. Final completion must be determined by outside ChatGPT review; after **YES — DONE** and integration to `main`, rename the fix file to its `fix-### archive.md` form.
 
 ## Fix 004 — Space Onboarding Redesign
 - **Status:** Closed by user
