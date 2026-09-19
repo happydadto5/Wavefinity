@@ -1405,3 +1405,526 @@ Only after outside review returns **YES — DONE** may the accepted fix be merge
 - **Job size: Large / Class C**
 
 The architecture is now heavily specified. The high model recommendation is because this changes durable identity, migration, filesystem behavior, local startup, hosted browser persistence, and failure recovery simultaneously—not because the coding model is expected to redesign anything.
+
+---
+
+# Implementation Outbrief
+
+**Commits on `fix6`:** `82c04bb` (backend WIP), `08a959a` (frontend, hosted, docs, tests). Based on current accepted `origin/main` (`3a5153e`, includes the rewritten plan).
+
+**Changed files:** `organizer_inventory.py`, `organizer_spaces.py`, `wavefinity_web.py`, `web/spaces.js`, `web/browser-files.js`, `web/drawer-model.js` (comment), `README.md`, `changelog.md`, new `test_space_identity.py`, filename assertions in `test_bin_logging.py` / `test_drawer.py`.
+
+**Behavior implemented**
+- Inventory: `INVENTORY_FILENAME = "Wavefinity bins.md"`, one `resolve_inventory_path(migrate=)` under `INVENTORY_LOCK` (read-only load reads a legacy file; writes rename it; identical leftover removed on migrate; differing/multiple candidates raise `InventoryMigrationError`). `inventory_path()` kept as canonical-only.
+- Metadata v5 + `space_id`: v4 setup1 is not re-onboarded (`needs_setup=False`, `needs_identity_migration=True`); v5 typed without a valid ID raises; `_write_metadata` preserves any valid ID and only generates one for new/pre-v5 writes; design metadata carries no ID. `_folder_state` keeps its six-item tuple; identity comes from `_identity_state`.
+- `prepare_folder_for_open` (duplicate check -> inventory migration -> v4->v5) then `remember_prepared` (registry, `active_space_id`, `output`, `last_seen`) last. `/api/space/inspect` stays read-only.
+- Profile prefs: OS-profile path (`Wavefinity` folder on every OS), legacy app file read once and never deleted or merged over the profile file; `mutate_preferences` atomic read-modify-write; hosted keeps the legacy path.
+- Registry: not capped; combined Recents capped to `MAX_RECENT`, newest first; same-parent exact-ID recovery; duplicate copies refused; `/api/space/startup`; identity-aware Forget.
+- Hosted: metadata v5/UUID, `SP.readInventoryFor`, `listFilenames`/`removeFile`, technical migration in `useHostedFolder`, active record `{handle, space_id}` with mismatch check, all write call sites keep the returned ID.
+- Show Log uses the resolver (no arbitrary `*.md` guessing).
+
+**Deviations:** `space_routes` takes `mutate_preferences` as an optional 4th argument (falls back to load/save) so older callers/tests still work.
+
+**Checks run**
+- `py_compile` (3 modules), `node --check` (2 JS files): pass.
+- `test_space_identity` (11 tests): pass.
+- `test_bin_logging...test_generate_organizer_files_keep_log`: pass. `test_log_bin_to_folder_creates_and_appends`: fails on an older stale header assertion (`Wall (mm)` column) after its filename assertion passes; unrelated to this fix, not repaired. `test_drawer.py` cannot import (`spacer_frame` missing) — pre-existing, unrelated.
+- `test_wavefinity_web`: ran; no failure reported in the tail.
+- Local smoke: NOT a browser tour. I started the real server with a throwaway `APPDATA` and drove the HTTP routes: create -> v5 + UUID + canonical inventory, prefs written to the profile folder, same-parent rename recovered by `/api/space/startup`, edit kept the ID, Forget left the folder. The user's real legacy prefs file was read as the starting point and not modified.
+- Hosted smoke: NOT run (needs File System Access in a real browser). Hosted code is syntax-checked only.
+- Full suite: not run.
+
+No Fix Master edit. Awaiting outside review.
+
+
+---
+
+# Correction 1 — Outside review of Fix 006 implementation
+
+Review target: `2c3a157a3f001fa0a36d6a143fac6e552609c8a8`.
+
+**Verdict: NO — NOT FULLY DONE.**
+
+The core Fix 006 architecture is present and the implementation is close, but outside review found three concrete contract defects plus one incomplete Class-C verification requirement. Fix all items below in one correction pass. Do not redesign the persistence model.
+
+The current `fix6` branch is one commit behind `main`, but that newer main commit (`4e493c3`) only reserves Fix 008 in `/fixes/Fix Master.md`; it does not overlap Fix 006 runtime files. Do not edit Fix Master on `fix6`, and do not merge main merely for that ledger-only commit.
+
+## A. Do not trust v2/v3 metadata `space_id`
+
+The plan allows preservation of an experimental valid ID only from already-onboarded v4 metadata. v2/v3 are setup-migration inputs and must receive a newly-generated identity when they are converted to v5.
+
+### Local backend — `organizer_spaces.py`
+
+Current `_write_metadata()` preserves any valid existing `space_id` regardless of metadata version.
+
+Change the preservation rule to:
+
+- v5 typed:
+  - valid ID required;
+  - preserve it;
+  - missing/invalid remains a hard error.
+- v4 typed:
+  - preserve a valid existing experimental ID;
+  - otherwise generate a new ID.
+- v2/v3 typed:
+  - ignore any `space_id` field, even if it looks valid;
+  - generate a new ID during migration.
+- design -> typed:
+  - generate a new ID.
+
+Use logic equivalent to:
+
+```python
+current_version = int(version)
+current_id = _space_id(current.get("space_id"))
+
+if current_version >= 4 and current_id is not None:
+    payload["space_id"] = current_id
+elif current_version >= METADATA_VERSION:
+    raise FolderMetadataError(
+        "This folder's Space information is incomplete or damaged. Nothing was changed."
+    )
+# v2/v3 intentionally keep the newly-generated payload["space_id"]
+```
+
+Do not change v4/v5 preservation semantics.
+
+### Hosted browser — `web/spaces.js`
+
+`SP.classifyMetadata()` currently parses/preserves `current.space_id` for v3.
+
+Change hosted classification so:
+- v2/v3 always expose `space_id: null`;
+- v4 may expose/preserve a valid experimental ID;
+- v5 requires a valid ID or is invalid-space.
+
+That way `SP.writeMetadata()` generates a new ID for v2/v3 setup migration but preserves v4/v5 correctly.
+
+### Regression test
+
+Add a focused local regression:
+
+`test_v3_space_id_is_not_trusted_during_setup_migration`
+
+Create v3 typed metadata containing a valid-looking UUID, complete the existing explicit Configure Existing/setup migration, and assert:
+- output metadata is v5;
+- output `space_id` is valid;
+- output `space_id` is **not** the injected v3 UUID.
+
+No giant version matrix.
+
+---
+
+## B. Inspect/Recents must not manufacture a new `last_seen`
+
+Fix 006 explicitly says displaying/inspecting Recents may repair cached path/name/kind but must not advance `last_seen`.
+
+Current `recent()` absorbs a path-based typed recent into `space_registry` using:
+
+```python
+one.get("last_seen") or _utc_now()
+```
+
+That makes an old entry appear newly opened just because Welcome/Inspect rendered it.
+
+### Exact repair — `organizer_spaces.py`
+
+When absorbing a legacy path-based typed recent:
+- preserve its existing `last_seen` if present;
+- if none exists, leave it null/empty/unstamped;
+- do not call `_utc_now()` from `recent()`;
+- entries without timestamps continue to sort after timestamped entries while retaining their relative order.
+
+It is fine to widen `_registered_space_entry(... last_seen ...)` to accept `str | None`.
+
+Only `remember_prepared()` / actual open-use actions should stamp the current time.
+
+### Regression test
+
+Add:
+
+`test_inspect_does_not_advance_last_seen`
+
+Seed a typed path-based recent with no timestamp, call `/api/space/inspect`/Recent rendering path, and assert:
+- it may be absorbed into the registry;
+- it does not get a current timestamp;
+- a second inspect still does not advance it.
+
+---
+
+## C. Hosted saved-ID mismatch must be rejected before folder mutation or setup
+
+Current hosted startup can mutate the selected folder before checking the saved IndexedDB identity:
+
+- `SP.useHostedFolder()` migrates the inventory / upgrades metadata, then checks `expectedSpaceId`;
+- `SP.launch()` bypasses that check entirely when `data.needs_setup` and enters setup first.
+
+If IndexedDB says the saved Space is ID A but the current handle now contains typed Space ID B, Wavefinity must not rename B's inventory, rewrite B's metadata, or send B into setup before rejecting it.
+
+### Exact repair — `web/spaces.js`
+
+After the initial read-only `SP.inspectHosted(folder)`, and before:
+- `SP.readInventoryFor(... migrate:true)`;
+- `SP.writeMetadata(...)`;
+- `SP.enterSetupFor(...)`;
+
+validate the saved expected identity.
+
+Use one helper or equivalent logic, for example:
+
+```javascript
+SP.assertExpectedHostedIdentity = (info, expectedSpaceId) => {
+  if (!expectedSpaceId) return;
+  if (info.space_id !== expectedSpaceId) {
+    throw new Error(
+      "This folder is not the Space that was open before. Use Open Existing Space to choose it."
+    );
+  }
+};
+```
+
+Important:
+- a pre-Fix-006 IndexedDB record has no saved `space_id`; that remains allowed to open/upgrade normally;
+- once an IndexedDB record has a saved ID, the folder must already prove the same ID before any mutation;
+- do not copy the expected browser ID into folder metadata to make a mismatch pass;
+- folder metadata remains the source of truth.
+
+Call the guard:
+1. in hosted `SP.launch()` immediately after `SP.inspectHosted(folder)` and before the `needs_setup` branch;
+2. in `SP.useHostedFolder()` immediately after its read-only inspect and before technical migration.
+
+Keeping the existing post-upgrade defensive check is fine, but the pre-mutation check is mandatory.
+
+---
+
+## D. Complete the required Class-C verification gate
+
+The outbrief explicitly says the required local browser smoke was **not** performed; it was replaced by HTTP route driving. The HTTP smoke is useful but does not verify DOM wiring, Space Info, Resume UI, or browser startup state.
+
+### Local browser smoke
+
+Run the already-specified one-time local browser smoke using throwaway folders/profile:
+
+1. start local Wavefinity;
+2. create/open one Drawer Space;
+3. verify it lands and renders normally, including Space Info;
+4. verify v5 metadata + UUID + `Wavefinity bins.md`;
+5. close the app;
+6. rename the folder under the same parent;
+7. relaunch with the same throwaway profile;
+8. verify Welcome/Resume resolves the renamed folder;
+9. continue into the Space and confirm inventory/layout are intact;
+10. edit the Space display name once and confirm UUID remains unchanged.
+
+Do this once. No screenshots, no repeated tour.
+
+If the coding environment truly has no usable browser capability, state that exact tooling limitation in the new outbrief. In that case keep the existing HTTP smoke as the strongest fallback; do not claim the browser smoke passed.
+
+### Hosted smoke
+
+The prior outbrief already reports the hosted File System Access browser limitation. That is acceptable under the Class-C policy if it is still genuinely unavailable. Do not invent a pass.
+
+### Stale existing inventory test
+
+`test_log_bin_to_folder_creates_and_appends` reaches the corrected filename assertion and then fails on a pre-existing stale header assertion because current accepted main already writes the `Wall (mm)` column.
+
+Do **not** repair unrelated header-test debt under Fix 006.
+
+Instead add one narrow Fix-006 regression in `test_space_identity.py` that calls the real `log_bin_to_folder()` path and asserts only:
+- the returned filename is `Wavefinity bins.md`;
+- the file exists;
+- the logged row/content is present.
+
+This supersedes the prior requirement to make the unrelated stale full test method green. Keep the already-passing `test_generate_organizer_files_keep_log` targeted check.
+
+---
+
+# Required checks for Correction 1
+
+Run only:
+
+```powershell
+.venv\Scripts\python.exe -m py_compile organizer_inventory.py organizer_spaces.py wavefinity_web.py
+node --check web/spaces.js
+node --check web/browser-files.js
+.venv\Scripts\python.exe -m unittest test_space_identity
+.venv\Scripts\python.exe -m unittest test_bin_logging.TestBinLogging.test_generate_organizer_files_keep_log
+```
+
+Plus the one local browser smoke above, or an exact documented browser-tooling limitation.
+
+Do not run the full suite unless one of these checks reveals a broader regression.
+
+---
+
+# Correction 1 completion requirements
+
+1. Make only the repairs above on `fix6`.
+2. Do not edit `/fixes/Fix Master.md` on the branch.
+3. Inspect the final diff.
+4. Append **Correction 1 Outbrief** to this file with:
+   - commit SHA;
+   - exact code changes;
+   - new/updated targeted tests;
+   - each required check result;
+   - local browser smoke result or exact environment limitation;
+   - hosted smoke result/limitation;
+   - confirmation no full suite was run unless justified.
+5. Commit/push `fix6`.
+6. Verify remote branch contains the correction and outbrief.
+7. STOP for outside ChatGPT review.
+
+**Recommended model family: Medium**
+**Recommended thinking/reasoning: High**
+
+The architecture is already settled; this is a bounded correction across identity-version handling, Recents timestamp semantics, hosted startup ordering, and the missing verification gate.
+
+---
+
+# Correction 1 Outbrief
+
+**Commit:** `a9ccd74` on `fix6` (outbrief itself is committed right after).
+
+**Code changes**
+- A: `organizer_spaces._write_metadata` keeps an existing ID only from v4/v5 metadata; v2/v3 IDs are ignored and a new one is generated (v5 missing ID still errors). `web/spaces.js` `classifyMetadata` now exposes `space_id: null` for v2/v3.
+- B: `recent()` no longer stamps `_utc_now()` when absorbing a legacy typed recent; it keeps the old `last_seen` or leaves it empty. Only `remember_prepared` stamps.
+- C: new `SP.assertExpectedHostedIdentity`, called in hosted `SP.launch()` right after the read-only inspect (before the setup branch) and in `SP.useHostedFolder()` before any inventory/metadata migration. Pre-Fix-006 records with no saved ID still pass.
+- D: added narrow `log_bin_to_folder` canonical-filename test; the unrelated stale header test was not touched.
+
+**New tests (test_space_identity.py):** `test_v3_space_id_is_not_trusted_during_setup_migration`, `test_inspect_does_not_advance_last_seen`, `test_log_bin_to_folder_uses_canonical_filename`.
+
+**Checks**
+- py_compile (3 modules), node --check (spaces.js, browser-files.js): pass.
+- `unittest test_space_identity`: 14 tests pass.
+- `test_bin_logging...test_generate_organizer_files_keep_log`: pass.
+
+**Local browser smoke (real server, throwaway profile via APPDATA, in-app browser):** created a Drawer Space, confirmed v5 metadata + UUID + `Wavefinity bins.md` on disk and prefs in the throwaway profile; stopped the server; renamed the folder; restarted with the same profile; page load recovered the renamed folder (state.output = renamed path, same ID) and showed the Resume dialog; continued into the Space, inventory/layout intact (layout Space name preserved, file is `Wavefinity bins.md`); edited the Space name once and the UUID was unchanged. Limitation: the native folder-picker dialog cannot be driven from the browser tool, so the Space was created via the create route from the page instead of the picker flow. No JS exceptions in the console (only existing CSP style and 404 noise).
+
+**Hosted smoke:** not run — File System Access browser folder permission is not available here. Hosted code is syntax-checked only.
+
+**Full suite:** not run.
+
+
+---
+
+# Correction 2 — Durable Forget + final generated-ID duplicate guard
+
+Review target: `3ff62ce6e9535f5b9379356ea83f2e5d79009a32`.
+
+**Verdict: NO — NOT FULLY DONE.**
+
+Correction 1 is implemented correctly. The outside re-review then traced the remaining original Fix 006 adversarial cases and found two final gaps in the pre-Correction-1 implementation. Fix both in one bounded pass.
+
+Do not redesign the registry, startup flow, or identity model.
+
+## A. Forgetting the current typed Space must survive restart
+
+Current behavior:
+
+1. a typed Space is active;
+2. `/api/space/forget` removes its registry entry and clears `active_space_id`;
+3. per the original plan, `output` is intentionally allowed to remain so the currently-open app can still use/show the folder;
+4. on the next launch, `/api/space/startup` sees no `active_space_id` and falls back to `prefs["output"]`;
+5. it opens the same v5 typed Space and `remember_prepared()` immediately re-registers it.
+
+That makes Forget non-durable: the forgotten Space comes back automatically without the user explicitly opening it again.
+
+The product contract says forgetting removes the registry shortcut and **opening it again** re-registers it. An automatic restart fallback is not an explicit reopen.
+
+### Exact repair — `organizer_spaces.py`
+
+Keep the existing rule that Forget may leave `output` untouched so the current session and Show Folder behavior remain intact.
+
+Change `startup()` so the legacy `output` fallback does **not** automatically reopen a current v5 typed Space that has been forgotten.
+
+Required logic:
+
+- If a valid `active_space_id` exists, keep the current ID-first startup behavior exactly.
+- If there is no active ID and `prefs["output"]` exists:
+  1. resolve the output path if it exists;
+  2. classify it read-only;
+  3. if it is a typed **v5** Space with a valid `space_id`;
+  4. and that ID is **not present** in `space_registry`;
+  5. treat it as intentionally forgotten for startup purposes:
+     - do not call `prepare_folder_for_open()`;
+     - do not call `remember_prepared()`;
+     - return Home/Recents with `folder: None`.
+
+Preserve fallback compatibility for:
+- v2/v3/v4 typed folders that still need migration/identity registration;
+- untyped Design folders;
+- current v5 typed folders whose ID is still present in the registry but `active_space_id` is absent for some benign reason.
+
+Do not clear `output` merely to solve this. It may remain the trusted current folder for the live session.
+
+A small helper is acceptable, for example:
+
+```python
+def _output_is_forgotten_typed_space(target: Path, prefs: dict[str, Any]) -> bool:
+    info = describe(target, prefs)
+    if info["folder_mode"] != "space" or not info["space_id"]:
+        return False
+    if _metadata_version(target) != METADATA_VERSION:
+        return False
+    return info["space_id"] not in _space_registry(prefs)
+```
+
+Use equivalent logic if a different local structure is cleaner.
+
+### Required regression test
+
+Add:
+
+`test_forget_current_typed_space_stays_forgotten_after_restart`
+
+Flow:
+1. create/upgrade and open a typed Space so it is registered and active;
+2. capture its `space_id`;
+3. call `/api/space/forget` with that ID and path;
+4. assert:
+   - registry no longer contains ID;
+   - `active_space_id` is cleared;
+   - `output` may still equal the folder;
+   - folder metadata and inventory still exist;
+5. call `/api/space/startup`;
+6. assert:
+   - returned `folder` is `None`;
+   - registry still does not contain the forgotten ID;
+7. explicitly call `/api/folder/use` on the same folder;
+8. assert it re-registers the same ID;
+9. call startup again and assert normal resume/open behavior returns that Space.
+
+This test is important because it proves both halves of the contract: Forget persists, explicit reopen restores.
+
+---
+
+## B. Implement the plan’s final duplicate guard after a newly-generated ID
+
+The final Fix 006 plan explicitly required:
+
+1. classify read-only;
+2. if an ID already exists, duplicate-check before mutation;
+3. migrate inventory;
+4. write v5/ID;
+5. re-read;
+6. **if the ID was newly generated, run a final duplicate guard**;
+7. only then update registry/output/last_seen.
+
+Current `prepare_folder_for_open()` performs the pre-mutation duplicate guard when an ID already exists, but after a v4 typed Space without an ID is upgraded and receives a new UUID, it only re-reads and checks that an ID exists. It never calls the duplicate guard for that newly-created identity.
+
+A random UUID collision is extraordinarily unlikely, but this was an explicit safety requirement and the completion review must verify the whole plan, not only likely paths.
+
+### Exact repair — `organizer_spaces.py`
+
+In `prepare_folder_for_open()`:
+
+- remember whether the typed folder already had an ID before mutation;
+- keep the existing pre-mutation guard for an existing ID;
+- after v4 -> v5 rewrite and re-read:
+  - require the resulting ID as today;
+  - if the folder was typed and **did not have an ID before the rewrite**, call:
+    `_check_not_duplicate(info["space_id"], target, prefs)`
+    before returning;
+- registry/profile mutation remains later in `remember_prepared()`.
+
+Equivalent structure:
+
+```python
+typed = info["folder_mode"] == "space"
+had_space_id = bool(info.get("space_id"))
+
+if typed and had_space_id:
+    _check_not_duplicate(info["space_id"], target, prefs)
+
+...
+
+info = describe(target, prefs)
+
+if typed:
+    if not info["space_id"]:
+        raise FolderMetadataError(...)
+    if not had_space_id:
+        _check_not_duplicate(info["space_id"], target, prefs)
+
+return info
+```
+
+Do not remove the existing pre-mutation guard.
+
+### Required focused regression
+
+Add:
+
+`test_newly_generated_space_id_gets_final_duplicate_guard`
+
+Use a deterministic patch/mocking approach:
+
+1. create/register an existing v5 typed Space with ID X;
+2. create a separate valid v4 typed Space with no ID;
+3. patch `organizer_spaces._new_space_id` to return X during the second folder’s technical upgrade;
+4. call `/api/folder/use` on the second folder;
+5. assert `DuplicateSpaceError` is raised;
+6. assert the existing registry entry for X still points to the original folder;
+7. assert profile `output` / `last_seen` were not advanced to the second folder.
+
+Do not add a broad UUID test matrix.
+
+It is acceptable that the second folder’s metadata has already been technically upgraded before this final guard fires; the purpose of this second guard is to stop registry/profile adoption after generation. Existing-ID duplicate cases must still be stopped before folder mutation by the earlier guard.
+
+---
+
+# Correction 2 verification
+
+Run only:
+
+```powershell
+.venv\Scripts\python.exe -m py_compile organizer_inventory.py organizer_spaces.py wavefinity_web.py
+node --check web/spaces.js
+node --check web/browser-files.js
+.venv\Scripts\python.exe -m unittest test_space_identity
+.venv\Scripts\python.exe -m unittest test_bin_logging.TestBinLogging.test_generate_organizer_files_keep_log
+```
+
+No full suite unless one of these focused checks exposes a broader shared regression.
+
+No additional browser smoke is required for Correction 2 unless implementation unexpectedly changes frontend code. Correction 1’s local browser smoke is accepted. Hosted File System Access remains a documented environment limitation unless capability has become available.
+
+---
+
+# Correction 2 completion requirements
+
+1. Make only the two repairs above on `fix6`.
+2. Do not edit `/fixes/Fix Master.md` on the branch.
+3. Inspect the final diff.
+4. Append **Correction 2 Outbrief** to this file with:
+   - commit SHA;
+   - exact code changes;
+   - both new regression tests;
+   - every required check result;
+   - confirmation no extra browser smoke was needed unless frontend changed;
+   - hosted limitation status;
+   - whether a full suite was run and why.
+5. Commit/push `fix6`.
+6. Verify remote branch contains the correction and outbrief.
+7. STOP for outside ChatGPT review.
+
+**Recommended model family: Medium**
+**Recommended thinking/reasoning: Medium**
+
+The remaining work is narrow and fully specified: one startup-state edge case and one missing safety guard in `prepare_folder_for_open()`.
+
+---
+
+# Correction 2 Outbrief
+
+**Commit:** `502f7ea` on `fix6` (outbrief committed right after).
+
+**Code changes (organizer_spaces.py only)**
+- A: new `_output_is_forgotten_typed_space()`; `startup()` with no `active_space_id` now returns Home (`folder: None`) instead of reopening a current v5 typed Space whose ID is no longer in `space_registry`. `output` is left untouched. v2/v3/v4 typed folders, untyped folders and registered v5 Spaces keep the old fallback.
+- B: `prepare_folder_for_open()` remembers whether the typed folder had an ID before the rewrite; after v4->v5 it runs `_check_not_duplicate` on a newly generated ID before returning. The earlier pre-mutation guard is unchanged.
+
+**New tests:** `test_forget_current_typed_space_stays_forgotten_after_restart`, `test_newly_generated_space_id_gets_final_duplicate_guard`.
+
+**Checks:** py_compile (3 modules) pass; node --check (spaces.js, browser-files.js) pass; `unittest test_space_identity` 16 tests pass; `test_generate_organizer_files_keep_log` pass.
+
+**Browser smoke:** not needed, no frontend change. **Hosted smoke:** still not run (File System Access unavailable here). **Full suite:** not run.

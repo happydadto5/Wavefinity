@@ -27,7 +27,7 @@ import uuid
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote, unquote, urlparse
 from urllib.request import urlopen
 
@@ -120,7 +120,7 @@ from organizer_inserts import (
 )
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from organizer_drawer import drawer_routes
-from organizer_inventory import configure_space_text
+from organizer_inventory import configure_space_text, resolve_inventory_path
 from organizer_product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
     ORDINARY_BIN_MIN_HEIGHT_MM,
@@ -223,7 +223,25 @@ API_COMPAT_VERSION = 1
 SERVER_INSTANCE = uuid.uuid4().hex
 SERVER_BUILD = os.environ.get("RENDER_GIT_COMMIT", SERVER_VERSION)[:12]
 GEOMETRY_LOCK = threading.RLock()
-PREFERENCES_FILE = APP_DIR / "wavefinity_prefs.json"
+LEGACY_PREFERENCES_FILE = APP_DIR / "wavefinity_prefs.json"
+
+
+def _user_config_dir() -> Path:
+    """The current OS user's Wavefinity settings folder."""
+    home = Path.home()
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA")
+        return (Path(base) if base else home / "AppData" / "Roaming") / "Wavefinity"
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "Wavefinity"
+    base = os.environ.get("XDG_CONFIG_HOME")
+    return (Path(base) if base else home / ".config") / "Wavefinity"
+
+
+# A hosted server is not the end user's profile; it keeps the old file.
+PREFERENCES_FILE = (
+    LEGACY_PREFERENCES_FILE if HOSTED else _user_config_dir() / "wavefinity_prefs.json"
+)
 PREFERENCES_LOCK = threading.RLock()
 PID_FILE = Path(os.environ.get("WAVEFINITY_PID_FILE", str(APP_DIR / "wavefinity.pid")))
 EXPORT_LOCK = threading.RLock()
@@ -261,26 +279,49 @@ def _stack_base_min_by_wall() -> dict[str, dict[str, float]]:
 def load_preferences() -> dict[str, Any]:
     """Small local settings that should survive between browser sessions.
 
-    A plain JSON file next to the app, not browser storage - the output
-    folder is a filesystem path the *server* writes to, so it belongs with
-    the server, and stays put across a different browser or a cleared
-    profile.
+    A plain JSON file in the user's OS profile, not browser storage - the
+    output folder is a filesystem path the *server* writes to, so it belongs
+    with the server, and stays put across a different browser or a cleared
+    profile. Until the profile file exists, the old app-local file is read as
+    the starting point (never deleted, never merged over the profile file).
     """
+    with PREFERENCES_LOCK:
+        if PREFERENCES_FILE.exists() or PREFERENCES_FILE == LEGACY_PREFERENCES_FILE:
+            return _read_preferences_file(PREFERENCES_FILE)
+        return _read_preferences_file(LEGACY_PREFERENCES_FILE)
+
+
+def _read_preferences_file(path: Path) -> dict[str, Any]:
     try:
-        with PREFERENCES_LOCK:
-            return json.loads(PREFERENCES_FILE.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_preferences_file(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = path.with_suffix(".tmp")
+    temp_file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    temp_file.replace(path)
+
+
+def mutate_preferences(mutator: Callable[[dict[str, Any]], Any]) -> dict[str, Any]:
+    """Atomic read-modify-write of the preferences (nested data included).
+
+    The mutator edits the dict in place, or returns a replacement.
+    """
+    with PREFERENCES_LOCK:
+        current = load_preferences()
+        replacement = mutator(current)
+        if isinstance(replacement, dict):
+            current = replacement
+        _write_preferences_file(PREFERENCES_FILE, current)
+        return current
 
 
 def save_preferences(update: dict[str, Any]) -> dict[str, Any]:
-    with PREFERENCES_LOCK:
-        current = load_preferences()
-        current.update(update)
-        temp_file = PREFERENCES_FILE.with_suffix(".tmp")
-        temp_file.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
-        temp_file.replace(PREFERENCES_FILE)
-        return current
+    return mutate_preferences(lambda current: current.update(update))
 
 
 def _json_value(value: Any) -> Any:
@@ -1235,23 +1276,13 @@ def open_log_with_wordpad(file_path: Path) -> None:
 
 
 def show_log_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Display the bins.md log in WordPad for the specified output folder."""
+    """Display the Wavefinity bins.md inventory in WordPad for the specified output folder."""
     if HOSTED:
         raise ValueError("Logs are saved to your chosen browser folder in hosted mode.")
     output_dir = Path(str(payload.get("output") or DEFAULT_OUTPUT)).expanduser().resolve()
-    folder_name = output_dir.name
-    expected_log = output_dir / f"{folder_name} bins.md"
-
-    log_file: Path | None = None
-    if expected_log.is_file():
-        log_file = expected_log
-    elif output_dir.is_dir():
-        candidates = list(output_dir.glob("*bins.md")) + list(output_dir.glob("*.md"))
-        if candidates:
-            log_file = candidates[0]
-
+    log_file = resolve_inventory_path(output_dir, migrate=True) if output_dir.is_dir() else None
     if log_file is None or not log_file.is_file():
-        raise FileNotFoundError(f"No inventory file found in '{output_dir}'. Enable Space planning and generate a bin first.")
+        raise FileNotFoundError(f"No inventory file found in '{output_dir}'. Generate a bin in this folder first.")
 
     open_log_with_wordpad(log_file)
     return {"file": str(log_file)}
@@ -2445,7 +2476,7 @@ POST_ROUTES.update({
 if not HOSTED:
     POST_ROUTES.update({
         # Local save-folder selection and optional Space setup.
-        **space_routes(DEFAULT_OUTPUT, load_preferences, save_preferences),
+        **space_routes(DEFAULT_OUTPUT, load_preferences, save_preferences, mutate_preferences),
     })
 
 

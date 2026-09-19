@@ -2,7 +2,7 @@
 
 Every selected folder gets ``.wavefinity.json``. Inventory and Space are
 independent: ``inventory`` (default ``true``) is whether generated bins/B4Bs
-are logged to ``<folder name> bins.md``, and ``folder_mode`` is ``design`` or
+are logged to ``Wavefinity bins.md``, and ``folder_mode`` is ``design`` or
 ``space`` depending on whether the folder also represents one physical
 Drawer, Surface, or Portable Storage case. A Space may also keep its own
 sanitized bin-default snapshot. ``folder_mode=space`` always implies
@@ -11,29 +11,64 @@ depends on. Legacy markers (an old ``design`` marker with no ``inventory``
 field, the historical ``no_inventory_folders`` preference,
 ``.wavefinity-space.json``, and the legacy ``box`` kind) remain readable and
 are migrated additively.
+
+A typed Space's permanent identity is ``space_id``, a UUID stored at the top
+level of its ``.wavefinity.json`` - never its path, folder name or display
+name. The per-user profile keeps a ``space_registry`` (id -> name, kind, last
+known folder, last_seen) as an index only; the folder stays authoritative.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import math
 import os
 from pathlib import Path
 from typing import Any, Callable
+import uuid
 
-from organizer_inventory import configure_space, legacy_layout_space, load_inventory
+from organizer_inventory import (
+    configure_space, legacy_layout_space, load_inventory, resolve_inventory_path,
+)
 from organizer_product_rules import SURFACE_TRIM_HEIGHTS
 
 MAX_RECENT = 8
 METADATA_FILE = ".wavefinity.json"
 LEGACY_METADATA_FILE = ".wavefinity-space.json"
-METADATA_VERSION = 4
+METADATA_VERSION = 5
 SPACE_SETUP_VERSION = 1
+SUPPORTED_METADATA_VERSIONS = {2, 3, 4, 5}
 _UNSET = object()
 
 
 class FolderMetadataError(ValueError):
     """The folder contains metadata that must not be guessed at or replaced."""
+
+
+class DuplicateSpaceError(ValueError):
+    """Two distinct folders carry the same Space identity."""
+
+
+DUPLICATE_MESSAGE = (
+    "This folder is a copy of an existing Wavefinity Space and has the same Space identity. "
+    "The existing Space was left unchanged."
+)
+
+
+def _space_id(raw: Any) -> str | None:
+    try:
+        return str(uuid.UUID(str(raw)))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _new_space_id() -> str:
+    return str(uuid.uuid4())
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _same(a: Any, b: Any) -> bool:
@@ -124,15 +159,18 @@ def _folder_state(
     if metadata is not None:
         version = metadata.get("version")
         setup_version = metadata.get("setup_version")
-        needs_setup = version != METADATA_VERSION or setup_version != SPACE_SETUP_VERSION
         if isinstance(version, (int, float)) and version > METADATA_VERSION:
             raise FolderMetadataError("This folder contains Wavefinity metadata from a newer version. The file was left unchanged.")
-        if version not in (2, 3, METADATA_VERSION):
+        if version not in SUPPORTED_METADATA_VERSIONS:
             raise FolderMetadataError("This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged.")
+        # v4 is already onboarded: it needs an identity migration, not setup.
+        needs_setup = int(version) < 4 or setup_version != SPACE_SETUP_VERSION
         if metadata.get("folder_mode") == "space":
             metadata_space = _space(metadata.get("space"))
             if metadata_space:
                 metadata_defaults = _metadata_space_defaults(metadata, int(version))
+                if int(version) >= METADATA_VERSION and _space_id(metadata.get("space_id")) is None:
+                    raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
                 chosen_space = explicit_space or metadata_space
                 # A stored legacy "box" identity always requires the
                 # explicit migration/setup pass, even inside an otherwise
@@ -190,9 +228,10 @@ def _write_metadata(
         "version": METADATA_VERSION,
         "setup_version": SPACE_SETUP_VERSION,
         "folder_mode": mode,
-        "inventory": True if mode == "space" else bool(inventory),
     }
     if mode == "space" and space:
+        payload["space_id"] = _new_space_id()
+        payload["inventory"] = True
         payload["space"] = space
         saved_keep = True
         saved_defaults = None
@@ -202,16 +241,27 @@ def _write_metadata(
             version = current.get("version")
             if isinstance(version, (int, float)) and version > METADATA_VERSION:
                 raise FolderMetadataError("This folder contains Wavefinity metadata from a newer version. The file was left unchanged.")
-            if version not in (2, 3, METADATA_VERSION) or current.get("folder_mode") not in {"design", "space"}:
+            if version not in SUPPORTED_METADATA_VERSIONS or current.get("folder_mode") not in {"design", "space"}:
                 raise FolderMetadataError("This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged.")
             if current.get("folder_mode") == "space":
                 saved_keep, saved_defaults = _metadata_space_defaults(current, int(version))
+                # The one choke point that keeps a Space's identity: an
+                # existing valid ID is always preserved. Only pre-v5 metadata
+                # may gain one; damaged v5 must never be re-identified.
+                current_id = _space_id(current.get("space_id"))
+                # v2/v3 are setup inputs: any ID they carry is not trusted.
+                if int(version) >= 4 and current_id is not None:
+                    payload["space_id"] = current_id
+                elif int(version) >= METADATA_VERSION:
+                    raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
         resolved_keep = saved_keep if keep_bin_defaults is _UNSET else bool(keep_bin_defaults)
         resolved_defaults = saved_defaults if bin_defaults is _UNSET else bin_defaults
         if resolved_defaults is not None and not isinstance(resolved_defaults, dict):
             raise ValueError("bin defaults must be an object or null")
         payload["keep_bin_defaults"] = resolved_keep
         payload["bin_defaults"] = resolved_defaults
+    else:
+        payload["inventory"] = bool(inventory)
     target = folder / METADATA_FILE
     temp = folder / f"{METADATA_FILE}.tmp"
     temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -250,6 +300,21 @@ def _unused_migrate(
     _write_metadata(folder, mode, space, inventory)
 
 
+def _identity_state(folder: Path, mode: str, needs_setup: bool) -> tuple[str | None, bool]:
+    """(space_id, needs_identity_migration) for a folder already classified.
+
+    Only current-metadata typed Spaces have an ID. A configured v4 typed Space
+    needs an identity migration - never another setup pass.
+    """
+    if mode != "space" or needs_setup:
+        return None, False
+    metadata = _json_file(folder / METADATA_FILE)
+    if not metadata or metadata.get("folder_mode") != "space":
+        return None, False
+    version = metadata.get("version")
+    return _space_id(metadata.get("space_id")), isinstance(version, (int, float)) and version < METADATA_VERSION
+
+
 def folder_mode(folder: Path, prefs: dict[str, Any]) -> str:
     """Space status for a folder - independent of whether inventory is kept."""
     return _folder_state(folder, prefs)[0]
@@ -262,6 +327,11 @@ def inventory_enabled(folder: Path, prefs: dict[str, Any]) -> bool:
 
 def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
     mode, space, inventory, keep_bin_defaults, bin_defaults, needs_setup = _folder_state(folder, prefs)
+    space_id, needs_identity = _identity_state(folder, mode, needs_setup)
+    if mode == "space" and needs_setup:
+        # A Space still needing setup may carry a valid ID (e.g. legacy box).
+        metadata = _json_file(folder / METADATA_FILE)
+        space_id = _space_id((metadata or {}).get("space_id"))
     # Any existing Wavefinity trace - inventory, current metadata, or legacy
     # metadata - not just the inventory file, or a folder with metadata but
     # no inventory yet is wrongly treated as brand new and skips the
@@ -278,10 +348,12 @@ def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
         "missing": not folder.is_dir(),
         "folder_mode": mode,
         "space": space,
+        "space_id": space_id if mode == "space" else None,
         "inventory": inventory,
         "keep_bin_defaults": keep_bin_defaults,
         "bin_defaults": bin_defaults,
         "needs_setup": needs_setup,
+        "needs_identity_migration": needs_identity,
         "exists": wavefinity_exists,
         "no_inventory": not inventory,
     }
@@ -293,6 +365,7 @@ def _recent_entry(info: dict[str, Any]) -> dict[str, Any]:
         "folder": info["folder"],
         "name": space.get("name") or info["folder_name"],
         "folder_mode": info["folder_mode"],
+        "space_id": info.get("space_id"),
         "inventory": info["inventory"],
         "kind": space.get("kind"),
         "size": [space["x"], space["y"], space["z"]] if space else None,
@@ -300,38 +373,256 @@ def _recent_entry(info: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ------------------------------------------------- Space registry (profile)
+
+
+def _space_registry(prefs: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    saved = prefs.get("space_registry")
+    if not isinstance(saved, dict):
+        return {}
+    return {
+        key: dict(value) for key, value in saved.items()
+        if _space_id(key) == key and isinstance(value, dict)
+    }
+
+
+def _read_folder_id(folder: Path) -> str | None:
+    """The Space ID a folder's own metadata carries, without raising."""
+    data = _json_file(folder / METADATA_FILE)
+    if data and data.get("folder_mode") == "space":
+        return _space_id(data.get("space_id"))
+    return None
+
+
+def _registered_space_entry(info: dict[str, Any], last_seen: str | None) -> dict[str, Any]:
+    space = info["space"] or {}
+    return {
+        "name": space.get("name") or info["folder_name"],
+        "kind": space.get("kind"),
+        "folder": info["folder"],
+        "last_seen": last_seen,
+    }
+
+
+def _recover_registered_space(space_id: str, recorded_folder: Any) -> Path | None:
+    """Find a renamed Space among its old folder's siblings by exact ID only.
+
+    Never searches beyond the one parent directory.
+    """
+    if not recorded_folder:
+        return None
+    parent = Path(str(recorded_folder)).parent
+    try:
+        children = [one for one in parent.iterdir() if one.is_dir()]
+    except OSError:
+        return None
+    matches = [one for one in children if _read_folder_id(one) == space_id]
+    if len(matches) > 1:
+        raise DuplicateSpaceError(
+            "More than one folder claims the same Wavefinity Space identity. "
+            "Use Open Existing Space to choose the right one."
+        )
+    return matches[0] if matches else None
+
+
+def _resolve_registered(space_id: str, entry: dict[str, Any]) -> Path | None:
+    """The registered Space's current folder: recorded path if it still holds
+    that ID, else same-parent recovery. None if it cannot be found."""
+    recorded = entry.get("folder")
+    if not recorded:
+        return None
+    folder = Path(str(recorded))
+    if folder.is_dir() and _read_folder_id(folder) == space_id:
+        return folder
+    return _recover_registered_space(space_id, recorded)
+
+
+def _check_not_duplicate(space_id: str, target: Path, prefs: dict[str, Any]) -> None:
+    entry = _space_registry(prefs).get(space_id)
+    old = str((entry or {}).get("folder") or "")
+    if (
+        old and not _same(old, target)
+        and Path(old).is_dir() and _read_folder_id(Path(old)) == space_id
+    ):
+        raise DuplicateSpaceError(DUPLICATE_MESSAGE)
+
+
+def _metadata_version(folder: Path) -> int | None:
+    data = _json_file(folder / METADATA_FILE)
+    version = (data or {}).get("version")
+    return int(version) if isinstance(version, (int, float)) and not isinstance(version, bool) else None
+
+
+def prepare_folder_for_open(target: Path, prefs: dict[str, Any]) -> dict[str, Any]:
+    """The narrow technical-maintenance step of opening a folder.
+
+    Read-only classification first; a folder that still needs Fix-004 setup is
+    returned untouched. Otherwise: duplicate-copy check, unambiguous inventory
+    filename migration, then v4 -> v5 metadata (typed Spaces gain/keep their
+    ID). It never changes kind, name, dimensions, inventory choice or layout,
+    and never touches the profile registry - the caller does that last.
+    """
+    info = describe(target, prefs)
+    if info["needs_setup"]:
+        return info
+    typed = info["folder_mode"] == "space"
+    had_space_id = bool(info.get("space_id"))
+    if typed and had_space_id:
+        _check_not_duplicate(info["space_id"], target, prefs)
+    if info["inventory"]:
+        resolve_inventory_path(target, migrate=True)
+    if typed and info["needs_identity_migration"]:
+        _write_metadata(
+            target, "space", info["space"], True,
+            keep_bin_defaults=info["keep_bin_defaults"], bin_defaults=info["bin_defaults"],
+        )
+    elif not typed and (_metadata_version(target) or METADATA_VERSION) < METADATA_VERSION \
+            and (target / METADATA_FILE).exists():
+        _write_metadata(target, "design", None, info["inventory"])
+    else:
+        return info
+    info = describe(target, prefs)
+    if typed:
+        if not info["space_id"]:
+            raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
+        if not had_space_id:
+            # Final guard for a newly generated ID, before any registry change.
+            _check_not_duplicate(info["space_id"], target, prefs)
+    return info
+
+
+def _output_is_forgotten_typed_space(target: Path, prefs: dict[str, Any]) -> bool:
+    """A current v5 typed Space whose ID is no longer registered was Forgotten;
+    a restart must not silently re-register it from the saved output path."""
+    info = describe(target, prefs)
+    if info["folder_mode"] != "space" or not info["space_id"]:
+        return False
+    if _metadata_version(target) != METADATA_VERSION:
+        return False
+    return info["space_id"] not in _space_registry(prefs)
+
+
 def space_routes(
     default_output: Path,
     load_preferences: Callable[[], dict[str, Any]],
     save_preferences: Callable[[dict[str, Any]], dict[str, Any]],
+    mutate_preferences: Callable[[Callable[[dict[str, Any]], Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Callable[[dict], dict]]:
-    """Local-folder handlers. Hosted folders remain owned by the browser."""
+    """Local-folder handlers. Hosted folders remain owned by the browser.
+
+    ``mutate_preferences`` is the atomic read-modify-write the app supplies;
+    without it a plain load/save pair stands in.
+    """
+    if mutate_preferences is None:
+        def mutate_preferences(mutator):
+            prefs = load_preferences()
+            result = mutator(prefs)
+            return save_preferences(result if isinstance(result, dict) else prefs)
 
     def folder(payload: dict[str, Any]) -> Path:
         return Path(str(payload.get("output") or default_output)).expanduser().resolve()
 
-    def recent(prefs: dict[str, Any]) -> list[dict[str, Any]]:
+    def path_recents(prefs: dict[str, Any]) -> list[dict[str, Any]]:
         saved = prefs.get("recent_folders")
         if not isinstance(saved, list):
             saved = prefs.get("recent_spaces") or []
-        entries = []
+        return [one for one in saved if isinstance(one, dict) and one.get("folder")]
+
+    def recent(prefs: dict[str, Any]) -> list[dict[str, Any]]:
+        registry = _space_registry(prefs)
+        saved = path_recents(prefs)
+        active = _space_id(prefs.get("active_space_id"))
+        absorbed: dict[str, dict[str, Any]] = {}
+        repairs: dict[str, dict[str, Any]] = {}
+
+        # Legacy path-based entries that already carry an ID move into the
+        # registry; ones without an ID stay shortcuts until upgraded.
+        kept_paths = []
         for one in saved:
-            if not isinstance(one, dict) or not one.get("folder"):
+            try:
+                info = describe(Path(one["folder"]), prefs)
+            except ValueError:
+                kept_paths.append(one)
                 continue
+            sid = info["space_id"]
+            if info["folder_mode"] == "space" and sid:
+                if sid not in registry:
+                    registry[sid] = absorbed[sid] = _registered_space_entry(
+                        info, one.get("last_seen") or None,
+                    )
+            else:
+                kept_paths.append(one)
+
+        items: list[tuple[str | None, dict[str, Any]]] = []
+        for sid, entry in list(registry.items()):
+            stamp = entry.get("last_seen")
+            recorded = Path(str(entry.get("folder") or ""))
+            base = {
+                "folder": str(recorded), "name": entry.get("name") or recorded.name,
+                "folder_mode": "space", "space_id": sid,
+                "kind": entry.get("kind"), "size": None,
+            }
+            try:
+                found = _resolve_registered(sid, entry)
+            except DuplicateSpaceError as error:
+                items.append((stamp, {**base, "missing": False, "invalid": True, "conflict": True, "error": str(error)}))
+                continue
+            if found is None:
+                items.append((stamp, {**base, "missing": True}))
+                continue
+            try:
+                info = describe(found, prefs)
+            except ValueError:
+                items.append((stamp, {**base, "folder": str(found), "missing": False, "invalid": True}))
+                continue
+            # Folder metadata wins over the cached name/kind/path.
+            fresh = {
+                key: value for key, value in _registered_space_entry(info, "").items()
+                if key != "last_seen" and value
+            }
+            if any(entry.get(key) != value for key, value in fresh.items()):
+                repairs[sid] = fresh
+            items.append((stamp, _recent_entry(info)))
+
+        if repairs or absorbed:
+            def apply(current: dict[str, Any]) -> None:
+                reg = _space_registry(current)
+                for sid, entry in absorbed.items():
+                    reg.setdefault(sid, entry)
+                for sid, fresh in repairs.items():
+                    if sid in reg:
+                        reg[sid] = {**reg[sid], **fresh}
+                        if sid == active and _space_id(current.get("active_space_id")) == sid:
+                            current["output"] = fresh["folder"]
+                current["space_registry"] = reg
+                if absorbed:
+                    current["recent_folders"] = [
+                        one for one in path_recents(current)
+                        if not any(_same(one.get("folder"), e["folder"]) for e in absorbed.values())
+                    ]
+            mutate_preferences(apply)
+
+        for one in kept_paths:
             target = Path(one["folder"])
             try:
-                entries.append(_recent_entry(describe(target, prefs)))
-            except FolderMetadataError:
-                entries.append({
+                entry = _recent_entry(describe(target, prefs))
+            except ValueError:
+                entry = {
                     "folder": str(target),
                     "name": one.get("name") or target.name,
                     "folder_mode": one.get("folder_mode"),
+                    "space_id": None,
                     "kind": one.get("kind"),
                     "size": one.get("size"),
                     "missing": not target.is_dir(),
                     "invalid": True,
-                })
-        return entries
+                }
+            items.append((one.get("last_seen"), entry))
+
+        # Newest first; legacy entries with no timestamp keep their order.
+        stamped = sorted((x for x in items if x[0]), key=lambda x: x[0], reverse=True)
+        plain = [x for x in items if not x[0]]
+        return [entry for _stamp, entry in [*stamped, *plain]][:MAX_RECENT]
 
     def reply(target: Path | None) -> dict[str, Any]:
         prefs = load_preferences()
@@ -342,26 +633,78 @@ def space_routes(
             "recent": recent(prefs),
         }
 
-    def remember(target: Path) -> None:
-        prefs = load_preferences()
-        info = describe(target, prefs)
-        prefs = save_preferences({"output": str(target)})
-        saved = prefs.get("recent_folders")
-        if not isinstance(saved, list):
-            saved = prefs.get("recent_spaces") or []
-        others = [
-            one for one in saved
-            if isinstance(one, dict) and not _same(one.get("folder"), target)
-        ]
-        save_preferences({"recent_folders": [_recent_entry(info), *others][:MAX_RECENT]})
+    def remember_prepared(target: Path, info: dict[str, Any]) -> None:
+        """Advance the profile last: only after folder maintenance succeeded."""
+        stamp = _utc_now()
+        typed = info["folder_mode"] == "space"
+        space_id = info["space_id"]
+        if typed and not space_id:
+            raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
 
+        def apply(prefs: dict[str, Any]) -> None:
+            others = [
+                one for one in path_recents(prefs) if not _same(one.get("folder"), target)
+            ]
+            prefs["output"] = str(target)
+            if typed:
+                registry = _space_registry(prefs)
+                registry[space_id] = _registered_space_entry(info, stamp)
+                prefs["space_registry"] = registry
+                prefs["active_space_id"] = space_id
+                prefs["recent_folders"] = others[:MAX_RECENT]
+            else:
+                prefs["active_space_id"] = None
+                prefs["recent_folders"] = [
+                    {**_recent_entry(info), "last_seen": stamp}, *others,
+                ][:MAX_RECENT]
+
+        mutate_preferences(apply)
+
+    def remember(target: Path) -> dict[str, Any]:
+        info = prepare_folder_for_open(target, load_preferences())
+        if info["needs_setup"]:
+            raise ValueError("this folder must complete Space setup before it can be opened")
+        remember_prepared(target, info)
+        return info
+
+    def startup(_payload):
+        prefs = load_preferences()
+        target: Path | None = None
+        space_id = _space_id(prefs.get("active_space_id"))
+        if space_id:
+            entry = _space_registry(prefs).get(space_id)
+            try:
+                target = _resolve_registered(space_id, entry) if entry else None
+            except DuplicateSpaceError:
+                target = None
+            if target is not None and not _same(target, (entry or {}).get("folder") or ""):
+                def repair(current: dict[str, Any]) -> None:
+                    registry = _space_registry(current)
+                    if space_id in registry:
+                        registry[space_id]["folder"] = str(target)
+                        current["space_registry"] = registry
+                        current["output"] = str(target)
+                mutate_preferences(repair)
+        elif prefs.get("output"):
+            target = Path(str(prefs["output"])).expanduser()
+        if target is None or not target.is_dir():
+            return {"folder": None, "space": None, "recent": recent(load_preferences())}
+        target = target.resolve()
+        if not space_id and _output_is_forgotten_typed_space(target, prefs):
+            return {"folder": None, "space": None, "recent": recent(load_preferences())}
+        info = describe(target, prefs)
+        if not info["needs_setup"]:
+            info = prepare_folder_for_open(target, prefs)
+            if not info["needs_setup"]:
+                remember_prepared(target, info)
+        return {"folder": info, "space": info, "recent": recent(load_preferences())}
 
     def inspect(payload):
         return reply(folder(payload))
 
     def use_folder(payload):
         # The explicit "use this folder without a Space type" choice. May
-        # write v4/setup_version-1 Design metadata, but must never demote a
+        # write v5/setup_version-1 Design metadata, but must never demote a
         # folder already classified as a Space - fully configured *or* still
         # needing its one-time setup pass. A Space that needs setup must go
         # through the explicit migration/setup flow instead, never straight
@@ -382,7 +725,8 @@ def space_routes(
         # A genuinely new typed Space: collision-protected, refuses a folder
         # that already holds a configured typed Space. Never accepts legacy
         # "box" - that only ever comes from the Configure Existing/migration
-        # path below - see Fix 004 Correction 7.H.
+        # path below - see Fix 004 Correction 7.H. A new Space always gets a
+        # brand-new ID; the caller can never supply one.
         target = folder(payload)
         target.mkdir(parents=True, exist_ok=True)
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
@@ -428,17 +772,17 @@ def space_routes(
         mode, existing_space, inventory, keep, defaults, needs_setup = _folder_state(target, load_preferences())
         if mode != "space":
             raise ValueError("not a typed space")
-        
+
         raw_def = {"name": payload.get("name"), "kind": existing_space["kind"], "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
-            
+
         result = configure_space(target, raw_def=raw_def, mode="update")
         space = result["layout"]["space"]
         _write_metadata(target, "space", space, keep_bin_defaults=keep, bin_defaults=defaults)
         remember(target)
         return reply(target)
-        
+
     def set_inventory(payload):
         target = folder(payload)
         if not target.is_dir():
@@ -486,20 +830,42 @@ def space_routes(
         return reply(target)
 
     def forget(payload):
-        target = folder(payload)
-        prefs = load_preferences()
-        saved = prefs.get("recent_folders")
-        if not isinstance(saved, list):
-            saved = prefs.get("recent_spaces") or []
-        save_preferences({"recent_folders": [
-            one for one in saved
-            if isinstance(one, dict) and not _same(one.get("folder"), target)
-        ]})
+        # Removes only the profile shortcut; the folder, its metadata, its
+        # inventory and its Space ID are never touched.
+        space_id = _space_id(payload.get("space_id"))
+        target = folder(payload) if payload.get("output") else None
+
+        def apply(prefs: dict[str, Any]) -> None:
+            if space_id:
+                registry = _space_registry(prefs)
+                if registry.pop(space_id, None) is not None:
+                    prefs["space_registry"] = registry
+                if _space_id(prefs.get("active_space_id")) == space_id:
+                    prefs["active_space_id"] = None
+            elif target is not None:
+                registry = _space_registry(prefs)
+                for key, entry in list(registry.items()):
+                    if _same(entry.get("folder") or "", target):
+                        del registry[key]
+                        if _space_id(prefs.get("active_space_id")) == key:
+                            prefs["active_space_id"] = None
+                if "space_registry" in prefs:
+                    prefs["space_registry"] = registry
+            if target is not None:
+                prefs["recent_folders"] = [
+                    one for one in path_recents(prefs)
+                    if not _same(one.get("folder"), target)
+                ]
+
+        mutate_preferences(apply)
         return reply(None)
 
     return {
         "/api/space/inspect": inspect,
-        # Open/remember only - never changes mode or rewrites metadata.
+        # Local startup: resolves the active Space by ID, not just a path.
+        "/api/space/startup": startup,
+        # Open/remember only - never changes mode or rewrites metadata
+        # beyond the technical identity/inventory upgrades in remember().
         "/api/folder/use": open_folder,
         # The explicit "use without a Space type" choice - may write.
         "/api/space/use-untyped": use_folder,

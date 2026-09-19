@@ -50,7 +50,7 @@ class TestBinLogging(unittest.TestCase):
                 part_name="Tools",
             )
             self.assertTrue(log_file.is_file())
-            self.assertEqual(log_file.name, "My Drawer bins.md")
+            self.assertEqual(log_file.name, "Wavefinity bins.md")
 
             content = log_file.read_text(encoding="utf-8")
             self.assertIn("# My Drawer Bins", content)
@@ -91,7 +91,7 @@ class TestBinLogging(unittest.TestCase):
             # With keep_log=False
             res1 = generate_organizer_files(box, layout, out_dir, keep_log=False)
             self.assertNotIn("log_file", res1)
-            self.assertFalse((out_dir / "TestFolder bins.md").exists())
+            self.assertFalse((out_dir / "Wavefinity bins.md").exists())
 
             # With keep_log=True
             res2 = generate_organizer_files(
@@ -100,7 +100,7 @@ class TestBinLogging(unittest.TestCase):
             self.assertIn("log_file", res2)
             log_path = Path(str(res2["log_file"]))
             self.assertTrue(log_path.exists())
-            self.assertEqual(log_path.name, "TestFolder bins.md")
+            self.assertEqual(log_path.name, "Wavefinity bins.md")
             content = log_path.read_text(encoding="utf-8")
             self.assertIn("| TEST |", content)
             self.assertIn("| 32 | 32 | 32 |", content)

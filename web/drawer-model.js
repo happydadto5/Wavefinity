@@ -2,7 +2,7 @@
 
 // Drawer layout mode - data model, saving and undo.
 //
-// The inventory file ('<folder> bins.md' in the save location) is the single
+// The inventory file ('Wavefinity bins.md' in the save location) is the single
 // source of truth: bin rows come from it, and the layout (drawers, where each
 // copy sits, settings) is saved back into it. Bin rows are edited on the
 // server by id, so a bin generated while this view is open is never lost.

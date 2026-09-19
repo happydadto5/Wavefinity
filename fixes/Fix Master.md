@@ -29,8 +29,8 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Final review confirmed Drawer/Surface/Portable Storage use the approved `/images/Drawer.png`, `/images/Vanity.png`, and `/images/B4B.png` assets, preserve the existing visible text and full-card button interaction, use decorative empty alt text, and add consistent responsive 4:3 card styling without changing Space logic. The individual `/fixes/fix-005.md` file was deleted after acceptance per Help Code protocol. No tests were run by ChatGPT during outside review.
 
 ## Fix 006 — Portable Space Identity
-- **Status:** YES — DONE; accepted by outside ChatGPT review, ready to merge into `main`
-- **Fix file:** `/fixes/fix-006.md`
+- **Status:** YES — DONE; merged into `main` and archived
+- **Archive file:** `/fixes/fix-006 archive.md`
 - **Planning thread:** `Portable Space Identity Plan #6`
 - **Implementation thread:** `Portable Space Identity Imp #6`
 - **Implementation branch:** `fix6`
@@ -38,7 +38,7 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Correction 1 implementation commit:** `a9ccd74f0da2b7f8ab2381e973b61c564fcaded1`
 - **Correction 2 implementation commit:** `502f7ea7a87be002a74c2f100e474d67930e8761`
 - **Testing class:** Class C risk-directed testing completed
-- **Notes:** Outside review accepted the final Fix 006 implementation after two correction passes. Final verification covers durable typed-Space UUID identity, v4->v5 migration, canonical `Wavefinity bins.md`, profile registry/startup/rename recovery, duplicate-copy safety, identity-aware Forget, hosted identity preservation, Show Log resolver behavior, focused automated regressions, and the local browser smoke. Hosted File System Access smoke remains an explicitly documented environment limitation. Current `main` changes since the Fix 006 base affect only README Help-Code policy and Fix 007/008 planning/master files; they do not overlap Fix 006 runtime code. The accepted fix is ready for the normal merge-to-main lifecycle.
+- **Notes:** Outside review accepted the final implementation after two correction passes. The accepted Fix 006 runtime/product changes were integrated onto the then-current `main` while preserving newer Help Code/testing policy and Fix 007/008 planning work. The completed fix specification/outbrief is retained as `fix-006 archive.md`. Hosted File System Access smoke remains the documented environment limitation from implementation review.
 
 ## Fix 007 — Adaptive Edge Connectors
 - **Status:** Requirements questions

@@ -181,8 +181,8 @@ A fix may be planned, numbered, recorded in `/fixes/Fix Master.md`, and have its
 - Make all changes needed for one coherent task, inspect the diff once, commit coherently, and push to `origin/fixN`. Avoid micro-checkpoint churn.
 - ChatGPT's outside completion review compares `fixN` against the then-current `main`.
 - If review returns **NO — NOT FULLY DONE**, continue corrections on the same `fixN` branch and push them there.
-- If review returns **YES — DONE**, merge the accepted fix into `main`, preferably as one squash-merged logical commit such as `Fix 006: <title>`, then delete the temporary fix branch when appropriate.
-- The permanent Fix Master ledger remains on `main` and is maintained there by ChatGPT. Coding agents on `fixN` branches must not edit `/fixes/Fix Master.md`; this avoids guaranteed conflicts between concurrent fix branches. Completed individual fix files may still be deleted under the Help Code lifecycle.
+- If review returns **YES — DONE**, ChatGPT's outside reviewer owns finalization whenever repository write/merge capability is available: preserve the current `main`, integrate the accepted fix into `main` (prefer one squash-style logical commit such as `Fix 006: <title>`), rename `/fixes/fix-###.md` on `main` to `/fixes/fix-### archive.md`, update `/fixes/Fix Master.md` to completed/merged, and verify the remote `main` contains the accepted implementation, archive file, and ledger update. This is the final step of a successful completion review; do not leave a completed fix merely sitting on `fixN` for the user to merge manually. If repository merge/write capability is unavailable, say so explicitly instead of claiming completion of the merge.
+- The permanent Fix Master ledger remains on `main` and is maintained there by ChatGPT. Coding agents on `fixN` branches must not edit `/fixes/Fix Master.md`; this avoids guaranteed conflicts between concurrent fix branches. After **YES — DONE** and successful integration to `main`, preserve the completed individual fix by renaming it to `/fixes/fix-### archive.md`; do not delete the completed fix record.
 - If two active fixes touch the same files, prefer sequencing them when the overlap is substantial: finish/merge the earlier fix first, then start the later fix from the updated `main`. If they were already developed concurrently, after the first fix reaches `main`, fetch `origin` and merge the new `origin/main` into the remaining `fixN` branch, deliberately resolve any overlap/conflict there, push that branch, and have it reviewed again against the new `main`. This is required even when Git reports no textual conflict if the earlier fix changed behavior or assumptions used by the remaining fix. Prefer this merge-forward approach over rebasing an already-pushed fix branch; it avoids history rewriting and force-pushes.
 - If another accepted fix lands on `main` while a `fixN` branch is still active, the active branch must incorporate the current `origin/main` before its final outside completion review whenever the new mainline change overlaps, affects a dependency, or could change the meaning of the fix. Do not declare the branch complete against an obsolete base.
 - If multiple local coding agents are active at once, do not make them share one working directory while switching branches; use separate clones or Git worktrees.
@@ -346,7 +346,7 @@ preview and refused at export.
 **Save design** downloads the existing `.wavefinity.json` format, and **Open
 design** validates that format through Python before using it. Generated `.3mf`
 files are written to the shown output folder, which is sticky — the server
-saves it to `wavefinity_prefs.json` next to the app, so it survives a reload
+saves it to `wavefinity_prefs.json` in the current user's profile (`%APPDATA%\Wavefinity` on Windows, `~/Library/Application Support/Wavefinity` on macOS, `~/.config/Wavefinity` on Linux; an old app-adjacent file is read once as a starting point and never deleted), so it survives a reload
 or a different browser rather than resetting every launch. The browser API is
 same-origin only, accepts JSON only, and applies a restrictive
 content-security policy so an unrelated web page cannot invoke local file
@@ -429,7 +429,7 @@ does not accept interior parts.
 ### Inventory, and Spaces
 
 Every selected save folder keeps an inventory by default: generating a bin,
-a B4B, or Bin for Bins case adds it to `<folder name> bins.md`. A checkbox
+a B4B, or Bin for Bins case adds it to `Wavefinity bins.md` (the same name in every folder, so renaming the folder never orphans it; one old `<name> bins.md` is adopted automatically). A checkbox
 beside the save folder, *Keep inventory for this folder*, lets a user turn
 that off for a normal, untyped **Design** folder - files still save
 normally, but nothing new is logged. Turning it off never deletes an
@@ -452,6 +452,12 @@ as Portable Storage, never as a current Box. A legacy folder's older,
 multiple-drawer layout is preserved as a compatibility exception - a new
 Drawer Space otherwise represents exactly one physical drawer.
 
+- **Space identity.** A typed Space carries a permanent `space_id` (UUID) in
+  its `.wavefinity.json` (metadata version 5). The per-user profile keeps a
+  registry of known Spaces (id, name, kind, last folder) as an index only.
+  Renaming the folder within the same parent is recovered automatically by
+  that ID; a folder moved elsewhere is recognised when you Open Existing it.
+  A second folder copy carrying the same ID is refused, not merged.
 - **The inventory file** is a Markdown table, one row per bin design, with an
   **ID**, a **Kind** (bin, B4B case, spacer, added by hand), a **Name**
   a **Stack** (blank, `lid` or `direct` - how the bin was printed to stack)
@@ -741,7 +747,8 @@ default and is never exposed to the network.
 | `POST /api/generate` | Generate the organizer parts. |
 | `POST /api/connector` | Generate a connector. |
 | `POST /api/sampler` | Generate the fit sampler. |
-| `POST /api/preferences` | Persist sticky per-machine settings (currently the output folder) to `wavefinity_prefs.json`. |
+| `POST /api/preferences` | Persist sticky per-machine settings (currently the output folder) to `wavefinity_prefs.json` in the user profile. |
+| `POST /api/space/startup` | Local startup: resolve the active Space by its ID (recovering a renamed folder in the same parent) and open it. |
 | `POST /api/folder/use` | Select or restore a local design folder, its inventory setting and optional Space metadata. |
 | `POST /api/folder/inventory` | Explicitly turn a local folder's inventory logging on or off. |
 | `POST /api/space/defaults` | Update a Space's Keep Defaults flag and/or sanitized bin snapshot. |
@@ -1353,7 +1360,7 @@ layered implementation:
 | `organizer_inserts/` | Item/layout model, authoritative feature registry, per-feature builders, Divider compartments, and fused/removable assembly. | No. |
 | `organizer_app.py` | CLI, exporters and design persistence. Legacy palette constants are generated from the feature registry. | Yes, for CLI subcommands. |
 | `wavefinity_web.py` | The local HTTP service — see [The browser service](#the-browser-service). | Yes, the default UI launch target. |
-| `organizer_inventory.py` | The drawer inventory file (`<folder> bins.md`): parsing, legacy upgrade, merge-saves, bin logging. | No. |
+| `organizer_inventory.py` | The drawer inventory file (`Wavefinity bins.md`): parsing, legacy upgrade, merge-saves, bin logging. | No. |
 | `organizer_drawer.py` | Drawer layout: grid fit, drawer report, auto-layout packer, spacer planning and export, and its `/api/drawer/*` routes. | No. |
 | `test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest`. |
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
