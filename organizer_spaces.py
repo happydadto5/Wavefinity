@@ -148,10 +148,30 @@ def _metadata_space_defaults(
 
 def _folder_state(
     folder: Path, prefs: dict[str, Any],
-) -> tuple[str, dict[str, Any] | None, bool, bool, dict[str, Any] | None, bool]:
+) -> tuple[
+    str,
+    dict[str, Any] | None,
+    bool,
+    bool,
+    dict[str, Any] | None,
+    bool,
+    str | None,
+    dict[str, Any] | None,
+]:
+    """Classify a folder, and say where its typed-Space authority came from.
+
+    The appended values are (7) `space_source` - the authority behind a typed
+    result, one of "metadata", "legacy_metadata", "inventory_layout",
+    "inventory_inferred" or None - and (8) `setup_prefill_space`, a read-only
+    inventory/layout candidate that may prefill a matching setup card. A
+    prefill candidate is suggestion-only: it is never the active `space`.
+    """
     inventory = load_inventory(folder)
     layout = inventory["layout"] if isinstance(inventory["layout"], dict) else {}
     explicit_space = _space(layout.get("space"))
+    # One read of the inventory/layout candidate, reused by every branch.
+    inferred_space = _space(legacy_layout_space(layout))
+    setup_prefill_space = explicit_space or inferred_space
     metadata_path = folder / METADATA_FILE
     metadata = _json_file(metadata_path, strict=metadata_path.exists())
     design_result = None
@@ -188,36 +208,57 @@ def _folder_state(
                     or chosen_space.get("kind") == "box"
                     or surface_needs_setup
                 )
-                return "space", chosen_space, True, *metadata_defaults, space_needs_setup
+                # Current typed metadata. Even if explicit layout.space supplies
+                # the latest values, the authority to be a typed Space came
+                # from current metadata.
+                return "space", chosen_space, True, *metadata_defaults, space_needs_setup, "metadata", None
             raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
         if metadata.get("folder_mode") == "design":
             explicit = _explicit_inventory(metadata)
             enabled = explicit if explicit is not None else _default_inventory(folder, prefs)
-            design_result = ("design", None, enabled, False, None, needs_setup)
+            design_result = (
+                "design", None, enabled, False, None, needs_setup,
+                None, setup_prefill_space,
+            )
+            # Completed current Design metadata is authoritative. Old inventory
+            # layout.space may be a prefill, but cannot silently convert the
+            # folder back into a typed Space.
+            if not needs_setup:
+                return design_result
         else:
             raise FolderMetadataError("This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged.")
 
     if explicit_space:
-        return "space", explicit_space, True, True, None, True
+        return "space", explicit_space, True, True, None, True, "inventory_layout", None
 
     legacy_path = folder / LEGACY_METADATA_FILE
     legacy = _json_file(legacy_path, strict=legacy_path.exists())
     if legacy is not None:
         legacy_space = _space(legacy)
         if legacy_space:
-            return "space", legacy_space, True, True, None, True
+            return "space", legacy_space, True, True, None, True, "legacy_metadata", None
         if legacy.get("kind") != "none":
             raise FolderMetadataError("This folder contains legacy Wavefinity metadata that this version cannot safely read. The file was left unchanged.")
 
     if design_result is not None:
         return design_result
-    if legacy is not None:
-        return "design", None, _default_inventory(folder, prefs), False, None, True
 
-    inferred_space = _space(legacy_layout_space(layout))
+    if legacy is not None:
+        return (
+            "design", None, _default_inventory(folder, prefs),
+            False, None, True, None, setup_prefill_space,
+        )
+
     if inferred_space:
-        return "space", inferred_space, True, True, None, True
-    return "design", None, _default_inventory(folder, prefs), False, None, True
+        return (
+            "space", inferred_space, True, True, None, True,
+            "inventory_inferred", None,
+        )
+
+    return (
+        "design", None, _default_inventory(folder, prefs),
+        False, None, True, None, None,
+    )
 
 
 def _write_metadata(
@@ -326,7 +367,7 @@ def inventory_enabled(folder: Path, prefs: dict[str, Any]) -> bool:
 
 
 def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
-    mode, space, inventory, keep_bin_defaults, bin_defaults, needs_setup = _folder_state(folder, prefs)
+    mode, space, inventory, keep_bin_defaults, bin_defaults, needs_setup, space_source, setup_prefill_space = _folder_state(folder, prefs)
     space_id, needs_identity = _identity_state(folder, mode, needs_setup)
     if mode == "space" and needs_setup:
         # A Space still needing setup may carry a valid ID (e.g. legacy box).
@@ -354,6 +395,8 @@ def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
         "bin_defaults": bin_defaults,
         "needs_setup": needs_setup,
         "needs_identity_migration": needs_identity,
+        "space_source": space_source,
+        "setup_prefill_space": setup_prefill_space,
         "exists": wavefinity_exists,
         "no_inventory": not inventory,
     }
@@ -713,8 +756,12 @@ def space_routes(
         # /api/folder/use, not this.
         target = folder(payload)
         target.mkdir(parents=True, exist_ok=True)
-        mode, space, inventory, _keep, _defaults, needs_setup = _folder_state(target, load_preferences())
-        if mode == "space":
+        mode, space, inventory, _keep, _defaults, needs_setup, source, _prefill = _folder_state(target, load_preferences())
+        # Only an authoritative typed Space is protected. An inventory-only or
+        # inferred candidate is old Wavefinity content, not a committed type,
+        # so the explicit exploration choice may commit Design metadata over
+        # it - without deleting the inventory/layout it came from.
+        if mode == "space" and source in {"metadata", "legacy_metadata"}:
             raise ValueError(f"this folder already holds the space {(space or {}).get('name')!r}")
         if needs_setup or mode != "design":
             _write_metadata(target, "design", None, inventory)
@@ -754,7 +801,7 @@ def space_routes(
         target = folder(payload)
         if not target.is_dir():
             raise ValueError("save folder not found")
-        _mode, _space, inventory, keep, defaults, _needs_setup = _folder_state(target, load_preferences())
+        _mode, _space, inventory, keep, defaults, _needs_setup, _source, _prefill = _folder_state(target, load_preferences())
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
@@ -769,7 +816,7 @@ def space_routes(
         target = folder(payload)
         if not target.is_dir():
             raise ValueError("save folder not found")
-        mode, existing_space, inventory, keep, defaults, needs_setup = _folder_state(target, load_preferences())
+        mode, existing_space, inventory, keep, defaults, needs_setup, _source, _prefill = _folder_state(target, load_preferences())
         if mode != "space":
             raise ValueError("not a typed space")
 
@@ -788,7 +835,7 @@ def space_routes(
         if not target.is_dir():
             raise ValueError("that save folder could not be found")
         prefs = load_preferences()
-        mode, space, _current, keep, defaults, _needs_setup = _folder_state(target, prefs)
+        mode, space, _current, keep, defaults, _needs_setup, _source, _prefill = _folder_state(target, prefs)
         inventory = bool(payload.get("inventory", True))
         if mode == "space" and not inventory:
             raise ValueError("Space planning needs this folder's inventory turned on.")
@@ -808,7 +855,7 @@ def space_routes(
         target = folder(payload)
         if not target.is_dir():
             raise ValueError("that save folder could not be found")
-        mode, space, inventory, keep, defaults, _needs_setup = _folder_state(target, load_preferences())
+        mode, space, inventory, keep, defaults, _needs_setup, _source, _prefill = _folder_state(target, load_preferences())
         if mode != "space":
             raise ValueError("bin defaults belong to a Space folder")
         new_keep = bool(payload["keep_bin_defaults"]) if "keep_bin_defaults" in payload else keep

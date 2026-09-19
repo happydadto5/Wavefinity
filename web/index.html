@@ -8,6 +8,12 @@
   <link rel="stylesheet" href="/drawer.css">
 </head>
 <body>
+  <div id="startup-cover" class="startup-cover" role="status" aria-live="polite">
+    <div class="startup-cover-card">
+      <h2>Welcome to Wavefinity</h2>
+      <p>Opening Wavefinity…</p>
+    </div>
+  </div>
   <header class="app-header">
     <div class="brand-group">
       <h1>Wavefinity <small class="brand-author">by happydadto5</small></h1>
@@ -751,8 +757,12 @@
 
       <div id="space-unsupported" hidden>
         <div class="welcome-header"><h2>Inventory and Spaces need folder access</h2></div>
-        <p class="welcome-lead">This browser cannot give Wavefinity ongoing access to a chosen folder, so Inventory and Spaces are unavailable.</p>
-        <p>You can still design and download bins normally. To use Inventory and Spaces, open Wavefinity in desktop Chrome or Edge, choose your folder, and allow access when asked.</p>
+        <p id="space-unsupported-lead" class="welcome-lead">
+          This browser cannot give Wavefinity ongoing read/write access to a chosen folder.
+        </p>
+        <p id="space-unsupported-detail">
+          You can still design and download parts normally. Inventory and Spaces require a browser that supports writable folder access.
+        </p>
         <div class="welcome-actions"><button id="space-unsupported-close" class="button primary" type="button">Keep designing</button></div>
       </div>
 
