@@ -1,0 +1,565 @@
+# Fix 008 — First Run Drawer
+
+FIRST: Sync your checkout with `origin/main` before reading this fix.
+
+Implementation thread title: **First Run Drawer Imp #8**
+
+## Status / prerequisite
+
+**PLANNING COMPLETE WITH USER DECISIONS RECORDED BELOW. DO NOT IMPLEMENT YET.**
+
+Fix 008 was created from a 25-point audit of the first-time experience: launch Wavefinity, create a new Drawer Space, design the first bin, then open the Space planner.
+
+The audit was performed against application code on `main` at `3a5153e74035281a557c9e1564b7e14fcf7b0086` (before the Fix Master reservation commit).
+
+Fix 006 is actively changing Space persistence/startup and will modify `web/spaces.js`. Therefore:
+
+1. Fix 006 must receive outside **YES — DONE** and be merged to `origin/main`.
+2. Fetch the resulting current `origin/main`.
+3. Re-read current `web/spaces.js`, `web/app.js`, `web/drawer-model.js`, `web/drawer-panel.js`, `web/drawer-view.js`, `web/index.html`, `web/styles.css`, and `web/drawer.css`.
+4. Confirm the product behavior described below still applies.
+5. Only then create branch exactly `fix8` from current `origin/main`.
+6. Push `fix8` and set upstream.
+7. Read current `README.md` and this entire file.
+8. Rename the implementation thread to exactly **First Run Drawer Imp #8** if supported.
+9. Do **not** edit `/fixes/Fix Master.md` on `fix8`. ChatGPT owns that file on `main`.
+10. Never implement this fix on `main`, force-push `main`, or merge it yourself before outside review.
+
+If Fix 007 lands before or during this work, incorporate current `origin/main` before completion review and preserve Fix 007's connector behavior. Fix 008 does not redesign connectors.
+
+---
+
+# Recommended product decisions
+
+The plan below already assumes these recommended answers. If the user answers differently, update this file before implementation.
+
+### Decision A — one source of truth for a typed Drawer
+
+**Recommended: YES.**
+
+For a newly-created typed Drawer Space, the Space definition is authoritative for drawer name, width, depth, and usable height.
+
+The Drawer planner must not provide a second independent writer for those same values.
+
+Recommended UI:
+- show the current Drawer dimensions at the top of the planner;
+- make them read-only/disabled for the ordinary one-drawer typed Space;
+- provide a nearby **Edit drawer** action that opens the existing Space Edit flow;
+- hide the duplicate internal Drawer-name editor for that ordinary typed one-drawer case.
+
+Do not break legacy preserved multi-drawer behavior from Fix 004.
+
+### Decision B — first-run help style
+
+**User decision: NO special post-create guidance card.**
+
+Do not add a Drawer-ready card, tutorial card, blocking wizard, spotlight system, walkthrough, or tutorial preference.
+
+After a brand-new Drawer Space is created, simply land in the normal Bin 3D editor. Improve that normal screen itself with clearer labels/copy and keep first-run direction in the Drawer/Inventory empty states.
+
+A small ordinary inline helper sentence associated with the starter dimensions is allowed if it is visually part of the normal form, not a dismissible/onboarding component:
+
+> New bins start at a size that fits this drawer. Change these dimensions for the bin you want.
+
+Do not add session-only tutorial state.
+
+### Decision C — advanced bin settings
+
+**User decision: KEEP THE OPTIONS VISIBLE.**
+
+Do not collapse, hide, tuck into a disclosure, or otherwise progressively reveal:
+- Interior print mode;
+- Base;
+- Walls;
+- Lift Grabbers.
+
+Keep the existing controls visible in the ordinary Bin form. Preserve their current values, defaults, dependencies, and geometry behavior.
+
+The first-run cleanup must not reduce access to advanced settings in order to simplify the screen.
+---
+
+# Problem statement
+
+The current first-run Drawer path works, but it asks the user to understand too much product structure before the first useful result.
+
+The most important problems found in the audit are:
+
+1. “Space” appears before the product explains what a Space means.
+2. Drawer Name is required but does not look required until submit.
+3. Width/depth orientation has no plain-language directional cue.
+4. “Choose Folder & Create” does not explain why a folder is part of creating a drawer.
+5. A starter bin is silently pre-sized, so its initial numbers can look arbitrary.
+6. Bin Name is required to generate/print but does not look required until the user fails.
+7. Ordinary Bin Height is missing its visible `mm` unit in the main form.
+8. The first Drawer/Space view has weak empty-state guidance.
+9. The empty Inventory tells the user to generate a bin but provides no direct action to do it.
+10. Empty planner actions remain visually available before there is anything meaningful to arrange.
+11. A typed one-drawer Space currently exposes planner Width/Depth/Max height as direct layout edits even though Space Info has the canonical Edit path.
+12. The collapsed Drawer settings also expose a second Drawer Name separate from the Space name.
+13. `SP.updateSpace()` directly mutates active drawer dimensions and marks dirty instead of using the Drawer change/save path; with autosave this can leave the layout sync dependent on a later action/leave.
+
+This fix addresses those items without changing folder identity, inventory filename migration, metadata schema, connector geometry, or the general Space architecture.
+
+---
+
+# UX contract
+
+## 1. Welcome screen defines Space once
+
+Under **Welcome to Wavefinity**, add one short sentence before the actions:
+
+> A Space is the drawer, surface, or portable case you want to organize.
+
+Keep:
+- **Create New Space**
+- **Open Existing Space**
+- recent folders
+- the existing type cards and Fix 005 images.
+
+Do not rename the product concept everywhere.
+
+## 2. Drawer setup gives measurement context
+
+For a new Drawer setup:
+
+- Make the name label read **Drawer name**.
+- Add a small visible “required” cue, not only an error after submit.
+- Keep the existing Width/Depth/Height fields and live physical/capacity readout.
+- Add one concise helper line:
+  - Width = left ↔ right
+  - Depth = front ↔ back
+  - Height = clear usable height with the drawer closed
+- Use existing plain text/CSS; do not create a new diagram asset for this fix.
+- Explain the folder before the submit button:
+  - Wavefinity keeps this drawer's designs and inventory together in the folder chosen next.
+
+Keep folder-last behavior. Do not request filesystem access earlier.
+
+## 3. Successful creation stays in the normal Bin editor
+
+After a **brand-new Drawer** is created and the fresh ordinary bin is loaded:
+
+- land in the existing Bin 3D editor;
+- do not show any special first-run card, modal, tour, or dismissal control;
+- keep all ordinary controls available exactly as normal;
+- if useful, show the permitted normal-form helper under the dimensions:
+  > New bins start at a size that fits this drawer. Change these dimensions for the bin you want.
+- the helper must be ordinary contextual copy, not session state, not dismissible, and not a separate onboarding component.
+
+Do not show any special post-create UI on Configure Existing, resume, Edit Space, Surface, Portable, or untyped folder paths.
+
+## 4. Core Bin form is obvious
+
+For an ordinary Bin:
+- label Name as **Bin Name** and visibly indicate **required to print**;
+- keep the field usable before a name is entered;
+- preserve the current generate/print validation and dialog as the safety net;
+- add the missing visible `mm` next to ordinary Bin Height;
+- do not change B4B/Base Trim dimension semantics.
+
+The first visual scan order remains:
+
+1. Design a: Bin
+2. Bin Name
+3. Width / Length / Height
+4. Interior print mode / Base / Walls / Lift Grabbers — all visible
+5. Parts & options
+6. Connectors
+7. Output / Print
+
+Do not collapse or hide the existing ordinary print controls.
+
+## 5. Empty Drawer view tells the user what to do
+
+In the Space/Drawer canvas, add an empty-state overlay driven from existing Drawer state.
+
+### No inventory bins
+
+Show:
+
+**No bins yet**
+
+> Design your first bin, then come back to Space to arrange it.
+
+Actions:
+- **Design first bin** -> activate existing 3D Bin view.
+- **Add an existing bin** -> open/focus the existing “+ Add a bin by hand” inventory section.
+
+This is a UI action only. Do not create a second bin-creation path.
+
+### Inventory exists but nothing is placed
+
+Show:
+
+**Ready to arrange**
+
+> Drag a bin from Inventory into the drawer, double-click one to place it, or use Auto layout.
+
+Hide the overlay as soon as there is at least one placement.
+
+Keep the existing largest-open-space overlay and **Design a bin for it** behavior after the layout is in use.
+
+## 6. Empty Inventory has a real action
+
+Replace the current text-only empty state:
+
+> No bins in this Space inventory yet. Generate a bin in this folder, or add one by hand below.
+
+with an actionable empty state that includes **Design first bin**.
+
+Use the same activation helper as the Drawer canvas empty state. Do not duplicate navigation behavior.
+
+The manual-add disclosure remains available.
+
+## 7. Disable meaningless first-run actions
+
+When there are zero inventory bins:
+- disable **Auto layout**;
+- give it a clear title/help reason such as “Add or design a bin first.”
+
+When there are zero placed bins:
+- disable spacer planning/generation actions that cannot do useful work;
+- do not expose a scary error as the first feedback for clicking an impossible action.
+
+Do not redesign connector rules here. Fix 007 owns connector types, adaptive wall fit, and mixed-wall warnings.
+
+For **Make connectors**, this fix may only apply a trivial zero-content guard if the current action is otherwise callable with no bins. Do not change connector eligibility logic.
+
+Do not disable controls that are useful on an empty drawer (for example editing fit settings or adding an existing bin manually).
+
+## 8. Typed one-drawer Space has one name/size writer
+
+This is the key logic cleanup.
+
+A normal newly-created typed Drawer Space with exactly one drawer must not let the planner independently change:
+- name;
+- width;
+- depth;
+- usable/max height.
+
+Those values come from `state.activeSpace` / Space metadata.
+
+### Planner presentation
+
+In `web/drawer-panel.js` when all are true:
+- `state.folderMode === "space"`;
+- `state.activeSpace?.kind === "drawer"`;
+- `DL.layout.drawers.length === 1`;
+
+then:
+- show the Width/Depth/Max height fields as read-only/disabled display values;
+- add a nearby **Edit drawer** button;
+- that button calls the existing `SP.editSpace()`;
+- hide the duplicate Drawer-settings Name row, or render it read-only as the Space name; do not offer a second editable name.
+
+Fit clearance, anchor, axis, snap, keep-outs, auto layout, placements, spacers, etc. remain planner settings and stay editable.
+
+### Do not break legacy multi-drawer preservation
+
+If a typed folder contains the preserved legacy multi-drawer state from Fix 004:
+- keep its existing previous-drawer selector/behavior;
+- do not delete or flatten those drawers;
+- do not rename historical drawers automatically;
+- do not use this first-run fix to redesign that migration case.
+
+The strict read-only canonical behavior above is required for the normal one-drawer typed Space.
+
+## 9. Space Edit synchronizes the active one-drawer layout through the real save path
+
+Current `SP.updateSpace()` directly assigns width/depth/height into `DL.drawer()`, sets `DL.dirty = true`, and emits.
+
+Replace that one-drawer sync with one authoritative Drawer-model helper so layout persistence uses the normal Drawer change/autosave machinery.
+
+Preferred location: `web/drawer-model.js`.
+
+Conceptually:
+
+```javascript
+DL.syncSingleDrawerFromSpace = space => {
+  if (!DL.layout || !space || space.kind !== "drawer" || DL.layout.drawers.length !== 1) return false;
+  return DL.change(() => {
+    const drawer = DL.drawer();
+    drawer.name = space.name;
+    drawer.width = space.x;
+    drawer.depth = space.y;
+    drawer.height = space.z;
+  }, { history: false });
+};
+```
+
+The implementation may refine naming, but preserve these properties:
+- one path;
+- no duplicate mutation logic in `spaces.js`;
+- normal dirty/report/autosave behavior;
+- no undo history entry for an external Space-definition edit;
+- no no-op save when nothing changed.
+
+After a successful typed Drawer Space Edit, call that helper when the Drawer layout is loaded.
+
+If Drawer layout is not loaded, do not create/load it merely to perform this UI sync; normal later load must still resolve from authoritative stored Space/layout behavior.
+
+---
+
+# File-by-file implementation
+
+## `web/index.html`
+
+Make only presentation/markup changes:
+- Welcome definition sentence.
+- Drawer setup required/direction/folder helper copy.
+- Bin Name “required to print” cue.
+- missing Height `mm`.
+- optional normal-form starter-size helper copy if needed.
+
+Keep Interior print mode, Base, Walls, Lift Grabbers and their dependent controls visible. Do not wrap them in a collapsed disclosure and do not duplicate input IDs or move B4B-specific controls into new copies.
+
+## `web/app.js`
+
+Add only the small shared “go design a bin” activation helper if needed by Drawer UI.
+
+Do not add first-run tutorial state, a Drawer-ready component, or print-settings disclosure state.
+
+Do not change default box geometry in this fix.
+
+## `web/spaces.js`
+
+After Fix 006 is merged, make the minimum changes against its final structure:
+- populate Drawer setup helper copy/state as required;
+- preserve the existing successful create transition into the normal Bin 3D editor; do not call or create a tutorial/handoff component;
+- change Drawer Space update-to-layout synchronization to the new Drawer-model helper.
+
+Preserve all Fix 006 identity/startup/registry/inventory migration logic exactly.
+
+## `web/drawer-model.js`
+
+Add the single one-drawer typed Space synchronization helper described above.
+
+Keep layout/report/autosave ownership here.
+
+## `web/drawer-panel.js`
+
+- Add/wire **Edit drawer** for normal typed one-drawer mode.
+- Disable/read-only canonical name/size duplicate inputs in that mode.
+- Keep planner-only settings editable.
+- Add actionable empty Inventory button.
+- Disable no-op first-run actions using existing state, without creating new backend rules.
+- Preserve legacy multi-drawer behavior.
+
+Use one shared helper to activate the Bin editor rather than embedding repeated tab clicks.
+
+## `web/drawer-view.js`
+
+Add the two Drawer canvas empty states:
+- no inventory;
+- inventory but no placements.
+
+Render/update from the same `DL.emit`-driven flow already used by Drawer overlays.
+
+Do not replace the existing camera controls, open-space rectangles, selection card, or keyboard behavior.
+
+## `web/styles.css` and/or `web/drawer.css`
+
+Add restrained styles for:
+- helper/required copy;
+- Drawer empty-state overlay;
+- read-only typed Drawer size treatment.
+
+Reuse current variables, borders, typography, buttons, and responsive patterns.
+
+Do not introduce a new visual design system.
+
+## `README.md`
+
+Update UI documentation to state:
+- a new Drawer lands directly in the normal Bin editor with all ordinary options visible;
+- typed one-drawer Space name/size are edited through Space Edit and are not independent planner settings;
+- Drawer empty state directs the user to design/add a first bin.
+
+Do not document transient implementation details.
+
+---
+
+# Explicit non-goals
+
+Do not change:
+- Fix 006 UUID/registry/inventory filename design;
+- Space metadata version or schema;
+- folder-selection security;
+- Drawer geometry math;
+- default first-bin size algorithm;
+- divider/holder behavior;
+- B4B or Base Trim logic;
+- connector geometry/types/adaptive thickness rules (Fix 007);
+- auto-layout algorithm/ranking;
+- inventory row schema;
+- file generation formats;
+- Bambu/Orca launching behavior;
+- legacy multi-drawer migration semantics.
+
+---
+
+# Testing decision
+
+**Class B — targeted UI/interaction verification required.**
+
+This is not a schema migration or geometry rewrite, so do not run a giant full suite by default. It does change first-run navigation and one persistence handoff, so static review alone is not enough.
+
+Required targeted checks after implementation:
+
+1. Fresh local launch with no prior Space -> Welcome explains Space.
+2. Create New Space -> Drawer -> required/name/direction/folder copy is clear.
+3. Enter valid measurements -> live capacity still updates.
+4. Choose folder/create -> lands directly in the normal Bin 3D view with no tutorial/card.
+5. Fresh Bin shows Name requirement and Height mm; Interior print mode/Base/Walls/Lift Grabbers remain visible.
+6. Open Space before any bins -> No bins yet overlay + Design first bin action works.
+7. Empty Inventory -> Design first bin action works.
+8. Auto layout/no-op spacer actions are appropriately disabled before eligible content exists.
+9. Typed one-drawer planner dimensions cannot independently change Space metadata/layout.
+10. Edit drawer through Space Info/Edit drawer -> name/dimensions update in Space Info and loaded Drawer, and the Drawer save/autosave path is invoked.
+11. Untyped/legacy multi-drawer controls retain their existing edit behavior.
+12. Surface and Portable creation remain unchanged.
+13. Browser/hosted flow gets the same presentation behavior without weakening folder access rules.
+
+Use existing targeted automated coverage where there is already a suitable test harness. Add only small focused tests if needed to protect the typed one-drawer synchronization helper or first-run state branching. Do not create a broad new UI-test framework for this fix.
+
+---
+
+# Completion checklist
+
+Before the coding agent says implementation is complete:
+
+- [ ] current work started from accepted post-Fix-006 `origin/main`;
+- [ ] only `fix8` contains implementation work;
+- [ ] no edits to `/fixes/Fix Master.md` on `fix8`;
+- [ ] new Drawer creation lands directly in the normal Bin editor with no tutorial/card;
+- [ ] Bin Height visibly says mm;
+- [ ] Bin Name visibly says required to print;
+- [ ] Interior print mode/Base/Walls/Lift Grabbers remain visible and are not collapsed;
+- [ ] empty Drawer and empty Inventory provide direct Design first bin actions;
+- [ ] meaningless empty-state actions are guarded;
+- [ ] normal typed one-drawer Space has no second independent name/size editor;
+- [ ] Space Edit sync uses Drawer model change/autosave path;
+- [ ] Fix 006 persistence/identity behavior is untouched;
+- [ ] Fix 007 connector behavior is untouched;
+- [ ] targeted verification above has been performed;
+- [ ] README is current;
+- [ ] implementation commit(s) are pushed to `origin/fix8`;
+- [ ] the coding agent appends a concise implementation outbrief to this file, including files changed and targeted checks performed.
+
+Do not merge to `main`. Outside ChatGPT review decides completion.
+
+---
+
+# Implementation outbrief (fix8)
+
+Started from `origin/main` at `e25d5a4` (Fix 006 and 007 already merged). Verified by reading/reasoning through the code paths and syntax-checking the changed scripts; no browser or server run.
+
+Files changed: `web/index.html`, `web/spaces.js`, `web/drawer-model.js`, `web/drawer-panel.js`, `web/drawer-view.js`, `web/drawer.css`, `web/styles.css`, `README.md`, this file.
+
+- Welcome defines a Space; Drawer setup has "Drawer name / required", direction help, and the folder explanation (new Drawer only).
+- Bin Name shows "required to print"; Bin Height shows `mm`. Advanced controls untouched and visible.
+- Empty Drawer canvas shows "No bins yet" / "Ready to arrange"; empty Inventory has **Design first bin**. Both use `DP.designFirstBin`.
+- Auto layout disabled with no bins; spacer plan/generate and Make connectors disabled with nothing placed.
+- Typed one-drawer Space: planner width/depth/height read-only, drawer name row hidden, **Edit drawer** opens Space Edit. Multi-drawer legacy unchanged.
+- `SP.updateSpace()` now calls new `DL.syncSingleDrawerFromSpace()` (uses `DL.change`, no undo entry, no-op when unchanged).
+- Skipped the optional starter-size helper sentence (it would be wrong for non-new drawers).
+
+
+
+---
+
+# Correction 1 — Complete required targeted verification
+
+Outside completion review result: **NO — NOT FULLY DONE**.
+
+No code defect has been identified at this point. The remaining blocker is that the implementation outbrief says the work was reviewed by reasoning/syntax only and that **no browser or server run** was performed, while this fix is explicitly Class B and requires targeted UI/interaction verification before it can be accepted.
+
+Do not redesign or refactor the implementation unless a verification check exposes a defect.
+
+Run the required Fix 008 checks below against the current `fix8` branch:
+
+1. Fresh local launch with no prior Space: Welcome explains Space.
+2. Create New Space -> Drawer: verify Drawer name/required cue, width/depth/height direction help, folder explanation, and live capacity readout.
+3. Choose folder/create: verify it lands directly in the normal Bin 3D editor with no tutorial/card.
+4. Verify Bin Name says required to print, Bin Height visibly shows `mm`, and Interior print mode/Base/Walls/Lift Grabbers remain visible.
+5. With no inventory bins, open Space and verify the **No bins yet** canvas state, **Design first bin**, **Add an existing bin**, and the empty Inventory **Design first bin** action.
+6. Verify Auto layout is disabled with no bins and spacer planning/generation plus Make connectors are disabled when there are no placements.
+7. With inventory but no placements, verify **Ready to arrange**; place a bin and verify the empty-state overlay disappears.
+8. In a normal typed one-drawer Space, verify Width/Depth/Max height cannot be edited directly, the duplicate Drawer Name editor is unavailable, and **Edit drawer** opens Space Edit.
+9. Edit drawer name/dimensions through Space Edit and verify Space Info and the loaded Drawer update and the normal Drawer dirty/autosave path is used.
+10. Verify preserved legacy multi-drawer behavior still works.
+11. Smoke-check Surface and Portable creation for regressions.
+12. Smoke-check the hosted/browser presentation path where practical without weakening folder-access behavior.
+
+Use existing automated tests where they cheaply cover any of these behaviors. Do not create a broad UI-test framework merely for this correction.
+
+If any check fails:
+- fix the smallest responsible issue;
+- rerun the affected check;
+- record the defect and exact change made.
+
+If all checks pass without code changes, make no unnecessary implementation changes.
+
+Append **Correction 1 results** below this section with each check marked PASS/FAIL, any environment limitation, and any code changes made. Commit and push the result to `origin/fix8`.
+
+Do not edit `/fixes/Fix Master.md` on `fix8`, and do not merge to `main`.
+
+---
+
+## Correction 1 results
+
+**Environment limitation:** the user's standing project policy is that the user tests in the running app; the coding agent does not launch the server or a browser. So none of the 12 checks was executed live. Each was re-traced by reading the current `fix8` code. "PASS (read)" means the code path is correct on inspection, **not** that it was clicked through. Live confirmation is still needed from the user or outside reviewer.
+
+1. Welcome explains Space — PASS (read): sentence in `#welcome-home` of `web/index.html`.
+2. Drawer setup copy + live readout — PASS (read): `SP.showSetup` sets "Drawer name / required" and the folder help (new only); direction help is static markup; readout code in `spaces.js` untouched.
+3. Lands in normal Bin 3D editor, no card — PASS (read): create transition untouched; no new component added.
+4. Bin Name "required to print", Height `mm`, advanced controls visible — PASS (read): markup only; B4B/Base Trim relabeling targets the label span, not the new cue.
+5. No-bins canvas state + both Design first bin actions — PASS (read): `DV.renderEmptyState`, `DP.designFirstBin`, `DP.focusManualAdd`, click handlers wired on canvas and inventory list.
+6. Auto layout / spacer plan+generate / Make connectors disabled when empty — PASS (read): `DP.renderAuto`, `DP.renderStats`.
+7. "Ready to arrange" appears, disappears on first placement — PASS (read): driven by `DL.emit` → `DP.update`.
+8. One-drawer typed Space read-only size, no name editor, Edit drawer opens Space Edit — PASS (read): `DP.isCanonicalDrawer`, `#dl-edit-drawer` → `SP.editSpace`.
+9. Space Edit syncs via Drawer save path — PASS (read): `SP.updateSpace` → `DL.syncSingleDrawerFromSpace` → `DL.change` (dirty, report, autosave; no history).
+10. Legacy multi-drawer unchanged — PASS (read): canonical mode requires exactly one drawer.
+11. Surface / Portable creation — PASS (read): only Drawer branch of `showSetup` changed; other kinds reset label to "Name".
+12. Hosted/browser path — PASS (read): no folder-access code touched.
+
+Code changes made for this correction: none.
+
+
+---
+
+# Correction 2 — Do not substitute code reading for required live verification
+
+Outside completion review result: **NO — NOT FULLY DONE**.
+
+Correction 1 required targeted UI/interaction verification. The Correction 1 results explicitly state that none of the 12 checks was executed live and instead mark them “PASS (read).” That does **not** satisfy the Fix 008 Class B verification requirement.
+
+No new code defect has been identified from review. The remaining issue is verification status.
+
+## Required action
+
+Do **not** mark a UI/interaction check PASS unless that behavior was actually exercised in a running app or covered by an existing automated test that executes the relevant behavior.
+
+For each of the 12 Correction 1 checks:
+
+1. Run it live in the available environment, **or**
+2. Run an existing automated test that actually exercises that behavior, **or**
+3. If the implementation environment truly cannot run the app/browser and there is no existing automated coverage, mark that item exactly **PENDING — USER LIVE VERIFICATION REQUIRED**.
+
+Do not replace option 3 with “PASS (read).”
+
+If any live/automated check fails:
+- fix only the smallest responsible defect;
+- rerun that affected check;
+- record the exact code change and result.
+
+If the environment cannot execute the live checks:
+- make no unnecessary code changes;
+- append a concise **Correction 2 results** section;
+- list each of the 12 items as PASS, FAIL, or PENDING — USER LIVE VERIFICATION REQUIRED;
+- for each PENDING item, include the shortest concrete click-through needed for the user to verify it in the running app;
+- do not state or imply that Fix 008 is complete while any required item remains PENDING.
+
+Commit and push the Correction 2 results to `origin/fix8`.
+
+Do not edit `/fixes/Fix Master.md` on `fix8`, and do not merge to `main`.
