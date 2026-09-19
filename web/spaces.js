@@ -191,7 +191,8 @@ SP.classifyMetadata = record => {
     }
     // A current-version typed Space must carry a valid ID; it is never healed
     // with a replacement identity.
-    const spaceId = SP.validUuid(current.space_id);
+    // v2/v3 are setup inputs (handled above for v2): never trust their ID.
+    const spaceId = current.version >= 4 ? SP.validUuid(current.space_id) : null;
     if (current.version >= FOLDER_METADATA_VERSION && !spaceId) return { status: "invalid-space" };
     const keep = current.keep_bin_defaults === undefined ? true : current.keep_bin_defaults;
     const defaults = current.bin_defaults === undefined ? null : current.bin_defaults;
@@ -452,6 +453,16 @@ SP.inspectHosted = async folder => {
   };
 };
 
+// A saved browser record that names a Space ID must be proven by the folder
+// itself before anything in that folder is migrated, set up or opened. A
+// record from before Fix 006 has no ID and is allowed through.
+SP.assertExpectedHostedIdentity = (info, expectedSpaceId) => {
+  if (!expectedSpaceId) return;
+  if (info.space_id !== expectedSpaceId) {
+    throw new Error("This folder is not the Space that was open before. Use Open Existing Space to choose it.");
+  }
+};
+
 SP.useHostedFolder = async (folder, { expectedSpaceId = null } = {}) => {
   // A download-only fallback is not a folder: there is no handle to inspect,
   // no metadata to restore, and nowhere to keep inventory. Treating it like a
@@ -471,6 +482,7 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null } = {}) => {
   // The hosted equivalent of the local technical open: only after read-only
   // classification says no setup is needed, adopt the canonical inventory
   // filename and give a configured v4 folder its v5 identity.
+  if (folder?.handle) SP.assertExpectedHostedIdentity(info, expectedSpaceId);
   if (folder?.handle && !info.needs_setup) {
     if (info.inventory) await SP.readInventoryFor(folder, { migrate: true });
     const upgradeSpace = info.folder_mode === "space" && info.needs_identity_migration;
@@ -1137,6 +1149,7 @@ SP.launch = async () => {
       if (saved?.handle && await WFFileSystem.requestReadWritePermission(saved.handle)) {
         const folder = { handle: saved.handle, name: saved.handle.name };
         const data = await SP.inspectHosted(folder);
+        SP.assertExpectedHostedIdentity(data, saved.space_id || null);
         if (data.needs_setup) {
           SP.enterSetupFor(folder, data);
           return;

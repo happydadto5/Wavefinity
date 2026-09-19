@@ -12,6 +12,9 @@ from unittest.mock import patch
 import uuid
 
 import wavefinity_web
+from organizer_app import log_bin_to_folder
+from organizer_engine import BoxSpec
+from organizer_inserts import Layout
 from organizer_inventory import (
     INVENTORY_FILENAME,
     InventoryMigrationError,
@@ -194,8 +197,51 @@ class SpaceIdentityTests(unittest.TestCase):
         self.assertEqual(len(self.prefs["space_registry"]), MAX_RECENT + 1)
         self.assertTrue((folders[gone] / ".wavefinity.json").is_file())
 
+    def test_v3_space_id_is_not_trusted_during_setup_migration(self):
+        folder = self.tmp / "V3 Space"
+        folder.mkdir()
+        injected = str(uuid.uuid4())
+        (folder / ".wavefinity.json").write_text(json.dumps({
+            **V4, "version": 3, "space_id": injected,
+        }), encoding="utf-8")
+        info = self.call("/api/space/inspect", output=str(folder))["folder"]
+        self.assertTrue(info["needs_setup"])
+        self.call(
+            "/api/space/configure", output=str(folder),
+            name="Vanity", kind="drawer", x=320, y=240, z=55,
+        )
+        data = meta(folder)
+        self.assertEqual(data["version"], 5)
+        self.assertEqual(str(uuid.UUID(data["space_id"])), data["space_id"])
+        self.assertNotEqual(data["space_id"], injected)
+
+    def test_inspect_does_not_advance_last_seen(self):
+        folder = self.tmp / "Legacy Typed"
+        folder.mkdir()
+        space_id = str(uuid.uuid4())
+        (folder / ".wavefinity.json").write_text(json.dumps({
+            **V4, "version": 5, "space_id": space_id,
+        }), encoding="utf-8")
+        self.prefs["recent_folders"] = [{"folder": str(folder), "name": "Vanity", "kind": "drawer"}]
+        for _ in range(2):
+            recent = self.call("/api/space/inspect")["recent"]
+            self.assertEqual(recent[0]["space_id"], space_id)
+            entry = self.prefs["space_registry"][space_id]
+            self.assertFalse(entry.get("last_seen"))
+        self.assertEqual(self.prefs["recent_folders"], [])
+
 
 class InventoryResolverTests(unittest.TestCase):
+    def test_log_bin_to_folder_uses_canonical_filename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Any Name"
+            log_file = log_bin_to_folder(
+                folder, BoxSpec(40.0, 48.0, 40.0), Layout((), "fused", 1.0),
+                generated_files=[folder / "Box 40 x 48 x 40.3mf"], label="TOOLS", part_name="Tools",
+            )
+            self.assertEqual(Path(log_file).name, INVENTORY_FILENAME)
+            self.assertTrue(Path(log_file).is_file())
+            self.assertIn("Box 40 x 48 x 40.3mf", Path(log_file).read_text(encoding="utf-8"))
     def test_resolver_is_read_only_then_migrates_safely(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Renamed Folder"

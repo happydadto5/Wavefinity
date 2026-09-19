@@ -249,7 +249,8 @@ def _write_metadata(
                 # existing valid ID is always preserved. Only pre-v5 metadata
                 # may gain one; damaged v5 must never be re-identified.
                 current_id = _space_id(current.get("space_id"))
-                if current_id is not None:
+                # v2/v3 are setup inputs: any ID they carry is not trusted.
+                if int(version) >= 4 and current_id is not None:
                     payload["space_id"] = current_id
                 elif int(version) >= METADATA_VERSION:
                     raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
@@ -393,7 +394,7 @@ def _read_folder_id(folder: Path) -> str | None:
     return None
 
 
-def _registered_space_entry(info: dict[str, Any], last_seen: str) -> dict[str, Any]:
+def _registered_space_entry(info: dict[str, Any], last_seen: str | None) -> dict[str, Any]:
     space = info["space"] or {}
     return {
         "name": space.get("name") or info["folder_name"],
@@ -531,7 +532,7 @@ def space_routes(
             if info["folder_mode"] == "space" and sid:
                 if sid not in registry:
                     registry[sid] = absorbed[sid] = _registered_space_entry(
-                        info, one.get("last_seen") or _utc_now(),
+                        info, one.get("last_seen") or None,
                     )
             else:
                 kept_paths.append(one)
