@@ -259,6 +259,124 @@ class SpaceIdentityTests(unittest.TestCase):
             self.assertFalse(entry.get("last_seen"))
         self.assertEqual(self.prefs["recent_folders"], [])
 
+    # ---- Fix 009: typed-Space authority (space_source / setup_prefill_space)
+
+    def test_current_design_metadata_outranks_stale_inventory_space(self):
+        folder = self.tmp / "Ordinary Design"
+        folder.mkdir()
+        configure_space(
+            folder,
+            raw_def={
+                "kind": "drawer",
+                "name": "Old Drawer",
+                "x": 320,
+                "y": 240,
+                "z": 55,
+            },
+        )
+        (folder / ".wavefinity.json").write_text(
+            json.dumps(
+                {
+                    "version": 5,
+                    "setup_version": 1,
+                    "folder_mode": "design",
+                    "inventory": True,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        info = self.call("/api/space/inspect", output=str(folder))["folder"]
+        self.assertEqual(info["folder_mode"], "design")
+        self.assertIsNone(info["space"])
+        self.assertIsNone(info["space_source"])
+        self.assertEqual(info["setup_prefill_space"]["kind"], "drawer")
+        self.assertFalse(info["needs_setup"])
+
+    def test_space_source_reports_each_authority(self):
+        typed = make_v4_space(self.tmp, "Typed")
+        info = self.call("/api/space/inspect", output=str(typed))["folder"]
+        self.assertEqual(info["space_source"], "metadata")
+        self.assertIsNone(info["setup_prefill_space"])
+
+        explicit = self.tmp / "Explicit Layout"
+        explicit.mkdir()
+        configure_space(
+            explicit,
+            raw_def={"kind": "drawer", "name": "From Layout", "x": 320, "y": 240, "z": 55},
+        )
+        info = self.call("/api/space/inspect", output=str(explicit))["folder"]
+        self.assertEqual(info["folder_mode"], "space")
+        self.assertEqual(info["space_source"], "inventory_layout")
+        self.assertIsNone(info["setup_prefill_space"])
+
+        # A pre-layout.space drawer layout: the only thing the server can do
+        # is infer "drawer" from the drawer itself.
+        inferred = self.tmp / "Inferred Only"
+        inferred.mkdir()
+        save_inventory(
+            inferred,
+            layout={
+                "version": 1,
+                "active": "d1",
+                "drawers": [{
+                    "id": "d1", "name": "Old Drawer",
+                    "width": 320, "depth": 240, "height": 55,
+                    "clearance": 1.0, "anchor": "front-left", "bin_axis": "x",
+                    "keepouts": [], "placements": [],
+                }],
+            },
+        )
+        info = self.call("/api/space/inspect", output=str(inferred))["folder"]
+        self.assertEqual(info["folder_mode"], "space")
+        self.assertEqual(info["space_source"], "inventory_inferred")
+        self.assertIsNone(info["setup_prefill_space"])
+
+        legacy = self.tmp / "Legacy Typed"
+        legacy.mkdir()
+        (legacy / ".wavefinity-space.json").write_text(
+            json.dumps({"kind": "drawer", "name": "Legacy", "x": 320, "y": 240, "z": 55}),
+            encoding="utf-8",
+        )
+        info = self.call("/api/space/inspect", output=str(legacy))["folder"]
+        self.assertEqual(info["folder_mode"], "space")
+        self.assertEqual(info["space_source"], "legacy_metadata")
+
+    def test_exploration_commits_design_over_inventory_candidate(self):
+        folder = self.tmp / "Just Get Started"
+        folder.mkdir()
+        configure_space(
+            folder,
+            raw_def={"kind": "drawer", "name": "Old Drawer", "x": 320, "y": 240, "z": 55},
+        )
+        append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts")
+        before = (folder / INVENTORY_FILENAME).read_text(encoding="utf-8")
+
+        used = self.call("/api/space/use-untyped", output=str(folder))["folder"]
+        self.assertEqual(used["folder_mode"], "design")
+        self.assertIsNone(used["space"])
+        self.assertIsNone(used["space_source"])
+        self.assertFalse(used["needs_setup"])
+
+        info = self.call("/api/space/inspect", output=str(folder))["folder"]
+        self.assertEqual(info["folder_mode"], "design")
+        self.assertIsNone(info["space"])
+        self.assertIsNone(info["space_source"])
+        self.assertFalse(info["needs_setup"])
+        # The stale candidate survives only as a prefill suggestion, and the
+        # inventory itself was not rewritten or deleted.
+        self.assertEqual(info["setup_prefill_space"]["kind"], "drawer")
+        self.assertTrue((folder / INVENTORY_FILENAME).is_file())
+        self.assertEqual((folder / INVENTORY_FILENAME).read_text(encoding="utf-8"), before)
+        self.assertEqual([b["name"] for b in load_inventory(folder)["bins"]], ["Nuts"])
+
+    def test_authoritative_typed_space_still_refuses_exploration(self):
+        folder = make_v4_space(self.tmp, "Committed")
+        with self.assertRaises(ValueError):
+            self.call("/api/space/use-untyped", output=str(folder))
+
+
 
 class InventoryResolverTests(unittest.TestCase):
     def test_log_bin_to_folder_uses_canonical_filename(self):

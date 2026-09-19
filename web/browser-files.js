@@ -35,19 +35,82 @@ window.WFFileSystem = (() => {
     return value;
   };
 
-  const supportsDirectoryPicker = () => typeof window.showDirectoryPicker === "function";
+  // Capability, never an OS or browser name: a browser either exposes a
+  // usable writable directory picker in a secure context, or it does not.
+  const supportsDirectoryPicker = () =>
+    window.isSecureContext &&
+    typeof window.showDirectoryPicker === "function";
+
+  // Read-only check. Safe at startup, where there is no user gesture to
+  // spend on a permission prompt.
+  const queryReadWritePermission = async handle => {
+    if (!handle || typeof handle.queryPermission !== "function") return false;
+    try {
+      return (await handle.queryPermission({ mode: "readwrite" })) === "granted";
+    } catch (_error) {
+      return false;
+    }
+  };
 
   const requestReadWritePermission = async handle => {
     if (!handle) return false;
-    const options = { mode: "readwrite" };
-    if (await handle.queryPermission(options) === "granted") return true;
-    return (await handle.requestPermission(options)) === "granted";
+    if (await queryReadWritePermission(handle)) return true;
+    if (typeof handle.requestPermission !== "function") return false;
+    try {
+      return (await handle.requestPermission({ mode: "readwrite" })) === "granted";
+    } catch (error) {
+      if (["SecurityError", "NotAllowedError"].includes(error?.name)) return false;
+      throw error;
+    }
   };
 
+  // Returns a status, never a fabricated folder: "ok", "cancelled",
+  // "denied" or "unsupported".
   const pickDirectory = async () => {
-    if (!supportsDirectoryPicker()) return null;
-    const handle = await window.showDirectoryPicker({ mode: "readwrite" });
-    return (await requestReadWritePermission(handle)) ? handle : null;
+    if (!supportsDirectoryPicker()) {
+      return { status: "unsupported", handle: null };
+    }
+    try {
+      const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+      if (
+        !handle ||
+        handle.kind !== "directory" ||
+        typeof handle.getFileHandle !== "function"
+      ) {
+        return { status: "unsupported", handle: null };
+      }
+      if (!(await requestReadWritePermission(handle))) {
+        return { status: "denied", handle: null };
+      }
+      return { status: "ok", handle };
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return { status: "cancelled", handle: null };
+      }
+      if (["SecurityError", "NotAllowedError"].includes(error?.name)) {
+        return { status: "denied", handle: null };
+      }
+      throw error;
+    }
+  };
+
+  // Persistent-file primitives fail closed. A missing handle or a lost
+  // permission must never be reported as "the file is not there", and a
+  // metadata/inventory write must never fall through to a download.
+  const requireDirectoryHandle = handle => {
+    if (!handle) {
+      throw new Error("Inventory and Spaces need access to a writable folder.");
+    }
+    return handle;
+  };
+
+  const requireWritableFolder = async handle => {
+    requireDirectoryHandle(handle);
+    if (!(await requestReadWritePermission(handle))) {
+      throw new Error(
+        "Wavefinity no longer has permission to read and write that folder. Choose the folder again and allow access.",
+      );
+    }
   };
 
   const download = (blob, filename) => {
@@ -59,6 +122,9 @@ window.WFFileSystem = (() => {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  // The one deliberate no-handle fallback in this file: ordinary generated
+  // design files download when no folder is selected. Persistent Space and
+  // inventory writes go through writeText(), which requires a real handle.
   const writeBlob = async (handle, filename, blob) => {
     if (!handle) return download(blob, filename);
     if (!(await requestReadWritePermission(handle))) throw new Error("Wavefinity needs permission to save in that folder.");
@@ -68,10 +134,17 @@ window.WFFileSystem = (() => {
     await writable.close();
   };
 
-  const writeText = (handle, filename, text) => writeBlob(handle, filename, new Blob([text], { type: "application/json" }));
+  const writeText = async (handle, filename, text) => {
+    requireDirectoryHandle(handle);
+    return writeBlob(
+      handle,
+      filename,
+      new Blob([text], { type: "application/json" }),
+    );
+  };
 
   const readText = async (handle, filename) => {
-    if (!handle || !(await requestReadWritePermission(handle))) return null;
+    await requireWritableFolder(handle);
     try {
       return await (await handle.getFileHandle(filename)).getFile().then(file => file.text());
     } catch (error) {
@@ -81,7 +154,7 @@ window.WFFileSystem = (() => {
   };
 
   const fileExists = async (handle, filename) => {
-    if (!handle || !(await requestReadWritePermission(handle))) return false;
+    await requireWritableFolder(handle);
     try {
       await handle.getFileHandle(filename);
       return true;
@@ -94,7 +167,7 @@ window.WFFileSystem = (() => {
   // Hosted inventory migration needs to see, and remove, the old
   // "<folder name> bins.md" - nothing else.
   const listFilenames = async handle => {
-    if (!handle || !(await requestReadWritePermission(handle))) return [];
+    await requireWritableFolder(handle);
     const names = [];
     for await (const [name, entry] of handle.entries()) {
       if (entry.kind === "file") names.push(name);
@@ -103,11 +176,14 @@ window.WFFileSystem = (() => {
   };
 
   const removeFile = async (handle, filename) => {
-    if (!handle || !(await requestReadWritePermission(handle))) {
-      throw new Error("Wavefinity needs permission to update that folder.");
-    }
+    await requireWritableFolder(handle);
     await handle.removeEntry(filename);
   };
 
-  return { supportsDirectoryPicker, pickDirectory, requestReadWritePermission, writeBlob, writeText, readText, fileExists, listFilenames, removeFile, save, load };
+  return {
+    supportsDirectoryPicker, pickDirectory,
+    queryReadWritePermission, requestReadWritePermission,
+    writeBlob, writeText, readText, fileExists, listFilenames, removeFile,
+    save, load,
+  };
 })();

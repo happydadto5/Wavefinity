@@ -1,9 +1,21 @@
 "use strict";
 
-// A save folder is always available for normal design work. A Space (Drawer,
-// Surface, or Portable Storage) is a one-time typed setup layered on that
-// folder; an untyped folder just keeps ordinary designs.
-const SP = { recent: [], setup: null, busy: false, resume: null, resumeTimer: null, isUpdate: false, collisionOrigin: null };
+// Normal Design can work without a persistent folder by downloading generated
+// files. Inventory and typed Spaces require a real writable folder. A typed
+// Space is a one-time Drawer/Surface/Portable setup layered on that folder;
+// an untyped folder just keeps ordinary designs.
+const SP = {
+  recent: [],
+  setup: null,
+  busy: false,
+  resume: null,
+  resumeTimer: null,
+  isUpdate: false,
+  collisionOrigin: null,
+  // A read-only inventory/layout candidate offered to a matching type card.
+  // Never an active Space.
+  setupPrefillSpace: null,
+};
 const RESUME_AUTOCONTINUE_SECONDS = 10;
 const SP_KINDS = {
   portable: { icon: "🧰", label: "Portable Storage" },
@@ -233,7 +245,9 @@ SP.metadataError = status => {
 };
 
 SP.writeMetadata = async (handle, mode, space = null, inventory = true, changes = {}) => {
-  if (!handle) return;
+  if (!handle) {
+    throw new Error("Inventory and Spaces need access to a writable folder.");
+  }
   // A Space's layout depends on the inventory, so it is never optional here.
   const metadata = {
     version: FOLDER_METADATA_VERSION, setup_version: SPACE_SETUP_VERSION,
@@ -277,7 +291,9 @@ SP.writeMetadata = async (handle, mode, space = null, inventory = true, changes 
 // handle it is given - never the previously-active folder.
 SP.readInventoryFor = async (folder, { migrate = false } = {}) => {
   const handle = folder?.handle;
-  if (!handle) return "";
+  if (!handle) {
+    throw new Error("Inventory and Spaces need access to a writable folder.");
+  }
   const names = await WFFileSystem.listFilenames(handle);
   const legacy = names.filter(name => name !== INVENTORY_FILENAME && name.endsWith(LEGACY_INVENTORY_SUFFIX));
   const conflict = () => new Error("Multiple Wavefinity inventory files were found; nothing was changed.");
@@ -343,11 +359,17 @@ SP.inspectHosted = async folder => {
     inventorySpace = SP.validSpace(data.layout?.space);
     inventorySpaceInferred = Boolean(data.space_inferred);
   }
-  // An explicit layout.space is authoritative. One the server had to infer
-  // from the drawer layout alone (no layout.space at all) can only ever
-  // guess "drawer" - it must not outrank real Box metadata below, so it is
-  // only considered as a last resort further down.
+  // An explicit layout.space is a genuine candidate, not automatic authority:
+  // completed current Design metadata still outranks it. One the server had
+  // to infer from the drawer layout alone (no layout.space at all) can only
+  // ever guess "drawer" - it must not outrank real Box metadata below, so it
+  // is only considered as a last resort further down.
   const genuineInventorySpace = inventorySpace && !inventorySpaceInferred;
+  // A completed current Design marker is authoritative: stale inventory or
+  // legacy data may prefill a setup card, but cannot convert the folder back
+  // into a typed Space - mirrors organizer_spaces._folder_state.
+  const currentDesignAuthoritative =
+    currentState.status === "design" && !currentState.needsMigration;
 
   // Damaged/future current metadata stops the folder outright, before
   // anything falls through to the legacy file.
@@ -359,7 +381,10 @@ SP.inspectHosted = async folder => {
   // has settled things - and once consulted, a damaged legacy file must
   // stop the folder too, not be silently skipped just because a stale
   // current "design" marker happens to be sitting next to it.
-  const legacyMatters = !genuineInventorySpace && currentState.status !== "space";
+  const legacyMatters =
+    !currentDesignAuthoritative &&
+    !genuineInventorySpace &&
+    currentState.status !== "space";
   if (legacyMatters && legacyState.status === "invalid") {
     throw SP.metadataError(legacyState.status);
   }
@@ -372,10 +397,22 @@ SP.inspectHosted = async folder => {
   let needsSetup = false;
   let spaceId = null;
   let needsIdentity = false;
-  if (genuineInventorySpace) {
+  // Where a typed result's authority came from: "metadata"/"legacy_metadata"
+  // are committed types; "inventory_layout"/"inventory_inferred" are only
+  // candidates. A prefill is suggestion-only and never the active space.
+  let spaceSource = null;
+  let setupPrefillSpace = null;
+  if (currentDesignAuthoritative) {
+    mode = "design";
+    // A folder saved before this preference existed keeps inventory on by default.
+    inventory = currentState.inventory === null ? true : currentState.inventory;
+    setupPrefillSpace = inventorySpace || null;
+    needsSetup = currentState.inventory === null;
+  } else if (genuineInventorySpace) {
     mode = "space";
     space = inventorySpace;
     if (currentState.status === "space") {
+      spaceSource = "metadata";
       keepBinDefaults = currentState.keep_bin_defaults;
       binDefaults = currentState.bin_defaults;
       spaceId = currentState.space_id;
@@ -385,11 +422,13 @@ SP.inspectHosted = async folder => {
       // reason to force setup again - mirrors organizer_spaces._folder_state.
       needsSetup = currentState.needsMigration;
     } else {
+      spaceSource = "inventory_layout";
       needsSetup = true;
     }
   } else if (currentState.status === "space") {
     mode = "space";
     space = currentState.space;
+    spaceSource = "metadata";
     keepBinDefaults = currentState.keep_bin_defaults;
     binDefaults = currentState.bin_defaults;
     spaceId = currentState.space_id;
@@ -401,20 +440,23 @@ SP.inspectHosted = async folder => {
     // Space identity, only current "space" metadata (handled above) is.
     mode = "space";
     space = legacyState.space;
+    spaceSource = "legacy_metadata";
     needsSetup = true;
   } else if (currentState.status === "design") {
     mode = "design";
-    // A folder saved before this preference existed keeps inventory on by default.
     inventory = currentState.inventory === null ? true : currentState.inventory;
+    setupPrefillSpace = inventorySpace || null;
     needsSetup = currentState.needsMigration || currentState.inventory === null;
   } else if (legacyState.status === "design") {
     mode = "design";
+    setupPrefillSpace = inventorySpace || null;
     needsSetup = true;
   } else if (inventorySpace) {
     // No authoritative metadata anywhere: fall back to the layout-only
     // inference (always "drawer" - there is no Box concept for it to recover).
     mode = "space";
     space = inventorySpace;
+    spaceSource = "inventory_inferred";
     needsSetup = true;
   } else {
     mode = "design";
@@ -439,6 +481,8 @@ SP.inspectHosted = async folder => {
     space,
     space_id: mode === "space" ? spaceId : null,
     needs_identity_migration: mode === "space" && needsIdentity,
+    space_source: spaceSource,
+    setup_prefill_space: setupPrefillSpace,
     metadata_version: currentState.status === "design" ? currentState.metadataVersion : null,
     inventory: mode === "space" ? true : inventory,
     keep_bin_defaults: mode === "space" ? keepBinDefaults : false,
@@ -464,26 +508,18 @@ SP.assertExpectedHostedIdentity = (info, expectedSpaceId) => {
 };
 
 SP.useHostedFolder = async (folder, { expectedSpaceId = null } = {}) => {
-  // A download-only fallback is not a folder: there is no handle to inspect,
-  // no metadata to restore, and nowhere to keep inventory. Treating it like a
-  // chosen folder would make inspectHosted() default inventory back on.
-  let info = folder?.handle
-    ? await SP.inspectHosted(folder)
-    : {
-        folder: folder.name,
-        folder_name: folder.name,
-        folder_mode: "design",
-        space: null,
-        inventory: false,
-        keep_bin_defaults: false,
-        bin_defaults: null,
-        missing: false,
-      };
+  // A hosted Design session without a persistent folder is "no folder
+  // selected", never a fabricated one. Opening a Wavefinity folder therefore
+  // always needs a real handle.
+  if (!folder?.handle) {
+    throw new Error("Opening a Wavefinity folder requires writable folder access.");
+  }
+  let info = await SP.inspectHosted(folder);
   // The hosted equivalent of the local technical open: only after read-only
   // classification says no setup is needed, adopt the canonical inventory
   // filename and give a configured v4 folder its v5 identity.
-  if (folder?.handle) SP.assertExpectedHostedIdentity(info, expectedSpaceId);
-  if (folder?.handle && !info.needs_setup) {
+  SP.assertExpectedHostedIdentity(info, expectedSpaceId);
+  if (!info.needs_setup) {
     if (info.inventory) await SP.readInventoryFor(folder, { migrate: true });
     const upgradeSpace = info.folder_mode === "space" && info.needs_identity_migration;
     const upgradeDesign = info.folder_mode === "design" && info.metadata_version && info.metadata_version < FOLDER_METADATA_VERSION;
@@ -504,24 +540,52 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null } = {}) => {
   await WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null });
   await SP.applyFolder(info, { reset: false });
   SP.close();
-  toast(folder.fallback
-    ? "Downloads still work. Inventory and Spaces need desktop Chrome or Edge with folder access allowed."
-    : info.folder_mode === "space"
+  toast(info.folder_mode === "space"
     ? `Opened ${info.space.name || folder.name}.`
-    : `Saving designs to ${folder.name}.`, false, folder.fallback ? 7000 : 3200);
+    : `Saving designs to ${folder.name}.`);
   return info;
 };
 
 // ------------------------------------------------------------ folder choice
 
-SP.pickFolder = async () => {
+// Returns a real folder or null - never a pretend one. With stayOnSetup the
+// caller is mid-setup, so a refusal explains itself inline instead of
+// throwing the person's entered Space details away.
+SP.pickFolder = async ({ stayOnSetup = false } = {}) => {
   if (state.runtime.hosted) {
     if (!window.WFFileSystem?.supportsDirectoryPicker()) {
-      return { handle: null, name: "Browser downloads", fallback: true };
+      if (stayOnSetup) {
+        SP.fail(
+          "This browser cannot give Wavefinity writable folder access. Your Space details have not been changed.",
+          "#space-create",
+        );
+      } else {
+        SP.showFolderAccessNeeded("unsupported");
+      }
+      return null;
     }
-    const handle = await WFFileSystem.pickDirectory();
-    return handle ? { handle, name: handle.name } : null;
+
+    const picked = await WFFileSystem.pickDirectory();
+    // A cancel is silent and leaves everything as it was.
+    if (!picked || picked.status === "cancelled") return null;
+
+    if (picked.status !== "ok" || !picked.handle) {
+      if (stayOnSetup) {
+        SP.fail(
+          "Folder access was not granted. Your Space details are still here; choose the folder again and allow read/write access.",
+          "#space-create",
+        );
+      } else {
+        SP.showFolderAccessNeeded(
+          picked.status === "denied" ? "denied" : "unsupported",
+        );
+      }
+      return null;
+    }
+
+    return { handle: picked.handle, name: picked.handle.name };
   }
+
   const data = await api("/api/browse-output-folder", { current: state.output });
   return data.folder || null;
 };
@@ -534,7 +598,11 @@ SP.pickFolder = async () => {
 SP.afterPick = async folder => {
   if (!folder) return null;
   if (state.runtime.hosted) {
-    if (!folder.handle) return SP.useHostedFolder(folder); // download-only fallback
+    // A hosted object with no handle is not a folder and is never adopted.
+    if (!folder.handle) {
+      SP.showFolderAccessNeeded("unsupported");
+      return null;
+    }
     const inspected = await SP.inspectHosted(folder);
     if (inspected.needs_setup) {
       SP.enterSetupFor(folder, inspected);
@@ -564,9 +632,9 @@ SP.chooseFolder = () => SP.run(async () => {
 });
 
 // The opt-out checkbox beside the save folder. Space always keeps inventory
-// on, and a hosted download-only fallback has no folder to keep one in, so
-// the control is disabled in both cases (see setFolderState) - these checks
-// just guard against a stray change event reaching here anyway.
+// on, and a hosted session with no persistent folder has nowhere to keep one,
+// so the control is disabled in both cases (see setFolderState) - these
+// checks just guard against a stray change event reaching here anyway.
 SP.setInventory = enabled => SP.run(async () => {
   if (!SP.hasFolder() || state.folderMode === "space") return;
   if (state.runtime.hosted && !state.browserFolder?.handle) return;
@@ -698,7 +766,24 @@ SP.offerSpacePlanning = async () => {
   }
 };
 
-SP.showFolderAccessNeeded = () => {
+// Capability-driven, never an OS or browser name: either this browser cannot
+// give writable folder access at all, or access was not granted.
+SP.showFolderAccessNeeded = (reason = "unsupported") => {
+  const lead = document.getElementById("space-unsupported-lead");
+  const detail = document.getElementById("space-unsupported-detail");
+  if (lead && detail) {
+    if (reason === "denied") {
+      lead.textContent =
+        "Wavefinity was not given read/write access to that folder.";
+      detail.textContent =
+        "You can still design and download parts normally. Choose the folder again and allow access to use Inventory and Spaces.";
+    } else {
+      lead.textContent =
+        "This browser cannot give Wavefinity ongoing read/write access to a chosen folder.";
+      detail.textContent =
+        "You can still design and download parts normally. Inventory and Spaces require a browser that supports writable folder access.";
+    }
+  }
   SP.showOnly("space-unsupported");
   SP.showDialog();
 };
@@ -744,10 +829,27 @@ SP.clearSetupContext = () => {
   SP.collisionOrigin = null;
   SP.pendingConfigureFolder = null;
   SP.isUpdate = false;
+  SP.setupPrefillSpace = null;
 };
 
+// Only a committed type - current or explicit legacy metadata - may resume or
+// block a folder. Inventory/layout candidates are suggestions.
+SP.authoritativeTypedSource = data =>
+  ["metadata", "legacy_metadata"].includes(data?.space_source);
+
 SP.beginCreateNew = () => {
+  // Clear prior setup state first, so an abandoned migration/collision target
+  // cannot survive an unsupported-browser message.
   SP.clearSetupContext();
+
+  if (
+    state.runtime.hosted &&
+    !window.WFFileSystem?.supportsDirectoryPicker()
+  ) {
+    SP.showFolderAccessNeeded("unsupported");
+    return;
+  }
+
   SP.showTypeCards();
 };
 
@@ -804,22 +906,20 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
 };
 
 SP.startUntyped = async () => {
-  const folder = await SP.pickFolder();
+  // Reuse the folder onboarding already chose rather than asking a second
+  // time: "I don't know yet" on the type cards is about this folder.
+  const folder = SP.configureData || await SP.pickFolder();
   if (!folder) return;
-  if (state.runtime.hosted && !folder.handle) {
-      // A download-only fallback has no handle to persist metadata into.
-      await SP.useHostedFolder(folder);
-      await loadFreshOrdinaryDesignForCurrentFolder();
-      return;
-  }
-  // Inspect first in both modes and never call Use Untyped on a folder
-  // already classified as a Space - fully configured *or* still needing
-  // its one-time setup pass - route it into the same collision prompt
-  // instead, mirroring hosted behavior exactly - see Fix 004 Correction 8.B.
+  // Inspect first in both modes and never call Use Untyped on a folder that
+  // holds an *authoritative* typed Space - committed and ready, or still
+  // needing its one-time setup pass - route it into the same collision
+  // prompt instead - see Fix 004 Correction 8.B. An inventory-only or
+  // inferred candidate is not a committed type, so the explicit exploration
+  // choice may make it ordinary Design without deleting its inventory.
   const data = state.runtime.hosted
       ? await SP.inspectHosted(folder)
       : (await api("/api/space/inspect", { output: folder })).folder;
-  if (data.folder_mode === "space") {
+  if (data.folder_mode === "space" && SP.authoritativeTypedSource(data)) {
       SP.collisionFolder = folder;
       SP.collisionData = data;
       SP.collisionOrigin = "untyped";
@@ -938,7 +1038,7 @@ SP.create = async () => {
   const { kind, name, x, y, z, trimSize } = values;
 
   // Folder last
-  const folder = SP.configureData || await SP.pickFolder();
+  const folder = SP.configureData || await SP.pickFolder({ stayOnSetup: true });
   if (!folder) return;
   // A folder already selected via SP.configureData (Open Existing ->
   // needs setup, or Configure Existing) is an explicit migration of that
@@ -949,11 +1049,13 @@ SP.create = async () => {
       const data = state.runtime.hosted
           ? await SP.inspectHosted(folder)
           : (await api("/api/space/inspect", { output: folder })).folder;
-      // Any folder already classified as a Space - typed and ready, or
-      // still needing its one-time setup pass - must never be treated as a
-      // brand-new create target; it always collision-prompts instead, in
-      // both modes - see Fix 004 Correction 7.B.
-      if (data.folder_mode === "space") {
+      // A folder holding an *authoritative* typed Space - committed and
+      // ready, or still needing its one-time setup pass - must never be
+      // treated as a brand-new create target; it always collision-prompts
+      // instead, in both modes - see Fix 004 Correction 7.B. An
+      // inventory-only or inferred candidate is existing Wavefinity content,
+      // not a committed type, so it falls through to the confirmation below.
+      if (data.folder_mode === "space" && SP.authoritativeTypedSource(data)) {
           SP.collisionFolder = folder;
           SP.collisionData = data;
           SP.collisionOrigin = "create";
@@ -962,10 +1064,10 @@ SP.create = async () => {
           SP.showDialog();
           return;
       }
-      // An existing untyped Wavefinity design/inventory folder must not be
+      // Existing Wavefinity content of either classified mode must not be
       // silently repurposed as this new Space - confirm explicitly, reusing
       // the already-entered Space setup values - see Fix 004 Correction 7.C.
-      if (data.folder_mode === "design" && data.exists) {
+      if (data.exists) {
           SP.pendingConfigureFolder = folder;
           SP.showOnly("space-existing-inventory-prompt");
           document.getElementById("space-existing-inventory-meta").textContent =
@@ -1077,17 +1179,37 @@ SP.designPortable = async space => {
 // Fix 004 Correction 6.A/E.
 SP.enterSetupFor = (folder, data) => {
     SP.configureData = folder;
+    SP.setupPrefillSpace = null;
+
     // Includes "surface" for recovery: a Surface created during an earlier
     // incomplete v4 pass, missing setup_version, must still safely prefill
     // instead of falling through to the generic Configure-vs-Untyped prompt
     // - see Fix 004 Correction 7.I.
-    if (data.space && ["drawer", "surface", "box", "portable"].includes(data.space.kind)) {
-        const kind = data.space.kind === "box" ? "portable" : data.space.kind;
-        SP.showSetup(kind, data.space);
-    } else {
-        SP.showOnly("space-configure-prompt");
-        SP.showDialog();
+    const candidate = data?.space || data?.setup_prefill_space;
+    const recognized = candidate &&
+      ["drawer", "surface", "box", "portable"].includes(candidate.kind);
+
+    // Only a committed type goes straight to its own setup form.
+    if (data?.space && recognized && SP.authoritativeTypedSource(data)) {
+        const kind = candidate.kind === "box" ? "portable" : candidate.kind;
+        SP.showSetup(kind, candidate);
+        return;
     }
+
+    if (recognized) {
+        SP.setupPrefillSpace = clone(candidate);
+    }
+
+    // Existing Wavefinity content with no committed typed Space goes straight
+    // to the three choices. A truly unmanaged folder still gets the explicit
+    // Configure-vs-Untyped confirmation first.
+    if (recognized || data?.exists) {
+        SP.showTypeCards();
+        return;
+    }
+
+    SP.showOnly("space-configure-prompt");
+    SP.showDialog();
 };
 
 SP.openExisting = async () => {
@@ -1108,11 +1230,12 @@ SP.useUntypedFolder = async () => {
     if (state.runtime.hosted) {
         const folder = SP.configureData;
         const data = await SP.inspectHosted(folder);
-        // Never demote an already-configured typed Space just because "Use
+        // Never demote an *authoritative* typed Space just because "Use
         // without a Space type" reached it - collision-prompt instead, the
         // hosted equivalent of the local backend's refuse guard - see
-        // Fix 004 Correction 7.D.
-        if (data.folder_mode === "space") {
+        // Fix 004 Correction 7.D. An inventory-only or inferred candidate is
+        // not a committed type and may be committed as Design.
+        if (data.folder_mode === "space" && SP.authoritativeTypedSource(data)) {
             SP.configureData = null;
             SP.collisionFolder = folder;
             SP.collisionData = data;
@@ -1151,7 +1274,11 @@ SP.launch = async () => {
   if (state.runtime.hosted) {
     try {
       const saved = await WFFileSystem.load("active");
-      if (saved?.handle && await WFFileSystem.requestReadWritePermission(saved.handle)) {
+      // Startup is not a user gesture: only already-granted permission may
+      // resume silently. A handle whose permission needs renewing falls
+      // through to Welcome, where an explicit action supplies the gesture.
+      // The saved record itself is kept.
+      if (saved?.handle && await WFFileSystem.queryReadWritePermission(saved.handle)) {
         const folder = { handle: saved.handle, name: saved.handle.name };
         const data = await SP.inspectHosted(folder);
         SP.assertExpectedHostedIdentity(data, saved.space_id || null);
@@ -1180,7 +1307,10 @@ SP.launch = async () => {
       return;
     }
     await SP.applyFolder(data);
+    // The routing decision must always end somewhere definite: the startup
+    // cover is dismissed only once this resolves.
     if (data.folder_mode === "space") SP.showResume(data);
+    else SP.close();
   } catch (_error) {
     SP.showHome();
   }
@@ -1195,16 +1325,26 @@ SP.wire = () => {
   const welcomeCreate = document.getElementById("welcome-create");
   if (welcomeCreate) welcomeCreate.addEventListener("click", SP.beginCreateNew);
   const welcomeOpen = document.getElementById("welcome-open");
-  if (welcomeOpen) welcomeOpen.addEventListener("click", SP.openExisting);
+  if (welcomeOpen) welcomeOpen.addEventListener("click", () => SP.run(SP.openExisting));
   const welcomeResumeContinue = document.getElementById("welcome-resume-continue");
   if (welcomeResumeContinue) welcomeResumeContinue.addEventListener("click", SP.confirmResume);
   const welcomeResumeSwitch = document.getElementById("welcome-resume-switch");
   if (welcomeResumeSwitch) welcomeResumeSwitch.addEventListener("click", () => {
     SP.cancelResumeAutoContinue();
-    SP.openExisting();
+    // SP.run() calls the task immediately, so showDirectoryPicker() is still
+    // reached from the trusted click.
+    SP.run(SP.openExisting);
   });
   document.querySelectorAll(".type-card").forEach(el => {
-      el.addEventListener("click", () => SP.showSetup(el.dataset.kind));
+      el.addEventListener("click", () => {
+          // A stale inventory candidate may prefill only its own card type;
+          // choosing a different type never inherits its dimensions.
+          const kind = el.dataset.kind;
+          const candidate = SP.setupPrefillSpace;
+          const candidateKind =
+            candidate?.kind === "box" ? "portable" : candidate?.kind;
+          SP.showSetup(kind, candidateKind === kind ? candidate : null);
+      });
   });
   const untypedStart = document.getElementById("space-untyped-start");
   if (untypedStart) untypedStart.addEventListener("click", () => SP.run(SP.startUntyped));
@@ -1563,9 +1703,23 @@ SP.crossTypeCheck = (designType) => {
 // so this stays the very last thing in the file. state.ready can already be
 // true by the time this script runs, which would otherwise call SP.wire()
 // before it exists - see Fix 004 Correction 8.A.
-const startSpaces = () => {
-  SP.wire();
-  SP.launch();
+const startSpaces = async () => {
+  try {
+    SP.wire();
+    // The routing decision - saved folder / Welcome / Resume / setup - is
+    // made first, behind the startup cover the initial HTML already shows.
+    await SP.launch();
+  } finally {
+    // Single owner of successful cover dismissal, so the bare Design UI never
+    // flashes between routing states - and an unexpected startup error can
+    // never leave "Opening Wavefinity..." on screen forever.
+    const cover = document.getElementById("startup-cover");
+    if (cover) cover.hidden = true;
+  }
+
+  // Only now does the first preview begin, behind the correct screen.
+  // refreshPreview() discards stale responses, so a later user action wins.
+  await refreshPreview();
 };
 
 if (state.ready) {

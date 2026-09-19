@@ -146,7 +146,7 @@ const VERSION_POLL_MS = 5000;
 
 // `inventory` is the folder's real setting and should be passed explicitly by
 // anything that knows it (a fresh /api/folder/use or SP.inspectHosted reply,
-// or an explicit new/fallback folder that has never had a setting). Leaving it
+// or an explicit new folder that has never had a setting). Leaving it
 // `undefined` - as a routine syncForm() refresh does - preserves whatever is
 // already in state.inventoryEnabled instead of silently resetting it: the
 // third argument is data about a folder, not a reset-to-default action.
@@ -170,15 +170,15 @@ function setFolderState(
   // Space always keeps inventory - it is what the layout is built from.
   state.inventoryEnabled = state.folderMode === "space" ? true : resolvedInventory;
   state.keepLog = state.inventoryEnabled;
-  // A hosted folder with no persistent directory handle (the download-only
-  // fallback) has nowhere to keep an inventory file, whatever the dropdown says.
+  // A hosted session with no persistent folder has nowhere to keep an
+  // inventory file, whatever the dropdown says.
   const canPersistInventory = !state.runtime.hosted || Boolean(state.browserFolder?.handle);
   const toggle = $("#folder-inventory-toggle");
   if (toggle) {
     toggle.value = state.inventoryEnabled ? "true" : "false";
     toggle.disabled = !state.folderSelected || state.folderMode === "space" || !canPersistInventory;
     toggle.title = !canPersistInventory
-      ? "Inventory and Spaces need folder access. Use desktop Chrome or Edge and allow access when asked; downloads still work here."
+      ? "Inventory and Spaces need writable folder access in this browser. Downloads still work without it."
       : state.folderMode === "space"
         ? "A Space needs this folder's inventory turned on."
         : "Add each generated bin and B4B to this folder's inventory file";
@@ -2355,54 +2355,6 @@ const saveOutputPreference = debounce(output => {
   if (state.runtime.hosted) return;
   api("/api/preferences", { output }).catch(() => {});
 }, 500);
-
-let isSelectingFolder = false;
-async function selectOutputFolder() {
-  if (isSelectingFolder) return;
-  isSelectingFolder = true;
-  const input = $("#output-folder");
-  const button = $("#output-folder-picker");
-  if (button) button.disabled = true;
-  if (input) input.style.pointerEvents = "none";
-  try {
-    if (state.runtime.hosted) {
-      if (!window.WFFileSystem?.supportsDirectoryPicker()) {
-        state.browserFolder = { handle: null, name: "Browser downloads", fallback: true };
-        state.output = state.browserFolder.name;
-        state.folderSelected = true;
-        // No persistent directory handle here, so there is nowhere to keep
-        // an inventory file - the opt-out default, not the normal one.
-        setFolderState("design", null, false);
-        if (input) input.value = state.output;
-        toast("Downloads still work. Inventory and Spaces need desktop Chrome or Edge with folder access allowed.", false, 7000);
-        return;
-      }
-      const handle = await WFFileSystem.pickDirectory();
-      if (!handle) return;
-      state.browserFolder = { handle, name: handle.name };
-      state.output = handle.name;
-      if (input) input.value = handle.name;
-      if (typeof SP !== "undefined") await SP.afterPick(state.browserFolder);
-      else toast(`Selected: ${handle.name}`);
-      return;
-    }
-    const result = await api("/api/browse-output-folder", { current: state.output });
-    if (result.folder) {
-      state.output = result.folder;
-      if (input) input.value = result.folder;
-      saveOutputPreference(result.folder);
-      // spaces.js detects optional Space metadata; a new folder stays design-only.
-      if (typeof SP !== "undefined") await SP.afterPick(result.folder);
-      else toast(`Selected: ${result.folder}`);
-    }
-  } catch (error) {
-    toast(error.message, true);
-  } finally {
-    if (button) button.disabled = false;
-    if (input) input.style.pointerEvents = "";
-    isSelectingFolder = false;
-  }
-}
 
 async function showLog() {
   const button = $("#show-log-button");
@@ -10456,11 +10408,16 @@ async function init() {
     watchServerVersion();
     updateHistoryButtons();
     clearDraftSelection();
-    await refreshPreview();
-    // The welcome screen (spaces.js) waits for the catalog and first preview.
+
+    // Space startup owns the first preview. Catalog/UI initialization is
+    // enough to begin onboarding, so Welcome/Resume no longer waits behind
+    // preview generation.
     state.ready = true;
     window.dispatchEvent(new Event("wavefinity:ready"));
   } catch (error) {
+    // A startup failure must never leave an infinite "Opening Wavefinity..."
+    // cover over the actual error.
+    document.getElementById("startup-cover")?.setAttribute("hidden", "");
     $("#connection").textContent = "Engine unavailable";
     $("#connection").classList.remove("ready");
     $("#connection").classList.add("stale");

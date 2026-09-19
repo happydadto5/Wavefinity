@@ -1173,6 +1173,17 @@ class WebApplicationTests(unittest.TestCase):
                     })
                 self.assertIn("Bambu Studio was not found", str(ctx.exception))
 
+    def test_no_pseudo_folder_remains_in_web_code(self):
+        # Fix 009: a hosted persistent-folder action must never fabricate a
+        # handle-less "folder" that quietly turns Space writes into downloads.
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        spaces_js = (root / "web" / "spaces.js").read_text(encoding="utf-8")
+        self.assertNotIn("Browser downloads", app_js)
+        self.assertNotIn("Browser downloads", spaces_js)
+        self.assertNotIn("fallback: true", app_js)
+        self.assertNotIn("fallback: true", spaces_js)
+
     def test_2d_layout_arrow_keys_and_movement_hints(self):
         root = Path(__file__).resolve().parent
         app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
@@ -1298,6 +1309,17 @@ class WebServerTests(unittest.TestCase):
         )
         with urlopen(request, timeout=30) as response:
             return response.status, json.loads(response.read())
+
+    def test_space_card_images_are_served_from_image_root(self):
+        for name in ("Drawer.png", "Vanity.png", "B4B.png"):
+            status, headers, body = self.get(f"/images/{name}")
+            self.assertEqual(status, 200)
+            self.assertEqual(headers["Content-Type"], "image/png")
+            self.assertTrue(body)
+
+        with self.assertRaises(HTTPError) as caught:
+            self.get("/images/%2e%2e%2fweb%2findex.html")
+        self.assertEqual(caught.exception.code, 404)
 
     def test_health_catalog_and_static_application_are_served(self):
         status, headers, body = self.get("/api/health")

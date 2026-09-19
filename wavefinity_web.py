@@ -216,6 +216,7 @@ from organizer_edge_mount import (
 
 
 WEB_ROOT = APP_DIR / "web"
+IMAGE_ROOT = APP_DIR / "images"
 DEFAULT_OUTPUT = APP_DIR / "generated"
 HOSTED = (
     os.environ.get("WAVEFINITY_DEPLOYMENT", "local").lower() == "hosted"
@@ -2568,6 +2569,36 @@ class WavefinityHandler(BaseHTTPRequestHandler):
     def _send_error(self, error: Exception, status: HTTPStatus) -> None:
         self._send_json({"error": str(error), "type": type(error).__name__}, status)
 
+    def _send_static_file(self, root: Path, relative: str) -> None:
+        resolved_root = root.resolve()
+        candidate = (resolved_root / relative).resolve()
+        try:
+            candidate.relative_to(resolved_root)
+        except ValueError:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if not candidate.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+
+        body = candidate.read_bytes()
+        content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; "
+            "base-uri 'none'; frame-ancestors 'none'",
+        )
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/health":
@@ -2627,33 +2658,17 @@ class WavefinityHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+        # Space-card artwork lives in the repository's canonical images/
+        # folder, not under web/. Serve it from its own root rather than
+        # duplicating the files or exposing APP_DIR itself.
+        if path.startswith("/images/"):
+            self._send_static_file(
+                IMAGE_ROOT,
+                unquote(path.removeprefix("/images/")),
+            )
+            return
         relative = "index.html" if path in {"", "/"} else unquote(path.lstrip("/"))
-        candidate = (WEB_ROOT / relative).resolve()
-        try:
-            candidate.relative_to(WEB_ROOT.resolve())
-        except ValueError:
-            self.send_error(HTTPStatus.NOT_FOUND)
-            return
-        if not candidate.is_file():
-            self.send_error(HTTPStatus.NOT_FOUND)
-            return
-        body = candidate.read_bytes()
-        content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; "
-            "connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; "
-            "base-uri 'none'; frame-ancestors 'none'",
-        )
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_static_file(WEB_ROOT, relative)
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
