@@ -64,11 +64,11 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Outside code review found no known implementation defect. The coding agent could not perform live browser verification and initially substituted code-reading checks. After that limitation was made explicit, the user chose to accept and close Fix 008 rather than keep it open solely for live verification. The accepted implementation includes clearer first-run Drawer copy, visible Bin Name/Height cues, actionable empty Drawer/Inventory states, empty-state action gating, and typed single-drawer canonical name/size synchronization. No special post-create tutorial card was added and advanced Bin options remain visible per user decision.
 
 
-## Fix 009 — Space Type Routing
+## Fix 009 — First Run Reliability
 - **Status:** Planned / ready for implementation
-- **Planning thread:** `Space Type Routing Plan #9`
-- **Implementation thread:** `Space Type Routing Imp #9`
+- **Planning thread:** `First Run Reliability Plan #9`
+- **Implementation thread:** `First Run Reliability Imp #9`
 - **Implementation branch:** `fix9`
 - **Fix file:** `/fixes/fix-009.md`
 - **Testing class:** Class B — focused regression coverage / targeted existing tests
-- **Notes:** Launch/setup can treat stale or inventory-derived Drawer Space data as authoritative and bypass the required three Space-type cards. Fix 009 restores current design-metadata precedence, distinguishes authoritative typed Space metadata from inventory/layout-only inference, and requires the type chooser whenever no committed Space type exists while retaining matching inferred values only as optional prefill.
+- **Notes:** Consolidated first-run/hosted reliability fix. Covers four observed issues: stale or inferred Drawer data bypassing the three Space-type cards; Welcome being delayed behind the first 3D preview; Render not serving the root `/images/` card assets; and hosted browsers without `showDirectoryPicker()` silently converting “Choose Folder & Create” into a `Wavefinity bins.md` download. The fix restores source authority for Space routing, starts onboarding before initial preview completion, serves approved card images safely, and blocks persistent Space creation when no real writable directory handle is available.
