@@ -65,10 +65,11 @@ This ledger was introduced after some earlier fixes already existed. The entries
 
 
 ## Fix 009 — First Run Reliability
-- **Status:** Planned / ready for implementation
+- **Status:** Completed / merged to `main`
 - **Planning thread:** `First Run Reliability Plan #9`
 - **Implementation thread:** `First Run Reliability Imp #9`
-- **Implementation branch:** `fix9`
-- **Fix file:** `/fixes/fix-009.md`
+- **Implementation branch:** `claude/fix9-implement-uertxg`
+- **Merge:** PR #5, merge commit `dac06dafe94613047611191ba125009ccd5700de`
 - **Testing class:** Class B — focused regression coverage / targeted existing tests
-- **Notes:** Consolidated first-run/hosted reliability fix. Covers four observed issues: stale or inferred Drawer data bypassing the three Space-type cards; Welcome being delayed behind the first 3D preview; Render not serving the root `/images/` card assets; and hosted browsers without `showDirectoryPicker()` silently converting “Choose Folder & Create” into a `Wavefinity bins.md` download. The fix restores source authority for Space routing, starts onboarding before initial preview completion, serves approved card images safely, and blocks persistent Space creation when no real writable directory handle is available.
+- **Review verdict:** YES — DONE
+- **Notes:** Completed first-run/hosted reliability work. Final implementation separates committed Space authority from safe setup prefill data, preserves unrestricted “just get started” Design mode, starts onboarding before initial preview generation, adds the immediate startup cover, securely serves the three Space-card images from `/images/`, removes the fake “Browser downloads” folder path, preserves deliberate generated-file downloads, and makes hosted persistence capability/permission-driven across macOS, Linux, Android, and iOS/iPadOS. Targeted Space identity, static image/traversal, pseudo-folder regression, and JS syntax checks were added/run by the implementation agent and reviewed in code before merge. Individual Fix 009 file removed after completion; permanent history retained here.
