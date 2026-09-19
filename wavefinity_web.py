@@ -15,7 +15,6 @@ import math
 import mimetypes
 import os
 from pathlib import Path
-import re
 import shutil
 import signal
 import secrets
@@ -1175,11 +1174,6 @@ def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
         update["output"] = str(payload["output"])
     if "slicer_path" in payload:
         update["slicer_path"] = str(payload["slicer_path"]) if payload["slicer_path"] else ""
-    if "default_join_mode" in payload:
-        value = str(payload["default_join_mode"])
-        if value not in {"side", "base_trim"}:
-            raise ValueError("Join bins with must be Side connectors or Base Trim.")
-        update["default_join_mode"] = value
     for key, label in (
         ("base_trim_bed_x_mm", "Bed X"),
         ("base_trim_bed_y_mm", "Bed Y"),
@@ -2227,19 +2221,9 @@ def configure_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    if payload.get("join_mode") == "base_trim":
-        raise ValueError("Connectors are turned off while bins are set to use a Base Trim.")
-    _reject_if_b4b(payload, "connectors")
-    box, *_ = _design(payload["design"])
-    if lid_enabled(box):
-        raise ValueError("Connectors are unavailable while this bin has a lid.")
-    options = payload.get("connector", {})
-    connector_type = str(options.get("type", "side"))
-    if connector_type not in {"side", "three_way", "four_way"}:
-        raise ValueError("Connector type must be side, three_way, or four_way.")
-    if connector_type != "side":
-        return _corner_connector_payload(payload, box, options, connector_type)
+def _generate_side_connector(
+    payload: dict[str, Any], box: Any, options: dict[str, Any], output_dir: Path,
+) -> tuple[Any, dict[str, Any]]:
     tolerance = float(options.get("tolerance", LOCKED_TOLERANCE))
     height = float(options.get("height", LOCKED_CONNECTOR_HEIGHT))
     arm_thickness = float(options.get("arm_thickness", DEFAULT_ARM_THICKNESS))
@@ -2265,8 +2249,6 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         rim_a = requested_a
         rim_b = requested_b
 
-    output_dir = _generation_output(payload)
-    output_dir.mkdir(parents=True, exist_ok=True)
     # The filename still speaks in the module heights the user knows the bins
     # by, not the physical rim heights.
     filename = connector_filename(
@@ -2312,59 +2294,87 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "wall_mm": connector_box.wall,
         "requires_same_wall": True,
     })
-    reply = {
-        "result": result,
-        "connector_plan": {
-            k: (round(v, 3) if isinstance(v, float) else v) for k, v in plan.items()
-        },
-    }
-    return _generation_reply(result=result, output=output_dir, extra=reply)
+    plan = {k: (round(v, 3) if isinstance(v, float) else v) for k, v in plan.items()}
+    return result, plan
 
 
-def _corner_quantity(value: Any) -> int:
-    """An actual whole number; never silently truncated."""
-    if isinstance(value, bool):
-        raise ValueError("Corner connector quantity must be a whole number from 1 to 20.")
-    if isinstance(value, str):
-        text = value.strip()
-        value = int(text) if re.fullmatch(r"[0-9]+", text) else None
-    elif isinstance(value, float) and value.is_integer():
-        value = int(value)
-    if not isinstance(value, int) or not 1 <= value <= 20:
-        raise ValueError("Corner connector quantity must be a whole number from 1 to 20.")
-    return value
-
-
-def _corner_connector_payload(
-    payload: dict[str, Any], box: Any, options: dict[str, Any], connector_type: str
-) -> dict[str, Any]:
-    if bool(options.get("different_heights", False)):
-        raise ValueError("3-Way and 4-Way Corner connectors require equal-height bins.")
-    ways = 3 if connector_type == "three_way" else 4
-    quantity = _corner_quantity(options.get("quantity", 1))
-    # Fresh defaults: hidden Side/Different settings never reach a corner part.
+def _generate_corner_connector(
+    box: Any, output_dir: Path, ways: int,
+) -> tuple[Any, dict[str, Any]]:
+    # Corner connectors are automatic bundle members: always quantity 1, with
+    # fresh defaults, since hidden Side/Different settings never reach them.
     connector = ConnectorSpec()
     connector_box = stack_effective_box(box) if box.stack.mode == "direct" else box
-    output_dir = _generation_output(payload)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    filename = corner_connector_filename(ways, quantity, connector_box.wall)
+    filename = corner_connector_filename(ways, 1, connector_box.wall)
     with GEOMETRY_LOCK:
         result = generate_corner_file(
-            connector_box, connector, output_dir / filename, ways, quantity
+            connector_box, connector, output_dir / filename, ways, 1
         )
-    reply = {
-        "result": result,
-        "connector_plan": {
-            "type": connector_type,
-            "quantity": quantity,
-            "wall_mm": round(connector_box.wall, 3),
-            "requires_equal_height": True,
-            "requires_same_wall": True,
-            "printed_height_mm": round(connector.height, 3),
-            "webbed": False,
-        },
+    plan = {
+        "type": "three_way" if ways == 3 else "four_way",
+        "quantity": 1,
+        "wall_mm": round(connector_box.wall, 3),
+        "requires_equal_height": True,
+        "requires_same_wall": True,
+        "printed_height_mm": round(connector.height, 3),
+        "webbed": False,
     }
-    return _generation_reply(result=result, output=output_dir, extra=reply)
+    return result, plan
+
+
+def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    if _is_base_trim_design(payload.get("design")):
+        raise ValueError(
+            "Connectors are generated from a bin design, not from a Base Trim design."
+        )
+    _reject_if_b4b(payload, "connectors")
+    box, *_ = _design(payload["design"])
+    if lid_enabled(box):
+        raise ValueError("Connectors are unavailable while this bin has a lid.")
+    options = payload.get("connector", {})
+    different_heights = bool(options.get("different_heights", False))
+
+    output_dir = _generation_output(payload)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    side_result, side_plan = _generate_side_connector(payload, box, options, output_dir)
+
+    if different_heights:
+        plan = dict(side_plan)
+        plan.update({
+            "mode": "auto",
+            "types": ["side"],
+            "different_heights": True,
+        })
+        reply = {"connector_plan": plan}
+        return _generation_reply(result={"side": side_result}, output=output_dir, extra=reply)
+
+    results: dict[str, Any] = {"side": side_result}
+    types = ["side"]
+    skipped_types: list[str] = []
+    for ways, key in ((3, "three_way"), (4, "four_way")):
+        try:
+            corner_result, _corner_plan = _generate_corner_connector(box, output_dir, ways)
+        except ValueError:
+            skipped_types.append(key)
+            continue
+        results[key] = corner_result
+        types.append(key)
+
+    plan = {
+        "mode": "auto",
+        "types": types,
+        "different_heights": False,
+        "wall_mm": side_plan.get("wall_mm"),
+        "requires_same_wall": True,
+    }
+    if skipped_types:
+        plan["skipped_types"] = skipped_types
+        plan["skipped_reason"] = (
+            "Corner connectors need at least 16 mm (2 Wavefinity units) in both "
+            "X and Y so the clip can clear the corners and engage the wall locks."
+        )
+    reply = {"connector_plan": plan}
+    return _generation_reply(result=results, output=output_dir, extra=reply)
 
 
 def sampler_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2478,9 +2488,11 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     files = _extract_generated_files(gen_result)
 
-    # The default bin print also carries one side connector, so a fresh
-    # build has the part on the plate to link bins together - but never for a
-    # B4B, whose lid controls the rim and which does not use the connector.
+    # The default bin print also carries the automatic connector bundle (a
+    # Side connector, plus 3-Way and 4-Way corners when the bin is eligible),
+    # so a fresh build has parts on the plate to link bins together - but
+    # never for a B4B, whose lid controls the rim and which does not use the
+    # connector, nor for a lidded bin or a Base Trim design.
     design = payload.get("design")
     is_base_trim = _is_base_trim_design(design)
     is_b4b = (
@@ -2495,15 +2507,11 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         and isinstance(design["box"].get("lid"), dict)
         and design["box"]["lid"].get("enabled")
     )
-    join_mode = str(payload.get("join_mode") or "side")
-    if join_mode not in {"side", "base_trim"}:
-        raise ValueError("Join bins with must be Side connectors or Base Trim.")
     if (
         target not in {"connector", "sampler"}
         and not is_b4b
         and not has_lid
         and not is_base_trim
-        and join_mode == "side"
     ):
         connector_files = _extract_generated_files(connector_payload(payload))
         files.extend(connector_files)

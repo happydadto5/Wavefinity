@@ -242,7 +242,10 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual((box.x, box.y), (16.0, 48.0))
 
     def test_connector_uses_two_heights_only_when_requested(self):
-        with patch.object(wavefinity_web, "generate_side_file", return_value={}) as generate:
+        with (
+            patch.object(wavefinity_web, "generate_side_file", return_value={}) as generate,
+            patch.object(wavefinity_web, "generate_corner_file", return_value={}),
+        ):
             wavefinity_web.connector_payload({
                 "design": default_design(),
                 "connector": {"bin_a_height": 40.0, "bin_b_height": 20.0},
@@ -259,7 +262,10 @@ class WebApplicationTests(unittest.TestCase):
             self.assertEqual(generate.call_args.args[-2:], (40.0, 20.0))
 
     def test_connector_payload_names_file_appropriately(self):
-        with patch.object(wavefinity_web, "generate_side_file", return_value={}) as generate:
+        with (
+            patch.object(wavefinity_web, "generate_side_file", return_value={}) as generate,
+            patch.object(wavefinity_web, "generate_corner_file", return_value={}),
+        ):
             wavefinity_web.connector_payload({
                 "design": default_design(),
                 "output": "/fake/output",
@@ -293,6 +299,56 @@ class WebApplicationTests(unittest.TestCase):
         plan = result["connector_plan"]
         self.assertEqual(plan["drop_mm"], 25.0)
         self.assertEqual(plan["shorter_bin"], "B")
+
+    def test_same_height_connector_payload_generates_the_full_automatic_bundle(self):
+        with (
+            patch.object(wavefinity_web, "generate_side_file", return_value={"output": "side.3mf"}) as side,
+            patch.object(wavefinity_web, "generate_corner_file", return_value={"output": "corner.3mf"}) as corner,
+        ):
+            result = wavefinity_web.connector_payload({"design": default_design()})
+        side.assert_called_once()
+        self.assertEqual(corner.call_count, 2)
+        corner_ways = sorted(call.args[3] for call in corner.call_args_list)
+        self.assertEqual(corner_ways, [3, 4])
+        self.assertEqual(set(result["result"]), {"side", "three_way", "four_way"})
+        plan = result["connector_plan"]
+        self.assertEqual(plan["mode"], "auto")
+        self.assertEqual(set(plan["types"]), {"side", "three_way", "four_way"})
+        self.assertFalse(plan["different_heights"])
+        self.assertNotIn("skipped_types", plan)
+
+    def test_different_height_connector_payload_generates_side_only(self):
+        with (
+            patch.object(wavefinity_web, "generate_side_file", return_value={"output": "side.3mf"}),
+            patch.object(wavefinity_web, "generate_corner_file") as corner,
+        ):
+            result = wavefinity_web.connector_payload({
+                "design": default_design(),
+                "connector": {"different_heights": True, "bin_a_height": 40.0, "bin_b_height": 20.0},
+            })
+        corner.assert_not_called()
+        self.assertEqual(set(result["result"]), {"side"})
+        plan = result["connector_plan"]
+        self.assertEqual(plan["types"], ["side"])
+        self.assertTrue(plan["different_heights"])
+
+    def test_ineligible_corner_size_still_generates_side_and_reports_skipped_types(self):
+        design = default_design()
+        # 8 mm is one Wavefinity unit - below MIN_JOINABLE_SIZE (16 mm), so the
+        # real corner geometry must refuse it while the Side connector, which
+        # has no such minimum, still succeeds.
+        design["box"]["x"] = 8.0
+        with patch.object(wavefinity_web, "generate_side_file", return_value={"output": "side.3mf"}):
+            result = wavefinity_web.connector_payload({"design": design})
+        self.assertEqual(set(result["result"]), {"side"})
+        plan = result["connector_plan"]
+        self.assertEqual(plan["types"], ["side"])
+        self.assertEqual(sorted(plan["skipped_types"]), ["four_way", "three_way"])
+
+    def test_connector_payload_rejects_base_trim_design_not_join_preference(self):
+        with self.assertRaises(ValueError) as ctx:
+            wavefinity_web.connector_payload({"design": {"design_kind": "base_trim"}})
+        self.assertIn("Base Trim", str(ctx.exception))
 
     def test_default_draft_changes_real_geometry_when_height_changes(self):
         design = default_design()
@@ -1242,6 +1298,93 @@ class WebApplicationTests(unittest.TestCase):
                         "output": temp_dir,
                     })
                 self.assertIn("Bambu Studio was not found", str(ctx.exception))
+
+    def test_print_payload_sends_bundle_for_ordinary_bin_and_ignores_join_mode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_exe = Path(temp_dir) / "bambu-studio.exe"
+            fake_exe.touch()
+            fake_3mf = Path(temp_dir) / "Box.3mf"
+            fake_3mf.touch()
+            fake_gen_result = {
+                "result": {"box": {"output": str(fake_3mf)}},
+                "output": str(temp_dir),
+            }
+            with (
+                patch.object(wavefinity_web, "generate_payload", return_value=fake_gen_result),
+                patch.object(wavefinity_web, "connector_payload", return_value={"result": {}, "output": str(temp_dir)}) as mock_connector,
+                patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
+                patch.object(wavefinity_web, "launch_slicer"),
+            ):
+                # A leftover/garbage join_mode value must be silently ignored -
+                # it is no longer read or validated anywhere in this path.
+                wavefinity_web.print_payload({
+                    "design": default_design(),
+                    "output": temp_dir,
+                    "join_mode": "base_trim",
+                })
+                mock_connector.assert_called_once()
+
+    def test_print_payload_skips_connector_bundle_for_b4b_lid_and_base_trim(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_exe = Path(temp_dir) / "bambu-studio.exe"
+            fake_exe.touch()
+            fake_3mf = Path(temp_dir) / "Box.3mf"
+            fake_3mf.touch()
+            fake_gen_result = {
+                "result": {"box": {"output": str(fake_3mf)}},
+                "output": str(temp_dir),
+            }
+
+            b4b_design = default_design()
+            b4b_design["box"]["b4b"] = {"enabled": True}
+            lid_design = default_design()
+            lid_design["box"]["lid"] = {"enabled": True}
+            base_trim_design = {"design_kind": "base_trim"}
+
+            for design in (b4b_design, lid_design, base_trim_design):
+                with self.subTest(design=design.get("design_kind", "bin")):
+                    with (
+                        patch.object(wavefinity_web, "generate_payload", return_value=fake_gen_result),
+                        patch.object(wavefinity_web, "connector_payload") as mock_connector,
+                        patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
+                        patch.object(wavefinity_web, "launch_slicer"),
+                    ):
+                        wavefinity_web.print_payload({"design": design, "output": temp_dir})
+                        mock_connector.assert_not_called()
+
+    def test_connector_choosers_are_removed_from_browser_source(self):
+        root = Path(__file__).resolve().parent
+        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        spaces_js = (root / "web" / "spaces.js").read_text(encoding="utf-8")
+        self.assertNotIn("bin-join-mode", index_html)
+        self.assertNotIn("connector-type", index_html)
+        self.assertNotIn("corner-connector-quantity", index_html)
+        for source in (app_js, spaces_js):
+            self.assertNotIn("joinMode", source)
+            self.assertNotIn("join_mode", source)
+            self.assertNotIn("default_join_mode", source)
+
+    def test_hosted_connector_bundle_exposes_all_files_without_duplicate_names(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            side_file = Path(temp_dir) / "side.3mf"
+            side_file.touch()
+            three_file = Path(temp_dir) / "three.3mf"
+            three_file.touch()
+            four_file = Path(temp_dir) / "four.3mf"
+            four_file.touch()
+            with (
+                patch.object(wavefinity_web, "HOSTED", True),
+                patch.object(wavefinity_web, "_generation_output", return_value=Path(temp_dir)),
+                patch.object(wavefinity_web, "generate_side_file", return_value={"output": str(side_file)}),
+                patch.object(wavefinity_web, "generate_corner_file", side_effect=[
+                    {"output": str(three_file)}, {"output": str(four_file)},
+                ]),
+            ):
+                result = wavefinity_web.connector_payload({"design": default_design()})
+        names = {entry["name"] for entry in result["files"]}
+        self.assertEqual(names, {"side.3mf", "three.3mf", "four.3mf"})
+        self.assertEqual(len(result["files"]), 3)
 
     def test_no_pseudo_folder_remains_in_web_code(self):
         # Fix 009: a hosted persistent-folder action must never fabricate a
