@@ -1038,7 +1038,9 @@ function syncForm() {
   $("#connector-bin-a-height").value = fmt(state.connector.bin_a_height ?? box.z);
   $("#connector-bin-b-height").value = fmt(state.connector.bin_b_height ?? box.z);
   $("#connector-height-mode").value = state.connector.different_heights ? "different" : "same";
-  syncConnectorHeightControls();
+  $("#connector-type").value = normalizeConnectorType(state.connector.type);
+  $("#corner-connector-quantity").value = state.connector.quantity ?? 1;
+  syncConnectorTypeControls();
   syncLidForm();
   syncB4BForm();
   syncJoiningControls();
@@ -1108,12 +1110,55 @@ function syncConnectorHeightControls() {
   autoAdjustConnectorFields();
 }
 
-function renderConnectorReadout() {
+const CONNECTOR_TYPES = ["side", "three_way", "four_way"];
+const CONNECTOR_TYPE_NAMES = {
+  side: "Side connector", three_way: "3-Way Corner connector", four_way: "4-Way Corner connector",
+};
+
+function normalizeConnectorType(value) {
+  return CONNECTOR_TYPES.includes(value) ? value : "side";
+}
+
+function connectorTypeNow() {
+  return normalizeConnectorType($("#connector-type")?.value);
+}
+
+function syncConnectorTypeControls() {
+  const type = connectorTypeNow();
+  const corner = type !== "side";
+  const heightWrap = $("#connector-height-wrap");
+  if (heightWrap) heightWrap.hidden = corner;
+  $("#corner-connector-quantity-row").hidden = !corner;
+  if (corner) {
+    $("#connector-height-mode").value = "same";
+    $("#connector-bin-heights").hidden = true;
+    $("#connector-settings").hidden = true;
+  } else {
+    syncConnectorHeightControls();
+  }
+  renderConnectorReadout();
+}
+
+function renderConnectorReadout(plan = null) {
   const el = $("#connector-derived");
-  if (el) {
+  if (!el) return;
+  if (baseTrimEnabled() || state.joinMode === "base_trim") {
     el.hidden = true;
     el.innerHTML = "";
+    return;
   }
+  const type = plan?.type ? normalizeConnectorType(plan.type) : connectorTypeNow();
+  const wall = plan?.wall_mm ?? state.design?.box?.wall;
+  const fits = Number.isFinite(Number(wall)) ? `Fits ${fmt(Number(wall))} mm bin walls.` : "Fits the bin wall thickness.";
+  const corner = "Equal-height bins only; bins must be at least 16 mm in X and Y.";
+  const text = type === "side"
+    ? `${fits} Use only with bins of the same wall thickness.`
+    : type === "three_way"
+      ? `${fits} ${corner} Rotate the connector to put the open corner where needed.`
+      : `${fits} ${corner}`;
+  const count = type !== "side" && Number(plan?.quantity) > 1 ? ` Quantity: ${plan.quantity}.` : "";
+  el.textContent = text + count;
+  el.hidden = false;
 }
 
 function updateInteriorModeVisibility(reveal = false) {
@@ -1377,13 +1422,17 @@ function syncJoiningControls() {
   const select = $("#bin-join-mode");
   if (select) select.value = state.joinMode;
   const connectorless = state.joinMode === "base_trim";
-  const heightMode = $("#connector-height-mode")?.closest("label");
-  if (heightMode) heightMode.hidden = connectorless;
+  const heightWrap = $("#connector-height-wrap");
   if (connectorless) {
+    if (heightWrap) heightWrap.hidden = true;
+    $("#connector-type-row").hidden = true;
+    $("#corner-connector-quantity-row").hidden = true;
     $("#connector-bin-heights").hidden = true;
     $("#connector-settings").hidden = true;
+    renderConnectorReadout();
   } else {
-    syncConnectorHeightControls();
+    $("#connector-type-row").hidden = false;
+    syncConnectorTypeControls();
   }
   if (!baseTrimEnabled() && !b4bEnabled()) {
     const connectorLocked = Boolean(state.design?.box?.lid?.enabled);
@@ -2262,7 +2311,7 @@ function updateDesignFromForm() {
         design.box.wall ?? defaultWall,
       )));
   $("#wall-thickness").value = design.box.standard_walls ? "standard" : fmt(design.box.wall);
-  if (design.box.wall !== previousWall) autoAdjustConnectorFields();
+  if (design.box.wall !== previousWall && connectorTypeNow() === "side") autoAdjustConnectorFields();
   const baseChoice = $("#base-thickness").value;
   design.box.standard_base = !b4bOn && currentStackMode === "none" && baseChoice === "standard";
   design.box.base_thickness = design.box.standard_base
@@ -2290,9 +2339,11 @@ function updateDesignFromForm() {
     height: state.connector.height,
     bin_a_height: number($("#connector-bin-a-height").value, state.design.box.z),
     bin_b_height: number($("#connector-bin-b-height").value, state.design.box.z),
-    different_heights: $("#connector-height-mode").value === "different",
+    different_heights: connectorTypeNow() === "side" && $("#connector-height-mode").value === "different",
     position: 0,
     axis: "y",
+    type: connectorTypeNow(),
+    quantity: number($("#corner-connector-quantity").value, 1),
   };
   readB4BForm(design);
   readStackForm(design);
@@ -2388,8 +2439,42 @@ function updatePreviewHelp(view) {
     : "Drag to spin, or click the arrows for a 15° step (shift-click for 2°). Wheel to zoom, double-click to reset.";
 }
 
+// Advisory only: a user-changed wall that differs from known ordinary bins already
+// in this Space. Never blocks the change and stays silent if the read fails.
+async function maybeWarnSpaceWallMismatch(newWall) {
+  if (state.folderMode !== "space" || !state.output) return;
+  const spaceKey = () => state.activeSpaceId || state.output;
+  const spaceAtStart = spaceKey();
+  try {
+    let bins;
+    if (typeof DL !== "undefined" && DL.loaded && DL.output === DL.folder()) {
+      bins = DL.bins;
+    } else {
+      const data = await DL.inventoryCall("/api/drawer/load", {}, { write: false });
+      bins = data.bins;
+    }
+    const differs = (bins || []).some(row => {
+      if (row?.kind !== "bin") return false;
+      const wall = Number(row.wall);
+      return row.wall != null && Number.isFinite(wall) && wall > 0 && Math.abs(wall - newWall) > 1e-6;
+    });
+    if (!differs) return;
+    if (state.folderMode !== "space" || spaceKey() !== spaceAtStart) return;
+    if (state.design?.box?.wall !== newWall) return;
+    toast(
+      "This Space already has bins with a different wall thickness. Connectors only fit bins with the same wall thickness. You can keep this thickness, but do not use one connector across different wall thicknesses.",
+      false, 9000,
+    );
+  } catch (_error) {
+    // Advisory warning only.
+  }
+}
+
 let pendingDesignHistory = null;
+let pendingWallMismatchCheck = false;
 const applyChangedDesign = debounce(() => {
+  const checkWall = pendingWallMismatchCheck;
+  pendingWallMismatchCheck = false;
   if (state.designMutationBusy) {
     pendingDesignHistory = null;
     return;
@@ -2397,6 +2482,7 @@ const applyChangedDesign = debounce(() => {
   const previousDesign = pendingDesignHistory || clone(state.design);
   pendingDesignHistory = null;
   updateDesignFromForm();
+  if (checkWall) maybeWarnSpaceWallMismatch(state.design.box.wall);
   recordHistory(previousDesign);
   // Re-fit contents-driven drafts after the bin changes. Arbitrarily sized
   // parts keep the size the user chose; if the bin was made too small, the
@@ -2744,6 +2830,7 @@ function wireControls() {
           delete select.dataset.choices;
         }
         state.binResizePending = true;
+        pendingWallMismatchCheck = true;
         syncWallControls();
       }
       if (selector === "#base-thickness") {
@@ -2938,6 +3025,15 @@ function wireControls() {
       updateDesignFromForm();
     });
   });
+  $("#connector-type").addEventListener("change", () => {
+    syncConnectorTypeControls();
+    updateDesignFromForm();
+    renderConnectorReadout();
+  });
+  ["input", "change"].forEach(name => $("#corner-connector-quantity").addEventListener(name, () => {
+    updateDesignFromForm();
+    renderConnectorReadout();
+  }));
   $("#connector-height-mode").addEventListener("change", () => {
     if ($("#connector-height-mode").value === "different") {
       $("#connector-bin-a-height").value = fmt(state.design.box.z);
@@ -9931,7 +10027,9 @@ async function generateParts(target) {
   const boxTitle = baseTrimEnabled()
     ? `Base Trim (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm field)`
     : `Bin (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} × ${fmt(state.design.box.z)} mm)`;
-  const connTitle = `Connector (${fmt(state.design.box.z)} mm)`;
+  const connTitle = connectorTypeNow() === "side"
+    ? `Connector (${fmt(state.design.box.z)} mm)`
+    : CONNECTOR_TYPE_NAMES[connectorTypeNow()];
 
   const items = [];
   if (target === "all" || target === "bin") {
