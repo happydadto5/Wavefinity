@@ -76,7 +76,7 @@ This ledger was introduced after some earlier fixes already existed. The entries
 
 ## Fix 010 — New Space Flow
 - **Status:** Planned / ready to implement
-- **Planning thread:** `New Space Flow Plan #10`
+- **Planning thread:** `(10) New Space Flow Plan #10`
 - **Implementation thread:** `New Space Flow Imp #10`
 - **Implementation branch:** `fix10`
 - **Testing class:** Moderate UI/Space-routing change — focused web regression coverage plus full test script required
