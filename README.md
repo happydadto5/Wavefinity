@@ -193,69 +193,78 @@ The hosted app tracks `main`; work on a fix branch is intentionally isolated fro
 
 #### Purpose & Core Rule
 
-> **TEST PROPORTIONALLY. DO NOT TEST CEREMONIALLY.**
-> Static reasoning remains the default for small, well-understood changes, but
-> coding agents may and should run limited real tests when a cheap, high-signal
-> check is likely to catch integration/runtime mistakes. Major shared-contract
-> changes require targeted verification before final acceptance.
+> **MAXIMIZE CONFIDENCE PER TOKEN.**
+> Use cheap automated tests when they materially improve confidence.
+> Prefer existing non-browser tests because running them is usually inexpensive in
+> LLM/token terms. Use browser-driving tests only when the behavior genuinely
+> depends on a real browser.
 
-Wavefinity has had two opposite failure modes: too much testing bureaucracy, and too little runtime verification on large integration work. The goal is neither. Use the smallest verification set that is likely to catch the actual risks.
+Wavefinity should avoid both extremes: skipping useful automated verification and wasting time/tokens on ceremonial testing. The computer running a test does not meaningfully consume LLM tokens; token cost mostly comes from the agent reading output, diagnosing failures, writing new tests, or driving a browser. Therefore prefer quiet, high-signal automated checks and concise output.
 
-> **Implement carefully, inspect the diff, then test only the risks that justify it. Stop when those risks are covered.**
+> **Implement carefully, inspect the diff, run the cheapest useful automated checks, and stop when the meaningful risks are covered.**
 
-Existing tests remain a safety net. Reuse them when they fit. Do not create a large test program merely because a change exists.
+Existing tests are a safety net. Reuse them freely when they fit. Do not build a large new testing program merely because a change exists.
 
 #### Change classification
 
-**Class A — Small/localized change: normally NO TESTING**
+**Class A — Small/localized change: TESTING OPTIONAL**
 - *Examples:* wording, labels, tooltips, CSS/layout/spacing, moving or hiding one control, documentation, a clear one-line/local bug fix, a small local refactor, renaming, or a contained default/range change.
-- *Action:* implement, inspect the changed path and diff, commit. No tests unless there is a specific known runtime risk that a one-shot check would cheaply answer.
+- *Action:* implement and inspect the changed path/diff. Skip tests when they add no meaningful signal. If a relevant existing automated test is cheap to run, it is fine to run it.
 
-**Class B — Moderate/bounded change: LIMITED TESTING WHEN IT ADDS REAL SIGNAL**
+**Class B — Moderate/bounded change: AUTOMATED TESTING ENCOURAGED**
 - *Examples:* one feature plus paired UI/API wiring; contained serialization; several files in one coherent path; a new local interaction/state flow; a meaningful bug fix spanning multiple functions.
-- The fact that code is new does **not** by itself require testing.
-- Use limited verification when the change crosses a runtime boundary static reading cannot fully prove, such as:
-  - DOM wiring / browser initialization;
-  - frontend-to-backend route contracts;
-  - save/load or persistence behavior;
-  - async state transitions;
-  - import/module wiring;
-  - a bug that already escaped one static review.
-- *Action:* usually 1–3 focused checks: an existing targeted test, syntax/import check, or one surgical browser/server smoke path. Do not automatically run the full suite.
+- Prefer an existing targeted automated test or small related test group.
+- A broader/full existing automated suite is also acceptable when it is fast, produces concise output, and can cheaply catch regressions outside the immediate path.
+- Do not write a new test unless it is likely to protect an important behavior at reasonable maintenance/token cost.
 
-**Class C — Major / Heavy-Lift / High-Blast-Radius change: TARGETED TESTING EXPECTED**
+**Class C — Major / Heavy-Lift / High-Blast-Radius change: AUTOMATED TESTING EXPECTED**
 Testing is expected when the change can realistically break significant portions of Wavefinity outside the immediate feature.
 - *Qualifying criteria:* shared box/wave/grid geometry; global mating/interlock rules; central data models; saved-design schema/versioning; broad save/load/generation paths; shared layout/assembly/registry infrastructure; major subsystem replacement; security/request boundaries; global browser state synchronization; common 3MF/export logic; versioned serialization.
+- Use the relevant targeted tests and normally the existing broader/full automated suite when it is practical and reasonably fast.
 - A large line count alone does not make work Class C; a tiny shared-contract edit can.
+
+#### Browser-driving rule
+
+Browser-driving/UI automation is intentionally the exception because it is more expensive in tokens and interaction steps.
+
+Use browser driving only when non-browser automated tests plus static review cannot establish the behavior with adequate confidence, such as:
+- real DOM interaction or browser initialization;
+- browser-only event behavior;
+- async UI state that cannot be exercised through existing tests;
+- visual/layout behavior where appearance itself is the risk;
+- download/file-picker or other browser-specific workflows.
+
+When browser driving is justified, use the smallest surgical path that answers the question. Avoid broad walkthroughs, screenshot-heavy QA, and repeated UI reassurance runs.
 
 #### Correction-escalation rule
 
-Repeated correction cycles are themselves evidence that static review is not enough.
+Repeated correction cycles are evidence that more real verification may be worthwhile.
 
-- After **2 correction passes** on the same fix, reconsider its test class even if it began as A/B.
-- After **3 correction passes**, or after any runtime/integration failure escapes review, the next implementation/review should include targeted real verification unless the environment truly cannot run it.
-- A fix that spans multiple subsystems, migration, frontend/backend state, or persistence should normally be treated as Class C before it reaches repeated corrections.
-- Do not allow a fix to accumulate a long chain of corrections while continuing to prohibit all runtime checks. Eleven correction passes is a process failure, not a virtue.
+- After **2 correction passes** on the same fix, reconsider whether additional automated coverage would cheaply catch the remaining issue.
+- After **3 correction passes**, or after any runtime/integration failure escapes review, run relevant automated verification unless the environment truly cannot run it.
+- A fix spanning multiple subsystems, migration, frontend/backend state, or persistence should normally receive automated verification before repeated corrections accumulate.
 
-The Help Code fix file should state the current testing decision explicitly:
-- **No testing**
-- **Limited targeted testing**
-- **Class C risk-directed testing**
+The Help Code fix file should state the testing approach for that fix, choosing from:
+- **No testing needed**
+- **Existing targeted automated tests**
+- **Existing broader/full automated suite**
+- **Targeted browser smoke check** (only when browser-specific risk requires it)
 
-and, when testing is allowed/required, name the exact checks to run.
+Name exact commands/checks when known, but do not turn the fix file into a testing plan.
 
-#### Testing rules when testing is justified
+#### Testing rules
 
-- **Name the risks first:** identify the 1–8 concrete failures the check is intended to catch.
-- **Prefer existing tests:** reuse targeted tests before writing new ones.
-- **New regression tests are allowed sparingly** when a stable important invariant is uncovered and the test is cheap to maintain.
-- **Syntax/import checks are encouraged** for touched languages/modules when relevant.
-- **Browser/server smoke checks are allowed** when the risk is runtime UI wiring, async state, or browser behavior that static inspection cannot establish.
-- **Full-suite limit:** normally one full-suite run maximum, and only when the change is broad enough that targeted tests cannot cover the shared contracts. A behavior-preserving structural refactor may justify one baseline and one final run.
-- **Reruns:** rerun a failed targeted check after fixing it; do not repeatedly rerun passing checks for reassurance.
+- **Prefer existing tests.** Reuse them before writing new ones.
+- **Targeted first when obvious.** If one small test group directly covers the change, start there.
+- **Full suites are allowed.** A full existing automated suite is reasonable whenever it is fast enough, output is concise, and the extra regression coverage is worth the small token cost.
+- **Use quiet/concise output.** Avoid verbose logs unless diagnosing a failure.
+- **New tests are optional, not automatic.** Add one only when it protects an important stable invariant and is worth the implementation/maintenance cost.
+- **Syntax/import checks are cheap** and encouraged when relevant.
+- **Browser/server driving is sparse.** Use it only for risks that cheaper automated checks cannot resolve.
+- **Rerun failures, not reassurance.** After fixing a failure, rerun the failed/relevant checks. Do not repeatedly rerun already-passing suites without a reason.
 - **No exhaustive matrices or random sweeps** unless the changed algorithm genuinely requires them.
-- **No screenshot QA** for routine styling. Capture/inspect visuals only when visual behavior is itself the risk.
-- If a needed test cannot run because the environment/tooling is unavailable, say so clearly and fall back to the strongest available static review; do not pretend it was verified.
+- **No screenshot QA** for routine styling; inspect visuals only when visual behavior is itself the risk.
+- If testing cannot run because the environment/tooling is unavailable, say so clearly and use the strongest available static review.
 
 #### What still should NOT happen
 
@@ -265,7 +274,7 @@ Do not create testing bureaucracy:
 - no giant acceptance matrices;
 - no dozens of near-duplicate cases;
 - no “one more verification” loops after the named risks are covered;
-- no full-suite run for a wording/CSS/local handler change;
+- no browser-driving test when a normal automated test can answer the question;
 - no new test merely to increase confidence cosmetically.
 
 #### Fast implementation workflow
@@ -273,28 +282,30 @@ Do not create testing bureaucracy:
 1. Read the affected implementation and direct callers.
 2. Make the smallest correct change.
 3. Inspect the changed code and diff.
-4. Decide the test class based on blast radius and correction history.
-5. If testing is justified, run only the named high-signal checks.
-6. Fix any real failures and rerun only those failed checks.
-7. Commit/push the coherent completed work.
-8. Stop.
+4. Choose the cheapest high-signal verification appropriate to the blast radius.
+5. Run relevant existing automated tests when they materially improve confidence.
+6. Use browser driving only if browser-specific behavior remains unverified.
+7. Fix real failures and rerun only the affected checks.
+8. Commit/push the coherent completed work.
+9. Stop.
 
 #### Quick decision rule
 
-Before testing, ask:
+Before spending testing tokens, ask:
 
-> **What concrete bug could this test catch that static inspection cannot cheaply establish?**
+> **Which check gives the most confidence for the least agent interaction/output?**
 
-- **No concrete answer** → do not test.
-- **One bounded runtime/integration risk** → Class B limited targeted test.
-- **Several shared-contract risks or broad blast radius** → Class C targeted verification.
-- **This fix has already needed repeated corrections** → escalate; do not keep relying on static review alone.
+- Tiny/local change with no meaningful runtime risk → testing may be skipped.
+- Relevant existing targeted test → usually run it.
+- Fast, concise full suite with useful regression coverage → running it is allowed and often worthwhile.
+- Behavior only provable in a real browser → use one small browser-driving smoke path.
+- Repeated corrections or escaped runtime failures → increase automated verification.
 
 #### Definition of done
 
-- **Class A:** requested behavior implemented, code path reasoned through, diff verified, docs updated only if needed.
-- **Class B:** Class A plus the smallest targeted checks justified by runtime/integration risk, when applicable.
-- **Class C:** implementation plus a named risk-directed verification set; final acceptance requires those checks to pass or a clearly documented environment limitation.
+- **Class A:** requested behavior implemented, code path reasoned through, diff verified; cheap relevant automated checks may be run but are not mandatory.
+- **Class B:** Class A plus useful existing automated verification when available; targeted is preferred, but a fast full suite is acceptable.
+- **Class C:** implementation plus relevant automated verification; broader/full suite is normally appropriate when practical. Browser driving is added only for browser-specific residual risk.
 
 ### Using the browser UI
 
