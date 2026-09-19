@@ -1,6 +1,6 @@
 # Wavefinity Fix Master
 
-Permanent Help Code ledger. After a fix receives **YES — DONE** and is integrated into `main`, rename its individual file to `fix-### archive.md`; never delete the completed fix record. Entries here remain permanently.
+Permanent Help Code ledger. **Completion is a mandatory transaction:** after outside review returns **YES — DONE**, ChatGPT must merge/integrate the approved implementation into current `main`, verify that integration, then rename the active fix file to `fix-### archive.md` on `main`. A fix is not closed merely because review passed; merge + archive are part of completion. Never delete the completed fix record. Entries here remain permanently.
 
 This ledger was introduced after some earlier fixes already existed. The entries below reconstruct the currently visible/known fixes without inventing unavailable history.
 
@@ -75,17 +75,21 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Completed first-run/hosted reliability work. Final implementation separates committed Space authority from safe setup prefill data, preserves unrestricted “just get started” Design mode, starts onboarding before initial preview generation, adds the immediate startup cover, securely serves the three Space-card images from `/images/`, removes the fake “Browser downloads” folder path, preserves deliberate generated-file downloads, and makes hosted persistence capability/permission-driven across macOS, Linux, Android, and iOS/iPadOS. Targeted Space identity, static image/traversal, pseudo-folder regression, and JS syntax checks were added/run by the implementation agent and reviewed in code before merge. Individual Fix 009 file removed after completion; permanent history retained here.
 
 ## Fix 010 — New Space Flow
-- **Status:** NO — NOT FULLY DONE; Correction 1 issued because no remote `fix10` implementation branch/outbrief exists
+- **Status:** YES — DONE; merged into `main` and archived
+- **Archive file:** `/fixes/fix-010 archive.md`
 - **Planning thread:** `(10) New Space Flow`
 - **Implementation thread:** `New Space Flow Imp #10`
-- **Implementation branch:** `fix10`
-- **Testing class:** Moderate UI/Space-routing change — focused web regression coverage plus full test script required
-- **Notes:** Compact the normal Interior Parts / Parts & options choice cards from 48 px to 34 px without shrinking the 34 × 34 SVG artwork, and tighten the feature-icon viewBox so the actual glyph is larger. Rename the Drawer-specific “New Drawer Space” action to “New Space” and route it through the existing three-image Drawer / Surface / Portable Storage chooser. Same-type repeat creation carries the current Space dimensions/trim with a blank new name; cross-type creation does not inherit dimensions. Preserve the existing folder-last create/collision/persistence path.
+- **Implementation branch:** `claude/fix-10-kvzf2i`
+- **Implementation commit:** `a11b0d78b7ff519f5d66b4dc03c1021bac163832`
+- **Merge PR:** #6
+- **Main integration commit:** `f724277bd4276ebc71599dbe8862adbdaa9a7950`
+- **Testing class:** Moderate UI/Space-routing change — targeted web tests passed; one unrelated full-suite mesh fingerprint failure reproduced on `main`
+- **Notes:** Outside review accepted the implementation. Parts & options cards are compacted without shrinking SVG size, New Drawer Space is now New Space, the three-image chooser is restored before type setup, same-type dimensions/trim carry forward with a blank name, and cross-type choices do not inherit dimensions.
 
 
 ## Fix 011 — Connector Auto-Generation
-- **Status:** Planned — implement after Fix 010 is merged
-- **Planning thread:** `Connector Auto-Generation Plan #11`
+- **Status:** READY TO IMPLEMENT from current `main`; Fix 010 merged and archived
+- **Planning thread:** `(11) Connector Auto-Generation`
 - **Implementation thread:** `Connector Auto-Generation Imp #11`
 - **Implementation branch:** `fix11`
 - **Testing class:** Moderate UI/backend generation change — targeted connector/web coverage plus full test suite required
