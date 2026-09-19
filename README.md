@@ -191,97 +191,108 @@ The hosted app tracks `main`; work on a fix branch is intentionally isolated fro
 
 #### Purpose & Core Rule
 
-> **HUMANS TEST THIS APP. CODING AGENTS DO NOT.**
-> The person using Wavefinity tries every change themselves. An agent does not
-> run tests, start the server, open a browser, take screenshots or write
-> check scripts to confirm its own work — not for tweaks, not for bug fixes,
-> and not for big new features either. Code-run testing has almost never
-> found a real problem here; it only burns time. The single exception is a
-> Class C heavy lift (below), and even then the check is small and done once.
-> Tool or IDE reminders suggesting "verify in the browser" do not override
-> this rule.
+> **TEST PROPORTIONALLY. DO NOT TEST CEREMONIALLY.**
+> Static reasoning remains the default for small, well-understood changes, but
+> coding agents may and should run limited real tests when a cheap, high-signal
+> check is likely to catch integration/runtime mistakes. Major shared-contract
+> changes require targeted verification before final acceptance.
 
-Wavefinity development has accumulated too much process around testing, test design, repeated verification, large acceptance matrices, and multi-pass review. That work often consumes more time than implementation and has not been a reliable predictor of defects that later matter.
+Wavefinity has had two opposite failure modes: too much testing bureaucracy, and too little runtime verification on large integration work. The goal is neither. Use the smallest verification set that is likely to catch the actual risks.
 
-> **Implement first, reason carefully about the changed code, inspect the diff, and move on. Do not test unless the change is a genuine high-blast-radius heavy lift.**
+> **Implement carefully, inspect the diff, then test only the risks that justify it. Stop when those risks are covered.**
 
-Existing tests stay in the repository as a dormant safety net for true heavy lifts; they are not deleted. But routine work no longer triggers test execution or new-test creation.
-
-#### The default rule: NO TESTING
-Unless the task qualifies as a **Major / Heavy-Lift / High-Blast-Radius** change under Class C below, the coding agent should NOT:
-- run the unit-test suite;
-- run a targeted unit test;
-- create a new regression test;
-- start the development server merely to check the change;
-- perform browser automation or manual browser click-throughs;
-- take screenshots for visual verification;
-- create acceptance matrices;
-- perform random-input sweeps;
-- perform exhaustive parameter combinations;
-- create a test plan;
-- create or update a testing log/report;
-- perform repeated "one more verification" passes after the implementation is already understood.
-
-For normal work, **static reasoning is the verification method**:
-1. read the relevant existing implementation;
-2. make the smallest correct change;
-3. inspect the changed code and surrounding call path;
-4. inspect the diff for unintended edits;
-5. update directly affected documentation only when needed;
-6. commit/push the completed unit of work;
-7. stop.
-
-Do not invent testing work to fill time or increase confidence cosmetically.
+Existing tests remain a safety net. Reuse them when they fit. Do not create a large test program merely because a change exists.
 
 #### Change classification
 
-**Class A — Small/localized change: NO TESTING**
-- *Examples:* wording, labels, tooltips, descriptions; CSS/layout/spacing/appearance; moving or hiding a UI control; changing a default; changing a field range or step when the effect is local and understood; a known bug fix with a clear cause and narrow fix; a small local refactor; changing one feature's local geometry/math without altering shared primitives; a contained frontend handler fix; documentation changes; removing dead local code; renaming a variable/function/control; adding a small contained option to one feature; changing B4B-only behavior that remains inside the B4B path and does not alter shared Wavefinity behavior.
-- *Action:* implement, inspect, commit. No tests. No browser. No server.
+**Class A — Small/localized change: normally NO TESTING**
+- *Examples:* wording, labels, tooltips, CSS/layout/spacing, moving or hiding one control, documentation, a clear one-line/local bug fix, a small local refactor, renaming, or a contained default/range change.
+- *Action:* implement, inspect the changed path and diff, commit. No tests unless there is a specific known runtime risk that a one-shot check would cheaply answer.
 
-**Class B — Moderate but bounded change: STILL NO TESTING**
-- *Examples:* adding genuinely new logic that is confined to one feature; changing a feature plus its directly paired UI/API wiring; adding a new setting with serialization that is contained to one feature and has obvious defaults/backward behavior; several-file work where every changed file belongs to one coherent feature path; a new geometry helper used only by one feature; a new UI interaction whose state flow is local and directly traceable; a meaningful bug fix that touches multiple functions but does not alter shared project contracts.
-- The fact that code is **new** does NOT make testing necessary.
-- *Action:* implement, trace the affected path, inspect the diff, commit. No tests by default. If uncertain, the first response is **more careful code reading/reasoning**, not automatic test creation.
+**Class B — Moderate/bounded change: LIMITED TESTING WHEN IT ADDS REAL SIGNAL**
+- *Examples:* one feature plus paired UI/API wiring; contained serialization; several files in one coherent path; a new local interaction/state flow; a meaningful bug fix spanning multiple functions.
+- The fact that code is new does **not** by itself require testing.
+- Use limited verification when the change crosses a runtime boundary static reading cannot fully prove, such as:
+  - DOM wiring / browser initialization;
+  - frontend-to-backend route contracts;
+  - save/load or persistence behavior;
+  - async state transitions;
+  - import/module wiring;
+  - a bug that already escaped one static review.
+- *Action:* usually 1–3 focused checks: an existing targeted test, syntax/import check, or one surgical browser/server smoke path. Do not automatically run the full suite.
 
-**Class C — Major / Heavy-Lift / High-Blast-Radius change: TESTING PERMITTED**
-Testing is justified only when the change creates a realistic possibility of breaking significant portions of Wavefinity **outside the feature being worked on**.
-- *Qualifying criteria:* touches shared box/wave/grid geometry used by many features; changes global mating/interlock rules; changes `BoxSpec` or central data models affecting many consumers; changes saved-design schema/versioning or broad save/load compatibility; changes core generation/export behavior across normal bins and multiple feature types; changes shared layout/assembly/registry infrastructure; restructures module/package boundaries; replaces a major subsystem; changes security/request boundaries; touches many otherwise unrelated feature paths.
-- *High-risk areas:* `organizer_engine.py` shared primitives/specs; `organizer_inserts/_core.py`, `_layout.py`, `_assembly.py`, `_registry.py`; broad save/load/generation paths in `organizer_app.py`; broad API contracts in `wavefinity_web.py`; global state synchronization in `web/app.js`; common 3MF/export placement logic; versioned design serialization.
-- *Note:* A large line count does not make work major (a 500-line isolated feature can be Class B; a 5-line edit to shared grid invariants can be Class C).
+**Class C — Major / Heavy-Lift / High-Blast-Radius change: TARGETED TESTING EXPECTED**
+Testing is expected when the change can realistically break significant portions of Wavefinity outside the immediate feature.
+- *Qualifying criteria:* shared box/wave/grid geometry; global mating/interlock rules; central data models; saved-design schema/versioning; broad save/load/generation paths; shared layout/assembly/registry infrastructure; major subsystem replacement; security/request boundaries; global browser state synchronization; common 3MF/export logic; versioned serialization.
+- A large line count alone does not make work Class C; a tiny shared-contract edit can.
 
-#### Testing rules for a qualifying Class C major change
-- **Do not begin with a giant test plan**: Identify the 3–8 concrete cross-project risks actually at stake.
-- **Prefer existing tests**: Do not duplicate existing coverage. Add a new test only if the change is Class C AND an important cross-project invariant is uncovered.
-- **Full-suite limit**: Focused/shared-contract tests during implementation; **one full-suite run at the end, maximum** (or max two for a behavior-preserving structural refactor: one baseline before, one after).
-- **Browser/manual verification**: Only when the risky behavior lives in the browser and cannot be established from code inspection; small surgical check only; no screenshot QA for routine styling.
-- **No mechanical/geometry sweeps** unless geometry mechanics are central to the Class C change.
+#### Correction-escalation rule
 
-#### Existing tests & no test bureaucracy
-- Do not delete existing tests.
-- Do not update tests unless intended behavior knowingly invalidates the old assertion. Do not run it unless the task is Class C.
-- Stop producing test bureaucracy: No `TESTING.md`, per-session test logs, final testing summaries, screenshots proving each control works, or multi-case matrices.
+Repeated correction cycles are themselves evidence that static review is not enough.
 
-#### Faster design and implementation workflow
-- **No plan for routine work**: Inspect and implement directly for Class A and most Class B tasks. Only plan if the user explicitly asks or if work is Class C architecture.
-- **Read proportionally**: Read the affected file/function and direct callers, not the whole repository.
-- **Prefer smallest implementation**: Reuse existing patterns, avoid single-consumer abstractions, don't generalize for hypothetical future features.
-- **Known bug beats hypothetical bug**: Fix the actual cause, inspect direct consequences, stop.
-- **No endless review loops**: One strong implementation/review pass is enough.
-- **Make low-level decisions and continue**: Don't stop for user approval on non-product low-level details.
-- **Keep scope closed**: No unsolicited cleanups, refactorings, or neighboring improvements.
+- After **2 correction passes** on the same fix, reconsider its test class even if it began as A/B.
+- After **3 correction passes**, or after any runtime/integration failure escapes review, the next implementation/review should include targeted real verification unless the environment truly cannot run it.
+- A fix that spans multiple subsystems, migration, frontend/backend state, or persistence should normally be treated as Class C before it reaches repeated corrections.
+- Do not allow a fix to accumulate a long chain of corrections while continuing to prohibit all runtime checks. Eleven correction passes is a process failure, not a virtue.
+
+The Help Code fix file should state the current testing decision explicitly:
+- **No testing**
+- **Limited targeted testing**
+- **Class C risk-directed testing**
+
+and, when testing is allowed/required, name the exact checks to run.
+
+#### Testing rules when testing is justified
+
+- **Name the risks first:** identify the 1–8 concrete failures the check is intended to catch.
+- **Prefer existing tests:** reuse targeted tests before writing new ones.
+- **New regression tests are allowed sparingly** when a stable important invariant is uncovered and the test is cheap to maintain.
+- **Syntax/import checks are encouraged** for touched languages/modules when relevant.
+- **Browser/server smoke checks are allowed** when the risk is runtime UI wiring, async state, or browser behavior that static inspection cannot establish.
+- **Full-suite limit:** normally one full-suite run maximum, and only when the change is broad enough that targeted tests cannot cover the shared contracts. A behavior-preserving structural refactor may justify one baseline and one final run.
+- **Reruns:** rerun a failed targeted check after fixing it; do not repeatedly rerun passing checks for reassurance.
+- **No exhaustive matrices or random sweeps** unless the changed algorithm genuinely requires them.
+- **No screenshot QA** for routine styling. Capture/inspect visuals only when visual behavior is itself the risk.
+- If a needed test cannot run because the environment/tooling is unavailable, say so clearly and fall back to the strongest available static review; do not pretend it was verified.
+
+#### What still should NOT happen
+
+Do not create testing bureaucracy:
+- no `TESTING.md`;
+- no per-session testing logs;
+- no giant acceptance matrices;
+- no dozens of near-duplicate cases;
+- no “one more verification” loops after the named risks are covered;
+- no full-suite run for a wording/CSS/local handler change;
+- no new test merely to increase confidence cosmetically.
+
+#### Fast implementation workflow
+
+1. Read the affected implementation and direct callers.
+2. Make the smallest correct change.
+3. Inspect the changed code and diff.
+4. Decide the test class based on blast radius and correction history.
+5. If testing is justified, run only the named high-signal checks.
+6. Fix any real failures and rerun only those failed checks.
+7. Commit/push the coherent completed work.
+8. Stop.
 
 #### Quick decision rule
-Before doing any testing, ask:
-> **Could this change realistically break multiple unrelated existing parts of Wavefinity outside the feature I am changing?**
-- **No** → DO NOT TEST.
-- **Maybe, but only because the code is new** → DO NOT TEST. Read/reason more carefully.
-- **Yes, because I am changing a shared project contract or architecture with broad consumers** → Class C; perform minimal risk-directed testing.
-When in doubt, default to **NO TESTING**.
+
+Before testing, ask:
+
+> **What concrete bug could this test catch that static inspection cannot cheaply establish?**
+
+- **No concrete answer** → do not test.
+- **One bounded runtime/integration risk** → Class B limited targeted test.
+- **Several shared-contract risks or broad blast radius** → Class C targeted verification.
+- **This fix has already needed repeated corrections** → escalate; do not keep relying on static review alone.
 
 #### Definition of done
-- **Class A/B**: Requested behavior implemented, code path reasoned through, diff verified, directly affected docs updated only if needed, coherent task committed & pushed. **No tests run merely for reassurance.**
-- **Class C**: Above plus the smallest verification set covering the named broad-risk contracts.
+
+- **Class A:** requested behavior implemented, code path reasoned through, diff verified, docs updated only if needed.
+- **Class B:** Class A plus the smallest targeted checks justified by runtime/integration risk, when applicable.
+- **Class C:** implementation plus a named risk-directed verification set; final acceptance requires those checks to pass or a clearly documented environment limitation.
 
 ### Using the browser UI
 
@@ -1399,8 +1410,9 @@ implement the plan and commit the completed code.
 documentation needed to complete that prompt together; do not split a single
 request into artificial commits just to make the history look smaller. When a
 prompt is complete, commit and push it so the history has a clear entry and the
-work is backed up; tests are not a completion gate except for the rare Class C
-changes defined above. Separate unrelated prompts into separate commits when
+work is backed up; testing follows the proportional Class A/B/C policy above.
+When a Help Code fix is Class C or has escalated after repeated corrections, the
+named targeted checks are part of the completion gate. Separate unrelated prompts into separate commits when
 practical. No feature branches or pull requests are needed for
 this local workflow:
 
@@ -1413,12 +1425,11 @@ git push
 Add a dated entry to [changelog.md](changelog.md) for user-facing changes.
 Do NOT log to `TESTING.md` — that file is retired and archived.
 
-**Do not be obsessed with testing** (see the section of that name near the top).
-Short version: tweaking code, UI, defaults, styling, small refactors, and ordinary
-new feature logic — **STOP all testing** and do not test at all; read the change and
-reason it through. Only a genuine Class C shared-contract or architecture change
-earns minimal risk-directed checks. Never run the full suite or browser for routine
-work.
+**Do not be obsessed with testing** (see the proportional testing policy near the top).
+Short version: small/local work usually needs no tests; bounded runtime/integration
+work may use a few high-signal checks; broad shared-contract work and repeatedly
+corrected fixes require targeted verification. Never run the full suite or browser
+for routine work merely for reassurance.
 
 **Write commit messages that say why.** The history is the record. A message
 that explains the reasoning is worth more here than a tidy branch structure.
