@@ -348,13 +348,15 @@
       <section class="control-section open" data-section="connector">
         <div class="section-heading no-toggle">
           <span>Connectors</span>
-          <label class="heading-select" for="connector-height-mode">
-            <span>Bin heights</span>
-            <select id="connector-height-mode">
-              <option value="same">Same</option>
-              <option value="different">Different</option>
-            </select>
-          </label>
+          <span id="connector-height-wrap">
+            <label class="heading-select" for="connector-height-mode">
+              <span>Bin heights</span>
+              <select id="connector-height-mode">
+                <option value="same">Same</option>
+                <option value="different">Different</option>
+              </select>
+            </label>
+          </span>
         </div>
         <div class="section-body">
           <label class="inline-select">Join bins with
@@ -363,6 +365,17 @@
               <option value="base_trim">Base Trim</option>
             </select>
           </label>
+          <label id="connector-type-row" class="inline-select">Connector type
+            <select id="connector-type">
+              <option value="side">Side</option>
+              <option value="three_way">3-Way Corner</option>
+              <option value="four_way">4-Way Corner</option>
+            </select>
+          </label>
+          <label id="corner-connector-quantity-row" class="inline-select" hidden>Quantity
+            <input id="corner-connector-quantity" type="number" min="1" max="20" step="1" value="1">
+          </label>
+          <div id="connector-derived" class="inline-help" hidden></div>
           <div id="connector-bin-heights" class="field-grid two" hidden>
             <label>A height <span class="unit">mm</span><input id="connector-bin-a-height" type="number" min="2" step="1"></label>
             <label>B height <span class="unit">mm</span><input id="connector-bin-b-height" type="number" min="2" step="1"></label>

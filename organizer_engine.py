@@ -13,8 +13,10 @@ Design summary
   amplitude the whole length of every wall, straight into the corners; there
   is no corner blend.  Corners are a short chamfer rounded to
   ``CORNER_FILLET``.
-* One connector: the **side connector**, a staple that drops over the seam
-  between two boxes.  There is no corner connector.
+* Connectors: the **side connector**, a staple that drops over the seam
+  between two boxes, plus compact **3-Way / 4-Way Corner** connectors.  All share
+  the same wall-following fit profile; the compact corner types deliberately do
+  not use the side connector's variable-height web.
 * Each wall carries small chamfered **lock bumps** on its interior face; the
   connector arms have matching notches so the clip locks in.  Every bump and
   notch face is chamfered at 45 degrees or shallower, so both parts print
@@ -145,6 +147,10 @@ MIN_JOINABLE_SIZE = (
     * GRID_PITCH
 )
 
+# Corner connectors: hanging arms start half a pitch from the junction so they
+# clear the perpendicular walls; only the cap bridges the junction itself.
+CORNER_CONNECTOR_ARM_START = GRID_PITCH / 2.0
+CORNER_CONNECTOR_END = GRID_PITCH - CORNER_INSET
 DEFAULT_CONNECTOR_HEIGHT = LOCKED_CONNECTOR_HEIGHT
 DEFAULT_CAP_THICKNESS = 1.2
 DEFAULT_ARM_THICKNESS = 1.0   # two 0.5 mm perimeters
@@ -1620,6 +1626,65 @@ def joinable_sides(
     return connector_fits(box, "x", length), connector_fits(box, "y", length)
 
 
+def _connector_corridor_polygon(
+    axis: str, geometry_coordinates, phase_offset: float, half_width: float
+) -> Polygon:
+    """Wall-following corridor polygon shared by every connector type.
+
+    ``geometry_coordinates`` are where the polygon is drawn; ``phase_offset`` is
+    added only when evaluating the wave.
+    """
+    coordinates = geometry_coordinates
+    low = high = [wave_value(phase_offset + float(v)) for v in coordinates]
+    if axis == "y":
+        near = [(o - half_width, float(v)) for v, o in zip(coordinates, low)]
+        far = [
+            (o + half_width, float(v))
+            for v, o in zip(coordinates[::-1], high[::-1])
+        ]
+    else:
+        near = [(float(v), o - half_width) for v, o in zip(coordinates, low)]
+        far = [
+            (float(v), o + half_width)
+            for v, o in zip(coordinates[::-1], high[::-1])
+        ]
+    polygon = Polygon(near + far)
+    if not polygon.is_valid:
+        raise RuntimeError("side-connector corridor is not a valid polygon")
+    return polygon
+
+
+def _validate_connector_arm_clearance(
+    box: BoxSpec, connector: ConnectorSpec, heights
+) -> None:
+    # The base slab, and any flat band on top of it, sit on the floor; the arms
+    # hang from the rim.  On a normal bin the two are nowhere near each other.
+    # On a very shallow one - easy to ask for as the short side of a
+    # differing-height pair - the arm drives into the band, or into the base
+    # slab itself, and the clip cannot seat on either bin.  Say so plainly
+    # rather than letting the fit check report a bare collision volume.
+    band_top = box.base_thickness + box.flat_inside
+    for bin_height in heights:
+        arm_bottom = bin_height - connector.arm_depth
+        if arm_bottom >= band_top:
+            continue
+        min_height = band_top + connector.arm_depth
+        if box.flat_inside > 0.0:
+            room = bin_height - connector.arm_depth - box.base_thickness
+            raise ValueError(
+                f"the flat band reaches {band_top:.2f} mm up but the connector's arms "
+                f"hang down to {arm_bottom:.2f} mm, so they would collide. On a "
+                f"{bin_height:g} mm box the band can be at most {max(room, 0.0):.2f} mm, or "
+                f"make the box at least {min_height:.2f} mm tall"
+            )
+        raise ValueError(
+            f"a {bin_height:g} mm bin is too shallow for this connector: the arms hang "
+            f"{connector.arm_depth:.2f} mm below the rim, down to {arm_bottom:.2f} mm, so "
+            f"they would collide with the {box.base_thickness:.2f} mm base and the clip "
+            f"could not seat. Make that bin at least {min_height:.2f} mm tall"
+        )
+
+
 def make_side_connector(
     box: BoxSpec,
     connector: ConnectorSpec,
@@ -1669,32 +1734,7 @@ def make_side_connector(
             f"{length:g}. A wall this short joins nothing - use the box's other "
             f"side, or make this one at least {shortest:.2f} mm"
         )
-    # The base slab, and any flat band on top of it, sit on the floor; the arms
-    # hang from the rim.  On a normal bin the two are nowhere near each other.
-    # On a very shallow one - easy to ask for as the short side of a
-    # differing-height pair - the arm drives into the band, or into the base
-    # slab itself, and the clip cannot seat on either bin.  Say so plainly
-    # rather than letting the fit check report a bare collision volume.
-    band_top = box.base_thickness + box.flat_inside
-    for bin_height in heights:
-        arm_bottom = bin_height - connector.arm_depth
-        if arm_bottom >= band_top:
-            continue
-        min_height = band_top + connector.arm_depth
-        if box.flat_inside > 0.0:
-            room = bin_height - connector.arm_depth - box.base_thickness
-            raise ValueError(
-                f"the flat band reaches {band_top:.2f} mm up but the connector's arms "
-                f"hang down to {arm_bottom:.2f} mm, so they would collide. On a "
-                f"{bin_height:g} mm box the band can be at most {max(room, 0.0):.2f} mm, or "
-                f"make the box at least {min_height:.2f} mm tall"
-            )
-        raise ValueError(
-            f"a {bin_height:g} mm bin is too shallow for this connector: the arms hang "
-            f"{connector.arm_depth:.2f} mm below the rim, down to {arm_bottom:.2f} mm, so "
-            f"they would collide with the {box.base_thickness:.2f} mm base and the clip "
-            f"could not seat. Make that bin at least {min_height:.2f} mm tall"
-        )
+    _validate_connector_arm_clearance(box, connector, heights)
 
     # A whole wave, not half of one.  The corridor between the arms is cut to
     # the wall's wave at this position, and the wave inverts every half cycle:
@@ -1719,23 +1759,7 @@ def make_side_connector(
     )
 
     def corridor(half_width: float, coordinates: np.ndarray) -> Polygon:
-        low = high = [wave_value(position + float(v)) for v in coordinates]
-        if axis == "y":
-            near = [(o - half_width, float(v)) for v, o in zip(coordinates, low)]
-            far = [
-                (o + half_width, float(v))
-                for v, o in zip(coordinates[::-1], high[::-1])
-            ]
-        else:
-            near = [(float(v), o - half_width) for v, o in zip(coordinates, low)]
-            far = [
-                (float(v), o + half_width)
-                for v, o in zip(coordinates[::-1], high[::-1])
-            ]
-        polygon = Polygon(near + far)
-        if not polygon.is_valid:
-            raise RuntimeError("side-connector corridor is not a valid polygon")
-        return polygon
+        return _connector_corridor_polygon(axis, coordinates, position, half_width)
 
     def arm_strip(sign: float, coordinates: np.ndarray) -> Polygon:
         offsets = [wave_value(position + float(v)) for v in coordinates]
@@ -1890,11 +1914,28 @@ def _arm_notches(
     inner_hw: float,
     z_offsets: dict[float, float] | None = None,
 ) -> list[trimesh.Trimesh]:
-    """Recesses in both arms that receive the walls' lock bumps.
+    """Side-connector notches: the arm interval is centred on ``position``."""
+    return _connector_arm_notches(
+        connector, axis, -length / 2.0, length / 2.0, position, inner_hw, z_offsets
+    )
+
+
+def _connector_arm_notches(
+    connector: ConnectorSpec,
+    axis: str,
+    geometry_start: float,
+    geometry_end: float,
+    phase_offset: float,
+    inner_hw: float,
+    z_offsets: dict[float, float] | None = None,
+    signs: tuple[float, ...] = (1.0, -1.0),
+) -> list[trimesh.Trimesh]:
+    """Recesses in the arms that receive the walls' lock bumps.
 
     The connector is modelled with its cap on top, so the arms hang from
     ``arm_depth`` down to 0 and the notches sit at the same distance below the
-    rim as the bumps do.
+    rim as the bumps do.  ``geometry_start``/``geometry_end`` are coordinates in
+    the returned mesh; ``phase_offset`` maps them onto the global lock lattice.
 
     A notch is cut at **every** lattice point under the connector, not only at
     the ones the box it was generated for happens to carry.  The neighbour
@@ -1904,14 +1945,16 @@ def _arm_notches(
     profile = _lock_profile(LOCK_PROTRUSION, LOCK_NOTCH_CLEARANCE)
     # Any bump that reaches under the connector at all needs a notch, including
     # one only half covered at an end - otherwise the solid arm end fouls it.
-    span = length / 2.0 + LOCK_RUN / 2.0
     notches: list[trimesh.Trimesh] = []
-    for centre in lock_lattice(position - span, position + span):
-        local = centre - position
+    for centre in lock_lattice(
+        geometry_start + phase_offset - LOCK_RUN / 2.0,
+        geometry_end + phase_offset + LOCK_RUN / 2.0,
+    ):
+        local = centre - phase_offset
         lo, hi = local - LOCK_RUN / 2.0, local + LOCK_RUN / 2.0
         ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
-        offsets = [wave_value(position + float(s)) for s in ss]
-        for sign in (1.0, -1.0):
+        offsets = [wave_value(phase_offset + float(s)) for s in ss]
+        for sign in signs:
             # The arm's wall-facing face is its inner one; the notch is cut from
             # there outward into the arm, matching the bump that pokes in.
             if axis == "y":
@@ -1927,6 +1970,65 @@ def _arm_notches(
                 )
             )
     return notches
+
+
+def _corner_connector_direction(
+    box: BoxSpec, connector: ConnectorSpec, axis: str, direction: int
+) -> trimesh.Trimesh:
+    """One leg of a corner connector: a cap bridge plus a locked grip arm."""
+    if axis not in {"x", "y"} or direction not in (-1, 1):
+        raise ValueError("corner leg needs axis x/y and direction -1/+1")
+    inner_hw, outer_hw = connector_half_widths(box, connector)
+    end = CORNER_CONNECTOR_END
+    start = CORNER_CONNECTOR_ARM_START
+
+    def span(a: float, b: float, extra: float = 0.0) -> np.ndarray:
+        lo, hi = (a, b) if direction > 0 else (-b, -a)
+        lo, hi = lo - extra, hi + extra
+        return np.linspace(lo, hi, _sample_count(hi - lo))
+
+    cap = _extrude_polygon(
+        _connector_corridor_polygon(axis, span(0.0, end), 0.0, outer_hw),
+        connector.cap_thickness,
+    )
+    cap.apply_translation((0.0, 0.0, connector.arm_depth))
+    arm_coords = span(start, end)
+    body = _extrude_polygon(
+        _connector_corridor_polygon(axis, arm_coords, 0.0, outer_hw),
+        connector.arm_depth + 0.01,
+    )
+    channel = _extrude_polygon(
+        _connector_corridor_polygon(axis, span(start, end, 0.5), 0.0, inner_hw),
+        connector.arm_depth,
+    )
+    arm = difference([body, channel])
+    lo, hi = float(arm_coords[0]), float(arm_coords[-1])
+    notches = _connector_arm_notches(connector, axis, lo, hi, 0.0, inner_hw)
+    if notches:
+        arm = difference([arm, *notches])
+    return union([arm, cap])
+
+
+def make_corner_connector(
+    box: BoxSpec, connector: ConnectorSpec, ways: int
+) -> trimesh.Trimesh:
+    """A compact 3-way or 4-way top connector for equal-height, same-wall bins.
+
+    The 3-way part leaves the south-east quadrant open; rotate it to suit.
+    """
+    if ways not in (3, 4):
+        raise ValueError("corner connector must be 3-way or 4-way")
+    if box.x < MIN_JOINABLE_SIZE - 1e-9 or box.y < MIN_JOINABLE_SIZE - 1e-9:
+        raise ValueError(
+            "Corner connectors need at least 16 mm (2 Wavefinity units) in both X "
+            "and Y so the clip can clear the corners and engage the wall locks."
+        )
+    _validate_connector_arm_clearance(box, connector, (box.z,))
+    legs = [("y", 1), ("x", -1)]
+    if ways == 4:
+        legs = [("y", 1), ("y", -1), ("x", 1), ("x", -1)]
+    parts = [_corner_connector_direction(box, connector, a, d) for a, d in legs]
+    return _cleaned(union(parts))
 
 
 def connector_for_print(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
@@ -2686,6 +2788,32 @@ def validate_side_fit(
     if overlap > 0.01:
         raise RuntimeError(
             f"side connector collides with installed boxes: {overlap:.6f} mm^3"
+        )
+    return overlap
+
+
+def installed_corner_boxes(box: BoxSpec, ways: int) -> list[trimesh.Trimesh]:
+    """The 3 or 4 bins meeting at the junction (0, 0)."""
+    if ways not in (3, 4):
+        raise ValueError("corner connector must be 3-way or 4-way")
+    mesh = make_box(box)
+    quadrants = [(-1, 1), (1, 1), (-1, -1), (1, -1)][:ways]
+    return [
+        translated(mesh, (sx * box.x / 2.0, sy * box.y / 2.0, 0.0))
+        for sx, sy in quadrants
+    ]
+
+
+def validate_corner_fit(
+    box: BoxSpec, connector: ConnectorSpec, clip: trimesh.Trimesh, ways: int
+) -> float:
+    """Overlap of the seated corner connector with the bins it joins."""
+    boxes = installed_corner_boxes(box, ways)
+    seated = translated(clip, (0.0, 0.0, box.z - connector.arm_depth))
+    overlap = sum(intersection_volume(seated, item) for item in boxes)
+    if overlap > 0.01:
+        raise RuntimeError(
+            f"corner connector collides with installed boxes: {overlap:.6f} mm^3"
         )
     return overlap
 

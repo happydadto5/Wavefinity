@@ -15,6 +15,7 @@ import math
 import mimetypes
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import secrets
@@ -135,10 +136,12 @@ from organizer_app import (
     clean_label,
     convert_layout_mode,
     connector_filename,
+    corner_connector_filename,
     default_feature,
     design_from_dict,
     design_to_dict,
     generate_organizer_files,
+    generate_corner_file,
     generate_side_file,
     inventory_bin_record,
     lid_label_regions,
@@ -983,6 +986,8 @@ def catalog_payload() -> dict[str, Any]:
                 "bin_a_height": 40.0,
                 "bin_b_height": 40.0,
                 "different_heights": False,
+                "type": "side",
+                "quantity": 1,
             },
             "sampler_boxes": DEFAULT_SAMPLE_BOXES,
         },
@@ -2201,12 +2206,17 @@ def configure_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("join_mode") == "base_trim":
-        raise ValueError("Side connectors are turned off while bins are set to use a Base Trim.")
-    _reject_if_b4b(payload, "the side connector")
+        raise ValueError("Connectors are turned off while bins are set to use a Base Trim.")
+    _reject_if_b4b(payload, "connectors")
     box, *_ = _design(payload["design"])
     if lid_enabled(box):
-        raise ValueError("Side connectors are unavailable while this bin has a lid.")
+        raise ValueError("Connectors are unavailable while this bin has a lid.")
     options = payload.get("connector", {})
+    connector_type = str(options.get("type", "side"))
+    if connector_type not in {"side", "three_way", "four_way"}:
+        raise ValueError("Connector type must be side, three_way, or four_way.")
+    if connector_type != "side":
+        return _corner_connector_payload(payload, box, options, connector_type)
     tolerance = float(options.get("tolerance", LOCKED_TOLERANCE))
     height = float(options.get("height", LOCKED_CONNECTOR_HEIGHT))
     arm_thickness = float(options.get("arm_thickness", DEFAULT_ARM_THICKNESS))
@@ -2273,10 +2283,62 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
             )
         else:
             plan["web_thickness_mm"] = connector.arm_thickness
+    plan.update({
+        "type": "side",
+        "quantity": 1,
+        "wall_mm": connector_box.wall,
+        "requires_same_wall": True,
+    })
     reply = {
         "result": result,
         "connector_plan": {
             k: (round(v, 3) if isinstance(v, float) else v) for k, v in plan.items()
+        },
+    }
+    return _generation_reply(result=result, output=output_dir, extra=reply)
+
+
+def _corner_quantity(value: Any) -> int:
+    """An actual whole number; never silently truncated."""
+    if isinstance(value, bool):
+        raise ValueError("Corner connector quantity must be a whole number from 1 to 20.")
+    if isinstance(value, str):
+        text = value.strip()
+        value = int(text) if re.fullmatch(r"[0-9]+", text) else None
+    elif isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if not isinstance(value, int) or not 1 <= value <= 20:
+        raise ValueError("Corner connector quantity must be a whole number from 1 to 20.")
+    return value
+
+
+def _corner_connector_payload(
+    payload: dict[str, Any], box: Any, options: dict[str, Any], connector_type: str
+) -> dict[str, Any]:
+    if bool(options.get("different_heights", False)):
+        raise ValueError("3-Way and 4-Way Corner connectors require equal-height bins.")
+    ways = 3 if connector_type == "three_way" else 4
+    quantity = _corner_quantity(options.get("quantity", 1))
+    # Fresh defaults: hidden Side/Different settings never reach a corner part.
+    connector = ConnectorSpec()
+    connector_box = stack_effective_box(box) if box.stack.mode == "direct" else box
+    output_dir = _generation_output(payload)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename = corner_connector_filename(ways, quantity, connector_box.wall)
+    with GEOMETRY_LOCK:
+        result = generate_corner_file(
+            connector_box, connector, output_dir / filename, ways, quantity
+        )
+    reply = {
+        "result": result,
+        "connector_plan": {
+            "type": connector_type,
+            "quantity": quantity,
+            "wall_mm": round(connector_box.wall, 3),
+            "requires_equal_height": True,
+            "requires_same_wall": True,
+            "printed_height_mm": round(connector.height, 3),
+            "webbed": False,
         },
     }
     return _generation_reply(result=result, output=output_dir, extra=reply)
