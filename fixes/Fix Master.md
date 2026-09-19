@@ -81,3 +81,12 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Implementation branch:** `fix10`
 - **Testing class:** Moderate UI/Space-routing change — focused web regression coverage plus full test script required
 - **Notes:** Compact the normal Interior Parts / Parts & options choice cards from 48 px to 34 px without shrinking the 34 × 34 SVG artwork, and tighten the feature-icon viewBox so the actual glyph is larger. Rename the Drawer-specific “New Drawer Space” action to “New Space” and route it through the existing three-image Drawer / Surface / Portable Storage chooser. Same-type repeat creation carries the current Space dimensions/trim with a blank new name; cross-type creation does not inherit dimensions. Preserve the existing folder-last create/collision/persistence path.
+
+
+## Fix 011 — Connector Auto-Generation
+- **Status:** Planned — implement after Fix 010 is merged
+- **Planning thread:** `Connector Auto-Generation Plan #11`
+- **Implementation thread:** `Connector Auto-Generation Imp #11`
+- **Implementation branch:** `fix11`
+- **Testing class:** Moderate UI/backend generation change — targeted connector/web coverage plus full test suite required
+- **Notes:** Remove the false Side-connectors-vs-Base-Trim chooser and the Side/3-Way/4-Way connector-type chooser. Same-height connector generation automatically creates one Side, one 3-Way Corner, and one 4-Way Corner file; different-height generation creates Side only. Existing physical corner eligibility remains, but an ineligible corner must not prevent a valid Side connector from being generated. Hosted folder generation and local Bambu Studio printing must use the same automatic bundle. Fix 011 overlaps Fix 010 in `web/index.html`, `web/app.js`, and `test_wavefinity_web.py`, so implementation starts only after Fix 010 is integrated into current `main`.
