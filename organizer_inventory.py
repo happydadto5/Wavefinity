@@ -1,4 +1,4 @@
-"""The folder's inventory file: ``<folder name> bins.md`` in the save folder.
+"""The folder's inventory file: ``Wavefinity bins.md`` in the save folder.
 
 A persistent save folder keeps this by default - a normal untyped Design
 folder may explicitly opt out, independently of whether it is a typed Space.
@@ -46,6 +46,7 @@ from organizer_product_rules import (
 )
 
 INVENTORY_LOCK = threading.RLock()
+INVENTORY_FILENAME = "Wavefinity bins.md"
 LAYOUT_HEADING = "## Drawer layout"
 COLUMNS = (
     ("id", "ID"), ("date", "Date"), ("kind", "Kind"), ("name", "Name"),
@@ -89,9 +90,50 @@ _HEADER_KEYS = {
 _KEEP = object()
 
 
-def inventory_path(output_dir: Path | str) -> Path:
-    output_dir = Path(output_dir).expanduser().resolve()
-    return output_dir / f"{output_dir.name} bins.md"
+class InventoryMigrationError(ValueError):
+    """More than one plausible inventory file exists; nothing was changed."""
+
+
+def resolve_inventory_path(output_dir: Path | str, *, migrate: bool) -> Path:
+    """The folder's inventory file, independent of the folder's name.
+
+    The canonical file is ``Wavefinity bins.md``. A pre-canonical folder may
+    hold one ``<any name> bins.md``; with ``migrate`` it is renamed to the
+    canonical name, without it the old file is returned so read-only callers
+    can still read it. Several different candidates are never guessed at.
+    """
+    folder = Path(output_dir).expanduser().resolve()
+    canonical = folder / INVENTORY_FILENAME
+    legacy: list[Path] = []
+    if folder.is_dir():
+        preferred = folder / f"{folder.name} bins.md"
+        if preferred.name != INVENTORY_FILENAME and preferred.is_file():
+            legacy.append(preferred)
+        for path in folder.glob("* bins.md"):
+            if path.name != INVENTORY_FILENAME and path.is_file() and path not in legacy:
+                legacy.append(path)
+    conflict = InventoryMigrationError(
+        "Multiple Wavefinity inventory files were found; nothing was changed."
+    )
+    with INVENTORY_LOCK:
+        if canonical.is_file():
+            if any(one.read_bytes() != canonical.read_bytes() for one in legacy):
+                raise conflict
+            if migrate:
+                # Identical leftovers go before the canonical file next
+                # changes, or the next write would look like a conflict.
+                for one in legacy:
+                    one.unlink()
+            return canonical
+        if not legacy:
+            return canonical
+        if len(legacy) != 1:
+            raise conflict
+        source = legacy[0]
+        if not migrate:
+            return source
+        source.replace(canonical)
+        return canonical
 
 
 # ---------------------------------------------------------------- reading
@@ -440,8 +482,8 @@ def _text_payload(text: str, title: str, data: dict[str, Any]) -> dict[str, Any]
 
 
 def load_inventory(output_dir: Path | str) -> dict[str, Any]:
-    path = inventory_path(output_dir)
     with INVENTORY_LOCK:
+        path = resolve_inventory_path(output_dir, migrate=False)
         return _payload(path, _read(path))
 
 
@@ -529,8 +571,8 @@ def save_inventory(
     delete_ids: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Merge changes into the file on disk and return the fresh contents."""
-    path = inventory_path(output_dir)
     with INVENTORY_LOCK:
+        path = resolve_inventory_path(output_dir, migrate=True)
         current = _read(path)
         bins, chosen = _merge_inventory(
             current, layout=layout, bin_updates=bin_updates,
@@ -578,8 +620,8 @@ def append_bin(
     Without an explicit ``qty`` the row takes the Layout view's *new bins
     count as printed* setting, stored in the file's layout block.
     """
-    path = inventory_path(output_dir)
     with INVENTORY_LOCK:
+        path = resolve_inventory_path(output_dir, migrate=True)
         current = _read(path)
         bins = current["bins"]
         if qty is None:
@@ -756,8 +798,8 @@ def configure_space(
     output_dir: Path | str, *, raw_def: dict[str, Any], mode: str = "create", allow_legacy: bool = False
 ) -> dict[str, Any]:
     space_def = normalise_space_definition(raw_def, allow_legacy=allow_legacy)
-    path = inventory_path(output_dir)
     with INVENTORY_LOCK:
+        path = resolve_inventory_path(output_dir, migrate=True)
         current = _read(path)
         layout = current["layout"] if isinstance(current["layout"], dict) else {}
         if mode == "create" and isinstance(layout.get("space"), dict):
