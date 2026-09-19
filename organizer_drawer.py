@@ -83,6 +83,7 @@ from organizer_inventory import (
     save_inventory_text,
 )
 from organizer_b4b import B4B_STACK_RECESS_DEPTH
+from organizer_product_rules import DRAWER_HARD_CLEARANCE_MM
 from organizer_stack import STACK_MIN_WALL, STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
 
 UNIT = BASE_UNIT
@@ -90,7 +91,7 @@ SNAPS = (8.0, 4.0)
 # How far a bin's wave crests stand past its grid footprint on each side.
 CREST = WAVE_AMPLITUDE - WAVE_MATING_GAP / 2.0
 # Total slack per axis a drawer needs just to take the crests at both walls.
-MIN_CLEARANCE = 2.0 * CREST
+MIN_CLEARANCE = DRAWER_HARD_CLEARANCE_MM
 MIN_EDGE_SPACER = 1.2           # thinnest edge spacer worth printing, at a wave trough
 MIN_SPACER_HEIGHT = 6.0         # a spacer frame still needs room for its lock bumps
 DEFAULT_SPACER_HEIGHT = 15.0
@@ -119,7 +120,6 @@ ANCHORS = ("front-left", "center")
 BOUNDARIES = ("wall", "mating")
 HEIGHT_RULES = ("strict", "prefer", "ignore")
 HEIGHT_REACHES = ("column", "adjacent")
-SPACER_FILLS = ("all", "edges", "cells")
 SIDES = ("left", "right", "front", "back")
 # Low filler nobody reaches for: spacers take room but are never counted for
 # or against the height rule.  A 1-tuple because inventories are migrated to

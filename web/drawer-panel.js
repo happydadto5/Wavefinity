@@ -747,8 +747,14 @@ DP.renderStats = () => {
   label("#dl-sp-generate", "Generate Selected Spacers", "Generating…", "spacers");
   label("#dl-connectors", "Make connectors", "Making connectors…", "connectors");
   label("#dl-base-trim", "Make Base Trim", "Making Base Trim…", "base_trim");
+  const hasPlacedSpacers = DL.drawer().placements.some(
+    placement => DL.isSpacer(DL.bin(placement.bin))
+  );
+  const spacerPrint = $("#dl-sp-print");
+  if (spacerPrint) spacerPrint.hidden = !hasPlacedSpacers;
   label("#dl-sp-print", "Print Spacers", "Printing…", "print");
-  
+  if (spacerPrint) spacerPrint.disabled = busy || !hasPlacedSpacers;
+
   const report = DL.report;
   const warnings = DL.warnings.map(text => `<p class="dl-note dl-warning">${escapeHtml(text)}</p>`).join("");
   if (!report) { box.innerHTML = warnings || `<p class="dl-note">Measuring…</p>`; return; }

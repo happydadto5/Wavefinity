@@ -259,17 +259,39 @@ function spaceBinDefaultsFromDesign(design) {
   return snapshot;
 }
 
+function drawerSpaceCapacity(mm) {
+  const unit = number(state.catalog?.base_unit, 8);
+  const clearance = number(
+    state.catalog?.drawer_rules?.hard_wall_clearance_mm,
+    0,
+  );
+  return Math.max(
+    0,
+    Math.floor((number(mm, 0) - clearance) / unit + 1e-9),
+  );
+}
+
+function ordinaryBinMinimumHeight() {
+  return number(
+    state.catalog?.drawer_rules?.ordinary_bin_min_height_mm,
+    Math.ceil(
+      number(state.catalog?.base_rules?.default_mm, 0.6)
+      + number(state.catalog?.min_height_above_base_mm, 5),
+    ),
+  );
+}
+
 function applySpaceSizingDefaults(design) {
   if (state.folderMode !== "space" || !state.activeSpace) return design;
-  
+
   if (design.box.base_trim?.enabled || design.box.b4b?.enabled) return design;
 
   const kind = state.activeSpace.kind;
   const space = state.activeSpace;
   const unit = state.catalog?.base_unit || 8;
-  
-  const spaceXUnits = Math.floor(space.x / unit);
-  const spaceYUnits = Math.floor(space.y / unit);
+
+  const spaceXUnits = kind === "drawer" ? drawerSpaceCapacity(space.x) : Math.floor(space.x / unit);
+  const spaceYUnits = kind === "drawer" ? drawerSpaceCapacity(space.y) : Math.floor(space.y / unit);
   const startX = Math.min(4, Math.max(1, spaceXUnits));
   const startY = Math.min(4, Math.max(1, spaceYUnits));
   
@@ -277,7 +299,10 @@ function applySpaceSizingDefaults(design) {
   if (!state.pinnedZone?.y) design.box.y = startY * unit;
 
   if (kind === "drawer") {
-    design.box.z = normalizeBinDimension("z", space.z - 3);
+    design.box.z = Math.min(
+      space.z,
+      normalizeBinDimension("z", space.z - 3, space.z - 3),
+    );
   } else if (kind === "surface") {
     const presets = { small: 6.5, medium: 7.5, large: 10.0 };
     design.box.z = presets[space.trim_size || "medium"] || 7.5;
@@ -295,6 +320,23 @@ function freshDesignForCurrentFolder() {
   }
   const merged = spaceBinDefaultsFromDesign(mergeDesignDefaults(current, state.spaceBinDefaults));
   return applySpaceSizingDefaults(merged);
+}
+
+async function loadFreshOrdinaryDesignForCurrentFolder() {
+  state.design = freshDesignForCurrentFolder();
+  state.joinMode = "side";
+  state.baseTrimSourceLayout = null;
+  state.lastOrdinaryDesign = clone(state.design);
+  resetNestPhotoSession();
+  state.cleanDesign = clone(state.design);
+  state.drafts = {};
+  state.history = [];
+  state.future = [];
+  state.binResizePending = false;
+  syncForm();
+  clearDraftSelection();
+  activatePreviewView("3d");
+  await refreshPreview();
 }
 
 async function rememberGeneratedSpaceBin(design) {
@@ -2043,6 +2085,19 @@ async function changeBinType() {
     if (!ok) { $("#bin-type").value = binTypeFromDesign(); return; }
   }
   const wasBaseTrim = baseTrimEnabled();
+  const wasB4B = b4bEnabled();
+  const typedOrdinaryReturn =
+    requested === "single"
+    && state.folderMode === "space"
+    && Boolean(state.activeSpace)
+    && (wasBaseTrim || wasB4B);
+  if (typedOrdinaryReturn) {
+    if (wasBaseTrim) state.lastBaseTrimDesign = clone(state.design);
+    await loadFreshOrdinaryDesignForCurrentFolder();
+    $("#bin-type").value = "single";
+    changedDesign();
+    return;
+  }
   if (requested === "base-trim") {
     if (!wasBaseTrim) {
       state.lastOrdinaryDesign = clone(state.design);
@@ -2065,7 +2120,6 @@ async function changeBinType() {
     $("#bin-type").value = requested;
   }
   const previousStack = stackMode();
-  const wasB4B = b4bEnabled();
   if (requested === "b4b") {
     await toggleB4B(true);
     return;

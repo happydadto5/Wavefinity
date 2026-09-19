@@ -34,6 +34,15 @@ import shutil
 import threading
 from typing import Any, Iterable
 
+from organizer_engine import BASE_UNIT
+from organizer_product_rules import (
+    B4B_LATCHED_MIN_HEIGHT,
+    B4B_MIN_FIELD_XY,
+    DRAWER_HARD_CLEARANCE_MM,
+    ORDINARY_BIN_MIN_HEIGHT_MM,
+    SURFACE_TRIM_HEIGHTS,
+)
+
 INVENTORY_LOCK = threading.RLock()
 LAYOUT_HEADING = "## Drawer layout"
 COLUMNS = (
@@ -44,10 +53,11 @@ COLUMNS = (
     ("boundary", "Boundary"),
 )
 # bin: generated here.  b4b: a Bin for Bins case.  spacer: made by the Layout
-# view to fill a drawer - a plain grid-filling frame, or (boundary "edge") a
-# piece cut flat against the drawer wall on one side.  manual: typed in for a
-# bin printed elsewhere.  Older inventories used a separate "shim" kind for
-# what is now an edge-facing spacer; see the migration in ``_normalise``.
+# view to take up the measured back/right gap left by the placed grid - a
+# flexible serpentine flexure with printed preload where there is room for
+# one, or a rigid spacer where the gap is too short to flex.  manual: typed in
+# for a bin printed elsewhere.  Older inventories used a separate "shim" kind
+# for what is now an edge-facing spacer; see the migration in ``_normalise``.
 KINDS = ("bin", "b4b", "spacer", "manual")
 # How the bin was printed to stack: not at all, with a snap-on lid, or snapping
 # straight into the bin below. For stackable bins Z is the requested module
@@ -638,33 +648,100 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
     x, y, z = (_number(raw.get(axis)) for axis in ("x", "y", "z"))
     if min(x, y, z) <= 0:
         raise ValueError("a space needs its inside X, Y and Z in mm")
-        
+
+    if kind == "drawer":
+        minimum_xy = BASE_UNIT + DRAWER_HARD_CLEARANCE_MM
+        if x + 1e-9 < minimum_xy or y + 1e-9 < minimum_xy:
+            raise ValueError(
+                f"a drawer space needs at least {minimum_xy:g} mm width and depth"
+            )
+        if z + 1e-9 < ORDINARY_BIN_MIN_HEIGHT_MM:
+            raise ValueError(
+                f"a drawer space needs at least {ORDINARY_BIN_MIN_HEIGHT_MM:g} mm usable height"
+            )
+
+    elif kind == "portable":
+        if x + 1e-9 < B4B_MIN_FIELD_XY or y + 1e-9 < B4B_MIN_FIELD_XY:
+            raise ValueError(
+                f"portable storage needs at least {B4B_MIN_FIELD_XY:g} mm in X and Y"
+            )
+        if z + 1e-9 < B4B_LATCHED_MIN_HEIGHT:
+            raise ValueError(
+                f"portable storage needs at least {B4B_LATCHED_MIN_HEIGHT:g} mm usable height"
+            )
+        for axis_name, value in (("X", x), ("Y", y)):
+            units = value / BASE_UNIT
+            if not math.isclose(units, round(units), abs_tol=1e-6):
+                raise ValueError(
+                    f"portable storage {axis_name} must be a whole Wavefinity unit"
+                )
+
+    elif kind == "surface":
+        for axis_name, value in (("X", x), ("Y", y)):
+            units = value / BASE_UNIT
+            if units < 1 or not math.isclose(units, round(units), abs_tol=1e-6):
+                raise ValueError(
+                    f"surface {axis_name} must be a positive whole Wavefinity unit"
+                )
+
+        trim_size = str(raw.get("trim_size") or "").strip().lower()
+        expected_z = SURFACE_TRIM_HEIGHTS.get(trim_size)
+        if expected_z is None:
+            raise ValueError("surface trim size must be small, medium, or large")
+        if not math.isclose(z, expected_z, abs_tol=1e-6):
+            raise ValueError(
+                f"surface trim size {trim_size!r} requires Z={expected_z:g} mm"
+            )
+
     result = {"name": name, "kind": kind, "x": x, "y": y, "z": z}
-    if kind == "surface" and "trim_size" in raw:
-        result["trim_size"] = str(raw["trim_size"])
+    if kind == "surface":
+        result["trim_size"] = trim_size
     return result
 
 def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> None:
     layout["version"] = 1
     layout["space"] = space_def
-    
+
     kind = space_def["kind"]
     x, y, z = space_def["x"], space_def["y"], space_def["z"]
-    
-    clearance = 0.0 if kind in ("portable", "box", "surface") else 1.0
-    boundary = "mating" if kind in ("portable", "box", "surface") else "wall"
-    
+
     drawers = layout.setdefault("drawers", [])
-    primary = next((d for d in drawers if d.get("id") == "d1"), None)
-    if not primary:
+    active_id = layout.get("active")
+    primary = next(
+        (
+            drawer for drawer in drawers
+            if isinstance(drawer, dict) and drawer.get("id") == active_id
+        ),
+        None,
+    )
+
+    if primary is None and drawers:
+        primary = next(
+            (drawer for drawer in drawers if isinstance(drawer, dict)),
+            None,
+        )
+
+    if primary is None:
         primary = {
-            "id": "d1", 
-            "keepouts": [], 
-            "placements": []
+            "id": "d1",
+            "keepouts": [],
+            "placements": [],
         }
-        drawers.insert(0, primary)
-        layout["active"] = "d1"
-        
+        drawers.append(primary)
+
+    layout["active"] = primary["id"]
+
+    if kind == "drawer":
+        boundary = "wall"
+        try:
+            previous_clearance = float(primary.get("clearance", DRAWER_HARD_CLEARANCE_MM))
+        except (TypeError, ValueError):
+            previous_clearance = DRAWER_HARD_CLEARANCE_MM
+        clearance = max(DRAWER_HARD_CLEARANCE_MM, previous_clearance)
+    else:
+        boundary = "mating"
+        clearance = 0.0
+
     primary["name"] = space_def["name"]
     primary["width"] = x
     primary["depth"] = y

@@ -45,6 +45,10 @@ from organizer_engine import (
     text_prism,
     wave_value,
 )
+from organizer_product_rules import (
+    B4B_LATCHED_MIN_HEIGHT,
+    B4B_MIN_FIELD_XY,
+)
 from organizer_geometry import (
     _extrude_polygon,
     _extrude_xz_profile,
@@ -93,8 +97,7 @@ B4B_LID_SEAT_CLEARANCE = 0.15
 B4B_LID_SKIRT_LAP = 4.0        # how far the skirt laps down past the body rim
 B4B_LID_SKIRT_MIN_LAP = 0.30   # smallest lap that still counts as a locating skirt
 # A latched lid needs a printable body wall below its latch pad, independent
-# of the selected latch strength.
-B4B_LATCHED_MIN_HEIGHT = 16.0
+# of the selected latch strength - see organizer_product_rules.B4B_LATCHED_MIN_HEIGHT.
 
 # --- support-free integrated hardware -------------------------------------- #
 # Every integrated hinge/latch/handle barrel has its axis on world X and prints
@@ -326,9 +329,7 @@ B4B_HW_M2_MAX_FIELD_Z = 64.0
 # --- minimum case ---------------------------------------------------------- #
 # A B4B is a carrying case, not a bin with hardware bolted on.  Below this the
 # hardware would be the product, so B4B is refused rather than grown.
-B4B_MIN_FIELD_XY = 48.0
-# A secure lid still needs a printable body wall below its catch receiver.
-B4B_LATCHED_MIN_HEIGHT = 16.0
+# See organizer_product_rules for B4B_MIN_FIELD_XY / B4B_LATCHED_MIN_HEIGHT.
 # B4B wall floor and default.  A repeatedly opened, latched, hinged and carried
 # case is the wrong place for a two-line wall; 1.2 mm is roughly three lines on
 # a nominal 0.4 mm nozzle.  The child field stays authoritative, so the extra

@@ -745,22 +745,105 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
 // one representative, and aggregates quantity/printed across all of them -
 // see Fix 004 Correction 6.L.
 DL.spacerPrintGroups = () => {
-  const placements = DL.drawer().placements.filter(p => DL.isSpacer(DL.bin(p.bin)));
   const groups = new Map();
-  placements.forEach(p => {
-    const b = DL.bin(p.bin);
-    if (!b) return;
-    const key = `${b.file}|${b.x}|${b.y}|${b.z}`;
-    if (!groups.has(key)) groups.set(key, { bin: b, memberIds: new Set(), layoutQty: 0 });
-    const group = groups.get(key);
-    group.memberIds.add(b.id);
-    group.layoutQty += 1;
+
+  DL.drawer().placements.forEach(placement => {
+    const bin = DL.bin(placement.bin);
+    if (!DL.isSpacer(bin)) return;
+
+    const key = `${bin.file}|${bin.x}|${bin.y}|${bin.z}`;
+    if (!groups.has(key)) {
+      groups.set(key, { bin, entries: [] });
+    }
+    groups.get(key).entries.push({ bin, placement });
   });
-  return Array.from(groups.values()).map(g => {
-    const members = Array.from(g.memberIds).map(id => DL.bin(id)).filter(Boolean);
-    const printed = members.reduce((sum, one) => sum + (Number(one.qty) || 0), 0);
-    return { bin: g.bin, members, qty: g.layoutQty, printed, toPrint: Math.max(0, g.layoutQty - printed) };
+
+  return Array.from(groups.values()).map(group => {
+    const members = Array.from(
+      new Map(group.entries.map(entry => [entry.bin.id, entry.bin])).values()
+    );
+    const printedEntries = group.entries.filter(
+      entry => (entry.placement.copy ?? 0) < (Number(entry.bin.qty) || 0)
+    );
+    const unprintedEntries = group.entries.filter(
+      entry => (entry.placement.copy ?? 0) >= (Number(entry.bin.qty) || 0)
+    );
+
+    return {
+      bin: group.bin,
+      members,
+      entries: group.entries,
+      unprintedEntries,
+      qty: group.entries.length,
+      printed: printedEntries.length,
+      toPrint: unprintedEntries.length,
+    };
   });
+};
+
+// This reorders only planned copy indices so the selected active-drawer
+// copies become the next contiguous printed copies. Other planned copies
+// stay planned.
+DL.promoteSpacerCopies = (group, requestedCount) => {
+  let remaining = Math.min(
+    Number(requestedCount) || 0,
+    group.unprintedEntries.length,
+  );
+  const updates = [];
+
+  for (const member of group.members) {
+    if (remaining <= 0) break;
+
+    const currentQty = Number(member.qty) || 0;
+    const selected = group.unprintedEntries
+      .filter(entry => entry.bin.id === member.id)
+      .sort((a, b) =>
+        (a.placement.copy ?? 0) - (b.placement.copy ?? 0)
+      )
+      .slice(0, remaining)
+      .map(entry => entry.placement);
+
+    if (!selected.length) continue;
+
+    const allPlanned = DL.layout.drawers
+      .flatMap(drawer => drawer.placements)
+      .filter(
+        placement =>
+          placement.bin === member.id
+          && (placement.copy ?? 0) >= currentQty
+      )
+      .sort((a, b) => (a.copy ?? 0) - (b.copy ?? 0));
+
+    const selectedSet = new Set(selected);
+    const ordered = [
+      ...selected,
+      ...allPlanned.filter(placement => !selectedSet.has(placement)),
+    ];
+    const snapshots = ordered.map(placement => ({
+      placement,
+      oldKey: DL.key(placement),
+    }));
+    const rename = new Map();
+
+    snapshots.forEach(({ placement, oldKey }, index) => {
+      placement.copy = currentQty + index;
+      rename.set(oldKey, DL.key(placement));
+    });
+
+    DL.layout.drawers.forEach(drawer => {
+      drawer.placements.forEach(placement => {
+        if (rename.has(placement.on)) placement.on = rename.get(placement.on);
+      });
+    });
+
+    updates.push({
+      id: member.id,
+      qty: currentQty + selected.length,
+    });
+    remaining -= selected.length;
+  }
+
+  return updates;
 };
 
 // selection: { [group's representative bin id]: requested copy count }, as
@@ -778,24 +861,21 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async () => {
 
   const groups = DL.spacerPrintGroups();
   const updates = [];
+
   for (const [id, count] of Object.entries(selection)) {
     if (!(count > 0)) continue;
-    const group = groups.find(g => g.members.some(member => member.id === id));
+    const group = groups.find(
+      candidate => candidate.members.some(member => member.id === id)
+    );
     if (!group) continue;
-    let remaining = count;
-    for (const member of group.members) {
-      if (remaining <= 0) break;
-      const ownPrinted = Number(member.qty) || 0;
-      const ownPlaced = DL.drawer().placements.filter(p => p.bin === member.id).length;
-      const ownShortfall = Math.max(0, ownPlaced - ownPrinted);
-      if (ownShortfall <= 0) continue;
-      const grant = Math.min(remaining, ownShortfall);
-      updates.push({ id: member.id, qty: ownPrinted + grant });
-      remaining -= grant;
-    }
+    updates.push(...DL.promoteSpacerCopies(group, count));
   }
+
   if (updates.length > 0) {
-    await DL.editBins({ bin_updates: updates });
+    await DL.editBins({
+      bin_updates: updates,
+      layout: DL.layout,
+    });
   }
   // launch_slicer opens the files but does not itself set Bambu Studio's
   // per-object copy count - tell the user what to set it to.

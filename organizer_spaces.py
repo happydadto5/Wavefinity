@@ -1,15 +1,16 @@
-"""Optional Space planning layered on ordinary Wavefinity save folders.
+"""Space setup layered on ordinary Wavefinity save folders.
 
 Every selected folder gets ``.wavefinity.json``. Inventory and Space are
 independent: ``inventory`` (default ``true``) is whether generated bins/B4Bs
 are logged to ``<folder name> bins.md``, and ``folder_mode`` is ``design`` or
 ``space`` depending on whether the folder also represents one physical
-drawer or box. A Space may also keep its own sanitized bin-default snapshot.
-``folder_mode=space`` always implies ``inventory=true`` - a Space cannot
-operate without the inventory its layout depends on. Legacy
-markers (an old ``design`` marker with no ``inventory`` field, the historical
-``no_inventory_folders`` preference, ``.wavefinity-space.json``) remain
-readable and are migrated additively.
+Drawer, Surface, or Portable Storage case. A Space may also keep its own
+sanitized bin-default snapshot. ``folder_mode=space`` always implies
+``inventory=true`` - a Space cannot operate without the inventory its layout
+depends on. Legacy markers (an old ``design`` marker with no ``inventory``
+field, the historical ``no_inventory_folders`` preference,
+``.wavefinity-space.json``, and the legacy ``box`` kind) remain readable and
+are migrated additively.
 """
 
 from __future__ import annotations
@@ -21,6 +22,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from organizer_inventory import configure_space, legacy_layout_space, load_inventory
+from organizer_product_rules import (
+    SURFACE_TRIM_HEIGHTS,
+    surface_trim_key_for_height,
+)
 
 MAX_RECENT = 8
 METADATA_FILE = ".wavefinity.json"
@@ -72,8 +77,11 @@ def _space(raw: Any) -> dict[str, Any] | None:
         "name": str(raw.get("name") or "").strip()[:80],
         "x": size[0], "y": size[1], "z": size[2],
     }
-    if raw.get("kind") == "surface" and "trim_size" in raw:
-        res["trim_size"] = str(raw["trim_size"])
+    if raw.get("kind") == "surface":
+        trim_size = str(raw.get("trim_size") or "").strip().lower()
+        expected = SURFACE_TRIM_HEIGHTS.get(trim_size)
+        if expected is not None and math.isclose(size[2], expected, abs_tol=1e-6):
+            res["trim_size"] = trim_size
     return res
 
 
@@ -133,8 +141,18 @@ def _folder_state(
                 # explicit migration/setup pass, even inside an otherwise
                 # fully-valid v4 + setup_version-1 metadata file left over
                 # from an earlier incomplete Fix 004 build - see Fix 004
-                # Correction 8.D.
-                space_needs_setup = needs_setup or chosen_space.get("kind") == "box"
+                # Correction 8.D. A Surface missing its validated trim_size
+                # is likewise recoverable migration input, not a corrupt
+                # file - see Fix 004 Correction 11.A4.
+                surface_needs_setup = (
+                    chosen_space.get("kind") == "surface"
+                    and "trim_size" not in chosen_space
+                )
+                space_needs_setup = (
+                    needs_setup
+                    or chosen_space.get("kind") == "box"
+                    or surface_needs_setup
+                )
                 return "space", chosen_space, True, *metadata_defaults, space_needs_setup
             raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
         if metadata.get("folder_mode") == "design":
@@ -165,14 +183,6 @@ def _folder_state(
     if inferred_space:
         return "space", inferred_space, True, True, None, True
     return "design", None, _default_inventory(folder, prefs), False, None, True
-
-    # No authoritative Space identity anywhere - only now fall back to a
-    # lossy reconstruction from the drawer layout alone, which can only ever
-    # infer "drawer" (there is no historical way to recover "box" from it).
-    inferred_space = _space(legacy_layout_space(layout))
-    if inferred_space:
-        return "space", inferred_space, True, True, None
-    return "design", None, _default_inventory(folder, prefs), False, None
 
 
 def _write_metadata(

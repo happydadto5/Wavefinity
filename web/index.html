@@ -815,12 +815,11 @@
           <label class="space-field"><span>Width <span class="unit">units</span></span><input id="surface-x" type="number" min="1" step="1"></label>
           <label class="space-field"><span>Depth <span class="unit">units</span></span><input id="surface-y" type="number" min="1" step="1"></label>
           <label class="space-field"><span>Trim size</span>
-            <select id="surface-trim">
-              <option value="small">Small</option>
-              <option value="medium" selected>Medium</option>
-              <option value="large">Large</option>
-            </select>
+            <select id="surface-trim"></select>
           </label>
+          <div id="surface-readout" class="derived-readout" hidden>
+            <dt>Field size</dt><dd id="surface-size-readout"></dd>
+          </div>
         </div>
 
         <div id="space-fields-portable" class="space-type-fields" hidden>

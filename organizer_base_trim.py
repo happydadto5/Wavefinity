@@ -35,14 +35,13 @@ from organizer_geometry import (
     intersection,
     union,
 )
+from organizer_product_rules import SURFACE_TRIM_PRESETS
 
 
 BASE_TRIM_SCHEMA_VERSION = 1
 
 BASE_TRIM_SIZE_PRESETS = (
-    ("small", 6.5, "Small"),
-    ("medium", 7.5, "Medium"),
-    ("large", 10.0, "Large"),
+    *SURFACE_TRIM_PRESETS,
     ("xl", 15.0, "XL"),
     ("xxl", 20.0, "XXL"),
 )

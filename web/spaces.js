@@ -1,14 +1,17 @@
 "use strict";
 
-// A save folder is always available for normal design work. Space planning is
-// an optional capability layered on that folder, never a design type.
+// A save folder is always available for normal design work. A Space (Drawer,
+// Surface, or Portable Storage) is a one-time typed setup layered on that
+// folder; an untyped folder just keeps ordinary designs.
 const SP = { recent: [], setup: null, busy: false, resume: null, resumeTimer: null, isUpdate: false, collisionOrigin: null };
 const RESUME_AUTOCONTINUE_SECONDS = 10;
 const SP_KINDS = {
   portable: { icon: "🧰", label: "Portable Storage" },
   surface: { icon: "🔲", label: "Surface" },
   drawer: { icon: "🗄️", label: "Drawer" },
-  box: { icon: "📦", label: "Box" },
+  // Legacy kind, readable for migration only - never a current Space type;
+  // it presents as Portable Storage, its recovery destination.
+  box: { icon: "🧰", label: "Portable Storage" },
 };
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
@@ -42,13 +45,45 @@ SP.run = async task => {
 };
 
 SP.sizeText = size => Array.isArray(size) ? `${size.map(fmt).join(" × ")} mm` : "";
-SP.kind = () => $('input[name="space-kind"]:checked')?.value || "drawer";
-SP.readSize = () => ["#space-x", "#space-y", "#space-z"].map(sel => number($(sel).value, NaN));
 SP.snap = mm => {
   const unit = state.catalog?.base_unit || 8;
   const max = Math.floor((state.catalog?.max_box_size || 350) / unit) * unit;
   return Math.min(max, Math.max(unit, Math.round(mm / unit) * unit));
 };
+
+// The single source of the Small/Medium/Large Surface trim presets: the
+// authoritative Base Trim catalog, never a second hard-coded mm table.
+SP.surfacePresetRows = () => {
+  const rows = state.catalog?.base_trim_rules?.size_presets || [];
+  return rows.filter(row => ["small", "medium", "large"].includes(row.key));
+};
+
+SP.surfacePresetMap = () => Object.fromEntries(
+  SP.surfacePresetRows().map(row => [row.key, Number(row.value_mm)])
+);
+
+SP.surfaceTrimKeyForHeight = value => {
+  const z = Number(value);
+  if (!Number.isFinite(z)) return null;
+  for (const [key, height] of Object.entries(SP.surfacePresetMap())) {
+    if (Math.abs(z - height) <= 1e-6) return key;
+  }
+  return null;
+};
+
+SP.populateSurfaceTrim = () => {
+  const select = document.getElementById("surface-trim");
+  if (!select) return;
+  const rows = SP.surfacePresetRows();
+  select.innerHTML = [
+    '<option value="" disabled>Choose trim size</option>',
+    ...rows.map(row =>
+      `<option value="${escapeHtml(row.key)}">${escapeHtml(row.label)}</option>`
+    ),
+  ].join("");
+};
+
+SP.drawerCapacity = mm => drawerSpaceCapacity(mm);
 SP.hasFolder = () => Boolean(state.folderSelected);
 SP.canPersistSpace = () => !state.runtime.hosted || Boolean(state.browserFolder?.handle);
 // The active folder's inventory filename. Create/Configure must use
@@ -102,10 +137,22 @@ SP.validSpace = raw => {
   const space = {
     kind: raw.kind,
     name: String(raw.name || "").trim(),
-    x: Number(raw.x), y: Number(raw.y), z: Number(raw.z),
+    x: Number(raw.x),
+    y: Number(raw.y),
+    z: Number(raw.z),
   };
-  if (raw.kind === "surface" && raw.trim_size) space.trim_size = String(raw.trim_size);
-  return [space.x, space.y, space.z].every(value => Number.isFinite(value) && value > 0) ? space : null;
+  if (![space.x, space.y, space.z].every(value => Number.isFinite(value) && value > 0)) {
+    return null;
+  }
+
+  if (space.kind === "surface") {
+    const trimSize = String(raw.trim_size || "").trim().toLowerCase();
+    const expected = SP.surfacePresetMap()[trimSize];
+    if (Number.isFinite(expected) && Math.abs(space.z - expected) <= 1e-6) {
+      space.trim_size = trimSize;
+    }
+  }
+  return space;
 };
 
 SP.classifyMetadata = record => {
@@ -136,8 +183,10 @@ SP.classifyMetadata = record => {
     // A stored legacy "box" identity always requires the explicit
     // migration/setup pass, even inside an otherwise fully-valid v4 +
     // setup_version-1 file left over from an earlier incomplete Fix 004
-    // build - see Fix 004 Correction 8.D.
-    const spaceNeedsMigration = needsMigration || space.kind === "box";
+    // build - see Fix 004 Correction 8.D. A Surface missing its validated
+    // trim_size is likewise recoverable migration input - Correction 11.A4.
+    const surfaceNeedsMigration = space.kind === "surface" && !space.trim_size;
+    const spaceNeedsMigration = needsMigration || space.kind === "box" || surfaceNeedsMigration;
     return { status: "space", space, inventory: true, keep_bin_defaults: keep, bin_defaults: defaults, needsMigration: spaceNeedsMigration };
   }
   return { status: "invalid" };
@@ -310,6 +359,11 @@ SP.inspectHosted = async folder => {
   // migration/setup pass, whichever path above produced it - see Fix 004
   // Correction 8.D.
   if (mode === "space" && space?.kind === "box") needsSetup = true;
+  // A Surface missing its validated trim_size is recoverable migration
+  // input, not a corrupt file - see Fix 004 Correction 11.A4.
+  if (mode === "space" && space?.kind === "surface" && !space.trim_size) {
+    needsSetup = true;
+  }
 
   return {
     folder: folder.name,
@@ -454,19 +508,6 @@ SP.updateBinDefaults = async (changes = {}) => {
 SP.setKeepBinDefaults = enabled => SP.run(async () => {
   await SP.updateBinDefaults({ enabled });
   toast(enabled ? "Keeping bin defaults for this Space." : "Bin defaults turned off for this Space.");
-});
-
-SP.continueSpaceSetup = info => {
-  if (info?.folder_mode === "space") return SP.showResume(info);
-  if (!SP.canPersistSpace()) return SP.showFolderAccessNeeded();
-  SP.showSetup();
-};
-
-SP.changeFolderThenSetup = () => SP.run(async () => {
-  const folder = await SP.pickFolder();
-  if (!folder) return;
-  const info = await SP.afterPick(folder);
-  SP.continueSpaceSetup(info);
 });
 
 // ------------------------------------------------------------ welcome/manage
@@ -618,6 +659,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   // Fix 004 Correction 6.F.
   SP.isUpdate = update;
   SP.setupKind = kind;
+  SP.populateSurfaceTrim();
   document.querySelectorAll(".space-type-fields").forEach(el => el.hidden = true);
   const field = document.getElementById(`space-fields-${kind}`);
   if (field) field.hidden = false;
@@ -629,12 +671,23 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById('drawer-y').value = prefillSpace?.y || '';
       document.getElementById('drawer-z').value = prefillSpace?.z || '';
   } else if (kind === 'surface') {
-      document.getElementById('surface-x').value = prefillSpace?.x ? prefillSpace.x / (state.catalog?.base_unit || 8) : '';
-      document.getElementById('surface-y').value = prefillSpace?.y ? prefillSpace.y / (state.catalog?.base_unit || 8) : '';
-      const trimSelect = document.getElementById('surface-trim');
+      const unit = state.catalog?.base_unit || 8;
+      document.getElementById("surface-x").value =
+        prefillSpace?.x ? prefillSpace.x / unit : "";
+      document.getElementById("surface-y").value =
+        prefillSpace?.y ? prefillSpace.y / unit : "";
+
+      const trimSelect = document.getElementById("surface-trim");
       if (trimSelect) {
-        trimSelect.value = prefillSpace?.trim_size
-          || (prefillSpace?.z === 6.5 ? 'small' : prefillSpace?.z === 10 ? 'large' : 'medium');
+        if (!prefillSpace) {
+          trimSelect.value = "medium";
+        } else {
+          const stored = String(prefillSpace.trim_size || "").toLowerCase();
+          const validStored = Object.hasOwn(SP.surfacePresetMap(), stored);
+          trimSelect.value = validStored
+            ? stored
+            : (SP.surfaceTrimKeyForHeight(prefillSpace.z) || "");
+        }
       }
   } else if (kind === "portable") {
       document.getElementById("portable-x").value = prefillSpace?.x || "";
@@ -651,6 +704,7 @@ SP.startUntyped = async () => {
   if (state.runtime.hosted && !folder.handle) {
       // A download-only fallback has no handle to persist metadata into.
       await SP.useHostedFolder(folder);
+      await loadFreshOrdinaryDesignForCurrentFolder();
       return;
   }
   // Inspect first in both modes and never call Use Untyped on a folder
@@ -675,37 +729,108 @@ SP.startUntyped = async () => {
   await SP.useUntypedFolder();
 };
 
-SP.create = async () => {
-  if (SP.isUpdate) return SP.updateSpace();
+// The single validated reader for both Create and Edit, so setup minimums
+// (drawer grid capacity/height floor, B4B field/height floor, whole-unit
+// Surface presets) are enforced identically in one place - Fix 004
+// Correction 11.A6.
+SP.readSetupValues = () => {
+  const fail = (message, selector) => {
+    SP.fail(message, selector);
+    return null;
+  };
+
   const kind = SP.setupKind;
   const name = document.getElementById("space-name").value.trim();
-  if (!name) return SP.fail("Give the Space a name.", "#space-name");
-  
-  let x, y, z;
-  let trimSize = null;
-  const unit = state.catalog?.base_unit || 8;
+  if (!name) return fail("Give the Space a name.", "#space-name");
 
-  if (kind === 'drawer') {
-      x = Number(document.getElementById('drawer-x').value);
-      y = Number(document.getElementById('drawer-y').value);
-      z = Number(document.getElementById('drawer-z').value);
-      if (![x, y, z].every(v => Number.isFinite(v) && v > 0)) return SP.fail("Enter valid mm dimensions.", "#drawer-x");
-  } else if (kind === 'surface') {
-      const wUnits = Number(document.getElementById('surface-x').value);
-      const dUnits = Number(document.getElementById('surface-y').value);
-      if (![wUnits, dUnits].every(v => Number.isFinite(v) && v > 0)) return SP.fail("Enter valid unit dimensions.", "#surface-x");
-      x = wUnits * unit;
-      y = dUnits * unit;
-      trimSize = document.getElementById('surface-trim').value;
-      z = trimSize === 'small' ? 6.5 : (trimSize === 'large' ? 10.0 : 7.5);
-  } else if (kind === 'portable') {
-      let rawX = Number(document.getElementById('portable-x').value);
-      let rawY = Number(document.getElementById('portable-y').value);
-      z = Number(document.getElementById('portable-z').value);
-      if (![rawX, rawY, z].every(v => Number.isFinite(v) && v > 0)) return SP.fail("Enter valid mm dimensions.", "#portable-x");
-      x = SP.snap(rawX);
-      y = SP.snap(rawY);
+  const unit = Number(state.catalog?.base_unit || 8);
+
+  if (kind === "drawer") {
+    const x = Number(document.getElementById("drawer-x").value);
+    const y = Number(document.getElementById("drawer-y").value);
+    const z = Number(document.getElementById("drawer-z").value);
+    if (![x, y, z].every(Number.isFinite)) {
+      return fail("Enter valid drawer dimensions in mm.", "#drawer-x");
+    }
+    if (SP.drawerCapacity(x) < 1 || SP.drawerCapacity(y) < 1) {
+      return fail(
+        "The drawer must have room for at least one Wavefinity unit after wall clearance.",
+        "#drawer-x",
+      );
+    }
+    const minHeight = ordinaryBinMinimumHeight();
+    if (z < minHeight) {
+      return fail(
+        `Usable drawer height must be at least ${fmt(minHeight)} mm.`,
+        "#drawer-z",
+      );
+    }
+    return { kind, name, x, y, z, trimSize: null };
   }
+
+  if (kind === "surface") {
+    const xUnits = Number(document.getElementById("surface-x").value);
+    const yUnits = Number(document.getElementById("surface-y").value);
+    if (
+      !Number.isInteger(xUnits) || xUnits < 1
+      || !Number.isInteger(yUnits) || yUnits < 1
+    ) {
+      return fail(
+        "Surface width and depth must be positive whole Wavefinity units.",
+        "#surface-x",
+      );
+    }
+    const trimSize = document.getElementById("surface-trim").value;
+    const z = SP.surfacePresetMap()[trimSize];
+    if (!Number.isFinite(z)) {
+      return fail("Choose Small, Medium, or Large trim.", "#surface-trim");
+    }
+    return {
+      kind,
+      name,
+      x: xUnits * unit,
+      y: yUnits * unit,
+      z,
+      trimSize,
+    };
+  }
+
+  if (kind === "portable") {
+    const rawX = Number(document.getElementById("portable-x").value);
+    const rawY = Number(document.getElementById("portable-y").value);
+    const z = Number(document.getElementById("portable-z").value);
+    if (![rawX, rawY, z].every(Number.isFinite)) {
+      return fail("Enter valid Portable Storage dimensions in mm.", "#portable-x");
+    }
+
+    const x = SP.snap(rawX);
+    const y = SP.snap(rawY);
+    const minField = Number(state.catalog?.b4b_rules?.min_field_mm);
+    const minHeight = Number(state.catalog?.b4b_rules?.min_secure_height_mm);
+
+    if (x < minField || y < minField) {
+      return fail(
+        `Portable Storage needs at least ${fmt(minField)} × ${fmt(minField)} mm of child-bin field.`,
+        "#portable-x",
+      );
+    }
+    if (z < minHeight) {
+      return fail(
+        `Portable Storage usable height must be at least ${fmt(minHeight)} mm.`,
+        "#portable-z",
+      );
+    }
+    return { kind, name, x, y, z, trimSize: null };
+  }
+
+  return fail("Choose a Space type.", "#space-name");
+};
+
+SP.create = async () => {
+  if (SP.isUpdate) return SP.updateSpace();
+  const values = SP.readSetupValues();
+  if (!values) return;
+  const { kind, name, x, y, z, trimSize } = values;
 
   // Folder last
   const folder = SP.configureData || await SP.pickFolder();
@@ -793,18 +918,14 @@ SP.create = async () => {
   
   if (kind === "portable") SP.designBox(info.space);
   else if (kind === "surface") SP.designSurface(info.space);
-  else activatePreviewView("3d");
+  else await loadFreshOrdinaryDesignForCurrentFolder();
 };
 
 // Reuses the real Base Trim design path (makeBaseTrimDesign) rather than
 // building a second, incompatible "edge" design object - see Fix 004.
 SP.designSurface = space => {
   activatePreviewView("3d");
-  const trimPresets = { small: 6.5, medium: 7.5, large: 10.0 };
-  const trimSize = space.trim_size && trimPresets[space.trim_size] !== undefined
-    ? space.trim_size
-    : (space.z === 6.5 ? "small" : space.z === 10 ? "large" : "medium");
-  const trimValue = trimPresets[trimSize];
+  const trimValue = SP.surfacePresetMap()[space.trim_size] ?? space.z;
   if (!baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
   state.design = makeBaseTrimDesign(space.x, space.y);
   state.design.base_trim.width_mm = trimValue;
@@ -891,6 +1012,7 @@ SP.useUntypedFolder = async () => {
         await SP.writeMetadata(folder.handle, "design", null, true);
         SP.configureData = null;
         await SP.useHostedFolder(folder);
+        await loadFreshOrdinaryDesignForCurrentFolder();
     } else {
         const data = await api("/api/space/use-untyped", { output: SP.configureData });
         // Clear the selected-folder setup context now that it has been
@@ -900,6 +1022,7 @@ SP.useUntypedFolder = async () => {
         SP.recent = data.recent || [];
         await SP.applyFolder(data.folder);
         SP.close();
+        await loadFreshOrdinaryDesignForCurrentFolder();
     }
 };
 
@@ -1021,6 +1144,8 @@ SP.wire = () => {
   }));
   const existingNo = document.getElementById("space-existing-inventory-no");
   if (existingNo) existingNo.addEventListener("click", () => SP.run(async () => {
+    SP.showOnly("space-form");
+    SP.showDialog();
     SP.pendingConfigureFolder = null;
     await SP.create();
   }));
@@ -1055,7 +1180,7 @@ SP.wire = () => {
 
   // Live Drawer/Portable readouts while the user types, not only when the
   // setup screen first opens - see Fix 004 Correction 6.G.
-  ["drawer-x", "drawer-y", "drawer-z", "portable-x", "portable-y", "portable-z"].forEach(id => {
+  ["drawer-x", "drawer-y", "drawer-z", "surface-x", "surface-y", "portable-x", "portable-y", "portable-z"].forEach(id => {
     const input = document.getElementById(id);
     if (input) input.addEventListener("input", SP.updateReadouts);
   });
@@ -1071,9 +1196,20 @@ SP.updateReadouts = () => {
         if (x > 0 && y > 0 && z > 0) {
             document.getElementById("drawer-readout").hidden = false;
             document.getElementById("drawer-size-readout").textContent = `${x} × ${y} × ${z} mm`;
-            document.getElementById("drawer-capacity-readout").textContent = `${Math.floor(x/unit)} × ${Math.floor(y/unit)} units`;
+            document.getElementById("drawer-capacity-readout").textContent = `${SP.drawerCapacity(x)} × ${SP.drawerCapacity(y)} units`;
         } else {
             document.getElementById("drawer-readout").hidden = true;
+        }
+    } else if (kind === "surface") {
+        const xUnits = Number(document.getElementById("surface-x").value);
+        const yUnits = Number(document.getElementById("surface-y").value);
+        const readout = document.getElementById("surface-readout");
+        if (Number.isFinite(xUnits) && xUnits > 0 && Number.isFinite(yUnits) && yUnits > 0) {
+            readout.hidden = false;
+            document.getElementById("surface-size-readout").textContent =
+                `${xUnits * unit} × ${yUnits * unit} mm`;
+        } else {
+            readout.hidden = true;
         }
     } else if (kind === "portable") {
         const x = Number(document.getElementById("portable-x").value);
@@ -1137,12 +1273,12 @@ SP.renderSpaceInfo = () => {
         } else if (kind === "surface") {
             const x = state.activeSpace.x;
             const y = state.activeSpace.y;
-            const z = state.activeSpace.z;
-            const trimLabels = { small: "Small", medium: "Medium", large: "Large" };
-            let trim = trimLabels[state.activeSpace.trim_size];
-            if (!trim) {
-                trim = z === 6.5 ? "Small" : z === 10 ? "Large" : "Medium";
-            }
+            // Current fully-configured Surface Spaces are guaranteed a
+            // valid trim_size - see Fix 004 Correction 11.A4/A6.
+            const trimRow = SP.surfacePresetRows().find(
+                row => row.key === state.activeSpace.trim_size
+            );
+            const trim = trimRow?.label || state.activeSpace.trim_size || "";
             sizeText = (x/unit) + " × " + (y/unit) + " units (" + x + " × " + y + " mm), " + trim + " trim";
         } else if (kind === "portable" || kind === "box") {
             const x = state.activeSpace.x;
@@ -1201,28 +1337,9 @@ const wireInfoButtons = (prefix = "space-info") => {
 };
 
 SP.updateSpace = async () => {
-    const kind = SP.setupKind;
-    const name = document.getElementById("space-name").value.trim();
-    if (!name) return SP.fail("Give the Space a name.", "#space-name");
-    
-    let x, y, z;
-    let trimSize = null;
-    const unit = state.catalog?.base_unit || 8;
-
-    if (kind === "drawer") {
-        x = Number(document.getElementById("drawer-x").value);
-        y = Number(document.getElementById("drawer-y").value);
-        z = Number(document.getElementById("drawer-z").value);
-    } else if (kind === "surface") {
-        x = Number(document.getElementById("surface-x").value) * unit;
-        y = Number(document.getElementById("surface-y").value) * unit;
-        trimSize = document.getElementById("surface-trim").value;
-        z = trimSize === "small" ? 6.5 : (trimSize === "large" ? 10.0 : 7.5);
-    } else if (kind === "portable") {
-        x = SP.snap(Number(document.getElementById("portable-x").value));
-        y = SP.snap(Number(document.getElementById("portable-y").value));
-        z = Number(document.getElementById("portable-z").value);
-    }
+    const values = SP.readSetupValues();
+    if (!values) return;
+    const { kind, name, x, y, z, trimSize } = values;
 
     if (state.runtime.hosted) {
         // Mirror local update semantics: the inventory's own layout.space is
@@ -1292,23 +1409,36 @@ SP.crossTypeCheck = (designType) => {
         return new Promise(resolve => {
             const btnContinue = document.getElementById("cross-type-continue");
             const btnNew = document.getElementById("cross-type-new");
-            
+
             const cleanup = () => {
-                dialog.close();
                 btnContinue.removeEventListener("click", onContinue);
                 btnNew.removeEventListener("click", onNew);
+                dialog.removeEventListener("cancel", onCancel);
+                if (dialog.open) dialog.close();
             };
-            
-            const onContinue = () => { cleanup(); resolve(true); };
+
+            const finish = value => {
+                cleanup();
+                resolve(value);
+            };
+
+            const onContinue = () => finish(true);
+
             const onNew = () => {
                 cleanup();
                 SP.clearSetupContext();
                 SP.showSetup(targetKind);
                 resolve(false);
             };
-            
+
+            const onCancel = event => {
+                event.preventDefault();
+                finish(false);
+            };
+
             btnContinue.addEventListener("click", onContinue);
             btnNew.addEventListener("click", onNew);
+            dialog.addEventListener("cancel", onCancel);
             dialog.showModal();
         });
     }

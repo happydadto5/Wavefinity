@@ -121,6 +121,10 @@ from organizer_inserts import (
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from organizer_drawer import drawer_routes
 from organizer_inventory import configure_space_text
+from organizer_product_rules import (
+    DRAWER_HARD_CLEARANCE_MM,
+    ORDINARY_BIN_MIN_HEIGHT_MM,
+)
 from organizer_spaces import inventory_enabled, space_routes
 from organizer_app import (
     APP_DIR,
@@ -755,6 +759,10 @@ def catalog_payload() -> dict[str, Any]:
         "base_unit": BASE_UNIT,
         "max_box_size": MAX_BOX_SIZE,
         "min_height_above_base_mm": MIN_HEIGHT_ABOVE_BASE,
+        "drawer_rules": {
+            "hard_wall_clearance_mm": DRAWER_HARD_CLEARANCE_MM,
+            "ordinary_bin_min_height_mm": ORDINARY_BIN_MIN_HEIGHT_MM,
+        },
         "modes": [
             {"value": "fused", "label": "Fused into box"},
             {"value": "separate", "label": "Removable insert"},
