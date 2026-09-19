@@ -75,8 +75,8 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Completed first-run/hosted reliability work. Final implementation separates committed Space authority from safe setup prefill data, preserves unrestricted “just get started” Design mode, starts onboarding before initial preview generation, adds the immediate startup cover, securely serves the three Space-card images from `/images/`, removes the fake “Browser downloads” folder path, preserves deliberate generated-file downloads, and makes hosted persistence capability/permission-driven across macOS, Linux, Android, and iOS/iPadOS. Targeted Space identity, static image/traversal, pseudo-folder regression, and JS syntax checks were added/run by the implementation agent and reviewed in code before merge. Individual Fix 009 file removed after completion; permanent history retained here.
 
 ## Fix 010 — New Space Flow
-- **Status:** Planned / ready to implement
-- **Planning thread:** `(10) New Space Flow Plan #10`
+- **Status:** NO — NOT FULLY DONE; Correction 1 issued because no remote `fix10` implementation branch/outbrief exists
+- **Planning thread:** `(10) New Space Flow`
 - **Implementation thread:** `New Space Flow Imp #10`
 - **Implementation branch:** `fix10`
 - **Testing class:** Moderate UI/Space-routing change — focused web regression coverage plus full test script required
