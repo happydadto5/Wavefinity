@@ -62,3 +62,13 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Main integration commit:** `c705f60f7595cfe05f3deba4cc1df5b4671f9e56`
 - **Testing class:** Class B targeted UI/interaction verification was not completed live by the coding agent; user explicitly accepted closure with no known implementation issue
 - **Notes:** Outside code review found no known implementation defect. The coding agent could not perform live browser verification and initially substituted code-reading checks. After that limitation was made explicit, the user chose to accept and close Fix 008 rather than keep it open solely for live verification. The accepted implementation includes clearer first-run Drawer copy, visible Bin Name/Height cues, actionable empty Drawer/Inventory states, empty-state action gating, and typed single-drawer canonical name/size synchronization. No special post-create tutorial card was added and advanced Bin options remain visible per user decision.
+
+
+## Fix 009 — Space Type Routing
+- **Status:** Planned / ready for implementation
+- **Planning thread:** `Space Type Routing Plan #9`
+- **Implementation thread:** `Space Type Routing Imp #9`
+- **Implementation branch:** `fix9`
+- **Fix file:** `/fixes/fix-009.md`
+- **Testing class:** Class B — focused regression coverage / targeted existing tests
+- **Notes:** Launch/setup can treat stale or inventory-derived Drawer Space data as authoritative and bypass the required three Space-type cards. Fix 009 restores current design-metadata precedence, distinguishes authoritative typed Space metadata from inventory/layout-only inference, and requires the type chooser whenever no committed Space type exists while retaining matching inferred values only as optional prefill.
