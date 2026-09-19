@@ -48,7 +48,7 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Planned implementation branch:** `fix7`
 - **Implementation model:** Medium / Medium
 - **Testing class:** Class B — limited targeted connector/geometry checks
-- **Notes:** Re-checked against the accepted post-Fix-006 `main`. Adds manually selected 3-Way and 4-Way Corner connectors for equal-height/same-wall bins, reusing the existing automatic wall-thickness fit and lock lattice. Corner connectors use the existing 16 mm minimum joinable size. Mixed wall thickness remains allowed in a Space; a non-blocking warning appears only when the user changes Wall and an existing ordinary bin has a different known wall. Fix 007 should be implemented/accepted before starting overlapping Fix 008 UI work.
+- **Notes:** Re-checked against the accepted post-Fix-006 `main`. Adds manually selected 3-Way and 4-Way Corner connectors for equal-height/same-wall bins, reusing the existing automatic wall-thickness fit and lock lattice. Corner connectors use the existing 16 mm minimum joinable size. Mixed wall thickness remains allowed in a Space; a non-blocking warning appears only when the user changes Wall and an existing ordinary bin has a different known wall. Fix 007 should be implemented/accepted before starting overlapping Fix 008 UI work. Startup instructions now require the repository-wide remote-state gate: fetch, fast-forward, prove local `main == origin/main`, prove the fix file exists on `origin/main`, and verify this ledger status before creating `fix7`.
 
 ## Fix 008 — First Run Drawer
 - **Status:** Planning revised with user decisions; implementation blocked until Fix 006 is accepted and merged to `main`
