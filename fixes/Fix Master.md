@@ -16,10 +16,10 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Implementation outbrief is present in the fix file. Final completion must be determined by outside ChatGPT review before the fix file is deleted.
 
 ## Fix 004 — Space Onboarding Redesign
-- **Status:** Needs remediation work — Correction 12 three-pass closure audit
+- **Status:** Needs remediation work — Correction 12 with targeted testing required
 - **Fix file:** `/fixes/fix-004.md`
 - **Implementation thread:** `Space Onboarding Redesign Imp #4`
-- **Notes:** Claude commit `065d99e` implemented Correction 11A, but a deliberate three-pass top-to-bottom closure audit found remaining original-scope integration defects. The Drawer panel still dereferences removed `dl-output-folder` DOM nodes and can fail at initialization; browser code still duplicates authoritative Surface/Base Trim presets, B4B minimums, and Drawer clearance; fresh typed-Space sizing can be defeated by stale `state.pinnedZone`; B4B generation can contaminate the remembered ordinary-bin defaults; seeded Surface/Portable transitions are not fully awaited/refreshed and still use stale `designBox` naming; and README/current copy still documents the old optional Space-planning / drawer-box model. Correction 12 gives exact repairs and a required three-pass closure gate.
+- **Notes:** Claude commit `065d99e` implemented Correction 11A. A three-pass closure audit found remaining integration defects and produced Correction 12. The Help Code testing policy was then updated project-wide: testing is proportional rather than categorically forbidden. Because Fix 004 is a high-blast-radius, repeatedly-corrected integration change, its final Correction 12 implementation now requires a small targeted verification set (Python/JS syntax, two focused web-contract tests, and one short runtime browser smoke) before outside acceptance. Full-suite testing remains unnecessary unless a focused check exposes a broader regression.
 ## Fix 005 — Space Type Card Images
 - **Status:** Completed — accepted by outside ChatGPT review
 - **Planning thread:** `Space Card Images Plan #5`
