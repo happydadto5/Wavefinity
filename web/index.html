@@ -35,7 +35,7 @@
                 <option value="base-trim">Base Trim</option>
               </select>
             </label>
-            <label class="part-name-row"><span id="part-name-label">Bin Name</span>
+            <label class="part-name-row"><span id="part-name-label">Bin Name</span> <span id="part-name-required" class="required-cue">required to print</span>
               <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
             </label>
             <span id="stack-note" class="stack-note" hidden></span>
@@ -44,7 +44,7 @@
           <div id="ordinary-size-row" class="field-grid three">
             <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
             <label><span id="y-size-label">Length</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
-            <label><span id="z-size-label">Height</span><input id="z" type="text" inputmode="numeric"></label>
+            <label><span id="z-size-label">Height</span> <span class="unit">mm</span><input id="z" type="text" inputmode="numeric"></label>
           </div>
           <div class="mode-and-bin-options">
             <label class="compact-select">Interior print mode
@@ -719,6 +719,7 @@
           <h2 id="welcome-title">Welcome to Wavefinity</h2>
           <button id="welcome-close" class="button secondary" type="button" aria-label="Close">✕</button>
         </div>
+        <p class="welcome-lead">A Space is the drawer, surface, or portable case you want to organize.</p>
         <div class="welcome-actions">
           <button id="welcome-create" class="button primary" type="button">Create New Space</button>
           <button id="welcome-open" class="button secondary" type="button">Open Existing Space</button>
@@ -806,12 +807,13 @@
           <h2 id="space-form-title">Configure Space</h2>
           <button id="space-form-close" class="button secondary" type="button" aria-label="Close">✕</button>
         </div>
-        <label id="space-name-row" class="space-field">Name<input id="space-name" type="text" maxlength="80" placeholder="e.g. Tool chest, drawer 2"></label>
+        <label id="space-name-row" class="space-field"><span id="space-name-label">Name</span><input id="space-name" type="text" maxlength="80" placeholder="e.g. Tool chest, drawer 2"></label>
         
         <div id="space-fields-drawer" class="space-type-fields" hidden>
           <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="drawer-x" type="number" min="1" step="any"></label>
           <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="drawer-y" type="number" min="1" step="any"></label>
           <label class="space-field"><span>Usable height <span class="unit">mm</span></span><input id="drawer-z" type="number" min="1" step="any"></label>
+          <p class="space-help">Width = left ↔ right. Depth = front ↔ back. Height = clear usable height with the drawer closed.</p>
           <div id="drawer-readout" class="derived-readout" hidden>
              <dt>Physical Size</dt><dd id="drawer-size-readout"></dd>
              <dt>Wavefinity Capacity</dt><dd id="drawer-capacity-readout"></dd>
@@ -838,6 +840,7 @@
           </div>
         </div>
 
+        <p id="space-folder-help" class="space-help" hidden>Wavefinity keeps this drawer's designs and inventory together in the folder you choose next.</p>
         <p id="space-note" class="space-note"></p>
         <p id="space-error" class="field-error" role="alert" hidden></p>
         <div class="button-row space-buttons">

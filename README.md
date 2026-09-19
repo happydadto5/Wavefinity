@@ -482,6 +482,16 @@ as Portable Storage, never as a current Box. A legacy folder's older,
 multiple-drawer layout is preserved as a compatibility exception - a new
 Drawer Space otherwise represents exactly one physical drawer.
 
+Creating a new Drawer Space lands directly in the normal Bin editor with every
+ordinary option (Interior print mode, Base, Walls, Lift Grabbers) still
+visible; there is no tutorial or first-run card. A one-drawer Drawer Space's
+name, width, depth and usable height belong to the Space: the Space tab shows
+them read-only with an **Edit drawer** button (the Space Edit form), and an edit
+there updates the loaded layout through the normal Drawer save path. An empty
+Drawer view or Inventory points to **Design first bin** (or adding an existing
+bin), and Auto layout and spacer/connector actions stay disabled until there is
+something to work on.
+
 - **Space identity.** A typed Space carries a permanent `space_id` (UUID) in
   its `.wavefinity.json` (metadata version 5). The per-user profile keeps a
   registry of known Spaces (id, name, kind, last folder) as an index only.
