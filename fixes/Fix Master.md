@@ -53,11 +53,11 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Testing class:** Class B — limited targeted connector/geometry checks completed
 - **Notes:** Outside review accepted Fix 007 after Correction 1. The implementation adds Side / 3-Way Corner / 4-Way Corner connector selection, equal-height/same-wall corner connectors using the existing lock lattice and 16 mm minimum joinable size, automatic connector fit from the active wall thickness, quantity 1–20 for corner parts, and a non-blocking mixed-wall warning only after an explicit Wall change in a typed Space. Correction 1 cleared stale warning state whenever the debounced design update is cancelled and made `installed_corner_boxes()` reject invalid way counts. The branch was merged forward to current `main` before final review.
 ## Fix 008 — First Run Drawer
-- **Status:** Planning revised with user decisions; implementation blocked until Fix 006 is accepted and merged to `main`
+- **Status:** Outside review: NO — NOT FULLY DONE; implementation appears complete but required Class B targeted UI/interaction verification is still outstanding; Correction 1 added to `fix8`
 - **Fix file:** `/fixes/fix-008.md`
 - **Planning thread:** `First Run Drawer Plan #8`
 - **Planned implementation thread:** `First Run Drawer Imp #8`
 - **Planned implementation branch:** `fix8`
 - **Testing class:** Class B targeted UI/interaction verification
-- **Notes:** Created from a 25-point first-run audit of the Drawer Space workflow. User decisions recorded: no post-create Drawer-ready/tutorial card, and do not collapse Interior print mode/Base/Walls/Lift Grabbers. Scope remains clearer Space/measurement/folder copy, visible print requirement for bin names, missing Height unit, actionable empty Drawer/Inventory states, sensible empty-state action gating, and eliminating separate planner edits of canonical typed Drawer name/size. Connector behavior itself remains Fix 007 territory. Fix 008 must be rebased/re-audited against accepted Fix 006 because Fix 006 changes `web/spaces.js` startup/persistence contracts.
+- **Notes:** Created from a 25-point first-run audit of the Drawer Space workflow. User decisions recorded: no post-create Drawer-ready/tutorial card, and do not collapse Interior print mode/Base/Walls/Lift Grabbers. Implementation is on `fix8`; outside review found no specific code defect but could not accept completion because the implementation outbrief explicitly reported no browser/server run. Correction 1 requires the targeted Fix 008 verification and any smallest fixes exposed by those checks. Connector behavior remains Fix 007 territory.
 
