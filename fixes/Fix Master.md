@@ -42,3 +42,13 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Planning thread:** `Adaptive Edge Connectors Plan #7`
 - **Planned implementation thread:** `Adaptive Edge Connectors Imp #7`
 - **Notes:** Requirements gathering for expanded connector behavior: add three-way and four-way corner connectors, keep those corner connector types incompatible with variable height, ensure ordinary connectors derive fit from active bin wall thickness, and warn when a Space contains mixed wall thicknesses because connectors between different thicknesses are not supported. The current README already states that custom-wall connectors are generated for the selected wall thickness and are only for same-thickness bins; implementation details and warning behavior remain to be specified.
+
+## Fix 008 — First Run Drawer
+- **Status:** Planning complete under recommended defaults; awaiting user preference answers; implementation blocked until Fix 006 is accepted and merged to `main`
+- **Fix file:** `/fixes/fix-008.md`
+- **Planning thread:** `First Run Drawer Plan #8`
+- **Planned implementation thread:** `First Run Drawer Imp #8`
+- **Planned implementation branch:** `fix8`
+- **Testing class:** Class B targeted UI/interaction verification
+- **Notes:** Created from a 25-point first-run audit of the Drawer Space workflow. Scope is first-run clarity and typed single-drawer source-of-truth cleanup: clearer Space/measurement/folder copy, first-bin guidance, visible print requirement for bin names, missing Height unit, progressive disclosure for advanced bin settings, actionable empty Drawer/Inventory states, sensible empty-state action gating, and eliminating separate planner edits of canonical typed Drawer name/size. Connector behavior itself remains Fix 007 territory. Fix 008 must be rebased/re-audited against accepted Fix 006 because Fix 006 changes `web/spaces.js` startup/persistence contracts.
+
