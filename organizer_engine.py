@@ -2794,8 +2794,10 @@ def validate_side_fit(
 
 def installed_corner_boxes(box: BoxSpec, ways: int) -> list[trimesh.Trimesh]:
     """The 3 or 4 bins meeting at the junction (0, 0)."""
+    if ways not in (3, 4):
+        raise ValueError("corner connector must be 3-way or 4-way")
     mesh = make_box(box)
-    quadrants = [(-1, 1), (1, 1), (-1, -1), (1, -1)][: 3 if ways == 3 else 4]
+    quadrants = [(-1, 1), (1, 1), (-1, -1), (1, -1)][:ways]
     return [
         translated(mesh, (sx * box.x / 2.0, sy * box.y / 2.0, 0.0))
         for sx, sy in quadrants

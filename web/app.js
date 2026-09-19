@@ -2501,6 +2501,11 @@ const applyChangedDesign = debounce(() => {
   state.binResizePending = false;
 }, 280);
 
+function cancelChangedDesignDebounce() {
+  applyChangedDesign.cancel();
+  pendingWallMismatchCheck = false;
+}
+
 // Re-evaluate contents-driven parts after the bin itself changes size. Plain
 // sized blocks are deliberately untouched: their footprint is user intent,
 // so a too-small bin must grow around them rather than cutting them down.
@@ -3271,7 +3276,7 @@ async function selectEdgeMount(fromPlaced = false) {
 function commitEdgeMountFormBeforeSwitch() {
   if (!editingEdgeMount()) return;
   const previousDesign = pendingDesignHistory || clone(state.design);
-  applyChangedDesign.cancel();
+  cancelChangedDesignDebounce();
   pendingDesignHistory = null;
   updateDesignFromForm();
   recordHistory(previousDesign);
@@ -6066,7 +6071,7 @@ async function deleteCurrentPart() {
 async function deleteEdgeMountPart(fromPlaced = false) {
   const active = edgeMountActive();
   if (!active) {
-    applyChangedDesign.cancel();
+    cancelChangedDesignDebounce();
     pendingDesignHistory = null;
     state.paletteBrowsing = true;
     clearDraftSelection();
@@ -6160,7 +6165,7 @@ function beginDesignMutation() {
   cancelPendingDraftWork();
   // A queued size-history snapshot belongs to the design before this atomic
   // operation. Do not let it become the "before" state of a later edit.
-  applyChangedDesign.cancel();
+  cancelChangedDesignDebounce();
   pendingDesignHistory = null;
   updateDesignFromForm();
   recordHistory(beforeForm);
