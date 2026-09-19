@@ -826,6 +826,27 @@ DV.wire = () => {
   }, true);
 };
 
+// First-run guidance on the canvas, driven only by inventory/placement state.
+DV.renderEmptyState = () => {
+  const box = $("#dl-empty-state");
+  if (!box || !DL.layout || !DL.loaded) return;
+  const mode = !DL.bins.length ? "none" : !DL.layout.drawers.some(one => one.placements.length) ? "unplaced" : "";
+  if (box.dataset.state === mode) return;
+  box.dataset.state = mode;
+  box.hidden = !mode;
+  if (mode === "none") {
+    box.innerHTML = `<strong>No bins yet</strong>
+      <p>Design your first bin, then come back to Space to arrange it.</p>
+      <div class="button-row">
+        <button type="button" class="button primary" data-empty-act="design">Design first bin</button>
+        <button type="button" class="button secondary" data-empty-act="add">Add an existing bin</button>
+      </div>`;
+  } else if (mode === "unplaced") {
+    box.innerHTML = `<strong>Ready to arrange</strong>
+      <p>Drag a bin from Inventory into the drawer, double-click one to place it, or use Auto layout.</p>`;
+  }
+};
+
 DV.buildOverlay = () => {
   const wrap = $('.canvas-wrap[data-canvas="drawer"]');
   if (!wrap || $("#dl-tilt")) return;
@@ -851,6 +872,7 @@ DV.buildOverlay = () => {
     </div>
     <div id="dl-selection" class="dl-selection" hidden></div>
     <div id="dl-open-spaces" class="dl-open-spaces"></div>
+    <div id="dl-empty-state" class="dl-empty-state" hidden></div>
     <div class="layout-hint dl-hint">Drag bins to move · drop on a same-size stackable bin to stack · drag off the drawer to take out · drag the floor to pan · wheel zooms · L locks · Del removes</div>`);
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
     if (button.dataset.dlView === "fit") DV.fit(); else DV.setView(DV.PRESETS[button.dataset.dlView]);

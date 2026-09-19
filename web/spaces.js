@@ -766,6 +766,11 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   document.getElementById("space-name").value = prefillSpace?.name || "";
   document.getElementById("space-error").hidden = true;
   document.getElementById("space-note").textContent = "";
+  // Drawer setup names the field for what it is and says up front that a
+  // name is needed and why a folder comes next. Other types keep "Name".
+  document.getElementById("space-name-label").innerHTML =
+    kind === "drawer" ? 'Drawer name <span class="required-cue">required</span>' : "Name";
+  document.getElementById("space-folder-help").hidden = !(kind === "drawer" && !update);
   if (kind === 'drawer') {
       document.getElementById('drawer-x').value = prefillSpace?.x || '';
       document.getElementById('drawer-y').value = prefillSpace?.y || '';
@@ -1484,11 +1489,7 @@ SP.updateSpace = async () => {
     toast("Space updated.");
     
     if (kind === "drawer" && typeof DL !== "undefined" && DL.active) {
-        DL.drawer().width = x;
-        DL.drawer().depth = y;
-        DL.drawer().height = z;
-        DL.dirty = true;
-        DL.emit();
+        DL.syncSingleDrawerFromSpace(state.activeSpace);
     }
 };
 

@@ -378,6 +378,20 @@ DL.change = (mutate, { history = true } = {}) => {
   return true;
 };
 
+// A typed one-drawer Space owns its drawer's name and size. Space Edit calls
+// this to copy them into the loaded layout through the normal change path
+// (dirty, report, autosave); no undo entry, and nothing happens if unchanged.
+DL.syncSingleDrawerFromSpace = space => {
+  if (!DL.layout || !space || space.kind !== "drawer" || DL.layout.drawers.length !== 1) return false;
+  return DL.change(() => {
+    const drawer = DL.drawer();
+    drawer.name = space.name;
+    drawer.width = space.x;
+    drawer.depth = space.y;
+    drawer.height = space.z;
+  }, { history: false });
+};
+
 DL.afterChange = () => {
   DL.dirty = true;
   DL.clearSpacerPlan();

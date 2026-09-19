@@ -46,11 +46,15 @@ DP.build = () => {
         <label>Depth <span class="unit">mm</span><input id="dl-depth" type="number" min="16" step="1" title="Inside, front to back"></label>
         <label>Max height <span class="unit">mm</span><input id="dl-height" type="number" min="6" step="1" title="The tallest bin or stack that fits: the inside height, less whatever the drawer above needs to close"></label>
       </div>
+      <div id="dl-canonical-row" class="dl-canonical-row" hidden>
+        <span class="dl-note">Name and size come from this Space.</span>
+        <button type="button" id="dl-edit-drawer" class="button secondary dl-small">Edit drawer</button>
+      </div>
       <p id="dl-grid-note" class="dl-note"></p>
       <details class="dl-details" id="dl-fit-details">
         <summary>Drawer settings</summary>
         <div class="field-grid two">
-          <label>Name<input id="dl-name" type="text" maxlength="40"></label>
+          <label id="dl-name-row">Name<input id="dl-name" type="text" maxlength="40"></label>
           <label>Fit clearance <span class="unit">mm</span><input id="dl-clearance" type="number" min="0.6" step="0.1" title="Total slack per axis so the bins drop in. At least 0.6 mm for the wave crests."></label>
           <label>Grid sits<select id="dl-anchor"><option value="front-left">Against front-left corner</option><option value="center">Centred</option></select></label>
           <label>Width direction<select id="dl-axis"><option value="x">Width left ↔ right</option><option value="y">Width front ↔ back</option></select></label>
@@ -276,6 +280,15 @@ DP.wire = () => {
 
   setting("#dl-new-printed", null, "new_bins_printed", node => node.checked);
   $("#dl-auto").addEventListener("click", () => DL.runAuto());
+  $("#dl-edit-drawer").addEventListener("click", () => SP.editSpace());
+  // Empty-state buttons (canvas overlay and Inventory list) share these.
+  const emptyAction = event => {
+    const act = event.target.closest("[data-empty-act]")?.dataset.emptyAct;
+    if (act === "design") DP.designFirstBin();
+    else if (act === "add") DP.focusManualAdd();
+  };
+  $("#dl-inv-list").addEventListener("click", emptyAction);
+  $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", emptyAction);
   $("#dl-candidates").addEventListener("click", event => {
     const card = event.target.closest("[data-candidate]");
     if (card) DL.applyCandidate(Number(card.dataset.candidate));
@@ -490,6 +503,21 @@ DP.lowerQty = one => {
   DL.editBins({ bin_updates: [{ id: one.id, qty: next }] });
 };
 
+// The one "go design a bin" jump used by both empty states.
+DP.designFirstBin = () => activatePreviewView("3d");
+
+// Open the existing manual-add section and put the cursor in it.
+DP.focusManualAdd = () => {
+  const details = $("#dl-add-details");
+  details.open = true;
+  details.scrollIntoView({ block: "nearest" });
+  $("#dl-add-name").focus();
+};
+
+// A normal typed one-drawer Space: name and size are owned by the Space.
+DP.isCanonicalDrawer = () => state.folderMode === "space" && state.activeSpace?.kind === "drawer"
+  && DL.layout.drawers.length === 1;
+
 // Send the largest empty spot to the bin editor as a new bin's size.
 DP.designSpot = () => {
   const spot = DL.report?.opens?.[0];
@@ -576,6 +604,7 @@ DP.update = () => {
   DP.renderTodo();
   DP.renderInventory();
   DP.renderSave();
+  DV.renderEmptyState();
   DV.render();
 };
 
@@ -619,6 +648,11 @@ DP.renderDrawer = () => {
       : "";
   }
 
+  const canonical = DP.isCanonicalDrawer();
+  ["#dl-width", "#dl-depth", "#dl-height"].forEach(selector => { $(selector).disabled = canonical; });
+  $("#dl-name-row").hidden = canonical;
+  $("#dl-canonical-row").hidden = !canonical;
+
   dlSet("#dl-width", fmt(drawer.width));
   dlSet("#dl-depth", fmt(drawer.depth));
   dlSet("#dl-height", fmt(drawer.height));
@@ -655,7 +689,9 @@ DP.renderAuto = () => {
   dlSet("#dl-auto-locked", Boolean(auto.keep_locked), "checked");
   dlSet("#dl-auto-spacers", Boolean(auto.include_spacers), "checked");
   const button = $("#dl-auto");
-  button.disabled = Boolean(DL.busy);
+  const noBins = DL.loaded && !DL.bins.length;
+  button.disabled = Boolean(DL.busy) || noBins;
+  button.title = noBins ? "Add or design a bin first." : "";
   button.textContent = DL.busy === "auto" ? "Arranging…" : "Auto layout";
   const box = $("#dl-candidates");
   const signature = JSON.stringify([DL.candidates.map(c => c.id), DL.candidateIndex, DL.skipped, DL.autoNotes, DL.layout.active]);
@@ -722,6 +758,15 @@ DP.renderStats = () => {
   label("#dl-sp-generate", "Generate Selected Spacers", "Generating…", "spacers");
   label("#dl-connectors", "Make connectors", "Making connectors…", "connectors");
   label("#dl-base-trim", "Make Base Trim", "Making Base Trim…", "base_trim");
+  // Nothing placed yet: these have nothing to work on, so say why instead of
+  // letting the click end in an error.
+  const nothingPlaced = DL.loaded && !DL.drawer().placements.length;
+  ["#dl-sp-plan", "#dl-sp-generate", "#dl-connectors"].forEach(selector => {
+    const node = $(selector);
+    if (!nothingPlaced) return;
+    node.disabled = true;
+    node.title = "Place a bin in the drawer first.";
+  });
   const hasPlacedSpacers = DL.drawer().placements.some(
     placement => DL.isSpacer(DL.bin(placement.bin))
   );
@@ -816,7 +861,7 @@ DP.renderInventory = (force = false) => {
   const bins = DP.filteredBins();
   if (!DL.bins.length) {
     list.innerHTML = `<div class="dl-empty">${DL.loaded
-      ? "No bins in this Space inventory yet.<br>Generate a bin in this folder, or add one by hand below."
+      ? `No bins in this Space inventory yet.<br><button type="button" class="button primary dl-small" data-empty-act="design">Design first bin</button><br>Or add one by hand below.`
       : "Loading the inventory…"}</div>`;
     return;
   }
