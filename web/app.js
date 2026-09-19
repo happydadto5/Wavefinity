@@ -178,9 +178,9 @@ function setFolderState(
     toggle.value = state.inventoryEnabled ? "true" : "false";
     toggle.disabled = !state.folderSelected || state.folderMode === "space" || !canPersistInventory;
     toggle.title = !canPersistInventory
-      ? "Inventory and Space planning need folder access. Use desktop Chrome or Edge and allow access when asked; downloads still work here."
+      ? "Inventory and Spaces need folder access. Use desktop Chrome or Edge and allow access when asked; downloads still work here."
       : state.folderMode === "space"
-        ? "Space planning needs this folder's inventory turned on."
+        ? "A Space needs this folder's inventory turned on."
         : "Add each generated bin and B4B to this folder's inventory file";
   }
 }
@@ -239,14 +239,12 @@ function mergeDesignDefaults(current, remembered) {
 
 function spaceBinDefaultsFromDesign(design) {
   const snapshot = clone(design);
+  delete snapshot.design_kind;
+  delete snapshot.base_trim;
+  if (snapshot.box) delete snapshot.box.b4b;
   snapshot.part_name = "";
   snapshot.label = "";
   snapshot.label_position = "bottom";
-  if (snapshot.box?.b4b) {
-    const oldText = String(snapshot.box.b4b.label_text || "").trim();
-    snapshot.box.b4b.label_enabled = Boolean(snapshot.box.b4b.label_enabled || oldText);
-    snapshot.box.b4b.label_text = "";
-  }
   snapshot.layout = snapshot.layout || {};
   snapshot.layout.features = (snapshot.layout.features || [])
     .filter(feature => feature?.kind === "text" && feature.options?.level === "rim")
@@ -259,12 +257,13 @@ function spaceBinDefaultsFromDesign(design) {
   return snapshot;
 }
 
+function drawerHardClearance() {
+  return number(state.catalog?.drawer_rules?.hard_wall_clearance_mm, 0);
+}
+
 function drawerSpaceCapacity(mm) {
   const unit = number(state.catalog?.base_unit, 8);
-  const clearance = number(
-    state.catalog?.drawer_rules?.hard_wall_clearance_mm,
-    0,
-  );
+  const clearance = drawerHardClearance();
   return Math.max(
     0,
     Math.floor((number(mm, 0) - clearance) / unit + 1e-9),
@@ -295,8 +294,8 @@ function applySpaceSizingDefaults(design) {
   const startX = Math.min(4, Math.max(1, spaceXUnits));
   const startY = Math.min(4, Math.max(1, spaceYUnits));
   
-  if (!state.pinnedZone?.x) design.box.x = startX * unit;
-  if (!state.pinnedZone?.y) design.box.y = startY * unit;
+  design.box.x = startX * unit;
+  design.box.y = startY * unit;
 
   if (kind === "drawer") {
     design.box.z = Math.min(
@@ -304,8 +303,8 @@ function applySpaceSizingDefaults(design) {
       normalizeBinDimension("z", space.z - 3, space.z - 3),
     );
   } else if (kind === "surface") {
-    const presets = { small: 6.5, medium: 7.5, large: 10.0 };
-    design.box.z = presets[space.trim_size || "medium"] || 7.5;
+    const trimHeight = surfaceTrimHeight(space.trim_size);
+    if (Number.isFinite(trimHeight)) design.box.z = trimHeight;
   } else if (kind === "portable" || kind === "box") {
     design.box.z = normalizeBinDimension("z", space.z);
   }
@@ -577,6 +576,8 @@ function renderCatalog() {
   $$(".support-choice", palette).forEach(button => {
     button.addEventListener("click", () => pickKind(button.dataset.kind));
   });
+
+  populateBaseTrimSizeChoices();
 }
 
 function ensureRimFeatureInLayout() {
@@ -1129,19 +1130,37 @@ const B4B_DEFAULTS = {
   label_location: "top", front_label_style: "flat", stacking: false, handle: false,
 };
 const BASE_TRIM_DEFAULTS = {
-  width_mm: 7.5,
-  height_mm: 7.5,
   join_type: "drop_in",
   bed_x_mm: 256,
   bed_y_mm: 256,
 };
-const BASE_TRIM_SIZE_PRESETS = [6.5, 7.5, 10, 15, 20];
+
+function baseTrimPresetRows() {
+  return state.catalog?.base_trim_rules?.size_presets || [];
+}
 
 function baseTrimPresetValue(trim) {
   const same = Math.abs(trim.width_mm - trim.height_mm) < 1e-9;
-  return same && BASE_TRIM_SIZE_PRESETS.some(v => Math.abs(v - trim.width_mm) < 1e-9)
-    ? String(trim.width_mm)
-    : null;
+  if (!same) return null;
+  const row = baseTrimPresetRows().find(
+    one => Math.abs(Number(one.value_mm) - trim.width_mm) < 1e-9
+  );
+  return row ? String(row.value_mm) : null;
+}
+
+function surfaceTrimHeight(trimSize) {
+  const row = baseTrimPresetRows().find(one => one.key === trimSize);
+  const value = Number(row?.value_mm);
+  return Number.isFinite(value) ? value : null;
+}
+
+function populateBaseTrimSizeChoices() {
+  const select = $("#base-trim-size");
+  if (!select) return;
+  select.innerHTML = baseTrimPresetRows().map(row =>
+    `<option value="${escapeHtml(String(row.value_mm))}">` +
+    `${escapeHtml(row.label)} — ${fmt(row.value_mm)} × ${fmt(row.value_mm)} mm</option>`
+  ).join("");
 }
 const LIFT_GRABBER_DEFAULTS = { enabled: false, size: "medium", location: "sides" };
 const EDGE_MOUNT_DEFAULTS = {
@@ -1203,11 +1222,11 @@ function makeBaseTrimDesign(fieldX = null, fieldY = null) {
     box: {
       x: legal(fieldX ?? fallback.x),
       y: legal(fieldY ?? fallback.y),
-      z: number(rules.default_height_mm, 7.5),
+      z: number(rules.default_height_mm),
     },
     base_trim: {
       version: 1,
-      width_mm: number(rules.default_width_mm, 7.5),
+      width_mm: number(rules.default_width_mm),
       join_type: "drop_in",
       bed_x_mm: bedX,
       bed_y_mm: bedY,
@@ -1222,8 +1241,8 @@ function baseTrimState(design = state.design) {
   const rules = baseTrimRules();
   return {
     version: 1,
-    width_mm: number(design?.base_trim?.width_mm, rules.default_width_mm ?? 7.5),
-    height_mm: number(design?.box?.z, rules.default_height_mm ?? 7.5),
+    width_mm: number(design?.base_trim?.width_mm, rules.default_width_mm),
+    height_mm: number(design?.box?.z, rules.default_height_mm),
     join_type: "drop_in",
     bed_x_mm: number(design?.base_trim?.bed_x_mm, rules.default_bed_x_mm ?? 256),
     bed_y_mm: number(design?.base_trim?.bed_y_mm, rules.default_bed_y_mm ?? 256),
@@ -1457,10 +1476,17 @@ function promoteWallForLiftGrabbers() {
   }
   flashField(select);
 }
-// Product minimums. Switching to B4B grows undersized field axes to 48 mm;
-// height stays user-controlled and is reported if it cannot carry a latched lid.
-const B4B_LATCHED_MIN_HEIGHT = 16;
-const B4B_MIN_FIELD = 48;
+// Product minimums, from organizer_product_rules.py via the catalog.
+// Switching to B4B grows undersized field axes to this minimum; height stays
+// user-controlled and is reported if it cannot carry a latched lid.
+function b4bMinField() {
+  return number(state.catalog?.b4b_rules?.min_field_mm, 0);
+}
+
+function b4bLatchedMinHeight() {
+  return number(state.catalog?.b4b_rules?.min_secure_height_mm, 0);
+}
+
 const B4B_MIN_WALL = 1.2;
 
 function b4bState() {
@@ -1976,11 +2002,13 @@ function b4bLimitProblems(design = state.design) {
   const b4b = box?.b4b;
   if (!b4b?.enabled) return [];
   const problems = [];
-  if (number(box.x, 0) < B4B_MIN_FIELD - 1e-9 || number(box.y, 0) < B4B_MIN_FIELD - 1e-9) {
-    problems.push(`A B4B holds at least ${B4B_MIN_FIELD} x ${B4B_MIN_FIELD} mm of bins.`);
+  const minField = b4bMinField();
+  const minHeight = b4bLatchedMinHeight();
+  if (number(box.x, 0) < minField - 1e-9 || number(box.y, 0) < minField - 1e-9) {
+    problems.push(`A B4B holds at least ${minField} x ${minField} mm of bins.`);
   }
-  if (b4b.secure_lid && number(box.z, 0) < B4B_LATCHED_MIN_HEIGHT - 1e-9) {
-    problems.push(`A latched lid needs at least ${B4B_LATCHED_MIN_HEIGHT} mm of bin height.`);
+  if (b4b.secure_lid && number(box.z, 0) < minHeight - 1e-9) {
+    problems.push(`A latched lid needs at least ${minHeight} mm of bin height.`);
   }
   return problems;
 }
@@ -2053,9 +2081,10 @@ async function toggleB4B(wantEnabled) {
       if (!ok) { $("#bin-type").value = binTypeFromDesign(); return false; }
       state.design.layout.features = [];
     }
+    const minField = b4bMinField();
     for (const [axis, label] of [["x", "Width"], ["y", "Length"]]) {
-      if (number(state.design.box[axis], 0) < B4B_MIN_FIELD - 1e-9) {
-        state.design.box[axis] = B4B_MIN_FIELD;
+      if (number(state.design.box[axis], 0) < minField - 1e-9) {
+        state.design.box[axis] = minField;
         const input = $(`#${axis}-size`);
         if (input) {
           formatDimField(axis);
@@ -2294,7 +2323,7 @@ async function selectOutputFolder() {
         // an inventory file - the opt-out default, not the normal one.
         setFolderState("design", null, false);
         if (input) input.value = state.output;
-        toast("Downloads still work. Inventory and Space planning need desktop Chrome or Edge with folder access allowed.", false, 7000);
+        toast("Downloads still work. Inventory and Spaces need desktop Chrome or Edge with folder access allowed.", false, 7000);
         return;
       }
       const handle = await WFFileSystem.pickDirectory();
@@ -9951,7 +9980,7 @@ async function generateParts(target) {
       const binResult = await api("/api/generate", payload);
       saveOutput = binResult.output || saveOutput;
       const binFiles = await saveGeneratedFiles(binResult);
-      if (!baseTrimEnabled(payload.design)) await rememberGeneratedSpaceBin(payload.design);
+      if (!baseTrimEnabled(payload.design) && !Boolean(payload.design?.box?.b4b?.enabled)) await rememberGeneratedSpaceBin(payload.design);
       if (binResult.inventory_bin && state.inventoryEnabled && typeof SP !== "undefined") {
         await SP.addInventoryBin(binResult.inventory_bin);
       }
@@ -10062,7 +10091,7 @@ async function printModel(target = "bin") {
       keep_log: state.keepLog,
     };
     const result = await api("/api/print", payload);
-    if ((target === "bin" || target === "all") && !baseTrimEnabled(payload.design)) {
+    if ((target === "bin" || target === "all") && !baseTrimEnabled(payload.design) && !Boolean(payload.design?.box?.b4b?.enabled)) {
       await rememberGeneratedSpaceBin(payload.design);
     }
     const files = result.files || [];

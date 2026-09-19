@@ -405,7 +405,7 @@ SP.useHostedFolder = async folder => {
   await SP.applyFolder(info, { reset: false });
   SP.close();
   toast(folder.fallback
-    ? "Downloads still work. Inventory and Space planning need desktop Chrome or Edge with folder access allowed."
+    ? "Downloads still work. Inventory and Spaces need desktop Chrome or Edge with folder access allowed."
     : info.folder_mode === "space"
     ? `Opened ${info.space.name || folder.name}.`
     : `Saving designs to ${folder.name}.`, false, folder.fallback ? 7000 : 3200);
@@ -916,43 +916,50 @@ SP.create = async () => {
   await SP.applyFolder(info);
   SP.close();
   
-  if (kind === "portable") SP.designBox(info.space);
-  else if (kind === "surface") SP.designSurface(info.space);
+  if (kind === "portable") await SP.designPortable(info.space);
+  else if (kind === "surface") await SP.designSurface(info.space);
   else await loadFreshOrdinaryDesignForCurrentFolder();
 };
 
 // Reuses the real Base Trim design path (makeBaseTrimDesign) rather than
 // building a second, incompatible "edge" design object - see Fix 004.
-SP.designSurface = space => {
-  activatePreviewView("3d");
-  const trimValue = SP.surfacePresetMap()[space.trim_size] ?? space.z;
+SP.designSurface = async space => {
+  const trimValue = SP.surfacePresetMap()[space.trim_size];
   if (!baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
+
   state.design = makeBaseTrimDesign(space.x, space.y);
   state.design.base_trim.width_mm = trimValue;
   state.design.box.z = trimValue;
   state.design.part_name = space.name;
   state.joinMode = "base_trim";
   persistJoinMode();
+
   clearDraftSelection();
   syncForm();
+  activatePreviewView("3d");
+  await refreshPreview();
+
   if (SP.renderSpaceInfo) SP.renderSpaceInfo();
   toast(`Designing Surface: ${space.name}`);
 };
 
 // Reuses the ordinary bin -> B4B toggle machinery (toggleB4B/readB4BForm)
 // rather than forking B4B form logic - see Fix 004 ("Portable -> Bin for Bins").
-SP.designBox = space => {
-  activatePreviewView("3d");
-  if (!b4bEnabled()) state.lastOrdinaryDesign = clone(state.design);
+SP.designPortable = async space => {
   state.design = clone(state.catalog.defaults.design);
   state.design.box.x = space.x;
   state.design.box.y = space.y;
   state.design.box.z = normalizeBinDimension("z", space.z);
   state.design.part_name = space.name;
+
   clearDraftSelection();
   syncForm();
   $("#bin-type").value = "b4b";
-  toggleB4B(true);
+  await toggleB4B(true);
+  syncForm();
+  activatePreviewView("3d");
+  await refreshPreview();
+
   if (SP.renderSpaceInfo) SP.renderSpaceInfo();
   toast(`Designing Portable Storage: ${space.name}`);
 };
@@ -1269,7 +1276,7 @@ SP.renderSpaceInfo = () => {
             const x = state.activeSpace.x;
             const y = state.activeSpace.y;
             const z = state.activeSpace.z;
-            sizeText = x + " × " + y + " × " + z + " mm (" + Math.floor(x/unit) + " × " + Math.floor(y/unit) + " units)";
+            sizeText = x + " × " + y + " × " + z + " mm (" + SP.drawerCapacity(x) + " × " + SP.drawerCapacity(y) + " units)";
         } else if (kind === "surface") {
             const x = state.activeSpace.x;
             const y = state.activeSpace.y;

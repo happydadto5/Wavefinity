@@ -149,12 +149,13 @@ DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
 
 // A B4B/Box's own mating boundary is already the correct interlocking
 // surface (see organizer_drawer.normalise_drawer) and needs no extra
-// hard-wall slack; only a real drawer wall floors clearance at 0.55 mm.
+// hard-wall slack; only a real drawer wall floors clearance at the
+// catalog's drawer_rules.hard_wall_clearance_mm.
 DL.grid = (drawer = DL.drawer()) => {
   const step = Number(drawer.snap) === 4 ? 4 : 8;
   const slack = drawer.boundary === "mating"
     ? Math.max(0, Number(drawer.clearance) || 0)
-    : Math.max(0.55, Number(drawer.clearance) || 0);
+    : Math.max(drawerHardClearance(), Number(drawer.clearance) || 0);
   const usableX = drawer.width - slack;
   const usableY = drawer.depth - slack;
   const cols = Math.max(0, Math.floor(usableX / step + 1e-6));

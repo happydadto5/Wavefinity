@@ -158,13 +158,7 @@
               <h3 class="b4b-card-title">Trim</h3>
               <div class="field-grid three">
                 <label>Trim size
-                  <select id="base-trim-size">
-                    <option value="6.5">Small — 6.5 × 6.5 mm</option>
-                    <option value="7.5" selected>Medium — 7.5 × 7.5 mm</option>
-                    <option value="10">Large — 10 × 10 mm</option>
-                    <option value="15">XL — 15 × 15 mm</option>
-                    <option value="20">XXL — 20 × 20 mm</option>
-                  </select>
+                  <select id="base-trim-size"></select>
                 </label>
               </div>
             </div>
@@ -399,8 +393,8 @@
           <div class="save-location-group">
             <label for="output-folder">Save folder</label>
             <div class="save-location-input-wrap">
-              <input id="output-folder" type="text" readonly title="Choose a save folder or open Space planning">
-              <button type="button" id="output-folder-picker" class="folder-picker-button" title="Choose a save folder or open Space planning" aria-label="Choose a save folder or open Space planning">
+              <input id="output-folder" type="text" readonly title="Choose a save folder or manage Spaces">
+              <button type="button" id="output-folder-picker" class="folder-picker-button" title="Choose a save folder or manage Spaces" aria-label="Choose a save folder or manage Spaces">
                 <svg viewBox="0 0 20 20" fill="currentColor" width="32" height="32" aria-hidden="true">
                   <path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
                 </svg>
@@ -742,9 +736,9 @@
       </div>
 
       <div id="space-unsupported" hidden>
-        <div class="welcome-header"><h2>Inventory and Space planning need folder access</h2></div>
-        <p class="welcome-lead">This browser cannot give Wavefinity ongoing access to a chosen folder, so Inventory and Space planning are unavailable.</p>
-        <p>You can still design and download bins normally. To use Inventory and Space planning, open Wavefinity in desktop Chrome or Edge, choose your folder, and allow access when asked.</p>
+        <div class="welcome-header"><h2>Inventory and Spaces need folder access</h2></div>
+        <p class="welcome-lead">This browser cannot give Wavefinity ongoing access to a chosen folder, so Inventory and Spaces are unavailable.</p>
+        <p>You can still design and download bins normally. To use Inventory and Spaces, open Wavefinity in desktop Chrome or Edge, choose your folder, and allow access when asked.</p>
         <div class="welcome-actions"><button id="space-unsupported-close" class="button primary" type="button">Keep designing</button></div>
       </div>
 

@@ -35,7 +35,10 @@ from organizer_geometry import (
     intersection,
     union,
 )
-from organizer_product_rules import SURFACE_TRIM_PRESETS
+from organizer_product_rules import (
+    SURFACE_TRIM_HEIGHTS,
+    SURFACE_TRIM_PRESETS,
+)
 
 
 BASE_TRIM_SCHEMA_VERSION = 1
@@ -46,8 +49,8 @@ BASE_TRIM_SIZE_PRESETS = (
     ("xxl", 20.0, "XXL"),
 )
 
-BASE_TRIM_DEFAULT_WIDTH = 7.5
-BASE_TRIM_DEFAULT_HEIGHT = 7.5
+BASE_TRIM_DEFAULT_WIDTH = SURFACE_TRIM_HEIGHTS["medium"]
+BASE_TRIM_DEFAULT_HEIGHT = SURFACE_TRIM_HEIGHTS["medium"]
 BASE_TRIM_MIN_WIDTH = 4.0
 BASE_TRIM_MAX_WIDTH = 20.0
 BASE_TRIM_MIN_HEIGHT = 4.0

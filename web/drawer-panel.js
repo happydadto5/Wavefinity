@@ -200,7 +200,7 @@ DP.wire = () => {
   drawerField("#dl-width", "width", positive(8));
   drawerField("#dl-depth", "depth", positive(8));
   drawerField("#dl-height", "height", positive(1));
-  drawerField("#dl-clearance", "clearance", positive(0.55));
+  drawerField("#dl-clearance", "clearance", positive(drawerHardClearance()));
   drawerField("#dl-name", "name", raw => raw.trim() || null);
   drawerField("#dl-anchor", "anchor", raw => raw);
   drawerField("#dl-axis", "bin_axis", raw => raw);
@@ -443,19 +443,6 @@ DP.wire = () => {
     SP.setKeepBinDefaults(event.target.checked);
   });
   $("#dl-save").addEventListener("click", () => DL.save());
-  const outputFolderEl = $("#dl-output-folder");
-  outputFolderEl.addEventListener("click", () => DP.changeFolder());
-  outputFolderEl.addEventListener("keydown", event => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      DP.changeFolder();
-    }
-  });
-  $('label[for="dl-output-folder"]').addEventListener("click", event => {
-    event.preventDefault();
-    DP.changeFolder();
-  });
-  $("#dl-output-folder-picker")?.addEventListener("click", () => DP.changeFolder());
 };
 
 DP.onInventoryClick = event => {
@@ -501,18 +488,6 @@ DP.lowerQty = one => {
     if (DL.selected === oldKey) DL.selected = DL.key(top);
   }
   DL.editBins({ bin_updates: [{ id: one.id, qty: next }] });
-};
-
-DP.changeFolder = async () => {
-  if (DL.dirty) await DL.save();
-  await selectOutputFolder();
-  if (state.output !== DL.output) {
-    DL.layout = null;
-    DL.dirty = false;
-    DL.candidates = [];
-    DP.signatures = {};
-    try { await DL.load(); } catch (error) { toast(error.message, true, 7000); }
-  }
 };
 
 // Send the largest empty spot to the bin editor as a new bin's size.
@@ -654,7 +629,7 @@ DP.renderDrawer = () => {
   dlSet("#dl-snap", String(Number(drawer.snap) === 4 ? 4 : 8));
   $("#dl-drawer-delete").disabled = DL.layout.drawers.length < 2;
   const grid = DL.grid(drawer);
-  const wall = (drawer.boundary === "mating" ? Math.max(0, drawer.clearance) : Math.max(0.55, drawer.clearance)) / 2;
+  const wall = (drawer.boundary === "mating" ? Math.max(0, drawer.clearance) : Math.max(drawerHardClearance(), drawer.clearance)) / 2;
   const edges = [["left", grid.gapLeft], ["right", grid.gapRight], ["front", grid.gapFront], ["back", grid.gapBack]]
     .map(([side, gap]) => [side, gap - wall]).filter(([, play]) => play >= 0.1)
     .map(([side, play]) => `${side} ${play.toFixed(1)} mm`);
@@ -915,18 +890,6 @@ DP.renderSave = () => {
   const settings = DL.layout.settings;
   dlSet("#dl-keep-bin-defaults", Boolean(state.keepBinDefaults), "checked");
   dlSet("#dl-autosave", Boolean(settings.autosave), "checked");
-  dlSet("#dl-output-folder", DL.output ?? DL.folder(), "value");
-  if (state.activeSpace && state.activeSpace.name) {
-    const parent = $("#dl-output-folder").closest(".save-location-group");
-    if (parent) {
-      parent.innerHTML = `<div class="space-info-compact">
-        <strong>${escapeHtml(state.activeSpace.name)}</strong>
-        <span style="opacity: 0.7">(${state.activeSpace.kind})</span>
-        <button type="button" class="link-button" onclick="api('/api/space/show-folder', {folder: DL.output ?? DL.folder()})" title="Show folder">Show Folder</button>
-        <button type="button" class="link-button" onclick="DP.changeFolder()" title="Change folder">Change folder</button>
-      </div>`;
-    }
-  }
   const status = $("#dl-save-status");
   let text = "";
   let tone = "";
@@ -941,6 +904,7 @@ DP.renderSave = () => {
   const save = $("#dl-save");
   save.hidden = Boolean(settings.autosave);
   save.disabled = DL.saving || (!DL.dirty && DL.saveState !== "error");
+  if (typeof SP !== "undefined" && SP.renderSpaceInfo) SP.renderSpaceInfo();
 };
 
 // ------------------------------------------------------------------ mode

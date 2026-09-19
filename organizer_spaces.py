@@ -22,10 +22,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from organizer_inventory import configure_space, legacy_layout_space, load_inventory
-from organizer_product_rules import (
-    SURFACE_TRIM_HEIGHTS,
-    surface_trim_key_for_height,
-)
+from organizer_product_rules import SURFACE_TRIM_HEIGHTS
 
 MAX_RECENT = 8
 METADATA_FILE = ".wavefinity.json"

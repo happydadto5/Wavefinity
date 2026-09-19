@@ -1,11 +1,13 @@
 """The folder's inventory file: ``<folder name> bins.md`` in the save folder.
 
-A persistent save folder keeps this by default - a normal folder may
-explicitly opt out - independently of whether Space planning is on. Every
-generated bin/B4B is appended here when inventory is enabled. Space planning,
-when enabled, stores its physical drawer/box layout in this same file rather
-than a separate one; Space requires inventory, but inventory does not require
-Space. The file has two parts:
+A persistent save folder keeps this by default - a normal untyped Design
+folder may explicitly opt out, independently of whether it is a typed Space.
+Every generated bin/B4B is appended here when inventory is enabled. A typed
+Drawer, Surface, or Portable Space stores its layout in this same file rather
+than a separate one; a Space requires inventory, but inventory does not
+require a Space. Legacy Box metadata remains readable as migration input
+only - see ``normalise_space_definition``'s ``allow_legacy``. The file has
+two parts:
 
 * a Markdown table, one row per bin design.  ``Qty`` is how many copies were
   actually printed - 0 means generated but never printed, or superseded by a

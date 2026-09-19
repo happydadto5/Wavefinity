@@ -413,24 +413,31 @@ does not accept interior parts.
 }
 ```
 
-### Inventory, and optional Space planning
+### Inventory, and Spaces
 
 Every selected save folder keeps an inventory by default: generating a bin,
 a B4B, or Bin for Bins case adds it to `<folder name> bins.md`. A checkbox
 beside the save folder, *Keep inventory for this folder*, lets a user turn
-that off for a normal folder - files still save normally, but nothing new is
-logged. Turning it off never deletes an existing inventory file, and turning
-it back on resumes logging to the same file.
+that off for a normal, untyped **Design** folder - files still save
+normally, but nothing new is logged. Turning it off never deletes an
+existing inventory file, and turning it back on resumes logging to the same
+file.
 
-The **Space** tab (beside *3D* and *2D*) is a separate, optional layer: when
-the user explicitly enables Space planning, the folder additionally represents
-one real drawer or storage box, and the Space view lays out its inventory in
-it. A folder can already hold a full inventory of bins before Space is ever
-turned on - enabling Space adds layout information to that same inventory
-file rather than starting a second one, so nothing already generated is lost
-or needs re-adding. Because a Space's layout depends on the inventory it
-places, enabling Space always keeps inventory on and the checkbox is disabled
-while it is active.
+A folder is either an untyped Design folder, or a typed **Space** - a
+**Drawer**, a **Surface**, or **Portable Storage**. *Create New Space*
+configures the Space's type and dimensions first and chooses the save folder
+last; *Open Existing* can instead turn an already-selected folder into a
+Space, or use it without a type. The **Space** tab (beside *3D* and *2D*)
+then lays out that Space's inventory. A folder can already hold a full
+inventory of bins before it becomes a Space - configuring one adds layout
+information to that same inventory file rather than starting a second one,
+so nothing already generated is lost or needs re-adding. Because a Space's
+layout depends on the inventory it places, a typed Space always keeps
+inventory on and the checkbox is disabled while one is active. An older
+folder's legacy "Box" identity is migration-only: setting it up recovers it
+as Portable Storage, never as a current Box. A legacy folder's older,
+multiple-drawer layout is preserved as a compatibility exception - a new
+Drawer Space otherwise represents exactly one physical drawer.
 
 - **The inventory file** is a Markdown table, one row per bin design, with an
   **ID**, a **Kind** (bin, B4B case, spacer, added by hand), a **Name**
@@ -747,7 +754,7 @@ folder gets an additive `.wavefinity.json` marker holding its folder mode,
 inventory choice, optional Space identity, and per-Space Keep Defaults state.
 `inventory` (default `true`) controls whether generated bins/B4Bs are logged;
 `folder_mode` (`"design"` or `"space"`) says whether the folder also represents
-one physical drawer or storage box. `folder_mode: "space"` always
+one typed Drawer, Surface, or Portable Storage Space. `folder_mode: "space"` always
 implies `inventory: true` - a Space's layout depends on the inventory it
 places. A normal `"design"` folder can have inventory on (the default for a
 new folder) or explicitly off (`/api/folder/inventory`, mirrored by the
@@ -1259,8 +1266,8 @@ choices.
   Grabber; enabling both on conflicting walls is refused.
 
 The plate's projection is real geometry but is not part of the bin's
-nominal X/Y footprint, inventory dimensions or Space planning - those keep
-using the ordinary bin size. A removable/cartridge insert is never drilled,
+nominal X/Y footprint, inventory dimensions or Space sizing/layout - those
+keep using the ordinary bin size. A removable/cartridge insert is never drilled,
 since it can simply be lifted out before the bin is mounted; the fused
 access passage does clear any fused interior holder material blocking its
 path, since that material cannot be removed. Edge Mount's own label is
