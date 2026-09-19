@@ -29,12 +29,14 @@ This ledger was introduced after some earlier fixes already existed. The entries
 - **Notes:** Final review confirmed Drawer/Surface/Portable Storage use the approved `/images/Drawer.png`, `/images/Vanity.png`, and `/images/B4B.png` assets, preserve the existing visible text and full-card button interaction, use decorative empty alt text, and add consistent responsive 4:3 card styling without changing Space logic. The individual `/fixes/fix-005.md` file was deleted after acceptance per Help Code protocol. No tests were run by ChatGPT during outside review.
 
 ## Fix 006 — Portable Space Identity
-- **Status:** Ready to implement
+- **Status:** Planning complete; blocked until Fix 004 Correction 12 targeted verification is completed and Fix 004 receives outside **YES — DONE**
 - **Fix file:** `/fixes/fix-006.md`
 - **Planning thread:** `Portable Space Identity Plan #6`
 - **Planned implementation thread:** `Portable Space Identity Imp #6`
 - **Implementation branch:** `fix6`
-- **Notes:** Final dependency audit completed against the Fix 004 implementation line. Fix 004 is now closed, so Fix 006 is unblocked. Before implementation, recreate/refresh `fix6` from the then-current accepted `origin/main` rather than using a stale branch base. The plan covers v4->v5 identity migration without re-onboarding, UUID preservation, active-ID startup recovery, duplicate-copy handling, uncapped Space registry vs capped Recents, identity-aware Forget, exact read-only/write inventory filename migration, hosted target-folder preservation, and failure ordering.
+- **Testing class:** Class C risk-directed testing required
+- **Notes:** Final plan was rebuilt against current post-Correction-12 code (`be5ed7e3`) and the updated Help Code proportional testing policy. It now gives a single file-by-file implementation recipe for metadata v5/UUID identity, per-user preference migration with atomic registry mutation, active-ID startup recovery, same-parent rename recovery, duplicate-copy handling, uncapped registry vs capped Recents, identity-aware Forget, exact local/hosted inventory filename migration, hosted selected-handle preservation, Show Log resolver integration, failure ordering, and a named Class C verification gate. Fix 006 must start from the finally accepted post-Fix-004 `origin/main`; create `fix6` only after Fix 004 is closed.
+
 ## Fix 007 — Adaptive Edge Connectors
 - **Status:** Requirements questions
 - **Planning thread:** `Adaptive Edge Connectors Plan #7`
