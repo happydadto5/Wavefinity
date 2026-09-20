@@ -140,6 +140,7 @@ from ._bore import (
     _is_hex_bit,
     build_bore,
     bore_defaults,
+    normalize_bore_auto,
     bore_hole_axes,
 )
 from ._post import build_post, post_defaults

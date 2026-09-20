@@ -107,6 +107,7 @@ from organizer_inserts import (
     layout_from_dict,
     layout_to_dict,
     layout_zone,
+    normalize_bore_auto,
     moved_feature,
     occupied_zones,
     option_value,
@@ -1601,6 +1602,11 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     draft_raw = payload.get("draft")
     draft = _feature_from_json(draft_raw, layout.mode) if draft_raw else None
+    if draft is not None:
+        draft = normalize_bore_auto(
+            _interior_work_box(box), draft,
+            base_height(_interior_work_box(box), layout.mode), layout.mode,
+        )
     selected = payload.get("selected")
     if not isinstance(selected, int) or isinstance(selected, bool):
         selected = None
@@ -1781,6 +1787,7 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     request_box, layout, label, _part, label_location, scoop = _design(payload["design"])
     box = _interior_work_box(request_box)
     one = _feature_from_json(payload["feature"], layout.mode)
+    one = normalize_bore_auto(box, one, base_height(box, layout.mode), layout.mode)
     nest_solids = None
     if one.kind == "nest":
         request_box, box, _updated, one, _warnings, nest_solids = _resolve_photo_nest_edit(
@@ -1896,6 +1903,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     box = _interior_work_box(request_box)
     one = _feature_from_json(payload["feature"], layout.mode)
+    one = normalize_bore_auto(box, one, base_height(box, layout.mode), layout.mode)
     if one.kind == "divider":
         one = normalize_divider_scoop(
             box, one, base_height(box, layout.mode)

@@ -672,6 +672,11 @@ input[type="number"]::-webkit-inner-spin-button {
 .bore-group-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; align-items: start; }
 .bore-group-fields.bore-hole-fields { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .bore-group-fields > label { min-width: 0; }
+.bore-auto-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: 9px; align-items: end; grid-column: 1 / -1; }
+.bore-auto-row > label { min-width: 0; }
+.bore-auto-row > .bore-auto { min-height: 38px; grid-column: 3; }
+.bore-auto-row > .bore-auto.active { background: var(--teal-soft); border-color: var(--teal); }
+.bore-auto-field { cursor: pointer; }
 @media (max-width: 460px) {
   .draft-fields .bore-group { grid-template-columns: 1fr; gap: 4px; }
   .bore-group-fields, .bore-group-fields.bore-hole-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
