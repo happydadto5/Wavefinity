@@ -2007,7 +2007,10 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         self.assertIn("SP.showSetup(kind, candidateKind === kind ? candidate : null);", spaces_js)
 
         # New Space is offered for every typed Space, not only Drawer.
-        self.assertIn('const btnNew = document.getElementById(prefix + "-new-space");\n        if (btnNew) btnNew.hidden = false;', spaces_js)
+        self.assertIn(
+            'const btnNew = document.getElementById("space-head-new-space");\n    if (btnNew) btnNew.hidden = false;',
+            spaces_js,
+        )
 
 
 class WebServerTests(unittest.TestCase):

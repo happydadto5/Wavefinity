@@ -1724,6 +1724,10 @@ SP.renderSpaceInfo = () => {
     }
     document.getElementById("space-head-size").textContent = sizeText;
 
+    // New Space is offered for every typed Space, not only Drawer.
+    const btnNew = document.getElementById("space-head-new-space");
+    if (btnNew) btnNew.hidden = false;
+
     const btnShow = document.getElementById("space-head-show");
     if (btnShow) btnShow.hidden = state.runtime.hosted;
 };
