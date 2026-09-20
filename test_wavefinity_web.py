@@ -2343,7 +2343,7 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b'id="generate-bin"', body)
         self.assertIn(b">Generate Bin</button>", body)
         self.assertIn(b'id="generate-connector"', body)
-        self.assertIn(b">Generate Connector</button>", body)
+        self.assertIn(b">Generate Connectors</button>", body)
         self.assertNotIn(b"generate-sampler", body)
         self.assertNotIn(b"Generate sampler", body)
         self.assertIn(b'id="generation-dialog"', body)
