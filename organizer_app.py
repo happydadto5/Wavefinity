@@ -153,6 +153,7 @@ from organizer_inserts import (
     fitted_nest_feature,
     make_insert_plate,
     normalize_divider_scoop,
+    resolve_nest_settings,
     resolve_text_features,
     snapped_zone,
     scoop_zone,
@@ -1083,24 +1084,51 @@ def preview_geometry(
                 if j not in invalid_feature_indexes:
                     invalid_feature_indexes.append(j)
 
-    # Recessed Photo Nests share one physical deck. Preview them as one group
-    # too, otherwise a later full deck visually refills an earlier cavity.
+    # Recessed Photo Nests share one physical deck. Build every saved recessed
+    # Nest plus a participating live draft as one effective group, so editing
+    # a saved Nest cannot briefly refill the other Nest cavities with a second
+    # deck and a new Recessed draft is visible before it is saved.
     grouped_recessed = {
         index for index, one in enumerate(features)
         if one.kind == "nest" and one.contour
         and str(resolve_nest_settings(box, one, base_z)["holder_style"]) == "recessed"
-        and not (selected is not None and index == selected and draft is not None)
     }
-    if grouped_recessed:
+    draft_in_recessed_group = (
+        draft is not None and draft.kind == "nest" and bool(draft.contour)
+        and str(resolve_nest_settings(box, draft, base_z)["holder_style"]) == "recessed"
+    )
+    effective_recessed = []
+    draft_in_group = False
+    for index in sorted(grouped_recessed):
+        if index == selected and draft_in_recessed_group:
+            effective_recessed.append(draft)
+            draft_in_group = True
+        else:
+            effective_recessed.append(features[index])
+    if draft_in_recessed_group and not draft_in_group:
+        effective_recessed.append(draft)
+        draft_in_group = True
+    if effective_recessed:
         try:
-            group = [features[index] for index in sorted(grouped_recessed)]
-            for solid in build_features(box, group, base_z, layout_zone(box, mode), mode=mode,
-                                        include_text=True):
+            built = build_features(
+                box, effective_recessed, base_z, layout_zone(box, mode), mode=mode,
+                include_text=True,
+            )
+            if built:
+                top_z = max(float(solid.bounds[1][2]) for solid in built)
+                for index in grouped_recessed:
+                    feature_overhang_mm[index] = round(max(0.0, top_z - box.z), 3)
+                if draft_in_group:
+                    draft_overhang_mm = round(max(0.0, top_z - box.z), 3)
+            for solid in built:
                 geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_nest"))
         except Exception as error:
             for index in grouped_recessed:
                 feature_errors.append(f"nest: {error}")
-                invalid_feature_indexes.append(index)
+                if index not in invalid_feature_indexes:
+                    invalid_feature_indexes.append(index)
+            if draft_in_group:
+                draft_error = f"nest: {error}"
 
     for feature_index, one in enumerate(features):
         if feature_index in grouped_recessed:
@@ -1177,7 +1205,7 @@ def preview_geometry(
             box, one, base_z, f"{part_kind}_bore_axis"
         ))
 
-    if draft is not None:
+    if draft is not None and not draft_in_group:
         cut_draft = cut_fused_pieces and not is_text(draft)
         cut_draft_side_opening = cut_side_opening_pieces and not is_text(draft)
         if draft_error is not None:

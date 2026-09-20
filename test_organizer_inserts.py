@@ -1871,6 +1871,18 @@ class RegistryTests(unittest.TestCase):
 
 
 class OtherHoldersTests(unittest.TestCase):
+    def test_recessed_photo_nests_share_one_watertight_deck(self) -> None:
+        box = BoxSpec(192.0, 120.0, 40.0)
+        options = {
+            "holder_style": "recessed", "tool_thickness": 6.0,
+            "cavity_depth_mode": "auto", "lift_assist": "none",
+        }
+        left = inserts.moved_feature(photo_nest(options=options), box, (-48.0, 0.0))
+        right = inserts.moved_feature(photo_nest(options=options), box, (48.0, 0.0))
+        made = build_features(box, [left, right], box.base_thickness)
+        self.assertEqual(len(made), 1)
+        self.assertTrue(made[0].is_watertight)
+
     def test_each_holder_builds_a_watertight_solid(self) -> None:
         pencil = inserts.LIBRARY["pencil"]
         cases = [

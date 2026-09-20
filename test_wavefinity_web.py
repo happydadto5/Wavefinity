@@ -680,6 +680,34 @@ class WebApplicationTests(unittest.TestCase):
         self.assertGreaterEqual(scaled["box"]["x"], rotated["box"]["x"])
         self.assertGreater(scaled["box"]["y"], rotated["box"]["y"])
 
+    def test_photo_nest_duplicate_creates_an_independent_second_copy(self):
+        outline = PhotoOutline(
+            ((-20, -8), (20, -8), (20, 8), (-20, 8)), 40.0, 16.0,
+            ((0, 0), (1, 0), (1, 1), (0, 1)),
+        )
+        with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
+            made = _traced_photo_nest_payload({
+                "design": default_design(), "image": "unused", "mime_type": "image/png",
+                "options": {"depth": 5.0},
+            })
+        duplicate = wavefinity_web.duplicate_feature_payload({
+            "design": made["design"], "index": 0,
+        })
+        features = duplicate["design"]["layout"]["features"]
+        self.assertEqual(len(features), 2)
+        self.assertEqual(duplicate["selected"], 1)
+        self.assertEqual(features[0]["contour"], features[1]["contour"])
+        self.assertNotEqual(features[0]["zone"], features[1]["zone"])
+
+    def test_photo_nest_outline_mode_and_shared_preview_are_explicit(self):
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        preview_source = (root / "organizer_app.py").read_text(encoding="utf-8")
+        self.assertIn("&& state.nestOutlineEditing === true\n    && (hasPhotoSession", app_js)
+        self.assertIn('feature.contour && isNestEditWorkspaceActive()\n        && (state.nestOutlineTool', app_js)
+        self.assertIn("effective_recessed", preview_source)
+        self.assertIn("draft_in_recessed_group", preview_source)
+
     def test_draft_geometry_identifies_the_part_it_will_print_with(self):
         for mode, prefix in (("fused", "feature_"), ("separate", "insert_")):
             design = default_design()

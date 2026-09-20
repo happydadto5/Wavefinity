@@ -5032,14 +5032,11 @@ function syncNest2DWorkspace() {
     isNest
     && Array.isArray(state.nestPaperCorners)
     && Boolean(state.nestOriginalImage);
-  // The dedicated outline editor owns the canvas once there is an outline to
-  // show - a photo/scan session, or (a design reopened without its photo) an
-  // already-committed contour - not only while scan-tuning is active, so
-  // manual point editing, Soften outline and Finish Editing stay reachable
-  // either way. A brand new Nest with neither yet still gets the ordinary
-  // full-width bin view, matching its Choose Photo control in the sidebar.
+  // The dedicated outline editor owns the canvas only while the user has
+  // explicitly entered it. A saved Photo Nest otherwise stays in Layout.
   const hasPhotoSession = isNest && !recoveryActive && Boolean(state.nestRectifiedImage);
   const editingOutline = isNest && !recoveryActive
+    && state.nestOutlineEditing === true
     && (hasPhotoSession || Boolean(state.draft.contour?.length));
   const hasContour = editingOutline && Boolean(state.draft.contour?.length);
 
@@ -5380,26 +5377,40 @@ function wireNestFieldActions() {
 
 async function duplicateNest() {
   if (!state.draft?.contour || !Number.isInteger(state.selected)) return;
-  const before = clone(state.design);
+  let previousDesign = null;
+  let previousSelected = null;
+  let mutationStarted = false;
   try {
-    const committed = await commitVisibleDraft();
-    if (committed === false && !state.design.layout.features[state.selected]) return;
-    if (!beginDesignMutation()) return;
+    await commitVisibleDraft();
     const index = state.selected;
+    if (!Number.isInteger(index) || !state.design.layout.features[index]) return;
+    if (!beginDesignMutation()) return;
+    mutationStarted = true;
+    previousDesign = clone(state.design);
+    previousSelected = index;
     const result = await api("/api/feature/duplicate", { design: state.design, index });
     state.design = result.design;
-    recordHistory(before);
+    recordHistory(previousDesign);
     resetNestPhotoSession();
     state.selected = result.selected;
+    state.draftSourceIndex = result.selected;
     state.draft = clone(state.design.layout.features[result.selected]);
     state.draftKind = "nest"; state.draftIsNew = false; state.draftTouched = false;
     state.draftAutoCommit = true; state.nestOutlineEditing = false;
     syncForm(); renderDraftFields(); renderPlaced(); await refreshPreview();
     toast("Photo Nest duplicated.");
   } catch (error) {
-    state.design = before;
+    if (previousDesign && Number.isInteger(previousSelected)) {
+      state.design = previousDesign;
+      state.selected = previousSelected;
+      state.draftSourceIndex = previousSelected;
+      state.draft = clone(previousDesign.layout.features[previousSelected]);
+      state.draftKind = "nest"; state.draftIsNew = false; state.draftTouched = false;
+      state.draftAutoCommit = true; state.nestOutlineEditing = false;
+      renderDraftFields(); renderPlaced(); await refreshPreview();
+    }
     toast(error.message, true, 6500);
-  } finally { if (state.designMutationBusy) finishDesignMutation(); }
+  } finally { if (mutationStarted) finishDesignMutation(); }
 }
 
 async function resetNestOutline() {
@@ -7076,8 +7087,7 @@ function updateSelectionButtons() {
     const isModifier = info?.capabilities?.includes("box_modifier");
     const alreadyAdded = partAtLimit(info);
     const isThisModifierBeingEdited = state.modifierEditing === button.dataset.kind;
-    button.disabled = busy ||
-      (hasPhotoNest && !replacingPhotoNest && button.dataset.kind !== "nest" && !isModifier);
+    button.disabled = busy || (hasPhotoNest && !replacingPhotoNest && !isModifier);
     button.classList.toggle("added", alreadyAdded && !isThisModifierBeingEdited);
     const stateLabel = $(".support-choice-state", button);
     if (stateLabel) {
@@ -10398,7 +10408,7 @@ function wireLayoutInteraction() {
       const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
       if (autoField) autoField.checked = false;
     }
-    if (feature.kind === "nest" && feature.contour
+    if (feature.kind === "nest" && feature.contour && isNestEditWorkspaceActive()
         && (state.nestOutlineTool === "add-point" || state.nestOutlineTool === "delete-point")) {
       pointerActive = false;
       if (state.nestOutlineTool === "add-point") {
