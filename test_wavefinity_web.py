@@ -236,6 +236,52 @@ class WebApplicationTests(unittest.TestCase):
         box, *_ = design_from_dict(design)
         self.assertFalse(box.side_openings.enabled)
 
+    def test_side_opening_resize_replaces_or_removes_ineligible_sides(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is required for the focused browser-state regression")
+        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        start = source.index("// BEGIN SIDE_OPENING_SELECTION_HELPER")
+        end = source.index("// END SIDE_OPENING_SELECTION_HELPER")
+        helper = source[start:end]
+
+        def reconcile(selected, eligible):
+            script = (
+                helper + "\nprocess.stdout.write(JSON.stringify("
+                f"reconcileSideOpeningSelection({json.dumps(selected)}, {json.dumps(eligible)})));"
+            )
+            result = subprocess.run(
+                [node, "-e", script], check=True, capture_output=True, text=True,
+            )
+            return json.loads(result.stdout)
+
+        # 3U x 3U, Front selected, then X shrinks to 1U: the invalid Front
+        # side is removed and the first eligible Y-running wall replaces it.
+        self.assertEqual(
+            reconcile(["front"], ["left", "right"]),
+            {"sides": ["left"], "removed": ["front"], "replacement": "left"},
+        )
+        # With no eligible axis, no selected side survives or gets invented;
+        # the caller disables the option rather than sending invalid data.
+        self.assertEqual(
+            reconcile(["front"], []),
+            {"sides": [], "removed": ["front"], "replacement": None},
+        )
+        reconcile_start = source.index("function reconcileSideOpeningsAfterResize(design)")
+        reconcile_end = source.index("// Python remains authoritative", reconcile_start)
+        self.assertIn(
+            "design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };",
+            source[reconcile_start:reconcile_end],
+        )
+
+        update_start = source.index("function updateDesignFromForm()")
+        update_end = source.index("const saveOutputPreference", update_start)
+        update_source = source[update_start:update_end]
+        self.assertLess(
+            update_source.index("reconcileSideOpeningsAfterResize(design)"),
+            update_source.index("readSideOpeningForm(design)"),
+        )
+
     def test_bore_catalog_exposes_the_grid_and_angle_and_drops_quantity(self):
         parts = {part["kind"]: part for part in catalog_payload()["parts"]}
         bore = parts["bore"]

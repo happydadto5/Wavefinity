@@ -2739,6 +2739,22 @@ class SideOpeningTests(unittest.TestCase):
                 depth_percent=1.0,
             )))
 
+    def test_depth_range_is_one_through_one_hundred_percent(self) -> None:
+        saved = organizer_app.design_to_dict(self._box(), organizer_app.Layout())
+        saved["box"]["side_openings"] = {
+            "enabled": True,
+            "shape": "square",
+            "sides": ["front"],
+            "size": "small",
+            "depth_percent": 0.5,
+            "top_support": False,
+        }
+        with self.assertRaisesRegex(ValueError, "between 1 and 100"):
+            organizer_app.design_from_dict(saved)
+        saved["box"]["side_openings"]["depth_percent"] = 1.0
+        box, *_ = organizer_app.design_from_dict(saved)
+        validate_side_openings(box)
+
     def test_save_load_round_trips_exactly(self) -> None:
         spec = self._box(x=48.0, y=48.0, z=40.0)
         spec = replace(spec, side_openings=SideOpeningSpec(

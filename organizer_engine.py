@@ -660,8 +660,8 @@ class SideOpeningSpec:
             if side in seen:
                 raise ValueError(f"side opening side '{side}' is duplicated")
             seen.add(side)
-        if not math.isfinite(self.depth_percent) or not (0.0 < self.depth_percent <= 100.0):
-            raise ValueError("side opening depth must be between 0 and 100 percent")
+        if not math.isfinite(self.depth_percent) or not (1.0 <= self.depth_percent <= 100.0):
+            raise ValueError("side opening depth must be between 1 and 100 percent")
         if self.enabled and not self.sides:
             raise ValueError("side openings are enabled but no sides are selected")
 

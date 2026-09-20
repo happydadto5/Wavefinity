@@ -50,6 +50,9 @@ const state = {
   // Set while a user-driven Width/Length edit waits for grow-only minimum
   // enforcement. Consumed by the debounced design update.
   binResizePending: false,
+  // Only Width/Length edits set this; wall/base edits also use
+  // binResizePending but do not change Side Opening wall eligibility.
+  binFootprintResizePending: false,
   camera: { yaw: 45, elevation: 76, zoom: 1 },
   lastBoxSize: null,
   previewRequest: 0,
@@ -330,6 +333,7 @@ async function loadFreshOrdinaryDesignForCurrentFolder() {
   state.history = [];
   state.future = [];
   state.binResizePending = false;
+  state.binFootprintResizePending = false;
   syncForm();
   clearDraftSelection();
   activatePreviewView("3d");
@@ -805,6 +809,7 @@ const SIDE_OPENING_DEFAULTS = {
   depth_percent: 100, top_support: false,
 };
 const SIDE_OPENING_SIDE_IDS = ["front", "back", "left", "right"];
+let sideOpeningAdjustmentNote = "";
 
 function sideOpeningState(design = state.design) {
   return { ...SIDE_OPENING_DEFAULTS, ...(design?.box?.side_openings || {}) };
@@ -826,6 +831,49 @@ function sideOpeningEligibleSide(side, design = state.design) {
   const rules = state.catalog?.side_openings || {};
   const minSide = number(rules.min_side_mm, 16);
   return sideOpeningSideSpan(side, design) >= minSide - 1e-9;
+}
+
+// BEGIN SIDE_OPENING_SELECTION_HELPER
+function reconcileSideOpeningSelection(selectedSides, eligibleSides) {
+  const eligible = new Set(eligibleSides);
+  const sides = selectedSides.filter(side => eligible.has(side));
+  const removed = selectedSides.filter(side => !eligible.has(side));
+  let replacement = null;
+  if (!sides.length && eligibleSides.length) {
+    replacement = eligibleSides[0];
+    sides.push(replacement);
+  }
+  return { sides, removed, replacement };
+}
+// END SIDE_OPENING_SELECTION_HELPER
+
+function reconcileSideOpeningsAfterResize(design) {
+  sideOpeningAdjustmentNote = "";
+  const current = sideOpeningState(design);
+  if (!current.enabled) return;
+
+  const eligibleSides = SIDE_OPENING_SIDE_IDS.filter(side => sideOpeningEligibleSide(side, design));
+  const result = reconcileSideOpeningSelection(current.sides || [], eligibleSides);
+  if (!result.sides.length) {
+    design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };
+    return;
+  }
+
+  design.box.side_openings = { ...current, enabled: true, sides: result.sides };
+  const allowed = sideOpeningAllowedSizes(design);
+  if (allowed.length && !allowed.includes(design.box.side_openings.size)) {
+    design.box.side_openings.size = allowed[allowed.length - 1];
+  }
+
+  if (result.removed.length) {
+    const removed = result.removed.map(side => side[0].toUpperCase() + side.slice(1)).join(" and ");
+    const replacement = result.replacement
+      ? ` ${result.replacement[0].toUpperCase() + result.replacement.slice(1)} was selected instead.`
+      : "";
+    const verb = result.removed.length === 1 ? "was" : "were";
+    const wall = result.removed.length === 1 ? "that wall is" : "those walls are";
+    sideOpeningAdjustmentNote = `${removed} ${verb} turned off because ${wall} now shorter than 2 units (16 mm).${replacement}`;
+  }
 }
 
 // Python remains authoritative for real validation/geometry; this mirrors
@@ -954,6 +1002,8 @@ function syncSideOpeningControls() {
     if (!anyEligible) {
       const rules = state.catalog?.side_openings || {};
       note.textContent = `Side openings require at least one bin side to be 2 units (${fmt(number(rules.min_side_mm, 16))} mm) or longer.`;
+    } else if (sideOpeningAdjustmentNote) {
+      note.textContent = sideOpeningAdjustmentNote;
     } else if (forced) {
       note.textContent = "Top Support is required while Lid & Stacking is enabled.";
     } else {
@@ -2393,12 +2443,22 @@ function updateDesignFromForm() {
   const newBoxY = normalizeBinDimension("y", $("#y-size").value, design.box.y);
   design.box.x = newBoxX;
   design.box.y = newBoxY;
+  const boxFootprintChanged = design.box.x !== prevBoxX || design.box.y !== prevBoxY;
+  // Width/Length handlers update state before this debounced read, so the
+  // dedicated pending flag detects a resize even when prevBoxX/Y already
+  // contain the new values.
+  const sideOpeningResizeChanged = state.binFootprintResizePending || boxFootprintChanged;
   const prevBoxZ = design.box.z;
   design.box.z = normalizeBinDimension("z", $("#z").value, design.box.z);
-  if (design.box.x !== prevBoxX || design.box.y !== prevBoxY) {
+  if (boxFootprintChanged) {
     turnOffNestAutoSizeForManualEdit();
   }
   checkBinSizeChange();
+  if (sideOpeningResizeChanged) {
+    reconcileSideOpeningsAfterResize(design);
+    syncSideOpeningControls();
+    state.binFootprintResizePending = false;
+  }
   if (design.box.z !== prevBoxZ) {
     const setAutoConnectorHeight = selector => {
       const input = $(selector);
@@ -2577,6 +2637,7 @@ const applyChangedDesign = debounce(() => {
     enforceBinMinimumSoon();
   }
   state.binResizePending = false;
+  state.binFootprintResizePending = false;
 }, 280);
 
 function cancelChangedDesignDebounce() {
@@ -2607,6 +2668,7 @@ function changedDesign(previousDesign = null) {
 
 function markBinAxisManual(_axis) {
   state.binResizePending = true;
+  state.binFootprintResizePending = true;
 }
 
 let pendingNudgeHistory = null;
@@ -2989,6 +3051,7 @@ function wireControls() {
   });
   $("#side-openings-toggle").addEventListener("click", () => {
     const previous = clone(state.design);
+    sideOpeningAdjustmentNote = "";
     if (sideOpeningPartActive()) {
       state.design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };
     } else {
@@ -3009,6 +3072,7 @@ function wireControls() {
    "#side-opening-front", "#side-opening-back", "#side-opening-left", "#side-opening-right"]
     .forEach(selector => $(selector)?.addEventListener("change", () => {
       const previous = clone(state.design);
+      sideOpeningAdjustmentNote = "";
       readSideOpeningForm(state.design);
       syncSideOpeningControls();
       changedDesign(previous);
@@ -9986,6 +10050,7 @@ async function openDesign(event) {
     state.history = [];
     state.future = [];
     state.binResizePending = false;
+    state.binFootprintResizePending = false;
     syncForm();
     clearDraftSelection();
     await refreshPreview();
@@ -10009,6 +10074,7 @@ async function newDesign() {
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
   state.binResizePending = false;
+  state.binFootprintResizePending = false;
   recordHistory(previousDesign);
   state.drafts = {};
   syncForm();
