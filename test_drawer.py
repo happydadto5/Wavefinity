@@ -722,7 +722,11 @@ class AutoSpaceFolderTests(unittest.TestCase):
                     "y": 300,
                     "z": 60,
                 })
-            self.assertIn("already exists. Choose a different Space name.", str(ctx.exception))
+            self.assertEqual(
+                str(ctx.exception),
+                "That Space name is already in use. "
+                "Space names can't be reused. Choose a different name.",
+            )
 
     def test_auto_space_cleanup_on_validation_failure(self):
         with tempfile.TemporaryDirectory() as tmp:

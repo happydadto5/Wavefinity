@@ -3085,16 +3085,43 @@ class Fix20SpaceFormTests(unittest.TestCase):
         html = (root / "index.html").read_text(encoding="utf-8")
         self.assertIn('<p id="space-form-type"', html)
         self.assertEqual(html.count('class="space-dimension-row"'), 3)
-        self.assertIn('id="space-create" type="button"', html)
-        self.assertIn('id="space-save-changes" type="button"', html)
+        self.assertIn(
+            'id="space-create" class="button primary" type="button"',
+            html,
+        )
+        self.assertIn(
+            'id="space-save-changes" class="button primary" type="button"',
+            html,
+        )
 
     def test_space_form_submit_event_and_button_clicks(self):
+        import re
         root = Path(__file__).resolve().parent / "web"
         spaces = (root / "spaces.js").read_text(encoding="utf-8")
-        self.assertIn('spaceForm.addEventListener("submit", event => {', spaces)
-        self.assertIn('event.preventDefault();', spaces)
-        self.assertIn('createButton.addEventListener("click", () => SP.create());', spaces)
-        self.assertIn('saveButton.addEventListener("click", () => SP.update());', spaces)
+        self.assertIn(
+            'spaceForm.addEventListener("submit", event => event.preventDefault());',
+            spaces,
+        )
+        self.assertIn(
+            'document.getElementById("space-create")',
+            spaces,
+        )
+        self.assertIn(
+            '?.addEventListener("click", () => SP.run(SP.create));',
+            spaces,
+        )
+        self.assertIn(
+            'document.getElementById("space-save-changes")',
+            spaces,
+        )
+        self.assertIn(
+            '?.addEventListener("click", () => SP.run(SP.updateSpace));',
+            spaces,
+        )
+        wire_start = spaces.index("SP.wire = () => {")
+        wire_end = spaces.index("\n};", wire_start)
+        wire_body = spaces[wire_start:wire_end]
+        self.assertFalse(re.search(r'addEventListener\(["\']submit["\'].*(?:create|updateSpace)', wire_body))
 
     def test_space_setup_button_labels_and_help(self):
         root = Path(__file__).resolve().parent / "web"
@@ -3160,10 +3187,61 @@ class Fix20StorageBoxDividerTests(unittest.TestCase):
         root = Path(__file__).resolve().parent / "web"
         app_js = (root / "app.js").read_text(encoding="utf-8")
         self.assertIn("function b4bPartAllowed(kind) {\n  return kind === \"divider\";\n}", app_js)
-        self.assertIn("if (b4bEnabled() && !b4bPartAllowed(kind)) return;", app_js)
-        self.assertIn("if (b4bEnabled() && kind === \"divider\") {", app_js)
-        self.assertIn("if (box?.b4b?.enabled) {\n    return [number(box.x), number(box.y)];\n  }", app_js)
-        self.assertNotIn("b4bEnabled()", app_js[app_js.find("function eligibleGridDividerIndexes") : app_js.find("function updateDividerEditBreadcrumb")])
+
+        pick_start = app_js.index("function pickKind(kind) {")
+        pick_end = app_js.index("async function selectEdgeMount(", pick_start)
+        pick = app_js[pick_start:pick_end]
+        self.assertLess(
+            pick.index("if (b4bEnabled() && !b4bPartAllowed(kind)) return;"),
+            pick.index("state.paletteBrowsing = false;"),
+        )
+        self.assertIn("if (b4bEnabled() && kind === \"divider\") {", pick)
+
+        select_start = app_js.index("async function selectKind(kind, reset = false) {")
+        select_end = app_js.index("async function selectedFeature(", select_start)
+        select = app_js[select_start:select_end]
+        self.assertLess(
+            select.index("if (b4bEnabled() && !b4bPartAllowed(kind)) return;"),
+            select.index("state.draftKind = kind;"),
+        )
+
+        open_mod_start = app_js.index("async function openModifier(kind, fromPlaced = false) {")
+        open_mod_end = app_js.index("async function addModifier(", open_mod_start)
+        open_mod = app_js[open_mod_start:open_mod_end]
+        self.assertLess(
+            open_mod.index("if (b4bEnabled()) return;"),
+            open_mod.index("if (!BOX_MODIFIER_KINDS.has(kind)"),
+        )
+
+        add_mod_start = app_js.index("async function addModifier(kind) {")
+        add_mod_end = app_js.index("async function removeModifier(", add_mod_start)
+        add_mod = app_js[add_mod_start:add_mod_end]
+        self.assertLess(
+            add_mod.index("if (b4bEnabled()) return;"),
+            add_mod.index("if (kind === \"inside_handles\""),
+        )
+
+        div_ext_start = app_js.index("function dividerLayoutExtent(box = state.design?.box) {")
+        div_ext_end = app_js.index("function positionSharedThicknessControls(", div_ext_start)
+        div_ext = app_js[div_ext_start:div_ext_end]
+        self.assertIn("if (box?.b4b?.enabled) {\n    return [number(box.x), number(box.y)];\n  }", div_ext)
+
+        elig_start = app_js.index("function eligibleGridDividerIndexes() {")
+        elig_end = app_js.index("function updateDividerEditBreadcrumb() {", elig_start)
+        elig = app_js[elig_start:elig_end]
+        self.assertNotIn("b4bEnabled()", elig)
+
+        render_start = app_js.index("function renderDraftFields(one = state.draft) {")
+        render_end = app_js.index("function renderFitActions(", render_start)
+        render_code = app_js[render_start:render_end]
+        self.assertIn("if (!b4bEnabled()) {\n      const hasLabels = opt.label_divisions === true;", render_code)
+
+        b4b_vis_start = app_js.index("function applyB4BVisibility() {")
+        b4b_vis_end = app_js.index("function b4bHandleBlockedReason() {", b4b_vis_start)
+        b4b_vis = app_js[b4b_vis_start:b4b_vis_end]
+        self.assertIn("button.hidden = on && !b4bPartAllowed(button.dataset.kind);", b4b_vis)
+        self.assertNotIn('hide("#tab-2d"', b4b_vis)
+        self.assertNotIn('hide(".tab-button[data-canvas=\\"2d\\"]"', b4b_vis)
 
     def test_default_feature_payload_for_b4b_divider(self):
         design = self._b4b_design()
@@ -3207,7 +3285,10 @@ class Fix20StorageBoxDividerTests(unittest.TestCase):
 
         preview = preview_payload({"design": design})
         self.assertIn("meshes", preview)
-        self.assertIn("feature_divider", preview["meshes"])
+        self.assertTrue(any(
+            mesh.get("kind") == "feature_divider"
+            for mesh in preview["meshes"]
+        ))
         self.assertEqual(preview["layout_bounds"], [-32.0, -24.0, 32.0, 24.0])
         self.assertEqual(len(preview["design"]["layout"]["features"]), 1)
 
@@ -3215,7 +3296,10 @@ class Fix20StorageBoxDividerTests(unittest.TestCase):
         draft_feat = dict(feat)
         draft_feat["options"] = {"count_x": 2, "count_y": 1}
         draft_prev = preview_payload({"design": design, "draft": draft_feat, "selected": 0})
-        self.assertIn("feature_divider", draft_prev["meshes"])
+        self.assertTrue(any(
+            mesh.get("kind") == "feature_divider"
+            for mesh in draft_prev["meshes"]
+        ))
         # Preview never commits live draft to saved design
         self.assertEqual(draft_prev["design"]["layout"]["features"][0]["options"], feat.get("options"))
 
@@ -3224,7 +3308,10 @@ class Fix20StorageBoxDividerTests(unittest.TestCase):
         bad_draft["options"] = {"label_divisions": True}
         bad_prev = preview_payload({"design": design, "draft": bad_draft, "selected": 0})
         self.assertTrue(bad_prev["draft_error"])
-        self.assertIn("base", bad_prev["meshes"])
+        self.assertTrue(any(
+            mesh.get("kind") == "b4b_body" and mesh.get("owner") == "base"
+            for mesh in bad_prev["meshes"]
+        ))
 
 
 class Fix20StorageBoxMaterialsTests(unittest.TestCase):
@@ -3245,14 +3332,60 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
         self.assertEqual(rules["wall_choices"], expected_ladder)
         self.assertEqual(rules["base_choices"], expected_ladder)
 
-    def test_app_js_material_functions(self):
+    def test_app_js_material_functions_and_fallbacks(self):
         root = Path(__file__).resolve().parent / "web"
         app_js = (root / "app.js").read_text(encoding="utf-8")
+
+        # b4bMinWall helper
         self.assertIn("function b4bMinWall() {\n  return number(state.catalog?.b4b_rules?.min_wall_mm, 0.8);\n}", app_js)
+
+        # populateWallChoices numericChoices preservation for B4B
+        wall_fn_start = app_js.index("function populateWallChoices(box, select = $(\"#wall-thickness\")) {")
+        wall_fn_end = app_js.index("function baseRequiredMin(", wall_fn_start)
+        wall_fn = app_js[wall_fn_start:wall_fn_end]
+        self.assertIn("const numericChoices = isB4B\n    ? choices\n    : choices.filter(choice => fmt(choice.value) !== ordinaryDefaultValue);", wall_fn)
+
+        # populateBaseChoices numericChoices preservation for B4B
+        base_fn_start = app_js.index("function populateBaseChoices(box, select = $(\"#base-thickness\")) {")
+        base_fn_end = app_js.index("function syncBaseControls() {", base_fn_start)
+        base_fn = app_js[base_fn_start:base_fn_end]
+        self.assertIn("const numericChoices = isB4B\n    ? choices\n    : choices.filter(choice => fmt(choice.value) !== ordinaryDefaultValue);", base_fn)
+
+        # applyB4BMaterialDefaults definition and invocation on B4B enable
         self.assertIn("function applyB4BMaterialDefaults(design = state.design) {", app_js)
         self.assertIn("box.wall = number(rules.default_wall_mm, 1.6);", app_js)
         self.assertIn("box.base_thickness = number(rules.default_base_mm, 1.6);", app_js)
-        self.assertIn("Super thin / light duty — reduced case strength.", app_js)
+        toggle_b4b_start = app_js.index("async function toggleB4B(wantEnabled) {")
+        toggle_b4b_end = app_js.index("async function changeBinType() {", toggle_b4b_start)
+        toggle_b4b = app_js[toggle_b4b_start:toggle_b4b_end]
+        self.assertIn("applyB4BMaterialDefaults(state.design);", toggle_b4b)
+
+        # normalizeB4BBaseForStacking fallback
+        norm_stack_start = app_js.index("function normalizeB4BBaseForStacking(design = state.design) {")
+        norm_stack_end = app_js.index("function b4bValidationErrors(", norm_stack_start)
+        norm_stack = app_js[norm_stack_start:norm_stack_end]
+        self.assertIn("b4bPreStackBase = number(box.base_thickness, number(state.catalog?.b4b_rules?.default_base_mm, 1.6));", norm_stack)
+
+        # visibleDesignSnapshot B4B fallbacks
+        vsnap_start = app_js.index("function visibleDesignSnapshot() {")
+        vsnap_end = app_js.index("function checkBinSizeChange() {", vsnap_start)
+        vsnap = app_js[vsnap_start:vsnap_end]
+        self.assertIn("const defaultBase = visibleB4B\n    ? number(b4bRules.default_base_mm, 1.6)\n    : number(state.catalog?.base_rules?.default_mm, 0.6);", vsnap)
+        self.assertIn("const defaultWall = visibleB4B\n    ? number(b4bRules.default_wall_mm, 1.6)\n    : (wallRules.default_mm ?? 0.8);", vsnap)
+
+        # updateDesignFromForm B4B fallbacks
+        update_form_start = app_js.index("function updateDesignFromForm() {")
+        update_form_end = app_js.index("function updateInteriorModeVisibility(", update_form_start)
+        update_form = app_js[update_form_start:update_form_end]
+        self.assertIn("const defaultWall = b4bOn\n    ? number(b4bRules.default_wall_mm, 1.6)\n    : (wallRules.default_mm ?? 0.8);", update_form)
+        self.assertIn("const defaultBase = b4bOn\n    ? number(b4bRules.default_base_mm, 1.6)\n    : number(state.catalog?.base_rules?.default_mm, 0.6);", update_form)
+
+        # syncWallControls uses wallPresetChoices and B4B super-thin warning
+        sync_wall_start = app_js.index("function syncWallControls() {")
+        sync_wall_end = app_js.index("function syncForm() {", sync_wall_start)
+        sync_wall = app_js[sync_wall_start:sync_wall_end]
+        self.assertIn("const choices = wallPresetChoices(state.design?.box);", sync_wall)
+        self.assertIn("Super thin / light duty — reduced case strength.", sync_wall)
 
 
 if __name__ == "__main__":

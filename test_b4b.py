@@ -961,9 +961,28 @@ class B4BDividerAndMaterialTests(unittest.TestCase):
         objs_no_div = b4b.b4b_build_print_objects(box, ())
         objs_with_div = b4b.b4b_build_print_objects(box, (feat,))
         self.assertEqual(len(objs_no_div), len(objs_with_div))
-        body_no = next(o for o in objs_no_div if "Body" in o["name"])
-        body_with = next(o for o in objs_with_div if "Body" in o["name"])
-        self.assertGreater(body_with["mesh"].volume, body_no["mesh"].volume)
+        body_no_parts = next(
+            parts for object_name, parts in objs_no_div
+            if object_name == "Storage Box Body"
+        )
+        body_with_parts = next(
+            parts for object_name, parts in objs_with_div
+            if object_name == "Storage Box Body"
+        )
+        body_no = next(
+            mesh for part_name, mesh in body_no_parts
+            if part_name == "Storage Box Body"
+        )
+        body_with = next(
+            mesh for part_name, mesh in body_with_parts
+            if part_name == "Storage Box Body"
+        )
+
+        self.assertGreater(body_with.volume, body_no.volume)
+        self.assertFalse(any(
+            object_name == "Divider"
+            for object_name, _parts in objs_with_div
+        ))
 
 
 if __name__ == "__main__":
