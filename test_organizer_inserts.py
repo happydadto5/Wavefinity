@@ -2470,11 +2470,22 @@ class BoreAutoModeTests(unittest.TestCase):
             self.assertEqual(fixed.zone, whole)
             self.assertNotIn("height", fixed.options)
             height = inserts.resolved_options(box, fixed, box.base_thickness)["height"]
-            self.assertLessEqual(box.base_thickness + height, box.z + 1e-9)
-            self.assertGreater(height, box.z - box.base_thickness - 12.0)
+            self.assertAlmostEqual(height, box.z - box.base_thickness, places=6)
             inserts.build_features(
                 box, [fixed], box.base_thickness, whole, "fused",
             )
+
+
+class BoreAutoBaseZoneTests(unittest.TestCase):
+    def test_mode_conversion_keeps_exact_derived_zone(self):
+        from organizer_app import convert_layout_mode
+        one = inserts.Feature(
+            "bore", inserts.Zone(-8.0, -8.0, 8.0, 8.0),
+            item=inserts.LIBRARY["hex_driver"], options={"auto_base": True, "auto_height": True},
+        )
+        for mode in ("fused", "cartridge"):
+            layout = convert_layout_mode(BIN, [one], mode)
+            self.assertEqual(layout.features[0].zone, inserts.layout_zone(BIN, mode))
 
 
 class SlotRackTests(unittest.TestCase):

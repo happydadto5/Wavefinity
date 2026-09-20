@@ -4813,11 +4813,35 @@ function enableBoreAuto(group) {
   finishBoreAutoChange();
 }
 
-function manualizeBoreAuto(group, focusKey) {
+// Leaving Height / Grid Auto seeds the manual numbers from a fresh server
+// resolve of the still-Auto draft, never from cached resolved options that may
+// predate the Auto switch.
+async function manualizeBoreAuto(group, focusKey) {
   const one = state.draft;
-  if (!one?.options?.[`auto_${group}`]) return;
+  if (!one?.options?.[`auto_${group}`] || state.boreManualizing) return;
   markDraftChanged();
-  const resolved = state.draftResolvedOptions || {};
+  let resolved = null;
+  if (group !== "base") {
+    state.boreManualizing = true;
+    refreshDraftSoon.cancel();
+    const request = ++state.draftRequest;
+    try {
+      const index = draftCommitIndex();
+      const result = await api("/api/feature/draft", {
+        design: state.design, feature: one,
+        ...(index === false ? {} : { index }),
+      });
+      if (request !== state.draftRequest || state.draft !== one) return;
+      resolved = result.resolved_options || {};
+      state.draftResolvedOptions = resolved;
+    } catch (error) {
+      toast(error.message || "Could not read the current Auto values.", true);
+      return;
+    } finally {
+      state.boreManualizing = false;
+    }
+  }
+  if (!one.options?.[`auto_${group}`]) return;
   delete one.options[`auto_${group}`];
   if (group === "base") {
     // Keep the current full-interior size as the manual Base and own both axes.

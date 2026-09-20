@@ -10,10 +10,7 @@ import trimesh
 from organizer_engine import BoxSpec
 from organizer_geometry import difference, union
 
-from ._core import (
-    CONNECTOR_EDGE_KEEP_OUT, Feature, Zone, _fit_count, _need_item,
-    connector_keep_out, layout_zone,
-)
+from ._core import Feature, _fit_count, _need_item, layout_zone
 from ._registry import (
     OptionDefinition, SettingInteraction, defaults, feature,
     register_setting_interactions, resolved_options,
@@ -85,22 +82,11 @@ def bore_minimum_pitches(
 def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     item = _need_item(one)
     auto_height = bool(one.options.get("auto_height"))
-    top = box.z
-    if auto_height:
-        whole = Zone.whole(box)
-        zone = one.zone
-        if (zone.x0 <= whole.x0 + CONNECTOR_EDGE_KEEP_OUT
-                or zone.x1 >= whole.x1 - CONNECTOR_EDGE_KEEP_OUT
-                or zone.y0 <= whole.y0 + CONNECTOR_EDGE_KEEP_OUT
-                or zone.y1 >= whole.y1 - CONNECTOR_EDGE_KEEP_OUT):
-            # A Base touching the wall must still leave room for a connector
-            # to seat; that existing rule caps how close to the rim it may rise.
-            top = min(top, connector_keep_out(box))
     if _is_hex_bit(item.profile):
-        hole = min(HEX_BIT_HOLD[item.profile], top - base_z - 2.0)
+        hole = min(HEX_BIT_HOLD[item.profile], box.z - base_z - 2.0)
         held = HEX_BIT_FLATS + HEX_BIT_CLEARANCE
     else:
-        hole = min(item.length * 0.4, top - base_z - 2.0)
+        hole = min(item.length * 0.4, box.z - base_z - 2.0)
         held = item.held(item.widest)
     try:
         angle = max(0.0, float(one.options.get("angle", 0.0) or 0.0))
@@ -114,7 +100,7 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     except (TypeError, ValueError):
         depth = hole
     reach = max(0.0, depth) * math.sin(math.radians(angle)) if tilted else 0.0
-    resolved_height = top - base_z if auto_height else one.options.get("depth", hole) + 2.0
+    resolved_height = box.z - base_z if auto_height else one.options.get("depth", hole) + 2.0
     resolved_grid: dict[str, float] = {}
     if one.options.get("auto_grid"):
         # Auto Grid fills the current Base: the most holes that fit on each

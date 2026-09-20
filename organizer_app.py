@@ -2300,6 +2300,10 @@ def convert_layout_mode(
                 cx - width / 2.0, cy - depth / 2.0,
                 cx + width / 2.0, cy + depth / 2.0,
             )
+        if one.kind == "bore" and one.options.get("auto_base"):
+            # Its zone is the exact derived usable area; snapping would shrink it.
+            converted_items.append(one)
+            continue
         converted_items.append(replace(one, zone=snapped_zone(zone, box, mode)))
     converted = tuple(converted_items)
     layout = Layout(converted, mode, EDITOR_SNAP)

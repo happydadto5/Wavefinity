@@ -190,6 +190,8 @@ def build_features(
         if (
             touches_wall
             and not (one.kind == "nest" and one.contour)
+            # A full-height Auto Bore deliberately reaches the rim.
+            and not (one.kind == "bore" and one.options.get("auto_height"))
             and any(solid.bounds[1][2] > connector_keep_out(box) + 1e-6 for solid in made)
             and not (divider_rim_shelf and clears_stack_lid)
         ):

@@ -1942,7 +1942,8 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # Full-span Dividers and Curved Scoops are derived from the bin, not from
     # a user-draggable footprint. Keep their exact normalized zone instead of
     # passing it through ordinary 1 mm resize/move snapping.
-    if not (one.kind == "scoop" or (one.kind == "divider" and one.full_span)):
+    if not (one.kind == "scoop" or (one.kind == "divider" and one.full_span)
+            or (one.kind == "bore" and one.options.get("auto_base"))):
         width, depth = one.zone.width, one.zone.depth
         cx, cy = one.zone.centre
         one = resized_feature(one, box, (width, depth), layout.mode, layout.snap)
