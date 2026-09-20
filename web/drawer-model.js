@@ -39,6 +39,7 @@ const DL = {
   dirty: false,
   saving: false,
   saveAgain: false,
+  savePromise: null,     // Fix 019 correction C1.1: the in-flight serialized save chain, if any
   saveState: "idle",     // idle | saving | saved | error
   savedAt: null,
   saveError: "",
@@ -573,32 +574,65 @@ DL.load = async () => {
 // in spaces.js, Fix 019 Item 2) must check the return value rather than
 // assume success. UI error handling (toast + saveState/saveError) is
 // unchanged either way.
-DL.save = async () => {
+//
+// Serialization (Fix 019 correction C1.1): DL.save() never hands out an
+// optimistic `true` to a caller that arrives while a save is already in
+// flight. Instead every caller awaits the SAME promise chain - either the
+// request already running, or (if the layout changes again before that
+// request finishes) one more queued, serialized request sent right after
+// it. DL.saving stays true for the whole chain, and the real, final result
+// (success or failure) is what every waiting caller receives. This is a
+// small internal loop driven by DL.savePromise/DL.saveAgain, not polling.
+DL.save = () => {
   DL.saveSoon.cancel();
-  if (!DL.layout) return true;
-  if (DL.saving) { DL.saveAgain = true; return true; }
-  DL.saving = true;
-  DL.saveState = "saving";
-  DL.emit();
-  const sent = DL.snapshot();
-  let ok = true;
-  try {
-    const data = await DL.inventoryCall("/api/drawer/save", { layout: DL.layout });
-    DL.adopt(data);
-    DL.exists = true;
-    if (DL.snapshot() === sent) DL.dirty = false;
-    DL.saveState = "saved";
-    DL.savedAt = new Date();
-  } catch (error) {
-    ok = false;
-    DL.saveState = "error";
-    DL.saveError = error.message;
-    toast(`Layout not saved: ${error.message}`, true, 6000);
-  } finally {
-    DL.saving = false;
-    DL.emit();
-    if (DL.saveAgain) { DL.saveAgain = false; DL.save(); }
+  if (!DL.layout) return Promise.resolve(true);
+  if (DL.savePromise) {
+    // A save is already in flight. Ask for one more serialized save of
+    // whatever the layout looks like when that request finishes, and wait
+    // on the exact same promise everyone else is waiting on - never an
+    // early, optimistic `true`.
+    DL.saveAgain = true;
+    return DL.savePromise;
   }
+  DL.savePromise = DL._runSaveChain().finally(() => {
+    DL.savePromise = null;
+  });
+  return DL.savePromise;
+};
+
+// Runs one or more serialized "/api/drawer/save" requests back to back
+// until the layout stops changing underneath it, and resolves once that
+// chain is genuinely finished. Only DL.save() should call this.
+DL._runSaveChain = async () => {
+  DL.saving = true;
+  let ok = true;
+  do {
+    DL.saveAgain = false;
+    DL.saveState = "saving";
+    DL.emit();
+    const sent = DL.snapshot();
+    try {
+      const data = await DL.inventoryCall("/api/drawer/save", { layout: DL.layout });
+      DL.adopt(data);
+      DL.exists = true;
+      if (DL.snapshot() === sent) DL.dirty = false;
+      DL.saveState = "saved";
+      DL.savedAt = new Date();
+      ok = true;
+    } catch (error) {
+      ok = false;
+      DL.saveState = "error";
+      DL.saveError = error.message;
+      toast(`Layout not saved: ${error.message}`, true, 6000);
+    }
+    // Only chain another serialized save when the previous one actually
+    // succeeded and something asked for one more in the meantime. A
+    // failure ends the chain immediately so every waiting caller (e.g. a
+    // Space-switch safe-leave check) gets `false` and can abort - it must
+    // not silently retry and let a caller think the switch is still safe.
+  } while (ok && DL.saveAgain);
+  DL.saving = false;
+  DL.emit();
   return ok;
 };
 // Don't write on every keystroke: wait for a lull, then hold off saving again

@@ -659,18 +659,35 @@ SP.assertExpectedHostedIdentity = (info, expectedSpaceId) => {
   }
 };
 
-SP.useHostedFolder = async (folder, { expectedSpaceId = null } = {}) => {
+SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = false } = {}) => {
   // A hosted Design session without a persistent folder is "no folder
   // selected", never a fabricated one. Opening a Wavefinity folder therefore
   // always needs a real handle.
   if (!folder?.handle) {
     throw new Error("Opening a Wavefinity folder requires writable folder access.");
   }
+  // Read-only classification of the target folder only - no write yet.
   let info = await SP.inspectHosted(folder);
+  SP.assertExpectedHostedIdentity(info, expectedSpaceId);
+
+  // Leave the old Drawer layout safely BEFORE any write to the target
+  // folder - the inventory-filename migration and metadata version upgrade
+  // just below - or adoption of it as the active folder/handle (Fix 019
+  // correction C1.3). Cancel or a failed save must abort here, leaving the
+  // target folder and the previously active folder/handle untouched.
+  // skipLeaveCheck is set only by a caller that already resolved this exact
+  // decision itself immediately beforehand (e.g. hosted
+  // SP.useUntypedFolder(), which must write the target's own metadata
+  // before calling in here) - it must never be used to skip the decision
+  // itself, only to avoid asking twice.
+  if (!skipLeaveCheck) {
+    const ok = await SP.leaveDrawerLayoutSafely();
+    if (!ok) return null;
+  }
+
   // The hosted equivalent of the local technical open: only after read-only
   // classification says no setup is needed, adopt the canonical inventory
   // filename and give a configured v4 folder its v5 identity.
-  SP.assertExpectedHostedIdentity(info, expectedSpaceId);
   if (!info.needs_setup) {
     if (info.inventory) await SP.readInventoryFor(folder, { migrate: true });
     const upgradeSpace = info.folder_mode === "space" && (
@@ -690,12 +707,9 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null } = {}) => {
   if (expectedSpaceId && info.space_id !== expectedSpaceId) {
     throw new Error("This folder is not the Space that was open before. Use Open Existing Space to choose it.");
   }
-  // Leave the old Drawer layout safely FIRST (Fix 019 Item 2): if the user
-  // cancels or a save fails, none of the new-folder adoption/persistence
-  // steps below may run - the previously active folder/handle stays
-  // authoritative and untouched.
-  const left = await SP.resetDrawer();
-  if (!left) return null;
+  // The safe-leave decision is already resolved above - clear the old
+  // Drawer state exactly once, with no second prompt.
+  await SP.resetDrawer({ skipSafeLeave: true });
   state.browserFolder = folder;
   await WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null });
   await SP.applyFolder(info, { reset: false });
@@ -776,9 +790,18 @@ SP.afterPick = async folder => {
     SP.enterSetupFor(folder, inspected.folder);
     return inspected.folder;
   }
+  // Resolve the safe-leave decision BEFORE the backend remembers this
+  // folder as active (Fix 019 correction C1.2) - Cancel or a failed save
+  // must abort before /api/folder/use ever runs, so the backend's
+  // remembered active folder/Space cannot get ahead of what is on screen.
+  const okToLeave = await SP.leaveDrawerLayoutSafely();
+  if (!okToLeave) return null;
   const data = await api("/api/folder/use", { output: folder });
   SP.recent = data.recent || [];
-  if (!(await SP.applyFolder(data.folder))) return null;
+  // The leave decision is already resolved - clear the old Drawer state
+  // exactly once, with no second prompt, then adopt the new folder.
+  await SP.resetDrawer({ skipSafeLeave: true });
+  if (!(await SP.applyFolder(data.folder, { reset: false }))) return null;
   SP.close();
   toast(data.folder.folder_mode === "space"
     ? `Opened ${data.folder.space?.name || data.folder.folder_name}.`
@@ -1304,6 +1327,16 @@ SP.create = async () => {
   }
   SP.configureData = null;
 
+  // Resolve the safe-leave decision BEFORE any write to the target folder
+  // (inventory migration, metadata write) or backend mutation, and before
+  // the new active handle is saved (Fix 019 correction C1.2/C1.3). This
+  // covers Create New Space, Configure Existing and migrate, in both hosted
+  // and local runtimes - Cancel or a failed save must abort here, leaving
+  // the target folder, the backend's remembered active folder, and the
+  // previously active handle all untouched.
+  const okToLeave = await SP.leaveDrawerLayoutSafely();
+  if (!okToLeave) return;
+
   let info;
   if (state.runtime.hosted) {
     // Read/write the *selected target's* inventory filename, never the
@@ -1351,10 +1384,13 @@ SP.create = async () => {
     info = data.folder;
   }
 
+  // The leave decision is already resolved above - clear the old Drawer
+  // state exactly once, with no second prompt.
+  await SP.resetDrawer({ skipSafeLeave: true });
   // SP.create() always follows with an explicit designSurface/designPortable/
   // loadFreshOrdinaryDesignForCurrentFolder call below, which installs the
   // starter design itself - skip applyFolder's own (redundant) activation.
-  await SP.applyFolder(info, { initDesign: false });
+  await SP.applyFolder(info, { initDesign: false, reset: false });
   SP.close();
 
   if (kind === "portable") await SP.designPortable(info.space);
@@ -1537,19 +1573,34 @@ SP.useUntypedFolder = async () => {
             SP.showDialog();
             return;
         }
+        // Resolve the safe-leave decision BEFORE writing the target folder's
+        // own metadata (Fix 019 correction C1.3) - Cancel or a failed save
+        // must abort before "design" is committed to this folder.
+        const okToLeave = await SP.leaveDrawerLayoutSafely();
+        if (!okToLeave) return;
         await SP.writeMetadata(folder.handle, "design", null, true);
         SP.configureData = null;
-        const info = await SP.useHostedFolder(folder);
+        // The leave decision above already covers this switch - skip asking
+        // again inside SP.useHostedFolder().
+        const info = await SP.useHostedFolder(folder, { skipLeaveCheck: true });
         if (!info) return; // switch aborted (cancelled or a failed save) - stay put
         await loadFreshOrdinaryDesignForCurrentFolder();
     } else {
+        // Resolve the safe-leave decision BEFORE the backend mutates the
+        // active folder (Fix 019 correction C1.2) - Cancel or a failed save
+        // must abort before /api/space/use-untyped ever runs.
+        const okToLeave = await SP.leaveDrawerLayoutSafely();
+        if (!okToLeave) return;
         const data = await api("/api/space/use-untyped", { output: SP.configureData });
         // Clear the selected-folder setup context now that it has been
         // used, so a later Create New Space cannot accidentally reuse it -
         // see Fix 004 Correction 7.F.
         SP.configureData = null;
         SP.recent = data.recent || [];
-        if (!(await SP.applyFolder(data.folder))) return;
+        // The leave decision is already resolved - clear the old Drawer
+        // state once, with no second prompt, then adopt the new folder.
+        await SP.resetDrawer({ skipSafeLeave: true });
+        if (!(await SP.applyFolder(data.folder, { reset: false }))) return;
         SP.close();
         await loadFreshOrdinaryDesignForCurrentFolder();
     }
@@ -1581,10 +1632,14 @@ SP.launch = async () => {
       // through to Welcome, where an explicit action supplies the gesture.
       // The saved record itself is kept.
       hasPermission = Boolean(saved?.handle) && await WFFileSystem.queryReadWritePermission(saved.handle);
-    } catch (_error) {
-      // Reading the saved handle/permission itself failed - not a
-      // metadata/identity error, so fall back quietly too.
-      SP.showHome();
+    } catch (error) {
+      // A thrown exception here means the saved-handle read or the
+      // permission query itself failed (damaged storage, a read error, a
+      // permission-query failure) - a real startup read failure, not the
+      // ordinary "nothing saved" / "permission not granted" outcomes above,
+      // so it must be visible (Fix 019 correction C1.5), consistent with
+      // Fix 019 Item 6's other startup-read-failure handling below.
+      SP.showHome(error?.message || "Wavefinity could not read your saved folder.");
       return;
     }
     if (!hasPermission) { SP.showHome(); return; }

@@ -6591,7 +6591,7 @@ function promptDraftConflict(reason) {
 function appConfirm({
   title, message,
   primaryLabel = "OK", secondaryLabel = null, cancelLabel = "Cancel",
-  danger = false,
+  danger = false, secondaryDanger = false,
 } = {}) {
   return new Promise(resolve => {
     const dialog = $("#app-confirm-dialog");
@@ -6627,8 +6627,10 @@ function appConfirm({
     if (secondaryLabel) {
       secondaryBtn.hidden = false;
       secondaryBtn.textContent = secondaryLabel;
+      secondaryBtn.classList.toggle("danger", secondaryDanger);
     } else {
       secondaryBtn.hidden = true;
+      secondaryBtn.classList.remove("danger");
     }
 
     primaryBtn.onclick = () => finish("primary");
@@ -6637,6 +6639,9 @@ function appConfirm({
 
     dialog.addEventListener("cancel", onCancel);
     if (!dialog.open) dialog.showModal();
+    // Focus always stays on a safe default - the primary action, or Cancel
+    // when the primary itself is the dangerous one - never on a danger-
+    // styled secondary button (e.g. "Discard & Switch").
     (danger ? cancelBtn : primaryBtn).focus();
   });
 }
@@ -6657,6 +6662,10 @@ async function appConfirmSaveDiscardCancel({
 }) {
   const choice = await appConfirm({
     title, message, primaryLabel: saveLabel, secondaryLabel: discardLabel, cancelLabel,
+    // Discard & Switch throws the in-memory layout away - it must read as
+    // destructive (Fix 019 correction C1.4), while Save & Switch stays the
+    // normal safe/default action and keeps focus.
+    secondaryDanger: true,
   });
   if (choice === "primary") return "save";
   if (choice === "secondary") return "discard";

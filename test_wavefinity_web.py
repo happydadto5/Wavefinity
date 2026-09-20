@@ -2148,6 +2148,277 @@ DL.dirty = true;
         self.assertFalse(out["failureReturn"])
         self.assertTrue(out["dirtyAfterFailure"])  # a failed save never clears dirty
 
+    def test_drawer_save_serializes_concurrent_callers(self):
+        # Fix 019 correction C1.1: a caller that arrives while a save is
+        # already in flight must never get an optimistic `true` back - it
+        # has to await the SAME real, serialized result. Case 1: the
+        # in-flight request fails - both the original caller and the
+        # second, concurrent caller resolve false, and dirty stays true, and
+        # no un-awaited/extra request is fired after the failure. Case 2: the
+        # in-flight request succeeds but a second save was queued while it
+        # ran - exactly one more serialized request goes out, and the
+        # original (and every other) caller only resolves once that queued
+        # request itself is finished.
+        node = self._node_or_skip()
+        model = Path(__file__).resolve().parent / "web" / "drawer-model.js"
+        script = """
+const vm = require("vm"), fs = require("fs");
+function makeCtx() {
+  const calls = [];
+  const pending = [];
+  const ctx = {
+    debounce: f => f, console, Math, JSON, Number, Set, Map, Promise, setTimeout, clearTimeout, setImmediate,
+    state: { runtime: { hosted: false }, output: "out" },
+    toast: () => {},
+    api: async () => {
+      calls.push(1);
+      return new Promise((resolve, reject) => { pending.push({ resolve, reject }); });
+    },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + " ;this.DL = DL;", ctx);
+  const DL = ctx.DL;
+  DL.emit = () => {};
+  DL.output = "out";
+  DL.layout = { settings: {} };
+  DL.dirty = true;
+  return { DL, calls, pending };
+}
+const tick = () => new Promise(r => setImmediate(r));
+
+(async () => {
+  const out = {};
+
+  // Case 1: concurrent caller during an in-flight save that then fails.
+  {
+    const { DL, calls, pending } = makeCtx();
+    const p1 = DL.save();
+    await tick();
+    out.savingDuringFirst = DL.saving;
+    const p2 = DL.save(); // arrives while DL.saving === true
+    out.sameChainPromise = p1 === p2; // never a separate, optimistic promise
+    out.callsBeforeSettle = calls.length;
+    pending[0].reject(new Error("boom"));
+    const [r1, r2] = await Promise.all([p1, p2]);
+    out.failCase = {
+      r1, r2, calls: calls.length, dirty: DL.dirty, saving: DL.saving,
+    };
+  }
+
+  // Case 2: the in-flight save succeeds, but a second save was queued
+  // while it ran - the queued save must actually run, serialized, and the
+  // original caller (e.g. a safe-switch check) must not resolve until it
+  // does.
+  {
+    const { DL, calls, pending } = makeCtx();
+    const p1 = DL.save();
+    await tick();
+    const p2 = DL.save(); // queued: asks for one more save of the newest layout
+    out.queuedCallsBeforeFirstSettles = calls.length; // still just 1 request so far
+    pending[0].resolve({});
+    await tick();
+    await tick();
+    out.queueCase = { callsAfterFirstResolves: calls.length }; // the queued 2nd request must now be in flight
+    out.stillSavingBetween = DL.saving; // chain not over yet - 2nd request pending
+    pending[1].resolve({});
+    const [r1, r2] = await Promise.all([p1, p2]);
+    out.queueCase.r1 = r1;
+    out.queueCase.r2 = r2;
+    out.queueCase.callsTotal = calls.length;
+    out.queueCase.savingAfter = DL.saving;
+  }
+
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
+        result = subprocess.run([node, "-e", script, str(model)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+
+        self.assertTrue(out["savingDuringFirst"])
+        self.assertTrue(out["sameChainPromise"])
+        self.assertEqual(out["callsBeforeSettle"], 1)
+        fail_case = out["failCase"]
+        self.assertFalse(fail_case["r1"])
+        self.assertFalse(fail_case["r2"])
+        self.assertEqual(fail_case["calls"], 1)  # a failed save must not silently retry
+        self.assertTrue(fail_case["dirty"])       # dirty must remain true
+        self.assertFalse(fail_case["saving"])     # the chain is over, not stuck "in flight"
+
+        self.assertEqual(out["queuedCallsBeforeFirstSettles"], 1)
+        queue_case = out["queueCase"]
+        self.assertEqual(queue_case["callsAfterFirstResolves"], 2)
+        self.assertTrue(out["stillSavingBetween"])
+        self.assertTrue(queue_case["r1"])
+        self.assertTrue(queue_case["r2"])
+        self.assertEqual(queue_case["callsTotal"], 2)
+        self.assertFalse(queue_case["savingAfter"])
+
+    def _spaces_slice(self, spaces_js, start_marker, end_marker="\n};\n"):
+        chunk = spaces_js[spaces_js.index(start_marker):]
+        return chunk[:chunk.index(end_marker)] + "\n};\n"
+
+    def test_local_folder_switch_preflight_blocks_backend_mutation_on_cancel(self):
+        # Fix 019 correction C1.2: the local (non-hosted) Save/Discard/
+        # Cancel preflight must resolve BEFORE the backend's active-folder
+        # mutation, not after - a Cancel must mean the mutating endpoint is
+        # never called at all. Covers SP.afterPick(), SP.useUntypedFolder()
+        # and SP.create() (create and migrate/configure).
+        node = self._node_or_skip()
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+
+        after_pick = self._spaces_slice(spaces_js, "SP.afterPick = async folder => {")
+        use_untyped = self._spaces_slice(spaces_js, "SP.useUntypedFolder = async () => {")
+        create = self._spaces_slice(spaces_js, "SP.create = async () => {")
+
+        script = "\n".join([
+            "const calls = [];",
+            "let leaveOk = false; // simulate Cancel",
+            "const state = { runtime: { hosted: false } };",
+            "const SP = {",
+            "  isUpdate: false,",
+            "  configureData: null,",
+            "  readSetupValues: () => ({ kind: 'drawer', name: 'N', x: 1, y: 1, z: 1, trimSize: null }),",
+            "  pickFolder: async () => 'the-folder',",
+            "  leaveDrawerLayoutSafely: async () => leaveOk,",
+            "  resetDrawer: async () => { calls.push('resetDrawer'); return true; },",
+            "  applyFolder: async () => { calls.push('applyFolder'); return true; },",
+            "  close: () => { calls.push('close'); },",
+            "  enterSetupFor: () => { calls.push('enterSetupFor'); },",
+            "  designPortable: async () => { calls.push('designPortable'); },",
+            "  designSurface: async () => { calls.push('designSurface'); },",
+            "};",
+            "const toast = () => {};",
+            "function loadFreshOrdinaryDesignForCurrentFolder() { calls.push('loadFreshOrdinaryDesignForCurrentFolder'); }",
+            "const api = async (path, body) => {",
+            "  calls.push(path);",
+            "  if (path === '/api/space/inspect') return { folder: { needs_setup: false, folder_mode: 'none', exists: false } };",
+            "  if (path === '/api/folder/use') return { folder: { folder_mode: 'design', folder_name: 'N' }, recent: [] };",
+            "  if (path === '/api/space/use-untyped') return { folder: { folder_mode: 'design', folder_name: 'N' }, recent: [] };",
+            "  if (path === '/api/space/create') return { folder: { folder_mode: 'space', folder_name: 'N', space: {} }, recent: [] };",
+            "  return {};",
+            "};",
+            after_pick,
+            use_untyped,
+            create,
+            "(async () => {",
+            "  const out = {};",
+            "",
+            "  leaveOk = false;",
+            "  calls.length = 0;",
+            "  await SP.afterPick('the-folder');",
+            "  out.afterPickCancel = calls.slice();",
+            "",
+            "  leaveOk = false;",
+            "  calls.length = 0;",
+            "  SP.configureData = 'the-folder';",
+            "  await SP.useUntypedFolder();",
+            "  out.useUntypedCancel = calls.slice();",
+            "",
+            "  leaveOk = false;",
+            "  calls.length = 0;",
+            "  SP.configureData = null;",
+            "  await SP.create();",
+            "  out.createCancel = calls.slice();",
+            "",
+            "  // Sanity: with leaveOk = true the mutating endpoints DO run, so the",
+            "  // above really is the preflight blocking them, not a broken stub.",
+            "  leaveOk = true;",
+            "  calls.length = 0;",
+            "  await SP.afterPick('the-folder');",
+            "  out.afterPickAllowed = calls.slice();",
+            "",
+            "  process.stdout.write(JSON.stringify(out));",
+            "})();",
+        ])
+        done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+
+        # Cancel: the mutating endpoint must never be called.
+        self.assertNotIn("/api/folder/use", out["afterPickCancel"])
+        self.assertNotIn("/api/space/use-untyped", out["useUntypedCancel"])
+        self.assertNotIn("/api/space/create", out["createCancel"])
+        self.assertNotIn("/api/space/configure", out["createCancel"])
+        # And the switch never proceeded to reset/apply the new folder.
+        self.assertNotIn("resetDrawer", out["afterPickCancel"])
+        self.assertNotIn("applyFolder", out["afterPickCancel"])
+
+        # Sanity: an allowed switch does call the mutating endpoint.
+        self.assertIn("/api/folder/use", out["afterPickAllowed"])
+
+    def test_hosted_folder_switch_preflight_blocks_target_writes_on_cancel(self):
+        # Fix 019 correction C1.3: the hosted Save/Discard/Cancel preflight
+        # must resolve BEFORE any write to the target folder (inventory
+        # migration, metadata upgrade) or adoption of it as the active
+        # folder/handle. A Cancel must leave the target folder untouched and
+        # must not change state.browserFolder or the saved active handle.
+        node = self._node_or_skip()
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+
+        use_hosted = self._spaces_slice(spaces_js, "SP.useHostedFolder = async (folder")
+
+        script = "\n".join([
+            "const calls = [];",
+            "let leaveOk = false; // simulate Cancel",
+            "const state = { browserFolder: 'OLD_FOLDER' };",
+            "const SP = {",
+            "  inspectHosted: async () => ({",
+            "    needs_setup: false, folder_mode: 'space', inventory: true,",
+            "    needs_identity_migration: false, metadata_version: 999, space: { name: 'S' }, space_id: 'sid',",
+            "    keep_bin_defaults: true, bin_defaults: null, part_defaults: {},",
+            "  }),",
+            "  assertExpectedHostedIdentity: () => {},",
+            "  leaveDrawerLayoutSafely: async () => leaveOk,",
+            "  resetDrawer: async () => { calls.push('resetDrawer'); return true; },",
+            "  readInventoryFor: async () => { calls.push('readInventoryFor:migrate'); return ''; },",
+            "  writeMetadata: async () => { calls.push('writeMetadata'); return {}; },",
+            "  applyFolder: async () => { calls.push('applyFolder'); return true; },",
+            "  close: () => { calls.push('close'); },",
+            "};",
+            "const FOLDER_METADATA_VERSION = 1;",
+            "const toast = () => {};",
+            "const WFFileSystem = { save: async () => { calls.push('WFFileSystem.save(active)'); } };",
+            use_hosted,
+            "(async () => {",
+            "  const out = {};",
+            "  const folder = { handle: {}, name: 'NewFolder' };",
+            "",
+            "  leaveOk = false;",
+            "  calls.length = 0;",
+            "  state.browserFolder = 'OLD_FOLDER';",
+            "  const result = await SP.useHostedFolder(folder);",
+            "  out.result = result;",
+            "  out.cancelCalls = calls.slice();",
+            "  out.browserFolderAfterCancel = state.browserFolder;",
+            "",
+            "  leaveOk = true;",
+            "  calls.length = 0;",
+            "  await SP.useHostedFolder(folder);",
+            "  out.allowedCalls = calls.slice();",
+            "",
+            "  process.stdout.write(JSON.stringify(out));",
+            "})();",
+        ])
+        done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+
+        self.assertIsNone(out["result"])  # aborted
+        # No write to the target folder, and no adoption as active.
+        for forbidden in (
+            "readInventoryFor:migrate", "writeMetadata", "resetDrawer",
+            "WFFileSystem.save(active)", "applyFolder", "close",
+        ):
+            self.assertNotIn(forbidden, out["cancelCalls"])
+        self.assertEqual(out["browserFolderAfterCancel"], "OLD_FOLDER")
+
+        # Sanity: an allowed switch does perform the target writes/adoption.
+        self.assertIn("readInventoryFor:migrate", out["allowedCalls"])
+        self.assertIn("WFFileSystem.save(active)", out["allowedCalls"])
+
     def test_hosted_drawer_actions_stay_disabled_every_render(self):
         # Item 3: hosted capability is part of the normal render-state
         # calculation (DP.renderStats), not only a one-time DP.build() patch,
@@ -2191,6 +2462,66 @@ DL.dirty = true;
         # The quiet, expected non-error paths (no remembered folder /
         # permission not granted) still fall back with no message.
         self.assertIn("if (!hasPermission) { SP.showHome(); return; }", launch)
+
+    def test_hosted_startup_thrown_read_failure_is_visible(self):
+        # Fix 019 correction C1.5: no remembered folder, or permission
+        # simply not (yet) granted, are quiet/expected - Welcome with no
+        # message. A thrown exception while actually reading the saved
+        # record or querying permission is a real startup/read failure and
+        # must reach the visible Welcome recovery message instead of being
+        # swallowed into an ordinary-looking Welcome screen.
+        node = self._node_or_skip()
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        launch = spaces_js[spaces_js.index("SP.launch = async () => {"):]
+        launch = launch[:launch.index("\nSP.wire = ")]
+
+        script = "\n".join([
+            "const SP = {};",
+            "let loadResult = null, loadThrows = false, permResult = false, permThrows = false;",
+            "const homeCalls = [];",
+            "SP.showHome = (message) => { homeCalls.push(message); };",
+            "const WFFileSystem = {",
+            "  load: async () => { if (loadThrows) throw new Error('storage read failed'); return loadResult; },",
+            "  queryReadWritePermission: async () => { if (permThrows) throw new Error('permission query failed'); return permResult; },",
+            "};",
+            "const api = async () => ({});",
+            "const state = { runtime: { hosted: true } };",
+            launch,
+            "(async () => {",
+            "  const out = {};",
+            "  // No saved record at all - quiet Welcome, no message.",
+            "  loadResult = null; loadThrows = false; permResult = false; permThrows = false;",
+            "  await SP.launch();",
+            "  out.noRecord = homeCalls.slice();",
+            "  homeCalls.length = 0;",
+            "  // Saved record, but permission simply not granted - quiet Welcome.",
+            "  loadResult = { handle: { name: 'x' }, space_id: null }; permResult = false; permThrows = false;",
+            "  await SP.launch();",
+            "  out.permNotGranted = homeCalls.slice();",
+            "  homeCalls.length = 0;",
+            "  // The saved-record read itself throws - a real read failure, must be visible.",
+            "  loadThrows = true;",
+            "  await SP.launch();",
+            "  out.loadThrew = homeCalls.slice();",
+            "  homeCalls.length = 0;",
+            "  // The permission query itself throws - also a real read failure.",
+            "  loadThrows = false; permThrows = true;",
+            "  await SP.launch();",
+            "  out.permThrew = homeCalls.slice();",
+            "  process.stdout.write(JSON.stringify(out));",
+            "})();",
+        ])
+        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        out = json.loads(done.stdout)
+        # Quiet, expected outcomes call SP.showHome() with no message.
+        self.assertEqual(out["noRecord"], [None])
+        self.assertEqual(out["permNotGranted"], [None])
+        # A thrown exception must call SP.showHome(<a real message>).
+        self.assertEqual(len(out["loadThrew"]), 1)
+        self.assertTrue(out["loadThrew"][0])
+        self.assertEqual(len(out["permThrew"]), 1)
+        self.assertTrue(out["permThrew"][0])
 
     def test_connector_action_labels_match_bundle(self):
         # Item 7: same height -> "Generate Connectors"/"Generate Bin and
@@ -2236,6 +2567,71 @@ DL.dirty = true;
         self.assertIn('id="app-confirm-dialog"', index_html)
         self.assertIn("function appConfirm(", app_js)
         self.assertIn("function appConfirmSaveDiscardCancel(", app_js)
+
+    def test_discard_and_switch_is_danger_styled(self):
+        # Fix 019 correction C1.4: "Discard & Switch" is destructive and
+        # must be visibly danger-styled - Save & Switch stays the normal
+        # primary/safe action and keeps default focus, Cancel stays
+        # available, and this must not be a one-off second dialog.
+        node = self._node_or_skip()
+        root = Path(__file__).resolve().parent / "web"
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+
+        confirm_src = app_js[app_js.index("function appConfirm({"):]
+        confirm_src = confirm_src[:confirm_src.index("\n\n// Ordinary two-choice")]
+        save_discard_src = app_js[app_js.index("async function appConfirmSaveDiscardCancel({"):]
+        save_discard_src = save_discard_src[:save_discard_src.index("\n\n// Used only for")]
+
+        self.assertIn("secondaryDanger", confirm_src)
+        self.assertIn("secondaryDanger: true", save_discard_src)
+        # No one-off second dialog - Save/Discard/Cancel is still built from
+        # the one shared appConfirm() implementation.
+        self.assertIn("await appConfirm({", save_discard_src)
+
+        script = "\n".join([
+            "class FakeClassList {",
+            "  constructor() { this.set = new Set(); }",
+            "  toggle(name, on) { if (on) this.set.add(name); else this.set.delete(name); }",
+            "  remove(name) { this.set.delete(name); }",
+            "  has(name) { return this.set.has(name); }",
+            "}",
+            "function makeBtn() { return { classList: new FakeClassList(), hidden: false, focusCalled: 0, focus() { this.focusCalled++; }, onclick: null, textContent: '' }; }",
+            "const dialog = { open: false, showModal() { this.open = true; }, close() { this.open = false; }, addEventListener() {}, removeEventListener() {} };",
+            "const titleEl = { textContent: '' }, msgEl = { textContent: '' };",
+            "const primaryBtn = makeBtn(), secondaryBtn = makeBtn(), cancelBtn = makeBtn();",
+            "const els = {",
+            "  '#app-confirm-dialog': dialog, '#app-confirm-title': titleEl, '#app-confirm-message': msgEl,",
+            "  '#app-confirm-primary': primaryBtn, '#app-confirm-secondary': secondaryBtn, '#app-confirm-cancel': cancelBtn,",
+            "};",
+            "const $ = sel => els[sel];",
+            confirm_src,
+            save_discard_src,
+            "(async () => {",
+            "  const p = appConfirmSaveDiscardCancel({ title: 't', message: 'm' });",
+            "  const out = {};",
+            "  out.primaryDanger = primaryBtn.classList.has('danger');",
+            "  out.primaryPrimary = primaryBtn.classList.has('primary');",
+            "  out.secondaryDanger = secondaryBtn.classList.has('danger');",
+            "  out.focusedPrimary = primaryBtn.focusCalled === 1;",
+            "  out.focusedCancel = cancelBtn.focusCalled === 1;",
+            "  out.cancelHidden = cancelBtn.hidden;",
+            "  primaryBtn.onclick();",
+            "  out.choice = await p;",
+            "  process.stdout.write(JSON.stringify(out));",
+            "})();",
+        ])
+        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        out = json.loads(done.stdout)
+        # Save & Switch (primary) is the normal, non-danger, default-focused
+        # action.
+        self.assertFalse(out["primaryDanger"])
+        self.assertTrue(out["primaryPrimary"])
+        self.assertTrue(out["focusedPrimary"])
+        self.assertFalse(out["focusedCancel"])
+        self.assertFalse(out["cancelHidden"])
+        # Discard & Switch (secondary) is danger-styled.
+        self.assertTrue(out["secondaryDanger"])
+        self.assertEqual(out["choice"], "save")
 
     def test_native_confirms_replaced_regressions_leave_class_confirms_alone(self):
         # Sanity check that the sweep did not touch confirm() usage outside
