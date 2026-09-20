@@ -82,7 +82,6 @@ DL.defaultDrawer = (name, from = null) => ({
   bin_axis: from?.bin_axis ?? "x",
   snap: from?.snap ?? 8,
   boundary: from?.boundary ?? "wall",
-  keepouts: [],
   placements: [],
 });
 
@@ -100,7 +99,7 @@ DL.normaliseLayout = raw => {
   layout.drawers.forEach((one, index) => {
     const base = DL.defaultDrawer(`Drawer ${index + 1}`);
     for (const key of Object.keys(base)) if (one[key] === undefined || one[key] === null) one[key] = base[key];
-    if (!Array.isArray(one.keepouts)) one.keepouts = [];
+    delete one.keepouts; // the old Keep-out Zone feature is gone
     one.placements = (Array.isArray(one.placements) ? one.placements : [])
       .filter(p => p && typeof p === "object" && p.bin);
   });
@@ -316,18 +315,6 @@ DL.findPlacement = key => {
   return null;
 };
 
-DL.blockedCells = (drawer = DL.drawer(), grid = DL.grid(drawer)) => {
-  const cells = new Set();
-  for (const zone of drawer.keepouts || []) {
-    const c0 = Math.max(0, Math.floor((zone.x - grid.ox) / grid.step + 1e-6));
-    const r0 = Math.max(0, Math.floor((zone.y - grid.oy) / grid.step + 1e-6));
-    const c1 = Math.min(grid.cols, Math.ceil((zone.x + zone.w - grid.ox) / grid.step - 1e-6));
-    const r1 = Math.min(grid.rows, Math.ceil((zone.y + zone.d - grid.oy) / grid.step - 1e-6));
-    for (let r = r0; r < r1; r += 1) for (let c = c0; c < c1; c += 1) cells.add(`${c},${r}`);
-  }
-  return cells;
-};
-
 // Can these bins (bottom first) stand as a footprint with its front-left cell
 // at (gx, gy)? `ignore` holds keys being moved. Used live while dragging, so
 // it answers in plain words.
@@ -337,10 +324,6 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
   const height = DL.stackHeight(bins);
   if (height > drawer.height + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this drawer's ${fmt(drawer.height)} mm.` };
   if (gx < 0 || gy < 0 || gx + w > grid.cols || gy + d > grid.rows) return { ok: false, reason: "That would stick out of the drawer." };
-  const blocked = DL.blockedCells(drawer, grid);
-  for (let r = gy; r < gy + d; r += 1) for (let c = gx; c < gx + w; c += 1) {
-    if (blocked.has(`${c},${r}`)) return { ok: false, reason: "That spot is a keep-out zone." };
-  }
   for (const item of DL.items(drawer)) {
     if (item.keys.every(key => ignore.has(key))) continue;
     if (gx < item.gx + item.w && item.gx < gx + w && gy < item.gy + item.d && item.gy < gy + d) {
@@ -402,7 +385,7 @@ DL.afterChange = () => {
 };
 
 // A fingerprint of everything a spacer plan is derived from: the active
-// drawer (placements, dimensions, keepouts, settings) and every bin's
+// drawer (placements, dimensions, settings) and every bin's
 // size-relevant fields. Kept for reference; DL.clearSpacerPlan() below is
 // the actual invalidation mechanism (proactive, not signature-compared) -
 // see Fix 004 Correction 6.I.
@@ -412,7 +395,7 @@ DL.spacerSignature = () => JSON.stringify([
 ]);
 
 // Stale spacer proposals must never survive a layout/inventory change that
-// could invalidate them (placements, dimensions, keepouts, settings, the
+// could invalidate them (placements, dimensions, settings, the
 // active drawer, an auto-layout arrangement, or the bin inventory itself).
 // Toggling a candidate's own checkbox must not call this.
 DL.clearSpacerPlan = () => {

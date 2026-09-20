@@ -324,7 +324,7 @@ class SpaceIdentityTests(unittest.TestCase):
                     "id": "d1", "name": "Old Drawer",
                     "width": 320, "depth": 240, "height": 55,
                     "clearance": 1.0, "anchor": "front-left", "bin_axis": "x",
-                    "keepouts": [], "placements": [],
+                    "placements": [],
                 }],
             },
         )

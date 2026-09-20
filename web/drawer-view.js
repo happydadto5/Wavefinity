@@ -367,7 +367,7 @@ DV.paintScene = (ctx, drawer, cam) => {
   face(flat(0, 0, W, D), "#f1ebdf", "rgba(120,100,70,.5)", 1.2);
   walls.filter(wall => wall.inside).forEach(wall => face(wall.points, wall.tone, "rgba(120,100,70,.35)"));
 
-  // On the floor: the strips the grid cannot use, grid lines, keep-outs.
+  // On the floor: the strips the grid cannot use, grid lines.
   const gx1 = grid.ox + grid.cols * step;
   const gy1 = grid.oy + grid.rows * step;
   const hatch = DV.hatch(ctx, "rgba(150,130,95,.35)");
@@ -383,12 +383,10 @@ DV.paintScene = (ctx, drawer, cam) => {
     for (let y = 0; y <= grid.rows * step + 1e-6; y += every) line([grid.ox, grid.oy + y, 0], [gx1, grid.oy + y, 0]);
     ctx.stroke();
   }
-  const keepHatch = DV.hatch(ctx, "rgba(168,68,61,.55)");
-  (drawer.keepouts || []).forEach(zone => face(flat(zone.x, zone.y, zone.x + zone.w, zone.y + zone.d), keepHatch, "rgba(168,68,61,.7)"));
 
   // Empty cells, and the largest empty spot the report found.
   if (DL.layout.settings.show_empty) {
-    const taken = DL.blockedCells(drawer, grid);
+    const taken = new Set();
     DL.items(drawer).forEach(item => {
       for (let r = item.gy; r < item.gy + item.d; r += 1) for (let c = item.gx; c < item.gx + item.w; c += 1) taken.add(`${c},${r}`);
     });
@@ -917,8 +915,6 @@ DV.planImage = (drawer, width = 1400) => {
   for (let x = 0; x <= grid.cols * grid.step + 1e-6; x += DL.UNIT) { const [ax, ay] = at(grid.ox + x, grid.oy); const [, by] = at(grid.ox + x, grid.oy + grid.rows * grid.step); ctx.moveTo(ax, ay); ctx.lineTo(ax, by); }
   for (let y = 0; y <= grid.rows * grid.step + 1e-6; y += DL.UNIT) { const [ax, ay] = at(grid.ox, grid.oy + y); const [bx] = at(grid.ox + grid.cols * grid.step, grid.oy + y); ctx.moveTo(ax, ay); ctx.lineTo(bx, ay); }
   ctx.stroke();
-  const keepHatch = DV.hatch(ctx, "rgba(168,68,61,.6)");
-  (drawer.keepouts || []).forEach(zone => { ctx.fillStyle = keepHatch; ctx.fillRect(...rect(zone.x, zone.y, zone.x + zone.w, zone.y + zone.d)); });
   const range = DV.heightRange();
   const items = DL.items(drawer);
   items.forEach((item, index) => {

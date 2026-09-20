@@ -382,7 +382,7 @@ def _row(one: dict[str, Any]) -> str:
 
 
 def _compact_json(value: Any, level: int = 0) -> str:
-    """JSON that keeps each placement or keep-out on one line, so the block
+    """JSON that keeps each placement on one line, so the block
     stays short enough to scroll past when the file is opened by hand."""
     flat = json.dumps(value, ensure_ascii=False)
     if not isinstance(value, (dict, list)) or len(flat) + 2 * level <= 110:
@@ -773,7 +773,6 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
     if primary is None:
         primary = {
             "id": "d1",
-            "keepouts": [],
             "placements": [],
         }
         drawers.append(primary)

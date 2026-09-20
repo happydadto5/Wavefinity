@@ -61,9 +61,6 @@ DP.build = () => {
           <label>Snap to<select id="dl-snap" title="The wave repeats every 4 mm, so bins may also sit half a unit along from each other"><option value="8">8 mm - whole units</option><option value="4">4 mm - half units</option></select></label>
         </div>
         <p class="dl-note">Bins never turn sideways on their own: a quarter-turned bin's waves clash with its neighbours. <em>Width direction</em> turns every bin in this drawer together, which is safe.</p>
-        <div class="dl-subhead"><strong>Keep-out zones</strong><button type="button" id="dl-keepout-add" class="dl-link">+ Add</button></div>
-        <p class="dl-note">Slide rails, screw heads, a rounded corner - anywhere bins must not go. Measured in mm from the inside front-left corner.</p>
-        <div id="dl-keepouts"></div>
         <button type="button" id="dl-drawer-delete" class="button danger dl-small">Delete this drawer</button>
       </details>
     </section>
@@ -249,20 +246,6 @@ DP.wire = () => {
       DL.layout.active = DL.layout.drawers[0].id;
     });
   });
-  $("#dl-keepout-add").addEventListener("click", () => DL.change(() => {
-    DL.drawer().keepouts.push({ x: 0, y: 0, w: 16, d: 16 });
-  }));
-  $("#dl-keepouts").addEventListener("change", event => {
-    const row = event.target.closest("[data-keepout]");
-    const value = dlNum(event.target.value);
-    if (!row || value === null) return;
-    DL.change(() => { DL.drawer().keepouts[Number(row.dataset.keepout)][event.target.dataset.k] = Math.max(0, value); });
-  });
-  $("#dl-keepouts").addEventListener("click", event => {
-    const row = event.target.closest("[data-remove]")?.closest("[data-keepout]");
-    if (row) DL.change(() => { DL.drawer().keepouts.splice(Number(row.dataset.keepout), 1); });
-  });
-
   const setting = (selector, group, key, read) => $(selector).addEventListener("change", event => {
     DL.change(() => {
       const target = group ? DL.layout.settings[group] : DL.layout.settings;
@@ -670,14 +653,6 @@ DP.renderDrawer = () => {
   const units = value => fmt(value * grid.step / DL.UNIT);
   $("#dl-grid-note").textContent = `Grid ${units(grid.cols)} × ${units(grid.rows)} units (${fmt(grid.cols * grid.step)} × ${fmt(grid.rows * grid.step)} mm). `
     + (edges.length ? `Left over at the edges: ${edges.join(", ")}.` : "No spare strip at the edges.");
-  const zones = JSON.stringify([drawer.id, drawer.keepouts]);
-  if (dlChanged("keepouts", zones) && !$("#dl-keepouts").contains(document.activeElement)) {
-    $("#dl-keepouts").innerHTML = drawer.keepouts.map((zone, index) => `
-      <div class="dl-keepout" data-keepout="${index}">
-        ${["x", "y", "w", "d"].map(k => `<label>${{ x: "From left", y: "From front", w: "Width", d: "Depth" }[k]}<input type="number" min="0" step="1" data-k="${k}" value="${fmt(zone[k])}"></label>`).join("")}
-        <button type="button" data-remove title="Remove this keep-out zone" aria-label="Remove">✕</button>
-      </div>`).join("");
-  }
 };
 
 DP.renderAuto = () => {

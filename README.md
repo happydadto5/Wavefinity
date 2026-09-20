@@ -522,8 +522,7 @@ something to work on.
   wave crests); whether the grid sits against the front-left corner or is
   centred; which way bin X runs; whether bins **snap** to 8 mm whole units or
   4 mm half units (the wave repeats every 4 mm, so a bin half a unit along a
-  seam still nests); and **keep-out zones** (slide rails, screw heads, a
-  rounded corner). Several drawers share one inventory, and a copy placed in
+  seam still nests). Several drawers share one inventory, and a copy placed in
   one drawer is not available to another.
 - **Bins never turn a quarter turn on their own.** Left walls mate with right,
   and front with back; a bin turned 90 degrees meets its neighbours crest to
@@ -546,7 +545,7 @@ something to work on.
   printed**, so you can lay a drawer out first and print to it.
 - **Placing.** Drag a bin from the inventory onto the drawer, or double-click
   it to drop it in the best free spot. Drag placed bins to move them: they
-  snap to the 8 mm grid and refuse overlaps, keep-outs and the drawer edge.
+  snap to the 8 mm grid and refuse overlaps and the drawer edge.
   Drag one off the drawer, or select it and press **Delete**, to take it out.
   Keys: the arrows move one unit, **L** locks, **Delete** takes out, **F** fits
   the view, **Esc** deselects.

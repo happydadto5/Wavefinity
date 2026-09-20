@@ -36,11 +36,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
   border: 0; background: none; color: var(--teal-dark); font-weight: 700; font-size: 12px; cursor: pointer;
   padding: 2px 0; text-decoration: underline; text-underline-offset: 2px;
 }
-#dl-keepouts { margin: 8px 0 12px; }
-.dl-keepout { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 6px; align-items: end; margin-bottom: 6px; }
-.dl-keepout label { font-size: 10px; color: var(--muted); }
-.dl-keepout input { margin-top: 2px; padding: 6px 7px; }
-.dl-keepout button { border: 0; background: none; color: var(--danger); font-size: 15px; cursor: pointer; padding: 7px 4px; }
 
 .dl-auto-button { font-size: 15px; }
 .dl-options { display: grid; gap: 8px 12px; grid-template-columns: 1fr 1fr; margin-top: 12px; }

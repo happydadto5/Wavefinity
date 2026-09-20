@@ -163,15 +163,7 @@ def normalise_drawer(raw: dict[str, Any]) -> dict[str, Any]:
     if drawer["bin_axis"] not in ("x", "y"):
         drawer["bin_axis"] = "x"
     drawer["snap"] = 4.0 if float(drawer.get("snap") or 8.0) == 4.0 else 8.0
-    keepouts = []
-    for one in drawer.get("keepouts") or []:
-        try:
-            box = {key: float(one[key]) for key in ("x", "y", "w", "d")}
-        except (KeyError, TypeError, ValueError):
-            continue
-        if box["w"] > 0 and box["d"] > 0:
-            keepouts.append(box)
-    drawer["keepouts"] = keepouts
+    drawer.pop("keepouts", None)  # the old Keep-out Zone feature is gone
     drawer["placements"] = [one for one in drawer.get("placements") or [] if isinstance(one, dict)]
     return drawer
 
@@ -261,21 +253,6 @@ def _close(a: float, b: float) -> bool:
 
 def _overlaps(a: dict[str, float], b: dict[str, float]) -> bool:
     return a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"] and a["y"] < b["y"] + b["d"] and b["y"] < a["y"] + a["d"]
-
-
-def _blocked(drawer: dict[str, Any], grid: dict[str, Any]) -> np.ndarray:
-    step = grid["step"]
-    blocked = np.zeros((grid["rows"], grid["cols"]), dtype=bool)
-    for zone in drawer["keepouts"]:
-        x0 = (zone["x"] - grid["ox"]) / step
-        y0 = (zone["y"] - grid["oy"]) / step
-        x1 = x0 + zone["w"] / step
-        y1 = y0 + zone["d"] / step
-        c0, c1 = max(0, math.floor(x0 + 1e-6)), min(grid["cols"], math.ceil(x1 - 1e-6))
-        r0, r1 = max(0, math.floor(y0 + 1e-6)), min(grid["rows"], math.ceil(y1 - 1e-6))
-        if c1 > c0 and r1 > r0:
-            blocked[r0:r1, c0:c1] = True
-    return blocked
 
 
 def _chains(drawer: dict[str, Any], by_id: dict[str, dict]) -> tuple[list[list[dict]], list[dict]]:
@@ -491,7 +468,6 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
     grid = drawer_grid(drawer)
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
     by_id = {one["id"]: one for one in bins}
-    blocked = _blocked(drawer, grid)
     owner = np.full((rows, cols), -1, dtype=int)
     problems: list[dict[str, Any]] = []
     for placement in drawer["placements"]:
@@ -520,16 +496,14 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         cx0, cy0, cx1, cy1 = max(0, x0), max(0, y0), min(cols, x1), min(rows, y1)
         if cx1 <= cx0 or cy1 <= cy0:
             continue
-        if blocked[cy0:cy1, cx0:cx1].any():
-            problems.append({"type": "keepout", "keys": item["keys"], "message": f"{label} sits on a keep-out zone"})
         region = owner[cy0:cy1, cx0:cx1]
         for other in sorted({int(v) for v in region[region >= 0]}):
             problems.append({"type": "overlap", "keys": items[other]["keys"] + item["keys"], "message": f"{_label(by_id[items[other]['bin']])} and {_label(by_id[item['bin']])} overlap"})
         region[region < 0] = index
     # Edge-facing spacers were cut for the drawer as it was; resizing it,
-    # moving the grid, changing the snap, or a since-placed bin/keep-out can
+    # moving the grid, changing the snap, or a since-placed bin can
     # leave one stuck outside the drawer or colliding with something real.
-    # Checked against the actual occupied/blocked cells (not the whole grid
+    # Checked against the actual occupied cells (not the whole grid
     # rectangle) - a back/right spacer legitimately reaches from a
     # component's own edge to the real wall, and empty grid along the way is
     # not a conflict.
@@ -546,7 +520,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
             ex1 = min(cols, math.ceil((edge["x"] + edge["w"] - grid["ox"]) / step - 1e-6))
             ey1 = min(rows, math.ceil((edge["y"] + edge["d"] - grid["oy"]) / step - 1e-6))
             if ex1 > ex0 and ey1 > ey0:
-                collides = bool(blocked[ey0:ey1, ex0:ex1].any() or (owner[ey0:ey1, ex0:ex1] >= 0).any())
+                collides = bool((owner[ey0:ey1, ex0:ex1] >= 0).any())
         if outside or collides:
             problems.append({"type": "edge_spacer", "keys": [_key(placement)], "message": "An edge spacer no longer fits this drawer - take the spacers out and make them again"})
     issues = _height_issues(items, reach)
@@ -556,9 +530,8 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
             "message": f"{_label(by_id[back['bin']])} ({back['h']:g} mm) is behind taller {_label(by_id[front['bin']])} ({front['h']:g} mm)",
         })
     used = int((owner >= 0).sum())
-    blocked_cells = int(blocked.sum())
-    usable = rows * cols - blocked_cells
-    free = (owner < 0) & ~blocked
+    usable = rows * cols
+    free = owner < 0
     opens = _two_largest_empty(free, _per_unit(drawer)) if rows and cols else []
     edge_area = sum(
         float(p.get("w", 0)) * float(p.get("d", 0))
@@ -572,7 +545,7 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
             planned[one["id"]] = planned.get(one["id"], 0) + 1
     return {
         "grid": grid,
-        "cells": {"total": usable, "used": used, "free": int(free.sum()), "blocked": blocked_cells},
+        "cells": {"total": usable, "used": used, "free": int(free.sum())},
         "fill": round(100.0 * used / usable, 1) if usable else 0.0,
         "free_mm2": round(float(free.sum()) * step * step),
         "edge_mm2": round(max(0.0, drawer["width"] * drawer["depth"] - rows * cols * step * step - edge_area)),
@@ -648,8 +621,8 @@ STRATEGIES: tuple[tuple[str, str, str, Callable, Callable], ...] = (
 )
 
 
-def _pack(rows, cols, blocked, fixed, items, order, scorer, height_rule, reach="column"):
-    occupied = blocked.copy()
+def _pack(rows, cols, fixed, items, order, scorer, height_rule, reach="column"):
+    occupied = np.zeros((rows, cols), dtype=bool)
     heights = np.zeros((rows, cols))
     has_bin = np.zeros((rows, cols), dtype=bool)
 
@@ -842,10 +815,9 @@ def auto_layout(
             singles.append(single)
     items = _build_stacks(singles, drawer["height"]) if stack_bins else singles
 
-    blocked = _blocked(drawer, grid)
     strategies = [s for s in STRATEGIES if s[0] == "tight"] if only else list(STRATEGIES)
     candidates, seen = [], set()
-    usable = rows * cols - int(blocked.sum())
+    usable = rows * cols
 
     def placements_for(item):
         members = item.get("members") or [(item["bin"], item["copy"])]
@@ -857,7 +829,7 @@ def auto_layout(
 
     def run(strategy, rule, name=None, description=None):
         ident, title, blurb, order, scorer = strategy
-        placed, unplaced = _pack(rows, cols, blocked, fixed, items, order, scorer, rule, reach)
+        placed, unplaced = _pack(rows, cols, fixed, items, order, scorer, rule, reach)
         signature = frozenset((p["bin"], p["copy"], p["gx"], p["gy"]) for p in placed)
         if signature in seen and placed:
             return
@@ -1021,9 +993,9 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
                     if candidate is not None:
                         candidates.append(candidate)
 
-        # Reject a candidate that overlaps a keep-out, or another bin/
-        # component along its own physical path to the wall (never bridge
-        # through something real to reach it).
+        # Reject a candidate that overlaps another bin/component along its
+        # own physical path to the wall (never bridge through something real
+        # to reach it).
         item_boxes = [
             {"x": grid["ox"] + i["gx"] * step, "y": grid["oy"] + i["gy"] * step, "w": i["w"] * step, "d": i["d"] * step}
             for i in items
@@ -1032,8 +1004,6 @@ def plan_spacers(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], options
         for cand in candidates:
             p = cand["placements"][0]
             edge = {"x": p["x"], "y": p["y"], "w": p["w"], "d": p["d"]}
-            if any(_overlaps(edge, k) for k in drawer["keepouts"]):
-                continue
             if any(_overlaps(edge, box) for box in item_boxes):
                 continue
             valid_cands.append(cand)
