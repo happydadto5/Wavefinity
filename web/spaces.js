@@ -1648,7 +1648,7 @@ SP.crossTypeCheck = (designType) => {
     let warning = null;
     let targetKind = null;
     if (designType === "b4b" && (kind === "drawer" || kind === "surface")) {
-        warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. B4B is meant for Portable Storage.`;
+        warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. Storage Box is meant for Portable Storage.`;
         targetKind = "portable";
     } else if ((designType === "base-trim" || designType === "base_trim") && (kind === "drawer" || kind === "portable" || kind === "box")) {
         warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. Base Trim is meant for Surface Spaces.`;

@@ -1301,10 +1301,10 @@ def text_report(box: BoxSpec, one: Feature, surface: float) -> dict[str, object]
 
 
 def b4b_filename(box: BoxSpec, part_name: str = "", suffix: str = ".3mf") -> str:
-    """``B4B 64x48x40 - Fasteners.3mf`` - distinct from an ordinary bin file of
+    """``Storage Box 64x48x40 - Fasteners.3mf`` - distinct from an ordinary bin file of
     the same dimensions."""
     eff = b4b_effective_box(box)
-    name = f"B4B {eff.x:g}x{eff.y:g}x{eff.z:g}"
+    name = f"Storage Box {eff.x:g}x{eff.y:g}x{eff.z:g}"
     tidy = clean_label(part_name) or clean_label(box.b4b.label_text)
     if tidy:
         name += f" - {tidy}"
@@ -1318,7 +1318,7 @@ def generate_b4b_files(
     auto_timestamp: bool = False,
     keep_log: bool = False,
 ) -> dict[str, object]:
-    """Dedicated B4B export with independently placeable print objects.
+    """Dedicated Storage Box export with independently placeable print objects.
 
     Registered two-colour geometry remains multi-part: the front label or the
     lid plus its top inlay.  Never routed through ``make_fused_box`` and never
@@ -1349,7 +1349,7 @@ def generate_b4b_files(
     # lettering parts open on the second filament slot
     filaments = {
         name: 2 for name, _ in parts
-        if name in ("B4B Top Label", "B4B Front Label Text")
+        if name in ("Storage Box Top Label", "Storage Box Front Label Text")
     }
     written = export_object_groups_3mf(print_objects, target, filaments)
     report = validate_object_groups_3mf(target, print_objects, filaments)
@@ -1358,7 +1358,7 @@ def generate_b4b_files(
         "mode": "b4b",
         "b4b": summary,
         "output": str(target),
-        "box": _part_result(target, {"name": "B4B Body", **report}),
+        "box": _part_result(target, {"name": "Storage Box Body", **report}),
         "parts": [
             {"name": name, "mesh": mesh_report(name, mesh) if "Label" not in name
              else {"name": name}}
@@ -1381,7 +1381,7 @@ def generate_b4b_files(
 
 def _b4b_log_note(summary: dict) -> str:
     cx, cy = summary["capacity_units"]
-    bits = [f"B4B {cx}x{cy} units"]
+    bits = [f"Storage Box {cx}x{cy} units"]
     if summary["lid"]:
         bits.append("secure lid" if summary["secure_lid"] else "passive lid")
     else:
@@ -1710,7 +1710,7 @@ def inventory_bin_record(
     """Build the one inventory row used by local and browser-owned folders.
 
     ``physical_size_mm`` lets a caller override the printed physical
-    footprint reported for space/drawer planning - a B4B case's real
+    footprint reported for space/drawer planning - a Storage Box case's real
     assembled envelope, not its child-bin field - without touching ``box``.
     Ordinary bins continue using ``box.x/y/z`` when no override is supplied.
     """
@@ -2541,7 +2541,7 @@ def design_from_dict(
         validate_side_openings(box)
     if b4b.enabled:
         if lid.enabled or stack.enabled:
-            raise ValueError("Bin for Bins cannot use the ordinary Lid & Stacking part")
+            raise ValueError("Storage Box cannot use the ordinary Lid & Stacking part")
         # A B4B interior is reserved for child bins.  Imported/saved JSON is
         # authoritative user data: if it still carries interior features, a
         # non-fused mode or the flat-inside band, that is a real

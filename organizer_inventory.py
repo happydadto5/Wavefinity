@@ -192,7 +192,7 @@ def infer_name(file: str, label: str = "") -> str:
     stem = re.sub(r"\.(3mf|stl)$", "", file.split(",")[0].strip(), flags=re.I)
     size = r"\d+(?:\.\d+)?"
     stem = re.sub(rf"^(Box|Insert)\s+{size}\s*x\s*{size}(\s*x\s*{size})?", "", stem, flags=re.I)
-    stem = re.sub(rf"^B4B\s+{size}x{size}x{size}", "", stem, flags=re.I)
+    stem = re.sub(rf"^(?:Storage Box|B4B)\s+{size}x{size}x{size}", "", stem, flags=re.I)
     stem = re.sub(r"^\s*-\s*", "", stem)
     stem = re.sub(r"\s*\b\d{12}\b\s*$", "", stem)  # the auto timestamp, mmddyyHHMMSS
     return stem.strip()
@@ -272,7 +272,7 @@ def _migrate_drawer_boundaries(layout: dict[str, Any] | None) -> None:
     A Space's ``boundary`` ("wall" or "mating") was added after Box Spaces
     already existed, and organizer_drawer.normalise_drawer defaults an absent
     one to "wall" - a hard-wall clearance floor that silently shrinks an old
-    Box/B4B's exact interior (see organizer_drawer.BOUNDARIES). Migrate only
+    Box/Storage Box's exact interior (see organizer_drawer.BOUNDARIES). Migrate only
     the Space's own primary drawer from ``layout.space.kind``; any other
     drawer in the layout, and any drawer that already carries an explicit
     valid boundary, is left untouched. The mutation is in place, so a save

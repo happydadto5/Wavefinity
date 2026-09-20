@@ -46,10 +46,10 @@ The control panel is ordered by **blast radius**: a setting sits above
 everything whose meaning it can change.
 
 **The top selector decides what the thing is.** *Let’s design a* offers **Bin**,
-the normal design; **Bin for Bins**, a separate child-bin container
+the normal design; **Storage Box**, a separate child-bin container
 architecture; and **Base Trim**, a separate open-centre perimeter for a
 rectangular field of bins. Lid & Stacking is a bin-level option, not a
-top-selector design type. Bin for Bins retires interior parts and connectors;
+top-selector design type. Storage Box retires interior parts and connectors;
 Base Trim has no floor, interior parts, inventory entry, or side connector. The
 selected wall/base values are shown and saved; they are never silent
 generation-only overrides.
@@ -65,11 +65,11 @@ Side connectors are unavailable while a lid is fitted.
 **Controls follow their meaning, not their mechanism.**
 
 - A **select** is for choosing one of several named states — *Let’s design a*,
-  *Lid type*, *Lid snugness*, *Show*, *Orientation*, *B4B Stacking*. This holds even at two
+  *Lid type*, *Lid snugness*, *Show*, *Orientation*, *Storage Box Stacking*. This holds even at two
   options: a row of big buttons for a two-state setting reads as two actions,
   and gives no clue the two are exclusive.
 - A **checkbox** is for a genuine on/off with no second state worth naming —
-  *Standard base*, *Stacking* and *Add label* inside B4B.
+  *Standard base*, *Stacking* and *Add label* inside Storage Box.
 - A **button** is for something that *happens* — *Generate*, *Reset*, *Top*,
   *Show Log*. Nothing that merely records a preference is a button.
 
@@ -77,20 +77,20 @@ Checkbox rows put the label first and the box on the right, everywhere.
 
 **Settings that belong together live together.** A dependent control sits
 directly under the control that reveals it (*Standard walls?* → *Wall
-thickness* → the thin-wall warning). One setting has exactly one control: B4B
+thickness* → the thin-wall warning). One setting has exactly one control: Storage Box
 used to carry its own duplicate wall-thickness select that wrote back into the
 main one, and that duplicate is gone. Anything naming the output file —
 *Part name* — lives in the output panel beside *Save Location* and the generate
 buttons, not in the middle of the build form.
 
 **Automatic changes are shown, never silent.** When the app overrides what was
-typed — B4B growing the bin field, stacking raising the wall and floor — it
+typed — Storage Box growing the bin field, stacking raising the wall and floor — it
 says so in plain language in a note under the control that caused it, and it
 never writes the new value back into the field the user is typing in.
 
 **The right side has three primary views: *3D*, *2D* and optional *Space*.** 3D and 2D
 show the bin being designed (2D is where its interior parts are laid out, and
-it steps aside only for a B4B case, which has none). **Space is a mode, not a
+it steps aside only for a Storage Box case, which has none). **Space is a mode, not a
 panel**: it swaps the whole screen: the inventory and its tools take the sidebar, the
 drawer takes the workspace, and the bin editor's chrome (placed parts, the
 design file buttons) steps aside. Undo, Redo and Ctrl+Z act on the drawer while
@@ -110,7 +110,7 @@ drawer is always nearest you. That is what makes "a short bin behind a tall
 one" visible, and it means dragging a bin away from you always moves it back.
 The printed map stays a flat, numbered plan.
 
-**Colour means height.** Bins run from light (short) to dark (tall) teal, B4B
+**Colour means height.** Bins run from light (short) to dark (tall) teal, Storage Box
 cases purple, spacers sand. A bin shows its name, or its size when it
 has none. Red is a real fault (overlap, sticking out, too tall for the drawer);
 a dashed orange outline is the softer height-order warning.
@@ -463,8 +463,8 @@ does not accept interior parts.
 
 ### Inventory, and Spaces
 
-Every selected save folder keeps an inventory by default: generating a bin,
-a B4B, or Bin for Bins case adds it to `Wavefinity bins.md` (the same name in every folder, so renaming the folder never orphans it; one old `<name> bins.md` is adopted automatically). A checkbox
+Every selected save folder keeps an inventory by default: generating a bin
+or Storage Box adds it to `Wavefinity bins.md` (the same name in every folder, so renaming the folder never orphans it; one old `<name> bins.md` is adopted automatically). A checkbox
 beside the save folder, *Keep inventory for this folder*, lets a user turn
 that off for a normal, untyped **Design** folder - files still save
 normally, but nothing new is logged. Turning it off never deletes an
@@ -504,7 +504,7 @@ something to work on.
   that ID; a folder moved elsewhere is recognised when you Open Existing it.
   A second folder copy carrying the same ID is refused, not merged.
 - **The inventory file** is a Markdown table, one row per bin design, with an
-  **ID**, a **Kind** (bin, B4B case, spacer, added by hand), a **Name**
+  **ID**, a **Kind** (bin, Storage Box, spacer, added by hand), a **Name**
   a **Stack** (blank, `lid` or `direct` - how the bin was printed to stack)
   and a **Qty**. Qty is how many copies you have *printed*. Generating is not
   printing, so a newly generated bin arrives at Qty 0 until you raise it (turn
@@ -559,7 +559,7 @@ something to work on.
   anything that did not fit.
 - **Space & spacers.** The drawer view itself shows the one or two biggest
   open rectangles a bin could still go into, each as both a millimetre size
-  and a Wavefinity-unit size (*Design a bin for it* sends the primary one to
+  and a Wavefinity-unit size (*Design a Storage Box* sends the primary one to
   the bin editor); the left panel covers connector and layout problems
   instead of restating those as a summary. **Make spacers** fills the drawer,
   15 mm tall by default (*Height*). There is one filler part, the **Spacer**.
@@ -624,7 +624,7 @@ A future ordinary `layout.feature` is interior content and does not belong.
 | Lid configuration | Yes |
 | Handle / grabber / shell options | Yes |
 | Scoop / shell modifications | Yes |
-| B4B container configuration | Yes |
+| Storage Box container configuration | Yes |
 | Label enabled/type/location/style | Yes |
 | Actual label text | **No — blank** |
 | Edge Mount side/projection/thickness/screw settings | Yes |
@@ -816,7 +816,7 @@ engine used locally.
 **Save folders, inventory and Spaces are three separate ideas.** Every chosen
 folder gets an additive `.wavefinity.json` marker holding its folder mode,
 inventory choice, optional Space identity, and per-Space Keep Defaults state.
-`inventory` (default `true`) controls whether generated bins/B4Bs are logged;
+`inventory` (default `true`) controls whether generated bins/Storage Boxes are logged;
 `folder_mode` (`"design"` or `"space"`) says whether the folder also represents
 one typed Drawer, Surface, or Portable Storage Space. `folder_mode: "space"` always
 implies `inventory: true` - a Space's layout depends on the inventory it
@@ -1310,7 +1310,7 @@ the two are independent, so a bin can say `M3` on the floor and still save as
 **Edge Mount modifies an ordinary bin; it is not a bin type, an interior
 part, or a second bin-generation path.** It is available for a normal Bin
 and for both Stacked Bin-to-Bin and Stacked Lid-to-Bin, and it is hidden (but
-preserved in the saved design) while B4B is selected, since B4B uses a
+preserved in the saved design) while Storage Box is selected, since Storage Box uses a
 separate body architecture. It lets a normal bin hang vertically outside a
 cart, table, shelf or workbench: one selected wall (**Front** `-Y`, **Back**
 `+Y`, **Left** `-X`, **Right** `+X` - the same convention the rim label
@@ -1354,7 +1354,7 @@ keep using the ordinary bin size. A removable/cartridge insert is never drilled,
 since it can simply be lifted out before the bin is mounted; the fused
 access passage does clear any fused interior holder material blocking its
 path, since that material cannot be removed. Edge Mount's own label is
-independent of floor Text parts, the rim label, and B4B/divider labels -
+independent of floor Text parts, the rim label, and Storage Box/divider labels -
 none of those are migrated or replaced.
 
 ### Side Openings
@@ -1389,7 +1389,7 @@ selected side and the current Shape/Depth/Top Support combination; Python
 re-validates the same rule and refuses an impossible saved or imported
 combination outright.
 
-Side Openings are for **ordinary bins only** - hidden for B4B and Base
+Side Openings are for **ordinary bins only** - hidden for Storage Box and Base
 Trim. Lid & Stacking requires Top Support on, so the continuous top rim
 survives; turning either on while the other is set that way forces Top
 Support on automatically in the browser. A rim label, an Edge Mount

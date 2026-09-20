@@ -183,7 +183,7 @@ function setFolderState(
       ? "Inventory and Spaces need writable folder access in this browser. Downloads still work without it."
       : state.folderMode === "space"
         ? "A Space needs this folder's inventory turned on."
-        : "Add each generated bin and B4B to this folder's inventory file";
+        : "Add each generated bin and Storage Box to this folder's inventory file";
   }
 }
 
@@ -1796,7 +1796,7 @@ function applyB4BVisibility() {
   if (zLabel) zLabel.textContent = on ? "Height (Inside)" : "Height";
   // One Name field for both bin kinds; only its label changes.
   const partNameLabel = $("#part-name-label");
-  if (partNameLabel) partNameLabel.textContent = on ? "Bin for Bins Name" : "Bin Name";
+  if (partNameLabel) partNameLabel.textContent = on ? "Storage Box Name" : "Bin Name";
   if (on) {
     // The handle is front-mounted body hardware now, so stacking is no longer
     // a reason to refuse it. What it does still need is a lid that latches,
@@ -1845,7 +1845,7 @@ function b4bHandleBlockedReason() {
   if ($("#b4b-lid-type").value !== "latched") return "Handle requires a secure lid.";
   const b4b = state.preview?.b4b;
   if (!b4b || b4b.handle_available !== false) return "";
-  return b4b.handle_blocked_reason || "This B4B is too small for a handle.";
+  return b4b.handle_blocked_reason || "This Storage Box is too small for a handle.";
 }
 
 // Same reasoning as b4bHandleBlockedReason: the server derives this from the
@@ -2234,7 +2234,7 @@ function b4bLimitProblems(design = state.design) {
   const minField = b4bMinField();
   const minHeight = b4bLatchedMinHeight();
   if (number(box.x, 0) < minField - 1e-9 || number(box.y, 0) < minField - 1e-9) {
-    problems.push(`A B4B holds at least ${minField} x ${minField} mm of bins.`);
+    problems.push(`A Storage Box holds at least ${minField} x ${minField} mm of bins.`);
   }
   if (b4b.secure_lid && number(box.z, 0) < minHeight - 1e-9) {
     problems.push(`A latched lid needs at least ${minHeight} mm of bin height.`);
@@ -2305,7 +2305,7 @@ async function toggleB4B(wantEnabled) {
     // Placed interior parts need an explicit confirmation before they go.
     if (state.design?.layout?.features?.length) {
       const ok = window.confirm(
-        "Turning on Bin for Bins clears the interior parts - the B4B interior " +
+        "Turning on Storage Box clears the interior parts - the Storage Box interior " +
         "is reserved for child bins. Continue?");
       if (!ok) { $("#bin-type").value = binTypeFromDesign(); return false; }
       state.design.layout.features = [];

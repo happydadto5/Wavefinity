@@ -396,7 +396,7 @@ def _largest_empty(free: np.ndarray, min_cells: int = 1) -> tuple[int, int, int,
 def _connector_eligible(item: dict[str, Any]) -> bool:
     """Whether this footprint's seam can take a side connector at all.
 
-    A B4B case has no bare wave wall to clip onto, and a stackable bin's
+    A Storage Box case has no bare wave wall to clip onto, and a stackable bin's
     mouth is meant for the bin above, not a side clip - so neither should
     ever get one, no matter how long the shared seam runs."""
     if item["kind"] == "b4b":

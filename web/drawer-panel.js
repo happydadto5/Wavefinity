@@ -778,7 +778,7 @@ DP.renderOpenSpaces = () => {
     return `<div class="dl-open-spot">
       <span>${index === 0 ? "Largest open space" : "Next open space"}</span>
       <div>${fmt(wMm)} × ${fmt(dMm)} mm<small>${DL.mmToUnits(wMm)} × ${DL.mmToUnits(dMm)} units</small></div>
-      ${index === 0 ? `<button type="button" id="dl-design-spot" class="dl-link" title="Open the bin editor with this size">Design a bin for it</button>` : ""}
+      ${index === 0 ? `<button type="button" id="dl-design-spot" class="dl-link" title="Open the bin editor with this size">Design a Storage Box</button>` : ""}
     </div>`;
   }).join("");
 };
@@ -842,7 +842,7 @@ DP.renderInventory = (force = false) => {
   }
   if (!bins.length) { list.innerHTML = `<div class="dl-empty">No bins match.</div>`; return; }
   const range = DV.heightRange();
-  const kinds = { b4b: "B4B case", manual: "Added by hand" };
+  const kinds = { b4b: "Storage Box", manual: "Added by hand" };
   const kindLabel = one => one.kind === "spacer" ? (one.boundary === "edge" ? "Edge spacer" : "X spacer") : kinds[one.kind];
   list.innerHTML = bins.map(one => {
     const placed = DL.placedCount(one.id);

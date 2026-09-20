@@ -1,6 +1,6 @@
-"""B4B (Bin for Bins) - a Wavefinity carrying-case mode.
+"""Storage Box - a Wavefinity carrying-case mode.
 
-For B4B, ``BoxSpec.x/y`` are the requested child-bin field dimensions.  The
+For Storage Box, ``BoxSpec.x/y`` are the requested child-bin field dimensions.  The
 authoritative inner mating wall is built around that exact field and the case
 wall grows outward from it.  The physical case footprint is therefore derived
 and intentionally does not promise ordinary external Wavefinity interlock.
@@ -145,7 +145,7 @@ B4B_HEAD_RECESS_DEPTH = 0.50
 
 @dataclass(frozen=True)
 class HardwareProfile:
-    """One metric screw family and every B4B dimension derived from it.
+    """One metric screw family and every Storage Box dimension derived from it.
 
     Exact first-build values.  Only the three physical-calibration fields -
     ``pilot``, ``clear_bore`` and the detent interferences held elsewhere - are
@@ -476,7 +476,7 @@ _EPS = 1e-6
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class B4BLayout:
-    """One source of truth for every derived B4B plan-view datum."""
+    """One source of truth for every derived Storage Box plan-view datum."""
 
     target_child_x: float
     target_child_y: float
@@ -512,7 +512,7 @@ def b4b_layout(box: BoxSpec) -> B4BLayout:
     if not inner.is_valid:
         inner = inner.buffer(0)
     if not isinstance(inner, Polygon) or not inner.is_valid:
-        raise RuntimeError("B4B inner mating outline is not a valid single polygon")
+        raise RuntimeError("Storage Box inner mating outline is not a valid single polygon")
     inner = _rounded(inner, B4B_WALL_CORNER_FILLET)
 
     outer_half_x = inner_half_x + eff.wall_depth
@@ -523,10 +523,10 @@ def b4b_layout(box: BoxSpec) -> B4BLayout:
     if not outer.is_valid:
         outer = outer.buffer(0)
     if not isinstance(outer, Polygon) or not outer.is_valid:
-        raise RuntimeError("B4B outer structural outline is not a valid single polygon")
+        raise RuntimeError("Storage Box outer structural outline is not a valid single polygon")
     outer = _rounded(outer, B4B_WALL_CORNER_FILLET)
     if not outer.buffer(_EPS).contains(inner):
-        raise RuntimeError("B4B outward wall does not contain its inner mating face")
+        raise RuntimeError("Storage Box outward wall does not contain its inner mating face")
     return B4BLayout(
         target_child_x=eff.x,
         target_child_y=eff.y,
@@ -552,7 +552,7 @@ def b4b_capacity_mm(box: BoxSpec) -> tuple[float, float]:
 
 
 def b4b_effective_base_thickness(box: BoxSpec) -> float:
-    """Base thickness B4B geometry actually uses.
+    """Base thickness Storage Box geometry actually uses.
 
     ``max(requested, B4B_STACK_MIN_BASE)`` when stacking is on, otherwise the
     requested value.  Never redefines the normal Standard Base.
@@ -598,7 +598,7 @@ def b4b_required_min_wall(box: BoxSpec) -> float:
 
 
 def b4b_min_field(box: BoxSpec) -> tuple[float, float]:
-    """Smallest child field B4B will build, per axis.
+    """Smallest child field Storage Box will build, per axis.
 
     A flat product rule, not a hardware-fit search: below this the hinges,
     latches and handle would *be* the product.  B4B is refused rather than
@@ -808,7 +808,7 @@ def b4b_lid_skin(box: BoxSpec) -> float:
 
 
 def b4b_effective_box(box: BoxSpec) -> BoxSpec:
-    """The BoxSpec every B4B builder uses.
+    """The BoxSpec every Storage Box builder uses.
 
     An effective-*material* normaliser, not a dimension mutator.  The entered
     child field is authoritative and survives untouched: X, Y and Z are never
@@ -845,7 +845,7 @@ def b4b_grew(box: BoxSpec) -> bool:
         and math.isclose(eff.z, box.z)
     ):
         raise RuntimeError(
-            "B4B changed the requested child field - the effective box must "
+            "Storage Box changed the requested child field - the effective box must "
             "never resize X, Y or Z"
         )
     return not math.isclose(eff.base_thickness, box.base_thickness)
@@ -1169,7 +1169,7 @@ def _solve_hinge_axis(
             return axis_y, relief
         axis_y += B4B_HINGE_AXIS_STEP
     raise ValueError(
-        "the B4B lid cannot be opened to "
+        "the Storage Box lid cannot be opened to "
         f"{B4B_LID_OPEN_ANGLE:g} degrees without striking the body; the rear "
         "hinge geometry needs design review"
     )
@@ -1288,7 +1288,7 @@ def b4b_hardware_plan(box: BoxSpec) -> B4BHardwarePlan:
     )
     if latch_root_top_z - profile.latch_root_height < 0.5:
         raise ValueError(
-            f"a {eff.z:g} mm B4B is too short for a secure lid: the latch "
+            f"a {eff.z:g} mm Storage Box is too short for a secure lid: the latch "
             f"receiver needs {profile.latch_root_height:.0f} mm of front wall "
             f"below the lid seam; use at least "
             f"{B4B_LATCHED_MIN_HEIGHT:g} mm of bin height"
@@ -1394,7 +1394,7 @@ class B4BHandlePlan:
 
 def b4b_handle_min_width(box: BoxSpec) -> float:
     """Smallest valid child-field X (a whole GRID_PITCH multiple) that lets
-    this B4B's front wall carry a handle.
+    this Storage Box's front wall carry a handle.
 
     Scans the real front-wall fit check over legal grid widths rather than a
     hard-coded width rule, so it tracks wall thickness, latch layout, and
@@ -1409,7 +1409,7 @@ def b4b_handle_min_width(box: BoxSpec) -> float:
         candidate = float(units) * GRID_PITCH
         if b4b_handle_width_fit(replace(box, x=candidate))[0]:
             return candidate
-    raise ValueError("could not find a valid B4B width for the carrying handle")
+    raise ValueError("could not find a valid Storage Box width for the carrying handle")
 
 
 def b4b_handle_eligibility(box: BoxSpec) -> tuple[bool, str]:
@@ -1448,8 +1448,8 @@ def b4b_handle_plan(box: BoxSpec) -> B4BHandlePlan | None:
     eligible, reason = b4b_handle_eligibility(box)
     if not eligible:
         raise ValueError(
-            f"this B4B cannot take a carrying handle: {reason.rstrip('.')}; "
-            f"turn the handle off, or use a wider or taller B4B"
+            f"this Storage Box cannot take a carrying handle: {reason.rstrip('.')}; "
+            f"turn the handle off, or use a wider or taller Storage Box"
         )
 
     layout = b4b_layout(box)
@@ -1528,7 +1528,7 @@ def b4b_lid_underside_z_from_eff(eff: BoxSpec) -> float:
 
 
 def b4b_lid_underside_z(box: BoxSpec) -> float:
-    """Z of the lid underside over the child field, from the B4B bottom datum.
+    """Z of the lid underside over the child field, from the Storage Box bottom datum.
 
     ``effective_floor_z + box.z + lid_headroom_mm`` - a child of nominal height
     ``box.z`` resting on the floor then has ``lid_headroom_mm`` clearance.
@@ -1566,7 +1566,7 @@ def _stack_locator_centres(eff: BoxSpec) -> list[tuple[float, float]]:
 
 
 def _stack_recesses(box: BoxSpec) -> list[trimesh.Trimesh]:
-    """Female locator recesses cut into the B4B underside.
+    """Female locator recesses cut into the Storage Box underside.
 
     The cutter's upper face terminates at *exactly* ``B4B_STACK_RECESS_DEPTH``;
     all boolean overshoot is below the exterior bottom (z=0).  So the finished
@@ -1595,7 +1595,7 @@ _B4B_GRABBER_WALL_PAIRS = {"+x": "left/right", "-x": "left/right",
 def _b4b_wall_face_table(
     layout: "B4BLayout",
 ) -> dict[str, tuple[str, float, float, tuple[float, float]]]:
-    """B4B inner-mating-wall faces, in the same shape as the ordinary bin's
+    """Storage Box inner-mating-wall faces, in the same shape as the ordinary bin's
     ``organizer_engine._wall_face_table`` - grabbers must root against the
     authoritative child-facing wall, never the outer case polygon."""
     return {
@@ -1607,7 +1607,7 @@ def _b4b_wall_face_table(
 
 
 def validate_b4b_lift_grabbers(box: BoxSpec) -> None:
-    """Lift grabbers are incompatible with Bin for Bins.
+    """Lift grabbers are incompatible with Storage Box.
 
     They would protrude inward into the exact child-bin field B4B promises
     stays usable edge-to-edge, so B4B refuses to generate with them enabled
@@ -1616,20 +1616,20 @@ def validate_b4b_lift_grabbers(box: BoxSpec) -> None:
     if not grabbers.enabled:
         return
     raise ValueError(
-        "Lift grabbers are not available on Bin for Bins because they would "
+        "Lift grabbers are not available on Storage Box because they would "
         "protrude into the child-bin field."
     )
 
 
 def validate_b4b_side_openings(box: BoxSpec) -> None:
-    """Side Openings are for ordinary bins only, never Bin for Bins."""
+    """Side Openings are for ordinary bins only, never Storage Box."""
     if not box.side_openings.enabled:
         return
-    raise ValueError("Side Openings are not available on Bin for Bins.")
+    raise ValueError("Side Openings are not available on Storage Box.")
 
 
 def make_b4b_lift_grabbers(box: BoxSpec) -> list[trimesh.Trimesh]:
-    """Small support-free internal finger ledges on the B4B's inner mating
+    """Small support-free internal finger ledges on the Storage Box's inner mating
     wall, near the top of the case."""
     grabbers = box.lift_grabbers
     if not grabbers.enabled:
@@ -1710,9 +1710,9 @@ def _skirt_polygons(eff: BoxSpec) -> tuple[Polygon, Polygon]:
     outer = layout.inner_mating_polygon.buffer(-clr)
     inner = outer.buffer(-B4B_LID_SKIRT_WALL)
     if outer.is_empty or inner.is_empty:
-        raise RuntimeError("B4B lid locating skirt collapsed inside the body wall")
+        raise RuntimeError("Storage Box lid locating skirt collapsed inside the body wall")
     if not isinstance(outer, Polygon) or not isinstance(inner, Polygon):
-        raise RuntimeError("B4B lid locating skirt must remain a single polygon")
+        raise RuntimeError("Storage Box lid locating skirt must remain a single polygon")
     return outer, inner
 
 
@@ -1736,7 +1736,7 @@ def make_b4b_lid(box: BoxSpec) -> trimesh.Trimesh:
     """
     eff = b4b_effective_box(box)
     if not eff.b4b.lid:
-        raise ValueError("this B4B has no lid")
+        raise ValueError("this Storage Box has no lid")
     plan = b4b_hardware_plan(box)
 
     underside_z = b4b_lid_underside_z(box)
@@ -1933,7 +1933,7 @@ def _cavity_prism(
         window = Polygon([(x0, -reach), (x1, -reach), (x1, reach), (x0, reach)])
         outline = outline.intersection(window)
         if outline.is_empty:
-            raise RuntimeError("a B4B hardware group sits outside the case")
+            raise RuntimeError("a Storage Box hardware group sits outside the case")
         if not isinstance(outline, Polygon):
             outline = max(outline.geoms, key=lambda part: part.area)
     cavity = _extrude_polygon(outline, top - floor_z)
@@ -2041,7 +2041,7 @@ def _root_profile_yz(
         ])
     )
     if profile.is_empty or not isinstance(profile, Polygon):
-        raise RuntimeError("a B4B hardware root collapsed")
+        raise RuntimeError("a Storage Box hardware root collapsed")
     return profile
 
 
@@ -2543,7 +2543,7 @@ def b4b_latch_lever_profile(plan: B4BHardwarePlan) -> Polygon:
         Point(*catch).buffer(inner_r, quad_segs=32).union(opening)
     )
     if not isinstance(body, Polygon) or not body.is_valid:
-        raise RuntimeError("the B4B latch strap outline did not resolve")
+        raise RuntimeError("the Storage Box latch strap outline did not resolve")
     # the jaws root at the mouth in two square internal corners, and that is
     # exactly where a hook snapped over a pin cracks
     body = _filleted(body, min(profile.lever_fillet, 0.4 * mouth))
@@ -2654,7 +2654,7 @@ def b4b_handle_outline(plan: B4BHandlePlan) -> Polygon:
         band, cap_style=2, join_style=1, quad_segs=24
     )
     if not isinstance(outline, Polygon) or not outline.is_valid:
-        raise RuntimeError("the B4B handle outline did not resolve")
+        raise RuntimeError("the Storage Box handle outline did not resolve")
     # Taper the band down to the eye width over the top run, so the resolved
     # pivot stack fits without thinning the part a hand actually holds.  The
     # taper is symmetric about each arm's own centreline - narrowing only the
@@ -2939,7 +2939,7 @@ def _sweep_intersection_cc(
         except Exception as exc:
             raise ValueError(
                 f"could not verify the swept clearance at {deg:g} deg "
-                f"({exc}); the B4B mechanics could not be validated"
+                f"({exc}); the Storage Box mechanics could not be validated"
             ) from exc
     return worst
 
@@ -3005,20 +3005,20 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
     # 2. actual generated solids are watertight single volumes.
     body = b4b_body_with_features(box)
     if not body.is_watertight or body.volume <= 0.0:
-        raise ValueError("B4B body did not generate as a watertight solid")
+        raise ValueError("Storage Box body did not generate as a watertight solid")
     lid = None
     if b4b.lid:
         lid = make_b4b_lid(box)
         if b4b.label_location == "top" and b4b.label_text.strip():
             lid, _inlay = _apply_top_label(box, lid)
         if not lid.is_watertight or lid.volume <= 0.0:
-            raise ValueError("B4B lid did not generate as a watertight solid")
+            raise ValueError("Storage Box lid did not generate as a watertight solid")
 
     # 3. the handle: one solid, stowed clear of the wall, and swept to its stop.
     if handle is not None:
         bail = make_b4b_handle(box)
         if bail is None or not bail.is_watertight or bail.volume <= 0.0:
-            raise ValueError("the B4B handle did not generate as a watertight solid")
+            raise ValueError("the Storage Box handle did not generate as a watertight solid")
         # Deploying swings the bail's grip away from the wall, which about
         # world +X is the negative rotation - the same handedness the lid and
         # the latch straps open on.
@@ -3084,7 +3084,7 @@ def _validate_b4b_mechanics(box: BoxSpec) -> None:
             raise ValueError(
                 f"a latch strap does not swing clear of the body once released "
                 f"(overlap {worst:.3f} cc vs {closed:.3f} cc closed); reduce "
-                f"the hook depth or use a larger B4B"
+                f"the hook depth or use a larger Storage Box"
             )
 
     # 5. the hook is geometrically off the pin by the release angle.
@@ -3155,37 +3155,37 @@ def validate_b4b_design(
     """
     raw = box.b4b
     if not raw.enabled:
-        raise ValueError("validate_b4b_design called on a non-B4B design")
+        raise ValueError("validate_b4b_design called on a non-Storage Box design")
     b4b = raw.normalised()
     if layout_feature_count:
         raise ValueError(
-            "a B4B interior is reserved for child bins - remove the "
+            "a Storage Box interior is reserved for child bins - remove the "
             f"{layout_feature_count} interior part(s) first"
         )
     if layout_mode != "fused":
-        raise ValueError("a B4B layout mode must be 'fused'")
+        raise ValueError("a Storage Box layout mode must be 'fused'")
     if flat_inside:
-        raise ValueError("the flat-inside band is incompatible with B4B")
+        raise ValueError("the flat-inside band is incompatible with Storage Box")
 
     min_x, min_y = b4b_min_field(box)
     if box.x + _EPS < min_x or box.y + _EPS < min_y:
         raise ValueError(
-            f"a B4B child field is at least {min_x:g} x {min_y:g} mm "
+            f"a Storage Box child field is at least {min_x:g} x {min_y:g} mm "
             f"({round(min_x / GRID_PITCH)}U x {round(min_y / GRID_PITCH)}U); "
             f"{box.x:g} x {box.y:g} mm is too small to carry the hardware"
         )
     min_wall = b4b_required_min_wall(box)
     if box.wall + _EPS < min_wall:
         raise ValueError(
-            f"a B4B wall is at least {min_wall:g} mm - this design is set "
+            f"a Storage Box wall is at least {min_wall:g} mm - this design is set "
             f"to {box.wall:g} mm; raise the wall before regenerating"
         )
     min_height = b4b_secure_min_height()
     if b4b.secure_lid and box.z + _EPS < min_height:
         raise ValueError(
-            f"a latched B4B lid needs at least {min_height:g} mm of bin "
+            f"a latched Storage Box lid needs at least {min_height:g} mm of bin "
             f"height; this design is {box.z:g} mm - use Lid Only or a taller "
-            f"B4B"
+            f"Storage Box"
         )
 
     if b4b.lid and b4b.stacking:
@@ -3194,7 +3194,7 @@ def validate_b4b_design(
         remaining = lid_skin - B4B_STACK_SOCKET_DEPTH
         if remaining + _EPS < B4B_STACK_SOCKET_MIN_SKIN:
             raise ValueError(
-                f"the B4B lid skin ({lid_skin:g} mm) leaves only "
+                f"the Storage Box lid skin ({lid_skin:g} mm) leaves only "
                 f"{remaining:.2f} mm beneath the {B4B_STACK_SOCKET_DEPTH:g} mm "
                 f"stacking socket (need {B4B_STACK_SOCKET_MIN_SKIN:g} mm)"
             )
@@ -3204,7 +3204,7 @@ def validate_b4b_design(
         lap = _skirt_lap(eff)
         if lap + _EPS < B4B_LID_SKIRT_MIN_LAP:
             raise ValueError(
-                f"this Lid Only B4B only has {lap:.2f} mm of locating skirt "
+                f"this Lid Only Storage Box only has {lap:.2f} mm of locating skirt "
                 f"lap (need {B4B_LID_SKIRT_MIN_LAP:g} mm); the lid would sit "
                 "as a loose, unlocated flat plate - raise the bin height or "
                 "loosen the lid snugness"
@@ -3212,12 +3212,12 @@ def validate_b4b_design(
 
     cx, cy = b4b_capacity_units(box)
     if cx < 1 or cy < 1:
-        raise ValueError("B4B interior is smaller than one child unit")
+        raise ValueError("Storage Box interior is smaller than one child unit")
 
     layout = b4b_layout(box)
     wall = layout.outer_structural_polygon.difference(layout.inner_mating_polygon)
     if wall.is_empty or wall.area <= 0.0:
-        raise ValueError("B4B outward structural wall is empty")
+        raise ValueError("Storage Box outward structural wall is empty")
 
     validate_b4b_lift_grabbers(box)
     validate_b4b_side_openings(box)
@@ -3226,11 +3226,11 @@ def validate_b4b_design(
         eligible, reason = b4b_handle_eligibility(box)
         if not eligible:
             raise ValueError(
-                f"this B4B cannot carry a handle: {reason.rstrip('.')}"
+                f"this Storage Box cannot carry a handle: {reason.rstrip('.')}"
             )
         handle = b4b_handle_plan(box)
         if handle is None:
-            raise ValueError("the handle did not resolve for this B4B")
+            raise ValueError("the handle did not resolve for this Storage Box")
         if handle.screw_length_mm not in handle.profile.lengths:
             raise ValueError(
                 "the handle screw did not resolve to an allowed "
@@ -3258,12 +3258,12 @@ def validate_b4b_design(
         profile = plan.profile
         if plan.hinge_count not in (1, 2):
             raise ValueError(
-                f"a secure B4B lid must resolve to one or two hinges; "
+                f"a secure Storage Box lid must resolve to one or two hinges; "
                 f"got {plan.hinge_count}"
             )
         if len(plan.hinge_centers_x) != plan.hinge_count:
             raise ValueError(
-                f"B4B hinge plan is inconsistent: hinge_count={plan.hinge_count}, "
+                f"Storage Box hinge plan is inconsistent: hinge_count={plan.hinge_count}, "
                 f"but {len(plan.hinge_centers_x)} hinge centers were generated"
             )
         # --- printability and structure, not merely "it resolved to a number"
@@ -3295,7 +3295,7 @@ def validate_b4b_design(
             if reach > limit + _EPS:
                 raise ValueError(
                     f"a {what} root reaches {reach - limit:.2f} mm into the "
-                    f"corner keep-out; this B4B is too narrow for its hardware"
+                    f"corner keep-out; this Storage Box is too narrow for its hardware"
                 )
         if len(plan.hinge_centers_x) == 2:
             gap = (
@@ -3366,7 +3366,7 @@ def validate_b4b_design(
                         f"bracket on the front wall (closest approach "
                         f"{max(z_gap, x_gap):.2f} mm, need "
                         f"{B4B_FRONT_ROOT_SEPARATION:g} mm of clear wall); "
-                        f"this B4B is too wide for a centred bail and its "
+                        f"this Storage Box is too wide for a centred bail and its "
                         f"latches at once"
                     )
         detent = profile.nominal - profile.hook_mouth
@@ -3519,7 +3519,7 @@ def b4b_summary(box: BoxSpec) -> dict:
 
 
 def b4b_body_with_features(box: BoxSpec) -> trimesh.Trimesh:
-    """The B4B body exactly as it will print: flat floor + wall + hardware, plus the
+    """The Storage Box body exactly as it will print: flat floor + wall + hardware, plus the
     top-loading front-label channel frame when that label is selected.
 
     Preview and export both go through here so they can never disagree about
@@ -3535,7 +3535,7 @@ def b4b_body_with_features(box: BoxSpec) -> trimesh.Trimesh:
 
 @lru_cache(maxsize=32)
 def _b4b_preview_geometry(box: BoxSpec) -> tuple:
-    """Cached: identical B4B designs reuse the same preview mesh walk instead of
+    """Cached: identical Storage Box designs reuse the same preview mesh walk instead of
     re-running the booleans on every keystroke."""
     from organizer_app import _mesh_preview_geometry  # local: avoid import cycle
 
@@ -3774,7 +3774,7 @@ def b4b_top_label_outline(box: BoxSpec):
         else:
             raise ValueError(
                 "the top label cannot be placed clear of the stacking bosses; "
-                "shorten the label, disable stacking, or use a larger B4B"
+                "shorten the label, disable stacking, or use a larger Storage Box"
             )
     outline = _fit_text_outline(
         eff.b4b.label_text, avail_w, avail_h, B4B_TOP_LABEL_CAP_IDEAL
@@ -3899,7 +3899,7 @@ def _b4b_wave_mask_1d(t: float, half_span: float, flat_border: float, blend: flo
 def _b4b_wavy_front_y(plate_w: float, plate_h: float, plate_t: float):
     """The Wavy style's front-face height function ``front_y(x, z)``.
 
-    Exactly the B4B/Wavefinity front-wall wave (``wave_value``, unmodified)
+    Exactly the Storage Box/Wavefinity front-wall wave (``wave_value``, unmodified)
     in the centre of the plate, blending out within
     ``B4B_FRONT_LABEL_FLAT_BORDER`` of every edge to the same flat face the
     Flat style uses - so, viewed straight on, the Wavy label's outline is the
@@ -4365,7 +4365,7 @@ def _pack_print_objects(
 def b4b_build_print_objects(
     box: BoxSpec,
 ) -> list[tuple[str, list[tuple[str, trimesh.Trimesh]]]]:
-    """B4B top-level print objects, named, oriented and packed on the bed.
+    """Storage Box top-level print objects, named, oriented and packed on the bed.
 
     Multi-part objects retain their required registration: the lid and its
     flush top-label inlay, or the front-label plate and text.  Every other
@@ -4378,43 +4378,43 @@ def b4b_build_print_objects(
     objects: list[tuple[str, list[tuple[str, trimesh.Trimesh]]]] = []
 
     body = b4b_body_with_features(box)
-    objects.append(("B4B Body", [("B4B Body", _print_pose(body, "body"))]))
+    objects.append(("Storage Box Body", [("Storage Box Body", _print_pose(body, "body"))]))
 
     if b4b.lid:
         lid = make_b4b_lid(box)
         top_inlay = None
         if b4b.label_location == "top" and b4b.label_text.strip():
             lid, top_inlay = _apply_top_label(box, lid)
-        lid_parts = [("B4B Lid", _print_pose(lid, "lid"))]
+        lid_parts = [("Storage Box Lid", _print_pose(lid, "lid"))]
         if top_inlay is not None:
-            lid_parts.append(("B4B Top Label", _print_pose(top_inlay, "lid")))
-        objects.append(("B4B Lid", lid_parts))
+            lid_parts.append(("Storage Box Top Label", _print_pose(top_inlay, "lid")))
+        objects.append(("Storage Box Lid", lid_parts))
 
     handle = make_b4b_handle(box)
     if handle is not None:
-        objects.append(("B4B Handle", [("B4B Handle", _print_pose(handle, "handle"))]))
+        objects.append(("Storage Box Handle", [("Storage Box Handle", _print_pose(handle, "handle"))]))
 
     if b4b.secure_lid:
         for i, lever in enumerate(make_b4b_latches(box), start=1):
-            name = f"B4B Latch {i}"
+            name = f"Storage Box Latch {i}"
             objects.append((name, [(name, _print_pose(lever, "latch"))]))
 
     if b4b.stacking:
         for i, peg in enumerate(_stack_pegs(box), start=1):
-            name = f"B4B Stacking Peg {i}"
+            name = f"Storage Box Stacking Peg {i}"
             objects.append((name, [(name, _print_pose(peg, "peg"))]))
 
     if b4b.label_location == "front" and b4b.label_text.strip():
         _frame, plate, text, centre = b4b_front_label_geometry(box)
         # Rotated together so the plate and its lettering stay registered:
         # printed flat on its back, text facing up.
-        objects.append(("B4B Front Label", [
+        objects.append(("Storage Box Front Label", [
             (
-                "B4B Front Label Plate",
+                "Storage Box Front Label Plate",
                 _print_pose(translated(plate, centre), "label"),
             ),
             (
-                "B4B Front Label Text",
+                "Storage Box Front Label Text",
                 _print_pose(translated(text, centre), "label"),
             ),
         ]))

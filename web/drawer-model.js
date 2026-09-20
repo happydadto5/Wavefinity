@@ -140,7 +140,7 @@ DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
 DL.mmToUnits = mm => fmt(mm / 8);
 DL.isSpacer = one => one?.kind === "spacer";
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
-DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct snap", b4b: "B4B stacking" })[mode] || "Not stackable";
+DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct snap", b4b: "Storage Box stacking" })[mode] || "Not stackable";
 DL.isPlanned = p => (p.copy ?? 0) >= (Number(DL.bin(p.bin)?.qty) || 0);
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.

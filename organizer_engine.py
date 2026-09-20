@@ -357,7 +357,7 @@ LID_HANDLE_POSITIONS = ("left", "right", "front", "back", "middle")
 
 @dataclass(frozen=True)
 class LidSpec:
-    """Ordinary-bin lid intent. B4B owns its separate lid system."""
+    """Ordinary-bin lid intent. Storage Box owns its separate lid system."""
 
     enabled: bool = False
     stackable: bool = False
@@ -422,7 +422,7 @@ def vertical_stack_enabled(box: "BoxSpec") -> bool:
 
 @dataclass(frozen=True)
 class B4BSpec:
-    """User-facing B4B settings.  Serialised as ``box.b4b``; harmless defaults
+    """User-facing Storage Box settings.  Serialised as ``box.b4b``; harmless defaults
     when ``enabled`` is ``False`` so an ordinary bin is untouched."""
 
     enabled: bool = False
@@ -468,7 +468,7 @@ class B4BSpec:
             raise ValueError(f"lid snugness must be one of {allowed} mm")
 
     def normalised(self) -> "B4BSpec":
-        """Return the coherent B4B configuration used by geometry.
+        """Return the coherent Storage Box configuration used by geometry.
 
         Enabled B4B designs always have a lid. Older no-lid files reopen as a
         Lid Only design; dependent hardware and stacking settings stay off.
@@ -1581,7 +1581,7 @@ def make_box(spec: BoxSpec) -> trimesh.Trimesh:
     # missed - fail loudly rather than silently print a plain box.
     if getattr(getattr(spec, "b4b", None), "enabled", False):
         raise ValueError(
-            "B4B BoxSpec must use the dedicated B4B builder, not make_box()"
+            "Storage Box BoxSpec must use the dedicated Storage Box builder, not make_box()"
         )
     envelope = _extrude_polygon(wavy_outer_polygon(spec), spec.z)
     if spec.flat_inside > 0.0:
