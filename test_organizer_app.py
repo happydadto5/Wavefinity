@@ -2834,6 +2834,44 @@ class SideOpeningTests(unittest.TestCase):
         self.assertEqual(box.side_openings.from_bottom_percent, 60.0)
         self.assertEqual(box.side_openings.from_top_percent, 100.0)
 
+    def _legacy_top_support(self, **box_changes):
+        saved = organizer_app.design_to_dict(self._box(), organizer_app.Layout())
+        saved["box"].update(box_changes)
+        saved["box"]["side_openings"] = {
+            "enabled": True, "shape": "square", "sides": ["front"],
+            "size": "small", "depth_percent": 60.0, "top_support": True,
+        }
+        return saved
+
+    def _assert_bridge(self, box) -> None:
+        usable = box.z - box.base_thickness
+        bridge = usable * (1 - box.side_openings.from_top_percent / 100.0)
+        self.assertAlmostEqual(bridge, organizer_app.SIDE_OPENING_TOP_BRIDGE_MM, places=6)
+
+    def test_legacy_top_support_gives_exact_bridge(self) -> None:
+        box, *_ = organizer_app.design_from_dict(self._legacy_top_support())
+        self._assert_bridge(box)
+
+    def test_legacy_top_support_uses_final_z_for_v4_stackable_lid(self) -> None:
+        saved = self._legacy_top_support(z=40.0)
+        saved["version"] = 4
+        saved["box"]["lid"] = {"enabled": True, "stackable": True}
+        box, *_ = organizer_app.design_from_dict(saved)
+        self._assert_bridge(box)
+
+    def test_legacy_top_support_uses_final_base_after_stack_normalization(self) -> None:
+        saved = self._legacy_top_support(base_thickness=0.6)
+        saved["box"]["stack"] = {"mode": "direct"}
+        raw_base = saved["box"]["base_thickness"]
+        box, *_ = organizer_app.design_from_dict(saved)
+        self.assertGreater(box.base_thickness, raw_base)
+        self._assert_bridge(box)
+
+    def test_legacy_top_support_degenerate_height_is_controlled(self) -> None:
+        saved = self._legacy_top_support(z=2.0, base_thickness=2.0)
+        with self.assertRaises(ValueError):
+            organizer_app.design_from_dict(saved)
+
     def test_save_load_round_trips_exactly(self) -> None:
         spec = self._box(x=48.0, y=48.0, z=40.0)
         spec = replace(spec, side_openings=SideOpeningSpec(
