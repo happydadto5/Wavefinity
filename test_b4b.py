@@ -340,10 +340,20 @@ class B4BFilletTests(unittest.TestCase):
 
 
 class B4BValidationTests(unittest.TestCase):
-    def test_rejects_interior_features(self):
+    def test_rejects_interior_features_except_single_divider(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
-        with self.assertRaises(ValueError):
-            b4b.validate_b4b_design(box, layout_feature_count=1)
+        # Zero features accepted
+        b4b.validate_b4b_design(box, layout_feature_kinds=())
+        # Single divider accepted
+        b4b.validate_b4b_design(box, layout_feature_kinds=("divider",))
+        # Non-divider rejected
+        with self.assertRaises(ValueError) as ctx:
+            b4b.validate_b4b_design(box, layout_feature_kinds=("post",))
+        self.assertIn("Dividers only", str(ctx.exception))
+        # Multiple features rejected
+        with self.assertRaises(ValueError) as ctx:
+            b4b.validate_b4b_design(box, layout_feature_kinds=("divider", "divider"))
+        self.assertIn("one Divider layout", str(ctx.exception))
 
     def test_rejects_incompatible_settings(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
@@ -351,6 +361,23 @@ class B4BValidationTests(unittest.TestCase):
             b4b.validate_b4b_design(box, layout_mode="separate")
         with self.assertRaises(ValueError):
             b4b.validate_b4b_design(box, flat_inside=0.5)
+
+    def test_rejects_ordinary_modifiers(self):
+        from organizer_engine import LiftGrabberSpec, EdgeMountSpec, SideOpeningSpec
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True), lift_grabbers=LiftGrabberSpec(enabled=True))
+        with self.assertRaises(ValueError) as ctx:
+            b4b.validate_b4b_design(box)
+        self.assertIn("Inside Grip is not available", str(ctx.exception))
+
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True), edge_mount=EdgeMountSpec(side="front", label_projection_mm=10))
+        with self.assertRaises(ValueError) as ctx:
+            b4b.validate_b4b_design(box)
+        self.assertIn("Edge Mount is not available", str(ctx.exception))
+
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True), side_openings=SideOpeningSpec(enabled=True))
+        with self.assertRaises(ValueError) as ctx:
+            b4b.validate_b4b_design(box)
+        self.assertIn("Side Openings are not available", str(ctx.exception))
 
     def test_legacy_nolid_normalisation_keeps_lid_only(self):
         n = B4BSpec(
@@ -806,6 +833,137 @@ class B4BWavyLabelMeshComplexityTests(unittest.TestCase):
             self.assertAlmostEqual(
                 front_y(float(x), 0.0), flat_y + wave_value(float(x)), places=6,
             )
+
+
+class B4BDividerAndMaterialTests(unittest.TestCase):
+    def test_lid_skin_equals_effective_base(self):
+        for base in (0.8, 1.2, 1.6, 2.0, 2.4):
+            box = BoxSpec(x=64, y=48, z=40, base_thickness=base, b4b=B4BSpec(enabled=True, lid=True))
+            self.assertAlmostEqual(b4b.b4b_lid_skin(box), base)
+
+        # Stacking forces B4B_STACK_MIN_BASE (2.8)
+        stacked = BoxSpec(x=64, y=48, z=40, base_thickness=1.6, b4b=B4BSpec(enabled=True, lid=True, stacking=True))
+        self.assertAlmostEqual(b4b.b4b_lid_skin(stacked), b4b.B4B_STACK_MIN_BASE)
+        self.assertAlmostEqual(b4b.b4b_lid_skin(stacked), 2.8)
+
+    def test_b4b_min_wall_constant(self):
+        self.assertEqual(b4b.B4B_MIN_WALL, 0.8)
+
+    def test_explicit_thin_materials_accepted(self):
+        box = BoxSpec(x=64, y=48, z=40, wall=0.8, base_thickness=0.8, standard_walls=False, standard_base=False, b4b=B4BSpec(enabled=True))
+        b4b.validate_b4b_design(box)
+
+    def test_b4b_divider_round_trip(self):
+        from organizer_engine import Feature, Zone
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
+        feat = Feature("divider", Zone(-32, -24, 32, 24), full_span=True, options={"count_x": 1, "count_y": 1})
+        data = design_to_dict(box, Layout((feat,), "fused"))
+        back_box, back_layout, *_ = design_from_dict(data)
+        self.assertEqual(len(back_layout.features), 1)
+        self.assertEqual(back_layout.features[0].kind, "divider")
+        self.assertEqual(back_layout.features[0].zone, Zone(-32, -24, 32, 24))
+
+    def test_b4b_rejects_divider_with_labels_enabled(self):
+        data = {
+            "version": 1,
+            "box": {"x": 64, "y": 48, "z": 40, "b4b": {"enabled": True}},
+            "layout": {
+                "mode": "fused",
+                "features": [{
+                    "kind": "divider",
+                    "zone": [-32, -24, 32, 24],
+                    "options": {"label_divisions": True},
+                }],
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            design_from_dict(data)
+        self.assertIn("Divider division labels are not available on Storage Box", str(ctx.exception))
+
+    def test_b4b_rejects_non_divider_feature(self):
+        data = {
+            "version": 1,
+            "box": {"x": 64, "y": 48, "z": 40, "b4b": {"enabled": True}},
+            "layout": {
+                "mode": "fused",
+                "features": [{
+                    "kind": "post",
+                    "zone": [-10, -10, 10, 10],
+                }],
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            design_from_dict(data)
+        self.assertIn("Storage Box supports Dividers only", str(ctx.exception))
+
+    def test_b4b_rejects_multiple_dividers(self):
+        data = {
+            "version": 1,
+            "box": {"x": 64, "y": 48, "z": 40, "b4b": {"enabled": True}},
+            "layout": {
+                "mode": "fused",
+                "features": [
+                    {"kind": "divider", "zone": [-32, -24, 32, 24]},
+                    {"kind": "divider", "zone": [-32, -24, 32, 24]},
+                ],
+            },
+        }
+        with self.assertRaises(ValueError) as ctx:
+            design_from_dict(data)
+        self.assertIn("Storage Box supports one Divider layout", str(ctx.exception))
+
+    def test_b4b_rejects_non_fused_layout(self):
+        data = {
+            "version": 1,
+            "box": {"x": 64, "y": 48, "z": 40, "b4b": {"enabled": True}},
+            "layout": {"mode": "removable", "features": []},
+        }
+        with self.assertRaises(ValueError) as ctx:
+            design_from_dict(data)
+        self.assertIn("fused", str(ctx.exception).lower())
+
+    def test_old_b4b_standard_defaults_migrate_to_b4b_defaults(self):
+        data = {
+            "version": 1,
+            "box": {
+                "x": 64, "y": 48, "z": 40,
+                "wall": 0.8, "standard_walls": True,
+                "base_thickness": 0.6, "standard_base": True,
+                "b4b": {"enabled": True},
+            },
+            "layout": {"mode": "fused", "features": []},
+        }
+        box, layout, *_ = design_from_dict(data)
+        self.assertEqual(box.wall, 1.6)
+        self.assertEqual(box.base_thickness, 1.6)
+        self.assertFalse(box.standard_walls)
+        self.assertFalse(box.standard_base)
+
+    def test_explicit_b4b_materials_preserved_on_deserialization(self):
+        data = {
+            "version": 1,
+            "box": {
+                "x": 64, "y": 48, "z": 40,
+                "wall": 1.2, "standard_walls": False,
+                "base_thickness": 0.8, "standard_base": False,
+                "b4b": {"enabled": True},
+            },
+            "layout": {"mode": "fused", "features": []},
+        }
+        box, layout, *_ = design_from_dict(data)
+        self.assertEqual(box.wall, 1.2)
+        self.assertEqual(box.base_thickness, 0.8)
+
+    def test_b4b_build_print_objects_with_divider(self):
+        from organizer_engine import Feature, Zone
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, lid=False))
+        feat = Feature("divider", Zone(-32, -24, 32, 24), full_span=True, options={"count_x": 1, "count_y": 1})
+        objs_no_div = b4b.b4b_build_print_objects(box, ())
+        objs_with_div = b4b.b4b_build_print_objects(box, (feat,))
+        self.assertEqual(len(objs_no_div), len(objs_with_div))
+        body_no = next(o for o in objs_no_div if "Body" in o["name"])
+        body_with = next(o for o in objs_with_div if "Body" in o["name"])
+        self.assertGreater(body_with["mesh"].volume, body_no["mesh"].volume)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,8 @@ from organizer_engine import (
     SideOpeningSpec,
     DEFAULT_BASE_THICKNESS,
     DEFAULT_WALL,
+    B4B_DEFAULT_BASE,
+    B4B_DEFAULT_WALL,
     GRID_PITCH,
     MAX_WALL,
     MIN_WALL,
@@ -213,8 +215,8 @@ def validate_scoop_lift_grabbers(box: BoxSpec, scoop: bool) -> None:
     )
     if scoop_top > grabber_bottom:
         raise ValueError(
-            "the front scoop rises into the front-wall Inside Handles. Choose "
-            "a smaller Inside Handle size, use side-only Inside Handles, make the bin "
+            "the front scoop rises into the front-wall Inside Grip. Choose "
+            "a smaller Inside Grip size, use side-only Inside Grip, make the bin "
             "taller, or disable the scoop"
         )
 
@@ -774,8 +776,8 @@ def _customization_zones(
 def validate_inside_handles_mode(box: BoxSpec, mode: str) -> None:
     if box.lift_grabbers.enabled and mode != "fused":
         raise ValueError(
-            "Inside Handles are built into the bin wall and cannot be used "
-            "with Removable insert. Choose Fused into box or remove Inside Handles."
+            "Inside Grip is built into the bin wall and cannot be used "
+            "with Removable insert. Choose Fused into box or remove Inside Grip."
         )
 
 
@@ -1375,6 +1377,8 @@ def generate_b4b_files(
     part_name: str = "",
     auto_timestamp: bool = False,
     keep_log: bool = False,
+    *,
+    features=(),
 ) -> dict[str, object]:
     """Dedicated Storage Box export with independently placeable print objects.
 
@@ -1382,9 +1386,13 @@ def generate_b4b_files(
     lid plus its top inlay.  Never routed through ``make_fused_box`` and never
     carries a side connector.
     """
-    validate_b4b_design(box)
+    validate_b4b_design(
+        box,
+        layout_feature_kinds=tuple(one.kind for one in features),
+        deep=True,
+    )
     summary = b4b_summary(box)
-    print_objects = b4b_build_print_objects(box)
+    print_objects = b4b_build_print_objects(box, features=features)
     parts = [
         part
         for _object_name, object_parts in print_objects
@@ -1482,19 +1490,17 @@ def generate_organizer_files(
     every piece can take its own filament.
     """
     if box.b4b.enabled:
-        # B4B is a container mode, not an interior layout: dedicated path.
-        # A caller that hands a B4B box a non-empty or non-fused Layout is
-        # passing conflicting intent - reject it rather than quietly ignoring
-        # the layout argument.
         validate_b4b_design(
             box,
-            layout_feature_count=len(layout.features),
+            layout_feature_kinds=tuple(one.kind for one in layout.features),
             layout_mode=layout.mode,
             flat_inside=box.flat_inside,
         )
         return generate_b4b_files(
             box, output_dir, part_name,
-            auto_timestamp=auto_timestamp, keep_log=keep_log,
+            auto_timestamp=auto_timestamp,
+            keep_log=keep_log,
+            features=layout.features,
         )
     # Stacking rewrites the box before anything is built: a thicker wall to hold
     # the snap groove, a floor deep enough to contain the stepped base, and - in
@@ -2627,29 +2633,37 @@ def design_from_dict(
         # silently as something else.
         validate_side_openings(box)
     if b4b.enabled:
+        if box.standard_walls:
+            box = replace(
+                box,
+                wall=B4B_DEFAULT_WALL,
+                standard_walls=False,
+            )
+        if box.standard_base:
+            box = replace(
+                box,
+                base_thickness=B4B_DEFAULT_BASE,
+                standard_base=False,
+            )
         if lid.enabled or stack.enabled:
             raise ValueError("Storage Box cannot use the ordinary Lid & Stacking part")
-        # A B4B interior is reserved for child bins.  Imported/saved JSON is
-        # authoritative user data: if it still carries interior features, a
-        # non-fused mode or the flat-inside band, that is a real
-        # conflict and must fail with an actionable message - never a silent
-        # discard.  The UI's own conversion clears these before saving, so
-        # well-formed B4B JSON passes straight through.
         raw_layout = data.get("layout", {}) or {}
-        raw_features = raw_layout.get("features", []) or []
-        raw_mode = str(raw_layout.get("mode", "fused"))
+        layout = layout_from_dict(raw_layout)
+        if layout.mode != "fused":
+            raise ValueError("a Storage Box layout mode must be 'fused'")
         validate_b4b_design(
             box,
-            layout_feature_count=len(raw_features),
-            layout_mode=raw_mode,
+            layout_feature_kinds=tuple(one.kind for one in layout.features),
+            layout_mode=layout.mode,
             flat_inside=float(raw.get("flat_inside", 0.0) or 0.0),
         )
         # Normalize legacy no-lid data and adopt any required child-field growth
         # so reopened and saved designs show the exact capacity that will print.
         box = replace(box, flat_inside=0.0, b4b=box.b4b.normalised())
-        from organizer_b4b import b4b_effective_box
+        from organizer_b4b import b4b_effective_box, normalize_b4b_divider
         box = b4b_effective_box(box)
-        layout = Layout((), "fused", EDITOR_SNAP)
+        normalized = [normalize_b4b_divider(box, one) for one in layout.features]
+        layout = Layout(tuple(normalized), "fused", layout.snap)
         label = str(data.get("label", ""))
         location = label_position(data.get("label_position", "bottom"))
         return (box, layout, label, str(data.get("part_name", "")), location, False)

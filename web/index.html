@@ -236,10 +236,10 @@
           </div>
           <div id="inside-handles-option" class="lid-option-card" hidden>
             <div class="field-grid two">
-              <label id="lift-grabber-size-setting" class="inline-select">Inside Handle size
+              <label id="lift-grabber-size-setting" class="inline-select">Inside Grip size
                 <select id="lift-grabber-size"></select>
               </label>
-              <label id="lift-grabber-location-setting" class="inline-select">Inside Handle location
+              <label id="lift-grabber-location-setting" class="inline-select">Inside Grip location
                 <select id="lift-grabber-location"></select>
               </label>
             </div>
@@ -836,12 +836,15 @@
           <h2 id="space-form-title">Configure Space</h2>
           <button id="space-form-close" class="button secondary" type="button" aria-label="Close">✕</button>
         </div>
+        <p id="space-form-type" class="space-form-type"></p>
         <label id="space-name-row" class="space-field"><span id="space-name-label">Name</span><input id="space-name" type="text" maxlength="80" placeholder="e.g. Tool chest, drawer 2"></label>
         
         <div id="space-fields-drawer" class="space-type-fields" hidden>
-          <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="drawer-x" type="number" min="1" step="any"></label>
-          <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="drawer-y" type="number" min="1" step="any"></label>
-          <label class="space-field"><span>Usable height <span class="unit">mm</span></span><input id="drawer-z" type="number" min="1" step="any"></label>
+          <div class="space-dimension-row">
+            <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="drawer-x" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="drawer-y" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Usable height <span class="unit">mm</span></span><input id="drawer-z" type="number" min="1" step="any"></label>
+          </div>
           <p class="space-help">Width = left ↔ right. Depth = front ↔ back. Height = clear usable height with the drawer closed.</p>
           <div id="drawer-readout" class="derived-readout" hidden>
              <dt>Physical Size</dt><dd id="drawer-size-readout"></dd>
@@ -850,11 +853,13 @@
         </div>
 
         <div id="space-fields-surface" class="space-type-fields" hidden>
-          <label class="space-field"><span>Outside width <span class="unit">mm</span></span><input id="surface-x" type="number" min="1" step="any"></label>
-          <label class="space-field"><span>Outside length <span class="unit">mm</span></span><input id="surface-y" type="number" min="1" step="any"></label>
-          <label class="space-field"><span>Trim size</span>
-            <select id="surface-trim"></select>
-          </label>
+          <div class="space-dimension-row">
+            <label class="space-field"><span>Outside width <span class="unit">mm</span></span><input id="surface-x" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Outside length <span class="unit">mm</span></span><input id="surface-y" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Trim size</span>
+              <select id="surface-trim"></select>
+            </label>
+          </div>
           <p class="dl-note">The largest Wavefinity field that fits inside these outside sizes is used. The finished Surface never exceeds them.</p>
           <div id="surface-readout" class="derived-readout" hidden>
             <dt>Wavefinity interior</dt><dd id="surface-size-readout"></dd>
@@ -864,9 +869,11 @@
         </div>
 
         <div id="space-fields-portable" class="space-type-fields" hidden>
-          <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="portable-x" type="number" min="1" step="any"></label>
-          <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="portable-y" type="number" min="1" step="any"></label>
-          <label class="space-field"><span>Usable inside height <span class="unit">mm</span></span><input id="portable-z" type="number" min="1" step="any"></label>
+          <div class="space-dimension-row">
+            <label class="space-field"><span>Usable inside width <span class="unit">mm</span></span><input id="portable-x" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Usable inside depth <span class="unit">mm</span></span><input id="portable-y" type="number" min="1" step="any"></label>
+            <label class="space-field"><span>Usable inside height <span class="unit">mm</span></span><input id="portable-z" type="number" min="1" step="any"></label>
+          </div>
           <div id="portable-readout" class="derived-readout" hidden>
              <dt>Resolved Size</dt><dd id="portable-size-readout"></dd>
           </div>
@@ -877,8 +884,8 @@
         <p id="space-error" class="field-error" role="alert" hidden></p>
         <div class="button-row space-buttons">
           <button id="space-back" class="button secondary" type="button">Back</button>
-          <button id="space-create" class="button primary" type="submit">Choose Folder & Create</button>
-          <button id="space-save-changes" class="button primary" type="submit" hidden>Save Changes</button>
+          <button id="space-create" class="button primary" type="button">Choose Folder & Create</button>
+          <button id="space-save-changes" class="button primary" type="button" hidden>Save Changes</button>
           <button id="space-cancel-edit" class="button secondary" type="button" hidden>Cancel</button>
         </div>
       </form>

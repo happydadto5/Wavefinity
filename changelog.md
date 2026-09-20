@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-20 — Batch fixes: Spaces, Storage Box Dividers, materials, and UI polish
+
+- New local Spaces default to Documents/Wavefinity/<Space Name> and reject duplicate names.
+- Configure Space shows selected type and compact dimensions.
+- Dimension editing no longer implicitly creates/saves.
+- Drawer chooser image repaired.
+- Inside Handles renamed to Inside Grip and routed through the standard Parts & options palette flow for ordinary Bins.
+- Storage Box Parts & options now exposes Dividers only; Divider geometry is preserved, previewed, saved, and fused into the Storage Box body.
+- Storage Box Wall/Base now use their own 0.8–2.4 mm material ladder, default to 1.6/1.6 mm, and the lid top plate matches the effective base thickness.
+
 ## 2026-09-20 — Parts & options cleanup
 
 - Lid & Stacking, Inside Handles, Side Openings, and Edge Mount now use the

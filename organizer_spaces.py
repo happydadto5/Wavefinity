@@ -25,11 +25,17 @@ import json
 import math
 import os
 from pathlib import Path
+import threading
 from typing import Any, Callable
 import uuid
 
 from organizer_inventory import (
-    configure_space, legacy_layout_space, load_inventory, resolve_inventory_path,
+    INVENTORY_FILENAME,
+    configure_space,
+    legacy_layout_space,
+    load_inventory,
+    normalise_space_definition,
+    resolve_inventory_path,
 )
 from organizer_product_rules import SURFACE_TRIM_HEIGHTS
 
@@ -55,6 +61,64 @@ DUPLICATE_MESSAGE = (
     "This folder is a copy of an existing Wavefinity Space and has the same Space identity. "
     "The existing Space was left unchanged."
 )
+
+_INVALID_SPACE_FOLDER_CHARS = set('<>:"/\\|?*')
+_RESERVED_SPACE_FOLDER_NAMES = {
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
+_DUPLICATE_SPACE_NAME_MESSAGE = (
+    "That Space name is already in use. "
+    "Space names can't be reused. Choose a different name."
+)
+_SPACE_CREATE_LOCK = threading.RLock()
+
+def _space_folder_name(raw: Any) -> str:
+    name = str(raw or "").strip()
+    if not name:
+        raise ValueError("Give the Space a name.")
+    if len(name) > 80:
+        raise ValueError("Space names must be 80 characters or fewer.")
+    if (
+        name in {".", ".."}
+        or name.endswith((" ", "."))
+        or any(ord(ch) < 32 or ch in _INVALID_SPACE_FOLDER_CHARS for ch in name)
+        or name.split(".", 1)[0].casefold() in _RESERVED_SPACE_FOLDER_NAMES
+    ):
+        raise ValueError(
+            'Space names cannot use Windows folder characters < > : " / \\ | ? *, '
+            "end in a space or period, or use a reserved Windows device name."
+        )
+    return name
+
+def _new_space_target(root: Path, raw_name: Any) -> Path:
+    name = _space_folder_name(raw_name)
+    with _SPACE_CREATE_LOCK:
+        root.mkdir(parents=True, exist_ok=True)
+        folded = name.casefold()
+        if any(child.name.casefold() == folded for child in root.iterdir()):
+            raise ValueError(_DUPLICATE_SPACE_NAME_MESSAGE)
+        target = root / name
+        try:
+            target.mkdir()
+        except FileExistsError as error:
+            raise ValueError(_DUPLICATE_SPACE_NAME_MESSAGE) from error
+    return target.resolve()
+
+def _cleanup_failed_auto_space(target: Path) -> None:
+    # Only remove files this create path itself owns. Never recursively delete
+    # a directory that acquired any other content.
+    for filename in (INVENTORY_FILENAME, METADATA_FILE):
+        try:
+            (target / filename).unlink(missing_ok=True)
+        except OSError:
+            pass
+    try:
+        target.rmdir()  # succeeds only when now empty
+    except OSError:
+        pass
 
 
 def _space_id(raw: Any) -> str | None:
@@ -572,12 +636,20 @@ def space_routes(
     load_preferences: Callable[[], dict[str, Any]],
     save_preferences: Callable[[dict[str, Any]], dict[str, Any]],
     mutate_preferences: Callable[[Callable[[dict[str, Any]], Any]], dict[str, Any]] | None = None,
+    *,
+    space_root: Path | None = None,
 ) -> dict[str, Callable[[dict], dict]]:
     """Local-folder handlers. Hosted folders remain owned by the browser.
 
     ``mutate_preferences`` is the atomic read-modify-write the app supplies;
     without it a plain load/save pair stands in.
     """
+    auto_space_root = (
+        Path(space_root).expanduser().resolve()
+        if space_root is not None
+        else (Path.home() / "Documents" / "Wavefinity").resolve()
+    )
+
     if mutate_preferences is None:
         def mutate_preferences(mutator):
             prefs = load_preferences()
@@ -792,17 +864,41 @@ def space_routes(
         return reply(target)
 
     def configure(payload):
-        # A genuinely new typed Space: collision-protected, refuses a folder
-        # that already holds a configured typed Space. Never accepts legacy
-        # "box" - that only ever comes from the Configure Existing/migration
-        # path below - see Fix 004 Correction 7.H. A new Space always gets a
-        # brand-new ID; the caller can never supply one.
-        target = folder(payload)
-        target.mkdir(parents=True, exist_ok=True)
-        raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
+        raw_def = {
+            "name": payload.get("name"),
+            "kind": payload.get("kind"),
+            "x": payload.get("x"),
+            "y": payload.get("y"),
+            "z": payload.get("z"),
+        }
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
 
+        auto_created = not payload.get("output")
+
+        if auto_created:
+            # Validate the exact folder/display name before normalise_space_definition()
+            # can apply its legacy 80-character truncation behavior.
+            folder_name = _space_folder_name(raw_def["name"])
+            raw_def["name"] = folder_name
+            validated = normalise_space_definition(raw_def)
+            target = _new_space_target(auto_space_root, folder_name)
+            try:
+                result = configure_space(target, raw_def=validated, mode="create")
+                space = result["layout"]["space"]
+                _write_metadata(target, "space", space, keep_bin_defaults=True)
+            except Exception:
+                _cleanup_failed_auto_space(target)
+                raise
+
+            # A preference/registry write failure must not delete an already-valid
+            # Space folder; the folder remains authoritative and recoverable.
+            remember(target)
+            return reply(target)
+
+        # Explicit-output callers keep the current create behavior.
+        target = folder(payload)
+        target.mkdir(parents=True, exist_ok=True)
         result = configure_space(target, raw_def=raw_def, mode="create")
         space = result["layout"]["space"]
         _write_metadata(target, "space", space, keep_bin_defaults=True)

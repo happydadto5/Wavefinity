@@ -1252,6 +1252,27 @@ dialog:not([open]) { display: none; }
 .space-kind:has(input:checked) { border-color: var(--teal); background: var(--teal-soft); }
 .space-kind input { margin-top: 2px; accent-color: var(--teal); }
 .space-kind strong { display: block; font-size: 13.5px; color: var(--ink); }
+.space-form-type {
+  margin: -2px 0 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.space-dimension-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 150px));
+  gap: 10px;
+  align-items: end;
+  justify-content: start;
+}
+
+.space-dimension-row input,
+.space-dimension-row select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
 .space-size { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .space-size[hidden] { display: none; }
 .space-note { margin: 8px 0 0; min-height: 1.4em; font-size: 12px; color: var(--muted); }
@@ -1314,6 +1335,7 @@ dialog:not([open]) { display: none; }
 }
 @media (max-width: 620px) {
   .welcome-steps, .space-kinds, .space-size { grid-template-columns: 1fr; }
+  .space-dimension-row { grid-template-columns: 1fr; }
   .type-cards {
     grid-template-columns: 1fr;
   }

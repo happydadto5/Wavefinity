@@ -1767,6 +1767,18 @@ class FullSpanLeaningDividerTests(unittest.TestCase):
         self.assertAlmostEqual(insert.bounds[1][0], footprint.bounds[2], places=3)
         self.assertAlmostEqual(insert.bounds[0][0], footprint.bounds[0], places=3)
 
+    def test_full_span_cavity_override(self) -> None:
+        from organizer_inserts._divider import build_divider
+        from shapely.geometry import box as shapely_box
+        cavity = shapely_box(-18.0, -22.0, 18.0, 22.0)
+        feature = self._feature()
+        solids_default = build_divider(self.box, feature, self.box.base_thickness)
+        self.assertTrue(len(solids_default) > 0)
+        solids_custom = build_divider(self.box, feature, self.box.base_thickness, full_span_cavity=cavity)
+        self.assertTrue(len(solids_custom) > 0)
+        self.assertAlmostEqual(solids_custom[0].bounds[1][0], 18.0, places=3)
+        self.assertAlmostEqual(solids_custom[0].bounds[0][0], -18.0, places=3)
+
 
 class RegistryTests(unittest.TestCase):
     def test_every_holder_is_registered_and_callable(self) -> None:

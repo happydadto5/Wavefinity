@@ -330,11 +330,10 @@ B4B_HW_M2_MAX_FIELD_Z = 64.0
 # A B4B is a carrying case, not a bin with hardware bolted on.  Below this the
 # hardware would be the product, so B4B is refused rather than grown.
 # See organizer_product_rules for B4B_MIN_FIELD_XY / B4B_LATCHED_MIN_HEIGHT.
-# B4B wall floor and default.  A repeatedly opened, latched, hinged and carried
-# case is the wrong place for a two-line wall; 1.2 mm is roughly three lines on
-# a nominal 0.4 mm nozzle.  The child field stays authoritative, so the extra
-# material grows outward and costs no capacity.
-B4B_MIN_WALL = 1.2
+# B4B wall floor and default. 0.8 mm is the deliberate Super thin / light duty
+# option; 1.6 mm is the default/recommended Storage Box wall. The child field
+# stays authoritative, so the extra material grows outward and costs no capacity.
+B4B_MIN_WALL = 0.8
 
 # --- hardware reinforcement ------------------------------------------------ #
 # Hinge, latch and handle loads must not run through a sub-millimetre overlap
@@ -787,20 +786,8 @@ def b4b_handle_width_fit(box: BoxSpec) -> tuple[bool, float, float]:
 
 
 def b4b_lid_skin_from_eff(eff: BoxSpec) -> float:
-    """Authoritative lid top-plate thickness.
-
-    A secure lid carries its hinge and latch roots in this plate, so it is
-    thicker than a passive one.  The handle is no longer part of this decision:
-    it mounts to the body front wall and puts no load into the lid at all, so
-    a handled lid is exactly a secure lid.  Every lid datum - plate, top Z,
-    hinge axis, latch pivot, stacking socket roof, label pocket, envelope
-    summary - reads this one helper so they cannot drift apart.
-    """
-    b4b = eff.b4b.normalised()
-    skin = B4B_SECURE_LID_SKIN if b4b.secure_lid else B4B_LID_SKIN
-    if b4b.stacking:
-        skin = max(skin, B4B_STACK_SOCKET_DEPTH + B4B_STACK_SOCKET_MIN_SKIN)
-    return skin
+    """Storage Box lid top plate matches the effective Storage Box base."""
+    return eff.base_thickness
 
 
 def b4b_lid_skin(box: BoxSpec) -> float:
@@ -1616,7 +1603,7 @@ def validate_b4b_lift_grabbers(box: BoxSpec) -> None:
     if not grabbers.enabled:
         return
     raise ValueError(
-        "Lift grabbers are not available on Storage Box because they would "
+        "Inside Grip is not available on Storage Box because they would "
         "protrude into the child-bin field."
     )
 
@@ -3136,10 +3123,80 @@ def _validate_latch_release(plan: B4BHardwarePlan) -> None:
         )
 
 
+def b4b_divider_zone(box: BoxSpec):
+    from organizer_inserts import Zone
+    eff = b4b_effective_box(box)
+    return Zone(
+        -eff.x / 2.0, -eff.y / 2.0,
+         eff.x / 2.0,  eff.y / 2.0,
+    )
+
+
+def b4b_divider_work_box(box: BoxSpec) -> BoxSpec:
+    eff = b4b_effective_box(box)
+    return replace(
+        eff,
+        z=eff.base_thickness + eff.z,
+        b4b=B4BSpec(),
+    )
+
+
+def _b4b_divider_labels_enabled(feature) -> bool:
+    raw = (feature.options or {}).get("label_divisions")
+    if isinstance(raw, str):
+        return raw.strip().lower() not in {"", "false", "0", "no", "off"}
+    return bool(raw)
+
+
+def normalize_b4b_divider(box: BoxSpec, feature):
+    from organizer_inserts import normalize_divider_scoop
+
+    if feature.kind != "divider":
+        raise ValueError("Storage Box supports Dividers only in Parts & options.")
+    if _b4b_divider_labels_enabled(feature) or (feature.options or {}).get("division_labels"):
+        raise ValueError("Divider division labels are not available on Storage Box.")
+
+    eff = b4b_effective_box(box)
+    work = b4b_divider_work_box(eff)
+    options = dict(feature.options or {})
+    if options.get("height") in (None, ""):
+        # Storage Box has no ordinary connector band. Default to full child height.
+        options["height"] = eff.z
+
+    one = replace(
+        feature,
+        zone=b4b_divider_zone(eff),
+        full_span=True,
+        options=options,
+    )
+    one = normalize_divider_scoop(work, one, work.base_thickness)
+    return replace(one, zone=b4b_divider_zone(eff), full_span=True)
+
+
+def b4b_divider_solids(box: BoxSpec, features):
+    from organizer_inserts import build_divider
+
+    features = tuple(features)
+    if len(features) > 1:
+        raise ValueError("Storage Box supports one Divider layout.")
+    if not features:
+        return []
+
+    eff = b4b_effective_box(box)
+    work = b4b_divider_work_box(eff)
+    one = normalize_b4b_divider(eff, features[0])
+    return build_divider(
+        work,
+        one,
+        work.base_thickness,
+        full_span_cavity=b4b_mating_polygon(eff),
+    )
+
+
 def validate_b4b_design(
     box: BoxSpec,
     *,
-    layout_feature_count: int = 0,
+    layout_feature_kinds: tuple[str, ...] = (),
     layout_mode: str = "fused",
     flat_inside: float = 0.0,
     deep: bool = False,
@@ -3157,11 +3214,14 @@ def validate_b4b_design(
     if not raw.enabled:
         raise ValueError("validate_b4b_design called on a non-Storage Box design")
     b4b = raw.normalised()
-    if layout_feature_count:
+    unsupported = [kind for kind in layout_feature_kinds if kind != "divider"]
+    if unsupported:
         raise ValueError(
-            "a Storage Box interior is reserved for child bins - remove the "
-            f"{layout_feature_count} interior part(s) first"
+            "Storage Box supports Dividers only in Parts & options; "
+            "remove the other interior parts first."
         )
+    if len(layout_feature_kinds) > 1:
+        raise ValueError("Storage Box supports one Divider layout.")
     if layout_mode != "fused":
         raise ValueError("a Storage Box layout mode must be 'fused'")
     if flat_inside:
@@ -3221,6 +3281,8 @@ def validate_b4b_design(
 
     validate_b4b_lift_grabbers(box)
     validate_b4b_side_openings(box)
+    if box.edge_mount.active:
+        raise ValueError("Edge Mount is not available on Storage Box.")
 
     if b4b.handle:
         eligible, reason = b4b_handle_eligibility(box)
@@ -3518,14 +3580,17 @@ def b4b_summary(box: BoxSpec) -> dict:
     return summary
 
 
-def b4b_body_with_features(box: BoxSpec) -> trimesh.Trimesh:
+def b4b_body_with_features(box: BoxSpec, features=()) -> trimesh.Trimesh:
     """The Storage Box body exactly as it will print: flat floor + wall + hardware, plus the
-    top-loading front-label channel frame when that label is selected.
+    top-loading front-label channel frame when that label is selected and any fused Dividers.
 
     Preview and export both go through here so they can never disagree about
     whether the frame is present.
     """
     body = make_b4b_body(box)
+    dividers = b4b_divider_solids(box, features)
+    if dividers:
+        body = _weld(union([body, *dividers]))
     b4b = b4b_effective_box(box).b4b
     if b4b.label_location == "front" and b4b.label_text.strip():
         frame, _plate, _text, _centre = b4b_front_label_geometry(box)
@@ -3579,15 +3644,19 @@ def _b4b_preview_geometry(box: BoxSpec) -> tuple:
     return tuple(geometry)
 
 
-def b4b_preview_parts(box: BoxSpec) -> list[tuple[list, str, tuple, int, str]]:
+def b4b_preview_parts(box: BoxSpec, features=()) -> list[tuple[list, str, tuple, int, str]]:
     """Preview geometry in the ``preview_geometry`` tuple format:
     ``(points, kind, normal, layer, owner)``, where ``owner`` is ``"base"`` or
     ``"lid"``.  Dimensionally true; microdetail such as thread pilots is
     omitted."""
-    return list(_b4b_preview_geometry(box))
+    from organizer_app import _mesh_preview_geometry  # local: avoid import cycle
+    parts = list(_b4b_preview_geometry(box))
+    for mesh in b4b_divider_solids(box, features):
+        parts.extend(_mesh_preview_geometry(mesh, "feature_divider", owner="base"))
+    return parts
 
 
-def b4b_preview_meshes(box: BoxSpec) -> list[dict]:
+def b4b_preview_meshes(box: BoxSpec, features=()) -> list[dict]:
     """Compact GPU-ready preview transport: one entry per (kind, owner,
     layer) group, carrying flat ``positions``/``normals`` arrays instead of
     one JSON object per triangle.
@@ -3602,7 +3671,7 @@ def b4b_preview_meshes(box: BoxSpec) -> list[dict]:
     and the browser expands it per vertex when building its GPU buffer.
     """
     groups: dict[tuple[str, str, int], dict[str, list[float]]] = {}
-    for points, kind, normal, layer, owner in _b4b_preview_geometry(box):
+    for points, kind, normal, layer, owner in b4b_preview_parts(box, features):
         bucket = groups.setdefault((kind, owner, layer), {"positions": [], "normals": []})
         for corner in points:
             bucket["positions"].extend(corner)
@@ -4364,6 +4433,7 @@ def _pack_print_objects(
 
 def b4b_build_print_objects(
     box: BoxSpec,
+    features=(),
 ) -> list[tuple[str, list[tuple[str, trimesh.Trimesh]]]]:
     """Storage Box top-level print objects, named, oriented and packed on the bed.
 
@@ -4373,11 +4443,15 @@ def b4b_build_print_objects(
     """
     eff = b4b_effective_box(box)
     b4b = eff.b4b
-    validate_b4b_design(box, deep=True)
+    validate_b4b_design(
+        box,
+        layout_feature_kinds=tuple(one.kind for one in features),
+        deep=True,
+    )
 
     objects: list[tuple[str, list[tuple[str, trimesh.Trimesh]]]] = []
 
-    body = b4b_body_with_features(box)
+    body = b4b_body_with_features(box, features=features)
     objects.append(("Storage Box Body", [("Storage Box Body", _print_pose(body, "body"))]))
 
     if b4b.lid:
@@ -4422,10 +4496,10 @@ def b4b_build_print_objects(
     return _pack_print_objects(objects)
 
 
-def b4b_build_parts(box: BoxSpec) -> list[tuple[str, trimesh.Trimesh]]:
+def b4b_build_parts(box: BoxSpec, features=()) -> list[tuple[str, trimesh.Trimesh]]:
     """Compatibility view of :func:`b4b_build_print_objects` as flat parts."""
     return [
         part
-        for _object_name, parts in b4b_build_print_objects(box)
+        for _object_name, parts in b4b_build_print_objects(box, features=features)
         for part in parts
     ]

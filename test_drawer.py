@@ -689,5 +689,62 @@ class OpenSpaceTests(unittest.TestCase):
         self.assertEqual(report["opens"], [])
 
 
+class AutoSpaceFolderTests(unittest.TestCase):
+    def test_auto_space_creation_and_duplicate_name_rejection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            space_root = Path(tmp) / "Documents" / "Wavefinity"
+            prefs = {}
+            routes = space_routes(
+                Path(tmp),
+                lambda: dict(prefs),
+                lambda update: prefs.update(update) or dict(prefs),
+                space_root=space_root,
+            )
+            made = routes["/api/space/create"]({
+                "name": "Kitchen Drawer",
+                "kind": "drawer",
+                "x": 400,
+                "y": 300,
+                "z": 60,
+            })
+            target = space_root / "Kitchen Drawer"
+            self.assertTrue(target.is_dir())
+            self.assertTrue((target / "Wavefinity bins.md").is_file())
+            self.assertTrue((target / ".wavefinity.json").is_file())
+            self.assertEqual(made["folder"]["name"], "Kitchen Drawer")
+
+            # Duplicate name check (case-insensitive)
+            with self.assertRaises(ValueError) as ctx:
+                routes["/api/space/create"]({
+                    "name": "kitchen drawer",
+                    "kind": "drawer",
+                    "x": 400,
+                    "y": 300,
+                    "z": 60,
+                })
+            self.assertIn("already exists. Choose a different Space name.", str(ctx.exception))
+
+    def test_auto_space_cleanup_on_validation_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            space_root = Path(tmp) / "Documents" / "Wavefinity"
+            prefs = {}
+            routes = space_routes(
+                Path(tmp),
+                lambda: dict(prefs),
+                lambda update: prefs.update(update) or dict(prefs),
+                space_root=space_root,
+            )
+            with self.assertRaises(ValueError):
+                routes["/api/space/create"]({
+                    "name": "Invalid Drawer",
+                    "kind": "drawer",
+                    "x": 0,
+                    "y": 0,
+                    "z": 0,
+                })
+            self.assertFalse((space_root / "Invalid Drawer").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
+

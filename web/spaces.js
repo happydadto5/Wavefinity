@@ -1084,6 +1084,8 @@ SP.cancelInlineEdit = () => {
 // Cancel instead, and none of the onboarding chrome.
 SP.setFormMode = edit => {
   $("#space-form").classList.toggle("editing", edit);
+  const typeLine = $("#space-form-type");
+  if (typeLine) typeLine.hidden = edit;
   $("#space-back").hidden = edit;
   $("#space-create").hidden = edit;
   $("#space-save-changes").hidden = !edit;
@@ -1106,6 +1108,12 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   // Fix 004 Correction 6.F.
   SP.isUpdate = update;
   SP.setupKind = kind;
+  const typeLabel = SP_KINDS[kind]?.label || kind;
+  const typeLine = document.getElementById("space-form-type");
+  if (typeLine) {
+    typeLine.textContent = "Type: " + typeLabel;
+    typeLine.hidden = update;
+  }
   SP.populateSurfaceTrim();
   document.querySelectorAll(".space-type-fields").forEach(el => el.hidden = true);
   const field = document.getElementById(`space-fields-${kind}`);
@@ -1117,7 +1125,24 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
   // name is needed and why a folder comes next. Other types keep "Name".
   document.getElementById("space-name-label").innerHTML =
     kind === "drawer" ? 'Drawer name <span class="required-cue">required</span>' : "Name";
-  document.getElementById("space-folder-help").hidden = !(kind === "drawer" && !update);
+  const createButton = document.getElementById("space-create");
+  if (createButton && !update) {
+    createButton.textContent = state.runtime.hosted
+      ? "Choose Folder & Create"
+      : "Create Space";
+  }
+  const folderHelp = document.getElementById("space-folder-help");
+  if (folderHelp) {
+    if (update) {
+      folderHelp.hidden = true;
+    } else if (state.runtime.hosted) {
+      folderHelp.hidden = false;
+      folderHelp.textContent = "Wavefinity keeps this drawer's designs and inventory together in the folder you choose next.";
+    } else {
+      folderHelp.hidden = false;
+      folderHelp.textContent = "Wavefinity will save this Space under Documents\\Wavefinity using the Space name.";
+    }
+  }
   if (kind === 'drawer') {
       document.getElementById('drawer-x').value = prefillSpace?.x || '';
       document.getElementById('drawer-y').value = prefillSpace?.y || '';
@@ -1285,19 +1310,16 @@ SP.create = async () => {
   const values = SP.readSetupValues();
   if (!values) return;
   const { kind, name, x, y, z, trimSize } = values;
-
-  // Folder last
-  const folder = SP.configureData || await SP.pickFolder({ stayOnSetup: true });
-  if (!folder) return;
-  // A folder already selected via SP.configureData (Open Existing ->
-  // needs setup, or Configure Existing) is an explicit migration of that
-  // folder, not a brand-new typed Space - see Fix 004 Correction 6.D.
   const migrating = Boolean(SP.configureData);
+  let folder = SP.configureData || null;
 
-  if (!migrating) {
-      const data = state.runtime.hosted
-          ? await SP.inspectHosted(folder)
-          : (await api("/api/space/inspect", { output: folder })).folder;
+  if (!migrating && state.runtime.hosted) {
+    folder = await SP.pickFolder({ stayOnSetup: true });
+    if (!folder) return;
+  }
+
+  if (!migrating && state.runtime.hosted) {
+      const data = await SP.inspectHosted(folder);
       // A folder holding an *authoritative* typed Space - committed and
       // ready, or still needing its one-time setup pass - must never be
       // treated as a brand-new create target; it always collision-prompts
@@ -1376,10 +1398,30 @@ SP.create = async () => {
       bin_defaults: metadata.bin_defaults, part_defaults: metadata.part_defaults,
     };
   } else {
-    const data = await api(migrating ? "/api/space/configure" : "/api/space/create", {
-      output: folder, name, kind, x, y, z, keep_bin_defaults: true,
+    const payload = {
+      name, kind, x, y, z, keep_bin_defaults: true,
       ...(trimSize ? { trim_size: trimSize } : {}),
-    });
+    };
+    if (migrating) payload.output = folder;
+
+    let data;
+    try {
+      data = await api(
+        migrating ? "/api/space/configure" : "/api/space/create",
+        payload,
+      );
+    } catch (error) {
+      if (!migrating) {
+        const message = String(error?.message || "Could not create this Space.");
+        const nameError =
+          message.includes("Space name") ||
+          message.includes("space name") ||
+          message.includes("Windows folder");
+        SP.fail(message, nameError ? "#space-name" : "#space-create");
+        return;
+      }
+      throw error;
+    }
     SP.recent = data.recent || [];
     info = data.folder;
   }
@@ -1718,10 +1760,16 @@ SP.wire = () => {
   const spaceBack = document.getElementById("space-back");
   if (spaceBack) spaceBack.addEventListener("click", SP.showTypeCards);
   const spaceForm = document.getElementById("space-form");
-  if (spaceForm) spaceForm.addEventListener("submit", event => {
-    event.preventDefault();
-    SP.run(SP.create);
-  });
+  if (spaceForm) {
+    // Defensive only: typing/Enter in a field is never permission to create.
+    spaceForm.addEventListener("submit", event => event.preventDefault());
+  }
+
+  document.getElementById("space-create")
+    ?.addEventListener("click", () => SP.run(SP.create));
+
+  document.getElementById("space-save-changes")
+    ?.addEventListener("click", () => SP.run(SP.updateSpace));
   const colOpen = document.getElementById("space-collision-open");
   if (colOpen) colOpen.addEventListener("click", () => SP.run(async () => {
     // The collision prompt can be reached by a Space that still needs its

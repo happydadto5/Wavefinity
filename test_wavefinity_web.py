@@ -2639,7 +2639,7 @@ const tick = () => new Promise(r => setImmediate(r));
         # confirm stays a plain window.confirm(), out of Item 8's scope).
         root = Path(__file__).resolve().parent / "web"
         app_js = (root / "app.js").read_text(encoding="utf-8")
-        self.assertIn("Turning on Storage Box clears the interior parts", app_js)
+        self.assertIn("Turning on Storage Box removes all interior parts except one Divider layout", app_js)
 
     def test_primary_bin_y_axis_reads_depth(self):
         # Item 9B: the main bin/Space Y axis is "Depth", not "Length" -
@@ -3075,6 +3075,184 @@ class StaleProcessReplacementTests(unittest.TestCase):
         self.assertTrue(first_instance)
         self.assertTrue(second_instance)
         self.assertNotEqual(first_instance, second_instance)
+
+
+class Fix20SpaceFormTests(unittest.TestCase):
+    """Tests for Item 2, 3, 4: Space form, dimensions, and local folder auto-creation."""
+
+    def test_space_form_type_and_dimension_row_markup(self):
+        root = Path(__file__).resolve().parent / "web"
+        html = (root / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<p id="space-form-type"', html)
+        self.assertEqual(html.count('class="space-dimension-row"'), 3)
+        self.assertIn('id="space-create" type="button"', html)
+        self.assertIn('id="space-save-changes" type="button"', html)
+
+    def test_space_form_submit_event_and_button_clicks(self):
+        root = Path(__file__).resolve().parent / "web"
+        spaces = (root / "spaces.js").read_text(encoding="utf-8")
+        self.assertIn('spaceForm.addEventListener("submit", event => {', spaces)
+        self.assertIn('event.preventDefault();', spaces)
+        self.assertIn('createButton.addEventListener("click", () => SP.create());', spaces)
+        self.assertIn('saveButton.addEventListener("click", () => SP.update());', spaces)
+
+    def test_space_setup_button_labels_and_help(self):
+        root = Path(__file__).resolve().parent / "web"
+        spaces = (root / "spaces.js").read_text(encoding="utf-8")
+        self.assertIn('createButton.textContent = state.runtime.hosted', spaces)
+        self.assertIn('? "Choose Folder & Create"', spaces)
+        self.assertIn(': "Create Space";', spaces)
+        self.assertIn('Wavefinity will save this Space under Documents\\\\Wavefinity using the Space name.', spaces)
+
+    def test_local_create_does_not_call_pick_folder_or_inspect(self):
+        root = Path(__file__).resolve().parent / "web"
+        spaces = (root / "spaces.js").read_text(encoding="utf-8")
+        self.assertIn('if (!migrating && state.runtime.hosted) {', spaces)
+        self.assertIn('folder = await SP.pickFolder({ stayOnSetup: true });', spaces)
+        self.assertIn('data = await SP.inspectHosted(folder);', spaces)
+
+
+class Fix20InsideGripTests(unittest.TestCase):
+    """Tests for Item 5: Inside Grip terminology and visibility."""
+
+    def test_catalog_and_ui_labels(self):
+        root = Path(__file__).resolve().parent / "web"
+        html = (root / "index.html").read_text(encoding="utf-8")
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+        catalog = catalog_payload()
+        inside_handles = next(p for p in catalog["parts"] if p["kind"] == "inside_handles")
+        self.assertEqual(inside_handles["title"], "Inside Grip")
+        self.assertEqual(inside_handles["description"], "A finger grip inside the bin so it is easier to lift.")
+        self.assertIn("Inside Grip size", html)
+        self.assertIn("Inside Grip location", html)
+        self.assertIn("INSIDE_HANDLES_REMOVABLE_MESSAGE", app_js)
+        self.assertIn("Inside Grip is built into the bin wall", app_js)
+
+    def test_b4b_and_app_validation_messages(self):
+        import organizer_b4b as b4b
+        from organizer_engine import BoxSpec, B4BSpec, LiftGrabberSpec
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True), lift_grabbers=LiftGrabberSpec(enabled=True))
+        with self.assertRaises(ValueError) as ctx:
+            b4b.validate_b4b_design(box)
+        self.assertIn("Inside Grip is not available on Storage Box", str(ctx.exception))
+
+    def test_mode_visibility_does_not_force_show_modifier_panels(self):
+        root = Path(__file__).resolve().parent / "web"
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn('hide("#inside-handles-option", on)', app_js)
+        self.assertIn('if (on) {\n    hide("#lid-option", true);\n    hide("#inside-handles-option", true);', app_js)
+
+
+class Fix20StorageBoxDividerTests(unittest.TestCase):
+    """Tests for Item 6: Storage Box Divider support across web API and frontend rules."""
+
+    def _b4b_design(self, x=64, y=48, z=40, features=()):
+        design = default_design()
+        design["box"]["x"] = x
+        design["box"]["y"] = y
+        design["box"]["z"] = z
+        design["box"]["b4b"] = {"enabled": True, "lid": False}
+        design["layout"]["mode"] = "fused"
+        design["layout"]["features"] = list(features)
+        return design
+
+    def test_app_js_b4b_divider_and_guard_contracts(self):
+        root = Path(__file__).resolve().parent / "web"
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function b4bPartAllowed(kind) {\n  return kind === \"divider\";\n}", app_js)
+        self.assertIn("if (b4bEnabled() && !b4bPartAllowed(kind)) return;", app_js)
+        self.assertIn("if (b4bEnabled() && kind === \"divider\") {", app_js)
+        self.assertIn("if (box?.b4b?.enabled) {\n    return [number(box.x), number(box.y)];\n  }", app_js)
+        self.assertNotIn("b4bEnabled()", app_js[app_js.find("function eligibleGridDividerIndexes") : app_js.find("function updateDividerEditBreadcrumb")])
+
+    def test_default_feature_payload_for_b4b_divider(self):
+        design = self._b4b_design()
+        result = default_feature_payload({"design": design, "kind": "divider"})
+        feat = result["feature"]
+        self.assertEqual(feat["kind"], "divider")
+        self.assertEqual(feat["zone"], [-32.0, -24.0, 32.0, 24.0])
+        self.assertTrue(feat["full_span"])
+        self.assertEqual(result["resolved_options"]["height"], 40.0)
+
+        # Duplicate divider is rejected
+        design_with_div = self._b4b_design(features=[feat])
+        with self.assertRaises(ValueError) as ctx:
+            default_feature_payload({"design": design_with_div, "kind": "divider"})
+        self.assertIn("one Divider layout", str(ctx.exception))
+
+        # Non-divider is rejected
+        with self.assertRaises(ValueError) as ctx:
+            default_feature_payload({"design": design, "kind": "bore"})
+        self.assertIn("Dividers only", str(ctx.exception))
+
+    def test_apply_and_delete_feature_payload_for_b4b(self):
+        design = self._b4b_design()
+        default_res = default_feature_payload({"design": design, "kind": "divider"})
+        feat = default_res["feature"]
+
+        applied = apply_feature_payload({"design": design, "feature": feat})
+        self.assertEqual(applied["selected"], 0)
+        self.assertEqual(len(applied["design"]["layout"]["features"]), 1)
+        self.assertEqual(applied["design"]["layout"]["features"][0]["kind"], "divider")
+
+        # Delete returns layout with 0 features
+        deleted = delete_feature_payload({"design": applied["design"], "index": 0})
+        self.assertEqual(len(deleted["design"]["layout"]["features"]), 0)
+
+    def test_b4b_preview_payload_with_divider_and_draft(self):
+        design = self._b4b_design()
+        default_res = default_feature_payload({"design": design, "kind": "divider"})
+        feat = default_res["feature"]
+        design["layout"]["features"] = [feat]
+
+        preview = preview_payload({"design": design})
+        self.assertIn("meshes", preview)
+        self.assertIn("feature_divider", preview["meshes"])
+        self.assertEqual(preview["layout_bounds"], [-32.0, -24.0, 32.0, 24.0])
+        self.assertEqual(len(preview["design"]["layout"]["features"]), 1)
+
+        # Live draft preview
+        draft_feat = dict(feat)
+        draft_feat["options"] = {"count_x": 2, "count_y": 1}
+        draft_prev = preview_payload({"design": design, "draft": draft_feat, "selected": 0})
+        self.assertIn("feature_divider", draft_prev["meshes"])
+        # Preview never commits live draft to saved design
+        self.assertEqual(draft_prev["design"]["layout"]["features"][0]["options"], feat.get("options"))
+
+        # Invalid draft sets draft_error while meshes still generate
+        bad_draft = dict(feat)
+        bad_draft["options"] = {"label_divisions": True}
+        bad_prev = preview_payload({"design": design, "draft": bad_draft, "selected": 0})
+        self.assertTrue(bad_prev["draft_error"])
+        self.assertIn("base", bad_prev["meshes"])
+
+
+class Fix20StorageBoxMaterialsTests(unittest.TestCase):
+    """Tests for Item 7: Storage Box material presets, defaults, and lid thickness."""
+
+    def test_catalog_b4b_rules(self):
+        catalog = catalog_payload()
+        rules = catalog["b4b_rules"]
+        self.assertEqual(rules["default_wall_mm"], 1.6)
+        self.assertEqual(rules["default_base_mm"], 1.6)
+        expected_ladder = [
+            {"value": 0.8, "label": "Super thin / light duty"},
+            {"value": 1.2, "label": "Thin"},
+            {"value": 1.6, "label": "Standard"},
+            {"value": 2.0, "label": "Strong"},
+            {"value": 2.4, "label": "Extra strong / maximum"},
+        ]
+        self.assertEqual(rules["wall_choices"], expected_ladder)
+        self.assertEqual(rules["base_choices"], expected_ladder)
+
+    def test_app_js_material_functions(self):
+        root = Path(__file__).resolve().parent / "web"
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function b4bMinWall() {\n  return number(state.catalog?.b4b_rules?.min_wall_mm, 0.8);\n}", app_js)
+        self.assertIn("function applyB4BMaterialDefaults(design = state.design) {", app_js)
+        self.assertIn("box.wall = number(rules.default_wall_mm, 1.6);", app_js)
+        self.assertIn("box.base_thickness = number(rules.default_base_mm, 1.6);", app_js)
+        self.assertIn("Super thin / light duty — reduced case strength.", app_js)
 
 
 if __name__ == "__main__":

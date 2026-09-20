@@ -49,10 +49,10 @@ everything whose meaning it can change.
 the normal design; **Storage Box**, a separate child-bin container
 architecture; and **Base Trim**, a separate open-centre perimeter for a
 rectangular field of bins. Lid & Stacking is a bin-level option, not a
-top-selector design type. Storage Box retires interior parts and connectors;
-Base Trim has no floor, interior parts, inventory entry, or side connector. The
-selected wall/base values are shown and saved; they are never silent
-generation-only overrides.
+top-selector design type. Storage Box retires connectors and ordinary interior
+parts except Dividers; Base Trim has no floor, interior parts, inventory entry, or
+side connector. The selected wall/base values are shown and saved; they are never
+silent generation-only overrides.
 
 **Lid & Stacking** offers three ordinary-bin configurations: **Stackable Bin**
 stacks directly with no lid, **Stackable Lid** closes the bin and keeps a flat
@@ -90,7 +90,7 @@ never writes the new value back into the field the user is typing in.
 
 **The right side has three primary views: *3D*, *2D* and optional *Space*.** 3D and 2D
 show the bin being designed (2D is where its interior parts are laid out, and
-it steps aside only for a Storage Box case, which has none). **Space is a mode, not a
+remains available for a Storage Box Divider layout). **Space is a mode, not a
 panel**: it swaps the whole screen: the inventory and its tools take the sidebar, the
 drawer takes the workspace, and the bin editor's chrome (placed parts, the
 design file buttons) steps aside. Undo, Redo and Ctrl+Z act on the drawer while
@@ -498,7 +498,7 @@ multiple-drawer layout is preserved as a compatibility exception - a new
 Drawer Space otherwise represents exactly one physical drawer.
 
 Creating a new Drawer Space lands directly in the normal Bin editor with every
-ordinary option (Interior print mode, Base, Walls, Inside Handles) still
+ordinary option (Interior print mode, Base, Walls, Inside Grip) still
 visible; there is no tutorial or first-run card. A one-drawer Drawer Space's
 name, width, depth and usable height belong to the Space: the Space tab shows
 them read-only with an **Edit drawer** button (the Space Edit form), and an edit
@@ -632,7 +632,7 @@ something to work on.
 Wavefinity separates reusable **bin/shell intent** from **content placed inside
 the bin**. A future setting belongs in the reusable bin category when it changes
 the shell itself: mounting holes, exterior mounting, wall/base construction,
-lid/stacking, shell scoop, Inside Handles, or bin-level label construction.
+lid/stacking, shell scoop, Inside Grip, or bin-level label construction.
 A future ordinary `layout.feature` is interior content and does not belong.
 
 | Variable / feature | Space default? |
@@ -644,7 +644,7 @@ A future ordinary `layout.feature` is interior content and does not belong.
 | Bin/container type | Yes |
 | Stacking | Yes |
 | Lid configuration | Yes |
-| Inside Handles / shell options | Yes |
+| Inside Grip / shell options | Yes |
 | Scoop / shell modifications | Yes |
 | Storage Box container configuration | Yes |
 | Label enabled/type/location/style | Yes |
@@ -1424,7 +1424,7 @@ Trim. Lid & Stacking clamps **% from top** as needed to keep its required
 bridge. Curved supported openings use a pointed supportless arch with a
 minimum 45-degree underside, rather than the old fixed arch.
 A rim label, an Edge Mount
-mounting wall, or an Inside Handle may not share a wall with a Side Opening -
+mounting wall, or an Inside Grip may not share a wall with a Side Opening -
 different walls are fine for all three. The scoop and other interior parts
 are never globally blocked; the cutter is authoritative wherever a Side
 Opening's wall intersects other body geometry, and it is re-applied to the

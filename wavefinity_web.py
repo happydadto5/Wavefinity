@@ -36,6 +36,8 @@ import numpy as np
 from organizer_engine import (
     BASE_UNIT,
     BASE_PRESETS,
+    B4B_BASE_PRESETS,
+    B4B_DEFAULT_BASE,
     B4B_DEFAULT_WALL,
     B4B_LATCH_COUNTS,
     B4B_LATCH_STRENGTHS,
@@ -162,6 +164,10 @@ from organizer_b4b import (
     b4b_preview_meshes,
     b4b_summary,
     validate_b4b_design,
+    b4b_divider_solids,
+    b4b_divider_work_box,
+    b4b_divider_zone,
+    normalize_b4b_divider,
 )
 from organizer_base_trim import (
     BASE_TRIM_BED_EDGE_MARGIN,
@@ -812,8 +818,8 @@ def catalog_payload() -> dict[str, Any]:
     for kind, title, description in (
         ("lid_stacking", "Lid & Stacking",
          "Add a lid or make matching bins stack together."),
-        ("inside_handles", "Inside Handles",
-         "Finger ledges inside the bin so it is easier to lift."),
+        ("inside_handles", "Inside Grip",
+         "A finger grip inside the bin so it is easier to lift."),
         ("side_openings", "Side Openings",
          "Finger-access cutouts through selected bin walls."),
         ("edge_mount", "Edge Mount",
@@ -905,6 +911,10 @@ def catalog_payload() -> dict[str, Any]:
             "default_wall_mm": B4B_DEFAULT_WALL,
             "wall_choices": [
                 {"value": value, "label": label} for value, label in B4B_WALL_PRESETS
+            ],
+            "default_base_mm": B4B_DEFAULT_BASE,
+            "base_choices": [
+                {"value": value, "label": label} for value, label in B4B_BASE_PRESETS
             ],
             "handle_min_grip_mm": B4B_HANDLE_GRIP_ABS_MIN,
             "stack_min_base_mm": B4B_STACK_MIN_BASE,
@@ -1447,8 +1457,7 @@ def _interior_work_box(box: BoxSpec) -> BoxSpec:
 
 
 def _reject_if_b4b(payload: dict[str, Any], what: str) -> None:
-    """Guard routes that assume a normal box + interior layout.  A Storage Box interior
-    is reserved for child bins and Storage Box v1 does not use the side connector."""
+    """Guard routes that assume a normal box + interior layout."""
     design = payload.get("design")
     if not isinstance(design, dict):
         return
@@ -1456,8 +1465,8 @@ def _reject_if_b4b(payload: dict[str, Any], what: str) -> None:
     b4b_raw = box_raw.get("b4b") if isinstance(box_raw, dict) else None
     if isinstance(b4b_raw, dict) and b4b_raw.get("enabled"):
         raise ValueError(
-            f"{what} is not available while Storage Box is enabled - the Storage Box "
-            "interior is reserved for child bins and its lid controls the rim"
+            f"{what} is not available while Storage Box is enabled - Storage Box "
+            "Parts & options supports Dividers only"
         )
 
 
@@ -1513,63 +1522,110 @@ def _features_from_preview(layout: Layout, scene: dict[str, Any]) -> tuple:
 def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Preview for a Storage Box design: body/lid/latch/label meshes plus the
     authoritative capacity + hardware readout.  Shares the ordinary response
-    shape (empty interior-feature fields) so the frontend needs no special
-    case to render it."""
+    shape so the frontend needs no special case to render it."""
     box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     eff = b4b_effective_box(box)
-    # The browser adopts every effective printable dimension so its fields
-    # always match what will print and save.
     adopted = replace(box, x=eff.x, y=eff.y, z=eff.z)
     message = ""
-    # B4B routinely runs past 100k triangles, where a per-face JSON object
-    # (the "geometry" ordinary bins use) is itself most of what the browser
-    # has to parse just to show a preview - so B4B ships the compact
-    # grouped-flat-array transport instead (see b4b_preview_meshes) and
-    # leaves "geometry" empty, only for response-shape compatibility with
-    # the ordinary-bin payload.
+    feature_errors: list[str] = []
+    invalid_feature_indexes: list[int] = []
+    draft_error: str | None = None
+
+    normalized_saved = []
+    for idx, feat in enumerate(layout.features):
+        try:
+            normalized_saved.append(normalize_b4b_divider(box, feat))
+        except Exception as err:
+            feature_errors.append(str(err))
+            invalid_feature_indexes.append(idx)
+
+    saved_layout = Layout(tuple(normalized_saved), "fused", layout.snap)
+    display_features = list(normalized_saved)
+
+    draft_raw = payload.get("draft")
+    selected = payload.get("selected")
+    draft_feature = None
+    if draft_raw and isinstance(draft_raw, dict):
+        try:
+            one = _feature_from_json(draft_raw, "fused")
+            one = normalize_b4b_divider(box, one)
+            draft_feature = one
+            if selected == 0:
+                display_features = [one]
+            elif selected is None and not normalized_saved:
+                display_features = [one]
+            else:
+                draft_error = "Storage Box supports one Divider layout."
+        except Exception as err:
+            draft_error = str(err)
+
     meshes: list[dict[str, Any]] = []
     b4b_block: dict[str, Any] | None = None
     try:
         with GEOMETRY_LOCK:
-            validate_b4b_design(box)
+            validate_b4b_design(
+                box,
+                layout_feature_kinds=tuple(f.kind for f in display_features),
+            )
             b4b_block = b4b_summary(box)
-            meshes = b4b_preview_meshes(box)
-    except Exception as error:  # surface the real, actionable message
-        message = str(error)
-        # A bad optional label must not erase the body/lid/latch preview.
-        if box.b4b.label_text.strip() and box.b4b.label_location in {"top", "front"}:
+            meshes = b4b_preview_meshes(box, features=display_features)
+    except Exception as error:
+        if draft_feature is not None and display_features == [draft_feature]:
+            draft_error = str(error)
             try:
-                label_free = replace(
-                    box,
-                    b4b=replace(box.b4b, label_text="", label_location="none"),
-                )
                 with GEOMETRY_LOCK:
-                    meshes = b4b_preview_meshes(label_free)
-            except Exception:
-                pass
+                    validate_b4b_design(
+                        box,
+                        layout_feature_kinds=tuple(f.kind for f in normalized_saved),
+                    )
+                    b4b_block = b4b_summary(box)
+                    meshes = b4b_preview_meshes(box, features=normalized_saved)
+            except Exception as saved_err:
+                if not feature_errors and normalized_saved:
+                    feature_errors.append(str(saved_err))
+                    invalid_feature_indexes.extend(range(len(normalized_saved)))
+                try:
+                    with GEOMETRY_LOCK:
+                        validate_b4b_design(box)
+                        b4b_block = b4b_summary(box)
+                        meshes = b4b_preview_meshes(box, features=())
+                except Exception as base_err:
+                    message = str(base_err)
+        else:
+            if display_features and not feature_errors:
+                feature_errors.append(str(error))
+                invalid_feature_indexes.extend(range(len(display_features)))
+            try:
+                with GEOMETRY_LOCK:
+                    validate_b4b_design(box)
+                    b4b_block = b4b_summary(box)
+                    meshes = b4b_preview_meshes(box, features=())
+            except Exception as base_err:
+                message = str(base_err)
+
+    if not b4b_block:
         try:
             b4b_block = b4b_summary(box)
         except Exception:
             b4b_block = None
 
-    # B4B x/y are the exact child field.  Its physical case outline is derived
-    # separately and is reported in b4b_summary.
-    bounds = Zone(-eff.x / 2.0, -eff.y / 2.0, eff.x / 2.0, eff.y / 2.0)
+    bounds = b4b_divider_zone(box)
     cavity = b4b_mating_polygon(box)
     return {
-        "design": design_to_dict(adopted, Layout((), "fused", EDITOR_SNAP),
-                                 "", part_name, "bottom", False),
+        "design": design_to_dict(
+            adopted, saved_layout, label, part_name, label_location, False
+        ),
         "b4b": b4b_block,
         "label_outline": [],
         "label_meta": None,
         "text_meta": [],
         "geometry": [],
         "meshes": meshes,
-        "fits": not message,
+        "fits": not message and not feature_errors and not draft_error,
         "message": message,
-        "feature_errors": [],
-        "invalid_feature_indexes": [],
-        "draft_error": None,
+        "feature_errors": feature_errors,
+        "invalid_feature_indexes": invalid_feature_indexes,
+        "draft_error": draft_error,
         "dimensions": {
             "size": (f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm Storage Box child field - "
                      f"case outside {b4b_block['case_outer_mm'][0]:g} x "
@@ -1581,7 +1637,7 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "layout_bounds": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
         "cavity_outline": [[float(x), float(y)] for x, y in cavity.exterior.coords],
         "customization_zones": [],
-        "feature_footprints": [],
+        "feature_footprints": [None] * len(saved_layout.features),
         "draft_footprint": None,
         "feature_outlines": [],
         "nest_soft_contours": [],
@@ -1723,10 +1779,31 @@ def validate_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def default_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    _reject_if_b4b(payload, "adding interior parts")
     box, layout, *_ = _design(payload["design"])
-    box = _interior_work_box(box)
     kind = str(payload["kind"])
+    if box.b4b.enabled:
+        if kind != "divider":
+            raise ValueError(
+                "adding interior parts is not available while Storage Box is enabled - "
+                "Storage Box Parts & options supports Dividers only"
+            )
+        if any(f.kind == "divider" for f in layout.features):
+            raise ValueError("Storage Box supports one Divider layout.")
+        work = b4b_divider_work_box(box)
+        one = default_feature(
+            work,
+            "divider",
+            along=str(payload.get("along", "x")),
+            mode="fused",
+        )
+        one = normalize_b4b_divider(box, one)
+        return {
+            "feature": feature_to_dict(one, "fused"),
+            "resolved_options": resolved_options(work, one, work.base_thickness),
+            "divider_cells": _divider_cells_payload(work, one, "fused"),
+        }
+    _reject_if_b4b(payload, "adding interior parts")
+    box = _interior_work_box(box)
     try:
         definition = feature_definition(kind)
     except KeyError:
@@ -1783,8 +1860,33 @@ def _divider_cells_payload(
 
 
 def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    box, layout, label, _part, label_location, scoop = _design(payload["design"])
+    if box.b4b.enabled:
+        one = _feature_from_json(payload["feature"], "fused")
+        if one.kind != "divider":
+            raise ValueError(
+                "editing interior parts is not available while Storage Box is enabled - "
+                "Storage Box Parts & options supports Dividers only"
+            )
+        one = normalize_b4b_divider(box, one)
+        with GEOMETRY_LOCK:
+            solids = b4b_divider_solids(box, [one])
+        geometry = []
+        for solid in solids:
+            geometry.extend(_mesh_preview_geometry(solid, "feature_divider", owner="base"))
+        work = b4b_divider_work_box(box)
+        return {
+            "geometry": [
+                {"points": points, "kind": kind, "normal": normal,
+                 "layer": layer, "owner": owner}
+                for points, kind, normal, layer, owner in geometry
+            ],
+            "feature": feature_to_dict(one, "fused"),
+            "resolved_options": resolved_options(work, one, work.base_thickness),
+            "divider_cells": _divider_cells_payload(work, one, "fused"),
+        }
     _reject_if_b4b(payload, "editing interior parts")
-    request_box, layout, label, _part, label_location, scoop = _design(payload["design"])
+    request_box = box
     box = _interior_work_box(request_box)
     one = _feature_from_json(payload["feature"], layout.mode)
     one = normalize_bore_auto(box, one, base_height(box, layout.mode), layout.mode)
@@ -1899,8 +2001,35 @@ def feature_fit_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    if box.b4b.enabled:
+        one = _feature_from_json(payload["feature"], "fused")
+        if one.kind != "divider":
+            raise ValueError(
+                "adding interior parts is not available while Storage Box is enabled - "
+                "Storage Box Parts & options supports Dividers only"
+            )
+        index = payload.get("index")
+        if index is None:
+            if len(layout.features) > 0:
+                raise ValueError("Storage Box supports one Divider layout.")
+        else:
+            if int(index) != 0 or len(layout.features) == 0 or layout.features[0].kind != "divider":
+                raise ValueError("Storage Box supports one Divider layout.")
+        one = normalize_b4b_divider(box, one)
+        with GEOMETRY_LOCK:
+            validate_b4b_design(box, layout_feature_kinds=("divider",), deep=True)
+            b4b_divider_solids(box, [one])
+        updated = Layout((one,), "fused", layout.snap)
+        return {
+            "design": design_to_dict(
+                box, updated, label, part_name, label_location, False
+            ),
+            "selected": 0,
+            "warnings": [],
+        }
     _reject_if_b4b(payload, "adding interior parts")
-    request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    request_box = box
     box = _interior_work_box(request_box)
     one = _feature_from_json(payload["feature"], layout.mode)
     one = normalize_bore_auto(box, one, base_height(box, layout.mode), layout.mode)
@@ -1994,13 +2123,21 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def delete_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    box, layout, label, part_name, label_location, scoop = design_from_dict(
+        payload["design"], validate_layout=False
+    )
+    if box.b4b.enabled:
+        index = int(payload["index"])
+        if index != 0 or len(layout.features) == 0 or layout.features[0].kind != "divider":
+            raise ValueError("the selected interior part no longer exists")
+        updated = Layout((), "fused", layout.snap)
+        return {"design": design_to_dict(
+            box, updated, label, part_name, label_location, False,
+        )}
     _reject_if_b4b(payload, "editing interior parts")
     # Deletion is the recovery path for a design made invalid by shrinking the
     # bin. Parse its schema and box, but defer layout validation until after
     # the unwanted support has been removed.
-    box, layout, label, part_name, label_location, scoop = design_from_dict(
-        payload["design"], validate_layout=False
-    )
     index = int(payload["index"])
     existing = list(layout.features)
     if not 0 <= index < len(existing):

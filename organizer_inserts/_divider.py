@@ -147,14 +147,23 @@ def _divider_scoops(
         OptionDefinition("Compartment Scoop", "scoop", {}, "json", False),
     ), order=60,
 )
-def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
+def build_divider(
+    box: BoxSpec,
+    spec_feature: Feature,
+    base_z: float,
+    *,
+    full_span_cavity: Polygon | None = None,
+) -> list[trimesh.Trimesh]:
     """One or more evenly spaced parallel walls subdividing the bin."""
     spec_feature = normalize_divider_scoop(box, spec_feature, base_z)
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
     grid_x, grid_y = divider_grid_counts(options)
     if grid_x or grid_y:
-        solids = _build_divider_grid(box, spec_feature, base_z, options, grid_x, grid_y)
+        solids = _build_divider_grid(
+            box, spec_feature, base_z, options, grid_x, grid_y,
+            full_span_cavity=full_span_cavity,
+        )
         solids.extend(_divider_scoops(box, spec_feature, base_z))
         return solids
     thickness = options["thickness"]
@@ -195,9 +204,15 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
         )
         one = replace(spec_feature, zone=one_zone)
         if angle != 0.0 and one.full_span:
-            solids.extend(_full_span_leaning_divider(box, one, thickness, height, angle, base_z))
+            solids.extend(_full_span_leaning_divider(
+                box, one, thickness, height, angle, base_z,
+                full_span_cavity=full_span_cavity,
+            ))
         elif one.full_span:
-            solids.extend(_full_span_divider(box, along, cross_centre, thickness, base_z, height))
+            solids.extend(_full_span_divider(
+                box, along, cross_centre, thickness, base_z, height,
+                full_span_cavity=full_span_cavity,
+            ))
         else:
             solids.extend(_divider_wall(box, one, thickness, height, angle, base_z))
     solids.extend(_divider_sloped_bottoms(
@@ -217,6 +232,8 @@ def build_divider(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tr
 def _build_divider_grid(
     box: BoxSpec, spec_feature: Feature, base_z: float, options: dict,
     grid_x: int, grid_y: int,
+    *,
+    full_span_cavity: Polygon | None = None,
 ) -> list[trimesh.Trimesh]:
     """A grid of dividers - ``grid_x`` walls across X, ``grid_y`` across Y -
     cutting the zone into a ``(grid_x + 1) x (grid_y + 1)`` set of cells.
@@ -238,6 +255,7 @@ def _build_divider_grid(
         return _build_custom_divider_grid(
             box, spec_feature, base_z, options, grid_x, grid_y,
             thickness, height, angle,
+            full_span_cavity=full_span_cavity,
         )
     full_span = spec_feature.full_span
     solids: list[trimesh.Trimesh] = []
@@ -245,10 +263,12 @@ def _build_divider_grid(
     for centre in _even_centres(zone.x0, zone.x1, grid_x):
         solids.extend(_one_grid_wall(
             box, spec_feature, "y", centre, thickness, height, angle, base_z, full_span,
+            full_span_cavity=full_span_cavity,
         ))
     for centre in _even_centres(zone.y0, zone.y1, grid_y):
         solids.extend(_one_grid_wall(
             box, spec_feature, "x", centre, thickness, height, angle, base_z, full_span,
+            full_span_cavity=full_span_cavity,
         ))
     slope_along = spec_feature.along if spec_feature.along in ("x", "y") else "x"
     slope_centres = (
@@ -342,6 +362,8 @@ def _custom_grid_wall(
 def _build_custom_divider_grid(
     box: BoxSpec, spec_feature: Feature, base_z: float, options: dict,
     grid_x: int, grid_y: int, thickness: float, height: float, angle: float,
+    *,
+    full_span_cavity: Polygon | None = None,
 ) -> list[trimesh.Trimesh]:
     """Build only boundaries between the saved logical rectangles."""
     cells = divider_cells(box, spec_feature, base_z)
@@ -364,6 +386,7 @@ def _build_custom_divider_grid(
         line: _one_grid_wall(
             box, spec_feature, "y", x_edges[line], thickness, height, angle,
             base_z, spec_feature.full_span,
+            full_span_cavity=full_span_cavity,
         )
         for line in range(1, columns)
         if any(vertical_present[line])
@@ -372,6 +395,7 @@ def _build_custom_divider_grid(
         line: _one_grid_wall(
             box, spec_feature, "x", y_edges[line], thickness, height, angle,
             base_z, spec_feature.full_span,
+            full_span_cavity=full_span_cavity,
         )
         for line in range(1, rows)
         if any(horizontal_present[line])
@@ -429,10 +453,15 @@ def _build_custom_divider_grid(
 def _one_grid_wall(
     box: BoxSpec, spec_feature: Feature, along: str, centre: float,
     thickness: float, height: float, angle: float, base_z: float, full_span: bool,
+    *,
+    full_span_cavity: Polygon | None = None,
 ) -> list[trimesh.Trimesh]:
     """One wall of a grid divider, centred on ``centre`` of its cross axis."""
     if full_span and angle == 0.0:
-        return _full_span_divider(box, along, centre, thickness, base_z, height)
+        return _full_span_divider(
+            box, along, centre, thickness, base_z, height,
+            full_span_cavity=full_span_cavity,
+        )
     zone = spec_feature.zone
     half_t = thickness / 2.0
     if along == "y":
@@ -441,7 +470,10 @@ def _one_grid_wall(
         wall_zone = Zone(zone.x0, centre - half_t, zone.x1, centre + half_t)
     one = replace(spec_feature, zone=wall_zone, along=along)
     if full_span and angle != 0.0:
-        return _full_span_leaning_divider(box, one, thickness, height, angle, base_z)
+        return _full_span_leaning_divider(
+            box, one, thickness, height, angle, base_z,
+            full_span_cavity=full_span_cavity,
+        )
     return _divider_wall(box, one, thickness, height, angle, base_z)
 
 
@@ -1260,6 +1292,8 @@ def _divider_wall(
 def _full_span_leaning_divider(
     box: BoxSpec, spec_feature: Feature, thickness: float, height: float,
     angle: float, base_z: float,
+    *,
+    full_span_cavity: Polygon | None = None,
 ) -> list[trimesh.Trimesh]:
     """A leaning divider that also reaches the box's true wavy wall.
 
@@ -1276,9 +1310,31 @@ def _full_span_leaning_divider(
     footprint with.
     """
     along = spec_feature.along
-    half_run = (box.half_x if along == "x" else box.half_y) + 2.0 * WAVE_AMPLITUDE
     zone = spec_feature.zone
     centre_x, centre_y = zone.centre
+
+    if full_span_cavity is not None:
+        minx, miny, maxx, maxy = full_span_cavity.bounds
+        half_span_x = (maxx - minx) / 2.0 + 2.0
+        half_span_y = (maxy - miny) / 2.0 + 2.0
+        half_run = half_span_x if along == "x" else half_span_y
+        oversized_zone = (
+            Zone(centre_x - half_run, zone.y0, centre_x + half_run, zone.y1)
+            if along == "x" else
+            Zone(zone.x0, centre_y - half_run, zone.x1, centre_y + half_run)
+        )
+        wedge = _divider_wall(
+            box, replace(spec_feature, zone=oversized_zone), thickness, height,
+            angle, base_z,
+        )[0]
+        prism = _extrude_polygon(full_span_cavity, height)
+        prism.apply_translation((0.0, 0.0, base_z))
+        piece = intersection([wedge, prism])
+        if piece is None or len(piece.faces) == 0:
+            raise ValueError("no room for a leaning full-width divider at this position")
+        return [piece]
+
+    half_run = (box.half_x if along == "x" else box.half_y) + 2.0 * WAVE_AMPLITUDE
     oversized_zone = (
         Zone(centre_x - half_run, zone.y0, centre_x + half_run, zone.y1)
         if along == "x" else
@@ -1321,6 +1377,8 @@ def _trimmed_prism(strip: Polygon, cavity: Polygon, z0: float, z1: float) -> tri
 def _full_span_divider(
     box: BoxSpec, along: str, cross_centre: float, thickness: float,
     base_z: float, height: float,
+    *,
+    full_span_cavity: Polygon | None = None,
 ) -> list[trimesh.Trimesh]:
     """A divider that runs edge to edge, hugging the box's true interior wall.
 
@@ -1334,14 +1392,22 @@ def _full_span_divider(
     profile above it - exactly the same outlines the wall itself is built
     from, so the two can never disagree.
     """
-    half_run = (box.half_x if along == "x" else box.half_y) + 2.0 * WAVE_AMPLITUDE
     half_thick = thickness / 2.0
+    z0, z1 = base_z, base_z + height
+    if full_span_cavity is not None:
+        minx, miny, maxx, maxy = full_span_cavity.bounds
+        if along == "x":
+            strip = shapely_box(minx - 1.0, cross_centre - half_thick, maxx + 1.0, cross_centre + half_thick)
+        else:
+            strip = shapely_box(cross_centre - half_thick, miny - 1.0, cross_centre + half_thick, maxy + 1.0)
+        return [_trimmed_prism(strip, full_span_cavity, z0, z1)]
+
+    half_run = (box.half_x if along == "x" else box.half_y) + 2.0 * WAVE_AMPLITUDE
     strip = (
         shapely_box(-half_run, cross_centre - half_thick, half_run, cross_centre + half_thick)
         if along == "x" else
         shapely_box(cross_centre - half_thick, -half_run, cross_centre + half_thick, half_run)
     )
-    z0, z1 = base_z, base_z + height
     flat_top = box.base_thickness + box.flat_inside
     pieces: list[trimesh.Trimesh] = []
     if box.flat_inside > 0.0 and z0 < flat_top:

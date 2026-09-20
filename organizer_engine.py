@@ -109,12 +109,17 @@ WALL_PRESETS = (
     (2.0, "Extra heavy"),
     (2.4, "Maximum"),
 )
-# B4B is a carried, latched, repeatedly opened case, so it starts where an
-# ordinary bin's "Strong" does and never goes below it.
-B4B_WALL_PRESETS = tuple(
-    choice for choice in WALL_PRESETS if choice[0] >= 1.2 - 1e-9
+B4B_MATERIAL_PRESETS = (
+    (0.8, "Super thin / light duty"),
+    (1.2, "Thin"),
+    (1.6, "Standard"),
+    (2.0, "Strong"),
+    (2.4, "Extra strong / maximum"),
 )
-B4B_DEFAULT_WALL = 1.2
+B4B_WALL_PRESETS = B4B_MATERIAL_PRESETS
+B4B_BASE_PRESETS = B4B_MATERIAL_PRESETS
+B4B_DEFAULT_WALL = 1.6
+B4B_DEFAULT_BASE = 1.6
 DEFAULT_BASE_THICKNESS = 0.6
 # Base thickness presets, same reasoning as WALL_PRESETS: a short list of
 # choices that print differently, not a free numeric field.  A design saved
