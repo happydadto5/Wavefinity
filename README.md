@@ -159,67 +159,66 @@ All instructions for coding agents (OpenAI, Anthropic, Google) and human contrib
 
 ### Development handoff workflow
 
-Wavefinity is developed through a series of handoffs between **chat/planning LLMs**
-and **coding LLMs**. Project-wide rules and architecture live in this
-`README.md`; task-specific implementation instructions live in the
-`/fixes/` folder.
+Wavefinity is developed through handoffs between **chat/planning LLMs** and **coding LLMs**. Project-wide rules and architecture live in this `README.md`.
 
-A coding LLM must read this `README.md` for the general project rules and then
-read the requested fix file for the specific work it has been handed. If the
-human says **"read fix4"**, **"read fix 4"**, or uses equivalent shorthand, that
-means the corresponding zero-padded file in `/fixes/` — for example, fix 4
-means `/fixes/fix-004.md`. The human should not need to restate the fix
-instructions in chat; the fix file is the task handoff and should contain the
-instructions needed to perform that work.
+**Help Code task records do not live in this repository.** The only authoritative Help Code store is the private GitHub repository `happydadto5/Wavefinity-Help-Code`.
 
-**Help Code planning quality gate:** Every implementation plan must be comprehensive enough that a junior coding LLM can execute it without having to rediscover the intended architecture, product decisions, affected code paths, edge cases, or completion criteria. Name the relevant files/functions and give exact implementation direction or code-level structure whenever current code makes that reasonably possible; do not hand off a vague conceptual outline. After drafting any Help Code implementation plan, the planning assistant must re-read it against the current code and requirements. If that re-check finds any omission, contradiction, ambiguity, stale assumption, or unsafe implementation detail, revise the plan and perform another full re-check. Repeat until a complete re-check finds no material issues. Only then may the plan be marked ready for implementation.
+- `happydadto5/Wavefinity-Help-Code/fixes/Fix Master.md` is the permanent ledger.
+- `happydadto5/Wavefinity-Help-Code/fixes/fix-###.md` is the active specification.
+- Completed specifications are archived there as `fix-### archive.md`.
+- This Wavefinity repository must not contain, restore, clone, or commit a local `/fixes` directory.
+
+If the human says **"read fix4"**, **"read fix 4"**, or equivalent shorthand, read the corresponding zero-padded file directly from the private Help Code repository's current `main`, for example `fixes/fix-004.md`. Do not ask the human to paste the plan when authenticated GitHub access is available.
+
+**Help Code planning quality gate:** Every implementation plan must be comprehensive enough that a junior coding LLM can execute it without rediscovering architecture, product decisions, affected code paths, edge cases, or completion criteria. Name relevant files/functions and give exact implementation direction or code-level structure whenever current code makes that reasonably possible. After drafting, re-read the plan against current code and requirements and revise until a complete pass finds no material issue.
 
 ### 1. User communication preferences
-- **Operate in "caveman mode"**: Keep messages simple, plain, and short.
-- **User is NOT a programmer**: Avoid code jargon, technical implementation details, and long explanations unless explicitly asked.
-- **Show progress**: Give the user a clear, general sense of progress by stating the steps in layman's terms.
+- **Operate in "caveman mode"**: keep messages simple, plain, and short.
+- **User is NOT a programmer**: avoid code jargon and long technical explanations unless asked.
+- **Show progress**: give a clear, general sense of progress in layman's terms.
 
 ### 2. Branch, commit & push workflow
 
-Starting with **Fix 6**, complex/non-trivial work that enters the Help Code `/fixes` workflow uses **one temporary branch per fix in this same repository**. Use branches, not forks, for normal Help Code isolation.
+Starting with Fix 6, non-trivial Help Code work uses one temporary implementation branch per fix in this Wavefinity repository. The **code branch is local/remote Git work; the fix specification and ledger remain cloud-only in `Wavefinity-Help-Code`.**
 
-A fix may be planned, numbered, recorded in `/fixes/Fix Master.md`, and have its `/fixes/fix-###.md` specification committed on `main` before implementation is ready. That does **not** mean implementation may begin. The implementation branch is created only when all prerequisite fixes are accepted and present on current `origin/main`.
+#### Mandatory cloud + code remote-state gate
 
-#### Mandatory remote-state gate — prevents stale-checkout implementation
+A coding agent must **never trust a local fix file, local Fix Master, chat memory, a copied plan, or an old branch** as the authoritative Help Code state.
 
-A coding agent must **never trust its local checkout, local Fix Master, or local `fixes/` directory as proof that a fix does or does not exist**. Local state may be stale even when the planner has already committed the complete handoff to GitHub.
+Before reading or implementing every Help Code fix:
 
-Before reading or implementing **every Help Code fix**, the coding agent must perform this gate in this order:
+1. Read this current Wavefinity `README.md` from current `origin/main`.
+2. Read the requested fix directly from the private Help Code repository's current `main` using authenticated GitHub access. Example:
+   `gh api -H "Accept: application/vnd.github.raw+json" repos/happydadto5/Wavefinity-Help-Code/contents/fixes/fix-012.md`
+3. Read cloud Fix Master directly:
+   `gh api -H "Accept: application/vnd.github.raw+json" repos/happydadto5/Wavefinity-Help-Code/contents/fixes/Fix%20Master.md`
+4. Record the exact Help Code repository `main` commit SHA used:
+   `gh api repos/happydadto5/Wavefinity-Help-Code/commits/main --jq .sha`
+5. Confirm the requested fix exists and Fix Master says it is ready/active for implementation. If the two cloud files disagree, or authenticated access fails, **STOP**. Do not fall back to a cached or local copy.
+6. Sync the Wavefinity code checkout separately: run `git fetch --prune origin`, switch to local `main`, then `git merge --ff-only origin/main`.
+7. Prove local Wavefinity `HEAD` equals `origin/main`. If not, **STOP**.
+8. Only then create/switch to the exact assigned `fixN` branch from current `origin/main` and begin implementation.
+9. Never create, restore, or commit a Wavefinity `/fixes` directory.
 
-1. Run `git fetch --prune origin`.
-2. Switch to local `main`.
-3. Fast-forward only: `git merge --ff-only origin/main`. Do not merge an old local `main` into `origin/main`, and do not continue after a failed fast-forward.
-4. Prove local `main` is exactly current remote main: `git rev-parse HEAD` must equal `git rev-parse origin/main`. If they differ, **STOP**.
-5. Prove the requested fix file exists on the **remote-tracking ref**, not merely locally: `git cat-file -e origin/main:fixes/fix-###.md`. If it does not exist there, **STOP and report that the remote handoff is missing**.
-6. Read the fix directly from current `origin/main` or the now-equal local `main`. Do not use a remembered, cached, copied, or previously opened version.
-7. Read current `origin/main:fixes/Fix Master.md` and confirm that the requested fix is not still in a planning/questions/blocked state. If the fix file and Fix Master disagree, **STOP and report the mismatch**; do not guess which is newer.
-8. Only after steps 1–7 succeed may the agent create/switch to `fixN` from that exact `origin/main` and begin implementation.
+The cloud Help Code repository is the authority even if an old Wavefinity commit or branch historically contains a `/fixes` folder.
 
-If the agent says a fix file is missing or the ledger is stale, the **first response must be to repeat this remote-state gate**, not to conclude that the planner forgot to commit the plan. This rule applies even if the agent fetched recently or another fix was just completed.
+Planner-side handoff rule: before telling the coding agent to implement a fix, the outside ChatGPT planner verifies in `happydadto5/Wavefinity-Help-Code` current `main` that the active fix file exists, Fix Master has the intended ready/active status, and the cloud file contains the final rechecked plan.
 
-Planner-side handoff rule: before telling the user or coding agent to implement a new fix, ChatGPT must verify from the remote repository that (a) `/fixes/fix-###.md` exists on `origin/main`, (b) Fix Master shows the intended ready/active status, and (c) the remote file contains the final rechecked plan. A local draft, local commit, tool-side cached result, or earlier verification does not count. The user-facing handoff should explicitly say that the coding agent must run the remote-state gate before creating `fixN`.
+- `main` is the accepted Wavefinity implementation line. Do not implement Help Code work directly on `main`.
+- Each fix uses branch `fixN`, using the unpadded number: `fix6`, `fix9`, `fix12`, etc.
+- Old unrelated branches are not blockers. Stop only when the exact assigned branch already exists and its ownership/state is unclear.
+- Coding agents work only on the assigned Wavefinity `fixN` branch. Never force-push/rewrite `main` or merge the fix to `main` before outside review authorizes it.
+- Make the coherent implementation, inspect the diff, run the required risk-appropriate tests, commit coherently, and push `origin/fixN`.
+- At implementation completion, put the outbrief in the **cloud active fix file in `Wavefinity-Help-Code`**, including the Help Code specification SHA used, implementation commit SHA, files changed, tests/results, deviations, and environment limitations. Do not put the outbrief in a Wavefinity `/fixes` directory.
+- Coding agents must never edit cloud `Fix Master.md`. If the coding environment can read but cannot write the private Help Code repository, include the full outbrief in the completion message and do not create a local fix file; the outside ChatGPT reviewer will write it to the cloud record.
+- ChatGPT's outside completion review compares `fixN` against current Wavefinity `main` and the exact cloud fix specification.
+- If review returns **NO — NOT FULLY DONE**, corrections continue on the same `fixN` branch.
+- If review returns **YES — DONE**, the outside ChatGPT reviewer owns finalization when repository write/merge capability is available: integrate the accepted code into Wavefinity `main`, archive the active fix in `Wavefinity-Help-Code`, update cloud Fix Master there, verify both repositories, and release any downstream fixes whose prerequisites are now satisfied.
+- If two active fixes overlap implementation files, prefer sequencing. If work already overlaps, the later branch must incorporate current `origin/main` after the earlier fix merges and be reviewed again against the new base.
+- If another accepted fix lands on `main` while a branch is active, incorporate current `origin/main` before final review whenever the new change overlaps, affects a dependency, or changes assumptions.
+- If multiple coding agents are active at once, use separate clones/worktrees rather than one working directory that switches branches.
 
-- `main` is the accepted implementation line. Do not perform Help Code implementation directly on `main`.
-- Each fix uses a branch named exactly `fixN`, using the unpadded fix number: `fix6`, `fix9`, `fix10`, etc.
-- **Old branches are not a blocker by themselves.** After the mandatory remote-state gate succeeds, unrelated/stale local or remote branches may be ignored. Create the exact branch named by the active fix file from current `origin/main`. Stop only if that exact branch already exists and its ownership/state is unclear; do not stop merely because other old fix branches exist.
-- When implementation is actually ready to begin, fetch `origin` and create/switch to `fixN` from the then-current accepted `origin/main`. If a prerequisite fix is not yet complete on `main`, STOP rather than implementing against an incomplete base. Do not create a useful implementation history from a stale pre-prerequisite base.
-- Coding agents work only on the assigned `fixN` branch. Never commit implementation work directly to `main`, force-push `main`, reset/rewrite `main`, or merge the fix into `main` themselves unless the Help Code handoff explicitly says the outside review is complete and authorizes that merge.
-- Make all changes needed for one coherent task, inspect the diff once, commit coherently, and push to `origin/fixN`. Avoid micro-checkpoint churn.
-- ChatGPT's outside completion review compares `fixN` against the then-current `main`.
-- If review returns **NO — NOT FULLY DONE**, continue corrections on the same `fixN` branch and push them there.
-- If review returns **YES — DONE**, ChatGPT's outside reviewer owns finalization whenever repository write/merge capability is available: preserve the current `main`, integrate the accepted fix into `main` (prefer one squash-style logical commit such as `Fix 006: <title>`), rename `/fixes/fix-###.md` on `main` to `/fixes/fix-### archive.md`, update `/fixes/Fix Master.md` to completed/merged, and verify the remote `main` contains the accepted implementation, archive file, and ledger update. This is the final step of a successful completion review; do not leave a completed fix merely sitting on `fixN` for the user to merge manually. If repository merge/write capability is unavailable, say so explicitly instead of claiming completion of the merge.
-- **Dependency release is part of that same completion transaction.** After a fix is merged/closed, scan current `/fixes/Fix Master.md` for any planned/blocked fixes that name the completed fix as a prerequisite. If all prerequisites for one of those downstream fixes are now satisfied, update its Fix Master status to **READY TO IMPLEMENT**, remove or replace obsolete blocking/gate language in its active `/fixes/fix-###.md`, commit those updates to `main`, and verify both files on current `origin/main`. Do not declare the predecessor's completion transaction finished until this downstream-state release check is complete.
-- The permanent Fix Master ledger remains on `main` and is maintained there by ChatGPT. Coding agents on `fixN` branches must not edit `/fixes/Fix Master.md`; this avoids guaranteed conflicts between concurrent fix branches. After **YES — DONE** and successful integration to `main`, preserve the completed individual fix by renaming it to `/fixes/fix-### archive.md`; do not delete the completed fix record.
-- If two active fixes touch the same files, prefer sequencing them when the overlap is substantial: finish/merge the earlier fix first, then start the later fix from the updated `main`. If they were already developed concurrently, after the first fix reaches `main`, fetch `origin` and merge the new `origin/main` into the remaining `fixN` branch, deliberately resolve any overlap/conflict there, push that branch, and have it reviewed again against the new `main`. This is required even when Git reports no textual conflict if the earlier fix changed behavior or assumptions used by the remaining fix. Prefer this merge-forward approach over rebasing an already-pushed fix branch; it avoids history rewriting and force-pushes.
-- If another accepted fix lands on `main` while a `fixN` branch is still active, the active branch must incorporate the current `origin/main` before its final outside completion review whenever the new mainline change overlaps, affects a dependency, or could change the meaning of the fix. Do not declare the branch complete against an obsolete base.
-- If multiple local coding agents are active at once, do not make them share one working directory while switching branches; use separate clones or Git worktrees.
-
-The hosted app tracks `main`; work on a fix branch is intentionally isolated from the accepted/live line until outside review approves it.
+The hosted app tracks `main`; fix branches remain isolated until outside review accepts them.
 
 ### 3. Fast vibe-coding & testing policy
 
