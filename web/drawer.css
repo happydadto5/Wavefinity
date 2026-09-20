@@ -192,3 +192,10 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-canonical-row .dl-note { margin: 0; }
 .field-grid input:disabled { background: var(--surface-soft, #f3f4f2); color: var(--muted); }
 .dl-canonical-row[hidden] { display: none; }
+
+/* Space camera: full text labels at normal zoom; +/- stay compact. */
+.dl-view-controls .camera-controls-row { flex-wrap: wrap; }
+.dl-view-controls .camera-views { flex-wrap: wrap; }
+.dl-view-controls .camera-views-row { flex-wrap: wrap; }
+.dl-view-controls .camera-views button { flex: 0 0 auto; min-width: 0; padding: 10px 14px; font-size: 14px; white-space: nowrap; }
+.dl-view-controls .zoom-controls button { flex: 0 0 auto; min-width: 40px; padding: 10px 12px; }
