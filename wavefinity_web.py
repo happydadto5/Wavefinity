@@ -170,6 +170,7 @@ from organizer_base_trim import (
     BASE_TRIM_JOIN_LABELS,
     BASE_TRIM_JOIN_TYPES,
     BASE_TRIM_MAX_HEIGHT,
+    BASE_TRIM_MAX_FIELD,
     BASE_TRIM_MAX_WIDTH,
     BASE_TRIM_MIN_HEIGHT,
     BASE_TRIM_MIN_WIDTH,
@@ -898,6 +899,8 @@ def catalog_payload() -> dict[str, Any]:
         },
         "base_trim_rules": {
             "unit_mm": BASE_UNIT,
+            "mating_gap_mm": WAVE_MATING_GAP,
+            "max_field_mm": BASE_TRIM_MAX_FIELD,
             "default_width_mm": BASE_TRIM_DEFAULT_WIDTH,
             "default_height_mm": BASE_TRIM_DEFAULT_HEIGHT,
             "min_width_mm": BASE_TRIM_MIN_WIDTH,
