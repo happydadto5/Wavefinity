@@ -274,7 +274,7 @@ def edge_mount_hole_plan(box: BoxSpec) -> tuple[dict[str, float], ...]:
     if top_offset < access_r + 1.0 - 1e-9:
         raise ValueError(
             f"Distance below top must be at least {access_r + 1.0:.1f} mm for a "
-            f"{access_d:g} mm driver access hole. Increase it, or reduce the "
+            f"{access_d:g} mm screwdriver access hole. Increase it, or reduce the "
             "access diameter."
         )
     min_spacing = access_d + EDGE_HOLE_BETWEEN_CLEARANCE
@@ -294,7 +294,7 @@ def edge_mount_hole_plan(box: BoxSpec) -> tuple[dict[str, float], ...]:
             )
         if spacing < min_spacing - 1e-9:
             raise ValueError(
-                f"{count} vertical {access_d:g} mm driver-access holes do not fit "
+                f"{count} vertical {access_d:g} mm screwdriver access holes do not fit "
                 "with this distance below top. Reduce the hole count, increase the "
                 "bin height, or raise the distance below top."
             )
@@ -313,7 +313,7 @@ def edge_mount_hole_plan(box: BoxSpec) -> tuple[dict[str, float], ...]:
             )
         if spacing < min_spacing - 1e-9:
             raise ValueError(
-                f"Two {access_d:g} mm driver-access holes do not fit side by side "
+                f"Two {access_d:g} mm screwdriver access holes do not fit side by side "
                 f"on this {span:g} mm wall. Use one screw, reduce the access "
                 "diameter, or use a larger bin."
             )

@@ -243,8 +243,8 @@ class Layout:
             # inserted or withdrawn. Fused holders grow from the floor and are
             # unaffected.
             raise ValueError(
-                "Lift grabbers narrow the bin opening and are not compatible "
-                "with this removable interior mode."
+                "Inside Handles narrow the bin opening and are not compatible "
+                "with Removable insert mode."
             )
         bounds = layout_zone(box, self.mode)
         # Fused holders stand on the bin floor; that is the only mode whose

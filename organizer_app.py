@@ -212,7 +212,7 @@ def validate_scoop_lift_grabbers(box: BoxSpec, scoop: bool) -> None:
     if scoop_top > grabber_bottom:
         raise ValueError(
             "the front scoop rises into the front-wall Inside Handles. Choose "
-            "a smaller grabber size, use side-only grabbers, make the bin "
+            "a smaller Inside Handle size, use side-only Inside Handles, make the bin "
             "taller, or disable the scoop"
         )
 

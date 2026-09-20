@@ -254,7 +254,6 @@ function spaceBinDefaultsFromDesign(design) {
   if (snapshot.box) delete snapshot.box.b4b;
   snapshot.part_name = "";
   snapshot.label = "";
-  snapshot.label_position = "bottom";
   if (snapshot.box?.edge_mount) snapshot.box.edge_mount.label_text = "";
   if (snapshot.box?.lid) {
     snapshot.box.lid.label_text = "";
@@ -319,6 +318,13 @@ async function rememberPartDefault(feature) {
   } catch (error) {
     toast(`Part defaults were not saved: ${error.message}`, true, 5000);
   }
+}
+
+async function rememberAppliedPartDefault(result, fallback = null) {
+  const saved = Number.isInteger(result?.selected)
+    ? state.design?.layout?.features?.[result.selected]
+    : null;
+  await rememberPartDefault(saved || fallback);
 }
 
 function drawerHardClearance() {
@@ -2822,6 +2828,7 @@ const commitNudge = debounce(async () => {
       index,
     });
     state.design = result.design;
+    await rememberAppliedPartDefault(result, state.draft);
     recordHistory(historySnapshot);
     state.selected = result.selected;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
@@ -3775,7 +3782,7 @@ async function selectKind(kind, reset = false) {
         if (request !== state.kindRequest) return;
         const previousDesign = clone(state.design);
         state.design = applyResult.design;
-        await rememberPartDefault(state.draft);
+        await rememberAppliedPartDefault(applyResult, state.draft);
         seedPartNameFromText(state.draft);
         recordHistory(previousDesign);
         state.selected = applyResult.selected;
@@ -6277,7 +6284,7 @@ async function autoCommitDraft(request) {
     if (state.selected !== null && state.design.layout.features[state.selected]) {
       state.draft = clone(state.design.layout.features[state.selected]);
     }
-    await rememberPartDefault(state.draft);
+    await rememberAppliedPartDefault(result, state.draft);
     if (state.draft?.kind === "nest") syncForm();
     for (const warning of result.warnings || []) toast(warning, false, 6500);
     renderPlaced();
@@ -6311,7 +6318,7 @@ async function commitVisibleDraft() {
     throw new Error("The interior part changed while it was being saved. Try again.");
   }
   state.design = committed.design;
-  await rememberPartDefault(draft);
+  await rememberAppliedPartDefault(committed, draft);
   seedPartNameFromText(draft);
   recordHistory(previousDesign);
   state.draftIsNew = false;
@@ -6416,6 +6423,7 @@ async function applySupport(index) {
     const previousDesign = clone(state.design);
     const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index });
     state.design = result.design;
+    await rememberAppliedPartDefault(result, state.draft);
     recordHistory(previousDesign);
     state.selected = result.selected;
     state.draftIsNew = false;
@@ -6454,7 +6462,7 @@ async function saveCurrentPart() {
       design: state.design, feature: state.draft, index: applyIndex,
     });
     state.design = result.design;
-    await rememberPartDefault(state.draft);
+    await rememberAppliedPartDefault(result, state.draft);
     seedPartNameFromText(state.draft);
     recordHistory(previousDesign);
     state.paletteBrowsing = true;
@@ -6487,7 +6495,7 @@ async function saveEdgeMountPart() {
     clearDraftSelection();
     renderPlaced();
     await refreshPreview();
-    toast("Part saved.");
+    toast(`${partInfo(kind)?.title || "Option"} saved.`);
   } catch (error) {
     toast(error.message, true, 5000);
   } finally {
@@ -6730,8 +6738,8 @@ function renderPlaced() {
   const summaryEl = $("#design-summary");
   if (summaryEl) {
     summaryEl.textContent = total
-      ? `${total} part${total === 1 ? "" : "s"} · ${state.design.layout.mode}`
-      : `No parts placed · ${state.design.layout.mode}`;
+      ? `${total} added · ${state.design.layout.mode}`
+      : `Nothing added · ${state.design.layout.mode}`;
   }
 
   // With a single support there's nothing to choose between, so drop straight

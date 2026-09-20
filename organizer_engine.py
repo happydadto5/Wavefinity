@@ -1376,7 +1376,7 @@ def _lift_grabber_bulge_mesh(
     if mesh.volume < 0:
         mesh.invert()
     if not (mesh.is_watertight and mesh.is_winding_consistent):
-        raise RuntimeError("lift grabber bulge is not a clean solid")
+        raise RuntimeError("Inside Handle geometry is not a clean solid")
     return mesh
 
 
