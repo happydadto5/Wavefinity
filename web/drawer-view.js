@@ -245,7 +245,7 @@ DV.entries = (drawer, grid) => {
     if (one) entries.push({ key: DL.key(p), x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.d, layers: [{ bin: one, key: DL.key(p), z0: 0, z1: Number(one.z) }], mode: "", edge: true });
   }
   // The design being edited, standing at the first legal spot: session only,
-  // not draggable and not a placement.
+  // draggable in place (session only), and never a placement.
   const working = DL.working && !DL.working.error ? DL.workingFit() : null;
   if (working?.ok && !DV.drag?.moved) {
     const bin = DL.working.bin;
@@ -492,7 +492,9 @@ DV.paintScene = (ctx, drawer, cam) => {
         topInk = color.light + DV.FACE_TONE.top < 60 ? "#ffffff" : color.ink;
         topPlanned = planned;
       }
-      if (!entry.ghost) hits.push({ key: layer.key, grid: !entry.edge, z: z1, polys: screens.map(s => s.screen) });
+      if (!entry.ghost || entry.working) {
+        hits.push({ key: layer.key, grid: !entry.edge, z: z1, polys: screens.map(s => s.screen), working: Boolean(entry.working) });
+      }
     });
     if (topFace) DV.drawLabel(ctx, entry, topFace, topInk, topPlanned);
     const base = entry.item?.chain[0];
@@ -660,7 +662,17 @@ DV.wire = () => {
       DV.paint();
       return;
     }
-    if (hit) {
+    if (hit?.working) {
+      const fit = DL.workingFit();
+      const start = fit?.ok && DV.cam.onPlane(sx, sy, hit.z);
+      if (start) {
+        DV.drag = {
+          key: "__working", keys: new Set(["__working"]), bins: [DL.working.bin], working: true,
+          sx, sy, plane: hit.z, start, gx0: fit.gx, gy0: fit.gy, gx: fit.gx, gy: fit.gy,
+          moved: false, valid: true, outside: false, target: null, locked: false,
+        };
+      }
+    } else if (hit) {
       DL.selected = hit.key;
       const chain = hit.grid && DL.stackOf(hit.key);
       const start = DV.cam.onPlane(sx, sy, hit.z);
@@ -702,7 +714,8 @@ DV.wire = () => {
       // never counts as throwing a bin away.
       drag.outside = !DV.hitAt(sx, sy, drag.keys)
         && (point[0] < -12 || point[1] < -12 || point[0] > DV.cam.W + 12 || point[1] > DV.cam.D + 12);
-      const { target, refusal } = DV.stackTarget(drag.bins, sx, sy, drag.keys);
+      const { target, refusal } = drag.working ? { target: null, refusal: "" }
+        : DV.stackTarget(drag.bins, sx, sy, drag.keys);
       drag.target = target;
       if (target) Object.assign(drag, { valid: true, reason: "" });
       else {
@@ -738,7 +751,10 @@ DV.wire = () => {
     const drag = DV.drag;
     DV.drag = null;
     DV.pan = null;
-    if (drag?.moved) {
+    if (drag?.moved && drag.working) {
+      if (drag.valid && !drag.outside) DL.moveWorkingTo(drag.gx, drag.gy);
+      else if (!drag.outside) toast(drag.reason || "It does not fit there.", true);
+    } else if (drag?.moved) {
       if (drag.outside) {
         const count = DL.takeOut(drag.key);
         toast(`Taken out of the drawer${count > 1 ? ` (${count} bins)` : ""}. Back in the inventory list.`);

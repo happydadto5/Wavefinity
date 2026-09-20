@@ -486,6 +486,11 @@ DL.workingFit = () => {
   const drawer = DL.drawer();
   const stamp = JSON.stringify([working.key, drawer.id, drawer.width, drawer.depth, drawer.height,
     drawer.snap, drawer.placements]);
+  const spot = working.position;
+  if (spot?.drawer === drawer.id) {
+    if (DL.fitsAt(drawer, [working.bin], spot.gx, spot.gy).ok) return { ok: true, gx: spot.gx, gy: spot.gy };
+    working.position = null;
+  }
   if (working.fitStamp === stamp) return working.fit;
   const grid = DL.grid(drawer);
   const [w, d] = DL.cells(working.bin, drawer);
@@ -505,6 +510,18 @@ DL.workingFit = () => {
   working.fitStamp = stamp;
   working.fit = fit;
   return fit;
+};
+
+// Session-only: remember where the Current design was dragged. Never a placement.
+DL.moveWorkingTo = (gx, gy) => {
+  const working = DL.working;
+  if (!working?.bin || working.error) return false;
+  const drawer = DL.drawer();
+  if (!DL.fitsAt(drawer, [working.bin], gx, gy).ok) return false;
+  working.position = { drawer: drawer.id, gx, gy };
+  working.fitStamp = null;
+  DL.emit();
+  return true;
 };
 
 DL.load = async () => {
