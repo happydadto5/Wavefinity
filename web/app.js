@@ -5609,6 +5609,16 @@ function applyBoreAuto(one) {
   return true;
 }
 
+// Mirrors bore_minimum_pitches() in organizer_inserts/_bore.py. Axis-aligned
+// square holes (square_axis) pitch at held + wall; other polygons use the
+// circumscribed radius.
+function boreCrossPitch(profile, held, wall) {
+  if (profile === "square_axis") return held + wall;
+  const sides = profile === "round" ? 48 : profile === "square" ? 4 : 6;
+  const holeRadius = held / 2 / (sides < 8 ? Math.cos(Math.PI / sides) : 1);
+  return 2 * holeRadius + wall;
+}
+
 function sizeBoreToGrid(one) {
   if (one.kind !== "bore") return;
   // Auto Base fills the bin whatever the grid needs; Auto Grid fills whatever
@@ -5626,10 +5636,7 @@ function sizeBoreToGrid(one) {
   // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
   // Wall was hand-set - match that so the block sizing tracks the real pitch.
   const wall = opts.wall !== undefined ? number(opts.wall) : (angle > 0 ? 3 : 1.6);
-  const sides = profile === "round" ? 48 : profile === "square" ? 4 : 6;
-  const holeRadius = held / 2 / (sides < 8 ? Math.cos(Math.PI / sides) : 1);
-  // Axis-aligned square holes pitch at held + wall (engine: bore_minimum_pitches).
-  const crossPitch = profile === "square_axis" ? held + wall : 2 * holeRadius + wall;
+  const crossPitch = boreCrossPitch(profile, held, wall);
   const leanPitch = crossPitch / Math.cos(angle * Math.PI / 180);
   if (!(crossPitch > 0) || !(leanPitch > 0)) return;
 

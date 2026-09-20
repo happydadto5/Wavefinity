@@ -2861,8 +2861,10 @@ class SideOpeningTests(unittest.TestCase):
 
     def test_legacy_top_support_uses_final_base_after_stack_normalization(self) -> None:
         saved = self._legacy_top_support(base_thickness=0.6)
-        saved["box"]["stack"] = {"enabled": True}
+        saved["box"]["stack"] = {"mode": "direct"}
+        raw_base = saved["box"]["base_thickness"]
         box, *_ = organizer_app.design_from_dict(saved)
+        self.assertGreater(box.base_thickness, raw_base)
         self._assert_bridge(box)
 
     def test_legacy_top_support_degenerate_height_is_controlled(self) -> None:

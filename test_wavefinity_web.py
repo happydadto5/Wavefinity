@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -1539,13 +1540,87 @@ class WebApplicationTests(unittest.TestCase):
         done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
         self.assertEqual(json.loads(done.stdout), [False, True, False, True, False, False])
 
-    def test_removed_modifiers_resync_form_and_square_axis_pitch(self):
+    def _app_js_functions(self, *names):
         source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
-        body = source[source.index("async function removeModifier"):source.index("function commitEdgeMountFormBeforeSwitch")]
-        self.assertLess(body.index("clearDraftSelection();
-    // Forms"), body.index("syncForm();"))
-        bore = source[source.index("function sizeBoreToGrid"):]
-        self.assertIn('profile === "square_axis" ? held + wall', bore[:2500])
+        chunks = []
+        for name in names:
+            start = source.index(f"function {name}(")
+            end = source.index("\n}\n", start) + 3
+            chunks.append(source[start:end])
+        return "\n".join(chunks)
+
+    def _run_node(self, script):
+        node = self._node_or_skip()
+        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        return json.loads(done.stdout)
+
+    def test_removed_inside_handles_stay_removed_after_form_read(self):
+        code = self._app_js_functions("readLiftGrabberForm", "syncLiftGrabberControls")
+
+        def script(resync_value):
+            return "\n".join([
+                "const LIFT_GRABBER_DEFAULTS = { enabled: false, size: 'medium', location: 'sides' };",
+                "const els = { '#lift-grabber-size': { value: 'large' },"
+                " '#lift-grabber-location': { value: 'sides' },"
+                " '#lift-grabber-location-setting': { hidden: false } };",
+                "const $ = sel => els[sel];",
+                code,
+                "const design = { box: { lift_grabbers: { enabled: false, size: 'medium', location: 'sides' } } };",
+                f"els['#lift-grabber-size'].value = {resync_value};",
+                "syncLiftGrabberControls();",
+                "readLiftGrabberForm(design);",
+                "process.stdout.write(JSON.stringify(design.box.lift_grabbers.enabled));",
+            ])
+
+        # What syncForm() does for this control after a delete: 'no'.
+        self.assertFalse(self._run_node(script("'no'")))
+        # Without the resync the stale 'large' value would resurrect handles.
+        self.assertTrue(self._run_node(script("'large'")))
+
+    def test_removed_side_openings_stay_removed_after_form_read(self):
+        code = self._app_js_functions(
+            "sideOpeningState", "sideOpeningPartActive", "readSideOpeningForm", "syncSideOpeningControls",
+        )
+        script = "\n".join([
+            "const SIDE_OPENING_DEFAULTS = { enabled: false, shape: 'curved', sides: [], size: 'medium',"
+            " from_bottom_percent: 100, from_top_percent: 100 };",
+            "const SIDE_OPENING_SIDE_IDS = ['front', 'back', 'left', 'right'];",
+            "const els = { '#side-openings-panel': { hidden: false }, '#side-opening-shape': { value: 'square' },"
+            " '#side-opening-from-bottom': { value: '60' }, '#side-opening-from-top': { value: '90' },"
+            " '#side-opening-size': { value: 'small', options: [] } };",
+            "for (const side of SIDE_OPENING_SIDE_IDS) {"
+            " const attrs = { 'aria-pressed': side === 'front' ? 'true' : 'false' };"
+            " els['#side-opening-' + side] = { disabled: false,"
+            "  getAttribute: k => attrs[k], setAttribute: (k, v) => { attrs[k] = v; },"
+            "  classList: { toggle() {} } }; }",
+            "const $ = sel => els[sel];",
+            "const state = { design: { box: { side_openings: { ...SIDE_OPENING_DEFAULTS } } } };",
+            "const b4bEnabled = () => false, baseTrimEnabled = () => false;",
+            "const sideOpeningLidStackForced = () => false, clampSideOpeningTopForLid = () => {};",
+            "const sideOpeningEligibleSide = () => true, sideOpeningAllowedSizes = () => [];",
+            "const sideOpeningAdjustmentNote = '', fmt = v => String(v), flashField = () => {};",
+            "const number = (v, f) => (Number.isFinite(Number(v)) ? Number(v) : f);",
+            code,
+            "syncSideOpeningControls();",
+            "const design = JSON.parse(JSON.stringify(state.design)); readSideOpeningForm(design);",
+            "process.stdout.write(JSON.stringify([els['#side-openings-panel'].hidden,"
+            " els['#side-opening-front'].getAttribute('aria-pressed'), design.box.side_openings.enabled]));",
+        ])
+        self.assertEqual(self._run_node(script), [True, "false", False])
+
+    def test_square_bore_pitch_matches_backend_profiles(self):
+        code = self._app_js_functions("boreCrossPitch")
+        script = "\n".join([
+            code,
+            "process.stdout.write(JSON.stringify(['square_axis', 'square', 'hex', 'round']"
+            ".map(p => boreCrossPitch(p, 6.25, 1.6))));",
+        ])
+        axis, square, hexagon, rnd = self._run_node(script)
+        held, wall = 6.25, 1.6
+        self.assertAlmostEqual(axis, held + wall)
+        self.assertAlmostEqual(square, held / math.cos(math.pi / 4) + wall)
+        self.assertAlmostEqual(hexagon, held / math.cos(math.pi / 6) + wall)
+        self.assertAlmostEqual(rnd, held + wall, places=1)
 
     def test_surface_outside_size_resolves_down_to_whole_units(self):
         node = self._node_or_skip()
