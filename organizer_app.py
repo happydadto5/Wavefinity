@@ -1932,6 +1932,7 @@ def run_command(args: argparse.Namespace) -> dict[str, object]:
                 if args.wall is None
                 else math.isclose(args.wall, DEFAULT_WALL, abs_tol=1e-9)
             ),
+            side_openings=saved_box.side_openings,
         )
         if args.mode:
             layout = replace(layout, mode=args.mode)

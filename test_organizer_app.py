@@ -1900,6 +1900,32 @@ class InsertEditorTests(unittest.TestCase):
             self.assertEqual((used_label, used_part), ("M3", "Nozzles"))
             self.assertEqual((used_label_location, used_scoop), ("top", False))
 
+    def test_organizer_cli_keeps_saved_side_openings(self) -> None:
+        openings = SideOpeningSpec(
+            enabled=True, sides=("front",), shape="curved", size="medium",
+            top_support=True, depth_percent=60.0,
+        )
+        spec = BoxSpec(48.0, 32.0, 35.0, side_openings=openings)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.wavefinity.json"
+            path.write_text(
+                organizer_app.json.dumps(
+                    organizer_app.design_to_dict(spec, organizer_app.Layout())
+                ),
+                encoding="utf-8",
+            )
+            args = organizer_app.build_parser().parse_args([
+                "organizer", "--layout", str(path), "--z", "50",
+                "--output-dir", directory,
+            ])
+            with mock.patch.object(
+                organizer_app, "generate_organizer_files", return_value={}
+            ) as generate:
+                organizer_app.run_command(args)
+            used_box = generate.call_args.args[0]
+            self.assertEqual(used_box.z, 50.0)
+            self.assertEqual(used_box.side_openings, openings)
+
     def test_a_floor_label_on_the_command_line_becomes_a_text_part(self) -> None:
         """``--label`` with no position is sugar for a self-placing text part."""
         spec = BoxSpec(48.0, 32.0, 35.0)
