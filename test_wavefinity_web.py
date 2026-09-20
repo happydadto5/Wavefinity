@@ -3231,10 +3231,13 @@ class Fix20StorageBoxDividerTests(unittest.TestCase):
         elig = app_js[elig_start:elig_end]
         self.assertNotIn("b4bEnabled()", elig)
 
-        render_start = app_js.index("function renderDraftFields(one = state.draft) {")
-        render_end = app_js.index("function renderFitActions(", render_start)
+        render_start = app_js.index("function renderDraftFields() {")
+        render_end = app_js.index("function finishBoreAutoChange(", render_start)
         render_code = app_js[render_start:render_end]
-        self.assertIn("if (!b4bEnabled()) {\n      const hasLabels = opt.label_divisions === true;", render_code)
+        self.assertIn(
+            "if (!b4bEnabled()) {\n      const hasLabels = opt.label_divisions === true;",
+            render_code,
+        )
 
         b4b_vis_start = app_js.index("function applyB4BVisibility() {")
         b4b_vis_end = app_js.index("function b4bHandleBlockedReason() {", b4b_vis_start)
@@ -3362,7 +3365,7 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
 
         # normalizeB4BBaseForStacking fallback
         norm_stack_start = app_js.index("function normalizeB4BBaseForStacking(design = state.design) {")
-        norm_stack_end = app_js.index("function b4bValidationErrors(", norm_stack_start)
+        norm_stack_end = app_js.index("function b4bLimitProblems(", norm_stack_start)
         norm_stack = app_js[norm_stack_start:norm_stack_end]
         self.assertIn("b4bPreStackBase = number(box.base_thickness, number(state.catalog?.b4b_rules?.default_base_mm, 1.6));", norm_stack)
 
@@ -3375,7 +3378,10 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
 
         # updateDesignFromForm B4B fallbacks
         update_form_start = app_js.index("function updateDesignFromForm() {")
-        update_form_end = app_js.index("function updateInteriorModeVisibility(", update_form_start)
+        update_form_end = app_js.index(
+            "async function showLog(",
+            update_form_start,
+        )
         update_form = app_js[update_form_start:update_form_end]
         self.assertIn("const defaultWall = b4bOn\n    ? number(b4bRules.default_wall_mm, 1.6)\n    : (wallRules.default_mm ?? 0.8);", update_form)
         self.assertIn("const defaultBase = b4bOn\n    ? number(b4bRules.default_base_mm, 1.6)\n    : number(state.catalog?.base_rules?.default_mm, 0.6);", update_form)
