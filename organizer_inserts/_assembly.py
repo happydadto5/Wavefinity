@@ -44,6 +44,7 @@ from ._text import (
     text_placed_outline,
 )
 from ._divider import divider_division_texts
+from ._nest import build_recessed_nest_group, resolve_nest_settings
 
 # Physical assembly policy, not a user-facing capability: only these feature
 # kinds may legitimately rise above the bin rim, and only when fused directly
@@ -108,7 +109,20 @@ def build_features(
     if stack_enabled(box):
         max_feature_z = box.z - STACK_PLUG_DEPTH
     solids: list[trimesh.Trimesh] = []
+    recessed_nests = [
+        one for one in features
+        if one.kind == "nest" and one.contour
+        and str(resolve_nest_settings(box, one, base_z)["holder_style"]) == "recessed"
+    ]
+    if recessed_nests:
+        shared_deck = _nest_recessed_deck_footprint(box, mode)
+        made = [build_recessed_nest_group(box, recessed_nests, base_z, shared_deck)]
+        # A shared deck deliberately spans the physical insert/bin footprint,
+        # not any one Nest zone.
+        solids.extend(made)
     for one in features:
+        if one in recessed_nests:
+            continue
         recessed_deck_footprint = None
 
         if (

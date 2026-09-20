@@ -137,6 +137,7 @@ const state = {
   nestCornerBusy: false,
   nestCornerTipDismissed: false,
   nestOutlineTool: "select",    // "select" | "add-point" | "delete-point"
+  nestOutlineEditing: false,
   nestAccessWarningShown: null, // last access-planner warning already toasted
   nestViewZoom: 1,              // dedicated outline-editor viewport zoom (1 = fitted)
   nestViewPanX: 0,               // viewport pan, in canvas pixels, on top of the fit
@@ -284,6 +285,10 @@ function partDefaultsFromFeature(feature) {
     }
   }
   delete copy.options.photo;
+  if (feature.kind === "nest") {
+    delete copy.count;
+    delete copy.options.repeat_spacing_percent;
+  }
   if (feature.kind === "bore") {
     // An Auto mode is remembered as the mode itself; the numbers it supersedes
     // are derived from each new bin, never carried over from the old one.
@@ -320,7 +325,7 @@ function seedFeatureFromPartDefaults(feature, remembered) {
       delete seeded.options.rows;
     }
   }
-  if (Object.hasOwn(remembered, "count")) seeded.count = remembered.count;
+  if (Object.hasOwn(remembered, "count") && seeded.kind !== "nest") seeded.count = remembered.count;
   if (remembered.along) seeded.along = remembered.along;
   if (remembered.item && !partInfo(feature.kind)?.flags?.photo) seeded.item = clone(remembered.item);
   delete seeded.contour;
@@ -3603,6 +3608,7 @@ function cancelPendingDraftWork() {
 }
 
 function resetNestPhotoSession() {
+  state.nestOutlineEditing = false;
   state.nestPhoto = null;
   state.nestOriginalImage = null;
   state.nestRectifiedImage = null;
@@ -3957,6 +3963,7 @@ async function selectedFeature(index, force = false) {
   if (!force && index === state.selected) return;
   // Don't drop unsaved work on the part currently open without asking first.
   if (!force && !(await guardDraftSwitch())) return;
+  if (state.draft?.kind === "nest") resetNestPhotoSession();
   commitEdgeMountFormBeforeSwitch();
   cancelPendingDraftWork();
   state.edgeMountEditing = false;
@@ -3972,6 +3979,7 @@ async function selectedFeature(index, force = false) {
   state.nestViewPanX = 0;
   state.nestViewPanY = 0;
   state.draft = clone(state.design.layout.features[index]);
+  state.nestOutlineEditing = false;
   state.draftTouched = false;
   state.draftAutoCommit = true;
   state.draftIsNew = false;
@@ -4171,6 +4179,24 @@ function renderNestFields(one) {
     </details>
   </div>`;
 
+  const shownRotation = ((number(one.rotation, 0) % 360) + 360) % 360;
+  const standardRotation = [0, 90, 180, 270].some(value => Math.abs(value - shownRotation) < 1e-6);
+  const spacing = opt.repeat_spacing_percent ?? 0;
+  html += `<fieldset class="wide editor-group"><legend>Copies</legend>
+    <div class="pair">
+      <label>Quantity<input type="number" min="1" max="20" step="1" data-draft="nest-count" value="${Math.max(1, Math.min(20, Math.round(number(one.count, 1))))}"></label>
+      <label>Orientation<select data-draft="nest-orientation">
+        ${standardRotation ? "" : `<option value="${escapeHtml(String(one.rotation))}" selected disabled>Current ${fmt(one.rotation)}° (existing)</option>`}
+        ${[[0, "As Scanned"], [90, "90°"], [180, "180°"], [270, "270°"]].map(([value, label]) => `<option value="${value}" ${standardRotation && shownRotation === value ? "selected" : ""}>${label}</option>`).join("")}
+      </select></label>
+    </div>
+    ${plainCheckbox("nest-alternate", "Flip every other one", one.alternate_ends === true, { wide: true, help: "Turns every second copy 180° end-for-end." })}
+    <label class="wide">Space between nests<select data-draft="option:repeat_spacing_percent">
+      ${[[-100, "-100% (Minimum)"], [-75, "-75%"], [-50, "-50%"], [-25, "-25%"], [0, "Auto"], [25, "+25%"], [50, "+50%"], [75, "+75%"], [100, "+100%"]].map(([value, label]) => `<option value="${value}" ${Number(spacing) === value ? "selected" : ""}>${label}</option>`).join("")}
+    </select></label>
+    ${one.contour ? `<div class="pair"><button type="button" class="button secondary" data-action="duplicate-nest">Duplicate</button><button type="button" class="button secondary" data-action="edit-nest-outline">Edit outline</button></div>` : ""}
+  </fieldset>`;
+
   const autoCavity = 0.6 * toolThickness;
   const cavityDepth = cavityMode === "manual"
     ? number(val("cavity_depth", autoCavity), autoCavity)
@@ -4348,6 +4374,22 @@ function renderDraftFields() {
     html += scoopDepthField("option:depth", shown);
   }
   if (one.kind === "nest") {
+    if (changed === "nest-count") {
+      one.count = Math.max(1, Math.min(20, Math.round(number(get("nest-count"), 1))));
+    }
+    if (changed === "nest-orientation") {
+      const angle = number(get("nest-orientation"), NaN);
+      if ([0, 90, 180, 270].includes(angle)) one.rotation = angle;
+    }
+    if (changed === "nest-alternate") {
+      one.alternate_ends = $('[data-draft="nest-alternate"]', $("#draft-fields"))?.checked === true;
+    }
+    if (changed === "option:repeat_spacing_percent") {
+      const spacing = Math.round(number(get("option:repeat_spacing_percent"), NaN));
+      if ([-100, -75, -50, -25, 0, 25, 50, 75, 100].includes(spacing)) {
+        one.options.repeat_spacing_percent = spacing;
+      }
+    }
     html += renderNestFields(one);
   }
   if (info.flags.text) {
@@ -5338,6 +5380,37 @@ function wireNestFieldActions() {
     updateSelectionButtons();
     refreshDraftSoon();
   });
+  const editOutline = $('[data-action="edit-nest-outline"]', fields);
+  if (editOutline) editOutline.addEventListener("click", () => {
+    state.nestOutlineEditing = true;
+    state.nestViewZoom = 1; state.nestViewPanX = 0; state.nestViewPanY = 0;
+    activatePreviewView("2d"); syncNest2DWorkspace(); renderLayout2D();
+  });
+  const duplicate = $('[data-action="duplicate-nest"]', fields);
+  if (duplicate) duplicate.addEventListener("click", duplicateNest);
+}
+
+async function duplicateNest() {
+  if (!state.draft?.contour || !Number.isInteger(state.selected) || !beginDesignMutation()) return;
+  const before = clone(state.design);
+  try {
+    const committed = await commitVisibleDraft();
+    if (committed === false && !state.design.layout.features[state.selected]) return;
+    const index = state.selected;
+    const result = await api("/api/feature/duplicate", { design: state.design, index });
+    state.design = result.design;
+    recordHistory(before);
+    resetNestPhotoSession();
+    state.selected = result.selected;
+    state.draft = clone(state.design.layout.features[result.selected]);
+    state.draftKind = "nest"; state.draftIsNew = false; state.draftTouched = false;
+    state.draftAutoCommit = true; state.nestOutlineEditing = false;
+    syncForm(); renderDraftFields(); renderPlaced(); await refreshPreview();
+    toast("Photo Nest duplicated.");
+  } catch (error) {
+    state.design = before;
+    toast(error.message, true, 6500);
+  } finally { finishDesignMutation(); }
 }
 
 async function resetNestOutline() {
@@ -5405,6 +5478,7 @@ async function finishNestEditing() {
   if (!one || one.kind !== "nest") return;
   if (state.nestCandidateContour) await acceptNestTrace();
   if (!state.draft?.contour?.length) return;
+  state.nestOutlineEditing = false;
   activatePreviewView("3d");
 }
 
@@ -5485,6 +5559,7 @@ async function runNestTrace(paperCorners) {
     });
     if (request !== state.nestTraceRequest || state.draft !== draft) return;
     state.nestTraceResult = result;
+    state.nestOutlineEditing = true;
     state.nestRectifiedImage = result.rectified_image
       ? { dataUrl: result.rectified_image, mimeType: "image/jpeg" } : state.nestRectifiedImage;
     state.nestPaperCorners = null;
@@ -5545,7 +5620,10 @@ async function finishPhotoNestIfReady() {
     };
     // Replacing an existing photo: send the live draft too, so a setting
     // changed since the last debounced save is not lost (spec section 7).
-    if (draft.contour) payload.feature = draft;
+    if (draft.contour) {
+      payload.feature = draft;
+      payload.index = draftCommitIndex();
+    }
     const result = await api("/api/nest/photo", payload);
     state.design = result.design;
     recordHistory(previousDesign);
@@ -6231,7 +6309,7 @@ function updateDraftFromFields(event) {
         "slope_base", "bottom_mode", "slope_construction", "label_divisions", "division_level", "division_side", "division_labels",
         "level", "rim_side",
         "lift_assist", "finger_position", "push_position", "angle_towards",
-        "holder_style", "auto_size"]
+        "holder_style", "auto_size", "repeat_spacing_percent"]
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
     const option = info.fields.find(entry => entry.key === key);
@@ -8952,7 +9030,24 @@ function drawPendingNestTrace(context, width, height) {
 // The pre-commit "waiting on Tool thickness" case is handled above by
 // drawPendingNestTrace instead, since it has no manual-edit handles yet.
 function isNestEditWorkspaceActive() {
-  return state.draft?.kind === "nest" && Boolean(state.draft.contour?.length);
+  return state.draft?.kind === "nest" && Boolean(state.draft.contour?.length)
+    && state.nestOutlineEditing === true;
+}
+
+function nestOccurrenceOutlines(feature, softContour, occurrences) {
+  const local = softContour?.length ? softContour : feature?.contour;
+  if (!local?.length || !Array.isArray(occurrences) || !occurrences.length) {
+    return [nestOutlineWorld(feature, softContour)];
+  }
+  const scale = Math.max(.05, number(feature.scale, 1));
+  return occurrences.map(occurrence => {
+    const angle = number(occurrence.rotation) * Math.PI / 180;
+    const cosine = Math.cos(angle), sine = Math.sin(angle);
+    return local.map(([x, y]) => [
+      number(occurrence.x) + scale * (number(x) * cosine - number(y) * sine),
+      number(occurrence.y) + scale * (number(x) * sine + number(y) * cosine),
+    ]);
+  });
 }
 
 // The dedicated 2D outline editor (spec: "Nested 2D Outline Editing"): the
@@ -9762,7 +9857,7 @@ function renderLayout2D() {
     const active = state.layoutDrag?.index === state.selected
       ? state.layoutDrag.feature
       : (state.draft?.kind === "nest" ? state.draft : saved);
-    if (active?.kind === "nest") drawNestPhotoReference(context, active, toCanvas);
+    if (active?.kind === "nest" && isNestEditWorkspaceActive()) drawNestPhotoReference(context, active, toCanvas);
   }
   const invalid = new Set(state.preview.invalid_feature_indexes || []);
   layoutFeatures().forEach((feature, index) => {
@@ -9774,26 +9869,16 @@ function renderLayout2D() {
     context.lineWidth = index === state.selected ? 3 : 1.2;
     if (feature.kind === "nest" && feature.contour) {
       const editingPoint = state.layoutDrag?.index === index && state.layoutDrag?.mode === "point";
-      const outline = drawClosedPath(context, nestOutlineWorld(
-        feature, editingPoint ? null : state.preview.nest_soft_contours?.[index]
-      ), toCanvas);
       context.fillStyle = color + "35";
-      context.fill(outline);
-      if (index === state.selected && state.nestRectifiedImage) {
-        context.save();
-        context.strokeStyle = "rgba(255,255,255,.95)";
-        context.lineWidth = 7;
-        context.stroke(outline);
-        context.strokeStyle = "#145d76";
-        context.lineWidth = 3;
-        context.stroke(outline);
-        context.restore();
-      } else {
-        context.stroke(outline);
+      for (const points of nestOccurrenceOutlines(feature,
+        editingPoint ? null : state.preview.nest_soft_contours?.[index],
+        state.preview.nest_occurrences?.[index])) {
+        const outline = drawClosedPath(context, points, toCanvas);
+        context.fill(outline); context.stroke(outline);
       }
       // A not-yet-accepted scan-tuning retrace draws dashed over the
       // accepted (solid) outline - see spec section 35.
-      if (index === state.selected && state.nestCandidateContour?.length) {
+      if (isNestEditWorkspaceActive() && index === state.selected && state.nestCandidateContour?.length) {
         const candidateWorld = state.nestCandidateContour.map(point => nestLocalToWorld(feature, point));
         const candidatePath = drawClosedPath(context, candidateWorld, toCanvas);
         context.save();
@@ -9978,7 +10063,7 @@ function renderLayout2D() {
         context.fillStyle = "#237fa6";
         context.beginPath(); context.arc(rotate[0], rotate[1], 6, 0, Math.PI * 2); context.fill();
         context.strokeStyle = "white"; context.stroke();
-        drawNestContourHandles(context, feature, toCanvas);
+        if (isNestEditWorkspaceActive()) drawNestContourHandles(context, feature, toCanvas);
       }
     }
   });
@@ -9994,10 +10079,13 @@ function renderLayout2D() {
     if (state.draft.kind === "nest" && state.draft.contour) {
       const liveDraft = state.layoutDrag?.feature || state.draft;
       const softContour = state.layoutDrag?.mode === "point" ? null : state.preview.draft_soft_contour;
-      const outline = drawClosedPath(context, nestOutlineWorld(liveDraft, softContour), toCanvas);
       context.fillStyle = draftColor + "18";
       context.strokeStyle = draftColor;
-      context.fill(outline); context.stroke(outline);
+      for (const points of nestOccurrenceOutlines(liveDraft, softContour,
+        state.preview.draft_nest_occurrences)) {
+        const outline = drawClosedPath(context, points, toCanvas);
+        context.fill(outline); context.stroke(outline);
+      }
     } else if (state.draft.kind !== "nest") {
       // Same as a placed support: fill the floor it really covers, outline the
       // zone it lives in.
@@ -10095,7 +10183,7 @@ function hitFeature(world) {
     const feat = (state.draft && state.draft.kind === features[selIndex].kind) ? state.draft : features[selIndex];
     const zone = feat.zone;
     if (feat.kind === "nest" && feat.contour) {
-      if (hitNestContourPoint(feat, world) !== null) return selIndex;
+      if (isNestEditWorkspaceActive() && hitNestContourPoint(feat, world) !== null) return selIndex;
       if (state.layoutTransform) {
         const cx = (zone[0] + zone[2]) / 2;
         const handles = [[zone[2], zone[1]], [cx, zone[3] + 8]];
@@ -10104,7 +10192,8 @@ function hitFeature(world) {
           (world[1] - point[1]) * state.layoutTransform.scale,
         ) < 14)) return selIndex;
       }
-      if (pointInPolygon(world, nestOutlineWorld(feat, state.preview?.nest_soft_contours?.[selIndex]))) return selIndex;
+      if (nestOccurrenceOutlines(feat, state.preview?.nest_soft_contours?.[selIndex],
+          state.preview?.nest_occurrences?.[selIndex]).some(outline => pointInPolygon(world, outline))) return selIndex;
     } else {
       const pad = feat.kind === "text" ? 3.0 : 0;
       if (world[0] >= zone[0] - pad && world[0] <= zone[2] + pad &&
@@ -10119,7 +10208,8 @@ function hitFeature(world) {
     const feat = features[index];
     const zone = feat.zone;
     if (feat.kind === "nest" && feat.contour) {
-      if (pointInPolygon(world, nestOutlineWorld(feat, state.preview?.nest_soft_contours?.[index]))) return index;
+      if (nestOccurrenceOutlines(feat, state.preview?.nest_soft_contours?.[index],
+          state.preview?.nest_occurrences?.[index]).some(outline => pointInPolygon(world, outline))) return index;
       continue;
     }
     const pad = feat.kind === "text" ? 3.0 : 0;
@@ -10365,7 +10455,8 @@ function wireLayoutInteraction() {
     const rotatePixels = Math.hypot((world[0] - rotatePoint[0]) * state.layoutTransform.scale, (world[1] - rotatePoint[1]) * state.layoutTransform.scale);
     const centre = [(zone[0] + zone[2]) / 2, (zone[1] + zone[3]) / 2];
     const resizable = Boolean(partInfo(feature.kind)?.flags?.size || feature.kind === "nest");
-    const contourPoint = feature.kind === "nest" ? hitNestContourPoint(feature, world) : null;
+    const contourPoint = feature.kind === "nest" && isNestEditWorkspaceActive()
+      ? hitNestContourPoint(feature, world) : null;
     state.layoutDrag = {
       index, feature, original: clone(feature),
       mode: contourPoint !== null ? "point"
@@ -10425,7 +10516,8 @@ function wireLayoutInteraction() {
       drag.feature.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
     } else if (drag.feature.kind === "nest" && drag.mode === "rotate") {
       const angle = Math.atan2(world[1] - drag.centre[1], world[0] - drag.centre[0]);
-      drag.feature.rotation = Math.round(number(drag.original.rotation) + (angle - drag.startAngle) * 180 / Math.PI);
+      const raw = number(drag.original.rotation) + (angle - drag.startAngle) * 180 / Math.PI;
+      drag.feature.rotation = ((Math.round(raw / 90) * 90) % 360 + 360) % 360;
     } else if (drag.feature.kind === "nest") {
       const radius = Math.hypot(world[0] - drag.centre[0], world[1] - drag.centre[1]);
       drag.feature.scale = Math.max(.1, number(drag.original.scale, 1) * radius / drag.startRadius);

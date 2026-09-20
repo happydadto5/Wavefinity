@@ -2267,7 +2267,7 @@ def default_feature(
         item=item,
         # A cradle, like a post, starts as a single holder - Quantity "auto"
         # then fills the zone with lanes only when the user asks for it.
-        count=3 if kind == "steps" else (1 if kind in {"post", "cradle", "slot"} else None),
+        count=3 if kind == "steps" else (1 if kind in {"post", "cradle", "slot", "nest"} else None),
         along=along,
         options=feature_options,
         full_span=(kind == "divider"),

@@ -193,8 +193,8 @@ class Feature:
             raise ValueError("feature count must be positive or automatic")
         if self.full_span and self.kind != "divider":
             raise ValueError("only a divider can span the full wall")
-        if self.alternate_ends and self.kind != "cradle":
-            raise ValueError("only a cradle can alternate item ends")
+        if self.alternate_ends and self.kind not in {"cradle", "nest"}:
+            raise ValueError("only a cradle or Photo Nest can alternate item ends")
         if not math.isfinite(self.rotation):
             raise ValueError("feature rotation must be finite")
         if not math.isfinite(self.scale) or self.scale <= 0.0:

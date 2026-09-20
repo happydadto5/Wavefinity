@@ -48,6 +48,18 @@ NEST_PUSH_DEPTH = 4.0
 NEST_ASSISTS = {"auto", "none", "finger_grasp", "push_out"}
 NEST_FINGER_POSITIONS = {"sides", "top_bottom", "both"}
 NEST_PUSH_POSITIONS = {"left", "right", "top", "bottom"}
+NEST_REPEAT_AUTO_GAP = 2.0
+NEST_REPEAT_SPACING_CHOICES = frozenset({-100, -75, -50, -25, 0, 25, 50, 75, 100})
+NEST_REPEAT_MAX = 20
+
+
+@dataclass(frozen=True)
+class NestOccurrence:
+    """One derived copy of a saved Photo Nest group."""
+    index: int
+    x: float
+    y: float
+    rotation: float
 
 
 def _softened_outline(outline: Polygon, smoothing: float) -> Polygon:
@@ -110,6 +122,13 @@ def nest_contour_polygon(one: Feature, include_clearance: bool = False) -> Polyg
     outline = affinity.rotate(outline, one.rotation, origin=(0, 0), use_radians=False)
     cx, cy = one.zone.centre
     return affinity.translate(outline, xoff=cx, yoff=cy)
+
+
+def _nest_occurrence_opening(one: Feature, occurrence: NestOccurrence) -> Polygon:
+    """One softened, scaled opening at its derived world transform."""
+    opening = _nest_local_polygon(one, include_clearance=True)
+    opening = affinity.rotate(opening, occurrence.rotation, origin=(0, 0), use_radians=False)
+    return affinity.translate(opening, xoff=occurrence.x, yoff=occurrence.y)
 
 
 # --- option resolution (works from the raw stored options alone, no BoxSpec
@@ -236,6 +255,33 @@ def _raised_wall_outer_foot(wall_height: float) -> float:
     thin Raised Wall does not need (or have room for) a 2 mm buttress."""
     target = min(NEST_OUTER_FOOT_MAX, max(NEST_OUTER_FOOT_MIN, 0.35 * wall_height))
     return min(target, wall_height)
+
+
+def nest_quantity(one: Feature) -> int:
+    quantity = 1 if one.count is None else int(one.count)
+    if quantity < 1 or quantity > NEST_REPEAT_MAX:
+        raise ValueError("Photo Nest Quantity must be between 1 and 20")
+    return quantity
+
+
+def nest_repeat_spacing_percent(one: Feature) -> int:
+    raw = one.options.get("repeat_spacing_percent", 0)
+    try:
+        number = float(raw)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Photo Nest spacing must be a whole-number preset") from error
+    if not math.isfinite(number) or abs(number - round(number)) > 1e-9:
+        raise ValueError("Photo Nest spacing must be a whole-number preset")
+    value = int(round(number))
+    if value not in NEST_REPEAT_SPACING_CHOICES:
+        raise ValueError(
+            "Photo Nest spacing must be Minimum, -75%, -50%, -25%, Auto, +25%, +50%, +75%, or +100%"
+        )
+    return value
+
+
+def nest_repeat_gap(one: Feature) -> float:
+    return NEST_REPEAT_AUTO_GAP * (1.0 + nest_repeat_spacing_percent(one) / 100.0)
 
 
 # --- the one authoritative Nest access planner --------------------------------
@@ -516,13 +562,12 @@ def nest_access_preview(one: Feature) -> dict | None:
     holder_style = _resolved_holder_style(one)
     legacy = _is_legacy_nest(one)
     assist, locations, width = _resolved_finger_settings(one)
-    radians = math.radians(one.rotation)
-    cos_r, sin_r = math.cos(radians), math.sin(radians)
-    cx, cy = one.zone.centre
-
-    def to_world(local_points: list[tuple[float, float]]) -> list[dict]:
+    def to_world(local_points: list[tuple[float, float]], occurrence: NestOccurrence) -> list[dict]:
+        radians = math.radians(occurrence.rotation)
+        cos_r, sin_r = math.cos(radians), math.sin(radians)
         return [
-            {"x": x * cos_r - y * sin_r + cx, "y": x * sin_r + y * cos_r + cy}
+            {"x": x * cos_r - y * sin_r + occurrence.x,
+             "y": x * sin_r + y * cos_r + occurrence.y}
             for x, y in local_points
         ]
 
@@ -547,7 +592,8 @@ def nest_access_preview(one: Feature) -> dict | None:
                 "style": "finger_grasp" if local_points else "none",
                 "holder_style": holder_style,
                 "width": width if width is not None else NEST_FINGER_WIDTH,
-                "points": to_world(local_points),
+                "points": [point for occurrence in nest_occurrences(one)
+                           for point in to_world(local_points, occurrence)],
                 "warning": None,
             }
 
@@ -557,7 +603,8 @@ def nest_access_preview(one: Feature) -> dict | None:
         "style": plan.style,
         "holder_style": holder_style,
         "width": plan.width,
-        "points": to_world([point.position for point in plan.points]),
+        "points": [point for occurrence in nest_occurrences(one)
+                   for point in to_world([point.position for point in plan.points], occurrence)],
         "warning": plan.warning,
     }
 
@@ -574,6 +621,66 @@ def _raised_wall_height_for_sizing(one: Feature) -> float:
     return tool_thickness + push_depth
 
 
+def _nest_single_required_footprint(one: Feature, rotation: float) -> Polygon:
+    """The exact local finished-holder envelope before group placement."""
+    rim = float(one.options.get("rim", 3.0))
+    if not math.isfinite(rim) or rim <= 0.0:
+        raise ValueError("Outline wall must be greater than zero")
+    local_cleared = _nest_local_polygon(one, include_clearance=True)
+    if _resolved_holder_style(one) == "recessed":
+        assist, locations, width = _resolved_finger_settings(one)
+        plan = resolve_nest_access_plan(local_cleared, _nest_access_mode(assist), locations, width)
+        footprint = unary_union([local_cleared, plan.footprint]) if (
+            plan.style == "finger_grasp" and not plan.footprint.is_empty
+        ) else local_cleared
+        outer = footprint.buffer(rim, join_style="round")
+    else:
+        outer_foot = LEGACY_NEST_CHAMFER if _is_legacy_nest(one) else _raised_wall_outer_foot(
+            _raised_wall_height_for_sizing(one)
+        )
+        outer = local_cleared.buffer(rim, join_style="round").buffer(outer_foot, join_style="round")
+    return affinity.rotate(outer, rotation, origin=(0, 0), use_radians=False)
+
+
+def nest_occurrences(one: Feature) -> tuple[NestOccurrence, ...]:
+    """Derive one straight row while retaining safe finished-envelope gaps."""
+    quantity = nest_quantity(one)
+    base_rotation = float(one.rotation)
+    base = _nest_single_required_footprint(one, base_rotation)
+    min_x, min_y, max_x, max_y = base.bounds
+    axis_x = (max_x - min_x) <= (max_y - min_y)
+    gap = nest_repeat_gap(one)
+    raw: list[tuple[int, float, float, float, Polygon]] = []
+    previous = None
+    for index in range(quantity):
+        rotation = (base_rotation + (180.0 if one.alternate_ends and index % 2 else 0.0)) % 360.0
+        footprint = _nest_single_required_footprint(one, rotation)
+        lo_x, lo_y, hi_x, hi_y = footprint.bounds
+        if previous is None:
+            x = y = 0.0
+        elif axis_x:
+            x = previous[1] + previous[4].bounds[2] - lo_x + gap
+            y = 0.0
+        else:
+            x = 0.0
+            y = previous[2] + previous[4].bounds[3] - lo_y + gap
+        raw.append((index, x, y, rotation, footprint))
+        previous = raw[-1]
+    joined = unary_union([affinity.translate(footprint, xoff=x, yoff=y)
+                          for _index, x, y, _rotation, footprint in raw])
+    lo_x, lo_y, hi_x, hi_y = joined.bounds
+    correction_x, correction_y = -(lo_x + hi_x) / 2.0, -(lo_y + hi_y) / 2.0
+    cx, cy = one.zone.centre
+    return tuple(NestOccurrence(index, x + correction_x + cx, y + correction_y + cy, rotation)
+                 for index, x, y, rotation, _footprint in raw)
+
+
+def nest_occurrence_preview(one: Feature) -> list[dict[str, float]]:
+    return [{"index": occurrence.index, "x": round(occurrence.x, 6),
+             "y": round(occurrence.y, 6), "rotation": round(occurrence.rotation, 6)}
+            for occurrence in nest_occurrences(one)]
+
+
 def nest_required_zone(one: Feature) -> Zone:
     """Tight axis-aligned footprint enclosing the finished holder.
 
@@ -583,30 +690,11 @@ def nest_required_zone(one: Feature) -> Zone:
     scoops, since a scoop can reach past the plain contour, buffered by the
     structural rim.
     """
-    rim = float(one.options.get("rim", 3.0))
-    if not math.isfinite(rim) or rim <= 0.0:
-        raise ValueError("Outline wall must be greater than zero")
-    holder_style = _resolved_holder_style(one)
-    if holder_style == "recessed":
-        local_cleared = _nest_local_polygon(one, include_clearance=True)
-        assist, locations, width = _resolved_finger_settings(one)
-        plan = resolve_nest_access_plan(local_cleared, _nest_access_mode(assist), locations, width)
-        local_footprint = (
-            unary_union([local_cleared, plan.footprint])
-            if plan.style == "finger_grasp" and not plan.footprint.is_empty
-            else local_cleared
-        )
-        footprint = affinity.rotate(local_footprint, one.rotation, origin=(0, 0), use_radians=False)
-        cx, cy = one.zone.centre
-        footprint = affinity.translate(footprint, xoff=cx, yoff=cy)
-        outer = footprint.buffer(rim, join_style="round")
-    else:
-        cavity = nest_contour_polygon(one, include_clearance=True)
-        if _is_legacy_nest(one):
-            outer_foot = LEGACY_NEST_CHAMFER
-        else:
-            outer_foot = _raised_wall_outer_foot(_raised_wall_height_for_sizing(one))
-        outer = cavity.buffer(rim, join_style="round").buffer(outer_foot, join_style="round")
+    outer = unary_union([
+        affinity.translate(_nest_single_required_footprint(one, occurrence.rotation),
+                           xoff=occurrence.x, yoff=occurrence.y)
+        for occurrence in nest_occurrences(one)
+    ])
     min_x, min_y, max_x, max_y = outer.bounds
     return Zone(float(min_x), float(min_y), float(max_x), float(max_y))
 
@@ -651,6 +739,7 @@ def nest_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, obje
         # third state distinct from True/False, so it is passed straight
         # through rather than defaulted to either.
         "auto_size": one.options.get("auto_size", None),
+        "repeat_spacing_percent": nest_repeat_spacing_percent(one),
         "lift_assist": assist,
         "finger_position": locations,
         "finger_width": width if width is not None else auto_width,
@@ -1037,6 +1126,7 @@ def _nest_finger_scoops(
         OptionDefinition("Cavity depth", "cavity_depth", "", editor=False),
         OptionDefinition("Cavity depth mode", "cavity_depth_mode", "auto", "enum", False),
         OptionDefinition("Automatic footprint sizing", "auto_size", True, "boolean", False),
+        OptionDefinition("Repeat spacing", "repeat_spacing_percent", 0, "integer", False),
         OptionDefinition("Finger access", "lift_assist", "auto", "enum", False),
         OptionDefinition("Finger locations", "finger_position", "sides", "enum", False),
         OptionDefinition("Finger width", "finger_width", "25", editor=False),
@@ -1108,18 +1198,8 @@ def build_nest(
                 f"Cavity depth {cavity_depth:g} mm must fit within {available:.1f} mm "
                 f"above the printable floor"
             )
-        plan = resolve_nest_access_plan(
-            local_opening, _nest_access_mode(assist), finger_position, finger_width,
-        )
         physical_deck = deck_footprint if deck_footprint is not None else spec_feature.zone.polygon
-        deck = _nest_recessed_deck(physical_deck, cavity_depth, base_z)
-        cutter = _nest_recessed_cavity_cutter(world_opening, cavity_depth, base_z)
-        deck = difference([deck, cutter])
-        if plan.style == "finger_grasp":
-            scoops = _nest_finger_scoops(plan.points, plan.width / 2.0, base_z + cavity_depth)
-            scoops = [_nest_transform_mesh(scoop, spec_feature) for scoop in scoops]
-            deck = difference([deck, union(scoops)])
-        return [deck]
+        return [build_recessed_nest_group(box, (spec_feature,), base_z, physical_deck)]
 
     # Raised Wall. A design saved before holder_style existed keeps its exact
     # old wall (fixed foot, shared top round) and old finger-cutout placement
@@ -1167,10 +1247,84 @@ def build_nest(
                 for point in plan.points
             ]
             wall = difference([wall, union(cutters)])
-    return [wall]
+    # Quantity uses the same holder geometry at every derived transform. The
+    # first pass above retains the exact legacy geometry for Quantity 1.
+    occurrences = nest_occurrences(spec_feature)
+    if len(occurrences) == 1:
+        return [wall]
+    solids = []
+    for occurrence in occurrences:
+        temporary = replace(
+            spec_feature,
+            rotation=occurrence.rotation,
+            zone=Zone(occurrence.x - 0.5, occurrence.y - 0.5,
+                      occurrence.x + 0.5, occurrence.y + 0.5),
+            count=1,
+            alternate_ends=False,
+        )
+        # Re-enter with a one-copy temporary only; this is intentionally not
+        # a recursive group build and preserves all existing wall paths.
+        solids.extend(build_nest(box, temporary, base_z, deck_footprint=deck_footprint))
+    return solids
+
+
+def build_recessed_nest_group(
+    box: BoxSpec, features: tuple[Feature, ...] | list[Feature], base_z: float,
+    deck_footprint: Polygon,
+) -> trimesh.Trimesh:
+    """One physical deck for all recessed Photo Nest occurrences."""
+    recessed = tuple(features)
+    if not recessed:
+        raise ValueError("at least one Recessed Photo Nest is required")
+    resolved = []
+    for one in recessed:
+        require_measured_tool_thickness(one)
+        options = resolve_nest_settings(box, one, base_z)
+        if str(options["holder_style"]) != "recessed":
+            raise ValueError("shared Photo Nest deck requires Recessed Cavity holders")
+        depth = float(options["cavity_depth"])
+        if not math.isfinite(depth) or depth <= 0.0:
+            raise ValueError("Cavity depth must be greater than zero")
+        resolved.append((one, options, depth))
+    group_depth = max(depth for _one, _options, depth in resolved)
+    if group_depth > box.z - base_z + 1e-9:
+        raise ValueError(
+            f"Cavity depth {group_depth:g} mm must fit within {box.z - base_z:.1f} mm above the printable floor"
+        )
+    deck = _nest_recessed_deck(deck_footprint, group_depth, base_z)
+    cutters: list[trimesh.Trimesh] = []
+    scoops: list[trimesh.Trimesh] = []
+    for one, options, depth in resolved:
+        floor_raise = group_depth - depth
+        occurrence_base_z = base_z + floor_raise
+        local_opening = _nest_local_polygon(one, include_clearance=True)
+        assist = str(options["lift_assist"])
+        plan = resolve_nest_access_plan(
+            local_opening, _nest_access_mode(assist), str(options["finger_position"]),
+            float(options["finger_width"]),
+        )
+        for occurrence in nest_occurrences(one):
+            world_opening = _nest_occurrence_opening(one, occurrence)
+            cutters.append(_nest_recessed_cavity_cutter(world_opening, depth, occurrence_base_z))
+            if plan.style == "finger_grasp":
+                temporary = replace(one, rotation=occurrence.rotation,
+                                    zone=Zone(occurrence.x - .5, occurrence.y - .5,
+                                              occurrence.x + .5, occurrence.y + .5))
+                scoops.extend(_nest_transform_mesh(scoop, temporary) for scoop in
+                             _nest_finger_scoops(plan.points, plan.width / 2.0,
+                                                 base_z + group_depth))
+    return difference([deck, union(cutters + scoops)]) if cutters or scoops else deck
 
 
 register_setting_interactions("nest", (
+    SettingInteraction("count", "zone", "auto-adjust", "nest-repeat",
+                       "The repeated group footprint is recalculated."),
+    SettingInteraction("rotation", "zone", "auto-adjust", "nest-repeat",
+                       "The repeated group footprint is recalculated."),
+    SettingInteraction("alternate_ends", "zone", "auto-adjust", "nest-repeat",
+                       "The repeated group footprint is recalculated."),
+    SettingInteraction("repeat_spacing_percent", "zone", "auto-adjust", "nest-repeat",
+                       "The repeated group footprint is recalculated."),
     SettingInteraction("holder_style", "lift_assist", "auto-adjust", "nest",
                        "Switching to Recessed Cavity turns off Push Out and resolves "
                        "Automatic finger access instead."),

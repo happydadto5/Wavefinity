@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-20 — Photo Nest repeats
+
+- Photo Nest can make one straight row of 1–20 copies, with 90° orientation choices, optional end-for-end alternating copies, and safe spacing choices.
+- Duplicate makes an independent Photo Nest that can be moved, rotated, or replaced without scanning again.
+- Multiple recessed Photo Nests now share one deck while retaining each cavity's chosen depth.
+
 ## 2026-09-20 — Batch fixes: Spaces, Storage Box Dividers, materials, and UI polish
 
 - New local Spaces default to Documents/Wavefinity/<Space Name> and reject duplicate names.

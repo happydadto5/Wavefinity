@@ -83,6 +83,7 @@ from organizer_engine import (
     wavy_cavity_polygon,
 )
 from organizer_inserts import (
+    CARTRIDGE_PITCH,
     EDITOR_SNAP,
     MIN_FEATURE_GAP,
     Feature,
@@ -102,6 +103,8 @@ from organizer_inserts import (
     fitted_nest_feature,
     is_legacy_nest,
     nest_access_preview,
+    nest_occurrence_preview,
+    nest_quantity,
     nest_contour_polygon,
     nest_smoothed_contour,
     require_measured_tool_thickness,
@@ -549,6 +552,39 @@ def _sized_photo_nest_box(box: BoxSpec, one: Feature, mode: str) -> tuple[BoxSpe
     return _fit_photo_nest_box(box, one, mode), one
 
 
+def _auto_size_photo_nest_layout_box(box: BoxSpec, features: list[Feature], mode: str,
+                                     *, grow_only: bool = False) -> BoxSpec:
+    """Smallest grid box holding every independently placed Nest group."""
+    required_x = 2.0 * max(max(abs(one.zone.x0), abs(one.zone.x1)) for one in features)
+    required_y = 2.0 * max(max(abs(one.zone.y0), abs(one.zone.y1)) for one in features)
+    x = max(box.x if grow_only else BASE_UNIT, math.ceil(required_x / BASE_UNIT) * BASE_UNIT)
+    y = max(box.y if grow_only else BASE_UNIT, math.ceil(required_y / BASE_UNIT) * BASE_UNIT)
+    for _attempt in range(400):
+        trial = replace(box, x=float(x), y=float(y))
+        bounds = layout_zone(trial, mode)
+        if all(bounds.x0 - 1e-6 <= one.zone.x0 and one.zone.x1 <= bounds.x1 + 1e-6
+               and bounds.y0 - 1e-6 <= one.zone.y0 and one.zone.y1 <= bounds.y1 + 1e-6
+               for one in features):
+            break
+        if any(one.zone.x0 < bounds.x0 - 1e-6 or one.zone.x1 > bounds.x1 + 1e-6 for one in features):
+            x += BASE_UNIT
+        if any(one.zone.y0 < bounds.y0 - 1e-6 or one.zone.y1 > bounds.y1 + 1e-6 for one in features):
+            y += BASE_UNIT
+    else:
+        raise ValueError("the photographed outline is too large for a printable bin")
+    if not grow_only:
+        for axis in ("x", "y"):
+            while getattr(trial, axis) - BASE_UNIT >= BASE_UNIT:
+                candidate = replace(trial, **{axis: getattr(trial, axis) - BASE_UNIT})
+                bounds = layout_zone(candidate, mode)
+                if not all(bounds.x0 - 1e-6 <= one.zone.x0 and one.zone.x1 <= bounds.x1 + 1e-6
+                           and bounds.y0 - 1e-6 <= one.zone.y0 and one.zone.y1 <= bounds.y1 + 1e-6
+                           for one in features):
+                    break
+                trial = candidate
+    return trial
+
+
 def _resolve_photo_nest_edit(
     request_box: BoxSpec,
     layout: Layout,
@@ -556,19 +592,49 @@ def _resolve_photo_nest_edit(
     label: str,
     label_location: str,
     scoop: bool,
+    *,
+    index: int | None = None,
 ) -> tuple[BoxSpec, BoxSpec, Layout, Feature, list[str], list[Any]]:
     """Repair a live Nest edit before anything can reject stale dimensions."""
     if one.kind != "nest" or not one.contour:
         raise ValueError("upload a part photo before adding a Photo Nest")
+    if any(existing.kind != "nest" for existing in layout.features):
+        raise ValueError("Photo Nest designs can contain Photo Nests only.")
     one, warnings = clamp_nest_feature_options(one)
     box = _interior_work_box(request_box)
-    grown, one = _sized_photo_nest_box(box, one, layout.mode)
+    features = list(layout.features)
+    if index is None:
+        if features:
+            raise ValueError("Duplicate an existing Photo Nest first, then use Replace Photo on that copy.")
+        selected = 0
+        features.append(one)
+    else:
+        if not 0 <= index < len(features) or features[index].kind != "nest":
+            raise ValueError("the selected Photo Nest no longer exists")
+        selected = index
+        features[selected] = one
+    resolved = resolve_nest_settings(box, one, base_height(box, layout.mode))
+    recenter = len(features) == 1 and resolved.get("auto_size") is True
+    one = fitted_nest_feature(one, (0.0, 0.0) if recenter else one.zone.centre)
+    features[selected] = one
+    auto_size = resolved.get("auto_size")
+    if auto_size is True:
+        grown = _auto_size_photo_nest_layout_box(box, features, layout.mode)
+    elif auto_size is None:
+        grown = _auto_size_photo_nest_layout_box(box, features, layout.mode, grow_only=True)
+    else:
+        grown = box
+        bounds = layout_zone(box, layout.mode)
+        if not all(bounds.x0 - 1e-6 <= member.zone.x0 and member.zone.x1 <= bounds.x1 + 1e-6
+                   and bounds.y0 - 1e-6 <= member.zone.y0 and member.zone.y1 <= bounds.y1 + 1e-6
+                   for member in features):
+            raise ValueError("This Photo Nest no longer fits its bin. Turn Automatic footprint sizing back on or enlarge the bin.")
     request_box = replace(
         request_box, x=grown.x, y=grown.y,
         z=request_box.z + (grown.z - box.z),
     )
     box = _interior_work_box(request_box)
-    updated = Layout((one,), layout.mode, layout.snap)
+    updated = Layout(tuple(features), layout.mode, layout.snap)
     updated.validate(box)
     validate_customization_clearance(
         box, updated.features, label, label_location, scoop, updated.mode
@@ -651,9 +717,11 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
     source_raw = payload.get("source_contour", contour_raw)
     source_contour = tuple((float(point[0]), float(point[1])) for point in source_raw)
 
-    saved_existing = next(
-        (one for one in layout.features if one.kind == "nest" and one.contour), None
-    )
+    raw_index = payload.get("index")
+    index = int(raw_index) if raw_index is not None else None
+    if index is not None and not 0 <= index < len(layout.features):
+        raise ValueError("the selected Photo Nest no longer exists")
+    saved_existing = layout.features[index] if index is not None else None
     # Replace Photo: prefer the browser's own live draft over the last-saved
     # copy - a debounced auto-save may not have caught up with the newest
     # setting yet, and starting the photo operation must not lose it.
@@ -664,6 +732,8 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if candidate.kind == "nest" and candidate.contour:
             live_feature = candidate
     existing = live_feature if live_feature is not None else saved_existing
+    if index is None and layout.features:
+        raise ValueError("Duplicate an existing Photo Nest first, then use Replace Photo on that copy.")
 
     supplied = dict(payload.get("options", {}))
     if existing is None:
@@ -699,7 +769,7 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
             options["finger_width"] = float(supplied["finger_width"])
         starter = Feature(
             "nest", Zone(-0.5, -0.5, 0.5, 0.5), options=options,
-            contour=contour, source_contour=source_contour,
+            count=1, contour=contour, source_contour=source_contour,
         )
     else:
         # Replace Photo: change only the outline. Holder style, cavity
@@ -709,13 +779,13 @@ def photo_nest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         # (including shrinking a manually sized bin back to Auto).
         starter = replace(existing, contour=contour, source_contour=source_contour)
     request_box, _box, updated, one, nest_warnings, _solids = _resolve_photo_nest_edit(
-        request_box, layout, starter, label, label_location, scoop,
+        request_box, layout, starter, label, label_location, scoop, index=index,
     )
     return {
         "design": design_to_dict(
             request_box, updated, label, part_name, label_location, scoop,
         ),
-        "selected": 0,
+        "selected": index if index is not None else 0,
         "access": nest_access_preview(one),
         "warnings": nest_warnings,
     }
@@ -1753,6 +1823,14 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
             [list(point) for point in nest_smoothed_contour(draft)]
             if draft is not None and draft.kind == "nest" and draft.contour else None
         ),
+        "nest_occurrences": [
+            nest_occurrence_preview(one) if one.kind == "nest" and one.contour else None
+            for one in layout.features
+        ],
+        "draft_nest_occurrences": (
+            nest_occurrence_preview(draft)
+            if draft is not None and draft.kind == "nest" and draft.contour else None
+        ),
         # Informational-only 2D indicators for the resolved finger-access plan
         # - a notch location on Raised Wall, a scoop footprint on Recessed.
         "nest_access": [
@@ -1893,7 +1971,7 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     nest_solids = None
     if one.kind == "nest":
         request_box, box, _updated, one, _warnings, nest_solids = _resolve_photo_nest_edit(
-            request_box, layout, one, label, label_location, scoop,
+            request_box, layout, one, label, label_location, scoop, index=payload.get("index"),
         )
     if one.kind == "divider":
         one = normalize_divider_scoop(
@@ -2044,21 +2122,22 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         index = payload.get("index")
         if index is None:
             if existing:
-                raise ValueError("a Photo Nest is one custom cavity; start a new photo bin to replace these interior parts")
+                raise ValueError("Duplicate an existing Photo Nest first, then use Replace Photo on that copy.")
         else:
             selected = int(index)
             if not 0 <= selected < len(existing):
                 raise ValueError("the selected interior part no longer exists")
-            if len(existing) != 1:
-                raise ValueError("a Photo Nest design can contain only its one custom cavity")
+            if existing[selected].kind != "nest" or any(item.kind != "nest" for item in existing):
+                raise ValueError("Photo Nest designs can contain Photo Nests only.")
         request_box, _box, updated, one, nest_warnings, _solids = _resolve_photo_nest_edit(
             request_box, layout, one, label, label_location, scoop,
+            index=(int(index) if index is not None else None),
         )
         return {
             "design": design_to_dict(
                 request_box, updated, label, part_name, label_location, scoop,
             ),
-            "selected": 0,
+            "selected": (int(index) if index is not None else 0),
             "warnings": nest_warnings,
         }
     if one.kind == "text" and not one.options.get("auto"):
@@ -2080,7 +2159,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     index = payload.get("index")
     existing = list(layout.features)
     if any(item.kind == "nest" and item.contour for item in existing):
-        raise ValueError("a Photo Nest bin contains only its one custom cavity")
+        raise ValueError("Photo Nest designs can contain scanned Photo Nests only.")
     if index is None:
         one = _first_open_position(
             one, box, layout, label, label_location, scoop
@@ -2120,6 +2199,77 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "selected": selected,
         "warnings": [],
     }
+
+
+def duplicate_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Duplicate one completed Photo Nest as an independently editable group."""
+    request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
+    index = int(payload["index"])
+    features = list(layout.features)
+    if not 0 <= index < len(features) or features[index].kind != "nest" or not features[index].contour:
+        raise ValueError("the selected Photo Nest no longer exists")
+    if any(one.kind != "nest" for one in features):
+        raise ValueError("Photo Nest designs can contain Photo Nests only.")
+    box = _interior_work_box(request_box)
+    source = features[index]
+    clone = replace(source, options=dict(source.options))
+    w, d = clone.zone.width, clone.zone.depth
+    gap = MIN_FEATURE_GAP
+    sx, sy = source.zone.centre
+    candidates = [
+        (source.zone.x1 + gap + w / 2, sy), (sx, source.zone.y1 + gap + d / 2),
+        (source.zone.x0 - gap - w / 2, sy), (sx, source.zone.y0 - gap - d / 2),
+    ]
+    min_x = min(one.zone.x0 for one in features); max_x = max(one.zone.x1 for one in features)
+    min_y = min(one.zone.y0 for one in features); max_y = max(one.zone.y1 for one in features)
+    gcx, gcy = (min_x + max_x) / 2, (min_y + max_y) / 2
+    candidates += [(max_x + gap + w / 2, gcy), (gcx, max_y + gap + d / 2),
+                   (min_x - gap - w / 2, gcy), (gcx, min_y - gap - d / 2)]
+    # Also try every existing legal grid centre, nearest first, for Manual.
+    bounds = layout_zone(box, layout.mode)
+    pitch = CARTRIDGE_PITCH if layout.mode == "cartridge" else layout.snap
+    x = bounds.x0 + w / 2
+    while x <= bounds.x1 - w / 2 + 1e-9:
+        y = bounds.y0 + d / 2
+        while y <= bounds.y1 - d / 2 + 1e-9:
+            candidates.append((x, y)); y += pitch
+        x += pitch
+    unique: list[tuple[float, float]] = []
+    for candidate in candidates:
+        if candidate not in unique:
+            unique.append(candidate)
+    auto = resolve_nest_settings(box, clone, base_height(box, layout.mode)).get("auto_size")
+    choices = []
+    for order, (cx, cy) in enumerate(unique):
+        candidate = replace(clone, zone=Zone(cx - w / 2, cy - d / 2, cx + w / 2, cy + d / 2))
+        proposed = features + [candidate]
+        try:
+            prospective = (_auto_size_photo_nest_layout_box(box, proposed, layout.mode,
+                grow_only=(auto is None)) if auto is not False else box)
+            bounds = layout_zone(prospective, layout.mode)
+            if not all(bounds.x0 <= one.zone.x0 + 1e-6 and one.zone.x1 <= bounds.x1 + 1e-6
+                       and bounds.y0 <= one.zone.y0 + 1e-6 and one.zone.y1 <= bounds.y1 + 1e-6
+                       for one in proposed):
+                continue
+            updated = Layout(tuple(proposed), layout.mode, layout.snap)
+            updated.validate(prospective)
+            validate_customization_clearance(prospective, updated.features, label, label_location, scoop, updated.mode)
+        except ValueError:
+            continue
+        choices.append(((prospective.x * prospective.y, max(prospective.x, prospective.y),
+                         (cx - sx) ** 2 + (cy - sy) ** 2, order), prospective, updated))
+    if not choices:
+        if auto is False:
+            raise ValueError("No room to duplicate this Photo Nest. Turn Automatic footprint sizing on or enlarge the bin.")
+        raise ValueError("Could not find room for another copy of this Photo Nest.")
+    _score, grown, updated = min(choices, key=lambda choice: choice[0])
+    request_box = replace(request_box, x=grown.x, y=grown.y, z=request_box.z + (grown.z - box.z))
+    box = _interior_work_box(request_box)
+    with GEOMETRY_LOCK:
+        build_features(box, updated.features, base_height(box, updated.mode),
+                       layout_zone(box, updated.mode), updated.mode)
+    return {"design": design_to_dict(request_box, updated, label, part_name, label_location, scoop),
+            "selected": len(updated.features) - 1}
 
 
 def delete_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2754,6 +2904,7 @@ POST_ROUTES = {
     "/api/feature/draft": draft_payload,
     "/api/feature/fit": feature_fit_payload,
     "/api/feature/apply": apply_feature_payload,
+    "/api/feature/duplicate": duplicate_feature_payload,
     "/api/feature/delete": delete_feature_payload,
     "/api/nest/trace": nest_trace_payload,
     "/api/nest/photo": photo_nest_payload,
