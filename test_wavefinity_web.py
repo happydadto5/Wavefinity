@@ -1539,6 +1539,14 @@ class WebApplicationTests(unittest.TestCase):
         done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
         self.assertEqual(json.loads(done.stdout), [False, True, False, True, False, False])
 
+    def test_removed_modifiers_resync_form_and_square_axis_pitch(self):
+        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        body = source[source.index("async function removeModifier"):source.index("function commitEdgeMountFormBeforeSwitch")]
+        self.assertLess(body.index("clearDraftSelection();
+    // Forms"), body.index("syncForm();"))
+        bore = source[source.index("function sizeBoreToGrid"):]
+        self.assertIn('profile === "square_axis" ? held + wall', bore[:2500])
+
     def test_surface_outside_size_resolves_down_to_whole_units(self):
         node = self._node_or_skip()
         source = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")

@@ -3697,6 +3697,9 @@ async function removeModifier(kind) {
     recordHistory(previous);
     state.paletteBrowsing = true;
     clearDraftSelection();
+    // Forms must match the validated design before any later form read, or a
+    // stale handle/opening control would silently re-add the deleted option.
+    syncForm();
     renderPlaced();
     await refreshPreview();
     toast(`${partInfo(kind)?.title || "Option"} deleted.`);
@@ -5625,7 +5628,8 @@ function sizeBoreToGrid(one) {
   const wall = opts.wall !== undefined ? number(opts.wall) : (angle > 0 ? 3 : 1.6);
   const sides = profile === "round" ? 48 : profile === "square" ? 4 : 6;
   const holeRadius = held / 2 / (sides < 8 ? Math.cos(Math.PI / sides) : 1);
-  const crossPitch = 2 * holeRadius + wall;
+  // Axis-aligned square holes pitch at held + wall (engine: bore_minimum_pitches).
+  const crossPitch = profile === "square_axis" ? held + wall : 2 * holeRadius + wall;
   const leanPitch = crossPitch / Math.cos(angle * Math.PI / 180);
   if (!(crossPitch > 0) || !(leanPitch > 0)) return;
 

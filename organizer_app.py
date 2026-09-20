@@ -91,6 +91,7 @@ from organizer_edge_mount import (
     edge_mount_text_object,
 )
 from organizer_side_openings import (
+    SIDE_OPENING_TOP_BRIDGE_MM,
     apply_side_openings,
     side_opening_summary,
     validate_side_openings,
@@ -2502,6 +2503,7 @@ def design_from_dict(
         )
     side_openings_raw = raw.get("side_openings")
     side_openings = SideOpeningSpec()
+    legacy_top_support = False
     if isinstance(side_openings_raw, dict) and bool(side_openings_raw.get("enabled", False)):
         raw_sides = side_openings_raw.get("sides", ())
         if not isinstance(raw_sides, (list, tuple)):
@@ -2509,22 +2511,23 @@ def design_from_dict(
         from_bottom = float(side_openings_raw.get(
             "from_bottom_percent", side_openings_raw.get("depth_percent", 100.0)
         ))
-        if "from_top_percent" in side_openings_raw:
-            from_top = float(side_openings_raw["from_top_percent"])
-        elif bool(side_openings_raw.get("top_support", False)):
-            usable_h = float(raw["z"]) - float(
-                raw.get("base_thickness", raw.get("wall", DEFAULT_WALL))
-            )
-            from_top = 100.0 * (usable_h - SIDE_OPENING_TOP_BRIDGE_MM) / usable_h
-        else:
-            from_top = 100.0
+        explicit_from_top = (
+            float(side_openings_raw["from_top_percent"])
+            if "from_top_percent" in side_openings_raw else None
+        )
+        legacy_top_support = (
+            explicit_from_top is None
+            and bool(side_openings_raw.get("top_support", False))
+        )
+        # Legacy Top Support is a physical 4 mm bridge, so its percentage is
+        # derived below from the final normalised box, never from raw JSON.
         side_openings = SideOpeningSpec(
             enabled=True,
             shape=str(side_openings_raw.get("shape", "curved")),
             sides=tuple(str(side) for side in raw_sides),
             size=str(side_openings_raw.get("size", "medium")),
             from_bottom_percent=from_bottom,
-            from_top_percent=from_top,
+            from_top_percent=100.0 if explicit_from_top is None else explicit_from_top,
         )
     b4b_raw = raw.get("b4b")
     b4b = B4BSpec()
@@ -2610,6 +2613,14 @@ def design_from_dict(
         side_openings=side_openings,
     )
     box = normalize_stack_settings(box)
+    if legacy_top_support:
+        usable_h = box.z - box.base_thickness
+        if not usable_h > 0:
+            raise ValueError("side openings need usable wall height above the base")
+        from_top = 100.0 * (usable_h - SIDE_OPENING_TOP_BRIDGE_MM) / usable_h
+        box = replace(box, side_openings=replace(
+            box.side_openings, from_top_percent=from_top,
+        ))
     if not b4b.enabled:
         # Authoritative even for saved/imported JSON: an impossible Side
         # Opening combination must fail loudly at load time, never load
