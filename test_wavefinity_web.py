@@ -2012,6 +2012,263 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
             spaces_js,
         )
 
+    # ------------------------------------------------------------ Fix 019
+
+    def test_space_activation_resets_design_session_state(self):
+        # Item 1/5: one authoritative activation path resets every session-
+        # only Current-design/editor/Surface-first-run flag before installing
+        # the new Space's starter design - and applyFolder always routes a
+        # typed-Space activation through it.
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        reset = spaces_js[spaces_js.index("SP.resetDesignSession = () => {"):]
+        reset = reset[:reset.index("\n};\n")]
+        for flag in (
+            "state.workingPending = false", "state.workingGeneratedKey = null",
+            "state.surfaceEdgeHandled = false", "state.baseTrimSourceLayout = null",
+            "state.lastOrdinaryDesign = null", "state.lastBaseTrimDesign = null",
+            "state.drafts = {}", "state.history = []", "state.future = []",
+            "resetNestPhotoSession()", "clearDraftSelection()",
+        ):
+            self.assertIn(flag, reset)
+
+        init = spaces_js[spaces_js.index("SP.initializeDesignForActiveSpace = async () => {"):]
+        init = init[:init.index("\n};\n")]
+        self.assertIn("SP.resetDesignSession();", init)
+        self.assertIn("SP.installSpaceStarterDesign(state.activeSpace);", init)
+        # Opening/switching alone must never mark the starter as pending.
+        self.assertNotIn("markWorkingDesignPending", init)
+
+        apply_folder = spaces_js[spaces_js.index("SP.applyFolder = async"):]
+        apply_folder = apply_folder[:apply_folder.index("\n};\n")]
+        self.assertIn(
+            'if (initDesign && info.folder_mode === "space") await SP.initializeDesignForActiveSpace();',
+            apply_folder,
+        )
+
+    def test_starter_design_matches_space_kind(self):
+        # Item 1.4: Drawer -> fresh ordinary Bin, Surface -> Base Trim
+        # starter, Portable Storage (incl. legacy "box") -> Storage Box/B4B.
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        installer = spaces_js[spaces_js.index("SP.installSpaceStarterDesign = async"):]
+        installer = installer[:installer.index("\n};\n")]
+        self.assertIn('space.kind === "surface"', installer)
+        self.assertIn("makeBaseTrimDesign(space.x, space.y)", installer)
+        self.assertIn('space.kind === "portable" || space.kind === "box"', installer)
+        self.assertIn("await toggleB4B(true);", installer)
+        self.assertIn("state.design = freshDesignForCurrentFolder();", installer)
+
+    def test_safe_drawer_switch_never_silently_saves_or_loses_work(self):
+        # Item 2: Autosave ON aborts the switch (keeping DL.layout/DL.dirty)
+        # on a failed flush; Autosave OFF always goes through the explicit
+        # three-way Save & Switch / Discard & Switch / Cancel dialog, never
+        # window.confirm().
+        node = self._node_or_skip()
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        leave = spaces_js[spaces_js.index("SP.leaveDrawerLayoutSafely = async () => {"):]
+        leave = leave[:leave.index("SP.resetDrawer = async")]
+        self.assertNotIn("window.confirm(", leave)
+        self.assertNotIn(" confirm(", leave)
+        self.assertIn("appConfirmSaveDiscardCancel", leave)
+
+        script = "\n".join([
+            "const SP = {};",
+            "let saveResult = true, choiceResult = 'cancel';",
+            "const toast = () => {};",
+            "const appConfirmSaveDiscardCancel = async () => choiceResult;",
+            "const DL = { dirty: true, layout: { settings: { autosave: true } }, output: 'x',"
+            " saveError: 'boom', save: async () => saveResult };",
+            leave,
+            "(async () => {",
+            "  const out = {};",
+            "  out.autosaveOnSuccess = await SP.leaveDrawerLayoutSafely();",
+            "  saveResult = false;",
+            "  out.autosaveOnFailure = await SP.leaveDrawerLayoutSafely();",
+            "  DL.dirty = true;",
+            "  DL.layout.settings.autosave = false;",
+            "  choiceResult = 'cancel';",
+            "  out.manualCancel = await SP.leaveDrawerLayoutSafely();",
+            "  choiceResult = 'discard';",
+            "  out.manualDiscard = await SP.leaveDrawerLayoutSafely();",
+            "  choiceResult = 'save'; saveResult = true;",
+            "  out.manualSave = await SP.leaveDrawerLayoutSafely();",
+            "  choiceResult = 'save'; saveResult = false;",
+            "  out.manualSaveFails = await SP.leaveDrawerLayoutSafely();",
+            "  process.stdout.write(JSON.stringify(out));",
+            "})();",
+        ])
+        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        out = json.loads(done.stdout)
+        self.assertTrue(out["autosaveOnSuccess"])
+        self.assertFalse(out["autosaveOnFailure"])
+        self.assertFalse(out["manualCancel"])
+        self.assertTrue(out["manualDiscard"])
+        self.assertTrue(out["manualSave"])
+        self.assertFalse(out["manualSaveFails"])
+
+    def test_drawer_save_reports_success_or_failure(self):
+        # Item 2's implementation detail: DL.save() must let callers know
+        # whether persistence actually succeeded.
+        node = self._node_or_skip()
+        model = Path(__file__).resolve().parent / "web" / "drawer-model.js"
+        script = """
+const vm = require("vm"), fs = require("fs");
+let shouldFail = false;
+const ctx = {
+  debounce: f => f, console, Math, JSON, Number, Set, Map, setTimeout, clearTimeout,
+  state: { runtime: { hosted: false }, output: "out" },
+  toast: () => {},
+  api: async () => { if (shouldFail) throw new Error("boom"); return {}; },
+};
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + " ;this.DL = DL;", ctx);
+const DL = ctx.DL;
+DL.emit = () => {};
+DL.output = "out";
+DL.layout = { settings: {} };
+DL.dirty = true;
+(async () => {
+  const out = {};
+  out.successReturn = await DL.save();
+  out.dirtyAfterSuccess = DL.dirty;
+  DL.dirty = true;
+  shouldFail = true;
+  out.failureReturn = await DL.save();
+  out.dirtyAfterFailure = DL.dirty;
+  console.log(JSON.stringify(out));
+})();
+"""
+        result = subprocess.run([node, "-e", script, str(model)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertTrue(out["successReturn"])
+        self.assertFalse(out["dirtyAfterSuccess"])
+        self.assertFalse(out["failureReturn"])
+        self.assertTrue(out["dirtyAfterFailure"])  # a failed save never clears dirty
+
+    def test_hosted_drawer_actions_stay_disabled_every_render(self):
+        # Item 3: hosted capability is part of the normal render-state
+        # calculation (DP.renderStats), not only a one-time DP.build() patch,
+        # and covers all four backend-rejected actions including Print
+        # Drawer (All).
+        root = Path(__file__).resolve().parent / "web"
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        stats = panel[panel.index("DP.renderStats = () => {"):]
+        stats = stats[:stats.index("\nDP.renderOpenSpaces")]
+        self.assertIn("const hosted = Boolean(state.runtime.hosted);", stats)
+        for selector in ('"#dl-sp-plan"', '"#dl-sp-generate"', '"#dl-sp-print"', '"#dl-print"'):
+            self.assertIn(selector, stats)
+        self.assertIn("if (hosted) {", stats)
+        self.assertIn("DP.HOSTED_UNSUPPORTED_TOOLTIP", panel)
+
+    def test_generate_selected_spacers_disabled_without_a_selected_plan(self):
+        # Item 4: never an enabled silent no-op - needs a current plan AND a
+        # selected candidate, not merely "not busy and something is placed".
+        root = Path(__file__).resolve().parent / "web"
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        stats = panel[panel.index("DP.renderStats = () => {"):]
+        stats = stats[:stats.index("\nDP.renderOpenSpaces")]
+        self.assertIn("const hasPlan = Boolean(DL.spacerPlan);", stats)
+        self.assertIn("DL.spacerSelected && DL.spacerSelected.size > 0", stats)
+        self.assertIn('"Plan spacers first."', stats)
+        self.assertIn('"Select at least one planned spacer."', stats)
+
+    def test_startup_errors_reach_welcome_with_visible_text(self):
+        # Item 6: a real metadata/identity/read exception must show up on
+        # Welcome, not be silently swallowed into an ordinary-looking screen.
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        index_html = (root / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="welcome-startup-error"', index_html)
+        show_home = spaces_js[spaces_js.index("SP.showHome = (message"):]
+        show_home = show_home[:show_home.index("\n};\n")]
+        self.assertIn("welcome-startup-error", show_home)
+        launch = spaces_js[spaces_js.index("SP.launch = async () => {"):]
+        launch = launch[:launch.index("\nSP.wire = ")]
+        self.assertIn("SP.showHome(error.message)", launch)
+        # The quiet, expected non-error paths (no remembered folder /
+        # permission not granted) still fall back with no message.
+        self.assertIn("if (!hasPermission) { SP.showHome(); return; }", launch)
+
+    def test_connector_action_labels_match_bundle(self):
+        # Item 7: same height -> "Generate Connectors"/"Generate Bin and
+        # Connectors"; different heights -> "Generate Side Connector"/
+        # "Generate Bin and Side Connector" - synced on height-mode change
+        # and during normal syncForm(), not fixed at first render.
+        root = Path(__file__).resolve().parent / "web"
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+        labels = app_js[app_js.index("function syncConnectorActionLabels() {"):]
+        labels = labels[:labels.index("\n}\n")]
+        self.assertIn('"Generate Bin and Side Connector"', labels)
+        self.assertIn('"Generate Bin and Connectors"', labels)
+        self.assertIn('"Generate Side Connector"', labels)
+        self.assertIn('"Generate Connectors"', labels)
+        self.assertIn("syncConnectorActionLabels();", app_js[app_js.index("function syncConnectorHeightControls"):])
+        self.assertIn("syncConnectorActionLabels();", app_js[app_js.index("function syncConnectorSectionVisibility"):])
+
+    def test_native_confirms_replaced_with_app_dialog(self):
+        # Item 8: the five listed native confirm() sites are gone; the
+        # reusable dialog helper (and the three-way Save/Discard/Cancel
+        # variant Item 2 needs) exist instead.
+        root = Path(__file__).resolve().parent / "web"
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        index_html = (root / "index.html").read_text(encoding="utf-8")
+
+        open_design = app_js[app_js.index("async function openDesign("):app_js.index("async function newDesign(")]
+        self.assertNotIn("window.confirm(", open_design)
+        new_design = app_js[app_js.index("async function newDesign("):]
+        new_design = new_design[:new_design.index("\nlet isGenerating")]
+        self.assertNotIn("window.confirm(", new_design)
+
+        self.assertNotIn("confirm(`Delete ${drawer.name}", panel)
+        self.assertNotIn("confirm(`Remove ${DL.label(one)}", panel)
+        self.assertIn("appConfirmAction({", panel)
+
+        show_folder = spaces_js[spaces_js.index("SP.showFolder = async"):]
+        show_folder = show_folder[:show_folder.index("\n};\n")]
+        self.assertNotIn("confirm(", show_folder)
+        self.assertIn("appConfirmAction({", show_folder)
+
+        self.assertIn('id="app-confirm-dialog"', index_html)
+        self.assertIn("function appConfirm(", app_js)
+        self.assertIn("function appConfirmSaveDiscardCancel(", app_js)
+
+    def test_native_confirms_replaced_regressions_leave_class_confirms_alone(self):
+        # Sanity check that the sweep did not touch confirm() usage outside
+        # the five listed sites (e.g. the unrelated B4B interior-parts
+        # confirm stays a plain window.confirm(), out of Item 8's scope).
+        root = Path(__file__).resolve().parent / "web"
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+        self.assertIn("Turning on Storage Box clears the interior parts", app_js)
+
+    def test_primary_bin_y_axis_reads_depth(self):
+        # Item 9B: the main bin/Space Y axis is "Depth", not "Length" -
+        # part-specific Length fields (Base width/length, slot/screw/label
+        # length) are untouched.
+        root = Path(__file__).resolve().parent / "web"
+        index_html = (root / "index.html").read_text(encoding="utf-8")
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+        self.assertIn('<span id="y-size-label">Depth</span>', index_html)
+        self.assertIn('yLabel.textContent = on ? "Depth (Inside)" : "Depth";', app_js)
+        # Untouched part-specific Length fields.
+        self.assertIn('field("Length", "item_length"', app_js)
+        self.assertIn('autoField("Length", "base", "depth", "mm")', app_js)
+
+    def test_responsive_workspace_height_is_viewport_aware(self):
+        # Item 9A: no more hard-coded 720px on every <=980px viewport - a
+        # capped, viewport-aware rule with a useful minimum instead.
+        root = Path(__file__).resolve().parent / "web"
+        styles = (root / "styles.css").read_text(encoding="utf-8")
+        start = styles.index("@media (max-width: 980px)")
+        block = styles[start:styles.index("@media (max-width: 620px)", start)]
+        self.assertNotIn(".workspace { height: 720px; }", block)
+        self.assertIn("svh", block)
+        self.assertIn("min(720px", block)
+
 
 class WebServerTests(unittest.TestCase):
     @classmethod

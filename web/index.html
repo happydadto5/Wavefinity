@@ -65,7 +65,7 @@
           </div>
           <div id="ordinary-size-row" class="field-grid three">
             <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
-            <label><span id="y-size-label">Length</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
+            <label><span id="y-size-label">Depth</span> <span class="unit">mm</span><input id="y-size" type="text" inputmode="numeric"></label>
             <label><span id="z-size-label">Height</span> <span class="unit">mm</span><input id="z" type="text" inputmode="numeric"></label>
           </div>
           <div class="mode-and-bin-options">
@@ -444,7 +444,7 @@
         <div class="button-row equal generate-actions">
           <button id="generate-all" class="button secondary">Generate Bin and Connectors</button>
           <button id="generate-bin" class="button secondary">Generate Bin</button>
-          <button id="generate-connector" class="button secondary">Generate Connector</button>
+          <button id="generate-connector" class="button secondary">Generate Connectors</button>
         </div>
       </section>
       <div id="drawer-panel" class="drawer-panel" hidden></div>
@@ -703,6 +703,15 @@
       <button id="draft-switch-add" type="button" class="button primary" hidden>Add as new</button>
     </div>
   </dialog>
+  <dialog id="app-confirm-dialog" class="support-layout-dialog" aria-labelledby="app-confirm-title">
+    <h2 id="app-confirm-title"></h2>
+    <p id="app-confirm-message"></p>
+    <div class="button-row">
+      <button id="app-confirm-cancel" type="button" class="button secondary">Cancel</button>
+      <button id="app-confirm-secondary" type="button" class="button secondary" hidden></button>
+      <button id="app-confirm-primary" type="button" class="button primary">OK</button>
+    </div>
+  </dialog>
   <dialog id="about-dialog" class="about-dialog" aria-labelledby="about-dialog-title">
     <div class="about-dialog-header">
       <h2 id="about-dialog-title">About Wavefinity</h2>
@@ -735,6 +744,7 @@
           <button id="welcome-close" class="button secondary" type="button" aria-label="Close">✕</button>
         </div>
         <p class="welcome-lead">A Space is the drawer, surface, or portable case you want to organize.</p>
+        <p id="welcome-startup-error" class="field-error" hidden></p>
         <div class="welcome-actions">
           <button id="welcome-create" class="button primary" type="button">Create New Space</button>
           <button id="welcome-open" class="button secondary" type="button">Open Existing Space</button>

@@ -150,16 +150,25 @@ DP.build = () => {
     </section>`;
   DP.wire();
   DV.buildOverlay();
+  // Hosted capability (Fix 019 Item 3) is recalculated on every render in
+  // DP.renderStats() below, not only here - this first pass just avoids a
+  // flash of enabled buttons before the first render.
   if (state.runtime.hosted) {
-    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print"].forEach(selector => {
+    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print", "#dl-print"].forEach(selector => {
       const button = $(selector);
       if (button) {
         button.disabled = true;
-        button.title = "Use the normal designer to generate downloadable files in hosted Wavefinity.";
+        button.title = DP.HOSTED_UNSUPPORTED_TOOLTIP;
       }
     });
   }
 };
+
+// Fix 019 Item 3: the hosted backend rejects /api/drawer/spacers,
+// /api/drawer/spacers/generate, /api/drawer/print-spacers and
+// /api/drawer/print outright, so these four stay unavailable in hosted mode
+// on every render, not just once at build time.
+DP.HOSTED_UNSUPPORTED_TOOLTIP = "Hosted Wavefinity uses the normal Design generator and download-to-folder workflow instead of local Drawer spacer/slicer operations.";
 
 // ------------------------------------------------------------------ wiring
 
@@ -189,10 +198,16 @@ DP.wire = () => {
     DL.emit();
     $("#dl-name").focus();
   });
-  $("#dl-drawer-delete").addEventListener("click", () => {
+  $("#dl-drawer-delete").addEventListener("click", async () => {
     const drawer = DL.drawer();
     if (DL.layout.drawers.length < 2) return;
-    if (!confirm(`Delete ${drawer.name}? Its bins go back to the inventory list.`)) return;
+    const ok = await appConfirmAction({
+      title: "Delete this drawer?",
+      message: `Delete ${drawer.name}? Its bins go back to the inventory list.`,
+      actionLabel: "Delete Drawer",
+      danger: true,
+    });
+    if (!ok) return;
     DL.change(() => {
       DL.layout.drawers = DL.layout.drawers.filter(one => one !== drawer);
       DL.layout.active = DL.layout.drawers[0].id;
@@ -393,7 +408,7 @@ DP.wire = () => {
   $("#dl-save").addEventListener("click", () => DL.save());
 };
 
-DP.onInventoryClick = event => {
+DP.onInventoryClick = async event => {
   const row = event.target.closest("[data-bin]");
   const one = row && DL.bin(row.dataset.bin);
   if (!one) return;
@@ -406,7 +421,13 @@ DP.onInventoryClick = event => {
   else if (action === "printed") DL.markPrinted(one);
   else if (action === "delete") {
     const placed = DL.placedCount(one.id);
-    if (confirm(`Remove ${DL.label(one)} from the inventory?${placed ? ` Its ${dlPlural(placed, "placed copy", "placed copies")} come out of every drawer.` : ""} The print file stays in the folder.`)) {
+    const ok = await appConfirmAction({
+      title: "Remove this bin from inventory?",
+      message: `Remove ${DL.label(one)} from the inventory?${placed ? ` Its ${dlPlural(placed, "placed copy", "placed copies")} come out of every drawer.` : ""} The print file stays in the folder.`,
+      actionLabel: "Remove Bin",
+      danger: true,
+    });
+    if (ok) {
       DP.open.delete(one.id);
       DL.editBins({ delete_ids: [one.id] });
     }
@@ -699,10 +720,13 @@ DP.renderStats = () => {
   dlSet("#dl-sp-height", fmt(spacers.height));
 
   const busy = Boolean(DL.busy);
+  const hosted = Boolean(state.runtime.hosted);
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
   label("#dl-sp-plan", "Plan / Update Spacers", "Planning…", "spacers");
   label("#dl-sp-generate", "Generate Selected Spacers", "Generating…", "spacers");
   label("#dl-base-trim", "Make Base Trim", "Making Base Trim…", "base_trim");
+  const printAll = $("#dl-print");
+  if (printAll) printAll.disabled = busy;
   // Nothing placed yet: these have nothing to work on, so say why instead of
   // letting the click end in an error.
   const nothingPlaced = DL.loaded && !DL.drawer().placements.length;
@@ -712,6 +736,27 @@ DP.renderStats = () => {
     node.disabled = true;
     node.title = "Place a bin in the drawer first.";
   });
+  // Fix 019 Item 4: Generate Selected Spacers must never be an enabled
+  // silent no-op. DL.generateSelectedSpacers() already returns immediately
+  // with nothing selected/no plan, but the button must not invite that -
+  // it needs a current plan (DL.clearSpacerPlan() proactively nulls
+  // DL.spacerPlan the moment anything invalidates it, so its mere presence
+  // already means "current") AND at least one selected candidate.
+  const genNode = $("#dl-sp-generate");
+  if (genNode && !hosted && !nothingPlaced) {
+    const hasPlan = Boolean(DL.spacerPlan);
+    const hasSelection = hasPlan && DL.spacerSelected && DL.spacerSelected.size > 0;
+    if (!hasPlan) {
+      genNode.disabled = true;
+      genNode.title = "Plan spacers first.";
+    } else if (!hasSelection) {
+      genNode.disabled = true;
+      genNode.title = "Select at least one planned spacer.";
+    } else {
+      genNode.disabled = busy;
+      genNode.title = "Generate the selected spacer candidates";
+    }
+  }
   const hasPlacedSpacers = DL.drawer().placements.some(
     placement => DL.isSpacer(DL.bin(placement.bin))
   );
@@ -719,6 +764,17 @@ DP.renderStats = () => {
   if (spacerPrint) spacerPrint.hidden = !hasPlacedSpacers;
   label("#dl-sp-print", "Print Spacers", "Printing…", "print");
   if (spacerPrint) spacerPrint.disabled = busy || !hasPlacedSpacers;
+
+  // Hosted: these four always stay unavailable, on every render - see
+  // DP.HOSTED_UNSUPPORTED_TOOLTIP (Fix 019 Item 3).
+  if (hosted) {
+    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print", "#dl-print"].forEach(selector => {
+      const node = $(selector);
+      if (!node) return;
+      node.disabled = true;
+      node.title = DP.HOSTED_UNSUPPORTED_TOOLTIP;
+    });
+  }
 
   const report = DL.report;
   const warnings = DL.warnings.map(text => `<p class="dl-note dl-warning">${escapeHtml(text)}</p>`).join("");

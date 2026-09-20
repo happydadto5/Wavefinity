@@ -567,14 +567,21 @@ DL.load = async () => {
   DL.refreshWorking();
 };
 
+// Resolves true once the layout is actually persisted, false on failure -
+// callers that need to know whether it is safe to proceed with something
+// that depends on that (e.g. switching Spaces - see SP.leaveDrawerLayoutSafely
+// in spaces.js, Fix 019 Item 2) must check the return value rather than
+// assume success. UI error handling (toast + saveState/saveError) is
+// unchanged either way.
 DL.save = async () => {
   DL.saveSoon.cancel();
-  if (!DL.layout) return;
-  if (DL.saving) { DL.saveAgain = true; return; }
+  if (!DL.layout) return true;
+  if (DL.saving) { DL.saveAgain = true; return true; }
   DL.saving = true;
   DL.saveState = "saving";
   DL.emit();
   const sent = DL.snapshot();
+  let ok = true;
   try {
     const data = await DL.inventoryCall("/api/drawer/save", { layout: DL.layout });
     DL.adopt(data);
@@ -583,6 +590,7 @@ DL.save = async () => {
     DL.saveState = "saved";
     DL.savedAt = new Date();
   } catch (error) {
+    ok = false;
     DL.saveState = "error";
     DL.saveError = error.message;
     toast(`Layout not saved: ${error.message}`, true, 6000);
@@ -591,6 +599,7 @@ DL.save = async () => {
     DL.emit();
     if (DL.saveAgain) { DL.saveAgain = false; DL.save(); }
   }
+  return ok;
 };
 // Don't write on every keystroke: wait for a lull, then hold off saving again
 // until at least AUTOSAVE_MIN_INTERVAL has passed since the last save.
