@@ -1585,6 +1585,47 @@ class WebApplicationTests(unittest.TestCase):
         self.assertNotIn("DL.bins.push", model)
         self.assertNotIn("bins.push(DL.working", panel)
 
+    def test_current_design_position_does_not_leak_between_spaces(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        model = Path(__file__).resolve().parent / "web" / "drawer-model.js"
+        script = """
+const vm = require("vm"), fs = require("fs");
+const ctx = { debounce: f => f, state: { activeSpaceId: "A", output: "" }, console, Math, JSON, Number, Set, Map };
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + " ;this.DL = DL;", ctx);
+const DL = ctx.DL;
+const drawer = () => ({ id: "d1", width: 200, depth: 200, height: 60, snap: 8, placements: [] });
+DL.layout = { active: "d1", drawers: [drawer()] };
+DL.emit = () => {};
+DL.grid = () => ({ cols: 20, rows: 20, step: 8 });
+DL.cells = () => [2, 2];
+DL.stackHeight = () => 20;
+DL.items = () => [];
+DL.working = { key: "k", bin: { id: "__current__" } };
+const out = {};
+out.first = DL.workingFit();
+out.moved = DL.moveWorkingTo(5, 6);
+out.same = DL.workingFit();
+ctx.state.activeSpaceId = "B";
+DL.layout = { active: "d1", drawers: [drawer()] };
+out.other = DL.workingFit();
+ctx.state.activeSpaceId = "A";
+out.back = DL.workingFit();
+out.placements = DL.layout.drawers[0].placements.length;
+console.log(JSON.stringify(out));
+"""
+        result = subprocess.run([node, "-e", script, str(model)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertEqual((out["first"]["gx"], out["first"]["gy"]), (0, 0))
+        self.assertTrue(out["moved"])
+        self.assertEqual((out["same"]["gx"], out["same"]["gy"]), (5, 6))
+        self.assertEqual((out["other"]["gx"], out["other"]["gy"]), (0, 0))
+        self.assertEqual((out["back"]["gx"], out["back"]["gy"]), (0, 0))  # discarded for good
+        self.assertEqual(out["placements"], 0)
+
     def test_inventory_preview_writes_nothing(self):
         with tempfile.TemporaryDirectory() as directory:
             wavefinity_web.inventory_preview_payload({"design": default_design(), "output": directory})
