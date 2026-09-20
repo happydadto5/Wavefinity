@@ -1357,6 +1357,49 @@ path, since that material cannot be removed. Edge Mount's own label is
 independent of floor Text parts, the rim label, and B4B/divider labels -
 none of those are migrated or replaced.
 
+### Side Openings
+
+**Side Openings modifies an ordinary bin; it is not an interior part.**
+Like Lid & Stacking, it is a bin-level option shown under **Parts &
+options**, before the interior-part palette. It cuts centered finger-access
+notches through selected bin walls - built by making the normal Wavefinity
+bin first, then subtracting negative cutter solids through the selected
+wall(s), so the ordinary shell, cavity, wave, lock and connector geometry
+never change. Default is off.
+
+- **Shape** - Curved (a rounded finger slot) or Square (a rectangular
+  notch).
+- **Sides** - Front, Back, Left and Right are independent toggles, not a
+  single choice; any combination can be selected together.
+- **Opening size** - Small (8 mm), Medium (10 mm, default), Large (15 mm)
+  or XL (20 mm).
+- **Depth** - 1-100% (default 100%), measured from the rim down toward the
+  floor. 100% reaches the top of the base but never cuts into it; 50%
+  reaches halfway down the usable wall height.
+- **Top Support** - off by default. Off leaves an open-top notch; on keeps
+  a fixed 4 mm bridge across the top of the wall - a smooth printable arch
+  for Curved, a support-free 45-degree roof for Square.
+
+A wall needs to be at least **2 Wavefinity units (16 mm)** long to take a
+Side Opening at all, with a 4 mm solid corner shoulder kept at each end of
+the opening. That modular rule means a 2-unit wall only offers Small, a
+3-unit wall offers up to Large, and a 4-unit-or-larger wall offers every
+size including XL. The browser only offers sizes that fit every currently
+selected side and the current Shape/Depth/Top Support combination; Python
+re-validates the same rule and refuses an impossible saved or imported
+combination outright.
+
+Side Openings are for **ordinary bins only** - hidden for B4B and Base
+Trim. Lid & Stacking requires Top Support on, so the continuous top rim
+survives; turning either on while the other is set that way forces Top
+Support on automatically in the browser. A rim label, an Edge Mount
+mounting wall, or a Lift Grabber may not share a wall with a Side Opening -
+different walls are fine for all three. The scoop and other interior parts
+are never globally blocked; the cutter is authoritative wherever a Side
+Opening's wall intersects other body geometry, and it is re-applied to the
+finished body right before export so a later fused feature can never
+quietly fill an opening back in.
+
 ---
 
 ## Command line

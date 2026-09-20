@@ -800,6 +800,168 @@ function syncEdgeMountEditorVisibility() {
   $("#edge-mount-hole-orientation-row").hidden = number($("#edge-mount-hole-count").value) <= 1;
 }
 
+const SIDE_OPENING_DEFAULTS = {
+  enabled: false, shape: "curved", sides: [], size: "medium",
+  depth_percent: 100, top_support: false,
+};
+const SIDE_OPENING_SIDE_IDS = ["front", "back", "left", "right"];
+
+function sideOpeningState(design = state.design) {
+  return { ...SIDE_OPENING_DEFAULTS, ...(design?.box?.side_openings || {}) };
+}
+
+function sideOpeningPartActive(design = state.design) {
+  return Boolean(design?.box?.side_openings?.enabled);
+}
+
+// Wall span a Side Opening's width is measured against - Front/Back run
+// along X, Left/Right run along Y. Mirrors organizer_side_openings.
+// side_opening_side_span() so the UI can filter eligibility client-side.
+function sideOpeningSideSpan(side, design = state.design) {
+  const box = design?.box || {};
+  return side === "front" || side === "back" ? number(box.x) : number(box.y);
+}
+
+function sideOpeningEligibleSide(side, design = state.design) {
+  const rules = state.catalog?.side_openings || {};
+  const minSide = number(rules.min_side_mm, 16);
+  return sideOpeningSideSpan(side, design) >= minSide - 1e-9;
+}
+
+// Python remains authoritative for real validation/geometry; this mirrors
+// organizer_side_openings._vertical_fits() only for the immediate size-list
+// filtering while typing.
+function sideOpeningVerticalFits(design, shape, depthPercent, topSupport, widthMm) {
+  const box = design?.box || {};
+  const rules = state.catalog?.side_openings || {};
+  const topBridge = number(rules.top_bridge_mm, 4);
+  const floorZ = number(box.base_thickness);
+  const rimZ = number(box.z);
+  const usable = rimZ - floorZ;
+  const bottomZ = rimZ - usable * (number(depthPercent, 100) / 100);
+  const r = widthMm / 2;
+  if (bottomZ < floorZ - 1e-9) return false;
+  if (!topSupport) {
+    return shape === "curved" ? (rimZ - bottomZ) >= r - 1e-9 : true;
+  }
+  const openingTopZ = rimZ - topBridge;
+  if (openingTopZ <= bottomZ + 1e-9) return false;
+  return shape === "curved" ? (openingTopZ - bottomZ) >= 2 * r - 1e-9 : (openingTopZ - bottomZ) >= r - 1e-9;
+}
+
+// Sizes that fit every currently-selected side at the current shape/depth/
+// top-support combination. Mirrors organizer_side_openings.
+// side_opening_allowed_sizes() so the browser never offers an impossible
+// preset, but Python still re-validates on every preview/generate.
+function sideOpeningAllowedSizes(design = state.design) {
+  const rules = state.catalog?.side_openings || {};
+  const sizes = rules.sizes || [];
+  const margin = number(rules.corner_margin_mm, 4);
+  const so = sideOpeningState(design);
+  const spans = (so.sides || []).map(side => sideOpeningSideSpan(side, design));
+  return sizes.filter(entry => {
+    if (spans.some(span => entry.width_mm > span - 2 * margin + 1e-9)) return false;
+    return sideOpeningVerticalFits(design, so.shape, so.depth_percent, so.top_support, entry.width_mm);
+  }).map(entry => entry.value);
+}
+
+function sideOpeningLidStackForced(design = state.design) {
+  return lidPartActive(design);
+}
+
+function populateSideOpeningChoices() {
+  const rules = state.catalog?.side_openings || {};
+  const sizeSelect = $("#side-opening-size");
+  if (sizeSelect && !sizeSelect.options.length) {
+    for (const choice of rules.sizes || []) {
+      sizeSelect.add(new Option(choice.label, choice.value));
+    }
+  }
+}
+
+// Mirrors readEdgeMountForm/readLiftGrabberForm: only resets an *existing*
+// key to defaults when off, so a design that never touched Side Openings
+// keeps no key at all and design_to_dict omits the block while disabled.
+function readSideOpeningForm(design) {
+  design.box = design.box || {};
+  // Ordinary bins only - never surfaced for B4B or Base Trim.
+  if (b4bEnabled() || baseTrimEnabled(design)) {
+    if (design.box.side_openings) design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };
+    return;
+  }
+  const sides = SIDE_OPENING_SIDE_IDS.filter(side => $(`#side-opening-${side}`)?.checked);
+  const enabled = sides.length > 0 && !$("#side-openings-panel").hidden;
+  if (!enabled) {
+    if (design.box.side_openings) design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };
+    return;
+  }
+  const current = { ...SIDE_OPENING_DEFAULTS, ...(design.box.side_openings || {}) };
+  const shape = $("#side-opening-shape")?.value || current.shape;
+  const topSupport = sideOpeningLidStackForced(design) || Boolean($("#side-opening-top-support")?.checked);
+  const allowed = sideOpeningAllowedSizes({
+    ...design,
+    box: { ...design.box, side_openings: { ...current, sides, shape, top_support: topSupport } },
+  });
+  let size = $("#side-opening-size")?.value || current.size;
+  if (allowed.length && !allowed.includes(size)) size = allowed[allowed.length - 1];
+  design.box.side_openings = {
+    enabled: true,
+    shape,
+    sides,
+    size,
+    depth_percent: number($("#side-opening-depth")?.value, current.depth_percent),
+    top_support: topSupport,
+  };
+}
+
+function syncSideOpeningControls() {
+  const active = sideOpeningPartActive();
+  const so = sideOpeningState();
+  $("#side-openings-panel").hidden = !active;
+  $("#side-openings-toggle").textContent = active ? "Remove" : "Add";
+  $("#side-opening-shape").value = so.shape;
+  $("#side-opening-depth").value = fmt(so.depth_percent);
+  for (const side of SIDE_OPENING_SIDE_IDS) {
+    const input = $(`#side-opening-${side}`);
+    if (!input) continue;
+    input.checked = (so.sides || []).includes(side);
+    const eligible = sideOpeningEligibleSide(side);
+    input.disabled = !eligible;
+    if (!eligible) input.checked = false;
+  }
+  const anyEligible = SIDE_OPENING_SIDE_IDS.some(side => sideOpeningEligibleSide(side));
+  const addButton = $("#side-openings-toggle");
+  if (addButton) addButton.disabled = !active && !anyEligible;
+  const forced = sideOpeningLidStackForced();
+  const topSupportInput = $("#side-opening-top-support");
+  if (topSupportInput) {
+    if (forced) topSupportInput.checked = true;
+    topSupportInput.disabled = forced;
+  }
+  const allowed = sideOpeningAllowedSizes();
+  const sizeSelect = $("#side-opening-size");
+  if (sizeSelect) {
+    for (const option of sizeSelect.options) option.disabled = !allowed.includes(option.value);
+    if (allowed.length && !allowed.includes(sizeSelect.value)) {
+      sizeSelect.value = allowed[allowed.length - 1];
+      flashField(sizeSelect);
+    } else {
+      sizeSelect.value = so.size;
+    }
+  }
+  const note = $("#side-opening-note");
+  if (note) {
+    if (!anyEligible) {
+      const rules = state.catalog?.side_openings || {};
+      note.textContent = `Side openings require at least one bin side to be 2 units (${fmt(number(rules.min_side_mm, 16))} mm) or longer.`;
+    } else if (forced) {
+      note.textContent = "Top Support is required while Lid & Stacking is enabled.";
+    } else {
+      note.textContent = "";
+    }
+  }
+}
+
 function wallPresetChoices() {
   const rules = state.catalog?.wall_rules || {};
   return Array.isArray(rules.choices) && rules.choices.length
@@ -1037,6 +1199,8 @@ function syncForm() {
   $("#connector-bin-b-height").value = fmt(state.connector.bin_b_height ?? box.z);
   $("#connector-height-mode").value = state.connector.different_heights ? "different" : "same";
   syncLidForm();
+  populateSideOpeningChoices();
+  syncSideOpeningControls();
   syncB4BForm();
   syncConnectorSectionVisibility();
   updateInteriorModeVisibility();
@@ -1389,6 +1553,7 @@ function applyBaseTrimVisibility() {
   hide(".mode-and-bin-options", on);
   hide(".subheading-row", on);
   hide("#lid-option", on);
+  hide("#side-openings-option", on);
   hide(".palette-wrap", on);
   hide(".placed-block-panel", on);
   if (on) hide(".support-editor", true);
@@ -1540,6 +1705,7 @@ function applyB4BVisibility() {
   const hide = (sel, hidden) => { const el = $(sel); if (el) el.hidden = hidden; };
   hide(".subheading-row", on);
   hide("#lid-option", on);
+  hide("#side-openings-option", on);
   hide(".palette-wrap", on);
   // B4B shows its own All/Base/Lid group instead of the ordinary bin's
   // Bin/Interior/Xray toggles - the two mean different things and are never
@@ -2287,6 +2453,7 @@ function updateDesignFromForm() {
   if (scoopEl) design.scoop = scoopEl.checked;
   readLiftGrabberForm(design);
   if (editingEdgeMount()) readEdgeMountForm(design);
+  readSideOpeningForm(design);
   syncRimLabelFromFeatures();
   const newOutput = $("#output-folder").value.trim();
   if (!state.runtime.hosted && newOutput !== state.output) {
@@ -2797,6 +2964,7 @@ function wireControls() {
       state.design.box.stack = { mode: "direct" };
     }
     syncLidForm();
+    syncSideOpeningControls();
     populateWallChoices(state.design.box);
     populateBaseChoices(state.design.box);
     changedDesign(previous);
@@ -2808,6 +2976,7 @@ function wireControls() {
       readStackForm(state.design);
       normalizeStackSettings(state.design);
       syncLidForm();
+      syncSideOpeningControls();
       populateWallChoices(state.design.box);
       populateBaseChoices(state.design.box);
       changedDesign(previous);
@@ -2816,6 +2985,38 @@ function wireControls() {
     const previous = clone(state.design);
     readStackForm(state.design);
     seedPartNameFromLabel($("#lid-label-text").value);
+    changedDesign(previous);
+  });
+  $("#side-openings-toggle").addEventListener("click", () => {
+    const previous = clone(state.design);
+    if (sideOpeningPartActive()) {
+      state.design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };
+    } else {
+      const defaultSide = sideOpeningEligibleSide("front")
+        ? "front"
+        : SIDE_OPENING_SIDE_IDS.find(side => sideOpeningEligibleSide(side));
+      state.design.box.side_openings = {
+        ...SIDE_OPENING_DEFAULTS,
+        enabled: true,
+        sides: defaultSide ? [defaultSide] : [],
+        top_support: sideOpeningLidStackForced(),
+      };
+    }
+    syncSideOpeningControls();
+    changedDesign(previous);
+  });
+  ["#side-opening-shape", "#side-opening-size", "#side-opening-top-support",
+   "#side-opening-front", "#side-opening-back", "#side-opening-left", "#side-opening-right"]
+    .forEach(selector => $(selector)?.addEventListener("change", () => {
+      const previous = clone(state.design);
+      readSideOpeningForm(state.design);
+      syncSideOpeningControls();
+      changedDesign(previous);
+    }));
+  $("#side-opening-depth")?.addEventListener("input", () => {
+    const previous = clone(state.design);
+    readSideOpeningForm(state.design);
+    syncSideOpeningControls();
     changedDesign(previous);
   });
   ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location", "#b4b-latch-count", "#b4b-front-label-style"].forEach(sel =>
@@ -9754,6 +9955,7 @@ function designHasChanges() {
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
   readLiftGrabberForm(visibleDesign);
   if (editingEdgeMount()) readEdgeMountForm(visibleDesign);
+  readSideOpeningForm(visibleDesign);
   const index = draftCommitIndex();
   if (state.draft && state.draftAutoCommit && (
     index === null ||

@@ -615,6 +615,61 @@ class EdgeMountSpec:
         return self.label_enabled or self.holes_enabled
 
 
+SIDE_OPENING_SHAPES = ("curved", "square")
+SIDE_OPENING_SIZES = ("small", "medium", "large", "xl")
+SIDE_OPENING_WIDTHS = {
+    "small": 8.0,
+    "medium": 10.0,
+    "large": 15.0,
+    "xl": 20.0,
+}
+SIDE_OPENING_SIDES = ("front", "back", "left", "right")
+
+
+@dataclass(frozen=True)
+class SideOpeningSpec:
+    """Optional bin-level finger-access cutouts through selected walls.
+
+    Not an interior part - it modifies the bin body itself, like
+    ``LidSpec``.  Default off; inert for every existing design.  Geometry,
+    validation and cutter generation live in ``organizer_side_openings.py`` -
+    this is only the saved shape of the data."""
+
+    enabled: bool = False
+    shape: str = "curved"
+    sides: tuple[str, ...] = ()
+    size: str = "medium"
+    depth_percent: float = 100.0
+    top_support: bool = False
+
+    def __post_init__(self) -> None:
+        if self.shape not in SIDE_OPENING_SHAPES:
+            raise ValueError(
+                f"side opening shape must be one of {', '.join(SIDE_OPENING_SHAPES)}"
+            )
+        if self.size not in SIDE_OPENING_SIZES:
+            raise ValueError(
+                f"side opening size must be one of {', '.join(SIDE_OPENING_SIZES)}"
+            )
+        seen: set[str] = set()
+        for side in self.sides:
+            if side not in SIDE_OPENING_SIDES:
+                raise ValueError(
+                    f"side opening side must be one of {', '.join(SIDE_OPENING_SIDES)}"
+                )
+            if side in seen:
+                raise ValueError(f"side opening side '{side}' is duplicated")
+            seen.add(side)
+        if not math.isfinite(self.depth_percent) or not (0.0 < self.depth_percent <= 100.0):
+            raise ValueError("side opening depth must be between 0 and 100 percent")
+        if self.enabled and not self.sides:
+            raise ValueError("side openings are enabled but no sides are selected")
+
+    @property
+    def width_mm(self) -> float:
+        return SIDE_OPENING_WIDTHS[self.size]
+
+
 @dataclass(frozen=True)
 class BoxSpec:
     x: float = MIN_JOINABLE_SIZE
@@ -639,9 +694,12 @@ class BoxSpec:
     lift_grabbers: LiftGrabberSpec = field(default_factory=LiftGrabberSpec)
     lid: LidSpec = field(default_factory=LidSpec)
     # Edge Mount modifier (projecting label + screw mounting), same reasoning:
+    # trailing and inert unless switched on.
+    edge_mount: EdgeMountSpec = field(default_factory=EdgeMountSpec)
+    # Side Openings modifier (finger-access wall cutouts), same reasoning:
     # trailing and inert unless switched on. Last so every older positional
     # BoxSpec call keeps its meaning.
-    edge_mount: EdgeMountSpec = field(default_factory=EdgeMountSpec)
+    side_openings: SideOpeningSpec = field(default_factory=SideOpeningSpec)
 
     def __post_init__(self) -> None:
         values = {

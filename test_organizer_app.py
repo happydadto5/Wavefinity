@@ -20,13 +20,30 @@ import trimesh
 from shapely.geometry import Point
 
 import organizer_app
+import organizer_b4b
 import organizer_engine
 import organizer_geometry
 import organizer_inserts
+import organizer_side_openings
+from organizer_side_openings import (
+    SIDE_OPENING_CORNER_MARGIN_MM,
+    SIDE_OPENING_MIN_SIDE_MM,
+    SIDE_OPENING_TOP_BRIDGE_MM,
+    apply_side_openings,
+    side_opening_allowed_sizes,
+    validate_side_openings,
+)
 from organizer_engine import (
     BoxSpec,
+    B4BSpec,
     CORNER_INSET,
     ConnectorSpec,
+    EdgeMountSpec,
+    LidSpec,
+    LiftGrabberSpec,
+    SideOpeningSpec,
+    SIDE_OPENING_WIDTHS,
+    StackSpec,
     GRID_PITCH,
     LOCK_CORNER_CLEAR,
     MIN_BOX_SIZE,
@@ -2552,6 +2569,270 @@ class TextExportTests(unittest.TestCase):
             organizer_app.insert_filename(spec, "Driver rack"),
             "Insert 48 x 48 Driver rack.3mf",
         )
+
+
+def _wall_midpoint(box: BoxSpec, side: str, z: float) -> tuple[float, float, float]:
+    """A point at ``tangent=0`` (a wave zero-crossing), halfway through the
+    wall thickness of ``side``, at height ``z``. Inside a solid bin body,
+    this is real wall material away from any Side Opening cut."""
+    half = box.wall_depth / 2.0
+    if side == "front":
+        return (0.0, -(box.half_y - half), z)
+    if side == "back":
+        return (0.0, box.half_y - half, z)
+    if side == "left":
+        return (-(box.half_x - half), 0.0, z)
+    return (box.half_x - half, 0.0, z)
+
+
+class SideOpeningTests(unittest.TestCase):
+    def _box(self, **kwargs) -> BoxSpec:
+        defaults = dict(x=40.0, y=40.0, z=40.0)
+        defaults.update(kwargs)
+        return BoxSpec(**defaults)
+
+    def test_default_off_matches_default_box_fingerprint(self) -> None:
+        # Off/default SideOpeningSpec must leave the existing default box
+        # fingerprint/geometry completely unchanged.
+        self.assertEqual(
+            mesh_fingerprint(make_box(BoxSpec())), REFERENCE_FINGERPRINTS["box"]
+        )
+        self.assertFalse(BoxSpec().side_openings.enabled)
+
+    def test_100_percent_curved_reaches_floor_not_below(self) -> None:
+        box = replace(self._box(), side_openings=SideOpeningSpec(
+            enabled=True, sides=("front",), shape="curved", size="medium",
+            top_support=False, depth_percent=100.0,
+        ))
+        floor_z, rim_z, bottom_z = organizer_side_openings._vertical_geometry(
+            box, box.side_openings.depth_percent
+        )
+        self.assertAlmostEqual(bottom_z, floor_z)
+        cut = apply_side_openings(box, make_box(box))
+        self.assertTrue(cut.is_watertight)
+        # The deepest point of the cutter meets the floor top; it must not
+        # remove base material below it.
+        self.assertGreaterEqual(round(float(cut.bounds[0][2]), 6), 0.0)
+        self.assertFalse(bool(cut.contains([_wall_midpoint(box, "front", floor_z + 3.0)])[0]))
+        # A point actually inside the base slab, directly under the
+        # opening, must still be solid.
+        self.assertTrue(bool(cut.contains([(0.0, -box.half_y + 1.0, floor_z / 2.0)])[0]))
+
+    def test_50_percent_depth_stops_halfway_down_usable_wall(self) -> None:
+        box = self._box()
+        floor_z, rim_z, bottom_z = organizer_side_openings._vertical_geometry(box, 50.0)
+        usable = rim_z - floor_z
+        self.assertAlmostEqual(bottom_z, rim_z - usable * 0.5)
+        self.assertAlmostEqual(rim_z - bottom_z, usable / 2.0)
+
+    def test_square_open_top_profile_has_flat_bottom(self) -> None:
+        profile = organizer_side_openings._open_top_profile("square", 5.0, 10.0, 30.0)
+        ys = [round(y, 6) for _x, y in profile.exterior.coords]
+        self.assertEqual(ys.count(10.0), 2)
+
+    def test_curved_open_top_profile_has_u_bottom(self) -> None:
+        profile = organizer_side_openings._open_top_profile("curved", 5.0, 10.0, 30.0)
+        minx, miny, maxx, maxy = profile.bounds
+        self.assertAlmostEqual(miny, 10.0, places=6)
+        # The deepest point is a single point on the curve (the semicircle's
+        # bottom), not a flat run like the square profile.
+        ys = [round(y, 6) for _x, y in profile.exterior.coords]
+        self.assertEqual(ys.count(round(miny, 6)), 1)
+
+    def test_curved_top_support_leaves_fixed_bridge_and_arched_top(self) -> None:
+        box = self._box(z=60.0)
+        rim_z = box.z
+        r = 5.0
+        opening_top_z = rim_z - SIDE_OPENING_TOP_BRIDGE_MM
+        profile = organizer_side_openings._bridged_profile("curved", r, 20.0, opening_top_z)
+        minx, miny, maxx, maxy = profile.bounds
+        self.assertAlmostEqual(maxy, opening_top_z, places=6)
+        self.assertAlmostEqual(rim_z - maxy, SIDE_OPENING_TOP_BRIDGE_MM, places=6)
+
+    def test_square_top_support_has_exact_45_degree_roof(self) -> None:
+        r = 7.5
+        bottom_z = 10.0
+        opening_top_z = 40.0
+        profile = organizer_side_openings._bridged_profile("square", r, bottom_z, opening_top_z)
+        coords = list(profile.exterior.coords)
+        shoulder = next(
+            pt for pt in coords
+            if math.isclose(pt[0], r, abs_tol=1e-6) and not math.isclose(pt[1], bottom_z, abs_tol=1e-6)
+        )
+        apex = next(pt for pt in coords if math.isclose(pt[0], 0.0, abs_tol=1e-6))
+        self.assertAlmostEqual(shoulder[1], opening_top_z - r, places=6)
+        self.assertAlmostEqual(apex[1], opening_top_z, places=6)
+        # 45 degrees: the roof rises exactly ``r`` over a run of exactly ``r``.
+        self.assertAlmostEqual(apex[1] - shoulder[1], r, places=6)
+
+    def test_each_side_cuts_only_its_own_wall(self) -> None:
+        for side in ("front", "back", "left", "right"):
+            with self.subTest(side=side):
+                box = replace(self._box(), side_openings=SideOpeningSpec(
+                    enabled=True, sides=(side,), shape="curved", size="medium",
+                    top_support=False, depth_percent=100.0,
+                ))
+                cut = apply_side_openings(box, make_box(box))
+                self.assertTrue(cut.is_watertight)
+                probe_z = box.base_thickness + 3.0
+                for other in ("front", "back", "left", "right"):
+                    contained = bool(cut.contains([_wall_midpoint(box, other, probe_z)])[0])
+                    if other == side:
+                        self.assertFalse(contained, f"{side} wall was not cut")
+                    else:
+                        self.assertTrue(contained, f"{other} wall was cut but should not be")
+
+    def test_multiple_sides_and_shapes_stay_one_printable_solid(self) -> None:
+        combos = [
+            ("curved", False, 100.0), ("square", False, 100.0),
+            ("curved", True, 100.0), ("square", True, 100.0),
+            ("curved", False, 50.0),
+        ]
+        for shape, top_support, depth in combos:
+            with self.subTest(shape=shape, top_support=top_support, depth=depth):
+                box = replace(self._box(z=50.0), side_openings=SideOpeningSpec(
+                    enabled=True, sides=("front", "back", "left", "right"),
+                    shape=shape, size="medium", top_support=top_support,
+                    depth_percent=depth,
+                ))
+                cut = apply_side_openings(box, make_box(box))
+                self.assertTrue(cut.is_watertight)
+                self.assertEqual(len(cut.split(only_watertight=False)), 1)
+
+    def test_width_presets_are_exact(self) -> None:
+        self.assertEqual(
+            SIDE_OPENING_WIDTHS,
+            {"small": 8.0, "medium": 10.0, "large": 15.0, "xl": 20.0},
+        )
+
+    def test_size_availability_follows_wall_units(self) -> None:
+        spec = SideOpeningSpec(enabled=True, sides=("front",))
+        self.assertEqual(
+            side_opening_allowed_sizes(self._box(x=16.0), spec), ("small",)
+        )
+        self.assertEqual(
+            side_opening_allowed_sizes(self._box(x=24.0), spec),
+            ("small", "medium", "large"),
+        )
+        self.assertEqual(
+            side_opening_allowed_sizes(self._box(x=32.0), spec),
+            ("small", "medium", "large", "xl"),
+        )
+
+    def test_illegal_combinations_are_rejected(self) -> None:
+        box = self._box(z=20.0)
+        # A wall shorter than the 2U minimum.
+        with self.assertRaises(ValueError):
+            validate_side_openings(replace(box, x=8.0, side_openings=SideOpeningSpec(
+                enabled=True, sides=("front",),
+            )))
+        # A width that does not fit the corner shoulders.
+        with self.assertRaises(ValueError):
+            validate_side_openings(replace(box, x=16.0, side_openings=SideOpeningSpec(
+                enabled=True, sides=("front",), size="xl",
+            )))
+        # Vertically impossible: too shallow a depth for a curved cut of
+        # this width.
+        with self.assertRaises(ValueError):
+            validate_side_openings(replace(box, side_openings=SideOpeningSpec(
+                enabled=True, sides=("front",), shape="curved", size="xl",
+                depth_percent=1.0,
+            )))
+
+    def test_save_load_round_trips_exactly(self) -> None:
+        spec = self._box(x=48.0, y=48.0, z=40.0)
+        spec = replace(spec, side_openings=SideOpeningSpec(
+            enabled=True, sides=("front", "left"), shape="square",
+            size="large", depth_percent=75.0, top_support=True,
+        ))
+        layout = organizer_app.Layout()
+        box, rebuilt, label, part_name, location, scoop = organizer_app.design_from_dict(
+            organizer_app.design_to_dict(spec, layout)
+        )
+        self.assertEqual(box, spec)
+        self.assertEqual(box.side_openings, spec.side_openings)
+
+    def test_old_design_without_side_openings_block_loads_unchanged(self) -> None:
+        spec = self._box()
+        data = organizer_app.design_to_dict(spec, organizer_app.Layout())
+        self.assertNotIn("side_openings", data["box"])
+        box, *_ = organizer_app.design_from_dict(data)
+        self.assertEqual(box.side_openings, SideOpeningSpec())
+        self.assertEqual(box, spec)
+
+    def test_b4b_rejects_side_openings(self) -> None:
+        box = BoxSpec(
+            x=64.0, y=48.0, z=40.0, wall=1.4,
+            b4b=B4BSpec(enabled=True),
+            side_openings=SideOpeningSpec(enabled=True, sides=("front",)),
+        )
+        with self.assertRaises(ValueError):
+            organizer_b4b.validate_b4b_design(box)
+
+    def test_lid_and_stacking_require_top_support(self) -> None:
+        box = self._box(side_openings=SideOpeningSpec(
+            enabled=True, sides=("front",), top_support=False,
+        ))
+        with self.assertRaises(ValueError):
+            validate_side_openings(replace(box, lid=LidSpec(enabled=True)))
+        # With Top Support on, Lid & Stacking is fine.
+        validate_side_openings(replace(
+            box, lid=LidSpec(enabled=True),
+            side_openings=replace(box.side_openings, top_support=True),
+        ))
+        with self.assertRaises(ValueError):
+            validate_side_openings(replace(box, stack=StackSpec(mode="direct")))
+
+    def test_edge_mount_same_wall_rejected_different_wall_allowed(self) -> None:
+        box = self._box(side_openings=SideOpeningSpec(enabled=True, sides=("front",)))
+        with self.assertRaises(ValueError):
+            validate_side_openings(replace(
+                box, edge_mount=EdgeMountSpec(side="front", holes_enabled=True)
+            ))
+        validate_side_openings(replace(
+            box, edge_mount=EdgeMountSpec(side="back", holes_enabled=True)
+        ))
+
+    def test_lift_grabber_same_wall_rejected_different_wall_allowed(self) -> None:
+        box = self._box(side_openings=SideOpeningSpec(enabled=True, sides=("front",)))
+        with self.assertRaises(ValueError):
+            validate_side_openings(replace(
+                box, lift_grabbers=LiftGrabberSpec(enabled=True, location="front_back")
+            ))
+        validate_side_openings(replace(
+            box, lift_grabbers=LiftGrabberSpec(enabled=True, location="sides")
+        ))
+
+    def test_rim_label_same_wall_rejected_in_preview_and_generate(self) -> None:
+        box = self._box(side_openings=SideOpeningSpec(enabled=True, sides=("front",)))
+        with self.assertRaises(ValueError):
+            organizer_app.preview_geometry(box, label="HELLO", label_location="front")
+        organizer_app.preview_geometry(box, label="HELLO", label_location="back")
+        with self.assertRaises(ValueError):
+            organizer_app.generate_organizer_files(
+                box, organizer_app.Layout(), Path(tempfile.mkdtemp()),
+                label="HELLO", label_location="front",
+            )
+
+    def test_exported_body_retains_cut_after_later_body_operations(self) -> None:
+        # A scoop is fused into the shell after make_box() but before the
+        # Side Opening cutter is (re)applied - the export must still show
+        # the requested opening, not have it filled back in.
+        box = self._box(side_openings=SideOpeningSpec(
+            enabled=True, sides=("front",), shape="curved", size="medium",
+            top_support=False, depth_percent=100.0,
+        ))
+        with tempfile.TemporaryDirectory() as tmp:
+            result = organizer_app.generate_organizer_files(
+                box, organizer_app.Layout(), Path(tmp), scoop=True,
+            )
+            out_path = next(Path(tmp).glob("*.3mf"))
+            scene = trimesh.load(str(out_path))
+            mesh = list(scene.geometry.values())[0]
+            self.assertTrue(mesh.is_watertight)
+            probe_z = box.base_thickness + 3.0
+            self.assertFalse(bool(mesh.contains([_wall_midpoint(box, "front", probe_z)])[0]))
+            self.assertTrue(bool(mesh.contains([_wall_midpoint(box, "back", probe_z)])[0]))
 
 
 if __name__ == "__main__":

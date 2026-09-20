@@ -148,6 +148,93 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual((box.x, box.y, box.z), (16.0, 48.0, 40.0))
         self.assertEqual(box.base_thickness, 0.6)
         self.assertEqual(layout.mode, "fused")
+        # Side Openings is a bin-level part, not a placed interior part.
+        self.assertNotIn("side_openings", parts)
+
+    def test_catalog_exposes_side_opening_constants_presets_and_defaults(self):
+        rules = catalog_payload()["side_openings"]
+        self.assertEqual(rules["min_side_mm"], 16.0)
+        self.assertEqual(rules["corner_margin_mm"], 4.0)
+        self.assertEqual(rules["top_bridge_mm"], 4.0)
+        self.assertEqual(rules["default_shape"], "curved")
+        self.assertEqual(rules["default_size"], "medium")
+        self.assertEqual(rules["default_depth_percent"], 100)
+        self.assertEqual(
+            {(row["value"], row["width_mm"]) for row in rules["sizes"]},
+            {("small", 8.0), ("medium", 10.0), ("large", 15.0), ("xl", 20.0)},
+        )
+        self.assertEqual(
+            {row["value"] for row in rules["sides"]}, {"front", "back", "left", "right"}
+        )
+
+    def test_side_opening_validation_round_trips_the_block(self):
+        design = default_design()
+        design["box"]["x"] = design["box"]["y"] = 48.0
+        design["box"]["side_openings"] = {
+            "enabled": True, "shape": "curved", "sides": ["front", "left"],
+            "size": "medium", "depth_percent": 100.0, "top_support": False,
+        }
+        preview = preview_payload({"design": design})
+        self.assertTrue(preview["fits"], preview["message"])
+        self.assertEqual(
+            preview["design"]["box"]["side_openings"],
+            design["box"]["side_openings"],
+        )
+        self.assertTrue(any(row["kind"] == "outside" for row in preview["geometry"]))
+
+    def test_side_opening_preview_uses_real_cut_geometry(self):
+        design = default_design()
+        design["box"]["x"] = design["box"]["y"] = 48.0
+        without = preview_payload({"design": design})
+        design["box"]["side_openings"] = {
+            "enabled": True, "shape": "curved", "sides": ["front"],
+            "size": "medium", "depth_percent": 100.0, "top_support": False,
+        }
+        with_opening = preview_payload({"design": design})
+        self.assertTrue(with_opening["fits"], with_opening["message"])
+        # A real cut body has far fewer "outside" triangles filling the flat
+        # wall than the ordinary synthesized quad walls, and specifically
+        # fewer than the same design without the opening.
+        without_outside = sum(1 for row in without["geometry"] if row["kind"] == "outside")
+        with_outside = sum(1 for row in with_opening["geometry"] if row["kind"] == "outside")
+        self.assertGreater(without_outside, 0)
+        self.assertGreater(with_outside, 0)
+        self.assertNotEqual(without_outside, with_outside)
+
+    def test_invalid_1u_side_selection_is_rejected(self):
+        design = default_design()
+        design["box"]["x"] = 8.0
+        design["box"]["y"] = 48.0
+        design["box"]["side_openings"] = {
+            "enabled": True, "shape": "curved", "sides": ["front"],
+            "size": "small", "depth_percent": 100.0, "top_support": False,
+        }
+        with self.assertRaises(ValueError):
+            preview_payload({"design": design})
+
+    def test_b4b_and_base_trim_do_not_surface_side_openings(self):
+        design = default_design()
+        design["box"].update({
+            "x": 64.0, "y": 48.0, "z": 40.0, "wall": 1.4, "standard_walls": False,
+            "b4b": {
+                "enabled": True, "lid": True, "secure_lid": True,
+                "latch_count": "auto", "latch_strength": "standard",
+                "lid_headroom_mm": 1.0, "label_text": "",
+                "label_location": "none", "stacking": False,
+            },
+            "side_openings": {
+                "enabled": True, "shape": "curved", "sides": ["front"],
+                "size": "small", "depth_percent": 100.0, "top_support": False,
+            },
+        })
+        with self.assertRaises(ValueError):
+            design_from_dict(design)
+
+    def test_default_design_is_unchanged_by_side_openings(self):
+        design = default_design()
+        self.assertNotIn("side_openings", design["box"])
+        box, *_ = design_from_dict(design)
+        self.assertFalse(box.side_openings.enabled)
 
     def test_bore_catalog_exposes_the_grid_and_angle_and_drops_quantity(self):
         parts = {part["kind"]: part for part in catalog_payload()["parts"]}
@@ -1638,6 +1725,28 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b'id="base-thickness"', body)
         self.assertIn(b'id="wall-thickness"', body)
         self.assertIn(b'id="lift-grabber-size"', body)
+        self.assertIn(b'id="side-openings-option"', body)
+        self.assertIn(b'id="side-openings-toggle"', body)
+        self.assertIn(b'id="side-openings-panel"', body)
+        self.assertIn(b'id="side-opening-shape"', body)
+        self.assertIn(b'id="side-opening-front"', body)
+        self.assertIn(b'id="side-opening-back"', body)
+        self.assertIn(b'id="side-opening-left"', body)
+        self.assertIn(b'id="side-opening-right"', body)
+        self.assertIn(b'id="side-opening-size"', body)
+        self.assertIn(b'id="side-opening-depth"', body)
+        self.assertIn(b'id="side-opening-top-support"', body)
+        self.assertIn(b'id="side-opening-note"', body)
+        # The Side Openings card sits with Lid & Stacking, before the
+        # interior-part palette - not inside it.
+        self.assertLess(
+            body.index(b"<h2>Parts &amp; options</h2>"),
+            body.index(b'id="side-openings-option"'),
+        )
+        self.assertLess(
+            body.index(b'id="side-openings-option"'),
+            body.index(b'id="support-palette"'),
+        )
         self.assertNotIn(b'id="standard-base"', body)
         self.assertNotIn(b'id="standard-walls"', body)
         self.assertNotIn(b'id="different-height-bins"', body)
