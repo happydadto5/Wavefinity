@@ -1381,7 +1381,12 @@ dialog:not([open]) { display: none; }
   .controls { overflow: visible; border-right: 0; }
   .sidebar-collapsed .controls { display: none; }
   .sidebar-resizer { display: none; }
-  .workspace { height: 720px; }
+  /* Fix 019 Item 9A: a hard 720px made the preview needlessly tall (and
+     forced scrolling) on short phones/tablets. Keep a useful minimum, cap
+     around the former desktop-like target, and shrink on short viewports;
+     svh (falls back to vh where unsupported) avoids the preview jumping
+     around as mobile browser chrome shows/hides. */
+  .workspace { height: 720px; height: min(720px, max(360px, 78vh)); height: min(720px, max(360px, 78svh)); }
 }
 @media (max-width: 620px) {
   .app-header { align-items: flex-start; padding: 12px; }

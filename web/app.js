@@ -479,8 +479,8 @@ function updateGenerateAvailability() {
   const connectorButton = $("#generate-connector");
   if (connectorButton) {
     connectorButton.disabled = state.designMutationBusy;
-    connectorButton.title = "Generate connector for the current bin";
   }
+  syncConnectorActionLabels();
   const printButton = $("#print-bin");
   if (printButton) {
     printButton.disabled = state.designMutationBusy || !state.canGenerate;
@@ -1475,6 +1475,7 @@ function syncConnectorHeightControls() {
   const settingsEl = $("#connector-settings");
   if (settingsEl) settingsEl.hidden = !different;
   autoAdjustConnectorFields();
+  syncConnectorActionLabels();
 }
 
 // Mirrors organizer_engine.MIN_JOINABLE_SIZE; corner connectors below this
@@ -1496,9 +1497,29 @@ function syncConnectorSectionVisibility() {
   renderConnectorReadout();
   const connectorLocked = Boolean(state.design?.box?.lid?.enabled);
   $("#generate-all").hidden = connectorLocked;
-  $("#generate-all").textContent = "Generate Bin and Connectors";
   $("#generate-bin").hidden = false;
   $("#generate-connector").hidden = connectorLocked;
+  syncConnectorActionLabels();
+}
+
+// Fix 019 Item 7: same-height bins auto-bundle Side + 3-Way + 4-Way
+// connectors; different-height bins only ever produce a Side connector -
+// keep the action wording matching that actual bundle, on every
+// syncForm()/height-mode change, not just at first render.
+function syncConnectorActionLabels() {
+  const allButton = $("#generate-all");
+  const connectorButton = $("#generate-connector");
+  if (!allButton && !connectorButton) return;
+  const different = $("#connector-height-mode")?.value === "different";
+  if (allButton) {
+    allButton.textContent = different ? "Generate Bin and Side Connector" : "Generate Bin and Connectors";
+  }
+  if (connectorButton) {
+    connectorButton.textContent = different ? "Generate Side Connector" : "Generate Connectors";
+    connectorButton.title = different
+      ? "Generate the Side connector for the current bin"
+      : "Generate Side, 3-Way Corner, and 4-Way Corner connectors for the current bin";
+  }
 }
 
 function renderConnectorReadout(plan = null) {
@@ -1954,7 +1975,7 @@ function applyB4BVisibility() {
   const yLabel = $("#y-size-label");
   const zLabel = $("#z-size-label");
   if (xLabel) xLabel.textContent = on ? "Width (Inside)" : "Width";
-  if (yLabel) yLabel.textContent = on ? "Length (Inside)" : "Length";
+  if (yLabel) yLabel.textContent = on ? "Depth (Inside)" : "Depth";
   if (zLabel) zLabel.textContent = on ? "Height (Inside)" : "Height";
   // One Name field for both bin kinds; only its label changes.
   const partNameLabel = $("#part-name-label");
@@ -6561,6 +6582,96 @@ function promptDraftConflict(reason) {
   });
 }
 
+// ---- Reusable application confirmation dialog (Fix 019 Item 8). One shared
+// implementation instead of one-off native confirm()s or duplicated custom
+// dialogs. Resolves "primary" / "secondary" / "cancel" - Escape, the
+// backdrop, and the dialog's own close all behave as "cancel". Danger
+// actions use the existing danger button styling and move focus to Cancel
+// (the safe default); ordinary actions move focus to the primary button.
+function appConfirm({
+  title, message,
+  primaryLabel = "OK", secondaryLabel = null, cancelLabel = "Cancel",
+  danger = false, secondaryDanger = false,
+} = {}) {
+  return new Promise(resolve => {
+    const dialog = $("#app-confirm-dialog");
+    const titleEl = $("#app-confirm-title");
+    const msgEl = $("#app-confirm-message");
+    const primaryBtn = $("#app-confirm-primary");
+    const secondaryBtn = $("#app-confirm-secondary");
+    const cancelBtn = $("#app-confirm-cancel");
+    if (!dialog || !titleEl || !msgEl || !primaryBtn || !secondaryBtn || !cancelBtn) {
+      // Markup missing (older cached HTML): fail safe to "cancel" rather
+      // than silently proceeding with a destructive/ambiguous action.
+      resolve("cancel");
+      return;
+    }
+
+    let done = false;
+    const finish = choice => {
+      if (done) return;
+      done = true;
+      primaryBtn.onclick = secondaryBtn.onclick = cancelBtn.onclick = null;
+      dialog.removeEventListener("cancel", onCancel);
+      if (dialog.open) dialog.close();
+      resolve(choice);
+    };
+    const onCancel = event => { event.preventDefault(); finish("cancel"); };
+
+    titleEl.textContent = title || "";
+    msgEl.textContent = message || "";
+    primaryBtn.textContent = primaryLabel;
+    primaryBtn.classList.toggle("danger", danger);
+    primaryBtn.classList.toggle("primary", !danger);
+    cancelBtn.textContent = cancelLabel;
+    if (secondaryLabel) {
+      secondaryBtn.hidden = false;
+      secondaryBtn.textContent = secondaryLabel;
+      secondaryBtn.classList.toggle("danger", secondaryDanger);
+    } else {
+      secondaryBtn.hidden = true;
+      secondaryBtn.classList.remove("danger");
+    }
+
+    primaryBtn.onclick = () => finish("primary");
+    secondaryBtn.onclick = () => finish("secondary");
+    cancelBtn.onclick = () => finish("cancel");
+
+    dialog.addEventListener("cancel", onCancel);
+    if (!dialog.open) dialog.showModal();
+    // Focus always stays on a safe default - the primary action, or Cancel
+    // when the primary itself is the dangerous one - never on a danger-
+    // styled secondary button (e.g. "Discard & Switch").
+    (danger ? cancelBtn : primaryBtn).focus();
+  });
+}
+
+// Ordinary two-choice confirmation. Resolves true for the action, false for
+// Cancel/Escape/backdrop.
+async function appConfirmAction({ title, message, actionLabel = "OK", cancelLabel = "Cancel", danger = false }) {
+  const choice = await appConfirm({ title, message, primaryLabel: actionLabel, cancelLabel, danger });
+  return choice === "primary";
+}
+
+// The three-choice Save & Switch / Discard & Switch / Cancel dialog Fix 019
+// Item 2 needs for leaving a dirty manual-save Drawer layout. Resolves
+// "save", "discard" or "cancel" - never an ambiguous two-button confirm().
+async function appConfirmSaveDiscardCancel({
+  title, message,
+  saveLabel = "Save & Switch", discardLabel = "Discard & Switch", cancelLabel = "Cancel",
+}) {
+  const choice = await appConfirm({
+    title, message, primaryLabel: saveLabel, secondaryLabel: discardLabel, cancelLabel,
+    // Discard & Switch throws the in-memory layout away - it must read as
+    // destructive (Fix 019 correction C1.4), while Save & Switch stays the
+    // normal safe/default action and keeps focus.
+    secondaryDanger: true,
+  });
+  if (choice === "primary") return "save";
+  if (choice === "secondary") return "discard";
+  return "cancel";
+}
+
 // Used only for committing a 2D-layout drag of an already-placed support -
 // a discrete one-shot action, unlike the continuous autoCommitDraft above.
 async function applySupport(index) {
@@ -10472,7 +10583,11 @@ function workingDesignForSpace() {
 async function openDesign(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-  if (designHasChanges() && !window.confirm("Open this design and replace the current one?")) {
+  if (designHasChanges() && !(await appConfirmAction({
+    title: "Open a different design?",
+    message: "Open this design and replace the current one? Unsaved changes to the current design will be lost.",
+    actionLabel: "Open Design",
+  }))) {
     event.target.value = "";
     return;
   }
@@ -10505,7 +10620,12 @@ async function openDesign(event) {
 }
 
 async function newDesign() {
-  if (designHasChanges() && !window.confirm("Start a new design and discard the current changes?")) return;
+  if (designHasChanges() && !(await appConfirmAction({
+    title: "Start a new design?",
+    message: "Start a new design and discard the current changes?",
+    actionLabel: "Discard Changes",
+    danger: true,
+  }))) return;
   if (!beginDesignMutation()) return;
   const previousDesign = clone(state.design);
   state.design = baseTrimEnabled(previousDesign)

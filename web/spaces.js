@@ -185,9 +185,56 @@ SP.canPersistSpace = () => !state.runtime.hosted || Boolean(state.browserFolder?
 SP.inventoryFilename = () => SP.inventoryFilenameFor(state.browserFolder);
 SP.inventoryFilenameFor = _folder => INVENTORY_FILENAME;
 
-SP.resetDrawer = async () => {
-  if (typeof DL === "undefined") return;
-  if (DL.dirty && DL.layout && DL.output) await DL.save();
+// ------------------------------------------------------------ safe Drawer/Space switch (Fix 019 Item 2)
+//
+// Folder identity must never change until leaving the current Drawer layout
+// either succeeds or the user deliberately discards it. Autosave ON: flush
+// if dirty, and ABORT the switch (old Space stays active, DL.layout/DL.dirty
+// stay intact) if that save fails. Autosave OFF: a dirty layout gets an
+// explicit three-way choice - Save & Switch / Discard & Switch / Cancel -
+// never an ambiguous two-button native confirm().
+
+// Resolves true when it is safe to proceed (nothing dirty, a successful
+// flush, an explicit save, or an explicit discard) and false when the
+// switch must be aborted with everything - including DL.layout/DL.dirty -
+// left exactly as it was.
+SP.leaveDrawerLayoutSafely = async () => {
+  if (typeof DL === "undefined" || !DL.dirty || !DL.layout || !DL.output) return true;
+  const autosave = Boolean(DL.layout.settings?.autosave);
+  if (autosave) {
+    const ok = await DL.save();
+    if (!ok) {
+      toast(`Could not switch Spaces: ${DL.saveError || "the layout failed to save."}`, true, 6000);
+      return false;
+    }
+    return true;
+  }
+  const choice = await appConfirmSaveDiscardCancel({
+    title: "Unsaved Drawer layout",
+    message: "This Drawer's layout has unsaved manual changes and Autosave is off for this Drawer. Save it before switching, discard it, or stay here.",
+  });
+  if (choice === "cancel") return false;
+  if (choice === "save") {
+    const ok = await DL.save();
+    if (!ok) {
+      toast(`Could not save the layout: ${DL.saveError || "please try again."}`, true, 6000);
+      return false;
+    }
+  }
+  // Save & Switch (already saved above) and Discard & Switch both continue;
+  // the actual layout/dirty clearing happens right below.
+  return true;
+};
+
+// Returns true once it is safe for the caller to change folder/Space
+// identity, false when the switch was aborted (a failed save, or the user
+// choosing Cancel) - in which case DL.layout/DL.dirty are left untouched.
+SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
+  if (typeof DL === "undefined") return true;
+  if (!skipSafeLeave) {
+    const ok = await SP.leaveDrawerLayoutSafely();
+    if (!ok) return false;
+  }
   // A different folder means a different Space: close the workspace first.
   if (typeof DP !== "undefined" && DP.leave) DP.leave();
   DL.layout = null;
@@ -197,10 +244,19 @@ SP.resetDrawer = async () => {
   DL.output = null;
   DL.loaded = false;
   if (typeof DP !== "undefined") DP.signatures = {};
+  return true;
 };
 
-SP.applyFolder = async (info, { reset = true } = {}) => {
-  if (reset) await SP.resetDrawer();
+// Folder/Space identity and persisted Space defaults only - see
+// SP.initializeDesignForActiveSpace below for the (separate) Current-design
+// activation this triggers whenever the newly-applied folder is a typed
+// Space (Fix 019 Item 1). Resolves false without changing anything when a
+// dirty Drawer layout blocked the switch (see SP.resetDrawer above).
+SP.applyFolder = async (info, { reset = true, initDesign = true } = {}) => {
+  if (reset) {
+    const ok = await SP.resetDrawer();
+    if (!ok) return false;
+  }
   state.output = info.folder;
   state.activeSpaceId = info.space_id || null;
   state.folderSelected = true;
@@ -212,8 +268,10 @@ SP.applyFolder = async (info, { reset = true } = {}) => {
     info.bin_defaults,
     info.part_defaults,
   );
+  if (initDesign && info.folder_mode === "space") await SP.initializeDesignForActiveSpace();
   syncForm();
   if (SP.renderSpaceInfo) SP.renderSpaceInfo();
+  return true;
 };
 
 // ------------------------------------------------------------ browser files
@@ -601,18 +659,35 @@ SP.assertExpectedHostedIdentity = (info, expectedSpaceId) => {
   }
 };
 
-SP.useHostedFolder = async (folder, { expectedSpaceId = null } = {}) => {
+SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = false } = {}) => {
   // A hosted Design session without a persistent folder is "no folder
   // selected", never a fabricated one. Opening a Wavefinity folder therefore
   // always needs a real handle.
   if (!folder?.handle) {
     throw new Error("Opening a Wavefinity folder requires writable folder access.");
   }
+  // Read-only classification of the target folder only - no write yet.
   let info = await SP.inspectHosted(folder);
+  SP.assertExpectedHostedIdentity(info, expectedSpaceId);
+
+  // Leave the old Drawer layout safely BEFORE any write to the target
+  // folder - the inventory-filename migration and metadata version upgrade
+  // just below - or adoption of it as the active folder/handle (Fix 019
+  // correction C1.3). Cancel or a failed save must abort here, leaving the
+  // target folder and the previously active folder/handle untouched.
+  // skipLeaveCheck is set only by a caller that already resolved this exact
+  // decision itself immediately beforehand (e.g. hosted
+  // SP.useUntypedFolder(), which must write the target's own metadata
+  // before calling in here) - it must never be used to skip the decision
+  // itself, only to avoid asking twice.
+  if (!skipLeaveCheck) {
+    const ok = await SP.leaveDrawerLayoutSafely();
+    if (!ok) return null;
+  }
+
   // The hosted equivalent of the local technical open: only after read-only
   // classification says no setup is needed, adopt the canonical inventory
   // filename and give a configured v4 folder its v5 identity.
-  SP.assertExpectedHostedIdentity(info, expectedSpaceId);
   if (!info.needs_setup) {
     if (info.inventory) await SP.readInventoryFor(folder, { migrate: true });
     const upgradeSpace = info.folder_mode === "space" && (
@@ -632,7 +707,9 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null } = {}) => {
   if (expectedSpaceId && info.space_id !== expectedSpaceId) {
     throw new Error("This folder is not the Space that was open before. Use Open Existing Space to choose it.");
   }
-  await SP.resetDrawer();
+  // The safe-leave decision is already resolved above - clear the old
+  // Drawer state exactly once, with no second prompt.
+  await SP.resetDrawer({ skipSafeLeave: true });
   state.browserFolder = folder;
   await WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null });
   await SP.applyFolder(info, { reset: false });
@@ -713,9 +790,18 @@ SP.afterPick = async folder => {
     SP.enterSetupFor(folder, inspected.folder);
     return inspected.folder;
   }
+  // Resolve the safe-leave decision BEFORE the backend remembers this
+  // folder as active (Fix 019 correction C1.2) - Cancel or a failed save
+  // must abort before /api/folder/use ever runs, so the backend's
+  // remembered active folder/Space cannot get ahead of what is on screen.
+  const okToLeave = await SP.leaveDrawerLayoutSafely();
+  if (!okToLeave) return null;
   const data = await api("/api/folder/use", { output: folder });
   SP.recent = data.recent || [];
-  await SP.applyFolder(data.folder);
+  // The leave decision is already resolved - clear the old Drawer state
+  // exactly once, with no second prompt, then adopt the new folder.
+  await SP.resetDrawer({ skipSafeLeave: true });
+  if (!(await SP.applyFolder(data.folder, { reset: false }))) return null;
   SP.close();
   toast(data.folder.folder_mode === "space"
     ? `Opened ${data.folder.space?.name || data.folder.folder_name}.`
@@ -903,8 +989,16 @@ SP.open = () => {
 // ------------------------------------------------------------ setup
 
 
-SP.showHome = () => {
+// `message`, when given, is a startup recovery error (Fix 019 Item 6) shown
+// in #welcome-startup-error. Ordinary navigation to Welcome (no message)
+// clears any previously-shown error.
+SP.showHome = (message = null) => {
   SP.showOnly("welcome-home");
+  const errorEl = document.getElementById("welcome-startup-error");
+  if (errorEl) {
+    errorEl.textContent = message || "";
+    errorEl.hidden = !message;
+  }
   SP.renderRecent();
   const hasRecent = SP.recent.length > 0;
   document.getElementById("welcome-recent-container").hidden = !hasRecent;
@@ -1233,6 +1327,16 @@ SP.create = async () => {
   }
   SP.configureData = null;
 
+  // Resolve the safe-leave decision BEFORE any write to the target folder
+  // (inventory migration, metadata write) or backend mutation, and before
+  // the new active handle is saved (Fix 019 correction C1.2/C1.3). This
+  // covers Create New Space, Configure Existing and migrate, in both hosted
+  // and local runtimes - Cancel or a failed save must abort here, leaving
+  // the target folder, the backend's remembered active folder, and the
+  // previously active handle all untouched.
+  const okToLeave = await SP.leaveDrawerLayoutSafely();
+  if (!okToLeave) return;
+
   let info;
   if (state.runtime.hosted) {
     // Read/write the *selected target's* inventory filename, never the
@@ -1280,27 +1384,101 @@ SP.create = async () => {
     info = data.folder;
   }
 
-  await SP.applyFolder(info);
+  // The leave decision is already resolved above - clear the old Drawer
+  // state exactly once, with no second prompt.
+  await SP.resetDrawer({ skipSafeLeave: true });
+  // SP.create() always follows with an explicit designSurface/designPortable/
+  // loadFreshOrdinaryDesignForCurrentFolder call below, which installs the
+  // starter design itself - skip applyFolder's own (redundant) activation.
+  await SP.applyFolder(info, { initDesign: false, reset: false });
   SP.close();
-  
+
   if (kind === "portable") await SP.designPortable(info.space);
   else if (kind === "surface") await SP.designSurface(info.space);
   else await loadFreshOrdinaryDesignForCurrentFolder();
 };
 
-// Reuses the real Base Trim design path (makeBaseTrimDesign) rather than
-// building a second, incompatible "edge" design object - see Fix 004.
-SP.designSurface = async space => {
-  const trimValue = SP.surfacePresetMap()[space.trim_size];
+// ------------------------------------------------------------ design/session activation (Fix 019 Item 1/5)
+//
+// Every session-only Current-design/editor/Surface-first-run flag that must
+// never leak from one typed-Space identity to another. Base Trim source/
+// switching memory (lastOrdinaryDesign/lastBaseTrimDesign/
+// baseTrimSourceLayout) is per-design editing-session bookkeeping, not
+// per-Space persisted state, so it is cleared here too rather than carried
+// into a different Space.
+SP.resetDesignSession = () => {
+  state.workingPending = false;
+  state.workingGeneratedKey = null;
   state.surfaceEdgeHandled = false;
-  if (!baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
+  state.baseTrimSourceLayout = null;
+  state.lastOrdinaryDesign = null;
+  state.lastBaseTrimDesign = null;
+  state.drafts = {};
+  state.history = [];
+  state.future = [];
+  state.binResizePending = false;
+  state.binFootprintResizePending = false;
+  if (typeof resetNestPhotoSession === "function") resetNestPhotoSession();
+  if (typeof clearDraftSelection === "function") clearDraftSelection();
+  if (typeof updateHistoryButtons === "function") updateHistoryButtons();
+};
 
-  state.design = makeBaseTrimDesign(space.x, space.y);
-  state.design.base_trim.width_mm = trimValue;
-  state.design.box.z = trimValue;
-  state.design.part_name = space.name;
+// Builds the correct design family's clean starter design for `space` into
+// state.design/state.cleanDesign. Does not touch preview/toast/the working-
+// pending flag - callers decide those. Shared by SP.initializeDesignForActiveSpace
+// (silent, for open/resume/switch) and SP.designSurface/SP.designPortable
+// (explicit, user-visible creation) instead of duplicating the reset logic -
+// see Fix 004/Fix 019 Item 1.
+SP.installSpaceStarterDesign = async space => {
+  if (space.kind === "surface") {
+    const trimValue = SP.surfacePresetMap()[space.trim_size];
+    state.design = makeBaseTrimDesign(space.x, space.y);
+    if (Number.isFinite(trimValue)) {
+      state.design.base_trim.width_mm = trimValue;
+      state.design.box.z = trimValue;
+    }
+    state.design.part_name = space.name;
+  } else if (space.kind === "portable" || space.kind === "box") {
+    state.design = clone(state.catalog.defaults.design);
+    state.design.box.x = space.x;
+    state.design.box.y = space.y;
+    state.design.box.z = normalizeBinDimension("z", space.z);
+    state.design.part_name = space.name;
+    const binType = document.getElementById("bin-type");
+    if (binType) binType.value = "b4b";
+    await toggleB4B(true);
+  } else {
+    // Drawer (and any other/untyped folder that reaches here) -> the fresh
+    // ordinary Bin starter, same as loadFreshOrdinaryDesignForCurrentFolder.
+    state.design = freshDesignForCurrentFolder();
+  }
+  state.cleanDesign = clone(state.design);
+};
 
-  clearDraftSelection();
+// The ONE authoritative typed-Space design/session activation path (Fix 019
+// Item 1). SP.applyFolder calls this after folder/Space identity is already
+// current, for every path that activates a typed Space: local/hosted
+// startup resume, Open Existing Space, Recent Space selection, collision
+// "Open this Space", a newly created Space, a configured/migrated Space, and
+// any later folder switch. The resulting starter design is clean/untouched:
+// opening/switching alone never marks it as a pending Current design -
+// explicit user actions (New design, Design first bin, opening a design
+// file) continue to call markWorkingDesignPending() themselves.
+SP.initializeDesignForActiveSpace = async () => {
+  if (state.folderMode !== "space" || !state.activeSpace || !state.catalog) return;
+  SP.resetDesignSession();
+  await SP.installSpaceStarterDesign(state.activeSpace);
+  syncForm();
+};
+
+// Reuses the real Base Trim design path (makeBaseTrimDesign) rather than
+// building a second, incompatible "edge" design object - see Fix 004. This
+// is the explicit "design this Surface now" action (e.g. right after
+// Create), so it forces the 3D preview and announces itself - unlike the
+// silent SP.initializeDesignForActiveSpace used for open/resume.
+SP.designSurface = async space => {
+  SP.resetDesignSession();
+  await SP.installSpaceStarterDesign(space);
   syncForm();
   activatePreviewView("3d");
   await refreshPreview();
@@ -1312,16 +1490,8 @@ SP.designSurface = async space => {
 // Reuses the ordinary bin -> B4B toggle machinery (toggleB4B/readB4BForm)
 // rather than forking B4B form logic - see Fix 004 ("Portable -> Bin for Bins").
 SP.designPortable = async space => {
-  state.design = clone(state.catalog.defaults.design);
-  state.design.box.x = space.x;
-  state.design.box.y = space.y;
-  state.design.box.z = normalizeBinDimension("z", space.z);
-  state.design.part_name = space.name;
-
-  clearDraftSelection();
-  syncForm();
-  $("#bin-type").value = "b4b";
-  await toggleB4B(true);
+  SP.resetDesignSession();
+  await SP.installSpaceStarterDesign(space);
   syncForm();
   activatePreviewView("3d");
   await refreshPreview();
@@ -1403,18 +1573,34 @@ SP.useUntypedFolder = async () => {
             SP.showDialog();
             return;
         }
+        // Resolve the safe-leave decision BEFORE writing the target folder's
+        // own metadata (Fix 019 correction C1.3) - Cancel or a failed save
+        // must abort before "design" is committed to this folder.
+        const okToLeave = await SP.leaveDrawerLayoutSafely();
+        if (!okToLeave) return;
         await SP.writeMetadata(folder.handle, "design", null, true);
         SP.configureData = null;
-        await SP.useHostedFolder(folder);
+        // The leave decision above already covers this switch - skip asking
+        // again inside SP.useHostedFolder().
+        const info = await SP.useHostedFolder(folder, { skipLeaveCheck: true });
+        if (!info) return; // switch aborted (cancelled or a failed save) - stay put
         await loadFreshOrdinaryDesignForCurrentFolder();
     } else {
+        // Resolve the safe-leave decision BEFORE the backend mutates the
+        // active folder (Fix 019 correction C1.2) - Cancel or a failed save
+        // must abort before /api/space/use-untyped ever runs.
+        const okToLeave = await SP.leaveDrawerLayoutSafely();
+        if (!okToLeave) return;
         const data = await api("/api/space/use-untyped", { output: SP.configureData });
         // Clear the selected-folder setup context now that it has been
         // used, so a later Create New Space cannot accidentally reuse it -
         // see Fix 004 Correction 7.F.
         SP.configureData = null;
         SP.recent = data.recent || [];
-        await SP.applyFolder(data.folder);
+        // The leave decision is already resolved - clear the old Drawer
+        // state once, with no second prompt, then adopt the new folder.
+        await SP.resetDrawer({ skipSafeLeave: true });
+        if (!(await SP.applyFolder(data.folder, { reset: false }))) return;
         SP.close();
         await loadFreshOrdinaryDesignForCurrentFolder();
     }
@@ -1428,29 +1614,51 @@ SP.fail = (message, selector) => {
   $(selector)?.focus();
 };
 
+// Fix 019 Item 6: "no remembered folder" and "permission not (yet) granted"
+// are expected, silent outcomes - Welcome with no message. An exception from
+// actually reading/classifying/identifying the remembered folder is a real
+// condition (damaged/newer metadata, an identity mismatch, a read failure)
+// and must reach the user as visible text on Welcome, not be swallowed into
+// an ordinary-looking Welcome screen. Recovery never mutates the
+// damaged/newer metadata itself - it only stops and explains.
 SP.launch = async () => {
   if (state.runtime.hosted) {
+    let saved = null;
+    let hasPermission = false;
     try {
-      const saved = await WFFileSystem.load("active");
+      saved = await WFFileSystem.load("active");
       // Startup is not a user gesture: only already-granted permission may
       // resume silently. A handle whose permission needs renewing falls
       // through to Welcome, where an explicit action supplies the gesture.
       // The saved record itself is kept.
-      if (saved?.handle && await WFFileSystem.queryReadWritePermission(saved.handle)) {
-        const folder = { handle: saved.handle, name: saved.handle.name };
-        const data = await SP.inspectHosted(folder);
-        SP.assertExpectedHostedIdentity(data, saved.space_id || null);
-        if (data.needs_setup) {
-          SP.enterSetupFor(folder, data);
-          return;
-        }
-        const info = await SP.useHostedFolder(folder, { expectedSpaceId: saved.space_id || null });
-        if (info.folder_mode === "space") SP.showResume(info);
+      hasPermission = Boolean(saved?.handle) && await WFFileSystem.queryReadWritePermission(saved.handle);
+    } catch (error) {
+      // A thrown exception here means the saved-handle read or the
+      // permission query itself failed (damaged storage, a read error, a
+      // permission-query failure) - a real startup read failure, not the
+      // ordinary "nothing saved" / "permission not granted" outcomes above,
+      // so it must be visible (Fix 019 correction C1.5), consistent with
+      // Fix 019 Item 6's other startup-read-failure handling below.
+      SP.showHome(error?.message || "Wavefinity could not read your saved folder.");
+      return;
+    }
+    if (!hasPermission) { SP.showHome(); return; }
+    try {
+      const folder = { handle: saved.handle, name: saved.handle.name };
+      const data = await SP.inspectHosted(folder);
+      SP.assertExpectedHostedIdentity(data, saved.space_id || null);
+      if (data.needs_setup) {
+        SP.enterSetupFor(folder, data);
         return;
       }
-    } catch (_error) { /* The welcome screen offers a fresh folder choice. */ }
-    SP.showHome();
-    return;
+      const info = await SP.useHostedFolder(folder, { expectedSpaceId: saved.space_id || null });
+      if (!info) { SP.showHome(); return; } // switch aborted mid-startup - fall back quietly
+      if (info.folder_mode === "space") SP.showResume(info);
+      return;
+    } catch (error) {
+      SP.showHome(error.message);
+      return;
+    }
   }
 
   try {
@@ -1464,13 +1672,13 @@ SP.launch = async () => {
       SP.enterSetupFor(data.folder, data);
       return;
     }
-    await SP.applyFolder(data);
+    if (!(await SP.applyFolder(data))) { SP.showHome(); return; }
     // The routing decision must always end somewhere definite: the startup
     // cover is dismissed only once this resolves.
     if (data.folder_mode === "space") SP.showResume(data);
     else SP.close();
-  } catch (_error) {
-    SP.showHome();
+  } catch (error) {
+    SP.showHome(error.message);
   }
 };
 
@@ -1737,7 +1945,13 @@ SP.showFolder = async () => {
     const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
     const isWin = navigator.platform.toUpperCase().indexOf("WIN") >= 0;
     const fm = isMac ? "Finder" : (isWin ? "File Explorer" : "your file manager");
-    if (!confirm("Open this Space in " + fm + "?")) return;
+    // Not destructive - ordinary primary/secondary styling, not danger.
+    const ok = await appConfirmAction({
+      title: "Show Folder",
+      message: `Open this Space in ${fm}?`,
+      actionLabel: "Show Folder",
+    });
+    if (!ok) return;
     try {
         await api("/api/space/show-folder", { output: state.output });
     } catch (e) {
