@@ -228,6 +228,37 @@
               <p id="lid-option-note" class="inline-help"></p>
             </div>
           </div>
+          <div id="side-openings-option" class="lid-option-card">
+            <div class="lid-option-heading">
+              <div><strong>Side Openings</strong><span>Bin-level part</span></div>
+              <button id="side-openings-toggle" type="button" class="button secondary">Add</button>
+            </div>
+            <div id="side-openings-panel" hidden>
+              <div class="field-grid three">
+                <label class="inline-select">Shape
+                  <select id="side-opening-shape">
+                    <option value="curved">Curved</option>
+                    <option value="square">Square</option>
+                  </select>
+                </label>
+                <label class="inline-select">Opening size
+                  <select id="side-opening-size"></select>
+                </label>
+                <label title="Percent of the usable wall height, measured down from the rim. 100% reaches the top of the base but never cuts it.">Depth %
+                  <input id="side-opening-depth" type="number" min="1" max="100" step="1">
+                </label>
+              </div>
+              <div class="field-grid four">
+                <label class="checkbox-row"><span>Front</span><input id="side-opening-front" type="checkbox"></label>
+                <label class="checkbox-row"><span>Back</span><input id="side-opening-back" type="checkbox"></label>
+                <label class="checkbox-row"><span>Left</span><input id="side-opening-left" type="checkbox"></label>
+                <label class="checkbox-row"><span>Right</span><input id="side-opening-right" type="checkbox"></label>
+              </div>
+              <label class="checkbox-row"><span>Top Support</span><input id="side-opening-top-support" type="checkbox"></label>
+              <p class="inline-help">Off leaves an open-top finger notch. On keeps a continuous printable bridge across the top of the wall.</p>
+            </div>
+            <p id="side-opening-note" class="inline-help"></p>
+          </div>
           <div class="palette-wrap">
             <div id="support-palette" class="support-palette" role="list"></div>
             <div id="draft-actions" class="draft-actions" hidden>

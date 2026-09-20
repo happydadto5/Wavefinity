@@ -61,6 +61,7 @@ from organizer_engine import (
     MAX_WALL,
     MIN_HEIGHT_ABOVE_BASE,
     MIN_WALL,
+    SIDE_OPENING_WIDTHS,
     TEXT_DEPTH,
     WAVE_AMPLITUDE,
     WAVE_MATING_GAP,
@@ -211,6 +212,11 @@ from organizer_edge_mount import (
     EDGE_LABEL_MIN_THICKNESS,
     EDGE_LABEL_PROJECTION_PRESETS,
     EDGE_LABEL_THICKNESS_PRESETS,
+)
+from organizer_side_openings import (
+    SIDE_OPENING_CORNER_MARGIN_MM,
+    SIDE_OPENING_MIN_SIDE_MM,
+    SIDE_OPENING_TOP_BRIDGE_MM,
 )
 
 
@@ -975,6 +981,33 @@ def catalog_payload() -> dict[str, Any]:
             "max_access_diameter_mm": EDGE_HOLE_MAX_ACCESS_DIAMETER,
             "min_hole_count": EDGE_HOLE_MIN_COUNT,
             "max_hole_count": EDGE_HOLE_MAX_COUNT,
+        },
+        "side_openings": {
+            "min_side_mm": SIDE_OPENING_MIN_SIDE_MM,
+            "corner_margin_mm": SIDE_OPENING_CORNER_MARGIN_MM,
+            "top_bridge_mm": SIDE_OPENING_TOP_BRIDGE_MM,
+            "default_shape": "curved",
+            "default_size": "medium",
+            "default_depth_percent": 100,
+            "sides": [
+                {"value": "front", "label": "Front"},
+                {"value": "back", "label": "Back"},
+                {"value": "left", "label": "Left"},
+                {"value": "right", "label": "Right"},
+            ],
+            "shapes": [
+                {"value": "curved", "label": "Curved"},
+                {"value": "square", "label": "Square"},
+            ],
+            "sizes": [
+                {"value": key, "label": label, "width_mm": SIDE_OPENING_WIDTHS[key]}
+                for key, label in (
+                    ("small", "Small — 8 mm"),
+                    ("medium", "Medium — 10 mm"),
+                    ("large", "Large — 15 mm"),
+                    ("xl", "XL — 20 mm"),
+                )
+            ],
         },
         "setting_interactions": [
             {

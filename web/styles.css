@@ -511,6 +511,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .field-grid { display: grid; gap: 10px; }
 .field-grid.three { grid-template-columns: repeat(3, 1fr); }
 .field-grid.two { grid-template-columns: repeat(2, 1fr); }
+.field-grid.four { grid-template-columns: repeat(4, 1fr); }
 .mode-and-bin-options { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .mode-and-bin-options > label:first-child { min-width: 140px; flex: 0 1 180px; }
 .mode-and-bin-options .inline-option { margin: 0 0 3px; white-space: nowrap; }
@@ -1377,6 +1378,7 @@ dialog:not([open]) { display: none; }
   .section-body, .output-panel { padding-left: 13px; padding-right: 13px; }
   .support-palette { grid-template-columns: 1fr; }
   .field-grid.three { grid-template-columns: repeat(2, 1fr); }
+  .field-grid.four { grid-template-columns: repeat(2, 1fr); }
   .workspace-toolbar { align-items: flex-start; }
   .icon-button span { display: none; }
   .camera-controls { top: 10px; left: 10px; }

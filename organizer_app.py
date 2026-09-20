@@ -25,6 +25,7 @@ from organizer_engine import (
     LidSpec,
     StackSpec,
     LiftGrabberSpec,
+    SideOpeningSpec,
     DEFAULT_BASE_THICKNESS,
     DEFAULT_WALL,
     GRID_PITCH,
@@ -88,6 +89,11 @@ from organizer_edge_mount import (
     apply_edge_mount_structure,
     edge_mount_summary,
     edge_mount_text_object,
+)
+from organizer_side_openings import (
+    apply_side_openings,
+    side_opening_summary,
+    validate_side_openings,
 )
 from organizer_b4b import (
     b4b_build_print_objects,
@@ -208,6 +214,23 @@ def validate_scoop_lift_grabbers(box: BoxSpec, scoop: bool) -> None:
             "the front scoop rises into the front-wall lift grabbers. Choose "
             "a smaller grabber size, use side-only grabbers, make the bin "
             "taller, or disable the scoop"
+        )
+
+
+def validate_side_opening_label(box: BoxSpec, label: str, label_location: str) -> None:
+    """A rim label may not occupy the same wall as a Side Opening.
+
+    The rim label's text/side live outside ``BoxSpec`` (they are generation
+    parameters, not saved box fields), so this conflict is checked here
+    rather than inside ``organizer_side_openings.validate_side_openings``.
+    """
+    if not box.side_openings.enabled or not clean_label(label):
+        return
+    side = rim_label_side(label_position(label_location))
+    if side is not None and side in box.side_openings.sides:
+        raise ValueError(
+            f"a rim label and a Side Opening cannot share the {side} wall; "
+            "move the rim label to a different side or deselect that side"
         )
 
 
@@ -845,6 +868,8 @@ def preview_geometry(
         label = text_of(rim_feature)
         label_location = str(rim_feature.options.get("rim_side", "back"))
     validate_scoop_lift_grabbers(box, scoop)
+    validate_side_openings(box)
+    validate_side_opening_label(box, label, label_location)
 
     features = resolve_text_features(
         box, features,
@@ -870,13 +895,20 @@ def preview_geometry(
     # them into the bin shell's own "outside" geometry, which would misclass
     # interior-part geometry as Bin geometry and break Bin/Interior/Xray.
     cut_fused_pieces = mode == "fused" and box.edge_mount.holes_enabled
+    cut_side_opening_pieces = mode == "fused" and box.side_openings.enabled
 
-    if box.edge_mount.active:
-        # make_box() already includes Lift Grabbers; this also adds the
+    if box.edge_mount.active or box.side_openings.enabled:
+        # make_box() already includes Lift Grabbers; Edge Mount also adds the
         # Projecting Label plate and cuts the shell's own small screw holes
-        # and driver-access openings.
-        edge_body = apply_edge_mount_structure(box, make_box(box))
-        geometry.extend(_mesh_preview_geometry(edge_body, "outside"))
+        # and driver-access openings. Side Openings cut the finished shell
+        # last, so the real cut body - not a synthesized wall - is what
+        # shows in preview here.
+        shell_body = make_box(box)
+        if box.edge_mount.active:
+            shell_body = apply_edge_mount_structure(box, shell_body)
+        if box.side_openings.enabled:
+            shell_body = apply_side_openings(box, shell_body)
+        geometry.extend(_mesh_preview_geometry(shell_body, "outside"))
     else:
         count = len(outer)
         for index in range(count):
@@ -901,6 +933,8 @@ def preview_geometry(
         ledge_mesh = make_top_label_ledge(box, rim_side)
         if cut_fused_pieces:
             ledge_mesh = apply_edge_mount_hole_cuts(box, ledge_mesh)
+        if cut_side_opening_pieces:
+            ledge_mesh = apply_side_openings(box, ledge_mesh)
         geometry.extend(_mesh_preview_geometry(ledge_mesh, "top_label_ledge"))
     if scoop:
         scoop_mesh = (
@@ -913,14 +947,16 @@ def preview_geometry(
         )
         # The scoop is fused into the shell, so a hole crossing it should show
         # cut here too. A removable-mode scoop belongs to the insert, which
-        # Edge Mount never drills.
+        # Edge Mount never drills and Side Openings never cut.
         if cut_fused_pieces:
             scoop_mesh = apply_edge_mount_hole_cuts(box, scoop_mesh)
+        if cut_side_opening_pieces:
+            scoop_mesh = apply_side_openings(box, scoop_mesh)
         geometry.extend(_mesh_preview_geometry(scoop_mesh, "scoop"))
     # make_box() already bakes lift grabbers into the shell it returns, so
-    # only draw them separately when the Edge Mount shell above did not
-    # already include them.
-    if box.lift_grabbers.enabled and not box.edge_mount.active:
+    # only draw them separately when the Edge Mount/Side Openings shell above
+    # did not already include them.
+    if box.lift_grabbers.enabled and not box.edge_mount.active and not box.side_openings.enabled:
         for grabber_mesh in make_lift_grabbers(box):
             geometry.extend(_mesh_preview_geometry(grabber_mesh, "lift_grabber"))
 
@@ -1041,6 +1077,8 @@ def preview_geometry(
                 # like the shell, scoop and rim ledge above.
                 if cut_fused_pieces and not is_text(one):
                     solid = apply_edge_mount_hole_cuts(box, solid)
+                if cut_side_opening_pieces and not is_text(one):
+                    solid = apply_side_openings(box, solid)
                 geometry.extend(
                     _mesh_preview_geometry(solid, tag)
                 )
@@ -1060,6 +1098,7 @@ def preview_geometry(
 
     if draft is not None:
         cut_draft = cut_fused_pieces and not is_text(draft)
+        cut_draft_side_opening = cut_side_opening_pieces and not is_text(draft)
         if draft_error is not None:
             built = False
             try:
@@ -1072,6 +1111,8 @@ def preview_geometry(
                 for solid in solids:
                     if cut_draft:
                         solid = apply_edge_mount_hole_cuts(box, solid)
+                    if cut_draft_side_opening:
+                        solid = apply_side_openings(box, solid)
                     geometry.extend(_mesh_preview_geometry(solid, "draft_invalid"))
                 built = True
             except Exception:
@@ -1094,6 +1135,8 @@ def preview_geometry(
                 for solid in solids:
                     if cut_draft:
                         solid = apply_edge_mount_hole_cuts(box, solid)
+                    if cut_draft_side_opening:
+                        solid = apply_side_openings(box, solid)
                     geometry.extend(_mesh_preview_geometry(solid, f"draft_{draft.kind}"))
             except Exception as error:
                 draft_error = f"{draft.kind}: {error}"
@@ -1150,6 +1193,8 @@ def preview_geometry(
             _edge_label, edge_mesh, _edge_raised = edge_text
             geometry.extend(_mesh_preview_geometry(edge_mesh, "label"))
 
+    side_openings_meta = side_opening_summary(box) if box.side_openings.enabled else None
+
     inside_x, inside_y = box.usable_opening
     return {
         "geometry": geometry,
@@ -1165,6 +1210,7 @@ def preview_geometry(
         "label_outline": label_outline_coords,
         "label_meta": label_meta,
         "edge_mount": edge_mount_meta,
+        "side_openings": side_openings_meta,
         # Where each text interior part ended up, so the browser can show the
         # resolved letter height an auto or zone-fitted one landed on.
         "text_meta": tuple(
@@ -1407,6 +1453,8 @@ def generate_organizer_files(
         label = text_of(rim_feature)
         label_location = str(rim_feature.options.get("rim_side", "back"))
     validate_scoop_lift_grabbers(box, scoop)
+    validate_side_openings(box)
+    validate_side_opening_label(box, label, label_location)
     layout = replace(
         layout,
         features=resolve_text_features(
@@ -1476,6 +1524,10 @@ def generate_organizer_files(
                 reported.remove_unreferenced_vertices()
                 reported.merge_vertices()
             inlays.append(edge_text)
+        # Re-applied last, to the fully completed body (fused features, scoop,
+        # rim ledge, Edge Mount and floor text all already on it), so a later
+        # body-level operation can never quietly fill a Side Opening back in.
+        reported = apply_side_openings(box, reported)
         output_dir.mkdir(parents=True, exist_ok=True)
         if inlays:
             written = export_text_body_3mf(
@@ -1484,7 +1536,7 @@ def generate_organizer_files(
             )
         else:
             written = []
-            export_mesh(body, output, "fused_organizer")
+            export_mesh(reported, output, "fused_organizer")
         result: dict[str, object] = {
             "mode": layout.mode,
             "box": _part_result(output, mesh_report("fused_organizer", reported)),
@@ -1523,6 +1575,9 @@ def generate_organizer_files(
                 body.remove_unreferenced_vertices()
                 body.merge_vertices()
             box_inlays.append(edge_text)
+        # Re-applied last, to the fully completed box shell, so a later
+        # body-level operation can never quietly fill a Side Opening back in.
+        body = apply_side_openings(box, body)
         reported_box = body
         if box_inlays:
             export_text_body_3mf(
@@ -1556,6 +1611,8 @@ def generate_organizer_files(
     result["customizations"] = {"scoop": scoop, "label_position": location}
     if box.edge_mount.active:
         result["edge_mount"] = edge_mount_summary(box)
+    if box.side_openings.enabled:
+        result["side_openings"] = side_opening_summary(box)
     if lid_enabled(stack_request):
         lid_output = _resolve_file(lid_filename, stack_request, part_name)
         lid, lid_texts = make_lid_parts(
@@ -1875,6 +1932,7 @@ def run_command(args: argparse.Namespace) -> dict[str, object]:
                 if args.wall is None
                 else math.isclose(args.wall, DEFAULT_WALL, abs_tol=1e-9)
             ),
+            side_openings=saved_box.side_openings,
         )
         if args.mode:
             layout = replace(layout, mode=args.mode)
@@ -2287,6 +2345,16 @@ def design_to_dict(
             "top_offset_mm": edge_mount.top_offset_mm,
             "hole_spacing_mm": edge_mount.hole_spacing_mm,
         }
+    side_openings = getattr(box, "side_openings", None) or SideOpeningSpec()
+    if side_openings.enabled:
+        box_block["side_openings"] = {
+            "enabled": True,
+            "shape": side_openings.shape,
+            "sides": list(side_openings.sides),
+            "size": side_openings.size,
+            "depth_percent": side_openings.depth_percent,
+            "top_support": side_openings.top_support,
+        }
     return {
         # Version 3 only when B4B is on. Version 3 changes B4B x/y from the
         # physical outside to the exact requested child field, so older builds
@@ -2367,6 +2435,20 @@ def design_from_dict(
             access_diameter_mm=(float(access_raw) if access_raw is not None else None),
             top_offset_mm=float(edge_mount_raw.get("top_offset_mm", 12.7)),
             hole_spacing_mm=(float(spacing_raw) if spacing_raw is not None else None),
+        )
+    side_openings_raw = raw.get("side_openings")
+    side_openings = SideOpeningSpec()
+    if isinstance(side_openings_raw, dict) and bool(side_openings_raw.get("enabled", False)):
+        raw_sides = side_openings_raw.get("sides", ())
+        if not isinstance(raw_sides, (list, tuple)):
+            raise ValueError("side opening sides must be a list")
+        side_openings = SideOpeningSpec(
+            enabled=True,
+            shape=str(side_openings_raw.get("shape", "curved")),
+            sides=tuple(str(side) for side in raw_sides),
+            size=str(side_openings_raw.get("size", "medium")),
+            depth_percent=float(side_openings_raw.get("depth_percent", 100.0)),
+            top_support=bool(side_openings_raw.get("top_support", False)),
         )
     b4b_raw = raw.get("b4b")
     b4b = B4BSpec()
@@ -2449,8 +2531,14 @@ def design_from_dict(
         lift_grabbers=lift_grabbers,
         lid=lid,
         edge_mount=edge_mount,
+        side_openings=side_openings,
     )
     box = normalize_stack_settings(box)
+    if not b4b.enabled:
+        # Authoritative even for saved/imported JSON: an impossible Side
+        # Opening combination must fail loudly at load time, never load
+        # silently as something else.
+        validate_side_openings(box)
     if b4b.enabled:
         if lid.enabled or stack.enabled:
             raise ValueError("Bin for Bins cannot use the ordinary Lid & Stacking part")

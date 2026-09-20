@@ -1621,6 +1621,13 @@ def validate_b4b_lift_grabbers(box: BoxSpec) -> None:
     )
 
 
+def validate_b4b_side_openings(box: BoxSpec) -> None:
+    """Side Openings are for ordinary bins only, never Bin for Bins."""
+    if not box.side_openings.enabled:
+        return
+    raise ValueError("Side Openings are not available on Bin for Bins.")
+
+
 def make_b4b_lift_grabbers(box: BoxSpec) -> list[trimesh.Trimesh]:
     """Small support-free internal finger ledges on the B4B's inner mating
     wall, near the top of the case."""
@@ -3213,6 +3220,7 @@ def validate_b4b_design(
         raise ValueError("B4B outward structural wall is empty")
 
     validate_b4b_lift_grabbers(box)
+    validate_b4b_side_openings(box)
 
     if b4b.handle:
         eligible, reason = b4b_handle_eligibility(box)

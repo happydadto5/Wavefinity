@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-19 — Side Openings
+
+- Added centered Curved or Square finger-access openings to any eligible
+  ordinary-bin wall, with four width presets, adjustable depth, and optional
+  printable Top Support. The editor removes or replaces a selected wall when
+  resizing makes it too short, and the finished 3D preview and generated body
+  show the real cut.
+
 ## 2026-09-19 — Fused holders may rise above a shallow bin's rim
 
 - A shallow Fused bin (e.g. a 10 mm vanity-top organizer) can now carry
