@@ -53,7 +53,7 @@ def pocket_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, floa
         OptionDefinition("Wall", "wall", "1.6"),
         OptionDefinition("Recess", "depth", ""),
         OptionDefinition("Rounding", "rounding", "", editor=False),
-    ), order=50,
+    ), order=50, palette_visible=False,
 )
 def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A raised block with a rectangular recess in it, chamfered on outside edges for strength."""

@@ -54,9 +54,13 @@ def _hole_sides(profile: str) -> int:
     """Polygon sides for a bore hole of this profile - round is a fine circle,
     a hex bit is a six-sided socket."""
     return {
-        "round": 48, "hex": 6, "square": 4,
+        "round": 48, "hex": 6, "square": 4, "square_axis": 4,
         "hex_bit_short": 6, "hex_bit_long": 6,
     }[profile]
+
+
+def _axis_square(profile: str) -> bool:
+    return profile == "square_axis"
 
 
 def bore_minimum_pitches(
@@ -64,8 +68,11 @@ def bore_minimum_pitches(
 ) -> tuple[float, float]:
     """Smallest X/Y centre pitches that retain the requested wall thickness."""
     sides = _hole_sides(profile)
-    radius = held / 2.0 / (math.cos(math.pi / sides) if sides < 8 else 1.0)
-    cross_pitch = 2.0 * radius + wall
+    if _axis_square(profile):
+        cross_pitch = held + wall
+    else:
+        radius = held / 2.0 / (math.cos(math.pi / sides) if sides < 8 else 1.0)
+        cross_pitch = 2.0 * radius + wall
     lean_pitch = cross_pitch / math.cos(math.radians(angle)) if angle > 1e-9 else cross_pitch
     return (lean_pitch, cross_pitch) if lean_axis == "x" else (cross_pitch, lean_pitch)
 
@@ -288,7 +295,7 @@ def bore_tool_clearance_zone(
 
 @feature(
     "bore", title="Bore", display="Bore — upright tools",
-    description="A block of snug upright holes for tools stood on end.",
+    description="Small pockets for your stuff of vary sizes/shapes.",
     capabilities=("size", "along", "item"),
     options=(
         OptionDefinition("Height", "height", ""),
@@ -345,6 +352,10 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             shaft = trimesh.creation.cylinder(
                 radius=hole_radius, height=depth + over, sections=sections,
             )
+            if _axis_square(grid["item"].profile):
+                shaft.apply_transform(
+                    trimesh.transformations.rotation_matrix(math.pi / 4.0, (0.0, 0.0, 1.0))
+                )
             shaft.apply_translation((0.0, 0.0, (over - depth) / 2.0))
             parts = [shaft]
             if chamfer > 1e-6:
@@ -357,6 +368,12 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
                     ],
                     sections=sections,
                 )
+                if _axis_square(grid["item"].profile):
+                    mouth.apply_transform(
+                        trimesh.transformations.rotation_matrix(
+                            math.pi / 4.0, (0.0, 0.0, 1.0)
+                        )
+                    )
                 parts.append(mouth)
             hole = union(parts) if len(parts) > 1 else parts[0]
 

@@ -498,7 +498,7 @@ multiple-drawer layout is preserved as a compatibility exception - a new
 Drawer Space otherwise represents exactly one physical drawer.
 
 Creating a new Drawer Space lands directly in the normal Bin editor with every
-ordinary option (Interior print mode, Base, Walls, Lift Grabbers) still
+ordinary option (Interior print mode, Base, Walls, Inside Handles) still
 visible; there is no tutorial or first-run card. A one-drawer Drawer Space's
 name, width, depth and usable height belong to the Space: the Space tab shows
 them read-only with an **Edit drawer** button (the Space Edit form), and an edit
@@ -508,7 +508,7 @@ bin), and Auto layout and spacer/connector actions stay disabled until there is
 something to work on.
 
 - **Space identity.** A typed Space carries a permanent `space_id` (UUID) in
-  its `.wavefinity.json` (metadata version 5). The per-user profile keeps a
+  its `.wavefinity.json` (metadata version 6; identity required since version 5). The per-user profile keeps a
   registry of known Spaces (id, name, kind, last folder) as an index only.
   Renaming the folder within the same parent is recovered automatically by
   that ID; a folder moved elsewhere is recognised when you Open Existing it.
@@ -620,7 +620,7 @@ something to work on.
 Wavefinity separates reusable **bin/shell intent** from **content placed inside
 the bin**. A future setting belongs in the reusable bin category when it changes
 the shell itself: mounting holes, exterior mounting, wall/base construction,
-lid/stacking, shell scoop, handles/grabbers, or bin-level label construction.
+lid/stacking, shell scoop, Inside Handles, or bin-level label construction.
 A future ordinary `layout.feature` is interior content and does not belong.
 
 | Variable / feature | Space default? |
@@ -632,7 +632,7 @@ A future ordinary `layout.feature` is interior content and does not belong.
 | Bin/container type | Yes |
 | Stacking | Yes |
 | Lid configuration | Yes |
-| Handle / grabber / shell options | Yes |
+| Inside Handles / shell options | Yes |
 | Scoop / shell modifications | Yes |
 | Storage Box container configuration | Yes |
 | Label enabled/type/location/style | Yes |
@@ -641,11 +641,10 @@ A future ordinary `layout.feature` is interior content and does not belong.
 | Edge Mount label text | **No — blank** |
 | Part/Bin name | **No — blank** |
 | Interior print/layout mode | Yes |
-| Divider or divider label | No |
-| Bore, cradle, post, pocket, slot, or steps | No |
-| Photo Nest / Nest | No |
-| Floor Text interior part | No |
-| Any future ordinary `layout.feature` | No |
+| Interior part instance / X-Y placement | **No — never auto-copied** |
+| Safe last-used interior-part editor settings by kind | **Yes** |
+| Actual interior text / division-label wording | **No — blank** |
+| Photo/image/contour source geometry | **No** |
 | Camera/view/editor/session state | No |
 | Connector-generation/session UI state | No |
 
@@ -658,10 +657,18 @@ on resumes using it. New fields missing from an older snapshot come from the
 current Wavefinity defaults.
 
 The sanitized snapshot lives in the Space's `.wavefinity.json` folder metadata,
-now version 3. It copies the complete bin/shell configuration, blanks names and
-label wording, and discards interior content generically. A rim/bin label is the
-sole `layout.features` exception because it is shell-level label configuration;
-its configuration remains while its wording is cleared.
+now version 6. It copies the complete bin/shell configuration, blanks names and
+label wording, and never copies placed interior-part instances. Safe last-used
+interior-part editor settings are stored separately by kind in `part_defaults`;
+width/depth and reusable options carry, while placement, photos/contours, names,
+and actual wording do not.
+
+A new user-editable option/part setting is presumed to participate in Space
+defaults unless it is explicitly instance-specific content. Bin/shell modifier
+settings carry forward with the bin-default snapshot. Interior-part instances
+do not auto-copy; their last-used safe editor settings are remembered per kind
+and seed the next instance. When adding a new option/editor field, update or
+verify Space-default persistence in the same change.
 
 ### Using the browser editor
 
@@ -1328,35 +1335,38 @@ uses) faces the support. That one **side** setting controls both
 subsections at once - there are no separate mounting-side and label-side
 choices.
 
-- **Projecting Label** - a thin horizontal plate, flush with the top rim,
+- **Label** - a thin horizontal plate, flush with the top rim,
   cantilevered outward from the top of the selected wall like a diving
   board, so it can rest over the top edge of a cart or table. It is not a
-  hook, clamp, gusset or mounting feature. **Plate length** is either Full
+  hook, clamp, gusset or mounting feature. **Length** is either Full
   Side (the wall's real wavy-envelope span) or Text Length (the fitted text
-  plus a 2 mm margin on every side, never wider than Full Side). Projection
-  (5-200 mm) and thickness (0.8-6.0 mm) are configurable, with 25/50/75 mm
-  and 1.2/2.0/3.0 mm presets. Lettering reuses the ordinary text engine:
+  plus a 2 mm margin on every side, never wider than Full Side). Projection is
+  one exact 5-200 mm field; a new Edge Mount starts at one-third of the
+  mount-normal bin dimension, clamped to that range. Thickness (0.8-6.0 mm)
+  keeps its named choices. The two free Label corners have a fixed ~1 mm
+  45-degree shave. Lettering reuses the ordinary text engine:
   Inlaid/Flush (default, 0.4 mm deep, needs the usual minimum backing) or
-  Raised. Text starts at a 5 mm cap height and only shrinks - never below
-  4 mm - to fit the plate; if it still will not fit at 4 mm, generation
+  Raised. Text targets a 12 mm cap height and only shrinks - never below
+  6 mm - to fit the plate; if it still will not fit at 6 mm, generation
   refuses with a plain explanation rather than truncating or enlarging the
   plate. **Flip text** turns the reading direction 180 degrees for mounting
   on the underside of a surface.
 - **Screw Mounting** - 1-4 round screw holes through the selected wall
   (default 2, arranged Horizontal or Vertical, default Horizontal), each
-  paired with a larger round driver-access passage that opens from the
+  paired with a larger round Screwdriver access passage that opens from the
   *opposite* wall and crosses the cavity to reach it - so a screwdriver can
   follow the screw in from the far side. Both holes are always round; there
   are no teardrops, countersinks or counterbores. Default screw diameter is
-  4 mm; default driver-access diameter is Auto = `max(8 mm, 2x screw
-  diameter)`, or a custom 2-20 mm value. The first (or only) hole centres
+  4 mm; new Screwdriver access choices are Small (6 mm), Default (8 mm), or
+  Large (10 mm). Legacy exact access values reopen unchanged when relevant.
+  The first (or only) hole centres
   12.7 mm (1/2 in) below the top rim by default (**Distance below top**);
   additional holes use Auto spacing (evenly fit, up to 20 mm apart) or an
   exact custom spacing. A pattern that cannot fit - too close to a corner,
   too close to the floor, or two access holes too close together - is
   refused with the reason, never silently shrunk, reduced or repositioned.
-  Screw Mounting cannot share its mounting or opposite wall with a Lift
-  Grabber; enabling both on conflicting walls is refused.
+  Screw Mounting cannot share its mounting or opposite wall with Inside
+  Handles; enabling both on conflicting walls is refused.
 
 The plate's projection is real geometry but is not part of the bin's
 nominal X/Y footprint, inventory dimensions or Space sizing/layout - those
@@ -1370,8 +1380,7 @@ none of those are migrated or replaced.
 ### Side Openings
 
 **Side Openings modifies an ordinary bin; it is not an interior part.**
-Like Lid & Stacking, it is a bin-level option shown under **Parts &
-options**, before the interior-part palette. It cuts centered finger-access
+It is a normal **Parts & options** palette option. It cuts centered finger-access
 notches through selected bin walls - built by making the normal Wavefinity
 bin first, then subtracting negative cutter solids through the selected
 wall(s), so the ordinary shell, cavity, wave, lock and connector geometry
@@ -1379,31 +1388,31 @@ never change. Default is off.
 
 - **Shape** - Curved (a rounded finger slot) or Square (a rectangular
   notch).
-- **Sides** - Front, Back, Left and Right are independent toggles, not a
-  single choice; any combination can be selected together.
+- **Cutout on:** Front, Back, Left and Right are independent toggle buttons,
+  not a single choice; any combination can be selected together. A new opening
+  prefers Left + Right when both are legal.
 - **Opening size** - Small (8 mm), Medium (10 mm, default), Large (15 mm)
   or XL (20 mm).
-- **Depth** - 1-100% (default 100%), measured from the rim down toward the
-  floor. 100% reaches the top of the base but never cuts into it; 50%
-  reaches halfway down the usable wall height.
-- **Top Support** - off by default. Off leaves an open-top notch; on keeps
-  a fixed 4 mm bridge across the top of the wall - a smooth printable arch
-  for Curved, a support-free 45-degree roof for Square.
+- **% from bottom** - defaults to 100%. It sets how far down the opening
+  reaches; 100% reaches the top of the base but never cuts into it.
+- **% from top** - defaults to 100%. Lowering it leaves progressively more
+  material above the opening.
 
 A wall needs to be at least **2 Wavefinity units (16 mm)** long to take a
 Side Opening at all, with a 4 mm solid corner shoulder kept at each end of
 the opening. That modular rule means a 2-unit wall only offers Small, a
 3-unit wall offers up to Large, and a 4-unit-or-larger wall offers every
 size including XL. The browser only offers sizes that fit every currently
-selected side and the current Shape/Depth/Top Support combination; Python
+selected side and the current Shape and percentage combination; Python
 re-validates the same rule and refuses an impossible saved or imported
 combination outright.
 
 Side Openings are for **ordinary bins only** - hidden for Storage Box and Base
-Trim. Lid & Stacking requires Top Support on, so the continuous top rim
-survives; turning either on while the other is set that way forces Top
-Support on automatically in the browser. A rim label, an Edge Mount
-mounting wall, or a Lift Grabber may not share a wall with a Side Opening -
+Trim. Lid & Stacking clamps **% from top** as needed to keep its required
+bridge. Curved supported openings use a pointed supportless arch with a
+minimum 45-degree underside, rather than the old fixed arch.
+A rim label, an Edge Mount
+mounting wall, or an Inside Handle may not share a wall with a Side Opening -
 different walls are fine for all three. The scoop and other interior parts
 are never globally blocked; the cutter is authoritative wherever a Side
 Opening's wall intersects other body geometry, and it is re-applied to the

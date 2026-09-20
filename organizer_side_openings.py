@@ -37,6 +37,7 @@ SIDE_OPENING_CORNER_MARGIN_MM = BASE_UNIT / 2.0  # 4 mm
 # The fixed continuous bridge Top Support leaves across the top of the wall.
 # Deliberately the same 4 mm as the existing lock geometry's upper chamfer.
 SIDE_OPENING_TOP_BRIDGE_MM = LOCK_TOP_BELOW_RIM
+SIDE_OPENING_ARCH_CURVE = 0.5
 SIDE_OPENING_CURVE_SEGMENTS = 32
 # Extra slack, beyond the wave's own amplitude, so an extruded cutter fully
 # crosses the most-inward and most-outward possible wavy wall surface
@@ -59,8 +60,10 @@ def side_opening_side_span(box: BoxSpec, side: str) -> float:
     return box.x if side in ("front", "back") else box.y
 
 
-def _vertical_geometry(box: BoxSpec, depth_percent: float) -> tuple[float, float, float]:
-    """``(floor_z, rim_z, bottom_z)`` for a given depth percentage.
+def _vertical_geometry(
+    box: BoxSpec, from_bottom_percent: float, from_top_percent: float,
+) -> tuple[float, float, float, float]:
+    """``(floor_z, rim_z, bottom_z, top_z)`` for the saved percentages.
 
     ``bottom_z`` is the opening's deepest point. At 100% it equals
     ``floor_z`` exactly; it never goes lower, so a Side Opening never removes
@@ -68,29 +71,28 @@ def _vertical_geometry(box: BoxSpec, depth_percent: float) -> tuple[float, float
     """
     floor_z = box.base_thickness
     rim_z = box.z
-    usable_wall_height = rim_z - floor_z
-    depth_fraction = depth_percent / 100.0
-    bottom_z = rim_z - usable_wall_height * depth_fraction
-    return floor_z, rim_z, bottom_z
+    usable_h = rim_z - floor_z
+    bottom_z = rim_z - usable_h * (from_bottom_percent / 100.0)
+    top_z = floor_z + usable_h * (from_top_percent / 100.0)
+    return floor_z, rim_z, bottom_z, top_z
 
 
-def _vertical_fits(
-    box: BoxSpec, shape: str, depth_percent: float, top_support: bool, width_mm: float,
-) -> bool:
+def _vertical_fits(box: BoxSpec, spec, width_mm: float) -> bool:
     r = width_mm / 2.0
-    floor_z, rim_z, bottom_z = _vertical_geometry(box, depth_percent)
+    floor_z, rim_z, bottom_z, top_z = _vertical_geometry(
+        box, spec.from_bottom_percent, spec.from_top_percent
+    )
     if bottom_z < floor_z - 1e-9:
         return False
-    if not top_support:
-        if shape == "curved":
+    if top_z <= bottom_z + 1e-9:
+        return False
+    if spec.from_top_percent >= 100.0 - 1e-9:
+        if spec.shape == "curved":
             return (rim_z - bottom_z) >= r - 1e-9
         return True
-    opening_top_z = rim_z - SIDE_OPENING_TOP_BRIDGE_MM
-    if opening_top_z <= bottom_z + 1e-9:
-        return False
-    if shape == "curved":
-        return (opening_top_z - bottom_z) >= 2.0 * r - 1e-9
-    return (opening_top_z - bottom_z) >= r - 1e-9
+    if spec.shape == "curved":
+        return (top_z - bottom_z) >= 2.5 * r - 1e-9
+    return (top_z - bottom_z) >= r - 1e-9
 
 
 def side_opening_allowed_sizes(box: BoxSpec, spec) -> tuple[str, ...]:
@@ -109,7 +111,7 @@ def side_opening_allowed_sizes(box: BoxSpec, spec) -> tuple[str, ...]:
             width > span - 2.0 * SIDE_OPENING_CORNER_MARGIN_MM + 1e-9 for span in spans
         ):
             continue
-        if not _vertical_fits(box, spec.shape, spec.depth_percent, spec.top_support, width):
+        if not _vertical_fits(box, spec, width):
             continue
         allowed.append(size)
     return tuple(allowed)
@@ -140,22 +142,21 @@ def validate_side_openings(box: BoxSpec) -> None:
                 f"{side} wall ({span:g} mm) with its {SIDE_OPENING_CORNER_MARGIN_MM:g} mm "
                 "corner shoulders; choose a smaller size or a longer wall"
             )
-    if not _vertical_fits(box, spec.shape, spec.depth_percent, spec.top_support, width):
-        if spec.top_support:
+    if not _vertical_fits(box, spec, width):
+        if spec.from_top_percent < 100.0 - 1e-9:
             raise ValueError(
-                "this Depth is too shallow for the selected width with Top "
-                "Support on; increase the depth, choose a smaller opening, or "
-                "turn Top Support off"
+                "the selected percentages leave too little height for this supported "
+                "opening; increase the span or choose a smaller opening"
             )
         raise ValueError(
-            "this Depth is too shallow for a curved opening of this width; "
-            "increase the depth or choose a smaller opening"
+            "the selected percentages leave too little height for a curved opening; "
+            "increase the span or choose a smaller opening"
         )
     if box.lift_grabbers.enabled:
         walls = {SIDE_OPENING_WALL_NAME[side] for side in spec.sides}
         if walls & set(box.lift_grabbers.walls):
             raise ValueError(
-                "a Side Opening and a Lift Grabber cannot share the same wall; "
+                "a Side Opening and an Inside Handle cannot share the same wall; "
                 "move one to a different wall or turn one off"
             )
     if box.edge_mount.active and box.edge_mount.side in spec.sides:
@@ -163,12 +164,14 @@ def validate_side_openings(box: BoxSpec) -> None:
             "Edge Mount's mounting wall cannot also carry a Side Opening; "
             "choose a different wall for one of them"
         )
-    if not spec.top_support and (lid_enabled(box) or box.stack.enabled):
-        raise ValueError(
-            "Side Openings need Top Support on while Lid & Stacking is "
-            "enabled, so the rim stays continuous; turn Top Support on or "
-            "disable Lid & Stacking"
-        )
+    if lid_enabled(box) or box.stack.enabled:
+        usable_h = box.z - box.base_thickness
+        max_from_top = 100.0 * (usable_h - SIDE_OPENING_TOP_BRIDGE_MM) / usable_h
+        if spec.from_top_percent > max_from_top + 1e-9:
+            raise ValueError(
+                "Side Openings need a top bridge while Lid & Stacking is enabled; "
+                "lower % from top or disable Lid & Stacking"
+            )
 
 
 def _wall_normal_range(box: BoxSpec, side: str) -> tuple[float, float]:
@@ -203,24 +206,26 @@ def _open_top_profile(shape: str, r: float, bottom_z: float, top_z: float) -> Po
     return polygon
 
 
-def _bridged_profile(shape: str, r: float, bottom_z: float, opening_top_z: float) -> Polygon:
+def _bridged_profile(shape: str, r: float, bottom_z: float, top_z: float) -> Polygon:
     if shape == "square":
         points = [
             (-r, bottom_z), (r, bottom_z),
-            (r, opening_top_z - r),
-            (0.0, opening_top_z),
-            (-r, opening_top_z - r),
+            (r, top_z - r),
+            (0.0, top_z),
+            (-r, top_z - r),
         ]
     else:
         bottom_theta = np.linspace(math.pi, 2.0 * math.pi, SIDE_OPENING_CURVE_SEGMENTS + 1)
         bottom_arc = [
             (r * math.cos(t), bottom_z + r + r * math.sin(t)) for t in bottom_theta
         ]
-        top_theta = np.linspace(0.0, math.pi, SIDE_OPENING_CURVE_SEGMENTS + 1)
-        top_arc = [
-            (r * math.cos(t), (opening_top_z - r) + r * math.sin(t)) for t in top_theta
+        roof_x = np.linspace(r, -r, SIDE_OPENING_CURVE_SEGMENTS + 1)
+        roof = [
+            (float(x), top_z - abs(float(x))
+             - SIDE_OPENING_ARCH_CURVE * (float(x) * float(x) / r))
+            for x in roof_x
         ]
-        points = [*bottom_arc, *top_arc]
+        points = [*bottom_arc, *roof]
     polygon = Polygon(points)
     if not polygon.is_valid or polygon.area <= 0.0:
         raise ValueError("invalid side opening profile generated")
@@ -230,10 +235,11 @@ def _bridged_profile(shape: str, r: float, bottom_z: float, opening_top_z: float
 def _side_opening_cutter(box: BoxSpec, side: str) -> trimesh.Trimesh:
     spec = box.side_openings
     r = spec.width_mm / 2.0
-    floor_z, rim_z, bottom_z = _vertical_geometry(box, spec.depth_percent)
-    if spec.top_support:
-        opening_top_z = rim_z - SIDE_OPENING_TOP_BRIDGE_MM
-        profile = _bridged_profile(spec.shape, r, bottom_z, opening_top_z)
+    floor_z, rim_z, bottom_z, top_z = _vertical_geometry(
+        box, spec.from_bottom_percent, spec.from_top_percent
+    )
+    if spec.from_top_percent < 100.0 - 1e-9:
+        profile = _bridged_profile(spec.shape, r, bottom_z, top_z)
     else:
         top_open_z = rim_z + SIDE_OPENING_TOP_OVERTRAVEL_MM
         profile = _open_top_profile(spec.shape, r, bottom_z, top_open_z)
@@ -302,8 +308,8 @@ def side_opening_summary(box: BoxSpec) -> dict[str, object]:
         "sides": list(spec.sides),
         "size": spec.size,
         "width_mm": spec.width_mm,
-        "depth_percent": spec.depth_percent,
-        "top_support": spec.top_support,
+        "from_bottom_percent": spec.from_bottom_percent,
+        "from_top_percent": spec.from_top_percent,
     }
     try:
         validate_side_openings(box)

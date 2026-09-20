@@ -555,11 +555,11 @@ class LiftGrabberSpec:
     def __post_init__(self) -> None:
         if self.size not in LIFT_GRABBER_SIZES:
             raise ValueError(
-                f"lift grabber size must be one of {', '.join(LIFT_GRABBER_SIZES)}"
+                f"Inside Handle size must be one of {', '.join(LIFT_GRABBER_SIZES)}"
             )
         if self.location not in LIFT_GRABBER_LOCATIONS:
             raise ValueError(
-                "lift grabber location must be one of "
+                "Inside Handle location must be one of "
                 f"{', '.join(LIFT_GRABBER_LOCATIONS)}"
             )
 
@@ -639,8 +639,8 @@ class SideOpeningSpec:
     shape: str = "curved"
     sides: tuple[str, ...] = ()
     size: str = "medium"
-    depth_percent: float = 100.0
-    top_support: bool = False
+    from_bottom_percent: float = 100.0
+    from_top_percent: float = 100.0
 
     def __post_init__(self) -> None:
         if self.shape not in SIDE_OPENING_SHAPES:
@@ -660,8 +660,14 @@ class SideOpeningSpec:
             if side in seen:
                 raise ValueError(f"side opening side '{side}' is duplicated")
             seen.add(side)
-        if not math.isfinite(self.depth_percent) or not (1.0 <= self.depth_percent <= 100.0):
-            raise ValueError("side opening depth must be between 1 and 100 percent")
+        for name, value in (
+            ("from bottom", self.from_bottom_percent),
+            ("from top", self.from_top_percent),
+        ):
+            if not math.isfinite(value) or not (0.0 <= value <= 100.0):
+                raise ValueError(f"side opening {name} must be between 0 and 100 percent")
+        if self.from_bottom_percent + self.from_top_percent <= 100.0:
+            raise ValueError("side opening top must be above its bottom")
         if self.enabled and not self.sides:
             raise ValueError("side openings are enabled but no sides are selected")
 
@@ -1370,7 +1376,7 @@ def _lift_grabber_bulge_mesh(
     if mesh.volume < 0:
         mesh.invert()
     if not (mesh.is_watertight and mesh.is_winding_consistent):
-        raise RuntimeError("lift grabber bulge is not a clean solid")
+        raise RuntimeError("Inside Handle geometry is not a clean solid")
     return mesh
 
 
@@ -1455,7 +1461,7 @@ def validate_lift_grabbers(box: BoxSpec) -> None:
     root_bite = embed - WAVE_AMPLITUDE
     if root_bite < LIFT_GRABBER_MIN_ROOT_BITE - 1e-9:
         raise ValueError(
-            f"this wall is too thin for lift grabbers to root into "
+            f"this wall is too thin for Inside Handles to root into "
             f"({root_bite:.2f} mm of bite; {LIFT_GRABBER_MIN_ROOT_BITE:g} mm "
             "needed). Choose a thicker wall."
         )
@@ -1471,14 +1477,14 @@ def validate_lift_grabbers(box: BoxSpec) -> None:
         if available < needed:
             checked_pairs.add(pair)
             raise ValueError(
-                f"{grabbers.size_label} lift grabbers do not fit on "
+                f"{grabbers.size_label} Inside Handles do not fit on "
                 f"this bin's {pair} walls. Choose a smaller size, a "
                 "different location, or make the bin larger."
             )
     bottom_z = box.z - LIFT_GRABBER_RIM_CLEARANCE - dims.height
     if bottom_z < box.base_thickness + LIFT_GRABBER_FLOOR_CLEARANCE:
         raise ValueError(
-            f"{grabbers.size_label} lift grabbers require a taller bin."
+            f"{grabbers.size_label} Inside Handles require a taller bin."
         )
 
 
@@ -1517,14 +1523,24 @@ def lift_grabber_keep_outs(box: BoxSpec) -> list[tuple[str, Polygon]]:
     1 mm, inward reach plus 1 mm) rather than doing per-height collision
     testing against interior parts.
     """
+    return [(name, polygon) for name, polygon, _z0, _z1
+            in lift_grabber_collision_volumes(box)]
+
+
+def lift_grabber_collision_volumes(
+    box: BoxSpec,
+) -> list[tuple[str, Polygon, float, float]]:
+    """Physical XY and Z volume reserved by each active Inside Handle."""
     grabbers = box.lift_grabbers
     if not grabbers.enabled:
         return []
     dims = grabbers.dimensions
     half_width = (dims.width + 1.0) / 2.0
     reach = dims.projection + 1.0
+    top_z = box.z - LIFT_GRABBER_RIM_CLEARANCE
+    bottom_z = top_z - dims.height
     faces = _wall_face_table(box)
-    zones: list[tuple[str, Polygon]] = []
+    volumes: list[tuple[str, Polygon, float, float]] = []
     for wall in grabbers.walls:
         run_axis, _wave_half, face, inward = faces[wall]
         inward_x, inward_y = inward
@@ -1534,9 +1550,9 @@ def lift_grabber_keep_outs(box: BoxSpec) -> list[tuple[str, Polygon]]:
         else:
             x0, x1 = -half_width, half_width
             y0, y1 = sorted((face, face + inward_y * reach))
-        name = f"lift grabber ({_LIFT_GRABBER_WALL_LABELS[wall]})"
-        zones.append((name, shapely_box(x0, y0, x1, y1)))
-    return zones
+        name = f"inside handle ({_LIFT_GRABBER_WALL_LABELS[wall]})"
+        volumes.append((name, shapely_box(x0, y0, x1, y1), bottom_z, top_z))
+    return volumes
 
 
 def lift_grabber_summary(box: BoxSpec) -> dict | None:

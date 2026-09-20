@@ -53,7 +53,7 @@
             <label><span id="z-size-label">Height</span> <span class="unit">mm</span><input id="z" type="text" inputmode="numeric"></label>
           </div>
           <div class="mode-and-bin-options">
-            <label class="compact-select">Interior print mode
+            <label class="compact-select" title="Fused into box prints the interior parts as part of the bin. Removable insert prints all interior parts as a separate drop-in piece, so you can adjust or reprint the interior without reprinting the whole bin.">Interior print mode
               <select id="mode-select"></select>
             </label>
             <!-- Base/Wall are the same shared controls the B4B panel uses;
@@ -67,14 +67,8 @@
               <label id="wall-thickness-setting" class="inline-select compact-select">Walls
                 <select id="wall-thickness"><option value="standard">Standard</option></select>
               </label>
-              <label id="lift-grabber-size-setting" class="inline-select compact-select" title="Adds small finger ledges inside the bin so it can be lifted when neighboring bins block the outside walls.">Lift Grabbers
-                <select id="lift-grabber-size"></select>
-              </label>
             </div>
             <span id="thin-wall-warning" class="wall-warning" hidden>Very thin — may not print reliably with standard nozzle/slicer settings.</span>
-            <label id="lift-grabber-location-setting" class="inline-select compact-select" hidden>Grabber location
-              <select id="lift-grabber-location"></select>
-            </label>
           </div>
 
           <div id="b4b-panel" class="b4b-panel" hidden>
@@ -185,14 +179,10 @@
 
           <div class="subheading-row">
             <div><h2>Parts &amp; options</h2></div>
-            <span id="support-count" class="count-badge">0 placed</span>
+            <span id="support-count" class="count-badge">0 added</span>
           </div>
-          <div id="lid-option" class="lid-option-card">
-            <div class="lid-option-heading">
-              <div><strong>Lid &amp; Stacking</strong><span>Bin-level part</span></div>
-              <button id="lid-option-toggle" type="button" class="button secondary">Add</button>
-            </div>
-            <div id="lid-option-panel" hidden>
+          <div id="lid-option" class="lid-option-card" hidden>
+            <div id="lid-option-panel">
               <label>Configuration
                 <select id="lid-configuration">
                   <option value="stackable_bin">Stackable Bin</option>
@@ -228,12 +218,18 @@
               <p id="lid-option-note" class="inline-help"></p>
             </div>
           </div>
-          <div id="side-openings-option" class="lid-option-card">
-            <div class="lid-option-heading">
-              <div><strong>Side Openings</strong><span>Bin-level part</span></div>
-              <button id="side-openings-toggle" type="button" class="button secondary">Add</button>
+          <div id="inside-handles-option" class="lid-option-card" hidden>
+            <div class="field-grid two">
+              <label id="lift-grabber-size-setting" class="inline-select">Inside Handle size
+                <select id="lift-grabber-size"></select>
+              </label>
+              <label id="lift-grabber-location-setting" class="inline-select">Inside Handle location
+                <select id="lift-grabber-location"></select>
+              </label>
             </div>
-            <div id="side-openings-panel" hidden>
+          </div>
+          <div id="side-openings-option" class="lid-option-card" hidden>
+            <div id="side-openings-panel">
               <div class="field-grid three">
                 <label class="inline-select">Shape
                   <select id="side-opening-shape">
@@ -244,31 +240,33 @@
                 <label class="inline-select">Opening size
                   <select id="side-opening-size"></select>
                 </label>
-                <label title="Percent of the usable wall height, measured down from the rim. 100% reaches the top of the base but never cuts it.">Depth %
-                  <input id="side-opening-depth" type="number" min="1" max="100" step="1">
+                <label>% from bottom
+                  <input id="side-opening-from-bottom" type="number" min="0" max="100" step="1">
+                </label>
+                <label>% from top
+                  <input id="side-opening-from-top" type="number" min="0" max="100" step="1">
                 </label>
               </div>
-              <div class="field-grid four">
-                <label class="checkbox-row"><span>Front</span><input id="side-opening-front" type="checkbox"></label>
-                <label class="checkbox-row"><span>Back</span><input id="side-opening-back" type="checkbox"></label>
-                <label class="checkbox-row"><span>Left</span><input id="side-opening-left" type="checkbox"></label>
-                <label class="checkbox-row"><span>Right</span><input id="side-opening-right" type="checkbox"></label>
+              <div class="field-label">Cutout on:</div>
+              <div class="segmented four" aria-label="Side Opening walls">
+                <button id="side-opening-front" type="button" aria-pressed="false">Front</button>
+                <button id="side-opening-back" type="button" aria-pressed="false">Back</button>
+                <button id="side-opening-left" type="button" aria-pressed="false">Left</button>
+                <button id="side-opening-right" type="button" aria-pressed="false">Right</button>
               </div>
-              <label class="checkbox-row"><span>Top Support</span><input id="side-opening-top-support" type="checkbox"></label>
-              <p class="inline-help">Off leaves an open-top finger notch. On keeps a continuous printable bridge across the top of the wall.</p>
             </div>
             <p id="side-opening-note" class="inline-help"></p>
           </div>
           <div class="palette-wrap">
             <div id="support-palette" class="support-palette" role="list"></div>
             <div id="draft-actions" class="draft-actions" hidden>
-              <button type="button" id="save-part" class="button primary">Save Part</button>
-              <button type="button" id="delete-part" class="button danger">Delete Part</button>
+              <button type="button" id="save-part" class="button primary">Save</button>
+              <button type="button" id="delete-part" class="button danger">Delete</button>
             </div>
           </div>
 
           <div class="placed-block placed-block-panel">
-            <h3>Placed parts</h3>
+            <h3>Added parts &amp; options</h3>
             <div id="placed-supports-panel" class="placed-supports"></div>
           </div>
 
@@ -289,27 +287,23 @@
                     <option value="right">Right</option>
                   </select>
                 </label>
-                <label class="checkbox-row"><span>Projecting Label</span><input id="edge-mount-label-enabled" type="checkbox"></label>
+                <label class="checkbox-row"><span>Label</span><input id="edge-mount-label-enabled" type="checkbox"></label>
                 <label class="checkbox-row"><span>Screw Mounting</span><input id="edge-mount-holes-enabled" type="checkbox"></label>
               </div>
 
               <div id="edge-mount-label-panel" hidden>
-                <h4 class="b4b-card-title">Projecting Label</h4>
                 <div class="field-grid three">
                   <label style="grid-column:1 / span 2">Label text
                     <input id="edge-mount-label-text" type="text" maxlength="40" placeholder="e.g. PRUNER">
                   </label>
-                  <label class="inline-select">Plate length
+                  <label class="inline-select">Length
                     <select id="edge-mount-label-length-mode">
                       <option value="full">Full Side</option>
                       <option value="text">Text Length</option>
                     </select>
                   </label>
-                  <label class="inline-select">Projection
-                    <select id="edge-mount-label-projection"></select>
-                  </label>
-                  <label id="edge-mount-label-projection-custom-row" hidden>Projection mm
-                    <input id="edge-mount-label-projection-mm" type="number" min="5" max="200" step="1">
+                  <label>Projection <span class="unit">mm</span>
+                    <input id="edge-mount-label-projection-mm" type="number" min="5" max="200" step="0.1">
                   </label>
                   <label class="inline-select">Plate thickness
                     <select id="edge-mount-label-thickness"></select>
@@ -348,18 +342,15 @@
                       <option value="vertical">Vertical</option>
                     </select>
                   </label>
-                  <label>Screw hole Ø mm
+                  <label>Screw hole <span class="unit">mm</span>
                     <input id="edge-mount-screw-diameter" type="number" min="1" max="12" step="0.1">
                   </label>
-                  <label class="inline-select">Driver access Ø
-                    <select id="edge-mount-access-mode">
-                      <option value="auto">Auto</option>
-                      <option value="custom">Custom</option>
+                  <label class="inline-select">Screwdriver access
+                    <select id="edge-mount-access-diameter">
+                      <option value="6">Small (6 mm)</option>
+                      <option value="8">Default (8 mm)</option>
+                      <option value="10">Large (10 mm)</option>
                     </select>
-                  </label>
-                  <span id="edge-mount-access-auto-note" class="muted">Auto: 8 mm</span>
-                  <label id="edge-mount-access-custom-row" hidden>Access Ø mm
-                    <input id="edge-mount-access-diameter" type="number" min="2" max="20" step="0.1">
                   </label>
                   <label title="Measured from the top rim to the center of the upper screw hole.">Distance below top mm
                     <input id="edge-mount-top-offset" type="number" min="0.1" step="0.1">

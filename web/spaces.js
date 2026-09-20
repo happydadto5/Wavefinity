@@ -28,7 +28,8 @@ const SP_KINDS = {
 };
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
-const FOLDER_METADATA_VERSION = 5;
+const SPACE_ID_REQUIRED_VERSION = 5;
+const FOLDER_METADATA_VERSION = 6;
 const SPACE_SETUP_VERSION = 1;
 // One fixed name for every inventory-enabled folder: it never follows the
 // folder's own (renamable) name.
@@ -206,6 +207,7 @@ SP.applyFolder = async (info, { reset = true } = {}) => {
     info.inventory,
     info.keep_bin_defaults,
     info.bin_defaults,
+    info.part_defaults,
   );
   syncForm();
   if (SP.renderSpaceInfo) SP.renderSpaceInfo();
@@ -261,7 +263,7 @@ SP.classifyMetadata = record => {
   // v2 and v3 are readable migration inputs, same as the local backend
   // (organizer_spaces._folder_state); v4 is already onboarded and v5 is
   // current - v4 only lacks the Space identity, which is not a setup pass.
-  if (![2, 3, 4, FOLDER_METADATA_VERSION].includes(current.version)) return { status: "invalid" };
+  if (![2, 3, 4, 5, 6].includes(current.version)) return { status: "invalid" };
   const needsMigration = current.version < 4 || current.setup_version !== SPACE_SETUP_VERSION;
   const explicitInventory = typeof current.inventory === "boolean" ? current.inventory : null;
   if (current.folder_mode === "design") {
@@ -272,16 +274,19 @@ SP.classifyMetadata = record => {
     if (!space) return { status: "invalid-space" };
     if (current.version === 2) {
       // v2 predates keep_bin_defaults/bin_defaults entirely.
-      return { status: "space", space, space_id: null, needsIdentityMigration: false, inventory: true, keep_bin_defaults: true, bin_defaults: null, needsMigration: true };
+      return { status: "space", space, space_id: null, needsIdentityMigration: false, inventory: true, keep_bin_defaults: true, bin_defaults: null, part_defaults: {}, needsMigration: true, metadataVersion: 2 };
     }
     // A current-version typed Space must carry a valid ID; it is never healed
     // with a replacement identity.
     // v2/v3 are setup inputs (handled above for v2): never trust their ID.
     const spaceId = current.version >= 4 ? SP.validUuid(current.space_id) : null;
-    if (current.version >= FOLDER_METADATA_VERSION && !spaceId) return { status: "invalid-space" };
+    if (current.version >= SPACE_ID_REQUIRED_VERSION && !spaceId) return { status: "invalid-space" };
     const keep = current.keep_bin_defaults === undefined ? true : current.keep_bin_defaults;
     const defaults = current.bin_defaults === undefined ? null : current.bin_defaults;
-    if (typeof keep !== "boolean" || (defaults !== null && (typeof defaults !== "object" || Array.isArray(defaults)))) {
+    const partDefaults = current.version <= 5 ? (current.part_defaults || {}) : current.part_defaults;
+    if (typeof keep !== "boolean"
+        || (defaults !== null && (typeof defaults !== "object" || Array.isArray(defaults)))
+        || !partDefaults || typeof partDefaults !== "object" || Array.isArray(partDefaults)) {
       return { status: "invalid" };
     }
     // A stored legacy "box" identity always requires the explicit
@@ -293,8 +298,10 @@ SP.classifyMetadata = record => {
     const spaceNeedsMigration = needsMigration || space.kind === "box" || surfaceNeedsMigration;
     return {
       status: "space", space, space_id: spaceId,
-      needsIdentityMigration: current.version < FOLDER_METADATA_VERSION && !spaceNeedsMigration,
-      inventory: true, keep_bin_defaults: keep, bin_defaults: defaults, needsMigration: spaceNeedsMigration,
+      needsIdentityMigration: current.version < SPACE_ID_REQUIRED_VERSION && !spaceNeedsMigration,
+      inventory: true, keep_bin_defaults: keep, bin_defaults: defaults,
+      part_defaults: partDefaults, needsMigration: spaceNeedsMigration,
+      metadataVersion: current.version,
     };
   }
   return { status: "invalid" };
@@ -331,26 +338,33 @@ SP.writeMetadata = async (handle, mode, space = null, inventory = true, changes 
     let spaceId = null;
     let keep = true;
     let defaults = null;
+    let partDefaults = {};
     const { current } = await SP.readMetadata(handle);
     const currentState = SP.classifyMetadata(current);
     if (!["missing", "design", "space"].includes(currentState.status)) throw SP.metadataError(currentState.status);
     if (currentState.status === "space") {
       keep = currentState.keep_bin_defaults;
       defaults = currentState.bin_defaults;
+      partDefaults = currentState.part_defaults || {};
       // The identity choke point: keep an existing ID, only new or pre-v5
       // Spaces may get one. (A damaged v5 already threw above.)
       spaceId = currentState.space_id;
     }
     if (Object.hasOwn(changes, "keep_bin_defaults")) keep = Boolean(changes.keep_bin_defaults);
     if (Object.hasOwn(changes, "bin_defaults")) defaults = changes.bin_defaults;
+    if (Object.hasOwn(changes, "part_defaults")) partDefaults = changes.part_defaults;
     if (defaults !== null && (typeof defaults !== "object" || Array.isArray(defaults))) {
       throw new Error("Bin defaults must be an object or null.");
+    }
+    if (!partDefaults || typeof partDefaults !== "object" || Array.isArray(partDefaults)) {
+      throw new Error("Part defaults must be an object.");
     }
     metadata.space_id = spaceId || crypto.randomUUID();
     metadata.inventory = true;
     metadata.space = space;
     metadata.keep_bin_defaults = keep;
     metadata.bin_defaults = defaults;
+    metadata.part_defaults = partDefaults;
   }
   await WFFileSystem.writeText(handle, FOLDER_METADATA, JSON.stringify(metadata, null, 2));
   return metadata;
@@ -467,6 +481,7 @@ SP.inspectHosted = async folder => {
   let inventory = true;
   let keepBinDefaults = true;
   let binDefaults = null;
+  let partDefaults = {};
   let needsSetup = false;
   let spaceId = null;
   let needsIdentity = false;
@@ -488,6 +503,7 @@ SP.inspectHosted = async folder => {
       spaceSource = "metadata";
       keepBinDefaults = currentState.keep_bin_defaults;
       binDefaults = currentState.bin_defaults;
+      partDefaults = currentState.part_defaults || {};
       spaceId = currentState.space_id;
       needsIdentity = currentState.needsIdentityMigration;
       // Already valid current v4/v5 setup_version-1 metadata: the inventory's
@@ -504,6 +520,7 @@ SP.inspectHosted = async folder => {
     spaceSource = "metadata";
     keepBinDefaults = currentState.keep_bin_defaults;
     binDefaults = currentState.bin_defaults;
+    partDefaults = currentState.part_defaults || {};
     spaceId = currentState.space_id;
     needsIdentity = currentState.needsIdentityMigration;
     needsSetup = currentState.needsMigration;
@@ -556,10 +573,11 @@ SP.inspectHosted = async folder => {
     needs_identity_migration: mode === "space" && needsIdentity,
     space_source: spaceSource,
     setup_prefill_space: setupPrefillSpace,
-    metadata_version: currentState.status === "design" ? currentState.metadataVersion : null,
+    metadata_version: currentState.metadataVersion || null,
     inventory: mode === "space" ? true : inventory,
     keep_bin_defaults: mode === "space" ? keepBinDefaults : false,
     bin_defaults: mode === "space" ? binDefaults : null,
+    part_defaults: mode === "space" ? partDefaults : {},
     missing: false,
     needs_setup: needsSetup,
     inventory_text: inventoryText,
@@ -594,11 +612,14 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null } = {}) => {
   SP.assertExpectedHostedIdentity(info, expectedSpaceId);
   if (!info.needs_setup) {
     if (info.inventory) await SP.readInventoryFor(folder, { migrate: true });
-    const upgradeSpace = info.folder_mode === "space" && info.needs_identity_migration;
+    const upgradeSpace = info.folder_mode === "space" && (
+      info.needs_identity_migration || (info.metadata_version || 0) < FOLDER_METADATA_VERSION
+    );
     const upgradeDesign = info.folder_mode === "design" && info.metadata_version && info.metadata_version < FOLDER_METADATA_VERSION;
     if (upgradeSpace) {
       await SP.writeMetadata(folder.handle, "space", info.space, true, {
         keep_bin_defaults: info.keep_bin_defaults, bin_defaults: info.bin_defaults,
+        part_defaults: info.part_defaults,
       });
     } else if (upgradeDesign) {
       await SP.writeMetadata(folder.handle, "design", null, info.inventory);
@@ -726,6 +747,7 @@ SP.updateBinDefaults = async (changes = {}) => {
   const updates = {};
   if (Object.hasOwn(changes, "enabled")) updates.keep_bin_defaults = Boolean(changes.enabled);
   if (Object.hasOwn(changes, "snapshot")) updates.bin_defaults = changes.snapshot;
+  if (Object.hasOwn(changes, "partDefaults")) updates.part_defaults = changes.partDefaults;
   if (!Object.keys(updates).length) return;
   let info;
   if (state.runtime.hosted) {
@@ -743,6 +765,8 @@ SP.updateBinDefaults = async (changes = {}) => {
   state.keepBinDefaults = Boolean(info.keep_bin_defaults);
   state.spaceBinDefaults = info.bin_defaults && typeof info.bin_defaults === "object"
     ? clone(info.bin_defaults) : null;
+  state.spacePartDefaults = info.part_defaults && typeof info.part_defaults === "object"
+    ? clone(info.part_defaults) : {};
   if (typeof DP !== "undefined" && DP.built) DP.renderSave();
 };
 
@@ -1157,12 +1181,14 @@ SP.create = async () => {
     const inventoryText = await SP.readInventoryFor(folder, { migrate: true });
     let keepBinDefaults = true;
     let binDefaults = null;
+    let partDefaults = {};
     if (migrating) {
       const { current } = await SP.readMetadata(folder.handle);
       const currentState = SP.classifyMetadata(current);
       if (currentState.status === "space") {
         keepBinDefaults = currentState.keep_bin_defaults;
         binDefaults = currentState.bin_defaults;
+        partDefaults = currentState.part_defaults || {};
       }
     }
     const result = await api(migrating ? "/api/space/configure-text" : "/api/space/create-text", {
@@ -1174,6 +1200,7 @@ SP.create = async () => {
     const metadata = await SP.writeMetadata(folder.handle, "space", space, true, {
       keep_bin_defaults: keepBinDefaults,
       bin_defaults: binDefaults,
+      part_defaults: partDefaults,
     });
     // Activate the selected target folder itself, not whatever folder was
     // previously active - see Fix 004 Correction 7.A.
@@ -1182,7 +1209,8 @@ SP.create = async () => {
     info = {
       folder: folder.name, folder_name: folder.name, folder_mode: "space", space,
       space_id: metadata.space_id,
-      inventory: true, keep_bin_defaults: metadata.keep_bin_defaults, bin_defaults: metadata.bin_defaults,
+      inventory: true, keep_bin_defaults: metadata.keep_bin_defaults,
+      bin_defaults: metadata.bin_defaults, part_defaults: metadata.part_defaults,
     };
   } else {
     const data = await api(migrating ? "/api/space/configure" : "/api/space/create", {
@@ -1715,9 +1743,11 @@ SP.updateSpace = async () => {
         const currentState = SP.classifyMetadata(current);
         const keep = currentState.status === "space" ? currentState.keep_bin_defaults : true;
         const defaults = currentState.status === "space" ? currentState.bin_defaults : null;
+        const partDefaults = currentState.status === "space" ? currentState.part_defaults : {};
         const metadata = await SP.writeMetadata(folder.handle, "space", space, true, {
           keep_bin_defaults: keep,
           bin_defaults: defaults,
+          part_defaults: partDefaults,
         });
         state.activeSpace = space;
         state.activeSpaceId = metadata.space_id || null;

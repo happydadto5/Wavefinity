@@ -44,6 +44,7 @@ const state = {
   // a lone part for editing. Cleared the moment a part is picked or reopened.
   paletteBrowsing: false,
   edgeMountEditing: false,
+  modifierEditing: null,
   // Which of the open draft's zone axes the user has set by hand. A pinned axis
   // is only ever grown to fit the part's contents, never shrunk back or
   // overwritten - a manual size always wins. Reset whenever a fresh draft loads.
@@ -68,6 +69,7 @@ const state = {
   activeSpace: null,
   keepBinDefaults: false,
   spaceBinDefaults: null,
+  spacePartDefaults: {},
   // Whether this folder logs generated bins/B4Bs to its inventory file - the
   // default for any folder, independent of whether Space planning is on.
   inventoryEnabled: true,
@@ -161,15 +163,18 @@ function setFolderState(
   inventory = undefined,
   keepBinDefaults = undefined,
   binDefaults = undefined,
+  partDefaults = undefined,
 ) {
   state.folderMode = mode === "space" ? "space" : "design";
   state.activeSpace = state.folderMode === "space" ? (space || null) : null;
   if (state.folderMode === "space") {
     state.keepBinDefaults = keepBinDefaults === undefined ? true : Boolean(keepBinDefaults);
     state.spaceBinDefaults = binDefaults && typeof binDefaults === "object" ? clone(binDefaults) : null;
+    state.spacePartDefaults = partDefaults && typeof partDefaults === "object" ? clone(partDefaults) : {};
   } else {
     state.keepBinDefaults = false;
     state.spaceBinDefaults = null;
+    state.spacePartDefaults = {};
   }
   const resolvedInventory = inventory === undefined ? state.inventoryEnabled : Boolean(inventory);
   // Space always keeps inventory - it is what the layout is built from.
@@ -249,17 +254,77 @@ function spaceBinDefaultsFromDesign(design) {
   if (snapshot.box) delete snapshot.box.b4b;
   snapshot.part_name = "";
   snapshot.label = "";
-  snapshot.label_position = "bottom";
+  if (snapshot.box?.edge_mount) snapshot.box.edge_mount.label_text = "";
+  if (snapshot.box?.lid) {
+    snapshot.box.lid.label_text = "";
+    snapshot.box.lid.division_labels = (snapshot.box.lid.division_labels || []).map(() => "");
+  }
   snapshot.layout = snapshot.layout || {};
-  snapshot.layout.features = (snapshot.layout.features || [])
-    .filter(feature => feature?.kind === "text" && feature.options?.level === "rim")
-    .slice(0, 1)
-    .map(feature => {
-      const copy = clone(feature);
-      copy.options = { ...(copy.options || {}), text: "" };
-      return copy;
-    });
+  snapshot.layout.features = [];
   return snapshot;
+}
+
+function partDefaultsFromFeature(feature) {
+  if (!feature?.kind || !Array.isArray(feature.zone) || feature.zone.length !== 4) return null;
+  const copy = {
+    kind: feature.kind,
+    zone_size: [
+      number(feature.zone[2]) - number(feature.zone[0]),
+      number(feature.zone[3]) - number(feature.zone[1]),
+    ],
+    options: clone(feature.options || {}),
+    count: feature.count ?? null,
+    along: feature.along || "x",
+  };
+  for (const key of Object.keys(copy.options)) {
+    if (key === "text" || key === "division_labels" || key.endsWith("_text")) {
+      delete copy.options[key];
+    }
+  }
+  delete copy.options.photo;
+  if (!partInfo(feature.kind)?.flags?.photo && feature.item) {
+    copy.item = clone(feature.item);
+    copy.item.name = "Custom item";
+  }
+  return copy;
+}
+
+function seedFeatureFromPartDefaults(feature, remembered) {
+  if (!feature || !remembered || remembered.kind !== feature.kind) return feature;
+  const seeded = clone(feature);
+  if (Array.isArray(remembered.zone_size) && remembered.zone_size.length === 2) {
+    const cx = (number(seeded.zone[0]) + number(seeded.zone[2])) / 2;
+    const cy = (number(seeded.zone[1]) + number(seeded.zone[3])) / 2;
+    const width = Math.max(0.1, number(remembered.zone_size[0]));
+    const depth = Math.max(0.1, number(remembered.zone_size[1]));
+    seeded.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
+  }
+  seeded.options = { ...(seeded.options || {}), ...(clone(remembered.options || {})) };
+  if (Object.hasOwn(remembered, "count")) seeded.count = remembered.count;
+  if (remembered.along) seeded.along = remembered.along;
+  if (remembered.item && !partInfo(feature.kind)?.flags?.photo) seeded.item = clone(remembered.item);
+  delete seeded.contour;
+  delete seeded.source_contour;
+  return seeded;
+}
+
+async function rememberPartDefault(feature) {
+  if (state.folderMode !== "space" || !state.keepBinDefaults || typeof SP === "undefined") return;
+  const remembered = partDefaultsFromFeature(feature);
+  if (!remembered) return;
+  state.spacePartDefaults = { ...(state.spacePartDefaults || {}), [feature.kind]: remembered };
+  try {
+    await SP.updateBinDefaults({ partDefaults: state.spacePartDefaults });
+  } catch (error) {
+    toast(`Part defaults were not saved: ${error.message}`, true, 5000);
+  }
+}
+
+async function rememberAppliedPartDefault(result, fallback = null) {
+  const saved = Number.isInteger(result?.selected)
+    ? state.design?.layout?.features?.[result.selected]
+    : null;
+  await rememberPartDefault(saved || fallback);
 }
 
 function drawerHardClearance() {
@@ -349,7 +414,16 @@ async function loadFreshOrdinaryDesignForCurrentFolder() {
 
 async function rememberGeneratedSpaceBin(design) {
   if (state.folderMode !== "space" || !state.keepBinDefaults || typeof SP === "undefined") return;
-  await SP.updateBinDefaults({ snapshot: spaceBinDefaultsFromDesign(design) });
+  const fallback = {};
+  for (const feature of design?.layout?.features || []) {
+    const remembered = partDefaultsFromFeature(feature);
+    if (remembered) fallback[feature.kind] = remembered;
+  }
+  state.spacePartDefaults = { ...fallback, ...(state.spacePartDefaults || {}) };
+  await SP.updateBinDefaults({
+    snapshot: spaceBinDefaultsFromDesign(design),
+    partDefaults: state.spacePartDefaults || {},
+  });
 }
 
 function pinDraftAxis(axis) {
@@ -503,7 +577,34 @@ function partInfo(kind = state.draftKind) {
 }
 
 function editingEdgeMount() {
-  return state.edgeMountEditing === true;
+  return state.modifierEditing === "edge_mount";
+}
+
+const BOX_MODIFIER_KINDS = new Set([
+  "lid_stacking", "inside_handles", "side_openings", "edge_mount",
+]);
+
+function modifierIsActive(kind, design = state.design) {
+  const box = design?.box || {};
+  if (kind === "lid_stacking") {
+    return Boolean(box.lid?.enabled || (box.stack?.mode && box.stack.mode !== "none"));
+  }
+  if (kind === "inside_handles") return Boolean(box.lift_grabbers?.enabled);
+  if (kind === "side_openings") return Boolean(box.side_openings?.enabled);
+  if (kind === "edge_mount") {
+    return Boolean(box.edge_mount?.label_enabled || box.edge_mount?.holes_enabled);
+  }
+  return false;
+}
+
+function partInstanceCount(kind, design = state.design) {
+  if (BOX_MODIFIER_KINDS.has(kind)) return modifierIsActive(kind, design) ? 1 : 0;
+  return (design?.layout?.features || []).filter(one => one.kind === kind).length;
+}
+
+function partAtLimit(info, design = state.design) {
+  const max = info?.max_instances;
+  return Number.isInteger(max) && partInstanceCount(info.kind, design) >= max;
 }
 
 function edgeMountActive(design = state.design) {
@@ -517,7 +618,7 @@ function edgeMountAvailable(design = state.design) {
 
 function placedPartCount() {
   return (state.design?.layout?.features?.length || 0) +
-    (edgeMountAvailable() && edgeMountActive() ? 1 : 0);
+    [...BOX_MODIFIER_KINDS].filter(kind => modifierIsActive(kind)).length;
 }
 
 function iconFor(kind) {
@@ -534,6 +635,11 @@ function renderCatalog() {
   `).join("");
   modes.addEventListener("change", async () => {
       if (modes.value === state.design.layout.mode) return;
+      if (modes.value === "separate" && insideHandlesActive()) {
+        modes.value = state.design.layout.mode;
+        toast(INSIDE_HANDLES_REMOVABLE_MESSAGE, true, 6500);
+        return;
+      }
       if (!beginDesignMutation()) {
         syncForm();
         return;
@@ -570,7 +676,9 @@ function renderCatalog() {
   });
 
   const palette = $("#support-palette");
-  palette.innerHTML = state.catalog.parts.map(part => `
+  palette.innerHTML = state.catalog.parts
+    .filter(part => part.palette_visible !== false)
+    .map(part => `
     <button class="support-choice" data-kind="${part.kind}" style="--support-color:${kindColor(part.kind)}" aria-label="${escapeHtml(part.title)}: ${escapeHtml(part.description)}" title="${escapeHtml(part.title)} — ${escapeHtml(part.description)}">
       <span class="support-choice-icon">
         ${iconFor(part.kind)}
@@ -637,7 +745,6 @@ function populateLiftGrabberChoices() {
   const sizeSelect = $("#lift-grabber-size");
   const locationSelect = $("#lift-grabber-location");
   if (sizeSelect && !sizeSelect.options.length) {
-    sizeSelect.add(new Option("No", "no"));
     for (const choice of rules.sizes || []) {
       const opt = document.createElement("option");
       opt.value = choice.value;
@@ -692,15 +799,13 @@ function readEdgeMountForm(design) {
     return;
   }
   const current = { ...EDGE_MOUNT_DEFAULTS, ...(design.box.edge_mount || {}) };
-  const projectionSelect = $("#edge-mount-label-projection");
-  const projection = projectionSelect?.value === "custom"
-    ? number($("#edge-mount-label-projection-mm")?.value, current.label_projection_mm)
-    : number(projectionSelect?.value, current.label_projection_mm);
+  const projection = number(
+    $("#edge-mount-label-projection-mm")?.value, current.label_projection_mm,
+  );
   const thicknessSelect = $("#edge-mount-label-thickness");
   const thickness = thicknessSelect?.value === "custom"
     ? number($("#edge-mount-label-thickness-mm")?.value, current.label_thickness_mm)
     : number(thicknessSelect?.value, current.label_thickness_mm);
-  const accessMode = $("#edge-mount-access-mode")?.value || "auto";
   const spacingMode = $("#edge-mount-spacing-mode")?.value || "auto";
   design.box.edge_mount = {
     side: $("#edge-mount-side")?.value || "front",
@@ -716,9 +821,10 @@ function readEdgeMountForm(design) {
     hole_count: number($("#edge-mount-hole-count")?.value, current.hole_count),
     hole_orientation: $("#edge-mount-hole-orientation")?.value || "horizontal",
     screw_diameter_mm: number($("#edge-mount-screw-diameter")?.value, current.screw_diameter_mm),
-    access_diameter_mm: accessMode === "custom"
-      ? number($("#edge-mount-access-diameter")?.value, resolvedEdgeMountAccessDiameter(current))
-      : null,
+    access_diameter_mm: number(
+      $("#edge-mount-access-diameter")?.value,
+      resolvedEdgeMountAccessDiameter(current),
+    ),
     top_offset_mm: number($("#edge-mount-top-offset")?.value, current.top_offset_mm),
     hole_spacing_mm: spacingMode === "custom"
       ? number($("#edge-mount-spacing-mm")?.value, current.hole_spacing_mm || EDGE_MOUNT_DEFAULTS.top_offset_mm)
@@ -749,18 +855,10 @@ function syncEdgeMountControls() {
   if ($("#edge-mount-hole-orientation")) $("#edge-mount-hole-orientation").value = edgeMount.hole_orientation;
   if ($("#edge-mount-screw-diameter")) $("#edge-mount-screw-diameter").value = fmt(edgeMount.screw_diameter_mm);
   if ($("#edge-mount-top-offset")) $("#edge-mount-top-offset").value = fmt(edgeMount.top_offset_mm);
-
-  const projectionSelect = $("#edge-mount-label-projection");
-  if (projectionSelect) {
-    const known = [...projectionSelect.options].some(
-      option => option.value !== "custom" && number(option.value) === number(edgeMount.label_projection_mm)
-    );
-    projectionSelect.value = known ? fmt(edgeMount.label_projection_mm) : "custom";
-    if ($("#edge-mount-label-projection-custom-row")) {
-      $("#edge-mount-label-projection-custom-row").hidden = known;
-    }
-    if ($("#edge-mount-label-projection-mm")) $("#edge-mount-label-projection-mm").value = fmt(edgeMount.label_projection_mm);
+  if ($("#edge-mount-label-projection-mm")) {
+    $("#edge-mount-label-projection-mm").value = fmt(edgeMount.label_projection_mm);
   }
+
   const thicknessSelect = $("#edge-mount-label-thickness");
   if (thicknessSelect) {
     const known = [...thicknessSelect.options].some(
@@ -772,17 +870,17 @@ function syncEdgeMountControls() {
     }
     if ($("#edge-mount-label-thickness-mm")) $("#edge-mount-label-thickness-mm").value = fmt(edgeMount.label_thickness_mm);
   }
-  const accessMode = edgeMount.access_diameter_mm === null || edgeMount.access_diameter_mm === undefined ? "auto" : "custom";
-  if ($("#edge-mount-access-mode")) $("#edge-mount-access-mode").value = accessMode;
-  if ($("#edge-mount-access-custom-row")) $("#edge-mount-access-custom-row").hidden = accessMode !== "custom";
-  if ($("#edge-mount-access-diameter")) {
-    $("#edge-mount-access-diameter").value = fmt(
-      accessMode === "custom" ? edgeMount.access_diameter_mm : resolvedEdgeMountAccessDiameter(edgeMount)
-    );
-  }
-  if ($("#edge-mount-access-auto-note")) {
-    $("#edge-mount-access-auto-note").hidden = accessMode === "custom";
-    $("#edge-mount-access-auto-note").textContent = `Auto: ${fmt(resolvedEdgeMountAccessDiameter(edgeMount))} mm`;
+  const accessSelect = $("#edge-mount-access-diameter");
+  if (accessSelect) {
+    $("option[data-legacy]", accessSelect)?.remove();
+    const access = resolvedEdgeMountAccessDiameter(edgeMount);
+    const standard = [6, 8, 10].some(value => Math.abs(value - access) < 1e-9);
+    if (!standard) {
+      const option = new Option(`Existing — ${fmt(access)} mm`, fmt(access));
+      option.dataset.legacy = "true";
+      accessSelect.appendChild(option);
+    }
+    accessSelect.value = fmt(access);
   }
   const spacingMode = edgeMount.hole_spacing_mm === null || edgeMount.hole_spacing_mm === undefined ? "auto" : "custom";
   if ($("#edge-mount-spacing-mode")) $("#edge-mount-spacing-mode").value = spacingMode;
@@ -802,18 +900,19 @@ function syncEdgeMountEditorVisibility() {
   const edgeMount = scratch.box.edge_mount || EDGE_MOUNT_DEFAULTS;
   $("#edge-mount-label-panel").hidden = !$("#edge-mount-label-enabled").checked;
   $("#edge-mount-holes-panel").hidden = !$("#edge-mount-holes-enabled").checked;
-  $("#edge-mount-label-projection-custom-row").hidden = $("#edge-mount-label-projection").value !== "custom";
   $("#edge-mount-label-thickness-custom-row").hidden = $("#edge-mount-label-thickness").value !== "custom";
-  $("#edge-mount-access-custom-row").hidden = $("#edge-mount-access-mode").value !== "custom";
-  $("#edge-mount-access-auto-note").hidden = $("#edge-mount-access-mode").value === "custom";
-  $("#edge-mount-access-auto-note").textContent = `Auto: ${fmt(resolvedEdgeMountAccessDiameter(edgeMount))} mm`;
   $("#edge-mount-spacing-custom-row").hidden = $("#edge-mount-spacing-mode").value !== "custom";
   $("#edge-mount-hole-orientation-row").hidden = number($("#edge-mount-hole-count").value) <= 1;
+  const access = $("#edge-mount-access-diameter");
+  if (access) {
+    const tooSmall = number(access.value) < number($("#edge-mount-screw-diameter")?.value);
+    access.setCustomValidity(tooSmall ? "Screwdriver access must be at least the screw diameter." : "");
+  }
 }
 
 const SIDE_OPENING_DEFAULTS = {
   enabled: false, shape: "curved", sides: [], size: "medium",
-  depth_percent: 100, top_support: false,
+  from_bottom_percent: 100, from_top_percent: 100,
 };
 const SIDE_OPENING_SIDE_IDS = ["front", "back", "left", "right"];
 let sideOpeningAdjustmentNote = "";
@@ -837,7 +936,18 @@ function sideOpeningSideSpan(side, design = state.design) {
 function sideOpeningEligibleSide(side, design = state.design) {
   const rules = state.catalog?.side_openings || {};
   const minSide = number(rules.min_side_mm, 16);
-  return sideOpeningSideSpan(side, design) >= minSide - 1e-9;
+  if (sideOpeningSideSpan(side, design) < minSide - 1e-9) return false;
+  const box = design?.box || {};
+  const handleLocation = box.lift_grabbers?.enabled ? box.lift_grabbers.location : null;
+  const handleSides = handleLocation === "both"
+    ? SIDE_OPENING_SIDE_IDS
+    : handleLocation === "sides" ? ["left", "right"]
+      : handleLocation === "front_back" ? ["front", "back"] : [];
+  if (handleSides.includes(side)) return false;
+  if ((box.edge_mount?.label_enabled || box.edge_mount?.holes_enabled)
+      && box.edge_mount.side === side) return false;
+  if (String(design?.label || "").trim() && design?.label_position === side) return false;
+  return true;
 }
 
 // BEGIN SIDE_OPENING_SELECTION_HELPER
@@ -886,22 +996,23 @@ function reconcileSideOpeningsAfterResize(design) {
 // Python remains authoritative for real validation/geometry; this mirrors
 // organizer_side_openings._vertical_fits() only for the immediate size-list
 // filtering while typing.
-function sideOpeningVerticalFits(design, shape, depthPercent, topSupport, widthMm) {
+function sideOpeningVerticalFits(design, spec, widthMm) {
   const box = design?.box || {};
   const rules = state.catalog?.side_openings || {};
-  const topBridge = number(rules.top_bridge_mm, 4);
   const floorZ = number(box.base_thickness);
   const rimZ = number(box.z);
   const usable = rimZ - floorZ;
-  const bottomZ = rimZ - usable * (number(depthPercent, 100) / 100);
+  const bottomZ = rimZ - usable * (number(spec.from_bottom_percent, 100) / 100);
+  const topZ = floorZ + usable * (number(spec.from_top_percent, 100) / 100);
   const r = widthMm / 2;
   if (bottomZ < floorZ - 1e-9) return false;
-  if (!topSupport) {
-    return shape === "curved" ? (rimZ - bottomZ) >= r - 1e-9 : true;
+  if (topZ <= bottomZ + 1e-9) return false;
+  if (number(spec.from_top_percent, 100) >= 100 - 1e-9) {
+    return spec.shape === "curved" ? (rimZ - bottomZ) >= r - 1e-9 : true;
   }
-  const openingTopZ = rimZ - topBridge;
-  if (openingTopZ <= bottomZ + 1e-9) return false;
-  return shape === "curved" ? (openingTopZ - bottomZ) >= 2 * r - 1e-9 : (openingTopZ - bottomZ) >= r - 1e-9;
+  return spec.shape === "curved"
+    ? (topZ - bottomZ) >= 2.5 * r - 1e-9
+    : (topZ - bottomZ) >= r - 1e-9;
 }
 
 // Sizes that fit every currently-selected side at the current shape/depth/
@@ -916,12 +1027,29 @@ function sideOpeningAllowedSizes(design = state.design) {
   const spans = (so.sides || []).map(side => sideOpeningSideSpan(side, design));
   return sizes.filter(entry => {
     if (spans.some(span => entry.width_mm > span - 2 * margin + 1e-9)) return false;
-    return sideOpeningVerticalFits(design, so.shape, so.depth_percent, so.top_support, entry.width_mm);
+    return sideOpeningVerticalFits(design, so, entry.width_mm);
   }).map(entry => entry.value);
 }
 
 function sideOpeningLidStackForced(design = state.design) {
   return lidPartActive(design);
+}
+
+function sideOpeningMaxFromTop(design = state.design) {
+  const box = design?.box || {};
+  const usable = number(box.z) - number(box.base_thickness);
+  const bridge = number(state.catalog?.side_openings?.top_bridge_mm, 4);
+  return usable > 0 ? 100 * (usable - bridge) / usable : 0;
+}
+
+function clampSideOpeningTopForLid(design = state.design, flash = false) {
+  const current = sideOpeningState(design);
+  if (!current.enabled || !sideOpeningLidStackForced(design)) return;
+  const maximum = Math.max(0, sideOpeningMaxFromTop(design));
+  if (number(current.from_top_percent, 100) > maximum) {
+    design.box.side_openings = { ...current, from_top_percent: maximum };
+    if (flash) flashField($("#side-opening-from-top"));
+  }
 }
 
 function populateSideOpeningChoices() {
@@ -944,7 +1072,9 @@ function readSideOpeningForm(design) {
     if (design.box.side_openings) design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };
     return;
   }
-  const sides = SIDE_OPENING_SIDE_IDS.filter(side => $(`#side-opening-${side}`)?.checked);
+  const sides = SIDE_OPENING_SIDE_IDS.filter(
+    side => $(`#side-opening-${side}`)?.getAttribute("aria-pressed") === "true"
+  );
   const enabled = sides.length > 0 && !$("#side-openings-panel").hidden;
   if (!enabled) {
     if (design.box.side_openings) design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };
@@ -952,10 +1082,15 @@ function readSideOpeningForm(design) {
   }
   const current = { ...SIDE_OPENING_DEFAULTS, ...(design.box.side_openings || {}) };
   const shape = $("#side-opening-shape")?.value || current.shape;
-  const topSupport = sideOpeningLidStackForced(design) || Boolean($("#side-opening-top-support")?.checked);
+  const fromBottom = number($("#side-opening-from-bottom")?.value, current.from_bottom_percent);
+  let fromTop = number($("#side-opening-from-top")?.value, current.from_top_percent);
+  if (sideOpeningLidStackForced(design)) fromTop = Math.min(fromTop, sideOpeningMaxFromTop(design));
   const allowed = sideOpeningAllowedSizes({
     ...design,
-    box: { ...design.box, side_openings: { ...current, sides, shape, top_support: topSupport } },
+    box: { ...design.box, side_openings: {
+      ...current, sides, shape,
+      from_bottom_percent: fromBottom, from_top_percent: fromTop,
+    } },
   });
   let size = $("#side-opening-size")?.value || current.size;
   if (allowed.length && !allowed.includes(size)) size = allowed[allowed.length - 1];
@@ -964,35 +1099,30 @@ function readSideOpeningForm(design) {
     shape,
     sides,
     size,
-    depth_percent: number($("#side-opening-depth")?.value, current.depth_percent),
-    top_support: topSupport,
+    from_bottom_percent: fromBottom,
+    from_top_percent: fromTop,
   };
 }
 
 function syncSideOpeningControls() {
   const active = sideOpeningPartActive();
+  const forced = sideOpeningLidStackForced();
+  if (forced) clampSideOpeningTopForLid(state.design, true);
   const so = sideOpeningState();
   $("#side-openings-panel").hidden = !active;
-  $("#side-openings-toggle").textContent = active ? "Remove" : "Add";
   $("#side-opening-shape").value = so.shape;
-  $("#side-opening-depth").value = fmt(so.depth_percent);
+  $("#side-opening-from-bottom").value = fmt(so.from_bottom_percent);
+  $("#side-opening-from-top").value = fmt(so.from_top_percent);
   for (const side of SIDE_OPENING_SIDE_IDS) {
     const input = $(`#side-opening-${side}`);
     if (!input) continue;
-    input.checked = (so.sides || []).includes(side);
+    input.setAttribute("aria-pressed", String((so.sides || []).includes(side)));
+    input.classList.toggle("active", (so.sides || []).includes(side));
     const eligible = sideOpeningEligibleSide(side);
     input.disabled = !eligible;
-    if (!eligible) input.checked = false;
+    if (!eligible) input.setAttribute("aria-pressed", "false");
   }
   const anyEligible = SIDE_OPENING_SIDE_IDS.some(side => sideOpeningEligibleSide(side));
-  const addButton = $("#side-openings-toggle");
-  if (addButton) addButton.disabled = !active && !anyEligible;
-  const forced = sideOpeningLidStackForced();
-  const topSupportInput = $("#side-opening-top-support");
-  if (topSupportInput) {
-    if (forced) topSupportInput.checked = true;
-    topSupportInput.disabled = forced;
-  }
   const allowed = sideOpeningAllowedSizes();
   const sizeSelect = $("#side-opening-size");
   if (sizeSelect) {
@@ -1012,7 +1142,7 @@ function syncSideOpeningControls() {
     } else if (sideOpeningAdjustmentNote) {
       note.textContent = sideOpeningAdjustmentNote;
     } else if (forced) {
-      note.textContent = "Top Support is required while Lid & Stacking is enabled.";
+      note.textContent = "% from top is limited to keep the Lid & Stacking bridge.";
     } else {
       note.textContent = "";
     }
@@ -1247,6 +1377,7 @@ function syncForm() {
     state.inventoryEnabled,
     state.keepBinDefaults,
     state.spaceBinDefaults,
+    state.spacePartDefaults,
   );
   $("#connector-tolerance").value = fmt(state.connector.tolerance);
   $("#connector-length").value = fmt(state.connector.length);
@@ -1594,7 +1725,10 @@ function syncBaseTrimForm() {
   $("#output-folder").value = state.runtime.hosted
     ? (state.browserFolder?.name || "Select a folder...")
     : state.output;
-  setFolderState(state.folderMode, state.activeSpace, state.inventoryEnabled, state.keepBinDefaults, state.spaceBinDefaults);
+  setFolderState(
+    state.folderMode, state.activeSpace, state.inventoryEnabled,
+    state.keepBinDefaults, state.spaceBinDefaults, state.spacePartDefaults,
+  );
   const source = typeof DL !== "undefined" && DL.baseTrimSource ? DL.baseTrimSource() : { ok: false, message: "Create and arrange bins in Space first." };
   const auto = $("#base-trim-auto-size");
   auto.disabled = !source.ok;
@@ -1610,6 +1744,7 @@ function applyBaseTrimVisibility() {
   hide(".mode-and-bin-options", on);
   hide(".subheading-row", on);
   hide("#lid-option", on);
+  hide("#inside-handles-option", on);
   hide("#side-openings-option", on);
   hide(".palette-wrap", on);
   hide(".placed-block-panel", on);
@@ -1747,8 +1882,7 @@ function positionSharedThicknessControls(on) {
     if (wall && wall.parentElement !== grid) grid.appendChild(wall);
     if (base && base.parentElement !== grid) grid.appendChild(base);
   } else {
-    // Base and Wall always come back as the first two of the three columns,
-    // with Lift Grabbers (which never leaves this row) staying third.
+    // Base and Wall are the only shared ordinary controls in this row.
     if (base && base.parentElement !== home) home.insertBefore(base, home.firstChild);
     if (wall && wall.parentElement !== home) home.insertBefore(wall, base ? base.nextSibling : home.firstChild);
   }
@@ -1762,6 +1896,7 @@ function applyB4BVisibility() {
   const hide = (sel, hidden) => { const el = $(sel); if (el) el.hidden = hidden; };
   hide(".subheading-row", on);
   hide("#lid-option", on);
+  hide("#inside-handles-option", on);
   hide("#side-openings-option", on);
   hide(".palette-wrap", on);
   // B4B shows its own All/Base/Lid group instead of the ordinary bin's
@@ -1983,7 +2118,6 @@ function syncLidForm() {
   const lid = lidState();
   const config = lidConfiguration();
   $("#lid-option-panel").hidden = !active;
-  $("#lid-option-toggle").textContent = active ? "Remove" : "Add";
   $("#lid-configuration").value = config;
   $("#lid-thickness").value = lid.thickness;
   $("#lid-handle-type").value = lid.handle_type;
@@ -2694,6 +2828,7 @@ const commitNudge = debounce(async () => {
       index,
     });
     state.design = result.design;
+    await rememberAppliedPartDefault(result, state.draft);
     recordHistory(historySnapshot);
     state.selected = result.selected;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
@@ -3005,7 +3140,7 @@ function wireControls() {
     "#edge-mount-side", "#edge-mount-label-enabled", "#edge-mount-holes-enabled",
     "#edge-mount-label-length-mode", "#edge-mount-label-projection",
     "#edge-mount-label-thickness", "#edge-mount-label-style", "#edge-mount-label-flip",
-    "#edge-mount-hole-count", "#edge-mount-hole-orientation", "#edge-mount-access-mode",
+    "#edge-mount-hole-count", "#edge-mount-hole-orientation", "#edge-mount-access-diameter",
     "#edge-mount-spacing-mode",
   ];
   edgeMountChangeIds.forEach(selector => $(selector)?.addEventListener("change", () => {
@@ -3023,27 +3158,13 @@ function wireControls() {
   }));
 
   $("#bin-type").addEventListener("change", changeBinType);
-  $("#lid-option-toggle").addEventListener("click", () => {
-    const previous = clone(state.design);
-    if (lidPartActive()) {
-      delete state.design.box.stack;
-      delete state.design.box.lid;
-      normalizeStackSettings(state.design, { restoreDefaults: true, flash: true });
-    } else {
-      state.design.box.stack = { mode: "direct" };
-    }
-    syncLidForm();
-    syncSideOpeningControls();
-    populateWallChoices(state.design.box);
-    populateBaseChoices(state.design.box);
-    changedDesign(previous);
-  });
   ["#lid-configuration", "#lid-thickness", "#lid-handle-type", "#lid-handle-size",
    "#lid-handle-position", "#lid-label-enabled", "#lid-label-orientation", "#lid-label-style"]
     .forEach(selector => $(selector).addEventListener("change", () => {
       const previous = clone(state.design);
       readStackForm(state.design);
       normalizeStackSettings(state.design);
+      clampSideOpeningTopForLid(state.design, true);
       syncLidForm();
       syncSideOpeningControls();
       populateWallChoices(state.design.box);
@@ -3056,27 +3177,7 @@ function wireControls() {
     seedPartNameFromLabel($("#lid-label-text").value);
     changedDesign(previous);
   });
-  $("#side-openings-toggle").addEventListener("click", () => {
-    const previous = clone(state.design);
-    sideOpeningAdjustmentNote = "";
-    if (sideOpeningPartActive()) {
-      state.design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };
-    } else {
-      const defaultSide = sideOpeningEligibleSide("front")
-        ? "front"
-        : SIDE_OPENING_SIDE_IDS.find(side => sideOpeningEligibleSide(side));
-      state.design.box.side_openings = {
-        ...SIDE_OPENING_DEFAULTS,
-        enabled: true,
-        sides: defaultSide ? [defaultSide] : [],
-        top_support: sideOpeningLidStackForced(),
-      };
-    }
-    syncSideOpeningControls();
-    changedDesign(previous);
-  });
-  ["#side-opening-shape", "#side-opening-size", "#side-opening-top-support",
-   "#side-opening-front", "#side-opening-back", "#side-opening-left", "#side-opening-right"]
+  ["#side-opening-shape", "#side-opening-size"]
     .forEach(selector => $(selector)?.addEventListener("change", () => {
       const previous = clone(state.design);
       sideOpeningAdjustmentNote = "";
@@ -3084,11 +3185,30 @@ function wireControls() {
       syncSideOpeningControls();
       changedDesign(previous);
     }));
-  $("#side-opening-depth")?.addEventListener("input", () => {
-    const previous = clone(state.design);
-    readSideOpeningForm(state.design);
-    syncSideOpeningControls();
-    changedDesign(previous);
+  ["#side-opening-from-bottom", "#side-opening-from-top"].forEach(selector =>
+    $(selector)?.addEventListener("input", () => {
+      const previous = clone(state.design);
+      readSideOpeningForm(state.design);
+      syncSideOpeningControls();
+      changedDesign(previous);
+    }));
+  SIDE_OPENING_SIDE_IDS.forEach(side => {
+    $(`#side-opening-${side}`)?.addEventListener("click", event => {
+      const button = event.currentTarget;
+      const active = button.getAttribute("aria-pressed") === "true";
+      const selected = SIDE_OPENING_SIDE_IDS.filter(
+        one => $(`#side-opening-${one}`)?.getAttribute("aria-pressed") === "true"
+      );
+      if (active && selected.length === 1) {
+        toast("Side Openings need at least one side.", true, 4000);
+        return;
+      }
+      button.setAttribute("aria-pressed", String(!active));
+      const previous = clone(state.design);
+      readSideOpeningForm(state.design);
+      syncSideOpeningControls();
+      changedDesign(previous);
+    });
   });
   ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location", "#b4b-latch-count", "#b4b-front-label-style"].forEach(sel =>
     $(sel).addEventListener("change", () => {
@@ -3390,6 +3510,7 @@ function clearDraftSelection(resetLocks = true) {
   state.draftSourceIndex = null;
   state.draftTouched = false;
   state.edgeMountEditing = false;
+  state.modifierEditing = null;
   state.pinnedZone = {};
   if (resetLocks) state.partZoneLocks = {};
   state.selected = null;
@@ -3399,6 +3520,9 @@ function clearDraftSelection(resetLocks = true) {
   $(".support-editor").hidden = true;
   $("#draft-fields").hidden = false;
   $("#edge-mount-editor").hidden = true;
+  ["#lid-option", "#inside-handles-option", "#side-openings-option"].forEach(
+    selector => { const panel = $(selector); if (panel) panel.hidden = true; },
+  );
   $("#draft-status").textContent = "";
   $("#draft-status").classList.remove("error");
   updateDraftStatusColor(null);
@@ -3409,42 +3533,164 @@ function clearDraftSelection(resetLocks = true) {
 
 function pickKind(kind) {
   state.paletteBrowsing = false;
-  if (kind === "edge_mount") {
-    selectEdgeMount();
-    return;
+  const info = partInfo(kind);
+  if (info?.capabilities?.includes("box_modifier")) {
+    if (partAtLimit(info)) return openModifier(kind);
+    return addModifier(kind);
   }
   updateInteriorModeVisibility(true);
   selectKind(kind);
 }
 
 async function selectEdgeMount(fromPlaced = false) {
-  if (!edgeMountAvailable()) return;
-  if (edgeMountActive() && !fromPlaced && !editingEdgeMount()) return;
+  return openModifier("edge_mount", fromPlaced);
+}
+
+function insideHandlesActive(design = state.design) {
+  return Boolean(design?.box?.lift_grabbers?.enabled);
+}
+
+const INSIDE_HANDLES_REMOVABLE_MESSAGE =
+  "Inside Handles are built into the bin wall, so they aren’t available with Removable insert. Choose Fused into box to use Inside Handles.";
+
+async function openModifier(kind, fromPlaced = false) {
+  if (!BOX_MODIFIER_KINDS.has(kind) || !edgeMountAvailable()) return;
   if (state.draft && !(await guardDraftSwitch())) return;
+  if (state.modifierEditing && state.modifierEditing !== kind) commitEdgeMountFormBeforeSwitch();
   cancelPendingDraftWork();
   state.paletteBrowsing = false;
   state.draft = null;
-  state.draftKind = "edge_mount";
+  state.draftKind = kind;
   state.draftAutoCommit = false;
   state.draftIsNew = false;
   state.draftSourceIndex = null;
   state.draftTouched = false;
   state.selected = null;
-  state.edgeMountEditing = true;
+  state.edgeMountEditing = kind === "edge_mount";
+  state.modifierEditing = kind;
   $(".support-editor").hidden = false;
   $("#draft-fields").hidden = true;
-  $("#edge-mount-editor").hidden = false;
-  $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === "edge_mount"));
-  const info = partInfo("edge_mount");
-  syncDraftEditorIdentity("edge_mount", info);
-  populateEdgeMountChoices();
-  syncEdgeMountControls();
+  $("#edge-mount-editor").hidden = kind !== "edge_mount";
+  const panelByKind = {
+    lid_stacking: "#lid-option",
+    inside_handles: "#inside-handles-option",
+    side_openings: "#side-openings-option",
+  };
+  for (const [oneKind, selector] of Object.entries(panelByKind)) {
+    const panel = $(selector);
+    if (panel) panel.hidden = oneKind !== kind;
+  }
+  $$(".support-choice").forEach(button => button.classList.toggle("active", button.dataset.kind === kind));
+  const info = partInfo(kind);
+  syncDraftEditorIdentity(kind, info);
+  if (kind === "edge_mount") {
+    populateEdgeMountChoices();
+    syncEdgeMountControls();
+  } else if (kind === "lid_stacking") {
+    syncLidForm();
+    $("#lid-option-panel").hidden = false;
+  } else if (kind === "inside_handles") {
+    $("#lift-grabber-size").value = state.design.box.lift_grabbers?.size || "medium";
+    $("#lift-grabber-location").value = state.design.box.lift_grabbers?.location || "sides";
+    syncLiftGrabberControls();
+  } else if (kind === "side_openings") {
+    syncSideOpeningControls();
+    $("#side-openings-panel").hidden = false;
+  }
   renderPlaced();
   updateSelectionButtons();
 }
 
+async function addModifier(kind) {
+  if (kind === "inside_handles" && state.design.layout.mode !== "fused") {
+    toast(INSIDE_HANDLES_REMOVABLE_MESSAGE, true, 6500);
+    return;
+  }
+  if (kind === "edge_mount") {
+    const rules = state.catalog?.edge_mount || {};
+    const side = state.design.box.edge_mount?.side || "front";
+    const normalDepth = ["front", "back"].includes(side)
+      ? number(state.design.box.y) : number(state.design.box.x);
+    const projection = Math.min(
+      number(rules.max_projection_mm, 200),
+      Math.max(number(rules.min_projection_mm, 5), normalDepth / 3),
+    );
+    state.design.box.edge_mount = {
+      ...EDGE_MOUNT_DEFAULTS,
+      ...(state.design.box.edge_mount || {}),
+      label_projection_mm: projection,
+      access_diameter_mm: resolvedEdgeMountAccessDiameter(
+        state.design.box.edge_mount || EDGE_MOUNT_DEFAULTS,
+      ),
+    };
+    return openModifier(kind);
+  }
+  const previous = clone(state.design);
+  if (kind === "lid_stacking") {
+    state.design.box.stack = { mode: "direct" };
+  } else if (kind === "inside_handles") {
+    const rules = state.catalog?.lift_grabbers || {};
+    state.design.box.lift_grabbers = {
+      enabled: true,
+      size: rules.default_size || "medium",
+      location: rules.default_location || "sides",
+    };
+  } else if (kind === "side_openings") {
+    const eligible = SIDE_OPENING_SIDE_IDS.filter(side => sideOpeningEligibleSide(side));
+    const sides = ["left", "right"].filter(side => eligible.includes(side));
+    if (!sides.length && eligible.length) sides.push(eligible[0]);
+    if (!sides.length) {
+      toast("No bin wall is available for Side Openings.", true, 5500);
+      return;
+    }
+    state.design.box.side_openings = {
+      ...SIDE_OPENING_DEFAULTS, enabled: true, sides,
+    };
+    clampSideOpeningTopForLid(state.design, true);
+  }
+  recordHistory(previous);
+  syncForm();
+  await openModifier(kind);
+  refreshPreview();
+}
+
+async function removeModifier(kind) {
+  if (!modifierIsActive(kind)) {
+    clearDraftSelection();
+    return;
+  }
+  if (state.draft && !(await guardDraftSwitch())) return;
+  if (!beginDesignMutation()) return;
+  try {
+    const previous = clone(state.design);
+    if (kind === "lid_stacking") {
+      delete state.design.box.stack;
+      delete state.design.box.lid;
+      normalizeStackSettings(state.design, { restoreDefaults: true, flash: true });
+    } else if (kind === "inside_handles") {
+      state.design.box.lift_grabbers = { enabled: false, size: "medium", location: "sides" };
+    } else if (kind === "side_openings") {
+      state.design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };
+    } else if (kind === "edge_mount") {
+      state.design.box.edge_mount = { ...EDGE_MOUNT_DEFAULTS };
+    }
+    const result = await api("/api/design/validate", { design: state.design });
+    state.design = result.design;
+    recordHistory(previous);
+    state.paletteBrowsing = true;
+    clearDraftSelection();
+    renderPlaced();
+    await refreshPreview();
+    toast(`${partInfo(kind)?.title || "Option"} deleted.`);
+  } catch (error) {
+    toast(error.message, true, 5000);
+  } finally {
+    finishDesignMutation();
+  }
+}
+
 function commitEdgeMountFormBeforeSwitch() {
-  if (!editingEdgeMount()) return;
+  if (!state.modifierEditing) return;
   const previousDesign = pendingDesignHistory || clone(state.design);
   cancelChangedDesignDebounce();
   pendingDesignHistory = null;
@@ -3511,7 +3757,10 @@ async function selectKind(kind, reset = false) {
       item: info.flags.item ? starterItem() : null,
     });
     if (request !== state.kindRequest) return;
-    state.draft = result.feature;
+    state.draft = seedFeatureFromPartDefaults(
+      result.feature,
+      state.keepBinDefaults ? state.spacePartDefaults?.[kind] : null,
+    );
     state.draftTouched = false;
     state.pinnedZone = {};
     state.draftResolvedOptions = result.resolved_options || {};
@@ -3533,6 +3782,7 @@ async function selectKind(kind, reset = false) {
         if (request !== state.kindRequest) return;
         const previousDesign = clone(state.design);
         state.design = applyResult.design;
+        await rememberAppliedPartDefault(applyResult, state.draft);
         seedPartNameFromText(state.draft);
         recordHistory(previousDesign);
         state.selected = applyResult.selected;
@@ -4026,7 +4276,8 @@ function renderDraftFields() {
             <input type="number" value="${HEX_BIT_PROFILES[draftProfile].diameter}" disabled></label>`
         : field("Diameter", "item_diameter", fmt(boreFirst.diameter), { unit: "mm" });
       const boreProfiles = [
-        ["round", "Round"], ["hex", "Hex"], ["square", "Square"],
+        ["round", "Round"], ["hex", "Hex"], ["square", "Diamond"],
+        ["square_axis", "Square"],
         ["hex_bit_short", HEX_BIT_PROFILES.hex_bit_short.label],
         ["hex_bit_long", HEX_BIT_PROFILES.hex_bit_long.label],
       ];
@@ -6033,6 +6284,7 @@ async function autoCommitDraft(request) {
     if (state.selected !== null && state.design.layout.features[state.selected]) {
       state.draft = clone(state.design.layout.features[state.selected]);
     }
+    await rememberAppliedPartDefault(result, state.draft);
     if (state.draft?.kind === "nest") syncForm();
     for (const warning of result.warnings || []) toast(warning, false, 6500);
     renderPlaced();
@@ -6066,6 +6318,7 @@ async function commitVisibleDraft() {
     throw new Error("The interior part changed while it was being saved. Try again.");
   }
   state.design = committed.design;
+  await rememberAppliedPartDefault(committed, draft);
   seedPartNameFromText(draft);
   recordHistory(previousDesign);
   state.draftIsNew = false;
@@ -6170,6 +6423,7 @@ async function applySupport(index) {
     const previousDesign = clone(state.design);
     const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index });
     state.design = result.design;
+    await rememberAppliedPartDefault(result, state.draft);
     recordHistory(previousDesign);
     state.selected = result.selected;
     state.draftIsNew = false;
@@ -6198,7 +6452,7 @@ async function applySupport(index) {
 // draft that can't be saved (overlap, doesn't fit) keeps the editor open with
 // its error.
 async function saveCurrentPart() {
-  if (editingEdgeMount()) return saveEdgeMountPart();
+  if (state.modifierEditing) return saveEdgeMountPart();
   if (!state.draft || !beginDesignMutation()) return;
   try {
     const index = draftCommitIndex();
@@ -6208,6 +6462,7 @@ async function saveCurrentPart() {
       design: state.design, feature: state.draft, index: applyIndex,
     });
     state.design = result.design;
+    await rememberAppliedPartDefault(result, state.draft);
     seedPartNameFromText(state.draft);
     recordHistory(previousDesign);
     state.paletteBrowsing = true;
@@ -6224,14 +6479,15 @@ async function saveCurrentPart() {
 }
 
 async function saveEdgeMountPart() {
-  if (!$("#edge-mount-label-enabled")?.checked && !$("#edge-mount-holes-enabled")?.checked) {
-    toast("Enable Projecting Label or Screw Mounting first.", true, 5000);
+  const kind = state.modifierEditing;
+  if (!kind) return;
+  if (kind === "edge_mount" && !$("#edge-mount-label-enabled")?.checked && !$("#edge-mount-holes-enabled")?.checked) {
+    toast("Enable Label or Screw Mounting first.", true, 5000);
     return;
   }
   if (!beginDesignMutation()) return;
   try {
     const previousDesign = clone(state.design);
-    readEdgeMountForm(state.design);
     const result = await api("/api/design/validate", { design: state.design });
     state.design = result.design;
     recordHistory(previousDesign);
@@ -6239,7 +6495,7 @@ async function saveEdgeMountPart() {
     clearDraftSelection();
     renderPlaced();
     await refreshPreview();
-    toast("Part saved.");
+    toast(`${partInfo(kind)?.title || "Option"} saved.`);
   } catch (error) {
     toast(error.message, true, 5000);
   } finally {
@@ -6251,7 +6507,7 @@ async function saveEdgeMountPart() {
 // removed from the design, a brand-new draft is just discarded - then return
 // to the 10-part palette.
 async function deleteCurrentPart() {
-  if (editingEdgeMount()) return deleteEdgeMountPart();
+  if (state.modifierEditing) return removeModifier(state.modifierEditing);
   if (!state.draft) return;
   const deletingNest = state.draft.kind === "nest";
   const index = draftCommitIndex();
@@ -6268,35 +6524,7 @@ async function deleteCurrentPart() {
 }
 
 async function deleteEdgeMountPart(fromPlaced = false) {
-  const active = edgeMountActive();
-  if (!active) {
-    cancelChangedDesignDebounce();
-    pendingDesignHistory = null;
-    state.paletteBrowsing = true;
-    clearDraftSelection();
-    renderPlaced();
-    refreshPreview();
-    return;
-  }
-  if (fromPlaced && state.draft && !(await guardDraftSwitch())) return;
-  if (!window.confirm("Delete Edge Mount? This can't be undone.")) return;
-  if (!beginDesignMutation()) return;
-  try {
-    const previousDesign = clone(state.design);
-    state.design.box.edge_mount = { ...EDGE_MOUNT_DEFAULTS };
-    const result = await api("/api/design/validate", { design: state.design });
-    state.design = result.design;
-    recordHistory(previousDesign);
-    state.paletteBrowsing = true;
-    clearDraftSelection();
-    renderPlaced();
-    await refreshPreview();
-    toast("Edge Mount deleted.");
-  } catch (error) {
-    toast(error.message, true, 5000);
-  } finally {
-    finishDesignMutation();
-  }
+  return removeModifier("edge_mount");
 }
 
 async function deleteSupportAt(index) {
@@ -6311,8 +6539,6 @@ async function deleteSupportAt(index) {
   // unsaved edit underneath it - route through the same guard used to switch
   // parts so that edit is saved (or the user confirms losing it) first.
   if (state.draft && draftCommitIndex() !== index && !(await guardDraftSwitch())) return;
-  const title = partInfo(target.kind)?.title || "this interior part";
-  if (!window.confirm(`Delete ${title}? This can't be undone.`)) return;
   if (!beginDesignMutation()) return;
   const deletingNest = state.design.layout.features[index]?.kind === "nest";
   let deleted = false;
@@ -6402,27 +6628,28 @@ function updateSelectionButtons() {
   if (draftActions) draftActions.hidden = !editing;
   const hasPlaced = placedPartCount() > 0;
   $$(".placed-block").forEach(placedBlock => { placedBlock.hidden = !hasPlaced; });
-  $("#save-part").disabled = busy || (!state.draft && !editingEdgeMount());
-  $("#delete-part").disabled = busy || (!state.draft && !editingEdgeMount()) ||
+  $("#save-part").disabled = busy || (!state.draft && !state.modifierEditing);
+  $("#delete-part").disabled = busy || (!state.draft && !state.modifierEditing) ||
     (state.draft?.kind === "divider" && dividerLockedByLidLabels());
   const hasPhotoNest = state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour);
   const replacingPhotoNest = hasPhotoNest && state.selected !== null &&
     state.design.layout.features[state.selected]?.kind === "nest";
   $$(".support-choice").forEach(button => {
-    const isEdgeMount = button.dataset.kind === "edge_mount";
-    const alreadyAdded = isEdgeMount && edgeMountActive() && !editingEdgeMount();
-    button.disabled = busy || alreadyAdded ||
-      (hasPhotoNest && !replacingPhotoNest && button.dataset.kind !== "nest" && !isEdgeMount);
-    button.classList.toggle("added", alreadyAdded);
+    const info = partInfo(button.dataset.kind);
+    const isModifier = info?.capabilities?.includes("box_modifier");
+    const alreadyAdded = partAtLimit(info);
+    const isThisModifierBeingEdited = state.modifierEditing === button.dataset.kind;
+    button.disabled = busy ||
+      (hasPhotoNest && !replacingPhotoNest && button.dataset.kind !== "nest" && !isModifier);
+    button.classList.toggle("added", alreadyAdded && !isThisModifierBeingEdited);
     const stateLabel = $(".support-choice-state", button);
     if (stateLabel) {
       stateLabel.hidden = !alreadyAdded;
       stateLabel.textContent = alreadyAdded ? "Added" : "";
     }
-    if (isEdgeMount) {
-      const info = partInfo("edge_mount");
+    if (isModifier) {
       button.title = alreadyAdded
-        ? "Edge Mount already added. Reopen it under Placed parts."
+        ? `${info.title} already added. Select it to edit.`
         : `${info.title} — ${info.description}`;
     }
   });
@@ -6431,7 +6658,7 @@ function updateSelectionButtons() {
     button.disabled = busy || (button.classList.contains("placed-item-delete") &&
       feature?.kind === "divider" && dividerLockedByLidLabels());
   });
-  $("#support-count").textContent = `${placedPartCount()} placed`;
+  $("#support-count").textContent = `${placedPartCount()} added`;
 }
 
 function updateDraftStatusColor(hasError) {
@@ -6448,7 +6675,6 @@ function updateDraftStatusColor(hasError) {
 function renderPlaced() {
   if (!state.design) return;
   const features = state.design.layout.features;
-  const edgeMount = state.design.box?.edge_mount;
   // Painted in two spots: the floating box over the 3D/2D view, and the
   // matching list in the left settings panel - same markup, same handlers.
   const containers = $$("#placed-supports, #placed-supports-panel");
@@ -6468,23 +6694,32 @@ function renderPlaced() {
         <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this interior part" aria-label="Delete ${title}">✕</button>
       </div>`;
     }).join("");
-  let edgeMountMarkup = "";
-  if (edgeMountAvailable() && edgeMountActive()) {
-    const side = `${edgeMount.side || "front"}`;
-    const detail = edgeMount.label_enabled && edgeMount.holes_enabled
-      ? "Label + Screws"
-      : edgeMount.label_enabled ? "Label" : "Screws";
-    const specs = `${side.charAt(0).toUpperCase()}${side.slice(1)} · ${detail}`;
-    edgeMountMarkup = `<div class="placed-item ${editingEdgeMount() ? "selected status-valid" : ""}" data-kind="edge_mount" style="--support-color:${kindColor("edge_mount")}">
-      <button type="button" class="placed-item-select" data-kind="edge_mount">
-        <span class="placed-item-icon">${iconFor("edge_mount")}</span>
-        <span class="placed-item-copy"><strong>Edge Mount</strong><span>${escapeHtml(specs)}</span></span>
-      </button>
-      <button type="button" class="placed-item-delete" data-kind="edge_mount" title="Delete Edge Mount" aria-label="Delete Edge Mount">✕</button>
-    </div>`;
-  }
-  const markup = featureMarkup + edgeMountMarkup ||
-    '<div class="placed-empty">No parts yet. Pick a shape above.</div>';
+  const modifierDetail = kind => {
+    const box = state.design.box || {};
+    if (kind === "lid_stacking") return box.lid?.enabled ? "Lid" : "Stackable Bin";
+    if (kind === "inside_handles") {
+      return `${box.lift_grabbers?.size || "medium"} · ${box.lift_grabbers?.location || "sides"}`;
+    }
+    if (kind === "side_openings") return (box.side_openings?.sides || []).join(" + ");
+    const edge = box.edge_mount || {};
+    const detail = edge.label_enabled && edge.holes_enabled
+      ? "Label + Screws" : edge.label_enabled ? "Label" : "Screws";
+    return `${edge.side || "front"} · ${detail}`;
+  };
+  const modifierMarkup = [...BOX_MODIFIER_KINDS]
+    .filter(kind => modifierIsActive(kind))
+    .map(kind => {
+      const info = partInfo(kind);
+      return `<div class="placed-item ${state.modifierEditing === kind ? "selected status-valid" : ""}" data-kind="${kind}" style="--support-color:${kindColor(kind)}">
+        <button type="button" class="placed-item-select" data-kind="${kind}">
+          <span class="placed-item-icon">${iconFor(kind)}</span>
+          <span class="placed-item-copy"><strong>${escapeHtml(info?.title || kind)}</strong><span>${escapeHtml(modifierDetail(kind))}</span></span>
+        </button>
+        <button type="button" class="placed-item-delete" data-kind="${kind}" title="Delete ${escapeHtml(info?.title || kind)}" aria-label="Delete ${escapeHtml(info?.title || kind)}">✕</button>
+      </div>`;
+    }).join("");
+  const markup = featureMarkup + modifierMarkup ||
+    '<div class="placed-empty">No parts or options yet. Pick one above.</div>';
   containers.forEach(container => {
     container.innerHTML = markup;
     $$(".placed-item-select[data-index]", container).forEach(button => button.addEventListener("click", async () => {
@@ -6493,16 +6728,18 @@ function renderPlaced() {
       if (state.selected === index) activatePreviewView("2d");
     }));
     $$(".placed-item-delete[data-index]", container).forEach(button => button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
-    $(".placed-item-select[data-kind='edge_mount']", container)?.addEventListener("click", () => selectEdgeMount(true));
-    $(".placed-item-delete[data-kind='edge_mount']", container)?.addEventListener("click", () => deleteEdgeMountPart(true));
+    $$(".placed-item-select[data-kind]", container).forEach(button =>
+      button.addEventListener("click", () => openModifier(button.dataset.kind, true)));
+    $$(".placed-item-delete[data-kind]", container).forEach(button =>
+      button.addEventListener("click", () => removeModifier(button.dataset.kind)));
   });
   const total = placedPartCount();
-  $("#support-count").textContent = `${total} placed`;
+  $("#support-count").textContent = `${total} added`;
   const summaryEl = $("#design-summary");
   if (summaryEl) {
     summaryEl.textContent = total
-      ? `${total} part${total === 1 ? "" : "s"} · ${state.design.layout.mode}`
-      : `No parts placed · ${state.design.layout.mode}`;
+      ? `${total} added · ${state.design.layout.mode}`
+      : `Nothing added · ${state.design.layout.mode}`;
   }
 
   // With a single support there's nothing to choose between, so drop straight
