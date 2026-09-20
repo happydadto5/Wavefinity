@@ -2213,6 +2213,26 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return reply
 
 
+def inventory_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """The planning record Space shows for the design being edited.
+
+    Read-only: the same ``inventory_bin_record`` a generated bin would log, so
+    Space sees the exact same x/y/z/kind/stack/wall envelope, but nothing is
+    written, counted or claimed to exist as a file. Interior parts need not be
+    generation-valid; only the container envelope matters here.
+    """
+    raw_design = payload["design"]
+    if _is_base_trim_design(raw_design):
+        raise ValueError("Base Trim is not a bin, so it has no place to plan in Space.")
+    box, layout, label, part_name, _location, scoop = design_from_dict(
+        raw_design, validate_layout=False,
+    )
+    with GEOMETRY_LOCK:
+        record = inventory_bin_record(box, layout, None, label, part_name, scoop)
+    record["file"] = ""
+    return {"bin": record}
+
+
 def base_trim_joint_test_payload(payload: dict[str, Any]) -> dict[str, Any]:
     raw_design = payload["design"]
     if not _is_base_trim_design(raw_design):
@@ -2574,6 +2594,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
 POST_ROUTES = {
     "/api/preview": preview_payload,
     "/api/design/validate": validate_design_payload,
+    "/api/design/inventory-preview": inventory_preview_payload,
     "/api/feature/default": default_feature_payload,
     "/api/feature/draft": draft_payload,
     "/api/feature/fit": feature_fit_payload,

@@ -14,6 +14,9 @@ const state = {
   catalog: null,
   design: null,
   cleanDesign: null,
+  workingPending: false,        // session-only "Current design" bookkeeping
+  workingGeneratedKey: null,
+  surfaceEdgeHandled: false,    // Surface first-run: edge done or deliberately skipped
   preview: null,
   draftKind: "divider",
   draft: null,
@@ -329,6 +332,8 @@ async function loadFreshOrdinaryDesignForCurrentFolder() {
   state.lastOrdinaryDesign = clone(state.design);
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
+  state.workingPending = false;
+  state.workingGeneratedKey = null;
   state.drafts = {};
   state.history = [];
   state.future = [];
@@ -9976,6 +9981,7 @@ async function saveDesign() {
     link.download = `${(state.design.part_name || "Wavefinity design").replace(/[^a-z0-9 _-]/gi, "").trim() || "Wavefinity design"}.wavefinity.json`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    if (!baseTrimEnabled() && designHasChanges()) markWorkingDesignPending();
     state.cleanDesign = clone(state.design);
     toast("Design downloaded.");
   } catch (error) {
@@ -9985,11 +9991,12 @@ async function saveDesign() {
   }
 }
 
-function designHasChanges() {
+// The design as the form currently shows it, without touching state.design.
+function visibleDesignSnapshot() {
   const visibleDesign = clone(state.design);
   if (baseTrimEnabled(visibleDesign)) {
     readBaseTrimForm(visibleDesign);
-    return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
+    return visibleDesign;
   }
   visibleDesign.box.x = normalizeBinDimension("x", $("#x-size").value, visibleDesign.box.x);
   visibleDesign.box.y = normalizeBinDimension("y", $("#y-size").value, visibleDesign.box.y);
@@ -10020,6 +10027,14 @@ function designHasChanges() {
   readLiftGrabberForm(visibleDesign);
   if (editingEdgeMount()) readEdgeMountForm(visibleDesign);
   readSideOpeningForm(visibleDesign);
+  return visibleDesign;
+}
+
+function designHasChanges() {
+  const visibleDesign = visibleDesignSnapshot();
+  if (baseTrimEnabled(visibleDesign)) {
+    return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
+  }
   const index = draftCommitIndex();
   if (state.draft && state.draftAutoCommit && (
     index === null ||
@@ -10027,6 +10042,39 @@ function designHasChanges() {
       JSON.stringify(state.draft) !== JSON.stringify(state.design.layout.features[index]))
   )) return true;
   return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
+}
+
+// ---- Current design in Space (session only, never written to inventory).
+// A design counts as "pending inventory" once it has been edited, opened or
+// started new, until a Bin/Storage Box generation or local Print logs that
+// exact design. Base Trim and an untouched starter design never count.
+function markWorkingDesignPending() {
+  state.workingPending = true;
+}
+
+function markWorkingDesignReconciled() {
+  if (baseTrimEnabled()) return;
+  state.workingPending = false;
+  try {
+    state.workingGeneratedKey = JSON.stringify(visibleDesignSnapshot());
+  } catch (_error) {
+    state.workingGeneratedKey = null;
+  }
+}
+
+// The design Space should show as "Current design", or null.
+function workingDesignForSpace() {
+  if (!state.design || baseTrimEnabled() || state.folderMode !== "space") return null;
+  let visible;
+  try {
+    visible = visibleDesignSnapshot();
+  } catch (_error) {
+    return null;
+  }
+  const key = JSON.stringify(visible);
+  if (state.workingGeneratedKey && state.workingGeneratedKey === key) return null;
+  const changed = state.workingPending || key !== JSON.stringify(state.cleanDesign);
+  return changed ? visible : null;
 }
 
 async function openDesign(event) {
@@ -10046,6 +10094,7 @@ async function openDesign(event) {
     state.baseTrimSourceLayout = null;
     resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
+    markWorkingDesignPending();
     state.drafts = {};
     state.history = [];
     state.future = [];
@@ -10073,6 +10122,7 @@ async function newDesign() {
   state.baseTrimSourceLayout = null;
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
+  if (!baseTrimEnabled(state.design)) markWorkingDesignPending();
   state.binResizePending = false;
   state.binFootprintResizePending = false;
   recordHistory(previousDesign);
@@ -10189,6 +10239,35 @@ function checkPartNamePresent(target = "bin") {
   return true;
 }
 
+// Surface first-run: after the Base Trim edge is generated or printed, and
+// real inventory still holds no bin-like row, hand off to the first bin.
+// Gated by typed Surface + Base Trim + a successful operation + no real bin.
+function realInventoryHasBin() {
+  return typeof DL !== "undefined" && Array.isArray(DL.bins)
+    && DL.bins.some(one => one.kind === "bin" || one.kind === "b4b" || one.kind === "manual");
+}
+
+// True while a Surface has no real bin yet and its edge is still the next step.
+function surfaceNeedsEdge() {
+  return state.folderMode === "space" && state.activeSpace?.kind === "surface"
+    && !state.surfaceEdgeHandled && typeof DL !== "undefined" && DL.loaded
+    && !realInventoryHasBin();
+}
+
+async function surfaceEdgeSucceeded(design) {
+  if (state.folderMode !== "space" || state.activeSpace?.kind !== "surface") return;
+  if (!baseTrimEnabled(design)) return;
+  try {
+    if (typeof DL !== "undefined" && DL.load && !DL.active) await DL.load();
+  } catch (_error) {
+    return;
+  }
+  if (typeof DL === "undefined" || !DL.loaded || realInventoryHasBin()) return;
+  state.surfaceEdgeHandled = true;
+  await loadFreshOrdinaryDesignForCurrentFolder();
+  toast("Edge ready — design your first bin.");
+}
+
 async function generateParts(target) {
   if (baseTrimEnabled()) target = "bin";
   if (state.designMutationBusy || isGenerating) {
@@ -10258,6 +10337,7 @@ async function generateParts(target) {
   const allFiles = [];
   let connectorPlan = null;
   let saveOutput = state.output;
+  let surfaceEdgeDone = null;
 
   try {
     // A debounced support edit may still be visible only in the draft. Save
@@ -10283,6 +10363,8 @@ async function generateParts(target) {
       }
       allFiles.push(...binFiles);
       setItemStatus("bin", "done", "Done");
+      if (baseTrimEnabled(payload.design)) surfaceEdgeDone = payload.design;
+      else markWorkingDesignReconciled();
     }
 
     // Step 2: Generate Connector if requested
@@ -10351,6 +10433,7 @@ async function generateParts(target) {
     updateGenerateAvailability();
     updateHistoryButtons();
   }
+  if (surfaceEdgeDone) await surfaceEdgeSucceeded(surfaceEdgeDone);
 }
 
 async function generate(path, selector) {
@@ -10372,6 +10455,7 @@ async function printModel(target = "bin") {
   if (!beginDesignMutation()) return;
   const button = $("#print-bin");
   const old = button.textContent;
+  let printedEdge = null;
   button.disabled = true;
   const slicerName = state.slicer?.name || "Bambu Studio";
   button.textContent = `Sending to ${slicerName}…`;
@@ -10392,6 +10476,8 @@ async function printModel(target = "bin") {
     const files = result.files || [];
     const fileNames = files.map(f => f.split(/[\\/]/).pop());
     toast(`Sent to ${slicerName}!\n${fileNames.join("\n")}`, false, 7000);
+    if (baseTrimEnabled(payload.design)) printedEdge = payload.design;
+    else if (target === "bin" || target === "all") markWorkingDesignReconciled();
   } catch (error) {
     setError(error.message);
     toast(error.message, true, 8000);
@@ -10399,6 +10485,7 @@ async function printModel(target = "bin") {
     button.textContent = old;
     finishDesignMutation();
   }
+  if (printedEdge) await surfaceEdgeSucceeded(printedEdge);
 }
 
 function updatePrimaryPrintButtonLabel() {

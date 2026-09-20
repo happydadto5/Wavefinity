@@ -244,6 +244,17 @@ DV.entries = (drawer, grid) => {
     const one = DL.bin(p.bin);
     if (one) entries.push({ key: DL.key(p), x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.d, layers: [{ bin: one, key: DL.key(p), z0: 0, z1: Number(one.z) }], mode: "", edge: true });
   }
+  // The design being edited, standing at the first legal spot: session only,
+  // not draggable and not a placement.
+  const working = DL.working && !DL.working.error ? DL.workingFit() : null;
+  if (working?.ok && !DV.drag?.moved) {
+    const bin = DL.working.bin;
+    const [w, d] = DL.cells(bin, drawer);
+    entries.push({
+      key: "__working", ...box(working.gx, working.gy, w, d),
+      layers: DV.layersFor([bin], ["__working"], 0), mode: "ghost", ghost: true, working: true,
+    });
+  }
   const ghost = drag || DV.drop;
   if (ghost) {
     const bins = drag ? drag.bins : [DV.drop.bin];
@@ -455,6 +466,14 @@ DV.paintScene = (ctx, drawer, cam) => {
       const stroke = entry.mode === "invalid" || problem === "error" ? "#a8443d" : "rgba(23,37,45,.45)";
       const screens = faces.map(([side, points]) => ({ side, screen: face(points, DV.tone(color, DV.FACE_TONE[side]), stroke) }));
       ctx.globalAlpha = 1;
+      if (entry.working) {
+        ctx.save();
+        ctx.setLineDash([5, 3]);
+        ctx.strokeStyle = "#146c70";
+        ctx.lineWidth = 1.8;
+        screens.forEach(({ screen }) => { ctx.beginPath(); screen.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.stroke(); });
+        ctx.restore();
+      }
       if (planned || problem === "height") {
         ctx.save();
         ctx.setLineDash([4, 3]);
@@ -573,6 +592,7 @@ DV.renderSelection = () => {
     ${planned ? `<span class="dl-planned-note">Planned - not printed yet</span>` : ""}
     ${found.drawer !== DL.drawer() ? `<span>In ${escapeHtml(found.drawer.name)}</span>` : ""}
     <div class="dl-selection-actions">
+      ${!DL.isSpacer(one) && !DL.isEdgePlacement(p) ? `<button type="button" data-sel="duplicate" title="Place another copy of this bin">Duplicate</button>` : ""}
       ${planned ? `<button type="button" data-sel="printed" title="You have printed this one">Mark printed</button>` : ""}
       ${chain ? `<button type="button" data-sel="lock" title="Locked stacks stay put when you drag or run Auto layout (L)">${chain[0].locked ? "Unlock" : "Lock"}</button>` : ""}
     </div>`;
@@ -828,11 +848,29 @@ DV.wire = () => {
 DV.renderEmptyState = () => {
   const box = $("#dl-empty-state");
   if (!box || !DL.layout || !DL.loaded) return;
-  const mode = !DL.bins.length ? "none" : !DL.layout.drawers.some(one => one.placements.length) ? "unplaced" : "";
+  const working = DL.working ? DL.workingFit() : null;
+  const edgeFirst = typeof surfaceNeedsEdge === "function" && surfaceNeedsEdge();
+  let mode = !DL.bins.length ? "none" : !DL.layout.drawers.some(one => one.placements.length) ? "unplaced" : "";
+  if (working && !working.ok) mode = `working-nofit:${working.reason}`;
+  else if (working && mode === "none") mode = "";
+  else if (mode === "none" && edgeFirst) mode = "edge-first";
   if (box.dataset.state === mode) return;
   box.dataset.state = mode;
   box.hidden = !mode;
-  if (mode === "none") {
+  if (mode.startsWith("working-nofit")) {
+    box.innerHTML = `<strong>Current design does not fit this Space yet</strong>
+      <p>${escapeHtml(working.reason || "Change its size, then come back to Space.")}</p>
+      <div class="button-row">
+        <button type="button" class="button secondary" data-empty-act="design">Back to design</button>
+      </div>`;
+  } else if (mode === "edge-first") {
+    box.innerHTML = `<strong>Finish your edge, then start adding bins.</strong>
+      <p>The edge trim goes around your Surface first.</p>
+      <div class="button-row">
+        <button type="button" class="button primary" data-empty-act="edge">Finish Edge</button>
+        <button type="button" class="button secondary dl-quiet" data-empty-act="start-bin">Start a bin now</button>
+      </div>`;
+  } else if (mode === "none") {
     box.innerHTML = `<strong>No bins yet</strong>
       <p>Design your first bin, then come back to Space to arrange it.</p>
       <div class="button-row">
@@ -887,6 +925,13 @@ DV.buildOverlay = () => {
     if (!action || !found) return;
     if (action === "lock") DL.toggleLock(DL.selected);
     if (action === "printed") DL.markPrinted(DL.bin(found.placement.bin));
+    // Another copy of the same inventory row (never a second definition):
+    // the normal quick-place rules pick the copy and spot, record history and
+    // select the new placement. No room leaves the layout as it was.
+    if (action === "duplicate") {
+      const bin = DL.bin(found.placement.bin);
+      if (bin && !DL.isSpacer(bin)) DL.quickPlace(bin);
+    }
   });
   DV.syncControls();
 };

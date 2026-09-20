@@ -471,6 +471,16 @@ normally, but nothing new is logged. Turning it off never deletes an
 existing inventory file, and turning it back on resumes logging to the same
 file.
 
+**Surface size** is entered as the maximum finished *outside* width and
+length in mm. Wavefinity rounds down to the largest whole-unit interior field
+that fits (`outside = field + mating gap + 2 × trim width`); Space data still
+stores the interior field. A new Surface's first job is its edge: Space says
+*Finish your edge, then start adding bins*, and once the Base Trim edge is
+generated or printed, with no real bin in inventory yet, the first bin design
+opens. In Space, the bin being designed shows as a session-only **Current
+design** (never written to inventory) until it is generated, and a selected bin
+has **Duplicate**.
+
 A folder is either an untyped Design folder, or a typed **Space** - a
 **Drawer**, a **Surface**, or **Portable Storage**. *Create New Space*
 configures the Space's type and dimensions first and chooses the save folder

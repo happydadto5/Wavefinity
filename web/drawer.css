@@ -199,3 +199,8 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-view-controls .camera-views-row { flex-wrap: wrap; }
 .dl-view-controls .camera-views button { flex: 0 0 auto; min-width: 0; padding: 10px 14px; font-size: 14px; white-space: nowrap; }
 .dl-view-controls .zoom-controls button { flex: 0 0 auto; min-width: 40px; padding: 10px 12px; }
+
+/* Current design (session only) row in the Space inventory. */
+.dl-working { border-style: dashed; border-color: var(--teal); background: var(--teal-soft); cursor: default; }
+.dl-working .dl-working-swatch { background: var(--paper); color: var(--teal-dark); }
+.dl-empty-state .dl-quiet { background: none; border-color: transparent; color: var(--muted); text-decoration: underline; }

@@ -1485,6 +1485,24 @@ class WebApplicationTests(unittest.TestCase):
                         wavefinity_web.print_payload({"design": design, "output": temp_dir})
                         mock_connector.assert_not_called()
 
+    def test_inventory_preview_is_read_only_planning_envelope(self):
+        ordinary = default_design()
+        ordinary["part_name"] = "Screws"
+        record = wavefinity_web.inventory_preview_payload({"design": ordinary})["bin"]
+        self.assertEqual(record["kind"], "bin")
+        self.assertEqual(record["file"], "")
+        self.assertEqual(
+            (record["x"], record["y"], record["z"]),
+            (ordinary["box"]["x"], ordinary["box"]["y"], ordinary["box"]["z"]),
+        )
+        storage = default_design()
+        storage["box"]["b4b"] = {"enabled": True}
+        self.assertEqual(
+            wavefinity_web.inventory_preview_payload({"design": storage})["bin"]["kind"], "b4b",
+        )
+        with self.assertRaises(ValueError):
+            wavefinity_web.inventory_preview_payload({"design": {"design_kind": "base_trim"}})
+
     def test_connector_choosers_are_removed_from_browser_source(self):
         root = Path(__file__).resolve().parent
         index_html = (root / "web" / "index.html").read_text(encoding="utf-8")

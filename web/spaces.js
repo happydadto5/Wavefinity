@@ -1205,6 +1205,7 @@ SP.create = async () => {
 // building a second, incompatible "edge" design object - see Fix 004.
 SP.designSurface = async space => {
   const trimValue = SP.surfacePresetMap()[space.trim_size];
+  state.surfaceEdgeHandled = false;
   if (!baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
 
   state.design = makeBaseTrimDesign(space.x, space.y);

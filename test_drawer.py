@@ -635,6 +635,13 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(loaded["layout"]["drawers"][0]["boundary"], "mating")
 
 
+class StorageBoxFilenameTests(unittest.TestCase):
+    def test_new_and_legacy_file_names_both_infer_the_part_name(self):
+        from organizer_inventory import infer_name
+        self.assertEqual(infer_name("Storage Box 64x48x40 - Fasteners.3mf"), "Fasteners")
+        self.assertEqual(infer_name("B4B 64x48x40 - Fasteners.3mf"), "Fasteners")
+
+
 class KeepOutRemovalTests(unittest.TestCase):
     def test_a_stray_old_keepouts_key_is_dropped(self):
         drawer = normalise_drawer({

@@ -47,6 +47,13 @@ const DL = {
   listeners: [],
 };
 
+// The design being edited, shown in Space before it has been generated. It
+// lives only here: never in DL.bins, the layout, autosave, Qty or To print.
+//   { key, bin, error }  where bin is a planning record from
+//   /api/design/inventory-preview (the same envelope a generated row gets).
+DL.working = null;
+DL.workingTicket = 0;
+
 DL.on = fn => DL.listeners.push(fn);
 DL.emit = () => DL.listeners.forEach(fn => fn());
 
@@ -442,6 +449,64 @@ DL.adopt = data => {
   if (data.stack_steps) DL.stackSteps = data.stack_steps;
 };
 
+// Re-read the current design and, if it is pending inventory, its planning
+// envelope from the server. Cheap when the design has not changed.
+DL.refreshWorking = async () => {
+  const design = typeof workingDesignForSpace === "function" ? workingDesignForSpace() : null;
+  if (!design) {
+    if (DL.working) { DL.working = null; DL.emit(); }
+    return;
+  }
+  const key = JSON.stringify(design);
+  if (DL.working?.key === key) return;
+  const ticket = ++DL.workingTicket;
+  try {
+    const { bin } = await api("/api/design/inventory-preview", { design });
+    if (ticket !== DL.workingTicket) return;
+    DL.working = {
+      key,
+      bin: {
+        ...bin, id: "__current__", qty: 0, working: true,
+        name: (design.part_name || "").trim(),
+      },
+    };
+  } catch (error) {
+    if (ticket !== DL.workingTicket) return;
+    DL.working = { key, error: error.message };
+  }
+  DL.emit();
+};
+
+// First legal floor spot for the working design in the active drawer, or the
+// plain reason it does not fit. Memoised on what it depends on.
+DL.workingFit = () => {
+  const working = DL.working;
+  if (!working) return null;
+  if (working.error) return { ok: false, reason: working.error };
+  const drawer = DL.drawer();
+  const stamp = JSON.stringify([working.key, drawer.id, drawer.width, drawer.depth, drawer.height,
+    drawer.snap, drawer.placements]);
+  if (working.fitStamp === stamp) return working.fit;
+  const grid = DL.grid(drawer);
+  const [w, d] = DL.cells(working.bin, drawer);
+  let fit = { ok: false, reason: "" };
+  if (!Number.isFinite(w) || !Number.isFinite(d) || w > grid.cols || d > grid.rows) {
+    fit.reason = "That is bigger than this Space.";
+  } else {
+    search:
+    for (let gy = 0; gy + d <= grid.rows; gy += 1) {
+      for (let gx = 0; gx + w <= grid.cols; gx += 1) {
+        const test = DL.fitsAt(drawer, [working.bin], gx, gy);
+        if (test.ok) { fit = { ok: true, gx, gy }; break search; }
+        if (!fit.reason) fit.reason = test.reason;
+      }
+    }
+  }
+  working.fitStamp = stamp;
+  working.fit = fit;
+  return fit;
+};
+
 DL.load = async () => {
   const output = DL.folder();
   const data = await DL.inventoryCall("/api/drawer/load", {}, { write: false });
@@ -465,6 +530,7 @@ DL.load = async () => {
   DL.loaded = true;
   DL.emit();
   DL.requestReport();
+  DL.refreshWorking();
 };
 
 DL.save = async () => {
