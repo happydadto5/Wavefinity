@@ -109,8 +109,16 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(
             set(parts),
             {"divider", "post", "pocket", "bore", "cradle", "nest", "slot",
-             "steps", "scoop", "text", "edge_mount"},
+             "steps", "scoop", "text", "lid_stacking", "inside_handles",
+             "side_openings", "edge_mount"},
         )
+        self.assertTrue(all("max_instances" in part for part in parts.values()))
+        self.assertTrue(all("palette_visible" in part for part in parts.values()))
+        self.assertFalse(parts["pocket"]["palette_visible"])
+        for kind in ("lid_stacking", "inside_handles", "side_openings", "edge_mount"):
+            self.assertEqual(parts[kind]["max_instances"], 1)
+            self.assertTrue(parts[kind]["palette_visible"])
+            self.assertIn("box_modifier", parts[kind]["capabilities"])
         self.assertEqual(parts["scoop"]["title"], "Curved Scoop")
         self.assertEqual(parts["scoop"]["icon"], "scoop")
         self.assertFalse(parts["scoop"]["flags"]["size"])
@@ -148,8 +156,8 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual((box.x, box.y, box.z), (16.0, 48.0, 40.0))
         self.assertEqual(box.base_thickness, 0.6)
         self.assertEqual(layout.mode, "fused")
-        # Side Openings is a bin-level part, not a placed interior part.
-        self.assertNotIn("side_openings", parts)
+        # Box modifiers share the catalog lifecycle but do not become Layout features.
+        self.assertIn("side_openings", parts)
 
     def test_catalog_exposes_side_opening_constants_presets_and_defaults(self):
         rules = catalog_payload()["side_openings"]
@@ -158,7 +166,9 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(rules["top_bridge_mm"], 4.0)
         self.assertEqual(rules["default_shape"], "curved")
         self.assertEqual(rules["default_size"], "medium")
-        self.assertEqual(rules["default_depth_percent"], 100)
+        self.assertEqual(rules["default_from_bottom_percent"], 100)
+        self.assertEqual(rules["default_from_top_percent"], 100)
+        self.assertEqual(rules["arch_curve"], 0.5)
         self.assertEqual(
             {(row["value"], row["width_mm"]) for row in rules["sizes"]},
             {("small", 8.0), ("medium", 10.0), ("large", 15.0), ("xl", 20.0)},
@@ -172,7 +182,8 @@ class WebApplicationTests(unittest.TestCase):
         design["box"]["x"] = design["box"]["y"] = 48.0
         design["box"]["side_openings"] = {
             "enabled": True, "shape": "curved", "sides": ["front", "left"],
-            "size": "medium", "depth_percent": 100.0, "top_support": False,
+            "size": "medium", "from_bottom_percent": 100.0,
+            "from_top_percent": 100.0,
         }
         preview = preview_payload({"design": design})
         self.assertTrue(preview["fits"], preview["message"])
@@ -188,7 +199,8 @@ class WebApplicationTests(unittest.TestCase):
         without = preview_payload({"design": design})
         design["box"]["side_openings"] = {
             "enabled": True, "shape": "curved", "sides": ["front"],
-            "size": "medium", "depth_percent": 100.0, "top_support": False,
+            "size": "medium", "from_bottom_percent": 100.0,
+            "from_top_percent": 100.0,
         }
         with_opening = preview_payload({"design": design})
         self.assertTrue(with_opening["fits"], with_opening["message"])
@@ -207,7 +219,8 @@ class WebApplicationTests(unittest.TestCase):
         design["box"]["y"] = 48.0
         design["box"]["side_openings"] = {
             "enabled": True, "shape": "curved", "sides": ["front"],
-            "size": "small", "depth_percent": 100.0, "top_support": False,
+            "size": "small", "from_bottom_percent": 100.0,
+            "from_top_percent": 100.0,
         }
         with self.assertRaises(ValueError):
             preview_payload({"design": design})
@@ -224,7 +237,8 @@ class WebApplicationTests(unittest.TestCase):
             },
             "side_openings": {
                 "enabled": True, "shape": "curved", "sides": ["front"],
-                "size": "small", "depth_percent": 100.0, "top_support": False,
+                "size": "small", "from_bottom_percent": 100.0,
+                "from_top_percent": 100.0,
             },
         })
         with self.assertRaises(ValueError):
@@ -1882,7 +1896,6 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b'id="wall-thickness"', body)
         self.assertIn(b'id="lift-grabber-size"', body)
         self.assertIn(b'id="side-openings-option"', body)
-        self.assertIn(b'id="side-openings-toggle"', body)
         self.assertIn(b'id="side-openings-panel"', body)
         self.assertIn(b'id="side-opening-shape"', body)
         self.assertIn(b'id="side-opening-front"', body)
@@ -1890,8 +1903,8 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b'id="side-opening-left"', body)
         self.assertIn(b'id="side-opening-right"', body)
         self.assertIn(b'id="side-opening-size"', body)
-        self.assertIn(b'id="side-opening-depth"', body)
-        self.assertIn(b'id="side-opening-top-support"', body)
+        self.assertIn(b'id="side-opening-from-bottom"', body)
+        self.assertIn(b'id="side-opening-from-top"', body)
         self.assertIn(b'id="side-opening-note"', body)
         # The Side Openings card sits with Lid & Stacking, before the
         # interior-part palette - not inside it.

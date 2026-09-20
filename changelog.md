@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-09-20 — Parts & options cleanup
+
+- Lid & Stacking, Inside Handles, Side Openings, and Edge Mount now use the
+  same add/edit/save/delete flow as interior parts, with one-instance limits.
+- Side Openings now have independent `% from bottom` and `% from top` controls,
+  improved supported curves, and automatic lid/stack bridge protection.
+- Bore offers separate Square and Diamond orientations. Edge Mount has simpler
+  projection and screwdriver-access controls plus cleaner label geometry.
+- Space metadata v6 can remember safe per-part defaults without storing names,
+  text, photos, contours, or positions.
+- Inside Handle conflicts now use real part height, and removable inserts block
+  handles before an invalid design is created.
+
 ## 2026-09-19 — Space interface workflow
 
 - The bin you are designing now shows in Space as **Current design**, even

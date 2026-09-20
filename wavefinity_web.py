@@ -143,6 +143,7 @@ from organizer_app import (
     generate_organizer_files,
     generate_corner_file,
     generate_side_file,
+    inside_handle_conflict,
     inventory_bin_record,
     lid_label_regions,
     parse_sizes,
@@ -211,10 +212,10 @@ from organizer_edge_mount import (
     EDGE_LABEL_MIN_PROJECTION,
     EDGE_LABEL_MIN_TEXT_DEPTH,
     EDGE_LABEL_MIN_THICKNESS,
-    EDGE_LABEL_PROJECTION_PRESETS,
     EDGE_LABEL_THICKNESS_PRESETS,
 )
 from organizer_side_openings import (
+    SIDE_OPENING_ARCH_CURVE,
     SIDE_OPENING_CORNER_MARGIN_MM,
     SIDE_OPENING_MIN_SIDE_MM,
     SIDE_OPENING_TOP_BRIDGE_MM,
@@ -769,7 +770,8 @@ def _first_open_position(
         centre_x, centre_y = placed.zone.centre
         covers = Zone(centre_x + inset[0], centre_y + inset[1],
                       centre_x + inset[2], centre_y + inset[3])
-        if all(not covers.overlaps(zone, MIN_FEATURE_GAP) for zone in taken):
+        if (all(not covers.overlaps(zone, MIN_FEATURE_GAP) for zone in taken)
+                and inside_handle_conflict(box, placed, base_z, layout.mode) is None):
             return placed
     raise ValueError("there is no open floor area large enough for that interior part")
 
@@ -797,29 +799,38 @@ def catalog_payload() -> dict[str, Any]:
                 for option in definition.options
             ],
             "capabilities": list(definition.capabilities),
+            "max_instances": definition.max_instances,
+            "palette_visible": definition.palette_visible,
         }
         for definition in feature_definitions()
     ]
-    parts.append({
-        "kind": "edge_mount",
-        "title": "Edge Mount",
-        "display": "Edge Mount",
-        "description": "Mount the bin to an edge using a projecting label and/or screw mounting.",
-        "icon": "edge_mount",
-        "flags": {
-            "qty": False,
-            "size": False,
-            "along": False,
-            "item": False,
-            "lean": False,
-            "alternate": False,
-            "photo": False,
-            "text": False,
-        },
-        "fields": [],
-        "options": [],
-        "capabilities": ["box_modifier"],
-    })
+    empty_flags = {
+        "qty": False, "size": False, "along": False, "item": False,
+        "lean": False, "alternate": False, "photo": False, "text": False,
+    }
+    for kind, title, description in (
+        ("lid_stacking", "Lid & Stacking",
+         "Add a lid or make matching bins stack together."),
+        ("inside_handles", "Inside Handles",
+         "Finger ledges inside the bin so it is easier to lift."),
+        ("side_openings", "Side Openings",
+         "Finger-access cutouts through selected bin walls."),
+        ("edge_mount", "Edge Mount",
+         "Add a label and/or screw mounting for an outside edge."),
+    ):
+        parts.append({
+            "kind": kind,
+            "title": title,
+            "display": title,
+            "description": description,
+            "icon": kind,
+            "flags": dict(empty_flags),
+            "fields": [],
+            "options": [],
+            "capabilities": ["box_modifier"],
+            "max_instances": 1,
+            "palette_visible": True,
+        })
     import sys
     return {
         "platform": sys.platform,
@@ -946,10 +957,6 @@ def catalog_payload() -> dict[str, Any]:
                 {"value": "left", "label": "Left"},
                 {"value": "right", "label": "Right"},
             ],
-            "projection_choices": [
-                {"value": value, "label": f"{value:g} mm — {name}"}
-                for value, name in EDGE_LABEL_PROJECTION_PRESETS
-            ],
             "thickness_choices": [
                 {"value": value, "label": f"{value:g} mm — {name}"}
                 for value, name in EDGE_LABEL_THICKNESS_PRESETS
@@ -989,9 +996,11 @@ def catalog_payload() -> dict[str, Any]:
             "min_side_mm": SIDE_OPENING_MIN_SIDE_MM,
             "corner_margin_mm": SIDE_OPENING_CORNER_MARGIN_MM,
             "top_bridge_mm": SIDE_OPENING_TOP_BRIDGE_MM,
+            "arch_curve": SIDE_OPENING_ARCH_CURVE,
             "default_shape": "curved",
             "default_size": "medium",
-            "default_depth_percent": 100,
+            "default_from_bottom_percent": 100,
+            "default_from_top_percent": 100,
             "sides": [
                 {"value": "front", "label": "Front"},
                 {"value": "back", "label": "Back"},

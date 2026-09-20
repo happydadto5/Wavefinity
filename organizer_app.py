@@ -52,7 +52,7 @@ from organizer_engine import (
     make_top_labelled_box,
     make_labelled_box,
     make_lift_grabbers,
-    lift_grabber_keep_outs,
+    lift_grabber_collision_volumes,
     lift_grabber_summary,
     lid_enabled,
     lid_spec,
@@ -211,7 +211,7 @@ def validate_scoop_lift_grabbers(box: BoxSpec, scoop: bool) -> None:
     )
     if scoop_top > grabber_bottom:
         raise ValueError(
-            "the front scoop rises into the front-wall lift grabbers. Choose "
+            "the front scoop rises into the front-wall Inside Handles. Choose "
             "a smaller grabber size, use side-only grabbers, make the bin "
             "taller, or disable the scoop"
         )
@@ -766,9 +766,49 @@ def _customization_zones(
         zones.append(
             ("scoop", Zone(*scoop_keep_out(box, _scoop_floor_bounds(box, mode)).bounds))
         )
-    for name, polygon in lift_grabber_keep_outs(box):
-        zones.append((name, Zone(*polygon.bounds)))
     return zones
+
+
+def validate_inside_handles_mode(box: BoxSpec, mode: str) -> None:
+    if box.lift_grabbers.enabled and mode != "fused":
+        raise ValueError(
+            "Inside Handles are built into the bin wall and cannot be used "
+            "with Removable insert. Choose Fused into box or remove Inside Handles."
+        )
+
+
+def _feature_z_range(
+    box: BoxSpec, one: Feature, base_z: float, mode: str,
+) -> tuple[float, float]:
+    solids = build_features(
+        box, [one], base_z, layout_zone(box, mode), mode=mode, include_text=True,
+    )
+    if not solids:
+        return base_z, _feature_height(box, one, base_z)
+    return (
+        min(float(solid.bounds[0][2]) for solid in solids),
+        max(float(solid.bounds[1][2]) for solid in solids),
+    )
+
+
+def inside_handle_conflict(
+    box: BoxSpec, one: Feature, base_z: float, mode: str,
+) -> str | None:
+    if not box.lift_grabbers.enabled:
+        return None
+    footprint = feature_footprint(box, one, base_z).polygon
+    try:
+        z0, z1 = _feature_z_range(box, one, base_z, mode)
+    except Exception:
+        # The normal feature build path owns malformed-feature errors. Avoid
+        # turning one bad editor draft into a whole-preview failure here.
+        return None
+    for name, polygon, h0, h1 in lift_grabber_collision_volumes(box):
+        xy_overlap = footprint.buffer(MIN_FEATURE_GAP).intersects(polygon)
+        z_overlap = z1 + MIN_FEATURE_GAP > h0 and h1 + MIN_FEATURE_GAP > z0
+        if xy_overlap and z_overlap:
+            return name
+    return None
 
 
 def _scoop_floor_bounds(
@@ -841,6 +881,12 @@ def validate_customization_clearance(
                     f"interior part {index + 1} ({one.kind}) overlaps the {name}; "
                     "move or resize the part in the 2D layout"
                 )
+        handle_conflict = inside_handle_conflict(box, one, base_z, mode)
+        if handle_conflict is not None:
+            raise ValueError(
+                f"interior part {index + 1} ({one.kind}) overlaps the "
+                f"{handle_conflict}; move, resize, or lower the part"
+            )
 
 
 def preview_geometry(
@@ -867,6 +913,7 @@ def preview_geometry(
     if rim_feature is not None:
         label = text_of(rim_feature)
         label_location = str(rim_feature.options.get("rim_side", "back"))
+    validate_inside_handles_mode(box, mode)
     validate_scoop_lift_grabbers(box, scoop)
     validate_side_openings(box)
     validate_side_opening_label(box, label, label_location)
@@ -991,6 +1038,10 @@ def preview_geometry(
             if conflict is not None:
                 draft_error = f"{draft.kind}: overlaps the {conflict}"
             else:
+                handle_conflict = inside_handle_conflict(box, draft, base_z, mode)
+                if handle_conflict is not None:
+                    draft_error = f"{draft.kind}: overlaps the {handle_conflict}"
+            if draft_error is None:
                 try:
                     draft_occ = feature_footprint(box, draft, base_z) if mode == "fused" else draft.zone
                     for idx, one_occ in enumerate(occupied):
@@ -1046,6 +1097,11 @@ def preview_geometry(
         )
         if conflict is not None:
             feature_errors.append(f"{one.kind}: overlaps the {conflict}")
+            if feature_index not in invalid_feature_indexes:
+                invalid_feature_indexes.append(feature_index)
+        handle_conflict = inside_handle_conflict(box, one, base_z, mode)
+        if handle_conflict is not None:
+            feature_errors.append(f"{one.kind}: overlaps the {handle_conflict}")
             if feature_index not in invalid_feature_indexes:
                 invalid_feature_indexes.append(feature_index)
 
@@ -1448,6 +1504,7 @@ def generate_organizer_files(
     validate_stack_design(box)
     stack_request = box
     box = stack_effective_box(box)
+    validate_inside_handles_mode(box, layout.mode)
     rim_feature = next((one for one in layout.features if is_text(one) and one.options.get("level") == "rim"), None)
     if rim_feature is not None:
         label = text_of(rim_feature)
@@ -2352,8 +2409,8 @@ def design_to_dict(
             "shape": side_openings.shape,
             "sides": list(side_openings.sides),
             "size": side_openings.size,
-            "depth_percent": side_openings.depth_percent,
-            "top_support": side_openings.top_support,
+            "from_bottom_percent": side_openings.from_bottom_percent,
+            "from_top_percent": side_openings.from_top_percent,
         }
     return {
         # Version 3 only when B4B is on. Version 3 changes B4B x/y from the
@@ -2442,13 +2499,25 @@ def design_from_dict(
         raw_sides = side_openings_raw.get("sides", ())
         if not isinstance(raw_sides, (list, tuple)):
             raise ValueError("side opening sides must be a list")
+        from_bottom = float(side_openings_raw.get(
+            "from_bottom_percent", side_openings_raw.get("depth_percent", 100.0)
+        ))
+        if "from_top_percent" in side_openings_raw:
+            from_top = float(side_openings_raw["from_top_percent"])
+        elif bool(side_openings_raw.get("top_support", False)):
+            usable_h = float(raw["z"]) - float(
+                raw.get("base_thickness", raw.get("wall", DEFAULT_WALL))
+            )
+            from_top = 100.0 * (usable_h - SIDE_OPENING_TOP_BRIDGE_MM) / usable_h
+        else:
+            from_top = 100.0
         side_openings = SideOpeningSpec(
             enabled=True,
             shape=str(side_openings_raw.get("shape", "curved")),
             sides=tuple(str(side) for side in raw_sides),
             size=str(side_openings_raw.get("size", "medium")),
-            depth_percent=float(side_openings_raw.get("depth_percent", 100.0)),
-            top_support=bool(side_openings_raw.get("top_support", False)),
+            from_bottom_percent=from_bottom,
+            from_top_percent=from_top,
         )
     b4b_raw = raw.get("b4b")
     b4b = B4BSpec()

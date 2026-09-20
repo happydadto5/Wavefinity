@@ -21,6 +21,7 @@ from shapely.geometry import Point
 
 import organizer_app
 import organizer_b4b
+import organizer_edge_mount
 import organizer_engine
 import organizer_geometry
 import organizer_inserts
@@ -1677,6 +1678,37 @@ class FlatInsideTests(unittest.TestCase):
 
 
 class InsertEditorTests(unittest.TestCase):
+    def test_inside_handles_are_rejected_for_a_removable_insert(self) -> None:
+        spec = BoxSpec(
+            48.0, 48.0, 40.0,
+            lift_grabbers=LiftGrabberSpec(enabled=True, location="sides"),
+        )
+        with self.assertRaisesRegex(ValueError, "cannot be used with Removable insert"):
+            organizer_app.preview_geometry(spec, mode="separate")
+
+    def test_inside_handle_collision_uses_the_parts_actual_height(self) -> None:
+        spec = BoxSpec(
+            48.0, 48.0, 40.0,
+            lift_grabbers=LiftGrabberSpec(enabled=True, location="sides"),
+        )
+        zone = organizer_app.Zone(18.0, -2.0, 22.0, 2.0)
+        low = organizer_app.Feature(
+            "post", zone, count=1,
+            options={"diameter": 4.0, "height": 10.0, "spacing": 0.0},
+        )
+        tall = replace(low, options={**low.options, "height": 30.0})
+        self.assertIsNone(
+            organizer_app.inside_handle_conflict(
+                spec, low, spec.base_thickness, "fused"
+            )
+        )
+        self.assertIn(
+            "inside handle",
+            organizer_app.inside_handle_conflict(
+                spec, tall, spec.base_thickness, "fused"
+            ),
+        )
+
     def test_label_moves_clear_of_a_holder_zone(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
         occupied = organizer_app.Zone(-8.0, -8.0, 8.0, 8.0).polygon
@@ -1903,7 +1935,7 @@ class InsertEditorTests(unittest.TestCase):
     def test_organizer_cli_keeps_saved_side_openings(self) -> None:
         openings = SideOpeningSpec(
             enabled=True, sides=("front",), shape="curved", size="medium",
-            top_support=True, depth_percent=60.0,
+            from_bottom_percent=60.0, from_top_percent=80.0,
         )
         spec = BoxSpec(48.0, 32.0, 35.0, side_openings=openings)
         with tempfile.TemporaryDirectory() as directory:
@@ -2628,12 +2660,14 @@ class SideOpeningTests(unittest.TestCase):
     def test_100_percent_curved_reaches_floor_not_below(self) -> None:
         box = replace(self._box(), side_openings=SideOpeningSpec(
             enabled=True, sides=("front",), shape="curved", size="medium",
-            top_support=False, depth_percent=100.0,
+            from_bottom_percent=100.0, from_top_percent=100.0,
         ))
-        floor_z, rim_z, bottom_z = organizer_side_openings._vertical_geometry(
-            box, box.side_openings.depth_percent
+        floor_z, rim_z, bottom_z, top_z = organizer_side_openings._vertical_geometry(
+            box, box.side_openings.from_bottom_percent,
+            box.side_openings.from_top_percent,
         )
         self.assertAlmostEqual(bottom_z, floor_z)
+        self.assertAlmostEqual(top_z, rim_z)
         cut = apply_side_openings(box, make_box(box))
         self.assertTrue(cut.is_watertight)
         # The deepest point of the cutter meets the floor top; it must not
@@ -2646,10 +2680,13 @@ class SideOpeningTests(unittest.TestCase):
 
     def test_50_percent_depth_stops_halfway_down_usable_wall(self) -> None:
         box = self._box()
-        floor_z, rim_z, bottom_z = organizer_side_openings._vertical_geometry(box, 50.0)
+        floor_z, rim_z, bottom_z, top_z = organizer_side_openings._vertical_geometry(
+            box, 50.0, 100.0
+        )
         usable = rim_z - floor_z
         self.assertAlmostEqual(bottom_z, rim_z - usable * 0.5)
         self.assertAlmostEqual(rim_z - bottom_z, usable / 2.0)
+        self.assertAlmostEqual(top_z, rim_z)
 
     def test_square_open_top_profile_has_flat_bottom(self) -> None:
         profile = organizer_side_openings._open_top_profile("square", 5.0, 10.0, 30.0)
@@ -2665,7 +2702,7 @@ class SideOpeningTests(unittest.TestCase):
         ys = [round(y, 6) for _x, y in profile.exterior.coords]
         self.assertEqual(ys.count(round(miny, 6)), 1)
 
-    def test_curved_top_support_leaves_fixed_bridge_and_arched_top(self) -> None:
+    def test_curved_supported_profile_uses_the_shallow_arch_curve(self) -> None:
         box = self._box(z=60.0)
         rim_z = box.z
         r = 5.0
@@ -2674,6 +2711,10 @@ class SideOpeningTests(unittest.TestCase):
         minx, miny, maxx, maxy = profile.bounds
         self.assertAlmostEqual(maxy, opening_top_z, places=6)
         self.assertAlmostEqual(rim_z - maxy, SIDE_OPENING_TOP_BRIDGE_MM, places=6)
+        right_roof = max(
+            y for x, y in profile.exterior.coords if math.isclose(x, r, abs_tol=1e-6)
+        )
+        self.assertAlmostEqual(right_roof, opening_top_z - 1.5 * r, places=6)
 
     def test_square_top_support_has_exact_45_degree_roof(self) -> None:
         r = 7.5
@@ -2696,7 +2737,7 @@ class SideOpeningTests(unittest.TestCase):
             with self.subTest(side=side):
                 box = replace(self._box(), side_openings=SideOpeningSpec(
                     enabled=True, sides=(side,), shape="curved", size="medium",
-                    top_support=False, depth_percent=100.0,
+                    from_bottom_percent=100.0, from_top_percent=100.0,
                 ))
                 cut = apply_side_openings(box, make_box(box))
                 self.assertTrue(cut.is_watertight)
@@ -2710,16 +2751,17 @@ class SideOpeningTests(unittest.TestCase):
 
     def test_multiple_sides_and_shapes_stay_one_printable_solid(self) -> None:
         combos = [
-            ("curved", False, 100.0), ("square", False, 100.0),
-            ("curved", True, 100.0), ("square", True, 100.0),
-            ("curved", False, 50.0),
+            ("curved", 100.0, 100.0), ("square", 100.0, 100.0),
+            ("curved", 75.0, 75.0), ("square", 75.0, 75.0),
+            ("curved", 50.0, 100.0),
         ]
-        for shape, top_support, depth in combos:
-            with self.subTest(shape=shape, top_support=top_support, depth=depth):
+        for shape, from_bottom, from_top in combos:
+            with self.subTest(shape=shape, from_bottom=from_bottom, from_top=from_top):
                 box = replace(self._box(z=50.0), side_openings=SideOpeningSpec(
                     enabled=True, sides=("front", "back", "left", "right"),
-                    shape=shape, size="medium", top_support=top_support,
-                    depth_percent=depth,
+                    shape=shape, size="medium",
+                    from_bottom_percent=from_bottom,
+                    from_top_percent=from_top,
                 ))
                 cut = apply_side_openings(box, make_box(box))
                 self.assertTrue(cut.is_watertight)
@@ -2762,30 +2804,41 @@ class SideOpeningTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_side_openings(replace(box, side_openings=SideOpeningSpec(
                 enabled=True, sides=("front",), shape="curved", size="xl",
-                depth_percent=1.0,
+                from_bottom_percent=1.0, from_top_percent=100.0,
             )))
 
-    def test_depth_range_is_one_through_one_hundred_percent(self) -> None:
+    def test_percentages_are_bounded_and_must_overlap(self) -> None:
         saved = organizer_app.design_to_dict(self._box(), organizer_app.Layout())
         saved["box"]["side_openings"] = {
             "enabled": True,
             "shape": "square",
             "sides": ["front"],
             "size": "small",
-            "depth_percent": 0.5,
-            "top_support": False,
+            "from_bottom_percent": -0.5,
+            "from_top_percent": 100.0,
         }
-        with self.assertRaisesRegex(ValueError, "between 1 and 100"):
+        with self.assertRaisesRegex(ValueError, "between 0 and 100"):
             organizer_app.design_from_dict(saved)
-        saved["box"]["side_openings"]["depth_percent"] = 1.0
+        saved["box"]["side_openings"]["from_bottom_percent"] = 50.0
+        saved["box"]["side_openings"]["from_top_percent"] = 50.0
+        with self.assertRaisesRegex(ValueError, "top must be above"):
+            organizer_app.design_from_dict(saved)
+
+    def test_legacy_depth_and_top_support_migrate(self) -> None:
+        saved = organizer_app.design_to_dict(self._box(), organizer_app.Layout())
+        saved["box"]["side_openings"] = {
+            "enabled": True, "shape": "square", "sides": ["front"],
+            "size": "small", "depth_percent": 60.0, "top_support": False,
+        }
         box, *_ = organizer_app.design_from_dict(saved)
-        validate_side_openings(box)
+        self.assertEqual(box.side_openings.from_bottom_percent, 60.0)
+        self.assertEqual(box.side_openings.from_top_percent, 100.0)
 
     def test_save_load_round_trips_exactly(self) -> None:
         spec = self._box(x=48.0, y=48.0, z=40.0)
         spec = replace(spec, side_openings=SideOpeningSpec(
             enabled=True, sides=("front", "left"), shape="square",
-            size="large", depth_percent=75.0, top_support=True,
+            size="large", from_bottom_percent=75.0, from_top_percent=75.0,
         ))
         layout = organizer_app.Layout()
         box, rebuilt, label, part_name, location, scoop = organizer_app.design_from_dict(
@@ -2811,16 +2864,16 @@ class SideOpeningTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             organizer_b4b.validate_b4b_design(box)
 
-    def test_lid_and_stacking_require_top_support(self) -> None:
+    def test_lid_and_stacking_require_a_top_bridge(self) -> None:
         box = self._box(side_openings=SideOpeningSpec(
-            enabled=True, sides=("front",), top_support=False,
+            enabled=True, sides=("front",), from_top_percent=100.0,
         ))
         with self.assertRaises(ValueError):
             validate_side_openings(replace(box, lid=LidSpec(enabled=True)))
-        # With Top Support on, Lid & Stacking is fine.
+        # Lowering the top leaves a bridge for the lid/stacking geometry.
         validate_side_openings(replace(
             box, lid=LidSpec(enabled=True),
-            side_openings=replace(box.side_openings, top_support=True),
+            side_openings=replace(box.side_openings, from_top_percent=80.0),
         ))
         with self.assertRaises(ValueError):
             validate_side_openings(replace(box, stack=StackSpec(mode="direct")))
@@ -2862,7 +2915,7 @@ class SideOpeningTests(unittest.TestCase):
         # the requested opening, not have it filled back in.
         box = self._box(side_openings=SideOpeningSpec(
             enabled=True, sides=("front",), shape="curved", size="medium",
-            top_support=False, depth_percent=100.0,
+            from_bottom_percent=100.0, from_top_percent=100.0,
         ))
         with tempfile.TemporaryDirectory() as tmp:
             result = organizer_app.generate_organizer_files(
@@ -2875,6 +2928,46 @@ class SideOpeningTests(unittest.TestCase):
             probe_z = box.base_thickness + 3.0
             self.assertFalse(bool(mesh.contains([_wall_midpoint(box, "front", probe_z)])[0]))
             self.assertTrue(bool(mesh.contains([_wall_midpoint(box, "back", probe_z)])[0]))
+
+
+class EdgeMountTests(unittest.TestCase):
+    def test_label_uses_12_mm_target_and_6_mm_floor(self) -> None:
+        box = BoxSpec(
+            48.0, 48.0, 40.0,
+            edge_mount=EdgeMountSpec(
+                label_enabled=True, label_text="A", label_projection_mm=20.0,
+            ),
+        )
+        self.assertEqual(organizer_edge_mount.edge_mount_label_plan(box)["cap_height_mm"], 12.0)
+        too_small = replace(
+            box,
+            edge_mount=replace(
+                box.edge_mount, label_text="A VERY LONG LABEL", label_projection_mm=5.0,
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "Shorten the text, increase Projection"):
+            organizer_edge_mount.edge_mount_label_plan(too_small)
+
+    def test_label_plate_has_square_wall_corners_and_one_mm_free_chamfers(self) -> None:
+        box = BoxSpec(48.0, 48.0, 40.0)
+        outer_top = organizer_engine.wavy_outer_polygon(box).bounds[3]
+        polygon = organizer_edge_mount._plate_rectangle(box, "back", 10.0, 20.0)
+        coords = {(round(x, 6), round(y, 6)) for x, y in polygon.exterior.coords}
+        attached_y = min(y for _x, y in coords)
+        self.assertIn((-10.0, attached_y), coords)
+        self.assertIn((10.0, attached_y), coords)
+        self.assertIn((-9.0, round(outer_top + 20.0, 6)), coords)
+        self.assertIn((9.0, round(outer_top + 20.0, 6)), coords)
+
+    def test_driver_access_preserves_legacy_auto_and_rejects_too_small(self) -> None:
+        auto = EdgeMountSpec(holes_enabled=True, screw_diameter_mm=5.0)
+        self.assertEqual(organizer_edge_mount.resolved_access_diameter(auto), 10.0)
+        bad = BoxSpec(
+            48.0, 48.0, 40.0,
+            edge_mount=replace(auto, access_diameter_mm=4.0),
+        )
+        with self.assertRaisesRegex(ValueError, "at least the screw diameter"):
+            organizer_edge_mount.edge_mount_hole_plan(bad)
 
 
 if __name__ == "__main__":

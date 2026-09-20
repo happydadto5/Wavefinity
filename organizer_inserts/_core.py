@@ -55,7 +55,7 @@ class Item:
         if not self.segments:
             raise ValueError(f"{self.name}: an item needs at least one segment")
         if self.profile not in {
-            "round", "hex", "square", "hex_bit_short", "hex_bit_long"
+            "round", "hex", "square", "square_axis", "hex_bit_short", "hex_bit_long"
         }:
             raise ValueError(f"{self.name}: unknown profile {self.profile!r}")
         if not math.isfinite(self.clearance) or self.clearance < 0.0:

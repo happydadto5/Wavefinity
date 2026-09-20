@@ -43,6 +43,8 @@ class FeatureDefinition:
     options: tuple[OptionDefinition, ...] = ()
     icon: str = ""
     order: int = 100
+    max_instances: int | None = None
+    palette_visible: bool = True
     builder: Builder | None = None
     default_resolver: Defaults | None = None
 
@@ -91,7 +93,12 @@ def feature(
     options: tuple[OptionDefinition, ...] | None = None,
     icon: str | None = None,
     order: int | None = None,
+    max_instances: int | None = None,
+    palette_visible: bool | None = None,
 ) -> Callable[[Builder], Builder]:
+    if max_instances is not None and max_instances < 1:
+        raise ValueError("max_instances must be at least 1")
+
     def register(function: Builder) -> Builder:
         FEATURE_BUILDERS[kind] = function
         current = _definition(kind)
@@ -109,6 +116,10 @@ def feature(
             icon=(current.icon if icon is None and current.icon else
                   kind if icon is None and title is not None else icon or ""),
             order=current.order if order is None else order,
+            max_instances=(current.max_instances if max_instances is None
+                           else max_instances),
+            palette_visible=(current.palette_visible if palette_visible is None
+                             else palette_visible),
             builder=function,
         )
         return function

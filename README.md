@@ -498,7 +498,7 @@ multiple-drawer layout is preserved as a compatibility exception - a new
 Drawer Space otherwise represents exactly one physical drawer.
 
 Creating a new Drawer Space lands directly in the normal Bin editor with every
-ordinary option (Interior print mode, Base, Walls, Lift Grabbers) still
+ordinary option (Interior print mode, Base, Walls, Inside Handles) still
 visible; there is no tutorial or first-run card. A one-drawer Drawer Space's
 name, width, depth and usable height belong to the Space: the Space tab shows
 them read-only with an **Edit drawer** button (the Space Edit form), and an edit
@@ -508,7 +508,7 @@ bin), and Auto layout and spacer/connector actions stay disabled until there is
 something to work on.
 
 - **Space identity.** A typed Space carries a permanent `space_id` (UUID) in
-  its `.wavefinity.json` (metadata version 5). The per-user profile keeps a
+  its `.wavefinity.json` (metadata version 6; identity required since version 5). The per-user profile keeps a
   registry of known Spaces (id, name, kind, last folder) as an index only.
   Renaming the folder within the same parent is recovered automatically by
   that ID; a folder moved elsewhere is recognised when you Open Existing it.
@@ -658,10 +658,18 @@ on resumes using it. New fields missing from an older snapshot come from the
 current Wavefinity defaults.
 
 The sanitized snapshot lives in the Space's `.wavefinity.json` folder metadata,
-now version 3. It copies the complete bin/shell configuration, blanks names and
-label wording, and discards interior content generically. A rim/bin label is the
-sole `layout.features` exception because it is shell-level label configuration;
-its configuration remains while its wording is cleared.
+now version 6. It copies the complete bin/shell configuration, blanks names and
+label wording, and never copies placed interior-part instances. Safe last-used
+interior-part editor settings are stored separately by kind in `part_defaults`;
+width/depth and reusable options carry, while placement, photos/contours, names,
+and actual wording do not.
+
+A new user-editable option/part setting is presumed to participate in Space
+defaults unless it is explicitly instance-specific content. Bin/shell modifier
+settings carry forward with the bin-default snapshot. Interior-part instances
+do not auto-copy; their last-used safe editor settings are remembered per kind
+and seed the next instance. When adding a new option/editor field, update or
+verify Space-default persistence in the same change.
 
 ### Using the browser editor
 
@@ -1403,7 +1411,7 @@ Side Openings are for **ordinary bins only** - hidden for Storage Box and Base
 Trim. Lid & Stacking requires Top Support on, so the continuous top rim
 survives; turning either on while the other is set that way forces Top
 Support on automatically in the browser. A rim label, an Edge Mount
-mounting wall, or a Lift Grabber may not share a wall with a Side Opening -
+mounting wall, or an Inside Handle may not share a wall with a Side Opening -
 different walls are fine for all three. The scoop and other interior parts
 are never globally blocked; the cutter is authoritative wherever a Side
 Opening's wall intersects other body geometry, and it is re-applied to the

@@ -58,8 +58,9 @@ EDGE_LABEL_THICKNESS_PRESETS = (
 EDGE_LABEL_DEFAULT_THICKNESS = 2.0
 
 EDGE_LABEL_TEXT_MARGIN = 2.0
-EDGE_LABEL_TARGET_CAP_HEIGHT = 5.0
-EDGE_LABEL_MIN_CAP_HEIGHT = 4.0
+EDGE_LABEL_TARGET_CAP_HEIGHT = 12.0
+EDGE_LABEL_MIN_CAP_HEIGHT = 6.0
+EDGE_LABEL_FRONT_CHAMFER_MM = 1.0
 
 EDGE_HOLE_DEFAULT_SCREW_DIAMETER = 4.0
 EDGE_HOLE_DEFAULT_ACCESS_DIAMETER = 8.0
@@ -114,8 +115,8 @@ def _validate_lift_grabber_conflict(box: BoxSpec, side: str) -> None:
     opposite_wall = _EDGE_MOUNT_WALL_NAME[_EDGE_MOUNT_OPPOSITE_SIDE[side]]
     if mounting_wall in grabbers.walls or opposite_wall in grabbers.walls:
         raise ValueError(
-            "Edge Mount screw access conflicts with a Lift Grabber on the "
-            "mounting or access wall. Move the Lift Grabbers to the other "
+            "Edge Mount screw access conflicts with an Inside Handle on the "
+            "mounting or access wall. Move the Inside Handles to the other "
             "walls or turn them off."
         )
 
@@ -145,13 +146,13 @@ def _validate_hole_ranges(spec: EdgeMountSpec) -> float:
     access = resolved_access_diameter(spec)
     if not (EDGE_HOLE_MIN_ACCESS_DIAMETER <= access <= EDGE_HOLE_MAX_ACCESS_DIAMETER):
         raise ValueError(
-            f"Edge Mount driver access diameter of {access:g} mm is outside the "
+            f"Edge Mount screwdriver access diameter of {access:g} mm is outside the "
             f"{EDGE_HOLE_MIN_ACCESS_DIAMETER:g}-{EDGE_HOLE_MAX_ACCESS_DIAMETER:g} mm "
-            "range. Use a smaller screw diameter or set a custom access diameter."
+            "range. Use a smaller screw diameter or set another access diameter."
         )
     if access < spec.screw_diameter_mm - 1e-9:
         raise ValueError(
-            "Edge Mount driver access diameter must be at least the screw diameter"
+            "Edge Mount screwdriver access must be at least the screw diameter"
         )
     if spec.hole_orientation not in ("horizontal", "vertical"):
         raise ValueError("Edge Mount hole pattern must be horizontal or vertical")
@@ -198,8 +199,8 @@ def _fit_edge_label_text(text: str, room_along: float, room_depth: float) -> flo
     if cap_height < EDGE_LABEL_MIN_CAP_HEIGHT - 1e-9:
         raise ValueError(
             f'The Edge Mount label is too small for "{text}" at the '
-            f"{EDGE_LABEL_MIN_CAP_HEIGHT:g} mm minimum letter height. Increase "
-            "the plate size or shorten the text."
+            f"{EDGE_LABEL_MIN_CAP_HEIGHT:g} mm minimum letter height. Shorten "
+            "the text, increase Projection, or use Full Side Length."
         )
     return cap_height
 
@@ -454,13 +455,26 @@ def _plate_rectangle(box: BoxSpec, side: str, half_length: float, projection: fl
     outer = wavy_outer_polygon(box)
     ox0, oy0, ox1, oy1 = outer.bounds
     reach = box.wall_depth + 2.0 * WAVE_AMPLITUDE + 1.0
+    plate_length = 2.0 * half_length
+    c = min(EDGE_LABEL_FRONT_CHAMFER_MM, projection / 4.0, plate_length / 4.0)
+    # Canonical plate: tangent is X, outward is +Y. Only the two free/outward
+    # corners are chamfered; the wall-attached edge remains square.
+    polygon = Polygon([
+        (-half_length, -reach),
+        (half_length, -reach),
+        (half_length, projection - c),
+        (half_length - c, projection),
+        (-half_length + c, projection),
+        (-half_length, projection - c),
+    ])
+    polygon = rotate_polygon(polygon, _EDGE_MOUNT_ROTATION[side], origin=(0.0, 0.0))
     if side == "back":
-        return shapely_box(-half_length, oy1 - reach, half_length, oy1 + projection)
+        return translate_polygon(polygon, yoff=oy1)
     if side == "front":
-        return shapely_box(-half_length, oy0 - projection, half_length, oy0 + reach)
+        return translate_polygon(polygon, yoff=oy0)
     if side == "left":
-        return shapely_box(ox0 - projection, -half_length, ox0 + reach, half_length)
-    return shapely_box(ox1 - reach, -half_length, ox1 + projection, half_length)
+        return translate_polygon(polygon, xoff=ox0)
+    return translate_polygon(polygon, xoff=ox1)
 
 
 def _build_label_plate_mesh(box: BoxSpec, plan: dict[str, object]) -> trimesh.Trimesh:

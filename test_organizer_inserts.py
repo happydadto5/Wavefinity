@@ -23,7 +23,7 @@ from organizer_engine import (
     wavy_cavity_polygon,
 )
 import organizer_inserts as inserts
-from organizer_inserts._bore import _bore_grid
+from organizer_inserts._bore import _bore_grid, bore_minimum_pitches
 from organizer_inserts import (
     EDITOR_SNAP,
     Feature,
@@ -1808,6 +1808,21 @@ class RegistryTests(unittest.TestCase):
             self.assertTrue(definition.icon)
             self.assertTrue(all(option.value_type for option in definition.options))
 
+    def test_registry_carries_instance_limits_and_palette_visibility(self) -> None:
+        @inserts.feature("test_hidden_single", max_instances=1, palette_visible=False)
+        def build(box, spec_feature, base_z):
+            return []
+
+        try:
+            definition = inserts.feature_definition("test_hidden_single")
+            self.assertEqual(definition.max_instances, 1)
+            self.assertFalse(definition.palette_visible)
+        finally:
+            inserts.FEATURE_BUILDERS.pop("test_hidden_single", None)
+            inserts.FEATURE_DEFINITIONS.pop("test_hidden_single", None)
+        with self.assertRaisesRegex(ValueError, "at least 1"):
+            inserts.feature("test_bad_limit", max_instances=0)
+
     def test_divider_compartments_have_their_own_module_boundary(self) -> None:
         self.assertEqual(inserts.DividerCell.__module__, "organizer_inserts._divider_cells")
         self.assertEqual(inserts.divider_cells.__module__, "organizer_inserts._divider_cells")
@@ -2196,6 +2211,29 @@ class BoreEnhancementTests(unittest.TestCase):
         # so a chamfered build is always lighter than one with square mouths.
         self.assertGreater(inserts.BORE_MOUTH_CHAMFER, 0.0)
         self.assertTrue(plain.is_watertight)
+
+    def test_square_and_diamond_profiles_keep_their_distinct_orientation(self) -> None:
+        zone = Zone(-10.0, -10.0, 10.0, 10.0)
+        meshes = {}
+        for profile in ("square", "square_axis"):
+            item = Item.simple("tool", 20.0, 6.0, profile=profile)
+            meshes[profile] = build_features(
+                BIN,
+                [Feature("bore", zone, item, options={"columns": 1, "rows": 1})],
+                BIN.base_thickness,
+            )[0]
+        legacy_xy = np.asarray(meshes["square"].vertices)[:, :2]
+        axis_xy = np.asarray(meshes["square_axis"].vertices)[:, :2]
+        legacy_near = legacy_xy[np.max(np.abs(legacy_xy), axis=1) < 6.0]
+        axis_near = axis_xy[np.max(np.abs(axis_xy), axis=1) < 6.0]
+        self.assertTrue(any(abs(x) < 1e-6 and abs(y) > 4.0 for x, y in legacy_near))
+        self.assertTrue(any(abs(x) > 3.0 and abs(y) > 3.0 for x, y in axis_near))
+
+    def test_axis_square_pitch_uses_held_width_plus_wall(self) -> None:
+        self.assertEqual(
+            bore_minimum_pitches("square_axis", 6.4, 1.6, 0.0, "x"),
+            (8.0, 8.0),
+        )
 
 
 class FeatureMinFootprintTests(unittest.TestCase):

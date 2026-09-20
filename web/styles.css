@@ -528,7 +528,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .section-heading .heading-select select { width: auto; min-width: 92px; margin: 0; padding-top: 6px; padding-bottom: 6px; }
 .mode-and-bin-options .compact-select { flex: 1 1 120px; min-width: 110px; }
 .mode-and-bin-options .compact-select select { height: 38px; }
-/* Base, Walls and Lift Grabbers as one fixed 3-column row so they stay the
+/* Base, Walls and Inside Handles as one fixed 3-column row so they stay the
    same width and never split across lines regardless of sidebar width. */
 .thickness-grabber-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; flex: 1 1 320px; min-width: 280px; }
 .thickness-grabber-row .inline-select { margin: 0; min-width: 0; }
@@ -546,12 +546,16 @@ input[type="number"]::-webkit-inner-spin-button {
 .segmented span { display: block; padding: 7px 6px; cursor: pointer; border-right: 1px solid var(--line); }
 .segmented label:last-child span { border-right: 0; }
 .segmented input:checked + span { background: var(--teal); color: white; }
+.segmented button { border: 0; border-right: 1px solid var(--line); border-radius: 0; padding: 7px 6px; background: white; color: var(--ink); cursor: pointer; }
+.segmented button:last-child { border-right: 0; }
+.segmented button[aria-pressed="true"] { background: var(--teal); color: white; }
+.segmented button:disabled { opacity: .45; cursor: not-allowed; }
 
 .subheading-row { display: flex; align-items: end; justify-content: space-between; margin-top: 18px; }
 .subheading-row h2 { margin: 0; font-size: 15px; }
 .subheading-row p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
 .count-badge { border-radius: 999px; background: var(--teal-soft); color: var(--teal-dark); padding: 4px 8px; font-size: 11px; font-weight: 700; }
-.support-palette { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; margin: 8px 0; }
+.support-palette { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 5px; margin: 8px 0; }
 .support-choice {
   --support-color: var(--teal); min-height: 34px; max-height: 34px; padding: 0; background: white; border: 1px solid var(--line);
   border-radius: 8px; cursor: pointer; text-align: left; display: flex; align-items: stretch; gap: 0;
@@ -594,18 +598,18 @@ input[type="number"]::-webkit-inner-spin-button {
 .support-palette.editing .support-choice:not(.active) { display: none; }
 .support-palette.editing .support-choice.active {
   cursor: default; transform: none; box-shadow: 0 0 0 2px rgba(31,107,69,.32);
-  max-height: none; min-height: 84px; padding-right: 132px;
+  max-height: none; min-height: 42px; padding-right: 150px;
 }
 
-/* Save / Delete Part ride in the top-right of the green part chip, stacked,
+/* Save / Delete ride in the top-right of the green part chip,
    shown only while a part is open for editing. */
 .palette-wrap { position: relative; }
 .draft-actions {
-  position: absolute; top: 8px; right: 8px; z-index: 2;
-  display: flex; flex-direction: column; gap: 5px; width: 116px;
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  display: flex; flex-direction: row; gap: 5px; width: auto;
 }
 .draft-actions[hidden] { display: none; }
-.draft-actions .button { width: 100%; padding: 6px 10px; font-size: 12px; }
+.draft-actions .button { width: auto; min-width: 64px; padding: 6px 9px; font-size: 12px; }
 
 .support-editor { border: 1px solid var(--line); border-radius: 9px; padding: 13px; background: #fbfcfc; }
 .support-editor:not([hidden]) { border-color: #1f6b45; box-shadow: 0 0 0 2px rgba(31,107,69,.16); }
@@ -1380,6 +1384,8 @@ dialog:not([open]) { display: none; }
   .connection { width: 100%; text-align: right; }
   .section-body, .output-panel { padding-left: 13px; padding-right: 13px; }
   .support-palette { grid-template-columns: 1fr; }
+  .draft-actions { flex-wrap: wrap; max-width: calc(100% - 12px); }
+  .support-palette.editing .support-choice.active { padding-right: 150px; }
   .field-grid.three { grid-template-columns: repeat(2, 1fr); }
   .field-grid.four { grid-template-columns: repeat(2, 1fr); }
   .workspace-toolbar { align-items: flex-start; }
