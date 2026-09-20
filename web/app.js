@@ -3667,6 +3667,10 @@ function clearDraftSelection(resetLocks = true) {
 }
 
 function pickKind(kind) {
+  if (kind === "nest" && state.design?.layout?.features?.some(one => one.kind === "nest")) {
+    toast("Duplicate an existing Photo Nest to add another copy.", true, 5000);
+    return;
+  }
   if (b4bEnabled() && !b4bPartAllowed(kind)) return;
   if (b4bEnabled() && kind === "divider") {
     const existing = state.design?.layout?.features?.findIndex(
@@ -4374,22 +4378,6 @@ function renderDraftFields() {
     html += scoopDepthField("option:depth", shown);
   }
   if (one.kind === "nest") {
-    if (changed === "nest-count") {
-      one.count = Math.max(1, Math.min(20, Math.round(number(get("nest-count"), 1))));
-    }
-    if (changed === "nest-orientation") {
-      const angle = number(get("nest-orientation"), NaN);
-      if ([0, 90, 180, 270].includes(angle)) one.rotation = angle;
-    }
-    if (changed === "nest-alternate") {
-      one.alternate_ends = $('[data-draft="nest-alternate"]', $("#draft-fields"))?.checked === true;
-    }
-    if (changed === "option:repeat_spacing_percent") {
-      const spacing = Math.round(number(get("option:repeat_spacing_percent"), NaN));
-      if ([-100, -75, -50, -25, 0, 25, 50, 75, 100].includes(spacing)) {
-        one.options.repeat_spacing_percent = spacing;
-      }
-    }
     html += renderNestFields(one);
   }
   if (info.flags.text) {
@@ -5391,11 +5379,12 @@ function wireNestFieldActions() {
 }
 
 async function duplicateNest() {
-  if (!state.draft?.contour || !Number.isInteger(state.selected) || !beginDesignMutation()) return;
+  if (!state.draft?.contour || !Number.isInteger(state.selected)) return;
   const before = clone(state.design);
   try {
     const committed = await commitVisibleDraft();
     if (committed === false && !state.design.layout.features[state.selected]) return;
+    if (!beginDesignMutation()) return;
     const index = state.selected;
     const result = await api("/api/feature/duplicate", { design: state.design, index });
     state.design = result.design;
@@ -5410,7 +5399,7 @@ async function duplicateNest() {
   } catch (error) {
     state.design = before;
     toast(error.message, true, 6500);
-  } finally { finishDesignMutation(); }
+  } finally { if (state.designMutationBusy) finishDesignMutation(); }
 }
 
 async function resetNestOutline() {
@@ -6205,6 +6194,16 @@ function updateDraftFromFields(event) {
     else delete one.options.angle_towards;
   }
   if (one.kind === "nest") {
+    if (changed === "nest-count") one.count = Math.max(1, Math.min(20, Math.round(number(get("nest-count"), 1))));
+    if (changed === "nest-orientation") {
+      const angle = number(get("nest-orientation"), NaN);
+      if ([0, 90, 180, 270].includes(angle)) one.rotation = angle;
+    }
+    if (changed === "nest-alternate") one.alternate_ends = event.currentTarget?.checked === true;
+    if (changed === "option:repeat_spacing_percent") {
+      const spacing = Math.round(number(get("option:repeat_spacing_percent"), NaN));
+      if ([-100, -75, -50, -25, 0, 25, 50, 75, 100].includes(spacing)) one.options.repeat_spacing_percent = spacing;
+    }
     for (const key of ["lift_assist", "finger_position", "push_position"]) {
       const value = get(`option:${key}`);
       if (value !== undefined) one.options[key] = value;
@@ -10549,7 +10548,8 @@ function wireLayoutInteraction() {
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     if (typeof drag.index !== "number") return;   // not a feature drag - nothing to apply
     state.draft = drag.feature;
-    if (drag.mode === "move" && drag.feature.kind === "nest" && drag.feature.options?.auto_size === true) {
+    if (drag.mode === "move" && drag.feature.kind === "nest" && drag.feature.options?.auto_size === true
+        && state.design.layout.features.filter(one => one.kind === "nest").length === 1) {
       const zone = drag.feature.zone;
       const cx = (zone[0] + zone[2]) / 2, cy = (zone[1] + zone[3]) / 2;
       if (Math.abs(cx) > 0.5 || Math.abs(cy) > 0.5) {
@@ -10637,7 +10637,8 @@ function handleLayoutArrowKeys(event) {
     if (autoField) autoField.checked = false;
   }
   if (feature.kind === "nest") {
-    if (feature.options?.auto_size === true) {
+    if (feature.options?.auto_size === true
+        && state.design.layout.features.filter(one => one.kind === "nest").length === 1) {
       const cx = (feature.zone[0] + feature.zone[2]) / 2, cy = (feature.zone[1] + feature.zone[3]) / 2;
       if (Math.abs(cx) > 0.5 || Math.abs(cy) > 0.5) {
         feature.options.auto_size = false;

@@ -1083,7 +1083,28 @@ def preview_geometry(
                 if j not in invalid_feature_indexes:
                     invalid_feature_indexes.append(j)
 
+    # Recessed Photo Nests share one physical deck. Preview them as one group
+    # too, otherwise a later full deck visually refills an earlier cavity.
+    grouped_recessed = {
+        index for index, one in enumerate(features)
+        if one.kind == "nest" and one.contour
+        and str(resolve_nest_settings(box, one, base_z)["holder_style"]) == "recessed"
+        and not (selected is not None and index == selected and draft is not None)
+    }
+    if grouped_recessed:
+        try:
+            group = [features[index] for index in sorted(grouped_recessed)]
+            for solid in build_features(box, group, base_z, layout_zone(box, mode), mode=mode,
+                                        include_text=True):
+                geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_nest"))
+        except Exception as error:
+            for index in grouped_recessed:
+                feature_errors.append(f"nest: {error}")
+                invalid_feature_indexes.append(index)
+
     for feature_index, one in enumerate(features):
+        if feature_index in grouped_recessed:
+            continue
         if is_text(one) and one.options.get("level") == "rim":
             continue
         if selected is not None and feature_index == selected and draft is not None:

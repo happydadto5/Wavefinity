@@ -117,6 +117,13 @@ def build_features(
     if recessed_nests:
         shared_deck = _nest_recessed_deck_footprint(box, mode)
         made = [build_recessed_nest_group(box, recessed_nests, base_z, shared_deck)]
+        top = made[0].bounds[1][2]
+        if stack_enabled(box) and top > max_feature_z + 1e-6:
+            raise ValueError("a Photo Nest rises into the stacking interface")
+        if lid_enabled(box) and top > box.z + 1e-6:
+            raise ValueError("a Photo Nest rises above the bin rim and conflicts with the lid")
+        if not stack_enabled(box) and not lid_enabled(box) and mode != "fused" and top > box.z + 1e-6:
+            raise ValueError("a Photo Nest rises above the bin rim")
         # A shared deck deliberately spans the physical insert/bin footprint,
         # not any one Nest zone.
         solids.extend(made)
