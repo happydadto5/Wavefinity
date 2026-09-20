@@ -45,6 +45,7 @@ const spSame = (a, b) => {
 SP.dialog = () => $("#welcome-dialog");
 SP.close = () => { if (SP.dialog().open) SP.dialog().close(); };
 SP.showOnly = id => {
+  SP.cancelInlineEdit();
   SP.cancelResumeAutoContinue();
   ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-form", "space-configure-prompt", "space-collision-prompt", "space-existing-inventory-prompt"]
     .forEach(one => { $("#" + one).hidden = one !== id; });
@@ -187,6 +188,8 @@ SP.inventoryFilenameFor = _folder => INVENTORY_FILENAME;
 SP.resetDrawer = async () => {
   if (typeof DL === "undefined") return;
   if (DL.dirty && DL.layout && DL.output) await DL.save();
+  // A different folder means a different Space: close the workspace first.
+  if (typeof DP !== "undefined" && DP.leave) DP.leave();
   DL.layout = null;
   DL.dirty = false;
   DL.candidates = [];
@@ -925,6 +928,7 @@ SP.clearSetupContext = () => {
   SP.collisionData = null;
   SP.collisionOrigin = null;
   SP.pendingConfigureFolder = null;
+  SP.cancelInlineEdit();
   SP.isUpdate = false;
   SP.setupPrefillSpace = null;
 };
@@ -950,8 +954,58 @@ SP.beginCreateNew = () => {
   SP.showTypeCards();
 };
 
+// Editing the open Space happens in the Space header, not in the Welcome
+// dialog: the same setup form is moved into the header for the edit and put
+// back afterwards, so Create and Edit share every field and check while the
+// Create-only buttons (Back, Choose Folder & Create) never appear in Edit.
+SP.editing = false;
+
+SP.mountInlineEdit = () => {
+  const form = $("#space-form");
+  const host = $("#space-head-edit-host");
+  if (!form || !host) return false;
+  if (!SP.formHome) SP.formHome = { parent: form.parentNode, next: form.nextSibling };
+  host.appendChild(form);
+  host.hidden = false;
+  SP.editing = true;
+  return true;
+};
+
+SP.cancelInlineEdit = () => {
+  if (!SP.editing) return;
+  SP.editing = false;
+  const form = $("#space-form");
+  const host = $("#space-head-edit-host");
+  if (form && SP.formHome) {
+    SP.formHome.parent.insertBefore(form, SP.formHome.next && SP.formHome.next.parentNode === SP.formHome.parent ? SP.formHome.next : null);
+    form.hidden = true;
+  }
+  if (host) host.hidden = true;
+  SP.isUpdate = false;
+  SP.setFormMode(false);
+  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
+};
+
+// Create shows Back and Choose Folder & Create; Edit shows Save Changes and
+// Cancel instead, and none of the onboarding chrome.
+SP.setFormMode = edit => {
+  $("#space-form").classList.toggle("editing", edit);
+  $("#space-back").hidden = edit;
+  $("#space-create").hidden = edit;
+  $("#space-save-changes").hidden = !edit;
+  $("#space-cancel-edit").hidden = !edit;
+  $("#space-form-title").parentElement.hidden = edit;
+};
+
 SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
-  SP.showOnly("space-form");
+  if (update) {
+    if (!SP.mountInlineEdit()) return;
+    $("#space-form").hidden = false;
+    SP.close();
+  } else {
+    SP.showOnly("space-form");
+  }
+  SP.setFormMode(update);
   // Every entry into setup explicitly states whether it is editing the
   // current Space, so a stale Edit that was backed out of can never make a
   // later Create/New Space silently call SP.updateSpace() - see
@@ -1001,7 +1055,12 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById("portable-z").value = prefillSpace?.z || "";
   }
   SP.updateReadouts();
-  SP.showDialog();
+  if (update) {
+    if (SP.renderSpaceInfo) SP.renderSpaceInfo();
+    $("#space-name").focus();
+  } else {
+    SP.showDialog();
+  }
 };
 
 SP.startUntyped = async () => {
@@ -1417,6 +1476,7 @@ SP.launch = async () => {
 
 SP.wire = () => {
   wireInfoButtons();
+  $("#space-cancel-edit")?.addEventListener("click", SP.cancelInlineEdit);
   document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-form-close, #space-type-cards-close")
     .forEach(el => el?.addEventListener("click", SP.close));
   SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
@@ -1613,65 +1673,59 @@ SP.renderSpaceInfo = () => {
         }
     }
     
-    const infoBlocks = [
-        { prefix: "space-info", saveBlock: "save-location-row" },
-        { prefix: "dl-space-info", saveBlock: null }
-    ];
-    
-    infoBlocks.forEach(({prefix, saveBlock}) => {
-        const block = document.getElementById(prefix + "-block");
-        if (!block) return;
-        if (saveBlock) {
-            const saveEl = document.getElementById(saveBlock);
-            if (saveEl) saveEl.hidden = isSpace;
-        }
-        
-        if (!isSpace) {
-            block.hidden = true;
-            return;
-        }
-        
-        block.hidden = false;
-        document.getElementById(prefix + "-name").textContent = state.activeSpace.name;
-        
-        const kind = state.activeSpace.kind;
-        const kindLabel = SP_KINDS[kind]?.label || kind;
-        document.getElementById(prefix + "-type").textContent = kindLabel;
-        
-        let sizeText = "";
-        const unit = state.catalog?.base_unit || 8;
-        if (kind === "drawer") {
-            const x = state.activeSpace.x;
-            const y = state.activeSpace.y;
-            const z = state.activeSpace.z;
-            sizeText = x + " × " + y + " × " + z + " mm (" + SP.drawerCapacity(x) + " × " + SP.drawerCapacity(y) + " units)";
-        } else if (kind === "surface") {
-            const x = state.activeSpace.x;
-            const y = state.activeSpace.y;
-            // Current fully-configured Surface Spaces are guaranteed a
-            // valid trim_size - see Fix 004 Correction 11.A4/A6.
-            const trimRow = SP.surfacePresetRows().find(
-                row => row.key === state.activeSpace.trim_size
-            );
-            const trim = trimRow?.label || state.activeSpace.trim_size || "";
-            const outsideX = SP.surfaceOutsideFor(x, state.activeSpace.trim_size);
-            const outsideY = SP.surfaceOutsideFor(y, state.activeSpace.trim_size);
-            sizeText = "Interior " + SP.fieldText(x, y) + ", " + trim + " trim; finished outside "
-                + fmt(outsideX) + " × " + fmt(outsideY) + " mm";
-        } else if (kind === "portable" || kind === "box") {
-            const x = state.activeSpace.x;
-            const y = state.activeSpace.y;
-            const z = state.activeSpace.z;
-            sizeText = (x/unit) + " × " + (y/unit) + " units (" + x + " × " + y + " mm) x " + z + " mm usable height";
-        }
-        document.getElementById(prefix + "-size").textContent = sizeText;
-        
-        const btnNew = document.getElementById(prefix + "-new-space");
-        if (btnNew) btnNew.hidden = false;
-        
-        const btnShow = document.getElementById(prefix + "-show");
-        if (btnShow) btnShow.hidden = state.runtime.hosted;
-    });
+    const saveEl = document.getElementById("save-location-row");
+    if (saveEl) saveEl.hidden = Boolean(isSpace);
+
+    // The one place a Space's identity is shown and edited: name, type and
+    // size at the top left, read-only until Edit is chosen.
+    const head = document.getElementById("space-head");
+    if (!head) return;
+    if (!isSpace) {
+        head.hidden = true;
+        SP.cancelInlineEdit();
+        return;
+    }
+    head.hidden = false;
+    const toggle = document.getElementById("space-mode-toggle");
+    if (toggle) toggle.hidden = !(typeof DL !== "undefined" && DL.active);
+    const viewing = document.getElementById("space-head-view");
+    if (viewing) viewing.hidden = SP.editing;
+    document.getElementById("space-head-name").textContent = state.activeSpace.name;
+
+    const kind = state.activeSpace.kind;
+    const kindLabel = SP_KINDS[kind]?.label || kind;
+    document.getElementById("space-head-type").textContent = kindLabel;
+
+    let sizeText = "";
+    const unit = state.catalog?.base_unit || 8;
+    if (kind === "drawer") {
+        const x = state.activeSpace.x;
+        const y = state.activeSpace.y;
+        const z = state.activeSpace.z;
+        sizeText = x + " × " + y + " × " + z + " mm (" + SP.drawerCapacity(x) + " × " + SP.drawerCapacity(y) + " units)";
+    } else if (kind === "surface") {
+        const x = state.activeSpace.x;
+        const y = state.activeSpace.y;
+        // Current fully-configured Surface Spaces are guaranteed a
+        // valid trim_size - see Fix 004 Correction 11.A4/A6.
+        const trimRow = SP.surfacePresetRows().find(
+            row => row.key === state.activeSpace.trim_size
+        );
+        const trim = trimRow?.label || state.activeSpace.trim_size || "";
+        const outsideX = SP.surfaceOutsideFor(x, state.activeSpace.trim_size);
+        const outsideY = SP.surfaceOutsideFor(y, state.activeSpace.trim_size);
+        sizeText = "Interior " + SP.fieldText(x, y) + ", " + trim + " trim; finished outside "
+            + fmt(outsideX) + " × " + fmt(outsideY) + " mm";
+    } else if (kind === "portable" || kind === "box") {
+        const x = state.activeSpace.x;
+        const y = state.activeSpace.y;
+        const z = state.activeSpace.z;
+        sizeText = (x/unit) + " × " + (y/unit) + " units (" + x + " × " + y + " mm) x " + z + " mm usable height";
+    }
+    document.getElementById("space-head-size").textContent = sizeText;
+
+    const btnShow = document.getElementById("space-head-show");
+    if (btnShow) btnShow.hidden = state.runtime.hosted;
 };
 
 SP.showFolder = async () => {
@@ -1711,7 +1765,7 @@ SP.newSpace = () => {
 // the Drawer panel's dynamically-built copy (wired once when DP.build()
 // creates it) never both attach a listener to the same button - see
 // Fix 004 Correction 6.M.
-const wireInfoButtons = (prefix = "space-info") => {
+const wireInfoButtons = (prefix = "space-head") => {
     const btnEdit = document.getElementById(prefix + "-edit");
     if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
     const btnShow = document.getElementById(prefix + "-show");
@@ -1758,9 +1812,7 @@ SP.updateSpace = async () => {
         });
         state.activeSpace = data.folder.space;
     }
-    SP.isUpdate = false;
-    SP.renderSpaceInfo();
-    SP.close();
+    SP.cancelInlineEdit();
     toast("Space updated.");
     
     if (kind === "drawer" && typeof DL !== "undefined" && DL.active) {

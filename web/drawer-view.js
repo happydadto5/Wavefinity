@@ -468,9 +468,12 @@ DV.paintScene = (ctx, drawer, cam) => {
       ctx.globalAlpha = 1;
       if (entry.working) {
         ctx.save();
-        ctx.setLineDash([5, 3]);
-        ctx.strokeStyle = "#146c70";
-        ctx.lineWidth = 1.8;
+        // While the Design editor is open this is the bin being worked on:
+        // outline it firmly so it reads as the active item in the Space.
+        const designing = DP.mode === "design";
+        ctx.setLineDash(designing ? [] : [5, 3]);
+        ctx.strokeStyle = designing ? "#0f8f96" : "#146c70";
+        ctx.lineWidth = designing ? 3 : 1.8;
         screens.forEach(({ screen }) => { ctx.beginPath(); screen.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.stroke(); });
         ctx.restore();
       }
@@ -814,7 +817,7 @@ DV.wire = () => {
   // Keys while the drawer is on screen. Capture phase, so the bin editor's
   // own shortcuts (Undo, arrow nudges) never act on the hidden design.
   window.addEventListener("keydown", event => {
-    if (!DL.active || !DL.layout) return;
+    if (!DP.spaceEditing() || !DL.layout) return;
     if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return;
     if (document.querySelector("dialog[open]")) return;
     const key = event.key.toLowerCase();
@@ -851,7 +854,7 @@ DV.wire = () => {
 
   // The header's Undo/Redo act on the drawer while this view is showing.
   document.addEventListener("click", event => {
-    if (!DL.active) return;
+    if (!DP.spaceEditing()) return;
     const button = event.target.closest?.("#undo-design, #redo-design");
     if (!button) return;
     event.preventDefault();

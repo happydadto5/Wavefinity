@@ -41,26 +41,17 @@ DP.build = () => {
         <label id="dl-drawer-label-row"><span id="dl-drawer-label">Drawer</span><select id="dl-drawer"></select></label>
         <button type="button" id="dl-drawer-add" class="button secondary dl-small" title="Add another drawer; it shares this inventory">+ Drawer</button>
       </div>
-      <div class="field-grid three">
+      <div class="field-grid three dl-drawer-size">
         <label>Width <span class="unit">mm</span><input id="dl-width" type="number" min="16" step="1" title="Inside, left to right"></label>
         <label>Depth <span class="unit">mm</span><input id="dl-depth" type="number" min="16" step="1" title="Inside, front to back"></label>
         <label>Max height <span class="unit">mm</span><input id="dl-height" type="number" min="6" step="1" title="The tallest bin or stack that fits: the inside height, less whatever the drawer above needs to close"></label>
       </div>
-      <div id="dl-canonical-row" class="dl-canonical-row" hidden>
-        <span class="dl-note">Name and size come from this Space.</span>
-        <button type="button" id="dl-edit-drawer" class="button secondary dl-small">Edit drawer</button>
-      </div>
       <p id="dl-grid-note" class="dl-note"></p>
-      <details class="dl-details" id="dl-fit-details">
-        <summary>Drawer settings</summary>
+      <details class="dl-details" id="dl-fit-details" hidden>
+        <summary>Advanced Settings</summary>
         <div class="field-grid two">
           <label id="dl-name-row">Name<input id="dl-name" type="text" maxlength="40"></label>
-          <label>Fit clearance <span class="unit">mm</span><input id="dl-clearance" type="number" min="0.6" step="0.1" title="Total slack per axis so the bins drop in. At least 0.6 mm for the wave crests."></label>
-          <label>Grid sits<select id="dl-anchor"><option value="front-left">Against front-left corner</option><option value="center">Centred</option></select></label>
-          <label>Width direction<select id="dl-axis"><option value="x">Width left ↔ right</option><option value="y">Width front ↔ back</option></select></label>
-          <label>Snap to<select id="dl-snap" title="The wave repeats every 4 mm, so bins may also sit half a unit along from each other"><option value="8">8 mm - whole units</option><option value="4">4 mm - half units</option></select></label>
         </div>
-        <p class="dl-note">Bins never turn sideways on their own: a quarter-turned bin's waves clash with its neighbours. <em>Width direction</em> turns every bin in this drawer together, which is safe.</p>
         <button type="button" id="dl-drawer-delete" class="button danger dl-small">Delete this drawer</button>
       </details>
     </section>
@@ -91,8 +82,8 @@ DP.build = () => {
       </div>
     </section>
 
-    <section class="control-section open dl-section" aria-label="Spacers and connectors">
-      <div class="section-heading no-toggle"><span>Spacers &amp; connectors</span></div>
+    <section class="control-section open dl-section" aria-label="Spacers">
+      <div class="section-heading no-toggle"><span>Spacers</span></div>
       <div class="section-body">
         <div id="dl-stats" class="dl-stats"></div>
         <div class="field-grid two">
@@ -102,10 +93,9 @@ DP.build = () => {
         <div class="dl-action-grid">
           <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the back and right walls">Plan / Update Spacers</button>
           <button type="button" id="dl-sp-generate" class="button secondary" title="Generate the selected spacer candidates">Generate Selected Spacers</button>
-          <button type="button" id="dl-connectors" class="button secondary" title="Save a file for every connector this layout needs, with how many to print">Make connectors</button>
           <button type="button" id="dl-base-trim" class="button secondary" title="Create a Base Trim around one filled rectangular block of bins">Make Base Trim</button>
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
-          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and connectors together in Bambu Studio">Print Drawer (All)</button>
+          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and the connectors they need together in Bambu Studio">Print Drawer (All)</button>
         </div>
       </div>
     </section>
@@ -150,19 +140,6 @@ DP.build = () => {
     </section>
 
     <section class="dl-savebar" aria-label="Saving">
-      <div id="dl-space-info-block" class="space-info-card b4b-card" hidden style="margin-bottom: 16px;">
-        <h3 class="b4b-card-title">Space Info</h3>
-        <div class="space-info-details">
-          <strong id="dl-space-info-name"></strong>
-          <div id="dl-space-info-type"></div>
-          <div id="dl-space-info-size" class="muted"></div>
-        </div>
-        <div class="button-row" style="margin-top: 8px;">
-          <button id="dl-space-info-edit" class="button secondary" type="button">Edit</button>
-          <button id="dl-space-info-show" class="button secondary" type="button">Show Folder</button>
-          <button id="dl-space-info-new-space" class="button secondary" type="button" hidden>New Space</button>
-        </div>
-      </div>
       <label class="checkbox-row" title="New bins start with the bin settings from the last bin generated or printed in this Space. Interior parts and names start fresh."><span>Keep bin defaults</span><input id="dl-keep-bin-defaults" type="checkbox"></label>
       <div class="dl-save-row">
         <label class="checkbox-row" title="Save the layout to the inventory file after every change"><span>Auto-save</span><input id="dl-autosave" type="checkbox"></label>
@@ -172,14 +149,9 @@ DP.build = () => {
       </div>
     </section>`;
   DP.wire();
-  // The dl-space-info-* buttons above did not exist at startup, when
-  // SP.wire() wired the normal "space-info" prefix - wire only this
-  // Drawer-panel prefix now that it exists, so neither button gets a
-  // duplicate listener.
-  if (typeof wireInfoButtons === "function") wireInfoButtons("dl-space-info");
   DV.buildOverlay();
   if (state.runtime.hosted) {
-    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print", "#dl-connectors"].forEach(selector => {
+    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print"].forEach(selector => {
       const button = $(selector);
       if (button) {
         button.disabled = true;
@@ -201,27 +173,7 @@ DP.wire = () => {
   drawerField("#dl-width", "width", positive(8));
   drawerField("#dl-depth", "depth", positive(8));
   drawerField("#dl-height", "height", positive(1));
-  drawerField("#dl-clearance", "clearance", positive(drawerHardClearance()));
   drawerField("#dl-name", "name", raw => raw.trim() || null);
-  drawerField("#dl-anchor", "anchor", raw => raw);
-  drawerField("#dl-axis", "bin_axis", raw => raw);
-  $("#dl-snap").addEventListener("change", event => {
-    const snap = Number(event.target.value) === 4 ? 4 : 8;
-    let moved = 0;
-    DL.change(() => {
-      const drawer = DL.drawer();
-      drawer.snap = snap;
-      // Back to whole units: anything sitting half a unit along snaps to the
-      // nearest whole one (the report flags any overlap that makes).
-      if (snap === 8) drawer.placements.filter(DL.onGrid).forEach(p => {
-        const gx = Math.round(p.gx), gy = Math.round(p.gy);
-        if (gx !== p.gx || gy !== p.gy) moved += 1;
-        Object.assign(p, { gx, gy });
-      });
-    });
-    if (moved) toast(`${dlPlural(moved, "bin")} moved onto whole 8 mm units.`);
-  });
-
   $("#dl-drawer").addEventListener("change", event => {
     DL.change(() => { DL.layout.active = event.target.value; }, { history: false });
     DL.selected = null;
@@ -263,7 +215,6 @@ DP.wire = () => {
 
   setting("#dl-new-printed", null, "new_bins_printed", node => node.checked);
   $("#dl-auto").addEventListener("click", () => DL.runAuto());
-  $("#dl-edit-drawer").addEventListener("click", () => SP.editSpace());
   // Empty-state buttons (canvas overlay and Inventory list) share these.
   const emptyAction = event => {
     const act = event.target.closest("[data-empty-act]")?.dataset.emptyAct;
@@ -291,7 +242,6 @@ DP.wire = () => {
     if (event.target === $("#spacer-print-dialog")) $("#spacer-print-dialog").close();
   });
   $("#spacer-print-confirm").addEventListener("click", () => DP.confirmSpacerPrint());
-  $("#dl-connectors").addEventListener("click", () => DL.makeConnectors());
   $("#dl-base-trim").addEventListener("click", async () => {
     const source = DL.baseTrimSource();
     if (!source.ok) {
@@ -491,6 +441,7 @@ DP.lowerQty = one => {
 // The one "go design a bin" jump used by both empty states.
 DP.designFirstBin = () => {
   if (typeof markWorkingDesignPending === "function") markWorkingDesignPending();
+  DP.setMode("design");
   activatePreviewView("3d");
 };
 
@@ -499,12 +450,14 @@ DP.designFirstBin = () => {
 DP.finishEdge = async () => {
   if (state.activeSpace?.kind !== "surface") return;
   state.surfaceEdgeHandled = false;
+  DP.setMode("design");
   await SP.designSurface(state.activeSpace);
 };
 
 // Deliberately skip the edge and begin the first bin.
 DP.startBinNow = async () => {
   state.surfaceEdgeHandled = true;
+  DP.setMode("design");
   await loadFreshOrdinaryDesignForCurrentFolder();
 };
 
@@ -527,7 +480,8 @@ DP.designSpot = () => {
   if (typeof b4bEnabled === "function" && b4bEnabled()) { toast("Set Bin type to Single bin first, then try again.", true); return; }
   const drawer = DL.drawer();
   const round8 = mm => Math.max(8, Math.floor(mm / 8) * 8);
-  const [x, y] = drawer.bin_axis === "y" ? [round8(spot.d_mm), round8(spot.w_mm)] : [round8(spot.w_mm), round8(spot.d_mm)];
+  const [x, y] = [round8(spot.w_mm), round8(spot.d_mm)];
+  DP.setMode("design");
   activatePreviewView("3d");
   const previous = clone(state.design);
   state.design.box.x = x;
@@ -611,6 +565,7 @@ DP.update = () => {
 };
 
 DP.syncHistory = () => {
+  if (!DP.spaceEditing()) return;
   const undo = $("#undo-design");
   const redo = $("#redo-design");
   if (undo) undo.disabled = !DL.history.length;
@@ -650,22 +605,19 @@ DP.renderDrawer = () => {
       : "";
   }
 
+  // A typed one-drawer Space owns its name and size (shown, and edited, in
+  // the Space header), so only legacy multi-drawer Spaces keep these here.
   const canonical = DP.isCanonicalDrawer();
-  ["#dl-width", "#dl-depth", "#dl-height"].forEach(selector => { $(selector).disabled = canonical; });
-  $("#dl-name-row").hidden = canonical;
-  $("#dl-canonical-row").hidden = !canonical;
+  $("#dl-fit-details").hidden = canonical;
+  $$(".dl-drawer-size", $("#drawer-panel")).forEach(node => { node.hidden = canonical; });
 
   dlSet("#dl-width", fmt(drawer.width));
   dlSet("#dl-depth", fmt(drawer.depth));
   dlSet("#dl-height", fmt(drawer.height));
   dlSet("#dl-name", drawer.name);
-  dlSet("#dl-clearance", fmt(drawer.clearance));
-  dlSet("#dl-anchor", drawer.anchor);
-  dlSet("#dl-axis", drawer.bin_axis);
-  dlSet("#dl-snap", String(Number(drawer.snap) === 4 ? 4 : 8));
   $("#dl-drawer-delete").disabled = DL.layout.drawers.length < 2;
   const grid = DL.grid(drawer);
-  const wall = (drawer.boundary === "mating" ? Math.max(0, drawer.clearance) : Math.max(drawerHardClearance(), drawer.clearance)) / 2;
+  const wall = DL.slack(drawer) / 2;
   const edges = [["left", grid.gapLeft], ["right", grid.gapRight], ["front", grid.gapFront], ["back", grid.gapBack]]
     .map(([side, gap]) => [side, gap - wall]).filter(([, play]) => play >= 0.1)
     .map(([side, play]) => `${side} ${play.toFixed(1)} mm`);
@@ -750,12 +702,11 @@ DP.renderStats = () => {
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
   label("#dl-sp-plan", "Plan / Update Spacers", "Planning…", "spacers");
   label("#dl-sp-generate", "Generate Selected Spacers", "Generating…", "spacers");
-  label("#dl-connectors", "Make connectors", "Making connectors…", "connectors");
   label("#dl-base-trim", "Make Base Trim", "Making Base Trim…", "base_trim");
   // Nothing placed yet: these have nothing to work on, so say why instead of
   // letting the click end in an error.
   const nothingPlaced = DL.loaded && !DL.drawer().placements.length;
-  ["#dl-sp-plan", "#dl-sp-generate", "#dl-connectors"].forEach(selector => {
+  ["#dl-sp-plan", "#dl-sp-generate"].forEach(selector => {
     const node = $(selector);
     if (!nothingPlaced) return;
     node.disabled = true;
@@ -793,7 +744,7 @@ DP.renderOpenSpaces = () => {
   if (!opens.length) { box.innerHTML = `<p class="dl-note">No open space left for another bin.</p>`; return; }
   const drawer = DL.drawer();
   box.innerHTML = opens.map((spot, index) => {
-    const [wMm, dMm] = drawer.bin_axis === "y" ? [spot.d_mm, spot.w_mm] : [spot.w_mm, spot.d_mm];
+    const [wMm, dMm] = [spot.w_mm, spot.d_mm];
     return `<div class="dl-open-spot">
       <span>${index === 0 ? "Largest open space" : "Next open space"}</span>
       <div>${fmt(wMm)} × ${fmt(dMm)} mm<small>${DL.mmToUnits(wMm)} × ${DL.mmToUnits(dMm)} units</small></div>
@@ -874,7 +825,7 @@ DP.renderInventory = (force = false) => {
   $("#dl-inv-count").textContent = `${dlPlural(DL.bins.length, "design")} · ${printed} printed`;
   const selectedBin = DL.selected ? DL.findPlacement(DL.selected)?.placement.bin : null;
   const counts = DL.bins.map(one => [DL.placedCount(one.id), DL.plannedCount(one.id)]);
-  const signature = JSON.stringify([DL.bins, counts, DP.filter, [...DP.open], selectedBin, drawer.id, drawer.height, drawer.bin_axis, drawer.snap,
+  const signature = JSON.stringify([DL.bins, counts, DP.filter, [...DP.open], selectedBin, drawer.id, drawer.height,
     DL.working ? [DL.working.key, DL.working.error || "", DL.workingFit()] : null]);
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
@@ -974,12 +925,53 @@ DP.renderSave = () => {
 };
 
 // ------------------------------------------------------------------ mode
+//
+// Three separate things, each with one owner:
+//   - the Space workspace being open (DL.active): the layout is loaded and the
+//     Space header shows. It ends only when the folder stops being this Space;
+//   - which preview canvas is showing (3D, 2D or Space): the view tabs own it;
+//   - which editor owns the left panel (DP.mode): "space" for the layout
+//     tools, "design" for the current bin or Storage Box.
+// Changing one never changes another, except that opening the workspace
+// picks the starting editor.
 
+DP.mode = "space";
+
+// The layout tools own the left panel (keys, Undo/Redo and the header
+// buttons act on the layout only then).
+DP.spaceEditing = () => DL.active && DP.mode === "space";
+
+DP.applyMode = () => {
+  const open = DL.active;
+  const space = DP.spaceEditing();
+  document.body.classList.toggle("space-workspace", open);
+  // Hides the bin editor's own chrome while the layout tools are showing.
+  document.body.classList.toggle("drawer-mode", space);
+  $("#drawer-panel").hidden = !space;
+  $$("[data-space-mode]").forEach(button => {
+    const on = button.dataset.spaceMode === DP.mode;
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-pressed", String(on));
+  });
+  if (typeof SP !== "undefined" && SP.renderSpaceInfo) SP.renderSpaceInfo();
+  if (typeof updateHistoryButtons === "function") updateHistoryButtons();
+};
+
+DP.setMode = mode => {
+  if (!DL.active || (mode !== "space" && mode !== "design") || DP.mode === mode) return;
+  DP.mode = mode;
+  DP.applyMode();
+  if (mode === "space") DP.update();
+};
+
+// Open the Space workspace. Starts in Design mode when there is a current
+// design to work on, otherwise Space mode.
 DP.enter = async () => {
+  if (DL.active) return;
   DL.active = true;
-  document.body.classList.add("drawer-mode");
-  $("#drawer-panel").hidden = false;
+  DP.mode = typeof workingDesignForSpace === "function" && workingDesignForSpace() ? "design" : "space";
   DP.build();
+  DP.applyMode();
   DP.update();
   try {
     await DL.load();
@@ -988,14 +980,17 @@ DP.enter = async () => {
   }
 };
 
+// Close the Space workspace (the folder is no longer this Space).
 DP.leave = () => {
+  if (!DL.active) return;
   DL.active = false;
-  document.body.classList.remove("drawer-mode");
-  $("#drawer-panel").hidden = true;
+  if (typeof SP !== "undefined" && SP.cancelInlineEdit) SP.cancelInlineEdit();
+  DP.applyMode();
   DV.drag = null;
   DV.pan = null;
-  if (typeof updateHistoryButtons === "function") updateHistoryButtons();
   if (DL.dirty && DL.layout?.settings.autosave) DL.save();
+  // The Space canvas has nothing to show any more.
+  if ($('.canvas-wrap[data-canvas="drawer"]')?.classList.contains("active")) activatePreviewView("3d");
 };
 
 (() => {
@@ -1003,10 +998,10 @@ DP.leave = () => {
   if (!wrap) return;
   DV.wire();
   DL.on(DP.update);
+  $$("[data-space-mode]").forEach(button => button.addEventListener("click", () => DP.setMode(button.dataset.spaceMode)));
+  // Showing the Space preview opens the workspace; hiding it does not close it.
   new MutationObserver(() => {
-    const on = wrap.classList.contains("active");
-    if (on && !DL.active) DP.enter();
-    else if (!on && DL.active) DP.leave();
+    if (wrap.classList.contains("active") && !DL.active) DP.enter();
   }).observe(wrap, { attributes: true, attributeFilter: ["class"] });
   window.addEventListener("beforeunload", event => {
     if (DL.dirty && DL.layout && !DL.layout.settings.autosave) {
