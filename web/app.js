@@ -175,6 +175,8 @@ function setFolderState(
     state.keepBinDefaults = false;
     state.spaceBinDefaults = null;
     state.spacePartDefaults = {};
+    // No longer a typed Space: the Space workspace has nothing to show.
+    if (typeof DP !== "undefined" && DP.leave) DP.leave();
   }
   const resolvedInventory = inventory === undefined ? state.inventoryEnabled : Boolean(inventory);
   // Space always keeps inventory - it is what the layout is built from.
@@ -6967,6 +6969,8 @@ async function refreshPreview() {
     state.design = result.design;
     updateDraftOverhangNote();
     checkBinSizeChange();
+    // The Space shows the design being worked on as Current design.
+    if (typeof DL !== "undefined" && DL.active) DL.refreshWorking();
     // Surface the access planner's own warning (spec section 46) once per
     // distinct message, not on every preview refresh.
     const accessWarning = (result.draft_nest_access || result.nest_access?.[state.selected])?.warning;
@@ -10444,6 +10448,9 @@ function markWorkingDesignReconciled() {
   } catch (_error) {
     state.workingGeneratedKey = null;
   }
+  // The generated bin is now in the inventory; an open Space workspace must
+  // show it there instead of as Current design.
+  if (typeof DL !== "undefined" && DL.active && DL.load) DL.load().catch(() => {});
 }
 
 // The design Space should show as "Current design", or null.
@@ -10643,7 +10650,7 @@ async function surfaceEdgeSucceeded(design) {
   if (state.folderMode !== "space" || state.activeSpace?.kind !== "surface") return;
   if (!baseTrimEnabled(design)) return;
   try {
-    if (typeof DL !== "undefined" && DL.load && !DL.active) await DL.load();
+    if (typeof DL !== "undefined" && DL.load) await DL.load();
   } catch (_error) {
     return;
   }

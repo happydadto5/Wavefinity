@@ -31,6 +31,22 @@
 
   <main class="app-shell" id="app-shell">
     <aside class="controls" aria-label="Bin controls">
+      <section id="space-head" class="space-head" aria-label="Space" hidden>
+        <div id="space-head-view" class="space-head-view">
+          <div class="space-head-title"><strong id="space-head-name"></strong><span id="space-head-type" class="space-head-type"></span></div>
+          <div id="space-head-size" class="muted"></div>
+          <div class="button-row">
+            <button id="space-head-edit" class="button secondary dl-small" type="button">Edit</button>
+            <button id="space-head-show" class="button secondary dl-small" type="button">Show Folder</button>
+            <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
+          </div>
+        </div>
+        <div id="space-head-edit-host" class="space-head-edit-host" hidden></div>
+        <div id="space-mode-toggle" class="space-mode-toggle" role="group" aria-label="What the left panel edits" hidden>
+          <button type="button" data-space-mode="space" class="active" aria-pressed="true" title="Work on the Space and its layout">Space</button>
+          <button type="button" data-space-mode="design" aria-pressed="false" title="Work on the current bin or Storage Box">Design</button>
+        </div>
+      </section>
       <section class="control-section open" data-section="build">
         <div class="section-body">
           <div class="bin-type-row">
@@ -401,19 +417,6 @@
       </section>
 
       <section class="output-panel">
-        <div id="space-info-block" class="space-info-card b4b-card" hidden style="margin-bottom: 16px;">
-          <h3 class="b4b-card-title">Space Info</h3>
-          <div class="space-info-details">
-            <strong id="space-info-name"></strong>
-            <div id="space-info-type"></div>
-            <div id="space-info-size" class="muted"></div>
-          </div>
-          <div class="button-row" style="margin-top: 8px;">
-            <button id="space-info-edit" class="button secondary" type="button">Edit</button>
-            <button id="space-info-show" class="button secondary" type="button">Show Folder</button>
-            <button id="space-info-new-space" class="button secondary" type="button" hidden>New Space</button>
-          </div>
-        </div>
         <div id="save-location-row" class="save-location-row">
           <div class="save-location-group">
             <label for="output-folder">Save folder</label>
@@ -865,6 +868,8 @@
         <div class="button-row space-buttons">
           <button id="space-back" class="button secondary" type="button">Back</button>
           <button id="space-create" class="button primary" type="submit">Choose Folder & Create</button>
+          <button id="space-save-changes" class="button primary" type="submit" hidden>Save Changes</button>
+          <button id="space-cancel-edit" class="button secondary" type="button" hidden>Cancel</button>
         </div>
       </form>
 

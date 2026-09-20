@@ -1709,6 +1709,81 @@ console.log(JSON.stringify(out));
         self.assertEqual((out["back"]["gx"], out["back"]["gy"]), (0, 0))  # discarded for good
         self.assertEqual(out["placements"], 0)
 
+    def test_space_workspace_separates_editor_mode_from_preview(self):
+        # Fix 017: the Space | Design editor mode is its own state; showing or
+        # hiding the Space preview never opens, closes or flips it.
+        root = Path(__file__).resolve().parent / "web"
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        index_html = (root / "index.html").read_text(encoding="utf-8")
+        self.assertIn('data-space-mode="space"', index_html)
+        self.assertIn('data-space-mode="design"', index_html)
+        observer = panel[panel.index("new MutationObserver"):]
+        observer = observer[:observer.index("attributeFilter")]
+        self.assertIn("DP.enter()", observer)
+        self.assertNotIn("DP.leave()", observer)
+        self.assertNotIn("DP.mode =", observer)
+        enter = panel[panel.index("DP.enter = "):panel.index("DP.leave = ")]
+        self.assertIn('workingDesignForSpace() ? "design" : "space"', enter)
+        self.assertNotIn("activatePreviewView", enter)
+        setter = panel[panel.index("DP.setMode = "):panel.index("DP.enter = ")]
+        self.assertNotIn("activatePreviewView", setter)
+
+    def test_space_settings_lost_their_user_choices(self):
+        root = Path(__file__).resolve().parent / "web"
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        for gone in ("Snap to", "Grid sits", "Width direction", "Fit clearance",
+                     "dl-snap", "dl-anchor", "dl-axis", "dl-clearance",
+                     "Spacers &amp; connectors", "dl-connectors", "Drawer settings"):
+            self.assertNotIn(gone, panel)
+        self.assertIn("<span>Spacers</span>", panel)
+        self.assertIn("Advanced Settings", panel)
+
+    def test_existing_space_edit_is_inline_with_edit_only_buttons(self):
+        root = Path(__file__).resolve().parent / "web"
+        spaces = (root / "spaces.js").read_text(encoding="utf-8")
+        index_html = (root / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="space-save-changes"', index_html)
+        self.assertIn('id="space-cancel-edit"', index_html)
+        self.assertNotIn('id="space-info-block"', index_html)
+        mode = spaces[spaces.index("SP.setFormMode = "):]
+        mode = mode[:mode.index("};")]
+        self.assertIn('$("#space-back").hidden = edit;', mode)
+        self.assertIn('$("#space-create").hidden = edit;', mode)
+        self.assertIn('$("#space-save-changes").hidden = !edit;', mode)
+        setup = spaces[spaces.index("SP.showSetup = "):]
+        setup = setup[:setup.index("SP.startUntyped")]
+        self.assertIn("SP.mountInlineEdit()", setup)
+
+    def test_legacy_layout_settings_normalise_to_the_canonical_rules(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        model = Path(__file__).resolve().parent / "web" / "drawer-model.js"
+        script = """
+const vm = require("vm"), fs = require("fs");
+const ctx = { debounce: f => f, state: { activeSpaceId: "A", output: "" }, console, Math, JSON, Number, Set, Map,
+  clone: value => JSON.parse(JSON.stringify(value)), drawerHardClearance: () => 0.6, fmt: value => String(value) };
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + " ;this.DL = DL;", ctx);
+const DL = ctx.DL;
+const layout = DL.normaliseLayout({ active: "d1", drawers: [
+  { id: "d1", width: 400, depth: 300, height: 60, snap: 4, anchor: "center", bin_axis: "y", clearance: 5,
+    placements: [{ bin: "b1", gx: 1.5, gy: 3 }, { bin: "b2", x: 1, y: 2, w: 3, d: 4 }] },
+  { id: "d2", width: 100, depth: 100, height: 60, boundary: "mating", clearance: 1, placements: [] },
+] });
+console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL.cells({ x: 20, y: 40 }, layout.drawers[0]) }));
+"""
+        result = subprocess.run([node, "-e", script, str(model)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        legacy, mating = out["layout"]["drawers"]
+        self.assertEqual((legacy["snap"], legacy["anchor"], legacy["bin_axis"], legacy["clearance"]), (8, "front-left", "x", 0.6))
+        self.assertEqual((legacy["placements"][0]["gx"], legacy["placements"][0]["gy"]), (2, 3))
+        self.assertNotIn("gx", legacy["placements"][1])
+        self.assertEqual(mating["clearance"], 0)
+        self.assertEqual(out["grid"]["step"], 8)
+        self.assertEqual(out["cells"], [3, 5])
+
     def test_inventory_preview_writes_nothing(self):
         with tempfile.TemporaryDirectory() as directory:
             wavefinity_web.inventory_preview_payload({"design": default_design(), "output": directory})
@@ -1910,11 +1985,9 @@ console.log(JSON.stringify(out));
         spaces_js = (root / "web" / "spaces.js").read_text(encoding="utf-8")
 
         self.assertIn("New Space</button>", index_html)
-        self.assertIn('id="space-info-new-space"', index_html)
+        self.assertIn('id="space-head-new-space"', index_html)
         self.assertNotIn("New Drawer Space", index_html)
 
-        self.assertIn("New Space</button>", drawer_panel_js)
-        self.assertIn('id="dl-space-info-new-space"', drawer_panel_js)
         self.assertNotIn("New Drawer Space", drawer_panel_js)
 
         self.assertNotIn("New Drawer Space", spaces_js)
@@ -1934,7 +2007,10 @@ console.log(JSON.stringify(out));
         self.assertIn("SP.showSetup(kind, candidateKind === kind ? candidate : null);", spaces_js)
 
         # New Space is offered for every typed Space, not only Drawer.
-        self.assertIn('const btnNew = document.getElementById(prefix + "-new-space");\n        if (btnNew) btnNew.hidden = false;', spaces_js)
+        self.assertIn(
+            'const btnNew = document.getElementById("space-head-new-space");\n    if (btnNew) btnNew.hidden = false;',
+            spaces_js,
+        )
 
 
 class WebServerTests(unittest.TestCase):

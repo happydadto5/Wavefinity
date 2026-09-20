@@ -84,12 +84,22 @@ DL.defaultDrawer = (name, from = null) => ({
   width: from?.width ?? 400,
   depth: from?.depth ?? 300,
   height: from?.height ?? 60,
-  clearance: from?.clearance ?? 1,
-  anchor: from?.anchor ?? "front-left",
-  bin_axis: from?.bin_axis ?? "x",
-  snap: from?.snap ?? 8,
   boundary: from?.boundary ?? "wall",
+  // Not user choices: one 8 mm grid, width left-right, grid against the
+  // front-left corner, and the product-rule wall allowance.
+  ...DL.canonicalLayoutRules(from?.boundary ?? "wall"),
   placements: [],
+});
+
+// The single placement grid, orientation, origin and wall allowance every
+// Space layout uses. A real drawer wall needs the catalog's hard-wall
+// allowance for the outermost wave crests; a Storage Box's own mating
+// boundary is already the interlocking surface and needs none.
+DL.canonicalLayoutRules = boundary => ({
+  clearance: boundary === "mating" ? 0 : drawerHardClearance(),
+  anchor: "front-left",
+  bin_axis: "x",
+  snap: 8,
 });
 
 DL.normaliseLayout = raw => {
@@ -109,6 +119,15 @@ DL.normaliseLayout = raw => {
     delete one.keepouts; // the old Keep-out Zone feature is gone
     one.placements = (Array.isArray(one.placements) ? one.placements : [])
       .filter(p => p && typeof p === "object" && p.bin);
+    // Legacy 4 mm layouts go onto the one 8 mm grid: bins sitting half a unit
+    // along snap to the nearest whole unit (the report flags any overlap that
+    // makes). Legacy axis, anchor and clearance settings are no longer
+    // choices, so they are put back to the canonical rules.
+    if (Number(one.snap) === 4) one.placements.filter(DL.onGrid).forEach(p => {
+      p.gx = Math.round(p.gx);
+      p.gy = Math.round(p.gy);
+    });
+    Object.assign(one, DL.canonicalLayoutRules(one.boundary));
   });
   if (!layout.drawers.some(one => one.id === layout.active)) layout.active = layout.drawers[0].id;
   return layout;
@@ -141,9 +160,8 @@ DL.bin = id => DL.bins.find(one => one.id === id);
 DL.key = p => `${p.bin}:${p.copy ?? 0}`;
 DL.label = one => one.name || `${fmt(one.x)} × ${fmt(one.y)}`;
 DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
-// The user-facing Wavefinity unit is always 8 mm, independent of a drawer's
-// own internal grid snap (4 or 8 mm) - see the "8 mm size grid" section of
-// README.md. The one place this conversion belongs.
+// The user-facing Wavefinity unit is always 8 mm - see the "8 mm size grid"
+// section of README.md. The one place this conversion belongs.
 DL.mmToUnits = mm => fmt(mm / 8);
 DL.isSpacer = one => one?.kind === "spacer";
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
@@ -153,22 +171,18 @@ DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
 DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
 
-// A B4B/Box's own mating boundary is already the correct interlocking
-// surface (see organizer_drawer.normalise_drawer) and needs no extra
-// hard-wall slack; only a real drawer wall floors clearance at the
-// catalog's drawer_rules.hard_wall_clearance_mm.
+// The wall allowance is a product rule (see DL.canonicalLayoutRules), not a
+// per-drawer setting.
+DL.slack = drawer => DL.canonicalLayoutRules(drawer.boundary).clearance;
 DL.grid = (drawer = DL.drawer()) => {
-  const step = Number(drawer.snap) === 4 ? 4 : 8;
-  const slack = drawer.boundary === "mating"
-    ? Math.max(0, Number(drawer.clearance) || 0)
-    : Math.max(drawerHardClearance(), Number(drawer.clearance) || 0);
+  const step = 8;
+  const slack = DL.slack(drawer);
   const usableX = drawer.width - slack;
   const usableY = drawer.depth - slack;
   const cols = Math.max(0, Math.floor(usableX / step + 1e-6));
   const rows = Math.max(0, Math.floor(usableY / step + 1e-6));
-  const centre = drawer.anchor === "center";
-  const ox = slack / 2 + (centre ? (usableX - cols * step) / 2 : 0);
-  const oy = slack / 2 + (centre ? (usableY - rows * step) / 2 : 0);
+  const ox = slack / 2;
+  const oy = slack / 2;
   return {
     step, perUnit: DL.UNIT / step, cols, rows, ox, oy,
     gapLeft: ox, gapRight: drawer.width - ox - cols * step,
@@ -181,7 +195,7 @@ DL.cells = (one, drawer = DL.drawer()) => {
   const step = DL.grid(drawer).step;
   const cx = Math.max(1, Math.ceil(one.x / step - 1e-6));
   const cy = Math.max(1, Math.ceil(one.y / step - 1e-6));
-  return drawer.bin_axis === "y" ? [cy, cx] : [cx, cy];
+  return [cx, cy];
 };
 DL.toCell = (units, drawer = DL.drawer()) => Math.round(Number(units) * DL.grid(drawer).perUnit);
 DL.toUnits = (cell, drawer = DL.drawer()) => cell / DL.grid(drawer).perUnit;
@@ -485,7 +499,7 @@ DL.workingFit = () => {
   if (working.error) return { ok: false, reason: working.error };
   const drawer = DL.drawer();
   const stamp = JSON.stringify([working.key, drawer.id, drawer.width, drawer.depth, drawer.height,
-    drawer.snap, drawer.placements]);
+    drawer.placements]);
   const spot = working.position;
   if (spot && spot.space === DL.workingContext() && spot.drawer === drawer.id) {
     if (DL.fitsAt(drawer, [working.bin], spot.gx, spot.gy).ok) return { ok: true, gx: spot.gx, gy: spot.gy };
@@ -818,7 +832,14 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
   if (result.placed) bits.push(`${result.placed} spacer${result.placed === 1 ? "" : "s"} placed`);
   if (made) bits.push(`${made} new file${made === 1 ? "" : "s"} saved`);
   if (result.reused) bits.push(`${result.reused} reused from the inventory`);
-  toast([bits.join(", ") || "Nothing to fill", ...(result.notes || [])].join("\n"), false, 7000);
+  let connectorLines = [];
+  try {
+    const connectors = await DL.saveConnectorFiles();
+    if (connectors.lines.length) connectorLines = ["Connector files saved:", ...connectors.lines, ...connectors.notes];
+  } catch (error) {
+    connectorLines = [`Connector files could not be saved: ${error.message}`];
+  }
+  toast([bits.join(", ") || "Nothing to fill", ...(result.notes || []), ...connectorLines].join("\n"), false, 9000);
   DL.requestReport();
 });
 
@@ -972,13 +993,17 @@ DL.removeSpacers = () => DL.change(() => {
   drawer.placements = drawer.placements.filter(p => !DL.isSpacer(DL.bin(p.bin)));
 });
 
-DL.makeConnectors = () => DL.busyWith("connectors", async () => {
+// Saves a file for every connector the layout needs. Connectors are part of
+// generating spacers, not a separate Space setting.
+DL.saveConnectorFiles = async () => {
   const result = await api("/api/drawer/connectors", {
     output: DL.output ?? DL.folder(), layout: DL.layout, bins: DL.bins, drawer_id: DL.layout.active,
   });
-  const lines = (result.connectors || []).map(one => `Print ${one.count} × ${one.file}`);
-  toast([lines.length ? "Connector files saved:" : "No connectors needed yet.", ...lines, ...(result.notes || [])].join("\n"), false, 9000);
-});
+  return {
+    lines: (result.connectors || []).map(one => `Print ${one.count} × ${one.file}`),
+    notes: result.notes || [],
+  };
+};
 
 DL.printDrawer = () => DL.busyWith("print", async () => {
   const result = await api("/api/drawer/print", {

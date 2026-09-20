@@ -525,19 +525,31 @@ something to work on.
   seven-column log is upgraded the first time it is saved, and a one-off `.bak`
   copy is left beside it. Every save re-reads the file and merges, so a bin
   generated while the layout is open is never lost.
-- **Drawers.** Set each drawer's inside width and depth, and its **max
-  height**: the tallest bin or stack that fits, which is the inside height
-  less whatever the drawer above needs to close. *Drawer settings* holds the
-  name; the **fit clearance** (total slack per axis, at least 0.6 mm for the
-  wave crests); whether the grid sits against the front-left corner or is
-  centred; which way bin X runs; whether bins **snap** to 8 mm whole units or
-  4 mm half units (the wave repeats every 4 mm, so a bin half a unit along a
-  seam still nests). Several drawers share one inventory, and a copy placed in
-  one drawer is not available to another.
+- **Space workspace.** A typed Space opens as one workspace with a **Space |
+  Design** switch at the top left, under the Space's name, type (Drawer,
+  Surface or Portable Storage) and size. The switch decides what the left panel
+  edits: *Space* is the layout tools, *Design* is the current bin or Storage
+  Box. It is separate from the preview: the 3D, 2D and Space tabs only choose what
+  the right side shows and never flip the switch. Opening the Space while a
+  current design exists starts in *Design* with the full Space still showing and
+  the Current design outlined in it (not zoomed, not added to the inventory);
+  otherwise it starts in *Space*. The workspace stays open until the folder
+  stops being that Space. The name, type and size are shown read-only; **Edit**
+  opens the same fields in place with **Save Changes** and **Cancel** (never
+  the New Space buttons).
+- **Drawers.** A drawer's inside width, depth and **max height** come from its
+  Space. The layout has one fixed rule set, not choices: an **8 mm** whole-unit
+  grid, width running left to right, the grid against the front-left corner, and the
+  catalog's hard-wall allowance (none against a Storage Box's own mating
+  boundary) with spacers taking up the rest. Older saves are normalised on
+  load: a 4 mm layout rounds each bin to whole units (the report flags any
+  overlap that makes), and any other axis, corner or clearance goes back to
+  these rules. Only a legacy Space that still holds several drawers keeps a
+  name and Delete under *Advanced Settings*; the drawers share one inventory, and
+  a copy placed in one drawer is not available to another.
 - **Bins never turn a quarter turn on their own.** Left walls mate with right,
   and front with back; a bin turned 90 degrees meets its neighbours crest to
-  crest. *Width direction: Width front ↔ back* turns every bin in a drawer together
-  instead, which keeps every seam matched.
+  crest, so there is no sideways option.
 - **Stacking.** A bin printed stackable (a snap-on lid, or direct snap) shows
   a ⇅ on its swatch and its style under its name. Drop it on a bin of the same
   size that stacks the same way and it snaps on top, sides aligned. Anything
@@ -581,8 +593,8 @@ something to work on.
   from a virtual bin standing just outside the grid: wavy and interlocking on
   the bin-facing side, flat on the wall side, and sized to the drawer's real
   leftover millimetres. Neither kind of spacer is forced onto the whole 8 mm
-  grid a normal bin's own size must be - on a drawer that snaps to 4 mm, a
-  genuine 4 mm-wide leftover, edge or interior, is filled at its real size.
+  grid a normal bin's own size must be - a genuine 4 mm-wide leftover, edge or
+  interior, is filled at its real size.
   Only a genuine manufacturability floor - is there still room for a cavity
   once both walls are subtracted? - rejects a spacer as too narrow to print.
   A long edge is still split into pieces no longer than *Longest piece*,
@@ -596,10 +608,10 @@ something to work on.
   rewrites them as spacers the next time it saves. Spare copies of a matching
   spacer already in the inventory are used first. *Keep gaps open from*
   leaves any gap at least that wide both ways empty, for a bin you will print
-  later. **Make connectors**
-  saves one file for each pair of rim heights the layout needs, and says how
-  many of each to print. Stacks join at their top bins; X spacers need none,
-  since their waves hold them. **Print spacers & connectors** opens the lot in
+  later. **Generate Selected Spacers**
+  also saves one connector file for each pair of rim heights the layout needs,
+  and says how many of each to print. Stacks join at their top bins; X spacers
+  need none, since their waves hold them. **Print Drawer (All)** opens the lot in
   Bambu Studio. **Print map** prints a plan of the drawer with a list of where
   each bin goes.
 - **Make Base Trim** uses the minimum bounding rectangle around one completely
