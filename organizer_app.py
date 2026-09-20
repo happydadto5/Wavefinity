@@ -131,6 +131,7 @@ from organizer_inserts import (
     Zone,
     apply_texts,
     bore_hole_axes,
+    normalize_bore_auto,
     build_features,
     build_texts,
     connector_keep_out,
@@ -2285,6 +2286,8 @@ def convert_layout_mode(
     """Snap every interior part onto a new mode's grid and validate the result."""
     converted_items = []
     for one in features:
+        # Auto Bores follow the new mode's usable area, not the old cache.
+        one = normalize_bore_auto(box, one, base_height(box, mode), mode)
         if one.kind == "nest" and one.contour:
             converted_items.append(fitted_nest_feature(one))
             continue
@@ -2297,6 +2300,10 @@ def convert_layout_mode(
                 cx - width / 2.0, cy - depth / 2.0,
                 cx + width / 2.0, cy + depth / 2.0,
             )
+        if one.kind == "bore" and one.options.get("auto_base"):
+            # Its zone is the exact derived usable area; snapping would shrink it.
+            converted_items.append(one)
+            continue
         converted_items.append(replace(one, zone=snapped_zone(zone, box, mode)))
     converted = tuple(converted_items)
     layout = Layout(converted, mode, EDITOR_SNAP)
@@ -2649,7 +2656,8 @@ def design_from_dict(
             one,
             zone=scoop_zone(box, one, base_z, layout.mode, layout.snap),
         )
-        if one.kind == "scoop" else one
+        if one.kind == "scoop" else
+        normalize_bore_auto(box, one, base_z, layout.mode)
         for one in layout.features
     ))
     label = str(data.get("label", ""))

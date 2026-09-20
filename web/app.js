@@ -282,6 +282,16 @@ function partDefaultsFromFeature(feature) {
     }
   }
   delete copy.options.photo;
+  if (feature.kind === "bore") {
+    // An Auto mode is remembered as the mode itself; the numbers it supersedes
+    // are derived from each new bin, never carried over from the old one.
+    if (copy.options.auto_base) copy.zone_size = null;
+    if (copy.options.auto_height) delete copy.options.height;
+    if (copy.options.auto_grid) {
+      delete copy.options.columns;
+      delete copy.options.rows;
+    }
+  }
   if (!partInfo(feature.kind)?.flags?.photo && feature.item) {
     copy.item = clone(feature.item);
     copy.item.name = "Custom item";
@@ -292,7 +302,8 @@ function partDefaultsFromFeature(feature) {
 function seedFeatureFromPartDefaults(feature, remembered) {
   if (!feature || !remembered || remembered.kind !== feature.kind) return feature;
   const seeded = clone(feature);
-  if (Array.isArray(remembered.zone_size) && remembered.zone_size.length === 2) {
+  const rememberedAutoBase = remembered.kind === "bore" && remembered.options?.auto_base;
+  if (!rememberedAutoBase && Array.isArray(remembered.zone_size) && remembered.zone_size.length === 2) {
     const cx = (number(seeded.zone[0]) + number(seeded.zone[2])) / 2;
     const cy = (number(seeded.zone[1]) + number(seeded.zone[3])) / 2;
     const width = Math.max(0.1, number(remembered.zone_size[0]));
@@ -300,6 +311,13 @@ function seedFeatureFromPartDefaults(feature, remembered) {
     seeded.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
   }
   seeded.options = { ...(seeded.options || {}), ...(clone(remembered.options || {})) };
+  if (seeded.kind === "bore") {
+    if (seeded.options.auto_height) delete seeded.options.height;
+    if (seeded.options.auto_grid) {
+      delete seeded.options.columns;
+      delete seeded.options.rows;
+    }
+  }
   if (Object.hasOwn(remembered, "count")) seeded.count = remembered.count;
   if (remembered.along) seeded.along = remembered.along;
   if (remembered.item && !partInfo(feature.kind)?.flags?.photo) seeded.item = clone(remembered.item);
@@ -4261,15 +4279,14 @@ function renderDraftFields() {
         const { transform, ...fieldOpts } = opts;
         return field(label, `option:${key}`, shown, fieldOpts);
       };
-      // X / Y counts show the fitter's current count until the user edits one.
-      const gridField = (key, label) => {
-        const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
-        const shown = explicit ? one.options[key] : state.draftResolvedOptions?.[key] ?? 1;
-        return `<label><span class="field-label">${label}${explicit ? "" : '<span class="unit">Auto</span>'}</span><div class="input-with-button">
-          <input type="number" data-draft="option:${key}" value="${escapeHtml(shown)}" min="1" step="1">
-          <button type="button" class="button secondary" data-action="auto-option" data-key="${key}">Auto</button>
-        </div></label>`;
-      };
+      // Each Auto group shows literal "Auto" in same-size read-only fields;
+      // clicking one turns just that group manual (see manualizeBoreAuto).
+      const autoOn = group => one.options?.[`auto_${group}`] === true;
+      const autoButton = group => `<button type="button" class="button secondary bore-auto${autoOn(group) ? " active" : ""}" data-action="bore-auto" data-group="${group}" aria-pressed="${autoOn(group)}">Auto</button>`;
+      const autoField = (label, group, target, unit) => `<label><span class="field-label">${label}${unit ? `<span class="unit">${unit}</span>` : ""}</span>
+        <input type="text" class="bore-auto-field" value="Auto" readonly data-bore-auto-field="${group}" data-focus="${target}"></label>`;
+      const gridField = (key, label) => field(label, `option:${key}`,
+        one.options?.[key] ?? state.draftResolvedOptions?.[key] ?? 1, { step: "1", min: "1" });
       // Diameter is locked to the preset for a hex-bit profile.
       const diameterField = hexBit
         ? `<label><span class="field-label">Diameter<span class="unit">mm</span></span>
@@ -4291,11 +4308,25 @@ function renderDraftFields() {
       html += `<div class="bore-group wide">
         <span class="bore-group-label">Base</span>
         <div class="bore-group-fields">
-          ${field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" })}
-          ${field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
-          ${optionField("height", "Height", { unit: "mm", step: "0.5" })}
-          ${gridField("columns", "X count")}
-          ${gridField("rows", "Y count")}
+          <div class="bore-auto-row">
+            ${autoOn("base")
+              ? autoField("Width", "base", "width", "mm") + autoField("Length", "base", "depth", "mm")
+              : field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" }) +
+                field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
+            ${autoButton("base")}
+          </div>
+          <div class="bore-auto-row">
+            ${autoOn("height")
+              ? autoField("Height", "height", "option:height", "mm")
+              : optionField("height", "Height", { unit: "mm", step: "0.5" })}
+            ${autoButton("height")}
+          </div>
+          <div class="bore-auto-row">
+            ${autoOn("grid")
+              ? autoField("X count", "grid", "option:columns") + autoField("Y count", "grid", "option:rows")
+              : gridField("columns", "X count") + gridField("rows", "Y count")}
+            ${autoButton("grid")}
+          </div>
         </div>
       </div>`;
 
@@ -4742,17 +4773,90 @@ function renderDraftFields() {
   const growBtn = $('[data-action="grow-bin"]', $("#draft-fields"));
   if (growBtn) growBtn.addEventListener("click", autoExpandBin);
   updateFitActions();
-  // Bore: "Auto" beside an X / Y quantity hands that count back to the fitter.
-  $$('[data-action="auto-option"]', $("#draft-fields")).forEach(button => button.addEventListener("click", () => {
-    markDraftChanged();
-    const key = button.dataset.key;
-    if (state.draft.options) delete state.draft.options[key];
-    state.draftAutoCommit = true;
-    renderDraftFields();
-    updateSelectionButtons();
-    refreshDraftSoon();
+  // Bore Auto modes: one button per group, and clicking an Auto field turns
+  // that group manual starting from what it currently resolves to.
+  $$('[data-action="bore-auto"]', $("#draft-fields")).forEach(button => button.addEventListener("click", () => {
+    const group = button.dataset.group;
+    if (state.draft.options?.[`auto_${group}`]) manualizeBoreAuto(group);
+    else enableBoreAuto(group);
   }));
+  $$('[data-bore-auto-field]', $("#draft-fields")).forEach(input => {
+    input.addEventListener("focus", () => manualizeBoreAuto(input.dataset.boreAutoField, input.dataset.focus));
+    input.addEventListener("click", () => manualizeBoreAuto(input.dataset.boreAutoField, input.dataset.focus));
+  });
   if (state.draft?.kind === "nest") wireNestFieldActions();
+}
+
+function finishBoreAutoChange(focusKey) {
+  state.draftAutoCommit = true;
+  if (Number.isInteger(state.selected)) state.partZoneLocks[state.selected] = state.pinnedZone;
+  renderDraftFields();
+  if (focusKey) {
+    const input = $(`[data-draft="${focusKey}"]`, $("#draft-fields"));
+    if (input) { input.focus(); input.select?.(); }
+  }
+  updateSelectionButtons();
+  refreshDraftSoon();
+}
+
+function enableBoreAuto(group) {
+  const one = state.draft;
+  if (one?.kind !== "bore") return;
+  markDraftChanged();
+  one.options ||= {};
+  one.options[`auto_${group}`] = true;
+  if (group === "base") {
+    delete state.pinnedZone.width;
+    delete state.pinnedZone.depth;
+  }
+  applyBoreAuto(one);
+  finishBoreAutoChange();
+}
+
+// Leaving Height / Grid Auto seeds the manual numbers from a fresh server
+// resolve of the still-Auto draft, never from cached resolved options that may
+// predate the Auto switch.
+async function manualizeBoreAuto(group, focusKey) {
+  const one = state.draft;
+  if (!one?.options?.[`auto_${group}`] || state.boreManualizing) return;
+  markDraftChanged();
+  let resolved = null;
+  if (group !== "base") {
+    state.boreManualizing = true;
+    refreshDraftSoon.cancel();
+    const request = ++state.draftRequest;
+    try {
+      const index = draftCommitIndex();
+      const result = await api("/api/feature/draft", {
+        design: state.design, feature: one,
+        ...(index === false ? {} : { index }),
+      });
+      if (request !== state.draftRequest || state.draft !== one) return;
+      resolved = result.resolved_options || {};
+      state.draftResolvedOptions = resolved;
+    } catch (error) {
+      toast(error.message || "Could not read the current Auto values.", true);
+      return;
+    } finally {
+      state.boreManualizing = false;
+    }
+  }
+  if (!one.options?.[`auto_${group}`]) return;
+  delete one.options[`auto_${group}`];
+  if (group === "base") {
+    // Keep the current full-interior size as the manual Base and own both axes.
+    pinDraftAxis("width");
+    pinDraftAxis("depth");
+  } else if (group === "height") {
+    if (Number.isFinite(number(resolved.height, NaN))) one.options.height = number(resolved.height);
+  } else if (group === "grid") {
+    for (const key of ["columns", "rows"]) {
+      if (Number.isFinite(number(resolved[key], NaN))) {
+        one.options[key] = Math.max(1, Math.round(number(resolved[key])));
+      }
+    }
+  }
+  finishBoreAutoChange(focusKey);
 }
 
 function syncNest2DWorkspace() {
@@ -5482,8 +5586,31 @@ function sizeCradleToItem(one) {
 // minimum - a hand-set Base size is never shrunk back. An axis left on "auto"
 // count still keeps room for at least one hole so the fitter always has
 // something to divide.
+// Persisted Bore Auto modes (options auto_base / auto_height / auto_grid).
+// Base Auto owns the zone (the whole usable floor, never a pin or a minimum
+// grid); Height and Grid Auto own their numbers by leaving them unset so the
+// engine derives them. Returns true when Base Auto placed the zone.
+function applyBoreAuto(one) {
+  if (one?.kind !== "bore") return false;
+  const opts = one.options ||= {};
+  if (opts.auto_height) delete opts.height;
+  if (opts.auto_grid) {
+    delete opts.columns;
+    delete opts.rows;
+  }
+  if (!opts.auto_base) return false;
+  const [insideX, insideY] = binInsideExtent(state.design.box);
+  one.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
+  delete state.pinnedZone.width;
+  delete state.pinnedZone.depth;
+  return true;
+}
+
 function sizeBoreToGrid(one) {
   if (one.kind !== "bore") return;
+  // Auto Base fills the bin whatever the grid needs; Auto Grid fills whatever
+  // Base there is. Only a manual Base with manual counts grows to the grid.
+  if (applyBoreAuto(one) || one.options?.auto_grid) return;
   const opts = one.options || {};
   const resolved = state.draftResolvedOptions || {};
   const profile = one.item?.profile || "round";
@@ -6130,6 +6257,7 @@ async function refreshDraft() {
     const [insideX, insideY] = binInsideExtent(state.design.box);
     state.draft.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
   }
+  applyBoreAuto(state.draft);
   const request = ++state.draftRequest;
   if (state.draft.kind === "nest") {
     $("#draft-status").textContent = "Resizing bin around cavity…";
@@ -6152,6 +6280,11 @@ async function refreshDraft() {
     });
     if (request !== state.draftRequest) return;
     state.draftResolvedOptions = result.resolved_options || {};
+    // The server's usable layout area is the authority for Base Auto.
+    if (state.draft.kind === "bore" && state.draft.options?.auto_base
+        && Array.isArray(result.feature?.zone)) {
+      state.draft.zone = result.feature.zone;
+    }
     const info = partInfo();
     // The resolver now has the real item depth and lean. Re-size before saving
     // so Base always reflects the actual hole grid, not a stale preview size.

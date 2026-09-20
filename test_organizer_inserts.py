@@ -2437,6 +2437,57 @@ class LayoutModelTests(unittest.TestCase):
             self.assertAlmostEqual(mesh.bounds[1][2], inserts.BASE_PLATE)
 
 
+class BoreAutoModeTests(unittest.TestCase):
+    def _bore(self, **options):
+        return inserts.Feature(
+            "bore", inserts.Zone(-12.0, -12.0, 12.0, 12.0),
+            item=inserts.LIBRARY["hex_driver"], options=options,
+        )
+
+    def test_legacy_bore_without_flags_stays_one_by_one(self):
+        grid = _bore_grid(BIN, self._bore(), BIN.base_thickness)
+        self.assertEqual((grid["columns"], grid["rows"]), (1, 1))
+
+    def test_auto_grid_fills_base_with_max_counts(self):
+        one = inserts.Feature(
+            "bore", inserts.Zone(-40.0, -30.0, 40.0, 30.0),
+            item=inserts.LIBRARY["hex_driver"],
+            options={"auto_grid": True, "columns": 1, "rows": 1},
+        )
+        one = inserts.normalize_bore_auto(BIN, one, BIN.base_thickness)
+        self.assertNotIn("columns", one.options)
+        grid = _bore_grid(BIN, one, BIN.base_thickness)
+        px, py = grid["pitch_x"], grid["pitch_y"]
+        self.assertEqual(grid["columns"], int(80.0 // px))
+        self.assertEqual(grid["rows"], int(60.0 // py))
+        self.assertGreater(grid["columns"] * grid["rows"], 1)
+
+    def test_auto_base_and_height_follow_bin(self):
+        one = self._bore(auto_base=True, auto_height=True, height=5.0)
+        for box in (BIN, BoxSpec(160.0, 88.0, 56.0)):
+            fixed = inserts.normalize_bore_auto(box, one, box.base_thickness)
+            whole = inserts.layout_zone(box)
+            self.assertEqual(fixed.zone, whole)
+            self.assertNotIn("height", fixed.options)
+            height = inserts.resolved_options(box, fixed, box.base_thickness)["height"]
+            self.assertAlmostEqual(height, box.z - box.base_thickness, places=6)
+            inserts.build_features(
+                box, [fixed], box.base_thickness, whole, "fused",
+            )
+
+
+class BoreAutoBaseZoneTests(unittest.TestCase):
+    def test_mode_conversion_keeps_exact_derived_zone(self):
+        from organizer_app import convert_layout_mode
+        one = inserts.Feature(
+            "bore", inserts.Zone(-8.0, -8.0, 8.0, 8.0),
+            item=inserts.LIBRARY["hex_driver"], options={"auto_base": True, "auto_height": True},
+        )
+        for mode in ("fused", "cartridge"):
+            layout = convert_layout_mode(BIN, [one], mode)
+            self.assertEqual(layout.features[0].zone, inserts.layout_zone(BIN, mode))
+
+
 class SlotRackTests(unittest.TestCase):
     def test_slot_rack_builds_watertight_mesh_inside_bounds(self) -> None:
         zone = Zone(-20.0, -15.0, 20.0, 15.0)

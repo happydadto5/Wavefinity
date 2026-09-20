@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import trimesh
 
 from organizer_engine import BoxSpec
 from organizer_geometry import difference, union
 
-from ._core import Feature, _fit_count, _need_item
+from ._core import Feature, _fit_count, _need_item, layout_zone
 from ._registry import (
     OptionDefinition, SettingInteraction, defaults, feature,
     register_setting_interactions, resolved_options,
@@ -80,6 +81,7 @@ def bore_minimum_pitches(
 @defaults("bore")
 def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     item = _need_item(one)
+    auto_height = bool(one.options.get("auto_height"))
     if _is_hex_bit(item.profile):
         hole = min(HEX_BIT_HOLD[item.profile], box.z - base_z - 2.0)
         held = HEX_BIT_FLATS + HEX_BIT_CLEARANCE
@@ -98,20 +100,60 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     except (TypeError, ValueError):
         depth = hole
     reach = max(0.0, depth) * math.sin(math.radians(angle)) if tilted else 0.0
+    resolved_height = box.z - base_z if auto_height else one.options.get("depth", hole) + 2.0
+    resolved_grid: dict[str, float] = {}
+    if one.options.get("auto_grid"):
+        # Auto Grid fills the current Base: the most holes that fit on each
+        # axis at the real wall/lean pitch, never a stored quantity.
+        lean_axis, _ = bore_direction(one)
+        pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, lean_axis)
+        resolved_grid = {
+            "columns": float(_fit_count(
+                one.zone.width - (reach if lean_axis == "x" else 0.0), pitch_x, pitch_x)),
+            "rows": float(_fit_count(
+                one.zone.depth - (reach if lean_axis == "y" else 0.0), pitch_y, pitch_y)),
+        }
     return {
         "depth": hole,
         # A leaned bore takes a thicker wall by default so the extra material
         # between slanting holes still prints; an explicit Wall overrides it.
         "wall": default_wall,
-        "height": one.options.get("depth", hole) + 2.0,
+        "height": resolved_height,
         # A new Bore is one hole. X/Y quantities grow the Base and then the
         # bin; they never begin by filling whatever space happened to exist.
+        # Only the persisted Auto Grid mode fills the Base instead.
         "columns": 1.0,
         "rows": 1.0,
+        **resolved_grid,
         # 0 is straight up; a positive angle leans the holes off vertical so
         # tubes rest at a slant. Any grid may lean.
         "angle": 0.0,
     }
+
+
+def normalize_bore_auto(
+    box: BoxSpec, one: Feature, base_z: float, mode: str = "fused",
+) -> Feature:
+    """Make a Bore's persisted Auto modes authoritative over stale manual values.
+
+    Base Auto takes the current usable layout area, Height Auto and Grid Auto
+    drop their manual numbers (defaults then derive them from the current bin
+    and Base). Anything that is not an Auto Bore is returned untouched.
+    """
+    if one.kind != "bore":
+        return one
+    options = dict(one.options)
+    zone = one.zone
+    if options.get("auto_base"):
+        zone = layout_zone(box, mode)
+    if options.get("auto_height"):
+        options.pop("height", None)
+    if options.get("auto_grid"):
+        options.pop("columns", None)
+        options.pop("rows", None)
+    if zone is one.zone and options == one.options:
+        return one
+    return replace(one, zone=zone, options=options)
 
 
 def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
@@ -305,6 +347,9 @@ def bore_tool_clearance_zone(
         OptionDefinition("Y quantity", "rows", "", "integer"),
         OptionDefinition("Angle °", "angle", "0"),
         OptionDefinition("Angle towards", "angle_towards", "front", "enum", False),
+        OptionDefinition("Auto base size", "auto_base", False, "boolean", False),
+        OptionDefinition("Auto height", "auto_height", False, "boolean", False),
+        OptionDefinition("Auto X/Y count", "auto_grid", False, "boolean", False),
     ), order=30,
 )
 def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
