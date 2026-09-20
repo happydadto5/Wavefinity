@@ -398,7 +398,7 @@ class B4BSerializationTests(unittest.TestCase):
 class B4BGenerationTests(unittest.TestCase):
     def test_filename_distinct_from_ordinary_bin(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
-        self.assertNotIn("Box 64", b4b_filename(box))
+        self.assertFalse(b4b_filename(box).startswith("Box "))
         self.assertTrue(b4b_filename(box).startswith("Storage Box "))
 
 

@@ -332,7 +332,9 @@ async function loadFreshOrdinaryDesignForCurrentFolder() {
   state.lastOrdinaryDesign = clone(state.design);
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
-  state.workingPending = false;
+  // An explicit first-bin action is working intent: Space shows this bin as
+  // Current design even before any edit. Startup never does this.
+  state.workingPending = state.folderMode === "space";
   state.workingGeneratedKey = null;
   state.drafts = {};
   state.history = [];
@@ -10048,6 +10050,7 @@ function designHasChanges() {
 // A design counts as "pending inventory" once it has been edited, opened or
 // started new, until a Bin/Storage Box generation or local Print logs that
 // exact design. Base Trim and an untouched starter design never count.
+// BEGIN WORKING_DESIGN_HELPERS
 function markWorkingDesignPending() {
   state.workingPending = true;
 }
@@ -10076,6 +10079,7 @@ function workingDesignForSpace() {
   const changed = state.workingPending || key !== JSON.stringify(state.cleanDesign);
   return changed ? visible : null;
 }
+// END WORKING_DESIGN_HELPERS
 
 async function openDesign(event) {
   const file = event.target.files?.[0];

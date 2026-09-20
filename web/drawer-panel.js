@@ -489,7 +489,10 @@ DP.lowerQty = one => {
 };
 
 // The one "go design a bin" jump used by both empty states.
-DP.designFirstBin = () => activatePreviewView("3d");
+DP.designFirstBin = () => {
+  if (typeof markWorkingDesignPending === "function") markWorkingDesignPending();
+  activatePreviewView("3d");
+};
 
 // Surface first run: reopen the direct Base Trim edge design (never the
 // arranged-bin source, which cannot exist for an empty Surface).

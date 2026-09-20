@@ -1485,6 +1485,97 @@ class WebApplicationTests(unittest.TestCase):
                         wavefinity_web.print_payload({"design": design, "output": temp_dir})
                         mock_connector.assert_not_called()
 
+    def _node_or_skip(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is required for this browser-state regression")
+        return node
+
+    def test_current_design_lifecycle(self):
+        node = self._node_or_skip()
+        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        helper = source[
+            source.index("// BEGIN WORKING_DESIGN_HELPERS"):source.index("// END WORKING_DESIGN_HELPERS")
+        ]
+        steps = "\n".join([
+            "const shown = () => out.push(workingDesignForSpace() !== null);",
+            # Untouched startup starter: never invented.
+            "visible = {a: 1}; state.cleanDesign = clone(visible); shown();",
+            # Explicit first-bin action (fresh design, pending, no edit): shown.
+            "state.workingPending = true; shown();",
+            # Real generation logs it: hidden, no duplicate.
+            "markWorkingDesignReconciled(); shown();",
+            # A later edit makes it pending again.
+            "visible = {a: 2}; shown();",
+            # Base Trim and non-Space folders never count.
+            "baseTrim = true; shown(); baseTrim = false; state.folderMode = 'design'; shown();",
+        ])
+        script = "\n".join([
+            "const clone = v => JSON.parse(JSON.stringify(v));",
+            "const state = { design: {}, cleanDesign: {}, workingPending: false,"
+            " workingGeneratedKey: null, folderMode: 'space' };",
+            "let visible = {}; let baseTrim = false;",
+            "const baseTrimEnabled = () => baseTrim;",
+            "const visibleDesignSnapshot = () => clone(visible);",
+            helper,
+            "const out = [];",
+            steps,
+            "process.stdout.write(JSON.stringify(out));",
+        ])
+        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        self.assertEqual(json.loads(done.stdout), [False, True, False, True, False, False])
+
+    def test_surface_outside_size_resolves_down_to_whole_units(self):
+        node = self._node_or_skip()
+        source = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")
+        code = source[source.index("SP.surfacePresetRows = "):source.index("// Show the resolved finished size")]
+        rules = {key: catalog_payload()["base_trim_rules"][key] for key in
+                 ("unit_mm", "mating_gap_mm", "max_field_mm", "size_presets")}
+        script = "\n".join([
+            "const SP = {}; const fmt = v => String(Math.round(v * 100) / 100);",
+            "const state = { catalog: { base_unit: 8, base_trim_rules: " + json.dumps(rules) + " } };",
+            code,
+            "const r = (x, y, t) => SP.resolveSurface(x, y, t);",
+            "process.stdout.write(JSON.stringify([r(300, 250, 'medium'), r(295.25, 247.25, 'medium'),"
+            " r(295.24, 247.25, 'medium'), r(10, 10, 'medium'), r(5000, 250, 'medium')]));",
+        ])
+        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        first, exact, just_under, tiny, huge = json.loads(done.stdout)
+        self.assertEqual((first["fieldX"], first["fieldY"]), (280, 232))
+        self.assertEqual((first["outerX"], first["outerY"]), (295.25, 247.25))
+        self.assertEqual(exact["fieldX"], 280)
+        self.assertEqual(just_under["fieldX"], 272)   # never rounds up
+        self.assertFalse(tiny["ok"])
+        self.assertFalse(huge["ok"])
+
+    def test_first_bin_actions_mark_the_current_design_pending(self):
+        root = Path(__file__).resolve().parent / "web"
+        app = (root / "app.js").read_text(encoding="utf-8")
+        fresh = app[app.index("async function loadFreshOrdinaryDesignForCurrentFolder"):]
+        fresh = fresh[:fresh.index("\n}\n")]
+        self.assertIn('state.workingPending = state.folderMode === "space"', fresh)
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        first = panel[panel.index("DP.designFirstBin = "):]
+        self.assertIn("markWorkingDesignPending()", first[:first.index("};")])
+        # Both Surface first-run exits go through the shared fresh-design load.
+        self.assertIn(
+            "await loadFreshOrdinaryDesignForCurrentFolder();",
+            app[app.index("async function surfaceEdgeSucceeded"):],
+        )
+        self.assertIn(
+            "await loadFreshOrdinaryDesignForCurrentFolder();",
+            panel[panel.index("DP.startBinNow"):],
+        )
+        # The working design is session-only: never merged into inventory rows.
+        model = (root / "drawer-model.js").read_text(encoding="utf-8")
+        self.assertNotIn("DL.bins.push", model)
+        self.assertNotIn("bins.push(DL.working", panel)
+
+    def test_inventory_preview_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wavefinity_web.inventory_preview_payload({"design": default_design(), "output": directory})
+            self.assertEqual(os.listdir(directory), [])
+
     def test_inventory_preview_is_read_only_planning_envelope(self):
         ordinary = default_design()
         ordinary["part_name"] = "Screws"
@@ -1496,6 +1587,7 @@ class WebApplicationTests(unittest.TestCase):
             (ordinary["box"]["x"], ordinary["box"]["y"], ordinary["box"]["z"]),
         )
         storage = default_design()
+        storage["box"].update(x=64.0, y=48.0, z=40.0, wall=1.2, standard_walls=False)
         storage["box"]["b4b"] = {"enabled": True}
         self.assertEqual(
             wavefinity_web.inventory_preview_payload({"design": storage})["bin"]["kind"], "b4b",
