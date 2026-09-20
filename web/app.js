@@ -14,6 +14,9 @@ const state = {
   catalog: null,
   design: null,
   cleanDesign: null,
+  workingPending: false,        // session-only "Current design" bookkeeping
+  workingGeneratedKey: null,
+  surfaceEdgeHandled: false,    // Surface first-run: edge done or deliberately skipped
   preview: null,
   draftKind: "divider",
   draft: null,
@@ -183,7 +186,7 @@ function setFolderState(
       ? "Inventory and Spaces need writable folder access in this browser. Downloads still work without it."
       : state.folderMode === "space"
         ? "A Space needs this folder's inventory turned on."
-        : "Add each generated bin and B4B to this folder's inventory file";
+        : "Add each generated bin and Storage Box to this folder's inventory file";
   }
 }
 
@@ -329,6 +332,10 @@ async function loadFreshOrdinaryDesignForCurrentFolder() {
   state.lastOrdinaryDesign = clone(state.design);
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
+  // An explicit first-bin action is working intent: Space shows this bin as
+  // Current design even before any edit. Startup never does this.
+  state.workingPending = state.folderMode === "space";
+  state.workingGeneratedKey = null;
   state.drafts = {};
   state.history = [];
   state.future = [];
@@ -1796,7 +1803,7 @@ function applyB4BVisibility() {
   if (zLabel) zLabel.textContent = on ? "Height (Inside)" : "Height";
   // One Name field for both bin kinds; only its label changes.
   const partNameLabel = $("#part-name-label");
-  if (partNameLabel) partNameLabel.textContent = on ? "Bin for Bins Name" : "Bin Name";
+  if (partNameLabel) partNameLabel.textContent = on ? "Storage Box Name" : "Bin Name";
   if (on) {
     // The handle is front-mounted body hardware now, so stacking is no longer
     // a reason to refuse it. What it does still need is a lid that latches,
@@ -1845,7 +1852,7 @@ function b4bHandleBlockedReason() {
   if ($("#b4b-lid-type").value !== "latched") return "Handle requires a secure lid.";
   const b4b = state.preview?.b4b;
   if (!b4b || b4b.handle_available !== false) return "";
-  return b4b.handle_blocked_reason || "This B4B is too small for a handle.";
+  return b4b.handle_blocked_reason || "This Storage Box is too small for a handle.";
 }
 
 // Same reasoning as b4bHandleBlockedReason: the server derives this from the
@@ -2234,7 +2241,7 @@ function b4bLimitProblems(design = state.design) {
   const minField = b4bMinField();
   const minHeight = b4bLatchedMinHeight();
   if (number(box.x, 0) < minField - 1e-9 || number(box.y, 0) < minField - 1e-9) {
-    problems.push(`A B4B holds at least ${minField} x ${minField} mm of bins.`);
+    problems.push(`A Storage Box holds at least ${minField} x ${minField} mm of bins.`);
   }
   if (b4b.secure_lid && number(box.z, 0) < minHeight - 1e-9) {
     problems.push(`A latched lid needs at least ${minHeight} mm of bin height.`);
@@ -2305,7 +2312,7 @@ async function toggleB4B(wantEnabled) {
     // Placed interior parts need an explicit confirmation before they go.
     if (state.design?.layout?.features?.length) {
       const ok = window.confirm(
-        "Turning on Bin for Bins clears the interior parts - the B4B interior " +
+        "Turning on Storage Box clears the interior parts - the Storage Box interior " +
         "is reserved for child bins. Continue?");
       if (!ok) { $("#bin-type").value = binTypeFromDesign(); return false; }
       state.design.layout.features = [];
@@ -9976,6 +9983,7 @@ async function saveDesign() {
     link.download = `${(state.design.part_name || "Wavefinity design").replace(/[^a-z0-9 _-]/gi, "").trim() || "Wavefinity design"}.wavefinity.json`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    if (!baseTrimEnabled() && designHasChanges()) markWorkingDesignPending();
     state.cleanDesign = clone(state.design);
     toast("Design downloaded.");
   } catch (error) {
@@ -9985,11 +9993,12 @@ async function saveDesign() {
   }
 }
 
-function designHasChanges() {
+// The design as the form currently shows it, without touching state.design.
+function visibleDesignSnapshot() {
   const visibleDesign = clone(state.design);
   if (baseTrimEnabled(visibleDesign)) {
     readBaseTrimForm(visibleDesign);
-    return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
+    return visibleDesign;
   }
   visibleDesign.box.x = normalizeBinDimension("x", $("#x-size").value, visibleDesign.box.x);
   visibleDesign.box.y = normalizeBinDimension("y", $("#y-size").value, visibleDesign.box.y);
@@ -10020,6 +10029,14 @@ function designHasChanges() {
   readLiftGrabberForm(visibleDesign);
   if (editingEdgeMount()) readEdgeMountForm(visibleDesign);
   readSideOpeningForm(visibleDesign);
+  return visibleDesign;
+}
+
+function designHasChanges() {
+  const visibleDesign = visibleDesignSnapshot();
+  if (baseTrimEnabled(visibleDesign)) {
+    return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
+  }
   const index = draftCommitIndex();
   if (state.draft && state.draftAutoCommit && (
     index === null ||
@@ -10028,6 +10045,41 @@ function designHasChanges() {
   )) return true;
   return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
 }
+
+// ---- Current design in Space (session only, never written to inventory).
+// A design counts as "pending inventory" once it has been edited, opened or
+// started new, until a Bin/Storage Box generation or local Print logs that
+// exact design. Base Trim and an untouched starter design never count.
+// BEGIN WORKING_DESIGN_HELPERS
+function markWorkingDesignPending() {
+  state.workingPending = true;
+}
+
+function markWorkingDesignReconciled() {
+  if (baseTrimEnabled()) return;
+  state.workingPending = false;
+  try {
+    state.workingGeneratedKey = JSON.stringify(visibleDesignSnapshot());
+  } catch (_error) {
+    state.workingGeneratedKey = null;
+  }
+}
+
+// The design Space should show as "Current design", or null.
+function workingDesignForSpace() {
+  if (!state.design || baseTrimEnabled() || state.folderMode !== "space") return null;
+  let visible;
+  try {
+    visible = visibleDesignSnapshot();
+  } catch (_error) {
+    return null;
+  }
+  const key = JSON.stringify(visible);
+  if (state.workingGeneratedKey && state.workingGeneratedKey === key) return null;
+  const changed = state.workingPending || key !== JSON.stringify(state.cleanDesign);
+  return changed ? visible : null;
+}
+// END WORKING_DESIGN_HELPERS
 
 async function openDesign(event) {
   const file = event.target.files?.[0];
@@ -10046,6 +10098,7 @@ async function openDesign(event) {
     state.baseTrimSourceLayout = null;
     resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
+    markWorkingDesignPending();
     state.drafts = {};
     state.history = [];
     state.future = [];
@@ -10073,6 +10126,7 @@ async function newDesign() {
   state.baseTrimSourceLayout = null;
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
+  if (!baseTrimEnabled(state.design)) markWorkingDesignPending();
   state.binResizePending = false;
   state.binFootprintResizePending = false;
   recordHistory(previousDesign);
@@ -10189,6 +10243,35 @@ function checkPartNamePresent(target = "bin") {
   return true;
 }
 
+// Surface first-run: after the Base Trim edge is generated or printed, and
+// real inventory still holds no bin-like row, hand off to the first bin.
+// Gated by typed Surface + Base Trim + a successful operation + no real bin.
+function realInventoryHasBin() {
+  return typeof DL !== "undefined" && Array.isArray(DL.bins)
+    && DL.bins.some(one => one.kind === "bin" || one.kind === "b4b" || one.kind === "manual");
+}
+
+// True while a Surface has no real bin yet and its edge is still the next step.
+function surfaceNeedsEdge() {
+  return state.folderMode === "space" && state.activeSpace?.kind === "surface"
+    && !state.surfaceEdgeHandled && typeof DL !== "undefined" && DL.loaded
+    && !realInventoryHasBin();
+}
+
+async function surfaceEdgeSucceeded(design) {
+  if (state.folderMode !== "space" || state.activeSpace?.kind !== "surface") return;
+  if (!baseTrimEnabled(design)) return;
+  try {
+    if (typeof DL !== "undefined" && DL.load && !DL.active) await DL.load();
+  } catch (_error) {
+    return;
+  }
+  if (typeof DL === "undefined" || !DL.loaded || realInventoryHasBin()) return;
+  state.surfaceEdgeHandled = true;
+  await loadFreshOrdinaryDesignForCurrentFolder();
+  toast("Edge ready — design your first bin.");
+}
+
 async function generateParts(target) {
   if (baseTrimEnabled()) target = "bin";
   if (state.designMutationBusy || isGenerating) {
@@ -10258,6 +10341,7 @@ async function generateParts(target) {
   const allFiles = [];
   let connectorPlan = null;
   let saveOutput = state.output;
+  let surfaceEdgeDone = null;
 
   try {
     // A debounced support edit may still be visible only in the draft. Save
@@ -10283,6 +10367,8 @@ async function generateParts(target) {
       }
       allFiles.push(...binFiles);
       setItemStatus("bin", "done", "Done");
+      if (baseTrimEnabled(payload.design)) surfaceEdgeDone = payload.design;
+      else markWorkingDesignReconciled();
     }
 
     // Step 2: Generate Connector if requested
@@ -10351,6 +10437,7 @@ async function generateParts(target) {
     updateGenerateAvailability();
     updateHistoryButtons();
   }
+  if (surfaceEdgeDone) await surfaceEdgeSucceeded(surfaceEdgeDone);
 }
 
 async function generate(path, selector) {
@@ -10372,6 +10459,7 @@ async function printModel(target = "bin") {
   if (!beginDesignMutation()) return;
   const button = $("#print-bin");
   const old = button.textContent;
+  let printedEdge = null;
   button.disabled = true;
   const slicerName = state.slicer?.name || "Bambu Studio";
   button.textContent = `Sending to ${slicerName}…`;
@@ -10392,6 +10480,8 @@ async function printModel(target = "bin") {
     const files = result.files || [];
     const fileNames = files.map(f => f.split(/[\\/]/).pop());
     toast(`Sent to ${slicerName}!\n${fileNames.join("\n")}`, false, 7000);
+    if (baseTrimEnabled(payload.design)) printedEdge = payload.design;
+    else if (target === "bin" || target === "all") markWorkingDesignReconciled();
   } catch (error) {
     setError(error.message);
     toast(error.message, true, 8000);
@@ -10399,6 +10489,7 @@ async function printModel(target = "bin") {
     button.textContent = old;
     finishDesignMutation();
   }
+  if (printedEdge) await surfaceEdgeSucceeded(printedEdge);
 }
 
 function updatePrimaryPrintButtonLabel() {

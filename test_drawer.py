@@ -56,7 +56,7 @@ def _layout(width, depth, height=60, placements=()):
     return {"version": 1, "active": "d1", "drawers": [{
         "id": "d1", "name": "Drawer 1", "width": width, "depth": depth, "height": height,
         "clearance": 1.0, "anchor": "front-left", "bin_axis": "x",
-        "keepouts": [], "placements": list(placements),
+        "placements": list(placements),
     }]}
 
 
@@ -477,7 +477,7 @@ class SpacerTests(unittest.TestCase):
         raw_drawer = {
             "id": "d1", "name": "Drawer 1", "width": 100.0, "depth": 93.0, "height": 60,
             "clearance": 1.0, "anchor": "front-left", "bin_axis": "x", "snap": 4,
-            "keepouts": [], "placements": [{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}],
+            "placements": [{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}],
         }
         bins = [_bin("B1", 16, 16, 40)]
         grid = drawer_grid(normalise_drawer(raw_drawer))
@@ -590,7 +590,7 @@ class BoundaryTests(unittest.TestCase):
             "space": {"kind": kind, "name": folder.name, "x": 96, "y": 48, "z": 40},
             "drawers": [{
                 "id": "d1", "name": folder.name, "width": 96, "depth": 48, "height": 40,
-                "clearance": 0.0 if kind == "box" else 1.0, "keepouts": [], "placements": [],
+                "clearance": 0.0 if kind == "box" else 1.0, "placements": [],
                 **(drawer_extra or {}),
             }],
         }
@@ -627,12 +627,28 @@ class BoundaryTests(unittest.TestCase):
             "space": {"kind": "box", "name": "Case", "x": 96, "y": 48, "z": 40},
             "drawers": [{
                 "id": "d1", "name": "Case", "width": 96, "depth": 48, "height": 40,
-                "clearance": 0.0, "keepouts": [], "placements": [],
+                "clearance": 0.0, "placements": [],
             }],
         }
         text = render_inventory("Case", [], layout)
         loaded = load_inventory_text(text, title="Case")
         self.assertEqual(loaded["layout"]["drawers"][0]["boundary"], "mating")
+
+
+class StorageBoxFilenameTests(unittest.TestCase):
+    def test_new_and_legacy_file_names_both_infer_the_part_name(self):
+        from organizer_inventory import infer_name
+        self.assertEqual(infer_name("Storage Box 64x48x40 - Fasteners.3mf"), "Fasteners")
+        self.assertEqual(infer_name("B4B 64x48x40 - Fasteners.3mf"), "Fasteners")
+
+
+class KeepOutRemovalTests(unittest.TestCase):
+    def test_a_stray_old_keepouts_key_is_dropped(self):
+        drawer = normalise_drawer({
+            "id": "d1", "width": 100.0, "depth": 93.0, "height": 60,
+            "keepouts": [{"x": 0, "y": 0, "w": 16, "d": 16}], "placements": [],
+        })
+        self.assertNotIn("keepouts", drawer)
 
 
 class OpenSpaceTests(unittest.TestCase):
@@ -666,7 +682,7 @@ class OpenSpaceTests(unittest.TestCase):
         drawer = {
             "id": "d1", "name": "Drawer 1", "width": 14.0, "depth": 18.0, "height": 40,
             "clearance": 1.0, "anchor": "front-left", "bin_axis": "x", "snap": 4,
-            "keepouts": [], "placements": [{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}],
+            "placements": [{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}],
         }
         report = drawer_report(drawer, bins)
         self.assertGreater(report["cells"]["free"], 0)

@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-19 — Space interface workflow
+
+- The bin you are designing now shows in Space as **Current design**, even
+  before you generate it (session only: never saved to inventory, counted,
+  or autosaved). It disappears once the real generated bin is logged.
+- Selected bins in Space have a **Duplicate** button.
+- Surface setup asks for the maximum finished **outside** width/length in mm
+  and uses the largest whole-unit field that fits; a live readout shows the
+  interior, edge trim and finished outside size. Stored Surface sizes are
+  unchanged (still the interior field).
+- A new Surface says "Finish your edge, then start adding bins" in Space, and
+  after the edge is generated or printed it opens the first bin design.
+- Keep-out Zones are removed (old saved keep-out data is ignored).
+- **B4B** / **Bin for Bins** is now called **Storage Box** everywhere users see
+  it; old saved designs and B4B-named files still load.
+- Interface polish: Width/Length/Height proportions, 40/60 controls/preview
+  default, contained Space type-card images, full Space camera button labels.
+
 ## 2026-09-19 — Side Openings
 
 - Added centered Curved or Square finger-access openings to any eligible

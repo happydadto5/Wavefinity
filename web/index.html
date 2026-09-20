@@ -37,11 +37,11 @@
             <label><span>Design a:</span>
               <select id="bin-type">
                 <option value="single" selected>Bin</option>
-                <option value="b4b">Bin for Bins</option>
+                <option value="b4b">Storage Box</option>
                 <option value="base-trim">Base Trim</option>
               </select>
             </label>
-            <label class="part-name-row"><span id="part-name-label">Bin Name</span> <span id="part-name-required" class="required-cue">required to print</span>
+            <label class="part-name-row"><span id="part-name-label">Bin Name</span>
               <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
             </label>
             <span id="stack-note" class="stack-note" hidden></span>
@@ -434,7 +434,7 @@
                 </svg>
               </button>
             </div>
-            <label class="inventory-select-row" title="Add each generated bin and B4B to this folder's inventory file">
+            <label class="inventory-select-row" title="Add each generated bin and Storage Box to this folder's inventory file">
               <span class="sr-only">Inventory</span>
               <select id="folder-inventory-toggle">
                 <option value="true">Keep Inventory</option>
@@ -846,13 +846,16 @@
         </div>
 
         <div id="space-fields-surface" class="space-type-fields" hidden>
-          <label class="space-field"><span>Width <span class="unit">units</span></span><input id="surface-x" type="number" min="1" step="1"></label>
-          <label class="space-field"><span>Depth <span class="unit">units</span></span><input id="surface-y" type="number" min="1" step="1"></label>
+          <label class="space-field"><span>Outside width <span class="unit">mm</span></span><input id="surface-x" type="number" min="1" step="any"></label>
+          <label class="space-field"><span>Outside length <span class="unit">mm</span></span><input id="surface-y" type="number" min="1" step="any"></label>
           <label class="space-field"><span>Trim size</span>
             <select id="surface-trim"></select>
           </label>
+          <p class="dl-note">The largest Wavefinity field that fits inside these outside sizes is used. The finished Surface never exceeds them.</p>
           <div id="surface-readout" class="derived-readout" hidden>
-            <dt>Field size</dt><dd id="surface-size-readout"></dd>
+            <dt>Wavefinity interior</dt><dd id="surface-size-readout"></dd>
+            <dt>Edge trim</dt><dd id="surface-trim-readout"></dd>
+            <dt>Finished outside</dt><dd id="surface-outside-readout"></dd>
           </div>
         </div>
 

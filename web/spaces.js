@@ -89,6 +89,78 @@ SP.surfaceTrimKeyForHeight = value => {
   return null;
 };
 
+// Surface setup asks for the maximum finished OUTSIDE size in mm. Space
+// x / y stay the interior Wavefinity field in mm; this is the one place that
+// converts between the two, using the catalog's Base Trim rules (never a
+// second hard-coded table):
+//   outside = field + mating gap + 2 * trim width
+SP.surfaceRules = () => {
+  const rules = state.catalog?.base_trim_rules || {};
+  return {
+    unit: Number(rules.unit_mm || state.catalog?.base_unit),
+    gap: Number(rules.mating_gap_mm),
+    maxField: Number(rules.max_field_mm),
+  };
+};
+
+SP.surfaceOutsideFor = (fieldMm, trimKey) => {
+  const { gap } = SP.surfaceRules();
+  const width = SP.surfacePresetMap()[trimKey];
+  return fieldMm + gap + 2 * width;
+};
+
+// Largest whole-unit interior field that fits inside the requested outside
+// size (never nearest/up). Returns { ok, error, fieldX, fieldY, unitsX,
+// unitsY, outerX, outerY, trimWidth }.
+SP.resolveSurface = (requestedX, requestedY, trimKey) => {
+  const { unit, gap, maxField } = SP.surfaceRules();
+  const width = SP.surfacePresetMap()[trimKey];
+  if (!Number.isFinite(width)) return { ok: false, error: "Choose Small, Medium, or Large trim." };
+  if (!Number.isFinite(requestedX) || !Number.isFinite(requestedY) || requestedX <= 0 || requestedY <= 0) {
+    return { ok: false, error: "Enter the outside width and length in mm." };
+  }
+  const epsilon = 1e-6;
+  const extra = gap + 2 * width;
+  const unitsFor = requested => Math.floor((requested - extra + epsilon) / unit);
+  const unitsX = unitsFor(requestedX);
+  const unitsY = unitsFor(requestedY);
+  if (unitsX < 1 || unitsY < 1) {
+    return {
+      ok: false,
+      error: `Too small: the smallest Surface is ${fmt(unit + extra)} mm outside with this trim.`,
+    };
+  }
+  const fieldX = unitsX * unit;
+  const fieldY = unitsY * unit;
+  if (fieldX > maxField + epsilon || fieldY > maxField + epsilon) {
+    return {
+      ok: false,
+      error: `Too large: the Wavefinity field cannot exceed ${fmt(maxField)} mm.`,
+    };
+  }
+  return {
+    ok: true, fieldX, fieldY, unitsX, unitsY, trimWidth: width,
+    outerX: fieldX + extra, outerY: fieldY + extra,
+  };
+};
+
+// Show the resolved finished size in the visible inputs, so a hidden
+// request never lingers after resolution.
+SP.normalizeSurfaceInputs = resolved => {
+  if (!resolved?.ok) return;
+  document.getElementById("surface-x").value = fmt(resolved.outerX);
+  document.getElementById("surface-y").value = fmt(resolved.outerY);
+};
+
+SP.surfaceTrimLabel = key =>
+  SP.surfacePresetRows().find(row => row.key === key)?.label || key || "";
+
+// "35X × 29X — 280 × 232 mm" for a stored interior field.
+SP.fieldText = (x, y) => {
+  const { unit } = SP.surfaceRules();
+  return `${fmt(x / unit)}X × ${fmt(y / unit)}X — ${fmt(x)} × ${fmt(y)} mm`;
+};
+
 SP.populateSurfaceTrim = () => {
   const select = document.getElementById("surface-trim");
   if (!select) return;
@@ -879,12 +951,6 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById('drawer-y').value = prefillSpace?.y || '';
       document.getElementById('drawer-z').value = prefillSpace?.z || '';
   } else if (kind === 'surface') {
-      const unit = state.catalog?.base_unit || 8;
-      document.getElementById("surface-x").value =
-        prefillSpace?.x ? prefillSpace.x / unit : "";
-      document.getElementById("surface-y").value =
-        prefillSpace?.y ? prefillSpace.y / unit : "";
-
       const trimSelect = document.getElementById("surface-trim");
       if (trimSelect) {
         if (!prefillSpace) {
@@ -897,6 +963,14 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
             : (SP.surfaceTrimKeyForHeight(prefillSpace.z) || "");
         }
       }
+      // Edit prefills the finished outside size from the stored interior
+      // field plus the selected trim; nothing is migrated.
+      const prefillTrim = trimSelect?.value;
+      const hasSize = prefillSpace?.x && prefillSpace?.y && prefillTrim;
+      document.getElementById("surface-x").value =
+        hasSize ? fmt(SP.surfaceOutsideFor(prefillSpace.x, prefillTrim)) : "";
+      document.getElementById("surface-y").value =
+        hasSize ? fmt(SP.surfaceOutsideFor(prefillSpace.y, prefillTrim)) : "";
   } else if (kind === "portable") {
       document.getElementById("portable-x").value = prefillSpace?.x || "";
       document.getElementById("portable-y").value = prefillSpace?.y || "";
@@ -975,28 +1049,25 @@ SP.readSetupValues = () => {
   }
 
   if (kind === "surface") {
-    const xUnits = Number(document.getElementById("surface-x").value);
-    const yUnits = Number(document.getElementById("surface-y").value);
-    if (
-      !Number.isInteger(xUnits) || xUnits < 1
-      || !Number.isInteger(yUnits) || yUnits < 1
-    ) {
+    const trimSize = document.getElementById("surface-trim").value;
+    const resolved = SP.resolveSurface(
+      Number(document.getElementById("surface-x").value),
+      Number(document.getElementById("surface-y").value),
+      trimSize,
+    );
+    if (!resolved.ok) {
       return fail(
-        "Surface width and depth must be positive whole Wavefinity units.",
-        "#surface-x",
+        resolved.error,
+        SP.surfacePresetMap()[trimSize] === undefined ? "#surface-trim" : "#surface-x",
       );
     }
-    const trimSize = document.getElementById("surface-trim").value;
-    const z = SP.surfacePresetMap()[trimSize];
-    if (!Number.isFinite(z)) {
-      return fail("Choose Small, Medium, or Large trim.", "#surface-trim");
-    }
+    SP.normalizeSurfaceInputs(resolved);
     return {
       kind,
       name,
-      x: xUnits * unit,
-      y: yUnits * unit,
-      z,
+      x: resolved.fieldX,
+      y: resolved.fieldY,
+      z: SP.surfacePresetMap()[trimSize],
       trimSize,
     };
   }
@@ -1134,6 +1205,7 @@ SP.create = async () => {
 // building a second, incompatible "edge" design object - see Fix 004.
 SP.designSurface = async space => {
   const trimValue = SP.surfacePresetMap()[space.trim_size];
+  state.surfaceEdgeHandled = false;
   if (!baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
 
   state.design = makeBaseTrimDesign(space.x, space.y);
@@ -1434,6 +1506,21 @@ SP.wire = () => {
     const input = document.getElementById(id);
     if (input) input.addEventListener("input", SP.updateReadouts);
   });
+  // Surface: on blur show the actual resolved outside size in the inputs.
+  ["surface-x", "surface-y"].forEach(id => {
+    document.getElementById(id)?.addEventListener("blur", () => {
+      const resolved = SP.resolveSurface(
+        Number(document.getElementById("surface-x").value),
+        Number(document.getElementById("surface-y").value),
+        document.getElementById("surface-trim").value,
+      );
+      SP.normalizeSurfaceInputs(resolved);
+      SP.updateReadouts();
+    });
+  });
+  // Changing trim re-resolves the largest field that fits the request that
+  // is currently visible; it never grows beyond it.
+  document.getElementById("surface-trim")?.addEventListener("change", SP.updateReadouts);
 };
 
 SP.updateReadouts = () => {
@@ -1451,15 +1538,25 @@ SP.updateReadouts = () => {
             document.getElementById("drawer-readout").hidden = true;
         }
     } else if (kind === "surface") {
-        const xUnits = Number(document.getElementById("surface-x").value);
-        const yUnits = Number(document.getElementById("surface-y").value);
+        const trimKey = document.getElementById("surface-trim").value;
+        const resolved = SP.resolveSurface(
+            Number(document.getElementById("surface-x").value),
+            Number(document.getElementById("surface-y").value),
+            trimKey,
+        );
         const readout = document.getElementById("surface-readout");
-        if (Number.isFinite(xUnits) && xUnits > 0 && Number.isFinite(yUnits) && yUnits > 0) {
-            readout.hidden = false;
-            document.getElementById("surface-size-readout").textContent =
-                `${xUnits * unit} × ${yUnits * unit} mm`;
+        const interior = document.getElementById("surface-size-readout");
+        const trim = document.getElementById("surface-trim-readout");
+        const outside = document.getElementById("surface-outside-readout");
+        readout.hidden = false;
+        if (resolved.ok) {
+            interior.textContent = SP.fieldText(resolved.fieldX, resolved.fieldY);
+            trim.textContent = `${SP.surfaceTrimLabel(trimKey)} — ${fmt(resolved.trimWidth)} mm`;
+            outside.textContent = `${fmt(resolved.outerX)} × ${fmt(resolved.outerY)} mm`;
         } else {
-            readout.hidden = true;
+            interior.textContent = resolved.error;
+            trim.textContent = "—";
+            outside.textContent = "—";
         }
     } else if (kind === "portable") {
         const x = Number(document.getElementById("portable-x").value);
@@ -1529,7 +1626,10 @@ SP.renderSpaceInfo = () => {
                 row => row.key === state.activeSpace.trim_size
             );
             const trim = trimRow?.label || state.activeSpace.trim_size || "";
-            sizeText = (x/unit) + " × " + (y/unit) + " units (" + x + " × " + y + " mm), " + trim + " trim";
+            const outsideX = SP.surfaceOutsideFor(x, state.activeSpace.trim_size);
+            const outsideY = SP.surfaceOutsideFor(y, state.activeSpace.trim_size);
+            sizeText = "Interior " + SP.fieldText(x, y) + ", " + trim + " trim; finished outside "
+                + fmt(outsideX) + " × " + fmt(outsideY) + " mm";
         } else if (kind === "portable" || kind === "box") {
             const x = state.activeSpace.x;
             const y = state.activeSpace.y;
@@ -1648,7 +1748,7 @@ SP.crossTypeCheck = (designType) => {
     let warning = null;
     let targetKind = null;
     if (designType === "b4b" && (kind === "drawer" || kind === "surface")) {
-        warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. B4B is meant for Portable Storage.`;
+        warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. Storage Box is meant for Portable Storage.`;
         targetKind = "portable";
     } else if ((designType === "base-trim" || designType === "base_trim") && (kind === "drawer" || kind === "portable" || kind === "box")) {
         warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. Base Trim is meant for Surface Spaces.`;

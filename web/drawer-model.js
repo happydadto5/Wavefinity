@@ -47,6 +47,13 @@ const DL = {
   listeners: [],
 };
 
+// The design being edited, shown in Space before it has been generated. It
+// lives only here: never in DL.bins, the layout, autosave, Qty or To print.
+//   { key, bin, error }  where bin is a planning record from
+//   /api/design/inventory-preview (the same envelope a generated row gets).
+DL.working = null;
+DL.workingTicket = 0;
+
 DL.on = fn => DL.listeners.push(fn);
 DL.emit = () => DL.listeners.forEach(fn => fn());
 
@@ -82,7 +89,6 @@ DL.defaultDrawer = (name, from = null) => ({
   bin_axis: from?.bin_axis ?? "x",
   snap: from?.snap ?? 8,
   boundary: from?.boundary ?? "wall",
-  keepouts: [],
   placements: [],
 });
 
@@ -100,7 +106,7 @@ DL.normaliseLayout = raw => {
   layout.drawers.forEach((one, index) => {
     const base = DL.defaultDrawer(`Drawer ${index + 1}`);
     for (const key of Object.keys(base)) if (one[key] === undefined || one[key] === null) one[key] = base[key];
-    if (!Array.isArray(one.keepouts)) one.keepouts = [];
+    delete one.keepouts; // the old Keep-out Zone feature is gone
     one.placements = (Array.isArray(one.placements) ? one.placements : [])
       .filter(p => p && typeof p === "object" && p.bin);
   });
@@ -141,7 +147,7 @@ DL.sizeText = one => `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`;
 DL.mmToUnits = mm => fmt(mm / 8);
 DL.isSpacer = one => one?.kind === "spacer";
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
-DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct snap", b4b: "B4B stacking" })[mode] || "Not stackable";
+DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct snap", b4b: "Storage Box stacking" })[mode] || "Not stackable";
 DL.isPlanned = p => (p.copy ?? 0) >= (Number(DL.bin(p.bin)?.qty) || 0);
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
@@ -316,18 +322,6 @@ DL.findPlacement = key => {
   return null;
 };
 
-DL.blockedCells = (drawer = DL.drawer(), grid = DL.grid(drawer)) => {
-  const cells = new Set();
-  for (const zone of drawer.keepouts || []) {
-    const c0 = Math.max(0, Math.floor((zone.x - grid.ox) / grid.step + 1e-6));
-    const r0 = Math.max(0, Math.floor((zone.y - grid.oy) / grid.step + 1e-6));
-    const c1 = Math.min(grid.cols, Math.ceil((zone.x + zone.w - grid.ox) / grid.step - 1e-6));
-    const r1 = Math.min(grid.rows, Math.ceil((zone.y + zone.d - grid.oy) / grid.step - 1e-6));
-    for (let r = r0; r < r1; r += 1) for (let c = c0; c < c1; c += 1) cells.add(`${c},${r}`);
-  }
-  return cells;
-};
-
 // Can these bins (bottom first) stand as a footprint with its front-left cell
 // at (gx, gy)? `ignore` holds keys being moved. Used live while dragging, so
 // it answers in plain words.
@@ -337,10 +331,6 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
   const height = DL.stackHeight(bins);
   if (height > drawer.height + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this drawer's ${fmt(drawer.height)} mm.` };
   if (gx < 0 || gy < 0 || gx + w > grid.cols || gy + d > grid.rows) return { ok: false, reason: "That would stick out of the drawer." };
-  const blocked = DL.blockedCells(drawer, grid);
-  for (let r = gy; r < gy + d; r += 1) for (let c = gx; c < gx + w; c += 1) {
-    if (blocked.has(`${c},${r}`)) return { ok: false, reason: "That spot is a keep-out zone." };
-  }
   for (const item of DL.items(drawer)) {
     if (item.keys.every(key => ignore.has(key))) continue;
     if (gx < item.gx + item.w && item.gx < gx + w && gy < item.gy + item.d && item.gy < gy + d) {
@@ -402,7 +392,7 @@ DL.afterChange = () => {
 };
 
 // A fingerprint of everything a spacer plan is derived from: the active
-// drawer (placements, dimensions, keepouts, settings) and every bin's
+// drawer (placements, dimensions, settings) and every bin's
 // size-relevant fields. Kept for reference; DL.clearSpacerPlan() below is
 // the actual invalidation mechanism (proactive, not signature-compared) -
 // see Fix 004 Correction 6.I.
@@ -412,7 +402,7 @@ DL.spacerSignature = () => JSON.stringify([
 ]);
 
 // Stale spacer proposals must never survive a layout/inventory change that
-// could invalidate them (placements, dimensions, keepouts, settings, the
+// could invalidate them (placements, dimensions, settings, the
 // active drawer, an auto-layout arrangement, or the bin inventory itself).
 // Toggling a candidate's own checkbox must not call this.
 DL.clearSpacerPlan = () => {
@@ -459,6 +449,64 @@ DL.adopt = data => {
   if (data.stack_steps) DL.stackSteps = data.stack_steps;
 };
 
+// Re-read the current design and, if it is pending inventory, its planning
+// envelope from the server. Cheap when the design has not changed.
+DL.refreshWorking = async () => {
+  const design = typeof workingDesignForSpace === "function" ? workingDesignForSpace() : null;
+  if (!design) {
+    if (DL.working) { DL.working = null; DL.emit(); }
+    return;
+  }
+  const key = JSON.stringify(design);
+  if (DL.working?.key === key) return;
+  const ticket = ++DL.workingTicket;
+  try {
+    const { bin } = await api("/api/design/inventory-preview", { design });
+    if (ticket !== DL.workingTicket) return;
+    DL.working = {
+      key,
+      bin: {
+        ...bin, id: "__current__", qty: 0, working: true,
+        name: (design.part_name || "").trim(),
+      },
+    };
+  } catch (error) {
+    if (ticket !== DL.workingTicket) return;
+    DL.working = { key, error: error.message };
+  }
+  DL.emit();
+};
+
+// First legal floor spot for the working design in the active drawer, or the
+// plain reason it does not fit. Memoised on what it depends on.
+DL.workingFit = () => {
+  const working = DL.working;
+  if (!working) return null;
+  if (working.error) return { ok: false, reason: working.error };
+  const drawer = DL.drawer();
+  const stamp = JSON.stringify([working.key, drawer.id, drawer.width, drawer.depth, drawer.height,
+    drawer.snap, drawer.placements]);
+  if (working.fitStamp === stamp) return working.fit;
+  const grid = DL.grid(drawer);
+  const [w, d] = DL.cells(working.bin, drawer);
+  let fit = { ok: false, reason: "" };
+  if (!Number.isFinite(w) || !Number.isFinite(d) || w > grid.cols || d > grid.rows) {
+    fit.reason = "That is bigger than this Space.";
+  } else {
+    search:
+    for (let gy = 0; gy + d <= grid.rows; gy += 1) {
+      for (let gx = 0; gx + w <= grid.cols; gx += 1) {
+        const test = DL.fitsAt(drawer, [working.bin], gx, gy);
+        if (test.ok) { fit = { ok: true, gx, gy }; break search; }
+        if (!fit.reason) fit.reason = test.reason;
+      }
+    }
+  }
+  working.fitStamp = stamp;
+  working.fit = fit;
+  return fit;
+};
+
 DL.load = async () => {
   const output = DL.folder();
   const data = await DL.inventoryCall("/api/drawer/load", {}, { write: false });
@@ -482,6 +530,7 @@ DL.load = async () => {
   DL.loaded = true;
   DL.emit();
   DL.requestReport();
+  DL.refreshWorking();
 };
 
 DL.save = async () => {

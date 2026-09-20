@@ -61,9 +61,6 @@ DP.build = () => {
           <label>Snap to<select id="dl-snap" title="The wave repeats every 4 mm, so bins may also sit half a unit along from each other"><option value="8">8 mm - whole units</option><option value="4">4 mm - half units</option></select></label>
         </div>
         <p class="dl-note">Bins never turn sideways on their own: a quarter-turned bin's waves clash with its neighbours. <em>Width direction</em> turns every bin in this drawer together, which is safe.</p>
-        <div class="dl-subhead"><strong>Keep-out zones</strong><button type="button" id="dl-keepout-add" class="dl-link">+ Add</button></div>
-        <p class="dl-note">Slide rails, screw heads, a rounded corner - anywhere bins must not go. Measured in mm from the inside front-left corner.</p>
-        <div id="dl-keepouts"></div>
         <button type="button" id="dl-drawer-delete" class="button danger dl-small">Delete this drawer</button>
       </details>
     </section>
@@ -249,20 +246,6 @@ DP.wire = () => {
       DL.layout.active = DL.layout.drawers[0].id;
     });
   });
-  $("#dl-keepout-add").addEventListener("click", () => DL.change(() => {
-    DL.drawer().keepouts.push({ x: 0, y: 0, w: 16, d: 16 });
-  }));
-  $("#dl-keepouts").addEventListener("change", event => {
-    const row = event.target.closest("[data-keepout]");
-    const value = dlNum(event.target.value);
-    if (!row || value === null) return;
-    DL.change(() => { DL.drawer().keepouts[Number(row.dataset.keepout)][event.target.dataset.k] = Math.max(0, value); });
-  });
-  $("#dl-keepouts").addEventListener("click", event => {
-    const row = event.target.closest("[data-remove]")?.closest("[data-keepout]");
-    if (row) DL.change(() => { DL.drawer().keepouts.splice(Number(row.dataset.keepout), 1); });
-  });
-
   const setting = (selector, group, key, read) => $(selector).addEventListener("change", event => {
     DL.change(() => {
       const target = group ? DL.layout.settings[group] : DL.layout.settings;
@@ -286,6 +269,8 @@ DP.wire = () => {
     const act = event.target.closest("[data-empty-act]")?.dataset.emptyAct;
     if (act === "design") DP.designFirstBin();
     else if (act === "add") DP.focusManualAdd();
+    else if (act === "edge") DP.finishEdge();
+    else if (act === "start-bin") DP.startBinNow();
   };
   $("#dl-inv-list").addEventListener("click", emptyAction);
   $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", emptyAction);
@@ -504,7 +489,24 @@ DP.lowerQty = one => {
 };
 
 // The one "go design a bin" jump used by both empty states.
-DP.designFirstBin = () => activatePreviewView("3d");
+DP.designFirstBin = () => {
+  if (typeof markWorkingDesignPending === "function") markWorkingDesignPending();
+  activatePreviewView("3d");
+};
+
+// Surface first run: reopen the direct Base Trim edge design (never the
+// arranged-bin source, which cannot exist for an empty Surface).
+DP.finishEdge = async () => {
+  if (state.activeSpace?.kind !== "surface") return;
+  state.surfaceEdgeHandled = false;
+  await SP.designSurface(state.activeSpace);
+};
+
+// Deliberately skip the edge and begin the first bin.
+DP.startBinNow = async () => {
+  state.surfaceEdgeHandled = true;
+  await loadFreshOrdinaryDesignForCurrentFolder();
+};
 
 // Open the existing manual-add section and put the cursor in it.
 DP.focusManualAdd = () => {
@@ -670,14 +672,6 @@ DP.renderDrawer = () => {
   const units = value => fmt(value * grid.step / DL.UNIT);
   $("#dl-grid-note").textContent = `Grid ${units(grid.cols)} × ${units(grid.rows)} units (${fmt(grid.cols * grid.step)} × ${fmt(grid.rows * grid.step)} mm). `
     + (edges.length ? `Left over at the edges: ${edges.join(", ")}.` : "No spare strip at the edges.");
-  const zones = JSON.stringify([drawer.id, drawer.keepouts]);
-  if (dlChanged("keepouts", zones) && !$("#dl-keepouts").contains(document.activeElement)) {
-    $("#dl-keepouts").innerHTML = drawer.keepouts.map((zone, index) => `
-      <div class="dl-keepout" data-keepout="${index}">
-        ${["x", "y", "w", "d"].map(k => `<label>${{ x: "From left", y: "From front", w: "Width", d: "Depth" }[k]}<input type="number" min="0" step="1" data-k="${k}" value="${fmt(zone[k])}"></label>`).join("")}
-        <button type="button" data-remove title="Remove this keep-out zone" aria-label="Remove">✕</button>
-      </div>`).join("");
-  }
 };
 
 DP.renderAuto = () => {
@@ -803,7 +797,7 @@ DP.renderOpenSpaces = () => {
     return `<div class="dl-open-spot">
       <span>${index === 0 ? "Largest open space" : "Next open space"}</span>
       <div>${fmt(wMm)} × ${fmt(dMm)} mm<small>${DL.mmToUnits(wMm)} × ${DL.mmToUnits(dMm)} units</small></div>
-      ${index === 0 ? `<button type="button" id="dl-design-spot" class="dl-link" title="Open the bin editor with this size">Design a bin for it</button>` : ""}
+      ${index === 0 ? `<button type="button" id="dl-design-spot" class="dl-link" title="Open the bin editor with this size">Design a Storage Box</button>` : ""}
     </div>`;
   }).join("");
 };
@@ -845,6 +839,31 @@ DP.filteredBins = () => {
   return list.sort((a, b) => Number(DL.isSpacer(a)) - Number(DL.isSpacer(b)) || sorters[DP.filter.sort](a, b));
 };
 
+// The "Current design" row: session only, so no Qty controls, no remove, no
+// drag. It just shows the size and lets you go back to the design.
+DP.workingRow = () => {
+  const working = DL.working;
+  if (!working || working.error) {
+    return working?.error ? `<div class="dl-bin dl-working"><span class="dl-bin-main"><strong>Current design</strong>
+      <small>${escapeHtml(working.error)}</small></span></div>` : "";
+  }
+  const one = working.bin;
+  const drawer = DL.drawer();
+  const [w, d] = DL.cells(one, drawer);
+  const units = value => fmt(value * DL.grid(drawer).step / DL.UNIT);
+  const fit = DL.workingFit();
+  const title = one.name ? `Current design · ${one.name}` : "Current design";
+  return `<div class="dl-bin dl-working" data-working="1" title="Not generated yet - only shown so you can plan around it">
+    <span class="dl-swatch dl-working-swatch">${fmt(one.z)}</span>
+    <span class="dl-bin-main">
+      <strong>${escapeHtml(title)}</strong>
+      <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units</small>
+      <small class="dl-flags">${fit?.ok ? "Not generated yet" : "Does not fit this Space yet"}</small>
+    </span>
+    <button type="button" class="button secondary dl-small" data-empty-act="design">Edit design</button>
+  </div>`;
+};
+
 DP.renderInventory = (force = false) => {
   const drawer = DL.drawer();
   const list = $("#dl-inv-list");
@@ -855,21 +874,23 @@ DP.renderInventory = (force = false) => {
   $("#dl-inv-count").textContent = `${dlPlural(DL.bins.length, "design")} · ${printed} printed`;
   const selectedBin = DL.selected ? DL.findPlacement(DL.selected)?.placement.bin : null;
   const counts = DL.bins.map(one => [DL.placedCount(one.id), DL.plannedCount(one.id)]);
-  const signature = JSON.stringify([DL.bins, counts, DP.filter, [...DP.open], selectedBin, drawer.id, drawer.height, drawer.bin_axis, drawer.snap]);
+  const signature = JSON.stringify([DL.bins, counts, DP.filter, [...DP.open], selectedBin, drawer.id, drawer.height, drawer.bin_axis, drawer.snap,
+    DL.working ? [DL.working.key, DL.working.error || "", DL.workingFit()] : null]);
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
   const bins = DP.filteredBins();
+  const workingRow = DP.workingRow();
   if (!DL.bins.length) {
-    list.innerHTML = `<div class="dl-empty">${DL.loaded
+    list.innerHTML = workingRow || `<div class="dl-empty">${DL.loaded
       ? `No bins in this Space inventory yet.<br><button type="button" class="button primary dl-small" data-empty-act="design">Design first bin</button><br>Or add one by hand below.`
       : "Loading the inventory…"}</div>`;
     return;
   }
   if (!bins.length) { list.innerHTML = `<div class="dl-empty">No bins match.</div>`; return; }
   const range = DV.heightRange();
-  const kinds = { b4b: "B4B case", manual: "Added by hand" };
+  const kinds = { b4b: "Storage Box", manual: "Added by hand" };
   const kindLabel = one => one.kind === "spacer" ? (one.boundary === "edge" ? "Edge spacer" : "X spacer") : kinds[one.kind];
-  list.innerHTML = bins.map(one => {
+  list.innerHTML = workingRow + bins.map(one => {
     const placed = DL.placedCount(one.id);
     const planned = DL.plannedCount(one.id);
     const [w, d] = DL.cells(one, drawer);

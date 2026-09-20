@@ -788,7 +788,7 @@ def validate_stack_design(box: BoxSpec) -> None:
         return
     if getattr(getattr(box, "b4b", None), "enabled", False):
         raise ValueError(
-            "a Bin for Bins already stacks on its own - turn B4B stacking on "
+            "a Storage Box already stacks on its own - turn Storage Box stacking on "
             "instead"
         )
     # Checked against the request, before the effective box is built: below

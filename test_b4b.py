@@ -398,8 +398,8 @@ class B4BSerializationTests(unittest.TestCase):
 class B4BGenerationTests(unittest.TestCase):
     def test_filename_distinct_from_ordinary_bin(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
-        self.assertNotIn("Box 64", b4b_filename(box))
-        self.assertTrue(b4b_filename(box).startswith("B4B "))
+        self.assertFalse(b4b_filename(box).startswith("Box "))
+        self.assertTrue(b4b_filename(box).startswith("Storage Box "))
 
 
 class B4B3MFHierarchyTests(unittest.TestCase):
@@ -490,10 +490,10 @@ class B4B3MFHierarchyTests(unittest.TestCase):
         ), x=200, y=120, z=80)
         self.assertGreater(len(hierarchy["top"]), 1)
         self.assertEqual(hierarchy["components"], {})
-        self._assert_direct(hierarchy, "B4B Body")
-        self._assert_direct(hierarchy, "B4B Lid")
-        self._assert_direct(hierarchy, "B4B Handle")
-        latches = [name for name in hierarchy["top"] if name.startswith("B4B Latch ")]
+        self._assert_direct(hierarchy, "Storage Box Body")
+        self._assert_direct(hierarchy, "Storage Box Lid")
+        self._assert_direct(hierarchy, "Storage Box Handle")
+        latches = [name for name in hierarchy["top"] if name.startswith("Storage Box Latch ")]
         self.assertTrue(latches)
         for name in latches:
             self._assert_direct(hierarchy, name)
@@ -503,41 +503,41 @@ class B4B3MFHierarchyTests(unittest.TestCase):
             enabled=True, secure_lid=True, label_text="NUTS", label_location="front",
         ))
         self.assertEqual(hierarchy["components"], {
-            "B4B Front Label": [
-                "B4B Front Label Plate", "B4B Front Label Text",
+            "Storage Box Front Label": [
+                "Storage Box Front Label Plate", "Storage Box Front Label Text",
             ],
         })
-        self._assert_direct(hierarchy, "B4B Body")
-        self._assert_direct(hierarchy, "B4B Lid")
+        self._assert_direct(hierarchy, "Storage Box Body")
+        self._assert_direct(hierarchy, "Storage Box Lid")
         for name in hierarchy["top"]:
-            if name.startswith("B4B Latch "):
+            if name.startswith("Storage Box Latch "):
                 self._assert_direct(hierarchy, name)
-        self.assertEqual(hierarchy["filaments"]["B4B Front Label Plate"], 1)
-        self.assertEqual(hierarchy["filaments"]["B4B Front Label Text"], 2)
+        self.assertEqual(hierarchy["filaments"]["Storage Box Front Label Plate"], 1)
+        self.assertEqual(hierarchy["filaments"]["Storage Box Front Label Text"], 2)
 
     def test_top_label_is_registered_with_its_lid_only(self):
         hierarchy = self._export_hierarchy(B4BSpec(
             enabled=True, secure_lid=True, label_text="NUTS", label_location="top",
         ))
         self.assertEqual(hierarchy["components"], {
-            "B4B Lid": ["B4B Lid", "B4B Top Label"],
+            "Storage Box Lid": ["Storage Box Lid", "Storage Box Top Label"],
         })
-        self.assertEqual(hierarchy["top"]["B4B Lid"]["children"], [
-            "B4B Lid", "B4B Top Label",
+        self.assertEqual(hierarchy["top"]["Storage Box Lid"]["children"], [
+            "Storage Box Lid", "Storage Box Top Label",
         ])
-        self._assert_direct(hierarchy, "B4B Body")
+        self._assert_direct(hierarchy, "Storage Box Body")
         for name in hierarchy["top"]:
-            if name.startswith("B4B Latch "):
+            if name.startswith("Storage Box Latch "):
                 self._assert_direct(hierarchy, name)
-        self.assertEqual(hierarchy["filaments"]["B4B Top Label"], 2)
+        self.assertEqual(hierarchy["filaments"]["Storage Box Top Label"], 2)
 
     def test_lid_only_b4b_has_no_unneeded_components_object(self):
         hierarchy = self._export_hierarchy(B4BSpec(
             enabled=True, secure_lid=False, label_location="top",
         ))
         self.assertEqual(hierarchy["components"], {})
-        self._assert_direct(hierarchy, "B4B Body")
-        self._assert_direct(hierarchy, "B4B Lid")
+        self._assert_direct(hierarchy, "Storage Box Body")
+        self._assert_direct(hierarchy, "Storage Box Lid")
 
 
 def _front_label_box(style: str = "flat", text: str = "FRONT", **overrides) -> BoxSpec:
@@ -703,7 +703,7 @@ class B4BFrontLabelPrintPoseTests(unittest.TestCase):
     def _label_parts(self, style: str) -> dict:
         objects = b4b.b4b_build_print_objects(_front_label_box(style))
         parts = dict(next(
-            parts for name, parts in objects if name == "B4B Front Label"
+            parts for name, parts in objects if name == "Storage Box Front Label"
         ))
         return parts
 
@@ -711,8 +711,8 @@ class B4BFrontLabelPrintPoseTests(unittest.TestCase):
         for style in ("flat", "wavy"):
             with self.subTest(style=style):
                 parts = self._label_parts(style)
-                plate = parts["B4B Front Label Plate"]
-                text = parts["B4B Front Label Text"]
+                plate = parts["Storage Box Front Label Plate"]
+                text = parts["Storage Box Front Label Text"]
                 # Flat back on the build plate.
                 self.assertAlmostEqual(float(plate.bounds[0][2]), 0.0, places=6)
                 # Lettering sits above the back, flush with (never past) the

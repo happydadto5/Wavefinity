@@ -170,6 +170,7 @@ from organizer_base_trim import (
     BASE_TRIM_JOIN_LABELS,
     BASE_TRIM_JOIN_TYPES,
     BASE_TRIM_MAX_HEIGHT,
+    BASE_TRIM_MAX_FIELD,
     BASE_TRIM_MAX_WIDTH,
     BASE_TRIM_MIN_HEIGHT,
     BASE_TRIM_MIN_WIDTH,
@@ -898,6 +899,8 @@ def catalog_payload() -> dict[str, Any]:
         },
         "base_trim_rules": {
             "unit_mm": BASE_UNIT,
+            "mating_gap_mm": WAVE_MATING_GAP,
+            "max_field_mm": BASE_TRIM_MAX_FIELD,
             "default_width_mm": BASE_TRIM_DEFAULT_WIDTH,
             "default_height_mm": BASE_TRIM_DEFAULT_HEIGHT,
             "min_width_mm": BASE_TRIM_MIN_WIDTH,
@@ -1434,8 +1437,8 @@ def _interior_work_box(box: BoxSpec) -> BoxSpec:
 
 
 def _reject_if_b4b(payload: dict[str, Any], what: str) -> None:
-    """Guard routes that assume a normal box + interior layout.  A B4B interior
-    is reserved for child bins and B4B v1 does not use the side connector."""
+    """Guard routes that assume a normal box + interior layout.  A Storage Box interior
+    is reserved for child bins and Storage Box v1 does not use the side connector."""
     design = payload.get("design")
     if not isinstance(design, dict):
         return
@@ -1443,7 +1446,7 @@ def _reject_if_b4b(payload: dict[str, Any], what: str) -> None:
     b4b_raw = box_raw.get("b4b") if isinstance(box_raw, dict) else None
     if isinstance(b4b_raw, dict) and b4b_raw.get("enabled"):
         raise ValueError(
-            f"{what} is not available while Bin for Bins is enabled - the B4B "
+            f"{what} is not available while Storage Box is enabled - the Storage Box "
             "interior is reserved for child bins and its lid controls the rim"
         )
 
@@ -1498,7 +1501,7 @@ def _features_from_preview(layout: Layout, scene: dict[str, Any]) -> tuple:
 
 
 def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Preview for a B4B design: body/lid/latch/label meshes plus the
+    """Preview for a Storage Box design: body/lid/latch/label meshes plus the
     authoritative capacity + hardware readout.  Shares the ordinary response
     shape (empty interior-feature fields) so the frontend needs no special
     case to render it."""
@@ -1558,10 +1561,10 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "invalid_feature_indexes": [],
         "draft_error": None,
         "dimensions": {
-            "size": (f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm B4B child field - "
+            "size": (f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm Storage Box child field - "
                      f"case outside {b4b_block['case_outer_mm'][0]:g} x "
                      f"{b4b_block['case_outer_mm'][1]:g} mm"
-                     if b4b_block else f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm B4B"),
+                     if b4b_block else f"{eff.x:g} X {eff.y:g} X {eff.z:g} mm Storage Box"),
             "inside_x": b4b_block["capacity_mm"][0] if b4b_block else None,
             "inside_y": b4b_block["capacity_mm"][1] if b4b_block else None,
         },
@@ -2210,6 +2213,26 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return reply
 
 
+def inventory_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """The planning record Space shows for the design being edited.
+
+    Read-only: the same ``inventory_bin_record`` a generated bin would log, so
+    Space sees the exact same x/y/z/kind/stack/wall envelope, but nothing is
+    written, counted or claimed to exist as a file. Interior parts need not be
+    generation-valid; only the container envelope matters here.
+    """
+    raw_design = payload["design"]
+    if _is_base_trim_design(raw_design):
+        raise ValueError("Base Trim is not a bin, so it has no place to plan in Space.")
+    box, layout, label, part_name, _location, scoop = design_from_dict(
+        raw_design, validate_layout=False,
+    )
+    with GEOMETRY_LOCK:
+        record = inventory_bin_record(box, layout, None, label, part_name, scoop)
+    record["file"] = ""
+    return {"bin": record}
+
+
 def base_trim_joint_test_payload(payload: dict[str, Any]) -> dict[str, Any]:
     raw_design = payload["design"]
     if not _is_base_trim_design(raw_design):
@@ -2571,6 +2594,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
 POST_ROUTES = {
     "/api/preview": preview_payload,
     "/api/design/validate": validate_design_payload,
+    "/api/design/inventory-preview": inventory_preview_payload,
     "/api/feature/default": default_feature_payload,
     "/api/feature/draft": draft_payload,
     "/api/feature/fit": feature_fit_payload,

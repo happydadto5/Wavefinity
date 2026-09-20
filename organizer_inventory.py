@@ -192,7 +192,7 @@ def infer_name(file: str, label: str = "") -> str:
     stem = re.sub(r"\.(3mf|stl)$", "", file.split(",")[0].strip(), flags=re.I)
     size = r"\d+(?:\.\d+)?"
     stem = re.sub(rf"^(Box|Insert)\s+{size}\s*x\s*{size}(\s*x\s*{size})?", "", stem, flags=re.I)
-    stem = re.sub(rf"^B4B\s+{size}x{size}x{size}", "", stem, flags=re.I)
+    stem = re.sub(rf"^(?:Storage Box|B4B)\s+{size}x{size}x{size}", "", stem, flags=re.I)
     stem = re.sub(r"^\s*-\s*", "", stem)
     stem = re.sub(r"\s*\b\d{12}\b\s*$", "", stem)  # the auto timestamp, mmddyyHHMMSS
     return stem.strip()
@@ -272,7 +272,7 @@ def _migrate_drawer_boundaries(layout: dict[str, Any] | None) -> None:
     A Space's ``boundary`` ("wall" or "mating") was added after Box Spaces
     already existed, and organizer_drawer.normalise_drawer defaults an absent
     one to "wall" - a hard-wall clearance floor that silently shrinks an old
-    Box/B4B's exact interior (see organizer_drawer.BOUNDARIES). Migrate only
+    Box/Storage Box's exact interior (see organizer_drawer.BOUNDARIES). Migrate only
     the Space's own primary drawer from ``layout.space.kind``; any other
     drawer in the layout, and any drawer that already carries an explicit
     valid boundary, is left untouched. The mutation is in place, so a save
@@ -382,7 +382,7 @@ def _row(one: dict[str, Any]) -> str:
 
 
 def _compact_json(value: Any, level: int = 0) -> str:
-    """JSON that keeps each placement or keep-out on one line, so the block
+    """JSON that keeps each placement on one line, so the block
     stays short enough to scroll past when the file is opened by hand."""
     flat = json.dumps(value, ensure_ascii=False)
     if not isinstance(value, (dict, list)) or len(flat) + 2 * level <= 110:
@@ -773,7 +773,6 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
     if primary is None:
         primary = {
             "id": "d1",
-            "keepouts": [],
             "placements": [],
         }
         drawers.append(primary)
