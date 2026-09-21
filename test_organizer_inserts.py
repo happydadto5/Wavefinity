@@ -2715,14 +2715,26 @@ class BoreWallOnlyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "style"):
             self._build(bore_style="sideways")
 
+    def test_zone_equal_to_minimum_footprint_builds_within_it(self) -> None:
+        for wall_style in ("straight", "wavy"):
+            for profile in self.PROFILES:
+                probe = Feature("bore", self.ZONE, self._item(profile), options={
+                    "bore_style": "wall_only", "wall_style": wall_style, "wall": 1.6})
+                width, depth = inserts.feature_min_footprint(BIN, probe, BIN.base_thickness)
+                zone = Zone(-width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0)
+                mesh = self._build(self._item(profile), zone=zone, wall_style=wall_style)
+                extent = mesh.bounds[1] - mesh.bounds[0]
+                self.assertLessEqual(extent[0], width + 1e-5, (profile, wall_style))
+                self.assertLessEqual(extent[1], depth + 1e-5, (profile, wall_style))
+
     def test_minimum_footprint_and_auto_grid_use_the_true_outer_shell(self) -> None:
         for wall_style in ("straight", "wavy"):
             one = Feature("bore", self.ZONE, self._item(), options={
                 "bore_style": "wall_only", "wall_style": wall_style, "wall": 1.6})
             width, depth = inserts.feature_min_footprint(BIN, one, BIN.base_thickness)
             reach = 1.6 if wall_style == "straight" else 2.0 * WAVE_AMPLITUDE + wall_depth_for(1.6)
-            self.assertAlmostEqual(width, 30.0 + 2.0 * reach, places=6)
-            self.assertAlmostEqual(depth, 30.0 + 2.0 * reach, places=6)
+            self.assertAlmostEqual(width, 30.0 + 2.0 * reach, delta=0.01)
+            self.assertAlmostEqual(depth, 30.0 + 2.0 * reach, delta=0.01)
         # Two sleeves need 31.6 more; a zone a hair short of that fits only one.
         env = wall_only_envelope("round", 30.0, 1.6, "wavy")
         two = env["span_x"] + env["pitch_x"]

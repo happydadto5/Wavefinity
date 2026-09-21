@@ -51,8 +51,9 @@ def bore_direction(spec_feature: Feature) -> tuple[str, float]:
 
 BORE_STYLES = ("full_base", "wall_only")
 WALL_STYLES = ("wavy", "straight")
+WAVE_NOISE_FLOOR = 1e-4       # trough sits a hair outside the clear opening, so
+                              # float noise cannot fold the outline back on itself
 WAVE_SAMPLES_PER_CYCLE = 32   # keeps a wavy sleeve smooth in the STL and preview
-WALL_ONLY_FIT_TOLERANCE = 2e-3  # round clear openings are circumscribed polygons
 
 
 def _is_hex_bit(profile: str) -> bool:
@@ -93,13 +94,28 @@ def _wall_only_shell_reach(wall: float, wall_style: str) -> float:
     clear profile; the outer face adds Wavefinity's wall depth on top.
     """
     if wall_style == "wavy":
-        return 2.0 * WAVE_AMPLITUDE + wall_depth_for(wall)
+        return 2.0 * WAVE_AMPLITUDE + wall_depth_for(wall) + WAVE_NOISE_FLOOR
     return wall
 
 
-def _clear_spans(profile: str, held: float) -> tuple[float, float]:
-    """X/Y span of one upright clear opening (matches the cut geometry)."""
-    if profile == "round" or _axis_square(profile):
+def _round_clear_sides(held: float, wall_style: str) -> int:
+    """Sides of the polygon that stands in for a round clear opening."""
+    if wall_style == "wavy":
+        cycles = max(1, round(math.pi * held / WAVE_LENGTH))
+        return max(256, WAVE_SAMPLES_PER_CYCLE * cycles)
+    return 256
+
+
+def _clear_spans(profile: str, held: float, wall_style: str) -> tuple[float, float]:
+    """X/Y span of one upright clear opening - exactly what the builder cuts.
+
+    A round opening is a polygon circumscribing the requested circle, so its
+    span is a hair over ``held``.
+    """
+    if profile == "round":
+        span = held / math.cos(math.pi / _round_clear_sides(held, wall_style))
+        return span, span
+    if _axis_square(profile):
         return held, held
     sides = _hole_sides(profile)
     radius = held / 2.0 / math.cos(math.pi / sides)
@@ -117,7 +133,7 @@ def wall_only_envelope(
     the physical one-hole span is the clear span plus the shell on both sides.
     """
     pitch_x, pitch_y = bore_minimum_pitches(profile, held, wall, 0.0, "x")
-    clear_x, clear_y = _clear_spans(profile, held)
+    clear_x, clear_y = _clear_spans(profile, held, wall_style)
     reach = _wall_only_shell_reach(wall, wall_style)
     return {
         "pitch_x": pitch_x, "pitch_y": pitch_y,
@@ -133,8 +149,7 @@ def _clear_profile_points(profile: str, held: float, wall_style: str) -> list[tu
     opening is never smaller than requested.
     """
     if profile == "round":
-        cycles = max(1, round(math.pi * held / WAVE_LENGTH))
-        sides = max(256, WAVE_SAMPLES_PER_CYCLE * cycles) if wall_style == "wavy" else 256
+        sides = _round_clear_sides(held, wall_style)
         radius = held / 2.0 / math.cos(math.pi / sides)
         return [
             (radius * math.cos(2.0 * math.pi * i / sides),
@@ -177,7 +192,7 @@ def _wavy_outline(
         for k in range(pieces + 1):
             t = k / pieces
             s = travelled + t * length
-            push = (thickness
+            push = (thickness + WAVE_NOISE_FLOOR
                     + WAVE_AMPLITUDE * (1.0 + math.sin(2.0 * math.pi * cycles * s / perimeter)))
             points.append((a[0] + (b[0] - a[0]) * t + nx * push,
                            a[1] + (b[1] - a[1]) * t + ny * push))
@@ -354,8 +369,7 @@ def _wall_only_grid(
         raise ValueError(f"no room for {item.name}: zone is too small for a bore")
     needed_x = env["span_x"] + (columns - 1) * env["pitch_x"]
     needed_y = env["span_y"] + (rows - 1) * env["pitch_y"]
-    if (needed_x > zone.width + WALL_ONLY_FIT_TOLERANCE
-            or needed_y > zone.depth + WALL_ONLY_FIT_TOLERANCE):
+    if needed_x > zone.width + 1e-9 or needed_y > zone.depth + 1e-9:
         raise ValueError(
             f"{columns} x {rows} bores need {needed_x:.1f} x {needed_y:.1f} mm "
             f"but the zone gives {zone.width:.1f} x {zone.depth:.1f} mm"

@@ -332,6 +332,22 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(plain["resolved_options"]["wall"], 1.6)
         self.assertEqual(plain["resolved_options"]["wall_style"], "wavy")
 
+    def test_wall_only_bore_default_wall_comes_from_the_bin_wall(self):
+        design = default_design()
+        design["box"].update({"wall": 2.4, "standard_walls": False, "x": 64.0, "y": 64.0})
+        item = {"name": "tube", "profile": "round",
+                "segments": [{"length": 40, "diameter": 6}], "clearance": 0.25}
+        full = default_feature_payload({"design": design, "kind": "bore", "item": item})
+        self.assertEqual(full["resolved_options"]["wall"], 1.6)
+        feature = full["feature"]
+        feature["options"] = {**feature.get("options", {}), "bore_style": "wall_only"}
+        feature["options"].pop("wall", None)
+        feature["zone"] = [-20.0, -20.0, 20.0, 20.0]
+        design["layout"]["features"] = [feature]
+        result = draft_payload({"design": design, "feature": feature})
+        self.assertEqual(result["resolved_options"]["bore_style"], "wall_only")
+        self.assertEqual(result["resolved_options"]["wall"], design["box"]["wall"])
+
     def test_bore_editor_source_handles_wall_only_as_strings_and_upright(self):
         app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
         for text in ("Full Base", "Wall Only", "Wavy Walls", "Straight Walls",
