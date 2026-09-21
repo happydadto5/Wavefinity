@@ -502,7 +502,7 @@ def _pegboard_report(drawer: dict[str, Any], bins: list[dict[str, Any]]) -> dict
     by_id = {one["id"]: one for one in bins}
     problems: list[dict[str, Any]] = []
     rectangles: list[dict[str, Any]] = []
-    occupied_mounts: dict[tuple[int, int], str] = {}
+    occupied_mounts: dict[tuple[float, int], str] = {}
     mounts: list[dict[str, Any]] = []
     used_cells: set[tuple[int, int]] = set()
     planned: dict[str, int] = {}
@@ -565,8 +565,8 @@ def _pegboard_report(drawer: dict[str, Any], bins: list[dict[str, Any]]) -> dict
                 problems.append({"type": "mount", "keys": [key], "message": f"{_label(one)} cannot reach enough valid board openings there"})
                 continue
             other_key = occupied_mounts.get(mount)
-            if other_key and other_key != key:
-                problems.append({"type": "mount_overlap", "keys": [other_key, key], "message": "Two bins use the same pegboard opening"})
+            if other_key is not None:
+                problems.append({"type": "mount_overlap", "keys": [other_key, key], "message": "Two adapters use the same pegboard opening"})
             occupied_mounts[mount] = key
             mounts.append({"gx": mount[0], "gy": mount[1], "key": key})
         if int(placement.get("copy", 0)) >= int(one.get("qty", 0)):

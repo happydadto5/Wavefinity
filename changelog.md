@@ -6,6 +6,7 @@
 - Board size can be entered physically or by hole/slot count, with the usable grid and residual border shown before creation.
 - Ordinary bins gain a standard-neutral rear receiver with automatic or manual cleat counts; generation creates the matching board adapters as a separate 3MF.
 - Space shows the board openings, snaps bins to mount positions, and rejects footprint, edge, standard, and exact mount conflicts.
+- Corrected the adapter to a one-piece sloped cleat printed pegs-up, added 45° receiver starts, kept paired standard holes disjoint, and covered outer rear-support gaps.
 
 ## 2026-09-20 — Edge Mount separate labels
 

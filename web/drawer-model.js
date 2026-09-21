@@ -379,7 +379,9 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
       for (const [mx, my] of other?.mount_offsets || []) occupied.add(`${item.gx + mx},${item.gy + my}`);
     }
     for (const [mx, my] of layout.mount_offsets || []) {
-      if (occupied.has(`${gx + mx},${gy + my}`)) return { ok: false, reason: "That mounting position is already in use." };
+      const hole = `${gx + mx},${gy + my}`;
+      if (occupied.has(hole)) return { ok: false, reason: "That mounting position is already in use." };
+      occupied.add(hole);
     }
   }
   for (const item of DL.items(drawer)) {

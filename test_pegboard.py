@@ -3,6 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import numpy as np
 
 from organizer_app import Layout, design_from_dict, design_to_dict, generate_organizer_files
 from organizer_drawer import drawer_report
@@ -10,9 +13,14 @@ from organizer_engine import BoxSpec
 from organizer_inventory import configure_space, load_inventory
 from organizer_pegboard import (
     PegboardMountSpec,
+    PEGBOARD_PROJECTION,
+    _adapter_body_profile,
+    _receiver_guide_profile,
+    adapter_print_transform,
     apply_pegboard_mount_structure,
     make_board_adapter,
     make_board_adapters,
+    pegboard_catalog,
     pegboard_layout_for_bin,
     receiver_layout,
     resolve_pegboard_size,
@@ -58,7 +66,7 @@ class PegboardSizeTests(unittest.TestCase):
 
 class PegboardMountTests(unittest.TestCase):
     def test_design_round_trip_keeps_mount_choices(self) -> None:
-        box = BoxSpec(160, 64, 80, pegboard=PegboardMountSpec(True, "standard", 3, 2))
+        box = BoxSpec(160, 64, 112, pegboard=PegboardMountSpec(True, "standard", 3, 2))
         saved = design_to_dict(box, Layout())
         loaded, *_ = design_from_dict(saved)
         self.assertEqual(loaded.pegboard, box.pegboard)
@@ -71,7 +79,7 @@ class PegboardMountTests(unittest.TestCase):
             design_from_dict(data)
 
     def test_manual_counts_are_grid_aligned_and_side_biased(self) -> None:
-        layout = receiver_layout(160, 80, PegboardMountSpec(True, "standard", 3, 2))
+        layout = receiver_layout(160, 112, PegboardMountSpec(True, "standard", 3, 2))
         xs = sorted({one["x"] for one in layout["receivers"]})
         self.assertEqual(xs, [-67.3, -16.5, 59.7])
         self.assertEqual(layout["resolved_y"], 2)
@@ -84,39 +92,98 @@ class PegboardMountTests(unittest.TestCase):
             receiver_layout(80, 20, PegboardMountSpec(True, "standard", 1, 2))
         with self.assertRaisesRegex(ValueError, "does not fit"):
             receiver_layout(48, 40, PegboardMountSpec(True, "standard", 1, 1))
+        with self.assertRaisesRegex(ValueError, "does not fit"):
+            receiver_layout(48, 96, PegboardMountSpec(True, "standard", 1, 2))
         self.assertLessEqual(
-            receiver_layout(48, 44, PegboardMountSpec(True, "standard", 1, 1))["minimum_height_mm"], 44,
+            receiver_layout(48, 48, PegboardMountSpec(True, "standard", 1, 1))["minimum_height_mm"], 48,
         )
-        self.assertEqual(receiver_layout(48, 65, PegboardMountSpec(True, "standard"))["resolved_y"], 1)
+        self.assertEqual(receiver_layout(48, 96, PegboardMountSpec(True, "standard"))["resolved_y"], 1)
+        self.assertEqual(receiver_layout(80, 40, PegboardMountSpec(True, "skadis"))["resolved_x"], 1)
 
     def test_standard_adapter_stays_hidden_at_minimum_height(self) -> None:
-        height = 44
+        height = 48
         receiver = receiver_layout(48, height, PegboardMountSpec(True, "standard", 1, 1))["receivers"][0]
         adapter = make_board_adapter("standard")
-        placed_z = adapter.bounds[:, 2] + receiver["z"] - 17.0
+        placed_z = adapter.bounds[:, 2] + receiver["z"] - 42.4
         self.assertGreaterEqual(float(placed_z[0]), 0)
         self.assertLessEqual(float(placed_z[1]), height)
 
-    def test_ribs_only_bridge_large_unsupported_gaps(self) -> None:
-        narrow = receiver_layout(64, 48, PegboardMountSpec(True, "standard", 2, 1))
-        wide = receiver_layout(160, 48, PegboardMountSpec(True, "standard", 2, 1))
-        self.assertEqual(narrow["ribs"], [])
-        self.assertTrue(wide["ribs"])
+    def test_ribs_cover_outer_and_inner_spans_only_when_needed(self) -> None:
+        narrow_single = receiver_layout(48, 48, PegboardMountSpec(True, "standard", 1, 1))
+        wide_single = receiver_layout(160, 48, PegboardMountSpec(True, "standard", 1, 1))
+        multi = receiver_layout(80, 48, PegboardMountSpec(True, "standard", 2, 1))
+        self.assertEqual(narrow_single["ribs"], [])
+        self.assertGreaterEqual(len(wide_single["ribs"]), 2)
+        self.assertEqual(multi["ribs"], [])
+        self.assertTrue(all(abs(x) < 160 / 2 - 2 for x in wide_single["ribs"]))
+        self.assertEqual(wide_single["contact_plane_y"], PEGBOARD_PROJECTION)
+        contact_edges = sorted(
+            [(-160 / 2 + 3, -160 / 2 + 3), (160 / 2 - 3, 160 / 2 - 3)]
+            + [(one["x"] - 7, one["x"] + 7) for one in wide_single["receivers"]]
+            + [(x - 1, x + 1) for x in wide_single["ribs"]]
+        )
+        self.assertTrue(all(right[0] - left[1] <= 40 for left, right in zip(contact_edges, contact_edges[1:])))
+
+    def test_body_itself_is_sloped_cleat_and_receiver_starts_at_45_degrees(self) -> None:
+        for standard, center in (("standard", 42.4), ("skadis", 8.0)):
+            profile = _adapter_body_profile(center)
+            self.assertEqual(profile[0][0], 0)
+            self.assertEqual(profile[1][0], PEGBOARD_PROJECTION)
+            self.assertAlmostEqual(profile[3][1] - profile[2][1], PEGBOARD_PROJECTION)
+            self.assertAlmostEqual(float(make_board_adapter(standard).bounds[1][1]), PEGBOARD_PROJECTION)
+        guide = _receiver_guide_profile(20.0, 38.1)
+        self.assertAlmostEqual(guide[1][1] - guide[0][1], guide[1][0] - guide[0][0])
+        self.assertEqual(guide[2][1], guide[3][1])
+
+    def test_print_transform_points_board_pegs_up(self) -> None:
+        direction = adapter_print_transform() @ np.array([0.0, -1.0, 0.0, 0.0])
+        np.testing.assert_allclose(direction[:3], [0.0, 0.0, 1.0], atol=1e-9)
+        for standard in ("standard", "skadis"):
+            box = BoxSpec(64, 64, 112, pegboard=PegboardMountSpec(True, standard, 1, 1))
+            adapter = make_board_adapters(box)[0][1]
+            self.assertAlmostEqual(float(adapter.bounds[0][2]), 0)
+            self.assertGreater(float(adapter.bounds[1][2]), PEGBOARD_PROJECTION + 2)
+
+    def test_standard_multirow_pairs_are_disjoint_and_bodies_separate(self) -> None:
+        catalog = {one["id"]: one for one in pegboard_catalog()["standards"]}
+        self.assertEqual(catalog["standard"]["minimum_heights_mm"], [47.1, 97.9, 148.7])
+        self.assertEqual(catalog["skadis"]["minimum_widths_mm"][0], 49.0)
+        for count, height in ((2, 112), (3, 160)):
+            layout = pegboard_layout_for_bin({
+                "x": 48, "z": height, "pegboard_standard": "standard",
+                "cleat_x": 1, "cleat_y": count,
+            }, "standard")
+            offsets = layout["mount_offsets"]
+            self.assertEqual(len(offsets), 2 * count)
+            self.assertEqual(len({tuple(pair) for pair in offsets}), len(offsets))
+            self.assertEqual(sorted({int(pair[1]) for pair in offsets}), list(range(2 * count)))
+            adapter = make_board_adapter("standard")
+            bounds = [adapter.bounds[:, 2] + row["z"] - 42.4 for row in layout["receivers"]]
+            self.assertTrue(all(left[1] < right[0] for left, right in zip(bounds, bounds[1:])))
 
     def test_receiver_and_both_adapter_families_are_printable_meshes(self) -> None:
         for standard in ("standard", "skadis"):
-            box = BoxSpec(96, 64, 80, pegboard=PegboardMountSpec(True, standard, 2, 2))
+            box = BoxSpec(96, 64, 112, pegboard=PegboardMountSpec(True, standard, 2, 2))
             body = __import__("trimesh").creation.box((box.x, box.y, box.z))
+            body.apply_translation((0, 0, box.z / 2))
             mounted = apply_pegboard_mount_structure(box, body)
             self.assertGreater(mounted.volume, body.volume)
+            self.assertTrue(mounted.is_watertight)
             # The rear support must not grow beyond the side mating envelope.
             self.assertAlmostEqual(float(mounted.bounds[0][0]), float(body.bounds[0][0]))
             self.assertAlmostEqual(float(mounted.bounds[1][0]), float(body.bounds[1][0]))
+            self.assertAlmostEqual(float(mounted.bounds[1][1]), box.y / 2 + PEGBOARD_PROJECTION)
             adapters = make_board_adapters(box)
             self.assertEqual(len(adapters), 4)
             self.assertTrue(all(mesh.is_watertight for _, mesh in adapters))
             self.assertEqual(len({round(float(mesh.centroid[0]), 3) for _, mesh in adapters}), 4)
-            self.assertLess(float(adapters[0][1].bounds[1][0]), float(adapters[1][1].bounds[0][0]))
+            for index, (_, left) in enumerate(adapters):
+                for _, right in adapters[index + 1:]:
+                    self.assertTrue(any(
+                        left.bounds[1][axis] < right.bounds[0][axis]
+                        or right.bounds[1][axis] < left.bounds[0][axis]
+                        for axis in (0, 1)
+                    ))
 
     def test_generation_writes_bin_and_separate_adapter_plate(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -174,6 +241,14 @@ class PegboardPlacementTests(unittest.TestCase):
             {"gx": 2, "gy": 3, "key": "B1:0"},
             {"gx": 2, "gy": 4, "key": "B1:0"},
         ])
+
+    def test_same_bin_cannot_use_one_hole_twice(self) -> None:
+        self.drawer["placements"] = [{"bin": "B1", "copy": 0, "gx": 2, "gy": 3}]
+        duplicate = {**pegboard_layout_for_bin(self.bin, "standard"),
+                     "mount_offsets": [[0.0, 0], [0.0, 0]]}
+        with patch("organizer_drawer.pegboard_layout_for_bin", return_value=duplicate):
+            report = drawer_report(self.drawer, [self.bin])
+        self.assertIn("mount_overlap", {problem["type"] for problem in report["problems"]})
 
 
 class PegboardBrowserContractTests(unittest.TestCase):

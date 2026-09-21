@@ -508,9 +508,10 @@ Y (Auto or 1–3) control the receiver grid. Multi-cleat receivers stay
 grid-aligned and side-biased, impossible counts are disabled or rejected, and
 vertical ribs appear only across unsupported spans over 40 mm. Pegboard bins
 do not use drawer stacking, Auto layout, spacers, or Base Trim.
-Standard-pegboard bins need at least 44 mm height for the paired-hole adapter
-to stay hidden behind them. Adapters are exported sideways on a separate
-print plate; check physical fit on your actual board before a full print.
+Standard-pegboard bins need at least 48 mm height for the paired-hole adapter
+to stay hidden behind them. Adapters are exported flat on a separate
+print plate with board pegs pointing up; check physical fit on your actual
+board before a full print.
 
 Creating a new Drawer Space lands directly in the normal Bin editor with every
 ordinary option (Interior print mode, Base, Walls, Inside Grip) still
