@@ -277,7 +277,12 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     except (TypeError, ValueError):
         depth = hole
     reach = max(0.0, depth) * math.sin(math.radians(angle)) if tilted else 0.0
-    resolved_height = box.z - base_z if auto_height else one.options.get("depth", hole) + 2.0
+    if auto_height:
+        resolved_height = box.z - base_z
+    elif wall_only:
+        resolved_height = hole + 2.0
+    else:
+        resolved_height = one.options.get("depth", hole) + 2.0
     resolved_grid: dict[str, float] = {}
     if one.options.get("auto_grid"):
         # Auto Grid fills the current Base: the most holes that fit on each

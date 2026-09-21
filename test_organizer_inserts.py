@@ -2715,6 +2715,21 @@ class BoreWallOnlyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "style"):
             self._build(bore_style="sideways")
 
+    def test_wall_only_default_height_ignores_stale_depth(self) -> None:
+        item = self._item()
+        # Wall Only with no explicit Height and no stored Depth gets default from item.
+        one = Feature("bore", self.ZONE, item, options={"bore_style": "wall_only"})
+        no_depth = inserts.resolved_options(BIN, one, BIN.base_thickness)["height"]
+        # Now add stale Full Base Depth; Wall Only should ignore it.
+        with_stale_depth = Feature("bore", self.ZONE, item, options={
+            "bore_style": "wall_only", "depth": 500.0})
+        same = inserts.resolved_options(BIN, with_stale_depth, BIN.base_thickness)["height"]
+        self.assertEqual(no_depth, same)
+        # Explicit Height still wins.
+        explicit = Feature("bore", self.ZONE, item, options={
+            "bore_style": "wall_only", "height": 15.0, "depth": 500.0})
+        self.assertEqual(inserts.resolved_options(BIN, explicit, BIN.base_thickness)["height"], 15.0)
+
     def test_zone_equal_to_minimum_footprint_builds_within_it(self) -> None:
         for wall_style in ("straight", "wavy"):
             for profile in self.PROFILES:

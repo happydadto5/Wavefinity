@@ -5912,10 +5912,16 @@ function sizeBoreToGrid(one) {
   const wallRules = state.catalog?.wall_rules || {};
   const amplitude = number(wallRules.wave_amplitude_mm ?? state.catalog?.wave_amplitude_mm, 0.4);
   const depthFactor = number(wallRules.wall_depth_factor ?? state.catalog?.wall_depth_factor, 1.181);
+  const waveNoiseFloor = 1e-4;  // ensure wavy troughs never self-intersect
   const wavy = (opts.wall_style ?? resolved.wall_style ?? "wavy") !== "straight";
-  const shellReach = wavy ? 2 * amplitude + wall * depthFactor : wall;
+  const shellReach = wavy ? 2 * amplitude + wall * depthFactor + waveNoiseFloor : wall;
   const clearSpan = (axis) => {
-    if (profile === "round" || profile === "square_axis") return held;
+    if (profile === "round") {
+      // Conservative round clear span: a 256-sided circumscribed polygon.
+      // Backend uses >= 256 sides for all Wavy sampling, so this is safe.
+      return held / Math.cos(Math.PI / 256);
+    }
+    if (profile === "square_axis") return held;
     const sides = profile === "square" ? 4 : 6;
     const circum = held / Math.cos(Math.PI / sides);   // corner-to-corner
     return sides === 4 || axis === "x" ? circum : held;
