@@ -4040,7 +4040,7 @@ function field(label, key, value, options = {}) {
 // The Divider's own wall thickness is a real numeric option (no "standard"
 // sentinel like the bin wall), but it draws from the same preset catalog so
 // the two controls can never drift apart.
-function dividerThicknessField(value) {
+function dividerThicknessField(value, key = "option:thickness") {
   const choices = wallPresetChoices();
   const current = fmt(number(value, 1.6));
   const isPreset = choices.some(choice => fmt(choice.value) === current);
@@ -4053,7 +4053,7 @@ function dividerThicknessField(value) {
   const customOption = isPreset ? ""
     : `<option value="${current}" selected>${current} mm — Existing custom</option>`;
   return `<label><span class="field-label">Wall thickness</span>
-    <select data-draft="option:thickness">${optionsHtml}${customOption}</select>
+    <select data-draft="${key}">${optionsHtml}${customOption}</select>
   </label>`;
 }
 
@@ -4466,11 +4466,23 @@ function renderDraftFields() {
         ["hex_bit_short", HEX_BIT_PROFILES.hex_bit_short.label],
         ["hex_bit_long", HEX_BIT_PROFILES.hex_bit_long.label],
       ];
+      // Full Base is the solid block the holes are cut into; Wall Only builds
+      // just the perimeter sleeve(s) rising from the base. Absent = Full Base.
+      const boreStyle = one.options?.bore_style ?? state.draftResolvedOptions?.bore_style ?? "full_base";
+      const wallOnly = boreStyle === "wall_only";
+      const wallStyle = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style ?? "wavy";
+      const styleField = `<label><span class="field-label">Style</span><select data-draft="option:bore_style">
+        ${[["full_base", "Full Base"], ["wall_only", "Wall Only"]].map(([value, label]) => `<option value="${value}" ${boreStyle === value ? "selected" : ""}>${label}</option>`).join("")}
+      </select></label>`;
+      const wallStyleField = wallOnly ? `<label><span class="field-label">Walls</span><select data-draft="option:wall_style">
+        ${[["wavy", "Wavy Walls"], ["straight", "Straight Walls"]].map(([value, label]) => `<option value="${value}" ${wallStyle === value ? "selected" : ""}>${label}</option>`).join("")}
+      </select></label>` : "";
+      const boreWallShown = one.options?.wall ?? state.draftResolvedOptions?.wall ?? state.design?.box?.wall;
       const shapeField = `<label><span class="field-label">Shape</span><select data-draft="profile">
         ${boreProfiles.map(([value, label]) => `<option value="${value}" ${draftProfile === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>`;
 
-      // Base: the solid block the holes are cut into - its size and the hole
+      // Base: the zone the Bore occupies (solid block for Full Base) - its size and the hole
       // grid that fills it (X / Y counts drive the same footprint as Width /
       // Length, so they belong together).
       html += `<div class="bore-group wide">
@@ -4502,12 +4514,14 @@ function renderDraftFields() {
       html += `<div class="bore-group wide">
         <span class="bore-group-label">Hole</span>
         <div class="bore-group-fields bore-hole-fields">
+          ${styleField}
+          ${wallStyleField}
           ${diameterField}
           ${shapeField}
-          ${optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
-          ${optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
-          ${hexBit ? "" : optionField("angle", "Tool angle", { unit: "°", step: "1", min: "20", max: "90", transform: value => 90 - number(value, 0), tip: "90° is upright. Smaller angles lean the tool toward the selected direction." })}
-          ${hexBit || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Angle towards</span><select data-draft="option:angle_towards">
+          ${wallOnly ? "" : optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
+          ${wallOnly ? dividerThicknessField(boreWallShown, "option:wall") : optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
+          ${hexBit || wallOnly ? "" : optionField("angle", "Tool angle", { unit: "°", step: "1", min: "20", max: "90", transform: value => 90 - number(value, 0), tip: "90° is upright. Smaller angles lean the tool toward the selected direction." })}
+          ${hexBit || wallOnly || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Angle towards</span><select data-draft="option:angle_towards">
             ${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]].map(([value, label]) => `<option value="${value}" ${(one.options?.angle_towards || (one.along === "y" ? "front" : "left")) === value ? "selected" : ""}>${label}</option>`).join("")}
           </select></label>`}
         </div>
@@ -5848,10 +5862,14 @@ function sizeBoreToGrid(one) {
     ? HEX_BIT_PROFILES[profile].diameter
     : number(one.item?.segments?.[0]?.diameter, 6);
   const held = diameter + 0.25;
-  const angle = hexBit ? 0 : Math.min(70, Math.max(0, number(opts.angle ?? resolved.angle, 0)));
+  const wallOnly = (opts.bore_style ?? resolved.bore_style ?? "full_base") === "wall_only";
+  const angle = hexBit || wallOnly ? 0 : Math.min(70, Math.max(0, number(opts.angle ?? resolved.angle, 0)));
   // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
   // Wall was hand-set - match that so the block sizing tracks the real pitch.
-  const wall = opts.wall !== undefined ? number(opts.wall) : (angle > 0 ? 3 : 1.6);
+  // Wall Only takes the current bin wall instead (engine: bore_defaults).
+  const wall = opts.wall !== undefined ? number(opts.wall)
+    : wallOnly ? number(state.design?.box?.wall, 0.8)
+    : (angle > 0 ? 3 : 1.6);
   const crossPitch = boreCrossPitch(profile, held, wall);
   const leanPitch = crossPitch / Math.cos(angle * Math.PI / 180);
   if (!(crossPitch > 0) || !(leanPitch > 0)) return;
@@ -5882,7 +5900,23 @@ function sizeBoreToGrid(one) {
   const curW = one.zone[2] - one.zone[0];
   const curD = one.zone[3] - one.zone[1];
   const [insideX, insideY] = binInsideExtent(state.design.box);
+  // Wall Only mirrors wall_only_envelope() in organizer_inserts/_bore.py: the
+  // footprint is the sleeves' true outer envelope, wave included.
+  const wallRules = state.catalog?.wall_rules || {};
+  const amplitude = number(wallRules.wave_amplitude_mm ?? state.catalog?.wave_amplitude_mm, 0.4);
+  const depthFactor = number(wallRules.wall_depth_factor ?? state.catalog?.wall_depth_factor, 1.181);
+  const wavy = (opts.wall_style ?? resolved.wall_style ?? "wavy") !== "straight";
+  const shellReach = wavy ? 2 * amplitude + wall * depthFactor : wall;
+  const clearSpan = (axis) => {
+    if (profile === "round" || profile === "square_axis") return held;
+    const sides = profile === "square" ? 4 : 6;
+    const circum = held / Math.cos(Math.PI / sides);   // corner-to-corner
+    return sides === 4 || axis === "x" ? circum : held;
+  };
   const axisSpan = (count, axis) => {
+    if (wallOnly) {
+      return Math.ceil(clearSpan(axis) + 2 * shellReach + (count - 1) * crossPitch - 1e-6);
+    }
     const pitch = along === axis ? leanPitch : crossPitch;
     return Math.ceil(count * pitch + (along === axis ? reach : 0) - 1e-6);
   };
@@ -6215,6 +6249,18 @@ function updateDraftFromFields(event) {
     const toward = get("option:angle_towards");
     if (toward !== undefined) one.options.angle_towards = toward;
     else delete one.options.angle_towards;
+    // Style choices are words, never numbers.
+    if (changed === "option:bore_style") {
+      one.options.bore_style = get(changed) === "wall_only" ? "wall_only" : "full_base";
+      // A Wall Only sleeve stands upright.
+      if (one.options.bore_style === "wall_only") {
+        one.options.angle = 0;
+        delete one.options.angle_towards;
+      }
+    }
+    if (changed === "option:wall_style") {
+      one.options.wall_style = get(changed) === "straight" ? "straight" : "wavy";
+    }
   }
   if (one.kind === "nest") {
     if (changed === "nest-count") one.count = Math.max(1, Math.min(20, Math.round(number(get("nest-count"), 1))));
@@ -6331,7 +6377,7 @@ function updateDraftFromFields(event) {
         "slope_base", "bottom_mode", "slope_construction", "label_divisions", "division_level", "division_side", "division_labels",
         "level", "rim_side",
         "lift_assist", "finger_position", "push_position", "angle_towards",
-        "holder_style", "auto_size", "repeat_spacing_percent"]
+        "bore_style", "wall_style", "holder_style", "auto_size", "repeat_spacing_percent"]
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
     const option = info.fields.find(entry => entry.key === key);
@@ -6436,8 +6482,12 @@ function updateDraftFromFields(event) {
     changed === "option:depth" || changed === "option:wall" ||
     changed === "option:angle" || changed === "item_diameter" ||
     changed === "clearance" || changed === "profile" || changed === "along" ||
-    changed === "option:angle_towards"
+    changed === "option:angle_towards" ||
+    changed === "option:bore_style" || changed === "option:wall_style"
   )) sizeBoreToGrid(one);
+  if (one.kind === "bore" && (changed === "option:bore_style" || changed === "option:wall_style")) {
+    renderDraftFields();
+  }
   // The peg row and the slot bank track their own contents the same way the
   // bore base tracks its grid: change the count, peg size, gap, slot pitch or
   // lean and the zone re-fits (grow or shrink) on the driven axis.
@@ -6533,7 +6583,8 @@ async function refreshDraft() {
       // retype briefly drops the key from options, and stomping the auto value
       // back in mid-edit is exactly what makes a 16->20 change snap back to 16.
       if (input && input === document.activeElement) continue;
-      if (input && Object.prototype.hasOwnProperty.call(state.draftResolvedOptions, option.key)) {
+      if (input && option.type !== "enum"
+          && Object.prototype.hasOwnProperty.call(state.draftResolvedOptions, option.key)) {
         const value = state.draftResolvedOptions[option.key];
         const next = fmt(info.kind === "bore" && option.key === "angle" ? 90 - number(value, 0) : value);
         if (input.value !== next) {

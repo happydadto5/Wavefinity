@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from pathlib import Path
 import json
 import subprocess
@@ -19,14 +20,16 @@ from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
     LOCK_PROTRUSION,
+    WAVE_AMPLITUDE,
     intersection_volume,
     make_box,
     top_label_surface_z,
     translated,
+    wall_depth_for,
     wavy_cavity_polygon,
 )
 import organizer_inserts as inserts
-from organizer_inserts._bore import _bore_grid, bore_minimum_pitches
+from organizer_inserts._bore import _bore_grid, bore_minimum_pitches, wall_only_envelope
 from organizer_inserts import (
     EDITOR_SNAP,
     Feature,
@@ -2622,6 +2625,116 @@ class LayoutModelTests(unittest.TestCase):
             self.assertTrue(mesh.is_watertight)
             self.assertAlmostEqual(mesh.bounds[0][2], 0.0)
             self.assertAlmostEqual(mesh.bounds[1][2], inserts.BASE_PLATE)
+
+
+class BoreWallOnlyTests(unittest.TestCase):
+    ZONE = Zone(-40.0, -30.0, 40.0, 30.0)
+    PROFILES = ("round", "hex", "square", "square_axis", "hex_bit_short", "hex_bit_long")
+
+    def _item(self, profile="round"):
+        return Item("tube", (Segment(25.0, 30.0),), profile=profile, clearance=0.0)
+
+    def _build(self, item=None, zone=None, **options):
+        options = {"bore_style": "wall_only", "height": 10.0, "wall": 1.6, **options}
+        one = Feature("bore", zone or self.ZONE, item or self._item(), options=options)
+        return build_features(BIN, [one], BIN.base_thickness)[0]
+
+    def test_missing_style_is_full_base_and_matches_explicit(self) -> None:
+        item = self._item()
+        legacy = build_features(BIN, [Feature("bore", self.ZONE, item)], BIN.base_thickness)[0]
+        explicit = build_features(
+            BIN, [Feature("bore", self.ZONE, item, options={"bore_style": "full_base"})],
+            BIN.base_thickness)[0]
+        np.testing.assert_allclose(legacy.bounds, explicit.bounds)
+        self.assertAlmostEqual(legacy.volume, explicit.volume, places=3)
+        self.assertAlmostEqual(legacy.bounds[1][0] - legacy.bounds[0][0], self.ZONE.width)
+
+    def test_wall_only_is_a_sleeve_from_base_z_not_a_block(self) -> None:
+        mesh = self._build(depth=500.0)     # stale Full Base depth is ignored
+        self.assertTrue(mesh.is_watertight)
+        self.assertAlmostEqual(mesh.bounds[0][2], BIN.base_thickness, places=4)
+        self.assertAlmostEqual(mesh.bounds[1][2], BIN.base_thickness + 10.0, places=4)
+        self.assertLess(mesh.bounds[1][0] - mesh.bounds[0][0], self.ZONE.width / 2.0)
+        block = self.ZONE.width * self.ZONE.depth * 10.0
+        self.assertLess(mesh.volume, block / 10.0)
+
+    def test_clear_opening_is_never_reduced(self) -> None:
+        for wall_style in ("straight", "wavy"):
+            mesh = self._build(wall_style=wall_style)
+            radii = np.hypot(mesh.vertices[:, 0], mesh.vertices[:, 1])
+            self.assertGreaterEqual(radii.min(), 15.0 - 1e-6, wall_style)
+            # The wavy trough reaches the clear envelope, it never digs in.
+            self.assertLess(radii.min(), 15.01, wall_style)
+
+    def test_wavy_varies_and_uses_wavefinity_constants(self) -> None:
+        wavy = self._build(wall_style="wavy")
+        straight = self._build(wall_style="straight")
+        radii = lambda mesh: np.hypot(mesh.vertices[:, 0], mesh.vertices[:, 1])
+        outer = lambda mesh: radii(mesh).max()
+        self.assertAlmostEqual(
+            outer(wavy), 15.0 + 2.0 * WAVE_AMPLITUDE + wall_depth_for(1.6), delta=0.02)
+        self.assertAlmostEqual(outer(straight), 15.0 + 1.6, delta=0.02)
+        inner = lambda mesh: radii(mesh)[radii(mesh) < 15.0 + 2.0 * WAVE_AMPLITUDE + 0.05]
+        self.assertGreater(inner(wavy).max() - inner(wavy).min(), WAVE_AMPLITUDE)
+        self.assertLess(inner(straight).max() - inner(straight).min(), 0.01)
+
+    def test_wall_thickness_grows_the_sleeve_and_defaults_to_the_bin_wall(self) -> None:
+        thin = self._build(wall=0.8, wall_style="straight")
+        thick = self._build(wall=2.4, wall_style="straight")
+        self.assertGreater(thick.bounds[1][0], thin.bounds[1][0])
+        one = Feature("bore", self.ZONE, self._item(),
+                      options={"bore_style": "wall_only", "height": 10.0})
+        self.assertEqual(inserts.resolved_options(BIN, one, BIN.base_thickness)["wall"], BIN.wall)
+        full = Feature("bore", self.ZONE, self._item())
+        self.assertEqual(inserts.resolved_options(BIN, full, BIN.base_thickness)["wall"], 1.6)
+
+    def test_touching_sleeves_merge_and_every_opening_stays_open(self) -> None:
+        zone = Zone(-60.0, -25.0, 60.0, 25.0)
+        for wall_style in ("straight", "wavy"):
+            mesh = self._build(zone=zone, columns=3, rows=1, wall_style=wall_style)
+            self.assertTrue(mesh.is_watertight)
+            pitch = 30.0 + 1.6
+            for column in (-1, 0, 1):
+                centre = np.array([column * pitch, 0.0])
+                vertices = mesh.vertices[:, :2] - centre
+                inside = np.hypot(vertices[:, 0], vertices[:, 1]) < 15.0 - 1e-6
+                self.assertFalse(inside.any(), (wall_style, column))
+
+    def test_every_profile_builds_in_both_wall_styles(self) -> None:
+        for profile in self.PROFILES:
+            for wall_style in ("straight", "wavy"):
+                mesh = self._build(self._item(profile), wall_style=wall_style)
+                self.assertTrue(mesh.is_watertight, (profile, wall_style))
+        diamond = self._build(self._item("square"), wall_style="straight")
+        square = self._build(self._item("square_axis"), wall_style="straight")
+        self.assertGreater(diamond.bounds[1][0], square.bounds[1][0] + 5.0)
+
+    def test_angle_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "upright"):
+            self._build(angle=10.0)
+        with self.assertRaisesRegex(ValueError, "style"):
+            self._build(bore_style="sideways")
+
+    def test_minimum_footprint_and_auto_grid_use_the_true_outer_shell(self) -> None:
+        for wall_style in ("straight", "wavy"):
+            one = Feature("bore", self.ZONE, self._item(), options={
+                "bore_style": "wall_only", "wall_style": wall_style, "wall": 1.6})
+            width, depth = inserts.feature_min_footprint(BIN, one, BIN.base_thickness)
+            reach = 1.6 if wall_style == "straight" else 2.0 * WAVE_AMPLITUDE + wall_depth_for(1.6)
+            self.assertAlmostEqual(width, 30.0 + 2.0 * reach, places=6)
+            self.assertAlmostEqual(depth, 30.0 + 2.0 * reach, places=6)
+        # Two sleeves need 31.6 more; a zone a hair short of that fits only one.
+        env = wall_only_envelope("round", 30.0, 1.6, "wavy")
+        two = env["span_x"] + env["pitch_x"]
+        tight = Zone(-(two - 0.2) / 2.0, -25.0, (two - 0.2) / 2.0, 25.0)
+        one = Feature("bore", tight, self._item(), options={
+            "bore_style": "wall_only", "auto_grid": True, "wall": 1.6, "height": 10.0})
+        self.assertEqual(inserts.resolved_options(BIN, one, BIN.base_thickness)["columns"], 1.0)
+        roomy = Zone(-(two + 0.2) / 2.0, -25.0, (two + 0.2) / 2.0, 25.0)
+        one = replace(one, zone=roomy)
+        self.assertEqual(inserts.resolved_options(BIN, one, BIN.base_thickness)["columns"], 2.0)
+        with self.assertRaises(ValueError):
+            self._build(zone=tight, columns=2, rows=1)
 
 
 class BoreAutoModeTests(unittest.TestCase):

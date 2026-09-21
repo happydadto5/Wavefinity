@@ -7,8 +7,10 @@ from dataclasses import replace
 
 import trimesh
 
-from organizer_engine import BoxSpec
-from organizer_geometry import difference, union
+from shapely.geometry import Polygon
+
+from organizer_engine import WAVE_AMPLITUDE, WAVE_LENGTH, BoxSpec, wall_depth_for
+from organizer_geometry import _extrude_polygon, difference, union
 
 from ._core import Feature, _fit_count, _need_item, layout_zone
 from ._registry import (
@@ -47,6 +49,12 @@ def bore_direction(spec_feature: Feature) -> tuple[str, float]:
     }
     return directions.get(toward, (spec_feature.along, -1.0))
 
+BORE_STYLES = ("full_base", "wall_only")
+WALL_STYLES = ("wavy", "straight")
+WAVE_SAMPLES_PER_CYCLE = 32   # keeps a wavy sleeve smooth in the STL and preview
+WALL_ONLY_FIT_TOLERANCE = 2e-3  # round clear openings are circumscribed polygons
+
+
 def _is_hex_bit(profile: str) -> bool:
     return profile in HEX_BIT_HOLD
 
@@ -78,6 +86,155 @@ def bore_minimum_pitches(
     return (lean_pitch, cross_pitch) if lean_axis == "x" else (cross_pitch, lean_pitch)
 
 
+def _wall_only_shell_reach(wall: float, wall_style: str) -> float:
+    """How far a Wall Only sleeve reaches past its clear opening, per side.
+
+    A wavy inner wall runs from 0 to ``2 * WAVE_AMPLITUDE`` outward of the
+    clear profile; the outer face adds Wavefinity's wall depth on top.
+    """
+    if wall_style == "wavy":
+        return 2.0 * WAVE_AMPLITUDE + wall_depth_for(wall)
+    return wall
+
+
+def _clear_spans(profile: str, held: float) -> tuple[float, float]:
+    """X/Y span of one upright clear opening (matches the cut geometry)."""
+    if profile == "round" or _axis_square(profile):
+        return held, held
+    sides = _hole_sides(profile)
+    radius = held / 2.0 / math.cos(math.pi / sides)
+    if sides == 4:                      # diamond: corners on both axes
+        return 2.0 * radius, 2.0 * radius
+    return 2.0 * radius, held           # hex: corners on X, flats on Y
+
+
+def wall_only_envelope(
+    profile: str, held: float, wall: float, wall_style: str,
+) -> dict[str, float]:
+    """Shared Wall Only spacing/size numbers (backend build, layout, Auto Grid).
+
+    Pitch keeps today's "clear opening + requested web" rule at upright angle;
+    the physical one-hole span is the clear span plus the shell on both sides.
+    """
+    pitch_x, pitch_y = bore_minimum_pitches(profile, held, wall, 0.0, "x")
+    clear_x, clear_y = _clear_spans(profile, held)
+    reach = _wall_only_shell_reach(wall, wall_style)
+    return {
+        "pitch_x": pitch_x, "pitch_y": pitch_y,
+        "clear_x": clear_x, "clear_y": clear_y, "reach": reach,
+        "span_x": clear_x + 2.0 * reach, "span_y": clear_y + 2.0 * reach,
+    }
+
+
+def _clear_profile_points(profile: str, held: float, wall_style: str) -> list[tuple[float, float]]:
+    """Counter-clockwise outline of one upright clear opening.
+
+    Round openings are a fine polygon circumscribing the true circle so the
+    opening is never smaller than requested.
+    """
+    if profile == "round":
+        cycles = max(1, round(math.pi * held / WAVE_LENGTH))
+        sides = max(256, WAVE_SAMPLES_PER_CYCLE * cycles) if wall_style == "wavy" else 256
+        radius = held / 2.0 / math.cos(math.pi / sides)
+        return [
+            (radius * math.cos(2.0 * math.pi * i / sides),
+             radius * math.sin(2.0 * math.pi * i / sides))
+            for i in range(sides)
+        ]
+    if _axis_square(profile):
+        half = held / 2.0
+        return [(half, half), (-half, half), (-half, -half), (half, -half)]
+    sides = _hole_sides(profile)
+    radius = held / 2.0 / math.cos(math.pi / sides)
+    return [
+        (radius * math.cos(2.0 * math.pi * i / sides),
+         radius * math.sin(2.0 * math.pi * i / sides))
+        for i in range(sides)
+    ]
+
+
+def _wavy_outline(
+    clear: list[tuple[float, float]], thickness: float,
+) -> list[tuple[float, float]]:
+    """Displace the clear outline outward by a whole-cycle sine.
+
+    Each edge is walked by arc length and pushed along its own outward normal by
+    ``WAVE_AMPLITUDE * (1 + sin(phase)) + thickness``. The
+    displacement is never negative, so the outline never enters the clear
+    profile; at corners the neighbouring displaced edge ends simply join.
+    """
+    count = len(clear)
+    edges = [(clear[i], clear[(i + 1) % count]) for i in range(count)]
+    lengths = [math.dist(a, b) for a, b in edges]
+    perimeter = sum(lengths)
+    cycles = max(1, round(perimeter / WAVE_LENGTH))
+    step = WAVE_LENGTH / WAVE_SAMPLES_PER_CYCLE
+    points: list[tuple[float, float]] = []
+    travelled = 0.0
+    for (a, b), length in zip(edges, lengths):
+        nx, ny = (b[1] - a[1]) / length, -(b[0] - a[0]) / length   # CCW: outward is right
+        pieces = max(1, math.ceil(length / step))
+        for k in range(pieces + 1):
+            t = k / pieces
+            s = travelled + t * length
+            push = (thickness
+                    + WAVE_AMPLITUDE * (1.0 + math.sin(2.0 * math.pi * cycles * s / perimeter)))
+            points.append((a[0] + (b[0] - a[0]) * t + nx * push,
+                           a[1] + (b[1] - a[1]) * t + ny * push))
+        travelled += length
+    return points
+
+
+def _wall_only_ring(
+    profile: str, held: float, wall: float, wall_style: str,
+) -> tuple[Polygon, Polygon, Polygon]:
+    """(outer, inner, clear) outlines of one upright Wall Only sleeve at 0, 0.
+
+    ``inner`` is the sleeve's bore wall, which hugs or waves outward of the
+    ``clear`` opening the user asked for.
+    """
+    outline = _clear_profile_points(profile, held, wall_style)
+    clear = Polygon(outline)
+    if wall_style == "wavy":
+        inner = Polygon(_wavy_outline(outline, 0.0))
+        outer = Polygon(_wavy_outline(outline, wall_depth_for(wall)))
+    else:
+        inner = clear
+        outer = clear.buffer(wall, join_style="round")
+    if (not outer.is_valid or not inner.is_valid or not outer.contains(inner)
+            or not inner.buffer(1e-7).contains(clear)):
+        raise ValueError("bore wall profile could not be built; try another wall or shape")
+    return outer, inner, clear
+
+
+def _build_wall_only_bore(grid: dict, count: int | None) -> trimesh.Trimesh:
+    """Perimeter sleeves rising from the base; no raised rectangular block."""
+    profile = grid["item"].profile
+    outer, inner, clear = _wall_only_ring(
+        profile, grid["held"], grid["wall"], grid["wall_style"])
+    height, base_z = grid["height"], grid["base_z"]
+    # Cut the inner wall out of the outer body with a boolean; that is sturdier
+    # than triangulating a ring with a hole.
+    bore = _extrude_polygon(inner, height + 2.0)
+    bore.apply_translation((0.0, 0.0, -1.0))
+    sleeve = difference([_extrude_polygon(outer, height), bore])
+    opening = _extrude_polygon(clear, height + 2.0)
+    opening.apply_translation((0.0, 0.0, -1.0))
+    sleeves, openings = [], []
+    for x, y in _bore_hole_centres(grid, count):
+        one = sleeve.copy()
+        one.apply_translation((x, y, base_z))
+        sleeves.append(one)
+        cut = opening.copy()
+        cut.apply_translation((x, y, base_z))
+        openings.append(cut)
+    if len(sleeves) == 1:
+        return sleeves[0]
+    # Touching sleeves merge for strength; every opening is then cut again so a
+    # neighbour's wall can never close it.
+    return difference([union(sleeves), union(openings)])
+
+
 @defaults("bore")
 def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     item = _need_item(one)
@@ -88,12 +245,17 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     else:
         hole = min(item.length * 0.4, box.z - base_z - 2.0)
         held = item.held(item.widest)
+    style = str(one.options.get("bore_style", "full_base"))
+    wall_style = str(one.options.get("wall_style", "wavy"))
+    wall_only = style == "wall_only"
     try:
         angle = max(0.0, float(one.options.get("angle", 0.0) or 0.0))
     except (TypeError, ValueError):
         angle = 0.0
+    if wall_only:
+        angle = 0.0      # a Wall Only sleeve is always upright
     tilted = angle > 1e-9
-    default_wall = BORE_TILTED_WALL if tilted else BORE_WALL
+    default_wall = box.wall if wall_only else BORE_TILTED_WALL if tilted else BORE_WALL
     wall = float(one.options.get("wall", default_wall))
     try:
         depth = float(one.options.get("depth", hole))
@@ -107,12 +269,19 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         # axis at the real wall/lean pitch, never a stored quantity.
         lean_axis, _ = bore_direction(one)
         pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, lean_axis)
-        resolved_grid = {
-            "columns": float(_fit_count(
-                one.zone.width - (reach if lean_axis == "x" else 0.0), pitch_x, pitch_x)),
-            "rows": float(_fit_count(
-                one.zone.depth - (reach if lean_axis == "y" else 0.0), pitch_y, pitch_y)),
-        }
+        if wall_only:
+            env = wall_only_envelope(item.profile, held, wall, wall_style)
+            resolved_grid = {
+                "columns": float(_fit_count(one.zone.width, env["pitch_x"], env["span_x"])),
+                "rows": float(_fit_count(one.zone.depth, env["pitch_y"], env["span_y"])),
+            }
+        else:
+            resolved_grid = {
+                "columns": float(_fit_count(
+                    one.zone.width - (reach if lean_axis == "x" else 0.0), pitch_x, pitch_x)),
+                "rows": float(_fit_count(
+                    one.zone.depth - (reach if lean_axis == "y" else 0.0), pitch_y, pitch_y)),
+            }
     return {
         "depth": hole,
         # A leaned bore takes a thicker wall by default so the extra material
@@ -128,6 +297,8 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         # 0 is straight up; a positive angle leans the holes off vertical so
         # tubes rest at a slant. Any grid may lean.
         "angle": 0.0,
+        "bore_style": style,
+        "wall_style": wall_style,
     }
 
 
@@ -156,6 +327,52 @@ def normalize_bore_auto(
     return replace(one, zone=zone, options=options)
 
 
+def _wall_only_grid(
+    item, zone, spec_feature: Feature, held: float, wall: float, height: float,
+    angle: float, wall_style: str, where: tuple[BoxSpec, float], options: dict,
+) -> dict:
+    """Grid for an upright Wall Only Bore; its footprint is the sleeves' outer envelope."""
+    _, base_z = where
+    if height <= 0.0 or wall <= 0.0:
+        raise ValueError(f"{item.name}: bore height and wall must be positive")
+    if not math.isfinite(angle) or abs(angle) > 1e-9:
+        raise ValueError("a Wall Only bore stands upright; its angle must be 0")
+    env = wall_only_envelope(item.profile, held, wall, wall_style)
+    raw_columns = options.get("columns")
+    raw_rows = options.get("rows")
+    columns = int(raw_columns) if raw_columns is not None else _fit_count(
+        zone.width, env["pitch_x"], env["span_x"])
+    rows = int(raw_rows) if raw_rows is not None else _fit_count(
+        zone.depth, env["pitch_y"], env["span_y"])
+    if ((raw_columns is not None and abs(float(raw_columns) - columns) > 1e-9)
+            or (raw_rows is not None and abs(float(raw_rows) - rows) > 1e-9)):
+        raise ValueError("bore columns and rows must be whole numbers")
+    if spec_feature.count is not None:
+        columns = min(columns, spec_feature.count)
+        rows = max(1, math.ceil(spec_feature.count / max(columns, 1)))
+    if columns < 1 or rows < 1:
+        raise ValueError(f"no room for {item.name}: zone is too small for a bore")
+    needed_x = env["span_x"] + (columns - 1) * env["pitch_x"]
+    needed_y = env["span_y"] + (rows - 1) * env["pitch_y"]
+    if (needed_x > zone.width + WALL_ONLY_FIT_TOLERANCE
+            or needed_y > zone.depth + WALL_ONLY_FIT_TOLERANCE):
+        raise ValueError(
+            f"{columns} x {rows} bores need {needed_x:.1f} x {needed_y:.1f} mm "
+            f"but the zone gives {zone.width:.1f} x {zone.depth:.1f} mm"
+        )
+    centre_x, centre_y = zone.centre
+    return {
+        "item": item, "zone": zone, "held": held, "depth": 0.0, "wall": wall,
+        "height": height, "angle": 0.0, "tilted": False, "lean": 0.0,
+        "lean_axis": "x", "lean_sign": 1.0, "reach": 0.0, "drop": 0.0,
+        "lean_shift": 0.0, "pitch": min(env["pitch_x"], env["pitch_y"]),
+        "pitch_x": env["pitch_x"], "pitch_y": env["pitch_y"],
+        "columns": columns, "rows": rows, "centre_x": centre_x, "centre_y": centre_y,
+        "bore_style": "wall_only", "wall_style": wall_style, "base_z": base_z,
+        "needed_x": needed_x, "needed_y": needed_y, "envelope": env,
+    }
+
+
 def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
     """Resolve and validate a bore's grid once, for both the mesh builder and
     the preview's lean indicator. Raises the same errors ``build_bore`` used to
@@ -172,6 +389,17 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
     wall = options["wall"]
     height = options["height"]
     angle = options.get("angle", 0.0)
+    style = str(options.get("bore_style", "full_base"))
+    wall_style = str(options.get("wall_style", "wavy"))
+    if style not in BORE_STYLES:
+        raise ValueError(f"bore style must be one of {', '.join(BORE_STYLES)}")
+    if wall_style not in WALL_STYLES:
+        raise ValueError(f"bore wall style must be one of {', '.join(WALL_STYLES)}")
+    if style == "wall_only":
+        return _wall_only_grid(
+            item, zone, spec_feature, held, wall, height, angle, wall_style,
+            (box, base_z), options,
+        )
     if depth <= 0.0 or height <= 0.0 or wall <= 0.0 or depth >= height:
         raise ValueError(
             f"{item.name}: bore depth must be below its positive height and wall"
@@ -340,6 +568,8 @@ def bore_tool_clearance_zone(
     description="Small pockets for your stuff of vary sizes/shapes.",
     capabilities=("size", "along", "item"),
     options=(
+        OptionDefinition("Style", "bore_style", "full_base", "enum"),
+        OptionDefinition("Wall style", "wall_style", "wavy", "enum"),
         OptionDefinition("Height", "height", ""),
         OptionDefinition("Hole depth", "depth", ""),
         OptionDefinition("Wall", "wall", "1.6"),
@@ -355,6 +585,8 @@ def bore_tool_clearance_zone(
 def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A block of holes for objects stood on end."""
     grid = _bore_grid(box, spec_feature, base_z)
+    if grid.get("bore_style") == "wall_only":
+        return [_build_wall_only_bore(grid, spec_feature.count)]
     zone = grid["zone"]
     held = grid["held"]
     depth = grid["depth"]
@@ -447,6 +679,14 @@ register_setting_interactions("bore", (
                        "A user-edited Height wins and lowers Hole depth to keep a 2 mm floor."),
     SettingInteraction("angle", "wall", "default", "bore",
                        "A leaned Bore uses a thicker wall unless Wall is explicitly set."),
+    SettingInteraction("bore_style", "angle", "reset", "bore-editor",
+                       "Wall Only stands upright, so choosing it removes a stored lean."),
+    SettingInteraction("bore_style", "wall", "default", "bore",
+                       "Wall Only takes the bin wall unless Wall is explicitly set."),
+    SettingInteraction("bore_style", "zone", "auto-adjust", "bore-sizing",
+                       "Wall Only sizes the Base to the sleeves' outer envelope."),
+    SettingInteraction("wall_style", "zone", "auto-adjust", "bore-sizing",
+                       "Wavy walls reach further than straight walls."),
     SettingInteraction("angle", "angle_towards", "enable/disable", "bore-editor",
                        "Direction is shown only for a Bore that is actually leaned."),
     SettingInteraction("item.profile", "angle", "reset", "bore-editor",
