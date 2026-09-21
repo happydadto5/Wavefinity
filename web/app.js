@@ -3208,6 +3208,13 @@ function activatePreviewView(view) {
     if (typeof SP !== "undefined") SP.showFolderAccessNeeded();
     return;
   }
+  if (typeof DP !== "undefined") {
+    if ((view === "2d" || view === "3d") && DP.spaceEditing()) DP.setMode("design");
+    else if (view === "drawer") {
+      if (DL.active) DP.setMode("space");
+      else DP.enter("space");
+    }
+  }
   const tab = $(`.view-tab[data-view="${view}"]`);
   const canvasWrap = $(`.canvas-wrap[data-canvas="${view}"]`);
   if (!tab || !canvasWrap) return;
