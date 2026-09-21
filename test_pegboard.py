@@ -11,6 +11,7 @@ from organizer_inventory import configure_space, load_inventory
 from organizer_pegboard import (
     PegboardMountSpec,
     apply_pegboard_mount_structure,
+    make_board_adapter,
     make_board_adapters,
     pegboard_layout_for_bin,
     receiver_layout,
@@ -78,19 +79,33 @@ class PegboardMountTests(unittest.TestCase):
 
     def test_invalid_manual_count_or_short_bin_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Cleat Count X"):
-            receiver_layout(80, 40, PegboardMountSpec(True, "standard", 6, 1))
+            receiver_layout(80, 48, PegboardMountSpec(True, "standard", 6, 1))
         with self.assertRaisesRegex(ValueError, "does not fit"):
             receiver_layout(80, 20, PegboardMountSpec(True, "standard", 1, 2))
+        with self.assertRaisesRegex(ValueError, "does not fit"):
+            receiver_layout(48, 40, PegboardMountSpec(True, "standard", 1, 1))
+        self.assertLessEqual(
+            receiver_layout(48, 44, PegboardMountSpec(True, "standard", 1, 1))["minimum_height_mm"], 44,
+        )
+        self.assertEqual(receiver_layout(48, 65, PegboardMountSpec(True, "standard"))["resolved_y"], 1)
+
+    def test_standard_adapter_stays_hidden_at_minimum_height(self) -> None:
+        height = 44
+        receiver = receiver_layout(48, height, PegboardMountSpec(True, "standard", 1, 1))["receivers"][0]
+        adapter = make_board_adapter("standard")
+        placed_z = adapter.bounds[:, 2] + receiver["z"] - 17.0
+        self.assertGreaterEqual(float(placed_z[0]), 0)
+        self.assertLessEqual(float(placed_z[1]), height)
 
     def test_ribs_only_bridge_large_unsupported_gaps(self) -> None:
-        narrow = receiver_layout(64, 40, PegboardMountSpec(True, "standard", 2, 1))
-        wide = receiver_layout(160, 40, PegboardMountSpec(True, "standard", 2, 1))
+        narrow = receiver_layout(64, 48, PegboardMountSpec(True, "standard", 2, 1))
+        wide = receiver_layout(160, 48, PegboardMountSpec(True, "standard", 2, 1))
         self.assertEqual(narrow["ribs"], [])
         self.assertTrue(wide["ribs"])
 
     def test_receiver_and_both_adapter_families_are_printable_meshes(self) -> None:
         for standard in ("standard", "skadis"):
-            box = BoxSpec(96, 64, 64, pegboard=PegboardMountSpec(True, standard, 2, 2))
+            box = BoxSpec(96, 64, 80, pegboard=PegboardMountSpec(True, standard, 2, 2))
             body = __import__("trimesh").creation.box((box.x, box.y, box.z))
             mounted = apply_pegboard_mount_structure(box, body)
             self.assertGreater(mounted.volume, body.volume)
@@ -101,10 +116,11 @@ class PegboardMountTests(unittest.TestCase):
             self.assertEqual(len(adapters), 4)
             self.assertTrue(all(mesh.is_watertight for _, mesh in adapters))
             self.assertEqual(len({round(float(mesh.centroid[0]), 3) for _, mesh in adapters}), 4)
+            self.assertLess(float(adapters[0][1].bounds[1][0]), float(adapters[1][1].bounds[0][0]))
 
     def test_generation_writes_bin_and_separate_adapter_plate(self) -> None:
         with tempfile.TemporaryDirectory() as root:
-            box = BoxSpec(32, 32, 32, pegboard=PegboardMountSpec(True, "standard", 1, 1))
+            box = BoxSpec(32, 32, 48, pegboard=PegboardMountSpec(True, "standard", 1, 1))
             made = generate_organizer_files(box, Layout(), Path(root), part_name="Fasteners")
             self.assertTrue(Path(made["box"]["output"]).is_file())
             self.assertTrue(Path(made["pegboard_adapters"]["output"]).is_file())
@@ -122,7 +138,7 @@ class PegboardPlacementTests(unittest.TestCase):
             "placements": [],
         }
         self.bin = {
-            "id": "B1", "name": "Fasteners", "x": 48, "y": 48, "z": 40,
+            "id": "B1", "name": "Fasteners", "x": 48, "y": 48, "z": 48,
             "qty": 1, "stack": "none", "pegboard_standard": "standard",
             "cleat_x": "auto", "cleat_y": "auto",
         }

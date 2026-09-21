@@ -403,6 +403,8 @@ function applySpaceSizingDefaults(design) {
   } else if (kind === "portable" || kind === "box") {
     design.box.z = normalizeBinDimension("z", space.z);
   } else if (kind === "pegboard") {
+    if (space.pegboard_standard === "standard") design.box.z = Math.max(44, design.box.z);
+    else design.box.x = Math.max(32, design.box.x);
     design.box.pegboard = {
       enabled: true,
       standard: space.pegboard_standard,
@@ -1455,6 +1457,13 @@ function activePegboardStandard() {
   return state.catalog?.pegboard_rules?.standards?.find(row => row.id === id) || null;
 }
 
+function pegboardMinimumFor(count, pitch, end) {
+  const receiver = state.catalog?.pegboard_rules?.receiver || {};
+  const margin = number(receiver.edge_inset_mm, 2) + number(receiver.width_mm, 14) / 2;
+  const first = Math.ceil((margin - pitch / 2) / pitch) * pitch + pitch / 2;
+  return first + (count - 1) * pitch + end;
+}
+
 function syncPegboardMountForm() {
   const row = $("#pegboard-mount-row");
   if (!row) return;
@@ -1466,11 +1475,13 @@ function syncPegboardMountForm() {
   $("#pegboard-mount-standard").textContent = standard?.name || "Pegboard";
   $("#pegboard-cleat-x").value = String(mount?.cleat_x ?? "auto");
   $("#pegboard-cleat-y").value = String(mount?.cleat_y ?? "auto");
-  const receiver = state.catalog?.pegboard_rules?.receiver || {};
-  const minFor = (count, pitch) => 2 * (number(receiver.edge_inset_mm, 2) + number(receiver.width_mm, 14) / 2) + (count - 1) * pitch;
-  for (const [selector, size, pitch] of [["#pegboard-cleat-x", state.design.box.x, standard?.pitch_x_mm], ["#pegboard-cleat-y", state.design.box.z, standard?.pitch_y_mm]]) {
+  for (const [selector, size, pitch, end] of [["#pegboard-cleat-x", state.design.box.x, standard?.pitch_x_mm, 9], ["#pegboard-cleat-y", state.design.box.z, standard?.pitch_y_mm, standard?.id === "standard" ? 30.4 : 9]]) {
     for (const option of $(selector).options) {
-      option.disabled = option.value !== "auto" && Number.isFinite(pitch) && size + 1e-9 < minFor(Number(option.value), pitch);
+      option.disabled = option.value !== "auto" && Number.isFinite(pitch) && size + 1e-9 < pegboardMinimumFor(Number(option.value), pitch, end);
+    }
+    if ($(selector).selectedOptions[0]?.disabled) {
+      $(selector).value = "auto";
+      if (state.design.box.pegboard) state.design.box.pegboard[selector.endsWith("-x") ? "cleat_x" : "cleat_y"] = "auto";
     }
   }
   const preview = state.preview?.pegboard;
@@ -1488,11 +1499,18 @@ function readPegboardMountForm(design) {
     if (design.box.pegboard) design.box.pegboard.enabled = false;
     return;
   }
+  const standard = activePegboardStandard();
+  const choice = (selector, size, pitch, end) => {
+    const value = $(selector)?.value || "auto";
+    if (value === "auto" || !Number.isFinite(pitch) || size + 1e-9 >= pegboardMinimumFor(Number(value), pitch, end)) return value;
+    $(selector).value = "auto";
+    return "auto";
+  };
   design.box.pegboard = {
     enabled: true,
     standard: design.box.pegboard?.standard || state.activeSpace?.pegboard_standard || "standard",
-    cleat_x: $("#pegboard-cleat-x")?.value || design.box.pegboard?.cleat_x || "auto",
-    cleat_y: $("#pegboard-cleat-y")?.value || design.box.pegboard?.cleat_y || "auto",
+    cleat_x: choice("#pegboard-cleat-x", design.box.x, standard?.pitch_x_mm, 9),
+    cleat_y: choice("#pegboard-cleat-y", design.box.z, standard?.pitch_y_mm, standard?.id === "standard" ? 30.4 : 9),
   };
 }
 

@@ -46,7 +46,7 @@ PEGBOARD_MAX_CLEATS_Y = 3
 PEGBOARD_DEFAULT_DEPTH_MM = 350.0
 PEGBOARD_RECEIVER_WIDTH = 14.0
 PEGBOARD_RECEIVER_HEIGHT = 14.0
-PEGBOARD_PROJECTION = 5.0
+PEGBOARD_PROJECTION = 5.5
 PEGBOARD_RIB_WIDTH = 2.0
 PEGBOARD_MAX_UNSUPPORTED_GAP = 40.0
 PEGBOARD_EDGE_INSET = 2.0
@@ -221,13 +221,14 @@ def _auto_count(length: float, support: float, maximum: int) -> int:
 
 def _axis_positions(
     length: float, pitch: float, count: int, receiver: float, axis: str,
-    offset: float = 0.0,
+    offset: float = 0.0, end_margin: float | None = None,
 ) -> list[float]:
     margin = PEGBOARD_EDGE_INSET + receiver / 2.0
+    limit = length - (margin if end_margin is None else end_margin)
     candidates = [
         (index + 0.5) * pitch + offset
         for index in range(-1, int(math.ceil(length / pitch)) + 1)
-        if margin - 1e-9 <= (index + 0.5) * pitch + offset <= length - margin + 1e-9
+        if margin - 1e-9 <= (index + 0.5) * pitch + offset <= limit + 1e-9
     ]
     if len(candidates) < count:
         raise ValueError(
@@ -255,7 +256,19 @@ def receiver_layout(box_or_x: Any, z: float | None = None, mount: PegboardMountS
         if mount.cleat_x == "auto" else int(mount.cleat_x)
     count_y = _auto_count(height, PEGBOARD_AUTO_SUPPORT_Y, PEGBOARD_MAX_CLEATS_Y) \
         if mount.cleat_y == "auto" else int(mount.cleat_y)
-    zs = _axis_positions(height, standard.pitch_y_mm, count_y, PEGBOARD_RECEIVER_HEIGHT, "Y")
+    # The standard adapter uses two vertically adjacent holes. Its upper
+    # hooked peg and narrow plate must remain concealed behind the bin.
+    end_margin = 30.4 if standard.id == "standard" else None
+    if mount.cleat_y == "auto":
+        while count_y > 1:
+            try:
+                _axis_positions(height, standard.pitch_y_mm, count_y,
+                                PEGBOARD_RECEIVER_HEIGHT, "Y", end_margin=end_margin)
+                break
+            except ValueError:
+                count_y -= 1
+    zs = _axis_positions(height, standard.pitch_y_mm, count_y,
+                         PEGBOARD_RECEIVER_HEIGHT, "Y", end_margin=end_margin)
     receivers = []
     for row, pz in enumerate(zs):
         grid_y = round(pz / standard.pitch_y_mm - 0.5)
@@ -285,7 +298,9 @@ def receiver_layout(box_or_x: Any, z: float | None = None, mount: PegboardMountS
         "cleat_y": mount.cleat_y,
         "resolved_x": count_x,
         "resolved_y": count_y,
-        "minimum_height_mm": round(max(one["z"] for one in receivers) + PEGBOARD_EDGE_INSET + PEGBOARD_RECEIVER_HEIGHT / 2, 6),
+        "minimum_height_mm": round(max(one["z"] for one in receivers) +
+                                   (30.4 if standard.id == "standard" else
+                                    PEGBOARD_EDGE_INSET + PEGBOARD_RECEIVER_HEIGHT / 2), 6),
         "receivers": receivers,
         "ribs": [round(value, 6) for value in ribs],
         "projection_mm": PEGBOARD_PROJECTION,
@@ -329,17 +344,41 @@ def _box(extents: tuple[float, float, float], center: tuple[float, float, float]
     return mesh
 
 
+def _prism_x(profile: list[tuple[float, float]], x0: float, x1: float) -> trimesh.Trimesh:
+    """Extrude a convex Y/Z cleat profile across the bin width."""
+    count = len(profile)
+    vertices = np.asarray(
+        [(x, y, z) for x in (x0, x1) for y, z in profile], dtype=float,
+    )
+    faces: list[tuple[int, int, int]] = []
+    for index in range(1, count - 1):
+        faces.extend([(0, index + 1, index), (count, count + index, count + index + 1)])
+    for index in range(count):
+        next_index = (index + 1) % count
+        faces.extend([
+            (index, next_index, count + next_index),
+            (index, count + next_index, count + index),
+        ])
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+
+
 def _receiver_mesh(cx: float, back_y: float, cz: float) -> trimesh.Trimesh:
     rail = 3.0
     side = (PEGBOARD_RECEIVER_WIDTH - rail) / 2.0
+    guide_depth = 4.5
     pieces = [
-        _box((rail, PEGBOARD_PROJECTION + 0.35, PEGBOARD_RECEIVER_HEIGHT),
-             (cx - side, back_y + PEGBOARD_PROJECTION / 2.0 - 0.175, cz)),
-        _box((rail, PEGBOARD_PROJECTION + 0.35, PEGBOARD_RECEIVER_HEIGHT),
-             (cx + side, back_y + PEGBOARD_PROJECTION / 2.0 - 0.175, cz)),
-        _box((PEGBOARD_RECEIVER_WIDTH, PEGBOARD_PROJECTION + 0.35, rail),
-             (cx, back_y + PEGBOARD_PROJECTION / 2.0 - 0.175,
-              cz + (PEGBOARD_RECEIVER_HEIGHT - rail) / 2.0)),
+        _box((rail, guide_depth + 0.35, PEGBOARD_RECEIVER_HEIGHT),
+             (cx - side, back_y + guide_depth / 2.0 - 0.175, cz)),
+        _box((rail, guide_depth + 0.35, PEGBOARD_RECEIVER_HEIGHT),
+             (cx + side, back_y + guide_depth / 2.0 - 0.175, cz)),
+        # The underside rises outward at 45 degrees. Gravity pulls this
+        # inverted hook against the mating sloped adapter, not a flat shelf.
+        _prism_x([
+            (back_y - 0.35, cz - 2.1),
+            (back_y + PEGBOARD_PROJECTION, cz + 3.4),
+            (back_y + PEGBOARD_PROJECTION, cz + 5.8),
+            (back_y - 0.35, cz + 0.3),
+        ], cx - PEGBOARD_RECEIVER_WIDTH / 2, cx + PEGBOARD_RECEIVER_WIDTH / 2),
     ]
     return union(pieces)
 
@@ -372,7 +411,7 @@ def make_board_adapter(standard_id: Any) -> trimesh.Trimesh:
     if standard.id == "standard":
         # The lower peg shares the male cleat's height. The upper peg is
         # exactly one board row above it, matching mount_offsets below.
-        plate = _box((12.0, 3.0, 43.0), (0.0, 0.0, 25.5))
+        plate = _box((10.0, 3.0, 31.4), (0.0, 0.0, 29.7))
         straight = _cylinder_y(2.65, 8.0, (0.0, -5.5, 17.0))
         hooked = _cylinder_y(2.65, 8.0, (0.0, -5.5, 42.4))
         hook = _box((4.8, 3.0, 4.0), (0.0, -9.0, 40.2))
@@ -380,11 +419,19 @@ def make_board_adapter(standard_id: Any) -> trimesh.Trimesh:
     else:
         # A single vertical SKÅDIS slot holds the tab and its locking hook;
         # adjacent slot rows stagger sideways and cannot take two straight tabs.
-        plate = _box((12.0, 3.0, 16.0), (0.0, 0.0, 8.0))
+        plate = _box((10.0, 3.0, 16.0), (0.0, 0.0, 8.0))
         tab = _box((4.4, 8.0, 12.0), (0.0, -5.5, 8.0))
         hook = _box((4.4, 3.0, 3.0), (0.0, -9.0, 3.0))
         back = union([plate, tab, hook])
-    male = _box((7.4, 3.2, 10.0), (0.0, 3.1, 17.0 if standard.id == "standard" else 8.0))
+    center = 17.0 if standard.id == "standard" else 8.0
+    # One narrow sloped cleat, not a separate shelf. Its upper face and the
+    # universal receiver underside have 0.2 mm of sliding clearance.
+    male = _prism_x([
+        (1.15, center - 5.3),
+        (7.0, center - 5.3),
+        (7.0, center - 2.3),
+        (1.15, center + 3.2),
+    ], -3.7, 3.7)
     return union([back, male])
 
 
@@ -395,9 +442,10 @@ def make_board_adapters(box_spec: Any) -> list[tuple[str, trimesh.Trimesh]]:
     result = []
     for index, _receiver in enumerate(layout["receivers"], 1):
         mesh = make_board_adapter(layout["standard"])
-        # Place its lowest point on the build plane; print orientation and fit
-        # still need a physical prototype before they can be guaranteed.
-        mesh.apply_translation((25.0 * ((index - 1) % 5),
+        # Lay the narrow side on the bed, as in the fit prototype. The board
+        # peg and cleat profiles can then rise with minimal bridging.
+        mesh.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2.0, (0.0, 1.0, 0.0)))
+        mesh.apply_translation((40.0 * ((index - 1) % 5),
                                 25.0 * ((index - 1) // 5),
                                 -float(mesh.bounds[0][2])))
         result.append((f"pegboard_adapter_{index}", mesh))
