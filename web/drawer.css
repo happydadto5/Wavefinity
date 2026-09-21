@@ -63,7 +63,7 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-inv-tools input, .dl-inv-tools select { margin: 0; padding: 7px 8px; font-size: 12px; }
 .dl-inv-list { display: grid; gap: 6px; }
 .dl-bin {
-  display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto auto auto auto; align-items: center; gap: 8px;
+  display: grid; grid-template-columns: 18px 38px minmax(0, 1fr) auto auto auto auto auto; align-items: center; gap: 8px;
   padding: 6px 6px 6px 6px; border: 1px solid var(--line); border-radius: 9px; background: white;
 }
 .dl-bin[draggable="true"] { cursor: grab; }
@@ -118,7 +118,14 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-save-status.dirty { color: #8a4e12; font-weight: 650; }
 
 .dl-action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 12px; }
-.dl-new-printed { margin: 10px 0 0; }
+.dl-print-select { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.dl-print-placeholder { display: block; width: 16px; height: 16px; }
+.dl-bin.print-selected { background: var(--teal-soft); }
+.dl-batch-tools { display: grid; gap: 7px; margin: 0 0 8px; }
+.dl-batch-tools[hidden] { display: none; }
+.dl-batch-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dl-batch-summary { font-size: 11px; color: var(--muted); flex: 1 1 100%; min-height: 14px; }
+.dl-batch-connectors { margin: 0; }
 .dl-swatch { position: relative; }
 .dl-swatch i {
   position: absolute; right: -4px; bottom: -4px; font-style: normal; font-size: 10px; line-height: 1;

@@ -629,7 +629,7 @@ something to work on.
   later. **Generate Selected Spacers**
   also saves one connector file for each pair of rim heights the layout needs,
   and says how many of each to print. Stacks join at their top bins; X spacers
-  need none, since their waves hold them. **Print Drawer (All)** opens the lot in
+  need none, since their waves hold them. **Print Spacers + Connectors** opens the lot in
   Bambu Studio. **Print map** prints a plan of the drawer with a list of where
   each bin goes.
 - **Make Base Trim** uses the minimum bounding rectangle around one completely

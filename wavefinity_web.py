@@ -126,8 +126,9 @@ from organizer_inserts import (
     text_of,
 )
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
+from bambu_project import build_bambu_project, is_bambu_studio_executable
 from organizer_drawer import drawer_routes
-from organizer_inventory import configure_space_text, resolve_inventory_path
+from organizer_inventory import append_bin, configure_space_text, resolve_inventory_path
 from organizer_product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
     ORDINARY_BIN_MIN_HEIGHT_MM,
@@ -1279,12 +1280,23 @@ def detect_bambu_studio(custom_path: str | None = None) -> Path | None:
         return _find_bambu_studio_linux()
 
 
-def launch_slicer(slicer_path: Path, files: list[Path]) -> None:
+def launch_slicer(slicer_path: Path, files: list[Path]) -> Path | None:
+    """Open ``files`` in the slicer.
+
+    Bambu Studio gets one arranged project 3MF built from the files (repeated
+    files mean repeated physical copies) and that project's path is returned.
+    Other slicers get the files directly and ``None`` is returned.
+    """
     if not slicer_path.is_file():
         raise FileNotFoundError(f"Slicer executable not found: {slicer_path}")
     if not files:
         raise ValueError("No files to open in slicer")
-    args = [str(slicer_path.resolve())] + [str(f.resolve()) for f in files]
+    project: Path | None = None
+    if is_bambu_studio_executable(slicer_path):
+        project = build_bambu_project(slicer_path, files)
+        args = [str(slicer_path.resolve()), str(project.resolve())]
+    else:
+        args = [str(slicer_path.resolve())] + [str(f.resolve()) for f in files]
     subprocess.Popen(
         args,
         stdin=subprocess.DEVNULL,
@@ -1292,6 +1304,7 @@ def launch_slicer(slicer_path: Path, files: list[Path]) -> None:
         stderr=subprocess.DEVNULL,
         close_fds=True,
     )
+    return project
 
 
 def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2487,7 +2500,11 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def generate_payload(
+    payload: dict[str, Any],
+    *,
+    suppress_local_inventory: bool = False,
+) -> dict[str, Any]:
     raw_design = payload["design"]
     if _is_base_trim_design(raw_design):
         spec = base_trim_from_design(raw_design)
@@ -2504,7 +2521,12 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     output = _generation_output(payload)
     auto_timestamp = bool(payload.get("auto_timestamp", False))
     requested_inventory = bool(payload.get("keep_log", False))
-    keep_log = requested_inventory if HOSTED else inventory_enabled(output, load_preferences())
+    if HOSTED:
+        keep_log = requested_inventory
+    elif suppress_local_inventory:
+        keep_log = False
+    else:
+        keep_log = inventory_enabled(output, load_preferences())
     with GEOMETRY_LOCK:
         result = generate_organizer_files(
             box, layout, output, label, part_name, label_location, scoop,
@@ -2513,10 +2535,12 @@ def generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         )
     reply = _generation_reply(result=result, output=output)
     if HOSTED and requested_inventory:
-        reply["inventory_bin"] = inventory_bin_record(
+        record = inventory_bin_record(
             box, layout, _extract_generated_files(result), label,
             part_name, scoop,
         )
+        record["qty"] = 0
+        reply["inventory_bin"] = record
     return reply
 
 
@@ -2867,9 +2891,13 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         gen_result = base_trim_joint_test_payload(payload)
     else:
         # For Bambu printing, always auto-save with timestamp if file exists or unnamed
-        gen_result = generate_payload(dict(payload, auto_timestamp=True))
+        gen_result = generate_payload(
+            dict(payload, auto_timestamp=True),
+            suppress_local_inventory=True,
+        )
 
     files = _extract_generated_files(gen_result)
+    design_files = list(files)
 
     # The default bin print also carries the automatic connector bundle (a
     # Side connector, plus 3-Way and 4-Way corners when the bin is eligible),
@@ -2909,12 +2937,26 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "Bambu Studio was not found. Please locate your Bambu Studio executable in settings or install Bambu Studio."
         )
 
-    launch_slicer(slicer_path, files)
+    project_path = launch_slicer(slicer_path, files)
+
+    # Printed means the slicer really opened it: log the copy only now.
+    if (
+        target not in {"connector", "sampler", "base_trim_joint_test"}
+        and not is_base_trim
+    ):
+        output_dir = Path(gen_result["output"])
+        if inventory_enabled(output_dir, load_preferences()):
+            box, layout, label, part_name, _location, scoop = _design(design)
+            record = inventory_bin_record(
+                box, layout, design_files, label, part_name, scoop,
+            )
+            append_bin(output_dir, **record, qty=1)
     return {
         "result": gen_result.get("result"),
         "output": gen_result.get("output"),
         "files": [str(f) for f in files],
         "slicer": str(slicer_path),
+        "project": str(project_path) if project_path else None,
     }
 
 

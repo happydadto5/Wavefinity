@@ -1734,13 +1734,131 @@ class WebApplicationTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 wavefinity_web.launch_slicer(missing_exe, [fake_3mf])
 
-            # Successful launch
-            with patch("subprocess.Popen") as mock_popen:
-                wavefinity_web.launch_slicer(fake_exe, [fake_3mf])
+            # Bambu Studio opens one exported project, never the source files.
+            project = Path(temp_dir) / "Wavefinity Print.3mf"
+            with (
+                patch("subprocess.Popen") as mock_popen,
+                patch.object(wavefinity_web, "build_bambu_project", return_value=project) as build,
+            ):
+                result = wavefinity_web.launch_slicer(fake_exe, [fake_3mf, fake_3mf])
+                build.assert_called_once_with(fake_exe, [fake_3mf, fake_3mf])
                 mock_popen.assert_called_once()
                 args = mock_popen.call_args[0][0]
-                self.assertEqual(args[0], str(fake_exe.resolve()))
-                self.assertEqual(args[1], str(fake_3mf.resolve()))
+                self.assertEqual(args, [str(fake_exe.resolve()), str(project.resolve())])
+                self.assertEqual(result, project)
+
+            # Other slicers keep the direct multi-file launch.
+            orca = Path(temp_dir) / "orca-slicer.exe"
+            orca.touch()
+            with (
+                patch("subprocess.Popen") as mock_popen,
+                patch.object(wavefinity_web, "build_bambu_project") as build,
+            ):
+                result = wavefinity_web.launch_slicer(orca, [fake_3mf])
+                build.assert_not_called()
+                args = mock_popen.call_args[0][0]
+                self.assertEqual(args, [str(orca.resolve()), str(fake_3mf.resolve())])
+                self.assertIsNone(result)
+
+    def _print_setup(self, temp_dir):
+        fake_exe = Path(temp_dir) / "bambu-studio.exe"
+        fake_exe.touch()
+        box = Path(temp_dir) / "Box.3mf"
+        box.touch()
+        connector = Path(temp_dir) / "Connector.3mf"
+        connector.touch()
+        gen = {"result": {"box": {"output": str(box)}}, "output": str(temp_dir)}
+        conn = {"result": {"output": str(connector)}, "output": str(temp_dir)}
+        return fake_exe, box, connector, gen, conn
+
+    def test_print_payload_logs_qty_one_only_after_launch_and_excludes_connectors(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_exe, box, connector, gen, conn = self._print_setup(temp_dir)
+            project = Path(temp_dir) / "Wavefinity Print.3mf"
+            with (
+                patch.object(wavefinity_web, "generate_payload", return_value=gen) as generate,
+                patch.object(wavefinity_web, "connector_payload", return_value=conn),
+                patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
+                patch.object(wavefinity_web, "launch_slicer", return_value=project),
+                patch.object(wavefinity_web, "inventory_enabled", return_value=True),
+                patch.object(wavefinity_web, "append_bin") as append,
+            ):
+                response = wavefinity_web.print_payload({"design": default_design(), "output": temp_dir})
+            self.assertTrue(generate.call_args.kwargs["suppress_local_inventory"])
+            append.assert_called_once()
+            self.assertEqual(append.call_args.kwargs["qty"], 1)
+            self.assertEqual(append.call_args.kwargs["file"], "Box.3mf")
+            self.assertEqual(response["project"], str(project))
+            self.assertEqual(len(response["files"]), 2)
+
+    def test_print_payload_launch_failure_logs_nothing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_exe, box, connector, gen, conn = self._print_setup(temp_dir)
+            with (
+                patch.object(wavefinity_web, "generate_payload", return_value=gen),
+                patch.object(wavefinity_web, "connector_payload", return_value=conn),
+                patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
+                patch.object(wavefinity_web, "launch_slicer", side_effect=RuntimeError("no")),
+                patch.object(wavefinity_web, "inventory_enabled", return_value=True),
+                patch.object(wavefinity_web, "append_bin") as append,
+            ):
+                with self.assertRaises(RuntimeError):
+                    wavefinity_web.print_payload({"design": default_design(), "output": temp_dir})
+            append.assert_not_called()
+
+    def test_generate_payload_suppression_and_hosted_qty_zero(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            box = Path(temp_dir) / "Box.3mf"
+            box.touch()
+            made = {"box": {"output": str(box)}}
+            with (
+                patch.object(wavefinity_web, "_generation_output", return_value=Path(temp_dir)),
+                patch.object(wavefinity_web, "inventory_enabled", return_value=True),
+                patch.object(wavefinity_web, "generate_organizer_files", return_value=made) as gen,
+            ):
+                wavefinity_web.generate_payload({"design": default_design()})
+                self.assertTrue(gen.call_args.kwargs["keep_log"])
+                wavefinity_web.generate_payload(
+                    {"design": default_design()}, suppress_local_inventory=True)
+                self.assertFalse(gen.call_args.kwargs["keep_log"])
+            with (
+                patch.object(wavefinity_web, "HOSTED", True),
+                patch.object(wavefinity_web, "_generation_output", return_value=Path(temp_dir)),
+                patch.object(wavefinity_web, "generate_organizer_files", return_value=made),
+                patch.object(wavefinity_web, "_generation_reply", return_value={}),
+            ):
+                reply = wavefinity_web.generate_payload(
+                    {"design": default_design(), "keep_log": True})
+            self.assertEqual(reply["inventory_bin"]["qty"], 0)
+
+    def test_bulk_print_web_source_contract(self):
+        root = Path(__file__).resolve().parent / "web"
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        model = (root / "drawer-model.js").read_text(encoding="utf-8")
+        css = (root / "drawer.css").read_text(encoding="utf-8")
+        self.assertNotIn("dl-new-printed", panel + css)
+        self.assertNotIn("new_bins_printed: false", model)
+        for ident in ("dl-batch-select-all", "dl-batch-clear", "dl-batch-connectors", "dl-batch-print"):
+            self.assertIn(f'id="{ident}"', panel)
+        self.assertIn("Print Spacers + Connectors", panel)
+        # Session-only selection: never written into the layout or storage.
+        defaults = model[model.index("DL.defaultSettings"):model.index("DL.canonicalLayoutRules")]
+        self.assertNotIn("print", defaults)
+        self.assertNotIn("localStorage", panel[panel.index("DP.printSelected ="):][:200])
+        self.assertIn("DL.bins.filter(one => DL.printNeeded(one) > 0)", panel)
+        self.assertIn("DL.printCount(one)", panel)
+        self.assertIn("tools.hidden = hosted;", panel)
+        fn = model[model.index("DL.printSelectedBins ="):]
+        fn = fn[:fn.index("DL.printDrawer =")]
+        self.assertLess(fn.index("await DL.save()"), fn.index("/api/drawer/print-bins"))
+        self.assertIn("DL.adopt(result)", fn)
+        self.assertIn("DP.resetPrintSelection()", fn)
+        self.assertNotIn("set copies to", model)
+        node = shutil.which("node")
+        if node:
+            for name in ("drawer-model.js", "drawer-panel.js"):
+                done = subprocess.run([node, "--check", str(root / name)], capture_output=True, text=True)
+                self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_print_payload_generates_and_opens_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1851,6 +1969,7 @@ class WebApplicationTests(unittest.TestCase):
                         patch.object(wavefinity_web, "connector_payload") as mock_connector,
                         patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
                         patch.object(wavefinity_web, "launch_slicer"),
+                        patch.object(wavefinity_web, "inventory_enabled", return_value=False),
                     ):
                         wavefinity_web.print_payload({"design": design, "output": temp_dir})
                         mock_connector.assert_not_called()

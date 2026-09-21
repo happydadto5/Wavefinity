@@ -42,6 +42,7 @@ ever sees the old kind.
 
 from __future__ import annotations
 
+import copy
 import math
 from pathlib import Path
 from typing import Any, Callable
@@ -75,6 +76,7 @@ from organizer_engine import (
 from organizer_geometry import _extrude_polygon
 from organizer_inventory import (
     INVENTORY_LOCK,
+    MAX_QTY,
     legacy_layout_space,
     load_inventory,
     load_inventory_text,
@@ -1334,11 +1336,165 @@ def print_spacers_and_connectors(
     files = [output_dir / name for name in counts if (output_dir / name).is_file()]
     if not files:
         raise ValueError("this drawer has no spacers or connectors to print yet")
+    # Each file is repeated once per physical copy so the slicer project holds
+    # the real number of parts.
+    launch_files = [path for path in files for _ in range(max(1, counts[path.name]))]
     slicer = detect_slicer(slicer_path)
     if slicer is None or not Path(slicer).is_file():
         raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
-    launch_slicer(Path(slicer), files)
+    launch_slicer(Path(slicer), launch_files)
     return {"files": [str(path) for path in files], "counts": counts, "notes": connectors["notes"]}
+
+
+# ---------------------------------------------------------------- bulk bin print
+
+
+def inventory_row_files(output_dir: Path | str, row: dict[str, Any]) -> list[Path]:
+    """The generated .3mf files an inventory row records, safely resolved.
+
+    The File cell is user-editable text, so every name must be a plain file
+    name inside ``output_dir`` that exists.
+    """
+    root = Path(output_dir).expanduser().resolve()
+    label = _label(row)
+    found: list[Path] = []
+    for token in str(row.get("file") or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if (Path(token).name != token or Path(token).is_absolute()
+                or "/" in token or "\\" in token):
+            raise ValueError(f"{label} ({row.get('id')}): unsafe file name {token!r}")
+        if not token.lower().endswith(".3mf"):
+            raise ValueError(f"{label} ({row.get('id')}): {token} is not a .3mf file")
+        path = (root / token).resolve()
+        if path.parent != root or not path.is_file():
+            raise ValueError(f"{label} ({row.get('id')}): file {token} is missing from the Space folder")
+        found.append(path)
+    if not found:
+        raise ValueError(f"{label} ({row.get('id')}) has no generated file to print")
+    return found
+
+
+def reconcile_printed_copies(
+    layout: dict[str, Any],
+    bins: list[dict[str, Any]],
+    selection: dict[str, int],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Turn planned copies into printed ones for a batch that was just sent.
+
+    Returns a copied layout whose promoted placements take copy numbers
+    ``old_qty ...`` (stack ``on`` references follow the renames) and the exact
+    new Qty for every selected row. Nothing is saved here.
+    """
+    layout = copy.deepcopy(layout) if layout else None
+    by_id = {one["id"]: one for one in bins}
+    rename: dict[str, str] = {}
+    updates: list[dict[str, Any]] = []
+    drawers = (layout or {}).get("drawers") or []
+    for bin_id, count in selection.items():
+        old_qty = int(by_id[bin_id].get("qty") or 0)
+        planned = [
+            placement
+            for drawer in drawers
+            for placement in drawer.get("placements") or []
+            if placement.get("bin") == bin_id and int(placement.get("copy", 0)) >= old_qty
+        ]
+        planned.sort(key=lambda placement: int(placement.get("copy", 0)))
+        for offset, placement in enumerate(planned[:count]):
+            old_key, new_copy = _key(placement), old_qty + offset
+            placement["copy"] = new_copy
+            rename[old_key] = f"{bin_id}:{new_copy}"
+        updates.append({"id": bin_id, "qty": old_qty + count})
+    for drawer in drawers:
+        for placement in drawer.get("placements") or []:
+            if placement.get("on") in rename:
+                placement["on"] = rename[placement["on"]]
+    return layout, updates
+
+
+def print_inventory_bins(
+    output_dir: Path | str,
+    layout: dict[str, Any],
+    bins: list[dict[str, Any]],
+    selection: dict[str, Any],
+    include_connectors: bool,
+    detect_slicer: Callable,
+    launch_slicer: Callable,
+    slicer_path: str | None = None,
+) -> dict[str, Any]:
+    """Send selected generated bins (and optional Space connectors) to the slicer.
+
+    Qty and planned copies change only after the slicer launch succeeds.
+    """
+    output_dir = Path(output_dir).expanduser().resolve()
+    by_id = {one["id"]: one for one in bins}
+    counts: dict[str, int] = {}
+    rows_files: dict[str, list[Path]] = {}
+    for bin_id, raw_count in (selection or {}).items():
+        one = by_id.get(str(bin_id))
+        if one is None:
+            raise ValueError(f"no bin {bin_id!r} in the inventory")
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            raise ValueError(f"{_label(one)}: copies must be a whole number") from None
+        if count < 1:
+            continue
+        if one.get("kind") not in ("bin", "b4b"):
+            raise ValueError(f"{_label(one)} is not a generated bin and cannot be printed here")
+        if int(one.get("qty") or 0) + count > MAX_QTY:
+            raise ValueError(f"{_label(one)}: Qty printed cannot go above {MAX_QTY}")
+        rows_files[one["id"]] = inventory_row_files(output_dir, one)
+        counts[one["id"]] = count
+    if not counts:
+        raise ValueError("Select at least one bin to print.")
+
+    connector_counts: dict[str, int] = {}
+    notes: list[str] = []
+    if include_connectors:
+        for drawer in (layout or {}).get("drawers") or []:
+            made = generate_connectors(output_dir, layout, bins, drawer.get("id"))
+            for item in made["connectors"]:
+                connector_counts[item["file"]] = connector_counts.get(item["file"], 0) + int(item["count"])
+            for note in made["notes"]:
+                if note not in notes:
+                    notes.append(note)
+
+    slicer = detect_slicer(slicer_path)
+    if slicer is None or not Path(slicer).is_file():
+        raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
+
+    launch_files: list[Path] = []
+    for bin_id, count in counts.items():
+        for _copy in range(count):
+            launch_files.extend(rows_files[bin_id])
+    for name, count in connector_counts.items():
+        launch_files.extend([output_dir / name] * count)
+
+    reconciled, updates = reconcile_printed_copies(layout, bins, counts)
+
+    project = launch_slicer(Path(slicer), launch_files)
+
+    try:
+        changes: dict[str, Any] = {"bin_updates": updates}
+        if reconciled is not None:
+            changes["layout"] = reconciled
+        saved = save_inventory(output_dir, **changes)
+    except Exception as error:
+        raise RuntimeError(
+            f"Bambu Studio opened, but saving the printed counts failed: {error}. "
+            "Nothing was marked printed - fix Qty by hand if you print."
+        ) from error
+    return {
+        **saved,
+        "selection": counts,
+        "bin_copies": sum(counts.values()),
+        "connector_counts": connector_counts,
+        "connector_copies": sum(connector_counts.values()),
+        "notes": notes,
+        "project": str(project) if project else None,
+    }
 
 
 # ---------------------------------------------------------------- web routes
@@ -1478,6 +1634,7 @@ def drawer_routes(
             out_dir = folder(payload)
             inv = load_inventory(out_dir)
             files: list[Path] = []
+            launch_files: list[Path] = []
             counts: dict[str, int] = {}
             for b in inv["bins"]:
                 count = selection.get(b["id"])
@@ -1485,14 +1642,30 @@ def drawer_routes(
                     path = out_dir / b["file"]
                     if path.is_file():
                         files.append(path)
+                        launch_files.extend([path] * int(count))
                         counts[b["file"]] = int(count)
             if not files:
                 raise ValueError("Select at least one spacer to print.")
             slicer = detect_slicer(payload.get("slicer_path"))
             if slicer is None or not Path(slicer).is_file():
                 raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
-            launch_slicer(Path(slicer), files)
+            launch_slicer(Path(slicer), launch_files)
             return {"files": [str(path) for path in files], "counts": counts, "notes": []}
+
+    def print_bins(payload):
+        if hosted:
+            raise ValueError("Bulk printing to a local slicer is available in local Wavefinity.")
+        if detect_slicer is None or launch_slicer is None:
+            raise ValueError("printing is not available here")
+        with geometry_lock:
+            out_dir = folder(payload)
+            inv = load_inventory(out_dir)
+            return with_rules(print_inventory_bins(
+                out_dir, inv["layout"], inv["bins"],
+                payload.get("selection") or {},
+                bool(payload.get("include_connectors", True)),
+                detect_slicer, launch_slicer, payload.get("slicer_path"),
+            ))
 
     def connectors(payload):
         if hosted:
@@ -1521,4 +1694,5 @@ def drawer_routes(
         "/api/drawer/connectors": connectors,
         "/api/drawer/print": send_to_slicer,
         "/api/drawer/print-spacers": print_spacers_only,
+        "/api/drawer/print-bins": print_bins,
     }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-21 — Bulk Space Printing (Fix 027)
+
+- Generating a bin now always adds it to Inventory at Qty 0. The "New bins count as printed" switch is gone.
+- Space Inventory can print many bins at once: tick designs or press Select all needed, then Print Selected to Bambu Studio. Missing copies (and optionally the Space's connectors, once) go out together; Qty and planned copies update only after Bambu Studio opens.
+- Bambu Studio launches now build one arranged Bambu project 3MF through Bambu's own command line, keeping second-color parts, instead of opening every file separately. Repeated files mean real copies, so there is no manual copy count.
+- Direct Print logs Qty 1 only after the slicer opens. "Print Drawer (All)" is now "Print Spacers + Connectors".
+
 ## 2026-09-21 — Pegboard Spaces
 
 - Added Pegboard as a Space type for standard 1-inch pegboard and IKEA SKÅDIS.
