@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-20 — Edge Mount separate labels
+
+- Edge Mount labels now default to a replaceable separate label part, with a long wavy-wall saddle clip and its own generated file. Integrated keeps the old fused plate, and older saved labels stay integrated.
+
 ## 2026-09-20 — Corner connectors
 
 - The 3-Way Corner now has a clear T-shaped top cap: two real wall-gripping seams plus an honest cap-only third arm beside the open quadrant. The 4-Way remains a full four-way cross.

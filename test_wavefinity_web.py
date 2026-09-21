@@ -3036,6 +3036,16 @@ const tick = () => new Promise(r => setImmediate(r));
         self.assertIn("svh", block)
         self.assertIn("min(720px", block)
 
+    def test_edge_mount_label_type_browser_contract(self):
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        index = (root / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('label_type: "separate"', app_js)
+        self.assertIn('id="edge-mount-label-type"', index)
+        self.assertIn('value="separate">Separate part', index)
+        read = app_js[app_js.index("function readEdgeMountForm(design) {"):app_js.index("function resolvedEdgeMountAccessDiameter")]
+        self.assertIn("label_type:", read)
+
 
 class WebServerTests(unittest.TestCase):
     @classmethod

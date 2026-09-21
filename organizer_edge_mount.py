@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import trimesh
 from shapely.affinity import rotate as rotate_polygon, translate as translate_polygon
 from shapely.geometry import LineString, MultiPolygon, Polygon
-from shapely.geometry import box as shapely_box
 
 from organizer_engine import (
     BoxSpec,
@@ -61,6 +61,12 @@ EDGE_LABEL_TEXT_MARGIN = 2.0
 EDGE_LABEL_TARGET_CAP_HEIGHT = 12.0
 EDGE_LABEL_MIN_CAP_HEIGHT = 6.0
 EDGE_LABEL_FRONT_CHAMFER_MM = 1.0
+EDGE_LABEL_CLIP_DEPTH_MM = 3.0
+EDGE_LABEL_CLIP_FACE_CLEARANCE_MM = 0.25
+EDGE_LABEL_CLIP_LEG_THICKNESS_MM = 1.0
+EDGE_LABEL_CLIP_RETENTION_MM = 0.15
+EDGE_LABEL_CLIP_RETENTION_SPAN_MM = 4.0
+EDGE_LABEL_CLIP_RAMP_OVERLAP_MM = 0.75
 
 EDGE_HOLE_DEFAULT_SCREW_DIAMETER = 4.0
 EDGE_HOLE_DEFAULT_ACCESS_DIAMETER = 8.0
@@ -181,6 +187,8 @@ def _validate_label_ranges(spec: EdgeMountSpec) -> None:
         )
     if spec.label_length_mode not in ("full", "text"):
         raise ValueError("Edge Mount plate length mode must be 'full' or 'text'")
+    if spec.label_type not in ("separate", "integrated"):
+        raise ValueError("Edge Mount label type must be 'separate' or 'integrated'")
     if not spec.label_raised:
         require_text_backing(
             spec.label_thickness_mm, spec.label_text_depth_mm, what="Edge Mount label"
@@ -252,6 +260,7 @@ def edge_mount_label_plan(box: BoxSpec) -> dict[str, object] | None:
         "raised": bool(spec.label_raised),
         "text_depth_mm": spec.label_text_depth_mm,
         "rotation_deg": rotation,
+        "label_type": spec.label_type,
     }
 
 
@@ -477,7 +486,7 @@ def _plate_rectangle(box: BoxSpec, side: str, half_length: float, projection: fl
     return translate_polygon(polygon, xoff=ox1)
 
 
-def _build_label_plate_mesh(box: BoxSpec, plan: dict[str, object]) -> trimesh.Trimesh:
+def _build_label_plate_mesh(box: BoxSpec, plan: dict[str, object], *, top_z: float | None = None) -> trimesh.Trimesh:
     side = str(plan["side"])
     half = float(plan["plate_length_mm"]) / 2.0
     rectangle = _plate_rectangle(box, side, half, float(plan["projection_mm"]))
@@ -496,10 +505,106 @@ def _build_label_plate_mesh(box: BoxSpec, plan: dict[str, object]) -> trimesh.Tr
             "wall. Increase the projection or plate length."
         )
     solid = union(solids) if len(solids) > 1 else solids[0]
-    solid.apply_translation((0.0, 0.0, box.z - thickness))
+    top_z = box.z if top_z is None else top_z
+    solid.apply_translation((0.0, 0.0, top_z - thickness))
     solid.remove_unreferenced_vertices()
     solid.merge_vertices()
     return solid
+
+
+def _extrude_parts(footprint, height: float, z: float) -> list[trimesh.Trimesh]:
+    pieces = list(footprint.geoms) if isinstance(footprint, MultiPolygon) else [footprint]
+    solids = []
+    for piece in pieces:
+        if not piece.is_empty and piece.area > 1e-7:
+            solid = _extrude_polygon(piece, height)
+            solid.apply_translation((0.0, 0.0, z))
+            solids.append(solid)
+    return solids
+
+
+def _retention_ramp(
+    box: BoxSpec, side: str, tangent: float, z0: float, z1: float,
+) -> trimesh.Trimesh:
+    """A short, printable 45-degree inner-leg snap rib at one wall location."""
+    inward = 1.0 if side in ("front", "left") else -1.0
+    samples = np.linspace(
+        tangent - EDGE_LABEL_CLIP_RETENTION_SPAN_MM / 2.0,
+        tangent + EDGE_LABEL_CLIP_RETENTION_SPAN_MM / 2.0,
+        9,
+    )
+    cavity_samples = [_wall_surface_coords(box, side, float(one))[1] for one in samples]
+    # A localized straight ramp is placed from the most inward real cavity
+    # sample in its 4 mm span, so the wave can never turn a clearance into a
+    # collision between samples.
+    cavity = max(cavity_samples) if inward > 0 else min(cavity_samples)
+    clearance = EDGE_LABEL_CLIP_FACE_CLEARANCE_MM
+    interference = EDGE_LABEL_CLIP_RETENTION_MM
+    overlap = EDGE_LABEL_CLIP_RAMP_OVERLAP_MM
+    # Profile coordinates are inward distance from the real cavity surface
+    # (horizontal) and Z (vertical).  Both slopes rise one Z mm per inward
+    # mm, so the entry and release ramps are exactly 45 degrees.
+    profile = Polygon([
+        (clearance, z0),
+        (clearance + overlap, z0),
+        (clearance + overlap, z1),
+        (clearance, z1),
+        (clearance - interference, z1 - interference),
+        (clearance - interference, z0 + interference),
+    ])
+    rib = _extrude_polygon(profile, EDGE_LABEL_CLIP_RETENTION_SPAN_MM)
+    t0 = tangent - EDGE_LABEL_CLIP_RETENTION_SPAN_MM / 2.0
+    transform = np.eye(4)
+    if side == "front":
+        transform[:3, :3] = ((0.0, 0.0, 1.0), (inward, 0.0, 0.0), (0.0, 1.0, 0.0))
+        transform[:3, 3] = (t0, cavity, 0.0)
+    elif side == "back":
+        transform[:3, :3] = ((0.0, 0.0, 1.0), (inward, 0.0, 0.0), (0.0, 1.0, 0.0))
+        transform[:3, 3] = (t0, cavity, 0.0)
+    elif side == "left":
+        transform[:3, :3] = ((inward, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 1.0, 0.0))
+        transform[:3, 3] = (cavity, t0, 0.0)
+    else:
+        transform[:3, :3] = ((inward, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 1.0, 0.0))
+        transform[:3, 3] = (cavity, t0, 0.0)
+    rib.apply_transform(transform)
+    return rib
+
+
+def make_edge_mount_label_part(box: BoxSpec) -> trimesh.Trimesh | None:
+    """The installed separate plate and continuous clip around the real wall."""
+    plan = edge_mount_label_plan(box)
+    if plan is None or plan["label_type"] != "separate":
+        return None
+    side = str(plan["side"])
+    thickness = float(plan["thickness_mm"])
+    rectangle = _plate_rectangle(box, side, float(plan["plate_length_mm"]) / 2.0, float(plan["projection_mm"]))
+    outer = wavy_outer_polygon(box)
+    cavity = wavy_cavity_polygon(box)
+    clearance = EDGE_LABEL_CLIP_FACE_CLEARANCE_MM
+    leg_thickness = EDGE_LABEL_CLIP_LEG_THICKNESS_MM
+    # The legs begin clear of each real face.  The bridge lives only above the
+    # rim, where it can straddle the wall without touching it.
+    outer_leg = outer.buffer(clearance + leg_thickness).difference(
+        outer.buffer(clearance)
+    ).intersection(rectangle)
+    inner_leg = cavity.buffer(-clearance).difference(
+        cavity.buffer(-(clearance + leg_thickness))
+    ).intersection(rectangle)
+    bridge = outer.buffer(clearance + leg_thickness).difference(
+        cavity.buffer(-(clearance + leg_thickness))
+    ).intersection(rectangle)
+    half = float(plan["plate_length_mm"]) / 2.0
+    rib_half = EDGE_LABEL_CLIP_RETENTION_SPAN_MM / 2.0
+    offset = max(0.0, half - 2.0 * rib_half)
+    low_z = box.z - EDGE_LABEL_CLIP_DEPTH_MM
+    legs = _extrude_parts(outer_leg.union(inner_leg), EDGE_LABEL_CLIP_DEPTH_MM + thickness, low_z)
+    caps = _extrude_parts(bridge, thickness, box.z)
+    rib_z0 = low_z + EDGE_LABEL_CLIP_RETENTION_MM
+    rib_z1 = box.z - EDGE_LABEL_CLIP_RETENTION_MM
+    ramp_ribs = [_retention_ramp(box, side, tangent, rib_z0, rib_z1) for tangent in (-offset, offset)]
+    plate = _build_label_plate_mesh(box, plan, top_z=box.z + thickness)
+    return union([plate, *legs, *caps, *ramp_ribs])
 
 
 def apply_edge_mount_hole_cuts(
@@ -558,7 +663,7 @@ def apply_edge_mount_structure(
         return body
     result = body
     label_plan = edge_mount_label_plan(box)
-    if label_plan is not None:
+    if label_plan is not None and label_plan["label_type"] == "integrated":
         plate = _build_label_plate_mesh(box, label_plan)
         # union() already cleans up after itself (and only keeps the clean
         # copy when that does not break watertightness) - an extra unguarded
@@ -591,7 +696,6 @@ def edge_mount_text_object(box: BoxSpec) -> tuple[str, trimesh.Trimesh, bool] | 
     if rotation:
         outline = rotate_polygon(outline, rotation, origin=(0.0, 0.0))
     outline = translate_polygon(outline, xoff=position[0], yoff=position[1])
-    mesh = text_prism(
-        outline, box.z, depth=float(plan["text_depth_mm"]), raised=bool(plan["raised"]),
-    )
+    top_z = box.z + float(plan["thickness_mm"]) if plan["label_type"] == "separate" else box.z
+    mesh = text_prism(outline, top_z, depth=float(plan["text_depth_mm"]), raised=bool(plan["raised"]))
     return str(plan["text"]), mesh, bool(plan["raised"])
