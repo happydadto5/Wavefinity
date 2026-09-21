@@ -2010,8 +2010,8 @@ console.log(JSON.stringify(out));
         self.assertEqual(out["placements"], 0)
 
     def test_space_workspace_separates_editor_mode_from_preview(self):
-        # Fix 017: the Space | Design editor mode is its own state; showing or
-        # hiding the Space preview never opens, closes or flips it.
+        # Fix 024: preview and editor choices are synchronized without a
+        # second state machine.
         root = Path(__file__).resolve().parent / "web"
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         index_html = (root / "index.html").read_text(encoding="utf-8")
@@ -2024,9 +2024,25 @@ console.log(JSON.stringify(out));
         self.assertNotIn("DP.mode =", observer)
         enter = panel[panel.index("DP.enter = "):panel.index("DP.leave = ")]
         self.assertIn('workingDesignForSpace() ? "design" : "space"', enter)
-        self.assertNotIn("activatePreviewView", enter)
-        setter = panel[panel.index("DP.setMode = "):panel.index("DP.enter = ")]
+        self.assertIn('preferredMode === "space"', enter)
+        setter = panel[panel.index("DP.setMode = "):panel.index("DP.selectMode = ")]
         self.assertNotIn("activatePreviewView", setter)
+        app = (root / "app.js").read_text(encoding="utf-8")
+        preview = app[app.index("function activatePreviewView(view)"):app.index("\nfunction wireControls", app.index("function activatePreviewView(view)"))]
+        self.assertIn('view === "2d" || view === "3d"', preview)
+        self.assertIn('DP.setMode("design")', preview)
+        self.assertIn('DP.enter("space")', preview)
+        self.assertIn('DP.setMode("space")', preview)
+        self.assertIn('role="tablist"', index_html)
+        mode_toggle = index_html[index_html.index('id="space-mode-toggle"'):index_html.index("</div>", index_html.index('id="space-mode-toggle"'))]
+        self.assertEqual(mode_toggle.count('role="tab"'), 2)
+        self.assertIn("aria-selected", index_html)
+        apply_mode = panel[panel.index("DP.applyMode = "):panel.index("DP.setMode = ")]
+        self.assertIn('setAttribute("aria-selected", String(on))', apply_mode)
+        self.assertIn("button.tabIndex = on ? 0 : -1", apply_mode)
+        select_mode = panel[panel.index("DP.selectMode = "):panel.index("// Open the Space workspace")]
+        self.assertIn('activatePreviewView("drawer")', select_mode)
+        self.assertIn('activatePreviewView("3d")', select_mode)
 
     def test_space_settings_lost_their_user_choices(self):
         root = Path(__file__).resolve().parent / "web"

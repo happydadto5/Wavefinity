@@ -42,9 +42,9 @@
           </div>
         </div>
         <div id="space-head-edit-host" class="space-head-edit-host" hidden></div>
-        <div id="space-mode-toggle" class="space-mode-toggle" role="group" aria-label="What the left panel edits" hidden>
-          <button type="button" data-space-mode="space" class="active" aria-pressed="true" title="Work on the Space and its layout">Space</button>
-          <button type="button" data-space-mode="design" aria-pressed="false" title="Work on the current bin or Storage Box">Design</button>
+        <div id="space-mode-toggle" class="space-mode-toggle" role="tablist" aria-label="What the left panel edits" hidden>
+          <button type="button" role="tab" data-space-mode="space" class="active" aria-selected="true" aria-pressed="true" tabindex="0" title="Work on the Space and its layout">Space</button>
+          <button type="button" role="tab" data-space-mode="design" aria-selected="false" aria-pressed="false" tabindex="-1" title="Work on the current bin or Storage Box">Design</button>
         </div>
       </section>
       <section class="control-section open" data-section="build">

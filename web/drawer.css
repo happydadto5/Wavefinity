@@ -219,11 +219,17 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .space-head-edit-host .space-type-fields { display: grid; gap: 8px; margin: 0; padding: 0; }
 .space-head-edit-host .space-buttons { margin-top: 10px; }
 .space-mode-toggle {
-  display: grid; grid-template-columns: 1fr 1fr; margin-top: 12px; padding: 3px; gap: 3px;
-  background: #e3e9ea; border-radius: 9px;
+  display: grid; grid-template-columns: 1fr 1fr; margin-top: 12px;
+  border-bottom: 1px solid var(--line-dark);
 }
 .space-mode-toggle button {
-  border: 0; border-radius: 7px; padding: 7px 10px; background: transparent; color: var(--muted);
-  font-weight: 700; font-size: 13px; cursor: pointer;
+  border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0;
+  padding: 6px 10px 7px; background: transparent; color: var(--muted);
+  font-weight: 700; font-size: 13px; cursor: pointer; margin-bottom: -1px;
 }
-.space-mode-toggle button.active { background: #fff; color: var(--teal-dark); box-shadow: 0 1px 3px rgba(23,37,45,.18); }
+.space-mode-toggle button.active {
+  background: var(--panel); color: var(--teal-dark); border-color: var(--line-dark);
+  border-bottom-color: var(--panel);
+}
+.space-mode-toggle button:hover,
+.space-mode-toggle button:focus-visible { color: var(--teal-dark); outline: 2px solid var(--teal); outline-offset: -2px; }

@@ -988,8 +988,7 @@ DP.renderSave = () => {
 //   - which preview canvas is showing (3D, 2D or Space): the view tabs own it;
 //   - which editor owns the left panel (DP.mode): "space" for the layout
 //     tools, "design" for the current bin or Storage Box.
-// Changing one never changes another, except that opening the workspace
-// picks the starting editor.
+// Preview and editor controls synchronize through their owners below.
 
 DP.mode = "space";
 
@@ -1007,7 +1006,9 @@ DP.applyMode = () => {
   $$("[data-space-mode]").forEach(button => {
     const on = button.dataset.spaceMode === DP.mode;
     button.classList.toggle("active", on);
+    button.setAttribute("aria-selected", String(on));
     button.setAttribute("aria-pressed", String(on));
+    button.tabIndex = on ? 0 : -1;
   });
   if (typeof SP !== "undefined" && SP.renderSpaceInfo) SP.renderSpaceInfo();
   if (typeof updateHistoryButtons === "function") updateHistoryButtons();
@@ -1020,12 +1021,21 @@ DP.setMode = mode => {
   if (mode === "space") DP.update();
 };
 
+DP.selectMode = mode => {
+  if (mode !== "space" && mode !== "design") return;
+  DP.setMode(mode);
+  if (mode === "space") activatePreviewView("drawer");
+  else if ($('.view-tab[data-view="drawer"]')?.classList.contains("active")) activatePreviewView("3d");
+};
+
 // Open the Space workspace. Starts in Design mode when there is a current
 // design to work on, otherwise Space mode.
-DP.enter = async () => {
+DP.enter = async preferredMode => {
   if (DL.active) return;
   DL.active = true;
-  DP.mode = typeof workingDesignForSpace === "function" && workingDesignForSpace() ? "design" : "space";
+  DP.mode = preferredMode === "space" || preferredMode === "design"
+    ? preferredMode
+    : (typeof workingDesignForSpace === "function" && workingDesignForSpace() ? "design" : "space");
   DP.build();
   DP.applyMode();
   DP.update();
@@ -1054,7 +1064,7 @@ DP.leave = () => {
   if (!wrap) return;
   DV.wire();
   DL.on(DP.update);
-  $$("[data-space-mode]").forEach(button => button.addEventListener("click", () => DP.setMode(button.dataset.spaceMode)));
+  $$("[data-space-mode]").forEach(button => button.addEventListener("click", () => DP.selectMode(button.dataset.spaceMode)));
   // Showing the Space preview opens the workspace; hiding it does not close it.
   new MutationObserver(() => {
     if (wrap.classList.contains("active") && !DL.active) DP.enter();
