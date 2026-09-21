@@ -233,7 +233,15 @@ def feature_min_footprint(
         held = (HEX_BIT_FLATS + HEX_BIT_CLEARANCE
                 if _is_hex_bit(item.profile) else item.held(item.widest))
         wall = float(options["wall"])
-        from ._bore import bore_direction, bore_minimum_pitches
+        from ._bore import bore_direction, bore_minimum_pitches, wall_only_envelope
+        if str(options.get("bore_style", "full_base")) == "wall_only":
+            env = wall_only_envelope(
+                item.profile, held, wall, str(options.get("wall_style", "wavy")))
+            raw_c, raw_r = one.options.get("columns"), one.options.get("rows")
+            columns = max(1, int(round(float(raw_c)))) if raw_c is not None else 1
+            rows = max(1, int(round(float(raw_r)))) if raw_r is not None else 1
+            return (env["span_x"] + (columns - 1) * env["pitch_x"],
+                    env["span_y"] + (rows - 1) * env["pitch_y"])
         angle = float(options.get("angle", 0.0))
         lean_axis, _ = bore_direction(one)
         pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, lean_axis)

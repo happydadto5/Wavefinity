@@ -316,6 +316,61 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn("Y quantity", labels)
         self.assertIn("Angle °", labels)
 
+    def test_bore_catalog_exposes_style_and_wall_style_enums(self):
+        parts = {part["kind"]: part for part in catalog_payload()["parts"]}
+        fields = {field["key"]: field for field in parts["bore"]["fields"]}
+        self.assertEqual(fields["bore_style"]["type"], "enum")
+        self.assertEqual(fields["wall_style"]["type"], "enum")
+        self.assertFalse(parts["bore"]["flags"]["qty"])
+
+    def test_bore_resolved_defaults_are_full_base(self):
+        design = default_design()
+        item = {"name": "tube", "profile": "round",
+                "segments": [{"length": 40, "diameter": 6}], "clearance": 0.25}
+        plain = default_feature_payload({"design": design, "kind": "bore", "item": item})
+        self.assertEqual(plain["resolved_options"]["bore_style"], "full_base")
+        self.assertEqual(plain["resolved_options"]["wall"], 1.6)
+        self.assertEqual(plain["resolved_options"]["wall_style"], "wavy")
+
+    def test_wall_only_bore_default_wall_comes_from_the_bin_wall(self):
+        design = default_design()
+        design["box"].update({"wall": 2.4, "standard_walls": False, "x": 64.0, "y": 64.0})
+        item = {"name": "tube", "profile": "round",
+                "segments": [{"length": 40, "diameter": 6}], "clearance": 0.25}
+        full = default_feature_payload({"design": design, "kind": "bore", "item": item})
+        self.assertEqual(full["resolved_options"]["wall"], 1.6)
+        feature = full["feature"]
+        feature["options"] = {**feature.get("options", {}), "bore_style": "wall_only"}
+        feature["options"].pop("wall", None)
+        feature["zone"] = [-20.0, -20.0, 20.0, 20.0]
+        design["layout"]["features"] = [feature]
+        result = draft_payload({"design": design, "feature": feature})
+        self.assertEqual(result["resolved_options"]["bore_style"], "wall_only")
+        self.assertEqual(result["resolved_options"]["wall"], design["box"]["wall"])
+
+    def test_bore_editor_source_handles_wall_only_as_strings_and_upright(self):
+        app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        for text in ("Full Base", "Wall Only", "Wavy Walls", "Straight Walls",
+                     'data-draft="option:bore_style"', 'data-draft="option:wall_style"'):
+            self.assertIn(text, app_js)
+        # Style words never go through the numeric option path.
+        self.assertIn('"bore_style", "wall_style", "holder_style"', app_js)
+        self.assertIn('one.options.bore_style = get(changed) === "wall_only"', app_js)
+        self.assertIn("one.options.angle = 0;", app_js)
+        self.assertIn("delete one.options.angle_towards;", app_js)
+        # Depth and lean controls disappear; wall uses the preset list.
+        self.assertIn('${wallOnly ? "" : optionField("depth"', app_js)
+        self.assertIn('dividerThicknessField(boreWallShown, "option:wall")', app_js)
+        # Sizing mirrors the backend shell reach from the catalog's wave values.
+        sizing = app_js[app_js.index("function sizeBoreToGrid(one) {"):]
+        sizing = sizing[:sizing.index("function sizePostToRow")] if "function sizePostToRow" in sizing else sizing
+        self.assertIn("wave_amplitude_mm", sizing)
+        self.assertIn("wall_depth_factor", sizing)
+        self.assertIn("waveNoiseFloor = 1e-4", sizing)
+        self.assertIn("2 * amplitude + wall * depthFactor + waveNoiseFloor", sizing)
+        # Round profiles use a conservative circumscribed clear span (256 sides).
+        self.assertIn("held / Math.cos(Math.PI / 256)", sizing)
+
     def test_hex_bit_bore_default_holds_the_bit_and_stands_upright(self):
         design = default_design()
         response = default_feature_payload({
