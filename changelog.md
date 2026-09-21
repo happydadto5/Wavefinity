@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-21 — Pegboard Spaces
+
+- Added Pegboard as a Space type for standard 1-inch pegboard and IKEA SKÅDIS.
+- Board size can be entered physically or by hole/slot count, with the usable grid and residual border shown before creation.
+- Ordinary bins gain a standard-neutral rear receiver with automatic or manual cleat counts; generation creates the matching board adapters as a separate 3MF.
+- Space shows the board openings, snaps bins to mount positions, and rejects footprint, edge, standard, and exact mount conflicts.
+
 ## 2026-09-20 — Edge Mount separate labels
 
 - Edge Mount labels now default to a replaceable separate label part, with a long wavy-wall saddle clip and its own generated file. Integrated keeps the old fused plate, and older saved labels stay integrated.

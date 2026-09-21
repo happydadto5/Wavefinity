@@ -79,10 +79,11 @@ DV.zoomBy = (factor, sx = null, sy = null) => {
   const [width, height] = DV.size();
   if (!DL.layout || !width) return;
   const drawer = DL.drawer();
-  const before = sx === null ? null : DV.camera(width, height, drawer).onPlane(sx, sy, 0);
+  const camera = () => DL.isPegboard(drawer) ? DV.pegboardCamera(width, height, drawer) : DV.camera(width, height, drawer);
+  const before = sx === null ? null : camera().onPlane(sx, sy, 0);
   DV.view.zoom = dvClamp(DV.view.zoom * factor, DV.LIMITS.zoom);
   if (before) {
-    const after = DV.camera(width, height, drawer).onPlane(sx, sy, 0);
+    const after = camera().onPlane(sx, sy, 0);
     if (after) {
       DV.view.panX += before[0] - after[0];
       DV.view.panY += before[1] - after[1];
@@ -152,6 +153,18 @@ DV.camera = (width, height, drawer, view = DV.view) => {
     return t > 0 ? V3.add(b.eye, V3.scale(ray, t)) : null;
   };
   return { W, D, H, eye: b.eye, project, onPlane };
+};
+
+DV.pegboardCamera = (width, height, drawer) => {
+  const pad = 34;
+  const scale = Math.max(0.05, Math.min((width - 2 * pad) / drawer.width, (height - 2 * pad) / drawer.depth) * DV.view.zoom);
+  const left = (width - drawer.width * scale) / 2 - DV.view.panX * scale;
+  const top = (height - drawer.depth * scale) / 2 + DV.view.panY * scale;
+  return {
+    W: drawer.width, D: drawer.depth, H: 0, eye: [drawer.width / 2, -1, drawer.depth / 2],
+    project: point => [left + point[0] * scale, top + (drawer.depth - point[1]) * scale],
+    onPlane: (sx, sy) => [(sx - left) / scale, drawer.depth - (sy - top) / scale, 0],
+  };
 };
 
 // ------------------------------------------------------------------ colour
@@ -232,8 +245,7 @@ DV.layersFor = (bins, keys, start) => {
 // Everything standing in the drawer, as columns of boxes, with a drag or
 // drop shown where it would land.
 DV.entries = (drawer, grid) => {
-  const step = grid.step;
-  const box = (gx, gy, w, d) => ({ x0: grid.ox + gx * step, y0: grid.oy + gy * step, x1: grid.ox + (gx + w) * step, y1: grid.oy + (gy + d) * step });
+  const box = (gx, gy, w, d) => ({ x0: grid.ox + gx * grid.stepX, y0: grid.oy + gy * grid.stepY, x1: grid.ox + (gx + w) * grid.stepX, y1: grid.oy + (gy + d) * grid.stepY });
   const entries = [];
   const drag = DV.drag?.moved ? DV.drag : null;
   for (const item of DL.items(drawer)) {
@@ -334,9 +346,53 @@ DV.render = () => {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, box.width, box.height);
   const drawer = DL.drawer();
-  DV.cam = DV.camera(box.width, box.height, drawer);
-  DV.hits = DV.paintScene(ctx, drawer, DV.cam);
+  DV.cam = DL.isPegboard(drawer) ? DV.pegboardCamera(box.width, box.height, drawer) : DV.camera(box.width, box.height, drawer);
+  DV.hits = DL.isPegboard(drawer) ? DV.paintPegboardScene(ctx, drawer, DV.cam) : DV.paintScene(ctx, drawer, DV.cam);
   DV.renderSelection();
+};
+
+DV.paintPegboardScene = (ctx, drawer, cam) => {
+  const grid = DL.grid(drawer);
+  const rect = (x0, y0, x1, y1) => [cam.project([x0, y0, 0]), cam.project([x1, y0, 0]), cam.project([x1, y1, 0]), cam.project([x0, y1, 0])];
+  const path = points => { ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.closePath(); };
+  const board = rect(0, 0, drawer.width, drawer.depth);
+  path(board); ctx.fillStyle = "#d9c79e"; ctx.fill(); ctx.strokeStyle = "#816d48"; ctx.lineWidth = 2; ctx.stroke();
+  const standard = state.catalog?.pegboard_rules?.standards?.find(row => row.id === drawer.pegboard_standard) || {};
+  for (let gy = 0; gy < grid.rows; gy += 1) for (let gx = 0; gx < grid.cols; gx += 1) {
+    const px = grid.ox + (gx + 0.5) * grid.stepX + (standard.stagger_x_mm && gy % 2 ? standard.stagger_x_mm : 0);
+    const py = grid.oy + (gy + 0.5) * grid.stepY;
+    if (px > drawer.width - grid.ox + 1e-9) continue;
+    const [sx, sy] = cam.project([px, py, 0]);
+    const [rx] = cam.project([px + Number(standard.opening_width_mm || 6) / 2, py, 0]);
+    const [, ry] = cam.project([px, py + Number(standard.opening_height_mm || 6) / 2, 0]);
+    ctx.beginPath();
+    if (standard.opening_shape === "rounded_slot") ctx.roundRect(sx - Math.abs(rx - sx), sy - Math.abs(ry - sy), Math.abs(rx - sx) * 2, Math.abs(ry - sy) * 2, Math.abs(rx - sx));
+    else ctx.arc(sx, sy, Math.max(1.5, Math.abs(rx - sx)), 0, Math.PI * 2);
+    ctx.fillStyle = "#4e4638"; ctx.fill();
+  }
+  const hits = [];
+  const problems = DV.problemKeys();
+  for (const entry of DV.entries(drawer, grid)) {
+    const one = entry.layers[entry.layers.length - 1].bin;
+    const poly = rect(entry.x0, entry.y0, entry.x1, entry.y1);
+    path(poly);
+    const invalid = entry.mode === "invalid" || entry.layers.some(layer => problems.get(layer.key) === "error");
+    ctx.fillStyle = invalid ? "rgba(210,75,63,.72)" : entry.ghost ? "rgba(63,155,155,.55)" : "rgba(67,137,139,.86)";
+    ctx.fill(); ctx.strokeStyle = DL.selected && entry.layers.some(layer => layer.key === DL.selected) ? "#ffb000" : "#244b4c"; ctx.lineWidth = 2; ctx.stroke();
+    const [cx, cy] = cam.project([(entry.x0 + entry.x1) / 2, (entry.y0 + entry.y1) / 2, 0]);
+    ctx.fillStyle = "white"; ctx.font = "600 12px 'Segoe UI', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(DV.fitText(ctx, DL.label(one), Math.max(20, Math.abs(poly[1][0] - poly[0][0]) - 8)), cx, cy);
+    if (!entry.ghost) entry.layers.forEach(layer => hits.push({ key: layer.key, grid: true, z: 0, polys: [poly], working: Boolean(entry.working) }));
+    const selected = entry.working || entry.layers.some(layer => layer.key === DL.selected);
+    if (selected) {
+      const layout = DL.pegboardLayouts[one.id] || one.pegboard_layout;
+      for (const [mx, my] of layout?.mount_offsets || []) {
+        const [hx, hy] = cam.project([grid.ox + (Math.round((entry.x0 - grid.ox) / grid.stepX) + mx + 0.5) * grid.stepX, grid.oy + (Math.round((entry.y0 - grid.oy) / grid.stepY) + my + 0.5) * grid.stepY, 0]);
+        ctx.beginPath(); ctx.arc(hx, hy, 5, 0, Math.PI * 2); ctx.fillStyle = "#ffe16b"; ctx.fill(); ctx.strokeStyle = "#5d4800"; ctx.stroke();
+      }
+    }
+  }
+  return hits;
 };
 
 // One repaint per frame while dragging, panning or hovering. Pointer events
@@ -636,7 +692,7 @@ DV.cellUnder = (bins, sx, sy) => {
   const [w, d] = DL.cells(bins[0], drawer);
   const point = DV.cam.onPlane(sx, sy, DL.stackHeight(bins)) || DV.cam.onPlane(sx, sy, 0);
   if (!point) return [-999, -999];
-  return [Math.round((point[0] - grid.ox) / grid.step - w / 2), Math.round((point[1] - grid.oy) / grid.step - d / 2)];
+  return [Math.round((point[0] - grid.ox) / grid.stepX - w / 2), Math.round((point[1] - grid.oy) / grid.stepY - d / 2)];
 };
 
 // If the pointer is over a stack these bins can snap onto, that stack. The
@@ -976,15 +1032,15 @@ DV.planImage = (drawer, width = 1400) => {
   ctx.fillRect(...rect(0, 0, drawer.width, drawer.depth));
   ctx.strokeStyle = "rgba(120,100,70,.18)";
   ctx.beginPath();
-  for (let x = 0; x <= grid.cols * grid.step + 1e-6; x += DL.UNIT) { const [ax, ay] = at(grid.ox + x, grid.oy); const [, by] = at(grid.ox + x, grid.oy + grid.rows * grid.step); ctx.moveTo(ax, ay); ctx.lineTo(ax, by); }
-  for (let y = 0; y <= grid.rows * grid.step + 1e-6; y += DL.UNIT) { const [ax, ay] = at(grid.ox, grid.oy + y); const [bx] = at(grid.ox + grid.cols * grid.step, grid.oy + y); ctx.moveTo(ax, ay); ctx.lineTo(bx, ay); }
+  for (let x = 0; x <= grid.cols * grid.stepX + 1e-6; x += DL.isPegboard(drawer) ? grid.stepX : DL.UNIT) { const [ax, ay] = at(grid.ox + x, grid.oy); const [, by] = at(grid.ox + x, grid.oy + grid.rows * grid.stepY); ctx.moveTo(ax, ay); ctx.lineTo(ax, by); }
+  for (let y = 0; y <= grid.rows * grid.stepY + 1e-6; y += DL.isPegboard(drawer) ? grid.stepY : DL.UNIT) { const [ax, ay] = at(grid.ox, grid.oy + y); const [bx] = at(grid.ox + grid.cols * grid.stepX, grid.oy + y); ctx.moveTo(ax, ay); ctx.lineTo(bx, ay); }
   ctx.stroke();
   const range = DV.heightRange();
   const items = DL.items(drawer);
   items.forEach((item, index) => {
-    const x0 = grid.ox + item.gx * grid.step;
-    const y0 = grid.oy + item.gy * grid.step;
-    const box = rect(x0, y0, x0 + item.w * grid.step, y0 + item.d * grid.step);
+    const x0 = grid.ox + item.gx * grid.stepX;
+    const y0 = grid.oy + item.gy * grid.stepY;
+    const box = rect(x0, y0, x0 + item.w * grid.stepX, y0 + item.d * grid.stepY);
     const top = item.bins[item.bins.length - 1];
     ctx.fillStyle = DV.binColor(top, range).top;
     ctx.fillRect(...box);
@@ -1014,14 +1070,15 @@ DV.planImage = (drawer, width = 1400) => {
 DV.printMap = () => {
   const drawer = DL.drawer();
   const grid = DL.grid(drawer);
+  const pegboard = DL.isPegboard(drawer);
   const rows = DL.items(drawer).map((item, index) => {
     const top = item.bins[item.bins.length - 1];
-    const x = grid.ox + item.gx * grid.step;
-    const y = grid.oy + item.gy * grid.step;
+    const x = grid.ox + item.gx * grid.stepX;
+    const y = grid.oy + item.gy * grid.stepY;
     const planned = item.chain.filter(DL.isPlanned).length;
     return `<tr><td>${index + 1}</td><td>${escapeHtml(item.bins.map(one => DL.label(one)).join(" + "))}</td>
-      <td>${escapeHtml(DL.sizeText(item.bins[0]))}</td><td>${fmt(x)} from left, ${fmt(y)} from front</td>
-      <td>${item.bins.length > 1 ? `${item.bins.length}-high, ${fmt(item.h)} mm` : escapeHtml(DL.stackName(top.stack))}</td>
+      <td>${escapeHtml(DL.sizeText(item.bins[0]))}</td><td>${fmt(x)} from left, ${fmt(y)} from ${pegboard ? "bottom" : "front"}</td>
+      <td>${pegboard ? "Mounted" : item.bins.length > 1 ? `${item.bins.length}-high, ${fmt(item.h)} mm` : escapeHtml(DL.stackName(top.stack))}</td>
       <td>${planned ? "planned" : ""}</td></tr>`;
   }).join("");
   let sheet = $("#dl-print-sheet");
@@ -1031,9 +1088,9 @@ DV.printMap = () => {
     document.body.appendChild(sheet);
   }
   sheet.innerHTML = `<h1>${escapeHtml(drawer.name)}</h1>
-    <p>${fmt(drawer.width)} × ${fmt(drawer.depth)} mm inside, ${fmt(drawer.height)} mm max height. Front of the drawer at the bottom.</p>
-    <img alt="Drawer map" src="${DV.planImage(drawer)}">
-    <table><thead><tr><th>#</th><th>Bin</th><th>Size</th><th>Where (front-left corner, mm)</th><th>Stacking</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    <p>${pegboard ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm board. Bottom of the board at the bottom.` : `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm inside, ${fmt(drawer.height)} mm max height. Front of the drawer at the bottom.`}</p>
+    <img alt="${pegboard ? "Pegboard" : "Drawer"} map" src="${DV.planImage(drawer)}">
+    <table><thead><tr><th>#</th><th>Bin</th><th>Size</th><th>Where (${pegboard ? "bottom" : "front"}-left corner, mm)</th><th>${pegboard ? "Mount" : "Stacking"}</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   document.body.classList.add("dl-printing");
   const done = () => { document.body.classList.remove("dl-printing"); window.removeEventListener("afterprint", done); };
   window.addEventListener("afterprint", done);

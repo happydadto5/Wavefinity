@@ -53,6 +53,7 @@ from organizer_geometry import (
     translated,
     union,
 )
+from organizer_pegboard import PegboardMountSpec
 
 
 # --------------------------------------------------------------------------- #
@@ -712,6 +713,8 @@ class BoxSpec:
     # trailing and inert unless switched on. Last so every older positional
     # BoxSpec call keeps its meaning.
     side_openings: SideOpeningSpec = field(default_factory=SideOpeningSpec)
+    # Pegboard Space mounting. Inert for every ordinary/legacy design.
+    pegboard: PegboardMountSpec = field(default_factory=PegboardMountSpec)
 
     def __post_init__(self) -> None:
         values = {

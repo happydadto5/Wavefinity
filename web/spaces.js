@@ -2,7 +2,7 @@
 
 // Normal Design can work without a persistent folder by downloading generated
 // files. Inventory and typed Spaces require a real writable folder. A typed
-// Space is a one-time Drawer/Surface/Portable setup layered on that folder;
+// Space is a one-time Drawer/Surface/Portable/Pegboard setup layered on that folder;
 // an untyped folder just keeps ordinary designs.
 const SP = {
   recent: [],
@@ -22,6 +22,7 @@ const SP_KINDS = {
   portable: { icon: "🧰", label: "Portable Storage" },
   surface: { icon: "🔲", label: "Surface" },
   drawer: { icon: "🗄️", label: "Drawer" },
+  pegboard: { icon: "🧱", label: "Pegboard" },
   // Legacy kind, readable for migration only - never a current Space type;
   // it presents as Portable Storage, its recovery destination.
   box: { icon: "🧰", label: "Portable Storage" },
@@ -29,7 +30,7 @@ const SP_KINDS = {
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
 const SPACE_ID_REQUIRED_VERSION = 5;
-const FOLDER_METADATA_VERSION = 6;
+const FOLDER_METADATA_VERSION = 7;
 const SPACE_SETUP_VERSION = 1;
 // One fixed name for every inventory-enabled folder: it never follows the
 // folder's own (renamable) name.
@@ -175,6 +176,43 @@ SP.populateSurfaceTrim = () => {
   ].join("");
 };
 
+SP.pegboardStandards = () => state.catalog?.pegboard_rules?.standards || [];
+SP.pegboardStandard = id => SP.pegboardStandards().find(row => row.id === id) || SP.pegboardStandards()[0];
+SP.populatePegboardStandards = () => {
+  const select = document.getElementById("pegboard-standard");
+  if (!select) return;
+  select.innerHTML = SP.pegboardStandards().map(row =>
+    `<option value="${escapeHtml(row.id)}">${escapeHtml(row.name)}</option>`
+  ).join("");
+};
+SP.resolvePegboard = () => {
+  const standard = SP.pegboardStandard(document.getElementById("pegboard-standard")?.value);
+  const mode = document.getElementById("pegboard-size-mode")?.value || "physical";
+  if (!standard) return { ok: false, error: "Pegboard standards are unavailable." };
+  let holesX, holesY, width, height, residualX = 0, residualY = 0;
+  if (mode === "holes") {
+    holesX = Number(document.getElementById("pegboard-holes-x")?.value);
+    holesY = Number(document.getElementById("pegboard-holes-y")?.value);
+    if (![holesX, holesY].every(value => Number.isInteger(value) && value >= 1 && value <= 500)) {
+      return { ok: false, error: "Enter whole hole or slot counts from 1 to 500." };
+    }
+    width = holesX * standard.pitch_x_mm;
+    height = holesY * standard.pitch_y_mm;
+  } else {
+    width = Number(document.getElementById("pegboard-x")?.value);
+    height = Number(document.getElementById("pegboard-y")?.value);
+    if (![width, height].every(value => Number.isFinite(value) && value > 0)) {
+      return { ok: false, error: "Enter the pegboard width and height in mm." };
+    }
+    holesX = Math.floor(width / standard.pitch_x_mm + 1e-9);
+    holesY = Math.floor(height / standard.pitch_y_mm + 1e-9);
+    if (holesX < 1 || holesY < 1) return { ok: false, error: "The board must contain at least one mount position." };
+    residualX = width - holesX * standard.pitch_x_mm;
+    residualY = height - holesY * standard.pitch_y_mm;
+  }
+  return { ok: true, standard, mode, holesX, holesY, width, height, residualX, residualY };
+};
+
 SP.drawerCapacity = mm => drawerSpaceCapacity(mm);
 SP.hasFolder = () => Boolean(state.folderSelected);
 SP.canPersistSpace = () => !state.runtime.hosted || Boolean(state.browserFolder?.handle);
@@ -287,7 +325,7 @@ SP.readMetadata = async handle => {
 };
 
 SP.validSpace = raw => {
-  if (!raw || !["drawer", "surface", "portable", "box"].includes(raw.kind)) return null;
+  if (!raw || !["drawer", "surface", "portable", "box", "pegboard"].includes(raw.kind)) return null;
   const space = {
     kind: raw.kind,
     name: String(raw.name || "").trim(),
@@ -306,6 +344,22 @@ SP.validSpace = raw => {
       space.trim_size = trimSize;
     }
   }
+  if (space.kind === "pegboard") {
+    const standard = SP.pegboardStandard(raw.pegboard_standard);
+    const holesX = Number(raw.pegboard_holes_x);
+    const holesY = Number(raw.pegboard_holes_y);
+    if (!standard || !Number.isInteger(holesX) || holesX < 1 || !Number.isInteger(holesY) || holesY < 1) return null;
+    Object.assign(space, {
+      pegboard_standard: standard.id,
+      pegboard_size_mode: raw.pegboard_size_mode === "holes" ? "holes" : "physical",
+      pegboard_holes_x: holesX,
+      pegboard_holes_y: holesY,
+      pegboard_usable_x: Number(raw.pegboard_usable_x ?? holesX * standard.pitch_x_mm),
+      pegboard_usable_y: Number(raw.pegboard_usable_y ?? holesY * standard.pitch_y_mm),
+      pegboard_residual_x: Number(raw.pegboard_residual_x ?? 0),
+      pegboard_residual_y: Number(raw.pegboard_residual_y ?? 0),
+    });
+  }
   return space;
 };
 
@@ -322,9 +376,9 @@ SP.classifyMetadata = record => {
   const current = record.data;
   if (Number(current.version) > FOLDER_METADATA_VERSION) return { status: "unsupported" };
   // v2 and v3 are readable migration inputs, same as the local backend
-  // (organizer_spaces._folder_state); v4 is already onboarded and v5 is
-  // current - v4 only lacks the Space identity, which is not a setup pass.
-  if (![2, 3, 4, 5, 6].includes(current.version)) return { status: "invalid" };
+  // (organizer_spaces._folder_state); v4+ are already onboarded. Older
+  // current formats upgrade in place; v4 only lacks the Space identity.
+  if (![2, 3, 4, 5, 6, 7].includes(current.version)) return { status: "invalid" };
   const needsMigration = current.version < 4 || current.setup_version !== SPACE_SETUP_VERSION;
   const explicitInventory = typeof current.inventory === "boolean" ? current.inventory : null;
   if (current.folder_mode === "design") {
@@ -1122,6 +1176,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
     typeLine.hidden = update;
   }
   SP.populateSurfaceTrim();
+  SP.populatePegboardStandards();
   document.querySelectorAll(".space-type-fields").forEach(el => el.hidden = true);
   const field = document.getElementById(`space-fields-${kind}`);
   if (field) field.hidden = false;
@@ -1179,6 +1234,13 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById("portable-x").value = prefillSpace?.x || "";
       document.getElementById("portable-y").value = prefillSpace?.y || "";
       document.getElementById("portable-z").value = prefillSpace?.z || "";
+  } else if (kind === "pegboard") {
+      document.getElementById("pegboard-standard").value = prefillSpace?.pegboard_standard || "standard";
+      document.getElementById("pegboard-size-mode").value = prefillSpace?.pegboard_size_mode || "physical";
+      document.getElementById("pegboard-x").value = prefillSpace?.x || "";
+      document.getElementById("pegboard-y").value = prefillSpace?.y || "";
+      document.getElementById("pegboard-holes-x").value = prefillSpace?.pegboard_holes_x || "";
+      document.getElementById("pegboard-holes-y").value = prefillSpace?.pegboard_holes_y || "";
   }
   SP.updateReadouts();
   if (update) {
@@ -1309,6 +1371,20 @@ SP.readSetupValues = () => {
     return { kind, name, x, y, z, trimSize: null };
   }
 
+  if (kind === "pegboard") {
+    const resolved = SP.resolvePegboard();
+    if (!resolved.ok) return fail(resolved.error, resolved.mode === "holes" ? "#pegboard-holes-x" : "#pegboard-x");
+    return {
+      kind, name, x: resolved.width, y: resolved.height, z: 350, trimSize: null,
+      extra: {
+        pegboard_standard: resolved.standard.id,
+        pegboard_size_mode: resolved.mode,
+        pegboard_holes_x: resolved.holesX,
+        pegboard_holes_y: resolved.holesY,
+      },
+    };
+  }
+
   return fail("Choose a Space type.", "#space-name");
 };
 
@@ -1316,7 +1392,7 @@ SP.create = async () => {
   if (SP.isUpdate) return SP.updateSpace();
   const values = SP.readSetupValues();
   if (!values) return;
-  const { kind, name, x, y, z, trimSize } = values;
+  const { kind, name, x, y, z, trimSize, extra = {} } = values;
   const migrating = Boolean(SP.configureData);
   let folder = SP.configureData || null;
 
@@ -1385,7 +1461,7 @@ SP.create = async () => {
     }
     const result = await api(migrating ? "/api/space/configure-text" : "/api/space/create-text", {
       inventory_text: inventoryText, inventory_title: name,
-      name, kind, x, y, z, ...(trimSize ? { trim_size: trimSize } : {}),
+      name, kind, x, y, z, ...extra, ...(trimSize ? { trim_size: trimSize } : {}),
     });
     await WFFileSystem.writeText(folder.handle, SP.inventoryFilenameFor(folder), result.inventory_text);
     const space = result.layout.space;
@@ -1407,7 +1483,7 @@ SP.create = async () => {
   } else {
     const payload = {
       name, kind, x, y, z, keep_bin_defaults: true,
-      ...(trimSize ? { trim_size: trimSize } : {}),
+      ...extra, ...(trimSize ? { trim_size: trimSize } : {}),
     };
     if (migrating) payload.output = folder;
 
@@ -1496,6 +1572,14 @@ SP.installSpaceStarterDesign = async space => {
     const binType = document.getElementById("bin-type");
     if (binType) binType.value = "b4b";
     await toggleB4B(true);
+  } else if (space.kind === "pegboard") {
+    state.design = freshDesignForCurrentFolder();
+    state.design.box.pegboard = {
+      enabled: true,
+      standard: space.pegboard_standard,
+      cleat_x: "auto",
+      cleat_y: "auto",
+    };
   } else {
     // Drawer (and any other/untyped folder that reaches here) -> the fresh
     // ordinary Bin starter, same as loadFreshOrdinaryDesignForCurrentFolder.
@@ -1564,7 +1648,7 @@ SP.enterSetupFor = (folder, data) => {
     // - see Fix 004 Correction 7.I.
     const candidate = data?.space || data?.setup_prefill_space;
     const recognized = candidate &&
-      ["drawer", "surface", "box", "portable"].includes(candidate.kind);
+      ["drawer", "surface", "box", "portable", "pegboard"].includes(candidate.kind);
 
     // Only a committed type goes straight to its own setup form.
     if (data?.space && recognized && SP.authoritativeTypedSource(data)) {
@@ -1857,7 +1941,7 @@ SP.wire = () => {
 
   // Live Drawer/Portable readouts while the user types, not only when the
   // setup screen first opens - see Fix 004 Correction 6.G.
-  ["drawer-x", "drawer-y", "drawer-z", "surface-x", "surface-y", "portable-x", "portable-y", "portable-z"].forEach(id => {
+  ["drawer-x", "drawer-y", "drawer-z", "surface-x", "surface-y", "portable-x", "portable-y", "portable-z", "pegboard-x", "pegboard-y", "pegboard-holes-x", "pegboard-holes-y"].forEach(id => {
     const input = document.getElementById(id);
     if (input) input.addEventListener("input", SP.updateReadouts);
   });
@@ -1876,6 +1960,7 @@ SP.wire = () => {
   // Changing trim re-resolves the largest field that fits the request that
   // is currently visible; it never grows beyond it.
   document.getElementById("surface-trim")?.addEventListener("change", SP.updateReadouts);
+  ["pegboard-standard", "pegboard-size-mode"].forEach(id => document.getElementById(id)?.addEventListener("change", SP.updateReadouts));
 };
 
 SP.updateReadouts = () => {
@@ -1924,6 +2009,17 @@ SP.updateReadouts = () => {
             document.getElementById("portable-size-readout").textContent = `${rx/unit} × ${ry/unit} units (${rx} × ${ry} mm)`;
         } else {
             document.getElementById("portable-readout").hidden = true;
+        }
+    } else if (kind === "pegboard") {
+        const mode = document.getElementById("pegboard-size-mode")?.value || "physical";
+        document.getElementById("pegboard-physical-fields").hidden = mode !== "physical";
+        document.getElementById("pegboard-hole-fields").hidden = mode !== "holes";
+        const resolved = SP.resolvePegboard();
+        const readout = document.getElementById("pegboard-readout");
+        readout.hidden = !resolved.ok;
+        if (resolved.ok) {
+          document.getElementById("pegboard-grid-readout").textContent = `${resolved.holesX} × ${resolved.holesY} positions — ${fmt(resolved.holesX * resolved.standard.pitch_x_mm)} × ${fmt(resolved.holesY * resolved.standard.pitch_y_mm)} mm`;
+          document.getElementById("pegboard-border-readout").textContent = `${fmt(resolved.residualX / 2)} mm sides, ${fmt(resolved.residualY / 2)} mm top/bottom`;
         }
     }
 };
@@ -1988,6 +2084,9 @@ SP.renderSpaceInfo = () => {
         const y = state.activeSpace.y;
         const z = state.activeSpace.z;
         sizeText = (x/unit) + " × " + (y/unit) + " units (" + x + " × " + y + " mm) x " + z + " mm usable height";
+    } else if (kind === "pegboard") {
+        const standard = SP.pegboardStandard(state.activeSpace.pegboard_standard);
+        sizeText = `${standard?.name || "Pegboard"}: ${state.activeSpace.pegboard_holes_x} × ${state.activeSpace.pegboard_holes_y} positions (${fmt(state.activeSpace.x)} × ${fmt(state.activeSpace.y)} mm)`;
     }
     document.getElementById("space-head-size").textContent = sizeText;
 
@@ -2054,7 +2153,7 @@ const wireInfoButtons = (prefix = "space-head") => {
 SP.updateSpace = async () => {
     const values = SP.readSetupValues();
     if (!values) return;
-    const { kind, name, x, y, z, trimSize } = values;
+    const { kind, name, x, y, z, trimSize, extra = {} } = values;
 
     if (state.runtime.hosted) {
         // Mirror local update semantics: the inventory's own layout.space is
@@ -2065,7 +2164,7 @@ SP.updateSpace = async () => {
         const inventoryText = await SP.readInventoryFor(folder, { migrate: true });
         const result = await api("/api/space/configure-text", {
           inventory_text: inventoryText, inventory_title: name,
-          name, kind: state.activeSpace.kind, x, y, z,
+          name, kind: state.activeSpace.kind, x, y, z, ...extra,
           ...(trimSize ? { trim_size: trimSize } : {}),
         });
         await WFFileSystem.writeText(folder.handle, SP.inventoryFilenameFor(folder), result.inventory_text);
@@ -2084,7 +2183,7 @@ SP.updateSpace = async () => {
         state.activeSpaceId = metadata.space_id || null;
     } else {
         const data = await api("/api/space/update", {
-          output: state.output, name: name, x: x, y: y, z: z,
+          output: state.output, name: name, x: x, y: y, z: z, ...extra,
           ...(trimSize ? { trim_size: trimSize } : {}),
         });
         state.activeSpace = data.folder.space;
@@ -2092,7 +2191,7 @@ SP.updateSpace = async () => {
     SP.cancelInlineEdit();
     toast("Space updated.");
     
-    if (kind === "drawer" && typeof DL !== "undefined" && DL.active) {
+    if ((kind === "drawer" || kind === "pegboard") && typeof DL !== "undefined" && DL.active) {
         DL.syncSingleDrawerFromSpace(state.activeSpace);
     }
 };
@@ -2106,10 +2205,10 @@ SP.crossTypeCheck = (designType) => {
     
     let warning = null;
     let targetKind = null;
-    if (designType === "b4b" && (kind === "drawer" || kind === "surface")) {
+    if (designType === "b4b" && (kind === "drawer" || kind === "surface" || kind === "pegboard")) {
         warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. Storage Box is meant for Portable Storage.`;
         targetKind = "portable";
-    } else if ((designType === "base-trim" || designType === "base_trim") && (kind === "drawer" || kind === "portable" || kind === "box")) {
+    } else if ((designType === "base-trim" || designType === "base_trim") && (kind === "drawer" || kind === "portable" || kind === "box" || kind === "pegboard")) {
         warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. Base Trim is meant for Surface Spaces.`;
         targetKind = "surface";
     }

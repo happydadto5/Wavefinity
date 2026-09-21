@@ -482,7 +482,7 @@ design** (never written to inventory) until it is generated, and a selected bin
 has **Duplicate**.
 
 A folder is either an untyped Design folder, or a typed **Space** - a
-**Drawer**, a **Surface**, or **Portable Storage**. *Create New Space*
+**Drawer**, a **Surface**, **Portable Storage**, or **Pegboard**. *Create New Space*
 configures the Space's type and dimensions first and chooses the save folder
 last; *Open Existing* can instead turn an already-selected folder into a
 Space, or use it without a type. The **Space** tab (beside *3D* and *2D*)
@@ -497,6 +497,18 @@ as Portable Storage, never as a current Box. A legacy folder's older,
 multiple-drawer layout is preserved as a compatibility exception - a new
 Drawer Space otherwise represents exactly one physical drawer.
 
+**Pegboard Space** supports standard 1-inch pegboard and IKEA SKÅDIS. Enter a
+physical board size or a hole/slot count; Wavefinity derives the other value
+and shows the centred residual border. The Space view draws the real round
+holes or rounded slots and snaps bins to them. A bin occupies both its visible
+front-view footprint and its exact receiver openings, so either kind of clash
+is refused. The bin-side receiver is universal; generation also writes the
+selected board standard's removable adapters. Cleat Count X (Auto or 1–5) and
+Y (Auto or 1–3) control the receiver grid. Multi-cleat receivers stay
+grid-aligned and side-biased, impossible counts are disabled or rejected, and
+vertical ribs appear only across unsupported spans over 40 mm. Pegboard bins
+do not use drawer stacking, Auto layout, spacers, or Base Trim.
+
 Creating a new Drawer Space lands directly in the normal Bin editor with every
 ordinary option (Interior print mode, Base, Walls, Inside Grip) still
 visible; there is no tutorial or first-run card. A one-drawer Drawer Space's
@@ -508,7 +520,7 @@ bin), and Auto layout and spacer/connector actions stay disabled until there is
 something to work on.
 
 - **Space identity.** A typed Space carries a permanent `space_id` (UUID) in
-  its `.wavefinity.json` (metadata version 6; identity required since version 5). The per-user profile keeps a
+  its `.wavefinity.json` (metadata version 7; identity required since version 5). The per-user profile keeps a
   registry of known Spaces (id, name, kind, last folder) as an index only.
   Renaming the folder within the same parent is recovered automatically by
   that ID; a folder moved elsewhere is recognised when you Open Existing it.
@@ -527,7 +539,7 @@ something to work on.
   generated while the layout is open is never lost.
 - **Space workspace.** A typed Space opens as one workspace with a **Space |
   Design** switch at the top left, under the Space's name, type (Drawer,
-  Surface or Portable Storage) and size. The switch decides what the left panel
+  Surface, Portable Storage or Pegboard) and size. The switch decides what the left panel
   edits: *Space* is the layout tools, *Design* is the current bin or Storage
   Box. It is separate from the preview: the 3D, 2D and Space tabs only choose what
   the right side shows and never flip the switch. Opening the Space while a
@@ -669,7 +681,7 @@ on resumes using it. New fields missing from an older snapshot come from the
 current Wavefinity defaults.
 
 The sanitized snapshot lives in the Space's `.wavefinity.json` folder metadata,
-now version 6. It copies the complete bin/shell configuration, blanks names and
+now version 7. It copies the complete bin/shell configuration, blanks names and
 label wording, and never copies placed interior-part instances. Safe last-used
 interior-part editor settings are stored separately by kind in `part_defaults`;
 width/depth and reusable options carry, while placement, photos/contours, names,
@@ -847,7 +859,7 @@ folder gets an additive `.wavefinity.json` marker holding its folder mode,
 inventory choice, optional Space identity, and per-Space Keep Defaults state.
 `inventory` (default `true`) controls whether generated bins/Storage Boxes are logged;
 `folder_mode` (`"design"` or `"space"`) says whether the folder also represents
-one typed Drawer, Surface, or Portable Storage Space. `folder_mode: "space"` always
+one typed Drawer, Surface, Portable Storage, or Pegboard Space. `folder_mode: "space"` always
 implies `inventory: true` - a Space's layout depends on the inventory it
 places. A normal `"design"` folder can have inventory on (the default for a
 new folder) or explicitly off (`/api/folder/inventory`, mirrored by the
@@ -1500,10 +1512,12 @@ layered implementation:
 | `wavefinity_web.py` | The local HTTP service — see [The browser service](#the-browser-service). | Yes, the default UI launch target. |
 | `organizer_inventory.py` | The drawer inventory file (`Wavefinity bins.md`): parsing, legacy upgrade, merge-saves, bin logging. | No. |
 | `organizer_drawer.py` | Drawer layout: grid fit, drawer report, auto-layout packer, spacer planning and export, and its `/api/drawer/*` routes. | No. |
+| `organizer_pegboard.py` | Pegboard standards, size derivation, receiver layout/geometry, standard-specific adapters, and mount footprints. | No. |
 | `test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest`. |
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
 | `test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest`. |
 | `test_drawer.py` | Inventory file, auto layout and spacer regressions. | Only via `python -m unittest`. |
+| `test_pegboard.py` | Pegboard sizing, persistence, mount geometry and placement regressions. | Only via `python -m unittest`. |
 | `run_tests.py` | Compact test runner: one pass/fail summary line, full tracebacks only on failure. See [Testing rules](#testing-rules). | Yes — `python3 run_tests.py [module ...]`. |
 
 `web/index.html`, `web/styles.css`, `web/feature-icons.js` and `web/app.js` are

@@ -528,6 +528,21 @@ input[type="number"]::-webkit-inner-spin-button {
 .section-heading .heading-select select { width: auto; min-width: 92px; margin: 0; padding-top: 6px; padding-bottom: 6px; }
 .mode-and-bin-options .compact-select { flex: 1 1 120px; min-width: 110px; }
 .mode-and-bin-options .compact-select select { height: 38px; }
+.pegboard-mount-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(100px, 1fr);
+  gap: 6px 10px;
+  align-items: end;
+  margin: 8px 0 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.pegboard-mount-row[hidden] { display: none; }
+.pegboard-mount-row > strong, .pegboard-mount-row > .muted { grid-column: 1 / -1; }
+.pegboard-mount-row label { font-size: 12px; font-weight: 650; color: var(--muted); }
+.pegboard-mount-row select { margin-top: 4px; }
 /* Base, Walls and Inside Handles as one fixed 3-column row so they stay the
    same width and never split across lines regardless of sidebar width. */
 .thickness-grabber-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; flex: 1 1 320px; min-width: 280px; }
@@ -1327,7 +1342,7 @@ dialog:not([open]) { display: none; }
 
 .type-cards {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
   margin-top: 4px;

@@ -85,6 +85,7 @@ from organizer_inventory import (
 from organizer_b4b import B4B_STACK_RECESS_DEPTH
 from organizer_product_rules import DRAWER_HARD_CLEARANCE_MM
 from organizer_stack import STACK_MIN_WALL, STACK_PLUG_DEPTH, STACK_SEAT_DEPTH
+from organizer_pegboard import pegboard_layout_for_bin, pegboard_standard
 
 UNIT = BASE_UNIT
 SNAPS = (8.0, 4.0)
@@ -117,7 +118,7 @@ ANCHORS = ("front-left", "center")
 # for the outermost bins' wave crests) or a B4B/Box's own Wavefinity-mating
 # boundary, which is already the correct interlocking surface and needs no
 # extra hard-wall slack added on top of it.
-BOUNDARIES = ("wall", "mating")
+BOUNDARIES = ("wall", "mating", "pegboard")
 HEIGHT_RULES = ("strict", "prefer", "ignore")
 HEIGHT_REACHES = ("column", "adjacent")
 SIDES = ("left", "right", "front", "back")
@@ -156,7 +157,7 @@ def normalise_drawer(raw: dict[str, Any]) -> dict[str, Any]:
     # interlocking surface - flooring its clearance the same way would
     # silently eat a real 8 mm row or column from its exact interior.
     drawer["clearance"] = (
-        requested_clearance if drawer["boundary"] == "mating" else max(MIN_CLEARANCE, requested_clearance)
+        requested_clearance if drawer["boundary"] in ("mating", "pegboard") else max(MIN_CLEARANCE, requested_clearance)
     )
     if drawer["anchor"] not in ANCHORS:
         drawer["anchor"] = "front-left"
@@ -184,6 +185,30 @@ def drawer_grid(drawer: dict[str, Any]) -> dict[str, Any]:
     clearance is total slack per axis: half of it sits at each wall so the wave
     crests of the outermost bins clear the drawer sides.
     """
+    if drawer.get("boundary") == "pegboard":
+        standard = pegboard_standard(drawer.get("pegboard_standard"))
+        cols = max(1, int(drawer.get("pegboard_holes_x") or math.floor(drawer["width"] / standard.pitch_x_mm)))
+        rows = max(1, int(drawer.get("pegboard_holes_y") or math.floor(drawer["depth"] / standard.pitch_y_mm)))
+        residual_x = max(0.0, float(drawer.get("pegboard_residual_x") or drawer["width"] - cols * standard.pitch_x_mm))
+        residual_y = max(0.0, float(drawer.get("pegboard_residual_y") or drawer["depth"] - rows * standard.pitch_y_mm))
+        return {
+            "step": standard.pitch_x_mm,
+            "step_x": standard.pitch_x_mm,
+            "step_y": standard.pitch_y_mm,
+            "cols": cols,
+            "rows": rows,
+            "ox": residual_x / 2.0,
+            "oy": residual_y / 2.0,
+            "gap_left": residual_x / 2.0,
+            "gap_right": residual_x / 2.0,
+            "gap_front": residual_y / 2.0,
+            "gap_back": residual_y / 2.0,
+            "standard": standard.id,
+            "opening_shape": standard.opening_shape,
+            "opening_width_mm": standard.opening_width_mm,
+            "opening_height_mm": standard.opening_height_mm,
+            "stagger_x_mm": standard.stagger_x_mm,
+        }
     step = drawer["snap"]
     slack = drawer["clearance"]
     usable_x = drawer["width"] - slack
@@ -219,6 +244,12 @@ def _units(cell: int, drawer: dict[str, Any]) -> float | int:
 
 def bin_cells(one: dict[str, Any], drawer: dict[str, Any]) -> tuple[int, int]:
     """A bin's footprint in grid cells, as it stands in this drawer."""
+    if drawer.get("boundary") == "pegboard":
+        standard = pegboard_standard(drawer.get("pegboard_standard"))
+        return (
+            max(1, math.ceil(float(one["x"]) / standard.pitch_x_mm - 1e-6)),
+            max(1, math.ceil(float(one["z"]) / standard.pitch_y_mm - 1e-6)),
+        )
     step = drawer["snap"]
     cx = max(1, math.ceil(float(one["x"]) / step - 1e-6))
     cy = max(1, math.ceil(float(one["y"]) / step - 1e-6))
@@ -461,10 +492,110 @@ def _connectors(items: list[dict[str, Any]], step: float) -> tuple[list[dict[str
     return groups, mismatched
 
 
+def _pegboard_report(drawer: dict[str, Any], bins: list[dict[str, Any]]) -> dict[str, Any]:
+    """Front-view occupancy for a Pegboard Space.
+
+    Footprints and exact used board openings are independent checks. A layout
+    is invalid if either one overlaps or leaves the board.
+    """
+    grid = drawer_grid(drawer)
+    by_id = {one["id"]: one for one in bins}
+    problems: list[dict[str, Any]] = []
+    rectangles: list[dict[str, Any]] = []
+    occupied_mounts: dict[tuple[int, int], str] = {}
+    mounts: list[dict[str, Any]] = []
+    used_cells: set[tuple[int, int]] = set()
+    planned: dict[str, int] = {}
+
+    for placement in drawer["placements"]:
+        key = _key(placement)
+        one = by_id.get(placement.get("bin"))
+        if one is None:
+            problems.append({"type": "missing", "keys": [key], "message": f"{placement.get('bin')} is no longer in the inventory"})
+            continue
+        if placement.get("on") is not None:
+            problems.append({"type": "mount", "keys": [key], "message": "Pegboard bins cannot be stacked"})
+            continue
+        try:
+            layout = pegboard_layout_for_bin(one, grid["standard"])
+        except (TypeError, ValueError, KeyError) as error:
+            problems.append({"type": "mount", "keys": [key], "message": str(error)})
+            continue
+        if not layout["compatible"]:
+            problems.append({
+                "type": "mount", "keys": [key],
+                "message": (
+                    f"{_label(one)} has no pegboard receiver"
+                    if not one.get("pegboard_standard") else
+                    f"{_label(one)} was generated for {one.get('pegboard_standard')}"
+                ),
+            })
+        try:
+            raw_gx, raw_gy = float(placement["gx"]), float(placement["gy"])
+        except (KeyError, TypeError, ValueError):
+            problems.append({"type": "outside", "keys": [key], "message": f"{_label(one)} is not snapped to a board opening"})
+            continue
+        if not math.isclose(raw_gx, round(raw_gx), abs_tol=1e-9) or not math.isclose(raw_gy, round(raw_gy), abs_tol=1e-9):
+            problems.append({"type": "outside", "keys": [key], "message": f"{_label(one)} is not snapped to a board opening"})
+            continue
+        gx, gy = int(round(raw_gx)), int(round(raw_gy))
+        if grid["standard"] == "skadis" and gy % 2:
+            problems.append({
+                "type": "mount", "keys": [key],
+                "message": f"{_label(one)} must start on an aligned SKÅDIS slot row",
+            })
+            continue
+        w, d = int(layout["cells_x"]), int(layout["cells_y"])
+        rect = {"key": key, "x": gx, "y": gy, "w": w, "d": d, "one": one}
+        if gx < 0 or gy < 0 or gx + w > grid["cols"] or gy + d > grid["rows"]:
+            problems.append({"type": "outside", "keys": [key], "message": f"{_label(one)} sticks out of the pegboard"})
+        for other in rectangles:
+            if _overlaps(rect, other):
+                problems.append({
+                    "type": "overlap", "keys": [other["key"], key],
+                    "message": f"{_label(other['one'])} and {_label(one)} overlap",
+                })
+        rectangles.append(rect)
+        for row in range(max(0, gy), min(grid["rows"], gy + d)):
+            for col in range(max(0, gx), min(grid["cols"], gx + w)):
+                used_cells.add((col, row))
+        for ox, oy in layout["mount_offsets"]:
+            mount = (gx + float(ox), gy + int(oy))
+            if not (0 <= mount[0] < grid["cols"] - 0.5 + 1e-9 and 0 <= mount[1] < grid["rows"]):
+                problems.append({"type": "mount", "keys": [key], "message": f"{_label(one)} cannot reach enough valid board openings there"})
+                continue
+            other_key = occupied_mounts.get(mount)
+            if other_key and other_key != key:
+                problems.append({"type": "mount_overlap", "keys": [other_key, key], "message": "Two bins use the same pegboard opening"})
+            occupied_mounts[mount] = key
+            mounts.append({"gx": mount[0], "gy": mount[1], "key": key})
+        if int(placement.get("copy", 0)) >= int(one.get("qty", 0)):
+            planned[one["id"]] = planned.get(one["id"], 0) + 1
+
+    total = grid["cols"] * grid["rows"]
+    return {
+        "grid": grid,
+        "cells": {"total": total, "used": len(used_cells), "free": max(0, total - len(used_cells))},
+        "fill": round(100.0 * len(used_cells) / total, 1) if total else 0.0,
+        "free_mm2": round(max(0.0, drawer["width"] * drawer["depth"] - len(used_cells) * grid["step_x"] * grid["step_y"])),
+        "edge_mm2": 0,
+        "opens": [],
+        "connectors": [],
+        "connector_total": 0,
+        "wall_mismatches": 0,
+        "problems": problems,
+        "planned": [{"id": key, "count": count} for key, count in planned.items()],
+        "mounts": mounts,
+        "pegboard": True,
+    }
+
+
 def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach: str = "column") -> dict[str, Any]:
     """Everything the Layout view says about one drawer: fill, what is left,
     what is wrong, what is still to print, and the connectors it needs."""
     drawer = normalise_drawer(raw_drawer)
+    if drawer.get("boundary") == "pegboard":
+        return _pegboard_report(drawer, bins)
     grid = drawer_grid(drawer)
     rows, cols, step = grid["rows"], grid["cols"], grid["step"]
     by_id = {one["id"]: one for one in bins}
@@ -741,6 +872,8 @@ def auto_layout(
     options = options or {}
     raw = find_drawer(layout, drawer_id)
     drawer = normalise_drawer(raw)
+    if drawer.get("boundary") == "pegboard":
+        raise ValueError("Auto layout is not available for Pegboard Space; place bins on the visible openings.")
     grid = drawer_grid(drawer)
     rows, cols = grid["rows"], grid["cols"]
     by_id = {one["id"]: one for one in bins}

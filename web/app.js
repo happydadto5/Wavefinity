@@ -402,6 +402,13 @@ function applySpaceSizingDefaults(design) {
     if (Number.isFinite(trimHeight)) design.box.z = trimHeight;
   } else if (kind === "portable" || kind === "box") {
     design.box.z = normalizeBinDimension("z", space.z);
+  } else if (kind === "pegboard") {
+    design.box.pegboard = {
+      enabled: true,
+      standard: space.pegboard_standard,
+      cleat_x: design.box.pegboard?.cleat_x || "auto",
+      cleat_y: design.box.pegboard?.cleat_y || "auto",
+    };
   }
   
   return design;
@@ -1437,9 +1444,56 @@ function syncForm() {
   populateSideOpeningChoices();
   syncSideOpeningControls();
   syncB4BForm();
+  syncPegboardMountForm();
   syncConnectorSectionVisibility();
   updateInteriorModeVisibility();
   renderPlaced();
+}
+
+function activePegboardStandard() {
+  const id = state.design?.box?.pegboard?.standard || state.activeSpace?.pegboard_standard || "standard";
+  return state.catalog?.pegboard_rules?.standards?.find(row => row.id === id) || null;
+}
+
+function syncPegboardMountForm() {
+  const row = $("#pegboard-mount-row");
+  if (!row) return;
+  const mount = state.design?.box?.pegboard;
+  const active = Boolean(mount?.enabled) || (state.folderMode === "space" && state.activeSpace?.kind === "pegboard");
+  row.hidden = !active || b4bEnabled() || baseTrimEnabled();
+  if (row.hidden) return;
+  const standard = activePegboardStandard();
+  $("#pegboard-mount-standard").textContent = standard?.name || "Pegboard";
+  $("#pegboard-cleat-x").value = String(mount?.cleat_x ?? "auto");
+  $("#pegboard-cleat-y").value = String(mount?.cleat_y ?? "auto");
+  const receiver = state.catalog?.pegboard_rules?.receiver || {};
+  const minFor = (count, pitch) => 2 * (number(receiver.edge_inset_mm, 2) + number(receiver.width_mm, 14) / 2) + (count - 1) * pitch;
+  for (const [selector, size, pitch] of [["#pegboard-cleat-x", state.design.box.x, standard?.pitch_x_mm], ["#pegboard-cleat-y", state.design.box.z, standard?.pitch_y_mm]]) {
+    for (const option of $(selector).options) {
+      option.disabled = option.value !== "auto" && Number.isFinite(pitch) && size + 1e-9 < minFor(Number(option.value), pitch);
+    }
+  }
+  const preview = state.preview?.pegboard;
+  const ribCount = preview?.ribs?.length || 0;
+  $("#pegboard-mount-note").textContent = preview
+    ? `${preview.resolved_x} × ${preview.resolved_y} receiver grid${ribCount ? `, ${ribCount} support rib${ribCount === 1 ? "" : "s"}` : ""}.`
+    : "The receiver is standard-neutral; generation also creates the matching board adapters.";
+}
+
+function readPegboardMountForm(design) {
+  design.box ||= {};
+  const enabled = Boolean(design.box.pegboard?.enabled) ||
+    (state.folderMode === "space" && state.activeSpace?.kind === "pegboard");
+  if (!enabled || b4bEnabled(design) || baseTrimEnabled(design)) {
+    if (design.box.pegboard) design.box.pegboard.enabled = false;
+    return;
+  }
+  design.box.pegboard = {
+    enabled: true,
+    standard: design.box.pegboard?.standard || state.activeSpace?.pegboard_standard || "standard",
+    cleat_x: $("#pegboard-cleat-x")?.value || design.box.pegboard?.cleat_x || "auto",
+    cleat_y: $("#pegboard-cleat-y")?.value || design.box.pegboard?.cleat_y || "auto",
+  };
 }
 
 function autoAdjustConnectorFields() {
@@ -2810,6 +2864,7 @@ function updateDesignFromForm() {
     axis: "y",
   };
   readB4BForm(design);
+  readPegboardMountForm(design);
   readStackForm(design);
   enforceB4BMinimums(design);
   applyB4BVisibility();
@@ -3308,6 +3363,11 @@ function wireControls() {
   }));
 
   $("#bin-type").addEventListener("change", changeBinType);
+  ["#pegboard-cleat-x", "#pegboard-cleat-y"].forEach(selector => $(selector)?.addEventListener("change", () => {
+    readPegboardMountForm(state.design);
+    syncPegboardMountForm();
+    changedDesign();
+  }));
   ["#lid-configuration", "#lid-thickness", "#lid-handle-type", "#lid-handle-size",
    "#lid-handle-position", "#lid-label-enabled", "#lid-label-orientation", "#lid-label-style"]
     .forEach(selector => $(selector).addEventListener("change", () => {

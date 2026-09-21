@@ -99,6 +99,13 @@ from organizer_side_openings import (
     side_opening_summary,
     validate_side_openings,
 )
+from organizer_pegboard import (
+    PegboardMountSpec,
+    apply_pegboard_mount_structure,
+    make_board_adapters,
+    normalise_mount_spec,
+    receiver_layout,
+)
 from organizer_b4b import (
     b4b_build_print_objects,
     b4b_effective_box,
@@ -465,6 +472,12 @@ def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
 
 def edge_mount_label_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
     name = f"Edge Mount Label {box.x:g} x {box.y:g}"
+    tidy = clean_label(part)
+    return (f"{name} {tidy}" if tidy else name) + suffix
+
+
+def pegboard_adapter_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+    name = f"Pegboard Adapters {box.pegboard.standard} {box.x:g} x {box.z:g}"
     tidy = clean_label(part)
     return (f"{name} {tidy}" if tidy else name) + suffix
 
@@ -956,7 +969,7 @@ def preview_geometry(
     cut_fused_pieces = mode == "fused" and box.edge_mount.holes_enabled
     cut_side_opening_pieces = mode == "fused" and box.side_openings.enabled
 
-    if box.edge_mount.active or box.side_openings.enabled:
+    if box.edge_mount.active or box.side_openings.enabled or box.pegboard.enabled:
         # make_box() already includes Lift Grabbers; Edge Mount also adds the
         # Projecting Label plate and cuts the shell's own small screw holes
         # and driver-access openings. Side Openings cut the finished shell
@@ -965,6 +978,8 @@ def preview_geometry(
         shell_body = make_box(box)
         if box.edge_mount.active:
             shell_body = apply_edge_mount_structure(box, shell_body)
+        if box.pegboard.enabled:
+            shell_body = apply_pegboard_mount_structure(box, shell_body)
         if box.side_openings.enabled:
             shell_body = apply_side_openings(box, shell_body)
         geometry.extend(_mesh_preview_geometry(shell_body, "outside"))
@@ -1323,6 +1338,7 @@ def preview_geometry(
             geometry.extend(_mesh_preview_geometry(edge_mesh, "label"))
 
     side_openings_meta = side_opening_summary(box) if box.side_openings.enabled else None
+    pegboard_meta = receiver_layout(box) if box.pegboard.enabled else None
 
     inside_x, inside_y = box.usable_opening
     return {
@@ -1340,6 +1356,7 @@ def preview_geometry(
         "label_meta": label_meta,
         "edge_mount": edge_mount_meta,
         "side_openings": side_openings_meta,
+        "pegboard": pegboard_meta,
         # Where each text interior part ended up, so the browser can show the
         # resolved letter height an auto or zone-fitted one landed on.
         "text_meta": tuple(
@@ -1649,6 +1666,7 @@ def generate_organizer_files(
         # shell (fused features, scoop and the rim ledge already on it), so
         # the driver-access cut also clears any fused geometry blocking it.
         body = apply_edge_mount_structure(box, body)
+        body = apply_pegboard_mount_structure(box, body)
         reported = apply_texts(body, texts)
         edge_text = edge_mount_text_object(box)
         if edge_text is not None and box.edge_mount.label_type == "integrated":
@@ -1701,6 +1719,7 @@ def generate_organizer_files(
             body, box_inlay = make_top_labelled_box(box, tidy, body, side)
             box_inlays.append((tidy, box_inlay, False))
         body = apply_edge_mount_structure(box, body)
+        body = apply_pegboard_mount_structure(box, body)
         edge_text = edge_mount_text_object(box)
         if edge_text is not None and box.edge_mount.label_type == "integrated":
             _edge_label, edge_mesh, edge_raised = edge_text
@@ -1767,6 +1786,18 @@ def generate_organizer_files(
                 export_mesh(printed_body, label_output, "edge_mount_label")
             result["edge_mount_label"] = _part_result(label_output, mesh_report("edge_mount_label", printed_body))
             result["edge_mount_label"]["text_objects"] = written
+    if box.pegboard.enabled:
+        adapters = make_board_adapters(box)
+        adapter_output = _resolve_file(pegboard_adapter_filename, box, part_name)
+        export_object_groups_3mf(
+            [(name, [(name, mesh)]) for name, mesh in adapters], adapter_output
+        )
+        result["pegboard_adapters"] = {
+            "output": str(adapter_output.resolve()),
+            "count": len(adapters),
+            "standard": box.pegboard.standard,
+        }
+        result["pegboard"] = receiver_layout(box)
     if label_info is not None:
         result["label"] = label_info
     result["texts"] = [
@@ -1804,6 +1835,8 @@ def generate_organizer_files(
             out_files.append(Path(str(result["lid"]["output"])))
         if "edge_mount_label" in result and isinstance(result["edge_mount_label"], dict) and "output" in result["edge_mount_label"]:
             out_files.append(Path(str(result["edge_mount_label"]["output"])))
+        if "pegboard_adapters" in result and isinstance(result["pegboard_adapters"], dict) and "output" in result["pegboard_adapters"]:
+            out_files.append(Path(str(result["pegboard_adapters"]["output"])))
         # Inventory stores the requested stack-module height.  The drawer adds
         # the exposed top engagement depth when checking physical clearance.
         log_file = log_bin_to_folder(
@@ -1941,6 +1974,9 @@ def inventory_bin_record(
             )
         ),
         "wall": wall,
+        "pegboard_standard": box.pegboard.standard if box.pegboard.enabled else "",
+        "cleat_x": box.pegboard.cleat_x if box.pegboard.enabled else "auto",
+        "cleat_y": box.pegboard.cleat_y if box.pegboard.enabled else "auto",
     }
 
 
@@ -2442,6 +2478,10 @@ def design_to_dict(
     if getattr(box.stack, "mode", "none") == "lid":
         box = replace(box, stack=StackSpec(), lid=legacy_lid)
     box = normalize_stack_settings(box)
+    if box.pegboard.enabled:
+        if box.b4b.enabled:
+            raise ValueError("Pegboard mounting is available only for ordinary bins")
+        receiver_layout(box)  # validates Auto/manual counts and minimum height
     b4b = box.b4b.normalised()
     box_block = {
         "x": box.x,
@@ -2527,6 +2567,14 @@ def design_to_dict(
             "size": side_openings.size,
             "from_bottom_percent": side_openings.from_bottom_percent,
             "from_top_percent": side_openings.from_top_percent,
+        }
+    pegboard = normalise_mount_spec(getattr(box, "pegboard", None))
+    if pegboard.enabled:
+        box_block["pegboard"] = {
+            "enabled": True,
+            "standard": pegboard.standard,
+            "cleat_x": pegboard.cleat_x,
+            "cleat_y": pegboard.cleat_y,
         }
     return {
         # Version 3 only when B4B is on. Version 3 changes B4B x/y from the
@@ -2638,6 +2686,7 @@ def design_from_dict(
             from_bottom_percent=from_bottom,
             from_top_percent=100.0 if explicit_from_top is None else explicit_from_top,
         )
+    pegboard = normalise_mount_spec(raw.get("pegboard"))
     b4b_raw = raw.get("b4b")
     b4b = B4BSpec()
     if isinstance(b4b_raw, dict) and bool(b4b_raw.get("enabled", False)):
@@ -2720,8 +2769,13 @@ def design_from_dict(
         lid=lid,
         edge_mount=edge_mount,
         side_openings=side_openings,
+        pegboard=pegboard,
     )
     box = normalize_stack_settings(box)
+    if box.pegboard.enabled:
+        if box.b4b.enabled:
+            raise ValueError("Pegboard mounting is available only for ordinary bins")
+        receiver_layout(box)
     if legacy_top_support:
         usable_h = box.z - box.base_thickness
         if not usable_h > 0:

@@ -3076,7 +3076,7 @@ class WebServerTests(unittest.TestCase):
             return response.status, json.loads(response.read())
 
     def test_space_card_images_are_served_from_image_root(self):
-        for name in ("Drawer.png", "Vanity.png", "B4B.png"):
+        for name in ("Drawer.png", "Vanity.png", "B4B.png", "Pegboard.png"):
             status, headers, body = self.get(f"/images/{name}")
             self.assertEqual(status, 200)
             self.assertEqual(headers["Content-Type"], "image/png")
@@ -3094,7 +3094,7 @@ class WebServerTests(unittest.TestCase):
         health = json.loads(body)
         self.assertTrue(health["ok"])
         self.assertTrue(health["instance"])
-        self.assertEqual(health["api_compat"], 1)
+        self.assertEqual(health["api_compat"], 2)
         self.assertEqual(health["instance"], catalog_payload()["instance"])
         status, headers, body = self.get("/")
         self.assertEqual(status, 200)

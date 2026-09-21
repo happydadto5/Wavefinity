@@ -4,7 +4,7 @@ Every selected folder gets ``.wavefinity.json``. Inventory and Space are
 independent: ``inventory`` (default ``true``) is whether generated bins/B4Bs
 are logged to ``Wavefinity bins.md``, and ``folder_mode`` is ``design`` or
 ``space`` depending on whether the folder also represents one physical
-Drawer, Surface, or Portable Storage case. A Space may also keep its own
+Drawer, Surface, Portable Storage case, or Pegboard. A Space may also keep its own
 sanitized bin-default snapshot. ``folder_mode=space`` always implies
 ``inventory=true`` - a Space cannot operate without the inventory its layout
 depends on. Legacy markers (an old ``design`` marker with no ``inventory``
@@ -43,9 +43,9 @@ MAX_RECENT = 8
 METADATA_FILE = ".wavefinity.json"
 LEGACY_METADATA_FILE = ".wavefinity-space.json"
 SPACE_ID_REQUIRED_VERSION = 5
-METADATA_VERSION = 6
+METADATA_VERSION = 7
 SPACE_SETUP_VERSION = 1
-SUPPORTED_METADATA_VERSIONS = {2, 3, 4, 5, 6}
+SUPPORTED_METADATA_VERSIONS = {2, 3, 4, 5, 6, 7}
 _UNSET = object()
 
 
@@ -161,8 +161,13 @@ def _json_file(path: Path, *, strict: bool = False) -> dict[str, Any] | None:
 
 
 def _space(raw: Any) -> dict[str, Any] | None:
-    if not isinstance(raw, dict) or raw.get("kind") not in {"drawer", "box", "surface", "portable"}:
+    if not isinstance(raw, dict) or raw.get("kind") not in {"drawer", "box", "surface", "portable", "pegboard"}:
         return None
+    if raw.get("kind") == "pegboard":
+        try:
+            return normalise_space_definition(raw)
+        except (TypeError, ValueError):
+            return None
     try:
         size = [float(raw[axis]) for axis in ("x", "y", "z")]
     except (KeyError, TypeError, ValueError):
@@ -873,6 +878,9 @@ def space_routes(
         }
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
+        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y"):
+            if key in payload:
+                raw_def[key] = payload[key]
 
         auto_created = not payload.get("output")
 
@@ -925,6 +933,9 @@ def space_routes(
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
+        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y"):
+            if key in payload:
+                raw_def[key] = payload[key]
 
         result = configure_space(target, raw_def=raw_def, mode="update", allow_legacy=True)
         space = result["layout"]["space"]
@@ -947,6 +958,9 @@ def space_routes(
         raw_def = {"name": payload.get("name"), "kind": existing_space["kind"], "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
+        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y"):
+            if key in payload:
+                raw_def[key] = payload[key]
 
         result = configure_space(target, raw_def=raw_def, mode="update")
         space = result["layout"]["space"]

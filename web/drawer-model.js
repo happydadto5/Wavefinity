@@ -46,6 +46,7 @@ const DL = {
   history: [],
   future: [],
   listeners: [],
+  pegboardLayouts: {},
 };
 
 // The design being edited, shown in Space before it has been generated. It
@@ -97,7 +98,7 @@ DL.defaultDrawer = (name, from = null) => ({
 // allowance for the outermost wave crests; a Storage Box's own mating
 // boundary is already the interlocking surface and needs none.
 DL.canonicalLayoutRules = boundary => ({
-  clearance: boundary === "mating" ? 0 : drawerHardClearance(),
+  clearance: boundary === "mating" || boundary === "pegboard" ? 0 : drawerHardClearance(),
   anchor: "front-left",
   bin_axis: "x",
   snap: 8,
@@ -171,11 +172,24 @@ DL.isPlanned = p => (p.copy ?? 0) >= (Number(DL.bin(p.bin)?.qty) || 0);
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
 DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
+DL.isPegboard = (drawer = DL.drawer()) => drawer?.boundary === "pegboard";
 
 // The wall allowance is a product rule (see DL.canonicalLayoutRules), not a
 // per-drawer setting.
 DL.slack = drawer => DL.canonicalLayoutRules(drawer.boundary).clearance;
 DL.grid = (drawer = DL.drawer()) => {
+  if (DL.isPegboard(drawer)) {
+    const standard = state.catalog?.pegboard_rules?.standards?.find(row => row.id === drawer.pegboard_standard);
+    const stepX = Number(standard?.pitch_x_mm || 25.4);
+    const stepY = Number(standard?.pitch_y_mm || 25.4);
+    const cols = Number(drawer.pegboard_holes_x || Math.floor(drawer.width / stepX));
+    const rows = Number(drawer.pegboard_holes_y || Math.floor(drawer.depth / stepY));
+    const ox = Number(drawer.pegboard_residual_x || 0) / 2;
+    const oy = Number(drawer.pegboard_residual_y || 0) / 2;
+    return { step: stepX, stepX, stepY, perUnit: 1, cols, rows, ox, oy,
+      gapLeft: ox, gapRight: drawer.width - ox - cols * stepX,
+      gapFront: oy, gapBack: drawer.depth - oy - rows * stepY };
+  }
   const step = 8;
   const slack = DL.slack(drawer);
   const usableX = drawer.width - slack;
@@ -185,7 +199,7 @@ DL.grid = (drawer = DL.drawer()) => {
   const ox = slack / 2;
   const oy = slack / 2;
   return {
-    step, perUnit: DL.UNIT / step, cols, rows, ox, oy,
+    step, stepX: step, stepY: step, perUnit: DL.UNIT / step, cols, rows, ox, oy,
     gapLeft: ox, gapRight: drawer.width - ox - cols * step,
     gapFront: oy, gapBack: drawer.depth - oy - rows * step,
   };
@@ -193,13 +207,17 @@ DL.grid = (drawer = DL.drawer()) => {
 
 // Footprint in grid cells, as the bin stands in this drawer.
 DL.cells = (one, drawer = DL.drawer()) => {
-  const step = DL.grid(drawer).step;
-  const cx = Math.max(1, Math.ceil(one.x / step - 1e-6));
-  const cy = Math.max(1, Math.ceil(one.y / step - 1e-6));
+  const grid = DL.grid(drawer);
+  if (DL.isPegboard(drawer)) {
+    const layout = DL.pegboardLayouts[one.id] || one.pegboard_layout;
+    if (layout && !layout.error) return [layout.cells_x, layout.cells_y];
+  }
+  const cx = Math.max(1, Math.ceil(one.x / grid.stepX - 1e-6));
+  const cy = Math.max(1, Math.ceil((DL.isPegboard(drawer) ? one.z : one.y) / grid.stepY - 1e-6));
   return [cx, cy];
 };
-DL.toCell = (units, drawer = DL.drawer()) => Math.round(Number(units) * DL.grid(drawer).perUnit);
-DL.toUnits = (cell, drawer = DL.drawer()) => cell / DL.grid(drawer).perUnit;
+DL.toCell = (units, drawer = DL.drawer()) => DL.isPegboard(drawer) ? Math.round(Number(units)) : Math.round(Number(units) * DL.grid(drawer).perUnit);
+DL.toUnits = (cell, drawer = DL.drawer()) => DL.isPegboard(drawer) ? cell : cell / DL.grid(drawer).perUnit;
 
 // Inventory Z is the seating-datum module height. The top interlock remains
 // exposed on the physical envelope of the first/detached part.
@@ -344,8 +362,26 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
   const grid = DL.grid(drawer);
   const [w, d] = DL.cells(bins[0], drawer);
   const height = DL.stackHeight(bins);
-  if (height > drawer.height + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this drawer's ${fmt(drawer.height)} mm.` };
-  if (gx < 0 || gy < 0 || gx + w > grid.cols || gy + d > grid.rows) return { ok: false, reason: "That would stick out of the drawer." };
+  if (!DL.isPegboard(drawer) && height > drawer.height + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this drawer's ${fmt(drawer.height)} mm.` };
+  if (gx < 0 || gy < 0 || gx + w > grid.cols || gy + d > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the pegboard." : "That would stick out of the drawer." };
+  if (DL.isPegboard(drawer)) {
+    const layout = DL.pegboardLayouts[bins[0].id] || bins[0].pegboard_layout;
+    if (!layout || layout.error) return { ok: false, reason: layout?.error || "Mount layout is still loading." };
+    if (!layout.compatible) return { ok: false, reason: bins[0].pegboard_standard ? "This bin was generated for another pegboard standard." : "This bin has no pegboard receiver." };
+    if (drawer.pegboard_standard === "skadis" && gy % 2) return { ok: false, reason: "SKÅDIS bins start on an aligned slot row." };
+    if ((layout.mount_offsets || []).some(([mx, my]) => gx + mx < 0 || gx + mx >= grid.cols - 0.5 + 1e-9 || gy + my < 0 || gy + my >= grid.rows)) {
+      return { ok: false, reason: "The bin cannot reach enough valid board openings there." };
+    }
+    const occupied = new Set();
+    for (const item of DL.items(drawer)) {
+      if (item.keys.every(key => ignore.has(key))) continue;
+      const other = DL.pegboardLayouts[item.bins[0].id];
+      for (const [mx, my] of other?.mount_offsets || []) occupied.add(`${item.gx + mx},${item.gy + my}`);
+    }
+    for (const [mx, my] of layout.mount_offsets || []) {
+      if (occupied.has(`${gx + mx},${gy + my}`)) return { ok: false, reason: "That mounting position is already in use." };
+    }
+  }
   for (const item of DL.items(drawer)) {
     if (item.keys.every(key => ignore.has(key))) continue;
     if (gx < item.gx + item.w && item.gx < gx + w && gy < item.gy + item.d && item.gy < gy + d) {
@@ -357,6 +393,7 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
 
 // Can these bins snap onto the top of this stack?
 DL.fitsOn = (drawer, bins, target) => {
+  if (DL.isPegboard(drawer)) return { ok: false, reason: "Pegboard bins mount directly to the board and cannot be stacked here." };
   const lower = target.bins[target.bins.length - 1];
   const refusal = DL.stackRefusal(bins[0], lower);
   if (refusal) return { ok: false, reason: refusal };
@@ -387,13 +424,18 @@ DL.change = (mutate, { history = true } = {}) => {
 // this to copy them into the loaded layout through the normal change path
 // (dirty, report, autosave); no undo entry, and nothing happens if unchanged.
 DL.syncSingleDrawerFromSpace = space => {
-  if (!DL.layout || !space || space.kind !== "drawer" || DL.layout.drawers.length !== 1) return false;
+  if (!DL.layout || !space || !["drawer", "pegboard"].includes(space.kind) || DL.layout.drawers.length !== 1) return false;
   return DL.change(() => {
     const drawer = DL.drawer();
     drawer.name = space.name;
     drawer.width = space.x;
     drawer.depth = space.y;
     drawer.height = space.z;
+    if (space.kind === "pegboard") Object.assign(drawer, {
+      boundary: "pegboard", pegboard_standard: space.pegboard_standard,
+      pegboard_holes_x: space.pegboard_holes_x, pegboard_holes_y: space.pegboard_holes_y,
+      pegboard_residual_x: space.pegboard_residual_x, pegboard_residual_y: space.pegboard_residual_y,
+    });
   }, { history: false });
 };
 
@@ -464,6 +506,18 @@ DL.adopt = data => {
   if (data.stack_steps) DL.stackSteps = data.stack_steps;
 };
 
+DL.refreshPegboardLayouts = async () => {
+  const drawer = DL.layout && DL.drawer();
+  if (!DL.isPegboard(drawer)) { DL.pegboardLayouts = {}; return; }
+  const bins = [...DL.bins];
+  if (DL.working?.bin) bins.push(DL.working.bin);
+  const result = await api("/api/pegboard/layouts", {
+    standard: drawer.pegboard_standard,
+    bins,
+  });
+  DL.pegboardLayouts = result.layouts || {};
+};
+
 // Re-read the current design and, if it is pending inventory, its planning
 // envelope from the server. Cheap when the design has not changed.
 DL.refreshWorking = async () => {
@@ -485,6 +539,7 @@ DL.refreshWorking = async () => {
         name: (design.part_name || "").trim(),
       },
     };
+    await DL.refreshPegboardLayouts();
   } catch (error) {
     if (ticket !== DL.workingTicket) return;
     DL.working = { key, error: error.message };
@@ -563,6 +618,7 @@ DL.load = async () => {
   }
   DL.prune();
   DL.loaded = true;
+  await DL.refreshPegboardLayouts();
   DL.emit();
   DL.requestReport();
   DL.refreshWorking();
@@ -656,6 +712,7 @@ DL.editBins = async changes => {
   try {
     const data = await DL.inventoryCall("/api/drawer/save", payload);
     DL.adopt(data);
+    await DL.refreshPegboardLayouts();
     DL.exists = true;
     // Bin sizes/kinds may have just changed underneath any spacer proposal.
     DL.clearSpacerPlan();
@@ -727,6 +784,7 @@ DL.busyWith = async (what, work) => {
 // ------------------------------------------------------------------ actions
 
 DL.runAuto = () => DL.busyWith("auto", async () => {
+  if (DL.isPegboard()) { toast("Place pegboard bins on the visible mount grid.", true); return; }
   const result = await api("/api/drawer/auto", {
     layout: DL.layout, bins: DL.bins, drawer_id: DL.layout.active,
     options: DL.layout.settings.auto,
@@ -766,6 +824,17 @@ DL.placeAt = (one, where) => {
 // Drop one bin into the best free spot, using the same packer as Auto layout.
 DL.quickPlace = one => DL.busyWith("", async () => {
   const drawer = DL.drawer();
+  if (DL.isPegboard(drawer)) {
+    const grid = DL.grid(drawer);
+    const [w, d] = DL.cells(one, drawer);
+    for (let gy = 0; gy + d <= grid.rows; gy += 1) {
+      for (let gx = 0; gx + w <= grid.cols; gx += 1) {
+        if (DL.fitsAt(drawer, [one], gx, gy).ok) { DL.placeAt(one, { gx, gy }); return; }
+      }
+    }
+    toast(`No mountable space remains for ${DL.label(one)}.`, true);
+    return;
+  }
   if (one.z > drawer.height + 1e-6) { toast(`${DL.label(one)} is ${fmt(one.z)} mm tall - taller than this drawer.`, true); return; }
   const copy = DL.nextCopy(one);
   const ask = async rule => {

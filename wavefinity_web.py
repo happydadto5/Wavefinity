@@ -230,6 +230,7 @@ from organizer_side_openings import (
     SIDE_OPENING_MIN_SIDE_MM,
     SIDE_OPENING_TOP_BRIDGE_MM,
 )
+from organizer_pegboard import pegboard_catalog, pegboard_layout_for_bin
 
 
 WEB_ROOT = APP_DIR / "web"
@@ -240,7 +241,7 @@ HOSTED = (
     or os.environ.get("RENDER", "").lower() == "true"
 )
 SERVER_VERSION = "1"
-API_COMPAT_VERSION = 1
+API_COMPAT_VERSION = 2
 SERVER_INSTANCE = uuid.uuid4().hex
 SERVER_BUILD = os.environ.get("RENDER_GIT_COMMIT", SERVER_VERSION)[:12]
 GEOMETRY_LOCK = threading.RLock()
@@ -922,6 +923,7 @@ def catalog_payload() -> dict[str, Any]:
             "hard_wall_clearance_mm": DRAWER_HARD_CLEARANCE_MM,
             "ordinary_bin_min_height_mm": ORDINARY_BIN_MIN_HEIGHT_MM,
         },
+        "pegboard_rules": pegboard_catalog(),
         "modes": [
             {"value": "fused", "label": "Fused into box"},
             {"value": "separate", "label": "Removable insert"},
@@ -2538,6 +2540,20 @@ def inventory_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {"bin": record}
 
 
+def pegboard_layouts_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    standard = payload.get("standard") or "standard"
+    layouts: dict[str, Any] = {}
+    for one in payload.get("bins") or []:
+        if not isinstance(one, dict):
+            continue
+        key = str(one.get("id") or "")
+        try:
+            layouts[key] = pegboard_layout_for_bin(one, standard)
+        except (TypeError, ValueError, KeyError) as error:
+            layouts[key] = {"error": str(error), "compatible": False}
+    return {"standard": standard, "layouts": layouts}
+
+
 def base_trim_joint_test_payload(payload: dict[str, Any]) -> dict[str, Any]:
     raw_design = payload["design"]
     if not _is_base_trim_design(raw_design):
@@ -2559,6 +2575,9 @@ def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if "trim_size" in payload:
         raw_def["trim_size"] = payload["trim_size"]
+    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y"):
+        if key in payload:
+            raw_def[key] = payload[key]
     return configure_space_text(
         payload.get("inventory_text") or "",
         title=str(payload.get("inventory_title") or payload.get("name") or "Wavefinity"),
@@ -2575,6 +2594,9 @@ def configure_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if "trim_size" in payload:
         raw_def["trim_size"] = payload["trim_size"]
+    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y"):
+        if key in payload:
+            raw_def[key] = payload[key]
     return configure_space_text(
         payload.get("inventory_text") or "",
         title=str(payload.get("inventory_title") or payload.get("name") or "Wavefinity"),
@@ -2900,6 +2922,7 @@ POST_ROUTES = {
     "/api/preview": preview_payload,
     "/api/design/validate": validate_design_payload,
     "/api/design/inventory-preview": inventory_preview_payload,
+    "/api/pegboard/layouts": pegboard_layouts_payload,
     "/api/feature/default": default_feature_payload,
     "/api/feature/draft": draft_payload,
     "/api/feature/fit": feature_fit_payload,

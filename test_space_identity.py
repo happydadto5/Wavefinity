@@ -80,7 +80,7 @@ class SpaceIdentityTests(unittest.TestCase):
     def call(self, route, **payload):
         return self.routes[route](payload)
 
-    def test_v4_typed_open_upgrades_to_v6_without_setup(self):
+    def test_v4_typed_open_upgrades_to_v7_without_setup(self):
         folder = make_v4_space(self.tmp)
         before = (folder / ".wavefinity.json").read_bytes()
         info = self.call("/api/space/inspect", output=str(folder))["folder"]
@@ -92,7 +92,7 @@ class SpaceIdentityTests(unittest.TestCase):
 
         opened = self.call("/api/folder/use", output=str(folder))["folder"]
         data = meta(folder)
-        self.assertEqual(data["version"], 6)
+        self.assertEqual(data["version"], 7)
         self.assertEqual(str(uuid.UUID(data["space_id"])), data["space_id"])
         self.assertEqual(data["space"], V4["space"])
         self.assertEqual(data["bin_defaults"], {"marker": 1})
@@ -127,7 +127,7 @@ class SpaceIdentityTests(unittest.TestCase):
         (folder / ".wavefinity.json").write_text(json.dumps(data), encoding="utf-8")
         opened = self.call("/api/folder/use", output=str(folder))["folder"]
         upgraded = meta(folder)
-        self.assertEqual(upgraded["version"], 6)
+        self.assertEqual(upgraded["version"], 7)
         self.assertEqual(upgraded["space_id"], space_id)
         self.assertEqual(upgraded["part_defaults"], {})
         self.assertEqual(opened["part_defaults"], {})
@@ -142,7 +142,7 @@ class SpaceIdentityTests(unittest.TestCase):
         self.assertEqual(result["part_defaults"], saved)
         self.assertEqual(meta(folder)["part_defaults"], saved)
 
-    def test_v6_typed_without_id_is_damaged_not_healed(self):
+    def test_v7_typed_without_id_is_damaged_not_healed(self):
         folder = make_v4_space(self.tmp)
         self.call("/api/folder/use", output=str(folder))
         data = meta(folder)
@@ -266,7 +266,7 @@ class SpaceIdentityTests(unittest.TestCase):
             name="Vanity", kind="drawer", x=320, y=240, z=55,
         )
         data = meta(folder)
-        self.assertEqual(data["version"], 6)
+        self.assertEqual(data["version"], 7)
         self.assertEqual(data["part_defaults"], {})
         self.assertEqual(str(uuid.UUID(data["space_id"])), data["space_id"])
         self.assertNotEqual(data["space_id"], injected)

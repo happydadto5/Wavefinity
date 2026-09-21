@@ -3,7 +3,7 @@
 A persistent save folder keeps this by default - a normal untyped Design
 folder may explicitly opt out, independently of whether it is a typed Space.
 Every generated bin/B4B is appended here when inventory is enabled. A typed
-Drawer, Surface, or Portable Space stores its layout in this same file rather
+Drawer, Surface, Portable, or Pegboard Space stores its layout in this same file rather
 than a separate one; a Space requires inventory, but inventory does not
 require a Space. Legacy Box metadata remains readable as migration input
 only - see ``normalise_space_definition``'s ``allow_legacy``. The file has
@@ -44,6 +44,7 @@ from organizer_product_rules import (
     ORDINARY_BIN_MIN_HEIGHT_MM,
     SURFACE_TRIM_HEIGHTS,
 )
+from organizer_pegboard import normalise_pegboard_space
 
 INVENTORY_LOCK = threading.RLock()
 INVENTORY_FILENAME = "Wavefinity bins.md"
@@ -54,6 +55,8 @@ COLUMNS = (
     ("wall", "Wall (mm)"),
     ("qty", "Qty"), ("file", "File"), ("label", "Label"), ("interior", "Interior Part(s)"),
     ("boundary", "Boundary"),
+    ("pegboard_standard", "Pegboard"),
+    ("cleat_x", "Cleat X"), ("cleat_y", "Cleat Y"),
 )
 # bin: generated here.  b4b: a Bin for Bins case.  spacer: made by the Layout
 # view to take up the measured back/right gap left by the placed grid - a
@@ -71,12 +74,12 @@ MAX_QTY = 999
 # A generated bin is not a printed one.  Until the Layout view's setting says
 # otherwise, new rows start at Qty 0 and are marked printed by hand.
 DEFAULT_NEW_BIN_QTY = 0
-# A Space is one physical drawer, surface, or portable case. Its inventory
+# A Space is one physical drawer, surface, portable case, or pegboard. Its inventory
 # is stored in the selected Wavefinity save folder. Legacy "box" is read for
 # migration only (see normalise_space_definition's allow_legacy) - it must
 # never be a normal writable current kind, or every caller that omits
 # allow_legacy (the default) would still silently accept and persist it.
-SPACE_KINDS = ("drawer", "surface", "portable")
+SPACE_KINDS = ("drawer", "surface", "portable", "pegboard")
 LEGACY_SPACE_KINDS = ("box",)
 
 _HEADER_KEYS = {
@@ -86,6 +89,7 @@ _HEADER_KEYS = {
     "qty": "qty", "quantity": "qty",
     "file": "file", "label": "label", "interior part(s)": "interior",
     "interior": "interior", "boundary": "boundary",
+    "pegboard": "pegboard_standard", "cleat x": "cleat_x", "cleat y": "cleat_y",
 }
 _KEEP = object()
 
@@ -237,6 +241,9 @@ def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
         "file": file,
         "label": label,
         "interior": interior,
+        "pegboard_standard": _text(raw.get("pegboard_standard")).lower(),
+        "cleat_x": _text(raw.get("cleat_x")).lower() or "auto",
+        "cleat_y": _text(raw.get("cleat_y")).lower() or "auto",
     }
 
 
@@ -291,7 +298,11 @@ def _migrate_drawer_boundaries(layout: dict[str, Any] | None) -> None:
     drawers = [d for d in (layout.get("drawers") or []) if isinstance(d, dict)]
     if not isinstance(space, dict) or not drawers:
         return
-    target = "mating" if space.get("kind") == "box" else "wall"
+    target = (
+        "pegboard" if space.get("kind") == "pegboard"
+        else "mating" if space.get("kind") == "box"
+        else "wall"
+    )
     primary = next((d for d in drawers if d.get("id") == "d1"), None)
     if primary is None:
         want = tuple(_number(space.get(axis), float("nan")) for axis in ("x", "y", "z"))
@@ -305,7 +316,7 @@ def _migrate_drawer_boundaries(layout: dict[str, Any] | None) -> None:
                 None,
             )
     primary = primary or drawers[0]
-    if primary.get("boundary") not in ("wall", "mating"):
+    if primary.get("boundary") not in ("wall", "mating", "pegboard"):
         primary["boundary"] = target
 
 
@@ -564,6 +575,9 @@ def _merge_inventory(
             "file": str(raw.get("file") or ""),
             "label": str(raw.get("label") or ""),
             "interior": str(raw.get("interior") or ""),
+            "pegboard_standard": str(raw.get("pegboard_standard") or "").lower(),
+            "cleat_x": str(raw.get("cleat_x") or "auto").lower(),
+            "cleat_y": str(raw.get("cleat_y") or "auto").lower(),
         })
     chosen = current["layout"] if layout is _KEEP else layout
     return bins, _prune_layout(chosen, bins)
@@ -619,6 +633,9 @@ def append_bin(
     stack: str = "none",
     wall: float | None = None,
     qty: int | None = None,
+    pegboard_standard: str = "",
+    cleat_x: str | int = "auto",
+    cleat_y: str | int = "auto",
 ) -> Path:
     """Log one generated bin as a new row, keeping everything else intact.
 
@@ -644,6 +661,9 @@ def append_bin(
             "file": file,
             "label": label,
             "interior": interior,
+            "pegboard_standard": str(pegboard_standard or "").lower(),
+            "cleat_x": str(cleat_x or "auto").lower(),
+            "cleat_y": str(cleat_y or "auto").lower(),
         })
         _write(path, bins, current["layout"], current["legacy"])
     return path
@@ -693,6 +713,10 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
         # here too, not left to every caller to remember - see Fix 004
         # Correction 8.D.
         kind = "portable"
+
+    if kind == "pegboard":
+        resolved = normalise_pegboard_space(raw)
+        return {"name": name, "kind": kind, **resolved}
 
     x, y, z = (_number(raw.get(axis)) for axis in ("x", "y", "z"))
     if min(x, y, z) <= 0:
@@ -786,6 +810,9 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
         except (TypeError, ValueError):
             previous_clearance = DRAWER_HARD_CLEARANCE_MM
         clearance = max(DRAWER_HARD_CLEARANCE_MM, previous_clearance)
+    elif kind == "pegboard":
+        boundary = "pegboard"
+        clearance = 0.0
     else:
         boundary = "mating"
         clearance = 0.0
@@ -796,6 +823,12 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
     primary["height"] = z
     primary["clearance"] = clearance
     primary["boundary"] = boundary
+    if kind == "pegboard":
+        primary["pegboard_standard"] = space_def["pegboard_standard"]
+        primary["pegboard_holes_x"] = space_def["pegboard_holes_x"]
+        primary["pegboard_holes_y"] = space_def["pegboard_holes_y"]
+        primary["pegboard_residual_x"] = space_def["pegboard_residual_x"]
+        primary["pegboard_residual_y"] = space_def["pegboard_residual_y"]
 
 
 def configure_space(

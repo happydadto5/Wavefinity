@@ -491,7 +491,7 @@ DP.focusManualAdd = () => {
 };
 
 // A normal typed one-drawer Space: name and size are owned by the Space.
-DP.isCanonicalDrawer = () => state.folderMode === "space" && state.activeSpace?.kind === "drawer"
+DP.isCanonicalDrawer = () => state.folderMode === "space" && ["drawer", "pegboard"].includes(state.activeSpace?.kind)
   && DL.layout.drawers.length === 1;
 
 // Send the largest empty spot to the bin editor as a new bin's size.
@@ -595,6 +595,12 @@ DP.syncHistory = () => {
 
 DP.renderDrawer = () => {
   const drawer = DL.drawer();
+  const pegboard = DL.isPegboard(drawer);
+  const autoSection = document.querySelector('#drawer-panel [aria-label="Auto layout"]');
+  const spacerSection = document.querySelector('#drawer-panel [aria-label="Spacers"]');
+  if (autoSection) autoSection.hidden = pegboard;
+  if (spacerSection) spacerSection.hidden = pegboard;
+  if ($("#dl-add-details")) $("#dl-add-details").hidden = pegboard;
   const select = $("#dl-drawer");
   if (dlChanged("drawers", JSON.stringify(DL.layout.drawers.map(one => [one.id, one.name])) + DL.layout.active)) {
     select.innerHTML = DL.layout.drawers.map(one =>
@@ -619,7 +625,7 @@ DP.renderDrawer = () => {
   const drawerLabel = $("#dl-drawer-label");
   if (drawerLabel) {
     const legacyMultiDrawer = isTypedSpace && DL.layout.drawers.length > 1;
-    drawerLabel.textContent = legacyMultiDrawer ? "Previous drawers" : "Drawer";
+    drawerLabel.textContent = legacyMultiDrawer ? "Previous spaces" : (pegboard ? "Pegboard" : "Drawer");
     const labelRow = $("#dl-drawer-label-row");
     if (labelRow) labelRow.title = legacyMultiDrawer
       ? "Legacy drawers from before this folder became this Space. This Space keeps one physical drawer; new drawers can't be added here."
@@ -638,6 +644,11 @@ DP.renderDrawer = () => {
   dlSet("#dl-name", drawer.name);
   $("#dl-drawer-delete").disabled = DL.layout.drawers.length < 2;
   const grid = DL.grid(drawer);
+  if (pegboard) {
+    const standard = state.catalog?.pegboard_rules?.standards?.find(row => row.id === drawer.pegboard_standard);
+    $("#dl-grid-note").textContent = `${standard?.name || "Pegboard"}: ${grid.cols} × ${grid.rows} mount positions (${fmt(grid.cols * grid.stepX)} × ${fmt(grid.rows * grid.stepY)} mm usable). Drag bins onto visible holes or slots; yellow dots show their exact mounts.`;
+    return;
+  }
   const wall = DL.slack(drawer) / 2;
   const edges = [["left", grid.gapLeft], ["right", grid.gapRight], ["front", grid.gapFront], ["back", grid.gapBack]]
     .map(([side, gap]) => [side, gap - wall]).filter(([, play]) => play >= 0.1)
