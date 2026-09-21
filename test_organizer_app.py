@@ -3044,6 +3044,26 @@ class EdgeMountTests(unittest.TestCase):
             result = organizer_app.generate_organizer_files(box, organizer_app.Layout(), Path(directory))
         self.assertTrue(result["edge_mount_label"]["mesh"]["watertight"])
 
+    def test_separate_clip_ribs_have_real_45_degree_ramps_and_clear_every_wall(self) -> None:
+        for side in ("front", "back", "left", "right"):
+            for wall in (0.8, 1.2):
+                box = BoxSpec(
+                    48.0, 56.0, 40.0, wall=wall,
+                    edge_mount=EdgeMountSpec(
+                        side=side, label_enabled=True, label_text="A",
+                        label_length_mode="text",
+                    ),
+                )
+                clip = organizer_edge_mount.make_edge_mount_label_part(box)
+                self.assertTrue(clip.is_watertight, f"{side}/{wall}")
+                self.assertEqual(len(clip.split()), 1, f"{side}/{wall}")
+                self.assertLess(intersection_volume(clip, make_box(box)), 1e-3)
+                # The ramp face is 45 degrees: its Z normal component is
+                # sin(45), unlike a constant-cross-section vertical nub.
+                self.assertTrue(np.any(np.isclose(
+                    np.abs(clip.face_normals[:, 2]), math.sqrt(0.5), atol=0.02,
+                )), f"{side}/{wall} has no 45-degree retention ramp")
+
     def test_label_uses_12_mm_target_and_6_mm_floor(self) -> None:
         box = BoxSpec(
             48.0, 48.0, 40.0,
