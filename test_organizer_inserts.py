@@ -11,6 +11,9 @@ import unittest
 
 import numpy as np
 import trimesh
+from shapely import affinity
+
+import organizer_inserts._nest as nest_impl
 
 from organizer_engine import (
     BoxSpec,
@@ -1871,6 +1874,166 @@ class RegistryTests(unittest.TestCase):
 
 
 class OtherHoldersTests(unittest.TestCase):
+    def test_fix21_quantity_defaults_limits_and_occurrence_count(self) -> None:
+        legacy = photo_nest()
+        self.assertIsNone(legacy.count)
+        self.assertEqual(len(inserts.nest_occurrences(legacy)), 1)
+        repeated = photo_nest(count=4)
+        self.assertEqual([one.index for one in inserts.nest_occurrences(repeated)], list(range(4)))
+        with self.assertRaises(ValueError):
+            photo_nest(count=0)
+        with self.assertRaisesRegex(ValueError, "between 1 and 20"):
+            photo_nest(count=21)
+
+    def test_fix21_repeat_axis_uses_shorter_finished_axis_and_ties_choose_x(self) -> None:
+        tall = photo_nest(
+            contour=((-5, -20), (5, -20), (5, 20), (-5, 20)), count=3,
+            options={"lift_assist": "none"},
+        )
+        wide = photo_nest(
+            contour=((-20, -5), (20, -5), (20, 5), (-20, 5)), count=3,
+            options={"lift_assist": "none"},
+        )
+        square = photo_nest(
+            contour=((-10, -10), (10, -10), (10, 10), (-10, 10)), count=2,
+            options={"lift_assist": "none"},
+        )
+        tall_occ = inserts.nest_occurrences(tall)
+        wide_occ = inserts.nest_occurrences(wide)
+        square_occ = inserts.nest_occurrences(square)
+        self.assertNotEqual(tall_occ[0].x, tall_occ[1].x)
+        self.assertEqual(tall_occ[0].y, tall_occ[1].y)
+        self.assertEqual(wide_occ[0].x, wide_occ[1].x)
+        self.assertNotEqual(wide_occ[0].y, wide_occ[1].y)
+        self.assertNotEqual(square_occ[0].x, square_occ[1].x)
+        self.assertEqual(square_occ[0].y, square_occ[1].y)
+
+    def test_fix21_spacing_presets_are_exact_and_invalid_values_reject(self) -> None:
+        expected = {
+            -100: 0.0, -75: 0.5, -50: 1.0, -25: 1.5, 0: 2.0,
+            25: 2.5, 50: 3.0, 75: 3.5, 100: 4.0,
+        }
+        for percent, gap in expected.items():
+            one = photo_nest(options={"repeat_spacing_percent": percent})
+            self.assertAlmostEqual(inserts.nest_repeat_gap(one), gap)
+        for invalid in (10, 12.5, "wide"):
+            with self.assertRaisesRegex(ValueError, "Photo Nest spacing"):
+                inserts.nest_repeat_gap(photo_nest(options={"repeat_spacing_percent": invalid}))
+
+    def test_fix21_flip_and_historical_rotation_semantics(self) -> None:
+        plain = photo_nest(count=4, rotation=90.0)
+        self.assertEqual([one.rotation for one in inserts.nest_occurrences(plain)], [90.0] * 4)
+        flipped = photo_nest(count=4, rotation=90.0, alternate_ends=True)
+        self.assertEqual(
+            [one.rotation for one in inserts.nest_occurrences(flipped)],
+            [90.0, 270.0, 90.0, 270.0],
+        )
+        single = photo_nest(count=1, rotation=37.0, alternate_ends=True)
+        self.assertTrue(single.alternate_ends)
+        self.assertEqual(inserts.nest_occurrences(single)[0].rotation, 37.0)
+
+    def test_fix21_required_zone_contains_every_finished_occurrence_envelope(self) -> None:
+        one = photo_nest(count=4, rotation=90.0, alternate_ends=True,
+                         options={"repeat_spacing_percent": 75})
+        required = inserts.nest_required_zone(one)
+        for occurrence in inserts.nest_occurrences(one):
+            footprint = affinity.translate(
+                nest_impl._nest_single_required_footprint(one, occurrence.rotation),
+                xoff=occurrence.x, yoff=occurrence.y,
+            )
+            x0, y0, x1, y1 = footprint.bounds
+            self.assertLessEqual(required.x0, x0 + 1e-7)
+            self.assertLessEqual(required.y0, y0 + 1e-7)
+            self.assertGreaterEqual(required.x1, x1 - 1e-7)
+            self.assertGreaterEqual(required.y1, y1 - 1e-7)
+
+    def test_fix21_asymmetric_flip_preserves_exact_gap_without_overlap(self) -> None:
+        one = photo_nest(
+            contour=((-2, -5), (18, -5), (18, 8), (3, 8), (3, 16), (-2, 16)),
+            count=3, alternate_ends=True,
+            options={"lift_assist": "none", "repeat_spacing_percent": -50},
+        )
+        footprints = [
+            affinity.translate(
+                nest_impl._nest_single_required_footprint(one, occurrence.rotation),
+                xoff=occurrence.x, yoff=occurrence.y,
+            )
+            for occurrence in inserts.nest_occurrences(one)
+        ]
+        for left, right in zip(footprints, footprints[1:]):
+            self.assertFalse(left.overlaps(right))
+            self.assertAlmostEqual(left.distance(right), 1.0, places=6)
+
+    def test_fix21_recessed_quantity_and_independent_nests_share_one_open_deck(self) -> None:
+        box = BoxSpec(224.0, 128.0, 40.0)
+        options = {
+            "holder_style": "recessed", "tool_thickness": 8.0,
+            "cavity_depth_mode": "auto", "lift_assist": "none",
+        }
+        single = inserts.moved_feature(photo_nest(options=options), box, (-55.0, 0.0))
+        repeated = inserts.moved_feature(photo_nest(count=3, options=options), box, (0.0, 0.0))
+        single_deck = build_features(box, [single], box.base_thickness)
+        repeated_deck = build_features(box, [repeated], box.base_thickness)
+        self.assertEqual(len(repeated_deck), 1)
+        self.assertLess(repeated_deck[0].volume, single_deck[0].volume)
+
+        right = inserts.moved_feature(photo_nest(options=options), box, (55.0, 0.0))
+        shared = build_features(box, [single, right], box.base_thickness)
+        self.assertEqual(len(shared), 1)
+        self.assertLess(shared[0].volume, single_deck[0].volume)
+        self.assertTrue(shared[0].is_watertight)
+
+    def test_fix21_mixed_styles_build_and_variable_depths_remain_independent(self) -> None:
+        box = BoxSpec(224.0, 128.0, 40.0)
+        raised = inserts.fitted_nest_feature(photo_nest(options={
+            "holder_style": "raised_wall", "tool_thickness": 6.0,
+            "lift_assist": "none",
+        }), (-55.0, 0.0))
+        recessed = inserts.fitted_nest_feature(photo_nest(options={
+            "holder_style": "recessed", "tool_thickness": 10.0,
+            "cavity_depth_mode": "manual", "cavity_depth": 6.0,
+            "lift_assist": "none",
+        }), (55.0, 0.0))
+        self.assertEqual(len(build_features(box, [raised, recessed], box.base_thickness)), 2)
+
+        shallow = inserts.fitted_nest_feature(photo_nest(options={
+            "holder_style": "recessed", "tool_thickness": 10.0,
+            "cavity_depth_mode": "manual", "cavity_depth": 3.0,
+            "lift_assist": "none",
+        }), (-55.0, 0.0))
+        mixed_depth = build_features(box, [shallow, recessed], box.base_thickness)[0]
+        deep_left = inserts.fitted_nest_feature(photo_nest(options={
+            "holder_style": "recessed", "tool_thickness": 10.0,
+            "cavity_depth_mode": "manual", "cavity_depth": 6.0,
+            "lift_assist": "none",
+        }), (-55.0, 0.0))
+        all_deep = build_features(box, [deep_left, recessed], box.base_thickness)[0]
+        self.assertAlmostEqual(mixed_depth.bounds[1][2], all_deep.bounds[1][2], places=6)
+        self.assertGreater(mixed_depth.volume, all_deep.volume)
+
+    def test_fix21_serialization_and_old_save_defaults_preserve_behavior(self) -> None:
+        one = photo_nest(
+            count=3, rotation=37.0, alternate_ends=True,
+            options={"repeat_spacing_percent": 50},
+        )
+        rebuilt = layout_from_dict(layout_to_dict(Layout((one,)))).features[0]
+        self.assertEqual(rebuilt.count, 3)
+        self.assertTrue(rebuilt.alternate_ends)
+        self.assertEqual(rebuilt.rotation, 37.0)
+        self.assertEqual(rebuilt.options["repeat_spacing_percent"], 50)
+
+        old_data = layout_to_dict(Layout((photo_nest(rotation=27.0),)))
+        old = old_data["features"][0]
+        old.pop("count", None)
+        old.pop("alternate_ends", None)
+        old["options"].pop("repeat_spacing_percent", None)
+        legacy = layout_from_dict(old_data).features[0]
+        self.assertIsNone(legacy.count)
+        self.assertFalse(legacy.alternate_ends)
+        self.assertEqual(legacy.rotation, 27.0)
+        self.assertAlmostEqual(inserts.nest_repeat_gap(legacy), 2.0)
+        self.assertEqual(len(inserts.nest_occurrences(legacy)), 1)
+
     def test_recessed_photo_nests_share_one_watertight_deck(self) -> None:
         box = BoxSpec(192.0, 120.0, 40.0)
         options = {

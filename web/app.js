@@ -2847,9 +2847,15 @@ function updateNudgeUI() {
 function updatePreviewHelp(view) {
   const el = $("#preview-help");
   if (!el) return;
-  el.textContent = view === "2d"
-    ? "Drag a Photo Nest outline point to reshape it. Drag inside to move; use the square to resize and circle to rotate."
-    : "Drag to spin, or click the arrows for a 15° step (shift-click for 2°). Wheel to zoom, double-click to reset.";
+  if (view !== "2d") {
+    el.textContent = "Drag to spin, or click the arrows for a 15° step (shift-click for 2°). Wheel to zoom, double-click to reset.";
+  } else if (isNestEditWorkspaceActive()) {
+    el.textContent = "Drag a source-outline point to reshape this Photo Nest. Use Add point or Delete point for outline detail.";
+  } else if (state.draft?.kind === "nest" || state.design?.layout?.features?.[state.selected]?.kind === "nest") {
+    el.textContent = "Drag the whole repeated Photo Nest group to move it; use the square to resize and circle to rotate.";
+  } else {
+    el.textContent = "Drag a part to move it; use the square to resize and circle to rotate.";
+  }
 }
 
 // Advisory only: a user-changed wall that differs from known ordinary bins already
@@ -3638,6 +3644,7 @@ function clearDraftSelection(resetLocks = true) {
   // context. Invalidate every in-flight draft operation so an old palette
   // response, fit, photo upload, or auto-save cannot alter the new design.
   cancelPendingDraftWork();
+  resetNestPhotoSession();
   state.draft = null;
   state.draftKind = null;
   state.draftAutoCommit = false;
@@ -3667,8 +3674,10 @@ function clearDraftSelection(resetLocks = true) {
 }
 
 function pickKind(kind) {
-  if (kind === "nest" && state.design?.layout?.features?.some(one => one.kind === "nest")) {
-    toast("Duplicate an existing Photo Nest to add another copy.", true, 5000);
+  const info = partInfo(kind);
+  const isModifier = info?.capabilities?.includes("box_modifier");
+  if (!isModifier && state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour)) {
+    toast("Photo Nest designs use Duplicate for another group; other interior parts are unavailable.", true, 5000);
     return;
   }
   if (b4bEnabled() && !b4bPartAllowed(kind)) return;
@@ -3682,8 +3691,7 @@ function pickKind(kind) {
     }
   }
   state.paletteBrowsing = false;
-  const info = partInfo(kind);
-  if (info?.capabilities?.includes("box_modifier")) {
+  if (isModifier) {
     if (partAtLimit(info)) return openModifier(kind);
     return addModifier(kind);
   }
@@ -3706,6 +3714,7 @@ async function openModifier(kind, fromPlaced = false) {
   if (b4bEnabled()) return;
   if (!BOX_MODIFIER_KINDS.has(kind) || !edgeMountAvailable()) return;
   if (state.draft && !(await guardDraftSwitch())) return;
+  resetNestPhotoSession();
   if (state.modifierEditing && state.modifierEditing !== kind) commitEdgeMountFormBeforeSwitch();
   cancelPendingDraftWork();
   state.paletteBrowsing = false;
@@ -3877,6 +3886,7 @@ async function selectKind(kind, reset = false) {
   // give the user the chance to keep unsaved work first.
   const keepsSameDraft = !reset && state.draft?.kind === kind;
   if (!keepsSameDraft && !(await guardDraftSwitch())) return;
+  if (!keepsSameDraft && state.draft?.kind === "nest") resetNestPhotoSession();
   commitEdgeMountFormBeforeSwitch();
   state.edgeMountEditing = false;
   $("#draft-fields").hidden = false;
@@ -3967,7 +3977,8 @@ async function selectedFeature(index, force = false) {
   if (!force && index === state.selected) return;
   // Don't drop unsaved work on the part currently open without asking first.
   if (!force && !(await guardDraftSwitch())) return;
-  if (state.draft?.kind === "nest") resetNestPhotoSession();
+  const selected = state.design.layout.features[index];
+  if (state.draft?.kind === "nest" || selected?.kind === "nest") resetNestPhotoSession();
   commitEdgeMountFormBeforeSwitch();
   cancelPendingDraftWork();
   state.edgeMountEditing = false;
@@ -5039,6 +5050,7 @@ function syncNest2DWorkspace() {
     && state.nestOutlineEditing === true
     && (hasPhotoSession || Boolean(state.draft.contour?.length));
   const hasContour = editingOutline && Boolean(state.draft.contour?.length);
+  if (wrap.classList.contains("active")) updatePreviewHelp("2d");
 
   recovery.hidden = !recoveryActive;
   canvas.hidden = recoveryActive;
@@ -7080,14 +7092,12 @@ function updateSelectionButtons() {
   $("#delete-part").disabled = busy || (!state.draft && !state.modifierEditing) ||
     (state.draft?.kind === "divider" && dividerLockedByLidLabels());
   const hasPhotoNest = state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour);
-  const replacingPhotoNest = hasPhotoNest && state.selected !== null &&
-    state.design.layout.features[state.selected]?.kind === "nest";
   $$(".support-choice").forEach(button => {
     const info = partInfo(button.dataset.kind);
     const isModifier = info?.capabilities?.includes("box_modifier");
     const alreadyAdded = partAtLimit(info);
     const isThisModifierBeingEdited = state.modifierEditing === button.dataset.kind;
-    button.disabled = busy || (hasPhotoNest && !replacingPhotoNest && !isModifier);
+    button.disabled = busy || (hasPhotoNest && !isModifier);
     button.classList.toggle("added", alreadyAdded && !isThisModifierBeingEdited);
     const stateLabel = $(".support-choice-state", button);
     if (stateLabel) {
@@ -10368,6 +10378,7 @@ function wireLayoutInteraction() {
     if (index === null) {
       if (state.selected !== null) {
         if (!(await guardDraftSwitch())) return;
+        resetNestPhotoSession();
         state.selected = null;
         state.draft = null;
         state.draftKind = null;

@@ -1098,13 +1098,17 @@ def preview_geometry(
         and str(resolve_nest_settings(box, draft, base_z)["holder_style"]) == "recessed"
     )
     effective_recessed = []
+    represented_recessed = set()
     draft_in_group = False
     for index in sorted(grouped_recessed):
-        if index == selected and draft_in_recessed_group:
-            effective_recessed.append(draft)
-            draft_in_group = True
-        else:
-            effective_recessed.append(features[index])
+        if index == selected and draft is not None:
+            if draft_in_recessed_group:
+                effective_recessed.append(draft)
+                represented_recessed.add(index)
+                draft_in_group = True
+            continue
+        effective_recessed.append(features[index])
+        represented_recessed.add(index)
     if draft_in_recessed_group and not draft_in_group:
         effective_recessed.append(draft)
         draft_in_group = True
@@ -1116,14 +1120,18 @@ def preview_geometry(
             )
             if built:
                 top_z = max(float(solid.bounds[1][2]) for solid in built)
-                for index in grouped_recessed:
+                for index in represented_recessed:
                     feature_overhang_mm[index] = round(max(0.0, top_z - box.z), 3)
                 if draft_in_group:
                     draft_overhang_mm = round(max(0.0, top_z - box.z), 3)
             for solid in built:
+                if cut_fused_pieces:
+                    solid = apply_edge_mount_hole_cuts(box, solid)
+                if cut_side_opening_pieces:
+                    solid = apply_side_openings(box, solid)
                 geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_nest"))
         except Exception as error:
-            for index in grouped_recessed:
+            for index in represented_recessed:
                 feature_errors.append(f"nest: {error}")
                 if index not in invalid_feature_indexes:
                     invalid_feature_indexes.append(index)
@@ -1131,8 +1139,6 @@ def preview_geometry(
                 draft_error = f"nest: {error}"
 
     for feature_index, one in enumerate(features):
-        if feature_index in grouped_recessed:
-            continue
         if is_text(one) and one.options.get("level") == "rim":
             continue
         if selected is not None and feature_index == selected and draft is not None:
@@ -1157,6 +1163,9 @@ def preview_geometry(
             feature_errors.append(f"{one.kind}: overlaps the {handle_conflict}")
             if feature_index not in invalid_feature_indexes:
                 invalid_feature_indexes.append(feature_index)
+
+        if feature_index in represented_recessed:
+            continue
 
         is_conflicting = feature_index in conflicting_feature_indexes
         is_invalid = feature_index in invalid_feature_indexes
