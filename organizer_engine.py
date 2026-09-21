@@ -2052,9 +2052,13 @@ def _connector_arm_notches(
 
 
 def _corner_connector_direction(
-    box: BoxSpec, connector: ConnectorSpec, axis: str, direction: int
+    box: BoxSpec,
+    connector: ConnectorSpec,
+    axis: str,
+    direction: int,
+    include_grip: bool = True,
 ) -> trimesh.Trimesh:
-    """One leg of a corner connector: a cap bridge plus a locked grip arm."""
+    """One corner branch: always a cap bridge, optionally a locked grip arm."""
     if axis not in {"x", "y"} or direction not in (-1, 1):
         raise ValueError("corner leg needs axis x/y and direction -1/+1")
     inner_hw, outer_hw = connector_half_widths(box, connector)
@@ -2071,6 +2075,9 @@ def _corner_connector_direction(
         connector.cap_thickness,
     )
     cap.apply_translation((0.0, 0.0, connector.arm_depth))
+    if not include_grip:
+        return _cleaned(cap)
+
     arm_coords = span(start, end)
     body = _extrude_polygon(
         _connector_corridor_polygon(axis, arm_coords, 0.0, outer_hw),
@@ -2088,25 +2095,37 @@ def _corner_connector_direction(
     return union([arm, cap])
 
 
+def _corner_connector_branches(ways: int) -> tuple[tuple[str, int, bool], ...]:
+    """Installed-seam topology for the compact corner connectors."""
+    if ways == 3:
+        # NW, NE and SW bins are installed.  East completes the T cap, but the
+        # empty SE quadrant means it cannot honestly carry a two-wall grip.
+        return (("y", 1, True), ("x", -1, True), ("x", 1, False))
+    if ways == 4:
+        return (("y", 1, True), ("y", -1, True), ("x", 1, True), ("x", -1, True))
+    raise ValueError("corner connector must be 3-way or 4-way")
+
+
 def make_corner_connector(
     box: BoxSpec, connector: ConnectorSpec, ways: int
 ) -> trimesh.Trimesh:
     """A compact 3-way or 4-way top connector for equal-height, same-wall bins.
 
-    The 3-way part leaves the south-east quadrant open; rotate it to suit.
+    The 3-way cap is a T: north and west have real two-bin grip channels,
+    while east is cap-only because the south-east quadrant is open. Rotate it
+    to suit. The 4-way part has four full-grip branches.
     """
-    if ways not in (3, 4):
-        raise ValueError("corner connector must be 3-way or 4-way")
+    branches = _corner_connector_branches(ways)
     if box.x < MIN_JOINABLE_SIZE - 1e-9 or box.y < MIN_JOINABLE_SIZE - 1e-9:
         raise ValueError(
             "Corner connectors need at least 16 mm (2 Wavefinity units) in both X "
             "and Y so the clip can clear the corners and engage the wall locks."
         )
     _validate_connector_arm_clearance(box, connector, (box.z,))
-    legs = [("y", 1), ("x", -1)]
-    if ways == 4:
-        legs = [("y", 1), ("y", -1), ("x", 1), ("x", -1)]
-    parts = [_corner_connector_direction(box, connector, a, d) for a, d in legs]
+    parts = [
+        _corner_connector_direction(box, connector, axis, direction, include_grip)
+        for axis, direction, include_grip in branches
+    ]
     return _cleaned(union(parts))
 
 
