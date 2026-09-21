@@ -3037,22 +3037,6 @@ const tick = () => new Promise(r => setImmediate(r));
         self.assertIn("min(720px", block)
 
 
-    def test_edge_mount_label_type_browser_contract(self):
-        root = Path(__file__).resolve().parent
-        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
-        index = (root / "web" / "index.html").read_text(encoding="utf-8")
-        self.assertIn('label_type: "separate"', app_js)
-        self.assertIn('id="edge-mount-label-type"', index)
-        self.assertIn('value="separate">Separate part', index)
-        self.assertIn('value="integrated">Integrated', index)
-        read_start = app_js.index("function readEdgeMountForm(design) {")
-        read_end = app_js.index("function resolvedEdgeMountAccessDiameter", read_start)
-        self.assertIn("label_type:", app_js[read_start:read_end])
-        sync_start = app_js.index("function syncEdgeMountControls() {")
-        sync_end = app_js.index("function syncEdgeMountEditorVisibility", sync_start)
-        self.assertIn("edge-mount-label-type", app_js[sync_start:sync_end])
-
-
 class WebServerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

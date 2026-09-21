@@ -2719,16 +2719,23 @@ class BoreWallOnlyTests(unittest.TestCase):
         item = self._item()
         # Wall Only with no explicit Height and no stored Depth gets default from item.
         one = Feature("bore", self.ZONE, item, options={"bore_style": "wall_only"})
-        no_depth = inserts.resolved_options(BIN, one, BIN.base_thickness)["height"]
+        no_depth_h = inserts.resolved_options(BIN, one, BIN.base_thickness)["height"]
         # Now add stale Full Base Depth; Wall Only should ignore it.
         with_stale_depth = Feature("bore", self.ZONE, item, options={
             "bore_style": "wall_only", "depth": 500.0})
-        same = inserts.resolved_options(BIN, with_stale_depth, BIN.base_thickness)["height"]
-        self.assertEqual(no_depth, same)
+        same_h = inserts.resolved_options(BIN, with_stale_depth, BIN.base_thickness)["height"]
+        self.assertEqual(no_depth_h, same_h)
+        # Build both: they must have identical Z bounds despite stale 500 mm Depth.
+        mesh_no_depth = self._build()
+        mesh_stale = self._build(depth=500.0)
+        self.assertAlmostEqual(mesh_no_depth.bounds[0][2], mesh_stale.bounds[0][2], places=4)
+        self.assertAlmostEqual(mesh_no_depth.bounds[1][2], mesh_stale.bounds[1][2], places=4)
         # Explicit Height still wins.
         explicit = Feature("bore", self.ZONE, item, options={
             "bore_style": "wall_only", "height": 15.0, "depth": 500.0})
         self.assertEqual(inserts.resolved_options(BIN, explicit, BIN.base_thickness)["height"], 15.0)
+        mesh_explicit = self._build(height=15.0, depth=500.0)
+        self.assertAlmostEqual(mesh_explicit.bounds[1][2], BIN.base_thickness + 15.0, places=4)
 
     def test_zone_equal_to_minimum_footprint_builds_within_it(self) -> None:
         for wall_style in ("straight", "wavy"):
