@@ -535,9 +535,11 @@ something to work on.
   **ID**, a **Kind** (bin, Storage Box, spacer, added by hand), a **Name**
   a **Stack** (blank, `lid` or `direct` - how the bin was printed to stack)
   and a **Qty**. Qty is how many copies you have *printed*. Generating is not
-  printing, so a newly generated bin arrives at Qty 0 until you raise it (turn
-  on *New bins count as printed* to start it at 1), and a superseded version
-  can be set back to 0. The ✕ on a row removes that bin from the inventory altogether (its
+  printing: a generated bin is always recorded at Qty 0. Print (direct, or
+  *Print Selected to Bambu Studio* in Space Inventory after ticking designs or
+  pressing *Select all needed*) raises Qty only after the slicer opened
+  successfully. You can still change Qty by hand for external or failed prints,
+  and a superseded version can be set back to 0. The ✕ on a row removes that bin from the inventory altogether (its
   placed copies come out of every drawer). Under the table, a `## Drawer layout` JSON block holds the drawers and
   where each copy sits. Rows stay hand-editable; keep the IDs. An older
   seven-column log is upgraded the first time it is saved, and a one-off `.bak`

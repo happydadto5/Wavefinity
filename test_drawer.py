@@ -891,6 +891,48 @@ class BulkPrintTests(unittest.TestCase):
             self.run_print({"B1": 1}, launch=boom)
         self.assertEqual(inventory_path(self.folder).read_text(encoding="utf-8"), before)
 
+    def test_file_names_containing_commas(self):
+        (self.folder / "Box Bolts, Nuts.3mf").write_bytes(b"3mf")
+        append_bin(self.folder, file="Box Bolts, Nuts.3mf", x=16, y=16, z=20, name="Bolts")
+        one = load_inventory(self.folder)["bins"][0]
+        self.assertEqual([p.name for p in inventory_row_files(self.folder, one)], ["Box Bolts, Nuts.3mf"])
+        (self.folder / "Insert, A.3mf").write_bytes(b"3mf")
+        (self.folder / "Lid.3mf").write_bytes(b"3mf")
+        row = dict(one, file="Box Bolts, Nuts.3mf, Insert, A.3mf, Lid.3mf")
+        self.assertEqual(
+            [p.name for p in inventory_row_files(self.folder, row)],
+            ["Box Bolts, Nuts.3mf", "Insert, A.3mf", "Lid.3mf"])
+        self.run_print({"B1": 1})
+        self.assertEqual([p.name for p in self.launched[0]], ["Box Bolts, Nuts.3mf"])
+
+    def test_ambiguous_file_list_rejected(self):
+        for name in ("A.3mf", "C.3mf", "B.3mf, C.3mf", "A.3mf, B.3mf"):
+            (self.folder / name).write_bytes(b"3mf")
+        row = {"id": "B1", "name": "X", "file": "A.3mf, B.3mf, C.3mf"}
+        with self.assertRaises(ValueError) as ctx:
+            inventory_row_files(self.folder, row)
+        self.assertIn("more than one way", str(ctx.exception))
+        (self.folder / "A.3mf, B.3mf, C.3mf").write_bytes(b"3mf")
+        self.assertEqual(len(inventory_row_files(self.folder, row)), 1)
+
+    def test_traversal_and_missing_still_rejected_with_commas(self):
+        self.add("A", "A.3mf")
+        one = load_inventory(self.folder)["bins"][0]
+        for bad in ("A.3mf, ../evil.3mf", "A.3mf, nope.3mf", "C:/evil.3mf"):
+            with self.assertRaises(ValueError):
+                inventory_row_files(self.folder, dict(one, file=bad))
+
+    def test_invalid_copy_counts_rejected_without_side_effects(self):
+        self.add("A", "A.3mf")
+        before = inventory_path(self.folder).read_text(encoding="utf-8")
+        for bad in (0, -1, 1.5, 1.0, True, "1.5", "-1", "abc", ""):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self.run_print({"B1": bad})
+        self.assertEqual(self.launched, [])
+        self.assertEqual(inventory_path(self.folder).read_text(encoding="utf-8"), before)
+        self.assertEqual(self.run_print({"B1": "2"})["bins"][0]["qty"], 2)
+        self.assertEqual(self.run_print({"B1": 1})["bins"][0]["qty"], 3)
+
     def test_route_is_registered_and_hosted_rejects(self):
         routes = drawer_routes(threading.Lock(), self.folder, lambda _p: self.slicer, self.launch)
         self.assertIn("/api/drawer/print-bins", routes)

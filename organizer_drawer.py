@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -1349,31 +1350,78 @@ def print_spacers_and_connectors(
 # ---------------------------------------------------------------- bulk bin print
 
 
+def _safe_row_file(root: Path, name: str) -> Path | None:
+    """The real .3mf directly inside ``root`` called ``name``, else None."""
+    if (not name or name != name.strip() or Path(name).name != name
+            or Path(name).is_absolute() or "/" in name or "\\" in name
+            or not name.lower().endswith(".3mf")):
+        return None
+    path = (root / name).resolve()
+    return path if path.parent == root and path.is_file() else None
+
+
 def inventory_row_files(output_dir: Path | str, row: dict[str, Any]) -> list[Path]:
     """The generated .3mf files an inventory row records, safely resolved.
 
-    The File cell is user-editable text, so every name must be a plain file
-    name inside ``output_dir`` that exists.
+    The File cell is user-editable text joined with ", ", but a generated file
+    name may itself contain ", ". So the cell is resolved against the real
+    files in the Space folder: the whole cell if it is one file, otherwise the
+    one way of cutting it at ", " where every piece is a real .3mf file.
     """
     root = Path(output_dir).expanduser().resolve()
-    label = _label(row)
-    found: list[Path] = []
-    for token in str(row.get("file") or "").split(","):
+    label = f"{_label(row)} ({row.get('id')})"
+    text = str(row.get("file") or "").strip()
+    if not text:
+        raise ValueError(f"{label} has no generated file to print")
+    whole = _safe_row_file(root, text)
+    if whole is not None:
+        return [whole]
+
+    pieces = text.split(", ")
+    partitions: list[list[Path]] = []
+
+    def walk(start: int, chosen: list[Path]) -> None:
+        if len(partitions) > 1:
+            return
+        if start == len(pieces):
+            partitions.append(list(chosen))
+            return
+        for end in range(start + 1, len(pieces) + 1):
+            found = _safe_row_file(root, ", ".join(pieces[start:end]))
+            if found is not None:
+                walk(end, chosen + [found])
+
+    walk(0, [])
+    unique = {tuple(str(path) for path in part) for part in partitions}
+    if len(unique) == 1:
+        return partitions[0]
+    if len(unique) > 1:
+        raise ValueError(
+            f"{label}: the File list can be read more than one way, so it cannot be printed safely")
+    for token in pieces:
         token = token.strip()
         if not token:
             continue
         if (Path(token).name != token or Path(token).is_absolute()
                 or "/" in token or "\\" in token):
-            raise ValueError(f"{label} ({row.get('id')}): unsafe file name {token!r}")
+            raise ValueError(f"{label}: unsafe file name {token!r}")
         if not token.lower().endswith(".3mf"):
-            raise ValueError(f"{label} ({row.get('id')}): {token} is not a .3mf file")
-        path = (root / token).resolve()
-        if path.parent != root or not path.is_file():
-            raise ValueError(f"{label} ({row.get('id')}): file {token} is missing from the Space folder")
-        found.append(path)
-    if not found:
-        raise ValueError(f"{label} ({row.get('id')}) has no generated file to print")
-    return found
+            raise ValueError(f"{label}: {token} is not a .3mf file")
+    raise ValueError(f"{label}: a recorded file is missing from the Space folder ({text})")
+
+
+def _copy_count(one: dict[str, Any], raw: Any) -> int:
+    """A selected copy count: a whole number of at least 1, nothing looser."""
+    label = _label(one)
+    if isinstance(raw, bool) or isinstance(raw, float):
+        raise ValueError(f"{label}: copies must be a whole number of 1 or more")
+    if isinstance(raw, str):
+        if not re.fullmatch(r"[0-9]+", raw.strip()):
+            raise ValueError(f"{label}: copies must be a whole number of 1 or more")
+        raw = int(raw.strip())
+    if not isinstance(raw, int) or raw < 1:
+        raise ValueError(f"{label}: copies must be a whole number of 1 or more")
+    return raw
 
 
 def reconcile_printed_copies(
@@ -1435,12 +1483,7 @@ def print_inventory_bins(
         one = by_id.get(str(bin_id))
         if one is None:
             raise ValueError(f"no bin {bin_id!r} in the inventory")
-        try:
-            count = int(raw_count)
-        except (TypeError, ValueError):
-            raise ValueError(f"{_label(one)}: copies must be a whole number") from None
-        if count < 1:
-            continue
+        count = _copy_count(one, raw_count)
         if one.get("kind") not in ("bin", "b4b"):
             raise ValueError(f"{_label(one)} is not a generated bin and cannot be printed here")
         if int(one.get("qty") or 0) + count > MAX_QTY:
