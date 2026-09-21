@@ -47,7 +47,7 @@ SP.close = () => { if (SP.dialog().open) SP.dialog().close(); };
 SP.showOnly = id => {
   SP.cancelInlineEdit();
   SP.cancelResumeAutoContinue();
-  ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-form", "space-configure-prompt", "space-collision-prompt", "space-existing-inventory-prompt"]
+  ["welcome-home", "welcome-resume", "space-unsupported", "space-type-cards", "space-tutorial", "space-form", "space-configure-prompt", "space-collision-prompt", "space-existing-inventory-prompt"]
     .forEach(one => { $("#" + one).hidden = one !== id; });
 };
 SP.showDialog = () => { if (!SP.dialog().open) SP.dialog().showModal(); };
@@ -1008,6 +1008,13 @@ SP.showHome = (message = null) => {
 SP.showTypeCards = () => {
   SP.showOnly("space-type-cards");
   SP.showDialog();
+  SP.dialog().scrollTop = 0;
+};
+
+SP.showTutorial = () => {
+  SP.showOnly("space-tutorial");
+  SP.showDialog();
+  SP.dialog().scrollTop = 0;
 };
 
 // Drops any leftover selected-folder/collision/edit state from a previous
@@ -1727,7 +1734,7 @@ SP.launch = async () => {
 SP.wire = () => {
   wireInfoButtons();
   $("#space-cancel-edit")?.addEventListener("click", SP.cancelInlineEdit);
-  document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-form-close, #space-type-cards-close")
+  document.querySelectorAll("#welcome-close, #welcome-resume-close, #space-unsupported-close, #space-form-close, #space-type-cards-close, #space-tutorial-close")
     .forEach(el => el?.addEventListener("click", SP.close));
   SP.dialog().addEventListener("click", event => { if (event.target === SP.dialog()) SP.close(); });
   SP.dialog().addEventListener("close", SP.cancelResumeAutoContinue);
@@ -1735,6 +1742,10 @@ SP.wire = () => {
   if (welcomeCreate) welcomeCreate.addEventListener("click", SP.beginCreateNew);
   const welcomeOpen = document.getElementById("welcome-open");
   if (welcomeOpen) welcomeOpen.addEventListener("click", () => SP.run(SP.openExisting));
+  const tutorialOpen = document.getElementById("space-tutorial-open");
+  if (tutorialOpen) tutorialOpen.addEventListener("click", SP.showTutorial);
+  const tutorialBack = document.getElementById("space-tutorial-back");
+  if (tutorialBack) tutorialBack.addEventListener("click", SP.showTypeCards);
   const welcomeResumeContinue = document.getElementById("welcome-resume-continue");
   if (welcomeResumeContinue) welcomeResumeContinue.addEventListener("click", SP.confirmResume);
   const welcomeResumeSwitch = document.getElementById("welcome-resume-switch");
