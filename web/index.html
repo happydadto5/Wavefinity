@@ -791,6 +791,9 @@
           <button id="space-type-cards-close" class="button secondary" type="button" aria-label="Close">✕</button>
         </div>
         <p class="welcome-lead">What are you physically organizing?</p>
+        <div class="space-tutorial-launch">
+          <button id="space-tutorial-open" class="button secondary" type="button">Take a quick tutorial</button>
+        </div>
         <div class="type-cards">
           <button class="type-card" data-kind="drawer" type="button">
             <img
@@ -828,6 +831,74 @@
         </div>
         <div class="button-row" style="justify-content: center; margin-top: 24px;">
           <button id="space-untyped-start" class="link-button" type="button">I don't know what I'm designing yet - just get started</button>
+        </div>
+      </div>
+
+      <div id="space-tutorial" class="space-tutorial" hidden>
+        <div class="welcome-header">
+          <h2>Wavefinity Quick Tutorial</h2>
+          <button id="space-tutorial-close" class="button secondary" type="button" aria-label="Close">✕</button>
+        </div>
+        <p class="welcome-lead">The basic idea is simple: define the physical Space, design the bins and parts that belong in it, then arrange the finished bins in that Space.</p>
+
+        <div class="space-tutorial-content">
+          <section class="space-tutorial-section">
+            <h3>1. Start with a Space</h3>
+            <p>A <strong>Space</strong> is the real area you want to organize. Choose <strong>Drawer</strong> for an existing drawer, <strong>Surface</strong> for a countertop, shelf, or vanity, or <strong>Portable Storage</strong> for a case you carry.</p>
+            <p>The Space keeps the physical size, layout, and inventory together so Wavefinity knows what has to fit.</p>
+          </section>
+
+          <section class="space-tutorial-section">
+            <h3>2. Design a bin</h3>
+            <p>A <strong>Design</strong> is the bin or storage box you are building. Set its width, depth, height, wall and base choices, labels, stacking choices, and other shell options here.</p>
+            <p>Use <strong>3D</strong> to inspect the assembled result. When you are working in a typed Space, the Design and Space tabs let you switch between the current bin and the overall layout.</p>
+          </section>
+
+          <section class="space-tutorial-section">
+            <h3>3. Add Parts &amp; Options</h3>
+            <p><strong>Parts &amp; Options</strong> customize what the bin holds or how the shell behaves. Interior features include things such as Dividers, Bores, Cradles, Slot Racks, and Photo Nests. Shell options can change labels, grips, openings, lids, stacking, or mounts.</p>
+            <p>Add only what the bin needs. The 3D preview shows the combined result as you work.</p>
+          </section>
+
+          <section class="space-tutorial-section">
+            <h3>4. Arrange things inside a bin</h3>
+            <p>Switch to <strong>2D</strong> when you want to position interior parts. Select a part, then move or arrange it inside the bin footprint. Use 3D again to check clearances and the finished shape.</p>
+            <p>Some parts can size themselves from what they hold. If an auto-sized part needs more room, Wavefinity can grow the bin to keep the part valid instead of silently clipping it.</p>
+          </section>
+
+          <section class="space-tutorial-section">
+            <h3>5. Arrange bins inside the Space</h3>
+            <p>After a bin is generated or printed, it can become an <strong>Inventory</strong> item for the active Space. Switch to <strong>Space</strong> to place those bins in the drawer, surface, or portable layout.</p>
+            <p>You can arrange bins yourself or use <strong>Auto layout</strong> where available. <strong>Spacers</strong> can fill leftover areas so the finished layout stays supported and organized.</p>
+          </section>
+
+          <section class="space-tutorial-section">
+            <h3>6. Connect neighboring bins</h3>
+            <p><strong>Connectors</strong> lock neighboring Wavefinity bins together. Side connectors join a shared seam and can work with different bin heights. 3-Way and 4-Way corner connectors join equal-height, equal-wall bins around a corner.</p>
+            <p>You do not set a separate connector wall thickness. Connector fit follows the wall thickness of the bin being designed.</p>
+          </section>
+
+          <section class="space-tutorial-section">
+            <h3>7. Generate or print</h3>
+            <p>Give the design a useful name, then generate files to your folder or send them to your slicer when that option is available. Wavefinity can produce the bin plus any related printable parts that belong to the design.</p>
+            <p>Then keep going: design another bin, add it to inventory, and build out the Space until the physical area is organized the way you want.</p>
+          </section>
+
+          <section class="space-tutorial-section space-tutorial-flow">
+            <h3>A good first workflow</h3>
+            <ol>
+              <li>Create the Space and enter its real measurements.</li>
+              <li>Design one bin that fits something you actually want to store.</li>
+              <li>Add Parts &amp; Options, then arrange interior parts in 2D.</li>
+              <li>Check the result in 3D and generate or print it.</li>
+              <li>Open Space, place the bin from inventory, and repeat.</li>
+              <li>Use connectors and spacers to finish the overall layout.</li>
+            </ol>
+          </section>
+        </div>
+
+        <div class="button-row space-tutorial-actions">
+          <button id="space-tutorial-back" class="button primary" type="button">Back to New Space</button>
         </div>
       </div>
 
