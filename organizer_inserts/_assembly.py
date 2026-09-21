@@ -44,6 +44,7 @@ from ._text import (
     text_placed_outline,
 )
 from ._divider import divider_division_texts
+from ._nest import build_recessed_nest_group, resolve_nest_settings
 
 # Physical assembly policy, not a user-facing capability: only these feature
 # kinds may legitimately rise above the bin rim, and only when fused directly
@@ -108,7 +109,47 @@ def build_features(
     if stack_enabled(box):
         max_feature_z = box.z - STACK_PLUG_DEPTH
     solids: list[trimesh.Trimesh] = []
+    recessed_nests = [
+        one for one in features
+        if one.kind == "nest" and one.contour
+        and str(resolve_nest_settings(box, one, base_z)["holder_style"]) == "recessed"
+    ]
+    if recessed_nests:
+        shared_deck = _nest_recessed_deck_footprint(box, mode)
+        made = [build_recessed_nest_group(box, recessed_nests, base_z, shared_deck)]
+        shared = made[0]
+        epsilon = 0.01
+        x0, y0, x1, y1 = shared_deck.bounds
+        if (
+            shared.bounds[0][0] < x0 - epsilon
+            or shared.bounds[1][0] > x1 + epsilon
+            or shared.bounds[0][1] < y0 - epsilon
+            or shared.bounds[1][1] > y1 + epsilon
+        ):
+            raise ValueError(
+                "a Photo Nest exceeds the shared recessed deck; reduce its size or move it inward"
+            )
+        top = shared.bounds[1][2]
+        if stack_enabled(box) and top > max_feature_z + 1e-6:
+            raise ValueError(
+                "a Photo Nest rises into the stacking interface; keep interior "
+                f"parts below {max_feature_z:.1f} mm, reduce its height, or make the bin taller"
+            )
+        if lid_enabled(box) and top > box.z + 1e-6:
+            raise ValueError(
+                "a Photo Nest rises above the bin rim and conflicts with the lid; "
+                "reduce its height, remove the lid, or make the bin taller"
+            )
+        if not stack_enabled(box) and not lid_enabled(box) and mode != "fused" and top > box.z + 1e-6:
+            raise ValueError(
+                "a Photo Nest rises above the bin rim; reduce its height or make the bin taller"
+            )
+        # A shared deck deliberately spans the physical insert/bin footprint,
+        # not any one Nest zone.
+        solids.extend(made)
     for one in features:
+        if one in recessed_nests:
+            continue
         recessed_deck_footprint = None
 
         if (

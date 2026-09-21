@@ -153,6 +153,7 @@ from organizer_inserts import (
     fitted_nest_feature,
     make_insert_plate,
     normalize_divider_scoop,
+    resolve_nest_settings,
     resolve_text_features,
     snapped_zone,
     scoop_zone,
@@ -1083,6 +1084,60 @@ def preview_geometry(
                 if j not in invalid_feature_indexes:
                     invalid_feature_indexes.append(j)
 
+    # Recessed Photo Nests share one physical deck. Build every saved recessed
+    # Nest plus a participating live draft as one effective group, so editing
+    # a saved Nest cannot briefly refill the other Nest cavities with a second
+    # deck and a new Recessed draft is visible before it is saved.
+    grouped_recessed = {
+        index for index, one in enumerate(features)
+        if one.kind == "nest" and one.contour
+        and str(resolve_nest_settings(box, one, base_z)["holder_style"]) == "recessed"
+    }
+    draft_in_recessed_group = (
+        draft is not None and draft.kind == "nest" and bool(draft.contour)
+        and str(resolve_nest_settings(box, draft, base_z)["holder_style"]) == "recessed"
+    )
+    effective_recessed = []
+    represented_recessed = set()
+    draft_in_group = False
+    for index in sorted(grouped_recessed):
+        if index == selected and draft is not None:
+            if draft_in_recessed_group:
+                effective_recessed.append(draft)
+                represented_recessed.add(index)
+                draft_in_group = True
+            continue
+        effective_recessed.append(features[index])
+        represented_recessed.add(index)
+    if draft_in_recessed_group and not draft_in_group:
+        effective_recessed.append(draft)
+        draft_in_group = True
+    if effective_recessed:
+        try:
+            built = build_features(
+                box, effective_recessed, base_z, layout_zone(box, mode), mode=mode,
+                include_text=True,
+            )
+            if built:
+                top_z = max(float(solid.bounds[1][2]) for solid in built)
+                for index in represented_recessed:
+                    feature_overhang_mm[index] = round(max(0.0, top_z - box.z), 3)
+                if draft_in_group:
+                    draft_overhang_mm = round(max(0.0, top_z - box.z), 3)
+            for solid in built:
+                if cut_fused_pieces:
+                    solid = apply_edge_mount_hole_cuts(box, solid)
+                if cut_side_opening_pieces:
+                    solid = apply_side_openings(box, solid)
+                geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_nest"))
+        except Exception as error:
+            for index in represented_recessed:
+                feature_errors.append(f"nest: {error}")
+                if index not in invalid_feature_indexes:
+                    invalid_feature_indexes.append(index)
+            if draft_in_group:
+                draft_error = f"nest: {error}"
+
     for feature_index, one in enumerate(features):
         if is_text(one) and one.options.get("level") == "rim":
             continue
@@ -1108,6 +1163,9 @@ def preview_geometry(
             feature_errors.append(f"{one.kind}: overlaps the {handle_conflict}")
             if feature_index not in invalid_feature_indexes:
                 invalid_feature_indexes.append(feature_index)
+
+        if feature_index in represented_recessed:
+            continue
 
         is_conflicting = feature_index in conflicting_feature_indexes
         is_invalid = feature_index in invalid_feature_indexes
@@ -1156,7 +1214,7 @@ def preview_geometry(
             box, one, base_z, f"{part_kind}_bore_axis"
         ))
 
-    if draft is not None:
+    if draft is not None and not draft_in_group:
         cut_draft = cut_fused_pieces and not is_text(draft)
         cut_draft_side_opening = cut_side_opening_pieces and not is_text(draft)
         if draft_error is not None:
@@ -2267,7 +2325,7 @@ def default_feature(
         item=item,
         # A cradle, like a post, starts as a single holder - Quantity "auto"
         # then fills the zone with lanes only when the user asks for it.
-        count=3 if kind == "steps" else (1 if kind in {"post", "cradle", "slot"} else None),
+        count=3 if kind == "steps" else (1 if kind in {"post", "cradle", "slot", "nest"} else None),
         along=along,
         options=feature_options,
         full_span=(kind == "divider"),

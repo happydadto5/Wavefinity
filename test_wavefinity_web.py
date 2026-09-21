@@ -20,6 +20,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 
 import wavefinity_web
+import organizer_app
 import organizer_inserts as inserts
 from organizer_app import base_height, design_from_dict
 from organizer_inserts import build_features
@@ -74,6 +75,15 @@ def _traced_photo_nest_payload(payload):
     result["reference"] = traced.get("reference")
     result["trace_outline"] = traced["outline"]
     return result
+
+
+def _fix21_photo_design(*, contour=None, options=None):
+    contour = contour or ((-20.0, -8.0), (20.0, -8.0), (20.0, 8.0), (-20.0, 8.0))
+    return photo_nest_payload({
+        "design": default_design(),
+        "contour": [list(point) for point in contour],
+        "options": {"depth": 5.0, **(options or {})},
+    })
 
 
 class WebApplicationTests(unittest.TestCase):
@@ -679,6 +689,296 @@ class WebApplicationTests(unittest.TestCase):
         scaled = apply_feature_payload({"design": rotated, "feature": feature, "index": 0})["design"]
         self.assertGreaterEqual(scaled["box"]["x"], rotated["box"]["x"])
         self.assertGreater(scaled["box"]["y"], rotated["box"]["y"])
+
+    def test_photo_nest_duplicate_creates_an_independent_second_copy(self):
+        outline = PhotoOutline(
+            ((-20, -8), (20, -8), (20, 8), (-20, 8)), 40.0, 16.0,
+            ((0, 0), (1, 0), (1, 1), (0, 1)),
+        )
+        with patch.object(wavefinity_web, "photo_outline_from_data", return_value=outline):
+            made = _traced_photo_nest_payload({
+                "design": default_design(), "image": "unused", "mime_type": "image/png",
+                "options": {"depth": 5.0},
+            })
+        duplicate = wavefinity_web.duplicate_feature_payload({
+            "design": made["design"], "index": 0,
+        })
+        features = duplicate["design"]["layout"]["features"]
+        self.assertEqual(len(features), 2)
+        self.assertEqual(duplicate["selected"], 1)
+        self.assertEqual(features[0]["contour"], features[1]["contour"])
+        self.assertNotEqual(features[0]["zone"], features[1]["zone"])
+
+    def test_photo_nest_outline_mode_and_shared_preview_are_explicit(self):
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        preview_source = (root / "organizer_app.py").read_text(encoding="utf-8")
+        self.assertIn("&& state.nestOutlineEditing === true\n    && (hasPhotoSession", app_js)
+        self.assertIn('feature.contour && isNestEditWorkspaceActive()\n        && (state.nestOutlineTool', app_js)
+        self.assertIn("effective_recessed", preview_source)
+        self.assertIn("draft_in_recessed_group", preview_source)
+
+    def test_fix21_multi_nest_apply_edit_and_non_nest_exclusion(self):
+        first = _fix21_photo_design()["design"]
+        duplicated = wavefinity_web.duplicate_feature_payload({"design": first, "index": 0})
+        design = duplicated["design"]
+        original_first = json.loads(json.dumps(design["layout"]["features"][0]))
+        edited = json.loads(json.dumps(design["layout"]["features"][1]))
+        edited["rotation"] = 180.0
+        edited_result = apply_feature_payload({
+            "design": design, "feature": edited, "index": 1,
+        })
+        features = edited_result["design"]["layout"]["features"]
+        self.assertEqual(len(features), 2)
+        self.assertEqual(features[0], original_first)
+        self.assertEqual(features[1]["rotation"], 180.0)
+
+        post = default_feature_payload({
+            "design": edited_result["design"], "kind": "post",
+        })["feature"]
+        with self.assertRaisesRegex(ValueError, "Photo Nest designs"):
+            apply_feature_payload({
+                "design": edited_result["design"], "feature": post, "index": None,
+            })
+
+    def test_fix21_replace_photo_targets_one_index_and_requires_an_index(self):
+        made = _fix21_photo_design()
+        duplicated = wavefinity_web.duplicate_feature_payload({
+            "design": made["design"], "index": 0,
+        })
+        design = duplicated["design"]
+        before_first = json.loads(json.dumps(design["layout"]["features"][0]))
+        before_second = json.loads(json.dumps(design["layout"]["features"][1]))
+        replacement = [[-12.0, -6.0], [12.0, -6.0], [12.0, 6.0], [-12.0, 6.0]]
+        replaced = photo_nest_payload({
+            "design": design, "contour": replacement, "index": 1,
+        })
+        features = replaced["design"]["layout"]["features"]
+        self.assertEqual(features[0], before_first)
+        self.assertNotEqual(features[1]["contour"], before_second["contour"])
+        self.assertEqual(features[1]["contour"], replacement)
+        with self.assertRaisesRegex(ValueError, "Duplicate an existing Photo Nest first"):
+            photo_nest_payload({"design": design, "contour": replacement})
+
+    def test_fix21_single_and_multi_auto_sizing_preserve_required_centres(self):
+        made = _fix21_photo_design()
+        design = made["design"]
+        one = design["layout"]["features"][0]
+        self.assertAlmostEqual((one["zone"][0] + one["zone"][2]) / 2.0, 0.0)
+        self.assertAlmostEqual((one["zone"][1] + one["zone"][3]) / 2.0, 0.0)
+        self.assertEqual(design["box"]["x"] % 8.0, 0.0)
+        self.assertEqual(design["box"]["y"] % 8.0, 0.0)
+
+        duplicated = wavefinity_web.duplicate_feature_payload({"design": design, "index": 0})
+        multi = duplicated["design"]
+        centres_before = [
+            ((one["zone"][0] + one["zone"][2]) / 2.0,
+             (one["zone"][1] + one["zone"][3]) / 2.0)
+            for one in multi["layout"]["features"]
+        ]
+        edited = json.loads(json.dumps(multi["layout"]["features"][1]))
+        edited["options"]["repeat_spacing_percent"] = 100
+        resized = apply_feature_payload({"design": multi, "feature": edited, "index": 1})["design"]
+        centres_after = [
+            ((one["zone"][0] + one["zone"][2]) / 2.0,
+             (one["zone"][1] + one["zone"][3]) / 2.0)
+            for one in resized["layout"]["features"]
+        ]
+        self.assertEqual(centres_after, centres_before)
+
+    def test_fix21_manual_never_grows_and_legacy_auto_only_grows(self):
+        made = _fix21_photo_design()["design"]
+        made["box"]["x"] = made["box"]["y"] = 192.0
+        made["layout"]["features"][0]["options"]["auto_size"] = False
+        duplicate = wavefinity_web.duplicate_feature_payload({"design": made, "index": 0})
+        self.assertEqual(duplicate["design"]["box"]["x"], 192.0)
+        self.assertEqual(duplicate["design"]["box"]["y"], 192.0)
+
+        legacy = _fix21_photo_design()["design"]
+        old_size = (legacy["box"]["x"], legacy["box"]["y"])
+        legacy_one = legacy["layout"]["features"][0]
+        legacy_one["options"].pop("auto_size")
+        legacy_one["count"] = 4
+        grown = apply_feature_payload({
+            "design": legacy, "feature": legacy_one, "index": 0,
+        })["design"]
+        self.assertGreaterEqual(grown["box"]["x"], old_size[0])
+        self.assertGreaterEqual(grown["box"]["y"], old_size[1])
+        self.assertTrue(
+            grown["box"]["x"] > old_size[0] or grown["box"]["y"] > old_size[1]
+        )
+
+    def test_fix21_duplicate_copies_all_fields_selects_and_auto_grows(self):
+        design = _fix21_photo_design()["design"]
+        source = design["layout"]["features"][0]
+        source["count"] = 2
+        source["alternate_ends"] = True
+        source["rotation"] = 90.0
+        source["scale"] = 1.2
+        source["options"].update({
+            "repeat_spacing_percent": 75, "smoothing": 1.5,
+            "finger_position": "both", "push_area": 25.0,
+        })
+        saved = apply_feature_payload({"design": design, "feature": source, "index": 0})["design"]
+        old_area = saved["box"]["x"] * saved["box"]["y"]
+        duplicated = wavefinity_web.duplicate_feature_payload({"design": saved, "index": 0})
+        self.assertEqual(duplicated["selected"], 1)
+        first, second = duplicated["design"]["layout"]["features"]
+        for key in ("contour", "source_contour", "scale", "rotation", "count", "alternate_ends"):
+            self.assertEqual(second[key], first[key])
+        self.assertEqual(second["options"], first["options"])
+        second["options"]["clearance"] = 99
+        self.assertNotEqual(second["options"]["clearance"], first["options"]["clearance"])
+        new_box = duplicated["design"]["box"]
+        self.assertGreater(new_box["x"] * new_box["y"], old_area)
+
+    def test_fix21_duplicate_manual_failure_is_exact_and_non_mutating(self):
+        design = _fix21_photo_design()["design"]
+        design["layout"]["features"][0]["options"]["auto_size"] = False
+        before = json.dumps(design, sort_keys=True)
+        with self.assertRaises(ValueError) as caught:
+            wavefinity_web.duplicate_feature_payload({"design": design, "index": 0})
+        self.assertEqual(
+            str(caught.exception),
+            "No room to duplicate this Photo Nest. Turn Automatic footprint sizing on or enlarge the bin.",
+        )
+        self.assertEqual(json.dumps(design, sort_keys=True), before)
+
+    def test_fix21_occurrence_preview_and_new_scan_repeat_defaults(self):
+        made = _fix21_photo_design()
+        feature = made["design"]["layout"]["features"][0]
+        self.assertEqual(feature["count"], 1)
+        self.assertFalse(feature["alternate_ends"])
+        self.assertNotIn("repeat_spacing_percent", feature["options"])
+        feature["count"] = 4
+        feature["rotation"] = 90.0
+        feature["alternate_ends"] = True
+        changed = apply_feature_payload({
+            "design": made["design"], "feature": feature, "index": 0,
+        })["design"]
+        preview = preview_payload({"design": changed})
+        occurrences = preview["nest_occurrences"][0]
+        self.assertEqual(len(occurrences), 4)
+        self.assertEqual([one["rotation"] for one in occurrences], [90.0, 270.0, 90.0, 270.0])
+
+    def test_fix21_duplicate_then_replace_changes_only_the_copy(self):
+        made = _fix21_photo_design()
+        duplicated = wavefinity_web.duplicate_feature_payload({
+            "design": made["design"], "index": 0,
+        })["design"]
+        original = json.loads(json.dumps(duplicated["layout"]["features"][0]))
+        replacement = [[-9.0, -4.0], [9.0, -4.0], [9.0, 4.0], [-9.0, 4.0]]
+        result = photo_nest_payload({
+            "design": duplicated, "contour": replacement, "index": 1,
+        })["design"]
+        self.assertEqual(result["layout"]["features"][0], original)
+        self.assertEqual(result["layout"]["features"][1]["contour"], replacement)
+
+    def test_fix21_recessed_to_raised_draft_replaces_saved_group_member(self):
+        duplicated = wavefinity_web.duplicate_feature_payload({
+            "design": _fix21_photo_design()["design"], "index": 0,
+        })["design"]
+        box, layout, *_ = design_from_dict(duplicated)
+        selected = layout.features[0]
+        raised_options = dict(selected.options)
+        raised_options["holder_style"] = "raised_wall"
+        raised_options["lift_assist"] = "none"
+        raised = replace(selected, options=raised_options)
+        with patch.object(organizer_app, "build_features", return_value=[]) as build:
+            organizer_app.preview_geometry(
+                box, features=layout.features, draft=raised, selected=0,
+            )
+        groups = [list(call.args[1]) for call in build.call_args_list]
+        self.assertIn([layout.features[1]], groups)
+        self.assertIn([raised], groups)
+        self.assertFalse(any(selected in group for group in groups))
+
+    def test_fix21_grouped_recessed_preview_keeps_customization_and_grip_validation(self):
+        design = _fix21_photo_design()["design"]
+        box, layout, *_ = design_from_dict(design)
+        feature = layout.features[0]
+        with patch.object(
+            organizer_app, "_customization_zones", return_value=[("scoop", feature.zone)],
+        ):
+            scene = organizer_app.preview_geometry(box, features=layout.features)
+        self.assertIn(0, scene["invalid_feature_indexes"])
+        self.assertTrue(any("overlaps the scoop" in error for error in scene["feature_errors"]))
+
+        with patch.object(organizer_app, "inside_handle_conflict", return_value="inside grip"):
+            scene = organizer_app.preview_geometry(box, features=layout.features)
+        self.assertIn(0, scene["invalid_feature_indexes"])
+        self.assertTrue(any("inside grip" in error for error in scene["feature_errors"]))
+
+    def test_fix21_frontend_and_shared_preview_source_contracts(self):
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        app_py = (root / "organizer_app.py").read_text(encoding="utf-8")
+
+        render_start = app_js.index("function renderDraftFields() {")
+        render_end = app_js.index("function updateDraftFromFields(event) {", render_start)
+        nest_render = app_js[render_start:render_end]
+        self.assertNotIn('changed === "nest-', nest_render)
+        self.assertNotIn('get("nest-', nest_render)
+
+        for label in ("Minimum", "-75%", "-50%", "-25%", "Auto", "+25%", "+50%", "+75%", "+100%"):
+            self.assertIn(label, app_js)
+        self.assertIn('[[0, "As Scanned"], [90, "90°"], [180, "180°"], [270, "270°"]]', app_js)
+        self.assertIn('plainCheckbox("nest-alternate", "Flip every other one"', app_js)
+        self.assertIn('data-action="duplicate-nest"', app_js)
+        self.assertIn("Math.round(raw / 90) * 90", app_js)
+        self.assertIn("state.preview.draft_nest_occurrences", app_js)
+        self.assertIn("state.preview.nest_occurrences", app_js)
+        self.assertIn("isNestEditWorkspaceActive()", app_js)
+        self.assertIn("state.nestOutlineEditing === true", app_js)
+        self.assertIn('feature.contour && isNestEditWorkspaceActive()', app_js)
+        self.assertIn('filter(one => one.kind === "nest").length === 1', app_js)
+
+        help_start = app_js.index("function updatePreviewHelp(view) {")
+        help_end = app_js.index("async function maybeWarnSpaceWallMismatch", help_start)
+        help_source = app_js[help_start:help_end]
+        self.assertIn("source-outline point", help_source)
+        self.assertIn("whole repeated Photo Nest group", help_source)
+        sync_start = app_js.index("function syncNest2DWorkspace() {")
+        sync_end = app_js.index("function renderNestPaperOutline", sync_start)
+        self.assertIn('updatePreviewHelp("2d")', app_js[sync_start:sync_end])
+
+        selection_start = app_js.index("function updateSelectionButtons() {")
+        selection_end = app_js.index("function updateDraftStatusColor", selection_start)
+        selection_source = app_js[selection_start:selection_end]
+        self.assertIn("button.disabled = busy || (hasPhotoNest && !isModifier);", selection_source)
+        self.assertNotIn("replacingPhotoNest", selection_source)
+        pick_start = app_js.index("function pickKind(kind) {")
+        pick_end = app_js.index("async function selectEdgeMount", pick_start)
+        self.assertIn("if (!isModifier && state.design", app_js[pick_start:pick_end])
+
+        selected_start = app_js.index("async function selectedFeature(index, force = false) {")
+        selected_end = app_js.index("function field(", selected_start)
+        self.assertIn('selected?.kind === "nest") resetNestPhotoSession()', app_js[selected_start:selected_end])
+        blank_start = app_js.index("if (index === null) {", app_js.index("function wireLayoutInteraction()"))
+        self.assertIn("resetNestPhotoSession();", app_js[blank_start:blank_start + 420])
+        modifier_start = app_js.index("async function openModifier(")
+        self.assertIn("resetNestPhotoSession();", app_js[modifier_start:modifier_start + 500])
+
+        duplicate_start = app_js.index("async function duplicateNest() {")
+        duplicate_end = app_js.index("async function resetNestOutline", duplicate_start)
+        duplicate_source = app_js[duplicate_start:duplicate_end]
+        self.assertLess(duplicate_source.index("await commitVisibleDraft();"),
+                        duplicate_source.index("previousDesign = clone(state.design);"))
+        self.assertIn("state.draftSourceIndex = previousSelected;", duplicate_source)
+
+        defaults_start = app_js.index("function partDefaultsFromFeature(feature) {")
+        defaults_end = app_js.index("function seedFeatureFromPartDefaults", defaults_start)
+        defaults_source = app_js[defaults_start:defaults_end]
+        self.assertIn("delete copy.count;", defaults_source)
+        self.assertIn("delete copy.options.repeat_spacing_percent;", defaults_source)
+
+        self.assertIn("solid = apply_edge_mount_hole_cuts(box, solid)", app_py)
+        self.assertIn("solid = apply_side_openings(box, solid)", app_py)
+        shared_start = app_py.index("if effective_recessed:")
+        loop_start = app_py.index("for feature_index, one in enumerate(features):", shared_start)
+        shared_source = app_py[shared_start:loop_start]
+        self.assertIn("apply_edge_mount_hole_cuts", shared_source)
+        self.assertIn("apply_side_openings", shared_source)
 
     def test_draft_geometry_identifies_the_part_it_will_print_with(self):
         for mode, prefix in (("fused", "feature_"), ("separate", "insert_")):
