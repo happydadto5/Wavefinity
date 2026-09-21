@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-20 — Corner connectors
+
+- The 3-Way Corner now has a clear T-shaped top cap: two real wall-gripping seams plus an honest cap-only third arm beside the open quadrant. The 4-Way remains a full four-way cross.
+
 ## 2026-09-20 — Photo Nest repeats
 
 - Photo Nest can make one straight row of 1–20 copies, with 90° orientation choices, optional end-for-end alternating copies, and safe spacing choices.

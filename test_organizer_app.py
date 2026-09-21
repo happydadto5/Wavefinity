@@ -57,6 +57,7 @@ from organizer_engine import (
     LOCKED_CONNECTOR_HEIGHT,
     LOCKED_CONNECTOR_LENGTH,
     MIN_JOINABLE_SIZE,
+    WALL_PRESETS,
     WAVE_AMPLITUDE,
     WAVE_LENGTH,
     WAVE_MATING_GAP,
@@ -104,6 +105,7 @@ from organizer_engine import (
     nested_clearance,
     placed_outline,
     make_side_connector,
+    make_corner_connector,
     make_wall_lock_bumps,
     measure_lock,
     mesh_fingerprint,
@@ -112,6 +114,7 @@ from organizer_engine import (
     translated,
     validate_3mf,
     validate_side_fit,
+    validate_corner_fit,
     wave_cycles,
     wave_value,
     wavy_cavity_polygon,
@@ -631,6 +634,56 @@ class LockTests(unittest.TestCase):
 
 
 class ConnectorTests(unittest.TestCase):
+    def test_three_way_corner_has_t_cap_and_only_two_real_grips(self) -> None:
+        branches = organizer_engine._corner_connector_branches(3)
+        self.assertEqual(branches, (("y", 1, True), ("x", -1, True), ("x", 1, False)))
+        self.assertNotIn(("y", -1, True), branches)
+
+        mesh = make_corner_connector(BoxSpec(24.0, 24.0, 40.0), ConnectorSpec(), 3)
+        report = mesh_report("three-way corner", mesh)
+        self.assertTrue(mesh.is_watertight)
+        self.assertEqual(report["components"], 1)
+
+    def test_four_way_corner_has_four_full_grip_cross(self) -> None:
+        branches = organizer_engine._corner_connector_branches(4)
+        self.assertEqual(
+            set(branches),
+            {("y", 1, True), ("y", -1, True), ("x", 1, True), ("x", -1, True)},
+        )
+        self.assertEqual(len(branches), 4)
+
+        mesh = make_corner_connector(BoxSpec(24.0, 24.0, 40.0), ConnectorSpec(), 4)
+        report = mesh_report("four-way corner", mesh)
+        self.assertTrue(mesh.is_watertight)
+        self.assertEqual(report["components"], 1)
+        self.assertAlmostEqual(mesh.extents[0], mesh.extents[1], places=5)
+
+    def test_corner_connectors_fit_every_wall_preset(self) -> None:
+        connector = ConnectorSpec()
+        volumes = {}
+        cap_volumes = {}
+        for wall, _label in WALL_PRESETS:
+            box = BoxSpec(24.0, 24.0, 40.0, wall=wall)
+            inner, outer = connector_half_widths(box, connector)
+            self.assertAlmostEqual(outer - inner, connector.arm_thickness, places=9)
+            for ways in (3, 4):
+                with self.subTest(wall=wall, ways=ways):
+                    mesh = make_corner_connector(box, connector, ways)
+                    report = mesh_report(f"{ways}-way wall {wall}", mesh)
+                    self.assertTrue(mesh.is_watertight)
+                    self.assertEqual(report["components"], 1)
+                    self.assertLess(validate_corner_fit(box, connector, mesh, ways), 1e-3)
+                    volumes[wall, ways] = mesh.volume
+            cap_volumes[wall] = organizer_engine._corner_connector_direction(
+                box, connector, "x", 1, include_grip=False
+            ).volume
+        for ways in (3, 4):
+            self.assertNotEqual(
+                volumes[WALL_PRESETS[0][0], ways],
+                volumes[WALL_PRESETS[-1][0], ways],
+            )
+        self.assertNotEqual(cap_volumes[WALL_PRESETS[0][0]], cap_volumes[WALL_PRESETS[-1][0]])
+
     def test_arms_are_two_perimeters_thick(self) -> None:
         box, connector = BoxSpec(), ConnectorSpec()
         inner, outer = connector_half_widths(box, connector)
