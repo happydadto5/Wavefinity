@@ -61,6 +61,10 @@ EDGE_LABEL_TEXT_MARGIN = 2.0
 EDGE_LABEL_TARGET_CAP_HEIGHT = 12.0
 EDGE_LABEL_MIN_CAP_HEIGHT = 6.0
 EDGE_LABEL_FRONT_CHAMFER_MM = 1.0
+EDGE_LABEL_CLIP_DEPTH_MM = 3.0
+EDGE_LABEL_CLIP_FACE_CLEARANCE_MM = 0.25
+EDGE_LABEL_CLIP_RETENTION_MM = 0.15
+EDGE_LABEL_CLIP_RETENTION_SPAN_MM = 4.0
 
 EDGE_HOLE_DEFAULT_SCREW_DIAMETER = 4.0
 EDGE_HOLE_DEFAULT_ACCESS_DIAMETER = 8.0
@@ -181,6 +185,8 @@ def _validate_label_ranges(spec: EdgeMountSpec) -> None:
         )
     if spec.label_length_mode not in ("full", "text"):
         raise ValueError("Edge Mount plate length mode must be 'full' or 'text'")
+    if spec.label_type not in ("separate", "integrated"):
+        raise ValueError("Edge Mount label type must be 'separate' or 'integrated'")
     if not spec.label_raised:
         require_text_backing(
             spec.label_thickness_mm, spec.label_text_depth_mm, what="Edge Mount label"
@@ -252,6 +258,7 @@ def edge_mount_label_plan(box: BoxSpec) -> dict[str, object] | None:
         "raised": bool(spec.label_raised),
         "text_depth_mm": spec.label_text_depth_mm,
         "rotation_deg": rotation,
+        "label_type": spec.label_type,
     }
 
 
@@ -477,7 +484,7 @@ def _plate_rectangle(box: BoxSpec, side: str, half_length: float, projection: fl
     return translate_polygon(polygon, xoff=ox1)
 
 
-def _build_label_plate_mesh(box: BoxSpec, plan: dict[str, object]) -> trimesh.Trimesh:
+def _build_label_plate_mesh(box: BoxSpec, plan: dict[str, object], *, top_z: float | None = None) -> trimesh.Trimesh:
     side = str(plan["side"])
     half = float(plan["plate_length_mm"]) / 2.0
     rectangle = _plate_rectangle(box, side, half, float(plan["projection_mm"]))
@@ -496,10 +503,61 @@ def _build_label_plate_mesh(box: BoxSpec, plan: dict[str, object]) -> trimesh.Tr
             "wall. Increase the projection or plate length."
         )
     solid = union(solids) if len(solids) > 1 else solids[0]
-    solid.apply_translation((0.0, 0.0, box.z - thickness))
+    top_z = box.z if top_z is None else top_z
+    solid.apply_translation((0.0, 0.0, top_z - thickness))
     solid.remove_unreferenced_vertices()
     solid.merge_vertices()
     return solid
+
+
+def _extrude_parts(footprint, height: float, z: float) -> list[trimesh.Trimesh]:
+    pieces = list(footprint.geoms) if isinstance(footprint, MultiPolygon) else [footprint]
+    solids = []
+    for piece in pieces:
+        if not piece.is_empty and piece.area > 1e-7:
+            solid = _extrude_polygon(piece, height)
+            solid.apply_translation((0.0, 0.0, z))
+            solids.append(solid)
+    return solids
+
+
+def make_edge_mount_label_part(box: BoxSpec) -> trimesh.Trimesh | None:
+    """The installed separate plate and continuous clip around the real wall."""
+    plan = edge_mount_label_plan(box)
+    if plan is None or plan["label_type"] != "separate":
+        return None
+    side = str(plan["side"])
+    thickness = float(plan["thickness_mm"])
+    rectangle = _plate_rectangle(box, side, float(plan["plate_length_mm"]) / 2.0, float(plan["projection_mm"]))
+    outer = wavy_outer_polygon(box)
+    cavity = wavy_cavity_polygon(box)
+    clearance = EDGE_LABEL_CLIP_FACE_CLEARANCE_MM
+    envelope_shape = outer.buffer(clearance).difference(cavity.buffer(-clearance)).intersection(rectangle)
+    # Two short reduced-clearance ribs supply the positive grip while the
+    # rest of the long continuous saddle remains easy to slide on and tune.
+    half = float(plan["plate_length_mm"]) / 2.0
+    rib_half = EDGE_LABEL_CLIP_RETENTION_SPAN_MM / 2.0
+    offset = max(0.0, half - 2.0 * rib_half)
+    if side in ("front", "back"):
+        ribs = shapely_box(-offset - rib_half, -1e4, -offset + rib_half, 1e4).union(
+            shapely_box(offset - rib_half, -1e4, offset + rib_half, 1e4)
+        )
+    else:
+        ribs = shapely_box(-1e4, -offset - rib_half, 1e4, -offset + rib_half).union(
+            shapely_box(-1e4, offset - rib_half, 1e4, offset + rib_half)
+        )
+    retention = outer.buffer(clearance - EDGE_LABEL_CLIP_RETENTION_MM).difference(
+        cavity.buffer(-(clearance - EDGE_LABEL_CLIP_RETENTION_MM))
+    ).intersection(rectangle).intersection(ribs)
+    envelope_shape = envelope_shape.union(retention)
+    low_z = box.z - EDGE_LABEL_CLIP_DEPTH_MM
+    envelopes = _extrude_parts(envelope_shape, EDGE_LABEL_CLIP_DEPTH_MM + thickness, low_z)
+    envelope = union(envelopes) if len(envelopes) > 1 else envelopes[0]
+    wall_shape = outer.difference(cavity).intersection(rectangle)
+    cutters = _extrude_parts(wall_shape, EDGE_LABEL_CLIP_DEPTH_MM + EDGE_BOOLEAN_EPSILON, low_z - EDGE_BOOLEAN_EPSILON)
+    cutter = union(cutters) if len(cutters) > 1 else cutters[0]
+    plate = _build_label_plate_mesh(box, plan, top_z=box.z + thickness)
+    return union([plate, difference([envelope, cutter])])
 
 
 def apply_edge_mount_hole_cuts(
@@ -558,7 +616,7 @@ def apply_edge_mount_structure(
         return body
     result = body
     label_plan = edge_mount_label_plan(box)
-    if label_plan is not None:
+    if label_plan is not None and label_plan["label_type"] == "integrated":
         plate = _build_label_plate_mesh(box, label_plan)
         # union() already cleans up after itself (and only keeps the clean
         # copy when that does not break watertightness) - an extra unguarded
@@ -591,7 +649,6 @@ def edge_mount_text_object(box: BoxSpec) -> tuple[str, trimesh.Trimesh, bool] | 
     if rotation:
         outline = rotate_polygon(outline, rotation, origin=(0.0, 0.0))
     outline = translate_polygon(outline, xoff=position[0], yoff=position[1])
-    mesh = text_prism(
-        outline, box.z, depth=float(plan["text_depth_mm"]), raised=bool(plan["raised"]),
-    )
+    top_z = box.z + float(plan["thickness_mm"]) if plan["label_type"] == "separate" else box.z
+    mesh = text_prism(outline, top_z, depth=float(plan["text_depth_mm"]), raised=bool(plan["raised"]))
     return str(plan["text"]), mesh, bool(plan["raised"])

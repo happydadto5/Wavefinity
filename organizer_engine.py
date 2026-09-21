@@ -600,6 +600,7 @@ class EdgeMountSpec:
 
     label_enabled: bool = False
     label_text: str = ""
+    label_type: str = "separate"          # "separate" | "integrated"
     label_projection_mm: float = 50.0
     label_length_mode: str = "full"       # "full" | "text"
     label_thickness_mm: float = 2.0

@@ -91,6 +91,7 @@ from organizer_edge_mount import (
     apply_edge_mount_structure,
     edge_mount_summary,
     edge_mount_text_object,
+    make_edge_mount_label_part,
 )
 from organizer_side_openings import (
     SIDE_OPENING_TOP_BRIDGE_MM,
@@ -460,6 +461,12 @@ def box_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
     if tidy:
         name += f" {tidy}"
     return name + suffix
+
+
+def edge_mount_label_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
+    name = f"Edge Mount Label {box.x:g} x {box.y:g}"
+    tidy = clean_label(part)
+    return (f"{name} {tidy}" if tidy else name) + suffix
 
 
 def lid_filename(box: BoxSpec, part: str = "", suffix: str = ".3mf") -> str:
@@ -1303,6 +1310,10 @@ def preview_geometry(
     edge_mount_meta = None
     if box.edge_mount.active:
         edge_mount_meta = edge_mount_summary(box)
+        if box.edge_mount.label_enabled and box.edge_mount.label_type == "separate":
+            separate_label = make_edge_mount_label_part(box)
+            if separate_label is not None:
+                geometry.extend(_mesh_preview_geometry(separate_label, "edge_mount"))
         try:
             edge_text = edge_mount_text_object(box)
         except ValueError:
@@ -1640,7 +1651,7 @@ def generate_organizer_files(
         body = apply_edge_mount_structure(box, body)
         reported = apply_texts(body, texts)
         edge_text = edge_mount_text_object(box)
-        if edge_text is not None:
+        if edge_text is not None and box.edge_mount.label_type == "integrated":
             _edge_label, edge_mesh, edge_raised = edge_text
             if not edge_raised:
                 reported = difference([reported, edge_mesh])
@@ -1691,7 +1702,7 @@ def generate_organizer_files(
             box_inlays.append((tidy, box_inlay, False))
         body = apply_edge_mount_structure(box, body)
         edge_text = edge_mount_text_object(box)
-        if edge_text is not None:
+        if edge_text is not None and box.edge_mount.label_type == "integrated":
             _edge_label, edge_mesh, edge_raised = edge_text
             if not edge_raised:
                 body = difference([body, edge_mesh])
@@ -1726,6 +1737,36 @@ def generate_organizer_files(
             "layout": insert_report("organizer_insert", layout.features, insert),
             "text_objects": written,
         }
+    if box.edge_mount.label_enabled and box.edge_mount.label_type == "separate":
+        label_body = make_edge_mount_label_part(box)
+        if label_body is not None:
+            edge_text = edge_mount_text_object(box)
+            inlays = []
+            if edge_text is not None:
+                name, mesh, raised = edge_text
+                if not raised:
+                    label_body = difference([label_body, mesh])
+                inlays.append((name, mesh))
+            axis = (1.0, 0.0, 0.0) if box.edge_mount.side in ("front", "back") else (0.0, 1.0, 0.0)
+            transform = trimesh.transformations.rotation_matrix(math.pi, axis)
+            printed_body = label_body.copy()
+            printed_body.apply_transform(transform)
+            offset = -float(printed_body.bounds[0][2])
+            printed_body.apply_translation((0.0, 0.0, offset))
+            printed_texts = []
+            for name, mesh in inlays:
+                printed = mesh.copy()
+                printed.apply_transform(transform)
+                printed.apply_translation((0.0, 0.0, offset))
+                printed_texts.append((name, printed))
+            label_output = _resolve_file(edge_mount_label_filename, box, part_name)
+            if printed_texts:
+                written = export_text_body_3mf(printed_body, printed_texts, label_output, "edge_mount_label")
+            else:
+                written = []
+                export_mesh(printed_body, label_output, "edge_mount_label")
+            result["edge_mount_label"] = _part_result(label_output, mesh_report("edge_mount_label", printed_body))
+            result["edge_mount_label"]["text_objects"] = written
     if label_info is not None:
         result["label"] = label_info
     result["texts"] = [
@@ -1761,6 +1802,8 @@ def generate_organizer_files(
             out_files.append(Path(str(result["insert"]["output"])))
         if "lid" in result and isinstance(result["lid"], dict) and "output" in result["lid"]:
             out_files.append(Path(str(result["lid"]["output"])))
+        if "edge_mount_label" in result and isinstance(result["edge_mount_label"], dict) and "output" in result["edge_mount_label"]:
+            out_files.append(Path(str(result["edge_mount_label"]["output"])))
         # Inventory stores the requested stack-module height.  The drawer adds
         # the exposed top engagement depth when checking physical clearance.
         log_file = log_bin_to_folder(
@@ -2460,6 +2503,7 @@ def design_to_dict(
             "side": edge_mount.side,
             "label_enabled": edge_mount.label_enabled,
             "label_text": edge_mount.label_text,
+            "label_type": edge_mount.label_type,
             "label_projection_mm": edge_mount.label_projection_mm,
             "label_length_mode": edge_mount.label_length_mode,
             "label_thickness_mm": edge_mount.label_thickness_mm,
@@ -2551,6 +2595,7 @@ def design_from_dict(
             side=str(edge_mount_raw.get("side", "front")),
             label_enabled=bool(edge_mount_raw.get("label_enabled", False)),
             label_text=str(edge_mount_raw.get("label_text", "")),
+            label_type=str(edge_mount_raw.get("label_type", "integrated")),
             label_projection_mm=float(edge_mount_raw.get("label_projection_mm", 50.0)),
             label_length_mode=str(edge_mount_raw.get("label_length_mode", "full")),
             label_thickness_mm=float(edge_mount_raw.get("label_thickness_mm", 2.0)),

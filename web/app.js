@@ -836,6 +836,7 @@ function readEdgeMountForm(design) {
     side: $("#edge-mount-side")?.value || "front",
     label_enabled: labelEnabled,
     label_text: $("#edge-mount-label-text")?.value || "",
+    label_type: $("#edge-mount-label-type")?.value || current.label_type,
     label_projection_mm: projection,
     label_length_mode: $("#edge-mount-label-length-mode")?.value || "full",
     label_thickness_mm: thickness,
@@ -872,6 +873,7 @@ function syncEdgeMountControls() {
   if ($("#edge-mount-label-enabled")) $("#edge-mount-label-enabled").checked = edgeMount.label_enabled;
   if ($("#edge-mount-holes-enabled")) $("#edge-mount-holes-enabled").checked = edgeMount.holes_enabled;
   if ($("#edge-mount-label-text")) $("#edge-mount-label-text").value = edgeMount.label_text;
+  if ($("#edge-mount-label-type")) $("#edge-mount-label-type").value = edgeMount.label_type;
   if ($("#edge-mount-label-length-mode")) $("#edge-mount-label-length-mode").value = edgeMount.label_length_mode;
   if ($("#edge-mount-label-style")) $("#edge-mount-label-style").value = edgeMount.label_raised ? "raised" : "flush";
   if ($("#edge-mount-label-depth")) $("#edge-mount-label-depth").value = fmt(edgeMount.label_text_depth_mm);
@@ -1627,6 +1629,7 @@ const EDGE_MOUNT_DEFAULTS = {
   side: "front",
   label_enabled: false,
   label_text: "",
+  label_type: "separate",
   label_projection_mm: 50,
   label_length_mode: "full",
   label_thickness_mm: 2,

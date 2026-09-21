@@ -1347,10 +1347,11 @@ uses) faces the support. That one **side** setting controls both
 subsections at once - there are no separate mounting-side and label-side
 choices.
 
-- **Label** - a thin horizontal plate, flush with the top rim,
-  cantilevered outward from the top of the selected wall like a diving
-  board, so it can rest over the top edge of a cart or table. It is not a
-  hook, clamp, gusset or mounting feature. **Length** is either Full
+- **Label** - **Separate part** is the new-design default: the projecting
+  plate prints as its own **Edge Mount Label** file on one continuous shallow
+  snap/slide saddle that follows the selected wall's real wavy shape. It is
+  shown installed in preview. **Integrated** keeps the original fused plate;
+  old saved labels without Label Type reopen as Integrated. **Length** is either Full
   Side (the wall's real wavy-envelope span) or Text Length (the fitted text
   plus a 2 mm margin on every side, never wider than Full Side). Projection is
   one exact 5-200 mm field; a new Edge Mount starts at one-third of the
