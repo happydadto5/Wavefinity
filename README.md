@@ -159,6 +159,8 @@ All instructions for coding agents (OpenAI, Anthropic, Google) and human contrib
 
 ### Development handoff workflow
 
+> **WHERE THE FIXES LIVE:** all fix plans (fix 1, fix 27, etc.) are in the separate private GitHub repo **`happydadto5/Wavefinity-Help-Code`**, in its `fixes/` folder. They are NOT in this repo. When told "implement fix N" or "read fix N", read `fixes/fix-00N.md` from that repo first (use `gh api`, see below). Never say a fix is missing without checking there.
+
 Wavefinity is developed through handoffs between **chat/planning LLMs** and **coding LLMs**. Project-wide rules and architecture live in this `README.md`.
 
 **Help Code task records do not live in this repository.** The only authoritative Help Code store is the private GitHub repository `happydadto5/Wavefinity-Help-Code`.
