@@ -16,6 +16,11 @@ const SP = {
   // It may come from existing inventory/layout recovery or from an explicit
   // New Space repeat-size template. It is never itself the active Space.
   setupPrefillSpace: null,
+  // Set once SP.initializeDesignForActiveSpace() has kicked off its own
+  // fresh preview during startup, so startSpaces()'s own fallback preview
+  // does not fire a redundant duplicate for the same design (Fix 032
+  // Correction 3, C3.2).
+  _activationPreviewRequested: false,
 };
 const RESUME_AUTOCONTINUE_SECONDS = 10;
 const SP_KINDS = {
@@ -304,6 +309,15 @@ SP.applyFolder = async (info, options = {}) => {
     const ok = await SP.resetDrawer();
     if (!ok) return false;
   }
+  // Any preview still in flight belongs to the OUTGOING Space/folder.
+  // Invalidate it before the resume flush/identity switch below - its own
+  // stale-request guard (`request !== state.previewRequest`) is what stops
+  // a late Space-A response from landing into the now-active Space-B
+  // state.design and getting persisted as B's checkpoint (Fix 032
+  // Correction 3, C3.1). Also clear any visible "recalculating" notice so
+  // a cancelled Space-A preview cannot leave a stale overlay in Space B.
+  state.previewRequest += 1;
+  clearPreviewWaitTimers();
   // The old Space's queued/in-flight resume checkpoint must land before ANY
   // identity field below changes - a completion for it after the switch
   // must never write into, or overwrite in memory, the new Space's
@@ -649,8 +663,14 @@ SP._pumpResumeQueue = () => {
       // SP.flushResumeCheckpoint() caller instead gets its own rejection
       // through its waiter, and OWNS the user-facing message from there -
       // reporting both here and at the caller would duplicate/contradict
-      // it (Fix 032 Correction 2, C2.3).
-      if (!item.waiters.length) {
+      // it (Fix 032 Correction 2, C2.3). The same ownership hand-off
+      // applies when an explicit flush is already queued up BEHIND this
+      // failing background write for the same Space (e.g. the preview
+      // autosave that immediately precedes a Surface first-bin flush) -
+      // that upcoming call owns the one warning, so stay silent here too
+      // (Fix 032 Correction 3, C3.3).
+      const nextOwnsMessage = Boolean(SP._resume.latest?.waiters.length);
+      if (!item.waiters.length && !nextOwnsMessage) {
         toast(`Current design could not be saved to this Space: ${error.message}`, true, 6000);
       }
       item.waiters.forEach(w => w.reject(error));
@@ -1868,6 +1888,18 @@ SP.initializeDesignForActiveSpace = async () => {
 
   if (!restored) await SP.installSpaceStarterDesign(state.activeSpace);
   syncForm();
+  // The active Space identity, state.design, and the preview must all
+  // belong to the same Space/design generation - request a fresh preview
+  // for the design just installed here, rather than leaving the 3D view
+  // showing whatever an earlier Space last rendered until some later edit
+  // triggers one (Fix 032 Correction 3, C3.2). Fire-and-forget: it owns its
+  // own errors and stale-request guard, so nothing here needs to await it.
+  // startSpaces()'s own startup fallback preview checks this flag so a
+  // Space-activating startup does not also fire a redundant duplicate.
+  if (typeof refreshPreview === "function") {
+    SP._activationPreviewRequested = true;
+    refreshPreview();
+  }
 };
 
 // Reuses the real Base Trim design path (makeBaseTrimDesign) rather than
@@ -2546,9 +2578,12 @@ const startSpaces = async () => {
     if (cover) cover.hidden = true;
   }
 
-  // Only now does the first preview begin, behind the correct screen.
+  // Only now does the first preview begin, behind the correct screen -
+  // unless Space activation during SP.launch() already started one for the
+  // design it just installed (Fix 032 Correction 3, C3.2); firing this one
+  // too would be a redundant duplicate of the same design/generation.
   // refreshPreview() discards stale responses, so a later user action wins.
-  await refreshPreview();
+  if (!SP._activationPreviewRequested) await refreshPreview();
 };
 
 if (state.ready) {

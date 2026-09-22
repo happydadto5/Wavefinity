@@ -11189,9 +11189,11 @@ async function surfaceEdgeSucceeded(design) {
       // The Base Trim edge itself already succeeded and the first-bin
       // editor is already showing - only the checkpoint write failed, so
       // say that plainly and leave it retryable rather than treating the
-      // transition as failed.
+      // transition as failed. This one qualified warning already says the
+      // edge succeeded and the first-bin editor is ready, so the ordinary
+      // success toast below must not also fire (Fix 032 Correction 3,
+      // C3.3 - the prior code fired both).
       toast(`Edge ready, but the first-bin design could not be saved to this Space: ${error.message}`, true, 8000);
-      toast("Edge ready — design your first bin.");
       return;
     }
   }
