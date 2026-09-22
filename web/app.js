@@ -11248,6 +11248,7 @@ async function generateParts(target) {
   let connectorPlan = null;
   let saveOutput = state.output;
   let surfaceEdgeDone = null;
+  let checkpointSaveFailed = null;
 
   try {
     // A debounced support edit may still be visible only in the draft. Save
@@ -11261,13 +11262,18 @@ async function generateParts(target) {
       keep_log: state.keepLog,
     };
 
-    // Fix 032: flush the exact pre-operation resume checkpoint before this
-    // design is sent anywhere, so a failed generation still leaves the
-    // editing state recoverable. Pending is computed for this exact payload
-    // now, not blindly forced true - a reprint of an already-reconciled
-    // unchanged design stays reconciled.
+    // Fix 032 Correction 1: flush the exact pre-operation resume checkpoint
+    // before this design is sent anywhere. Pending is computed for this
+    // exact payload now, not blindly forced true - a reprint of an already-
+    // reconciled unchanged design stays reconciled. If this checkpoint
+    // cannot be durably saved, the "recoverable on failure" guarantee is not
+    // met - stop here rather than proceed as though it were.
     if (state.folderMode === "space" && typeof SP !== "undefined") {
-      await SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()));
+      try {
+        await SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()));
+      } catch (error) {
+        throw new Error(`Current design could not be saved to this Space, so nothing was generated: ${error.message}`);
+      }
     }
 
     // Step 1: Generate Bin if requested
@@ -11285,12 +11291,19 @@ async function generateParts(target) {
       if (baseTrimEnabled(payload.design)) surfaceEdgeDone = payload.design;
       else {
         markWorkingDesignReconciled();
-        // The just-generated bin is the next resume target, pending=false,
-        // and is awaited before this step is reported complete. Connector-
-        // only generation never reaches this branch, so it cannot falsely
-        // reconcile the bin design.
+        // The just-generated bin is the next resume target, pending=false.
+        // Connector-only generation never reaches this branch, so it cannot
+        // falsely reconcile the bin design. The generated files and
+        // inventory entry already exist by this point, so a checkpoint-save
+        // failure here must not be reported as the generation itself
+        // failing (Correction 1) - only that this design still needs saving
+        // to the Space, which a later preview/action will retry.
         if (state.folderMode === "space" && typeof SP !== "undefined") {
-          await SP.flushResumeCheckpoint(payload.design, false);
+          try {
+            await SP.flushResumeCheckpoint(payload.design, false);
+          } catch (error) {
+            checkpointSaveFailed = error;
+          }
         }
       }
     }
@@ -11329,6 +11342,15 @@ async function generateParts(target) {
       false,
       7000,
     );
+    // The generated output above is real and already saved; only the
+    // Space's resume checkpoint failed to persist. Say so separately rather
+    // than implying the whole operation is untrustworthy (Correction 1).
+    if (checkpointSaveFailed) {
+      toast(
+        `Generated, but the current design could not be saved to this Space: ${checkpointSaveFailed.message}`,
+        true, 8000,
+      );
+    }
   } catch (error) {
     if (target === "all" || target === "bin") {
       const binRow = $("#gen-item-bin");
@@ -11397,11 +11419,16 @@ async function printModel(target = "bin") {
       target: target,
       keep_log: state.keepLog,
     };
-    // Fix 032: same exact resume checkpoint contract as generateParts() -
-    // flush the pre-operation state before sending, so a failed print still
-    // leaves it recoverable with its pre-operation pending value.
+    // Fix 032 Correction 1: same exact resume checkpoint contract as
+    // generateParts() - flush the pre-operation state before sending. If it
+    // cannot be durably saved, stop before /api/print rather than proceed
+    // as though the design would still be recoverable on a failed print.
     if (state.folderMode === "space" && typeof SP !== "undefined") {
-      await SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()));
+      try {
+        await SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()));
+      } catch (error) {
+        throw new Error(`Current design could not be saved to this Space, so nothing was sent: ${error.message}`);
+      }
     }
     const result = await api("/api/print", payload);
     if ((target === "bin" || target === "all") && !baseTrimEnabled(payload.design) && !Boolean(payload.design?.box?.b4b?.enabled)) {
@@ -11413,8 +11440,15 @@ async function printModel(target = "bin") {
     if (baseTrimEnabled(payload.design)) printedEdge = payload.design;
     else if (target === "bin" || target === "all") {
       markWorkingDesignReconciled();
+      // The slicer handoff already succeeded by this point; only the
+      // resume checkpoint failed to persist. Report that separately rather
+      // than as the print itself failing (Correction 1).
       if (state.folderMode === "space" && typeof SP !== "undefined") {
-        await SP.flushResumeCheckpoint(payload.design, false);
+        try {
+          await SP.flushResumeCheckpoint(payload.design, false);
+        } catch (error) {
+          toast(`Sent to ${slicerName}, but the current design could not be saved to this Space: ${error.message}`, true, 8000);
+        }
       }
     }
   } catch (error) {

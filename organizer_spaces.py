@@ -237,12 +237,16 @@ def _metadata_resume(
     if version < RESUME_REQUIRED_VERSION:
         return None, False
     design = metadata.get("resume_design")
-    pending = metadata.get("resume_pending", False)
+    # A missing/explicit-null resume_design normalizes to null, but a v8
+    # typed Space must carry a literal boolean resume_pending - a missing
+    # field is malformed metadata, not a silent "not pending" - see Fix 032
+    # Correction 1.
+    pending = metadata.get("resume_pending", _UNSET)
     if design is not None and not isinstance(design, dict):
         raise FolderMetadataError(
             "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
         )
-    if not isinstance(pending, bool):
+    if pending is _UNSET or not isinstance(pending, bool):
         raise FolderMetadataError(
             "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
         )

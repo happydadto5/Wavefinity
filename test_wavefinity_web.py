@@ -2783,6 +2783,7 @@ const tick = () => new Promise(r => setImmediate(r));
             "out.nullDesignForcesPendingFalse = SP.classifyMetadata({ exists: true, data: { ...base, resume_design: null, resume_pending: true } });",
             "out.malformedDesign = SP.classifyMetadata({ exists: true, data: { ...base, resume_design: ['nope'], resume_pending: false } });",
             "out.malformedPending = SP.classifyMetadata({ exists: true, data: { ...base, resume_design: { box: {} }, resume_pending: 'yes' } });",
+            "out.missingPending = SP.classifyMetadata({ exists: true, data: { ...base, resume_design: { box: {} } } });",
             "out.v7HasNoResumeConcept = SP.classifyMetadata({ exists: true, data: { ...base, version: 7 } });",
             "process.stdout.write(JSON.stringify(out));",
         ])
@@ -2795,6 +2796,7 @@ const tick = () => new Promise(r => setImmediate(r));
         self.assertFalse(out["nullDesignForcesPendingFalse"]["resume_pending"])
         self.assertEqual(out["malformedDesign"]["status"], "invalid")
         self.assertEqual(out["malformedPending"]["status"], "invalid")
+        self.assertEqual(out["missingPending"]["status"], "invalid")
         self.assertEqual(out["v7HasNoResumeConcept"]["status"], "space")
         self.assertIsNone(out["v7HasNoResumeConcept"]["resume_design"])
         self.assertFalse(out["v7HasNoResumeConcept"]["resume_pending"])
@@ -2865,11 +2867,15 @@ const tick = () => new Promise(r => setImmediate(r));
             "  await new Promise(r => setTimeout(r, 60));",
             "  out.staleCompletionDesign = state.spaceResumeDesign;",
             "",
-            "  // 3) A rejected write must not poison the queue: a later write for",
-            "  //    the (now active) Space must still go through.",
+            "  // 3) An explicit flush must observably reject on a failed write (so",
+            "  //    Generate/Print can tell), but that rejection must not poison the",
+            "  //    queue - a later write for the same Space must still go through.",
             "  let calls = 0;",
             "  apiBehavior = async () => { calls += 1; if (calls === 1) throw new Error('disk full'); return {}; };",
-            "  await SP.flushResumeCheckpoint({ v: 'first-fails' }, false);",
+            "  let firstFlushRejected = false;",
+            "  try { await SP.flushResumeCheckpoint({ v: 'first-fails' }, false); }",
+            "  catch (error) { firstFlushRejected = error.message === 'disk full'; }",
+            "  out.firstFlushRejected = firstFlushRejected;",
             "  out.toastsAfterFailure = toasts.length;",
             "  await SP.flushResumeCheckpoint({ v: 'second-succeeds' }, true);",
             "  out.recoveredDesign = state.spaceResumeDesign;",
@@ -2890,8 +2896,11 @@ const tick = () => new Promise(r => setImmediate(r));
         # Space A's stale, late-arriving completion did not clobber Space B.
         self.assertEqual(out["staleCompletionDesign"], {"v": "B-current"})
 
-        # The rejected write reported itself but did not stop the next one.
+        # The failed flush was observable to its own caller (Correction 1)...
+        self.assertTrue(out["firstFlushRejected"])
+        # ...reported itself once...
         self.assertEqual(out["toastsAfterFailure"], 1)
+        # ...and did not stop the next write.
         self.assertEqual(out["recoveredDesign"], {"v": "second-succeeds"})
         self.assertTrue(out["recoveredPending"])
 
@@ -2936,6 +2945,7 @@ const tick = () => new Promise(r => setImmediate(r));
             "  const out = {};",
             "  out.noResume = await run({});",
             "  out.withValidResume = await run({ resumeDesign: { box: { x: 1 } }, resumePending: true });",
+            "  out.withReconciledResume = await run({ resumeDesign: { box: { x: 2 } }, resumePending: false });",
             "  out.invalidResumeFallsBack = await run({ resumeDesign: { box: { x: 1 } }, resumePending: true, validateFails: true });",
             "  out.notASpace = await run({ folderMode: 'design' });",
             "  process.stdout.write(JSON.stringify(out));",
@@ -2958,12 +2968,192 @@ const tick = () => new Promise(r => setImmediate(r));
         self.assertEqual(with_resume["cleanDesign"], with_resume["design"])
         self.assertTrue(with_resume["workingPending"])
 
+        # resume_pending=false restores the same exact design but as already
+        # reconciled - not reinvented as a new pending Current design.
+        reconciled = out["withReconciledResume"]
+        self.assertFalse(any(c[0] == "installSpaceStarterDesign" for c in reconciled["calls"]))
+        self.assertEqual(reconciled["design"], {"box": {"x": 2}, "validated": True})
+        self.assertFalse(reconciled["workingPending"])
+
         fallback = out["invalidResumeFallsBack"]
         self.assertTrue(any(c[0] == "installSpaceStarterDesign" for c in fallback["calls"]))
         self.assertEqual(len(fallback["toasts"]), 1)
 
         not_space = out["notASpace"]
         self.assertEqual(not_space["calls"], [])
+
+    def test_hosted_write_metadata_serializes_resume_against_other_writes(self):
+        # Fix 032 Correction 1, item 4: hosted SP.writeMetadata() must
+        # serialize its read/preserve/write transactions - a resume save and
+        # a defaults/rename update racing the same slow read must not both
+        # read the old file and then overwrite each other's fields.
+        node = self._node_or_skip()
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+
+        start = "SP._metadataWriteQueue = Promise.resolve();"
+        end = "  return metadata;\n};"
+        write_module = spaces_js[spaces_js.index(start):]
+        write_module = write_module[:write_module.index(end) + len(end)]
+
+        script = "\n".join([
+            "const FOLDER_METADATA = '.wavefinity.json';",
+            "const FOLDER_METADATA_VERSION = 8;",
+            "const SPACE_SETUP_VERSION = 1;",
+            "let fileText = JSON.stringify({",
+            "  version: 8, setup_version: 1, folder_mode: 'space',",
+            "  space_id: 'sid', space: { kind: 'drawer', name: 'S', x: 320, y: 240, z: 55 },",
+            "  keep_bin_defaults: true, bin_defaults: null, part_defaults: {},",
+            "  resume_design: { box: { x: 1 } }, resume_pending: true,",
+            "});",
+            "const writeCalls = [];",
+            "const WFFileSystem = {",
+            "  writeText: async (handle, name, text) => { writeCalls.push(text); fileText = text; },",
+            "};",
+            "const crypto = { randomUUID: () => 'unused' };",
+            "const SP = {",
+            "  readMetadata: async () => {",
+            "    // The slow read: both callers see the SAME pre-write snapshot if",
+            "    // they are not serialized against each other.",
+            "    await new Promise(r => setTimeout(r, 20));",
+            "    return { current: { exists: true, data: JSON.parse(fileText) } };",
+            "  },",
+            "  classifyMetadata: record => {",
+            "    const d = record.data;",
+            "    return {",
+            "      status: 'space', space_id: d.space_id,",
+            "      keep_bin_defaults: d.keep_bin_defaults, bin_defaults: d.bin_defaults,",
+            "      part_defaults: d.part_defaults, resume_design: d.resume_design, resume_pending: d.resume_pending,",
+            "    };",
+            "  },",
+            "  metadataError: () => new Error('bad metadata'),",
+            "};",
+            write_module,
+            "(async () => {",
+            "  const space = { kind: 'drawer', name: 'Renamed', x: 320, y: 240, z: 55 };",
+            "  const [resumeResult, renameResult] = await Promise.all([",
+            "    SP.writeMetadata('handle', 'space', space, true, { resume_design: { box: { x: 2 } }, resume_pending: false }),",
+            "    SP.writeMetadata('handle', 'space', space, true, { keep_bin_defaults: false }),",
+            "  ]);",
+            "  const finalMetadata = JSON.parse(fileText);",
+            "  process.stdout.write(JSON.stringify({ writeCount: writeCalls.length, resumeResult, renameResult, finalMetadata }));",
+            "})();",
+        ])
+        done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+
+        # Two serialized writes, not two concurrent ones stepping on each other.
+        self.assertEqual(out["writeCount"], 2)
+        final = out["finalMetadata"]
+        # Whichever write landed last, it must carry BOTH the resume change
+        # from one call AND the keep_bin_defaults change from the other -
+        # each write reads the other's already-applied result, not a stale
+        # shared snapshot.
+        self.assertFalse(final["keep_bin_defaults"])
+        self.assertEqual(final["resume_design"], {"box": {"x": 2}})
+        self.assertFalse(final["resume_pending"])
+
+    def test_apply_folder_flushes_outgoing_checkpoint_before_changing_identity(self):
+        # Fix 032 item 5 / Correction 1, item 4: SP.applyFolder() must flush
+        # whatever is queued/in-flight for the OUTGOING Space before it
+        # mutates state.output/state.activeSpaceId - not after.
+        node = self._node_or_skip()
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        apply_folder = self._spaces_slice(spaces_js, "SP.applyFolder = async (info,")
+
+        script = "\n".join([
+            "const calls = [];",
+            "const state = { output: 'OLD_OUTPUT', activeSpaceId: 'OLD_ID', folderSelected: false };",
+            "const SP = {",
+            "  resetDrawer: async () => { calls.push(['resetDrawer']); return true; },",
+            "  flushOutgoingResumeCheckpoint: async () => {",
+            "    calls.push(['flush', state.output, state.activeSpaceId]);",
+            "  },",
+            "  initializeDesignForActiveSpace: async () => { calls.push(['initializeDesignForActiveSpace']); },",
+            "};",
+            "const setFolderState = (...args) => calls.push(['setFolderState', state.output, state.activeSpaceId]);",
+            "const syncForm = () => calls.push(['syncForm']);",
+            apply_folder,
+            "(async () => {",
+            "  const info = {",
+            "    folder: 'NEW_FOLDER', space_id: 'NEW_ID', folder_mode: 'space',",
+            "    space: { kind: 'drawer', name: 'N' }, inventory: true,",
+            "    keep_bin_defaults: true, bin_defaults: null, part_defaults: {},",
+            "    resume_design: null, resume_pending: false,",
+            "  };",
+            "  await SP.applyFolder(info, { reset: false });",
+            "  process.stdout.write(JSON.stringify({ calls, finalOutput: state.output, finalId: state.activeSpaceId }));",
+            "})();",
+        ])
+        done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+
+        flush_call = next(c for c in out["calls"] if c[0] == "flush")
+        # The flush saw the OLD identity - it ran before the mutation below.
+        self.assertEqual(flush_call[1:], ["OLD_OUTPUT", "OLD_ID"])
+        set_folder_state_call = next(c for c in out["calls"] if c[0] == "setFolderState")
+        # By the time setFolderState() runs, identity has already moved on.
+        self.assertEqual(set_folder_state_call[1:], ["NEW_FOLDER", "NEW_ID"])
+        self.assertEqual(out["finalOutput"], "NEW_FOLDER")
+        self.assertEqual(out["finalId"], "NEW_ID")
+        self.assertLess(out["calls"].index(flush_call), out["calls"].index(set_folder_state_call))
+
+    def test_generate_and_print_flush_semantics_match_correction_1_contract(self):
+        # Fix 032 Correction 1, item 2: the pre-operation flush must gate the
+        # actual network call (throwing stops Generate/Print before it sends
+        # anything), while the post-success flush must not turn a successful
+        # generate/print into a reported failure merely because the
+        # checkpoint save failed. These are structural, not behavioral,
+        # checks - full DOM execution of generateParts()/printModel() is not
+        # practical to harness here, and the ordering/throw-vs-report shape
+        # is what Correction 1 specifically required.
+        app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+
+        def slice_fn(name):
+            start = app_js.index(f"async function {name}(")
+            end = app_js.index("\nasync function ", start + 1)
+            return app_js[start:end]
+
+        generate_parts = slice_fn("generateParts")
+        print_model = slice_fn("printModel")
+
+        for label, source in (("generateParts", generate_parts), ("printModel", print_model)):
+            pre_flush_idx = source.index("SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()))")
+            api_call = 'api("/api/generate"' if label == "generateParts" else 'api("/api/print"'
+            api_idx = source.index(api_call)
+            self.assertLess(
+                pre_flush_idx, api_idx,
+                f"{label}: the pre-operation checkpoint flush must happen before {api_call} is called",
+            )
+            # The pre-operation flush's own catch must throw (stop the
+            # operation), not merely toast.
+            pre_flush_catch = source[pre_flush_idx:source.index("catch (error)", pre_flush_idx) + 400]
+            self.assertIn("throw new Error", pre_flush_catch)
+
+            # The post-success flush (pending=false) must NOT stop/refuse the
+            # already-produced output on a checkpoint-save failure.
+            post_flush_idx = source.index("SP.flushResumeCheckpoint(payload.design, false)")
+            post_flush_catch = source[post_flush_idx:source.index("catch (error)", post_flush_idx) + 400]
+            self.assertNotIn("throw", post_flush_catch)
+
+    def test_refresh_preview_only_queues_checkpoint_on_a_fully_valid_preview(self):
+        # Fix 032 Correction 1, item 4: an HTTP-200 preview that still
+        # reports fit/feature/draft errors must not replace the last valid
+        # resume checkpoint.
+        app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        start = app_js.index("async function refreshPreview(")
+        end = app_js.index("\nasync function ", start + 1)
+        source = app_js[start:end]
+
+        previews_has_errors_idx = source.index("const previewHasErrors =")
+        queue_idx = source.index("SP.queueResumeCheckpoint(")
+        self.assertLess(previews_has_errors_idx, queue_idx)
+        guard = source[previews_has_errors_idx:queue_idx]
+        self.assertIn("if (!previewHasErrors", guard)
+        self.assertIn('state.folderMode === "space"', guard)
 
     def test_space_name_heading_is_materially_larger_than_prior_hierarchy(self):
         # Fix 032 item 8: the Space name is the strongest heading in the left

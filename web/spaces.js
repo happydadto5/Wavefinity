@@ -418,12 +418,15 @@ SP.classifyMetadata = record => {
     let resumePending = false;
     if (current.version >= RESUME_REQUIRED_VERSION) {
       resumeDesign = current.resume_design === undefined ? null : current.resume_design;
-      resumePending = current.resume_pending === undefined ? false : current.resume_pending;
       if (resumeDesign !== null && (typeof resumeDesign !== "object" || Array.isArray(resumeDesign))) {
         return { status: "invalid" };
       }
-      if (typeof resumePending !== "boolean") return { status: "invalid" };
-      if (resumeDesign === null) resumePending = false;
+      // A missing/explicit-null resume_design normalizes to null, but a v8
+      // typed Space must carry a literal boolean resume_pending - a missing
+      // field is malformed metadata, not a silent "not pending" - see
+      // Fix 032 Correction 1.
+      if (typeof current.resume_pending !== "boolean") return { status: "invalid" };
+      resumePending = resumeDesign === null ? false : current.resume_pending;
     }
     // A stored legacy "box" identity always requires the explicit
     // migration/setup pass, even inside an otherwise fully-valid v4 +
@@ -545,9 +548,20 @@ SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, chan
 // never coalesced into the same slot, and a stale Space-A completion is
 // still gated by identity before it is allowed to overwrite in-memory state.
 SP._resume = {
-  latest: null,          // { target, design, pending, key } - queued, unsent
+  latest: null,          // { target, design, pending, key, waiters } - queued, unsent
   inFlight: null,         // the write currently in progress, if any
   savedKey: new Map(),   // space_id -> dedupe key of the last value actually saved
+};
+
+// A queued item a background save is about to replace, discarded before it
+// was ever written under its own content, tells whoever was waiting on it
+// (an explicit SP.flushResumeCheckpoint() caller) rather than leaving it
+// hanging silently - see Correction 1.
+SP._rejectSupersededWaiters = () => {
+  const waiters = SP._resume.latest?.waiters;
+  if (!waiters?.length) return;
+  const error = new Error("a newer design replaced this save before it was written");
+  waiters.forEach(w => w.reject(error));
 };
 
 // Captured synchronously, before any await - never resolved from mutable
@@ -596,13 +610,16 @@ SP._pumpResumeQueue = () => {
         state.spaceResumeDesign = clone(item.design);
         state.spaceResumePending = item.pending;
       }
+      item.waiters.forEach(w => w.resolve());
     })
     .catch(error => {
       // A rejected write must not poison the tail - the queue recovers so
-      // later writes still run; this is reported here, not thrown, because
-      // nothing awaiting the queue should have a checkpoint-save failure
-      // mistaken for its own operation failing.
+      // later writes still run. A background autosave has no waiter, so it
+      // is only reported here as a toast; an explicit
+      // SP.flushResumeCheckpoint() caller gets its own rejection through
+      // its waiter below, on top of this same toast - see Correction 1.
       toast(`Current design could not be saved to this Space: ${error.message}`, true, 6000);
+      item.waiters.forEach(w => w.reject(error));
     })
     .then(() => {
       SP._resume.inFlight = null;
@@ -614,31 +631,43 @@ SP._pumpResumeQueue = () => {
 // Background autosave choke point - call only after a fully valid preview
 // (see refreshPreview in web/app.js). Coalesces with whatever is already
 // queued for the same Space and skips an exact duplicate of the last value
-// actually saved for it.
+// actually saved for it. Fire-and-forget: never blocks the caller, and a
+// failure is reported as its own toast, not thrown.
 SP.queueResumeCheckpoint = (design, pending) => {
   const target = SP._captureResumeTarget();
   if (!target) return;
   const key = `${pending ? 1 : 0}:${JSON.stringify(design)}`;
   if (SP._resume.savedKey.get(target.spaceId) === key) return;
   if (SP._resume.latest?.target.spaceId === target.spaceId && SP._resume.latest.key === key) return;
-  SP._resume.latest = { target, design: clone(design), pending: Boolean(pending), key };
+  SP._rejectSupersededWaiters();
+  SP._resume.latest = { target, design: clone(design), pending: Boolean(pending), key, waiters: [] };
   SP._pumpResumeQueue();
 };
 
 // Explicit/deterministic persistence for Generate/Print and for leaving a
-// Space - awaited, so a failed external operation still leaves the exact
-// pre-operation state recoverable. Never rejects: a persistence failure is
-// reported as its own toast and must not abort the caller's real operation.
-SP.flushResumeCheckpoint = async (design, pending) => {
+// Space. Unlike the background autosave path, this one is observable: it
+// rejects if the exact requested checkpoint could not be durably saved, so
+// its caller (Generate/Print) can refuse to proceed, or to report itself
+// fully complete, on that specific failure - see Correction 1. It never
+// poisons the shared queue - other pending/future writes still run.
+SP.flushResumeCheckpoint = (design, pending) => {
   const target = SP._captureResumeTarget();
-  if (!target) return;
+  if (!target) return Promise.resolve();
   const key = `${pending ? 1 : 0}:${JSON.stringify(design)}`;
-  SP._resume.latest = { target, design: clone(design), pending: Boolean(pending), key };
-  await SP._pumpResumeQueue();
+  return new Promise((resolve, reject) => {
+    SP._rejectSupersededWaiters();
+    SP._resume.latest = {
+      target, design: clone(design), pending: Boolean(pending), key,
+      waiters: [{ resolve, reject }],
+    };
+    SP._pumpResumeQueue();
+  });
 };
 
 // Waits out whatever is queued/in-flight before SP.applyFolder changes
-// state.output/state.activeSpaceId to a different folder/Space.
+// state.output/state.activeSpaceId to a different folder/Space. Best-effort:
+// a failure here already toasted itself via the queue and must not block
+// the folder switch the user asked for.
 SP.flushOutgoingResumeCheckpoint = () => SP._pumpResumeQueue();
 
 // The one place hosted code reads a folder's inventory. Mirrors the local

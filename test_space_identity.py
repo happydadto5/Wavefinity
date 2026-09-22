@@ -480,6 +480,19 @@ class SpaceIdentityTests(unittest.TestCase):
             )
         self.assertEqual((folder / ".wavefinity.json").read_bytes(), before)
 
+    def test_missing_v8_resume_pending_is_malformed_not_defaulted(self):
+        # Fix 032 Correction 1: a v8 typed Space must carry a literal boolean
+        # resume_pending - a missing field is malformed metadata, not a
+        # silent "not pending".
+        folder = make_v4_space(self.tmp)
+        self.call("/api/folder/use", output=str(folder))
+        data = meta(folder)
+        self.assertEqual(data["version"], 8)
+        del data["resume_pending"]
+        (folder / ".wavefinity.json").write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            self.call("/api/space/inspect", output=str(folder))
+
     def test_resume_route_refuses_an_untyped_folder(self):
         plain = self.tmp / "Plain"
         plain.mkdir()
