@@ -68,6 +68,15 @@ EDGE_LABEL_CLIP_RETENTION_MM = 0.15
 EDGE_LABEL_CLIP_RETENTION_SPAN_MM = 4.0
 EDGE_LABEL_CLIP_RAMP_OVERLAP_MM = 0.75
 
+# Permanent bin-body fins that let a Separate-label saddle clip and the bin
+# touch the same flat mounting surface.
+EDGE_STANDOFF_CONTACT_WIDTH_MM = 2.0
+EDGE_STANDOFF_AUTO_MAX_SPACING_MM = 20.0
+EDGE_STANDOFF_EDGE_CLEARANCE_MM = 2.0
+EDGE_STANDOFF_CLIP_GAP_MM = 0.25
+EDGE_STANDOFF_MIN_COUNT = 1
+EDGE_STANDOFF_MAX_COUNT = 20
+
 EDGE_HOLE_DEFAULT_SCREW_DIAMETER = 4.0
 EDGE_HOLE_DEFAULT_ACCESS_DIAMETER = 8.0
 EDGE_HOLE_DEFAULT_TOP_OFFSET = 12.7
@@ -264,6 +273,130 @@ def edge_mount_label_plan(box: BoxSpec) -> dict[str, object] | None:
     }
 
 
+def edge_mount_clip_outer_standoff_mm() -> float:
+    """Distance from the wavy envelope to the separate clip's outside face."""
+    return EDGE_LABEL_CLIP_FACE_CLEARANCE_MM + EDGE_LABEL_CLIP_LEG_THICKNESS_MM
+
+
+def _edge_mount_contact_plane(box: BoxSpec, side: str) -> float:
+    """One absolute flat mounting plane for the selected wall's clip and ribs."""
+    ox0, oy0, ox1, oy1 = wavy_outer_polygon(box).bounds
+    standoff = edge_mount_clip_outer_standoff_mm()
+    if side == "front":
+        return oy0 - standoff
+    if side == "back":
+        return oy1 + standoff
+    if side == "left":
+        return ox0 - standoff
+    return ox1 + standoff
+
+
+def edge_mount_standoff_plan(box: BoxSpec) -> dict[str, object] | None:
+    """Resolve the authoritative Separate-label rib layout and contact plane."""
+    spec = box.edge_mount
+    if not (spec.label_enabled and spec.label_type == "separate" and spec.standoff_ribs_enabled):
+        return None
+    side = _normalize_side(spec.side)
+    contact_width = EDGE_STANDOFF_CONTACT_WIDTH_MM
+    clip_standoff = edge_mount_clip_outer_standoff_mm()
+    max_outward_depth = clip_standoff + 2.0 * WAVE_AMPLITUDE
+    contact_half = contact_width / 2.0
+    base_half = contact_half + max_outward_depth
+    base_width = 2.0 * base_half
+    wall_span = _wall_tangential_span(box, side)
+    center_limit = wall_span / 2.0 - EDGE_STANDOFF_EDGE_CLEARANCE_MM - base_half
+    if center_limit < -1e-9:
+        raise ValueError(
+            f"This {wall_span:g} mm Edge Mount wall is too narrow for one Standoff Rib. "
+            "Use a wider bin."
+        )
+    center_limit = max(0.0, center_limit)
+    z0 = 0.0
+    z1 = box.z - EDGE_LABEL_CLIP_DEPTH_MM - EDGE_STANDOFF_CLIP_GAP_MM
+    if z1 <= z0 + EDGE_BOOLEAN_EPSILON:
+        raise ValueError("The bin is too short for Edge Mount Standoff Ribs below the label clip.")
+
+    requested = spec.standoff_rib_count
+    auto = requested is None
+    if auto:
+        # Two end ribs are useful only when their full bases can remain apart.
+        if 2.0 * center_limit < base_width - 1e-9:
+            count = 1
+        else:
+            usable_center_span = 2.0 * center_limit
+            count = max(2, math.ceil(usable_center_span / EDGE_STANDOFF_AUTO_MAX_SPACING_MM) + 1)
+            max_nonoverlapping = math.floor(usable_center_span / base_width + 1e-9) + 1
+            count = min(count, max_nonoverlapping, EDGE_STANDOFF_MAX_COUNT)
+    else:
+        if isinstance(requested, bool) or int(requested) != requested:
+            raise ValueError("Edge Mount Standoff Rib Quantity must be a whole number.")
+        count = int(requested)
+        if not (EDGE_STANDOFF_MIN_COUNT <= count <= EDGE_STANDOFF_MAX_COUNT):
+            raise ValueError(
+                f"Edge Mount Standoff Rib Quantity must be between "
+                f"{EDGE_STANDOFF_MIN_COUNT} and {EDGE_STANDOFF_MAX_COUNT}"
+            )
+        if count > 1 and (2.0 * center_limit / (count - 1)) < base_width - 1e-9:
+            raise ValueError(
+                "Standoff Rib Quantity makes rib bases overlap. Reduce Quantity or use a wider bin."
+            )
+
+    centers = (0.0,) if count == 1 else tuple(np.linspace(-center_limit, center_limit, count))
+    return {
+        "side": side,
+        "enabled": True,
+        "auto": auto,
+        "count": count,
+        "centers_mm": centers,
+        "contact_plane_mm": _edge_mount_contact_plane(box, side),
+        "contact_width_mm": contact_width,
+        "base_width_mm": base_width,
+        "base_half_mm": base_half,
+        "max_outward_depth_mm": max_outward_depth,
+        "clip_standoff_mm": clip_standoff,
+        "z0_mm": z0,
+        "z1_mm": z1,
+    }
+
+
+def _build_edge_mount_standoff_rib(
+    box: BoxSpec, plan: dict[str, object], tangent: float,
+) -> trimesh.Trimesh:
+    """One vertical 45-degree-or-gentler trapezoidal fin on the real shell."""
+    side = str(plan["side"])
+    contact = float(plan["contact_plane_mm"])
+    contact_half = float(plan["contact_width_mm"]) / 2.0
+    base_half = float(plan["base_half_mm"])
+    outward = -1.0 if side in ("front", "left") else 1.0
+    # Extend a hair past the deepest wavy trough to make a robust boolean
+    # overlap with the real shell; this also makes the taper slightly gentler.
+    base_plane = contact - outward * (float(plan["max_outward_depth_mm"]) + EDGE_BOOLEAN_EPSILON)
+    if side in ("front", "back"):
+        footprint = Polygon([
+            (tangent - base_half, base_plane),
+            (tangent + base_half, base_plane),
+            (tangent + contact_half, contact),
+            (tangent - contact_half, contact),
+        ])
+    else:
+        footprint = Polygon([
+            (base_plane, tangent - base_half),
+            (base_plane, tangent + base_half),
+            (contact, tangent + contact_half),
+            (contact, tangent - contact_half),
+        ])
+    return _extrude_polygon(footprint, float(plan["z1_mm"]))
+
+
+def make_edge_mount_standoff_ribs(box: BoxSpec) -> trimesh.Trimesh | None:
+    """Permanent vertical ribs for a selected Separate Edge Mount label."""
+    plan = edge_mount_standoff_plan(box)
+    if plan is None:
+        return None
+    ribs = [_build_edge_mount_standoff_rib(box, plan, float(tangent)) for tangent in plan["centers_mm"]]
+    return union(ribs) if len(ribs) > 1 else ribs[0]
+
+
 def edge_mount_hole_plan(box: BoxSpec) -> tuple[dict[str, float], ...]:
     """Resolve every screw-mounting hole's tangential position and height.
 
@@ -362,6 +495,19 @@ def edge_mount_summary(box: BoxSpec) -> dict[str, object]:
     if label_plan is not None:
         summary["label"] = label_plan
     try:
+        standoffs = edge_mount_standoff_plan(box)
+    except ValueError as error:
+        standoffs = None
+        summary["standoff_ribs_error"] = str(error)
+    if standoffs is not None:
+        summary["standoff_ribs"] = {
+            "enabled": True,
+            "auto": standoffs["auto"],
+            "count": standoffs["count"],
+            "contact_plane_mm": standoffs["contact_plane_mm"],
+            "projection_mm": standoffs["clip_standoff_mm"],
+        }
+    try:
         holes = edge_mount_hole_plan(box)
     except ValueError as error:
         holes = ()
@@ -452,6 +598,11 @@ def _hole_cutters(
     outer_sel, cavity_sel, cavity_opp, outer_opp = _wall_surface_coords(box, side, tangent)
     sign = 1.0 if cavity_sel >= outer_sel else -1.0
     screw_a = outer_sel - sign * EDGE_BOOLEAN_OVERTRAVEL
+    standoffs = edge_mount_standoff_plan(box)
+    if standoffs is not None:
+        # A rib can project beyond a local wavy crest. Cut through its shared
+        # flat contact plane, not merely through the original wall skin.
+        screw_a = float(standoffs["contact_plane_mm"]) - sign * EDGE_BOOLEAN_OVERTRAVEL
     screw_b = cavity_sel + sign * EDGE_BOOLEAN_OVERTRAVEL
     cutters = [_axis_cylinder(axis, screw_a, screw_b, tangent, z, screw_r)]
     if cut_driver_passage:
@@ -670,6 +821,9 @@ def apply_edge_mount_structure(
         # clean-up call here has, in practice, turned an otherwise-valid
         # solid non-watertight and failed the boolean cut that follows.
         result = union([result, plate])
+    standoffs = make_edge_mount_standoff_ribs(box)
+    if standoffs is not None:
+        result = union([result, standoffs])
     return apply_edge_mount_hole_cuts(box, result, cut_driver_passages=cut_driver_passages)
 
 
