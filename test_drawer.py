@@ -646,6 +646,97 @@ class StorageBoxFilenameTests(unittest.TestCase):
         self.assertEqual(infer_name("B4B 64x48x40 - Fasteners.3mf"), "Fasteners")
 
 
+class DesignSourceTests(unittest.TestCase):
+    """Fix 034 C/D: the canonical design_specs source map and the one
+    Save-to-Space identity transaction that creates/updates/forks it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.folder = Path(self.tmp.name) / "Space"
+        self.folder.mkdir()
+
+    def _design(self, name="Bin"):
+        return {"version": 1, "box": {"x": 16.0, "y": 16.0, "z": 20.0}, "part_name": name}
+
+    def _record(self, name="Bin", **extra):
+        return {"kind": "bin", "name": name, "x": 16.0, "y": 16.0, "z": 20.0, "stack": "none", **extra}
+
+    def test_old_inventory_without_specs_still_loads(self):
+        append_bin(self.folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts")
+        loaded = load_inventory(self.folder)
+        self.assertEqual(loaded["layout"], None)
+        from organizer_inventory import design_specs
+        self.assertEqual(design_specs(loaded["layout"]), {})
+
+    def test_row_and_spec_survive_write_and_read(self):
+        from organizer_inventory import save_design_source, design_specs
+        design = self._design("Fasteners")
+        result = save_design_source(self.folder, design=design, record=self._record("Fasteners"))
+        row_id = result["row_id"]
+        self.assertEqual(result["bins"][0]["id"], row_id)
+        self.assertEqual(result["bins"][0]["file"], "")
+        self.assertEqual(result["bins"][0]["qty"], 0)
+
+        reloaded = load_inventory(self.folder)
+        self.assertEqual(design_specs(reloaded["layout"]).get(row_id), design)
+
+    def test_deleting_a_row_prunes_its_spec(self):
+        from organizer_inventory import save_design_source, design_specs
+        result = save_design_source(self.folder, design=self._design(), record=self._record())
+        row_id = result["row_id"]
+        save_inventory(self.folder, delete_ids=[row_id])
+        after = load_inventory(self.folder)
+        self.assertEqual(design_specs(after["layout"]), {})
+
+    def test_save_to_space_identity_transaction_cases(self):
+        """One case table: idempotent same-row save, in-place Qty-0 edit
+        with stale-file clearing, and an immutable Qty>0 row forking instead
+        of being silently redefined."""
+        from organizer_inventory import save_design_source, design_specs
+
+        # Unchanged design already bound to the same row: saving again is
+        # idempotent - same row id, no duplicate created.
+        first = save_design_source(self.folder, design=self._design("A"), record=self._record("A"))
+        row_id = first["row_id"]
+        again = save_design_source(
+            self.folder, design=self._design("A"), record=self._record("A"), row_id=row_id,
+        )
+        self.assertEqual(again["row_id"], row_id)
+        self.assertEqual(len(again["bins"]), 1)
+
+        # Loaded same-Space Qty-0 row, edited: updates that source in place
+        # and clears a stale generated File if the caller says the geometry
+        # changed (record.clear_file).
+        save_inventory(self.folder, bin_updates=[{"id": row_id, "x": 16, "y": 16, "z": 20}])
+        save_design_source(self.folder, design=self._design(), record={
+            **{k: v for k, v in self._record("Renamed").items()}, "clear_file": True,
+        }, row_id=row_id)
+        edited = load_inventory(self.folder)
+        edited_row = next(one for one in edited["bins"] if one["id"] == row_id)
+        self.assertEqual(edited_row["name"], "Renamed")
+        self.assertEqual(edited_row["file"], "")
+        self.assertEqual(len(edited["bins"]), 1)
+        self.assertEqual(design_specs(edited["layout"])[row_id]["part_name"], "Bin")
+
+        # Qty > 0 is immutable printed history: an edited source forks to a
+        # new Qty-0 row instead of silently redefining the printed one.
+        save_inventory(self.folder, bin_updates=[{"id": row_id, "qty": 1}])
+        forked = save_design_source(
+            self.folder, design=self._design("Forked"), record=self._record("Forked"), row_id=row_id,
+        )
+        self.assertNotEqual(forked["row_id"], row_id)
+        printed_row = next(one for one in forked["bins"] if one["id"] == row_id)
+        self.assertEqual(printed_row["qty"], 1)
+        self.assertEqual(printed_row["name"], "Renamed")
+        new_row = next(one for one in forked["bins"] if one["id"] == forked["row_id"])
+        self.assertEqual(new_row["qty"], 0)
+        self.assertEqual(new_row["name"], "Forked")
+        specs = design_specs(forked["layout"])
+        self.assertIn(row_id, specs)
+        self.assertIn(forked["row_id"], specs)
+
+
 class KeepOutRemovalTests(unittest.TestCase):
     def test_a_stray_old_keepouts_key_is_dropped(self):
         drawer = normalise_drawer({
@@ -861,12 +952,65 @@ class BulkPrintTests(unittest.TestCase):
         save_inventory(self.folder, new_bins=[
             {"kind": "manual", "x": 16, "y": 16, "z": 20, "name": "Hand"},
             {"kind": "spacer", "x": 16, "y": 16, "z": 20, "name": "Sp", "file": "S.3mf"},
+            # Fix 034 F: a Wavefinity bin/b4b row with neither a file nor a
+            # design_specs entry remains ineligible - only spec-only rows
+            # become printable now, not every no-file row.
+            {"kind": "bin", "x": 16, "y": 16, "z": 20, "name": "NoSourceEither"},
         ])
         with self.assertRaises(ValueError):
             self.run_print({"B2": 1})
         with self.assertRaises(ValueError):
             self.run_print({"B3": 1})
+        with self.assertRaises(ValueError):
+            self.run_print({"B4": 1})
         self.assertEqual(self.launched, [])
+
+    def test_spec_only_row_generates_on_demand_and_follows_qty_semantics(self):
+        from organizer_inventory import save_design_source
+
+        design = {"version": 1, "box": {"x": 16, "y": 16, "z": 20}, "part_name": "Spec Only"}
+        record = {"kind": "bin", "name": "Spec Only", "x": 16, "y": 16, "z": 20, "stack": "none"}
+        saved = save_design_source(self.folder, design=design, record=record)
+        row_id = saved["row_id"]
+
+        generated = []
+
+        def generate_from_design(output_dir, spec):
+            self.assertEqual(spec, design)
+            out = Path(output_dir) / "OnDemand.3mf"
+            out.write_bytes(b"3mf")
+            generated.append(out)
+            return [out]
+
+        def failing_launch(_slicer, _files):
+            raise RuntimeError("slicer did not open")
+
+        inv = load_inventory(self.folder)
+        with self.assertRaises(RuntimeError):
+            print_inventory_bins(
+                self.folder, inv["layout"], inv["bins"], {row_id: 1}, False,
+                lambda _path: self.slicer, failing_launch, None, generate_from_design,
+            )
+        # The resolved file is persisted even though the handoff failed, but
+        # Qty is untouched - generating is not printing.
+        mid = load_inventory(self.folder)
+        mid_row = next(one for one in mid["bins"] if one["id"] == row_id)
+        self.assertEqual(mid_row["file"], "OnDemand.3mf")
+        self.assertEqual(mid_row["qty"], 0)
+        self.assertEqual(len(generated), 1)
+
+        inv2 = load_inventory(self.folder)
+        result = print_inventory_bins(
+            self.folder, inv2["layout"], inv2["bins"], {row_id: 1}, False,
+            lambda _path: self.slicer, self.launch, None, generate_from_design,
+        )
+        self.assertEqual(self.launched, [[self.folder / "OnDemand.3mf"]])
+        # The already-resolved file is reused - no second on-demand generation.
+        self.assertEqual(len(generated), 1)
+        after = load_inventory(self.folder)
+        after_row = next(one for one in after["bins"] if one["id"] == row_id)
+        self.assertEqual(after_row["qty"], 1)
+        self.assertEqual(result["selection"], {row_id: 1})
 
     def test_missing_and_traversal_files_rejected_before_launch(self):
         self.add("A", "A.3mf")
