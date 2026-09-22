@@ -7383,6 +7383,23 @@ function clearPreviewWaitTimers() {
   previewSlowTimer = null;
 }
 
+// Explicit invalidation of the visible "recalculating" state, for when the
+// in-flight request is intentionally no longer current (e.g. a Space/folder
+// switch) rather than having completed normally. clearPreviewWaitTimers()
+// alone only cancels timeouts - it does not hide #preview-wait or remove
+// .preview-recalculating, so a switch mid-build could otherwise leave a
+// stale overlay showing in the newly active Space (Fix 032 Correction 4,
+// C4.3 - clearPreviewWaitTimers() was believed to already do this).
+// endPreviewWait(requestId) remains request-guarded for ordinary preview
+// completion; this helper is unconditional on purpose.
+function cancelPreviewWait() {
+  clearPreviewWaitTimers();
+  const wrapper = $('[data-canvas="3d"]');
+  const notice = $("#preview-wait");
+  if (notice) notice.hidden = true;
+  if (wrapper) wrapper.classList.remove("preview-recalculating");
+}
+
 function beginPreviewWait(requestId) {
   clearPreviewWaitTimers();
   const wrapper = $('[data-canvas="3d"]');
@@ -7417,7 +7434,15 @@ function endPreviewWait(requestId) {
   if (wrapper) wrapper.classList.remove("preview-recalculating");
 }
 
-async function refreshPreview() {
+// `persistResume: false` (Fix 032 Correction 4, C4.2) renders a normal,
+// fully valid preview WITHOUT queuing it as the Space's resume checkpoint.
+// Used only for the one narrow starter preview that replaces a stored
+// resume design that just failed canonical validation - that starter is
+// otherwise indistinguishable from any other valid preview and would
+// silently overwrite the bad checkpoint the original contract says must be
+// left alone for possible recovery. Every ordinary call (the ordinary
+// default) persists exactly as before.
+async function refreshPreview({ persistResume = true } = {}) {
   const request = ++state.previewRequest;
   beginPreviewWait(request);
   state.canGenerate = false;
@@ -7481,7 +7506,7 @@ async function refreshPreview() {
     // Placed after the controls above so workingDesignForSpace() compares
     // the same canonical design the user now sees, including any server-
     // adjusted X/Y/Z.
-    if (!previewHasErrors && state.folderMode === "space" && typeof SP !== "undefined") {
+    if (persistResume && !previewHasErrors && state.folderMode === "space" && typeof SP !== "undefined") {
       SP.queueResumeCheckpoint(state.design, Boolean(workingDesignForSpace()));
     }
     const messages = [result.message, ...result.feature_errors, result.draft_error].filter(Boolean);

@@ -314,10 +314,12 @@ SP.applyFolder = async (info, options = {}) => {
   // stale-request guard (`request !== state.previewRequest`) is what stops
   // a late Space-A response from landing into the now-active Space-B
   // state.design and getting persisted as B's checkpoint (Fix 032
-  // Correction 3, C3.1). Also clear any visible "recalculating" notice so
-  // a cancelled Space-A preview cannot leave a stale overlay in Space B.
+  // Correction 3, C3.1). cancelPreviewWait() also explicitly hides any
+  // visible "recalculating" notice/overlay (not just its timers - Fix 032
+  // Correction 4, C4.3), so a cancelled Space-A preview cannot leave a
+  // stale overlay showing in Space B.
   state.previewRequest += 1;
-  clearPreviewWaitTimers();
+  cancelPreviewWait();
   // The old Space's queued/in-flight resume checkpoint must land before ANY
   // identity field below changes - a completion for it after the switch
   // must never write into, or overwrite in memory, the new Space's
@@ -511,26 +513,37 @@ SP._serializeMetadataWrite = task => {
   return result;
 };
 
-SP.writeMetadata = (handle, mode, space = null, inventory = true, changes = {}) =>
-  SP._serializeMetadataWrite(() => SP._writeMetadataNow(handle, mode, space, inventory, changes));
+// `options.preserveSpace`/`options.expectedSpaceId` (Fix 032 Correction 4,
+// C4.1): serialization alone does not stop a caller from writing back a
+// Space definition it captured before this transaction's own read. With
+// `preserveSpace: true`, the `space` argument is ignored and the CURRENT
+// on-disk Space definition (read inside this same serialized transaction)
+// is written back instead; `expectedSpaceId` additionally refuses to write
+// at all if that current Space's id no longer matches what the caller
+// captured - it must never create/recreate a Space under a new UUID.
+SP.writeMetadata = (handle, mode, space = null, inventory = true, changes = {}, options = {}) =>
+  SP._serializeMetadataWrite(() => SP._writeMetadataNow(handle, mode, space, inventory, changes, options));
 
-SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, changes = {}) => {
+SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, changes = {}, options = {}) => {
+  const { preserveSpace = false, expectedSpaceId = null } = options;
   if (!handle) {
     throw new Error("Inventory and Spaces need access to a writable folder.");
   }
+  const hasSpace = Boolean(space) || preserveSpace;
   // A Space's layout depends on the inventory, so it is never optional here.
   const metadata = {
     version: FOLDER_METADATA_VERSION, setup_version: SPACE_SETUP_VERSION,
     folder_mode: mode,
   };
-  if (mode !== "space" || !space) metadata.inventory = Boolean(inventory);
-  if (mode === "space" && space) {
+  if (mode !== "space" || !hasSpace) metadata.inventory = Boolean(inventory);
+  if (mode === "space" && hasSpace) {
     let spaceId = null;
     let keep = true;
     let defaults = null;
     let partDefaults = {};
     let resumeDesign = null;
     let resumePending = false;
+    let currentSpace = null;
     const { current } = await SP.readMetadata(handle);
     const currentState = SP.classifyMetadata(current);
     if (!["missing", "design", "space"].includes(currentState.status)) throw SP.metadataError(currentState.status);
@@ -543,6 +556,17 @@ SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, chan
       spaceId = currentState.space_id;
       resumeDesign = currentState.resume_design ?? null;
       resumePending = Boolean(currentState.resume_pending);
+      currentSpace = currentState.space;
+    }
+    if ((preserveSpace || expectedSpaceId) && currentState.status !== "space") {
+      throw new Error("This Space no longer exists in that folder. Nothing was changed.");
+    }
+    if (expectedSpaceId && spaceId !== expectedSpaceId) {
+      throw new Error("This folder is not the Space that was open before. Nothing was changed.");
+    }
+    const resolvedSpace = preserveSpace ? currentSpace : space;
+    if (!resolvedSpace) {
+      throw new Error("This folder is not the Space that was open before. Nothing was changed.");
     }
     if (Object.hasOwn(changes, "keep_bin_defaults")) keep = Boolean(changes.keep_bin_defaults);
     if (Object.hasOwn(changes, "bin_defaults")) defaults = changes.bin_defaults;
@@ -561,7 +585,7 @@ SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, chan
     if (resumeDesign === null) resumePending = false;
     metadata.space_id = spaceId || crypto.randomUUID();
     metadata.inventory = true;
-    metadata.space = space;
+    metadata.space = resolvedSpace;
     metadata.keep_bin_defaults = keep;
     metadata.bin_defaults = defaults;
     metadata.part_defaults = partDefaults;
@@ -628,12 +652,22 @@ SP._writeResumeCheckpointNow = async (target, design, pending) => {
     if (!target.browserFolder?.handle) {
       throw new Error("This Space has no writable folder access in this browser session.");
     }
-    await SP.writeMetadata(target.browserFolder.handle, "space", target.space, true, {
+    // preserveSpace/expectedSpaceId: this transaction owns only the resume
+    // fields, never the Space definition - never write back the possibly-
+    // stale target.space captured when this write was queued, and never
+    // recreate a Space under a new id if it disappeared/changed identity in
+    // the meantime (Fix 032 Correction 4, C4.1).
+    await SP.writeMetadata(target.browserFolder.handle, "space", null, true, {
       resume_design: design, resume_pending: pending,
-    });
+    }, { preserveSpace: true, expectedSpaceId: target.spaceId });
   } else {
+    // space_id lets the local /api/space/resume route refuse to write if
+    // this Space is no longer the one on disk at that output path, instead
+    // of writing into whatever Space is there now (Fix 032 Correction 4,
+    // C4.1).
     await api("/api/space/resume", {
-      output: target.output, resume_design: design, resume_pending: pending,
+      output: target.output, space_id: target.spaceId,
+      resume_design: design, resume_pending: pending,
     });
   }
 };
@@ -1000,10 +1034,12 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
     );
     const upgradeDesign = info.folder_mode === "design" && info.metadata_version && info.metadata_version < FOLDER_METADATA_VERSION;
     if (upgradeSpace) {
-      await SP.writeMetadata(folder.handle, "space", info.space, true, {
-        keep_bin_defaults: info.keep_bin_defaults, bin_defaults: info.bin_defaults,
-        part_defaults: info.part_defaults,
-      });
+      // `info` was read by SP.inspectHosted() just above, outside this
+      // write's own serialized transaction - preserveSpace re-reads the
+      // current Space definition (and leaving keep/bin/part defaults unset
+      // re-reads those too) instead of writing back this possibly-stale
+      // copy over a concurrent rename/resize (Fix 032 Correction 4, C4.1).
+      await SP.writeMetadata(folder.handle, "space", null, true, {}, { preserveSpace: true });
     } else if (upgradeDesign) {
       await SP.writeMetadata(folder.handle, "design", null, info.inventory);
     }
@@ -1148,12 +1184,16 @@ SP.updateBinDefaults = async (changes = {}) => {
   if (!Object.keys(updates).length) return;
   let info;
   if (state.runtime.hosted) {
+    // Owns only the requested defaults fields (already filtered above), not
+    // the Space definition - preserve the current on-disk one rather than
+    // this possibly-stale state.activeSpace (Fix 032 Correction 4, C4.1).
     info = await SP.writeMetadata(
       state.browserFolder?.handle,
       "space",
-      state.activeSpace,
+      null,
       true,
       updates,
+      { preserveSpace: true },
     );
   } else {
     const data = await api("/api/space/defaults", { output: state.output, ...updates });
@@ -1701,29 +1741,21 @@ SP.create = async () => {
     // Read/write the *selected target's* inventory filename, never the
     // previously-active folder's - see Fix 004 Correction 7.A.
     const inventoryText = await SP.readInventoryFor(folder, { migrate: true });
-    let keepBinDefaults = true;
-    let binDefaults = null;
-    let partDefaults = {};
-    if (migrating) {
-      const { current } = await SP.readMetadata(folder.handle);
-      const currentState = SP.classifyMetadata(current);
-      if (currentState.status === "space") {
-        keepBinDefaults = currentState.keep_bin_defaults;
-        binDefaults = currentState.bin_defaults;
-        partDefaults = currentState.part_defaults || {};
-      }
-    }
     const result = await api(migrating ? "/api/space/configure-text" : "/api/space/create-text", {
       inventory_text: inventoryText, inventory_title: name,
       name, kind, x, y, z, ...extra, ...(trimSize ? { trim_size: trimSize } : {}),
     });
     await WFFileSystem.writeText(folder.handle, SP.inventoryFilenameFor(folder), result.inventory_text);
     const space = result.layout.space;
-    const metadata = await SP.writeMetadata(folder.handle, "space", space, true, {
-      keep_bin_defaults: keepBinDefaults,
-      bin_defaults: binDefaults,
-      part_defaults: partDefaults,
-    });
+    // This call owns the new Space definition, but not the bin/part
+    // defaults - on Create there is nothing yet to preserve (the writer's
+    // own under-lock defaults already match), and on Configure Existing/
+    // migrate, leaving them unset lets the writer preserve the newest
+    // under-lock value instead of a copy captured here before its own
+    // read/lock (Fix 032 Correction 4, C4.1 - this mirrors the previous
+    // pre-lock SP.readMetadata() capture that used to run only when
+    // `migrating`, now removed).
+    const metadata = await SP.writeMetadata(folder.handle, "space", space, true, {});
     // Activate the selected target folder itself, not whatever folder was
     // previously active - see Fix 004 Correction 7.A. state.browserFolder
     // itself is set inside SP.applyFolder() below, never here (Fix 032
@@ -1867,6 +1899,7 @@ SP.initializeDesignForActiveSpace = async () => {
   SP.resetDesignSession();
 
   let restored = false;
+  let resumeValidationFailed = false;
   if (state.spaceResumeDesign) {
     try {
       const result = await api("/api/design/validate", {
@@ -1882,6 +1915,7 @@ SP.initializeDesignForActiveSpace = async () => {
     } catch (error) {
       // The stored checkpoint itself is left untouched - a validation
       // failure here must never delete or rewrite recoverable user data.
+      resumeValidationFailed = true;
       toast(`The last design for this Space could not be restored: ${error.message}`, true, 7000);
     }
   }
@@ -1898,7 +1932,14 @@ SP.initializeDesignForActiveSpace = async () => {
   // Space-activating startup does not also fire a redundant duplicate.
   if (typeof refreshPreview === "function") {
     SP._activationPreviewRequested = true;
-    refreshPreview();
+    // A starter preview installed only because the stored resume design
+    // just failed validation must not silently overwrite that bad
+    // checkpoint merely because the starter itself previews validly - it
+    // stays untouched for possible recovery until a real edit/new/open
+    // replaces it with ordinary refreshPreview() (Fix 032 Correction 4,
+    // C4.2). Every other case (no stored resume, or a successfully
+    // restored one) persists exactly as before.
+    refreshPreview({ persistResume: !resumeValidationFailed });
   }
 };
 
@@ -2467,16 +2508,12 @@ SP.updateSpace = async () => {
         });
         await WFFileSystem.writeText(folder.handle, SP.inventoryFilenameFor(folder), result.inventory_text);
         const space = result.layout.space;
-        const { current } = await SP.readMetadata(folder.handle);
-        const currentState = SP.classifyMetadata(current);
-        const keep = currentState.status === "space" ? currentState.keep_bin_defaults : true;
-        const defaults = currentState.status === "space" ? currentState.bin_defaults : null;
-        const partDefaults = currentState.status === "space" ? currentState.part_defaults : {};
-        const metadata = await SP.writeMetadata(folder.handle, "space", space, true, {
-          keep_bin_defaults: keep,
-          bin_defaults: defaults,
-          part_defaults: partDefaults,
-        });
+        // This call owns the new Space definition (just written above), but
+        // not the bin/part defaults - reading them here and passing them
+        // back would be exactly the stale pre-lock capture Correction 4
+        // eliminates; leaving them unset lets the serialized writer read
+        // the newest value from under its own lock instead (C4.1).
+        const metadata = await SP.writeMetadata(folder.handle, "space", space, true, {});
         state.activeSpace = space;
         state.activeSpaceId = metadata.space_id || null;
     } else {

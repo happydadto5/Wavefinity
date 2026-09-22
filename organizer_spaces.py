@@ -377,26 +377,35 @@ def _write_metadata(
     folder: Path, mode: str, space: dict[str, Any] | None = None, inventory: bool = True,
     *, keep_bin_defaults: Any = _UNSET, bin_defaults: Any = _UNSET,
     part_defaults: Any = _UNSET, resume_design: Any = _UNSET, resume_pending: Any = _UNSET,
+    preserve_space: bool = False, expected_space_id: str | None = None,
 ) -> None:
     # The whole read/preserve/write transaction - including the temp-file
     # replace - is one critical section, so a resume checkpoint write can
     # never race a rename/defaults/version-upgrade write (or another resume
-    # write) into the same file and lose either one's fields.
+    # write) into the same file and lose either one's fields. Serialization
+    # alone is not ownership safety though (Fix 032 Correction 4, C4.1): a
+    # caller that captured `space` (or any other field it does not actually
+    # own) before acquiring this lock must not have that stale value written
+    # back as authoritative. `preserve_space=True` tells this function to use
+    # the CURRENT on-disk Space definition - read inside the lock, right
+    # now - instead of the caller's `space` argument; `expected_space_id`
+    # additionally refuses to write at all if the Space identity has moved
+    # on since the caller captured it.
     with _METADATA_WRITE_LOCK:
         payload: dict[str, Any] = {
             "version": METADATA_VERSION,
             "setup_version": SPACE_SETUP_VERSION,
             "folder_mode": mode,
         }
-        if mode == "space" and space:
+        if mode == "space" and (space or preserve_space):
             payload["space_id"] = _new_space_id()
-            payload["inventory"] = True
-            payload["space"] = space
             saved_keep = True
             saved_defaults = None
             saved_part_defaults: dict[str, Any] = {}
             saved_resume_design: dict[str, Any] | None = None
             saved_resume_pending = False
+            saved_space: dict[str, Any] | None = None
+            current_id: str | None = None
             target = folder / METADATA_FILE
             if target.exists():
                 current = _json_file(target, strict=True)
@@ -410,6 +419,7 @@ def _write_metadata(
                         current, int(version)
                     )
                     saved_resume_design, saved_resume_pending = _metadata_resume(current, int(version))
+                    saved_space = _space(current.get("space"))
                     # The one choke point that keeps a Space's identity: an
                     # existing valid ID is always preserved. Only pre-v5 metadata
                     # may gain one; damaged v5 must never be re-identified.
@@ -419,6 +429,19 @@ def _write_metadata(
                         payload["space_id"] = current_id
                     elif int(version) >= SPACE_ID_REQUIRED_VERSION:
                         raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
+            # A caller asking to preserve the current Space, or to verify a
+            # captured identity, needs an actual current typed Space to read
+            # that from - there is nothing to preserve/verify against a
+            # brand-new or non-Space file.
+            if (preserve_space or expected_space_id is not None) and saved_space is None:
+                raise FolderMetadataError("This folder is not the Space that was open before. Nothing was changed.")
+            if expected_space_id is not None and current_id != expected_space_id:
+                raise FolderMetadataError("This folder is not the Space that was open before. Nothing was changed.")
+            resolved_space = saved_space if preserve_space else space
+            if not resolved_space:
+                raise FolderMetadataError("This folder is not the Space that was open before. Nothing was changed.")
+            payload["inventory"] = True
+            payload["space"] = resolved_space
             resolved_keep = saved_keep if keep_bin_defaults is _UNSET else bool(keep_bin_defaults)
             resolved_defaults = saved_defaults if bin_defaults is _UNSET else bin_defaults
             resolved_part_defaults = (
@@ -676,11 +699,12 @@ def prepare_folder_for_open(target: Path, prefs: dict[str, Any]) -> dict[str, An
         info["needs_identity_migration"]
         or (_metadata_version(target) or 0) < METADATA_VERSION
     ):
-        _write_metadata(
-            target, "space", info["space"], True,
-            keep_bin_defaults=info["keep_bin_defaults"], bin_defaults=info["bin_defaults"],
-            part_defaults=info["part_defaults"],
-        )
+        # `info` was read by describe() just above, outside this write's own
+        # lock - preserve_space re-reads the current Space definition (and
+        # leaving keep/bin/part defaults _UNSET re-reads those too) inside
+        # the lock instead of writing back this possibly-stale copy over a
+        # concurrent rename/resize (Fix 032 Correction 4, C4.1).
+        _write_metadata(target, "space", None, True, preserve_space=True)
     elif not typed and (_metadata_version(target) or METADATA_VERSION) < METADATA_VERSION \
             and (target / METADATA_FILE).exists():
         _write_metadata(target, "design", None, info["inventory"])
@@ -999,7 +1023,7 @@ def space_routes(
         target = folder(payload)
         if not target.is_dir():
             raise ValueError("save folder not found")
-        (_mode, _space, inventory, keep, defaults, part_defaults,
+        (_mode, _space, inventory, _keep, _defaults, _part_defaults,
          _needs_setup, _source, _prefill) = _folder_state(target, load_preferences())
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
@@ -1010,10 +1034,12 @@ def space_routes(
 
         result = configure_space(target, raw_def=raw_def, mode="update", allow_legacy=True)
         space = result["layout"]["space"]
-        _write_metadata(
-            target, "space", space, inventory, keep_bin_defaults=keep,
-            bin_defaults=defaults, part_defaults=part_defaults,
-        )
+        # This route owns the new Space definition (just written above by
+        # configure_space), but not keep_bin_defaults/bin_defaults/
+        # part_defaults - leaving those _UNSET lets _write_metadata() read
+        # the newest under-lock value instead of writing back this
+        # possibly-stale pre-lock copy (Fix 032 Correction 4, C4.1).
+        _write_metadata(target, "space", space, inventory)
         remember(target)
         return reply(target)
 
@@ -1021,7 +1047,7 @@ def space_routes(
         target = folder(payload)
         if not target.is_dir():
             raise ValueError("save folder not found")
-        (mode, existing_space, inventory, keep, defaults, part_defaults,
+        (mode, existing_space, _inventory, _keep, _defaults, _part_defaults,
          needs_setup, _source, _prefill) = _folder_state(target, load_preferences())
         if mode != "space":
             raise ValueError("not a typed space")
@@ -1035,10 +1061,11 @@ def space_routes(
 
         result = configure_space(target, raw_def=raw_def, mode="update")
         space = result["layout"]["space"]
-        _write_metadata(
-            target, "space", space, keep_bin_defaults=keep,
-            bin_defaults=defaults, part_defaults=part_defaults,
-        )
+        # This route owns the new Space definition, but not the bin/part
+        # defaults - leave them _UNSET so _write_metadata() preserves the
+        # newest under-lock value rather than this possibly-stale pre-lock
+        # copy (Fix 032 Correction 4, C4.1).
+        _write_metadata(target, "space", space)
         remember(target)
         return reply(target)
 
@@ -1047,15 +1074,20 @@ def space_routes(
         if not target.is_dir():
             raise ValueError("that save folder could not be found")
         prefs = load_preferences()
-        (mode, space, _current, keep, defaults, part_defaults,
+        (mode, space, _current, _keep, _defaults, _part_defaults,
          _needs_setup, _source, _prefill) = _folder_state(target, prefs)
         inventory = bool(payload.get("inventory", True))
         if mode == "space" and not inventory:
             raise ValueError("Space planning needs this folder's inventory turned on.")
-        _write_metadata(
-            target, mode, space, inventory, keep_bin_defaults=keep,
-            bin_defaults=defaults, part_defaults=part_defaults,
-        )
+        # A typed Space owns nothing here but `inventory` (which a Space
+        # ignores anyway - it is always forced true) - preserve its current
+        # Space definition and bin/part defaults from under the lock rather
+        # than this route's pre-lock captures (Fix 032 Correction 4, C4.1).
+        # An untyped design folder has no Space to preserve.
+        if mode == "space":
+            _write_metadata(target, mode, None, inventory, preserve_space=True)
+        else:
+            _write_metadata(target, mode, space, inventory)
         # Keep the legacy preference in step, in case anything still reads it.
         kept = [
             one for one in (prefs.get("no_inventory_folders") or [])
@@ -1071,24 +1103,28 @@ def space_routes(
         target = folder(payload)
         if not target.is_dir():
             raise ValueError("that save folder could not be found")
-        (mode, space, inventory, keep, defaults, part_defaults,
+        (mode, _space, inventory, _keep, _defaults, _part_defaults,
          _needs_setup, _source, _prefill) = _folder_state(target, load_preferences())
         if mode != "space":
             raise ValueError("bin defaults belong to a Space folder")
-        new_keep = bool(payload["keep_bin_defaults"]) if "keep_bin_defaults" in payload else keep
-        new_defaults = payload.get("bin_defaults") if "bin_defaults" in payload else defaults
-        new_part_defaults = (
-            payload.get("part_defaults") if "part_defaults" in payload else part_defaults
-        )
-        if new_defaults is not None and not isinstance(new_defaults, dict):
-            raise ValueError("bin defaults must be an object or null")
-        if not isinstance(new_part_defaults, dict):
-            raise ValueError("part defaults must be an object")
-        _write_metadata(
-            target, mode, space, inventory,
-            keep_bin_defaults=new_keep, bin_defaults=new_defaults,
-            part_defaults=new_part_defaults,
-        )
+        # Pass an explicit value only for a field this request is actually
+        # changing; an absent field stays _UNSET so _write_metadata()
+        # preserves the newest under-lock value instead of this route's
+        # pre-lock capture of it (Fix 032 Correction 4, C4.1).
+        write_kwargs: dict[str, Any] = {}
+        if "keep_bin_defaults" in payload:
+            write_kwargs["keep_bin_defaults"] = bool(payload["keep_bin_defaults"])
+        if "bin_defaults" in payload:
+            new_defaults = payload.get("bin_defaults")
+            if new_defaults is not None and not isinstance(new_defaults, dict):
+                raise ValueError("bin defaults must be an object or null")
+            write_kwargs["bin_defaults"] = new_defaults
+        if "part_defaults" in payload:
+            new_part_defaults = payload.get("part_defaults")
+            if not isinstance(new_part_defaults, dict):
+                raise ValueError("part defaults must be an object")
+            write_kwargs["part_defaults"] = new_part_defaults
+        _write_metadata(target, mode, None, inventory, preserve_space=True, **write_kwargs)
         remember(target)
         return reply(target)
 
@@ -1096,14 +1132,23 @@ def space_routes(
         # The local-server counterpart to hosted SP.writeMetadata(): persists
         # the exact editor design a typed Space should reopen to. It never
         # touches inventory, bin/part defaults, or Space identity, and never
-        # builds a design from inventory rows - see Fix 032.
+        # builds a design from inventory rows - see Fix 032. It never rolls
+        # back a concurrent rename/resize either (Correction 4, C4.1):
+        # preserve_space re-reads the CURRENT Space definition from under
+        # _write_metadata()'s own lock instead of writing back whatever was
+        # captured here before it, and expected_space_id refuses to write at
+        # all if the Space this checkpoint was queued for is no longer the
+        # one on disk - the client must name which Space it means.
         target = folder(payload)
         if not target.is_dir():
             raise ValueError("that save folder could not be found")
-        (mode, space, _inventory, _keep, _defaults, _part_defaults,
+        (mode, _space, _inventory, _keep, _defaults, _part_defaults,
          _needs_setup, _source, _prefill) = _folder_state(target, load_preferences())
         if mode != "space":
             raise ValueError("resume checkpoints belong to a Space folder")
+        expected_space_id = _space_id(payload.get("space_id"))
+        if not expected_space_id:
+            raise ValueError("a resume checkpoint must name the Space it belongs to")
         resume_design = payload.get("resume_design")
         resume_pending = payload.get("resume_pending")
         if resume_design is not None and not isinstance(resume_design, dict):
@@ -1111,8 +1156,9 @@ def space_routes(
         if not isinstance(resume_pending, bool):
             raise ValueError("resume pending must be a boolean")
         _write_metadata(
-            target, mode, space, True,
+            target, mode, None, True,
             resume_design=resume_design, resume_pending=resume_pending,
+            preserve_space=True, expected_space_id=expected_space_id,
         )
         return reply(target)
 
