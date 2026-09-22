@@ -408,7 +408,15 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
       ctx.font = "600 11px 'Segoe UI', sans-serif";
       ctx.fillText(DV.fitText(ctx, info.name, Math.max(20, boxW - 8)), cx, cy);
     }
-    if (!entry.ghost) entry.layers.forEach(layer => hits.push({ key: layer.key, grid: true, z: 0, polys: [poly], working: Boolean(entry.working) }));
+    if (!entry.ghost || entry.working) {
+      entry.layers.forEach(layer => hits.push({
+        key: layer.key,
+        grid: true,
+        z: 0,
+        polys: [poly],
+        working: Boolean(entry.working),
+      }));
+    }
     const selected = entry.working || entry.layers.some(layer => layer.key === DL.selected);
     if (selected) {
       const layout = DL.pegboardLayouts[one.id] || one.pegboard_layout;
@@ -637,8 +645,8 @@ DV.binLabelInfo = (one, stackCount = 1) => {
   const name = isEdgeSpacer ? "Spacer" : (rawName || "Unnamed bin");
   const wMm = fmt(one.x);
   const lMm = fmt(one.y);
-  const wUnits = DL.mmToUnits ? DL.mmToUnits(one.x) : fmt(one.x / 8);
-  const lUnits = DL.mmToUnits ? DL.mmToUnits(one.y) : fmt(one.y / 8);
+  const wUnits = DL.mmToUnits ? DL.mmToUnits(one.x) : fmt(Number(one.x) / DL.UNIT);
+  const lUnits = DL.mmToUnits ? DL.mmToUnits(one.y) : fmt(Number(one.y) / DL.UNIT);
   const dimLine = `${wMm} × ${lMm} mm · ${wUnits} × ${lUnits} units`;
   const heightLine = `${fmt(one.z)} mm high`;
   const stackNote = stackCount > 1 ? ` · ${stackCount}-high stack` : "";

@@ -743,7 +743,7 @@ input[type="number"]::-webkit-inner-spin-button {
   overflow: hidden;
 }
 .placed-item-icon svg {
-  display: block; width: 28px; height: 28px; stroke: currentColor; fill: none; stroke-width: 1.8;
+  display: block; width: 34px; height: 34px; stroke: currentColor; fill: none; stroke-width: 1.8;
 }
 .placed-item-copy {
   display: flex; flex-direction: row; align-items: baseline; min-width: 0; flex: 1;

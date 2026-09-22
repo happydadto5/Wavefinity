@@ -7360,8 +7360,10 @@ function renderPlaced() {
         <button type="button" class="placed-item-delete" data-kind="${kind}" title="Delete ${escapeHtml(info?.title || kind)}" aria-label="Delete ${escapeHtml(info?.title || kind)}">Delete</button>
       </div>`;
     }).join("");
-  const markup = featureMarkup + modifierMarkup ||
-    '<div class="placed-empty">No parts or options yet. Pick one above.</div>';
+  const visibleMarkup = featureMarkup + modifierMarkup;
+  const markup = visibleMarkup || (placedPartCount() > 0
+    ? '<div class="placed-empty">No other parts or options.</div>'
+    : '<div class="placed-empty">No parts or options yet. Pick one above.</div>');
   containers.forEach(container => {
     container.innerHTML = markup;
     $$(".placed-item-select[data-index]", container).forEach(button => button.addEventListener("click", async () => {
