@@ -11175,6 +11175,26 @@ async function surfaceEdgeSucceeded(design) {
   if (typeof DL === "undefined" || !DL.loaded || realInventoryHasBin()) return;
   state.surfaceEdgeHandled = true;
   await loadFreshOrdinaryDesignForCurrentFolder();
+  // Fix 032 Correction 2 (C2.2): the fresh first-bin design the editor just
+  // landed on is the durable resume target now, not the just-generated
+  // Base Trim. refreshPreview() inside loadFreshOrdinaryDesignForCurrentFolder()
+  // already queued it in the background, but that write can still be
+  // mid-flight if the app closes right away - explicitly flush and await it
+  // (pending=true, a fresh first-bin intent) so the transition is durably
+  // finished before this function returns.
+  if (typeof SP !== "undefined") {
+    try {
+      await SP.flushResumeCheckpoint(state.design, true);
+    } catch (error) {
+      // The Base Trim edge itself already succeeded and the first-bin
+      // editor is already showing - only the checkpoint write failed, so
+      // say that plainly and leave it retryable rather than treating the
+      // transition as failed.
+      toast(`Edge ready, but the first-bin design could not be saved to this Space: ${error.message}`, true, 8000);
+      toast("Edge ready — design your first bin.");
+      return;
+    }
+  }
   toast("Edge ready — design your first bin.");
 }
 
@@ -11322,8 +11342,17 @@ async function generateParts(target) {
       setItemStatus("connector", "done", "Done");
     }
 
-    if (dialogTitle) dialogTitle.textContent = "Complete!";
-    if (dialogSubtitle) dialogSubtitle.textContent = "All parts generated and saved.";
+    // Fix 032 Correction 2 (C2.3): the generated output is real either way,
+    // but a failed final checkpoint must not be buried under an
+    // unconditional "Complete!" - and the two outcomes get exactly one
+    // toast each, not a success toast followed by a contradicting one.
+    if (checkpointSaveFailed) {
+      if (dialogTitle) dialogTitle.textContent = "Generated — design save needs attention";
+      if (dialogSubtitle) dialogSubtitle.textContent = "Parts were generated, but the current design could not be saved to this Space.";
+    } else {
+      if (dialogTitle) dialogTitle.textContent = "Complete!";
+      if (dialogSubtitle) dialogSubtitle.textContent = "All parts generated and saved.";
+    }
 
     // Pause briefly so user clearly sees checkmarks
     await new Promise(resolve => setTimeout(resolve, 650));
@@ -11337,20 +11366,14 @@ async function generateParts(target) {
       ? `\nConnector: ${fmt(connectorPlan.length_mm)} mm long, ${fmt(connectorPlan.web_thickness_mm)} mm web, `
         + `${fmt(connectorPlan.printed_height_mm)} mm printed height`
       : "";
+    const savedMessage = `Saved to ${saveOutput}${uniqueFiles.length ? `\n${uniqueFiles.join("\n")}` : ""}${planNote}`;
     toast(
-      `Saved to ${saveOutput}${uniqueFiles.length ? `\n${uniqueFiles.join("\n")}` : ""}${planNote}`,
-      false,
-      7000,
+      checkpointSaveFailed
+        ? `${savedMessage}\n\nThe current design could not be saved to this Space: ${checkpointSaveFailed.message}`
+        : savedMessage,
+      Boolean(checkpointSaveFailed),
+      checkpointSaveFailed ? 9000 : 7000,
     );
-    // The generated output above is real and already saved; only the
-    // Space's resume checkpoint failed to persist. Say so separately rather
-    // than implying the whole operation is untrustworthy (Correction 1).
-    if (checkpointSaveFailed) {
-      toast(
-        `Generated, but the current design could not be saved to this Space: ${checkpointSaveFailed.message}`,
-        true, 8000,
-      );
-    }
   } catch (error) {
     if (target === "all" || target === "bin") {
       const binRow = $("#gen-item-bin");
@@ -11436,20 +11459,33 @@ async function printModel(target = "bin") {
     }
     const files = result.files || [];
     const fileNames = files.map(f => f.split(/[\\/]/).pop());
-    toast(`Sent to ${slicerName}!\n${fileNames.join("\n")}`, false, 7000);
-    if (baseTrimEnabled(payload.design)) printedEdge = payload.design;
-    else if (target === "bin" || target === "all") {
+    const sentMessage = `Sent to ${slicerName}!\n${fileNames.join("\n")}`;
+    if (baseTrimEnabled(payload.design)) {
+      printedEdge = payload.design;
+      toast(sentMessage, false, 7000);
+    } else if (target === "bin" || target === "all") {
       markWorkingDesignReconciled();
-      // The slicer handoff already succeeded by this point; only the
-      // resume checkpoint failed to persist. Report that separately rather
-      // than as the print itself failing (Correction 1).
+      // Fix 032 Correction 2 (C2.3): the slicer handoff already succeeded
+      // by this point, so defer the success toast until after the final
+      // checkpoint attempt and report exactly one message - never the
+      // ordinary success toast followed by a contradicting failure one.
+      let checkpointSaveFailed = null;
       if (state.folderMode === "space" && typeof SP !== "undefined") {
         try {
           await SP.flushResumeCheckpoint(payload.design, false);
         } catch (error) {
-          toast(`Sent to ${slicerName}, but the current design could not be saved to this Space: ${error.message}`, true, 8000);
+          checkpointSaveFailed = error;
         }
       }
+      toast(
+        checkpointSaveFailed
+          ? `${sentMessage}\n\nThe current design could not be saved to this Space: ${checkpointSaveFailed.message}`
+          : sentMessage,
+        Boolean(checkpointSaveFailed),
+        checkpointSaveFailed ? 9000 : 7000,
+      );
+    } else {
+      toast(sentMessage, false, 7000);
     }
   } catch (error) {
     setError(error.message);

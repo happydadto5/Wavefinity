@@ -291,18 +291,38 @@ SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
 // activation this triggers whenever the newly-applied folder is a typed
 // Space (Fix 019 Item 1). Resolves false without changing anything when a
 // dirty Drawer layout blocked the switch (see SP.resetDrawer above).
-SP.applyFolder = async (info, { reset = true, initDesign = true } = {}) => {
+//
+// The single owner of the ENTIRE frontend folder/Space identity transition,
+// including state.browserFolder (Fix 032 Correction 2, C2.1). No caller may
+// assign state.browserFolder itself before calling in here - an old Space's
+// preview finishing during that window could otherwise capture its id/
+// design paired with the new Space's folder handle. Pass `browserFolder`
+// only from a hosted caller that has one to hand over.
+SP.applyFolder = async (info, options = {}) => {
+  const { reset = true, initDesign = true } = options;
   if (reset) {
     const ok = await SP.resetDrawer();
     if (!ok) return false;
   }
-  // The old Space's queued/in-flight resume checkpoint must land before its
-  // identity is replaced below - a completion for it after the switch must
-  // never write into, or overwrite in memory, the new Space's checkpoint.
+  // The old Space's queued/in-flight resume checkpoint must land before ANY
+  // identity field below changes - a completion for it after the switch
+  // must never write into, or overwrite in memory, the new Space's
+  // checkpoint.
   await SP.flushOutgoingResumeCheckpoint();
+  // Everything from here through setFolderState() is one synchronous block
+  // with no intervening await, so nothing can ever observe a half-migrated
+  // identity (e.g. the new state.browserFolder paired with the old
+  // state.activeSpaceId).
+  if (Object.hasOwn(options, "browserFolder")) state.browserFolder = options.browserFolder;
   state.output = info.folder;
   state.activeSpaceId = info.space_id || null;
   state.folderSelected = true;
+  // A manually-built `info` that omits these fields (e.g. hosted
+  // SP.create()'s constructed object) must not let the outgoing Space's
+  // in-memory checkpoint leak into the new one - absence normalizes to
+  // explicit null/false, never "preserve whatever is already there".
+  const resumeDesign = Object.hasOwn(info, "resume_design") ? info.resume_design : null;
+  const resumePending = Object.hasOwn(info, "resume_pending") ? info.resume_pending : false;
   setFolderState(
     info.folder_mode,
     info.space,
@@ -310,8 +330,8 @@ SP.applyFolder = async (info, { reset = true, initDesign = true } = {}) => {
     info.keep_bin_defaults,
     info.bin_defaults,
     info.part_defaults,
-    info.resume_design,
-    info.resume_pending,
+    resumeDesign,
+    resumePending,
   );
   if (initDesign && info.folder_mode === "space") await SP.initializeDesignForActiveSpace();
   syncForm();
@@ -571,7 +591,11 @@ SP._captureResumeTarget = () => {
   if (state.folderMode !== "space" || !state.activeSpace || !state.activeSpaceId) return null;
   return {
     spaceId: state.activeSpaceId,
-    space: state.activeSpace,
+    // Cloned so the queued target is immutable - a later in-place edit to
+    // state.activeSpace (e.g. a rename/resize) must not retroactively
+    // change what an already-queued write sends (Fix 032 Correction 2,
+    // item 9).
+    space: clone(state.activeSpace),
     output: state.output,
     browserFolder: state.browserFolder,
     hosted: Boolean(state.runtime.hosted),
@@ -583,7 +607,13 @@ SP._resumeMatchesActive = target =>
 
 SP._writeResumeCheckpointNow = async (target, design, pending) => {
   if (target.hosted) {
-    if (!target.browserFolder?.handle) return;
+    // A missing captured folder handle must throw, not silently resolve as
+    // though the design were saved - an explicit flush must never mark
+    // itself/its dedupe key successful when nothing was actually written
+    // (Fix 032 Correction 2, item 10).
+    if (!target.browserFolder?.handle) {
+      throw new Error("This Space has no writable folder access in this browser session.");
+    }
     await SP.writeMetadata(target.browserFolder.handle, "space", target.space, true, {
       resume_design: design, resume_pending: pending,
     });
@@ -614,11 +644,15 @@ SP._pumpResumeQueue = () => {
     })
     .catch(error => {
       // A rejected write must not poison the tail - the queue recovers so
-      // later writes still run. A background autosave has no waiter, so it
-      // is only reported here as a toast; an explicit
-      // SP.flushResumeCheckpoint() caller gets its own rejection through
-      // its waiter below, on top of this same toast - see Correction 1.
-      toast(`Current design could not be saved to this Space: ${error.message}`, true, 6000);
+      // later writes still run. A background autosave has no waiter, so
+      // this generic toast is its only report; an explicit
+      // SP.flushResumeCheckpoint() caller instead gets its own rejection
+      // through its waiter, and OWNS the user-facing message from there -
+      // reporting both here and at the caller would duplicate/contradict
+      // it (Fix 032 Correction 2, C2.3).
+      if (!item.waiters.length) {
+        toast(`Current design could not be saved to this Space: ${error.message}`, true, 6000);
+      }
       item.waiters.forEach(w => w.reject(error));
     })
     .then(() => {
@@ -961,9 +995,12 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   // The safe-leave decision is already resolved above - clear the old
   // Drawer state exactly once, with no second prompt.
   await SP.resetDrawer({ skipSafeLeave: true });
-  state.browserFolder = folder;
+  // This only writes the remembered-active record; it does not mutate the
+  // live editor identity, so it may run before the atomic identity
+  // transition below (Fix 032 Correction 2, item 7). state.browserFolder
+  // itself is set inside SP.applyFolder(), never here.
   await WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null });
-  await SP.applyFolder(info, { reset: false });
+  await SP.applyFolder(info, { reset: false, browserFolder: folder });
   SP.close();
   toast(info.folder_mode === "space"
     ? `Opened ${info.space.name || folder.name}.`
@@ -1668,14 +1705,20 @@ SP.create = async () => {
       part_defaults: partDefaults,
     });
     // Activate the selected target folder itself, not whatever folder was
-    // previously active - see Fix 004 Correction 7.A.
-    state.browserFolder = folder;
+    // previously active - see Fix 004 Correction 7.A. state.browserFolder
+    // itself is set inside SP.applyFolder() below, never here (Fix 032
+    // Correction 2, C2.1) - this only writes the remembered-active record.
     await WFFileSystem.save("active", { handle: folder.handle, space_id: metadata.space_id });
     info = {
       folder: folder.name, folder_name: folder.name, folder_mode: "space", space,
       space_id: metadata.space_id,
       inventory: true, keep_bin_defaults: metadata.keep_bin_defaults,
       bin_defaults: metadata.bin_defaults, part_defaults: metadata.part_defaults,
+      // A brand-new Space never inherits the previous Space's in-memory
+      // resume design just because this manually-built info could have
+      // omitted these fields - state them explicitly (Correction 2, item 8).
+      resume_design: metadata.resume_design ?? null,
+      resume_pending: Boolean(metadata.resume_pending),
     };
   } else {
     const payload = {
@@ -1712,7 +1755,12 @@ SP.create = async () => {
   // SP.create() always follows with an explicit designSurface/designPortable/
   // loadFreshOrdinaryDesignForCurrentFolder call below, which installs the
   // starter design itself - skip applyFolder's own (redundant) activation.
-  await SP.applyFolder(info, { initDesign: false, reset: false });
+  const applyOptions = { initDesign: false, reset: false };
+  // `folder` is a real handle-bearing object only in the hosted branch
+  // above - in the local branch it may be a plain output path string, so
+  // state.browserFolder must not be set from it there.
+  if (state.runtime.hosted) applyOptions.browserFolder = folder;
+  await SP.applyFolder(info, applyOptions);
   SP.close();
 
   if (kind === "portable") await SP.designPortable(info.space);
