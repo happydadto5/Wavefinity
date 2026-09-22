@@ -1384,6 +1384,12 @@ function applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGener
   return false;
 }
 
+function applyPendingLiveFormWithModifierConflictGuard() {
+  const previousDesign = pendingDesignHistory || clone(state.design);
+  const previousCanGenerate = state.canGenerate;
+  return applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate);
+}
+
 // Wall span a Side Opening's width is measured against - Front/Back run
 // along X, Left/Right run along Y. Mirrors organizer_side_openings.
 // side_opening_side_span() so the UI can filter eligibility client-side.
@@ -4001,11 +4007,13 @@ function wireControls() {
   });
   ["#output-folder", "#keep-log", "#connector-tolerance", "#connector-length",
     "#connector-arm-thickness", "#connector-bin-a-height", "#connector-bin-b-height"]
-    .forEach(selector => $(selector)?.addEventListener("change", updateDesignFromForm));
+    .forEach(selector => $(selector)?.addEventListener("change", () => {
+      applyPendingLiveFormWithModifierConflictGuard();
+    }));
   ["#connector-bin-a-height", "#connector-bin-b-height"].forEach(selector => {
     $(selector)?.addEventListener("input", () => {
       autoAdjustConnectorFields();
-      updateDesignFromForm();
+      applyPendingLiveFormWithModifierConflictGuard();
     });
   });
   $("#connector-height-mode").addEventListener("change", () => {
@@ -4016,7 +4024,7 @@ function wireControls() {
       }
     }
     syncConnectorHeightControls();
-    updateDesignFromForm();
+    if (!applyPendingLiveFormWithModifierConflictGuard()) return;
     renderConnectorReadout();
   });
   ["#base-trim-x-units", "#base-trim-y-units"].forEach((selector, index) => {
@@ -11695,12 +11703,21 @@ async function generateParts(target) {
     toast("Choose a folder before generating files.", true);
     return;
   }
+  const beforeForm = pendingDesignHistory || clone(state.design);
+  const previousCanGenerate = state.canGenerate;
+
+  cancelChangedDesignDebounce();
+  pendingDesignHistory = null;
+
+  if (!applyLiveFormWithModifierConflictGuard(beforeForm, previousCanGenerate)) {
+    return;
+  }
+  recordHistory(beforeForm);
+
   if ((target === "all" || target === "bin") && !state.canGenerate) {
     toast("Resolve the highlighted issue before generating.", true);
     return;
   }
-
-  updateDesignFromForm();
   setError();
 
   const dialog = $("#generation-dialog");
