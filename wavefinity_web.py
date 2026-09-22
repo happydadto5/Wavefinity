@@ -61,6 +61,7 @@ from organizer_engine import (
     LOCKED_TOLERANCE,
     MAX_BOX_SIZE,
     MAX_WALL,
+    MIN_BOX_SIZE,
     MIN_HEIGHT_ABOVE_BASE,
     MIN_WALL,
     SIDE_OPENING_WIDTHS,
@@ -2344,6 +2345,11 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     The current size is always the floor: this operation only grows. A larger
     bin is valid user intent and is never silently tightened around its parts.
+
+    ``payload["fit"] = True`` switches to a true smallest-fit search instead:
+    the current X/Y are no longer a floor, and the bin may shrink as well as
+    grow to the smallest legal footprint that still holds the layout. Z is
+    never touched either way.
     """
     request_box, layout, label, part_name, label_location, scoop = design_from_dict(
         payload["design"], validate_layout=False
@@ -2357,6 +2363,37 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # and the others move around it; without one, the biggest block anchors.
     anchor = payload.get("anchor")
     anchor = int(anchor) if anchor is not None and 0 <= int(anchor) < len(originals) else None
+    fit = bool(payload.get("fit", False))
+
+    if (fit and anchor is not None and originals[anchor].kind == "bore"
+            and originals[anchor].options.get("auto_base")):
+        # Auto size bin on a legacy Auto-Base Bore: materialize a concrete
+        # Base sized to the Bore's own resolved footprint before the bin
+        # search runs, so the button can size the bin around it.
+        legacy = originals[anchor]
+        base_z = base_height(box, mode)
+        resolved = resolved_options(box, legacy, base_z)
+        materialized = dict(legacy.options)
+        materialized["auto_base"] = False
+        auto_grid = bool(legacy.options.get("auto_grid"))
+        if auto_grid:
+            materialized["columns"] = resolved["columns"]
+            materialized["rows"] = resolved["rows"]
+            materialized["auto_grid"] = False
+        temp = replace(legacy, options=materialized)
+        footprint = feature_min_footprint(box, temp, base_z)
+        if footprint is None:
+            raise ValueError("Auto size bin: this Bore has no fittable footprint")
+        snap = layout.snap or EDITOR_SNAP
+        width, depth = (math.ceil(v / snap - 1e-6) * snap for v in footprint)
+        materialized_bore = resized_feature(temp, box, (width, depth), mode, layout.snap)
+        if auto_grid:
+            restored = dict(materialized_bore.options)
+            restored.pop("columns", None)
+            restored.pop("rows", None)
+            restored["auto_grid"] = True
+            materialized_bore = replace(materialized_bore, options=restored)
+        originals[anchor] = materialized_bore
 
     def sized(one: Feature, trial: BoxSpec) -> Feature:
         if one.kind == "nest" and one.contour:
@@ -2439,8 +2476,8 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
         return out
 
     def fits(x: float, y: float):
-        trial = replace(box, x=float(x), y=float(y))
         try:
+            trial = replace(box, x=float(x), y=float(y))
             placed = spread_apart(
                 [sized(one, trial) for one in originals], trial
             )
@@ -2455,31 +2492,54 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     start_x, start_y = box.x, box.y
     ceiling = math.floor(MAX_BOX_SIZE / BASE_UNIT) * BASE_UNIT
-    floor_x, floor_y = start_x, start_y
-    x, y = floor_x, floor_y
-    result = fits(x, y)
-    while result is None:
-        x = round(x + BASE_UNIT)
-        y = round(y + BASE_UNIT)
-        if x > ceiling:
+
+    if fit:
+        # Smallest legal footprint that fits the whole current layout: every
+        # X/Y pair on the grid, tried in deterministic increasing order of
+        # area, then max side, then side sum, then X, then Y.
+        floor_units = int(round(MIN_BOX_SIZE / BASE_UNIT))
+        ceiling_units = int(round(ceiling / BASE_UNIT))
+        legal = [round(units * BASE_UNIT) for units in range(floor_units, ceiling_units + 1)]
+        pairs = sorted(
+            ((xv, yv) for xv in legal for yv in legal),
+            key=lambda pair: (pair[0] * pair[1], max(pair), pair[0] + pair[1], pair[0], pair[1]),
+        )
+        x = y = None
+        for xv, yv in pairs:
+            if fits(xv, yv) is not None:
+                x, y = xv, yv
+                break
+        if x is None:
             raise ValueError(
                 "this layout will not fit within Wavefinity's maximum "
                 f"{ceiling:g} mm bin size - remove or shrink a support"
             )
+    else:
+        floor_x, floor_y = start_x, start_y
+        x, y = floor_x, floor_y
         result = fits(x, y)
+        while result is None:
+            x = round(x + BASE_UNIT)
+            y = round(y + BASE_UNIT)
+            if x > ceiling:
+                raise ValueError(
+                    "this layout will not fit within Wavefinity's maximum "
+                    f"{ceiling:g} mm bin size - remove or shrink a support"
+                )
+            result = fits(x, y)
 
-    # First fit found by growing both axes; give back any step that was not
-    # actually needed (down to the floor).
-    for _ in range(200):
-        trimmed = False
-        if x - BASE_UNIT >= floor_x and fits(x - BASE_UNIT, y) is not None:
-            x = round(x - BASE_UNIT)
-            trimmed = True
-        if y - BASE_UNIT >= floor_y and fits(x, y - BASE_UNIT) is not None:
-            y = round(y - BASE_UNIT)
-            trimmed = True
-        if not trimmed:
-            break
+        # First fit found by growing both axes; give back any step that was not
+        # actually needed (down to the floor).
+        for _ in range(200):
+            trimmed = False
+            if x - BASE_UNIT >= floor_x and fits(x - BASE_UNIT, y) is not None:
+                x = round(x - BASE_UNIT)
+                trimmed = True
+            if y - BASE_UNIT >= floor_y and fits(x, y - BASE_UNIT) is not None:
+                y = round(y - BASE_UNIT)
+                trimmed = True
+            if not trimmed:
+                break
 
     trial, updated = fits(x, y)
     with GEOMETRY_LOCK:

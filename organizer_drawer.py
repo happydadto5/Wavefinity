@@ -758,6 +758,56 @@ STRATEGIES: tuple[tuple[str, str, str, Callable, Callable], ...] = (
     ("most", "Most bins", "Biggest bins first, packed for the fullest drawer.", _by_area, _score_tight),
 )
 
+# Non-conclusive: a greedy/backtracked miss, not a proof the drawer is full.
+AUTO_NO_SPOT = "Auto layout did not find a spot"
+AUTO_NO_HEIGHT_SPOT = "Auto layout did not find a height-safe spot"
+
+
+def _placement_options(
+    rows, cols, occupied, heights, has_bin, item, scorer, height_rule, reach="column",
+) -> list[tuple[int, int, float]]:
+    """Every legal (row, col) an item may occupy against the given occupancy
+    state, best-first: higher score, then lower row, then lower column."""
+    w, d, h = item["w"], item["d"], item["h"]
+    if w > cols or d > rows:
+        return []
+    ny, nx = rows - d + 1, cols - w + 1
+    free = _window(_sat(occupied), 0, 0, d, w, ny, nx) == 0
+    if not free.any():
+        return []
+    padded = _sat(np.pad(occupied, 1, constant_values=True))
+    contact = (
+        _window(padded, 1, 0, d, 1, ny, nx) + _window(padded, 1, w + 1, d, 1, ny, nx)
+        + _window(padded, 0, 1, 1, w, ny, nx) + _window(padded, d + 1, 1, 1, w, ny, nx)
+    ) / (2.0 * (w + d))
+    gy, gx = np.mgrid[0:ny, 0:nx]
+    score = scorer(gx, gy, contact, rows, cols)
+    allowed = free
+    if height_rule != "ignore" and item.get("kind") not in SPACER_KINDS:
+        behind_heights = np.where(has_bin, heights, np.inf)
+        if reach == "adjacent":
+            # front[r] is the row just in front of r; behind[r] is row r.
+            front = np.vstack([np.zeros((1, cols)), heights])
+            behind = np.vstack([behind_heights, np.full((1, cols), np.inf)])
+        else:
+            front = np.maximum.accumulate(np.vstack([np.zeros((1, cols)), heights]), axis=0)
+            behind = np.minimum.accumulate(
+                np.vstack([behind_heights, np.full((1, cols), np.inf)])[::-1], axis=0
+            )[::-1]
+        taller_in_front = sliding_window_view(front[:ny], w, axis=1).max(axis=2) > h + HEIGHT_TOLERANCE
+        shorter_behind = sliding_window_view(behind[d:d + ny], w, axis=1).min(axis=2) < h - HEIGHT_TOLERANCE
+        violation = taller_in_front | shorter_behind
+        if height_rule == "strict":
+            allowed = free & ~violation
+        else:
+            score = score - violation * 1e6
+    if not allowed.any():
+        return []
+    rows_idx, cols_idx = np.where(allowed)
+    scores = score[rows_idx, cols_idx]
+    order = sorted(range(len(rows_idx)), key=lambda i: (-scores[i], rows_idx[i], cols_idx[i]))
+    return [(int(rows_idx[i]), int(cols_idx[i]), float(scores[i])) for i in order]
+
 
 def _pack(rows, cols, fixed, items, order, scorer, height_rule, reach="column"):
     occupied = np.zeros((rows, cols), dtype=bool)
@@ -777,50 +827,108 @@ def _pack(rows, cols, fixed, items, order, scorer, height_rule, reach="column"):
         mark(item)
     placed, unplaced = [], []
     for item in sorted(items, key=order):
-        w, d, h = item["w"], item["d"], item["h"]
+        w, d = item["w"], item["d"]
         if w > cols or d > rows:
             unplaced.append({**item, "reason": "bigger than the drawer"})
             continue
-        ny, nx = rows - d + 1, cols - w + 1
-        free = _window(_sat(occupied), 0, 0, d, w, ny, nx) == 0
-        if not free.any():
-            unplaced.append({**item, "reason": "no room left"})
+        options = _placement_options(rows, cols, occupied, heights, has_bin, item, scorer, height_rule, reach)
+        if not options:
+            has_room = bool(_placement_options(rows, cols, occupied, heights, has_bin, item, scorer, "ignore", reach))
+            unplaced.append({**item, "reason": AUTO_NO_HEIGHT_SPOT if has_room else AUTO_NO_SPOT})
             continue
-        padded = _sat(np.pad(occupied, 1, constant_values=True))
-        contact = (
-            _window(padded, 1, 0, d, 1, ny, nx) + _window(padded, 1, w + 1, d, 1, ny, nx)
-            + _window(padded, 0, 1, 1, w, ny, nx) + _window(padded, d + 1, 1, 1, w, ny, nx)
-        ) / (2.0 * (w + d))
-        gy, gx = np.mgrid[0:ny, 0:nx]
-        score = scorer(gx, gy, contact, rows, cols)
-        allowed = free
-        if height_rule != "ignore" and item.get("kind") not in SPACER_KINDS:
-            behind_heights = np.where(has_bin, heights, np.inf)
-            if reach == "adjacent":
-                # front[r] is the row just in front of r; behind[r] is row r.
-                front = np.vstack([np.zeros((1, cols)), heights])
-                behind = np.vstack([behind_heights, np.full((1, cols), np.inf)])
-            else:
-                front = np.maximum.accumulate(np.vstack([np.zeros((1, cols)), heights]), axis=0)
-                behind = np.minimum.accumulate(
-                    np.vstack([behind_heights, np.full((1, cols), np.inf)])[::-1], axis=0
-                )[::-1]
-            taller_in_front = sliding_window_view(front[:ny], w, axis=1).max(axis=2) > h + HEIGHT_TOLERANCE
-            shorter_behind = sliding_window_view(behind[d:d + ny], w, axis=1).min(axis=2) < h - HEIGHT_TOLERANCE
-            violation = taller_in_front | shorter_behind
-            if height_rule == "strict":
-                allowed = free & ~violation
-            else:
-                score = score - violation * 1e6
-        if not allowed.any():
-            unplaced.append({**item, "reason": "no spot keeps taller bins behind it"})
-            continue
-        best = int(np.argmax(np.where(allowed, score, -np.inf)))
-        row, col = divmod(best, nx)
-        placed_item = {**item, "gx": int(col), "gy": int(row)}
+        row, col, _ = options[0]
+        placed_item = {**item, "gx": col, "gy": row}
         mark(placed_item)
         placed.append(placed_item)
     return placed, unplaced
+
+
+# ------------------------------------------------------------- rescue search
+
+AUTO_RESCUE_NODE_BUDGET = 20_000  # search-node cap, not a wall-clock timeout
+
+
+def _rescue_item_order(rows, cols, fixed, items, scorer, height_rule, reach):
+    """Movable items sorted hardest-to-place first, judged against the fixed
+    placements only (no other movable item yet placed)."""
+    occupied = np.zeros((rows, cols), dtype=bool)
+    heights = np.zeros((rows, cols))
+    has_bin = np.zeros((rows, cols), dtype=bool)
+
+    def mark(item):
+        x0, y0 = max(0, item["gx"]), max(0, item["gy"])
+        x1, y1 = min(cols, item["gx"] + item["w"]), min(rows, item["gy"] + item["d"])
+        if x1 > x0 and y1 > y0:
+            occupied[y0:y1, x0:x1] = True
+            if item.get("kind") not in SPACER_KINDS:
+                has_bin[y0:y1, x0:x1] = True
+                heights[y0:y1, x0:x1] = item["h"]
+
+    for item in fixed:
+        mark(item)
+
+    scored = [
+        (len(_placement_options(rows, cols, occupied, heights, has_bin, item, scorer, height_rule, reach)), item)
+        for item in items
+    ]
+    scored.sort(key=lambda pair: (
+        pair[0],
+        -(pair[1]["w"] * pair[1]["d"]),
+        -pair[1]["h"],
+        -max(pair[1]["w"], pair[1]["d"]),
+        pair[1]["name"], pair[1]["bin"], pair[1]["copy"],
+    ))
+    return [item for _, item in scored]
+
+
+def _rescue_pack(rows, cols, fixed, items, height_rule, reach, budget=AUTO_RESCUE_NODE_BUDGET):
+    """Deterministic bounded backtracking search for one complete legal
+    arrangement of every item in ``items``.  Returns ``(placed, status,
+    nodes)`` where ``status`` is ``"found"``, ``"budget"`` or ``"exhausted"``."""
+    order = _rescue_item_order(rows, cols, fixed, items, _score_tight, height_rule, reach)
+    occupied = np.zeros((rows, cols), dtype=bool)
+    heights = np.zeros((rows, cols))
+    has_bin = np.zeros((rows, cols), dtype=bool)
+
+    def mark(item, on):
+        x0, y0 = max(0, item["gx"]), max(0, item["gy"])
+        x1, y1 = min(cols, item["gx"] + item["w"]), min(rows, item["gy"] + item["d"])
+        if x1 > x0 and y1 > y0:
+            occupied[y0:y1, x0:x1] = on
+            if item.get("kind") not in SPACER_KINDS:
+                has_bin[y0:y1, x0:x1] = on
+                heights[y0:y1, x0:x1] = item["h"] if on else 0.0
+
+    for item in fixed:
+        mark(item, True)
+
+    placements: list[dict] = []
+    nodes = 0
+
+    def recurse(index):
+        nonlocal nodes
+        if index == len(order):
+            return True
+        item = order[index]
+        options = _placement_options(rows, cols, occupied, heights, has_bin, item, _score_tight, height_rule, reach)
+        for row, col, _ in options:
+            if nodes >= budget:
+                return False
+            nodes += 1
+            placed_item = {**item, "gx": col, "gy": row}
+            mark(placed_item, True)
+            placements.append(placed_item)
+            if recurse(index + 1):
+                return True
+            placements.pop()
+            mark(placed_item, False)
+        return False
+
+    if recurse(0):
+        return placements, "found", nodes
+    if nodes >= budget:
+        return None, "budget", nodes
+    return None, "exhausted", nodes
 
 
 def _build_stacks(singles: list[dict[str, Any]], max_height: float) -> list[dict[str, Any]]:
@@ -958,6 +1066,7 @@ def auto_layout(
     strategies = [s for s in STRATEGIES if s[0] == "tight"] if only else list(STRATEGIES)
     candidates, seen = [], set()
     usable = rows * cols
+    notes = []
 
     def placements_for(item):
         members = item.get("members") or [(item["bin"], item["copy"])]
@@ -967,25 +1076,16 @@ def auto_layout(
             out.append({"bin": bin_id, "copy": copy, "on": f"{below_bin}:{below_copy}"})
         return out
 
-    def run(strategy, rule, name=None, description=None):
-        ident, title, blurb, order, scorer = strategy
-        placed, unplaced = _pack(rows, cols, fixed, items, order, scorer, rule, reach)
-        signature = frozenset((p["bin"], p["copy"], p["gx"], p["gy"]) for p in placed)
-        if signature in seen and placed:
-            return
-        seen.add(signature)
+    def make_candidate(ident, name, description, placed, unplaced_entries):
         everything = fixed + [{**p, "top": by_id[(p.get("members") or [(p["bin"],)])[-1][0]]} for p in placed]
         used = sum(item["w"] * item["d"] for item in everything)
         count = lambda group: sum(len(item.get("members") or [0]) for item in group)
-        candidates.append({
-            "id": ident if rule == height_rule else f"{ident}-{rule}",
-            "name": name or title,
-            "description": description or blurb,
+        return {
+            "id": ident,
+            "name": name,
+            "description": description,
             "placements": keep_placements + [p for item in placed for p in placements_for(item)],
-            "unplaced": [
-                {"bin": bin_id, "copy": copy, "reason": u["reason"]}
-                for u in unplaced for bin_id, copy in (u.get("members") or [(u["bin"], u["copy"])])
-            ],
+            "unplaced": unplaced_entries,
             "stats": {
                 "placed": count(placed),
                 "wanted": count(items),
@@ -994,18 +1094,49 @@ def auto_layout(
                 "height_issues": len(_height_issues(everything, reach)),
                 "connectors": sum(one["count"] for one in _connectors(everything, grid["step"])[0]),
             },
-        })
+        }
+
+    def run(strategy, rule, name=None, description=None):
+        ident, title, blurb, order, scorer = strategy
+        placed, unplaced = _pack(rows, cols, fixed, items, order, scorer, rule, reach)
+        signature = frozenset((p["bin"], p["copy"], p["gx"], p["gy"]) for p in placed)
+        if signature in seen and placed:
+            return
+        seen.add(signature)
+        unplaced_entries = [
+            {"bin": bin_id, "copy": copy, "reason": u["reason"]}
+            for u in unplaced for bin_id, copy in (u.get("members") or [(u["bin"], u["copy"])])
+        ]
+        candidates.append(make_candidate(
+            ident if rule == height_rule else f"{ident}-{rule}",
+            name or title, description or blurb, placed, unplaced_entries,
+        ))
 
     for strategy in strategies:
         run(strategy, height_rule)
+
+    # A deeper bounded search for a complete fit, when the fast layouts left
+    # bins out and there is more than one movable bin to place around.
+    if not only and not any(c["stats"]["placed"] == c["stats"]["wanted"] for c in candidates):
+        rescued, status, _nodes = _rescue_pack(rows, cols, fixed, items, height_rule, reach, AUTO_RESCUE_NODE_BUDGET)
+        if status == "found":
+            candidates.append(make_candidate(
+                "rescue", "Complete fit",
+                "A deeper bounded search found a complete arrangement after the fast layouts did not.",
+                rescued, [],
+            ))
+        elif status == "budget":
+            notes.append("Auto layout reached its search limit. A complete fit may still exist; try moving or locking a bin and run Auto layout again.")
+        else:
+            notes.append("No complete fit was found under the current placement rules.")
+
     # When the height rule is what left bins out, offer the layout that bends it.
     if height_rule == "strict" and any(
-        u["reason"].startswith("no spot keeps") for c in candidates for u in c["unplaced"]
+        u["reason"] == AUTO_NO_HEIGHT_SPOT for c in candidates for u in c["unplaced"]
     ):
         run(STRATEGIES[1], "prefer", "Fits more", "Bends the height rule where it has to, so more bins fit.")
     order = {id(c): index for index, c in enumerate(candidates)}
     candidates.sort(key=lambda c: (-c["stats"]["placed"], c["stats"]["height_issues"], order[id(c)]))
-    notes = []
     if dropped_spacers:
         notes.append(f"{dropped_spacers} spacer{'s' if dropped_spacers != 1 else ''} taken out - make spacers again once the layout settles.")
     return {"candidates": candidates, "skipped": skipped, "notes": notes}
