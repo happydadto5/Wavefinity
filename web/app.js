@@ -623,7 +623,7 @@ async function designerLoadFromAnotherSpace() {
 // in a typed Space is preserved through Save to Space first, never silently
 // discarded; on save failure New Bin is cancelled rather than losing work.
 async function designerNewBin() {
-  await commitVisibleDraft();
+  if (!(await guardDraftSwitch())) return;
   if (state.folderMode === "space") {
     if (workingDesignForSpace()) {
       const saved = await designerSaveToSpace({ silent: true });
@@ -652,7 +652,7 @@ async function designerNewBin() {
 // text cleared and source-row identity cleared, so a later Save/Generate/
 // Print creates a distinct source rather than mutating the original's row.
 async function designerDuplicate() {
-  await commitVisibleDraft();
+  if (!(await guardDraftSwitch())) return;
   if (baseTrimEnabled()) {
     toast("Base Trim cannot be duplicated here.", true, 5000);
     return;
