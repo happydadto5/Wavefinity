@@ -210,6 +210,7 @@ from ._layout import (
     feature_footprint,
     feature_min_footprint,
     occupied_zones,
+    wavy_base_bin_minimum,
 )
 from ._assembly import (
     apply_texts,
