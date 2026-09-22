@@ -227,18 +227,32 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .space-head-edit-host .space-form,
 .space-head-edit-host .space-type-fields { display: grid; gap: 8px; margin: 0; padding: 0; }
 .space-head-edit-host .space-buttons { margin-top: 10px; }
+.space-mode-row {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px;
+}
+.space-mode-row[hidden] { display: none; }
+.space-mode-label {
+  font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap;
+}
 .space-mode-toggle {
-  display: grid; grid-template-columns: 1fr 1fr; margin-top: 12px;
-  border-bottom: 1px solid var(--line-dark);
+  display: inline-flex; flex: 1; border: 1px solid var(--line-dark);
+  border-radius: 8px; background: #eef5f4; overflow: hidden; margin: 0;
 }
 .space-mode-toggle button {
-  border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0;
-  padding: 6px 10px 7px; background: transparent; color: var(--muted);
-  font-weight: 700; font-size: 13px; cursor: pointer; margin-bottom: -1px;
+  flex: 1 1 0; border: 0; border-radius: 0; padding: 6px 12px;
+  background: transparent; color: var(--muted); font-weight: 700;
+  font-size: 12px; cursor: pointer; margin: 0; text-align: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.space-mode-toggle button + button {
+  border-left: 1px solid var(--line-dark);
+}
+.space-mode-toggle button:hover:not(.active) {
+  background: rgba(0,0,0,0.04); color: var(--ink);
 }
 .space-mode-toggle button.active {
-  background: var(--panel); color: var(--teal-dark); border-color: var(--line-dark);
-  border-bottom-color: var(--panel);
+  background: var(--teal); color: white;
 }
-.space-mode-toggle button:hover,
-.space-mode-toggle button:focus-visible { color: var(--teal-dark); outline: 2px solid var(--teal); outline-offset: -2px; }
+.space-mode-toggle button:focus-visible {
+  outline: 2px solid var(--teal-dark); outline-offset: -2px; z-index: 1;
+}

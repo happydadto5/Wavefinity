@@ -42,9 +42,12 @@
           </div>
         </div>
         <div id="space-head-edit-host" class="space-head-edit-host" hidden></div>
-        <div id="space-mode-toggle" class="space-mode-toggle" role="tablist" aria-label="What the left panel edits" hidden>
-          <button type="button" role="tab" data-space-mode="space" class="active" aria-selected="true" aria-pressed="true" tabindex="0" title="Work on the Space and its layout">Space</button>
-          <button type="button" role="tab" data-space-mode="design" aria-selected="false" aria-pressed="false" tabindex="-1" title="Work on the current bin or Storage Box">Design</button>
+        <div id="space-mode-row" class="space-mode-row">
+          <span class="space-mode-label">Work on:</span>
+          <div id="space-mode-toggle" class="space-mode-toggle" role="tablist" aria-label="What the left panel edits" hidden>
+            <button type="button" role="tab" data-space-mode="space" class="active" aria-selected="true" aria-pressed="true" tabindex="0" title="Work on the Space and its layout">Space</button>
+            <button type="button" role="tab" data-space-mode="design" aria-selected="false" aria-pressed="false" tabindex="-1" title="Work on the current bin or Storage Box">Designer</button>
+          </div>
         </div>
       </section>
       <section class="control-section open" data-section="build">
@@ -54,7 +57,7 @@
               <select id="bin-type">
                 <option value="single" selected>Bin</option>
                 <option value="b4b">Storage Box</option>
-                <option value="base-trim">Base Trim</option>
+                <option id="bin-type-base-trim" value="base-trim">Base Trim</option>
               </select>
             </label>
             <label class="part-name-row"><span id="part-name-label">Bin Name</span>
@@ -288,10 +291,6 @@
             </div>
           </div>
 
-          <div class="placed-block placed-block-panel">
-            <h3>Added parts &amp; options</h3>
-            <div id="placed-supports-panel" class="placed-supports"></div>
-          </div>
 
           <div class="support-editor" hidden>
             <div class="editor-title">

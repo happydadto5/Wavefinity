@@ -2364,6 +2364,7 @@ SP.updateReadouts = () => {
 };
 
 SP.renderSpaceInfo = () => {
+    if (typeof syncBaseTrimOption === "function") syncBaseTrimOption();
     const isSpace = state.folderMode === "space" && state.activeSpace;
     const wsName = document.getElementById("workspace-space-name");
     if (wsName) {
@@ -2389,7 +2390,12 @@ SP.renderSpaceInfo = () => {
     }
     head.hidden = false;
     const toggle = document.getElementById("space-mode-toggle");
-    if (toggle) toggle.hidden = !(typeof DL !== "undefined" && DL.active);
+    if (toggle) {
+        const hideToggle = !(typeof DL !== "undefined" && DL.active);
+        toggle.hidden = hideToggle;
+        const modeRow = document.getElementById("space-mode-row");
+        if (modeRow) modeRow.hidden = hideToggle;
+    }
     const viewing = document.getElementById("space-head-view");
     if (viewing) viewing.hidden = SP.editing;
     document.getElementById("space-head-name").textContent = state.activeSpace.name;

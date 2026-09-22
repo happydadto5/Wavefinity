@@ -215,6 +215,7 @@ function setFolderState(
         ? "A Space needs this folder's inventory turned on."
         : "Add each generated bin and Storage Box to this folder's inventory file";
   }
+  syncBaseTrimOption();
 }
 
 const COLORS = {
@@ -1897,7 +1898,22 @@ function syncBaseTrimForm() {
   renderBaseTrimReadout();
 }
 
+function syncBaseTrimOption() {
+  const opt = $("#bin-type-base-trim") || document.querySelector("#bin-type option[value='base-trim']");
+  if (!opt) return;
+  const isSpace = state.folderMode === "space" && Boolean(state.activeSpace);
+  const allowBaseTrim = !isSpace || state.activeSpace.kind === "surface";
+  opt.hidden = !allowBaseTrim;
+  opt.disabled = !allowBaseTrim;
+  const select = document.getElementById("bin-type");
+  if (!allowBaseTrim && select && select.value === "base-trim") {
+    select.value = "single";
+  }
+}
+window.syncBaseTrimOption = syncBaseTrimOption;
+
 function applyBaseTrimVisibility() {
+  syncBaseTrimOption();
   const on = baseTrimEnabled();
   const hide = (selector, hidden) => { const element = $(selector); if (element) element.hidden = hidden; };
   hide("#base-trim-panel", !on);
@@ -1910,7 +1926,6 @@ function applyBaseTrimVisibility() {
     hide("#side-openings-option", true);
   }
   hide(".palette-wrap", on);
-  hide(".placed-block-panel", on);
   if (on) hide(".support-editor", true);
   const connectorSection = document.querySelector('.control-section[data-section="connector"]');
   if (connectorSection) connectorSection.hidden = on;
@@ -3977,7 +3992,7 @@ function syncDraftEditorIdentity(kind, info) {
   title.textContent = info.title;
   description.textContent = info.description;
 
-  title.hidden = isNest;
+  title.hidden = isNest || kind === "bore";
   description.hidden = isNest;
 
   $(".support-editor")?.classList.toggle("nest-editor", isNest);
@@ -4679,7 +4694,6 @@ function renderDraftFields() {
         ${field("Height", "option:height", shownHeight, { unit: "mm", step: "0.5" })}
       </div></div>`;
     } else {
-      html += `<div class="editor-group"><span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`;
       const autoPost = info.kind === "post" && one.count == null;
       const directionLabel = info.kind === "steps" ? "Shelf direction" : "Runs along";
       const runsAlong = info.flags.along && !["divider", "bore"].includes(info.kind) && !autoPost
@@ -4688,52 +4702,56 @@ function renderDraftFields() {
           <label><input type="radio" name="draft-along" value="y" ${one.along === "y" ? "checked" : ""}><span>Y direction</span></label>
         </div></fieldset>`
         : "";
-      // A part with no spacing field of its own (Slot Rack) would leave
-      // Quantity alone on its row: Runs along takes the second column instead.
-      const alongInPair = Boolean(info.flags.qty && !repeatFieldsHtml && runsAlong);
-      if (info.flags.qty) {
-        const quantityLabel = info.kind === "steps" ? "Number of steps" : "Quantity";
-        const autoState = info.kind !== "steps" && one.count == null;
-        html += `<div class="pair"><label><span class="field-label">${quantityLabel}${autoState ? '<span class="unit">Auto</span>' : ""}</span><div class="input-with-button">
-          <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
-          ${info.kind === "steps" ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
-        </div></label>${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
-        if (autoPost) html += `<p class="inline-help">Auto fills the available area with posts.</p>`;
-        if (info.kind === "cradle") {
-          const item = one.item || starterItem();
-          const first = item.segments[0] || { length: 40, diameter: 6 };
-          const tip = "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.";
-          html += `<div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div>`;
+      const hasOrientationControls = Boolean(info.flags.qty || repeatFieldsHtml || runsAlong || info.flags.alternate);
+      if (hasOrientationControls) {
+        html += `<div class="editor-group"><span class="editor-group-label">${info.flags.qty ? "Repeats" : "Orientation"}</span>`;
+        // A part with no spacing field of its own (Slot Rack) would leave
+        // Quantity alone on its row: Runs along takes the second column instead.
+        const alongInPair = Boolean(info.flags.qty && !repeatFieldsHtml && runsAlong);
+        if (info.flags.qty) {
+          const quantityLabel = info.kind === "steps" ? "Number of steps" : "Quantity";
+          const autoState = info.kind !== "steps" && one.count == null;
+          html += `<div class="pair"><label><span class="field-label">${quantityLabel}${autoState ? '<span class="unit">Auto</span>' : ""}</span><div class="input-with-button">
+            <input type="number" min="1" step="1" data-draft="count" value="${resolvedDraftCount(one)}">
+            ${info.kind === "steps" ? "" : `<button type="button" class="button secondary" data-action="auto-count">Auto</button>`}
+          </div></label>${repeatFieldsHtml}${alongInPair ? runsAlong : ""}</div>`;
+          if (autoPost) html += `<p class="inline-help">Auto fills the available area with posts.</p>`;
+          if (info.kind === "cradle") {
+            const item = one.item || starterItem();
+            const first = item.segments[0] || { length: 40, diameter: 6 };
+            const tip = "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.";
+            html += `<div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div>`;
+          }
+        } else if (repeatFieldsHtml) {
+          html += `<div class="pair">${repeatFieldsHtml}</div>`;
         }
-      } else if (repeatFieldsHtml) {
-        html += `<div class="pair">${repeatFieldsHtml}</div>`;
+        if (info.flags.alternate) {
+          html += `<label>End layout<select data-draft="alternate_ends">
+            <option value="aligned" ${one.alternate_ends === true ? "" : "selected"}>Aligned</option>
+            <option value="alternate" ${one.alternate_ends === true ? "selected" : ""}>Alternate ends</option>
+          </select></label>`;
+        }
+        if (runsAlong && !alongInPair) html += runsAlong;
+        if (info.flags.alternate) {
+          // One field, two readings. Alternate ends on: the clearance kept at each
+          // run end (writes end_margin). Off: a signed slide of the whole row along
+          // the bin (writes run_offset). Each key keeps its own last value.
+          const alternating = one.alternate_ends === true;
+          const key = alternating ? "end_margin" : "run_offset";
+          const label = alternating ? "From ends" : "Offset from center";
+          const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
+          const shown = explicit
+            ? one.options[key]
+            : alternating
+            ? state.draftResolvedOptions?.end_margin ?? 10
+            : 0;
+          const tip = alternating
+            ? "Share of the run kept clear at each end. Larger pulls the alternating troughs toward the middle; smaller pushes them to the ends."
+            : "Slides the trough along the bin from centre, as a share of the room to the wall. Positive one way, negative the other; 0 stays centred.";
+          html += field(label, `option:${key}`, fmt(shown), { unit: "%", step: "1", tip });
+        }
+        html += `</div>`;
       }
-      if (info.flags.alternate) {
-        html += `<label>End layout<select data-draft="alternate_ends">
-          <option value="aligned" ${one.alternate_ends === true ? "" : "selected"}>Aligned</option>
-          <option value="alternate" ${one.alternate_ends === true ? "selected" : ""}>Alternate ends</option>
-        </select></label>`;
-      }
-      if (runsAlong && !alongInPair) html += runsAlong;
-      if (info.flags.alternate) {
-        // One field, two readings. Alternate ends on: the clearance kept at each
-        // run end (writes end_margin). Off: a signed slide of the whole row along
-        // the bin (writes run_offset). Each key keeps its own last value.
-        const alternating = one.alternate_ends === true;
-        const key = alternating ? "end_margin" : "run_offset";
-        const label = alternating ? "From ends" : "Offset from center";
-        const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
-        const shown = explicit
-          ? one.options[key]
-          : alternating
-          ? state.draftResolvedOptions?.end_margin ?? 10
-          : 0;
-        const tip = alternating
-          ? "Share of the run kept clear at each end. Larger pulls the alternating troughs toward the middle; smaller pushes them to the ends."
-          : "Slides the trough along the bin from centre, as a share of the room to the wall. Positive one way, negative the other; 0 stays centred.";
-        html += field(label, `option:${key}`, fmt(shown), { unit: "%", step: "1", tip });
-      }
-      html += `</div>`;
     }
   }
   if (info.flags.item && !["bore", "cradle"].includes(one.kind)) {
@@ -7297,10 +7315,12 @@ function updateDraftStatusColor(hasError) {
 function renderPlaced() {
   if (!state.design) return;
   const features = state.design.layout.features;
-  // Painted in two spots: the floating box over the 3D/2D view, and the
-  // matching list in the left settings panel - same markup, same handlers.
-  const containers = $$("#placed-supports, #placed-supports-panel");
+  const containers = $$("#placed-supports");
+  const editingFeatureIndex = state.draft
+    ? (Number.isInteger(draftCommitIndex()) ? draftCommitIndex() : state.draftSourceIndex)
+    : null;
   const featureMarkup = features.map((one, index) => {
+      if (index === editingFeatureIndex) return "";
       const width = one.zone[2] - one.zone[0];
       const depth = one.zone[3] - one.zone[1];
       const isRim = one.kind === "text" && one.options?.level === "rim";
@@ -7311,9 +7331,9 @@ function renderPlaced() {
       return `<div class="placed-item ${index === state.selected ? "selected" : ""} ${statusClass}" style="--support-color:${kindColor(one.kind)}">
         <button type="button" class="placed-item-select" data-index="${index}">
           <span class="placed-item-icon">${iconFor(one.kind)}</span>
-          <span class="placed-item-copy"><strong>${title}</strong><span>${specs}</span></span>
+          <span class="placed-item-copy"><strong>${title}</strong><span class="placed-item-detail">${specs}</span></span>
         </button>
-        <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this interior part" aria-label="Delete ${title}">✕</button>
+        <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this interior part" aria-label="Delete ${title}">Delete</button>
       </div>`;
     }).join("");
   const modifierDetail = kind => {
@@ -7329,15 +7349,15 @@ function renderPlaced() {
     return `${edge.side || "front"} · ${detail}`;
   };
   const modifierMarkup = [...BOX_MODIFIER_KINDS]
-    .filter(kind => modifierIsActive(kind))
+    .filter(kind => modifierIsActive(kind) && state.modifierEditing !== kind)
     .map(kind => {
       const info = partInfo(kind);
       return `<div class="placed-item ${state.modifierEditing === kind ? "selected status-valid" : ""}" data-kind="${kind}" style="--support-color:${kindColor(kind)}">
         <button type="button" class="placed-item-select" data-kind="${kind}">
           <span class="placed-item-icon">${iconFor(kind)}</span>
-          <span class="placed-item-copy"><strong>${escapeHtml(info?.title || kind)}</strong><span>${escapeHtml(modifierDetail(kind))}</span></span>
+          <span class="placed-item-copy"><strong>${escapeHtml(info?.title || kind)}</strong><span class="placed-item-detail">${escapeHtml(modifierDetail(kind))}</span></span>
         </button>
-        <button type="button" class="placed-item-delete" data-kind="${kind}" title="Delete ${escapeHtml(info?.title || kind)}" aria-label="Delete ${escapeHtml(info?.title || kind)}">✕</button>
+        <button type="button" class="placed-item-delete" data-kind="${kind}" title="Delete ${escapeHtml(info?.title || kind)}" aria-label="Delete ${escapeHtml(info?.title || kind)}">Delete</button>
       </div>`;
     }).join("");
   const markup = featureMarkup + modifierMarkup ||
@@ -7347,7 +7367,6 @@ function renderPlaced() {
     $$(".placed-item-select[data-index]", container).forEach(button => button.addEventListener("click", async () => {
       const index = Number(button.dataset.index);
       await selectedFeature(index);
-      if (state.selected === index) activatePreviewView("2d");
     }));
     $$(".placed-item-delete[data-index]", container).forEach(button => button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
     $$(".placed-item-select[data-kind]", container).forEach(button =>

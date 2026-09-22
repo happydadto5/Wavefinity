@@ -15,6 +15,7 @@ import trimesh
 from shapely import affinity
 
 import organizer_inserts._nest as nest_impl
+import organizer_inserts._divider as divider_impl
 
 from organizer_engine import (
     BoxSpec,
@@ -1208,6 +1209,20 @@ class DividerScoopTests(unittest.TestCase):
             clear_band_start = (cell.zone.y0 + cell.zone.y1) / 2.0
             self.assertGreaterEqual(solid.bounds[0][1], clear_band_start - 1e-6)
 
+        preview_with_text = build_features(self.box, [feature], self.base_z, include_text=True)
+        preview_without_text = build_features(self.box, [feature], self.base_z, include_text=False)
+        self.assertEqual(len(preview_with_text), len(preview_without_text) + len(texts))
+
+        rim_feature = self.divider(
+            label_divisions=True,
+            division_level="rim",
+            division_side="left",
+            division_labels=["A", "B", "C", "D"],
+        )
+        rim_preview_with = build_features(self.box, [rim_feature], self.base_z, include_text=True)
+        rim_preview_without = build_features(self.box, [rim_feature], self.base_z, include_text=False)
+        self.assertEqual(len(rim_preview_with), len(rim_preview_without))
+
     def test_scoop_wins_over_an_old_conflicting_sloped_bottom(self) -> None:
         feature = Feature(
             "divider", Zone.whole(self.box), along="x", count=1,
@@ -1237,18 +1252,20 @@ class DividerScoopTests(unittest.TestCase):
         solids = build_features(self.box, [feature], self.base_z)
         label_pieces = solids[2:]
         self.assertEqual(len(label_pieces), 8)
-        # A rim-level shelf sits at the box's fixed top-label ceiling, not at
-        # the divider's own configured height - see z_top in
-        # _divider_grid_rim_texts (capped by top_label_surface_z()).
-        top = top_label_surface_z(self.box)
+        options = inserts.resolved_options(self.box, feature, self.base_z)
+        crest = self.base_z + options["height"]
         cells = inserts.divider_cells(self.box, feature, self.base_z)
         for cell, shelf, inlay in zip(cells, label_pieces[::2], label_pieces[1::2]):
             # places=3: mesh bounds come from float32 vertices.
-            self.assertAlmostEqual(shelf.bounds[1][2], top, places=3)
-            self.assertLess(shelf.bounds[0][2], top - 2.0)
+            self.assertAlmostEqual(shelf.bounds[1][2], crest, places=3)
+            self.assertLess(shelf.bounds[0][2], crest - 2.0)
             self.assertLessEqual(shelf.bounds[0][0], cell.zone.x0 + 1e-6)
             self.assertGreater(shelf.bounds[1][0], cell.zone.x0 + 2.0)
-            self.assertAlmostEqual(inlay.bounds[1][2], top, places=3)
+            self.assertAlmostEqual(shelf.bounds[0][1], cell.zone.y0, places=3)
+            self.assertAlmostEqual(shelf.bounds[1][1], cell.zone.y1, places=3)
+            self.assertAlmostEqual(inlay.bounds[1][2], crest, places=3)
+            self.assertGreater(inlay.bounds[0][1], cell.zone.y0 + divider_impl.DIVISION_SHELF_TEXT_MARGIN - 1e-6)
+            self.assertLess(inlay.bounds[1][1], cell.zone.y1 - divider_impl.DIVISION_SHELF_TEXT_MARGIN + 1e-6)
             self.assertTrue(shelf.is_volume)
             self.assertTrue(inlay.is_volume)
         assembled = make_fitted_insert(self.box, [feature])

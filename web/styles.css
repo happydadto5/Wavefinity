@@ -713,11 +713,6 @@ input[type="number"]::-webkit-inner-spin-button {
 .fit-actions .button:hover { background: #fbe6c4; border-color: #d7ab63; }
 .button-row { display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap; }
 .button-row.equal > * { flex: 1; }
-/* .placed-block is reused for two DOM copies of the same placed-parts list:
-   the floating box over the 3D/2D view, and the left-panel copy (which also
-   carries .placed-block-panel to reset floating-box styling below). Any new
-   rule meant only for the floating box must be scoped past .placed-block-panel
-   (e.g. ".workspace > .placed-block") or it will leak into the panel copy. */
 .placed-block {
   position: absolute; top: 70px; right: 16px; z-index: 3;
   width: clamp(220px, 28%, 340px); max-height: calc(100% - 132px); overflow: auto;
@@ -726,24 +721,48 @@ input[type="number"]::-webkit-inner-spin-button {
   backdrop-filter: blur(8px);
 }
 .placed-block h3 { margin: 0 0 10px; font-size: 13px; }
-.placed-block-panel {
-  position: static; width: auto; max-height: none; margin: 10px 0 0; padding: 0;
-  border: 0; border-radius: 0; background: none; box-shadow: none; backdrop-filter: none;
-}
 .placed-supports { display: grid; gap: 5px; }
 .placed-empty { border: 1px dashed var(--line-dark); border-radius: 7px; padding: 12px; color: var(--muted); text-align: center; font-size: 12px; }
-.placed-item { border: 1px solid var(--line); border-radius: 8px; background: white; display: flex; justify-content: space-between; align-items: stretch; gap: 0; }
+.placed-item {
+  border: 1px solid var(--line); border-radius: 8px; background: white;
+  display: flex; justify-content: space-between; align-items: stretch; gap: 0;
+  min-height: 34px; max-height: 34px; overflow: hidden;
+}
+.placed-item:hover { border-color: var(--support-color); }
 .placed-item.selected { border-color: #d58d21; box-shadow: 0 0 0 2px rgba(240,169,60,.35); background: #fffaf0; }
 .placed-item.selected.status-valid { border-color: #1f6b45; box-shadow: 0 0 0 2px rgba(31,107,69,.18); background: #f3faf6; }
 .placed-item.status-error { border-color: var(--danger); background: #fff4f2; }
-.placed-item-select { flex: 1; min-width: 0; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; display: flex; align-items: stretch; gap: 0; }
-.placed-item-icon { display: grid; place-items: center; flex: 0 0 auto; width: 80px; border-radius: 8px 0 0 8px; color: var(--support-color); background: color-mix(in srgb, var(--support-color) 14%, white); }
-.placed-item-icon svg { width: 48px; height: 48px; stroke: currentColor; fill: none; stroke-width: 1.8; }
-.placed-item-copy { display: flex; flex-direction: column; min-width: 0; flex: 1; padding: 10px 12px; justify-content: center; }
-.placed-item-copy strong { color: var(--ink); font-size: 12px; }
-.placed-item-copy span { color: var(--muted); font-size: 11px; }
-.placed-item-delete { flex: none; border: 0; border-radius: 0 8px 8px 0; background: none; color: var(--danger); font-size: 16px; line-height: 1; padding: 0 8px; cursor: pointer; display: grid; place-items: center; }
-.placed-item-delete:hover { background: #fff0ef; }
+.placed-item-select {
+  flex: 1; min-width: 0; border: 0; background: none; padding: 0; text-align: left;
+  cursor: pointer; display: flex; align-items: center; gap: 0; overflow: hidden;
+}
+.placed-item-icon {
+  display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; align-self: stretch;
+  border-radius: 7px 0 0 7px; color: var(--support-color);
+  background: color-mix(in srgb, var(--support-color) 14%, white);
+  overflow: hidden;
+}
+.placed-item-icon svg {
+  display: block; width: 28px; height: 28px; stroke: currentColor; fill: none; stroke-width: 1.8;
+}
+.placed-item-copy {
+  display: flex; flex-direction: row; align-items: baseline; min-width: 0; flex: 1;
+  padding: 0 8px; gap: 6px; overflow: hidden;
+}
+.placed-item-copy strong {
+  color: var(--ink); font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.placed-item-copy .placed-item-detail, .placed-item-copy span {
+  color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.placed-item-delete {
+  flex: none; border: 0; border-radius: 0 7px 7px 0; background: none;
+  color: var(--danger); font-size: 11px; font-weight: 600; padding: 0 10px;
+  cursor: pointer; display: grid; place-items: center; transition: background 0.15s ease;
+}
+.placed-item-delete:hover, .placed-item-delete:focus-visible {
+  background: #fff0ef; outline: none;
+}
 
 .check-card { display: flex; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfc; cursor: pointer; }
 .check-card input { margin-top: 2px; accent-color: var(--teal); }
