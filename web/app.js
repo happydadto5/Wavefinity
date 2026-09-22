@@ -1376,6 +1376,14 @@ function rejectModifierConflict(previousDesign, previousCanGenerate, conflict) {
   toast(conflict.message, true, 6000);
 }
 
+function applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate) {
+  updateDesignFromForm();
+  const conflict = newModifierConflict(previousDesign, state.design);
+  if (!conflict) return true;
+  rejectModifierConflict(previousDesign, previousCanGenerate, conflict);
+  return false;
+}
+
 // Wall span a Side Opening's width is measured against - Front/Back run
 // along X, Left/Right run along Y. Mirrors organizer_side_openings.
 // side_opening_side_span() so the UI can filter eligibility client-side.
@@ -3407,11 +3415,7 @@ const applyChangedDesign = debounce(() => {
   const previousDesign = pendingDesignHistory || clone(state.design);
   const previousCanGenerate = state.canGenerate;
   pendingDesignHistory = null;
-  updateDesignFromForm();
-
-  const conflict = newModifierConflict(previousDesign, state.design);
-  if (conflict) {
-    rejectModifierConflict(previousDesign, previousCanGenerate, conflict);
+  if (!applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate)) {
     return;
   }
 
@@ -3987,11 +3991,7 @@ function wireControls() {
   $("#scoop")?.addEventListener("change", () => {
     const previousDesign = clone(state.design);
     const previousCanGenerate = state.canGenerate;
-    updateDesignFromForm();
-
-    const conflict = newModifierConflict(previousDesign, state.design);
-    if (conflict) {
-      rejectModifierConflict(previousDesign, previousCanGenerate, conflict);
+    if (!applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate)) {
       return;
     }
 
@@ -4244,7 +4244,10 @@ async function openModifier(kind, fromPlaced = false) {
   if (!BOX_MODIFIER_KINDS.has(kind) || !edgeMountAvailable()) return;
   if (state.draft && !(await guardDraftSwitch())) return;
   resetNestPhotoSession();
-  if (state.modifierEditing && state.modifierEditing !== kind) commitEdgeMountFormBeforeSwitch();
+  if (state.modifierEditing && state.modifierEditing !== kind &&
+      !commitEdgeMountFormBeforeSwitch()) {
+    return;
+  }
   cancelPendingDraftWork();
   state.paletteBrowsing = false;
   state.draft = null;
@@ -4382,12 +4385,20 @@ async function removeModifier(kind) {
 }
 
 function commitEdgeMountFormBeforeSwitch() {
-  if (!state.modifierEditing) return;
+  if (!state.modifierEditing) return true;
+
   const previousDesign = pendingDesignHistory || clone(state.design);
+  const previousCanGenerate = state.canGenerate;
+
   cancelChangedDesignDebounce();
   pendingDesignHistory = null;
-  updateDesignFromForm();
+
+  if (!applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate)) {
+    return false;
+  }
+
   recordHistory(previousDesign);
+  return true;
 }
 
 function syncDraftEditorIdentity(kind, info) {
@@ -4416,7 +4427,7 @@ async function selectKind(kind, reset = false) {
   const keepsSameDraft = !reset && state.draft?.kind === kind;
   if (!keepsSameDraft && !(await guardDraftSwitch())) return;
   if (!keepsSameDraft && state.draft?.kind === "nest") resetNestPhotoSession();
-  commitEdgeMountFormBeforeSwitch();
+  if (!commitEdgeMountFormBeforeSwitch()) return;
   state.edgeMountEditing = false;
   $("#draft-fields").hidden = false;
   $("#edge-mount-editor").hidden = true;
@@ -4505,7 +4516,7 @@ async function selectedFeature(index, force = false) {
   if (!force && !(await guardDraftSwitch())) return;
   const selected = state.design.layout.features[index];
   if (state.draft?.kind === "nest" || selected?.kind === "nest") resetNestPhotoSession();
-  commitEdgeMountFormBeforeSwitch();
+  if (!commitEdgeMountFormBeforeSwitch()) return;
   cancelPendingDraftWork();
   state.edgeMountEditing = false;
   $("#draft-fields").hidden = false;
@@ -7633,15 +7644,22 @@ function beginDesignMutation() {
     toast("Finish the current design change first.", true);
     return false;
   }
-  // The mutation operates on a new snapshot of the design. Pending draft
-  // work was calculated against the old snapshot and must not land afterward.
+
   const beforeForm = clone(pendingDesignHistory || state.design);
-  cancelPendingDraftWork();
-  // A queued size-history snapshot belongs to the design before this atomic
-  // operation. Do not let it become the "before" state of a later edit.
+  const previousCanGenerate = state.canGenerate;
+
+  // Flush/cancel the debounced ordinary path, but do not cancel unrelated
+  // draft work until we know the live modifier form is allowed to commit.
   cancelChangedDesignDebounce();
   pendingDesignHistory = null;
-  updateDesignFromForm();
+
+  if (!applyLiveFormWithModifierConflictGuard(beforeForm, previousCanGenerate)) {
+    return false;
+  }
+
+  // The mutation is now allowed to own a new design snapshot. Pending draft
+  // work calculated against the old snapshot must not land afterward.
+  cancelPendingDraftWork();
   recordHistory(beforeForm);
   state.designMutationBusy = true;
   state.previewRequest += 1;
