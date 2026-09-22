@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-22 — Edge Mount printable screw holes (Fix 035A)
+
+- Edge Mount screw holes and their screwdriver-access passages now cut with a pointed, self-supporting roof instead of a flat-topped round roof, so they print without slicer supports. The full requested clearance diameter is preserved.
+- Added a warning under Label Type when Integrated is selected, noting it normally needs slicer supports and that Separate is recommended for support-free printing.
+- The screwdriver-access fit error now reports the actual selected hole count instead of always saying "Two".
+
 ## 2026-09-22 — Edge Mount standoff ribs
 
 - Separate Edge Mount labels now add vertical standoff ribs to the bin body so the saddle clip and bin meet a flat mounting surface together. Auto spaces ribs across the chosen wall; older saved Separate labels keep ribs off until enabled.
