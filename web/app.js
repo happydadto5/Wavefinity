@@ -5015,9 +5015,14 @@ function renderDraftFields() {
       // just the perimeter sleeve(s) rising from the base. Absent = Full Base.
       const boreStyle = one.options?.bore_style ?? state.draftResolvedOptions?.bore_style ?? "full_base";
       const wallOnly = boreStyle === "wall_only";
+      // Wavy Base is a Full Base-style solid block with Wall Only's wavy holes;
+      // like Wall Only it stands upright and is sized by its outer envelope, and
+      // it also sizes the bin around itself.
+      const wavyBase = boreStyle === "wavy_base";
+      const envelopeStyle = wallOnly || wavyBase;
       const wallStyle = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style ?? "wavy";
       const styleField = `<label><span class="field-label">Style</span><select data-draft="option:bore_style">
-        ${[["full_base", "Full Base"], ["wall_only", "Wall Only"]].map(([value, label]) => `<option value="${value}" ${boreStyle === value ? "selected" : ""}>${label}</option>`).join("")}
+        ${[["full_base", "Full Base"], ["wall_only", "Wall Only"], ["wavy_base", "Wavy Base"]].map(([value, label]) => `<option value="${value}" ${boreStyle === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>`;
       const wallStyleField = wallOnly ? `<label><span class="field-label">Walls</span><select data-draft="option:wall_style">
         ${[["wavy", "Wavy Walls"], ["straight", "Straight Walls"]].map(([value, label]) => `<option value="${value}" ${wallStyle === value ? "selected" : ""}>${label}</option>`).join("")}
@@ -5034,7 +5039,12 @@ function renderDraftFields() {
         <span class="bore-group-label">Base</span>
         <div class="bore-group-fields">
           <div class="bore-auto-row">
-            ${autoOn("base")
+            ${wavyBase
+              ? `<label><span class="field-label">Width<span class="unit">mm</span></span>
+                  <input type="text" class="bore-auto-field" value="Auto-fit" readonly disabled title="Wavy Base sizes itself and the bin around its holes"></label>
+                 <label><span class="field-label">Length<span class="unit">mm</span></span>
+                  <input type="text" class="bore-auto-field" value="Auto-fit" readonly disabled title="Wavy Base sizes itself and the bin around its holes"></label>`
+              : autoOn("base")
               ? autoField("Width", "base", "width", "mm") + autoField("Length", "base", "depth", "mm")
               : field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" }) +
                 field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
@@ -5047,10 +5057,10 @@ function renderDraftFields() {
             ${autoButton("height")}
           </div>
           <div class="bore-auto-row">
-            ${autoOn("grid")
+            ${autoOn("grid") && !wavyBase
               ? autoField("X count", "grid", "option:columns") + autoField("Y count", "grid", "option:rows")
               : gridField("columns", "X count") + gridField("rows", "Y count")}
-            ${autoButton("grid")}
+            ${wavyBase ? "" : autoButton("grid")}
           </div>
         </div>
       </div>`;
@@ -5064,9 +5074,9 @@ function renderDraftFields() {
           ${diameterField}
           ${shapeField}
           ${wallOnly ? "" : optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
-          ${wallOnly ? dividerThicknessField(boreWallShown, "option:wall") : optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
-          ${hexBit || wallOnly ? "" : optionField("angle", "Tool angle", { unit: "°", step: "1", min: "20", max: "90", transform: value => 90 - number(value, 0), tip: "90° is upright. Smaller angles lean the tool toward the selected direction." })}
-          ${hexBit || wallOnly || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Angle towards</span><select data-draft="option:angle_towards">
+          ${envelopeStyle ? dividerThicknessField(boreWallShown, "option:wall") : optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
+          ${hexBit || envelopeStyle ? "" : optionField("angle", "Tool angle", { unit: "°", step: "1", min: "20", max: "90", transform: value => 90 - number(value, 0), tip: "90° is upright. Smaller angles lean the tool toward the selected direction." })}
+          ${hexBit || envelopeStyle || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Angle towards</span><select data-draft="option:angle_towards">
             ${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]].map(([value, label]) => `<option value="${value}" ${(one.options?.angle_towards || (one.along === "y" ? "front" : "left")) === value ? "selected" : ""}>${label}</option>`).join("")}
           </select></label>`}
         </div>
@@ -6378,6 +6388,8 @@ function applyBoreAuto(one) {
   if (one?.kind !== "bore") return false;
   const opts = one.options ||= {};
   if (opts.auto_height) delete opts.height;
+  // Wavy Base sizes itself; a saved Auto Base / Auto Grid is kept but dormant.
+  if (opts.bore_style === "wavy_base") return false;
   if (opts.auto_grid) {
     delete opts.columns;
     delete opts.rows;
@@ -6404,16 +6416,20 @@ function sizeBoreToGrid(one) {
   if (one.kind !== "bore") return;
   // Auto Base fills the bin whatever the grid needs; Auto Grid fills whatever
   // Base there is. Only a manual Base with manual counts grows to the grid.
-  if (applyBoreAuto(one) || one.options?.auto_grid) return;
   const opts = one.options || {};
   const resolved = state.draftResolvedOptions || {};
+  const dormantAuto = (opts.bore_style ?? resolved.bore_style ?? "full_base") === "wavy_base";
+  if (applyBoreAuto(one) || (!dormantAuto && opts.auto_grid)) return;
   const profile = one.item?.profile || "round";
   const hexBit = isHexBitProfile(profile);
   const diameter = hexBit
     ? HEX_BIT_PROFILES[profile].diameter
     : number(one.item?.segments?.[0]?.diameter, 6);
   const held = diameter + 0.25;
-  const wallOnly = (opts.bore_style ?? resolved.bore_style ?? "full_base") === "wall_only";
+  const boreStyle = opts.bore_style ?? resolved.bore_style ?? "full_base";
+  const wavyBase = boreStyle === "wavy_base";
+  // Wall Only and Wavy Base both stand upright and size to their outer envelope.
+  const wallOnly = boreStyle === "wall_only" || wavyBase;
   const angle = hexBit || wallOnly ? 0 : Math.min(70, Math.max(0, number(opts.angle ?? resolved.angle, 0)));
   // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
   // Wall was hand-set - match that so the block sizing tracks the real pitch.
@@ -6457,7 +6473,7 @@ function sizeBoreToGrid(one) {
   const amplitude = number(wallRules.wave_amplitude_mm ?? state.catalog?.wave_amplitude_mm, 0.4);
   const depthFactor = number(wallRules.wall_depth_factor ?? state.catalog?.wall_depth_factor, 1.181);
   const waveNoiseFloor = 1e-4;  // ensure wavy troughs never self-intersect
-  const wavy = (opts.wall_style ?? resolved.wall_style ?? "wavy") !== "straight";
+  const wavy = wavyBase || (opts.wall_style ?? resolved.wall_style ?? "wavy") !== "straight";
   const shellReach = wavy ? 2 * amplitude + wall * depthFactor + waveNoiseFloor : wall;
   const clearSpan = (axis) => {
     if (profile === "round") {
@@ -6482,7 +6498,8 @@ function sizeBoreToGrid(one) {
   const resolveAxis = (countKey, cur, pinKey, leanAxis) => {
     const count = Math.max(1, Math.round(number(opts[countKey] ?? resolved[countKey], 1)));
     const minimum = axisSpan(count, leanAxis);
-    return state.pinnedZone[pinKey] ? Math.max(cur, minimum) : minimum;
+    // A Wavy Base always takes its exact envelope; nothing pins it larger.
+    return state.pinnedZone[pinKey] && !wavyBase ? Math.max(cur, minimum) : minimum;
   };
   const width = resolveAxis("columns", curW, "width", "x");
   const depth = resolveAxis("rows", curD, "depth", "y");
@@ -6813,12 +6830,15 @@ function updateDraftFromFields(event) {
     else delete one.options.angle_towards;
     // Style choices are words, never numbers.
     if (changed === "option:bore_style") {
-      one.options.bore_style = get(changed) === "wall_only" ? "wall_only" : "full_base";
-      // A Wall Only sleeve stands upright.
-      if (one.options.bore_style === "wall_only") {
+      const chosen = get(changed);
+      one.options.bore_style = ["wall_only", "wavy_base"].includes(chosen) ? chosen : "full_base";
+      // Wall Only and Wavy Base stand upright.
+      if (one.options.bore_style !== "full_base") {
         one.options.angle = 0;
         delete one.options.angle_towards;
       }
+      // Wavy Base sizes its own Base and the bin. Any saved Auto Base / Auto
+      // Grid stays on record, dormant, and returns when another style is chosen.
     }
     if (changed === "option:wall_style") {
       one.options.wall_style = get(changed) === "straight" ? "straight" : "wavy";
@@ -7144,6 +7164,7 @@ async function refreshDraft() {
     state.draftResolvedOptions = result.resolved_options || {};
     // The server's usable layout area is the authority for Base Auto.
     if (state.draft.kind === "bore" && state.draft.options?.auto_base
+        && state.draft.options?.bore_style !== "wavy_base"
         && Array.isArray(result.feature?.zone)) {
       state.draft.zone = result.feature.zone;
     }
@@ -7151,6 +7172,20 @@ async function refreshDraft() {
     // The resolver now has the real item depth and lean. Re-size before saving
     // so Base always reflects the actual hole grid, not a stale preview size.
     if (info.kind === "bore") sizeBoreToGrid(state.draft);
+    // A Wavy Base sizes the bin: the server says what the smallest legal bin is,
+    // so the bin shrinks or grows to it (the browser never guesses this number).
+    const wavyBin = result.wavy_base_bin;
+    const box = state.design.box;
+    if (wavyBin && state.draftAutoCommit && !state.autoGrowingBin
+        && (Math.abs(number(box.x) - wavyBin.x) > 1e-6 || Math.abs(number(box.y) - wavyBin.y) > 1e-6)) {
+      state.autoGrowingBin = true;
+      try {
+        await autoExpandBin({ keepDraft: true, silent: true });
+      } finally {
+        state.autoGrowingBin = false;
+      }
+      return;
+    }
     for (const option of info.fields) {
       if (Object.prototype.hasOwnProperty.call(state.draft.options || {}, option.key)) continue;
       const input = $(`[data-draft="option:${option.key}"]`, $("#draft-fields"));
