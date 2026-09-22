@@ -864,6 +864,7 @@ function readEdgeMountForm(design) {
     ? number($("#edge-mount-label-thickness-mm")?.value, current.label_thickness_mm)
     : number(thicknessSelect?.value, current.label_thickness_mm);
   const spacingMode = $("#edge-mount-spacing-mode")?.value || "auto";
+  const ribCountMode = $("#edge-mount-standoff-rib-count-mode")?.value || "auto";
   design.box.edge_mount = {
     side: $("#edge-mount-side")?.value || "front",
     label_enabled: labelEnabled,
@@ -875,6 +876,10 @@ function readEdgeMountForm(design) {
     label_raised: $("#edge-mount-label-style")?.value === "raised",
     label_text_depth_mm: number($("#edge-mount-label-depth")?.value, current.label_text_depth_mm),
     label_flip: Boolean($("#edge-mount-label-flip")?.checked),
+    standoff_ribs_enabled: Boolean($("#edge-mount-standoff-ribs-enabled")?.checked),
+    standoff_rib_count: ribCountMode === "manual"
+      ? number($("#edge-mount-standoff-rib-count")?.value, current.standoff_rib_count || 1)
+      : null,
     holes_enabled: holesEnabled,
     hole_count: number($("#edge-mount-hole-count")?.value, current.hole_count),
     hole_orientation: $("#edge-mount-hole-orientation")?.value || "horizontal",
@@ -910,6 +915,18 @@ function syncEdgeMountControls() {
   if ($("#edge-mount-label-style")) $("#edge-mount-label-style").value = edgeMount.label_raised ? "raised" : "flush";
   if ($("#edge-mount-label-depth")) $("#edge-mount-label-depth").value = fmt(edgeMount.label_text_depth_mm);
   if ($("#edge-mount-label-flip")) $("#edge-mount-label-flip").checked = edgeMount.label_flip;
+  if ($("#edge-mount-standoff-ribs-enabled")) {
+    $("#edge-mount-standoff-ribs-enabled").checked = edgeMount.standoff_ribs_enabled;
+  }
+  const ribCountMode = edgeMount.standoff_rib_count === null || edgeMount.standoff_rib_count === undefined
+    ? "auto" : "manual";
+  if ($("#edge-mount-standoff-rib-count-mode")) $("#edge-mount-standoff-rib-count-mode").value = ribCountMode;
+  if ($("#edge-mount-standoff-rib-count")) {
+    $("#edge-mount-standoff-rib-count").value = String(edgeMount.standoff_rib_count || 1);
+  }
+  if ($("#edge-mount-standoff-rib-count-row")) {
+    $("#edge-mount-standoff-rib-count-row").hidden = ribCountMode !== "manual";
+  }
   if ($("#edge-mount-hole-count")) $("#edge-mount-hole-count").value = String(edgeMount.hole_count);
   if ($("#edge-mount-hole-orientation")) $("#edge-mount-hole-orientation").value = edgeMount.hole_orientation;
   if ($("#edge-mount-screw-diameter")) $("#edge-mount-screw-diameter").value = fmt(edgeMount.screw_diameter_mm);
@@ -950,6 +967,9 @@ function syncEdgeMountControls() {
 
   if ($("#edge-mount-label-panel")) $("#edge-mount-label-panel").hidden = !edgeMount.label_enabled;
   if ($("#edge-mount-holes-panel")) $("#edge-mount-holes-panel").hidden = !edgeMount.holes_enabled;
+  if ($("#edge-mount-standoff-rib-controls")) {
+    $("#edge-mount-standoff-rib-controls").hidden = !edgeMount.label_enabled || edgeMount.label_type !== "separate";
+  }
   if ($("#edge-mount-hole-orientation-row")) $("#edge-mount-hole-orientation-row").hidden = number(edgeMount.hole_count) <= 1;
 }
 
@@ -959,6 +979,9 @@ function syncEdgeMountEditorVisibility() {
   const edgeMount = scratch.box.edge_mount || EDGE_MOUNT_DEFAULTS;
   $("#edge-mount-label-panel").hidden = !$("#edge-mount-label-enabled").checked;
   $("#edge-mount-holes-panel").hidden = !$("#edge-mount-holes-enabled").checked;
+  const separateLabel = $("#edge-mount-label-type").value === "separate";
+  $("#edge-mount-standoff-rib-controls").hidden = !$("#edge-mount-label-enabled").checked || !separateLabel;
+  $("#edge-mount-standoff-rib-count-row").hidden = $("#edge-mount-standoff-rib-count-mode").value !== "manual";
   $("#edge-mount-label-thickness-custom-row").hidden = $("#edge-mount-label-thickness").value !== "custom";
   $("#edge-mount-spacing-custom-row").hidden = $("#edge-mount-spacing-mode").value !== "custom";
   $("#edge-mount-hole-orientation-row").hidden = number($("#edge-mount-hole-count").value) <= 1;
@@ -1729,6 +1752,8 @@ const EDGE_MOUNT_DEFAULTS = {
   label_raised: false,
   label_text_depth_mm: 0.4,
   label_flip: false,
+  standoff_ribs_enabled: true,
+  standoff_rib_count: null,
   holes_enabled: false,
   hole_count: 2,
   hole_orientation: "horizontal",
@@ -3396,8 +3421,9 @@ function wireControls() {
 
   const edgeMountChangeIds = [
     "#edge-mount-side", "#edge-mount-label-enabled", "#edge-mount-holes-enabled",
-    "#edge-mount-label-length-mode", "#edge-mount-label-projection",
+    "#edge-mount-label-type", "#edge-mount-label-length-mode", "#edge-mount-label-projection",
     "#edge-mount-label-thickness", "#edge-mount-label-style", "#edge-mount-label-flip",
+    "#edge-mount-standoff-ribs-enabled", "#edge-mount-standoff-rib-count-mode",
     "#edge-mount-hole-count", "#edge-mount-hole-orientation", "#edge-mount-access-diameter",
     "#edge-mount-spacing-mode",
   ];
@@ -3407,7 +3433,7 @@ function wireControls() {
   }));
   const edgeMountInputIds = [
     "#edge-mount-label-text", "#edge-mount-label-projection-mm", "#edge-mount-label-thickness-mm",
-    "#edge-mount-label-depth", "#edge-mount-screw-diameter", "#edge-mount-access-diameter",
+    "#edge-mount-label-depth", "#edge-mount-standoff-rib-count", "#edge-mount-screw-diameter", "#edge-mount-access-diameter",
     "#edge-mount-top-offset", "#edge-mount-spacing-mm",
   ];
   edgeMountInputIds.forEach(selector => $(selector)?.addEventListener("input", () => {
