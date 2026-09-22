@@ -12,6 +12,8 @@ const DP = {
   signatures: {},
   open: new Set(),        // bin ids whose details are expanded
   filter: { text: "", show: "all", sort: "height" },
+  printSelected: new Set(), // bin ids picked for the bulk print (session only)
+  includeSpaceConnectors: true,
 };
 
 try { Object.assign(DP.filter, JSON.parse(localStorage.getItem("wavefinity-drawer-filter") || "{}"), { text: "" }); } catch (_error) {}
@@ -95,7 +97,7 @@ DP.build = () => {
           <button type="button" id="dl-sp-generate" class="button secondary" title="Generate the selected spacer candidates">Generate Selected Spacers</button>
           <button type="button" id="dl-base-trim" class="button secondary" title="Create a Base Trim around one filled rectangular block of bins">Make Base Trim</button>
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
-          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and the connectors they need together in Bambu Studio">Print Drawer (All)</button>
+          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and the connectors they need together in Bambu Studio">Print Spacers + Connectors</button>
         </div>
       </div>
     </section>
@@ -121,8 +123,16 @@ DP.build = () => {
             <option value="newest">Newest first</option>
           </select>
         </div>
+        <div id="dl-batch-tools" class="dl-batch-tools">
+          <div class="dl-batch-row">
+            <button type="button" id="dl-batch-select-all" class="button secondary dl-small" title="Select every generated bin that still needs printing">Select all needed</button>
+            <button type="button" id="dl-batch-clear" class="button secondary dl-small">Clear</button>
+            <span id="dl-batch-summary" class="dl-batch-summary" role="status"></span>
+          </div>
+          <label class="checkbox-row dl-batch-connectors"><span>Include Space Connectors</span><input id="dl-batch-connectors" type="checkbox" checked></label>
+          <button type="button" id="dl-batch-print" class="button primary wide">Print Selected to Bambu Studio</button>
+        </div>
         <div id="dl-inv-list" class="dl-inv-list"></div>
-        <label class="checkbox-row dl-new-printed" title="Off: a newly generated bin starts at Qty 0 until you mark it printed. On: it counts as one printed copy straight away."><span>New bins count as printed</span><input id="dl-new-printed" type="checkbox"></label>
         <details class="dl-details" id="dl-add-details">
           <summary>+ Add a bin by hand</summary>
           <p class="dl-note">For bins printed before logging, or elsewhere. Width, length and height snap to the same sizes a designed bin uses.</p>
@@ -228,7 +238,14 @@ DP.wire = () => {
   setting("#dl-sp-flexible", "spacers", "flexible", node => node.checked);
   setting("#dl-sp-height", "spacers", "height", node => Math.max(6, dlNum(node.value, 15)));
 
-  setting("#dl-new-printed", null, "new_bins_printed", node => node.checked);
+  $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllNeeded());
+  $("#dl-batch-clear").addEventListener("click", () => DP.clearPrintSelection());
+  $("#dl-batch-connectors").addEventListener("change", event => {
+    DP.includeSpaceConnectors = event.target.checked;
+    DP.renderBatch();
+  });
+  $("#dl-batch-print").addEventListener("click", () =>
+    DL.printSelectedBins(DP.printSelectionPayload(), DP.includeSpaceConnectors));
   $("#dl-auto").addEventListener("click", () => DL.runAuto());
   // Empty-state buttons (canvas overlay and Inventory list) share these.
   const emptyAction = event => {
@@ -288,6 +305,13 @@ DP.wire = () => {
     if (one) DL.quickPlace(one);
   });
   list.addEventListener("change", event => {
+    const printId = event.target.dataset.printSelect;
+    if (printId) {
+      if (event.target.checked) DP.printSelected.add(printId); else DP.printSelected.delete(printId);
+      event.target.closest("[data-bin]")?.classList.toggle("print-selected", event.target.checked);
+      DP.renderBatch();
+      return;
+    }
     const field = event.target.dataset.field;
     const id = event.target.closest("[data-bin]")?.dataset.bin;
     if (!field || !id) return;
@@ -408,7 +432,56 @@ DP.wire = () => {
   $("#dl-save").addEventListener("click", () => DL.save());
 };
 
+// ------------------------------------------------------------ bulk print
+
+DP.prunePrintSelection = () => {
+  DP.printSelected = new Set(
+    [...DP.printSelected].filter(id => DL.printEligible(DL.bin(id))));
+};
+
+DP.resetPrintSelection = () => {
+  DP.printSelected = new Set();
+  DP.renderInventory(true);
+};
+
+DP.selectAllNeeded = () => {
+  DP.printSelected = new Set(
+    DL.bins.filter(one => DL.printNeeded(one) > 0).map(one => one.id));
+  DP.renderInventory(true);
+};
+
+DP.clearPrintSelection = () => {
+  DP.printSelected.clear();
+  DP.renderInventory(true);
+};
+
+DP.printSelectionPayload = () => Object.fromEntries(
+  [...DP.printSelected]
+    .map(id => DL.bin(id))
+    .filter(one => DL.printEligible(one))
+    .map(one => [one.id, DL.printCount(one)]));
+
+DP.renderBatch = () => {
+  const hosted = Boolean(state.runtime.hosted);
+  const tools = $("#dl-batch-tools");
+  if (!tools) return;
+  tools.hidden = hosted;
+  if (hosted) return;
+  const rows = [...DP.printSelected].map(id => DL.bin(id)).filter(one => DL.printEligible(one));
+  const copies = rows.reduce((sum, one) => sum + DL.printCount(one), 0);
+  $("#dl-batch-summary").textContent = rows.length
+    ? `${dlPlural(rows.length, "design")} · ${dlPlural(copies, "bin copy", "bin copies")}${DP.includeSpaceConnectors ? " · Space connectors included" : ""}`
+    : "";
+  dlSet("#dl-batch-connectors", DP.includeSpaceConnectors, "checked");
+  const noSlicer = !state.slicer || !state.slicer.available;
+  const button = $("#dl-batch-print");
+  button.disabled = !rows.length || noSlicer || Boolean(DL.busy);
+  button.title = noSlicer ? "Bambu Studio was not found. Locate it with Change slicer in the bin view." : "";
+  button.textContent = DL.busy === "print-bins" ? "Opening Bambu Studio…" : "Print Selected to Bambu Studio";
+};
+
 DP.onInventoryClick = async event => {
+  if (event.target.closest(".dl-print-select, .dl-print-placeholder")) return;
   const row = event.target.closest("[data-bin]");
   const one = row && DL.bin(row.dataset.bin);
   if (!one) return;
@@ -872,6 +945,7 @@ DP.workingRow = () => {
   const fit = DL.workingFit();
   const title = one.name ? `Current design · ${one.name}` : "Current design";
   return `<div class="dl-bin dl-working" data-working="1" title="Not generated yet - only shown so you can plan around it">
+    <span class="dl-print-placeholder" aria-hidden="true"></span>
     <span class="dl-swatch dl-working-swatch">${fmt(one.z)}</span>
     <span class="dl-bin-main">
       <strong>${escapeHtml(title)}</strong>
@@ -887,12 +961,13 @@ DP.renderInventory = (force = false) => {
   const list = $("#dl-inv-list");
   dlSet("#dl-inv-show", DP.filter.show);
   dlSet("#dl-inv-sort", DP.filter.sort);
-  dlSet("#dl-new-printed", Boolean(DL.layout.settings.new_bins_printed), "checked");
+  DP.prunePrintSelection();
+  DP.renderBatch();
   const printed = DL.bins.reduce((sum, one) => sum + (one.qty > 0 ? one.qty : 0), 0);
   $("#dl-inv-count").textContent = `${dlPlural(DL.bins.length, "design")} · ${printed} printed`;
   const selectedBin = DL.selected ? DL.findPlacement(DL.selected)?.placement.bin : null;
   const counts = DL.bins.map(one => [DL.placedCount(one.id), DL.plannedCount(one.id)]);
-  const signature = JSON.stringify([DL.bins, counts, DP.filter, [...DP.open], selectedBin, drawer.id, drawer.height,
+  const signature = JSON.stringify([DL.bins, counts, DP.filter, [...DP.open], selectedBin, drawer.id, drawer.height, [...DP.printSelected],
     DL.working ? [DL.working.key, DL.working.error || "", DL.workingFit()] : null]);
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
@@ -927,13 +1002,19 @@ DP.renderInventory = (force = false) => {
       one.qty <= 0 ? "unprinted" : "", tooTall ? "too-tall" : "",
     ].filter(Boolean).join(" ");
     const open = DP.open.has(one.id);
+    const eligible = DL.printEligible(one);
+    const printFlag = !eligible ? "" : (planned > 0 ? `${planned} needed` : (one.qty <= 0 ? "Ready to print" : ""));
+    const picked = eligible && DP.printSelected.has(one.id);
     return `
-      <div class="dl-bin ${classes}" data-bin="${escapeHtml(one.id)}" draggable="${canPlace}" title="${canPlace ? "Drag into the drawer, or double-click to place" : ""}">
+      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" draggable="${canPlace}" title="${canPlace ? "Drag into the drawer, or double-click to place" : ""}">
+        ${eligible
+          ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.label(one))} for printing"${picked ? " checked" : ""}>`
+          : `<span class="dl-print-placeholder" aria-hidden="true"></span>`}
         <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${DL.stackable(one) ? `${fmt(one.z)} mm stack module; ${fmt(DL.partHeight(one))} mm detached` : `${fmt(one.z)} mm tall`}">${fmt(one.z)}${DL.stackable(one) ? "<i>⇅</i>" : ""}</span>
         <span class="dl-bin-main">
           <strong>${escapeHtml(DL.label(one))}</strong>
           <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units</small>
-          ${flags.length ? `<small class="dl-flags">${escapeHtml(flags.join(" · "))}</small>` : ""}
+          ${flags.length || printFlag ? `<small class="dl-flags">${escapeHtml([...flags, printFlag].filter(Boolean).join(" · "))}</small>` : ""}
         </span>
         <span class="dl-placed" title="${holding.length ? `In ${escapeHtml(holding.join(", "))}` : "Not in a drawer"}">${placed - planned}/${one.qty}<small>${planned ? `+${planned} planned` : "placed"}</small></span>
         <span class="dl-qty" title="How many you have printed">

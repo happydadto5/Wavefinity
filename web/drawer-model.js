@@ -64,8 +64,6 @@ DL.emit = () => DL.listeners.forEach(fn => fn());
 DL.defaultSettings = () => ({
   autosave: true,
   show_empty: true,
-  // Generating is not printing: new bins arrive at Qty 0 unless this is on.
-  new_bins_printed: false,
   auto: {
     mode: "rearrange", height_rule: "strict", height_reach: "column",
     keep_locked: true, include_spacers: false, stack_bins: true,
@@ -109,6 +107,7 @@ DL.normaliseLayout = raw => {
   const defaults = DL.defaultSettings();
   layout.version = 1;
   layout.settings = { ...defaults, ...(layout.settings || {}) };
+  delete layout.settings.new_bins_printed; // retired: generating always means Qty 0
   layout.settings.auto = { ...defaults.auto, ...(layout.settings.auto || {}) };
   layout.settings.spacers = { ...defaults.spacers, ...(layout.settings.spacers || {}) };
   layout.drawers = Array.isArray(layout.drawers)
@@ -331,6 +330,26 @@ DL.plannedCount = id => {
   return DL.layout.drawers.reduce((sum, drawer) =>
     sum + drawer.placements.filter(p => p.bin === id && (p.copy ?? 0) >= (Number(one?.qty) || 0)).length, 0);
 };
+// Bulk printing: a generated bin/B4B row (one with a file) can be sent to the
+// slicer. Needed = planned copies not yet printed, or one copy for a Qty 0 row
+// that is not placed; an explicit pick of a satisfied row reprints one.
+DL.printEligible = one =>
+  Boolean(one) &&
+  ["bin", "b4b"].includes(one.kind) &&
+  Boolean(String(one.file || "").trim());
+
+DL.printNeeded = one => {
+  if (!DL.printEligible(one)) return 0;
+  const planned = DL.plannedCount(one.id);
+  if (planned > 0) return planned;
+  return Number(one.qty) <= 0 ? 1 : 0;
+};
+
+DL.printCount = one => {
+  const needed = DL.printNeeded(one);
+  return needed > 0 ? needed : (DL.printEligible(one) ? 1 : 0);
+};
+
 DL.drawersHolding = id => DL.layout.drawers
   .filter(drawer => drawer.placements.some(p => p.bin === id)).map(drawer => drawer.name);
 
@@ -605,6 +624,7 @@ DL.load = async () => {
   const sameFolder = DL.output === output;
   DL.output = output;
   DL.exists = data.exists;
+  if (!sameFolder && typeof DP !== "undefined") DP.printSelected = new Set();
   DL.warnings = data.warnings || [];
   DL.adopt(data);
   // Unsaved edits (auto-save off) survive a trip to the 3D view; anything
@@ -1096,10 +1116,9 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async () => {
       layout: DL.layout,
     });
   }
-  // launch_slicer opens the files but does not itself set Bambu Studio's
-  // per-object copy count - tell the user what to set it to.
+  // The launch already repeats each file once per copy.
   const lines = Object.entries(result.counts || {}).map(([file, copyCount]) => `${copyCount} × ${file}`);
-  toast(["Opened in Bambu Studio - set copies to:", ...lines].join("\n"), false, 9000);
+  toast(["Opened in Bambu Studio", ...lines].join("\n"), false, 9000);
 });
 
 DL.removeSpacers = () => DL.change(() => {
@@ -1119,11 +1138,53 @@ DL.saveConnectorFiles = async () => {
   };
 };
 
+// selection: { [bin id]: copies }. The server re-reads the saved inventory, so
+// the layout is saved first; Qty and planned copies change there only after
+// the slicer opened successfully.
+DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async () => {
+  if (state.runtime.hosted) {
+    toast("Bulk printing to a local slicer is available in local Wavefinity.", true);
+    return;
+  }
+  if (!state.slicer || !state.slicer.available) {
+    toast("Bambu Studio was not found. Locate it with Change slicer in the bin view.", true, 7000);
+    return;
+  }
+  const chosen = Object.fromEntries(Object.entries(selection || {}).filter(([, count]) => count > 0));
+  if (!Object.keys(chosen).length) return;
+  if (!(await DL.save())) return;
+  const result = await DL.inventoryCall("/api/drawer/print-bins", {
+    selection: chosen,
+    include_connectors: Boolean(includeConnectors),
+    slicer_path: state.slicer?.path || null,
+  });
+  DL.adopt(result);
+  if (result.layout) {
+    const selected = DL.selected;
+    DL.normaliseLayout(result.layout);
+    DL.selected = selected && DL.findPlacement(selected) ? selected : null;
+  }
+  DL.dirty = false;
+  DL.saveState = "saved";
+  DL.savedAt = new Date();
+  DP.resetPrintSelection();
+  DL.emit();
+  DL.requestReport();
+  const project = result.project ? String(result.project).split(/[\\/]/).pop() : "";
+  toast([
+    "Opened one Bambu project",
+    `${result.bin_copies} bin ${result.bin_copies === 1 ? "copy" : "copies"}`,
+    ...(result.connector_copies ? [`${result.connector_copies} connector ${result.connector_copies === 1 ? "copy" : "copies"}`] : []),
+    ...(project ? [project] : []),
+    ...(result.notes || []),
+  ].join("\n"), false, 10000);
+});
+
 DL.printDrawer = () => DL.busyWith("print", async () => {
   const result = await api("/api/drawer/print", {
     output: DL.output ?? DL.folder(), layout: DL.layout, bins: DL.bins,
     drawer_id: DL.layout.active, slicer_path: state.slicer?.path || null,
   });
   const lines = Object.entries(result.counts || {}).map(([file, count]) => `${count} × ${file}`);
-  toast(["Opened in Bambu Studio - set copies to:", ...lines, ...(result.notes || [])].join("\n"), false, 10000);
+  toast(["Opened in Bambu Studio", ...lines, ...(result.notes || [])].join("\n"), false, 10000);
 });

@@ -4,6 +4,7 @@ import threading
 import unittest
 import json
 from pathlib import Path
+from unittest import mock
 
 from shapely import affinity
 
@@ -13,8 +14,11 @@ from organizer_drawer import (
     drawer_report,
     drawer_routes,
     generate_spacers,
+    inventory_row_files,
     normalise_drawer,
     plan_spacers,
+    print_inventory_bins,
+    print_spacers_and_connectors,
     wavy_rect_outer,
 )
 from organizer_engine import (
@@ -747,6 +751,210 @@ class AutoSpaceFolderTests(unittest.TestCase):
                     "z": 0,
                 })
             self.assertFalse((space_root / "Invalid Drawer").exists())
+
+
+class BulkPrintTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = Path(self.tmp.name)
+        self.slicer = self.folder / "bambu-studio.exe"
+        self.slicer.write_bytes(b"")
+        self.launched = []
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def add(self, name, files, qty=None, **extra):
+        for one in files.split(", "):
+            (self.folder / one).write_bytes(b"3mf")
+        append_bin(self.folder, file=files, x=16, y=16, z=20, name=name, qty=qty, **extra)
+
+    def launch(self, slicer, files):
+        self.launched.append(list(files))
+        return None
+
+    def run_print(self, selection, layout=None, include=False, launch=None):
+        inv = load_inventory(self.folder)
+        return print_inventory_bins(
+            self.folder, layout or inv["layout"], inv["bins"], selection, include,
+            lambda _path: self.slicer, launch or self.launch,
+        )
+
+    def place(self, *placements):
+        save_inventory(self.folder, layout=_layout(200, 120, placements=list(placements)))
+
+    def test_generation_defaults_to_qty_zero_even_with_legacy_setting(self):
+        self.add("A", "A.3mf")
+        save_inventory(self.folder, layout={
+            **_layout(200, 120), "settings": {"new_bins_printed": True}})
+        append_bin(self.folder, file="B.3mf", x=16, y=16, z=20, name="B")
+        append_bin(self.folder, file="C.3mf", x=16, y=16, z=20, name="C", qty=1)
+        qty = {b["name"]: b["qty"] for b in load_inventory(self.folder)["bins"]}
+        self.assertEqual(qty, {"A": 0, "B": 0, "C": 1})
+
+    def test_missing_planned_copies_are_sent_and_qty_advances(self):
+        self.add("A", "A.3mf", qty=1)
+        self.place(*({"bin": "B1", "copy": c, "gx": c * 2, "gy": 0} for c in range(3)))
+        result = self.run_print({"B1": 2})
+        self.assertEqual(self.launched[0], [self.folder.resolve() / "A.3mf"] * 2)
+        self.assertEqual(result["bins"][0]["qty"], 3)
+        copies = sorted(p["copy"] for p in result["layout"]["drawers"][0]["placements"])
+        self.assertEqual(copies, [0, 1, 2])
+        self.assertEqual(result["bin_copies"], 2)
+
+    def test_partial_selection_keeps_rest_planned_and_stack_refs_follow(self):
+        self.add("A", "A.3mf", qty=1)
+        self.place(
+            {"bin": "B1", "copy": 0, "gx": 0, "gy": 0},
+            {"bin": "B1", "copy": 3, "gx": 2, "gy": 0},
+            {"bin": "B1", "copy": 5, "gx": 4, "gy": 0, "on": "B1:3"},
+            {"bin": "B1", "copy": 6, "gx": 6, "gy": 0},
+        )
+        result = self.run_print({"B1": 2})
+        placements = {(p["copy"]): p for p in result["layout"]["drawers"][0]["placements"]}
+        self.assertEqual(result["bins"][0]["qty"], 3)
+        self.assertEqual(sorted(placements), [0, 1, 2, 6])
+        self.assertEqual(placements[2].get("on"), "B1:1")
+
+    def test_unplaced_qty_zero_sends_one(self):
+        self.add("A", "A.3mf")
+        result = self.run_print({"B1": 1})
+        self.assertEqual(result["bins"][0]["qty"], 1)
+
+    def test_multi_file_row_expands_every_file_per_copy(self):
+        self.add("A", "A.3mf, A insert.3mf, A lid.3mf")
+        self.run_print({"B1": 2})
+        names = [p.name for p in self.launched[0]]
+        self.assertEqual(names, ["A.3mf", "A insert.3mf", "A lid.3mf"] * 2)
+
+    def test_connectors_aggregate_once_across_drawers(self):
+        self.add("A", "A.3mf")
+        inv = load_inventory(self.folder)
+        layout = {**_layout(200, 120), "drawers": [
+            {**_layout(200, 120)["drawers"][0], "id": "d1"},
+            {**_layout(200, 120)["drawers"][0], "id": "d2"},
+        ]}
+        (self.folder / "Conn.3mf").write_bytes(b"3mf")
+        calls = []
+
+        def fake_connectors(out, lay, bins, drawer_id=None):
+            calls.append(drawer_id)
+            return {"connectors": [{"file": "Conn.3mf", "count": 2}], "notes": ["n"]}
+
+        with mock.patch("organizer_drawer.generate_connectors", fake_connectors):
+            result = print_inventory_bins(
+                self.folder, layout, inv["bins"], {"B1": 1}, True,
+                lambda _p: self.slicer, self.launch)
+        self.assertEqual(calls, ["d1", "d2"])
+        self.assertEqual(result["connector_counts"], {"Conn.3mf": 4})
+        self.assertEqual(result["notes"], ["n"])
+        self.assertEqual([p.name for p in self.launched[0]].count("Conn.3mf"), 4)
+
+    def test_connectors_off_generates_nothing(self):
+        self.add("A", "A.3mf")
+        with mock.patch("organizer_drawer.generate_connectors") as gen:
+            self.run_print({"B1": 1}, include=False)
+        gen.assert_not_called()
+
+    def test_rejects_non_bin_rows_and_no_file_rows(self):
+        self.add("A", "A.3mf")
+        save_inventory(self.folder, new_bins=[
+            {"kind": "manual", "x": 16, "y": 16, "z": 20, "name": "Hand"},
+            {"kind": "spacer", "x": 16, "y": 16, "z": 20, "name": "Sp", "file": "S.3mf"},
+        ])
+        with self.assertRaises(ValueError):
+            self.run_print({"B2": 1})
+        with self.assertRaises(ValueError):
+            self.run_print({"B3": 1})
+        self.assertEqual(self.launched, [])
+
+    def test_missing_and_traversal_files_rejected_before_launch(self):
+        self.add("A", "A.3mf")
+        (self.folder / "A.3mf").unlink()
+        with self.assertRaises(ValueError):
+            self.run_print({"B1": 1})
+        inv = load_inventory(self.folder)
+        bad = dict(inv["bins"][0], file="../evil.3mf")
+        with self.assertRaises(ValueError):
+            inventory_row_files(self.folder, bad)
+        self.assertEqual(self.launched, [])
+
+    def test_launch_failure_leaves_inventory_and_layout_unchanged(self):
+        self.add("A", "A.3mf", qty=1)
+        self.place({"bin": "B1", "copy": 0, "gx": 0, "gy": 0}, {"bin": "B1", "copy": 1, "gx": 2, "gy": 0})
+        before = inventory_path(self.folder).read_text(encoding="utf-8")
+
+        def boom(_slicer, _files):
+            raise RuntimeError("no slicer")
+
+        with self.assertRaises(RuntimeError):
+            self.run_print({"B1": 1}, launch=boom)
+        self.assertEqual(inventory_path(self.folder).read_text(encoding="utf-8"), before)
+
+    def test_file_names_containing_commas(self):
+        (self.folder / "Box Bolts, Nuts.3mf").write_bytes(b"3mf")
+        append_bin(self.folder, file="Box Bolts, Nuts.3mf", x=16, y=16, z=20, name="Bolts")
+        one = load_inventory(self.folder)["bins"][0]
+        self.assertEqual([p.name for p in inventory_row_files(self.folder, one)], ["Box Bolts, Nuts.3mf"])
+        (self.folder / "Insert, A.3mf").write_bytes(b"3mf")
+        (self.folder / "Lid.3mf").write_bytes(b"3mf")
+        row = dict(one, file="Box Bolts, Nuts.3mf, Insert, A.3mf, Lid.3mf")
+        self.assertEqual(
+            [p.name for p in inventory_row_files(self.folder, row)],
+            ["Box Bolts, Nuts.3mf", "Insert, A.3mf", "Lid.3mf"])
+        self.run_print({"B1": 1})
+        self.assertEqual([p.name for p in self.launched[0]], ["Box Bolts, Nuts.3mf"])
+
+    def test_ambiguous_file_list_rejected(self):
+        for name in ("A.3mf", "C.3mf", "B.3mf, C.3mf", "A.3mf, B.3mf"):
+            (self.folder / name).write_bytes(b"3mf")
+        row = {"id": "B1", "name": "X", "file": "A.3mf, B.3mf, C.3mf"}
+        with self.assertRaises(ValueError) as ctx:
+            inventory_row_files(self.folder, row)
+        self.assertIn("more than one way", str(ctx.exception))
+        (self.folder / "A.3mf, B.3mf, C.3mf").write_bytes(b"3mf")
+        self.assertEqual(len(inventory_row_files(self.folder, row)), 1)
+
+    def test_traversal_and_missing_still_rejected_with_commas(self):
+        self.add("A", "A.3mf")
+        one = load_inventory(self.folder)["bins"][0]
+        for bad in ("A.3mf, ../evil.3mf", "A.3mf, nope.3mf", "C:/evil.3mf"):
+            with self.assertRaises(ValueError):
+                inventory_row_files(self.folder, dict(one, file=bad))
+
+    def test_invalid_copy_counts_rejected_without_side_effects(self):
+        self.add("A", "A.3mf")
+        before = inventory_path(self.folder).read_text(encoding="utf-8")
+        for bad in (0, -1, 1.5, 1.0, True, "1.5", "-1", "abc", ""):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self.run_print({"B1": bad})
+        self.assertEqual(self.launched, [])
+        self.assertEqual(inventory_path(self.folder).read_text(encoding="utf-8"), before)
+        self.assertEqual(self.run_print({"B1": "2"})["bins"][0]["qty"], 2)
+        self.assertEqual(self.run_print({"B1": 1})["bins"][0]["qty"], 3)
+
+    def test_route_is_registered_and_hosted_rejects(self):
+        routes = drawer_routes(threading.Lock(), self.folder, lambda _p: self.slicer, self.launch)
+        self.assertIn("/api/drawer/print-bins", routes)
+        hosted = drawer_routes(threading.Lock(), self.folder, None, None, hosted=True)
+        with self.assertRaises(ValueError):
+            hosted["/api/drawer/print-bins"]({"selection": {"B1": 1}})
+        self.add("A", "A.3mf")
+        result = routes["/api/drawer/print-bins"](
+            {"output": str(self.folder), "selection": {"B1": 1}, "include_connectors": False})
+        self.assertEqual(result["bins"][0]["qty"], 1)
+        self.assertIn("stack_steps", result)
+
+    def test_spacer_and_connector_print_repeats_files_by_count(self):
+        self.add("A", "A.3mf")
+        (self.folder / "Conn.3mf").write_bytes(b"3mf")
+        inv = load_inventory(self.folder)
+        with mock.patch("organizer_drawer.generate_connectors",
+                        lambda *a, **k: {"connectors": [{"file": "Conn.3mf", "count": 3}], "notes": []}):
+            print_spacers_and_connectors(
+                self.folder, _layout(200, 120), inv["bins"], None,
+                lambda _p: self.slicer, self.launch)
+        self.assertEqual([p.name for p in self.launched[0]], ["Conn.3mf"] * 3)
 
 
 if __name__ == "__main__":

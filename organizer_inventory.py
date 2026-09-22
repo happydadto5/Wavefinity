@@ -639,16 +639,15 @@ def append_bin(
 ) -> Path:
     """Log one generated bin as a new row, keeping everything else intact.
 
-    Without an explicit ``qty`` the row takes the Layout view's *new bins
-    count as printed* setting, stored in the file's layout block.
+    An omitted ``qty`` means generated but not printed: 0. A real print path
+    must pass ``qty=1`` (or another explicit physical count).
     """
     with INVENTORY_LOCK:
         path = resolve_inventory_path(output_dir, migrate=True)
         current = _read(path)
         bins = current["bins"]
         if qty is None:
-            settings = (current["layout"] or {}).get("settings") or {}
-            qty = 1 if settings.get("new_bins_printed", DEFAULT_NEW_BIN_QTY) else 0
+            qty = DEFAULT_NEW_BIN_QTY
         bins.append({
             "id": next_bin_id(bins),
             "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
