@@ -159,6 +159,9 @@ All instructions for coding agents (OpenAI, Anthropic, Google) and human contrib
 
 ### Development handoff workflow
 
+> **CODING LLM — STOP BEFORE SEARCHING THIS REPO FOR A FIX FILE.**
+> Help Code plans intentionally do **not** exist in the Wavefinity checkout. For any “implement/read/check fix N” request, first fetch the authoritative plan from the private helper repo `happydadto5/Wavefinity-Help-Code` on its current `main`. For lettered work, e.g. Fix 35A, the path is `fixes/fix-035a.md`. If that private repo cannot be read with your authenticated GitHub access, report **HELPER REPO ACCESS FAILED**. Do not report “fix missing” merely because it is absent from Wavefinity, and do not ask the human to paste a plan that exists in the helper repo.
+
 > **WHERE THE FIXES LIVE:** all fix plans (fix 1, fix 27, etc.) are in the separate private GitHub repo **`happydadto5/Wavefinity-Help-Code`**, in its `fixes/` folder. They are NOT in this repo. When told "implement fix N" or "read fix N", read `fixes/fix-00N.md` from that repo first (use `gh api`, see below). Never say a fix is missing without checking there.
 
 Wavefinity is developed through handoffs between **chat/planning LLMs** and **coding LLMs**. Project-wide rules and architecture live in this `README.md`.
