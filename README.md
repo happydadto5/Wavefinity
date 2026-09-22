@@ -479,9 +479,9 @@ that fits (`outside = field + mating gap + 2 × trim width`); Space data still
 stores the interior field. A new Surface's first job is its edge: Space says
 *Finish your edge, then start adding bins*, and once the Base Trim edge is
 generated or printed, with no real bin in inventory yet, the first bin design
-opens. In Space, the bin being designed shows as a session-only **Current
-design** (never written to inventory) until it is generated, and a selected bin
-has **Duplicate**.
+opens. In Space, the bin being designed shows as **Current design** (never
+written to inventory) until it is generated; reopening the Space later
+restores that exact design, generated or not. A selected bin has **Duplicate**.
 
 A folder is either an untyped Design folder, or a typed **Space** - a
 **Drawer**, a **Surface**, **Portable Storage**, or **Pegboard**. *Create New Space*
@@ -526,11 +526,15 @@ bin), and Auto layout and spacer/connector actions stay disabled until there is
 something to work on.
 
 - **Space identity.** A typed Space carries a permanent `space_id` (UUID) in
-  its `.wavefinity.json` (metadata version 7; identity required since version 5). The per-user profile keeps a
+  its `.wavefinity.json` (metadata version 8; identity required since version 5). The per-user profile keeps a
   registry of known Spaces (id, name, kind, last folder) as an index only.
   Renaming the folder within the same parent is recovered automatically by
   that ID; a folder moved elsewhere is recognised when you Open Existing it.
-  A second folder copy carrying the same ID is refused, not merged.
+  A second folder copy carrying the same ID is refused, not merged. The same
+  metadata file also holds the Space's exact resume design: closing the app
+  mid-edit and reopening the Space later restores that same design, not a
+  fresh starter - generating or printing it keeps it as the resume target,
+  and a later edit replaces it again.
 - **The inventory file** is a Markdown table, one row per bin design, with an
   **ID**, a **Kind** (bin, Storage Box, spacer, added by hand), a **Name**
   a **Stack** (blank, `lid` or `direct` - how the bin was printed to stack)

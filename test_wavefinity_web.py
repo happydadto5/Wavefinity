@@ -7,6 +7,7 @@ import math
 import os
 from dataclasses import replace
 from pathlib import Path
+import re
 import shutil
 import socket
 import subprocess
@@ -2747,6 +2748,233 @@ const tick = () => new Promise(r => setImmediate(r));
     def _spaces_slice(self, spaces_js, start_marker, end_marker="\n};\n"):
         chunk = spaces_js[spaces_js.index(start_marker):]
         return chunk[:chunk.index(end_marker)] + "\n};\n"
+
+    def test_classify_metadata_parses_and_validates_v8_resume_fields(self):
+        # Fix 032: the exact resume checkpoint only exists from v8 on, and its
+        # top-level shape (object-or-null design, boolean pending) is
+        # validated the same way as keep_bin_defaults/bin_defaults already are.
+        node = self._node_or_skip()
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+
+        valid_space = self._spaces_slice(spaces_js, "SP.validSpace = raw => {")
+        valid_uuid = self._spaces_slice(spaces_js, "SP.validUuid = raw => {")
+        classify = self._spaces_slice(spaces_js, "SP.classifyMetadata = record => {")
+
+        script = "\n".join([
+            "const SP = {};",
+            "const FOLDER_METADATA_VERSION = 8;",
+            "const SPACE_ID_REQUIRED_VERSION = 5;",
+            "const SPACE_SETUP_VERSION = 1;",
+            "const RESUME_REQUIRED_VERSION = 8;",
+            "const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;",
+            valid_space,
+            valid_uuid,
+            classify,
+            "const base = {",
+            "  version: 8, setup_version: 1, folder_mode: 'space',",
+            "  space: { kind: 'drawer', name: 'S', x: 320, y: 240, z: 55 },",
+            "  space_id: '11111111-1111-1111-1111-111111111111',",
+            "  keep_bin_defaults: true, bin_defaults: null, part_defaults: {},",
+            "};",
+            "const out = {};",
+            "out.noResume = SP.classifyMetadata({ exists: true, data: { ...base, resume_design: null, resume_pending: false } });",
+            "out.withResume = SP.classifyMetadata({ exists: true, data: { ...base, resume_design: { box: { x: 1 } }, resume_pending: true } });",
+            "out.nullDesignForcesPendingFalse = SP.classifyMetadata({ exists: true, data: { ...base, resume_design: null, resume_pending: true } });",
+            "out.malformedDesign = SP.classifyMetadata({ exists: true, data: { ...base, resume_design: ['nope'], resume_pending: false } });",
+            "out.malformedPending = SP.classifyMetadata({ exists: true, data: { ...base, resume_design: { box: {} }, resume_pending: 'yes' } });",
+            "out.v7HasNoResumeConcept = SP.classifyMetadata({ exists: true, data: { ...base, version: 7 } });",
+            "process.stdout.write(JSON.stringify(out));",
+        ])
+        out = self._run_node(script)
+        self.assertIsNone(out["noResume"]["resume_design"])
+        self.assertFalse(out["noResume"]["resume_pending"])
+        self.assertEqual(out["withResume"]["resume_design"], {"box": {"x": 1}})
+        self.assertTrue(out["withResume"]["resume_pending"])
+        self.assertIsNone(out["nullDesignForcesPendingFalse"]["resume_design"])
+        self.assertFalse(out["nullDesignForcesPendingFalse"]["resume_pending"])
+        self.assertEqual(out["malformedDesign"]["status"], "invalid")
+        self.assertEqual(out["malformedPending"]["status"], "invalid")
+        self.assertEqual(out["v7HasNoResumeConcept"]["status"], "space")
+        self.assertIsNone(out["v7HasNoResumeConcept"]["resume_design"])
+        self.assertFalse(out["v7HasNoResumeConcept"]["resume_pending"])
+
+    def test_resume_checkpoint_queue_coalesces_serializes_and_gates_by_space_identity(self):
+        # Fix 032: the resume-checkpoint queue is a single coalescing slot
+        # (not a per-Space queue) - newest state for the active Space wins
+        # while a write is in flight, a rejected write must not stop later
+        # writes, and a completion for a Space that is no longer active must
+        # never overwrite a different Space's in-memory checkpoint.
+        node = self._node_or_skip()
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+
+        start = "SP._resume = {"
+        end = "SP.flushOutgoingResumeCheckpoint = () => SP._pumpResumeQueue();"
+        resume_module = spaces_js[spaces_js.index(start):]
+        resume_module = resume_module[:resume_module.index(end) + len(end)]
+
+        script = "\n".join([
+            "const clone = v => JSON.parse(JSON.stringify(v));",
+            "const toasts = [];",
+            "const toast = msg => toasts.push(msg);",
+            "const writes = [];",
+            "let apiBehavior = async () => ({});",
+            "const api = async (path, payload) => {",
+            "  writes.push({ path, payload: clone(payload) });",
+            "  return apiBehavior();",
+            "};",
+            "const state = {",
+            "  folderMode: 'space', activeSpace: { kind: 'drawer', name: 'A' }, activeSpaceId: 'sidA',",
+            "  output: '/A', browserFolder: null, runtime: { hosted: false },",
+            "  spaceResumeDesign: null, spaceResumePending: false,",
+            "};",
+            "const SP = { writeMetadata: async () => ({}) };",
+            resume_module,
+            "(async () => {",
+            "  const out = {};",
+            "",
+            "  // 1) Coalescing: a second queue call while the first write is still",
+            "  //    in flight must not start a second concurrent write - it replaces",
+            "  //    the pending value, and the pump picks it up once the first",
+            "  //    write settles.",
+            "  apiBehavior = async () => { await new Promise(r => setTimeout(r, 15)); return {}; };",
+            "  SP.queueResumeCheckpoint({ v: 1 }, false);",
+            "  SP.queueResumeCheckpoint({ v: 2 }, true);",
+            "  await new Promise(r => setTimeout(r, 80));",
+            "  out.coalescedWriteCount = writes.length;",
+            "  out.coalescedFinalDesign = state.spaceResumeDesign;",
+            "  out.coalescedFinalPending = state.spaceResumePending;",
+            "",
+            "  // Re-queuing the exact same value that was actually saved must be a",
+            "  // no-op - no extra write.",
+            "  SP.queueResumeCheckpoint({ v: 2 }, true);",
+            "  await new Promise(r => setTimeout(r, 30));",
+            "  out.duplicateSkipped = writes.length === out.coalescedWriteCount;",
+            "",
+            "  // 2) A write for Space A that finishes AFTER the UI switched to",
+            "  //    Space B must not overwrite Space B's in-memory checkpoint.",
+            "  writes.length = 0;",
+            "  apiBehavior = async () => { await new Promise(r => setTimeout(r, 30)); return {}; };",
+            "  SP.flushResumeCheckpoint({ v: 'A-late' }, true); // fire and forget on purpose",
+            "  state.activeSpaceId = 'sidB';",
+            "  state.activeSpace = { kind: 'drawer', name: 'B' };",
+            "  state.output = '/B';",
+            "  state.spaceResumeDesign = { v: 'B-current' };",
+            "  state.spaceResumePending = false;",
+            "  await new Promise(r => setTimeout(r, 60));",
+            "  out.staleCompletionDesign = state.spaceResumeDesign;",
+            "",
+            "  // 3) A rejected write must not poison the queue: a later write for",
+            "  //    the (now active) Space must still go through.",
+            "  let calls = 0;",
+            "  apiBehavior = async () => { calls += 1; if (calls === 1) throw new Error('disk full'); return {}; };",
+            "  await SP.flushResumeCheckpoint({ v: 'first-fails' }, false);",
+            "  out.toastsAfterFailure = toasts.length;",
+            "  await SP.flushResumeCheckpoint({ v: 'second-succeeds' }, true);",
+            "  out.recoveredDesign = state.spaceResumeDesign;",
+            "  out.recoveredPending = state.spaceResumePending;",
+            "",
+            "  process.stdout.write(JSON.stringify(out));",
+            "})();",
+        ])
+        done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+
+        self.assertEqual(out["coalescedWriteCount"], 2)
+        self.assertEqual(out["coalescedFinalDesign"], {"v": 2})
+        self.assertTrue(out["coalescedFinalPending"])
+        self.assertTrue(out["duplicateSkipped"])
+
+        # Space A's stale, late-arriving completion did not clobber Space B.
+        self.assertEqual(out["staleCompletionDesign"], {"v": "B-current"})
+
+        # The rejected write reported itself but did not stop the next one.
+        self.assertEqual(out["toastsAfterFailure"], 1)
+        self.assertEqual(out["recoveredDesign"], {"v": "second-succeeds"})
+        self.assertTrue(out["recoveredPending"])
+
+    def test_initialize_design_for_active_space_resumes_before_starter_fallback(self):
+        # Fix 032: opening a typed Space must restore its exact saved design
+        # before ever falling back to SP.installSpaceStarterDesign() - and a
+        # restore must bypass the starter/sizing path entirely.
+        node = self._node_or_skip()
+        root = Path(__file__).resolve().parent / "web"
+        spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
+        init_fn = self._spaces_slice(spaces_js, "SP.initializeDesignForActiveSpace = async () => {")
+
+        script = "\n".join([
+            "const clone = v => JSON.parse(JSON.stringify(v));",
+            "async function run(scenario) {",
+            "  const calls = [];",
+            "  const toasts = [];",
+            "  const toast = msg => toasts.push(msg);",
+            "  const state = {",
+            "    folderMode: scenario.folderMode ?? 'space',",
+            "    activeSpace: scenario.activeSpace ?? { kind: 'drawer', name: 'S' },",
+            "    catalog: scenario.noCatalog ? null : {},",
+            "    spaceResumeDesign: scenario.resumeDesign ?? null,",
+            "    spaceResumePending: scenario.resumePending ?? false,",
+            "    design: null, cleanDesign: null, workingPending: 'untouched',",
+            "  };",
+            "  const api = async (path, payload) => {",
+            "    calls.push(['api', path, clone(payload)]);",
+            "    if (scenario.validateFails) throw new Error('schema rejected');",
+            "    return { design: { ...clone(payload.design), validated: true } };",
+            "  };",
+            "  const SP = {",
+            "    resetDesignSession: () => calls.push(['resetDesignSession']),",
+            "    installSpaceStarterDesign: async space => calls.push(['installSpaceStarterDesign', space]),",
+            "  };",
+            "  const syncForm = () => calls.push(['syncForm']);",
+            init_fn,
+            "  await SP.initializeDesignForActiveSpace();",
+            "  return { calls, toasts, design: state.design, cleanDesign: state.cleanDesign, workingPending: state.workingPending };",
+            "}",
+            "(async () => {",
+            "  const out = {};",
+            "  out.noResume = await run({});",
+            "  out.withValidResume = await run({ resumeDesign: { box: { x: 1 } }, resumePending: true });",
+            "  out.invalidResumeFallsBack = await run({ resumeDesign: { box: { x: 1 } }, resumePending: true, validateFails: true });",
+            "  out.notASpace = await run({ folderMode: 'design' });",
+            "  process.stdout.write(JSON.stringify(out));",
+            "})();",
+        ])
+        done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+
+        no_resume = out["noResume"]
+        self.assertIn(["resetDesignSession"], no_resume["calls"])
+        self.assertTrue(any(c[0] == "installSpaceStarterDesign" for c in no_resume["calls"]))
+        self.assertIn(["syncForm"], no_resume["calls"])
+        self.assertEqual(no_resume["toasts"], [])
+
+        with_resume = out["withValidResume"]
+        self.assertTrue(any(c[0] == "api" and c[1] == "/api/design/validate" for c in with_resume["calls"]))
+        self.assertFalse(any(c[0] == "installSpaceStarterDesign" for c in with_resume["calls"]))
+        self.assertEqual(with_resume["design"], {"box": {"x": 1}, "validated": True})
+        self.assertEqual(with_resume["cleanDesign"], with_resume["design"])
+        self.assertTrue(with_resume["workingPending"])
+
+        fallback = out["invalidResumeFallsBack"]
+        self.assertTrue(any(c[0] == "installSpaceStarterDesign" for c in fallback["calls"]))
+        self.assertEqual(len(fallback["toasts"]), 1)
+
+        not_space = out["notASpace"]
+        self.assertEqual(not_space["calls"], [])
+
+    def test_space_name_heading_is_materially_larger_than_prior_hierarchy(self):
+        # Fix 032 item 8: the Space name is the strongest heading in the left
+        # panel - the prior hierarchy had it at 16px, level with everything
+        # else. Type/size stay secondary (unchanged, small/muted).
+        css = (Path(__file__).resolve().parent / "web" / "drawer.css").read_text(encoding="utf-8")
+        match = re.search(r"\.space-head-title strong\s*\{([^}]*)\}", css)
+        self.assertIsNotNone(match, "expected a .space-head-title strong rule in drawer.css")
+        size_match = re.search(r"font-size:\s*(\d+(?:\.\d+)?)px", match.group(1))
+        self.assertIsNotNone(size_match)
+        self.assertGreater(float(size_match.group(1)), 16)
 
     def test_local_folder_switch_preflight_blocks_backend_mutation_on_cancel(self):
         # Fix 019 correction C1.2: the local (non-hosted) Save/Discard/

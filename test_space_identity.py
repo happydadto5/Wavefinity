@@ -80,7 +80,7 @@ class SpaceIdentityTests(unittest.TestCase):
     def call(self, route, **payload):
         return self.routes[route](payload)
 
-    def test_v4_typed_open_upgrades_to_v7_without_setup(self):
+    def test_v4_typed_open_upgrades_to_v8_without_setup(self):
         folder = make_v4_space(self.tmp)
         before = (folder / ".wavefinity.json").read_bytes()
         info = self.call("/api/space/inspect", output=str(folder))["folder"]
@@ -92,12 +92,16 @@ class SpaceIdentityTests(unittest.TestCase):
 
         opened = self.call("/api/folder/use", output=str(folder))["folder"]
         data = meta(folder)
-        self.assertEqual(data["version"], 7)
+        self.assertEqual(data["version"], 8)
         self.assertEqual(str(uuid.UUID(data["space_id"])), data["space_id"])
         self.assertEqual(data["space"], V4["space"])
         self.assertEqual(data["bin_defaults"], {"marker": 1})
         self.assertEqual(data["part_defaults"], {})
+        self.assertIsNone(data["resume_design"])
+        self.assertFalse(data["resume_pending"])
         self.assertEqual(opened["space_id"], data["space_id"])
+        self.assertIsNone(opened["resume_design"])
+        self.assertFalse(opened["resume_pending"])
         self.assertTrue((folder / INVENTORY_FILENAME).is_file())
         self.assertFalse((folder / "Old Name bins.md").exists())
         loaded = load_inventory(folder)
@@ -127,9 +131,11 @@ class SpaceIdentityTests(unittest.TestCase):
         (folder / ".wavefinity.json").write_text(json.dumps(data), encoding="utf-8")
         opened = self.call("/api/folder/use", output=str(folder))["folder"]
         upgraded = meta(folder)
-        self.assertEqual(upgraded["version"], 7)
+        self.assertEqual(upgraded["version"], 8)
         self.assertEqual(upgraded["space_id"], space_id)
         self.assertEqual(upgraded["part_defaults"], {})
+        self.assertIsNone(upgraded["resume_design"])
+        self.assertFalse(upgraded["resume_pending"])
         self.assertEqual(opened["part_defaults"], {})
 
     def test_part_defaults_round_trip_through_the_space_defaults_route(self):
@@ -142,7 +148,7 @@ class SpaceIdentityTests(unittest.TestCase):
         self.assertEqual(result["part_defaults"], saved)
         self.assertEqual(meta(folder)["part_defaults"], saved)
 
-    def test_v7_typed_without_id_is_damaged_not_healed(self):
+    def test_v8_typed_without_id_is_damaged_not_healed(self):
         folder = make_v4_space(self.tmp)
         self.call("/api/folder/use", output=str(folder))
         data = meta(folder)
@@ -266,8 +272,10 @@ class SpaceIdentityTests(unittest.TestCase):
             name="Vanity", kind="drawer", x=320, y=240, z=55,
         )
         data = meta(folder)
-        self.assertEqual(data["version"], 7)
+        self.assertEqual(data["version"], 8)
         self.assertEqual(data["part_defaults"], {})
+        self.assertIsNone(data["resume_design"])
+        self.assertFalse(data["resume_pending"])
         self.assertEqual(str(uuid.UUID(data["space_id"])), data["space_id"])
         self.assertNotEqual(data["space_id"], injected)
 
@@ -402,6 +410,85 @@ class SpaceIdentityTests(unittest.TestCase):
         folder = make_v4_space(self.tmp, "Committed")
         with self.assertRaises(ValueError):
             self.call("/api/space/use-untyped", output=str(folder))
+
+    # ---- Fix 032: exact Space resume checkpoint
+
+    def test_resume_checkpoint_round_trips_through_the_resume_route(self):
+        folder = make_v4_space(self.tmp)
+        self.call("/api/folder/use", output=str(folder))
+        design = {"box": {"x": 40, "y": 48, "z": 30}, "part_name": "My Bin"}
+        result = self.call(
+            "/api/space/resume", output=str(folder),
+            resume_design=design, resume_pending=True,
+        )["folder"]
+        self.assertEqual(result["resume_design"], design)
+        self.assertTrue(result["resume_pending"])
+        self.assertEqual(meta(folder)["resume_design"], design)
+        self.assertTrue(meta(folder)["resume_pending"])
+        # A fresh describe() (as /api/folder/use would return) sees it too.
+        reopened = self.call("/api/folder/use", output=str(folder))["folder"]
+        self.assertEqual(reopened["resume_design"], design)
+        self.assertTrue(reopened["resume_pending"])
+
+    def test_resume_checkpoint_survives_unrelated_metadata_rewrites(self):
+        folder = make_v4_space(self.tmp)
+        self.call("/api/folder/use", output=str(folder))
+        design = {"box": {"x": 40, "y": 48, "z": 30}}
+        self.call("/api/space/resume", output=str(folder), resume_design=design, resume_pending=True)
+
+        # Space rename/resize must not erase it.
+        self.call("/api/space/update", output=str(folder), name="Renamed", x=320, y=240, z=55)
+        self.assertEqual(meta(folder)["resume_design"], design)
+        self.assertTrue(meta(folder)["resume_pending"])
+
+        # Neither must a bin-defaults change.
+        self.call("/api/space/defaults", output=str(folder), keep_bin_defaults=False)
+        self.assertEqual(meta(folder)["resume_design"], design)
+        self.assertTrue(meta(folder)["resume_pending"])
+
+        # Nor a plain re-open/version-maintenance pass.
+        self.call("/api/folder/use", output=str(folder))
+        self.assertEqual(meta(folder)["resume_design"], design)
+        self.assertTrue(meta(folder)["resume_pending"])
+
+    def test_null_resume_design_forces_pending_false(self):
+        folder = make_v4_space(self.tmp)
+        self.call("/api/folder/use", output=str(folder))
+        self.call("/api/space/resume", output=str(folder), resume_design={"box": {}}, resume_pending=True)
+        result = self.call(
+            "/api/space/resume", output=str(folder), resume_design=None, resume_pending=True,
+        )["folder"]
+        self.assertIsNone(result["resume_design"])
+        self.assertFalse(result["resume_pending"])
+        self.assertIsNone(meta(folder)["resume_design"])
+        self.assertFalse(meta(folder)["resume_pending"])
+
+    def test_malformed_resume_fields_are_rejected_without_rewriting_the_file(self):
+        folder = make_v4_space(self.tmp)
+        self.call("/api/folder/use", output=str(folder))
+        before = (folder / ".wavefinity.json").read_bytes()
+        with self.assertRaises(ValueError):
+            self.call(
+                "/api/space/resume", output=str(folder),
+                resume_design=["not", "an", "object"], resume_pending=True,
+            )
+        self.assertEqual((folder / ".wavefinity.json").read_bytes(), before)
+        with self.assertRaises(ValueError):
+            self.call(
+                "/api/space/resume", output=str(folder),
+                resume_design={"box": {}}, resume_pending="yes",
+            )
+        self.assertEqual((folder / ".wavefinity.json").read_bytes(), before)
+
+    def test_resume_route_refuses_an_untyped_folder(self):
+        plain = self.tmp / "Plain"
+        plain.mkdir()
+        self.call("/api/space/use-untyped", output=str(plain))
+        with self.assertRaises(ValueError):
+            self.call(
+                "/api/space/resume", output=str(plain),
+                resume_design={"box": {}}, resume_pending=True,
+            )
 
 
 

@@ -43,9 +43,10 @@ MAX_RECENT = 8
 METADATA_FILE = ".wavefinity.json"
 LEGACY_METADATA_FILE = ".wavefinity-space.json"
 SPACE_ID_REQUIRED_VERSION = 5
-METADATA_VERSION = 7
+RESUME_REQUIRED_VERSION = 8
+METADATA_VERSION = 8
 SPACE_SETUP_VERSION = 1
-SUPPORTED_METADATA_VERSIONS = {2, 3, 4, 5, 6, 7}
+SUPPORTED_METADATA_VERSIONS = {2, 3, 4, 5, 6, 7, 8}
 _UNSET = object()
 
 
@@ -74,6 +75,11 @@ _DUPLICATE_SPACE_NAME_MESSAGE = (
     "Space names can't be reused. Choose a different name."
 )
 _SPACE_CREATE_LOCK = threading.RLock()
+# Guards the complete read/preserve/write transaction of a folder's
+# .wavefinity.json (including the temp-file replace) so resume/defaults/
+# rename/version-upgrade writes from concurrent requests cannot clobber one
+# another's fields.
+_METADATA_WRITE_LOCK = threading.RLock()
 
 def _space_folder_name(raw: Any) -> str:
     name = str(raw or "").strip()
@@ -219,6 +225,30 @@ def _metadata_space_defaults(
     return keep, defaults, part_defaults
 
 
+def _metadata_resume(
+    metadata: dict[str, Any], version: int,
+) -> tuple[dict[str, Any] | None, bool]:
+    """A typed Space's exact resume checkpoint, or (None, False) pre-v8.
+
+    Kept separate from `_metadata_space_defaults()` so the existing
+    nine-value `_folder_state()` tuple does not need to grow across many
+    unrelated callers - `describe()` calls this directly instead.
+    """
+    if version < RESUME_REQUIRED_VERSION:
+        return None, False
+    design = metadata.get("resume_design")
+    pending = metadata.get("resume_pending", False)
+    if design is not None and not isinstance(design, dict):
+        raise FolderMetadataError(
+            "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
+        )
+    if not isinstance(pending, bool):
+        raise FolderMetadataError(
+            "This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged."
+        )
+    return design, (pending if design is not None else False)
+
+
 def _folder_state(
     folder: Path, prefs: dict[str, Any],
 ) -> tuple[
@@ -263,6 +293,10 @@ def _folder_state(
             metadata_space = _space(metadata.get("space"))
             if metadata_space:
                 metadata_defaults = _metadata_space_defaults(metadata, int(version))
+                # Schema-validate the resume checkpoint here too, even though
+                # the nine-value tuple below does not carry it - describe()
+                # reads it again through the same helper to expose it.
+                _metadata_resume(metadata, int(version))
                 if int(version) >= SPACE_ID_REQUIRED_VERSION and _space_id(metadata.get("space_id")) is None:
                     raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
                 chosen_space = explicit_space or metadata_space
@@ -338,59 +372,81 @@ def _folder_state(
 def _write_metadata(
     folder: Path, mode: str, space: dict[str, Any] | None = None, inventory: bool = True,
     *, keep_bin_defaults: Any = _UNSET, bin_defaults: Any = _UNSET,
-    part_defaults: Any = _UNSET,
+    part_defaults: Any = _UNSET, resume_design: Any = _UNSET, resume_pending: Any = _UNSET,
 ) -> None:
-    payload: dict[str, Any] = {
-        "version": METADATA_VERSION,
-        "setup_version": SPACE_SETUP_VERSION,
-        "folder_mode": mode,
-    }
-    if mode == "space" and space:
-        payload["space_id"] = _new_space_id()
-        payload["inventory"] = True
-        payload["space"] = space
-        saved_keep = True
-        saved_defaults = None
-        saved_part_defaults: dict[str, Any] = {}
+    # The whole read/preserve/write transaction - including the temp-file
+    # replace - is one critical section, so a resume checkpoint write can
+    # never race a rename/defaults/version-upgrade write (or another resume
+    # write) into the same file and lose either one's fields.
+    with _METADATA_WRITE_LOCK:
+        payload: dict[str, Any] = {
+            "version": METADATA_VERSION,
+            "setup_version": SPACE_SETUP_VERSION,
+            "folder_mode": mode,
+        }
+        if mode == "space" and space:
+            payload["space_id"] = _new_space_id()
+            payload["inventory"] = True
+            payload["space"] = space
+            saved_keep = True
+            saved_defaults = None
+            saved_part_defaults: dict[str, Any] = {}
+            saved_resume_design: dict[str, Any] | None = None
+            saved_resume_pending = False
+            target = folder / METADATA_FILE
+            if target.exists():
+                current = _json_file(target, strict=True)
+                version = current.get("version")
+                if isinstance(version, (int, float)) and version > METADATA_VERSION:
+                    raise FolderMetadataError("This folder contains Wavefinity metadata from a newer version. The file was left unchanged.")
+                if version not in SUPPORTED_METADATA_VERSIONS or current.get("folder_mode") not in {"design", "space"}:
+                    raise FolderMetadataError("This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged.")
+                if current.get("folder_mode") == "space":
+                    saved_keep, saved_defaults, saved_part_defaults = _metadata_space_defaults(
+                        current, int(version)
+                    )
+                    saved_resume_design, saved_resume_pending = _metadata_resume(current, int(version))
+                    # The one choke point that keeps a Space's identity: an
+                    # existing valid ID is always preserved. Only pre-v5 metadata
+                    # may gain one; damaged v5 must never be re-identified.
+                    current_id = _space_id(current.get("space_id"))
+                    # v2/v3 are setup inputs: any ID they carry is not trusted.
+                    if int(version) >= 4 and current_id is not None:
+                        payload["space_id"] = current_id
+                    elif int(version) >= SPACE_ID_REQUIRED_VERSION:
+                        raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
+            resolved_keep = saved_keep if keep_bin_defaults is _UNSET else bool(keep_bin_defaults)
+            resolved_defaults = saved_defaults if bin_defaults is _UNSET else bin_defaults
+            resolved_part_defaults = (
+                saved_part_defaults if part_defaults is _UNSET else part_defaults
+            )
+            if resolved_defaults is not None and not isinstance(resolved_defaults, dict):
+                raise ValueError("bin defaults must be an object or null")
+            if not isinstance(resolved_part_defaults, dict):
+                raise ValueError("part defaults must be an object")
+            payload["keep_bin_defaults"] = resolved_keep
+            payload["bin_defaults"] = resolved_defaults
+            payload["part_defaults"] = resolved_part_defaults
+            resolved_resume_design = (
+                saved_resume_design if resume_design is _UNSET else resume_design
+            )
+            resolved_resume_pending = (
+                saved_resume_pending if resume_pending is _UNSET else resume_pending
+            )
+            if resolved_resume_design is not None and not isinstance(resolved_resume_design, dict):
+                raise ValueError("resume design must be an object or null")
+            if not isinstance(resolved_resume_pending, bool):
+                raise ValueError("resume pending must be a boolean")
+            if resolved_resume_design is None:
+                resolved_resume_pending = False
+            payload["resume_design"] = resolved_resume_design
+            payload["resume_pending"] = resolved_resume_pending
+        else:
+            payload["inventory"] = bool(inventory)
         target = folder / METADATA_FILE
-        if target.exists():
-            current = _json_file(target, strict=True)
-            version = current.get("version")
-            if isinstance(version, (int, float)) and version > METADATA_VERSION:
-                raise FolderMetadataError("This folder contains Wavefinity metadata from a newer version. The file was left unchanged.")
-            if version not in SUPPORTED_METADATA_VERSIONS or current.get("folder_mode") not in {"design", "space"}:
-                raise FolderMetadataError("This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged.")
-            if current.get("folder_mode") == "space":
-                saved_keep, saved_defaults, saved_part_defaults = _metadata_space_defaults(
-                    current, int(version)
-                )
-                # The one choke point that keeps a Space's identity: an
-                # existing valid ID is always preserved. Only pre-v5 metadata
-                # may gain one; damaged v5 must never be re-identified.
-                current_id = _space_id(current.get("space_id"))
-                # v2/v3 are setup inputs: any ID they carry is not trusted.
-                if int(version) >= 4 and current_id is not None:
-                    payload["space_id"] = current_id
-                elif int(version) >= SPACE_ID_REQUIRED_VERSION:
-                    raise FolderMetadataError("This folder's Space information is incomplete or damaged. Nothing was changed.")
-        resolved_keep = saved_keep if keep_bin_defaults is _UNSET else bool(keep_bin_defaults)
-        resolved_defaults = saved_defaults if bin_defaults is _UNSET else bin_defaults
-        resolved_part_defaults = (
-            saved_part_defaults if part_defaults is _UNSET else part_defaults
-        )
-        if resolved_defaults is not None and not isinstance(resolved_defaults, dict):
-            raise ValueError("bin defaults must be an object or null")
-        if not isinstance(resolved_part_defaults, dict):
-            raise ValueError("part defaults must be an object")
-        payload["keep_bin_defaults"] = resolved_keep
-        payload["bin_defaults"] = resolved_defaults
-        payload["part_defaults"] = resolved_part_defaults
-    else:
-        payload["inventory"] = bool(inventory)
-    target = folder / METADATA_FILE
-    temp = folder / f"{METADATA_FILE}.tmp"
-    temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    temp.replace(target)
+        temp = folder / f"{METADATA_FILE}.tmp"
+        temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        temp.replace(target)
 
 
 def _unused_migrate(
@@ -459,6 +515,15 @@ def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
         # A Space still needing setup may carry a valid ID (e.g. legacy box).
         metadata = _json_file(folder / METADATA_FILE)
         space_id = _space_id((metadata or {}).get("space_id"))
+    # An exact resume checkpoint only ever comes from current v8+ typed-Space
+    # metadata; a legacy/inferred Space or one still needing setup has none.
+    resume_design: dict[str, Any] | None = None
+    resume_pending = False
+    if mode == "space" and space_source == "metadata" and not needs_setup:
+        metadata_now = _json_file(folder / METADATA_FILE)
+        resume_version = (metadata_now or {}).get("version")
+        if isinstance(resume_version, (int, float)) and not isinstance(resume_version, bool):
+            resume_design, resume_pending = _metadata_resume(metadata_now, int(resume_version))
     # Any existing Wavefinity trace - inventory, current metadata, or legacy
     # metadata - not just the inventory file, or a folder with metadata but
     # no inventory yet is wrongly treated as brand new and skips the
@@ -484,6 +549,8 @@ def describe(folder: Path, prefs: dict[str, Any]) -> dict[str, Any]:
         "needs_identity_migration": needs_identity,
         "space_source": space_source,
         "setup_prefill_space": setup_prefill_space,
+        "resume_design": resume_design,
+        "resume_pending": resume_pending,
         "exists": wavefinity_exists,
         "no_inventory": not inventory,
     }
@@ -1021,6 +1088,30 @@ def space_routes(
         remember(target)
         return reply(target)
 
+    def resume(payload):
+        # The local-server counterpart to hosted SP.writeMetadata(): persists
+        # the exact editor design a typed Space should reopen to. It never
+        # touches inventory, bin/part defaults, or Space identity, and never
+        # builds a design from inventory rows - see Fix 032.
+        target = folder(payload)
+        if not target.is_dir():
+            raise ValueError("that save folder could not be found")
+        (mode, space, _inventory, _keep, _defaults, _part_defaults,
+         _needs_setup, _source, _prefill) = _folder_state(target, load_preferences())
+        if mode != "space":
+            raise ValueError("resume checkpoints belong to a Space folder")
+        resume_design = payload.get("resume_design")
+        resume_pending = payload.get("resume_pending")
+        if resume_design is not None and not isinstance(resume_design, dict):
+            raise ValueError("resume design must be an object or null")
+        if not isinstance(resume_pending, bool):
+            raise ValueError("resume pending must be a boolean")
+        _write_metadata(
+            target, mode, space, True,
+            resume_design=resume_design, resume_pending=resume_pending,
+        )
+        return reply(target)
+
     def open_folder(payload):
         target = folder(payload)
         if not target.is_dir():
@@ -1073,6 +1164,7 @@ def space_routes(
         "/api/space/update": update,
         "/api/folder/inventory": set_inventory,
         "/api/space/defaults": set_bin_defaults,
+        "/api/space/resume": resume,
         "/api/space/open": open_folder,
         "/api/space/no-inventory": lambda payload: set_inventory({**payload, "inventory": False}),
         "/api/space/forget": forget,

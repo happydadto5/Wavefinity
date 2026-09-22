@@ -30,7 +30,8 @@ const SP_KINDS = {
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
 const SPACE_ID_REQUIRED_VERSION = 5;
-const FOLDER_METADATA_VERSION = 7;
+const FOLDER_METADATA_VERSION = 8;
+const RESUME_REQUIRED_VERSION = 8;
 const SPACE_SETUP_VERSION = 1;
 // One fixed name for every inventory-enabled folder: it never follows the
 // folder's own (renamable) name.
@@ -295,6 +296,10 @@ SP.applyFolder = async (info, { reset = true, initDesign = true } = {}) => {
     const ok = await SP.resetDrawer();
     if (!ok) return false;
   }
+  // The old Space's queued/in-flight resume checkpoint must land before its
+  // identity is replaced below - a completion for it after the switch must
+  // never write into, or overwrite in memory, the new Space's checkpoint.
+  await SP.flushOutgoingResumeCheckpoint();
   state.output = info.folder;
   state.activeSpaceId = info.space_id || null;
   state.folderSelected = true;
@@ -305,6 +310,8 @@ SP.applyFolder = async (info, { reset = true, initDesign = true } = {}) => {
     info.keep_bin_defaults,
     info.bin_defaults,
     info.part_defaults,
+    info.resume_design,
+    info.resume_pending,
   );
   if (initDesign && info.folder_mode === "space") await SP.initializeDesignForActiveSpace();
   syncForm();
@@ -378,7 +385,7 @@ SP.classifyMetadata = record => {
   // v2 and v3 are readable migration inputs, same as the local backend
   // (organizer_spaces._folder_state); v4+ are already onboarded. Older
   // current formats upgrade in place; v4 only lacks the Space identity.
-  if (![2, 3, 4, 5, 6, 7].includes(current.version)) return { status: "invalid" };
+  if (![2, 3, 4, 5, 6, 7, 8].includes(current.version)) return { status: "invalid" };
   const needsMigration = current.version < 4 || current.setup_version !== SPACE_SETUP_VERSION;
   const explicitInventory = typeof current.inventory === "boolean" ? current.inventory : null;
   if (current.folder_mode === "design") {
@@ -389,7 +396,7 @@ SP.classifyMetadata = record => {
     if (!space) return { status: "invalid-space" };
     if (current.version === 2) {
       // v2 predates keep_bin_defaults/bin_defaults entirely.
-      return { status: "space", space, space_id: null, needsIdentityMigration: false, inventory: true, keep_bin_defaults: true, bin_defaults: null, part_defaults: {}, needsMigration: true, metadataVersion: 2 };
+      return { status: "space", space, space_id: null, needsIdentityMigration: false, inventory: true, keep_bin_defaults: true, bin_defaults: null, part_defaults: {}, needsMigration: true, metadataVersion: 2, resume_design: null, resume_pending: false };
     }
     // A current-version typed Space must carry a valid ID; it is never healed
     // with a replacement identity.
@@ -404,6 +411,20 @@ SP.classifyMetadata = record => {
         || !partDefaults || typeof partDefaults !== "object" || Array.isArray(partDefaults)) {
       return { status: "invalid" };
     }
+    // The exact resume checkpoint only exists from v8 on. /api/design/validate
+    // remains the canonical design-schema validator on restore - this only
+    // checks the top-level shape, same as the local backend's _metadata_resume.
+    let resumeDesign = null;
+    let resumePending = false;
+    if (current.version >= RESUME_REQUIRED_VERSION) {
+      resumeDesign = current.resume_design === undefined ? null : current.resume_design;
+      resumePending = current.resume_pending === undefined ? false : current.resume_pending;
+      if (resumeDesign !== null && (typeof resumeDesign !== "object" || Array.isArray(resumeDesign))) {
+        return { status: "invalid" };
+      }
+      if (typeof resumePending !== "boolean") return { status: "invalid" };
+      if (resumeDesign === null) resumePending = false;
+    }
     // A stored legacy "box" identity always requires the explicit
     // migration/setup pass, even inside an otherwise fully-valid v4 +
     // setup_version-1 file left over from an earlier incomplete Fix 004
@@ -417,6 +438,7 @@ SP.classifyMetadata = record => {
       inventory: true, keep_bin_defaults: keep, bin_defaults: defaults,
       part_defaults: partDefaults, needsMigration: spaceNeedsMigration,
       metadataVersion: current.version,
+      resume_design: resumeDesign, resume_pending: resumePending,
     };
   }
   return { status: "invalid" };
@@ -439,7 +461,23 @@ SP.metadataError = status => {
   return new Error("This folder contains Wavefinity metadata that this version cannot safely read. The file was left unchanged.");
 };
 
-SP.writeMetadata = async (handle, mode, space = null, inventory = true, changes = {}) => {
+// Every SP.writeMetadata() call is a read/preserve/write transaction against
+// the same file. Serialized through one promise-chain queue so a resume
+// checkpoint save (from a background preview) can never race a rename/
+// defaults/version-upgrade write and read the same stale file - see Fix 032.
+// A rejected write must not poison the tail: the caller still gets its own
+// rejection, but later queued writes still run.
+SP._metadataWriteQueue = Promise.resolve();
+SP._serializeMetadataWrite = task => {
+  const result = SP._metadataWriteQueue.then(task, task);
+  SP._metadataWriteQueue = result.then(() => {}, () => {});
+  return result;
+};
+
+SP.writeMetadata = (handle, mode, space = null, inventory = true, changes = {}) =>
+  SP._serializeMetadataWrite(() => SP._writeMetadataNow(handle, mode, space, inventory, changes));
+
+SP._writeMetadataNow = async (handle, mode, space = null, inventory = true, changes = {}) => {
   if (!handle) {
     throw new Error("Inventory and Spaces need access to a writable folder.");
   }
@@ -454,6 +492,8 @@ SP.writeMetadata = async (handle, mode, space = null, inventory = true, changes 
     let keep = true;
     let defaults = null;
     let partDefaults = {};
+    let resumeDesign = null;
+    let resumePending = false;
     const { current } = await SP.readMetadata(handle);
     const currentState = SP.classifyMetadata(current);
     if (!["missing", "design", "space"].includes(currentState.status)) throw SP.metadataError(currentState.status);
@@ -464,26 +504,142 @@ SP.writeMetadata = async (handle, mode, space = null, inventory = true, changes 
       // The identity choke point: keep an existing ID, only new or pre-v5
       // Spaces may get one. (A damaged v5 already threw above.)
       spaceId = currentState.space_id;
+      resumeDesign = currentState.resume_design ?? null;
+      resumePending = Boolean(currentState.resume_pending);
     }
     if (Object.hasOwn(changes, "keep_bin_defaults")) keep = Boolean(changes.keep_bin_defaults);
     if (Object.hasOwn(changes, "bin_defaults")) defaults = changes.bin_defaults;
     if (Object.hasOwn(changes, "part_defaults")) partDefaults = changes.part_defaults;
+    if (Object.hasOwn(changes, "resume_design")) resumeDesign = changes.resume_design;
+    if (Object.hasOwn(changes, "resume_pending")) resumePending = Boolean(changes.resume_pending);
     if (defaults !== null && (typeof defaults !== "object" || Array.isArray(defaults))) {
       throw new Error("Bin defaults must be an object or null.");
     }
     if (!partDefaults || typeof partDefaults !== "object" || Array.isArray(partDefaults)) {
       throw new Error("Part defaults must be an object.");
     }
+    if (resumeDesign !== null && (typeof resumeDesign !== "object" || Array.isArray(resumeDesign))) {
+      throw new Error("The Space resume design must be an object or null.");
+    }
+    if (resumeDesign === null) resumePending = false;
     metadata.space_id = spaceId || crypto.randomUUID();
     metadata.inventory = true;
     metadata.space = space;
     metadata.keep_bin_defaults = keep;
     metadata.bin_defaults = defaults;
     metadata.part_defaults = partDefaults;
+    metadata.resume_design = resumeDesign;
+    metadata.resume_pending = resumePending;
   }
   await WFFileSystem.writeText(handle, FOLDER_METADATA, JSON.stringify(metadata, null, 2));
   return metadata;
 };
+
+// ------------------------------------------------ exact resume checkpoint
+//
+// A typed Space's exact-design resume checkpoint (Fix 032). One coalescing
+// slot, not a per-Space queue: SP.applyFolder always flushes whatever is
+// queued/in-flight for the outgoing Space before it changes state.output/
+// state.activeSpaceId (see SP.flushOutgoingResumeCheckpoint below), so only
+// one Space is ever actively queuing at a time - Space A and Space B are
+// never coalesced into the same slot, and a stale Space-A completion is
+// still gated by identity before it is allowed to overwrite in-memory state.
+SP._resume = {
+  latest: null,          // { target, design, pending, key } - queued, unsent
+  inFlight: null,         // the write currently in progress, if any
+  savedKey: new Map(),   // space_id -> dedupe key of the last value actually saved
+};
+
+// Captured synchronously, before any await - never resolved from mutable
+// global state after a wait, so a queued write always targets the exact
+// Space that owned the design when it was queued.
+SP._captureResumeTarget = () => {
+  if (state.folderMode !== "space" || !state.activeSpace || !state.activeSpaceId) return null;
+  return {
+    spaceId: state.activeSpaceId,
+    space: state.activeSpace,
+    output: state.output,
+    browserFolder: state.browserFolder,
+    hosted: Boolean(state.runtime.hosted),
+  };
+};
+
+SP._resumeMatchesActive = target =>
+  state.folderMode === "space" && state.activeSpaceId === target.spaceId;
+
+SP._writeResumeCheckpointNow = async (target, design, pending) => {
+  if (target.hosted) {
+    if (!target.browserFolder?.handle) return;
+    await SP.writeMetadata(target.browserFolder.handle, "space", target.space, true, {
+      resume_design: design, resume_pending: pending,
+    });
+  } else {
+    await api("/api/space/resume", {
+      output: target.output, resume_design: design, resume_pending: pending,
+    });
+  }
+};
+
+SP._pumpResumeQueue = () => {
+  if (SP._resume.inFlight) return SP._resume.inFlight;
+  const item = SP._resume.latest;
+  if (!item) return Promise.resolve();
+  SP._resume.latest = null;
+  SP._resume.inFlight = SP._writeResumeCheckpointNow(item.target, item.design, item.pending)
+    .then(() => {
+      SP._resume.savedKey.set(item.target.spaceId, item.key);
+      // The file write for an outgoing Space may finish after a switch;
+      // that is fine. Adopting it into memory only when that Space is still
+      // active is what stops a late completion overwriting a newer Space's
+      // in-memory checkpoint.
+      if (SP._resumeMatchesActive(item.target)) {
+        state.spaceResumeDesign = clone(item.design);
+        state.spaceResumePending = item.pending;
+      }
+    })
+    .catch(error => {
+      // A rejected write must not poison the tail - the queue recovers so
+      // later writes still run; this is reported here, not thrown, because
+      // nothing awaiting the queue should have a checkpoint-save failure
+      // mistaken for its own operation failing.
+      toast(`Current design could not be saved to this Space: ${error.message}`, true, 6000);
+    })
+    .then(() => {
+      SP._resume.inFlight = null;
+      if (SP._resume.latest) return SP._pumpResumeQueue();
+    });
+  return SP._resume.inFlight;
+};
+
+// Background autosave choke point - call only after a fully valid preview
+// (see refreshPreview in web/app.js). Coalesces with whatever is already
+// queued for the same Space and skips an exact duplicate of the last value
+// actually saved for it.
+SP.queueResumeCheckpoint = (design, pending) => {
+  const target = SP._captureResumeTarget();
+  if (!target) return;
+  const key = `${pending ? 1 : 0}:${JSON.stringify(design)}`;
+  if (SP._resume.savedKey.get(target.spaceId) === key) return;
+  if (SP._resume.latest?.target.spaceId === target.spaceId && SP._resume.latest.key === key) return;
+  SP._resume.latest = { target, design: clone(design), pending: Boolean(pending), key };
+  SP._pumpResumeQueue();
+};
+
+// Explicit/deterministic persistence for Generate/Print and for leaving a
+// Space - awaited, so a failed external operation still leaves the exact
+// pre-operation state recoverable. Never rejects: a persistence failure is
+// reported as its own toast and must not abort the caller's real operation.
+SP.flushResumeCheckpoint = async (design, pending) => {
+  const target = SP._captureResumeTarget();
+  if (!target) return;
+  const key = `${pending ? 1 : 0}:${JSON.stringify(design)}`;
+  SP._resume.latest = { target, design: clone(design), pending: Boolean(pending), key };
+  await SP._pumpResumeQueue();
+};
+
+// Waits out whatever is queued/in-flight before SP.applyFolder changes
+// state.output/state.activeSpaceId to a different folder/Space.
+SP.flushOutgoingResumeCheckpoint = () => SP._pumpResumeQueue();
 
 // The one place hosted code reads a folder's inventory. Mirrors the local
 // organizer_inventory.resolve_inventory_path: the canonical file wins, exactly
@@ -605,6 +761,8 @@ SP.inspectHosted = async folder => {
   // candidates. A prefill is suggestion-only and never the active space.
   let spaceSource = null;
   let setupPrefillSpace = null;
+  let resumeDesign = null;
+  let resumePending = false;
   if (currentDesignAuthoritative) {
     mode = "design";
     // A folder saved before this preference existed keeps inventory on by default.
@@ -621,6 +779,8 @@ SP.inspectHosted = async folder => {
       partDefaults = currentState.part_defaults || {};
       spaceId = currentState.space_id;
       needsIdentity = currentState.needsIdentityMigration;
+      resumeDesign = currentState.resume_design || null;
+      resumePending = Boolean(currentState.resume_pending);
       // Already valid current v4/v5 setup_version-1 metadata: the inventory's
       // own explicit layout.space is only the values source here, not a
       // reason to force setup again - mirrors organizer_spaces._folder_state.
@@ -638,6 +798,8 @@ SP.inspectHosted = async folder => {
     partDefaults = currentState.part_defaults || {};
     spaceId = currentState.space_id;
     needsIdentity = currentState.needsIdentityMigration;
+    resumeDesign = currentState.resume_design || null;
+    resumePending = Boolean(currentState.resume_pending);
     needsSetup = currentState.needsMigration;
   } else if (legacyState.status === "space") {
     // A stale or absent current "design" marker must not hide a genuine
@@ -678,6 +840,10 @@ SP.inspectHosted = async folder => {
     needsSetup = true;
   }
   if (needsSetup) needsIdentity = false;
+  // An exact resume checkpoint only ever comes from current v8+ typed-Space
+  // metadata (spaceSource === "metadata"); a legacy/inferred Space or one
+  // still needing setup has none - mirrors organizer_spaces.describe().
+  const hasResumeCheckpoint = mode === "space" && spaceSource === "metadata" && !needsSetup;
 
   return {
     folder: folder.name,
@@ -688,6 +854,8 @@ SP.inspectHosted = async folder => {
     needs_identity_migration: mode === "space" && needsIdentity,
     space_source: spaceSource,
     setup_prefill_space: setupPrefillSpace,
+    resume_design: hasResumeCheckpoint ? resumeDesign : null,
+    resume_pending: hasResumeCheckpoint ? resumePending : false,
     metadata_version: currentState.metadataVersion || null,
     inventory: mode === "space" ? true : inventory,
     keep_bin_defaults: mode === "space" ? keepBinDefaults : false,
@@ -1600,7 +1768,28 @@ SP.installSpaceStarterDesign = async space => {
 SP.initializeDesignForActiveSpace = async () => {
   if (state.folderMode !== "space" || !state.activeSpace || !state.catalog) return;
   SP.resetDesignSession();
-  await SP.installSpaceStarterDesign(state.activeSpace);
+
+  let restored = false;
+  if (state.spaceResumeDesign) {
+    try {
+      const result = await api("/api/design/validate", {
+        design: clone(state.spaceResumeDesign),
+      });
+      // A restored design bypasses SP.installSpaceStarterDesign() and
+      // applySpaceSizingDefaults() entirely - it is the exact design the
+      // user left, not a fresh starter seeded from remembered defaults.
+      state.design = result.design;
+      state.cleanDesign = clone(result.design);
+      state.workingPending = Boolean(state.spaceResumePending);
+      restored = true;
+    } catch (error) {
+      // The stored checkpoint itself is left untouched - a validation
+      // failure here must never delete or rewrite recoverable user data.
+      toast(`The last design for this Space could not be restored: ${error.message}`, true, 7000);
+    }
+  }
+
+  if (!restored) await SP.installSpaceStarterDesign(state.activeSpace);
   syncForm();
 };
 

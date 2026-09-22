@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-21 — Space design resume
+
+- Opening a typed Space (Drawer, Surface, Portable Storage, Pegboard) now reopens the exact bin or part last worked on there, including its name, size, label text, and interior layout - not a fresh starter.
+- Generating or printing a bin keeps that same design as what the Space reopens to next; a later edit updates it again.
+- New design and Open design still work as before and become the Space's resume target once they preview successfully.
+- The Space name is now the strongest heading in the left panel, above its type and size.
+
 ## 2026-09-21 — Bulk Space Printing (Fix 027)
 
 - Generating a bin now always adds it to Inventory at Qty 0. The "New bins count as printed" switch is gone.

@@ -70,6 +70,11 @@ const state = {
   keepBinDefaults: false,
   spaceBinDefaults: null,
   spacePartDefaults: {},
+  // The active typed Space's exact resume checkpoint (Fix 032) - the full
+  // canonical design it should reopen to, and whether that design is still
+  // an unreconciled Current design. null/false outside a typed Space.
+  spaceResumeDesign: null,
+  spaceResumePending: false,
   // Whether this folder logs generated bins/B4Bs to its inventory file - the
   // default for any folder, independent of whether Space planning is on.
   inventoryEnabled: true,
@@ -158,6 +163,10 @@ const VERSION_POLL_MS = 5000;
 // `undefined` - as a routine syncForm() refresh does - preserves whatever is
 // already in state.inventoryEnabled instead of silently resetting it: the
 // third argument is data about a folder, not a reset-to-default action.
+// `resumeDesign`/`resumePending` follow the same "undefined preserves it"
+// rule as `inventory` above: only SP.applyFolder() (which just read the
+// folder's own metadata) supplies new values. A routine syncForm() refresh
+// that re-passes its own current state.spaceResume* leaves them untouched.
 function setFolderState(
   mode = "design",
   space = null,
@@ -165,6 +174,8 @@ function setFolderState(
   keepBinDefaults = undefined,
   binDefaults = undefined,
   partDefaults = undefined,
+  resumeDesign = undefined,
+  resumePending = undefined,
 ) {
   state.folderMode = mode === "space" ? "space" : "design";
   state.activeSpace = state.folderMode === "space" ? (space || null) : null;
@@ -172,11 +183,19 @@ function setFolderState(
     state.keepBinDefaults = keepBinDefaults === undefined ? true : Boolean(keepBinDefaults);
     state.spaceBinDefaults = binDefaults && typeof binDefaults === "object" ? clone(binDefaults) : null;
     state.spacePartDefaults = partDefaults && typeof partDefaults === "object" ? clone(partDefaults) : {};
+    if (resumeDesign !== undefined) {
+      state.spaceResumeDesign = resumeDesign && typeof resumeDesign === "object" ? clone(resumeDesign) : null;
+    }
+    if (resumePending !== undefined) state.spaceResumePending = Boolean(resumePending);
+    if (!state.spaceResumeDesign) state.spaceResumePending = false;
   } else {
     state.keepBinDefaults = false;
     state.spaceBinDefaults = null;
     state.spacePartDefaults = {};
-    // No longer a typed Space: the Space workspace has nothing to show.
+    // No longer a typed Space: neither the Space workspace nor a stale
+    // resume checkpoint from it has anything left to show.
+    state.spaceResumeDesign = null;
+    state.spaceResumePending = false;
     if (typeof DP !== "undefined" && DP.leave) DP.leave();
   }
   const resolvedInventory = inventory === undefined ? state.inventoryEnabled : Boolean(inventory);
@@ -7456,6 +7475,15 @@ async function refreshPreview() {
     $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(physical[0])} mm`;
     $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(physical[1])} mm`;
     $(".dimension-height", $("#dimensions")).textContent = `Height ${fmt(state.design.box.z)} mm`;
+    // A typed Space's exact resume checkpoint (Fix 032): only a fully valid
+    // preview - never one that merely returned HTTP 200 while still
+    // reporting fit/feature/draft errors - replaces the last valid one.
+    // Placed after the controls above so workingDesignForSpace() compares
+    // the same canonical design the user now sees, including any server-
+    // adjusted X/Y/Z.
+    if (!previewHasErrors && state.folderMode === "space" && typeof SP !== "undefined") {
+      SP.queueResumeCheckpoint(state.design, Boolean(workingDesignForSpace()));
+    }
     const messages = [result.message, ...result.feature_errors, result.draft_error].filter(Boolean);
     const actions = [];
     if (result.message) actions.push({
@@ -11233,6 +11261,15 @@ async function generateParts(target) {
       keep_log: state.keepLog,
     };
 
+    // Fix 032: flush the exact pre-operation resume checkpoint before this
+    // design is sent anywhere, so a failed generation still leaves the
+    // editing state recoverable. Pending is computed for this exact payload
+    // now, not blindly forced true - a reprint of an already-reconciled
+    // unchanged design stays reconciled.
+    if (state.folderMode === "space" && typeof SP !== "undefined") {
+      await SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()));
+    }
+
     // Step 1: Generate Bin if requested
     if (target === "all" || target === "bin") {
       setItemStatus("bin", "generating", "Generating…");
@@ -11246,7 +11283,16 @@ async function generateParts(target) {
       allFiles.push(...binFiles);
       setItemStatus("bin", "done", "Done");
       if (baseTrimEnabled(payload.design)) surfaceEdgeDone = payload.design;
-      else markWorkingDesignReconciled();
+      else {
+        markWorkingDesignReconciled();
+        // The just-generated bin is the next resume target, pending=false,
+        // and is awaited before this step is reported complete. Connector-
+        // only generation never reaches this branch, so it cannot falsely
+        // reconcile the bin design.
+        if (state.folderMode === "space" && typeof SP !== "undefined") {
+          await SP.flushResumeCheckpoint(payload.design, false);
+        }
+      }
     }
 
     // Step 2: Generate Connector if requested
@@ -11351,6 +11397,12 @@ async function printModel(target = "bin") {
       target: target,
       keep_log: state.keepLog,
     };
+    // Fix 032: same exact resume checkpoint contract as generateParts() -
+    // flush the pre-operation state before sending, so a failed print still
+    // leaves it recoverable with its pre-operation pending value.
+    if (state.folderMode === "space" && typeof SP !== "undefined") {
+      await SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()));
+    }
     const result = await api("/api/print", payload);
     if ((target === "bin" || target === "all") && !baseTrimEnabled(payload.design) && !Boolean(payload.design?.box?.b4b?.enabled)) {
       await rememberGeneratedSpaceBin(payload.design);
@@ -11359,7 +11411,12 @@ async function printModel(target = "bin") {
     const fileNames = files.map(f => f.split(/[\\/]/).pop());
     toast(`Sent to ${slicerName}!\n${fileNames.join("\n")}`, false, 7000);
     if (baseTrimEnabled(payload.design)) printedEdge = payload.design;
-    else if (target === "bin" || target === "all") markWorkingDesignReconciled();
+    else if (target === "bin" || target === "all") {
+      markWorkingDesignReconciled();
+      if (state.folderMode === "space" && typeof SP !== "undefined") {
+        await SP.flushResumeCheckpoint(payload.design, false);
+      }
+    }
   } catch (error) {
     setError(error.message);
     toast(error.message, true, 8000);
