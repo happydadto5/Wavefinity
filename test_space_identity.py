@@ -416,9 +416,10 @@ class SpaceIdentityTests(unittest.TestCase):
     def test_resume_checkpoint_round_trips_through_the_resume_route(self):
         folder = make_v4_space(self.tmp)
         self.call("/api/folder/use", output=str(folder))
+        space_id = meta(folder)["space_id"]
         design = {"box": {"x": 40, "y": 48, "z": 30}, "part_name": "My Bin"}
         result = self.call(
-            "/api/space/resume", output=str(folder),
+            "/api/space/resume", output=str(folder), space_id=space_id,
             resume_design=design, resume_pending=True,
         )["folder"]
         self.assertEqual(result["resume_design"], design)
@@ -433,8 +434,12 @@ class SpaceIdentityTests(unittest.TestCase):
     def test_resume_checkpoint_survives_unrelated_metadata_rewrites(self):
         folder = make_v4_space(self.tmp)
         self.call("/api/folder/use", output=str(folder))
+        space_id = meta(folder)["space_id"]
         design = {"box": {"x": 40, "y": 48, "z": 30}}
-        self.call("/api/space/resume", output=str(folder), resume_design=design, resume_pending=True)
+        self.call(
+            "/api/space/resume", output=str(folder), space_id=space_id,
+            resume_design=design, resume_pending=True,
+        )
 
         # Space rename/resize must not erase it.
         self.call("/api/space/update", output=str(folder), name="Renamed", x=320, y=240, z=55)
@@ -454,9 +459,14 @@ class SpaceIdentityTests(unittest.TestCase):
     def test_null_resume_design_forces_pending_false(self):
         folder = make_v4_space(self.tmp)
         self.call("/api/folder/use", output=str(folder))
-        self.call("/api/space/resume", output=str(folder), resume_design={"box": {}}, resume_pending=True)
+        space_id = meta(folder)["space_id"]
+        self.call(
+            "/api/space/resume", output=str(folder), space_id=space_id,
+            resume_design={"box": {}}, resume_pending=True,
+        )
         result = self.call(
-            "/api/space/resume", output=str(folder), resume_design=None, resume_pending=True,
+            "/api/space/resume", output=str(folder), space_id=space_id,
+            resume_design=None, resume_pending=True,
         )["folder"]
         self.assertIsNone(result["resume_design"])
         self.assertFalse(result["resume_pending"])
@@ -466,16 +476,17 @@ class SpaceIdentityTests(unittest.TestCase):
     def test_malformed_resume_fields_are_rejected_without_rewriting_the_file(self):
         folder = make_v4_space(self.tmp)
         self.call("/api/folder/use", output=str(folder))
+        space_id = meta(folder)["space_id"]
         before = (folder / ".wavefinity.json").read_bytes()
         with self.assertRaises(ValueError):
             self.call(
-                "/api/space/resume", output=str(folder),
+                "/api/space/resume", output=str(folder), space_id=space_id,
                 resume_design=["not", "an", "object"], resume_pending=True,
             )
         self.assertEqual((folder / ".wavefinity.json").read_bytes(), before)
         with self.assertRaises(ValueError):
             self.call(
-                "/api/space/resume", output=str(folder),
+                "/api/space/resume", output=str(folder), space_id=space_id,
                 resume_design={"box": {}}, resume_pending="yes",
             )
         self.assertEqual((folder / ".wavefinity.json").read_bytes(), before)
