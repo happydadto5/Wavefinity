@@ -1374,7 +1374,11 @@ choices.
 - **Label** - **Separate part** is the new-design default: the projecting
   plate prints as its own **Edge Mount Label** file on one continuous shallow
   snap/slide saddle that follows the selected wall's real wavy shape. It is
-  shown installed in preview. **Integrated** keeps the original fused plate;
+  shown installed in preview. Separate labels also use vertical **Standoff
+  Ribs** on the bin body by default: they match the clip's outer thickness so
+  the bin sits flat on its mounting surface. Auto spaces the ribs across the
+  selected wall, or you can choose 1-20 manually. Existing saved Separate
+  labels keep ribs Off until you enable them. **Integrated** keeps the original fused plate;
   old saved labels without Label Type reopen as Integrated. **Length** is either Full
   Side (the wall's real wavy-envelope span) or Text Length (the fitted text
   plus a 2 mm margin on every side, never wider than Full Side). Projection is
