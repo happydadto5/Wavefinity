@@ -19,14 +19,7 @@
       <h1>Wavefinity <small class="brand-author">by happydadto5</small></h1>
       <button id="about-btn" class="button secondary" type="button" title="Learn about Wavefinity">About</button>
     </div>
-    <div class="header-actions">
-      <button id="connection" class="connection" title="Reload the app and Python engine">Starting…</button>
-      <button id="undo-design" class="button secondary" type="button" title="Undo last design change (Ctrl+Z)">Undo</button>
-      <button id="redo-design" class="button secondary" type="button" title="Redo last undone design change (Ctrl+Y or Ctrl+Shift+Z)">Redo</button>
-      <button id="new-design" class="button secondary">New</button>
-      <button id="save-design" class="button secondary">Save design</button>
-      <label class="button secondary file-button">Open design<input id="open-design" type="file" accept=".json,.wavefinity.json"></label>
-    </div>
+    <div class="header-actions"></div>
   </header>
 
   <main class="app-shell" id="app-shell">
@@ -34,8 +27,11 @@
       <section id="space-head" class="space-head" aria-label="Space" hidden>
         <div id="space-head-view" class="space-head-view">
           <div class="space-head-title"><strong id="space-head-name"></strong><span id="space-head-type" class="space-head-type"></span></div>
-          <div id="space-head-size" class="muted"></div>
+          <div id="space-head-actual" class="muted"></div>
+          <div id="space-head-usable" class="muted"></div>
+          <div id="space-head-remainder" class="muted" hidden></div>
           <div class="button-row">
+            <button id="space-head-open" class="button secondary dl-small" type="button">Open Space</button>
             <button id="space-head-edit" class="button secondary dl-small" type="button">Edit</button>
             <button id="space-head-show" class="button secondary dl-small" type="button">Show Folder</button>
             <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
@@ -256,7 +252,7 @@
           </div>
           <div id="side-openings-option" class="lid-option-card" hidden>
             <div id="side-openings-panel">
-              <div class="field-grid three">
+              <div class="field-grid two">
                 <label class="inline-select">Shape
                   <select id="side-opening-shape">
                     <option value="curved">Curved</option>
@@ -266,6 +262,8 @@
                 <label class="inline-select">Opening size
                   <select id="side-opening-size"></select>
                 </label>
+              </div>
+              <div class="field-grid two">
                 <label>% from bottom
                   <input id="side-opening-from-bottom" type="number" min="0" max="100" step="1">
                 </label>
@@ -448,6 +446,14 @@
               </select>
             </label>
           </div>
+        </div>
+        <div id="designer-lifecycle-row" class="button-row equal designer-lifecycle-row">
+          <button type="button" id="designer-new-bin" class="button secondary">New Bin</button>
+          <button type="button" id="designer-duplicate" class="button secondary">Duplicate</button>
+          <button type="button" id="designer-save-space" class="button secondary" hidden>Save to Space</button>
+          <button type="button" id="designer-load-space" class="button secondary" hidden>Load from Space</button>
+          <button type="button" id="designer-save-file" class="button secondary">Save design file</button>
+          <label class="button secondary file-button" id="designer-open-file-label">Open design file<input id="designer-open-file" type="file" accept=".json,.wavefinity.json"></label>
         </div>
         <div class="print-button-wrap">
           <button id="print-bin" class="button primary wide print-button">Print to Bambu Studio</button>
@@ -713,6 +719,13 @@
       <button id="draft-switch-keep" type="button" class="button secondary">Keep editing</button>
       <button id="draft-switch-discard" type="button" class="button danger">Discard change</button>
       <button id="draft-switch-add" type="button" class="button primary" hidden>Add as new</button>
+    </div>
+  </dialog>
+  <dialog id="designer-load-dialog" class="support-layout-dialog" aria-labelledby="designer-load-title">
+    <h2 id="designer-load-title">Load from Space</h2>
+    <div id="designer-load-list" class="designer-load-list"></div>
+    <div class="button-row">
+      <button id="designer-load-cancel" type="button" class="button secondary">Cancel</button>
     </div>
   </dialog>
   <dialog id="app-confirm-dialog" class="support-layout-dialog" aria-labelledby="app-confirm-title">

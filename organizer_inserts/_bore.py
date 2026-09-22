@@ -12,7 +12,7 @@ from shapely.geometry import Polygon
 from organizer_engine import WAVE_AMPLITUDE, WAVE_LENGTH, BoxSpec, wall_depth_for
 from organizer_geometry import _extrude_polygon, difference, union
 
-from ._core import Feature, _fit_count, _need_item, layout_zone
+from ._core import Feature, _fit_count, _need_item, connector_keep_out, feature_touches_wall, layout_zone
 from ._registry import (
     OptionDefinition, SettingInteraction, defaults, feature,
     register_setting_interactions, resolved_options,
@@ -278,7 +278,19 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         depth = hole
     reach = max(0.0, depth) * math.sin(math.radians(angle)) if tilted else 0.0
     if auto_height:
-        resolved_height = box.z - base_z
+        # Fix 034 G1: Auto Height must resolve to a height that is actually
+        # legal, not just the full bin - a wall-touching Bore is capped at
+        # the connector keep-out exactly like a manual height would be.
+        top_limit = box.z - base_z
+        if feature_touches_wall(box, one):
+            top_limit = min(top_limit, connector_keep_out(box) - base_z)
+        minimum_height = (hole if wall_only else depth) + 2.0
+        if top_limit + 1e-6 < minimum_height:
+            raise ValueError(
+                "Auto Height cannot fit a legal Bore here - the connector keep-out "
+                "leaves too little room; make the bin taller or move the Bore away from the wall"
+            )
+        resolved_height = top_limit
     elif wall_only:
         resolved_height = hole + 2.0
     else:

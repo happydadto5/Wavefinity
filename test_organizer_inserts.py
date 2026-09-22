@@ -2814,29 +2814,48 @@ class BoreAutoModeTests(unittest.TestCase):
         self.assertGreater(grid["columns"] * grid["rows"], 1)
 
     def test_auto_base_and_height_follow_bin(self):
+        # Fix 034 G1: a full-Base Bore's zone touches every wall, so Auto
+        # Height now resolves to the connector keep-out limit exactly like a
+        # manual height must - the old full-bin-height exemption is gone.
+        # In a bin tall enough for that legal cap, Auto still fills it.
         one = self._bore(auto_base=True, auto_height=True, height=5.0)
-        for box in (BIN, BoxSpec(160.0, 88.0, 56.0)):
-            fixed = inserts.normalize_bore_auto(box, one, box.base_thickness)
-            whole = inserts.layout_zone(box)
-            self.assertEqual(fixed.zone, whole)
-            self.assertNotIn("height", fixed.options)
-            height = inserts.resolved_options(box, fixed, box.base_thickness)["height"]
-            self.assertAlmostEqual(height, box.z - box.base_thickness, places=6)
-            inserts.build_features(
-                box, [fixed], box.base_thickness, whole, "fused",
-            )
+        box = BoxSpec(160.0, 88.0, 56.0)
+        fixed = inserts.normalize_bore_auto(box, one, box.base_thickness)
+        whole = inserts.layout_zone(box)
+        self.assertEqual(fixed.zone, whole)
+        self.assertNotIn("height", fixed.options)
+        height = inserts.resolved_options(box, fixed, box.base_thickness)["height"]
+        expected_top = inserts.connector_keep_out(box)
+        self.assertAlmostEqual(height, expected_top - box.base_thickness, places=6)
+        inserts.build_features(
+            box, [fixed], box.base_thickness, whole, "fused",
+        )
+
+    def test_auto_height_refuses_when_the_legal_cap_is_too_short(self):
+        # Fix 034 G1: when the connector keep-out leaves too little room for
+        # this Bore's minimum geometry, Auto Height raises a clear,
+        # actionable error instead of silently building an illegal bin that
+        # would foul a seated connector.
+        one = self._bore(auto_base=True, auto_height=True)
+        fixed = inserts.normalize_bore_auto(BIN, one, BIN.base_thickness)
+        with self.assertRaisesRegex(ValueError, "make the bin taller or move the Bore"):
+            inserts.resolved_options(BIN, fixed, BIN.base_thickness)
 
 
 class BoreAutoBaseZoneTests(unittest.TestCase):
     def test_mode_conversion_keeps_exact_derived_zone(self):
         from organizer_app import convert_layout_mode
+        # Fix 034 G1: auto_base fills the whole Base, so this Bore touches
+        # every wall and Auto Height's connector keep-out cap applies - use a
+        # box tall enough for that legal cap to hold the hex driver's hole.
+        box = BoxSpec(128.0, 88.0, 60.0)
         one = inserts.Feature(
             "bore", inserts.Zone(-8.0, -8.0, 8.0, 8.0),
             item=inserts.LIBRARY["hex_driver"], options={"auto_base": True, "auto_height": True},
         )
         for mode in ("fused", "cartridge"):
-            layout = convert_layout_mode(BIN, [one], mode)
-            self.assertEqual(layout.features[0].zone, inserts.layout_zone(BIN, mode))
+            layout = convert_layout_mode(box, [one], mode)
+            self.assertEqual(layout.features[0].zone, inserts.layout_zone(box, mode))
 
 
 class SlotRackTests(unittest.TestCase):

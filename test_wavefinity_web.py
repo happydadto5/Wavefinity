@@ -178,8 +178,8 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(rules["top_bridge_mm"], 4.0)
         self.assertEqual(rules["default_shape"], "curved")
         self.assertEqual(rules["default_size"], "medium")
-        self.assertEqual(rules["default_from_bottom_percent"], 100)
-        self.assertEqual(rules["default_from_top_percent"], 100)
+        self.assertEqual(rules["default_from_bottom_percent"], 0)
+        self.assertEqual(rules["default_from_top_percent"], 0)
         self.assertEqual(rules["arch_curve"], 0.5)
         self.assertEqual(
             {(row["value"], row["width_mm"]) for row in rules["sizes"]},
@@ -194,8 +194,8 @@ class WebApplicationTests(unittest.TestCase):
         design["box"]["x"] = design["box"]["y"] = 48.0
         design["box"]["side_openings"] = {
             "enabled": True, "shape": "curved", "sides": ["front", "left"],
-            "size": "medium", "from_bottom_percent": 100.0,
-            "from_top_percent": 100.0,
+            "size": "medium", "from_bottom_percent": 0.0,
+            "from_top_percent": 0.0, "percent_mode": "inset_v2",
         }
         preview = preview_payload({"design": design})
         self.assertTrue(preview["fits"], preview["message"])
@@ -211,8 +211,8 @@ class WebApplicationTests(unittest.TestCase):
         without = preview_payload({"design": design})
         design["box"]["side_openings"] = {
             "enabled": True, "shape": "curved", "sides": ["front"],
-            "size": "medium", "from_bottom_percent": 100.0,
-            "from_top_percent": 100.0,
+            "size": "medium", "from_bottom_percent": 0.0,
+            "from_top_percent": 0.0, "percent_mode": "inset_v2",
         }
         with_opening = preview_payload({"design": design})
         self.assertTrue(with_opening["fits"], with_opening["message"])
@@ -231,8 +231,8 @@ class WebApplicationTests(unittest.TestCase):
         design["box"]["y"] = 48.0
         design["box"]["side_openings"] = {
             "enabled": True, "shape": "curved", "sides": ["front"],
-            "size": "small", "from_bottom_percent": 100.0,
-            "from_top_percent": 100.0,
+            "size": "small", "from_bottom_percent": 0.0,
+            "from_top_percent": 0.0, "percent_mode": "inset_v2",
         }
         with self.assertRaises(ValueError):
             preview_payload({"design": design})
@@ -249,8 +249,8 @@ class WebApplicationTests(unittest.TestCase):
             },
             "side_openings": {
                 "enabled": True, "shape": "curved", "sides": ["front"],
-                "size": "small", "from_bottom_percent": 100.0,
-                "from_top_percent": 100.0,
+                "size": "small", "from_bottom_percent": 0.0,
+                "from_top_percent": 0.0, "percent_mode": "inset_v2",
             },
         })
         with self.assertRaises(ValueError):
@@ -1022,11 +1022,10 @@ class WebApplicationTests(unittest.TestCase):
                         duplicate_source.index("previousDesign = clone(state.design);"))
         self.assertIn("state.draftSourceIndex = previousSelected;", duplicate_source)
 
-        defaults_start = app_js.index("function partDefaultsFromFeature(feature) {")
-        defaults_end = app_js.index("function seedFeatureFromPartDefaults", defaults_start)
-        defaults_source = app_js[defaults_start:defaults_end]
-        self.assertIn("delete copy.count;", defaults_source)
-        self.assertIn("delete copy.options.repeat_spacing_percent;", defaults_source)
+        # Fix 034 K2: partDefaultsFromFeature/seedFeatureFromPartDefaults were
+        # retired with Keep bin defaults - New Bin is always fresh and
+        # Duplicate is the explicit clone workflow, so there is no
+        # remembered-per-kind Nest option stripping to check here any more.
 
         self.assertIn("solid = apply_edge_mount_hole_cuts(box, solid)", app_py)
         self.assertIn("solid = apply_side_openings(box, solid)", app_py)
@@ -2257,7 +2256,7 @@ const ctx = { debounce: f => f, state: { activeSpaceId: "A", output: "" }, conso
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + " ;this.DL = DL;", ctx);
 const DL = ctx.DL;
-const layout = DL.normaliseLayout({ active: "d1", drawers: [
+const layout = DL.normaliseLayout({ active: "d1", settings: { autosave: false }, drawers: [
   { id: "d1", width: 400, depth: 300, height: 60, snap: 4, anchor: "center", bin_axis: "y", clearance: 5,
     placements: [{ bin: "b1", gx: 1.5, gy: 3 }, { bin: "b2", x: 1, y: 2, w: 3, d: 4 }] },
   { id: "d2", width: 100, depth: 100, height: 60, boundary: "mating", clearance: 1, placements: [] },
@@ -2274,6 +2273,9 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         self.assertEqual(mating["clearance"], 0)
         self.assertEqual(out["grid"]["step"], 8)
         self.assertEqual(out["cells"], [3, 5])
+        # Fix 034 K1: autosave has no off state - a legacy autosave:false
+        # layout normalises to the always-on runtime value.
+        self.assertTrue(out["layout"]["settings"]["autosave"])
 
     def test_inventory_preview_writes_nothing(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2363,18 +2365,6 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         self.assertIn("Shift: 10 mm", app_js)
         self.assertIn("Ctrl: 0.1 mm", app_js)
         self.assertIn("layout-hint", styles_css)
-
-    def test_undo_redo_keyboard_shortcuts_and_titles(self):
-        root = Path(__file__).resolve().parent
-        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
-        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
-
-        self.assertIn('title="Undo last design change (Ctrl+Z)"', index_html)
-        self.assertIn('title="Redo last undone design change (Ctrl+Y or Ctrl+Shift+Z)"', index_html)
-        self.assertIn("restoreHistory(event.shiftKey)", app_js)
-        self.assertIn("restoreHistory(true)", app_js)
-        self.assertIn('event.key.toLowerCase() === "z"', app_js)
-        self.assertIn('event.key.toLowerCase() === "y"', app_js)
 
     def test_divider_scoop_editor_applies_to_every_compartment(self):
         root = Path(__file__).resolve().parent
@@ -2551,10 +2541,9 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         self.assertIn("state.design = freshDesignForCurrentFolder();", installer)
 
     def test_safe_drawer_switch_never_silently_saves_or_loses_work(self):
-        # Item 2: Autosave ON aborts the switch (keeping DL.layout/DL.dirty)
-        # on a failed flush; Autosave OFF always goes through the explicit
-        # three-way Save & Switch / Discard & Switch / Cancel dialog, never
-        # window.confirm().
+        # Fix 034 K1: autosave has no off state any more, so this always just
+        # flushes a dirty layout and aborts the switch (keeping DL.layout/
+        # DL.dirty intact) on a failed flush - never a confirm() dialog.
         node = self._node_or_skip()
         root = Path(__file__).resolve().parent / "web"
         spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
@@ -2562,42 +2551,28 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         leave = leave[:leave.index("SP.resetDrawer = async")]
         self.assertNotIn("window.confirm(", leave)
         self.assertNotIn(" confirm(", leave)
-        self.assertIn("appConfirmSaveDiscardCancel", leave)
+        self.assertNotIn("appConfirmSaveDiscardCancel", leave)
 
         script = "\n".join([
             "const SP = {};",
-            "let saveResult = true, choiceResult = 'cancel';",
+            "let saveResult = true;",
             "const toast = () => {};",
-            "const appConfirmSaveDiscardCancel = async () => choiceResult;",
             "const DL = { dirty: true, layout: { settings: { autosave: true } }, output: 'x',"
             " saveError: 'boom', save: async () => saveResult };",
             leave,
             "(async () => {",
             "  const out = {};",
-            "  out.autosaveOnSuccess = await SP.leaveDrawerLayoutSafely();",
-            "  saveResult = false;",
-            "  out.autosaveOnFailure = await SP.leaveDrawerLayoutSafely();",
+            "  out.flushSuccess = await SP.leaveDrawerLayoutSafely();",
             "  DL.dirty = true;",
-            "  DL.layout.settings.autosave = false;",
-            "  choiceResult = 'cancel';",
-            "  out.manualCancel = await SP.leaveDrawerLayoutSafely();",
-            "  choiceResult = 'discard';",
-            "  out.manualDiscard = await SP.leaveDrawerLayoutSafely();",
-            "  choiceResult = 'save'; saveResult = true;",
-            "  out.manualSave = await SP.leaveDrawerLayoutSafely();",
-            "  choiceResult = 'save'; saveResult = false;",
-            "  out.manualSaveFails = await SP.leaveDrawerLayoutSafely();",
+            "  saveResult = false;",
+            "  out.flushFailure = await SP.leaveDrawerLayoutSafely();",
             "  process.stdout.write(JSON.stringify(out));",
             "})();",
         ])
         done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
         out = json.loads(done.stdout)
-        self.assertTrue(out["autosaveOnSuccess"])
-        self.assertFalse(out["autosaveOnFailure"])
-        self.assertFalse(out["manualCancel"])
-        self.assertTrue(out["manualDiscard"])
-        self.assertTrue(out["manualSave"])
-        self.assertFalse(out["manualSaveFails"])
+        self.assertTrue(out["flushSuccess"])
+        self.assertFalse(out["flushFailure"])
 
     def test_drawer_save_reports_success_or_failure(self):
         # Item 2's implementation detail: DL.save() must let callers know
@@ -3474,72 +3449,11 @@ const tick = () => new Promise(r => setImmediate(r));
 
         self.assertIn('id="app-confirm-dialog"', index_html)
         self.assertIn("function appConfirm(", app_js)
-        self.assertIn("function appConfirmSaveDiscardCancel(", app_js)
-
-    def test_discard_and_switch_is_danger_styled(self):
-        # Fix 019 correction C1.4: "Discard & Switch" is destructive and
-        # must be visibly danger-styled - Save & Switch stays the normal
-        # primary/safe action and keeps default focus, Cancel stays
-        # available, and this must not be a one-off second dialog.
-        node = self._node_or_skip()
-        root = Path(__file__).resolve().parent / "web"
-        app_js = (root / "app.js").read_text(encoding="utf-8")
-
-        confirm_src = app_js[app_js.index("function appConfirm({"):]
-        confirm_src = confirm_src[:confirm_src.index("\n\n// Ordinary two-choice")]
-        save_discard_src = app_js[app_js.index("async function appConfirmSaveDiscardCancel({"):]
-        save_discard_src = save_discard_src[:save_discard_src.index("\n\n// Used only for")]
-
-        self.assertIn("secondaryDanger", confirm_src)
-        self.assertIn("secondaryDanger: true", save_discard_src)
-        # No one-off second dialog - Save/Discard/Cancel is still built from
-        # the one shared appConfirm() implementation.
-        self.assertIn("await appConfirm({", save_discard_src)
-
-        script = "\n".join([
-            "class FakeClassList {",
-            "  constructor() { this.set = new Set(); }",
-            "  toggle(name, on) { if (on) this.set.add(name); else this.set.delete(name); }",
-            "  remove(name) { this.set.delete(name); }",
-            "  has(name) { return this.set.has(name); }",
-            "}",
-            "function makeBtn() { return { classList: new FakeClassList(), hidden: false, focusCalled: 0, focus() { this.focusCalled++; }, onclick: null, textContent: '' }; }",
-            "const dialog = { open: false, showModal() { this.open = true; }, close() { this.open = false; }, addEventListener() {}, removeEventListener() {} };",
-            "const titleEl = { textContent: '' }, msgEl = { textContent: '' };",
-            "const primaryBtn = makeBtn(), secondaryBtn = makeBtn(), cancelBtn = makeBtn();",
-            "const els = {",
-            "  '#app-confirm-dialog': dialog, '#app-confirm-title': titleEl, '#app-confirm-message': msgEl,",
-            "  '#app-confirm-primary': primaryBtn, '#app-confirm-secondary': secondaryBtn, '#app-confirm-cancel': cancelBtn,",
-            "};",
-            "const $ = sel => els[sel];",
-            confirm_src,
-            save_discard_src,
-            "(async () => {",
-            "  const p = appConfirmSaveDiscardCancel({ title: 't', message: 'm' });",
-            "  const out = {};",
-            "  out.primaryDanger = primaryBtn.classList.has('danger');",
-            "  out.primaryPrimary = primaryBtn.classList.has('primary');",
-            "  out.secondaryDanger = secondaryBtn.classList.has('danger');",
-            "  out.focusedPrimary = primaryBtn.focusCalled === 1;",
-            "  out.focusedCancel = cancelBtn.focusCalled === 1;",
-            "  out.cancelHidden = cancelBtn.hidden;",
-            "  primaryBtn.onclick();",
-            "  out.choice = await p;",
-            "  process.stdout.write(JSON.stringify(out));",
-            "})();",
-        ])
-        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
-        out = json.loads(done.stdout)
-        # Save & Switch (primary) is the normal, non-danger, default-focused
-        # action.
-        self.assertFalse(out["primaryDanger"])
-        self.assertTrue(out["primaryPrimary"])
-        self.assertTrue(out["focusedPrimary"])
-        self.assertFalse(out["focusedCancel"])
-        self.assertFalse(out["cancelHidden"])
-        # Discard & Switch (secondary) is danger-styled.
-        self.assertTrue(out["secondaryDanger"])
-        self.assertEqual(out["choice"], "save")
+        # Fix 034 K1: the three-way Save & Switch / Discard & Switch / Cancel
+        # dialog (appConfirmSaveDiscardCancel) existed only for the now-
+        # retired Autosave-Off path - SP.leaveDrawerLayoutSafely always just
+        # flushes and aborts on failure, so that helper is gone too.
+        self.assertNotIn("appConfirmSaveDiscardCancel", app_js)
 
     def test_native_confirms_replaced_regressions_leave_class_confirms_alone(self):
         # Sanity check that the sweep did not touch confirm() usage outside

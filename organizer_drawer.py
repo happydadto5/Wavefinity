@@ -56,7 +56,7 @@ from shapely.geometry import box as shape_box
 from shapely.ops import unary_union
 import trimesh
 
-from organizer_app import connector_filename, generate_side_file
+from organizer_app import connector_filename, design_source_payload, generate_side_file
 from organizer_engine import (
     BASE_UNIT,
     DEFAULT_WALL,
@@ -78,12 +78,16 @@ from organizer_geometry import _extrude_polygon
 from organizer_inventory import (
     INVENTORY_LOCK,
     MAX_QTY,
+    design_specs,
     legacy_layout_space,
     load_inventory,
     load_inventory_text,
     next_bin_id,
+    save_design_source as _save_design_source_row,
+    save_design_source_text as _save_design_source_row_text,
     save_inventory,
     save_inventory_text,
+    update_bin_file,
 )
 from organizer_b4b import B4B_STACK_RECESS_DEPTH
 from organizer_product_rules import DRAWER_HARD_CLEARANCE_MM
@@ -1470,13 +1474,19 @@ def print_inventory_bins(
     detect_slicer: Callable,
     launch_slicer: Callable,
     slicer_path: str | None = None,
+    generate_from_design: Callable[[Path, dict[str, Any]], list[Path]] | None = None,
 ) -> dict[str, Any]:
     """Send selected generated bins (and optional Space connectors) to the slicer.
 
-    Qty and planned copies change only after the slicer launch succeeds.
+    Qty and planned copies change only after the slicer launch succeeds. A
+    selected row with no generated file but a canonical ``design_specs``
+    entry (Fix 034 F2) is generated on demand via ``generate_from_design``
+    first, and its resolved File cell is persisted immediately - still at
+    Qty 0 - so a later print does not regenerate it.
     """
     output_dir = Path(output_dir).expanduser().resolve()
     by_id = {one["id"]: one for one in bins}
+    specs = design_specs(layout)
     counts: dict[str, int] = {}
     rows_files: dict[str, list[Path]] = {}
     for bin_id, raw_count in (selection or {}).items():
@@ -1488,7 +1498,19 @@ def print_inventory_bins(
             raise ValueError(f"{_label(one)} is not a generated bin and cannot be printed here")
         if int(one.get("qty") or 0) + count > MAX_QTY:
             raise ValueError(f"{_label(one)}: Qty printed cannot go above {MAX_QTY}")
-        rows_files[one["id"]] = inventory_row_files(output_dir, one)
+        if not str(one.get("file") or "").strip():
+            spec = specs.get(one["id"])
+            if spec is None or generate_from_design is None:
+                raise ValueError(f"{_label(one)} has no generated file to print")
+            generated = generate_from_design(output_dir, spec)
+            if not generated:
+                raise ValueError(f"{_label(one)}: generating its files did not produce any")
+            file_text = ", ".join(dict.fromkeys(path.name for path in generated))
+            update_bin_file(output_dir, one["id"], file_text)
+            one["file"] = file_text
+            rows_files[one["id"]] = list(generated)
+        else:
+            rows_files[one["id"]] = inventory_row_files(output_dir, one)
         counts[one["id"]] = count
     if not counts:
         raise ValueError("Select at least one bin to print.")
@@ -1549,6 +1571,7 @@ def drawer_routes(
     detect_slicer: Callable | None = None,
     launch_slicer: Callable | None = None,
     hosted: bool = False,
+    generate_from_design: Callable[[Path, dict[str, Any]], list[Path]] | None = None,
 ) -> dict[str, Callable[[dict], dict]]:
     """POST handlers for the browser service, keyed by path."""
 
@@ -1594,6 +1617,24 @@ def drawer_routes(
                 **changes,
             ))
         return with_rules(save_inventory(folder(payload), **changes))
+
+    def save_design_source(payload):
+        """Save-to-Space: canonicalize the design, then create/update its
+        editable source row + ``design_specs`` entry in one authoritative
+        write. ``row_id`` targets an existing same-Space Qty-0 source row to
+        update in place; a Qty>0 row (immutable printed history) or a missing
+        row_id instead creates a fresh Qty-0 row."""
+        design, record = design_source_payload(payload["design"])
+        row_id = str(payload.get("row_id") or "") or None
+        if hosted:
+            result = _save_design_source_row_text(
+                payload.get("inventory_text") or "",
+                title=str(payload.get("inventory_title") or "Wavefinity"),
+                design=design, record=record, row_id=row_id,
+            )
+        else:
+            result = _save_design_source_row(folder(payload), design=design, record=record, row_id=row_id)
+        return with_rules(result)
 
     def report(payload):
         return drawer_report(
@@ -1708,6 +1749,7 @@ def drawer_routes(
                 payload.get("selection") or {},
                 bool(payload.get("include_connectors", True)),
                 detect_slicer, launch_slicer, payload.get("slicer_path"),
+                generate_from_design,
             ))
 
     def connectors(payload):
@@ -1730,6 +1772,7 @@ def drawer_routes(
     return {
         "/api/drawer/load": load,
         "/api/drawer/save": save,
+        "/api/drawer/design-source/save": save_design_source,
         "/api/drawer/report": report,
         "/api/drawer/auto": auto,
         "/api/drawer/spacers": spacers,

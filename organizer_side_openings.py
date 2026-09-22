@@ -65,15 +65,16 @@ def _vertical_geometry(
 ) -> tuple[float, float, float, float]:
     """``(floor_z, rim_z, bottom_z, top_z)`` for the saved percentages.
 
-    ``bottom_z`` is the opening's deepest point. At 100% it equals
-    ``floor_z`` exactly; it never goes lower, so a Side Opening never removes
-    base material.
+    Fix 034 H inset_v2 semantics: 0% means that edge - ``bottom_z`` reaches
+    ``floor_z``, ``top_z`` reaches ``rim_z``. A higher percentage pulls that
+    edge inward. ``bottom_z`` never goes below ``floor_z``, so a Side Opening
+    never removes base material.
     """
     floor_z = box.base_thickness
     rim_z = box.z
     usable_h = rim_z - floor_z
-    bottom_z = rim_z - usable_h * (from_bottom_percent / 100.0)
-    top_z = floor_z + usable_h * (from_top_percent / 100.0)
+    bottom_z = floor_z + usable_h * (from_bottom_percent / 100.0)
+    top_z = rim_z - usable_h * (from_top_percent / 100.0)
     return floor_z, rim_z, bottom_z, top_z
 
 
@@ -86,7 +87,7 @@ def _vertical_fits(box: BoxSpec, spec, width_mm: float) -> bool:
         return False
     if top_z <= bottom_z + 1e-9:
         return False
-    if spec.from_top_percent >= 100.0 - 1e-9:
+    if spec.from_top_percent <= 1e-9:
         if spec.shape == "curved":
             return (rim_z - bottom_z) >= r - 1e-9
         return True
@@ -143,7 +144,7 @@ def validate_side_openings(box: BoxSpec) -> None:
                 "corner shoulders; choose a smaller size or a longer wall"
             )
     if not _vertical_fits(box, spec, width):
-        if spec.from_top_percent < 100.0 - 1e-9:
+        if spec.from_top_percent > 1e-9:
             raise ValueError(
                 "the selected percentages leave too little height for this supported "
                 "opening; increase the span or choose a smaller opening"
@@ -166,11 +167,11 @@ def validate_side_openings(box: BoxSpec) -> None:
         )
     if lid_enabled(box) or box.stack.enabled:
         usable_h = box.z - box.base_thickness
-        max_from_top = 100.0 * (usable_h - SIDE_OPENING_TOP_BRIDGE_MM) / usable_h
-        if spec.from_top_percent > max_from_top + 1e-9:
+        min_from_top = 100.0 * SIDE_OPENING_TOP_BRIDGE_MM / usable_h
+        if spec.from_top_percent < min_from_top - 1e-9:
             raise ValueError(
                 "Side Openings need a top bridge while Lid & Stacking is enabled; "
-                "lower % from top or disable Lid & Stacking"
+                "raise % from top or disable Lid & Stacking"
             )
 
 
@@ -238,7 +239,7 @@ def _side_opening_cutter(box: BoxSpec, side: str) -> trimesh.Trimesh:
     floor_z, rim_z, bottom_z, top_z = _vertical_geometry(
         box, spec.from_bottom_percent, spec.from_top_percent
     )
-    if spec.from_top_percent < 100.0 - 1e-9:
+    if spec.from_top_percent > 1e-9:
         profile = _bridged_profile(spec.shape, r, bottom_z, top_z)
     else:
         top_open_z = rim_z + SIDE_OPENING_TOP_OVERTRAVEL_MM

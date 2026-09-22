@@ -1032,6 +1032,12 @@ dialog:not([open]) { display: none; }
 .support-layout-dialog .button-row { justify-content: end; }
 #draft-switch-dialog { width: min(440px, calc(100vw - 32px)); }
 #draft-switch-dialog p { line-height: 1.45; }
+#designer-load-dialog { width: min(420px, calc(100vw - 32px)); }
+.designer-load-list { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; margin-bottom: 16px; }
+.designer-load-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--border, #d7dee0); border-radius: 8px; background: none; cursor: pointer; }
+.designer-load-row:hover:not(:disabled) { background: var(--surface-hover, rgba(20,36,42,.05)); }
+.designer-load-row:disabled { color: var(--muted); cursor: not-allowed; opacity: .65; }
+.designer-load-row .muted { font-size: 12px; color: var(--muted); }
 #draft-switch-dialog .field-error { color: var(--danger); margin: 0 0 16px; }
 
 .generation-dialog {

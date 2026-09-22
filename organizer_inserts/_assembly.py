@@ -25,12 +25,12 @@ from organizer_engine import (
 from ._core import (
     BASE_PLATE,
     CARTRIDGE_PITCH,
-    CONNECTOR_EDGE_KEEP_OUT,
     INSERT_CLEARANCE,
     Feature,
     Zone,
     cartridge_zone,
     connector_keep_out,
+    feature_touches_wall,
     layout_zone,
 )
 from ._layout import _feature_reach, check_layout, feature_footprint
@@ -210,13 +210,7 @@ def build_features(
                     f"a {one.kind} rises above the bin rim; reduce its height "
                     "or make the bin taller"
                 )
-        whole = Zone.whole(box)
-        touches_wall = (
-            one.zone.x0 <= whole.x0 + CONNECTOR_EDGE_KEEP_OUT
-            or one.zone.x1 >= whole.x1 - CONNECTOR_EDGE_KEEP_OUT
-            or one.zone.y0 <= whole.y0 + CONNECTOR_EDGE_KEEP_OUT
-            or one.zone.y1 >= whole.y1 - CONNECTOR_EDGE_KEEP_OUT
-        )
+        touches_wall = feature_touches_wall(box, one)
         # A Divider's rim-label shelf follows the same near-rim clearance as a
         # Text shelf. It may enter the connector band, but never the stack/lid
         # plug space; ordinary wall-touching features keep the connector rule.
@@ -231,8 +225,8 @@ def build_features(
         if (
             touches_wall
             and not (one.kind == "nest" and one.contour)
-            # A full-height Auto Bore deliberately reaches the rim.
-            and not (one.kind == "bore" and one.options.get("auto_height"))
+            # Fix 034 G1: Auto Height now resolves to a legal height itself
+            # (see bore_defaults), so Auto obeys this exactly like manual.
             and any(solid.bounds[1][2] > connector_keep_out(box) + 1e-6 for solid in made)
             and not (divider_rim_shelf and clears_stack_lid)
         ):

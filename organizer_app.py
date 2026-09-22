@@ -1521,11 +1521,13 @@ def generate_b4b_files(
     }
     if keep_log:
         envelope = summary["assembled_envelope_mm"]
+        design_spec = design_to_dict(box, Layout(tuple(features), "fused", EDITOR_SNAP), "", part_name, "bottom", False)
         log_file = log_bin_to_folder(
             output_dir, b4b_effective_box(box), Layout((), "fused", EDITOR_SNAP),
             generated_files=[target], label="", part_name=part_name,
             b4b_note=_b4b_log_note(summary),
             physical_size_mm=(envelope[0], envelope[1], envelope[2]),
+            design_spec=design_spec,
         )
         result["log_file"] = str(log_file)
     return result
@@ -1847,6 +1849,7 @@ def generate_organizer_files(
             label=label,
             part_name=part_name,
             scoop=scoop,
+            design_spec=design_to_dict(box, layout, label, part_name, location, scoop),
         )
         result["log_file"] = str(log_file)
     return result
@@ -1990,9 +1993,17 @@ def log_bin_to_folder(
     scoop: bool = False,
     b4b_note: str = "",
     physical_size_mm: tuple[float, float, float] | None = None,
+    design_spec: dict[str, Any] | None = None,
 ) -> Path:
-    """Record a generated bin in the save folder's inventory."""
-    return append_bin(output_dir, **inventory_bin_record(
+    """Record a generated bin in the save folder's inventory.
+
+    ``design_spec`` is the canonical design JSON (see ``design_source_payload``)
+    for the *original* box the user configured - distinct from ``box`` here,
+    which may already be an effective/stack-adjusted variant used for the
+    physical inventory row. Passing it means Generate/Print, even without an
+    explicit Save to Space first, still leaves the new row reloadable.
+    """
+    return append_bin(output_dir, design_spec=design_spec, **inventory_bin_record(
         box, layout, generated_files, label, part_name, scoop, b4b_note,
         physical_size_mm,
     ))
@@ -2567,6 +2578,7 @@ def design_to_dict(
             "size": side_openings.size,
             "from_bottom_percent": side_openings.from_bottom_percent,
             "from_top_percent": side_openings.from_top_percent,
+            "percent_mode": "inset_v2",
         }
     pegboard = normalise_mount_spec(getattr(box, "pegboard", None))
     if pegboard.enabled:
@@ -2665,26 +2677,39 @@ def design_from_dict(
         raw_sides = side_openings_raw.get("sides", ())
         if not isinstance(raw_sides, (list, tuple)):
             raise ValueError("side opening sides must be a list")
-        from_bottom = float(side_openings_raw.get(
-            "from_bottom_percent", side_openings_raw.get("depth_percent", 100.0)
-        ))
-        explicit_from_top = (
-            float(side_openings_raw["from_top_percent"])
-            if "from_top_percent" in side_openings_raw else None
-        )
-        legacy_top_support = (
-            explicit_from_top is None
-            and bool(side_openings_raw.get("top_support", False))
-        )
-        # Legacy Top Support is a physical 4 mm bridge, so its percentage is
-        # derived below from the final normalised box, never from raw JSON.
+        if side_openings_raw.get("percent_mode") == "inset_v2":
+            from_bottom = float(side_openings_raw.get("from_bottom_percent", 0.0))
+            from_top = float(side_openings_raw.get("from_top_percent", 0.0))
+        else:
+            # Fix 034 H: pre-inset_v2 saves used reach semantics (higher meant
+            # "reaches further"; 100 meant "reaches that edge"). Convert to
+            # the new inset meaning (0 reaches that edge) without changing
+            # the physical geometry: new = 100 - old.
+            old_bottom = float(side_openings_raw.get(
+                "from_bottom_percent", side_openings_raw.get("depth_percent", 100.0)
+            ))
+            explicit_old_top = (
+                float(side_openings_raw["from_top_percent"])
+                if "from_top_percent" in side_openings_raw else None
+            )
+            legacy_top_support = (
+                explicit_old_top is None
+                and bool(side_openings_raw.get("top_support", False))
+            )
+            from_bottom = 100.0 - old_bottom
+            # A legacy Top Support bridge becomes the new minimum top inset,
+            # derived below from the final normalised box, never from raw
+            # JSON - 0.0 here is only a placeholder pending that.
+            from_top = 0.0 if legacy_top_support else 100.0 - (
+                100.0 if explicit_old_top is None else explicit_old_top
+            )
         side_openings = SideOpeningSpec(
             enabled=True,
             shape=str(side_openings_raw.get("shape", "curved")),
             sides=tuple(str(side) for side in raw_sides),
             size=str(side_openings_raw.get("size", "medium")),
             from_bottom_percent=from_bottom,
-            from_top_percent=100.0 if explicit_from_top is None else explicit_from_top,
+            from_top_percent=from_top,
         )
     pegboard = normalise_mount_spec(raw.get("pegboard"))
     b4b_raw = raw.get("b4b")
@@ -2780,7 +2805,7 @@ def design_from_dict(
         usable_h = box.z - box.base_thickness
         if not usable_h > 0:
             raise ValueError("side openings need usable wall height above the base")
-        from_top = 100.0 * (usable_h - SIDE_OPENING_TOP_BRIDGE_MM) / usable_h
+        from_top = 100.0 * SIDE_OPENING_TOP_BRIDGE_MM / usable_h
         box = replace(box, side_openings=replace(
             box.side_openings, from_top_percent=from_top,
         ))
@@ -2886,6 +2911,24 @@ def design_from_dict(
         )
         layout.validate(box)
     return (box, layout, label, str(data.get("part_name", "")), location, scoop)
+
+
+def design_source_payload(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Canonicalize *raw* and derive its Inventory source-row fields.
+
+    Used by Save-to-Space and by Generate/Print's on-demand source
+    attachment: the design is validated/normalised exactly as it would be for
+    preview or generation, so a saved source can never hold an invalid or
+    stale-shaped design. The returned record's ``file`` is always blank - a
+    design source is editable design data, not a generated file.
+    """
+    if isinstance(raw, dict) and raw.get("design_kind") == "base_trim":
+        raise ValueError("a Base Trim is never an Inventory design source")
+    box, layout, label, part_name, label_location, scoop = design_from_dict(raw)
+    canonical = design_to_dict(box, layout, label, part_name, label_location, scoop)
+    record = inventory_bin_record(box, layout, None, label, part_name, scoop)
+    record["file"] = ""
+    return canonical, record
 
 
 def main(argv: list[str] | None = None) -> int:

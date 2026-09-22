@@ -1083,8 +1083,8 @@ def catalog_payload() -> dict[str, Any]:
             "arch_curve": SIDE_OPENING_ARCH_CURVE,
             "default_shape": "curved",
             "default_size": "medium",
-            "default_from_bottom_percent": 100,
-            "default_from_top_percent": 100,
+            "default_from_bottom_percent": 0,
+            "default_from_top_percent": 0,
             "sides": [
                 {"value": "front", "label": "Front"},
                 {"value": "back", "label": "Back"},
@@ -2541,6 +2541,7 @@ def generate_payload(
         )
         record["qty"] = 0
         reply["inventory_bin"] = record
+        reply["inventory_design_spec"] = design_to_dict(box, layout, label, part_name, label_location, scoop)
     return reply
 
 
@@ -2856,6 +2857,22 @@ def _generation_reply(*, result: Any, output: Path, extra: dict[str, Any] | None
     }
 
 
+def _generate_bin_from_design_spec(output_dir: Path, design_spec: dict[str, Any]) -> list[Path]:
+    """Fix 034 F2: generate a spec-only Inventory row's files on demand.
+
+    Uses the same generator as a normal Generate action, with Inventory
+    append/logging suppressed - ``print_inventory_bins`` owns persisting the
+    resolved File cell itself, still at Qty 0.
+    """
+    box, layout, label, part_name, label_location, scoop = design_from_dict(design_spec)
+    with GEOMETRY_LOCK:
+        result = generate_organizer_files(
+            box, layout, output_dir, label, part_name, label_location, scoop,
+            auto_timestamp=False, keep_log=False,
+        )
+    return _extract_generated_files(result)
+
+
 def _extract_generated_files(result_data: Any) -> list[Path]:
     paths: list[Path] = []
     if isinstance(result_data, dict):
@@ -2946,11 +2963,14 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     ):
         output_dir = Path(gen_result["output"])
         if inventory_enabled(output_dir, load_preferences()):
-            box, layout, label, part_name, _location, scoop = _design(design)
+            box, layout, label, part_name, location, scoop = _design(design)
             record = inventory_bin_record(
                 box, layout, design_files, label, part_name, scoop,
             )
-            append_bin(output_dir, **record, qty=1)
+            append_bin(
+                output_dir, **record, qty=1,
+                design_spec=design_to_dict(box, layout, label, part_name, location, scoop),
+            )
     return {
         "result": gen_result.get("result"),
         "output": gen_result.get("output"),
@@ -2991,7 +3011,7 @@ POST_ROUTES = {
 POST_ROUTES.update({
     **drawer_routes(
         GEOMETRY_LOCK, DEFAULT_OUTPUT, detect_bambu_studio, launch_slicer,
-        hosted=HOSTED,
+        hosted=HOSTED, generate_from_design=_generate_bin_from_design_spec,
     ),
 })
 if not HOSTED:

@@ -43,7 +43,7 @@ DP.build = () => {
         <label id="dl-drawer-label-row"><span id="dl-drawer-label">Drawer</span><select id="dl-drawer"></select></label>
         <button type="button" id="dl-drawer-add" class="button secondary dl-small" title="Add another drawer; it shares this inventory">+ Drawer</button>
       </div>
-      <div class="field-grid three dl-drawer-size">
+      <div id="dl-drawer-size-card" class="field-grid three dl-drawer-size">
         <label>Width <span class="unit">mm</span><input id="dl-width" type="number" min="16" step="1" title="Inside, left to right"></label>
         <label>Depth <span class="unit">mm</span><input id="dl-depth" type="number" min="16" step="1" title="Inside, front to back"></label>
         <label>Max height <span class="unit">mm</span><input id="dl-height" type="number" min="6" step="1" title="The tallest bin or stack that fits: the inside height, less whatever the drawer above needs to close"></label>
@@ -150,12 +150,9 @@ DP.build = () => {
     </section>
 
     <section class="dl-savebar" aria-label="Saving">
-      <label class="checkbox-row" title="New bins start with the bin settings from the last bin generated or printed in this Space. Interior parts and names start fresh."><span>Keep bin defaults</span><input id="dl-keep-bin-defaults" type="checkbox"></label>
       <div class="dl-save-row">
-        <label class="checkbox-row" title="Save the layout to the inventory file after every change"><span>Auto-save</span><input id="dl-autosave" type="checkbox"></label>
         <span id="dl-save-status" class="dl-save-status" role="status"></span>
         <button type="button" id="dl-map" class="button secondary dl-small" title="Print a map of this drawer and where each bin goes (Ctrl+P)">Print map</button>
-        <button type="button" id="dl-save" class="button primary dl-small" hidden>Save layout</button>
       </div>
     </section>`;
   DP.wire();
@@ -421,15 +418,6 @@ DP.wire = () => {
     }
   });
 
-  $("#dl-autosave").addEventListener("change", event => {
-    DL.layout.settings.autosave = event.target.checked;
-    DL.dirty = true;
-    if (event.target.checked) DL.save(); else DL.emit();
-  });
-  $("#dl-keep-bin-defaults").addEventListener("change", event => {
-    SP.setKeepBinDefaults(event.target.checked);
-  });
-  $("#dl-save").addEventListener("click", () => DL.save());
 };
 
 // ------------------------------------------------------------ bulk print
@@ -754,7 +742,7 @@ DP.renderAuto = () => {
     return `${escapeHtml(one ? DL.label(one) : u.bin)} (${escapeHtml(u.reason)})`;
   }).join(", ");
   box.innerHTML = `
-    <p class="dl-note">Pick an arrangement - click to try it; Undo goes back.</p>
+    <p class="dl-note">Pick an arrangement - click to try it, or click another to switch.</p>
     <div class="dl-candidates">${DL.candidates.map((c, index) => `
       <button type="button" class="dl-candidate${index === DL.candidateIndex ? " active" : ""}" data-candidate="${index}" title="${escapeHtml(c.description)}">
         <canvas width="264" height="152" data-thumb="${index}"></canvas>
@@ -1051,24 +1039,19 @@ DP.renderInventory = (force = false) => {
   });
 };
 
+// Fix 034 K1: status only - autosave has no off state and no manual Save
+// button, so there is no Unsaved-changes/manual-Save branch here any more.
 DP.renderSave = () => {
-  const settings = DL.layout.settings;
-  dlSet("#dl-keep-bin-defaults", Boolean(state.keepBinDefaults), "checked");
-  dlSet("#dl-autosave", Boolean(settings.autosave), "checked");
   const status = $("#dl-save-status");
   let text = "";
   let tone = "";
   if (DL.saveState === "saving") text = "Saving…";
   else if (DL.saveState === "error") { text = "Not saved"; tone = "error"; }
-  else if (DL.dirty && !settings.autosave) { text = "Unsaved changes"; tone = "dirty"; }
   else if (DL.savedAt && DL.saveState === "saved") text = `Saved ${DL.savedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
   else if (!DL.exists) text = "Inventory starts with the first bin";
-  else text = settings.autosave ? "Saves as you go" : "Up to date";
+  else text = "Saves as you go";
   status.textContent = text;
   status.className = `dl-save-status ${tone}`;
-  const save = $("#dl-save");
-  save.hidden = Boolean(settings.autosave);
-  save.disabled = DL.saving || (!DL.dirty && DL.saveState !== "error");
   if (typeof SP !== "undefined" && SP.renderSpaceInfo) SP.renderSpaceInfo();
 };
 
@@ -1113,11 +1096,21 @@ DP.setMode = mode => {
   if (mode === "space") DP.update();
 };
 
-DP.selectMode = mode => {
+// Fix 034 A: switching to Space always shows the exact current working bin -
+// refresh it before the Space canvas activates, so a stale/no-longer-current
+// design is never shown. Switching alone never creates a placement or an
+// Inventory row.
+DP.selectMode = async mode => {
   if (mode !== "space" && mode !== "design") return;
   DP.setMode(mode);
-  if (mode === "space") activatePreviewView("drawer");
-  else if ($('.view-tab[data-view="drawer"]')?.classList.contains("active")) activatePreviewView("3d");
+  if (mode === "space") {
+    await DL.refreshWorking();
+    if (!DL.active || DP.mode !== "space") return;
+    activatePreviewView("drawer");
+    DP.update();
+  } else if ($('.view-tab[data-view="drawer"]')?.classList.contains("active")) {
+    activatePreviewView("3d");
+  }
 };
 
 // Open the Space workspace. Starts in Design mode when there is a current
@@ -1146,7 +1139,7 @@ DP.leave = () => {
   DP.applyMode();
   DV.drag = null;
   DV.pan = null;
-  if (DL.dirty && DL.layout?.settings.autosave) DL.save();
+  if (DL.dirty) DL.save();
   // The Space canvas has nothing to show any more.
   if ($('.canvas-wrap[data-canvas="drawer"]')?.classList.contains("active")) activatePreviewView("3d");
 };
