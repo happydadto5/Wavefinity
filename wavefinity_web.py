@@ -122,6 +122,7 @@ from organizer_inserts import (
     option_value,
     normalize_divider_scoop,
     resized_feature,
+    wavy_base_bin_minimum,
     scoop_zone,
     resolve_text_features,
     resolved_options,
@@ -2073,6 +2074,9 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "feature": feature_to_dict(one, layout.mode),
         "resolved_options": shown,
     }
+    wavy_bin = wavy_base_bin_minimum(box, [one], base_height(box, layout.mode), layout.mode)
+    if wavy_bin is not None:
+        result["wavy_base_bin"] = {"x": wavy_bin[0], "y": wavy_bin[1]}
     if one.kind == "divider":
         result["divider_cells"] = _divider_cells_payload(box, one, layout.mode)
     return result
@@ -2178,7 +2182,8 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # a user-draggable footprint. Keep their exact normalized zone instead of
     # passing it through ordinary 1 mm resize/move snapping.
     if not (one.kind == "scoop" or (one.kind == "divider" and one.full_span)
-            or (one.kind == "bore" and one.options.get("auto_base"))):
+            or (one.kind == "bore" and one.options.get("auto_base")
+                 and one.options.get("bore_style") != "wavy_base")):
         width, depth = one.zone.width, one.zone.depth
         cx, cy = one.zone.centre
         one = resized_feature(one, box, (width, depth), layout.mode, layout.snap)
@@ -2527,6 +2532,11 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
             )
     else:
         floor_x, floor_y = start_x, start_y
+        # A Wavy Base sizes the bin itself: the smallest legal size around it is the
+        # floor, so the bin shrinks as well as grows to meet it.
+        wavy_floor = wavy_base_bin_minimum(box, originals, base_height(box, mode), mode)
+        if wavy_floor is not None:
+            floor_x, floor_y = wavy_floor
         x, y = floor_x, floor_y
         result = fits(x, y)
         while result is None:
