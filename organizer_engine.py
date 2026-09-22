@@ -608,6 +608,10 @@ class EdgeMountSpec:
     label_raised: bool = False
     label_text_depth_mm: float = TEXT_DEPTH
     label_flip: bool = False
+    # Separate-label clips stand proud of the wavy wall. Permanent ribs keep
+    # the bin plumb against its mounting surface; None means Auto spacing.
+    standoff_ribs_enabled: bool = True
+    standoff_rib_count: int | None = None
 
     holes_enabled: bool = False
     hole_count: int = 2
