@@ -650,8 +650,10 @@ class SideOpeningSpec:
     shape: str = "curved"
     sides: tuple[str, ...] = ()
     size: str = "medium"
-    from_bottom_percent: float = 100.0
-    from_top_percent: float = 100.0
+    # Fix 034 H: inset_v2 semantics - 0 means the opening reaches that edge
+    # (floor for bottom, rim for top); a higher percentage pulls it inward.
+    from_bottom_percent: float = 0.0
+    from_top_percent: float = 0.0
 
     def __post_init__(self) -> None:
         if self.shape not in SIDE_OPENING_SHAPES:
@@ -677,7 +679,7 @@ class SideOpeningSpec:
         ):
             if not math.isfinite(value) or not (0.0 <= value <= 100.0):
                 raise ValueError(f"side opening {name} must be between 0 and 100 percent")
-        if self.from_bottom_percent + self.from_top_percent <= 100.0:
+        if self.from_bottom_percent + self.from_top_percent >= 100.0:
             raise ValueError("side opening top must be above its bottom")
         if self.enabled and not self.sides:
             raise ValueError("side openings are enabled but no sides are selected")

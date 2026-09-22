@@ -75,6 +75,11 @@ const state = {
   // an unreconciled Current design. null/false outside a typed Space.
   spaceResumeDesign: null,
   spaceResumePending: false,
+  // Fix 034 D: the current Designer's bound editable-source Inventory row in
+  // the active Space, or null when the current design has no saved source
+  // there yet. Cleared on New Bin/Duplicate/folder switch; set by Save to
+  // Space, Load from Space and on-demand source attach from Generate/Print.
+  designInventoryId: null,
   // Whether this folder logs generated bins/B4Bs to its inventory file - the
   // default for any folder, independent of whether Space planning is on.
   inventoryEnabled: true,
@@ -192,6 +197,8 @@ function setFolderState(
     state.keepBinDefaults = false;
     state.spaceBinDefaults = null;
     state.spacePartDefaults = {};
+    // No source row means anything outside a typed Space.
+    state.designInventoryId = null;
     // No longer a typed Space: neither the Space workspace nor a stale
     // resume checkpoint from it has anything left to show.
     state.spaceResumeDesign = null;
@@ -216,6 +223,7 @@ function setFolderState(
         : "Add each generated bin and Storage Box to this folder's inventory file";
   }
   syncBaseTrimOption();
+  applyDesignerLifecycleVisibility();
 }
 
 const COLORS = {
@@ -259,118 +267,11 @@ function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function mergeDesignDefaults(current, remembered) {
-  if (!plainObject(current) || !plainObject(remembered)) return clone(remembered);
-  const merged = clone(current);
-  for (const [key, value] of Object.entries(remembered)) {
-    merged[key] = plainObject(value) && plainObject(merged[key])
-      ? mergeDesignDefaults(merged[key], value)
-      : clone(value);
-  }
-  return merged;
-}
-
-function spaceBinDefaultsFromDesign(design) {
-  const snapshot = clone(design);
-  delete snapshot.design_kind;
-  delete snapshot.base_trim;
-  if (snapshot.box) delete snapshot.box.b4b;
-  snapshot.part_name = "";
-  snapshot.label = "";
-  if (snapshot.box?.edge_mount) snapshot.box.edge_mount.label_text = "";
-  if (snapshot.box?.lid) {
-    snapshot.box.lid.label_text = "";
-    snapshot.box.lid.division_labels = (snapshot.box.lid.division_labels || []).map(() => "");
-  }
-  snapshot.layout = snapshot.layout || {};
-  snapshot.layout.features = [];
-  return snapshot;
-}
-
-function partDefaultsFromFeature(feature) {
-  if (!feature?.kind || !Array.isArray(feature.zone) || feature.zone.length !== 4) return null;
-  const copy = {
-    kind: feature.kind,
-    zone_size: [
-      number(feature.zone[2]) - number(feature.zone[0]),
-      number(feature.zone[3]) - number(feature.zone[1]),
-    ],
-    options: clone(feature.options || {}),
-    count: feature.count ?? null,
-    along: feature.along || "x",
-  };
-  for (const key of Object.keys(copy.options)) {
-    if (key === "text" || key === "division_labels" || key.endsWith("_text")) {
-      delete copy.options[key];
-    }
-  }
-  delete copy.options.photo;
-  if (feature.kind === "nest") {
-    delete copy.count;
-    delete copy.options.repeat_spacing_percent;
-  }
-  if (feature.kind === "bore") {
-    // An Auto mode is remembered as the mode itself; the numbers it supersedes
-    // are derived from each new bin, never carried over from the old one.
-    if (copy.options.auto_base) copy.zone_size = null;
-    if (copy.options.auto_height) delete copy.options.height;
-    if (copy.options.auto_grid) {
-      delete copy.options.columns;
-      delete copy.options.rows;
-    }
-  }
-  if (!partInfo(feature.kind)?.flags?.photo && feature.item) {
-    copy.item = clone(feature.item);
-    copy.item.name = "Custom item";
-  }
-  return copy;
-}
-
-function seedFeatureFromPartDefaults(feature, remembered) {
-  if (!feature || !remembered || remembered.kind !== feature.kind) return feature;
-  const seeded = clone(feature);
-  const rememberedAutoBase = remembered.kind === "bore" && remembered.options?.auto_base;
-  if (!rememberedAutoBase && Array.isArray(remembered.zone_size) && remembered.zone_size.length === 2) {
-    const cx = (number(seeded.zone[0]) + number(seeded.zone[2])) / 2;
-    const cy = (number(seeded.zone[1]) + number(seeded.zone[3])) / 2;
-    const width = Math.max(0.1, number(remembered.zone_size[0]));
-    const depth = Math.max(0.1, number(remembered.zone_size[1]));
-    seeded.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
-  }
-  seeded.options = { ...(seeded.options || {}), ...(clone(remembered.options || {})) };
-  if (seeded.kind === "bore") {
-    if (seeded.options.auto_height) delete seeded.options.height;
-    if (seeded.options.auto_grid) {
-      delete seeded.options.columns;
-      delete seeded.options.rows;
-    }
-  }
-  if (Object.hasOwn(remembered, "count") && seeded.kind !== "nest") seeded.count = remembered.count;
-  if (remembered.along) seeded.along = remembered.along;
-  if (remembered.item && !partInfo(feature.kind)?.flags?.photo) seeded.item = clone(remembered.item);
-  delete seeded.contour;
-  delete seeded.source_contour;
-  return seeded;
-}
-
-async function rememberPartDefault(feature) {
-  if (state.folderMode !== "space" || !state.keepBinDefaults || typeof SP === "undefined") return;
-  const remembered = partDefaultsFromFeature(feature);
-  if (!remembered) return;
-  state.spacePartDefaults = { ...(state.spacePartDefaults || {}), [feature.kind]: remembered };
-  try {
-    await SP.updateBinDefaults({ partDefaults: state.spacePartDefaults });
-  } catch (error) {
-    toast(`Part defaults were not saved: ${error.message}`, true, 5000);
-  }
-}
-
-async function rememberAppliedPartDefault(result, fallback = null) {
-  const saved = Number.isInteger(result?.selected)
-    ? state.design?.layout?.features?.[result.selected]
-    : null;
-  await rememberPartDefault(saved || fallback);
-}
+// Fix 034 K2: Keep bin defaults is retired - New Bin always starts fresh and
+// Duplicate is the explicit clone workflow, so nothing remembers a bin/part
+// snapshot as a generate/print/edit side effect any more. Kept as a no-op
+// because it is still called from several apply-part sites below.
+async function rememberAppliedPartDefault() {}
 
 function drawerHardClearance() {
   return number(state.catalog?.drawer_rules?.hard_wall_clearance_mm, 0);
@@ -439,13 +340,11 @@ function applySpaceSizingDefaults(design) {
   return design;
 }
 
+// Fix 034 K2: New Bin is always a fresh catalog starter plus current Space
+// sizing - stale remembered bin_defaults never seed it. Duplicate (Section
+// B2) is the only clone-last-design workflow now.
 function freshDesignForCurrentFolder() {
-  const current = clone(state.catalog.defaults.design);
-  if (state.folderMode !== "space" || !state.keepBinDefaults || !state.spaceBinDefaults) {
-    return applySpaceSizingDefaults(current);
-  }
-  const merged = spaceBinDefaultsFromDesign(mergeDesignDefaults(current, state.spaceBinDefaults));
-  return applySpaceSizingDefaults(merged);
+  return applySpaceSizingDefaults(clone(state.catalog.defaults.design));
 }
 
 async function loadFreshOrdinaryDesignForCurrentFolder() {
@@ -469,18 +368,216 @@ async function loadFreshOrdinaryDesignForCurrentFolder() {
   await refreshPreview();
 }
 
-async function rememberGeneratedSpaceBin(design) {
-  if (state.folderMode !== "space" || !state.keepBinDefaults || typeof SP === "undefined") return;
-  const fallback = {};
-  for (const feature of design?.layout?.features || []) {
-    const remembered = partDefaultsFromFeature(feature);
-    if (remembered) fallback[feature.kind] = remembered;
+// Fix 034 K2: retired along with Keep bin defaults - kept as a no-op so its
+// Generate/Print call sites need no further change.
+async function rememberGeneratedSpaceBin() {}
+
+// ------------------------------------------------------------ Fix 034 lifecycle
+
+function applyDesignerLifecycleVisibility() {
+  const typed = state.folderMode === "space";
+  const hide = (selector, hidden) => { const el = $(selector); if (el) el.hidden = hidden; };
+  hide("#designer-save-space", !typed);
+  hide("#designer-load-space", !typed);
+  hide("#designer-save-file", typed);
+  hide("#designer-open-file-label", typed);
+}
+
+// Save to Space: canonicalize the current design and create/update its
+// editable-source Inventory row, keeping Qty untouched. Returns true on
+// success so callers that use this to preserve work before replacing it
+// (New Bin, Duplicate) can abort instead of losing anything on failure.
+async function designerSaveToSpace({ silent = false } = {}) {
+  if (state.folderMode !== "space" || typeof DL === "undefined") return false;
+  if (baseTrimEnabled()) {
+    if (!silent) toast("Base Trim is not a Designer bin, so it has no place in Save to Space.", true, 5000);
+    return false;
   }
-  state.spacePartDefaults = { ...fallback, ...(state.spacePartDefaults || {}) };
-  await SP.updateBinDefaults({
-    snapshot: spaceBinDefaultsFromDesign(design),
-    partDefaults: state.spacePartDefaults || {},
+  const design = visibleDesignSnapshot();
+  try {
+    const data = await DL.inventoryCall("/api/drawer/design-source/save", {
+      design, row_id: state.designInventoryId || undefined,
+    });
+    state.designInventoryId = data.row_id;
+    DL.adopt(data);
+    if (!silent) toast("Saved to Space.");
+    return true;
+  } catch (error) {
+    if (!silent) toast(`Could not save to Space: ${error.message}`, true, 6000);
+    return false;
+  }
+}
+
+// Install a canonical design (from Load from Space) as the working Designer
+// design, replacing whatever is currently shown.
+async function installLoadedDesignSource(rowId, spec) {
+  if (!beginDesignMutation()) return;
+  try {
+    const result = await api("/api/design/validate", { design: spec });
+    state.design = result.design;
+    state.baseTrimSourceLayout = null;
+    state.lastOrdinaryDesign = clone(state.design);
+    resetNestPhotoSession();
+    state.cleanDesign = clone(state.design);
+    state.designInventoryId = rowId;
+    state.workingPending = true;
+    state.workingGeneratedKey = null;
+    state.drafts = {};
+    state.history = [];
+    state.future = [];
+    state.binResizePending = false;
+    state.binFootprintResizePending = false;
+    syncForm();
+    clearDraftSelection();
+    activatePreviewView("3d");
+    await refreshPreview();
+    toast("Loaded from Space.");
+  } catch (error) {
+    toast(`Could not load that design: ${error.message}`, true, 6000);
+  } finally {
+    finishDesignMutation();
+  }
+}
+
+// Load from Space (E2): a picker of this Space's bin/B4B rows that carry a
+// canonical design source. A no-spec/manual/legacy row is listed but
+// disabled, never reverse-engineered from a generated 3MF.
+async function designerLoadFromSpace() {
+  if (state.folderMode !== "space" || typeof DL === "undefined") return;
+  const dialog = $("#designer-load-dialog");
+  const list = $("#designer-load-list");
+  const cancelBtn = $("#designer-load-cancel");
+  if (!dialog || !list || !cancelBtn) return;
+  let data;
+  try {
+    data = await DL.inventoryCall("/api/drawer/load", {});
+  } catch (error) {
+    toast(`Could not read this Space's inventory: ${error.message}`, true, 6000);
+    return;
+  }
+  const bins = (data.bins || []).filter(one => ["bin", "b4b"].includes(one.kind));
+  const specs = (data.layout && data.layout.design_specs) || {};
+  list.textContent = "";
+  if (!bins.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "This Space has no bins yet.";
+    list.appendChild(empty);
+  }
+  let chosen = null;
+  bins.forEach(one => {
+    const spec = specs[one.id];
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "designer-load-row";
+    row.disabled = !spec;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = one.name || `${fmt(one.x)} × ${fmt(one.y)}`;
+    const noteSpan = document.createElement("span");
+    noteSpan.className = "muted";
+    noteSpan.textContent = spec
+      ? `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`
+      : "Design settings not available";
+    row.append(nameSpan, noteSpan);
+    row.addEventListener("click", () => { chosen = { id: one.id, spec }; if (dialog.open) dialog.close(); });
+    list.appendChild(row);
   });
+  cancelBtn.onclick = () => { if (dialog.open) dialog.close(); };
+  await new Promise(resolve => {
+    dialog.addEventListener("close", resolve, { once: true });
+    if (!dialog.open) dialog.showModal();
+  });
+  if (!chosen) return;
+  if (workingDesignForSpace() && !(await appConfirmAction({
+    title: "Load a different bin?",
+    message: "This replaces the bin you're currently editing. Save it to this Space first if you want to keep it.",
+    actionLabel: "Load anyway",
+    danger: true,
+  }))) return;
+  await installLoadedDesignSource(chosen.id, chosen.spec);
+}
+
+// New Bin (B1): a fresh product-appropriate starter. Meaningful current work
+// in a typed Space is preserved through Save to Space first, never silently
+// discarded; on save failure New Bin is cancelled rather than losing work.
+async function designerNewBin() {
+  await commitVisibleDraft();
+  if (state.folderMode === "space") {
+    if (workingDesignForSpace()) {
+      const saved = await designerSaveToSpace({ silent: true });
+      if (!saved) {
+        toast("Could not preserve your current bin, so New Bin was cancelled.", true, 6000);
+        return;
+      }
+    }
+  } else if (designHasChanges() && !(await appConfirmAction({
+    title: "Start a new bin?",
+    message: "Start a new bin and discard the current changes?",
+    actionLabel: "Discard Changes",
+    danger: true,
+  }))) return;
+  if (!beginDesignMutation()) return;
+  try {
+    state.designInventoryId = null;
+    await loadFreshOrdinaryDesignForCurrentFolder();
+    toast("Started a new bin.");
+  } finally {
+    finishDesignMutation();
+  }
+}
+
+// Duplicate (B2): a deep copy of the exact current design with name/label
+// text cleared and source-row identity cleared, so a later Save/Generate/
+// Print creates a distinct source rather than mutating the original's row.
+async function designerDuplicate() {
+  await commitVisibleDraft();
+  if (baseTrimEnabled()) {
+    toast("Base Trim cannot be duplicated here.", true, 5000);
+    return;
+  }
+  const design = clone(visibleDesignSnapshot());
+  design.part_name = "";
+  design.label = "";
+  if (design.box?.edge_mount) design.box.edge_mount.label_text = "";
+  if (design.box?.lid) {
+    design.box.lid.label_text = "";
+    design.box.lid.division_labels = (design.box.lid.division_labels || []).map(() => "");
+  }
+  if (design.box?.b4b) design.box.b4b.label_text = "";
+  if (Array.isArray(design.layout?.features)) {
+    design.layout.features = design.layout.features.map(feature => {
+      if (feature.kind !== "divider" || !Array.isArray(feature.options?.division_labels)) return feature;
+      return {
+        ...feature,
+        options: { ...feature.options, division_labels: feature.options.division_labels.map(() => "") },
+      };
+    });
+  }
+  if (!beginDesignMutation()) return;
+  try {
+    const result = await api("/api/design/validate", { design });
+    state.design = result.design;
+    state.baseTrimSourceLayout = null;
+    state.lastOrdinaryDesign = clone(state.design);
+    state.cleanDesign = clone(state.design);
+    state.designInventoryId = null;
+    state.workingPending = state.folderMode === "space";
+    state.workingGeneratedKey = null;
+    state.drafts = {};
+    state.history = [];
+    state.future = [];
+    state.binResizePending = false;
+    state.binFootprintResizePending = false;
+    syncForm();
+    clearDraftSelection();
+    activatePreviewView("3d");
+    await refreshPreview();
+    toast("Duplicated. Edit the copy freely - the original is unchanged.");
+  } catch (error) {
+    toast(error.message, true, 6000);
+  } finally {
+    finishDesignMutation();
+  }
 }
 
 function pinDraftAxis(axis) {
@@ -992,9 +1089,11 @@ function syncEdgeMountEditorVisibility() {
   }
 }
 
+// Fix 034 H inset_v2 semantics: 0 means the opening reaches that edge
+// (floor for bottom, rim for top); a higher percentage pulls it inward.
 const SIDE_OPENING_DEFAULTS = {
   enabled: false, shape: "curved", sides: [], size: "medium",
-  from_bottom_percent: 100, from_top_percent: 100,
+  from_bottom_percent: 0, from_top_percent: 0,
 };
 const SIDE_OPENING_SIDE_IDS = ["front", "back", "left", "right"];
 let sideOpeningAdjustmentNote = "";
@@ -1080,16 +1179,15 @@ function reconcileSideOpeningsAfterResize(design) {
 // filtering while typing.
 function sideOpeningVerticalFits(design, spec, widthMm) {
   const box = design?.box || {};
-  const rules = state.catalog?.side_openings || {};
   const floorZ = number(box.base_thickness);
   const rimZ = number(box.z);
   const usable = rimZ - floorZ;
-  const bottomZ = rimZ - usable * (number(spec.from_bottom_percent, 100) / 100);
-  const topZ = floorZ + usable * (number(spec.from_top_percent, 100) / 100);
+  const bottomZ = floorZ + usable * (number(spec.from_bottom_percent, 0) / 100);
+  const topZ = rimZ - usable * (number(spec.from_top_percent, 0) / 100);
   const r = widthMm / 2;
   if (bottomZ < floorZ - 1e-9) return false;
   if (topZ <= bottomZ + 1e-9) return false;
-  if (number(spec.from_top_percent, 100) >= 100 - 1e-9) {
+  if (number(spec.from_top_percent, 0) <= 1e-9) {
     return spec.shape === "curved" ? (rimZ - bottomZ) >= r - 1e-9 : true;
   }
   return spec.shape === "curved"
@@ -1117,19 +1215,22 @@ function sideOpeningLidStackForced(design = state.design) {
   return lidPartActive(design);
 }
 
-function sideOpeningMaxFromTop(design = state.design) {
+// Fix 034 H: renamed from the old MaxFromTop - with inset_v2 semantics the
+// Lid/Stack bridge is now a MINIMUM top inset (a higher % from top means
+// more material left at the rim), not a maximum.
+function sideOpeningMinFromTop(design = state.design) {
   const box = design?.box || {};
   const usable = number(box.z) - number(box.base_thickness);
   const bridge = number(state.catalog?.side_openings?.top_bridge_mm, 4);
-  return usable > 0 ? 100 * (usable - bridge) / usable : 0;
+  return usable > 0 ? 100 * bridge / usable : 0;
 }
 
 function clampSideOpeningTopForLid(design = state.design, flash = false) {
   const current = sideOpeningState(design);
   if (!current.enabled || !sideOpeningLidStackForced(design)) return;
-  const maximum = Math.max(0, sideOpeningMaxFromTop(design));
-  if (number(current.from_top_percent, 100) > maximum) {
-    design.box.side_openings = { ...current, from_top_percent: maximum };
+  const minimum = Math.max(0, sideOpeningMinFromTop(design));
+  if (number(current.from_top_percent, 0) < minimum) {
+    design.box.side_openings = { ...current, from_top_percent: minimum };
     if (flash) flashField($("#side-opening-from-top"));
   }
 }
@@ -1166,7 +1267,7 @@ function readSideOpeningForm(design) {
   const shape = $("#side-opening-shape")?.value || current.shape;
   const fromBottom = number($("#side-opening-from-bottom")?.value, current.from_bottom_percent);
   let fromTop = number($("#side-opening-from-top")?.value, current.from_top_percent);
-  if (sideOpeningLidStackForced(design)) fromTop = Math.min(fromTop, sideOpeningMaxFromTop(design));
+  if (sideOpeningLidStackForced(design)) fromTop = Math.max(fromTop, sideOpeningMinFromTop(design));
   const allowed = sideOpeningAllowedSizes({
     ...design,
     box: { ...design.box, side_openings: {
@@ -1224,7 +1325,7 @@ function syncSideOpeningControls() {
     } else if (sideOpeningAdjustmentNote) {
       note.textContent = sideOpeningAdjustmentNote;
     } else if (forced) {
-      note.textContent = "% from top is limited to keep the Lid & Stacking bridge.";
+      note.textContent = "% from top has a minimum to keep the Lid & Stacking bridge.";
     } else {
       note.textContent = "";
     }
@@ -3699,31 +3800,25 @@ function wireControls() {
   // palette; "Delete Part" removes the part being edited and does the same.
   $("#save-part").addEventListener("click", saveCurrentPart);
   $("#delete-part").addEventListener("click", deleteCurrentPart);
-  $("#save-design").addEventListener("click", saveDesign);
-  $("#open-design").addEventListener("change", openDesign);
-  $("#new-design").addEventListener("click", newDesign);
-  $("#undo-design").addEventListener("click", () => restoreHistory());
-  $("#redo-design").addEventListener("click", () => restoreHistory(true));
-  document.addEventListener("keydown", event => {
-    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
-    if (event.target.closest("input, textarea, select, [contenteditable='true']")) return;
-    const isZ = event.key.toLowerCase() === "z" || event.code === "KeyZ";
-    const isY = event.key.toLowerCase() === "y" || event.code === "KeyY";
-    if (isZ) {
-      event.preventDefault();
-      restoreHistory(event.shiftKey);
-    } else if (isY) {
-      event.preventDefault();
-      restoreHistory(true);
-    }
-  });
+  // Fix 034 I: the global top-right lifecycle/history controls are gone -
+  // New Bin/Duplicate/Save/Load live at the bottom of the Designer instead
+  // (Section E1), and Undo/Redo have no replacement (autosave + explicit
+  // Duplicate cover their role). Internal history snapshot plumbing remains
+  // for the algorithms that still use it (e.g. size-drag history).
+  $("#designer-new-bin").addEventListener("click", designerNewBin);
+  $("#designer-duplicate").addEventListener("click", designerDuplicate);
+  $("#designer-save-space").addEventListener("click", () => designerSaveToSpace());
+  $("#designer-load-space").addEventListener("click", designerLoadFromSpace);
+  $("#designer-save-file").addEventListener("click", saveDesign);
+  $("#designer-open-file").addEventListener("change", openDesign);
   window.addEventListener("beforeunload", event => {
-    if (designHasChanges()) {
+    const layoutUnsaved = typeof DL !== "undefined" && DL.active
+      && (DL.dirty || DL.saving || Boolean(DL.savePromise) || DL.saveState === "error");
+    if (designHasChanges() || layoutUnsaved) {
       event.preventDefault();
       event.returnValue = "";
     }
   });
-  $("#connection").addEventListener("click", () => location.reload(true));
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
   $("#print-bin").addEventListener("click", event => {
     if (!state.runtime.hosted && baseTrimEnabled() && event.ctrlKey && event.shiftKey) {
@@ -4071,10 +4166,7 @@ async function selectKind(kind, reset = false) {
       item: info.flags.item ? starterItem() : null,
     });
     if (request !== state.kindRequest) return;
-    state.draft = seedFeatureFromPartDefaults(
-      result.feature,
-      state.keepBinDefaults ? state.spacePartDefaults?.[kind] : null,
-    );
+    state.draft = result.feature;
     state.draftTouched = false;
     state.pinnedZone = {};
     state.draftResolvedOptions = result.resolved_options || {};
@@ -7065,25 +7157,6 @@ async function appConfirmAction({ title, message, actionLabel = "OK", cancelLabe
   return choice === "primary";
 }
 
-// The three-choice Save & Switch / Discard & Switch / Cancel dialog Fix 019
-// Item 2 needs for leaving a dirty manual-save Drawer layout. Resolves
-// "save", "discard" or "cancel" - never an ambiguous two-button confirm().
-async function appConfirmSaveDiscardCancel({
-  title, message,
-  saveLabel = "Save & Switch", discardLabel = "Discard & Switch", cancelLabel = "Cancel",
-}) {
-  const choice = await appConfirm({
-    title, message, primaryLabel: saveLabel, secondaryLabel: discardLabel, cancelLabel,
-    // Discard & Switch throws the in-memory layout away - it must read as
-    // destructive (Fix 019 correction C1.4), while Save & Switch stays the
-    // normal safe/default action and keeps focus.
-    secondaryDanger: true,
-  });
-  if (choice === "primary") return "save";
-  if (choice === "secondary") return "discard";
-  return "cancel";
-}
-
 // Used only for committing a 2D-layout drag of an already-placed support -
 // a discrete one-shot action, unlike the continuous autoCommitDraft above.
 async function applySupport(index) {
@@ -7238,7 +7311,8 @@ function mutationControls() {
     '#lid-option-toggle, #lid-configuration, #lid-thickness, #lid-handle-type, #lid-handle-size, ' +
     '#lid-handle-position, #lid-label-enabled, #lid-label-orientation, #lid-label-style, #lid-label-text, ' +
     '#b4b-stacking, #b4b-handle, #b4b-label-location, #b4b-latch-count, #b4b-front-label-style, ' +
-    '#new-design, #open-design, #save-design'
+    '#designer-new-bin, #designer-duplicate, #designer-save-space, #designer-load-space, ' +
+    '#designer-save-file, #designer-open-file'
   );
 }
 
@@ -11378,7 +11452,7 @@ async function generateParts(target) {
       const binFiles = await saveGeneratedFiles(binResult);
       if (!baseTrimEnabled(payload.design) && !Boolean(payload.design?.box?.b4b?.enabled)) await rememberGeneratedSpaceBin(payload.design);
       if (binResult.inventory_bin && state.inventoryEnabled && typeof SP !== "undefined") {
-        await SP.addInventoryBin(binResult.inventory_bin);
+        await SP.addInventoryBin(binResult.inventory_bin, binResult.inventory_design_spec || null);
       }
       allFiles.push(...binFiles);
       setItemStatus("bin", "done", "Done");
@@ -11683,13 +11757,10 @@ function watchServerVersion() {
       return;
     }
     const incompatibleHosted = state.runtime.hosted;
-    $("#connection").textContent = incompatibleHosted ? "Update requires reload" : "Engine restarted";
     const message = $("#update-banner span");
     if (message) message.textContent = incompatibleHosted
       ? "Wavefinity was updated. This update requires the page to reload before you continue."
       : "Wavefinity restarted. Reload to use the current code.";
-    $("#connection").classList.remove("ready");
-    $("#connection").classList.add("stale");
     $("#update-banner").hidden = false;
   }, VERSION_POLL_MS);
 }
@@ -11810,9 +11881,6 @@ async function init() {
     renderCatalog();
     wireControls();
     syncForm();
-    $("#connection").textContent = state.runtime.hosted ? "Hosted engine connected" : "Local engine connected";
-    $("#connection").classList.add("ready");
-    $("#connection").classList.remove("stale");
     watchServerVersion();
     updateHistoryButtons();
     clearDraftSelection();
@@ -11826,9 +11894,6 @@ async function init() {
     // A startup failure must never leave an infinite "Opening Wavefinity..."
     // cover over the actual error.
     document.getElementById("startup-cover")?.setAttribute("hidden", "");
-    $("#connection").textContent = "Engine unavailable";
-    $("#connection").classList.remove("ready");
-    $("#connection").classList.add("stale");
     setError(error.message);
     toast(error.message, true, 8000);
   }

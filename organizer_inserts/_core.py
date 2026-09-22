@@ -470,6 +470,21 @@ def connector_keep_out(box: BoxSpec, connector: ConnectorSpec | None = None) -> 
     return box.z - connector.arm_depth
 
 
+def feature_touches_wall(box: BoxSpec, one: Feature) -> bool:
+    """Whether ``one``'s zone reaches the bin's outer wall on any side.
+
+    Shared by assembly's connector-keep-out validation and Bore's Auto
+    Height resolution (Fix 034 G1), so both obey the exact same rule.
+    """
+    whole = Zone.whole(box)
+    return (
+        one.zone.x0 <= whole.x0 + CONNECTOR_EDGE_KEEP_OUT
+        or one.zone.x1 >= whole.x1 - CONNECTOR_EDGE_KEEP_OUT
+        or one.zone.y0 <= whole.y0 + CONNECTOR_EDGE_KEEP_OUT
+        or one.zone.y1 >= whole.y1 - CONNECTOR_EDGE_KEEP_OUT
+    )
+
+
 # --- a starter library --------------------------------------------------------
 #
 # Measured nominal sizes. Extend freely; nothing here is special.

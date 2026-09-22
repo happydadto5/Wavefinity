@@ -110,6 +110,9 @@ DL.normaliseLayout = raw => {
   delete layout.settings.new_bins_printed; // retired: generating always means Qty 0
   layout.settings.auto = { ...defaults.auto, ...(layout.settings.auto || {}) };
   layout.settings.spacers = { ...defaults.spacers, ...(layout.settings.spacers || {}) };
+  // Fix 034 K1: autosave has no user-off path any more; a legacy
+  // autosave:false layout normalises to the always-on runtime value.
+  layout.settings.autosave = true;
   layout.drawers = Array.isArray(layout.drawers)
     ? layout.drawers.filter(one => one && typeof one === "object") : [];
   DL.layout = layout;
@@ -330,13 +333,15 @@ DL.plannedCount = id => {
   return DL.layout.drawers.reduce((sum, drawer) =>
     sum + drawer.placements.filter(p => p.bin === id && (p.copy ?? 0) >= (Number(one?.qty) || 0)).length, 0);
 };
-// Bulk printing: a generated bin/B4B row (one with a file) can be sent to the
-// slicer. Needed = planned copies not yet printed, or one copy for a Qty 0 row
-// that is not placed; an explicit pick of a satisfied row reprints one.
+// Bulk printing: a generated bin/B4B row (one with a file, or with a
+// canonical design source that Generate can resolve on demand) can be sent
+// to the slicer. Needed = planned copies not yet printed, or one copy for a
+// Qty 0 row that is not placed; an explicit pick of a satisfied row reprints one.
 DL.printEligible = one =>
   Boolean(one) &&
   ["bin", "b4b"].includes(one.kind) &&
-  Boolean(String(one.file || "").trim());
+  (Boolean(String(one.file || "").trim()) ||
+   Boolean(DL.layout?.design_specs?.[one.id]));
 
 DL.printNeeded = one => {
   if (!DL.printEligible(one)) return 0;
@@ -463,10 +468,9 @@ DL.syncSingleDrawerFromSpace = space => {
 DL.afterChange = () => {
   DL.dirty = true;
   DL.clearSpacerPlan();
-  if (!DL.layout.settings.autosave) DL.saveState = "idle";
   DL.emit();
   DL.requestReport();
-  if (DL.layout.settings.autosave) DL.saveSoon();
+  DL.saveSoon();
 };
 
 // A fingerprint of everything a spacer plan is derived from: the active
@@ -549,10 +553,11 @@ DL.refreshWorking = async () => {
   }
   const key = JSON.stringify(design);
   if (DL.working?.key === key) return;
+  const context = DL.workingContext();
   const ticket = ++DL.workingTicket;
   try {
     const { bin } = await api("/api/design/inventory-preview", { design });
-    if (ticket !== DL.workingTicket) return;
+    if (ticket !== DL.workingTicket || context !== DL.workingContext()) return;
     DL.working = {
       key,
       bin: {
@@ -562,7 +567,7 @@ DL.refreshWorking = async () => {
     };
     await DL.refreshPegboardLayouts();
   } catch (error) {
-    if (ticket !== DL.workingTicket) return;
+    if (ticket !== DL.workingTicket || context !== DL.workingContext()) return;
     DL.working = { key, error: error.message };
   }
   DL.emit();
@@ -726,11 +731,10 @@ DL.saveSoon = () => {
 DL.saveSoon.cancel = () => { clearTimeout(dlSaveTimer); dlSaveTimer = null; };
 
 // Bin rows (Qty, name, sizes, stacking, hand-added bins) always save straight
-// away - they are the inventory, not the layout. The layout rides along only
-// when auto-save is on.
+// away - they are the inventory, not the layout. The layout always rides
+// along too (Fix 034 K1: no autosave-off path any more).
 DL.editBins = async changes => {
-  const payload = { ...changes };
-  if (DL.layout.settings.autosave) payload.layout = DL.layout;
+  const payload = { ...changes, layout: DL.layout };
   try {
     const data = await DL.inventoryCall("/api/drawer/save", payload);
     DL.adopt(data);
@@ -742,7 +746,7 @@ DL.editBins = async changes => {
     if (removed) {
       toast(`${removed} placed cop${removed === 1 ? "y" : "ies"} taken out of the drawers.`);
       DL.afterChange();
-    } else if (payload.layout) {
+    } else {
       DL.dirty = false;
       DL.saveState = "saved";
       DL.savedAt = new Date();
