@@ -1988,7 +1988,7 @@ class InsertEditorTests(unittest.TestCase):
     def test_organizer_cli_keeps_saved_side_openings(self) -> None:
         openings = SideOpeningSpec(
             enabled=True, sides=("front",), shape="curved", size="medium",
-            from_bottom_percent=60.0, from_top_percent=80.0,
+            from_bottom_percent=30.0, from_top_percent=20.0,
         )
         spec = BoxSpec(48.0, 32.0, 35.0, side_openings=openings)
         with tempfile.TemporaryDirectory() as directory:
@@ -2710,10 +2710,10 @@ class SideOpeningTests(unittest.TestCase):
         )
         self.assertFalse(BoxSpec().side_openings.enabled)
 
-    def test_100_percent_curved_reaches_floor_not_below(self) -> None:
+    def test_0_percent_curved_reaches_floor_not_below(self) -> None:
         box = replace(self._box(), side_openings=SideOpeningSpec(
             enabled=True, sides=("front",), shape="curved", size="medium",
-            from_bottom_percent=100.0, from_top_percent=100.0,
+            from_bottom_percent=0.0, from_top_percent=0.0,
         ))
         floor_z, rim_z, bottom_z, top_z = organizer_side_openings._vertical_geometry(
             box, box.side_openings.from_bottom_percent,
@@ -2734,7 +2734,7 @@ class SideOpeningTests(unittest.TestCase):
     def test_50_percent_depth_stops_halfway_down_usable_wall(self) -> None:
         box = self._box()
         floor_z, rim_z, bottom_z, top_z = organizer_side_openings._vertical_geometry(
-            box, 50.0, 100.0
+            box, 50.0, 0.0
         )
         usable = rim_z - floor_z
         self.assertAlmostEqual(bottom_z, rim_z - usable * 0.5)
@@ -2790,7 +2790,7 @@ class SideOpeningTests(unittest.TestCase):
             with self.subTest(side=side):
                 box = replace(self._box(), side_openings=SideOpeningSpec(
                     enabled=True, sides=(side,), shape="curved", size="medium",
-                    from_bottom_percent=100.0, from_top_percent=100.0,
+                    from_bottom_percent=0.0, from_top_percent=0.0,
                 ))
                 cut = apply_side_openings(box, make_box(box))
                 self.assertTrue(cut.is_watertight)
@@ -2804,9 +2804,9 @@ class SideOpeningTests(unittest.TestCase):
 
     def test_multiple_sides_and_shapes_stay_one_printable_solid(self) -> None:
         combos = [
-            ("curved", 100.0, 100.0), ("square", 100.0, 100.0),
-            ("curved", 75.0, 75.0), ("square", 75.0, 75.0),
-            ("curved", 50.0, 100.0),
+            ("curved", 0.0, 0.0), ("square", 0.0, 0.0),
+            ("curved", 25.0, 25.0), ("square", 25.0, 25.0),
+            ("curved", 50.0, 0.0),
         ]
         for shape, from_bottom, from_top in combos:
             with self.subTest(shape=shape, from_bottom=from_bottom, from_top=from_top):
@@ -2884,8 +2884,10 @@ class SideOpeningTests(unittest.TestCase):
             "size": "small", "depth_percent": 60.0, "top_support": False,
         }
         box, *_ = organizer_app.design_from_dict(saved)
-        self.assertEqual(box.side_openings.from_bottom_percent, 60.0)
-        self.assertEqual(box.side_openings.from_top_percent, 100.0)
+        # Legacy reach semantics (no percent_mode marker): old 60/absent
+        # (implicit 100) converts to new inset 40/0, the same physical cut.
+        self.assertEqual(box.side_openings.from_bottom_percent, 40.0)
+        self.assertEqual(box.side_openings.from_top_percent, 0.0)
 
     def _legacy_top_support(self, **box_changes):
         saved = organizer_app.design_to_dict(self._box(), organizer_app.Layout())
@@ -2898,7 +2900,8 @@ class SideOpeningTests(unittest.TestCase):
 
     def _assert_bridge(self, box) -> None:
         usable = box.z - box.base_thickness
-        bridge = usable * (1 - box.side_openings.from_top_percent / 100.0)
+        # Fix 034 H inset_v2: bridge = rim_z - top_z = usable * top_percent/100.
+        bridge = usable * (box.side_openings.from_top_percent / 100.0)
         self.assertAlmostEqual(bridge, organizer_app.SIDE_OPENING_TOP_BRIDGE_MM, places=6)
 
     def test_legacy_top_support_gives_exact_bridge(self) -> None:
@@ -2929,7 +2932,7 @@ class SideOpeningTests(unittest.TestCase):
         spec = self._box(x=48.0, y=48.0, z=40.0)
         spec = replace(spec, side_openings=SideOpeningSpec(
             enabled=True, sides=("front", "left"), shape="square",
-            size="large", from_bottom_percent=75.0, from_top_percent=75.0,
+            size="large", from_bottom_percent=30.0, from_top_percent=20.0,
         ))
         layout = organizer_app.Layout()
         box, rebuilt, label, part_name, location, scoop = organizer_app.design_from_dict(
@@ -2957,14 +2960,14 @@ class SideOpeningTests(unittest.TestCase):
 
     def test_lid_and_stacking_require_a_top_bridge(self) -> None:
         box = self._box(side_openings=SideOpeningSpec(
-            enabled=True, sides=("front",), from_top_percent=100.0,
+            enabled=True, sides=("front",), from_top_percent=0.0,
         ))
         with self.assertRaises(ValueError):
             validate_side_openings(replace(box, lid=LidSpec(enabled=True)))
-        # Lowering the top leaves a bridge for the lid/stacking geometry.
+        # Raising the top inset leaves a bridge for the lid/stacking geometry.
         validate_side_openings(replace(
             box, lid=LidSpec(enabled=True),
-            side_openings=replace(box.side_openings, from_top_percent=80.0),
+            side_openings=replace(box.side_openings, from_top_percent=20.0),
         ))
         with self.assertRaises(ValueError):
             validate_side_openings(replace(box, stack=StackSpec(mode="direct")))
@@ -3006,7 +3009,7 @@ class SideOpeningTests(unittest.TestCase):
         # the requested opening, not have it filled back in.
         box = self._box(side_openings=SideOpeningSpec(
             enabled=True, sides=("front",), shape="curved", size="medium",
-            from_bottom_percent=100.0, from_top_percent=100.0,
+            from_bottom_percent=0.0, from_top_percent=0.0,
         ))
         with tempfile.TemporaryDirectory() as tmp:
             result = organizer_app.generate_organizer_files(
