@@ -232,41 +232,21 @@ SP.inventoryFilenameFor = _folder => INVENTORY_FILENAME;
 // ------------------------------------------------------------ safe Drawer/Space switch (Fix 019 Item 2)
 //
 // Folder identity must never change until leaving the current Drawer layout
-// either succeeds or the user deliberately discards it. Autosave ON: flush
-// if dirty, and ABORT the switch (old Space stays active, DL.layout/DL.dirty
-// stay intact) if that save fails. Autosave OFF: a dirty layout gets an
-// explicit three-way choice - Save & Switch / Discard & Switch / Cancel -
-// never an ambiguous two-button native confirm().
+// either succeeds or the user deliberately discards it. Fix 034 K1: autosave
+// has no off state any more, so this always just flushes a dirty layout and
+// ABORTS the switch (old Space stays active, DL.layout/DL.dirty stay intact)
+// if that save fails - never an ambiguous native confirm().
 
-// Resolves true when it is safe to proceed (nothing dirty, a successful
-// flush, an explicit save, or an explicit discard) and false when the
-// switch must be aborted with everything - including DL.layout/DL.dirty -
-// left exactly as it was.
+// Resolves true when it is safe to proceed (nothing dirty, or a successful
+// flush) and false when the switch must be aborted with everything -
+// including DL.layout/DL.dirty - left exactly as it was.
 SP.leaveDrawerLayoutSafely = async () => {
   if (typeof DL === "undefined" || !DL.dirty || !DL.layout || !DL.output) return true;
-  const autosave = Boolean(DL.layout.settings?.autosave);
-  if (autosave) {
-    const ok = await DL.save();
-    if (!ok) {
-      toast(`Could not switch Spaces: ${DL.saveError || "the layout failed to save."}`, true, 6000);
-      return false;
-    }
-    return true;
+  const ok = await DL.save();
+  if (!ok) {
+    toast(`Could not switch Spaces: ${DL.saveError || "the layout failed to save."}`, true, 6000);
+    return false;
   }
-  const choice = await appConfirmSaveDiscardCancel({
-    title: "Unsaved Drawer layout",
-    message: "This Drawer's layout has unsaved manual changes and Autosave is off for this Drawer. Save it before switching, discard it, or stay here.",
-  });
-  if (choice === "cancel") return false;
-  if (choice === "save") {
-    const ok = await DL.save();
-    if (!ok) {
-      toast(`Could not save the layout: ${DL.saveError || "please try again."}`, true, 6000);
-      return false;
-    }
-  }
-  // Save & Switch (already saved above) and Discard & Switch both continue;
-  // the actual layout/dirty clearing happens right below.
   return true;
 };
 
@@ -805,8 +785,20 @@ SP.inventoryRequest = async (path, extra = {}, { write = true } = {}) => {
   return data;
 };
 
-SP.addInventoryBin = async entry => {
-  const data = await SP.inventoryRequest("/api/drawer/save", { new_bins: [entry] });
+// Fix 034 F1: hosted Generate/Print has no server folder to write to
+// directly, so the browser appends the row itself, then (when the generator
+// supplied a canonical design) attaches it as that row's design_specs entry
+// so a spec-only Wavefinity row stays reloadable even without Save to Space.
+SP.addInventoryBin = async (entry, designSpec = null) => {
+  let data = await SP.inventoryRequest("/api/drawer/save", { new_bins: [entry] });
+  if (designSpec) {
+    const added = (data.bins || []).find(one => one.file === entry.file);
+    if (added) {
+      data = await SP.inventoryRequest("/api/drawer/design-source/save", {
+        design: designSpec, row_id: added.id,
+      });
+    }
+  }
   if (typeof DL !== "undefined" && DL.active) {
     DL.adopt(data);
     DL.exists = true;
@@ -1175,42 +1167,10 @@ SP.setInventory = enabled => SP.run(async () => {
   toast(enabled ? "Keeping inventory for this folder." : "Inventory turned off for this folder.");
 });
 
-SP.updateBinDefaults = async (changes = {}) => {
-  if (state.folderMode !== "space") return;
-  const updates = {};
-  if (Object.hasOwn(changes, "enabled")) updates.keep_bin_defaults = Boolean(changes.enabled);
-  if (Object.hasOwn(changes, "snapshot")) updates.bin_defaults = changes.snapshot;
-  if (Object.hasOwn(changes, "partDefaults")) updates.part_defaults = changes.partDefaults;
-  if (!Object.keys(updates).length) return;
-  let info;
-  if (state.runtime.hosted) {
-    // Owns only the requested defaults fields (already filtered above), not
-    // the Space definition - preserve the current on-disk one rather than
-    // this possibly-stale state.activeSpace (Fix 032 Correction 4, C4.1).
-    info = await SP.writeMetadata(
-      state.browserFolder?.handle,
-      "space",
-      null,
-      true,
-      updates,
-      { preserveSpace: true },
-    );
-  } else {
-    const data = await api("/api/space/defaults", { output: state.output, ...updates });
-    info = data.folder;
-  }
-  state.keepBinDefaults = Boolean(info.keep_bin_defaults);
-  state.spaceBinDefaults = info.bin_defaults && typeof info.bin_defaults === "object"
-    ? clone(info.bin_defaults) : null;
-  state.spacePartDefaults = info.part_defaults && typeof info.part_defaults === "object"
-    ? clone(info.part_defaults) : {};
-  if (typeof DP !== "undefined" && DP.built) DP.renderSave();
-};
-
-SP.setKeepBinDefaults = enabled => SP.run(async () => {
-  await SP.updateBinDefaults({ enabled });
-  toast(enabled ? "Keeping bin defaults for this Space." : "Bin defaults turned off for this Space.");
-});
+// Fix 034 K2: Keep bin defaults is retired (New Bin is always fresh;
+// Duplicate is the explicit clone workflow) - old keep_bin_defaults/
+// bin_defaults/part_defaults metadata keys are still read tolerantly on
+// folder load elsewhere, but nothing writes or acts on them any more.
 
 // ------------------------------------------------------------ welcome/manage
 
@@ -2404,13 +2364,27 @@ SP.renderSpaceInfo = () => {
     const kindLabel = SP_KINDS[kind]?.label || kind;
     document.getElementById("space-head-type").textContent = kindLabel;
 
-    let sizeText = "";
+    // Fix 034 J: the top Space summary is the single authoritative Actual
+    // size / Usable interior readout - existing calculations only, never
+    // duplicated math (Portable Storage still uses its simple stored field
+    // pending a full B4B assembled-envelope summary wire-up here).
+    let actualText = "";
+    let usableText = "";
     const unit = state.catalog?.base_unit || 8;
     if (kind === "drawer") {
         const x = state.activeSpace.x;
         const y = state.activeSpace.y;
         const z = state.activeSpace.z;
-        sizeText = x + " × " + y + " × " + z + " mm (" + SP.drawerCapacity(x) + " × " + SP.drawerCapacity(y) + " units)";
+        actualText = `${x} × ${y} × ${z} mm`;
+        let gx = SP.drawerCapacity(x);
+        let gy = SP.drawerCapacity(y);
+        try {
+            if (typeof DL !== "undefined" && DL.active && DL.layout) {
+                const grid = DL.grid(DL.drawer());
+                if (grid) { gx = grid.cols; gy = grid.rows; }
+            }
+        } catch (_error) { /* keep the approximate unit count above */ }
+        usableText = `${gx} × ${gy} units`;
     } else if (kind === "surface") {
         const x = state.activeSpace.x;
         const y = state.activeSpace.y;
@@ -2422,18 +2396,23 @@ SP.renderSpaceInfo = () => {
         const trim = trimRow?.label || state.activeSpace.trim_size || "";
         const outsideX = SP.surfaceOutsideFor(x, state.activeSpace.trim_size);
         const outsideY = SP.surfaceOutsideFor(y, state.activeSpace.trim_size);
-        sizeText = "Interior " + SP.fieldText(x, y) + ", " + trim + " trim; finished outside "
-            + fmt(outsideX) + " × " + fmt(outsideY) + " mm";
+        actualText = `${fmt(outsideX)} × ${fmt(outsideY)} mm (${trim} trim)`;
+        usableText = SP.fieldText(x, y);
     } else if (kind === "portable" || kind === "box") {
         const x = state.activeSpace.x;
         const y = state.activeSpace.y;
         const z = state.activeSpace.z;
-        sizeText = (x/unit) + " × " + (y/unit) + " units (" + x + " × " + y + " mm) x " + z + " mm usable height";
+        actualText = `${x} × ${y} mm`;
+        usableText = `${fmt(x / unit)} × ${fmt(y / unit)} units, ${z} mm usable height`;
     } else if (kind === "pegboard") {
         const standard = SP.pegboardStandard(state.activeSpace.pegboard_standard);
-        sizeText = `${standard?.name || "Pegboard"}: ${state.activeSpace.pegboard_holes_x} × ${state.activeSpace.pegboard_holes_y} positions (${fmt(state.activeSpace.x)} × ${fmt(state.activeSpace.y)} mm)`;
+        actualText = `${fmt(state.activeSpace.x)} × ${fmt(state.activeSpace.y)} mm`;
+        usableText = `${standard?.name || "Pegboard"}: ${state.activeSpace.pegboard_holes_x} × ${state.activeSpace.pegboard_holes_y} positions`;
     }
-    document.getElementById("space-head-size").textContent = sizeText;
+    const actualEl = document.getElementById("space-head-actual");
+    const usableEl = document.getElementById("space-head-usable");
+    if (actualEl) actualEl.textContent = actualText ? `Actual size: ${actualText}` : "";
+    if (usableEl) usableEl.textContent = usableText ? `Usable interior: ${usableText}` : "";
 
     // New Space is offered for every typed Space, not only Drawer.
     const btnNew = document.getElementById("space-head-new-space");
@@ -2487,6 +2466,8 @@ SP.newSpace = () => {
 // creates it) never both attach a listener to the same button - see
 // Fix 004 Correction 6.M.
 const wireInfoButtons = (prefix = "space-head") => {
+    const btnOpen = document.getElementById(prefix + "-open");
+    if (btnOpen) btnOpen.addEventListener("click", SP.openExisting);
     const btnEdit = document.getElementById(prefix + "-edit");
     if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
     const btnShow = document.getElementById(prefix + "-show");
