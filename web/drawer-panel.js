@@ -750,7 +750,7 @@ DP.renderAuto = () => {
         <small>${c.stats.placed} of ${c.stats.wanted} bins${c.stats.stacks ? ` · ${dlPlural(c.stats.stacks, "stack")}` : ""}</small>
         <small>${c.stats.height_issues ? dlPlural(c.stats.height_issues, "height clash", "height clashes") : "Tall bins at the back"}</small>
       </button>`).join("")}</div>
-    ${active?.unplaced.length ? `<p class="dl-unfit">Didn't fit: ${names(active.unplaced)}</p>` : ""}
+    ${active?.unplaced.length ? `<p class="dl-unfit">Auto layout did not place: ${names(active.unplaced)}</p>` : ""}
     ${DL.skipped.length ? `<p class="dl-unfit">Left out: ${names(DL.skipped)}</p>` : ""}
     ${DL.autoNotes.map(note => `<p class="dl-note">${escapeHtml(note)}</p>`).join("")}`;
   DL.candidates.forEach((candidate, index) => DP.drawThumb($(`[data-thumb="${index}"]`, box), candidate));

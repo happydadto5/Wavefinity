@@ -4741,7 +4741,7 @@ function renderDraftFields() {
               ? autoField("Width", "base", "width", "mm") + autoField("Length", "base", "depth", "mm")
               : field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" }) +
                 field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
-            ${autoButton("base")}
+            <button type="button" class="button secondary" data-action="bore-size-bin">Auto size bin</button>
           </div>
           <div class="bore-auto-row">
             ${autoOn("height")
@@ -5206,7 +5206,10 @@ function renderDraftFields() {
   const fillBtn = $('[data-action="fill-part"]', $("#draft-fields"));
   if (fillBtn) fillBtn.addEventListener("click", fillPartToBin);
   const growBtn = $('[data-action="grow-bin"]', $("#draft-fields"));
-  if (growBtn) growBtn.addEventListener("click", autoExpandBin);
+  if (growBtn) growBtn.addEventListener("click", event => autoExpandBin({ button: event.currentTarget }));
+  const sizeBinBtn = $('[data-action="bore-size-bin"]', $("#draft-fields"));
+  if (sizeBinBtn) sizeBinBtn.addEventListener("click", event =>
+    autoExpandBin({ keepDraft: true, fit: true, button: event.currentTarget }));
   updateFitActions();
   // Bore Auto modes: one button per group, and clicking an Auto field turns
   // that group manual starting from what it currently resolves to.
@@ -7815,18 +7818,20 @@ function fillPartToBin() {
   refreshDraftSoon();
 }
 
-// Grow the bin to hold every interior part. Options:
+// Grow (or, with fit, shrink-or-grow to the smallest fit) the bin to hold
+// every interior part. Options:
 //   keepDraft - stay in the editor on the same part instead of closing it
 //   silent    - no toast
-async function autoExpandBin(event) {
-  const opts = event && !event.currentTarget ? event : {};
+//   fit       - smallest legal footprint instead of only growing
+//   button    - the button element to disable while the request runs
+async function autoExpandBin({ keepDraft = false, silent = false, fit = false, button = null } = {}) {
+  const opts = { keepDraft, silent };
   const draftIndex = state.draft ? draftCommitIndex() : null;
   if (draftIndex === false) {
     if (!opts.silent) toast("Select the interior part again before growing the bin.", true);
     return;
   }
   if (!beginDesignMutation()) return;
-  const button = event?.currentTarget || null;
   if (button) button.disabled = true;
   try {
     // Grow for what the user is actually looking at: an open draft may hold
@@ -7852,6 +7857,7 @@ async function autoExpandBin(event) {
     const result = await api("/api/layout/expand", {
       design,
       anchor,
+      fit,
     });
     const changed = result.changed ?? result.grew;
     state.design = result.design;
@@ -7879,7 +7885,11 @@ async function autoExpandBin(event) {
     if (result.box.x !== previousBox.x) flashField($("#x-size"));
     if (result.box.y !== previousBox.y) flashField($("#y-size"));
     if (!opts.silent && changed) {
-      toast(`Bin resized to ${fmt(result.box.x)} × ${fmt(result.box.y)} mm.`);
+      toast(fit
+        ? `Bin sized to the smallest fit: ${fmt(result.box.x)} × ${fmt(result.box.y)} mm.`
+        : `Bin resized to ${fmt(result.box.x)} × ${fmt(result.box.y)} mm.`);
+    } else if (!opts.silent && fit) {
+      toast("The bin is already at the smallest fit.");
     } else if (!opts.silent && !opts.keepDraft) {
       toast("The interior parts already fit - bin unchanged.");
     }
