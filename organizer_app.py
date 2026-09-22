@@ -2550,6 +2550,8 @@ def design_to_dict(
             "label_raised": edge_mount.label_raised,
             "label_text_depth_mm": edge_mount.label_text_depth_mm,
             "label_flip": edge_mount.label_flip,
+            "standoff_ribs_enabled": edge_mount.standoff_ribs_enabled,
+            "standoff_rib_count": edge_mount.standoff_rib_count,
             "holes_enabled": edge_mount.holes_enabled,
             "hole_count": edge_mount.hole_count,
             "hole_orientation": edge_mount.hole_orientation,
@@ -2639,6 +2641,15 @@ def design_from_dict(
     if isinstance(edge_mount_raw, dict):
         access_raw = edge_mount_raw.get("access_diameter_mm")
         spacing_raw = edge_mount_raw.get("hole_spacing_mm")
+        # Fix-025 Separate labels predate ribs. Keep their printed body exactly
+        # as saved, while older integrated labels gain the new default when a
+        # user later chooses a Separate part.
+        if "standoff_ribs_enabled" in edge_mount_raw:
+            standoff_ribs_enabled = bool(edge_mount_raw["standoff_ribs_enabled"])
+        else:
+            standoff_ribs_enabled = str(edge_mount_raw.get("label_type", "integrated")) != "separate"
+        rib_count_raw = edge_mount_raw.get("standoff_rib_count")
+        standoff_rib_count = int(rib_count_raw) if rib_count_raw is not None else None
         edge_mount = EdgeMountSpec(
             side=str(edge_mount_raw.get("side", "front")),
             label_enabled=bool(edge_mount_raw.get("label_enabled", False)),
@@ -2650,6 +2661,8 @@ def design_from_dict(
             label_raised=bool(edge_mount_raw.get("label_raised", False)),
             label_text_depth_mm=float(edge_mount_raw.get("label_text_depth_mm", TEXT_DEPTH)),
             label_flip=bool(edge_mount_raw.get("label_flip", False)),
+            standoff_ribs_enabled=standoff_ribs_enabled,
+            standoff_rib_count=standoff_rib_count,
             holes_enabled=bool(edge_mount_raw.get("holes_enabled", False)),
             hole_count=int(edge_mount_raw.get("hole_count", 2)),
             hole_orientation=str(edge_mount_raw.get("hole_orientation", "horizontal")),

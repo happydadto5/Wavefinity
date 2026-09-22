@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-22 — Edge Mount standoff ribs
+
+- Separate Edge Mount labels now add vertical standoff ribs to the bin body so the saddle clip and bin meet a flat mounting surface together. Auto spaces ribs across the chosen wall; older saved Separate labels keep ribs off until enabled.
+
 ## 2026-09-21 — Space design resume
 
 - Opening a typed Space (Drawer, Surface, Portable Storage, Pegboard) now reopens the exact bin or part last worked on there, including its name, size, label text, and interior layout - not a fresh starter.
