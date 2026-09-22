@@ -18,6 +18,7 @@ const state = {
   workingGeneratedKey: null,
   surfaceEdgeHandled: false,    // Surface first-run: edge done or deliberately skipped
   preview: null,
+  previewDesignKey: null,
   draftKind: "divider",
   draft: null,
   draftResolvedOptions: {},
@@ -410,7 +411,9 @@ async function designerSaveToSpace({ silent = false } = {}) {
 
 // Install a canonical design (from Load from Space) as the working Designer
 // design, replacing whatever is currently shown.
-async function installLoadedDesignSource(rowId, spec) {
+async function installLoadedDesignSource(rowId, spec, {
+  successMessage = "Loaded from Space.",
+} = {}) {
   if (!beginDesignMutation()) return;
   try {
     const result = await api("/api/design/validate", { design: spec });
@@ -431,7 +434,7 @@ async function installLoadedDesignSource(rowId, spec) {
     clearDraftSelection();
     activatePreviewView("3d");
     await refreshPreview();
-    toast("Loaded from Space.");
+    toast(successMessage);
   } catch (error) {
     toast(`Could not load that design: ${error.message}`, true, 6000);
   } finally {
@@ -439,15 +442,89 @@ async function installLoadedDesignSource(rowId, spec) {
   }
 }
 
+async function chooseDesignerSource(data, {
+  title = "Load from Space",
+  allowOther = false,
+  includeUnavailable = true,
+} = {}) {
+  const dialog = $("#designer-load-dialog");
+  const titleEl = $("#designer-load-title");
+  const list = $("#designer-load-list");
+  const otherBtn = $("#designer-load-other");
+  const cancelBtn = $("#designer-load-cancel");
+  if (!dialog || !titleEl || !list || !otherBtn || !cancelBtn) {
+    throw new Error("The Load from Space dialog is unavailable.");
+  }
+
+  titleEl.textContent = title;
+  otherBtn.hidden = !allowOther;
+  list.textContent = "";
+
+  const specs = data.layout?.design_specs || {};
+  const bins = (data.bins || []).filter(one => ["bin", "b4b"].includes(one.kind));
+  const visible = includeUnavailable
+    ? bins
+    : bins.filter(one => Boolean(specs[one.id]));
+
+  if (!visible.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = includeUnavailable
+      ? "This Space has no bins yet."
+      : "This Space has no saved editable bin designs.";
+    list.appendChild(empty);
+  }
+
+  let chosen = null;
+  visible.forEach(one => {
+    const spec = specs[one.id];
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "designer-load-row";
+    row.disabled = !spec;
+
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = one.name || `${fmt(one.x)} × ${fmt(one.y)}`;
+
+    const noteSpan = document.createElement("span");
+    noteSpan.className = "muted";
+    noteSpan.textContent = spec
+      ? `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`
+      : "Design settings not available";
+
+    row.append(nameSpan, noteSpan);
+    row.addEventListener("click", () => {
+      chosen = { id: one.id, spec };
+      if (dialog.open) dialog.close();
+    });
+    list.appendChild(row);
+  });
+
+  otherBtn.onclick = () => {
+    chosen = { other: true };
+    if (dialog.open) dialog.close();
+  };
+  cancelBtn.onclick = () => {
+    chosen = null;
+    if (dialog.open) dialog.close();
+  };
+
+  await new Promise(resolve => {
+    dialog.addEventListener("close", resolve, { once: true });
+    if (!dialog.open) dialog.showModal();
+  });
+
+  otherBtn.onclick = null;
+  cancelBtn.onclick = null;
+  return chosen;
+}
+
 // Load from Space (E2): a picker of this Space's bin/B4B rows that carry a
 // canonical design source. A no-spec/manual/legacy row is listed but
 // disabled, never reverse-engineered from a generated 3MF.
 async function designerLoadFromSpace() {
   if (state.folderMode !== "space" || typeof DL === "undefined") return;
-  const dialog = $("#designer-load-dialog");
-  const list = $("#designer-load-list");
-  const cancelBtn = $("#designer-load-cancel");
-  if (!dialog || !list || !cancelBtn) return;
+
   let data;
   try {
     data = await DL.inventoryCall("/api/drawer/load", {});
@@ -455,46 +532,91 @@ async function designerLoadFromSpace() {
     toast(`Could not read this Space's inventory: ${error.message}`, true, 6000);
     return;
   }
-  const bins = (data.bins || []).filter(one => ["bin", "b4b"].includes(one.kind));
-  const specs = (data.layout && data.layout.design_specs) || {};
-  list.textContent = "";
-  if (!bins.length) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = "This Space has no bins yet.";
-    list.appendChild(empty);
+
+  let chosen;
+  try {
+    chosen = await chooseDesignerSource(data, {
+      title: "Load from Space",
+      allowOther: true,
+      includeUnavailable: true,
+    });
+  } catch (error) {
+    toast(error.message, true, 6000);
+    return;
   }
-  let chosen = null;
-  bins.forEach(one => {
-    const spec = specs[one.id];
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "designer-load-row";
-    row.disabled = !spec;
-    const nameSpan = document.createElement("span");
-    nameSpan.textContent = one.name || `${fmt(one.x)} × ${fmt(one.y)}`;
-    const noteSpan = document.createElement("span");
-    noteSpan.className = "muted";
-    noteSpan.textContent = spec
-      ? `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`
-      : "Design settings not available";
-    row.append(nameSpan, noteSpan);
-    row.addEventListener("click", () => { chosen = { id: one.id, spec }; if (dialog.open) dialog.close(); });
-    list.appendChild(row);
-  });
-  cancelBtn.onclick = () => { if (dialog.open) dialog.close(); };
-  await new Promise(resolve => {
-    dialog.addEventListener("close", resolve, { once: true });
-    if (!dialog.open) dialog.showModal();
-  });
+
   if (!chosen) return;
+  if (chosen.other) {
+    await designerLoadFromAnotherSpace();
+    return;
+  }
+
   if (workingDesignForSpace() && !(await appConfirmAction({
     title: "Load a different bin?",
     message: "This replaces the bin you're currently editing. Save it to this Space first if you want to keep it.",
     actionLabel: "Load anyway",
     danger: true,
   }))) return;
+
   await installLoadedDesignSource(chosen.id, chosen.spec);
+}
+
+async function designerLoadFromAnotherSpace() {
+  if (typeof SP === "undefined") return;
+
+  const folder = await SP.pickFolder();
+  if (!folder) return;
+
+  try {
+    let info;
+    let data;
+    let sourceName;
+
+    if (state.runtime.hosted) {
+      info = await SP.inspectHosted(folder);
+      if (info.folder_mode !== "space" || info.needs_setup) {
+        throw new Error("Choose a fully configured Wavefinity Space.");
+      }
+      sourceName = info.space?.name || folder.name;
+      data = await api("/api/drawer/load", {
+        inventory_text: info.inventory_text || "",
+        inventory_title: sourceName,
+      });
+    } else {
+      const inspected = await api("/api/space/inspect", { output: folder });
+      info = inspected.folder;
+      if (info?.folder_mode !== "space" || info?.needs_setup) {
+        throw new Error("Choose a fully configured Wavefinity Space.");
+      }
+      sourceName = info.space?.name || info.folder_name || String(folder);
+      data = await api("/api/drawer/load", { output: folder });
+    }
+
+    const chosen = await chooseDesignerSource(data, {
+      title: `Load a copy from ${sourceName}`,
+      allowOther: false,
+      includeUnavailable: false,
+    });
+    if (!chosen) return;
+
+    if (workingDesignForSpace()) {
+      const saved = await designerSaveToSpace({ silent: true });
+      if (!saved) {
+        toast(
+          "Could not preserve your current bin, so Load from another Space was cancelled.",
+          true,
+          6000,
+        );
+        return;
+      }
+    }
+
+    await installLoadedDesignSource(null, clone(chosen.spec), {
+      successMessage: `Loaded a copy from ${sourceName}.`,
+    });
+  } catch (error) {
+    toast(`Could not load from that Space: ${error.message}`, true, 6000);
+  }
 }
 
 // New Bin (B1): a fresh product-appropriate starter. Meaningful current work
@@ -1113,6 +1235,147 @@ function sideOpeningPartActive(design = state.design) {
   return Boolean(design?.box?.side_openings?.enabled);
 }
 
+const MODIFIER_SIDE_TO_WALL = {
+  front: "-y",
+  back: "+y",
+  left: "-x",
+  right: "+x",
+};
+
+const MODIFIER_OPPOSITE_SIDE = {
+  front: "back",
+  back: "front",
+  left: "right",
+  right: "left",
+};
+
+const MODIFIER_SIDE_LABEL = {
+  front: "Front",
+  back: "Back",
+  left: "Left",
+  right: "Right",
+};
+
+function insideGripWalls(box) {
+  const grip = box?.lift_grabbers;
+  if (!grip?.enabled) return new Set();
+  if (grip.location === "sides") return new Set(["-x", "+x"]);
+  if (grip.location === "front_back") return new Set(["-y", "+y"]);
+  if (grip.location === "both") return new Set(["-x", "+x", "-y", "+y"]);
+  return new Set();
+}
+
+function rimLabelSideForDesign(design) {
+  if (!String(design?.label || "").trim()) return null;
+  const side = design?.label_position;
+  if (side === "top") return "back";
+  return SIDE_OPENING_SIDE_IDS.includes(side) ? side : null;
+}
+
+function modifierConflicts(design) {
+  const conflicts = [];
+  const box = design?.box || {};
+  const sideOpenings = sideOpeningState(design);
+  const openSides = sideOpenings.enabled
+    ? new Set(sideOpenings.sides || [])
+    : new Set();
+  const gripWalls = insideGripWalls(box);
+
+  for (const side of SIDE_OPENING_SIDE_IDS) {
+    if (!openSides.has(side)) continue;
+    if (gripWalls.has(MODIFIER_SIDE_TO_WALL[side])) {
+      conflicts.push({
+        key: `side-opening:inside-grip:${side}`,
+        message:
+          `The ${MODIFIER_SIDE_LABEL[side]} wall already has a Side Opening. ` +
+          "Move the Inside Grip to a different wall or remove that Side Opening.",
+      });
+    }
+  }
+
+  const edgeMount = box.edge_mount || {};
+  if ((edgeMount.label_enabled || edgeMount.holes_enabled) &&
+      openSides.has(edgeMount.side)) {
+    conflicts.push({
+      key: `side-opening:edge-mount:${edgeMount.side}`,
+      message:
+        `The ${MODIFIER_SIDE_LABEL[edgeMount.side]} wall already has a Side Opening. ` +
+        "Choose another Edge Mount wall or remove that Side Opening.",
+    });
+  }
+
+  const rimSide = rimLabelSideForDesign(design);
+  if (rimSide && openSides.has(rimSide)) {
+    conflicts.push({
+      key: `side-opening:rim-label:${rimSide}`,
+      message:
+        `The ${MODIFIER_SIDE_LABEL[rimSide]} wall already has a Side Opening. ` +
+        "Put the rim label on another wall or remove that Side Opening.",
+    });
+  }
+
+  if (edgeMount.holes_enabled) {
+    const side = SIDE_OPENING_SIDE_IDS.includes(edgeMount.side)
+      ? edgeMount.side
+      : "front";
+    const opposite = MODIFIER_OPPOSITE_SIDE[side];
+    const mountWall = MODIFIER_SIDE_TO_WALL[side];
+    const accessWall = MODIFIER_SIDE_TO_WALL[opposite];
+    if (gripWalls.has(mountWall) || gripWalls.has(accessWall)) {
+      conflicts.push({
+        key: `edge-mount-holes:inside-grip:${side}`,
+        message:
+          `Edge Mount screw access needs both the ${MODIFIER_SIDE_LABEL[side]} wall ` +
+          `and opposite ${MODIFIER_SIDE_LABEL[opposite]} wall clear of Inside Grips. ` +
+          "Move the Inside Grip, choose another Edge Mount wall, or turn off Screw Mounting.",
+      });
+    }
+  }
+
+  if (design?.scoop && gripWalls.has("-y")) {
+    const usableHeight = number(box.z) - number(box.base_thickness);
+    const scoopTop = number(box.base_thickness)
+      + usableHeight * number(state.catalog?.scoop_rules?.height_fraction, 0.6);
+    const selectedSize = box.lift_grabbers?.size || "medium";
+    const sizeRule = (state.catalog?.lift_grabbers?.sizes || [])
+      .find(one => one.value === selectedSize);
+    const grabberHeight = Number(sizeRule?.height_mm);
+    const rimClearance = Number(state.catalog?.lift_grabbers?.rim_clearance_mm);
+    if (Number.isFinite(grabberHeight) && Number.isFinite(rimClearance)) {
+      const grabberBottom = number(box.z) - rimClearance - grabberHeight;
+      if (scoopTop > grabberBottom) {
+        conflicts.push({
+          key: "scoop:inside-grip:front",
+          message:
+            "The front scoop rises into the front Inside Grip. Use side-only Inside Grip, " +
+            "choose a smaller grip that clears, make the bin taller, or turn off the scoop.",
+        });
+      }
+    }
+  }
+
+  return conflicts;
+}
+
+function newModifierConflict(previousDesign, nextDesign) {
+  const previousKeys = new Set(
+    modifierConflicts(previousDesign).map(conflict => conflict.key)
+  );
+  return modifierConflicts(nextDesign)
+    .find(conflict => !previousKeys.has(conflict.key)) || null;
+}
+
+function rejectModifierConflict(previousDesign, previousCanGenerate, conflict) {
+  state.design = previousDesign;
+  state.canGenerate = previousCanGenerate;
+  state.binResizePending = false;
+  state.binFootprintResizePending = false;
+  sideOpeningAdjustmentNote = "";
+  syncForm();
+  updateGenerateAvailability();
+  toast(conflict.message, true, 6000);
+}
+
 // Wall span a Side Opening's width is measured against - Front/Back run
 // along X, Left/Right run along Y. Mirrors organizer_side_openings.
 // side_opening_side_span() so the UI can filter eligibility client-side.
@@ -1125,16 +1388,15 @@ function sideOpeningEligibleSide(side, design = state.design) {
   const rules = state.catalog?.side_openings || {};
   const minSide = number(rules.min_side_mm, 16);
   if (sideOpeningSideSpan(side, design) < minSide - 1e-9) return false;
+
   const box = design?.box || {};
-  const handleLocation = box.lift_grabbers?.enabled ? box.lift_grabbers.location : null;
-  const handleSides = handleLocation === "both"
-    ? SIDE_OPENING_SIDE_IDS
-    : handleLocation === "sides" ? ["left", "right"]
-      : handleLocation === "front_back" ? ["front", "back"] : [];
-  if (handleSides.includes(side)) return false;
-  if ((box.edge_mount?.label_enabled || box.edge_mount?.holes_enabled)
-      && box.edge_mount.side === side) return false;
-  if (String(design?.label || "").trim() && design?.label_position === side) return false;
+  if (insideGripWalls(box).has(MODIFIER_SIDE_TO_WALL[side])) return false;
+
+  if ((box.edge_mount?.label_enabled || box.edge_mount?.holes_enabled) &&
+      box.edge_mount.side === side) return false;
+
+  if (rimLabelSideForDesign(design) === side) return false;
+
   return true;
 }
 
@@ -3143,8 +3405,16 @@ const applyChangedDesign = debounce(() => {
     return;
   }
   const previousDesign = pendingDesignHistory || clone(state.design);
+  const previousCanGenerate = state.canGenerate;
   pendingDesignHistory = null;
   updateDesignFromForm();
+
+  const conflict = newModifierConflict(previousDesign, state.design);
+  if (conflict) {
+    rejectModifierConflict(previousDesign, previousCanGenerate, conflict);
+    return;
+  }
+
   if (checkWall) maybeWarnSpaceWallMismatch(state.design.box.wall);
   recordHistory(previousDesign);
   // Re-fit contents-driven drafts after the bin changes. Arbitrarily sized
@@ -3716,7 +3986,15 @@ function wireControls() {
   });
   $("#scoop")?.addEventListener("change", () => {
     const previousDesign = clone(state.design);
+    const previousCanGenerate = state.canGenerate;
     updateDesignFromForm();
+
+    const conflict = newModifierConflict(previousDesign, state.design);
+    if (conflict) {
+      rejectModifierConflict(previousDesign, previousCanGenerate, conflict);
+      return;
+    }
+
     recordHistory(previousDesign);
     refreshPreview();
     if (state.draft) refreshDraft();
@@ -6430,6 +6708,11 @@ function keepCutBelowHeight(one, changedKey, gap = 2) {
 }
 
 function updateDraftFromFields(event) {
+  const previousConflictDesign = clone(state.design);
+  const previousDraftForConflict = clone(state.draft);
+  const previousDraftAutoCommit = state.draftAutoCommit;
+  const previousDraftTouched = state.draftTouched;
+  const previousCanGenerate = state.canGenerate;
   // Any deliberate edit is a strong enough signal to start saving this draft
   // as it goes, even if the app put it up on its own (see state.draftAutoCommit).
   state.draftAutoCommit = true;
@@ -6592,6 +6875,19 @@ function updateDraftFromFields(event) {
       }
     }
     syncRimLabelFromFeatures();
+    const conflict = newModifierConflict(previousConflictDesign, state.design);
+    if (conflict) {
+      state.design = previousConflictDesign;
+      state.draft = previousDraftForConflict;
+      state.draftAutoCommit = previousDraftAutoCommit;
+      state.draftTouched = previousDraftTouched;
+      state.canGenerate = previousCanGenerate;
+      syncForm();
+      renderDraftFields();
+      updateGenerateAvailability();
+      toast(conflict.message, true, 6000);
+      return;
+    }
   }
   // A Divider's bottom is one construction mode. Translate that visible choice
   // into its established saved options so older designs stay compatible.
@@ -7578,6 +7874,9 @@ async function refreshPreview({ persistResume = true } = {}) {
   beginPreviewWait(request);
   state.canGenerate = false;
   updateGenerateAvailability();
+  if (typeof SP !== "undefined" && SP.renderSpaceInfo) {
+    SP.renderSpaceInfo();
+  }
   $("#preview-state").textContent = "Building preview…";
   $("#preview-state").classList.remove("status-ok", "status-error");
   setError();
@@ -7599,6 +7898,7 @@ async function refreshPreview({ persistResume = true } = {}) {
     const grownZ = result.design?.box?.z !== state.design?.box?.z;
     state.preview = result;
     state.design = result.design;
+    state.previewDesignKey = JSON.stringify(result.design);
     updateDraftOverhangNote();
     checkBinSizeChange();
     // The Space shows the design being worked on as Current design.
@@ -7686,6 +7986,9 @@ async function refreshPreview({ persistResume = true } = {}) {
     updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
     updateAutoExpandButton();
     renderB4BReadout();
+    if (typeof SP !== "undefined" && SP.renderSpaceInfo) {
+      SP.renderSpaceInfo();
+    }
     renderBaseTrimReadout();
     applyStackVisibility();
     renderPreview3D();

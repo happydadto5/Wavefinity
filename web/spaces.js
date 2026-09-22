@@ -2398,7 +2398,27 @@ SP.renderSpaceInfo = () => {
         const outsideY = SP.surfaceOutsideFor(y, state.activeSpace.trim_size);
         actualText = `${fmt(outsideX)} × ${fmt(outsideY)} mm (${trim} trim)`;
         usableText = SP.fieldText(x, y);
-    } else if (kind === "portable" || kind === "box") {
+    } else if (kind === "portable") {
+        const previewCurrent = Boolean(
+            state.preview?.b4b &&
+            state.previewDesignKey &&
+            state.previewDesignKey === JSON.stringify(state.design)
+        );
+        const b4b = previewCurrent ? state.preview.b4b : null;
+        if (!b4b) {
+            actualText = "Calculating…";
+            usableText = "Calculating…";
+        } else {
+            const outer = b4b.assembled_envelope_mm;
+            const capacity = b4b.capacity_mm;
+            const units = b4b.capacity_units;
+            actualText = `${fmt(outer[0])} × ${fmt(outer[1])} × ${fmt(outer[2])} mm`;
+            usableText =
+                `${fmt(capacity[0])} × ${fmt(capacity[1])} mm ` +
+                `(${units[0]} × ${units[1]} units), max bin height ` +
+                `${fmt(b4b.max_child_height_mm)} mm`;
+        }
+    } else if (kind === "box") {
         const x = state.activeSpace.x;
         const y = state.activeSpace.y;
         const z = state.activeSpace.z;

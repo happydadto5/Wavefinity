@@ -76,6 +76,9 @@ from organizer_engine import (
     differing_connector_plan,
     differing_web_reach,
     lift_grabber_min_wall,
+    LIFT_GRABBER_DIMENSIONS,
+    LIFT_GRABBER_RIM_CLEARANCE,
+    SCOOP_HEIGHT_FRACTION,
     lid_enabled,
     make_top_label,
     make_top_label_ledge,
@@ -1019,21 +1022,29 @@ def catalog_payload() -> dict[str, Any]:
         "lift_grabbers": {
             "default_size": "medium",
             "default_location": "sides",
-            # Smallest wall thickness whose grabber root actually bites into
-            # the wall; below this, the browser bumps a newly-enabled
-            # grabber's wall up to the next preset that clears it.
             "min_wall_mm": round(lift_grabber_min_wall(), 3),
+            "rim_clearance_mm": LIFT_GRABBER_RIM_CLEARANCE,
             "sizes": [
-                {"value": "small", "label": "Small"},
-                {"value": "medium", "label": "Medium"},
-                {"value": "large", "label": "Large"},
-                {"value": "xl", "label": "XL"},
+                {
+                    "value": value,
+                    "label": label,
+                    "height_mm": LIFT_GRABBER_DIMENSIONS[value].height,
+                }
+                for value, label in (
+                    ("small", "Small"),
+                    ("medium", "Medium"),
+                    ("large", "Large"),
+                    ("xl", "XL"),
+                )
             ],
             "locations": [
                 {"value": "sides", "label": "Sides (left/right)"},
                 {"value": "front_back", "label": "Front/back"},
                 {"value": "both", "label": "Both"},
             ],
+        },
+        "scoop_rules": {
+            "height_fraction": SCOOP_HEIGHT_FRACTION,
         },
         "edge_mount": {
             "sides": [
