@@ -735,8 +735,8 @@ def _divider_grid_rim_texts(
         if side in ("top", "bottom"):
             edge = cell.zone.y1 if side == "top" else cell.zone.y0
             edge_axis = "x"
-            lo = cell.zone.x0 + DIVISION_SHELF_TEXT_MARGIN
-            hi = cell.zone.x1 - DIVISION_SHELF_TEXT_MARGIN
+            lo = cell.zone.x0
+            hi = cell.zone.x1
             inward = -1.0 if side == "top" else 1.0
             cx = (cell.zone.x0 + cell.zone.x1) / 2.0
             cy = edge + inward * depth_here / 2.0
@@ -744,15 +744,15 @@ def _divider_grid_rim_texts(
         else:
             edge = cell.zone.x0 if side == "left" else cell.zone.x1
             edge_axis = "y"
-            lo = cell.zone.y0 + DIVISION_SHELF_TEXT_MARGIN
-            hi = cell.zone.y1 - DIVISION_SHELF_TEXT_MARGIN
+            lo = cell.zone.y0
+            hi = cell.zone.y1
             inward = 1.0 if side == "left" else -1.0
             cx = edge + inward * depth_here / 2.0
             cy = (cell.zone.y0 + cell.zone.y1) / 2.0
             turn = 90.0 if side == "left" else -90.0
         if hi <= lo:
             continue
-        z_top = min(top_label_surface_z(box), base_z + height + depth_here)
+        z_top = base_z + height
         try:
             shelf = _division_shelf_solid(
                 edge, edge_axis, lo, hi, inward, z_top, depth_here,
@@ -856,13 +856,13 @@ def _division_side_shelves(
     for text, slot_lo, slot_hi, depth_here in picked:
         edge, edge_axis, span_lo, span_hi, inward = geom(slot_lo, slot_hi)
         if on_crest:
-            lo = span_lo + DIVISION_SHELF_TEXT_MARGIN
-            hi = span_hi - DIVISION_SHELF_TEXT_MARGIN
+            lo = span_lo
+            hi = span_hi
         else:
             # Weld the bridging ledge into the walls it spans between.
             lo = span_lo - thickness / 2.0
             hi = span_hi + thickness / 2.0
-        z_top = min(top_label_surface_z(box), base_z + height + depth_here)
+        z_top = base_z + height
         try:
             shelf = _division_shelf_solid(
                 edge, edge_axis, lo, hi, inward, z_top, depth_here, embed,

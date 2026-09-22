@@ -380,9 +380,43 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
     ctx.fillStyle = invalid ? "rgba(210,75,63,.72)" : entry.ghost ? "rgba(63,155,155,.55)" : "rgba(67,137,139,.86)";
     ctx.fill(); ctx.strokeStyle = DL.selected && entry.layers.some(layer => layer.key === DL.selected) ? "#ffb000" : "#244b4c"; ctx.lineWidth = 2; ctx.stroke();
     const [cx, cy] = cam.project([(entry.x0 + entry.x1) / 2, (entry.y0 + entry.y1) / 2, 0]);
-    ctx.fillStyle = "white"; ctx.font = "600 12px 'Segoe UI', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(DV.fitText(ctx, DL.label(one), Math.max(20, Math.abs(poly[1][0] - poly[0][0]) - 8)), cx, cy);
-    if (!entry.ghost) entry.layers.forEach(layer => hits.push({ key: layer.key, grid: true, z: 0, polys: [poly], working: Boolean(entry.working) }));
+    const info = DV.binLabelInfo(one, 1);
+    const boxW = Math.abs(poly[1][0] - poly[0][0]);
+    const boxH = Math.abs(poly[3][1] - poly[0][1]);
+    ctx.fillStyle = "white";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    if (boxH >= 40 && boxW >= 55) {
+      const fontSize = Math.min(12, boxW / Math.max(4, info.name.length * 0.55));
+      const subSize = Math.max(7.5, Math.min(9.5, fontSize * 0.8));
+      const lineGap = subSize * 1.25;
+      ctx.font = `700 ${fontSize}px 'Segoe UI', sans-serif`;
+      ctx.fillText(DV.fitText(ctx, info.name, boxW - 8), cx, cy - lineGap);
+      ctx.font = `500 ${subSize}px 'Segoe UI', sans-serif`;
+      ctx.fillText(DV.fitText(ctx, info.dimLine, boxW - 8), cx, cy);
+      ctx.fillText(DV.fitText(ctx, info.heightLine, boxW - 8), cx, cy + lineGap);
+    } else if (boxH >= 24 && boxW >= 40) {
+      const fontSize = Math.min(11, boxW / Math.max(4, info.name.length * 0.55));
+      const subSize = Math.max(7, Math.min(9, fontSize * 0.8));
+      const lineGap = subSize * 0.65;
+      ctx.font = `700 ${fontSize}px 'Segoe UI', sans-serif`;
+      ctx.fillText(DV.fitText(ctx, info.name, boxW - 8), cx, cy - lineGap);
+      ctx.font = `500 ${subSize}px 'Segoe UI', sans-serif`;
+      const compactDetail = `${fmt(one.x)}×${fmt(one.y)} · ${fmt(one.z)} mm`;
+      ctx.fillText(DV.fitText(ctx, compactDetail, boxW - 8), cx, cy + lineGap);
+    } else {
+      ctx.font = "600 11px 'Segoe UI', sans-serif";
+      ctx.fillText(DV.fitText(ctx, info.name, Math.max(20, boxW - 8)), cx, cy);
+    }
+    if (!entry.ghost || entry.working) {
+      entry.layers.forEach(layer => hits.push({
+        key: layer.key,
+        grid: true,
+        z: 0,
+        polys: [poly],
+        working: Boolean(entry.working),
+      }));
+    }
     const selected = entry.working || entry.layers.some(layer => layer.key === DL.selected);
     if (selected) {
       const layout = DL.pegboardLayouts[one.id] || one.pegboard_layout;
@@ -604,7 +638,28 @@ DV.paintScene = (ctx, drawer, cam) => {
   return hits;
 };
 
-// Name (or size) on the top of each column; a second line when there is room.
+// Unified label info helper for canvas, hover, and selection details.
+DV.binLabelInfo = (one, stackCount = 1) => {
+  const isEdgeSpacer = one.kind === "spacer" && one.boundary === "edge";
+  const rawName = String(one.name || "").trim();
+  const name = isEdgeSpacer ? "Spacer" : (rawName || "Unnamed bin");
+  const wMm = fmt(one.x);
+  const lMm = fmt(one.y);
+  const wUnits = DL.mmToUnits ? DL.mmToUnits(one.x) : fmt(Number(one.x) / DL.UNIT);
+  const lUnits = DL.mmToUnits ? DL.mmToUnits(one.y) : fmt(Number(one.y) / DL.UNIT);
+  const dimLine = `${wMm} × ${lMm} mm · ${wUnits} × ${lUnits} units`;
+  const heightLine = `${fmt(one.z)} mm high`;
+  const stackNote = stackCount > 1 ? ` · ${stackCount}-high stack` : "";
+  return {
+    name,
+    dimLine,
+    heightLine,
+    fullHeightLine: `${heightLine}${stackNote}`,
+    detailLine: `${dimLine} · ${heightLine}${stackNote}`,
+  };
+};
+
+// Name, Width × Length, Height on the top of each column; compact when small.
 DV.drawLabel = (ctx, entry, topFace, ink, planned) => {
   const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   const [p0, p1, p2, p3] = topFace;           // front-left, front-right, back-right, back-left
@@ -612,25 +667,45 @@ DV.drawLabel = (ctx, entry, topFace, ink, planned) => {
   const height = Math.hypot(...mid(p3, p2).map((v, i) => v - mid(p0, p1)[i]));
   const [cx, cy] = mid(mid(p0, p2), mid(p1, p3));
   const top = entry.layers[entry.layers.length - 1].bin;
-  const primary = top.kind === "spacer" && top.boundary === "edge" ? "Spacer" : DL.label(top);
-  const size = Math.min(14, height * 0.36, width / Math.max(3, primary.length * 0.56));
-  if (size < 7) return;
+  if (top.kind === "spacer" && top.boundary === "edge") {
+    const size = Math.min(14, height * 0.36, width / 4);
+    if (size < 7) return;
+    ctx.fillStyle = ink;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `650 ${size}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.fillText(DV.fitText(ctx, "Spacer", width - 6), cx, cy);
+    return;
+  }
+  const stackCount = entry.layers.length;
+  const info = DV.binLabelInfo(top, stackCount);
+  const size = Math.min(13, height * 0.28, width / Math.max(3, info.name.length * 0.55));
+  if (size < 6) return;
   ctx.fillStyle = planned ? "#0d5356" : ink;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = `650 ${size}px 'Segoe UI', system-ui, sans-serif`;
-  const twoLines = height > size * 2.7 && !(top.kind === "spacer" && top.boundary === "edge");
-  const y = cy - (twoLines ? size * 0.45 : 0);
-  ctx.fillText(DV.fitText(ctx, primary, width - 6), cx, y);
-  if (twoLines) {
-    const small = Math.max(7, size * 0.78);
-    ctx.font = `500 ${small}px 'Segoe UI', system-ui, sans-serif`;
-    const stackHeight = entry.layers[entry.layers.length - 1].z1;
-    const detail = entry.layers.length > 1
-      ? `${entry.layers.length}-high stack · ${fmt(stackHeight)} tall`
-      : planned ? `planned · ${fmt(top.z)} tall`
-        : top.name ? `${fmt(top.x)}×${fmt(top.y)} · ${fmt(top.z)} tall` : `${fmt(top.z)} mm tall`;
-    ctx.fillText(DV.fitText(ctx, detail, width - 6), cx, y + size * 1.05);
+
+  const can3Lines = height >= 38 && width >= 50;
+  const can2Lines = !can3Lines && height >= 24 && width >= 36;
+  if (can3Lines) {
+    const subSize = Math.max(7.5, Math.min(10, size * 0.82));
+    const lineGap = Math.max(9, size * 0.95);
+    ctx.font = `700 ${size}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.fillText(DV.fitText(ctx, info.name, width - 6), cx, cy - lineGap);
+    ctx.font = `500 ${subSize}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.fillText(DV.fitText(ctx, info.dimLine, width - 6), cx, cy);
+    ctx.fillText(DV.fitText(ctx, info.fullHeightLine, width - 6), cx, cy + lineGap);
+  } else if (can2Lines) {
+    const subSize = Math.max(7, Math.min(9, size * 0.8));
+    const lineGap = subSize * 0.65;
+    ctx.font = `700 ${size}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.fillText(DV.fitText(ctx, info.name, width - 6), cx, cy - lineGap);
+    ctx.font = `500 ${subSize}px 'Segoe UI', system-ui, sans-serif`;
+    const compactDetail = `${fmt(top.x)}×${fmt(top.y)} · ${fmt(top.z)} mm` + (stackCount > 1 ? ` (${stackCount}×)` : "");
+    ctx.fillText(DV.fitText(ctx, compactDetail, width - 6), cx, cy + lineGap);
+  } else {
+    ctx.font = `650 ${size}px 'Segoe UI', system-ui, sans-serif`;
+    ctx.fillText(DV.fitText(ctx, info.name, width - 6), cx, cy);
   }
 };
 
@@ -646,9 +721,10 @@ DV.renderSelection = () => {
   const planned = DL.isPlanned(p);
   const chain = DL.stackOf(DL.selected, found.drawer);
   const where = chain && chain.length > 1 ? ` · ${chain.findIndex(q => q === p) + 1} of ${chain.length} in a stack` : "";
+  const info = DV.binLabelInfo(one, chain?.length || 1);
   card.innerHTML = `
-    <strong>${escapeHtml(DL.label(one))}</strong>
-    <span>${escapeHtml(DL.sizeText(one))}${!planned && copies > 1 ? ` · copy ${(p.copy ?? 0) + 1} of ${copies}` : ""}</span>
+    <strong>${escapeHtml(info.name)}</strong>
+    <span>${escapeHtml(info.dimLine)} · ${escapeHtml(info.fullHeightLine)}${!planned && copies > 1 ? ` · copy ${(p.copy ?? 0) + 1} of ${copies}` : ""}</span>
     <span>${escapeHtml(DL.stackName(one.stack))}${where}</span>
     ${planned ? `<span class="dl-planned-note">Planned - not printed yet</span>` : ""}
     ${found.drawer !== DL.drawer() ? `<span>In ${escapeHtml(found.drawer.name)}</span>` : ""}
@@ -766,9 +842,9 @@ DV.wire = () => {
       const point = DV.cam.onPlane(sx, sy, drag.plane);
       if (!point) return;
       drag.moved = true;
-      const step = DL.grid().step;
-      drag.gx = drag.gx0 + Math.round((point[0] - drag.start[0]) / step);
-      drag.gy = drag.gy0 + Math.round((point[1] - drag.start[1]) / step);
+      const grid = DL.grid();
+      drag.gx = drag.gx0 + Math.round((point[0] - drag.start[0]) / grid.stepX);
+      drag.gy = drag.gy0 + Math.round((point[1] - drag.start[1]) / grid.stepY);
       // Off the drawer means off every bin too, so pointing at a tall stack
       // never counts as throwing a bin away.
       drag.outside = !DV.hitAt(sx, sy, drag.keys)
@@ -798,7 +874,9 @@ DV.wire = () => {
         DV.hover = key;
         const found = key && DL.findPlacement(key);
         const one = found && DL.bin(found.placement.bin);
-        canvas.title = one ? `${DL.label(one)} - ${DL.sizeText(one)}${DL.stackable(one) ? ` · ${DL.stackName(one.stack)}` : ""}${DL.isPlanned(found.placement) ? " (planned)" : ""}` : "";
+        const chain = found ? DL.stackOf(key, found.drawer) : null;
+        const info = one ? DV.binLabelInfo(one, chain?.length || 1) : null;
+        canvas.title = info ? `${info.name} — ${info.detailLine}${DL.isPlanned(found.placement) ? " (planned)" : ""}` : "";
         DV.paint();
       }
     }

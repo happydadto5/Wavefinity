@@ -243,6 +243,10 @@ def build_features(
         if is_text(one) and not include_text:
             continue
         solids.extend(made)
+        if include_text and one.kind == "divider":
+            for _label, text_solid, raised in divider_division_texts(box, one, base_z):
+                if not raised:
+                    solids.append(text_solid)
     return solids
 
 
