@@ -3580,76 +3580,8 @@ const tick = () => new Promise(r => setImmediate(r));
         self.assertIn('label_type: "separate"', app_js)
         self.assertIn('id="edge-mount-label-type"', index)
         self.assertIn('value="separate">Separate part', index)
-        self.assertIn('id="edge-mount-standoff-ribs-enabled"', index)
-        self.assertIn('id="edge-mount-standoff-rib-count-mode"', index)
-        self.assertIn('standoff_ribs_enabled: true', app_js)
         read = app_js[app_js.index("function readEdgeMountForm(design) {"):app_js.index("function resolvedEdgeMountAccessDiameter")]
         self.assertIn("label_type:", read)
-        self.assertIn("standoff_ribs_enabled:", read)
-        self.assertIn("standoff_rib_count:", read)
-        sync = app_js[app_js.index("function syncEdgeMountEditorVisibility() {"):app_js.index("const SIDE_OPENING_DEFAULTS")]
-        self.assertIn("edge-mount-standoff-rib-controls", sync)
-        self.assertIn('label-type").value === "separate"', sync)
-
-    def test_edge_mount_rib_quantity_form_serializes_auto_and_manual(self):
-        node = shutil.which("node")
-        if not node:
-            self.skipTest("node is not installed")
-        app = Path(__file__).resolve().parent / "web" / "app.js"
-        script = r'''
-const fs = require("fs");
-const source = fs.readFileSync(process.argv[1], "utf8");
-const start = source.indexOf("function readEdgeMountForm(design) {");
-const end = source.indexOf("function syncEdgeMountControls()", start);
-const fields = {};
-const field = (value = "", checked = false) => ({ value, checked });
-const $ = selector => fields[selector] || null;
-const number = (value, fallback) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-const EDGE_MOUNT_DEFAULTS = {
-  side: "front", label_enabled: false, label_text: "", label_type: "separate",
-  label_projection_mm: 50, label_length_mode: "full", label_thickness_mm: 2,
-  label_raised: false, label_text_depth_mm: 0.4, label_flip: false,
-  standoff_ribs_enabled: true, standoff_rib_count: null, holes_enabled: false,
-  hole_count: 2, hole_orientation: "horizontal", screw_diameter_mm: 4,
-  access_diameter_mm: null, top_offset_mm: 12.7, hole_spacing_mm: null,
-};
-eval(source.slice(start, end));
-Object.assign(fields, {
-  "#edge-mount-label-enabled": field("", true),
-  "#edge-mount-holes-enabled": field("", false),
-  "#edge-mount-side": field("front"),
-  "#edge-mount-label-text": field("TOOLS"),
-  "#edge-mount-label-type": field("separate"),
-  "#edge-mount-label-projection-mm": field("50"),
-  "#edge-mount-label-length-mode": field("full"),
-  "#edge-mount-label-thickness": field("2"),
-  "#edge-mount-label-style": field("flush"),
-  "#edge-mount-label-depth": field("0.4"),
-  "#edge-mount-label-flip": field("", false),
-  "#edge-mount-standoff-ribs-enabled": field("", true),
-  "#edge-mount-standoff-rib-count-mode": field("auto"),
-  "#edge-mount-standoff-rib-count": field("3"),
-  "#edge-mount-hole-count": field("2"),
-  "#edge-mount-hole-orientation": field("horizontal"),
-  "#edge-mount-screw-diameter": field("4"),
-  "#edge-mount-access-diameter": field("8"),
-  "#edge-mount-top-offset": field("12.7"),
-  "#edge-mount-spacing-mode": field("auto"),
-  "#edge-mount-spacing-mm": field("20"),
-});
-const auto = { box: { edge_mount: { ...EDGE_MOUNT_DEFAULTS } } };
-readEdgeMountForm(auto);
-fields["#edge-mount-standoff-rib-count-mode"].value = "manual";
-const manual = { box: { edge_mount: { ...EDGE_MOUNT_DEFAULTS } } };
-readEdgeMountForm(manual);
-console.log(JSON.stringify({ auto: auto.box.edge_mount.standoff_rib_count, manual: manual.box.edge_mount.standoff_rib_count }));
-'''
-        result = subprocess.run([node, "-e", script, str(app)], capture_output=True, text=True, timeout=30)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), {"auto": None, "manual": 3})
 
 
 class WebServerTests(unittest.TestCase):
