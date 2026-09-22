@@ -5,12 +5,25 @@ from __future__ import annotations
 import math
 from typing import Iterable
 
-from organizer_engine import BoxSpec, flat_cavity_polygon, wavy_cavity_polygon
+from dataclasses import replace
+
+from organizer_engine import (
+    GRID_PITCH,
+    MAX_BOX_SIZE,
+    MIN_BOX_SIZE,
+    WAVE_AMPLITUDE,
+    BoxSpec,
+    flat_cavity_polygon,
+    wavy_cavity_polygon,
+)
 
 from ._bore import (
+    ENVELOPE_STYLES,
     HEX_BIT_CLEARANCE,
     HEX_BIT_FLATS,
+    WALL_JOIN_FLAG,
     _is_hex_bit,
+    bore_envelope_zone,
     bore_tool_clearance_zone,
 )
 from ._core import MIN_FEATURE_GAP, Feature, Zone, _fit_count
@@ -53,6 +66,12 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
         # it; leave room for the rounding that puts them there.
         return Zone(one.zone.x0 - TEXT_ZONE_EPSILON, one.zone.y0 - TEXT_ZONE_EPSILON,
                     one.zone.x1 + TEXT_ZONE_EPSILON, one.zone.y1 + TEXT_ZONE_EPSILON)
+    if one.kind == "bore" and one.options.get(WALL_JOIN_FLAG):
+        # A Bore that may join the bin wall blends into it through the wall's
+        # wavy inner face - at most this far past its own zone.
+        reach = box.wall_depth + 2.0 * WAVE_AMPLITUDE
+        return Zone(one.zone.x0 - reach, one.zone.y0 - reach,
+                    one.zone.x1 + reach, one.zone.y1 + reach)
     if one.kind != "divider":
         return one.zone
     zone = one.zone
@@ -234,9 +253,11 @@ def feature_min_footprint(
                 if _is_hex_bit(item.profile) else item.held(item.widest))
         wall = float(options["wall"])
         from ._bore import bore_direction, bore_minimum_pitches, wall_only_envelope
-        if str(options.get("bore_style", "full_base")) == "wall_only":
+        style = str(options.get("bore_style", "full_base"))
+        if style in ENVELOPE_STYLES:
             env = wall_only_envelope(
-                item.profile, held, wall, str(options.get("wall_style", "wavy")))
+                item.profile, held, wall,
+                "wavy" if style == "wavy_base" else str(options.get("wall_style", "wavy")))
             raw_c, raw_r = one.options.get("columns"), one.options.get("rows")
             columns = max(1, int(round(float(raw_c)))) if raw_c is not None else 1
             rows = max(1, int(round(float(raw_r)))) if raw_r is not None else 1
@@ -334,8 +355,14 @@ def check_layout(
                 f"unknown holder {one.kind!r}; have "
                 f"{', '.join(sorted(FEATURE_BUILDERS))}"
             )
-        if (one.zone.x0 < whole.x0 - 1e-6 or one.zone.x1 > whole.x1 + 1e-6
-                or one.zone.y0 < whole.y0 - 1e-6 or one.zone.y1 > whole.y1 + 1e-6):
+        # A Wavy Base is judged on its real outer envelope: its zone is that
+        # envelope rounded up to the editor grid, and may overhang by less.
+        judged = one.zone
+        if mode == "fused" and one.kind == "bore" and str(
+                one.options.get("bore_style", "")) == "wavy_base":
+            judged = bore_envelope_zone(box, one, base_z) or one.zone
+        if (judged.x0 < whole.x0 - 1e-6 or judged.x1 > whole.x1 + 1e-6
+                or judged.y0 < whole.y0 - 1e-6 or judged.y1 > whole.y1 + 1e-6):
             raise ValueError(
                 f"a {one.kind} reaches outside the bin: its zone is "
                 f"{one.zone.width:.1f} x {one.zone.depth:.1f} mm at "
@@ -364,3 +391,55 @@ def check_layout(
                     f"a {one.kind} and a {other.kind} overlap; leave at least "
                     f"{MIN_FEATURE_GAP:g} mm between features"
                 )
+
+
+def wavy_base_bin_minimum(
+    box: BoxSpec, features: Iterable[Feature], base_z: float = 0.0,
+    mode: str = "fused",
+) -> tuple[float, float] | None:
+    """Smallest legal bin ``(x, y)`` whose usable floor holds every Wavy Base.
+
+    A Wavy Base sizes the bin around itself: each one is measured by its true
+    outer envelope (every row and column), kept exactly where it was placed, and
+    the bin - stepping on the normal 8 mm grid, exactly like any bin size - is
+    the smallest whose usable inside contains it. Saved Auto Base / Auto Grid
+    flags are dormant under Wavy Base and never change this. ``None`` when no
+    Wavy Base sizes the bin (none present, or a removable-insert layout).
+    """
+    if mode != "fused":
+        return None
+    need_x = need_y = 0.0
+    found = False
+    for one in features:
+        if one.kind != "bore" or str(one.options.get("bore_style", "")) != "wavy_base":
+            continue
+        envelope = bore_envelope_zone(box, one, base_z)
+        if envelope is None:
+            continue
+        found = True
+        need_x = max(need_x, 2.0 * max(abs(envelope.x0), abs(envelope.x1)))
+        need_y = max(need_y, 2.0 * max(abs(envelope.y0), abs(envelope.y1)))
+    if not found:
+        return None
+
+    def smallest(axis: str, need: float) -> float | None:
+        size = MIN_BOX_SIZE
+        while size <= MAX_BOX_SIZE + 1e-9:
+            try:
+                trial = replace(box, **{axis: float(size)})
+            except ValueError:
+                size += GRID_PITCH
+                continue
+            inside = trial.usable_inside[0 if axis == "x" else 1]
+            if inside >= need - 1e-6:
+                return float(size)
+            size += GRID_PITCH
+        return None
+
+    x, y = smallest("x", need_x), smallest("y", need_y)
+    if x is None or y is None:
+        raise ValueError(
+            "a Wavy Base needs a bin larger than Wavefinity's maximum "
+            f"{MAX_BOX_SIZE:g} mm; use fewer or smaller holes"
+        )
+    return x, y

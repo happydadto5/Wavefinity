@@ -19,6 +19,7 @@ MIN_FEATURE_GAP = 0.8      # material between two features
 CONNECTOR_EDGE_KEEP_OUT = 2.0  # interior strip kept low for connector arms
 EDITOR_SNAP = 1.0          # normal editor movement; effectively no floor loss
 CARTRIDGE_PITCH = 8.0      # optional interchangeable standalone-insert grid
+WAVY_BASE_ZONE_SLACK = 1.5  # a Wavy Base zone may overhang the floor this far
 LAYOUT_MODES = ("fused", "separate", "cartridge")
 
 
@@ -291,17 +292,34 @@ def layout_zone(box: BoxSpec, mode: str = "fused") -> Zone:
     return cartridge_zone(box) if mode == "cartridge" else Zone.whole(box)
 
 
+def zone_overhang(one: "Feature", mode: str) -> float:
+    """How far past the usable floor a Feature's snapped zone may sit.
+
+    A Wavy Base bin is sized to the Bore's true outer envelope, while its zone
+    is that envelope rounded up to the editor grid. The zone can therefore poke
+    a hair past the floor even though nothing physical does.
+    """
+    if (mode == "fused" and one.kind == "bore"
+            and str(one.options.get("bore_style", "")) == "wavy_base"):
+        return WAVY_BASE_ZONE_SLACK
+    return 0.0
+
+
 def snapped_zone(
     zone: Zone,
     box: BoxSpec,
     mode: str = "fused",
     snap: float = EDITOR_SNAP,
+    overhang: float = 0.0,
 ) -> Zone:
     """Snap a zone's centre and size, then clamp it inside the usable floor."""
     bounds = layout_zone(box, mode)
     pitch = CARTRIDGE_PITCH if mode == "cartridge" else snap
     width = max(pitch, snap_value(zone.width, pitch))
     depth = max(pitch, snap_value(zone.depth, pitch))
+    if overhang:
+        bounds = Zone(bounds.x0 - overhang, bounds.y0 - overhang,
+                      bounds.x1 + overhang, bounds.y1 + overhang)
     if width > bounds.width + 1e-9 or depth > bounds.depth + 1e-9:
         raise ValueError(
             f"{width:g} x {depth:g} mm does not fit in the "
@@ -336,7 +354,8 @@ def moved_feature(
     cx, cy = centre
     zone = Zone(cx - width / 2.0, cy - depth / 2.0,
                 cx + width / 2.0, cy + depth / 2.0)
-    return replace(one, zone=snapped_zone(zone, box, mode, snap))
+    return replace(one, zone=snapped_zone(
+        zone, box, mode, snap, zone_overhang(one, mode)))
 
 
 def resized_feature(
@@ -352,7 +371,8 @@ def resized_feature(
     cx, cy = one.zone.centre
     zone = Zone(cx - width / 2.0, cy - depth / 2.0,
                 cx + width / 2.0, cy + depth / 2.0)
-    return replace(one, zone=snapped_zone(zone, box, mode, snap))
+    return replace(one, zone=snapped_zone(
+        zone, box, mode, snap, zone_overhang(one, mode)))
 
 
 def _item_dict(item: Item | None) -> dict | None:

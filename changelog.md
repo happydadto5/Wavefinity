@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-21 — Bore Wavy Base and wall joining
+
+- Bore has a third style, **Wavy Base**: a solid raised base with wavy-walled holes. It sizes the bin to the smallest legal size around all its holes, keeping the holes where you placed them.
+- Wall Only and Wavy Base now blend into any bin wall they reach (both walls in a corner). The outside of the bin and the requested hole size never change. Older designs open unchanged.
+
 ## 2026-09-22 — Edge Mount printable screw holes (Fix 035A)
 
 - Edge Mount screw holes and their screwdriver-access passages now cut with a pointed, self-supporting roof instead of a flat-topped round roof, so they print without slicer supports. The full requested clearance diameter is preserved.

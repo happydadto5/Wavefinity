@@ -356,7 +356,16 @@ class WebApplicationTests(unittest.TestCase):
             self.assertIn(text, app_js)
         # Style words never go through the numeric option path.
         self.assertIn('"bore_style", "wall_style", "holder_style"', app_js)
-        self.assertIn('one.options.bore_style = get(changed) === "wall_only"', app_js)
+        self.assertIn('["wall_only", "wavy_base"].includes(chosen) ? chosen : "full_base"', app_js)
+        # Wavy Base is the third style and sizes the bin from the server's answer.
+        for text in ('["wavy_base", "Wavy Base"]', "result.wavy_base_bin"):
+            self.assertIn(text, app_js)
+        # Saved Auto Base / Auto Grid survive a trip through Wavy Base.
+        style_change = app_js[app_js.index('if (changed === "option:bore_style")'):]
+        style_change = style_change[:style_change.index('option:wall_style')]
+        self.assertNotIn("delete one.options.auto_base", style_change)
+        self.assertNotIn("delete one.options.auto_grid", style_change)
+        self.assertIn('if (opts.bore_style === "wavy_base") return false;', app_js)
         self.assertIn("one.options.angle = 0;", app_js)
         self.assertIn("delete one.options.angle_towards;", app_js)
         # Depth and lean controls disappear; wall uses the preset list.

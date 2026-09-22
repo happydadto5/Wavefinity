@@ -28,9 +28,13 @@ from organizer_engine import (
     translated,
     wall_depth_for,
     wavy_cavity_polygon,
+    wavy_outer_polygon,
 )
 import organizer_inserts as inserts
-from organizer_inserts._bore import _bore_grid, bore_minimum_pitches, wall_only_envelope
+from organizer_inserts._bore import (
+    JOIN_SKIN, _bore_grid, _round_clear_sides, _wall_only_shell_reach,
+    bore_envelope_zone, bore_minimum_pitches, wall_only_envelope,
+)
 from organizer_inserts import (
     EDITOR_SNAP,
     Feature,
@@ -46,6 +50,7 @@ from organizer_inserts import (
     layout_to_dict,
     make_fitted_insert,
     make_fused_box,
+    wavy_base_bin_minimum,
 )
 
 BIN = BoxSpec(128.0, 88.0, 40.0)
@@ -2786,6 +2791,144 @@ class BoreWallOnlyTests(unittest.TestCase):
         self.assertEqual(inserts.resolved_options(BIN, one, BIN.base_thickness)["columns"], 2.0)
         with self.assertRaises(ValueError):
             self._build(zone=tight, columns=2, rows=1)
+
+
+class BoreWavyBaseTests(unittest.TestCase):
+    """Fix 030: Wavy Base style, bin sizing, and automatic bin-wall joining."""
+
+    def _item(self, diameter=30.0):
+        return Item("tube", (Segment(25.0, diameter),), profile="round", clearance=0.0)
+
+    def _one(self, zone, style="wavy_base", diameter=30.0, **options):
+        options = {"bore_style": style, "height": 10.0, "wall": 1.6, **options}
+        if style == "wavy_base":
+            options.setdefault("depth", 6.0)
+        return Feature("bore", zone, self._item(diameter), options=options)
+
+    def _touching(self, size=40.0):
+        """A bin and a hole whose outer envelope exactly meets the usable floor."""
+        box = replace(BIN, x=size, y=size)
+        inside = box.usable_inside[0]
+        reach = _wall_only_shell_reach(1.6, "wavy")
+        clear = inside - 2.0 * reach
+        diameter = clear * math.cos(math.pi / _round_clear_sides(clear, "wavy"))
+        env = wall_only_envelope("round", diameter, 1.6, "wavy")
+        self.assertAlmostEqual(env["span_x"], inside, places=6)
+        return box, diameter, Zone.whole(box)
+
+    def test_wavy_base_is_a_solid_base_with_wavy_holes(self) -> None:
+        zone = Zone(-30.0, -30.0, 30.0, 30.0)
+        mesh = build_features(BIN, [self._one(zone)], BIN.base_thickness)[0]
+        env = wall_only_envelope("round", 30.0, 1.6, "wavy")
+        extent = mesh.bounds[1] - mesh.bounds[0]
+        self.assertTrue(mesh.is_watertight)
+        self.assertAlmostEqual(extent[0], env["span_x"], places=4)
+        self.assertAlmostEqual(extent[1], env["span_y"], places=4)
+        self.assertAlmostEqual(mesh.bounds[0][2], BIN.base_thickness, places=4)
+        self.assertAlmostEqual(mesh.bounds[1][2], BIN.base_thickness + 10.0, places=4)
+        radii = np.hypot(mesh.vertices[:, 0], mesh.vertices[:, 1])
+        self.assertGreaterEqual(radii[radii < 20.0].min(), 15.0 - 1e-6)   # opening stays open
+        self.assertLess(mesh.volume, extent[0] * extent[1] * 10.0)         # a hole was cut
+        self.assertGreater(mesh.volume, 0.5 * extent[0] * extent[1] * 10.0)  # but it is a block
+
+    def test_legacy_and_explicit_styles_are_unchanged(self) -> None:
+        self.assertEqual(inserts._bore.BORE_STYLES, ("full_base", "wall_only", "wavy_base"))
+        zone = Zone(-30.0, -30.0, 30.0, 30.0)
+        one = Feature("bore", zone, self._item())
+        self.assertEqual(
+            inserts.resolved_options(BIN, one, BIN.base_thickness)["bore_style"], "full_base")
+        wavy = self._one(zone, style="wavy_base", wall_style="straight")
+        # A stale Straight setting never reaches the geometry: Wavy Base is Wavy.
+        self.assertEqual(_bore_grid(BIN, wavy, BIN.base_thickness)["wall_style"], "wavy")
+
+    def test_bin_is_the_smallest_legal_size_around_the_whole_grid(self) -> None:
+        for columns, rows in ((1, 1), (3, 2)):
+            zone = Zone(-60.0, -50.0, 60.0, 50.0)
+            one = self._one(zone, columns=columns, rows=rows)
+            envelope = bore_envelope_zone(BIN, one, BIN.base_thickness)
+            env = wall_only_envelope("round", 30.0, 1.6, "wavy")
+            self.assertAlmostEqual(
+                envelope.width, env["span_x"] + (columns - 1) * env["pitch_x"], places=6)
+            x, y = wavy_base_bin_minimum(BIN, [one], BIN.base_thickness)
+            self.assertGreaterEqual(replace(BIN, x=x).usable_inside[0], envelope.width - 1e-6)
+            self.assertGreaterEqual(replace(BIN, y=y).usable_inside[1], envelope.depth - 1e-6)
+            if x > 8.0:
+                self.assertLess(replace(BIN, x=x - 8.0).usable_inside[0], envelope.width)
+            if y > 8.0:
+                self.assertLess(replace(BIN, y=y - 8.0).usable_inside[1], envelope.depth)
+
+    def test_bore_position_is_kept_and_bin_grows_around_it(self) -> None:
+        zone = Zone(-4.0, -30.0, 56.0, 30.0)
+        one = self._one(zone)
+        envelope = bore_envelope_zone(BIN, one, BIN.base_thickness)
+        self.assertAlmostEqual(envelope.centre[0], 26.0, places=6)
+        x, _y = wavy_base_bin_minimum(BIN, [one], BIN.base_thickness)
+        self.assertGreaterEqual(replace(BIN, x=x).usable_inside[0], 2.0 * envelope.x1 - 1e-6)
+        self.assertIsNone(wavy_base_bin_minimum(BIN, [self._one(zone, style="wall_only")]))
+        self.assertIsNone(wavy_base_bin_minimum(BIN, [one], BIN.base_thickness, "separate"))
+
+    def test_wavy_base_joins_every_wall_it_reaches_without_touching_the_outside(self) -> None:
+        box, diameter, whole = self._touching()
+        outer = wavy_outer_polygon(box).bounds
+        for style in ("wavy_base", "wall_only"):
+            one = self._one(whole, style=style, diameter=diameter)
+            mesh = build_features(box, [one], box.base_thickness)[0]
+            self.assertGreater(mesh.bounds[1][0], whole.x1 + 0.5, style)
+            self.assertLess(mesh.bounds[0][0], whole.x0 - 0.5, style)
+            if style == "wavy_base":
+                # A round wavy sleeve only touches where its wave peaks line up;
+                # the Base block itself touches every side.
+                self.assertGreater(mesh.bounds[1][1], whole.y1 + 0.5, style)
+                self.assertLess(mesh.bounds[0][1], whole.y0 - 0.5, style)
+            self.assertLessEqual(mesh.bounds[1][0], outer[2] - JOIN_SKIN + 1e-6, style)
+            self.assertGreaterEqual(mesh.bounds[0][0], outer[0] + JOIN_SKIN - 1e-6, style)
+            radii = np.hypot(mesh.vertices[:, 0], mesh.vertices[:, 1])
+            self.assertGreaterEqual(
+                radii[radii < diameter / 2.0 + 0.5].min(), diameter / 2.0 - 1e-6, style)
+
+    def test_a_single_wall_contact_joins_only_that_wall(self) -> None:
+        box, diameter, _ = self._touching()
+        box = replace(box, x=56.0)                             # room to spare in X
+        whole = Zone.whole(box)
+        span = wall_only_envelope("round", diameter, 1.6, "wavy")["span_x"]
+        zone = Zone(whole.x0, -20.0, whole.x0 + span, 20.0)   # only the low-X wall
+        mesh = build_features(box, [self._one(zone, diameter=diameter)], box.base_thickness)[0]
+        self.assertLess(mesh.bounds[0][0], whole.x0 - 0.5)
+        self.assertLessEqual(mesh.bounds[1][0], whole.x1 + 1e-6)
+
+    def test_removable_insert_never_claims_to_join_the_bin_wall(self) -> None:
+        box, diameter, whole = self._touching()
+        mesh = build_features(
+            box, [self._one(whole, diameter=diameter)],
+            box.base_thickness + inserts.BASE_PLATE, mode="separate")[0]
+        self.assertLessEqual(mesh.bounds[1][0], whole.x1 + 1e-5)
+        self.assertGreaterEqual(mesh.bounds[0][0], whole.x0 - 1e-5)
+
+    def test_saved_auto_modes_are_dormant_under_wavy_base_and_return_afterwards(self) -> None:
+        zone = Zone(-30.0, -30.0, 30.0, 30.0)
+        plain = self._one(zone)
+        auto = self._one(zone, auto_base=True, auto_grid=True, columns=1, rows=1)
+        # Dormant flags change neither the sizing nor the counts under Wavy Base.
+        self.assertEqual(
+            wavy_base_bin_minimum(BIN, [auto], BIN.base_thickness),
+            wavy_base_bin_minimum(BIN, [plain], BIN.base_thickness))
+        resolved = inserts.resolved_options(BIN, auto, BIN.base_thickness)
+        self.assertEqual((resolved["columns"], resolved["rows"]), (1, 1))
+        normalized = inserts.normalize_bore_auto(BIN, auto, BIN.base_thickness)
+        self.assertIs(normalized, auto)
+        self.assertEqual(normalized.zone, zone)
+        # Switching back to Full Base: the same stored flags are active again.
+        back = replace(auto, options={**auto.options, "bore_style": "full_base"})
+        self.assertTrue(back.options["auto_base"] and back.options["auto_grid"])
+        again = inserts.normalize_bore_auto(BIN, back, BIN.base_thickness)
+        self.assertEqual(again.zone, Zone.whole(BIN))
+        self.assertNotIn("columns", again.options)
+
+    def test_joined_bore_in_the_connector_band_is_a_clear_error(self) -> None:
+        box, diameter, whole = self._touching()
+        one = self._one(whole, diameter=diameter, height=box.z - 1.0, depth=8.0)
+        with self.assertRaisesRegex(ValueError, "touching the wall"):
+            build_features(box, [one], box.base_thickness)
 
 
 class BoreAutoModeTests(unittest.TestCase):
