@@ -1067,6 +1067,9 @@ function syncEdgeMountControls() {
   if ($("#edge-mount-standoff-rib-controls")) {
     $("#edge-mount-standoff-rib-controls").hidden = !edgeMount.label_enabled || edgeMount.label_type !== "separate";
   }
+  if ($("#edge-mount-integrated-support-warning")) {
+    $("#edge-mount-integrated-support-warning").hidden = !edgeMount.label_enabled || edgeMount.label_type !== "integrated";
+  }
   if ($("#edge-mount-hole-orientation-row")) $("#edge-mount-hole-orientation-row").hidden = number(edgeMount.hole_count) <= 1;
 }
 
@@ -1078,6 +1081,10 @@ function syncEdgeMountEditorVisibility() {
   $("#edge-mount-holes-panel").hidden = !$("#edge-mount-holes-enabled").checked;
   const separateLabel = $("#edge-mount-label-type").value === "separate";
   $("#edge-mount-standoff-rib-controls").hidden = !$("#edge-mount-label-enabled").checked || !separateLabel;
+  if ($("#edge-mount-integrated-support-warning")) {
+    $("#edge-mount-integrated-support-warning").hidden = !$("#edge-mount-label-enabled").checked
+      || $("#edge-mount-label-type").value !== "integrated";
+  }
   $("#edge-mount-standoff-rib-count-row").hidden = $("#edge-mount-standoff-rib-count-mode").value !== "manual";
   $("#edge-mount-label-thickness-custom-row").hidden = $("#edge-mount-label-thickness").value !== "custom";
   $("#edge-mount-spacing-custom-row").hidden = $("#edge-mount-spacing-mode").value !== "custom";

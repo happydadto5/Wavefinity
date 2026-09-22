@@ -37,7 +37,13 @@ from organizer_engine import (
     wavy_cavity_polygon,
     wavy_outer_polygon,
 )
-from organizer_geometry import _extrude_polygon, difference, union
+from organizer_geometry import (
+    _extrude_polygon,
+    _extrude_xz_profile,
+    _extrude_yz_profile,
+    difference,
+    union,
+)
 
 EDGE_MOUNT_SIDES = ("front", "back", "left", "right")
 
@@ -87,6 +93,8 @@ EDGE_HOLE_BETWEEN_CLEARANCE = 2.0
 
 EDGE_BOOLEAN_OVERTRAVEL = 0.5
 EDGE_BOOLEAN_EPSILON = 0.05
+
+EDGE_HOLE_PROFILE_SECTIONS = 64
 
 # Input ranges (validation/resource limits - never silently clamped).
 EDGE_LABEL_MIN_PROJECTION = 5.0
@@ -410,16 +418,25 @@ def edge_mount_hole_plan(box: BoxSpec) -> tuple[dict[str, float], ...]:
     access_d = _validate_hole_ranges(spec)
     _validate_lift_grabber_conflict(box, side)
     access_r = access_d / 2.0
+    # The access profile (pointed-roof, print-safe) always controls required
+    # room, since the access diameter is always >= the screw diameter; this
+    # is the actual cutter envelope validation is checked against, not the
+    # raw requested radius.
+    access_profile_r = _print_safe_profile_radius(access_r)
+    access_roof = _print_safe_hole_roof_rise(access_r)
+    access_profile_height = access_profile_r + access_roof
+    access_profile_width = 2.0 * access_profile_r
     count = spec.hole_count
     span = _wall_tangential_span(box, side)
     top_offset = spec.top_offset_mm
-    if top_offset < access_r + 1.0 - 1e-9:
+    if top_offset < access_roof + 1.0 - 1e-9:
         raise ValueError(
-            f"Distance below top must be at least {access_r + 1.0:.1f} mm for a "
+            f"Distance below top must be at least {access_roof + 1.0:.1f} mm for a "
             f"{access_d:g} mm screwdriver access hole. Increase it, or reduce the "
             "access diameter."
         )
-    min_spacing = access_d + EDGE_HOLE_BETWEEN_CLEARANCE
+    min_spacing_horizontal = access_profile_width + EDGE_HOLE_BETWEEN_CLEARANCE
+    min_spacing_vertical = access_profile_height + EDGE_HOLE_BETWEEN_CLEARANCE
     holes: list[dict[str, float]] = []
     if count == 1:
         holes.append({"tangent_mm": 0.0, "z_mm": box.z - top_offset})
@@ -428,13 +445,13 @@ def edge_mount_hole_plan(box: BoxSpec) -> tuple[dict[str, float], ...]:
         if spec.hole_spacing_mm is not None:
             spacing = spec.hole_spacing_mm
         else:
-            z_min = box.base_thickness + access_r + EDGE_HOLE_VERTICAL_CLEARANCE
+            z_min = box.base_thickness + access_profile_r + EDGE_HOLE_VERTICAL_CLEARANCE
             available_drop = z_first - z_min
             spacing = (
                 min(EDGE_HOLE_AUTO_MAX_SPACING, available_drop / (count - 1))
                 if available_drop > 0 else 0.0
             )
-        if spacing < min_spacing - 1e-9:
+        if spacing < min_spacing_vertical - 1e-9:
             raise ValueError(
                 f"{count} vertical {access_d:g} mm screwdriver access holes do not fit "
                 "with this distance below top. Reduce the hole count, increase the "
@@ -447,15 +464,15 @@ def edge_mount_hole_plan(box: BoxSpec) -> tuple[dict[str, float], ...]:
         if spec.hole_spacing_mm is not None:
             spacing = spec.hole_spacing_mm
         else:
-            edge_clearance = access_r + EDGE_HOLE_EDGE_CLEARANCE
+            edge_clearance = access_profile_r + EDGE_HOLE_EDGE_CLEARANCE
             available_span = span - 2.0 * edge_clearance
             spacing = (
                 min(EDGE_HOLE_AUTO_MAX_SPACING, available_span / (count - 1))
                 if available_span > 0 else 0.0
             )
-        if spacing < min_spacing - 1e-9:
+        if spacing < min_spacing_horizontal - 1e-9:
             raise ValueError(
-                f"Two {access_d:g} mm screwdriver access holes do not fit side by side "
+                f"{count} {access_d:g} mm screwdriver access holes do not fit side by side "
                 f"on this {span:g} mm wall. Use one screw, reduce the access "
                 "diameter, or use a larger bin."
             )
@@ -464,13 +481,13 @@ def edge_mount_hole_plan(box: BoxSpec) -> tuple[dict[str, float], ...]:
             holes.append({"tangent_mm": offset, "z_mm": z})
 
     max_tangent = max(abs(hole["tangent_mm"]) for hole in holes)
-    if max_tangent + access_r + 2.0 > span / 2.0 + 1e-9:
+    if max_tangent + access_profile_r + 2.0 > span / 2.0 + 1e-9:
         raise ValueError(
             f"The screw pattern is too wide for this {span:g} mm wall. Reduce "
             "the hole count, spacing, or access diameter."
         )
     min_z = min(hole["z_mm"] for hole in holes)
-    if min_z - box.base_thickness < access_r + EDGE_HOLE_VERTICAL_CLEARANCE - 1e-9:
+    if min_z - box.base_thickness < access_profile_r + EDGE_HOLE_VERTICAL_CLEARANCE - 1e-9:
         raise ValueError(
             "The screw pattern extends into the bin floor. Reduce the hole "
             "count, spacing, or distance below the top."
@@ -565,26 +582,76 @@ def _wall_surface_coords(
     return outer_hi, cavity_hi, cavity_lo, outer_lo
 
 
-def _axis_cylinder(
+def _print_safe_profile_radius(
+    requested_radius: float, sections: int = EDGE_HOLE_PROFILE_SECTIONS,
+) -> float:
+    """The faceted polygon radius that circumscribes ``requested_radius``.
+
+    A regular polygon whose vertices sit on the requested radius is
+    inscribed and slightly smaller than the true circle between vertices;
+    dividing by ``cos(pi / sections)`` makes the polygon circumscribe the
+    requested circle instead, so a round tool/screw of the requested
+    diameter is never pinched by mesh faceting.
+    """
+    return requested_radius / math.cos(math.pi / sections)
+
+
+def _print_safe_hole_roof_rise(
+    requested_radius: float, sections: int = EDGE_HOLE_PROFILE_SECTIONS,
+) -> float:
+    profile_r = _print_safe_profile_radius(requested_radius, sections)
+    return math.sqrt(2.0) * profile_r
+
+
+def _print_safe_hole_profile(
+    requested_radius: float, sections: int = EDGE_HOLE_PROFILE_SECTIONS,
+) -> Polygon:
+    """A round hole profile capped with a 45-degree pointed roof.
+
+    The circular clearance of ``requested_radius`` is fully preserved (the
+    faceted circle circumscribes it); only the upper boundary is replaced
+    with two 45-degree faces meeting at a +Z apex, so the cut prints without
+    horizontal-roof support.
+    """
+    profile_r = _print_safe_profile_radius(requested_radius, sections)
+    theta = np.linspace(0.0, 2.0 * math.pi, sections, endpoint=False)
+    circle = Polygon([
+        (profile_r * math.cos(t), profile_r * math.sin(t))
+        for t in theta
+    ])
+    tangent = profile_r / math.sqrt(2.0)
+    roof = Polygon([
+        (-tangent, tangent),
+        (tangent, tangent),
+        (0.0, math.sqrt(2.0) * profile_r),
+    ])
+    profile = circle.union(roof)
+    if not isinstance(profile, Polygon) or not profile.is_valid or profile.area <= 0.0:
+        raise ValueError("invalid Edge Mount print-safe hole profile")
+    return profile
+
+
+def _axis_print_safe_hole(
     axis: str, coord_a: float, coord_b: float, tangent: float, z: float,
-    radius: float, sections: int = 32,
+    radius: float,
 ) -> trimesh.Trimesh:
+    """A pointed-roof hole cutter swept along the wall-normal ``axis``.
+
+    The profile's apex always points toward +Z, independent of which wall
+    (Front/Back/Left/Right) it cuts.
+    """
     height = abs(coord_b - coord_a)
     if height <= 1e-6:
         raise ValueError("an Edge Mount hole cutter has no length")
     center = (coord_a + coord_b) / 2.0
-    cylinder = trimesh.creation.cylinder(radius=radius, height=height, sections=sections)
+    profile = translate_polygon(_print_safe_hole_profile(radius), xoff=tangent, yoff=z)
     if axis == "y":
-        cylinder.apply_transform(
-            trimesh.transformations.rotation_matrix(math.pi / 2.0, (1.0, 0.0, 0.0))
-        )
-        cylinder.apply_translation((tangent, center, z))
+        solid = _extrude_xz_profile(profile, height)
+        solid.apply_translation((0.0, center, 0.0))
     else:
-        cylinder.apply_transform(
-            trimesh.transformations.rotation_matrix(math.pi / 2.0, (0.0, 1.0, 0.0))
-        )
-        cylinder.apply_translation((center, tangent, z))
-    return cylinder
+        solid = _extrude_yz_profile(profile, height)
+        solid.apply_translation((center, 0.0, 0.0))
+    return solid
 
 
 def _hole_cutters(
@@ -604,10 +671,10 @@ def _hole_cutters(
         # flat contact plane, not merely through the original wall skin.
         screw_a = float(standoffs["contact_plane_mm"]) - sign * EDGE_BOOLEAN_OVERTRAVEL
     screw_b = cavity_sel + sign * EDGE_BOOLEAN_OVERTRAVEL
-    cutters = [_axis_cylinder(axis, screw_a, screw_b, tangent, z, screw_r)]
+    cutters = [_axis_print_safe_hole(axis, screw_a, screw_b, tangent, z, screw_r)]
     if cut_driver_passage:
         access_far = outer_opp + sign * EDGE_BOOLEAN_OVERTRAVEL
-        cutters.append(_axis_cylinder(axis, cavity_sel, access_far, tangent, z, access_r))
+        cutters.append(_axis_print_safe_hole(axis, cavity_sel, access_far, tangent, z, access_r))
     return cutters
 
 
