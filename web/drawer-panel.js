@@ -2,10 +2,9 @@
 
 // Drawer layout mode - the left panel and switching in and out of the mode.
 //
-// Order follows the rest of the app: what the drawer *is* first (its size and
-// fit), then the big action (Auto layout) with its options under it, then what
-// is left over (space, spacers, connectors), then the inventory you work from,
-// and the save controls pinned at the bottom.
+// Sidebar order follows the rest of the app: what the drawer *is* first (its
+// size and fit), then spacers, then the inventory you work from, with saving
+// pinned at the bottom. Auto layout lives on the preview.
 
 const DP = {
   built: false,
@@ -34,11 +33,30 @@ const dlChanged = (name, value) => {
 };
 const STACK_OPTIONS = `<option value="none">Not stackable</option><option value="lid">Snap-on lid</option><option value="direct">Direct snap</option>`;
 
+DP.singleTypedSpace = () => state.folderMode === "space"
+  && Boolean(state.activeSpace)
+  && Boolean(DL.layout)
+  && DL.layout.drawers.length === 1;
+
+DP.extraSpaceText = () => {
+  if (!DP.singleTypedSpace() || state.activeSpace?.kind !== "drawer") return "";
+  const drawer = DL.drawer();
+  if (!drawer) return "";
+  const grid = DL.grid(drawer);
+  if (!grid) return "";
+  const wall = DL.slack(drawer) / 2;
+  return [["left", grid.gapLeft], ["right", grid.gapRight], ["front", grid.gapFront], ["back", grid.gapBack]]
+    .map(([side, gap]) => [side, gap - wall])
+    .filter(([, play]) => Number.isFinite(play) && play >= 0.1)
+    .map(([side, play]) => `${play.toFixed(1)} mm (${side})`)
+    .join(", ");
+};
+
 DP.build = () => {
   if (DP.built) return;
   DP.built = true;
   $("#drawer-panel").innerHTML = `
-    <section class="dl-card" aria-label="Drawer">
+    <section id="dl-space-details-card" class="dl-card" aria-label="Drawer">
       <div class="dl-drawer-row">
         <label id="dl-drawer-label-row"><span id="dl-drawer-label">Drawer</span><select id="dl-drawer"></select></label>
         <button type="button" id="dl-drawer-add" class="button secondary dl-small" title="Add another drawer; it shares this inventory">+ Drawer</button>
@@ -56,32 +74,6 @@ DP.build = () => {
         </div>
         <button type="button" id="dl-drawer-delete" class="button danger dl-small">Delete this drawer</button>
       </details>
-    </section>
-
-    <section class="control-section open dl-section" aria-label="Auto layout">
-      <div class="section-heading no-toggle"><span>Auto layout</span></div>
-      <div class="section-body">
-        <button type="button" id="dl-auto" class="button primary wide dl-auto-button">Auto layout</button>
-        <div class="dl-options">
-          <label>Arrange<select id="dl-auto-mode">
-            <option value="rearrange">Everything not locked</option>
-            <option value="fill">Only new bins, around the rest</option>
-          </select></label>
-          <label>Tall bins<select id="dl-auto-height">
-            <option value="strict">Always behind shorter ones</option>
-            <option value="prefer">Behind shorter ones if they can</option>
-            <option value="ignore">Anywhere</option>
-          </select></label>
-          <label>Height check<select id="dl-auto-reach" title="Which bins in front count when keeping short bins out of sight">
-            <option value="column">Anything in front of it</option>
-            <option value="adjacent">Only the bin right in front</option>
-          </select></label>
-          <label class="checkbox-row" title="Snap stackable bins of the same size into stacks, as tall as the drawer takes"><span>Stack stackable bins</span><input id="dl-auto-stack" type="checkbox"></label>
-          <label class="checkbox-row"><span>Keep locked bins in place</span><input id="dl-auto-locked" type="checkbox"></label>
-          <label class="checkbox-row"><span>Include spacers</span><input id="dl-auto-spacers" type="checkbox"></label>
-        </div>
-        <div id="dl-candidates"></div>
-      </div>
     </section>
 
     <section class="control-section open dl-section" aria-label="Spacers">
@@ -155,8 +147,8 @@ DP.build = () => {
         <button type="button" id="dl-map" class="button secondary dl-small" title="Print a map of this drawer and where each bin goes (Ctrl+P)">Print map</button>
       </div>
     </section>`;
-  DP.wire();
   DV.buildOverlay();
+  DP.wire();
   // Hosted capability (Fix 019 Item 3) is recalculated on every render in
   // DP.renderStats() below, not only here - this first pass just avoids a
   // flash of enabled buttons before the first render.
@@ -258,11 +250,7 @@ DP.wire = () => {
     const card = event.target.closest("[data-candidate]");
     if (card) DL.applyCandidate(Number(card.dataset.candidate));
   });
-  $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", event => {
-    if (event.target.closest("#dl-design-spot")) DP.designSpot();
-  });
-  
-  
+
     $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
   $("#dl-sp-generate").addEventListener("click", () => DL.generateSelectedSpacers());
   $("#dl-sp-print").addEventListener("click", () => DP.openSpacerPrintDialog());
@@ -555,39 +543,6 @@ DP.focusManualAdd = () => {
 DP.isCanonicalDrawer = () => state.folderMode === "space" && ["drawer", "pegboard"].includes(state.activeSpace?.kind)
   && DL.layout.drawers.length === 1;
 
-// Send the largest empty spot to the bin editor as a new bin's size.
-DP.designSpot = () => {
-  const spot = DL.report?.opens?.[0];
-  if (!spot) return;
-  if (typeof b4bEnabled === "function" && b4bEnabled()) { toast("Set Bin type to Single bin first, then try again.", true); return; }
-  const drawer = DL.drawer();
-  const round8 = mm => Math.max(8, Math.floor(mm / 8) * 8);
-  const [x, y] = [round8(spot.w_mm), round8(spot.d_mm)];
-  const mode = stackMode();
-  const engagement = DL.stackSteps[mode] ?? 0;
-  const maxModuleHeight = drawer.height - engagement;
-  if (maxModuleHeight <= 0) {
-    toast(`This gap is too short: the ${fmt(engagement)} mm stacking foot alone is taller than ${drawer.name}'s ${fmt(drawer.height)} mm height. Switch to a single bin (no stacking) or pick a taller drawer.`, true, 8000);
-    return;
-  }
-  DP.setMode("design");
-  activatePreviewView("3d");
-  const previous = clone(state.design);
-  state.design.box.x = x;
-  state.design.box.y = y;
-  let heightNote = `Keep it ${fmt(drawer.height)} mm tall or less.`;
-  if (state.design.box.z > maxModuleHeight) state.design.box.z = Math.floor(maxModuleHeight);
-  if (engagement > 0) {
-    heightNote = `Keep module height at ${fmt(Math.floor(maxModuleHeight))} mm or less so the ${fmt(engagement)} mm stacking foot fits within this drawer's ${fmt(drawer.height)} mm height.`;
-  }
-  syncForm();
-  state.binResizePending = true;
-  state.canGenerate = false;
-  updateGenerateAvailability();
-  changedDesign(previous);
-  toast(`Bin set to ${fmt(x)} × ${fmt(y)} mm to fill the gap in ${drawer.name}. ${heightNote}`, false, 6000);
-};
-
 // Opens the grouped selection dialog before anything is sent to the slicer -
 // clicking Print Spacers… must never silently print every unprinted row.
 DP.openSpacerPrintDialog = () => {
@@ -638,7 +593,6 @@ DP.update = () => {
   DP.renderDrawer();
   DP.renderAuto();
   DP.renderStats();
-  DP.renderOpenSpaces();
   DP.renderTodo();
   DP.renderInventory();
   DP.renderSave();
@@ -657,8 +611,10 @@ DP.syncHistory = () => {
 DP.renderDrawer = () => {
   const drawer = DL.drawer();
   const pegboard = DL.isPegboard(drawer);
-  const autoSection = document.querySelector('#drawer-panel [aria-label="Auto layout"]');
+  const autoSection = $("#dl-auto-panel");
   const spacerSection = document.querySelector('#drawer-panel [aria-label="Spacers"]');
+  const detailsCard = $("#dl-space-details-card");
+  if (detailsCard) detailsCard.hidden = DP.singleTypedSpace();
   if (autoSection) autoSection.hidden = pegboard;
   if (spacerSection) spacerSection.hidden = pegboard;
   if ($("#dl-add-details")) $("#dl-add-details").hidden = pegboard;
@@ -796,6 +752,9 @@ DP.renderStats = () => {
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
   label("#dl-sp-plan", "Plan / Update Spacers", "Planning…", "spacers");
   label("#dl-sp-generate", "Generate Selected Spacers", "Generating…", "spacers");
+  const typedSpace = state.folderMode === "space" && Boolean(state.activeSpace);
+  const baseTrim = $("#dl-base-trim");
+  if (baseTrim) baseTrim.hidden = typedSpace && state.activeSpace.kind !== "surface";
   label("#dl-base-trim", "Make Base Trim", "Making Base Trim…", "base_trim");
   const printAll = $("#dl-print");
   if (printAll) printAll.disabled = busy;
@@ -851,34 +810,11 @@ DP.renderStats = () => {
   const report = DL.report;
   const warnings = DL.warnings.map(text => `<p class="dl-note dl-warning">${escapeHtml(text)}</p>`).join("");
   if (!report) { box.innerHTML = warnings || `<p class="dl-note">Measuring…</p>`; return; }
-  // Fill/empty/largest-gap/connector-count summaries used to live here; they
-  // were numbers nobody acted on. The two live open-space rectangles now show
-  // on the drawer view itself (DP.renderOpenSpaces), next to the layout they
-  // describe. Only actionable problems and warnings stay in this panel.
+  // Only actionable problems and warnings stay in this panel.
   const problems = report.problems;
   box.innerHTML = `
     ${problems.length ? `<ul class="dl-problems">${problems.slice(0, 8).map(p => `<li class="${p.type === "height" ? "height" : ""}">${escapeHtml(p.message)}</li>`).join("")}${problems.length > 8 ? `<li>…and ${problems.length - 8} more</li>` : ""}</ul>` : ""}
     ${warnings}`;
-};
-
-// The one or two biggest genuine bin-placement openings, shown right on the
-// drawer view (see the matching dashed outlines in DV.render) instead of as
-// a left-panel statistic. Always both mm and the user-facing 8 mm unit.
-DP.renderOpenSpaces = () => {
-  const box = $("#dl-open-spaces");
-  if (!box) return;
-  const opens = DL.report?.opens;
-  if (!opens) { box.innerHTML = ""; return; }
-  if (!opens.length) { box.innerHTML = `<p class="dl-note">No open space left for another bin.</p>`; return; }
-  const drawer = DL.drawer();
-  box.innerHTML = opens.map((spot, index) => {
-    const [wMm, dMm] = [spot.w_mm, spot.d_mm];
-    return `<div class="dl-open-spot">
-      <span>${index === 0 ? "Largest open space" : "Next open space"}</span>
-      <div>${fmt(wMm)} × ${fmt(dMm)} mm<small>${DL.mmToUnits(wMm)} × ${DL.mmToUnits(dMm)} units</small></div>
-      ${index === 0 ? `<button type="button" id="dl-design-spot" class="dl-link" title="Open the bin editor with this size">Design a Storage Box</button>` : ""}
-    </div>`;
-  }).join("");
 };
 
 // Bins placed before they were printed, across every drawer: the print list.

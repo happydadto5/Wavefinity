@@ -1061,7 +1061,7 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
 // Returns a real folder or null - never a pretend one. With stayOnSetup the
 // caller is mid-setup, so a refusal explains itself inline instead of
 // throwing the person's entered Space details away.
-SP.pickFolder = async ({ stayOnSetup = false } = {}) => {
+SP.pickFolder = async ({ stayOnSetup = false, spaceRoot = false } = {}) => {
   if (state.runtime.hosted) {
     if (!window.WFFileSystem?.supportsDirectoryPicker()) {
       if (stayOnSetup) {
@@ -1096,7 +1096,10 @@ SP.pickFolder = async ({ stayOnSetup = false } = {}) => {
     return { handle: picked.handle, name: picked.handle.name };
   }
 
-  const data = await api("/api/browse-output-folder", { current: state.output });
+  const data = await api("/api/browse-output-folder", {
+    current: state.output,
+    space_root: Boolean(spaceRoot),
+  });
   return data.folder || null;
 };
 
@@ -1973,7 +1976,7 @@ SP.enterSetupFor = (folder, data) => {
 };
 
 SP.openExisting = async () => {
-    const folder = await SP.pickFolder();
+    const folder = await SP.pickFolder({ spaceRoot: true });
     if (!folder) return;
     const data = state.runtime.hosted
         ? await SP.inspectHosted(folder)
@@ -2362,7 +2365,7 @@ SP.renderSpaceInfo = () => {
 
     const kind = state.activeSpace.kind;
     const kindLabel = SP_KINDS[kind]?.label || kind;
-    document.getElementById("space-head-type").textContent = kindLabel;
+    document.getElementById("space-head-type").textContent = ` - ${kindLabel}`;
 
     // Fix 034 J: the top Space summary is the single authoritative Actual
     // size / Usable interior readout - existing calculations only, never
@@ -2429,10 +2432,16 @@ SP.renderSpaceInfo = () => {
         actualText = `${fmt(state.activeSpace.x)} × ${fmt(state.activeSpace.y)} mm`;
         usableText = `${standard?.name || "Pegboard"}: ${state.activeSpace.pegboard_holes_x} × ${state.activeSpace.pegboard_holes_y} positions`;
     }
-    const actualEl = document.getElementById("space-head-actual");
-    const usableEl = document.getElementById("space-head-usable");
-    if (actualEl) actualEl.textContent = actualText ? `Actual size: ${actualText}` : "";
-    if (usableEl) usableEl.textContent = usableText ? `Usable interior: ${usableText}` : "";
+    const extraText = kind === "drawer" && typeof DP !== "undefined" && DP.extraSpaceText
+        ? DP.extraSpaceText()
+        : "";
+    const summary = [
+        actualText ? `Actual size: ${actualText}` : "",
+        usableText ? `Usable interior: ${usableText}` : "",
+        extraText ? `Extra space: ${extraText}` : "",
+    ].filter(Boolean).join(" · ");
+    const summaryEl = document.getElementById("space-head-summary");
+    if (summaryEl) summaryEl.textContent = summary;
 
     // New Space is offered for every typed Space, not only Drawer.
     const btnNew = document.getElementById("space-head-new-space");

@@ -160,8 +160,19 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-tilt-control input[type="range"] { width: 104px; margin: 0; accent-color: var(--teal); }
 .dl-tilt-control, .dl-empty-control { padding: 6px 10px; }
 .dl-empty-control input { margin: 0; accent-color: var(--teal); }
+.dl-right-stack {
+  position: absolute; top: 16px; right: 16px; z-index: 3; width: 320px;
+  max-width: calc(100% - 32px); max-height: calc(100% - 32px);
+  display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+  overscroll-behavior: contain; pointer-events: none;
+}
+.dl-auto-panel {
+  flex: 0 0 auto; padding: 10px; border: 1px solid var(--line-dark); border-radius: 10px;
+  background: rgba(255,255,255,.94); box-shadow: 0 3px 12px rgba(30,51,61,.1);
+  backdrop-filter: blur(6px); pointer-events: auto;
+}
 .dl-selection {
-  position: absolute; top: 16px; right: 16px; z-index: 3; width: min(250px, calc(100% - 32px));
+  position: static; flex: 0 0 auto; max-width: 100%; pointer-events: auto;
   padding: 10px 12px; border: 2px solid var(--teal); border-radius: 10px; background: rgba(243,250,249,.96);
   box-shadow: 0 6px 18px rgba(20,51,61,.14); display: flex; flex-direction: column; gap: 2px; font-size: 13px;
 }
@@ -172,18 +183,10 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
   padding: 6px; font-size: 12px; font-weight: 650; cursor: pointer;
 }
 .dl-selection-actions button:hover { background: var(--teal-soft); border-color: var(--teal); }
-
-.dl-open-spaces:empty { display: none; }
-.dl-open-spaces {
-  position: absolute; bottom: 16px; right: 16px; z-index: 2; width: min(220px, calc(100% - 32px));
-  padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.94);
-  box-shadow: 0 1px 4px rgba(0,0,0,.08); font-size: 12px; display: flex; flex-direction: column; gap: 8px;
-}
-.dl-open-spot { display: flex; flex-direction: column; gap: 2px; }
-.dl-open-spot > span { color: var(--muted); font-size: 11px; font-weight: 700; }
-.dl-open-spot > div { font-weight: 650; }
-.dl-open-spot small { display: block; color: var(--muted); font-size: 11px; font-weight: 500; }
-.dl-open-spot .dl-link { align-self: flex-start; margin-top: 2px; }
+.dl-auto-details { margin-top: 6px; }
+.dl-auto-details summary { color: var(--muted); font-size: 12px; font-weight: 650; cursor: pointer; }
+.dl-auto-panel .dl-options { grid-template-columns: 1fr; margin-top: 8px; }
+.dl-auto-panel #dl-candidates:empty { display: none; }
 
 /* First-run empty state over the drawer canvas. */
 .dl-empty-state[hidden] { display: none; }
@@ -215,13 +218,11 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
   margin: 10px 12px 0; padding: 12px 14px; background: var(--panel);
   border: 1px solid var(--line-dark); border-left: 3px solid var(--teal); border-radius: 11px;
 }
-.space-head-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
-/* The Space name is the strongest heading in the left panel - it is the
-   top-level context everything below (bin/part controls) is subordinate to. */
-.space-head-title strong { font-size: 24px; line-height: 1.1; font-weight: 800; color: var(--ink); overflow-wrap: anywhere; }
-.space-head-type {
-  font-size: 11px; font-weight: 700; color: var(--teal-dark); text-transform: uppercase; letter-spacing: .04em;
+.space-head-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0; }
+.space-head-title strong, .space-head-type {
+  font-size: 24px; line-height: 1.1; font-weight: 800; color: var(--ink); overflow-wrap: anywhere;
 }
+.space-head-type { text-transform: none; letter-spacing: normal; }
 .space-head-view .muted { margin-top: 3px; font-size: 12px; line-height: 1.4; }
 .space-head-view .button-row { margin-top: 8px; }
 .space-head-edit-host .space-form,
@@ -231,9 +232,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
   display: flex; align-items: center; gap: 8px; margin-top: 10px;
 }
 .space-mode-row[hidden] { display: none; }
-.space-mode-label {
-  font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap;
-}
 .space-mode-toggle {
   display: inline-flex; flex: 1; border: 1px solid var(--line-dark);
   border-radius: 8px; background: #eef5f4; overflow: hidden; margin: 0;
@@ -255,4 +253,11 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 }
 .space-mode-toggle button:focus-visible {
   outline: 2px solid var(--teal-dark); outline-offset: -2px; z-index: 1;
+}
+
+@media (max-width: 700px) {
+  .dl-right-stack {
+    top: 10px; right: 10px; width: 300px; max-width: calc(100% - 20px);
+    max-height: calc(100% - 20px);
+  }
 }

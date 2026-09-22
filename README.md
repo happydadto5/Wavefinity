@@ -94,10 +94,10 @@ remains available for a Storage Box Divider layout). **Space is a mode, not a
 panel**: it swaps the whole screen: the inventory and its tools take the sidebar, the
 drawer takes the workspace, and the bin editor's chrome (placed parts, the
 design file buttons) steps aside. Undo, Redo and Ctrl+Z act on the drawer while
-it is showing. Its sidebar keeps the same blast-radius order: the *drawer*
-card (size and fit) first, then *Auto layout* with its options directly under
-the button, then *Space & spacers*, then the *Inventory* you work from, with
-saving pinned to the bottom.
+it is showing. Space inventory and work controls occupy the sidebar; **Auto
+Layout** is a compact panel on the Space preview. The left mode switch reads
+**Space | Design**. In Design, the main build fields, **Parts & Options**, and
+**Connectors** appear in separate cards.
 
 **The drawer is seen through a camera looking into it.** It is a real 3D
 view: bins are boxes in perspective, showing their tops, their fronts and the

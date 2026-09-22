@@ -27,22 +27,19 @@
       <section id="space-head" class="space-head" aria-label="Space" hidden>
         <div id="space-head-view" class="space-head-view">
           <div class="space-head-title"><strong id="space-head-name"></strong><span id="space-head-type" class="space-head-type"></span></div>
-          <div id="space-head-actual" class="muted"></div>
-          <div id="space-head-usable" class="muted"></div>
-          <div id="space-head-remainder" class="muted" hidden></div>
+          <div id="space-head-summary" class="muted"></div>
           <div class="button-row">
-            <button id="space-head-open" class="button secondary dl-small" type="button">Open Space</button>
+            <button id="space-head-open" class="button secondary dl-small" type="button">Open</button>
             <button id="space-head-edit" class="button secondary dl-small" type="button">Edit</button>
             <button id="space-head-show" class="button secondary dl-small" type="button">Show Folder</button>
-            <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
+            <button id="space-head-new-space" class="button secondary dl-small" type="button">New</button>
           </div>
         </div>
         <div id="space-head-edit-host" class="space-head-edit-host" hidden></div>
         <div id="space-mode-row" class="space-mode-row">
-          <span class="space-mode-label">Work on:</span>
           <div id="space-mode-toggle" class="space-mode-toggle" role="tablist" aria-label="What the left panel edits" hidden>
             <button type="button" role="tab" data-space-mode="space" class="active" aria-selected="true" aria-pressed="true" tabindex="0" title="Work on the Space and its layout">Space</button>
-            <button type="button" role="tab" data-space-mode="design" aria-selected="false" aria-pressed="false" tabindex="-1" title="Work on the current bin or Storage Box">Designer</button>
+            <button type="button" role="tab" data-space-mode="design" aria-selected="false" aria-pressed="false" tabindex="-1" title="Work on the current bin or Storage Box">Design</button>
           </div>
         </div>
       </section>
@@ -199,6 +196,11 @@
             </div>
           </div>
 
+        </div>
+      </section>
+
+      <section class="control-section open" data-section="parts-options">
+        <div class="section-body">
           <div class="subheading-row">
             <div><h2>Parts &amp; options</h2></div>
             <span id="support-count" class="count-badge">0 added</span>

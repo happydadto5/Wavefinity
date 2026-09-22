@@ -498,9 +498,8 @@ DV.paintScene = (ctx, drawer, cam) => {
       shape(flat(grid.ox + c * step + inset, grid.oy + r * step + inset, grid.ox + (c + 1) * step - inset, grid.oy + (r + 1) * step - inset));
       ctx.fill();
     }
-    // Up to the two biggest genuine bin-placement openings the report found
-    // (see DP.renderOpenSpaces for their mm/unit read-out); the primary one
-    // also gets an on-canvas label.
+    // Keep the report's subtle open-space outlines and the primary on-canvas
+    // label in the preview.
     const opens = DL.report?.opens;
     if (opens && !DV.drag && DL.report.grid?.step === step) {
       opens.forEach((spot, index) => {
@@ -1059,8 +1058,34 @@ DV.buildOverlay = () => {
         <label class="canvas-select dl-empty-control">Empty cells <input id="dl-show-empty" type="checkbox"></label>
       </div>
     </div>
-    <div id="dl-selection" class="dl-selection" hidden></div>
-    <div id="dl-open-spaces" class="dl-open-spaces"></div>
+    <div class="dl-right-stack">
+      <section id="dl-auto-panel" class="dl-auto-panel" aria-label="Auto layout">
+        <button type="button" id="dl-auto" class="button primary wide dl-auto-button">Auto layout</button>
+        <details id="dl-auto-details" class="dl-auto-details">
+          <summary>Auto layout options</summary>
+          <div class="dl-options">
+            <label>Arrange<select id="dl-auto-mode">
+              <option value="rearrange">Everything not locked</option>
+              <option value="fill">Only new bins, around the rest</option>
+            </select></label>
+            <label>Tall bins<select id="dl-auto-height">
+              <option value="strict">Always behind shorter ones</option>
+              <option value="prefer">Behind shorter ones if they can</option>
+              <option value="ignore">Anywhere</option>
+            </select></label>
+            <label>Height check<select id="dl-auto-reach" title="Which bins in front count when keeping short bins out of sight">
+              <option value="column">Anything in front of it</option>
+              <option value="adjacent">Only the bin right in front</option>
+            </select></label>
+            <label class="checkbox-row" title="Snap stackable bins of the same size into stacks, as tall as the drawer takes"><span>Stack stackable bins</span><input id="dl-auto-stack" type="checkbox"></label>
+            <label class="checkbox-row"><span>Keep locked bins in place</span><input id="dl-auto-locked" type="checkbox"></label>
+            <label class="checkbox-row"><span>Include spacers</span><input id="dl-auto-spacers" type="checkbox"></label>
+          </div>
+        </details>
+        <div id="dl-candidates"></div>
+      </section>
+      <div id="dl-selection" class="dl-selection" hidden></div>
+    </div>
     <div id="dl-empty-state" class="dl-empty-state" hidden></div>
     <div class="layout-hint dl-hint">Drag bins to move · drop on a same-size stackable bin to stack · drag off the drawer to take out · drag the floor to pan · wheel zooms · L locks · Del removes</div>`);
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {

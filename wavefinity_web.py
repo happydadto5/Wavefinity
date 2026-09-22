@@ -1404,8 +1404,12 @@ def browse_output_folder_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if HOSTED:
         raise ValueError("Choose a folder in your browser instead.")
     try:
+        space_root = bool(payload.get("space_root"))
+        spaces_root = (Path.home() / "Documents" / "Wavefinity").resolve()
+        if space_root:
+            spaces_root.mkdir(parents=True, exist_ok=True)
         current = Path(str(payload.get("current") or DEFAULT_OUTPUT)).expanduser()
-        initial = current if current.is_dir() else DEFAULT_OUTPUT
+        initial = spaces_root if space_root else (current if current.is_dir() else DEFAULT_OUTPUT)
         script = f"""
 import tkinter as tk
 from tkinter import filedialog

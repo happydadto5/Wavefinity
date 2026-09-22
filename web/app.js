@@ -2328,13 +2328,13 @@ function applyBaseTrimVisibility() {
   hide("#base-trim-panel", !on);
   hide("#ordinary-size-row", on);
   hide(".mode-and-bin-options", on);
-  hide(".subheading-row", on);
+  const partsSection = document.querySelector('.control-section[data-section="parts-options"]');
+  if (partsSection) partsSection.hidden = on;
   if (on) {
     hide("#lid-option", true);
     hide("#inside-handles-option", true);
     hide("#side-openings-option", true);
   }
-  hide(".palette-wrap", on);
   if (on) hide(".support-editor", true);
   const connectorSection = document.querySelector('.control-section[data-section="connector"]');
   if (connectorSection) connectorSection.hidden = on;
