@@ -449,7 +449,7 @@ def _write(path: Path, bins: list[dict[str, Any]], layout: dict | None, legacy: 
 
 
 def _prune_layout(layout: dict | None, bins: list[dict[str, Any]]) -> dict | None:
-    """Drop placements whose bin row is gone.
+    """Drop placements and design sources whose bin row is gone.
 
     A copy numbered past the printed Qty stays: it is a *planned* bin, placed
     before it is printed.  A bin stacked on a dropped one takes its place, so a
@@ -471,7 +471,111 @@ def _prune_layout(layout: dict | None, bins: list[dict[str, Any]]) -> dict | Non
                         if field in gone:
                             above[field] = gone[field]
         drawer["placements"] = [one for one in placements if one.get("bin") in known]
+    specs = layout.get("design_specs")
+    if isinstance(specs, dict):
+        pruned = {row_id: spec for row_id, spec in specs.items() if row_id in known}
+        if len(pruned) != len(specs):
+            layout["design_specs"] = pruned
     return layout
+
+
+def update_bin_file(output_dir: Path | str, row_id: str, file_text: str) -> dict[str, Any]:
+    """Set one row's File cell directly, outside the normal hand-editable fields.
+
+    Used only when Generate/Print resolves a spec-only row's files on demand
+    (Fix 034 F2): the row keeps its Qty 0 until the slicer handoff succeeds,
+    but the generated file names are persisted immediately so a retry does
+    not regenerate needlessly.
+    """
+    with INVENTORY_LOCK:
+        path = resolve_inventory_path(output_dir, migrate=True)
+        current = _read(path)
+        bins = current["bins"]
+        target = next((one for one in bins if one["id"] == row_id), None)
+        if target is None:
+            raise ValueError(f"no bin {row_id!r} in the inventory")
+        target["file"] = file_text
+        _write(path, bins, current["layout"], current["legacy"])
+        return _payload(path, _read(path))
+
+
+def design_specs(layout: dict[str, Any] | None) -> dict[str, Any]:
+    """The saved canonical design source per Inventory row ID, else empty."""
+    specs = layout.get("design_specs") if isinstance(layout, dict) else None
+    return specs if isinstance(specs, dict) else {}
+
+
+def save_design_source(
+    output_dir: Path | str, *, design: dict[str, Any], record: dict[str, Any], row_id: str | None = None,
+) -> dict[str, Any]:
+    """Atomically create/update one canonical design source row + its ``design_specs`` entry.
+
+    ``record`` is the caller-derived Inventory row fields (already validated
+    server-side) for the design being saved; ``design`` is the exact canonical
+    design JSON to store as that row's editable source. ``row_id`` updates that
+    existing row in place only while it is still Qty 0 - an immutable Qty>0
+    printed row instead forks a new Qty-0 row, so printed history is never
+    silently redefined underneath. Returns the fresh inventory/layout payload
+    plus the ``row_id`` actually used.
+    """
+    with INVENTORY_LOCK:
+        path = resolve_inventory_path(output_dir, migrate=True)
+        current = _read(path)
+        bins, layout, used_id = _merge_design_source(current, design=design, record=record, row_id=row_id)
+        _write(path, bins, layout, current["legacy"])
+        return {**_payload(path, _read(path)), "row_id": used_id}
+
+
+def save_design_source_text(
+    text: str, *, title: str = "Wavefinity", design: dict[str, Any], record: dict[str, Any],
+    row_id: str | None = None,
+) -> dict[str, Any]:
+    """Merge changes into browser-owned text and return replacement text, per ``save_design_source``."""
+    raw = str(text or "")
+    with INVENTORY_LOCK:
+        current = parse_inventory(raw)
+        bins, layout, used_id = _merge_design_source(current, design=design, record=record, row_id=row_id)
+        rendered = render_inventory(str(title or "Wavefinity"), bins, layout)
+        return {**_text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered)), "row_id": used_id}
+
+
+def _merge_design_source(
+    current: dict[str, Any], *, design: dict[str, Any], record: dict[str, Any], row_id: str | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    bins = current["bins"]
+    by_id = {one["id"]: one for one in bins}
+    target = by_id.get(row_id) if row_id else None
+    row_fields = {
+        "kind": record.get("kind", "bin"),
+        "name": record.get("name", ""),
+        "x": float(record["x"]), "y": float(record["y"]), "z": float(record["z"]),
+        "stack": record.get("stack", "none"),
+        "wall": record.get("wall"),
+        "label": record.get("label", ""),
+        "interior": record.get("interior", ""),
+        "pegboard_standard": record.get("pegboard_standard", ""),
+        "cleat_x": record.get("cleat_x", "auto"),
+        "cleat_y": record.get("cleat_y", "auto"),
+    }
+    if target is not None and int(target.get("qty") or 0) == 0:
+        target.update(row_fields)
+        if record.get("clear_file"):
+            target["file"] = ""
+        used_id = target["id"]
+    else:
+        used_id = next_bin_id(bins)
+        bins.append({
+            "id": used_id,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "boundary": "",
+            "qty": 0,
+            "file": "",
+            **row_fields,
+        })
+    layout = current["layout"] if isinstance(current["layout"], dict) else {}
+    layout = {**layout, "design_specs": {**design_specs(layout), used_id: design}}
+    layout = _prune_layout(layout, bins)
+    return bins, layout, used_id
 
 
 def _payload(path: Path, data: dict[str, Any]) -> dict[str, Any]:
@@ -636,11 +740,15 @@ def append_bin(
     pegboard_standard: str = "",
     cleat_x: str | int = "auto",
     cleat_y: str | int = "auto",
+    design_spec: dict[str, Any] | None = None,
 ) -> Path:
     """Log one generated bin as a new row, keeping everything else intact.
 
     An omitted ``qty`` means generated but not printed: 0. A real print path
-    must pass ``qty=1`` (or another explicit physical count).
+    must pass ``qty=1`` (or another explicit physical count). A generate call
+    that also has the canonical design (Fix 034's Generate/Print source
+    preservation) passes ``design_spec`` so the new row's editable source is
+    written atomically alongside the row itself.
     """
     with INVENTORY_LOCK:
         path = resolve_inventory_path(output_dir, migrate=True)
@@ -648,8 +756,9 @@ def append_bin(
         bins = current["bins"]
         if qty is None:
             qty = DEFAULT_NEW_BIN_QTY
+        new_id = next_bin_id(bins)
         bins.append({
-            "id": next_bin_id(bins),
+            "id": new_id,
             "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "kind": kind if kind in KINDS else "bin",
             "name": name,
@@ -664,7 +773,11 @@ def append_bin(
             "cleat_x": str(cleat_x or "auto").lower(),
             "cleat_y": str(cleat_y or "auto").lower(),
         })
-        _write(path, bins, current["layout"], current["legacy"])
+        layout = current["layout"]
+        if design_spec is not None:
+            layout = layout if isinstance(layout, dict) else {}
+            layout = {**layout, "design_specs": {**design_specs(layout), new_id: design_spec}}
+        _write(path, bins, layout, current["legacy"])
     return path
 
 
