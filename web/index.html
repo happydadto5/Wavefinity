@@ -321,6 +321,19 @@
                       <option value="integrated">Integrated</option>
                     </select>
                   </label>
+                  <div id="edge-mount-standoff-rib-controls" class="field-grid three" style="grid-column: 1 / -1" hidden>
+                    <label class="checkbox-row"><span>Standoff Ribs</span><input id="edge-mount-standoff-ribs-enabled" type="checkbox"></label>
+                    <label class="inline-select">Quantity
+                      <select id="edge-mount-standoff-rib-count-mode">
+                        <option value="auto">Auto</option>
+                        <option value="manual">Manual</option>
+                      </select>
+                    </label>
+                    <label id="edge-mount-standoff-rib-count-row" hidden>Ribs
+                      <input id="edge-mount-standoff-rib-count" type="number" min="1" max="20" step="1">
+                    </label>
+                    <p class="inline-help" style="grid-column: 1 / -1">Keeps the bin flat against the mounting surface when using a Separate label.</p>
+                  </div>
                   <label style="grid-column:1 / span 2">Label text
                     <input id="edge-mount-label-text" type="text" maxlength="40" placeholder="e.g. PRUNER">
                   </label>
