@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import contextlib
 from dataclasses import replace
 import io
@@ -3025,33 +3024,18 @@ class SideOpeningTests(unittest.TestCase):
 class EdgeMountTests(unittest.TestCase):
     def test_label_type_migrates_and_separate_clip_is_watertight(self) -> None:
         self.assertEqual(EdgeMountSpec().label_type, "separate")
-        self.assertTrue(EdgeMountSpec().standoff_ribs_enabled)
-        self.assertIsNone(EdgeMountSpec().standoff_rib_count)
         box = BoxSpec(48.0, 56.0, 40.0, edge_mount=EdgeMountSpec(label_enabled=True, label_text="TOOLS"))
         saved = organizer_app.design_to_dict(box, organizer_app.Layout())
         self.assertEqual(saved["box"]["edge_mount"]["label_type"], "separate")
-        self.assertTrue(saved["box"]["edge_mount"]["standoff_ribs_enabled"])
-        self.assertIsNone(saved["box"]["edge_mount"]["standoff_rib_count"])
-        legacy_separate = copy.deepcopy(saved)
-        del legacy_separate["box"]["edge_mount"]["standoff_ribs_enabled"]
-        del legacy_separate["box"]["edge_mount"]["standoff_rib_count"]
-        loaded_legacy, *_ = organizer_app.design_from_dict(legacy_separate)
-        self.assertFalse(loaded_legacy.edge_mount.standoff_ribs_enabled)
         del saved["box"]["edge_mount"]["label_type"]
         loaded, *_ = organizer_app.design_from_dict(saved)
         self.assertEqual(loaded.edge_mount.label_type, "integrated")
-        self.assertTrue(loaded.edge_mount.standoff_ribs_enabled)
         label = organizer_edge_mount.make_edge_mount_label_part(box)
         self.assertTrue(label.is_watertight)
         self.assertEqual(len(label.split()), 1)
 
     def test_separate_label_is_not_fused_and_exports_separately(self) -> None:
-        box = BoxSpec(
-            48.0, 48.0, 40.0,
-            edge_mount=EdgeMountSpec(
-                label_enabled=True, label_text="TOOLS", standoff_ribs_enabled=False,
-            ),
-        )
+        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(label_enabled=True, label_text="TOOLS"))
         bare = organizer_engine.make_box(box)
         self.assertAlmostEqual(
             organizer_edge_mount.apply_edge_mount_structure(box, bare).volume, bare.volume, places=4
@@ -3059,79 +3043,6 @@ class EdgeMountTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             result = organizer_app.generate_organizer_files(box, organizer_app.Layout(), Path(directory))
         self.assertTrue(result["edge_mount_label"]["mesh"]["watertight"])
-
-    def test_standoff_ribs_follow_all_walls_and_auto_spacing(self) -> None:
-        for side in ("front", "back", "left", "right"):
-            box = BoxSpec(
-                48.0, 56.0, 40.0,
-                edge_mount=EdgeMountSpec(side=side, label_enabled=True, label_text="A"),
-            )
-            plan = organizer_edge_mount.edge_mount_standoff_plan(box)
-            self.assertIsNotNone(plan)
-            self.assertGreaterEqual(plan["count"], 2, side)
-            self.assertAlmostEqual(
-                plan["z1_mm"],
-                box.z - organizer_edge_mount.EDGE_LABEL_CLIP_DEPTH_MM
-                - organizer_edge_mount.EDGE_STANDOFF_CLIP_GAP_MM,
-            )
-            self.assertGreaterEqual(
-                plan["base_half_mm"] - plan["contact_width_mm"] / 2.0,
-                plan["max_outward_depth_mm"],
-            )
-            outer = organizer_engine.wavy_outer_polygon(box).bounds
-            expected = {
-                "front": outer[1] - organizer_edge_mount.edge_mount_clip_outer_standoff_mm(),
-                "back": outer[3] + organizer_edge_mount.edge_mount_clip_outer_standoff_mm(),
-                "left": outer[0] - organizer_edge_mount.edge_mount_clip_outer_standoff_mm(),
-                "right": outer[2] + organizer_edge_mount.edge_mount_clip_outer_standoff_mm(),
-            }[side]
-            self.assertAlmostEqual(plan["contact_plane_mm"], expected)
-            ribs = organizer_edge_mount.make_edge_mount_standoff_ribs(box)
-            contact_axis = 1 if side in ("front", "back") else 0
-            self.assertTrue(np.any(np.isclose(ribs.vertices[:, contact_axis], expected)), side)
-            body = organizer_edge_mount.apply_edge_mount_structure(box, organizer_engine.make_box(box))
-            self.assertTrue(body.is_watertight, side)
-
-        narrow = BoxSpec(
-            16.0, 48.0, 40.0, edge_mount=EdgeMountSpec(label_enabled=True, label_text="A"),
-        )
-        self.assertEqual(organizer_edge_mount.edge_mount_standoff_plan(narrow)["count"], 1)
-        too_many = replace(
-            narrow, edge_mount=replace(narrow.edge_mount, standoff_rib_count=2),
-        )
-        with self.assertRaisesRegex(ValueError, "overlap"):
-            organizer_edge_mount.edge_mount_standoff_plan(too_many)
-        manual = replace(
-            narrow, edge_mount=replace(narrow.edge_mount, standoff_rib_count=1),
-        )
-        self.assertEqual(organizer_edge_mount.edge_mount_standoff_plan(manual)["count"], 1)
-        too_narrow = replace(narrow, x=8.0)
-        with self.assertRaisesRegex(ValueError, "too narrow"):
-            organizer_edge_mount.edge_mount_standoff_plan(too_narrow)
-
-    def test_standoff_ribs_cut_screw_holes_and_stay_off_when_disabled(self) -> None:
-        spec = EdgeMountSpec(
-            side="front", label_enabled=True, label_text="A", holes_enabled=True,
-            hole_count=1, standoff_rib_count=1,
-        )
-        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=spec)
-        body = organizer_edge_mount.apply_edge_mount_structure(box, organizer_engine.make_box(box))
-        plan = organizer_edge_mount.edge_mount_standoff_plan(box)
-        hole = organizer_edge_mount.edge_mount_hole_plan(box)[0]
-        # This is inside the center rib without the cutter, immediately inward
-        # from its contact face. The continuous mounting hole leaves it empty.
-        point = [[0.0, float(plan["contact_plane_mm"]) + 0.1, hole["z_mm"]]]
-        self.assertFalse(bool(body.contains(point)[0]))
-        disabled_spec = replace(spec, standoff_ribs_enabled=False, holes_enabled=False)
-        disabled = replace(box, edge_mount=disabled_spec)
-        self.assertIsNone(organizer_edge_mount.edge_mount_standoff_plan(disabled))
-        self.assertAlmostEqual(
-            organizer_edge_mount.apply_edge_mount_structure(disabled, organizer_engine.make_box(disabled)).volume,
-            organizer_engine.make_box(disabled).volume,
-            places=4,
-        )
-        integrated = replace(box, edge_mount=replace(spec, label_type="integrated"))
-        self.assertIsNone(organizer_edge_mount.edge_mount_standoff_plan(integrated))
 
     def test_separate_clip_ribs_have_real_45_degree_ramps_and_clear_every_wall(self) -> None:
         for side in ("front", "back", "left", "right"):
