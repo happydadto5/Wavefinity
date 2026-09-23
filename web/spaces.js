@@ -261,12 +261,30 @@ SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
   }
   // A different folder means a different Space: close the workspace first.
   if (typeof DP !== "undefined" && DP.leave) DP.leave();
+  DL.loadEpoch += 1;
+  DL.loadPromise = null;
   DL.layout = null;
   DL.dirty = false;
+  DL.loaded = false;
+  DL.exists = false;
+  DL.bins = [];
+  DL.file = "";
+  DL.warnings = [];
+  DL.report = null;
+  DL.reportTicket += 1;
   DL.candidates = [];
   DL.selected = null;
   DL.output = null;
-  DL.loaded = false;
+  DL.pegboardLayouts = {};
+  DL.pegboardRefreshError = "";
+  DL.working = null;
+  DL.workingTicket += 1;
+  DL.saveState = "idle";
+  DL.saveError = "";
+  DL.history = [];
+  DL.future = [];
+  DL.clearSpacerPlan();
+  if (typeof DP !== "undefined") DP.printSelected = new Set();
   if (typeof DP !== "undefined") DP.signatures = {};
   return true;
 };
@@ -1248,7 +1266,7 @@ SP.armResumeAutoContinue = () => {
 // restored Current design or making a second inventory parser.
 SP.openTypedSpacePreferredView = async () => {
   try {
-    await DL.load();
+    await DL.ensureLoaded();
   } catch (error) {
     toast(`Could not read this Space's inventory: ${error.message}`, true, 7000);
     return false;

@@ -601,7 +601,25 @@ DP.confirmSpacerPrint = () => {
 DP.update = () => {
   if (!DL.active || !DP.built) return;
   DP.syncHistory();
-  if (!DL.layout) return;
+  const panel = $("#drawer-panel");
+  if (panel) panel.inert = !DL.layout;
+  if (!DL.layout) {
+    const list = $("#dl-inv-list");
+    if (list) list.innerHTML = '<p class="dl-note">Inventory unavailable. Select Space to retry loading.</p>';
+    const count = $("#dl-inv-count");
+    if (count) count.textContent = "";
+    const stats = $("#dl-stats");
+    if (stats) stats.textContent = "";
+    const overlay = $("#dl-empty-state");
+    if (overlay) {
+      overlay.hidden = false;
+      overlay.dataset.state = "unavailable";
+      overlay.innerHTML = "<strong>Inventory unavailable</strong><p>Select Space to retry loading.</p>";
+    }
+    const canvas = $("#drawer-canvas");
+    if (canvas) canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
   dlSet("#dl-show-empty", Boolean(DL.layout.settings.show_empty), "checked");
   DP.renderDrawer();
   DP.renderAuto();
@@ -821,7 +839,7 @@ DP.renderStats = () => {
 
   const report = DL.report;
   const warnings = [...DL.warnings, ...(DL.pegboardRefreshError
-    ? [`Inventory saved, but pegboard placement data could not be refreshed. ${DL.pegboardRefreshError}`]
+    ? [`Pegboard placement data could not be refreshed. ${DL.pegboardRefreshError}`]
     : [])].map(text => `<p class="dl-note dl-warning">${escapeHtml(text)}</p>`).join("");
   if (!report) { box.innerHTML = warnings || `<p class="dl-note">Measuring…</p>`; return; }
   // Only actionable problems and warnings stay in this panel.
@@ -1049,6 +1067,18 @@ DP.setMode = mode => {
 // refresh it before the Space canvas activates, so a stale/no-longer-current
 // design is never shown. Switching alone never creates a placement or an
 // Inventory row.
+DP.ensureInventoryLoaded = async (message = "Could not read the inventory") => {
+  if (DL.loaded) return true;
+  try {
+    await DL.ensureLoaded();
+    return true;
+  } catch (error) {
+    toast(`${message}: ${error.message}`, true, 7000);
+    DP.update();
+    return false;
+  }
+};
+
 DP.selectMode = async mode => {
   if (mode !== "space" && mode !== "design") return;
   if (DP.mode === "design" && mode === "space" &&
@@ -1058,8 +1088,13 @@ DP.selectMode = async mode => {
   }
   DP.setMode(mode);
   if (mode === "space") {
-    await DL.refreshWorking();
-    if (DL.pegboardRefreshError) await DL.refreshPegboardLayoutsAfterWrite();
+    if (!(await DP.ensureInventoryLoaded())) return;
+    if (DL.pegboardRefreshError) {
+      await DL.refreshWorking({ refreshPegboard: false });
+      await DL.retryPegboardLayouts();
+    } else {
+      await DL.refreshWorking();
+    }
     if (!DL.active || DP.mode !== "space") return;
     activatePreviewView("drawer");
     DP.update();
@@ -1073,6 +1108,7 @@ DP.selectMode = async mode => {
 DP.enter = async (preferredMode, inventoryLoaded = false) => {
   if (DL.active) {
     if (preferredMode === "space" || preferredMode === "design") DP.setMode(preferredMode);
+    if (!DL.loaded) await DP.ensureInventoryLoaded();
     return;
   }
   DL.active = true;
@@ -1082,11 +1118,8 @@ DP.enter = async (preferredMode, inventoryLoaded = false) => {
   DP.build();
   DP.applyMode();
   DP.update();
-  try {
-    if (!inventoryLoaded) await DL.load();
-  } catch (error) {
-    toast(`Could not read the inventory: ${error.message}`, true, 7000);
-  }
+  // inventoryLoaded is a hint from the caller; DL.loaded is authoritative.
+  if (!DL.loaded) await DP.ensureInventoryLoaded();
 };
 
 // Close the Space workspace (the folder is no longer this Space).
@@ -1110,7 +1143,7 @@ DP.leave = () => {
   $$("[data-space-mode]").forEach(button => button.addEventListener("click", () => DP.selectMode(button.dataset.spaceMode)));
   // Showing the Space preview opens the workspace; hiding it does not close it.
   new MutationObserver(() => {
-    if (wrap.classList.contains("active") && !DL.active) DP.enter();
+    if (wrap.classList.contains("active") && (!DL.active || !DL.loaded)) DP.enter("space");
   }).observe(wrap, { attributes: true, attributeFilter: ["class"] });
   window.addEventListener("beforeunload", event => {
     if (DL.dirty && DL.layout && !DL.layout.settings.autosave) {

@@ -19,6 +19,8 @@ const DL = {
   stackSteps: { lid: 1, direct: 3, b4b: 2 },   // replaced by the server's values on load
   active: false,
   loaded: false,
+  loadPromise: null,
+  loadEpoch: 0,
   exists: false,
   output: null,
   file: "",
@@ -541,58 +543,78 @@ DL.adopt = data => {
 DL.refreshPegboardLayouts = async () => {
   const drawer = DL.layout && DL.drawer();
   if (!DL.isPegboard(drawer)) { DL.pegboardLayouts = {}; return; }
+  const epoch = DL.loadEpoch;
   const bins = [...DL.bins];
   if (DL.working?.bin) bins.push(DL.working.bin);
   const result = await api("/api/pegboard/layouts", {
     standard: drawer.pegboard_standard,
     bins,
   });
+  if (epoch !== DL.loadEpoch) return;
   DL.pegboardLayouts = result.layouts || {};
 };
 
-// A derived geometry failure cannot undo a successful Inventory write.
-DL.refreshPegboardLayoutsAfterWrite = async () => {
+// Derived geometry failure cannot undo a successful Inventory write or load.
+DL.refreshPegboardLayoutsSafe = async warningPrefix => {
+  const epoch = DL.loadEpoch;
   try {
     await DL.refreshPegboardLayouts();
+    if (epoch !== DL.loadEpoch) return false;
     DL.pegboardRefreshError = "";
     DL.emit();
     return true;
   } catch (error) {
+    if (epoch !== DL.loadEpoch) return false;
     DL.pegboardLayouts = {};
     DL.pegboardRefreshError = String(error?.message || error);
     DL.emit();
-    toast(`Inventory saved, but pegboard placement data could not be refreshed. ${DL.pegboardRefreshError}`, true, 7000);
+    if (warningPrefix) toast(`${warningPrefix} ${DL.pegboardRefreshError}`, true, 7000);
     return false;
   }
 };
+DL.refreshPegboardLayoutsAfterWrite = () => DL.refreshPegboardLayoutsSafe(
+  "Inventory saved, but pegboard placement data could not be refreshed.");
+DL.refreshPegboardLayoutsAfterLoad = () => DL.refreshPegboardLayoutsSafe(
+  "Inventory loaded, but pegboard placement data could not be refreshed.");
+DL.retryPegboardLayouts = () => DL.refreshPegboardLayoutsSafe(
+  "Pegboard placement data could not be refreshed.");
 
 // Re-read the current design and, if it is pending inventory, its planning
 // envelope from the server. Cheap when the design has not changed.
-DL.refreshWorking = async () => {
+DL.refreshWorking = async ({ refreshPegboard = true } = {}) => {
   const design = typeof workingDesignForSpace === "function" ? workingDesignForSpace() : null;
   if (!design) {
     if (DL.working) { DL.working = null; DL.emit(); }
+    if (refreshPegboard && DL.pegboardRefreshError && DL.isPegboard(DL.layout && DL.drawer())) {
+      await DL.retryPegboardLayouts();
+    }
     return;
   }
   const key = JSON.stringify(design);
-  if (DL.working?.key === key) return;
+  if (DL.working?.key === key) {
+    if (refreshPegboard && DL.pegboardRefreshError) await DL.retryPegboardLayouts();
+    return;
+  }
   const context = DL.workingContext();
   const ticket = ++DL.workingTicket;
+  let bin;
   try {
-    const { bin } = await api("/api/design/inventory-preview", { design });
-    if (ticket !== DL.workingTicket || context !== DL.workingContext()) return;
-    DL.working = {
-      key,
-      bin: {
-        ...bin, id: "__current__", qty: 0, working: true,
-        name: (design.part_name || "").trim(),
-      },
-    };
-    await DL.refreshPegboardLayouts();
+    ({ bin } = await api("/api/design/inventory-preview", { design }));
   } catch (error) {
     if (ticket !== DL.workingTicket || context !== DL.workingContext()) return;
     DL.working = { key, error: error.message };
+    DL.emit();
+    return;
   }
+  if (ticket !== DL.workingTicket || context !== DL.workingContext()) return;
+  DL.working = {
+    key,
+    bin: {
+      ...bin, id: "__current__", qty: 0, working: true,
+      name: (design.part_name || "").trim(),
+    },
+  };
+  if (refreshPegboard) await DL.retryPegboardLayouts();
   DL.emit();
 };
 
@@ -648,7 +670,11 @@ DL.moveWorkingTo = (gx, gy) => {
 
 DL.load = async () => {
   const output = DL.folder();
+  const epoch = DL.loadEpoch;
   const data = await DL.inventoryCall("/api/drawer/load", {}, { write: false });
+  if (epoch !== DL.loadEpoch || output !== DL.folder()) {
+    throw new Error("This Space changed while its inventory was loading.");
+  }
   const sameFolder = DL.output === output;
   DL.output = output;
   DL.exists = data.exists;
@@ -668,10 +694,24 @@ DL.load = async () => {
   }
   DL.prune();
   DL.loaded = true;
-  await DL.refreshPegboardLayouts();
   DL.emit();
   DL.requestReport();
-  DL.refreshWorking();
+  await DL.refreshWorking({ refreshPegboard: false });
+  if (epoch !== DL.loadEpoch) throw new Error("This Space changed while its inventory was loading.");
+  await DL.refreshPegboardLayoutsAfterLoad();
+  if (epoch !== DL.loadEpoch) throw new Error("This Space changed while its inventory was loading.");
+};
+
+// Initial entry/retry calls share one load. Explicit DL.load() callers still
+// force a fresh read after generation or other authoritative changes.
+DL.ensureLoaded = () => {
+  if (DL.loaded) return Promise.resolve(true);
+  if (DL.loadPromise) return DL.loadPromise;
+  const promise = DL.load()
+    .then(() => true)
+    .finally(() => { if (DL.loadPromise === promise) DL.loadPromise = null; });
+  DL.loadPromise = promise;
+  return DL.loadPromise;
 };
 
 // Resolves true once the layout is actually persisted, false on failure -
