@@ -38,6 +38,7 @@ const DL = {
   spacerSelected: new Set(),
   spacerPlanSignature: null,
   busy: "",              // "auto" | "spacers" | "connectors" | "print" while a request runs
+  busyTicket: 0,
   dirty: false,
   saving: false,
   saveAgain: false,
@@ -527,9 +528,39 @@ DL.detach = (drawer, placement) => {
 
 DL.folder = () => state.output || "";
 
-DL.inventoryCall = (path, payload = {}, options = {}) => state.runtime.hosted
-  ? SP.inventoryRequest(path, payload, options)
-  : api(path, { output: DL.output ?? DL.folder(), ...payload });
+DL.spaceContext = () => ({
+  epoch: DL.loadEpoch,
+  output: DL.folder(),
+  spaceId: state.activeSpaceId || null,
+});
+
+DL.spaceContextCurrent = context =>
+  Boolean(context) &&
+  context.epoch === DL.loadEpoch &&
+  context.output === DL.folder() &&
+  context.spaceId === (state.activeSpaceId || null);
+
+DL.staleSpaceError = () => {
+  const error = new Error("This action belongs to the Space you just left.");
+  error.code = "STALE_SPACE_CONTEXT";
+  return error;
+};
+
+DL.isStaleSpaceError = error => error?.code === "STALE_SPACE_CONTEXT";
+
+DL.requireSpaceContext = context => {
+  if (!DL.spaceContextCurrent(context)) throw DL.staleSpaceError();
+};
+
+DL.inventoryCall = async (path, payload = {}, options = {}) => {
+  const { context = DL.spaceContext(), ...requestOptions } = options;
+  DL.requireSpaceContext(context);
+  const data = state.runtime.hosted
+    ? await SP.inventoryRequest(path, payload, requestOptions)
+    : await api(path, { output: DL.output ?? DL.folder(), ...payload });
+  DL.requireSpaceContext(context);
+  return data;
+};
 
 DL.adopt = data => {
   DL.bins = data.bins || DL.bins;
@@ -757,8 +788,9 @@ DL._runSaveChain = async () => {
     DL.saveState = "saving";
     DL.emit();
     const sent = DL.snapshot();
+    const context = DL.spaceContext();
     try {
-      const data = await DL.inventoryCall("/api/drawer/save", { layout: DL.layout });
+      const data = await DL.inventoryCall("/api/drawer/save", { layout: DL.layout }, { context });
       DL.adopt(data);
       DL.exists = true;
       if (DL.snapshot() === sent) DL.dirty = false;
@@ -767,9 +799,11 @@ DL._runSaveChain = async () => {
       ok = true;
     } catch (error) {
       ok = false;
-      DL.saveState = "error";
-      DL.saveError = error.message;
-      toast(`Layout not saved: ${error.message}`, true, 6000);
+      if (!DL.isStaleSpaceError(error)) {
+        DL.saveState = "error";
+        DL.saveError = error.message;
+        toast(`Layout not saved: ${error.message}`, true, 6000);
+      }
     }
     // Only chain another serialized save when the previous one actually
     // succeeded and something asked for one more in the meantime. A
@@ -796,13 +830,20 @@ DL.saveSoon.cancel = () => { clearTimeout(dlSaveTimer); dlSaveTimer = null; };
 // Bin rows (Qty, name, sizes, stacking, hand-added bins) always save straight
 // away - they are the inventory, not the layout. The layout always rides
 // along too (Fix 034 K1: no autosave-off path any more).
-DL.editBins = async (changes, { commitLayout = false, selected = DL.selected, customFailure = false } = {}) => {
+DL.editBins = async (changes, {
+  commitLayout = false,
+  selected = DL.selected,
+  customFailure = false,
+  context = DL.spaceContext(),
+} = {}) => {
+  if (!DL.spaceContextCurrent(context)) return false;
   const payload = {
     ...changes,
     layout: Object.hasOwn(changes, "layout") ? changes.layout : DL.layout,
   };
   try {
-    const data = await DL.inventoryCall("/api/drawer/save", payload);
+    DL.requireSpaceContext(context);
+    const data = await DL.inventoryCall("/api/drawer/save", payload, { context });
     DL.adopt(data);
     if (commitLayout) DL.normaliseLayout(data.layout || payload.layout);
     DL.exists = true;
@@ -820,6 +861,7 @@ DL.editBins = async (changes, { commitLayout = false, selected = DL.selected, cu
     }
     DL.emit();
   } catch (error) {
+    if (DL.isStaleSpaceError(error)) return false;
     DL.saveState = "error";
     DL.saveError = error.message;
     DL.emit();
@@ -827,6 +869,7 @@ DL.editBins = async (changes, { commitLayout = false, selected = DL.selected, cu
     return false;
   }
   await DL.refreshPegboardLayoutsAfterWrite();
+  if (!DL.spaceContextCurrent(context)) return false;
   DL.requestReport();
   return true;
 };
@@ -874,27 +917,32 @@ DL.requestReport = debounce(async () => {
 }, 120);
 
 DL.busyWith = async (what, work) => {
+  const context = DL.spaceContext();
+  const ticket = ++DL.busyTicket;
   DL.busy = what;
   DL.emit();
   try {
-    return await work();
+    return await work(context);
   } catch (error) {
-    toast(error.message, true, 7000);
+    if (!DL.isStaleSpaceError(error)) toast(error.message, true, 7000);
     return null;
   } finally {
-    DL.busy = "";
-    DL.emit();
+    if (ticket === DL.busyTicket && DL.spaceContextCurrent(context)) {
+      DL.busy = "";
+      DL.emit();
+    }
   }
 };
 
 // ------------------------------------------------------------------ actions
 
-DL.runAuto = () => DL.busyWith("auto", async () => {
+DL.runAuto = () => DL.busyWith("auto", async context => {
   if (DL.isPegboard()) { toast("Place pegboard bins on the visible mount grid.", true); return; }
   const result = await api("/api/drawer/auto", {
     layout: DL.layout, bins: DL.bins, drawer_id: DL.layout.active,
     options: DL.layout.settings.auto,
   });
+  DL.requireSpaceContext(context);
   DL.candidates = result.candidates || [];
   DL.skipped = result.skipped || [];
   DL.autoNotes = result.notes || [];
@@ -928,7 +976,7 @@ DL.placeAt = (one, where) => {
 };
 
 // Drop one bin into the best free spot, using the same packer as Auto layout.
-DL.quickPlace = one => DL.busyWith("", async () => {
+DL.quickPlace = one => DL.busyWith("", async context => {
   const drawer = DL.drawer();
   if (DL.isPegboard(drawer)) {
     const grid = DL.grid(drawer);
@@ -948,6 +996,7 @@ DL.quickPlace = one => DL.busyWith("", async () => {
       layout: DL.layout, bins: DL.bins, drawer_id: drawer.id,
       options: { ...DL.layout.settings.auto, mode: "fill", stack_bins: false, height_rule: rule, only: [{ bin: one.id, copy }] },
     });
+    DL.requireSpaceContext(context);
     return (result.candidates?.[0]?.placements || []).find(p => p.bin === one.id && p.copy === copy);
   };
   const rule = DL.layout.settings.auto.height_rule;
@@ -1010,11 +1059,12 @@ DL.toggleLock = key => DL.change(() => {
   if (chain) chain[0].locked = !chain[0].locked;
 });
 
-DL.planSpacers = () => DL.busyWith("spacers", async () => {
+DL.planSpacers = () => DL.busyWith("spacers", async context => {
   const result = await api("/api/drawer/spacers", {
     output: DL.output ?? DL.folder(), layout: DL.layout,
     drawer_id: DL.layout.active, options: DL.layout.settings.spacers,
   });
+  DL.requireSpaceContext(context);
   DL.spacerPlan = result.candidates || [];
   DL.spacerSelected = new Set((result.selected || []).map(c => c.id));
   DL.spacerPlanSignature = DL.spacerSignature();
@@ -1028,7 +1078,7 @@ DL.toggleSpacerCandidate = id => {
   DL.emit();
 };
 
-DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
+DL.generateSelectedSpacers = () => DL.busyWith("spacers", async context => {
   if (!DL.spacerPlan) return;
   const before = DL.snapshot();
   const result = await api("/api/drawer/spacers/generate", {
@@ -1036,6 +1086,10 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
     drawer_id: DL.layout.active, selected: Array.from(DL.spacerSelected),
     options: DL.layout.settings.spacers,
   });
+  if (!DL.spaceContextCurrent(context)) {
+    toast("Spacer generation finished in the Space you left. The current Space was not changed.");
+    return;
+  }
   DL.adopt(result);
   DL.normaliseLayout(result.layout);
   if (DL.snapshot() !== before) { DL.history.push(before); DL.future = []; }
@@ -1052,9 +1106,13 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
   if (result.reused) bits.push(`${result.reused} reused from the inventory`);
   let connectorLines = [];
   try {
-    const connectors = await DL.saveConnectorFiles();
+    const connectors = await DL.saveConnectorFiles(context);
     if (connectors.lines.length) connectorLines = ["Connector files saved:", ...connectors.lines, ...connectors.notes];
   } catch (error) {
+    if (!DL.spaceContextCurrent(context)) {
+      toast("Spacer generation finished in the Space you left. The current Space was not changed.");
+      return;
+    }
     connectorLines = [`Connector files could not be saved: ${error.message}`];
   }
   toast([bits.join(", ") || "Nothing to fill", ...(result.notes || []), ...connectorLines].join("\n"), false, 9000);
@@ -1175,13 +1233,17 @@ DL.promoteSpacerCopies = (group, requestedCount, layout = DL.layout) => {
 // file is sent per group; any newly-printed logical copies are then spread
 // across that group's own previously-unprinted member rows, and reprints
 // never increase the logical quantity in the drawer.
-DL.printSelectedSpacers = (selection) => DL.busyWith("print", async () => {
+DL.printSelectedSpacers = (selection) => DL.busyWith("print", async context => {
   if (Object.keys(selection).length === 0) return;
   const result = await api("/api/drawer/print-spacers", {
     output: DL.output ?? DL.folder(),
     selection: selection,
     slicer_path: state.slicer?.path || null,
   });
+  if (!DL.spaceContextCurrent(context)) {
+    toast("Bambu Studio opened for the Space you left, but Wavefinity did not mark those spacer counts printed. Reopen that Space and correct Qty if you print.");
+    return;
+  }
 
   const stagedLayout = clone(DL.layout);
   const selectedPlacement = stagedLayout.drawers.flatMap(drawer => drawer.placements)
@@ -1206,7 +1268,12 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async () => {
       commitLayout: true,
       selected: selectedPlacement ? DL.key(selectedPlacement) : DL.selected,
       customFailure: true,
+      context,
     });
+    if (!DL.spaceContextCurrent(context)) {
+      toast("Bambu Studio opened for the Space you left. Check that Space's Qty before printing; the current Space was not changed.");
+      return;
+    }
     if (!saved) {
       toast("Bambu Studio opened, but Wavefinity could not save the printed counts. Nothing was marked printed in Wavefinity; correct Qty manually if you print.", true, 10000);
       return;
@@ -1224,10 +1291,12 @@ DL.removeSpacers = () => DL.change(() => {
 
 // Saves a file for every connector the layout needs. Connectors are part of
 // generating spacers, not a separate Space setting.
-DL.saveConnectorFiles = async () => {
+DL.saveConnectorFiles = async (context = DL.spaceContext()) => {
+  DL.requireSpaceContext(context);
   const result = await api("/api/drawer/connectors", {
     output: DL.output ?? DL.folder(), layout: DL.layout, bins: DL.bins, drawer_id: DL.layout.active,
   });
+  DL.requireSpaceContext(context);
   return {
     lines: (result.connectors || []).map(one => `Print ${one.count} × ${one.file}`),
     notes: result.notes || [],
@@ -1237,7 +1306,7 @@ DL.saveConnectorFiles = async () => {
 // selection: { [bin id]: copies }. The server re-reads the saved inventory, so
 // the layout is saved first; Qty and planned copies change there only after
 // the slicer opened successfully.
-DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async () => {
+DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async context => {
   if (state.runtime.hosted) {
     toast("Bulk printing to a local slicer is available in local Wavefinity.", true);
     return;
@@ -1249,11 +1318,19 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
   const chosen = Object.fromEntries(Object.entries(selection || {}).filter(([, count]) => count > 0));
   if (!Object.keys(chosen).length) return;
   if (!(await DL.save())) return;
-  const result = await DL.inventoryCall("/api/drawer/print-bins", {
-    selection: chosen,
-    include_connectors: Boolean(includeConnectors),
-    slicer_path: state.slicer?.path || null,
-  });
+  DL.requireSpaceContext(context);
+  let result;
+  try {
+    result = await DL.inventoryCall("/api/drawer/print-bins", {
+      selection: chosen,
+      include_connectors: Boolean(includeConnectors),
+      slicer_path: state.slicer?.path || null,
+    }, { context });
+  } catch (error) {
+    if (!DL.isStaleSpaceError(error)) throw error;
+    toast("Bambu Studio opened for the Space you left. The current Space was not changed.");
+    return;
+  }
   DL.adopt(result);
   if (result.layout) {
     const selected = DL.selected;
@@ -1276,11 +1353,15 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
   ].join("\n"), false, 10000);
 });
 
-DL.printDrawer = () => DL.busyWith("print", async () => {
+DL.printDrawer = () => DL.busyWith("print", async context => {
   const result = await api("/api/drawer/print", {
     output: DL.output ?? DL.folder(), layout: DL.layout, bins: DL.bins,
     drawer_id: DL.layout.active, slicer_path: state.slicer?.path || null,
   });
+  if (!DL.spaceContextCurrent(context)) {
+    toast("Bambu Studio opened for the Space you left. The current Space was not changed.");
+    return;
+  }
   const lines = Object.entries(result.counts || {}).map(([file, count]) => `${count} × ${file}`);
   toast(["Opened in Bambu Studio", ...lines, ...(result.notes || [])].join("\n"), false, 10000);
 });

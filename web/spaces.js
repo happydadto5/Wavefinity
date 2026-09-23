@@ -260,6 +260,8 @@ SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
     if (!ok) return false;
   }
   // A different folder means a different Space: close the workspace first.
+  DL.busyTicket += 1;
+  DL.busy = "";
   if (typeof DP !== "undefined" && DP.leave) DP.leave();
   DL.loadEpoch += 1;
   DL.loadPromise = null;

@@ -594,18 +594,28 @@ async function designerGenerateInventoryRow(rowId) {
   const one = DL.bin(rowId);
   const spec = DL.layout?.design_specs?.[rowId];
   if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return;
-  await DL.busyWith("generate-row", async () => {
+  await DL.busyWith("generate-row", async context => {
     const result = await api("/api/generate", {
       design: clone(spec), output: state.output, connector: state.connector,
       keep_log: false,
     });
+    DL.requireSpaceContext(context);
     const savedFiles = await saveGeneratedFiles(result);
+    try {
+      DL.requireSpaceContext(context);
+    } catch (error) {
+      if (!DL.isStaleSpaceError(error)) throw error;
+      toast("Files were generated in the Space you left, but its Inventory row was not updated.");
+      return;
+    }
     const files = [...new Set(savedFiles.map(path => String(path).split(/[\\/]/).pop())
       .filter(name => /\.3mf$/i.test(name)))];
     if (!files.length) throw new Error("The generated design files were not returned.");
     const file = files.join(", ");
-    if (await DL.editBins({ bin_updates: [{ id: rowId, file }] })) {
+    if (await DL.editBins({ bin_updates: [{ id: rowId, file }] }, { context })) {
       toast(`Generated ${file}.`);
+    } else if (!DL.spaceContextCurrent(context)) {
+      toast("Files were generated in the Space you left. Check its Inventory row; the current Space was not changed.");
     }
   });
 }
