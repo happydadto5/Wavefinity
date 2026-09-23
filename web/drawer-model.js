@@ -47,6 +47,7 @@ const DL = {
   future: [],
   listeners: [],
   pegboardLayouts: {},
+  pegboardRefreshError: "",
 };
 
 // The design being edited, shown in Space before it has been generated. It
@@ -383,6 +384,9 @@ DL.findPlacement = key => {
 // at (gx, gy)? `ignore` holds keys being moved. Used live while dragging, so
 // it answers in plain words.
 DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
+  if (DL.isPegboard(drawer) && DL.pegboardRefreshError) {
+    return { ok: false, reason: "Pegboard placement data is unavailable. Select Space again to retry the refresh." };
+  }
   const grid = DL.grid(drawer);
   const [w, d] = DL.cells(bins[0], drawer);
   const height = DL.stackHeight(bins);
@@ -544,6 +548,22 @@ DL.refreshPegboardLayouts = async () => {
     bins,
   });
   DL.pegboardLayouts = result.layouts || {};
+};
+
+// A derived geometry failure cannot undo a successful Inventory write.
+DL.refreshPegboardLayoutsAfterWrite = async () => {
+  try {
+    await DL.refreshPegboardLayouts();
+    DL.pegboardRefreshError = "";
+    DL.emit();
+    return true;
+  } catch (error) {
+    DL.pegboardLayouts = {};
+    DL.pegboardRefreshError = String(error?.message || error);
+    DL.emit();
+    toast(`Inventory saved, but pegboard placement data could not be refreshed. ${DL.pegboardRefreshError}`, true, 7000);
+    return false;
+  }
 };
 
 // Re-read the current design and, if it is pending inventory, its planning
@@ -736,16 +756,20 @@ DL.saveSoon.cancel = () => { clearTimeout(dlSaveTimer); dlSaveTimer = null; };
 // Bin rows (Qty, name, sizes, stacking, hand-added bins) always save straight
 // away - they are the inventory, not the layout. The layout always rides
 // along too (Fix 034 K1: no autosave-off path any more).
-DL.editBins = async changes => {
-  const payload = { ...changes, layout: DL.layout };
+DL.editBins = async (changes, { commitLayout = false, selected = DL.selected, customFailure = false } = {}) => {
+  const payload = {
+    ...changes,
+    layout: Object.hasOwn(changes, "layout") ? changes.layout : DL.layout,
+  };
   try {
     const data = await DL.inventoryCall("/api/drawer/save", payload);
     DL.adopt(data);
-    await DL.refreshPegboardLayouts();
+    if (commitLayout) DL.normaliseLayout(data.layout || payload.layout);
     DL.exists = true;
     // Bin sizes/kinds may have just changed underneath any spacer proposal.
     DL.clearSpacerPlan();
     const removed = DL.prune();
+    if (commitLayout) DL.selected = selected && DL.findPlacement(selected) ? selected : null;
     if (removed) {
       toast(`${removed} placed cop${removed === 1 ? "y" : "ies"} taken out of the drawers.`);
       DL.afterChange();
@@ -755,12 +779,16 @@ DL.editBins = async changes => {
       DL.savedAt = new Date();
     }
     DL.emit();
-    DL.requestReport();
-    return true;
   } catch (error) {
-    toast(error.message, true, 6000);
+    DL.saveState = "error";
+    DL.saveError = error.message;
+    DL.emit();
+    if (!customFailure) toast(error.message, true, 6000);
     return false;
   }
+  await DL.refreshPegboardLayoutsAfterWrite();
+  DL.requestReport();
+  return true;
 };
 
 // Planned copies of a bin become printed ones: renumber them to follow the
@@ -776,14 +804,19 @@ DL.markPrinted = async one => {
   }
   const count = planned.length || 1;
   if (planned.length) {
+    const stagedLayout = clone(DL.layout);
+    const stagedPlanned = stagedLayout.drawers.flatMap(drawer => drawer.placements)
+      .filter(p => p.bin === one.id && (p.copy ?? 0) >= printed)
+      .sort((a, b) => (a.copy ?? 0) - (b.copy ?? 0));
     const rename = new Map();
-    DL.change(() => {
-      planned.forEach((p, index) => { rename.set(DL.key(p), `${one.id}:${printed + index}`); p.copy = printed + index; });
-      DL.layout.drawers.forEach(drawer => drawer.placements.forEach(p => { if (rename.has(p.on)) p.on = rename.get(p.on); }));
-    }, { history: false });
-    if (rename.has(DL.selected)) DL.selected = rename.get(DL.selected);
+    stagedPlanned.forEach((p, index) => { rename.set(DL.key(p), `${one.id}:${printed + index}`); p.copy = printed + index; });
+    stagedLayout.drawers.forEach(drawer => drawer.placements.forEach(p => { if (rename.has(p.on)) p.on = rename.get(p.on); }));
+    return DL.editBins({ bin_updates: [{ id: one.id, qty: printed + count }], layout: stagedLayout }, {
+      commitLayout: true,
+      selected: rename.get(DL.selected) || DL.selected,
+    });
   }
-  await DL.editBins({ bin_updates: [{ id: one.id, qty: printed + count }] });
+  return DL.editBins({ bin_updates: [{ id: one.id, qty: printed + count }] });
 };
 
 DL.requestReport = debounce(async () => {
@@ -994,10 +1027,11 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async () => {
 // geometry (same file/size) - a group carries every member row, not just
 // one representative, and aggregates quantity/printed across all of them -
 // see Fix 004 Correction 6.L.
-DL.spacerPrintGroups = () => {
+DL.spacerPrintGroups = (layout = DL.layout) => {
   const groups = new Map();
 
-  DL.drawer().placements.forEach(placement => {
+  const drawer = layout.drawers.find(one => one.id === layout.active) || layout.drawers[0];
+  drawer.placements.forEach(placement => {
     const bin = DL.bin(placement.bin);
     if (!DL.isSpacer(bin)) return;
 
@@ -1034,7 +1068,7 @@ DL.spacerPrintGroups = () => {
 // This reorders only planned copy indices so the selected active-drawer
 // copies become the next contiguous printed copies. Other planned copies
 // stay planned.
-DL.promoteSpacerCopies = (group, requestedCount) => {
+DL.promoteSpacerCopies = (group, requestedCount, layout = DL.layout) => {
   let remaining = Math.min(
     Number(requestedCount) || 0,
     group.unprintedEntries.length,
@@ -1055,7 +1089,7 @@ DL.promoteSpacerCopies = (group, requestedCount) => {
 
     if (!selected.length) continue;
 
-    const allPlanned = DL.layout.drawers
+    const allPlanned = layout.drawers
       .flatMap(drawer => drawer.placements)
       .filter(
         placement =>
@@ -1080,7 +1114,7 @@ DL.promoteSpacerCopies = (group, requestedCount) => {
       rename.set(oldKey, DL.key(placement));
     });
 
-    DL.layout.drawers.forEach(drawer => {
+    layout.drawers.forEach(drawer => {
       drawer.placements.forEach(placement => {
         if (rename.has(placement.on)) placement.on = rename.get(placement.on);
       });
@@ -1109,7 +1143,10 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async () => {
     slicer_path: state.slicer?.path || null,
   });
 
-  const groups = DL.spacerPrintGroups();
+  const stagedLayout = clone(DL.layout);
+  const selectedPlacement = stagedLayout.drawers.flatMap(drawer => drawer.placements)
+    .find(placement => DL.key(placement) === DL.selected);
+  const groups = DL.spacerPrintGroups(stagedLayout);
   const updates = [];
 
   for (const [id, count] of Object.entries(selection)) {
@@ -1118,14 +1155,22 @@ DL.printSelectedSpacers = (selection) => DL.busyWith("print", async () => {
       candidate => candidate.members.some(member => member.id === id)
     );
     if (!group) continue;
-    updates.push(...DL.promoteSpacerCopies(group, count));
+    updates.push(...DL.promoteSpacerCopies(group, count, stagedLayout));
   }
 
   if (updates.length > 0) {
-    await DL.editBins({
+    const saved = await DL.editBins({
       bin_updates: updates,
-      layout: DL.layout,
+      layout: stagedLayout,
+    }, {
+      commitLayout: true,
+      selected: selectedPlacement ? DL.key(selectedPlacement) : DL.selected,
+      customFailure: true,
     });
+    if (!saved) {
+      toast("Bambu Studio opened, but Wavefinity could not save the printed counts. Nothing was marked printed in Wavefinity; correct Qty manually if you print.", true, 10000);
+      return;
+    }
   }
   // The launch already repeats each file once per copy.
   const lines = Object.entries(result.counts || {}).map(([file, copyCount]) => `${copyCount} × ${file}`);

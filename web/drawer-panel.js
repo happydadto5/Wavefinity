@@ -496,7 +496,7 @@ DP.onInventoryClick = async event => {
 
 // Printing one fewer should turn an unplaced copy away, not a placed one:
 // renumber the top copy into a free slot first.
-DP.lowerQty = one => {
+DP.lowerQty = async one => {
   if (one.qty <= 0) return;
   const next = one.qty - 1;
   const placements = DL.layout.drawers.flatMap(drawer => drawer.placements.filter(p => p.bin === one.id));
@@ -506,13 +506,19 @@ DP.lowerQty = one => {
   for (let copy = 0; copy < next; copy += 1) if (!used.has(copy)) { free = copy; break; }
   if (top && free !== null) {
     const oldKey = DL.key(top);
-    DL.change(() => {
-      top.copy = free;
-      DL.layout.drawers.forEach(drawer => drawer.placements.forEach(p => { if (p.on === oldKey) p.on = DL.key(top); }));
-    }, { history: false });
-    if (DL.selected === oldKey) DL.selected = DL.key(top);
+    const stagedLayout = clone(DL.layout);
+    const stagedTop = stagedLayout.drawers.flatMap(drawer => drawer.placements)
+      .find(p => DL.key(p) === oldKey);
+    stagedTop.copy = free;
+    stagedLayout.drawers.forEach(drawer => drawer.placements.forEach(p => {
+      if (p.on === oldKey) p.on = DL.key(stagedTop);
+    }));
+    return DL.editBins({ bin_updates: [{ id: one.id, qty: next }], layout: stagedLayout }, {
+      commitLayout: true,
+      selected: DL.selected === oldKey ? DL.key(stagedTop) : DL.selected,
+    });
   }
-  DL.editBins({ bin_updates: [{ id: one.id, qty: next }] });
+  return DL.editBins({ bin_updates: [{ id: one.id, qty: next }] });
 };
 
 // The one "go design a bin" jump used by both empty states.
@@ -814,7 +820,9 @@ DP.renderStats = () => {
   }
 
   const report = DL.report;
-  const warnings = DL.warnings.map(text => `<p class="dl-note dl-warning">${escapeHtml(text)}</p>`).join("");
+  const warnings = [...DL.warnings, ...(DL.pegboardRefreshError
+    ? [`Inventory saved, but pegboard placement data could not be refreshed. ${DL.pegboardRefreshError}`]
+    : [])].map(text => `<p class="dl-note dl-warning">${escapeHtml(text)}</p>`).join("");
   if (!report) { box.innerHTML = warnings || `<p class="dl-note">Measuring…</p>`; return; }
   // Only actionable problems and warnings stay in this panel.
   const problems = report.problems;
@@ -1051,6 +1059,7 @@ DP.selectMode = async mode => {
   DP.setMode(mode);
   if (mode === "space") {
     await DL.refreshWorking();
+    if (DL.pegboardRefreshError) await DL.refreshPegboardLayoutsAfterWrite();
     if (!DL.active || DP.mode !== "space") return;
     activatePreviewView("drawer");
     DP.update();

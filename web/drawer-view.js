@@ -419,7 +419,7 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
     }
     const selected = entry.working || entry.layers.some(layer => layer.key === DL.selected);
     if (selected) {
-      const layout = DL.pegboardLayouts[one.id] || one.pegboard_layout;
+      const layout = DL.pegboardRefreshError ? null : (DL.pegboardLayouts[one.id] || one.pegboard_layout);
       for (const [mx, my] of layout?.mount_offsets || []) {
         const [hx, hy] = cam.project([grid.ox + (Math.round((entry.x0 - grid.ox) / grid.stepX) + mx + 0.5) * grid.stepX, grid.oy + (Math.round((entry.y0 - grid.oy) / grid.stepY) + my + 0.5) * grid.stepY, 0]);
         ctx.beginPath(); ctx.arc(hx, hy, 5, 0, Math.PI * 2); ctx.fillStyle = "#ffe16b"; ctx.fill(); ctx.strokeStyle = "#5d4800"; ctx.stroke();
