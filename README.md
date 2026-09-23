@@ -1559,6 +1559,52 @@ Dependencies run one way: shared geometry sits at the bottom; the engine and
 insert package consume it; the app consumes both; the web
 service consumes the app. Nothing imports back upward.
 
+### State, persistence, and async ownership
+
+The Designer has two layers of state. `state.design` is the canonical committed
+design; `state.draft` and queued visible edits may be newer. Save, Generate,
+Print/export, Load/Open/New, and design replacement must use
+`visibleDesignSnapshot()` and `commitVisibleDraft()` through the existing
+mutation path before taking a snapshot. Do not clone a possibly stale
+`state.design` directly.
+
+Multi-await Designer replacement or persistence actions use
+`beginDesignMutation()` and `finishDesignMutation()`, backed by
+`state.designMutationBusy`. This is the single mutation owner: do not invent a
+second busy or ownership system. Space/folder switches are blocked or
+serialized while it is held.
+
+Space async work uses `DL.spaceContext()`,
+`DL.spaceContextCurrent()`/`DL.requireSpaceContext()`, context-aware
+`DL.busyWith()`, `DL.inventoryCall()`, and `DL.editBins()`. Capture one context
+before the first relevant `await` and carry it through every result that can
+mutate live Space, Inventory, or layout state. A stale completion must never
+mutate the newly active Space. External file or slicer effects may already have
+happened, so report partial success truthfully when required. Serialized Space
+saves use `DL.savePromise`/`DL.saveAgain` inside `DL.save()`; do not add polling
+or parallel save ownership.
+
+For spec-backed Inventory rows, `layout.design_specs[row_id]` is the canonical
+editable design source. Qty, placement, layout, and source changes that form
+one logical action belong in one authoritative transaction. Local filesystem
+and hosted browser-text implementations must preserve that same logical
+atomicity through `organizer_inventory.design_specs()`,
+`save_design_source()`/`save_design_source_text()`, and `_merge_inventory()`
+under `INVENTORY_LOCK`.
+
+`Layout` metadata is additive. Current examples include `object_height_mm`,
+`surface_base_mode`, and `surface_lightweight_base`. When transforming an
+existing ordinary layout, use `dataclasses.replace(layout, ...)` or another
+full-preservation path so every metadata field survives. Direct `Layout(...)`
+construction is for a genuinely fresh, default, transient, or B4B-specific
+layout, not a shortcut for modifying an existing design. Future additive fields
+must not be lost because every transform was not found and rewritten.
+
+When adding a new Space/Inventory async write, use the existing DL context and
+transaction owner. When adding a persistence or replacement action, use the
+existing Designer commit/mutation owner. When transforming a Layout, preserve
+all additive metadata.
+
 Two things worth knowing before tidying anything up:
 
 - The `*Tests` classes look unreferenced, because
