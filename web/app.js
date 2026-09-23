@@ -391,7 +391,7 @@ function applyDesignerLifecycleVisibility() {
 async function designerSaveToSpace({ silent = false } = {}) {
   if (state.folderMode !== "space" || typeof DL === "undefined") return false;
   if (baseTrimEnabled()) {
-    if (!silent) toast("Base Trim is not a Designer bin, so it has no place in Save to Space.", true, 5000);
+    if (!silent) toast("Base Trim is not a bin design, so it has no place in Save to Space.", true, 5000);
     return false;
   }
   if (!beginDesignMutation()) return false;
@@ -531,8 +531,9 @@ async function chooseDesignerSource(data, {
 async function designerLoadFromSpace() {
   if (state.folderMode !== "space" || typeof DL === "undefined") return;
 
+  let data;
   try {
-    await DL.load();
+    data = await DL.inventoryCall("/api/drawer/load", {}, { write: false });
   } catch (error) {
     toast(`Could not read this Space's inventory: ${error.message}`, true, 6000);
     return;
@@ -540,7 +541,7 @@ async function designerLoadFromSpace() {
 
   let chosen;
   try {
-    chosen = await chooseDesignerSource({ bins: DL.bins, layout: DL.layout }, {
+    chosen = await chooseDesignerSource(data, {
       title: "Load from Space",
       allowOther: true,
       includeUnavailable: true,
@@ -556,7 +557,7 @@ async function designerLoadFromSpace() {
     return;
   }
 
-  await designerEditInventoryRow(chosen.id);
+  await designerInstallInventorySpec(chosen.id, chosen.spec);
 }
 
 async function designerEditInventoryRow(rowId) {
@@ -564,6 +565,11 @@ async function designerEditInventoryRow(rowId) {
   const one = DL.bin(rowId);
   const spec = DL.layout?.design_specs?.[rowId];
   if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return;
+  await designerInstallInventorySpec(rowId, spec);
+}
+
+async function designerInstallInventorySpec(rowId, spec) {
+  if (!spec) return;
   if (state.designInventoryId === rowId && workingDesignForSpace()) {
     activatePreviewView("3d");
     return;
@@ -594,11 +600,10 @@ async function designerGenerateInventoryRow(rowId) {
       keep_log: false,
     });
     const savedFiles = await saveGeneratedFiles(result);
-    const generatedFile = result.inventory_bin?.file || result.result?.box?.output ||
-      result.result?.output ||
-      savedFiles.find(name => /\.3mf$/i.test(name));
-    if (!generatedFile) throw new Error("The generated bin file was not returned.");
-    const file = String(generatedFile).split(/[\\/]/).pop();
+    const files = [...new Set(savedFiles.map(path => String(path).split(/[\\/]/).pop())
+      .filter(name => /\.3mf$/i.test(name)))];
+    if (!files.length) throw new Error("The generated design files were not returned.");
+    const file = files.join(", ");
     if (await DL.editBins({ bin_updates: [{ id: rowId, file }] })) {
       toast(`Generated ${file}.`);
     }

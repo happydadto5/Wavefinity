@@ -1239,7 +1239,7 @@ SP.armResumeAutoContinue = () => {
   const button = $("#welcome-resume-continue");
   SP.resumeTimer = setInterval(() => {
     remaining -= 1;
-    if (remaining <= 0) { SP.confirmResume(); return; }
+    if (remaining <= 0) { SP.run(SP.confirmResume); return; }
     if (button) button.textContent = `Open Space (${remaining})`;
   }, 1000);
 };
@@ -2159,7 +2159,7 @@ SP.wire = () => {
   const tutorialBack = document.getElementById("space-tutorial-back");
   if (tutorialBack) tutorialBack.addEventListener("click", SP.showTypeCards);
   const welcomeResumeContinue = document.getElementById("welcome-resume-continue");
-  if (welcomeResumeContinue) welcomeResumeContinue.addEventListener("click", SP.confirmResume);
+  if (welcomeResumeContinue) welcomeResumeContinue.addEventListener("click", () => SP.run(SP.confirmResume));
   const welcomeResumeSwitch = document.getElementById("welcome-resume-switch");
   if (welcomeResumeSwitch) welcomeResumeSwitch.addEventListener("click", () => {
     SP.cancelResumeAutoContinue();

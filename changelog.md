@@ -38,7 +38,7 @@
 ## 2026-09-21 — Bulk Space Printing (Fix 027)
 
 - Generating a bin now always adds it to Inventory at Qty 0. The "New bins count as printed" switch is gone.
-- Space Inventory can print many bins at once: tick designs or press Select all needed, then Print Selected to Bambu Studio. Missing copies (and optionally the Space's connectors, once) go out together; Qty and planned copies update only after Bambu Studio opens.
+- Space Inventory can print many bins at once: tick designs, press Select all not printed for needed copies, or press Select all for every printable design, then Print Selected to Bambu Studio. Selected copies (and optionally the Space's connectors, once) go out together; Qty and planned copies update only after Bambu Studio opens.
 - Bambu Studio launches now build one arranged Bambu project 3MF through Bambu's own command line, keeping second-color parts, instead of opening every file separately. Repeated files mean real copies, so there is no manual copy count.
 - Direct Print logs Qty 1 only after the slicer opens. "Print Drawer (All)" is now "Print Spacers + Connectors".
 
@@ -478,9 +478,9 @@
   bin of the same style and it lands on top, sides aligned. Each drawer's
   **max height** limits bins and stacks alike. Auto layout can build stacks
   itself.
-- **Plan first:** place copies you have not printed yet. They are drawn faded,
-  listed under *To print*, and turned real with *Mark printed*. Newly
-  generated bins now start at Qty 0 (optional).
+- **Plan first:** place copies you have not printed yet. They are drawn faded;
+  their planned and needed counts appear on their Inventory rows, and **Mark Printed** records them as printed. Newly
+  generated bins start at Qty 0.
 - **Make connectors** writes every connector a layout needs, with counts.
   **Print spacers & connectors** opens them in Bambu Studio. **Print map**
   prints a plan of the drawer.

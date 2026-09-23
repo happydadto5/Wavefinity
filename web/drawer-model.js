@@ -529,6 +529,9 @@ DL.adopt = data => {
   DL.bins = data.bins || DL.bins;
   DL.file = data.file || DL.file;
   if (data.stack_steps) DL.stackSteps = data.stack_steps;
+  if (DL.layout && data.layout && Object.hasOwn(data.layout, "design_specs")) {
+    DL.layout.design_specs = clone(data.layout.design_specs || {});
+  }
 };
 
 DL.refreshPegboardLayouts = async () => {
