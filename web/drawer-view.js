@@ -630,7 +630,7 @@ DV.paintScene = (ctx, drawer, cam) => {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.fillText(DL.isSurface()
-    ? `FRONT · ${fmt(W)} mm wide · ${fmt(D)} deep · ${fmt(H)} mm edge`
+    ? `FRONT · ${fmt(W)} mm wide · ${fmt(D)} deep · ${fmt(drawer.height)} mm edge`
     : `FRONT · ${fmt(W)} mm wide · ${fmt(D)} deep · ${fmt(H)} max height`, fx, fy + 10);
   if (DL.isSurface() && DL.fillPlan) {
     DL.fillPlan.forEach(candidate => {

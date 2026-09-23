@@ -514,6 +514,7 @@ input[type="number"]::-webkit-inner-spin-button {
   #ordinary-size-row.field-grid.three { grid-template-columns: 1.2fr 1.2fr 0.6fr; }
 }
 .field-grid.two { grid-template-columns: repeat(2, 1fr); }
+.surface-bin-help { grid-column: 1 / -1; }
 .field-grid.four { grid-template-columns: repeat(4, 1fr); }
 .mode-and-bin-options { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .mode-and-bin-options > label:first-child { min-width: 140px; flex: 0 1 180px; }
