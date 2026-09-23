@@ -1563,10 +1563,11 @@ service consumes the app. Nothing imports back upward.
 
 The Designer has two layers of state. `state.design` is the canonical committed
 design; `state.draft` and queued visible edits may be newer. Save, Generate,
-Print/export, Load/Open/New, and design replacement must use
-`visibleDesignSnapshot()` and `commitVisibleDraft()` through the existing
-mutation path before taking a snapshot. Do not clone a possibly stale
-`state.design` directly.
+Print/export, Load/Open/New, and design-replacement paths must use the existing
+Designer freshness/mutation owner before persisting or replacing state. Use
+`commitVisibleDraft()` and/or `visibleDesignSnapshot()` where the established
+path requires them; never clone `state.design` as a substitute for resolving
+pending visible edits.
 
 Multi-await Designer replacement or persistence actions use
 `beginDesignMutation()` and `finishDesignMutation()`, backed by
