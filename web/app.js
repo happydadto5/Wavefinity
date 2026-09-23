@@ -599,7 +599,13 @@ async function designerGenerateInventoryRow(rowId) {
       design: clone(spec), output: state.output, connector: state.connector,
       keep_log: false,
     });
-    DL.requireSpaceContext(context);
+    try {
+      DL.requireSpaceContext(context);
+    } catch (error) {
+      if (!DL.isStaleSpaceError(error)) throw error;
+      toast("Generation finished for the Space you left. No files were saved to the current Space and its Inventory was not changed.");
+      return;
+    }
     const savedFiles = await saveGeneratedFiles(result);
     try {
       DL.requireSpaceContext(context);

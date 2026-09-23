@@ -241,7 +241,15 @@ SP.inventoryFilenameFor = _folder => INVENTORY_FILENAME;
 // flush) and false when the switch must be aborted with everything -
 // including DL.layout/DL.dirty - left exactly as it was.
 SP.leaveDrawerLayoutSafely = async () => {
-  if (typeof DL === "undefined" || !DL.dirty || !DL.layout || !DL.output) return true;
+  if (typeof DL === "undefined") return true;
+  if (DL.savePromise) {
+    const ok = await DL.savePromise;
+    if (!ok && DL.dirty) {
+      toast(`Could not switch Spaces: ${DL.saveError || "the layout failed to save."}`, true, 6000);
+      return false;
+    }
+  }
+  if (!DL.dirty || !DL.layout || !DL.output) return true;
   const ok = await DL.save();
   if (!ok) {
     toast(`Could not switch Spaces: ${DL.saveError || "the layout failed to save."}`, true, 6000);
@@ -255,7 +263,7 @@ SP.leaveDrawerLayoutSafely = async () => {
 // choosing Cancel) - in which case DL.layout/DL.dirty are left untouched.
 SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
   if (typeof DL === "undefined") return true;
-  if (!skipSafeLeave) {
+  if (!skipSafeLeave || DL.savePromise || DL.dirty) {
     const ok = await SP.leaveDrawerLayoutSafely();
     if (!ok) return false;
   }
@@ -1062,7 +1070,7 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   }
   // The safe-leave decision is already resolved above - clear the old
   // Drawer state exactly once, with no second prompt.
-  await SP.resetDrawer({ skipSafeLeave: true });
+  if (!(await SP.resetDrawer({ skipSafeLeave: true }))) return null;
   // This only writes the remembered-active record; it does not mutate the
   // live editor identity, so it may run before the atomic identity
   // transition below (Fix 032 Correction 2, item 7). state.browserFolder
@@ -1162,7 +1170,7 @@ SP.afterPick = async folder => {
   SP.recent = data.recent || [];
   // The leave decision is already resolved - clear the old Drawer state
   // exactly once, with no second prompt, then adopt the new folder.
-  await SP.resetDrawer({ skipSafeLeave: true });
+  if (!(await SP.resetDrawer({ skipSafeLeave: true }))) return null;
   if (!(await SP.applyFolder(data.folder, { reset: false }))) return null;
   SP.close();
   if (data.folder.folder_mode === "space") {
@@ -1812,7 +1820,7 @@ SP.create = async () => {
 
   // The leave decision is already resolved above - clear the old Drawer
   // state exactly once, with no second prompt.
-  await SP.resetDrawer({ skipSafeLeave: true });
+  if (!(await SP.resetDrawer({ skipSafeLeave: true }))) return;
   // SP.create() always follows with an explicit designSurface/designPortable/
   // loadFreshOrdinaryDesignForCurrentFolder call below, which installs the
   // starter design itself - skip applyFolder's own (redundant) activation.
@@ -2080,7 +2088,7 @@ SP.useUntypedFolder = async () => {
         SP.recent = data.recent || [];
         // The leave decision is already resolved - clear the old Drawer
         // state once, with no second prompt, then adopt the new folder.
-        await SP.resetDrawer({ skipSafeLeave: true });
+        if (!(await SP.resetDrawer({ skipSafeLeave: true }))) return;
         if (!(await SP.applyFolder(data.folder, { reset: false }))) return;
         SP.close();
         await loadFreshOrdinaryDesignForCurrentFolder();
