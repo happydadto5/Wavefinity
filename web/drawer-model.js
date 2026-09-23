@@ -37,6 +37,9 @@ const DL = {
   spacerPlan: null,
   spacerSelected: new Set(),
   spacerPlanSignature: null,
+  fillPlan: null,
+  fillSelected: new Set(),
+  fillSignature: null,
   busy: "",              // "auto" | "spacers" | "connectors" | "print" while a request runs
   busyTicket: 0,
   dirty: false,
@@ -73,6 +76,7 @@ DL.defaultSettings = () => ({
     keep_locked: true, include_spacers: false, stack_bins: true,
   },
   spacers: { flexible: true, height: 15 },
+  surface: { ask_object_height: true },
 });
 
 DL.newDrawerId = () => {
@@ -114,6 +118,7 @@ DL.normaliseLayout = raw => {
   delete layout.settings.new_bins_printed; // retired: generating always means Qty 0
   layout.settings.auto = { ...defaults.auto, ...(layout.settings.auto || {}) };
   layout.settings.spacers = { ...defaults.spacers, ...(layout.settings.spacers || {}) };
+  layout.settings.surface = { ...defaults.surface, ...(layout.settings.surface || {}) };
   // Fix 034 K1: autosave has no user-off path any more; a legacy
   // autosave:false layout normalises to the always-on runtime value.
   layout.settings.autosave = true;
@@ -179,6 +184,11 @@ DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
 DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
 DL.isPegboard = (drawer = DL.drawer()) => drawer?.boundary === "pegboard";
+DL.isSurface = () => DL.layout?.space?.kind === "surface";
+DL.planningMap = () => DL.report?.planning_heights || {};
+DL.rowPlanning = one => DL.planningMap()[one?.id] || one?.planning || null;
+DL.effectiveHeight = one => Number(DL.rowPlanning(one)?.effective_mm ?? DL.partHeight(one));
+DL.stackPlanningHeight = layers => Math.max(0, ...layers.map(layer => layer.z0 + DL.effectiveHeight(layer.bin)));
 
 // The wall allowance is a product rule (see DL.canonicalLayoutRules), not a
 // per-drawer setting.
@@ -274,6 +284,7 @@ DL.items = (drawer = DL.drawer()) => DL.chains(drawer).map(chain => {
   return {
     key: DL.key(chain[0]), keys: layers.map(layer => layer.key), chain, bins, layers,
     gx: DL.toCell(chain[0].gx, drawer), gy: DL.toCell(chain[0].gy, drawer), w, d, h: top,
+    plan_h: DL.isSurface() ? DL.stackPlanningHeight(layers) : top,
   };
 });
 
@@ -393,7 +404,7 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
   const grid = DL.grid(drawer);
   const [w, d] = DL.cells(bins[0], drawer);
   const height = DL.stackHeight(bins);
-  if (!DL.isPegboard(drawer) && height > drawer.height + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this drawer's ${fmt(drawer.height)} mm.` };
+  if (!DL.isPegboard(drawer) && !DL.isSurface() && height > drawer.height + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this drawer's ${fmt(drawer.height)} mm.` };
   if (gx < 0 || gy < 0 || gx + w > grid.cols || gy + d > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the pegboard." : "That would stick out of the drawer." };
   if (DL.isPegboard(drawer)) {
     const layout = DL.pegboardLayouts[bins[0].id] || bins[0].pegboard_layout;
@@ -431,7 +442,7 @@ DL.fitsOn = (drawer, bins, target) => {
   const refusal = DL.stackRefusal(bins[0], lower);
   if (refusal) return { ok: false, reason: refusal };
   const height = target.h - (DL.stackSteps[bins[0].stack] ?? 0) + DL.stackHeight(bins);
-  if (height > drawer.height + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this drawer's ${fmt(drawer.height)} mm.` };
+  if (!DL.isSurface() && height > drawer.height + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this drawer's ${fmt(drawer.height)} mm.` };
   return { ok: true, reason: "" };
 };
 
@@ -494,10 +505,15 @@ DL.spacerSignature = () => JSON.stringify([
 // could invalidate them (placements, dimensions, settings, the
 // active drawer, an auto-layout arrangement, or the bin inventory itself).
 // Toggling a candidate's own checkbox must not call this.
-DL.clearSpacerPlan = () => {
+DL.clearSpacerPlan = ({ preserveFill = false } = {}) => {
   DL.spacerPlan = null;
   DL.spacerSelected = new Set();
   DL.spacerPlanSignature = null;
+  if (!preserveFill) {
+    DL.fillPlan = null;
+    DL.fillSelected = new Set();
+    DL.fillSignature = null;
+  }
 };
 
 DL.restore = redo => {
@@ -841,6 +857,9 @@ DL.editBins = async (changes, {
     ...changes,
     layout: Object.hasOwn(changes, "layout") ? changes.layout : DL.layout,
   };
+  const heightOnly = !changes.layout && !changes.new_bins?.length && !changes.delete_ids?.length &&
+    changes.bin_updates?.length > 0 && changes.bin_updates.every(update =>
+      Object.keys(update).every(key => key === "id" || key === "object_height_mm"));
   try {
     DL.requireSpaceContext(context);
     const data = await DL.inventoryCall("/api/drawer/save", payload, { context });
@@ -848,7 +867,7 @@ DL.editBins = async (changes, {
     if (commitLayout) DL.normaliseLayout(data.layout || payload.layout);
     DL.exists = true;
     // Bin sizes/kinds may have just changed underneath any spacer proposal.
-    DL.clearSpacerPlan();
+    DL.clearSpacerPlan({ preserveFill: heightOnly });
     const removed = DL.prune();
     if (commitLayout) DL.selected = selected && DL.findPlacement(selected) ? selected : null;
     if (removed) {
@@ -989,7 +1008,7 @@ DL.quickPlace = one => DL.busyWith("", async context => {
     toast(`No mountable space remains for ${DL.label(one)}.`, true);
     return;
   }
-  if (one.z > drawer.height + 1e-6) { toast(`${DL.label(one)} is ${fmt(one.z)} mm tall - taller than this drawer.`, true); return; }
+  if (!DL.isSurface() && one.z > drawer.height + 1e-6) { toast(`${DL.label(one)} is ${fmt(one.z)} mm tall - taller than this drawer.`, true); return; }
   const copy = DL.nextCopy(one);
   const ask = async rule => {
     const result = await api("/api/drawer/auto", {
@@ -1015,6 +1034,50 @@ DL.quickPlace = one => DL.busyWith("", async context => {
   DL.change(() => drawer.placements.push(placement));
   DL.selected = DL.key(placement);
   if (DL.isPlanned(placement)) toast(`Placed as planned - mark ${DL.label(one)} printed once it is.`);
+});
+
+DL.planSurfaceFill = () => DL.busyWith("fill", async context => {
+  if (!DL.isSurface()) return;
+  if (DL.working?.bin || (typeof workingDesignForSpace === "function" && workingDesignForSpace())) {
+    toast("Finish or save the Current design before filling empty Surface space.", true);
+    return;
+  }
+  if (!(await DL.save())) return;
+  DL.requireSpaceContext(context);
+  const result = await DL.inventoryCall("/api/drawer/surface-fill", {}, { context, write: false });
+  DL.fillPlan = result.candidates || [];
+  DL.fillSelected = new Set(DL.fillPlan.map(one => one.id));
+  DL.fillSignature = result.signature;
+  DL.emit();
+});
+
+DL.toggleFillCandidate = id => {
+  if (!DL.fillPlan) return;
+  if (DL.fillSelected.has(id)) DL.fillSelected.delete(id);
+  else DL.fillSelected.add(id);
+  DL.emit();
+};
+
+DL.createSelectedFillBins = () => DL.busyWith("fill", async context => {
+  if (!DL.isSurface() || !DL.fillPlan || !DL.fillSelected.size) return;
+  const before = DL.snapshot();
+  const result = await DL.inventoryCall("/api/drawer/surface-fill/create", {
+    signature: DL.fillSignature, selected: [...DL.fillSelected],
+  }, { context });
+  DL.adopt(result);
+  DL.normaliseLayout(result.layout);
+  if (DL.snapshot() !== before) { DL.history.push(before); DL.future = []; }
+  DL.fillPlan = null;
+  DL.fillSelected = new Set();
+  DL.fillSignature = null;
+  DL.dirty = false;
+  DL.saveState = "saved";
+  DL.savedAt = new Date();
+  DL.requestReport();
+  await DL.refreshWorking();
+  DL.requireSpaceContext(context);
+  DL.emit();
+  toast(`${result.created?.length || 0} fill bins added to Surface.`);
 });
 
 // Move a placement, and everything stacked on it, to a cell or onto a stack.

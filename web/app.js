@@ -321,7 +321,14 @@ function applySpaceSizingDefaults(design) {
     );
   } else if (kind === "surface") {
     const trimHeight = surfaceTrimHeight(space.trim_size);
-    if (Number.isFinite(trimHeight)) design.box.z = trimHeight;
+    if (Number.isFinite(trimHeight)) {
+      design.layout.surface_base_mode = "edge";
+      design.layout.surface_lightweight_base = true;
+      design.layout.object_height_mm = null;
+      design.box.standard_base = false;
+      design.box.base_thickness = trimHeight;
+      design.box.z = trimHeight + number(state.catalog?.min_height_above_base_mm, 5);
+    }
   } else if (kind === "portable" || kind === "box") {
     design.box.z = normalizeBinDimension("z", space.z);
   } else if (kind === "pegboard") {
@@ -336,6 +343,11 @@ function applySpaceSizingDefaults(design) {
       cleat_x: design.box.pegboard?.cleat_x || "auto",
       cleat_y: design.box.pegboard?.cleat_y || "auto",
     };
+  }
+  if (kind !== "surface") {
+    design.layout.surface_base_mode = "custom";
+    design.layout.surface_lightweight_base = false;
+    design.layout.object_height_mm = null;
   }
   
   return design;
@@ -394,6 +406,7 @@ async function designerSaveToSpace({ silent = false } = {}) {
     if (!silent) toast("Base Trim is not a bin design, so it has no place in Save to Space.", true, 5000);
     return false;
   }
+  if (!(await maybePromptSurfaceObjectHeight())) return false;
   if (!beginDesignMutation()) return false;
   try {
     await commitVisibleDraft();
@@ -427,6 +440,7 @@ async function installLoadedDesignSource(rowId, spec, {
     resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
     state.designInventoryId = rowId;
+    state.surfaceHeightPromptSkipped = false;
     state.workingPending = true;
     state.workingGeneratedKey = null;
     state.drafts = {};
@@ -628,11 +642,13 @@ async function designerGenerateInventoryRow(rowId) {
 
 async function designerLoadFromAnotherSpace() {
   if (typeof SP === "undefined") return;
+  const destination = typeof DL !== "undefined" ? DL.spaceContext() : null;
 
   const folder = await SP.pickFolder();
   if (!folder) return;
 
   try {
+    if (destination) DL.requireSpaceContext(destination);
     let info;
     let data;
     let sourceName;
@@ -663,6 +679,7 @@ async function designerLoadFromAnotherSpace() {
       includeUnavailable: false,
     });
     if (!chosen) return;
+    if (destination) DL.requireSpaceContext(destination);
 
     if (workingDesignForSpace()) {
       const saved = await designerSaveToSpace({ silent: true });
@@ -676,7 +693,8 @@ async function designerLoadFromAnotherSpace() {
       }
     }
 
-    await installLoadedDesignSource(null, clone(chosen.spec), {
+    if (destination) DL.requireSpaceContext(destination);
+    await installLoadedDesignSource(null, normalizeCopiedDesignForDestination(clone(chosen.spec)), {
       successMessage: `Loaded a copy from ${sourceName}.`,
     });
   } catch (error) {
@@ -706,6 +724,7 @@ async function designerNewBin() {
   if (!beginDesignMutation()) return;
   try {
     state.designInventoryId = null;
+    state.surfaceHeightPromptSkipped = false;
     await loadFreshOrdinaryDesignForCurrentFolder();
     toast("Started a new bin.");
   } finally {
@@ -723,6 +742,7 @@ async function designerDuplicate() {
     return;
   }
   const design = clone(visibleDesignSnapshot());
+  if (design.layout) design.layout.object_height_mm = null;
   design.part_name = "";
   design.label = "";
   if (design.box?.edge_mount) design.box.edge_mount.label_text = "";
@@ -748,6 +768,7 @@ async function designerDuplicate() {
     state.lastOrdinaryDesign = clone(state.design);
     state.cleanDesign = clone(state.design);
     state.designInventoryId = null;
+    state.surfaceHeightPromptSkipped = false;
     state.workingPending = state.folderMode === "space";
     state.workingGeneratedKey = null;
     state.drafts = {};
@@ -1839,7 +1860,7 @@ function populateBaseChoices(box, select = $("#base-thickness")) {
 }
 
 function syncBaseControls() {
-  $("#base-thickness-setting").hidden = false;
+  $("#base-thickness-setting").hidden = isSurfaceBinDesign();
 }
 
 function syncWallControls() {
@@ -1935,6 +1956,7 @@ function syncForm() {
   syncPegboardMountForm();
   syncConnectorSectionVisibility();
   updateInteriorModeVisibility();
+  syncSurfaceControls();
   renderPlaced();
 }
 
@@ -2170,6 +2192,159 @@ function surfaceTrimHeight(trimSize) {
   const row = baseTrimPresetRows().find(one => one.key === trimSize);
   const value = Number(row?.value_mm);
   return Number.isFinite(value) ? value : null;
+}
+
+// One prompt per unfinished Surface bin. The setting lives in this Space's
+// saved layout, while the number belongs to this bin and its Inventory row.
+async function maybePromptSurfaceObjectHeight() {
+  if (!isSurfaceBinDesign() || state.design.layout.object_height_mm != null ||
+      state.surfaceHeightPromptSkipped || typeof DL === "undefined") return true;
+  if (!(await DL.ensureLoaded())) return false;
+  const context = DL.spaceContext();
+  if (DL.layout?.settings?.surface?.ask_object_height === false) return true;
+  const dialog = $("#surface-object-height-dialog");
+  const input = $("#surface-object-height-prompt");
+  const noAsk = $("#surface-object-height-no-ask");
+  const error = $("#surface-object-height-error");
+  input.value = "";
+  noAsk.checked = false;
+  error.hidden = true;
+  return new Promise(resolve => {
+    let busy = false;
+    const finish = value => {
+      $("#surface-object-height-save").onclick = null;
+      $("#surface-object-height-continue").onclick = null;
+      dialog.removeEventListener("cancel", onCancel);
+      if (dialog.open) dialog.close();
+      resolve(value);
+    };
+    const persistPreference = async () => {
+      if (!noAsk.checked) return true;
+      DL.requireSpaceContext(context);
+      DL.change(() => { DL.layout.settings.surface.ask_object_height = false; }, { history: false });
+      return DL.save();
+    };
+    const onCancel = event => { event.preventDefault(); if (!busy) finish(false); };
+    $("#surface-object-height-save").onclick = async () => {
+      if (busy) return;
+      const height = Number(input.value);
+      if (!input.value.trim() || !Number.isFinite(height) || height <= 0) {
+        error.textContent = "Enter a positive Object height, or continue without one.";
+        error.hidden = false;
+        return;
+      }
+      busy = true;
+      try {
+        DL.requireSpaceContext(context);
+        if (state.designInventoryId && !(await DL.editBins({ bin_updates: [{ id: state.designInventoryId,
+          object_height_mm: height }] }, { context, customFailure: true }))) throw new Error("Object height was not saved.");
+        if (!(await persistPreference())) throw new Error("Surface setting was not saved.");
+        DL.requireSpaceContext(context);
+        const before = clone(state.design);
+        state.design.layout.object_height_mm = height;
+        $("#surface-object-height").value = height;
+        changedDesign(before);
+        finish(true);
+      } catch (cause) {
+        error.textContent = cause.message;
+        error.hidden = false;
+      } finally { busy = false; }
+    };
+    $("#surface-object-height-continue").onclick = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        if (!(await persistPreference())) throw new Error("Surface setting was not saved.");
+        DL.requireSpaceContext(context);
+        state.surfaceHeightPromptSkipped = true;
+        finish(true);
+      } catch (cause) {
+        error.textContent = cause.message;
+        error.hidden = false;
+      } finally { busy = false; }
+    };
+    dialog.addEventListener("cancel", onCancel);
+    dialog.showModal();
+    input.focus();
+  });
+}
+
+function isSurfaceBinDesign(design = state.design) {
+  return state.folderMode === "space" && state.activeSpace?.kind === "surface"
+    && !design?.box?.b4b?.enabled && !baseTrimEnabled(design);
+}
+
+function normalizeCopiedDesignForDestination(design) {
+  if (!design?.layout || design.box?.b4b?.enabled) return design;
+  if (state.folderMode === "space" && state.activeSpace?.kind === "surface") {
+    if (design.layout.surface_base_mode === "edge") resolveSurfaceBase(design);
+    if (surfaceStackingBlocked(design)) design.layout.surface_lightweight_base = false;
+  } else {
+    design.layout.surface_base_mode = "custom";
+    design.layout.surface_lightweight_base = false;
+  }
+  return design;
+}
+
+function surfaceStackingBlocked(design = state.design) {
+  return design?.box?.stack?.mode === "direct" || Boolean(design?.box?.lid?.enabled && design.box.lid.stackable);
+}
+
+function resolveSurfaceBase(design, { fromForm = false } = {}) {
+  if (!isSurfaceBinDesign(design)) return;
+  design.layout ||= {};
+  const oldBase = number(design.box.base_thickness, 0.6);
+  const oldZ = number(design.box.z, oldBase + 5);
+  const minimum = number(state.catalog?.min_height_above_base_mm, 5);
+  const mode = fromForm ? $("#surface-base-mode").value : (design.layout.surface_base_mode || "custom");
+  const edge = surfaceTrimHeight(state.activeSpace.trim_size);
+  const base = mode === "edge" ? edge : (fromForm
+    ? number($("#surface-base-custom").value, oldBase) : oldBase);
+  if (!Number.isFinite(base) || base <= 0) return;
+  design.layout.surface_base_mode = mode;
+  design.box.standard_base = false;
+  design.box.base_thickness = base;
+  if (Math.abs(base - oldBase) > 1e-9) {
+    design.box.z = mode === "edge"
+      ? base + Math.max(minimum, oldZ - oldBase)
+      : Math.max(oldZ, base + minimum);
+  }
+  if (fromForm) {
+    const objectText = $("#surface-object-height").value.trim();
+    design.layout.object_height_mm = objectText ? Number(objectText) : null;
+    design.layout.surface_lightweight_base = !surfaceStackingBlocked(design)
+      && $("#surface-lightweight-base").checked;
+  }
+}
+
+function syncSurfaceControls() {
+  const shown = isSurfaceBinDesign();
+  const controls = $("#surface-bin-controls");
+  if (!controls) return;
+  controls.hidden = !shown;
+  $("#base-thickness-setting").hidden = shown;
+  if (!shown) return;
+  const layout = state.design.layout || {};
+  const edge = surfaceTrimHeight(state.activeSpace.trim_size);
+  $("#z-size-label").textContent = "Bin height";
+  $("#surface-base-mode").value = layout.surface_base_mode === "edge" ? "edge" : "custom";
+  $("#surface-base-custom-row").hidden = layout.surface_base_mode === "edge";
+  if (document.activeElement !== $("#surface-base-custom"))
+    $("#surface-base-custom").value = fmt(state.design.box.base_thickness);
+  $("#surface-base-resolved").textContent = `Platform: ${fmt(state.design.box.base_thickness)} mm${layout.surface_base_mode === "edge" ? ` (Surface edge ${fmt(edge)} mm)` : ""}`;
+  const blocked = surfaceStackingBlocked();
+  $("#surface-lightweight-base").disabled = blocked;
+  $("#surface-lightweight-base").checked = !blocked && Boolean(layout.surface_lightweight_base);
+  $("#surface-lightweight-base").title = blocked ? "Unavailable with vertical stacking." : "Hidden support-free underside cavities.";
+  if (document.activeElement !== $("#surface-object-height"))
+    $("#surface-object-height").value = layout.object_height_mm ?? "";
+  const plan = Number(state.preview?.planning?.object_height_mm) === Number(layout.object_height_mm)
+    ? state.preview.planning : null;
+  $("#surface-planning-height").textContent = layout.object_height_mm == null
+    ? "Object height not set — using physical bin height for planning"
+    : plan?.source === "bore"
+      ? `Installed planning height: ${fmt(plan.effective_mm)} mm`
+      : `Installed planning height: ~${fmt(plan?.effective_mm ?? layout.object_height_mm)} mm (estimated)`;
 }
 
 function populateBaseTrimSizeChoices() {
@@ -3249,10 +3424,10 @@ function normalizeBinDimension(axis, requestedValue, fallback, { baseThickness }
       baseThickness ?? state.design?.box?.base_thickness,
       state.catalog?.base_rules?.default_mm ?? 0.6
     );
-    const minimum = Math.ceil(
-      base + number(state.catalog.min_height_above_base_mm, 5)
-    );
-    return Math.max(minimum, Math.round(value));
+    const minimum = base + number(state.catalog.min_height_above_base_mm, 5);
+    return isSurfaceBinDesign()
+      ? Math.max(minimum, Math.round(value * 10) / 10)
+      : Math.max(Math.ceil(minimum), Math.round(value));
   }
   const unit = state.catalog.base_unit;
   const max = Math.floor((state.catalog.max_box_size || 350) / unit) * unit;
@@ -3280,6 +3455,7 @@ function updateDesignFromForm() {
     return;
   }
   const prevBoxX = design.box.x;
+  if (isSurfaceBinDesign(design)) resolveSurfaceBase(design, { fromForm: true });
   const prevBoxY = design.box.y;
   const newBoxX = normalizeBinDimension("x", $("#x-size").value, design.box.x);
   const newBoxY = normalizeBinDimension("y", $("#y-size").value, design.box.y);
@@ -3347,11 +3523,11 @@ function updateDesignFromForm() {
   $("#wall-thickness").value = design.box.standard_walls ? "standard" : fmt(design.box.wall);
   if (design.box.wall !== previousWall) autoAdjustConnectorFields();
   const baseChoice = $("#base-thickness").value;
-  design.box.standard_base = !b4bOn && currentStackMode === "none" && baseChoice === "standard";
+  design.box.standard_base = !isSurfaceBinDesign(design) && !b4bOn && currentStackMode === "none" && baseChoice === "standard";
   const defaultBase = b4bOn
     ? number(b4bRules.default_base_mm, 1.6)
     : number(state.catalog?.base_rules?.default_mm, 0.6);
-  design.box.base_thickness = design.box.standard_base
+  if (!isSurfaceBinDesign(design)) design.box.base_thickness = design.box.standard_base
     ? defaultBase
     : number(baseChoice, design.box.base_thickness ?? defaultBase);
   if (currentStackMode !== "none") {
@@ -3384,8 +3560,11 @@ function updateDesignFromForm() {
   readB4BForm(design);
   readPegboardMountForm(design);
   readStackForm(design);
+  if (isSurfaceBinDesign(design) && surfaceStackingBlocked(design))
+    design.layout.surface_lightweight_base = false;
   enforceB4BMinimums(design);
   applyB4BVisibility();
+  syncSurfaceControls();
 }
 
 const saveOutputPreference = debounce(output => {
@@ -3854,6 +4033,17 @@ function wireControls() {
       }
       state.canGenerate = false;
       updateGenerateAvailability();
+      changedDesign();
+    }));
+  ["#surface-base-mode", "#surface-base-custom", "#surface-lightweight-base", "#surface-object-height"]
+    .forEach(selector => $(selector)?.addEventListener(selector === "#surface-base-mode" ? "change" : "input", () => {
+      if (!isSurfaceBinDesign()) return;
+      resolveSurfaceBase(state.design, { fromForm: true });
+      if (selector === "#surface-base-mode" || selector === "#surface-base-custom") {
+        $("#z").value = fmt(state.design.box.z);
+        state.binResizePending = true;
+      }
+      syncSurfaceControls();
       changedDesign();
     }));
   $("#lift-grabber-size").addEventListener("change", () => {
@@ -7435,6 +7625,7 @@ async function autoCommitDraft(request) {
     for (const warning of result.warnings || []) toast(warning, false, 6500);
     renderPlaced();
     updateSelectionButtons();
+    if (wasNew && state.draft?.kind !== "text") await maybePromptSurfaceObjectHeight();
     return true;
   } catch (error) {
     if (request !== state.draftRequest) return;
@@ -7655,6 +7846,7 @@ async function applySupport(index) {
     await refreshPreview();
     refreshDraft();
     for (const warning of result.warnings || []) toast(warning, false, 6500);
+    if (index === null && state.draft?.kind !== "text") await maybePromptSurfaceObjectHeight();
     return true;
   } catch (error) {
     toast(error.message, true, 5000);
@@ -8088,6 +8280,7 @@ async function refreshPreview({ persistResume = true } = {}) {
     const grownZ = result.design?.box?.z !== state.design?.box?.z;
     state.preview = result;
     state.design = result.design;
+    syncSurfaceControls();
     state.previewDesignKey = JSON.stringify(result.design);
     updateDraftOverhangNote();
     checkBinSizeChange();
@@ -11643,15 +11836,18 @@ function visibleDesignSnapshot() {
   visibleDesign.box.x = normalizeBinDimension("x", $("#x-size").value, visibleDesign.box.x);
   visibleDesign.box.y = normalizeBinDimension("y", $("#y-size").value, visibleDesign.box.y);
   visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
+  if (isSurfaceBinDesign(visibleDesign)) resolveSurfaceBase(visibleDesign, { fromForm: true });
   const visibleB4B = $("#bin-type").value === "b4b";
   const b4bRules = state.catalog?.b4b_rules || {};
   const defaultBase = visibleB4B
     ? number(b4bRules.default_base_mm, 1.6)
     : number(state.catalog?.base_rules?.default_mm, 0.6);
-  visibleDesign.box.standard_base = !visibleB4B && $("#base-thickness").value === "standard";
-  visibleDesign.box.base_thickness = visibleDesign.box.standard_base
-    ? defaultBase
-    : number($("#base-thickness").value, visibleDesign.box.base_thickness ?? defaultBase);
+  if (!isSurfaceBinDesign(visibleDesign)) {
+    visibleDesign.box.standard_base = !visibleB4B && $("#base-thickness").value === "standard";
+    visibleDesign.box.base_thickness = visibleDesign.box.standard_base
+      ? defaultBase
+      : number($("#base-thickness").value, visibleDesign.box.base_thickness ?? defaultBase);
+  }
   const wallRules = state.catalog?.wall_rules || {};
   const defaultWall = visibleB4B
     ? number(b4bRules.default_wall_mm, 1.6)
@@ -11670,6 +11866,8 @@ function visibleDesignSnapshot() {
   } else {
     readStackForm(visibleDesign);
     normalizeStackSettings(visibleDesign);
+    if (isSurfaceBinDesign(visibleDesign) && surfaceStackingBlocked(visibleDesign))
+      visibleDesign.layout.surface_lightweight_base = false;
   }
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
@@ -11783,6 +11981,7 @@ async function newDesign() {
     ? makeBaseTrimDesign(previousDesign.box.x, previousDesign.box.y)
     : freshDesignForCurrentFolder();
   state.baseTrimSourceLayout = null;
+  state.surfaceHeightPromptSkipped = false;
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
   if (!baseTrimEnabled(state.design)) markWorkingDesignPending();

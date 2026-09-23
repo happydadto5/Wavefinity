@@ -36,7 +36,7 @@ import shutil
 import threading
 from typing import Any, Iterable
 
-from organizer_engine import BASE_UNIT
+from organizer_engine import BASE_UNIT, MIN_HEIGHT_ABOVE_BASE
 from organizer_product_rules import (
     B4B_LATCHED_MIN_HEIGHT,
     B4B_MIN_FIELD_XY,
@@ -52,7 +52,7 @@ LAYOUT_HEADING = "## Drawer layout"
 COLUMNS = (
     ("id", "ID"), ("date", "Date"), ("kind", "Kind"), ("name", "Name"),
     ("x", "X (mm)"), ("y", "Y (mm)"), ("z", "Z (mm)"), ("stack", "Stack"),
-    ("wall", "Wall (mm)"),
+    ("wall", "Wall (mm)"), ("object_height_mm", "Object height (mm)"),
     ("qty", "Qty"), ("file", "File"), ("label", "Label"), ("interior", "Interior Part(s)"),
     ("boundary", "Boundary"),
     ("pegboard_standard", "Pegboard"),
@@ -69,7 +69,7 @@ KINDS = ("bin", "b4b", "spacer", "manual")
 # straight into the bin below. For stackable bins Z is the requested module
 # contribution; the drawer derives the detached envelope from the interface.
 STACK_MODES = ("none", "lid", "direct", "b4b")
-EDITABLE = ("name", "qty", "x", "y", "z", "stack", "wall")
+EDITABLE = ("name", "qty", "x", "y", "z", "stack", "wall", "object_height_mm")
 MAX_QTY = 999
 # A generated bin is not a printed one.  Until the Layout view's setting says
 # otherwise, new rows start at Qty 0 and are marked printed by hand.
@@ -85,7 +85,7 @@ LEGACY_SPACE_KINDS = ("box",)
 _HEADER_KEYS = {
     "id": "id", "date": "date", "kind": "kind", "name": "name",
     "x": "x", "y": "y", "z": "z", "stack": "stack", "stacking": "stack",
-    "wall": "wall",
+    "wall": "wall", "object height": "object_height_mm",
     "qty": "qty", "quantity": "qty",
     "file": "file", "label": "label", "interior part(s)": "interior",
     "interior": "interior", "boundary": "boundary",
@@ -175,6 +175,18 @@ def _number(value: Any, fallback: float = 0.0) -> float:
     return number if number == number and abs(number) != float("inf") else fallback
 
 
+def _object_height(value: Any) -> float | None:
+    if value is None or str(value).strip() in ("", "-"):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Object height must be a positive number of mm") from error
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError("Object height must be a positive number of mm")
+    return number
+
+
 def infer_kind(file: str, interior: str = "") -> str:
     lead = file.strip().lower()
     if lead.startswith("b4b") or interior.strip().lower().startswith("b4b"):
@@ -237,6 +249,7 @@ def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
         "x": x, "y": y, "z": z,
         "stack": stack if stack in STACK_MODES else "none",
         "wall": wall,
+        "object_height_mm": _object_height(raw.get("object_height_mm")),
         "qty": max(0, min(MAX_QTY, int(_number(qty, 1)))) if _text(qty) else 1,
         "file": file,
         "label": label,
@@ -388,6 +401,8 @@ def _row(one: dict[str, Any]) -> str:
         "qty": str(int(one["qty"])),
         "stack": "" if one.get("stack", "none") == "none" else one["stack"],
         "wall": f"{float(wall):g}" if wall else "",
+        "object_height_mm": (f"{float(one['object_height_mm']):g}"
+                             if one.get("object_height_mm") is not None else ""),
     }
     return "| " + " | ".join(_cell(values.get(key, "")) for key, _ in COLUMNS) + " |"
 
@@ -551,6 +566,7 @@ def _merge_design_source(
         "x": float(record["x"]), "y": float(record["y"]), "z": float(record["z"]),
         "stack": record.get("stack", "none"),
         "wall": record.get("wall"),
+        "object_height_mm": _object_height(record.get("object_height_mm")),
         "label": record.get("label", ""),
         "interior": record.get("interior", ""),
         "pegboard_standard": record.get("pegboard_standard", ""),
@@ -628,6 +644,8 @@ def _clean_bin(raw: dict[str, Any], *, partial: bool) -> dict[str, Any]:
             clean["stack"] = mode
         elif key == "qty":
             clean["qty"] = max(0, min(MAX_QTY, int(_number(raw["qty"], 0))))
+        elif key == "object_height_mm":
+            clean[key] = _object_height(raw[key])
         else:
             value = _number(raw[key])
             if value <= 0:
@@ -650,12 +668,26 @@ def _merge_inventory(
     if layout is not _KEEP and layout is not None and not isinstance(layout, dict):
         raise ValueError("drawer layout must be an object")
     bins = current["bins"]
+    chosen = current["layout"] if layout is _KEEP else layout
+    if isinstance(chosen, dict):
+        chosen = {**chosen, "design_specs": dict(design_specs(chosen))}
     by_id = {one["id"]: one for one in bins}
     for update in bin_updates or ():
         target = by_id.get(str(update.get("id", "")))
         if target is None:
             raise ValueError(f"no bin {update.get('id')!r} in the inventory")
-        target.update(_clean_bin(update, partial=True))
+        clean = _clean_bin(update, partial=True)
+        old_qty = int(target.get("qty") or 0)
+        target.update(clean)
+        spec = design_specs(chosen).get(target["id"])
+        if isinstance(spec, dict) and ("object_height_mm" in clean or
+                                       (old_qty == 0 and int(target["qty"]) > 0)):
+            spec = {**spec, "layout": dict(spec.get("layout") or {})}
+            if "object_height_mm" in clean:
+                spec["layout"]["object_height_mm"] = clean["object_height_mm"]
+            if old_qty == 0 and int(target["qty"]) > 0 and spec["layout"].get("surface_base_mode") == "edge":
+                spec["layout"]["surface_base_mode"] = "custom"
+            chosen["design_specs"][target["id"]] = spec
     gone = {str(one) for one in delete_ids or ()}
     bins = [one for one in bins if one["id"] not in gone]
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -675,6 +707,7 @@ def _merge_inventory(
             "x": clean["x"], "y": clean["y"], "z": clean["z"],
             "stack": clean.get("stack", "none"),
             "wall": raw_wall if raw_wall and raw_wall > 0 else None,
+            "object_height_mm": clean.get("object_height_mm"),
             "qty": clean.get("qty", 1),
             "file": str(raw.get("file") or ""),
             "label": str(raw.get("label") or ""),
@@ -683,7 +716,6 @@ def _merge_inventory(
             "cleat_x": str(raw.get("cleat_x") or "auto").lower(),
             "cleat_y": str(raw.get("cleat_y") or "auto").lower(),
         })
-    chosen = current["layout"] if layout is _KEEP else layout
     return bins, _prune_layout(chosen, bins)
 
 
@@ -736,6 +768,7 @@ def append_bin(
     kind: str = "bin",
     stack: str = "none",
     wall: float | None = None,
+    object_height_mm: float | None = None,
     qty: int | None = None,
     pegboard_standard: str = "",
     cleat_x: str | int = "auto",
@@ -756,6 +789,13 @@ def append_bin(
         bins = current["bins"]
         if qty is None:
             qty = DEFAULT_NEW_BIN_QTY
+        object_height_mm = _object_height(object_height_mm)
+        if design_spec is not None:
+            design_spec = {**design_spec, "layout": dict(design_spec.get("layout") or {})}
+            if object_height_mm is None:
+                object_height_mm = _object_height(design_spec["layout"].get("object_height_mm"))
+            if int(qty) > 0 and design_spec["layout"].get("surface_base_mode") == "edge":
+                design_spec["layout"]["surface_base_mode"] = "custom"
         new_id = next_bin_id(bins)
         bins.append({
             "id": new_id,
@@ -765,6 +805,7 @@ def append_bin(
             "x": float(x), "y": float(y), "z": float(z),
             "stack": stack if stack in STACK_MODES else "none",
             "wall": float(wall) if wall and float(wall) > 0 else None,
+            "object_height_mm": object_height_mm,
             "qty": max(0, int(qty)),
             "file": file,
             "label": label,
@@ -943,6 +984,33 @@ def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> No
         primary["pegboard_residual_y"] = space_def["pegboard_residual_y"]
 
 
+def _reconcile_surface_bases(bins: list[dict[str, Any]], layout: dict[str, Any],
+                             edge: float) -> None:
+    """Keep unprinted Auto platforms on the Surface edge in this transaction."""
+    rows = {one["id"]: one for one in bins}
+    for row_id, source in design_specs(layout).items():
+        row = rows.get(row_id)
+        if row is None or not isinstance(source, dict):
+            continue
+        metadata = source.get("layout")
+        if not isinstance(metadata, dict) or metadata.get("surface_base_mode") != "edge":
+            continue
+        if int(row.get("qty") or 0) > 0:
+            metadata["surface_base_mode"] = "custom"
+            continue
+        box = source.get("box")
+        if not isinstance(box, dict):
+            continue
+        old_base, old_z = float(box["base_thickness"]), float(box["z"])
+        headroom = max(MIN_HEIGHT_ABOVE_BASE, old_z - old_base)
+        box["base_thickness"] = edge
+        box["standard_base"] = False
+        box["z"] = edge + headroom
+        row["z"] = box["z"]
+        if not math.isclose(edge, old_base, abs_tol=1e-9):
+            row["file"] = ""
+
+
 def configure_space(
     output_dir: Path | str, *, raw_def: dict[str, Any], mode: str = "create", allow_legacy: bool = False
 ) -> dict[str, Any]:
@@ -954,6 +1022,8 @@ def configure_space(
         if mode == "create" and isinstance(layout.get("space"), dict):
             raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
         _setup_space_layout(layout, space_def)
+        if mode == "update" and space_def["kind"] == "surface":
+            _reconcile_surface_bases(current["bins"], layout, space_def["z"])
         _write(path, current["bins"], layout, current["legacy"])
         return _payload(path, _read(path))
 
@@ -969,6 +1039,8 @@ def configure_space_text(
         if mode == "create" and isinstance(layout.get("space"), dict):
             raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
         _setup_space_layout(layout, space_def)
+        if mode == "update" and space_def["kind"] == "surface":
+            _reconcile_surface_bases(current["bins"], layout, space_def["z"])
         rendered = render_inventory(str(title or space_def["name"]), current["bins"], layout)
         return _text_payload(rendered, str(title or space_def["name"]), parse_inventory(rendered))
 

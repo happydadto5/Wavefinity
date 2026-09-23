@@ -134,7 +134,7 @@ from organizer_inserts import (
 from organizer_inserts._core import feature_touches_wall
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from bambu_project import build_bambu_project, is_bambu_studio_executable
-from organizer_drawer import drawer_routes
+from organizer_drawer import drawer_routes, stack_part_height
 from organizer_inventory import append_bin, configure_space_text, resolve_inventory_path
 from organizer_product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
@@ -159,6 +159,7 @@ from organizer_app import (
     generate_side_file,
     inside_handle_conflict,
     inventory_bin_record,
+    object_height_plan,
     lid_label_regions,
     parse_sizes,
     preview_geometry,
@@ -643,7 +644,7 @@ def _resolve_photo_nest_edit(
         z=request_box.z + (grown.z - box.z),
     )
     box = _interior_work_box(request_box)
-    updated = Layout(tuple(features), layout.mode, layout.snap)
+    updated = replace(layout, features=tuple(features))
     updated.validate(box)
     validate_customization_clearance(
         box, updated.features, label, label_location, scoop, updated.mode
@@ -1781,7 +1782,7 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     with GEOMETRY_LOCK:
         scene = preview_geometry(
             box, label, layout.features, layout.mode, label_location, scoop, draft,
-            selected=selected,
+            selected=selected, layout=layout,
         )
         if lid_enabled(stack_request):
             lid, lid_texts = make_lid_parts(
@@ -1801,10 +1802,13 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # that comes back carries the zone it actually landed on - otherwise the
     # browser would keep drawing it where it used to be.
     resolved = replace(layout, features=_features_from_preview(layout, scene))
+    canonical = design_to_dict(stack_request, resolved, label, part_name, label_location, scoop)
+    planning_record = inventory_bin_record(stack_request, resolved, None, label, part_name, scoop)
+    planning = object_height_plan(canonical, resolved.object_height_mm)
+    planning["effective_mm"] = max(stack_part_height(planning_record), planning["object_top_mm"] or 0.0)
     return {
-        "design": design_to_dict(
-            stack_request, resolved, label, part_name, label_location, scoop
-        ),
+        "design": canonical,
+        "planning": planning,
         "stack": stack_block,
         "label_outline": scene["label_outline"],
         "label_meta": scene["label_meta"],
@@ -2220,7 +2224,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # placeholder zone it has not been moved out of yet.
     existing = list(_resolved_text(box, tuple(existing), layout.mode,
                                    label, label_location, scoop))
-    updated = Layout(tuple(existing), layout.mode, layout.snap)
+    updated = replace(layout, features=tuple(existing))
     updated.validate(box)
     validate_customization_clearance(
         box, updated.features, label, label_location, scoop, updated.mode
@@ -2289,7 +2293,7 @@ def duplicate_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
                        and bounds.y0 <= one.zone.y0 + 1e-6 and one.zone.y1 <= bounds.y1 + 1e-6
                        for one in proposed):
                 continue
-            updated = Layout(tuple(proposed), layout.mode, layout.snap)
+            updated = replace(layout, features=tuple(proposed))
             updated.validate(prospective)
             validate_customization_clearance(prospective, updated.features, label, label_location, scoop, updated.mode)
         except ValueError:
@@ -2342,7 +2346,7 @@ def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
     request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     box = _interior_work_box(request_box)
     new_mode = str(payload["mode"])
-    converted = convert_layout_mode(box, layout.features, new_mode)
+    converted = convert_layout_mode(box, layout.features, new_mode, layout)
     validate_customization_clearance(
         box, converted.features, label, label_location, scoop, converted.mode
     )
@@ -2415,7 +2419,7 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
         candidate_request = replace(request_box, z=candidate_z)
         candidate_design = design_to_dict(
-            candidate_request, Layout(tuple(originals), mode, layout.snap),
+            candidate_request, replace(layout, features=tuple(originals), mode=mode),
             label, part_name, label_location, scoop,
         )
         (validated_request, validated_layout, validated_label, validated_name,
@@ -2561,7 +2565,7 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
             placed = spread_apart(
                 [sized(one, trial) for one in originals], trial
             )
-            updated = Layout(tuple(placed), mode, layout.snap)
+            updated = replace(layout, features=tuple(placed), mode=mode)
             updated.validate(trial)
             validate_customization_clearance(
                 trial, updated.features, label, label_location, scoop, mode
@@ -2707,6 +2711,9 @@ def inventory_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     with GEOMETRY_LOCK:
         record = inventory_bin_record(box, layout, None, label, part_name, scoop)
     record["file"] = ""
+    plan = object_height_plan(raw_design, record.get("object_height_mm"))
+    record["planning"] = {**plan, "physical_mm": stack_part_height(record),
+                          "effective_mm": max(stack_part_height(record), plan["object_top_mm"] or 0.0)}
     return {"bin": record}
 
 

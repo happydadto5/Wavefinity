@@ -87,6 +87,15 @@
                 <select id="wall-thickness"><option value="standard">Standard</option></select>
               </label>
             </div>
+            <div id="surface-bin-controls" class="field-grid two" hidden>
+              <label>Base height<select id="surface-base-mode"><option value="edge">Auto — Match Surface edge</option><option value="custom">Custom</option></select></label>
+              <label id="surface-base-custom-row">Custom base <span class="unit">mm</span><input id="surface-base-custom" type="number" min="0.4" step="0.1"></label>
+              <span id="surface-base-resolved" class="muted"></span>
+              <label class="checkbox-row"><span>Lightweight base</span><input id="surface-lightweight-base" type="checkbox"></label>
+              <label>Object height <span class="unit">mm</span><input id="surface-object-height" type="number" min="0.1" step="0.1" placeholder="Not set"></label>
+              <span id="surface-planning-height" class="muted"></span>
+              <p class="muted surface-bin-help">Base height is the platform under this Surface bin. Auto matches the Base Trim edge. Lightweight base removes hidden material underneath with support-free 45° cavities. Object height is the object's full physical height or length. Wavefinity uses it only to plan this Surface. It does not change the bin.</p>
+            </div>
             <span id="thin-wall-warning" class="wall-warning" hidden>Very thin — may not print reliably with standard nozzle/slicer settings.</span>
           </div>
 
@@ -731,6 +740,17 @@
     <p id="bin-name-dialog-message">Bins must have a name before you can generate or print.</p>
     <div class="button-row">
       <button id="bin-name-dialog-ok" type="button" class="button primary">OK</button>
+    </div>
+  </dialog>
+  <dialog id="surface-object-height-dialog" class="support-layout-dialog" aria-labelledby="surface-object-height-title">
+    <h2 id="surface-object-height-title">Object height for this bin</h2>
+    <p>Enter the object's full physical height or length. Wavefinity uses it only to plan this Surface. It does not change the bin.</p>
+    <label>Object height (mm) <input id="surface-object-height-prompt" type="number" min="0.1" step="0.1" placeholder="Not set"></label>
+    <label class="checkbox-row"><span>Don't ask again for this Space</span><input id="surface-object-height-no-ask" type="checkbox"></label>
+    <p id="surface-object-height-error" class="field-error" hidden></p>
+    <div class="button-row">
+      <button id="surface-object-height-continue" type="button" class="button secondary">Continue without one</button>
+      <button id="surface-object-height-save" type="button" class="button primary">Save Object height</button>
     </div>
   </dialog>
   <dialog id="draft-switch-dialog" class="support-layout-dialog" aria-labelledby="draft-switch-title">

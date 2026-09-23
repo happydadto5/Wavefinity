@@ -2563,6 +2563,12 @@ SP.updateSpace = async () => {
     const values = SP.readSetupValues();
     if (!values) return;
     const { kind, name, x, y, z, trimSize, extra = {} } = values;
+    const context = typeof DL !== "undefined" ? DL.spaceContext() : null;
+    const requireCurrent = () => { if (context) DL.requireSpaceContext(context); };
+    if (kind === "surface" && typeof DL !== "undefined" && DL.loaded && !(await DL.save())) {
+        throw new Error("Save the current Surface layout before changing its edge.");
+    }
+    requireCurrent();
 
     if (state.runtime.hosted) {
         // Mirror local update semantics: the inventory's own layout.space is
@@ -2571,12 +2577,15 @@ SP.updateSpace = async () => {
         // see Fix 004 Correction 7.E.
         const folder = state.browserFolder;
         const inventoryText = await SP.readInventoryFor(folder, { migrate: true });
+        requireCurrent();
         const result = await api("/api/space/configure-text", {
           inventory_text: inventoryText, inventory_title: name,
           name, kind: state.activeSpace.kind, x, y, z, ...extra,
           ...(trimSize ? { trim_size: trimSize } : {}),
         });
+        requireCurrent();
         await WFFileSystem.writeText(folder.handle, SP.inventoryFilenameFor(folder), result.inventory_text);
+        requireCurrent();
         const space = result.layout.space;
         // This call owns the new Space definition (just written above), but
         // not the bin/part defaults - reading them here and passing them
@@ -2584,6 +2593,7 @@ SP.updateSpace = async () => {
         // eliminates; leaving them unset lets the serialized writer read
         // the newest value from under its own lock instead (C4.1).
         const metadata = await SP.writeMetadata(folder.handle, "space", space, true, {});
+        requireCurrent();
         state.activeSpace = space;
         state.activeSpaceId = metadata.space_id || null;
     } else {
@@ -2591,11 +2601,25 @@ SP.updateSpace = async () => {
           output: state.output, name: name, x: x, y: y, z: z, ...extra,
           ...(trimSize ? { trim_size: trimSize } : {}),
         });
+        requireCurrent();
         state.activeSpace = data.folder.space;
     }
     SP.cancelInlineEdit();
     toast("Space updated.");
     
+    if (kind === "surface" && typeof DL !== "undefined" && DL.loaded) {
+        await DL.load();
+        requireCurrent();
+        DL.clearSpacerPlan();
+        if (typeof isSurfaceBinDesign === "function" && isSurfaceBinDesign()) {
+            const source = DL.layout?.design_specs?.[state.designInventoryId];
+            if (source?.layout?.surface_base_mode === "custom")
+                state.design.layout.surface_base_mode = "custom";
+            if (typeof resolveSurfaceBase === "function") resolveSurfaceBase(state.design);
+            if (typeof syncForm === "function") syncForm();
+            if (typeof refreshPreview === "function") await refreshPreview();
+        }
+    }
     if ((kind === "drawer" || kind === "pegboard") && typeof DL !== "undefined" && DL.active) {
         DL.syncSingleDrawerFromSpace(state.activeSpace);
     }
