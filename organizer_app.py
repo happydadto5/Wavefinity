@@ -900,6 +900,8 @@ def apply_surface_lightweight_base(body: trimesh.Trimesh, box: BoxSpec,
     if max_opening < SURFACE_BASE_MIN_OPENING_MM:
         return body
     safe = flat_cavity_polygon(box)
+    protected = [shape_box(one.zone.x0, one.zone.y0, one.zone.x1, one.zone.y1).buffer(1.0)
+                 for one in layout.features if not is_text(one)]
     cutters = []
     for ix in range(round(box.x / SURFACE_BASE_CELL_MM)):
         cx = -box.x / 2.0 + (ix + 0.5) * SURFACE_BASE_CELL_MM
@@ -909,7 +911,8 @@ def apply_surface_lightweight_base(body: trimesh.Trimesh, box: BoxSpec,
             for _ in range(18):
                 width = (low + high) / 2.0
                 half = width / 2.0
-                if safe.covers(shape_box(cx - half, cy - half, cx + half, cy + half)):
+                square = shape_box(cx - half, cy - half, cx + half, cy + half)
+                if safe.covers(square) and not any(square.intersects(zone) for zone in protected):
                     low = width
                 else:
                     high = width
