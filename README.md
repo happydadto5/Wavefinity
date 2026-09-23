@@ -213,7 +213,7 @@ Planner-side handoff rule: before telling the coding agent to implement a fix, t
 - Each fix uses branch `fixN`, using the unpadded number: `fix6`, `fix9`, `fix12`, etc.
 - Old unrelated branches are not blockers. Stop only when the exact assigned branch already exists and its ownership/state is unclear.
 - Coding agents work only on the assigned Wavefinity `fixN` branch. Never force-push/rewrite `main` or merge the fix to `main` before outside review authorizes it.
-- Make the coherent implementation, inspect the diff, run the required risk-appropriate tests, commit coherently, and push `origin/fixN`.
+- Make the coherent implementation, inspect the diff, perform the verification explicitly required by the active cloud fix, commit coherently, and push `origin/fixN`.
 - At implementation completion, put the outbrief in the **cloud active fix file in `Wavefinity-Help-Code`**, including the Help Code specification SHA used, implementation commit SHA, files changed, tests/results, deviations, and environment limitations. Do not put the outbrief in a Wavefinity `/fixes` directory.
 - Coding agents must never edit cloud `Fix Master.md`. If the coding environment can read but cannot write the private Help Code repository, include the full outbrief in the completion message and do not create a local fix file; the outside ChatGPT reviewer will write it to the cloud record.
 - ChatGPT's outside completion review compares `fixN` against current Wavefinity `main` and the exact cloud fix specification.
@@ -228,6 +228,8 @@ The hosted app tracks `main`; fix branches remain isolated until outside review 
 ### 3. Fast vibe-coding & testing policy
 
 #### Purpose & Core Rule
+
+> **Help Code override:** The generic testing guidance below is for work without an active Help Code implementation contract. For a Help Code Fix/correction, the active cloud fix is the sole task-specific authority for testing. If it says not to write, update, or run automated tests, do not do so regardless of the generic Class A/B/C guidance below.
 
 > **MAXIMIZE CONFIDENCE PER TOKEN.**
 > Use cheap automated tests when they materially improve confidence.
