@@ -2496,7 +2496,7 @@ SP.newSpace = () => {
 // Fix 004 Correction 6.M.
 const wireInfoButtons = (prefix = "space-head") => {
     const btnOpen = document.getElementById(prefix + "-open");
-    if (btnOpen) btnOpen.addEventListener("click", SP.openExisting);
+    if (btnOpen) btnOpen.addEventListener("click", () => SP.run(SP.openExisting));
     const btnEdit = document.getElementById(prefix + "-edit");
     if (btnEdit) btnEdit.addEventListener("click", SP.editSpace);
     const btnShow = document.getElementById(prefix + "-show");
