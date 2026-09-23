@@ -926,7 +926,7 @@ DV.wire = () => {
     } else if (drag?.moved) {
       if (drag.outside) {
         const count = DL.takeOut(drag.key);
-        toast(`Taken out of the drawer${count > 1 ? ` (${count} bins)` : ""}. Back in the inventory list.`);
+        toast(`Taken out of the Space${count > 1 ? ` (${count} bins)` : ""}. Back in the inventory list.`);
       } else if (drag.target) {
         DL.moveTo(drag.key, { target: drag.target });
       } else if (drag.valid) {
@@ -1064,7 +1064,7 @@ DV.renderEmptyState = () => {
       </div>`;
   } else if (mode === "unplaced") {
     box.innerHTML = `<strong>Ready to arrange</strong>
-      <p>Drag a bin from Inventory into the drawer, double-click one to place it, or use Auto layout.</p>`;
+      <p>Drag a bin from Inventory into the Space, double-click one to place it, or use Auto layout.</p>`;
   }
 };
 
@@ -1072,13 +1072,13 @@ DV.buildOverlay = () => {
   const wrap = $('.canvas-wrap[data-canvas="drawer"]');
   if (!wrap || $("#dl-tilt")) return;
   wrap.insertAdjacentHTML("beforeend", `
-    <div class="camera-controls dl-view-controls" aria-label="Drawer camera">
+    <div class="camera-controls dl-view-controls" aria-label="Space camera">
       <div class="camera-controls-row">
         <div class="camera-views"><div class="camera-views-row">
-          <button type="button" data-dl-view="look" title="Standing at the drawer, looking in">Look in</button>
+          <button type="button" data-dl-view="look" title="Looking in from the front of this Space">Look in</button>
           <button type="button" data-dl-view="overhead" title="Almost straight down, like a plan">Overhead</button>
-          <button type="button" data-dl-view="low" title="Low, as if crouched at the drawer - shows what hides behind what">Low</button>
-          <button type="button" data-dl-view="fit" title="Frame the whole drawer again (F)">Fit</button>
+          <button type="button" data-dl-view="low" title="Low view from the front of this Space - shows what hides behind what">Low</button>
+          <button type="button" data-dl-view="fit" title="Frame the whole Space again (F)">Fit</button>
         </div></div>
         <div class="zoom-controls">
           <button type="button" data-dl-zoom="out" aria-label="Zoom out">−</button>
@@ -1086,8 +1086,8 @@ DV.buildOverlay = () => {
         </div>
       </div>
       <div class="camera-controls-row">
-        <label class="canvas-select dl-tilt-control" title="How steeply you look down into the drawer">Angle <input id="dl-tilt" type="range" min="${DV.LIMITS.tilt[0]}" max="${DV.LIMITS.tilt[1]}" step="1"></label>
-        <label class="canvas-select dl-tilt-control" title="Step a little to the left or right of the drawer">Turn <input id="dl-turn" type="range" min="${DV.LIMITS.turn[0]}" max="${DV.LIMITS.turn[1]}" step="1"></label>
+        <label class="canvas-select dl-tilt-control" title="How steeply you look down into the Space">Angle <input id="dl-tilt" type="range" min="${DV.LIMITS.tilt[0]}" max="${DV.LIMITS.tilt[1]}" step="1"></label>
+        <label class="canvas-select dl-tilt-control" title="Move the viewpoint left or right around the Space">Turn <input id="dl-turn" type="range" min="${DV.LIMITS.turn[0]}" max="${DV.LIMITS.turn[1]}" step="1"></label>
         <label class="canvas-select dl-empty-control">Empty cells <input id="dl-show-empty" type="checkbox"></label>
       </div>
     </div>
@@ -1110,7 +1110,7 @@ DV.buildOverlay = () => {
               <option value="column">Anything in front of it</option>
               <option value="adjacent">Only the bin right in front</option>
             </select></label>
-            <label class="checkbox-row" title="Snap stackable bins of the same size into stacks, as tall as the drawer takes"><span>Stack stackable bins</span><input id="dl-auto-stack" type="checkbox"></label>
+            <label class="checkbox-row" title="Snap stackable bins of the same size into stacks, as tall as the Space allows"><span>Stack stackable bins</span><input id="dl-auto-stack" type="checkbox"></label>
             <label class="checkbox-row"><span>Keep locked bins in place</span><input id="dl-auto-locked" type="checkbox"></label>
             <label class="checkbox-row"><span>Include spacers</span><input id="dl-auto-spacers" type="checkbox"></label>
           </div>
@@ -1120,7 +1120,7 @@ DV.buildOverlay = () => {
       <div id="dl-selection" class="dl-selection" hidden></div>
     </div>
     <div id="dl-empty-state" class="dl-empty-state" hidden></div>
-    <div class="layout-hint dl-hint">Drag bins to move · drop on a same-size stackable bin to stack · drag off the drawer to take out · drag the floor to pan · wheel zooms · L locks · Del removes</div>`);
+    <div class="layout-hint dl-hint">Drag bins to move · drop on a same-size stackable bin to stack · drag off the Space to take out · drag the floor to pan · wheel zooms · L locks · Del removes</div>`);
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
     if (button.dataset.dlView === "fit") DV.fit(); else DV.setView(DV.PRESETS[button.dataset.dlView]);
   }));
@@ -1223,9 +1223,22 @@ DV.printMap = () => {
     sheet.id = "dl-print-sheet";
     document.body.appendChild(sheet);
   }
+  const spaceKind = state.activeSpace?.kind;
+  const portable = spaceKind === "portable" || spaceKind === "box";
+  const legacyDrawer = !spaceKind || spaceKind === "drawer";
+  const description = pegboard
+    ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm board. Bottom of the board at the bottom.`
+    : DL.isSurface()
+      ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm surface, ${fmt(drawer.height)} mm edge. Front at the bottom.`
+      : portable
+        ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm inside, ${fmt(drawer.height)} mm max height. Front of the case at the bottom.`
+        : legacyDrawer
+          ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm inside, ${fmt(drawer.height)} mm max height. Front of the drawer at the bottom.`
+          : `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm Space layout.`;
+  const mapAlt = pegboard ? "Pegboard map" : DL.isSurface() ? "Surface map" : portable ? "Portable Storage map" : legacyDrawer ? "Drawer map" : "Space map";
   sheet.innerHTML = `<h1>${escapeHtml(drawer.name)}</h1>
-     <p>${pegboard ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm board. Bottom of the board at the bottom.` : DL.isSurface() ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm surface, ${fmt(drawer.height)} mm edge. Front at the bottom.` : `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm inside, ${fmt(drawer.height)} mm max height. Front of the drawer at the bottom.`}</p>
-    <img alt="${pegboard ? "Pegboard" : "Drawer"} map" src="${DV.planImage(drawer)}">
+     <p>${description}</p>
+    <img alt="${mapAlt}" src="${DV.planImage(drawer)}">
     <table><thead><tr><th>#</th><th>Bin</th><th>Size</th><th>Where (${pegboard ? "bottom" : "front"}-left corner, mm)</th><th>${pegboard ? "Mount" : "Stacking"}</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   document.body.classList.add("dl-printing");
   const done = () => { document.body.classList.remove("dl-printing"); window.removeEventListener("afterprint", done); };

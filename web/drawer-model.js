@@ -404,8 +404,8 @@ DL.fitsAt = (drawer, bins, gx, gy, ignore = new Set()) => {
   const grid = DL.grid(drawer);
   const [w, d] = DL.cells(bins[0], drawer);
   const height = DL.stackHeight(bins);
-  if (!DL.isPegboard(drawer) && !DL.isSurface() && height > drawer.height + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this drawer's ${fmt(drawer.height)} mm.` };
-  if (gx < 0 || gy < 0 || gx + w > grid.cols || gy + d > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the pegboard." : "That would stick out of the drawer." };
+  if (!DL.isPegboard(drawer) && !DL.isSurface() && height > drawer.height + 1e-6) return { ok: false, reason: `That is ${fmt(height)} mm tall - more than this Space's ${fmt(drawer.height)} mm.` };
+  if (gx < 0 || gy < 0 || gx + w > grid.cols || gy + d > grid.rows) return { ok: false, reason: DL.isPegboard(drawer) ? "That would stick out of the pegboard." : "That would stick out of the Space." };
   if (DL.isPegboard(drawer)) {
     const layout = DL.pegboardLayouts[bins[0].id] || bins[0].pegboard_layout;
     if (!layout || layout.error) return { ok: false, reason: layout?.error || "Mount layout is still loading." };
@@ -442,7 +442,7 @@ DL.fitsOn = (drawer, bins, target) => {
   const refusal = DL.stackRefusal(bins[0], lower);
   if (refusal) return { ok: false, reason: refusal };
   const height = target.h - (DL.stackSteps[bins[0].stack] ?? 0) + DL.stackHeight(bins);
-  if (!DL.isSurface() && height > drawer.height + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this drawer's ${fmt(drawer.height)} mm.` };
+  if (!DL.isSurface() && height > drawer.height + 1e-6) return { ok: false, reason: `The stack would be ${fmt(height)} mm tall - more than this Space's ${fmt(drawer.height)} mm.` };
   return { ok: true, reason: "" };
 };
 
@@ -871,7 +871,7 @@ DL.editBins = async (changes, {
     const removed = DL.prune();
     if (commitLayout) DL.selected = selected && DL.findPlacement(selected) ? selected : null;
     if (removed) {
-      toast(`${removed} placed cop${removed === 1 ? "y" : "ies"} taken out of the drawers.`);
+      toast(`${removed} placed cop${removed === 1 ? "y" : "ies"} removed from saved placements.`);
       DL.afterChange();
     } else {
       DL.dirty = false;
@@ -989,7 +989,7 @@ DL.placeAt = (one, where) => {
     : { bin: one.id, copy, gx: DL.toUnits(where.gx, drawer), gy: DL.toUnits(where.gy, drawer), locked: false };
   DL.change(() => drawer.placements.push(placement));
   DL.selected = DL.key(placement);
-  if (DL.isPlanned(placement)) toast(`Placed as planned - every printed ${DL.label(one)} is already in a drawer. Mark it printed once it is.`);
+  if (DL.isPlanned(placement)) toast(`Placed as planned - every printed ${DL.label(one)} is already placed in this Space. Mark it printed once it is.`);
   DL.emit();
   return true;
 };
@@ -1008,7 +1008,7 @@ DL.quickPlace = one => DL.busyWith("", async context => {
     toast(`No mountable space remains for ${DL.label(one)}.`, true);
     return;
   }
-  if (!DL.isSurface() && one.z > drawer.height + 1e-6) { toast(`${DL.label(one)} is ${fmt(one.z)} mm tall - taller than this drawer.`, true); return; }
+  if (!DL.isSurface() && one.z > drawer.height + 1e-6) { toast(`${DL.label(one)} is ${fmt(one.z)} mm tall - taller than this Space.`, true); return; }
   const copy = DL.nextCopy(one);
   const ask = async rule => {
     const result = await api("/api/drawer/auto", {

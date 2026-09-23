@@ -1510,7 +1510,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       folderHelp.hidden = true;
     } else if (state.runtime.hosted) {
       folderHelp.hidden = false;
-      folderHelp.textContent = "Wavefinity keeps this drawer's designs and inventory together in the folder you choose next.";
+      folderHelp.textContent = "Wavefinity keeps this Space's designs and inventory together in the folder you choose next.";
     } else {
       folderHelp.hidden = false;
       folderHelp.textContent = "Wavefinity will save this Space under Documents\\Wavefinity using the Space name.";

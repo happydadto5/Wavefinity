@@ -56,7 +56,7 @@ DP.build = () => {
   if (DP.built) return;
   DP.built = true;
   $("#drawer-panel").innerHTML = `
-    <section id="dl-space-details-card" class="dl-card" aria-label="Drawer">
+    <section id="dl-space-details-card" class="dl-card" aria-label="Space">
       <div class="dl-drawer-row">
         <label id="dl-drawer-label-row"><span id="dl-drawer-label">Drawer</span><select id="dl-drawer"></select></label>
         <button type="button" id="dl-drawer-add" class="button secondary dl-small" title="Add another drawer; it shares this inventory">+ Drawer</button>
@@ -89,7 +89,7 @@ DP.build = () => {
           <button type="button" id="dl-sp-generate" class="button secondary" title="Generate the selected spacer candidates">Generate Selected Spacers</button>
           <button type="button" id="dl-base-trim" class="button secondary" title="Create a Base Trim around one filled rectangular block of bins">Make Base Trim</button>
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
-          <button type="button" id="dl-print" class="button secondary" title="Open this drawer's spacers and the connectors they need together in Bambu Studio">Print Spacers + Connectors</button>
+          <button type="button" id="dl-print" class="button secondary" title="Open this Space's spacers and the connectors they need together in Bambu Studio">Print Spacers + Connectors</button>
         </div>
       </div>
     </section>
@@ -158,7 +158,7 @@ DP.build = () => {
     <section class="dl-savebar" aria-label="Saving">
       <div class="dl-save-row">
         <span id="dl-save-status" class="dl-save-status" role="status"></span>
-        <button type="button" id="dl-map" class="button secondary dl-small" title="Print a map of this drawer and where each bin goes (Ctrl+P)">Print map</button>
+        <button type="button" id="dl-map" class="button secondary dl-small" title="Print a map of this Space and where each bin goes (Ctrl+P)">Print map</button>
       </div>
     </section>`;
   DV.buildOverlay();
@@ -181,7 +181,7 @@ DP.build = () => {
 // /api/drawer/spacers/generate, /api/drawer/print-spacers and
 // /api/drawer/print outright, so these four stay unavailable in hosted mode
 // on every render, not just once at build time.
-DP.HOSTED_UNSUPPORTED_TOOLTIP = "Hosted Wavefinity uses the normal Design generator and download-to-folder workflow instead of local Drawer spacer/slicer operations.";
+DP.HOSTED_UNSUPPORTED_TOOLTIP = "Hosted Wavefinity uses the normal Design generator and download-to-folder workflow instead of local Space spacer/slicer operations.";
 
 // ------------------------------------------------------------------ wiring
 
@@ -508,7 +508,7 @@ DP.onInventoryClick = async event => {
     const placed = DL.placedCount(one.id);
     const ok = await appConfirmAction({
       title: "Remove this bin from inventory?",
-      message: `Remove ${DL.label(one)} from the inventory?${placed ? ` Its ${dlPlural(placed, "placed copy", "placed copies")} come out of every drawer.` : ""} The print file stays in the folder.`,
+      message: `Remove ${DL.label(one)} from the inventory?${placed ? ` Its ${dlPlural(placed, "placed copy", "placed copies")} are removed from the saved layout.` : ""} The print file stays in the folder.`,
       actionLabel: "Remove Bin",
       danger: true,
     });
@@ -589,12 +589,12 @@ DP.isCanonicalDrawer = () => state.folderMode === "space" && ["drawer", "pegboar
 // clicking Print Spacers… must never silently print every unprinted row.
 DP.openSpacerPrintDialog = () => {
   const groups = DL.spacerPrintGroups();
-  if (!groups.length) { toast("No spacers placed in this drawer yet.", true); return; }
+  if (!groups.length) { toast("No spacers placed in this Space yet.", true); return; }
   DP.spacerPrintGroups = groups;
   const container = $("#spacer-print-table-container");
   container.innerHTML = `
     <table class="spacer-print-table">
-      <thead><tr><th></th><th>Size</th><th>Flexible/Rigid</th><th>Qty in drawer</th><th>Printed</th><th>Qty to print</th></tr></thead>
+      <thead><tr><th></th><th>Size</th><th>Flexible/Rigid</th><th>Qty in Space</th><th>Printed</th><th>Qty to print</th></tr></thead>
       <tbody>${groups.map((g, index) => `
         <tr data-group="${index}">
           <td><input type="checkbox" data-sp-check ${g.toPrint > 0 ? "checked" : ""}></td>
@@ -845,7 +845,7 @@ DP.renderStats = () => {
     const node = $(selector);
     if (!nothingPlaced) return;
     node.disabled = true;
-    node.title = "Place a bin in the drawer first.";
+    node.title = "Place a bin in the Space first.";
   });
   // Fix 019 Item 4: Generate Selected Spacers must never be an enabled
   // silent no-op. DL.generateSelectedSpacers() already returns immediately
@@ -1013,7 +1013,7 @@ DP.renderInventory = (force = false) => {
     const printFlag = needed > 0 ? `${needed} needed` : "";
     const picked = eligible && DP.printSelected.has(one.id);
     return `
-      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" draggable="${canPlace}" title="${canPlace ? "Drag into the drawer, or double-click to place" : ""}">
+      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" draggable="${canPlace}" title="${canPlace ? "Drag into the Space, or double-click to place" : ""}">
         ${eligible
           ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.label(one))} for printing"${picked ? " checked" : ""}>`
           : `<span class="dl-print-placeholder" aria-hidden="true"></span>`}
@@ -1024,7 +1024,7 @@ DP.renderInventory = (force = false) => {
           ${planningText ? `<small>${escapeHtml(planningText)}</small>` : ""}
           ${flags.length || printFlag ? `<small class="dl-flags">${escapeHtml([...flags, printFlag].filter(Boolean).join(" · "))}</small>` : ""}
         </span>
-        <span class="dl-placed" title="${holding.length ? `In ${escapeHtml(holding.join(", "))}` : "Not in a drawer"}">${placed - planned}/${one.qty}<small>${planned ? `+${planned} planned` : "placed"}</small></span>
+        <span class="dl-placed" title="${holding.length ? `In ${escapeHtml(holding.join(", "))}` : "Not placed"}">${placed - planned}/${one.qty}<small>${planned ? `+${planned} planned` : "placed"}</small></span>
         <span class="dl-qty" title="How many you have printed">
           <button type="button" data-act="qty-" ${one.qty <= 0 ? "disabled" : ""} aria-label="One fewer printed">−</button>
           <span>${one.qty}</span>
