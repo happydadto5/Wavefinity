@@ -2182,6 +2182,11 @@ SP.wire = () => {
   if (welcomeCreate) welcomeCreate.addEventListener("click", SP.beginCreateNew);
   const welcomeOpen = document.getElementById("welcome-open");
   if (welcomeOpen) welcomeOpen.addEventListener("click", () => SP.run(SP.openExisting));
+  const welcomeDesign = document.getElementById("welcome-design");
+  if (welcomeDesign) welcomeDesign.addEventListener("click", () => {
+    SP.clearSetupContext();
+    SP.run(SP.startUntyped);
+  });
   const tutorialOpen = document.getElementById("space-tutorial-open");
   if (tutorialOpen) tutorialOpen.addEventListener("click", SP.showTutorial);
   const tutorialBack = document.getElementById("space-tutorial-back");
