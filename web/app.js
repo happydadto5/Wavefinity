@@ -642,11 +642,13 @@ async function designerGenerateInventoryRow(rowId) {
 
 async function designerLoadFromAnotherSpace() {
   if (typeof SP === "undefined") return;
+  const destination = typeof DL !== "undefined" ? DL.spaceContext() : null;
 
   const folder = await SP.pickFolder();
   if (!folder) return;
 
   try {
+    if (destination) DL.requireSpaceContext(destination);
     let info;
     let data;
     let sourceName;
@@ -677,6 +679,7 @@ async function designerLoadFromAnotherSpace() {
       includeUnavailable: false,
     });
     if (!chosen) return;
+    if (destination) DL.requireSpaceContext(destination);
 
     if (workingDesignForSpace()) {
       const saved = await designerSaveToSpace({ silent: true });
@@ -690,7 +693,8 @@ async function designerLoadFromAnotherSpace() {
       }
     }
 
-    await installLoadedDesignSource(null, clone(chosen.spec), {
+    if (destination) DL.requireSpaceContext(destination);
+    await installLoadedDesignSource(null, normalizeCopiedDesignForDestination(clone(chosen.spec)), {
       successMessage: `Loaded a copy from ${sourceName}.`,
     });
   } catch (error) {
@@ -2268,6 +2272,18 @@ async function maybePromptSurfaceObjectHeight() {
 function isSurfaceBinDesign(design = state.design) {
   return state.folderMode === "space" && state.activeSpace?.kind === "surface"
     && !design?.box?.b4b?.enabled && !baseTrimEnabled(design);
+}
+
+function normalizeCopiedDesignForDestination(design) {
+  if (!design?.layout || design.box?.b4b?.enabled) return design;
+  if (state.folderMode === "space" && state.activeSpace?.kind === "surface") {
+    if (design.layout.surface_base_mode === "edge") resolveSurfaceBase(design);
+    if (surfaceStackingBlocked(design)) design.layout.surface_lightweight_base = false;
+  } else {
+    design.layout.surface_base_mode = "custom";
+    design.layout.surface_lightweight_base = false;
+  }
+  return design;
 }
 
 function surfaceStackingBlocked(design = state.design) {

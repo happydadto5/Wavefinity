@@ -644,7 +644,7 @@ def _resolve_photo_nest_edit(
         z=request_box.z + (grown.z - box.z),
     )
     box = _interior_work_box(request_box)
-    updated = Layout(tuple(features), layout.mode, layout.snap)
+    updated = replace(layout, features=tuple(features))
     updated.validate(box)
     validate_customization_clearance(
         box, updated.features, label, label_location, scoop, updated.mode
@@ -2224,7 +2224,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # placeholder zone it has not been moved out of yet.
     existing = list(_resolved_text(box, tuple(existing), layout.mode,
                                    label, label_location, scoop))
-    updated = Layout(tuple(existing), layout.mode, layout.snap)
+    updated = replace(layout, features=tuple(existing))
     updated.validate(box)
     validate_customization_clearance(
         box, updated.features, label, label_location, scoop, updated.mode
@@ -2293,7 +2293,7 @@ def duplicate_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
                        and bounds.y0 <= one.zone.y0 + 1e-6 and one.zone.y1 <= bounds.y1 + 1e-6
                        for one in proposed):
                 continue
-            updated = Layout(tuple(proposed), layout.mode, layout.snap)
+            updated = replace(layout, features=tuple(proposed))
             updated.validate(prospective)
             validate_customization_clearance(prospective, updated.features, label, label_location, scoop, updated.mode)
         except ValueError:
@@ -2346,7 +2346,7 @@ def mode_payload(payload: dict[str, Any]) -> dict[str, Any]:
     request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     box = _interior_work_box(request_box)
     new_mode = str(payload["mode"])
-    converted = convert_layout_mode(box, layout.features, new_mode)
+    converted = convert_layout_mode(box, layout.features, new_mode, layout)
     validate_customization_clearance(
         box, converted.features, label, label_location, scoop, converted.mode
     )
@@ -2419,7 +2419,7 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
         candidate_request = replace(request_box, z=candidate_z)
         candidate_design = design_to_dict(
-            candidate_request, Layout(tuple(originals), mode, layout.snap),
+            candidate_request, replace(layout, features=tuple(originals), mode=mode),
             label, part_name, label_location, scoop,
         )
         (validated_request, validated_layout, validated_label, validated_name,
@@ -2565,7 +2565,7 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
             placed = spread_apart(
                 [sized(one, trial) for one in originals], trial
             )
-            updated = Layout(tuple(placed), mode, layout.snap)
+            updated = replace(layout, features=tuple(placed), mode=mode)
             updated.validate(trial)
             validate_customization_clearance(
                 trial, updated.features, label, label_location, scoop, mode

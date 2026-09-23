@@ -2534,7 +2534,8 @@ def auto_text_feature(box: BoxSpec, label: str, mode: str = "fused") -> Feature:
 
 
 def convert_layout_mode(
-    box: BoxSpec, features: Iterable[Feature], mode: str
+    box: BoxSpec, features: Iterable[Feature], mode: str,
+    source_layout: Layout | None = None,
 ) -> Layout:
     """Snap every interior part onto a new mode's grid and validate the result."""
     converted_items = []
@@ -2559,7 +2560,8 @@ def convert_layout_mode(
             continue
         converted_items.append(replace(one, zone=snapped_zone(zone, box, mode)))
     converted = tuple(converted_items)
-    layout = Layout(converted, mode, EDITOR_SNAP)
+    layout = (replace(source_layout, features=converted, mode=mode, snap=EDITOR_SNAP)
+              if source_layout is not None else Layout(converted, mode, EDITOR_SNAP))
     layout.validate(box)
     base_z = base_height(box, mode)
     build_features(box, converted, base_z, layout_zone(box, mode), mode=mode)
