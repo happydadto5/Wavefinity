@@ -104,7 +104,7 @@ DV.clampPan = drawer => {
 DV.camera = (width, height, drawer, view = DV.view) => {
   const W = drawer.width;
   const D = drawer.depth;
-  const H = drawer.height;
+  const H = DL.isSurface() ? Math.max(drawer.height, ...DL.items(drawer).map(item => item.plan_h || item.h)) : drawer.height;
   const tilt = view.tilt * Math.PI / 180;
   const turn = view.turn * Math.PI / 180;
   const away = [Math.sin(turn) * Math.cos(tilt), -Math.cos(turn) * Math.cos(tilt), Math.sin(tilt)];
@@ -170,7 +170,7 @@ DV.pegboardCamera = (width, height, drawer) => {
 // ------------------------------------------------------------------ colour
 
 DV.heightRange = () => {
-  const heights = DL.bins.filter(one => !DL.isSpacer(one)).map(one => Number(one.z));
+  const heights = DL.bins.filter(one => !DL.isSpacer(one)).map(one => DL.isSurface() ? DL.effectiveHeight(one) : Number(one.z));
   return heights.length ? [Math.min(...heights), Math.max(...heights)] : [0, 1];
 };
 
@@ -180,7 +180,8 @@ DV.binColor = (one, range) => {
   let hue, sat, light;
   if (one.kind === "spacer") [hue, sat, light] = one.boundary === "edge" ? [42, 28, 72] : [43, 20, 82];
   else {
-    const t = range[1] > range[0] ? (one.z - range[0]) / (range[1] - range[0]) : 0.5;
+    const height = DL.isSurface() ? DL.effectiveHeight(one) : Number(one.z);
+    const t = range[1] > range[0] ? (height - range[0]) / (range[1] - range[0]) : 0.5;
     const b4b = one.kind === "b4b";
     hue = b4b ? 262 : 188 - t * 6;
     sat = b4b ? 28 : 30 + t * 22;
@@ -587,6 +588,22 @@ DV.paintScene = (ctx, drawer, cam) => {
       if (!entry.ghost || entry.working) {
         hits.push({ key: layer.key, grid: !entry.edge, z: z1, polys: screens.map(s => s.screen), working: Boolean(entry.working) });
       }
+      if (DL.isSurface() && !DL.isSpacer(one)) {
+        const planTop = z0 + DL.effectiveHeight(one);
+        if (planTop > z1 + 0.1) {
+          ctx.save();
+          ctx.setLineDash([4, 4]);
+          ctx.globalAlpha = entry.ghost ? 0.2 : 0.35;
+          const tint = "rgba(32,143,150,.14)";
+          const outline = "#168b92";
+          if (eye[1] < y0) face([[x0, y0, z1], [x1, y0, z1], [x1, y0, planTop], [x0, y0, planTop]], tint, outline);
+          if (eye[1] > y1) face([[x1, y1, z1], [x0, y1, z1], [x0, y1, planTop], [x1, y1, planTop]], tint, outline);
+          if (eye[0] < x0) face([[x0, y1, z1], [x0, y0, z1], [x0, y0, planTop], [x0, y1, planTop]], tint, outline);
+          if (eye[0] > x1) face([[x1, y0, z1], [x1, y1, z1], [x1, y1, planTop], [x1, y0, planTop]], tint, outline);
+          face(flat(x0, y0, x1, y1, planTop), tint, outline);
+          ctx.restore();
+        }
+      }
     });
     if (topFace) DV.drawLabel(ctx, entry, topFace, topInk, topPlanned);
     const base = entry.item?.chain[0];
@@ -612,7 +629,20 @@ DV.paintScene = (ctx, drawer, cam) => {
   ctx.font = "700 11px 'Segoe UI', system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  ctx.fillText(`FRONT · ${fmt(W)} mm wide · ${fmt(D)} deep · ${fmt(H)} max height`, fx, fy + 10);
+  ctx.fillText(DL.isSurface()
+    ? `FRONT · ${fmt(W)} mm wide · ${fmt(D)} deep · ${fmt(H)} mm edge`
+    : `FRONT · ${fmt(W)} mm wide · ${fmt(D)} deep · ${fmt(H)} max height`, fx, fy + 10);
+  if (DL.isSurface() && DL.fillPlan) {
+    DL.fillPlan.forEach(candidate => {
+      const selected = DL.fillSelected.has(candidate.id);
+      const x = grid.ox + candidate.gx * grid.stepX;
+      const y = grid.oy + candidate.gy * grid.stepY;
+      ctx.setLineDash(selected ? [] : [4, 4]);
+      face(flat(x, y, x + candidate.w * grid.stepX, y + candidate.d * grid.stepY, 0.2),
+        selected ? "rgba(37,151,159,.35)" : "rgba(37,151,159,.10)", "#168b92", 2);
+      ctx.setLineDash([]);
+    });
+  }
   // Draw spacer candidates
   if (DL.spacerPlan) {
     DL.spacerPlan.forEach(c => {
@@ -647,7 +677,10 @@ DV.binLabelInfo = (one, stackCount = 1) => {
   const wUnits = DL.mmToUnits ? DL.mmToUnits(one.x) : fmt(Number(one.x) / DL.UNIT);
   const lUnits = DL.mmToUnits ? DL.mmToUnits(one.y) : fmt(Number(one.y) / DL.UNIT);
   const dimLine = `${wMm} × ${lMm} mm · ${wUnits} × ${lUnits} units`;
-  const heightLine = `${fmt(one.z)} mm high`;
+  const plan = DL.isSurface() ? DL.rowPlanning(one) : null;
+  const heightLine = DL.isSurface()
+    ? `${fmt(one.z)} mm print · ${plan?.estimated ? "~" : ""}${fmt(DL.effectiveHeight(one))} mm installed planning`
+    : `${fmt(one.z)} mm high`;
   const stackNote = stackCount > 1 ? ` · ${stackCount}-high stack` : "";
   return {
     name,
@@ -1181,7 +1214,7 @@ DV.printMap = () => {
     const planned = item.chain.filter(DL.isPlanned).length;
     return `<tr><td>${index + 1}</td><td>${escapeHtml(item.bins.map(one => DL.label(one)).join(" + "))}</td>
       <td>${escapeHtml(DL.sizeText(item.bins[0]))}</td><td>${fmt(x)} from left, ${fmt(y)} from ${pegboard ? "bottom" : "front"}</td>
-      <td>${pegboard ? "Mounted" : item.bins.length > 1 ? `${item.bins.length}-high, ${fmt(item.h)} mm` : escapeHtml(DL.stackName(top.stack))}</td>
+       <td>${pegboard ? "Mounted" : DL.isSurface() ? `${fmt(item.h)} mm print · ${fmt(item.plan_h || item.h)} mm installed planning` : item.bins.length > 1 ? `${item.bins.length}-high, ${fmt(item.h)} mm` : escapeHtml(DL.stackName(top.stack))}</td>
       <td>${planned ? "planned" : ""}</td></tr>`;
   }).join("");
   let sheet = $("#dl-print-sheet");
@@ -1191,7 +1224,7 @@ DV.printMap = () => {
     document.body.appendChild(sheet);
   }
   sheet.innerHTML = `<h1>${escapeHtml(drawer.name)}</h1>
-    <p>${pegboard ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm board. Bottom of the board at the bottom.` : `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm inside, ${fmt(drawer.height)} mm max height. Front of the drawer at the bottom.`}</p>
+     <p>${pegboard ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm board. Bottom of the board at the bottom.` : DL.isSurface() ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm surface, ${fmt(drawer.height)} mm edge. Front at the bottom.` : `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm inside, ${fmt(drawer.height)} mm max height. Front of the drawer at the bottom.`}</p>
     <img alt="${pegboard ? "Pegboard" : "Drawer"} map" src="${DV.planImage(drawer)}">
     <table><thead><tr><th>#</th><th>Bin</th><th>Size</th><th>Where (${pegboard ? "bottom" : "front"}-left corner, mm)</th><th>${pegboard ? "Mount" : "Stacking"}</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   document.body.classList.add("dl-printing");

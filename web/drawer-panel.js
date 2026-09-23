@@ -94,6 +94,19 @@ DP.build = () => {
       </div>
     </section>
 
+    <section id="dl-surface-fill" class="control-section open dl-section" aria-label="Fill Empty Space" hidden>
+      <div class="section-heading no-toggle"><span>Fill Empty Space</span></div>
+      <div class="section-body">
+        <p class="dl-note">Turn free Surface cells into ordinary editable bins.</p>
+        <label class="checkbox-row"><span>Ask for missing Object height</span><input id="dl-surface-ask-height" type="checkbox" checked></label>
+        <div class="dl-action-grid">
+          <button type="button" id="dl-fill-plan" class="button secondary">Plan / Update Fill Bins</button>
+          <button type="button" id="dl-fill-create" class="button secondary">Create Selected Fill Bins</button>
+        </div>
+        <div id="dl-fill-candidates"></div>
+      </div>
+    </section>
+
     <section class="control-section open dl-section" aria-label="Inventory">
       <div class="section-heading no-toggle"><span>Inventory</span><span id="dl-inv-count" class="count-badge"></span></div>
       <div class="section-body">
@@ -136,6 +149,7 @@ DP.build = () => {
             <label>Length <span class="unit">mm</span><input id="dl-add-y" type="text" inputmode="numeric" value="48"></label>
             <label>Physical height <span class="unit">mm</span><input id="dl-add-z" type="text" inputmode="numeric" value="40" title="Full printed height including lid/stacking foot"></label>
           </div>
+          <label id="dl-add-object-row" hidden>Object height <span class="unit">mm</span><input id="dl-add-object-height" type="number" min="0.1" step="0.1" placeholder="Not set"></label>
           <div class="button-row"><button type="button" id="dl-add" class="button secondary">Add to inventory</button></div>
         </details>
       </div>
@@ -226,6 +240,16 @@ DP.wire = () => {
   setting("#dl-auto-spacers", "auto", "include_spacers", node => node.checked);
   setting("#dl-sp-flexible", "spacers", "flexible", node => node.checked);
   setting("#dl-sp-height", "spacers", "height", node => Math.max(6, dlNum(node.value, 15)));
+  $("#dl-surface-ask-height").addEventListener("change", async event => {
+    DL.change(() => { DL.layout.settings.surface.ask_object_height = event.target.checked; }, { history: false });
+    await DL.save();
+  });
+  $("#dl-fill-plan").addEventListener("click", () => DL.planSurfaceFill());
+  $("#dl-fill-create").addEventListener("click", () => DL.createSelectedFillBins());
+  $("#dl-fill-candidates").addEventListener("change", event => {
+    const id = event.target.dataset.fillCandidate;
+    if (id) DL.toggleFillCandidate(id);
+  });
 
   $("#dl-batch-select-needed").addEventListener("click", () => DP.selectAllNotPrinted());
   $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllPrintable());
@@ -297,7 +321,9 @@ DP.wire = () => {
     const id = event.target.closest("[data-bin]")?.dataset.bin;
     if (!field || !id) return;
     const text = field === "name" || field === "stack";
-    DL.editBins({ bin_updates: [{ id, [field]: text ? event.target.value : dlNum(event.target.value, 0) }] });
+    DL.editBins({ bin_updates: [{ id, [field]: text ? event.target.value
+      : field === "object_height_mm" && !event.target.value.trim() ? null
+        : dlNum(event.target.value, 0) }] });
   });
   list.addEventListener("dragstart", event => {
     const one = DL.bin(event.target.closest?.("[data-bin]")?.dataset.bin);
@@ -394,10 +420,13 @@ DP.wire = () => {
       x: dlNum($("#dl-add-x").value, 0), y: dlNum($("#dl-add-y").value, 0), z: moduleZ,
       stack,
       kind: "manual",
+      object_height_mm: DL.isSurface() && $("#dl-add-object-height").value.trim()
+        ? dlNum($("#dl-add-object-height").value, 0) : null,
     };
     if (!(bin.x > 0 && bin.y > 0 && bin.z > 0)) { toast("Enter the bin's X, Y and physical height in mm.", true); return; }
     if (await DL.editBins({ new_bins: [bin] })) {
       $("#dl-add-name").value = "";
+      $("#dl-add-object-height").value = "";
       toast(`Added ${bin.name || `${fmt(bin.x)} × ${fmt(bin.y)}`} to the inventory.`);
     }
   });
@@ -624,6 +653,7 @@ DP.update = () => {
   DP.renderDrawer();
   DP.renderAuto();
   DP.renderStats();
+  DP.renderSurfaceFill();
   DP.renderInventory();
   DP.renderSave();
   DV.renderEmptyState();
@@ -641,12 +671,16 @@ DP.syncHistory = () => {
 DP.renderDrawer = () => {
   const drawer = DL.drawer();
   const pegboard = DL.isPegboard(drawer);
+  const surface = DL.isSurface();
   const autoSection = $("#dl-auto-panel");
   const spacerSection = document.querySelector('#drawer-panel [aria-label="Spacers"]');
   const detailsCard = $("#dl-space-details-card");
   if (detailsCard) detailsCard.hidden = DP.singleTypedSpace();
   if (autoSection) autoSection.hidden = pegboard;
-  if (spacerSection) spacerSection.hidden = pegboard;
+  if (spacerSection) spacerSection.hidden = pegboard || surface;
+  $("#dl-surface-fill").hidden = !surface;
+  $("#dl-add-object-row").hidden = !surface;
+  $("#dl-height").closest("label").hidden = surface;
   if ($("#dl-add-details")) $("#dl-add-details").hidden = pegboard;
   const select = $("#dl-drawer");
   if (dlChanged("drawers", JSON.stringify(DL.layout.drawers.map(one => [one.id, one.name])) + DL.layout.active)) {
@@ -703,6 +737,22 @@ DP.renderDrawer = () => {
   const units = value => fmt(value * grid.step / DL.UNIT);
   $("#dl-grid-note").textContent = `Grid ${units(grid.cols)} × ${units(grid.rows)} units (${fmt(grid.cols * grid.step)} × ${fmt(grid.rows * grid.step)} mm). `
     + (edges.length ? `Left over at the edges: ${edges.join(", ")}.` : "No spare strip at the edges.");
+};
+
+DP.renderSurfaceFill = () => {
+  if (!DL.isSurface()) return;
+  dlSet("#dl-surface-ask-height", Boolean(DL.layout.settings.surface.ask_object_height), "checked");
+  const busy = Boolean(DL.busy);
+  $("#dl-fill-plan").disabled = busy;
+  $("#dl-fill-plan").textContent = DL.busy === "fill" ? "Working…" : "Plan / Update Fill Bins";
+  $("#dl-fill-create").disabled = busy || !DL.fillPlan || !DL.fillSelected.size;
+  const signature = JSON.stringify([DL.fillPlan, [...DL.fillSelected]]);
+  if (!dlChanged("surface-fill", signature)) return;
+  $("#dl-fill-candidates").innerHTML = !DL.fillPlan ? ""
+    : DL.fillPlan.length ? `<p class="dl-note">${DL.fillPlan.length} bins fit. Select the ones to create.</p>`
+      + DL.fillPlan.map(one => `<label class="checkbox-row"><span>${fmt(one.x_mm)} × ${fmt(one.y_mm)} mm · cell ${one.gx + 1}, ${one.gy + 1}</span>`
+        + `<input type="checkbox" data-fill-candidate="${escapeHtml(one.id)}"${DL.fillSelected.has(one.id) ? " checked" : ""}></label>`).join("")
+      : '<p class="dl-note">No empty Surface cells remain.</p>';
 };
 
 DP.renderAuto = () => {
@@ -864,7 +914,8 @@ DP.filteredBins = () => {
       .toLowerCase().includes(text);
   });
   const sorters = {
-    height: (a, b) => b.z - a.z || b.x * b.y - a.x * a.y,
+    height: (a, b) => (DL.isSurface() ? DL.effectiveHeight(b) - DL.effectiveHeight(a) : b.z - a.z)
+      || b.x * b.y - a.x * a.y,
     size: (a, b) => b.x * b.y - a.x * a.y || b.z - a.z,
     name: (a, b) => DL.label(a).localeCompare(DL.label(b), undefined, { numeric: true }),
     newest: (a, b) => Number(b.id.slice(1)) - Number(a.id.slice(1)),
@@ -893,6 +944,7 @@ DP.workingRow = () => {
     <span class="dl-bin-main">
       <strong>${escapeHtml(title)}</strong>
       <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units</small>
+      ${DL.isSurface() ? `<small>${one.object_height_mm == null ? "Object height not set" : `Object height ${fmt(one.object_height_mm)} mm · ${one.planning?.estimated ? "~" : ""}${fmt(one.planning?.effective_mm ?? one.z)} mm installed planning${one.planning?.estimated ? " (estimated)" : ""}`}</small>` : ""}
       <small class="dl-flags">${fit?.ok ? "Not generated yet" : "Does not fit this Space yet"}</small>
     </span>
     <button type="button" class="button secondary dl-small" data-empty-act="design">Edit design</button>
@@ -910,7 +962,7 @@ DP.renderInventory = (force = false) => {
   $("#dl-inv-count").textContent = `${dlPlural(DL.bins.length, "design")} · ${printed} printed`;
   const selectedBin = DL.selected ? DL.findPlacement(DL.selected)?.placement.bin : null;
   const counts = DL.bins.map(one => [DL.placedCount(one.id), DL.plannedCount(one.id)]);
-  const signature = JSON.stringify([DL.bins, counts, Object.keys(DL.layout.design_specs || {}),
+  const signature = JSON.stringify([DL.bins, counts, Object.keys(DL.layout.design_specs || {}), DL.report?.planning_heights,
     Boolean(state.runtime.hosted), Boolean(state.slicer?.available),
     DP.filter, [...DP.open], selectedBin, drawer.id, drawer.height, [...DP.printSelected],
     DL.working ? [DL.working.key, DL.working.error || "", DL.workingFit()] : null]);
@@ -933,7 +985,12 @@ DP.renderInventory = (force = false) => {
     const planned = DL.plannedCount(one.id);
     const [w, d] = DL.cells(one, drawer);
     const units = value => fmt(value * DL.grid(drawer).step / DL.UNIT);
-    const tooTall = one.z > drawer.height + 1e-6;
+    const tooTall = !DL.isSurface() && one.z > drawer.height + 1e-6;
+    const plan = DL.rowPlanning(one);
+    const planningText = DL.isSurface()
+      ? one.object_height_mm == null ? "Object height not set"
+        : `Object height ${fmt(one.object_height_mm)} mm · Installed planning ${plan?.estimated ? "~" : ""}${fmt(plan?.effective_mm ?? one.z)} mm${plan?.estimated ? " (estimated)" : ""}`
+      : "";
     const freePrinted = one.qty - (placed - planned);
     const canPlace = !tooTall && !(one.kind === "spacer" && one.boundary === "edge");
     const color = DV.binColor(one, range);
@@ -964,6 +1021,7 @@ DP.renderInventory = (force = false) => {
         <span class="dl-bin-main">
           <strong>${escapeHtml(DL.label(one))}</strong>
           <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units</small>
+          ${planningText ? `<small>${escapeHtml(planningText)}</small>` : ""}
           ${flags.length || printFlag ? `<small class="dl-flags">${escapeHtml([...flags, printFlag].filter(Boolean).join(" · "))}</small>` : ""}
         </span>
         <span class="dl-placed" title="${holding.length ? `In ${escapeHtml(holding.join(", "))}` : "Not in a drawer"}">${placed - planned}/${one.qty}<small>${planned ? `+${planned} planned` : "placed"}</small></span>
@@ -987,6 +1045,7 @@ DP.renderInventory = (force = false) => {
           <label>Qty printed<input type="number" data-field="qty" min="0" step="1" value="${one.qty}"></label>
           <label>Stacking<select data-field="stack">${STACK_OPTIONS.replace(`value="${one.stack}"`, `value="${one.stack}" selected`)}</select></label>
         </div>
+        ${DL.isSurface() ? `<label>Object height <span class="unit">mm</span><input type="number" data-field="object_height_mm" min="0.1" step="0.1" value="${one.object_height_mm ?? ""}" placeholder="Not set"></label>` : ""}
         <div class="field-grid three">
           <label>Width <span class="unit">mm</span><input type="number" data-field="x" min="1" step="8" value="${fmt(one.x)}"></label>
           <label>Length <span class="unit">mm</span><input type="number" data-field="y" min="1" step="8" value="${fmt(one.y)}"></label>
@@ -1086,6 +1145,8 @@ DP.selectMode = async mode => {
       !(await flushVisibleDesignEditsBeforeModeSwitch())) {
     return;
   }
+  if (mode === "space" && typeof workingDesignForSpace === "function" && workingDesignForSpace() &&
+      typeof maybePromptSurfaceObjectHeight === "function" && !(await maybePromptSurfaceObjectHeight())) return;
   DP.setMode(mode);
   if (mode === "space") {
     if (!(await DP.ensureInventoryLoaded())) return;

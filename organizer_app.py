@@ -15,6 +15,7 @@ from typing import Iterable
 import numpy as np
 import trimesh
 from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import box as shape_box
 
 from organizer_engine import (
     BASE_UNIT,
@@ -62,6 +63,7 @@ from organizer_engine import (
     placed_label_outline,
     preview_rings,
     make_box,
+    flat_cavity_polygon,
     make_side_connector,
     make_corner_connector,
     label_mesh_report,
@@ -163,6 +165,7 @@ from organizer_inserts import (
     normalize_divider_scoop,
     resolve_nest_settings,
     resolve_text_features,
+    resolved_options,
     snapped_zone,
     scoop_zone,
     text_depth,
@@ -174,6 +177,11 @@ from organizer_inserts import (
 
 
 APP_DIR = Path(__file__).resolve().parent
+SURFACE_BASE_CELL_MM = BASE_UNIT
+SURFACE_BASE_TOP_SKIN_MM = 1.0
+SURFACE_BASE_CELL_INSET_MM = 1.0
+SURFACE_BASE_MIN_OPENING_MM = 2.0
+SURFACE_BASE_BOOLEAN_OVERTRAVEL_MM = 0.05
 DEFAULT_SAMPLE_BOXES = "2x6,4x6,6x6"   # 16x48, 32x48, 48x48 mm
 
 _FEATURE_DEFINITIONS = feature_definitions()
@@ -860,6 +868,58 @@ def base_height(box: BoxSpec, mode: str) -> float:
     )
 
 
+def _surface_base_cutter(cx: float, cy: float, opening: float, roof_top: float) -> trimesh.Trimesh:
+    """Open-bottom square cavity with a manifold 45 degree closing roof."""
+    tip = 0.05
+    roof_start = roof_top - (opening - tip) / 2.0
+    rings = ((-SURFACE_BASE_BOOLEAN_OVERTRAVEL_MM, opening),
+             (roof_start, opening), (roof_top, tip))
+    vertices = []
+    for z, width in rings:
+        half = width / 2.0
+        vertices.extend(((cx - half, cy - half, z), (cx + half, cy - half, z),
+                         (cx + half, cy + half, z), (cx - half, cy + half, z)))
+    faces = [(0, 3, 2), (0, 2, 1), (8, 9, 10), (8, 10, 11)]
+    for lower in (0, 4):
+        for side in range(4):
+            a, b = lower + side, lower + (side + 1) % 4
+            faces.extend(((a, b, b + 4), (a, b + 4, a + 4)))
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+
+
+def apply_surface_lightweight_base(body: trimesh.Trimesh, box: BoxSpec,
+                                   layout: Layout) -> trimesh.Trimesh:
+    """Remove hidden 8 mm cell cavities from a Surface platform only."""
+    if not layout.surface_lightweight_base:
+        return body
+    if box.b4b.enabled or stack_enabled(box) or lid_stackable(box):
+        raise ValueError("Lightweight base is unavailable with vertical stacking")
+    roof_top = box.base_thickness - SURFACE_BASE_TOP_SKIN_MM
+    max_opening = min(SURFACE_BASE_CELL_MM - 2 * SURFACE_BASE_CELL_INSET_MM,
+                      2.0 * roof_top)
+    if max_opening < SURFACE_BASE_MIN_OPENING_MM:
+        return body
+    safe = flat_cavity_polygon(box)
+    cutters = []
+    for ix in range(round(box.x / SURFACE_BASE_CELL_MM)):
+        cx = -box.x / 2.0 + (ix + 0.5) * SURFACE_BASE_CELL_MM
+        for iy in range(round(box.y / SURFACE_BASE_CELL_MM)):
+            cy = -box.y / 2.0 + (iy + 0.5) * SURFACE_BASE_CELL_MM
+            low, high = 0.0, max_opening
+            for _ in range(18):
+                width = (low + high) / 2.0
+                half = width / 2.0
+                if safe.covers(shape_box(cx - half, cy - half, cx + half, cy + half)):
+                    low = width
+                else:
+                    high = width
+            if low >= SURFACE_BASE_MIN_OPENING_MM:
+                cutters.append(_surface_base_cutter(cx, cy, low, roof_top))
+    if not cutters:
+        return body
+    return difference([body, trimesh.util.concatenate(cutters)])
+
+
 def insert_plate_solid(box: BoxSpec, mode: str):
     """The standalone insert's base plate, sitting on the bin floor.
 
@@ -918,6 +978,7 @@ def preview_geometry(
     box: BoxSpec, label: str = "", features: Iterable[Feature] = (),
     mode: str = "fused", label_location: str = "bottom", scoop: bool = False,
     draft: Feature | None = None, selected: int | None = None,
+    layout: Layout | None = None,
 ) -> dict[str, object]:
     """Build camera-independent preview geometry once per design change.
 
@@ -969,7 +1030,8 @@ def preview_geometry(
     cut_fused_pieces = mode == "fused" and box.edge_mount.holes_enabled
     cut_side_opening_pieces = mode == "fused" and box.side_openings.enabled
 
-    if box.edge_mount.active or box.side_openings.enabled or box.pegboard.enabled:
+    if (box.edge_mount.active or box.side_openings.enabled or box.pegboard.enabled
+            or (layout is not None and layout.surface_lightweight_base)):
         # make_box() already includes Lift Grabbers; Edge Mount also adds the
         # Projecting Label plate and cuts the shell's own small screw holes
         # and driver-access openings. Side Openings cut the finished shell
@@ -980,6 +1042,8 @@ def preview_geometry(
             shell_body = apply_edge_mount_structure(box, shell_body)
         if box.pegboard.enabled:
             shell_body = apply_pegboard_mount_structure(box, shell_body)
+        if layout is not None:
+            shell_body = apply_surface_lightweight_base(shell_body, box, layout)
         if box.side_openings.enabled:
             shell_body = apply_side_openings(box, shell_body)
         geometry.extend(_mesh_preview_geometry(shell_body, "outside"))
@@ -1678,6 +1742,7 @@ def generate_organizer_files(
                 reported.remove_unreferenced_vertices()
                 reported.merge_vertices()
             inlays.append(edge_text)
+        reported = apply_surface_lightweight_base(reported, box, layout)
         # Re-applied last, to the fully completed body (fused features, scoop,
         # rim ledge, Edge Mount and floor text all already on it), so a later
         # body-level operation can never quietly fill a Side Opening back in.
@@ -1730,6 +1795,7 @@ def generate_organizer_files(
                 body.remove_unreferenced_vertices()
                 body.merge_vertices()
             box_inlays.append(edge_text)
+        body = apply_surface_lightweight_base(body, box, layout)
         # Re-applied last, to the fully completed box shell, so a later
         # body-level operation can never quietly fill a Side Opening back in.
         body = apply_side_openings(box, body)
@@ -1977,10 +2043,42 @@ def inventory_bin_record(
             )
         ),
         "wall": wall,
+        "object_height_mm": layout.object_height_mm,
         "pegboard_standard": box.pegboard.standard if box.pegboard.enabled else "",
         "cleat_x": box.pegboard.cleat_x if box.pegboard.enabled else "auto",
         "cleat_y": box.pegboard.cleat_y if box.pegboard.enabled else "auto",
     }
+
+
+def object_height_plan(design: dict | None, object_height_mm: float | None) -> dict[str, object]:
+    """Installed top of an object above its bin's seating datum, for planning only."""
+    if object_height_mm is None:
+        return {"object_height_mm": None, "object_top_mm": None,
+                "estimated": False, "source": "missing"}
+    height = float(object_height_mm)
+    if not math.isfinite(height) or height <= 0:
+        raise ValueError("Object height must be positive and finite")
+    fallback = {"object_height_mm": height, "object_top_mm": height,
+                "estimated": True, "source": "estimate"}
+    if not isinstance(design, dict):
+        return fallback
+    try:
+        box, layout, *_ = design_from_dict(design, validate_layout=False)
+        holders = [one for one in layout.features if not is_text(one)]
+        if not holders or any(one.kind != "bore" for one in holders):
+            return fallback
+        base_z = base_height(box, layout.mode)
+        tops = []
+        for bore in holders:
+            options = resolved_options(box, bore, base_z)
+            mouth_z = base_z + float(options["height"])
+            exposed = height - float(options["depth"])
+            angle = math.radians(float(options.get("angle", 0.0)))
+            tops.append(max(0.0, mouth_z + exposed * math.cos(angle)))
+        return {"object_height_mm": height, "object_top_mm": max(tops),
+                "estimated": False, "source": "bore"}
+    except (ValueError, TypeError, KeyError, OverflowError):
+        return fallback
 
 
 def log_bin_to_folder(
@@ -2863,6 +2961,8 @@ def design_from_dict(
         location = label_position(data.get("label_position", "bottom"))
         return (box, layout, label, str(data.get("part_name", "")), location, False)
     layout = layout_from_dict(data.get("layout", {}))
+    if layout.surface_lightweight_base and (stack_enabled(box) or lid_stackable(box)):
+        raise ValueError("Lightweight base is unavailable with vertical stacking")
     base_z = base_height(box, layout.mode)
     layout = replace(layout, features=tuple(
         replace(

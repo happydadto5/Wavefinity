@@ -225,6 +225,9 @@ class Layout:
     features: tuple[Feature, ...] = ()
     mode: str = "fused"
     snap: float = EDITOR_SNAP
+    object_height_mm: float | None = None
+    surface_base_mode: str = "custom"
+    surface_lightweight_base: bool = False
 
     def __post_init__(self) -> None:
         if self.mode not in LAYOUT_MODES:
@@ -233,6 +236,14 @@ class Layout:
             )
         if not math.isfinite(self.snap) or self.snap <= 0.0:
             raise ValueError("layout snap must be positive and finite")
+        if self.object_height_mm is not None and (
+            not math.isfinite(self.object_height_mm) or self.object_height_mm <= 0
+        ):
+            raise ValueError("Object height must be positive and finite")
+        if self.surface_base_mode not in ("custom", "edge"):
+            raise ValueError("Surface base mode must be custom or edge")
+        if not isinstance(self.surface_lightweight_base, bool):
+            raise ValueError("Lightweight base must be true or false")
 
     def validate(self, box: BoxSpec) -> None:
         # Import locally to keep the shared core independent at module load time.
@@ -394,6 +405,9 @@ def layout_to_dict(layout: Layout) -> dict:
         "version": 1,
         "mode": layout.mode,
         "snap": layout.snap,
+        "object_height_mm": layout.object_height_mm,
+        "surface_base_mode": layout.surface_base_mode,
+        "surface_lightweight_base": layout.surface_lightweight_base,
         "features": [
             {
                 "kind": one.kind,
@@ -458,8 +472,14 @@ def layout_from_dict(data: dict) -> Layout:
             (tuple((float(point[0]), float(point[1])) for point in raw["source_contour"])
              if raw.get("source_contour") else None),
         ))
-    return Layout(tuple(made), str(data.get("mode", "fused")),
-                  float(data.get("snap", EDITOR_SNAP)))
+    object_height = data.get("object_height_mm")
+    return Layout(
+        tuple(made), str(data.get("mode", "fused")),
+        float(data.get("snap", EDITOR_SNAP)),
+        None if object_height is None or object_height == "" else float(object_height),
+        str(data.get("surface_base_mode", "custom")),
+        data.get("surface_lightweight_base", False),
+    )
 
 
 def save_layout(layout: Layout, path: Path) -> None:
