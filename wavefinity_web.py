@@ -97,6 +97,7 @@ from organizer_inserts import (
     Zone,
     auto_grow_text_feature,
     build_features,
+    connector_keep_out,
     cradle_min_footprint,
     divider_cells,
     divider_scoop_targets,
@@ -130,6 +131,7 @@ from organizer_inserts import (
     snapped_zone,
     text_of,
 )
+from organizer_inserts._core import feature_touches_wall
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from bambu_project import build_bambu_project, is_bambu_studio_executable
 from organizer_drawer import drawer_routes
@@ -2384,6 +2386,64 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
     anchor = payload.get("anchor")
     anchor = int(anchor) if anchor is not None and 0 <= int(anchor) < len(originals) else None
     fit = bool(payload.get("fit", False))
+
+    if payload.get("fit_height_to_bore"):
+        if anchor is None or originals[anchor].kind != "bore":
+            raise ValueError("select a Bore before sizing the bin height")
+        bore = originals[anchor]
+        current_base_z = base_height(box, mode)
+        bore_height = float(resolved_options(box, bore, current_base_z)["height"])
+        required_work_z = current_base_z + bore_height
+        if feature_touches_wall(box, bore):
+            required_work_z += box.z - connector_keep_out(box)
+
+        effective_z_offset = box.z - request_box.z
+        structural_minimum = max(
+            ORDINARY_BIN_MIN_HEIGHT_MM,
+            request_box.base_thickness + MIN_HEIGHT_ABOVE_BASE,
+        )
+        candidate_z = float(math.ceil(max(
+            structural_minimum,
+            required_work_z - effective_z_offset,
+        ) - 1e-9))
+        max_height = payload.get("max_height")
+        if max_height is not None and candidate_z > float(max_height) + 1e-9:
+            raise ValueError(
+                f"the Bore needs a {candidate_z:g} mm bin, above this Space's "
+                f"{float(max_height):g} mm maximum height"
+            )
+
+        candidate_request = replace(request_box, z=candidate_z)
+        candidate_design = design_to_dict(
+            candidate_request, Layout(tuple(originals), mode, layout.snap),
+            label, part_name, label_location, scoop,
+        )
+        (validated_request, validated_layout, validated_label, validated_name,
+         validated_location, validated_scoop) = _design(candidate_design)
+        validated_box = _interior_work_box(validated_request)
+        validate_customization_clearance(
+            validated_box, validated_layout.features, validated_label,
+            validated_location, validated_scoop, validated_layout.mode,
+        )
+        with GEOMETRY_LOCK:
+            preview_geometry(
+                validated_box, validated_label, validated_layout.features,
+                validated_layout.mode, validated_location, validated_scoop,
+            )
+        canonical = design_to_dict(
+            validated_request, validated_layout, validated_label,
+            validated_name, validated_location, validated_scoop,
+        )
+        return {
+            "design": canonical,
+            "box": {
+                "x": validated_request.x,
+                "y": validated_request.y,
+                "z": validated_request.z,
+            },
+            "grew": validated_request.z > request_box.z,
+            "changed": validated_request.z != request_box.z,
+        }
 
     if (fit and anchor is not None and originals[anchor].kind == "bore"
             and originals[anchor].options.get("auto_base")):

@@ -286,11 +286,17 @@
           <div class="palette-wrap">
             <div id="support-palette" class="support-palette" role="list"></div>
             <div id="draft-actions" class="draft-actions" hidden>
-              <button type="button" id="save-part" class="button primary">Save</button>
+              <span class="draft-auto-save-note">Changes save automatically.</span>
+              <button type="button" id="save-part" class="button primary">Done</button>
               <button type="button" id="delete-part" class="button danger">Delete</button>
             </div>
           </div>
 
+
+          <div class="added-parts-block">
+            <h3>Added to this bin</h3>
+            <div id="added-parts-list" class="placed-supports"></div>
+          </div>
 
           <div class="support-editor" hidden>
             <div class="editor-title">
@@ -350,11 +356,8 @@
                   <label>Projection <span class="unit">mm</span>
                     <input id="edge-mount-label-projection-mm" type="number" min="5" max="200" step="0.1">
                   </label>
-                  <label class="inline-select">Plate thickness
-                    <select id="edge-mount-label-thickness"></select>
-                  </label>
-                  <label id="edge-mount-label-thickness-custom-row" hidden>Thickness mm
-                    <input id="edge-mount-label-thickness-mm" type="number" min="0.8" max="6" step="0.1">
+                  <label>Plate thickness <span class="unit">mm</span>
+                    <input id="edge-mount-label-thickness-mm" type="number" min="0.8" max="4" step="0.1">
                   </label>
                   <label class="inline-select">Label style
                     <select id="edge-mount-label-style">

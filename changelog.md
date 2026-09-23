@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-22 — Designer workflow polish (Fix 040)
+
+- Parts and options now add and save automatically. **Done** exits editing, and a compact **Added to this bin** list opens or deletes every exact item.
+- Bore controls now read Type, Base, Hole and include one-click Bore-to-bin and bin-to-Bore sizing for footprint and height.
+- Edge Mount starts as a real separate label, keeps Label or Screw Mounting enabled until Delete, and uses one direct Plate thickness field.
+- Save to Space and switching into Space now preserve the latest visible valid edit instead of an older saved draft.
+
 ## 2026-09-21 — Bore Wavy Base and wall joining
 
 - Bore has a third style, **Wavy Base**: a solid raised base with wavy-walled holes. It sizes the bin to the smallest legal size around all its holes, keeping the holes where you placed them.

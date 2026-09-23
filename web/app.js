@@ -394,8 +394,10 @@ async function designerSaveToSpace({ silent = false } = {}) {
     if (!silent) toast("Base Trim is not a Designer bin, so it has no place in Save to Space.", true, 5000);
     return false;
   }
-  const design = visibleDesignSnapshot();
+  if (!beginDesignMutation()) return false;
   try {
+    await commitVisibleDraft();
+    const design = clone(state.design);
     const data = await DL.inventoryCall("/api/drawer/design-source/save", {
       design, row_id: state.designInventoryId || undefined,
     });
@@ -406,6 +408,8 @@ async function designerSaveToSpace({ silent = false } = {}) {
   } catch (error) {
     if (!silent) toast(`Could not save to Space: ${error.message}`, true, 6000);
     return false;
+  } finally {
+    finishDesignMutation();
   }
 }
 
@@ -1046,18 +1050,11 @@ function syncLiftGrabberControls() {
 function populateEdgeMountChoices() {
   const rules = state.catalog?.edge_mount || {};
   const projectionSelect = $("#edge-mount-label-projection");
-  const thicknessSelect = $("#edge-mount-label-thickness");
   if (projectionSelect && !projectionSelect.options.length) {
     for (const choice of rules.projection_choices || []) {
       projectionSelect.add(new Option(choice.label, choice.value));
     }
     projectionSelect.add(new Option("Custom", "custom"));
-  }
-  if (thicknessSelect && !thicknessSelect.options.length) {
-    for (const choice of rules.thickness_choices || []) {
-      thicknessSelect.add(new Option(choice.label, choice.value));
-    }
-    thicknessSelect.add(new Option("Custom", "custom"));
   }
 }
 
@@ -1078,10 +1075,12 @@ function readEdgeMountForm(design) {
   const projection = number(
     $("#edge-mount-label-projection-mm")?.value, current.label_projection_mm,
   );
-  const thicknessSelect = $("#edge-mount-label-thickness");
-  const thickness = thicknessSelect?.value === "custom"
-    ? number($("#edge-mount-label-thickness-mm")?.value, current.label_thickness_mm)
-    : number(thicknessSelect?.value, current.label_thickness_mm);
+  const thicknessInput = $("#edge-mount-label-thickness-mm");
+  const thicknessRaw = thicknessInput?.value ?? "";
+  const thicknessWasEdited = thicknessRaw !== (thicknessInput?.dataset.storedValue ?? thicknessRaw);
+  const thickness = thicknessWasEdited
+    ? Math.min(4, Math.max(0.8, number(thicknessRaw, current.label_thickness_mm)))
+    : current.label_thickness_mm;
   const spacingMode = $("#edge-mount-spacing-mode")?.value || "auto";
   const ribCountMode = $("#edge-mount-standoff-rib-count-mode")?.value || "auto";
   design.box.edge_mount = {
@@ -1154,16 +1153,10 @@ function syncEdgeMountControls() {
     $("#edge-mount-label-projection-mm").value = fmt(edgeMount.label_projection_mm);
   }
 
-  const thicknessSelect = $("#edge-mount-label-thickness");
-  if (thicknessSelect) {
-    const known = [...thicknessSelect.options].some(
-      option => option.value !== "custom" && number(option.value) === number(edgeMount.label_thickness_mm)
-    );
-    thicknessSelect.value = known ? fmt(edgeMount.label_thickness_mm) : "custom";
-    if ($("#edge-mount-label-thickness-custom-row")) {
-      $("#edge-mount-label-thickness-custom-row").hidden = known;
-    }
-    if ($("#edge-mount-label-thickness-mm")) $("#edge-mount-label-thickness-mm").value = fmt(edgeMount.label_thickness_mm);
+  const thicknessInput = $("#edge-mount-label-thickness-mm");
+  if (thicknessInput) {
+    thicknessInput.value = fmt(edgeMount.label_thickness_mm);
+    thicknessInput.dataset.storedValue = thicknessInput.value;
   }
   const accessSelect = $("#edge-mount-access-diameter");
   if (accessSelect) {
@@ -1208,7 +1201,6 @@ function syncEdgeMountEditorVisibility() {
       || $("#edge-mount-label-type").value !== "integrated";
   }
   $("#edge-mount-standoff-rib-count-row").hidden = $("#edge-mount-standoff-rib-count-mode").value !== "manual";
-  $("#edge-mount-label-thickness-custom-row").hidden = $("#edge-mount-label-thickness").value !== "custom";
   $("#edge-mount-spacing-custom-row").hidden = $("#edge-mount-spacing-mode").value !== "custom";
   $("#edge-mount-hole-orientation-row").hidden = number($("#edge-mount-hole-count").value) <= 1;
   const access = $("#edge-mount-access-diameter");
@@ -3808,9 +3800,9 @@ function wireControls() {
   $("#lift-grabber-location").addEventListener("change", changedDesign);
 
   const edgeMountChangeIds = [
-    "#edge-mount-side", "#edge-mount-label-enabled", "#edge-mount-holes-enabled",
+    "#edge-mount-side",
     "#edge-mount-label-type", "#edge-mount-label-length-mode", "#edge-mount-label-projection",
-    "#edge-mount-label-thickness", "#edge-mount-label-style", "#edge-mount-label-flip",
+    "#edge-mount-label-style", "#edge-mount-label-flip",
     "#edge-mount-standoff-ribs-enabled", "#edge-mount-standoff-rib-count-mode",
     "#edge-mount-hole-count", "#edge-mount-hole-orientation", "#edge-mount-access-diameter",
     "#edge-mount-spacing-mode",
@@ -3819,6 +3811,19 @@ function wireControls() {
     syncEdgeMountEditorVisibility();
     changedDesign();
   }));
+  ["#edge-mount-label-enabled", "#edge-mount-holes-enabled"].forEach(selector =>
+    $(selector)?.addEventListener("change", event => {
+      const labelEnabled = $("#edge-mount-label-enabled").checked;
+      const holesEnabled = $("#edge-mount-holes-enabled").checked;
+      if (state.modifierEditing === "edge_mount" && edgeMountActive() &&
+          !labelEnabled && !holesEnabled) {
+        event.currentTarget.checked = true;
+        toast("Edge Mount needs Label or Screw Mounting. Use Delete to remove Edge Mount.", true, 6000);
+        return;
+      }
+      syncEdgeMountEditorVisibility();
+      changedDesign();
+    }));
   const edgeMountInputIds = [
     "#edge-mount-label-text", "#edge-mount-label-projection-mm", "#edge-mount-label-thickness-mm",
     "#edge-mount-label-depth", "#edge-mount-standoff-rib-count", "#edge-mount-screw-diameter", "#edge-mount-access-diameter",
@@ -4307,6 +4312,7 @@ async function addModifier(kind) {
     return;
   }
   if (kind === "edge_mount") {
+    const previous = clone(state.design);
     const rules = state.catalog?.edge_mount || {};
     const side = state.design.box.edge_mount?.side || "front";
     const normalDepth = ["front", "back"].includes(side)
@@ -4318,12 +4324,20 @@ async function addModifier(kind) {
     state.design.box.edge_mount = {
       ...EDGE_MOUNT_DEFAULTS,
       ...(state.design.box.edge_mount || {}),
+      label_enabled: true,
+      holes_enabled: false,
+      label_type: "separate",
+      standoff_ribs_enabled: true,
       label_projection_mm: projection,
       access_diameter_mm: resolvedEdgeMountAccessDiameter(
         state.design.box.edge_mount || EDGE_MOUNT_DEFAULTS,
       ),
     };
-    return openModifier(kind);
+    recordHistory(previous);
+    syncForm();
+    await openModifier(kind);
+    await refreshPreview();
+    return;
   }
   const previous = clone(state.design);
   if (kind === "lid_stacking") {
@@ -4408,6 +4422,19 @@ function commitEdgeMountFormBeforeSwitch() {
   recordHistory(previousDesign);
   return true;
 }
+
+async function flushVisibleDesignEditsBeforeModeSwitch() {
+  if (state.designMutationBusy) return false;
+  if (state.draft && !(await guardDraftSwitch())) return false;
+  if (state.modifierEditing) return commitEdgeMountFormBeforeSwitch();
+
+  const previousDesign = pendingDesignHistory || clone(state.design);
+  const previousCanGenerate = state.canGenerate;
+  cancelChangedDesignDebounce();
+  pendingDesignHistory = null;
+  return applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate);
+}
+window.flushVisibleDesignEditsBeforeModeSwitch = flushVisibleDesignEditsBeforeModeSwitch;
 
 function syncDraftEditorIdentity(kind, info) {
   const isNest = kind === "nest";
@@ -5032,6 +5059,11 @@ function renderDraftFields() {
         ${boreProfiles.map(([value, label]) => `<option value="${value}" ${draftProfile === value ? "selected" : ""}>${label}</option>`).join("")}
       </select></label>`;
 
+      html += `<div class="bore-group wide">
+        <span class="bore-group-label">Type</span>
+        <div class="bore-group-fields">${styleField}</div>
+      </div>`;
+
       // Base: the zone the Bore occupies (solid block for Full Base) - its size and the hole
       // grid that fills it (X / Y counts drive the same footprint as Width /
       // Length, so they belong together).
@@ -5048,7 +5080,7 @@ function renderDraftFields() {
               ? autoField("Width", "base", "width", "mm") + autoField("Length", "base", "depth", "mm")
               : field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" }) +
                 field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
-            <button type="button" class="button secondary" data-action="bore-size-bin">Auto size bin</button>
+            ${autoButton("base")}
           </div>
           <div class="bore-auto-row">
             ${autoOn("height")
@@ -5062,6 +5094,17 @@ function renderDraftFields() {
               : gridField("columns", "X count") + gridField("rows", "Y count")}
             ${wavyBase ? "" : autoButton("grid")}
           </div>
+          <div class="bore-one-shot-grid">
+            <span class="bore-one-shot-corner" aria-hidden="true"></span>
+            <span class="bore-one-shot-heading">Target Bore</span>
+            <span class="bore-one-shot-heading">Target Bin</span>
+            <span class="bore-one-shot-row">Width / Length</span>
+            <button type="button" class="button secondary" data-action="bore-xy-to-bin" title="Resize Bore Width/Length to the bin" aria-label="Resize Bore Width/Length to the bin">Auto Size to Bin</button>
+            <button type="button" class="button secondary" data-action="bore-xy-to-bore" title="Resize bin Width/Length to the Bore" aria-label="Resize bin Width/Length to the Bore">Auto Size to Bore</button>
+            <span class="bore-one-shot-row">Height</span>
+            <button type="button" class="button secondary" data-action="bore-height-to-bin" title="Resize Bore Height to the bin" aria-label="Resize Bore Height to the bin">Auto Size to Bin</button>
+            <button type="button" class="button secondary" data-action="bore-height-to-bore" title="Resize bin Height to the Bore" aria-label="Resize bin Height to the Bore">Auto Size to Bore</button>
+          </div>
         </div>
       </div>`;
 
@@ -5069,7 +5112,6 @@ function renderDraftFields() {
       html += `<div class="bore-group wide">
         <span class="bore-group-label">Hole</span>
         <div class="bore-group-fields bore-hole-fields">
-          ${styleField}
           ${wallStyleField}
           ${diameterField}
           ${shapeField}
@@ -5514,9 +5556,16 @@ function renderDraftFields() {
   if (fillBtn) fillBtn.addEventListener("click", fillPartToBin);
   const growBtn = $('[data-action="grow-bin"]', $("#draft-fields"));
   if (growBtn) growBtn.addEventListener("click", event => autoExpandBin({ button: event.currentTarget }));
-  const sizeBinBtn = $('[data-action="bore-size-bin"]', $("#draft-fields"));
-  if (sizeBinBtn) sizeBinBtn.addEventListener("click", event =>
+  const boreXyToBin = $('[data-action="bore-xy-to-bin"]', $("#draft-fields"));
+  if (boreXyToBin) boreXyToBin.addEventListener("click", sizeBoreBaseToBinOnce);
+  const boreXyToBore = $('[data-action="bore-xy-to-bore"]', $("#draft-fields"));
+  if (boreXyToBore) boreXyToBore.addEventListener("click", event =>
     autoExpandBin({ keepDraft: true, fit: true, button: event.currentTarget }));
+  const boreHeightToBin = $('[data-action="bore-height-to-bin"]', $("#draft-fields"));
+  if (boreHeightToBin) boreHeightToBin.addEventListener("click", sizeBoreHeightToBinOnce);
+  const boreHeightToBore = $('[data-action="bore-height-to-bore"]', $("#draft-fields"));
+  if (boreHeightToBore) boreHeightToBore.addEventListener("click", event =>
+    sizeBinHeightToBoreOnce(event.currentTarget));
   updateFitActions();
   // Bore Auto modes: one button per group, and clicking an Auto field turns
   // that group manual starting from what it currently resolves to.
@@ -7549,30 +7598,17 @@ async function applySupport(index) {
   }
 }
 
-// "Save Part": fold the open draft into the design (appending a new part or
-// updating the one being re-edited), then return to the 10-part palette. A
-// draft that can't be saved (overlap, doesn't fit) keeps the editor open with
-// its error.
+// Done flushes the latest valid edit, then exits editing. Persistence belongs
+// to auto-add/auto-save; this action never appends a second copy.
 async function saveCurrentPart() {
   if (state.modifierEditing) return saveEdgeMountPart();
   if (!state.draft || !beginDesignMutation()) return;
   try {
-    const index = draftCommitIndex();
-    const applyIndex = Number.isInteger(index) ? index : null;
-    const previousDesign = clone(state.design);
-    const result = await api("/api/feature/apply", {
-      design: state.design, feature: state.draft, index: applyIndex,
-    });
-    state.design = result.design;
-    await rememberAppliedPartDefault(result, state.draft);
-    seedPartNameFromText(state.draft);
-    recordHistory(previousDesign);
+    await commitVisibleDraft();
     state.paletteBrowsing = true;
     clearDraftSelection();
     renderPlaced();
     await refreshPreview();
-    toast("Part saved.");
-    for (const warning of result.warnings || []) toast(warning, false, 6500);
   } catch (error) {
     toast(error.message, true, 5000);
   } finally {
@@ -7589,15 +7625,12 @@ async function saveEdgeMountPart() {
   }
   if (!beginDesignMutation()) return;
   try {
-    const previousDesign = clone(state.design);
     const result = await api("/api/design/validate", { design: state.design });
     state.design = result.design;
-    recordHistory(previousDesign);
     state.paletteBrowsing = true;
     clearDraftSelection();
     renderPlaced();
     await refreshPreview();
-    toast(`${partInfo(kind)?.title || "Option"} saved.`);
   } catch (error) {
     toast(error.message, true, 5000);
   } finally {
@@ -7745,14 +7778,16 @@ function updateSelectionButtons() {
   $$(".support-choice").forEach(button => {
     const info = partInfo(button.dataset.kind);
     const isModifier = info?.capabilities?.includes("box_modifier");
-    const alreadyAdded = partAtLimit(info);
-    const isThisModifierBeingEdited = state.modifierEditing === button.dataset.kind;
+    const count = partInstanceCount(button.dataset.kind);
+    const alreadyAdded = count > 0;
+    const active = button.classList.contains("active");
     button.disabled = busy || (hasPhotoNest && !isModifier);
-    button.classList.toggle("added", alreadyAdded && !isThisModifierBeingEdited);
+    button.classList.toggle("added", alreadyAdded && !active);
+    button.classList.toggle("has-state", active || alreadyAdded);
     const stateLabel = $(".support-choice-state", button);
     if (stateLabel) {
-      stateLabel.hidden = !alreadyAdded;
-      stateLabel.textContent = alreadyAdded ? "Added" : "";
+      stateLabel.hidden = !active && !alreadyAdded;
+      stateLabel.textContent = active ? "Editing" : alreadyAdded ? `${count} added` : "";
     }
     if (isModifier) {
       button.title = alreadyAdded
@@ -7779,30 +7814,10 @@ function updateDraftStatusColor(hasError) {
   });
 }
 
-function renderPlaced() {
-  if (!state.design) return;
-  const features = state.design.layout.features;
-  const containers = $$("#placed-supports");
+function placedRowData() {
   const editingFeatureIndex = state.draft
     ? (Number.isInteger(draftCommitIndex()) ? draftCommitIndex() : state.draftSourceIndex)
     : null;
-  const featureMarkup = features.map((one, index) => {
-      if (index === editingFeatureIndex) return "";
-      const width = one.zone[2] - one.zone[0];
-      const depth = one.zone[3] - one.zone[1];
-      const isRim = one.kind === "text" && one.options?.level === "rim";
-      const title = isRim ? "Text (Rim Level)" : escapeHtml(partInfo(one.kind)?.title || one.kind);
-      const specs = isRim ? escapeHtml(one.options?.text || "Rim label") : `${fmt(width)} × ${fmt(depth)} mm`;
-      const invalid = new Set(state.preview?.invalid_feature_indexes || []).has(index);
-      const statusClass = invalid ? "status-error" : (index === state.selected ? "status-valid" : "");
-      return `<div class="placed-item ${index === state.selected ? "selected" : ""} ${statusClass}" style="--support-color:${kindColor(one.kind)}">
-        <button type="button" class="placed-item-select" data-index="${index}">
-          <span class="placed-item-icon">${iconFor(one.kind)}</span>
-          <span class="placed-item-copy"><strong>${title}</strong><span class="placed-item-detail">${specs}</span></span>
-        </button>
-        <button type="button" class="placed-item-delete" data-index="${index}" title="Delete this interior part" aria-label="Delete ${title}">Delete</button>
-      </div>`;
-    }).join("");
   const modifierDetail = kind => {
     const box = state.design.box || {};
     if (kind === "lid_stacking") return box.lid?.enabled ? "Lid" : "Stackable Bin";
@@ -7815,34 +7830,79 @@ function renderPlaced() {
       ? "Label + Screws" : edge.label_enabled ? "Label" : "Screws";
     return `${edge.side || "front"} · ${detail}`;
   };
-  const modifierMarkup = [...BOX_MODIFIER_KINDS]
-    .filter(kind => modifierIsActive(kind) && state.modifierEditing !== kind)
-    .map(kind => {
-      const info = partInfo(kind);
-      return `<div class="placed-item ${state.modifierEditing === kind ? "selected status-valid" : ""}" data-kind="${kind}" style="--support-color:${kindColor(kind)}">
-        <button type="button" class="placed-item-select" data-kind="${kind}">
-          <span class="placed-item-icon">${iconFor(kind)}</span>
-          <span class="placed-item-copy"><strong>${escapeHtml(info?.title || kind)}</strong><span class="placed-item-detail">${escapeHtml(modifierDetail(kind))}</span></span>
-        </button>
-        <button type="button" class="placed-item-delete" data-kind="${kind}" title="Delete ${escapeHtml(info?.title || kind)}" aria-label="Delete ${escapeHtml(info?.title || kind)}">Delete</button>
-      </div>`;
-    }).join("");
-  const visibleMarkup = featureMarkup + modifierMarkup;
-  const markup = visibleMarkup || (placedPartCount() > 0
-    ? '<div class="placed-empty">No other parts or options.</div>'
-    : '<div class="placed-empty">No parts or options yet. Pick one above.</div>');
-  containers.forEach(container => {
-    container.innerHTML = markup;
-    $$(".placed-item-select[data-index]", container).forEach(button => button.addEventListener("click", async () => {
-      const index = Number(button.dataset.index);
-      await selectedFeature(index);
-    }));
-    $$(".placed-item-delete[data-index]", container).forEach(button => button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
-    $$(".placed-item-select[data-kind]", container).forEach(button =>
-      button.addEventListener("click", () => openModifier(button.dataset.kind, true)));
-    $$(".placed-item-delete[data-kind]", container).forEach(button =>
-      button.addEventListener("click", () => removeModifier(button.dataset.kind)));
+  const invalid = new Set(state.preview?.invalid_feature_indexes || []);
+  const rows = state.design.layout.features.map((one, index) => {
+    const width = one.zone[2] - one.zone[0];
+    const depth = one.zone[3] - one.zone[1];
+    const isRim = one.kind === "text" && one.options?.level === "rim";
+    return {
+      type: "feature", index, kind: one.kind,
+      title: isRim ? "Text (Rim Level)" : partInfo(one.kind)?.title || one.kind,
+      detail: isRim ? one.options?.text || "Rim label" : `${fmt(width)} × ${fmt(depth)} mm`,
+      editing: index === editingFeatureIndex,
+      selected: index === state.selected,
+      invalid: invalid.has(index),
+    };
   });
+  for (const kind of BOX_MODIFIER_KINDS) {
+    if (!modifierIsActive(kind)) continue;
+    rows.push({
+      type: "modifier", kind,
+      title: partInfo(kind)?.title || kind,
+      detail: modifierDetail(kind),
+      editing: state.modifierEditing === kind,
+      selected: state.modifierEditing === kind,
+      invalid: false,
+    });
+  }
+  return rows;
+}
+
+function placedRowsMarkup(rows) {
+  return rows.map(row => {
+    const statusClass = row.invalid ? "status-error" : row.selected ? "status-valid" : "";
+    const identity = row.type === "feature"
+      ? `data-index="${row.index}"` : `data-kind="${row.kind}"`;
+    const title = escapeHtml(row.title);
+    return `<div class="placed-item ${row.selected ? "selected" : ""} ${statusClass}" style="--support-color:${kindColor(row.kind)}">
+      <button type="button" class="placed-item-select" ${identity}>
+        <span class="placed-item-icon">${iconFor(row.kind)}</span>
+        <span class="placed-item-copy"><strong>${title}</strong><span class="placed-item-detail">${escapeHtml(row.detail)}</span></span>
+      </button>
+      <button type="button" class="placed-item-delete" ${identity} title="Delete ${title}" aria-label="Delete ${title}">Delete</button>
+    </div>`;
+  }).join("");
+}
+
+function wirePlacedRows(container) {
+  if (!container) return;
+  $$(".placed-item-select[data-index]", container).forEach(button => button.addEventListener("click", async () => {
+    await selectedFeature(Number(button.dataset.index));
+  }));
+  $$(".placed-item-delete[data-index]", container).forEach(button =>
+    button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
+  $$(".placed-item-select[data-kind]", container).forEach(button =>
+    button.addEventListener("click", () => openModifier(button.dataset.kind, true)));
+  $$(".placed-item-delete[data-kind]", container).forEach(button =>
+    button.addEventListener("click", () => removeModifier(button.dataset.kind)));
+}
+
+function renderPlaced() {
+  if (!state.design) return;
+  const rows = placedRowData();
+  const previewRows = rows.filter(row => !row.editing);
+  const preview = $("#placed-supports");
+  if (preview) {
+    preview.innerHTML = placedRowsMarkup(previewRows) || (rows.length
+      ? '<div class="placed-empty">No other parts or options.</div>'
+      : '<div class="placed-empty">No parts or options yet. Pick one above.</div>');
+    wirePlacedRows(preview);
+  }
+  const added = $("#added-parts-list");
+  if (added) {
+    added.innerHTML = placedRowsMarkup(rows) || '<div class="placed-empty">Nothing added yet.</div>';
+    wirePlacedRows(added);
+  }
   const total = placedPartCount();
   $("#support-count").textContent = `${total} added`;
   const summaryEl = $("#design-summary");
@@ -7857,7 +7917,7 @@ function renderPlaced() {
   // selectedFeature() sets state.selected, so the re-entrant renderPlaced() it
   // triggers falls through here instead of looping. Suppressed right after an
   // explicit Save / Delete Part, when the user asked to be back at the palette.
-  if (features.length === 1 && state.selected === null && !state.draft
+  if (state.design.layout.features.length === 1 && state.selected === null && !state.draft
       && !editingEdgeMount() && !state.paletteBrowsing) {
     selectedFeature(0);
   }
@@ -8180,6 +8240,103 @@ function fillPartToBin() {
   state.draftAutoCommit = true;
   updateSelectionButtons();
   refreshDraftSoon();
+}
+
+function sizeBoreBaseToBinOnce() {
+  if (state.draft?.kind !== "bore") return;
+  markDraftChanged();
+  const [insideX, insideY] = binInsideExtent(state.design.box);
+  state.draft.options ||= {};
+  state.draft.options.auto_base = false;
+  state.draft.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
+  pinDraftAxis("width");
+  pinDraftAxis("depth");
+  if (Number.isInteger(state.selected)) state.partZoneLocks[state.selected] = state.pinnedZone;
+  state.draftAutoCommit = true;
+  renderDraftFields();
+  updateSelectionButtons();
+  refreshDraftSoon();
+}
+
+async function sizeBoreHeightToBinOnce() {
+  if (state.draft?.kind !== "bore") return;
+  const candidate = clone(state.draft);
+  candidate.options ||= {};
+  candidate.options.auto_height = true;
+  try {
+    const result = await api("/api/feature/draft", {
+      design: state.design,
+      feature: candidate,
+      index: Number.isInteger(draftCommitIndex()) ? draftCommitIndex() : undefined,
+    });
+    const resolvedHeight = number(result.resolved_options?.height, NaN);
+    if (!Number.isFinite(resolvedHeight)) {
+      throw new Error("Could not resolve a legal Bore height for this bin.");
+    }
+    markDraftChanged();
+    state.draft.options ||= {};
+    state.draft.options.height = resolvedHeight;
+    state.draft.options.auto_height = false;
+    state.draftAutoCommit = true;
+    renderDraftFields();
+    updateSelectionButtons();
+    refreshDraftSoon();
+  } catch (error) {
+    toast(error.message, true, 5000);
+  }
+}
+
+function activeSpaceMaximumBinHeight() {
+  if (state.folderMode !== "space" || !state.activeSpace) return undefined;
+  if (!["drawer", "portable", "box"].includes(state.activeSpace.kind)) return undefined;
+  const maximum = number(state.activeSpace.z, NaN);
+  return Number.isFinite(maximum) ? maximum : undefined;
+}
+
+async function sizeBinHeightToBoreOnce(button = null) {
+  if (state.draft?.kind !== "bore") return;
+  const draftIndex = draftCommitIndex();
+  if (!Number.isInteger(draftIndex)) {
+    toast("Select the Bore again before sizing the bin height.", true, 5000);
+    return;
+  }
+  if (!beginDesignMutation()) return;
+  if (button) button.disabled = true;
+  try {
+    const previousDesign = clone(state.design);
+    const features = state.design.layout.features.map(
+      (feature, index) => index === draftIndex ? state.draft : feature,
+    );
+    const design = {
+      ...state.design,
+      layout: { ...state.design.layout, features },
+    };
+    const result = await api("/api/layout/expand", {
+      design,
+      anchor: draftIndex,
+      fit_height_to_bore: true,
+      max_height: activeSpaceMaximumBinHeight(),
+    });
+    state.design = result.design;
+    if (result.changed) recordHistory(previousDesign);
+    state.selected = draftIndex;
+    state.draftSourceIndex = draftIndex;
+    state.draftIsNew = false;
+    state.draftTouched = false;
+    state.draft = clone(state.design.layout.features[draftIndex]);
+    state.draftResolvedOptions = {};
+    syncForm();
+    renderDraftFields();
+    renderPlaced();
+    updateSelectionButtons();
+    await refreshPreview();
+    if (result.changed) flashField($("#z"));
+  } catch (error) {
+    toast(error.message, true, 5000);
+  } finally {
+    if (button) button.disabled = false;
+    finishDesignMutation();
+  }
 }
 
 // Grow (or, with fit, shrink-or-grow to the smallest fit) the bin to hold

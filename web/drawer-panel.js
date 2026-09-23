@@ -1038,6 +1038,11 @@ DP.setMode = mode => {
 // Inventory row.
 DP.selectMode = async mode => {
   if (mode !== "space" && mode !== "design") return;
+  if (DP.mode === "design" && mode === "space" &&
+      typeof flushVisibleDesignEditsBeforeModeSwitch === "function" &&
+      !(await flushVisibleDesignEditsBeforeModeSwitch())) {
+    return;
+  }
   DP.setMode(mode);
   if (mode === "space") {
     await DL.refreshWorking();
