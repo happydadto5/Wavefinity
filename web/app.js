@@ -1078,9 +1078,12 @@ function readEdgeMountForm(design) {
   const thicknessInput = $("#edge-mount-label-thickness-mm");
   const thicknessRaw = thicknessInput?.value ?? "";
   const thicknessWasEdited = thicknessRaw !== (thicknessInput?.dataset.storedValue ?? thicknessRaw);
-  const thickness = thicknessWasEdited
-    ? Math.min(4, Math.max(0.8, number(thicknessRaw, current.label_thickness_mm)))
-    : current.label_thickness_mm;
+  let thickness = current.label_thickness_mm;
+  if (thicknessWasEdited) {
+    const clamped = Math.min(4, Math.max(0.8, number(thicknessRaw, current.label_thickness_mm)));
+    thickness = Math.round((clamped + Number.EPSILON) * 10) / 10;
+    if (thicknessInput && thicknessRaw !== "") thicknessInput.value = fmt(thickness);
+  }
   const spacingMode = $("#edge-mount-spacing-mode")?.value || "auto";
   const ribCountMode = $("#edge-mount-standoff-rib-count-mode")?.value || "auto";
   design.box.edge_mount = {
@@ -4432,7 +4435,9 @@ async function flushVisibleDesignEditsBeforeModeSwitch() {
   const previousCanGenerate = state.canGenerate;
   cancelChangedDesignDebounce();
   pendingDesignHistory = null;
-  return applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate);
+  if (!applyLiveFormWithModifierConflictGuard(previousDesign, previousCanGenerate)) return false;
+  recordHistory(previousDesign);
+  return true;
 }
 window.flushVisibleDesignEditsBeforeModeSwitch = flushVisibleDesignEditsBeforeModeSwitch;
 
@@ -7787,7 +7792,10 @@ function updateSelectionButtons() {
     const stateLabel = $(".support-choice-state", button);
     if (stateLabel) {
       stateLabel.hidden = !active && !alreadyAdded;
-      stateLabel.textContent = active ? "Editing" : alreadyAdded ? `${count} added` : "";
+      const settingUpNest = active && button.dataset.kind === "nest" &&
+        state.draft?.kind === "nest" && !state.draft.contour;
+      stateLabel.textContent = settingUpNest ? "Setting up"
+        : active ? "Editing" : alreadyAdded ? `${count} added` : "";
     }
     if (isModifier) {
       button.title = alreadyAdded
