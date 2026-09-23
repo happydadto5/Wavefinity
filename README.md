@@ -1601,7 +1601,9 @@ Project moderators are **@happydadto5** and trusted collaborator
 final approval authority.
 
 **After completing an implementation, commit all changes and push them to
-GitHub before reporting that the work is finished.**
+GitHub before reporting that the work is finished.** For Help Code, push the
+assigned `fixN` branch; explicitly non-Help-Code work follows the local
+workflow below.
 
 **When given an implementation plan, review it first.** Understand what it
 does and confirm that the execution is sound before beginning. If it is sound,
@@ -1611,11 +1613,12 @@ implement the plan and commit the completed code.
 documentation needed to complete that prompt together; do not split a single
 request into artificial commits just to make the history look smaller. When a
 prompt is complete, commit and push it so the history has a clear entry and the
-work is backed up; testing follows the proportional Class A/B/C policy above.
-When a Help Code fix is Class C or has escalated after repeated corrections, the
-named targeted checks are part of the completion gate. Separate unrelated prompts into separate commits when
-practical. No feature branches or pull requests are needed for
-this local workflow:
+work is backed up. For a Help Code fix, verification is exactly what the active
+cloud fix requires. For explicitly non-Help-Code work, the generic Class A/B/C
+testing guidance above applies. Separate unrelated prompts into separate
+commits when practical. No feature branches or pull requests are needed for
+explicitly non-Help-Code local work; Help Code always uses its assigned `fixN`
+branch and outside completion review:
 
 ```powershell
 git add -A
@@ -1626,11 +1629,13 @@ git push
 Add a dated entry to [changelog.md](changelog.md) for user-facing changes.
 Do NOT log to `TESTING.md` — that file is retired and archived.
 
-**Do not be obsessed with testing** (see the proportional testing policy near the top).
-Short version: small/local work usually needs no tests; bounded runtime/integration
-work may use a few high-signal checks; broad shared-contract work and repeatedly
-corrected fixes require targeted verification. Never run the full suite or browser
-for routine work merely for reassurance.
+For explicitly non-Help-Code work, **do not be obsessed with testing** (see the
+proportional testing policy near the top). Short version: small/local work
+usually needs no tests; bounded runtime/integration work may use a few
+high-signal checks; broad shared-contract work and repeatedly corrected fixes
+require targeted verification. Never run the full suite or browser for routine
+work merely for reassurance. Help Code testing follows the active cloud fix
+only.
 
 **Write commit messages that say why.** The history is the record. A message
 that explains the reasoning is worth more here than a tidy branch structure.
@@ -1661,8 +1666,10 @@ session-pinning system because compatible open pages continue working.
 
 ### If more than one person is working in the repo
 
-Everyone commits to `main`, so the only rule that matters is: **pull before you
-start, push as soon as you are done.**
+For explicitly non-Help-Code work, everyone commits to `main`, so the only rule
+that matters is: **pull before you start, push as soon as you are done.** Help
+Code work stays on its assigned `fixN` branch and follows the outside review
+workflow above.
 
 ```powershell
 git pull --rebase        # before starting
@@ -1674,10 +1681,11 @@ Long-lived uncommitted work is the thing to avoid — two sessions editing
 unpleasant to resolve by hand. Small, frequent, pushed commits keep that from
 happening.
 
-If a push is rejected because someone else pushed first, `git pull --rebase`
-then push again. If that surfaces a real conflict, resolve it, inspect the merged
-diff, and continue under the same Class A/B/C testing rule. Do not automatically
-run the full suite just because a rebase occurred.
+If a non-Help-Code push is rejected because someone else pushed first, `git pull
+--rebase` then push again. If that surfaces a real conflict, resolve it, inspect
+the merged diff, and continue under the same Class A/B/C testing rule. Do not
+automatically run the full suite just because a rebase occurred. Help Code
+corrections continue on the assigned `fixN` branch under the active cloud fix.
 
 Also worth knowing before editing: the **traps** section below, and that
 `.venv/`, `__pycache__/` and `generated/` are gitignored and should stay that
