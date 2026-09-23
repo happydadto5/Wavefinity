@@ -50,7 +50,7 @@ const DL = {
 };
 
 // The design being edited, shown in Space before it has been generated. It
-// lives only here: never in DL.bins, the layout, autosave, Qty or To print.
+// lives only here: never in DL.bins, the layout, autosave, or Qty.
 //   { key, bin, error }  where bin is a planning record from
 //   /api/design/inventory-preview (the same envelope a generated row gets).
 DL.working = null;
@@ -767,7 +767,11 @@ DL.markPrinted = async one => {
   const planned = DL.layout.drawers.flatMap(drawer => drawer.placements)
     .filter(p => p.bin === one.id && (p.copy ?? 0) >= printed)
     .sort((a, b) => (a.copy ?? 0) - (b.copy ?? 0));
-  const count = Math.max(1, planned.length);
+  if (!planned.length && printed > 0) {
+    toast("All quantities are already marked printed. Increase Qty printed if you need more.");
+    return;
+  }
+  const count = planned.length || 1;
   if (planned.length) {
     const rename = new Map();
     DL.change(() => {

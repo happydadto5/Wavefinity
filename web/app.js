@@ -439,8 +439,10 @@ async function installLoadedDesignSource(rowId, spec, {
     activatePreviewView("3d");
     await refreshPreview();
     toast(successMessage);
+    return true;
   } catch (error) {
     toast(`Could not load that design: ${error.message}`, true, 6000);
+    return false;
   } finally {
     finishDesignMutation();
   }
@@ -529,9 +531,8 @@ async function chooseDesignerSource(data, {
 async function designerLoadFromSpace() {
   if (state.folderMode !== "space" || typeof DL === "undefined") return;
 
-  let data;
   try {
-    data = await DL.inventoryCall("/api/drawer/load", {});
+    await DL.load();
   } catch (error) {
     toast(`Could not read this Space's inventory: ${error.message}`, true, 6000);
     return;
@@ -539,7 +540,7 @@ async function designerLoadFromSpace() {
 
   let chosen;
   try {
-    chosen = await chooseDesignerSource(data, {
+    chosen = await chooseDesignerSource({ bins: DL.bins, layout: DL.layout }, {
       title: "Load from Space",
       allowOther: true,
       includeUnavailable: true,
@@ -555,6 +556,18 @@ async function designerLoadFromSpace() {
     return;
   }
 
+  await designerEditInventoryRow(chosen.id);
+}
+
+async function designerEditInventoryRow(rowId) {
+  if (state.folderMode !== "space" || typeof DL === "undefined") return;
+  const one = DL.bin(rowId);
+  const spec = DL.layout?.design_specs?.[rowId];
+  if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return;
+  if (state.designInventoryId === rowId && workingDesignForSpace()) {
+    activatePreviewView("3d");
+    return;
+  }
   if (workingDesignForSpace() && !(await appConfirmAction({
     title: "Load a different bin?",
     message: "This replaces the bin you're currently editing. Save it to this Space first if you want to keep it.",
@@ -562,7 +575,34 @@ async function designerLoadFromSpace() {
     danger: true,
   }))) return;
 
-  await installLoadedDesignSource(chosen.id, chosen.spec);
+  await installLoadedDesignSource(rowId, spec);
+}
+
+// Regenerate a saved source without touching the live Current design or Qty.
+async function designerGenerateInventoryRow(rowId) {
+  if (state.folderMode !== "space" || typeof DL === "undefined") return;
+  if (DL.busy || isGenerating || state.designMutationBusy) {
+    toast("Finish the current action before generating files.", true);
+    return;
+  }
+  const one = DL.bin(rowId);
+  const spec = DL.layout?.design_specs?.[rowId];
+  if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return;
+  await DL.busyWith("generate-row", async () => {
+    const result = await api("/api/generate", {
+      design: clone(spec), output: state.output, connector: state.connector,
+      keep_log: false,
+    });
+    const savedFiles = await saveGeneratedFiles(result);
+    const generatedFile = result.inventory_bin?.file || result.result?.box?.output ||
+      result.result?.output ||
+      savedFiles.find(name => /\.3mf$/i.test(name));
+    if (!generatedFile) throw new Error("The generated bin file was not returned.");
+    const file = String(generatedFile).split(/[\\/]/).pop();
+    if (await DL.editBins({ bin_updates: [{ id: rowId, file }] })) {
+      toast(`Generated ${file}.`);
+    }
+  });
 }
 
 async function designerLoadFromAnotherSpace() {

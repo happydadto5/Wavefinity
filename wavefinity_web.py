@@ -2671,7 +2671,7 @@ def generate_payload(
     elif suppress_local_inventory:
         keep_log = False
     else:
-        keep_log = inventory_enabled(output, load_preferences())
+        keep_log = requested_inventory and inventory_enabled(output, load_preferences())
     with GEOMETRY_LOCK:
         result = generate_organizer_files(
             box, layout, output, label, part_name, label_location, scoop,

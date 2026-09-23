@@ -97,7 +97,6 @@ DP.build = () => {
     <section class="control-section open dl-section" aria-label="Inventory">
       <div class="section-heading no-toggle"><span>Inventory</span><span id="dl-inv-count" class="count-badge"></span></div>
       <div class="section-body">
-        <div id="dl-todo"></div>
         <div class="dl-inv-tools">
           <input id="dl-inv-search" type="search" placeholder="Search name or size" aria-label="Search the inventory">
           <select id="dl-inv-show" aria-label="Which bins to list">
@@ -117,12 +116,13 @@ DP.build = () => {
         </div>
         <div id="dl-batch-tools" class="dl-batch-tools">
           <div class="dl-batch-row">
-            <button type="button" id="dl-batch-select-all" class="button secondary dl-small" title="Select every generated bin that still needs printing">Select all needed</button>
-            <button type="button" id="dl-batch-clear" class="button secondary dl-small">Clear</button>
+            <button type="button" id="dl-batch-select-needed" class="button secondary dl-small">Select all not printed</button>
+            <button type="button" id="dl-batch-select-all" class="button secondary dl-small">Select all</button>
+            <button type="button" id="dl-batch-clear" class="button secondary dl-small">Clear selection</button>
             <span id="dl-batch-summary" class="dl-batch-summary" role="status"></span>
           </div>
           <label class="checkbox-row dl-batch-connectors"><span>Include Space Connectors</span><input id="dl-batch-connectors" type="checkbox" checked></label>
-          <button type="button" id="dl-batch-print" class="button primary wide">Print Selected to Bambu Studio</button>
+          <button type="button" id="dl-batch-print" class="button secondary wide">Print Selected to Bambu Studio</button>
         </div>
         <div id="dl-inv-list" class="dl-inv-list"></div>
         <details class="dl-details" id="dl-add-details">
@@ -227,7 +227,8 @@ DP.wire = () => {
   setting("#dl-sp-flexible", "spacers", "flexible", node => node.checked);
   setting("#dl-sp-height", "spacers", "height", node => Math.max(6, dlNum(node.value, 15)));
 
-  $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllNeeded());
+  $("#dl-batch-select-needed").addEventListener("click", () => DP.selectAllNotPrinted());
+  $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllPrintable());
   $("#dl-batch-clear").addEventListener("click", () => DP.clearPrintSelection());
   $("#dl-batch-connectors").addEventListener("change", event => {
     DP.includeSpaceConnectors = event.target.checked;
@@ -269,11 +270,6 @@ DP.wire = () => {
   });
   $("#dl-print").addEventListener("click", () => DL.printDrawer());
   $("#dl-map").addEventListener("click", () => DV.printMap());
-  $("#dl-todo").addEventListener("click", event => {
-    const one = DL.bin(event.target.closest("[data-printed]")?.dataset.printed);
-    if (one) DL.markPrinted(one);
-  });
-
   const filterChanged = () => {
     try { localStorage.setItem("wavefinity-drawer-filter", JSON.stringify(DP.filter)); } catch (_error) {}
     DP.renderInventory();
@@ -420,9 +416,15 @@ DP.resetPrintSelection = () => {
   DP.renderInventory(true);
 };
 
-DP.selectAllNeeded = () => {
+DP.selectAllNotPrinted = () => {
   DP.printSelected = new Set(
     DL.bins.filter(one => DL.printNeeded(one) > 0).map(one => one.id));
+  DP.renderInventory(true);
+};
+
+DP.selectAllPrintable = () => {
+  DP.printSelected = new Set(
+    DL.bins.filter(one => DL.printEligible(one)).map(one => one.id));
   DP.renderInventory(true);
 };
 
@@ -451,6 +453,8 @@ DP.renderBatch = () => {
   dlSet("#dl-batch-connectors", DP.includeSpaceConnectors, "checked");
   const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
+  button.classList.toggle("primary", rows.length >= 2);
+  button.classList.toggle("secondary", rows.length < 2);
   button.disabled = !rows.length || noSlicer || Boolean(DL.busy);
   button.title = noSlicer ? "Bambu Studio was not found. Locate it with Change slicer in the bin view." : "";
   button.textContent = DL.busy === "print-bins" ? "Opening Bambu Studio…" : "Print Selected to Bambu Studio";
@@ -467,7 +471,10 @@ DP.onInventoryClick = async event => {
     DP.renderInventory(true);
   } else if (action === "qty+") DL.editBins({ bin_updates: [{ id: one.id, qty: one.qty + 1 }] });
   else if (action === "qty-") DP.lowerQty(one);
+  else if (action === "edit") designerEditInventoryRow(one.id);
   else if (action === "printed") DL.markPrinted(one);
+  else if (action === "print") DL.printSelectedBins({ [one.id]: DL.printCount(one) }, false);
+  else if (action === "generate") designerGenerateInventoryRow(one.id);
   else if (action === "delete") {
     const placed = DL.placedCount(one.id);
     const ok = await appConfirmAction({
@@ -593,7 +600,6 @@ DP.update = () => {
   DP.renderDrawer();
   DP.renderAuto();
   DP.renderStats();
-  DP.renderTodo();
   DP.renderInventory();
   DP.renderSave();
   DV.renderEmptyState();
@@ -817,19 +823,6 @@ DP.renderStats = () => {
     ${warnings}`;
 };
 
-// Bins placed before they were printed, across every drawer: the print list.
-DP.renderTodo = () => {
-  const box = $("#dl-todo");
-  const todo = DL.bins.map(one => [one, DL.plannedCount(one.id)]).filter(([, count]) => count > 0);
-  if (!dlChanged("todo", JSON.stringify(todo.map(([one, count]) => [one.id, count, one.name, one.qty])))) return;
-  box.innerHTML = todo.length ? `
-    <div class="dl-todo">
-      <strong>To print</strong> <small>placed in a drawer before they were printed</small>
-      <ul>${todo.map(([one, count]) => `<li><span>${count} × ${escapeHtml(DL.label(one))} <small>${escapeHtml(DL.sizeText(one))}</small></span>
-        <button type="button" class="dl-link" data-printed="${escapeHtml(one.id)}" title="Raise its printed Qty by ${count}">Mark printed</button></li>`).join("")}</ul>
-    </div>` : "";
-};
-
 DP.filteredBins = () => {
   const text = DP.filter.text.trim().toLowerCase();
   const show = DP.filter.show;
@@ -838,7 +831,7 @@ DP.filteredBins = () => {
     if (show === "printed" && one.qty <= 0) return false;
     if (show === "unplaced" && !(one.qty > placed - DL.plannedCount(one.id))) return false;
     if (show === "placed" && !placed) return false;
-    if (show === "unprinted" && one.qty > 0) return false;
+    if (show === "unprinted" && one.qty > 0 && DL.printNeeded(one) <= 0) return false;
     if (show === "stackable" && !DL.stackable(one)) return false;
     if (!text) return true;
     return `${one.name} ${fmt(one.x)}x${fmt(one.y)}x${fmt(one.z)} ${fmt(one.x)} × ${fmt(one.y)} ${one.file} ${one.label} ${one.interior} ${one.kind} ${one.stack}`
@@ -891,7 +884,9 @@ DP.renderInventory = (force = false) => {
   $("#dl-inv-count").textContent = `${dlPlural(DL.bins.length, "design")} · ${printed} printed`;
   const selectedBin = DL.selected ? DL.findPlacement(DL.selected)?.placement.bin : null;
   const counts = DL.bins.map(one => [DL.placedCount(one.id), DL.plannedCount(one.id)]);
-  const signature = JSON.stringify([DL.bins, counts, DP.filter, [...DP.open], selectedBin, drawer.id, drawer.height, [...DP.printSelected],
+  const signature = JSON.stringify([DL.bins, counts, Object.keys(DL.layout.design_specs || {}),
+    Boolean(state.runtime.hosted), Boolean(state.slicer?.available),
+    DP.filter, [...DP.open], selectedBin, drawer.id, drawer.height, [...DP.printSelected],
     DL.working ? [DL.working.key, DL.working.error || "", DL.workingFit()] : null]);
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
@@ -927,7 +922,12 @@ DP.renderInventory = (force = false) => {
     ].filter(Boolean).join(" ");
     const open = DP.open.has(one.id);
     const eligible = DL.printEligible(one);
-    const printFlag = !eligible ? "" : (planned > 0 ? `${planned} needed` : (one.qty <= 0 ? "Ready to print" : ""));
+    const spec = DL.layout?.design_specs?.[one.id];
+    const designSource = ["bin", "b4b"].includes(one.kind) && Boolean(spec);
+    const printable = eligible && !state.runtime.hosted && Boolean(state.slicer?.available);
+    const quantityTracked = ["bin", "b4b", "manual"].includes(one.kind);
+    const needed = DL.printNeeded(one);
+    const printFlag = needed > 0 ? `${needed} needed` : "";
     const picked = eligible && DP.printSelected.has(one.id);
     return `
       <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" draggable="${canPlace}" title="${canPlace ? "Drag into the drawer, or double-click to place" : ""}">
@@ -948,6 +948,12 @@ DP.renderInventory = (force = false) => {
         </span>
         <button type="button" class="dl-more" data-act="more" aria-expanded="${open}" title="Details">${open ? "▴" : "▾"}</button>
         <button type="button" class="dl-remove" data-act="delete" title="Remove from the inventory" aria-label="Remove ${escapeHtml(DL.label(one))} from the inventory">✕</button>
+        ${designSource || quantityTracked || printable ? `<div class="dl-row-actions">
+          ${designSource ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>` : ""}
+          ${quantityTracked ? `<button type="button" class="button secondary dl-small" data-act="printed">Mark Printed</button>` : ""}
+          ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}
+          ${designSource ? `<button type="button" class="button secondary dl-small" data-act="generate">Generate</button>` : ""}
+        </div>` : ""}
       </div>
       ${open ? `<div class="dl-bin-details" data-bin="${escapeHtml(one.id)}">
         <div class="field-grid three">
@@ -962,7 +968,6 @@ DP.renderInventory = (force = false) => {
         </div>
         <p>${DL.stackable(one) ? `Adds ${fmt(DL.pitch(one))} mm to a stack; detached height is ${fmt(DL.partHeight(one))} mm including its interlock.<br>` : ""}${one.file ? `File: ${escapeHtml(one.file)}<br>` : ""}${one.label ? `Label: ${escapeHtml(one.label)}<br>` : ""}${one.interior ? `Inside: ${escapeHtml(one.interior)}<br>` : ""}${escapeHtml(one.id)}${one.date ? ` · logged ${escapeHtml(one.date)}` : ""}</p>
         <div class="button-row">
-          ${planned ? `<button type="button" class="button secondary dl-small" data-act="printed">Mark ${planned} printed</button>` : ""}
           <button type="button" class="button danger dl-small" data-act="delete">Remove from inventory</button>
         </div>
       </div>` : ""}`;
@@ -1056,8 +1061,11 @@ DP.selectMode = async mode => {
 
 // Open the Space workspace. Starts in Design mode when there is a current
 // design to work on, otherwise Space mode.
-DP.enter = async preferredMode => {
-  if (DL.active) return;
+DP.enter = async (preferredMode, inventoryLoaded = false) => {
+  if (DL.active) {
+    if (preferredMode === "space" || preferredMode === "design") DP.setMode(preferredMode);
+    return;
+  }
   DL.active = true;
   DP.mode = preferredMode === "space" || preferredMode === "design"
     ? preferredMode
@@ -1066,7 +1074,7 @@ DP.enter = async preferredMode => {
   DP.applyMode();
   DP.update();
   try {
-    await DL.load();
+    if (!inventoryLoaded) await DL.load();
   } catch (error) {
     toast(`Could not read the inventory: ${error.message}`, true, 7000);
   }

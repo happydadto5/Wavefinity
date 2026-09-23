@@ -990,7 +990,7 @@ SP.assertExpectedHostedIdentity = (info, expectedSpaceId) => {
   }
 };
 
-SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = false } = {}) => {
+SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = false, openPreferredView = false } = {}) => {
   // A hosted Design session without a persistent folder is "no folder
   // selected", never a fabricated one. Opening a Wavefinity folder therefore
   // always needs a real handle.
@@ -1050,6 +1050,9 @@ SP.useHostedFolder = async (folder, { expectedSpaceId = null, skipLeaveCheck = f
   await WFFileSystem.save("active", { handle: folder.handle, space_id: info.space_id || null });
   await SP.applyFolder(info, { reset: false, browserFolder: folder });
   SP.close();
+  if (openPreferredView && info.folder_mode === "space") {
+    if (!(await SP.openTypedSpacePreferredView())) return null;
+  }
   toast(info.folder_mode === "space"
     ? `Opened ${info.space.name || folder.name}.`
     : `Saving designs to ${folder.name}.`);
@@ -1121,7 +1124,7 @@ SP.afterPick = async folder => {
       SP.enterSetupFor(folder, inspected);
       return inspected;
     }
-    return SP.useHostedFolder(folder);
+    return SP.useHostedFolder(folder, { openPreferredView: true });
   }
   const inspected = await api("/api/space/inspect", { output: folder });
   SP.recent = inspected.recent || [];
@@ -1142,6 +1145,9 @@ SP.afterPick = async folder => {
   await SP.resetDrawer({ skipSafeLeave: true });
   if (!(await SP.applyFolder(data.folder, { reset: false }))) return null;
   SP.close();
+  if (data.folder.folder_mode === "space") {
+    if (!(await SP.openTypedSpacePreferredView())) return null;
+  }
   toast(data.folder.folder_mode === "space"
     ? `Opened ${data.folder.space?.name || data.folder.folder_name}.`
     : `Saving designs to ${data.folder.folder_name}.`);
@@ -1238,10 +1244,30 @@ SP.armResumeAutoContinue = () => {
   }, 1000);
 };
 
-SP.confirmResume = () => {
+// An existing Space lands by its loaded Inventory, without changing its
+// restored Current design or making a second inventory parser.
+SP.openTypedSpacePreferredView = async () => {
+  try {
+    await DL.load();
+  } catch (error) {
+    toast(`Could not read this Space's inventory: ${error.message}`, true, 7000);
+    return false;
+  }
+  const preferred = DL.bins.some(one => ["bin", "b4b", "manual"].includes(one.kind))
+    ? "space" : "design";
+  if (preferred === "space") {
+    await DP.enter("space", true);
+    activatePreviewView("drawer");
+  } else {
+    if (DL.active) DP.setMode("design");
+    activatePreviewView("3d");
+  }
+  return true;
+};
+
+SP.confirmResume = async () => {
   SP.cancelResumeAutoContinue();
-  SP.close();
-  activatePreviewView("3d");
+  if (await SP.openTypedSpacePreferredView()) SP.close();
 };
 
 // The current folder isn't a typed Space yet (e.g. the user tried to switch

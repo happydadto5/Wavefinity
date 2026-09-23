@@ -118,7 +118,7 @@ a dashed orange outline is the softer height-order warning.
 **Stacks and plans read at a glance.** A stack is drawn as its bins standing
 on each other, each foot sunk into the bin below. A stackable bin's swatch
 carries a ⇅. A planned copy (placed before it is printed) is drawn faded with a
-dashed teal outline and listed under *To print* until it is marked printed.
+dashed teal outline; its Inventory row shows the planned and needed count until it is marked printed.
 Dropping a bin on a same-size bin that stacks the same way snaps it on top with
 the sides aligned; anything else is refused, and the refusal says why.
 
@@ -544,7 +544,7 @@ something to work on.
   and a **Qty**. Qty is how many copies you have *printed*. Generating is not
   printing: a generated bin is always recorded at Qty 0. Print (direct, or
   *Print Selected to Bambu Studio* in Space Inventory after ticking designs or
-  pressing *Select all needed*) raises Qty only after the slicer opened
+  pressing *Select all not printed* or *Select all*) raises Qty only after the slicer opened
   successfully. You can still change Qty by hand for external or failed prints,
   and a superseded version can be set back to 0. The ✕ on a row removes that bin from the inventory altogether (its
   placed copies come out of every drawer). Under the table, a `## Drawer layout` JSON block holds the drawers and
@@ -556,11 +556,11 @@ something to work on.
   Design** switch at the top left, under the Space's name, type (Drawer,
   Surface, Portable Storage or Pegboard) and size. The switch decides what the left panel
   edits: *Space* is the layout tools, *Design* is the current bin or Storage
-  Box. It is separate from the preview: the 3D, 2D and Space tabs only choose what
-  the right side shows and never flip the switch. Opening the Space while a
-  current design exists starts in *Design* with the full Space still showing and
-  the Current design outlined in it (not zoomed, not added to the inventory);
-  otherwise it starts in *Space*. The workspace stays open until the folder
+  Box. The 3D and 2D tabs select Design; the Space tab selects Space.
+  Opening an existing Space with a bin, Storage Box, or hand-added bin in
+  Inventory starts in *Space*. An empty or spacer-only Space starts in
+  *Design / 3D*. The saved Current design is preserved and appears in Space
+  when applicable. The workspace stays open until the folder
   stops being that Space. The name, type and size are shown read-only; **Edit**
   opens the same fields in place with **Save Changes** and **Cancel** (never
   the New Space buttons).
@@ -590,8 +590,8 @@ something to work on.
   whole stack.
 - **Planned bins.** When every printed copy of a bin is already placed, the
   next copy goes in as *planned* instead: drawn faded, with a dashed outline.
-  Every planned copy is listed under **To print** until you press **Mark
-  printed**, so you can lay a drawer out first and print to it.
+  Its Inventory row shows the planned and needed count. **Mark Printed** marks
+  all planned copies, so you can lay a drawer out first and print to it.
 - **Placing.** Drag a bin from the inventory onto the drawer, or double-click
   it to drop it in the best free spot. Drag placed bins to move them: they
   snap to the 8 mm grid and refuse overlaps and the drawer edge.

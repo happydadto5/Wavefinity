@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-22 — Space Inventory workflow (Fix 038)
+
+- Existing Spaces with bins open in Space view; empty and spacer-only Spaces open in Design / 3D, with the saved Current design preserved.
+- Inventory is the single list for planned and printed copies. Design rows now offer Edit, Mark Printed, Print and Generate where available.
+- Bulk selection offers Select all not printed, Select all and Clear selection. Unprinted rows remain fully readable.
+
 ## 2026-09-22 — Designer workflow polish (Fix 040)
 
 - Parts and options now add and save automatically. **Done** exits editing, and a compact **Added to this bin** list opens or deletes every exact item.
