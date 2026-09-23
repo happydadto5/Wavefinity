@@ -1041,7 +1041,7 @@ function renderCatalog() {
   palette.innerHTML = state.catalog.parts
     .filter(part => part.palette_visible !== false)
     .map(part => `
-    <button class="support-choice" data-kind="${part.kind}" style="--support-color:${kindColor(part.kind)}" aria-label="${escapeHtml(part.title)}: ${escapeHtml(part.description)}" title="${escapeHtml(part.title)} — ${escapeHtml(part.description)}">
+    <button class="support-choice" data-kind="${part.kind}" aria-label="${escapeHtml(part.title)}: ${escapeHtml(part.description)}" title="${escapeHtml(part.title)} — ${escapeHtml(part.description)}">
       <span class="support-choice-icon">
         ${iconFor(part.kind)}
       </span>
@@ -1053,6 +1053,7 @@ function renderCatalog() {
     </button>
   `).join("");
   $$(".support-choice", palette).forEach(button => {
+    button.style.setProperty("--support-color", kindColor(button.dataset.kind));
     button.addEventListener("click", () => pickKind(button.dataset.kind));
   });
 
@@ -2920,6 +2921,18 @@ function dividerLabelsForLid(divider) {
   return Array.isArray(labels) ? [...labels] : [];
 }
 
+function applyDivisionGridLayout(root) {
+  if (!root) return;
+  $$(".division-grid[data-grid-columns][data-grid-rows]", root).forEach(grid => {
+    grid.style.setProperty("--division-columns", grid.dataset.gridColumns);
+    grid.style.setProperty("--division-rows", grid.dataset.gridRows);
+  });
+  $$("[data-grid-column][data-grid-row]", root).forEach(input => {
+    input.style.gridColumn = `${input.dataset.gridColumn} / span ${input.dataset.gridColumnSpan}`;
+    input.style.gridRow = `${input.dataset.gridRow} / span ${input.dataset.gridRowSpan}`;
+  });
+}
+
 function renderLidLabelEditor() {
   const holder = $("#lid-division-labels");
   const textRow = $("#lid-label-text-row");
@@ -2935,11 +2948,12 @@ function renderLidLabelEditor() {
   }
   const topology = dividerCompartmentsClient(divider);
   const labels = Array.isArray(lid.division_labels) ? lid.division_labels : [];
-  holder.innerHTML = `<span class="field-label">Compartment labels</span><div class="division-table division-grid" style="--division-columns:${topology.columns};--division-rows:${topology.rows}">
+  holder.innerHTML = `<span class="field-label">Compartment labels</span><div class="division-table division-grid" data-grid-columns="${topology.columns}" data-grid-rows="${topology.rows}">
     ${topology.cells.map(cell => {
       const index = cell.row * topology.columns + cell.column;
-      return `<input type="text" data-lid-division-index="${index}" value="${escapeHtml(String(labels[index] || ""))}" style="grid-column:${cell.column + 1} / span ${cell.columnSpan};grid-row:${cell.row + 1} / span ${cell.rowSpan}">`;
+      return `<input type="text" data-lid-division-index="${index}" data-grid-column="${cell.column + 1}" data-grid-column-span="${cell.columnSpan}" data-grid-row="${cell.row + 1}" data-grid-row-span="${cell.rowSpan}" value="${escapeHtml(String(labels[index] || ""))}">`;
     }).join("")}</div>`;
+  applyDivisionGridLayout(holder);
   $$('[data-lid-division-index]', holder).forEach(input => input.addEventListener("input", () => {
     const previous = clone(state.design);
     const values = Array.isArray(state.design.box.lid.division_labels)
@@ -5654,11 +5668,11 @@ function renderDraftFields() {
         }
 
         const topology = dividerCompartmentsClient(one);
-        html += `<div class="division-table division-grid" style="--division-columns:${nCols};--division-rows:${nRows}">`;
+        html += `<div class="division-table division-grid" data-grid-columns="${nCols}" data-grid-rows="${nRows}">`;
         for (const cell of topology.cells) {
           const idx = cell.row * nCols + cell.column;
           const val = escapeHtml(String(divLabels[idx] || ""));
-          html += `<input type="text" data-division-index="${idx}" value="${val}" style="grid-column:${cell.column + 1} / span ${cell.columnSpan};grid-row:${cell.row + 1} / span ${cell.rowSpan}">`;
+          html += `<input type="text" data-division-index="${idx}" data-grid-column="${cell.column + 1}" data-grid-column-span="${cell.columnSpan}" data-grid-row="${cell.row + 1}" data-grid-row-span="${cell.rowSpan}" value="${val}">`;
         }
         html += `</div>`;
       }
@@ -5673,6 +5687,7 @@ function renderDraftFields() {
   html += `<p class="inline-help" data-draft-overhang hidden></p>`;
   const activeDraft = document.activeElement?.dataset?.draft;
   $("#draft-fields").innerHTML = html;
+  applyDivisionGridLayout($("#draft-fields"));
   if (one.kind === "divider" && dividerLockedByLidLabels()) {
     $$('input, select, button', $("#draft-fields")).forEach(control => { control.disabled = true; });
     $("#draft-status").textContent = dividerLockMessage();
@@ -8125,7 +8140,7 @@ function placedRowsMarkup(rows) {
     const identity = row.type === "feature"
       ? `data-index="${row.index}"` : `data-kind="${row.kind}"`;
     const title = escapeHtml(row.title);
-    return `<div class="placed-item ${row.selected ? "selected" : ""} ${statusClass}" style="--support-color:${kindColor(row.kind)}">
+    return `<div class="placed-item ${row.selected ? "selected" : ""} ${statusClass}" data-support-kind="${escapeHtml(row.kind)}">
       <button type="button" class="placed-item-select" ${identity}>
         <span class="placed-item-icon">${iconFor(row.kind)}</span>
         <span class="placed-item-copy"><strong>${title}</strong><span class="placed-item-detail">${escapeHtml(row.detail)}</span></span>
@@ -8137,6 +8152,9 @@ function placedRowsMarkup(rows) {
 
 function wirePlacedRows(container) {
   if (!container) return;
+  $$(".placed-item[data-support-kind]", container).forEach(row => {
+    row.style.setProperty("--support-color", kindColor(row.dataset.supportKind));
+  });
   $$(".placed-item-select[data-index]", container).forEach(button => button.addEventListener("click", async () => {
     await selectedFeature(Number(button.dataset.index));
   }));

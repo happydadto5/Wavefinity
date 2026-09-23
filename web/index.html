@@ -107,50 +107,50 @@
                      same single shared controls the ordinary bin uses; JS
                      relocates them here while B4B is active. See
                      positionSharedThicknessControls() in app.js. -->
-                <label class="inline-select" style="grid-column:1;grid-row:2">Lid type
+                <label class="inline-select b4b-grid-r2-c1">Lid type
                   <select id="b4b-lid-type">
                     <option value="lid_only">Lid Only</option>
                     <option value="latched" selected>Latched Lid</option>
                   </select>
                 </label>
-                <label class="inline-select" style="grid-column:2;grid-row:2">Lid snugness
+                <label class="inline-select b4b-grid-r2-c2">Lid snugness
                   <select id="b4b-lid-snugness">
                     <option value="0.5">0.5 mm — Tight</option>
                     <option value="1" selected>1.0 mm — Standard</option>
                     <option value="2">2.0 mm — Loose</option>
                   </select>
                 </label>
-                <label class="inline-select" style="grid-column:3;grid-row:2">Stacking
+                <label class="inline-select b4b-grid-r2-c3">Stacking
                   <select id="b4b-stacking">
                     <option value="false" selected>Not stackable</option>
                     <option value="true">Stackable</option>
                   </select>
                 </label>
-                <label id="b4b-handle-row" class="inline-select" style="grid-column:1;grid-row:3">
+                <label id="b4b-handle-row" class="inline-select b4b-grid-r3-c1">
                   <span id="b4b-handle-label">Carrying handle</span>
                   <select id="b4b-handle">
                     <option value="false" selected>No handle</option>
                     <option id="b4b-handle-add-option" value="true">Add handle</option>
                   </select>
                 </label>
-                <label id="b4b-latch-count-row" class="inline-select" style="grid-column:2;grid-row:3"># of latches
+                <label id="b4b-latch-count-row" class="inline-select b4b-grid-r3-c2"># of latches
                   <select id="b4b-latch-count">
                     <option value="auto" selected>Auto</option>
                     <option value="1">1</option>
                     <option value="2">2</option>
                   </select>
                 </label>
-                <label class="inline-select" style="grid-column:3;grid-row:3">Label
+                <label class="inline-select b4b-grid-r3-c3">Label
                   <select id="b4b-label-location">
                     <option value="none" selected>No label</option>
                     <option value="top">Top</option>
                     <option id="b4b-label-front-option" value="front">Front</option>
                   </select>
                 </label>
-                <label id="b4b-label-text-row" style="grid-column:1 / span 2;grid-row:4" hidden>Label text
+                <label id="b4b-label-text-row" class="b4b-grid-r4-c1-span2" hidden>Label text
                   <input id="b4b-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE">
                 </label>
-                <label id="b4b-front-label-style-row" class="inline-select" style="grid-column:3;grid-row:4" hidden>Front label style
+                <label id="b4b-front-label-style-row" class="inline-select b4b-grid-r4-c3" hidden>Front label style
                   <select id="b4b-front-label-style">
                     <option value="flat" selected>Flat</option>
                     <option value="wavy">Wavy</option>
@@ -340,7 +340,7 @@
                     Integrated projects horizontally from the bin and normally needs slicer supports.
                     Separate part is recommended for support-free printing.
                   </p>
-                  <div id="edge-mount-standoff-rib-controls" class="field-grid three" style="grid-column: 1 / -1" hidden>
+                  <div id="edge-mount-standoff-rib-controls" class="field-grid three grid-span-all" hidden>
                     <label class="checkbox-row"><span>Standoff Ribs</span><input id="edge-mount-standoff-ribs-enabled" type="checkbox"></label>
                     <label class="inline-select">Quantity
                       <select id="edge-mount-standoff-rib-count-mode">
@@ -351,9 +351,9 @@
                     <label id="edge-mount-standoff-rib-count-row" hidden>Ribs
                       <input id="edge-mount-standoff-rib-count" type="number" min="1" max="20" step="1">
                     </label>
-                    <p class="inline-help" style="grid-column: 1 / -1">Keeps the bin flat against the mounting surface when using a Separate label.</p>
+                    <p class="inline-help grid-span-all">Keeps the bin flat against the mounting surface when using a Separate label.</p>
                   </div>
-                  <label style="grid-column:1 / span 2">Label text
+                  <label class="grid-span-two">Label text
                     <input id="edge-mount-label-text" type="text" maxlength="40" placeholder="e.g. PRUNER">
                   </label>
                   <label class="inline-select">Length
@@ -729,7 +729,7 @@
     <dialog id="spacer-print-dialog" class="support-layout-dialog" aria-labelledby="spacer-print-title">
       <h2 id="spacer-print-title">Print Spacers</h2>
       <div id="spacer-print-table-container"></div>
-      <div class="button-row" style="margin-top: 16px;">
+      <div class="button-row dialog-actions-spaced">
         <button id="spacer-print-cancel" type="button" class="button secondary">Cancel</button>
         <button id="spacer-print-confirm" type="button" class="button primary">Print Selected</button>
       </div>
@@ -788,7 +788,7 @@
     <div id="about-dialog-content" class="about-dialog-content">
       Loading brochure…
     </div>
-    <div class="button-row" style="margin-top: 16px;">
+    <div class="button-row dialog-actions-spaced">
       <button id="about-dialog-close" type="button" class="button primary">Close</button>
     </div>
   </dialog>
@@ -909,7 +909,7 @@
             <p>A Standard Pegboard or IKEA SKÅDIS wall.</p>
           </button>
         </div>
-        <div class="button-row" style="justify-content: center; margin-top: 24px;">
+        <div class="button-row space-untyped-actions">
           <button id="space-untyped-start" class="link-button" type="button">Design without a Space</button>
         </div>
       </div>

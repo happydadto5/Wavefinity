@@ -81,7 +81,7 @@ DP.build = () => {
       <div class="section-body">
         <div id="dl-stats" class="dl-stats"></div>
         <div class="field-grid two">
-          <label class="checkbox-row" style="grid-column: 1 / -1" title="Build serpentine springs into the edge spacers to absorb real-world tolerance"><span>Flexible fit (recommended)</span><input id="dl-sp-flexible" type="checkbox" checked></label>
+          <label class="checkbox-row grid-span-all" title="Build serpentine springs into the edge spacers to absorb real-world tolerance"><span>Flexible fit (recommended)</span><input id="dl-sp-flexible" type="checkbox" checked></label>
           <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
         </div>
         <div class="dl-action-grid">

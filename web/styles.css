@@ -1568,6 +1568,21 @@ dialog:not([open]) { display: none; }
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px 10px;
 }
+.b4b-grid-r2-c1 { grid-column: 1; grid-row: 2; }
+.b4b-grid-r2-c2 { grid-column: 2; grid-row: 2; }
+.b4b-grid-r2-c3 { grid-column: 3; grid-row: 2; }
+.b4b-grid-r3-c1 { grid-column: 1; grid-row: 3; }
+.b4b-grid-r3-c2 { grid-column: 2; grid-row: 3; }
+.b4b-grid-r3-c3 { grid-column: 3; grid-row: 3; }
+.b4b-grid-r4-c1-span2 { grid-column: 1 / span 2; grid-row: 4; }
+.b4b-grid-r4-c3 { grid-column: 3; grid-row: 4; }
+.grid-span-all { grid-column: 1 / -1; }
+.grid-span-two { grid-column: 1 / span 2; }
+.dialog-actions-spaced { margin-top: 16px; }
+.space-untyped-actions {
+  justify-content: center;
+  margin-top: 24px;
+}
 .b4b-options-grid > label {
   display: block;
   margin: 0;
@@ -1591,7 +1606,10 @@ dialog:not([open]) { display: none; }
 /* Sidebar can get narrow; fall back to one column rather than overflow. */
 @media (max-width: 420px) {
   .b4b-options-grid { grid-template-columns: 1fr; }
-  .b4b-options-grid > label { grid-column: 1 !important; }
+  .b4b-options-grid > label {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+  }
 }
 .b4b-capacity {
   display: flex;
