@@ -2249,15 +2249,23 @@ class ResolvedOptionTests(unittest.TestCase):
         )
         return organizer_inserts.fitted_nest_feature(one)
 
-    def test_every_parameter_of_every_shape_resolves_to_a_number(self) -> None:
+    def test_every_parameter_of_every_shape_resolves_to_its_declared_type(self) -> None:
         for kind, _title, _blurb, _flags, fields in organizer_app.PART_KINDS:
             one = organizer_app.default_feature(self.spec, kind)
             shown = resolved_options(
                 self.spec, one, organizer_app.base_height(self.spec, "fused")
             )
+            option_types = {
+                field.key: field.value_type
+                for field in organizer_inserts.feature_definition(kind).options
+            }
             for _label, option, _default in fields:
                 self.assertIn(option, shown, (kind, option))
-                self.assertTrue(math.isfinite(shown[option]), (kind, option))
+                if option_types.get(option) in ("string", "enum"):
+                    self.assertIsInstance(shown[option], str, (kind, option))
+                    self.assertTrue(shown[option], (kind, option))
+                else:
+                    self.assertTrue(math.isfinite(shown[option]), (kind, option))
 
     def test_default_text_part_has_label_text(self) -> None:
         text_feature = organizer_app.default_feature(self.spec, "text")
@@ -3038,7 +3046,9 @@ class EdgeMountTests(unittest.TestCase):
         self.assertEqual(len(label.split()), 1)
 
     def test_separate_label_is_not_fused_and_exports_separately(self) -> None:
-        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(label_enabled=True, label_text="TOOLS"))
+        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
+            label_enabled=True, label_text="TOOLS", standoff_ribs_enabled=False,
+        ))
         bare = organizer_engine.make_box(box)
         self.assertAlmostEqual(
             organizer_edge_mount.apply_edge_mount_structure(box, bare).volume, bare.volume, places=4

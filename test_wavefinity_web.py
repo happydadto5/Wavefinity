@@ -1825,10 +1825,10 @@ class WebApplicationTests(unittest.TestCase):
                 patch.object(wavefinity_web, "inventory_enabled", return_value=True),
                 patch.object(wavefinity_web, "generate_organizer_files", return_value=made) as gen,
             ):
-                wavefinity_web.generate_payload({"design": default_design()})
+                wavefinity_web.generate_payload({"design": default_design(), "keep_log": True})
                 self.assertTrue(gen.call_args.kwargs["keep_log"])
                 wavefinity_web.generate_payload(
-                    {"design": default_design()}, suppress_local_inventory=True)
+                    {"design": default_design(), "keep_log": True}, suppress_local_inventory=True)
                 self.assertFalse(gen.call_args.kwargs["keep_log"])
             with (
                 patch.object(wavefinity_web, "HOSTED", True),
@@ -2324,7 +2324,7 @@ console.log(JSON.stringify(out));
         self.assertIn('data-space-mode="design"', index_html)
         observer = panel[panel.index("new MutationObserver"):]
         observer = observer[:observer.index("attributeFilter")]
-        self.assertIn("DP.enter()", observer)
+        self.assertIn('DP.enter("space")', observer)
         self.assertNotIn("DP.leave()", observer)
         self.assertNotIn("DP.mode =", observer)
         enter = panel[panel.index("DP.enter = "):panel.index("DP.leave = ")]
@@ -2520,7 +2520,7 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         self.assertNotIn("divider-scoop-grid", styles_css)
         self.assertIn('one.options.slope_base = true;', app_js)
         self.assertIn('delete one.options.scoop;', app_js)
-        self.assertIn('delete state.draft.options[key];', app_js)
+        self.assertIn('"bottom_supports", "scoop"]) delete one.options[key];', app_js)
         self.assertIn('textPlacementFields(', app_js)
         self.assertIn('>On base</option>', app_js)
         self.assertIn('>Rim level</option>', app_js)
@@ -3004,8 +3004,8 @@ const tick = () => new Promise(r => setImmediate(r));
 
         # The failed flush was observable to its own caller (Correction 1)...
         self.assertTrue(out["firstFlushRejected"])
-        # ...reported itself once...
-        self.assertEqual(out["toastsAfterFailure"], 1)
+        # ...leaves the user-facing message to the explicit caller...
+        self.assertEqual(out["toastsAfterFailure"], 0)
         # ...and did not stop the next write.
         self.assertEqual(out["recoveredDesign"], {"v": "second-succeeds"})
         self.assertTrue(out["recoveredPending"])
@@ -3171,7 +3171,8 @@ const tick = () => new Promise(r => setImmediate(r));
 
         script = "\n".join([
             "const calls = [];",
-            "const state = { output: 'OLD_OUTPUT', activeSpaceId: 'OLD_ID', folderSelected: false };",
+            "const state = { output: 'OLD_OUTPUT', activeSpaceId: 'OLD_ID', folderSelected: false, previewRequest: 0 };",
+            "const cancelPreviewWait = () => calls.push(['cancelPreviewWait', state.output, state.activeSpaceId]);",
             "const SP = {",
             "  resetDrawer: async () => { calls.push(['resetDrawer']); return true; },",
             "  flushOutgoingResumeCheckpoint: async () => {",
@@ -3198,6 +3199,9 @@ const tick = () => new Promise(r => setImmediate(r));
         out = json.loads(done.stdout)
 
         flush_call = next(c for c in out["calls"] if c[0] == "flush")
+        cancel_call = next(c for c in out["calls"] if c[0] == "cancelPreviewWait")
+        self.assertEqual(cancel_call[1:], ["OLD_OUTPUT", "OLD_ID"])
+        self.assertLess(out["calls"].index(cancel_call), out["calls"].index(flush_call))
         # The flush saw the OLD identity - it ran before the mutation below.
         self.assertEqual(flush_call[1:], ["OLD_OUTPUT", "OLD_ID"])
         set_folder_state_call = next(c for c in out["calls"] if c[0] == "setFolderState")
@@ -3266,7 +3270,7 @@ const tick = () => new Promise(r => setImmediate(r));
         # panel - the prior hierarchy had it at 16px, level with everything
         # else. Type/size stay secondary (unchanged, small/muted).
         css = (Path(__file__).resolve().parent / "web" / "drawer.css").read_text(encoding="utf-8")
-        match = re.search(r"\.space-head-title strong\s*\{([^}]*)\}", css)
+        match = re.search(r"\.space-head-title strong\s*,\s*\.space-head-type\s*\{([^}]*)\}", css)
         self.assertIsNotNone(match, "expected a .space-head-title strong rule in drawer.css")
         size_match = re.search(r"font-size:\s*(\d+(?:\.\d+)?)px", match.group(1))
         self.assertIsNotNone(size_match)
@@ -3441,7 +3445,7 @@ const tick = () => new Promise(r => setImmediate(r));
         root = Path(__file__).resolve().parent / "web"
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         stats = panel[panel.index("DP.renderStats = () => {"):]
-        stats = stats[:stats.index("\nDP.renderOpenSpaces")]
+        stats = stats[:stats.index("\n};")]
         self.assertIn("const hosted = Boolean(state.runtime.hosted);", stats)
         for selector in ('"#dl-sp-plan"', '"#dl-sp-generate"', '"#dl-sp-print"', '"#dl-print"'):
             self.assertIn(selector, stats)
@@ -3454,7 +3458,7 @@ const tick = () => new Promise(r => setImmediate(r));
         root = Path(__file__).resolve().parent / "web"
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         stats = panel[panel.index("DP.renderStats = () => {"):]
-        stats = stats[:stats.index("\nDP.renderOpenSpaces")]
+        stats = stats[:stats.index("\n};")]
         self.assertIn("const hasPlan = Boolean(DL.spacerPlan);", stats)
         self.assertIn("DL.spacerSelected && DL.spacerSelected.size > 0", stats)
         self.assertIn('"Plan spacers first."', stats)
@@ -4047,7 +4051,7 @@ class Fix20SpaceFormTests(unittest.TestCase):
         root = Path(__file__).resolve().parent / "web"
         html = (root / "index.html").read_text(encoding="utf-8")
         self.assertIn('<p id="space-form-type"', html)
-        self.assertEqual(html.count('class="space-dimension-row"'), 3)
+        self.assertEqual(html.count('class="space-dimension-row"'), 6)
         self.assertIn(
             'id="space-create" class="button primary" type="button"',
             html,
@@ -4334,7 +4338,7 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
 
         # visibleDesignSnapshot B4B fallbacks
         vsnap_start = app_js.index("function visibleDesignSnapshot() {")
-        vsnap_end = app_js.index("function checkBinSizeChange() {", vsnap_start)
+        vsnap_end = app_js.index("function designHasChanges() {", vsnap_start)
         vsnap = app_js[vsnap_start:vsnap_end]
         self.assertIn("const defaultBase = visibleB4B\n    ? number(b4bRules.default_base_mm, 1.6)\n    : number(state.catalog?.base_rules?.default_mm, 0.6);", vsnap)
         self.assertIn("const defaultWall = visibleB4B\n    ? number(b4bRules.default_wall_mm, 1.6)\n    : (wallRules.default_mm ?? 0.8);", vsnap)

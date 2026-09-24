@@ -369,12 +369,12 @@ class B4BValidationTests(unittest.TestCase):
             b4b.validate_b4b_design(box)
         self.assertIn("Inside Grip is not available", str(ctx.exception))
 
-        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True), edge_mount=EdgeMountSpec(side="front", label_projection_mm=10))
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True), edge_mount=EdgeMountSpec(side="front", label_enabled=True))
         with self.assertRaises(ValueError) as ctx:
             b4b.validate_b4b_design(box)
         self.assertIn("Edge Mount is not available", str(ctx.exception))
 
-        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True), side_openings=SideOpeningSpec(enabled=True))
+        box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True), side_openings=SideOpeningSpec(enabled=True, sides=("front",)))
         with self.assertRaises(ValueError) as ctx:
             b4b.validate_b4b_design(box)
         self.assertIn("Side Openings are not available", str(ctx.exception))
@@ -854,7 +854,7 @@ class B4BDividerAndMaterialTests(unittest.TestCase):
         b4b.validate_b4b_design(box)
 
     def test_b4b_divider_round_trip(self):
-        from organizer_engine import Feature, Zone
+        from organizer_inserts import Feature, Zone
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
         feat = Feature("divider", Zone(-32, -24, 32, 24), full_span=True, options={"count_x": 1, "count_y": 1})
         data = design_to_dict(box, Layout((feat,), "fused"))
@@ -955,7 +955,7 @@ class B4BDividerAndMaterialTests(unittest.TestCase):
         self.assertEqual(box.base_thickness, 0.8)
 
     def test_b4b_build_print_objects_with_divider(self):
-        from organizer_engine import Feature, Zone
+        from organizer_inserts import Feature, Zone
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True, lid=False))
         feat = Feature("divider", Zone(-32, -24, 32, 24), full_span=True, options={"count_x": 1, "count_y": 1})
         objs_no_div = b4b.b4b_build_print_objects(box, ())

@@ -540,23 +540,24 @@ class InventoryResolverTests(unittest.TestCase):
             self.assertTrue(legacy.is_file())
             self.assertFalse(canonical.exists())
 
-            save_inventory(folder, bin_updates=[{"id": "B1", "qty": 2}])
+            save_inventory(folder, bin_updates=[{"id": "B1", "name": "Two"}])
             self.assertTrue(canonical.is_file())
             self.assertFalse(legacy.exists())
-            self.assertEqual(load_inventory(folder)["bins"][0]["qty"], 2)
+            self.assertEqual(load_inventory(folder)["bins"][0]["name"], "Two")
 
             # Identical leftover: removed on migrate, before canonical changes.
             legacy.write_bytes(canonical.read_bytes())
             resolve_inventory_path(folder, migrate=False)
             self.assertTrue(legacy.is_file())
-            save_inventory(folder, bin_updates=[{"id": "B1", "qty": 3}])
+            save_inventory(folder, bin_updates=[{"id": "B1", "name": "Three"}])
             self.assertFalse(legacy.exists())
+            self.assertEqual(load_inventory(folder)["bins"][0]["name"], "Three")
 
             # Differing leftover: hard stop, nothing modified.
             legacy.write_text("# something else\n", encoding="utf-8")
             before = canonical.read_bytes()
             with self.assertRaises(InventoryMigrationError):
-                save_inventory(folder, bin_updates=[{"id": "B1", "qty": 4}])
+                save_inventory(folder, bin_updates=[{"id": "B1", "name": "Four"}])
             self.assertEqual(canonical.read_bytes(), before)
             self.assertEqual(legacy.read_text(encoding="utf-8"), "# something else\n")
 

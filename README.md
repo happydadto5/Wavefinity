@@ -1544,13 +1544,14 @@ layered implementation:
 `web/index.html`, `web/styles.css`, `web/feature-icons.js` and `web/app.js` are
 plain dependency-free frontend files with no build step. Icon artwork lives in
 `feature-icons.js`; the feature registry supplies stable icon identifiers.
-`app.js` holds the stateful editor and preview coordination, while all printable
-geometry still comes from the Python service. Drawer layout mode lives apart in
-`web/drawer-model.js` (data, saving, undo), `web/drawer-view.js` (the drawer
-canvas) and `web/drawer-panel.js` (its sidebar), styled by `web/drawer.css`.
-It borrows app.js's small helpers, but app.js knows nothing about it beyond the
-tab. The page's content-security policy refuses inline `style=""` attributes,
-so the drawer files set colours through the DOM.
+`app.js` holds the stateful editor, preview coordination, and typed-Space
+ordinary-bin autosave and status handoffs. All printable geometry still comes
+from the Python service. Drawer layout mode lives in `web/drawer-model.js`
+(data, saving, undo), `web/drawer-view.js` (the canvas) and
+`web/drawer-panel.js` (its sidebar), styled by `web/drawer.css`. These files
+share helpers and Space identity with `app.js`. The page's content-security
+policy refuses inline `style=""` attributes, so the drawer files set colours
+through the DOM.
 
 `TESTING.md` was the historical test log, now moved to the untracked `archive/`
 folder. We no longer maintain or keep this testing log updated.
@@ -1592,6 +1593,17 @@ and hosted browser-text implementations must preserve that same logical
 atomicity through `organizer_inventory.design_specs()`,
 `save_design_source()`/`save_design_source_text()`, and `_merge_inventory()`
 under `INVENTORY_LOCK`.
+
+In a typed Space, each ordinary bin has one canonical Inventory row and one
+`layout.design_specs[row_id]` source through its `in_design`, `saved`, and
+`printed` statuses. `app.js` debounces Designer autosave and serializes writes
+through `spaceAutosaveChain`; it flushes visible edits before replacement,
+Save, Print, or a folder/Space switch. `DL.spaceContext()` guards those writes
+and their completions against a changed Space. Save and Print update that same
+row. Qty remains a temporary compatibility bridge while the current Space UI
+is being simplified; it is not a second copy model for new ordinary bins.
+Standalone Design keeps its separate `.wavefinity.json` file workflow and is
+not owned by typed-Space autosave.
 
 `Layout` metadata is additive. Current examples include `object_height_mm`,
 `surface_base_mode`, and `surface_lightweight_base`. When transforming an

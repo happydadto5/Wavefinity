@@ -924,7 +924,7 @@ class AutoSpaceFolderTests(unittest.TestCase):
             self.assertTrue(target.is_dir())
             self.assertTrue((target / "Wavefinity bins.md").is_file())
             self.assertTrue((target / ".wavefinity.json").is_file())
-            self.assertEqual(made["folder"]["name"], "Kitchen Drawer")
+            self.assertEqual(made["folder"]["space"]["name"], "Kitchen Drawer")
 
             # Duplicate name check (case-insensitive)
             with self.assertRaises(ValueError) as ctx:
