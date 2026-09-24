@@ -7,9 +7,9 @@ from shapely import affinity
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 from organizer_engine import (
     BoxSpec, TEXT_DEPTH, TOP_LABEL_CAP_HEIGHT, TOP_LABEL_LEDGE_DEPTH,
-    TOP_LABEL_MARGIN, WAVE_AMPLITUDE, _rounded, flat_cavity_polygon,
+    TOP_LABEL_MARGIN, WAVE_AMPLITUDE, WAVE_LENGTH, _rounded, flat_cavity_polygon,
     require_text_backing, text_outline, text_prism, top_label_surface_z,
-    wavy_cavity_polygon, build_scoop_region,
+    wavy_cavity_polygon, build_scoop_region, wall_depth_for, wave_value,
 )
 from organizer_geometry import (
     _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile,
@@ -69,6 +69,7 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
     count = one.count or 1
     span = (zone.y1 - zone.y0) if along == "x" else (zone.x1 - zone.x0)
     return {
+        "wall_style": "straight",
         "thickness": RIB_THICKNESS,
         "height": connector_keep_out(box) - base_z,
         "angle": 0.0,
@@ -128,6 +129,7 @@ def _divider_scoops(
     capabilities=("qty", "along"),
     options=(
         OptionDefinition("Width", "thickness", "1.6"),
+        OptionDefinition("Walls", "wall_style", "straight", "enum"),
         OptionDefinition("Height", "height", ""),
         OptionDefinition("Spacing", "spacing", ""),
         OptionDefinition("Degree °", "bottom_angle", "0"),
@@ -158,6 +160,9 @@ def build_divider(
     spec_feature = normalize_divider_scoop(box, spec_feature, base_z)
     zone = spec_feature.zone
     options = resolved_options(box, spec_feature, base_z)
+    wall_style = str(options.get("wall_style", "straight"))
+    if wall_style not in {"straight", "wavy"}:
+        raise ValueError("divider walls must be straight or wavy")
     grid_x, grid_y = divider_grid_counts(options)
     if grid_x or grid_y:
         solids = _build_divider_grid(
@@ -180,7 +185,8 @@ def build_divider(
         raise ValueError("divider spacing must be positive")
     if count > 1:
         lean = height * math.tan(math.radians(angle)) if angle else 0.0
-        needed_gap = thickness + 2.0 * abs(lean)
+        needed_gap = ((wall_depth_for(thickness) + 2.0 * WAVE_AMPLITUDE)
+                      if wall_style == "wavy" else thickness) + 2.0 * abs(lean)
         if spacing < needed_gap:
             raise ValueError(
                 f"{count} dividers {spacing:.1f} mm apart need at least "
@@ -203,7 +209,7 @@ def build_divider(
             else Zone(zone.x0 + shift, zone.y0, zone.x1 + shift, zone.y1)
         )
         one = replace(spec_feature, zone=one_zone)
-        if angle != 0.0 and one.full_span:
+        if one.full_span and (angle != 0.0 or wall_style == "wavy"):
             solids.extend(_full_span_leaning_divider(
                 box, one, thickness, height, angle, base_z,
                 full_span_cavity=full_span_cavity,
@@ -457,7 +463,7 @@ def _one_grid_wall(
     full_span_cavity: Polygon | None = None,
 ) -> list[trimesh.Trimesh]:
     """One wall of a grid divider, centred on ``centre`` of its cross axis."""
-    if full_span and angle == 0.0:
+    if full_span and angle == 0.0 and spec_feature.options.get("wall_style") != "wavy":
         return _full_span_divider(
             box, along, centre, thickness, base_z, height,
             full_span_cavity=full_span_cavity,
@@ -469,7 +475,7 @@ def _one_grid_wall(
     else:
         wall_zone = Zone(zone.x0, centre - half_t, zone.x1, centre + half_t)
     one = replace(spec_feature, zone=wall_zone, along=along)
-    if full_span and angle != 0.0:
+    if full_span and (angle != 0.0 or spec_feature.options.get("wall_style") == "wavy"):
         return _full_span_leaning_divider(
             box, one, thickness, height, angle, base_z,
             full_span_cavity=full_span_cavity,
@@ -1248,7 +1254,8 @@ def _divider_wall(
     along = spec_feature.along
     cross_centre = centre_y if along == "x" else centre_x
     lean = height * math.tan(math.radians(angle))
-    half_t = thickness / 2.0
+    wavy = spec_feature.options.get("wall_style", "straight") == "wavy"
+    half_t = (wall_depth_for(thickness) if wavy else thickness) / 2.0
     base_low, base_high = cross_centre - half_t, cross_centre + half_t
     if thickness < MIN_WEDGE_EDGE:
         raise ValueError(
@@ -1280,6 +1287,9 @@ def _divider_wall(
     if not profile.is_valid:
         raise ValueError("that divider angle and thickness do not form a valid wall")
     run = zone.width if along == "x" else zone.depth
+    if wavy:
+        run_centre = centre_x if along == "x" else centre_y
+        return [_wavy_divider_profile(profile, along, run_centre, run)]
     if along == "x":
         wall = _extrude_yz_profile(profile, run)
         wall.apply_translation((centre_x, 0.0, 0.0))
@@ -1287,6 +1297,42 @@ def _divider_wall(
         wall = _extrude_xz_profile(profile, run)
         wall.apply_translation((0.0, centre_y, 0.0))
     return [wall]
+
+
+def _wavy_divider_profile(
+    profile: Polygon, along: str, centre: float, run: float,
+) -> trimesh.Trimesh:
+    """Sweep the existing lean/wedge/foot profile on the global wave phase."""
+    ring = list(profile.exterior.coords)[:-1]
+    count = len(ring)
+    steps = max(2, math.ceil(run / (WAVE_LENGTH / 8)))
+    runs = [centre - run / 2.0 + run * index / steps for index in range(steps + 1)]
+    def vertex(run_coordinate: float, cross: float, z: float):
+        shifted = cross + wave_value(run_coordinate)
+        return ((run_coordinate, shifted, z) if along == "x"
+                else (shifted, run_coordinate, z))
+    vertices = [vertex(position, cross, z) for position in runs for cross, z in ring]
+    faces = []
+    for section in range(steps):
+        low, high = section * count, (section + 1) * count
+        for index in range(count):
+            after = (index + 1) % count
+            faces.append((low + index, low + after, high + after))
+            faces.append((low + index, high + after, high + index))
+    cap_vertices, cap_faces = trimesh.creation.triangulate_polygon(profile, engine="earcut")
+    for position, reverse in ((runs[0], True), (runs[-1], False)):
+        offset = len(vertices)
+        vertices.extend(vertex(position, cross, z) for cross, z in cap_vertices)
+        for face in cap_faces:
+            triangle = tuple(offset + int(index) for index in face)
+            faces.append(triangle[::-1] if reverse else triangle)
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+    trimesh.repair.fix_winding(mesh)
+    if mesh.volume < 0:
+        mesh.invert()
+    if not mesh.is_watertight:
+        raise ValueError("wavy divider wall did not form a closed volume")
+    return mesh
 
 
 def _full_span_leaning_divider(
@@ -1392,15 +1438,53 @@ def _full_span_divider(
     profile above it - exactly the same outlines the wall itself is built
     from, so the two can never disagree.
     """
+    if height <= DIVIDER_CHAMFER:
+        raise ValueError("a divider must stand taller than its base chamfer")
     half_thick = thickness / 2.0
     z0, z1 = base_z, base_z + height
+    pieces: list[trimesh.Trimesh] = []
+
+    def foot_layers(cavity: Polygon, low: float, high: float) -> list[trimesh.Trimesh]:
+        # The regular wall profile already owns this foot. This clip-and-extrude
+        # path is its sole missing case. Keep the foot just inside the real
+        # cavity edge: the main rib makes the wall join, while coincident
+        # stepped foot edges there leave zero-volume boolean slivers.
+        steps = 5
+        layers = []
+        foot_cavity = cavity.buffer(-0.1)
+        if foot_cavity.is_empty:
+            return layers
+        for index in range(steps):
+            foot_z0 = z0 + index * DIVIDER_CHAMFER / steps
+            foot_z1 = z0 + (index + 1) * DIVIDER_CHAMFER / steps
+            lo, hi = max(low, foot_z0), min(high, foot_z1)
+            if hi <= lo:
+                continue
+            grow = DIVIDER_CHAMFER * (steps - index) / steps
+            half = half_thick + grow
+            bounds = cavity.bounds
+            expanded = (
+                shapely_box(bounds[0] - 1.0, cross_centre - half,
+                            bounds[2] + 1.0, cross_centre + half)
+                if along == "x" else
+                shapely_box(cross_centre - half, bounds[1] - 1.0,
+                            cross_centre + half, bounds[3] + 1.0)
+            )
+            layers.append(_trimmed_prism(expanded, foot_cavity, lo, hi))
+        return layers
+
+    def band(strip: Polygon, cavity: Polygon, low: float, high: float) -> trimesh.Trimesh:
+        main = _trimmed_prism(strip, cavity, low, high)
+        return union([main, *foot_layers(cavity, low, high)])
+
     if full_span_cavity is not None:
         minx, miny, maxx, maxy = full_span_cavity.bounds
         if along == "x":
             strip = shapely_box(minx - 1.0, cross_centre - half_thick, maxx + 1.0, cross_centre + half_thick)
         else:
             strip = shapely_box(cross_centre - half_thick, miny - 1.0, cross_centre + half_thick, maxy + 1.0)
-        return [_trimmed_prism(strip, full_span_cavity, z0, z1)]
+        pieces.append(band(strip, full_span_cavity, z0, z1))
+        return pieces
 
     half_run = (box.half_x if along == "x" else box.half_y) + 2.0 * WAVE_AMPLITUDE
     strip = (
@@ -1409,12 +1493,13 @@ def _full_span_divider(
         shapely_box(cross_centre - half_thick, -half_run, cross_centre + half_thick, half_run)
     )
     flat_top = box.base_thickness + box.flat_inside
-    pieces: list[trimesh.Trimesh] = []
     if box.flat_inside > 0.0 and z0 < flat_top:
-        pieces.append(_trimmed_prism(strip, flat_cavity_polygon(box), z0, min(z1, flat_top)))
+        cavity = flat_cavity_polygon(box)
+        pieces.append(band(strip, cavity, z0, min(z1, flat_top)))
     wavy_z0 = max(z0, flat_top) if box.flat_inside > 0.0 else z0
     if wavy_z0 < z1:
-        pieces.append(_trimmed_prism(strip, wavy_cavity_polygon(box), wavy_z0, z1))
+        cavity = wavy_cavity_polygon(box)
+        pieces.append(band(strip, cavity, wavy_z0, z1))
     if not pieces:
         raise ValueError("divider height leaves nothing to build")
     return pieces

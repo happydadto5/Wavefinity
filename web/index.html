@@ -380,7 +380,10 @@
           <label class="button secondary file-button" id="designer-open-file-label">Open design file<input id="designer-open-file" type="file" accept=".json,.wavefinity.json"></label>
         </div>
         <div class="print-button-wrap">
-          <button id="print-bin" class="button primary wide print-button">Print to Bambu Studio</button>
+          <div class="print-choice-row">
+            <button id="print-with-connectors" class="button primary print-button">Print with Connectors</button>
+            <button id="print-without-connectors" class="button secondary print-button">Print without Connectors</button>
+          </div>
           <button type="button" id="slicer-picker-button" class="slicer-picker-button" title="Select custom Bambu Studio or OrcaSlicer executable">Change slicer</button>
         </div>
         <div class="button-row equal generate-actions">

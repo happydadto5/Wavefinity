@@ -2398,7 +2398,7 @@ def default_feature(
         # New Dividers start with one wall on X and none on Y (X=1, Y=0). Older saved
         # Dividers have neither key and continue through the legacy one-axis
         # path in divider_defaults().
-        feature_options = {"count_x": 1, "count_y": 0}
+        feature_options = {"count_x": 1, "count_y": 0, "wall_style": "wavy"}
     elif kind == "post":
         # A one-cell-wide cartridge cannot hold the normal 12 mm starter peg.
         # Size the starter diameter to both axes, then give it as much of the
@@ -2454,6 +2454,7 @@ def default_feature(
         # fused-shallow-bin height seeding is new here.
         width = _starter_span(bounds.width, 16.0, mode)
         depth = _starter_span(bounds.depth, 16.0, mode)
+        feature_options["wall_style"] = "wavy"
         if mode == "fused":
             base_z = box.base_thickness
             available = box.z - base_z
@@ -2461,10 +2462,16 @@ def default_feature(
             if available + 1e-9 < natural_height:
                 feature_options["height"] = natural_height
     elif kind == "slot":
+        feature_options["wall_style"] = "wavy"
+        if mode == "cartridge":
+            # One 8 mm cell still fits a useful starter opening after the
+            # required 0.4 mm wave margin on each outside wall.
+            feature_options["thickness"] = 3.7
         run = _starter_span(bounds.width if along == "x" else bounds.depth, 32.0, mode)
-        # One explicit starter slot with a snug 8 mm Base. Raising Quantity in
+        # One explicit starter slot, with the extra wave excursion reserved.
+        # Raising Quantity in
         # the editor grows this axis automatically.
-        across = _starter_span(bounds.depth if along == "x" else bounds.width, 8.0, mode)
+        across = _starter_span(bounds.depth if along == "x" else bounds.width, 9.0, mode)
         width, depth = ((run, across) if along == "x" else (across, run))
         if mode == "fused":
             base_z = box.base_thickness

@@ -3071,10 +3071,10 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if target not in {"connector", "sampler", "base_trim_joint_test"} and not design_files:
         raise RuntimeError("No bin files were generated to send to Bambu Studio.")
 
-    # The default bin print also carries the automatic connector bundle (a
-    # Side connector, plus 3-Way and 4-Way corners when the bin is eligible),
-    # so a fresh build has parts on the plate to link bins together - but
-    # never for a B4B, whose lid controls the rim and which does not use the
+    # Only the explicit "with connectors" print (target "all") carries the
+    # automatic connector bundle (a Side connector, plus 3-Way and 4-Way
+    # corners when the bin is eligible). A bin-only print never generates
+    # connectors. Never for a B4B, whose lid controls the rim and which does not use the
     # connector, nor for a lidded bin or a Base Trim design.
     design = payload.get("design")
     is_base_trim = _is_base_trim_design(design)
@@ -3091,7 +3091,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         and design["box"]["lid"].get("enabled")
     )
     if (
-        target not in {"connector", "sampler"}
+        target == "all"
         and not is_b4b
         and not has_lid
         and not is_base_trim

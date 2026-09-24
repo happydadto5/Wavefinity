@@ -36,6 +36,7 @@ HEX_BIT_LENGTH = {
     "hex_bit_long": HEX_BIT_LONG_LENGTH,
 }
 BORE_MOUTH_CHAMFER = 0.6  # 45-degree lead-in at each hole mouth
+WALL_ONLY_FOOT = 0.5
 BORE_MAX_TILT = 70.0      # steepest lean off vertical the hole geometry still allows
 BORE_TILTED_WALL = 3.0    # thicker default wall once a bore is leaned
 
@@ -311,7 +312,15 @@ def _build_wall_only_bore(
     # than triangulating a ring with a hole.
     bore = _extrude_polygon(inner, height + 2.0)
     bore.apply_translation((0.0, 0.0, -1.0))
-    sleeve = difference([_extrude_polygon(outer, height), bore])
+    foot_layers = []
+    layers = 5
+    for index in range(layers):
+        reach = WALL_ONLY_FOOT * (layers - index) / layers
+        layer = _extrude_polygon(outer.buffer(reach, join_style="round"),
+                                 WALL_ONLY_FOOT / layers + 1e-4)
+        layer.apply_translation((0.0, 0.0, index * WALL_ONLY_FOOT / layers))
+        foot_layers.append(layer)
+    sleeve = difference([_union([_extrude_polygon(outer, height), *foot_layers]), bore])
     opening = _extrude_polygon(clear, height + 2.0)
     opening.apply_translation((0.0, 0.0, -1.0))
     sleeves, openings = [], []

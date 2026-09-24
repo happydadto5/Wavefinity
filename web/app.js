@@ -1023,10 +1023,11 @@ function updateGenerateAvailability() {
     connectorButton.disabled = state.designMutationBusy;
   }
   syncConnectorActionLabels();
-  const printButton = $("#print-bin");
-  if (printButton) {
+  updatePrimaryPrintButtonLabel();
+  for (const printButton of [$("#print-with-connectors"), $("#print-without-connectors")]) {
+    if (!printButton) continue;
     printButton.disabled = state.designMutationBusy || !state.canGenerate;
-    printButton.title = state.canGenerate ? "Export and open in Bambu Studio" : "Resolve the highlighted issue before printing";
+    if (!state.canGenerate) printButton.title = "Resolve the highlighted issue before printing";
   }
 }
 
@@ -2300,6 +2301,7 @@ function syncConnectorSectionVisibility() {
   renderConnectorReadout();
   const connectorLocked = Boolean(state.design?.box?.lid?.enabled);
   $("#generate-all").hidden = connectorLocked;
+  syncPrintChoiceAvailability();
   $("#generate-bin").hidden = false;
   $("#generate-connector").hidden = connectorLocked;
   syncConnectorActionLabels();
@@ -2836,6 +2838,7 @@ function applyStackVisibility() {
     const element = $(selector);
     if (element) element.hidden = b4b || baseTrimEnabled() || connectorLocked;
   });
+  syncPrintChoiceAvailability();
   if (!baseTrimEnabled()) {
     $("#generate-bin").textContent = hasLid ? "Save Bin + Lid" : "Save Bin";
   }
@@ -3785,7 +3788,8 @@ function wireControls() {
     }
   });
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
-  $("#print-bin").addEventListener("click", () => printModel("bin"));
+  $("#print-with-connectors").addEventListener("click", event => printModel("all", event.currentTarget));
+  $("#print-without-connectors").addEventListener("click", event => printModel("bin", event.currentTarget));
   $("#generate-all")?.addEventListener("click", () => generateParts("all"));
   $("#generate-bin")?.addEventListener("click", () => generateParts("bin"));
   $("#generate-connector")?.addEventListener("click", () => generateParts("connector"));
@@ -4634,6 +4638,21 @@ function updateDraftOverhangNote() {
     : `Extends ${fmt(overhang)} mm above rim`;
 }
 
+function wallStyleSelect(style) {
+  return `<label><span class="field-label">Walls</span><select data-draft="option:wall_style">
+    <option value="wavy" ${style === "wavy" ? "selected" : ""}>Wavy Walls</option>
+    <option value="straight" ${style === "wavy" ? "" : "selected"}>Straight Walls</option>
+  </select></label>`;
+}
+
+// Match Pocket's backend envelope and Bore Wall Only's outward wave reach.
+function pocketWallReach(wall, style) {
+  if (style !== "wavy") return wall;
+  const amplitude = 0.4, length = 4;
+  const slope = amplitude * 2 * Math.PI / length;
+  return 2 * amplitude + wall * Math.sqrt(1 + slope * slope) + 0.0001;
+}
+
 function renderDraftFields() {
   if (!state.draft) return;
   const info = partInfo();
@@ -4687,8 +4706,9 @@ function renderDraftFields() {
     const isPocket = one.kind === "pocket";
     const isBore = one.kind === "bore";
     const wall = isPocket ? number(one.options?.wall, state.draftResolvedOptions?.wall ?? 1.6) : 0;
-    const shownWidth = isPocket ? Math.max(0.1, width - 2 * wall) : width;
-    const shownDepth = isPocket ? Math.max(0.1, depth - 2 * wall) : depth;
+    const reach = isPocket ? pocketWallReach(wall, one.options?.wall_style ?? state.draftResolvedOptions?.wall_style) : 0;
+    const shownWidth = isPocket ? Math.max(0.1, width - 2 * reach) : width;
+    const shownDepth = isPocket ? Math.max(0.1, depth - 2 * reach) : depth;
     // A bore's footprint reads Width x Length, matching Pocket and the item terms.
     // Slot and base Text each also carry their own "Depth" field (slot cut / letter
     // sink), so the footprint dimension is named apart to avoid two "Depth" boxes.
@@ -4854,11 +4874,13 @@ function renderDraftFields() {
       const shownGy = (number(gy, 0) === 0) ? "" : gy;
       const shownThickness = opt.thickness ?? state.draftResolvedOptions?.thickness ?? 1.6;
       const shownHeight = opt.height ?? state.draftResolvedOptions?.height ?? "";
+      const wallStyle = opt.wall_style ?? state.draftResolvedOptions?.wall_style ?? "straight";
       html += `<div class="editor-group divider-layout"><span class="editor-group-label">Divider layout</span><div class="pair">
         ${field("X count", "option:count_x", shownGx, { min: "0", step: "1", tip: "Walls dividing the bin left to right. 0 for none." })}
         ${field("Y count", "option:count_y", shownGy, { min: "0", step: "1", tip: "Walls dividing the bin front to back. 0 for none." })}
         ${dividerThicknessField(shownThickness)}
         ${field("Height", "option:height", shownHeight, { unit: "mm", step: "0.5" })}
+        ${wallStyleSelect(wallStyle)}
       </div></div>`;
     } else {
       const autoPost = info.kind === "post" && one.count == null;
@@ -4959,12 +4981,16 @@ function renderDraftFields() {
     // Rendered by the Divider slope block below only for Crossbars.
     if (option.key === "bottom_supports") continue;
     // Slope and angle are handled specifically for divider below.
-    if (info.kind === "divider" && ["bottom_angle", "angle", "thickness", "height"].includes(option.key)) continue;
+    if (info.kind === "divider" && ["bottom_angle", "angle", "thickness", "height", "wall_style"].includes(option.key)) continue;
     // The scoop depth field is rendered with its own % unit and help text above.
     if (info.kind === "scoop") continue;
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
     const shown = explicit ? one.options[option.key]
       : state.draftResolvedOptions?.[option.key] ?? option.default;
+    if (option.key === "wall_style") {
+      bodyHtml += wallStyleSelect(shown);
+      continue;
+    }
     // Mouse-wheel / spinner steps: lean and slope a whole degree, width
     // half a mm.
     const stepFor = { angle: "1" };
@@ -6319,7 +6345,8 @@ function sizeSlotToBank(one) {
   if (!(thickness > 0) || !(wall > 0) || !(cosA > 0)) return;
   const count = Math.max(1, Math.round(one.count));
   const pitch = (thickness + wall) / cosA;
-  const acrossNeeded = Math.ceil((count - 1) * pitch + thickness / cosA + 2 * wall - 1e-6);
+  const waveReach = (opts.wall_style ?? resolved.wall_style) === "wavy" ? 0.8 : 0;
+  const acrossNeeded = Math.ceil((count - 1) * pitch + thickness / cosA + 2 * wall + waveReach - 1e-6);
   const along = one.along === "y" ? "y" : "x";
   const acrossKey = along === "x" ? "depth" : "width";
   const cx = (one.zone[0] + one.zone[2]) / 2;
@@ -6508,15 +6535,27 @@ function updateDraftFromFields(event) {
   const cy = number(get("cy"), oldCy);
   const isPocket = one.kind === "pocket";
   const wall = isPocket ? number(one.options?.wall, state.draftResolvedOptions?.wall ?? 1.6) : 0;
-  let width = Math.max(0.1, number(get("width"), isPocket ? oldWidth - 2 * wall : oldWidth));
-  let depth = Math.max(0.1, number(get("depth"), isPocket ? oldDepth - 2 * wall : oldDepth));
+  const oldStyle = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style ?? "straight";
+  const oldReach = isPocket ? pocketWallReach(wall, oldStyle) : 0;
+  let width = Math.max(0.1, number(get("width"), isPocket ? oldWidth - 2 * oldReach : oldWidth));
+  let depth = Math.max(0.1, number(get("depth"), isPocket ? oldDepth - 2 * oldReach : oldDepth));
   if (isPocket) {
-    width = width + 2 * wall;
-    depth = depth + 2 * wall;
+    width = width + 2 * oldReach;
+    depth = depth + 2 * oldReach;
   }
   one.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
   const info = partInfo();
   const changed = event?.currentTarget?.dataset?.draft || "";
+  if (["divider", "pocket", "slot"].includes(one.kind) && changed === "option:wall_style") {
+    one.options.wall_style = get(changed) === "wavy" ? "wavy" : "straight";
+    if (isPocket) {
+      const reach = pocketWallReach(wall, one.options.wall_style);
+      const insideW = Math.max(0.1, oldWidth - 2 * oldReach);
+      const insideD = Math.max(0.1, oldDepth - 2 * oldReach);
+      one.zone = [cx - insideW / 2 - reach, cy - insideD / 2 - reach,
+        cx + insideW / 2 + reach, cy + insideD / 2 + reach];
+    }
+  }
   if (info.flags.qty && one.kind !== "divider" && changed === "count") {
     const count = String(get("count") ?? "auto").trim().toLowerCase();
     one.count = one.kind === "steps"
@@ -6779,10 +6818,13 @@ function updateDraftFromFields(event) {
     if (info.kind === "pocket" && key === "wall") {
       const newWall = number(one.options.wall, 1.6);
       const prevWall = number(state.draftResolvedOptions?.wall, 1.6);
-      const innerW = Math.max(0.1, oldWidth - 2 * prevWall);
-      const innerD = Math.max(0.1, oldDepth - 2 * prevWall);
-      const newW = innerW + 2 * newWall;
-      const newD = innerD + 2 * newWall;
+      const style = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style ?? "straight";
+      const prevReach = pocketWallReach(prevWall, style);
+      const nextReach = pocketWallReach(newWall, style);
+      const innerW = Math.max(0.1, oldWidth - 2 * prevReach);
+      const innerD = Math.max(0.1, oldDepth - 2 * prevReach);
+      const newW = innerW + 2 * nextReach;
+      const newD = innerD + 2 * nextReach;
       one.zone = [cx - newW / 2, cy - newD / 2, cx + newW / 2, cy + newD / 2];
     }
     keepCutBelowHeight(one, key);
@@ -6835,7 +6877,8 @@ function updateDraftFromFields(event) {
   )) sizePostToRow(one);
   if (one.kind === "slot" && (
     changed === "count" || changed === "option:thickness" ||
-    changed === "option:wall" || changed === "option:angle" || changed === "along"
+    changed === "option:wall" || changed === "option:angle" || changed === "along" ||
+    changed === "option:wall_style"
   )) sizeSlotToBank(one);
   // A hand-typed Base Width / Length pins that axis: from now on the contents
   // sizers only ever grow it to fit, never shrink or overwrite the number.
@@ -11618,8 +11661,8 @@ async function generate(path, selector) {
   return generateParts("bin");
 }
 
-async function printModel(target = "bin") {
-  if (state.runtime.hosted) return generateParts(state.design?.box?.lid?.enabled ? "bin" : "all");
+async function printModel(target = "bin", initiatingButton = null) {
+  if (state.runtime.hosted) return generateParts(target === "all" ? "all" : "bin");
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
     toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
@@ -11631,9 +11674,10 @@ async function printModel(target = "bin") {
     ? state.designInventoryId : null;
   const designSpaceContext = designRowId ? DL.spaceContext() : null;
   if (!beginDesignMutation()) return;
-  const button = $("#print-bin");
+  const button = initiatingButton || $("#print-without-connectors");
   const old = button.textContent;
-  button.disabled = true;
+  const printButtons = [$("#print-with-connectors"), $("#print-without-connectors")].filter(Boolean);
+  printButtons.forEach(one => { one.disabled = true; });
   const slicerName = state.slicer?.name || "Bambu Studio";
   button.textContent = `Sending to ${slicerName}…`;
   setError();
@@ -11711,30 +11755,43 @@ async function printModel(target = "bin") {
   }
 }
 
+// Connectors are physically unavailable for a B4B, a Base Trim or a lidded
+// bin - the same rule that hides Save Bin + Connectors.
+function connectorsUnavailable() {
+  return b4bEnabled() || baseTrimEnabled() || Boolean(state.design?.box?.lid?.enabled);
+}
+
+function syncPrintChoiceAvailability() {
+  const withButton = $("#print-with-connectors");
+  if (withButton) withButton.hidden = connectorsUnavailable();
+}
+
 function updatePrimaryPrintButtonLabel() {
-  const printBtn = $("#print-bin");
+  const withButton = $("#print-with-connectors");
+  const withoutButton = $("#print-without-connectors");
   const wrap = $(".print-button-wrap");
-  if (!printBtn) return;
+  if (!withButton || !withoutButton) return;
+  if (wrap) wrap.hidden = false;
+  syncPrintChoiceAvailability();
+  withoutButton.hidden = false;
   if (state.runtime.hosted) {
-    if (wrap) wrap.hidden = false;
-    printBtn.hidden = false;
-    printBtn.textContent = "Save to Folder";
-    printBtn.title = "Save files into your selected folder";
+    withButton.textContent = "Save with Connectors";
+    withButton.title = "Save the bin and its connector files into your selected folder";
+    withoutButton.textContent = "Save without Connectors";
+    withoutButton.title = "Save only the bin into your selected folder";
     $("#slicer-picker-button").hidden = true;
     return;
   }
-  const slicer = state.slicer || {};
-  if (slicer.available) {
-    if (wrap) wrap.hidden = false;
-    printBtn.hidden = false;
-    printBtn.textContent = `Print to ${slicer.name || "Bambu Studio"}`;
-    printBtn.title = `Send directly to ${slicer.name || "Bambu Studio"}`;
-  } else {
-    if (wrap) wrap.hidden = false;
-    printBtn.hidden = false;
-    printBtn.textContent = `Print to ${slicer.name || "Bambu Studio"}`;
-    printBtn.title = "Bambu Studio is not installed - click 'Change slicer' to locate executable";
-  }
+  const name = state.slicer?.name || "Bambu Studio";
+  const missing = !state.slicer?.available;
+  withButton.textContent = "Print with Connectors";
+  withoutButton.textContent = "Print without Connectors";
+  withButton.title = missing
+    ? "Bambu Studio is not installed - click 'Change slicer' to locate executable"
+    : `Send the bin and its connectors to ${name}`;
+  withoutButton.title = missing
+    ? "Bambu Studio is not installed - click 'Change slicer' to locate executable"
+    : `Send only the bin to ${name}`;
 }
 
 function updateSlicerUI() {

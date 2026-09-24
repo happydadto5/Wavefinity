@@ -7,7 +7,9 @@ import math
 import trimesh
 from shapely.geometry import Polygon
 
-from organizer_engine import BoxSpec
+from organizer_engine import (
+    BoxSpec, WAVE_AMPLITUDE, WAVE_LENGTH, wall_depth_for, wave_value,
+)
 from organizer_geometry import _extrude_polygon, difference, union
 
 from ._core import Feature
@@ -19,6 +21,34 @@ from ._registry import (
 
 POCKET_CHAMFER = 0.5       # 45-degree chamfer on pocket outside edges for strength
 POCKET_FLOOR = 2.0         # solid floor thickness under a pocket recess
+WAVE_NOISE_FLOOR = 1e-4
+
+
+def pocket_wall_reach(wall: float, style: str) -> float:
+    """One outward envelope for both the editor's inside size and the shell."""
+    return (2.0 * WAVE_AMPLITUDE + wall_depth_for(wall) + WAVE_NOISE_FLOOR
+            if style == "wavy" else wall)
+
+
+def _wavy_clear_outline(hx: float, hy: float, cx: float, cy: float) -> Polygon:
+    """The clear rectangle only gains space; phase follows world X/Y."""
+    points = []
+    corners = [(-hx, -hy), (hx, -hy), (hx, hy), (-hx, hy)]
+    for start, end, normal in zip(corners, corners[1:] + corners[:1],
+                                   ((0, -1), (1, 0), (0, 1), (-1, 0))):
+        length = math.dist(start, end)
+        steps = max(2, math.ceil(length / (WAVE_LENGTH / 8)))
+        for index in range(steps + 1):
+            t = index / steps
+            x = start[0] + (end[0] - start[0]) * t
+            y = start[1] + (end[1] - start[1]) * t
+            run = (x + cx) if normal[1] else (y + cy)
+            push = WAVE_AMPLITUDE + wave_value(run) + WAVE_NOISE_FLOOR
+            points.append((x + normal[0] * push, y + normal[1] * push))
+    outline = Polygon(points)
+    if not outline.is_valid:
+        raise ValueError("pocket wavy wall profile could not be built")
+    return outline
 
 
 @defaults("pocket")
@@ -37,6 +67,7 @@ def pocket_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, floa
     side = min(zone.width, zone.depth)
     default_rounding = round(max(0.0, min(side * 0.05, wall - 0.4)), 1)
     return {
+        "wall_style": "straight",
         "height": default_height,
         "wall": 1.6,
         "depth": max(0.1, height - POCKET_FLOOR),
@@ -51,6 +82,7 @@ def pocket_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, floa
     options=(
         OptionDefinition("Height", "height", "12"),
         OptionDefinition("Wall", "wall", "1.6"),
+        OptionDefinition("Walls", "wall_style", "straight", "enum"),
         OptionDefinition("Recess", "depth", ""),
         OptionDefinition("Rounding", "rounding", "", editor=False),
     ), order=50, palette_visible=False,
@@ -61,10 +93,14 @@ def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
     options = resolved_options(box, spec_feature, base_z)
     height = options["height"]
     wall = options["wall"]
+    style = str(options.get("wall_style", "straight"))
+    if style not in {"straight", "wavy"}:
+        raise ValueError("pocket walls must be straight or wavy")
+    reach = pocket_wall_reach(wall, style)
     depth = options.get("depth", max(0.1, height - POCKET_FLOOR))
     rounding = max(0.0, options.get("rounding", 0.0))
     if (height <= 0.0 or wall <= 0.0 or depth <= 0.0 or depth >= height
-            or 2 * wall >= zone.width or 2 * wall >= zone.depth):
+            or 2 * reach >= zone.width or 2 * reach >= zone.depth):
         raise ValueError("pocket wall and depth must leave a positive shell")
     centre_x, centre_y = zone.centre
     c = min(POCKET_CHAMFER, wall / 2.0, zone.width / 4.0, zone.depth / 4.0)
@@ -76,7 +112,18 @@ def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
         (hx - c, hy), (-hx + c, hy),
         (-hx, hy - c), (-hx, -hy + c),
     ]
-    poly = Polygon(pts)
+    inner_w = zone.width - 2 * reach
+    inner_d = zone.depth - 2 * reach
+    inner_hx, inner_hy = inner_w / 2.0, inner_d / 2.0
+    if style == "wavy":
+        inner_poly = _wavy_clear_outline(inner_hx, inner_hy, centre_x, centre_y)
+        poly = inner_poly.buffer(wall_depth_for(wall), join_style="round")
+    else:
+        poly = Polygon(pts)
+        inner_poly = Polygon([
+            (-inner_hx, -inner_hy), (inner_hx, -inner_hy),
+            (inner_hx, inner_hy), (-inner_hx, inner_hy),
+        ])
     column = _extrude_polygon(poly, height)
     column.apply_translation((centre_x, centre_y, base_z))
     block = [column]
@@ -85,17 +132,11 @@ def build_pocket(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[tri
         layer = c / steps
         for index in range(steps):
             grow = c * (steps - index) / steps
-            foot = _extrude_polygon(poly.buffer(grow, join_style="mitre"), layer)
+            foot = _extrude_polygon(poly.buffer(
+                grow, join_style="round" if style == "wavy" else "mitre"), layer)
             foot.apply_translation((centre_x, centre_y, base_z + index * layer))
             block.append(foot)
     outer_solid = union(block) if len(block) > 1 else column
-    inner_w = zone.width - 2 * wall
-    inner_d = zone.depth - 2 * wall
-    inner_hx, inner_hy = inner_w / 2.0, inner_d / 2.0
-    inner_poly = Polygon([
-        (-inner_hx, -inner_hy), (inner_hx, -inner_hy),
-        (inner_hx, inner_hy), (-inner_hx, inner_hy)
-    ])
     cavity_parts = []
     col = _extrude_polygon(inner_poly, depth + 1.0)
     col.apply_translation((centre_x, centre_y, base_z + height - depth))

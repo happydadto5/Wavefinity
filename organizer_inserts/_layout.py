@@ -15,6 +15,7 @@ from organizer_engine import (
     BoxSpec,
     flat_cavity_polygon,
     wavy_cavity_polygon,
+    wall_depth_for,
 )
 
 from ._bore import (
@@ -22,6 +23,7 @@ from ._bore import (
     HEX_BIT_CLEARANCE,
     HEX_BIT_FLATS,
     WALL_JOIN_FLAG,
+    WALL_ONLY_FOOT,
     _is_hex_bit,
     bore_envelope_zone,
     bore_tool_clearance_zone,
@@ -72,6 +74,9 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
         reach = box.wall_depth + 2.0 * WAVE_AMPLITUDE
         return Zone(one.zone.x0 - reach, one.zone.y0 - reach,
                     one.zone.x1 + reach, one.zone.y1 + reach)
+    if one.kind == "bore" and one.options.get("bore_style") == "wall_only":
+        return Zone(one.zone.x0 - WALL_ONLY_FOOT, one.zone.y0 - WALL_ONLY_FOOT,
+                    one.zone.x1 + WALL_ONLY_FOOT, one.zone.y1 + WALL_ONLY_FOOT)
     if one.kind != "divider":
         return one.zone
     zone = one.zone
@@ -91,17 +96,17 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
     thickness = options.get("thickness", 0.0)
     angle = options.get("angle", 0.0)
     lean = abs(options["height"] * math.tan(math.radians(angle))) if angle else 0.0
-    # The base chamfer comes from _divider_wall, used by every divider except
-    # a straight (non-leaning) full-span one, which is built by a separate,
-    # simpler clip-and-extrude path with no chamfer (see build_divider).
-    chamfer = 0.0 if (one.full_span and angle == 0.0) else DIVIDER_CHAMFER
+    chamfer = DIVIDER_CHAMFER
     # Margin each individual wall may reach past its own centre line. With
     # more than one (see build_divider), every centre sits strictly inside
     # the zone's own cross span, so widening that span by this margin on
     # each side always covers every wall - not the tightest possible bound,
     # but a safe one that does not need each wall's exact position redone
     # here too.
-    margin = thickness / 2.0 + lean + chamfer
+    wavy = options.get("wall_style") == "wavy"
+    margin = (wall_depth_for(thickness) if wavy else thickness) / 2.0 + lean + chamfer
+    if wavy:
+        margin += WAVE_AMPLITUDE
     grid_x, grid_y = divider_grid_counts(options)
     if grid_x or grid_y:
         # A grid divider has walls on both axes, so it reaches past its zone
@@ -199,8 +204,10 @@ def _divider_footprint(box: BoxSpec, one: Feature, base_z: float) -> Zone | None
     if thickness <= 0.0 or spacing <= 0.0 or count < 1:
         return None
     lean = abs(options["height"] * math.tan(math.radians(angle))) if angle else 0.0
-    chamfer = 0.0 if (one.full_span and angle == 0.0) else DIVIDER_CHAMFER
-    margin = thickness / 2.0 + lean + chamfer
+    wavy = options.get("wall_style") == "wavy"
+    margin = (wall_depth_for(thickness) if wavy else thickness) / 2.0 + lean + DIVIDER_CHAMFER
+    if wavy:
+        margin += WAVE_AMPLITUDE
     centres = _divider_cross_centres(zone, one.along, count, spacing)
     low, high = min(centres) - margin, max(centres) + margin
     # A sloped bottom fills the whole zone cross span between the walls, not
@@ -289,13 +296,14 @@ def feature_min_footprint(
         thickness, wall = float(options["thickness"]), float(options["wall"])
         cos_a = math.cos(math.radians(float(options.get("angle", 20.0))))
         pitch = (thickness + wall) / cos_a
+        wave = WAVE_AMPLITUDE if options.get("wall_style") == "wavy" else 0.0
         run = one.zone.width if one.along == "x" else one.zone.depth
         if one.count is not None:
             count = one.count
         else:
             across_now = one.zone.depth if one.along == "x" else one.zone.width
-            count = max(1, int((across_now - 2.0 * wall - thickness / cos_a) // pitch) + 1)
-        across = (count - 1) * pitch + thickness / cos_a + 2.0 * wall
+            count = max(1, int((across_now - 2.0 * (wall + wave) - thickness / cos_a) // pitch) + 1)
+        across = (count - 1) * pitch + thickness / cos_a + 2.0 * (wall + wave)
         return (run, across) if one.along == "x" else (across, run)
 
     return None
@@ -316,6 +324,10 @@ def feature_footprint(box: BoxSpec, one: Feature, base_z: float = 0.0) -> Zone:
     options that will not resolve - falls back to the zone, which is what the
     caller would have used anyway.
     """
+    if one.kind == "bore" and one.options.get("bore_style") == "wall_only":
+        zone = one.zone
+        return Zone(zone.x0 - WALL_ONLY_FOOT, zone.y0 - WALL_ONLY_FOOT,
+                    zone.x1 + WALL_ONLY_FOOT, zone.y1 + WALL_ONLY_FOOT)
     build = _FOOTPRINT_BUILDERS.get(one.kind)
     if build is None:
         return one.zone
