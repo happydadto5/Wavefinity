@@ -109,20 +109,6 @@ DP.build = () => {
           <button type="button" id="dl-batch-print" class="button secondary wide">Print Selected to Bambu Studio</button>
         </div>
         <div id="dl-inv-list" class="dl-inv-list"></div>
-        <details class="dl-details" id="dl-add-details">
-          <summary>+ Add a bin by hand</summary>
-          <p class="dl-note">For bins printed before logging, or elsewhere. Width, length and height snap to the same sizes a designed bin uses.</p>
-          <div class="field-grid three"><label>Name<input id="dl-add-name" type="text" maxlength="80" placeholder="e.g. Hex keys"></label>
-            <label class="checkbox-row"><span>Already printed</span><input id="dl-add-printed" type="checkbox" checked></label>
-            <label>Stacking<select id="dl-add-stack">${STACK_OPTIONS}</select></label></div>
-          <div class="field-grid three">
-            <label>Width <span class="unit">mm</span><input id="dl-add-x" type="text" inputmode="numeric" value="32"></label>
-            <label>Length <span class="unit">mm</span><input id="dl-add-y" type="text" inputmode="numeric" value="48"></label>
-            <label>Physical height <span class="unit">mm</span><input id="dl-add-z" type="text" inputmode="numeric" value="40" title="Full printed height including lid/stacking foot"></label>
-          </div>
-          <label id="dl-add-object-row" hidden>Object height <span class="unit">mm</span><input id="dl-add-object-height" type="number" min="0.1" step="0.1" placeholder="Not set"></label>
-          <div class="button-row"><button type="button" id="dl-add" class="button secondary">Add to inventory</button></div>
-        </details>
       </div>
     </section>
 
@@ -256,7 +242,6 @@ DP.wire = () => {
   const emptyAction = event => {
     const act = event.target.closest("[data-empty-act]")?.dataset.emptyAct;
     if (act === "design") DP.designFirstBin();
-    else if (act === "add") DP.focusManualAdd();
   };
   $("#dl-inv-list").addEventListener("click", emptyAction);
   $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", emptyAction);
@@ -304,104 +289,6 @@ DP.wire = () => {
     event.dataTransfer.effectAllowed = "move";
   });
   list.addEventListener("dragend", () => { DV.dragBin = null; DV.drop = null; DV.render(); });
-
-  // Width and Length consume the exact same authoritative rule the normal
-  // design form's Width/Length ultimately clamp to - normalizeBinDimension,
-  // from app.js - including its maximum, not just the minimum-unit snapping
-  // snapToUnit alone gives. A hand-added bin can then never land on a size
-  // (including too large) a designed bin never could.
-  const wireManualDimension = (selector, axis) => {
-    const input = $(selector);
-    const normalize = value => normalizeBinDimension(axis, value, value);
-    input.addEventListener("blur", () => {
-      input.value = String(normalize(number(input.value, state.catalog.base_unit)));
-    });
-    input.addEventListener("keydown", event => {
-      if (event.key === "Enter") { input.blur(); return; }
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      event.preventDefault();
-      const unit = state.catalog.base_unit;
-      const delta = event.key === "ArrowUp" ? unit : -unit;
-      input.value = String(normalize(number(input.value, unit) + delta));
-      input.select();
-    });
-    input.addEventListener("wheel", event => {
-      event.preventDefault();
-      const unit = state.catalog.base_unit;
-      const current = number(input.value, unit);
-      const delta = event.deltaY < 0 ? unit : -unit;
-      const next = normalize(current + delta);
-      if (next === current && delta < 0) return;
-      input.value = String(next);
-    }, { passive: false });
-  };
-  wireManualDimension("#dl-add-x", "x");
-  wireManualDimension("#dl-add-y", "y");
-
-  // Physical height is the full printed height (including any lid/stacking
-  // foot); stored/normal-bin Z is the module contribution alone. Convert to
-  // module, apply the exact same floor normal Height uses
-  // (normalizeBinDimension("z", ...)), then convert back - so the field
-  // itself visibly corrects on blur/arrow/wheel instead of only silently
-  // changing what gets saved when Add is clicked.
-  (() => {
-    const input = $("#dl-add-z");
-    const engagement = () => DL.stackSteps[$("#dl-add-stack").value] ?? 0;
-    const normalize = physical => normalizeBinDimension(
-      "z", physical - engagement(), physical - engagement(),
-      { baseThickness: state.catalog?.base_rules?.default_mm },
-    ) + engagement();
-    input.addEventListener("blur", () => {
-      input.value = String(normalize(number(input.value, engagement() + 1)));
-    });
-    input.addEventListener("keydown", event => {
-      if (event.key === "Enter") { input.blur(); return; }
-      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-      event.preventDefault();
-      const delta = event.key === "ArrowUp" ? 1 : -1;
-      input.value = String(normalize(number(input.value, engagement() + 1) + delta));
-      input.select();
-    });
-    input.addEventListener("wheel", event => {
-      event.preventDefault();
-      const current = number(input.value, engagement() + 1);
-      const delta = event.deltaY < 0 ? 1 : -1;
-      const next = normalize(current + delta);
-      if (next === current && delta < 0) return;
-      input.value = String(next);
-    }, { passive: false });
-  })();
-
-  $("#dl-add").addEventListener("click", async () => {
-    const stack = $("#dl-add-stack").value;
-    const physicalZ = dlNum($("#dl-add-z").value, 0);
-    const engagement = DL.stackSteps[stack] ?? 0;
-    // Height floors the same way the normal design form's Height does (see
-    // normalizeBinDimension in app.js), using the catalog's default base
-    // thickness since a hand-added bin has no design of its own to read one
-    // from. physicalZ of 0/blank stays 0 so the missing-height check below
-    // still fires instead of silently floating up to the minimum.
-    const moduleZ = physicalZ > 0
-      ? normalizeBinDimension("z", physicalZ - engagement, physicalZ - engagement,
-          { baseThickness: state.catalog?.base_rules?.default_mm })
-      : 0;
-    const bin = {
-      name: $("#dl-add-name").value.trim(),
-      qty: $("#dl-add-printed").checked ? 1 : 0,
-      x: dlNum($("#dl-add-x").value, 0), y: dlNum($("#dl-add-y").value, 0), z: moduleZ,
-      stack,
-      kind: "manual",
-      object_height_mm: DL.isSurface() && $("#dl-add-object-height").value.trim()
-        ? dlNum($("#dl-add-object-height").value, 0) : null,
-    };
-    if (!(bin.x > 0 && bin.y > 0 && bin.z > 0)) { toast("Enter the bin's X, Y and physical height in mm.", true); return; }
-    if (await DL.editBins({ new_bins: [bin] })) {
-      $("#dl-add-name").value = "";
-      $("#dl-add-object-height").value = "";
-      toast(`Added ${bin.name || `${fmt(bin.x)} × ${fmt(bin.y)}`} to the inventory.`);
-    }
-  });
-
 };
 
 // ------------------------------------------------------------ bulk print
@@ -521,14 +408,6 @@ DP.designFirstBin = () => {
   activatePreviewView("3d");
 };
 
-// Open the existing manual-add section and put the cursor in it.
-DP.focusManualAdd = () => {
-  const details = $("#dl-add-details");
-  details.open = true;
-  details.scrollIntoView({ block: "nearest" });
-  $("#dl-add-name").focus();
-};
-
 // A normal typed one-drawer Space: name and size are owned by the Space.
 DP.isCanonicalDrawer = () => state.folderMode === "space" && ["drawer", "pegboard"].includes(state.activeSpace?.kind)
   && DL.layout.drawers.length === 1;
@@ -625,9 +504,7 @@ DP.renderDrawer = () => {
   if (detailsCard) detailsCard.hidden = DP.singleTypedSpace();
   if (spacerSection) spacerSection.hidden = pegboard || surface;
   $("#dl-surface-fill").hidden = !surface;
-  $("#dl-add-object-row").hidden = !surface;
   $("#dl-height").closest("label").hidden = surface;
-  if ($("#dl-add-details")) $("#dl-add-details").hidden = pegboard;
   const select = $("#dl-drawer");
   if (dlChanged("drawers", JSON.stringify(DL.layout.drawers.map(one => [one.id, one.name])) + DL.layout.active)) {
     select.innerHTML = DL.layout.drawers.map(one =>
@@ -819,7 +696,7 @@ DP.renderInventory = (force = false) => {
   const bins = DP.filteredBins();
   if (!DL.bins.length) {
     list.innerHTML = `<div class="dl-empty">${DL.loaded
-      ? `No bins in this Space inventory yet.<br><button type="button" class="button primary dl-small" data-empty-act="design">Design first bin</button><br>Or add one by hand below.`
+      ? `No bins in this Space inventory yet.<br><button type="button" class="button primary dl-small" data-empty-act="design">Design first bin</button>`
       : "Loading the inventory…"}</div>`;
     return;
   }

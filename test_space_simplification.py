@@ -409,6 +409,102 @@ out.countAfter = els["#dl-staging"]._kids[".dl-staging-count"].textContent;
         self.assertEqual(out["countAfter"], "1")
 
 
+class ManualAddRemovalTests(unittest.TestCase):
+    def test_manual_add_creation_ui_and_wiring_are_gone(self):
+        panel = _read("drawer-panel.js")
+        view = _read("drawer-view.js")
+        app = _read("app.js")
+        for name in ("Add a bin by hand", "Add an existing bin", "dl-add", "focusManualAdd",
+                     "wireManualDimension", 'data-empty-act="add"', 'act === "add"', "by hand below"):
+            self.assertNotIn(name, panel + view, name)
+        self.assertNotIn("baseThickness", panel + app)
+        self.assertNotIn("Add a bin by hand", app)
+        self.assertIn('data-empty-act="design"', view)
+
+    def test_a_legacy_manual_row_still_loads_stages_places_and_is_manageable(self):
+        out = run_node(r"""
+setLayout([bin("M1", { kind: "manual", name: "Old tray", qty: 1, status: "printed" })]);
+out.staged = DL.stagedBins().map(one => one.id);
+out.placed = DL.placeAt(DL.bin("M1"), { gx: 2, gy: 2 });
+out.after = DL.stagedBins().length;
+DL.selectPlacement("M1:0");
+DL.takeOut("M1:0");
+out.unplaced = DL.stagedBins().map(one => one.id);
+DP.renderInventory(true);
+out.html = els["#dl-inv-list"].innerHTML;
+""")
+        self.assertEqual(out["staged"], ["M1"])
+        self.assertTrue(out["placed"])
+        self.assertEqual(out["after"], 0)
+        self.assertEqual(out["unplaced"], ["M1"])
+        html = out["html"]
+        self.assertIn("Added by hand", html)
+        self.assertIn(">Mark Not Printed<", html)
+        self.assertIn(">Delete<", html)
+        self.assertNotIn(">Edit<", html)
+
+
+class HostedStructuralPrintTests(unittest.TestCase):
+    SCRIPT = r"""
+const fs = require("fs");
+const source = fs.readFileSync(process.argv[1] + "/spaces.js", "utf8");
+const slice = source.slice(source.indexOf("SP.structuralKind = "), source.indexOf("SP.renderSpaceInfo = "));
+const calls = [], toasts = [], els = {};
+const el = () => ({ hidden: false, disabled: false, textContent: "", title: "", value: "256" });
+["space-structural", "space-structural-save", "space-structural-print", "space-structural-bed",
+ "space-structural-bed-x", "space-structural-bed-y"].forEach(id => { els[id] = el(); });
+const run = async (hosted) => {
+  calls.length = 0; toasts.length = 0;
+  const state = { folderMode: "space", activeSpace: { kind: "portable", name: "Case", x: 96, y: 96, z: 40 },
+    runtime: { hosted }, browserFolder: { name: "f" }, output: "C:/x", slicer: { available: true, name: "Bambu Studio" } };
+  const SP = { renderSpaceInfo() {} };
+  const DL = { spaceContext: () => ({}), requireSpaceContext() {}, isStaleSpaceError: () => false };
+  const api = async (path, body) => { calls.push(path); return { output: "C:/x", files: [] }; };
+  const saveGeneratedFiles = async () => ["a.3mf"];
+  const toast = (m, e) => toasts.push(m);
+  const document = { getElementById: id => els[id] || null };
+  const clone = v => JSON.parse(JSON.stringify(v));
+  const fn = new Function("SP", "state", "DL", "api", "saveGeneratedFiles", "toast", "document", "clone",
+    slice + "; return SP;");
+  const sp = fn(SP, state, DL, api, saveGeneratedFiles, toast, document, clone);
+  sp.renderStructuralActions();
+  const view = { disabled: els["space-structural-print"].disabled, title: els["space-structural-print"].title,
+    label: els["space-structural-print"].textContent, saveDisabled: els["space-structural-save"].disabled };
+  await sp.runStructural("print");
+  const afterPrint = [...calls];
+  await sp.runStructural("save");
+  return { view, afterPrint, afterSave: [...calls], toasts: [...toasts] };
+};
+(async () => {
+  process.stdout.write(JSON.stringify({ hosted: await run(true), local: await run(false) }));
+})();
+"""
+
+    def test_hosted_print_is_disabled_and_local_print_still_hands_off_to_the_slicer(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is required")
+        done = subprocess.run([node, "-e", self.SCRIPT, str(WEB)], capture_output=True, text=True,
+                              timeout=60, encoding="utf-8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+        hosted, local = out["hosted"], out["local"]
+        self.assertTrue(hosted["view"]["disabled"])
+        self.assertFalse(hosted["view"]["saveDisabled"])
+        self.assertEqual(hosted["view"]["label"], "Print Storage Box")
+        self.assertIn("local Wavefinity", hosted["view"]["title"])
+        self.assertEqual(hosted["afterPrint"], [])                       # Print never calls generate/save
+        self.assertEqual(hosted["afterSave"], ["/api/space/structural-generate"])
+        self.assertFalse(local["view"]["disabled"])
+        self.assertEqual(local["afterPrint"], ["/api/space/structural-print"])
+
+    def test_source_keeps_print_and_save_separate(self):
+        spaces = _read("spaces.js")
+        run = spaces[spaces.index("SP.runStructural = "):spaces.index("SP.saveStructural = ")]
+        self.assertIn('mode === "print" && hosted', run)
+        self.assertNotIn("&& !hosted;", run)
+
+
 class RetiredConceptSourceTests(unittest.TestCase):
     def test_current_design_shadow_owner_is_gone(self):
         combined = "\n".join(_read(name) for name in ("app.js", "drawer-model.js", "drawer-panel.js", "drawer-view.js", "spaces.js"))

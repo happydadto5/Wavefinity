@@ -963,7 +963,6 @@ DV.renderEmptyState = () => {
       <p>Design your first bin. It saves as you go and waits in Unplaced bins until you drag it into the Space.</p>
       <div class="button-row">
         <button type="button" class="button primary" data-empty-act="design">Design first bin</button>
-        <button type="button" class="button secondary" data-empty-act="add">Add an existing bin</button>
       </div>`;
   } else if (mode === "unplaced") {
     box.innerHTML = `<strong>Ready to arrange</strong>

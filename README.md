@@ -550,7 +550,7 @@ which suppress Inventory logging entirely.
   fresh starter - generating or printing it keeps it as the resume target,
   and a later edit replaces it again.
 - **The inventory file** is a Markdown table, one row per bin design, with an
-  **ID**, a **Kind** (bin, Storage Box, spacer, added by hand), a **Name**,
+  **ID**, a **Kind** (bin, Storage Box, spacer, or a legacy hand-added row), a **Name**,
   a **Stack** (blank, `lid` or `direct` - how the bin was printed to stack)
   and a **Status**: **In Design**, **Saved** (files exist) or **Printed**. There
   is no user-facing quantity: a row is one bin, and `Qty` survives only as a
@@ -572,7 +572,7 @@ which suppress Inventory logging entirely.
   Storage Box, Surface or Pegboard) and size, and its **Space Actions**. The
   switch decides what the left panel edits: *Space* is the layout tools, *Design*
   is the current bin. The 3D and 2D tabs select Design; the Space tab selects
-  Space. Opening an existing Space with a bin or hand-added bin in Inventory
+  Space. Opening an existing Space with a bin (or a legacy hand-added row) in Inventory
   starts in *Space*. An empty or spacer-only Space starts in *Design / 3D*. The
   workspace stays open until the folder stops being that Space. The name, type and
   size are shown read-only; **Edit Space** opens the same fields in place with
@@ -655,8 +655,8 @@ which suppress Inventory logging entirely.
   Inventory and layout.
 - **Saving.** *Auto-save* (on by default) writes the layout after a change, but
   no more than once every 5 minutes while you keep editing - leaving the tab
-  or closing auto-saves right away regardless. Names, status and
-  hand-added bins always save straight away, because they are the inventory.
+  or closing auto-saves right away regardless. Names and status
+  always save straight away, because they are the inventory.
   The layout is recalled automatically every time you open the tab. **Save
   location** shows the current folder and opens the folder picker, the same
   as the main editor's.

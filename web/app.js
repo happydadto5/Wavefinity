@@ -2569,18 +2569,16 @@ function readStackForm(design) {
 }
 
 // Shared by typed Width/Length/Height edits, by dragging their dimension
-// labels (see hitDimensionHandle/commitDimensionDrag), and by the manual
-// inventory "Add a bin by hand" form (see drawer-panel.js), so every path
+// labels (see hitDimensionHandle/commitDimensionDrag), so every path
 // lands on the same legal value: X/Y snap to the catalog base unit and clamp
 // to [unit, max_box_size]; Z rounds to whole millimetres with a floor that
 // clears the base thickness by min_height_above_base_mm (BoxSpec requires
-// it). `baseThickness` lets a caller with no open design (manual inventory)
-// supply its own floor instead of reading state.design.
-function normalizeBinDimension(axis, requestedValue, fallback, { baseThickness } = {}) {
+// it).
+function normalizeBinDimension(axis, requestedValue, fallback) {
   const value = number(requestedValue, fallback);
   if (axis === "z") {
     const base = number(
-      baseThickness ?? state.design?.box?.base_thickness,
+      state.design?.box?.base_thickness,
       state.catalog?.base_rules?.default_mm ?? 0.6
     );
     const minimum = base + number(state.catalog.min_height_above_base_mm, 5);
@@ -2594,8 +2592,7 @@ function normalizeBinDimension(axis, requestedValue, fallback, { baseThickness }
 }
 
 // The exact X/Y rounding rule normal Width/Length arrow keys, wheel and blur
-// all use, and now the manual inventory form too: nearest whole catalog
-// unit, floored at one unit.
+// all use: nearest whole catalog unit, floored at one unit.
 function snapToUnit(value, unit) {
   return Math.max(unit, Math.round(value / unit) * unit);
 }

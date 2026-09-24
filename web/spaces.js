@@ -2444,6 +2444,7 @@ SP.structuralKind = () => {
 SP.structuralLabel = kind => kind === "storage_box" ? "Storage Box" : "Base Trim";
 SP.structuralInfo = { key: "", data: null, error: "" };
 SP.structuralBusy = false;
+SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP = "Printing needs local Wavefinity with Bambu Studio. Use Save to put the files in your folder.";
 
 // The derived outside/capacity summary of a Storage Box, from the server.
 SP.refreshStructuralSummary = async () => {
@@ -2476,7 +2477,13 @@ SP.runStructural = async mode => {
   const label = SP.structuralLabel(kind);
   const hosted = Boolean(state.runtime.hosted);
   if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
-  const printing = mode === "print" && !hosted;
+  // Hosted Wavefinity has no local slicer: Print is disabled there (Save stays
+  // available) and never quietly becomes a Save.
+  if (mode === "print" && hosted) {
+    toast(SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP, true, 6000);
+    return;
+  }
+  const printing = mode === "print";
   if (printing && !state.slicer?.available) {
     toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
     return;
@@ -2529,8 +2536,8 @@ SP.renderStructuralActions = () => {
   save.textContent = `Save ${label}`;
   print.textContent = `Print ${label}`;
   save.disabled = SP.structuralBusy;
-  print.disabled = SP.structuralBusy;
-  print.title = hosted ? "Hosted Wavefinity saves the files to your folder instead of opening a slicer." : "";
+  print.disabled = SP.structuralBusy || hosted;
+  print.title = hosted ? SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP : "";
   const bed = document.getElementById("space-structural-bed");
   if (bed) bed.hidden = kind !== "base_trim";
 };
