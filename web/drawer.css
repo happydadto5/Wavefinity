@@ -5,7 +5,6 @@
    chrome (placed parts, its error panel, footer, design file buttons) steps
    aside. */
 body.drawer-mode .controls > :not(#drawer-panel):not(#space-head),
-body.drawer-mode .placed-block,
 body.drawer-mode #error-panel,
 body.drawer-mode .workspace-footer,
 body.drawer-mode #preview-state,

@@ -260,11 +260,275 @@ function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-// Fix 034 K2: Keep bin defaults is retired - New Bin always starts fresh and
-// Duplicate is the explicit clone workflow, so nothing remembers a bin/part
-// snapshot as a generate/print/edit side effect any more. Kept as a no-op
-// because it is still called from several apply-part sites below.
-async function rememberAppliedPartDefault() {}
+// ------------------------------------------------ Space preference memory (Fix 053)
+//
+// A typed Space remembers PREFERENCES (bin_defaults / part_defaults); each
+// Inventory bin separately remembers its EXACT design in design_specs. The
+// preference rule is exclusion-based: every user-configurable value is
+// remembered unless it is identity/text content, feature/modifier presence, or
+// placement/session/trace state - so a future option participates
+// automatically. Preferences only ever seed a NEW bin or a newly added
+// part/option; they never rewrite a bin that already exists.
+
+function isSpaceTextKey(key) {
+  return key === "text" || key === "label" || key === "division_labels" ||
+    key === "photo" || key.endsWith("_text");
+}
+
+function blankSpaceTextFields(value) {
+  const copy = clone(value);
+  for (const key of Object.keys(copy)) {
+    if (isSpaceTextKey(key)) copy[key] = Array.isArray(copy[key]) ? [] : "";
+  }
+  return copy;
+}
+
+function mergeDesignDefaults(current, remembered) {
+  if (!plainObject(current) || !plainObject(remembered)) return clone(remembered);
+  const merged = clone(current);
+  for (const [key, value] of Object.entries(remembered)) {
+    merged[key] = plainObject(value) && plainObject(merged[key])
+      ? mergeDesignDefaults(merged[key], value)
+      : clone(value);
+  }
+  return merged;
+}
+
+const SPACE_MODIFIER_BOX_KEYS = ["stack", "lid", "lift_grabbers", "edge_mount", "side_openings"];
+
+// The bin-level preference snapshot: the whole design minus identity/text,
+// modifier and feature presence, and per-object state. Idempotent, so it is
+// also the sanitizer for older stored payloads.
+function spaceBinDefaultsFromDesign(design) {
+  if (!plainObject(design)) return null;
+  const snapshot = clone(design);
+  delete snapshot.version;
+  delete snapshot.design_kind;
+  delete snapshot.base_trim;
+  delete snapshot.scoop;
+  snapshot.part_name = "";
+  snapshot.label = "";
+  if (plainObject(snapshot.box)) {
+    delete snapshot.box.b4b;
+    for (const key of SPACE_MODIFIER_BOX_KEYS) delete snapshot.box[key];
+    if (plainObject(snapshot.box.pegboard)) {
+      const cleat = {};
+      for (const key of ["cleat_x", "cleat_y"]) {
+        if (snapshot.box.pegboard[key] !== undefined) cleat[key] = snapshot.box.pegboard[key];
+      }
+      snapshot.box.pegboard = cleat;
+    }
+  }
+  snapshot.layout = plainObject(snapshot.layout) ? snapshot.layout : {};
+  snapshot.layout.features = [];
+  snapshot.layout.object_height_mm = null;
+  return snapshot;
+}
+
+// What a brand-new bin is seeded from, or null when nothing is remembered.
+function spaceBinPreferences() {
+  if (state.folderMode !== "space" || !plainObject(state.spaceBinDefaults)) return null;
+  const snapshot = spaceBinDefaultsFromDesign(state.spaceBinDefaults);
+  if (!plainObject(snapshot?.box)) return null;
+  delete snapshot.layout.features;
+  delete snapshot.part_name;
+  delete snapshot.label;
+  if (state.activeSpace?.kind !== "pegboard") delete snapshot.box.pegboard;
+  return snapshot;
+}
+
+// One interior-feature kind's reusable settings: logical size (never the
+// absolute position), count, orientation and options - never literal text,
+// photos or traced contours.
+function partDefaultsFromFeature(feature) {
+  if (!feature?.kind || !Array.isArray(feature.zone) || feature.zone.length !== 4) return null;
+  const copy = {
+    kind: feature.kind,
+    options: clone(feature.options || {}),
+    count: feature.count ?? null,
+    along: feature.along || "x",
+  };
+  if (!feature.full_span) {
+    copy.zone_size = [
+      number(feature.zone[2]) - number(feature.zone[0]),
+      number(feature.zone[3]) - number(feature.zone[1]),
+    ];
+  }
+  if (typeof feature.wedge === "boolean") copy.wedge = feature.wedge;
+  if (typeof feature.alternate_ends === "boolean") copy.alternate_ends = feature.alternate_ends;
+  for (const key of Object.keys(copy.options)) {
+    if (isSpaceTextKey(key)) delete copy.options[key];
+  }
+  if (feature.kind === "nest") {
+    delete copy.count;
+    delete copy.options.repeat_spacing_percent;
+  }
+  if (feature.kind === "bore") {
+    // An Auto mode is remembered as the mode itself; the numbers it supersedes
+    // are derived from each new bin, never carried over from the old one.
+    if (copy.options.auto_base) delete copy.zone_size;
+    if (copy.options.auto_height) delete copy.options.height;
+    if (copy.options.auto_grid) {
+      delete copy.options.columns;
+      delete copy.options.rows;
+    }
+  }
+  if (!partInfo(feature.kind)?.flags?.photo && feature.item) {
+    copy.item = clone(feature.item);
+    copy.item.name = "Custom item";
+  }
+  return cleanPartDefaultEntry(copy);
+}
+
+// Reduces any stored per-feature entry (including older shapes that may carry
+// text, features or modifier presence) to the known safe fields.
+function cleanPartDefaultEntry(entry) {
+  if (!plainObject(entry) || typeof entry.kind !== "string" || BOX_MODIFIER_KINDS.has(entry.kind)) return null;
+  const clean = { kind: entry.kind };
+  if (Array.isArray(entry.zone_size) && entry.zone_size.length === 2 &&
+      entry.zone_size.every(one => Number.isFinite(Number(one)) && Number(one) > 0)) {
+    clean.zone_size = entry.zone_size.map(Number);
+  }
+  clean.options = plainObject(entry.options) ? clone(entry.options) : {};
+  for (const key of Object.keys(clean.options)) {
+    if (isSpaceTextKey(key)) delete clean.options[key];
+  }
+  if (Object.hasOwn(entry, "count")) clean.count = entry.count;
+  if (typeof entry.along === "string") clean.along = entry.along;
+  if (typeof entry.wedge === "boolean") clean.wedge = entry.wedge;
+  if (typeof entry.alternate_ends === "boolean") clean.alternate_ends = entry.alternate_ends;
+  if (plainObject(entry.item)) clean.item = clone(entry.item);
+  return clean;
+}
+
+function seedFeatureFromPartDefaults(feature, entry) {
+  const remembered = cleanPartDefaultEntry(entry);
+  if (!feature || !remembered || remembered.kind !== feature.kind) return feature;
+  const seeded = clone(feature);
+  if (remembered.zone_size) {
+    const cx = (number(seeded.zone[0]) + number(seeded.zone[2])) / 2;
+    const cy = (number(seeded.zone[1]) + number(seeded.zone[3])) / 2;
+    const width = Math.max(0.1, remembered.zone_size[0]);
+    const depth = Math.max(0.1, remembered.zone_size[1]);
+    seeded.zone = [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
+  }
+  seeded.options = { ...(seeded.options || {}), ...remembered.options };
+  if (seeded.kind === "bore") {
+    if (seeded.options.auto_height) delete seeded.options.height;
+    if (seeded.options.auto_grid) {
+      delete seeded.options.columns;
+      delete seeded.options.rows;
+    }
+  }
+  if (Object.hasOwn(remembered, "count") && seeded.kind !== "nest") seeded.count = remembered.count;
+  if (remembered.along) seeded.along = remembered.along;
+  if (typeof remembered.wedge === "boolean") seeded.wedge = remembered.wedge;
+  if (typeof remembered.alternate_ends === "boolean") seeded.alternate_ends = remembered.alternate_ends;
+  if (remembered.item && !partInfo(feature.kind)?.flags?.photo) seeded.item = clone(remembered.item);
+  delete seeded.contour;
+  delete seeded.source_contour;
+  return seeded;
+}
+
+// A box modifier's reusable settings, or null when there is nothing to keep.
+// Which sub-parts are switched on (Label / Screw mounting, enabled) is
+// composition, not a preference, so those flags are dropped; text is blanked.
+function cleanModifierSettings(kind, settings) {
+  if (!plainObject(settings)) return null;
+  if (kind === "lid_stacking") {
+    const lid = plainObject(settings.lid) && settings.lid.enabled ? blankSpaceTextFields(settings.lid) : null;
+    const direct = plainObject(settings.stack) && settings.stack.mode === "direct";
+    if (!lid && !direct) return null;
+    return { lid, stack: direct ? { mode: "direct" } : null };
+  }
+  const one = blankSpaceTextFields(settings);
+  delete one.enabled;
+  if (kind === "edge_mount") {
+    delete one.label_enabled;
+    delete one.holes_enabled;
+  }
+  return one;
+}
+
+function modifierSettingsFromDesign(kind, design) {
+  const box = design?.box;
+  if (!plainObject(box)) return null;
+  if (kind === "lid_stacking") return cleanModifierSettings(kind, { lid: box.lid, stack: box.stack });
+  const source = { edge_mount: box.edge_mount, inside_handles: box.lift_grabbers, side_openings: box.side_openings }[kind];
+  return cleanModifierSettings(kind, source);
+}
+
+// Remembered settings for a modifier the user is adding: this Space's stored
+// per-kind entry, falling back to an older bin_defaults snapshot's modifier
+// block (its enabled state is ignored - only its reusable settings seed).
+function spaceModifierDefaults(kind) {
+  if (state.folderMode !== "space") return null;
+  const entry = state.spacePartDefaults?.[kind];
+  if (plainObject(entry) && entry.kind === kind) {
+    const settings = cleanModifierSettings(kind, entry.settings);
+    if (settings) return settings;
+  }
+  return modifierSettingsFromDesign(kind, state.spaceBinDefaults);
+}
+
+function cleanedSpacePartDefaults(raw) {
+  const clean = {};
+  if (!plainObject(raw)) return clean;
+  for (const [kind, entry] of Object.entries(raw)) {
+    if (BOX_MODIFIER_KINDS.has(kind)) {
+      const settings = plainObject(entry) ? cleanModifierSettings(kind, entry.settings) : null;
+      if (settings) clean[kind] = { kind, settings };
+    } else {
+      const one = cleanPartDefaultEntry(entry);
+      if (one) clean[kind] = one;
+    }
+  }
+  return clean;
+}
+
+// Called once an exact bin save has succeeded, with that save's canonical
+// design. `previous` is the design that save replaced: only a feature/modifier
+// kind whose settings actually changed replaces its remembered entry, so
+// reopening an old bin and renaming it never overwrites newer preferences.
+function rememberSpacePreferences(design, previous) {
+  if (state.folderMode !== "space" || typeof SP === "undefined" ||
+      !plainObject(design) || isStructuralDesign(design)) return;
+  const currentParts = plainObject(state.spacePartDefaults) ? state.spacePartDefaults : {};
+  const parts = cleanedSpacePartDefaults(currentParts);
+  let partsChanged = JSON.stringify(parts) !== JSON.stringify(currentParts);
+  const lastOfKind = (source, kind) =>
+    (source?.layout?.features || []).filter(one => one.kind === kind).at(-1) || null;
+  for (const kind of new Set((design.layout?.features || []).map(one => one.kind))) {
+    const entry = partDefaultsFromFeature(lastOfKind(design, kind));
+    if (!entry) continue;
+    const before = partDefaultsFromFeature(lastOfKind(previous, kind));
+    if (JSON.stringify(entry) === JSON.stringify(before)) continue;
+    parts[kind] = entry;
+    partsChanged = true;
+  }
+  for (const kind of BOX_MODIFIER_KINDS) {
+    if (!modifierIsActive(kind, design)) continue;
+    const settings = modifierSettingsFromDesign(kind, design);
+    if (!settings) continue;
+    const before = modifierIsActive(kind, previous) ? modifierSettingsFromDesign(kind, previous) : null;
+    if (JSON.stringify(settings) === JSON.stringify(before)) continue;
+    parts[kind] = { kind, settings };
+    partsChanged = true;
+  }
+  const binDefaults = spaceBinDefaultsFromDesign(design);
+  const binChanged = JSON.stringify(binDefaults) !== JSON.stringify(state.spaceBinDefaults);
+  if (!binChanged && !partsChanged) return;
+  const changes = {};
+  if (binChanged) {
+    state.spaceBinDefaults = binDefaults;
+    changes.bin_defaults = binDefaults;
+  }
+  if (partsChanged) {
+    state.spacePartDefaults = parts;
+    changes.part_defaults = parts;
+  }
+  SP.queueDefaults(changes);
+}
 
 function drawerHardClearance() {
   return number(state.catalog?.drawer_rules?.hard_wall_clearance_mm, 0);
@@ -289,39 +553,68 @@ function ordinaryBinMinimumHeight() {
   );
 }
 
-function applySpaceSizingDefaults(design) {
+// `remembered` is this Space's bin-preference snapshot (see
+// spaceBinPreferences). Its X/Y/Z seed the bin, then the Space's own capacity
+// and height rules clamp them - a remembered value that no longer fits is
+// normalized, never turned into an invalid bin. With nothing remembered the
+// product starter sizing applies unchanged.
+function applySpaceSizingDefaults(design, remembered = null) {
   if (state.folderMode !== "space" || !state.activeSpace) return design;
 
   const kind = state.activeSpace.kind;
   const space = state.activeSpace;
   const unit = state.catalog?.base_unit || 8;
+  const rememberedBox = plainObject(remembered?.box) ? remembered.box : {};
+  const rememberedLayout = plainObject(remembered?.layout) ? remembered.layout : {};
+  const largestUnits = Math.floor((state.catalog?.max_box_size || 350) / unit);
+  const rememberedUnits = (axis, capacity) => {
+    const value = Number(rememberedBox[axis]);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return Math.min(largestUnits, Math.max(1, capacity), Math.max(1, Math.round(value / unit)));
+  };
+  const rememberedZ = Number(rememberedBox.z);
+  const haveRememberedZ = Number.isFinite(rememberedZ) && rememberedZ > 0;
 
   const spaceXUnits = kind === "drawer" ? drawerSpaceCapacity(space.x) : Math.floor(space.x / unit);
   const spaceYUnits = kind === "drawer" ? drawerSpaceCapacity(space.y) : Math.floor(space.y / unit);
   const startX = Math.min(4, Math.max(1, spaceXUnits));
   const startY = Math.min(4, Math.max(1, spaceYUnits));
-  
-  design.box.x = startX * unit;
-  design.box.y = startY * unit;
+
+  design.box.x = (rememberedUnits("x", spaceXUnits) ?? startX) * unit;
+  design.box.y = (rememberedUnits("y", spaceYUnits) ?? startY) * unit;
 
   if (kind === "drawer") {
     design.box.z = Math.min(
       space.z,
-      normalizeBinDimension("z", space.z - 3, space.z - 3),
+      haveRememberedZ
+        ? normalizeBinDimension("z", rememberedZ, rememberedZ)
+        : normalizeBinDimension("z", space.z - 3, space.z - 3),
     );
   } else if (kind === "surface") {
     const trimHeight = surfaceTrimHeight(space.trim_size);
     if (Number.isFinite(trimHeight)) {
-      design.layout.surface_base_mode = "edge";
-      design.layout.surface_lightweight_base = true;
+      const minimumAbove = number(state.catalog?.min_height_above_base_mm, 5);
+      const rememberedBase = Number(rememberedBox.base_thickness);
+      const customBase = rememberedLayout.surface_base_mode === "custom" &&
+        Number.isFinite(rememberedBase) && rememberedBase > 0;
+      const base = customBase ? rememberedBase : trimHeight;
+      design.layout.surface_base_mode = customBase ? "custom" : "edge";
+      design.layout.surface_lightweight_base = typeof rememberedLayout.surface_lightweight_base === "boolean"
+        ? rememberedLayout.surface_lightweight_base : true;
       design.layout.object_height_mm = null;
       design.box.standard_base = false;
-      design.box.base_thickness = trimHeight;
-      design.box.z = trimHeight + number(state.catalog?.min_height_above_base_mm, 5);
+      design.box.base_thickness = base;
+      design.box.z = Math.max(
+        base + minimumAbove,
+        haveRememberedZ ? Math.round(rememberedZ * 10) / 10 : 0,
+      );
     }
   } else if (kind === "portable" || kind === "box") {
-    design.box.z = normalizeBinDimension("z", space.z);
+    design.box.z = normalizeBinDimension(
+      "z", haveRememberedZ ? Math.min(space.z, rememberedZ) : space.z,
+    );
   } else if (kind === "pegboard") {
+    if (haveRememberedZ) design.box.z = normalizeBinDimension("z", rememberedZ, rememberedZ);
     if (space.pegboard_standard === "standard") design.box.z = Math.max(48, design.box.z);
     else {
       design.box.x = Math.max(56, design.box.x);
@@ -343,11 +636,15 @@ function applySpaceSizingDefaults(design) {
   return design;
 }
 
-// Fix 034 K2: New Bin is always a fresh catalog starter plus current Space
-// sizing - stale remembered bin_defaults never seed it. Duplicate (Section
-// B2) is the only clone-last-design workflow now.
+// New Bin (Fix 053): the catalog starter, plus this Space's remembered bin
+// preferences, then the active Space's own constraints. It never copies the
+// last bin's parts, modifiers, names or text - Duplicate is the only
+// clone-the-last-design workflow.
 function freshDesignForCurrentFolder() {
-  return applySpaceSizingDefaults(clone(state.catalog.defaults.design));
+  const starter = clone(state.catalog.defaults.design);
+  const remembered = spaceBinPreferences();
+  if (!remembered) return applySpaceSizingDefaults(starter);
+  return applySpaceSizingDefaults(mergeDesignDefaults(starter, remembered), remembered);
 }
 
 async function loadFreshOrdinaryDesignForCurrentFolder() {
@@ -368,10 +665,6 @@ async function loadFreshOrdinaryDesignForCurrentFolder() {
   activatePreviewView("3d");
   await refreshPreview();
 }
-
-// Fix 034 K2: retired along with Keep bin defaults - kept as a no-op so its
-// Generate/Print call sites need no further change.
-async function rememberGeneratedSpaceBin() {}
 
 // ------------------------------------------------------------ Fix 034 lifecycle
 
@@ -422,10 +715,18 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
         state.preview.draft_error || state.previewDesignKey !== JSON.stringify(design))) return true;
     if (!force && JSON.stringify(design) === JSON.stringify(state.cleanDesign)) return true;
     const rowId = state.designInventoryId;
+    const previousClean = state.cleanDesign;
     const data = await DL.inventoryCall("/api/drawer/design-source/save", {
       design, row_id: rowId || undefined,
     }, { context });
     DL.requireSpaceContext(context);
+    // The exact bin is now durable in design_specs. Space preferences follow
+    // from that canonical design; a failure here never rolls the bin back.
+    try {
+      rememberSpacePreferences(data.design, previousClean);
+    } catch (error) {
+      toast(`This bin was saved, but the Space's remembered settings were not: ${error.message}`, true, 6000);
+    }
     if (state.designInventoryId !== rowId) return true;
     state.designInventoryId = data.row_id;
     DL.adopt(data);
@@ -433,7 +734,10 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
     if (JSON.stringify(state.design) === JSON.stringify(design)) {
       state.design = clone(data.design);
       state.cleanDesign = clone(data.design);
-      if (data.design.part_name !== design.part_name) syncForm();
+      // Only the assigned name can differ. Refresh just that field: a full
+      // syncForm() would overwrite anything the user is typing that has not
+      // reached state.design yet.
+      if (data.design.part_name !== design.part_name) $("#part-name").value = data.design.part_name || "";
     } else {
       state.cleanDesign = clone(data.design);
       queueSpaceDesignAutosave();
@@ -458,6 +762,7 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false } 
         state.previewDesignKey !== JSON.stringify(state.design))
       throw new Error("Resolve the design issue before leaving this bin.");
     await persistSpaceDesignSource(null, materialize);
+    await SP.flushDefaults();
     return true;
   } catch (error) {
     toast(`Could not autosave this bin: ${error.message}`, true, 6000);
@@ -1038,7 +1343,12 @@ function readEdgeMountForm(design) {
   if (thicknessWasEdited) {
     const clamped = Math.min(4, Math.max(0.8, number(thicknessRaw, current.label_thickness_mm)));
     thickness = Math.round((clamped + Number.EPSILON) * 10) / 10;
-    if (thicknessInput && thicknessRaw !== "") thicknessInput.value = fmt(thickness);
+    if (thicknessInput && thicknessRaw !== "") {
+      thicknessInput.value = fmt(thickness);
+      // The design now owns this value; without this, typing the original
+      // number back would look "unedited" and silently keep the new one.
+      thicknessInput.dataset.storedValue = thicknessInput.value;
+    }
   }
   const spacingMode = $("#edge-mount-spacing-mode")?.value || "auto";
   const ribCountMode = $("#edge-mount-standoff-rib-count-mode")?.value || "auto";
@@ -2876,7 +3186,6 @@ const commitNudge = debounce(async request => {
     pendingNudgeHistory = null;
     pendingNudgeDraft = null;
     recordHistory(historySnapshot);
-    await rememberAppliedPartDefault(result, draft);
     if (request !== state.draftRequest) return;
     state.selected = result.selected;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
@@ -3655,17 +3964,30 @@ async function addModifier(kind) {
       number(rules.max_projection_mm, 200),
       Math.max(number(rules.min_projection_mm, 5), normalDepth / 3),
     );
+    // This Space's remembered Edge Mount settings (label plate thickness,
+    // type, ribs, screw settings...) seed the new option; text is always
+    // blank and the label starts on with screw mounting off.
+    const seed = spaceModifierDefaults("edge_mount") || {};
+    const seededProjection = Number(seed.label_projection_mm);
     state.design.box.edge_mount = {
       ...EDGE_MOUNT_DEFAULTS,
       ...(state.design.box.edge_mount || {}),
-      label_enabled: true,
-      holes_enabled: false,
       label_type: "separate",
       standoff_ribs_enabled: true,
       label_projection_mm: projection,
       access_diameter_mm: resolvedEdgeMountAccessDiameter(
         state.design.box.edge_mount || EDGE_MOUNT_DEFAULTS,
       ),
+      ...seed,
+      ...(Number.isFinite(seededProjection) ? {
+        label_projection_mm: Math.min(
+          number(rules.max_projection_mm, 200),
+          Math.max(number(rules.min_projection_mm, 5), seededProjection),
+        ),
+      } : {}),
+      label_enabled: true,
+      holes_enabled: false,
+      label_text: "",
     };
     recordHistory(previous);
     syncForm();
@@ -3674,25 +3996,35 @@ async function addModifier(kind) {
     return;
   }
   const previous = clone(state.design);
+  const seed = spaceModifierDefaults(kind) || {};
   if (kind === "lid_stacking") {
-    state.design.box.stack = { mode: "direct" };
+    if (seed.lid) {
+      state.design.box.lid = { ...seed.lid, enabled: true };
+      delete state.design.box.stack;
+    } else {
+      state.design.box.stack = { mode: "direct" };
+    }
   } else if (kind === "inside_handles") {
     const rules = state.catalog?.lift_grabbers || {};
     state.design.box.lift_grabbers = {
       enabled: true,
-      size: rules.default_size || "medium",
-      location: rules.default_location || "sides",
+      size: seed.size || rules.default_size || "medium",
+      location: seed.location || rules.default_location || "sides",
     };
   } else if (kind === "side_openings") {
     const eligible = SIDE_OPENING_SIDE_IDS.filter(side => sideOpeningEligibleSide(side));
-    const sides = ["left", "right"].filter(side => eligible.includes(side));
+    const rememberedSides = Array.isArray(seed.sides)
+      ? seed.sides.filter(side => eligible.includes(side)) : [];
+    const sides = rememberedSides.length
+      ? rememberedSides
+      : ["left", "right"].filter(side => eligible.includes(side));
     if (!sides.length && eligible.length) sides.push(eligible[0]);
     if (!sides.length) {
       toast("No bin wall is available for Side Openings.", true, 5500);
       return;
     }
     state.design.box.side_openings = {
-      ...SIDE_OPENING_DEFAULTS, enabled: true, sides,
+      ...SIDE_OPENING_DEFAULTS, ...seed, enabled: true, sides,
     };
     clampSideOpeningTopForLid(state.design, true);
   }
@@ -3833,7 +4165,12 @@ async function selectKind(kind, reset = false) {
       item: info.flags.item ? starterItem() : null,
     });
     if (request !== state.kindRequest) return;
-    state.draft = result.feature;
+    // A newly added part starts from this Space's remembered settings for its
+    // kind (size, count, options - never position or text). An existing part
+    // is opened from the bin's own exact design instead (selectedFeature).
+    state.draft = state.folderMode === "space"
+      ? seedFeatureFromPartDefaults(result.feature, state.spacePartDefaults?.[kind])
+      : result.feature;
     state.draftTouched = false;
     state.pinnedZone = {};
     state.draftResolvedOptions = result.resolved_options || {};
@@ -3855,7 +4192,6 @@ async function selectKind(kind, reset = false) {
         if (request !== state.kindRequest) return;
         const previousDesign = clone(state.design);
         state.design = applyResult.design;
-        await rememberAppliedPartDefault(applyResult, state.draft);
         seedPartNameFromText(state.draft);
         recordHistory(previousDesign);
         state.selected = applyResult.selected;
@@ -6701,7 +7037,6 @@ async function autoCommitDraft(request) {
     if (state.selected !== null && state.design.layout.features[state.selected]) {
       state.draft = clone(state.design.layout.features[state.selected]);
     }
-    await rememberAppliedPartDefault(result, state.draft);
     if (state.draft?.kind === "nest") syncForm();
     for (const warning of result.warnings || []) toast(warning, false, 6500);
     renderPlaced();
@@ -6736,7 +7071,6 @@ async function commitVisibleDraft() {
     throw new Error("The interior part changed while it was being saved. Try again.");
   }
   state.design = committed.design;
-  await rememberAppliedPartDefault(committed, draft);
   seedPartNameFromText(draft);
   recordHistory(previousDesign);
   state.draftIsNew = false;
@@ -6913,7 +7247,6 @@ async function applySupport(index) {
     const previousDesign = clone(state.design);
     const result = await api("/api/feature/apply", { design: state.design, feature: state.draft, index });
     state.design = result.design;
-    await rememberAppliedPartDefault(result, state.draft);
     recordHistory(previousDesign);
     state.selected = result.selected;
     state.draftIsNew = false;
@@ -11158,7 +11491,6 @@ async function generateParts(target) {
         DL.adopt(saved);
         DL.emit();
       }
-      await rememberGeneratedSpaceBin(payload.design);
       if (!designRowId && binResult.inventory_bin && state.inventoryEnabled && typeof SP !== "undefined") {
         await SP.addInventoryBin(binResult.inventory_bin, binResult.inventory_design_spec || null);
       }
@@ -11322,9 +11654,6 @@ async function printModel(target = "bin") {
       } catch (error) {
         throw new Error(`Bambu Studio opened, but Printed status could not be recorded: ${error.message}`);
       }
-    }
-    if (target === "bin" || target === "all") {
-      await rememberGeneratedSpaceBin(payload.design);
     }
     const files = result.files || [];
     const fileNames = files.map(f => f.split(/[\\/]/).pop());

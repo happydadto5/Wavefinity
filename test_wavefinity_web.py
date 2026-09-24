@@ -1031,10 +1031,9 @@ class WebApplicationTests(unittest.TestCase):
                         duplicate_source.index("previousDesign = clone(state.design);"))
         self.assertIn("state.draftSourceIndex = previousSelected;", duplicate_source)
 
-        # Fix 034 K2: partDefaultsFromFeature/seedFeatureFromPartDefaults were
-        # retired with Keep bin defaults - New Bin is always fresh and
-        # Duplicate is the explicit clone workflow, so there is no
-        # remembered-per-kind Nest option stripping to check here any more.
+        # Fix 053: partDefaultsFromFeature/seedFeatureFromPartDefaults are back
+        # (always-on Space preference memory); their behaviour is covered in
+        # test_space_preferences.py.
 
         self.assertIn('geometry_owner=f"{one.kind} feature"', app_py)
         self.assertIn('geometry_owner=f"{draft.kind} draft"', app_py)

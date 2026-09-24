@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-24 — Space preference memory, exact bin autosave and Parts UI cleanup (Fix 053)
+
+- A typed Space now remembers your last-used settings (bin size, wall, base, Fused/Removable, and each part's and option's settings such as Edge Mount plate thickness or Bore size). New Bin starts from them, limited by the Space's own size rules. It does not copy the last bin's parts, names or text; adding a part or option starts from its remembered settings with text blank.
+- Every bin still saves its exact design separately, so reopening a bin always shows its own values. Autosave no longer overwrites a field you are still typing in.
+- Removed the duplicate floating "Placed parts" card over the preview; the **Added to this bin** list in the left panel is the only parts list, now set off from the addable parts by a divider.
+
 ## 2026-09-24 — Space simplification and Space-owned outputs (Fix 048C)
 
 - A Space now has two mental objects: the Space and the bins inside it. Every ordinary bin is one Inventory row, placed at most once, with one lifecycle label (In Design, Saved or Printed). Bins that are not placed wait in **Unplaced bins** beside the Space; drag one in to place it, drag a placed bin off the Space to unplace it.

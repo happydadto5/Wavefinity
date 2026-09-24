@@ -771,6 +771,60 @@ SP.flushResumeCheckpoint = (design, pending) => {
 // the folder switch the user asked for.
 SP.flushOutgoingResumeCheckpoint = () => SP._pumpResumeQueue();
 
+// ------------------------------------------------ Space preference memory (Fix 053)
+//
+// A typed Space always remembers its last-used bin and per-kind part settings
+// in `bin_defaults` / `part_defaults`. Every write is a serialized transaction
+// that names the Space it was queued for (captured synchronously, like the
+// resume checkpoint), so a late write can never land in a Space the user has
+// since left. Queued-but-unstarted writes for the same Space coalesce.
+SP._defaults = { chain: Promise.resolve(), tail: null };
+
+SP._writeDefaultsNow = async (target, changes) => {
+  const updates = {};
+  if (Object.hasOwn(changes, "bin_defaults")) updates.bin_defaults = changes.bin_defaults;
+  if (Object.hasOwn(changes, "part_defaults")) updates.part_defaults = changes.part_defaults;
+  if (!Object.keys(updates).length) return;
+  if (target.hosted) {
+    if (!target.browserFolder?.handle) {
+      throw new Error("This Space has no writable folder access in this browser session.");
+    }
+    await SP.writeMetadata(target.browserFolder.handle, "space", null, true, updates, {
+      preserveSpace: true, expectedSpaceId: target.spaceId,
+    });
+  } else {
+    await api("/api/space/defaults", {
+      output: target.output, space_id: target.spaceId, ...updates,
+    });
+  }
+};
+
+SP.queueDefaults = changes => {
+  const target = SP._captureResumeTarget();
+  if (!target) return;
+  const queue = SP._defaults;
+  const last = queue.tail;
+  if (last && !last.started && last.target.spaceId === target.spaceId) {
+    last.changes = { ...last.changes, ...changes };
+    return;
+  }
+  const item = { target, changes: { ...changes }, started: false };
+  queue.tail = item;
+  queue.chain = queue.chain.then(async () => {
+    item.started = true;
+    if (queue.tail === item) queue.tail = null;
+    try {
+      await SP._writeDefaultsNow(item.target, item.changes);
+    } catch (error) {
+      toast(`This bin was saved, but the Space's remembered settings were not: ${error.message}`, true, 6000);
+    }
+  });
+};
+
+// Resolves once everything queued so far has been written (a failure already
+// toasted itself and never blocks leaving a bin or Space).
+SP.flushDefaults = () => SP._defaults.chain;
+
 // The one place hosted code reads a folder's inventory. Mirrors the local
 // organizer_inventory.resolve_inventory_path: the canonical file wins, exactly
 // one old "<name> bins.md" is adopted (renamed only when migrate is true, and

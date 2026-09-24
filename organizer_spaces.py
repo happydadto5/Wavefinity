@@ -1132,7 +1132,17 @@ def space_routes(
             if not isinstance(new_part_defaults, dict):
                 raise ValueError("part defaults must be an object")
             write_kwargs["part_defaults"] = new_part_defaults
-        _write_metadata(target, mode, None, inventory, preserve_space=True, **write_kwargs)
+        # A client that names the Space it queued this write for is refused
+        # if the folder now holds a different Space.
+        expected_space_id = None
+        if payload.get("space_id"):
+            expected_space_id = _space_id(payload.get("space_id"))
+            if not expected_space_id:
+                raise ValueError("space_id must be a valid Space ID")
+        _write_metadata(
+            target, mode, None, inventory, preserve_space=True,
+            expected_space_id=expected_space_id, **write_kwargs,
+        )
         remember(target)
         return reply(target)
 

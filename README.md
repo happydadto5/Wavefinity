@@ -679,7 +679,7 @@ A future ordinary `layout.feature` is interior content and does not belong.
 | Stacking | Yes |
 | Lid configuration | Yes |
 | Inside Grip / shell options | Yes |
-| Scoop / shell modifications | Yes |
+| Scoop on/off (presence of a shell modification) | **No** |
 | Storage Box container configuration | Yes |
 | Label enabled/type/location/style | Yes |
 | Actual label text | **No — blank** |
@@ -694,27 +694,52 @@ A future ordinary `layout.feature` is interior content and does not belong.
 | Camera/view/editor/session state | No |
 | Connector-generation/session UI state | No |
 
-**Keep bin defaults** is per Space, never global. New and upgraded Spaces have
-it on but start with no snapshot, so New uses current Wavefinity defaults until
-a bin is successfully generated or printed. Editing, previewing, saving a
-design, generating only a connector, or opening an older design does not update
-the snapshot. Turning the option off keeps the stored snapshot; turning it back
-on resumes using it. New fields missing from an older snapshot come from the
-current Wavefinity defaults.
+For Stacking, Lid, Inside Grip, Edge Mount and Side Openings, "Yes" means the
+*settings* are remembered per kind and seed the option when it is explicitly
+added; the option merely being present on the last bin never carries into New
+Bin.
 
-The sanitized snapshot lives in the Space's `.wavefinity.json` folder metadata,
-now version 7. It copies the complete bin/shell configuration, blanks names and
-label wording, and never copies placed interior-part instances. Safe last-used
-interior-part editor settings are stored separately by kind in `part_defaults`;
-width/depth and reusable options carry, while placement, photos/contours, names,
-and actual wording do not.
+**A typed Space remembers preferences; each bin remembers its exact design.**
+These are two separate stores and both always apply. A bin's full design
+(names, text, every part and option) is saved exactly in `design_specs[row_id]`
+on every valid autosave and is never sanitized. Separately, every successful
+exact bin save also updates the Space's remembered *preferences*, with no
+dependence on Generate, Print or file creation. There is no "Keep bin
+defaults" toggle; `keep_bin_defaults: false` in older metadata is tolerated
+and ignored.
 
-A new user-editable option/part setting is presumed to participate in Space
-defaults unless it is explicitly instance-specific content. Bin/shell modifier
-settings carry forward with the bin-default snapshot. Interior-part instances
-do not auto-copy; their last-used safe editor settings are remembered per kind
-and seed the next instance. When adding a new option/editor field, update or
-verify Space-default persistence in the same change.
+The rule is exclusion-based: every user-configurable value is remembered
+unless it is **identity/text** (part name, rim/Edge Mount/Lid label text, lid
+division labels, Text-part wording, any `*_text` field), **presence** (which
+parts, modifiers or the Scoop the previous bin happened to contain) or
+**placement/session/trace state** (feature X/Y, Inventory placement, photos,
+contours). A part's *size* is a preference even though its position is not.
+Where a value is Auto, the Auto mode is remembered, not the numbers it
+derived. A future setting therefore participates automatically.
+
+New Bin starts from the catalog starter plus the remembered bin-level values
+(X/Y/Z, wall, base, Fused/Removable, Surface base choices, pegboard cleat
+counts...), then the active Space's own limits clamp them (a remembered size
+that no longer fits is reduced, never left invalid). It never copies the last
+bin's parts or modifiers. Explicitly adding a part or modifier (Bore, Edge
+Mount, Lid & Stacking, Inside Grip, Side Openings...) seeds it from the
+remembered settings for that kind, with text blank and a fresh placement;
+reopening an existing part or modifier always shows that bin's own exact
+values. Deleting a part or modifier from one bin does not erase the remembered
+settings for its kind. A kind's remembered entry changes only when a save
+actually changed that kind's settings.
+
+Preferences live in the Space's `.wavefinity.json` metadata: `bin_defaults`
+(the sanitized bin snapshot, with no parts, modifiers or text) and
+`part_defaults` (one entry per part kind; per modifier kind as
+`{kind, settings}`). Writes are serialized, name the Space they were queued
+for (`expectedSpaceId` hosted, `space_id` on `/api/space/defaults` locally) and
+preserve all unrelated metadata, so a late write can never land in a Space the
+user has left. Older `bin_defaults` / `part_defaults` shapes that contain
+text, features or modifier presence are sanitized when read and are replaced
+by the next preference write; they can never add a part or copy text. If the
+preference write fails after the bin saved, the bin is not rolled back and a
+warning says so.
 
 ### Using the browser editor
 
