@@ -2883,6 +2883,18 @@ def _generate_corner_connector(
     return result, plan
 
 
+class _PartialConnectorBundleError(Exception):
+    """An automatic connector bundle failed unexpectedly after one or more
+    connectors already generated successfully. Carries those completed
+    connector results so the caller can report them truthfully instead of
+    losing them behind the exception."""
+
+    def __init__(self, error: Exception, completed: dict[str, Any]) -> None:
+        super().__init__(str(error))
+        self.error = error
+        self.completed = completed
+
+
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if _is_base_trim_design(payload.get("design")):
         raise ValueError(
@@ -2918,6 +2930,12 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             skipped_types.append(key)
             continue
+        except Exception as error:
+            # An unfit corner is a normal ValueError skip, handled above.
+            # Anything else is unexpected - the connectors already in
+            # `results` (at least the Side connector) are real files on
+            # disk and must not be lost behind this exception.
+            raise _PartialConnectorBundleError(error, dict(results)) from error
         results[key] = corner_result
         types.append(key)
 
@@ -3112,6 +3130,18 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         # as a partial success, never erased by letting the exception escape.
         try:
             connector_files = _extract_generated_files(connector_payload(payload))
+        except _PartialConnectorBundleError as error:
+            # One or more connectors (at least the Side connector, if it
+            # completed) already exist on disk - report them alongside the
+            # bin files rather than only the bin files.
+            completed_files = _extract_generated_files(error.completed)
+            return {
+                "partial": True,
+                "error": f"Bin files were saved, but connectors could not be generated: {error.error}",
+                "partial_stage": "connectors",
+                "design_files": [str(f) for f in design_files],
+                "files": [str(f) for f in files + completed_files],
+            }
         except Exception as error:
             return {
                 "partial": True,
