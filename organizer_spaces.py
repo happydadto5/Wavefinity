@@ -4,7 +4,7 @@ Every selected folder gets ``.wavefinity.json``. Inventory and Space are
 independent: ``inventory`` (default ``true``) is whether generated bins/B4Bs
 are logged to ``Wavefinity bins.md``, and ``folder_mode`` is ``design`` or
 ``space`` depending on whether the folder also represents one physical
-Drawer, Surface, Portable Storage case, or Pegboard. A Space may also keep its own
+Drawer, Storage Box (internal kind ``portable``), Surface, or Pegboard. A Space may also keep its own
 sanitized bin-default snapshot. ``folder_mode=space`` always implies
 ``inventory=true`` - a Space cannot operate without the inventory its layout
 depends on. Legacy markers (an old ``design`` marker with no ``inventory``
@@ -35,6 +35,7 @@ from organizer_inventory import (
     legacy_layout_space,
     load_inventory,
     normalise_space_definition,
+    normalise_storage_box,
     resolve_inventory_path,
 )
 from organizer_product_rules import SURFACE_TRIM_HEIGHTS
@@ -190,6 +191,13 @@ def _space(raw: Any) -> dict[str, Any] | None:
         expected = SURFACE_TRIM_HEIGHTS.get(trim_size)
         if expected is not None and math.isclose(size[2], expected, abs_tol=1e-6):
             res["trim_size"] = trim_size
+    if raw.get("kind") in {"portable", "box"}:
+        # A legacy Storage Box Space with no block reads the established
+        # defaults; it needs no migration.
+        try:
+            res["storage_box"] = normalise_storage_box(raw.get("storage_box"))
+        except ValueError:
+            return None
     return res
 
 
@@ -973,7 +981,7 @@ def space_routes(
         }
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
-        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y"):
+        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box"):
             if key in payload:
                 raw_def[key] = payload[key]
 
@@ -1028,7 +1036,7 @@ def space_routes(
         raw_def = {"name": payload.get("name"), "kind": payload.get("kind"), "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
-        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y"):
+        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box"):
             if key in payload:
                 raw_def[key] = payload[key]
 
@@ -1055,7 +1063,7 @@ def space_routes(
         raw_def = {"name": payload.get("name"), "kind": existing_space["kind"], "x": payload.get("x"), "y": payload.get("y"), "z": payload.get("z")}
         if "trim_size" in payload:
             raw_def["trim_size"] = payload["trim_size"]
-        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y"):
+        for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box"):
             if key in payload:
                 raw_def[key] = payload[key]
 

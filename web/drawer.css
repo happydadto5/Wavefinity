@@ -37,21 +37,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
   padding: 2px 0; text-decoration: underline; text-underline-offset: 2px;
 }
 
-.dl-auto-button { font-size: 15px; }
-.dl-options { display: grid; gap: 8px 12px; grid-template-columns: 1fr 1fr; margin-top: 12px; }
-.dl-options .checkbox-row { margin: 2px 0; }
-.dl-candidates { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 8px; }
-.dl-candidate {
-  display: flex; flex-direction: column; gap: 3px; padding: 7px; border: 1px solid var(--line-dark);
-  border-radius: 9px; background: white; cursor: pointer; text-align: left;
-}
-.dl-candidate:hover { border-color: var(--teal); }
-.dl-candidate.active { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(20,108,112,.2); background: #f3faf9; }
-.dl-candidate canvas { width: 100%; height: auto; aspect-ratio: 264 / 152; border-radius: 5px; margin-bottom: 3px; }
-.dl-candidate strong { font-size: 12px; }
-.dl-candidate small { color: var(--muted); font-size: 11px; line-height: 1.35; }
-.dl-unfit { margin: 10px 0 0; font-size: 11px; color: var(--danger); line-height: 1.45; }
-
 .dl-stats { display: grid; gap: 9px; margin-bottom: 14px; }
 .dl-problems {
   margin: 0; padding: 8px 10px 8px 26px; border: 1px solid #e0aaa5; border-radius: 7px;
@@ -63,15 +48,12 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-inv-tools input, .dl-inv-tools select { margin: 0; padding: 7px 8px; font-size: 12px; }
 .dl-inv-list { display: grid; gap: 6px; }
 .dl-bin {
-  display: grid; grid-template-columns: 18px 38px minmax(0, 1fr) auto auto auto auto auto; align-items: center; gap: 8px;
+  display: grid; grid-template-columns: 18px 38px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
   padding: 6px 6px 6px 6px; border: 1px solid var(--line); border-radius: 9px; background: white;
 }
 .dl-bin[draggable="true"] { cursor: grab; }
 .dl-bin:hover { border-color: var(--line-dark); }
 .dl-bin.selected { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(20,108,112,.18); }
-.dl-bin.all-placed { background: #f7f9f9; }
-.dl-bin.all-placed .dl-bin-main strong { color: var(--muted); }
-.dl-bin.unprinted { border-color: #d7c6a9; background: #fffdfa; }
 .dl-bin.too-tall { border-color: #e0aaa5; }
 .dl-swatch {
   width: 38px; height: 38px; border-radius: 7px; display: grid; place-items: center;
@@ -83,13 +65,13 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-bin-main .dl-flags { color: #8a4e12; font-weight: 650; }
 .dl-row-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; padding-left: 26px; }
 .dl-row-actions .button { padding: 4px 7px; font-size: 11px; }
-.dl-placed { font-size: 12px; font-weight: 750; text-align: center; line-height: 1.1; min-width: 38px; }
-.dl-placed small { display: block; font-size: 10px; font-weight: 500; color: var(--muted); }
-.dl-qty { display: inline-flex; align-items: center; border: 1px solid var(--line-dark); border-radius: 7px; overflow: hidden; background: white; }
-.dl-qty button { border: 0; background: white; width: 24px; height: 28px; cursor: pointer; font-size: 15px; font-weight: 700; color: var(--teal-dark); }
-.dl-qty button:hover:not(:disabled) { background: var(--teal-soft); }
-.dl-qty button:disabled { color: var(--line-dark); cursor: default; }
-.dl-qty span { min-width: 22px; text-align: center; font-size: 12px; font-weight: 750; }
+.dl-bin-main .dl-status { color: var(--teal-dark); font-weight: 700; }
+.dl-bin.printed .dl-bin-main .dl-status { color: #1f6b45; }
+.dl-delete {
+  margin-left: auto; border: 0; background: none; color: var(--muted); font-size: 11px; cursor: pointer;
+  padding: 4px 6px; text-decoration: underline; text-underline-offset: 2px;
+}
+.dl-delete:hover { color: var(--danger); }
 .dl-more { border: 0; background: none; font-size: 13px; cursor: pointer; color: var(--muted); padding: 4px 2px; }
 .dl-remove {
   border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 13px;
@@ -133,54 +115,33 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
   position: absolute; right: -4px; bottom: -4px; font-style: normal; font-size: 10px; line-height: 1;
   padding: 2px 3px; border-radius: 4px; background: var(--teal); color: white;
 }
-.dl-placed small { white-space: nowrap; }
-.dl-planned-note { color: var(--teal-dark) !important; font-weight: 650; }
-/* Print map: only the sheet prints; on screen it never shows. */
-#dl-print-sheet { display: none; }
-@media print {
-  body.dl-printing > *:not(#dl-print-sheet) { display: none !important; }
-  body.dl-printing #dl-print-sheet { display: block; color: #000; font: 10pt "Segoe UI", system-ui, sans-serif; }
-  #dl-print-sheet h1 { margin: 0 0 4px; font-size: 16pt; }
-  #dl-print-sheet p { margin: 0 0 8px; }
-  #dl-print-sheet img { width: 100%; border: 1px solid #999; }
-  #dl-print-sheet table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-  #dl-print-sheet th, #dl-print-sheet td { border-bottom: 1px solid #ccc; padding: 3px 6px; text-align: left; font-size: 9pt; }
+/* The drawer canvas and its floating controls. The staging rail (Unplaced
+   bins) sits immediately beside the physical Space. */
+.canvas-wrap[data-canvas="drawer"].active { display: flex; }
+.canvas-wrap[data-canvas="drawer"] #drawer-canvas { flex: 1 1 0; width: auto; min-width: 0; height: 100%; }
+.dl-staging {
+  flex: 0 0 188px; width: 188px; display: flex; flex-direction: column; gap: 6px; padding: 10px 8px;
+  background: rgba(255,255,255,.9); border-right: 1px solid var(--line-dark); overflow: hidden; z-index: 2;
 }
-
-/* The drawer canvas and its floating controls. */
+.dl-staging-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
+.dl-staging-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; }
+.dl-staged {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 7px; padding: 5px 6px;
+  border: 1px solid var(--line); border-radius: 8px; background: white; cursor: grab;
+}
+.dl-staged:hover { border-color: var(--line-dark); }
+.dl-staged.selected { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(20,108,112,.18); }
+/* The camera controls and hint float over the canvas, not over the rail. */
+.canvas-wrap[data-canvas="drawer"] .dl-view-controls { left: 202px; }
+.canvas-wrap[data-canvas="drawer"] .dl-hint { left: 202px; }
+.dl-staging.receiving { background: var(--teal-soft); box-shadow: inset -3px 0 0 var(--teal); }
+.dl-staging.has-selection .dl-staging-head strong { color: var(--teal-dark); }
+.dl-staged .dl-swatch { width: 34px; }
 .canvas-wrap[data-canvas="drawer"] { background: radial-gradient(circle at 50% 40%, #fff 0, #f6f7f5 60%, #eceeea 100%); }
 #drawer-canvas.panning { cursor: grabbing; }
 .dl-tilt-control input[type="range"] { width: 104px; margin: 0; accent-color: var(--teal); }
 .dl-tilt-control, .dl-empty-control { padding: 6px 10px; }
 .dl-empty-control input { margin: 0; accent-color: var(--teal); }
-.dl-right-stack {
-  position: absolute; top: 16px; right: 16px; z-index: 3; width: 320px;
-  max-width: calc(100% - 32px); max-height: calc(100% - 32px);
-  display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
-  overscroll-behavior: contain; pointer-events: none;
-}
-.dl-auto-panel {
-  flex: 0 0 auto; padding: 10px; border: 1px solid var(--line-dark); border-radius: 10px;
-  background: rgba(255,255,255,.94); box-shadow: 0 3px 12px rgba(30,51,61,.1);
-  backdrop-filter: blur(6px); pointer-events: auto;
-}
-.dl-selection {
-  position: static; flex: 0 0 auto; max-width: 100%; pointer-events: auto;
-  padding: 10px 12px; border: 2px solid var(--teal); border-radius: 10px; background: rgba(243,250,249,.96);
-  box-shadow: 0 6px 18px rgba(20,51,61,.14); display: flex; flex-direction: column; gap: 2px; font-size: 13px;
-}
-.dl-selection span { color: var(--muted); font-size: 11px; }
-.dl-selection-actions { display: flex; gap: 6px; margin-top: 7px; }
-.dl-selection-actions button {
-  flex: 1; border: 1px solid var(--line-dark); border-radius: 6px; background: white;
-  padding: 6px; font-size: 12px; font-weight: 650; cursor: pointer;
-}
-.dl-selection-actions button:hover { background: var(--teal-soft); border-color: var(--teal); }
-.dl-auto-details { margin-top: 6px; }
-.dl-auto-details summary { color: var(--muted); font-size: 12px; font-weight: 650; cursor: pointer; }
-.dl-auto-panel .dl-options { grid-template-columns: 1fr; margin-top: 8px; }
-.dl-auto-panel #dl-candidates:empty { display: none; }
-
 /* First-run empty state over the drawer canvas. */
 .dl-empty-state[hidden] { display: none; }
 .dl-empty-state {
@@ -200,10 +161,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-view-controls .camera-views button { flex: 0 0 auto; min-width: 0; padding: 10px 14px; font-size: 14px; white-space: nowrap; }
 .dl-view-controls .zoom-controls button { flex: 0 0 auto; min-width: 40px; padding: 10px 12px; }
 
-/* Current design (session only) row in the Space inventory. */
-.dl-working { border-style: dashed; border-color: var(--teal); background: var(--teal-soft); cursor: default; }
-.dl-working .dl-working-swatch { background: var(--paper); color: var(--teal-dark); }
-.dl-empty-state .dl-quiet { background: none; border-color: transparent; color: var(--muted); text-decoration: underline; }
 
 /* Space header: what the Space is, and which editor (Space or Design) owns the
    left panel. Shown above either editor. */
@@ -249,8 +206,28 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 }
 
 @media (max-width: 700px) {
-  .dl-right-stack {
-    top: 10px; right: 10px; width: 300px; max-width: calc(100% - 20px);
-    max-height: calc(100% - 20px);
-  }
+  .canvas-wrap[data-canvas="drawer"] .dl-view-controls, .canvas-wrap[data-canvas="drawer"] .dl-hint { left: 10px; }
+  .canvas-wrap[data-canvas="drawer"] .dl-view-controls { top: 146px; }
+  .canvas-wrap[data-canvas="drawer"].active { flex-direction: column; }
+  .dl-staging { flex: 0 0 auto; width: auto; max-height: 132px; border-right: 0; border-bottom: 1px solid var(--line-dark); }
+  .dl-staging-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+  .dl-staged { flex: 0 0 176px; }
 }
+
+/* Spacers: below Inventory, collapsed until wanted. */
+.dl-spacers { margin: 10px 12px 0; border: 1px solid var(--line-dark); border-radius: 11px; background: var(--panel); }
+.dl-spacers > summary { cursor: pointer; padding: 10px 14px; font-size: 13px; font-weight: 750; color: var(--teal-dark); }
+.dl-spacers[open] > summary { border-bottom: 1px solid var(--line); }
+.dl-spacers > .section-body { padding: 10px 14px 14px; }
+.dl-spacers[hidden] { display: none; }
+
+/* Space Actions: the Space-level buttons in the Space header. */
+.space-actions { margin-top: 8px; }
+.space-actions-label { display: block; font-size: 11px; font-weight: 750; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.space-actions .button-row { margin-top: 0; }
+.space-structural { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.space-structural[hidden] { display: none; }
+.space-structural .space-structural-bed { display: flex; gap: 8px; margin-top: 6px; }
+.space-structural .space-structural-bed[hidden] { display: none; }
+.space-structural .space-structural-bed label { flex: 1; font-size: 11px; color: var(--muted); }
+.space-structural .space-structural-bed input { margin: 0; padding: 5px 6px; font-size: 12px; }

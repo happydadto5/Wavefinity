@@ -94,7 +94,8 @@ class StackAutoSettingsTests(unittest.TestCase):
         self.assertIn("direct", rules["base_min_by_wall_mm"])
         app = (Path(__file__).parent / "web" / "app.js").read_text(encoding="utf-8")
         self.assertIn("function normalizeStackSettings", app)
-        self.assertIn('restoreDefaults: (previousStack !== "none" || wasB4B)', app)
+        self.assertIn("{ restoreDefaults = false, flash = false } = {}", app)
+        self.assertNotIn("wasB4B", app)
         self.assertIn('set("standard_walls", false, "#wall-thickness")', app)
         self.assertIn('set("standard_base", false, "#base-thickness")', app)
 

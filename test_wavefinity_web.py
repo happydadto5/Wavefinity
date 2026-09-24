@@ -2011,40 +2011,12 @@ class WebApplicationTests(unittest.TestCase):
             self.skipTest("Node.js is required for this browser-state regression")
         return node
 
-    def test_current_design_lifecycle(self):
-        node = self._node_or_skip()
+    def test_current_design_shadow_helpers_are_gone(self):
         source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
-        helper = source[
-            source.index("// BEGIN WORKING_DESIGN_HELPERS"):source.index("// END WORKING_DESIGN_HELPERS")
-        ]
-        steps = "\n".join([
-            "const shown = () => out.push(workingDesignForSpace() !== null);",
-            # Untouched startup starter: never invented.
-            "visible = {a: 1}; state.cleanDesign = clone(visible); shown();",
-            # Explicit first-bin action (fresh design, pending, no edit): shown.
-            "state.workingPending = true; shown();",
-            # Real generation logs it: hidden, no duplicate.
-            "markWorkingDesignReconciled(); shown();",
-            # A later edit makes it pending again.
-            "visible = {a: 2}; shown();",
-            # Base Trim and non-Space folders never count.
-            "baseTrim = true; shown(); baseTrim = false; state.folderMode = 'design'; shown();",
-        ])
-        script = "\n".join([
-            "const clone = v => JSON.parse(JSON.stringify(v));",
-            "const state = { design: {}, cleanDesign: {}, workingPending: false,"
-            " workingGeneratedKey: null, folderMode: 'space' };",
-            "let visible = {}; let baseTrim = false;",
-            "const baseTrimEnabled = () => baseTrim;",
-            "const typedSpaceOrdinaryBin = () => !baseTrim && state.folderMode === 'space';",
-            "const visibleDesignSnapshot = () => clone(visible);",
-            helper,
-            "const out = [];",
-            steps,
-            "process.stdout.write(JSON.stringify(out));",
-        ])
-        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
-        self.assertEqual(json.loads(done.stdout), [False, False, False, False, False, False])
+        self.assertNotIn("WORKING_DESIGN_HELPERS", source)
+        for name in ("workingDesignForSpace", "markWorkingDesignPending", "markWorkingDesignReconciled",
+                     "workingPending", "workingGeneratedKey"):
+            self.assertNotIn(name, source)
 
     def test_typed_space_autosave_serializes_and_rejects_stale_completion(self):
         source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
@@ -2255,65 +2227,27 @@ class WebApplicationTests(unittest.TestCase):
         app = (root / "app.js").read_text(encoding="utf-8")
         fresh = app[app.index("async function loadFreshOrdinaryDesignForCurrentFolder"):]
         fresh = fresh[:fresh.index("\n}\n")]
-        self.assertIn('state.workingPending = false', fresh)
         self.assertIn('state.designInventoryId = null', fresh)
+        # Showing a fresh starter does not create an Inventory row.
+        self.assertIn("Showing a fresh starter does not create an Inventory row", fresh)
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         first = panel[panel.index("DP.designFirstBin = "):]
-        self.assertIn("markWorkingDesignPending()", first[:first.index("};")])
-        # Both Surface first-run exits go through the shared fresh-design load.
-        self.assertIn(
-            "await loadFreshOrdinaryDesignForCurrentFolder();",
-            app[app.index("async function surfaceEdgeSucceeded"):],
-        )
-        self.assertIn(
-            "await loadFreshOrdinaryDesignForCurrentFolder();",
-            panel[panel.index("DP.startBinNow"):],
-        )
-        # The working design is session-only: never merged into inventory rows.
+        self.assertIn('DP.setMode("design")', first[:first.index("};")])
+        self.assertNotIn("markWorking", first[:first.index("};")])
+        # The Surface first-run edge handoff is gone: Base Trim is a Space Action.
+        self.assertNotIn("surfaceEdgeSucceeded", app)
+        self.assertNotIn("DP.startBinNow", panel)
+        # Inventory rows are only ever the real rows - never a pseudo row.
         model = (root / "drawer-model.js").read_text(encoding="utf-8")
         self.assertNotIn("DL.bins.push", model)
-        self.assertNotIn("bins.push(DL.working", panel)
+        self.assertNotIn("__current__", model + panel)
 
     def test_current_design_position_does_not_leak_between_spaces(self):
-        node = shutil.which("node")
-        if not node:
-            self.skipTest("node is not installed")
-        model = Path(__file__).resolve().parent / "web" / "drawer-model.js"
-        script = """
-const vm = require("vm"), fs = require("fs");
-const ctx = { debounce: f => f, state: { activeSpaceId: "A", output: "" }, console, Math, JSON, Number, Set, Map };
-vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + " ;this.DL = DL;", ctx);
-const DL = ctx.DL;
-const drawer = () => ({ id: "d1", width: 200, depth: 200, height: 60, snap: 8, placements: [] });
-DL.layout = { active: "d1", drawers: [drawer()] };
-DL.emit = () => {};
-DL.grid = () => ({ cols: 20, rows: 20, step: 8 });
-DL.cells = () => [2, 2];
-DL.stackHeight = () => 20;
-DL.items = () => [];
-DL.working = { key: "k", bin: { id: "__current__" } };
-const out = {};
-out.first = DL.workingFit();
-out.moved = DL.moveWorkingTo(5, 6);
-out.same = DL.workingFit();
-ctx.state.activeSpaceId = "B";
-DL.layout = { active: "d1", drawers: [drawer()] };
-out.other = DL.workingFit();
-ctx.state.activeSpaceId = "A";
-out.back = DL.workingFit();
-out.placements = DL.layout.drawers[0].placements.length;
-console.log(JSON.stringify(out));
-"""
-        result = subprocess.run([node, "-e", script, str(model)], capture_output=True, text=True, timeout=30)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        out = json.loads(result.stdout)
-        self.assertEqual((out["first"]["gx"], out["first"]["gy"]), (0, 0))
-        self.assertTrue(out["moved"])
-        self.assertEqual((out["same"]["gx"], out["same"]["gy"]), (5, 6))
-        self.assertEqual((out["other"]["gx"], out["other"]["gy"]), (0, 0))
-        self.assertEqual((out["back"]["gx"], out["back"]["gy"]), (0, 0))  # discarded for good
-        self.assertEqual(out["placements"], 0)
+        # The session-only Current-design position is gone with the shadow
+        # owner; nothing about an unplaced bin is kept as coordinates.
+        model = (Path(__file__).resolve().parent / "web" / "drawer-model.js").read_text(encoding="utf-8")
+        for name in ("workingFit", "moveWorkingTo", "workingContext", "fitStamp"):
+            self.assertNotIn(name, model)
 
     def test_space_workspace_separates_editor_mode_from_preview(self):
         # Fix 024: preview and editor choices are synchronized without a
@@ -2329,8 +2263,8 @@ console.log(JSON.stringify(out));
         self.assertNotIn("DP.leave()", observer)
         self.assertNotIn("DP.mode =", observer)
         enter = panel[panel.index("DP.enter = "):panel.index("DP.leave = ")]
-        self.assertIn('workingDesignForSpace() ? "design" : "space"', enter)
-        self.assertIn('preferredMode === "space"', enter)
+        self.assertIn('preferredMode === "design" ? "design" : "space"', enter)
+        self.assertNotIn("workingDesignForSpace", enter)
         setter = panel[panel.index("DP.setMode = "):panel.index("DP.selectMode = ")]
         self.assertNotIn("activatePreviewView", setter)
         app = (root / "app.js").read_text(encoding="utf-8")
@@ -2357,7 +2291,7 @@ console.log(JSON.stringify(out));
                      "dl-snap", "dl-anchor", "dl-axis", "dl-clearance",
                      "Spacers &amp; connectors", "dl-connectors", "Drawer settings"):
             self.assertNotIn(gone, panel)
-        self.assertIn("<span>Spacers</span>", panel)
+        self.assertIn("<summary>Spacers</summary>", panel)
         self.assertIn("Advanced Settings", panel)
 
     def test_existing_space_edit_is_inline_with_edit_only_buttons(self):
@@ -2531,14 +2465,12 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         self.assertIn('divider_slope: "#1f6b45"', app_js)
         self.assertNotIn('changed === "option:bottom_angle" ||', app_js)
 
-    def test_auto_layout_candidate_cards_omit_fill_percent_and_connector_count(self):
+    def test_auto_layout_candidate_cards_are_removed(self):
         root = Path(__file__).resolve().parent
         drawer_panel_js = (root / "web" / "drawer-panel.js").read_text(encoding="utf-8")
-        self.assertIn("${c.stats.placed} of ${c.stats.wanted} bins", drawer_panel_js)
-        self.assertIn("height clash", drawer_panel_js)
-        self.assertNotIn("% full", drawer_panel_js)
-        self.assertNotIn("stats.fill", drawer_panel_js)
-        self.assertNotIn("stats.connectors", drawer_panel_js)
+        self.assertNotIn("data-candidate", drawer_panel_js)
+        self.assertNotIn("stats.placed", drawer_panel_js)
+        self.assertNotIn("drawThumb", drawer_panel_js)
 
     def test_feature_icons_are_separate_and_loaded_before_the_app(self):
         root = Path(__file__).resolve().parent
@@ -2558,14 +2490,15 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
         gl_js = (root / "web" / "preview3d-webgl.js").read_text(encoding="utf-8")
         self.assertIn('id="ordinary-preview-modes"', index_html)
-        self.assertIn('id="b4b-preview-modes"', index_html)
+        # The Designer only holds ordinary bins now: no Storage Box All/Base/Lid group.
+        self.assertNotIn('id="b4b-preview-modes"', index_html)
         # The four mutually-exclusive camera modes were replaced by three
         # independently toggleable Bin/Interior/Xray buttons - there is no
         # separate "standard" mode any more.
         for mode in ("bin", "interior", "xray"):
             self.assertIn(f'data-camera-toggle="{mode}"', index_html)
         for view in ("all", "base", "lid"):
-            self.assertIn(f'data-b4b-view="{view}"', index_html)
+            self.assertNotIn(f'data-b4b-view="{view}"', index_html)
         self.assertLess(
             index_html.index("/preview3d-webgl.js"), index_html.index("/app.js")
         )
@@ -2637,18 +2570,20 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         reset = spaces_js[spaces_js.index("SP.resetDesignSession = () => {"):]
         reset = reset[:reset.index("\n};\n")]
         for flag in (
-            "state.workingPending = false", "state.workingGeneratedKey = null",
-            "state.surfaceEdgeHandled = false", "state.baseTrimSourceLayout = null",
-            "state.lastOrdinaryDesign = null", "state.lastBaseTrimDesign = null",
+            "state.designInventoryId = null", "state.spaceStarterPreviewPending = false",
+            "state.lastOrdinaryDesign = null",
             "state.drafts = {}", "state.history = []", "state.future = []",
             "resetNestPhotoSession()", "clearDraftSelection()",
         ):
             self.assertIn(flag, reset)
+        for retired in ("workingPending", "workingGeneratedKey", "surfaceEdgeHandled",
+                        "baseTrimSourceLayout", "lastBaseTrimDesign"):
+            self.assertNotIn(retired, reset)
 
         init = spaces_js[spaces_js.index("SP.initializeDesignForActiveSpace = async () => {"):]
         init = init[:init.index("\n};\n")]
         self.assertIn("SP.resetDesignSession();", init)
-        self.assertIn("SP.installSpaceStarterDesign(state.activeSpace);", init)
+        self.assertIn("SP.installSpaceStarterDesign();", init)
         # Opening/switching alone must never mark the starter as pending.
         self.assertNotIn("markWorkingDesignPending", init)
 
@@ -2660,17 +2595,16 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         )
 
     def test_starter_design_matches_space_kind(self):
-        # Item 1.4: Drawer -> fresh ordinary Bin, Surface -> Base Trim
-        # starter, Portable Storage (incl. legacy "box") -> Storage Box/B4B.
+        # The Designer always starts an ordinary Bin, whatever the Space type:
+        # a Storage Box or Base Trim is a structural output of its Space.
         root = Path(__file__).resolve().parent / "web"
         spaces_js = (root / "spaces.js").read_text(encoding="utf-8")
         installer = spaces_js[spaces_js.index("SP.installSpaceStarterDesign = async"):]
         installer = installer[:installer.index("\n};\n")]
-        self.assertIn('space.kind === "surface"', installer)
-        self.assertIn("makeBaseTrimDesign(space.x, space.y)", installer)
-        self.assertIn('space.kind === "portable" || space.kind === "box"', installer)
-        self.assertIn("await toggleB4B(true);", installer)
         self.assertIn("state.design = freshDesignForCurrentFolder();", installer)
+        self.assertNotIn("makeBaseTrimDesign", installer)
+        self.assertNotIn("toggleB4B", installer)
+        self.assertNotIn("b4b", installer)
 
     def test_safe_drawer_switch_never_silently_saves_or_loses_work(self):
         # Fix 034 K1: autosave has no off state any more, so this always just
@@ -3032,7 +2966,7 @@ const tick = () => new Promise(r => setImmediate(r));
             "    catalog: scenario.noCatalog ? null : {},",
             "    spaceResumeDesign: scenario.resumeDesign ?? null,",
             "    spaceResumePending: scenario.resumePending ?? false,",
-            "    design: null, cleanDesign: null, workingPending: 'untouched',",
+            "    design: null, cleanDesign: null,",
             "  };",
             "  const api = async (path, payload) => {",
             "    calls.push(['api', path, clone(payload)]);",
@@ -3046,7 +2980,7 @@ const tick = () => new Promise(r => setImmediate(r));
             "  const syncForm = () => calls.push(['syncForm']);",
             init_fn,
             "  await SP.initializeDesignForActiveSpace();",
-            "  return { calls, toasts, design: state.design, cleanDesign: state.cleanDesign, workingPending: state.workingPending };",
+            "  return { calls, toasts, design: state.design, cleanDesign: state.cleanDesign };",
             "}",
             "(async () => {",
             "  const out = {};",
@@ -3073,14 +3007,11 @@ const tick = () => new Promise(r => setImmediate(r));
         self.assertFalse(any(c[0] == "installSpaceStarterDesign" for c in with_resume["calls"]))
         self.assertEqual(with_resume["design"], {"box": {"x": 1}, "validated": True})
         self.assertEqual(with_resume["cleanDesign"], with_resume["design"])
-        self.assertTrue(with_resume["workingPending"])
 
-        # resume_pending=false restores the same exact design but as already
-        # reconciled - not reinvented as a new pending Current design.
+        # A resume checkpoint is recovery only: it restores the same exact design.
         reconciled = out["withReconciledResume"]
         self.assertFalse(any(c[0] == "installSpaceStarterDesign" for c in reconciled["calls"]))
         self.assertEqual(reconciled["design"], {"box": {"x": 2}, "validated": True})
-        self.assertFalse(reconciled["workingPending"])
 
         fallback = out["invalidResumeFallsBack"]
         self.assertTrue(any(c[0] == "installSpaceStarterDesign" for c in fallback["calls"]))
@@ -3232,7 +3163,7 @@ const tick = () => new Promise(r => setImmediate(r));
         print_model = slice_fn("printModel")
 
         for label, source in (("generateParts", generate_parts), ("printModel", print_model)):
-            pre_flush_idx = source.index("SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()))")
+            pre_flush_idx = source.index("SP.flushResumeCheckpoint(payload.design, false)")
             api_call = 'api("/api/generate"' if label == "generateParts" else 'api("/api/print"'
             api_idx = source.index(api_call)
             self.assertLess(
@@ -3246,7 +3177,8 @@ const tick = () => new Promise(r => setImmediate(r));
 
             # The post-success flush (pending=false) must NOT stop/refuse the
             # already-produced output on a checkpoint-save failure.
-            post_flush_idx = source.index("SP.flushResumeCheckpoint(payload.design, false)")
+            post_flush_idx = source.rindex("SP.flushResumeCheckpoint(payload.design, false)")
+            self.assertGreater(post_flush_idx, pre_flush_idx)
             post_flush_catch = source[post_flush_idx:source.index("catch (error)", post_flush_idx) + 400]
             self.assertNotIn("throw", post_flush_catch)
 
@@ -3564,7 +3496,8 @@ const tick = () => new Promise(r => setImmediate(r));
         app_js = (root / "app.js").read_text(encoding="utf-8")
         # 1-2: Bin Actions owner sits before the bin definition controls.
         actions = html.index('id="bin-actions"')
-        self.assertLess(actions, html.index('id="bin-type"'))
+        self.assertLess(actions, html.index('id="part-name"'))
+        self.assertNotIn('id="bin-type"', html)
         block = html[actions:html.index("</div>", actions)]
         self.assertIn(">New Bin</button>", block)
         self.assertIn(">Duplicate Bin</button>", block)
@@ -3594,9 +3527,11 @@ const tick = () => new Promise(r => setImmediate(r));
         for text in (">Save Bin + Connectors<", ">Save Bin<", ">Save Connectors<", "Saving Parts…"):
             self.assertIn(text, html)
         self.assertNotIn(">Generate Bin", html)
-        for text in ('"Save Bin + Lid"', '"Save Base Trim"', '"Save to Folder"',
+        for text in ('"Save Bin + Lid"', '"Save to Folder"',
                      '"Saving Failed"', '"Saved — design save needs attention"'):
             self.assertIn(text, app_js)
+        # Base Trim is saved from its Space, not the Designer.
+        self.assertNotIn('"Save Base Trim"', app_js)
         self.assertNotIn('"Generate Bin', app_js)
         self.assertNotIn('"Generate to Folder"', app_js)
         # 7-9: browse/edit palette, selected-row-only Done/Delete.
@@ -3669,7 +3604,9 @@ const tick = () => new Promise(r => setImmediate(r));
         # confirm stays a plain window.confirm(), out of Item 8's scope).
         root = Path(__file__).resolve().parent / "web"
         app_js = (root / "app.js").read_text(encoding="utf-8")
-        self.assertIn("Turning on Storage Box removes all interior parts except one Divider layout", app_js)
+        # The Designer no longer converts a bin into a Storage Box, so that
+        # interior-parts confirm left with the conversion.
+        self.assertNotIn("Turning on Storage Box removes all interior parts", app_js)
 
     def test_primary_bin_y_axis_reads_depth(self):
         # Item 9B: the main bin/Space Y axis is "Depth", not "Length" -
@@ -3679,7 +3616,7 @@ const tick = () => new Promise(r => setImmediate(r));
         index_html = (root / "index.html").read_text(encoding="utf-8")
         app_js = (root / "app.js").read_text(encoding="utf-8")
         self.assertIn('<span id="y-size-label">Depth</span>', index_html)
-        self.assertIn('yLabel.textContent = on ? "Depth (Inside)" : "Depth";', app_js)
+        self.assertNotIn("Depth (Inside)", app_js)
         # Untouched part-specific Length fields.
         self.assertIn('field("Length", "item_length"', app_js)
         self.assertIn('autoField("Length", "base", "depth", "mm")', app_js)
@@ -3758,7 +3695,8 @@ class WebServerTests(unittest.TestCase):
         status, headers, body = self.get("/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
-        self.assertIn(b"Design a:", body)
+        self.assertNotIn(b"Design a:", body)
+        self.assertNotIn(b'id="bin-type"', body)
         self.assertNotIn(b'id="advanced-settings"', body)
         self.assertNotIn(b'id="advanced-build-settings"', body)
         self.assertIn(b"Base thickness", body)
@@ -3825,7 +3763,7 @@ class WebServerTests(unittest.TestCase):
         self.assertNotIn(b"Fixed 5 mm lettering on a shelf", body)
         # Bin type comes first: it decides what every control under it means,
         # so it sits above the size fields and everything else.
-        self.assertLess(body.index(b'id="bin-type"'), body.index(b'id="x-size"'))
+        self.assertLess(body.index(b'id="part-name"'), body.index(b'id="x-size"'))
         self.assertLess(body.index(b'id="x-size"'), body.index(b'id="mode-select"'))
         self.assertLess(body.index(b'id="mode-select"'), body.index(b"<h2>Parts &amp; options</h2>"))
         self.assertLess(body.index(b"<h2>Parts &amp; options</h2>"), body.index(b"Connectors"))
@@ -3833,7 +3771,7 @@ class WebServerTests(unittest.TestCase):
         # Part name now lives right with Bin type at the very top - naming the
         # bin is the first thing a person does, not something buried with the
         # output controls further down.
-        self.assertLess(body.index(b'id="bin-type"'), body.index(b'id="part-name"'))
+        self.assertLess(body.index(b'id="designer-new-bin"'), body.index(b'id="part-name"'))
         self.assertLess(body.index(b'id="part-name"'), body.index(b'id="x-size"'))
         # The palette itself is the "add another part" affordance now - there is
         # no separate button. Editing a part shows Done / Delete on its selected
@@ -4123,7 +4061,8 @@ class Fix20SpaceFormTests(unittest.TestCase):
         root = Path(__file__).resolve().parent / "web"
         html = (root / "index.html").read_text(encoding="utf-8")
         self.assertIn('<p id="space-form-type"', html)
-        self.assertEqual(html.count('class="space-dimension-row"'), 6)
+        # Six for the type/dimension rows plus four for the Storage Box case settings.
+        self.assertEqual(html.count('class="space-dimension-row"'), 10)
         self.assertIn(
             'id="space-create" class="button primary" type="button"',
             html,
@@ -4206,7 +4145,8 @@ class Fix20InsideGripTests(unittest.TestCase):
         root = Path(__file__).resolve().parent / "web"
         app_js = (root / "app.js").read_text(encoding="utf-8")
         self.assertNotIn('hide("#inside-handles-option", on)', app_js)
-        self.assertIn('if (on) {\n    hide("#lid-option", true);\n    hide("#inside-handles-option", true);', app_js)
+        self.assertNotIn("function applyB4BVisibility", app_js)
+        self.assertNotIn("function applyBaseTrimVisibility", app_js)
 
 
 class Fix20StorageBoxDividerTests(unittest.TestCase):
@@ -4261,7 +4201,7 @@ class Fix20StorageBoxDividerTests(unittest.TestCase):
         )
 
         div_ext_start = app_js.index("function dividerLayoutExtent(box = state.design?.box) {")
-        div_ext_end = app_js.index("function positionSharedThicknessControls(", div_ext_start)
+        div_ext_end = app_js.index("function stackMode() {", div_ext_start)
         div_ext = app_js[div_ext_start:div_ext_end]
         self.assertIn("if (box?.b4b?.enabled) {\n    return [number(box.x), number(box.y)];\n  }", div_ext)
 
@@ -4278,12 +4218,8 @@ class Fix20StorageBoxDividerTests(unittest.TestCase):
             render_code,
         )
 
-        b4b_vis_start = app_js.index("function applyB4BVisibility() {")
-        b4b_vis_end = app_js.index("function b4bHandleBlockedReason() {", b4b_vis_start)
-        b4b_vis = app_js[b4b_vis_start:b4b_vis_end]
-        self.assertIn("button.hidden = on && !b4bPartAllowed(button.dataset.kind);", b4b_vis)
-        self.assertNotIn('hide("#tab-2d"', b4b_vis)
-        self.assertNotIn('hide(".tab-button[data-canvas=\\"2d\\"]"', b4b_vis)
+        # The Storage Box panel left the Designer with the type switch.
+        self.assertNotIn("function applyB4BVisibility", app_js)
 
     def test_default_feature_payload_for_b4b_divider(self):
         design = self._b4b_design()
@@ -4393,37 +4329,22 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
         base_fn = app_js[base_fn_start:base_fn_end]
         self.assertIn("const numericChoices = isB4B\n    ? choices\n    : choices.filter(choice => fmt(choice.value) !== ordinaryDefaultValue);", base_fn)
 
-        # applyB4BMaterialDefaults definition and invocation on B4B enable
-        self.assertIn("function applyB4BMaterialDefaults(design = state.design) {", app_js)
-        self.assertIn("box.wall = number(rules.default_wall_mm, 1.6);", app_js)
-        self.assertIn("box.base_thickness = number(rules.default_base_mm, 1.6);", app_js)
-        toggle_b4b_start = app_js.index("async function toggleB4B(wantEnabled) {")
-        toggle_b4b_end = app_js.index("async function changeBinType() {", toggle_b4b_start)
-        toggle_b4b = app_js[toggle_b4b_start:toggle_b4b_end]
-        self.assertIn("applyB4BMaterialDefaults(state.design);", toggle_b4b)
+        # The Storage Box wall/base defaults belong to the Space (space.storage_box),
+        # not to a Designer type switch.
+        for gone in ("function applyB4BMaterialDefaults", "async function toggleB4B",
+                     "function normalizeB4BBaseForStacking", "function visibleB4B", "b4bPreStackBase"):
+            self.assertNotIn(gone, app_js)
+        spaces_js = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")
+        self.assertIn('SP.fillMaterialSelect("portable-wall"', spaces_js)
+        self.assertIn('SP.fillMaterialSelect("portable-base"', spaces_js)
+        self.assertIn("b4b_rules?.default_wall_mm", spaces_js)
+        self.assertIn("b4b_rules?.default_base_mm", spaces_js)
 
-        # normalizeB4BBaseForStacking fallback
-        norm_stack_start = app_js.index("function normalizeB4BBaseForStacking(design = state.design) {")
-        norm_stack_end = app_js.index("function b4bLimitProblems(", norm_stack_start)
-        norm_stack = app_js[norm_stack_start:norm_stack_end]
-        self.assertIn("b4bPreStackBase = number(box.base_thickness, number(state.catalog?.b4b_rules?.default_base_mm, 1.6));", norm_stack)
-
-        # visibleDesignSnapshot B4B fallbacks
+        # visibleDesignSnapshot / updateDesignFromForm are ordinary-bin only.
         vsnap_start = app_js.index("function visibleDesignSnapshot() {")
         vsnap_end = app_js.index("function designHasChanges() {", vsnap_start)
-        vsnap = app_js[vsnap_start:vsnap_end]
-        self.assertIn("const defaultBase = visibleB4B\n    ? number(b4bRules.default_base_mm, 1.6)\n    : number(state.catalog?.base_rules?.default_mm, 0.6);", vsnap)
-        self.assertIn("const defaultWall = visibleB4B\n    ? number(b4bRules.default_wall_mm, 1.6)\n    : (wallRules.default_mm ?? 0.8);", vsnap)
-
-        # updateDesignFromForm B4B fallbacks
-        update_form_start = app_js.index("function updateDesignFromForm() {")
-        update_form_end = app_js.index(
-            "async function showLog(",
-            update_form_start,
-        )
-        update_form = app_js[update_form_start:update_form_end]
-        self.assertIn("const defaultWall = b4bOn\n    ? number(b4bRules.default_wall_mm, 1.6)\n    : (wallRules.default_mm ?? 0.8);", update_form)
-        self.assertIn("const defaultBase = b4bOn\n    ? number(b4bRules.default_base_mm, 1.6)\n    : number(state.catalog?.base_rules?.default_mm, 0.6);", update_form)
+        self.assertNotIn("visibleB4B", app_js[vsnap_start:vsnap_end])
+        self.assertNotIn("readB4BForm", app_js)
 
         # syncWallControls uses wallPresetChoices and B4B super-thin warning
         sync_wall_start = app_js.index("function syncWallControls() {")

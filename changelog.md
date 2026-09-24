@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-09-24 — Space simplification and Space-owned outputs (Fix 048C)
+
+- A Space now has two mental objects: the Space and the bins inside it. Every ordinary bin is one Inventory row, placed at most once, with one lifecycle label (In Design, Saved or Printed). Bins that are not placed wait in **Unplaced bins** beside the Space; drag one in to place it, drag a placed bin off the Space to unplace it.
+- Inventory is the primary control: Edit, Duplicate, Print, Mark Printed / Mark Not Printed and Delete live on each row. Clicking a placed bin highlights its row, and clicking a row highlights its placement.
+- Removed Current design, Auto layout, Lock, Print map, the right-hand selected-bin card, double-click quick-place and ordinary Qty / planned copies. Spacers moved below Inventory (collapsed) and keep their own counts.
+- The four Space types are Drawer, Storage Box, Surface and Pegboard. A Storage Box keeps its case settings on the Space (`space.storage_box`) and edits them in **Edit Space**.
+- **Space Actions** groups Open Space…, Edit Space, Show Folder and New Space, and owns **Save / Print Storage Box** and **Save / Print Base Trim**. Neither output is an Inventory row.
+- The Designer always designs an ordinary Bin; the Design-a selector is gone.
+
 ## 2026-09-22 — Space Inventory workflow (Fix 038)
 
 - Existing Spaces with bins open in Space view; empty and spacer-only Spaces open in Design / 3D, with the saved Current design preserved.

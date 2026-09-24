@@ -14,9 +14,6 @@ const state = {
   catalog: null,
   design: null,
   cleanDesign: null,
-  workingPending: false,        // session-only "Current design" bookkeeping
-  workingGeneratedKey: null,
-  surfaceEdgeHandled: false,    // Surface first-run: edge done or deliberately skipped
   preview: null,
   previewDesignKey: null,
   draftKind: "divider",
@@ -72,8 +69,8 @@ const state = {
   spaceBinDefaults: null,
   spacePartDefaults: {},
   // The active typed Space's exact resume checkpoint (Fix 032) - the full
-  // canonical design it should reopen to, and whether that design is still
-  // an unreconciled Current design. null/false outside a typed Space.
+  // canonical design it should reopen to (recovery only, never an Inventory
+  // identity). null/false outside a typed Space.
   spaceResumeDesign: null,
   spaceResumePending: false,
   // Fix 034 D: the current Designer's bound editable-source Inventory row in
@@ -88,8 +85,6 @@ const state = {
   keepLog: false,
   connector: {},
   lastOrdinaryDesign: null,
-  lastBaseTrimDesign: null,
-  baseTrimSourceLayout: null,
   layoutDrag: null,
   layoutTransform: null,
   // Interactive dimension-label handles, rebuilt every overlay render - not
@@ -113,11 +108,8 @@ const state = {
   binVisible: true,
   interiorVisible: true,
   xrayOn: false,
-  // B4B's own All/Base/Lid preview state - see applyB4BVisibility() and
-  // setB4BView(). Separate from the bin/interior/xray flags above because the
-  // two mean different things (Bin/Interior/Xray classify ordinary-bin
-  // geometry by kind; All/Base/Lid classify B4B geometry by physical part
-  // ownership).
+  // All/Base/Lid preview state for a Storage Box preview response. The Designer
+  // only ever holds ordinary bins now, so this stays "all".
   b4bView: "all",
   history: [],
   future: [],
@@ -224,7 +216,6 @@ function setFolderState(
         ? "A Space needs this folder's inventory turned on."
         : "Add each generated bin and Storage Box to this folder's inventory file";
   }
-  syncBaseTrimOption();
   applyDesignerLifecycleVisibility();
 }
 
@@ -301,8 +292,6 @@ function ordinaryBinMinimumHeight() {
 function applySpaceSizingDefaults(design) {
   if (state.folderMode !== "space" || !state.activeSpace) return design;
 
-  if (design.box.base_trim?.enabled || design.box.b4b?.enabled) return design;
-
   const kind = state.activeSpace.kind;
   const space = state.activeSpace;
   const unit = state.catalog?.base_unit || 8;
@@ -364,14 +353,11 @@ function freshDesignForCurrentFolder() {
 async function loadFreshOrdinaryDesignForCurrentFolder() {
   state.design = freshDesignForCurrentFolder();
   state.designInventoryId = null;
-  state.baseTrimSourceLayout = null;
   state.lastOrdinaryDesign = clone(state.design);
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
   state.spaceStarterPreviewPending = state.folderMode === "space";
   // Showing a fresh starter does not create an Inventory row.
-  state.workingPending = false;
-  state.workingGeneratedKey = null;
   state.drafts = {};
   state.history = [];
   state.future = [];
@@ -397,8 +383,14 @@ function applyDesignerLifecycleVisibility() {
 }
 
 function typedSpaceOrdinaryBin() {
-  return state.folderMode === "space" && typeof DL !== "undefined" &&
-    !baseTrimEnabled() && !Boolean(state.design?.box?.b4b?.enabled);
+  return state.folderMode === "space" && typeof DL !== "undefined";
+}
+
+// A Storage Box or Base Trim is a structural output of its Space (see
+// SP.saveStructural in spaces.js), never a Designer object: the Designer
+// only opens and edits ordinary Bins.
+function isStructuralDesign(design) {
+  return Boolean(design) && (design.design_kind === "base_trim" || Boolean(design.box?.b4b?.enabled));
 }
 
 let spaceAutosaveTimer = null;
@@ -484,15 +476,12 @@ async function installLoadedDesignSource(rowId, spec, {
   try {
     const result = await api("/api/design/validate", { design: spec });
     state.design = result.design;
-    state.baseTrimSourceLayout = null;
     state.lastOrdinaryDesign = clone(state.design);
     resetNestPhotoSession();
     state.cleanDesign = clone(spec);
     state.spaceStarterPreviewPending = false;
     state.designInventoryId = rowId;
     state.surfaceHeightPromptSkipped = false;
-    state.workingPending = false;
-    state.workingGeneratedKey = null;
     state.drafts = {};
     state.history = [];
     state.future = [];
@@ -518,6 +507,10 @@ async function designerEditInventoryRow(rowId) {
   const one = DL.bin(rowId);
   const spec = DL.layout?.design_specs?.[rowId];
   if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return;
+  if (isStructuralDesign(spec)) {
+    toast("A Storage Box or Base Trim is saved from its Space, not designed here.", true, 6000);
+    return;
+  }
   await designerInstallInventorySpec(rowId, spec);
 }
 
@@ -604,10 +597,6 @@ async function designerNewBin() {
 // Print creates a distinct source rather than mutating the original's row.
 async function designerDuplicate() {
   if (!(await guardDraftSwitch())) return;
-  if (baseTrimEnabled()) {
-    toast("Base Trim cannot be duplicated here.", true, 5000);
-    return;
-  }
   if (typedSpaceOrdinaryBin()) {
     if (!(await flushSpaceDesignAutosave())) return;
     if (!state.designInventoryId) {
@@ -650,13 +639,10 @@ async function designerDuplicate() {
   try {
     const result = await api("/api/design/validate", { design });
     state.design = result.design;
-    state.baseTrimSourceLayout = null;
     state.lastOrdinaryDesign = clone(state.design);
     state.cleanDesign = clone(state.design);
     state.designInventoryId = null;
     state.surfaceHeightPromptSkipped = false;
-    state.workingPending = state.folderMode === "space";
-    state.workingGeneratedKey = null;
     state.drafts = {};
     state.history = [];
     state.future = [];
@@ -945,8 +931,6 @@ function renderCatalog() {
     button.style.setProperty("--support-color", kindColor(button.dataset.kind));
     button.addEventListener("click", () => pickKind(button.dataset.kind));
   });
-
-  populateBaseTrimSizeChoices();
 }
 
 function ensureRimFeatureInLayout() {
@@ -1030,7 +1014,7 @@ function populateEdgeMountChoices() {
   }
 }
 
-// Mirrors readLiftGrabberForm/readB4BForm: only resets an *existing* key to
+// Mirrors readLiftGrabberForm/readStackForm: only resets an *existing* key to
 // defaults when both subsections are off, so a design that never touched
 // Edge Mount keeps no key at all and design_to_dict omits the block while
 // disabled. Both subsections' fields are always preserved together so
@@ -1774,12 +1758,6 @@ function syncWallControls() {
 }
 
 function syncForm() {
-  applyBaseTrimVisibility();
-  if (baseTrimEnabled()) {
-    syncBaseTrimForm();
-    syncConnectorSectionVisibility();
-    return;
-  }
   normalizeStackSettings(state.design);
   const { box, layout } = state.design;
   ensureRimFeatureInLayout();
@@ -1842,7 +1820,6 @@ function syncForm() {
   syncLidForm();
   populateSideOpeningChoices();
   syncSideOpeningControls();
-  syncB4BForm();
   syncPegboardMountForm();
   syncConnectorSectionVisibility();
   updateInteriorModeVisibility();
@@ -2054,28 +2031,8 @@ function updateInteriorModeVisibility(reveal = false) {
   }
 }
 
-const B4B_DEFAULTS = {
-  enabled: false, lid: true, secure_lid: true, latch_count: "auto",
-  latch_strength: "standard", lid_headroom_mm: 1, label_enabled: false, label_text: "",
-  label_location: "top", front_label_style: "flat", stacking: false, handle: false,
-};
-const BASE_TRIM_DEFAULTS = {
-  join_type: "drop_in",
-  bed_x_mm: 256,
-  bed_y_mm: 256,
-};
-
 function baseTrimPresetRows() {
   return state.catalog?.base_trim_rules?.size_presets || [];
-}
-
-function baseTrimPresetValue(trim) {
-  const same = Math.abs(trim.width_mm - trim.height_mm) < 1e-9;
-  if (!same) return null;
-  const row = baseTrimPresetRows().find(
-    one => Math.abs(Number(one.value_mm) - trim.width_mm) < 1e-9
-  );
-  return row ? String(row.value_mm) : null;
 }
 
 function surfaceTrimHeight(trimSize) {
@@ -2227,14 +2184,6 @@ function syncSurfaceControls() {
       : `Installed planning height: ~${fmt(plan?.effective_mm ?? layout.object_height_mm)} mm (estimated)`;
 }
 
-function populateBaseTrimSizeChoices() {
-  const select = $("#base-trim-size");
-  if (!select) return;
-  select.innerHTML = baseTrimPresetRows().map(row =>
-    `<option value="${escapeHtml(String(row.value_mm))}">` +
-    `${escapeHtml(row.label)} — ${fmt(row.value_mm)} × ${fmt(row.value_mm)} mm</option>`
-  ).join("");
-}
 const LIFT_GRABBER_DEFAULTS = { enabled: false, size: "medium", location: "sides" };
 const EDGE_MOUNT_DEFAULTS = {
   side: "front",
@@ -2262,10 +2211,6 @@ function baseTrimEnabled(design = state.design) {
   return design?.design_kind === "base_trim";
 }
 
-function baseTrimRules() {
-  return { ...BASE_TRIM_DEFAULTS, ...(state.catalog?.base_trim_rules || {}) };
-}
-
 function storedPreference(key, fallback) {
   if (!state.runtime.hosted) return state.catalog?.preferences?.[key] ?? fallback;
   try {
@@ -2285,216 +2230,9 @@ function saveSimplePreference(key, value) {
   if (state.catalog?.preferences) state.catalog.preferences[key] = value;
 }
 
-function makeBaseTrimDesign(fieldX = null, fieldY = null) {
-  const rules = baseTrimRules();
-  const unit = number(rules.unit_mm, state.catalog?.base_unit ?? 8);
-  const fallback = state.lastOrdinaryDesign?.box || state.catalog?.defaults?.design?.box || { x: 16, y: 48 };
-  const legal = value => Math.max(unit, Math.min(1200, Math.round(number(value, unit) / unit) * unit));
-  const bedX = number(storedPreference("base_trim_bed_x_mm", rules.default_bed_x_mm ?? 256), 256);
-  const bedY = number(storedPreference("base_trim_bed_y_mm", rules.default_bed_y_mm ?? 256), 256);
-  return {
-    version: 6,
-    design_kind: "base_trim",
-    box: {
-      x: legal(fieldX ?? fallback.x),
-      y: legal(fieldY ?? fallback.y),
-      z: number(rules.default_height_mm),
-    },
-    base_trim: {
-      version: 1,
-      width_mm: number(rules.default_width_mm),
-      join_type: "drop_in",
-      bed_x_mm: bedX,
-      bed_y_mm: bedY,
-      auto_size: false,
-    },
-    part_name: "",
-    layout: { version: 1, mode: "fused", snap: 1, features: [] },
-  };
-}
-
-function baseTrimState(design = state.design) {
-  const rules = baseTrimRules();
-  return {
-    version: 1,
-    width_mm: number(design?.base_trim?.width_mm, rules.default_width_mm),
-    height_mm: number(design?.box?.z, rules.default_height_mm),
-    join_type: "drop_in",
-    bed_x_mm: number(design?.base_trim?.bed_x_mm, rules.default_bed_x_mm ?? 256),
-    bed_y_mm: number(design?.base_trim?.bed_y_mm, rules.default_bed_y_mm ?? 256),
-    auto_size: Boolean(design?.base_trim?.auto_size),
-  };
-}
-
-function renderBaseTrimReadout() {
-  if (!baseTrimEnabled()) return;
-  const unit = number(state.catalog?.base_trim_rules?.unit_mm, 8);
-  const trim = baseTrimState();
-  const ux = Math.round(number(state.design.box.x, unit) / unit);
-  const uy = Math.round(number(state.design.box.y, unit) / unit);
-  $("#base-trim-x-mm").textContent = `${fmt(ux * unit)} mm`;
-  $("#base-trim-y-mm").textContent = `${fmt(uy * unit)} mm`;
-  const margin = number(state.catalog?.base_trim_rules?.bed_edge_margin_mm, 10);
-  const effectiveX = trim.bed_x_mm - 2 * margin;
-  const effectiveY = trim.bed_y_mm - 2 * margin;
-  $("#base-trim-printable").textContent = `Printable area after ${fmt(margin)} mm edge clearance: ${fmt(effectiveX)} × ${fmt(effectiveY)} mm`;
-  const summary = state.preview?.base_trim;
-  const outer = summary?.outer_mm;
-  const pieces = summary?.piece_count;
-  const join = summary?.join_label || "Drop-in dovetail";
-  $("#base-trim-summary").innerHTML = [
-    `<div><strong>Inside field:</strong> ${ux}U × ${uy}U — ${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm</div>`,
-    `<div><strong>Outside footprint:</strong> ${outer ? `${fmt(outer[0])} × ${fmt(outer[1])} mm` : "Calculating…"}</div>`,
-    `<div><strong>Printable area:</strong> ${fmt(effectiveX)} × ${fmt(effectiveY)} mm</div>`,
-    `<div><strong>Pieces:</strong> ${pieces ?? "—"}${pieces > 1 ? ` — ${escapeHtml(join)}` : ""}</div>`,
-  ].join("");
-}
-
-function readBaseTrimForm(design = state.design) {
-  const unit = number(state.catalog?.base_trim_rules?.unit_mm, 8);
-  const unitsX = Math.max(1, Math.min(150, Math.round(number($("#base-trim-x-units").value, design.box.x / unit))));
-  const unitsY = Math.max(1, Math.min(150, Math.round(number($("#base-trim-y-units").value, design.box.y / unit))));
-  design.box.x = unitsX * unit;
-  design.box.y = unitsY * unit;
-  const sizeSelect = $("#base-trim-size");
-  const preset = sizeSelect && sizeSelect.value !== "__legacy__" ? number(sizeSelect.value, null) : null;
-  const width = preset != null ? preset : number(design.base_trim?.width_mm, design.box.z);
-  const height = preset != null ? preset : number(design.box.z, design.base_trim?.width_mm);
-  design.box.z = height;
-  design.base_trim = {
-    version: 1,
-    width_mm: width,
-    join_type: "drop_in",
-    bed_x_mm: number($("#base-trim-bed-x").value, design.base_trim?.bed_x_mm ?? 256),
-    bed_y_mm: number($("#base-trim-bed-y").value, design.base_trim?.bed_y_mm ?? 256),
-    auto_size: Boolean(design.base_trim?.auto_size),
-  };
-  design.part_name = $("#part-name").value;
-  renderBaseTrimReadout();
-  return design;
-}
-
-function syncBaseTrimForm() {
-  const unit = number(state.catalog?.base_trim_rules?.unit_mm, 8);
-  const trim = baseTrimState();
-  $("#bin-type").value = "base-trim";
-  $("#base-trim-x-units").value = Math.round(state.design.box.x / unit);
-  $("#base-trim-y-units").value = Math.round(state.design.box.y / unit);
-  const sizeSelect = $("#base-trim-size");
-  if (sizeSelect) {
-    const legacyOption = sizeSelect.querySelector('option[value="__legacy__"]');
-    const preset = baseTrimPresetValue(trim);
-    if (preset != null) {
-      if (legacyOption) legacyOption.remove();
-      sizeSelect.value = preset;
-    } else {
-      const label = Math.abs(trim.width_mm - trim.height_mm) < 1e-9
-        ? `Legacy — ${fmt(trim.width_mm)} × ${fmt(trim.width_mm)} mm`
-        : `Legacy — ${fmt(trim.width_mm)} × ${fmt(trim.height_mm)} mm`;
-      let option = legacyOption;
-      if (!option) {
-        option = document.createElement("option");
-        option.value = "__legacy__";
-        sizeSelect.prepend(option);
-      }
-      option.textContent = label;
-      sizeSelect.value = "__legacy__";
-    }
-  }
-  $("#base-trim-bed-x").value = fmt(trim.bed_x_mm);
-  $("#base-trim-bed-y").value = fmt(trim.bed_y_mm);
-  $("#part-name").value = state.design.part_name || "";
-  $("#output-folder").value = state.runtime.hosted
-    ? (state.browserFolder?.name || "Select a folder...")
-    : state.output;
-  setFolderState(
-    state.folderMode, state.activeSpace, state.inventoryEnabled,
-    state.keepBinDefaults, state.spaceBinDefaults, state.spacePartDefaults,
-  );
-  const source = typeof DL !== "undefined" && DL.baseTrimSource ? DL.baseTrimSource() : { ok: false, message: "Create and arrange bins in Space first." };
-  const auto = $("#base-trim-auto-size");
-  auto.disabled = !source.ok;
-  auto.title = source.ok ? "Size the field from the active Space" : source.message;
-  renderBaseTrimReadout();
-}
-
-function syncBaseTrimOption() {
-  const opt = $("#bin-type-base-trim") || document.querySelector("#bin-type option[value='base-trim']");
-  if (!opt) return;
-  const isSpace = state.folderMode === "space" && Boolean(state.activeSpace);
-  const allowBaseTrim = !isSpace || state.activeSpace.kind === "surface";
-  opt.hidden = !allowBaseTrim;
-  opt.disabled = !allowBaseTrim;
-  const select = document.getElementById("bin-type");
-  if (!allowBaseTrim && select && select.value === "base-trim") {
-    select.value = "single";
-  }
-}
-window.syncBaseTrimOption = syncBaseTrimOption;
-
-function applyBaseTrimVisibility() {
-  syncBaseTrimOption();
-  const on = baseTrimEnabled();
-  const hide = (selector, hidden) => { const element = $(selector); if (element) element.hidden = hidden; };
-  hide("#base-trim-panel", !on);
-  hide("#ordinary-size-row", on);
-  hide(".mode-and-bin-options", on);
-  const partsSection = document.querySelector('.control-section[data-section="parts-options"]');
-  if (partsSection) partsSection.hidden = on;
-  if (on) {
-    hide("#lid-option", true);
-    hide("#inside-handles-option", true);
-    hide("#side-openings-option", true);
-  }
-  if (on) hide(".support-editor", true);
-  const connectorSection = document.querySelector('.control-section[data-section="connector"]');
-  if (connectorSection) connectorSection.hidden = on;
-  hide("#generate-all", on);
-  hide("#generate-connector", on);
-  hide("#generate-bin", false);
-  const inventory = $("#folder-inventory-toggle")?.closest("label");
-  if (inventory) inventory.hidden = on;
-  hide("#ordinary-preview-modes", on);
-  hide("#b4b-preview-modes", true);
-  hide("#b4b-panel", true);
-  const layoutTab = document.querySelector('.view-tab[data-view="2d"]');
-  if (layoutTab) layoutTab.hidden = false;
-  $("#part-name-label").textContent = on ? "Base Trim Name" : "Bin Name";
-  $("#generate-bin").textContent = on ? "Save Base Trim" : "Save Bin";
-  updatePrimaryPrintButtonLabel();
-}
-
-async function autoSizeBaseTrimFromSpace() {
-  const source = typeof DL !== "undefined" && DL.baseTrimSource ? DL.baseTrimSource() : { ok: false, message: "Create and arrange bins in Space first." };
-  if (!source.ok) {
-    toast(source.message, true, 6500);
-    return;
-  }
-  await startBaseTrimFromSpace(source);
-}
-
-async function startBaseTrimFromSpace(source) {
-  if (!source?.ok) {
-    toast(source?.message || "Base Trim auto-size needs an arranged rectangle of bins.", true, 6500);
-    return;
-  }
-  if (typeof SP !== "undefined" && SP.crossTypeCheck) {
-    const ok = await SP.crossTypeCheck("base-trim");
-    if (!ok) return;
-  }
-  if (!baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
-  state.design = makeBaseTrimDesign(source.field_x_mm, source.field_y_mm);
-  state.design.base_trim.auto_size = true;
-  state.baseTrimSourceLayout = clone(source.items || []);
-  clearDraftSelection();
-  syncForm();
-  activatePreviewView("2d");
-  await refreshPreview();
-  toast(`Base Trim sized to ${source.units_x}U × ${source.units_y}U — ${fmt(source.field_x_mm)} × ${fmt(source.field_y_mm)} mm.`);
-}
 
 // Shared by updateDesignFromForm() and designHasChanges() so both compute the
-// same box.lift_grabbers from the live form. Mirrors readB4BForm/readStackForm:
+// same box.lift_grabbers from the live form. Mirrors readStackForm:
 // only resets an *existing* key to defaults when off, so a design that never
 // touched this feature keeps no key at all and stays byte-identical to what
 // the server would save (design_to_dict omits the block while disabled).
@@ -2544,23 +2282,8 @@ function promoteWallForLiftGrabbers() {
   }
   flashField(select);
 }
-// Product minimums, from organizer_product_rules.py via the catalog.
-// Switching to B4B grows undersized field axes to this minimum; height stays
-// user-controlled and is reported if it cannot carry a latched lid.
-function b4bMinField() {
-  return number(state.catalog?.b4b_rules?.min_field_mm, 0);
-}
-
-function b4bLatchedMinHeight() {
-  return number(state.catalog?.b4b_rules?.min_secure_height_mm, 0);
-}
-
 function b4bMinWall() {
   return number(state.catalog?.b4b_rules?.min_wall_mm, 0.8);
-}
-
-function b4bState() {
-  return { ...B4B_DEFAULTS, ...(state.design?.box?.b4b || {}) };
 }
 
 function b4bEnabled() {
@@ -2571,182 +2294,11 @@ function b4bPartAllowed(kind) {
   return kind === "divider";
 }
 
-function applyB4BMaterialDefaults(design = state.design) {
-  const box = design?.box;
-  if (!box) return;
-  const rules = state.catalog?.b4b_rules || {};
-
-  if (box.standard_walls !== false) {
-    box.wall = number(rules.default_wall_mm, 1.6);
-    box.standard_walls = false;
-  }
-  if (box.standard_base !== false) {
-    box.base_thickness = number(rules.default_base_mm, 1.6);
-    box.standard_base = false;
-  }
-}
-
 function dividerLayoutExtent(box = state.design?.box) {
   if (box?.b4b?.enabled) {
     return [number(box.x), number(box.y)];
   }
   return binInsideExtent(box);
-}
-
-// The shared Wall/Base thickness controls live in .mode-and-bin-options by
-// default (the ordinary bin's home for them) and move into row 1 of the B4B
-// Options grid while B4B is active. One element, one id, each - moving it
-// keeps everything (listeners, dataset state) intact; there is never a second
-// copy to keep in sync.
-function positionSharedThicknessControls(on) {
-  const grid = $(".b4b-options-grid");
-  const home = $("#thickness-grabber-row");
-  if (!grid || !home) return;
-  const wall = $("#wall-thickness-setting");
-  const base = $("#base-thickness-setting");
-  if (on) {
-    if (wall && wall.parentElement !== grid) grid.appendChild(wall);
-    if (base && base.parentElement !== grid) grid.appendChild(base);
-  } else {
-    // Base and Wall are the only shared ordinary controls in this row.
-    if (base && base.parentElement !== home) home.insertBefore(base, home.firstChild);
-    if (wall && wall.parentElement !== home) home.insertBefore(wall, base ? base.nextSibling : home.firstChild);
-  }
-}
-
-// A B4B interior is reserved for child bins: hide the interior-parts workflow,
-// the interior print mode and the Connect bins section entirely.
-function applyB4BVisibility() {
-  const on = b4bEnabled();
-  $("#b4b-panel").hidden = !on;
-  const hide = (sel, hidden) => { const el = $(sel); if (el) el.hidden = hidden; };
-  if (on) {
-    hide("#lid-option", true);
-    hide("#inside-handles-option", true);
-    hide("#side-openings-option", true);
-  }
-  document.querySelectorAll(".support-choice").forEach(button => {
-    button.hidden = on && !b4bPartAllowed(button.dataset.kind);
-  });
-  // B4B shows its own All/Base/Lid group instead of the ordinary bin's
-  // Bin/Interior/Xray toggles - the two mean different things and are never
-  // both meaningful at once.
-  hide("#ordinary-preview-modes", on);
-  hide("#b4b-preview-modes", !on);
-  if (on && !["all", "base", "lid"].includes(state.b4bView)) {
-    state.b4bView = "all";
-  }
-  if (on) {
-    $$('[data-b4b-view]').forEach(button =>
-      button.classList.toggle("active", button.dataset.b4bView === state.b4bView));
-  }
-  const modeLabel = $("#mode-select")?.closest("label");
-  if (modeLabel) modeLabel.hidden = on;
-  positionSharedThicknessControls(on);
-  hide("#wall-thickness-setting", false);
-  hide("#base-thickness-setting", false);
-  const connectorSection = document.querySelector('.control-section[data-section="connector"]');
-  if (connectorSection) connectorSection.hidden = on;
-  hide("#generate-all", on);
-  hide("#generate-connector", on);
-  // B4B dimensions are the child field, not the outside of the case - say so.
-  const xLabel = $("#x-size-label");
-  const yLabel = $("#y-size-label");
-  const zLabel = $("#z-size-label");
-  if (xLabel) xLabel.textContent = on ? "Width (Inside)" : "Width";
-  if (yLabel) yLabel.textContent = on ? "Depth (Inside)" : "Depth";
-  if (zLabel) zLabel.textContent = on ? "Height (Inside)" : "Height";
-  // One Name field for both bin kinds; only its label changes.
-  const partNameLabel = $("#part-name-label");
-  if (partNameLabel) partNameLabel.textContent = on ? "Storage Box Name" : "Bin Name";
-  if (on) {
-    // The handle is front-mounted body hardware now, so stacking is no longer
-    // a reason to refuse it. What it does still need is a lid that latches,
-    // and a case actually big enough to carry a hand.
-    const blocked = b4bHandleBlockedReason();
-    const handleSelect = $("#b4b-handle");
-    const addOption = $("#b4b-handle-add-option");
-    if (addOption) {
-      addOption.disabled = Boolean(blocked);
-      addOption.textContent = blocked || "Add handle";
-    }
-    if (blocked) handleSelect.value = "false";
-
-    // Latches only exist on a latched lid.
-    hide("#b4b-latch-count-row", $("#b4b-lid-type").value !== "latched");
-
-    const labelBlocked = b4bFrontLabelBlockedReason();
-    const frontOption = $("#b4b-label-front-option");
-    if (frontOption) {
-      frontOption.disabled = Boolean(labelBlocked);
-      frontOption.textContent = labelBlocked ? `- Front label - (Not available - ${labelBlocked})` : "Front";
-    }
-    const labelSelect = $("#b4b-label-location");
-    if (labelBlocked && labelSelect.value === "front") labelSelect.value = "none";
-    // Label text only exists once a location other than "No label" is chosen.
-    hide("#b4b-label-text-row", labelSelect.value === "none");
-    // Front label style is cosmetic to the removable front label only.
-    hide("#b4b-front-label-style-row", labelSelect.value !== "front");
-  }
-  // Lift grabbers protrude into the exact child-bin field B4B promises stays
-  // usable edge-to-edge, so B4B cannot offer them at all.
-  const grabberSizeSetting = $("#lift-grabber-size-setting");
-  const grabberSizeSelect = $("#lift-grabber-size");
-  if (grabberSizeSetting) grabberSizeSetting.hidden = on;
-  if (grabberSizeSelect) grabberSizeSelect.disabled = on;
-  if (on && grabberSizeSelect && grabberSizeSelect.value !== "no") {
-    grabberSizeSelect.value = "no";
-    syncLiftGrabberControls();
-  }
-  applyStackVisibility();
-}
-
-// The server resolves handle eligibility from the real front wall, so the UI
-// simply repeats its answer rather than keeping a second copy of the rule.
-function b4bHandleBlockedReason() {
-  if ($("#b4b-lid-type").value !== "latched") return "Handle requires a secure lid.";
-  const b4b = state.preview?.b4b;
-  if (!b4b || b4b.handle_available !== false) return "";
-  return b4b.handle_blocked_reason || "This Storage Box is too small for a handle.";
-}
-
-// Same reasoning as b4bHandleBlockedReason: the server derives this from the
-// real front wall, so the UI only repeats its answer.
-function b4bFrontLabelBlockedReason() {
-  const b4b = state.preview?.b4b;
-  if (!b4b || b4b.front_label_available !== false) return "";
-  return b4b.front_label_blocked_reason || "Not enough size for a front label.";
-}
-
-function normalizeB4BDependentControls() {
-  const secure = $("#b4b-lid-type").value === "latched";
-  if (!secure) $("#b4b-handle").value = "false";
-  if (!secure) $("#b4b-latch-count").value = "auto";
-}
-
-function syncB4BForm() {
-  const b4b = b4bState();
-  $("#bin-type").value = binTypeFromDesign();
-  $("#b4b-lid-type").value = b4b.lid !== false && b4b.secure_lid !== false
-    ? "latched" : "lid_only";
-  $("#b4b-stacking").value = String(Boolean(b4b.stacking));
-  $("#b4b-handle").value = String(Boolean(b4b.handle) && b4b.secure_lid !== false);
-  $("#b4b-latch-count").value = ["1", "2"].includes(b4b.latch_count) ? b4b.latch_count : "auto";
-  $("#b4b-lid-snugness").value = String(b4b.lid_headroom_mm ?? 1);
-  // Label text follows the design's saved text. Text typed and then switched
-  // to No label stays in the (hidden) field for this session, so switching
-  // back to Top/Front does not mean retyping it.
-  const labelText = String(b4b.label_text || "");
-  const labelEnabled = Boolean(b4b.label_enabled || labelText.trim());
-  if (labelText.trim() || labelEnabled) $("#b4b-label-text").value = labelText;
-  if (labelEnabled) {
-    $("#b4b-label-location").value = b4b.label_location === "front" ? "front" : "top";
-  } else {
-    $("#b4b-label-location").value = "none";
-  }
-  $("#b4b-front-label-style").value = b4b.front_label_style === "wavy" ? "wavy" : "flat";
-  normalizeB4BDependentControls();
-  applyB4BVisibility();
 }
 
 function stackMode() {
@@ -2885,12 +2437,6 @@ function syncLidForm() {
   applyStackVisibility();
 }
 
-function binTypeFromDesign() {
-  if (baseTrimEnabled()) return "base-trim";
-  if (b4bEnabled()) return "b4b";
-  return "single";
-}
-
 function stackRuleValues(mode = stackMode(), wall = state.design?.box?.wall) {
   const rules = state.catalog?.stack_rules || {};
   return {
@@ -3022,296 +2568,6 @@ function readStackForm(design) {
   };
 }
 
-function readB4BForm(design) {
-  design.box = design.box || {};
-  const enabled = $("#bin-type").value === "b4b";
-  if (!enabled) {
-    if (design.box.b4b) design.box.b4b = { ...B4B_DEFAULTS };
-    return;
-  }
-  // Explicit UI conversion clears the options a B4B interior cannot carry, so
-  // the saved JSON is coherent and does not trip the import-time validation.
-  design.box.flat_inside = 0;
-  if (design.layout) design.layout.mode = "fused";
-  const secure = $("#b4b-lid-type").value === "latched";
-  design.box.b4b = {
-    enabled: true,
-    lid: true,
-    secure_lid: secure,
-    // Latch count is user-configurable (Auto/1/2); strength is still derived
-    // from the case, so the saved value rides along untouched.
-    latch_count: secure ? $("#b4b-latch-count").value : "auto",
-    latch_strength: b4bState().latch_strength || "standard",
-    lid_headroom_mm: parseFloat($("#b4b-lid-snugness").value) || 1,
-    label_enabled: $("#b4b-label-location").value !== "none",
-    label_text: $("#b4b-label-location").value === "none" ? "" : $("#b4b-label-text").value,
-    label_location: $("#b4b-label-location").value === "none"
-      ? "top" : $("#b4b-label-location").value,
-    front_label_style: $("#b4b-front-label-style")?.value || "flat",
-    stacking: $("#b4b-stacking").value === "true",
-    // The bail folds against the front wall, so it no longer competes with
-    // stacking for the lid top - but it still needs a lid that latches shut.
-    handle: $("#b4b-handle").value === "true" && secure,
-  };
-}
-
-// The wall is promoted whenever B4B needs it. The child field is promoted on
-// the explicit type switch; height stays user-controlled.
-function enforceB4BMinimums(design = state.design, flash = true) {
-  const b4b = design?.box?.b4b;
-  if (!b4b?.enabled) return;
-  const minWall = b4bMinWall();
-  if (number(design.box.wall, 0.8) < minWall - 1e-9) {
-    design.box.wall = minWall;
-    design.box.standard_walls = false;
-    const sel = $("#wall-thickness");
-    if (sel) {
-      populateWallChoices(design.box, sel);
-      sel.value = fmt(minWall);
-      if (flash) flashField(sel);
-    }
-  }
-}
-
-// Session-only memory of the base the user had chosen before B4B stacking
-// forced it to the required floor, so turning stacking back off restores it
-// instead of leaving the design at a value nobody actually chose.
-let b4bPreStackBase = null;
-
-// B4B stacking needs a printable floor under its recesses. Unlike the wall
-// (a floor with headroom above it), this is one exact required value, so it
-// is saved directly rather than merely validated after the fact.
-function normalizeB4BBaseForStacking(design = state.design) {
-  const box = design?.box;
-  const b4b = box?.b4b;
-  if (!b4b?.enabled) return;
-  const required = number(state.catalog?.b4b_rules?.stack_min_base_mm, 2.8);
-  if (b4b.stacking) {
-    if (b4bPreStackBase == null) {
-      b4bPreStackBase = number(box.base_thickness, number(state.catalog?.b4b_rules?.default_base_mm, 1.6));
-    }
-    box.base_thickness = required;
-  } else if (b4bPreStackBase != null) {
-    box.base_thickness = b4bPreStackBase;
-    b4bPreStackBase = null;
-  }
-  populateBaseChoices(box);
-  syncBaseControls();
-}
-
-// Why this design cannot be generated as entered, in the user's terms. Never a
-// silent correction: the list is what the readout shows.
-function b4bLimitProblems(design = state.design) {
-  const box = design?.box;
-  const b4b = box?.b4b;
-  if (!b4b?.enabled) return [];
-  const problems = [];
-  const minField = b4bMinField();
-  const minHeight = b4bLatchedMinHeight();
-  if (number(box.x, 0) < minField - 1e-9 || number(box.y, 0) < minField - 1e-9) {
-    problems.push(`A Storage Box holds at least ${minField} x ${minField} mm of bins.`);
-  }
-  if (b4b.secure_lid && number(box.z, 0) < minHeight - 1e-9) {
-    problems.push(`A latched lid needs at least ${minHeight} mm of bin height.`);
-  }
-  return problems;
-}
-
-function groupB4BHardware(hardware) {
-  // Merge hinge/latch/catch screws by length - it doesn't matter which part
-  // uses which screw, just how many of each length to have on hand.
-  const byLength = new Map();
-  const add = (qty, screw) => {
-    if (!qty) return;
-    const length = parseInt(String(screw).split("x")[1], 10);
-    byLength.set(length, (byLength.get(length) || 0) + qty);
-  };
-  add(hardware.hinge_qty, hardware.hinge_screw);
-  add(hardware.latch_qty, hardware.latch_screw);
-  add(hardware.catch_qty, hardware.catch_screw);
-  add(hardware.handle_qty, hardware.handle_screw);
-  // The whole case is one screw family, chosen automatically - so name it once
-  // rather than assuming it is always M3.
-  const family = hardware.family || "M3";
-  return [...byLength.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([length, qty]) => `Qty ${qty} - ${family} - ${length} mm`)
-    .join(", ");
-}
-
-function renderB4BReadout() {
-  if (!b4bEnabled()) return;
-  const b4b = state.preview?.b4b;
-  const capLine = $("#b4b-capacity-line");
-  const grew = $("#b4b-grew");
-  const hardware = $("#b4b-hardware");
-  if (!b4b) {
-    capLine.textContent = "Inside capacity: —";
-    grew.hidden = true;
-    hardware.textContent = "Hardware: —";
-    return;
-  }
-  capLine.textContent =
-    `Inside capacity: ${b4b.capacity_mm[0]} × ${b4b.capacity_mm[1]} × ` +
-    `${b4b.max_child_height_mm} mm — ${b4b.capacity_units[0]} × ` +
-    `${b4b.capacity_units[1]} units`;
-  if (b4b.base_thickened) {
-    grew.hidden = false;
-    grew.textContent =
-      `Base thickened to ${b4b.effective_base_thickness_mm} mm so the stacking ` +
-      `recesses keep a printable floor. Bin field is unchanged.`;
-  } else {
-    grew.hidden = true;
-  }
-  // Remaining limits, such as those on older saved designs, are reported here.
-  const problems = b4bLimitProblems();
-  if (problems.length) {
-    grew.textContent = problems.join(" ");
-    grew.hidden = false;
-  }
-  const screws = groupB4BHardware(b4b.hardware || {});
-  hardware.textContent = screws ? `Hardware: ${screws}` : "Hardware: None";
-}
-
-async function toggleB4B(wantEnabled) {
-  const sizeNote = $("#b4b-size-note");
-  if (sizeNote) sizeNote.hidden = true;
-  if (wantEnabled) {
-    const features = state.design?.layout?.features || [];
-    const dividers = features.filter(one => one.kind === "divider");
-    const removed = features.filter(one => one.kind !== "divider");
-    if (dividers.length > 1) {
-      const msg = "Storage Box supports one Divider layout. Remove the extra Divider first.";
-      if (typeof toast === "function") toast(msg, true, 6000);
-      else alert(msg);
-      $("#bin-type").value = binTypeFromDesign();
-      return false;
-    }
-    const dividerHasLabels = dividers.length === 1 && (
-      (typeof dividers[0].options?.label_divisions === "string"
-        ? !["", "false", "0", "no", "off"].includes(dividers[0].options.label_divisions.trim().toLowerCase())
-        : Boolean(dividers[0].options?.label_divisions))
-      || Boolean(dividers[0].options?.division_labels?.length)
-    );
-    const needsConfirm = removed.length > 0 || dividerHasLabels;
-    if (needsConfirm) {
-      const message = dividerHasLabels
-        ? "Turning on Storage Box removes all interior parts except one Divider layout. Divider division labels are also removed. Continue?"
-        : "Turning on Storage Box removes all interior parts except one Divider layout. Continue?";
-      const ok = window.confirm(message);
-      if (!ok) {
-        $("#bin-type").value = binTypeFromDesign();
-        return false;
-      }
-    }
-    let preserved = null;
-    if (dividers.length === 1) {
-      preserved = clone(dividers[0]);
-      if (dividerHasLabels) {
-        preserved.options = {
-          ...(preserved.options || {}),
-          label_divisions: false,
-          division_labels: [],
-        };
-      }
-    }
-    const minField = b4bMinField();
-    for (const [axis, label] of [["x", "Width"], ["y", "Length"]]) {
-      if (number(state.design.box[axis], 0) < minField - 1e-9) {
-        state.design.box[axis] = minField;
-        const input = $(`#${axis}-size`);
-        if (input) {
-          formatDimField(axis);
-          flashField(input);
-        }
-      }
-    }
-    // An unsaved draft, a selection, or a pending debounced draft action must
-    // not survive into B4B mode and later reinsert a part. clearDraftSelection
-    // cancels every in-flight draft request and resets all draft flags.
-    clearDraftSelection();
-    state.design.layout.features = preserved ? [preserved] : [];
-    state.design.layout.mode = "fused";
-    state.design.box.lift_grabbers = { ...LIFT_GRABBER_DEFAULTS };
-    state.design.box.edge_mount = { ...EDGE_MOUNT_DEFAULTS };
-    state.design.box.side_openings = { ...SIDE_OPENING_DEFAULTS };
-    delete state.design.box.stack;
-    delete state.design.box.lid;
-    applyB4BMaterialDefaults(state.design);
-  }
-  readB4BForm(state.design);
-  enforceB4BMinimums();
-  applyB4BVisibility();
-  changedDesign();
-  return true;
-}
-
-async function changeBinType() {
-  const requested = $("#bin-type").value;
-  if (typeof SP !== "undefined" && SP.crossTypeCheck) {
-    const ok = await SP.crossTypeCheck(requested);
-    if (!ok) { $("#bin-type").value = binTypeFromDesign(); return; }
-  }
-  if (requested !== "single" && typedSpaceOrdinaryBin()) {
-    $("#bin-type").value = "single";
-    const saved = await flushSpaceDesignAutosave();
-    $("#bin-type").value = requested;
-    if (!saved) {
-      $("#bin-type").value = binTypeFromDesign();
-      return;
-    }
-    state.designInventoryId = null;
-  }
-  const wasBaseTrim = baseTrimEnabled();
-  const wasB4B = b4bEnabled();
-  const typedOrdinaryReturn =
-    requested === "single"
-    && state.folderMode === "space"
-    && Boolean(state.activeSpace)
-    && (wasBaseTrim || wasB4B);
-  if (typedOrdinaryReturn) {
-    if (wasBaseTrim) state.lastBaseTrimDesign = clone(state.design);
-    await loadFreshOrdinaryDesignForCurrentFolder();
-    $("#bin-type").value = "single";
-    changedDesign();
-    return;
-  }
-  if (requested === "base-trim") {
-    if (!wasBaseTrim) {
-      state.lastOrdinaryDesign = clone(state.design);
-      state.design = state.lastBaseTrimDesign
-        ? clone(state.lastBaseTrimDesign)
-        : makeBaseTrimDesign(state.design?.box?.x, state.design?.box?.y);
-    }
-    clearDraftSelection();
-    syncForm();
-    changedDesign();
-    return;
-  }
-  if (wasBaseTrim) {
-    state.lastBaseTrimDesign = clone(state.design);
-    state.design = state.lastOrdinaryDesign
-      ? clone(state.lastOrdinaryDesign)
-      : freshDesignForCurrentFolder();
-    $("#bin-type").value = requested;
-  }
-  const previousStack = stackMode();
-  if (requested === "b4b") {
-    await toggleB4B(true);
-    return;
-  }
-  if (wasB4B) {
-    state.design.box.b4b = { ...B4B_DEFAULTS };
-  }
-  readStackForm(state.design);
-  normalizeStackSettings(state.design, {
-    restoreDefaults: (previousStack !== "none" || wasB4B) && stackMode() === "none",
-    flash: true,
-  });
-  syncForm();
-  changedDesign();
-}
-
 // Shared by typed Width/Length/Height edits, by dragging their dimension
 // labels (see hitDimensionHandle/commitDimensionDrag), and by the manual
 // inventory "Add a bin by hand" form (see drawer-panel.js), so every path
@@ -3346,17 +2602,6 @@ function snapToUnit(value, unit) {
 
 function updateDesignFromForm() {
   const design = state.design;
-  if (baseTrimEnabled(design)) {
-    readBaseTrimForm(design);
-    const newOutput = $("#output-folder").value.trim();
-    if (!state.runtime.hosted && newOutput !== state.output) {
-      state.output = newOutput;
-      saveOutputPreference(newOutput);
-    }
-    saveSimplePreference("base_trim_bed_x_mm", design.base_trim.bed_x_mm);
-    saveSimplePreference("base_trim_bed_y_mm", design.base_trim.bed_y_mm);
-    return;
-  }
   const prevBoxX = design.box.x;
   if (isSurfaceBinDesign(design)) resolveSurfaceBase(design, { fromForm: true });
   const prevBoxY = design.box.y;
@@ -3460,13 +2705,10 @@ function updateDesignFromForm() {
     position: 0,
     axis: "y",
   };
-  readB4BForm(design);
   readPegboardMountForm(design);
   readStackForm(design);
   if (isSurfaceBinDesign(design) && surfaceStackingBlocked(design))
     design.layout.surface_lightweight_base = false;
-  enforceB4BMinimums(design);
-  applyB4BVisibility();
   syncSurfaceControls();
 }
 
@@ -3809,17 +3051,6 @@ function setPreviewToggle(name, on) {
   renderPreview3D();
 }
 
-// B4B's All/Base/Lid group visibility, distinct from the ordinary bin's
-// Bin/Interior/Xray toggles - see the state.b4bView comment. Never calls the backend: it only changes
-// which already-loaded GPU buffer groups get drawn and re-frames the camera
-// to whichever part is now showing.
-function setB4BView(view) {
-  if (!["all", "base", "lid"].includes(view)) view = "all";
-  state.b4bView = view;
-  $$('[data-b4b-view]').forEach(button => button.classList.toggle("active", button.dataset.b4bView === view));
-  renderPreview3D();
-}
-
 function wireCameraControls() {
   $$('[data-camera-view]').forEach(button => button.addEventListener("click", () => setCameraView(button.dataset.cameraView)));
   $$('[data-camera-toggle]').forEach(button => button.addEventListener("click", () => {
@@ -3827,7 +3058,6 @@ function wireCameraControls() {
     const key = PREVIEW_TOGGLE_KEYS[name];
     setPreviewToggle(name, !state[key]);
   }));
-  $$('[data-b4b-view]').forEach(button => button.addEventListener("click", () => setB4BView(button.dataset.b4bView)));
   $$('[data-camera-zoom]').forEach(button => button.addEventListener("click", () => {
     state.camera.zoom = Math.max(.35, Math.min(4, state.camera.zoom * (button.dataset.cameraZoom === "in" ? 1.2 : 1 / 1.2)));
     renderPreview3D();
@@ -4003,7 +3233,6 @@ function wireControls() {
     changedDesign();
   }));
 
-  $("#bin-type").addEventListener("change", changeBinType);
   ["#pegboard-cleat-x", "#pegboard-cleat-y"].forEach(selector => $(selector)?.addEventListener("change", () => {
     readPegboardMountForm(state.design);
     syncPegboardMountForm();
@@ -4061,32 +3290,6 @@ function wireControls() {
       changedDesign(previous);
     });
   });
-  ["#b4b-lid-type", "#b4b-handle", "#b4b-label-location", "#b4b-latch-count", "#b4b-front-label-style"].forEach(sel =>
-    $(sel).addEventListener("change", () => {
-      normalizeB4BDependentControls();
-      readB4BForm(state.design);
-      enforceB4BMinimums();
-      applyB4BVisibility();
-      changedDesign();
-    }));
-  $("#b4b-stacking").addEventListener("change", () => {
-    normalizeB4BDependentControls();
-    readB4BForm(state.design);
-    normalizeB4BBaseForStacking(state.design);
-    enforceB4BMinimums();
-    applyB4BVisibility();
-    changedDesign();
-  });
-  $("#b4b-lid-snugness").addEventListener("change", () => {
-    readB4BForm(state.design);
-    enforceB4BMinimums();
-    changedDesign();
-  });
-  $("#b4b-label-text").addEventListener("input", () => {
-    seedPartNameFromLabel($("#b4b-label-text").value);
-    state.canGenerate = false; updateGenerateAvailability(); changedDesign();
-  });
-
   ["#x-size", "#y-size"].forEach(selector => {
     const axis = selector === "#x-size" ? "x" : "y";
     const input = $(selector);
@@ -4201,34 +3404,6 @@ function wireControls() {
     if (!applyPendingLiveFormWithModifierConflictGuard()) return;
     renderConnectorReadout();
   });
-  ["#base-trim-x-units", "#base-trim-y-units"].forEach((selector, index) => {
-    $(selector)?.addEventListener("input", event => {
-      const unit = number(state.catalog?.base_trim_rules?.unit_mm, 8);
-      const units = Math.max(1, Math.min(150, Math.round(number(event.target.value, 1))));
-      $(`#base-trim-${index === 0 ? "x" : "y"}-mm`).textContent = `${fmt(units * unit)} mm`;
-    });
-  });
-  ["#base-trim-bed-x", "#base-trim-bed-y"].forEach(selector => {
-    $(selector)?.addEventListener("input", () => {
-      const margin = number(state.catalog?.base_trim_rules?.bed_edge_margin_mm, 10);
-      const x = number($("#base-trim-bed-x").value, 256) - 2 * margin;
-      const y = number($("#base-trim-bed-y").value, 256) - 2 * margin;
-      $("#base-trim-printable").textContent = `Printable area after ${fmt(margin)} mm edge clearance: ${fmt(x)} × ${fmt(y)} mm`;
-    });
-  });
-  ["#base-trim-x-units", "#base-trim-y-units", "#base-trim-size",
-    "#base-trim-bed-x", "#base-trim-bed-y"].forEach(selector => {
-    $(selector)?.addEventListener("change", () => {
-      if (!baseTrimEnabled()) return;
-      const previousDesign = clone(state.design);
-      if (selector === "#base-trim-x-units" || selector === "#base-trim-y-units") {
-        state.design.base_trim.auto_size = false;
-      }
-      readBaseTrimForm();
-      changedDesign(previousDesign);
-    });
-  });
-  $("#base-trim-auto-size")?.addEventListener("click", autoSizeBaseTrimFromSpace);
   // The folder icon covers both picking a save folder and Space planning -
   // SP.open() already offers recent/new folders before it gets to Space setup.
   const outputFolderEl = $("#output-folder");
@@ -4283,13 +3458,7 @@ function wireControls() {
     }
   });
   $("#update-banner-reload").addEventListener("click", () => location.reload(true));
-  $("#print-bin").addEventListener("click", event => {
-    if (!state.runtime.hosted && baseTrimEnabled() && event.ctrlKey && event.shiftKey) {
-      printModel("base_trim_joint_test");
-      return;
-    }
-    printModel("bin");
-  });
+  $("#print-bin").addEventListener("click", () => printModel("bin"));
   $("#generate-all")?.addEventListener("click", () => generateParts("all"));
   $("#generate-bin")?.addEventListener("click", () => generateParts("bin"));
   $("#generate-connector")?.addEventListener("click", () => generateParts("connector"));
@@ -7877,7 +7046,6 @@ function mutationControls() {
     '#mode-select, ' +
     '#lid-option-toggle, #lid-configuration, #lid-thickness, #lid-handle-type, #lid-handle-size, ' +
     '#lid-handle-position, #lid-label-enabled, #lid-label-orientation, #lid-label-style, #lid-label-text, ' +
-    '#b4b-stacking, #b4b-handle, #b4b-label-location, #b4b-latch-count, #b4b-front-label-style, ' +
     '#designer-new-bin, #designer-duplicate, ' +
     '#designer-save-file, #designer-open-file'
   );
@@ -8203,8 +7371,6 @@ async function refreshPreview({ persistResume = true } = {}) {
     state.previewDesignKey = JSON.stringify(result.design);
     updateDraftOverhangNote();
     checkBinSizeChange();
-    // The Space shows the design being worked on as Current design.
-    if (typeof DL !== "undefined" && DL.active) DL.refreshWorking();
     // Surface the access planner's own warning (spec section 46) once per
     // distinct message, not on every preview refresh.
     const accessWarning = (result.draft_nest_access || result.nest_access?.[state.selected])?.warning;
@@ -8236,9 +7402,8 @@ async function refreshPreview({ persistResume = true } = {}) {
     // A typed Space's exact resume checkpoint (Fix 032): only a fully valid
     // preview - never one that merely returned HTTP 200 while still
     // reporting fit/feature/draft errors - replaces the last valid one.
-    // Placed after the controls above so workingDesignForSpace() compares
-    // the same canonical design the user now sees, including any server-
-    // adjusted X/Y/Z.
+    // Placed after the controls above so the checkpoint is the same canonical
+    // design the user now sees, including any server-adjusted X/Y/Z.
     if (!previewHasErrors && typedSpaceOrdinaryBin()) {
       if (state.spaceStarterPreviewPending) {
         state.cleanDesign = clone(state.design);
@@ -8246,7 +7411,7 @@ async function refreshPreview({ persistResume = true } = {}) {
       } else queueSpaceDesignAutosave();
     }
     if (persistResume && !previewHasErrors && state.folderMode === "space" && typeof SP !== "undefined") {
-      SP.queueResumeCheckpoint(state.design, Boolean(workingDesignForSpace()));
+      SP.queueResumeCheckpoint(state.design, false);
     }
     const messages = [result.message, ...result.feature_errors, result.draft_error].filter(Boolean);
     const actions = [];
@@ -8293,16 +7458,13 @@ async function refreshPreview({ persistResume = true } = {}) {
     state.fitError = Boolean(result.feature_errors.length || result.draft_error);
     updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
     updateAutoExpandButton();
-    renderB4BReadout();
     if (typeof SP !== "undefined" && SP.renderSpaceInfo) {
       SP.renderSpaceInfo();
     }
-    renderBaseTrimReadout();
     applyStackVisibility();
     renderPreview3D();
     renderLayout2D();
     renderPlaced();
-    applyBaseTrimVisibility();
   } catch (error) {
     if (request !== state.previewRequest) return;
     endPreviewWait(request);
@@ -10727,112 +9889,6 @@ function renderDividerDivisionLabels(context, feature, toCanvas, scale) {
   }
 }
 
-function drawBaseTrimJointMarker(context, seam, midpoint) {
-  context.save();
-  context.translate(midpoint[0], midpoint[1]);
-  if (seam.side === "right" || seam.side === "left") context.rotate(Math.PI / 2);
-  context.beginPath();
-  context.moveTo(-4, -3); context.lineTo(4, -5); context.lineTo(4, 5); context.lineTo(-4, 3);
-  context.closePath(); context.fill();
-  context.restore();
-}
-
-function renderBaseTrim2D(context, width, height) {
-  const summary = state.preview?.base_trim;
-  if (!summary) return;
-  const [outerX, outerY] = summary.outer_mm;
-  const [fieldX, fieldY] = summary.field_mm;
-  const [unitsX, unitsY] = summary.field_units;
-  const [innerX, innerY] = summary.inner_half_mm;
-  const pad = Math.max(56, Math.min(width, height) * .1);
-  const scale = Math.min((width - 2 * pad) / outerX, (height - 2 * pad) / outerY);
-  const toCanvas = ([x, y]) => [width / 2 + x * scale, height / 2 - y * scale];
-  state.layoutTransform = { toCanvas, toWorld: () => [NaN, NaN], scale };
-
-  const outer = [
-    [-outerX / 2, -outerY / 2], [outerX / 2, -outerY / 2],
-    [outerX / 2, outerY / 2], [-outerX / 2, outerY / 2],
-  ];
-  const path = drawClosedPath(context, outer, toCanvas);
-  const innerPath = new Path2D();
-  (state.preview.cavity_outline || []).forEach((point, index) => {
-    const p = toCanvas(point);
-    index ? innerPath.lineTo(p[0], p[1]) : innerPath.moveTo(p[0], p[1]);
-  });
-  innerPath.closePath();
-  path.addPath(innerPath);
-  context.fillStyle = "rgba(57, 127, 135, .30)";
-  context.fill(path, "evenodd");
-  context.strokeStyle = "#397f87";
-  context.lineWidth = 2;
-  context.stroke(drawClosedPath(context, outer, toCanvas));
-  context.strokeStyle = "#245e65";
-  context.lineWidth = 1.5;
-  context.stroke(innerPath);
-
-  for (const item of state.baseTrimSourceLayout || []) {
-    const x0 = -fieldX / 2 + item.x;
-    const y0 = -fieldY / 2 + item.y;
-    const a = toCanvas([x0, y0]);
-    const b = toCanvas([x0 + item.w, y0 + item.d]);
-    context.fillStyle = "rgba(57, 127, 135, .07)";
-    context.strokeStyle = "rgba(57, 127, 135, .28)";
-    context.setLineDash([5, 4]);
-    context.fillRect(a[0], b[1], b[0] - a[0], a[1] - b[1]);
-    context.strokeRect(a[0], b[1], b[0] - a[0], a[1] - b[1]);
-  }
-  context.setLineDash([]);
-
-  const seamEnds = seam => {
-    if (seam.side === "front") return [[seam.coordinate, -outerY / 2], [seam.coordinate, -innerY]];
-    if (seam.side === "right") return [[outerX / 2, seam.coordinate], [innerX, seam.coordinate]];
-    if (seam.side === "back") return [[seam.coordinate, outerY / 2], [seam.coordinate, innerY]];
-    return [[-outerX / 2, seam.coordinate], [-innerX, seam.coordinate]];
-  };
-  if (!summary.one_piece) summary.seams.forEach(seam => {
-    const [a, b] = seamEnds(seam).map(toCanvas);
-    context.strokeStyle = "#b46b38";
-    context.lineWidth = 1.5;
-    context.setLineDash([4, 3]);
-    context.beginPath(); context.moveTo(...a); context.lineTo(...b); context.stroke();
-    context.setLineDash([]);
-    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    context.fillStyle = "#b46b38";
-    drawBaseTrimJointMarker(context, seam, mid);
-  });
-
-  if (!summary.one_piece) {
-    context.font = "700 10px Segoe UI";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillStyle = "#245e65";
-    summary.pieces.forEach(piece => {
-      if (!piece.clip_bounds) return;
-      const [x0, y0, x1, y1] = piece.clip_bounds;
-      const label = String(piece.label || "").toLowerCase();
-      let worldX = (Math.max(-outerX / 2, x0) + Math.min(outerX / 2, x1)) / 2;
-      let worldY = (Math.max(-outerY / 2, y0) + Math.min(outerY / 2, y1)) / 2;
-      if (label.startsWith("front")) worldY = (-outerY / 2 - innerY) / 2;
-      if (label.startsWith("back")) worldY = (outerY / 2 + innerY) / 2;
-      if (label.startsWith("right")) worldX = (outerX / 2 + innerX) / 2;
-      if (label.startsWith("left")) worldX = (-outerX / 2 - innerX) / 2;
-      const center = toCanvas([worldX, worldY]);
-      context.fillText(String(piece.number), center[0], center[1]);
-    });
-  }
-
-  context.font = "700 12px Segoe UI";
-  context.textAlign = "center";
-  context.fillStyle = "#496873";
-  context.fillText(`${unitsX}U / ${fmt(fieldX)} mm`, width / 2, Math.max(16, height / 2 - innerY * scale - 20));
-  context.save();
-  context.translate(Math.max(16, width / 2 - innerX * scale - 24), height / 2);
-  context.rotate(-Math.PI / 2);
-  context.fillText(`${unitsY}U / ${fmt(fieldY)} mm`, 0, 0);
-  context.restore();
-  context.fillText(`Outside ${fmt(outerX)} × ${fmt(outerY)} mm`, width / 2, Math.min(height - 12, height / 2 + outerY * scale / 2 + 30));
-}
-
 function renderLayout2D() {
   if (!state.preview) return;
   state.layoutDimensionHandles = [];
@@ -10840,10 +9896,6 @@ function renderLayout2D() {
   const canvas = $("#preview-2d");
   const { context, width, height } = canvasSize(canvas);
   context.clearRect(0, 0, width, height);
-  if (baseTrimEnabled()) {
-    renderBaseTrim2D(context, width, height);
-    return;
-  }
   if (drawPendingNestTrace(context, width, height)) return;
   if (drawNestEditWorkspace(context, width, height)) return;
   const bounds = state.preview.layout_bounds;
@@ -11750,7 +10802,6 @@ async function saveDesign() {
     link.download = `${(state.design.part_name || "Wavefinity design").replace(/[^a-z0-9 _-]/gi, "").trim() || "Wavefinity design"}.wavefinity.json`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-    if (!baseTrimEnabled() && designHasChanges()) markWorkingDesignPending();
     state.cleanDesign = clone(state.design);
     toast("Design downloaded.");
   } catch (error) {
@@ -11763,46 +10814,31 @@ async function saveDesign() {
 // The design as the form currently shows it, without touching state.design.
 function visibleDesignSnapshot() {
   const visibleDesign = clone(state.design);
-  if (baseTrimEnabled(visibleDesign)) {
-    readBaseTrimForm(visibleDesign);
-    return visibleDesign;
-  }
   visibleDesign.box.x = normalizeBinDimension("x", $("#x-size").value, visibleDesign.box.x);
   visibleDesign.box.y = normalizeBinDimension("y", $("#y-size").value, visibleDesign.box.y);
   visibleDesign.box.z = number($("#z").value, visibleDesign.box.z);
   if (isSurfaceBinDesign(visibleDesign)) resolveSurfaceBase(visibleDesign, { fromForm: true });
-  const visibleB4B = $("#bin-type").value === "b4b";
-  const b4bRules = state.catalog?.b4b_rules || {};
-  const defaultBase = visibleB4B
-    ? number(b4bRules.default_base_mm, 1.6)
-    : number(state.catalog?.base_rules?.default_mm, 0.6);
+  const defaultBase = number(state.catalog?.base_rules?.default_mm, 0.6);
   if (!isSurfaceBinDesign(visibleDesign)) {
-    visibleDesign.box.standard_base = !visibleB4B && $("#base-thickness").value === "standard";
+    visibleDesign.box.standard_base = $("#base-thickness").value === "standard";
     visibleDesign.box.base_thickness = visibleDesign.box.standard_base
       ? defaultBase
       : number($("#base-thickness").value, visibleDesign.box.base_thickness ?? defaultBase);
   }
   const wallRules = state.catalog?.wall_rules || {};
-  const defaultWall = visibleB4B
-    ? number(b4bRules.default_wall_mm, 1.6)
-    : (wallRules.default_mm ?? 0.8);
-  visibleDesign.box.standard_walls = !visibleB4B && $("#wall-thickness").value === "standard";
+  const defaultWall = wallRules.default_mm ?? 0.8;
+  visibleDesign.box.standard_walls = $("#wall-thickness").value === "standard";
   visibleDesign.box.wall = visibleDesign.box.standard_walls
     ? defaultWall
-    : Math.max(visibleB4B ? b4bMinWall() : (wallRules.min_mm ?? 0.2), Math.min(
+    : Math.max(wallRules.min_mm ?? 0.2, Math.min(
         wallRules.max_mm ?? 2.4,
         number($("#wall-thickness").value, visibleDesign.box.wall ?? defaultWall),
       ));
   visibleDesign.part_name = $("#part-name").value;
-  if (visibleB4B) {
-    readB4BForm(visibleDesign);
-    enforceB4BMinimums(visibleDesign, false);
-  } else {
-    readStackForm(visibleDesign);
-    normalizeStackSettings(visibleDesign);
-    if (isSurfaceBinDesign(visibleDesign) && surfaceStackingBlocked(visibleDesign))
-      visibleDesign.layout.surface_lightweight_base = false;
-  }
+  readStackForm(visibleDesign);
+  normalizeStackSettings(visibleDesign);
+  if (isSurfaceBinDesign(visibleDesign) && surfaceStackingBlocked(visibleDesign))
+    visibleDesign.layout.surface_lightweight_base = false;
   const scoopEl = $("#scoop");
   if (scoopEl) visibleDesign.scoop = scoopEl.checked;
   readLiftGrabberForm(visibleDesign);
@@ -11813,9 +10849,6 @@ function visibleDesignSnapshot() {
 
 function designHasChanges() {
   const visibleDesign = visibleDesignSnapshot();
-  if (baseTrimEnabled(visibleDesign)) {
-    return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
-  }
   const index = draftCommitIndex();
   if (state.draft && state.draftAutoCommit && (
     index === null ||
@@ -11824,47 +10857,6 @@ function designHasChanges() {
   )) return true;
   return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
 }
-
-// ---- Legacy Current design compatibility for non-ordinary design paths.
-// A design counts as "pending inventory" once it has been edited, opened or
-// started new, until a Bin/Storage Box generation or local Print logs that
-// exact design. Base Trim and an untouched starter design never count.
-// BEGIN WORKING_DESIGN_HELPERS
-function markWorkingDesignPending() {
-  if (typedSpaceOrdinaryBin()) return;
-  state.workingPending = true;
-}
-
-function markWorkingDesignReconciled() {
-  if (typedSpaceOrdinaryBin()) return;
-  if (baseTrimEnabled()) return;
-  state.workingPending = false;
-  try {
-    state.workingGeneratedKey = JSON.stringify(visibleDesignSnapshot());
-  } catch (_error) {
-    state.workingGeneratedKey = null;
-  }
-  // The generated bin is now in the inventory; an open Space workspace must
-  // show it there instead of as Current design.
-  if (typeof DL !== "undefined" && DL.active && DL.load) DL.load().catch(() => {});
-}
-
-// The design Space should show as "Current design", or null.
-function workingDesignForSpace() {
-  if (typedSpaceOrdinaryBin()) return null;
-  if (!state.design || baseTrimEnabled() || state.folderMode !== "space") return null;
-  let visible;
-  try {
-    visible = visibleDesignSnapshot();
-  } catch (_error) {
-    return null;
-  }
-  const key = JSON.stringify(visible);
-  if (state.workingGeneratedKey && state.workingGeneratedKey === key) return null;
-  const changed = state.workingPending || key !== JSON.stringify(state.cleanDesign);
-  return changed ? visible : null;
-}
-// END WORKING_DESIGN_HELPERS
 
 async function openDesign(event) {
   const file = event.target.files?.[0];
@@ -11885,15 +10877,14 @@ async function openDesign(event) {
   try {
     const parsed = JSON.parse(await file.text());
     const result = await api("/api/design/validate", { design: parsed });
-    if (baseTrimEnabled(result.design) && !baseTrimEnabled()) state.lastOrdinaryDesign = clone(state.design);
-    if (!baseTrimEnabled(result.design) && baseTrimEnabled()) state.lastBaseTrimDesign = clone(state.design);
+    if (isStructuralDesign(result.design)) {
+      throw new Error("A Storage Box or Base Trim is saved from its Space, not opened in the Designer.");
+    }
     state.design = result.design;
-    state.baseTrimSourceLayout = null;
     resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
     state.spaceStarterPreviewPending = false;
     if (state.folderMode === "space") state.designInventoryId = null;
-    markWorkingDesignPending();
     state.drafts = {};
     state.history = [];
     state.future = [];
@@ -11922,14 +10913,10 @@ async function newDesign() {
   }))) return;
   if (!beginDesignMutation()) return;
   const previousDesign = clone(state.design);
-  state.design = baseTrimEnabled(previousDesign)
-    ? makeBaseTrimDesign(previousDesign.box.x, previousDesign.box.y)
-    : freshDesignForCurrentFolder();
-  state.baseTrimSourceLayout = null;
+  state.design = freshDesignForCurrentFolder();
   state.surfaceHeightPromptSkipped = false;
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
-  if (!baseTrimEnabled(state.design)) markWorkingDesignPending();
   state.binResizePending = false;
   state.binFootprintResizePending = false;
   recordHistory(previousDesign);
@@ -12037,7 +11024,7 @@ function showFilenameConflictDialog(names) {
 }
 
 function checkPartNamePresent(target = "bin") {
-  if (target === "connector" || baseTrimEnabled()) return true;
+  if (target === "connector") return true;
   const val = ($("#part-name")?.value || "").trim();
   if (!val) {
     showBinNameRequiredDialog();
@@ -12046,59 +11033,7 @@ function checkPartNamePresent(target = "bin") {
   return true;
 }
 
-// Surface first-run: after the Base Trim edge is generated or printed, and
-// real inventory still holds no bin-like row, hand off to the first bin.
-// Gated by typed Surface + Base Trim + a successful operation + no real bin.
-function realInventoryHasBin() {
-  return typeof DL !== "undefined" && Array.isArray(DL.bins)
-    && DL.bins.some(one => one.kind === "bin" || one.kind === "b4b" || one.kind === "manual");
-}
-
-// True while a Surface has no real bin yet and its edge is still the next step.
-function surfaceNeedsEdge() {
-  return state.folderMode === "space" && state.activeSpace?.kind === "surface"
-    && !state.surfaceEdgeHandled && typeof DL !== "undefined" && DL.loaded
-    && !realInventoryHasBin();
-}
-
-async function surfaceEdgeSucceeded(design) {
-  if (state.folderMode !== "space" || state.activeSpace?.kind !== "surface") return;
-  if (!baseTrimEnabled(design)) return;
-  try {
-    if (typeof DL !== "undefined" && DL.load) await DL.load();
-  } catch (_error) {
-    return;
-  }
-  if (typeof DL === "undefined" || !DL.loaded || realInventoryHasBin()) return;
-  state.surfaceEdgeHandled = true;
-  await loadFreshOrdinaryDesignForCurrentFolder();
-  // Fix 032 Correction 2 (C2.2): the fresh first-bin design the editor just
-  // landed on is the durable resume target now, not the just-generated
-  // Base Trim. refreshPreview() inside loadFreshOrdinaryDesignForCurrentFolder()
-  // already queued it in the background, but that write can still be
-  // mid-flight if the app closes right away - explicitly flush and await it
-  // (pending=true, a fresh first-bin intent) so the transition is durably
-  // finished before this function returns.
-  if (typeof SP !== "undefined") {
-    try {
-      await SP.flushResumeCheckpoint(state.design, true);
-    } catch (error) {
-      // The Base Trim edge itself already succeeded and the first-bin
-      // editor is already showing - only the checkpoint write failed, so
-      // say that plainly and leave it retryable rather than treating the
-      // transition as failed. This one qualified warning already says the
-      // edge succeeded and the first-bin editor is ready, so the ordinary
-      // success toast below must not also fire (Fix 032 Correction 3,
-      // C3.3 - the prior code fired both).
-      toast(`Edge ready, but the first-bin design could not be saved to this Space: ${error.message}`, true, 8000);
-      return;
-    }
-  }
-  toast("Edge ready — design your first bin.");
-}
-
 async function generateParts(target) {
-  if (baseTrimEnabled()) target = "bin";
   if (state.designMutationBusy || isGenerating) {
     toast("Finish the current action before saving files.", true);
     return;
@@ -12145,9 +11080,7 @@ async function generateParts(target) {
     dialogActions.hidden = true;
   }
 
-  const boxTitle = baseTrimEnabled()
-    ? `Base Trim (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} mm field)`
-    : `Bin (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} × ${fmt(state.design.box.z)} mm)`;
+  const boxTitle = `Bin (${fmt(state.design.box.x)} × ${fmt(state.design.box.y)} × ${fmt(state.design.box.z)} mm)`;
   const connTitle = state.connector.different_heights
     ? "Side Connector"
     : "Connectors (Side + 3-Way + 4-Way)";
@@ -12179,7 +11112,6 @@ async function generateParts(target) {
   const allFiles = [];
   let connectorPlan = null;
   let saveOutput = state.output;
-  let surfaceEdgeDone = null;
   let checkpointSaveFailed = null;
 
   try {
@@ -12202,9 +11134,9 @@ async function generateParts(target) {
     // met - stop here rather than proceed as though it were.
     if (state.folderMode === "space" && typeof SP !== "undefined") {
       try {
-        await SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()));
+        await SP.flushResumeCheckpoint(payload.design, false);
       } catch (error) {
-        throw new Error(`Current design could not be saved to this Space, so nothing was saved: ${error.message}`);
+        throw new Error(`The current design could not be saved to this Space, so nothing was saved: ${error.message}`);
       }
     }
 
@@ -12229,28 +11161,22 @@ async function generateParts(target) {
         DL.adopt(saved);
         DL.emit();
       }
-      if (!baseTrimEnabled(payload.design) && !Boolean(payload.design?.box?.b4b?.enabled)) await rememberGeneratedSpaceBin(payload.design);
+      await rememberGeneratedSpaceBin(payload.design);
       if (!designRowId && binResult.inventory_bin && state.inventoryEnabled && typeof SP !== "undefined") {
         await SP.addInventoryBin(binResult.inventory_bin, binResult.inventory_design_spec || null);
       }
       allFiles.push(...binFiles);
       setItemStatus("bin", "done", "Done");
-      if (baseTrimEnabled(payload.design)) surfaceEdgeDone = payload.design;
-      else {
-        if (!designRowId) markWorkingDesignReconciled();
-        // The just-generated bin is the next resume target, pending=false.
-        // Connector-only generation never reaches this branch, so it cannot
-        // falsely reconcile the bin design. The generated files and
-        // inventory entry already exist by this point, so a checkpoint-save
-        // failure here must not be reported as the generation itself
-        // failing (Correction 1) - only that this design still needs saving
-        // to the Space, which a later preview/action will retry.
-        if (state.folderMode === "space" && typeof SP !== "undefined") {
-          try {
-            await SP.flushResumeCheckpoint(payload.design, false);
-          } catch (error) {
-            checkpointSaveFailed = error;
-          }
+      // The just-saved bin is the next resume target. The generated files and
+      // inventory entry already exist by this point, so a checkpoint-save
+      // failure here must not be reported as the generation itself
+      // failing (Correction 1) - only that this design still needs saving
+      // to the Space, which a later preview/action will retry.
+      if (state.folderMode === "space" && typeof SP !== "undefined") {
+        try {
+          await SP.flushResumeCheckpoint(payload.design, false);
+        } catch (error) {
+          checkpointSaveFailed = error;
         }
       }
     }
@@ -12333,7 +11259,6 @@ async function generateParts(target) {
     updateGenerateAvailability();
     updateHistoryButtons();
   }
-  if (surfaceEdgeDone) await surfaceEdgeSucceeded(surfaceEdgeDone);
 }
 
 async function generate(path, selector) {
@@ -12344,9 +11269,7 @@ async function generate(path, selector) {
 }
 
 async function printModel(target = "bin") {
-  if (state.runtime.hosted) return generateParts(
-    b4bEnabled() || baseTrimEnabled() || state.design?.box?.lid?.enabled ? "bin" : "all"
-  );
+  if (state.runtime.hosted) return generateParts(state.design?.box?.lid?.enabled ? "bin" : "all");
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
     toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
@@ -12360,7 +11283,6 @@ async function printModel(target = "bin") {
   if (!beginDesignMutation()) return;
   const button = $("#print-bin");
   const old = button.textContent;
-  let printedEdge = null;
   button.disabled = true;
   const slicerName = state.slicer?.name || "Bambu Studio";
   button.textContent = `Sending to ${slicerName}…`;
@@ -12381,9 +11303,9 @@ async function printModel(target = "bin") {
     // as though the design would still be recoverable on a failed print.
     if (state.folderMode === "space" && typeof SP !== "undefined") {
       try {
-        await SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()));
+        await SP.flushResumeCheckpoint(payload.design, false);
       } catch (error) {
-        throw new Error(`Current design could not be saved to this Space, so nothing was sent: ${error.message}`);
+        throw new Error(`The current design could not be saved to this Space, so nothing was sent: ${error.message}`);
       }
     }
     const result = await api("/api/print", payload);
@@ -12404,17 +11326,13 @@ async function printModel(target = "bin") {
         throw new Error(`Bambu Studio opened, but Printed status could not be recorded: ${error.message}`);
       }
     }
-    if ((target === "bin" || target === "all") && !baseTrimEnabled(payload.design) && !Boolean(payload.design?.box?.b4b?.enabled)) {
+    if (target === "bin" || target === "all") {
       await rememberGeneratedSpaceBin(payload.design);
     }
     const files = result.files || [];
     const fileNames = files.map(f => f.split(/[\\/]/).pop());
     const sentMessage = `Sent to ${slicerName}!\n${fileNames.join("\n")}`;
-    if (baseTrimEnabled(payload.design)) {
-      printedEdge = payload.design;
-      toast(sentMessage, false, 7000);
-    } else if (target === "bin" || target === "all") {
-      if (!designRowId) markWorkingDesignReconciled();
+    if (target === "bin" || target === "all") {
       // Fix 032 Correction 2 (C2.3): the slicer handoff already succeeded
       // by this point, so defer the success toast until after the final
       // checkpoint attempt and report exactly one message - never the
@@ -12444,27 +11362,12 @@ async function printModel(target = "bin") {
     button.textContent = old;
     finishDesignMutation();
   }
-  if (printedEdge) await surfaceEdgeSucceeded(printedEdge);
 }
 
 function updatePrimaryPrintButtonLabel() {
   const printBtn = $("#print-bin");
   const wrap = $(".print-button-wrap");
   if (!printBtn) return;
-  if (baseTrimEnabled()) {
-    if (wrap) wrap.hidden = false;
-    printBtn.hidden = false;
-    if (state.runtime.hosted) {
-      printBtn.textContent = "Save Base Trim";
-      printBtn.title = "Save all Base Trim pieces into your selected folder";
-      $("#slicer-picker-button").hidden = true;
-    } else {
-      const slicer = state.slicer || {};
-      printBtn.textContent = "Print Base Trim";
-      printBtn.title = `Send all Base Trim pieces directly to ${slicer.name || "Bambu Studio"}`;
-    }
-    return;
-  }
   if (state.runtime.hosted) {
     if (wrap) wrap.hidden = false;
     printBtn.hidden = false;

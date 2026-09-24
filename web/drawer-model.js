@@ -9,7 +9,10 @@
 //
 // A placement is on the grid (gx/gy in 8 mm units, halves allowed on a 4 mm
 // drawer), stacked (`on` names the placement below), or a free edge-facing
-// spacer (x/y/w/d mm). A copy numbered past its bin's printed Qty is *planned*.
+// spacer (x/y/w/d mm). One ordinary Inventory row is one placement identity: it
+// is placed at most once, and a row with no placement is *unplaced* (it shows
+// in the staging rail). Only spacers, being repeated filler parts, may be
+// placed several times.
 //
 // Uses the page's global helpers from app.js: $, $$, api, toast, clone, fmt,
 // debounce, escapeHtml and state.output.
@@ -28,19 +31,16 @@ const DL = {
   layout: null,
   warnings: [],
   selected: null,        // placement key "B3:0"
+  selectedRow: null,     // Inventory row id the user last picked (placed or staged)
   report: null,
   reportTicket: 0,
-  candidates: [],
-  candidateIndex: -1,
-  skipped: [],
-  autoNotes: [],
   spacerPlan: null,
   spacerSelected: new Set(),
   spacerPlanSignature: null,
   fillPlan: null,
   fillSelected: new Set(),
   fillSignature: null,
-  busy: "",              // "auto" | "spacers" | "connectors" | "print" while a request runs
+  busy: "",              // "spacers" | "fill" | "print" | ... while a request runs
   busyTicket: 0,
   dirty: false,
   saving: false,
@@ -56,13 +56,6 @@ const DL = {
   pegboardRefreshError: "",
 };
 
-// The design being edited, shown in Space before it has been generated. It
-// lives only here: never in DL.bins, the layout, autosave, or Qty.
-//   { key, bin, error }  where bin is a planning record from
-//   /api/design/inventory-preview (the same envelope a generated row gets).
-DL.working = null;
-DL.workingTicket = 0;
-
 DL.on = fn => DL.listeners.push(fn);
 DL.emit = () => DL.listeners.forEach(fn => fn());
 
@@ -71,10 +64,6 @@ DL.emit = () => DL.listeners.forEach(fn => fn());
 DL.defaultSettings = () => ({
   autosave: true,
   show_empty: true,
-  auto: {
-    mode: "rearrange", height_rule: "strict", height_reach: "column",
-    keep_locked: true, include_spacers: false, stack_bins: true,
-  },
   spacers: { flexible: true, height: 15 },
   surface: { ask_object_height: true },
 });
@@ -116,7 +105,7 @@ DL.normaliseLayout = raw => {
   layout.version = 1;
   layout.settings = { ...defaults, ...(layout.settings || {}) };
   delete layout.settings.new_bins_printed; // retired: generating always means Qty 0
-  layout.settings.auto = { ...defaults.auto, ...(layout.settings.auto || {}) };
+  delete layout.settings.auto;             // retired: there is no Auto layout
   layout.settings.spacers = { ...defaults.spacers, ...(layout.settings.spacers || {}) };
   layout.settings.surface = { ...defaults.surface, ...(layout.settings.surface || {}) };
   // Fix 034 K1: autosave has no user-off path any more; a legacy
@@ -132,6 +121,7 @@ DL.normaliseLayout = raw => {
     delete one.keepouts; // the old Keep-out Zone feature is gone
     one.placements = (Array.isArray(one.placements) ? one.placements : [])
       .filter(p => p && typeof p === "object" && p.bin);
+    one.placements.forEach(p => { delete p.locked; }); // retired: there is no Lock
     // Legacy 4 mm layouts go onto the one 8 mm grid: bins sitting half a unit
     // along snap to the nearest whole unit (the report flags any overlap that
     // makes). Legacy axis, anchor and clearance settings are no longer
@@ -143,11 +133,58 @@ DL.normaliseLayout = raw => {
     Object.assign(one, DL.canonicalLayoutRules(one.boundary));
   });
   if (!layout.drawers.some(one => one.id === layout.active)) layout.active = layout.drawers[0].id;
+  DL.singlePlacements(layout);
   return layout;
 };
 
+// One ordinary Inventory row is one placement. A legacy or test layout that
+// carries several copies of a row keeps one deterministically - the lowest
+// copy number, then the earliest drawer and position - and renumbers it copy 0.
+// Whatever was stacked on a dropped placement closes the gap. Spacers are
+// exempt (repeated filler parts) and so is any placement whose row is not
+// known yet. Returns how many placements were dropped.
+DL.singlePlacements = layout => {
+  const groups = new Map();
+  layout.drawers.forEach((drawer, drawerIndex) => drawer.placements.forEach((placement, index) => {
+    const one = DL.bin(placement.bin);
+    if (!one || DL.isSpacer(one)) return;
+    if (!groups.has(placement.bin)) groups.set(placement.bin, []);
+    groups.get(placement.bin).push({ drawer, drawerIndex, index, placement });
+  }));
+  const dropped = new Set();
+  const renamed = new Map();
+  for (const entries of groups.values()) {
+    entries.sort((a, b) => (a.placement.copy ?? 0) - (b.placement.copy ?? 0)
+      || a.drawerIndex - b.drawerIndex || a.index - b.index);
+    const [keeper, ...extras] = entries;
+    if (keeper.placement.copy !== undefined && (keeper.placement.copy ?? 0) !== 0) {
+      renamed.set(DL.key(keeper.placement), `${keeper.placement.bin}:0`);
+    }
+    extras.forEach(extra => dropped.add(extra.placement));
+  }
+  if (!dropped.size && !renamed.size) return 0;
+  for (const drawer of layout.drawers) {
+    for (const gone of drawer.placements.filter(p => dropped.has(p))) DL.detach(drawer, gone);
+  }
+  layout.drawers.forEach(drawer => {
+    drawer.placements = drawer.placements.filter(p => !dropped.has(p));
+  });
+  for (const drawer of layout.drawers) {
+    for (const p of drawer.placements) {
+      if (renamed.has(p.on)) p.on = renamed.get(p.on);
+    }
+  }
+  for (const drawer of layout.drawers) {
+    for (const p of drawer.placements) {
+      if (renamed.has(DL.key(p))) p.copy = 0;
+    }
+  }
+  return dropped.size;
+};
+
 // Drop placements whose bin row is gone (a bin stacked on one takes its
-// place) and any copy placed twice. Planned copies stay.
+// place), any placement listed twice, and any extra placement of an ordinary
+// row.
 DL.prune = () => {
   const known = new Set(DL.bins.map(one => one.id));
   const seen = new Set();
@@ -163,7 +200,7 @@ DL.prune = () => {
     removed += drawer.placements.length - kept.length;
     drawer.placements = kept;
   }
-  return removed;
+  return removed + DL.singlePlacements(DL.layout);
 };
 
 // ------------------------------------------------------------------ lookups
@@ -179,7 +216,6 @@ DL.mmToUnits = mm => fmt(mm / 8);
 DL.isSpacer = one => one?.kind === "spacer";
 DL.stackable = one => Boolean(one) && (one.stack === "lid" || one.stack === "direct" || one.stack === "b4b");
 DL.stackName = mode => ({ lid: "Snap-on lid", direct: "Direct snap", b4b: "Storage Box stacking" })[mode] || "Not stackable";
-DL.isPlanned = p => (p.copy ?? 0) >= (Number(DL.bin(p.bin)?.qty) || 0);
 DL.onGrid = p => p.gx !== undefined && p.on === undefined;
 // A free-placed edge-facing spacer: x/y/w/d/side in mm instead of a grid cell.
 DL.isEdgePlacement = p => p.gx === undefined && p.on === undefined;
@@ -288,82 +324,32 @@ DL.items = (drawer = DL.drawer()) => DL.chains(drawer).map(chain => {
   };
 });
 
-// One authoritative Space-to-Base-Trim calculation. Stacks are already one
-// DL.items() footprint; free edge spacers never enter DL.items().
-DL.baseTrimSource = () => {
-  if (!DL.loaded || !DL.layout) {
-    return { ok: false, message: "Open a Space and arrange bins first." };
-  }
-  const drawer = DL.drawer();
-  const items = DL.items(drawer).filter(item => !DL.isSpacer(item.bins[0]));
-  if (!items.length) {
-    return { ok: false, message: "There are no arranged bins in the active Space." };
-  }
-  const minX = Math.min(...items.map(item => item.gx));
-  const minY = Math.min(...items.map(item => item.gy));
-  const maxX = Math.max(...items.map(item => item.gx + item.w));
-  const maxY = Math.max(...items.map(item => item.gy + item.d));
-  const occupied = new Set();
-  items.forEach(item => {
-    for (let x = item.gx; x < item.gx + item.w; x += 1) {
-      for (let y = item.gy; y < item.gy + item.d; y += 1) occupied.add(`${x},${y}`);
-    }
-  });
-  if (occupied.size !== (maxX - minX) * (maxY - minY)) {
-    return {
-      ok: false,
-      message: "Base Trim auto-size needs one filled rectangular block of bins. Rearrange the bins into a rectangle or set the Base Trim size manually.",
-    };
-  }
-  const step = DL.grid(drawer).step;
-  const fieldX = (maxX - minX) * step;
-  const fieldY = (maxY - minY) * step;
-  if (Math.abs(fieldX / DL.UNIT - Math.round(fieldX / DL.UNIT)) > 1e-9 ||
-      Math.abs(fieldY / DL.UNIT - Math.round(fieldY / DL.UNIT)) > 1e-9) {
-    return {
-      ok: false,
-      message: "The arranged block does not end on whole Wavefinity units. Arrange it as a whole-unit rectangle or size the Base Trim manually.",
-    };
-  }
-  return {
-    ok: true,
-    field_x_mm: fieldX,
-    field_y_mm: fieldY,
-    units_x: Math.round(fieldX / DL.UNIT),
-    units_y: Math.round(fieldY / DL.UNIT),
-    items: items.map(item => ({
-      x: (item.gx - minX) * step,
-      y: (item.gy - minY) * step,
-      w: item.w * step,
-      d: item.d * step,
-      label: DL.label(item.bins[0]),
-    })),
-  };
-};
-
 DL.placedCount = id => DL.layout.drawers.reduce(
   (sum, drawer) => sum + drawer.placements.filter(p => p.bin === id).length, 0);
-DL.plannedCount = id => {
-  const one = DL.bin(id);
-  return DL.layout.drawers.reduce((sum, drawer) =>
-    sum + drawer.placements.filter(p => p.bin === id && (p.copy ?? 0) >= (Number(one?.qty) || 0)).length, 0);
-};
+DL.isPlaced = id => DL.placedCount(id) > 0;
+
+// Ordinary rows are the placeable, stageable bins; spacers are filler parts
+// planned from the Spacers section.
+DL.isOrdinary = one => Boolean(one) && !DL.isSpacer(one);
+
+// The staging rail's membership, derived and never persisted: every ordinary
+// Inventory row with no placement, in Inventory order.
+DL.stagedBins = () => DL.bins.filter(one => DL.isOrdinary(one) && !DL.isPlaced(one.id));
+
+// The one lifecycle label a row shows.
+DL.statusLabel = one => one?.status === "printed" ? "Printed" : one?.status === "saved" ? "Saved" : "In Design";
+
 // Bulk printing: a generated bin/B4B row (one with a file, or with a
-// canonical design source that Generate can resolve on demand) can be sent
-// to the slicer. Needed = planned copies not yet printed, or one copy for a
-// Qty 0 row that is not placed; an explicit pick of a satisfied row reprints one.
+// canonical design source that Save can resolve on demand) can be sent to the
+// slicer. A row not yet Printed is still to print; each selected row is
+// sent exactly once.
 DL.printEligible = one =>
   Boolean(one) &&
   ["bin", "b4b"].includes(one.kind) &&
   (Boolean(String(one.file || "").trim()) ||
    Boolean(DL.layout?.design_specs?.[one.id]));
 
-DL.printNeeded = one => {
-  if (!DL.printEligible(one)) return 0;
-  const planned = DL.plannedCount(one.id);
-  if (planned > 0) return 1;
-  return Number(one.qty) <= 0 ? 1 : 0;
-};
+DL.printNeeded = one => (DL.printEligible(one) && one.status !== "printed" ? 1 : 0);
 
 DL.printCount = one => {
   return DL.printEligible(one) ? 1 : 0;
@@ -372,17 +358,31 @@ DL.printCount = one => {
 DL.drawersHolding = id => DL.layout.drawers
   .filter(drawer => drawer.placements.some(p => p.bin === id)).map(drawer => drawer.name);
 
-// The next copy to place: a printed one not yet in a drawer, else (when
-// allowed) a planned one numbered past the printed Qty.
-DL.nextCopy = (one, allowPlanned = true) => {
+// A spacer is a repeated filler part: its next placement takes the first free
+// copy number. (Ordinary rows are always copy 0.)
+DL.nextSpacerCopy = one => {
   const used = new Set();
   DL.layout.drawers.forEach(drawer => drawer.placements.forEach(p => { if (p.bin === one.id) used.add(p.copy ?? 0); }));
-  const printed = Number(one.qty) || 0;
-  for (let copy = 0; copy < printed; copy += 1) if (!used.has(copy)) return copy;
-  if (!allowPlanned) return null;
-  let copy = printed;
+  let copy = 0;
   while (used.has(copy)) copy += 1;
   return copy;
+};
+
+// Picking an Inventory row - from the list, the staging rail or the canvas.
+// A placed row highlights its placement; an unplaced row highlights staging.
+DL.selectRow = id => {
+  DL.selectedRow = id || null;
+  const found = id ? DL.drawer().placements.find(p => p.bin === id)
+    || DL.layout.drawers.flatMap(drawer => drawer.placements).find(p => p.bin === id) : null;
+  DL.selected = found ? DL.key(found) : null;
+  DL.emit();
+};
+
+// Picking a placement on the canvas selects its Inventory row too.
+DL.selectPlacement = key => {
+  const found = key ? DL.findPlacement(key) : null;
+  DL.selected = found ? key : null;
+  DL.selectedRow = found ? found.placement.bin : null;
 };
 
 DL.findPlacement = key => {
@@ -458,7 +458,6 @@ DL.change = (mutate, { history = true } = {}) => {
     if (DL.history.length > 60) DL.history.shift();
     DL.future = [];
   }
-  DL.candidateIndex = -1;
   DL.afterChange();
   return true;
 };
@@ -502,7 +501,7 @@ DL.spacerSignature = () => JSON.stringify([
 
 // Stale spacer proposals must never survive a layout/inventory change that
 // could invalidate them (placements, dimensions, settings, the
-// active drawer, an auto-layout arrangement, or the bin inventory itself).
+// active drawer, a placement change, or the bin inventory itself).
 // Toggling a candidate's own checkbox must not call this.
 DL.clearSpacerPlan = ({ preserveFill = false } = {}) => {
   DL.spacerPlan = null;
@@ -523,7 +522,6 @@ DL.restore = redo => {
   DL.layout = DL.normaliseLayout(JSON.parse(from.pop()));
   DL.prune();
   if (DL.selected && !DL.findPlacement(DL.selected)) DL.selected = null;
-  DL.candidateIndex = -1;
   DL.afterChange();
 };
 DL.undo = () => DL.restore(false);
@@ -535,7 +533,7 @@ DL.detach = (drawer, placement) => {
   if (above) {
     delete above.on;
     if (placement.on !== undefined) above.on = placement.on;
-    else Object.assign(above, { gx: placement.gx, gy: placement.gy, locked: Boolean(placement.locked) });
+    else Object.assign(above, { gx: placement.gx, gy: placement.gy });
   }
 };
 
@@ -590,11 +588,9 @@ DL.refreshPegboardLayouts = async () => {
   const drawer = DL.layout && DL.drawer();
   if (!DL.isPegboard(drawer)) { DL.pegboardLayouts = {}; return; }
   const epoch = DL.loadEpoch;
-  const bins = [...DL.bins];
-  if (DL.working?.bin) bins.push(DL.working.bin);
   const result = await api("/api/pegboard/layouts", {
     standard: drawer.pegboard_standard,
-    bins,
+    bins: [...DL.bins],
   });
   if (epoch !== DL.loadEpoch) return;
   DL.pegboardLayouts = result.layouts || {};
@@ -625,95 +621,6 @@ DL.refreshPegboardLayoutsAfterLoad = () => DL.refreshPegboardLayoutsSafe(
 DL.retryPegboardLayouts = () => DL.refreshPegboardLayoutsSafe(
   "Pegboard placement data could not be refreshed.");
 
-// Re-read the current design and, if it is pending inventory, its planning
-// envelope from the server. Cheap when the design has not changed.
-DL.refreshWorking = async ({ refreshPegboard = true } = {}) => {
-  const design = typeof workingDesignForSpace === "function" ? workingDesignForSpace() : null;
-  if (!design) {
-    if (DL.working) { DL.working = null; DL.emit(); }
-    if (refreshPegboard && DL.pegboardRefreshError && DL.isPegboard(DL.layout && DL.drawer())) {
-      await DL.retryPegboardLayouts();
-    }
-    return;
-  }
-  const key = JSON.stringify(design);
-  if (DL.working?.key === key) {
-    if (refreshPegboard && DL.pegboardRefreshError) await DL.retryPegboardLayouts();
-    return;
-  }
-  const context = DL.workingContext();
-  const ticket = ++DL.workingTicket;
-  let bin;
-  try {
-    ({ bin } = await api("/api/design/inventory-preview", { design }));
-  } catch (error) {
-    if (ticket !== DL.workingTicket || context !== DL.workingContext()) return;
-    DL.working = { key, error: error.message };
-    DL.emit();
-    return;
-  }
-  if (ticket !== DL.workingTicket || context !== DL.workingContext()) return;
-  DL.working = {
-    key,
-    bin: {
-      ...bin, id: "__current__", qty: 0, working: true,
-      name: (design.part_name || "").trim(),
-    },
-  };
-  if (refreshPegboard) await DL.retryPegboardLayouts();
-  DL.emit();
-};
-
-// First legal floor spot for the working design in the active drawer, or the
-// plain reason it does not fit. Memoised on what it depends on.
-DL.workingFit = () => {
-  const working = DL.working;
-  if (!working) return null;
-  if (working.error) return { ok: false, reason: working.error };
-  const drawer = DL.drawer();
-  const stamp = JSON.stringify([working.key, drawer.id, drawer.width, drawer.depth, drawer.height,
-    drawer.placements]);
-  const spot = working.position;
-  if (spot && spot.space === DL.workingContext() && spot.drawer === drawer.id) {
-    if (DL.fitsAt(drawer, [working.bin], spot.gx, spot.gy).ok) return { ok: true, gx: spot.gx, gy: spot.gy };
-  }
-  if (spot) working.position = null;
-  if (working.fitStamp === stamp) return working.fit;
-  const grid = DL.grid(drawer);
-  const [w, d] = DL.cells(working.bin, drawer);
-  let fit = { ok: false, reason: "" };
-  if (!Number.isFinite(w) || !Number.isFinite(d) || w > grid.cols || d > grid.rows) {
-    fit.reason = "That is bigger than this Space.";
-  } else {
-    search:
-    for (let gy = 0; gy + d <= grid.rows; gy += 1) {
-      for (let gx = 0; gx + w <= grid.cols; gx += 1) {
-        const test = DL.fitsAt(drawer, [working.bin], gx, gy);
-        if (test.ok) { fit = { ok: true, gx, gy }; break search; }
-        if (!fit.reason) fit.reason = test.reason;
-      }
-    }
-  }
-  working.fitStamp = stamp;
-  working.fit = fit;
-  return fit;
-};
-
-// Which Space the Current design is standing in (drawer ids repeat across Spaces).
-DL.workingContext = () => state.activeSpaceId || DL.folder();
-
-// Session-only: remember where the Current design was dragged. Never a placement.
-DL.moveWorkingTo = (gx, gy) => {
-  const working = DL.working;
-  if (!working?.bin || working.error) return false;
-  const drawer = DL.drawer();
-  if (!DL.fitsAt(drawer, [working.bin], gx, gy).ok) return false;
-  working.position = { space: DL.workingContext(), drawer: drawer.id, gx, gy };
-  working.fitStamp = null;
-  DL.emit();
-  return true;
-};
-
 DL.load = async () => {
   const output = DL.folder();
   const epoch = DL.loadEpoch;
@@ -734,16 +641,14 @@ DL.load = async () => {
     DL.history = [];
     DL.future = [];
     DL.dirty = false;
-    DL.candidates = [];
     DL.selected = null;
+    DL.selectedRow = null;
     DL.saveState = "idle";
   }
   DL.prune();
   DL.loaded = true;
   DL.emit();
   DL.requestReport();
-  await DL.refreshWorking({ refreshPegboard: false });
-  if (epoch !== DL.loadEpoch) throw new Error("This Space changed while its inventory was loading.");
   await DL.refreshPegboardLayoutsAfterLoad();
   if (epoch !== DL.loadEpoch) throw new Error("This Space changed while its inventory was loading.");
 };
@@ -870,7 +775,7 @@ DL.editBins = async (changes, {
     const removed = DL.prune();
     if (commitLayout) DL.selected = selected && DL.findPlacement(selected) ? selected : null;
     if (removed) {
-      toast(`${removed} placed cop${removed === 1 ? "y" : "ies"} removed from saved placements.`);
+      toast(`${removed} placement${removed === 1 ? "" : "s"} removed from the saved layout.`);
       DL.afterChange();
     } else {
       DL.dirty = false;
@@ -921,6 +826,7 @@ DL.setBinPrinted = async (one, printed) => {
   return DL.editBins({ bin_updates: [{ id: one.id, qty: printed ? 1 : 0 }] });
 };
 DL.markPrinted = one => DL.setBinPrinted(one, true);
+DL.markNotPrinted = one => DL.setBinPrinted(one, false);
 
 DL.requestReport = debounce(async () => {
   if (!DL.active || !DL.layout) return;
@@ -928,7 +834,6 @@ DL.requestReport = debounce(async () => {
   try {
     const report = await api("/api/drawer/report", {
       layout: DL.layout, bins: DL.bins, drawer_id: DL.layout.active,
-      height_reach: DL.layout.settings.auto.height_reach,
     });
     if (ticket === DL.reportTicket) { DL.report = report; DL.emit(); }
   } catch (_error) {
@@ -956,93 +861,33 @@ DL.busyWith = async (what, work) => {
 
 // ------------------------------------------------------------------ actions
 
-DL.runAuto = () => DL.busyWith("auto", async context => {
-  if (DL.isPegboard()) { toast("Place pegboard bins on the visible mount grid.", true); return; }
-  const result = await api("/api/drawer/auto", {
-    layout: DL.layout, bins: DL.bins, drawer_id: DL.layout.active,
-    options: DL.layout.settings.auto,
-  });
-  DL.requireSpaceContext(context);
-  DL.candidates = result.candidates || [];
-  DL.skipped = result.skipped || [];
-  DL.autoNotes = result.notes || [];
-  if (DL.candidates.length) DL.applyCandidate(0);
-  else toast("Nothing to arrange - every bin is placed or locked.");
-});
-
-DL.applyCandidate = index => {
-  const candidate = DL.candidates[index];
-  if (!candidate) return;
-  DL.change(() => { DL.drawer().placements = clone(candidate.placements); });
-  DL.candidateIndex = index;
-  DL.emit();
-};
-
-// Put one copy of a bin at a grid cell, or on top of a stack (`target` is a
-// DL.items() entry). Uses a planned copy when every printed one is placed.
+// Put one bin at a grid cell, or on top of a stack (`target` is a DL.items()
+// entry). An ordinary row is placed once; a spacer takes its next copy number.
 DL.placeAt = (one, where) => {
-  const copy = DL.nextCopy(one);
+  if (DL.isOrdinary(one) && DL.isPlaced(one.id)) {
+    toast(`${DL.label(one)} is already placed in a Space.`, true);
+    return false;
+  }
+  const copy = DL.isSpacer(one) ? DL.nextSpacerCopy(one) : 0;
   const drawer = DL.drawer();
   const fit = where.target ? DL.fitsOn(drawer, [one], where.target) : DL.fitsAt(drawer, [one], where.gx, where.gy);
   if (!fit.ok) { toast(fit.reason, true); return false; }
   const placement = where.target
     ? { bin: one.id, copy, on: where.target.keys[where.target.keys.length - 1] }
-    : { bin: one.id, copy, gx: DL.toUnits(where.gx, drawer), gy: DL.toUnits(where.gy, drawer), locked: false };
+    : { bin: one.id, copy, gx: DL.toUnits(where.gx, drawer), gy: DL.toUnits(where.gy, drawer) };
   DL.change(() => drawer.placements.push(placement));
   DL.selected = DL.key(placement);
-  if (DL.isPlanned(placement)) toast(`Placed as planned - every printed ${DL.label(one)} is already placed in this Space. Mark it printed once it is.`);
+  DL.selectedRow = one.id;
   DL.emit();
   return true;
 };
 
-// Drop one bin into the best free spot, using the same packer as Auto layout.
-DL.quickPlace = one => DL.busyWith("", async context => {
-  const drawer = DL.drawer();
-  if (DL.isPegboard(drawer)) {
-    const grid = DL.grid(drawer);
-    const [w, d] = DL.cells(one, drawer);
-    for (let gy = 0; gy + d <= grid.rows; gy += 1) {
-      for (let gx = 0; gx + w <= grid.cols; gx += 1) {
-        if (DL.fitsAt(drawer, [one], gx, gy).ok) { DL.placeAt(one, { gx, gy }); return; }
-      }
-    }
-    toast(`No mountable space remains for ${DL.label(one)}.`, true);
-    return;
-  }
-  if (!DL.isSurface() && one.z > drawer.height + 1e-6) { toast(`${DL.label(one)} is ${fmt(one.z)} mm tall - taller than this Space.`, true); return; }
-  const copy = DL.nextCopy(one);
-  const ask = async rule => {
-    const result = await api("/api/drawer/auto", {
-      layout: DL.layout, bins: DL.bins, drawer_id: drawer.id,
-      options: { ...DL.layout.settings.auto, mode: "fill", stack_bins: false, height_rule: rule, only: [{ bin: one.id, copy }] },
-    });
-    DL.requireSpaceContext(context);
-    return (result.candidates?.[0]?.placements || []).find(p => p.bin === one.id && p.copy === copy);
-  };
-  const rule = DL.layout.settings.auto.height_rule;
-  let placement = await ask(rule);
-  if (!placement && rule === "strict") {
-    placement = await ask("prefer");
-    if (placement) toast("No free spot keeps taller bins behind it, so it went where it fits.");
-  }
-  if (!placement) {
-    // No floor left: try the top of a stack it can snap onto.
-    const target = DL.items(drawer).find(item => DL.fitsOn(drawer, [one], item).ok);
-    if (target) { DL.placeAt(one, { target }); return; }
-    toast(`No room left for ${DL.label(one)} in ${drawer.name}.`, true);
-    return;
-  }
-  DL.change(() => drawer.placements.push(placement));
-  DL.selected = DL.key(placement);
-  if (DL.isPlanned(placement)) toast(`Placed as planned - mark ${DL.label(one)} printed once it is.`);
-});
-
 DL.planSurfaceFill = () => DL.busyWith("fill", async context => {
   if (!DL.isSurface()) return;
-  if (DL.working?.bin || (typeof workingDesignForSpace === "function" && workingDesignForSpace())) {
-    toast("Finish or save the Current design before filling empty Surface space.", true);
-    return;
-  }
+  // The Designer's autosave is the boundary: settle it before Fill reads the
+  // authoritative Inventory and layout.
+  if (typeof flushSpaceDesignAutosave === "function" && !(await flushSpaceDesignAutosave())) return;
+  DL.requireSpaceContext(context);
   if (!(await DL.save())) return;
   DL.requireSpaceContext(context);
   const result = await DL.inventoryCall("/api/drawer/surface-fill", {}, { context, write: false });
@@ -1061,6 +906,8 @@ DL.toggleFillCandidate = id => {
 
 DL.createSelectedFillBins = () => DL.busyWith("fill", async context => {
   if (!DL.isSurface() || !DL.fillPlan || !DL.fillSelected.size) return;
+  if (typeof flushSpaceDesignAutosave === "function" && !(await flushSpaceDesignAutosave())) return;
+  DL.requireSpaceContext(context);
   const before = DL.snapshot();
   const result = await DL.inventoryCall("/api/drawer/surface-fill/create", {
     signature: DL.fillSignature, selected: [...DL.fillSelected],
@@ -1075,8 +922,6 @@ DL.createSelectedFillBins = () => DL.busyWith("fill", async context => {
   DL.saveState = "saved";
   DL.savedAt = new Date();
   DL.requestReport();
-  await DL.refreshWorking();
-  DL.requireSpaceContext(context);
   DL.emit();
   toast(`${result.created?.length || 0} fill bins added to Surface.`);
 });
@@ -1086,15 +931,15 @@ DL.moveTo = (key, where) => DL.change(() => {
   const found = DL.findPlacement(key);
   if (!found) return;
   const { drawer, placement } = found;
-  const locked = DL.onGrid(placement) && Boolean(placement.locked);
   // Whatever stood on the moved bin comes with it; the bin it stood on is
   // left with nothing on top.
-  delete placement.on; delete placement.gx; delete placement.gy; delete placement.locked;
+  delete placement.on; delete placement.gx; delete placement.gy;
   if (where.target) placement.on = where.target.keys[where.target.keys.length - 1];
-  else Object.assign(placement, { gx: DL.toUnits(where.gx, drawer), gy: DL.toUnits(where.gy, drawer), locked });
+  else Object.assign(placement, { gx: DL.toUnits(where.gx, drawer), gy: DL.toUnits(where.gy, drawer) });
 });
 
-// Take a bin and everything stacked on it out of the drawer.
+// Take a bin and everything stacked on it out of the Space. They are only
+// unplaced: each row stays in Inventory and returns to the staging rail.
 DL.takeOut = key => {
   const chain = DL.stackOf(key);
   const drop = new Set(chain ? chain.slice(chain.findIndex(p => DL.key(p) === key)).map(DL.key) : [key]);
@@ -1117,11 +962,6 @@ DL.removePlacement = key => {
   if (DL.selected === key) DL.selected = null;
   DL.emit();
 };
-
-DL.toggleLock = key => DL.change(() => {
-  const chain = DL.stackOf(key);
-  if (chain) chain[0].locked = !chain[0].locked;
-});
 
 DL.planSpacers = () => DL.busyWith("spacers", async context => {
   const result = await api("/api/drawer/spacers", {
@@ -1151,7 +991,7 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async context => {
     options: DL.layout.settings.spacers,
   });
   if (!DL.spaceContextCurrent(context)) {
-    toast("Spacer generation finished in the Space you left. The current Space was not changed.");
+    toast("Spacer saving finished in the Space you left. The current Space was not changed.");
     return;
   }
   DL.adopt(result);
@@ -1174,7 +1014,7 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async context => {
     if (connectors.lines.length) connectorLines = ["Connector files saved:", ...connectors.lines, ...connectors.notes];
   } catch (error) {
     if (!DL.spaceContextCurrent(context)) {
-      toast("Spacer generation finished in the Space you left. The current Space was not changed.");
+      toast("Spacer saving finished in the Space you left. The current Space was not changed.");
       return;
     }
     connectorLines = [`Connector files could not be saved: ${error.message}`];
@@ -1227,9 +1067,10 @@ DL.spacerPrintGroups = (layout = DL.layout) => {
   });
 };
 
-// This reorders only planned copy indices so the selected active-drawer
-// copies become the next contiguous printed copies. Other planned copies
-// stay planned.
+// Spacer-specific count semantics (accepted; spacers are repeated filler
+// parts): a spacer copy numbered past its row's printed Qty is still to print.
+// This reorders only those to-print copy indices so the selected active-drawer
+// copies become the next contiguous printed copies.
 DL.promoteSpacerCopies = (group, requestedCount, layout = DL.layout) => {
   let remaining = Math.min(
     Number(requestedCount) || 0,
@@ -1354,7 +1195,7 @@ DL.removeSpacers = () => DL.change(() => {
 });
 
 // Saves a file for every connector the layout needs. Connectors are part of
-// generating spacers, not a separate Space setting.
+// saving spacers, not a separate Space setting.
 DL.saveConnectorFiles = async (context = DL.spaceContext()) => {
   DL.requireSpaceContext(context);
   const result = await api("/api/drawer/connectors", {

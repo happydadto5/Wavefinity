@@ -45,14 +45,13 @@ See [changelog.md](changelog.md) for dated implementation changes.
 The control panel is ordered by **blast radius**: a setting sits above
 everything whose meaning it can change.
 
-**The top selector decides what the thing is.** *Let’s design a* offers **Bin**,
-the normal design; **Storage Box**, a separate child-bin container
-architecture; and **Base Trim**, a separate open-centre perimeter for a
-rectangular field of bins. Lid & Stacking is a bin-level option, not a
-top-selector design type. Storage Box retires connectors and ordinary interior
-parts except Dividers; Base Trim has no floor, interior parts, inventory entry, or
-side connector. The selected wall/base values are shown and saved; they are never
-silent generation-only overrides.
+**The Designer designs a Bin.** The Designer always means an ordinary **Bin**. A **Storage Box** and a **Base Trim** are
+*structural outputs of their Space*, never Designer objects and never Inventory
+rows: a Storage Box Space saves or prints its own case (settings live on the
+Space and are edited in **Edit Space**), and a Surface Space saves or prints its
+own Base Trim, both from **Space Actions** in the Space header. Lid & Stacking is
+a bin-level option. The selected wall/base values are shown and saved; they are
+never silent generation-only overrides.
 
 **Lid & Stacking** offers three ordinary-bin configurations: **Stackable Bin**
 stacks directly with no lid, **Stackable Lid** closes the bin and keeps a flat
@@ -64,38 +63,36 @@ Side connectors are unavailable while a lid is fitted.
 
 **Controls follow their meaning, not their mechanism.**
 
-- A **select** is for choosing one of several named states — *Let’s design a*,
+- A **select** is for choosing one of several named states —
   *Lid type*, *Lid snugness*, *Show*, *Orientation*, *Storage Box Stacking*. This holds even at two
   options: a row of big buttons for a two-state setting reads as two actions,
   and gives no clue the two are exclusive.
 - A **checkbox** is for a genuine on/off with no second state worth naming —
   *Standard base*, *Stacking* and *Add label* inside Storage Box.
-- A **button** is for something that *happens* — *Generate*, *Reset*, *Top*,
+- A **button** is for something that *happens* — *Save*, *Reset*, *Top*,
   *Show Log*. Nothing that merely records a preference is a button.
 
 Checkbox rows put the label first and the box on the right, everywhere.
 
 **Settings that belong together live together.** A dependent control sits
 directly under the control that reveals it (*Standard walls?* → *Wall
-thickness* → the thin-wall warning). One setting has exactly one control: Storage Box
-used to carry its own duplicate wall-thickness select that wrote back into the
-main one, and that duplicate is gone. Anything naming the output file —
+thickness* → the thin-wall warning). One setting has exactly one control.
+Anything naming the output file —
 *Part name* — lives in the output panel beside *Save Location* and the generate
 buttons, not in the middle of the build form.
 
 **Automatic changes are shown, never silent.** When the app overrides what was
-typed — Storage Box growing the bin field, stacking raising the wall and floor — it
+typed — stacking raising the wall and floor — it
 says so in plain language in a note under the control that caused it, and it
 never writes the new value back into the field the user is typing in.
 
 **The right side has three primary views: *3D*, *2D* and optional *Space*.** 3D and 2D
-show the bin being designed (2D is where its interior parts are laid out, and
-remains available for a Storage Box Divider layout). **Space is a mode, not a
-panel**: it swaps the whole screen: the inventory and its tools take the sidebar, the
-drawer takes the workspace, and the bin editor's chrome (placed parts, the
-design file buttons) steps aside. Undo, Redo and Ctrl+Z act on the drawer while
-it is showing. Space inventory and work controls occupy the sidebar; **Auto
-Layout** is a compact panel on the Space preview. The left mode switch reads
+show the bin being designed (2D is where its interior parts are laid out).
+**Space is a mode, not a panel**: it swaps the whole screen: the inventory and
+its tools take the sidebar, the Space takes the workspace, and the bin editor's
+chrome (placed parts, the design file buttons) steps aside. Undo, Redo and
+Ctrl+Z act on the Space while it is showing. A Space has only two mental
+objects: **the Space** and **the bins inside it**. The left mode switch reads
 **Space | Design**. In Design, the main build fields, **Parts & Options**, and
 **Connectors** appear in separate cards.
 
@@ -108,25 +105,21 @@ to either side, pan (drag the floor, or right-drag) and zoom (wheel, −/+,
 *Fit*). It never spins round or looks from underneath, so the front of the
 drawer is always nearest you. That is what makes "a short bin behind a tall
 one" visible, and it means dragging a bin away from you always moves it back.
-The printed map stays a flat, numbered plan.
 
 **Colour means height.** Bins run from light (short) to dark (tall) teal, Storage Box
 cases purple, spacers sand. A bin shows its name, or its size when it
 has none. Red is a real fault (overlap, sticking out, too tall for the drawer);
 a dashed orange outline is the softer height-order warning.
 
-**Stacks and plans read at a glance.** A stack is drawn as its bins standing
+**Stacks read at a glance.** A stack is drawn as its bins standing
 on each other, each foot sunk into the bin below. A stackable bin's swatch
-carries a ⇅. A planned copy (placed before it is printed) is drawn faded with a
-dashed teal outline; its Inventory row shows the planned and needed count until it is marked printed.
-Dropping a bin on a same-size bin that stacks the same way snaps it on top with
-the sides aligned; anything else is refused, and the refusal says why.
+carries a ⇅. Dropping a bin on a same-size bin that stacks the same way snaps it
+on top with the sides aligned; anything else is refused, and the refusal says why.
 
-**Auto layout offers; it does not decide.** It applies the best arrangement and
-lists the others as clickable cards, each showing bins placed against how many
-were wanted, any stack count, and height clashes or "tall bins at the back",
-and Undo steps back. A layout that bends the height rule is offered only when
-the rule is what left bins out.
+**Bins are placed by hand.** Every ordinary bin is one Inventory row and is placed at most once. A bin that is
+not placed waits in the **Unplaced bins** rail beside the Space (a derived view of
+Inventory, in Inventory order - never stored coordinates). Drag it into the
+Space; drag a placed bin off the Space to unplace it again.
 
 ---
 
@@ -481,15 +474,15 @@ file.
 **Surface size** is entered as the maximum finished *outside* width and
 length in mm. Wavefinity rounds down to the largest whole-unit interior field
 that fits (`outside = field + mating gap + 2 × trim width`); Space data still
-stores the interior field. A new Surface's first job is its edge: Space says
-*Finish your edge, then start adding bins*, and once the Base Trim edge is
-generated or printed, with no real bin in inventory yet, the first bin design
-opens. In Space, the bin being designed shows as **Current design** (never
-written to inventory) until it is generated; reopening the Space later
-restores that exact design, generated or not. A selected bin has **Duplicate**.
+stores the interior field and the trim size. The Surface owns its **Base Trim**:
+**Save Base Trim** / **Print Base Trim** in Space Actions build it from the
+Surface definition (with the printer-bed size used to split it) and never create
+an Inventory row. A bin you design saves itself into Inventory as you go and
+reopening the Space later restores the design you were editing (resume is
+recovery, not an Inventory identity). Each Inventory row has **Duplicate**.
 
 A folder is either an untyped Design folder, or a typed **Space** - a
-**Drawer**, a **Surface**, **Portable Storage**, or **Pegboard**. *Create New Space*
+**Drawer**, a **Storage Box**, a **Surface**, or a **Pegboard**. *Create New Space*
 configures the Space's type and dimensions first and chooses the save folder
 last; *Open Existing* can instead turn an already-selected folder into a
 Space, or use it without a type. The **Space** tab (beside *3D* and *2D*)
@@ -500,7 +493,7 @@ so nothing already generated is lost or needs re-adding. Because a Space's
 layout depends on the inventory it places, a typed Space always keeps
 inventory on and the checkbox is disabled while one is active. An older
 folder's legacy "Box" identity is migration-only: setting it up recovers it
-as Portable Storage, never as a current Box. A legacy folder's older,
+as a Storage Box, never as a current Box. A legacy folder's older,
 multiple-drawer layout is preserved as a compatibility exception - a new
 Drawer Space otherwise represents exactly one physical drawer.
 
@@ -514,21 +507,37 @@ selected board standard's removable adapters. Cleat Count X (Auto or 1–5) and
 Y (Auto or 1–3) control the receiver grid. Multi-cleat receivers stay
 grid-aligned and side-biased, impossible counts are disabled or rejected, and
 vertical ribs appear only across unsupported spans over 40 mm. Pegboard bins
-do not use drawer stacking, Auto layout, spacers, or Base Trim.
+do not use drawer stacking, spacers, or Base Trim.
 Standard-pegboard bins need at least 48 mm height for the paired-hole adapter
 to stay hidden behind them. Adapters are exported flat on a separate
 print plate with board pegs pointing up; check physical fit on your actual
 board before a full print.
 
-Creating a new Drawer Space lands directly in the normal Bin editor with every
+Creating a new Space lands directly in the normal Bin editor with every
 ordinary option (Interior print mode, Base, Walls, Inside Grip) still
 visible; there is no tutorial or first-run card. A one-drawer Drawer Space's
-name, width, depth and usable height belong to the Space: the Space tab shows
-them read-only with an **Edit drawer** button (the Space Edit form), and an edit
+name, width, depth and usable height belong to the Space: the Space header shows
+them read-only with **Edit Space** (the Space Edit form), and an edit
 there updates the loaded layout through the normal Drawer save path. An empty
-Drawer view or Inventory points to **Design first bin** (or adding an existing
-bin), and Auto layout and spacer/connector actions stay disabled until there is
-something to work on.
+Space view or Inventory points to **Design first bin** (or adding an existing
+bin), and spacer/connector actions stay disabled until there is something to
+work on.
+
+**The four Space types** are exactly **Drawer**, **Storage Box**, **Surface** and
+**Pegboard**. A Storage Box's internal kind is `portable` (a legacy `box` kind
+still normalizes to it). Its Space X/Y/Z are the usable child-bin field width,
+depth and height; the outer case is derived. The case settings live on the Space
+as `space.storage_box` (`secure_lid`, `latch_count`, `latch_strength`,
+`lid_headroom_mm`, `label_enabled`, `label_text`, `label_location`,
+`front_label_style`, `stacking`, `handle`, `wall_mm`, `base_mm`), round-trip
+through `.wavefinity.json`, `layout.space` and hosted Inventory text, and default to
+the established B4B values when a legacy Space has no block. **Space Actions**
+owns the Space-level buttons - *Open Space…*, *Edit Space*, *Show Folder*, *New
+Space* - plus the structural output: *Save Storage Box* / *Print Storage Box* for a
+Storage Box and *Save Base Trim* / *Print Base Trim* for a Surface. Those outputs
+are built by `organizer_space_outputs.py` as a transient empty-layout B4B (or Base
+Trim) design from the Space definition and go through `/api/space/structural-*`,
+which suppress Inventory logging entirely.
 
 - **Space identity.** A typed Space carries a permanent `space_id` (UUID) in
   its `.wavefinity.json` (metadata version 8; identity required since version 5). The per-user profile keeps a
@@ -541,31 +550,33 @@ something to work on.
   fresh starter - generating or printing it keeps it as the resume target,
   and a later edit replaces it again.
 - **The inventory file** is a Markdown table, one row per bin design, with an
-  **ID**, a **Kind** (bin, Storage Box, spacer, added by hand), a **Name**
+  **ID**, a **Kind** (bin, Storage Box, spacer, added by hand), a **Name**,
   a **Stack** (blank, `lid` or `direct` - how the bin was printed to stack)
-  and a **Qty**. Qty is how many copies you have *printed*. Generating is not
-  printing: a generated bin is always recorded at Qty 0. Print (direct, or
-  *Print Selected to Bambu Studio* in Space Inventory after ticking designs or
-  pressing *Select all not printed* or *Select all*) raises Qty only after the slicer opened
-  successfully. You can still change Qty by hand for external or failed prints,
-  and a superseded version can be set back to 0. The ✕ on a row removes that bin from the inventory altogether (its
-  placed copies come out of every drawer). Under the table, a `## Drawer layout` JSON block holds the drawers and
-  where each copy sits. Rows stay hand-editable; keep the IDs. An older
-  seven-column log is upgraded the first time it is saved, and a one-off `.bak`
-  copy is left beside it. Every save re-reads the file and merges, so a bin
-  generated while the layout is open is never lost.
+  and a **Status**: **In Design**, **Saved** (files exist) or **Printed**. There
+  is no user-facing quantity: a row is one bin, and `Qty` survives only as a
+  0/1 compatibility field derived from Status. Saving files is not printing. Print
+  (direct, or *Print Selected to Bambu Studio* in Space Inventory after ticking
+  designs or pressing *Select all not printed* or *Select all*) marks each
+  selected bin Printed exactly once, and only after the slicer opened
+  successfully. **Mark Printed** / **Mark Not Printed** on a row change the
+  status for external or failed prints. **Delete** on a row removes that bin from
+  the inventory altogether (its one placement and design source go with it);
+  dragging a bin off the Space only unplaces it. Under the table, a `## Drawer
+  layout` JSON block holds the drawers and where each bin sits. Rows stay
+  hand-editable; keep the IDs. An older seven-column log is upgraded the first
+  time it is saved, and a one-off `.bak` copy is left beside it. Every save
+  re-reads the file and merges, so a bin saved while the layout is open is never
+  lost.
 - **Space workspace.** A typed Space opens as one workspace with a **Space |
   Design** switch at the top left, under the Space's name, type (Drawer,
-  Surface, Portable Storage or Pegboard) and size. The switch decides what the left panel
-  edits: *Space* is the layout tools, *Design* is the current bin or Storage
-  Box. The 3D and 2D tabs select Design; the Space tab selects Space.
-  Opening an existing Space with a bin, Storage Box, or hand-added bin in
-  Inventory starts in *Space*. An empty or spacer-only Space starts in
-  *Design / 3D*. The saved Current design is preserved and appears in Space
-  when applicable. The workspace stays open until the folder
-  stops being that Space. The name, type and size are shown read-only; **Edit**
-  opens the same fields in place with **Save Changes** and **Cancel** (never
-  the New Space buttons).
+  Storage Box, Surface or Pegboard) and size, and its **Space Actions**. The
+  switch decides what the left panel edits: *Space* is the layout tools, *Design*
+  is the current bin. The 3D and 2D tabs select Design; the Space tab selects
+  Space. Opening an existing Space with a bin or hand-added bin in Inventory
+  starts in *Space*. An empty or spacer-only Space starts in *Design / 3D*. The
+  workspace stays open until the folder stops being that Space. The name, type and
+  size are shown read-only; **Edit Space** opens the same fields in place with
+  **Save Changes** and **Cancel** (never the New Space buttons).
 - **Drawers.** A drawer's inside width, depth and **max height** come from its
   Space. The layout has one fixed rule set, not choices: an **8 mm** whole-unit
   grid, width running left to right, the grid against the front-left corner, and the
@@ -575,7 +586,7 @@ something to work on.
   overlap that makes), and any other axis, corner or clearance goes back to
   these rules. Only a legacy Space that still holds several drawers keeps a
   name and Delete under *Advanced Settings*; the drawers share one inventory, and
-  a copy placed in one drawer is not available to another.
+  a bin placed in one drawer is not available to another.
 - **Bins never turn a quarter turn on their own.** Left walls mate with right,
   and front with back; a bin turned 90 degrees meets its neighbours crest to
   crest, so there is no sideways option.
@@ -590,30 +601,27 @@ something to work on.
   direct snap), which the drawer clearance check includes. Dragging a bin in a
   stack takes it and everything above it; dragging the bottom bin moves the
   whole stack.
-- **Planned bins.** When every printed copy of a bin is already placed, the
-  next copy goes in as *planned* instead: drawn faded, with a dashed outline.
-  Its Inventory row shows the planned and needed count. **Mark Printed** marks
-  all planned copies, so you can lay a drawer out first and print to it.
-- **Placing.** Drag a bin from the inventory onto the drawer, or double-click
-  it to drop it in the best free spot. Drag placed bins to move them: they
-  snap to the 8 mm grid and refuse overlaps and the drawer edge.
-  Drag one off the drawer, or select it and press **Delete**, to take it out.
-  Keys: the arrows move one unit, **L** locks, **Delete** takes out, **F** fits
-  the view, **Esc** deselects.
-- **Auto layout** arranges the drawer. *Arrange* either moves everything not
-  locked, or only adds new bins around the rest. *Tall bins* keeps tall bins
-  always behind shorter ones (the default), behind them when possible, or
-  anywhere. *Height check* counts anything in front of a bin, or only the bin
-  right in front of it. *Stack stackable bins* snaps same-size stackable bins
-  into stacks as tall as the drawer takes. It returns up to five arrangements — Tidy rows, Tight fit, Columns,
-  Most bins and, if the height rule left bins out, Fits more — and names
-  anything that did not fit.
+- **Inventory is the primary Space control.** Each ordinary row shows a
+  bulk-print tick (where eligible), the name, its dimensions and exactly one
+  lifecycle label (**In Design**, **Saved** or **Printed**), with **Edit**,
+  **Duplicate**, **Print**, **Mark Printed** (or **Mark Not Printed**) and a small
+  **Delete**. Clicking a placed bin on the canvas highlights and scrolls to its
+  Inventory row; clicking a row highlights its placement (or its chip in Unplaced
+  bins). *Clear selection* is disabled while nothing is ticked.
+- **Placing.** Drag a bin from **Unplaced bins** (or its Inventory row) onto the
+  Space. Drag placed bins to move them: they snap to the 8 mm grid and refuse
+  overlaps and the Space edge. Drag one off the Space, or select it and press
+  **Delete**, to unplace it - it returns to Unplaced bins and stays in Inventory.
+  Keys: the arrows move one unit, **Delete** unplaces, **F** fits the view, **Esc**
+  deselects. An ordinary bin is placed at most once; a legacy layout that holds
+  several copies of one row keeps one deterministically when it loads.
 - **Space & spacers.** The drawer view itself shows the one or two biggest
   open rectangles a bin could still go into, each as both a millimetre size
-  and a Wavefinity-unit size (*Design a Storage Box* sends the primary one to
-  the bin editor); the left panel covers connector and layout problems
-  instead of restating those as a summary. **Make spacers** fills the drawer,
+  and a Wavefinity-unit size; the left panel covers connector and layout problems
+  instead of restating those as a summary. The **Spacers** section (below
+  Inventory, collapsed until opened) fills the drawer,
   15 mm tall by default (*Height*). There is one filler part, the **Spacer**.
+  Spacers are repeated filler parts, so they keep their own placement counts.
   Empty grid cells become **X spacers**: open frames whose outside is exactly
   a bin's wavy wall, so they nest with the bins around them and take a
   connector (the lock bumps are kept) - inside, they have no floor, just one
@@ -637,20 +645,17 @@ something to work on.
   rewrites them as spacers the next time it saves. Spare copies of a matching
   spacer already in the inventory are used first. *Keep gaps open from*
   leaves any gap at least that wide both ways empty, for a bin you will print
-  later. **Generate Selected Spacers**
+  later. **Save Selected Spacers**
   also saves one connector file for each pair of rim heights the layout needs,
   and says how many of each to print. Stacks join at their top bins; X spacers
   need none, since their waves hold them. **Print Spacers + Connectors** opens the lot in
-  Bambu Studio. **Print map** prints a plan of the drawer with a list of where
-  each bin goes.
-- **Make Base Trim** uses the minimum bounding rectangle around one completely
-  filled rectangular block of placed bins. Stacks count once and free edge
-  spacers do not enlarge the field. Irregular or half-unit bounds are refused
-  with a direct explanation; manual Base Trim sizing remains available.
+  Bambu Studio.
+- **Surface Fill** (Surface only) turns free Surface cells into ordinary editable
+  bins. It first settles the Designer's autosave, then works from the authoritative
+  Inventory and layout.
 - **Saving.** *Auto-save* (on by default) writes the layout after a change, but
   no more than once every 5 minutes while you keep editing - leaving the tab
-  or closing auto-saves right away regardless. Turn auto-save off and the
-  **Save layout** button (or Ctrl+S) appears in its place. Qty, names and
+  or closing auto-saves right away regardless. Names, status and
   hand-added bins always save straight away, because they are the inventory.
   The layout is recalled automatically every time you open the tab. **Save
   location** shows the current folder and opens the folder picker, the same
@@ -876,7 +881,7 @@ folder gets an additive `.wavefinity.json` marker holding its folder mode,
 inventory choice, optional Space identity, and per-Space Keep Defaults state.
 `inventory` (default `true`) controls whether generated bins/Storage Boxes are logged;
 `folder_mode` (`"design"` or `"space"`) says whether the folder also represents
-one typed Drawer, Surface, Portable Storage, or Pegboard Space. `folder_mode: "space"` always
+one typed Drawer, Storage Box, Surface, or Pegboard Space. `folder_mode: "space"` always
 implies `inventory: true` - a Space's layout depends on the inventory it
 places. A normal `"design"` folder can have inventory on (the default for a
 new folder) or explicitly off (`/api/folder/inventory`, mirrored by the
@@ -1532,12 +1537,12 @@ layered implementation:
 | `organizer_app.py` | CLI, exporters and design persistence. Legacy palette constants are generated from the feature registry. | Yes, for CLI subcommands. |
 | `wavefinity_web.py` | The local HTTP service — see [The browser service](#the-browser-service). | Yes, the default UI launch target. |
 | `organizer_inventory.py` | The drawer inventory file (`Wavefinity bins.md`): parsing, legacy upgrade, merge-saves, bin logging. | No. |
-| `organizer_drawer.py` | Drawer layout: grid fit, drawer report, auto-layout packer, spacer planning and export, and its `/api/drawer/*` routes. | No. |
+| `organizer_drawer.py` | Drawer layout: grid fit, drawer report, spacer planning and export, and its `/api/drawer/*` routes. | No. |
 | `organizer_pegboard.py` | Pegboard standards, size derivation, receiver layout/geometry, standard-specific adapters, and mount footprints. | No. |
 | `test_organizer_app.py` | Box, connector, label, preview, CLI and export regressions. | Only via `python -m unittest`. |
 | `test_organizer_inserts.py` | Items, layout, registry, primitive and insert regressions. | Only via `python -m unittest`. |
 | `test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest`. |
-| `test_drawer.py` | Inventory file, auto layout and spacer regressions. | Only via `python -m unittest`. |
+| `test_drawer.py` | Inventory file, one-placement layout, report and spacer regressions. | Only via `python -m unittest`. |
 | `test_pegboard.py` | Pegboard sizing, persistence, mount geometry and placement regressions. | Only via `python -m unittest`. |
 | `run_tests.py` | Compact test runner: one pass/fail summary line, full tracebacks only on failure. See [Testing rules](#testing-rules). | Yes — `python3 run_tests.py [module ...]`. |
 
@@ -1600,8 +1605,9 @@ In a typed Space, each ordinary bin has one canonical Inventory row and one
 through `spaceAutosaveChain`; it flushes visible edits before replacement,
 Save, Print, or a folder/Space switch. `DL.spaceContext()` guards those writes
 and their completions against a changed Space. Save and Print update that same
-row. Qty remains a temporary compatibility bridge while the current Space UI
-is being simplified; it is not a second copy model for new ordinary bins.
+row. An ordinary row is one placement identity (at most one placement, copy 0);
+its unplaced state is derived from Inventory for the staging rail and is never
+persisted. `Qty` is only a 0/1 compatibility bridge under Status.
 Standalone Design keeps its separate `.wavefinity.json` file workflow and is
 not owned by typed-Space autosave.
 

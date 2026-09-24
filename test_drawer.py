@@ -8,8 +8,8 @@ from unittest import mock
 
 from shapely import affinity
 
+import organizer_drawer
 from organizer_drawer import (
-    auto_layout,
     drawer_grid,
     drawer_report,
     drawer_routes,
@@ -40,6 +40,7 @@ from organizer_inventory import (
     render_inventory,
     save_inventory,
     save_inventory_text,
+    storage_box_defaults,
 )
 from organizer_spaces import FolderMetadataError, space_routes
 
@@ -96,7 +97,10 @@ class InventoryFileTests(unittest.TestCase):
             # directly - that only ever arrives via migration - so a new
             # mating-boundary case is created as "portable".
             made = routes["/api/space/create"]({"output": str(folder), "name": "Screw box", "kind": "portable", "x": 96, "y": 48, "z": 40})
-            self.assertEqual(made["folder"]["space"], {"name": "Screw box", "kind": "portable", "x": 96.0, "y": 48.0, "z": 40.0})
+            self.assertEqual(made["folder"]["space"], {
+                "name": "Screw box", "kind": "portable", "x": 96.0, "y": 48.0, "z": 40.0,
+                "storage_box": storage_box_defaults(),
+            })
             self.assertEqual(made["folder"]["folder_mode"], "space")
             self.assertTrue((folder / ".wavefinity.json").is_file())
             self.assertEqual(made["recent"][0]["name"], "Screw box")
@@ -271,7 +275,10 @@ class FolderMigrationTests(unittest.TestCase):
             routes, _prefs = self.routes(tmp)
             inspected = routes["/api/space/inspect"]({"output": str(folder)})["folder"]
             self.assertEqual(inspected["folder_mode"], "space")
-            self.assertEqual(inspected["space"], {"name": "Screws", "kind": "box", "x": 96.0, "y": 48.0, "z": 40.0})
+            self.assertEqual(inspected["space"], {
+                "name": "Screws", "kind": "box", "x": 96.0, "y": 48.0, "z": 40.0,
+                "storage_box": storage_box_defaults(),
+            })
             self.assertEqual(inspected["space_source"], "legacy_metadata")
             self.assertTrue(inspected["needs_setup"])
 
@@ -282,7 +289,10 @@ class FolderMigrationTests(unittest.TestCase):
                 "output": str(folder), "name": "Screws", "kind": "box", "x": 96, "y": 48, "z": 40,
             })["folder"]
             self.assertEqual(result["folder_mode"], "space")
-            self.assertEqual(result["space"], {"name": "Screws", "kind": "portable", "x": 96.0, "y": 48.0, "z": 40.0})
+            self.assertEqual(result["space"], {
+                "name": "Screws", "kind": "portable", "x": 96.0, "y": 48.0, "z": 40.0,
+                "storage_box": storage_box_defaults(),
+            })
             self.assertTrue(result["inventory"])
             written = json.loads((folder / ".wavefinity.json").read_text())
             self.assertEqual(written["folder_mode"], "space")
@@ -381,32 +391,57 @@ class FolderMigrationTests(unittest.TestCase):
             self.assertEqual(metadata.read_bytes(), before)
 
 
-class AutoLayoutTests(unittest.TestCase):
-    def test_everything_fits_without_overlap_and_tall_bins_stand_behind(self):
-        bins = [_bin("B1", 16, 16, 50, qty=3), _bin("B2", 32, 16, 20, qty=2), _bin("B3", 16, 32, 35)]
-        layout = _layout(8 * 8 + 1, 6 * 8 + 1)
-        result = auto_layout(layout, bins)
-        best = result["candidates"][0]
-        self.assertEqual(best["stats"]["placed"], 6)
-        self.assertEqual(best["stats"]["height_issues"], 0)
-        layout["drawers"][0]["placements"] = best["placements"]
+class AutoLayoutRemovalTests(unittest.TestCase):
+    def test_auto_layout_function_route_and_helpers_are_gone(self):
+        for name in ("auto_layout", "_pack", "_rescue_pack", "_build_stacks", "STRATEGIES",
+                     "AUTO_NO_SPOT", "HEIGHT_RULES", "reconcile_printed_copies"):
+            self.assertFalse(hasattr(organizer_drawer, name), name)
+        routes = drawer_routes(threading.Lock(), Path("."), hosted=False)
+        self.assertNotIn("/api/drawer/auto", routes)
+        for path in ("/api/drawer/report", "/api/drawer/surface-fill", "/api/drawer/spacers",
+                     "/api/drawer/connectors", "/api/drawer/design-source/duplicate"):
+            self.assertIn(path, routes)
+
+    def test_manual_placements_still_report_fit_overlap_and_height(self):
+        bins = [_bin("B1", 16, 16, 50), _bin("B2", 32, 16, 20)]
+        layout = _layout(8 * 8 + 1, 6 * 8 + 1, placements=[
+            {"bin": "B1", "copy": 0, "gx": 0, "gy": 0}, {"bin": "B2", "copy": 0, "gx": 2, "gy": 0},
+        ])
         report = drawer_report(layout["drawers"][0], bins)
         self.assertEqual([p for p in report["problems"] if p["type"] != "height"], [])
-        self.assertEqual(report["height_issues"], 0)
+        overlap = _layout(8 * 8 + 1, 6 * 8 + 1, placements=[
+            {"bin": "B1", "copy": 0, "gx": 0, "gy": 0}, {"bin": "B2", "copy": 0, "gx": 1, "gy": 0},
+        ])
+        report = drawer_report(overlap["drawers"][0], bins)
+        self.assertTrue(any(p["type"] == "overlap" for p in report["problems"]))
+
+    def test_report_has_no_planned_or_locked_semantics_for_ordinary_bins(self):
+        # An unprinted (Qty 0) placed bin is simply placed - never "planned".
+        bins = [_bin("B1", 16, 16, 30, qty=0), _bin("B2", 16, 16, 30, qty=1)]
+        layout = _layout(8 * 8 + 1, 6 * 8 + 1, placements=[
+            {"bin": "B1", "copy": 0, "gx": 0, "gy": 0, "locked": True},
+            {"bin": "B2", "copy": 0, "gx": 2, "gy": 0},
+        ])
+        report = drawer_report(layout["drawers"][0], bins)
+        self.assertNotIn("planned", report)
+        self.assertEqual(report["placed"], 2)
+        pegboard = drawer_report({**layout["drawers"][0], "boundary": "pegboard"}, bins)
+        self.assertNotIn("planned", pegboard)
+        from organizer_drawer import _grid_items
+        item = _grid_items(normalise_drawer(layout["drawers"][0]), {one["id"]: one for one in bins})[0]
+        self.assertNotIn("locked", item)
+        self.assertTrue(all("planned" not in layer for layer in item["layers"]))
 
 
 class StackTests(unittest.TestCase):
-    def test_stackable_bins_snap_into_stacks_as_tall_as_the_drawer_takes(self):
+    def test_a_manual_stack_of_same_size_stackable_bins_reports_one_stack(self):
         bins = [
-            {**_bin("B1", 16, 16, 30, qty=3), "stack": "direct"},
-            _bin("B2", 16, 16, 20),
+            {**_bin("B1", 16, 16, 30), "stack": "direct"},
+            {**_bin("B2", 16, 16, 30), "stack": "direct"},
         ]
-        layout = _layout(4 * 8 + 1, 4 * 8 + 1, height=63)
-        best = auto_layout(layout, bins)["candidates"][0]
-        stacked = [p for p in best["placements"] if "on" in p]
-        self.assertEqual(len(stacked), 1)      # 33 mm envelope + one 30 mm module; a third would not fit
-        self.assertEqual(best["stats"]["placed"], 4)
-        layout["drawers"][0]["placements"] = best["placements"]
+        layout = _layout(4 * 8 + 1, 4 * 8 + 1, height=100, placements=[
+            {"bin": "B1", "copy": 0, "gx": 0, "gy": 0}, {"bin": "B2", "copy": 0, "on": "B1:0"},
+        ])
         report = drawer_report(layout["drawers"][0], bins)
         self.assertEqual(report["stacks"], 1)
         self.assertEqual([p for p in report["problems"] if p["type"] != "height"], [])

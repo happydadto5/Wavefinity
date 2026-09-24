@@ -257,17 +257,6 @@ DV.entries = (drawer, grid) => {
     const one = DL.bin(p.bin);
     if (one) entries.push({ key: DL.key(p), x0: p.x, y0: p.y, x1: p.x + p.w, y1: p.y + p.d, layers: [{ bin: one, key: DL.key(p), z0: 0, z1: Number(one.z) }], mode: "", edge: true });
   }
-  // The design being edited, standing at the first legal spot: session only,
-  // draggable in place (session only), and never a placement.
-  const working = DL.working && !DL.working.error ? DL.workingFit() : null;
-  if (working?.ok && !DV.drag?.moved) {
-    const bin = DL.working.bin;
-    const [w, d] = DL.cells(bin, drawer);
-    entries.push({
-      key: "__working", ...box(working.gx, working.gy, w, d),
-      layers: DV.layersFor([bin], ["__working"], 0), mode: "ghost", ghost: true, working: true,
-    });
-  }
   const ghost = drag || DV.drop;
   if (ghost) {
     const bins = drag ? drag.bins : [DV.drop.bin];
@@ -349,7 +338,8 @@ DV.render = () => {
   const drawer = DL.drawer();
   DV.cam = DL.isPegboard(drawer) ? DV.pegboardCamera(box.width, box.height, drawer) : DV.camera(box.width, box.height, drawer);
   DV.hits = DL.isPegboard(drawer) ? DV.paintPegboardScene(ctx, drawer, DV.cam) : DV.paintScene(ctx, drawer, DV.cam);
-  DV.renderSelection();
+  // Taking a bin off the Space is a drop onto the staging rail beside it.
+  $("#dl-staging")?.classList.toggle("receiving", Boolean(DV.drag?.moved && DV.drag.outside));
 };
 
 DV.paintPegboardScene = (ctx, drawer, cam) => {
@@ -409,16 +399,15 @@ DV.paintPegboardScene = (ctx, drawer, cam) => {
       ctx.font = "600 11px 'Segoe UI', sans-serif";
       ctx.fillText(DV.fitText(ctx, info.name, Math.max(20, boxW - 8)), cx, cy);
     }
-    if (!entry.ghost || entry.working) {
+    if (!entry.ghost) {
       entry.layers.forEach(layer => hits.push({
         key: layer.key,
         grid: true,
         z: 0,
         polys: [poly],
-        working: Boolean(entry.working),
       }));
     }
-    const selected = entry.working || entry.layers.some(layer => layer.key === DL.selected);
+    const selected = entry.layers.some(layer => layer.key === DL.selected);
     if (selected) {
       const layout = DL.pegboardRefreshError ? null : (DL.pegboardLayouts[one.id] || one.pegboard_layout);
       for (const [mx, my] of layout?.mount_offsets || []) {
@@ -538,15 +527,13 @@ DV.paintScene = (ctx, drawer, cam) => {
         : DV.hover && keys.includes(DV.hover) ? DV.hover : null;
     let topFace = null;
     let topInk = "#17252d";
-    let topPlanned = false;
     entry.layers.forEach((layer, index) => {
       const one = layer.bin;
       const { z0, z1 } = layer;
-      const planned = !entry.ghost && DL.isPlanned({ bin: one.id, copy: Number(layer.key.split(":")[1]) });
       const problem = problems.get(layer.key);
       let color = DV.binColor(one, range);
       if (entry.mode === "invalid" || problem === "error") color = { ...color, hue: 5, sat: 62, light: 83, ink: "#5e1f1b" };
-      ctx.globalAlpha = entry.mode === "leaving" ? 0.35 : entry.mode === "ghost" ? 0.78 : planned ? 0.55 : 1;
+      ctx.globalAlpha = entry.mode === "leaving" ? 0.35 : entry.mode === "ghost" ? 0.78 : 1;
       const faces = [];
       if (eye[1] < y0) faces.push(["front", [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]]]);
       if (eye[1] > y1) faces.push(["back", [[x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]]]);
@@ -556,22 +543,11 @@ DV.paintScene = (ctx, drawer, cam) => {
       const stroke = entry.mode === "invalid" || problem === "error" ? "#a8443d" : "rgba(23,37,45,.45)";
       const screens = faces.map(([side, points]) => ({ side, screen: face(points, DV.tone(color, DV.FACE_TONE[side]), stroke) }));
       ctx.globalAlpha = 1;
-      if (entry.working) {
-        ctx.save();
-        // While the Design editor is open this is the bin being worked on:
-        // outline it firmly so it reads as the active item in the Space.
-        const designing = DP.mode === "design";
-        ctx.setLineDash(designing ? [] : [5, 3]);
-        ctx.strokeStyle = designing ? "#0f8f96" : "#146c70";
-        ctx.lineWidth = designing ? 3 : 1.8;
-        screens.forEach(({ screen }) => { ctx.beginPath(); screen.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.stroke(); });
-        ctx.restore();
-      }
-      if (planned || problem === "height") {
+      if (problem === "height") {
         ctx.save();
         ctx.setLineDash([4, 3]);
-        ctx.strokeStyle = planned ? "#146c70" : "#c8741f";
-        ctx.lineWidth = planned ? 1.5 : 2;
+        ctx.strokeStyle = "#c8741f";
+        ctx.lineWidth = 2;
         screens.forEach(({ screen }) => { ctx.beginPath(); screen.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.stroke(); });
         ctx.restore();
       }
@@ -583,10 +559,9 @@ DV.paintScene = (ctx, drawer, cam) => {
       if (index === entry.layers.length - 1) {
         topFace = screens[screens.length - 1].screen;
         topInk = color.light + DV.FACE_TONE.top < 60 ? "#ffffff" : color.ink;
-        topPlanned = planned;
       }
-      if (!entry.ghost || entry.working) {
-        hits.push({ key: layer.key, grid: !entry.edge, z: z1, polys: screens.map(s => s.screen), working: Boolean(entry.working) });
+      if (!entry.ghost) {
+        hits.push({ key: layer.key, grid: !entry.edge, z: z1, polys: screens.map(s => s.screen) });
       }
       if (DL.isSurface() && !DL.isSpacer(one)) {
         const planTop = z0 + DL.effectiveHeight(one);
@@ -605,15 +580,7 @@ DV.paintScene = (ctx, drawer, cam) => {
         }
       }
     });
-    if (topFace) DV.drawLabel(ctx, entry, topFace, topInk, topPlanned);
-    const base = entry.item?.chain[0];
-    if (base?.locked && topFace) {
-      const [lx, ly] = topFace[3];
-      ctx.font = "10px 'Segoe UI Emoji', sans-serif";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillText("🔒", lx + 3, ly + 2);
-    }
+    if (topFace) DV.drawLabel(ctx, entry, topFace, topInk);
   }
 
   // Walls between you and the drawer, see-through; then every rim.
@@ -692,7 +659,7 @@ DV.binLabelInfo = (one, stackCount = 1) => {
 };
 
 // Name, Width × Length, Height on the top of each column; compact when small.
-DV.drawLabel = (ctx, entry, topFace, ink, planned) => {
+DV.drawLabel = (ctx, entry, topFace, ink) => {
   const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   const [p0, p1, p2, p3] = topFace;           // front-left, front-right, back-right, back-left
   const width = Math.hypot(...mid(p1, p2).map((v, i) => v - mid(p0, p3)[i]));
@@ -713,7 +680,7 @@ DV.drawLabel = (ctx, entry, topFace, ink, planned) => {
   const info = DV.binLabelInfo(top, stackCount);
   const size = Math.min(13, height * 0.28, width / Math.max(3, info.name.length * 0.55));
   if (size < 6) return;
-  ctx.fillStyle = planned ? "#0d5356" : ink;
+  ctx.fillStyle = ink;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
@@ -739,32 +706,6 @@ DV.drawLabel = (ctx, entry, topFace, ink, planned) => {
     ctx.font = `650 ${size}px 'Segoe UI', system-ui, sans-serif`;
     ctx.fillText(DV.fitText(ctx, info.name, width - 6), cx, cy);
   }
-};
-
-DV.renderSelection = () => {
-  const card = $("#dl-selection");
-  if (!card) return;
-  const found = DL.selected && DL.findPlacement(DL.selected);
-  const one = found && DL.bin(found.placement.bin);
-  card.hidden = !one;
-  if (!one) return;
-  const p = found.placement;
-  const copies = Number(one.qty) || 0;
-  const planned = DL.isPlanned(p);
-  const chain = DL.stackOf(DL.selected, found.drawer);
-  const where = chain && chain.length > 1 ? ` · ${chain.findIndex(q => q === p) + 1} of ${chain.length} in a stack` : "";
-  const info = DV.binLabelInfo(one, chain?.length || 1);
-  card.innerHTML = `
-    <strong>${escapeHtml(info.name)}</strong>
-    <span>${escapeHtml(info.dimLine)} · ${escapeHtml(info.fullHeightLine)}${!planned && copies > 1 ? ` · copy ${(p.copy ?? 0) + 1} of ${copies}` : ""}</span>
-    <span>${escapeHtml(DL.stackName(one.stack))}${where}</span>
-    ${planned ? `<span class="dl-planned-note">Planned - not printed yet</span>` : ""}
-    ${found.drawer !== DL.drawer() ? `<span>In ${escapeHtml(found.drawer.name)}</span>` : ""}
-    <div class="dl-selection-actions">
-      ${!DL.isSpacer(one) && !DL.isEdgePlacement(p) ? `<button type="button" data-sel="duplicate" title="Place another copy of this bin">Duplicate</button>` : ""}
-      ${planned ? `<button type="button" data-sel="printed" title="You have printed this one">Mark printed</button>` : ""}
-      ${chain ? `<button type="button" data-sel="lock" title="Locked stacks stay put when you drag or run Auto layout (L)">${chain[0].locked ? "Unlock" : "Lock"}</button>` : ""}
-    </div>`;
 };
 
 // ------------------------------------------------------------------ picking
@@ -829,18 +770,9 @@ DV.wire = () => {
       DV.paint();
       return;
     }
-    if (hit?.working) {
-      const fit = DL.workingFit();
-      const start = fit?.ok && DV.cam.onPlane(sx, sy, hit.z);
-      if (start) {
-        DV.drag = {
-          key: "__working", keys: new Set(["__working"]), bins: [DL.working.bin], working: true,
-          sx, sy, plane: hit.z, start, gx0: fit.gx, gy0: fit.gy, gx: fit.gx, gy: fit.gy,
-          moved: false, valid: true, outside: false, target: null, locked: false,
-        };
-      }
-    } else if (hit) {
-      DL.selected = hit.key;
+    if (hit) {
+      DL.selectPlacement(hit.key);
+      DV.revealRow(DL.selectedRow);
       const chain = hit.grid && DL.stackOf(hit.key);
       const start = DV.cam.onPlane(sx, sy, hit.z);
       if (chain && start) {
@@ -851,11 +783,11 @@ DV.wire = () => {
         DV.drag = {
           key: hit.key, keys: new Set(moving.map(DL.key)), bins: moving.map(p => DL.bin(p.bin)),
           sx, sy, plane: hit.z, start, gx0: gx, gy0: gy, gx, gy, moved: false, valid: true, outside: false,
-          target: null, locked: Boolean(chain[0].locked),
+          target: null,
         };
       }
     } else {
-      if (event.button === 0) DL.selected = null;
+      if (event.button === 0) DL.selectPlacement(null);
       const start = DV.cam.onPlane(sx, sy, 0);
       if (start) DV.pan = { cam: DV.cam, start, panX: DV.view.panX, panY: DV.view.panY };
       canvas.classList.add("panning");
@@ -867,10 +799,6 @@ DV.wire = () => {
     if (DV.drag) {
       const drag = DV.drag;
       if (!drag.moved && Math.hypot(sx - drag.sx, sy - drag.sy) < 4) return;
-      if (drag.locked) {
-        if (!drag.warned) { toast("This stack is locked. Unlock it (L) to move it."); drag.warned = true; }
-        return;
-      }
       const point = DV.cam.onPlane(sx, sy, drag.plane);
       if (!point) return;
       drag.moved = true;
@@ -881,8 +809,7 @@ DV.wire = () => {
       // never counts as throwing a bin away.
       drag.outside = !DV.hitAt(sx, sy, drag.keys)
         && (point[0] < -12 || point[1] < -12 || point[0] > DV.cam.W + 12 || point[1] > DV.cam.D + 12);
-      const { target, refusal } = drag.working ? { target: null, refusal: "" }
-        : DV.stackTarget(drag.bins, sx, sy, drag.keys);
+      const { target, refusal } = DV.stackTarget(drag.bins, sx, sy, drag.keys);
       drag.target = target;
       if (target) Object.assign(drag, { valid: true, reason: "" });
       else {
@@ -908,7 +835,7 @@ DV.wire = () => {
         const one = found && DL.bin(found.placement.bin);
         const chain = found ? DL.stackOf(key, found.drawer) : null;
         const info = one ? DV.binLabelInfo(one, chain?.length || 1) : null;
-        canvas.title = info ? `${info.name} — ${info.detailLine}${DL.isPlanned(found.placement) ? " (planned)" : ""}` : "";
+        canvas.title = info ? `${info.name} — ${info.detailLine}` : "";
         DV.paint();
       }
     }
@@ -920,13 +847,10 @@ DV.wire = () => {
     const drag = DV.drag;
     DV.drag = null;
     DV.pan = null;
-    if (drag?.moved && drag.working) {
-      if (drag.valid && !drag.outside) DL.moveWorkingTo(drag.gx, drag.gy);
-      else if (!drag.outside) toast(drag.reason || "It does not fit there.", true);
-    } else if (drag?.moved) {
+    if (drag?.moved) {
       if (drag.outside) {
         const count = DL.takeOut(drag.key);
-        toast(`Taken out of the Space${count > 1 ? ` (${count} bins)` : ""}. Back in the inventory list.`);
+        toast(`Moved to Unplaced bins${count > 1 ? ` (${count} bins)` : ""}. Still in Inventory.`);
       } else if (drag.target) {
         DL.moveTo(drag.key, { target: drag.target });
       } else if (drag.valid) {
@@ -978,7 +902,9 @@ DV.wire = () => {
     DV.render();
   });
 
-  new ResizeObserver(() => DV.render()).observe(canvas.parentElement);
+  const resized = new ResizeObserver(() => DV.render());
+  resized.observe(canvas.parentElement);
+  resized.observe(canvas);
 
   // Keys while the drawer is on screen. Capture phase, so the bin editor's
   // own shortcuts (Undo, arrow nudges) never act on the hidden design.
@@ -994,21 +920,16 @@ DV.wire = () => {
     if (mod && key === "z") (event.shiftKey ? DL.redo : DL.undo)();
     else if (mod && key === "y") DL.redo();
     else if (mod && key === "s") DL.save();
-    else if (mod && key === "p") DV.printMap();
     else if (mod || event.altKey) handled = false;
     else if (moves[key] && chain) {
-      if (chain[0].locked) toast("This stack is locked. Unlock it (L) to move it.");
-      else {
-        const drawer = DL.drawer();
-        const [dx, dy] = moves[key];
-        const gx = DL.toCell(chain[0].gx, drawer) + dx;
-        const gy = DL.toCell(chain[0].gy, drawer) + dy;
-        const fit = DL.fitsAt(drawer, chain.map(p => DL.bin(p.bin)), gx, gy, new Set(chain.map(DL.key)));
-        if (fit.ok) DL.moveTo(DL.key(chain[0]), { gx, gy }); else toast(fit.reason, true);
-      }
+      const drawer = DL.drawer();
+      const [dx, dy] = moves[key];
+      const gx = DL.toCell(chain[0].gx, drawer) + dx;
+      const gy = DL.toCell(chain[0].gy, drawer) + dy;
+      const fit = DL.fitsAt(drawer, chain.map(p => DL.bin(p.bin)), gx, gy, new Set(chain.map(DL.key)));
+      if (fit.ok) DL.moveTo(DL.key(chain[0]), { gx, gy }); else toast(fit.reason, true);
     } else if ((key === "delete" || key === "backspace") && DL.selected) DL.removePlacement(DL.selected);
-    else if (key === "l" && chain) DL.toggleLock(DL.selected);
-    else if (key === "escape") DL.selected = null;
+    else if (key === "escape") DL.selectPlacement(null);
     else if (key === "f") DV.fit();
     else handled = false;
     if (handled) {
@@ -1033,39 +954,61 @@ DV.wire = () => {
 DV.renderEmptyState = () => {
   const box = $("#dl-empty-state");
   if (!box || !DL.layout || !DL.loaded) return;
-  const working = DL.working ? DL.workingFit() : null;
-  const edgeFirst = typeof surfaceNeedsEdge === "function" && surfaceNeedsEdge();
-  let mode = !DL.bins.length ? "none" : !DL.layout.drawers.some(one => one.placements.length) ? "unplaced" : "";
-  if (working && !working.ok) mode = `working-nofit:${working.reason}`;
-  else if (working && mode === "none") mode = "";
-  else if (mode === "none" && edgeFirst) mode = "edge-first";
+  const mode = !DL.bins.length ? "none" : !DL.layout.drawers.some(one => one.placements.length) ? "unplaced" : "";
   if (box.dataset.state === mode) return;
   box.dataset.state = mode;
   box.hidden = !mode;
-  if (mode.startsWith("working-nofit")) {
-    box.innerHTML = `<strong>Current design does not fit this Space yet</strong>
-      <p>${escapeHtml(working.reason || "Change its size, then come back to Space.")}</p>
-      <div class="button-row">
-        <button type="button" class="button secondary" data-empty-act="design">Back to design</button>
-      </div>`;
-  } else if (mode === "edge-first") {
-    box.innerHTML = `<strong>Finish your edge, then start adding bins.</strong>
-      <p>The edge trim goes around your Surface first.</p>
-      <div class="button-row">
-        <button type="button" class="button primary" data-empty-act="edge">Finish Edge</button>
-        <button type="button" class="button secondary dl-quiet" data-empty-act="start-bin">Start a bin now</button>
-      </div>`;
-  } else if (mode === "none") {
+  if (mode === "none") {
     box.innerHTML = `<strong>No bins yet</strong>
-      <p>Design your first bin, then come back to Space to arrange it.</p>
+      <p>Design your first bin. It saves as you go and waits in Unplaced bins until you drag it into the Space.</p>
       <div class="button-row">
         <button type="button" class="button primary" data-empty-act="design">Design first bin</button>
         <button type="button" class="button secondary" data-empty-act="add">Add an existing bin</button>
       </div>`;
   } else if (mode === "unplaced") {
     box.innerHTML = `<strong>Ready to arrange</strong>
-      <p>Drag a bin from Inventory into the Space, double-click one to place it, or use Auto layout.</p>`;
+      <p>Drag a bin from Unplaced bins into the Space.</p>`;
   }
+};
+
+// The staging rail: every ordinary Inventory row with no placement, in
+// Inventory order. Derived from Inventory each time - never persisted, and
+// never a coordinate.
+DV.renderStaging = () => {
+  const rail = $("#dl-staging");
+  if (!rail || !DL.layout) return;
+  const staged = DL.stagedBins();
+  const drawer = DL.drawer();
+  const signature = JSON.stringify([
+    staged.map(one => [one.id, one.name, one.x, one.y, one.z, one.status]), DL.selectedRow, drawer.id,
+    DL.bins.some(DL.isOrdinary),
+  ]);
+  if (rail.dataset.signature === signature) return;
+  rail.dataset.signature = signature;
+  rail.querySelector(".dl-staging-count").textContent = staged.length ? String(staged.length) : "";
+  const list = rail.querySelector(".dl-staging-list");
+  const range = DV.heightRange();
+  list.innerHTML = staged.length ? staged.map(one => {
+    const color = DV.binColor(one, range);
+    const picked = one.id === DL.selectedRow;
+    return `<div class="dl-staged${picked ? " selected" : ""}" data-staged-bin="${escapeHtml(one.id)}" draggable="true" tabindex="0" title="Drag into the Space">
+      <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}">${fmt(one.z)}</span>
+      <span class="dl-bin-main"><strong>${escapeHtml(DL.label(one))}</strong>
+        <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${escapeHtml(DL.statusLabel(one))}</small></span>
+    </div>`;
+  }).join("") : `<p class="dl-note">${DL.bins.some(DL.isOrdinary) ? "Every bin is placed." : "New and duplicated bins wait here until you drag them into the Space."}</p>`;
+  $$(".dl-swatch", list).forEach(node => {
+    node.style.background = node.dataset.top;
+    node.style.color = node.dataset.ink;
+  });
+  rail.classList.toggle("has-selection", staged.some(one => one.id === DL.selectedRow));
+};
+
+// Scroll the Inventory row for `id` into view (canvas -> Inventory).
+DV.revealRow = id => {
+  if (!id) return;
+  const row = document.querySelector(`#dl-inv-list .dl-bin[data-bin="${CSS.escape(id)}"]`);
+  if (row && row.scrollIntoView) row.scrollIntoView({ block: "nearest" });
 };
 
 DV.buildOverlay = () => {
@@ -1091,36 +1034,32 @@ DV.buildOverlay = () => {
         <label class="canvas-select dl-empty-control">Empty cells <input id="dl-show-empty" type="checkbox"></label>
       </div>
     </div>
-    <div class="dl-right-stack">
-      <section id="dl-auto-panel" class="dl-auto-panel" aria-label="Auto layout">
-        <button type="button" id="dl-auto" class="button primary wide dl-auto-button">Auto layout</button>
-        <details id="dl-auto-details" class="dl-auto-details">
-          <summary>Auto layout options</summary>
-          <div class="dl-options">
-            <label>Arrange<select id="dl-auto-mode">
-              <option value="rearrange">Everything not locked</option>
-              <option value="fill">Only new bins, around the rest</option>
-            </select></label>
-            <label>Tall bins<select id="dl-auto-height">
-              <option value="strict">Always behind shorter ones</option>
-              <option value="prefer">Behind shorter ones if they can</option>
-              <option value="ignore">Anywhere</option>
-            </select></label>
-            <label>Height check<select id="dl-auto-reach" title="Which bins in front count when keeping short bins out of sight">
-              <option value="column">Anything in front of it</option>
-              <option value="adjacent">Only the bin right in front</option>
-            </select></label>
-            <label class="checkbox-row" title="Snap stackable bins of the same size into stacks, as tall as the Space allows"><span>Stack stackable bins</span><input id="dl-auto-stack" type="checkbox"></label>
-            <label class="checkbox-row"><span>Keep locked bins in place</span><input id="dl-auto-locked" type="checkbox"></label>
-            <label class="checkbox-row"><span>Include spacers</span><input id="dl-auto-spacers" type="checkbox"></label>
-          </div>
-        </details>
-        <div id="dl-candidates"></div>
-      </section>
-      <div id="dl-selection" class="dl-selection" hidden></div>
-    </div>
     <div id="dl-empty-state" class="dl-empty-state" hidden></div>
-    <div class="layout-hint dl-hint">Drag bins to move · drop on a same-size stackable bin to stack · drag off the Space to take out · drag the floor to pan · wheel zooms · L locks · Del removes</div>`);
+    <div class="layout-hint dl-hint">Drag bins to move · drop on a same-size stackable bin to stack · drag off the Space to unplace · drag the floor to pan · wheel zooms · Del unplaces</div>`);
+  // The staging rail sits immediately beside the physical Space, before the canvas.
+  wrap.insertAdjacentHTML("afterbegin", `
+    <aside id="dl-staging" class="dl-staging" aria-label="Unplaced bins">
+      <div class="dl-staging-head"><strong>Unplaced bins</strong><span class="dl-staging-count count-badge"></span></div>
+      <div class="dl-staging-list"></div>
+    </aside>`);
+  const rail = $("#dl-staging");
+  rail.addEventListener("click", event => {
+    const id = event.target.closest("[data-staged-bin]")?.dataset.stagedBin;
+    if (id) { DL.selectRow(id); DV.revealRow(id); }
+  });
+  rail.addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const id = event.target.closest("[data-staged-bin]")?.dataset.stagedBin;
+    if (id) { event.preventDefault(); DL.selectRow(id); DV.revealRow(id); }
+  });
+  rail.addEventListener("dragstart", event => {
+    const one = DL.bin(event.target.closest?.("[data-staged-bin]")?.dataset.stagedBin);
+    if (!one) return;
+    DV.dragBin = one;
+    event.dataTransfer.setData("text/plain", one.id);
+    event.dataTransfer.effectAllowed = "move";
+  });
+  rail.addEventListener("dragend", () => { DV.dragBin = null; DV.drop = null; DV.render(); });
   $$("[data-dl-view]").forEach(button => button.addEventListener("click", () => {
     if (button.dataset.dlView === "fit") DV.fit(); else DV.setView(DV.PRESETS[button.dataset.dlView]);
   }));
@@ -1130,118 +1069,5 @@ DV.buildOverlay = () => {
   $("#dl-turn").addEventListener("input", event => DV.setView({ turn: event.target.value }));
   $("#dl-show-empty").addEventListener("change", event => DL.change(
     () => { DL.layout.settings.show_empty = event.target.checked; }, { history: false }));
-  $("#dl-selection").addEventListener("click", event => {
-    const action = event.target.closest("[data-sel]")?.dataset.sel;
-    const found = DL.selected && DL.findPlacement(DL.selected);
-    if (!action || !found) return;
-    if (action === "lock") DL.toggleLock(DL.selected);
-    if (action === "printed") DL.markPrinted(DL.bin(found.placement.bin));
-    // Another copy of the same inventory row (never a second definition):
-    // the normal quick-place rules pick the copy and spot, record history and
-    // select the new placement. No room leaves the layout as it was.
-    if (action === "duplicate") {
-      const bin = DL.bin(found.placement.bin);
-      if (bin && !DL.isSpacer(bin)) DL.quickPlace(bin);
-    }
-  });
   DV.syncControls();
-};
-
-// ------------------------------------------------------------------ print map
-
-// A plain top-down plan of the active drawer for printing: numbered footprints
-// that match the list under it, front of the drawer at the bottom.
-DV.planImage = (drawer, width = 1400) => {
-  const grid = DL.grid(drawer);
-  const pad = 30;
-  const s = (width - 2 * pad) / drawer.width;
-  const height = Math.round(drawer.depth * s + 2 * pad);
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  const at = (x, y) => [pad + x * s, pad + (drawer.depth - y) * s];
-  const rect = (x0, y0, x1, y1) => { const [ax, ay] = at(x0, y1); return [ax, ay, (x1 - x0) * s, (y1 - y0) * s]; };
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = "#f1ebdf";
-  ctx.fillRect(...rect(0, 0, drawer.width, drawer.depth));
-  ctx.strokeStyle = "rgba(120,100,70,.18)";
-  ctx.beginPath();
-  for (let x = 0; x <= grid.cols * grid.stepX + 1e-6; x += DL.isPegboard(drawer) ? grid.stepX : DL.UNIT) { const [ax, ay] = at(grid.ox + x, grid.oy); const [, by] = at(grid.ox + x, grid.oy + grid.rows * grid.stepY); ctx.moveTo(ax, ay); ctx.lineTo(ax, by); }
-  for (let y = 0; y <= grid.rows * grid.stepY + 1e-6; y += DL.isPegboard(drawer) ? grid.stepY : DL.UNIT) { const [ax, ay] = at(grid.ox, grid.oy + y); const [bx] = at(grid.ox + grid.cols * grid.stepX, grid.oy + y); ctx.moveTo(ax, ay); ctx.lineTo(bx, ay); }
-  ctx.stroke();
-  const range = DV.heightRange();
-  const items = DL.items(drawer);
-  items.forEach((item, index) => {
-    const x0 = grid.ox + item.gx * grid.stepX;
-    const y0 = grid.oy + item.gy * grid.stepY;
-    const box = rect(x0, y0, x0 + item.w * grid.stepX, y0 + item.d * grid.stepY);
-    const top = item.bins[item.bins.length - 1];
-    ctx.fillStyle = DV.binColor(top, range).top;
-    ctx.fillRect(...box);
-    ctx.strokeStyle = "#17252d";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(...box);
-    ctx.fillStyle = "#17252d";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const size = Math.max(10, Math.min(20, box[3] * 0.28, box[2] / 6));
-    ctx.font = `700 ${size}px 'Segoe UI', system-ui, sans-serif`;
-    ctx.fillText(`${index + 1}`, box[0] + box[2] / 2, box[1] + box[3] / 2 - size * 0.55);
-    ctx.font = `500 ${Math.max(9, size * 0.7)}px 'Segoe UI', system-ui, sans-serif`;
-    const text = `${DL.label(top)}${item.bins.length > 1 ? ` ×${item.bins.length}` : ""}`;
-    ctx.fillText(DV.fitText(ctx, text, box[2] - 6), box[0] + box[2] / 2, box[1] + box[3] / 2 + size * 0.55);
-  });
-  drawer.placements.filter(DL.isEdgePlacement).forEach(p => {
-    ctx.fillStyle = "#cdbf9f";
-    ctx.fillRect(...rect(p.x, p.y, p.x + p.w, p.y + p.d));
-  });
-  ctx.strokeStyle = "#6b5d3a";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(...rect(0, 0, drawer.width, drawer.depth));
-  return canvas.toDataURL("image/png");
-};
-
-DV.printMap = () => {
-  const drawer = DL.drawer();
-  const grid = DL.grid(drawer);
-  const pegboard = DL.isPegboard(drawer);
-  const rows = DL.items(drawer).map((item, index) => {
-    const top = item.bins[item.bins.length - 1];
-    const x = grid.ox + item.gx * grid.stepX;
-    const y = grid.oy + item.gy * grid.stepY;
-    const planned = item.chain.filter(DL.isPlanned).length;
-    return `<tr><td>${index + 1}</td><td>${escapeHtml(item.bins.map(one => DL.label(one)).join(" + "))}</td>
-      <td>${escapeHtml(DL.sizeText(item.bins[0]))}</td><td>${fmt(x)} from left, ${fmt(y)} from ${pegboard ? "bottom" : "front"}</td>
-       <td>${pegboard ? "Mounted" : DL.isSurface() ? `${fmt(item.h)} mm print · ${fmt(item.plan_h || item.h)} mm installed planning` : item.bins.length > 1 ? `${item.bins.length}-high, ${fmt(item.h)} mm` : escapeHtml(DL.stackName(top.stack))}</td>
-      <td>${planned ? "planned" : ""}</td></tr>`;
-  }).join("");
-  let sheet = $("#dl-print-sheet");
-  if (!sheet) {
-    sheet = document.createElement("div");
-    sheet.id = "dl-print-sheet";
-    document.body.appendChild(sheet);
-  }
-  const spaceKind = state.activeSpace?.kind;
-  const portable = spaceKind === "portable" || spaceKind === "box";
-  const legacyDrawer = !spaceKind || spaceKind === "drawer";
-  const description = pegboard
-    ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm board. Bottom of the board at the bottom.`
-    : DL.isSurface()
-      ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm surface, ${fmt(drawer.height)} mm edge. Front at the bottom.`
-      : portable
-        ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm inside, ${fmt(drawer.height)} mm max height. Front of the case at the bottom.`
-        : legacyDrawer
-          ? `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm inside, ${fmt(drawer.height)} mm max height. Front of the drawer at the bottom.`
-          : `${fmt(drawer.width)} × ${fmt(drawer.depth)} mm Space layout.`;
-  const mapAlt = pegboard ? "Pegboard map" : DL.isSurface() ? "Surface map" : portable ? "Portable Storage map" : legacyDrawer ? "Drawer map" : "Space map";
-  sheet.innerHTML = `<h1>${escapeHtml(drawer.name)}</h1>
-     <p>${description}</p>
-    <img alt="${mapAlt}" src="${DV.planImage(drawer)}">
-    <table><thead><tr><th>#</th><th>Bin</th><th>Size</th><th>Where (${pegboard ? "bottom" : "front"}-left corner, mm)</th><th>${pegboard ? "Mount" : "Stacking"}</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
-  document.body.classList.add("dl-printing");
-  const done = () => { document.body.classList.remove("dl-printing"); window.removeEventListener("afterprint", done); };
-  window.addEventListener("afterprint", done);
-  setTimeout(() => window.print(), 50);
 };

@@ -2,9 +2,10 @@
 
 // Drawer layout mode - the left panel and switching in and out of the mode.
 //
-// Sidebar order follows the rest of the app: what the drawer *is* first (its
-// size and fit), then spacers, then the inventory you work from, with saving
-// pinned at the bottom. Auto layout lives on the preview.
+// Sidebar order: what the Space *is* (legacy multi-drawer card only), then the
+// Inventory you work from - the primary Space control, one row per bin - then
+// Surface Fill and the collapsed Spacers section, with saving pinned at the
+// bottom. Space-level actions live in the Space header, never here.
 
 const DP = {
   built: false,
@@ -76,46 +77,16 @@ DP.build = () => {
       </details>
     </section>
 
-    <section class="control-section open dl-section" aria-label="Spacers">
-      <div class="section-heading no-toggle"><span>Spacers</span></div>
-      <div class="section-body">
-        <div id="dl-stats" class="dl-stats"></div>
-        <div class="field-grid two">
-          <label class="checkbox-row grid-span-all" title="Build serpentine springs into the edge spacers to absorb real-world tolerance"><span>Flexible fit (recommended)</span><input id="dl-sp-flexible" type="checkbox" checked></label>
-          <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
-        </div>
-        <div class="dl-action-grid">
-          <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the back and right walls">Plan / Update Spacers</button>
-          <button type="button" id="dl-sp-generate" class="button secondary" title="Generate the selected spacer candidates">Generate Selected Spacers</button>
-          <button type="button" id="dl-base-trim" class="button secondary" title="Create a Base Trim around one filled rectangular block of bins">Make Base Trim</button>
-          <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
-          <button type="button" id="dl-print" class="button secondary" title="Open this Space's spacers and the connectors they need together in Bambu Studio">Print Spacers + Connectors</button>
-        </div>
-      </div>
-    </section>
-
-    <section id="dl-surface-fill" class="control-section open dl-section" aria-label="Fill Empty Space" hidden>
-      <div class="section-heading no-toggle"><span>Fill Empty Space</span></div>
-      <div class="section-body">
-        <p class="dl-note">Turn free Surface cells into ordinary editable bins.</p>
-        <label class="checkbox-row"><span>Ask for missing Object height</span><input id="dl-surface-ask-height" type="checkbox" checked></label>
-        <div class="dl-action-grid">
-          <button type="button" id="dl-fill-plan" class="button secondary">Plan / Update Fill Bins</button>
-          <button type="button" id="dl-fill-create" class="button secondary">Create Selected Fill Bins</button>
-        </div>
-        <div id="dl-fill-candidates"></div>
-      </div>
-    </section>
-
     <section class="control-section open dl-section" aria-label="Inventory">
       <div class="section-heading no-toggle"><span>Inventory</span><span id="dl-inv-count" class="count-badge"></span></div>
       <div class="section-body">
+        <div id="dl-stats" class="dl-stats"></div>
         <div class="dl-inv-tools">
           <input id="dl-inv-search" type="search" placeholder="Search name or size" aria-label="Search the inventory">
           <select id="dl-inv-show" aria-label="Which bins to list">
             <option value="all">Everything</option>
             <option value="printed">Printed</option>
-            <option value="unplaced">Not placed yet</option>
+            <option value="unplaced">Unplaced</option>
             <option value="placed">Placed</option>
             <option value="unprinted">Not printed</option>
             <option value="stackable">Stackable</option>
@@ -142,7 +113,7 @@ DP.build = () => {
           <summary>+ Add a bin by hand</summary>
           <p class="dl-note">For bins printed before logging, or elsewhere. Width, length and height snap to the same sizes a designed bin uses.</p>
           <div class="field-grid three"><label>Name<input id="dl-add-name" type="text" maxlength="80" placeholder="e.g. Hex keys"></label>
-            <label>Qty printed<input id="dl-add-qty" type="number" min="0" max="1" step="1" value="1"></label>
+            <label class="checkbox-row"><span>Already printed</span><input id="dl-add-printed" type="checkbox" checked></label>
             <label>Stacking<select id="dl-add-stack">${STACK_OPTIONS}</select></label></div>
           <div class="field-grid three">
             <label>Width <span class="unit">mm</span><input id="dl-add-x" type="text" inputmode="numeric" value="32"></label>
@@ -155,10 +126,38 @@ DP.build = () => {
       </div>
     </section>
 
+    <section id="dl-surface-fill" class="control-section open dl-section" aria-label="Fill Empty Space" hidden>
+      <div class="section-heading no-toggle"><span>Fill Empty Space</span></div>
+      <div class="section-body">
+        <p class="dl-note">Turn free Surface cells into ordinary editable bins.</p>
+        <label class="checkbox-row"><span>Ask for missing Object height</span><input id="dl-surface-ask-height" type="checkbox" checked></label>
+        <div class="dl-action-grid">
+          <button type="button" id="dl-fill-plan" class="button secondary">Plan / Update Fill Bins</button>
+          <button type="button" id="dl-fill-create" class="button secondary">Create Selected Fill Bins</button>
+        </div>
+        <div id="dl-fill-candidates"></div>
+      </div>
+    </section>
+
+    <details id="dl-spacers" class="dl-section dl-spacers" aria-label="Spacers">
+      <summary>Spacers</summary>
+      <div class="section-body">
+        <div class="field-grid two">
+          <label class="checkbox-row grid-span-all" title="Build serpentine springs into the edge spacers to absorb real-world tolerance"><span>Flexible fit (recommended)</span><input id="dl-sp-flexible" type="checkbox" checked></label>
+          <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
+        </div>
+        <div class="dl-action-grid">
+          <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the back and right walls">Plan / Update Spacers</button>
+          <button type="button" id="dl-sp-generate" class="button secondary" title="Save the selected spacer candidates">Save Selected Spacers</button>
+          <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
+          <button type="button" id="dl-print" class="button secondary" title="Open this Space's spacers and the connectors they need together in Bambu Studio">Print Spacers + Connectors</button>
+        </div>
+      </div>
+    </details>
+
     <section class="dl-savebar" aria-label="Saving">
       <div class="dl-save-row">
         <span id="dl-save-status" class="dl-save-status" role="status"></span>
-        <button type="button" id="dl-map" class="button secondary dl-small" title="Print a map of this Space and where each bin goes (Ctrl+P)">Print map</button>
       </div>
     </section>`;
   DV.buildOverlay();
@@ -181,7 +180,7 @@ DP.build = () => {
 // /api/drawer/spacers/generate, /api/drawer/print-spacers and
 // /api/drawer/print outright, so these four stay unavailable in hosted mode
 // on every render, not just once at build time.
-DP.HOSTED_UNSUPPORTED_TOOLTIP = "Hosted Wavefinity uses the normal Design generator and download-to-folder workflow instead of local Space spacer/slicer operations.";
+DP.HOSTED_UNSUPPORTED_TOOLTIP = "Hosted Wavefinity uses the normal Design save-to-folder workflow instead of local Space spacer/slicer operations.";
 
 // ------------------------------------------------------------------ wiring
 
@@ -199,14 +198,13 @@ DP.wire = () => {
   $("#dl-drawer").addEventListener("change", event => {
     DL.change(() => { DL.layout.active = event.target.value; }, { history: false });
     DL.selected = null;
-    DL.candidates = [];
+    DL.selectedRow = null;
     DV.fit();
     DL.emit();
   });
   $("#dl-drawer-add").addEventListener("click", () => {
     const added = DL.defaultDrawer(`Drawer ${DL.layout.drawers.length + 1}`, DL.drawer());
     DL.change(() => { DL.layout.drawers.push(added); DL.layout.active = added.id; });
-    DL.candidates = [];
     $("#dl-fit-details").open = true;
     DL.emit();
     $("#dl-name").focus();
@@ -232,12 +230,6 @@ DP.wire = () => {
       target[key] = read(event.target);
     }, { history: false });
   });
-  setting("#dl-auto-mode", "auto", "mode", node => node.value);
-  setting("#dl-auto-height", "auto", "height_rule", node => node.value);
-  setting("#dl-auto-reach", "auto", "height_reach", node => node.value);
-  setting("#dl-auto-stack", "auto", "stack_bins", node => node.checked);
-  setting("#dl-auto-locked", "auto", "keep_locked", node => node.checked);
-  setting("#dl-auto-spacers", "auto", "include_spacers", node => node.checked);
   setting("#dl-sp-flexible", "spacers", "flexible", node => node.checked);
   setting("#dl-sp-height", "spacers", "height", node => Math.max(6, dlNum(node.value, 15)));
   $("#dl-surface-ask-height").addEventListener("change", async event => {
@@ -260,23 +252,16 @@ DP.wire = () => {
   });
   $("#dl-batch-print").addEventListener("click", () =>
     DL.printSelectedBins(DP.printSelectionPayload(), DP.includeSpaceConnectors));
-  $("#dl-auto").addEventListener("click", () => DL.runAuto());
   // Empty-state buttons (canvas overlay and Inventory list) share these.
   const emptyAction = event => {
     const act = event.target.closest("[data-empty-act]")?.dataset.emptyAct;
     if (act === "design") DP.designFirstBin();
     else if (act === "add") DP.focusManualAdd();
-    else if (act === "edge") DP.finishEdge();
-    else if (act === "start-bin") DP.startBinNow();
   };
   $("#dl-inv-list").addEventListener("click", emptyAction);
   $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", emptyAction);
-  $("#dl-candidates").addEventListener("click", event => {
-    const card = event.target.closest("[data-candidate]");
-    if (card) DL.applyCandidate(Number(card.dataset.candidate));
-  });
 
-    $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
+  $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
   $("#dl-sp-generate").addEventListener("click", () => DL.generateSelectedSpacers());
   $("#dl-sp-print").addEventListener("click", () => DP.openSpacerPrintDialog());
   $("#spacer-print-cancel").addEventListener("click", () => $("#spacer-print-dialog").close());
@@ -284,16 +269,7 @@ DP.wire = () => {
     if (event.target === $("#spacer-print-dialog")) $("#spacer-print-dialog").close();
   });
   $("#spacer-print-confirm").addEventListener("click", () => DP.confirmSpacerPrint());
-  $("#dl-base-trim").addEventListener("click", async () => {
-    const source = DL.baseTrimSource();
-    if (!source.ok) {
-      toast(source.message, true, 6500);
-      return;
-    }
-    await startBaseTrimFromSpace(source);
-  });
   $("#dl-print").addEventListener("click", () => DL.printDrawer());
-  $("#dl-map").addEventListener("click", () => DV.printMap());
   const filterChanged = () => {
     try { localStorage.setItem("wavefinity-drawer-filter", JSON.stringify(DP.filter)); } catch (_error) {}
     DP.renderInventory();
@@ -304,11 +280,6 @@ DP.wire = () => {
 
   const list = $("#dl-inv-list");
   list.addEventListener("click", event => DP.onInventoryClick(event));
-  list.addEventListener("dblclick", event => {
-    if (event.target.closest("button, input, select, .dl-bin-details")) return;
-    const one = DL.bin(event.target.closest("[data-bin]")?.dataset.bin);
-    if (one) DL.quickPlace(one);
-  });
   list.addEventListener("change", event => {
     const printId = event.target.dataset.printSelect;
     if (printId) {
@@ -330,7 +301,7 @@ DP.wire = () => {
     if (!one) return;
     DV.dragBin = one;
     event.dataTransfer.setData("text/plain", one.id);
-    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.effectAllowed = "move";
   });
   list.addEventListener("dragend", () => { DV.dragBin = null; DV.drop = null; DV.render(); });
 
@@ -416,7 +387,7 @@ DP.wire = () => {
       : 0;
     const bin = {
       name: $("#dl-add-name").value.trim(),
-      qty: Math.max(0, Math.min(1, Math.round(dlNum($("#dl-add-qty").value, 1)))),
+      qty: $("#dl-add-printed").checked ? 1 : 0,
       x: dlNum($("#dl-add-x").value, 0), y: dlNum($("#dl-add-y").value, 0), z: moduleZ,
       stack,
       kind: "manual",
@@ -480,6 +451,7 @@ DP.renderBatch = () => {
     ? `${dlPlural(rows.length, "design")} · ${dlPlural(copies, "bin copy", "bin copies")}${DP.includeSpaceConnectors ? " · Space connectors included" : ""}`
     : "";
   dlSet("#dl-batch-connectors", DP.includeSpaceConnectors, "checked");
+  $("#dl-batch-clear").disabled = !DP.printSelected.size;
   const noSlicer = !state.slicer || !state.slicer.available;
   const button = $("#dl-batch-print");
   button.classList.toggle("primary", rows.length >= 2);
@@ -498,80 +470,55 @@ DP.onInventoryClick = async event => {
   if (action === "more") {
     if (DP.open.has(one.id)) DP.open.delete(one.id); else DP.open.add(one.id);
     DP.renderInventory(true);
-  } else if (action === "qty+") DL.markPrinted(one);
-  else if (action === "qty-") DP.lowerQty(one);
-  else if (action === "edit") designerEditInventoryRow(one.id);
-  else if (action === "printed") DL.markPrinted(one);
+  } else if (action === "edit") designerEditInventoryRow(one.id);
+  else if (action === "duplicate") DP.duplicateRow(one);
   else if (action === "print") DL.printSelectedBins({ [one.id]: DL.printCount(one) }, false);
-  else if (action === "generate") designerGenerateInventoryRow(one.id);
-  else if (action === "delete") {
-    const placed = DL.placedCount(one.id);
-    const ok = await appConfirmAction({
-      title: "Remove this bin from inventory?",
-      message: `Remove ${DL.label(one)} from the inventory?${placed ? ` Its ${dlPlural(placed, "placed copy", "placed copies")} are removed from the saved layout.` : ""} The print file stays in the folder.`,
-      actionLabel: "Remove Bin",
-      danger: true,
-    });
-    if (ok) {
-      DP.open.delete(one.id);
-      DL.editBins({ delete_ids: [one.id] });
-    }
-  } else if (!action && !event.target.closest(".dl-bin-details")) {
-    const placed = DL.drawer().placements.find(p => p.bin === one.id);
-    DL.selected = placed ? DL.key(placed) : null;
+  else if (action === "printed") DL.markPrinted(one);
+  else if (action === "not-printed") DL.markNotPrinted(one);
+  else if (action === "delete") DP.deleteRow(one);
+  else if (!action && !event.target.closest(".dl-bin-details")) DL.selectRow(one.id);
+};
+
+// Duplicate a design-source row through the accepted atomic owner. The new
+// row is In Design and unplaced, so it appears in the staging rail; the user
+// stays in Space.
+DP.duplicateRow = async one => {
+  if (typeof flushSpaceDesignAutosave === "function" && !(await flushSpaceDesignAutosave())) return;
+  const context = DL.spaceContext();
+  try {
+    const data = await DL.inventoryCall("/api/drawer/design-source/duplicate", { row_id: one.id }, { context });
+    DL.adopt(data);
+    DL.selectedRow = data.row_id;
+    DL.selected = null;
     DL.emit();
+    DL.requestReport();
+    toast(`Duplicated as ${DL.label(DL.bin(data.row_id) || one)}. It is waiting in Unplaced bins.`);
+  } catch (error) {
+    if (!DL.isStaleSpaceError(error)) toast(`Could not duplicate bin: ${error.message}`, true, 6000);
   }
 };
 
-// Printing one fewer should turn an unplaced copy away, not a placed one:
-// renumber the top copy into a free slot first.
-DP.lowerQty = async one => {
-  if (one.qty <= 0) return;
-  if (DL.layout?.design_specs?.[one.id]) return DL.setBinPrinted(one, false);
-  const next = one.qty - 1;
-  const placements = DL.layout.drawers.flatMap(drawer => drawer.placements.filter(p => p.bin === one.id));
-  const used = new Set(placements.map(p => p.copy ?? 0));
-  const top = placements.find(p => (p.copy ?? 0) === next);
-  let free = null;
-  for (let copy = 0; copy < next; copy += 1) if (!used.has(copy)) { free = copy; break; }
-  if (top && free !== null) {
-    const oldKey = DL.key(top);
-    const stagedLayout = clone(DL.layout);
-    const stagedTop = stagedLayout.drawers.flatMap(drawer => drawer.placements)
-      .find(p => DL.key(p) === oldKey);
-    stagedTop.copy = free;
-    stagedLayout.drawers.forEach(drawer => drawer.placements.forEach(p => {
-      if (p.on === oldKey) p.on = DL.key(stagedTop);
-    }));
-    return DL.editBins({ bin_updates: [{ id: one.id, qty: next }], layout: stagedLayout }, {
-      commitLayout: true,
-      selected: DL.selected === oldKey ? DL.key(stagedTop) : DL.selected,
-    });
-  }
-  return DL.editBins({ bin_updates: [{ id: one.id, qty: next }] });
+// Delete removes the row, its design source and its single placement.
+// Dragging a placed bin off the Space only unplaces it.
+DP.deleteRow = async one => {
+  const placed = DL.placedCount(one.id);
+  const ok = await appConfirmAction({
+    title: "Delete this bin?",
+    message: `Delete ${DL.label(one)} from Inventory?${placed ? " It is placed in this Space; its placement is removed too." : ""} Dragging a bin off the Space only unplaces it. The print file stays in the folder.`,
+    actionLabel: "Delete Bin",
+    danger: true,
+  });
+  if (!ok) return;
+  DP.open.delete(one.id);
+  DP.printSelected.delete(one.id);
+  if (DL.selectedRow === one.id) DL.selectedRow = null;
+  DL.editBins({ delete_ids: [one.id] });
 };
 
 // The one "go design a bin" jump used by both empty states.
 DP.designFirstBin = () => {
-  if (typeof markWorkingDesignPending === "function") markWorkingDesignPending();
   DP.setMode("design");
   activatePreviewView("3d");
-};
-
-// Surface first run: reopen the direct Base Trim edge design (never the
-// arranged-bin source, which cannot exist for an empty Surface).
-DP.finishEdge = async () => {
-  if (state.activeSpace?.kind !== "surface") return;
-  state.surfaceEdgeHandled = false;
-  DP.setMode("design");
-  await SP.designSurface(state.activeSpace);
-};
-
-// Deliberately skip the edge and begin the first bin.
-DP.startBinNow = async () => {
-  state.surfaceEdgeHandled = true;
-  DP.setMode("design");
-  await loadFreshOrdinaryDesignForCurrentFolder();
 };
 
 // Open the existing manual-add section and put the cursor in it.
@@ -652,12 +599,12 @@ DP.update = () => {
   }
   dlSet("#dl-show-empty", Boolean(DL.layout.settings.show_empty), "checked");
   DP.renderDrawer();
-  DP.renderAuto();
   DP.renderStats();
   DP.renderSurfaceFill();
   DP.renderInventory();
   DP.renderSave();
   DV.renderEmptyState();
+  DV.renderStaging();
   DV.render();
 };
 
@@ -673,11 +620,9 @@ DP.renderDrawer = () => {
   const drawer = DL.drawer();
   const pegboard = DL.isPegboard(drawer);
   const surface = DL.isSurface();
-  const autoSection = $("#dl-auto-panel");
-  const spacerSection = document.querySelector('#drawer-panel [aria-label="Spacers"]');
+  const spacerSection = $("#dl-spacers");
   const detailsCard = $("#dl-space-details-card");
   if (detailsCard) detailsCard.hidden = DP.singleTypedSpace();
-  if (autoSection) autoSection.hidden = pegboard;
   if (spacerSection) spacerSection.hidden = pegboard || surface;
   $("#dl-surface-fill").hidden = !surface;
   $("#dl-add-object-row").hidden = !surface;
@@ -756,72 +701,6 @@ DP.renderSurfaceFill = () => {
       : '<p class="dl-note">No empty Surface cells remain.</p>';
 };
 
-DP.renderAuto = () => {
-  const auto = DL.layout.settings.auto;
-  dlSet("#dl-auto-mode", auto.mode);
-  dlSet("#dl-auto-height", auto.height_rule);
-  dlSet("#dl-auto-reach", auto.height_reach);
-  dlSet("#dl-auto-stack", Boolean(auto.stack_bins), "checked");
-  dlSet("#dl-auto-locked", Boolean(auto.keep_locked), "checked");
-  dlSet("#dl-auto-spacers", Boolean(auto.include_spacers), "checked");
-  const button = $("#dl-auto");
-  const noBins = DL.loaded && !DL.bins.length;
-  button.disabled = Boolean(DL.busy) || noBins;
-  button.title = noBins ? "Add or design a bin first." : "";
-  button.textContent = DL.busy === "auto" ? "Arranging…" : "Auto layout";
-  const box = $("#dl-candidates");
-  const signature = JSON.stringify([DL.candidates.map(c => c.id), DL.candidateIndex, DL.skipped, DL.autoNotes, DL.layout.active]);
-  if (!dlChanged("candidates", signature)) return;
-  if (!DL.candidates.length) { box.innerHTML = ""; return; }
-  const active = DL.candidates[DL.candidateIndex] || null;
-  const names = list => list.map(u => {
-    const one = DL.bin(u.bin);
-    return `${escapeHtml(one ? DL.label(one) : u.bin)} (${escapeHtml(u.reason)})`;
-  }).join(", ");
-  box.innerHTML = `
-    <p class="dl-note">Pick an arrangement - click to try it, or click another to switch.</p>
-    <div class="dl-candidates">${DL.candidates.map((c, index) => `
-      <button type="button" class="dl-candidate${index === DL.candidateIndex ? " active" : ""}" data-candidate="${index}" title="${escapeHtml(c.description)}">
-        <canvas width="264" height="152" data-thumb="${index}"></canvas>
-        <strong>${escapeHtml(c.name)}${index === 0 ? " · best" : ""}</strong>
-        <small>${c.stats.placed} of ${c.stats.wanted} bins${c.stats.stacks ? ` · ${dlPlural(c.stats.stacks, "stack")}` : ""}</small>
-        <small>${c.stats.height_issues ? dlPlural(c.stats.height_issues, "height clash", "height clashes") : "Tall bins at the back"}</small>
-      </button>`).join("")}</div>
-    ${active?.unplaced.length ? `<p class="dl-unfit">Auto layout did not place: ${names(active.unplaced)}</p>` : ""}
-    ${DL.skipped.length ? `<p class="dl-unfit">Left out: ${names(DL.skipped)}</p>` : ""}
-    ${DL.autoNotes.map(note => `<p class="dl-note">${escapeHtml(note)}</p>`).join("")}`;
-  DL.candidates.forEach((candidate, index) => DP.drawThumb($(`[data-thumb="${index}"]`, box), candidate));
-};
-
-DP.drawThumb = (canvas, candidate) => {
-  const drawer = DL.drawer();
-  const grid = DL.grid(drawer);
-  const ctx = canvas.getContext("2d");
-  const pad = 6;
-  const s = Math.min((canvas.width - 2 * pad) / drawer.width, (canvas.height - 2 * pad) / drawer.depth);
-  const ox = (canvas.width - drawer.width * s) / 2;
-  const oy = (canvas.height - drawer.depth * s) / 2;
-  const range = DV.heightRange();
-  const stacked = new Set(candidate.placements.filter(p => p.on !== undefined).map(p => p.on));
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#f1ebdf";
-  ctx.fillRect(ox, oy, drawer.width * s, drawer.depth * s);
-  for (const p of candidate.placements) {
-    const one = DL.bin(p.bin);
-    if (!one || p.on !== undefined) continue;
-    let x0, y0, w, d;
-    if (p.gx !== undefined) {
-      const [cw, cd] = DL.cells(one, drawer);
-      x0 = grid.ox + p.gx * DL.UNIT; y0 = grid.oy + p.gy * DL.UNIT; w = cw * grid.step; d = cd * grid.step;
-    } else { x0 = p.x; y0 = p.y; w = p.w; d = p.d; }
-    ctx.fillStyle = DV.binColor(one, range).top;
-    ctx.strokeStyle = stacked.has(DL.key(p)) ? "#146c70" : "rgba(23,37,45,.45)";
-    const rect = [ox + x0 * s, oy + (drawer.depth - y0 - d) * s, w * s, d * s];
-    ctx.fillRect(...rect);
-    ctx.strokeRect(...rect);
-  }
-};
-
 DP.renderStats = () => {
   const box = $("#dl-stats");
   const spacers = DL.layout.settings.spacers;
@@ -832,11 +711,7 @@ DP.renderStats = () => {
   const hosted = Boolean(state.runtime.hosted);
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
   label("#dl-sp-plan", "Plan / Update Spacers", "Planning…", "spacers");
-  label("#dl-sp-generate", "Generate Selected Spacers", "Generating…", "spacers");
-  const typedSpace = state.folderMode === "space" && Boolean(state.activeSpace);
-  const baseTrim = $("#dl-base-trim");
-  if (baseTrim) baseTrim.hidden = typedSpace && state.activeSpace.kind !== "surface";
-  label("#dl-base-trim", "Make Base Trim", "Making Base Trim…", "base_trim");
+  label("#dl-sp-generate", "Save Selected Spacers", "Saving…", "spacers");
   const printAll = $("#dl-print");
   if (printAll) printAll.disabled = busy;
   // Nothing placed yet: these have nothing to work on, so say why instead of
@@ -848,7 +723,7 @@ DP.renderStats = () => {
     node.disabled = true;
     node.title = "Place a bin in the Space first.";
   });
-  // Fix 019 Item 4: Generate Selected Spacers must never be an enabled
+  // Fix 019 Item 4: Save Selected Spacers must never be an enabled
   // silent no-op. DL.generateSelectedSpacers() already returns immediately
   // with nothing selected/no plan, but the button must not invite that -
   // it needs a current plan (DL.clearSpacerPlan() proactively nulls
@@ -866,7 +741,7 @@ DP.renderStats = () => {
       genNode.title = "Select at least one planned spacer.";
     } else {
       genNode.disabled = busy;
-      genNode.title = "Generate the selected spacer candidates";
+      genNode.title = "Save the selected spacer candidates";
     }
   }
   const hasPlacedSpacers = DL.drawer().placements.some(
@@ -905,10 +780,10 @@ DP.filteredBins = () => {
   const show = DP.filter.show;
   const list = DL.bins.filter(one => {
     const placed = DL.placedCount(one.id);
-    if (show === "printed" && one.qty <= 0) return false;
-    if (show === "unplaced" && !(one.qty > placed - DL.plannedCount(one.id))) return false;
+    if (show === "printed" && one.status !== "printed") return false;
+    if (show === "unplaced" && placed) return false;
     if (show === "placed" && !placed) return false;
-    if (show === "unprinted" && one.qty > 0 && DL.printNeeded(one) <= 0) return false;
+    if (show === "unprinted" && one.status === "printed") return false;
     if (show === "stackable" && !DL.stackable(one)) return false;
     if (!text) return true;
     return `${one.name} ${fmt(one.x)}x${fmt(one.y)}x${fmt(one.z)} ${fmt(one.x)} × ${fmt(one.y)} ${one.file} ${one.label} ${one.interior} ${one.kind} ${one.stack}`
@@ -925,33 +800,6 @@ DP.filteredBins = () => {
   return list.sort((a, b) => Number(DL.isSpacer(a)) - Number(DL.isSpacer(b)) || sorters[DP.filter.sort](a, b));
 };
 
-// The "Current design" row: session only, so no Qty controls, no remove, no
-// drag. It just shows the size and lets you go back to the design.
-DP.workingRow = () => {
-  const working = DL.working;
-  if (!working || working.error) {
-    return working?.error ? `<div class="dl-bin dl-working"><span class="dl-bin-main"><strong>Current design</strong>
-      <small>${escapeHtml(working.error)}</small></span></div>` : "";
-  }
-  const one = working.bin;
-  const drawer = DL.drawer();
-  const [w, d] = DL.cells(one, drawer);
-  const units = value => fmt(value * DL.grid(drawer).step / DL.UNIT);
-  const fit = DL.workingFit();
-  const title = one.name ? `Current design · ${one.name}` : "Current design";
-  return `<div class="dl-bin dl-working" data-working="1" title="Not generated yet - only shown so you can plan around it">
-    <span class="dl-print-placeholder" aria-hidden="true"></span>
-    <span class="dl-swatch dl-working-swatch">${fmt(one.z)}</span>
-    <span class="dl-bin-main">
-      <strong>${escapeHtml(title)}</strong>
-      <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units</small>
-      ${DL.isSurface() ? `<small>${one.object_height_mm == null ? "Object height not set" : `Object height ${fmt(one.object_height_mm)} mm · ${one.planning?.estimated ? "~" : ""}${fmt(one.planning?.effective_mm ?? one.z)} mm installed planning${one.planning?.estimated ? " (estimated)" : ""}`}</small>` : ""}
-      <small class="dl-flags">${fit?.ok ? "Not generated yet" : "Does not fit this Space yet"}</small>
-    </span>
-    <button type="button" class="button secondary dl-small" data-empty-act="design">Edit design</button>
-  </div>`;
-};
-
 DP.renderInventory = (force = false) => {
   const drawer = DL.drawer();
   const list = $("#dl-inv-list");
@@ -959,20 +807,18 @@ DP.renderInventory = (force = false) => {
   dlSet("#dl-inv-sort", DP.filter.sort);
   DP.prunePrintSelection();
   DP.renderBatch();
-  const printed = DL.bins.reduce((sum, one) => sum + (one.qty > 0 ? one.qty : 0), 0);
-  $("#dl-inv-count").textContent = `${dlPlural(DL.bins.length, "design")} · ${printed} printed`;
-  const selectedBin = DL.selected ? DL.findPlacement(DL.selected)?.placement.bin : null;
-  const counts = DL.bins.map(one => [DL.placedCount(one.id), DL.plannedCount(one.id)]);
+  // The count is rows only: bins in this Inventory, nothing else.
+  $("#dl-inv-count").textContent = dlPlural(DL.bins.filter(DL.isOrdinary).length, "bin");
+  const selectedRow = DL.selectedRow && DL.bin(DL.selectedRow) ? DL.selectedRow : null;
+  const counts = DL.bins.map(one => [one.id, DL.placedCount(one.id)]);
   const signature = JSON.stringify([DL.bins, counts, Object.keys(DL.layout.design_specs || {}), DL.report?.planning_heights,
     Boolean(state.runtime.hosted), Boolean(state.slicer?.available),
-    DP.filter, [...DP.open], selectedBin, drawer.id, drawer.height, [...DP.printSelected],
-    DL.working ? [DL.working.key, DL.working.error || "", DL.workingFit()] : null]);
+    DP.filter, [...DP.open], selectedRow, drawer.id, drawer.height, [...DP.printSelected]]);
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
   const bins = DP.filteredBins();
-  const workingRow = DP.workingRow();
   if (!DL.bins.length) {
-    list.innerHTML = workingRow || `<div class="dl-empty">${DL.loaded
+    list.innerHTML = `<div class="dl-empty">${DL.loaded
       ? `No bins in this Space inventory yet.<br><button type="button" class="button primary dl-small" data-empty-act="design">Design first bin</button><br>Or add one by hand below.`
       : "Loading the inventory…"}</div>`;
     return;
@@ -981,9 +827,8 @@ DP.renderInventory = (force = false) => {
   const range = DV.heightRange();
   const kinds = { b4b: "Storage Box", manual: "Added by hand" };
   const kindLabel = one => one.kind === "spacer" ? (one.boundary === "edge" ? "Edge spacer" : "X spacer") : kinds[one.kind];
-  list.innerHTML = workingRow + bins.map(one => {
+  list.innerHTML = bins.map(one => {
     const placed = DL.placedCount(one.id);
-    const planned = DL.plannedCount(one.id);
     const [w, d] = DL.cells(one, drawer);
     const units = value => fmt(value * DL.grid(drawer).step / DL.UNIT);
     const tooTall = !DL.isSurface() && one.z > drawer.height + 1e-6;
@@ -992,60 +837,59 @@ DP.renderInventory = (force = false) => {
       ? one.object_height_mm == null ? "Object height not set"
         : `Object height ${fmt(one.object_height_mm)} mm · Installed planning ${plan?.estimated ? "~" : ""}${fmt(plan?.effective_mm ?? one.z)} mm${plan?.estimated ? " (estimated)" : ""}`
       : "";
-    const freePrinted = one.qty - (placed - planned);
-    const canPlace = !tooTall && !(one.kind === "spacer" && one.boundary === "edge");
+    const spacer = DL.isSpacer(one);
+    const canPlace = !tooTall && !(spacer && one.boundary === "edge") && (spacer || !placed);
     const color = DV.binColor(one, range);
     const flags = [
       DL.stackable(one) ? DL.stackName(one.stack) : "", kindLabel(one),
-      tooTall ? `Taller than ${drawer.name}` : "", one.qty <= 0 ? "Not printed" : "",
+      tooTall ? `Taller than ${drawer.name}` : "",
     ].filter(Boolean);
-    const holding = DL.drawersHolding(one.id);
-    const classes = [
-      one.id === selectedBin ? "selected" : "", freePrinted <= 0 && one.qty > 0 ? "all-placed" : "",
-      one.qty <= 0 ? "unprinted" : "", tooTall ? "too-tall" : "",
-    ].filter(Boolean).join(" ");
+    const classes = [one.id === selectedRow ? "selected" : "", tooTall ? "too-tall" : "",
+      spacer ? "spacer-row" : "", one.status === "printed" ? "printed" : ""].filter(Boolean).join(" ");
     const open = DP.open.has(one.id);
     const eligible = DL.printEligible(one);
     const spec = DL.layout?.design_specs?.[one.id];
     const designSource = ["bin", "b4b"].includes(one.kind) && Boolean(spec);
-    const statusLabel = one.status === "printed" ? "Printed" : one.status === "saved" ? "Saved" : "In Design";
+    // A Storage Box case saved by an older version is not a Designer object.
+    const editable = designSource && !(typeof isStructuralDesign === "function" && isStructuralDesign(spec));
     const printable = eligible && !state.runtime.hosted && Boolean(state.slicer?.available);
-    const quantityTracked = ["bin", "b4b", "manual"].includes(one.kind);
-    const needed = DL.printNeeded(one);
-    const printFlag = needed > 0 ? `${needed} needed` : "";
+    const statusTracked = !spacer && ["bin", "b4b", "manual"].includes(one.kind);
+    const printed = one.status === "printed";
     const picked = eligible && DP.printSelected.has(one.id);
+    const swatch = `<span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${DL.stackable(one) ? `${fmt(one.z)} mm stack module; ${fmt(DL.partHeight(one))} mm detached` : `${fmt(one.z)} mm tall`}">${fmt(one.z)}${DL.stackable(one) ? "<i>⇅</i>" : ""}</span>`;
+    const check = eligible
+      ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.label(one))} for printing"${picked ? " checked" : ""}>`
+      : `<span class="dl-print-placeholder" aria-hidden="true"></span>`;
+    const lifecycle = spacer
+      ? `<small>${dlPlural(placed, "placement")} · ${one.qty} printed</small>`
+      : `<small class="dl-status">${DL.statusLabel(one)}</small>`;
+    const actions = spacer ? "" : `<div class="dl-row-actions">
+          ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>` : ""}
+          ${designSource ? `<button type="button" class="button secondary dl-small" data-act="duplicate">Duplicate</button>` : ""}
+          ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}
+          ${statusTracked ? (printed
+            ? `<button type="button" class="button secondary dl-small" data-act="not-printed">Mark Not Printed</button>`
+            : `<button type="button" class="button secondary dl-small" data-act="printed">Mark Printed</button>`) : ""}
+          <button type="button" class="dl-delete" data-act="delete" aria-label="Delete ${escapeHtml(DL.label(one))}">Delete</button>
+        </div>`;
     return `
-      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" draggable="${canPlace}" title="${canPlace ? "Drag into the Space, or double-click to place" : ""}">
-        ${eligible
-          ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.label(one))} for printing"${picked ? " checked" : ""}>`
-          : `<span class="dl-print-placeholder" aria-hidden="true"></span>`}
-        <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${DL.stackable(one) ? `${fmt(one.z)} mm stack module; ${fmt(DL.partHeight(one))} mm detached` : `${fmt(one.z)} mm tall`}">${fmt(one.z)}${DL.stackable(one) ? "<i>⇅</i>" : ""}</span>
+      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" draggable="${canPlace}" title="${canPlace ? "Drag into the Space" : ""}">
+        ${check}
+        ${swatch}
         <span class="dl-bin-main">
           <strong>${escapeHtml(DL.label(one))}</strong>
           <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units</small>
           ${planningText ? `<small>${escapeHtml(planningText)}</small>` : ""}
-          ${designSource ? `<small>${statusLabel}</small>` : ""}
-          ${flags.length || printFlag ? `<small class="dl-flags">${escapeHtml([...flags, printFlag].filter(Boolean).join(" · "))}</small>` : ""}
-        </span>
-        <span class="dl-placed" title="${holding.length ? `In ${escapeHtml(holding.join(", "))}` : "Not placed"}">${placed - planned}/${one.qty}<small>${planned ? `+${planned} planned` : "placed"}</small></span>
-        <span class="dl-qty" title="How many you have printed">
-          <button type="button" data-act="qty-" ${one.qty <= 0 ? "disabled" : ""} aria-label="One fewer printed">−</button>
-          <span>${one.qty}</span>
-          <button type="button" data-act="qty+" ${one.qty >= 1 ? "disabled" : ""} aria-label="Mark printed">+</button>
+          ${lifecycle}
+          ${flags.length ? `<small class="dl-flags">${escapeHtml(flags.join(" · "))}</small>` : ""}
         </span>
         <button type="button" class="dl-more" data-act="more" aria-expanded="${open}" title="Details">${open ? "▴" : "▾"}</button>
-        <button type="button" class="dl-remove" data-act="delete" title="Remove from the inventory" aria-label="Remove ${escapeHtml(DL.label(one))} from the inventory">✕</button>
-        ${designSource || quantityTracked || printable ? `<div class="dl-row-actions">
-          ${designSource ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>` : ""}
-          ${quantityTracked ? `<button type="button" class="button secondary dl-small" data-act="printed">Mark Printed</button>` : ""}
-          ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}
-          ${designSource ? `<button type="button" class="button secondary dl-small" data-act="generate">Generate</button>` : ""}
-        </div>` : ""}
+        ${spacer ? `<button type="button" class="dl-remove" data-act="delete" title="Delete" aria-label="Delete ${escapeHtml(DL.label(one))}">✕</button>` : ""}
+        ${actions}
       </div>
       ${open ? `<div class="dl-bin-details" data-bin="${escapeHtml(one.id)}">
         <div class="field-grid three">
           <label>Name<input type="text" data-field="name" maxlength="80" value="${escapeHtml(one.name)}" placeholder="Shows the size when blank"></label>
-          <label>Qty printed<input type="number" data-field="qty" min="0" max="1" step="1" value="${one.qty}"></label>
           <label>Stacking<select data-field="stack">${STACK_OPTIONS.replace(`value="${one.stack}"`, `value="${one.stack}" selected`)}</select></label>
         </div>
         ${DL.isSurface() ? `<label>Object height <span class="unit">mm</span><input type="number" data-field="object_height_mm" min="0.1" step="0.1" value="${one.object_height_mm ?? ""}" placeholder="Not set"></label>` : ""}
@@ -1055,9 +899,6 @@ DP.renderInventory = (force = false) => {
           <label>Height <span class="unit">mm</span><input type="number" data-field="z" min="1" step="1" value="${fmt(one.z)}" title="${DL.stackable(one) ? "Stack module height" : "Finished height"}"></label>
         </div>
         <p>${DL.stackable(one) ? `Adds ${fmt(DL.pitch(one))} mm to a stack; detached height is ${fmt(DL.partHeight(one))} mm including its interlock.<br>` : ""}${one.file ? `File: ${escapeHtml(one.file)}<br>` : ""}${one.label ? `Label: ${escapeHtml(one.label)}<br>` : ""}${one.interior ? `Inside: ${escapeHtml(one.interior)}<br>` : ""}${escapeHtml(one.id)}${one.date ? ` · logged ${escapeHtml(one.date)}` : ""}</p>
-        <div class="button-row">
-          <button type="button" class="button danger dl-small" data-act="delete">Remove from inventory</button>
-        </div>
       </div>` : ""}`;
   }).join("");
   // The page's security policy refuses inline style attributes, so colours
@@ -1130,10 +971,9 @@ DP.setMode = mode => {
   if (mode === "space") DP.update();
 };
 
-// Fix 034 A: switching to Space always shows the exact current working bin -
-// refresh it before the Space canvas activates, so a stale/no-longer-current
-// design is never shown. Switching alone never creates a placement or an
-// Inventory row.
+// Switching to Space first settles the Designer's autosave, so Inventory is
+// authoritative before the Space canvas activates. Switching alone never
+// creates a placement or an Inventory row.
 DP.ensureInventoryLoaded = async (message = "Could not read the inventory") => {
   if (DL.loaded) return true;
   try {
@@ -1156,17 +996,10 @@ DP.selectMode = async mode => {
   if (DP.mode === "design" && mode === "space" &&
       typeof flushSpaceDesignAutosave === "function" &&
       !(await flushSpaceDesignAutosave())) return;
-  if (mode === "space" && typeof workingDesignForSpace === "function" && workingDesignForSpace() &&
-      typeof maybePromptSurfaceObjectHeight === "function" && !(await maybePromptSurfaceObjectHeight())) return;
   DP.setMode(mode);
   if (mode === "space") {
     if (!(await DP.ensureInventoryLoaded())) return;
-    if (DL.pegboardRefreshError) {
-      await DL.refreshWorking({ refreshPegboard: false });
-      await DL.retryPegboardLayouts();
-    } else {
-      await DL.refreshWorking();
-    }
+    if (DL.pegboardRefreshError) await DL.retryPegboardLayouts();
     if (!DL.active || DP.mode !== "space") return;
     activatePreviewView("drawer");
     DP.update();
@@ -1175,8 +1008,7 @@ DP.selectMode = async mode => {
   }
 };
 
-// Open the Space workspace. Starts in Design mode when there is a current
-// design to work on, otherwise Space mode.
+// Open the Space workspace. Starts in Space mode unless a caller asks for Design.
 DP.enter = async (preferredMode, inventoryLoaded = false) => {
   if (DL.active) {
     if (preferredMode === "space" || preferredMode === "design") DP.setMode(preferredMode);
@@ -1184,9 +1016,7 @@ DP.enter = async (preferredMode, inventoryLoaded = false) => {
     return;
   }
   DL.active = true;
-  DP.mode = preferredMode === "space" || preferredMode === "design"
-    ? preferredMode
-    : (typeof workingDesignForSpace === "function" && workingDesignForSpace() ? "design" : "space");
+  DP.mode = preferredMode === "design" ? "design" : "space";
   DP.build();
   DP.applyMode();
   DP.update();

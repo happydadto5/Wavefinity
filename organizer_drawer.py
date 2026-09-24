@@ -31,8 +31,10 @@ Placements
   across the wall is the drawer's real leftover play, not rounded to a grid
   unit - a physically genuine residual, not a whole-8-mm footprint.
 
-A copy numbered past its row's printed Qty is *planned*: placed before it is
-printed, so a drawer can be designed first and printed to.
+An ordinary bin row is one placement identity: at most one placement per
+row. Its print state is the row's own ``status``, never the placement. A
+spacer row is the exception: it is a repeated filler part and may be placed
+several times (``copy`` counts those placements).
 
 Legacy inventories used a separate ``kind: "shim"`` for the edge-facing
 piece; ``organizer_inventory._normalise`` migrates it to ``spacer`` with
@@ -51,7 +53,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view
 from shapely import affinity
 from shapely.geometry import LineString, Polygon
 from shapely.geometry import box as shape_box
@@ -135,8 +136,6 @@ ANCHORS = ("front-left", "center")
 # boundary, which is already the correct interlocking surface and needs no
 # extra hard-wall slack added on top of it.
 BOUNDARIES = ("wall", "mating", "pegboard")
-HEIGHT_RULES = ("strict", "prefer", "ignore")
-HEIGHT_REACHES = ("column", "adjacent")
 SIDES = ("left", "right", "front", "back")
 # Low filler nobody reaches for: spacers take room but are never counted for
 # or against the height rule.  A 1-tuple because inventories are migrated to
@@ -374,7 +373,6 @@ def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict
         layers.append({
             "key": _key(placement), "bin": placement["bin"], "copy": int(placement.get("copy", 0)),
             "z0": bottom, "z1": top, "plan_z1": layer_plan_top,
-            "planned": int(placement.get("copy", 0)) >= int(one["qty"]),
         })
     return {
         "key": _key(base), "keys": [layer["key"] for layer in layers],
@@ -382,7 +380,6 @@ def _stack_item(chain: list[dict], drawer: dict[str, Any], by_id: dict[str, dict
         "gx": _cell(base["gx"], drawer), "gy": _cell(base["gy"], drawer),
         "w": w, "d": d, "h": top, "plan_h": plan_top,
         "kind": first.get("kind", "bin"), "name": first.get("name", ""),
-        "locked": bool(base.get("locked", False)),
         "chain": chain, "layers": layers, "top": by_id[chain[-1]["bin"]], "issues": issues,
     }
 
@@ -588,7 +585,6 @@ def _pegboard_report(drawer: dict[str, Any], bins: list[dict[str, Any]]) -> dict
     occupied_mounts: dict[tuple[float, int], str] = {}
     mounts: list[dict[str, Any]] = []
     used_cells: set[tuple[int, int]] = set()
-    planned: dict[str, int] = {}
 
     for placement in drawer["placements"]:
         key = _key(placement)
@@ -652,8 +648,6 @@ def _pegboard_report(drawer: dict[str, Any], bins: list[dict[str, Any]]) -> dict
                 problems.append({"type": "mount_overlap", "keys": [other_key, key], "message": "Two adapters use the same pegboard opening"})
             occupied_mounts[mount] = key
             mounts.append({"gx": mount[0], "gy": mount[1], "key": key})
-        if int(placement.get("copy", 0)) >= int(one.get("qty", 0)):
-            planned[one["id"]] = planned.get(one["id"], 0) + 1
 
     total = grid["cols"] * grid["rows"]
     return {
@@ -667,7 +661,6 @@ def _pegboard_report(drawer: dict[str, Any], bins: list[dict[str, Any]]) -> dict
         "connector_total": 0,
         "wall_mismatches": 0,
         "problems": problems,
-        "planned": [{"id": key, "count": count} for key, count in planned.items()],
         "mounts": mounts,
         "pegboard": True,
     }
@@ -754,11 +747,6 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         for p in drawer["placements"] if "gx" not in p and "on" not in p and p.get("bin") in by_id
     )
     connectors, mismatched = _connectors(items, step)
-    planned: dict[str, int] = {}
-    for placement in drawer["placements"]:
-        one = by_id.get(placement.get("bin"))
-        if one and int(placement.get("copy", 0)) >= int(one["qty"]):
-            planned[one["id"]] = planned.get(one["id"], 0) + 1
     return {
         "grid": grid,
         "cells": {"total": usable, "used": used, "free": int(free.sum())},
@@ -779,456 +767,9 @@ def drawer_report(raw_drawer: dict[str, Any], bins: list[dict[str, Any]], reach:
         "height_issues": len(issues),
         "placed": sum(len(item["layers"]) for item in items),
         "stacks": sum(1 for item in items if len(item["layers"]) > 1),
-        "planned": planned,
         "planning_heights": plans,
         "edge_spacers": sum(1 for p in drawer["placements"] if "gx" not in p and "on" not in p),
     }
-
-
-# ---------------------------------------------------------------- auto layout
-
-
-def _sat(grid: np.ndarray) -> np.ndarray:
-    table = np.zeros((grid.shape[0] + 1, grid.shape[1] + 1), dtype=np.int32)
-    table[1:, 1:] = grid.astype(np.int32).cumsum(0).cumsum(1)
-    return table
-
-
-def _window(sat: np.ndarray, y_off: int, x_off: int, h: int, w: int, ny: int, nx: int) -> np.ndarray:
-    """Sum of every h x w window starting at (gy + y_off, gx + x_off), for all
-    gy < ny and gx < nx at once."""
-    y0, x0 = y_off, x_off
-    return (
-        sat[y0 + h:y0 + h + ny, x0 + w:x0 + w + nx]
-        - sat[y0:y0 + ny, x0 + w:x0 + w + nx]
-        - sat[y0 + h:y0 + h + ny, x0:x0 + nx]
-        + sat[y0:y0 + ny, x0:x0 + nx]
-    )
-
-
-def _score_rows(gx, gy, contact, rows, cols):
-    return gy * 1000.0 - gx * 10.0 + contact
-
-
-def _score_tight(gx, gy, contact, rows, cols):
-    return contact * 100.0 + gy / max(rows, 1) * 10.0 - gx / max(cols, 1)
-
-
-def _score_columns(gx, gy, contact, rows, cols):
-    return -gx * 1000.0 + gy * 10.0 + contact
-
-
-def _by_height(item):
-    return (-item.get("plan_h", item["h"]), -item["w"] * item["d"], -item["w"], item["name"], item["bin"], item["copy"])
-
-
-def _by_height_then_depth(item):
-    return (-item.get("plan_h", item["h"]), -item["d"], -item["w"], item["name"], item["bin"], item["copy"])
-
-
-def _by_area(item):
-    return (-item["w"] * item["d"], -item.get("plan_h", item["h"]), item["name"], item["bin"], item["copy"])
-
-
-STRATEGIES: tuple[tuple[str, str, str, Callable, Callable], ...] = (
-    ("rows", "Tidy rows", "Tallest at the back, filled in rows from the left.", _by_height, _score_rows),
-    ("tight", "Tight fit", "Tallest at the back; each bin goes where it touches the most neighbours.", _by_height, _score_tight),
-    ("columns", "Columns", "Tallest at the back, filled in columns from the left.", _by_height_then_depth, _score_columns),
-    ("most", "Most bins", "Biggest bins first, packed for the fullest drawer.", _by_area, _score_tight),
-)
-
-# Non-conclusive: a greedy/backtracked miss, not a proof the drawer is full.
-AUTO_NO_SPOT = "Auto layout did not find a spot"
-AUTO_NO_HEIGHT_SPOT = "Auto layout did not find a height-safe spot"
-
-
-def _placement_options(
-    rows, cols, occupied, heights, has_bin, item, scorer, height_rule, reach="column",
-) -> list[tuple[int, int, float]]:
-    """Every legal (row, col) an item may occupy against the given occupancy
-    state, best-first: higher score, then lower row, then lower column."""
-    w, d, h = item["w"], item["d"], item.get("plan_h", item["h"])
-    if w > cols or d > rows:
-        return []
-    ny, nx = rows - d + 1, cols - w + 1
-    free = _window(_sat(occupied), 0, 0, d, w, ny, nx) == 0
-    if not free.any():
-        return []
-    padded = _sat(np.pad(occupied, 1, constant_values=True))
-    contact = (
-        _window(padded, 1, 0, d, 1, ny, nx) + _window(padded, 1, w + 1, d, 1, ny, nx)
-        + _window(padded, 0, 1, 1, w, ny, nx) + _window(padded, d + 1, 1, 1, w, ny, nx)
-    ) / (2.0 * (w + d))
-    gy, gx = np.mgrid[0:ny, 0:nx]
-    score = scorer(gx, gy, contact, rows, cols)
-    allowed = free
-    if height_rule != "ignore" and item.get("kind") not in SPACER_KINDS:
-        behind_heights = np.where(has_bin, heights, np.inf)
-        if reach == "adjacent":
-            # front[r] is the row just in front of r; behind[r] is row r.
-            front = np.vstack([np.zeros((1, cols)), heights])
-            behind = np.vstack([behind_heights, np.full((1, cols), np.inf)])
-        else:
-            front = np.maximum.accumulate(np.vstack([np.zeros((1, cols)), heights]), axis=0)
-            behind = np.minimum.accumulate(
-                np.vstack([behind_heights, np.full((1, cols), np.inf)])[::-1], axis=0
-            )[::-1]
-        taller_in_front = sliding_window_view(front[:ny], w, axis=1).max(axis=2) > h + HEIGHT_TOLERANCE
-        shorter_behind = sliding_window_view(behind[d:d + ny], w, axis=1).min(axis=2) < h - HEIGHT_TOLERANCE
-        violation = taller_in_front | shorter_behind
-        if height_rule == "strict":
-            allowed = free & ~violation
-        else:
-            score = score - violation * 1e6
-    if not allowed.any():
-        return []
-    rows_idx, cols_idx = np.where(allowed)
-    scores = score[rows_idx, cols_idx]
-    order = sorted(range(len(rows_idx)), key=lambda i: (-scores[i], rows_idx[i], cols_idx[i]))
-    return [(int(rows_idx[i]), int(cols_idx[i]), float(scores[i])) for i in order]
-
-
-def _pack(rows, cols, fixed, items, order, scorer, height_rule, reach="column"):
-    occupied = np.zeros((rows, cols), dtype=bool)
-    heights = np.zeros((rows, cols))
-    has_bin = np.zeros((rows, cols), dtype=bool)
-
-    def mark(item):
-        x0, y0 = max(0, item["gx"]), max(0, item["gy"])
-        x1, y1 = min(cols, item["gx"] + item["w"]), min(rows, item["gy"] + item["d"])
-        if x1 > x0 and y1 > y0:
-            occupied[y0:y1, x0:x1] = True
-            if item.get("kind") not in SPACER_KINDS:
-                has_bin[y0:y1, x0:x1] = True
-                heights[y0:y1, x0:x1] = item.get("plan_h", item["h"])
-
-    for item in fixed:
-        mark(item)
-    placed, unplaced = [], []
-    for item in sorted(items, key=order):
-        w, d = item["w"], item["d"]
-        if w > cols or d > rows:
-            unplaced.append({**item, "reason": "bigger than the drawer"})
-            continue
-        options = _placement_options(rows, cols, occupied, heights, has_bin, item, scorer, height_rule, reach)
-        if not options:
-            has_room = bool(_placement_options(rows, cols, occupied, heights, has_bin, item, scorer, "ignore", reach))
-            unplaced.append({**item, "reason": AUTO_NO_HEIGHT_SPOT if has_room else AUTO_NO_SPOT})
-            continue
-        row, col, _ = options[0]
-        placed_item = {**item, "gx": col, "gy": row}
-        mark(placed_item)
-        placed.append(placed_item)
-    return placed, unplaced
-
-
-# ------------------------------------------------------------- rescue search
-
-AUTO_RESCUE_NODE_BUDGET = 20_000  # search-node cap, not a wall-clock timeout
-
-
-def _rescue_item_order(rows, cols, fixed, items, scorer, height_rule, reach):
-    """Movable items sorted hardest-to-place first, judged against the fixed
-    placements only (no other movable item yet placed)."""
-    occupied = np.zeros((rows, cols), dtype=bool)
-    heights = np.zeros((rows, cols))
-    has_bin = np.zeros((rows, cols), dtype=bool)
-
-    def mark(item):
-        x0, y0 = max(0, item["gx"]), max(0, item["gy"])
-        x1, y1 = min(cols, item["gx"] + item["w"]), min(rows, item["gy"] + item["d"])
-        if x1 > x0 and y1 > y0:
-            occupied[y0:y1, x0:x1] = True
-            if item.get("kind") not in SPACER_KINDS:
-                has_bin[y0:y1, x0:x1] = True
-                heights[y0:y1, x0:x1] = item.get("plan_h", item["h"])
-
-    for item in fixed:
-        mark(item)
-
-    scored = [
-        (len(_placement_options(rows, cols, occupied, heights, has_bin, item, scorer, height_rule, reach)), item)
-        for item in items
-    ]
-    scored.sort(key=lambda pair: (
-        pair[0],
-        -(pair[1]["w"] * pair[1]["d"]),
-        -pair[1].get("plan_h", pair[1]["h"]),
-        -max(pair[1]["w"], pair[1]["d"]),
-        pair[1]["name"], pair[1]["bin"], pair[1]["copy"],
-    ))
-    return [item for _, item in scored]
-
-
-def _rescue_pack(rows, cols, fixed, items, height_rule, reach, budget=AUTO_RESCUE_NODE_BUDGET):
-    """Deterministic bounded backtracking search for one complete legal
-    arrangement of every item in ``items``.  Returns ``(placed, status,
-    nodes)`` where ``status`` is ``"found"``, ``"budget"`` or ``"exhausted"``."""
-    order = _rescue_item_order(rows, cols, fixed, items, _score_tight, height_rule, reach)
-    occupied = np.zeros((rows, cols), dtype=bool)
-    heights = np.zeros((rows, cols))
-    has_bin = np.zeros((rows, cols), dtype=bool)
-
-    def mark(item, on):
-        x0, y0 = max(0, item["gx"]), max(0, item["gy"])
-        x1, y1 = min(cols, item["gx"] + item["w"]), min(rows, item["gy"] + item["d"])
-        if x1 > x0 and y1 > y0:
-            occupied[y0:y1, x0:x1] = on
-            if item.get("kind") not in SPACER_KINDS:
-                has_bin[y0:y1, x0:x1] = on
-                heights[y0:y1, x0:x1] = item.get("plan_h", item["h"]) if on else 0.0
-
-    for item in fixed:
-        mark(item, True)
-
-    placements: list[dict] = []
-    nodes = 0
-
-    def recurse(index):
-        nonlocal nodes
-        if index == len(order):
-            return True
-        item = order[index]
-        options = _placement_options(rows, cols, occupied, heights, has_bin, item, _score_tight, height_rule, reach)
-        for row, col, _ in options:
-            if nodes >= budget:
-                return False
-            nodes += 1
-            placed_item = {**item, "gx": col, "gy": row}
-            mark(placed_item, True)
-            placements.append(placed_item)
-            if recurse(index + 1):
-                return True
-            placements.pop()
-            mark(placed_item, False)
-        return False
-
-    if recurse(0):
-        return placements, "found", nodes
-    if nodes >= budget:
-        return None, "budget", nodes
-    return None, "exhausted", nodes
-
-
-def _build_stacks(singles: list[dict[str, Any]], max_height: float) -> list[dict[str, Any]]:
-    """Snap stackable bins of one footprint and one stacking style into
-    stacks, tallest at the bottom, as high as the drawer allows."""
-    groups: dict[tuple, list[dict]] = {}
-    items = []
-    for single in singles:
-        one = single["row"]
-        if one.get("stack", "none") in STACK_STEPS and one.get("kind") not in SPACER_KINDS:
-            groups.setdefault((round(float(one["x"]), 2), round(float(one["y"]), 2), one["stack"]), []).append(single)
-        else:
-            items.append(single)
-    for members in groups.values():
-        members.sort(key=lambda single: (-float(single["row"]["z"]), single["bin"], single["copy"]))
-        current: list[dict] = []
-        height = 0.0
-        for single in members:
-            added = stack_part_height(single["row"]) if not current else stack_pitch(single["row"])
-            if current and height + added > max_height + 1e-6:
-                items.append(_merge(current, height))
-                current, height = [], 0.0
-                added = stack_part_height(single["row"])
-            current.append(single)
-            height += added
-        if current:
-            items.append(_merge(current, height))
-    return items
-
-
-def _merge(members: list[dict[str, Any]], height: float) -> dict[str, Any]:
-    if len(members) == 1:
-        return members[0]
-    base = members[0]
-    bottom, plan_top = 0.0, 0.0
-    for index, member in enumerate(members):
-        if index:
-            bottom += stack_pitch(members[index - 1]["row"])
-        plan_top = max(plan_top, bottom + member.get("plan_h", member["h"]))
-    return {**base, "h": height, "plan_h": plan_top,
-            "members": [(m["bin"], m["copy"]) for m in members]}
-
-
-def auto_layout(
-    layout: dict[str, Any],
-    bins: list[dict[str, Any]],
-    drawer_id: str | None = None,
-    options: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Several arrangements for one drawer, best first.
-
-    Options: ``mode`` ``rearrange`` (move everything not locked) or ``fill``
-    (only add bins around the current ones); ``height_rule`` ``strict`` (never a
-    short bin behind a taller one), ``prefer`` or ``ignore``; ``height_reach``
-    ``column`` (anything in front) or ``adjacent`` (only the bin right in
-    front); ``keep_locked``; ``include_spacers``; ``stack_bins`` (snap
-    stackable bins into stacks as tall as the drawer takes); ``only`` - a list
-    of ``{bin, copy}`` to place, which is how the view drops one bin into the
-    best free spot.  A copy past the printed Qty in ``only`` is placed as a
-    planned bin.
-    """
-    options = options or {}
-    raw = find_drawer(layout, drawer_id)
-    drawer = normalise_drawer(raw)
-    if drawer.get("boundary") == "pegboard":
-        raise ValueError("Auto layout is not available for Pegboard Space; place bins on the visible openings.")
-    grid = drawer_grid(drawer)
-    rows, cols = grid["rows"], grid["cols"]
-    by_id = {one["id"]: one for one in bins}
-    surface = is_surface_layout(layout)
-    plans = surface_planning_heights(layout, bins)
-    mode = options.get("mode", "rearrange")
-    height_rule = options.get("height_rule", "strict")
-    if height_rule not in HEIGHT_RULES:
-        height_rule = "strict"
-    reach = options.get("height_reach", "column")
-    if reach not in HEIGHT_REACHES:
-        reach = "column"
-    keep_locked = bool(options.get("keep_locked", True))
-    include_spacers = bool(options.get("include_spacers", False))
-    stack_bins = bool(options.get("stack_bins", True))
-    only = {(str(one.get("bin")), int(one.get("copy", 0))) for one in options.get("only") or []}
-
-    elsewhere = {
-        (p.get("bin"), int(p.get("copy", 0)))
-        for other in layout.get("drawers") or [] if isinstance(other, dict) and other is not raw
-        for p in other.get("placements") or [] if isinstance(p, dict)
-    }
-    chains, _ = _chains(drawer, by_id)
-    keep_placements, fixed, loose_copies = [], [], []
-    dropped_spacers = 0
-    for placement in drawer["placements"]:
-        if placement.get("bin") in by_id and "gx" not in placement and "on" not in placement:
-            keep_placements.append(placement)          # edge-facing spacers stay where they are
-    for chain in chains:
-        base = chain[0]
-        if mode == "fill" or only or (keep_locked and base.get("locked")):
-            keep_placements += chain
-            fixed.append(_stack_item(chain, drawer, by_id, plans))
-            continue
-        for placement in chain:
-            one = by_id[placement["bin"]]
-            if one.get("kind") in SPACER_KINDS and not include_spacers:
-                dropped_spacers += 1
-            else:
-                loose_copies.append((one["id"], int(placement.get("copy", 0))))
-    kept = {(p.get("bin"), int(p.get("copy", 0))) for p in keep_placements}
-
-    wanted: list[tuple[str, int]] = list(loose_copies)
-    for one in bins:
-        # An edge-facing spacer has a free placement the grid packer below
-        # cannot produce, so it is never a candidate here - it keeps the spot
-        # plan_spacers cut it for, regardless of include_spacers.
-        if one.get("kind") == "spacer" and one.get("boundary") == "edge":
-            continue
-        if one.get("kind") == "spacer" and not include_spacers and not only:
-            continue
-        for copy in range(int(one["qty"])):
-            key = (one["id"], copy)
-            if key not in elsewhere and key not in kept and key not in wanted:
-                wanted.append(key)
-    for key in only:
-        if key[0] in by_id and key not in wanted and key not in kept and key not in elsewhere:
-            wanted.append(key)
-    if only:
-        wanted = [key for key in wanted if key in only]
-
-    singles, skipped = [], []
-    for bin_id, copy in wanted:
-        one = by_id[bin_id]
-        w, d = bin_cells(one, drawer)
-        single = {
-            "key": f"{bin_id}:{copy}", "bin": bin_id, "copy": copy, "row": one,
-            "w": w, "d": d, "h": stack_part_height(one),
-            "plan_h": plans.get(bin_id, {}).get("effective_mm", stack_part_height(one)),
-            "name": one.get("name", ""),
-            "kind": one.get("kind", "bin"),
-        }
-        if not surface and single["h"] > drawer["height"] + 1e-6:
-            skipped.append({"bin": bin_id, "copy": copy, "reason": f"taller than the drawer ({single['h']:g} > {drawer['height']:g} mm)"})
-        else:
-            singles.append(single)
-    items = _build_stacks(singles, math.inf if surface else drawer["height"]) if stack_bins else singles
-
-    strategies = [s for s in STRATEGIES if s[0] == "tight"] if only else list(STRATEGIES)
-    candidates, seen = [], set()
-    usable = rows * cols
-    notes = []
-
-    def placements_for(item):
-        members = item.get("members") or [(item["bin"], item["copy"])]
-        out = [{"bin": members[0][0], "copy": members[0][1],
-                "gx": _units(item["gx"], drawer), "gy": _units(item["gy"], drawer), "locked": False}]
-        for (below_bin, below_copy), (bin_id, copy) in zip(members, members[1:]):
-            out.append({"bin": bin_id, "copy": copy, "on": f"{below_bin}:{below_copy}"})
-        return out
-
-    def make_candidate(ident, name, description, placed, unplaced_entries):
-        everything = fixed + [{**p, "top": by_id[(p.get("members") or [(p["bin"],)])[-1][0]]} for p in placed]
-        used = sum(item["w"] * item["d"] for item in everything)
-        count = lambda group: sum(len(item.get("members") or [0]) for item in group)
-        return {
-            "id": ident,
-            "name": name,
-            "description": description,
-            "placements": keep_placements + [p for item in placed for p in placements_for(item)],
-            "unplaced": unplaced_entries,
-            "stats": {
-                "placed": count(placed),
-                "wanted": count(items),
-                "stacks": sum(1 for item in placed if item.get("members")),
-                "fill": round(100.0 * used / usable, 1) if usable else 0.0,
-                "height_issues": len(_height_issues(everything, reach)),
-                "connectors": sum(one["count"] for one in _connectors(everything, grid["step"])[0]),
-            },
-        }
-
-    def run(strategy, rule, name=None, description=None):
-        ident, title, blurb, order, scorer = strategy
-        placed, unplaced = _pack(rows, cols, fixed, items, order, scorer, rule, reach)
-        signature = frozenset((p["bin"], p["copy"], p["gx"], p["gy"]) for p in placed)
-        if signature in seen and placed:
-            return
-        seen.add(signature)
-        unplaced_entries = [
-            {"bin": bin_id, "copy": copy, "reason": u["reason"]}
-            for u in unplaced for bin_id, copy in (u.get("members") or [(u["bin"], u["copy"])])
-        ]
-        candidates.append(make_candidate(
-            ident if rule == height_rule else f"{ident}-{rule}",
-            name or title, description or blurb, placed, unplaced_entries,
-        ))
-
-    for strategy in strategies:
-        run(strategy, height_rule)
-
-    # A deeper bounded search for a complete fit, when the fast layouts left
-    # bins out and there is more than one movable bin to place around.
-    if not only and not any(c["stats"]["placed"] == c["stats"]["wanted"] for c in candidates):
-        rescued, status, _nodes = _rescue_pack(rows, cols, fixed, items, height_rule, reach, AUTO_RESCUE_NODE_BUDGET)
-        if status == "found":
-            candidates.append(make_candidate(
-                "rescue", "Complete fit",
-                "A deeper bounded search found a complete arrangement after the fast layouts did not.",
-                rescued, [],
-            ))
-        elif status == "budget":
-            notes.append("Auto layout reached its search limit. A complete fit may still exist; try moving or locking a bin and run Auto layout again.")
-        else:
-            notes.append("No complete fit was found under the current placement rules.")
-
-    # When the height rule is what left bins out, offer the layout that bends it.
-    if height_rule == "strict" and any(
-        u["reason"] == AUTO_NO_HEIGHT_SPOT for c in candidates for u in c["unplaced"]
-    ):
-        run(STRATEGIES[1], "prefer", "Fits more", "Bends the height rule where it has to, so more bins fit.")
-    order = {id(c): index for index, c in enumerate(candidates)}
-    candidates.sort(key=lambda c: (-c["stats"]["placed"], c["stats"]["height_issues"], order[id(c)]))
-    if dropped_spacers:
-        notes.append(f"{dropped_spacers} spacer{'s' if dropped_spacers != 1 else ''} taken out - make spacers again once the layout settles.")
-    return {"candidates": candidates, "skipped": skipped, "notes": notes}
 
 
 # ---------------------------------------------------------------- spacers
@@ -1648,43 +1189,6 @@ def _copy_count(one: dict[str, Any], raw: Any) -> int:
     return raw
 
 
-def reconcile_printed_copies(
-    layout: dict[str, Any],
-    bins: list[dict[str, Any]],
-    selection: dict[str, int],
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Turn planned copies into printed ones for a batch that was just sent.
-
-    Returns a copied layout whose promoted placements take copy numbers
-    ``old_qty ...`` (stack ``on`` references follow the renames) and the exact
-    new Qty for every selected row. Nothing is saved here.
-    """
-    layout = copy.deepcopy(layout) if layout else None
-    by_id = {one["id"]: one for one in bins}
-    rename: dict[str, str] = {}
-    updates: list[dict[str, Any]] = []
-    drawers = (layout or {}).get("drawers") or []
-    for bin_id, count in selection.items():
-        old_qty = int(by_id[bin_id].get("qty") or 0)
-        planned = [
-            placement
-            for drawer in drawers
-            for placement in drawer.get("placements") or []
-            if placement.get("bin") == bin_id and int(placement.get("copy", 0)) >= old_qty
-        ]
-        planned.sort(key=lambda placement: int(placement.get("copy", 0)))
-        for offset, placement in enumerate(planned[:count]):
-            old_key, new_copy = _key(placement), old_qty + offset
-            placement["copy"] = new_copy
-            rename[old_key] = f"{bin_id}:{new_copy}"
-        updates.append({"id": bin_id, "qty": old_qty + count})
-    for drawer in drawers:
-        for placement in drawer.get("placements") or []:
-            if placement.get("on") in rename:
-                placement["on"] = rename[placement["on"]]
-    return layout, updates
-
-
 def print_inventory_bins(
     output_dir: Path | str,
     layout: dict[str, Any],
@@ -1698,7 +1202,7 @@ def print_inventory_bins(
 ) -> dict[str, Any]:
     """Send selected generated bins (and optional Space connectors) to the slicer.
 
-    Qty and planned copies change only after the slicer launch succeeds. A
+    Printed status changes only after the slicer launch succeeds. A
     selected row with no generated file but a canonical ``design_specs``
     entry (Fix 034 F2) is generated on demand via ``generate_from_design``
     first, and its resolved File cell is persisted immediately - still at
@@ -1885,9 +1389,6 @@ def drawer_routes(
             payload.get("bins") or [], payload.get("height_reach") or "column",
             payload["layout"],
         )
-
-    def auto(payload):
-        return auto_layout(payload["layout"], payload.get("bins") or [], payload.get("drawer_id"), payload.get("options"))
 
     def surface_fill(payload):
         with INVENTORY_LOCK:
@@ -2078,7 +1579,6 @@ def drawer_routes(
         "/api/drawer/design-source/duplicate": duplicate_design_source,
         "/api/drawer/design-source/status": change_design_status,
         "/api/drawer/report": report,
-        "/api/drawer/auto": auto,
         "/api/drawer/surface-fill": surface_fill,
         "/api/drawer/surface-fill/create": surface_fill_create,
         "/api/drawer/spacers": spacers,

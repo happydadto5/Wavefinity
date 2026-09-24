@@ -36,7 +36,17 @@ import shutil
 import threading
 from typing import Any, Iterable
 
-from organizer_engine import BASE_UNIT, MIN_HEIGHT_ABOVE_BASE
+from organizer_engine import (
+    B4B_DEFAULT_BASE,
+    B4B_DEFAULT_WALL,
+    B4B_FRONT_LABEL_STYLES,
+    B4B_LABEL_LOCATIONS,
+    B4B_LATCH_COUNTS,
+    B4B_LATCH_STRENGTHS,
+    B4B_LID_HEADROOM_CHOICES,
+    BASE_UNIT,
+    MIN_HEIGHT_ABOVE_BASE,
+)
 from organizer_product_rules import (
     B4B_LATCHED_MIN_HEIGHT,
     B4B_MIN_FIELD_XY,
@@ -74,7 +84,7 @@ MAX_QTY = 999
 # A generated bin is not a printed one.  Until the Layout view's setting says
 # otherwise, new rows start at Qty 0 and are marked printed by hand.
 DEFAULT_NEW_BIN_QTY = 0
-# A Space is one physical drawer, surface, portable case, or pegboard. Its inventory
+# A Space is one physical drawer, Storage Box (kind ``portable``), surface, or pegboard. Its inventory
 # is stored in the selected Wavefinity save folder. Legacy "box" is read for
 # migration only (see normalise_space_definition's allow_legacy) - it must
 # never be a normal writable current kind, or every caller that omits
@@ -475,9 +485,8 @@ def _write(path: Path, bins: list[dict[str, Any]], layout: dict | None, legacy: 
 def _prune_layout(layout: dict | None, bins: list[dict[str, Any]]) -> dict | None:
     """Drop placements and design sources whose bin row is gone.
 
-    A copy numbered past the printed Qty stays: it is a *planned* bin, placed
-    before it is printed.  A bin stacked on a dropped one takes its place, so a
-    stack closes up instead of floating.
+    A bin stacked on a dropped one takes its place, so a stack closes up
+    instead of floating.
     """
     if not isinstance(layout, dict):
         return layout
@@ -491,7 +500,7 @@ def _prune_layout(layout: dict | None, bins: list[dict[str, Any]]) -> dict | Non
             for above in placements:
                 if above.get("on") == key:
                     above.pop("on", None)
-                    for field in ("on", "gx", "gy", "locked"):
+                    for field in ("on", "gx", "gy"):
                         if field in gone:
                             above[field] = gone[field]
         drawer["placements"] = [one for one in placements if one.get("bin") in known]
@@ -1008,6 +1017,107 @@ def legacy_layout_space(layout: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 
+STORAGE_BOX_LABEL_LIMIT = 80
+STORAGE_BOX_MIN_MATERIAL_MM = 0.4
+STORAGE_BOX_MAX_MATERIAL_MM = 4.0
+
+
+def storage_box_defaults() -> dict[str, Any]:
+    """The established B4B/Storage Box settings a new or legacy Space starts from."""
+    return {
+        "secure_lid": True,
+        "latch_count": "auto",
+        "latch_strength": "standard",
+        "lid_headroom_mm": 1.0,
+        "label_enabled": False,
+        "label_text": "",
+        "label_location": "top",
+        "front_label_style": "flat",
+        "stacking": False,
+        "handle": False,
+        "wall_mm": B4B_DEFAULT_WALL,
+        "base_mm": B4B_DEFAULT_BASE,
+    }
+
+
+def _storage_box_flag(raw: Any, name: str) -> bool:
+    if not isinstance(raw, bool):
+        raise ValueError(f"storage box {name} must be true or false")
+    return raw
+
+
+def _storage_box_choice(raw: Any, choices: tuple[str, ...], name: str) -> str:
+    value = str(raw).strip().lower()
+    if value not in choices:
+        raise ValueError(f"storage box {name} must be one of {', '.join(choices)}")
+    return value
+
+
+def _storage_box_material(raw: Any, name: str) -> float:
+    if isinstance(raw, bool):
+        raise ValueError(f"storage box {name} must be a number in mm")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"storage box {name} must be a number in mm") from error
+    if not math.isfinite(value) or not (
+        STORAGE_BOX_MIN_MATERIAL_MM <= value <= STORAGE_BOX_MAX_MATERIAL_MM
+    ):
+        raise ValueError(
+            f"storage box {name} must be between {STORAGE_BOX_MIN_MATERIAL_MM:g} "
+            f"and {STORAGE_BOX_MAX_MATERIAL_MM:g} mm"
+        )
+    return value
+
+
+def normalise_storage_box(raw: Any) -> dict[str, Any]:
+    """A complete, validated ``space.storage_box`` block.
+
+    Missing keys read the established defaults, so a legacy Storage Box Space
+    with no block behaves exactly like a new one with default settings. The
+    block never carries redundant ``enabled``/``lid`` flags: a Storage Box Space
+    is always a B4B case with a lid.
+    """
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError("storage box settings must be an object")
+    merged = {**storage_box_defaults(), **{
+        key: value for key, value in raw.items() if key in storage_box_defaults()
+    }}
+    headroom = merged["lid_headroom_mm"]
+    if isinstance(headroom, bool):
+        raise ValueError("storage box lid snugness must be a number in mm")
+    try:
+        headroom = float(headroom)
+    except (TypeError, ValueError) as error:
+        raise ValueError("storage box lid snugness must be a number in mm") from error
+    match = next(
+        (choice for choice in B4B_LID_HEADROOM_CHOICES if math.isclose(headroom, choice, abs_tol=1e-6)),
+        None,
+    )
+    if match is None:
+        allowed = ", ".join(f"{choice:g}" for choice in B4B_LID_HEADROOM_CHOICES)
+        raise ValueError(f"storage box lid snugness must be one of {allowed} mm")
+    label_text = str(merged["label_text"] or "").strip()
+    if len(label_text) > STORAGE_BOX_LABEL_LIMIT:
+        raise ValueError(f"storage box label text is at most {STORAGE_BOX_LABEL_LIMIT} characters")
+    return {
+        "secure_lid": _storage_box_flag(merged["secure_lid"], "secure lid"),
+        "latch_count": _storage_box_choice(merged["latch_count"], B4B_LATCH_COUNTS, "latch count"),
+        "latch_strength": _storage_box_choice(merged["latch_strength"], B4B_LATCH_STRENGTHS, "latch strength"),
+        "lid_headroom_mm": match,
+        "label_enabled": _storage_box_flag(merged["label_enabled"], "label"),
+        "label_text": label_text,
+        "label_location": _storage_box_choice(merged["label_location"], B4B_LABEL_LOCATIONS, "label location"),
+        "front_label_style": _storage_box_choice(merged["front_label_style"], B4B_FRONT_LABEL_STYLES, "front label style"),
+        "stacking": _storage_box_flag(merged["stacking"], "stacking"),
+        "handle": _storage_box_flag(merged["handle"], "handle"),
+        "wall_mm": _storage_box_material(merged["wall_mm"], "wall thickness"),
+        "base_mm": _storage_box_material(merged["base_mm"], "base thickness"),
+    }
+
+
 def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = False) -> dict[str, Any]:
     name = str(raw.get("name") or "").strip()[:80]
     if not name:
@@ -1044,17 +1154,17 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
     elif kind == "portable":
         if x + 1e-9 < B4B_MIN_FIELD_XY or y + 1e-9 < B4B_MIN_FIELD_XY:
             raise ValueError(
-                f"portable storage needs at least {B4B_MIN_FIELD_XY:g} mm in X and Y"
+                f"a storage box needs at least {B4B_MIN_FIELD_XY:g} mm in X and Y"
             )
         if z + 1e-9 < B4B_LATCHED_MIN_HEIGHT:
             raise ValueError(
-                f"portable storage needs at least {B4B_LATCHED_MIN_HEIGHT:g} mm usable height"
+                f"a storage box needs at least {B4B_LATCHED_MIN_HEIGHT:g} mm usable height"
             )
         for axis_name, value in (("X", x), ("Y", y)):
             units = value / BASE_UNIT
             if not math.isclose(units, round(units), abs_tol=1e-6):
                 raise ValueError(
-                    f"portable storage {axis_name} must be a whole Wavefinity unit"
+                    f"storage box {axis_name} must be a whole Wavefinity unit"
                 )
 
     elif kind == "surface":
@@ -1077,6 +1187,8 @@ def normalise_space_definition(raw: dict[str, Any], *, allow_legacy: bool = Fals
     result = {"name": name, "kind": kind, "x": x, "y": y, "z": z}
     if kind == "surface":
         result["trim_size"] = trim_size
+    if kind == "portable":
+        result["storage_box"] = normalise_storage_box(raw.get("storage_box"))
     return result
 
 def _setup_space_layout(layout: dict[str, Any], space_def: dict[str, Any]) -> None:
@@ -1166,16 +1278,27 @@ def _reconcile_surface_bases(bins: list[dict[str, Any]], layout: dict[str, Any],
             row["file"] = ""
 
 
+def _carry_storage_box(raw_def: dict[str, Any], layout: dict[str, Any], mode: str) -> dict[str, Any]:
+    """An update that does not send Storage Box settings keeps the saved ones."""
+    if mode != "update" or "storage_box" in raw_def:
+        return raw_def
+    existing = layout.get("space") if isinstance(layout, dict) else None
+    if isinstance(existing, dict) and isinstance(existing.get("storage_box"), dict):
+        return {**raw_def, "storage_box": existing["storage_box"]}
+    return raw_def
+
+
 def configure_space(
     output_dir: Path | str, *, raw_def: dict[str, Any], mode: str = "create", allow_legacy: bool = False
 ) -> dict[str, Any]:
-    space_def = normalise_space_definition(raw_def, allow_legacy=allow_legacy)
     with INVENTORY_LOCK:
         path = resolve_inventory_path(output_dir, migrate=True)
         current = _read(path)
         layout = current["layout"] if isinstance(current["layout"], dict) else {}
         if mode == "create" and isinstance(layout.get("space"), dict):
             raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
+        space_def = normalise_space_definition(
+            _carry_storage_box(raw_def, layout, mode), allow_legacy=allow_legacy)
         _setup_space_layout(layout, space_def)
         if mode == "update" and space_def["kind"] == "surface":
             _reconcile_surface_bases(current["bins"], layout, space_def["z"])
@@ -1186,13 +1309,14 @@ def configure_space(
 def configure_space_text(
     text: str, *, title: str, raw_def: dict[str, Any], mode: str = "create", allow_legacy: bool = False
 ) -> dict[str, Any]:
-    space_def = normalise_space_definition(raw_def, allow_legacy=allow_legacy)
     raw = str(text or "")
     with INVENTORY_LOCK:
         current = parse_inventory(raw)
         layout = current["layout"] if isinstance(current["layout"], dict) else {}
         if mode == "create" and isinstance(layout.get("space"), dict):
             raise ValueError(f"this folder already holds the space {layout['space'].get('name')!r}")
+        space_def = normalise_space_definition(
+            _carry_storage_box(raw_def, layout, mode), allow_legacy=allow_legacy)
         _setup_space_layout(layout, space_def)
         if mode == "update" and space_def["kind"] == "surface":
             _reconcile_surface_bases(current["bins"], layout, space_def["z"])

@@ -140,6 +140,7 @@ from organizer_product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
     ORDINARY_BIN_MIN_HEIGHT_MM,
 )
+from organizer_space_outputs import STORAGE_BOX, structural_design, structural_kind
 from organizer_spaces import inventory_enabled, space_routes
 from organizer_app import (
     APP_DIR,
@@ -2752,7 +2753,7 @@ def create_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if "trim_size" in payload:
         raw_def["trim_size"] = payload["trim_size"]
-    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y"):
+    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box"):
         if key in payload:
             raw_def[key] = payload[key]
     return configure_space_text(
@@ -2771,7 +2772,7 @@ def configure_space_text_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if "trim_size" in payload:
         raw_def["trim_size"] = payload["trim_size"]
-    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y"):
+    for key in ("pegboard_standard", "pegboard_size_mode", "pegboard_holes_x", "pegboard_holes_y", "storage_box"):
         if key in payload:
             raw_def[key] = payload[key]
     return configure_space_text(
@@ -3116,7 +3117,11 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         and not is_base_trim
     ):
         output_dir = Path(gen_result["output"])
-        if not payload.get("design_row_id") and inventory_enabled(output_dir, load_preferences()):
+        if (
+            not payload.get("design_row_id")
+            and not payload.get("structural_output")
+            and inventory_enabled(output_dir, load_preferences())
+        ):
             box, layout, label, part_name, location, scoop = _design(design)
             record = inventory_bin_record(
                 box, layout, design_files, label, part_name, scoop,
@@ -3133,6 +3138,52 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "slicer": str(slicer_path),
         "project": str(project_path) if project_path else None,
     }
+
+
+def _structural_request(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """The kind and transient design for the Space definition in ``payload``."""
+    space = payload.get("space")
+    kind = structural_kind(space if isinstance(space, dict) else None)
+    if kind is None:
+        raise ValueError("This Space type has no structural output.")
+    design = structural_design(
+        space, bed_x_mm=payload.get("bed_x_mm"), bed_y_mm=payload.get("bed_y_mm"),
+    )
+    return kind, design
+
+
+def structural_design_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """A Space's structural output design and a plain size summary. Read-only:
+    never touches an Inventory."""
+    kind, design = _structural_request(payload)
+    if kind == STORAGE_BOX:
+        box = design_from_dict(design)[0]
+        summary = b4b_summary(box)
+    else:
+        summary = base_trim_summary(base_trim_from_design(design))
+    return {"kind": kind, "design": design, "summary": summary}
+
+
+def structural_generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Save a Space's Storage Box or Base Trim files. Never logs an Inventory row."""
+    _kind, design = _structural_request(payload)
+    return generate_payload(
+        {
+            "design": design, "output": payload.get("output"), "keep_log": False,
+            "auto_timestamp": bool(payload.get("auto_timestamp", False)),
+        },
+        suppress_local_inventory=True,
+    )
+
+
+def structural_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Send a Space's Storage Box or Base Trim to the slicer. Never logs an Inventory row."""
+    _kind, design = _structural_request(payload)
+    return print_payload({
+        "design": design, "output": payload.get("output"), "target": "bin",
+        "keep_log": False, "structural_output": True,
+        "slicer_path": payload.get("slicer_path"),
+    })
 
 
 POST_ROUTES = {
@@ -3155,6 +3206,9 @@ POST_ROUTES = {
     "/api/connector": connector_payload,
     "/api/sampler": sampler_payload,
     "/api/print": print_payload,
+    "/api/space/structural-design": structural_design_payload,
+    "/api/space/structural-generate": structural_generate_payload,
+    "/api/space/structural-print": structural_print_payload,
     "/api/preferences": preferences_payload,
     "/api/space/show-folder": show_folder_payload,
     "/api/browse-output-folder": browse_output_folder_payload,

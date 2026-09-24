@@ -2,7 +2,7 @@
 
 // Normal Design can work without a persistent folder by downloading generated
 // files. Inventory and typed Spaces require a real writable folder. A typed
-// Space is a one-time Drawer/Surface/Portable/Pegboard setup layered on that folder;
+// Space is a one-time Drawer/Storage Box/Surface/Pegboard setup layered on that folder;
 // an untyped folder just keeps ordinary designs.
 const SP = {
   recent: [],
@@ -24,13 +24,14 @@ const SP = {
 };
 const RESUME_AUTOCONTINUE_SECONDS = 10;
 const SP_KINDS = {
-  portable: { icon: "🧰", label: "Portable Storage" },
+  // The internal kind stays "portable"; users only ever see "Storage Box".
+  portable: { icon: "🧰", label: "Storage Box" },
   surface: { icon: "🔲", label: "Surface" },
   drawer: { icon: "🗄️", label: "Drawer" },
   pegboard: { icon: "🧱", label: "Pegboard" },
   // Legacy kind, readable for migration only - never a current Space type;
-  // it presents as Portable Storage, its recovery destination.
-  box: { icon: "🧰", label: "Portable Storage" },
+  // it presents as a Storage Box, its recovery destination.
+  box: { icon: "🧰", label: "Storage Box" },
 };
 const FOLDER_METADATA = ".wavefinity.json";
 const LEGACY_METADATA = ".wavefinity-space.json";
@@ -285,13 +286,11 @@ SP.resetDrawer = async ({ skipSafeLeave = false } = {}) => {
   DL.warnings = [];
   DL.report = null;
   DL.reportTicket += 1;
-  DL.candidates = [];
   DL.selected = null;
+  DL.selectedRow = null;
   DL.output = null;
   DL.pegboardLayouts = {};
   DL.pegboardRefreshError = "";
-  DL.working = null;
-  DL.workingTicket += 1;
   DL.saveState = "idle";
   DL.saveError = "";
   DL.history = [];
@@ -397,6 +396,9 @@ SP.validSpace = raw => {
     if (Number.isFinite(expected) && Math.abs(space.z - expected) <= 1e-6) {
       space.trim_size = trimSize;
     }
+  }
+  if ((space.kind === "portable" || space.kind === "box") && raw.storage_box && typeof raw.storage_box === "object") {
+    space.storage_box = clone(raw.storage_box);
   }
   if (space.kind === "pegboard") {
     const standard = SP.pegboardStandard(raw.pegboard_standard);
@@ -716,7 +718,7 @@ SP._pumpResumeQueue = () => {
       // (Fix 032 Correction 3, C3.3).
       const nextOwnsMessage = Boolean(SP._resume.latest?.waiters.length);
       if (!item.waiters.length && !nextOwnsMessage) {
-        toast(`Current design could not be saved to this Space: ${error.message}`, true, 6000);
+        toast(`The current design could not be saved to this Space: ${error.message}`, true, 6000);
       }
       item.waiters.forEach(w => w.reject(error));
     })
@@ -1288,7 +1290,7 @@ SP.armResumeAutoContinue = () => {
 };
 
 // An existing Space lands by its loaded Inventory, without changing its
-// restored Current design or making a second inventory parser.
+// restored design or making a second inventory parser.
 SP.openTypedSpacePreferredView = async () => {
   try {
     await DL.ensureLoaded();
@@ -1560,6 +1562,7 @@ SP.showSetup = (kind, prefillSpace = null, { update = false } = {}) => {
       document.getElementById("portable-x").value = prefillSpace?.x || "";
       document.getElementById("portable-y").value = prefillSpace?.y || "";
       document.getElementById("portable-z").value = prefillSpace?.z || "";
+      SP.fillStorageBoxForm(prefillSpace?.storage_box);
   } else if (kind === "pegboard") {
       document.getElementById("pegboard-standard").value = prefillSpace?.pegboard_standard || "standard";
       document.getElementById("pegboard-size-mode").value = prefillSpace?.pegboard_size_mode || "physical";
@@ -1674,7 +1677,7 @@ SP.readSetupValues = () => {
     const rawY = Number(document.getElementById("portable-y").value);
     const z = Number(document.getElementById("portable-z").value);
     if (![rawX, rawY, z].every(Number.isFinite)) {
-      return fail("Enter valid Portable Storage dimensions in mm.", "#portable-x");
+      return fail("Enter valid Storage Box dimensions in mm.", "#portable-x");
     }
 
     const x = SP.snap(rawX);
@@ -1684,17 +1687,17 @@ SP.readSetupValues = () => {
 
     if (x < minField || y < minField) {
       return fail(
-        `Portable Storage needs at least ${fmt(minField)} × ${fmt(minField)} mm of child-bin field.`,
+        `A Storage Box needs at least ${fmt(minField)} × ${fmt(minField)} mm of child-bin field.`,
         "#portable-x",
       );
     }
     if (z < minHeight) {
       return fail(
-        `Portable Storage usable height must be at least ${fmt(minHeight)} mm.`,
+        `A Storage Box's usable height must be at least ${fmt(minHeight)} mm.`,
         "#portable-z",
       );
     }
-    return { kind, name, x, y, z, trimSize: null };
+    return { kind, name, x, y, z, trimSize: null, extra: { storage_box: SP.readStorageBoxForm() } };
   }
 
   if (kind === "pegboard") {
@@ -1836,7 +1839,7 @@ SP.create = async () => {
   // The leave decision is already resolved above - clear the old Drawer
   // state exactly once, with no second prompt.
   if (!(await SP.resetDrawer({ skipSafeLeave: true }))) return;
-  // SP.create() always follows with an explicit designSurface/designPortable/
+  // SP.create() always follows with an explicit
   // loadFreshOrdinaryDesignForCurrentFolder call below, which installs the
   // starter design itself - skip applyFolder's own (redundant) activation.
   const applyOptions = { initDesign: false, reset: false };
@@ -1847,28 +1850,19 @@ SP.create = async () => {
   await SP.applyFolder(info, applyOptions);
   SP.close();
 
-  if (kind === "portable") await SP.designPortable(info.space);
-  else if (kind === "surface") await SP.designSurface(info.space);
-  else await loadFreshOrdinaryDesignForCurrentFolder();
+  // The Designer always means an ordinary Bin. A Storage Box or Base Trim is
+  // saved from the Space itself (Space Actions), never designed here.
+  await loadFreshOrdinaryDesignForCurrentFolder();
 };
 
 // ------------------------------------------------------------ design/session activation (Fix 019 Item 1/5)
 //
-// Every session-only Current-design/editor/Surface-first-run flag that must
-// never leak from one typed-Space identity to another. Base Trim source/
-// switching memory (lastOrdinaryDesign/lastBaseTrimDesign/
-// baseTrimSourceLayout) is per-design editing-session bookkeeping, not
-// per-Space persisted state, so it is cleared here too rather than carried
-// into a different Space.
+// Every session-only editor flag that must never leak from one typed-Space
+// identity to another.
 SP.resetDesignSession = () => {
   state.designInventoryId = null;
   state.spaceStarterPreviewPending = false;
-  state.workingPending = false;
-  state.workingGeneratedKey = null;
-  state.surfaceEdgeHandled = false;
-  state.baseTrimSourceLayout = null;
   state.lastOrdinaryDesign = null;
-  state.lastBaseTrimDesign = null;
   state.drafts = {};
   state.history = [];
   state.future = [];
@@ -1879,44 +1873,13 @@ SP.resetDesignSession = () => {
   if (typeof updateHistoryButtons === "function") updateHistoryButtons();
 };
 
-// Builds the correct design family's clean starter design for `space` into
-// state.design/state.cleanDesign. Does not touch preview/toast/the working-
-// pending flag - callers decide those. Shared by SP.initializeDesignForActiveSpace
-// (silent, for open/resume/switch) and SP.designSurface/SP.designPortable
-// (explicit, user-visible creation) instead of duplicating the reset logic -
-// see Fix 004/Fix 019 Item 1.
-SP.installSpaceStarterDesign = async space => {
+// Builds the clean starter design for `space` into state.design/
+// state.cleanDesign. The Designer always starts an ordinary Bin - a Storage Box
+// or Base Trim is a structural output of the Space, not a Designer object.
+// Does not touch preview/toast - callers decide those.
+SP.installSpaceStarterDesign = async () => {
   state.spaceStarterPreviewPending = true;
-  if (space.kind === "surface") {
-    const trimValue = SP.surfacePresetMap()[space.trim_size];
-    state.design = makeBaseTrimDesign(space.x, space.y);
-    if (Number.isFinite(trimValue)) {
-      state.design.base_trim.width_mm = trimValue;
-      state.design.box.z = trimValue;
-    }
-    state.design.part_name = space.name;
-  } else if (space.kind === "portable" || space.kind === "box") {
-    state.design = clone(state.catalog.defaults.design);
-    state.design.box.x = space.x;
-    state.design.box.y = space.y;
-    state.design.box.z = normalizeBinDimension("z", space.z);
-    state.design.part_name = space.name;
-    const binType = document.getElementById("bin-type");
-    if (binType) binType.value = "b4b";
-    await toggleB4B(true);
-  } else if (space.kind === "pegboard") {
-    state.design = freshDesignForCurrentFolder();
-    state.design.box.pegboard = {
-      enabled: true,
-      standard: space.pegboard_standard,
-      cleat_x: "auto",
-      cleat_y: "auto",
-    };
-  } else {
-    // Drawer (and any other/untyped folder that reaches here) -> the fresh
-    // ordinary Bin starter, same as loadFreshOrdinaryDesignForCurrentFolder.
-    state.design = freshDesignForCurrentFolder();
-  }
+  state.design = freshDesignForCurrentFolder();
   state.cleanDesign = clone(state.design);
 };
 
@@ -1926,16 +1889,19 @@ SP.installSpaceStarterDesign = async space => {
 // startup resume, Open Existing Space, Recent Space selection, collision
 // "Open this Space", a newly created Space, a configured/migrated Space, and
 // any later folder switch. The resulting starter design is clean/untouched:
-// opening/switching alone never marks it as a pending Current design -
-// explicit user actions (New design, Design first bin, opening a design
-// file) continue to call markWorkingDesignPending() themselves.
+// opening/switching alone never creates an Inventory row.
 SP.initializeDesignForActiveSpace = async () => {
   if (state.folderMode !== "space" || !state.activeSpace || !state.catalog) return;
   SP.resetDesignSession();
 
   let restored = false;
   let resumeValidationFailed = false;
-  if (state.spaceResumeDesign) {
+  // A checkpoint left by an older version may hold a Storage Box or Base Trim
+  // design. Those are Space outputs now, not Designer objects: the checkpoint is
+  // left untouched and the Designer starts a fresh Bin instead.
+  const resumeIsStructural = Boolean(state.spaceResumeDesign) && (
+    state.spaceResumeDesign.design_kind === "base_trim" || Boolean(state.spaceResumeDesign.box?.b4b?.enabled));
+  if (state.spaceResumeDesign && !resumeIsStructural) {
     try {
       const result = await api("/api/design/validate", {
         design: clone(state.spaceResumeDesign),
@@ -1946,7 +1912,6 @@ SP.initializeDesignForActiveSpace = async () => {
       state.design = result.design;
       state.cleanDesign = clone(result.design);
       state.spaceStarterPreviewPending = false;
-      state.workingPending = Boolean(state.spaceResumePending);
       restored = true;
     } catch (error) {
       // The stored checkpoint itself is left untouched - a validation
@@ -1958,9 +1923,7 @@ SP.initializeDesignForActiveSpace = async () => {
 
   // Resume is a recovery snapshot; bind it back to its existing Inventory
   // source when that exact canonical design is already present.
-  if (restored && typeof DL !== "undefined" && DL.ensureLoaded &&
-      !state.design?.box?.b4b?.enabled &&
-      (typeof baseTrimEnabled !== "function" || !baseTrimEnabled())) {
+  if (restored && typeof DL !== "undefined" && DL.ensureLoaded) {
     await DL.ensureLoaded();
     const key = JSON.stringify(state.design);
     const matches = Object.entries(DL.layout?.design_specs || {})
@@ -1968,7 +1931,7 @@ SP.initializeDesignForActiveSpace = async () => {
     if (matches.length === 1) state.designInventoryId = matches[0][0];
   }
 
-  if (!restored) await SP.installSpaceStarterDesign(state.activeSpace);
+  if (!restored) await SP.installSpaceStarterDesign();
   syncForm();
   // The active Space identity, state.design, and the preview must all
   // belong to the same Space/design generation - request a fresh preview
@@ -1989,35 +1952,6 @@ SP.initializeDesignForActiveSpace = async () => {
     // restored one) persists exactly as before.
     refreshPreview({ persistResume: !resumeValidationFailed });
   }
-};
-
-// Reuses the real Base Trim design path (makeBaseTrimDesign) rather than
-// building a second, incompatible "edge" design object - see Fix 004. This
-// is the explicit "design this Surface now" action (e.g. right after
-// Create), so it forces the 3D preview and announces itself - unlike the
-// silent SP.initializeDesignForActiveSpace used for open/resume.
-SP.designSurface = async space => {
-  SP.resetDesignSession();
-  await SP.installSpaceStarterDesign(space);
-  syncForm();
-  activatePreviewView("3d");
-  await refreshPreview();
-
-  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
-  toast(`Designing Surface: ${space.name}`);
-};
-
-// Reuses the ordinary bin -> B4B toggle machinery (toggleB4B/readB4BForm)
-// rather than forking B4B form logic - see Fix 004 ("Portable -> Bin for Bins").
-SP.designPortable = async space => {
-  SP.resetDesignSession();
-  await SP.installSpaceStarterDesign(space);
-  syncForm();
-  activatePreviewView("3d");
-  await refreshPreview();
-
-  if (SP.renderSpaceInfo) SP.renderSpaceInfo();
-  toast(`Designing Portable Storage: ${space.name}`);
 };
 
 // Enters the same explicit setup/migration screen for a folder that needs
@@ -2337,6 +2271,8 @@ SP.wire = () => {
     const input = document.getElementById(id);
     if (input) input.addEventListener("input", SP.updateReadouts);
   });
+  ["portable-lid-type", "portable-label-location"].forEach(id =>
+    document.getElementById(id)?.addEventListener("change", SP.syncStorageBoxForm));
   // Surface: on blur show the actual resolved outside size in the inputs.
   ["surface-x", "surface-y"].forEach(id => {
     document.getElementById(id)?.addEventListener("blur", () => {
@@ -2416,8 +2352,190 @@ SP.updateReadouts = () => {
     }
 };
 
+// ------------------------------------------------------------ Storage Box case settings
+//
+// A Storage Box Space owns its case: `space.storage_box` (see
+// organizer_inventory.normalise_storage_box). These helpers fill and read the
+// case settings on the Space setup/Edit form.
+
+SP.storageBoxDefaults = () => ({
+  secure_lid: true, latch_count: "auto", latch_strength: "standard", lid_headroom_mm: 1,
+  label_enabled: false, label_text: "", label_location: "top", front_label_style: "flat",
+  stacking: false, handle: false,
+  wall_mm: Number(state.catalog?.b4b_rules?.default_wall_mm ?? 1.6),
+  base_mm: Number(state.catalog?.b4b_rules?.default_base_mm ?? 1.6),
+});
+
+SP.fillMaterialSelect = (id, choices, value) => {
+  const select = document.getElementById(id);
+  if (!select) return;
+  const rows = (choices || []).map(one => ({ value: Number(one.value), label: one.label }));
+  if (!rows.some(one => Math.abs(one.value - value) < 1e-9)) rows.push({ value, label: "Custom" });
+  select.innerHTML = rows.map(one =>
+    `<option value="${one.value}">${fmt(one.value)} mm — ${escapeHtml(one.label)}</option>`).join("");
+  select.value = String(value);
+};
+
+SP.fillStorageBoxForm = box => {
+  const one = { ...SP.storageBoxDefaults(), ...(box || {}) };
+  SP.storageBoxStrength = one.latch_strength || "standard";
+  const set = (id, value) => { const node = document.getElementById(id); if (node) node.value = String(value); };
+  set("portable-lid-type", one.secure_lid === false ? "lid_only" : "latched");
+  set("portable-lid-snugness", one.lid_headroom_mm);
+  set("portable-stacking", Boolean(one.stacking));
+  set("portable-latch-count", ["1", "2"].includes(String(one.latch_count)) ? String(one.latch_count) : "auto");
+  set("portable-handle", Boolean(one.handle) && one.secure_lid !== false);
+  set("portable-label-location", one.label_enabled ? (one.label_location === "front" ? "front" : "top") : "none");
+  set("portable-label-text", one.label_text || "");
+  set("portable-front-label-style", one.front_label_style === "wavy" ? "wavy" : "flat");
+  SP.fillMaterialSelect("portable-wall", state.catalog?.b4b_rules?.wall_choices, Number(one.wall_mm));
+  SP.fillMaterialSelect("portable-base", state.catalog?.b4b_rules?.base_choices, Number(one.base_mm));
+  SP.syncStorageBoxForm();
+};
+
+SP.syncStorageBoxForm = () => {
+  const value = id => document.getElementById(id)?.value;
+  const hide = (id, hidden) => { const node = document.getElementById(id); if (node) node.hidden = hidden; };
+  const latched = value("portable-lid-type") !== "lid_only";
+  hide("portable-latch-count-row", !latched);
+  hide("portable-handle-row", !latched);
+  if (!latched) {
+    const handle = document.getElementById("portable-handle");
+    if (handle) handle.value = "false";
+  }
+  const location = value("portable-label-location");
+  hide("portable-label-text-row", location === "none");
+  hide("portable-front-label-style-row", location !== "front");
+};
+
+SP.readStorageBoxForm = () => {
+  const value = id => document.getElementById(id)?.value;
+  const latched = value("portable-lid-type") !== "lid_only";
+  const location = value("portable-label-location") || "none";
+  const labelled = location !== "none";
+  return {
+    secure_lid: latched,
+    latch_count: latched ? (value("portable-latch-count") || "auto") : "auto",
+    latch_strength: SP.storageBoxStrength || "standard",
+    lid_headroom_mm: parseFloat(value("portable-lid-snugness")) || 1,
+    label_enabled: labelled,
+    label_text: labelled ? String(value("portable-label-text") || "").trim() : "",
+    label_location: labelled ? location : "top",
+    front_label_style: value("portable-front-label-style") === "wavy" ? "wavy" : "flat",
+    stacking: value("portable-stacking") === "true",
+    handle: latched && value("portable-handle") === "true",
+    wall_mm: Number(value("portable-wall")),
+    base_mm: Number(value("portable-base")),
+  };
+};
+
+// ------------------------------------------------------------ structural outputs
+//
+// Space Actions own the outputs a Space itself makes: a Storage Box case, or a
+// Surface Base Trim. Each is a transient design built by the server from the
+// authoritative Space definition; it never becomes an Inventory row.
+
+SP.structuralKind = () => {
+  const kind = state.folderMode === "space" ? state.activeSpace?.kind : null;
+  if (kind === "portable" || kind === "box") return "storage_box";
+  if (kind === "surface") return "base_trim";
+  return null;
+};
+SP.structuralLabel = kind => kind === "storage_box" ? "Storage Box" : "Base Trim";
+SP.structuralInfo = { key: "", data: null, error: "" };
+SP.structuralBusy = false;
+
+// The derived outside/capacity summary of a Storage Box, from the server.
+SP.refreshStructuralSummary = async () => {
+  const space = state.activeSpace;
+  if (SP.structuralKind() !== "storage_box" || !space) return;
+  const key = JSON.stringify(space);
+  if (SP.structuralInfo.key === key) return;
+  SP.structuralInfo = { key, data: null, error: "" };
+  try {
+    const result = await api("/api/space/structural-design", { space: clone(space) });
+    if (SP.structuralInfo.key !== key) return;
+    SP.structuralInfo.data = result.summary;
+  } catch (error) {
+    if (SP.structuralInfo.key !== key) return;
+    SP.structuralInfo.error = error.message;
+  }
+  SP.renderSpaceInfo();
+};
+
+SP.structuralBed = () => {
+  const read = id => Number(document.getElementById(id)?.value);
+  const x = read("space-structural-bed-x");
+  const y = read("space-structural-bed-y");
+  return { bed_x_mm: Number.isFinite(x) && x > 0 ? x : undefined, bed_y_mm: Number.isFinite(y) && y > 0 ? y : undefined };
+};
+
+SP.runStructural = async mode => {
+  const kind = SP.structuralKind();
+  if (!kind || SP.structuralBusy) return;
+  const label = SP.structuralLabel(kind);
+  const hosted = Boolean(state.runtime.hosted);
+  if (hosted && !state.browserFolder) { toast("Choose a folder before saving files.", true); return; }
+  const printing = mode === "print" && !hosted;
+  if (printing && !state.slicer?.available) {
+    toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
+    return;
+  }
+  // Built from the Space definition alone, so the Designer's autosave is not involved.
+  const context = DL.spaceContext();
+  const space = clone(state.activeSpace);
+  const payload = { space, output: state.output, ...(kind === "base_trim" ? SP.structuralBed() : {}) };
+  SP.structuralBusy = true;
+  SP.renderSpaceInfo();
+  try {
+    if (printing) {
+      const result = await api("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
+      DL.requireSpaceContext(context);
+      const names = (result.files || []).map(file => String(file).split(/[\\/]/).pop());
+      toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\n${names.join("\n")}`, false, 7000);
+    } else {
+      const result = await api("/api/space/structural-generate", payload);
+      DL.requireSpaceContext(context);
+      const saved = await saveGeneratedFiles(result);
+      DL.requireSpaceContext(context);
+      toast(`Saved ${label} to ${result.output || state.output}${saved.length ? `\n${[...new Set(saved.map(file => String(file).split(/[\\/]/).pop()))].join("\n")}` : ""}`, false, 7000);
+    }
+  } catch (error) {
+    if (DL.isStaleSpaceError(error)) {
+      toast(`${label} finished for the Space you left. Nothing was changed in the current Space.`);
+    } else if (/different name to avoid overwriting/i.test(String(error.message))) {
+      toast(`A file with that ${label} name already exists in this folder. Rename or move it, then try again.`, true, 8000);
+    } else {
+      toast(error.message, true, 8000);
+    }
+  } finally {
+    SP.structuralBusy = false;
+    SP.renderSpaceInfo();
+  }
+};
+SP.saveStructural = () => SP.runStructural("save");
+SP.printStructural = () => SP.runStructural("print");
+
+SP.renderStructuralActions = () => {
+  const box = document.getElementById("space-structural");
+  if (!box) return;
+  const kind = SP.structuralKind();
+  box.hidden = !kind;
+  if (!kind) return;
+  const label = SP.structuralLabel(kind);
+  const save = document.getElementById("space-structural-save");
+  const print = document.getElementById("space-structural-print");
+  const hosted = Boolean(state.runtime.hosted);
+  save.textContent = `Save ${label}`;
+  print.textContent = `Print ${label}`;
+  save.disabled = SP.structuralBusy;
+  print.disabled = SP.structuralBusy;
+  print.title = hosted ? "Hosted Wavefinity saves the files to your folder instead of opening a slicer." : "";
+  const bed = document.getElementById("space-structural-bed");
+  if (bed) bed.hidden = kind !== "base_trim";
+};
+
 SP.renderSpaceInfo = () => {
-    if (typeof syncBaseTrimOption === "function") syncBaseTrimOption();
     const isSpace = state.folderMode === "space" && state.activeSpace;
     const wsName = document.getElementById("workspace-space-name");
     if (wsName) {
@@ -2459,8 +2577,7 @@ SP.renderSpaceInfo = () => {
 
     // Fix 034 J: the top Space summary is the single authoritative Actual
     // size / Usable interior readout - existing calculations only, never
-    // duplicated math (Portable Storage still uses its simple stored field
-    // pending a full B4B assembled-envelope summary wire-up here).
+    // duplicated math.
     let actualText = "";
     let usableText = "";
     const unit = state.catalog?.base_unit || 8;
@@ -2492,15 +2609,13 @@ SP.renderSpaceInfo = () => {
         actualText = `${fmt(outsideX)} × ${fmt(outsideY)} mm (${trim} trim)`;
         usableText = SP.fieldText(x, y);
     } else if (kind === "portable") {
-        const previewCurrent = Boolean(
-            state.preview?.b4b &&
-            state.previewDesignKey &&
-            state.previewDesignKey === JSON.stringify(state.design)
-        );
-        const b4b = previewCurrent ? state.preview.b4b : null;
+        // The outside case and its capacity are derived by the server from the
+        // Space's own dimensions and case settings.
+        SP.refreshStructuralSummary();
+        const b4b = SP.structuralInfo.key === JSON.stringify(state.activeSpace) ? SP.structuralInfo.data : null;
         if (!b4b) {
-            actualText = "Calculating…";
-            usableText = "Calculating…";
+            actualText = SP.structuralInfo.error ? "Not available" : "Calculating…";
+            usableText = SP.structuralInfo.error || "Calculating…";
         } else {
             const outer = b4b.assembled_envelope_mm;
             const capacity = b4b.capacity_mm;
@@ -2539,6 +2654,7 @@ SP.renderSpaceInfo = () => {
 
     const btnShow = document.getElementById("space-head-show");
     if (btnShow) btnShow.hidden = state.runtime.hosted;
+    SP.renderStructuralActions();
 };
 
 SP.showFolder = async () => {
@@ -2593,6 +2709,24 @@ const wireInfoButtons = (prefix = "space-head") => {
     if (btnShow) btnShow.addEventListener("click", SP.showFolder);
     const btnNew = document.getElementById(prefix + "-new-space");
     if (btnNew) btnNew.addEventListener("click", SP.newSpace);
+    const btnSave = document.getElementById("space-structural-save");
+    if (btnSave) btnSave.addEventListener("click", SP.saveStructural);
+    const btnPrint = document.getElementById("space-structural-print");
+    if (btnPrint) btnPrint.addEventListener("click", SP.printStructural);
+    ["space-structural-bed-x", "space-structural-bed-y"].forEach(id => {
+        const input = document.getElementById(id);
+        if (!input) return;
+        try {
+            const saved = JSON.parse(localStorage.getItem("wavefinity-base-trim-bed") || "{}");
+            if (Number(saved[id]) > 0) input.value = String(saved[id]);
+        } catch (_error) {}
+        input.addEventListener("change", () => {
+            try {
+                const saved = JSON.parse(localStorage.getItem("wavefinity-base-trim-bed") || "{}");
+                localStorage.setItem("wavefinity-base-trim-bed", JSON.stringify({ ...saved, [id]: Number(input.value) }));
+            } catch (_error) {}
+        });
+    });
 };
 
 SP.updateSpace = async () => {
@@ -2663,71 +2797,9 @@ SP.updateSpace = async () => {
 
 
 
-// Cross-type warning
-SP.crossTypeCheck = (designType) => {
-    if (!state.activeSpace || state.folderMode !== "space") return Promise.resolve(true);
-    const kind = state.activeSpace.kind;
-    
-    let warning = null;
-    let targetKind = null;
-    if (designType === "b4b" && (kind === "drawer" || kind === "surface" || kind === "pegboard")) {
-        warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. Storage Box is meant for Portable Storage.`;
-        targetKind = "portable";
-    } else if ((designType === "base-trim" || designType === "base_trim") && (kind === "drawer" || kind === "portable" || kind === "box" || kind === "pegboard")) {
-        warning = `This Space is configured as a ${SP_KINDS[kind].label} and will not be converted. Base Trim is meant for Surface Spaces.`;
-        targetKind = "surface";
-    }
-    
-    if (warning) {
-        document.getElementById("cross-type-warning-text").textContent = warning;
-        const dialog = document.getElementById("cross-type-warning-dialog");
-        
-        return new Promise(resolve => {
-            const btnContinue = document.getElementById("cross-type-continue");
-            const btnNew = document.getElementById("cross-type-new");
-
-            const cleanup = () => {
-                btnContinue.removeEventListener("click", onContinue);
-                btnNew.removeEventListener("click", onNew);
-                dialog.removeEventListener("cancel", onCancel);
-                if (dialog.open) dialog.close();
-            };
-
-            const finish = value => {
-                cleanup();
-                resolve(value);
-            };
-
-            const onContinue = () => finish(true);
-
-            const onNew = () => {
-                cleanup();
-                SP.clearSetupContext();
-                SP.showSetup(targetKind);
-                resolve(false);
-            };
-
-            const onCancel = event => {
-                event.preventDefault();
-                finish(false);
-            };
-
-            btnContinue.addEventListener("click", onContinue);
-            btnNew.addEventListener("click", onNew);
-            dialog.addEventListener("cancel", onCancel);
-            dialog.showModal();
-        });
-    }
-    
-    return Promise.resolve(true);
-};
-
-// The real design-type control is #bin-type (see changeBinType() in app.js),
-// which calls SP.crossTypeCheck() itself before switching into B4B/Base Trim.
-
 // Startup must come after every SP.* helper it (transitively) depends on -
 // SP.wire, wireInfoButtons, SP.updateReadouts, SP.renderSpaceInfo,
-// SP.crossTypeCheck, and everything SP.launch()/SP.wire() call - is defined,
+// and everything SP.launch()/SP.wire() call - is defined,
 // so this stays the very last thing in the file. state.ready can already be
 // true by the time this script runs, which would otherwise call SP.wire()
 // before it exists - see Fix 004 Correction 8.A.

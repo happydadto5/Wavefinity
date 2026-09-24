@@ -28,18 +28,31 @@
         <div id="space-head-view" class="space-head-view">
           <div class="space-head-title"><strong id="space-head-name"></strong><span id="space-head-type" class="space-head-type"></span></div>
           <div id="space-head-summary" class="muted"></div>
-          <div class="button-row">
-            <button id="space-head-open" class="button secondary dl-small" type="button">Open</button>
-            <button id="space-head-edit" class="button secondary dl-small" type="button">Edit</button>
-            <button id="space-head-show" class="button secondary dl-small" type="button">Show Folder</button>
-            <button id="space-head-new-space" class="button secondary dl-small" type="button">New</button>
+          <div id="space-actions" class="space-actions" role="group" aria-label="Space Actions">
+            <span class="space-actions-label">Space Actions</span>
+            <div class="button-row">
+              <button id="space-head-open" class="button secondary dl-small" type="button">Open Space…</button>
+              <button id="space-head-edit" class="button secondary dl-small" type="button">Edit Space</button>
+              <button id="space-head-show" class="button secondary dl-small" type="button">Show Folder</button>
+              <button id="space-head-new-space" class="button secondary dl-small" type="button">New Space</button>
+            </div>
+            <div id="space-structural" class="space-structural" hidden>
+              <div class="button-row">
+                <button id="space-structural-save" class="button secondary dl-small" type="button">Save Storage Box</button>
+                <button id="space-structural-print" class="button secondary dl-small" type="button">Print Storage Box</button>
+              </div>
+              <div id="space-structural-bed" class="space-structural-bed" hidden>
+                <label>Printer bed X <span class="unit">mm</span><input id="space-structural-bed-x" type="number" min="1" step="1" value="256"></label>
+                <label>Printer bed Y <span class="unit">mm</span><input id="space-structural-bed-y" type="number" min="1" step="1" value="256"></label>
+              </div>
+            </div>
           </div>
         </div>
         <div id="space-head-edit-host" class="space-head-edit-host" hidden></div>
         <div id="space-mode-row" class="space-mode-row">
           <div id="space-mode-toggle" class="space-mode-toggle" role="tablist" aria-label="What the left panel edits" hidden>
             <button type="button" role="tab" data-space-mode="space" class="active" aria-selected="true" aria-pressed="true" tabindex="0" title="Work on the Space and its layout">Space</button>
-            <button type="button" role="tab" data-space-mode="design" aria-selected="false" aria-pressed="false" tabindex="-1" title="Work on the current bin or Storage Box">Design</button>
+            <button type="button" role="tab" data-space-mode="design" aria-selected="false" aria-pressed="false" tabindex="-1" title="Work on the current bin">Design</button>
           </div>
         </div>
       </section>
@@ -50,19 +63,11 @@
             <button type="button" id="designer-new-bin" class="button secondary">New Bin</button>
             <button type="button" id="designer-duplicate" class="button secondary">Duplicate Bin</button>
           </div>
-          <div class="bin-type-row">
-            <label><span>Design a:</span>
-              <select id="bin-type">
-                <option value="single" selected>Bin</option>
-                <option value="b4b">Storage Box</option>
-                <option id="bin-type-base-trim" value="base-trim">Base Trim</option>
-              </select>
-            </label>
+          <div class="part-name-block">
             <label class="part-name-row"><span id="part-name-label">Bin Name</span>
               <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
             </label>
             <span id="stack-note" class="stack-note" hidden></span>
-            <span id="b4b-size-note" class="stack-note" hidden></span>
           </div>
           <div id="ordinary-size-row" class="field-grid three">
             <label><span id="x-size-label">Width</span> <span class="unit">mm</span><input id="x-size" type="text" inputmode="numeric"></label>
@@ -80,10 +85,6 @@
             <label class="compact-select" title="Fused into box prints the interior parts as part of the bin. Removable insert prints all interior parts as a separate drop-in piece, so you can adjust or reprint the interior without reprinting the whole bin.">Interior print mode
               <select id="mode-select"></select>
             </label>
-            <!-- Base/Wall are the same shared controls the B4B panel uses;
-                 JS relocates them into .b4b-options-grid while B4B is active
-                 and back into this row otherwise. See
-                 positionSharedThicknessControls() in app.js. -->
             <div id="thickness-grabber-row" class="thickness-grabber-row">
               <label id="base-thickness-setting" class="inline-select compact-select">Base
                 <select id="base-thickness"><option value="standard">Standard</option></select>
@@ -104,111 +105,7 @@
             <span id="thin-wall-warning" class="wall-warning" hidden>Very thin — may not print reliably with standard nozzle/slicer settings.</span>
           </div>
 
-          <div id="b4b-panel" class="b4b-panel" hidden>
-            <div class="b4b-card">
-              <h3 class="b4b-card-title">Options</h3>
-              <div class="b4b-options-grid">
-                <!-- Wall thickness (col 2) and Base thickness (col 3) are the
-                     same single shared controls the ordinary bin uses; JS
-                     relocates them here while B4B is active. See
-                     positionSharedThicknessControls() in app.js. -->
-                <label class="inline-select b4b-grid-r2-c1">Lid type
-                  <select id="b4b-lid-type">
-                    <option value="lid_only">Lid Only</option>
-                    <option value="latched" selected>Latched Lid</option>
-                  </select>
-                </label>
-                <label class="inline-select b4b-grid-r2-c2">Lid snugness
-                  <select id="b4b-lid-snugness">
-                    <option value="0.5">0.5 mm — Tight</option>
-                    <option value="1" selected>1.0 mm — Standard</option>
-                    <option value="2">2.0 mm — Loose</option>
-                  </select>
-                </label>
-                <label class="inline-select b4b-grid-r2-c3">Stacking
-                  <select id="b4b-stacking">
-                    <option value="false" selected>Not stackable</option>
-                    <option value="true">Stackable</option>
-                  </select>
-                </label>
-                <label id="b4b-handle-row" class="inline-select b4b-grid-r3-c1">
-                  <span id="b4b-handle-label">Carrying handle</span>
-                  <select id="b4b-handle">
-                    <option value="false" selected>No handle</option>
-                    <option id="b4b-handle-add-option" value="true">Add handle</option>
-                  </select>
-                </label>
-                <label id="b4b-latch-count-row" class="inline-select b4b-grid-r3-c2"># of latches
-                  <select id="b4b-latch-count">
-                    <option value="auto" selected>Auto</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                  </select>
-                </label>
-                <label class="inline-select b4b-grid-r3-c3">Label
-                  <select id="b4b-label-location">
-                    <option value="none" selected>No label</option>
-                    <option value="top">Top</option>
-                    <option id="b4b-label-front-option" value="front">Front</option>
-                  </select>
-                </label>
-                <label id="b4b-label-text-row" class="b4b-grid-r4-c1-span2" hidden>Label text
-                  <input id="b4b-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE">
-                </label>
-                <label id="b4b-front-label-style-row" class="inline-select b4b-grid-r4-c3" hidden>Front label style
-                  <select id="b4b-front-label-style">
-                    <option value="flat" selected>Flat</option>
-                    <option value="wavy">Wavy</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-            <div class="b4b-card">
-              <h3 class="b4b-card-title">Information</h3>
-              <div id="b4b-capacity" class="b4b-capacity">
-                <strong id="b4b-capacity-line">Inside capacity: — units</strong>
-                <div id="b4b-hardware" class="muted b4b-hardware">Hardware: —</div>
-                <span id="b4b-grew" class="field-error" hidden></span>
-              </div>
-            </div>
-          </div>
 
-          <div id="base-trim-panel" class="base-trim-panel" hidden>
-            <div class="b4b-card">
-              <h3 class="b4b-card-title">Field size</h3>
-              <div class="base-trim-grid">
-                <label class="base-trim-size-row">Field width
-                  <span><input id="base-trim-x-units" type="number" min="1" max="150" step="1"> units</span>
-                  <span id="base-trim-x-mm" class="base-trim-unit-readout">160 mm</span>
-                </label>
-                <label class="base-trim-size-row">Field length
-                  <span><input id="base-trim-y-units" type="number" min="1" max="150" step="1"> units</span>
-                  <span id="base-trim-y-mm" class="base-trim-unit-readout">80 mm</span>
-                </label>
-              </div>
-            </div>
-            <div class="b4b-card">
-              <h3 class="b4b-card-title">Trim</h3>
-              <div class="field-grid three">
-                <label>Trim size
-                  <select id="base-trim-size"></select>
-                </label>
-              </div>
-            </div>
-            <div class="b4b-card">
-              <h3 class="b4b-card-title">Printer bed</h3>
-              <div class="field-grid two">
-                <label>Bed X <span class="unit">mm</span><input id="base-trim-bed-x" type="number" min="21" step="1" value="256"></label>
-                <label>Bed Y <span class="unit">mm</span><input id="base-trim-bed-y" type="number" min="21" step="1" value="256"></label>
-              </div>
-              <p id="base-trim-printable" class="muted">Printable area after 10 mm edge clearance: 236 × 236 mm</p>
-              <button id="base-trim-auto-size" type="button" class="button secondary">Auto size from Space</button>
-            </div>
-            <div class="b4b-card">
-              <h3 class="b4b-card-title">Information</h3>
-              <div id="base-trim-summary" class="base-trim-summary muted"></div>
-            </div>
-          </div>
 
         </div>
       </section>
@@ -544,11 +441,6 @@
               <button type="button" data-camera-toggle="interior" aria-pressed="true">Interior</button>
               <button type="button" data-camera-toggle="xray" aria-pressed="false">Xray</button>
             </div>
-            <div id="b4b-preview-modes" class="mode-controls" aria-label="Show" hidden>
-              <button type="button" class="active" data-b4b-view="all">All</button>
-              <button type="button" data-b4b-view="base">Base</button>
-              <button type="button" data-b4b-view="lid">Lid</button>
-            </div>
           </div>
         </div>
         <div id="dimensions" class="dimension-guides" aria-label="Bin dimensions">
@@ -799,7 +691,7 @@
           <h2 id="welcome-title">Welcome to Wavefinity</h2>
           <button id="welcome-close" class="button secondary" type="button" aria-label="Close">✕</button>
         </div>
-        <p class="welcome-lead">Use a Space when you want Wavefinity to plan a drawer, surface, portable case, or pegboard. Or design bins on their own without a Space.</p>
+        <p class="welcome-lead">Use a Space when you want Wavefinity to plan a drawer, storage box, surface, or pegboard. Or design bins on their own without a Space.</p>
         <p id="welcome-startup-error" class="field-error" hidden></p>
         <div class="welcome-actions">
           <button id="welcome-create" class="button primary" type="button">Create New Space</button>
@@ -882,8 +774,8 @@
               width="480"
               height="360"
               decoding="async">
-            <h3>Portable Storage</h3>
-            <p>A portable case you can carry.</p>
+            <h3>Storage Box</h3>
+            <p>A carrying case for your bins.</p>
           </button>
           <button class="type-card" data-kind="pegboard" type="button">
             <img
@@ -893,7 +785,7 @@
               width="480"
               height="360"
               decoding="async">
-            <h3>Pegboard Space</h3>
+            <h3>Pegboard</h3>
             <p>A Standard Pegboard or IKEA SKÅDIS wall.</p>
           </button>
         </div>
@@ -907,18 +799,18 @@
           <h2>Wavefinity Quick Tutorial</h2>
           <button id="space-tutorial-close" class="button secondary" type="button" aria-label="Close">✕</button>
         </div>
-        <p class="welcome-lead">The basic idea is simple: define the physical Space, design the bins and parts that belong in it, then arrange the finished bins in that Space.</p>
+        <p class="welcome-lead">The basic idea is simple: define the physical Space, design the bins that belong in it, then drag those bins into place.</p>
 
         <div class="space-tutorial-content">
           <section class="space-tutorial-section">
             <h3>1. Start with a Space</h3>
-            <p>A <strong>Space</strong> is the real area you want to organize. Choose <strong>Drawer</strong>, <strong>Surface</strong>, <strong>Portable Storage</strong>, or <strong>Pegboard Space</strong>.</p>
-            <p>The Space keeps the physical size, layout, and inventory together so Wavefinity knows what has to fit.</p>
+            <p>A <strong>Space</strong> is the real area you want to organize. Choose <strong>Drawer</strong>, <strong>Storage Box</strong>, <strong>Surface</strong>, or <strong>Pegboard</strong>.</p>
+            <p>The Space keeps the physical size, layout, and inventory together so Wavefinity knows what has to fit. A Storage Box Space also makes its own case, and a Surface Space makes its own Base Trim - use <strong>Space Actions</strong> to save or print them.</p>
           </section>
 
           <section class="space-tutorial-section">
-            <h3>2. Design a bin</h3>
-            <p>A <strong>Design</strong> is the bin or storage box you are building. Set its width, depth, height, wall and base choices, labels, stacking choices, and other shell options here.</p>
+            <h3>2. Design your bins</h3>
+            <p>A <strong>Design</strong> is the bin you are building. Set its width, depth, height, wall and base choices, labels, stacking choices, and other shell options here. It saves as you go.</p>
             <p>Use <strong>3D</strong> to inspect the assembled result. When you are working in a typed Space, the Design and Space tabs let you switch between the current bin and the overall layout.</p>
           </section>
 
@@ -936,8 +828,8 @@
 
           <section class="space-tutorial-section">
             <h3>5. Arrange bins inside the Space</h3>
-            <p>Generating a bin adds it to the active Space's <strong>Inventory</strong> as <strong>not printed</strong> (Qty 0). Switch to <strong>Space</strong> to place or plan with those bins in its layout - planned copies do not need to be printed yet.</p>
-            <p>You can arrange bins yourself or use <strong>Auto layout</strong> where available. <strong>Spacers</strong> can fill leftover areas so the finished layout stays supported and organized.</p>
+            <p>Every bin you design is one row in the active Space's <strong>Inventory</strong>, marked <strong>In Design</strong>, <strong>Saved</strong> or <strong>Printed</strong>. Switch to <strong>Space</strong>: bins that are not placed yet wait in <strong>Unplaced bins</strong> beside the Space. Drag one in to place it; drag a placed bin off the Space to unplace it. Each bin is placed once.</p>
+            <p>Each Inventory row has its own <strong>Edit</strong>, <strong>Duplicate</strong>, <strong>Print</strong>, <strong>Mark Printed</strong> and <strong>Delete</strong>. <strong>Spacers</strong> (below Inventory) can fill leftover areas so the finished layout stays supported and organized.</p>
           </section>
 
           <section class="space-tutorial-section">
@@ -947,10 +839,10 @@
           </section>
 
           <section class="space-tutorial-section">
-            <h3>7. Generate or print</h3>
-            <p>Give the design a useful name, then generate files to your folder or send them to your slicer when that option is available. Wavefinity can produce the bin plus any related printable parts that belong to the design.</p>
-            <p>To print in bulk, open Space Inventory, tick individual designs, press <strong>Select all not printed</strong> for needed copies, or press <strong>Select all</strong> for every printable design. Then press <strong>Print Selected to Bambu Studio</strong>. The copies are sent together in one project (with the Space's connectors, if you leave that on). After Bambu Studio opens successfully, Qty Printed goes up automatically. If a print fails or you print elsewhere, correct Qty by hand.</p>
-            <p>Then keep going: design another bin, add it to inventory, and build out the Space until the physical area is organized the way you want.</p>
+            <h3>7. Save or print</h3>
+            <p>Give the design a useful name, then save files to your folder or send them to your slicer when that option is available. Wavefinity can produce the bin plus any related printable parts that belong to the design.</p>
+            <p>To print in bulk, open Space Inventory, tick individual designs, press <strong>Select all not printed</strong>, or press <strong>Select all</strong> for every printable design. Then press <strong>Print Selected to Bambu Studio</strong>. Each selected bin is sent once, in one project (with the Space's connectors, if you leave that on). After Bambu Studio opens successfully, those bins become <strong>Printed</strong>. If you print elsewhere, use <strong>Mark Printed</strong> on the row.</p>
+            <p>Then keep going: design another bin and build out the Space until the physical area is organized the way you want.</p>
           </section>
 
           <section class="space-tutorial-section space-tutorial-flow">
@@ -959,8 +851,8 @@
               <li>Create the Space and enter its real measurements.</li>
               <li>Design one bin that fits something you actually want to store.</li>
               <li>Add Parts &amp; Options, then arrange interior parts in 2D.</li>
-              <li>Check the result in 3D and generate or print it.</li>
-              <li>Open Space, place the bin from inventory, and repeat.</li>
+              <li>Check the result in 3D and save or print it.</li>
+              <li>Open Space, drag the bin from Unplaced bins into the Space, and repeat.</li>
               <li>Use connectors and spacers to finish the overall layout.</li>
             </ol>
           </section>
@@ -1016,6 +908,43 @@
           </div>
           <div id="portable-readout" class="derived-readout" hidden>
              <dt>Resolved Size</dt><dd id="portable-size-readout"></dd>
+          </div>
+          <div id="portable-case" class="storage-box-case">
+            <h4 class="storage-box-title">Case settings</h4>
+            <div class="space-dimension-row">
+              <label class="space-field"><span>Lid type</span>
+                <select id="portable-lid-type"><option value="latched" selected>Latched Lid</option><option value="lid_only">Lid Only</option></select>
+              </label>
+              <label class="space-field"><span>Lid snugness</span>
+                <select id="portable-lid-snugness"><option value="0.5">0.5 mm — Tight</option><option value="1" selected>1.0 mm — Standard</option><option value="2">2.0 mm — Loose</option></select>
+              </label>
+              <label class="space-field"><span>Stacking</span>
+                <select id="portable-stacking"><option value="false" selected>Not stackable</option><option value="true">Stackable</option></select>
+              </label>
+            </div>
+            <div class="space-dimension-row">
+              <label id="portable-latch-count-row" class="space-field"><span># of latches</span>
+                <select id="portable-latch-count"><option value="auto" selected>Auto</option><option value="1">1</option><option value="2">2</option></select>
+              </label>
+              <label id="portable-handle-row" class="space-field"><span>Carrying handle</span>
+                <select id="portable-handle"><option value="false" selected>No handle</option><option value="true">Add handle</option></select>
+              </label>
+              <label class="space-field"><span>Label</span>
+                <select id="portable-label-location"><option value="none" selected>No label</option><option value="top">Top</option><option value="front">Front</option></select>
+              </label>
+            </div>
+            <div class="space-dimension-row">
+              <label id="portable-label-text-row" class="space-field" hidden><span>Label text</span>
+                <input id="portable-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE">
+              </label>
+              <label id="portable-front-label-style-row" class="space-field" hidden><span>Front label style</span>
+                <select id="portable-front-label-style"><option value="flat" selected>Flat</option><option value="wavy">Wavy</option></select>
+              </label>
+            </div>
+            <div class="space-dimension-row">
+              <label class="space-field"><span>Wall thickness</span><select id="portable-wall"></select></label>
+              <label class="space-field"><span>Base thickness</span><select id="portable-base"></select></label>
+            </div>
           </div>
         </div>
 
@@ -1087,16 +1016,6 @@
       </div>
     </dialog>
 
-    <dialog id="cross-type-warning-dialog" class="welcome-dialog" aria-modal="true">
-      <div class="welcome-header">
-        <h2>Space kind mismatch</h2>
-      </div>
-      <p class="welcome-lead" id="cross-type-warning-text"></p>
-      <div class="welcome-actions">
-        <button id="cross-type-continue" class="button secondary" type="button">Continue in this Space</button>
-        <button id="cross-type-new" class="button primary" type="button">Create a New Space</button>
-      </div>
-    </dialog>
 
   <div id="update-banner" class="update-banner" role="status" hidden>
     <span>Wavefinity was updated. This update requires the page to reload before you continue.</span>
