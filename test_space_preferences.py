@@ -154,6 +154,56 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(out["kept"], out["entry"])
         self.assertEqual(out["bin"]["layout"]["features"], [])
 
+    def test_the_changed_same_kind_feature_owns_the_remembered_entry(self):
+        def bore(diameter, x0=0):
+            return {
+                "kind": "bore", "zone": [x0, 0, x0 + 20, 20], "count": 1, "along": "x",
+                "full_span": False, "options": {"diameter": diameter, "height": 20},
+            }
+
+        def with_bores(*bores):
+            design = json.loads(json.dumps(BIN))
+            design["layout"]["features"] = list(bores)
+            return design
+
+        out = node_run(PRELUDE + js("""
+const remembered = () => state.spacePartDefaults.bore?.options.diameter;
+const sentinel = { kind: 'bore', zone_size: [20, 20], options: { diameter: 9, height: 20 }, count: 1, along: 'x' };
+const reset = () => { state.spacePartDefaults = { bore: clone(sentinel) }; };
+const result = {};
+reset();  // edit the NON-last Bore (5 -> 7); the last Bore (4) is unchanged
+rememberSpacePreferences(__EDITED__, __BEFORE__);
+result.editedNonLast = remembered();
+reset();  // reorder only
+rememberSpacePreferences(__REORDERED__, __BEFORE__);
+result.reordered = remembered();
+reset();  // move one Bore (position is not a preference)
+rememberSpacePreferences(__MOVED__, __BEFORE__);
+result.moved = remembered();
+reset();  // delete a Bore
+rememberSpacePreferences(__DELETED__, __BEFORE__);
+result.deleted = remembered();
+reset();  // add a new Bore
+rememberSpacePreferences(__ADDED__, __BEFORE__);
+result.added = remembered();
+reset();  // change only a different bin property
+const wall = clone(__BEFORE__); wall.box.wall = 2;
+rememberSpacePreferences(wall, __BEFORE__);
+result.otherProperty = remembered();
+process.stdout.write(JSON.stringify(result));
+""",
+            BEFORE=with_bores(bore(5), bore(4, 30)),
+            EDITED=with_bores(bore(7), bore(4, 30)),
+            REORDERED=with_bores(bore(4, 30), bore(5)),
+            MOVED=with_bores(bore(5, 12), bore(4, 30)),
+            DELETED=with_bores(bore(4, 30)),
+            ADDED=with_bores(bore(5), bore(4, 30), bore(6, 60)),
+        ))
+        self.assertEqual(out, {
+            "editedNonLast": 7, "reordered": 9, "moved": 9, "deleted": 9, "added": 6,
+            "otherProperty": 9,
+        })
+
     def test_lid_labels_and_division_text_are_not_seeded(self):
         design = json.loads(json.dumps(BIN))
         design["box"]["lid"] = {
@@ -184,6 +234,10 @@ process.stdout.write(JSON.stringify({ seed: spaceModifierDefaults('lid_stacking'
         legacy_parts = {"bore": {
             "kind": "bore", "zone_size": [10, 10], "count": 2, "enabled": True,
             "options": {"text": "stale", "diameter": 5}, "features": [{"kind": "post"}],
+            "item": {
+                "name": "Grandma's chisel", "segments": [{"length": 40, "diameter": 6}],
+                "profile": "round", "clearance": 0.3,
+            },
         }}
         out = node_run(PRELUDE + js("""
 state.spaceBinDefaults = __LEGACY__; state.spacePartDefaults = __PARTS__;
@@ -204,7 +258,13 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(out["edge"]["label_thickness_mm"], 2.5)
         self.assertNotIn("label_enabled", out["edge"])
         self.assertEqual(out["seeded"]["options"], {"diameter": 5})
-        self.assertEqual(out["cleaned"]["bore"].keys() - {"kind", "zone_size", "options", "count"}, set())
+        # The old user's item name is neutralized; its measurements survive.
+        self.assertEqual(out["seeded"]["item"]["name"], "Custom item")
+        self.assertEqual(out["seeded"]["item"]["segments"], [{"length": 40, "diameter": 6}])
+        self.assertEqual(out["seeded"]["item"]["clearance"], 0.3)
+        self.assertEqual(out["cleaned"]["bore"]["item"]["name"], "Custom item")
+        self.assertEqual(
+            out["cleaned"]["bore"].keys() - {"kind", "zone_size", "options", "count", "item"}, set())
 
     def test_structural_designs_are_never_remembered(self):
         design = json.loads(json.dumps(BIN))
@@ -426,60 +486,166 @@ process.stdout.write(JSON.stringify({ typed, stored, back: design.box.edge_mount
         self.assertEqual(out["back"], 2)
 
     def test_edge_mount_edit_saves_exactly_then_seeds_new_bin_and_added_option(self):
-        design = json.loads(json.dumps(BIN))
-        design["layout"]["mode"] = "fused"
-        design["box"]["edge_mount"] = {
-            "side": "front", "label_enabled": True, "label_text": "Tools", "label_type": "separate",
-            "label_projection_mm": 30, "label_length_mode": "full", "label_thickness_mm": 3.7,
-            "label_raised": False, "label_text_depth_mm": 0.8, "label_flip": False,
-            "standoff_ribs_enabled": True, "standoff_rib_count": None, "holes_enabled": False,
-            "hole_count": 2, "hole_orientation": "horizontal", "screw_diameter_mm": 4,
-            "access_diameter_mm": None, "top_offset_mm": 12.7, "hole_spacing_mm": None,
-        }
-        starter = json.loads(json.dumps(BIN))
-        starter["part_name"] = ""
-        starter["label"] = ""
-        starter["scoop"] = False
-        starter["layout"]["object_height_mm"] = None
+        # Drives the real frontend owners in order: the live thickness control ->
+        # changedDesign() -> the 280 ms debounced applyChangedDesign ->
+        # applyLiveFormWithModifierConflictGuard -> readEdgeMountForm -> preview
+        # acceptance -> queueSpaceDesignAutosave / the leave boundary ->
+        # persistSpaceDesignSource -> design_specs -> New Bin / addModifier ->
+        # designerEditInventoryRow / installLoadedDesignSource ->
+        # syncEdgeMountControls. The only seams are the DOM, the network/file
+        # store, and updateDesignFromForm(), which is reduced to the two form
+        # reads that matter here (part name and the open Edge Mount editor).
+        # The design starts at 2.0 mm; 3.7 only ever enters by typing.
+        # An autosave of the untyped design is held open while 3.7 is typed and
+        # the server then assigns the bin's name (the pre-Fix-053 syncForm()
+        # overwrite happened exactly there). The leave boundary then runs
+        # before the debounce can have fired.
         out = node_run("\n".join([
-            PRELUDE,
-            function_source("persistSpaceDesignSource"),
-            function_source("typedSpaceOrdinaryBin"),
-            function_source("addModifier"),
+            SpaceSizingTests.SCRIPT,
+            block("function typedSpaceOrdinaryBin() {", "// Install a canonical design"),
+            block("let pendingDesignHistory = null;", "// Re-evaluate contents-driven parts"),
             block("const EDGE_MOUNT_DEFAULTS", "\n};\n") + "\n};",
+            function_source("debounce"),
+            function_source("installLoadedDesignSource"),
+            function_source("designerEditInventoryRow"),
+            function_source("designerInstallInventorySpec"),
+            function_source("designerNewBin"),
+            function_source("loadFreshOrdinaryDesignForCurrentFolder"),
+            function_source("addModifier"),
+            function_source("changedDesign"),
+            function_source("editingEdgeMount"),
+            function_source("applyLiveFormWithModifierConflictGuard"),
+            function_source("commitEdgeMountFormBeforeSwitch"),
+            function_source("flushVisibleDesignEditsBeforeModeSwitch"),
+            function_source("readEdgeMountForm"),
+            function_source("syncEdgeMountControls"),
             function_source("resolvedEdgeMountAccessDiameter"),
-            "const $ = () => ({ value: '' });",
-            "const baseTrimEnabled = () => false; const b4bEnabled = () => false;",
-            "const recordHistory = () => {}; const syncForm = () => {}; const openModifier = async () => {};",
-            "const refreshPreview = async () => {};",
-            js("""
-const DESIGN = __DESIGN__;
-state.catalog = { edge_mount: { min_projection_mm: 5, max_projection_mm: 200 } };
-state.design = clone(DESIGN); state.cleanDesign = __STARTER__; state.designInventoryId = 'B1';
+            """
+const THICKNESS = '#edge-mount-label-thickness-mm';
+const els = {
+  '#edge-mount-label-enabled': { checked: true }, '#edge-mount-holes-enabled': { checked: false },
+  '#edge-mount-label-text': { value: 'Tools' }, '#edge-mount-standoff-ribs-enabled': { checked: true },
+  '#edge-mount-label-style': { value: 'flush' }, '#edge-mount-label-type': { value: 'separate' },
+  '#part-name': { value: '' }, [THICKNESS]: { value: '2', dataset: { storedValue: '2' } },
+};
+const $ = selector => els[selector];
+const fmt = v => String(Math.round(v * 100) / 100);
+const b4bEnabled = () => false; const guardDraftSwitch = async () => true;
+const recordHistory = () => {}; const maybeWarnSpaceWallMismatch = () => {};
+const reflowDraftToBin = () => {}; const refreshDraft = () => {}; const enforceBinMinimumSoon = () => {};
+const newModifierConflict = () => null; const maybePromptSurfaceObjectHeight = async () => true;
+const activatePreviewView = () => {}; const resetNestPhotoSession = () => {};
+const clearDraftSelection = () => { state.modifierEditing = null; };
+const syncForm = () => {
+  if (editingEdgeMount()) syncEdgeMountControls();
+  els['#part-name'].value = state.design.part_name || '';
+};
+const openModifier = async kind => {
+  state.modifierEditing = kind;
+  if (kind === 'edge_mount') syncEdgeMountControls();
+};
+const updateDesignFromForm = () => {
+  state.design.part_name = $('#part-name').value;
+  if (editingEdgeMount()) readEdgeMountForm(state.design);
+};
+const beginDesignMutation = () => {
+  if (state.designMutationBusy) return false;
+  cancelChangedDesignDebounce(); pendingDesignHistory = null;
+  updateDesignFromForm();
+  state.designMutationBusy = true;
+  return true;
+};
+const finishDesignMutation = () => { state.designMutationBusy = false; };
+const refreshPreview = async () => {
+  state.preview = { fits: true, feature_errors: [], draft_error: null };
+  state.design = clone(state.design);
+  state.previewDesignKey = JSON.stringify(state.design);
+  if (typedSpaceOrdinaryBin()) {
+    if (state.spaceStarterPreviewPending) {
+      state.cleanDesign = clone(state.design); state.spaceStarterPreviewPending = false;
+    } else queueSpaceDesignAutosave();
+  }
+};
+const api = async (_path, payload) => ({ design: clone(payload.design) });
+SP.flushDefaults = async () => {};
+
+const serverSpecs = {};   // the Space's file on disk
+let nextRow = 1; let releaseGate; let gate = new Promise(resolve => { releaseGate = resolve; });
+const DL = {
+  loaded: true, layout: { design_specs: {} },
+  spaceContext: () => ({}), requireSpaceContext: () => {}, isStaleSpaceError: () => false,
+  bin: id => (serverSpecs[id] ? { id, kind: 'bin' } : undefined),
+  inventoryCall: async (_path, payload) => {
+    const wait = gate; gate = null;
+    if (wait) await wait;
+    const rowId = payload.row_id || `B${nextRow++}`;
+    const canonical = clone(payload.design);
+    if (!canonical.part_name) canonical.part_name = `Bin ${rowId.slice(1)}`;
+    serverSpecs[rowId] = canonical;
+    return { row_id: rowId, design: clone(canonical), layout: { design_specs: clone(serverSpecs) } };
+  },
+  adopt: data => { DL.layout.design_specs = clone(data.layout.design_specs); }, emit: () => {},
+};
+
+state.catalog.edge_mount = { min_projection_mm: 5, max_projection_mm: 200 };
+const starter = clone(state.catalog.defaults.design);
+state.cleanDesign = clone(starter);
+state.design = clone(starter);
+state.design.box.edge_mount = {
+  ...EDGE_MOUNT_DEFAULTS, label_enabled: true, label_text: 'Tools', label_thickness_mm: 2,
+};
+state.designInventoryId = null; state.modifierEditing = 'edge_mount';
+state.spaceStarterPreviewPending = false; state.designMutationBusy = false;
 state.previewDesignKey = JSON.stringify(state.design);
 state.preview = { fits: true, feature_errors: [], draft_error: null };
-const DL = { loaded: true, spaceContext: () => ({}), requireSpaceContext: () => {},
-  inventoryCall: async (_path, payload) => ({ row_id: 'B1', design: clone(payload.design) }),
-  adopt: () => {}, emit: () => {}, layout: { design_specs: {} } };
+
 (async () => {
-  await persistSpaceDesignSource();
-  const saved = clone(state.design);
-  state.design = __STARTER__; state.design.box.x = 32;
-  await addModifier('edge_mount');
-  process.stdout.write(JSON.stringify({
-    saved: saved.box.edge_mount, added: state.design.box.edge_mount, bin: state.spaceBinDefaults,
-    queuedKinds: Object.keys(queued[0].part_defaults) }));
+  const out = {};
+  const held = persistSpaceDesignSource();                 // autosave of the untyped bin, held open
+  await new Promise(resolve => setTimeout(resolve, 0));
+  els[THICKNESS].value = '3.7';                            // the user types
+  changedDesign();                                         // debounce armed, NOT yet fired
+  releaseGate();
+  await held;                                              // server assigns the name; adoption runs
+  out.inputAfterAdoption = els[THICKNESS].value;
+  out.leave = await flushSpaceDesignAutosave();            // leave boundary before the debounce fires
+  const row = state.designInventoryId;
+  out.row = row;
+  out.savedThickness = serverSpecs[row]?.box?.edge_mount?.label_thickness_mm;
+  out.savedLabel = serverSpecs[row]?.box?.edge_mount?.label_text;
+
+  await designerNewBin();                                  // leave the bin
+  out.newBinHasEdgeMount = modifierIsActive('edge_mount');
+  out.newBinRow = state.designInventoryId;
+
+  await addModifier('edge_mount');                         // explicit add
+  const added = state.design.box.edge_mount;
+  out.addedThickness = added.label_thickness_mm; out.addedText = added.label_text;
+
+  await designerEditInventoryRow(row);                     // reopen the same Inventory row
+  out.reopenedRow = state.designInventoryId;
+  out.reopenedThickness = state.design.box.edge_mount.label_thickness_mm;
+  state.modifierEditing = 'edge_mount'; syncEdgeMountControls();
+  out.controlAfterReopen = els[THICKNESS].value;
+  out.reloadedThickness = serverSpecs[row].box.edge_mount.label_thickness_mm;  // fresh read of the saved file
+
+  clearTimeout(spaceAutosaveTimer); applyChangedDesign.cancel();
+  process.stdout.write(JSON.stringify(out));
 })();
-""", DESIGN=design, STARTER=starter),
+""",
         ]))
-        self.assertEqual(out["saved"]["label_thickness_mm"], 3.7)
-        self.assertEqual(out["saved"]["label_text"], "Tools")
-        self.assertNotIn("edge_mount", out["bin"]["box"])
-        self.assertEqual(out["queuedKinds"], ["edge_mount"])
-        self.assertEqual(out["added"]["label_thickness_mm"], 3.7)
-        self.assertEqual(out["added"]["label_text"], "")
-        self.assertTrue(out["added"]["label_enabled"])
-        self.assertFalse(out["added"]["holes_enabled"])
+        self.assertEqual(out["inputAfterAdoption"], "3.7")
+        self.assertTrue(out["leave"])
+        self.assertEqual(out["savedThickness"], 3.7)
+        self.assertEqual(out["savedLabel"], "Tools")
+        self.assertFalse(out["newBinHasEdgeMount"])
+        self.assertNotEqual(out["newBinRow"], out["row"])
+        self.assertEqual(out["addedThickness"], 3.7)
+        self.assertEqual(out["addedText"], "")
+        self.assertEqual(out["reopenedRow"], out["row"])
+        self.assertEqual(out["reopenedThickness"], 3.7)
+        self.assertEqual(out["controlAfterReopen"], "3.7")
+        self.assertEqual(out["reloadedThickness"], 3.7)
 
     def test_autosave_adoption_never_rewrites_unfinished_form_fields(self):
         persist = function_source("persistSpaceDesignSource")

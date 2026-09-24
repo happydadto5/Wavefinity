@@ -373,10 +373,7 @@ function partDefaultsFromFeature(feature) {
       delete copy.options.rows;
     }
   }
-  if (!partInfo(feature.kind)?.flags?.photo && feature.item) {
-    copy.item = clone(feature.item);
-    copy.item.name = "Custom item";
-  }
+  if (!partInfo(feature.kind)?.flags?.photo && feature.item) copy.item = clone(feature.item);
   return cleanPartDefaultEntry(copy);
 }
 
@@ -397,8 +394,36 @@ function cleanPartDefaultEntry(entry) {
   if (typeof entry.along === "string") clean.along = entry.along;
   if (typeof entry.wedge === "boolean") clean.wedge = entry.wedge;
   if (typeof entry.alternate_ends === "boolean") clean.alternate_ends = entry.alternate_ends;
-  if (plainObject(entry.item)) clean.item = clone(entry.item);
+  // Item measurements/profile/clearance are reusable; a user's item name is
+  // identity and never carries into another bin.
+  if (plainObject(entry.item)) clean.item = { ...clone(entry.item), name: "Custom item" };
   return clean;
+}
+
+// The remembered entry for a feature kind comes from the instance whose
+// settings actually changed between the design a save replaced and the one it
+// stored, not merely the last feature of that kind. Instances are matched by
+// their reusable settings (position is not one), so reordering or moving
+// features invents nothing and deleting one changes nothing. When several
+// instances are new or changed, the last of them wins.
+function changedPartDefault(design, previous, kind) {
+  const unmatched = new Map();
+  for (const one of previous?.layout?.features || []) {
+    if (one.kind !== kind) continue;
+    const key = JSON.stringify(partDefaultsFromFeature(one));
+    unmatched.set(key, (unmatched.get(key) || 0) + 1);
+  }
+  let changed = null;
+  for (const one of design.layout?.features || []) {
+    if (one.kind !== kind) continue;
+    const entry = partDefaultsFromFeature(one);
+    if (!entry) continue;
+    const key = JSON.stringify(entry);
+    const left = unmatched.get(key) || 0;
+    if (left > 0) unmatched.set(key, left - 1);
+    else changed = entry;
+  }
+  return changed;
 }
 
 function seedFeatureFromPartDefaults(feature, entry) {
@@ -496,13 +521,9 @@ function rememberSpacePreferences(design, previous) {
   const currentParts = plainObject(state.spacePartDefaults) ? state.spacePartDefaults : {};
   const parts = cleanedSpacePartDefaults(currentParts);
   let partsChanged = JSON.stringify(parts) !== JSON.stringify(currentParts);
-  const lastOfKind = (source, kind) =>
-    (source?.layout?.features || []).filter(one => one.kind === kind).at(-1) || null;
   for (const kind of new Set((design.layout?.features || []).map(one => one.kind))) {
-    const entry = partDefaultsFromFeature(lastOfKind(design, kind));
+    const entry = changedPartDefault(design, previous, kind);
     if (!entry) continue;
-    const before = partDefaultsFromFeature(lastOfKind(previous, kind));
-    if (JSON.stringify(entry) === JSON.stringify(before)) continue;
     parts[kind] = entry;
     partsChanged = true;
   }
