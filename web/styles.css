@@ -609,25 +609,8 @@ input[type="number"]::-webkit-inner-spin-button {
 .support-choice.active { color: var(--ink); border-color: #1f6b45; background: #edf7f1; box-shadow: 0 0 0 2px rgba(31,107,69,.32); }
 .support-choice.active .support-choice-icon { color: #1f6b45; background: #d5eddf; }
 
-/* Editing mode: the palette collapses to just the part being edited so its
-   settings get the whole panel. */
-.support-palette.editing { grid-template-columns: 1fr; margin: 8px 0 10px; }
-.support-palette.editing .support-choice:not(.active) { display: none; }
-.support-palette.editing .support-choice.active {
-  cursor: default; transform: none; box-shadow: 0 0 0 2px rgba(31,107,69,.32);
-  max-height: none; min-height: 42px; padding-right: 230px;
-}
-
-/* Save / Delete ride in the top-right of the green part chip,
-   shown only while a part is open for editing. */
-.palette-wrap { position: relative; }
-.draft-actions {
-  position: absolute; top: 6px; right: 6px; z-index: 2;
-  display: flex; flex-direction: row; align-items: center; gap: 5px; width: auto;
-}
-.draft-actions[hidden] { display: none; }
-.draft-actions .button { width: auto; min-width: 64px; padding: 6px 9px; font-size: 12px; }
-.draft-auto-save-note { width: 82px; color: var(--muted); font-size: 10px; line-height: 1.1; text-align: right; }
+/* Edit state hides the whole palette; the selected Added row owns Done / Delete. */
+.support-palette[hidden] { display: none; }
 .added-parts-block { margin: 10px 0 12px; }
 .added-parts-block h3 { margin: 0 0 5px; font-size: 12px; }
 .added-parts-block .placed-empty { padding: 8px; }
@@ -751,6 +734,9 @@ input[type="number"]::-webkit-inner-spin-button {
 .placed-item.selected { border-color: #d58d21; box-shadow: 0 0 0 2px rgba(240,169,60,.35); background: #fffaf0; }
 .placed-item.selected.status-valid { border-color: #1f6b45; box-shadow: 0 0 0 2px rgba(31,107,69,.18); background: #f3faf6; }
 .placed-item.status-error { border-color: var(--danger); background: #fff4f2; }
+.bin-actions { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.bin-actions-label { flex: none; margin-right: auto; font-size: 12px; font-weight: 700; color: var(--muted); }
+.bin-actions .button { width: auto; padding: 5px 10px; font-size: 12px; }
 .placed-item-select {
   flex: 1; min-width: 0; border: 0; background: none; padding: 0; text-align: left;
   cursor: pointer; display: flex; align-items: center; gap: 0; overflow: hidden;
@@ -774,14 +760,9 @@ input[type="number"]::-webkit-inner-spin-button {
 .placed-item-copy .placed-item-detail, .placed-item-copy span {
   color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.placed-item-delete {
-  flex: none; border: 0; border-radius: 0 7px 7px 0; background: none;
-  color: var(--danger); font-size: 11px; font-weight: 600; padding: 0 10px;
-  cursor: pointer; display: grid; place-items: center; transition: background 0.15s ease;
-}
-.placed-item-delete:hover, .placed-item-delete:focus-visible {
-  background: #fff0ef; outline: none;
-}
+.added-parts-block .placed-item.selected { max-height: none; flex-wrap: wrap; }
+.placed-item-actions { display: flex; gap: 5px; align-items: center; padding: 4px 6px; flex: none; }
+.placed-item-actions .button { width: auto; min-width: 56px; padding: 4px 9px; font-size: 12px; }
 
 .check-card { display: flex; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfcfc; cursor: pointer; }
 .check-card input { margin-top: 2px; accent-color: var(--teal); }
@@ -1051,12 +1032,6 @@ dialog:not([open]) { display: none; }
 .support-layout-dialog .button-row { justify-content: end; }
 #draft-switch-dialog { width: min(440px, calc(100vw - 32px)); }
 #draft-switch-dialog p { line-height: 1.45; }
-#designer-load-dialog { width: min(420px, calc(100vw - 32px)); }
-.designer-load-list { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; margin-bottom: 16px; }
-.designer-load-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--border, #d7dee0); border-radius: 8px; background: none; cursor: pointer; }
-.designer-load-row:hover:not(:disabled) { background: var(--surface-hover, rgba(20,36,42,.05)); }
-.designer-load-row:disabled { color: var(--muted); cursor: not-allowed; opacity: .65; }
-.designer-load-row .muted { font-size: 12px; color: var(--muted); }
 #draft-switch-dialog .field-error { color: var(--danger); margin: 0 0 16px; }
 
 .generation-dialog {
@@ -1523,8 +1498,6 @@ dialog:not([open]) { display: none; }
   .connection { width: 100%; text-align: right; }
   .section-body, .output-panel { padding-left: 13px; padding-right: 13px; }
   .support-palette { grid-template-columns: 1fr; }
-  .draft-actions { flex-wrap: wrap; max-width: calc(100% - 12px); }
-  .support-palette.editing .support-choice.active { padding-right: 230px; }
   .field-grid.three { grid-template-columns: repeat(2, 1fr); }
   .field-grid.four { grid-template-columns: repeat(2, 1fr); }
   .workspace-toolbar { align-items: flex-start; }

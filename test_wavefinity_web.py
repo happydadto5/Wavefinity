@@ -3542,20 +3542,92 @@ const tick = () => new Promise(r => setImmediate(r));
         self.assertTrue(out["permThrew"][0])
 
     def test_connector_action_labels_match_bundle(self):
-        # Item 7: same height -> "Generate Connectors"/"Generate Bin and
-        # Connectors"; different heights -> "Generate Side Connector"/
-        # "Generate Bin and Side Connector" - synced on height-mode change
+        # Item 7 (Fix 048B wording): same height -> "Save Connectors"/"Save Bin
+        # + Connectors"; different heights -> "Save Side Connector"/
+        # "Save Bin + Side Connector" - synced on height-mode change
         # and during normal syncForm(), not fixed at first render.
         root = Path(__file__).resolve().parent / "web"
         app_js = (root / "app.js").read_text(encoding="utf-8")
         labels = app_js[app_js.index("function syncConnectorActionLabels() {"):]
         labels = labels[:labels.index("\n}\n")]
-        self.assertIn('"Generate Bin and Side Connector"', labels)
-        self.assertIn('"Generate Bin and Connectors"', labels)
-        self.assertIn('"Generate Side Connector"', labels)
-        self.assertIn('"Generate Connectors"', labels)
+        self.assertIn('"Save Bin + Side Connector"', labels)
+        self.assertIn('"Save Bin + Connectors"', labels)
+        self.assertIn('"Save Side Connector"', labels)
+        self.assertIn('"Save Connectors"', labels)
         self.assertIn("syncConnectorActionLabels();", app_js[app_js.index("function syncConnectorHeightControls"):])
         self.assertIn("syncConnectorActionLabels();", app_js[app_js.index("function syncConnectorSectionVisibility"):])
+
+    def test_fix48b_designer_interaction_simplification(self):
+        root = Path(__file__).resolve().parent / "web"
+        html = (root / "index.html").read_text(encoding="utf-8")
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+        # 1-2: Bin Actions owner sits before the bin definition controls.
+        actions = html.index('id="bin-actions"')
+        self.assertLess(actions, html.index('id="bin-type"'))
+        block = html[actions:html.index("</div>", actions)]
+        self.assertIn(">New Bin</button>", block)
+        self.assertIn(">Duplicate Bin</button>", block)
+        output = html[html.index('class="output-panel"'):html.index('id="drawer-panel"')]
+        self.assertNotIn("designer-new-bin", output)
+        self.assertNotIn("designer-duplicate", output)
+        self.assertEqual(html.count('id="designer-new-bin"'), 1)
+        self.assertEqual(html.count('id="designer-duplicate"'), 1)
+        # 3-5: manual Space Save/Load workflow is gone; file controls remain.
+        for token in ("designer-save-space", "designer-load-space", "designer-load-dialog",
+                      "designer-load-list", "designer-load-other", "designer-load-cancel"):
+            self.assertNotIn(token, html)
+            self.assertNotIn(token, app_js)
+        for token in ("designerSaveToSpace", "chooseDesignerSource",
+                      "designerLoadFromSpace", "designerLoadFromAnotherSpace"):
+            self.assertNotIn(token, app_js)
+        self.assertIn('id="designer-save-file"', html)
+        self.assertIn('id="designer-open-file"', html)
+        vis = app_js[app_js.index("function applyDesignerLifecycleVisibility() {"):]
+        vis = vis[:vis.index("\n}\n")]
+        self.assertIn('hide("#designer-save-file", typed)', vis)
+        self.assertIn('hide("#designer-open-file-label", typed)', vis)
+        self.assertNotIn("designer-new-bin", vis)
+        self.assertIn("async function designerEditInventoryRow(", app_js)
+        self.assertIn("async function flushSpaceDesignAutosave(", app_js)
+        # 6: Save wording.
+        for text in (">Save Bin + Connectors<", ">Save Bin<", ">Save Connectors<", "Saving Parts…"):
+            self.assertIn(text, html)
+        self.assertNotIn(">Generate Bin", html)
+        for text in ('"Save Bin + Lid"', '"Save Base Trim"', '"Save to Folder"',
+                     '"Saving Failed"', '"Saved — design save needs attention"'):
+            self.assertIn(text, app_js)
+        self.assertNotIn('"Generate Bin', app_js)
+        self.assertNotIn('"Generate to Folder"', app_js)
+        # 7-9: browse/edit palette, selected-row-only Done/Delete.
+        self.assertNotIn('id="draft-actions"', html)
+        self.assertNotIn('id="save-part"', html)
+        self.assertNotIn('id="delete-part"', html)
+        sel = app_js[app_js.index("function updateSelectionButtons() {"):]
+        sel = sel[:sel.index("\n}\n")]
+        self.assertIn('$("#support-palette").hidden = editing;', sel)
+        markup = app_js[app_js.index("function placedRowsMarkup("):]
+        markup = markup[:markup.index("\n}\n")]
+        self.assertIn("actions && row.editing", markup)
+        renderer = app_js[app_js.index("function renderPlaced() {"):]
+        renderer = renderer[:renderer.index("\n}\n")]
+        self.assertIn("placedRowsMarkup(rows, { actions: true })", renderer)
+        self.assertIn("placedRowsMarkup(previewRows)", renderer)
+        self.assertNotIn("actions: true", renderer.replace("placedRowsMarkup(rows, { actions: true })", ""))
+        # 9: temporary selected row for an uncommitted draft; never persisted.
+        data = app_js[app_js.index("function placedRowData() {"):]
+        data = data[:data.index("\n}\n")]
+        self.assertIn('type: "draft"', data)
+        self.assertNotIn("features.push", data)
+        # 10-11: Done / Delete route through the existing owners.
+        wiring = app_js[app_js.index("function wirePlacedRows("):]
+        wiring = wiring[:wiring.index("\n}\n")]
+        self.assertIn('"click", saveCurrentPart', wiring)
+        self.assertIn('"click", deleteCurrentPart', wiring)
+        # 12: a sole remaining feature no longer auto-opens.
+        self.assertNotIn("selectedFeature(0);", renderer)
+        # 13: direct selection still uses the existing owners.
+        self.assertIn("await selectedFeature(Number(button.dataset.index));", wiring)
+        self.assertIn("openModifier(button.dataset.kind, true)", wiring)
 
     def test_native_confirms_replaced_with_app_dialog(self):
         # Item 8: the five listed native confirm() sites are gone; the
@@ -3702,11 +3774,11 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b'id="print-bin"', body)
         self.assertIn(b">Print to Bambu Studio</button>", body)
         self.assertIn(b'id="generate-all"', body)
-        self.assertIn(b"Generate Bin and Connectors", body)
+        self.assertIn(b"Save Bin + Connectors", body)
         self.assertIn(b'id="generate-bin"', body)
-        self.assertIn(b">Generate Bin</button>", body)
+        self.assertIn(b">Save Bin</button>", body)
         self.assertIn(b'id="generate-connector"', body)
-        self.assertIn(b">Generate Connectors</button>", body)
+        self.assertIn(b">Save Connectors</button>", body)
         self.assertNotIn(b"generate-sampler", body)
         self.assertNotIn(b"Generate sampler", body)
         self.assertIn(b'id="generation-dialog"', body)
@@ -3763,12 +3835,11 @@ class WebServerTests(unittest.TestCase):
         self.assertLess(body.index(b'id="bin-type"'), body.index(b'id="part-name"'))
         self.assertLess(body.index(b'id="part-name"'), body.index(b'id="x-size"'))
         # The palette itself is the "add another part" affordance now - there is
-        # no separate button. Editing a part shows Save / Delete Part below its
-        # settings.
+        # no separate button. Editing a part shows Done / Delete on its selected
+        # Added row.
         self.assertNotIn(b'id="add-support"', body)
         self.assertLess(body.index(b'id="support-palette"'), body.index(b'id="draft-fields"'))
-        self.assertLess(body.index(b'id="save-part"'), body.index(b'id="delete-part"'))
-        self.assertLess(body.index(b'id="delete-part"'), body.index(b'id="draft-fields"'))
+        self.assertLess(body.index(b'id="added-parts-list"'), body.index(b'id="draft-fields"'))
         self.assertIn(b'id="mode-select"', body)
         # Print mode and 2D orientation are selects; preview filters are buttons.
         self.assertIn(b'id="ordinary-preview-modes"', body)

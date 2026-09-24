@@ -78,8 +78,8 @@ const state = {
   spaceResumePending: false,
   // Fix 034 D: the current Designer's bound editable-source Inventory row in
   // the active Space, or null when the current design has no saved source
-  // there yet. Cleared on New Bin/Duplicate/folder switch; set by Save to
-  // Space, Load from Space and on-demand source attach from Generate/Print.
+  // there yet. Cleared on New Bin/Duplicate/folder switch; set by autosave,
+  // Inventory Edit and on-demand source attach from Save/Print.
   designInventoryId: null,
   spaceStarterPreviewPending: false,
   // Whether this folder logs generated bins/B4Bs to its inventory file - the
@@ -392,8 +392,6 @@ async function rememberGeneratedSpaceBin() {}
 function applyDesignerLifecycleVisibility() {
   const typed = state.folderMode === "space";
   const hide = (selector, hidden) => { const el = $(selector); if (el) el.hidden = hidden; };
-  hide("#designer-save-space", !typed);
-  hide("#designer-load-space", !typed);
   hide("#designer-save-file", typed);
   hide("#designer-open-file-label", typed);
 }
@@ -477,13 +475,7 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false } 
   }
 }
 
-async function designerSaveToSpace({ silent = false } = {}) {
-  const saved = await flushSpaceDesignAutosave({ materialize: true });
-  if (saved && !silent) toast("Bin autosaved to Space.");
-  return saved;
-}
-
-// Install a canonical design (from Load from Space) as the working Designer
+// Install a canonical design (from Inventory Edit or Duplicate) as the working Designer
 // design, replacing whatever is currently shown.
 async function installLoadedDesignSource(rowId, spec, {
   successMessage = "Loaded from Space.",
@@ -521,118 +513,6 @@ async function installLoadedDesignSource(rowId, spec, {
   }
 }
 
-async function chooseDesignerSource(data, {
-  title = "Load from Space",
-  allowOther = false,
-  includeUnavailable = true,
-} = {}) {
-  const dialog = $("#designer-load-dialog");
-  const titleEl = $("#designer-load-title");
-  const list = $("#designer-load-list");
-  const otherBtn = $("#designer-load-other");
-  const cancelBtn = $("#designer-load-cancel");
-  if (!dialog || !titleEl || !list || !otherBtn || !cancelBtn) {
-    throw new Error("The Load from Space dialog is unavailable.");
-  }
-
-  titleEl.textContent = title;
-  otherBtn.hidden = !allowOther;
-  list.textContent = "";
-
-  const specs = data.layout?.design_specs || {};
-  const bins = (data.bins || []).filter(one => ["bin", "b4b"].includes(one.kind));
-  const visible = includeUnavailable
-    ? bins
-    : bins.filter(one => Boolean(specs[one.id]));
-
-  if (!visible.length) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = includeUnavailable
-      ? "This Space has no bins yet."
-      : "This Space has no saved editable bin designs.";
-    list.appendChild(empty);
-  }
-
-  let chosen = null;
-  visible.forEach(one => {
-    const spec = specs[one.id];
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "designer-load-row";
-    row.disabled = !spec;
-
-    const nameSpan = document.createElement("span");
-    nameSpan.textContent = one.name || `${fmt(one.x)} × ${fmt(one.y)}`;
-
-    const noteSpan = document.createElement("span");
-    noteSpan.className = "muted";
-    noteSpan.textContent = spec
-      ? `${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm`
-      : "Design settings not available";
-
-    row.append(nameSpan, noteSpan);
-    row.addEventListener("click", () => {
-      chosen = { id: one.id, spec };
-      if (dialog.open) dialog.close();
-    });
-    list.appendChild(row);
-  });
-
-  otherBtn.onclick = () => {
-    chosen = { other: true };
-    if (dialog.open) dialog.close();
-  };
-  cancelBtn.onclick = () => {
-    chosen = null;
-    if (dialog.open) dialog.close();
-  };
-
-  await new Promise(resolve => {
-    dialog.addEventListener("close", resolve, { once: true });
-    if (!dialog.open) dialog.showModal();
-  });
-
-  otherBtn.onclick = null;
-  cancelBtn.onclick = null;
-  return chosen;
-}
-
-// Load from Space (E2): a picker of this Space's bin/B4B rows that carry a
-// canonical design source. A no-spec/manual/legacy row is listed but
-// disabled, never reverse-engineered from a generated 3MF.
-async function designerLoadFromSpace() {
-  if (state.folderMode !== "space" || typeof DL === "undefined") return;
-
-  let data;
-  try {
-    data = await DL.inventoryCall("/api/drawer/load", {}, { write: false });
-  } catch (error) {
-    toast(`Could not read this Space's inventory: ${error.message}`, true, 6000);
-    return;
-  }
-
-  let chosen;
-  try {
-    chosen = await chooseDesignerSource(data, {
-      title: "Load from Space",
-      allowOther: true,
-      includeUnavailable: true,
-    });
-  } catch (error) {
-    toast(error.message, true, 6000);
-    return;
-  }
-
-  if (!chosen) return;
-  if (chosen.other) {
-    await designerLoadFromAnotherSpace();
-    return;
-  }
-
-  await designerInstallInventorySpec(chosen.id, chosen.spec);
-}
-
 async function designerEditInventoryRow(rowId) {
   if (state.folderMode !== "space" || typeof DL === "undefined") return;
   const one = DL.bin(rowId);
@@ -655,7 +535,7 @@ async function designerInstallInventorySpec(rowId, spec) {
 async function designerGenerateInventoryRow(rowId) {
   if (state.folderMode !== "space" || typeof DL === "undefined") return;
   if (DL.busy || isGenerating || state.designMutationBusy) {
-    toast("Finish the current action before generating files.", true);
+    toast("Finish the current action before saving files.", true);
     return;
   }
   if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
@@ -695,61 +575,9 @@ async function designerGenerateInventoryRow(rowId) {
   });
 }
 
-async function designerLoadFromAnotherSpace() {
-  if (typeof SP === "undefined") return;
-  const destination = typeof DL !== "undefined" ? DL.spaceContext() : null;
-
-  const folder = await SP.pickFolder();
-  if (!folder) return;
-
-  try {
-    if (destination) DL.requireSpaceContext(destination);
-    let info;
-    let data;
-    let sourceName;
-
-    if (state.runtime.hosted) {
-      info = await SP.inspectHosted(folder);
-      if (info.folder_mode !== "space" || info.needs_setup) {
-        throw new Error("Choose a fully configured Wavefinity Space.");
-      }
-      sourceName = info.space?.name || folder.name;
-      data = await api("/api/drawer/load", {
-        inventory_text: info.inventory_text || "",
-        inventory_title: sourceName,
-      });
-    } else {
-      const inspected = await api("/api/space/inspect", { output: folder });
-      info = inspected.folder;
-      if (info?.folder_mode !== "space" || info?.needs_setup) {
-        throw new Error("Choose a fully configured Wavefinity Space.");
-      }
-      sourceName = info.space?.name || info.folder_name || String(folder);
-      data = await api("/api/drawer/load", { output: folder });
-    }
-
-    const chosen = await chooseDesignerSource(data, {
-      title: `Load a copy from ${sourceName}`,
-      allowOther: false,
-      includeUnavailable: false,
-    });
-    if (!chosen) return;
-    if (destination) DL.requireSpaceContext(destination);
-
-    if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
-
-    if (destination) DL.requireSpaceContext(destination);
-    await installLoadedDesignSource(null, normalizeCopiedDesignForDestination(clone(chosen.spec)), {
-      successMessage: `Loaded a copy from ${sourceName}.`,
-    });
-  } catch (error) {
-    toast(`Could not load from that Space: ${error.message}`, true, 6000);
-  }
-}
-
 // New Bin (B1): a fresh product-appropriate starter. Meaningful current work
-// in a typed Space is preserved through Save to Space first, never silently
-// discarded; on save failure New Bin is cancelled rather than losing work.
+// in a typed Space is preserved through the autosave flush first, never silently
+// discarded; on flush failure New Bin is cancelled rather than losing work.
 async function designerNewBin() {
   if (!(await guardDraftSwitch())) return;
   if (state.folderMode === "space") {
@@ -871,12 +699,12 @@ function updateGenerateAvailability() {
   const binButton = $("#generate-bin");
   if (binButton) {
     binButton.disabled = state.designMutationBusy || !state.canGenerate;
-    binButton.title = state.canGenerate ? "Generate the current bin files" : "Resolve the highlighted issue before generating";
+    binButton.title = state.canGenerate ? "Save the current bin files" : "Resolve the highlighted issue before saving";
   }
   const allButton = $("#generate-all");
   if (allButton) {
     allButton.disabled = state.designMutationBusy || !state.canGenerate;
-    allButton.title = state.canGenerate ? "Generate bin and connector files" : "Resolve the highlighted issue before generating";
+    allButton.title = state.canGenerate ? "Save bin and connector files" : "Resolve the highlighted issue before saving";
   }
   const connectorButton = $("#generate-connector");
   if (connectorButton) {
@@ -2179,13 +2007,13 @@ function syncConnectorActionLabels() {
   if (!allButton && !connectorButton) return;
   const different = $("#connector-height-mode")?.value === "different";
   if (allButton) {
-    allButton.textContent = different ? "Generate Bin and Side Connector" : "Generate Bin and Connectors";
+    allButton.textContent = different ? "Save Bin + Side Connector" : "Save Bin + Connectors";
   }
   if (connectorButton) {
-    connectorButton.textContent = different ? "Generate Side Connector" : "Generate Connectors";
+    connectorButton.textContent = different ? "Save Side Connector" : "Save Connectors";
     connectorButton.title = different
-      ? "Generate the Side connector for the current bin"
-      : "Generate Side, 3-Way Corner, and 4-Way Corner connectors for the current bin";
+      ? "Save the Side connector for the current bin"
+      : "Save Side, 3-Way Corner, and 4-Way Corner connectors for the current bin";
   }
 }
 
@@ -2336,18 +2164,6 @@ async function maybePromptSurfaceObjectHeight() {
 function isSurfaceBinDesign(design = state.design) {
   return state.folderMode === "space" && state.activeSpace?.kind === "surface"
     && !design?.box?.b4b?.enabled && !baseTrimEnabled(design);
-}
-
-function normalizeCopiedDesignForDestination(design) {
-  if (!design?.layout || design.box?.b4b?.enabled) return design;
-  if (state.folderMode === "space" && state.activeSpace?.kind === "surface") {
-    if (design.layout.surface_base_mode === "edge") resolveSurfaceBase(design);
-    if (surfaceStackingBlocked(design)) design.layout.surface_lightweight_base = false;
-  } else {
-    design.layout.surface_base_mode = "custom";
-    design.layout.surface_lightweight_base = false;
-  }
-  return design;
 }
 
 function surfaceStackingBlocked(design = state.design) {
@@ -2644,7 +2460,7 @@ function applyBaseTrimVisibility() {
   const layoutTab = document.querySelector('.view-tab[data-view="2d"]');
   if (layoutTab) layoutTab.hidden = false;
   $("#part-name-label").textContent = on ? "Base Trim Name" : "Bin Name";
-  $("#generate-bin").textContent = on ? "Generate Base Trim" : "Generate Bin";
+  $("#generate-bin").textContent = on ? "Save Base Trim" : "Save Bin";
   updatePrimaryPrintButtonLabel();
 }
 
@@ -3144,7 +2960,7 @@ function applyStackVisibility() {
     if (element) element.hidden = b4b || baseTrimEnabled() || connectorLocked;
   });
   if (!baseTrimEnabled()) {
-    $("#generate-bin").textContent = hasLid ? "Generate Bin + Lid" : "Generate Bin";
+    $("#generate-bin").textContent = hasLid ? "Save Bin + Lid" : "Save Bin";
   }
   const info = state.preview?.stack;
   if (b4b || (mode === "none" && !hasLid)) {
@@ -4449,8 +4265,6 @@ function wireControls() {
 
   // Editing a part: "Save Part" finalises it and returns to the 10-part
   // palette; "Delete Part" removes the part being edited and does the same.
-  $("#save-part").addEventListener("click", saveCurrentPart);
-  $("#delete-part").addEventListener("click", deleteCurrentPart);
   // Fix 034 I: the global top-right lifecycle/history controls are gone -
   // New Bin/Duplicate/Save/Load live at the bottom of the Designer instead
   // (Section E1), and Undo/Redo have no replacement (autosave + explicit
@@ -4458,8 +4272,6 @@ function wireControls() {
   // for the algorithms that still use it (e.g. size-drag history).
   $("#designer-new-bin").addEventListener("click", designerNewBin);
   $("#designer-duplicate").addEventListener("click", designerDuplicate);
-  $("#designer-save-space").addEventListener("click", () => designerSaveToSpace());
-  $("#designer-load-space").addEventListener("click", designerLoadFromSpace);
   $("#designer-save-file").addEventListener("click", saveDesign);
   $("#designer-open-file").addEventListener("change", openDesign);
   window.addEventListener("beforeunload", event => {
@@ -8066,7 +7878,7 @@ function mutationControls() {
     '#lid-option-toggle, #lid-configuration, #lid-thickness, #lid-handle-type, #lid-handle-size, ' +
     '#lid-handle-position, #lid-label-enabled, #lid-label-orientation, #lid-label-style, #lid-label-text, ' +
     '#b4b-stacking, #b4b-handle, #b4b-label-location, #b4b-latch-count, #b4b-front-label-style, ' +
-    '#designer-new-bin, #designer-duplicate, #designer-save-space, #designer-load-space, ' +
+    '#designer-new-bin, #designer-duplicate, ' +
     '#designer-save-file, #designer-open-file'
   );
 }
@@ -8121,20 +7933,16 @@ function finishDesignMutation() {
 function updateSelectionButtons() {
   const busy = state.designMutationBusy;
   // The editor being open IS "editing mode" - set synchronously the moment a
-  // part is picked, before its defaults have loaded. Collapse the palette to
-  // just that part. Placed parts remain available in the preview for direct
-  // 2D editing.
+  // part is picked, before its defaults have loaded. Browse state shows the
+  // palette; edit state hides it while "Added to this bin" stays visible and
+  // its selected row owns Done / Delete.
   const editing = !$(".support-editor").hidden;
-  $("#support-palette").classList.toggle("editing", editing);
-  // Save / Delete Part ride in the top-right of the green part chip, shown
-  // only while a part is open for editing.
-  const draftActions = $("#draft-actions");
-  if (draftActions) draftActions.hidden = !editing;
+  $("#support-palette").hidden = editing;
   const hasPlaced = placedPartCount() > 0;
   $$(".placed-block").forEach(placedBlock => { placedBlock.hidden = !hasPlaced; });
-  $("#save-part").disabled = busy || (!state.draft && !state.modifierEditing);
-  $("#delete-part").disabled = busy || (!state.draft && !state.modifierEditing) ||
-    (state.draft?.kind === "divider" && dividerLockedByLidLabels());
+  const lockedDivider = state.draft?.kind === "divider" && dividerLockedByLidLabels();
+  $$(".placed-item-done").forEach(button => { button.disabled = busy; });
+  $$(".placed-item-remove").forEach(button => { button.disabled = busy || lockedDivider; });
   const hasPhotoNest = state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour);
   $$(".support-choice").forEach(button => {
     const info = partInfo(button.dataset.kind);
@@ -8159,11 +7967,7 @@ function updateSelectionButtons() {
         : `${info.title} — ${info.description}`;
     }
   });
-  $$(".placed-item-select, .placed-item-delete").forEach(button => {
-    const feature = state.design?.layout?.features?.[Number(button.dataset.index)];
-    button.disabled = busy || (button.classList.contains("placed-item-delete") &&
-      feature?.kind === "divider" && dividerLockedByLidLabels());
-  });
+  $$(".placed-item-select").forEach(button => { button.disabled = busy; });
   $("#support-count").textContent = `${placedPartCount()} added`;
 }
 
@@ -8219,21 +8023,38 @@ function placedRowData() {
       invalid: false,
     });
   }
+  // A newly chosen draft (e.g. Photo Nest setup) has no saved feature yet:
+  // show it as one temporary selected row so Done / Delete stay reachable.
+  // Presentation only - nothing is persisted for it.
+  if (state.draft && !Number.isInteger(draftCommitIndex()) && !Number.isInteger(state.draftSourceIndex)) {
+    rows.push({
+      type: "draft", kind: state.draft.kind,
+      title: partInfo(state.draft.kind)?.title || state.draft.kind,
+      detail: "Setting up",
+      editing: true, selected: true, invalid: false,
+    });
+  }
   return rows;
 }
 
-function placedRowsMarkup(rows) {
+function placedRowsMarkup(rows, { actions = false } = {}) {
   return rows.map(row => {
     const statusClass = row.invalid ? "status-error" : row.selected ? "status-valid" : "";
     const identity = row.type === "feature"
-      ? `data-index="${row.index}"` : `data-kind="${row.kind}"`;
+      ? `data-index="${row.index}"`
+      : row.type === "modifier" ? `data-kind="${row.kind}"` : 'data-draft="true"';
     const title = escapeHtml(row.title);
+    const rowActions = actions && row.editing
+      ? `<div class="placed-item-actions">
+        <button type="button" class="placed-item-done button primary">Done</button>
+        <button type="button" class="placed-item-remove button danger" title="Delete ${title}" aria-label="Delete ${title}">Delete</button>
+      </div>` : "";
     return `<div class="placed-item ${row.selected ? "selected" : ""} ${statusClass}" data-support-kind="${escapeHtml(row.kind)}">
       <button type="button" class="placed-item-select" ${identity}>
         <span class="placed-item-icon">${iconFor(row.kind)}</span>
         <span class="placed-item-copy"><strong>${title}</strong><span class="placed-item-detail">${escapeHtml(row.detail)}</span></span>
       </button>
-      <button type="button" class="placed-item-delete" ${identity} title="Delete ${title}" aria-label="Delete ${title}">Delete</button>
+      ${rowActions}
     </div>`;
   }).join("");
 }
@@ -8246,12 +8067,12 @@ function wirePlacedRows(container) {
   $$(".placed-item-select[data-index]", container).forEach(button => button.addEventListener("click", async () => {
     await selectedFeature(Number(button.dataset.index));
   }));
-  $$(".placed-item-delete[data-index]", container).forEach(button =>
-    button.addEventListener("click", () => deleteSupportAt(Number(button.dataset.index))));
   $$(".placed-item-select[data-kind]", container).forEach(button =>
     button.addEventListener("click", () => openModifier(button.dataset.kind, true)));
-  $$(".placed-item-delete[data-kind]", container).forEach(button =>
-    button.addEventListener("click", () => removeModifier(button.dataset.kind)));
+  $$(".placed-item-done", container).forEach(button =>
+    button.addEventListener("click", saveCurrentPart));
+  $$(".placed-item-remove", container).forEach(button =>
+    button.addEventListener("click", deleteCurrentPart));
 }
 
 function renderPlaced() {
@@ -8267,7 +8088,7 @@ function renderPlaced() {
   }
   const added = $("#added-parts-list");
   if (added) {
-    added.innerHTML = placedRowsMarkup(rows) || '<div class="placed-empty">Nothing added yet.</div>';
+    added.innerHTML = placedRowsMarkup(rows, { actions: true }) || '<div class="placed-empty">Nothing added yet.</div>';
     wirePlacedRows(added);
   }
   const total = placedPartCount();
@@ -8279,15 +8100,7 @@ function renderPlaced() {
       : `Nothing added · ${state.design.layout.mode}`;
   }
 
-  // With a single support there's nothing to choose between, so drop straight
-  // into its settings rather than make the user pick it out of the list first.
-  // selectedFeature() sets state.selected, so the re-entrant renderPlaced() it
-  // triggers falls through here instead of looping. Suppressed right after an
-  // explicit Save / Delete Part, when the user asked to be back at the palette.
-  if (state.design.layout.features.length === 1 && state.selected === null && !state.draft
-      && !editingEdgeMount() && !state.paletteBrowsing) {
-    selectedFeature(0);
-  }
+  updateSelectionButtons();
   updateDividerEditBreadcrumb();
 }
 
@@ -12150,7 +11963,7 @@ function wireGenerationDialog() {
 
 function getIndicatorHtml(status) {
   if (status === "generating") {
-    return `<span class="gen-spinner" aria-label="Generating"></span>`;
+    return `<span class="gen-spinner" aria-label="Saving"></span>`;
   }
   if (status === "done") {
     return `<span class="gen-status-icon done" aria-label="Done">✓</span>`;
@@ -12193,7 +12006,7 @@ function showBinNameRequiredDialog(title, message) {
   const titleEl = $("#bin-name-dialog-title");
   const messageEl = $("#bin-name-dialog-message");
   if (titleEl) titleEl.textContent = title || "Bins must have a name";
-  if (messageEl) messageEl.textContent = message || "Bins must have a name before you can generate or print.";
+  if (messageEl) messageEl.textContent = message || "Bins must have a name before you can save or print.";
   if (!dialog || typeof dialog.showModal !== "function") {
     alert(message || "Bins must have a name");
     if (partInput) {
@@ -12219,7 +12032,7 @@ function showFilenameConflictDialog(names) {
   const list = names.join(", ");
   showBinNameRequiredDialog(
     "This name is already used",
-    `A file named "${list}" already exists in your chosen folder. Please label the bin with a different name, then generate again.`
+    `A file named "${list}" already exists in your chosen folder. Please label the bin with a different name, then save again.`
   );
 }
 
@@ -12287,12 +12100,12 @@ async function surfaceEdgeSucceeded(design) {
 async function generateParts(target) {
   if (baseTrimEnabled()) target = "bin";
   if (state.designMutationBusy || isGenerating) {
-    toast("Finish the current action before generating files.", true);
+    toast("Finish the current action before saving files.", true);
     return;
   }
   if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (state.runtime.hosted && !state.browserFolder) {
-    toast("Choose a folder before generating files.", true);
+    toast("Choose a folder before saving files.", true);
     return;
   }
   const beforeForm = pendingDesignHistory || clone(state.design);
@@ -12307,7 +12120,7 @@ async function generateParts(target) {
   recordHistory(beforeForm);
 
   if ((target === "all" || target === "bin") && !state.canGenerate) {
-    toast("Resolve the highlighted issue before generating.", true);
+    toast("Resolve the highlighted issue before saving.", true);
     return;
   }
   if (typedSpaceOrdinaryBin() &&
@@ -12322,8 +12135,8 @@ async function generateParts(target) {
   const dialogError = $("#generation-error");
   const dialogActions = $("#generation-actions");
 
-  if (dialogTitle) dialogTitle.textContent = "Generating Parts…";
-  if (dialogSubtitle) dialogSubtitle.textContent = "Please wait while your files are being generated and saved.";
+  if (dialogTitle) dialogTitle.textContent = "Saving Parts…";
+  if (dialogSubtitle) dialogSubtitle.textContent = "Please wait while your files are being saved.";
   if (dialogError) {
     dialogError.hidden = true;
     dialogError.textContent = "";
@@ -12391,13 +12204,13 @@ async function generateParts(target) {
       try {
         await SP.flushResumeCheckpoint(payload.design, Boolean(workingDesignForSpace()));
       } catch (error) {
-        throw new Error(`Current design could not be saved to this Space, so nothing was generated: ${error.message}`);
+        throw new Error(`Current design could not be saved to this Space, so nothing was saved: ${error.message}`);
       }
     }
 
     // Step 1: Generate Bin if requested
     if (target === "all" || target === "bin") {
-      setItemStatus("bin", "generating", "Generating…");
+      setItemStatus("bin", "generating", "Saving…");
       const binResult = await api("/api/generate", payload);
       if (designSpaceContext) DL.requireSpaceContext(designSpaceContext);
       saveOutput = binResult.output || saveOutput;
@@ -12444,7 +12257,7 @@ async function generateParts(target) {
 
     // Step 2: Generate Connector if requested
     if (target === "all" || target === "connector") {
-      setItemStatus("connector", "generating", "Generating…");
+      setItemStatus("connector", "generating", "Saving…");
       const connResult = await api("/api/connector", payload);
       saveOutput = connResult.output || saveOutput;
       if (connResult.connector_plan) {
@@ -12461,11 +12274,11 @@ async function generateParts(target) {
     // unconditional "Complete!" - and the two outcomes get exactly one
     // toast each, not a success toast followed by a contradicting one.
     if (checkpointSaveFailed) {
-      if (dialogTitle) dialogTitle.textContent = "Generated — design save needs attention";
-      if (dialogSubtitle) dialogSubtitle.textContent = "Parts were generated, but the current design could not be saved to this Space.";
+      if (dialogTitle) dialogTitle.textContent = "Saved — design save needs attention";
+      if (dialogSubtitle) dialogSubtitle.textContent = "Parts were saved, but the current design could not be saved to this Space.";
     } else {
-      if (dialogTitle) dialogTitle.textContent = "Complete!";
-      if (dialogSubtitle) dialogSubtitle.textContent = "All parts generated and saved.";
+      if (dialogTitle) dialogTitle.textContent = "Saved";
+      if (dialogSubtitle) dialogSubtitle.textContent = "All parts saved.";
     }
 
     // Pause briefly so user clearly sees checkmarks
@@ -12502,8 +12315,8 @@ async function generateParts(target) {
       }
     }
 
-    if (dialogTitle) dialogTitle.textContent = "Generation Failed";
-    if (dialogSubtitle) dialogSubtitle.textContent = "An error occurred while generating parts.";
+    if (dialogTitle) dialogTitle.textContent = "Saving Failed";
+    if (dialogSubtitle) dialogSubtitle.textContent = "An error occurred while saving parts.";
     if (dialogError) {
       dialogError.textContent = error.message;
       dialogError.hidden = false;
@@ -12642,8 +12455,8 @@ function updatePrimaryPrintButtonLabel() {
     if (wrap) wrap.hidden = false;
     printBtn.hidden = false;
     if (state.runtime.hosted) {
-      printBtn.textContent = "Generate Base Trim";
-      printBtn.title = "Generate all Base Trim pieces into your selected folder";
+      printBtn.textContent = "Save Base Trim";
+      printBtn.title = "Save all Base Trim pieces into your selected folder";
       $("#slicer-picker-button").hidden = true;
     } else {
       const slicer = state.slicer || {};
@@ -12655,8 +12468,8 @@ function updatePrimaryPrintButtonLabel() {
   if (state.runtime.hosted) {
     if (wrap) wrap.hidden = false;
     printBtn.hidden = false;
-    printBtn.textContent = "Generate to Folder";
-    printBtn.title = "Generate files into your selected folder";
+    printBtn.textContent = "Save to Folder";
+    printBtn.title = "Save files into your selected folder";
     $("#slicer-picker-button").hidden = true;
     return;
   }

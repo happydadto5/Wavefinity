@@ -45,6 +45,11 @@
       </section>
       <section class="control-section open" data-section="build">
         <div class="section-body">
+          <div id="bin-actions" class="bin-actions" role="group" aria-label="Bin Actions">
+            <span class="bin-actions-label">Bin Actions</span>
+            <button type="button" id="designer-new-bin" class="button secondary">New Bin</button>
+            <button type="button" id="designer-duplicate" class="button secondary">Duplicate Bin</button>
+          </div>
           <div class="bin-type-row">
             <label><span>Design a:</span>
               <select id="bin-type">
@@ -294,11 +299,6 @@
           </div>
           <div class="palette-wrap">
             <div id="support-palette" class="support-palette" role="list"></div>
-            <div id="draft-actions" class="draft-actions" hidden>
-              <span class="draft-auto-save-note">Changes save automatically.</span>
-              <button type="button" id="save-part" class="button primary">Done</button>
-              <button type="button" id="delete-part" class="button danger">Delete</button>
-            </div>
           </div>
 
 
@@ -479,10 +479,6 @@
           </div>
         </div>
         <div id="designer-lifecycle-row" class="button-row equal designer-lifecycle-row">
-          <button type="button" id="designer-new-bin" class="button secondary">New Bin</button>
-          <button type="button" id="designer-duplicate" class="button secondary">Duplicate</button>
-          <button type="button" id="designer-save-space" class="button secondary" hidden>Save to Space</button>
-          <button type="button" id="designer-load-space" class="button secondary" hidden>Load from Space</button>
           <button type="button" id="designer-save-file" class="button secondary">Save design file</button>
           <label class="button secondary file-button" id="designer-open-file-label">Open design file<input id="designer-open-file" type="file" accept=".json,.wavefinity.json"></label>
         </div>
@@ -491,9 +487,9 @@
           <button type="button" id="slicer-picker-button" class="slicer-picker-button" title="Select custom Bambu Studio or OrcaSlicer executable">Change slicer</button>
         </div>
         <div class="button-row equal generate-actions">
-          <button id="generate-all" class="button secondary">Generate Bin and Connectors</button>
-          <button id="generate-bin" class="button secondary">Generate Bin</button>
-          <button id="generate-connector" class="button secondary">Generate Connectors</button>
+          <button id="generate-all" class="button secondary">Save Bin + Connectors</button>
+          <button id="generate-bin" class="button secondary">Save Bin</button>
+          <button id="generate-connector" class="button secondary">Save Connectors</button>
         </div>
       </section>
       <div id="drawer-panel" class="drawer-panel" hidden></div>
@@ -737,7 +733,7 @@
 
   <dialog id="bin-name-dialog" class="support-layout-dialog" aria-labelledby="bin-name-dialog-title">
     <h2 id="bin-name-dialog-title">Bins must have a name</h2>
-    <p id="bin-name-dialog-message">Bins must have a name before you can generate or print.</p>
+    <p id="bin-name-dialog-message">Bins must have a name before you can save or print.</p>
     <div class="button-row">
       <button id="bin-name-dialog-ok" type="button" class="button primary">OK</button>
     </div>
@@ -761,14 +757,6 @@
       <button id="draft-switch-keep" type="button" class="button secondary">Keep editing</button>
       <button id="draft-switch-discard" type="button" class="button danger">Discard change</button>
       <button id="draft-switch-add" type="button" class="button primary" hidden>Add as new</button>
-    </div>
-  </dialog>
-  <dialog id="designer-load-dialog" class="support-layout-dialog" aria-labelledby="designer-load-title">
-    <h2 id="designer-load-title">Load from Space</h2>
-    <div id="designer-load-list" class="designer-load-list"></div>
-    <div class="button-row">
-      <button id="designer-load-other" type="button" class="button secondary">Load from another Space…</button>
-      <button id="designer-load-cancel" type="button" class="button secondary">Cancel</button>
     </div>
   </dialog>
   <dialog id="app-confirm-dialog" class="support-layout-dialog" aria-labelledby="app-confirm-title">
@@ -795,8 +783,8 @@
   <dialog id="generation-dialog" class="generation-dialog" aria-labelledby="generation-dialog-title">
     <div class="generation-dialog-card">
       <div class="generation-dialog-header">
-        <h2 id="generation-dialog-title">Generating Parts…</h2>
-        <p id="generation-dialog-subtitle" class="generation-dialog-subtitle">Please wait while your parts are being generated and saved.</p>
+        <h2 id="generation-dialog-title">Saving Parts…</h2>
+        <p id="generation-dialog-subtitle" class="generation-dialog-subtitle">Please wait while your parts are being saved.</p>
       </div>
       <div id="generation-items" class="generation-items"></div>
       <div id="generation-error" class="generation-error" hidden></div>
