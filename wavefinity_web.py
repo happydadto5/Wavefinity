@@ -3067,6 +3067,8 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     files = _extract_generated_files(gen_result)
     design_files = list(files)
+    if target not in {"connector", "sampler", "base_trim_joint_test"} and not design_files:
+        raise RuntimeError("No bin files were generated to send to Bambu Studio.")
 
     # The default bin print also carries the automatic connector bundle (a
     # Side connector, plus 3-Way and 4-Way corners when the bin is eligible),
@@ -3114,7 +3116,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         and not is_base_trim
     ):
         output_dir = Path(gen_result["output"])
-        if inventory_enabled(output_dir, load_preferences()):
+        if not payload.get("design_row_id") and inventory_enabled(output_dir, load_preferences()):
             box, layout, label, part_name, location, scoop = _design(design)
             record = inventory_bin_record(
                 box, layout, design_files, label, part_name, scoop,
@@ -3127,6 +3129,7 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "result": gen_result.get("result"),
         "output": gen_result.get("output"),
         "files": [str(f) for f in files],
+        "design_files": [str(f) for f in design_files],
         "slicer": str(slicer_path),
         "project": str(project_path) if project_path else None,
     }

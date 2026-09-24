@@ -142,7 +142,7 @@ DP.build = () => {
           <summary>+ Add a bin by hand</summary>
           <p class="dl-note">For bins printed before logging, or elsewhere. Width, length and height snap to the same sizes a designed bin uses.</p>
           <div class="field-grid three"><label>Name<input id="dl-add-name" type="text" maxlength="80" placeholder="e.g. Hex keys"></label>
-            <label>Qty printed<input id="dl-add-qty" type="number" min="0" step="1" value="1"></label>
+            <label>Qty printed<input id="dl-add-qty" type="number" min="0" max="1" step="1" value="1"></label>
             <label>Stacking<select id="dl-add-stack">${STACK_OPTIONS}</select></label></div>
           <div class="field-grid three">
             <label>Width <span class="unit">mm</span><input id="dl-add-x" type="text" inputmode="numeric" value="32"></label>
@@ -416,7 +416,7 @@ DP.wire = () => {
       : 0;
     const bin = {
       name: $("#dl-add-name").value.trim(),
-      qty: Math.max(0, Math.round(dlNum($("#dl-add-qty").value, 1))),
+      qty: Math.max(0, Math.min(1, Math.round(dlNum($("#dl-add-qty").value, 1)))),
       x: dlNum($("#dl-add-x").value, 0), y: dlNum($("#dl-add-y").value, 0), z: moduleZ,
       stack,
       kind: "manual",
@@ -498,7 +498,7 @@ DP.onInventoryClick = async event => {
   if (action === "more") {
     if (DP.open.has(one.id)) DP.open.delete(one.id); else DP.open.add(one.id);
     DP.renderInventory(true);
-  } else if (action === "qty+") DL.editBins({ bin_updates: [{ id: one.id, qty: one.qty + 1 }] });
+  } else if (action === "qty+") DL.markPrinted(one);
   else if (action === "qty-") DP.lowerQty(one);
   else if (action === "edit") designerEditInventoryRow(one.id);
   else if (action === "printed") DL.markPrinted(one);
@@ -527,6 +527,7 @@ DP.onInventoryClick = async event => {
 // renumber the top copy into a free slot first.
 DP.lowerQty = async one => {
   if (one.qty <= 0) return;
+  if (DL.layout?.design_specs?.[one.id]) return DL.setBinPrinted(one, false);
   const next = one.qty - 1;
   const placements = DL.layout.drawers.flatMap(drawer => drawer.placements.filter(p => p.bin === one.id));
   const used = new Set(placements.map(p => p.copy ?? 0));
@@ -1007,6 +1008,7 @@ DP.renderInventory = (force = false) => {
     const eligible = DL.printEligible(one);
     const spec = DL.layout?.design_specs?.[one.id];
     const designSource = ["bin", "b4b"].includes(one.kind) && Boolean(spec);
+    const statusLabel = one.status === "printed" ? "Printed" : one.status === "saved" ? "Saved" : "In Design";
     const printable = eligible && !state.runtime.hosted && Boolean(state.slicer?.available);
     const quantityTracked = ["bin", "b4b", "manual"].includes(one.kind);
     const needed = DL.printNeeded(one);
@@ -1022,13 +1024,14 @@ DP.renderInventory = (force = false) => {
           <strong>${escapeHtml(DL.label(one))}</strong>
           <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${units(w)}×${units(d)} units</small>
           ${planningText ? `<small>${escapeHtml(planningText)}</small>` : ""}
+          ${designSource ? `<small>${statusLabel}</small>` : ""}
           ${flags.length || printFlag ? `<small class="dl-flags">${escapeHtml([...flags, printFlag].filter(Boolean).join(" · "))}</small>` : ""}
         </span>
         <span class="dl-placed" title="${holding.length ? `In ${escapeHtml(holding.join(", "))}` : "Not placed"}">${placed - planned}/${one.qty}<small>${planned ? `+${planned} planned` : "placed"}</small></span>
         <span class="dl-qty" title="How many you have printed">
           <button type="button" data-act="qty-" ${one.qty <= 0 ? "disabled" : ""} aria-label="One fewer printed">−</button>
           <span>${one.qty}</span>
-          <button type="button" data-act="qty+" aria-label="One more printed">+</button>
+          <button type="button" data-act="qty+" ${one.qty >= 1 ? "disabled" : ""} aria-label="Mark printed">+</button>
         </span>
         <button type="button" class="dl-more" data-act="more" aria-expanded="${open}" title="Details">${open ? "▴" : "▾"}</button>
         <button type="button" class="dl-remove" data-act="delete" title="Remove from the inventory" aria-label="Remove ${escapeHtml(DL.label(one))} from the inventory">✕</button>
@@ -1042,7 +1045,7 @@ DP.renderInventory = (force = false) => {
       ${open ? `<div class="dl-bin-details" data-bin="${escapeHtml(one.id)}">
         <div class="field-grid three">
           <label>Name<input type="text" data-field="name" maxlength="80" value="${escapeHtml(one.name)}" placeholder="Shows the size when blank"></label>
-          <label>Qty printed<input type="number" data-field="qty" min="0" step="1" value="${one.qty}"></label>
+          <label>Qty printed<input type="number" data-field="qty" min="0" max="1" step="1" value="${one.qty}"></label>
           <label>Stacking<select data-field="stack">${STACK_OPTIONS.replace(`value="${one.stack}"`, `value="${one.stack}" selected`)}</select></label>
         </div>
         ${DL.isSurface() ? `<label>Object height <span class="unit">mm</span><input type="number" data-field="object_height_mm" min="0.1" step="0.1" value="${one.object_height_mm ?? ""}" placeholder="Not set"></label>` : ""}
@@ -1062,6 +1065,11 @@ DP.renderInventory = (force = false) => {
   $$(".dl-swatch", list).forEach(node => {
     node.style.background = node.dataset.top;
     node.style.color = node.dataset.ink;
+  });
+  $$(".dl-bin-details[data-bin]", list).forEach(details => {
+    if (DL.layout?.design_specs?.[details.dataset.bin]) {
+      $$("[data-field]", details).forEach(field => { field.disabled = true; });
+    }
   });
 };
 
@@ -1145,6 +1153,9 @@ DP.selectMode = async mode => {
       !(await flushVisibleDesignEditsBeforeModeSwitch())) {
     return;
   }
+  if (DP.mode === "design" && mode === "space" &&
+      typeof flushSpaceDesignAutosave === "function" &&
+      !(await flushSpaceDesignAutosave())) return;
   if (mode === "space" && typeof workingDesignForSpace === "function" && workingDesignForSpace() &&
       typeof maybePromptSurfaceObjectHeight === "function" && !(await maybePromptSurfaceObjectHeight())) return;
   DP.setMode(mode);

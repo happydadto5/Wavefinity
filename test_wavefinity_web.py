@@ -1954,6 +1954,27 @@ class WebApplicationTests(unittest.TestCase):
                 })
                 mock_connector.assert_called_once()
 
+    def test_typed_space_print_handoff_does_not_append_another_row(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            slicer = Path(temp_dir) / "bambu-studio.exe"
+            slicer.touch()
+            bin_file = Path(temp_dir) / "A.3mf"
+            bin_file.touch()
+            fake = {"result": {"box": {"output": str(bin_file)}}, "output": temp_dir}
+            with (
+                patch.object(wavefinity_web, "generate_payload", return_value=fake),
+                patch.object(wavefinity_web, "connector_payload", return_value={"result": {}, "output": temp_dir}),
+                patch.object(wavefinity_web, "detect_bambu_studio", return_value=slicer),
+                patch.object(wavefinity_web, "launch_slicer"),
+                patch.object(wavefinity_web, "append_bin") as append,
+                patch.object(wavefinity_web, "inventory_enabled", return_value=True),
+            ):
+                result = wavefinity_web.print_payload({
+                    "design": default_design(), "output": temp_dir, "design_row_id": "B1",
+                })
+                append.assert_not_called()
+                self.assertEqual(result["design_files"], [str(bin_file)])
+
     def test_print_payload_skips_connector_bundle_for_b4b_lid_and_base_trim(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fake_exe = Path(temp_dir) / "bambu-studio.exe"
@@ -2014,6 +2035,7 @@ class WebApplicationTests(unittest.TestCase):
             " workingGeneratedKey: null, folderMode: 'space' };",
             "let visible = {}; let baseTrim = false;",
             "const baseTrimEnabled = () => baseTrim;",
+            "const typedSpaceOrdinaryBin = () => !baseTrim && state.folderMode === 'space';",
             "const visibleDesignSnapshot = () => clone(visible);",
             helper,
             "const out = [];",
@@ -2021,7 +2043,106 @@ class WebApplicationTests(unittest.TestCase):
             "process.stdout.write(JSON.stringify(out));",
         ])
         done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
-        self.assertEqual(json.loads(done.stdout), [False, True, False, True, False, False])
+        self.assertEqual(json.loads(done.stdout), [False, False, False, False, False, False])
+
+    def test_typed_space_autosave_serializes_and_rejects_stale_completion(self):
+        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        owner = source[source.index("function typedSpaceOrdinaryBin() {"):
+                       source.index("// Install a canonical design", source.index("function typedSpaceOrdinaryBin() {"))]
+        script = "\n".join([
+            "const clone = v => JSON.parse(JSON.stringify(v));",
+            "const state = {folderMode:'space', design:{part_name:'',box:{b4b:{enabled:false}},v:0},",
+            "  cleanDesign:{part_name:'',box:{b4b:{enabled:false}},v:0}, designInventoryId:null,",
+            "  preview:{fits:true,feature_errors:[],draft_error:null}};",
+            "state.previewDesignKey=JSON.stringify(state.design);",
+            "const baseTrimEnabled = () => false;",
+            "const writes = []; let epoch = 1; let release; const gate = new Promise(r => release = r);",
+            "const DL = {loaded:true,spaceContext:() => ({epoch}), requireSpaceContext:c => {if(c.epoch!==epoch) throw Object.assign(new Error('stale'),{code:'STALE_SPACE_CONTEXT'});},",
+            "  isStaleSpaceError:e => e.code==='STALE_SPACE_CONTEXT',",
+            "  inventoryCall:async (_path,payload,options) => {writes.push({id:payload.row_id||null,v:payload.design.v}); if(payload.design.v===1) await gate; DL.requireSpaceContext(options.context); return {row_id:payload.row_id||'B1',design:clone(payload.design)};},",
+            "  adopt:()=>{},emit:()=>{}};",
+            "const toast = () => {}; const syncForm = () => {};",
+            "const flushVisibleDesignEditsBeforeModeSwitch = async () => true;",
+            "const refreshPreview = async () => {state.preview={fits:true,feature_errors:[],draft_error:null};};",
+            owner,
+            "(async () => {",
+            "  await persistSpaceDesignSource(); const untouched = writes.length;",
+            "  state.design.v=1; state.previewDesignKey=JSON.stringify(state.design);",
+            "  const first=persistSpaceDesignSource();",
+            "  await Promise.resolve(); state.design.v=2; state.previewDesignKey=JSON.stringify(state.design);",
+            "  const second=persistSpaceDesignSource();",
+            "  release(); await Promise.all([first,second]);",
+            "  const serial = clone(writes); const id=state.designInventoryId;",
+            "  state.design.v=3; state.previewDesignKey=JSON.stringify(state.design);",
+            "  const stale=persistSpaceDesignSource(); await Promise.resolve(); epoch=2;",
+            "  let rejected=false; try {await stale;} catch(e) {rejected=e.code==='STALE_SPACE_CONTEXT';}",
+            "  process.stdout.write(JSON.stringify({untouched,serial,id,clean:state.cleanDesign.v,rejected}));",
+            "})();",
+        ])
+        result = self._run_node(script)
+        self.assertEqual(result["untouched"], 0)
+        self.assertEqual(result["serial"], [{"id": None, "v": 1}, {"id": "B1", "v": 2}])
+        self.assertEqual(result["id"], "B1")
+        self.assertEqual(result["clean"], 2)
+        self.assertTrue(result["rejected"])
+
+    def test_hosted_inventory_writes_share_one_file_queue(self):
+        source = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")
+        owner = source[source.index("SP._inventoryWriteChain = Promise.resolve();"):
+                       source.index("// Fix 034 F1", source.index("SP._inventoryWriteChain = Promise.resolve();"))]
+        script = "\n".join([
+            "const files = {name:'S', text:''};",
+            "const state = {browserFolder:{name:'S',handle:files},activeSpace:{name:'S'}};",
+            "const SP = {readInventoryFor:async folder => folder.handle.text};",
+            "const INVENTORY_FILENAME = 'Wavefinity bins.md';",
+            "const WFFileSystem = {writeText:async (handle,_name,text) => {handle.text=text;}};",
+            "let release; const gate = new Promise(resolve => release=resolve); let calls=0;",
+            "const api = async (_path,payload) => {calls++; if(calls===1) await gate;",
+            "  return {inventory_text:payload.inventory_text+payload.mark};};",
+            owner,
+            "(async () => {const a=SP.inventoryRequest('/save',{mark:'A'});",
+            " const b=SP.inventoryRequest('/save',{mark:'B'});",
+            " await Promise.resolve(); release(); await Promise.all([a,b]);",
+            " process.stdout.write(JSON.stringify({text:files.text,calls}));})();",
+        ])
+        self.assertEqual(self._run_node(script), {"text": "AB", "calls": 2})
+
+    def test_resume_binds_existing_inventory_row_identity(self):
+        source = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")
+        start = source.index("SP.initializeDesignForActiveSpace = async () => {")
+        owner = source[start:source.index("\n};", start) + 3]
+        script = "\n".join([
+            "const clone = v => JSON.parse(JSON.stringify(v));",
+            "const state = {folderMode:'space',activeSpace:{kind:'drawer'},catalog:{},",
+            "  spaceResumeDesign:{box:{x:16,b4b:{enabled:false}},part_name:'A'},spaceResumePending:false};",
+            "const DL = {layout:{design_specs:{B2:clone(state.spaceResumeDesign)}},",
+            "  ensureLoaded:async()=>{}};",
+            "const SP = {resetDesignSession:()=>{state.designInventoryId=null;},",
+            "  installSpaceStarterDesign:async()=>{throw Error('starter used');}};",
+            "const api = async (_path,payload) => ({design:clone(payload.design)});",
+            "const baseTrimEnabled = () => false; const syncForm = () => {};",
+            "const refreshPreview = async () => {}; const toast = () => {};",
+            owner,
+            "(async()=>{await SP.initializeDesignForActiveSpace();",
+            "process.stdout.write(JSON.stringify(state.designInventoryId));})();",
+        ])
+        self.assertEqual(self._run_node(script), "B2")
+
+    def test_typed_space_replacement_and_output_boundaries_flush_autosave(self):
+        root = Path(__file__).resolve().parent / "web"
+        app = (root / "app.js").read_text(encoding="utf-8")
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        spaces = (root / "spaces.js").read_text(encoding="utf-8")
+        for function in ("designerInstallInventorySpec", "designerNewBin", "designerDuplicate",
+                         "generateParts", "printModel"):
+            start = app.index(f"async function {function}(")
+            end = app.find("\nasync function ", start + 1)
+            body = app[start:end if end >= 0 else None]
+            self.assertIn("flushSpaceDesignAutosave(", body, function)
+        self.assertIn("flushSpaceDesignAutosave(", panel[panel.index("DP.selectMode = "):])
+        self.assertIn("flushSpaceDesignAutosave(", spaces[spaces.index("SP.leaveDrawerLayoutSafely = "):])
+        self.assertIn('action: "saved"', app[app.index("async function generateParts("):])
+        self.assertIn('action: "printed"', app[app.index("async function printModel("):])
 
     def _app_js_functions(self, *names):
         source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
@@ -2128,12 +2249,13 @@ class WebApplicationTests(unittest.TestCase):
         self.assertFalse(tiny["ok"])
         self.assertFalse(huge["ok"])
 
-    def test_first_bin_actions_mark_the_current_design_pending(self):
+    def test_first_bin_starter_waits_for_a_meaningful_edit(self):
         root = Path(__file__).resolve().parent / "web"
         app = (root / "app.js").read_text(encoding="utf-8")
         fresh = app[app.index("async function loadFreshOrdinaryDesignForCurrentFolder"):]
         fresh = fresh[:fresh.index("\n}\n")]
-        self.assertIn('state.workingPending = state.folderMode === "space"', fresh)
+        self.assertIn('state.workingPending = false', fresh)
+        self.assertIn('state.designInventoryId = null', fresh)
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         first = panel[panel.index("DP.designFirstBin = "):]
         self.assertIn("markWorkingDesignPending()", first[:first.index("};")])

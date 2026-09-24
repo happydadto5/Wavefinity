@@ -81,11 +81,15 @@ from organizer_engine import (
 from organizer_geometry import _extrude_polygon
 from organizer_inventory import (
     INVENTORY_LOCK,
-    MAX_QTY,
     design_specs,
+    duplicate_design_source as _duplicate_design_source_row,
+    duplicate_design_source_text as _duplicate_design_source_row_text,
+    change_design_status as _change_design_status_row,
+    change_design_status_text as _change_design_status_row_text,
     legacy_layout_space,
     load_inventory,
     load_inventory_text,
+    mark_printed_rows,
     next_bin_id,
     save_design_source as _save_design_source_row,
     save_design_source_text as _save_design_source_row_text,
@@ -1709,11 +1713,10 @@ def print_inventory_bins(
         one = by_id.get(str(bin_id))
         if one is None:
             raise ValueError(f"no bin {bin_id!r} in the inventory")
-        count = _copy_count(one, raw_count)
+        _copy_count(one, raw_count)
+        count = 1
         if one.get("kind") not in ("bin", "b4b"):
             raise ValueError(f"{_label(one)} is not a generated bin and cannot be printed here")
-        if int(one.get("qty") or 0) + count > MAX_QTY:
-            raise ValueError(f"{_label(one)}: Qty printed cannot go above {MAX_QTY}")
         if not str(one.get("file") or "").strip():
             spec = specs.get(one["id"])
             if spec is None or generate_from_design is None:
@@ -1721,8 +1724,10 @@ def print_inventory_bins(
             generated = generate_from_design(output_dir, spec)
             if not generated:
                 raise ValueError(f"{_label(one)}: generating its files did not produce any")
+            if any(not Path(path).is_file() for path in generated):
+                raise ValueError(f"{_label(one)}: a generated file was not saved")
             file_text = ", ".join(dict.fromkeys(path.name for path in generated))
-            update_bin_file(output_dir, one["id"], file_text)
+            update_bin_file(output_dir, one["id"], file_text, expected_design=spec)
             one["file"] = file_text
             rows_files[one["id"]] = list(generated)
         else:
@@ -1753,19 +1758,15 @@ def print_inventory_bins(
     for name, count in connector_counts.items():
         launch_files.extend([output_dir / name] * count)
 
-    reconciled, updates = reconcile_printed_copies(layout, bins, counts)
-
     project = launch_slicer(Path(slicer), launch_files)
 
     try:
-        changes: dict[str, Any] = {"bin_updates": updates}
-        if reconciled is not None:
-            changes["layout"] = reconciled
-        saved = save_inventory(output_dir, **changes)
+        # A row is one bin. Placement copy numbers are not print bookkeeping.
+        saved = mark_printed_rows(output_dir, counts, specs)
     except Exception as error:
         raise RuntimeError(
-            f"Bambu Studio opened, but saving the printed counts failed: {error}. "
-            "Nothing was marked printed - fix Qty by hand if you print."
+            f"Bambu Studio opened, but the printed status could not be recorded: {error}. "
+            "Check the selected rows in Inventory."
         ) from error
     return {
         **saved,
@@ -1835,11 +1836,7 @@ def drawer_routes(
         return with_rules(save_inventory(folder(payload), **changes))
 
     def save_design_source(payload):
-        """Save-to-Space: canonicalize the design, then create/update its
-        editable source row + ``design_specs`` entry in one authoritative
-        write. ``row_id`` targets an existing same-Space Qty-0 source row to
-        update in place; a Qty>0 row (immutable printed history) or a missing
-        row_id instead creates a fresh Qty-0 row."""
+        """Canonicalize and save one editable Inventory design source."""
         design, record = design_source_payload(payload["design"])
         row_id = str(payload.get("row_id") or "") or None
         if hosted:
@@ -1850,6 +1847,36 @@ def drawer_routes(
             )
         else:
             result = _save_design_source_row(folder(payload), design=design, record=record, row_id=row_id)
+        return with_rules(result)
+
+    def duplicate_design_source(payload):
+        row_id = str(payload.get("row_id") or "")
+        if hosted:
+            result = _duplicate_design_source_row_text(
+                payload.get("inventory_text") or "", row_id,
+                title=str(payload.get("inventory_title") or "Wavefinity"),
+            )
+        else:
+            result = _duplicate_design_source_row(folder(payload), row_id)
+        return with_rules(result)
+
+    def change_design_status(payload):
+        row_id = str(payload.get("row_id") or "")
+        action = str(payload.get("action") or "")
+        file_text = payload.get("file")
+        expected_design = payload.get("design")
+        if file_text is not None and not isinstance(file_text, str):
+            raise ValueError("file names must be text")
+        if expected_design is not None and not isinstance(expected_design, dict):
+            raise ValueError("expected design must be an object")
+        if hosted:
+            result = _change_design_status_row_text(
+                payload.get("inventory_text") or "", row_id, action, file_text,
+                title=str(payload.get("inventory_title") or "Wavefinity"),
+                expected_design=expected_design,
+            )
+        else:
+            result = _change_design_status_row(folder(payload), row_id, action, file_text, expected_design)
         return with_rules(result)
 
     def report(payload):
@@ -2048,6 +2075,8 @@ def drawer_routes(
         "/api/drawer/load": load,
         "/api/drawer/save": save,
         "/api/drawer/design-source/save": save_design_source,
+        "/api/drawer/design-source/duplicate": duplicate_design_source,
+        "/api/drawer/design-source/status": change_design_status,
         "/api/drawer/report": report,
         "/api/drawer/auto": auto,
         "/api/drawer/surface-fill": surface_fill,

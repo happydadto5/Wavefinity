@@ -241,6 +241,9 @@ SP.inventoryFilenameFor = _folder => INVENTORY_FILENAME;
 // flush) and false when the switch must be aborted with everything -
 // including DL.layout/DL.dirty - left exactly as it was.
 SP.leaveDrawerLayoutSafely = async () => {
+  if (typeof flushSpaceDesignAutosave === "function" &&
+      !(await flushSpaceDesignAutosave())) return false;
+  if (SP._inventoryWriteChain) await SP._inventoryWriteChain;
   if (typeof DL === "undefined") return true;
   if (DL.savePromise) {
     const ok = await DL.savePromise;
@@ -798,19 +801,26 @@ SP.readInventoryFor = async (folder, { migrate = false } = {}) => {
   return text;
 };
 
+SP._inventoryWriteChain = Promise.resolve();
 SP.inventoryRequest = async (path, extra = {}, { write = true } = {}) => {
   const folder = state.browserFolder;
   if (!folder?.handle) throw new Error("Keeping an inventory needs folder access so Wavefinity can save it with your designs.");
-  const inventoryText = await SP.readInventoryFor(folder, { migrate: write });
-  const data = await api(path, {
-    inventory_text: inventoryText,
-    inventory_title: state.activeSpace?.name || folder.name,
-    ...extra,
-  });
-  if (write && typeof data.inventory_text === "string") {
-    await WFFileSystem.writeText(folder.handle, INVENTORY_FILENAME, data.inventory_text);
-  }
-  return data;
+  const title = state.activeSpace?.name || folder.name;
+  const run = async () => {
+    const inventoryText = await SP.readInventoryFor(folder, { migrate: write });
+    const data = await api(path, {
+      inventory_text: inventoryText,
+      inventory_title: title,
+      ...extra,
+    });
+    if (write && typeof data.inventory_text === "string") {
+      await WFFileSystem.writeText(folder.handle, INVENTORY_FILENAME, data.inventory_text);
+    }
+    return data;
+  };
+  const pending = SP._inventoryWriteChain.then(run, run);
+  if (write) SP._inventoryWriteChain = pending.catch(() => {});
+  return pending;
 };
 
 // Fix 034 F1: hosted Generate/Print has no server folder to write to
@@ -825,6 +835,11 @@ SP.addInventoryBin = async (entry, designSpec = null) => {
       data = await SP.inventoryRequest("/api/drawer/design-source/save", {
         design: designSpec, row_id: added.id,
       });
+      if (entry.file) {
+        data = await SP.inventoryRequest("/api/drawer/design-source/status", {
+          row_id: data.row_id, action: "saved", file: entry.file, design: data.design,
+        });
+      }
     }
   }
   if (typeof DL !== "undefined" && DL.active) {
@@ -1846,6 +1861,8 @@ SP.create = async () => {
 // per-Space persisted state, so it is cleared here too rather than carried
 // into a different Space.
 SP.resetDesignSession = () => {
+  state.designInventoryId = null;
+  state.spaceStarterPreviewPending = false;
   state.workingPending = false;
   state.workingGeneratedKey = null;
   state.surfaceEdgeHandled = false;
@@ -1869,6 +1886,7 @@ SP.resetDesignSession = () => {
 // (explicit, user-visible creation) instead of duplicating the reset logic -
 // see Fix 004/Fix 019 Item 1.
 SP.installSpaceStarterDesign = async space => {
+  state.spaceStarterPreviewPending = true;
   if (space.kind === "surface") {
     const trimValue = SP.surfacePresetMap()[space.trim_size];
     state.design = makeBaseTrimDesign(space.x, space.y);
@@ -1927,6 +1945,7 @@ SP.initializeDesignForActiveSpace = async () => {
       // user left, not a fresh starter seeded from remembered defaults.
       state.design = result.design;
       state.cleanDesign = clone(result.design);
+      state.spaceStarterPreviewPending = false;
       state.workingPending = Boolean(state.spaceResumePending);
       restored = true;
     } catch (error) {
@@ -1935,6 +1954,18 @@ SP.initializeDesignForActiveSpace = async () => {
       resumeValidationFailed = true;
       toast(`The last design for this Space could not be restored: ${error.message}`, true, 7000);
     }
+  }
+
+  // Resume is a recovery snapshot; bind it back to its existing Inventory
+  // source when that exact canonical design is already present.
+  if (restored && typeof DL !== "undefined" && DL.ensureLoaded &&
+      !state.design?.box?.b4b?.enabled &&
+      (typeof baseTrimEnabled !== "function" || !baseTrimEnabled())) {
+    await DL.ensureLoaded();
+    const key = JSON.stringify(state.design);
+    const matches = Object.entries(DL.layout?.design_specs || {})
+      .filter(([, design]) => JSON.stringify(design) === key);
+    if (matches.length === 1) state.designInventoryId = matches[0][0];
   }
 
   if (!restored) await SP.installSpaceStarterDesign(state.activeSpace);

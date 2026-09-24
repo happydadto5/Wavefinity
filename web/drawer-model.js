@@ -361,13 +361,12 @@ DL.printEligible = one =>
 DL.printNeeded = one => {
   if (!DL.printEligible(one)) return 0;
   const planned = DL.plannedCount(one.id);
-  if (planned > 0) return planned;
+  if (planned > 0) return 1;
   return Number(one.qty) <= 0 ? 1 : 0;
 };
 
 DL.printCount = one => {
-  const needed = DL.printNeeded(one);
-  return needed > 0 ? needed : (DL.printEligible(one) ? 1 : 0);
+  return DL.printEligible(one) ? 1 : 0;
 };
 
 DL.drawersHolding = id => DL.layout.drawers
@@ -893,33 +892,35 @@ DL.editBins = async (changes, {
   return true;
 };
 
-// Planned copies of a bin become printed ones: renumber them to follow the
-// printed Qty, then raise it by that many.
-DL.markPrinted = async one => {
-  const printed = Number(one.qty) || 0;
-  const planned = DL.layout.drawers.flatMap(drawer => drawer.placements)
-    .filter(p => p.bin === one.id && (p.copy ?? 0) >= printed)
-    .sort((a, b) => (a.copy ?? 0) - (b.copy ?? 0));
-  if (!planned.length && printed > 0) {
-    toast("All quantities are already marked printed. Increase Qty printed if you need more.");
-    return;
+DL.setBinPrinted = async (one, printed) => {
+  if (DL.layout?.design_specs?.[one.id]) {
+    const context = DL.spaceContext();
+    try {
+      let action = printed ? "mark_printed" : "mark_not_printed";
+      if (!printed && one.file && state.runtime.hosted) {
+        const names = new Set(await WFFileSystem.listFilenames(state.browserFolder.handle));
+        DL.requireSpaceContext(context);
+        const pieces = String(one.file).split(", ");
+        const existsFrom = start => start === pieces.length ||
+          pieces.some((_, end) => end >= start && names.has(pieces.slice(start, end + 1).join(", ")) &&
+            existsFrom(end + 1));
+        if (!existsFrom(0)) action = "in_design";
+      }
+      const data = await DL.inventoryCall("/api/drawer/design-source/status", {
+        row_id: one.id, action,
+      }, { context });
+      DL.adopt(data);
+      DL.emit();
+      DL.requestReport();
+      return true;
+    } catch (error) {
+      if (!DL.isStaleSpaceError(error)) toast(error.message, true, 6000);
+      return false;
+    }
   }
-  const count = planned.length || 1;
-  if (planned.length) {
-    const stagedLayout = clone(DL.layout);
-    const stagedPlanned = stagedLayout.drawers.flatMap(drawer => drawer.placements)
-      .filter(p => p.bin === one.id && (p.copy ?? 0) >= printed)
-      .sort((a, b) => (a.copy ?? 0) - (b.copy ?? 0));
-    const rename = new Map();
-    stagedPlanned.forEach((p, index) => { rename.set(DL.key(p), `${one.id}:${printed + index}`); p.copy = printed + index; });
-    stagedLayout.drawers.forEach(drawer => drawer.placements.forEach(p => { if (rename.has(p.on)) p.on = rename.get(p.on); }));
-    return DL.editBins({ bin_updates: [{ id: one.id, qty: printed + count }], layout: stagedLayout }, {
-      commitLayout: true,
-      selected: rename.get(DL.selected) || DL.selected,
-    });
-  }
-  return DL.editBins({ bin_updates: [{ id: one.id, qty: printed + count }] });
+  return DL.editBins({ bin_updates: [{ id: one.id, qty: printed ? 1 : 0 }] });
 };
+DL.markPrinted = one => DL.setBinPrinted(one, true);
 
 DL.requestReport = debounce(async () => {
   if (!DL.active || !DL.layout) return;
@@ -1366,10 +1367,10 @@ DL.saveConnectorFiles = async (context = DL.spaceContext()) => {
   };
 };
 
-// selection: { [bin id]: copies }. The server re-reads the saved inventory, so
-// the layout is saved first; Qty and planned copies change there only after
-// the slicer opened successfully.
+// The server re-reads saved Inventory; each selected row opens once in Bambu.
 DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async context => {
+  if (typeof flushSpaceDesignAutosave === "function" &&
+      !(await flushSpaceDesignAutosave())) return;
   if (state.runtime.hosted) {
     toast("Bulk printing to a local slicer is available in local Wavefinity.", true);
     return;

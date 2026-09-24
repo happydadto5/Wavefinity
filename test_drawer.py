@@ -73,7 +73,8 @@ class InventoryFileTests(unittest.TestCase):
             loaded = load_inventory(folder)
             self.assertEqual([b["id"] for b in loaded["bins"]], ["B1", "B2"])
             self.assertEqual([b["name"] for b in loaded["bins"]], ["Dental Floss", ""])
-            self.assertEqual({b["qty"] for b in loaded["bins"]}, {1})
+            self.assertEqual({b["qty"] for b in loaded["bins"]}, {0})
+            self.assertEqual({b["status"] for b in loaded["bins"]}, {"saved"})
 
             layout = _layout(200, 120, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
             save_inventory(folder, layout=layout, bin_updates=[{"id": "B1", "qty": 2}])
@@ -83,7 +84,7 @@ class InventoryFileTests(unittest.TestCase):
             self.assertTrue(inventory_path(folder).with_name("Wavefinity bins.md.bak").is_file())
             again = load_inventory(folder)
             self.assertEqual([b["id"] for b in again["bins"]], ["B1", "B2", "B3"])
-            self.assertEqual(again["bins"][0]["qty"], 2)
+            self.assertEqual(again["bins"][0]["qty"], 1)
             self.assertEqual(again["layout"]["drawers"][0]["placements"][0]["bin"], "B1")
 
     def test_a_new_space_starts_its_inventory_and_is_remembered(self):
@@ -647,8 +648,7 @@ class StorageBoxFilenameTests(unittest.TestCase):
 
 
 class DesignSourceTests(unittest.TestCase):
-    """Fix 034 C/D: the canonical design_specs source map and the one
-    Save-to-Space identity transaction that creates/updates/forks it."""
+    """One canonical Inventory row and design source per editable bin."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -689,10 +689,25 @@ class DesignSourceTests(unittest.TestCase):
         after = load_inventory(self.folder)
         self.assertEqual(design_specs(after["layout"]), {})
 
+    def test_stale_layout_save_cannot_replace_newer_design_source(self):
+        from organizer_inventory import save_design_source, design_specs
+        first = save_design_source(self.folder, design=self._design("A"), record=self._record("A"))
+        old_layout = first["layout"]
+        row_id = first["row_id"]
+        save_design_source(self.folder, design=self._design("B"), record=self._record("B"), row_id=row_id)
+        save_inventory(self.folder, layout=old_layout)
+        self.assertEqual(design_specs(load_inventory(self.folder)["layout"])[row_id]["part_name"], "B")
+
+    def test_layout_creation_can_attach_source_for_its_new_row(self):
+        from organizer_inventory import design_specs
+        design = self._design("Filled")
+        saved = save_inventory(self.folder,
+            layout={"design_specs": {"B1": design}},
+            new_bins=[{"id": "B1", "kind": "bin", "name": "Filled", "x": 16, "y": 16, "z": 20, "qty": 0}])
+        self.assertEqual(design_specs(saved["layout"])["B1"], design)
+
     def test_save_to_space_identity_transaction_cases(self):
-        """One case table: idempotent same-row save, in-place Qty-0 edit
-        with stale-file clearing, and an immutable Qty>0 row forking instead
-        of being silently redefined."""
+        """Identical saves preserve status; real edits reset the same row."""
         from organizer_inventory import save_design_source, design_specs
 
         # Unchanged design already bound to the same row: saving again is
@@ -708,7 +723,6 @@ class DesignSourceTests(unittest.TestCase):
         # Loaded same-Space Qty-0 row, edited: updates that source in place
         # and clears a stale generated File if the caller says the geometry
         # changed (record.clear_file).
-        save_inventory(self.folder, bin_updates=[{"id": row_id, "x": 16, "y": 16, "z": 20}])
         save_design_source(self.folder, design=self._design(), record={
             **{k: v for k, v in self._record("Renamed").items()}, "clear_file": True,
         }, row_id=row_id)
@@ -719,22 +733,126 @@ class DesignSourceTests(unittest.TestCase):
         self.assertEqual(len(edited["bins"]), 1)
         self.assertEqual(design_specs(edited["layout"])[row_id]["part_name"], "Bin")
 
-        # Qty > 0 is immutable printed history: an edited source forks to a
-        # new Qty-0 row instead of silently redefining the printed one.
-        save_inventory(self.folder, bin_updates=[{"id": row_id, "qty": 1}])
-        forked = save_design_source(
+        # A printed bin remains this same physical/logical row when edited.
+        from organizer_inventory import change_design_status
+        change_design_status(self.folder, row_id, "printed", "A.3mf")
+        unchanged = save_design_source(
+            self.folder, design=self._design(), record=self._record("Renamed"), row_id=row_id,
+        )
+        self.assertEqual(unchanged["row_id"], row_id)
+        self.assertEqual(unchanged["bins"][0]["status"], "printed")
+        self.assertEqual(unchanged["bins"][0]["file"], "A.3mf")
+        edited_again = save_design_source(
             self.folder, design=self._design("Forked"), record=self._record("Forked"), row_id=row_id,
         )
-        self.assertNotEqual(forked["row_id"], row_id)
-        printed_row = next(one for one in forked["bins"] if one["id"] == row_id)
-        self.assertEqual(printed_row["qty"], 1)
-        self.assertEqual(printed_row["name"], "Renamed")
-        new_row = next(one for one in forked["bins"] if one["id"] == forked["row_id"])
-        self.assertEqual(new_row["qty"], 0)
-        self.assertEqual(new_row["name"], "Forked")
-        specs = design_specs(forked["layout"])
+        self.assertEqual(edited_again["row_id"], row_id)
+        self.assertEqual(len(edited_again["bins"]), 1)
+        self.assertEqual(edited_again["bins"][0]["status"], "in_design")
+        self.assertEqual(edited_again["bins"][0]["qty"], 0)
+        self.assertEqual(edited_again["bins"][0]["file"], "")
+        specs = design_specs(edited_again["layout"])
         self.assertIn(row_id, specs)
-        self.assertIn(forked["row_id"], specs)
+
+    def test_legacy_status_and_lifecycle(self):
+        from organizer_inventory import parse_inventory, change_design_status, save_design_source
+        header = "| ID | Date | Kind | Name | X (mm) | Y (mm) | Z (mm) | Qty | File |\n"
+        divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        for qty, file, expected in [("2", "-", "printed"), ("0", "A.3mf", "saved"), ("0", "-", "in_design")]:
+            text = header + divider + f"| B1 | - | bin | A | 16 | 16 | 20 | {qty} | {file} |\n"
+            self.assertEqual(parse_inventory(text)["bins"][0]["status"], expected)
+        no_qty_header = "| ID | Date | Kind | Name | X (mm) | Y (mm) | Z (mm) | File |\n"
+        no_qty_divider = "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        for file, expected in [("A.3mf", "saved"), ("-", "in_design")]:
+            text = no_qty_header + no_qty_divider + f"| B1 | - | bin | A | 16 | 16 | 20 | {file} |\n"
+            self.assertEqual(parse_inventory(text)["bins"][0]["status"], expected)
+        with_status = header.replace("| File |", "| Status | File |")
+        with_divider = divider.replace("| --- |\n", "| --- | --- |\n")
+        bad = with_status + with_divider + "| B1 | - | bin | A | 16 | 16 | 20 | 0 | unknown | A.3mf |\n"
+        self.assertEqual(parse_inventory(bad)["bins"][0]["status"], "saved")
+        first = save_design_source(self.folder, design=self._design("A"), record=self._record("A"))
+        row_id = first["row_id"]
+        saved = change_design_status(self.folder, row_id, "saved", "A.3mf")
+        self.assertEqual(saved["bins"][0]["status"], "saved")
+        (self.folder / "A.3mf").write_bytes(b"3mf")
+        printed = change_design_status(self.folder, row_id, "mark_printed")
+        self.assertEqual(printed["bins"][0]["qty"], 1)
+        save_inventory(self.folder, layout={**printed["layout"], **_layout(200, 120, placements=[
+            {"bin": row_id, "copy": 0, "gx": 0, "gy": 0},
+        ])})
+        self.assertEqual(load_inventory(self.folder)["bins"][0]["status"], "printed")
+        back = change_design_status(self.folder, row_id, "mark_not_printed")
+        self.assertEqual(back["bins"][0]["status"], "saved")
+        changed = save_design_source(self.folder, design=self._design("B"), record=self._record("B"), row_id=row_id)
+        self.assertEqual(changed["bins"][0]["status"], "in_design")
+        self.assertEqual(changed["bins"][0]["file"], "")
+        with self.assertRaises(ValueError):
+            change_design_status(self.folder, row_id, "arbitrary")
+        with self.assertRaises(ValueError):
+            change_design_status(self.folder, row_id, "saved", "old.3mf",
+                                 expected_design=self._design("A"))
+        change_design_status(self.folder, row_id, "printed", "missing.3mf")
+        missing = change_design_status(self.folder, row_id, "mark_not_printed")
+        self.assertEqual(missing["bins"][0]["status"], "in_design")
+
+    def test_duplicate_clone_and_unique_names(self):
+        from organizer_inventory import save_design_source, duplicate_design_source, design_specs
+        design = {**self._design("Popper"), "label": "Keep", "box": {**self._design()["box"], "edge_mount": {"label_text": "Keep"}}}
+        first = save_design_source(self.folder, design=design, record=self._record("Popper"))
+        placed_layout = {**first["layout"], **_layout(200, 120, placements=[
+            {"bin": first["row_id"], "copy": 0, "gx": 0, "gy": 0},
+        ])}
+        save_inventory(self.folder, layout=placed_layout)
+        second = duplicate_design_source(self.folder, first["row_id"])
+        third = duplicate_design_source(self.folder, second["row_id"])
+        self.assertEqual([one["name"] for one in third["bins"]], ["Popper", "Popper (2)", "Popper (3)"])
+        self.assertEqual(second["design"]["box"], design["box"])
+        self.assertEqual(second["design"]["label"], "Keep")
+        self.assertEqual(second["bins"][-1]["status"], "in_design")
+        self.assertEqual(second["bins"][-1]["file"], "")
+        self.assertNotEqual(first["row_id"], second["row_id"])
+        self.assertEqual(len(design_specs(third["layout"])), 3)
+        self.assertEqual([one["bin"] for one in third["layout"]["drawers"][0]["placements"]],
+                         [first["row_id"]])
+        save_inventory(self.folder, delete_ids=[second["row_id"]])
+        gap = duplicate_design_source(self.folder, first["row_id"])
+        self.assertEqual(gap["design"]["part_name"], "Popper (2)")
+
+    def test_unnamed_source_gets_unique_simple_bin_name(self):
+        from organizer_inventory import save_design_source, duplicate_design_source
+        first = save_design_source(self.folder, design=self._design(""), record=self._record(""))
+        self.assertEqual(first["design"]["part_name"], "Bin 1")
+        second = save_design_source(self.folder, design=self._design(""), record=self._record(""))
+        self.assertEqual(second["design"]["part_name"], "Bin 2")
+        # Named duplicate follows the root, while a blank root uses Bin N.
+        duplicate = duplicate_design_source(self.folder, first["row_id"])
+        self.assertEqual(duplicate["design"]["part_name"], "Bin 1 (2)")
+        from organizer_inventory import _duplicate_name
+        self.assertEqual(_duplicate_name(duplicate["bins"], ""), "Bin 3")
+
+    def test_local_and_hosted_design_source_routes_match(self):
+        from wavefinity_web import default_design
+        design = default_design()
+        design["part_name"] = "Popper"
+        local = drawer_routes(threading.Lock(), self.folder)
+        hosted = drawer_routes(threading.Lock(), self.folder, hosted=True)
+        a = local["/api/drawer/design-source/save"]({"output": str(self.folder), "design": design})
+        b = hosted["/api/drawer/design-source/save"]({"inventory_text": "", "design": design})
+        self.assertEqual(a["bins"], b["bins"])
+        self.assertEqual(a["design"], b["design"])
+        for route, payload in ((local, {"output": str(self.folder)}),
+                               (hosted, {"inventory_text": b["inventory_text"]})):
+            source = a if route is local else b
+            duplicate = route["/api/drawer/design-source/duplicate"]({
+                **payload, "row_id": source["row_id"],
+            })
+            self.assertEqual(duplicate["design"]["part_name"], "Popper (2)")
+            saved = route["/api/drawer/design-source/status"]({
+                **payload,
+                **({"inventory_text": duplicate["inventory_text"]} if route is hosted else {}),
+                "row_id": duplicate["row_id"], "action": "saved", "file": "Popper (2).3mf",
+            })
+            row = next(one for one in saved["bins"] if one["id"] == duplicate["row_id"])
+            self.assertEqual((row["status"], row["qty"]), ("saved", 0))
 
 
 class KeepOutRemovalTests(unittest.TestCase):
@@ -883,15 +1001,15 @@ class BulkPrintTests(unittest.TestCase):
         qty = {b["name"]: b["qty"] for b in load_inventory(self.folder)["bins"]}
         self.assertEqual(qty, {"A": 0, "B": 0, "C": 1})
 
-    def test_missing_planned_copies_are_sent_and_qty_advances(self):
+    def test_selected_row_prints_once_without_changing_placements(self):
         self.add("A", "A.3mf", qty=1)
         self.place(*({"bin": "B1", "copy": c, "gx": c * 2, "gy": 0} for c in range(3)))
         result = self.run_print({"B1": 2})
-        self.assertEqual(self.launched[0], [self.folder.resolve() / "A.3mf"] * 2)
-        self.assertEqual(result["bins"][0]["qty"], 3)
+        self.assertEqual(self.launched[0], [self.folder.resolve() / "A.3mf"])
+        self.assertEqual(result["bins"][0]["qty"], 1)
         copies = sorted(p["copy"] for p in result["layout"]["drawers"][0]["placements"])
         self.assertEqual(copies, [0, 1, 2])
-        self.assertEqual(result["bin_copies"], 2)
+        self.assertEqual(result["bin_copies"], 1)
 
     def test_partial_selection_keeps_rest_planned_and_stack_refs_follow(self):
         self.add("A", "A.3mf", qty=1)
@@ -903,9 +1021,9 @@ class BulkPrintTests(unittest.TestCase):
         )
         result = self.run_print({"B1": 2})
         placements = {(p["copy"]): p for p in result["layout"]["drawers"][0]["placements"]}
-        self.assertEqual(result["bins"][0]["qty"], 3)
-        self.assertEqual(sorted(placements), [0, 1, 2, 6])
-        self.assertEqual(placements[2].get("on"), "B1:1")
+        self.assertEqual(result["bins"][0]["qty"], 1)
+        self.assertEqual(sorted(placements), [0, 3, 5, 6])
+        self.assertEqual(placements[5].get("on"), "B1:3")
 
     def test_unplaced_qty_zero_sends_one(self):
         self.add("A", "A.3mf")
@@ -916,7 +1034,7 @@ class BulkPrintTests(unittest.TestCase):
         self.add("A", "A.3mf, A insert.3mf, A lid.3mf")
         self.run_print({"B1": 2})
         names = [p.name for p in self.launched[0]]
-        self.assertEqual(names, ["A.3mf", "A insert.3mf", "A lid.3mf"] * 2)
+        self.assertEqual(names, ["A.3mf", "A insert.3mf", "A lid.3mf"])
 
     def test_connectors_aggregate_once_across_drawers(self):
         self.add("A", "A.3mf")
@@ -996,6 +1114,7 @@ class BulkPrintTests(unittest.TestCase):
         mid = load_inventory(self.folder)
         mid_row = next(one for one in mid["bins"] if one["id"] == row_id)
         self.assertEqual(mid_row["file"], "OnDemand.3mf")
+        self.assertEqual(mid_row["status"], "saved")
         self.assertEqual(mid_row["qty"], 0)
         self.assertEqual(len(generated), 1)
 
@@ -1010,7 +1129,26 @@ class BulkPrintTests(unittest.TestCase):
         after = load_inventory(self.folder)
         after_row = next(one for one in after["bins"] if one["id"] == row_id)
         self.assertEqual(after_row["qty"], 1)
+        self.assertEqual(after_row["status"], "printed")
         self.assertEqual(result["selection"], {row_id: 1})
+
+    def test_changed_source_during_slicer_handoff_is_not_marked_printed(self):
+        from organizer_inventory import save_design_source, change_design_status
+        design = {"version": 1, "box": {"x": 16, "y": 16, "z": 20}, "part_name": "A"}
+        record = {"kind": "bin", "name": "A", "x": 16, "y": 16, "z": 20, "stack": "none"}
+        created = save_design_source(self.folder, design=design, record=record)
+        row_id = created["row_id"]
+        (self.folder / "A.3mf").write_bytes(b"3mf")
+        change_design_status(self.folder, row_id, "saved", "A.3mf")
+
+        def changed_while_opening(_slicer, _files):
+            save_design_source(self.folder, design={**design, "part_name": "B"},
+                               record={**record, "name": "B"}, row_id=row_id)
+
+        with self.assertRaisesRegex(RuntimeError, "Bambu Studio opened"):
+            self.run_print({row_id: 1}, launch=changed_while_opening)
+        row = load_inventory(self.folder)["bins"][0]
+        self.assertEqual((row["id"], row["status"], row["file"]), (row_id, "in_design", ""))
 
     def test_missing_and_traversal_files_rejected_before_launch(self):
         self.add("A", "A.3mf")
@@ -1074,8 +1212,8 @@ class BulkPrintTests(unittest.TestCase):
                 self.run_print({"B1": bad})
         self.assertEqual(self.launched, [])
         self.assertEqual(inventory_path(self.folder).read_text(encoding="utf-8"), before)
-        self.assertEqual(self.run_print({"B1": "2"})["bins"][0]["qty"], 2)
-        self.assertEqual(self.run_print({"B1": 1})["bins"][0]["qty"], 3)
+        self.assertEqual(self.run_print({"B1": "2"})["bins"][0]["qty"], 1)
+        self.assertEqual(self.run_print({"B1": 1})["bins"][0]["qty"], 1)
 
     def test_route_is_registered_and_hosted_rejects(self):
         routes = drawer_routes(threading.Lock(), self.folder, lambda _p: self.slicer, self.launch)

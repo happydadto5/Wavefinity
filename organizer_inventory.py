@@ -9,9 +9,8 @@ require a Space. Legacy Box metadata remains readable as migration input
 only - see ``normalise_space_definition``'s ``allow_legacy``. The file has
 two parts:
 
-* a Markdown table, one row per bin design.  ``Qty`` is how many copies were
-  actually printed - 0 means generated but never printed, or superseded by a
-  later version.
+* a Markdown table, one row per bin. ``Status`` tracks its current printable
+  files; ``Qty`` remains a 0/1 bridge for older layout callers.
 * a ``## Drawer layout`` section holding one fenced JSON block: the drawers,
   where each printed copy sits, and the layout settings.  The Layout view owns
   that block and rewrites it on save.  The table above it stays hand-editable.
@@ -28,6 +27,7 @@ a new bin while the Layout view is open never loses either change.
 from __future__ import annotations
 
 from datetime import datetime
+import copy
 import json
 import math
 from pathlib import Path
@@ -53,7 +53,7 @@ COLUMNS = (
     ("id", "ID"), ("date", "Date"), ("kind", "Kind"), ("name", "Name"),
     ("x", "X (mm)"), ("y", "Y (mm)"), ("z", "Z (mm)"), ("stack", "Stack"),
     ("wall", "Wall (mm)"), ("object_height_mm", "Object height (mm)"),
-    ("qty", "Qty"), ("file", "File"), ("label", "Label"), ("interior", "Interior Part(s)"),
+    ("qty", "Qty"), ("status", "Status"), ("file", "File"), ("label", "Label"), ("interior", "Interior Part(s)"),
     ("boundary", "Boundary"),
     ("pegboard_standard", "Pegboard"),
     ("cleat_x", "Cleat X"), ("cleat_y", "Cleat Y"),
@@ -86,7 +86,7 @@ _HEADER_KEYS = {
     "id": "id", "date": "date", "kind": "kind", "name": "name",
     "x": "x", "y": "y", "z": "z", "stack": "stack", "stacking": "stack",
     "wall": "wall", "object height": "object_height_mm",
-    "qty": "qty", "quantity": "qty",
+    "qty": "qty", "quantity": "qty", "status": "status",
     "file": "file", "label": "label", "interior part(s)": "interior",
     "interior": "interior", "boundary": "boundary",
     "pegboard": "pegboard_standard", "cleat x": "cleat_x", "cleat y": "cleat_y",
@@ -235,6 +235,13 @@ def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
         boundary = ""
     name = _text(raw.get("name")) if "name" in raw else infer_name(file, label)
     qty = raw.get("qty")
+    normal_qty = max(0, min(MAX_QTY, int(_number(qty, 0)))) if _text(qty) else 0
+    derived_status = "printed" if normal_qty > 0 else ("saved" if file else "in_design")
+    status = _text(raw.get("status")).lower()
+    if status not in ("in_design", "saved", "printed"):
+        status = derived_status
+    else:
+        normal_qty = 1 if status == "printed" else 0
     stack = _text(raw.get("stack")).lower()
     wall_text = _text(raw.get("wall"))
     wall = _number(wall_text) if wall_text else None
@@ -250,7 +257,8 @@ def _normalise(raw: dict[str, str]) -> dict[str, Any] | None:
         "stack": stack if stack in STACK_MODES else "none",
         "wall": wall,
         "object_height_mm": _object_height(raw.get("object_height_mm")),
-        "qty": max(0, min(MAX_QTY, int(_number(qty, 1)))) if _text(qty) else 1,
+        "qty": normal_qty,
+        "status": status,
         "file": file,
         "label": label,
         "interior": interior,
@@ -399,6 +407,7 @@ def _row(one: dict[str, Any]) -> str:
         **one,
         "x": f"{float(one['x']):g}", "y": f"{float(one['y']):g}", "z": f"{float(one['z']):g}",
         "qty": str(int(one["qty"])),
+        "status": one.get("status", "in_design"),
         "stack": "" if one.get("stack", "none") == "none" else one["stack"],
         "wall": f"{float(wall):g}" if wall else "",
         "object_height_mm": (f"{float(one['object_height_mm']):g}"
@@ -424,8 +433,8 @@ def _compact_json(value: Any, level: int = 0) -> str:
 def render_inventory(title: str, bins: list[dict[str, Any]], layout: dict | None) -> str:
     parts = [
         f"# {title} Bins\n",
-        "One row per bin design. **Qty** is how many copies you have printed "
-        "(0 = not printed). Edit rows freely, but keep each row's ID.\n",
+        "One row per bin. Status tracks its current print files; Qty is a compatibility field. "
+        "Edit rows freely, but keep each row's ID.\n",
         "| " + " | ".join(title for _, title in COLUMNS) + " |",
         "| " + " | ".join("---" for _ in COLUMNS) + " |",
         *(_row(one) for one in bins),
@@ -494,7 +503,8 @@ def _prune_layout(layout: dict | None, bins: list[dict[str, Any]]) -> dict | Non
     return layout
 
 
-def update_bin_file(output_dir: Path | str, row_id: str, file_text: str) -> dict[str, Any]:
+def update_bin_file(output_dir: Path | str, row_id: str, file_text: str,
+                    expected_design: dict | None = None) -> dict[str, Any]:
     """Set one row's File cell directly, outside the normal hand-editable fields.
 
     Used only when Generate/Print resolves a spec-only row's files on demand
@@ -509,7 +519,9 @@ def update_bin_file(output_dir: Path | str, row_id: str, file_text: str) -> dict
         target = next((one for one in bins if one["id"] == row_id), None)
         if target is None:
             raise ValueError(f"no bin {row_id!r} in the inventory")
-        target["file"] = file_text
+        if expected_design is not None and design_specs(current["layout"]).get(row_id) != expected_design:
+            raise ValueError("This bin changed while its files were being prepared")
+        target.update({"file": file_text, "status": "saved", "qty": 0})
         _write(path, bins, current["layout"], current["legacy"])
         return _payload(path, _read(path))
 
@@ -528,9 +540,7 @@ def save_design_source(
     ``record`` is the caller-derived Inventory row fields (already validated
     server-side) for the design being saved; ``design`` is the exact canonical
     design JSON to store as that row's editable source. ``row_id`` updates that
-    existing row in place only while it is still Qty 0 - an immutable Qty>0
-    printed row instead forks a new Qty-0 row, so printed history is never
-    silently redefined underneath. Returns the fresh inventory/layout payload
+    existing row in place, including a Printed row. Returns the fresh inventory/layout payload
     plus the ``row_id`` actually used.
     """
     with INVENTORY_LOCK:
@@ -538,7 +548,8 @@ def save_design_source(
         current = _read(path)
         bins, layout, used_id = _merge_design_source(current, design=design, record=record, row_id=row_id)
         _write(path, bins, layout, current["legacy"])
-        return {**_payload(path, _read(path)), "row_id": used_id}
+        result = _payload(path, _read(path))
+        return {**result, "row_id": used_id, "design": design_specs(result["layout"])[used_id]}
 
 
 def save_design_source_text(
@@ -551,7 +562,136 @@ def save_design_source_text(
         current = parse_inventory(raw)
         bins, layout, used_id = _merge_design_source(current, design=design, record=record, row_id=row_id)
         rendered = render_inventory(str(title or "Wavefinity"), bins, layout)
-        return {**_text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered)), "row_id": used_id}
+        result = _text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered))
+        return {**result, "row_id": used_id, "design": design_specs(result["layout"])[used_id]}
+
+
+def _next_simple_bin_name(bins: list[dict[str, Any]]) -> str:
+    names = {str(one.get("name") or "").casefold() for one in bins}
+    number = 1
+    while f"bin {number}" in names:
+        number += 1
+    return f"Bin {number}"
+
+
+def _duplicate_name(bins: list[dict[str, Any]], source: str) -> str:
+    root = re.sub(r" \(\d+\)$", "", str(source or "").strip()).strip()
+    if not root or root == "-":
+        return _next_simple_bin_name(bins)
+    names = {str(one.get("name") or "").casefold() for one in bins}
+    number = 2
+    while f"{root} ({number})".casefold() in names:
+        number += 1
+    return f"{root} ({number})"
+
+
+def _duplicate_design_source(current: dict[str, Any], row_id: str) -> tuple[list[dict[str, Any]], dict, str, dict]:
+    bins = current["bins"]
+    source = next((one for one in bins if one["id"] == row_id), None)
+    layout = current["layout"] if isinstance(current["layout"], dict) else {}
+    spec = design_specs(layout).get(row_id)
+    if source is None or not isinstance(spec, dict):
+        raise ValueError(f"no canonical design source for {row_id!r}")
+    name = _duplicate_name(bins, source.get("name", ""))
+    design = copy.deepcopy(spec)
+    design["part_name"] = name
+    new_id = next_bin_id(bins)
+    bins.append({**copy.deepcopy(source), "id": new_id, "name": name,
+                 "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                 "file": "", "status": "in_design", "qty": 0})
+    layout = {**layout, "design_specs": {**design_specs(layout), new_id: design}}
+    return bins, layout, new_id, design
+
+
+def duplicate_design_source(output_dir: Path | str, row_id: str) -> dict[str, Any]:
+    with INVENTORY_LOCK:
+        path = resolve_inventory_path(output_dir, migrate=True)
+        current = _read(path)
+        bins, layout, used_id, design = _duplicate_design_source(current, row_id)
+        _write(path, bins, layout, current["legacy"])
+        return {**_payload(path, _read(path)), "row_id": used_id, "design": design}
+
+
+def duplicate_design_source_text(text: str, row_id: str, *, title: str = "Wavefinity") -> dict[str, Any]:
+    with INVENTORY_LOCK:
+        current = parse_inventory(str(text or ""))
+        bins, layout, used_id, design = _duplicate_design_source(current, row_id)
+        rendered = render_inventory(title, bins, layout)
+        return {**_text_payload(rendered, title, parse_inventory(rendered)), "row_id": used_id, "design": design}
+
+
+def _change_design_status(current: dict[str, Any], row_id: str, action: str,
+                          file_text: str | None, expected_design: dict | None = None) -> tuple[list[dict[str, Any]], dict]:
+    bins = current["bins"]
+    layout = current["layout"] if isinstance(current["layout"], dict) else {}
+    target = next((one for one in bins if one["id"] == row_id), None)
+    if target is None or row_id not in design_specs(layout):
+        raise ValueError(f"no canonical design source for {row_id!r}")
+    if expected_design is not None and design_specs(layout)[row_id] != expected_design:
+        raise ValueError("This bin changed while its files were being prepared")
+    if action not in ("saved", "printed", "mark_printed", "mark_not_printed", "in_design"):
+        raise ValueError("unsupported print status action")
+    if action == "saved":
+        if not file_text or not file_text.strip():
+            raise ValueError("Saved requires current file names")
+        target["file"] = file_text.strip()
+    elif action == "printed" and file_text is not None:
+        target["file"] = file_text.strip()
+    elif action == "in_design":
+        target["file"] = ""
+    target["status"] = ("printed" if action in ("printed", "mark_printed") else
+                        "saved" if action == "saved" or (action == "mark_not_printed" and target["file"]) else
+                        "in_design")
+    target["qty"] = 1 if target["status"] == "printed" else 0
+    return bins, layout
+
+
+def change_design_status(output_dir: Path | str, row_id: str, action: str,
+                         file_text: str | None = None, expected_design: dict | None = None) -> dict[str, Any]:
+    with INVENTORY_LOCK:
+        path = resolve_inventory_path(output_dir, migrate=True)
+        current = _read(path)
+        bins, layout = _change_design_status(current, row_id, action, file_text, expected_design)
+        if action == "mark_not_printed":
+            target = next(one for one in bins if one["id"] == row_id)
+            if target["file"]:
+                try:
+                    from organizer_drawer import inventory_row_files
+                    inventory_row_files(path.parent, target)
+                except ValueError:
+                    target.update({"file": "", "status": "in_design", "qty": 0})
+        _write(path, bins, layout, current["legacy"])
+        return _payload(path, _read(path))
+
+
+def change_design_status_text(text: str, row_id: str, action: str,
+                              file_text: str | None = None, *, title: str = "Wavefinity",
+                              expected_design: dict | None = None) -> dict[str, Any]:
+    with INVENTORY_LOCK:
+        current = parse_inventory(str(text or ""))
+        bins, layout = _change_design_status(current, row_id, action, file_text, expected_design)
+        rendered = render_inventory(title, bins, layout)
+        return _text_payload(rendered, title, parse_inventory(rendered))
+
+
+def mark_printed_rows(output_dir: Path | str, row_ids: Iterable[str],
+                      expected_specs: dict[str, Any]) -> dict[str, Any]:
+    """Mark a successful bulk slicer handoff in one Inventory write."""
+    with INVENTORY_LOCK:
+        path = resolve_inventory_path(output_dir, migrate=True)
+        current = _read(path)
+        bins = current["bins"]
+        by_id = {one["id"]: one for one in bins}
+        specs = design_specs(current["layout"])
+        for row_id in row_ids:
+            target = by_id.get(row_id)
+            if target is None:
+                raise ValueError(f"no bin {row_id!r} in the inventory")
+            if row_id in expected_specs and specs.get(row_id) != expected_specs[row_id]:
+                raise ValueError(f"bin {row_id} changed while its files were being prepared")
+            target.update({"status": "printed", "qty": 1})
+        _write(path, bins, current["layout"], current["legacy"])
+        return _payload(path, _read(path))
 
 
 def _merge_design_source(
@@ -560,9 +700,15 @@ def _merge_design_source(
     bins = current["bins"]
     by_id = {one["id"]: one for one in bins}
     target = by_id.get(row_id) if row_id else None
+    layout = current["layout"] if isinstance(current["layout"], dict) else {}
+    canonical = copy.deepcopy(design)
+    name = _text(record.get("name"))
+    if target is None and not name:
+        name = _next_simple_bin_name(bins)
+        canonical["part_name"] = name
     row_fields = {
         "kind": record.get("kind", "bin"),
-        "name": record.get("name", ""),
+        "name": name,
         "x": float(record["x"]), "y": float(record["y"]), "z": float(record["z"]),
         "stack": record.get("stack", "none"),
         "wall": record.get("wall"),
@@ -573,10 +719,12 @@ def _merge_design_source(
         "cleat_x": record.get("cleat_x", "auto"),
         "cleat_y": record.get("cleat_y", "auto"),
     }
-    if target is not None and int(target.get("qty") or 0) == 0:
-        target.update(row_fields)
-        if record.get("clear_file"):
-            target["file"] = ""
+    previous = design_specs(layout).get(target["id"]) if target is not None else None
+    changed = previous != canonical
+    if target is not None:
+        if changed:
+            target.update(row_fields)
+            target.update({"file": "", "status": "in_design", "qty": 0})
         used_id = target["id"]
     else:
         used_id = next_bin_id(bins)
@@ -585,11 +733,11 @@ def _merge_design_source(
             "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "boundary": "",
             "qty": 0,
+            "status": "in_design",
             "file": "",
             **row_fields,
         })
-    layout = current["layout"] if isinstance(current["layout"], dict) else {}
-    layout = {**layout, "design_specs": {**design_specs(layout), used_id: design}}
+    layout = {**layout, "design_specs": {**design_specs(layout), used_id: canonical}}
     layout = _prune_layout(layout, bins)
     return bins, layout, used_id
 
@@ -668,26 +816,26 @@ def _merge_inventory(
     if layout is not _KEEP and layout is not None and not isinstance(layout, dict):
         raise ValueError("drawer layout must be an object")
     bins = current["bins"]
+    existing_ids = {one["id"] for one in bins}
     chosen = current["layout"] if layout is _KEEP else layout
     if isinstance(chosen, dict):
-        chosen = {**chosen, "design_specs": dict(design_specs(chosen))}
+        # Layout saves may have been queued before a design autosave. The
+        # Inventory source map always comes from the latest file transaction.
+        submitted_specs = dict(design_specs(chosen))
+        chosen = {**chosen, "design_specs": dict(design_specs(current["layout"]))}
     by_id = {one["id"]: one for one in bins}
     for update in bin_updates or ():
         target = by_id.get(str(update.get("id", "")))
         if target is None:
             raise ValueError(f"no bin {update.get('id')!r} in the inventory")
         clean = _clean_bin(update, partial=True)
-        old_qty = int(target.get("qty") or 0)
+        if target["id"] in design_specs(chosen) and clean:
+            raise ValueError("Edit this bin through its canonical Designer source")
+        if "qty" in clean and target.get("kind") in ("bin", "b4b", "manual"):
+            clean["qty"] = min(1, clean["qty"])
         target.update(clean)
-        spec = design_specs(chosen).get(target["id"])
-        if isinstance(spec, dict) and ("object_height_mm" in clean or
-                                       (old_qty == 0 and int(target["qty"]) > 0)):
-            spec = {**spec, "layout": dict(spec.get("layout") or {})}
-            if "object_height_mm" in clean:
-                spec["layout"]["object_height_mm"] = clean["object_height_mm"]
-            if old_qty == 0 and int(target["qty"]) > 0 and spec["layout"].get("surface_base_mode") == "edge":
-                spec["layout"]["surface_base_mode"] = "custom"
-            chosen["design_specs"][target["id"]] = spec
+        if "qty" in clean:
+            target["status"] = "printed" if clean["qty"] > 0 else ("saved" if target.get("file") else "in_design")
     gone = {str(one) for one in delete_ids or ()}
     bins = [one for one in bins if one["id"] not in gone]
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -708,7 +856,9 @@ def _merge_inventory(
             "stack": clean.get("stack", "none"),
             "wall": raw_wall if raw_wall and raw_wall > 0 else None,
             "object_height_mm": clean.get("object_height_mm"),
-            "qty": clean.get("qty", 1),
+            "qty": min(1, clean.get("qty", 1)) if kind in ("bin", "b4b", "manual") else clean.get("qty", 1),
+            "status": ("printed" if clean.get("qty", 1) > 0 else
+                       "saved" if raw.get("file") else "in_design"),
             "file": str(raw.get("file") or ""),
             "label": str(raw.get("label") or ""),
             "interior": str(raw.get("interior") or ""),
@@ -716,6 +866,10 @@ def _merge_inventory(
             "cleat_x": str(raw.get("cleat_x") or "auto").lower(),
             "cleat_y": str(raw.get("cleat_y") or "auto").lower(),
         })
+    if isinstance(chosen, dict):
+        for row in bins:
+            if row["id"] not in existing_ids and row["id"] in submitted_specs:
+                chosen["design_specs"][row["id"]] = submitted_specs[row["id"]]
     return bins, _prune_layout(chosen, bins)
 
 
@@ -806,7 +960,8 @@ def append_bin(
             "stack": stack if stack in STACK_MODES else "none",
             "wall": float(wall) if wall and float(wall) > 0 else None,
             "object_height_mm": object_height_mm,
-            "qty": max(0, int(qty)),
+            "qty": min(1, max(0, int(qty))),
+            "status": "printed" if int(qty) > 0 else "saved" if file else "in_design",
             "file": file,
             "label": label,
             "interior": interior,

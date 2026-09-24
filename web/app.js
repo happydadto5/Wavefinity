@@ -81,6 +81,7 @@ const state = {
   // there yet. Cleared on New Bin/Duplicate/folder switch; set by Save to
   // Space, Load from Space and on-demand source attach from Generate/Print.
   designInventoryId: null,
+  spaceStarterPreviewPending: false,
   // Whether this folder logs generated bins/B4Bs to its inventory file - the
   // default for any folder, independent of whether Space planning is on.
   inventoryEnabled: true,
@@ -362,13 +363,14 @@ function freshDesignForCurrentFolder() {
 
 async function loadFreshOrdinaryDesignForCurrentFolder() {
   state.design = freshDesignForCurrentFolder();
+  state.designInventoryId = null;
   state.baseTrimSourceLayout = null;
   state.lastOrdinaryDesign = clone(state.design);
   resetNestPhotoSession();
   state.cleanDesign = clone(state.design);
-  // An explicit first-bin action is working intent: Space shows this bin as
-  // Current design even before any edit. Startup never does this.
-  state.workingPending = state.folderMode === "space";
+  state.spaceStarterPreviewPending = state.folderMode === "space";
+  // Showing a fresh starter does not create an Inventory row.
+  state.workingPending = false;
   state.workingGeneratedKey = null;
   state.drafts = {};
   state.history = [];
@@ -396,34 +398,89 @@ function applyDesignerLifecycleVisibility() {
   hide("#designer-open-file-label", typed);
 }
 
-// Save to Space: canonicalize the current design and create/update its
-// editable-source Inventory row, keeping Qty untouched. Returns true on
-// success so callers that use this to preserve work before replacing it
-// (New Bin, Duplicate) can abort instead of losing anything on failure.
-async function designerSaveToSpace({ silent = false } = {}) {
-  if (state.folderMode !== "space" || typeof DL === "undefined") return false;
-  if (baseTrimEnabled()) {
-    if (!silent) toast("Base Trim is not a bin design, so it has no place in Save to Space.", true, 5000);
-    return false;
-  }
-  if (!(await maybePromptSurfaceObjectHeight())) return false;
-  if (!beginDesignMutation()) return false;
-  try {
-    await commitVisibleDraft();
-    const design = clone(state.design);
-    const data = await DL.inventoryCall("/api/drawer/design-source/save", {
-      design, row_id: state.designInventoryId || undefined,
+function typedSpaceOrdinaryBin() {
+  return state.folderMode === "space" && typeof DL !== "undefined" &&
+    !baseTrimEnabled() && !Boolean(state.design?.box?.b4b?.enabled);
+}
+
+let spaceAutosaveTimer = null;
+let spaceAutosaveChain = Promise.resolve();
+
+function queueSpaceDesignAutosave() {
+  if (!typedSpaceOrdinaryBin()) return;
+  const context = DL.spaceContext();
+  clearTimeout(spaceAutosaveTimer);
+  spaceAutosaveTimer = setTimeout(() => {
+    spaceAutosaveTimer = null;
+    persistSpaceDesignSource(context).catch(error => {
+      if (!DL.isStaleSpaceError(error)) toast(`Could not autosave this bin: ${error.message}`, true, 6000);
     });
+  }, 350);
+}
+
+function persistSpaceDesignSource(expectedContext = null, force = false) {
+  const run = async () => {
+    if (!typedSpaceOrdinaryBin()) return true;
+    const context = expectedContext || DL.spaceContext();
+    DL.requireSpaceContext(context);
+    if (!DL.loaded) {
+      await DL.ensureLoaded();
+      DL.requireSpaceContext(context);
+    }
+    const design = clone(state.design);
+    if (!force && (!state.preview?.fits || state.preview.feature_errors?.length ||
+        state.preview.draft_error || state.previewDesignKey !== JSON.stringify(design))) return true;
+    if (!force && JSON.stringify(design) === JSON.stringify(state.cleanDesign)) return true;
+    const rowId = state.designInventoryId;
+    const data = await DL.inventoryCall("/api/drawer/design-source/save", {
+      design, row_id: rowId || undefined,
+    }, { context });
+    DL.requireSpaceContext(context);
+    if (state.designInventoryId !== rowId) return true;
     state.designInventoryId = data.row_id;
     DL.adopt(data);
-    if (!silent) toast("Saved to Space.");
+    DL.emit();
+    if (JSON.stringify(state.design) === JSON.stringify(design)) {
+      state.design = clone(data.design);
+      state.cleanDesign = clone(data.design);
+      if (data.design.part_name !== design.part_name) syncForm();
+    } else {
+      state.cleanDesign = clone(data.design);
+      queueSpaceDesignAutosave();
+    }
+    return true;
+  };
+  const pending = spaceAutosaveChain.then(run, run);
+  spaceAutosaveChain = pending.catch(() => {});
+  return pending;
+}
+
+async function flushSpaceDesignAutosave({ visible = true, materialize = false } = {}) {
+  if (!typedSpaceOrdinaryBin()) return true;
+  clearTimeout(spaceAutosaveTimer);
+  spaceAutosaveTimer = null;
+  if (visible && !(await flushVisibleDesignEditsBeforeModeSwitch())) return false;
+  if (visible && !(await maybePromptSurfaceObjectHeight())) return false;
+  if (!beginDesignMutation()) return false;
+  try {
+    await refreshPreview();
+    if (!state.preview?.fits || state.preview.feature_errors?.length || state.preview.draft_error ||
+        state.previewDesignKey !== JSON.stringify(state.design))
+      throw new Error("Resolve the design issue before leaving this bin.");
+    await persistSpaceDesignSource(null, materialize);
     return true;
   } catch (error) {
-    if (!silent) toast(`Could not save to Space: ${error.message}`, true, 6000);
+    toast(`Could not autosave this bin: ${error.message}`, true, 6000);
     return false;
   } finally {
     finishDesignMutation();
   }
+}
+
+async function designerSaveToSpace({ silent = false } = {}) {
+  const saved = await flushSpaceDesignAutosave({ materialize: true });
+  if (saved && !silent) toast("Bin autosaved to Space.");
+  return saved;
 }
 
 // Install a canonical design (from Load from Space) as the working Designer
@@ -438,10 +495,11 @@ async function installLoadedDesignSource(rowId, spec, {
     state.baseTrimSourceLayout = null;
     state.lastOrdinaryDesign = clone(state.design);
     resetNestPhotoSession();
-    state.cleanDesign = clone(state.design);
+    state.cleanDesign = clone(spec);
+    state.spaceStarterPreviewPending = false;
     state.designInventoryId = rowId;
     state.surfaceHeightPromptSkipped = false;
-    state.workingPending = true;
+    state.workingPending = false;
     state.workingGeneratedKey = null;
     state.drafts = {};
     state.history = [];
@@ -452,6 +510,7 @@ async function installLoadedDesignSource(rowId, spec, {
     clearDraftSelection();
     activatePreviewView("3d");
     await refreshPreview();
+    if (rowId === null && typedSpaceOrdinaryBin()) await persistSpaceDesignSource(null, true);
     toast(successMessage);
     return true;
   } catch (error) {
@@ -584,27 +643,22 @@ async function designerEditInventoryRow(rowId) {
 
 async function designerInstallInventorySpec(rowId, spec) {
   if (!spec) return;
-  if (state.designInventoryId === rowId && workingDesignForSpace()) {
+  if (state.designInventoryId === rowId) {
     activatePreviewView("3d");
     return;
   }
-  if (workingDesignForSpace() && !(await appConfirmAction({
-    title: "Load a different bin?",
-    message: "This replaces the bin you're currently editing. Save it to this Space first if you want to keep it.",
-    actionLabel: "Load anyway",
-    danger: true,
-  }))) return;
-
+  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
   await installLoadedDesignSource(rowId, spec);
 }
 
-// Regenerate a saved source without touching the live Current design or Qty.
+// Regenerate a saved source without replacing the live Designer edit.
 async function designerGenerateInventoryRow(rowId) {
   if (state.folderMode !== "space" || typeof DL === "undefined") return;
   if (DL.busy || isGenerating || state.designMutationBusy) {
     toast("Finish the current action before generating files.", true);
     return;
   }
+  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
   const one = DL.bin(rowId);
   const spec = DL.layout?.design_specs?.[rowId];
   if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return;
@@ -632,11 +686,12 @@ async function designerGenerateInventoryRow(rowId) {
       .filter(name => /\.3mf$/i.test(name)))];
     if (!files.length) throw new Error("The generated design files were not returned.");
     const file = files.join(", ");
-    if (await DL.editBins({ bin_updates: [{ id: rowId, file }] }, { context })) {
-      toast(`Generated ${file}.`);
-    } else if (!DL.spaceContextCurrent(context)) {
-      toast("Files were generated in the Space you left. Check its Inventory row; the current Space was not changed.");
-    }
+    const saved = await DL.inventoryCall("/api/drawer/design-source/status", {
+      row_id: rowId, action: "saved", file, design: clone(spec),
+    }, { context });
+    DL.adopt(saved);
+    DL.emit();
+    toast(`Generated ${file}.`);
   });
 }
 
@@ -681,17 +736,7 @@ async function designerLoadFromAnotherSpace() {
     if (!chosen) return;
     if (destination) DL.requireSpaceContext(destination);
 
-    if (workingDesignForSpace()) {
-      const saved = await designerSaveToSpace({ silent: true });
-      if (!saved) {
-        toast(
-          "Could not preserve your current bin, so Load from another Space was cancelled.",
-          true,
-          6000,
-        );
-        return;
-      }
-    }
+    if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
 
     if (destination) DL.requireSpaceContext(destination);
     await installLoadedDesignSource(null, normalizeCopiedDesignForDestination(clone(chosen.spec)), {
@@ -708,13 +753,7 @@ async function designerLoadFromAnotherSpace() {
 async function designerNewBin() {
   if (!(await guardDraftSwitch())) return;
   if (state.folderMode === "space") {
-    if (workingDesignForSpace()) {
-      const saved = await designerSaveToSpace({ silent: true });
-      if (!saved) {
-        toast("Could not preserve your current bin, so New Bin was cancelled.", true, 6000);
-        return;
-      }
-    }
+    if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
   } else if (designHasChanges() && !(await appConfirmAction({
     title: "Start a new bin?",
     message: "Start a new bin and discard the current changes?",
@@ -739,6 +778,25 @@ async function designerDuplicate() {
   if (!(await guardDraftSwitch())) return;
   if (baseTrimEnabled()) {
     toast("Base Trim cannot be duplicated here.", true, 5000);
+    return;
+  }
+  if (typedSpaceOrdinaryBin()) {
+    if (!(await flushSpaceDesignAutosave())) return;
+    if (!state.designInventoryId) {
+      toast("Edit this bin before duplicating it.", true);
+      return;
+    }
+    const context = DL.spaceContext();
+    try {
+      const data = await DL.inventoryCall("/api/drawer/design-source/duplicate", {
+        row_id: state.designInventoryId,
+      }, { context });
+      DL.adopt(data);
+      DL.emit();
+      await installLoadedDesignSource(data.row_id, data.design, { successMessage: "Duplicated bin." });
+    } catch (error) {
+      toast(`Could not duplicate bin: ${error.message}`, true, 6000);
+    }
     return;
   }
   const design = clone(visibleDesignSnapshot());
@@ -794,10 +852,12 @@ function pinDraftAxis(axis) {
 
 function recordHistory(before) {
   if (!before || JSON.stringify(before) === JSON.stringify(state.design)) return;
+  state.spaceStarterPreviewPending = false;
   state.history.push(clone(before));
   if (state.history.length > 50) state.history.shift();
   state.future = [];
   updateHistoryButtons();
+  // Accepted paths refresh the preview, or the next boundary flushes them.
 }
 
 function updateHistoryButtons() {
@@ -847,6 +907,7 @@ async function restoreHistory(redo = false) {
     clearDraftSelection();
     updateHistoryButtons();
     await refreshPreview();
+    if (typedSpaceOrdinaryBin()) queueSpaceDesignAutosave();
   } finally {
     finishDesignMutation();
   }
@@ -2237,8 +2298,10 @@ async function maybePromptSurfaceObjectHeight() {
       busy = true;
       try {
         DL.requireSpaceContext(context);
-        if (state.designInventoryId && !(await DL.editBins({ bin_updates: [{ id: state.designInventoryId,
-          object_height_mm: height }] }, { context, customFailure: true }))) throw new Error("Object height was not saved.");
+        if (state.designInventoryId && !typedSpaceOrdinaryBin() &&
+            !(await DL.editBins({ bin_updates: [{ id: state.designInventoryId,
+              object_height_mm: height }] }, { context, customFailure: true })))
+          throw new Error("Object height was not saved.");
         if (!(await persistPreference())) throw new Error("Surface setting was not saved.");
         DL.requireSpaceContext(context);
         const before = clone(state.design);
@@ -3372,6 +3435,16 @@ async function changeBinType() {
   if (typeof SP !== "undefined" && SP.crossTypeCheck) {
     const ok = await SP.crossTypeCheck(requested);
     if (!ok) { $("#bin-type").value = binTypeFromDesign(); return; }
+  }
+  if (requested !== "single" && typedSpaceOrdinaryBin()) {
+    $("#bin-type").value = "single";
+    const saved = await flushSpaceDesignAutosave();
+    $("#bin-type").value = requested;
+    if (!saved) {
+      $("#bin-type").value = binTypeFromDesign();
+      return;
+    }
+    state.designInventoryId = null;
   }
   const wasBaseTrim = baseTrimEnabled();
   const wasB4B = b4bEnabled();
@@ -7702,6 +7775,7 @@ async function commitVisibleDraft() {
   renderDraftFields();
   renderPlaced();
   updateSelectionButtons();
+  if (typedSpaceOrdinaryBin()) refreshPreview();
   return true;
 }
 
@@ -8352,6 +8426,12 @@ async function refreshPreview({ persistResume = true } = {}) {
     // Placed after the controls above so workingDesignForSpace() compares
     // the same canonical design the user now sees, including any server-
     // adjusted X/Y/Z.
+    if (!previewHasErrors && typedSpaceOrdinaryBin()) {
+      if (state.spaceStarterPreviewPending) {
+        state.cleanDesign = clone(state.design);
+        state.spaceStarterPreviewPending = false;
+      } else queueSpaceDesignAutosave();
+    }
     if (persistResume && !previewHasErrors && state.folderMode === "space" && typeof SP !== "undefined") {
       SP.queueResumeCheckpoint(state.design, Boolean(workingDesignForSpace()));
     }
@@ -11842,6 +11922,7 @@ function handleLayoutArrowKeys(event) {
 }
 
 async function saveDesign() {
+  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
   if (!beginDesignMutation()) return;
   try {
     // The editor saves valid part edits after a short typing pause. Commit the
@@ -11931,16 +12012,18 @@ function designHasChanges() {
   return JSON.stringify(visibleDesign) !== JSON.stringify(state.cleanDesign);
 }
 
-// ---- Current design in Space (session only, never written to inventory).
+// ---- Legacy Current design compatibility for non-ordinary design paths.
 // A design counts as "pending inventory" once it has been edited, opened or
 // started new, until a Bin/Storage Box generation or local Print logs that
 // exact design. Base Trim and an untouched starter design never count.
 // BEGIN WORKING_DESIGN_HELPERS
 function markWorkingDesignPending() {
+  if (typedSpaceOrdinaryBin()) return;
   state.workingPending = true;
 }
 
 function markWorkingDesignReconciled() {
+  if (typedSpaceOrdinaryBin()) return;
   if (baseTrimEnabled()) return;
   state.workingPending = false;
   try {
@@ -11955,6 +12038,7 @@ function markWorkingDesignReconciled() {
 
 // The design Space should show as "Current design", or null.
 function workingDesignForSpace() {
+  if (typedSpaceOrdinaryBin()) return null;
   if (!state.design || baseTrimEnabled() || state.folderMode !== "space") return null;
   let visible;
   try {
@@ -11972,6 +12056,10 @@ function workingDesignForSpace() {
 async function openDesign(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) {
+    event.target.value = "";
+    return;
+  }
   if (designHasChanges() && !(await appConfirmAction({
     title: "Open a different design?",
     message: "Open this design and replace the current one? Unsaved changes to the current design will be lost.",
@@ -11990,6 +12078,8 @@ async function openDesign(event) {
     state.baseTrimSourceLayout = null;
     resetNestPhotoSession();
     state.cleanDesign = clone(state.design);
+    state.spaceStarterPreviewPending = false;
+    if (state.folderMode === "space") state.designInventoryId = null;
     markWorkingDesignPending();
     state.drafts = {};
     state.history = [];
@@ -11999,6 +12089,7 @@ async function openDesign(event) {
     syncForm();
     clearDraftSelection();
     await refreshPreview();
+    if (typedSpaceOrdinaryBin()) await persistSpaceDesignSource(null, true);
     toast(`Opened ${file.name}.`);
   } catch (error) {
     toast(error.message, true, 5000);
@@ -12009,6 +12100,7 @@ async function openDesign(event) {
 }
 
 async function newDesign() {
+  if (typedSpaceOrdinaryBin()) return designerNewBin();
   if (designHasChanges() && !(await appConfirmAction({
     title: "Start a new design?",
     message: "Start a new design and discard the current changes?",
@@ -12198,7 +12290,7 @@ async function generateParts(target) {
     toast("Finish the current action before generating files.", true);
     return;
   }
-  if (!checkPartNamePresent(target)) return;
+  if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (state.runtime.hosted && !state.browserFolder) {
     toast("Choose a folder before generating files.", true);
     return;
@@ -12218,6 +12310,10 @@ async function generateParts(target) {
     toast("Resolve the highlighted issue before generating.", true);
     return;
   }
+  if (typedSpaceOrdinaryBin() &&
+      !(await flushSpaceDesignAutosave({ materialize: target === "all" || target === "bin" }))) return;
+  const designRowId = typedSpaceOrdinaryBin() ? state.designInventoryId : null;
+  const designSpaceContext = designRowId ? DL.spaceContext() : null;
   setError();
 
   const dialog = $("#generation-dialog");
@@ -12282,7 +12378,7 @@ async function generateParts(target) {
       design: clone(state.design),
       output: state.output,
       connector: state.connector,
-      keep_log: state.keepLog,
+      keep_log: designRowId ? false : state.keepLog,
     };
 
     // Fix 032 Correction 1: flush the exact pre-operation resume checkpoint
@@ -12303,17 +12399,32 @@ async function generateParts(target) {
     if (target === "all" || target === "bin") {
       setItemStatus("bin", "generating", "Generating…");
       const binResult = await api("/api/generate", payload);
+      if (designSpaceContext) DL.requireSpaceContext(designSpaceContext);
       saveOutput = binResult.output || saveOutput;
       const binFiles = await saveGeneratedFiles(binResult);
+      if (designSpaceContext) {
+        DL.requireSpaceContext(designSpaceContext);
+        if (state.designInventoryId !== designRowId ||
+            JSON.stringify(state.design) !== JSON.stringify(payload.design))
+          throw new Error("This bin changed while its files were being saved. Its status was not changed.");
+        const names = [...new Set(binFiles.map(file => String(file).split(/[\\/]/).pop())
+          .filter(name => /\.3mf$/i.test(name)))];
+        if (!names.length) throw new Error("No current bin files were saved.");
+        const saved = await DL.inventoryCall("/api/drawer/design-source/status", {
+          row_id: designRowId, action: "saved", file: names.join(", "), design: payload.design,
+        }, { context: designSpaceContext });
+        DL.adopt(saved);
+        DL.emit();
+      }
       if (!baseTrimEnabled(payload.design) && !Boolean(payload.design?.box?.b4b?.enabled)) await rememberGeneratedSpaceBin(payload.design);
-      if (binResult.inventory_bin && state.inventoryEnabled && typeof SP !== "undefined") {
+      if (!designRowId && binResult.inventory_bin && state.inventoryEnabled && typeof SP !== "undefined") {
         await SP.addInventoryBin(binResult.inventory_bin, binResult.inventory_design_spec || null);
       }
       allFiles.push(...binFiles);
       setItemStatus("bin", "done", "Done");
       if (baseTrimEnabled(payload.design)) surfaceEdgeDone = payload.design;
       else {
-        markWorkingDesignReconciled();
+        if (!designRowId) markWorkingDesignReconciled();
         // The just-generated bin is the next resume target, pending=false.
         // Connector-only generation never reaches this branch, so it cannot
         // falsely reconcile the bin design. The generated files and
@@ -12423,11 +12534,16 @@ async function printModel(target = "bin") {
   if (state.runtime.hosted) return generateParts(
     b4bEnabled() || baseTrimEnabled() || state.design?.box?.lid?.enabled ? "bin" : "all"
   );
-  if (!checkPartNamePresent(target)) return;
+  if (!typedSpaceOrdinaryBin() && !checkPartNamePresent(target)) return;
   if (!state.slicer || !state.slicer.available) {
     toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
     return;
   }
+  if (typedSpaceOrdinaryBin() &&
+      !(await flushSpaceDesignAutosave({ materialize: target === "bin" || target === "all" }))) return;
+  const designRowId = typedSpaceOrdinaryBin() && (target === "bin" || target === "all")
+    ? state.designInventoryId : null;
+  const designSpaceContext = designRowId ? DL.spaceContext() : null;
   if (!beginDesignMutation()) return;
   const button = $("#print-bin");
   const old = button.textContent;
@@ -12443,7 +12559,8 @@ async function printModel(target = "bin") {
       output: state.output,
       connector: state.connector,
       target: target,
-      keep_log: state.keepLog,
+      keep_log: designRowId ? false : state.keepLog,
+      design_row_id: designRowId || undefined,
     };
     // Fix 032 Correction 1: same exact resume checkpoint contract as
     // generateParts() - flush the pre-operation state before sending. If it
@@ -12457,6 +12574,23 @@ async function printModel(target = "bin") {
       }
     }
     const result = await api("/api/print", payload);
+    if (designSpaceContext) {
+      try {
+        DL.requireSpaceContext(designSpaceContext);
+        if (state.designInventoryId !== designRowId ||
+            JSON.stringify(state.design) !== JSON.stringify(payload.design))
+          throw new Error("This bin changed during the slicer handoff.");
+        const names = [...new Set((result.design_files || []).map(file => String(file).split(/[\\/]/).pop())
+          .filter(name => /\.3mf$/i.test(name)))];
+        const printed = await DL.inventoryCall("/api/drawer/design-source/status", {
+          row_id: designRowId, action: "printed", file: names.join(", "), design: payload.design,
+        }, { context: designSpaceContext });
+        DL.adopt(printed);
+        DL.emit();
+      } catch (error) {
+        throw new Error(`Bambu Studio opened, but Printed status could not be recorded: ${error.message}`);
+      }
+    }
     if ((target === "bin" || target === "all") && !baseTrimEnabled(payload.design) && !Boolean(payload.design?.box?.b4b?.enabled)) {
       await rememberGeneratedSpaceBin(payload.design);
     }
@@ -12467,7 +12601,7 @@ async function printModel(target = "bin") {
       printedEdge = payload.design;
       toast(sentMessage, false, 7000);
     } else if (target === "bin" || target === "all") {
-      markWorkingDesignReconciled();
+      if (!designRowId) markWorkingDesignReconciled();
       // Fix 032 Correction 2 (C2.3): the slicer handoff already succeeded
       // by this point, so defer the success toast until after the final
       // checkpoint attempt and report exactly one message - never the
