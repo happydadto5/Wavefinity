@@ -3033,6 +3033,213 @@ class SideOpeningTests(unittest.TestCase):
 
 
 class EdgeMountTests(unittest.TestCase):
+    def test_screw_cutters_are_closed_volumes(self) -> None:
+        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
+            side="front", holes_enabled=True, label_enabled=True,
+            label_text="A", label_type="separate", standoff_ribs_enabled=False,
+        ))
+        cutters = [cutter for hole in organizer_edge_mount.edge_mount_hole_plan(box)
+                   for cutter in organizer_edge_mount._hole_cutters(box, "front", hole, True)]
+        for index, cutter in enumerate(cutters):
+            with self.subTest(index=index):
+                self.assertTrue(cutter.is_volume, (cutter.bounds, cutter.is_watertight,
+                                                   cutter.is_winding_consistent))
+        combined = organizer_geometry.union(cutters)
+        self.assertTrue(combined.is_volume)
+        self.assertTrue(combined.is_watertight)
+        self.assertTrue(combined.is_winding_consistent)
+
+    def test_screw_cutters_remain_volumes_on_every_side_and_diameter(self) -> None:
+        for side in ("front", "back", "left", "right"):
+            for diameter in (1.0, 4.0, 10.0):
+                with self.subTest(side=side, diameter=diameter):
+                    box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
+                        side=side, holes_enabled=True, hole_count=1,
+                        screw_diameter_mm=diameter, top_offset_mm=20.0,
+                    ))
+                    for hole in organizer_edge_mount.edge_mount_hole_plan(box):
+                        for cutter in organizer_edge_mount._hole_cutters(box, side, hole, True):
+                            self.assertTrue(cutter.is_volume, cutter.bounds)
+
+    def test_wall_only_bore_screw_cut_preview_and_export(self) -> None:
+        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
+            side="front", holes_enabled=True, label_enabled=True,
+            label_text="A", label_type="separate", standoff_ribs_enabled=False,
+        ))
+        for style in ("straight", "wavy"):
+            one = organizer_app.Feature(
+                "bore", organizer_app.Zone(-20.0, -20.0, 20.0, 20.0),
+                organizer_inserts.Item.simple("tube", 30.0, 25.0),
+                options={"bore_style": "wall_only", "wall_style": style,
+                         "height": 30.0, "wall": 1.6},
+            )
+            with self.subTest(style=style):
+                body = organizer_inserts.build_features(
+                    box, [one], organizer_app.base_height(box, "fused"))[0]
+                self.assertTrue(body.is_volume, (body.bounds, body.is_watertight,
+                                                 body.is_winding_consistent))
+                cut = organizer_edge_mount.apply_edge_mount_hole_cuts(box, body)
+                self.assertTrue(cut.is_volume)
+                self.assertLess(cut.volume, body.volume)
+                for kwargs in ({"features": [one]}, {"draft": one}):
+                    preview = organizer_app.preview_geometry(box, mode="fused", **kwargs)
+                    self.assertFalse(preview["feature_errors"])
+                    self.assertIsNone(preview["draft_error"])
+                if style == "wavy":
+                    import wavefinity_web
+                    saved_design = organizer_app.design_to_dict(
+                        box, organizer_app.Layout((one,), "fused"))
+                    saved = wavefinity_web.preview_payload({"design": saved_design})
+                    draft_design = organizer_app.design_to_dict(
+                        box, organizer_app.Layout((), "fused"))
+                    draft = wavefinity_web.preview_payload({
+                        "design": draft_design,
+                        "draft": wavefinity_web.feature_to_dict(one),
+                    })
+                    self.assertFalse(saved["feature_errors"])
+                    self.assertIsNone(draft["draft_error"])
+                with tempfile.TemporaryDirectory() as directory:
+                    result = organizer_app.generate_organizer_files(
+                        box, organizer_app.Layout((one,), "fused"), Path(directory))
+                    self.assertIn("edge_mount_label", result)
+                    self.assertTrue(result["box"]["mesh"]["watertight"])
+                    self.assertTrue(result["box"]["mesh"]["positive_volume"])
+                    self.assertEqual(validate_3mf(Path(result["box"]["output"]), 1)["warnings"], 0)
+                    self.assertEqual(validate_3mf(
+                        Path(result["edge_mount_label"]["output"]), 2,
+                        multipart=("A",))["warnings"], 0)
+
+    def test_screw_cut_skips_disjoint_mesh_and_names_invalid_intersection(self) -> None:
+        box = BoxSpec(48.0, 48.0, 40.0,
+                      edge_mount=EdgeMountSpec(holes_enabled=True))
+        invalid = trimesh.creation.box(extents=(2.0, 2.0, 2.0))
+        invalid.update_faces(np.arange(len(invalid.faces)) != 0)
+        self.assertFalse(invalid.is_volume)
+        invalid.apply_translation((110.0, 100.0, 100.0))
+        vertices = invalid.vertices.copy()
+        with mock.patch.object(organizer_edge_mount, "difference",
+                               side_effect=AssertionError("boolean was called")):
+            self.assertIs(organizer_edge_mount.apply_edge_mount_hole_cuts(box, invalid), invalid)
+        np.testing.assert_array_equal(invalid.vertices, vertices)
+        invalid.apply_translation((-100.0, -100.0, -72.7))
+        with self.assertRaisesRegex(ValueError, "test post is not a valid volume"):
+            organizer_edge_mount.apply_edge_mount_hole_cuts(
+                box, invalid, geometry_owner="test post")
+        intersecting = trimesh.creation.box(extents=(20.0, 20.0, 10.0))
+        intersecting.apply_translation((0.0, 0.0, 27.3))
+        with mock.patch.object(organizer_edge_mount, "difference",
+                               wraps=organizer_edge_mount.difference) as difference:
+            cut = organizer_edge_mount.apply_edge_mount_hole_cuts(box, intersecting)
+        difference.assert_called_once()
+        self.assertTrue(cut.is_volume)
+        self.assertLess(cut.volume, intersecting.volume)
+
+    def test_pocket_screw_cut_preview_and_export_parity(self) -> None:
+        import wavefinity_web
+        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
+            holes_enabled=True, hole_count=1, top_offset_mm=20.0))
+        one = organizer_app.default_feature(box, "pocket")
+        body = organizer_inserts.build_features(
+            box, [one], organizer_app.base_height(box, "fused"))[0]
+        cut = organizer_edge_mount.apply_edge_mount_hole_cuts(box, body)
+        self.assertTrue(body.is_volume)
+        self.assertTrue(cut.is_volume)
+        self.assertLess(cut.volume, body.volume)
+        saved = wavefinity_web.preview_payload({
+            "design": organizer_app.design_to_dict(
+                box, organizer_app.Layout((one,), "fused")),
+        })
+        draft = wavefinity_web.preview_payload({
+            "design": organizer_app.design_to_dict(
+                box, organizer_app.Layout((), "fused")),
+            "draft": wavefinity_web.feature_to_dict(one),
+        })
+        self.assertFalse(saved["feature_errors"])
+        self.assertIsNone(draft["draft_error"])
+        with tempfile.TemporaryDirectory() as directory:
+            result = organizer_app.generate_organizer_files(
+                box, organizer_app.Layout((one,), "fused"), Path(directory))
+            self.assertTrue(result["box"]["mesh"]["positive_volume"])
+            self.assertEqual(validate_3mf(Path(result["box"]["output"]), 1)["warnings"], 0)
+
+    def test_screw_cut_covers_shell_rim_ledge_and_fused_scoop(self) -> None:
+        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
+            holes_enabled=True, hole_count=1, top_offset_mm=12.7))
+        shell = organizer_engine.make_box(box)
+        cut_shell = organizer_edge_mount.apply_edge_mount_structure(box, shell)
+        self.assertTrue(cut_shell.is_volume)
+        self.assertLess(cut_shell.volume, shell.volume)
+        scene = organizer_app.preview_geometry(
+            box, "M3", (), "fused", "top", True)
+        self.assertFalse(scene["feature_errors"])
+        kinds = {kind for _points, kind, _normal, _layer, _owner in scene["geometry"]}
+        self.assertIn("top_label_ledge", kinds)
+        self.assertIn("scoop", kinds)
+        with tempfile.TemporaryDirectory() as directory:
+            shell_result = organizer_app.generate_organizer_files(
+                box, organizer_app.Layout(), Path(directory))
+            self.assertEqual(validate_3mf(
+                Path(shell_result["box"]["output"]), 1)["warnings"], 0)
+            result = organizer_app.generate_organizer_files(
+                box, organizer_app.Layout(), Path(directory),
+                label="M3", label_location="top", scoop=True)
+            self.assertTrue(result["box"]["mesh"]["positive_volume"])
+
+    def test_non_text_fused_feature_screw_cut_matrix(self) -> None:
+        base = BoxSpec(96.0, 96.0, 64.0)
+        cases = [(kind, organizer_app.default_feature(base, kind)) for kind in (
+            "bore", "divider", "pocket", "slot", "cradle", "steps", "post", "scoop"
+        )]
+        for style in ("straight", "wavy"):
+            cases.append((f"bore_wall_only_{style}", organizer_app.Feature(
+                "bore", organizer_app.Zone(-20.0, -20.0, 20.0, 20.0),
+                organizer_inserts.Item.simple("tube", 30.0, 25.0),
+                options={"bore_style": "wall_only", "wall_style": style,
+                         "height": 30.0, "wall": 1.6},
+            )))
+        contour = ((-20.0, -8.0), (20.0, -8.0), (18.0, 8.0), (-20.0, 8.0))
+        for style in ("raised_wall", "recessed"):
+            cases.append((f"nest_{style}", organizer_inserts.fitted_nest_feature(
+                organizer_app.Feature(
+                    "nest", organizer_app.Zone(-1.0, -1.0, 1.0, 1.0),
+                    options={"holder_style": style, "tool_thickness": 8.0,
+                             "cavity_depth_mode": "auto", "lift_assist": "none",
+                             "clearance": 0.6, "depth": 8.0, "rim": 3.0,
+                             "smoothing": 0.0}, contour=contour,
+                ))))
+        for name, one in cases:
+            for intersects in (False, True):
+                placed = (replace(one, options={**one.options, "height": 20.0})
+                          if name == "divider" and not intersects else one)
+                if name == "cradle" and intersects:
+                    placed = organizer_inserts.moved_feature(placed, base, (4.0, 0.0))
+                spec = EdgeMountSpec(
+                    side="front", holes_enabled=True,
+                    hole_count=1,
+                    top_offset_mm=58.0 if intersects else 8.0,
+                    standoff_ribs_enabled=False,
+                )
+                box = replace(base, edge_mount=spec)
+                with self.subTest(feature=name, intersects=intersects):
+                    solids = organizer_inserts.build_features(
+                        box, [placed], organizer_app.base_height(box, "fused"))
+                    self.assertTrue(solids)
+                    for solid in solids:
+                        self.assertTrue(solid.is_volume, (name, solid.bounds,
+                                                        solid.is_watertight,
+                                                        solid.is_winding_consistent))
+                        cut = organizer_edge_mount.apply_edge_mount_hole_cuts(
+                            box, solid, geometry_owner=name)
+                        self.assertTrue(cut.is_volume, name)
+                        if intersects:
+                            self.assertLess(cut.volume, solid.volume, name)
+                        else:
+                            self.assertIs(cut, solid, name)
+                    for kwargs in ({"features": [placed]}, {"draft": placed}):
+                        preview = organizer_app.preview_geometry(box, mode="fused", **kwargs)
+                        self.assertFalse(preview["feature_errors"], (name, preview["feature_errors"]))
+                        self.assertIsNone(preview["draft_error"], name)
+
     def test_label_type_migrates_and_separate_clip_is_watertight(self) -> None:
         self.assertEqual(EdgeMountSpec().label_type, "separate")
         box = BoxSpec(48.0, 56.0, 40.0, edge_mount=EdgeMountSpec(label_enabled=True, label_text="TOOLS"))

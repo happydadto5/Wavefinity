@@ -1036,7 +1036,8 @@ class WebApplicationTests(unittest.TestCase):
         # Duplicate is the explicit clone workflow, so there is no
         # remembered-per-kind Nest option stripping to check here any more.
 
-        self.assertIn("solid = apply_edge_mount_hole_cuts(box, solid)", app_py)
+        self.assertIn('geometry_owner=f"{one.kind} feature"', app_py)
+        self.assertIn('geometry_owner=f"{draft.kind} draft"', app_py)
         self.assertIn("solid = apply_side_openings(box, solid)", app_py)
         shared_start = app_py.index("if effective_recessed:")
         loop_start = app_py.index("for feature_index, one in enumerate(features):", shared_start)

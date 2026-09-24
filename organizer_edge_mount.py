@@ -93,6 +93,8 @@ EDGE_HOLE_BETWEEN_CLEARANCE = 2.0
 
 EDGE_BOOLEAN_OVERTRAVEL = 0.5
 EDGE_BOOLEAN_EPSILON = 0.05
+# Trimesh's 3MF writer emits six decimal places for mesh coordinates.
+EDGE_3MF_DECIMALS = 6
 
 EDGE_HOLE_PROFILE_SECTIONS = 64
 
@@ -614,18 +616,15 @@ def _print_safe_hole_profile(
     horizontal-roof support.
     """
     profile_r = _print_safe_profile_radius(requested_radius, sections)
-    theta = np.linspace(0.0, 2.0 * math.pi, sections, endpoint=False)
-    circle = Polygon([
-        (profile_r * math.cos(t), profile_r * math.sin(t))
-        for t in theta
-    ])
-    tangent = profile_r / math.sqrt(2.0)
-    roof = Polygon([
-        (-tangent, tangent),
-        (tangent, tangent),
-        (0.0, math.sqrt(2.0) * profile_r),
-    ])
-    profile = circle.union(roof)
+    # Construct one boundary. Unioning a faceted circle with a triangle at
+    # tangent points creates tiny split edges that earcut extrudes as an open
+    # mesh, which Manifold correctly refuses as a boolean cutter.
+    arc_sections = max(6, math.ceil(0.75 * sections))
+    theta = np.linspace(3.0 * math.pi / 4.0, 9.0 * math.pi / 4.0,
+                        arc_sections + 1)
+    profile = Polygon([
+        (profile_r * math.cos(t), profile_r * math.sin(t)) for t in theta
+    ] + [(0.0, math.sqrt(2.0) * profile_r)])
     if not isinstance(profile, Polygon) or not profile.is_valid or profile.area <= 0.0:
         raise ValueError("invalid Edge Mount print-safe hole profile")
     return profile
@@ -830,6 +829,7 @@ def apply_edge_mount_hole_cuts(
     body: trimesh.Trimesh,
     *,
     cut_driver_passages: bool = True,
+    geometry_owner: str = "Edge Mount body",
 ) -> trimesh.Trimesh:
     """Subtract Screw Mounting's small mounting holes and (by default) their
     driver-access passages from ``body``.
@@ -856,11 +856,33 @@ def apply_edge_mount_hole_cuts(
     for hole in holes:
         cutters.extend(_hole_cutters(box, side, hole, cut_driver_passages))
     cutter = union(cutters) if len(cutters) > 1 else cutters[0]
-    # difference() already cleans up after itself the safe way (organizer_
-    # geometry._cleaned() only keeps the clean copy when that does not break
-    # watertightness) - a further unguarded clean-up call here has, in
-    # practice, turned an otherwise-valid cut solid non-watertight.
-    return difference([body, cutter])
+    if not cutter.is_volume:
+        raise ValueError("Edge Mount screw/driver cutter is not a valid volume")
+    # A cut whose bounds cannot reach this body is an exact no-op. In
+    # particular, preview may contain independent non-volume helper meshes.
+    tolerance = 1e-9
+    if np.any(body.bounds[1] < cutter.bounds[0] - tolerance) or np.any(
+        cutter.bounds[1] < body.bounds[0] - tolerance
+    ):
+        return body
+    if not body.is_volume:
+        raise ValueError(f"{geometry_owner} is not a valid volume for Edge Mount screw cutting")
+    # difference() retains sub-micron vertex distinctions that the 3MF writer
+    # rounds away. Weld on that writer's coordinate grid here, then validate:
+    # otherwise a valid in-memory cut can export with a detached zero-area
+    # triangle. This is limited to actual Edge Mount cuts; no-op bodies keep
+    # their exact original vertices and identity.
+    result = difference([body, cutter])
+    result.vertices = np.round(result.vertices, EDGE_3MF_DECIMALS)
+    result.merge_vertices()
+    # A sub-micron triangle can collapse to zero area on that grid. Drop only
+    # those collapsed faces; retaining them creates a detached two-face flap
+    # when 3MF reloads the cut.
+    result.update_faces(result.area_faces > 0.0)
+    result.remove_unreferenced_vertices()
+    if not result.is_volume:
+        raise ValueError(f"{geometry_owner} Edge Mount cut is not a valid volume")
+    return result
 
 
 def apply_edge_mount_structure(

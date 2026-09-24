@@ -1073,7 +1073,7 @@ def preview_geometry(
     if tidy and rim_side:
         ledge_mesh = make_top_label_ledge(box, rim_side)
         if cut_fused_pieces:
-            ledge_mesh = apply_edge_mount_hole_cuts(box, ledge_mesh)
+            ledge_mesh = apply_edge_mount_hole_cuts(box, ledge_mesh, geometry_owner="rim-label ledge")
         if cut_side_opening_pieces:
             ledge_mesh = apply_side_openings(box, ledge_mesh)
         geometry.extend(_mesh_preview_geometry(ledge_mesh, "top_label_ledge"))
@@ -1090,7 +1090,7 @@ def preview_geometry(
         # cut here too. A removable-mode scoop belongs to the insert, which
         # Edge Mount never drills and Side Openings never cut.
         if cut_fused_pieces:
-            scoop_mesh = apply_edge_mount_hole_cuts(box, scoop_mesh)
+            scoop_mesh = apply_edge_mount_hole_cuts(box, scoop_mesh, geometry_owner="fused scoop")
         if cut_side_opening_pieces:
             scoop_mesh = apply_side_openings(box, scoop_mesh)
         geometry.extend(_mesh_preview_geometry(scoop_mesh, "scoop"))
@@ -1215,7 +1215,8 @@ def preview_geometry(
                     draft_overhang_mm = round(max(0.0, top_z - box.z), 3)
             for solid in built:
                 if cut_fused_pieces:
-                    solid = apply_edge_mount_hole_cuts(box, solid)
+                    solid = apply_edge_mount_hole_cuts(
+                        box, solid, geometry_owner="recessed Photo Nest group")
                 if cut_side_opening_pieces:
                     solid = apply_side_openings(box, solid)
                 geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_nest"))
@@ -1283,7 +1284,8 @@ def preview_geometry(
                 # fused feature is real body material and gets cut exactly
                 # like the shell, scoop and rim ledge above.
                 if cut_fused_pieces and not is_text(one):
-                    solid = apply_edge_mount_hole_cuts(box, solid)
+                    solid = apply_edge_mount_hole_cuts(
+                        box, solid, geometry_owner=f"{one.kind} feature")
                 if cut_side_opening_pieces and not is_text(one):
                     solid = apply_side_openings(box, solid)
                 geometry.extend(
@@ -1317,7 +1319,8 @@ def preview_geometry(
                     ), 3)
                 for solid in solids:
                     if cut_draft:
-                        solid = apply_edge_mount_hole_cuts(box, solid)
+                        solid = apply_edge_mount_hole_cuts(
+                            box, solid, geometry_owner=f"{draft.kind} draft")
                     if cut_draft_side_opening:
                         solid = apply_side_openings(box, solid)
                     geometry.extend(_mesh_preview_geometry(solid, "draft_invalid"))
@@ -1341,7 +1344,8 @@ def preview_geometry(
                     ), 3)
                 for solid in solids:
                     if cut_draft:
-                        solid = apply_edge_mount_hole_cuts(box, solid)
+                        solid = apply_edge_mount_hole_cuts(
+                            box, solid, geometry_owner=f"{draft.kind} draft")
                     if cut_draft_side_opening:
                         solid = apply_side_openings(box, solid)
                     geometry.extend(_mesh_preview_geometry(solid, f"draft_{draft.kind}"))
