@@ -432,10 +432,12 @@ join value normalizes in memory to Drop-in dovetail, and the size selector
 shows a temporary *Legacy — W × H mm* option until a preset is picked. It is
 never rewritten on disk just by opening it.
 
-**Maintainer note:** while a Base Trim design is open in the local app,
-Ctrl+Shift+click **Print to Bambu Studio** sends a small ~50 mm two-piece
+**Maintainer note:** for a local Surface Space, Ctrl+Shift+click
+**Print Base Trim** in Space Actions sends a small ~50 mm two-piece
 drop-in-joint sample instead of the normal trim, to physically check the fit
-before a full print. It is not a normal UI control.
+before a full print. It is not a normal UI control; an ordinary click still
+prints the normal Base Trim, and the same chord on Storage Box's Print has no
+special behavior.
 
 Base Trim deliberately does **not** use `BoxSpec`. It saves as version 6 with
 `design_kind: "base_trim"`: `box.x` and `box.y` are enclosed field dimensions,
@@ -743,11 +745,15 @@ warning says so.
 
 ### Using the browser editor
 
-The browser editor is a three-step flow: **1. pick a shape** from the
-interior-part palette and read its one-line description; **2. set parameters**;
-**3. add interior part**. Placed parts can be selected in the list or on the 2D layout,
-then moved or resized there, or edited with exact numeric size fields. Normal layouts snap
-to **1 mm**. Overlaps and out-of-bounds features are refused at export.
+The browser editor is a two-step flow: **1. pick a shape** from the
+interior-part palette, reading its one-line description, which both creates it
+and adds it straight into the **Added to this bin** list below; **2. set
+parameters** in the editor that opens for it, then click **Done** to confirm
+(or **Delete** to remove it instead). Added parts can be selected in the
+**Added to this bin** list or on the 2D layout, then moved or resized there,
+or edited with exact numeric size fields, by reopening the same editor. Normal
+layouts snap to **1 mm**. Overlaps and out-of-bounds features are refused at
+export.
 
 A **divider** is a special case with no manually-sized footprint at all: it
 defaults to full-span (wall to wall) and centres itself, so there is nothing
@@ -756,7 +762,12 @@ for Center X/Y or a footprint Width/Depth to describe, and no separate
 just **Width mm** (the wall's own thickness), **Height mm** (blank by
 default, reading "height of box" until you type one), **Angle °**,
 **Quantity**, **Spacing mm** (blank - "fills evenly" - until overridden with
-an exact gap), and **Leaning shape**. Every other kind keeps manual sizing
+an exact gap), **Leaning shape**, and **Walls**. Its current grid controls,
+**X count** and **Y count**, place that many walls left-to-right and
+front-to-back respectively (0 means none on that axis) to build a full rows ×
+columns grid of compartments; entering either one retires the legacy
+single-axis Quantity, and the grid resets any custom compartment merges when
+its wall counts change. Every other kind keeps manual sizing
 and the ordinary per-kind **Auto** button next to Quantity, since their
 quantity means repeated elements inside one footprint, not sections of the
 bin.
@@ -776,6 +787,16 @@ length grows on the 8 mm grid. Shrinking a bin below any existing Pocket,
 Steps, rack, or holder grows the bin back around the part instead of trimming
 the part. When growth creates a collision, the part being edited stays put and
 the other parts move outward only as much as needed.
+
+Pocket, Slot Rack, and Divider each carry a **Walls** option: **Straight**
+(the default) or **Wavy**, the same globally phased mating wave used
+elsewhere (Bore Wall Only, Base Trim). Choosing Wavy changes how much shell
+each part needs - Pocket's outward reach grows to clear the wave while its
+entered inside Width/Length stay exactly what was typed; Slot Rack's required
+bank footprint grows to clear it; Divider's wall path and thickness
+compensation follow it while its logical compartments stay the same. The
+browser and the backend read the same catalog wave amplitude and depth
+factor, so this reach can never drift out of sync with the printed geometry.
 
 Typing a part Width/Length or resizing it in 2D makes that size the new minimum;
 later automatic changes can grow it but cannot pull it smaller. Reopening any
@@ -837,12 +858,21 @@ matters; `scoop_keep_out` is the smaller strip an interior part has to avoid.
 Bin wall, floor, and mating geometry use the tested printable defaults. The
 editor exposes only the dimensions and interior-part settings that affect the part.
 
-Three buttons: **Generate Box** (including the current insert layout) and
-**Generate Connector**, with a smaller
-**Generate Sampler** beside them. There is no status bar — a button reports on
-itself, briefly reading *Saved* when it has written the file, so nothing takes
-up a line saying "Ready" for the 99% of the time it has nothing to report. A
-failure still raises a dialog, because it needs acting on.
+Save and Print are separate pairs of buttons, not a sampler-style generator
+bank. **Save Bin** writes just the bin (including its current insert layout);
+**Save Bin + Connectors** adds its automatic connector bundle (a Side
+connector, plus 3-Way and 4-Way corners when the bin is eligible — never for a
+B4B, a lidded bin, or a Base Trim). Locally, **Print without Connectors** and
+**Print with Connectors** do the same pair of things but hand the files
+straight to Bambu Studio instead of only saving them; in hosted Wavefinity,
+where there is no local slicer, those same two buttons read **Save without
+Connectors** / **Save with Connectors** and behave exactly like the Save
+pair. There is no status bar — a button reports on itself, briefly reading
+*Saved* (or *Sending to Bambu Studio…*) while it works, so nothing takes up a
+line saying "Ready" for the 99% of the time it has nothing to report. A
+failure still raises a dialog, because it needs acting on; a Print that saved
+its files but could not finish (connectors failed, or the slicer did not
+open) says so truthfully instead of claiming nothing happened.
 
 ### The browser service
 

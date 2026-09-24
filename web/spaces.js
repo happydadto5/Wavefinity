@@ -2525,7 +2525,7 @@ SP.structuralBed = () => {
   return { bed_x_mm: Number.isFinite(x) && x > 0 ? x : undefined, bed_y_mm: Number.isFinite(y) && y > 0 ? y : undefined };
 };
 
-SP.runStructural = async mode => {
+SP.runStructural = async (mode, event) => {
   const kind = SP.structuralKind();
   if (!kind || SP.structuralBusy) return;
   const label = SP.structuralLabel(kind);
@@ -2542,18 +2542,33 @@ SP.runStructural = async mode => {
     toast("Bambu Studio is not installed or could not be found. Please install Bambu Studio or click 'Change slicer' to locate the executable.", true, 8000);
     return;
   }
+  // Fix 056 D: hidden maintainer shortcut restored at its new owner - local
+  // Base Trim Print only. Ctrl+Shift+click sends the existing production
+  // joint-fit sample instead of the full Base Trim; Storage Box Print has no
+  // special behavior for the same chord.
+  const jointTest = printing && kind === "base_trim" && Boolean(event?.ctrlKey && event?.shiftKey);
   // Built from the Space definition alone, so the Designer's autosave is not involved.
   const context = DL.spaceContext();
   const space = clone(state.activeSpace);
-  const payload = { space, output: state.output, ...(kind === "base_trim" ? SP.structuralBed() : {}) };
+  const payload = {
+    space, output: state.output,
+    ...(kind === "base_trim" ? SP.structuralBed() : {}),
+    ...(jointTest ? { joint_test_sample: true } : {}),
+  };
   SP.structuralBusy = true;
   SP.renderSpaceInfo();
   try {
     if (printing) {
       const result = await api("/api/space/structural-print", { ...payload, slicer_path: state.slicer?.path || null });
       DL.requireSpaceContext(context);
-      const names = (result.files || []).map(file => String(file).split(/[\\/]/).pop());
-      toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\n${names.join("\n")}`, false, 7000);
+      if (result.partial) {
+        // Files are a real side effect even though the slicer step failed -
+        // never claim "Sent to Bambu Studio" when it did not open.
+        toast(result.error || `${label} files were saved, but the slicer did not open.`, true, 8000);
+      } else {
+        const names = (result.files || []).map(file => String(file).split(/[\\/]/).pop());
+        toast(`Sent to ${state.slicer?.name || "Bambu Studio"}!\n${names.join("\n")}`, false, 7000);
+      }
     } else {
       const result = await api("/api/space/structural-generate", payload);
       DL.requireSpaceContext(context);
@@ -2575,7 +2590,7 @@ SP.runStructural = async mode => {
   }
 };
 SP.saveStructural = () => SP.runStructural("save");
-SP.printStructural = () => SP.runStructural("print");
+SP.printStructural = event => SP.runStructural("print", event);
 
 SP.renderStructuralActions = () => {
   const box = document.getElementById("space-structural");

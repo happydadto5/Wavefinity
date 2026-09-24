@@ -140,7 +140,7 @@ from organizer_product_rules import (
     DRAWER_HARD_CLEARANCE_MM,
     ORDINARY_BIN_MIN_HEIGHT_MM,
 )
-from organizer_space_outputs import STORAGE_BOX, structural_design, structural_kind
+from organizer_space_outputs import BASE_TRIM, STORAGE_BOX, structural_design, structural_kind
 from organizer_spaces import inventory_enabled, space_routes
 from organizer_app import (
     APP_DIR,
@@ -3053,6 +3053,17 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if HOSTED:
         raise ValueError("Hosted Wavefinity saves generated files to your selected folder instead.")
     target = str(payload.get("target", "bin"))
+
+    # Preflight: a missing/invalid slicer must fail before any generation
+    # file is written, so a bin 3MF is never created only to be orphaned by
+    # an avoidable slicer-not-found error.
+    custom = payload.get("slicer_path")
+    slicer_path = detect_bambu_studio(custom)
+    if slicer_path is None or not slicer_path.is_file():
+        raise ValueError(
+            "Bambu Studio was not found. Please locate your Bambu Studio executable in settings or install Bambu Studio."
+        )
+
     if target == "connector":
         gen_result = connector_payload(payload)
     elif target == "sampler":
@@ -3096,20 +3107,34 @@ def print_payload(payload: dict[str, Any]) -> dict[str, Any]:
         and not has_lid
         and not is_base_trim
     ):
-        connector_files = _extract_generated_files(connector_payload(payload))
+        # The bin file already exists on disk at this point, a real external
+        # side effect. A connector failure here must be reported truthfully
+        # as a partial success, never erased by letting the exception escape.
+        try:
+            connector_files = _extract_generated_files(connector_payload(payload))
+        except Exception as error:
+            return {
+                "partial": True,
+                "error": f"Bin files were saved, but connectors could not be generated: {error}",
+                "partial_stage": "connectors",
+                "design_files": [str(f) for f in design_files],
+                "files": [str(f) for f in files],
+            }
         files.extend(connector_files)
 
     if not files:
         raise RuntimeError("No 3MF files were generated to send to Bambu Studio.")
 
-    custom = payload.get("slicer_path")
-    slicer_path = detect_bambu_studio(custom)
-    if slicer_path is None or not slicer_path.is_file():
-        raise ValueError(
-            "Bambu Studio was not found. Please locate your Bambu Studio executable in settings or install Bambu Studio."
-        )
-
-    project_path = launch_slicer(slicer_path, files)
+    try:
+        project_path = launch_slicer(slicer_path, files)
+    except Exception as error:
+        return {
+            "partial": True,
+            "error": f"Files were saved, but Bambu Studio did not open: {error}",
+            "partial_stage": "slicer",
+            "design_files": [str(f) for f in design_files],
+            "files": [str(f) for f in files],
+        }
 
     # Printed means the slicer really opened it: log the copy only now.
     if (
@@ -3177,10 +3202,19 @@ def structural_generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def structural_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Send a Space's Storage Box or Base Trim to the slicer. Never logs an Inventory row."""
-    _kind, design = _structural_request(payload)
+    """Send a Space's Storage Box or Base Trim to the slicer. Never logs an Inventory row.
+
+    Fix 056 D: a hidden ``joint_test_sample`` flag (Ctrl+Shift+click on Print
+    Base Trim) swaps in the existing production joint-fit sample instead of
+    the full Base Trim. It only ever applies to a Base Trim - an impossible
+    request for a Storage Box is ignored rather than routed to unrelated
+    geometry.
+    """
+    kind, design = _structural_request(payload)
+    joint_test = kind == BASE_TRIM and bool(payload.get("joint_test_sample"))
     return print_payload({
-        "design": design, "output": payload.get("output"), "target": "bin",
+        "design": design, "output": payload.get("output"),
+        "target": "base_trim_joint_test" if joint_test else "bin",
         "keep_log": False, "structural_output": True,
         "slicer_path": payload.get("slicer_path"),
     })

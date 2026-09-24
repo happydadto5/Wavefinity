@@ -1582,4 +1582,8 @@ register_setting_interactions("divider", (
         "division_level", "division_labels.shelf", "enable/disable", "divider",
         "Rim-level Divider labels use the Text part's selected-side shelf profile.",
     ),
+    SettingInteraction(
+        "wall_style", "wall_geometry", "auto-adjust", "divider",
+        "Wall style changes wall path/thickness compensation while preserving logical compartments.",
+    ),
 ))

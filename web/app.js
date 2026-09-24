@@ -4646,11 +4646,15 @@ function wallStyleSelect(style) {
 }
 
 // Match Pocket's backend envelope and Bore Wall Only's outward wave reach.
+// The catalog's wall_rules is the one authoritative owner of the wave
+// contract - see sizeBoreToGrid, which already consumes it the same way.
 function pocketWallReach(wall, style) {
   if (style !== "wavy") return wall;
-  const amplitude = 0.4, length = 4;
-  const slope = amplitude * 2 * Math.PI / length;
-  return 2 * amplitude + wall * Math.sqrt(1 + slope * slope) + 0.0001;
+  const wallRules = state.catalog?.wall_rules || {};
+  const amplitude = number(wallRules.wave_amplitude_mm, 0.4);
+  const depthFactor = number(wallRules.wall_depth_factor, 1.181);
+  const waveNoiseFloor = 1e-4;  // ensure wavy troughs never self-intersect
+  return 2 * amplitude + wall * depthFactor + waveNoiseFloor;
 }
 
 function renderDraftFields() {
@@ -6345,7 +6349,8 @@ function sizeSlotToBank(one) {
   if (!(thickness > 0) || !(wall > 0) || !(cosA > 0)) return;
   const count = Math.max(1, Math.round(one.count));
   const pitch = (thickness + wall) / cosA;
-  const waveReach = (opts.wall_style ?? resolved.wall_style) === "wavy" ? 0.8 : 0;
+  const amplitude = number(state.catalog?.wall_rules?.wave_amplitude_mm, 0.4);
+  const waveReach = (opts.wall_style ?? resolved.wall_style) === "wavy" ? 2 * amplitude : 0;
   const acrossNeeded = Math.ceil((count - 1) * pitch + thickness / cosA + 2 * wall + waveReach - 1e-6);
   const along = one.along === "y" ? "y" : "x";
   const acrossKey = along === "x" ? "depth" : "width";
@@ -6816,13 +6821,15 @@ function updateDraftFromFields(event) {
       }
     }
     if (info.kind === "pocket" && key === "wall") {
+      // Use the live pre-edit wall/reach already captured at the top of this
+      // event (`wall`/`oldStyle`/`oldReach`), never the async
+      // draftResolvedOptions - that can still lag the live draft while a
+      // prior 220 ms preview is in flight, which would subtract the wrong
+      // prior reach on rapid edits and drift the inside Width/Length.
       const newWall = number(one.options.wall, 1.6);
-      const prevWall = number(state.draftResolvedOptions?.wall, 1.6);
-      const style = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style ?? "straight";
-      const prevReach = pocketWallReach(prevWall, style);
-      const nextReach = pocketWallReach(newWall, style);
-      const innerW = Math.max(0.1, oldWidth - 2 * prevReach);
-      const innerD = Math.max(0.1, oldDepth - 2 * prevReach);
+      const nextReach = pocketWallReach(newWall, oldStyle);
+      const innerW = Math.max(0.1, oldWidth - 2 * oldReach);
+      const innerD = Math.max(0.1, oldDepth - 2 * oldReach);
       const newW = innerW + 2 * nextReach;
       const newD = innerD + 2 * nextReach;
       one.zone = [cx - newW / 2, cy - newD / 2, cx + newW / 2, cy + newD / 2];
@@ -11703,6 +11710,39 @@ async function printModel(target = "bin", initiatingButton = null) {
       }
     }
     const result = await api("/api/print", payload);
+    if (result.partial) {
+      // Bin/design files are a real side effect even though connectors or
+      // the slicer step failed after them: never mark this row Printed, and
+      // never bury the truth of what was actually saved.
+      let savedStatusFailed = null;
+      if (designSpaceContext) {
+        try {
+          DL.requireSpaceContext(designSpaceContext);
+          if (state.designInventoryId !== designRowId ||
+              JSON.stringify(state.design) !== JSON.stringify(payload.design))
+            throw new Error("This bin changed during the slicer handoff.");
+          const names = [...new Set((result.design_files || []).map(file => String(file).split(/[\\/]/).pop())
+            .filter(name => /\.3mf$/i.test(name)))];
+          const saved = await DL.inventoryCall("/api/drawer/design-source/status", {
+            row_id: designRowId, action: "saved", file: names.join(", "), design: payload.design,
+          }, { context: designSpaceContext });
+          DL.adopt(saved);
+          DL.emit();
+        } catch (error) {
+          savedStatusFailed = error;
+        }
+      }
+      const partialMessage = result.error || "Files were saved, but the print could not finish.";
+      setError(partialMessage);
+      toast(
+        savedStatusFailed
+          ? `${partialMessage}\n\nSaved status could not be recorded: ${savedStatusFailed.message}`
+          : partialMessage,
+        true,
+        9000,
+      );
+      return;
+    }
     if (designSpaceContext) {
       try {
         DL.requireSpaceContext(designSpaceContext);

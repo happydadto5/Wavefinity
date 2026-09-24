@@ -112,6 +112,8 @@ register_setting_interactions("slot", (
                        "Slot thickness changes the pitch and required run length."),
     SettingInteraction("wall", "zone", "auto-adjust", "slot-sizing",
                        "Wall thickness changes the bank footprint."),
+    SettingInteraction("wall_style", "zone", "auto-adjust", "slot-sizing",
+                       "Wall style changes the required bank footprint."),
     SettingInteraction("angle", "zone.run", "auto-adjust", "slot-sizing",
                        "Slot angle changes the projected pitch and required run length."),
 ))

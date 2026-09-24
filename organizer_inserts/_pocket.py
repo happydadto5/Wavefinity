@@ -170,6 +170,8 @@ register_setting_interactions("pocket", (
                        "A user-edited Height wins and lowers Recess to keep a 2 mm floor."),
     SettingInteraction("wall", "zone", "auto-adjust", "pocket-sizing",
                        "Wall changes preserve entered inside size by resizing the outside zone."),
+    SettingInteraction("wall_style", "zone", "auto-adjust", "pocket-sizing",
+                       "Wall style changes shell reach while preserving inside Width/Length."),
     SettingInteraction("zone", "rounding", "default", "pocket",
                        "Automatic rounding follows the smaller pocket side and wall."),
 ))

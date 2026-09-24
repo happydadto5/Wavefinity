@@ -1786,33 +1786,42 @@ class WebApplicationTests(unittest.TestCase):
             project = Path(temp_dir) / "Wavefinity Print.3mf"
             with (
                 patch.object(wavefinity_web, "generate_payload", return_value=gen) as generate,
-                patch.object(wavefinity_web, "connector_payload", return_value=conn),
+                patch.object(wavefinity_web, "connector_payload", return_value=conn) as connector_gen,
                 patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
                 patch.object(wavefinity_web, "launch_slicer", return_value=project),
                 patch.object(wavefinity_web, "inventory_enabled", return_value=True),
                 patch.object(wavefinity_web, "append_bin") as append,
             ):
+                # No target means bin only: connectors are never generated.
                 response = wavefinity_web.print_payload({"design": default_design(), "output": temp_dir})
             self.assertTrue(generate.call_args.kwargs["suppress_local_inventory"])
+            connector_gen.assert_not_called()
             append.assert_called_once()
             self.assertEqual(append.call_args.kwargs["qty"], 1)
             self.assertEqual(append.call_args.kwargs["file"], "Box.3mf")
             self.assertEqual(response["project"], str(project))
-            self.assertEqual(len(response["files"]), 2)
+            self.assertEqual(len(response["files"]), 1)
 
-    def test_print_payload_launch_failure_logs_nothing(self):
+    def test_print_payload_launch_failure_reports_truthful_partial_save(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fake_exe, box, connector, gen, conn = self._print_setup(temp_dir)
             with (
                 patch.object(wavefinity_web, "generate_payload", return_value=gen),
-                patch.object(wavefinity_web, "connector_payload", return_value=conn),
+                patch.object(wavefinity_web, "connector_payload", return_value=conn) as connector_gen,
                 patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe),
                 patch.object(wavefinity_web, "launch_slicer", side_effect=RuntimeError("no")),
                 patch.object(wavefinity_web, "inventory_enabled", return_value=True),
                 patch.object(wavefinity_web, "append_bin") as append,
             ):
-                with self.assertRaises(RuntimeError):
-                    wavefinity_web.print_payload({"design": default_design(), "output": temp_dir})
+                # The bin file already saved is a real side effect: a later
+                # slicer failure must be reported as truthful partial success,
+                # never as an ordinary exception that erases it.
+                response = wavefinity_web.print_payload({"design": default_design(), "output": temp_dir})
+            connector_gen.assert_not_called()
+            self.assertTrue(response["partial"])
+            self.assertEqual(response["partial_stage"], "slicer")
+            self.assertEqual(response["design_files"], [str(box.resolve())])
+            self.assertNotIn("slicer", response)
             append.assert_not_called()
 
     def test_generate_payload_suppression_and_hosted_qty_zero(self):
@@ -1896,6 +1905,7 @@ class WebApplicationTests(unittest.TestCase):
                 response = wavefinity_web.print_payload({
                     "design": default_design(),
                     "output": temp_dir,
+                    "target": "all",
                 })
                 self.assertEqual(response["output"], str(temp_dir))
                 self.assertEqual(response["files"], [
@@ -1950,6 +1960,7 @@ class WebApplicationTests(unittest.TestCase):
                 wavefinity_web.print_payload({
                     "design": default_design(),
                     "output": temp_dir,
+                    "target": "all",
                     "join_mode": "base_trim",
                 })
                 mock_connector.assert_called_once()
@@ -2001,7 +2012,10 @@ class WebApplicationTests(unittest.TestCase):
                         patch.object(wavefinity_web, "launch_slicer"),
                         patch.object(wavefinity_web, "inventory_enabled", return_value=False),
                     ):
-                        wavefinity_web.print_payload({"design": design, "output": temp_dir})
+                        # target "all" is connector-inclusive Print's real
+                        # request; only the b4b/lid/base-trim exclusion below
+                        # should keep connector_payload from being called.
+                        wavefinity_web.print_payload({"design": design, "output": temp_dir, "target": "all"})
                         mock_connector.assert_not_called()
 
     def _node_or_skip(self):
@@ -3709,8 +3723,10 @@ class WebServerTests(unittest.TestCase):
         self.assertIn(b'id="part-name"', body)
         self.assertIn(b"Connectors", body)
         self.assertIn(b">Save folder</label>", body)
-        self.assertIn(b'id="print-bin"', body)
-        self.assertIn(b">Print to Bambu Studio</button>", body)
+        self.assertIn(b'id="print-with-connectors"', body)
+        self.assertIn(b">Print with Connectors</button>", body)
+        self.assertIn(b'id="print-without-connectors"', body)
+        self.assertIn(b">Print without Connectors</button>", body)
         self.assertIn(b'id="generate-all"', body)
         self.assertIn(b"Save Bin + Connectors", body)
         self.assertIn(b'id="generate-bin"', body)
