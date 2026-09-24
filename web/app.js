@@ -3726,23 +3726,30 @@ function markBinAxisManual(_axis) {
 }
 
 let pendingNudgeHistory = null;
-const commitNudge = debounce(async () => {
-  if (state.selected === null || !state.draft) {
-    pendingNudgeHistory = null;
-    return;
-  }
-  const historySnapshot = pendingNudgeHistory || clone(state.design);
-  pendingNudgeHistory = null;
+let pendingNudgeDraft = null;
+const commitNudge = debounce(async request => {
+  if (request !== state.draftRequest || state.selected === null || !state.draft) return;
   const index = state.selected;
+  const draft = state.draft;
+  const snapshot = JSON.stringify(draft);
+  const historySnapshot = pendingNudgeHistory || clone(state.design);
+  const ownsRequest = () => request === state.draftRequest
+    && state.selected === index
+    && state.draft === draft
+    && JSON.stringify(draft) === snapshot;
   try {
     const result = await api("/api/feature/apply", {
       design: state.design,
-      feature: state.draft,
+      feature: draft,
       index,
     });
+    if (!ownsRequest()) return;
     state.design = result.design;
-    await rememberAppliedPartDefault(result, state.draft);
+    pendingNudgeHistory = null;
+    pendingNudgeDraft = null;
     recordHistory(historySnapshot);
+    await rememberAppliedPartDefault(result, draft);
+    if (request !== state.draftRequest) return;
     state.selected = result.selected;
     if (Number.isInteger(result.selected)) state.draftSourceIndex = result.selected;
     state.draft = clone(state.design.layout.features[state.selected]);
@@ -3750,12 +3757,17 @@ const commitNudge = debounce(async () => {
     renderPlaced();
     updateSelectionButtons();
     await refreshPreview();
+    if (request !== state.draftRequest) return;
     refreshDraft();
     renderLayout2D();
   } catch (error) {
+    if (!ownsRequest()) return;
+    const restoreDraft = pendingNudgeDraft;
+    pendingNudgeHistory = null;
+    pendingNudgeDraft = null;
     toast(error.message, true, 5000);
-    if (state.design?.layout?.features?.[index]) {
-      state.draft = clone(state.design.layout.features[index]);
+    if (restoreDraft || state.design?.layout?.features?.[index]) {
+      state.draft = clone(restoreDraft || state.design.layout.features[index]);
       renderDraftFields();
       refreshDraft();
       renderLayout2D();
@@ -4416,11 +4428,14 @@ function cancelPendingDraftWork() {
   refreshDraftSoon.cancel();
   commitNudge.cancel();
   pendingNudgeHistory = null;
+  pendingNudgeDraft = null;
   state.kindRequest += 1;
   state.fitRequest += 1;
   state.nestTraceRequest += 1;
   state.nestRetraceRequest += 1;
   state.draftRequest += 1;
+  state.previewRequest += 1;
+  cancelPreviewWait();
 }
 
 function resetNestPhotoSession() {
@@ -8011,7 +8026,6 @@ function beginDesignMutation() {
   cancelPendingDraftWork();
   recordHistory(beforeForm);
   state.designMutationBusy = true;
-  state.previewRequest += 1;
   setMutationSurfacesInert(true);
   mutationControls().forEach(control => control.disabled = true);
   updateSelectionButtons();
@@ -8539,8 +8553,11 @@ function sizeBoreBaseToBinOnce() {
 }
 
 async function sizeBoreHeightToBinOnce() {
-  if (state.draft?.kind !== "bore") return;
-  const candidate = clone(state.draft);
+  const draft = state.draft;
+  if (draft?.kind !== "bore") return;
+  const snapshot = JSON.stringify(draft);
+  const request = ++state.draftRequest;
+  const candidate = clone(draft);
   candidate.options ||= {};
   candidate.options.auto_height = true;
   try {
@@ -8549,19 +8566,25 @@ async function sizeBoreHeightToBinOnce() {
       feature: candidate,
       index: Number.isInteger(draftCommitIndex()) ? draftCommitIndex() : undefined,
     });
+    if (request !== state.draftRequest
+        || state.draft !== draft
+        || JSON.stringify(draft) !== snapshot) return;
     const resolvedHeight = number(result.resolved_options?.height, NaN);
     if (!Number.isFinite(resolvedHeight)) {
       throw new Error("Could not resolve a legal Bore height for this bin.");
     }
     markDraftChanged();
-    state.draft.options ||= {};
-    state.draft.options.height = resolvedHeight;
-    state.draft.options.auto_height = false;
+    draft.options ||= {};
+    draft.options.height = resolvedHeight;
+    draft.options.auto_height = false;
     state.draftAutoCommit = true;
     renderDraftFields();
     updateSelectionButtons();
     refreshDraftSoon();
   } catch (error) {
+    if (request !== state.draftRequest
+        || state.draft !== draft
+        || JSON.stringify(draft) !== snapshot) return;
     toast(error.message, true, 5000);
   }
 }
@@ -11778,6 +11801,11 @@ function handleLayoutArrowKeys(event) {
     toast(dividerLockMessage(), true, 6500);
     return;
   }
+  if (!pendingNudgeHistory) {
+    pendingNudgeHistory = clone(state.design);
+    pendingNudgeDraft = clone(state.draft);
+  }
+  const request = ++state.draftRequest;
   const z = feature.zone;
   const roundCoord = val => Math.round(val * 1000) / 1000;
   feature.zone = [
@@ -11787,9 +11815,6 @@ function handleLayoutArrowKeys(event) {
     roundCoord(z[3] + dy),
   ];
 
-  if (state.design.layout.features[state.selected]) {
-    state.design.layout.features[state.selected].zone = clone(feature.zone);
-  }
   if (feature.kind === "text" && feature.options?.auto) {
     feature.options.auto = false;
     const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
@@ -11813,10 +11838,7 @@ function handleLayoutArrowKeys(event) {
   updateNudgeUI();
   renderLayout2D();
 
-  if (!pendingNudgeHistory) {
-    pendingNudgeHistory = clone(state.design);
-  }
-  commitNudge();
+  commitNudge(request);
 }
 
 async function saveDesign() {
