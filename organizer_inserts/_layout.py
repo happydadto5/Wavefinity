@@ -264,7 +264,8 @@ def feature_min_footprint(
         if style in ENVELOPE_STYLES:
             env = wall_only_envelope(
                 item.profile, held, wall,
-                "wavy" if style == "wavy_base" else str(options.get("wall_style", "wavy")))
+                "wavy" if style == "wavy_base" else str(options.get("wall_style", "wavy")),
+                foot=style == "wall_only")
             raw_c, raw_r = one.options.get("columns"), one.options.get("rows")
             columns = max(1, int(round(float(raw_c)))) if raw_c is not None else 1
             rows = max(1, int(round(float(raw_r)))) if raw_r is not None else 1

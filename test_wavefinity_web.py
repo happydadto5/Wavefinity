@@ -380,6 +380,10 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn("2 * amplitude + wall * depthFactor + waveNoiseFloor", sizing)
         # Round profiles use a conservative circumscribed clear span (256 sides).
         self.assertIn("held / Math.cos(Math.PI / 256)", sizing)
+        # The Wall Only base foot (WALL_ONLY_FOOT) counts on both outside sides,
+        # for Wall Only only - never Wavy Base.
+        self.assertIn('wallOnlyFoot = boreStyle === "wall_only" ? 0.5 : 0', sizing)
+        self.assertIn("2 * shellReach + 2 * wallOnlyFoot", sizing)
 
     def test_hex_bit_bore_default_holds_the_bit_and_stands_upright(self):
         design = default_design()
