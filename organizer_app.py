@@ -23,6 +23,7 @@ from organizer_engine import (
     BoxSpec,
     ConnectorSpec,
     EdgeMountSpec,
+    EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM,
     LidSpec,
     StackSpec,
     LiftGrabberSpec,
@@ -2785,7 +2786,11 @@ def design_from_dict(
             label_length_mode=str(edge_mount_raw.get("label_length_mode", "full")),
             label_thickness_mm=float(edge_mount_raw.get("label_thickness_mm", 2.0)),
             label_raised=bool(edge_mount_raw.get("label_raised", False)),
-            label_text_depth_mm=float(edge_mount_raw.get("label_text_depth_mm", TEXT_DEPTH)),
+            # Fix 058 Correction 1, C1.4D: a missing/new Edge Mount value uses
+            # the Edge-Mount-only 0.6 mm default, never the global floor-label
+            # TEXT_DEPTH; an explicitly saved value (including an old 0.4 mm
+            # design) is preserved exactly as saved.
+            label_text_depth_mm=float(edge_mount_raw.get("label_text_depth_mm", EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM)),
             label_flip=bool(edge_mount_raw.get("label_flip", False)),
             standoff_ribs_enabled=standoff_ribs_enabled,
             standoff_rib_count=standoff_rib_count,

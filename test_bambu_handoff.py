@@ -128,6 +128,30 @@ class StageBambuInputsTests(unittest.TestCase):
         self.assertTrue(staged[0].is_file())
         self.assertTrue(recent.is_dir())
 
+    def test_extruder_slot_mismatch_is_rejected_before_launch_and_cleaned_up(self):
+        # Fix 058 Correction 1, C1.3: simulate a staged copy that failed to
+        # preserve its non-default extruder-slot assignment(s) by returning a
+        # different count for the staged path than for the source path. The
+        # handoff must fail before Bambu is ever launched, and the
+        # now-incomplete handoff directory must be cleaned up - neither the
+        # source nor the staged package may be mutated to "fix" it.
+        import unittest.mock as mock
+
+        real_count = bh._second_colour_assignment_count
+
+        def fake_count(path):
+            n = real_count(path)
+            if Path(path).name.startswith("0001 -"):
+                return 0  # staged copy reports a mismatch vs. the source's 1
+            return n
+
+        with mock.patch.object(bh, "_second_colour_assignment_count", side_effect=fake_count):
+            with self.assertRaises(ValueError) as ctx:
+                bh.stage_bambu_inputs([self.b], handoff_root=self.root)
+        self.assertIn("extruder-slot", str(ctx.exception))
+        # The incomplete handoff directory created for this launch is removed.
+        self.assertEqual(list(self.root.iterdir()) if self.root.is_dir() else [], [])
+
     def test_no_files_raises(self):
         with self.assertRaises(ValueError):
             bh.stage_bambu_inputs([], handoff_root=self.root)

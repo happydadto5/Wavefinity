@@ -1341,6 +1341,14 @@ function populateEdgeMountChoices() {
   }
 }
 
+// Fix 058 Correction 1, C1.4B/G: the Label selector (None / Separate Part /
+// Integrated) is UI-only - it is derived from the existing label_enabled/
+// label_type fields, never persisted as its own key.
+function edgeMountLabelMode(edgeMount) {
+  if (!edgeMount?.label_enabled) return "none";
+  return edgeMount.label_type === "integrated" ? "integrated" : "separate";
+}
+
 // Mirrors readLiftGrabberForm/readStackForm: only resets an *existing* key to
 // defaults when both subsections are off, so a design that never touched
 // Edge Mount keeps no key at all and design_to_dict omits the block while
@@ -1348,13 +1356,18 @@ function populateEdgeMountChoices() {
 // toggling one off never erases the other's settings.
 function readEdgeMountForm(design) {
   design.box = design.box || {};
-  const labelEnabled = Boolean($("#edge-mount-label-enabled")?.checked);
+  const labelMode = $("#edge-mount-label-mode")?.value || "none";
+  const labelEnabled = labelMode !== "none";
   const holesEnabled = Boolean($("#edge-mount-holes-enabled")?.checked);
   if (!labelEnabled && !holesEnabled) {
     if (design.box.edge_mount) design.box.edge_mount = { ...EDGE_MOUNT_DEFAULTS };
     return;
   }
   const current = { ...EDGE_MOUNT_DEFAULTS, ...(design.box.edge_mount || {}) };
+  // Label=None preserves the previously chosen label_type (Separate/
+  // Integrated) rather than resetting it, just like the former enable
+  // checkbox left it untouched - re-enabling later restores the same choice.
+  const labelType = labelMode === "none" ? current.label_type : labelMode;
   const projection = number(
     $("#edge-mount-label-projection-mm")?.value, current.label_projection_mm,
   );
@@ -1374,15 +1387,23 @@ function readEdgeMountForm(design) {
   }
   const spacingMode = $("#edge-mount-spacing-mode")?.value || "auto";
   const ribCountMode = $("#edge-mount-standoff-rib-count-mode")?.value || "auto";
+  // Fix 058 Correction 1, C1.4C: a Separate Part label is always Inlaid /
+  // Flush - Raised text is not a valid manufacturing state for it, so the
+  // Label style control is hidden entirely and label_raised is forced false
+  // whenever Separate Part is selected. Label=None preserves whatever the
+  // Style control last held, same as every other detail field.
+  const labelRaised = labelType === "separate"
+    ? false
+    : labelMode === "none" ? current.label_raised : $("#edge-mount-label-style")?.value === "raised";
   design.box.edge_mount = {
     side: $("#edge-mount-side")?.value || "front",
     label_enabled: labelEnabled,
     label_text: $("#edge-mount-label-text")?.value || "",
-    label_type: $("#edge-mount-label-type")?.value || current.label_type,
+    label_type: labelType,
     label_projection_mm: projection,
     label_length_mode: $("#edge-mount-label-length-mode")?.value || "full",
     label_thickness_mm: thickness,
-    label_raised: $("#edge-mount-label-style")?.value === "raised",
+    label_raised: labelRaised,
     label_text_depth_mm: number($("#edge-mount-label-depth")?.value, current.label_text_depth_mm),
     label_flip: Boolean($("#edge-mount-label-flip")?.checked),
     standoff_ribs_enabled: Boolean($("#edge-mount-standoff-ribs-enabled")?.checked),
@@ -1416,10 +1437,9 @@ function resolvedEdgeMountAccessDiameter(edgeMount) {
 function syncEdgeMountControls() {
   const edgeMount = { ...EDGE_MOUNT_DEFAULTS, ...(state.design?.box?.edge_mount || {}) };
   if ($("#edge-mount-side")) $("#edge-mount-side").value = edgeMount.side;
-  if ($("#edge-mount-label-enabled")) $("#edge-mount-label-enabled").checked = edgeMount.label_enabled;
+  if ($("#edge-mount-label-mode")) $("#edge-mount-label-mode").value = edgeMountLabelMode(edgeMount);
   if ($("#edge-mount-holes-enabled")) $("#edge-mount-holes-enabled").checked = edgeMount.holes_enabled;
   if ($("#edge-mount-label-text")) $("#edge-mount-label-text").value = edgeMount.label_text;
-  if ($("#edge-mount-label-type")) $("#edge-mount-label-type").value = edgeMount.label_type;
   if ($("#edge-mount-label-length-mode")) $("#edge-mount-label-length-mode").value = edgeMount.label_length_mode;
   if ($("#edge-mount-label-style")) $("#edge-mount-label-style").value = edgeMount.label_raised ? "raised" : "flush";
   if ($("#edge-mount-label-depth")) $("#edge-mount-label-depth").value = fmt(edgeMount.label_text_depth_mm);
@@ -1468,13 +1488,18 @@ function syncEdgeMountControls() {
     $("#edge-mount-spacing-mm").value = fmt(edgeMount.hole_spacing_mm);
   }
 
-  if ($("#edge-mount-label-panel")) $("#edge-mount-label-panel").hidden = !edgeMount.label_enabled;
-  if ($("#edge-mount-holes-panel")) $("#edge-mount-holes-panel").hidden = !edgeMount.holes_enabled;
+  // Fix 058 Correction 1, C1.4: the Label and Screw Mounting cards are
+  // always visible; only their detail groups hide/show, driven by the Label
+  // selector and the Screw Mounting checkbox respectively.
+  const labelMode = edgeMountLabelMode(edgeMount);
+  if ($("#edge-mount-label-details")) $("#edge-mount-label-details").hidden = labelMode === "none";
+  if ($("#edge-mount-holes-details")) $("#edge-mount-holes-details").hidden = !edgeMount.holes_enabled;
+  if ($("#edge-mount-label-style-row")) $("#edge-mount-label-style-row").hidden = labelMode !== "integrated";
   if ($("#edge-mount-standoff-rib-controls")) {
-    $("#edge-mount-standoff-rib-controls").hidden = !edgeMount.label_enabled || edgeMount.label_type !== "separate";
+    $("#edge-mount-standoff-rib-controls").hidden = labelMode !== "separate";
   }
   if ($("#edge-mount-integrated-support-warning")) {
-    $("#edge-mount-integrated-support-warning").hidden = !edgeMount.label_enabled || edgeMount.label_type !== "integrated";
+    $("#edge-mount-integrated-support-warning").hidden = labelMode !== "integrated";
   }
   if ($("#edge-mount-hole-orientation-row")) $("#edge-mount-hole-orientation-row").hidden = number(edgeMount.hole_count) <= 1;
 }
@@ -1482,14 +1507,13 @@ function syncEdgeMountControls() {
 function syncEdgeMountEditorVisibility() {
   const scratch = { box: { edge_mount: { ...EDGE_MOUNT_DEFAULTS, ...(state.design?.box?.edge_mount || {}) } } };
   readEdgeMountForm(scratch);
-  const edgeMount = scratch.box.edge_mount || EDGE_MOUNT_DEFAULTS;
-  $("#edge-mount-label-panel").hidden = !$("#edge-mount-label-enabled").checked;
-  $("#edge-mount-holes-panel").hidden = !$("#edge-mount-holes-enabled").checked;
-  const separateLabel = $("#edge-mount-label-type").value === "separate";
-  $("#edge-mount-standoff-rib-controls").hidden = !$("#edge-mount-label-enabled").checked || !separateLabel;
+  const labelMode = $("#edge-mount-label-mode")?.value || "none";
+  $("#edge-mount-label-details").hidden = labelMode === "none";
+  $("#edge-mount-holes-details").hidden = !$("#edge-mount-holes-enabled").checked;
+  if ($("#edge-mount-label-style-row")) $("#edge-mount-label-style-row").hidden = labelMode !== "integrated";
+  $("#edge-mount-standoff-rib-controls").hidden = labelMode !== "separate";
   if ($("#edge-mount-integrated-support-warning")) {
-    $("#edge-mount-integrated-support-warning").hidden = !$("#edge-mount-label-enabled").checked
-      || $("#edge-mount-label-type").value !== "integrated";
+    $("#edge-mount-integrated-support-warning").hidden = labelMode !== "integrated";
   }
   $("#edge-mount-standoff-rib-count-row").hidden = $("#edge-mount-standoff-rib-count-mode").value !== "manual";
   $("#edge-mount-spacing-custom-row").hidden = $("#edge-mount-spacing-mode").value !== "custom";
@@ -2522,6 +2546,10 @@ function syncSurfaceControls() {
 }
 
 const LIFT_GRABBER_DEFAULTS = { enabled: false, size: "medium", location: "sides" };
+// Fix 058 Correction 1, C1.4D: 0.6 mm is Edge Mount's own default text depth
+// for a new/missing value - this never changes the global text-depth default
+// used by other label/text systems (floor labels, lid labels, ...).
+const EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM = 0.6;
 const EDGE_MOUNT_DEFAULTS = {
   side: "front",
   label_enabled: false,
@@ -2531,7 +2559,7 @@ const EDGE_MOUNT_DEFAULTS = {
   label_length_mode: "full",
   label_thickness_mm: 2,
   label_raised: false,
-  label_text_depth_mm: 0.4,
+  label_text_depth_mm: EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM,
   label_flip: false,
   standoff_ribs_enabled: true,
   standoff_rib_count: null,
@@ -3534,7 +3562,7 @@ function wireControls() {
 
   const edgeMountChangeIds = [
     "#edge-mount-side",
-    "#edge-mount-label-type", "#edge-mount-label-length-mode", "#edge-mount-label-projection",
+    "#edge-mount-label-length-mode", "#edge-mount-label-projection",
     "#edge-mount-label-style", "#edge-mount-label-flip",
     "#edge-mount-standoff-ribs-enabled", "#edge-mount-standoff-rib-count-mode",
     "#edge-mount-hole-count", "#edge-mount-hole-orientation", "#edge-mount-access-diameter",
@@ -3544,19 +3572,35 @@ function wireControls() {
     syncEdgeMountEditorVisibility();
     changedDesign();
   }));
-  ["#edge-mount-label-enabled", "#edge-mount-holes-enabled"].forEach(selector =>
-    $(selector)?.addEventListener("change", event => {
-      const labelEnabled = $("#edge-mount-label-enabled").checked;
-      const holesEnabled = $("#edge-mount-holes-enabled").checked;
-      if (state.modifierEditing === "edge_mount" && edgeMountActive() &&
-          !labelEnabled && !holesEnabled) {
-        event.currentTarget.checked = true;
-        toast("Edge Mount needs Label or Screw Mounting. Use Delete to remove Edge Mount.", true, 6000);
-        return;
-      }
-      syncEdgeMountEditorVisibility();
-      changedDesign();
-    }));
+  // Fix 058 Correction 1, C1.4B/E: the Label selector's None state and the
+  // Screw Mounting checkbox's off state together replace the former pair of
+  // top-level enable checkboxes. An Edge Mount already active in the saved
+  // design must still keep at least one of the two on while its editor is
+  // open - switching both off here reverts the just-made change and points
+  // the user at Delete instead. A brand-new, not-yet-saved Edge Mount may
+  // freely sit at Label=None + Screw Mounting off while the editor is open.
+  $("#edge-mount-label-mode")?.addEventListener("change", event => {
+    const holesEnabled = Boolean($("#edge-mount-holes-enabled")?.checked);
+    if (state.modifierEditing === "edge_mount" && edgeMountActive() &&
+        event.currentTarget.value === "none" && !holesEnabled) {
+      event.currentTarget.value = edgeMountLabelMode(state.design.box.edge_mount);
+      toast("Edge Mount needs Label or Screw Mounting. Use Delete to remove Edge Mount.", true, 6000);
+      return;
+    }
+    syncEdgeMountEditorVisibility();
+    changedDesign();
+  });
+  $("#edge-mount-holes-enabled")?.addEventListener("change", event => {
+    const labelMode = $("#edge-mount-label-mode")?.value || "none";
+    if (state.modifierEditing === "edge_mount" && edgeMountActive() &&
+        labelMode === "none" && !event.currentTarget.checked) {
+      event.currentTarget.checked = true;
+      toast("Edge Mount needs Label or Screw Mounting. Use Delete to remove Edge Mount.", true, 6000);
+      return;
+    }
+    syncEdgeMountEditorVisibility();
+    changedDesign();
+  });
   const edgeMountInputIds = [
     "#edge-mount-label-text", "#edge-mount-label-projection-mm", "#edge-mount-label-thickness-mm",
     "#edge-mount-label-depth", "#edge-mount-standoff-rib-count", "#edge-mount-screw-diameter", "#edge-mount-access-diameter",
@@ -4014,7 +4058,10 @@ async function addModifier(kind) {
           Math.max(number(rules.min_projection_mm, 5), seededProjection),
         ),
       } : {}),
-      label_enabled: true,
+      // Fix 058 Correction 1, C1.4B: a new Edge Mount defaults its Label
+      // selector to None (and Screw Mounting stays off) rather than opening
+      // pre-enabled - text is always blank regardless.
+      label_enabled: false,
       holes_enabled: false,
       label_text: "",
     };
@@ -4142,7 +4189,11 @@ function syncDraftEditorIdentity(kind, info) {
   description.textContent = info.description;
 
   title.hidden = isNest || kind === "bore";
-  description.hidden = isNest;
+  // Fix 058 Correction 1, C1.4A: the palette keeps its short description for
+  // discoverability, but the Edge Mount editor's own Label/Screw Mounting
+  // hierarchy makes the redundant "Add a label and/or screw mounting..."
+  // sentence unnecessary once the editor is open.
+  description.hidden = isNest || kind === "edge_mount";
 
   $(".support-editor")?.classList.toggle("nest-editor", isNest);
 }
@@ -7404,8 +7455,9 @@ async function saveCurrentPart() {
 async function saveEdgeMountPart() {
   const kind = state.modifierEditing;
   if (!kind) return;
-  if (kind === "edge_mount" && !$("#edge-mount-label-enabled")?.checked && !$("#edge-mount-holes-enabled")?.checked) {
-    toast("Enable Label or Screw Mounting first.", true, 5000);
+  if (kind === "edge_mount" && ($("#edge-mount-label-mode")?.value || "none") === "none" &&
+      !$("#edge-mount-holes-enabled")?.checked) {
+    toast("Choose a Label or turn on Screw Mounting first.", true, 5000);
     return;
   }
   if (!beginDesignMutation()) return;
@@ -7562,14 +7614,16 @@ function updateSelectionButtons() {
     const active = button.classList.contains("active");
     button.disabled = busy || (hasPhotoNest && !isModifier);
     button.classList.toggle("added", alreadyAdded && !active);
-    button.classList.toggle("has-state", active || alreadyAdded);
+    // "Editing"/"Setting up" are edit-state cues, not duplicate presence
+    // counts - an already-present, non-editing tile shows no state label at
+    // all; the green "added" border alone is the presence cue.
+    button.classList.toggle("has-state", active);
     const stateLabel = $(".support-choice-state", button);
     if (stateLabel) {
-      stateLabel.hidden = !active && !alreadyAdded;
+      stateLabel.hidden = !active;
       const settingUpNest = active && button.dataset.kind === "nest" &&
         state.draft?.kind === "nest" && !state.draft.contour;
-      stateLabel.textContent = settingUpNest ? "Setting up"
-        : active ? "Editing" : alreadyAdded ? `${count} added` : "";
+      stateLabel.textContent = settingUpNest ? "Setting up" : active ? "Editing" : "";
     }
     if (isModifier) {
       button.title = alreadyAdded

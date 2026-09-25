@@ -512,7 +512,15 @@ opening the folder chooser, or cancelling it never creates
 `Documents/Wavefinity` or any custom root - only an actual Create New Space
 does. Choosing a different parent there (or an unavailable saved parent being
 repaired) validates that the folder already exists and saves its absolute
-path, without creating its `Wavefinity` child. Hosted Wavefinity is
+path, without creating its `Wavefinity` child. If an explicit saved
+`space_parent` is no longer usable, automatic *Create New Space* refuses to
+create (with a concise, actionable error) rather than silently falling back
+to Documents - the saved preference is left untouched, and the user repairs
+the location with **Change…** on Welcome; the very next Create then succeeds
+under the newly chosen parent, no restart needed. A brand-new user with no
+explicit `space_parent` is unaffected and still gets the ordinary
+non-blocking Documents default. Opening or recovering an existing/recent
+Space remains independent of this guard. Hosted Wavefinity is
 unaffected - it keeps its existing per-folder browser File System Access
 behavior.
 
@@ -907,7 +915,12 @@ plate and AMS settings. A source 3MF carrying an embedded
 `project_settings.config`/`print_profile.config`/`print_setting_*`/
 `process_settings_*.config`/`filament_settings_*.config`/
 `machine_settings_*.config` member is refused before handoff with a clear
-error, never silently stripped. For a multi-file Bambu batch, if direct GUI
+error, never silently stripped. After copying a safe source, if it carries
+one or more non-default (not slot 1) extruder-slot assignments,
+`stage_bambu_inputs` compares the staged copy's assignment count against the
+source's before Bambu is ever launched; a mismatch fails the handoff and
+removes the incomplete handoff directory rather than launching Bambu or
+"fixing" either file. For a multi-file Bambu batch, if direct GUI
 import does not already arrange the plate, use Bambu Studio's own **Arrange**
 command (keyboard **A** where supported) — Wavefinity does not fall back to
 `--arrange --export-3mf` and has no plate-packing engine of its own. Custom
@@ -1476,43 +1489,64 @@ uses) faces the support. That one **side** setting controls both
 subsections at once - there are no separate mounting-side and label-side
 choices.
 
-- **Label** - **Separate part** is the new-design default: the projecting
-  plate prints as its own **Edge Mount Label** file on one continuous shallow
-  snap/slide saddle that follows the selected wall's real wavy shape. It is
-  shown installed in preview. Separate labels also use vertical **Standoff
-  Ribs** on the bin body by default: they match the clip's outer thickness so
-  the bin sits flat on its mounting surface. Auto spaces the ribs across the
-  selected wall, or you can choose 1-20 manually. Existing saved Separate
-  labels keep ribs Off until you enable them. **Integrated** keeps the original fused plate;
-  old saved labels without Label Type reopen as Integrated. **Length** is either Full
-  Side (the wall's real wavy-envelope span) or Text Length (the fitted text
-  plus a 2 mm margin on every side, never wider than Full Side). Projection is
-  one exact 5-200 mm field; a new Edge Mount starts at one-third of the
-  mount-normal bin dimension, clamped to that range. Thickness (0.8-6.0 mm)
-  keeps its named choices. The two free Label corners have a fixed ~1 mm
-  45-degree shave. Lettering reuses the ordinary text engine:
-  Inlaid/Flush (default, 0.4 mm deep, needs the usual minimum backing) or
-  Raised. Text targets a 12 mm cap height and only shrinks - never below
-  6 mm - to fit the plate; if it still will not fit at 6 mm, generation
-  refuses with a plain explanation rather than truncating or enlarging the
-  plate. **Flip text** turns the reading direction 180 degrees for mounting
-  on the underside of a surface.
-- **Screw Mounting** - 1-4 round screw holes through the selected wall
-  (default 2, arranged Horizontal or Vertical, default Horizontal), each
-  paired with a larger round Screwdriver access passage that opens from the
-  *opposite* wall and crosses the cavity to reach it - so a screwdriver can
-  follow the screw in from the far side. Both holes are always round; there
-  are no teardrops, countersinks or counterbores. Default screw diameter is
-  4 mm; new Screwdriver access choices are Small (6 mm), Default (8 mm), or
-  Large (10 mm). Legacy exact access values reopen unchanged when relevant.
-  The first (or only) hole centres
-  12.7 mm (1/2 in) below the top rim by default (**Distance below top**);
-  additional holes use Auto spacing (evenly fit, up to 20 mm apart) or an
-  exact custom spacing. A pattern that cannot fit - too close to a corner,
-  too close to the floor, or two access holes too close together - is
-  refused with the reason, never silently shrunk, reduced or repositioned.
-  Screw Mounting cannot share its mounting or opposite wall with Inside
-  Handles; enabling both on conflicting walls is refused.
+The editor reads in a fixed order: **Mounting side** is the only field above
+both sections; **Label** and **Screw Mounting** are always-visible sections
+below it, each owning its own enable control - Label's is a **Label: None /
+Separate Part / Integrated** selector (its first control), Screw Mounting's
+is a checkbox in its own section header. A brand-new Edge Mount opens at
+Label **None** with Screw Mounting off; turning Label to **None** hides its
+detail fields without erasing their stored values, so re-enabling Label
+later restores the same text/dimensions. Saving still needs at least one of
+the two switched on.
+
+- **Label** - choosing **Separate Part** prints the projecting plate as its
+  own **Edge Mount Label** file on one continuous shallow snap/slide saddle
+  that follows the selected wall's real wavy shape; it is shown installed in
+  preview. Separate labels also use vertical **Standoff Ribs** on the bin
+  body by default: they match the clip's outer thickness so the bin sits
+  flat on its mounting surface. Auto spaces the ribs across the selected
+  wall, or you can choose 1-20 manually. Existing saved Separate labels keep
+  ribs Off until you enable them. A Separate Part label is always
+  Inlaid/Flush - it is exported and rotated for print with its text face
+  down, so Raised is not a valid state for it, and the Label style control
+  is hidden entirely while Separate Part is selected; this is enforced both
+  in the editor and, so a legacy save or any non-UI input cannot bypass it,
+  by the saved-shape data itself. **Integrated** keeps the original fused
+  plate and can still choose **Inlaid/Flush** or **Raised**; old saved
+  labels without a label type reopen as Integrated. **Length** is either
+  Full Side (the wall's real wavy-envelope span) or Text Length (the fitted
+  text plus a 2 mm margin on every side, never wider than Full Side).
+  Projection is one exact 5-200 mm field; a new Edge Mount starts at
+  one-third of the mount-normal bin dimension, clamped to that range.
+  Thickness (0.8-6.0 mm) keeps its named choices. The two free Label corners
+  have a fixed ~1 mm 45-degree shave. Lettering reuses the ordinary text
+  engine, sunk to a text depth that defaults to 0.6 mm for a new or missing
+  Edge Mount (an explicit saved 0.4 mm design stays 0.4 mm - this default is
+  Edge Mount's own and never touches the floor-label text-depth default used
+  elsewhere), needing the usual minimum backing when flush. Text targets a
+  12 mm cap height and only shrinks - never below 6 mm - to fit the plate;
+  if it still will not fit at 6 mm, generation refuses with a plain
+  explanation rather than truncating or enlarging the plate. **Flip text**
+  (next to the Text field) turns the reading direction 180 degrees for
+  mounting on the underside of a surface.
+- **Screw Mounting** - its section-header checkbox reveals 1-4 round screw
+  holes through the selected wall (default 2, arranged Horizontal or
+  Vertical, default Horizontal), each paired with a larger round
+  Screwdriver access passage that opens from the *opposite* wall and crosses
+  the cavity to reach it - so a screwdriver can follow the screw in from the
+  far side; that explanation lives as hover/title help on the checkbox
+  itself rather than as permanent page text. Both holes are always round;
+  there are no teardrops, countersinks or counterbores. Default screw
+  diameter is 4 mm; new Screwdriver access choices are Small (6 mm),
+  Default (8 mm), or Large (10 mm). Legacy exact access values reopen
+  unchanged when relevant. The first (or only) hole centres 12.7 mm (1/2 in)
+  below the top rim by default (**From top**); additional holes use Auto
+  spacing (evenly fit, up to 20 mm apart) or an exact custom spacing. A
+  pattern that cannot fit - too close to a corner, too close to the floor,
+  or two access holes too close together - is refused with the reason,
+  never silently shrunk, reduced or repositioned. Screw Mounting cannot
+  share its mounting or opposite wall with Inside Handles; enabling both on
+  conflicting walls is refused.
 
 The plate's projection is real geometry but is not part of the bin's
 nominal X/Y footprint, inventory dimensions or Space sizing/layout - those

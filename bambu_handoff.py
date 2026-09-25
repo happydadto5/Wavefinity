@@ -174,6 +174,22 @@ def stage_bambu_inputs(
         for i, src in enumerate(sources, 1):
             dest = handoff_dir / f"{i:04d} - {src.stem}.3mf"
             shutil.copyfile(src, dest)
+            # Fix 058 E / Correction 1 C1.3: if the source has non-default
+            # (not slot 1) extruder assignments - e.g. a two-color part -
+            # confirm the staged copy carries the same count before Bambu is
+            # ever launched. Staged files are byte-for-byte copies, so this
+            # never rewrites either file; a mismatch means the handoff is
+            # incomplete and must be refused, not silently accepted.
+            source_slots = _second_colour_assignment_count(src)
+            if source_slots:
+                staged_slots = _second_colour_assignment_count(dest)
+                if staged_slots != source_slots:
+                    raise ValueError(
+                        f"Wavefinity stopped the Bambu handoff because the staged "
+                        f"copy of {src.name} does not preserve its "
+                        f"{source_slots} extruder-slot assignment(s) "
+                        f"({staged_slots} found)."
+                    )
             staged.append(dest)
     except Exception:
         shutil.rmtree(handoff_dir, ignore_errors=True)

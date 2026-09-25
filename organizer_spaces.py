@@ -1067,12 +1067,24 @@ def space_routes(
         auto_created = not payload.get("output")
 
         if auto_created:
+            prefs_for_create = load_preferences()
+            # Fix 058 Correction 1, C1.2: an explicit saved space_parent that is
+            # no longer usable must block automatic Create rather than silently
+            # falling back to Documents. The saved preference is left untouched
+            # - only Change (via the Welcome repair state) may update it. A
+            # brand-new user with no explicit space_parent is unaffected and
+            # still gets the ordinary Documents default.
+            if fixed_space_root is None and saved_parent_unavailable(prefs_for_create):
+                raise ValueError(
+                    "Your saved Space storage location is unavailable. "
+                    "Use Change on Welcome to choose a folder."
+                )
             # Validate the exact folder/display name before normalise_space_definition()
             # can apply its legacy 80-character truncation behavior.
             folder_name = _space_folder_name(raw_def["name"])
             raw_def["name"] = folder_name
             validated = normalise_space_definition(raw_def)
-            target = _new_space_target(current_space_root(load_preferences()), folder_name)
+            target = _new_space_target(current_space_root(prefs_for_create), folder_name)
             try:
                 result = configure_space(target, raw_def=validated, mode="create")
                 space = result["layout"]["space"]

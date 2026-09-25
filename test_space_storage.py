@@ -127,6 +127,28 @@ class SpaceStorageStartupTests(unittest.TestCase):
         self.assertEqual(state["parent"], str(self.docs))
         self.assertEqual(self.prefs["space_parent"], str(self.home / "vanished"))
 
+    # 9. Fix 058 Correction 1, C1.2: an unavailable explicit saved parent
+    #    blocks automatic Create - it must never silently fall back to
+    #    Documents - and the saved preference is left unchanged. Once a
+    #    valid parent is set, the very next Create uses it, no restart.
+    def test_create_blocks_on_unavailable_saved_parent_without_documents_fallback(self):
+        custom = self.home / "custom-gone"
+        custom.mkdir()
+        self.routes["/api/space/storage-parent"]({"parent": str(custom)})
+        custom.rmdir()  # the saved parent now no longer exists/is unavailable
+
+        with self.assertRaises(ValueError) as ctx:
+            self.routes["/api/space/create"]({"name": "Kitchen", "kind": "drawer", "x": 320, "y": 240, "z": 55})
+        self.assertIn("Change on Welcome", str(ctx.exception))
+        self.assertFalse((self.docs / "Wavefinity").exists())
+        self.assertEqual(self.prefs["space_parent"], str(custom.resolve()))
+
+        valid = self.home / "custom-valid"
+        valid.mkdir()
+        self.routes["/api/space/storage-parent"]({"parent": str(valid)})
+        result = self.routes["/api/space/create"]({"name": "Kitchen", "kind": "drawer", "x": 320, "y": 240, "z": 55})
+        self.assertEqual(Path(result["folder"]["folder"]).parent, (valid / "Wavefinity").resolve())
+
 
 class BrowseSpaceParentChooserTests(unittest.TestCase):
     """The Welcome "Change" chooser: browses, and on a real pick saves."""

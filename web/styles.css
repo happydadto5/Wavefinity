@@ -602,7 +602,7 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .support-choice-state { display: block; color: #1f6b45; font-size: 10px; font-weight: 800; line-height: 1.1; }
 .support-choice.has-state .support-choice-desc { display: none; }
-.support-choice.added { border-color: #7aa98d; background: #f3faf6; cursor: pointer; opacity: .95; }
+.support-choice.added { border-width: 2px; border-color: #7aa98d; background: #f3faf6; cursor: pointer; opacity: .95; }
 /* The part being edited always reads green - it's "the one you're working on",
    not a warning. Problems surface as red status text and in the preview panel,
    never by turning this chip or the editor red. */
@@ -1543,9 +1543,9 @@ dialog:not([open]) { display: none; }
   justify-content: center;
   margin-top: 24px;
 }
-/* Edge Mount reuses the card look; only its two collapsible
-   subsections (Label, Screw Mounting) and their help text need anything of
-   their own. Audit 006 J2: the live element is #edge-mount-editor - the
+/* Edge Mount reuses the card look; only its two always-visible sections
+   (Label, Screw Mounting) and their help text need anything of their own.
+   Audit 006 J2: the live element is #edge-mount-editor - the
    #edge-mount-panel id this used to target does not exist, so none of this
    ever applied. */
 #edge-mount-editor .b4b-card-title { margin-top: 6px; }
@@ -1558,11 +1558,64 @@ dialog:not([open]) { display: none; }
 }
 #edge-mount-editor .field-grid.three { align-items: end; }
 #edge-mount-access-auto-note { grid-column: span 1; align-self: center; }
-/* Each enabled subsection reads as its own physical concept, not a
-   continuation of the one above it. */
+/* Each section reads as its own physical concept, not a continuation of the
+   one above it. */
 #edge-mount-label-panel.b4b-card,
 #edge-mount-holes-panel.b4b-card {
   margin-top: 14px;
+}
+
+/* Fix 058 Correction 1, C1.4D/E/F: Label reads Text -> Plate -> Standoff
+   support (Separate only); Screw Mounting reads Pattern -> Hole/access ->
+   Position. Each group gets a light divider and small gap from the one
+   before it, and dense scalar controls stay compact instead of stretching
+   like long text fields - scoped to Edge Mount only. */
+#edge-mount-editor .edge-mount-section-header {
+  display: flex;
+  align-items: center;
+  margin: 0 0 4px;
+}
+#edge-mount-editor .edge-mount-section-header .checkbox-row { margin: 0; }
+#edge-mount-editor .edge-mount-group-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+#edge-mount-editor .edge-mount-field-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 14px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, #d5dcdf);
+}
+#edge-mount-editor .edge-mount-field-group:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+#edge-mount-editor .edge-mount-group-full { flex-basis: 100%; margin: 2px 0 0; }
+/* Text input: compact but comfortably editable - roughly a short-label
+   width, not a full-width text field. */
+#edge-mount-editor .edge-mount-text-field { flex: 0 1 180px; min-width: 130px; }
+#edge-mount-editor .edge-mount-text-field input[type="text"] { width: 100%; }
+/* Numeric inputs: ~80-100px effective width. */
+#edge-mount-editor .edge-mount-compact-number { flex: 0 0 auto; }
+#edge-mount-editor .edge-mount-compact-number input[type="number"] { width: 90px; }
+/* Small selects: ~110-150px as content requires. */
+#edge-mount-editor .edge-mount-compact-select { flex: 0 0 auto; }
+#edge-mount-editor .edge-mount-compact-select select { width: 130px; }
+@media (max-width: 620px) {
+  /* Groups may wrap on narrow screens and become full-width when necessary. */
+  #edge-mount-editor .edge-mount-text-field,
+  #edge-mount-editor .edge-mount-compact-number,
+  #edge-mount-editor .edge-mount-compact-select {
+    flex: 1 1 100%;
+  }
+  #edge-mount-editor .edge-mount-compact-number input[type="number"],
+  #edge-mount-editor .edge-mount-compact-select select {
+    width: 100%;
+  }
 }
 .part-name-block {
   display: grid;

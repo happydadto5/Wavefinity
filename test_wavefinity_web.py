@@ -3671,15 +3671,108 @@ const tick = () => new Promise(r => setImmediate(r));
         self.assertIn("svh", block)
         self.assertIn("min(720px", block)
 
-    def test_edge_mount_label_type_browser_contract(self):
+    def test_edge_mount_label_selector_browser_contract(self):
+        # Fix 058 Correction 1, C1.4: the former top-level Label/Screw
+        # Mounting enable checkboxes and separate "Label Type" dropdown are
+        # gone, replaced by one always-visible Label: None/Separate
+        # Part/Integrated selector, with Screw Mounting's checkbox living in
+        # its own section header.
         root = Path(__file__).resolve().parent
         app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
         index = (root / "web" / "index.html").read_text(encoding="utf-8")
-        self.assertIn('label_type: "separate"', app_js)
-        self.assertIn('id="edge-mount-label-type"', index)
-        self.assertIn('value="separate">Separate part', index)
+        self.assertNotIn('id="edge-mount-label-type"', index)
+        self.assertNotIn('id="edge-mount-label-enabled"', index)
+        self.assertIn('id="edge-mount-label-mode"', index)
+        self.assertIn('value="none">None', index)
+        self.assertIn('value="separate">Separate Part', index)
+        self.assertIn('value="integrated">Integrated', index)
+        # Screw Mounting's checkbox lives inside its own section header, not
+        # floating above both sections.
+        holes_panel = index[index.index('id="edge-mount-holes-panel"'):index.index('id="edge-mount-holes-details"')]
+        self.assertIn('id="edge-mount-holes-enabled"', holes_panel)
+        self.assertIn(">Screw Mounting<", holes_panel)
+
         read = app_js[app_js.index("function readEdgeMountForm(design) {"):app_js.index("function resolvedEdgeMountAccessDiameter")]
+        self.assertIn('$("#edge-mount-label-mode")', read)
         self.assertIn("label_type:", read)
+
+    def test_edge_mount_label_mode_default_and_mapping(self):
+        # C1.4B: a new Edge Mount defaults to Label=None + Screw Mounting
+        # off; existing saved states map back to the correct selector value.
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        mode_fn = app_js[app_js.index("function edgeMountLabelMode("):app_js.index("function readEdgeMountForm(")]
+        self.assertIn('return "none"', mode_fn)
+        self.assertIn('"integrated" : "separate"', mode_fn)
+        add_start = app_js.index('if (kind === "edge_mount") {', app_js.index("async function addModifier("))
+        add_end = app_js.index("recordHistory(previous);", add_start)
+        add_source = app_js[add_start:add_end]
+        self.assertIn("label_enabled: false,", add_source)
+        self.assertIn("holes_enabled: false,", add_source)
+
+    def test_edge_mount_separate_part_cannot_be_raised_in_browser(self):
+        # C1.4C: Separate Part forces label_raised false and hides the Label
+        # style control entirely, both when read from the form and when
+        # syncing the DOM from state.
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        index = (root / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="edge-mount-label-style-row"', index)
+        read = app_js[app_js.index("function readEdgeMountForm(design) {"):app_js.index("function resolvedEdgeMountAccessDiameter")]
+        self.assertIn('labelType === "separate"\n    ? false', read)
+        sync = app_js[app_js.index("function syncEdgeMountControls() {"):app_js.index("function syncEdgeMountEditorVisibility() {")]
+        self.assertIn('labelMode !== "integrated"', sync)
+
+    def test_edge_mount_text_depth_default_is_edge_mount_scoped(self):
+        # C1.4D: 0.6 mm is Edge Mount's own new/missing-value default and
+        # must never rewrite the shared, global TEXT_DEPTH constant.
+        root = Path(__file__).resolve().parent
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        app_py = (root / "organizer_app.py").read_text(encoding="utf-8")
+        engine_py = (root / "organizer_engine.py").read_text(encoding="utf-8")
+        self.assertIn("EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM = 0.6", app_js)
+        self.assertIn("label_text_depth_mm: EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM", app_js)
+        self.assertIn("EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM = 0.6", engine_py)
+        self.assertIn("TEXT_DEPTH = 0.4", engine_py)  # unchanged global default
+        self.assertIn(
+            'edge_mount_raw.get("label_text_depth_mm", EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM)', app_py,
+        )
+
+    def test_edge_mount_removed_and_relocated_help_text(self):
+        # C1.4A/D/E: the redundant opened-editor instruction and the two
+        # permanent help paragraphs are gone; the screwdriver-path
+        # explanation survives as hover/title help on Screw Mounting.
+        root = Path(__file__).resolve().parent
+        index = (root / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("Projects from the top of the mounting wall", index)
+        self.assertNotIn(
+            "<p class=\"inline-help\">The small holes go through the mounting wall.", index,
+        )
+        self.assertIn(
+            'title="The small holes go through the mounting wall. Larger round '
+            'access passages come from the opposite wall so a screwdriver can '
+            'reach each screw."', index,
+        )
+        app_py = (root / "wavefinity_web.py").read_text(encoding="utf-8")
+        self.assertIn("Add a label and/or screw mounting for an outside edge.", app_py)
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('description.hidden = isNest || kind === "edge_mount";', app_js)
+
+    def test_edge_mount_field_grouping_and_compact_sizing(self):
+        # C1.4D/F: Flip text sits on the Text row, Standoff Ribs/Quantity are
+        # grouped after the core label fields and only for Separate Part,
+        # and compact sizing is scoped under #edge-mount-editor.
+        root = Path(__file__).resolve().parent
+        index = (root / "web" / "index.html").read_text(encoding="utf-8")
+        text_group = index[index.index('edge-mount-text-group'):index.index('id="edge-mount-integrated-support-warning"')]
+        self.assertIn('id="edge-mount-label-text"', text_group)
+        self.assertIn('id="edge-mount-label-flip"', text_group)
+        details = index[index.index('id="edge-mount-label-details"'):index.index('id="edge-mount-holes-panel"')]
+        self.assertLess(details.index('id="edge-mount-label-text"'), details.index('id="edge-mount-standoff-rib-controls"'))
+        styles = (root / "web" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("#edge-mount-editor .edge-mount-compact-number input", styles)
+        self.assertIn("#edge-mount-editor .edge-mount-compact-select select", styles)
+        self.assertIn("width: 90px", styles)
 
 
 class WebServerTests(unittest.TestCase):

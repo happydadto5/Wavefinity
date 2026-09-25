@@ -3252,6 +3252,48 @@ class EdgeMountTests(unittest.TestCase):
         self.assertTrue(label.is_watertight)
         self.assertEqual(len(label.split()), 1)
 
+    def test_separate_part_label_can_never_be_raised(self) -> None:
+        # Fix 058 Correction 1, C1.4C: Separate Part is always exported with
+        # its text face down, so Raised is never a valid manufacturing state
+        # for it - normalized at construction, not merely hidden in the UI,
+        # so a legacy saved design or any non-UI/programmatic input cannot
+        # bypass the invariant.
+        spec = EdgeMountSpec(label_type="separate", label_enabled=True, label_raised=True)
+        self.assertFalse(spec.label_raised)
+
+        # A legacy saved design that explicitly contains
+        # label_type="separate" + label_raised=true must load as flush.
+        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(label_enabled=True, label_text="TOOLS"))
+        saved = organizer_app.design_to_dict(box, organizer_app.Layout())
+        saved["box"]["edge_mount"]["label_type"] = "separate"
+        saved["box"]["edge_mount"]["label_raised"] = True
+        loaded, *_ = organizer_app.design_from_dict(saved)
+        self.assertEqual(loaded.edge_mount.label_type, "separate")
+        self.assertFalse(loaded.edge_mount.label_raised)
+
+        # Integrated may still be Raised - the invariant is specific to
+        # Separate Part.
+        integrated = EdgeMountSpec(label_type="integrated", label_enabled=True, label_raised=True)
+        self.assertTrue(integrated.label_raised)
+
+    def test_edge_mount_text_depth_default_is_06mm_and_scoped(self) -> None:
+        # Fix 058 Correction 1, C1.4D: a new/missing Edge Mount value uses
+        # the Edge-Mount-only 0.6 mm default; an explicit saved 0.4 mm design
+        # stays 0.4 mm, and the shared floor-label TEXT_DEPTH is untouched.
+        self.assertEqual(EdgeMountSpec().label_text_depth_mm, 0.6)
+        self.assertEqual(organizer_engine.TEXT_DEPTH, 0.4)
+
+        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(label_enabled=True, label_text="TOOLS"))
+        saved = organizer_app.design_to_dict(box, organizer_app.Layout())
+        self.assertEqual(saved["box"]["edge_mount"]["label_text_depth_mm"], 0.6)
+        del saved["box"]["edge_mount"]["label_text_depth_mm"]
+        loaded, *_ = organizer_app.design_from_dict(saved)
+        self.assertEqual(loaded.edge_mount.label_text_depth_mm, 0.6)
+
+        saved["box"]["edge_mount"]["label_text_depth_mm"] = 0.4
+        loaded_legacy, *_ = organizer_app.design_from_dict(saved)
+        self.assertEqual(loaded_legacy.edge_mount.label_text_depth_mm, 0.4)
+
     def test_separate_label_is_not_fused_and_exports_separately(self) -> None:
         box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
             label_enabled=True, label_text="TOOLS", standoff_ribs_enabled=False,

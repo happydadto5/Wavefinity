@@ -275,6 +275,12 @@ TEXT_CAP_HEIGHT_MIN = 5.0      # auto letter height will shrink to here, no furt
 TEXT_CAP_HEIGHT_FLOOR = 5.0    # no text smaller than the readable automatic minimum
 TEXT_DEPTH = 0.4               # how deep the label is sunk into the floor,
                                # leaving DEFAULT_BASE_THICKNESS - TEXT_DEPTH beneath it
+# Fix 058 Correction 1, C1.4D: Edge Mount's own label text-depth default is
+# deeper than the floor-label TEXT_DEPTH above. This is deliberately a
+# separate constant - it must never change the global TEXT_DEPTH used by
+# other label/text systems (floor labels, lid labels, ...). Only a new/
+# missing Edge Mount value uses it; an explicit saved 0.4 mm stays 0.4 mm.
+EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM = 0.6
 TEXT_MIN_BACKING = 0.2         # minimum solid material a recessed label must leave behind it
 TEXT_MARGIN = 1.0              # clear space between the label and the cavity wall
 TEXT_FONT_FAMILY = "DejaVu Sans"
@@ -606,7 +612,7 @@ class EdgeMountSpec:
     label_length_mode: str = "full"       # "full" | "text"
     label_thickness_mm: float = 2.0
     label_raised: bool = False
-    label_text_depth_mm: float = TEXT_DEPTH
+    label_text_depth_mm: float = EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM
     label_flip: bool = False
     # Separate-label clips stand proud of the wavy wall. Permanent ribs keep
     # the bin plumb against its mounting surface; None means Auto spacing.
@@ -620,6 +626,16 @@ class EdgeMountSpec:
     access_diameter_mm: float | None = None
     top_offset_mm: float = 12.7
     hole_spacing_mm: float | None = None
+
+    def __post_init__(self) -> None:
+        # Fix 058 Correction 1, C1.4C: a Separate Part label is exported and
+        # rotated for its print orientation with the text face down, so
+        # Raised text is not a valid manufacturing state for it. Normalize
+        # here - not only in the browser - so a legacy saved design or any
+        # non-UI/programmatic path cannot bypass the invariant by
+        # constructing label_type="separate" with label_raised=True.
+        if self.label_type == "separate" and self.label_raised:
+            object.__setattr__(self, "label_raised", False)
 
     @property
     def active(self) -> bool:
