@@ -4611,11 +4611,13 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
         )
 
         # Switching to Stackable Bin caches the outgoing lid before deleting
-        # it, rather than just discarding it.
+        # it, rather than just discarding it. (Fix 060 Correction 2 moved the
+        # capture to rememberedLidSnapshot(), called unconditionally before
+        # any mutation, so the same call also feeds the Stackable Lid path.)
         stack_form_start = app_js.index("function readStackForm(design) {")
         stack_form_end = app_js.index("function normalizeBinDimension(", stack_form_start)
         read_stack_form = app_js[stack_form_start:stack_form_end]
-        self.assertIn('if (design.box.lid) state.lidMemory = { ...remembered };', read_stack_form)
+        self.assertIn('if (design.box.lid) state.lidMemory = rememberedLidSnapshot(design);', read_stack_form)
         self.assertIn("delete design.box.lid;", read_stack_form)
 
         # A routine full-form refresh (a different/loaded design bound to the
@@ -4624,7 +4626,7 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
         sync_form_start = app_js.index("function syncForm() {")
         sync_form_head = app_js[sync_form_start:sync_form_start + 600]
         self.assertIn(
-            "state.lidMemory = state.design.box.lid ? { ...state.design.box.lid } : null;",
+            "state.lidMemory = rememberedLidSnapshot(state.design);",
             sync_form_head,
         )
 
@@ -4640,6 +4642,126 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
             "return Boolean(design?.box?.lid?.enabled && design.box.lid.label_enabled && lidDivider(design) &&",
             app_js,
         )
+
+    def test_fix060_correction2_label_style_survives_stackable_lid_detour(self):
+        # Fix 060 Correction 2: label_style is a real, unforced preference
+        # only while Handled Lid is active - Stackable Lid always forces the
+        # authoritative value to Flush. This traces the actual state
+        # transitions through readStackForm()/rememberedLidSnapshot(),
+        # rather than only asserting source text, per the correction's
+        # required transition-level verification.
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is required for this browser-state regression")
+        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        start = source.index("const LID_DEFAULTS = {")
+        end = source.index("function applyDivisionGridLayout(")
+        lid_helpers = source[start:end]
+        rs_start = source.index("function readStackForm(design) {")
+        rs_end = source.index("\n}\n", rs_start) + 3
+        read_stack_form = source[rs_start:rs_end]
+
+        script = "\n".join([
+            "const state = { design: null, lidMemory: null };",
+            "const fields = {",
+            "  '#lid-configuration': 'handled_lid', '#lid-thickness': 'thin',",
+            "  '#lid-handle-type': 'knob', '#lid-handle-size': 'medium', '#lid-handle-position': 'middle',",
+            "  '#lid-label-enabled': 'true', '#lid-label-orientation': 'horizontal',",
+            "  '#lid-label-style': 'raised', '#lid-label-text': 'PARTS',",
+            "};",
+            "const $ = sel => ({ get value() { return fields[sel]; }, set value(v) { fields[sel] = v; } });",
+            lid_helpers,
+            read_stack_form,
+            # Mirrors what syncLidForm() does in the real app: after every
+            # readStackForm() call it unconditionally resyncs every DOM field
+            # (even hidden ones) from lidState(), which is exactly why a
+            # forced/remembered value can end up live in the DOM regardless
+            # of visibility - the same behavior this test must reproduce.
+            "function resyncFieldsFromLidState(design) {",
+            "  const lid = lidState(design);",
+            "  fields['#lid-thickness'] = lid.thickness;",
+            "  fields['#lid-handle-type'] = lid.handle_type;",
+            "  fields['#lid-handle-size'] = lid.handle_size;",
+            "  fields['#lid-handle-position'] = lid.handle_position;",
+            "  fields['#lid-label-enabled'] = String(Boolean(lid.label_enabled));",
+            "  fields['#lid-label-orientation'] = lid.label_orientation;",
+            "  fields['#lid-label-style'] = lid.label_style;",
+            "  fields['#lid-label-text'] = lid.label_text || '';",
+            "}",
+            "function apply(design, configValue, styleValue) {",
+            "  fields['#lid-configuration'] = configValue;",
+            "  if (styleValue !== undefined) fields['#lid-label-style'] = styleValue;",
+            "  readStackForm(design);",
+            "  resyncFieldsFromLidState(design);",
+            "  return design;",
+            "}",
+            "const steps = [];",
+            # 1. Handled Lid with Raised. (lidPartActive() requires the Lid &
+            # Stacking feature to already be active, as it would be once the
+            # user has placed it - seed a minimal active Handled Lid.)
+            "let design = { box: { lid: { ...LID_DEFAULTS, enabled: true } } };",
+            "design = apply(design, 'handled_lid', 'raised');",
+            "steps.push({ step: 'handled_raised',",
+            "  active: design.box.lid.label_style, memory: state.lidMemory?.label_style });",
+            # 2. -> Stackable Lid: active must be Flush, memory must keep Raised.
+            "design = apply(design, 'stackable_lid');",
+            "steps.push({ step: 'to_stackable_lid',",
+            "  active: design.box.lid.label_style, memory: state.lidMemory?.label_style,",
+            "  dividerLockActive: dividerLockedByLidLabels(design) });",
+            # 3. -> back to Handled Lid: style must restore to Raised.
+            "design = apply(design, 'handled_lid');",
+            "steps.push({ step: 'back_to_handled',",
+            "  active: design.box.lid.label_style, memory: state.lidMemory?.label_style });",
+            # 4. Handled Lid with Flush -> Stackable Lid -> Handled Lid: stays Flush.
+            "design = apply(design, 'handled_lid', 'flush');",
+            "design = apply(design, 'stackable_lid');",
+            "design = apply(design, 'handled_lid');",
+            "steps.push({ step: 'flush_roundtrip', active: design.box.lid.label_style });",
+            # 5. Custom Handle/thickness/label values -> Stackable Bin -> Handled: still restore.
+            "design = apply(design, 'handled_lid', 'raised');",
+            "fields['#lid-handle-type'] = 'pull'; fields['#lid-handle-size'] = 'large';",
+            "fields['#lid-handle-position'] = 'front'; fields['#lid-thickness'] = 'thick';",
+            "design = apply(design, 'handled_lid');",
+            "design = apply(design, 'stackable_bin');",
+            "steps.push({ step: 'stackable_bin_no_lid', hasLid: Boolean(design.box.lid),",
+            "  stackMode: design.box.stack.mode, dividerLockActive: dividerLockedByLidLabels(design) });",
+            # No manual field reset here: resyncFieldsFromLidState() inside
+            # apply() already put the DOM fields back to whatever
+            # rememberedLidSnapshot() cached (mirroring syncLidForm() in the
+            # real app), so this proves the restoration path itself, not a
+            # scripted field value.
+            "design = apply(design, 'handled_lid');",
+            "steps.push({ step: 'restored_from_stackable_bin',",
+            "  handleType: design.box.lid.handle_type, handleSize: design.box.lid.handle_size,",
+            "  handlePosition: design.box.lid.handle_position, thickness: design.box.lid.thickness,",
+            "  labelStyle: design.box.lid.label_style });",
+            # 6. A fresh/different design reseeds memory (no leak).
+            "state.design = design; syncFormReseed();",
+            "function syncFormReseed() { state.lidMemory = rememberedLidSnapshot(state.design); }",
+            "const freshDesign = { box: {} };",
+            "state.design = freshDesign; syncFormReseed();",
+            "steps.push({ step: 'fresh_design_reseed', memory: state.lidMemory });",
+            "process.stdout.write(JSON.stringify(steps));",
+        ])
+        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        steps = {entry["step"]: entry for entry in json.loads(done.stdout)}
+
+        self.assertEqual(steps["handled_raised"]["active"], "raised")
+        self.assertEqual(steps["to_stackable_lid"]["active"], "flush")
+        self.assertEqual(steps["to_stackable_lid"]["memory"], "raised")
+        self.assertFalse(steps["to_stackable_lid"]["dividerLockActive"])
+        self.assertEqual(steps["back_to_handled"]["active"], "raised")
+        self.assertEqual(steps["flush_roundtrip"]["active"], "flush")
+        self.assertFalse(steps["stackable_bin_no_lid"]["hasLid"])
+        self.assertEqual(steps["stackable_bin_no_lid"]["stackMode"], "direct")
+        self.assertFalse(steps["stackable_bin_no_lid"]["dividerLockActive"])
+        restored = steps["restored_from_stackable_bin"]
+        self.assertEqual(restored["handleType"], "pull")
+        self.assertEqual(restored["handleSize"], "large")
+        self.assertEqual(restored["handlePosition"], "front")
+        self.assertEqual(restored["thickness"], "thick")
+        self.assertEqual(restored["labelStyle"], "raised")
+        self.assertIsNone(steps["fresh_design_reseed"]["memory"])
 
 
 if __name__ == "__main__":

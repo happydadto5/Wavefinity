@@ -2120,12 +2120,13 @@ function syncWallControls() {
 }
 
 function syncForm() {
-  // Fix 060 Correction 1: a routine full refresh means a (possibly different)
-  // design is now bound to the editor, so reseed the remembered Lid/Handle/
-  // Label values from that design's own box.lid rather than carrying over
-  // whatever an earlier bin's session had - only the in-progress config
-  // switches on this same design should read from memory.
-  state.lidMemory = state.design.box.lid ? { ...state.design.box.lid } : null;
+  // Fix 060 Correction 1+2: a routine full refresh means a (possibly
+  // different) design is now bound to the editor, so reseed the remembered
+  // Lid/Handle/Label values from that design's own box.lid (via the same
+  // snapshot helper readStackForm uses, so an in-progress Stackable Lid
+  // detour's real label_style survives a refresh too) rather than carrying
+  // over whatever an earlier bin's session had.
+  state.lidMemory = rememberedLidSnapshot(state.design);
   normalizeStackSettings(state.design);
   const { box, layout } = state.design;
   ensureRimFeatureInLayout();
@@ -2699,6 +2700,21 @@ function lidState(design = state.design) {
   return { ...LID_DEFAULTS, ...(state.lidMemory || {}), ...(boxLid || {}), enabled: Boolean(boxLid?.enabled) };
 }
 
+// Fix 060 Correction 2: label_style is a real, unforced preference only while
+// Handled Lid is active - Stackable Lid always forces the active value to
+// Flush. Snapshotting the true style (not the forced one) here, rather than
+// wherever design.box.lid is about to be mutated, lets it survive any number
+// of Stackable Bin/Stackable Lid switches until Handled Lid is chosen again.
+function rememberedLidSnapshot(design = state.design) {
+  const boxLid = design?.box?.lid;
+  if (!boxLid) return null;
+  const merged = lidState(design);
+  const labelStyle = lidConfiguration(design) === "stackable_lid"
+    ? (state.lidMemory?.label_style ?? merged.label_style)
+    : boxLid.label_style;
+  return { ...merged, label_style: labelStyle };
+}
+
 function lidPartActive(design = state.design) {
   return (design?.box?.stack?.mode || "none") === "direct" || Boolean(design?.box?.lid?.enabled);
 }
@@ -2930,14 +2946,17 @@ function readStackForm(design) {
     delete design.box.lid;
     return;
   }
-  const config = $("#lid-configuration")?.value || lidConfiguration(design);
+  const previousConfig = lidConfiguration(design);
+  const config = $("#lid-configuration")?.value || previousConfig;
   const remembered = lidState(design);
+  // Fix 060 Correction 1+2: snapshot the real Lid/Handle/Label values -
+  // including the true (not forced-Flush) label_style - before this call
+  // mutates design.box.lid, so switching to Stackable Bin or Stackable Lid
+  // never erases what Handled Lid had, however many switches happen next.
+  if (design.box.lid) state.lidMemory = rememberedLidSnapshot(design);
   if (config === "stackable_bin") {
-    // Fix 060 Correction 1: remember the outgoing Lid/Handle/Label values so
-    // switching back to Handled/Stackable Lid restores them, without keeping
-    // an active design.box.lid that would make Stackable Bin look like it has
-    // a lid to the backend/output or to Divider label locking.
-    if (design.box.lid) state.lidMemory = { ...remembered };
+    // No active design.box.lid here: the backend/output and Divider label
+    // locking must see Stackable Bin as having no lid at all.
     design.box.stack = { mode: "direct" };
     delete design.box.lid;
     return;
@@ -2950,12 +2969,22 @@ function readStackForm(design) {
   if (divider && labelEnabled && !divisionLabels.some(value => String(value || "").trim())) {
     divisionLabels = dividerLabelsForLid(divider);
   }
+  // Stackable Lid always forces the active style to Flush; leaving Stackable
+  // Lid restores the remembered Handled Lid style rather than the live
+  // control, which was itself forced to Flush the moment Stackable Lid
+  // became active and so cannot be trusted here. A direct field edit while
+  // already in one of the two active configs still reads the live control.
+  const labelStyle = config === "stackable_lid"
+    ? "flush"
+    : previousConfig === "stackable_lid"
+      ? (state.lidMemory?.label_style ?? $("#lid-label-style").value)
+      : $("#lid-label-style").value;
   design.box.lid = {
     enabled: true,
     stackable: config === "stackable_lid",
     thickness: $("#lid-thickness").value,
     label_enabled: labelEnabled,
-    label_style: config === "stackable_lid" ? "flush" : $("#lid-label-style").value,
+    label_style: labelStyle,
     label_orientation: $("#lid-label-orientation").value,
     label_text: $("#lid-label-text").value,
     division_labels: divisionLabels,
