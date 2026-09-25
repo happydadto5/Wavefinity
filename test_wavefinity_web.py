@@ -585,7 +585,10 @@ class WebApplicationTests(unittest.TestCase):
 
     def test_new_divider_starts_with_one_wall_on_x_axis(self):
         response = default_feature_payload({"design": default_design(), "kind": "divider"})
-        self.assertEqual(response["feature"]["options"], {"count_x": 1, "count_y": 0})
+        options = response["feature"]["options"]
+        self.assertEqual(options["count_x"], 1)
+        self.assertEqual(options["count_y"], 0)
+        self.assertEqual(options["wall_style"], "wavy")
         self.assertEqual(response["resolved_options"]["count_x"], 1)
         self.assertEqual(response["resolved_options"]["count_y"], 0)
 
@@ -2134,6 +2137,7 @@ class WebApplicationTests(unittest.TestCase):
             "  installSpaceStarterDesign:async()=>{throw Error('starter used');}};",
             "const api = async (_path,payload) => ({design:clone(payload.design)});",
             "const baseTrimEnabled = () => false; const syncForm = () => {};",
+            "const bindLidMemoryForDesign = () => {};",
             "const refreshPreview = async () => {}; const toast = () => {};",
             owner,
             "(async()=>{await SP.initializeDesignForActiveSpace();",
@@ -3020,6 +3024,7 @@ const tick = () => new Promise(r => setImmediate(r));
             "    resetDesignSession: () => calls.push(['resetDesignSession']),",
             "    installSpaceStarterDesign: async space => calls.push(['installSpaceStarterDesign', space]),",
             "  };",
+            "  const bindLidMemoryForDesign = () => calls.push(['bindLidMemoryForDesign']);",
             "  const syncForm = () => calls.push(['syncForm']);",
             init_fn,
             "  await SP.initializeDesignForActiveSpace();",
@@ -3570,7 +3575,7 @@ const tick = () => new Promise(r => setImmediate(r));
         for text in (">Save Bin + Connectors<", ">Save Bin<", ">Save Connectors<", "Saving Parts…"):
             self.assertIn(text, html)
         self.assertNotIn(">Generate Bin", html)
-        for text in ('"Save Bin + Lid"', '"Save to Folder"',
+        for text in ('"Save Bin + Lid"', '"Save Bin"',
                      '"Saving Failed"', '"Saved — design save needs attention"'):
             self.assertIn(text, app_js)
         # Base Trim is saved from its Space, not the Designer.
@@ -3760,7 +3765,9 @@ const tick = () => new Promise(r => setImmediate(r));
         app_py = (root / "wavefinity_web.py").read_text(encoding="utf-8")
         self.assertIn("Add a label and/or screw mounting for an outside edge.", app_py)
         app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
-        self.assertIn('description.hidden = isNest || kind === "edge_mount";', app_js)
+        self.assertIn(
+            'description.hidden = isNest || kind === "edge_mount" || kind === "lid_stacking";', app_js,
+        )
 
     def test_edge_mount_field_grouping_and_compact_sizing(self):
         # C1.4D/F: Flip text sits on the Text row, Standoff Ribs/Quantity are
