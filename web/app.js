@@ -1034,10 +1034,13 @@ async function designerNewBin() {
 
 // Fix 064: the largest whole base-unit X/Y footprint that fits inside a
 // Storage Box's usable interior (rounding down, since the bin must fit),
-// plus the full legal usable Z. Returns { x, y, z } or { error }; never
+// plus the full legal usable Z. Z is validated against `candidateDesign` -
+// the fresh inside-bin starter that will actually be installed - not
+// whatever bin happens to be open, since its remembered Base thickness can
+// differ (Fix 064 Correction 1). Returns { x, y, z } or { error }; never
 // throws, so the caller can show an actionable message and leave the
 // current design untouched.
-function insideBinFitForStorageBox(space) {
+function insideBinFitForStorageBox(space, candidateDesign) {
   const unit = state.catalog.base_unit;
   const maxUnits = Math.floor((state.catalog.max_box_size || 350) / unit);
   const xUnits = Math.min(maxUnits, Math.floor(space.x / unit));
@@ -1045,7 +1048,7 @@ function insideBinFitForStorageBox(space) {
   if (xUnits < 1 || yUnits < 1) {
     return { error: "This Storage Box's inside is too small to fit a bin." };
   }
-  const z = normalizeBinDimension("z", space.z, space.z);
+  const z = normalizeBinDimension("z", space.z, space.z, candidateDesign);
   if (z > space.z) {
     return { error: "This Storage Box is too short to fit a legal bin." };
   }
@@ -1056,11 +1059,15 @@ function insideBinFitForStorageBox(space) {
 // ordinary bin, exactly like New Bin (same safety/reset primitives, same
 // remembered reusable Space preferences, no clone of the current bin's
 // name/text/features), but with X/Y/Z forced to fit the Storage Box's usable
-// interior instead of the normal New Bin starter size.
+// interior instead of the normal New Bin starter size. The fit is validated
+// against the fresh starter itself (Fix 064 Correction 1) - there is no
+// await between building it and installing it, so it stays the same
+// candidate the user sees land.
 async function designerMakeInsideBin() {
   if (!(await guardDraftSwitch())) return;
   if (!(await flushSpaceDesignAutosave())) return;
-  const fit = insideBinFitForStorageBox(state.activeSpace);
+  const candidate = freshDesignForCurrentFolder();
+  const fit = insideBinFitForStorageBox(state.activeSpace, candidate);
   if (fit.error) {
     toast(fit.error, true, 6000);
     return;
@@ -3164,15 +3171,15 @@ function readStackForm(design) {
 // to [unit, max_box_size]; Z rounds to whole millimetres with a floor that
 // clears the base thickness by min_height_above_base_mm (BoxSpec requires
 // it).
-function normalizeBinDimension(axis, requestedValue, fallback) {
+function normalizeBinDimension(axis, requestedValue, fallback, design = state.design) {
   const value = number(requestedValue, fallback);
   if (axis === "z") {
     const base = number(
-      state.design?.box?.base_thickness,
+      design?.box?.base_thickness,
       state.catalog?.base_rules?.default_mm ?? 0.6
     );
     const minimum = base + number(state.catalog.min_height_above_base_mm, 5);
-    return isSurfaceBinDesign()
+    return isSurfaceBinDesign(design)
       ? Math.max(minimum, Math.round(value * 10) / 10)
       : Math.max(Math.ceil(minimum), Math.round(value));
   }
