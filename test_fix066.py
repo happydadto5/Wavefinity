@@ -11,7 +11,7 @@ from organizer_app import BoxSpec, Layout
 from organizer_edge_mount import EdgeMountSpec
 from organizer_engine import LidSpec
 from test_fix061 import BatchFixture, design, record
-from organizer_inventory import change_design_status, save_design_source
+from organizer_inventory import change_design_status, load_inventory, save_design_source
 from test_space_preferences import function_source, node_run
 
 
@@ -108,16 +108,21 @@ class CommaFileStaleTests(BatchFixture):
         row_id = save_design_source(self.folder, design=design("W"), record=record("W"))["row_id"]
         (self.folder / "W.3mf").write_bytes(b"old")
         change_design_status(self.folder, row_id, "saved", "W.3mf")
-        # Force an unresolvable File cell mixing a comma name with a missing file.
-        import organizer_inventory as inv
-        data = inv.load_inventory(self.folder)
-        for one in data["bins"]:
-            if one["id"] == row_id:
-                one["file"] = "Box Bolts, Nuts.3mf, Missing.3mf"
-        row = next(o for o in data["bins"] if o["id"] == row_id)
-        names = inv._row_file_names(self.folder, row)
-        self.assertEqual(names, [])
+        # Persist an ambiguous File cell: comma-named file plus a missing one.
+        path = Path(load_inventory(self.folder)["file"])
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "W.3mf", "Box Bolts, Nuts.3mf, Missing.3mf"), encoding="utf-8")
+        self.assertEqual(self.rows()[row_id]["file"], "Box Bolts, Nuts.3mf, Missing.3mf")
+        edited = save_design_source(
+            self.folder, design=design("W", 24), record=record("W", 24), row_id=row_id)
+        stale = edited["layout"].get("stale_files", {}).get(row_id, [])
+        self.assertNotIn("Nuts.3mf", stale)
+        self.assertEqual(stale, [])
+        (self.folder / "W v2.3mf").write_bytes(b"new")
+        result = change_design_status(self.folder, row_id, "saved", "W v2.3mf")
         self.assertTrue((self.folder / "Nuts.3mf").is_file())
+        self.assertTrue((self.folder / "W v2.3mf").is_file())
+        self.assertNotIn(row_id, result["layout"].get("stale_files", {}))
 
 
 if __name__ == "__main__":
