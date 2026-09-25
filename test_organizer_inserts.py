@@ -2719,6 +2719,11 @@ class BoreWallOnlyTests(unittest.TestCase):
         one = Feature("bore", legacy, self._item(), options={
             "bore_style": "wall_only", "auto_grid": True, "wall": 1.6, "height": 10.0})
         self.assertEqual(inserts.resolved_options(BIN, one, BIN.base_thickness)["columns"], 1.0)
+        # A pre-065 two-column, two-row shell-sized zone keeps both counts.
+        two = Zone(-(old["span_x"] + old["pitch_x"]) / 2.0, -(old["span_y"] + old["pitch_y"]) / 2.0,
+                   (old["span_x"] + old["pitch_x"]) / 2.0, (old["span_y"] + old["pitch_y"]) / 2.0)
+        grid = inserts.resolved_options(BIN, replace(one, zone=two), BIN.base_thickness)
+        self.assertEqual((grid["columns"], grid["rows"]), (2.0, 2.0))
         # Foot counted once: legacy and foot-sized zones give the same footprint.
         new = wall_only_envelope("round", 30.0, 1.6, "wavy", foot=True)
         sized = Zone(-new["span_x"] / 2.0, -new["span_y"] / 2.0,

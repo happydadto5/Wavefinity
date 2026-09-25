@@ -448,7 +448,7 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
                                     foot=style == "wall_only")
             resolved_grid = {
                 "columns": float(_fit_count(one.zone.width, env["pitch_x"], env["zone_span_x"])),
-                "rows": float(_fit_count(one.zone.depth, env["pitch_y"], env["span_y"])),
+                "rows": float(_fit_count(one.zone.depth, env["pitch_y"], env["zone_span_y"])),
             }
         else:
             resolved_grid = {
