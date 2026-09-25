@@ -730,12 +730,13 @@ def _row_file_names(folder: Path | None, row: dict[str, Any]) -> list[str]:
     text = str(row.get("file") or "").strip()
     if not text or folder is None:
         return []
-    from organizer_drawer import _safe_row_file, inventory_row_files
+    from organizer_drawer import inventory_row_files
     try:
         return [path.name for path in inventory_row_files(folder, row)]
     except ValueError:
-        root = Path(folder).expanduser().resolve()
-        return [name for name in dict.fromkeys(text.split(", ")) if _safe_row_file(root, name)]
+        # Ownership is unprovable (missing/ambiguous); ", " may be part of a
+        # legal file name, so never guess by splitting. Preserve the files.
+        return []
 
 
 def _claimed_names(folder: Path | None, row: dict[str, Any]) -> set[str]:
