@@ -2889,10 +2889,13 @@ class _PartialConnectorBundleError(Exception):
     connector results so the caller can report them truthfully instead of
     losing them behind the exception."""
 
-    def __init__(self, error: Exception, completed: dict[str, Any]) -> None:
+    def __init__(
+        self, error: Exception, completed: dict[str, Any], output: Path | None = None,
+    ) -> None:
         super().__init__(str(error))
         self.error = error
         self.completed = completed
+        self.output = output
 
 
 def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2935,7 +2938,7 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
             # Anything else is unexpected - the connectors already in
             # `results` (at least the Side connector) are real files on
             # disk and must not be lost behind this exception.
-            raise _PartialConnectorBundleError(error, dict(results)) from error
+            raise _PartialConnectorBundleError(error, dict(results), output_dir) from error
         results[key] = corner_result
         types.append(key)
 
@@ -2954,6 +2957,30 @@ def connector_payload(payload: dict[str, Any]) -> dict[str, Any]:
         )
     reply = {"connector_plan": plan}
     return _generation_reply(result=results, output=output_dir, extra=reply)
+
+
+def connector_save_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Direct /api/connector route: like Print, an unexpected later connector
+    failure must not hide the connector files that already completed."""
+    try:
+        return connector_payload(payload)
+    except _PartialConnectorBundleError as error:
+        reply: dict[str, Any] = {
+            "partial": True,
+            "partial_stage": "connectors",
+            "error": (
+                "Some connector files were saved, but the remaining connectors "
+                f"could not be generated: {error.error}"
+            ),
+        }
+        output = error.output
+        if output is None:
+            return {**reply, "result": error.completed}
+        if HOSTED:
+            # Exposes the completed files through the normal export mechanism
+            # so the browser can still save them to the chosen folder.
+            return {**_generation_reply(result=error.completed, output=output), **reply}
+        return {**reply, "result": error.completed, "output": str(output)}
 
 
 def sampler_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3267,7 +3294,7 @@ POST_ROUTES = {
     "/api/layout/mode": mode_payload,
     "/api/layout/expand": expand_layout_payload,
     "/api/generate": generate_payload,
-    "/api/connector": connector_payload,
+    "/api/connector": connector_save_payload,
     "/api/sampler": sampler_payload,
     "/api/print": print_payload,
     "/api/space/structural-design": structural_design_payload,

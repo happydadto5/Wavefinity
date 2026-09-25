@@ -1245,6 +1245,14 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
   DL.dirty = false;
   DL.saveState = "saved";
   DL.savedAt = new Date();
+  // A slicer that did not open leaves the rows Saved, not Printed. Keep the
+  // print selection so Retry is one click, and never show the success toast.
+  if (result.partial) {
+    DL.emit();
+    DL.requestReport();
+    toast(`${result.error || "Bambu Studio did not open."}\nNo bins were marked Printed.`, true, 10000);
+    return;
+  }
   DP.resetPrintSelection();
   DL.emit();
   DL.requestReport();
@@ -1268,5 +1276,9 @@ DL.printDrawer = () => DL.busyWith("print", async context => {
     return;
   }
   const lines = Object.entries(result.counts || {}).map(([file, count]) => `${count} × ${file}`);
+  if (result.partial) {
+    toast([result.error || "Bambu Studio did not open.", "Connector files were prepared and kept.", ...lines, ...(result.notes || [])].join("\n"), true, 10000);
+    return;
+  }
   toast(["Opened in Bambu Studio", ...lines, ...(result.notes || [])].join("\n"), false, 10000);
 });

@@ -1139,11 +1139,18 @@ class BulkPrintTests(unittest.TestCase):
             raise RuntimeError("slicer did not open")
 
         inv = load_inventory(self.folder)
-        with self.assertRaises(RuntimeError):
-            print_inventory_bins(
-                self.folder, inv["layout"], inv["bins"], {row_id: 1}, False,
-                lambda _path: self.slicer, failing_launch, None, generate_from_design,
-            )
+        partial = print_inventory_bins(
+            self.folder, inv["layout"], inv["bins"], {row_id: 1}, False,
+            lambda _path: self.slicer, failing_launch, None, generate_from_design,
+        )
+        # Fix 057: a launch failure after on-demand generation is a structured
+        # partial result carrying the refreshed Saved (not Printed) state.
+        self.assertTrue(partial["partial"])
+        self.assertEqual(partial["partial_stage"], "slicer")
+        self.assertIn("kept", partial["error"])
+        partial_row = next(one for one in partial["bins"] if one["id"] == row_id)
+        self.assertEqual((partial_row["status"], partial_row["qty"], partial_row["file"]),
+                         ("saved", 0, "OnDemand.3mf"))
         # The resolved file is persisted even though the handoff failed, but
         # Qty is untouched - generating is not printing.
         mid = load_inventory(self.folder)
@@ -1204,9 +1211,30 @@ class BulkPrintTests(unittest.TestCase):
         def boom(_slicer, _files):
             raise RuntimeError("no slicer")
 
-        with self.assertRaises(RuntimeError):
-            self.run_print({"B1": 1}, launch=boom)
+        result = self.run_print({"B1": 1}, launch=boom)
+        self.assertTrue(result["partial"])
         self.assertEqual(inventory_path(self.folder).read_text(encoding="utf-8"), before)
+
+    def test_invalid_slicer_generates_nothing_before_preflight(self):
+        from organizer_inventory import save_design_source
+
+        design = {"version": 1, "box": {"x": 16, "y": 16, "z": 20}, "part_name": "Spec Only"}
+        record = {"kind": "bin", "name": "Spec Only", "x": 16, "y": 16, "z": 20, "stack": "none"}
+        row_id = save_design_source(self.folder, design=design, record=record)["row_id"]
+        before = inventory_path(self.folder).read_text(encoding="utf-8")
+        generate = mock.Mock(return_value=[])
+        inv = load_inventory(self.folder)
+        with mock.patch("organizer_drawer.generate_connectors") as connectors:
+            for detect in (lambda _p: None, lambda _p: self.folder / "missing.exe"):
+                with self.assertRaisesRegex(ValueError, "Bambu Studio was not found"):
+                    print_inventory_bins(
+                        self.folder, inv["layout"], inv["bins"], {row_id: 1}, True,
+                        detect, self.launch, None, generate,
+                    )
+        generate.assert_not_called()
+        connectors.assert_not_called()
+        self.assertEqual(inventory_path(self.folder).read_text(encoding="utf-8"), before)
+        self.assertEqual(self.launched, [])
 
     def test_file_names_containing_commas(self):
         (self.folder / "Box Bolts, Nuts.3mf").write_bytes(b"3mf")
@@ -1272,6 +1300,35 @@ class BulkPrintTests(unittest.TestCase):
                 self.folder, _layout(200, 120), inv["bins"], None,
                 lambda _p: self.slicer, self.launch)
         self.assertEqual([p.name for p in self.launched[0]], ["Conn.3mf"] * 3)
+
+    def test_spacer_and_connector_print_validates_slicer_before_generating(self):
+        self.add("A", "A.3mf")
+        inv = load_inventory(self.folder)
+        with mock.patch("organizer_drawer.generate_connectors") as connectors:
+            with self.assertRaisesRegex(ValueError, "Bambu Studio was not found"):
+                print_spacers_and_connectors(
+                    self.folder, _layout(200, 120), inv["bins"], None,
+                    lambda _p: None, self.launch)
+        connectors.assert_not_called()
+
+    def test_spacer_and_connector_launch_failure_is_partial_after_files_prepared(self):
+        self.add("A", "A.3mf")
+        (self.folder / "Conn.3mf").write_bytes(b"3mf")
+        inv = load_inventory(self.folder)
+
+        def boom(_slicer, _files):
+            raise RuntimeError("no open")
+
+        with mock.patch("organizer_drawer.generate_connectors",
+                        lambda *a, **k: {"connectors": [{"file": "Conn.3mf", "count": 2}], "notes": []}):
+            result = print_spacers_and_connectors(
+                self.folder, _layout(200, 120), inv["bins"], None,
+                lambda _p: self.slicer, boom)
+        self.assertTrue(result["partial"])
+        self.assertEqual(result["partial_stage"], "slicer")
+        self.assertEqual(result["counts"], {"Conn.3mf": 2})
+        self.assertEqual([Path(f).name for f in result["files"]], ["Conn.3mf"])
+        self.assertIn("did not open", result["error"])
 
 
 if __name__ == "__main__":

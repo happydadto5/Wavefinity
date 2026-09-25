@@ -1091,6 +1091,10 @@ def print_spacers_and_connectors(
     output_dir = Path(output_dir).expanduser().resolve()
     drawer = find_drawer(layout, drawer_id)
     by_id = {one["id"]: one for one in bins}
+    # Preflight the authoritative slicer before any connector file is written.
+    slicer = detect_slicer(slicer_path)
+    if slicer is None or not Path(slicer).is_file():
+        raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
     counts: dict[str, int] = {}
     for placement in drawer.get("placements") or []:
         one = by_id.get(placement.get("bin"))
@@ -1105,10 +1109,18 @@ def print_spacers_and_connectors(
     # Each file is repeated once per physical copy so the slicer project holds
     # the real number of parts.
     launch_files = [path for path in files for _ in range(max(1, counts[path.name]))]
-    slicer = detect_slicer(slicer_path)
-    if slicer is None or not Path(slicer).is_file():
-        raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
-    launch_slicer(Path(slicer), launch_files)
+    try:
+        launch_slicer(Path(slicer), launch_files)
+    except Exception as error:
+        # The connector files above are real and kept; say so plainly.
+        return {
+            "partial": True,
+            "partial_stage": "slicer",
+            "error": f"Files were prepared, but Bambu Studio did not open: {error}",
+            "files": [str(path) for path in files],
+            "counts": counts,
+            "notes": connectors["notes"],
+        }
     return {"files": [str(path) for path in files], "counts": counts, "notes": connectors["notes"]}
 
 
@@ -1209,6 +1221,11 @@ def print_inventory_bins(
     Qty 0 - so a later print does not regenerate it.
     """
     output_dir = Path(output_dir).expanduser().resolve()
+    # Preflight the authoritative slicer before any on-demand bin generation,
+    # Inventory File-cell write or connector generation.
+    slicer = detect_slicer(slicer_path)
+    if slicer is None or not Path(slicer).is_file():
+        raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
     by_id = {one["id"]: one for one in bins}
     specs = design_specs(layout)
     counts: dict[str, int] = {}
@@ -1251,10 +1268,6 @@ def print_inventory_bins(
                 if note not in notes:
                     notes.append(note)
 
-    slicer = detect_slicer(slicer_path)
-    if slicer is None or not Path(slicer).is_file():
-        raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
-
     launch_files: list[Path] = []
     for bin_id, count in counts.items():
         for _copy in range(count):
@@ -1262,7 +1275,28 @@ def print_inventory_bins(
     for name, count in connector_counts.items():
         launch_files.extend([output_dir / name] * count)
 
-    project = launch_slicer(Path(slicer), launch_files)
+    try:
+        project = launch_slicer(Path(slicer), launch_files)
+    except Exception as error:
+        # On-demand files and connectors written above are kept; rows stay
+        # Saved (never Printed). Return the refreshed Inventory so the browser
+        # matches what is on disk.
+        refreshed = load_inventory(output_dir)
+        return {
+            **refreshed,
+            "partial": True,
+            "partial_stage": "slicer",
+            "error": (
+                f"Bambu Studio did not open: {error}. "
+                "Any files made during this attempt were kept."
+            ),
+            "selection": counts,
+            "bin_copies": sum(counts.values()),
+            "connector_counts": connector_counts,
+            "connector_copies": sum(connector_counts.values()),
+            "notes": notes,
+            "project": None,
+        }
 
     try:
         # A row is one bin. Placement copy numbers are not print bookkeeping.

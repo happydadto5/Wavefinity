@@ -11514,6 +11514,10 @@ async function generateParts(target) {
   let connectorPlan = null;
   let saveOutput = state.output;
   let checkpointSaveFailed = null;
+  // Stage truth: once the bin is really saved, a later connector failure must
+  // say so instead of presenting the whole action as failed.
+  let saveStage = "setup";
+  let binSaved = false;
 
   try {
     // A debounced support edit may still be visible only in the draft. Save
@@ -11543,6 +11547,7 @@ async function generateParts(target) {
 
     // Step 1: Generate Bin if requested
     if (target === "all" || target === "bin") {
+      saveStage = "bin";
       setItemStatus("bin", "generating", "Saving…");
       const binResult = await api("/api/generate", payload);
       if (designSpaceContext) DL.requireSpaceContext(designSpaceContext);
@@ -11566,6 +11571,7 @@ async function generateParts(target) {
         await SP.addInventoryBin(binResult.inventory_bin, binResult.inventory_design_spec || null);
       }
       allFiles.push(...binFiles);
+      binSaved = true;
       setItemStatus("bin", "done", "Done");
       // The just-saved bin is the next resume target. The generated files and
       // inventory entry already exist by this point, so a checkpoint-save
@@ -11583,6 +11589,7 @@ async function generateParts(target) {
 
     // Step 2: Generate Connector if requested
     if (target === "all" || target === "connector") {
+      saveStage = "connector";
       setItemStatus("connector", "generating", "Saving…");
       const connResult = await api("/api/connector", payload);
       saveOutput = connResult.output || saveOutput;
@@ -11592,6 +11599,22 @@ async function generateParts(target) {
       }
       const connFiles = await saveGeneratedFiles(connResult);
       allFiles.push(...connFiles);
+      if (connResult.partial) {
+        // Some connectors were really written before a later one failed.
+        setItemStatus("connector", "error", "Partly saved");
+        const savedList = [...new Set(allFiles)];
+        const message = `${binSaved ? "The bin was saved. " : ""}Some connector files were saved, but not all.\n${connResult.error || ""}`
+          + `${savedList.length ? `\nSaved to ${saveOutput}\n${savedList.join("\n")}` : ""}`;
+        if (dialogTitle) dialogTitle.textContent = binSaved ? "Bin saved; connectors partly saved" : "Connectors partly saved";
+        if (dialogSubtitle) dialogSubtitle.textContent = "Some connector files were saved before the remaining connector failed.";
+        if (dialogError) {
+          dialogError.textContent = message;
+          dialogError.hidden = false;
+        }
+        if (dialogActions) dialogActions.hidden = false;
+        toast(message, true, 9000);
+        return;
+      }
       setItemStatus("connector", "done", "Done");
     }
 
@@ -11641,17 +11664,26 @@ async function generateParts(target) {
       }
     }
 
-    if (dialogTitle) dialogTitle.textContent = "Saving Failed";
-    if (dialogSubtitle) dialogSubtitle.textContent = "An error occurred while saving parts.";
+    const connectorsFailedAfterBin = binSaved && saveStage === "connector";
+    let failureText = error.message;
+    if (connectorsFailedAfterBin) {
+      const savedList = [...new Set(allFiles)];
+      failureText = `The bin was saved, but the connectors could not be saved: ${error.message}`
+        + `${savedList.length ? `\nSaved to ${saveOutput}\n${savedList.join("\n")}` : ""}`;
+    }
+    if (dialogTitle) dialogTitle.textContent = connectorsFailedAfterBin ? "Bin saved; connectors failed" : "Saving Failed";
+    if (dialogSubtitle) dialogSubtitle.textContent = connectorsFailedAfterBin
+      ? "The bin file was saved. Only the connectors failed."
+      : "An error occurred while saving parts.";
     if (dialogError) {
-      dialogError.textContent = error.message;
+      dialogError.textContent = failureText;
       dialogError.hidden = false;
     }
     if (dialogActions) {
       dialogActions.hidden = false;
     }
-    setError(error.message);
-    toast(error.message, true, 7000);
+    setError(failureText);
+    toast(failureText, true, 7000);
   } finally {
     isGenerating = false;
     state.designMutationBusy = false;

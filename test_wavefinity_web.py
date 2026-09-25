@@ -1824,6 +1824,29 @@ class WebApplicationTests(unittest.TestCase):
             self.assertNotIn("slicer", response)
             append.assert_not_called()
 
+    def test_connector_save_route_reports_completed_connectors_on_partial_failure(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            side = Path(temp_dir) / "Side.3mf"
+            side.touch()
+            with (
+                patch.object(wavefinity_web, "_generate_side_connector",
+                             return_value=({"output": str(side)}, {"wall_mm": 1.2})),
+                patch.object(wavefinity_web, "_generate_corner_connector",
+                             side_effect=RuntimeError("corner boom")),
+            ):
+                response = wavefinity_web.connector_save_payload(
+                    {"design": default_design(), "output": temp_dir})
+            self.assertIs(wavefinity_web.POST_ROUTES["/api/connector"],
+                          wavefinity_web.connector_save_payload)
+            self.assertTrue(response["partial"])
+            self.assertEqual(response["partial_stage"], "connectors")
+            self.assertIn("corner boom", response["error"])
+            self.assertEqual(response["result"], {"side": {"output": str(side)}})
+            self.assertEqual(
+                [f.name for f in wavefinity_web._extract_generated_files(response["result"])],
+                ["Side.3mf"])
+            self.assertTrue(side.is_file())
+
     def test_generate_payload_suppression_and_hosted_qty_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             box = Path(temp_dir) / "Box.3mf"
