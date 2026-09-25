@@ -49,6 +49,12 @@ const state = {
   pinnedZone: {},
   // Session-only manual Base widths/lengths, keyed by placed-part index.
   partZoneLocks: {},
+  // Fix 060 Correction 1: the last known Lid/Handle/Label field values for the
+  // design currently open in the editor, kept while Stackable Bin hides
+  // design.box.lid entirely so switching back to Handled/Stackable Lid
+  // restores them. Reseeded from the design's own box.lid (or cleared)
+  // whenever a different design is bound to the editor - see syncForm().
+  lidMemory: null,
   // Set while a user-driven Width/Length edit waits for grow-only minimum
   // enforcement. Consumed by the debounced design update.
   binResizePending: false,
@@ -2114,6 +2120,12 @@ function syncWallControls() {
 }
 
 function syncForm() {
+  // Fix 060 Correction 1: a routine full refresh means a (possibly different)
+  // design is now bound to the editor, so reseed the remembered Lid/Handle/
+  // Label values from that design's own box.lid rather than carrying over
+  // whatever an earlier bin's session had - only the in-progress config
+  // switches on this same design should read from memory.
+  state.lidMemory = state.design.box.lid ? { ...state.design.box.lid } : null;
   normalizeStackSettings(state.design);
   const { box, layout } = state.design;
   ensureRimFeatureInLayout();
@@ -2679,7 +2691,12 @@ const LID_DEFAULTS = {
 };
 
 function lidState(design = state.design) {
-  return { ...LID_DEFAULTS, ...(design?.box?.lid || {}) };
+  const boxLid = design?.box?.lid;
+  // Fix 060 Correction 1: fall back to the remembered Lid/Handle/Label values
+  // while Stackable Bin hides design.box.lid, but `enabled` always reflects
+  // the actual design - never the memory - so a hidden/inactive lid never
+  // reads as active (e.g. for the compartment-label editor or divider lock).
+  return { ...LID_DEFAULTS, ...(state.lidMemory || {}), ...(boxLid || {}), enabled: Boolean(boxLid?.enabled) };
 }
 
 function lidPartActive(design = state.design) {
@@ -2916,6 +2933,11 @@ function readStackForm(design) {
   const config = $("#lid-configuration")?.value || lidConfiguration(design);
   const remembered = lidState(design);
   if (config === "stackable_bin") {
+    // Fix 060 Correction 1: remember the outgoing Lid/Handle/Label values so
+    // switching back to Handled/Stackable Lid restores them, without keeping
+    // an active design.box.lid that would make Stackable Bin look like it has
+    // a lid to the backend/output or to Divider label locking.
+    if (design.box.lid) state.lidMemory = { ...remembered };
     design.box.stack = { mode: "direct" };
     delete design.box.lid;
     return;

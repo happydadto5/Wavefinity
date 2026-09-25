@@ -4586,6 +4586,61 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
         self.assertIn("residualX = width - holesX * standard.pitch_x_mm;", spaces_js)
         self.assertIn("residualY = height - holesY * standard.pitch_y_mm;", spaces_js)
 
+    def test_fix060_correction1_lid_hidden_values_survive_configuration_changes(self):
+        # Fix 060 Correction 1: Stackable Bin deletes design.box.lid (so the
+        # backend/output and Divider label lock keep seeing no active lid),
+        # but the outgoing Lid/Handle/Label values are cached in session-only
+        # state.lidMemory and read back through lidState() when the editor
+        # rebuilds design.box.lid for Handled/Stackable Lid, so they are not
+        # erased merely because Stackable Bin hides them.
+        root = Path(__file__).resolve().parent / "web"
+        app_js = (root / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("lidMemory: null,", app_js)
+
+        # lidState() falls back to the remembered values while design.box.lid
+        # is absent, but `enabled` always reflects the real design, never the
+        # memory - a hidden/inactive lid must never read back as active.
+        state_fn_start = app_js.index("function lidState(design = state.design) {")
+        state_fn_end = app_js.index("function lidPartActive(")
+        lid_state_fn = app_js[state_fn_start:state_fn_end]
+        self.assertIn(
+            "return { ...LID_DEFAULTS, ...(state.lidMemory || {}), ...(boxLid || {}), "
+            "enabled: Boolean(boxLid?.enabled) };",
+            lid_state_fn,
+        )
+
+        # Switching to Stackable Bin caches the outgoing lid before deleting
+        # it, rather than just discarding it.
+        stack_form_start = app_js.index("function readStackForm(design) {")
+        stack_form_end = app_js.index("function normalizeBinDimension(", stack_form_start)
+        read_stack_form = app_js[stack_form_start:stack_form_end]
+        self.assertIn('if (design.box.lid) state.lidMemory = { ...remembered };', read_stack_form)
+        self.assertIn("delete design.box.lid;", read_stack_form)
+
+        # A routine full-form refresh (a different/loaded design bound to the
+        # editor) reseeds memory from that design's own box.lid, so one bin's
+        # remembered Handle/Label values never leak into another bin.
+        sync_form_start = app_js.index("function syncForm() {")
+        sync_form_head = app_js[sync_form_start:sync_form_start + 600]
+        self.assertIn(
+            "state.lidMemory = state.design.box.lid ? { ...state.design.box.lid } : null;",
+            sync_form_head,
+        )
+
+        # Divider label locking still reads design.box.lid directly (never
+        # lidState()/memory), so it stays inactive while Stackable Bin hides
+        # the lid.
+        self.assertIn(
+            "function dividerLockedByLidLabels(design = state.design) {\n"
+            "  return lidDivisionLabelsMeaningful(design);\n}",
+            app_js,
+        )
+        self.assertIn(
+            "return Boolean(design?.box?.lid?.enabled && design.box.lid.label_enabled && lidDivider(design) &&",
+            app_js,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
