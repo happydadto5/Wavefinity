@@ -2649,6 +2649,9 @@ class LayoutModelTests(unittest.TestCase):
             self.assertAlmostEqual(mesh.bounds[1][2], inserts.BASE_PLATE)
 
 
+from organizer_inserts._bore import WALL_ONLY_FOOT
+
+
 class BoreWallOnlyTests(unittest.TestCase):
     ZONE = Zone(-40.0, -30.0, 40.0, 30.0)
     PROFILES = ("round", "hex", "square", "square_axis", "hex_bit_short", "hex_bit_long")
@@ -2692,13 +2695,62 @@ class BoreWallOnlyTests(unittest.TestCase):
         wavy = self._build(wall_style="wavy")
         straight = self._build(wall_style="straight")
         radii = lambda mesh: np.hypot(mesh.vertices[:, 0], mesh.vertices[:, 1])
+        # Upright sleeve only (above the strengthening foot) uses the wall constants.
+        upright = lambda mesh: np.hypot(
+            *mesh.vertices[mesh.vertices[:, 2] > mesh.bounds[0][2] + WALL_ONLY_FOOT + 0.05, :2].T
+        ).max()
         outer = lambda mesh: radii(mesh).max()
         self.assertAlmostEqual(
-            outer(wavy), 15.0 + 2.0 * WAVE_AMPLITUDE + wall_depth_for(1.6), delta=0.02)
-        self.assertAlmostEqual(outer(straight), 15.0 + 1.6, delta=0.02)
+            upright(wavy), 15.0 + 2.0 * WAVE_AMPLITUDE + wall_depth_for(1.6), delta=0.02)
+        self.assertAlmostEqual(upright(straight), 15.0 + 1.6, delta=0.02)
+        # The whole mesh reaches one extra WALL_ONLY_FOOT at the base.
+        self.assertAlmostEqual(outer(wavy), upright(wavy) + WALL_ONLY_FOOT, delta=0.02)
+        self.assertAlmostEqual(outer(straight), upright(straight) + WALL_ONLY_FOOT, delta=0.02)
         inner = lambda mesh: radii(mesh)[radii(mesh) < 15.0 + 2.0 * WAVE_AMPLITUDE + 0.05]
         self.assertGreater(inner(wavy).max() - inner(wavy).min(), WAVE_AMPLITUDE)
         self.assertLess(inner(straight).max() - inner(straight).min(), 0.01)
+
+    def test_pre_065_shell_sized_wall_only_zone_still_builds_and_counts_once(self) -> None:
+        old = wall_only_envelope("round", 30.0, 1.6, "wavy")
+        legacy = Zone(-old["span_x"] / 2.0, -old["span_y"] / 2.0,
+                      old["span_x"] / 2.0, old["span_y"] / 2.0)
+        mesh = self._build(zone=legacy, wall_style="wavy")      # must not raise
+        self.assertTrue(mesh.is_watertight)
+        one = Feature("bore", legacy, self._item(), options={
+            "bore_style": "wall_only", "auto_grid": True, "wall": 1.6, "height": 10.0})
+        self.assertEqual(inserts.resolved_options(BIN, one, BIN.base_thickness)["columns"], 1.0)
+        # A pre-065 two-column, two-row shell-sized zone keeps both counts.
+        two = Zone(-(old["span_x"] + old["pitch_x"]) / 2.0, -(old["span_y"] + old["pitch_y"]) / 2.0,
+                   (old["span_x"] + old["pitch_x"]) / 2.0, (old["span_y"] + old["pitch_y"]) / 2.0)
+        grid = inserts.resolved_options(BIN, replace(one, zone=two), BIN.base_thickness)
+        self.assertEqual((grid["columns"], grid["rows"]), (2.0, 2.0))
+        # Foot counted once: legacy and foot-sized zones give the same footprint.
+        new = wall_only_envelope("round", 30.0, 1.6, "wavy", foot=True)
+        sized = Zone(-new["span_x"] / 2.0, -new["span_y"] / 2.0,
+                     new["span_x"] / 2.0, new["span_y"] / 2.0)
+        opts = {"bore_style": "wall_only", "wall": 1.6, "wall_style": "wavy", "height": 10.0}
+        for zone in (legacy, sized):
+            fp = inserts.feature_footprint(
+                BIN, Feature("bore", zone, self._item(), options=dict(opts)), BIN.base_thickness)
+            self.assertAlmostEqual(fp.width, new["span_x"], places=6)
+
+    def test_wall_only_minimum_adds_foot_but_wavy_base_does_not(self) -> None:
+        from organizer_inserts._bore import wall_only_envelope
+        base = wall_only_envelope("round", 30.0, 1.6, "wavy")
+        foot = wall_only_envelope("round", 30.0, 1.6, "wavy", foot=True)
+        self.assertAlmostEqual(foot["span_x"] - base["span_x"], 2.0 * WALL_ONLY_FOOT)
+        self.assertAlmostEqual(foot["span_y"] - base["span_y"], 2.0 * WALL_ONLY_FOOT)
+        self.assertEqual(foot["pitch_x"], base["pitch_x"])
+        for style, extra in (("wall_only", 1.0), ("wavy_base", 0.0)):
+            sizes = []
+            for columns in (1, 3):
+                one = Feature("bore", self.ZONE, self._item(), options={
+                    "bore_style": style, "height": 10.0, "columns": columns,
+                    "wall_style": "wavy", "wall": 1.6})
+                sizes.append(inserts.feature_min_footprint(BIN, one, BIN.base_thickness))
+            plain = wall_only_envelope("round", 30.0, 1.6, "wavy")
+            self.assertAlmostEqual(sizes[0][0], plain["span_x"] + extra, delta=1e-6)
+            self.assertAlmostEqual(sizes[1][0] - sizes[0][0], 2.0 * plain["pitch_x"], delta=1e-6)
 
     def test_wall_thickness_grows_the_sleeve_and_defaults_to_the_bin_wall(self) -> None:
         thin = self._build(wall=0.8, wall_style="straight")
@@ -2777,11 +2829,12 @@ class BoreWallOnlyTests(unittest.TestCase):
                 "bore_style": "wall_only", "wall_style": wall_style, "wall": 1.6})
             width, depth = inserts.feature_min_footprint(BIN, one, BIN.base_thickness)
             reach = 1.6 if wall_style == "straight" else 2.0 * WAVE_AMPLITUDE + wall_depth_for(1.6)
+            reach += WALL_ONLY_FOOT     # Wall Only's strengthening foot
             self.assertAlmostEqual(width, 30.0 + 2.0 * reach, delta=0.01)
             self.assertAlmostEqual(depth, 30.0 + 2.0 * reach, delta=0.01)
         # Two sleeves need 31.6 more; a zone a hair short of that fits only one.
-        env = wall_only_envelope("round", 30.0, 1.6, "wavy")
-        two = env["span_x"] + env["pitch_x"]
+        env = wall_only_envelope("round", 30.0, 1.6, "wavy", foot=True)
+        two = env["zone_span_x"] + env["pitch_x"]
         tight = Zone(-(two - 0.2) / 2.0, -25.0, (two - 0.2) / 2.0, 25.0)
         one = Feature("bore", tight, self._item(), options={
             "bore_style": "wall_only", "auto_grid": True, "wall": 1.6, "height": 10.0})
@@ -2805,14 +2858,14 @@ class BoreWavyBaseTests(unittest.TestCase):
             options.setdefault("depth", 6.0)
         return Feature("bore", zone, self._item(diameter), options=options)
 
-    def _touching(self, size=40.0):
+    def _touching(self, size=40.0, foot=False):
         """A bin and a hole whose outer envelope exactly meets the usable floor."""
         box = replace(BIN, x=size, y=size)
         inside = box.usable_inside[0]
-        reach = _wall_only_shell_reach(1.6, "wavy")
+        reach = _wall_only_shell_reach(1.6, "wavy") + (WALL_ONLY_FOOT if foot else 0.0)
         clear = inside - 2.0 * reach
         diameter = clear * math.cos(math.pi / _round_clear_sides(clear, "wavy"))
-        env = wall_only_envelope("round", diameter, 1.6, "wavy")
+        env = wall_only_envelope("round", diameter, 1.6, "wavy", foot=foot)
         self.assertAlmostEqual(env["span_x"], inside, places=6)
         return box, diameter, Zone.whole(box)
 
@@ -2868,9 +2921,11 @@ class BoreWavyBaseTests(unittest.TestCase):
         self.assertIsNone(wavy_base_bin_minimum(BIN, [one], BIN.base_thickness, "separate"))
 
     def test_wavy_base_joins_every_wall_it_reaches_without_touching_the_outside(self) -> None:
-        box, diameter, whole = self._touching()
-        outer = wavy_outer_polygon(box).bounds
+        outer = wavy_outer_polygon(self._touching()[0]).bounds
+        # Wall Only's physical envelope includes the base foot, so it is sized
+        # (and joins the wall) by that foot-inclusive reach.
         for style in ("wavy_base", "wall_only"):
+            box, diameter, whole = self._touching(foot=style == "wall_only")
             one = self._one(whole, style=style, diameter=diameter)
             mesh = build_features(box, [one], box.base_thickness)[0]
             self.assertGreater(mesh.bounds[1][0], whole.x1 + 0.5, style)

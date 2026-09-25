@@ -6647,9 +6647,12 @@ function sizeBoreToGrid(one) {
     const circum = held / Math.cos(Math.PI / sides);   // corner-to-corner
     return sides === 4 || axis === "x" ? circum : held;
   };
+  // Mirrors WALL_ONLY_FOOT in _bore.py: the strengthening foot reaches this far
+  // past the sleeve on each outside side. Wall Only only - never Wavy Base.
+  const wallOnlyFoot = boreStyle === "wall_only" ? 0.5 : 0;
   const axisSpan = (count, axis) => {
     if (wallOnly) {
-      return Math.ceil(clearSpan(axis) + 2 * shellReach + (count - 1) * crossPitch - 1e-6);
+      return Math.ceil(clearSpan(axis) + 2 * shellReach + 2 * wallOnlyFoot + (count - 1) * crossPitch - 1e-6);
     }
     const pitch = along === axis ? leanPitch : crossPitch;
     return Math.ceil(count * pitch + (along === axis ? reach : 0) - 1e-6);

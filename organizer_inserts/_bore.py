@@ -138,19 +138,27 @@ def _clear_spans(profile: str, held: float, wall_style: str) -> tuple[float, flo
 
 def wall_only_envelope(
     profile: str, held: float, wall: float, wall_style: str,
+    foot: bool = False,
 ) -> dict[str, float]:
     """Shared Wall Only spacing/size numbers (backend build, layout, Auto Grid).
 
     Pitch keeps today's "clear opening + requested web" rule at upright angle;
     the physical one-hole span is the clear span plus the shell on both sides.
+    ``foot`` (Wall Only only, never Wavy Base) also adds the base strengthening
+    foot, WALL_ONLY_FOOT, on each outside side; pitch is unchanged.
     """
     pitch_x, pitch_y = bore_minimum_pitches(profile, held, wall, 0.0, "x")
     clear_x, clear_y = _clear_spans(profile, held, wall_style)
     reach = _wall_only_shell_reach(wall, wall_style)
+    extra = 2.0 * WALL_ONLY_FOOT if foot else 0.0
     return {
         "pitch_x": pitch_x, "pitch_y": pitch_y,
         "clear_x": clear_x, "clear_y": clear_y, "reach": reach,
-        "span_x": clear_x + 2.0 * reach, "span_y": clear_y + 2.0 * reach,
+        "span_x": clear_x + 2.0 * reach + extra,
+        "span_y": clear_y + 2.0 * reach + extra,
+        # Pre-Fix-065 stored zones were sized to the shell alone; the foot was
+        # allowed past them. Zone acceptance / Auto Grid fit keep honouring that.
+        "zone_span_x": clear_x + 2.0 * reach, "zone_span_y": clear_y + 2.0 * reach,
     }
 
 
@@ -334,7 +342,9 @@ def _build_wall_only_bore(
         openings.append(cut)
     tabs: list[trimesh.Trimesh] = []
     if join and box is not None:
-        material = unary_union([translate(outer, x, y) for x, y in centres])
+        # The base foot is physical material too, so it counts toward reaching a wall.
+        physical = outer.buffer(WALL_ONLY_FOOT, join_style="round")
+        material = unary_union([translate(physical, x, y) for x, y in centres])
         keep_clear = unary_union([translate(inner, x, y) for x, y in centres])
         tabs = _tab_meshes(
             _join_tabs(box, material, keep_clear, JOIN_BAND), height, base_z)
@@ -434,10 +444,11 @@ def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         lean_axis, _ = bore_direction(one)
         pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, lean_axis)
         if envelope:
-            env = wall_only_envelope(item.profile, held, wall, wall_style)
+            env = wall_only_envelope(item.profile, held, wall, wall_style,
+                                    foot=style == "wall_only")
             resolved_grid = {
-                "columns": float(_fit_count(one.zone.width, env["pitch_x"], env["span_x"])),
-                "rows": float(_fit_count(one.zone.depth, env["pitch_y"], env["span_y"])),
+                "columns": float(_fit_count(one.zone.width, env["pitch_x"], env["zone_span_x"])),
+                "rows": float(_fit_count(one.zone.depth, env["pitch_y"], env["zone_span_y"])),
             }
         else:
             resolved_grid = {
@@ -501,9 +512,9 @@ def _envelope_counts(
     raw_columns = options.get("columns")
     raw_rows = options.get("rows")
     columns = int(raw_columns) if raw_columns is not None else _fit_count(
-        zone.width, env["pitch_x"], env["span_x"])
+        zone.width, env["pitch_x"], env["zone_span_x"])
     rows = int(raw_rows) if raw_rows is not None else _fit_count(
-        zone.depth, env["pitch_y"], env["span_y"])
+        zone.depth, env["pitch_y"], env["zone_span_y"])
     if ((raw_columns is not None and abs(float(raw_columns) - columns) > 1e-9)
             or (raw_rows is not None and abs(float(raw_rows) - rows) > 1e-9)):
         raise ValueError("bore columns and rows must be whole numbers")
@@ -528,10 +539,12 @@ def _wall_only_grid(
     if not math.isfinite(angle) or abs(angle) > 1e-9:
         label = "Wall Only" if style == "wall_only" else "Wavy Base"
         raise ValueError(f"a {label} bore stands upright; its angle must be 0")
-    env = wall_only_envelope(item.profile, held, wall, wall_style)
+    env = wall_only_envelope(item.profile, held, wall, wall_style,
+                             foot=style == "wall_only")
     columns, rows = _envelope_counts(env, zone, spec_feature, options, item.name)
-    needed_x = env["span_x"] + (columns - 1) * env["pitch_x"]
-    needed_y = env["span_y"] + (rows - 1) * env["pitch_y"]
+    # The stored zone may predate foot-aware sizing (shell only); accept it.
+    needed_x = env["zone_span_x"] + (columns - 1) * env["pitch_x"]
+    needed_y = env["zone_span_y"] + (rows - 1) * env["pitch_y"]
     if needed_x > zone.width + 1e-9 or needed_y > zone.depth + 1e-9:
         raise ValueError(
             f"{columns} x {rows} bores need {needed_x:.1f} x {needed_y:.1f} mm "
@@ -565,7 +578,8 @@ def bore_envelope_zone(box: BoxSpec, one: Feature, base_z: float) -> Zone | None
         held = (HEX_BIT_FLATS + HEX_BIT_CLEARANCE
                 if _is_hex_bit(item.profile) else item.held(item.widest))
         wall_style = "wavy" if style == "wavy_base" else str(options.get("wall_style", "wavy"))
-        env = wall_only_envelope(item.profile, held, float(options["wall"]), wall_style)
+        env = wall_only_envelope(item.profile, held, float(options["wall"]), wall_style,
+                                 foot=style == "wall_only")
         columns, rows = _envelope_counts(env, one.zone, one, options, item.name)
     except (ValueError, KeyError, TypeError):
         return None
