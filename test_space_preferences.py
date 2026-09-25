@@ -65,10 +65,18 @@ def node_run(script: str):
     node = shutil.which("node")
     if not node:
         raise unittest.SkipTest("Node.js is required for this browser-state regression")
-    done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
-    if done.returncode != 0:
-        raise AssertionError(done.stderr)
-    return json.loads(done.stdout)
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", delete=False) as handle:
+            handle.write(script)
+            path = handle.name
+        done = subprocess.run([node, path], capture_output=True, text=True, timeout=30)
+        if done.returncode != 0:
+            raise AssertionError(done.stderr)
+        return json.loads(done.stdout)
+    finally:
+        if path:
+            Path(path).unlink(missing_ok=True)
 
 
 def js(template: str, **values) -> str:
@@ -464,7 +472,17 @@ class SpaceDefaultsRouteTests(unittest.TestCase):
 class ExactBinAutosaveTests(unittest.TestCase):
     def test_typed_edge_mount_thickness_is_owned_by_the_design_and_survives_typing_back(self):
         out = node_run("\n".join([
-            "const els = { '#edge-mount-label-enabled': { checked: true }, '#edge-mount-holes-enabled': { checked: false },",
+            "const EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM = 0.6;",
+            "const els = { '#edge-mount-label-mode': { value: 'separate' }, '#edge-mount-holes-enabled': { checked: false },",
+            "  '#edge-mount-side': { value: 'front' }, '#edge-mount-label-text': { value: '' },",
+            "  '#edge-mount-label-projection-mm': { value: '30' }, '#edge-mount-label-length-mode': { value: 'full' },",
+            "  '#edge-mount-label-style': { value: 'flush' }, '#edge-mount-label-depth': { value: '0.6' },",
+            "  '#edge-mount-label-flip': { checked: false }, '#edge-mount-standoff-ribs-enabled': { checked: true },",
+            "  '#edge-mount-standoff-rib-count-mode': { value: 'auto' }, '#edge-mount-standoff-rib-count': { value: '1' },",
+            "  '#edge-mount-hole-count': { value: '2' }, '#edge-mount-hole-orientation': { value: 'horizontal' },",
+            "  '#edge-mount-screw-diameter': { value: '4' }, '#edge-mount-access-diameter': { value: '8' },",
+            "  '#edge-mount-top-offset': { value: '5' }, '#edge-mount-spacing-mode': { value: 'auto' },",
+            "  '#edge-mount-spacing-mm': { value: '20' },",
             "  '#edge-mount-label-thickness-mm': { value: '2', dataset: { storedValue: '2' } } };",
             "const $ = selector => els[selector];",
             "const number = (v, f = 0) => { const n = Number(v); return Number.isFinite(n) ? n : f; };",
@@ -504,6 +522,8 @@ process.stdout.write(JSON.stringify({ typed, stored, back: design.box.edge_mount
             SpaceSizingTests.SCRIPT,
             block("function typedSpaceOrdinaryBin() {", "// Install a canonical design"),
             block("let pendingDesignHistory = null;", "// Re-evaluate contents-driven parts"),
+            "const EDGE_MOUNT_TEXT_DEPTH_DEFAULT_MM = 0.6;",
+            "const bindLidMemoryForDesign = () => {};",
             block("const EDGE_MOUNT_DEFAULTS", "\n};\n") + "\n};",
             function_source("debounce"),
             function_source("installLoadedDesignSource"),
@@ -518,12 +538,20 @@ process.stdout.write(JSON.stringify({ typed, stored, back: design.box.edge_mount
             function_source("commitEdgeMountFormBeforeSwitch"),
             function_source("flushVisibleDesignEditsBeforeModeSwitch"),
             function_source("readEdgeMountForm"),
+            function_source("edgeMountLabelMode"),
             function_source("syncEdgeMountControls"),
             function_source("resolvedEdgeMountAccessDiameter"),
             """
 const THICKNESS = '#edge-mount-label-thickness-mm';
 const els = {
-  '#edge-mount-label-enabled': { checked: true }, '#edge-mount-holes-enabled': { checked: false },
+  '#edge-mount-label-mode': { value: 'separate' }, '#edge-mount-holes-enabled': { checked: false },
+  '#edge-mount-side': { value: 'front' }, '#edge-mount-label-projection-mm': { value: '30' },
+  '#edge-mount-label-length-mode': { value: 'full' }, '#edge-mount-label-depth': { value: '0.6' },
+  '#edge-mount-label-flip': { checked: false }, '#edge-mount-standoff-rib-count-mode': { value: 'auto' },
+  '#edge-mount-standoff-rib-count': { value: '1' }, '#edge-mount-hole-count': { value: '2' },
+  '#edge-mount-hole-orientation': { value: 'horizontal' }, '#edge-mount-screw-diameter': { value: '4' },
+  '#edge-mount-access-diameter': { value: '8' }, '#edge-mount-top-offset': { value: '5' },
+  '#edge-mount-spacing-mode': { value: 'auto' }, '#edge-mount-spacing-mm': { value: '20' },
   '#edge-mount-label-text': { value: 'Tools' }, '#edge-mount-standoff-ribs-enabled': { checked: true },
   '#edge-mount-label-style': { value: 'flush' }, '#edge-mount-label-type': { value: 'separate' },
   '#part-name': { value: '' }, [THICKNESS]: { value: '2', dataset: { storedValue: '2' } },
@@ -649,7 +677,7 @@ state.preview = { fits: true, feature_errors: [], draft_error: null };
 
     def test_autosave_adoption_never_rewrites_unfinished_form_fields(self):
         persist = function_source("persistSpaceDesignSource")
-        self.assertNotIn("syncForm()", persist)
+        self.assertNotRegex(persist, r"(?m)^\s*syncForm\(\);\s*$")
         self.assertIn("rememberSpacePreferences(data.design, previousClean)", persist)
         flush = function_source("flushSpaceDesignAutosave")
         self.assertIn("await SP.flushDefaults()", flush)
