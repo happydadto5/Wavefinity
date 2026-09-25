@@ -2433,8 +2433,17 @@ SP.updateReadouts = () => {
         }
     } else if (kind === "pegboard") {
         const mode = document.getElementById("pegboard-size-mode")?.value || "physical";
-        document.getElementById("pegboard-physical-fields").hidden = mode !== "physical";
+        const isPhysical = mode === "physical";
+        document.getElementById("pegboard-physical-fields").hidden = !isPhysical;
         document.getElementById("pegboard-hole-fields").hidden = mode !== "holes";
+        // Fix 060 C: the physical-size help text and the Residual border
+        // readout only mean anything in Physical size mode - in Hole/slot
+        // count mode the board is derived directly from an exact count and
+        // the residual is always 0, so both leak meaningless state.
+        const physicalHelp = document.getElementById("pegboard-physical-help");
+        if (physicalHelp) physicalHelp.hidden = !isPhysical;
+        const borderRow = document.getElementById("pegboard-border-row");
+        if (borderRow) borderRow.hidden = !isPhysical;
         const resolved = SP.resolvePegboard();
         const readout = document.getElementById("pegboard-readout");
         readout.hidden = !resolved.ok;

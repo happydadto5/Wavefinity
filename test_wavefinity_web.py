@@ -4488,5 +4488,104 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
         self.assertIn("Super thin / light duty — reduced case strength.", sync_wall)
 
 
+    def test_fix060_lid_and_stacking_grouped_by_concept_and_state(self):
+        # Fix 060 A: Lid & Stacking reads as Configuration / Lid / Handle /
+        # Label groups instead of one mixed grid, Handle is hidden entirely
+        # (not merely disabled) outside Handled Lid, Stackable Lid hides the
+        # one-choice Style control, and the redundant opened-editor
+        # description is suppressed while the palette description remains.
+        root = Path(__file__).resolve().parent
+        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertNotIn('id="lid-physical-options"', index_html)
+        self.assertIn('id="lid-group-lid"', index_html)
+        self.assertIn('id="lid-group-handle"', index_html)
+        self.assertIn('id="lid-group-label"', index_html)
+        self.assertIn('id="lid-label-details"', index_html)
+        # Handle group and its own fields still exist, just regrouped.
+        for handle_id in ("lid-handle-type-row", "lid-handle-size-row", "lid-handle-position-row"):
+            self.assertIn(f'id="{handle_id}"', index_html)
+
+        sync_start = app_js.index("function syncLidForm() {")
+        sync_end = app_js.index("function stackRuleValues(", sync_start)
+        sync_lid_form = app_js[sync_start:sync_end]
+        self.assertIn('$("#lid-group-lid").hidden = !hasLid;', sync_lid_form)
+        self.assertIn('$("#lid-group-handle").hidden = !handled;', sync_lid_form)
+        self.assertIn('$("#lid-group-label").hidden = !hasLid;', sync_lid_form)
+        self.assertIn('$("#lid-label-details").hidden = !labelOn;', sync_lid_form)
+        # Style is hidden (not just disabled) unless the config is Handled Lid.
+        self.assertIn('$("#lid-label-style-row").hidden = !labelOn || !handled;', sync_lid_form)
+        # Handle rows are hidden by config state, never erased/reset here.
+        self.assertIn('["#lid-handle-type-row", "#lid-handle-size-row", "#lid-handle-position-row"].forEach(selector => {\n    $(selector).hidden = !handled;\n  });', sync_lid_form)
+
+        self.assertIn('kind === "lid_stacking"', app_js)
+
+    def test_fix060_storage_box_case_settings_grouped_by_concept(self):
+        # Fix 060 B: #portable-case reads as Lid / Case options / Label /
+        # Material sections, with the Label owner selector, Label text and
+        # Front label style contiguous inside one group, instead of split
+        # across generic three-column rows.
+        root = Path(__file__).resolve().parent
+        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+
+        case_start = index_html.index('id="portable-case"')
+        case_end = index_html.index('id="space-fields-pegboard"', case_start)
+        case_html = index_html[case_start:case_end]
+
+        for group_id in ("portable-case-lid-group", "portable-case-options-group",
+                          "portable-case-label-group", "portable-case-material-group"):
+            self.assertIn(f'id="{group_id}"', case_html)
+
+        # Label owner selector, Label text and Front label style must be
+        # contiguous inside the Label group, not split across rows.
+        label_group_start = case_html.index('id="portable-case-label-group"')
+        label_group_end = case_html.index("</div>\n            </div>\n            <div id=\"portable-case-material-group\"")
+        label_group_html = case_html[label_group_start:label_group_end]
+        self.assertIn('id="portable-label-location"', label_group_html)
+        self.assertIn('id="portable-label-text-row"', label_group_html)
+        self.assertIn('id="portable-front-label-style-row"', label_group_html)
+
+        # Latch count lives with the Lid group; carrying handle with Case options.
+        lid_group_start = case_html.index('id="portable-case-lid-group"')
+        lid_group_end = case_html.index('id="portable-case-options-group"')
+        self.assertIn('id="portable-latch-count-row"', case_html[lid_group_start:lid_group_end])
+        options_group_end = case_html.index('id="portable-case-label-group"')
+        self.assertIn('id="portable-handle-row"', case_html[lid_group_end:options_group_end])
+
+        # All persisted keys/ids driving Storage Box case state are unchanged.
+        for field_id in ("portable-lid-type", "portable-lid-snugness", "portable-latch-count",
+                          "portable-stacking", "portable-handle", "portable-label-location",
+                          "portable-label-text", "portable-front-label-style",
+                          "portable-wall", "portable-base"):
+            self.assertIn(f'id="{field_id}"', case_html)
+
+    def test_fix060_pegboard_hides_physical_help_and_residual_border_in_hole_mode(self):
+        # Fix 060 C: the physical-size help text and the Residual border
+        # readout are Physical-size-only; Hole/slot-count mode hides both
+        # instead of leaking them alongside a meaningless always-0 residual.
+        root = Path(__file__).resolve().parent
+        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+        spaces_js = (root / "web" / "spaces.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="pegboard-physical-help"', index_html)
+        self.assertIn('id="pegboard-border-row"', index_html)
+        # The dt/dd pair stays inside the derived-readout dt/dd grid, wrapped
+        # so both id'd pieces hide together.
+        self.assertIn(
+            '<div id="pegboard-border-row" class="pegboard-border-row">'
+            '<dt>Residual border</dt><dd id="pegboard-border-readout"></dd></div>',
+            index_html,
+        )
+        self.assertNotIn('<dt>Residual border</dt><dd id="pegboard-border-readout"></dd>\n          </div>', index_html)
+
+        self.assertIn('const isPhysical = mode === "physical";', spaces_js)
+        self.assertIn('if (physicalHelp) physicalHelp.hidden = !isPhysical;', spaces_js)
+        self.assertIn('if (borderRow) borderRow.hidden = !isPhysical;', spaces_js)
+        # Sizing math itself is untouched by this fix.
+        self.assertIn("residualX = width - holesX * standard.pitch_x_mm;", spaces_js)
+        self.assertIn("residualY = height - holesY * standard.pitch_y_mm;", spaces_js)
+
+
 if __name__ == "__main__":
     unittest.main()

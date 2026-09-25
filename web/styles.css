@@ -774,6 +774,10 @@ input[type="number"]::-webkit-inner-spin-button {
 .derived-readout dd { margin: 0; font-weight: 650; font-variant-numeric: tabular-nums; }
 .derived-readout .readout-caption { grid-column: 1 / -1; color: var(--muted); font-weight: 450; font-size: 11px; line-height: 1.4; margin-top: 2px; }
 .derived-readout .readout-adjust { color: var(--teal); }
+/* Fix 060 C: wraps the Residual border dt/dd pair so it can be hidden as one
+   unit in Hole-count mode without breaking the dt/dd grid layout. */
+.pegboard-border-row { display: contents; }
+.pegboard-border-row[hidden] { display: none; }
 .field-help { margin: 8px 0 13px; font-size: 11px; color: var(--muted); line-height: 1.45; }
 .field-error { margin: 6px 0 0; font-size: 11px; color: var(--danger); line-height: 1.4; }
 .output-panel { position: sticky; bottom: 0; z-index: 5; margin-top: 6px; padding: 10px 12px 12px; background: rgba(235,241,242,.97); border-top: 1px solid var(--line-dark); box-shadow: 0 -10px 24px rgba(30,51,61,.09); backdrop-filter: blur(8px); }
@@ -1565,6 +1569,21 @@ dialog:not([open]) { display: none; }
   margin-top: 14px;
 }
 
+/* Fix 060 A: Lid & Stacking's Lid/Handle/Label groups reuse the same bordered
+   card look so each concept reads as its own section. */
+#lid-option-panel .lid-option-group {
+  margin-top: 12px;
+}
+#lid-option-panel .lid-option-group .field-grid {
+  margin: 0;
+}
+#lid-option-panel #lid-label-details {
+  margin-top: 10px;
+}
+#lid-option-panel #lid-label-details .field-grid {
+  margin-top: 10px;
+}
+
 /* Fix 058 Correction 1, C1.4D/E/F: Label reads Text -> Plate -> Standoff
    support (Separate only); Screw Mounting reads Pattern -> Hole/access ->
    Position. Each group gets a light divider and small gap from the one
@@ -1672,3 +1691,8 @@ dialog:not([open]) { display: none; }
 /* Storage Box case settings on the Space setup / Edit form. */
 .storage-box-case { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
 .storage-box-title { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+/* Fix 060 B: Lid / Case options / Label / Material each read as their own
+   physical-concept group instead of generic three-column rows. */
+.storage-box-group { display: grid; gap: 6px; margin-top: 6px; }
+.storage-box-group:first-of-type { margin-top: 0; }
+.storage-box-subtitle { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }

@@ -125,31 +125,48 @@
                   <option value="handled_lid">Handled Lid</option>
                 </select>
               </label>
-              <div id="lid-physical-options" class="field-grid three" hidden>
-                <label>Lid thickness<select id="lid-thickness">
-                  <option value="thin">Thin</option><option value="medium">Medium</option><option value="thick">Thick</option>
-                </select></label>
-                <label id="lid-handle-type-row">Handle<select id="lid-handle-type">
-                  <option value="knob">Knob</option><option value="pull">Pull</option>
-                </select></label>
-                <label id="lid-handle-size-row">Handle size<select id="lid-handle-size">
-                  <option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option>
-                </select></label>
-                <label id="lid-handle-position-row">Handle position<select id="lid-handle-position">
-                  <option value="left">Left</option><option value="right">Right</option><option value="front">Front</option><option value="back">Back</option><option value="middle">Middle</option>
-                </select></label>
-                <label>Label<select id="lid-label-enabled">
-                  <option value="false">Off</option><option value="true">On</option>
-                </select></label>
-                <label id="lid-label-orientation-row">Orientation<select id="lid-label-orientation">
-                  <option value="horizontal">Horizontal</option><option value="vertical">Vertical</option>
-                </select></label>
-                <label id="lid-label-style-row">Style<select id="lid-label-style">
-                  <option value="flush">Level with top</option><option value="raised">Raised</option>
-                </select></label>
+              <div id="lid-group-lid" class="b4b-card lid-option-group" hidden>
+                <h4 class="b4b-card-title">Lid</h4>
+                <div class="field-grid three">
+                  <label>Lid thickness<select id="lid-thickness">
+                    <option value="thin">Thin</option><option value="medium">Medium</option><option value="thick">Thick</option>
+                  </select></label>
+                </div>
               </div>
-              <label id="lid-label-text-row" hidden>Text<input id="lid-label-text" type="text" maxlength="80" placeholder="e.g. SCREWS"></label>
-              <div id="lid-division-labels" hidden></div>
+              <div id="lid-group-handle" class="b4b-card lid-option-group" hidden>
+                <h4 class="b4b-card-title">Handle</h4>
+                <div class="field-grid three">
+                  <label id="lid-handle-type-row">Handle<select id="lid-handle-type">
+                    <option value="knob">Knob</option><option value="pull">Pull</option>
+                  </select></label>
+                  <label id="lid-handle-size-row">Handle size<select id="lid-handle-size">
+                    <option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option>
+                  </select></label>
+                  <label id="lid-handle-position-row">Handle position<select id="lid-handle-position">
+                    <option value="left">Left</option><option value="right">Right</option><option value="front">Front</option><option value="back">Back</option><option value="middle">Middle</option>
+                  </select></label>
+                </div>
+              </div>
+              <div id="lid-group-label" class="b4b-card lid-option-group" hidden>
+                <h4 class="b4b-card-title">Label</h4>
+                <div class="field-grid three">
+                  <label>Label<select id="lid-label-enabled">
+                    <option value="false">Off</option><option value="true">On</option>
+                  </select></label>
+                </div>
+                <div id="lid-label-details" hidden>
+                  <label id="lid-label-text-row" hidden>Text<input id="lid-label-text" type="text" maxlength="80" placeholder="e.g. SCREWS"></label>
+                  <div id="lid-division-labels" hidden></div>
+                  <div class="field-grid three">
+                    <label id="lid-label-orientation-row">Orientation<select id="lid-label-orientation">
+                      <option value="horizontal">Horizontal</option><option value="vertical">Vertical</option>
+                    </select></label>
+                    <label id="lid-label-style-row">Style<select id="lid-label-style">
+                      <option value="flush">Level with top</option><option value="raised">Raised</option>
+                    </select></label>
+                  </div>
+                </div>
+              </div>
               <p id="lid-option-note" class="inline-help"></p>
             </div>
           </div>
@@ -932,39 +949,51 @@
           </div>
           <div id="portable-case" class="storage-box-case">
             <h4 class="storage-box-title">Case settings</h4>
-            <div class="space-dimension-row">
-              <label class="space-field"><span>Lid type</span>
-                <select id="portable-lid-type"><option value="latched" selected>Latched Lid</option><option value="lid_only">Lid Only</option></select>
-              </label>
-              <label class="space-field"><span>Lid snugness</span>
-                <select id="portable-lid-snugness"><option value="0.5">0.5 mm — Tight</option><option value="1" selected>1.0 mm — Standard</option><option value="2">2.0 mm — Loose</option></select>
-              </label>
-              <label class="space-field"><span>Stacking</span>
-                <select id="portable-stacking"><option value="false" selected>Not stackable</option><option value="true">Stackable</option></select>
-              </label>
+            <div id="portable-case-lid-group" class="storage-box-group">
+              <h5 class="storage-box-subtitle">Lid</h5>
+              <div class="space-dimension-row">
+                <label class="space-field"><span>Lid type</span>
+                  <select id="portable-lid-type"><option value="latched" selected>Latched Lid</option><option value="lid_only">Lid Only</option></select>
+                </label>
+                <label class="space-field"><span>Lid snugness</span>
+                  <select id="portable-lid-snugness"><option value="0.5">0.5 mm — Tight</option><option value="1" selected>1.0 mm — Standard</option><option value="2">2.0 mm — Loose</option></select>
+                </label>
+                <label id="portable-latch-count-row" class="space-field"><span># of latches</span>
+                  <select id="portable-latch-count"><option value="auto" selected>Auto</option><option value="1">1</option><option value="2">2</option></select>
+                </label>
+              </div>
             </div>
-            <div class="space-dimension-row">
-              <label id="portable-latch-count-row" class="space-field"><span># of latches</span>
-                <select id="portable-latch-count"><option value="auto" selected>Auto</option><option value="1">1</option><option value="2">2</option></select>
-              </label>
-              <label id="portable-handle-row" class="space-field"><span>Carrying handle</span>
-                <select id="portable-handle"><option value="false" selected>No handle</option><option value="true">Add handle</option></select>
-              </label>
-              <label class="space-field"><span>Label</span>
-                <select id="portable-label-location"><option value="none" selected>No label</option><option value="top">Top</option><option value="front">Front</option></select>
-              </label>
+            <div id="portable-case-options-group" class="storage-box-group">
+              <h5 class="storage-box-subtitle">Case options</h5>
+              <div class="space-dimension-row">
+                <label class="space-field"><span>Stacking</span>
+                  <select id="portable-stacking"><option value="false" selected>Not stackable</option><option value="true">Stackable</option></select>
+                </label>
+                <label id="portable-handle-row" class="space-field"><span>Carrying handle</span>
+                  <select id="portable-handle"><option value="false" selected>No handle</option><option value="true">Add handle</option></select>
+                </label>
+              </div>
             </div>
-            <div class="space-dimension-row">
-              <label id="portable-label-text-row" class="space-field" hidden><span>Label text</span>
-                <input id="portable-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE">
-              </label>
-              <label id="portable-front-label-style-row" class="space-field" hidden><span>Front label style</span>
-                <select id="portable-front-label-style"><option value="flat" selected>Flat</option><option value="wavy">Wavy</option></select>
-              </label>
+            <div id="portable-case-label-group" class="storage-box-group">
+              <h5 class="storage-box-subtitle">Label</h5>
+              <div class="space-dimension-row">
+                <label class="space-field"><span>Label</span>
+                  <select id="portable-label-location"><option value="none" selected>No label</option><option value="top">Top</option><option value="front">Front</option></select>
+                </label>
+                <label id="portable-label-text-row" class="space-field" hidden><span>Label text</span>
+                  <input id="portable-label-text" type="text" maxlength="40" placeholder="e.g. M3 HARDWARE">
+                </label>
+                <label id="portable-front-label-style-row" class="space-field" hidden><span>Front label style</span>
+                  <select id="portable-front-label-style"><option value="flat" selected>Flat</option><option value="wavy">Wavy</option></select>
+                </label>
+              </div>
             </div>
-            <div class="space-dimension-row">
+            <div id="portable-case-material-group" class="storage-box-group">
+              <h5 class="storage-box-subtitle">Material</h5>
+              <div class="space-dimension-row">
               <label class="space-field"><span>Wall thickness</span><select id="portable-wall"></select></label>
               <label class="space-field"><span>Base thickness</span><select id="portable-base"></select></label>
+              </div>
             </div>
           </div>
         </div>
@@ -982,10 +1011,10 @@
             <label class="space-field"><span>Holes / slots across</span><input id="pegboard-holes-x" type="number" min="1" max="500" step="1"></label>
             <label class="space-field"><span>Holes / slots high</span><input id="pegboard-holes-y" type="number" min="1" max="500" step="1"></label>
           </div>
-          <p class="space-help">Physical sizes use the largest whole board grid that fits. Any leftover border is shown below.</p>
+          <p id="pegboard-physical-help" class="space-help">Physical sizes use the largest whole board grid that fits. Any leftover border is shown below.</p>
           <div id="pegboard-readout" class="derived-readout" hidden>
             <dt>Usable grid</dt><dd id="pegboard-grid-readout"></dd>
-            <dt>Residual border</dt><dd id="pegboard-border-readout"></dd>
+            <div id="pegboard-border-row" class="pegboard-border-row"><dt>Residual border</dt><dd id="pegboard-border-readout"></dd></div>
           </div>
         </div>
 

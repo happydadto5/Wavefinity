@@ -2779,14 +2779,23 @@ function syncLidForm() {
   $("#lid-label-text").value = lid.label_text || "";
   const hasLid = config !== "stackable_bin";
   const handled = config === "handled_lid";
-  $("#lid-physical-options").hidden = !hasLid;
+  // Fix 060 A: Lid / Handle / Label now read as separate groups instead of one
+  // mixed grid. Handle is hidden entirely (not just disabled) outside Handled
+  // Lid - its saved values are left untouched so switching configurations
+  // back and forth never erases them.
+  $("#lid-group-lid").hidden = !hasLid;
+  $("#lid-group-handle").hidden = !handled;
   ["#lid-handle-type-row", "#lid-handle-size-row", "#lid-handle-position-row"].forEach(selector => {
-    $(selector).hidden = !hasLid;
-    $("select", $(selector)).disabled = !handled;
+    $(selector).hidden = !handled;
   });
+  $("#lid-group-label").hidden = !hasLid;
   const labelOn = hasLid && lid.label_enabled;
+  $("#lid-label-details").hidden = !labelOn;
   $("#lid-label-orientation-row").hidden = !labelOn;
-  $("#lid-label-style-row").hidden = !labelOn;
+  // Style is a one-choice control for Stackable Lid (Raised is invalid and the
+  // engine already forces Flush), so it is hidden there rather than shown
+  // disabled; Handled Lid keeps the real Level-with-top/Raised choice.
+  $("#lid-label-style-row").hidden = !labelOn || !handled;
   const raised = [...$("#lid-label-style").options].find(option => option.value === "raised");
   if (raised) raised.disabled = config === "stackable_lid";
   if (config === "stackable_lid" && $("#lid-label-style").value === "raised") {
@@ -4193,7 +4202,11 @@ function syncDraftEditorIdentity(kind, info) {
   // discoverability, but the Edge Mount editor's own Label/Screw Mounting
   // hierarchy makes the redundant "Add a label and/or screw mounting..."
   // sentence unnecessary once the editor is open.
-  description.hidden = isNest || kind === "edge_mount";
+  // Fix 060 A: the Lid & Stacking editor's own Configuration/Lid/Handle/Label
+  // hierarchy makes the redundant "Add a lid or make matching bins stack
+  // together." sentence unnecessary once the editor is open; the palette
+  // tile keeps it for discoverability.
+  description.hidden = isNest || kind === "edge_mount" || kind === "lid_stacking";
 
   $(".support-editor")?.classList.toggle("nest-editor", isNest);
 }
