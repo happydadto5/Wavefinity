@@ -674,8 +674,10 @@ function freshDesignForCurrentFolder() {
   return applySpaceSizingDefaults(mergeDesignDefaults(starter, remembered), remembered);
 }
 
-async function loadFreshOrdinaryDesignForCurrentFolder() {
-  state.design = freshDesignForCurrentFolder();
+async function loadFreshOrdinaryDesignForCurrentFolder(overrideBox = null) {
+  const design = freshDesignForCurrentFolder();
+  if (overrideBox) Object.assign(design.box, overrideBox);
+  state.design = design;
   state.designInventoryId = null;
   state.lastOrdinaryDesign = clone(state.design);
   resetNestPhotoSession();
@@ -1025,6 +1027,50 @@ async function designerNewBin() {
     state.surfaceHeightPromptSkipped = false;
     await loadFreshOrdinaryDesignForCurrentFolder();
     toast("Started a new bin.");
+  } finally {
+    finishDesignMutation();
+  }
+}
+
+// Fix 064: the largest whole base-unit X/Y footprint that fits inside a
+// Storage Box's usable interior (rounding down, since the bin must fit),
+// plus the full legal usable Z. Returns { x, y, z } or { error }; never
+// throws, so the caller can show an actionable message and leave the
+// current design untouched.
+function insideBinFitForStorageBox(space) {
+  const unit = state.catalog.base_unit;
+  const maxUnits = Math.floor((state.catalog.max_box_size || 350) / unit);
+  const xUnits = Math.min(maxUnits, Math.floor(space.x / unit));
+  const yUnits = Math.min(maxUnits, Math.floor(space.y / unit));
+  if (xUnits < 1 || yUnits < 1) {
+    return { error: "This Storage Box's inside is too small to fit a bin." };
+  }
+  const z = normalizeBinDimension("z", space.z, space.z);
+  if (z > space.z) {
+    return { error: "This Storage Box is too short to fit a legal bin." };
+  }
+  return { x: xUnits * unit, y: yUnits * unit, z };
+}
+
+// Make Inside Bin (Fix 064): a Storage-Box-only Space Action. Starts a fresh
+// ordinary bin, exactly like New Bin (same safety/reset primitives, same
+// remembered reusable Space preferences, no clone of the current bin's
+// name/text/features), but with X/Y/Z forced to fit the Storage Box's usable
+// interior instead of the normal New Bin starter size.
+async function designerMakeInsideBin() {
+  if (!(await guardDraftSwitch())) return;
+  if (!(await flushSpaceDesignAutosave())) return;
+  const fit = insideBinFitForStorageBox(state.activeSpace);
+  if (fit.error) {
+    toast(fit.error, true, 6000);
+    return;
+  }
+  if (!beginDesignMutation()) return;
+  try {
+    state.designInventoryId = null;
+    state.surfaceHeightPromptSkipped = false;
+    await loadFreshOrdinaryDesignForCurrentFolder({ x: fit.x, y: fit.y, z: fit.z });
+    toast("Started an inside bin.");
   } finally {
     finishDesignMutation();
   }
