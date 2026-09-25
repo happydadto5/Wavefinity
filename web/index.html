@@ -225,7 +225,8 @@
                 <label class="checkbox-row"><span>Screw Mounting</span><input id="edge-mount-holes-enabled" type="checkbox"></label>
               </div>
 
-              <div id="edge-mount-label-panel" hidden>
+              <div id="edge-mount-label-panel" class="b4b-card" hidden>
+                <h4 class="b4b-card-title">Label</h4>
                 <div class="field-grid three">
                   <label class="inline-select">Label Type
                     <select id="edge-mount-label-type">
@@ -279,7 +280,7 @@
                 <p class="inline-help">Projects from the top of the mounting wall so the label can rest over the top edge of a cart, table, or shelf.</p>
               </div>
 
-              <div id="edge-mount-holes-panel" hidden>
+              <div id="edge-mount-holes-panel" class="b4b-card" hidden>
                 <h4 class="b4b-card-title">Screw Mounting</h4>
                 <div class="field-grid three">
                   <label class="inline-select">Number of screws
@@ -692,6 +693,13 @@
         </div>
         <p class="welcome-lead">Use a Space when you want Wavefinity to plan a drawer, storage box, surface, or pegboard. Or design bins on their own without a Space.</p>
         <p id="welcome-startup-error" class="field-error" hidden></p>
+        <div id="welcome-storage" class="welcome-storage" hidden>
+          <p id="welcome-storage-lead" class="welcome-storage-lead"></p>
+          <div class="welcome-storage-row">
+            <code id="welcome-storage-path"></code>
+            <button id="welcome-storage-change" class="button secondary" type="button">Change&#8230;</button>
+          </div>
+        </div>
         <div class="welcome-actions">
           <button id="welcome-create" class="button primary" type="button">Create New Space</button>
           <button id="welcome-open" class="button secondary" type="button">Open Existing Space</button>

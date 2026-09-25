@@ -1230,6 +1230,31 @@ dialog:not([open]) { display: none; }
 }
 .welcome-steps strong { display: block; margin-bottom: 3px; color: var(--ink); font-size: 13px; }
 .welcome-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+/* Fix 058 K: the compact, non-blocking first-run Space storage card. */
+.welcome-storage {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.welcome-storage-lead { margin: 0 0 8px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.welcome-storage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.welcome-storage-row code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(127, 169, 182, 0.12);
+  font-size: 12px;
+}
+.welcome-storage-row .button { margin: 0; flex: 0 0 auto; }
 .welcome-secondary { margin: 6px 0 20px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
 .welcome-secondary h3 { margin: 0 0 5px; font-size: 14px; }
 .welcome-secondary p { margin: 0 0 10px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
@@ -1519,17 +1544,26 @@ dialog:not([open]) { display: none; }
   margin-top: 24px;
 }
 /* Edge Mount reuses the card look; only its two collapsible
-   subsections and their help text need anything of their own. */
-#edge-mount-panel .b4b-card-title { margin-top: 6px; }
-#edge-mount-panel h4.b4b-card-title { margin-top: 10px; }
-#edge-mount-panel .inline-help {
+   subsections (Label, Screw Mounting) and their help text need anything of
+   their own. Audit 006 J2: the live element is #edge-mount-editor - the
+   #edge-mount-panel id this used to target does not exist, so none of this
+   ever applied. */
+#edge-mount-editor .b4b-card-title { margin-top: 6px; }
+#edge-mount-editor h4.b4b-card-title { margin-top: 10px; }
+#edge-mount-editor .inline-help {
   margin: 6px 0 0;
   font-size: 11px;
   color: var(--muted);
   line-height: 1.4;
 }
-#edge-mount-panel .field-grid.three { align-items: end; }
+#edge-mount-editor .field-grid.three { align-items: end; }
 #edge-mount-access-auto-note { grid-column: span 1; align-self: center; }
+/* Each enabled subsection reads as its own physical concept, not a
+   continuation of the one above it. */
+#edge-mount-label-panel.b4b-card,
+#edge-mount-holes-panel.b4b-card {
+  margin-top: 14px;
+}
 .part-name-block {
   display: grid;
   gap: 10px 12px;

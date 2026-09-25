@@ -499,6 +499,23 @@ as a Storage Box, never as a current Box. A legacy folder's older,
 multiple-drawer layout is preserved as a compatibility exception - a new
 Drawer Space otherwise represents exactly one physical drawer.
 
+**Local Space storage location (Fix 058 K).** In the local app, *Create New
+Space*'s automatic folder lives under `<space parent>/Wavefinity/<Space
+Name>/`, with the user's Documents folder as the default parent - so the
+default root is `Documents/Wavefinity/`. The parent is a single preference
+(`space_parent`), resolved fresh from current preferences at every
+auto-create so a change takes effect immediately, with no restart. The first
+time Wavefinity runs with no saved parent and no already-established
+`Documents/Wavefinity`, Welcome shows a small, non-blocking storage card with
+the resolved default path and a **Change…** button; merely reaching Welcome,
+opening the folder chooser, or cancelling it never creates
+`Documents/Wavefinity` or any custom root - only an actual Create New Space
+does. Choosing a different parent there (or an unavailable saved parent being
+repaired) validates that the folder already exists and saves its absolute
+path, without creating its `Wavefinity` child. Hosted Wavefinity is
+unaffected - it keeps its existing per-folder browser File System Access
+behavior.
+
 **Pegboard Space** supports standard 1-inch pegboard and IKEA SKÅDIS. Enter a
 physical board size or a hole/slot count; Wavefinity derives the other value
 and shows the centred residual border. The Space view draws the real round
@@ -873,6 +890,29 @@ line saying "Ready" for the 99% of the time it has nothing to report. A
 failure still raises a dialog, because it needs acting on; a Print that saved
 its files but could not finish (connectors failed, or the slicer did not
 open) says so truthfully instead of claiming nothing happened.
+
+**Bambu handoff stays settings-sovereign (Fix 058).** Wavefinity hands Bambu
+Studio profile-free model 3MFs only — never a manufactured Bambu *project*.
+Each requested physical occurrence (repeated copies are real, separate physical
+prints, never deduplicated) is copied into its own file in a persistent
+per-launch handoff folder (`bambu_handoff.stage_bambu_inputs`, under
+`%TEMP%/Wavefinity/Bambu Handoffs/<uuid>/`, pruned opportunistically after at
+least 24 hours and never while still the newest) and opened directly with
+`Popen([BambuStudio.exe, staged1, staged2, ...])` — no `--export-3mf`,
+`--arrange`, `--slice`, `--load-settings` or `--load-filaments`. Wavefinity
+preserves only model geometry, object/part names, and a deliberate per-part
+extruder-slot assignment (`Metadata/model_settings.config`); Bambu Studio and
+the user remain entirely authoritative for the printer, process, filament,
+plate and AMS settings. A source 3MF carrying an embedded
+`project_settings.config`/`print_profile.config`/`print_setting_*`/
+`process_settings_*.config`/`filament_settings_*.config`/
+`machine_settings_*.config` member is refused before handoff with a clear
+error, never silently stripped. For a multi-file Bambu batch, if direct GUI
+import does not already arrange the plate, use Bambu Studio's own **Arrange**
+command (keyboard **A** where supported) — Wavefinity does not fall back to
+`--arrange --export-3mf` and has no plate-packing engine of its own. Custom
+slicers (OrcaSlicer, etc.) keep opening the requested files directly, as
+before.
 
 ### The browser service
 

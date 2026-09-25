@@ -2335,25 +2335,29 @@ function renderConnectorReadout(plan = null) {
     el.innerHTML = "";
     return;
   }
+  // Audit 006 J3: the readout is exception-only. An ordinary eligible
+  // same-height bin gets no generic explanation - only a set that actually
+  // changed (different heights, or too small for corners) earns a line.
   const different = plan
     ? Boolean(plan.different_heights)
     : $("#connector-height-mode").value === "different";
   if (different) {
-    el.textContent = "Generates a Side connector only. 3-Way and 4-Way Corner connectors require equal-height bins.";
+    el.textContent = "Side connector only — corner connectors require equal-height bins.";
     el.hidden = false;
     return;
   }
-  let text = "Generates Side, 3-Way Corner, and 4-Way Corner connectors. Connectors only fit bins with the same wall thickness.";
   const x = Number(plan?.box_x_mm ?? state.design?.box?.x);
   const y = Number(plan?.box_y_mm ?? state.design?.box?.y);
   const cornersSkipped = Array.isArray(plan?.skipped_types) && plan.skipped_types.length > 0;
   const tooSmall = cornersSkipped
     || (Number.isFinite(x) && Number.isFinite(y) && (x < MIN_CORNER_JOINABLE_MM || y < MIN_CORNER_JOINABLE_MM));
   if (tooSmall) {
-    text += ` Corner connectors require at least ${MIN_CORNER_JOINABLE_MM} mm in both X and Y; this bin is too small for them, so only the Side connector will be generated.`;
+    el.textContent = `Side connector only — corner connectors need at least ${MIN_CORNER_JOINABLE_MM} mm in both X and Y.`;
+    el.hidden = false;
+    return;
   }
-  el.textContent = text;
-  el.hidden = false;
+  el.textContent = "";
+  el.hidden = true;
 }
 
 function updateInteriorModeVisibility(reveal = false) {
@@ -4840,6 +4844,36 @@ function renderDraftFields() {
           </select></label>`}
         </div>
       </div>`;
+    } else if (isPocket || one.kind === "slot") {
+      // Audit 006 J1: Pocket and Slot Rack group their related controls into
+      // the same `.editor-group` language Bore/Divider already use, instead
+      // of scattering Width/Length from Height/Wall/geometry across the
+      // renderer's default field order. Every data-draft key, default source,
+      // unit, min/step rule and autosize action below is identical to the
+      // plain fields this replaces - only the markup/grouping changed.
+      const isSlot = one.kind === "slot";
+      const fieldFor = (key, label, opts = {}) => {
+        const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
+        const def = info.fields.find(f => f.key === key)?.default;
+        const value = explicit ? one.options[key] : state.draftResolvedOptions?.[key] ?? def;
+        return field(label, `option:${key}`, value, opts);
+      };
+      const wallStyleShown = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style
+        ?? info.fields.find(f => f.key === "wall_style")?.default;
+      const wallField = fieldFor("wall", "Wall", isSlot ? { unit: "mm" } : { unit: "mm", min: "0.4" });
+      const wallsField = wallStyleSelect(wallStyleShown);
+      const sizeFieldsHtml = field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" })
+        + field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" })
+        + (isSlot ? "" : fieldFor("depth", "Pocket depth", { unit: "mm", step: "0.5", min: "0.1" }))
+        + fieldFor("height", "Height", isSlot ? { unit: "mm" } : { unit: "mm", step: "0.5", min: "1.0" });
+      html += `<div class="editor-group"><span class="editor-group-label">${isSlot ? "Rack size" : "Pocket size"}</span><div class="draft-triple">${sizeFieldsHtml}</div></div>`;
+      if (isSlot) {
+        const geometryFieldsHtml = fieldFor("thickness", "Slot width", { unit: "mm" })
+          + fieldFor("depth", "Slot depth", { unit: "mm" })
+          + fieldFor("angle", "Tilt angle", { unit: "°" });
+        html += `<div class="editor-group"><span class="editor-group-label">Slot geometry</span><div class="draft-triple">${geometryFieldsHtml}</div></div>`;
+      }
+      html += `<div class="editor-group"><span class="editor-group-label">Walls</span><div class="pair">${wallField}${wallsField}</div></div>`;
     } else {
       html += field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" });
       html += field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
@@ -4988,6 +5022,13 @@ function renderDraftFields() {
     if (info.kind === "divider" && ["bottom_angle", "angle", "thickness", "height", "wall_style"].includes(option.key)) continue;
     // The scoop depth field is rendered with its own % unit and help text above.
     if (info.kind === "scoop") continue;
+    // Audit 006 J1: Pocket size/geometry/Walls are already rendered as
+    // grouped fields above (Inside width/length, Pocket depth, Height, Wall,
+    // Walls) - nothing is left for this loop.
+    if (info.kind === "pocket" && ["height", "wall", "wall_style", "depth"].includes(option.key)) continue;
+    // Audit 006 J1: Rack size/Slot geometry/Walls are already rendered above
+    // (Rack width/length, Height, Slot width/depth, Tilt angle, Wall, Walls).
+    if (info.kind === "slot" && ["height", "wall", "wall_style", "depth", "thickness", "angle"].includes(option.key)) continue;
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, option.key);
     const shown = explicit ? one.options[option.key]
       : state.draftResolvedOptions?.[option.key] ?? option.default;

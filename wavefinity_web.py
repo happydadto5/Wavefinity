@@ -133,7 +133,7 @@ from organizer_inserts import (
 )
 from organizer_inserts._core import feature_touches_wall
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
-from bambu_project import build_bambu_project, is_bambu_studio_executable
+from bambu_handoff import is_bambu_studio_executable, stage_bambu_inputs
 from organizer_drawer import drawer_routes, stack_part_height
 from organizer_inventory import append_bin, configure_space_text, resolve_inventory_path
 from organizer_product_rules import (
@@ -141,7 +141,13 @@ from organizer_product_rules import (
     ORDINARY_BIN_MIN_HEIGHT_MM,
 )
 from organizer_space_outputs import BASE_TRIM, STORAGE_BOX, structural_design, structural_kind
-from organizer_spaces import inventory_enabled, space_routes
+from organizer_spaces import (
+    default_space_parent,
+    effective_space_root,
+    inventory_enabled,
+    space_routes,
+    storage_startup_state,
+)
 from organizer_app import (
     APP_DIR,
     DEFAULT_SAMPLE_BOXES,
@@ -1298,20 +1304,24 @@ def detect_bambu_studio(custom_path: str | None = None) -> Path | None:
 
 
 def launch_slicer(slicer_path: Path, files: list[Path]) -> Path | None:
-    """Open ``files`` in the slicer.
+    """Open ``files`` directly in the slicer.
 
-    Bambu Studio gets one arranged project 3MF built from the files (repeated
-    files mean repeated physical copies) and that project's path is returned.
-    Other slicers get the files directly and ``None`` is returned.
+    Fix 058: Wavefinity never manufactures a Bambu project for handoff.
+    Bambu Studio gets each requested physical occurrence (repeated files mean
+    repeated physical copies, never deduplicated) staged as a profile-free
+    model file and opened directly - no ``--export-3mf``, ``--arrange``,
+    ``--slice``, ``--load-settings`` or ``--load-filaments``, so Wavefinity
+    can never introduce or select a printer/process/filament preset. Other
+    slicers keep getting the files directly. Always returns ``None`` now:
+    there is no manufactured project path to report.
     """
     if not slicer_path.is_file():
         raise FileNotFoundError(f"Slicer executable not found: {slicer_path}")
     if not files:
         raise ValueError("No files to open in slicer")
-    project: Path | None = None
     if is_bambu_studio_executable(slicer_path):
-        project = build_bambu_project(slicer_path, files)
-        args = [str(slicer_path.resolve()), str(project.resolve())]
+        staged = stage_bambu_inputs(files)
+        args = [str(slicer_path.resolve())] + [str(p) for p in staged]
     else:
         args = [str(slicer_path.resolve())] + [str(f.resolve()) for f in files]
     subprocess.Popen(
@@ -1321,7 +1331,7 @@ def launch_slicer(slicer_path: Path, files: list[Path]) -> Path | None:
         stderr=subprocess.DEVNULL,
         close_fds=True,
     )
-    return project
+    return None
 
 
 def preferences_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1404,16 +1414,26 @@ def show_folder_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def browse_output_folder_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Open the native folder chooser for this local desktop app."""
+    """Open the native folder chooser for this local desktop app.
+
+    Fix 058 K "Critical no-side-effect rule": browsing, opening this chooser,
+    or cancelling it must never create ``Documents/Wavefinity`` or any custom
+    Wavefinity root. The effective Space root is only ever used here as an
+    *initial directory* when it already exists; it is never created merely to
+    have somewhere to point the picker.
+    """
     if HOSTED:
         raise ValueError("Choose a folder in your browser instead.")
     try:
         space_root = bool(payload.get("space_root"))
-        spaces_root = (Path.home() / "Documents" / "Wavefinity").resolve()
-        if space_root:
-            spaces_root.mkdir(parents=True, exist_ok=True)
+        spaces_root = effective_space_root(load_preferences())
         current = Path(str(payload.get("current") or DEFAULT_OUTPUT)).expanduser()
-        initial = spaces_root if space_root else (current if current.is_dir() else DEFAULT_OUTPUT)
+        if space_root:
+            initial = spaces_root if spaces_root.is_dir() else (
+                default_space_parent() if default_space_parent().is_dir() else DEFAULT_OUTPUT
+            )
+        else:
+            initial = current if current.is_dir() else DEFAULT_OUTPUT
         script = f"""
 import tkinter as tk
 from tkinter import filedialog
@@ -1427,6 +1447,51 @@ print(filedialog.askdirectory(parent=root, initialdir={repr(str(initial))}))
     except Exception as error:
         raise RuntimeError("could not open the output-folder chooser") from error
     return {"folder": selected}
+
+
+def browse_space_parent_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """The Welcome "Change" chooser for the first-run Space storage location.
+
+    Fix 058 K: opens the native directory chooser to pick the *parent*
+    directory that will contain the Wavefinity folder. Opening or cancelling
+    this chooser creates nothing; a real selection saves the absolute chosen
+    parent in preferences immediately (the effective root becomes
+    ``<selected parent>/Wavefinity``).
+    """
+    if HOSTED:
+        raise ValueError("Space storage location is available in the local Wavefinity app only.")
+    try:
+        prefs = load_preferences()
+        saved_raw = prefs.get("space_parent")
+        saved = Path(str(saved_raw)).expanduser() if saved_raw else None
+        docs = default_space_parent()
+        if saved is not None and saved.is_dir():
+            initial = saved
+        elif docs.is_dir():
+            initial = docs
+        else:
+            initial = Path.home()
+        script = f"""
+import tkinter as tk
+from tkinter import filedialog
+root = tk.Tk()
+root.withdraw()
+root.attributes("-topmost", True)
+print(filedialog.askdirectory(parent=root, initialdir={repr(str(initial))}))
+"""
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+        selected = result.stdout.strip()
+    except Exception as error:
+        raise RuntimeError("could not open the storage-location chooser") from error
+    if not selected:
+        # A cancel is silent and leaves the current/default choice unchanged.
+        return {"folder": None, "storage": storage_startup_state(load_preferences())}
+    candidate = Path(selected).expanduser()
+    if not candidate.is_dir():
+        raise ValueError("That folder could not be found. Choose an existing folder.")
+    absolute = candidate.resolve()
+    save_preferences({"space_parent": str(absolute)})
+    return {"folder": str(absolute), "storage": storage_startup_state(load_preferences())}
 
 
 def open_log_with_wordpad(file_path: Path) -> None:
@@ -3303,6 +3368,7 @@ POST_ROUTES = {
     "/api/preferences": preferences_payload,
     "/api/space/show-folder": show_folder_payload,
     "/api/browse-output-folder": browse_output_folder_payload,
+    "/api/space/browse-storage-parent": browse_space_parent_payload,
     "/api/browse-slicer-path": browse_slicer_path_payload,
     "/api/show-log": show_log_payload,
     "/api/space/create-text": create_space_text_payload,

@@ -21,6 +21,10 @@ const SP = {
   // does not fire a redundant duplicate for the same design (Fix 032
   // Correction 3, C3.2).
   _activationPreviewRequested: false,
+  // Fix 058 K: the local-only first-run Space storage state from the last
+  // /api/space/startup response - {parent, root, explicit, first_run,
+  // unavailable} or null before startup has run / in hosted mode.
+  storage: null,
 };
 const RESUME_AUTOCONTINUE_SECONDS = 10;
 const SP_KINDS = {
@@ -1438,8 +1442,40 @@ SP.showHome = (message = null) => {
   SP.renderRecent();
   const hasRecent = SP.recent.length > 0;
   document.getElementById("welcome-recent-container").hidden = !hasRecent;
+  SP.renderStorageCard();
   SP.showDialog();
 };
+
+// Fix 058 K: the compact, non-blocking first-run Space storage card. Local
+// mode only, and only in the true first-run/default-location case (or when a
+// saved custom parent has gone missing) - an existing established default or
+// an explicit saved parent shows nothing here.
+SP.renderStorageCard = () => {
+  const el = document.getElementById("welcome-storage");
+  if (!el) return;
+  const info = SP.storage;
+  if (state.runtime.hosted || !info || (!info.first_run && !info.unavailable)) {
+    el.hidden = true;
+    return;
+  }
+  const lead = document.getElementById("welcome-storage-lead");
+  const path = document.getElementById("welcome-storage-path");
+  if (info.unavailable) {
+    lead.textContent = "Your saved Space storage location could not be found. Choose a folder to continue.";
+  } else {
+    lead.textContent = "By default, Wavefinity creates its Wavefinity folder inside Documents.";
+  }
+  if (path) path.textContent = info.root;
+  el.hidden = false;
+};
+
+SP.changeStorageParent = () => SP.run(async () => {
+  const data = await api("/api/space/browse-storage-parent", {});
+  if (!data.folder) return; // a cancel is silent
+  SP.storage = data.storage || null;
+  SP.renderStorageCard();
+  toast(`Wavefinity Space storage set to ${data.folder}.`);
+});
 
 SP.showTypeCards = () => {
   SP.showOnly("space-type-cards");
@@ -2174,6 +2210,7 @@ SP.launch = async () => {
     // folder in the same parent) before falling back to the saved path.
     const resp = await api("/api/space/startup", {});
     SP.recent = resp.recent || [];
+    SP.storage = resp.storage || null;
     const data = resp.folder;
     if (!data || data.missing) { SP.showHome(); return; }
     if (data.needs_setup) {
@@ -2201,6 +2238,8 @@ SP.wire = () => {
   if (welcomeCreate) welcomeCreate.addEventListener("click", SP.beginCreateNew);
   const welcomeOpen = document.getElementById("welcome-open");
   if (welcomeOpen) welcomeOpen.addEventListener("click", () => SP.run(SP.openExisting));
+  const welcomeStorageChange = document.getElementById("welcome-storage-change");
+  if (welcomeStorageChange) welcomeStorageChange.addEventListener("click", SP.changeStorageParent);
   const welcomeDesign = document.getElementById("welcome-design");
   if (welcomeDesign) welcomeDesign.addEventListener("click", () => {
     SP.clearSetupContext();

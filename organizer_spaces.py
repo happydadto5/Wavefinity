@@ -82,6 +82,75 @@ _SPACE_CREATE_LOCK = threading.RLock()
 # another's fields.
 _METADATA_WRITE_LOCK = threading.RLock()
 
+# Fix 058 K: first-run local Space storage location. The default Space
+# hierarchy stays ``<space parent>/Wavefinity/<Space Name>`` with Documents as
+# the default parent; ``space_parent`` is the one explicit preference key that
+# overrides just the parent, never the ``Wavefinity`` child folder name.
+SPACE_PARENT_PREFERENCE_KEY = "space_parent"
+
+
+def default_space_parent() -> Path:
+    return (Path.home() / "Documents").resolve()
+
+
+def _usable_directory(raw: Any) -> Path | None:
+    if not raw:
+        return None
+    try:
+        candidate = Path(str(raw)).expanduser()
+        return candidate.resolve() if candidate.is_dir() else None
+    except OSError:
+        return None
+
+
+def effective_space_parent(prefs: dict[str, Any]) -> Path:
+    """The parent directory the *next* auto-created Space will use.
+
+    Resolved fresh from current preferences every time - never captured once
+    at server startup - so a Change made during this session affects the very
+    next Create New Space without a restart.
+    """
+    explicit = _usable_directory(prefs.get(SPACE_PARENT_PREFERENCE_KEY))
+    if explicit is not None:
+        return explicit
+    return default_space_parent()
+
+
+def effective_space_root(prefs: dict[str, Any]) -> Path:
+    return effective_space_parent(prefs) / "Wavefinity"
+
+
+def saved_parent_unavailable(prefs: dict[str, Any]) -> bool:
+    """An explicit saved parent exists but is no longer usable."""
+    raw = prefs.get(SPACE_PARENT_PREFERENCE_KEY)
+    return bool(raw) and _usable_directory(raw) is None
+
+
+def storage_startup_state(prefs: dict[str, Any]) -> dict[str, Any]:
+    """What Welcome needs to show (or not show) the first-run storage card.
+
+    Order (Fix 058 K "Startup decision"):
+    1. An explicit, usable saved ``space_parent`` wins - no first-run card.
+    2. Otherwise, an already-established default ``Documents/Wavefinity``
+       directory means no first-run card either - merely checking this must
+       never create that folder.
+    3. Otherwise this is the first-run/default-location case.
+    """
+    unavailable = saved_parent_unavailable(prefs)
+    explicit = _usable_directory(prefs.get(SPACE_PARENT_PREFERENCE_KEY)) is not None
+    parent = effective_space_parent(prefs)
+    root = parent / "Wavefinity"
+    first_run = False
+    if not explicit and not unavailable:
+        first_run = not root.is_dir()
+    return {
+        "parent": str(parent),
+        "root": str(root),
+        "explicit": explicit,
+        "first_run": first_run,
+        "unavailable": unavailable,
+    }
+
 def _space_folder_name(raw: Any) -> str:
     name = str(raw or "").strip()
     if not name:
@@ -752,11 +821,17 @@ def space_routes(
     ``mutate_preferences`` is the atomic read-modify-write the app supplies;
     without it a plain load/save pair stands in.
     """
-    auto_space_root = (
-        Path(space_root).expanduser().resolve()
-        if space_root is not None
-        else (Path.home() / "Documents" / "Wavefinity").resolve()
-    )
+    fixed_space_root = Path(space_root).expanduser().resolve() if space_root is not None else None
+
+    def current_space_root(prefs: dict[str, Any]) -> Path:
+        # Fix 058 K: resolved fresh from current preferences at create time,
+        # never captured once - a Change during this session must affect the
+        # very next Create New Space without a restart. An explicit
+        # ``space_root`` constructor override (used by callers that want a
+        # fixed root) still wins over the preference.
+        if fixed_space_root is not None:
+            return fixed_space_root
+        return effective_space_root(prefs)
 
     if mutate_preferences is None:
         def mutate_preferences(mutator):
@@ -914,6 +989,10 @@ def space_routes(
 
     def startup(_payload):
         prefs = load_preferences()
+        # Fix 058 K: resolved once per startup call so the frontend never has
+        # to reproduce filesystem heuristics - it only needs to know whether
+        # to show the first-run storage card and what path it should read.
+        storage = storage_startup_state(prefs)
         target: Path | None = None
         space_id = _space_id(prefs.get("active_space_id"))
         if space_id:
@@ -933,16 +1012,16 @@ def space_routes(
         elif prefs.get("output"):
             target = Path(str(prefs["output"])).expanduser()
         if target is None or not target.is_dir():
-            return {"folder": None, "space": None, "recent": recent(load_preferences())}
+            return {"folder": None, "space": None, "recent": recent(load_preferences()), "storage": storage}
         target = target.resolve()
         if not space_id and _output_is_forgotten_typed_space(target, prefs):
-            return {"folder": None, "space": None, "recent": recent(load_preferences())}
+            return {"folder": None, "space": None, "recent": recent(load_preferences()), "storage": storage}
         info = describe(target, prefs)
         if not info["needs_setup"]:
             info = prepare_folder_for_open(target, prefs)
             if not info["needs_setup"]:
                 remember_prepared(target, info)
-        return {"folder": info, "space": info, "recent": recent(load_preferences())}
+        return {"folder": info, "space": info, "recent": recent(load_preferences()), "storage": storage}
 
     def inspect(payload):
         return reply(folder(payload))
@@ -993,7 +1072,7 @@ def space_routes(
             folder_name = _space_folder_name(raw_def["name"])
             raw_def["name"] = folder_name
             validated = normalise_space_definition(raw_def)
-            target = _new_space_target(auto_space_root, folder_name)
+            target = _new_space_target(current_space_root(load_preferences()), folder_name)
             try:
                 result = configure_space(target, raw_def=validated, mode="create")
                 space = result["layout"]["space"]
@@ -1218,6 +1297,32 @@ def space_routes(
         mutate_preferences(apply)
         return reply(None)
 
+    def set_storage_parent(payload):
+        # Fix 058 K: saves only the selected *parent* directory - never
+        # creates its Wavefinity child, and never overwrites an existing
+        # explicit custom parent merely because Documents/Wavefinity also
+        # exists (this is only reached by an explicit Change/save call).
+        raw = payload.get("parent")
+        if not raw:
+            raise ValueError("Choose a folder for Wavefinity's Space storage.")
+        candidate = Path(str(raw)).expanduser()
+        try:
+            usable = candidate.is_dir()
+        except OSError:
+            usable = False
+        if not usable:
+            raise ValueError("That folder could not be found. Choose an existing folder.")
+        absolute = candidate.resolve()
+
+        def apply(prefs: dict[str, Any]) -> None:
+            prefs[SPACE_PARENT_PREFERENCE_KEY] = str(absolute)
+
+        prefs = mutate_preferences(apply)
+        return {"storage": storage_startup_state(prefs)}
+
+    def storage_state(_payload):
+        return {"storage": storage_startup_state(load_preferences())}
+
     return {
         "/api/space/inspect": inspect,
         # Local startup: resolves the active Space by ID, not just a path.
@@ -1236,4 +1341,6 @@ def space_routes(
         "/api/space/open": open_folder,
         "/api/space/no-inventory": lambda payload: set_inventory({**payload, "inventory": False}),
         "/api/space/forget": forget,
+        "/api/space/storage-parent": set_storage_parent,
+        "/api/space/storage-state": storage_state,
     }

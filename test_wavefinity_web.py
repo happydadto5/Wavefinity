@@ -1743,28 +1743,31 @@ class WebApplicationTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 wavefinity_web.launch_slicer(missing_exe, [fake_3mf])
 
-            # Bambu Studio opens one exported project, never the source files.
-            project = Path(temp_dir) / "Wavefinity Print.3mf"
+            # Fix 058: Bambu Studio never gets a manufactured project - it
+            # opens the staged, profile-free model files directly.
+            staged = [Path(temp_dir) / "0001 - test.3mf", Path(temp_dir) / "0002 - test.3mf"]
             with (
                 patch("subprocess.Popen") as mock_popen,
-                patch.object(wavefinity_web, "build_bambu_project", return_value=project) as build,
+                patch.object(wavefinity_web, "stage_bambu_inputs", return_value=staged) as stage,
             ):
                 result = wavefinity_web.launch_slicer(fake_exe, [fake_3mf, fake_3mf])
-                build.assert_called_once_with(fake_exe, [fake_3mf, fake_3mf])
+                stage.assert_called_once_with([fake_3mf, fake_3mf])
                 mock_popen.assert_called_once()
                 args = mock_popen.call_args[0][0]
-                self.assertEqual(args, [str(fake_exe.resolve()), str(project.resolve())])
-                self.assertEqual(result, project)
+                self.assertEqual(args, [str(fake_exe.resolve()), str(staged[0]), str(staged[1])])
+                for flag in ("--export-3mf", "--arrange", "--slice", "--load-settings", "--load-filaments"):
+                    self.assertNotIn(flag, args)
+                self.assertIsNone(result)
 
             # Other slicers keep the direct multi-file launch.
             orca = Path(temp_dir) / "orca-slicer.exe"
             orca.touch()
             with (
                 patch("subprocess.Popen") as mock_popen,
-                patch.object(wavefinity_web, "build_bambu_project") as build,
+                patch.object(wavefinity_web, "stage_bambu_inputs") as stage,
             ):
                 result = wavefinity_web.launch_slicer(orca, [fake_3mf])
-                build.assert_not_called()
+                stage.assert_not_called()
                 args = mock_popen.call_args[0][0]
                 self.assertEqual(args, [str(orca.resolve()), str(fake_3mf.resolve())])
                 self.assertIsNone(result)
