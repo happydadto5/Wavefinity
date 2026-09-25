@@ -2662,6 +2662,8 @@ SP.renderStructuralActions = () => {
   print.title = hosted ? SP.HOSTED_STRUCTURAL_PRINT_TOOLTIP : "";
   const bed = document.getElementById("space-structural-bed");
   if (bed) bed.hidden = kind !== "base_trim";
+  const makeInsideBin = document.getElementById("space-make-inside-bin");
+  if (makeInsideBin) makeInsideBin.hidden = kind !== "storage_box";
 };
 
 SP.renderSpaceInfo = () => {
@@ -2842,6 +2844,8 @@ const wireInfoButtons = (prefix = "space-head") => {
     if (btnSave) btnSave.addEventListener("click", SP.saveStructural);
     const btnPrint = document.getElementById("space-structural-print");
     if (btnPrint) btnPrint.addEventListener("click", SP.printStructural);
+    const btnMakeInsideBin = document.getElementById("space-make-inside-bin");
+    if (btnMakeInsideBin) btnMakeInsideBin.addEventListener("click", designerMakeInsideBin);
     ["space-structural-bed-x", "space-structural-bed-y"].forEach(id => {
         const input = document.getElementById(id);
         if (!input) return;
