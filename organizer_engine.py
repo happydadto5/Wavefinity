@@ -1273,6 +1273,37 @@ def make_wall_lock_bumps(spec: BoxSpec) -> list[trimesh.Trimesh]:
     return make_wall_lock_bumps_raw(spec.half_x, spec.half_y, spec.wall_depth, spec.z)
 
 
+def wall_lock_receivers(
+    spec: BoxSpec, wall: str, low: float, high: float,
+) -> list[trimesh.Trimesh]:
+    """Notch cutters that receive one wall's ordinary lock bumps.
+
+    ``wall`` is ``"+x"``, ``"-x"``, ``"+y"`` or ``"-y"``; ``low``/``high`` are
+    coordinates along that wall from its centre. A cutter is returned for every
+    bump on the wall that reaches into that span at all - including one only
+    partly covered, since a solid part ending on a bump would foul it. Each
+    cutter is the bump's own swept section grown by ``LOCK_NOTCH_CLEARANCE``
+    (the same profile connectors are notched with), placed at the same
+    positions and rim height as the bump, so a part cut with them seats over
+    the bumps without touching and still catches on their chamfers.
+    """
+    run_axis, wave_half, face, inward = _wall_face_table(spec)[wall]
+    embed = min(LOCK_EMBED, spec.wall_depth - LOCK_SAFE_SKIN)
+    profile = _lock_profile(LOCK_PROTRUSION, LOCK_NOTCH_CLEARANCE, embed=embed)
+    cutters: list[trimesh.Trimesh] = []
+    for centre in lock_positions(wave_half - CORNER_INSET - LOCK_CORNER_CLEAR):
+        lo, hi = centre - LOCK_RUN / 2.0, centre + LOCK_RUN / 2.0
+        if hi < low or lo > high:
+            continue
+        ss = np.linspace(lo, hi, _sample_count(LOCK_RUN))
+        if run_axis == "y":
+            path = [(face + wave_value(float(t)), float(t)) for t in ss]
+        else:
+            path = [(float(t), face + wave_value(float(t))) for t in ss]
+        cutters.append(translated(_sweep_profile(path, inward, profile), (0.0, 0.0, spec.z)))
+    return cutters
+
+
 # --------------------------------------------------------------------------- #
 # lift grabbers
 # --------------------------------------------------------------------------- #

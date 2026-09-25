@@ -544,9 +544,22 @@ input[type="number"]::-webkit-inner-spin-button {
 .pegboard-mount-row > strong, .pegboard-mount-row > .muted { grid-column: 1 / -1; }
 .pegboard-mount-row label { font-size: 12px; font-weight: 650; color: var(--muted); }
 .pegboard-mount-row select { margin-top: 4px; }
-/* Base, Walls and Inside Handles as one fixed 3-column row so they stay the
-   same width and never split across lines regardless of sidebar width. */
-.thickness-grabber-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; flex: 1 1 320px; min-width: 280px; }
+/* Base and Walls as one 2-column row so they stay the same width; it wraps to
+   a single column only on very narrow screens. */
+.thickness-grabber-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; flex: 1 1 320px; min-width: 280px; }
+@media (max-width: 420px) {
+  .thickness-grabber-row { grid-template-columns: 1fr; min-width: 0; }
+}
+/* Fix 061 F1: a labelled cluster of related settings outside .draft-fields. */
+.setting-group {
+  display: grid; gap: 8px; margin: 0 0 8px; padding: 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fbfcfc;
+}
+.setting-group-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted);
+}
+.surface-bin-controls { flex: 1 1 100%; min-width: 0; }
+.setting-group .surface-bin-help { margin: 0; font-size: 11px; }
 .thickness-grabber-row .inline-select { margin: 0; min-width: 0; }
 .thickness-grabber-row .compact-select select { height: 38px; }
 .measurement { color: var(--teal); margin: 4px 0 15px; font-size: 15px; font-weight: 600; }

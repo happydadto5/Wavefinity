@@ -1187,8 +1187,12 @@ class BulkPrintTests(unittest.TestCase):
             save_design_source(self.folder, design={**design, "part_name": "B"},
                                record={**record, "name": "B"}, row_id=row_id)
 
-        with self.assertRaisesRegex(RuntimeError, "Bambu Studio opened"):
-            self.run_print({row_id: 1}, launch=changed_while_opening)
+        # Fix 061 F7.5: "opened but not recorded" is a structured partial that
+        # carries the refreshed Inventory, never a success and never Printed.
+        result = self.run_print({row_id: 1}, launch=changed_while_opening)
+        self.assertTrue(result["partial"])
+        self.assertEqual(result["partial_stage"], "status")
+        self.assertIn("Bambu Studio opened", result["error"])
         row = load_inventory(self.folder)["bins"][0]
         self.assertEqual((row["id"], row["status"], row["file"]), (row_id, "in_design", ""))
 

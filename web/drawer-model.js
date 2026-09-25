@@ -66,6 +66,9 @@ DL.defaultSettings = () => ({
   show_empty: true,
   spacers: { flexible: true, height: 15 },
   surface: { ask_object_height: true },
+  // Fix 061 F6: per-Space choice to refresh a bin's saved files after an edit
+  // without asking. Default Ask.
+  auto_update_changed_files: false,
 });
 
 DL.newDrawerId = () => {
@@ -111,6 +114,7 @@ DL.normaliseLayout = raw => {
   // Fix 034 K1: autosave has no user-off path any more; a legacy
   // autosave:false layout normalises to the always-on runtime value.
   layout.settings.autosave = true;
+  layout.settings.auto_update_changed_files = layout.settings.auto_update_changed_files === true;
   layout.drawers = Array.isArray(layout.drawers)
     ? layout.drawers.filter(one => one && typeof one === "object") : [];
   DL.layout = layout;
@@ -350,6 +354,9 @@ DL.printEligible = one =>
    Boolean(DL.layout?.design_specs?.[one.id]));
 
 DL.printNeeded = one => (DL.printEligible(one) && one.status !== "printed" ? 1 : 0);
+
+// Batch Save: an eligible row whose current design has no current files yet.
+DL.saveNeeded = one => (DL.printEligible(one) && !String(one.file || "").trim() ? 1 : 0);
 
 DL.printCount = one => {
   return DL.printEligible(one) ? 1 : 0;
@@ -1208,14 +1215,81 @@ DL.saveConnectorFiles = async (context = DL.spaceContext()) => {
   };
 };
 
-// The server re-reads saved Inventory; each selected row opens once in Bambu.
-DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async context => {
+// A batch Save/Print answer always carries the refreshed Inventory, even when
+// only part of the work finished, so the browser matches what is on disk.
+DL.adoptBatchResult = result => {
+  DL.adopt(result);
+  if (result.layout) {
+    const selected = DL.selected;
+    DL.normaliseLayout(result.layout);
+    DL.selected = selected && DL.findPlacement(selected) ? selected : null;
+  }
+  DL.dirty = false;
+  DL.saveState = "saved";
+  DL.savedAt = new Date();
+};
+
+// Shared start of a batch Save/Print: flush the visible Designer, then the
+// Space layout, so the server prepares the latest saved designs.
+DL.prepareBatch = async () => {
   if (typeof flushSpaceDesignAutosave === "function" &&
-      !(await flushSpaceDesignAutosave())) return;
+      !(await flushSpaceDesignAutosave())) return false;
   if (state.runtime.hosted) {
-    toast("Bulk printing to a local slicer is available in local Wavefinity.", true);
+    toast("Bulk saving and printing are available in local Wavefinity.", true);
+    return false;
+  }
+  return true;
+};
+
+// Batch Save: make the chosen bins' files current (only rows without current
+// files are generated) and never open Bambu Studio or change Printed status.
+DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", async context => {
+  if (!(await DL.prepareBatch())) return;
+  const chosen = [...new Set(rowIds || [])];
+  if (!chosen.length) return;
+  if (!(await DL.save())) return;
+  DL.requireSpaceContext(context);
+  let result;
+  try {
+    result = await DL.inventoryCall("/api/drawer/save-bins", {
+      selection: chosen,
+      include_connectors: Boolean(includeConnectors),
+    }, { context });
+  } catch (error) {
+    if (!DL.isStaleSpaceError(error)) throw error;
+    toast("Files were saved for the Space you left. The current Space was not changed.");
     return;
   }
+  DL.adoptBatchResult(result);
+  if (result.partial) {
+    // Keep only the unfinished rows picked so a retry is one click.
+    if (result.partial_stage === "generate" && DP.printSelected.size) {
+      const unfinished = new Set(result.unfinished || []);
+      DP.printSelected = new Set(chosen.filter(id => unfinished.has(id)));
+    }
+    DP.renderInventory(true);
+    DL.emit();
+    DL.requestReport();
+    toast(result.error || "Not every file could be saved.", true, 10000);
+    return;
+  }
+  DP.resetPrintSelection();
+  DL.emit();
+  DL.requestReport();
+  const made = (result.generated_rows || []).length;
+  const kept = (result.reused_rows || []).length;
+  toast([
+    `Saved ${chosen.length} bin${chosen.length === 1 ? "" : "s"}`,
+    ...(made ? [`${made} new`] : []),
+    ...(kept ? [`${kept} already had current files`] : []),
+    ...(result.connector_copies ? [`${result.connector_copies} connector ${result.connector_copies === 1 ? "copy" : "copies"}`] : []),
+    ...(result.notes || []),
+  ].join("\n"), false, 8000);
+});
+
+// The server re-reads saved Inventory; each selected row opens once in Bambu.
+DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async context => {
+  if (!(await DL.prepareBatch())) return;
   if (!state.slicer || !state.slicer.available) {
     toast("Bambu Studio was not found. Locate it with Change slicer in the bin view.", true, 7000);
     return;
@@ -1236,32 +1310,25 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
     toast("Bambu Studio opened for the Space you left. The current Space was not changed.");
     return;
   }
-  DL.adopt(result);
-  if (result.layout) {
-    const selected = DL.selected;
-    DL.normaliseLayout(result.layout);
-    DL.selected = selected && DL.findPlacement(selected) ? selected : null;
-  }
-  DL.dirty = false;
-  DL.saveState = "saved";
-  DL.savedAt = new Date();
-  // A slicer that did not open leaves the rows Saved, not Printed. Keep the
-  // print selection so Retry is one click, and never show the success toast.
+  DL.adoptBatchResult(result);
+  // Anything that stopped before a recorded handoff leaves the rows Saved, not
+  // Printed. Keep the print selection so Retry is one click, and never show
+  // the success toast.
   if (result.partial) {
+    DP.renderInventory(true);
     DL.emit();
     DL.requestReport();
-    toast(`${result.error || "Bambu Studio did not open."}\nNo bins were marked Printed.`, true, 10000);
+    const recorded = result.partial_stage === "status" ? "" : "\nNo bins were marked Printed.";
+    toast(`${result.error || "Bambu Studio did not open."}${recorded}`, true, 10000);
     return;
   }
   DP.resetPrintSelection();
   DL.emit();
   DL.requestReport();
-  const project = result.project ? String(result.project).split(/[\\/]/).pop() : "";
   toast([
-    "Opened one Bambu project",
+    "Opened in Bambu Studio",
     `${result.bin_copies} bin ${result.bin_copies === 1 ? "copy" : "copies"}`,
     ...(result.connector_copies ? [`${result.connector_copies} connector ${result.connector_copies === 1 ? "copy" : "copies"}`] : []),
-    ...(project ? [project] : []),
     ...(result.notes || []),
   ].join("\n"), false, 10000);
 });

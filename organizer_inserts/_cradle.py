@@ -101,7 +101,9 @@ def cradle_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, fl
     capabilities=("qty", "along", "item", "alternate"),
     options=(
         OptionDefinition("Spacing", "spacing", "0"),
-        OptionDefinition("Floor gap", "floor_gap", "2"),
+        # Legacy: still tolerated in saved data, but the geometry always uses the
+        # fixed CRADLE_FLOOR_GAP, so it is not an editor control.
+        OptionDefinition("Floor gap", "floor_gap", "2", editor=False),
         OptionDefinition("% from ends", "end_margin", "10"),
         OptionDefinition("Offset from center", "run_offset", "0", editor=False),
         OptionDefinition("Rib thickness", "rib_thickness", "", editor=False),

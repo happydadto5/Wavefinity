@@ -64,22 +64,26 @@ Side connectors are unavailable while a lid is fitted.
 **Controls follow their meaning, not their mechanism.**
 
 - A **select** is for choosing one of several named states —
-  *Lid type*, *Lid snugness*, *Show*, *Orientation*, *Storage Box Stacking*. This holds even at two
+  *Lid type*, *Lid snugness*, *Show*, *Orientation*, *Base*, *Walls*, and the Storage Box case's
+  *Stacking* and *Carrying handle*. This holds even at two
   options: a row of big buttons for a two-state setting reads as two actions,
   and gives no clue the two are exclusive.
 - A **checkbox** is for a genuine on/off with no second state worth naming —
-  *Standard base*, *Stacking* and *Add label* inside Storage Box.
+  *Lightweight base* on a Surface bin, *Flip text* on an Edge Mount label and
+  *Screw Mounting*.
 - A **button** is for something that *happens* — *Save*, *Reset*, *Top*,
   *Show Log*. Nothing that merely records a preference is a button.
 
 Checkbox rows put the label first and the box on the right, everywhere.
 
 **Settings that belong together live together.** A dependent control sits
-directly under the control that reveals it (*Standard walls?* → *Wall
-thickness* → the thin-wall warning). One setting has exactly one control.
-Anything naming the output file —
-*Part name* — lives in the output panel beside *Save Location* and the generate
-buttons, not in the middle of the build form.
+directly under the control that reveals it (*Walls* → the thin-wall warning; a
+lid's *Label* choice → its label text). One setting has exactly one control.
+Anything naming the output file — the *Bin Name* — sits at the top of the
+Designer, before the dimensions, not in the middle of the build form. The
+Storage Box case settings group their selects as *Lid*, *Case options*, *Label*
+and *Material*, and the ordinary bin's Lid & Stacking editor groups *Configuration*,
+*Lid*, *Handle* and *Label* the same way.
 
 **Automatic changes are shown, never silent.** When the app overrides what was
 typed — stacking raising the wall and floor — it
@@ -346,12 +350,14 @@ Before spending testing tokens, ask:
 
 The page is split between intent-based controls and a large responsive
 workspace. The top design controls contain the dimensions, print mode and interior
-interior-part editor. **Customize your bin** contains the scoop and advanced
-physical settings. **Label your bin** contains the rim label and the part
-filename.
+interior-part editor. **Parts & options** below them holds the interior-part
+palette and the bin-level options (Lid & Stacking, Inside Grip, Side Openings,
+Edge Mount). The bin's name is the *Bin Name* field at the top, before the
+dimensions.
 
-**Standard walls** keeps the original 0.8 mm wall. Turn it off to use a 0.2–2.4
-mm wall in 0.2 mm steps; only the cavity moves, while the exterior wave
+**Base** and **Walls** are named preset selects sitting side by side. *Standard*
+walls keep the original 0.8 mm wall; the other presets run from very thin
+(0.4 mm) up to a 2.4 mm maximum. Only the cavity moves, while the exterior wave
 and 8 mm grid stay fixed. Custom-wall connectors are generated for that wall
 thickness and include it in their filename. Use a connector only with bins of
 the same wall thickness.
@@ -372,9 +378,10 @@ own scale, alongside whatever is already placed, not on a separate isolated
 canvas with its own camera. Parameter changes rebuild that draft after a
 short typing pause, before it is added to the layout; a draft that is
 currently invalid falls back to a red placeholder shape in the same spot, so
-a rejected edit is never mistaken for no change happening. **Add interior
-part** finds open floor space; selecting a placed one loads it back into the
-same editor for exact changes. Invalid dimensions, overlaps, reserved
+a rejected edit is never mistaken for no change happening. Choosing a part in
+the **palette** adds it (finding open floor space); selecting a placed one
+loads it back into the same editor for exact changes. There is no separate
+*Add interior part* button. Invalid dimensions, overlaps, reserved
 scoop/rim-label space, and lettering that cannot fit are reported beside the
 preview and refused at export.
 
@@ -582,10 +589,27 @@ which suppress Inventory logging entirely.
   and a **Status**: **In Design**, **Saved** (files exist) or **Printed**. There
   is no user-facing quantity: a row is one bin, and `Qty` survives only as a
   0/1 compatibility field derived from Status. Saving files is not printing. Print
-  (direct, or *Print Selected to Bambu Studio* in Space Inventory after ticking
-  designs or pressing *Select all not printed* or *Select all*) marks each
-  selected bin Printed exactly once, and only after the slicer opened
-  successfully. **Mark Printed** / **Mark Not Printed** on a row change the
+  (direct, or in Space Inventory) marks each bin Printed exactly once, and only
+  after Wavefinity handed it to Bambu Studio and the slicer opened
+  successfully - it does not claim the physical printer finished the part.
+  **Batch Save / Print** (Space Inventory): with nothing ticked the two buttons
+  are whole-Space quick actions - *Save All Needed (N)* and *Print All Not
+  Printed (N)*; with rows ticked (or via *Select all not printed* / *Select
+  all*) they become *Save Selected (N)* and *Print Selected to Bambu Studio (N)*.
+  Both use one preparation step: it re-reads the Inventory, reuses a row's
+  current files, and generates only rows without current files (each becomes
+  Saved as soon as it is made). Save stops there; Print then opens the files in
+  Bambu Studio. *Include Space Connectors* adds the Space-wide connector set to
+  either action and never belongs to a bin row. If a bin fails part-way, the
+  bins already saved stay Saved, Bambu Studio is not opened, and the unfinished
+  rows stay selected to retry.
+  **Editing a saved bin.** Changing the design of a bin that already has saved
+  files makes those files stale (the row goes back to *In Design*). Once, per
+  generated revision, Wavefinity asks whether to update the saved files; the
+  per-Space *Update saved files automatically after edits* setting
+  (`layout.settings.auto_update_changed_files`, default off) skips the question.
+  Superseded files are removed only when they were tracked to that row and no
+  other row uses them. **Mark Printed** / **Mark Not Printed** on a row change the
   status for external or failed prints. **Delete** on a row removes that bin from
   the inventory altogether (its one placement and design source go with it);
   dragging a bin off the Space only unplaces it. Under the table, a `## Drawer
@@ -612,7 +636,7 @@ which suppress Inventory logging entirely.
   load: a 4 mm layout rounds each bin to whole units (the report flags any
   overlap that makes), and any other axis, corner or clearance goes back to
   these rules. Only a legacy Space that still holds several drawers keeps a
-  name and Delete under *Advanced Settings*; the drawers share one inventory, and
+  name and Delete under *Drawer details*; the drawers share one inventory, and
   a bin placed in one drawer is not available to another.
 - **Bins never turn a quarter turn on their own.** Left walls mate with right,
   and front with back; a bin turned 90 degrees meets its neighbours crest to
@@ -680,10 +704,9 @@ which suppress Inventory logging entirely.
 - **Surface Fill** (Surface only) turns free Surface cells into ordinary editable
   bins. It first settles the Designer's autosave, then works from the authoritative
   Inventory and layout.
-- **Saving.** *Auto-save* (on by default) writes the layout after a change, but
-  no more than once every 5 minutes while you keep editing - leaving the tab
-  or closing auto-saves right away regardless. Names and status
-  always save straight away, because they are the inventory.
+- **Saving.** Space layout autosave is always on - there is no off state and no
+  manual Save button. Layout changes and each bin's design source save as you
+  work; names and status save straight away, because they are the inventory.
   The layout is recalled automatically every time you open the tab. **Save
   location** shows the current folder and opens the folder picker, the same
   as the main editor's.

@@ -509,6 +509,14 @@ def _prune_layout(layout: dict | None, bins: list[dict[str, Any]]) -> dict | Non
         pruned = {row_id: spec for row_id, spec in specs.items() if row_id in known}
         if len(pruned) != len(specs):
             layout["design_specs"] = pruned
+    stale = layout.get("stale_files")
+    if isinstance(stale, dict):
+        kept = {row_id: names for row_id, names in stale.items() if row_id in known}
+        if kept != stale:
+            if kept:
+                layout["stale_files"] = kept
+            else:
+                layout.pop("stale_files", None)
     return layout
 
 
@@ -531,7 +539,9 @@ def update_bin_file(output_dir: Path | str, row_id: str, file_text: str,
         if expected_design is not None and design_specs(current["layout"]).get(row_id) != expected_design:
             raise ValueError("This bin changed while its files were being prepared")
         target.update({"file": file_text, "status": "saved", "qty": 0})
-        _write(path, bins, current["layout"], current["legacy"])
+        layout, superseded = _reap_superseded(path.parent, bins, current["layout"], row_id)
+        _write(path, bins, layout, current["legacy"])
+        _delete_files(superseded)
         return _payload(path, _read(path))
 
 
@@ -555,10 +565,12 @@ def save_design_source(
     with INVENTORY_LOCK:
         path = resolve_inventory_path(output_dir, migrate=True)
         current = _read(path)
-        bins, layout, used_id = _merge_design_source(current, design=design, record=record, row_id=row_id)
+        bins, layout, used_id, stale = _merge_design_source(
+            current, design=design, record=record, row_id=row_id, folder=path.parent)
         _write(path, bins, layout, current["legacy"])
         result = _payload(path, _read(path))
-        return {**result, "row_id": used_id, "design": design_specs(result["layout"])[used_id]}
+        return {**result, "row_id": used_id, "design": design_specs(result["layout"])[used_id],
+                "files_became_stale": stale}
 
 
 def save_design_source_text(
@@ -569,10 +581,12 @@ def save_design_source_text(
     raw = str(text or "")
     with INVENTORY_LOCK:
         current = parse_inventory(raw)
-        bins, layout, used_id = _merge_design_source(current, design=design, record=record, row_id=row_id)
+        bins, layout, used_id, stale = _merge_design_source(
+            current, design=design, record=record, row_id=row_id)
         rendered = render_inventory(str(title or "Wavefinity"), bins, layout)
         result = _text_payload(rendered, str(title or "Wavefinity"), parse_inventory(rendered))
-        return {**result, "row_id": used_id, "design": design_specs(result["layout"])[used_id]}
+        return {**result, "row_id": used_id, "design": design_specs(result["layout"])[used_id],
+                "files_became_stale": stale}
 
 
 def _next_simple_bin_name(bins: list[dict[str, Any]]) -> str:
@@ -669,7 +683,11 @@ def change_design_status(output_dir: Path | str, row_id: str, action: str,
                     inventory_row_files(path.parent, target)
                 except ValueError:
                     target.update({"file": "", "status": "in_design", "qty": 0})
+        superseded: list[Path] = []
+        if action == "saved":
+            layout, superseded = _reap_superseded(path.parent, bins, layout, row_id)
         _write(path, bins, layout, current["legacy"])
+        _delete_files(superseded)
         return _payload(path, _read(path))
 
 
@@ -703,9 +721,96 @@ def mark_printed_rows(output_dir: Path | str, row_ids: Iterable[str],
         return _payload(path, _read(path))
 
 
+def _row_file_names(folder: Path | None, row: dict[str, Any]) -> list[str]:
+    """The real generated file names a row's File cell owns, else none.
+
+    Only names that resolve to real .3mf files directly in ``folder`` are
+    trusted; an unverifiable File cell is never turned into delete targets.
+    """
+    text = str(row.get("file") or "").strip()
+    if not text or folder is None:
+        return []
+    from organizer_drawer import _safe_row_file, inventory_row_files
+    try:
+        return [path.name for path in inventory_row_files(folder, row)]
+    except ValueError:
+        root = Path(folder).expanduser().resolve()
+        return [name for name in dict.fromkeys(text.split(", ")) if _safe_row_file(root, name)]
+
+
+def _referenced_names(bins: list[dict[str, Any]], skip_id: str) -> set[str]:
+    """Every file name any other row's File cell could be pointing at."""
+    names: set[str] = set()
+    for one in bins:
+        if one["id"] == skip_id:
+            continue
+        text = str(one.get("file") or "").strip()
+        if text:
+            names.add(text)
+            names.update(piece.strip() for piece in text.split(", "))
+    return names
+
+
+def _stale_files(layout: dict[str, Any] | None) -> dict[str, list[str]]:
+    """Old generated files per row that an edit made non-current (Fix 061 F6)."""
+    raw = layout.get("stale_files") if isinstance(layout, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): [str(name) for name in value if isinstance(name, str)]
+            for key, value in raw.items() if isinstance(value, list)}
+
+
+def _reap_superseded(
+    folder: Path, bins: list[dict[str, Any]], layout: dict[str, Any] | None, row_id: str,
+) -> tuple[dict[str, Any] | None, list[Path]]:
+    """Retire a row's tracked stale files once it has a new current file set.
+
+    Returns the layout with that row's stale entry dropped and the physical
+    files that are safe to delete: tracked as this row's old outputs, not part
+    of its new set, and not referenced by any other Inventory row.
+    """
+    if not isinstance(layout, dict):
+        return layout, []
+    stale = _stale_files(layout)
+    if row_id not in stale:
+        return layout, []
+    tracked = stale.pop(row_id)
+    target = next((one for one in bins if one["id"] == row_id), None)
+    current: set[str] = set()
+    if target is not None and str(target.get("file") or "").strip():
+        current.update(_row_file_names(folder, target))
+        current.add(str(target["file"]).strip())
+        current.update(piece.strip() for piece in str(target["file"]).split(", "))
+    referenced = _referenced_names(bins, row_id)
+    from organizer_drawer import _safe_row_file
+    root = Path(folder).expanduser().resolve()
+    doomed: list[Path] = []
+    for name in dict.fromkeys(tracked):
+        if name in current or name in referenced:
+            continue
+        found = _safe_row_file(root, name)
+        if found is not None:
+            doomed.append(found)
+    layout = {**layout}
+    if stale:
+        layout["stale_files"] = stale
+    else:
+        layout.pop("stale_files", None)
+    return layout, doomed
+
+
+def _delete_files(paths: Iterable[Path]) -> None:
+    for path in paths:
+        try:
+            path.unlink()
+        except OSError:
+            pass  # a locked or already-removed old file must never fail the save
+
+
 def _merge_design_source(
     current: dict[str, Any], *, design: dict[str, Any], record: dict[str, Any], row_id: str | None,
-) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    folder: Path | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any], str, bool]:
     bins = current["bins"]
     by_id = {one["id"]: one for one in bins}
     target = by_id.get(row_id) if row_id else None
@@ -730,8 +835,16 @@ def _merge_design_source(
     }
     previous = design_specs(layout).get(target["id"]) if target is not None else None
     changed = previous != canonical
+    files_became_stale = False
+    stale = _stale_files(layout)
     if target is not None:
         if changed:
+            if str(target.get("file") or "").strip():
+                files_became_stale = True
+                # Remember the old outputs so a later successful refresh can
+                # retire them; until then they are never treated as current.
+                kept = stale.get(target["id"], [])
+                stale[target["id"]] = list(dict.fromkeys(kept + _row_file_names(folder, target)))
             target.update(row_fields)
             target.update({"file": "", "status": "in_design", "qty": 0})
         used_id = target["id"]
@@ -747,8 +860,10 @@ def _merge_design_source(
             **row_fields,
         })
     layout = {**layout, "design_specs": {**design_specs(layout), used_id: canonical}}
+    if stale:
+        layout["stale_files"] = stale
     layout = _prune_layout(layout, bins)
-    return bins, layout, used_id
+    return bins, layout, used_id, files_became_stale
 
 
 def _payload(path: Path, data: dict[str, Any]) -> dict[str, Any]:
@@ -832,6 +947,10 @@ def _merge_inventory(
         # Inventory source map always comes from the latest file transaction.
         submitted_specs = dict(design_specs(chosen))
         chosen = {**chosen, "design_specs": dict(design_specs(current["layout"]))}
+        # Stale-file tracking is server-owned like the design sources.
+        chosen.pop("stale_files", None)
+        if _stale_files(current["layout"]):
+            chosen["stale_files"] = _stale_files(current["layout"])
     by_id = {one["id"]: one for one in bins}
     for update in bin_updates or ():
         target = by_id.get(str(update.get("id", "")))

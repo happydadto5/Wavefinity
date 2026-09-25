@@ -81,7 +81,15 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
   margin: -4px 0 2px; padding: 10px 12px; border: 1px solid var(--line); border-top: 0;
   border-radius: 0 0 9px 9px; background: #fbfcfc;
 }
-.dl-bin-details .field-grid { margin-bottom: 8px; }
+.dl-bin-details .field-grid { margin-bottom: 0; }
+/* Fix 061 F1.10: each cluster of row details reads as its own labelled group. */
+.dl-bin-details .dl-group {
+  display: grid; gap: 6px; margin: 0 0 8px; padding: 8px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fbfcfc;
+}
+.dl-bin-details .dl-group-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted);
+}
 .dl-bin-details p { margin: 6px 0 10px; font-size: 11px; color: var(--muted); line-height: 1.5; word-break: break-word; }
 .dl-empty {
   padding: 14px; border: 1px dashed var(--line-dark); border-radius: 8px; color: var(--muted);
@@ -109,6 +117,7 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-batch-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .dl-batch-summary { font-size: 11px; color: var(--muted); flex: 1 1 100%; min-height: 14px; }
 .dl-batch-connectors { margin: 0; }
+.dl-batch-refresh { margin: 0; }
 .dl-swatch { position: relative; }
 .dl-swatch i {
   position: absolute; right: -4px; bottom: -4px; font-style: normal; font-size: 10px; line-height: 1;

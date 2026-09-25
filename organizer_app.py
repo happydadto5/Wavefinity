@@ -129,6 +129,7 @@ from organizer_stack import (
 )
 from organizer_inventory import append_bin
 from organizer_inserts import (
+    CRADLE_FLOOR_GAP,
     BASE_PLATE,
     CARTRIDGE_PITCH,
     CONNECTOR_EDGE_KEEP_OUT,
@@ -650,7 +651,8 @@ def part_name_seed(text: str) -> str:
 def _feature_height(box: BoxSpec, one: Feature, base_z: float) -> float:
     options = one.options
     if one.kind == "cradle" and one.item is not None:
-        return base_z + options.get("floor_gap", 2.0) + one.item.widest / 2.0
+        # Fixed clearance: a legacy saved floor_gap is ignored, as in the geometry.
+        return base_z + CRADLE_FLOOR_GAP + one.item.widest / 2.0
     if one.kind == "bore" and one.item is not None:
         depth = options.get("depth", min(one.item.length * 0.4, box.z - base_z - 2.0))
         return base_z + options.get("height", depth + 2.0)

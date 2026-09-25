@@ -35,7 +35,7 @@ const makeEl = () => ({
   setAttribute() {}, getContext() { return null; }, insertAdjacentHTML() {}, scrollIntoView() {},
 });
 const known = ["#dl-inv-list", "#dl-inv-show", "#dl-inv-sort", "#dl-inv-count", "#dl-batch-tools",
-  "#dl-batch-summary", "#dl-batch-connectors", "#dl-batch-clear", "#dl-batch-print", "#dl-staging",
+  "#dl-batch-summary", "#dl-batch-connectors", "#dl-batch-clear", "#dl-batch-print", "#dl-batch-save", "#dl-refresh-saved", "#dl-staging",
   "#dl-empty-state", "#dl-stats", "#dl-save-status"];
 known.forEach(sel => { els[sel] = makeEl(); });
 els["#dl-staging"].querySelector = sel => (els["#dl-staging"]._kids ||= {})[sel] ||= makeEl();

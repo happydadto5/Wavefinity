@@ -69,7 +69,7 @@ DP.build = () => {
       </div>
       <p id="dl-grid-note" class="dl-note"></p>
       <details class="dl-details" id="dl-fit-details" hidden>
-        <summary>Advanced Settings</summary>
+        <summary>Drawer details</summary>
         <div class="field-grid two">
           <label id="dl-name-row">Name<input id="dl-name" type="text" maxlength="40"></label>
         </div>
@@ -105,8 +105,10 @@ DP.build = () => {
             <button type="button" id="dl-batch-clear" class="button secondary dl-small">Clear selection</button>
             <span id="dl-batch-summary" class="dl-batch-summary" role="status"></span>
           </div>
-          <label class="checkbox-row dl-batch-connectors"><span>Include Space Connectors</span><input id="dl-batch-connectors" type="checkbox" checked></label>
+          <label class="checkbox-row dl-batch-connectors" title="Connectors belong to the whole Space, not to individual bins. They are included with Save and Print when this is on."><span>Include Space Connectors</span><input id="dl-batch-connectors" type="checkbox" checked></label>
+          <button type="button" id="dl-batch-save" class="button secondary wide">Save Selected</button>
           <button type="button" id="dl-batch-print" class="button secondary wide">Print Selected to Bambu Studio</button>
+          <label class="checkbox-row dl-batch-refresh" title="When you edit a bin that already has saved files, remake those files to match instead of asking. This applies to this Space only."><span>Update saved files automatically after edits</span><input id="dl-refresh-saved" type="checkbox"></label>
         </div>
         <div id="dl-inv-list" class="dl-inv-list"></div>
       </div>
@@ -236,8 +238,14 @@ DP.wire = () => {
     DP.includeSpaceConnectors = event.target.checked;
     DP.renderBatch();
   });
+  $("#dl-batch-save").addEventListener("click", () =>
+    DL.saveSelectedBins(DP.batchSaveIds(), DP.includeSpaceConnectors));
   $("#dl-batch-print").addEventListener("click", () =>
     DL.printSelectedBins(DP.printSelectionPayload(), DP.includeSpaceConnectors));
+  $("#dl-refresh-saved").addEventListener("change", async event => {
+    DL.change(() => { DL.layout.settings.auto_update_changed_files = event.target.checked; }, { history: false });
+    await DL.save();
+  });
   // Empty-state buttons (canvas overlay and Inventory list) share these.
   const emptyAction = event => {
     const act = event.target.closest("[data-empty-act]")?.dataset.emptyAct;
@@ -320,11 +328,25 @@ DP.clearPrintSelection = () => {
   DP.renderInventory(true);
 };
 
+// The one batch scope both buttons share. With rows ticked, Save and Print act
+// on exactly those rows. With nothing ticked they become whole-Space quick
+// actions: Save covers every bin still without current files, Print every bin
+// not yet Printed.
+DP.batchScope = () => {
+  const picked = [...DP.printSelected].map(id => DL.bin(id)).filter(one => DL.printEligible(one));
+  if (picked.length) return { subset: true, save: picked, print: picked, picked };
+  const eligible = DL.bins.filter(one => DL.printEligible(one));
+  return {
+    subset: false, picked: [], eligible,
+    save: eligible.filter(one => DL.saveNeeded(one)),
+    print: eligible.filter(one => DL.printNeeded(one)),
+  };
+};
+
+DP.batchSaveIds = () => DP.batchScope().save.map(one => one.id);
+
 DP.printSelectionPayload = () => Object.fromEntries(
-  [...DP.printSelected]
-    .map(id => DL.bin(id))
-    .filter(one => DL.printEligible(one))
-    .map(one => [one.id, DL.printCount(one)]));
+  DP.batchScope().print.map(one => [one.id, DL.printCount(one)]));
 
 DP.renderBatch = () => {
   const hosted = Boolean(state.runtime.hosted);
@@ -332,20 +354,42 @@ DP.renderBatch = () => {
   if (!tools) return;
   tools.hidden = hosted;
   if (hosted) return;
-  const rows = [...DP.printSelected].map(id => DL.bin(id)).filter(one => DL.printEligible(one));
-  const copies = rows.reduce((sum, one) => sum + DL.printCount(one), 0);
-  $("#dl-batch-summary").textContent = rows.length
-    ? `${dlPlural(rows.length, "design")} · ${dlPlural(copies, "bin copy", "bin copies")}${DP.includeSpaceConnectors ? " · Space connectors included" : ""}`
-    : "";
+  const scope = DP.batchScope();
+  const connectorNote = DP.includeSpaceConnectors ? " · Space connectors included" : "";
+  const needFiles = scope.subset ? scope.picked.filter(one => DL.saveNeeded(one)).length : scope.save.length;
+  let summary;
+  if (scope.subset) {
+    summary = `${dlPlural(scope.picked.length, "design")} selected · ${needFiles} need${needFiles === 1 ? "s" : ""} new files${connectorNote}`;
+  } else if (!scope.eligible.length) {
+    summary = "No designs to save or print yet.";
+  } else {
+    summary = `Nothing ticked - the buttons cover the whole Space${connectorNote}`;
+  }
+  $("#dl-batch-summary").textContent = summary;
   dlSet("#dl-batch-connectors", DP.includeSpaceConnectors, "checked");
+  dlSet("#dl-refresh-saved", Boolean(DL.layout?.settings?.auto_update_changed_files), "checked");
   $("#dl-batch-clear").disabled = !DP.printSelected.size;
   const noSlicer = !state.slicer || !state.slicer.available;
+  const busy = Boolean(DL.busy);
+
+  const save = $("#dl-batch-save");
+  const saveCount = scope.subset ? scope.picked.length : scope.save.length;
+  save.textContent = DL.busy === "save-bins" ? "Saving files…"
+    : scope.subset ? `Save Selected (${saveCount})` : `Save All Needed (${saveCount})`;
+  save.disabled = busy || (scope.subset ? needFiles === 0 : scope.save.length === 0);
+  save.title = save.disabled && !busy
+    ? (scope.subset ? "Every selected bin already has current files." : "Every bin already has current files.")
+    : "Make the print files without opening Bambu Studio.";
+
   const button = $("#dl-batch-print");
-  button.classList.toggle("primary", rows.length >= 2);
-  button.classList.toggle("secondary", rows.length < 2);
-  button.disabled = !rows.length || noSlicer || Boolean(DL.busy);
-  button.title = noSlicer ? "Bambu Studio was not found. Locate it with Change slicer in the bin view." : "";
-  button.textContent = DL.busy === "print-bins" ? "Opening Bambu Studio…" : "Print Selected to Bambu Studio";
+  const printCount = scope.print.length;
+  button.classList.toggle("primary", printCount >= 2);
+  button.classList.toggle("secondary", printCount < 2);
+  button.textContent = DL.busy === "print-bins" ? "Opening Bambu Studio…"
+    : scope.subset ? `Print Selected to Bambu Studio (${printCount})` : `Print All Not Printed (${printCount})`;
+  button.disabled = !printCount || noSlicer || busy;
+  button.title = noSlicer ? "Bambu Studio was not found. Locate it with Change slicer in the bin view."
+    : !printCount ? "Every bin has already been printed." : "Make any missing files, then open them in Bambu Studio.";
 };
 
 DP.onInventoryClick = async event => {
@@ -741,7 +785,7 @@ DP.renderInventory = (force = false) => {
       ? `<small>${dlPlural(placed, "placement")} · ${one.qty} printed</small>`
       : `<small class="dl-status">${DL.statusLabel(one)}</small>`;
     const actions = spacer ? "" : `<div class="dl-row-actions">
-          ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>` : ""}
+          ${editable ? `<button type="button" class="button primary dl-small" data-act="edit" title="Open this bin in the Designer">Edit</button>` : ""}
           ${designSource ? `<button type="button" class="button secondary dl-small" data-act="duplicate">Duplicate</button>` : ""}
           ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}
           ${statusTracked ? (printed
@@ -765,15 +809,21 @@ DP.renderInventory = (force = false) => {
         ${actions}
       </div>
       ${open ? `<div class="dl-bin-details" data-bin="${escapeHtml(one.id)}">
-        <div class="field-grid three">
-          <label>Name<input type="text" data-field="name" maxlength="80" value="${escapeHtml(one.name)}" placeholder="Shows the size when blank"></label>
-          <label>Stacking<select data-field="stack">${STACK_OPTIONS.replace(`value="${one.stack}"`, `value="${one.stack}" selected`)}</select></label>
+        <div class="dl-group"><span class="dl-group-label">Bin</span>
+          <div class="field-grid two">
+            <label>Name<input type="text" data-field="name" maxlength="80" value="${escapeHtml(one.name)}" placeholder="Shows the size when blank"></label>
+            <label>Stacking<select data-field="stack">${STACK_OPTIONS.replace(`value="${one.stack}"`, `value="${one.stack}" selected`)}</select></label>
+          </div>
         </div>
-        ${DL.isSurface() ? `<label>Object height <span class="unit">mm</span><input type="number" data-field="object_height_mm" min="0.1" step="0.1" value="${one.object_height_mm ?? ""}" placeholder="Not set"></label>` : ""}
-        <div class="field-grid three">
-          <label>Width <span class="unit">mm</span><input type="number" data-field="x" min="1" step="8" value="${fmt(one.x)}"></label>
-          <label>Length <span class="unit">mm</span><input type="number" data-field="y" min="1" step="8" value="${fmt(one.y)}"></label>
-          <label>Height <span class="unit">mm</span><input type="number" data-field="z" min="1" step="1" value="${fmt(one.z)}" title="${DL.stackable(one) ? "Stack module height" : "Finished height"}"></label>
+        ${DL.isSurface() ? `<div class="dl-group"><span class="dl-group-label">Planning</span>
+          <label>Object height <span class="unit">mm</span><input type="number" data-field="object_height_mm" min="0.1" step="0.1" value="${one.object_height_mm ?? ""}" placeholder="Not set"></label>
+        </div>` : ""}
+        <div class="dl-group"><span class="dl-group-label">Size</span>
+          <div class="field-grid three">
+            <label>Width <span class="unit">mm</span><input type="number" data-field="x" min="1" step="8" value="${fmt(one.x)}"></label>
+            <label>Length <span class="unit">mm</span><input type="number" data-field="y" min="1" step="8" value="${fmt(one.y)}"></label>
+            <label>Height <span class="unit">mm</span><input type="number" data-field="z" min="1" step="1" value="${fmt(one.z)}" title="${DL.stackable(one) ? "Stack module height" : "Finished height"}"></label>
+          </div>
         </div>
         <p>${DL.stackable(one) ? `Adds ${fmt(DL.pitch(one))} mm to a stack; detached height is ${fmt(DL.partHeight(one))} mm including its interlock.<br>` : ""}${one.file ? `File: ${escapeHtml(one.file)}<br>` : ""}${one.label ? `Label: ${escapeHtml(one.label)}<br>` : ""}${one.interior ? `Inside: ${escapeHtml(one.interior)}<br>` : ""}${escapeHtml(one.id)}${one.date ? ` · logged ${escapeHtml(one.date)}` : ""}</p>
       </div>` : ""}`;

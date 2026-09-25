@@ -93,14 +93,22 @@
                 <select id="wall-thickness"><option value="standard">Standard</option></select>
               </label>
             </div>
-            <div id="surface-bin-controls" class="field-grid two" hidden>
-              <label>Base height<select id="surface-base-mode"><option value="edge">Auto — Match Surface edge</option><option value="custom">Custom</option></select></label>
-              <label id="surface-base-custom-row">Custom base <span class="unit">mm</span><input id="surface-base-custom" type="number" min="0.4" step="0.1"></label>
-              <span id="surface-base-resolved" class="muted"></span>
-              <label class="checkbox-row"><span>Lightweight base</span><input id="surface-lightweight-base" type="checkbox"></label>
-              <label>Object height <span class="unit">mm</span><input id="surface-object-height" type="number" min="0.1" step="0.1" placeholder="Not set"></label>
-              <span id="surface-planning-height" class="muted"></span>
-              <p class="muted surface-bin-help">Base height is the platform under this Surface bin. Auto matches the Base Trim edge. Lightweight base removes hidden material underneath with support-free 45° cavities. Object height is the object's full physical height or length. Wavefinity uses it only to plan this Surface. It does not change the bin.</p>
+            <div id="surface-bin-controls" class="surface-bin-controls" hidden>
+              <div class="setting-group"><span class="setting-group-label">Base</span>
+                <div class="field-grid two">
+                  <label title="The platform under this Surface bin. Auto matches the Base Trim edge.">Base height<select id="surface-base-mode"><option value="edge">Auto — Match Surface edge</option><option value="custom">Custom</option></select></label>
+                  <label id="surface-base-custom-row">Custom base <span class="unit">mm</span><input id="surface-base-custom" type="number" min="0.4" step="0.1"></label>
+                  <span id="surface-base-resolved" class="muted"></span>
+                  <label class="checkbox-row" title="Removes hidden material underneath with support-free 45° cavities."><span>Lightweight base</span><input id="surface-lightweight-base" type="checkbox"></label>
+                </div>
+              </div>
+              <div class="setting-group"><span class="setting-group-label">Planning</span>
+                <div class="field-grid two">
+                  <label title="The object's full physical height or length. Wavefinity uses it only to plan this Surface.">Object height <span class="unit">mm</span><input id="surface-object-height" type="number" min="0.1" step="0.1" placeholder="Not set"></label>
+                  <span id="surface-planning-height" class="muted"></span>
+                </div>
+                <p class="muted surface-bin-help">Planning only — does not change the bin.</p>
+              </div>
             </div>
             <span id="thin-wall-warning" class="wall-warning" hidden>Very thin — may not print reliably with standard nozzle/slicer settings.</span>
           </div>
@@ -182,31 +190,36 @@
           </div>
           <div id="side-openings-option" class="lid-option-card" hidden>
             <div id="side-openings-panel">
-              <div class="field-grid two">
-                <label class="inline-select">Shape
-                  <select id="side-opening-shape">
-                    <option value="curved">Curved</option>
-                    <option value="square">Square</option>
-                  </select>
-                </label>
-                <label class="inline-select">Opening size
-                  <select id="side-opening-size"></select>
-                </label>
+              <div class="setting-group"><span class="setting-group-label">Opening</span>
+                <div class="field-grid two">
+                  <label class="inline-select">Shape
+                    <select id="side-opening-shape">
+                      <option value="curved">Curved</option>
+                      <option value="square">Square</option>
+                    </select>
+                  </label>
+                  <label class="inline-select">Opening size
+                    <select id="side-opening-size"></select>
+                  </label>
+                </div>
               </div>
-              <div class="field-grid two">
-                <label>% from bottom
-                  <input id="side-opening-from-bottom" type="number" min="0" max="100" step="1">
-                </label>
-                <label>% from top
-                  <input id="side-opening-from-top" type="number" min="0" max="100" step="1">
-                </label>
+              <div class="setting-group"><span class="setting-group-label">Vertical position</span>
+                <div class="field-grid two">
+                  <label>% from bottom
+                    <input id="side-opening-from-bottom" type="number" min="0" max="100" step="1">
+                  </label>
+                  <label>% from top
+                    <input id="side-opening-from-top" type="number" min="0" max="100" step="1">
+                  </label>
+                </div>
               </div>
-              <div class="field-label">Cutout on:</div>
-              <div class="segmented four" aria-label="Side Opening walls">
-                <button id="side-opening-front" type="button" aria-pressed="false">Front</button>
-                <button id="side-opening-back" type="button" aria-pressed="false">Back</button>
-                <button id="side-opening-left" type="button" aria-pressed="false">Left</button>
-                <button id="side-opening-right" type="button" aria-pressed="false">Right</button>
+              <div class="setting-group"><span class="setting-group-label">Walls</span>
+                <div class="segmented four" aria-label="Side Opening walls">
+                  <button id="side-opening-front" type="button" aria-pressed="false">Front</button>
+                  <button id="side-opening-back" type="button" aria-pressed="false">Back</button>
+                  <button id="side-opening-left" type="button" aria-pressed="false">Left</button>
+                  <button id="side-opening-right" type="button" aria-pressed="false">Right</button>
+                </div>
               </div>
             </div>
             <p id="side-opening-note" class="inline-help"></p>
@@ -685,6 +698,7 @@
   <dialog id="app-confirm-dialog" class="support-layout-dialog" aria-labelledby="app-confirm-title">
     <h2 id="app-confirm-title"></h2>
     <p id="app-confirm-message"></p>
+    <label id="app-confirm-check-row" class="checkbox-row" hidden><span id="app-confirm-check-label"></span><input id="app-confirm-check" type="checkbox"></label>
     <div class="button-row">
       <button id="app-confirm-cancel" type="button" class="button secondary">Cancel</button>
       <button id="app-confirm-secondary" type="button" class="button secondary" hidden></button>
@@ -879,7 +893,7 @@
           <section class="space-tutorial-section">
             <h3>7. Save or print</h3>
             <p>Give the design a useful name, then save files to your folder or send them to your slicer when that option is available. Wavefinity can produce the bin plus any related printable parts that belong to the design.</p>
-            <p>To print in bulk, open Space Inventory, tick individual designs, press <strong>Select all not printed</strong>, or press <strong>Select all</strong> for every printable design. Then press <strong>Print Selected to Bambu Studio</strong>. Each selected bin is sent once, in one project (with the Space's connectors, if you leave that on). After Bambu Studio opens successfully, those bins become <strong>Printed</strong>. If you print elsewhere, use <strong>Mark Printed</strong> on the row.</p>
+            <p>To save or print in bulk, open Space Inventory. With nothing ticked, <strong>Save All Needed</strong> makes the files for every bin that has none, and <strong>Print All Not Printed</strong> makes any missing files and opens every bin not yet printed in Bambu Studio. Tick individual designs (or press <strong>Select all not printed</strong> / <strong>Select all</strong>) to work on just those. Each selected bin is sent once, with the Space's connectors if you leave that on. After Bambu Studio opens successfully, those bins become <strong>Printed</strong>. If you print elsewhere, use <strong>Mark Printed</strong> on the row.</p>
             <p>Then keep going: design another bin and build out the Space until the physical area is organized the way you want.</p>
           </section>
 

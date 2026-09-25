@@ -31,9 +31,11 @@ from organizer_engine import (
     EdgeMountSpec,
     TEXT_MIN_BACKING,
     WAVE_AMPLITUDE,
+    lock_z_levels,
     require_text_backing,
     text_outline,
     text_prism,
+    wall_lock_receivers,
     wavy_cavity_polygon,
     wavy_outer_polygon,
 )
@@ -68,11 +70,17 @@ EDGE_LABEL_TARGET_CAP_HEIGHT = 12.0
 EDGE_LABEL_MIN_CAP_HEIGHT = 6.0
 EDGE_LABEL_FRONT_CHAMFER_MM = 1.0
 EDGE_LABEL_CLIP_DEPTH_MM = 3.0
+# The separate label's inside leg reaches this far past the bottom of the
+# ordinary wall locks so it can seat over them. The outside leg, and the
+# standoff ribs that stop under it, keep the shallow EDGE_LABEL_CLIP_DEPTH_MM.
+EDGE_LABEL_INNER_LEG_SEAT_MARGIN_MM = 0.5
 EDGE_LABEL_CLIP_FACE_CLEARANCE_MM = 0.25
 EDGE_LABEL_CLIP_LEG_THICKNESS_MM = 1.0
 EDGE_LABEL_CLIP_RETENTION_MM = 0.15
 EDGE_LABEL_CLIP_RETENTION_SPAN_MM = 4.0
 EDGE_LABEL_CLIP_RAMP_OVERLAP_MM = 0.75
+# Keep the snap ribs' centres this far in from each end of the bin wall.
+EDGE_LABEL_RIB_CORNER_KEEP_MM = 6.0
 
 # Permanent bin-body fins that let a Separate-label saddle clip and the bin
 # touch the same flat mounting surface.
@@ -281,6 +289,20 @@ def edge_mount_label_plan(box: BoxSpec) -> dict[str, object] | None:
         "rotation_deg": rotation,
         "label_type": spec.label_type,
     }
+
+
+def edge_mount_inner_leg_depth_mm(box: BoxSpec | None = None) -> float:
+    """How far below the rim the separate label's inside leg reaches.
+
+    Derived from the shared wall-lock profile: past the bottom of the lock
+    chamfers plus a small seated margin (about 5.5 mm with today's locks). A
+    bin too shallow to hold that keeps the leg above its floor instead.
+    """
+    bottom, _, _, _ = lock_z_levels(0.0)
+    depth = -bottom + EDGE_LABEL_INNER_LEG_SEAT_MARGIN_MM
+    if box is not None:
+        depth = min(depth, max(EDGE_LABEL_CLIP_DEPTH_MM, box.z - box.base_thickness - 0.3))
+    return depth
 
 
 def edge_mount_clip_outer_standoff_mm() -> float:
@@ -813,9 +835,33 @@ def make_edge_mount_label_part(box: BoxSpec) -> trimesh.Trimesh | None:
     ).intersection(rectangle)
     half = float(plan["plate_length_mm"]) / 2.0
     rib_half = EDGE_LABEL_CLIP_RETENTION_SPAN_MM / 2.0
-    offset = max(0.0, half - 2.0 * rib_half)
+    # The snap ribs sit near the label's ends but never out where a Full Side
+    # label's ends wrap the bin corner, where they would bite into the wall.
+    offset = max(0.0, min(half - 2.0 * rib_half,
+                          _wall_tangential_span(box, side) / 2.0 - EDGE_LABEL_RIB_CORNER_KEEP_MM))
     low_z = box.z - EDGE_LABEL_CLIP_DEPTH_MM
-    legs = _extrude_parts(outer_leg.union(inner_leg), EDGE_LABEL_CLIP_DEPTH_MM + thickness, low_z)
+    # The outside leg stays shallow. The inside leg is deeper so it can reach
+    # the ordinary wall locks; where a lock sits under the label it is notched
+    # with the shared lock receiver profile, so it seats over the bump without
+    # touching and catches on its chamfers when pulled straight up.
+    inner_depth = edge_mount_inner_leg_depth_mm(box)
+    legs = _extrude_parts(outer_leg, EDGE_LABEL_CLIP_DEPTH_MM + thickness, low_z)
+    inner_pieces = _extrude_parts(inner_leg, inner_depth + thickness, box.z - inner_depth)
+    if inner_pieces:
+        inner_solid = union(inner_pieces) if len(inner_pieces) > 1 else inner_pieces[0]
+        # A Full Side label's leg also wraps into the corners, so any wall's
+        # lock that reaches the leg needs its receiver, not only the label's
+        # own wall. A lock the leg never comes near is left alone.
+        lo, hi = inner_solid.bounds
+        receivers = [
+            cutter
+            for wall in _EDGE_MOUNT_WALL_NAME.values()
+            for cutter in wall_lock_receivers(box, wall, -math.inf, math.inf)
+            if bool(np.all(cutter.bounds[0] <= hi) and np.all(cutter.bounds[1] >= lo))
+        ]
+        if receivers:
+            inner_solid = difference([inner_solid, *receivers])
+        legs.append(inner_solid)
     caps = _extrude_parts(bridge, thickness, box.z)
     rib_z0 = low_z + EDGE_LABEL_CLIP_RETENTION_MM
     rib_z1 = box.z - EDGE_LABEL_CLIP_RETENTION_MM

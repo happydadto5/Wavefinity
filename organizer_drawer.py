@@ -50,7 +50,7 @@ import json
 import math
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 import numpy as np
 from shapely import affinity
@@ -1201,6 +1201,170 @@ def _copy_count(one: dict[str, Any], raw: Any) -> int:
     return raw
 
 
+def prepare_inventory_bins(
+    output_dir: Path | str,
+    row_ids: Iterable[str],
+    generate_from_design: Callable[[Path, dict[str, Any]], list[Path]] | None = None,
+) -> dict[str, Any]:
+    """The one "make these bins' files current" step behind batch Save and Print.
+
+    Re-reads the Inventory from disk, reuses each row's current tracked files
+    when they are present and valid, and generates only rows without current
+    files from their canonical ``design_specs`` entry. Every newly generated
+    row is recorded Saved / Qty 0 immediately, so work that already succeeded
+    survives a later failure. Generation stops at the first row that fails and
+    reports it; nothing after it is touched. Selection problems (unknown row,
+    not a generated bin, no file and no design source) are raised before any
+    file is written.
+    """
+    root = Path(output_dir).expanduser().resolve()
+    inventory = load_inventory(root)
+    by_id = {one["id"]: one for one in inventory["bins"]}
+    specs = design_specs(inventory["layout"])
+    plan: list[tuple[dict[str, Any], list[Path] | None, dict[str, Any] | None]] = []
+    for row_id in dict.fromkeys(str(one) for one in row_ids):
+        one = by_id.get(row_id)
+        if one is None:
+            raise ValueError(f"no bin {row_id!r} in the inventory")
+        if one.get("kind") not in ("bin", "b4b"):
+            raise ValueError(f"{_label(one)} is not a generated bin and cannot be printed here")
+        spec = specs.get(row_id)
+        files: list[Path] | None = None
+        if str(one.get("file") or "").strip():
+            try:
+                files = inventory_row_files(root, one)
+            except ValueError:
+                # Recorded files that are missing/unreadable are not current.
+                # With no design source to rebuild them from, say so plainly.
+                if spec is None:
+                    raise
+        if files is None and (spec is None or generate_from_design is None):
+            raise ValueError(f"{_label(one)} has no generated file to print")
+        plan.append((one, files, spec))
+
+    rows_files: dict[str, list[Path]] = {}
+    row_specs: dict[str, dict[str, Any]] = {}
+    generated: list[str] = []
+    reused: list[str] = []
+    failed: dict[str, Any] | None = None
+    for one, files, spec in plan:
+        row_id = one["id"]
+        if spec is not None:
+            row_specs[row_id] = spec
+        if files is not None:
+            rows_files[row_id] = files
+            reused.append(row_id)
+            continue
+        try:
+            made = generate_from_design(root, spec)
+            if not made:
+                raise ValueError("generating its files did not produce any")
+            if any(not Path(path).is_file() for path in made):
+                raise ValueError("a generated file was not saved")
+            file_text = ", ".join(dict.fromkeys(path.name for path in made))
+            update_bin_file(root, row_id, file_text, expected_design=spec)
+        except Exception as error:
+            failed = {"id": row_id, "name": _label(one), "error": str(error)}
+            break
+        rows_files[row_id] = [Path(path) for path in made]
+        generated.append(row_id)
+    return {
+        "root": root,
+        "inventory": load_inventory(root),
+        "files": rows_files,
+        "specs": row_specs,
+        "generated": generated,
+        "reused": reused,
+        "failed": failed,
+        "unfinished": [one["id"] for one, _files, _spec in plan if one["id"] not in rows_files],
+    }
+
+
+def _space_connectors(
+    output_dir: Path, layout: dict[str, Any] | None, bins: list[dict[str, Any]],
+) -> tuple[dict[str, int], list[str]]:
+    """Generate every drawer's connector set once: file name -> copies, notes."""
+    counts: dict[str, int] = {}
+    notes: list[str] = []
+    for drawer in (layout or {}).get("drawers") or []:
+        made = generate_connectors(output_dir, layout, bins, drawer.get("id"))
+        for item in made["connectors"]:
+            counts[item["file"]] = counts.get(item["file"], 0) + int(item["count"])
+        for note in made["notes"]:
+            if note not in notes:
+                notes.append(note)
+    return counts, notes
+
+
+def _batch_partial(
+    prepared: dict[str, Any], stage: str, error: str, **extra: Any,
+) -> dict[str, Any]:
+    """A structured "some of it worked" result that still carries the fresh Inventory."""
+    return {
+        **load_inventory(prepared["root"]),
+        "partial": True,
+        "partial_stage": stage,
+        "error": error,
+        "saved_rows": [*prepared["reused"], *prepared["generated"]],
+        "generated_rows": prepared["generated"],
+        "failed_row": prepared["failed"],
+        "unfinished": prepared["unfinished"],
+        **extra,
+    }
+
+
+def _prepare_failure_text(prepared: dict[str, Any], slicer: bool) -> str:
+    failed = prepared["failed"]
+    done = len(prepared["generated"])
+    text = f"Could not prepare {failed['name']}: {failed['error']}."
+    text += f" {_plural(done, 'bin')} saved before it stopped." if done else " Nothing new was saved."
+    return text + (" Bambu Studio was not opened." if slicer else "") + " Retry to finish the rest."
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+def save_inventory_bins(
+    output_dir: Path | str,
+    row_ids: Iterable[str],
+    include_connectors: bool,
+    generate_from_design: Callable[[Path, dict[str, Any]], list[Path]] | None = None,
+) -> dict[str, Any]:
+    """Batch Save: make the selected bins' files current, never opening a slicer.
+
+    Only rows without current files are generated; rows that already have
+    them are reused. Qty / Printed status is never touched. Optional Space
+    connectors are Space-wide output and never belong to a bin row.
+    """
+    root = Path(output_dir).expanduser().resolve()
+    ids = list(dict.fromkeys(str(one) for one in row_ids))
+    if not ids:
+        raise ValueError("Select at least one bin to save.")
+    prepared = prepare_inventory_bins(root, ids, generate_from_design)
+    if prepared["failed"]:
+        return _batch_partial(prepared, "generate", _prepare_failure_text(prepared, slicer=False))
+    inventory = prepared["inventory"]
+    connector_counts: dict[str, int] = {}
+    notes: list[str] = []
+    if include_connectors:
+        try:
+            connector_counts, notes = _space_connectors(root, inventory["layout"], inventory["bins"])
+        except Exception as error:
+            return _batch_partial(
+                prepared, "connectors",
+                f"The bins were saved, but the Space connectors could not be made: {error}")
+    return {
+        **load_inventory(root),
+        "saved_rows": ids,
+        "generated_rows": prepared["generated"],
+        "reused_rows": prepared["reused"],
+        "connector_counts": connector_counts,
+        "connector_copies": sum(connector_counts.values()),
+        "notes": notes,
+    }
+
+
 def print_inventory_bins(
     output_dir: Path | str,
     layout: dict[str, Any],
@@ -1214,11 +1378,13 @@ def print_inventory_bins(
 ) -> dict[str, Any]:
     """Send selected generated bins (and optional Space connectors) to the slicer.
 
-    Printed status changes only after the slicer launch succeeds. A
-    selected row with no generated file but a canonical ``design_specs``
-    entry (Fix 034 F2) is generated on demand via ``generate_from_design``
-    first, and its resolved File cell is persisted immediately - still at
-    Qty 0 - so a later print does not regenerate it.
+    Printed status changes only after the slicer launch succeeds. Rows without
+    current files but with a canonical ``design_specs`` entry are generated
+    first by the shared ``prepare_inventory_bins`` step (the same one batch
+    Save uses); each is recorded Saved / Qty 0 as soon as it is made. Any
+    failure before the launch - a bin, the connectors, or the slicer - returns
+    a structured partial result with the refreshed Inventory and never marks
+    anything Printed.
     """
     output_dir = Path(output_dir).expanduser().resolve()
     # Preflight the authoritative slicer before any on-demand bin generation,
@@ -1227,94 +1393,69 @@ def print_inventory_bins(
     if slicer is None or not Path(slicer).is_file():
         raise ValueError("Bambu Studio was not found. Locate it with Change slicer in the bin view.")
     by_id = {one["id"]: one for one in bins}
-    specs = design_specs(layout)
     counts: dict[str, int] = {}
-    rows_files: dict[str, list[Path]] = {}
     for bin_id, raw_count in (selection or {}).items():
         one = by_id.get(str(bin_id))
         if one is None:
             raise ValueError(f"no bin {bin_id!r} in the inventory")
         _copy_count(one, raw_count)
-        count = 1
         if one.get("kind") not in ("bin", "b4b"):
             raise ValueError(f"{_label(one)} is not a generated bin and cannot be printed here")
-        if not str(one.get("file") or "").strip():
-            spec = specs.get(one["id"])
-            if spec is None or generate_from_design is None:
-                raise ValueError(f"{_label(one)} has no generated file to print")
-            generated = generate_from_design(output_dir, spec)
-            if not generated:
-                raise ValueError(f"{_label(one)}: generating its files did not produce any")
-            if any(not Path(path).is_file() for path in generated):
-                raise ValueError(f"{_label(one)}: a generated file was not saved")
-            file_text = ", ".join(dict.fromkeys(path.name for path in generated))
-            update_bin_file(output_dir, one["id"], file_text, expected_design=spec)
-            one["file"] = file_text
-            rows_files[one["id"]] = list(generated)
-        else:
-            rows_files[one["id"]] = inventory_row_files(output_dir, one)
-        counts[one["id"]] = count
+        counts[one["id"]] = 1
     if not counts:
         raise ValueError("Select at least one bin to print.")
+
+    prepared = prepare_inventory_bins(output_dir, list(counts), generate_from_design)
+    if prepared["failed"]:
+        return _batch_partial(
+            prepared, "generate", _prepare_failure_text(prepared, slicer=True), selection=counts)
+    rows_files = prepared["files"]
+    specs = prepared["specs"]
+    inventory = prepared["inventory"]
 
     connector_counts: dict[str, int] = {}
     notes: list[str] = []
     if include_connectors:
-        for drawer in (layout or {}).get("drawers") or []:
-            made = generate_connectors(output_dir, layout, bins, drawer.get("id"))
-            for item in made["connectors"]:
-                connector_counts[item["file"]] = connector_counts.get(item["file"], 0) + int(item["count"])
-            for note in made["notes"]:
-                if note not in notes:
-                    notes.append(note)
+        try:
+            connector_counts, notes = _space_connectors(output_dir, layout, inventory["bins"])
+        except Exception as error:
+            return _batch_partial(
+                prepared, "connectors",
+                f"The bins were saved, but the Space connectors could not be made: {error}. "
+                "Bambu Studio was not opened.", selection=counts)
 
     launch_files: list[Path] = []
-    for bin_id, count in counts.items():
-        for _copy in range(count):
-            launch_files.extend(rows_files[bin_id])
+    for bin_id in counts:
+        launch_files.extend(rows_files[bin_id])
     for name, count in connector_counts.items():
         launch_files.extend([output_dir / name] * count)
 
-    try:
-        project = launch_slicer(Path(slicer), launch_files)
-    except Exception as error:
-        # On-demand files and connectors written above are kept; rows stay
-        # Saved (never Printed). Return the refreshed Inventory so the browser
-        # matches what is on disk.
-        refreshed = load_inventory(output_dir)
-        return {
-            **refreshed,
-            "partial": True,
-            "partial_stage": "slicer",
-            "error": (
-                f"Bambu Studio did not open: {error}. "
-                "Any files made during this attempt were kept."
-            ),
-            "selection": counts,
-            "bin_copies": sum(counts.values()),
-            "connector_counts": connector_counts,
-            "connector_copies": sum(connector_counts.values()),
-            "notes": notes,
-            "project": None,
-        }
-
-    try:
-        # A row is one bin. Placement copy numbers are not print bookkeeping.
-        saved = mark_printed_rows(output_dir, counts, specs)
-    except Exception as error:
-        raise RuntimeError(
-            f"Bambu Studio opened, but the printed status could not be recorded: {error}. "
-            "Check the selected rows in Inventory."
-        ) from error
-    return {
-        **saved,
+    result_counts = {
         "selection": counts,
         "bin_copies": sum(counts.values()),
         "connector_counts": connector_counts,
         "connector_copies": sum(connector_counts.values()),
         "notes": notes,
-        "project": str(project) if project else None,
     }
+    try:
+        launch_slicer(Path(slicer), launch_files)
+    except Exception as error:
+        # Files and connectors written above are kept; rows stay Saved (never
+        # Printed). Return the refreshed Inventory so the browser matches disk.
+        return _batch_partial(
+            prepared, "slicer",
+            f"Bambu Studio did not open: {error}. Any files made during this attempt were kept.",
+            **result_counts)
+
+    try:
+        # A row is one bin. Placement copy numbers are not print bookkeeping.
+        saved = mark_printed_rows(output_dir, counts, specs)
+    except Exception as error:
+        return _batch_partial(
+            prepared, "status",
+            f"Bambu Studio opened, but the printed status could not be recorded: {error}. "
+            "Check the selected rows in Inventory.", **result_counts)
+    return {**saved, **result_counts}
 
 
 # ---------------------------------------------------------------- web routes
@@ -1589,6 +1730,17 @@ def drawer_routes(
                 generate_from_design,
             ))
 
+    def save_bins(payload):
+        if hosted:
+            raise ValueError("Saving bin files in bulk is available in local Wavefinity.")
+        selection = payload.get("selection") or []
+        row_ids = list(selection.keys()) if isinstance(selection, dict) else list(selection)
+        with geometry_lock:
+            return with_rules(save_inventory_bins(
+                folder(payload), row_ids, bool(payload.get("include_connectors", False)),
+                generate_from_design,
+            ))
+
     def connectors(payload):
         if hosted:
             raise ValueError("Hosted Space connectors are not available yet. Generate connectors from the normal designer.")
@@ -1621,4 +1773,5 @@ def drawer_routes(
         "/api/drawer/print": send_to_slicer,
         "/api/drawer/print-spacers": print_spacers_only,
         "/api/drawer/print-bins": print_bins,
+        "/api/drawer/save-bins": save_bins,
     }

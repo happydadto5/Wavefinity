@@ -1882,7 +1882,7 @@ class WebApplicationTests(unittest.TestCase):
         css = (root / "drawer.css").read_text(encoding="utf-8")
         self.assertNotIn("dl-new-printed", panel + css)
         self.assertNotIn("new_bins_printed: false", model)
-        for ident in ("dl-batch-select-all", "dl-batch-clear", "dl-batch-connectors", "dl-batch-print"):
+        for ident in ("dl-batch-select-all", "dl-batch-clear", "dl-batch-connectors", "dl-batch-save", "dl-batch-print"):
             self.assertIn(f'id="{ident}"', panel)
         self.assertIn("Print Spacers + Connectors", panel)
         # Session-only selection: never written into the layout or storage.
@@ -1895,7 +1895,8 @@ class WebApplicationTests(unittest.TestCase):
         fn = model[model.index("DL.printSelectedBins ="):]
         fn = fn[:fn.index("DL.printDrawer =")]
         self.assertLess(fn.index("await DL.save()"), fn.index("/api/drawer/print-bins"))
-        self.assertIn("DL.adopt(result)", fn)
+        self.assertIn("DL.adoptBatchResult(result)", fn)
+        self.assertIn("DL.adopt(result);", model[model.index("DL.adoptBatchResult ="):][:200])
         self.assertIn("DP.resetPrintSelection()", fn)
         self.assertNotIn("set copies to", model)
         node = shutil.which("node")
@@ -2331,7 +2332,8 @@ class WebApplicationTests(unittest.TestCase):
                      "Spacers &amp; connectors", "dl-connectors", "Drawer settings"):
             self.assertNotIn(gone, panel)
         self.assertIn("<summary>Spacers</summary>", panel)
-        self.assertIn("Advanced Settings", panel)
+        self.assertIn("Drawer details", panel)
+        self.assertNotIn("Advanced Settings", panel)
 
     def test_existing_space_edit_is_inline_with_edit_only_buttons(self):
         root = Path(__file__).resolve().parent / "web"
@@ -2486,7 +2488,9 @@ console.log(JSON.stringify({ layout, grid: DL.grid(layout.drawers[0]), cells: DL
         self.assertIn('plainCheckbox("option:label_divisions", "Label divisions"', app_js)
         self.assertNotIn("Slot bottoms", app_js)
         self.assertNotIn("Compartment scoops", app_js)
-        self.assertNotIn("Division labels", app_js)
+        # Fix 061 F1.6: the label controls are now one visible "Division labels"
+        # group, owner checkbox first - not the old separate scoop/label grid.
+        self.assertIn('editor-group-label">Division labels<', app_js)
         self.assertNotIn("data-divider-scoop-cell", app_js)
         self.assertNotIn("data-divider-scoop-all", app_js)
         self.assertNotIn("data-divider-scoop-none", app_js)

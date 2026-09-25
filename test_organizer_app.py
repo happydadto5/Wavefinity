@@ -3326,6 +3326,76 @@ class EdgeMountTests(unittest.TestCase):
                     np.abs(clip.face_normals[:, 2]), math.sqrt(0.5), atol=0.02,
                 )), f"{side}/{wall} has no 45-degree retention ramp")
 
+    def test_separate_label_inner_leg_seats_over_and_catches_the_wall_locks(self) -> None:
+        # Fix 061 U1: the outside leg stays 3 mm; the inside leg reaches past
+        # the ordinary wall locks, is notched to seat over them without
+        # touching, and catches on them when pulled straight up.
+        for mode, sides in (("text", ("front", "back", "left", "right")),
+                            ("full", ("front", "left"))):
+            for side in sides:
+                for wall in (0.8, 1.2):
+                    label = f"{mode}/{side}/{wall}"
+                    box = BoxSpec(
+                        48.0, 56.0, 40.0, wall=wall,
+                        edge_mount=EdgeMountSpec(
+                            side=side, label_enabled=True, label_text="A",
+                            label_length_mode=mode,
+                        ),
+                    )
+                    clip = organizer_edge_mount.make_edge_mount_label_part(box)
+                    self.assertTrue(clip.is_watertight, label)
+                    self.assertEqual(len(clip.split()), 1, label)
+                    depth = organizer_edge_mount.edge_mount_inner_leg_depth_mm(box)
+                    lock_bottom = organizer_engine.lock_z_levels(box.z)[0]
+                    self.assertAlmostEqual(depth, 5.5, places=6, msg=label)
+                    self.assertLess(clip.bounds[0][2], lock_bottom, label)
+                    self.assertAlmostEqual(clip.bounds[0][2], box.z - depth, places=3, msg=label)
+
+                    # Only the inside leg is deep: below the shallow outer
+                    # clip depth nothing lies outside the bin's outer face.
+                    ox0, oy0, ox1, oy1 = organizer_engine.wavy_outer_polygon(box).bounds
+                    axis, outward_min = {"front": (1, True), "back": (1, False),
+                                         "left": (0, True), "right": (0, False)}[side]
+                    edge = (oy0, oy1, ox0, ox1)[(0 if outward_min else 1) if axis == 1
+                                                else (2 if outward_min else 3)]
+
+                    def outside(z: float) -> bool:
+                        segments = trimesh.intersections.mesh_plane(
+                            clip, (0.0, 0.0, 1.0), (0.0, 0.0, z))
+                        coords = segments.reshape(-1, 3)[:, axis]
+                        return bool((coords < edge - 1e-6).any() if outward_min
+                                    else (coords > edge + 1e-6).any())
+
+                    self.assertTrue(outside(box.z - 1.5), label)
+                    self.assertFalse(outside(box.z - 4.0), label)
+
+                    locks = organizer_geometry.union(organizer_engine.make_wall_lock_bumps(box))
+                    self.assertLess(intersection_volume(clip, make_box(box)), 1e-3, label)
+                    self.assertLess(intersection_volume(clip, locks), 1e-6, label)
+                    raised = clip.copy()
+                    raised.apply_translation((0.0, 0.0, 0.3))
+                    self.assertGreater(intersection_volume(raised, locks), 1e-3, label)
+
+    def test_narrow_separate_label_only_notches_the_locks_beneath_it(self) -> None:
+        narrow = BoxSpec(48.0, 56.0, 40.0, edge_mount=EdgeMountSpec(
+            side="front", label_enabled=True, label_text="A", label_length_mode="text"))
+        wide = replace(narrow, edge_mount=replace(narrow.edge_mount, label_length_mode="full"))
+        locks = organizer_geometry.union(organizer_engine.make_wall_lock_bumps(narrow))
+        raised = {}
+        for name, box in (("narrow", narrow), ("wide", wide)):
+            clip = organizer_edge_mount.make_edge_mount_label_part(box)
+            moved = clip.copy()
+            moved.apply_translation((0.0, 0.0, 0.3))
+            raised[name] = intersection_volume(moved, locks)
+        self.assertGreater(raised["narrow"], 1e-3)
+        self.assertGreater(raised["wide"], raised["narrow"])
+
+    def test_inner_leg_depth_stays_above_the_floor_of_a_shallow_bin(self) -> None:
+        shallow = BoxSpec(48.0, 56.0, 8.0)
+        depth = organizer_edge_mount.edge_mount_inner_leg_depth_mm(shallow)
+        self.assertLessEqual(depth, shallow.z - shallow.base_thickness)
+        self.assertGreaterEqual(depth, organizer_edge_mount.EDGE_LABEL_CLIP_DEPTH_MM)
+
     def test_label_uses_12_mm_target_and_6_mm_floor(self) -> None:
         box = BoxSpec(
             48.0, 48.0, 40.0,

@@ -717,6 +717,60 @@ function isStructuralDesign(design) {
 let spaceAutosaveTimer = null;
 let spaceAutosaveChain = Promise.resolve();
 
+// Fix 061 F6: rows whose saved files just went stale because the bin was
+// edited. A row is queued once, at the generated -> In Design transition; the
+// server flags it, so later edits of the same row never queue it again.
+const staleFileRefreshQueue = new Set();
+let staleFileRefreshRunning = false;
+let staleFileRefreshTimer = null;
+
+// Refresh once the edits have settled: no autosave waiting, no other action
+// (including the flush that is calling us) still holding the Designer.
+function scheduleStaleFileRefresh(delay = 250) {
+  if (!staleFileRefreshQueue.size || staleFileRefreshTimer) return;
+  staleFileRefreshTimer = setTimeout(() => {
+    staleFileRefreshTimer = null;
+    settleStaleFileRefresh();
+  }, delay);
+}
+
+async function settleStaleFileRefresh() {
+  if (staleFileRefreshRunning || !staleFileRefreshQueue.size || state.runtime.hosted) return;
+  if (spaceAutosaveTimer || state.designMutationBusy || isGenerating || DL.busy) {
+    scheduleStaleFileRefresh(400);
+    return;
+  }
+  staleFileRefreshRunning = true;
+  try {
+    while (staleFileRefreshQueue.size) {
+      if (spaceAutosaveTimer) break; // more edits are on the way; their save settles again
+      const rowId = staleFileRefreshQueue.values().next().value;
+      staleFileRefreshQueue.delete(rowId);
+      const row = typedSpaceOrdinaryBin() ? DL.bin(rowId) : null;
+      // Gone, or already current again: nothing to refresh.
+      if (!row || String(row.file || "").trim()) continue;
+      if (DL.layout?.settings?.auto_update_changed_files !== true) {
+        const choice = await appConfirm({
+          title: "Update saved files?",
+          message: `${DL.label(row)} has saved files. Update them to match your changes?`,
+          primaryLabel: "Update saved files",
+          cancelLabel: "Not now",
+          checkboxLabel: "Automatically update saved files after edits in this Space",
+        });
+        if (choice !== "primary") continue;
+        if (appConfirm.checked) {
+          DL.change(() => { DL.layout.settings.auto_update_changed_files = true; }, { history: false });
+          await DL.save();
+        }
+      }
+      await designerGenerateInventoryRow(rowId);
+    }
+  } finally {
+    staleFileRefreshRunning = false;
+    if (staleFileRefreshQueue.size) scheduleStaleFileRefresh(400);
+  }
+}
+
 function queueSpaceDesignAutosave() {
   if (!typedSpaceOrdinaryBin()) return;
   const context = DL.spaceContext();
@@ -755,7 +809,11 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
     } catch (error) {
       toast(`This bin was saved, but the Space's remembered settings were not: ${error.message}`, true, 6000);
     }
-    if (state.designInventoryId !== rowId) return true;
+    if (data.files_became_stale && !state.runtime.hosted) staleFileRefreshQueue.add(data.row_id);
+    if (state.designInventoryId !== rowId) {
+      scheduleStaleFileRefresh();
+      return true;
+    }
     state.designInventoryId = data.row_id;
     DL.adopt(data);
     DL.emit();
@@ -770,6 +828,7 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
       state.cleanDesign = clone(data.design);
       queueSpaceDesignAutosave();
     }
+    scheduleStaleFileRefresh();
     return true;
   };
   const pending = spaceAutosaveChain.then(run, run);
@@ -4557,6 +4616,29 @@ function dividerScoopDefaultDepth() {
   return scoop?.fields?.find(field => field.key === "depth")?.default ?? "";
 }
 
+// Photo Nest Access state has exactly one writer per value. Finger access owns
+// lift_assist (auto / none / finger_grasp), the Push Out toggle owns
+// lift_assist = "push_out", and Location / Push at own their own positions.
+// A value is written only when its own control is what changed, so an
+// unrelated edit can never re-read a select that cannot represent push_out.
+function applyNestAccessOptions(options, changed, get) {
+  for (const key of ["lift_assist", "finger_position", "push_position"]) {
+    if (changed !== `option:${key}`) continue;
+    const value = get(`option:${key}`);
+    if (value !== undefined) options[key] = value;
+  }
+}
+
+// The Push Out toggle: on writes push_out; off returns to a legal Automatic.
+function setNestPushOut(options, on) {
+  options.lift_assist = on ? "push_out" : "auto";
+}
+
+// Finger access is replaced by Push Out while that is on, so it is not shown.
+function nestFingerAccessVisible(holderStyle, assist) {
+  return !(assist === "push_out" && holderStyle === "raised_wall");
+}
+
 // Photo Nest's editor: Tool, Holder, Finger access, Raised Wall advanced,
 // Fit, Bin and Outline (spec section 45). Broken out of renderDraftFields
 // only because it is long, not because it is reused elsewhere.
@@ -4620,6 +4702,15 @@ function renderNestFields(one) {
     : autoCavity;
   const cavityUnavailable = !hasMeasuredThickness && cavityMode !== "manual";
 
+  // Holder: the Nest type owns what follows, so it comes first.
+  html += `<div class="editor-group"><span class="editor-group-label">Holder</span>
+    <label>Nest type
+      <select data-draft="option:holder_style">
+        <option value="recessed" ${selected("recessed", holderStyle)}>Recessed Cavity</option>
+        <option value="raised_wall" ${selected("raised_wall", holderStyle)}>Raised Wall</option>
+      </select>
+    </label>`;
+
   html += `<div class="nest-primary-row">`;
 
   html += field(
@@ -4668,37 +4759,33 @@ function renderNestFields(one) {
     html += `</div>`;
   }
 
-  html += `</div>`;
+  html += `</div></div>`;
 
-  // Holder.
-  html += `<label class="wide">Nest type
-    <select data-draft="option:holder_style">
-      <option value="recessed" ${selected("recessed", holderStyle)}>Recessed Cavity</option>
-      <option value="raised_wall" ${selected("raised_wall", holderStyle)}>Raised Wall</option>
-    </select>
-  </label>`;
-
-  // Finger access.
-  html += `<label class="wide">Finger access
-    <select data-draft="option:lift_assist">
-      <option value="auto" ${selected("auto", isPushOut ? "" : assist)}>Automatic</option>
-      <option value="none" ${selected("none", assist)}>Off</option>
-      <option value="finger_grasp" ${selected("finger_grasp", assist)}>Custom</option>
-    </select>
-  </label>`;
-  if (assist === "finger_grasp") {
-    html += `<div class="pair">`;
-    html += `<label>Location
-      <select data-draft="option:finger_position">
-        <option value="sides" ${selected("sides", fingerPosition)}>Sides</option>
-        <option value="top_bottom" ${selected("top_bottom", fingerPosition)}>Ends</option>
-        <option value="both" ${selected("both", fingerPosition)}>Both</option>
+  // Access. Push Out replaces Finger access, so while it is on the Finger
+  // access selector is not shown at all - it cannot even represent push_out.
+  html += `<div class="editor-group"><span class="editor-group-label">Access</span>`;
+  if (nestFingerAccessVisible(holderStyle, assist)) {
+    html += `<label>Finger access
+      <select data-draft="option:lift_assist">
+        <option value="auto" ${selected("auto", isPushOut ? "" : assist)}>Automatic</option>
+        <option value="none" ${selected("none", assist)}>Off</option>
+        <option value="finger_grasp" ${selected("finger_grasp", assist)}>Custom</option>
       </select>
     </label>`;
-    html += field("Finger width", "option:finger_width",
-      fmt(val("finger_width", resolved.finger_width ?? 25)),
-      { unit: "mm", step: "1", min: "12", max: "40" });
-    html += `</div>`;
+    if (assist === "finger_grasp") {
+      html += `<div class="pair">`;
+      html += `<label>Location
+        <select data-draft="option:finger_position">
+          <option value="sides" ${selected("sides", fingerPosition)}>Sides</option>
+          <option value="top_bottom" ${selected("top_bottom", fingerPosition)}>Ends</option>
+          <option value="both" ${selected("both", fingerPosition)}>Both</option>
+        </select>
+      </label>`;
+      html += field("Finger width", "option:finger_width",
+        fmt(val("finger_width", resolved.finger_width ?? 25)),
+        { unit: "mm", step: "1", min: "12", max: "40" });
+      html += `</div>`;
+    }
   }
 
   // Raised Wall advanced.
@@ -4725,25 +4812,27 @@ function renderNestFields(one) {
     }
     html += `</details>`;
   }
+  html += `</div>`;
 
-  html += `<div class="pair nest-fit-row">`;
-
+  // Fit.
+  html += `<div class="editor-group"><span class="editor-group-label">Fit</span>`;
   html += field(
     "Fit clearance",
     "option:clearance",
     fmt(val("clearance", 0.6)),
     { unit: "mm", step: "0.1", min: "0" },
   );
-
   html += `</div>`;
 
   // Bin. Read straight from the stored option, never the resolved fallback:
   // a legacy design with no stored preference must show as off here, not as
   // on just because it happens to behave in a similar grow-only way.
+  html += `<div class="editor-group"><span class="editor-group-label">Bin</span>`;
   html += toggle("option:auto_size", "Automatically size footprint to tool",
     "Grows or shrinks the bin Width and Length to fit this Nest and keeps it centered. "
     + "Bin Height stays at the height you set.",
     opt.auto_size === true, { wide: true });
+  html += `</div>`;
 
   // Outline shape (Soften outline, manual point editing, zoom/pan, Finish
   // Editing) lives in the 2D view's own Outline editor panel now - editing
@@ -4769,6 +4858,15 @@ function updateDraftOverhangNote() {
   note.textContent = note.hidden
     ? ""
     : `Extends ${fmt(overhang)} mm above rim`;
+}
+
+// Which Bore Base sizing controls apply to a style. Wavy Base sizes its own
+// envelope (and the bin around it), so Base Auto and the Width / Length
+// one-shot buttons do not apply; Height stays meaningful. Stored auto_base /
+// auto_grid are left alone so they return when another style is chosen.
+function boreSizingControlsFor(boreStyle) {
+  const wavy = boreStyle === "wavy_base";
+  return { baseAuto: !wavy, gridAuto: !wavy, xyOneShot: !wavy, heightAuto: true, heightOneShot: true };
 }
 
 function wallStyleSelect(style) {
@@ -4804,6 +4902,13 @@ function renderDraftFields() {
   let html = "";
   // Keys pulled up into the "Repeats" cluster, so the body loop skips them.
   const repeatKeys = new Set();
+  // Fix 061 F1: Post and Steps describe the physical part before its repeat
+  // layout, so their Repeats group is held back until the part fields exist.
+  let repeatsHtml = "";
+  let stepsSizeHtml = "";
+  let cradleToolHtml = "";
+  const editorGroup = (label, inner) =>
+    `<div class="editor-group"><span class="editor-group-label">${label}</span>${inner}</div>`;
   if (one.kind === "scoop") {
     const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, "depth");
     const shown = explicit ? one.options.depth : state.draftResolvedOptions?.depth ?? 60;
@@ -4815,29 +4920,27 @@ function renderDraftFields() {
   if (info.flags.text) {
     const textLevel = one.options?.level === "rim" ? "rim" : "base";
     const textInput = `<input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">`;
-    html += textPlacementFields(
-      "option:level", "option:rim_side", textLevel, one.options?.rim_side,
-      textLevel === "rim" ? "" : `<label>Text${textInput}</label>`,
+    let textGroup = `<label>Text${textInput}</label>`;
+    let placementGroup = textPlacementFields(
+      "option:level", "option:rim_side", textLevel, one.options?.rim_side, "",
     );
-    if (textLevel === "rim") html += `<label class="wide">Text${textInput}</label>`;
     if (textLevel === "base") {
       const capShown = one.options?.cap_height ?? state.draftResolvedOptions?.cap_height ?? "";
       const depthShown = one.options?.depth ?? state.draftResolvedOptions?.depth ?? 0.4;
-      html += field("Letter height", "option:cap_height", capShown === "" ? "" : fmt(capShown), { unit: "mm", step: "0.5" });
-      html += field("Depth", "option:depth", fmt(depthShown), { unit: "mm", step: "0.1" });
-      html += `<fieldset class="wide"><legend>Turn</legend><div class="segmented four">
-        ${[0, 1, 2, 3].map(turn => `<label><input type="radio" name="draft-turns" value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "checked" : ""}><span>${turn * 90}°</span></label>`).join("")}
-      </div></fieldset>`;
-      html += `<div class="toggle-grid">`;
-      html += toggle("option:auto", "Place it for me",
-        "Keeps it centred where it fits, moving around the other interior parts as they change. Turn this off to put it exactly where you want.",
-        one.options?.auto === true);
-      html += `<fieldset><legend>Text style</legend><div class="segmented two">
+      textGroup += `<div class="pair">${field("Letter height", "option:cap_height", capShown === "" ? "" : fmt(capShown), { unit: "mm", step: "0.5" })}${field("Depth", "option:depth", fmt(depthShown), { unit: "mm", step: "0.1" })}</div>`;
+      textGroup += `<fieldset><legend>Text style</legend><div class="segmented two">
         <label><input type="radio" name="draft-text-style" value="inlaid" ${one.options?.raised === true ? "" : "checked"}><span>Inlaid</span></label>
         <label><input type="radio" name="draft-text-style" value="raised" ${one.options?.raised === true ? "checked" : ""}><span>Raised</span></label>
       </div></fieldset>`;
-      html += `</div>`;
+      placementGroup += `<fieldset><legend>Turn</legend><div class="segmented four">
+        ${[0, 1, 2, 3].map(turn => `<label><input type="radio" name="draft-turns" value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "checked" : ""}><span>${turn * 90}°</span></label>`).join("")}
+      </div></fieldset>`;
+      placementGroup += toggle("option:auto", "Place it for me",
+        "Keeps it centred where it fits, moving around the other interior parts as they change. Turn this off to put it exactly where you want.",
+        one.options?.auto === true);
     }
+    html += editorGroup("Text", textGroup);
+    html += editorGroup("Placement", placementGroup);
   }
   if (info.flags.size && one.kind !== "cradle" && !(one.kind === "text" && one.options?.level === "rim")) {
     const isPocket = one.kind === "pocket";
@@ -4897,6 +5000,7 @@ function renderDraftFields() {
       // it also sizes the bin around itself.
       const wavyBase = boreStyle === "wavy_base";
       const envelopeStyle = wallOnly || wavyBase;
+      const boreSizing = boreSizingControlsFor(boreStyle);
       const wallStyle = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style ?? "wavy";
       const styleField = `<label><span class="field-label">Style</span><select data-draft="option:bore_style">
         ${[["full_base", "Full Base"], ["wall_only", "Wall Only"], ["wavy_base", "Wavy Base"]].map(([value, label]) => `<option value="${value}" ${boreStyle === value ? "selected" : ""}>${label}</option>`).join("")}
@@ -4930,7 +5034,7 @@ function renderDraftFields() {
               ? autoField("Width", "base", "width", "mm") + autoField("Length", "base", "depth", "mm")
               : field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" }) +
                 field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
-            ${autoButton("base")}
+            ${boreSizing.baseAuto ? autoButton("base") : ""}
           </div>
           <div class="bore-auto-row">
             ${autoOn("height")
@@ -4939,18 +5043,18 @@ function renderDraftFields() {
             ${autoButton("height")}
           </div>
           <div class="bore-auto-row">
-            ${autoOn("grid") && !wavyBase
+            ${autoOn("grid") && boreSizing.gridAuto
               ? autoField("X count", "grid", "option:columns") + autoField("Y count", "grid", "option:rows")
               : gridField("columns", "X count") + gridField("rows", "Y count")}
-            ${wavyBase ? "" : autoButton("grid")}
+            ${boreSizing.gridAuto ? autoButton("grid") : ""}
           </div>
           <div class="bore-one-shot-grid">
             <span class="bore-one-shot-corner" aria-hidden="true"></span>
             <span class="bore-one-shot-heading">Target Bore</span>
             <span class="bore-one-shot-heading">Target Bin</span>
-            <span class="bore-one-shot-row">Width / Length</span>
+            ${boreSizing.xyOneShot ? `<span class="bore-one-shot-row">Width / Length</span>
             <button type="button" class="button secondary" data-action="bore-xy-to-bin" title="Resize Bore Width/Length to the bin" aria-label="Resize Bore Width/Length to the bin">Auto Size to Bin</button>
-            <button type="button" class="button secondary" data-action="bore-xy-to-bore" title="Resize bin Width/Length to the Bore" aria-label="Resize bin Width/Length to the Bore">Auto Size to Bore</button>
+            <button type="button" class="button secondary" data-action="bore-xy-to-bore" title="Resize bin Width/Length to the Bore" aria-label="Resize bin Width/Length to the Bore">Auto Size to Bore</button>` : ""}
             <span class="bore-one-shot-row">Height</span>
             <button type="button" class="button secondary" data-action="bore-height-to-bin" title="Resize Bore Height to the bin" aria-label="Resize Bore Height to the bin">Auto Size to Bin</button>
             <button type="button" class="button secondary" data-action="bore-height-to-bore" title="Resize bin Height to the Bore" aria-label="Resize bin Height to the Bore">Auto Size to Bore</button>
@@ -5004,13 +5108,18 @@ function renderDraftFields() {
       }
       html += `<div class="editor-group"><span class="editor-group-label">Walls</span><div class="pair">${wallField}${wallsField}</div></div>`;
     } else {
-      html += field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" });
-      html += field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
+      const footprint = field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" })
+        + field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
+      if (one.kind === "text") html += editorGroup("Footprint", `<div class="pair">${footprint}</div>`);
+      else if (one.kind === "steps") stepsSizeHtml += footprint;
+      else html += footprint;
     }
   }
   // Repeats: how many, how far apart, which way they run - one cluster, in
   // reading order, instead of Quantity / spacing / Runs along scattered apart.
   if (info.flags.qty || info.flags.along) {
+    const htmlBeforeRepeats = html;
+    html = "";
     // The part's own spacing / gap belongs with Quantity, not up in the body.
     let repeatFieldsHtml = "";
     for (const option of info.fields) {
@@ -5076,7 +5185,7 @@ function renderDraftFields() {
             const item = one.item || starterItem();
             const first = item.segments[0] || { length: 40, diameter: 6 };
             const tip = "Enter the tool's length and diameter. The cradle drops it into a half-circle notch and sizes its own ribs to the tool.";
-            html += `<div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div>`;
+            cradleToolHtml = editorGroup("Tool", `<div class="pair">${field("Length", "item_length", fmt(first.length), { unit: "mm", step: "1", tip })}${field("Diameter", "item_diameter", fmt(first.diameter), { unit: "mm", step: "1", tip })}</div>`);
           }
         } else if (repeatFieldsHtml) {
           html += `<div class="pair">${repeatFieldsHtml}</div>`;
@@ -5109,7 +5218,10 @@ function renderDraftFields() {
         html += `</div>`;
       }
     }
+    repeatsHtml = html;
+    html = htmlBeforeRepeats + cradleToolHtml;
   }
+  if (!["post", "steps"].includes(info.kind)) html += repeatsHtml;
   if (info.flags.item && !["bore", "cradle"].includes(one.kind)) {
     // A bore's Diameter / Profile / Clearance are drawn in the "Hole" group above.
     const item = one.item || starterItem();
@@ -5199,8 +5311,12 @@ function renderDraftFields() {
   }
   // Three-across for the kinds whose leftover body fields would otherwise leave
   // a half-empty row (matches the Width / Length / Height row at the top).
-  if (bodyHtml) {
-    html += ["post", "pocket", "slot"].includes(info.kind)
+  if (info.kind === "post") {
+    html += editorGroup("Post", `<div class="draft-triple">${bodyHtml}</div>`) + repeatsHtml;
+  } else if (info.kind === "steps") {
+    html += editorGroup("Steps size", `<div class="pair">${stepsSizeHtml}${bodyHtml}</div>`) + repeatsHtml;
+  } else if (bodyHtml) {
+    html += ["pocket", "slot"].includes(info.kind)
       ? `<div class="draft-triple">${bodyHtml}</div>`
       : bodyHtml;
   }
@@ -5213,6 +5329,7 @@ function renderDraftFields() {
     );
 
     const bottomMode = scoopConfig ? "scoop" : hasSlope ? "slope" : "flat";
+    html += `<div class="editor-group"><span class="editor-group-label">Bottom</span>`;
     html += `<label class="wide">Bottom<select data-draft="option:bottom_mode">
       <option value="flat" ${bottomMode === "flat" ? "selected" : ""}>Flat</option>
       <option value="slope" ${bottomMode === "slope" ? "selected" : ""}>Sloped</option>
@@ -5254,9 +5371,11 @@ function renderDraftFields() {
         tip: "Every Divider compartment gets the same Scoop depth and starts at its front floor edge.",
       });
     }
+    html += `</div>`;
 
     if (!b4bEnabled()) {
       const hasLabels = opt.label_divisions === true;
+      html += `<div class="editor-group"><span class="editor-group-label">Division labels</span>`;
       html += plainCheckbox("option:label_divisions", "Label divisions", hasLabels, {
         wide: true,
         help: "Add text labels to each division slot.",
@@ -5299,6 +5418,7 @@ function renderDraftFields() {
         }
         html += `</div>`;
       }
+      html += `</div>`;
     }
   }
   // The auto-size buttons sit at the very bottom of the editor.
@@ -5878,7 +5998,7 @@ function wireNestFieldActions() {
   if (pushOut) pushOut.addEventListener("change", () => {
     markDraftChanged();
     state.draft.options ||= {};
-    state.draft.options.lift_assist = pushOut.checked ? "push_out" : "auto";
+    setNestPushOut(state.draft.options, pushOut.checked);
     state.draftAutoCommit = true;
     renderDraftFields();
     updateSelectionButtons();
@@ -6812,10 +6932,7 @@ function updateDraftFromFields(event) {
       const spacing = Math.round(number(get("option:repeat_spacing_percent"), NaN));
       if ([-100, -75, -50, -25, 0, 25, 50, 75, 100].includes(spacing)) one.options.repeat_spacing_percent = spacing;
     }
-    for (const key of ["lift_assist", "finger_position", "push_position"]) {
-      const value = get(`option:${key}`);
-      if (value !== undefined) one.options[key] = value;
-    }
+    applyNestAccessOptions(one.options, changed, get);
     // holder_style is a legacy-compatibility marker: absence of it means a
     // true legacy Photo Nest that must keep its exact old geometry. A Nest
     // that has never had one stored must not silently acquire it just
@@ -7418,7 +7535,7 @@ function promptDraftConflict(reason) {
 function appConfirm({
   title, message,
   primaryLabel = "OK", secondaryLabel = null, cancelLabel = "Cancel",
-  danger = false, secondaryDanger = false,
+  danger = false, secondaryDanger = false, checkboxLabel = null,
 } = {}) {
   return new Promise(resolve => {
     const dialog = $("#app-confirm-dialog");
@@ -7434,10 +7551,19 @@ function appConfirm({
       return;
     }
 
+    const checkRow = $("#app-confirm-check-row");
+    const checkBox = $("#app-confirm-check");
+    if (checkRow && checkBox) {
+      checkRow.hidden = !checkboxLabel;
+      checkBox.checked = false;
+      $("#app-confirm-check-label").textContent = checkboxLabel || "";
+    }
     let done = false;
     const finish = choice => {
       if (done) return;
       done = true;
+      // Read by callers that offered a checkbox (see appConfirm.checked).
+      appConfirm.checked = Boolean(checkboxLabel && checkBox?.checked);
       primaryBtn.onclick = secondaryBtn.onclick = cancelBtn.onclick = null;
       dialog.removeEventListener("cancel", onCancel);
       if (dialog.open) dialog.close();
