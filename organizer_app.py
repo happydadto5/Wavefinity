@@ -257,6 +257,30 @@ def validate_side_opening_label(box: BoxSpec, label: str, label_location: str) -
         )
 
 
+def validate_edge_mount_label_conflicts(box: BoxSpec, label: str, label_location: str) -> None:
+    """A Separate Edge Mount label cannot share the rim region with a rim label or lid.
+
+    Its deep inside leg (Fix 061) occupies the near-rim inside wall, so the
+    combination cannot seat. Integrated labels are unaffected. Checked here
+    (not in ``EdgeMountSpec``) so old saved designs still load and can be fixed.
+    """
+    edge = box.edge_mount
+    if not (edge.label_enabled and edge.label_type == "separate"):
+        return
+    side = rim_label_side(label_location) if clean_label(label) else None
+    edge_side = str(edge.side or "front").strip().lower()
+    if side is not None and side == edge_side:
+        raise ValueError(
+            f"A Separate Edge Mount label and rim label cannot use the same {edge_side.title()} wall. "
+            "Move the rim label, choose another Edge Mount wall, or use Integrated."
+        )
+    if lid_spec(box).enabled:
+        raise ValueError(
+            "A Separate Edge Mount label cannot be used with a lid. "
+            "Use Integrated or remove the lid."
+        )
+
+
 # --- guided part palette ---------------------------------------------------
 #
 # Compatibility views for existing CLI/browser callers. Their source of truth
@@ -1009,6 +1033,7 @@ def preview_geometry(
     validate_scoop_lift_grabbers(box, scoop)
     validate_side_openings(box)
     validate_side_opening_label(box, label, label_location)
+    validate_edge_mount_label_conflicts(box, label, label_location)
 
     features = resolve_text_features(
         box, features,
@@ -1682,6 +1707,7 @@ def generate_organizer_files(
     validate_scoop_lift_grabbers(box, scoop)
     validate_side_openings(box)
     validate_side_opening_label(box, label, label_location)
+    validate_edge_mount_label_conflicts(box, label, label_location)
     layout = replace(
         layout,
         features=resolve_text_features(

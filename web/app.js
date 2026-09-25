@@ -1788,6 +1788,28 @@ function modifierConflicts(design) {
     });
   }
 
+  if (edgeMount.label_enabled && edgeMount.label_type === "separate") {
+    const edgeSide = SIDE_OPENING_SIDE_IDS.includes(edgeMount.side)
+      ? edgeMount.side
+      : "front";
+    if (rimSide && rimSide === edgeSide) {
+      conflicts.push({
+        key: `edge-mount-separate:rim-label:${edgeSide}`,
+        message:
+          `A Separate Edge Mount label and rim label cannot use the same ${MODIFIER_SIDE_LABEL[edgeSide]} wall. ` +
+          "Move the rim label, choose another Edge Mount wall, or use Integrated.",
+      });
+    }
+    if (box.lid?.enabled || box.stack?.mode === "lid") {
+      conflicts.push({
+        key: "edge-mount-separate:lid",
+        message:
+          "A Separate Edge Mount label cannot be used with a lid. " +
+          "Use Integrated or remove the lid.",
+      });
+    }
+  }
+
   if (edgeMount.holes_enabled) {
     const side = SIDE_OPENING_SIDE_IDS.includes(edgeMount.side)
       ? edgeMount.side
