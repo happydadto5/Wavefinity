@@ -36,6 +36,17 @@ from ._registry import FEATURE_BUILDERS, resolved_options
 from ._text import TEXT_KIND, TEXT_ZONE_EPSILON, _text_footprint, is_text
 
 
+def _wall_only_physical_zone(box: BoxSpec, one: Feature, base_z: float) -> Zone:
+    """The Wall Only footprint, foot included, counted exactly once - taken from
+    the shared Bore envelope so old shell-sized and new foot-sized zones agree."""
+    from ._bore import bore_envelope_zone
+    physical = bore_envelope_zone(box, one, base_z)
+    if physical is not None:
+        return physical
+    return Zone(one.zone.x0 - WALL_ONLY_FOOT, one.zone.y0 - WALL_ONLY_FOOT,
+                one.zone.x1 + WALL_ONLY_FOOT, one.zone.y1 + WALL_ONLY_FOOT)
+
+
 def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
     """How far a feature's own built geometry may legitimately extend.
 
@@ -75,8 +86,7 @@ def _feature_reach(box: BoxSpec, one: Feature, base_z: float) -> Zone:
         return Zone(one.zone.x0 - reach, one.zone.y0 - reach,
                     one.zone.x1 + reach, one.zone.y1 + reach)
     if one.kind == "bore" and one.options.get("bore_style") == "wall_only":
-        return Zone(one.zone.x0 - WALL_ONLY_FOOT, one.zone.y0 - WALL_ONLY_FOOT,
-                    one.zone.x1 + WALL_ONLY_FOOT, one.zone.y1 + WALL_ONLY_FOOT)
+        return _wall_only_physical_zone(box, one, base_z)
     if one.kind != "divider":
         return one.zone
     zone = one.zone
@@ -326,9 +336,7 @@ def feature_footprint(box: BoxSpec, one: Feature, base_z: float = 0.0) -> Zone:
     caller would have used anyway.
     """
     if one.kind == "bore" and one.options.get("bore_style") == "wall_only":
-        zone = one.zone
-        return Zone(zone.x0 - WALL_ONLY_FOOT, zone.y0 - WALL_ONLY_FOOT,
-                    zone.x1 + WALL_ONLY_FOOT, zone.y1 + WALL_ONLY_FOOT)
+        return _wall_only_physical_zone(box, one, base_z)
     build = _FOOTPRINT_BUILDERS.get(one.kind)
     if build is None:
         return one.zone
