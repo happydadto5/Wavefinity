@@ -288,6 +288,60 @@ class StaleFileLifecycleTests(BatchFixture):
         change_design_status(self.folder, row_id, "saved", "Widget v2.3mf")
         self.assertTrue((self.folder / "Widget.3mf").is_file())
 
+    def refresh_to(self, row_id, new_name="Widget v2.3mf"):
+        (self.folder / new_name).write_bytes(b"new")
+        return change_design_status(self.folder, row_id, "saved", new_name)
+
+    def other_row_owning(self, file_text, name="Other"):
+        other = save_design_source(self.folder, design=design(name), record=record(name))["row_id"]
+        change_design_status(self.folder, other, "saved", file_text)
+        return other
+
+    def test_a_comma_containing_file_owned_by_another_row_is_protected(self):
+        row_id = self.saved_row("A, B")                  # owns "A, B.3mf"
+        self.assertTrue((self.folder / "A, B.3mf").is_file())
+        self.other_row_owning("A, B.3mf")
+        self.edit(row_id, "A, B")
+        self.refresh_to(row_id)
+        self.assertTrue((self.folder / "A, B.3mf").is_file())
+
+    def test_every_real_member_of_a_multi_file_set_with_a_comma_is_protected(self):
+        row_id = self.saved_row("A, B")
+        (self.folder / "C.3mf").write_bytes(b"c")
+        self.other_row_owning("A, B.3mf, C.3mf")
+        self.edit(row_id, "A, B")
+        self.refresh_to(row_id)
+        self.assertTrue((self.folder / "A, B.3mf").is_file())
+        self.assertTrue((self.folder / "C.3mf").is_file())
+
+    def test_an_ambiguous_or_unresolvable_other_row_cell_never_causes_deletion(self):
+        row_id = self.saved_row("A")                      # owns A.3mf
+        # Ambiguous: this cell reads two different ways against the real files.
+        for name in ("C.3mf", "B.3mf, C.3mf", "A.3mf, B.3mf"):
+            (self.folder / name).write_bytes(b"x")
+        other = self.other_row_owning("A.3mf, B.3mf, C.3mf")
+        from organizer_drawer import inventory_row_files
+        with self.assertRaisesRegex(ValueError, "more than one way"):
+            inventory_row_files(self.folder, self.rows()[other])
+        self.edit(row_id, "A")
+        self.refresh_to(row_id, "A v2.3mf")
+        self.assertTrue((self.folder / "A.3mf").is_file())
+
+    def test_a_row_with_a_broken_file_cell_still_protects_its_possible_files(self):
+        row_id = self.saved_row("A, B")
+        other = save_design_source(self.folder, design=design("Broken"), record=record("Broken"))["row_id"]
+        change_design_status(self.folder, other, "printed", "A, B.3mf, Missing.3mf")
+        self.edit(row_id, "A, B")
+        self.refresh_to(row_id)
+        self.assertTrue((self.folder / "A, B.3mf").is_file())
+
+    def test_tracked_only_cleanup_still_removes_a_genuinely_unshared_old_file(self):
+        row_id = self.saved_row("A, B")
+        self.other_row_owning("Other.3mf")
+        self.edit(row_id, "A, B")
+        self.refresh_to(row_id)
+        self.assertFalse((self.folder / "A, B.3mf").exists())
+
     def test_a_failed_refresh_keeps_the_old_files_and_the_row_non_current(self):
         row_id = self.saved_row()
         self.edit(row_id)
@@ -415,55 +469,177 @@ process.stdout.write(JSON.stringify({ wavy: boreSizingControlsFor("wavy_base"),
         # Stored dormant preferences are never deleted by choosing Wavy Base.
         self.assertIn("stays on record, dormant", APP_JS)
 
-    def test_stale_file_refresh_asks_once_then_follows_the_space_preference(self):
-        start = APP_JS.index("// Fix 061 F6: rows whose saved files just went stale")
-        source = APP_JS[start:APP_JS.index("function queueSpaceDesignAutosave()", start)]
-        out = node_run("""
+    STALE_PRELUDE = r"""
 const timers = [];
 const setTimeout = (fn) => { timers.push(fn); return timers.length; };
 let spaceAutosaveTimer = null; let isGenerating = false;
-const state = { runtime: { hosted: false }, designMutationBusy: false };
-const rows = { B1: { id: "B1", file: "" }, B2: { id: "B2", file: "" }, B3: { id: "B3", file: "Old.3mf" } };
-const DL = { busy: "", layout: { settings: { auto_update_changed_files: false } },
-  bin: id => rows[id], label: row => row.id, change(fn) { fn(); }, async save() { saves.push(1); return true; } };
-const saves = []; const asked = []; const generated = [];
-let answer = { choice: "primary", checked: false };
-async function appConfirm(options) { asked.push(options); appConfirm.checked = answer.checked; return answer.choice; }
+const state = { runtime: { hosted: false }, designMutationBusy: false, folderMode: "space",
+  activeSpaceId: "A", output: "/A" };
+const spaces = {
+  A: { rows: { B1: { id: "B1", kind: "bin", file: "" }, B3: { id: "B3", kind: "bin", file: "Old.3mf" } },
+       settings: { auto_update_changed_files: false }, specs: { B1: {}, B3: {} } },
+  B: { rows: { B1: { id: "B1", kind: "bin", file: "" } },
+       settings: { auto_update_changed_files: false }, specs: { B1: {} } },
+};
+let active = "A";
+const log = { asked: [], generated: [], saves: [], api: [], status: [] };
+const DL = {
+  loadEpoch: 1, busy: "", listeners: [],
+  on(fn) { this.listeners.push(fn); },
+  folder: () => state.output,
+  spaceContext() { return { epoch: this.loadEpoch, output: state.output, spaceId: state.activeSpaceId || null }; },
+  spaceContextCurrent(c) { return Boolean(c) && c.epoch === this.loadEpoch && c.output === state.output && c.spaceId === (state.activeSpaceId || null); },
+  staleSpaceError() { const e = new Error("stale"); e.code = "STALE_SPACE_CONTEXT"; return e; },
+  isStaleSpaceError: e => e?.code === "STALE_SPACE_CONTEXT",
+  requireSpaceContext(c) { if (!this.spaceContextCurrent(c)) throw this.staleSpaceError(); },
+  bin: id => spaces[active].rows[id],
+  label: row => row.id,
+  get layout() { return { settings: spaces[active].settings, design_specs: spaces[active].specs }; },
+  change(fn) { fn(); },
+  async save() { log.saves.push(active); return true; },
+  busyWith: async (what, work) => work(DL.spaceContext()),
+  async inventoryCall(path, payload) { log.status.push([active, payload.row_id]); return {}; },
+  adopt() {}, emit() {},
+};
+function switchTo(id) {
+  active = id; state.activeSpaceId = id; state.output = "/" + id; DL.loadEpoch += 1;
+  DL.listeners.forEach(fn => fn());
+}
 const typedSpaceOrdinaryBin = () => true;
-async function designerGenerateInventoryRow(id) { generated.push(id); }
-""" + source + """
-(async () => {
-  const out = {};
-  // Ask mode + "Not now": no regeneration, preference untouched.
-  answer = { choice: "cancel", checked: false };
-  staleFileRefreshQueue.add("B1"); await settleStaleFileRefresh();
-  out.notNow = { asked: asked.length, generated: [...generated], auto: DL.layout.settings.auto_update_changed_files };
-  // Update + checkbox: regenerates and turns the Space preference on.
-  answer = { choice: "primary", checked: true };
-  staleFileRefreshQueue.add("B1"); await settleStaleFileRefresh();
-  out.update = { asked: asked.length, generated: [...generated], auto: DL.layout.settings.auto_update_changed_files, saves: saves.length };
-  // Automatic mode: no dialog at all.
-  staleFileRefreshQueue.add("B2"); await settleStaleFileRefresh();
-  out.automatic = { asked: asked.length, generated: [...generated] };
-  // A row that is already current again (or gone) is skipped.
-  staleFileRefreshQueue.add("B3"); staleFileRefreshQueue.add("B9"); await settleStaleFileRefresh();
-  out.skipped = [...generated];
-  // While the Designer is still busy, nothing runs and a retry is scheduled.
-  state.designMutationBusy = true;
-  staleFileRefreshQueue.add("B1"); const before = generated.length; await settleStaleFileRefresh();
-  out.busy = { ran: generated.length - before, retry: timers.length > 0 };
-  // Pending autosave (rapid edits): still nothing generated yet.
-  state.designMutationBusy = false; spaceAutosaveTimer = 7;
-  await settleStaleFileRefresh(); out.pending = generated.length - before;
-  process.stdout.write(JSON.stringify(out));
-})();
+const clone = v => JSON.parse(JSON.stringify(v));
+const toast = () => {};
+async function flushSpaceDesignAutosave() { if (hooks.duringFlush) hooks.duringFlush(); return true; }
+async function api() { log.api.push(active); return {}; }
+async function saveGeneratedFiles() { return ["Made.3mf"]; }
+const hooks = {};
+let answer = { choice: "primary", checked: false, during: null };
+async function appConfirm(options) {
+  log.asked.push([active, options.title]);
+  if (answer.during) answer.during();
+  appConfirm.checked = answer.checked;
+  return answer.choice;
+}
+"""
+
+    def stale_source(self):
+        start = APP_JS.index("// Fix 061 F6: rows whose saved files just went stale")
+        return (APP_JS[start:APP_JS.index("function queueSpaceDesignAutosave()", start)]
+                + "\n" + function_source("designerGenerateInventoryRow"))
+
+    def run_stale(self, body):
+        return node_run(self.STALE_PRELUDE + self.stale_source() + "\n(async () => {\nconst out = {};\n"
+                        + body + "\nprocess.stdout.write(JSON.stringify(out));\n})();")
+
+    def test_stale_file_refresh_asks_once_then_follows_the_space_preference(self):
+        out = self.run_stale("""
+const ctxA = DL.spaceContext();
+answer = { choice: "cancel", checked: false };
+queueStaleFileRefresh(ctxA, "B1"); await settleStaleFileRefresh();
+out.notNow = { asked: log.asked.length, api: log.api.length, auto: spaces.A.settings.auto_update_changed_files };
+// Not now leaves it dropped: no ghost prompt on later settles.
+await settleStaleFileRefresh(); out.afterNotNow = log.asked.length;
+// Update + checkbox: regenerates and turns the Space preference on.
+answer = { choice: "primary", checked: true };
+queueStaleFileRefresh(ctxA, "B1"); await settleStaleFileRefresh();
+out.update = { asked: log.asked.length, api: log.api.length, auto: spaces.A.settings.auto_update_changed_files, saves: log.saves.length };
+// Automatic mode: no dialog at all.
+queueStaleFileRefresh(ctxA, "B1"); await settleStaleFileRefresh();
+out.automatic = { asked: log.asked.length, api: log.api.length };
+// A row that is already current again (or gone) is skipped.
+queueStaleFileRefresh(ctxA, "B3"); queueStaleFileRefresh(ctxA, "B9"); await settleStaleFileRefresh();
+out.skipped = log.api.length;
+// While the Designer is busy nothing runs and a retry is scheduled.
+state.designMutationBusy = true; timers.length = 0;
+queueStaleFileRefresh(ctxA, "B1"); const before = log.api.length; await settleStaleFileRefresh();
+out.busy = { ran: log.api.length - before, retry: timers.length > 0 };
+// A pending autosave (rapid edits) is respected: still nothing generated yet.
+state.designMutationBusy = false; spaceAutosaveTimer = 7;
+await settleStaleFileRefresh(); out.pending = log.api.length - before;
+// Once the edits settle, exactly one regeneration of the queued row happens.
+spaceAutosaveTimer = null; await settleStaleFileRefresh(); out.settled = log.api.length - before;
 """)
-        self.assertEqual(out["notNow"], {"asked": 1, "generated": [], "auto": False})
-        self.assertEqual(out["update"], {"asked": 2, "generated": ["B1"], "auto": True, "saves": 1})
-        self.assertEqual(out["automatic"], {"asked": 2, "generated": ["B1", "B2"]})
-        self.assertEqual(out["skipped"], ["B1", "B2"])
+        self.assertEqual(out["notNow"], {"asked": 1, "api": 0, "auto": False})
+        self.assertEqual(out["afterNotNow"], 1)
+        self.assertEqual(out["update"], {"asked": 2, "api": 1, "auto": True, "saves": 1})
+        self.assertEqual(out["automatic"], {"asked": 2, "api": 2})
+        self.assertEqual(out["skipped"], 2)
         self.assertEqual(out["busy"], {"ran": 0, "retry": True})
         self.assertEqual(out["pending"], 0)
+        self.assertEqual(out["settled"], 1)
+
+    def test_a_queued_refresh_never_resolves_through_another_space(self):
+        # Space A and Space B both have a row B1.
+        out = self.run_stale("""
+const ctxA = DL.spaceContext();
+queueStaleFileRefresh(ctxA, "B1");
+switchTo("B");
+await settleStaleFileRefresh();
+out.inB = { asked: log.asked.length, api: log.api.length, bAuto: spaces.B.settings.auto_update_changed_files, saves: log.saves.length };
+out.stillQueued = staleFileRefreshQueue.size;
+""")
+        self.assertEqual(out["inB"], {"asked": 0, "api": 0, "bAuto": False, "saves": 0})
+        self.assertEqual(out["stillQueued"], 1)
+
+    def test_a_modal_answer_after_a_space_switch_is_not_applied_to_the_new_space(self):
+        out = self.run_stale("""
+const ctxA = DL.spaceContext();
+answer = { choice: "primary", checked: true, during: () => switchTo("B") };
+queueStaleFileRefresh(ctxA, "B1");
+await settleStaleFileRefresh();
+out.update = { api: log.api.length, saves: log.saves.length, bAuto: spaces.B.settings.auto_update_changed_files,
+  aAuto: spaces.A.settings.auto_update_changed_files, requeued: staleFileRefreshQueue.size, askedIn: log.asked.map(x => x[0]) };
+// "Not now" answered after the switch stays dropped (no ghost prompt on return).
+switchTo("A"); staleFileRefreshQueue.clear();
+answer = { choice: "cancel", checked: false, during: () => switchTo("B") };
+queueStaleFileRefresh(DL.spaceContext(), "B1");
+await settleStaleFileRefresh();
+out.notNow = { requeued: staleFileRefreshQueue.size, api: log.api.length };
+""")
+        self.assertEqual(out["update"], {"api": 0, "saves": 0, "bAuto": False, "aAuto": False,
+                                         "requeued": 1, "askedIn": ["A"]})
+        self.assertEqual(out["notNow"], {"requeued": 0, "api": 0})
+
+    def test_automatic_mode_in_one_space_never_regenerates_in_another(self):
+        out = self.run_stale("""
+spaces.A.settings.auto_update_changed_files = true;
+const ctxA = DL.spaceContext();
+queueStaleFileRefresh(ctxA, "B1");
+switchTo("B");
+await settleStaleFileRefresh();
+out.settle = { api: log.api.length, asked: log.asked.length, status: log.status.length };
+// Even calling the generator directly with A's context cannot cross into B.
+await designerGenerateInventoryRow("B1", ctxA);
+out.direct = { api: log.api.length, status: log.status.length };
+// ...nor if the switch happens while the Designer flush is awaited.
+switchTo("A"); const ctxA2 = DL.spaceContext();
+hooks.duringFlush = () => switchTo("B");
+await designerGenerateInventoryRow("B1", ctxA2);
+out.duringFlush = { api: log.api.length, status: log.status.length };
+""")
+        self.assertEqual(out["settle"], {"api": 0, "asked": 0, "status": 0})
+        self.assertEqual(out["direct"], {"api": 0, "status": 0})
+        self.assertEqual(out["duringFlush"], {"api": 0, "status": 0})
+
+    def test_returning_to_the_original_space_resumes_the_pending_entry_once(self):
+        out = self.run_stale("""
+const ctxA = DL.spaceContext();
+answer = { choice: "cancel", checked: false };
+queueStaleFileRefresh(ctxA, "B1");
+switchTo("B");
+await settleStaleFileRefresh(); out.whileAway = log.asked.length;
+timers.length = 0;
+switchTo("A");                                 // the watcher schedules the resume
+out.scheduled = timers.length > 0;
+await settleStaleFileRefresh();                // asks once in A, user says Not now
+out.onReturn = log.asked.map(x => x[0]);
+await settleStaleFileRefresh(); out.noGhost = log.asked.length;
+out.queue = staleFileRefreshQueue.size;
+""")
+        self.assertEqual(out["whileAway"], 0)
+        self.assertTrue(out["scheduled"])
+        self.assertEqual(out["onReturn"], ["A"])
+        self.assertEqual(out["noGhost"], 1)
+        self.assertEqual(out["queue"], 0)
 
     def test_batch_scope_switches_between_whole_space_and_subset(self):
         start = DRAWER_PANEL_JS.index("DP.batchScope = () => {")
@@ -556,7 +732,8 @@ class StaticContractTests(unittest.TestCase):
     def test_stale_file_hooks_are_wired_into_the_one_autosave_path(self):
         self.assertIn("data.files_became_stale", APP_JS)
         self.assertIn("scheduleStaleFileRefresh();", APP_JS)
-        self.assertIn("await designerGenerateInventoryRow(rowId);", APP_JS)
+        self.assertIn("await designerGenerateInventoryRow(entry.rowId, context);", APP_JS)
+        self.assertIn("queueStaleFileRefresh(context, data.row_id);", APP_JS)
         self.assertIn("auto_update_changed_files: false", DRAWER_MODEL_JS)
         self.assertIn('id="app-confirm-check"', INDEX_HTML)
         self.assertIn('id="dl-refresh-saved"', DRAWER_PANEL_JS)

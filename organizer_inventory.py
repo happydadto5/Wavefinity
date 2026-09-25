@@ -738,16 +738,39 @@ def _row_file_names(folder: Path | None, row: dict[str, Any]) -> list[str]:
         return [name for name in dict.fromkeys(text.split(", ")) if _safe_row_file(root, name)]
 
 
-def _referenced_names(bins: list[dict[str, Any]], skip_id: str) -> set[str]:
-    """Every file name any other row's File cell could be pointing at."""
+def _claimed_names(folder: Path | None, row: dict[str, Any]) -> set[str]:
+    """Every file name a row's File cell may be claiming, never fewer than it owns.
+
+    A resolvable cell contributes exactly the files ``inventory_row_files``
+    resolves (which understands names that themselves contain ", "). A cell
+    that cannot be resolved - ambiguous, or naming a missing file - is treated
+    conservatively: every contiguous ", "-joined run of its pieces counts as
+    claimed, so cleanup can never delete something the row might still own.
+    """
+    text = str(row.get("file") or "").strip()
+    if not text:
+        return set()
+    names = {text}
+    if folder is not None:
+        from organizer_drawer import inventory_row_files
+        try:
+            names.update(path.name for path in inventory_row_files(folder, row))
+            return names
+        except ValueError:
+            pass
+    pieces = text.split(", ")
+    for start in range(len(pieces)):
+        for end in range(start + 1, len(pieces) + 1):
+            names.add(", ".join(pieces[start:end]).strip())
+    return names
+
+
+def _referenced_names(folder: Path | None, bins: list[dict[str, Any]], skip_id: str) -> set[str]:
+    """Every file name any other row could still be using."""
     names: set[str] = set()
     for one in bins:
-        if one["id"] == skip_id:
-            continue
-        text = str(one.get("file") or "").strip()
-        if text:
-            names.add(text)
-            names.update(piece.strip() for piece in text.split(", "))
+        if one["id"] != skip_id:
+            names |= _claimed_names(folder, one)
     return names
 
 
@@ -776,12 +799,8 @@ def _reap_superseded(
         return layout, []
     tracked = stale.pop(row_id)
     target = next((one for one in bins if one["id"] == row_id), None)
-    current: set[str] = set()
-    if target is not None and str(target.get("file") or "").strip():
-        current.update(_row_file_names(folder, target))
-        current.add(str(target["file"]).strip())
-        current.update(piece.strip() for piece in str(target["file"]).split(", "))
-    referenced = _referenced_names(bins, row_id)
+    current = _claimed_names(folder, target) if target is not None else set()
+    referenced = _referenced_names(folder, bins, row_id)
     from organizer_drawer import _safe_row_file
     root = Path(folder).expanduser().resolve()
     doomed: list[Path] = []

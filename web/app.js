@@ -720,14 +720,35 @@ let spaceAutosaveChain = Promise.resolve();
 // Fix 061 F6: rows whose saved files just went stale because the bin was
 // edited. A row is queued once, at the generated -> In Design transition; the
 // server flags it, so later edits of the same row never queue it again.
-const staleFileRefreshQueue = new Set();
+//
+// Row IDs such as "B1" only mean something inside one Space, so every entry
+// carries the identity of the Space that produced it (folder + Space ID, taken
+// from the validated save context). An entry is only ever resolved, prompted,
+// or regenerated while that same Space is active; while another Space is open
+// it simply waits, and resumes if its Space comes back.
+const staleFileRefreshQueue = new Map();
 let staleFileRefreshRunning = false;
 let staleFileRefreshTimer = null;
+let staleFileRefreshWatching = false;
+
+const staleFileRefreshKey = entry => JSON.stringify([entry.output, entry.spaceId, entry.rowId]);
+const staleFileRefreshEntryCurrent = entry =>
+  typeof DL !== "undefined" && entry.output === DL.folder() && entry.spaceId === (state.activeSpaceId || null);
+
+function queueStaleFileRefresh(context, rowId) {
+  const entry = { output: context.output, spaceId: context.spaceId, rowId };
+  staleFileRefreshQueue.set(staleFileRefreshKey(entry), entry);
+  // A waiting entry resumes when its Space becomes active again.
+  if (!staleFileRefreshWatching && typeof DL !== "undefined") {
+    staleFileRefreshWatching = true;
+    DL.on(() => scheduleStaleFileRefresh());
+  }
+}
 
 // Refresh once the edits have settled: no autosave waiting, no other action
 // (including the flush that is calling us) still holding the Designer.
 function scheduleStaleFileRefresh(delay = 250) {
-  if (!staleFileRefreshQueue.size || staleFileRefreshTimer) return;
+  if (staleFileRefreshTimer || ![...staleFileRefreshQueue.values()].some(staleFileRefreshEntryCurrent)) return;
   staleFileRefreshTimer = setTimeout(() => {
     staleFileRefreshTimer = null;
     settleStaleFileRefresh();
@@ -735,18 +756,23 @@ function scheduleStaleFileRefresh(delay = 250) {
 }
 
 async function settleStaleFileRefresh() {
-  if (staleFileRefreshRunning || !staleFileRefreshQueue.size || state.runtime.hosted) return;
+  if (staleFileRefreshRunning || state.runtime.hosted) return;
+  if (![...staleFileRefreshQueue.values()].some(staleFileRefreshEntryCurrent)) return;
   if (spaceAutosaveTimer || state.designMutationBusy || isGenerating || DL.busy) {
     scheduleStaleFileRefresh(400);
     return;
   }
   staleFileRefreshRunning = true;
   try {
-    while (staleFileRefreshQueue.size) {
+    while (true) {
       if (spaceAutosaveTimer) break; // more edits are on the way; their save settles again
-      const rowId = staleFileRefreshQueue.values().next().value;
-      staleFileRefreshQueue.delete(rowId);
-      const row = typedSpaceOrdinaryBin() ? DL.bin(rowId) : null;
+      const entry = [...staleFileRefreshQueue.values()].find(staleFileRefreshEntryCurrent);
+      if (!entry) break;
+      staleFileRefreshQueue.delete(staleFileRefreshKey(entry));
+      // The entry was just proven to belong to the active Space; everything
+      // after an await is checked against this exact context.
+      const context = DL.spaceContext();
+      const row = typedSpaceOrdinaryBin() ? DL.bin(entry.rowId) : null;
       // Gone, or already current again: nothing to refresh.
       if (!row || String(row.file || "").trim()) continue;
       if (DL.layout?.settings?.auto_update_changed_files !== true) {
@@ -757,17 +783,29 @@ async function settleStaleFileRefresh() {
           cancelLabel: "Not now",
           checkboxLabel: "Automatically update saved files after edits in this Space",
         });
+        const checked = appConfirm.checked;
+        if (!DL.spaceContextCurrent(context)) {
+          // The Space changed while the question was open: the answer belongs
+          // to the Space that asked, so it is never applied here. An Update is
+          // kept for when that Space returns; Not now stays dropped.
+          if (choice === "primary") queueStaleFileRefresh(context, entry.rowId);
+          continue;
+        }
         if (choice !== "primary") continue;
-        if (appConfirm.checked) {
+        if (checked) {
           DL.change(() => { DL.layout.settings.auto_update_changed_files = true; }, { history: false });
           await DL.save();
+          if (!DL.spaceContextCurrent(context)) {
+            queueStaleFileRefresh(context, entry.rowId);
+            continue;
+          }
         }
       }
-      await designerGenerateInventoryRow(rowId);
+      await designerGenerateInventoryRow(entry.rowId, context);
     }
   } finally {
     staleFileRefreshRunning = false;
-    if (staleFileRefreshQueue.size) scheduleStaleFileRefresh(400);
+    scheduleStaleFileRefresh(400);
   }
 }
 
@@ -809,7 +847,7 @@ function persistSpaceDesignSource(expectedContext = null, force = false) {
     } catch (error) {
       toast(`This bin was saved, but the Space's remembered settings were not: ${error.message}`, true, 6000);
     }
-    if (data.files_became_stale && !state.runtime.hosted) staleFileRefreshQueue.add(data.row_id);
+    if (data.files_became_stale && !state.runtime.hosted) queueStaleFileRefresh(context, data.row_id);
     if (state.designInventoryId !== rowId) {
       scheduleStaleFileRefresh();
       return true;
@@ -918,17 +956,24 @@ async function designerInstallInventorySpec(rowId, spec) {
 }
 
 // Regenerate a saved source without replacing the live Designer edit.
-async function designerGenerateInventoryRow(rowId) {
+// ``expected`` (an automatic refresh) binds the whole run to the Space that
+// asked for it: it is checked before and after every await, so a Space switch
+// can never send this row ID to another Space.
+async function designerGenerateInventoryRow(rowId, expected = null) {
   if (state.folderMode !== "space" || typeof DL === "undefined") return;
+  const bound = () => !expected || DL.spaceContextCurrent(expected);
+  if (!bound()) return;
   if (DL.busy || isGenerating || state.designMutationBusy) {
     toast("Finish the current action before saving files.", true);
     return;
   }
   if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
+  if (!bound()) return;
   const one = DL.bin(rowId);
   const spec = DL.layout?.design_specs?.[rowId];
   if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return;
   await DL.busyWith("generate-row", async context => {
+    if (expected && !DL.spaceContextCurrent(expected)) return;
     const result = await api("/api/generate", {
       design: clone(spec), output: state.output, connector: state.connector,
       keep_log: false,
