@@ -687,6 +687,7 @@ async function loadFreshOrdinaryDesignForCurrentFolder() {
   state.future = [];
   state.binResizePending = false;
   state.binFootprintResizePending = false;
+  bindLidMemoryForDesign();
   syncForm();
   clearDraftSelection();
   activatePreviewView("3d");
@@ -819,6 +820,7 @@ async function installLoadedDesignSource(rowId, spec, {
     state.future = [];
     state.binResizePending = false;
     state.binFootprintResizePending = false;
+    bindLidMemoryForDesign();
     syncForm();
     clearDraftSelection();
     activatePreviewView("3d");
@@ -980,6 +982,7 @@ async function designerDuplicate() {
     state.future = [];
     state.binResizePending = false;
     state.binFootprintResizePending = false;
+    bindLidMemoryForDesign();
     syncForm();
     clearDraftSelection();
     activatePreviewView("3d");
@@ -1050,6 +1053,7 @@ async function restoreHistory(redo = false) {
     if (!from.length) return;
     to.push(clone(state.design));
     state.design = from.pop();
+    bindLidMemoryForDesign();
     syncForm();
     clearDraftSelection();
     updateHistoryButtons();
@@ -2120,13 +2124,11 @@ function syncWallControls() {
 }
 
 function syncForm() {
-  // Fix 060 Correction 1+2: a routine full refresh means a (possibly
-  // different) design is now bound to the editor, so reseed the remembered
-  // Lid/Handle/Label values from that design's own box.lid (via the same
-  // snapshot helper readStackForm uses, so an in-progress Stackable Lid
-  // detour's real label_style survives a refresh too) rather than carrying
-  // over whatever an earlier bin's session had.
-  state.lidMemory = rememberedLidSnapshot(state.design);
+  // Fix 060 Correction 3: syncForm() is also called for routine same-design
+  // refreshes (modifier apply/rollback, Nest operations, preview auto-grow,
+  // and more), not only when a different design is bound - so it must never
+  // touch state.lidMemory itself. Real design-replacement call sites reseed
+  // it explicitly via bindLidMemoryForDesign() before calling this.
   normalizeStackSettings(state.design);
   const { box, layout } = state.design;
   ensureRimFeatureInLayout();
@@ -2713,6 +2715,18 @@ function rememberedLidSnapshot(design = state.design) {
     ? (state.lidMemory?.label_style ?? merged.label_style)
     : boxLid.label_style;
   return { ...merged, label_style: labelStyle };
+}
+
+// Fix 060 Correction 3: the only safe moment to reseed/clear the remembered
+// Lid/Handle/Label values is when a genuinely different design is bound to
+// the editor (New, Open, Duplicate, Undo/Redo, a Space activating/resuming a
+// design, app bootstrap) - never a routine same-design syncForm() refresh
+// (modifier add/remove/rollback, feature apply, Nest operations, preview
+// auto-grow, and every other syncForm() caller not listed here). Call this
+// explicitly at each such replacement site, after state.design is reassigned
+// and before the resulting syncForm()/syncLidForm() call reads it.
+function bindLidMemoryForDesign(design = state.design) {
+  state.lidMemory = rememberedLidSnapshot(design);
 }
 
 function lidPartActive(design = state.design) {
@@ -11450,6 +11464,7 @@ async function openDesign(event) {
     state.future = [];
     state.binResizePending = false;
     state.binFootprintResizePending = false;
+    bindLidMemoryForDesign();
     syncForm();
     clearDraftSelection();
     await refreshPreview();
@@ -11481,6 +11496,7 @@ async function newDesign() {
   state.binFootprintResizePending = false;
   recordHistory(previousDesign);
   state.drafts = {};
+  bindLidMemoryForDesign();
   syncForm();
   try {
     clearDraftSelection();
@@ -12220,6 +12236,7 @@ async function init() {
     updateSlicerUI();
     renderCatalog();
     wireControls();
+    bindLidMemoryForDesign();
     syncForm();
     watchServerVersion();
     updateHistoryButtons();

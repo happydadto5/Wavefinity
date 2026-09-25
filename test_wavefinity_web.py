@@ -4620,15 +4620,14 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
         self.assertIn('if (design.box.lid) state.lidMemory = rememberedLidSnapshot(design);', read_stack_form)
         self.assertIn("delete design.box.lid;", read_stack_form)
 
-        # A routine full-form refresh (a different/loaded design bound to the
-        # editor) reseeds memory from that design's own box.lid, so one bin's
-        # remembered Handle/Label values never leak into another bin.
+        # Fix 060 Correction 3 moved the reseed/clear boundary off of every
+        # syncForm() call (many of which are routine same-design refreshes)
+        # and onto explicit bindLidMemoryForDesign() calls at genuine design-
+        # replacement sites only - see test_fix060_correction3_* for that
+        # call-site closure.
         sync_form_start = app_js.index("function syncForm() {")
-        sync_form_head = app_js[sync_form_start:sync_form_start + 600]
-        self.assertIn(
-            "state.lidMemory = rememberedLidSnapshot(state.design);",
-            sync_form_head,
-        )
+        sync_form_end = app_js.index("\nfunction ", sync_form_start + 1)
+        self.assertNotIn("state.lidMemory =", app_js[sync_form_start:sync_form_end])
 
         # Divider label locking still reads design.box.lid directly (never
         # lidState()/memory), so it stays inactive while Stackable Bin hides
@@ -4762,6 +4761,150 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
         self.assertEqual(restored["thickness"], "thick")
         self.assertEqual(restored["labelStyle"], "raised")
         self.assertIsNone(steps["fresh_design_reseed"]["memory"])
+
+    def test_fix060_correction3_routine_refresh_preserves_lid_memory(self):
+        # Fix 060 Correction 3: syncForm() is called for routine same-design
+        # refreshes (modifier apply/rollback, Nest operations, preview
+        # auto-grow, and more), not only when a different design is bound to
+        # the editor. It must never itself touch state.lidMemory - only the
+        # explicit bindLidMemoryForDesign() call at a genuine design-
+        # replacement site (New/Open/Duplicate/Undo-Redo/Space activation/
+        # bootstrap) may reseed or clear it. This traces that a routine
+        # refresh (simulated here as simply NOT calling
+        # bindLidMemoryForDesign - exactly what syncForm() now does) leaves
+        # memory untouched, while an explicit bind reseeds/clears it.
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is required for this browser-state regression")
+        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        start = source.index("const LID_DEFAULTS = {")
+        end = source.index("function applyDivisionGridLayout(")
+        lid_helpers = source[start:end]
+        rs_start = source.index("function readStackForm(design) {")
+        rs_end = source.index("\n}\n", rs_start) + 3
+        read_stack_form = source[rs_start:rs_end]
+
+        # syncForm() itself must contain no lidMemory assignment: Correction 3
+        # moved every reseed/clear to the explicit bindLidMemoryForDesign()
+        # call sites below, never to the routine full-form refresh itself.
+        sync_form_start = source.index("function syncForm() {")
+        sync_form_end = source.index("\nfunction ", sync_form_start + 1)
+        self.assertNotIn("state.lidMemory =", source[sync_form_start:sync_form_end])
+        self.assertIn("function bindLidMemoryForDesign(design = state.design) {\n"
+                       "  state.lidMemory = rememberedLidSnapshot(design);\n}", source)
+
+        # Every real design-replacement call site classified for this
+        # correction explicitly reseeds/clears memory before syncForm() runs.
+        replacement_sites = [
+            ("function loadFreshOrdinaryDesignForCurrentFolder() {", "web/app.js: New Bin / Space activation starter"),
+            ("async function installLoadedDesignSource(", "web/app.js: Inventory Edit / Duplicate (typed Space)"),
+            ("async function designerDuplicate() {", "web/app.js: Duplicate (ordinary Designer)"),
+            ("async function restoreHistory(", "web/app.js: Undo/Redo"),
+            ("async function newDesign() {", "web/app.js: New (ordinary Designer)"),
+            ("async function init() {", "web/app.js: app bootstrap"),
+        ]
+        def next_boundary(text, after):
+            candidates = [i for i in (text.find("\nasync function ", after), text.find("\nfunction ", after)) if i != -1]
+            return min(candidates) if candidates else len(text)
+
+        for needle, label in replacement_sites:
+            fn_start = source.index(needle)
+            fn_end = next_boundary(source, fn_start + 1)
+            self.assertIn("bindLidMemoryForDesign()", source[fn_start:fn_end], label)
+        spaces_js = (Path(__file__).resolve().parent / "web" / "spaces.js").read_text(encoding="utf-8")
+        init_space_start = spaces_js.index("SP.initializeDesignForActiveSpace = async () => {")
+        init_space_end = spaces_js.index("\n};", init_space_start)
+        self.assertIn("bindLidMemoryForDesign()", spaces_js[init_space_start:init_space_end],
+                       "web/spaces.js: typed Space activation/resume")
+
+        # Also find the Open-from-file handler (an anonymous/local function,
+        # not matched by name above) and confirm it binds too.
+        open_start = source.index('"A Storage Box or Base Trim is saved from its Space, not opened in the Designer."')
+        open_end = source.index("toast(`Opened", open_start)
+        self.assertIn("bindLidMemoryForDesign()", source[open_start:open_end], "web/app.js: Open from file")
+
+        script = "\n".join([
+            "const state = { design: null, lidMemory: null };",
+            "const fields = {",
+            "  '#lid-configuration': 'handled_lid', '#lid-thickness': 'thin',",
+            "  '#lid-handle-type': 'knob', '#lid-handle-size': 'medium', '#lid-handle-position': 'middle',",
+            "  '#lid-label-enabled': 'true', '#lid-label-orientation': 'horizontal',",
+            "  '#lid-label-style': 'raised', '#lid-label-text': 'PARTS',",
+            "};",
+            "const $ = sel => ({ get value() { return fields[sel]; }, set value(v) { fields[sel] = v; } });",
+            lid_helpers,
+            read_stack_form,
+            "function resyncFieldsFromLidState(design) {",
+            "  const lid = lidState(design);",
+            "  fields['#lid-thickness'] = lid.thickness;",
+            "  fields['#lid-handle-type'] = lid.handle_type;",
+            "  fields['#lid-handle-size'] = lid.handle_size;",
+            "  fields['#lid-handle-position'] = lid.handle_position;",
+            "  fields['#lid-label-enabled'] = String(Boolean(lid.label_enabled));",
+            "  fields['#lid-label-orientation'] = lid.label_orientation;",
+            "  fields['#lid-label-style'] = lid.label_style;",
+            "  fields['#lid-label-text'] = lid.label_text || '';",
+            "}",
+            "function apply(design, configValue, styleValue) {",
+            "  fields['#lid-configuration'] = configValue;",
+            "  if (styleValue !== undefined) fields['#lid-label-style'] = styleValue;",
+            "  readStackForm(design);",
+            "  resyncFieldsFromLidState(design);",
+            "  return design;",
+            "}",
+            # A routine same-design syncForm() refresh does nothing to
+            # memory now - simulate it as a no-op, exactly what the real
+            # syncForm() does after this correction.
+            "function routineSyncFormRefresh() {}",
+            "const steps = [];",
+            # 1. Handled custom values -> Stackable Bin -> routine refresh -> Handled.
+            "let design = { box: { lid: { ...LID_DEFAULTS, enabled: true } } };",
+            "design = apply(design, 'handled_lid', 'raised');",
+            "fields['#lid-handle-type'] = 'pull'; fields['#lid-thickness'] = 'thick';",
+            "design = apply(design, 'handled_lid');",
+            "design = apply(design, 'stackable_bin');",
+            "routineSyncFormRefresh();",
+            "routineSyncFormRefresh();",
+            "design = apply(design, 'handled_lid');",
+            "steps.push({ step: 'survives_routine_refresh_stackable_bin',",
+            "  handleType: design.box.lid.handle_type, thickness: design.box.lid.thickness });",
+            # 2. Handled Raised -> Stackable Lid -> routine refresh -> Handled.
+            "design = apply(design, 'handled_lid', 'raised');",
+            "design = apply(design, 'stackable_lid');",
+            "const activeDuringStackableLid = design.box.lid.label_style;",
+            "routineSyncFormRefresh();",
+            "design = apply(design, 'handled_lid');",
+            "steps.push({ step: 'survives_routine_refresh_stackable_lid',",
+            "  activeDuringStackableLid, restoredStyle: design.box.lid.label_style });",
+            # 3. A genuine design replacement with no lid clears memory.
+            "state.design = design; bindLidMemoryForDesign(state.design);",
+            "const noLidDesign = { box: {} };",
+            "state.design = noLidDesign; bindLidMemoryForDesign(state.design);",
+            "steps.push({ step: 'replacement_no_lid', memory: state.lidMemory });",
+            # 4. A genuine design replacement with its own lid reseeds memory
+            # from THAT design, not the previous one.
+            "const otherDesign = { box: { lid: { ...LID_DEFAULTS, enabled: true, stackable: false,",
+            "  handle_type: 'pull', thickness: 'thick', label_style: 'flush' } } };",
+            "state.design = otherDesign; bindLidMemoryForDesign(state.design);",
+            "steps.push({ step: 'replacement_with_lid',",
+            "  handleType: state.lidMemory.handle_type, thickness: state.lidMemory.thickness,",
+            "  labelStyle: state.lidMemory.label_style });",
+            "process.stdout.write(JSON.stringify(steps));",
+        ])
+        done = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        steps = {entry["step"]: entry for entry in json.loads(done.stdout)}
+
+        survived_bin = steps["survives_routine_refresh_stackable_bin"]
+        self.assertEqual(survived_bin["handleType"], "pull")
+        self.assertEqual(survived_bin["thickness"], "thick")
+        survived_lid = steps["survives_routine_refresh_stackable_lid"]
+        self.assertEqual(survived_lid["activeDuringStackableLid"], "flush")
+        self.assertEqual(survived_lid["restoredStyle"], "raised")
+        self.assertIsNone(steps["replacement_no_lid"]["memory"])
+        replacement_with_lid = steps["replacement_with_lid"]
+        self.assertEqual(replacement_with_lid["handleType"], "pull")
+        self.assertEqual(replacement_with_lid["thickness"], "thick")
+        self.assertEqual(replacement_with_lid["labelStyle"], "flush")
 
 
 if __name__ == "__main__":

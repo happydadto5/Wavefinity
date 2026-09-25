@@ -2022,6 +2022,11 @@ SP.initializeDesignForActiveSpace = async () => {
   }
 
   if (!restored) await SP.installSpaceStarterDesign();
+  // Fix 060 Correction 3: this is the one shared syncForm() call for every
+  // way a typed Space activates/resumes a design (restored checkpoint or a
+  // fresh starter), so this is the single place that needs to reseed/clear
+  // the remembered Lid/Handle/Label memory for the design just bound here.
+  bindLidMemoryForDesign();
   syncForm();
   // The active Space identity, state.design, and the preview must all
   // belong to the same Space/design generation - request a fresh preview
