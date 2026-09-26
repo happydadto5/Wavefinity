@@ -887,8 +887,8 @@ The optional **curved scoop** spans the usable width at the front of the bin and
 rises 60% up the usable wall height, so a part sweeps forward and lifts out
 over the low front lip — the opposite wall from the rim-label ledge. In
 removable modes it is part of the insert; in fused mode it is part of the box.
-An auto-placed text moves clear of the scoop strip, and the 2D editor shades the
-space reserved by a scoop or rim-label ledge and refuses overlapping parts.
+The 2D editor shades the space reserved by a scoop. Fused-layout clearance
+against base Text uses the actual letter shapes; rim Text reserves no floor.
 
 What a scoop reserves is not its whole run. The curve meets the floor
 tangentially, so its innermost millimetres are only microns proud of it — on a
@@ -1474,7 +1474,8 @@ kept for On-base Text; At-rim Text reads the right way up for its **Rim side**
 - **Inlay depth** (Inlaid) or **Raised height** (Raised): Thin 0.2 mm, Default
   0.4 mm, Thick 0.6 mm or Thickest 0.8 mm. Inlay depth is how deeply the
   letters are cut into the receiving surface (the pocket keeps its backing);
-  Raised height is how far they stand above it.
+  Raised height is how far they stand above it. Deeper inlays require a thick
+  enough base or insert to leave at least 0.2 mm of backing.
 - Every Text is its **own part of the 3MF** (its own filament). The pocket and
   the inlay are exact complements. In a removable insert the lettering is inlaid
   into the **0.6 mm insert plate**.
@@ -1961,7 +1962,7 @@ these numbers look arbitrary and are not.
 | Lock bump | **0.35** proud, 1.0 tall, **1.2** long | on every wave extremum, so every **2.0** |
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |
 | Bump band | top **4.0** below the rim | |
-| Text letters | **15.0** ideal, **5.0** auto minimum, **5.0** floor | sunk **0.4**; a zone sizes it, a hand-set height is capped by that zone |
+| Text letters | **15.0** usual base height, **5.0** readable minimum | centered; Letter height sets size; Inlay depth / Raised height **0.2–0.8** subject to backing |
 | At-rim Text | **5.0** target letters, **7.0** ledge | auto-shrinks; 45-degree underside; Raised lowers the ledge by its height |
 | Scoop | **60%** of usable wall height | full usable width at front |
 
@@ -2099,16 +2100,14 @@ Measured and regression-tested; run the suite for the current exact count.
 - Pocket volume removed == inlay volume; the two intersect by **<0.01 mm³**;
   union restores the plain box exactly. Checked on 48x48, 16x48 and 24x40
 - Strict 3MF, **zero warnings**; one assembly object, one build item, the body
-  and every piece of lettering as named parts — verified with three floor texts
-  and with a rim label alongside floor text. `model_settings.config` opens the
+  and every piece of lettering as named parts — verified with one base Text
+  and independent rim sides. `model_settings.config` opens the
   body on filament 1 and all lettering on filament 2
 - A raised text takes nothing out of the body; a recessed one is its exact
   complement
-- An auto-placed text moves around holders, reserved scoop/ledge space and other
-  auto texts with a 1 mm clearance; the same placement is used by the 2D editor,
-  3D preview, mesh pocket and export report
-- Neighbours are judged on the lettering's **ink**, not the box it was dragged
-  out to, so a short word in a wide box does not push a holder away
+- Base Text remains centered; fused neighbours are judged against the actual
+  buffered glyph outline, not the empty corners of its selection bounds.
+  Rim Text is outside floor occupancy in every layout mode.
 
 **Insert layouts**
 - Nine registered builders: cradle, Snug Holder, bore, center post, divider,

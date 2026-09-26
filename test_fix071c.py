@@ -119,6 +119,24 @@ class TextContractTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 inserts.Layout((back, floor), mode).validate(box)
 
+    def test_divider_and_bore_keep_saved_3d_pick_identity(self):
+        for kind in ("divider", "bore"):
+            with self.subTest(kind=kind):
+                design = default_design()
+                design["box"].update(x=64, y=64, z=40)
+                request = {"design": design, "kind": kind}
+                if kind == "bore":
+                    request["item"] = {"name": "tube", "profile": "round",
+                                       "segments": [{"length": 40, "diameter": 6}],
+                                       "clearance": 0.25}
+                feature = default_feature_payload(request)["feature"]
+                design["layout"]["features"] = [feature]
+                scene = json.loads(json.dumps(preview_payload({"design": design})))
+                self.assertFalse(scene["feature_errors"])
+                self.assertTrue(any(face["pick"] == {"type": "saved", "index": 0}
+                                    and face["kind"].startswith("feature_")
+                                    for face in scene["geometry"]))
+
 
 class RimTextInteractionTests(unittest.TestCase):
     def setUp(self):

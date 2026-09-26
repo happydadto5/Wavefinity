@@ -95,7 +95,6 @@ from organizer_inserts import (
     Layout,
     Segment,
     Zone,
-    auto_grow_text_feature,
     build_features,
     connector_keep_out,
     cradle_min_footprint,
@@ -1660,12 +1659,7 @@ def _resolved_text(
     box: BoxSpec, features: tuple, mode: str,
     label: str, label_location: str, scoop: bool,
 ) -> tuple:
-    """``features`` with every auto-placed text moved to where it really goes.
-
-    Any endpoint that judges a layout has to do this first: an auto text's
-    stored zone is only a cache of where it last landed, and a brand-new one
-    starts on a placeholder in the middle of the bin.
-    """
+    """Canonical Text, resolving old auto-placement once on import."""
     return resolve_text_features(
         box, features,
         reserved=[
@@ -1675,22 +1669,6 @@ def _resolved_text(
         ],
         base_z=base_height(box, mode), mode=mode,
     )
-
-
-def _features_from_preview(layout: Layout, scene: dict[str, Any]) -> tuple:
-    """The layout's features as the preview resolved them.
-
-    Only ``auto`` text moves, and only during the preview, so a scene that
-    could not report its features leaves the layout exactly as it was.
-    """
-    raw = scene.get("features")
-    if not raw:
-        return layout.features
-    try:
-        return layout_from_dict({"mode": layout.mode, "features": raw}).features
-    except (ValueError, KeyError, TypeError):
-        return layout.features
-
 
 def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Preview for a Storage Box design: body/lid/latch/label meshes plus the
