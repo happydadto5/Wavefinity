@@ -29,6 +29,21 @@ def node_json(source: str):
 
 
 class PreviewPickTransportTests(unittest.TestCase):
+    def test_storage_box_divider_has_compact_mesh_pick_identity(self):
+        design = default_design()
+        design["box"].update(x=64, y=48, z=40, b4b={"enabled": True})
+        feature = default_feature_payload({"design": design, "kind": "divider"})["feature"]
+        design["layout"]["features"] = [feature]
+        preview = json.loads(json.dumps(preview_payload({"design": design})))
+        self.assertEqual(len(preview["pick_meshes"]), 1)
+        pick = preview["pick_meshes"][0]
+        self.assertEqual(pick["pick"], {"type": "saved", "index": 0})
+        mesh = preview["meshes"][pick["mesh_index"]]
+        self.assertEqual((mesh["kind"], mesh["owner"]), ("feature_divider", "base"))
+        self.assertTrue(mesh["positions"])
+        draft = preview_payload({"design": design, "draft": feature, "selected": 0})
+        self.assertEqual(draft["pick_meshes"][0]["pick"], {"type": "draft"})
+
     def test_same_kind_and_draft_ids_survive_json_boundary(self):
         design = default_design()
         design["box"].update(x=64, y=64)
@@ -58,6 +73,148 @@ class PreviewPickTransportTests(unittest.TestCase):
 
 
 class BrowserStateLogicTests(unittest.TestCase):
+    def test_primary_and_legacy_preview_proxy_paths_execute_with_visibility(self):
+        names = ["drawOverlay2D", "drawGeometryLegacy2D", "addPreviewPickFace", "addPreviewPickProxies"]
+        source = "\n".join(function_source(name, APP) for name in names)
+        script = r"""
+const camera={yaw:0,elevation:40,zoom:1};
+const state={previewSupportPolygons:[],previewPickMeshContext:null,
+  preview:{pick_proxies:[{points:[[0,0,1],[1,0,1],[0,1,1]],pick:{type:'saved',index:0}}]},
+  design:{box:{x:8,y:8,z:8}},b4bView:'base',binVisible:true,interiorVisible:false,xrayOn:false};
+const ctx={beginPath(){},moveTo(){},lineTo(){},closePath(){},fill(){},stroke(){},fillText(){}};
+const b4bEnabled=()=>true,baseTrimEnabled=()=>false,number=v=>Number(v)||0;
+const canvasSize=()=>({context:ctx,width:100,height:100}),paintBackdrop=()=>{};
+const cameraVector=()=>[0,0,1],currentPreviewClassify=()=>face=>face.owner==='lid'?'lid':'base';
+const isFacingBinWall=()=>false,isBinFace=()=>false,iso=p=>p,dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
+const shadedColor=()=>'#aaa',drawContactShadow=()=>{},drawUsableFloor=()=>{},drawBoreAxes=()=>{};
+const draw3DDimensions=()=>{},drawDimensionGhost3D=()=>{},drawFrontMarker=()=>{};
+const b4bShadowBox=()=>null,b4bAssembledEnvelope=()=>null,dimensionDragBoxOverride=()=>null;
+const dimensionDisplayOverride=()=>null;
+__SOURCE__
+const face={kind:'feature_divider',normal:[0,0,1],owner:'base',layer:0,
+  points:[[0,0,1],[1,0,1],[0,1,1]]};
+drawOverlay2D(ctx,100,100,[],[],camera,{midX:0,midY:0,scale:1},()=> 'base',new Set(['base']));
+const primary=state.previewSupportPolygons.length;
+drawGeometryLegacy2D({},[face],camera);
+const legacy=state.previewSupportPolygons.length;
+state.b4bView='lid';drawGeometryLegacy2D({},[face],camera);
+const hidden=state.previewSupportPolygons.length;
+process.stdout.write(JSON.stringify({primary,legacy,hidden}));
+""".replace("__SOURCE__", source)
+        out = node_json(script)
+        self.assertEqual(out, {"primary": 1, "legacy": 1, "hidden": 0})
+
+    def test_compact_mesh_pick_is_frontmost_and_respects_base_lid_visibility(self):
+        names = ["pointInPolygon", "pickTriangleDepth", "previewPickDepth", "clickedPreviewMesh"]
+        source = "\n".join(function_source(name, APP) for name in names)
+        script = r"""
+const tri=z=>[0,0,z,10,0,z,0,10,z];
+const divider={positions:tri(1),normals:[0,0,1],owner:'base'};
+const cover={positions:tri(2),normals:[0,0,1],owner:'base'};
+const state={preview:{meshes:[divider],pick_meshes:[{mesh_index:0,pick:{type:'saved',index:0}}]},
+  previewPickMeshContext:{camera:{},project:p=>[p[0],p[1]],visibleGroups:new Set(['base'])}};
+const cameraVector=()=>[0,0,1],iso=p=>p,dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
+__SOURCE__
+const picked=clickedPreviewMesh([2,2])?.pick;
+state.preview.meshes.push(cover);
+const occluded=clickedPreviewMesh([2,2])?.pick;
+state.previewPickMeshContext.visibleGroups=new Set(['lid']);
+const hidden=clickedPreviewMesh([2,2]);
+process.stdout.write(JSON.stringify({picked,occluded,hidden}));
+""".replace("__SOURCE__", source)
+        out = node_json(script)
+        self.assertEqual(out, {"picked": {"type": "saved", "index": 0}, "occluded": None, "hidden": None})
+
+    def test_storage_box_mesh_pick_opens_exact_divider_in_2d(self):
+        names = ["pointInPolygon", "pickTriangleDepth", "previewPickDepth", "clickedPreviewSupport",
+                 "clickedPreviewMesh", "selectFromPreview"]
+        source = "\n".join(function_source(name, APP) for name in names)
+        script = r"""
+const design={},space={id:'S'},events=[],state={design,activeSpace:space,
+  designInventoryId:'B1',previewRequest:3,selected:null,
+  previewSupportPolygons:[],preview:{meshes:[{owner:'base',positions:[0,0,1,10,0,1,0,10,1],
+  normals:[0,0,1]}],pick_meshes:[{mesh_index:0,pick:{type:'saved',index:0}}]},
+  previewPickMeshContext:{camera:{},project:p=>[p[0],p[1]],visibleGroups:new Set(['base'])}};
+const DP={mode:'design'},cameraVector=()=>[0,0,1],iso=p=>p,
+  dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
+const selectedFeature=async i=>{state.selected=i;events.push('select:'+i);return true};
+const $=()=>({textContent:'',classList:{add(){},remove(){}}});
+const activatePreviewView=v=>events.push(v),renderLayout2D=()=>{};
+const localStorage={getItem:()=> '1'};
+__SOURCE__
+(async()=>{
+  const pick=clickedPreviewSupport({getBoundingClientRect:()=>({left:0,top:0})},
+    {clientX:2,clientY:2});
+  await selectFromPreview(pick,{design,space,source:'B1',preview:3});
+  process.stdout.write(JSON.stringify({pick,events,selected:state.selected}));
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__SOURCE__", source)
+        out = node_json(script)
+        self.assertEqual(out, {"pick": {"type": "saved", "index": 0},
+                               "events": ["select:0", "2d"], "selected": 0})
+
+    def test_delayed_preview_pick_rejects_new_preview_generation(self):
+        source = function_source("selectedFeature", APP)
+        script = r"""
+const design={layout:{features:[{kind:'post',zone:[0,0,8,8]}]}}, space={id:'S'};
+const state={design,activeSpace:space,designInventoryId:'B1',previewRequest:7,
+  selected:null,draft:{kind:'post'},partZoneLocks:{}};
+let release; const guardDraftSwitch=()=>new Promise(resolve=>release=resolve);
+const $=()=>({hidden:false}),$$=()=>[];
+const clone=v=>JSON.parse(JSON.stringify(v));
+const resetNestPhotoSession=()=>{},commitEdgeMountFormBeforeSwitch=()=>true;
+const cancelPendingDraftWork=()=>{},updateNudgeUI=()=>{},AUTO_FOOTPRINT_KINDS=new Set();
+const updateInteriorModeVisibility=()=>{},partInfo=()=>({}),syncDraftEditorIdentity=()=>{};
+const renderDraftFields=()=>{},renderPlaced=()=>{},updateSelectionButtons=()=>{};
+const refreshDraft=()=>{},renderLayout2D=()=>{};
+__SOURCE__
+(async()=>{
+  const oldGeneration=state.previewRequest;
+  const pending=selectedFeature(0,false,()=>state.previewRequest===oldGeneration);
+  state.previewRequest++;
+  release(true);
+  const accepted=await pending;
+  process.stdout.write(JSON.stringify({accepted,selected:state.selected}));
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {"accepted": False, "selected": None})
+
+    def test_inventory_edit_pending_and_rollback(self):
+        script = r"""
+const fs=require('fs'),vm=require('vm');
+const ctx={Map,Set,Promise,JSON,Number,String,Object,Date,
+  state:{activeSpaceId:'S',output:'folder'},DL:{selectRow:id=>events.push('select:'+id)},
+  localStorage:{getItem:()=>null},$:()=>null,$$:()=>[]};
+const events=[]; let release;
+ctx.designerEditInventoryRow=()=>new Promise(resolve=>release=resolve);
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1],'utf8')+';this.DP=DP',ctx);
+const DP=ctx.DP;DP.mode='space';
+DP.showPendingMode=mode=>events.push('pending:'+mode);
+DP.setMode=mode=>{DP.mode=mode;events.push('mode:'+mode)};
+(async()=>{
+  const failed=DP.openInventoryRow('B2');
+  const before=[DP.mode,events.slice()];release(false);await failed;
+  const afterFailure=[DP.mode,events.slice()];events.length=0;
+  const accepted=DP.openInventoryRow('B2');release(true);await accepted;
+  process.stdout.write(JSON.stringify({before,afterFailure,afterSuccess:[DP.mode,events]}));
+})().catch(e=>{console.error(e);process.exit(1)});
+"""
+        out = node_json(script.replace("process.argv[1]", json.dumps(str(ROOT / "web" / "drawer-panel.js"))))
+        self.assertEqual(out["before"], ["space", ["pending:design"]])
+        self.assertEqual(out["afterFailure"], ["space", ["pending:design", "pending:null"]])
+        self.assertEqual(out["afterSuccess"], ["design", ["pending:design", "select:B2", "mode:design", "pending:null"]])
+
+    def test_bore_derived_display_and_manual_minimum_are_separate(self):
+        helpers = "\n".join((APP[APP.index("const roundUpHalfMm ="):APP.index("\n", APP.index("const roundUpHalfMm ="))],
+                             APP[APP.index("const roundNearestHalfMm ="):APP.index("\n", APP.index("const roundNearestHalfMm ="))],
+                             APP[APP.index("const boreDerivedDimension ="):APP.index("\nfunction roundFitZoneUpHalfMm", APP.index("const boreDerivedDimension ="))]))
+        script = "const number=(v,f)=>Number.isFinite(Number(v))?Number(v):f;" + helpers + "\n" + \
+                 "const exact=57.695;process.stdout.write(JSON.stringify({auto:exact,shown:boreDerivedDimension('height',exact),manual:roundUpHalfMm(exact),angle:boreDerivedDimension('angle',17)}));"
+        self.assertEqual(node_json(script), {"auto": 57.695, "shown": 57.5, "manual": 58, "angle": 17})
+        self.assertIn("boreDerivedDimension(key, value)", APP[APP.index("const optionField ="):APP.index("const gridField =")])
+        self.assertIn("one.options.height = roundUpHalfMm(resolvedHeight)", APP)
+
     def test_3d_pick_switches_after_selection_invalidates_old_preview_and_remembers_help(self):
         source = "\n".join(function_source(name, APP) for name in
                            ("wireSupportLayoutDialog", "selectFromPreview"))
@@ -154,7 +311,7 @@ const els = {}, calls = [], make = () => ({ hidden:false, classList:{toggle(){},
   setAttribute(){}, addEventListener(){}, dataset:{} });
 const ctx = { Map, Set, Promise, JSON, Number, String, Object, Date,
   $: s => els[s] ||= make(), $$: () => [],
-  state: { folderMode:'space', activeSpace:{id:'A'} },
+  state: { folderMode:'space', activeSpace:{name:'Same'}, activeSpaceId:'A' },
   DL: { active:true, loaded:true, pegboardRefreshError:false, on(){}, bin:id => ({id}),
     ensureLoaded:async()=>{}, spaceContext:()=>({}), spaceContextCurrent:()=>true },
   DV: {wire(){}}, SP:{renderSpaceInfo(){},offerSpacePlanning(){}},
@@ -170,9 +327,9 @@ DP.update=()=>{};
 DP.syncFilterSpace();
 const fresh=[DP.filter.show,DP.filter.sort];
 DP.filter.show='saved'; DP.filtersBySpace.set('A','saved');
-ctx.state.activeSpace={id:'B'}; DP.syncFilterSpace();
+ctx.state.activeSpace={name:'Same'}; ctx.state.activeSpaceId='B'; DP.syncFilterSpace();
 const other=DP.filter.show;
-ctx.state.activeSpace={id:'A'}; DP.syncFilterSpace();
+ctx.state.activeSpace={name:'Renamed'}; ctx.state.activeSpaceId='A'; DP.syncFilterSpace();
 const back=DP.filter.show;
 (async()=>{
   DP.mode='design';
@@ -232,7 +389,7 @@ process.stdout.write(JSON.stringify({zero,ten,handles,crossing,bridged}));
         self.assertLessEqual(out["bridged"]["upper"], 80)
 
     def test_frontmost_pick_does_not_select_occluded_feature(self):
-        names = ["pointInPolygon", "pickTriangleDepth", "previewPickDepth", "clickedPreviewSupport"]
+        names = ["pointInPolygon", "pickTriangleDepth", "previewPickDepth", "clickedPreviewSupport", "clickedPreviewMesh"]
         source = "\n".join(function_source(name, APP) for name in names)
         script = r"""
 const state={previewSupportPolygons:[]};

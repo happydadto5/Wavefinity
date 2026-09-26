@@ -2067,7 +2067,7 @@ const vm = require("vm"), fs = require("fs");
 const ctx = { console, Math, JSON, Number, Set, Map, Date,
   debounce: fn => fn, clone: v => JSON.parse(JSON.stringify(v)),
   drawerHardClearance: () => 0.6, fmt: v => String(v),
-  localStorage: { getItem: () => null }, $: () => null,
+  localStorage: { getItem: () => null }, $: () => null, $$: () => [],
   state: { activeSpaceId: "A", output: "folder", runtime: { hosted: true }, activeSpace: { kind: "drawer" } } };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + ";this.DL=DL", ctx);
@@ -2183,14 +2183,14 @@ const DL = { bins: rows, isOrdinary: row => !!row && row.kind !== "spacer",
   markPrinted: () => {}, markNotPrinted: () => {}, printCount: () => 1,
   selectRow: id => { calls.selected.push(id); DL.selectedRow = id; }, selectedRow: "B1" };
 const ctx = { console, Date, Set, Map, Math, JSON, Number, state, DL,
-  localStorage: { getItem: () => null }, $: () => null,
+  localStorage: { getItem: () => null }, $: () => null, $$: () => [],
   appConfirmAction: async () => { calls.prompts++; return true; },
   flushSpaceDesignAutosave: async () => { calls.flushes++; return true; },
   designerEditInventoryRow: async id => { calls.opens.push(id); return editSuccess; },
   clearTimeout: () => {}, spaceAutosaveTimer: null,
   clone: value => JSON.parse(JSON.stringify(value)),
   discardStaleFileRefreshRows: () => {},
-  toast: () => {}, fmt: value => String(value) };
+  activatePreviewView: () => {}, toast: () => {}, fmt: value => String(value) };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + ";this.DP=DP", ctx);
 const DP = ctx.DP;

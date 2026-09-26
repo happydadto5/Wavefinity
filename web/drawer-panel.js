@@ -22,7 +22,7 @@ try {
 } catch (_error) {}
 DP.filterSpace = null;
 DP.syncFilterSpace = () => {
-  const id = state.activeSpace?.id || state.activeSpace?.name || null;
+  const id = state.activeSpaceId || state.output || null;
   if (id === DP.filterSpace) return;
   if (DP.filterSpace) DP.filtersBySpace.set(DP.filterSpace, DP.filter.show);
   DP.filterSpace = id;
@@ -429,10 +429,16 @@ DP.onInventoryClick = async event => {
 // Commit the row/canvas selection only after Designer accepted the switch.
 // Mouse and keyboard activation share this single success boundary.
 DP.openInventoryRow = async id => {
-  if (!(await designerEditInventoryRow(id))) return false;
-  DL.selectRow(id);
-  DP.setMode("design");
-  return true;
+  const request = ++DP.modeRequest;
+  DP.showPendingMode("design");
+  try {
+    if (!(await designerEditInventoryRow(id)) || request !== DP.modeRequest) return false;
+    DL.selectRow(id);
+    DP.setMode("design");
+    return true;
+  } finally {
+    if (request === DP.modeRequest) DP.showPendingMode(null);
+  }
 };
 
 // Duplicate a design-source row through the accepted atomic owner. The new

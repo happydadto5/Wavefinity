@@ -4560,7 +4560,7 @@ async function selectKind(kind, reset = false) {
   }
 }
 
-async function selectedFeature(index, force = false) {
+async function selectedFeature(index, force = false, acceptPreviewPick = null) {
   if (index === null || index < 0 || index >= state.design.layout.features.length) return false;
   if (!force && index === state.selected) return true;
   const request = state.selectionRequest = (state.selectionRequest || 0) + 1;
@@ -4569,6 +4569,7 @@ async function selectedFeature(index, force = false) {
   if (!force && !(await guardDraftSwitch())) return false;
   if (request !== state.selectionRequest || design !== state.design ||
       source !== state.designInventoryId || space !== state.activeSpace) return false;
+  if (acceptPreviewPick && !acceptPreviewPick()) return false;
   const selected = state.design.layout.features[index];
   if (state.draft?.kind === "nest" || selected?.kind === "nest") resetNestPhotoSession();
   if (!commitEdgeMountFormBeforeSwitch()) return false;
@@ -4614,6 +4615,10 @@ async function selectedFeature(index, force = false) {
   return true;
 }
 const roundUpHalfMm = value => Math.ceil((number(value, 0) - 1e-9) * 2) / 2;
+const roundNearestHalfMm = value => Math.round(number(value, 0) * 2) / 2;
+const boreDerivedDimension = (key, value) => ["height", "depth"].includes(key) &&
+  value !== null && value !== undefined && value !== ""
+  ? roundNearestHalfMm(value) : value;
 function roundFitZoneUpHalfMm(zone) {
   const cx = (zone[0] + zone[2]) / 2, cy = (zone[1] + zone[3]) / 2;
   const width = roundUpHalfMm(zone[2] - zone[0]);
@@ -5208,7 +5213,10 @@ function renderDraftFields() {
         const explicit = Object.prototype.hasOwnProperty.call(one.options || {}, key);
         const value = explicit ? one.options[key]
           : state.draftResolvedOptions?.[key] ?? info.fields.find(f => f.key === key)?.default;
-        const shown = opts.transform ? opts.transform(value) : value;
+        const displayValue = explicit ? value
+          : key === "height" && heightMode === "manual" ? roundUpHalfMm(value)
+            : boreDerivedDimension(key, value);
+        const shown = opts.transform ? opts.transform(displayValue) : displayValue;
         const { transform, ...fieldOpts } = opts;
         return field(label, `option:${key}`, shown, fieldOpts);
       };
@@ -7092,8 +7100,8 @@ function updateDraftFromFields(event) {
         // Walls Only -> Base keeps a cavity that reaches the normal bin floor:
         // Hole Depth becomes the Bore's resolved Height.
         if (Number.isFinite(resolvedHeight)) {
-          one.options.depth = resolvedHeight;
-          if (boreHeightMode(one) !== "bore_to_bin") one.options.height = resolvedHeight;
+          one.options.depth = roundUpHalfMm(resolvedHeight);
+          if (boreHeightMode(one) !== "bore_to_bin") one.options.height = roundUpHalfMm(resolvedHeight);
         }
         if (one.options.xy_size_mode === "bin_to_bore") delete one.options.xy_size_mode;
       }
@@ -7104,6 +7112,7 @@ function updateDraftFromFields(event) {
       one.options.xy_size_mode = chosen;
       if (chosen === "manual" && before !== "manual") {
         // Leaving an automatic mode keeps its current size as the manual Base.
+        one.zone = roundFitZoneUpHalfMm(one.zone);
         pinDraftAxis("width");
         pinDraftAxis("depth");
         if (Number.isInteger(state.selected)) state.partZoneLocks[state.selected] = state.pinnedZone;
@@ -7120,7 +7129,7 @@ function updateDraftFromFields(event) {
       if (chosen === "bore_to_bin") delete one.options.height;
       else if (before === "bore_to_bin" && Number.isFinite(resolvedHeight)) {
         // Leaving "bore to bin" keeps the height it resolved to as the visible number.
-        one.options.height = resolvedHeight;
+        one.options.height = roundUpHalfMm(resolvedHeight);
       }
     }
   }
@@ -7468,7 +7477,8 @@ async function refreshDraft() {
       if (input && option.type !== "enum"
           && Object.prototype.hasOwnProperty.call(state.draftResolvedOptions, option.key)) {
         const value = state.draftResolvedOptions[option.key];
-        const next = fmt(info.kind === "bore" && option.key === "angle" ? 90 - number(value, 0) : value);
+        const next = fmt(info.kind === "bore" && option.key === "angle" ? 90 - number(value, 0)
+          : info.kind === "bore" ? boreDerivedDimension(option.key, value) : value);
         if (input.value !== next) {
           input.value = next;
           flashField(input);
@@ -8955,6 +8965,11 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   const { context, width, height } = canvasSize(canvas);
   paintBackdrop(context, width, height);
   state.previewSupportPolygons = [];
+  state.previewPickMeshContext = null;
+  const visibleGroups = b4bEnabled()
+    ? new Set(state.b4bView === "base" ? ["base"] : state.b4bView === "lid" ? ["lid"] : ["base", "lid"])
+    : baseTrimEnabled() ? new Set(["bin"])
+      : new Set([...(state.binVisible ? ["bin"] : []), ...(state.interiorVisible ? ["interior"] : [])]);
   if (!geometry?.length) {
     context.fillStyle = "#8b989e";
     context.textAlign = "center";
@@ -8981,9 +8996,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
     const normal = face.normal;
     const facing = normal[0] * vx + normal[1] * vy + normal[2] * vz;
     if (facing <= 0 && kind !== "label_hole") continue;
-    const isBin = isBinFace(kind);
-    if (isBin && !state.binVisible) continue;
-    if (!isBin && !state.interiorVisible) continue;
+    if (!visibleGroups.has(currentPreviewClassify()(face))) continue;
     if (state.xrayOn && isFacingBinWall(face, camera)) continue;
     const points = face.points;
     const corners = points.length;
@@ -9041,6 +9054,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   const scale = Math.min((width * 0.75) / spanX, (height * 0.75) / spanY) * camera.zoom;
   const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
   const project = point => [width / 2 + (point[0] - midX) * scale, height / 2 + (point[1] - midY) * scale];
+  if (b4bEnabled()) state.previewPickMeshContext = { camera, project, visibleGroups };
   const originX = width / 2 - midX * scale;
   const originY = height / 2 - midY * scale;
   faces.sort((a, b) => a.depth - b.depth || a.layer - b.layer);
@@ -9070,7 +9084,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
     for (let at = 0; at < corners; at += 1) {
       polygon[at] = [originX + flat[at * 2] * scale, originY + flat[at * 2 + 1] * scale];
     }
-    addPreviewPickFace(face, polygon, camera);
+    if (!b4bEnabled()) addPreviewPickFace(face, polygon, camera);
     const fill = shadedColor(kind, face.normal);
     if (fill !== penFill) { context.fillStyle = fill; penFill = fill; }
     context.fill();
@@ -9683,6 +9697,7 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
     width / 2 + (point[0] - frame.midX) * frame.scale,
     height / 2 + (point[1] - frame.midY) * frame.scale,
   ];
+  state.previewPickMeshContext = b4bEnabled() ? { camera, project, visibleGroups } : null;
   for (const face of solidGeometry) {
     const kind = face.kind;
     if (!visibleGroups.has(classify(face))) continue;
@@ -9690,7 +9705,7 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
     if (dot(face.normal, vector) <= 0) continue;
     addPreviewPickFace(face, face.points.map(point => project(iso(point, camera))), camera);
   }
-  addPreviewPickProxies(camera, point => project(iso(point, camera)));
+  addPreviewPickProxies(camera, point => project(iso(point, camera)), visibleGroups);
   const box = dimensionDragBoxOverride(state.design?.box, "3d");
   drawContactShadow(context, b4bShadowBox(), camera, project, b4bAssembledEnvelope());
   drawUsableFloor(context, solidGeometry, camera, project);
@@ -9740,8 +9755,8 @@ function addPreviewPickFace(face, polygon, camera) {
 }
 
 function addPreviewPickProxies(camera, project, visibleGroups) {
-  if (!state.interiorVisible || baseTrimEnabled() ||
-      (b4bEnabled() && !visibleGroups.has("base"))) return;
+  if (baseTrimEnabled() || (b4bEnabled()
+    ? !visibleGroups.has("base") : !visibleGroups.has("interior"))) return;
   for (const proxy of state.preview?.pick_proxies || []) {
     if (!proxy.points?.length || !proxy.pick) continue;
     state.previewSupportPolygons.push({
@@ -9780,7 +9795,39 @@ function clickedPreviewSupport(canvas, event) {
     const depth = previewPickDepth(point, record);
     if (depth !== null && (!closest || depth > closest.depth)) closest = { depth, pick: record.pick };
   }
+  const mesh = clickedPreviewMesh(point);
+  if (mesh && (!closest || mesh.depth > closest.depth)) closest = mesh;
   return closest?.pick || null;
+}
+
+// Compact Storage Box meshes remain the printable visual source. This
+// preview-only map identifies its one supported Divider without copying the
+// triangles into the response or changing each mesh's physical owner.
+function clickedPreviewMesh(point) {
+  const context = state.previewPickMeshContext;
+  if (!context || !state.preview?.pick_meshes?.length) return null;
+  const identities = new Map(state.preview.pick_meshes.map(one => [one.mesh_index, one.pick]));
+  const vector = cameraVector(context.camera);
+  let closest = null;
+  for (const [index, mesh] of (state.preview.meshes || []).entries()) {
+    if (!context.visibleGroups.has(mesh.owner === "lid" ? "lid" : "base")) continue;
+    const positions = mesh.positions || [], normals = mesh.normals || [];
+    for (let at = 0; at + 8 < positions.length; at += 9) {
+      const normalAt = at / 3;
+      if (normals[normalAt] * vector[0] + normals[normalAt + 1] * vector[1]
+          + normals[normalAt + 2] * vector[2] <= 0) continue;
+      const points = [0, 3, 6].map(offset => positions.slice(at + offset, at + offset + 3));
+      const record = {
+        polygon: points.map(corner => context.project(iso(corner, context.camera))),
+        depths: points.map(corner => dot(corner, vector)),
+      };
+      const depth = previewPickDepth(point, record);
+      if (depth !== null && (!closest || depth > closest.depth)) {
+        closest = { depth, pick: identities.get(index) || null };
+      }
+    }
+  }
+  return closest;
 }
 
 function drawFrontMarker(context, camera, project) {
@@ -9815,7 +9862,7 @@ async function selectFromPreview(pick, context) {
   status.classList.add("preview-pending");
   try {
     if (pick.type === "saved") {
-      if (!Number.isInteger(pick.index) || !(await selectedFeature(pick.index))) return;
+      if (!Number.isInteger(pick.index) || !(await selectedFeature(pick.index, false, current))) return;
       // Selecting cancels the old preview request itself. Its guard already
       // rejects stale design/Space switches; check the accepted target here.
       if (state.designInventoryId !== context.source || state.activeSpace !== context.space ||
