@@ -54,15 +54,79 @@ def bore_direction(spec_feature: Feature) -> tuple[str, float]:
     }
     return directions.get(toward, (spec_feature.along, -1.0))
 
-BORE_STYLES = ("full_base", "wall_only", "wavy_base")
-# Styles that stand upright and are sized by their sleeves' true outer envelope.
-ENVELOPE_STYLES = ("wall_only", "wavy_base")
+
+def normalize_bore_style(style: object, wall_style: object = None) -> str:
+    """The one style word a Bore stores.
+
+    Testing-era values are translated one way (``full_base`` -> Base - Straight,
+    ``wavy_base`` -> Base - Wavy, ``wall_only`` + its separate wall style ->
+    Straight / Wavy Walls Only). A missing style is Base - Straight Walls; any
+    other word is left for validation to reject.
+    """
+    text = str(style or "")
+    if text in BORE_STYLES:
+        return text
+    if text in LEGACY_STYLES:
+        return LEGACY_STYLES[text]
+    if text == "wall_only":
+        return "walls_straight" if str(wall_style or "wavy") == "straight" else "walls_wavy"
+    return text if text else "base_straight"
+
+
+def is_walls_only(style: object) -> bool:
+    return str(style) in WALLS_ONLY_STYLES
+
+
+def is_wavy_style(style: object) -> bool:
+    return str(style) in WAVY_STYLES
+
+
+def default_xy_size_mode(style: object) -> str:
+    """Walls Only sizes the bin to itself by default; Base is hand-sized."""
+    return "bin_to_bore" if is_walls_only(style) else "manual"
+
+
+def bore_xy_size_mode(options: dict, style: object) -> str:
+    """The persisted Width / Length sizing mode, defaulting per style."""
+    mode = str(options.get("xy_size_mode") or default_xy_size_mode(style))
+    allowed = WALLS_XY_SIZE_MODES if is_walls_only(style) else XY_SIZE_MODES
+    return mode if mode in allowed else default_xy_size_mode(style)
+
+
+def bore_height_size_mode(options: dict) -> str:
+    mode = str(options.get("height_size_mode") or "manual")
+    return mode if mode in HEIGHT_SIZE_MODES else "manual"
+
+# One persisted style owner. "Base" styles are a solid block the holes are cut
+# into; "Walls Only" styles are just the perimeter sleeves rising from the floor.
+BORE_STYLES = ("base_straight", "base_wavy", "walls_straight", "walls_wavy")
+WALLS_ONLY_STYLES = ("walls_straight", "walls_wavy")
+WAVY_STYLES = ("base_wavy", "walls_wavy")
+# Styles that stand upright (only Base - Straight Walls may lean).
+UPRIGHT_STYLES = ("base_wavy", "walls_straight", "walls_wavy")
+# Styles sized by their sleeves' true outer envelope rather than a Base block.
+ENVELOPE_STYLES = WALLS_ONLY_STYLES
+# Styles whose geometry may fuse into the bin wall.
+JOIN_STYLES = UPRIGHT_STYLES
+# Testing-era style words, normalised one way at load boundaries.
+LEGACY_STYLES = {"full_base": "base_straight", "wavy_base": "base_wavy"}
+XY_SIZE_MODES = ("manual", "bore_to_bin", "bin_to_bore")
+WALLS_XY_SIZE_MODES = ("manual", "bin_to_bore")
+HEIGHT_SIZE_MODES = ("manual", "bore_to_bin", "bin_to_bore")
+# Auto-sized Bore Height keeps its top this far below the lowest physical point
+# of an Edge Mount screwdriver-access cutter.
+ACCESS_CUTTER_CLEARANCE = 2.0
+# Geometry-only boolean overtravel for a cavity that reaches the Bore's floor.
+FLOOR_OVERTRAVEL = 0.05
 # Set by the fused assembler on a Bore whose geometry may fuse into the bin wall.
 WALL_JOIN_FLAG = "_wall_join"
+# Set alongside WALL_JOIN_FLAG for a Walls Only Bore whose bin is sized around it:
+# the sleeves then bridge the (under one grid step) gap to the bin wall.
+WALL_HUG_FLAG = "_wall_hug"
 JOIN_TOUCH = 0.05             # envelope this close to a wall counts as reaching it
 JOIN_BAND = 1.2               # wall-only material this close to the wall is blended in
 JOIN_SKIN = 0.15              # a joined blend never comes closer than this to the outside
-WALL_STYLES = ("wavy", "straight")
+HUG_REACH = 8.0               # bin_to_bore leaves under one 8 mm grid step to the wall
 WAVE_NOISE_FLOOR = 1e-4       # trough sits a hair outside the clear opening, so
                               # float noise cannot fold the outline back on itself
 WAVE_SAMPLES_PER_CYCLE = 32   # keeps a wavy sleeve smooth in the STL and preview
@@ -257,7 +321,7 @@ def _polygons(shape) -> list[Polygon]:
 
 
 def _join_tabs(
-    box: BoxSpec, material, keep_clear, fill: float,
+    box: BoxSpec, material, keep_clear, fill: float, hug: bool = False,
 ) -> list[Polygon]:
     """Blends that carry ``material`` straight into any bin wall it reaches.
 
@@ -267,32 +331,38 @@ def _join_tabs(
     wall out through the bin's wavy inner face, so the sleeve fuses into the
     wall instead of stopping a hair short of it. Tabs never come within
     ``JOIN_SKIN`` of the bin's outside face, so the exterior stays as it was.
+
+    ``hug`` (a Walls Only Bore whose bin is sized around it) also bridges a gap
+    of up to one grid step: the bin can only grow in whole steps, so the sleeves
+    are carried the rest of the way to the wall on every side.
     """
     whole = Zone.whole(box)
     limit = wavy_outer_polygon(box).buffer(-JOIN_SKIN)
     reach = box.wall_depth + 2.0 * WAVE_AMPLITUDE
     x0, y0, x1, y1 = material.bounds
     big = 1.0e3
+    reachable = HUG_REACH if hug else JOIN_TOUCH
     sides = (
-        (x1 >= whole.x1 - JOIN_TOUCH,
-         shapely_box(whole.x1 - JOIN_BAND, -big, whole.x1 + big, big),
-         lambda b: shapely_box(whole.x1 - fill, b[1], whole.x1 + reach, b[3])),
-        (x0 <= whole.x0 + JOIN_TOUCH,
-         shapely_box(-big, -big, whole.x0 + JOIN_BAND, big),
-         lambda b: shapely_box(whole.x0 - reach, b[1], whole.x0 + fill, b[3])),
-        (y1 >= whole.y1 - JOIN_TOUCH,
-         shapely_box(-big, whole.y1 - JOIN_BAND, big, whole.y1 + big),
-         lambda b: shapely_box(b[0], whole.y1 - fill, b[2], whole.y1 + reach)),
-        (y0 <= whole.y0 + JOIN_TOUCH,
-         shapely_box(-big, -big, big, whole.y0 + JOIN_BAND),
-         lambda b: shapely_box(b[0], whole.y0 - reach, b[2], whole.y0 + fill)),
+        (whole.x1 - x1,
+         lambda d: shapely_box(whole.x1 - d - JOIN_BAND, -big, whole.x1 + big, big),
+         lambda b, d: shapely_box(whole.x1 - d - fill, b[1], whole.x1 + reach, b[3])),
+        (x0 - whole.x0,
+         lambda d: shapely_box(-big, -big, whole.x0 + d + JOIN_BAND, big),
+         lambda b, d: shapely_box(whole.x0 - reach, b[1], whole.x0 + d + fill, b[3])),
+        (whole.y1 - y1,
+         lambda d: shapely_box(-big, whole.y1 - d - JOIN_BAND, big, whole.y1 + big),
+         lambda b, d: shapely_box(b[0], whole.y1 - d - fill, b[2], whole.y1 + reach)),
+        (y0 - whole.y0,
+         lambda d: shapely_box(-big, -big, big, whole.y0 + d + JOIN_BAND),
+         lambda b, d: shapely_box(b[0], whole.y0 - reach, b[2], whole.y0 + d + fill)),
     )
     tabs: list[Polygon] = []
-    for touching, band, make in sides:
-        if not touching:
+    for gap, band, make in sides:
+        if gap > reachable + 1e-9:
             continue
-        for piece in _polygons(material.intersection(band)):
-            tab = make(piece.bounds).difference(keep_clear).intersection(limit)
+        span = gap if gap > JOIN_TOUCH else 0.0
+        for piece in _polygons(material.intersection(band(span))):
+            tab = make(piece.bounds, span).difference(keep_clear).intersection(limit)
             tabs.extend(part for part in _polygons(tab) if part.area > 1e-6)
     return tabs
 
@@ -310,6 +380,7 @@ def _tab_meshes(
 
 def _build_wall_only_bore(
     grid: dict, count: int | None, box: BoxSpec | None = None, join: bool = False,
+    hug: bool = False,
 ) -> trimesh.Trimesh:
     """Perimeter sleeves rising from the base; no raised rectangular block."""
     profile = grid["item"].profile
@@ -347,7 +418,7 @@ def _build_wall_only_bore(
         material = unary_union([translate(physical, x, y) for x, y in centres])
         keep_clear = unary_union([translate(inner, x, y) for x, y in centres])
         tabs = _tab_meshes(
-            _join_tabs(box, material, keep_clear, JOIN_BAND), height, base_z)
+            _join_tabs(box, material, keep_clear, JOIN_BAND, hug), height, base_z)
     if len(sleeves) == 1 and not tabs:
         return sleeves[0]
     # Touching sleeves merge for strength; every opening is then cut again so a
@@ -359,14 +430,19 @@ def _build_wall_only_bore(
 def _build_wavy_base_bore(
     grid: dict, count: int | None, box: BoxSpec | None = None, join: bool = False,
 ) -> trimesh.Trimesh:
-    """A solid raised Base whose holes have Wall Only's wavy walls."""
+    """A solid raised Base whose holes have Wall Only's wavy walls.
+
+    Like Base - Straight Walls, the block is the feature's own zone (Width /
+    Length and centre); the wavy hole grid is centred inside it.
+    """
     outer, inner, clear = _wall_only_ring(
         grid["item"].profile, grid["held"], grid["wall"], "wavy")
     ring = outer.difference(inner)
     height, depth, base_z = grid["height"], grid["depth"], grid["base_z"]
     centres = list(_bore_hole_centres(grid, count))
     cx, cy = grid["centre_x"], grid["centre_y"]
-    half_x, half_y = grid["needed_x"] / 2.0, grid["needed_y"] / 2.0
+    zone = grid["zone"]
+    half_x, half_y = zone.width / 2.0, zone.depth / 2.0
     # A neighbour's wall may reach into this hole's wavy cavity, so it is kept;
     # only the requested clear opening is then re-opened in full.
     walls = unary_union([translate(ring, x, y) for x, y in centres])
@@ -374,10 +450,13 @@ def _build_wavy_base_bore(
     cavity = cavity.union(unary_union([translate(clear, x, y) for x, y in centres]))
     body = trimesh.creation.box(extents=(2.0 * half_x, 2.0 * half_y, height))
     body.apply_translation((cx, cy, base_z + height / 2.0))
+    # A cavity as deep as the Bore is tall reaches the normal bin floor; a hair
+    # of overtravel keeps that boolean clean without touching the stored depth.
+    over = FLOOR_OVERTRAVEL if depth >= height - 1e-9 else 0.0
     cuts = []
     for piece in _polygons(cavity):
-        mesh = _extrude_polygon(piece, depth + 1.0)
-        mesh.apply_translation((0.0, 0.0, base_z + height - depth))
+        mesh = _extrude_polygon(piece, depth + 1.0 + over)
+        mesh.apply_translation((0.0, 0.0, base_z + height - depth - over))
         cuts.append(mesh)
     result = difference([body, _union(cuts)])
     if join and box is not None:
@@ -388,118 +467,122 @@ def _build_wavy_base_bore(
     return result
 
 
+def _access_top_limit(box: BoxSpec) -> float | None:
+    """Highest absolute Z an auto-sized Bore top may reach under Edge Mount's
+    screwdriver-access passage, or ``None`` when there is no such passage."""
+    from organizer_edge_mount import edge_mount_access_lowest_z
+    try:
+        lowest = edge_mount_access_lowest_z(box)
+    except ValueError:
+        return None      # an invalid Edge Mount is reported by the bin itself
+    return None if lowest is None else lowest - ACCESS_CUTTER_CLEARANCE
+
+
 @defaults("bore")
 def bore_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, float]:
     item = _need_item(one)
-    auto_height = bool(one.options.get("auto_height"))
+    height_mode = bore_height_size_mode(one.options)
     if _is_hex_bit(item.profile):
         hole = min(HEX_BIT_HOLD[item.profile], box.z - base_z - 2.0)
-        held = HEX_BIT_FLATS + HEX_BIT_CLEARANCE
     else:
         hole = min(item.length * 0.4, box.z - base_z - 2.0)
-        held = item.held(item.widest)
-    style = str(one.options.get("bore_style", "full_base"))
-    wall_style = str(one.options.get("wall_style", "wavy"))
-    if style == "wavy_base":
-        wall_style = "wavy"       # Wavy Base is Wavy by definition
-    wall_only = style == "wall_only"
-    envelope = style in ENVELOPE_STYLES
+    style = normalize_bore_style(one.options.get("bore_style"))
+    walls_only = is_walls_only(style)
     try:
         angle = max(0.0, float(one.options.get("angle", 0.0) or 0.0))
     except (TypeError, ValueError):
         angle = 0.0
-    if envelope:
-        angle = 0.0      # Wall Only and Wavy Base always stand upright
+    upright = style in UPRIGHT_STYLES
+    if upright:
+        angle = 0.0      # only Base - Straight Walls may lean
     tilted = angle > 1e-9
-    default_wall = box.wall if envelope else BORE_TILTED_WALL if tilted else BORE_WALL
-    wall = float(one.options.get("wall", default_wall))
+    default_wall = box.wall if upright else BORE_TILTED_WALL if tilted else BORE_WALL
     try:
         depth = float(one.options.get("depth", hole))
     except (TypeError, ValueError):
         depth = hole
-    reach = max(0.0, depth) * math.sin(math.radians(angle)) if tilted else 0.0
-    if auto_height:
-        # Fix 034 G1: Auto Height must resolve to a height that is actually
-        # legal, not just the full bin - a wall-touching Bore is capped at
-        # the connector keep-out exactly like a manual height would be.
+    if height_mode == "bore_to_bin":
+        # Fix 034 G1: the height must be one that is actually legal - a
+        # wall-touching Bore is capped at the connector keep-out exactly like a
+        # manual height would be. Fix 068: an Edge Mount screwdriver-access
+        # passage crosses the interior, so the top also stays clear of it.
         top_limit = box.z - base_z
         if feature_touches_wall(box, one):
             top_limit = min(top_limit, connector_keep_out(box) - base_z)
-        minimum_height = (hole if wall_only else depth) + 2.0
+        access_top = _access_top_limit(box)
+        limited_by_access = access_top is not None and access_top - base_z < top_limit
+        if limited_by_access:
+            top_limit = access_top - base_z
+        if walls_only:
+            minimum_height = hole + 2.0
+        elif tilted:
+            minimum_height = depth * math.cos(math.radians(angle)) + 2.0
+        else:
+            minimum_height = depth
         if top_limit + 1e-6 < minimum_height:
+            reason = ("the Edge Mount screwdriver access hole leaves too little room"
+                      if limited_by_access else
+                      "the connector keep-out leaves too little room")
             raise ValueError(
-                "Auto Height cannot fit a legal Bore here - the connector keep-out "
-                "leaves too little room; make the bin taller or move the Bore away from the wall"
+                f"Auto Height cannot fit a legal Bore here - {reason}; "
+                "make the bin taller or move the Bore away from the wall"
             )
         resolved_height = top_limit
-    elif wall_only:
+    elif walls_only:
         resolved_height = hole + 2.0
     else:
         resolved_height = one.options.get("depth", hole) + 2.0
-    resolved_grid: dict[str, float] = {}
-    # A saved Auto Grid stays on record but is dormant while Wavy Base is active.
-    if one.options.get("auto_grid") and style != "wavy_base":
-        # Auto Grid fills the current Base: the most holes that fit on each
-        # axis at the real wall/lean pitch, never a stored quantity.
-        lean_axis, _ = bore_direction(one)
-        pitch_x, pitch_y = bore_minimum_pitches(item.profile, held, wall, angle, lean_axis)
-        if envelope:
-            env = wall_only_envelope(item.profile, held, wall, wall_style,
-                                    foot=style == "wall_only")
-            resolved_grid = {
-                "columns": float(_fit_count(one.zone.width, env["pitch_x"], env["zone_span_x"])),
-                "rows": float(_fit_count(one.zone.depth, env["pitch_y"], env["zone_span_y"])),
-            }
-        else:
-            resolved_grid = {
-                "columns": float(_fit_count(
-                    one.zone.width - (reach if lean_axis == "x" else 0.0), pitch_x, pitch_x)),
-                "rows": float(_fit_count(
-                    one.zone.depth - (reach if lean_axis == "y" else 0.0), pitch_y, pitch_y)),
-            }
     return {
         "depth": hole,
         # A leaned bore takes a thicker wall by default so the extra material
         # between slanting holes still prints; an explicit Wall overrides it.
         "wall": default_wall,
         "height": resolved_height,
-        # A new Bore is one hole. X/Y quantities grow the Base and then the
-        # bin; they never begin by filling whatever space happened to exist.
-        # Only the persisted Auto Grid mode fills the Base instead.
+        # X/Y counts are always explicit: a new Bore is one hole, and quantities
+        # grow the footprint (and, in a bin-sizing mode, the bin) from there.
         "columns": 1.0,
         "rows": 1.0,
-        **resolved_grid,
         # 0 is straight up; a positive angle leans the holes off vertical so
-        # tubes rest at a slant. Any grid may lean.
+        # tubes rest at a slant. Only Base - Straight Walls may lean.
         "angle": 0.0,
         "bore_style": style,
-        "wall_style": wall_style,
+        "xy_size_mode": bore_xy_size_mode(one.options, style),
+        "height_size_mode": height_mode,
     }
 
 
-def normalize_bore_auto(
+def normalize_bore_modes(
     box: BoxSpec, one: Feature, base_z: float, mode: str = "fused",
 ) -> Feature:
-    """Make a Bore's persisted Auto modes authoritative over stale manual values.
+    """Make a Bore's persisted style and sizing modes authoritative.
 
-    Base Auto takes the current usable layout area, Height Auto and Grid Auto
-    drop their manual numbers (defaults then derive them from the current bin
-    and Base). Anything that is not an Auto Bore is returned untouched.
+    Testing-era style words and the retired ``wall_style`` / ``auto_base`` /
+    ``auto_height`` / ``auto_grid`` state are translated or dropped one way, so
+    no hidden Auto behaviour survives. Base Width / Length ``bore_to_bin`` takes
+    the current usable layout area, Height ``bore_to_bin`` drops its manual
+    number (defaults then derive it from the current bin), Walls Only takes its
+    default sizing mode, and the wall thickness Base styles hide is dropped.
+    Anything that is not a Bore is returned untouched.
     """
     if one.kind != "bore":
         return one
     options = dict(one.options)
     zone = one.zone
-    # Auto Base / Auto Grid are dormant (kept untouched) while Wavy Base is
-    # active, so switching back to another style restores them.
-    dormant = str(options.get("bore_style", "")) == "wavy_base"
-    if options.get("auto_base") and not dormant:
-        zone = layout_zone(box, mode)
-    if options.get("auto_height"):
+    style = normalize_bore_style(options.get("bore_style"), options.get("wall_style"))
+    for retired in ("auto_base", "auto_height", "auto_grid", "wall_style"):
+        options.pop(retired, None)
+    options["bore_style"] = style
+    options["xy_size_mode"] = bore_xy_size_mode(options, style)
+    options["height_size_mode"] = bore_height_size_mode(options)
+    if style in UPRIGHT_STYLES:
+        options.pop("angle", None)
+        options.pop("angle_towards", None)
+    if not is_walls_only(style):
+        options.pop("wall", None)
+    if options["height_size_mode"] == "bore_to_bin":
         options.pop("height", None)
-    if options.get("auto_grid") and not dormant:
-        options.pop("columns", None)
-        options.pop("rows", None)
+    if options["xy_size_mode"] == "bore_to_bin" and not is_walls_only(style):
+        zone = layout_zone(box, mode)
     if zone is one.zone and options == one.options:
         return one
     return replace(one, zone=zone, options=options)
@@ -528,19 +611,22 @@ def _envelope_counts(
 
 def _wall_only_grid(
     item, zone, spec_feature: Feature, held: float, wall: float, height: float,
-    angle: float, wall_style: str, where: tuple[BoxSpec, float], options: dict,
-    style: str = "wall_only", depth: float = 0.0,
+    angle: float, style: str, where: tuple[BoxSpec, float], options: dict,
+    depth: float = 0.0,
 ) -> dict:
-    """Grid for an upright envelope-sized Bore (Wall Only or Wavy Base); its
-    footprint is the sleeves' outer envelope."""
+    """Grid for an upright Bore (either Walls Only style or Base - Wavy Walls).
+
+    A Walls Only footprint is the sleeves' outer envelope; Base - Wavy Walls is a
+    block of the feature's own zone that the wavy hole grid must fit inside."""
     _, base_z = where
     if height <= 0.0 or wall <= 0.0:
         raise ValueError(f"{item.name}: bore height and wall must be positive")
     if not math.isfinite(angle) or abs(angle) > 1e-9:
-        label = "Wall Only" if style == "wall_only" else "Wavy Base"
+        label = "Walls Only" if is_walls_only(style) else "Base - Wavy Walls"
         raise ValueError(f"a {label} bore stands upright; its angle must be 0")
+    wall_style = "wavy" if is_wavy_style(style) else "straight"
     env = wall_only_envelope(item.profile, held, wall, wall_style,
-                             foot=style == "wall_only")
+                             foot=is_walls_only(style))
     columns, rows = _envelope_counts(env, zone, spec_feature, options, item.name)
     # The stored zone may predate foot-aware sizing (shell only); accept it.
     needed_x = env["zone_span_x"] + (columns - 1) * env["pitch_x"]
@@ -564,22 +650,21 @@ def _wall_only_grid(
 
 
 def bore_envelope_zone(box: BoxSpec, one: Feature, base_z: float) -> Zone | None:
-    """Physical footprint of an upright envelope-sized Bore, centred on its
-    zone - the smallest rectangle holding every sleeve. ``None`` for any other
-    holder (or one that cannot resolve yet)."""
+    """Physical footprint of a Walls Only Bore, centred on its zone - the
+    smallest rectangle holding every sleeve. ``None`` for any other holder (or
+    one that cannot resolve yet)."""
     if one.kind != "bore" or one.item is None:
         return None
     try:
         options = resolved_options(box, one, base_z)
-        style = str(options.get("bore_style", "full_base"))
+        style = normalize_bore_style(options.get("bore_style"))
         if style not in ENVELOPE_STYLES:
             return None
         item = one.item
         held = (HEX_BIT_FLATS + HEX_BIT_CLEARANCE
                 if _is_hex_bit(item.profile) else item.held(item.widest))
-        wall_style = "wavy" if style == "wavy_base" else str(options.get("wall_style", "wavy"))
-        env = wall_only_envelope(item.profile, held, float(options["wall"]), wall_style,
-                                 foot=style == "wall_only")
+        env = wall_only_envelope(item.profile, held, float(options["wall"]),
+                                 "wavy" if is_wavy_style(style) else "straight", foot=True)
         columns, rows = _envelope_counts(env, one.zone, one, options, item.name)
     except (ValueError, KeyError, TypeError):
         return None
@@ -605,29 +690,25 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
     wall = options["wall"]
     height = options["height"]
     angle = options.get("angle", 0.0)
-    style = str(options.get("bore_style", "full_base"))
-    wall_style = str(options.get("wall_style", "wavy"))
+    style = normalize_bore_style(options.get("bore_style"))
     if style not in BORE_STYLES:
         raise ValueError(f"bore style must be one of {', '.join(BORE_STYLES)}")
-    if wall_style not in WALL_STYLES:
-        raise ValueError(f"bore wall style must be one of {', '.join(WALL_STYLES)}")
-    if style == "wall_only":
+    if is_walls_only(style):
         return _wall_only_grid(
-            item, zone, spec_feature, held, wall, height, angle, wall_style,
+            item, zone, spec_feature, held, wall, height, angle, style,
             (box, base_z), options,
         )
-    if style == "wavy_base":
-        if depth <= 0.0 or height <= 0.0 or wall <= 0.0 or depth >= height:
-            raise ValueError(
-                f"{item.name}: bore depth must be below its positive height and wall"
-            )
-        return _wall_only_grid(
-            item, zone, spec_feature, held, wall, height, angle, "wavy",
-            (box, base_z), options, style="wavy_base", depth=depth,
-        )
-    if depth <= 0.0 or height <= 0.0 or wall <= 0.0 or depth >= height:
+    # A cavity as deep as the Bore is tall is valid: it reaches the normal
+    # Bore/base Z, so the ordinary bin floor stays its bottom.
+    if depth <= 0.0 or height <= 0.0 or wall <= 0.0 or depth > height + 1e-9:
         raise ValueError(
-            f"{item.name}: bore depth must be below its positive height and wall"
+            f"{item.name}: bore depth must be positive and no more than its "
+            "height, and height and wall must be positive"
+        )
+    if style == "base_wavy":
+        return _wall_only_grid(
+            item, zone, spec_feature, held, wall, height, angle, style,
+            (box, base_z), options, depth=depth,
         )
     if not math.isfinite(angle) or not (-1e-9 <= angle <= BORE_MAX_TILT + 1e-9):
         raise ValueError(
@@ -700,7 +781,7 @@ def _bore_grid(box: BoxSpec, spec_feature: Feature, base_z: float) -> dict:
         "pitch_y": pitch_y, "columns": columns,
         "rows": rows, "centre_x": centre_x, "centre_y": centre_y,
         "sections": sections, "hole_radius": hole_radius, "over": over,
-        "chamfer": chamfer,
+        "chamfer": chamfer, "bore_style": style,
     }
 
 
@@ -793,8 +874,7 @@ def bore_tool_clearance_zone(
     description="Small pockets for your stuff of vary sizes/shapes.",
     capabilities=("size", "along", "item"),
     options=(
-        OptionDefinition("Style", "bore_style", "full_base", "enum"),
-        OptionDefinition("Wall style", "wall_style", "wavy", "enum"),
+        OptionDefinition("Style", "bore_style", "base_straight", "enum"),
         OptionDefinition("Height", "height", ""),
         OptionDefinition("Hole depth", "depth", ""),
         OptionDefinition("Wall", "wall", "1.6"),
@@ -802,18 +882,18 @@ def bore_tool_clearance_zone(
         OptionDefinition("Y quantity", "rows", "", "integer"),
         OptionDefinition("Angle °", "angle", "0"),
         OptionDefinition("Angle towards", "angle_towards", "front", "enum", False),
-        OptionDefinition("Auto base size", "auto_base", False, "boolean", False),
-        OptionDefinition("Auto height", "auto_height", False, "boolean", False),
-        OptionDefinition("Auto X/Y count", "auto_grid", False, "boolean", False),
+        OptionDefinition("Width / Length sizing", "xy_size_mode", "manual", "enum", False),
+        OptionDefinition("Height sizing", "height_size_mode", "manual", "enum", False),
     ), order=30,
 )
 def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
     """A block of holes for objects stood on end."""
     grid = _bore_grid(box, spec_feature, base_z)
     join = bool(spec_feature.options.get(WALL_JOIN_FLAG))
-    if grid.get("bore_style") == "wall_only":
-        return [_build_wall_only_bore(grid, spec_feature.count, box, join)]
-    if grid.get("bore_style") == "wavy_base":
+    if is_walls_only(grid.get("bore_style")):
+        hug = (join and bool(spec_feature.options.get(WALL_HUG_FLAG)))
+        return [_build_wall_only_bore(grid, spec_feature.count, box, join, hug)]
+    if grid.get("bore_style") == "base_wavy":
         return [_build_wavy_base_bore(grid, spec_feature.count, box, join)]
     zone = grid["zone"]
     held = grid["held"]
@@ -854,14 +934,17 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
             else:
                 y += lean_shift
 
+            # A cavity as deep as the Bore is tall reaches the bin floor; a hair
+            # of overtravel keeps that boolean clean (never changes stored depth).
+            floor = FLOOR_OVERTRAVEL if (not tilted and depth >= height - 1e-9) else 0.0
             shaft = trimesh.creation.cylinder(
-                radius=hole_radius, height=depth + over, sections=sections,
+                radius=hole_radius, height=depth + over + floor, sections=sections,
             )
             if _axis_square(grid["item"].profile):
                 shaft.apply_transform(
                     trimesh.transformations.rotation_matrix(math.pi / 4.0, (0.0, 0.0, 1.0))
                 )
-            shaft.apply_translation((0.0, 0.0, (over - depth) / 2.0))
+            shaft.apply_translation((0.0, 0.0, (over - depth - floor) / 2.0))
             parts = [shaft]
             if chamfer > 1e-6:
                 mouth = trimesh.creation.revolve(
@@ -902,20 +985,30 @@ def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trime
 
 register_setting_interactions("bore", (
     SettingInteraction("depth", "height", "constraint", "bore-shell",
-                       "A user-edited Hole depth wins and raises Height to keep a 2 mm floor."),
+                       "A user-edited Hole depth wins and raises Height to at least that depth."),
     SettingInteraction("height", "depth", "constraint", "bore-shell",
-                       "A user-edited Height wins and lowers Hole depth to keep a 2 mm floor."),
+                       "A user-edited Height wins and lowers Hole depth to no more than that height."),
     SettingInteraction("angle", "wall", "default", "bore",
                        "A leaned Bore uses a thicker wall unless Wall is explicitly set."),
     SettingInteraction("bore_style", "angle", "reset", "bore-editor",
-                       "Wall Only and Wavy Base stand upright, so choosing one removes a stored lean."),
+                       "Base - Wavy Walls and both Walls Only styles stand upright, so choosing one "
+                       "removes a stored lean."),
     SettingInteraction("bore_style", "wall", "default", "bore",
-                       "Wall Only and Wavy Base take the bin wall unless Wall is explicitly set."),
+                       "Base - Wavy Walls and Walls Only take the bin wall; Base - Straight Walls "
+                       "keeps its own internal wall."),
     SettingInteraction("bore_style", "zone", "auto-adjust", "bore-sizing",
-                       "Wall Only and Wavy Base size the Base to the sleeves' outer envelope; "
-                       "Wavy Base also sizes the bin around it."),
-    SettingInteraction("wall_style", "zone", "auto-adjust", "bore-sizing",
-                       "Wavy walls reach further than straight walls."),
+                       "Walls Only sizes to the sleeves' outer envelope; Wavy walls reach further "
+                       "than straight walls."),
+    SettingInteraction("bore_style", "depth", "default", "bore-editor",
+                       "Switching from Walls Only to a Base style keeps a floor-reaching cavity "
+                       "by taking the Bore's Height as Hole depth."),
+    SettingInteraction("xy_size_mode", "zone", "auto-adjust", "bore-sizing",
+                       "Auto size bore to bin fills the usable bin; Auto size bin to bore fits the "
+                       "bin around the Bore's minimum footprint."),
+    SettingInteraction("height_size_mode", "height", "auto-adjust", "bore-sizing",
+                       "Auto size bore to bin derives Height from the bin, connector keep-out and "
+                       "Edge Mount screwdriver access; Auto size bin to bore keeps Height and "
+                       "resizes the bin."),
     SettingInteraction("angle", "angle_towards", "enable/disable", "bore-editor",
                        "Direction is shown only for a Bore that is actually leaned."),
     SettingInteraction("item.profile", "angle", "reset", "bore-editor",

@@ -132,7 +132,7 @@ process.stdout.write(JSON.stringify({ parts: state.spacePartDefaults }));
         design = json.loads(json.dumps(BIN))
         design["layout"]["features"] = [{
             "kind": "bore", "zone": [8, 8, 40, 40], "count": 3, "along": "x", "full_span": False,
-            "options": {"diameter": 6, "height": 20, "wall": 1.4, "text": "x", "auto_grid": False},
+            "options": {"diameter": 6, "height": 20, "wall": 1.4, "text": "x", "xy_size_mode": "manual"},
         }, {
             "kind": "text", "zone": [1, 1, 9, 9], "count": None, "along": "x", "full_span": False,
             "options": {"text": "HELLO", "font_size": 5},

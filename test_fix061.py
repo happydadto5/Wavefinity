@@ -451,23 +451,75 @@ process.stdout.write(JSON.stringify(results));
         self.assertLess(body.index("Nest type"), body.index('"Tool thickness"'))
         self.assertIn("nestFingerAccessVisible(holderStyle, assist)", body)
 
-    def test_bore_wavy_base_hides_inapplicable_sizing_but_keeps_height(self):
-        out = node_run(function_source("boreSizingControlsFor") + """
-process.stdout.write(JSON.stringify({ wavy: boreSizingControlsFor("wavy_base"),
-  full: boreSizingControlsFor("full_base"), wall: boreSizingControlsFor("wall_only") }));
+    def test_bore_style_and_sizing_mode_helpers(self):
+        out = node_run(
+            function_source("normalizeBoreStyle") + function_source("boreStyleOf")
+            + function_source("boreXyMode") + function_source("boreHeightMode") + """
+const BORE_STYLES = [["base_straight", "a"], ["base_wavy", "b"], ["walls_straight", "c"], ["walls_wavy", "d"]];
+const BORE_LEGACY_STYLES = { full_base: "base_straight", wavy_base: "base_wavy" };
+const boreWallsOnly = style => style === "walls_straight" || style === "walls_wavy";
+const state = { draftResolvedOptions: {} };
+const of = options => ({ options });
+process.stdout.write(JSON.stringify({
+  legacy: [normalizeBoreStyle("full_base"), normalizeBoreStyle("wavy_base"),
+    normalizeBoreStyle("wall_only", "straight"), normalizeBoreStyle("wall_only", "wavy"),
+    normalizeBoreStyle(undefined), normalizeBoreStyle("walls_straight")],
+  baseXy: boreXyMode(of({ bore_style: "base_straight" })),
+  wallsXy: boreXyMode(of({ bore_style: "walls_wavy" })),
+  wallsBoreToBin: boreXyMode(of({ bore_style: "walls_wavy", xy_size_mode: "bore_to_bin" })),
+  wallsManual: boreXyMode(of({ bore_style: "walls_straight", xy_size_mode: "manual" })),
+  baseBinToBore: boreXyMode(of({ bore_style: "base_wavy", xy_size_mode: "bin_to_bore" })),
+  height: [boreHeightMode(of({})), boreHeightMode(of({ height_size_mode: "bore_to_bin" })),
+    boreHeightMode(of({ height_size_mode: "bogus" }))],
+}));
 """)
-        self.assertEqual(out["wavy"], {"baseAuto": False, "gridAuto": False, "xyOneShot": False,
-                                       "heightAuto": True, "heightOneShot": True})
-        self.assertEqual(set(out["full"].values()), {True})
-        self.assertEqual(out["wall"], out["full"])
-        renderer = APP_JS[APP_JS.index("const boreSizing = boreSizingControlsFor(boreStyle);"):]
-        renderer = renderer[:renderer.index("// Hole: everything about the holes")]
-        self.assertIn("boreSizing.baseAuto ? autoButton(\"base\") : \"\"", renderer)
-        self.assertIn("boreSizing.xyOneShot ?", renderer)
-        self.assertIn('data-action="bore-height-to-bin"', renderer)
-        self.assertIn('value="Auto-fit"', renderer)             # disabled Auto-fit readout stays
-        # Stored dormant preferences are never deleted by choosing Wavy Base.
-        self.assertIn("stays on record, dormant", APP_JS)
+        self.assertEqual(out["legacy"], ["base_straight", "base_wavy", "walls_straight",
+                                         "walls_wavy", "base_straight", "walls_straight"])
+        self.assertEqual(out["baseXy"], "manual")
+        self.assertEqual(out["wallsXy"], "bin_to_bore")        # Walls Only defaults to bin-to-bore
+        self.assertEqual(out["wallsBoreToBin"], "bin_to_bore")  # not offered for Walls Only
+        self.assertEqual(out["wallsManual"], "manual")          # an explicit mode is kept
+        self.assertEqual(out["baseBinToBore"], "bin_to_bore")
+        self.assertEqual(out["height"], ["manual", "bore_to_bin", "manual"])
+
+    def test_apply_bore_sizing_drops_retired_state_and_owns_bore_to_bin(self):
+        out = node_run(
+            function_source("normalizeBoreStyle") + function_source("boreStyleOf")
+            + function_source("boreXyMode") + function_source("boreHeightMode")
+            + function_source("applyBoreSizing") + """
+const BORE_STYLES = [["base_straight", "a"], ["base_wavy", "b"], ["walls_straight", "c"], ["walls_wavy", "d"]];
+const BORE_LEGACY_STYLES = { full_base: "base_straight", wavy_base: "base_wavy" };
+const boreWallsOnly = style => style === "walls_straight" || style === "walls_wavy";
+const binInsideExtent = () => [40, 30];
+const state = { draftResolvedOptions: {}, pinnedZone: { width: true, depth: true },
+  design: { box: {} } };
+const legacy = { kind: "bore", zone: [-5, -5, 5, 5], options: {
+  bore_style: "wavy_base", auto_base: true, auto_height: true, auto_grid: true,
+  wall_style: "straight", wall: 2, height: 9, angle: 30, angle_towards: "left" } };
+applyBoreSizing(legacy);
+const fill = { kind: "bore", zone: [-5, -5, 5, 5], options: {
+  bore_style: "base_straight", xy_size_mode: "bore_to_bin", height_size_mode: "bore_to_bin", height: 9 } };
+const filled = applyBoreSizing(fill);
+const walls = { kind: "bore", zone: [-5, -5, 5, 5], options: {
+  bore_style: "walls_wavy", xy_size_mode: "bore_to_bin", wall: 1.2, angle: 20 } };
+const wallsFilled = applyBoreSizing(walls);
+process.stdout.write(JSON.stringify({ legacy, fill, filled, walls, wallsFilled, pinned: state.pinnedZone }));
+""")
+        legacy = out["legacy"]["options"]
+        self.assertEqual(legacy["bore_style"], "base_wavy")
+        for retired in ("auto_base", "auto_height", "auto_grid", "wall_style", "wall",
+                        "angle", "angle_towards"):
+            self.assertNotIn(retired, legacy)
+        self.assertEqual((legacy["xy_size_mode"], legacy["height_size_mode"]), ("manual", "manual"))
+        self.assertEqual(out["legacy"]["zone"], [-5, -5, 5, 5])   # no hidden fill
+        self.assertTrue(out["filled"])
+        self.assertEqual(out["fill"]["zone"], [-20, -15, 20, 15])
+        self.assertNotIn("height", out["fill"]["options"])        # hidden manual height never wins
+        # Walls Only never offers bore-to-bin: it falls back to its default mode.
+        self.assertFalse(out["wallsFilled"])
+        self.assertEqual(out["walls"]["options"]["xy_size_mode"], "bin_to_bore")
+        self.assertEqual(out["walls"]["options"]["wall"], 1.2)
+        self.assertNotIn("angle", out["walls"]["options"])
 
     STALE_PRELUDE = r"""
 const timers = [];

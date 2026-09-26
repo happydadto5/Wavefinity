@@ -317,23 +317,30 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn("Y quantity", labels)
         self.assertIn("Angle °", labels)
 
-    def test_bore_catalog_exposes_style_and_wall_style_enums(self):
+    def test_bore_catalog_exposes_style_and_sizing_mode_enums(self):
         parts = {part["kind"]: part for part in catalog_payload()["parts"]}
         fields = {field["key"]: field for field in parts["bore"]["fields"]}
         self.assertEqual(fields["bore_style"]["type"], "enum")
-        self.assertEqual(fields["wall_style"]["type"], "enum")
+        # The two sizing modes are stored words, not editor number fields.
+        self.assertEqual(inserts._registry.OPTION_TYPES["xy_size_mode"], "enum")
+        self.assertEqual(inserts._registry.OPTION_TYPES["height_size_mode"], "enum")
+        # Fix 068: the redundant Bore wall style and the Auto booleans are gone.
+        for retired in ("wall_style", "auto_base", "auto_height", "auto_grid"):
+            self.assertNotIn(retired, fields)
         self.assertFalse(parts["bore"]["flags"]["qty"])
 
-    def test_bore_resolved_defaults_are_full_base(self):
+    def test_bore_resolved_defaults_are_base_straight(self):
         design = default_design()
         item = {"name": "tube", "profile": "round",
                 "segments": [{"length": 40, "diameter": 6}], "clearance": 0.25}
         plain = default_feature_payload({"design": design, "kind": "bore", "item": item})
-        self.assertEqual(plain["resolved_options"]["bore_style"], "full_base")
+        self.assertEqual(plain["resolved_options"]["bore_style"], "base_straight")
         self.assertEqual(plain["resolved_options"]["wall"], 1.6)
-        self.assertEqual(plain["resolved_options"]["wall_style"], "wavy")
+        self.assertEqual(plain["resolved_options"]["xy_size_mode"], "manual")
+        self.assertEqual(plain["resolved_options"]["height_size_mode"], "manual")
+        self.assertNotIn("wall_style", plain["resolved_options"])
 
-    def test_wall_only_bore_default_wall_comes_from_the_bin_wall(self):
+    def test_walls_only_bore_default_wall_comes_from_the_bin_wall(self):
         design = default_design()
         design["box"].update({"wall": 2.4, "standard_walls": False, "x": 64.0, "y": 64.0})
         item = {"name": "tube", "profile": "round",
@@ -341,36 +348,65 @@ class WebApplicationTests(unittest.TestCase):
         full = default_feature_payload({"design": design, "kind": "bore", "item": item})
         self.assertEqual(full["resolved_options"]["wall"], 1.6)
         feature = full["feature"]
-        feature["options"] = {**feature.get("options", {}), "bore_style": "wall_only"}
+        feature["options"] = {**feature.get("options", {}), "bore_style": "walls_wavy"}
         feature["options"].pop("wall", None)
         feature["zone"] = [-20.0, -20.0, 20.0, 20.0]
         design["layout"]["features"] = [feature]
         result = draft_payload({"design": design, "feature": feature})
-        self.assertEqual(result["resolved_options"]["bore_style"], "wall_only")
+        self.assertEqual(result["resolved_options"]["bore_style"], "walls_wavy")
         self.assertEqual(result["resolved_options"]["wall"], design["box"]["wall"])
+        # Walls Only sizes the bin around itself by default.
+        self.assertEqual(result["resolved_options"]["xy_size_mode"], "bin_to_bore")
+        self.assertEqual(result["feature"]["options"]["xy_size_mode"], "bin_to_bore")
 
-    def test_bore_editor_source_handles_wall_only_as_strings_and_upright(self):
+    def test_bore_editor_source_has_four_styles_and_persistent_sizing_modes(self):
         app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
-        for text in ("Full Base", "Wall Only", "Wavy Walls", "Straight Walls",
-                     'data-draft="option:bore_style"', 'data-draft="option:wall_style"'):
-            self.assertIn(text, app_js)
+        start = app_js.index("    if (isBore) {")
+        renderer = app_js[start:app_js.index('    } else if (isPocket || one.kind === "slot") {', start)]
+        # Exactly four Style labels, one owner, no secondary Bore Walls selector.
+        for label in ("Base - Straight Walls", "Base - Wavy Walls",
+                      "Straight Walls Only", "Wavy Walls Only"):
+            self.assertIn(label, app_js)
+        self.assertEqual(renderer.count('data-draft="option:bore_style"'), 1)
+        self.assertNotIn("option:wall_style", renderer)
+        self.assertNotIn("wallStyleField", renderer)
+        # Persistent sizing modes replace the toggle buttons and one-shot buttons.
+        for text in ('data-action="bore-auto"', 'data-action="bore-xy-to-bin"',
+                     'data-action="bore-xy-to-bore"', 'data-action="bore-height-to-bin"',
+                     'data-action="bore-height-to-bore"', "bore-one-shot", 'value="Auto"',
+                     "autoButton", "autoField"):
+            self.assertNotIn(text, renderer, text)
+        for name in ("sizeBoreBaseToBinOnce", "sizeBoreHeightToBinOnce",
+                     "sizeBinHeightToBoreOnce", "enableBoreAuto", "manualizeBoreAuto",
+                     "applyBoreAuto", "boreSizingControlsFor", "finishBoreAutoChange"):
+            self.assertNotIn(name, app_js, name)
+        self.assertNotIn("result.wavy_base_bin", app_js)
+        for text in ("Set base width / length", "Set height", "Auto size bore to bin",
+                     "Auto size bin to bore", '"xy_size_mode"', '"height_size_mode"'):
+            self.assertIn(text, renderer, text)
+        # Counts are always explicit fields, never an Auto pair.
+        self.assertIn('gridField("columns", "X count")', renderer)
+        self.assertIn('gridField("rows", "Y count")', renderer)
+        # Walls Only: no Base Width / Length, thickness only there, depth only for Base.
+        self.assertIn("const showXy = !wallsOnly && xyMode === \"manual\";", renderer)
+        self.assertIn('${wallsOnly ? "" : optionField("depth"', renderer)
+        self.assertIn('${wallsOnly ? dividerThicknessField(boreWallShown, "option:wall") : ""}', renderer)
+        self.assertNotIn('optionField("wall"', renderer)
+        # The persistent bin-to-bore pass reuses the one expand endpoint.
+        recon = app_js[app_js.index("async function reconcileBoreBin(result) {"):]
+        recon = recon[:recon.index("\n}\n")]
+        self.assertIn("sizeBinHeightToBore({ silent: true })", recon)
+        self.assertIn("autoExpandBin({ keepDraft: true, silent: true, fit: true })", recon)
+        self.assertIn("state.boreFitSignature", recon)
+        self.assertIn("fit_height_to_bore: true", app_js)
         # Style words never go through the numeric option path.
-        self.assertIn('"bore_style", "wall_style", "holder_style"', app_js)
-        self.assertIn('["wall_only", "wavy_base"].includes(chosen) ? chosen : "full_base"', app_js)
-        # Wavy Base is the third style and sizes the bin from the server's answer.
-        for text in ('["wavy_base", "Wavy Base"]', "result.wavy_base_bin"):
-            self.assertIn(text, app_js)
-        # Saved Auto Base / Auto Grid survive a trip through Wavy Base.
-        style_change = app_js[app_js.index('if (changed === "option:bore_style")'):]
-        style_change = style_change[:style_change.index('option:wall_style')]
-        self.assertNotIn("delete one.options.auto_base", style_change)
-        self.assertNotIn("delete one.options.auto_grid", style_change)
-        self.assertIn('if (opts.bore_style === "wavy_base") return false;', app_js)
-        self.assertIn("one.options.angle = 0;", app_js)
-        self.assertIn("delete one.options.angle_towards;", app_js)
-        # Depth and lean controls disappear; wall uses the preset list.
-        self.assertIn('${wallOnly ? "" : optionField("depth"', app_js)
-        self.assertIn('dividerThicknessField(boreWallShown, "option:wall")', app_js)
+        self.assertIn('"bore_style", "wall_style", "xy_size_mode", "height_size_mode", "holder_style"', app_js)
+        # Walls Only -> Base keeps a floor-reaching cavity by taking the Height as depth.
+        style_change = app_js[app_js.index('if (changed === "option:bore_style") {'):]
+        style_change = style_change[:style_change.index('if (changed === "option:xy_size_mode")')]
+        self.assertIn("one.options.depth = resolvedHeight;", style_change)
+        self.assertIn('one.options.xy_size_mode = "bin_to_bore";', style_change)
+        self.assertIn("delete one.options.angle_towards;", style_change)
         # Sizing mirrors the backend shell reach from the catalog's wave values.
         sizing = app_js[app_js.index("function sizeBoreToGrid(one) {"):]
         sizing = sizing[:sizing.index("function sizePostToRow")] if "function sizePostToRow" in sizing else sizing
@@ -380,10 +416,22 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn("2 * amplitude + wall * depthFactor + waveNoiseFloor", sizing)
         # Round profiles use a conservative circumscribed clear span (256 sides).
         self.assertIn("held / Math.cos(Math.PI / 256)", sizing)
-        # The Wall Only base foot (WALL_ONLY_FOOT) counts on both outside sides,
-        # for Wall Only only - never Wavy Base.
-        self.assertIn('wallOnlyFoot = boreStyle === "wall_only" ? 0.5 : 0', sizing)
+        # The Walls Only base foot (WALL_ONLY_FOOT) counts on both outside sides,
+        # for Walls Only only - never Base - Wavy Walls.
+        self.assertIn("wallOnlyFoot = walls ? 0.5 : 0", sizing)
         self.assertIn("2 * shellReach + 2 * wallOnlyFoot", sizing)
+        # Old Auto booleans are no longer state owners anywhere in the browser.
+        for text in ("options.auto_base", "options.auto_height", "options.auto_grid",
+                     "opts.auto_base", "opts.auto_height", "opts.auto_grid"):
+            self.assertNotIn(text, app_js, text)
+
+    def test_bore_pocket_slot_floor_gap_rule_is_kept_only_for_pocket_and_slot(self):
+        app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        body = app_js[app_js.index("function keepCutBelowHeight("):]
+        body = body[:body.index("\nfunction updateDraftFromFields")]
+        self.assertIn('if (one.kind === "bore") {', body)
+        self.assertIn("gap = 0;", body)
+        self.assertIn("gap = 2", body)          # the Pocket / Slot default is unchanged
 
     def test_hex_bit_bore_default_holds_the_bit_and_stands_upright(self):
         design = default_design()
@@ -1492,6 +1540,99 @@ class WebApplicationTests(unittest.TestCase):
         preview = preview_payload({"design": expanded["design"]})
         self.assertFalse(preview["feature_errors"])
         self.assertIsNone(preview["draft_error"])
+
+    def _sized_bore(self, design, **options):
+        feature = default_feature_payload({
+            "design": design, "kind": "bore",
+            "item": {"name": "tube", "profile": "round", "clearance": 0.25,
+                     "segments": [{"length": 40.0, "diameter": 20.0}]},
+        })["feature"]
+        feature["options"] = {"height": 20.0, "depth": 14.0, **options}
+        return feature
+
+    def test_bin_to_bore_width_length_fits_the_smallest_bin_around_the_bore(self):
+        for style in ("walls_wavy", "walls_straight", "base_straight", "base_wavy"):
+            with self.subTest(style=style):
+                design = default_design()
+                design["box"].update({"x": 160.0, "y": 160.0})
+                feature = self._sized_bore(
+                    design, bore_style=style, xy_size_mode="bin_to_bore", columns=2, rows=1)
+                feature["zone"] = [-40.0, -40.0, 40.0, 40.0]
+                design["layout"]["features"] = [feature]
+                # The browser holds a bin_to_bore zone at its minimum footprint.
+                fitted = feature_fit_payload({"design": design, "feature": feature})["feature"]
+                design["layout"]["features"] = [fitted]
+                answer = draft_payload({"design": design, "feature": fitted, "index": 0})
+                cheap = answer["bore_bin"]
+                expanded = expand_layout_payload({"design": design, "anchor": 0, "fit": True})
+                # The cheap answer the browser polls and the exact fit agree,
+                # and the bin really shrank around the Bore.
+                self.assertEqual((expanded["box"]["x"], expanded["box"]["y"]),
+                                 (cheap["x"], cheap["y"]))
+                self.assertLess(expanded["box"]["x"], 160.0)
+                self.assertTrue(expanded["changed"])
+                preview = preview_payload({"design": expanded["design"]})
+                self.assertFalse(preview["feature_errors"])
+                # A later Bore edit (more holes) grows the requested bin again.
+                more = dict(fitted, options={**fitted["options"], "columns": 4})
+                more = feature_fit_payload({"design": design, "feature": more})["feature"]
+                design2 = {**design, "layout": {**design["layout"], "features": [more]}}
+                bigger = draft_payload({"design": design2, "feature": more, "index": 0})["bore_bin"]
+                self.assertGreater(bigger["x"], cheap["x"])
+                # Manual Bores never ask for a bin.
+                manual = dict(fitted, options={**fitted["options"], "xy_size_mode": "manual"})
+                self.assertNotIn("bore_bin", draft_payload({
+                    "design": design, "feature": manual, "index": 0}))
+
+    def test_bin_to_bore_height_reports_and_resizes_the_bin_height(self):
+        design = default_design()
+        design["box"].update({"x": 96.0, "y": 96.0, "z": 60.0})
+        feature = self._sized_bore(design, bore_style="base_straight", height=30.0, depth=20.0,
+                                   height_size_mode="bin_to_bore")
+        feature["zone"] = [-20.0, -20.0, 20.0, 20.0]
+        design["layout"]["features"] = [feature]
+        answer = draft_payload({"design": design, "feature": feature, "index": 0})
+        self.assertEqual(answer["resolved_options"]["height"], 30.0)   # stored Height is authoritative
+        wanted = answer["bore_bin_height"]
+        expanded = expand_layout_payload({
+            "design": design, "anchor": 0, "fit_height_to_bore": True})
+        self.assertEqual(expanded["box"]["z"], wanted)
+        self.assertLess(expanded["box"]["z"], 60.0)
+        # A taller Bore asks for a taller bin, through the same Space maximum rule.
+        tall = dict(feature, options={**feature["options"], "height": 50.0, "depth": 40.0})
+        design["layout"]["features"] = [tall]
+        self.assertGreater(
+            draft_payload({"design": design, "feature": tall, "index": 0})["bore_bin_height"], wanted)
+        with self.assertRaisesRegex(ValueError, "maximum height"):
+            expand_layout_payload({"design": design, "anchor": 0,
+                                   "fit_height_to_bore": True, "max_height": 40.0})
+        # Other Height modes never report a bin height.
+        for mode in ("manual", "bore_to_bin"):
+            other = dict(feature, options={**feature["options"], "height_size_mode": mode})
+            self.assertNotIn("bore_bin_height", draft_payload({
+                "design": design, "feature": other, "index": 0}))
+
+    def test_bore_to_bin_modes_follow_the_bin_through_the_payloads(self):
+        design = default_design()
+        design["box"].update({"x": 96.0, "y": 88.0, "z": 60.0})
+        feature = self._sized_bore(design, bore_style="base_straight", xy_size_mode="bore_to_bin",
+                                   height_size_mode="bore_to_bin", height=5.0)
+        feature["zone"] = [-8.0, -8.0, 8.0, 8.0]
+        design["layout"]["features"] = [feature]
+        first = draft_payload({"design": design, "feature": feature, "index": 0})
+        inside = first["feature"]["zone"]
+        self.assertNotIn("height", first["feature"]["options"])      # hidden Height never wins
+        self.assertGreater(inside[2] - inside[0], 80.0)
+        # Growing the bin later grows the Base and lets the Height follow the new bin.
+        design["box"].update({"x": 128.0, "y": 96.0, "z": 72.0})
+        later = draft_payload({"design": design, "feature": first["feature"], "index": 0})
+        self.assertGreater(later["feature"]["zone"][2] - later["feature"]["zone"][0],
+                           inside[2] - inside[0] + 20.0)
+        self.assertGreater(later["resolved_options"]["height"], first["resolved_options"]["height"])
+        # Applying keeps the exact derived zone (no snapping shrink).
+        applied = apply_feature_payload({"design": design, "feature": first["feature"], "index": 0})
+        saved = applied["design"]["layout"]["features"][0]["zone"]
+        self.assertAlmostEqual(saved[2] - saved[0], later["feature"]["zone"][2] - later["feature"]["zone"][0], places=6)
 
     def test_auto_expand_leaves_a_layout_that_already_fits_alone(self):
         design = default_design()
@@ -3868,7 +4009,7 @@ const tick = () => new Promise(r => setImmediate(r));
         self.assertNotIn("Depth (Inside)", app_js)
         # Untouched part-specific Length fields.
         self.assertIn('field("Length", "item_length"', app_js)
-        self.assertIn('autoField("Length", "base", "depth", "mm")', app_js)
+        self.assertIn('field("Length", "depth", fmt(shownDepth)', app_js)
 
     def test_responsive_workspace_height_is_viewport_aware(self):
         # Item 9A: no more hard-coded 720px on every <=980px viewport - a
@@ -4557,7 +4698,7 @@ class Fix20StorageBoxDividerTests(unittest.TestCase):
         self.assertNotIn("b4bEnabled()", elig)
 
         render_start = app_js.index("function renderDraftFields() {")
-        render_end = app_js.index("function finishBoreAutoChange(", render_start)
+        render_end = app_js.index("function syncNest2DWorkspace(", render_start)
         render_code = app_js[render_start:render_end]
         self.assertIn(
             "if (!b4bEnabled()) {\n      const hasLabels = opt.label_divisions === true;",

@@ -522,6 +522,23 @@ def edge_mount_hole_plan(box: BoxSpec) -> tuple[dict[str, float], ...]:
     )
 
 
+def edge_mount_access_lowest_z(box: BoxSpec) -> float | None:
+    """Absolute Z of the lowest physical point of the screwdriver-access cutter.
+
+    The large access passage crosses the bin interior, so it is the obstruction
+    an interior part must stay clear of. Uses the same print-safe circumscribed
+    profile the cutter is built from (see ``_axis_print_safe_hole``) and the most
+    restrictive - lowest - hole. ``None`` when Screw Mounting is off.
+    """
+    holes = edge_mount_hole_plan(box)
+    if not holes:
+        return None
+    return min(
+        hole["z_mm"] - _print_safe_profile_radius(hole["access_diameter_mm"] / 2.0)
+        for hole in holes
+    )
+
+
 def edge_mount_summary(box: BoxSpec) -> dict[str, object]:
     """Authoritative report used by preview/API/debug information."""
     spec = box.edge_mount

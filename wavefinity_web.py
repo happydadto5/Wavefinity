@@ -117,13 +117,13 @@ from organizer_inserts import (
     layout_from_dict,
     layout_to_dict,
     layout_zone,
-    normalize_bore_auto,
+    normalize_bore_modes,
     moved_feature,
     occupied_zones,
     option_value,
     normalize_divider_scoop,
     resized_feature,
-    wavy_base_bin_minimum,
+    bore_bin_minimum,
     scoop_zone,
     resolve_text_features,
     resolved_options,
@@ -1830,7 +1830,7 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     draft_raw = payload.get("draft")
     draft = _feature_from_json(draft_raw, layout.mode) if draft_raw else None
     if draft is not None:
-        draft = normalize_bore_auto(
+        draft = normalize_bore_modes(
             _interior_work_box(box), draft,
             base_height(_interior_work_box(box), layout.mode), layout.mode,
         )
@@ -2041,6 +2041,43 @@ def _divider_cells_payload(
     ]
 
 
+def _bore_required_bin_z(
+    request_box: BoxSpec, box: BoxSpec, mode: str, bore: Feature,
+) -> float:
+    """The bin height (mm, whole) that holds a Bore at its own resolved Height.
+
+    The one owner of "size the bin to the Bore": the expand endpoint uses it to
+    resize, and the draft answer reports it so the browser knows whether the bin
+    is already there.
+    """
+    current_base_z = base_height(box, mode)
+    bore_height = float(resolved_options(box, bore, current_base_z)["height"])
+    required_work_z = current_base_z + bore_height
+    if feature_touches_wall(box, bore):
+        required_work_z += box.z - connector_keep_out(box)
+    effective_z_offset = box.z - request_box.z
+    structural_minimum = max(
+        ORDINARY_BIN_MIN_HEIGHT_MM,
+        request_box.base_thickness + MIN_HEIGHT_ABOVE_BASE,
+    )
+    return float(math.ceil(max(
+        structural_minimum,
+        required_work_z - effective_z_offset,
+    ) - 1e-9))
+
+
+def _bore_height_bin(
+    request_box: BoxSpec, mode: str, one: Feature, box: BoxSpec,
+) -> float | None:
+    """Bin height a Height "Auto size bin to bore" Bore asks for, else ``None``."""
+    if one.kind != "bore" or one.options.get("height_size_mode") != "bin_to_bore":
+        return None
+    try:
+        return _bore_required_bin_z(request_box, box, mode, one)
+    except ValueError:
+        return None
+
+
 def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box, layout, label, _part, label_location, scoop = _design(payload["design"])
     if box.b4b.enabled:
@@ -2071,7 +2108,7 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     request_box = box
     box = _interior_work_box(request_box)
     one = _feature_from_json(payload["feature"], layout.mode)
-    one = normalize_bore_auto(box, one, base_height(box, layout.mode), layout.mode)
+    one = normalize_bore_modes(box, one, base_height(box, layout.mode), layout.mode)
     nest_solids = None
     if one.kind == "nest":
         request_box, box, _updated, one, _warnings, nest_solids = _resolve_photo_nest_edit(
@@ -2150,9 +2187,15 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "feature": feature_to_dict(one, layout.mode),
         "resolved_options": shown,
     }
-    wavy_bin = wavy_base_bin_minimum(box, [one], base_height(box, layout.mode), layout.mode)
-    if wavy_bin is not None:
-        result["wavy_base_bin"] = {"x": wavy_bin[0], "y": wavy_bin[1]}
+    # A Bore that sizes the bin around itself (Auto size bin to bore) reports the
+    # cheap smallest bin around it; the browser runs the exact fit when the bin
+    # is not already there.
+    bore_bin = bore_bin_minimum(box, [one], base_height(box, layout.mode), layout.mode)
+    if bore_bin is not None:
+        result["bore_bin"] = {"x": bore_bin[0], "y": bore_bin[1]}
+    height_bin = _bore_height_bin(request_box, layout.mode, one, box)
+    if height_bin is not None:
+        result["bore_bin_height"] = height_bin
     if one.kind == "divider":
         result["divider_cells"] = _divider_cells_payload(box, one, layout.mode)
     return result
@@ -2217,7 +2260,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     request_box = box
     box = _interior_work_box(request_box)
     one = _feature_from_json(payload["feature"], layout.mode)
-    one = normalize_bore_auto(box, one, base_height(box, layout.mode), layout.mode)
+    one = normalize_bore_modes(box, one, base_height(box, layout.mode), layout.mode)
     if one.kind == "divider":
         one = normalize_divider_scoop(
             box, one, base_height(box, layout.mode)
@@ -2258,8 +2301,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # a user-draggable footprint. Keep their exact normalized zone instead of
     # passing it through ordinary 1 mm resize/move snapping.
     if not (one.kind == "scoop" or (one.kind == "divider" and one.full_span)
-            or (one.kind == "bore" and one.options.get("auto_base")
-                 and one.options.get("bore_style") != "wavy_base")):
+            or (one.kind == "bore" and one.options.get("xy_size_mode") == "bore_to_bin")):
         width, depth = one.zone.width, one.zone.depth
         cx, cy = one.zone.centre
         one = resized_feature(one, box, (width, depth), layout.mode, layout.snap)
@@ -2461,21 +2503,7 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if anchor is None or originals[anchor].kind != "bore":
             raise ValueError("select a Bore before sizing the bin height")
         bore = originals[anchor]
-        current_base_z = base_height(box, mode)
-        bore_height = float(resolved_options(box, bore, current_base_z)["height"])
-        required_work_z = current_base_z + bore_height
-        if feature_touches_wall(box, bore):
-            required_work_z += box.z - connector_keep_out(box)
-
-        effective_z_offset = box.z - request_box.z
-        structural_minimum = max(
-            ORDINARY_BIN_MIN_HEIGHT_MM,
-            request_box.base_thickness + MIN_HEIGHT_ABOVE_BASE,
-        )
-        candidate_z = float(math.ceil(max(
-            structural_minimum,
-            required_work_z - effective_z_offset,
-        ) - 1e-9))
+        candidate_z = _bore_required_bin_z(request_box, box, mode, bore)
         max_height = payload.get("max_height")
         if max_height is not None and candidate_z > float(max_height) + 1e-9:
             raise ValueError(
@@ -2515,37 +2543,16 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "changed": validated_request.z != request_box.z,
         }
 
-    if (fit and anchor is not None and originals[anchor].kind == "bore"
-            and originals[anchor].options.get("auto_base")):
-        # Auto size bin on a legacy Auto-Base Bore: materialize a concrete
-        # Base sized to the Bore's own resolved footprint before the bin
-        # search runs, so the button can size the bin around it.
-        legacy = originals[anchor]
-        base_z = base_height(box, mode)
-        resolved = resolved_options(box, legacy, base_z)
-        materialized = dict(legacy.options)
-        materialized["auto_base"] = False
-        auto_grid = bool(legacy.options.get("auto_grid"))
-        if auto_grid:
-            materialized["columns"] = resolved["columns"]
-            materialized["rows"] = resolved["rows"]
-            materialized["auto_grid"] = False
-        temp = replace(legacy, options=materialized)
-        footprint = feature_min_footprint(box, temp, base_z)
-        if footprint is None:
-            raise ValueError("Auto size bin: this Bore has no fittable footprint")
-        snap = layout.snap or EDITOR_SNAP
-        width, depth = (math.ceil(v / snap - 1e-6) * snap for v in footprint)
-        materialized_bore = resized_feature(temp, box, (width, depth), mode, layout.snap)
-        if auto_grid:
-            restored = dict(materialized_bore.options)
-            restored.pop("columns", None)
-            restored.pop("rows", None)
-            restored["auto_grid"] = True
-            materialized_bore = replace(materialized_bore, options=restored)
-        originals[anchor] = materialized_bore
-
     def sized(one: Feature, trial: BoxSpec) -> Feature:
+        exact = False
+        if one.kind == "bore":
+            # A Bore's persisted sizing modes are re-resolved against each trial
+            # bin: bore_to_bin follows the trial's usable floor exactly, and
+            # bin_to_bore holds the Bore at its own minimum footprint.
+            one = normalize_bore_modes(trial, one, base_height(trial, mode), mode)
+            if one.options.get("xy_size_mode") == "bore_to_bin":
+                return one
+            exact = one.options.get("xy_size_mode") == "bin_to_bore"
         if one.kind == "nest" and one.contour:
             return fitted_nest_feature(one)
         if one.kind == "cradle" and one.item is not None:
@@ -2568,7 +2575,7 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 # a hair under what a leaned grid's reach needs.
                 snap = layout.snap or EDITOR_SNAP
                 grown = tuple(math.ceil(v / snap - 1e-6) * snap for v in grown)
-                width, depth = max(width, grown[0]), max(depth, grown[1])
+                width, depth = (grown if exact else (max(width, grown[0]), max(depth, grown[1])))
                 return resized_feature(one, trial, (width, depth), mode, layout.snap)
         cx, cy = one.zone.centre
         raw = Zone(cx - width / 2.0, cy - depth / 2.0,
@@ -2666,11 +2673,6 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
             )
     else:
         floor_x, floor_y = start_x, start_y
-        # A Wavy Base sizes the bin itself: the smallest legal size around it is the
-        # floor, so the bin shrinks as well as grows to meet it.
-        wavy_floor = wavy_base_bin_minimum(box, originals, base_height(box, mode), mode)
-        if wavy_floor is not None:
-            floor_x, floor_y = wavy_floor
         x, y = floor_x, floor_y
         result = fits(x, y)
         while result is None:

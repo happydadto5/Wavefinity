@@ -370,14 +370,10 @@ function partDefaultsFromFeature(feature) {
     delete copy.options.repeat_spacing_percent;
   }
   if (feature.kind === "bore") {
-    // An Auto mode is remembered as the mode itself; the numbers it supersedes
+    // A sizing mode is remembered as the mode itself; the numbers it supersedes
     // are derived from each new bin, never carried over from the old one.
-    if (copy.options.auto_base) delete copy.zone_size;
-    if (copy.options.auto_height) delete copy.options.height;
-    if (copy.options.auto_grid) {
-      delete copy.options.columns;
-      delete copy.options.rows;
-    }
+    if (copy.options.xy_size_mode && copy.options.xy_size_mode !== "manual") delete copy.zone_size;
+    if (copy.options.height_size_mode === "bore_to_bin") delete copy.options.height;
   }
   if (!partInfo(feature.kind)?.flags?.photo && feature.item) copy.item = clone(feature.item);
   return cleanPartDefaultEntry(copy);
@@ -445,11 +441,7 @@ function seedFeatureFromPartDefaults(feature, entry) {
   }
   seeded.options = { ...(seeded.options || {}), ...remembered.options };
   if (seeded.kind === "bore") {
-    if (seeded.options.auto_height) delete seeded.options.height;
-    if (seeded.options.auto_grid) {
-      delete seeded.options.columns;
-      delete seeded.options.rows;
-    }
+    if (seeded.options.height_size_mode === "bore_to_bin") delete seeded.options.height;
   }
   if (Object.hasOwn(remembered, "count") && seeded.kind !== "nest") seeded.count = remembered.count;
   if (remembered.along) seeded.along = remembered.along;
@@ -4961,13 +4953,48 @@ function updateDraftOverhangNote() {
     : `Extends ${fmt(overhang)} mm above rim`;
 }
 
-// Which Bore Base sizing controls apply to a style. Wavy Base sizes its own
-// envelope (and the bin around it), so Base Auto and the Width / Length
-// one-shot buttons do not apply; Height stays meaningful. Stored auto_base /
-// auto_grid are left alone so they return when another style is chosen.
-function boreSizingControlsFor(boreStyle) {
-  const wavy = boreStyle === "wavy_base";
-  return { baseAuto: !wavy, gridAuto: !wavy, xyOneShot: !wavy, heightAuto: true, heightOneShot: true };
+// Bore style and sizing model (Fix 068). One persisted Style word and two
+// persisted sizing modes replace the old wall_style / auto_base / auto_height /
+// auto_grid state. Mirrors normalize_bore_style() / normalize_bore_modes() in
+// organizer_inserts/_bore.py.
+const BORE_STYLES = [
+  ["base_straight", "Base - Straight Walls"],
+  ["base_wavy", "Base - Wavy Walls"],
+  ["walls_straight", "Straight Walls Only"],
+  ["walls_wavy", "Wavy Walls Only"],
+];
+const BORE_LEGACY_STYLES = { full_base: "base_straight", wavy_base: "base_wavy" };
+const boreWallsOnly = style => style === "walls_straight" || style === "walls_wavy";
+const boreWavy = style => style === "base_wavy" || style === "walls_wavy";
+
+function normalizeBoreStyle(style, wallStyle) {
+  const word = String(style ?? "");
+  if (BORE_STYLES.some(([value]) => value === word)) return word;
+  if (BORE_LEGACY_STYLES[word]) return BORE_LEGACY_STYLES[word];
+  if (word === "wall_only") return wallStyle === "straight" ? "walls_straight" : "walls_wavy";
+  return "base_straight";
+}
+
+function boreStyleOf(one) {
+  return normalizeBoreStyle(
+    one?.options?.bore_style ?? state.draftResolvedOptions?.bore_style,
+    one?.options?.wall_style,
+  );
+}
+
+// Width / Length sizing: Walls Only has no Base fields, so it only chooses
+// between Manually and sizing the bin to itself (its default).
+function boreXyMode(one) {
+  const style = boreStyleOf(one);
+  const walls = boreWallsOnly(style);
+  const mode = one?.options?.xy_size_mode;
+  const allowed = walls ? ["manual", "bin_to_bore"] : ["manual", "bore_to_bin", "bin_to_bore"];
+  return allowed.includes(mode) ? mode : (walls ? "bin_to_bore" : "manual");
+}
+
+function boreHeightMode(one) {
+  const mode = one?.options?.height_size_mode;
+  return ["manual", "bore_to_bin", "bin_to_bore"].includes(mode) ? mode : "manual";
 }
 
 function wallStyleSelect(style) {
@@ -5073,12 +5100,6 @@ function renderDraftFields() {
         const { transform, ...fieldOpts } = opts;
         return field(label, `option:${key}`, shown, fieldOpts);
       };
-      // Each Auto group shows literal "Auto" in same-size read-only fields;
-      // clicking one turns just that group manual (see manualizeBoreAuto).
-      const autoOn = group => one.options?.[`auto_${group}`] === true;
-      const autoButton = group => `<button type="button" class="button secondary bore-auto${autoOn(group) ? " active" : ""}" data-action="bore-auto" data-group="${group}" aria-pressed="${autoOn(group)}">Auto</button>`;
-      const autoField = (label, group, target, unit) => `<label><span class="field-label">${label}${unit ? `<span class="unit">${unit}</span>` : ""}</span>
-        <input type="text" class="bore-auto-field" value="Auto" readonly data-bore-auto-field="${group}" data-focus="${target}"></label>`;
       const gridField = (key, label) => field(label, `option:${key}`,
         one.options?.[key] ?? state.draftResolvedOptions?.[key] ?? 1, { step: "1", min: "1" });
       // Diameter is locked to the preset for a hex-bit profile.
@@ -5092,23 +5113,19 @@ function renderDraftFields() {
         ["hex_bit_short", HEX_BIT_PROFILES.hex_bit_short.label],
         ["hex_bit_long", HEX_BIT_PROFILES.hex_bit_long.label],
       ];
-      // Full Base is the solid block the holes are cut into; Wall Only builds
-      // just the perimeter sleeve(s) rising from the base. Absent = Full Base.
-      const boreStyle = one.options?.bore_style ?? state.draftResolvedOptions?.bore_style ?? "full_base";
-      const wallOnly = boreStyle === "wall_only";
-      // Wavy Base is a Full Base-style solid block with Wall Only's wavy holes;
-      // like Wall Only it stands upright and is sized by its outer envelope, and
-      // it also sizes the bin around itself.
-      const wavyBase = boreStyle === "wavy_base";
-      const envelopeStyle = wallOnly || wavyBase;
-      const boreSizing = boreSizingControlsFor(boreStyle);
-      const wallStyle = one.options?.wall_style ?? state.draftResolvedOptions?.wall_style ?? "wavy";
-      const styleField = `<label><span class="field-label">Style</span><select data-draft="option:bore_style">
-        ${[["full_base", "Full Base"], ["wall_only", "Wall Only"], ["wavy_base", "Wavy Base"]].map(([value, label]) => `<option value="${value}" ${boreStyle === value ? "selected" : ""}>${label}</option>`).join("")}
+      // One persisted Style word (Fix 068): Base styles are a solid block the
+      // holes are cut into; Walls Only builds just the perimeter sleeve(s)
+      // rising from the floor.
+      const boreStyle = boreStyleOf(one);
+      const wallsOnly = boreWallsOnly(boreStyle);
+      const xyMode = boreXyMode(one);
+      const heightMode = boreHeightMode(one);
+      const modeSelect = (label, key, value, choices) => `<label><span class="field-label">${label}</span><select data-draft="option:${key}">
+        ${choices.map(([choice, text]) => `<option value="${choice}" ${value === choice ? "selected" : ""}>${text}</option>`).join("")}
       </select></label>`;
-      const wallStyleField = wallOnly ? `<label><span class="field-label">Walls</span><select data-draft="option:wall_style">
-        ${[["wavy", "Wavy Walls"], ["straight", "Straight Walls"]].map(([value, label]) => `<option value="${value}" ${wallStyle === value ? "selected" : ""}>${label}</option>`).join("")}
-      </select></label>` : "";
+      const styleField = `<label><span class="field-label">Style</span><select data-draft="option:bore_style">
+        ${BORE_STYLES.map(([value, label]) => `<option value="${value}" ${boreStyle === value ? "selected" : ""}>${label}</option>`).join("")}
+      </select></label>`;
       const boreWallShown = one.options?.wall ?? state.draftResolvedOptions?.wall ?? state.design?.box?.wall;
       const shapeField = `<label><span class="field-label">Shape</span><select data-draft="profile">
         ${boreProfiles.map(([value, label]) => `<option value="${value}" ${draftProfile === value ? "selected" : ""}>${label}</option>`).join("")}
@@ -5119,46 +5136,35 @@ function renderDraftFields() {
         <div class="bore-group-fields">${styleField}</div>
       </div>`;
 
-      // Base: the zone the Bore occupies (solid block for Full Base) - its size and the hole
-      // grid that fills it (X / Y counts drive the same footprint as Width /
-      // Length, so they belong together).
+      // Base: the zone the Bore occupies and the hole grid that fills it. Sizing
+      // is one persistent mode per relationship (never a one-shot button); the
+      // X / Y counts are always explicit.
+      const xySelect = wallsOnly
+        ? modeSelect("Set bin width / length", "xy_size_mode", xyMode, [
+          ["manual", "Manually"], ["bin_to_bore", "Auto size bin to bore"]])
+        : modeSelect("Set base width / length", "xy_size_mode", xyMode, [
+          ["manual", "Manually"], ["bore_to_bin", "Auto size bore to bin"],
+          ["bin_to_bore", "Auto size bin to bore"]]);
+      const showXy = !wallsOnly && xyMode === "manual";
+      const showHeight = heightMode !== "bore_to_bin";
       html += `<div class="bore-group wide">
         <span class="bore-group-label">Base</span>
         <div class="bore-group-fields">
           <div class="bore-auto-row">
-            ${wavyBase
-              ? `<label><span class="field-label">Width<span class="unit">mm</span></span>
-                  <input type="text" class="bore-auto-field" value="Auto-fit" readonly disabled title="Wavy Base sizes itself and the bin around its holes"></label>
-                 <label><span class="field-label">Length<span class="unit">mm</span></span>
-                  <input type="text" class="bore-auto-field" value="Auto-fit" readonly disabled title="Wavy Base sizes itself and the bin around its holes"></label>`
-              : autoOn("base")
-              ? autoField("Width", "base", "width", "mm") + autoField("Length", "base", "depth", "mm")
-              : field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" }) +
-                field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })}
-            ${boreSizing.baseAuto ? autoButton("base") : ""}
+            ${xySelect}
+            ${showXy
+              ? field("Width", "width", fmt(shownWidth), { unit: "mm", step: "1" }) +
+                field("Length", "depth", fmt(shownDepth), { unit: "mm", step: "1" })
+              : ""}
           </div>
           <div class="bore-auto-row">
-            ${autoOn("height")
-              ? autoField("Height", "height", "option:height", "mm")
-              : optionField("height", "Height", { unit: "mm", step: "0.5" })}
-            ${autoButton("height")}
+            ${modeSelect("Set height", "height_size_mode", heightMode, [
+              ["manual", "Manually"], ["bore_to_bin", "Auto size bore to bin"],
+              ["bin_to_bore", "Auto size bin to bore"]])}
+            ${showHeight ? optionField("height", "Height", { unit: "mm", step: "0.5" }) : ""}
           </div>
           <div class="bore-auto-row">
-            ${autoOn("grid") && boreSizing.gridAuto
-              ? autoField("X count", "grid", "option:columns") + autoField("Y count", "grid", "option:rows")
-              : gridField("columns", "X count") + gridField("rows", "Y count")}
-            ${boreSizing.gridAuto ? autoButton("grid") : ""}
-          </div>
-          <div class="bore-one-shot-grid">
-            <span class="bore-one-shot-corner" aria-hidden="true"></span>
-            <span class="bore-one-shot-heading">Target Bore</span>
-            <span class="bore-one-shot-heading">Target Bin</span>
-            ${boreSizing.xyOneShot ? `<span class="bore-one-shot-row">Width / Length</span>
-            <button type="button" class="button secondary" data-action="bore-xy-to-bin" title="Resize Bore Width/Length to the bin" aria-label="Resize Bore Width/Length to the bin">Auto Size to Bin</button>
-            <button type="button" class="button secondary" data-action="bore-xy-to-bore" title="Resize bin Width/Length to the Bore" aria-label="Resize bin Width/Length to the Bore">Auto Size to Bore</button>` : ""}
-            <span class="bore-one-shot-row">Height</span>
-            <button type="button" class="button secondary" data-action="bore-height-to-bin" title="Resize Bore Height to the bin" aria-label="Resize Bore Height to the bin">Auto Size to Bin</button>
-            <button type="button" class="button secondary" data-action="bore-height-to-bore" title="Resize bin Height to the Bore" aria-label="Resize bin Height to the Bore">Auto Size to Bore</button>
+            ${gridField("columns", "X count")}${gridField("rows", "Y count")}
           </div>
         </div>
       </div>`;
@@ -5167,13 +5173,12 @@ function renderDraftFields() {
       html += `<div class="bore-group wide">
         <span class="bore-group-label">Hole</span>
         <div class="bore-group-fields bore-hole-fields">
-          ${wallStyleField}
           ${diameterField}
           ${shapeField}
-          ${wallOnly ? "" : optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
-          ${envelopeStyle ? dividerThicknessField(boreWallShown, "option:wall") : optionField("wall", "Wall", { unit: "mm", step: "0.5" })}
-          ${hexBit || envelopeStyle ? "" : optionField("angle", "Tool angle", { unit: "°", step: "1", min: "20", max: "90", transform: value => 90 - number(value, 0), tip: "90° is upright. Smaller angles lean the tool toward the selected direction." })}
-          ${hexBit || envelopeStyle || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Angle towards</span><select data-draft="option:angle_towards">
+          ${wallsOnly ? "" : optionField("depth", "Depth", { unit: "mm", step: "0.5" })}
+          ${wallsOnly ? dividerThicknessField(boreWallShown, "option:wall") : ""}
+          ${hexBit || boreStyle !== "base_straight" ? "" : optionField("angle", "Tool angle", { unit: "°", step: "1", min: "20", max: "90", transform: value => 90 - number(value, 0), tip: "90° is upright. Smaller angles lean the tool toward the selected direction." })}
+          ${hexBit || boreStyle !== "base_straight" || number(one.options?.angle ?? state.draftResolvedOptions?.angle, 0) <= 1e-9 ? "" : `<label><span class="field-label">Angle towards</span><select data-draft="option:angle_towards">
             ${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]].map(([value, label]) => `<option value="${value}" ${(one.options?.angle_towards || (one.along === "y" ? "front" : "left")) === value ? "selected" : ""}>${label}</option>`).join("")}
           </select></label>`}
         </div>
@@ -5671,101 +5676,8 @@ function renderDraftFields() {
   if (fillBtn) fillBtn.addEventListener("click", fillPartToBin);
   const growBtn = $('[data-action="grow-bin"]', $("#draft-fields"));
   if (growBtn) growBtn.addEventListener("click", event => autoExpandBin({ button: event.currentTarget }));
-  const boreXyToBin = $('[data-action="bore-xy-to-bin"]', $("#draft-fields"));
-  if (boreXyToBin) boreXyToBin.addEventListener("click", sizeBoreBaseToBinOnce);
-  const boreXyToBore = $('[data-action="bore-xy-to-bore"]', $("#draft-fields"));
-  if (boreXyToBore) boreXyToBore.addEventListener("click", event =>
-    autoExpandBin({ keepDraft: true, fit: true, button: event.currentTarget }));
-  const boreHeightToBin = $('[data-action="bore-height-to-bin"]', $("#draft-fields"));
-  if (boreHeightToBin) boreHeightToBin.addEventListener("click", sizeBoreHeightToBinOnce);
-  const boreHeightToBore = $('[data-action="bore-height-to-bore"]', $("#draft-fields"));
-  if (boreHeightToBore) boreHeightToBore.addEventListener("click", event =>
-    sizeBinHeightToBoreOnce(event.currentTarget));
   updateFitActions();
-  // Bore Auto modes: one button per group, and clicking an Auto field turns
-  // that group manual starting from what it currently resolves to.
-  $$('[data-action="bore-auto"]', $("#draft-fields")).forEach(button => button.addEventListener("click", () => {
-    const group = button.dataset.group;
-    if (state.draft.options?.[`auto_${group}`]) manualizeBoreAuto(group);
-    else enableBoreAuto(group);
-  }));
-  $$('[data-bore-auto-field]', $("#draft-fields")).forEach(input => {
-    input.addEventListener("focus", () => manualizeBoreAuto(input.dataset.boreAutoField, input.dataset.focus));
-    input.addEventListener("click", () => manualizeBoreAuto(input.dataset.boreAutoField, input.dataset.focus));
-  });
   if (state.draft?.kind === "nest") wireNestFieldActions();
-}
-
-function finishBoreAutoChange(focusKey) {
-  state.draftAutoCommit = true;
-  if (Number.isInteger(state.selected)) state.partZoneLocks[state.selected] = state.pinnedZone;
-  renderDraftFields();
-  if (focusKey) {
-    const input = $(`[data-draft="${focusKey}"]`, $("#draft-fields"));
-    if (input) { input.focus(); input.select?.(); }
-  }
-  updateSelectionButtons();
-  refreshDraftSoon();
-}
-
-function enableBoreAuto(group) {
-  const one = state.draft;
-  if (one?.kind !== "bore") return;
-  markDraftChanged();
-  one.options ||= {};
-  one.options[`auto_${group}`] = true;
-  if (group === "base") {
-    delete state.pinnedZone.width;
-    delete state.pinnedZone.depth;
-  }
-  applyBoreAuto(one);
-  finishBoreAutoChange();
-}
-
-// Leaving Height / Grid Auto seeds the manual numbers from a fresh server
-// resolve of the still-Auto draft, never from cached resolved options that may
-// predate the Auto switch.
-async function manualizeBoreAuto(group, focusKey) {
-  const one = state.draft;
-  if (!one?.options?.[`auto_${group}`] || state.boreManualizing) return;
-  markDraftChanged();
-  let resolved = null;
-  if (group !== "base") {
-    state.boreManualizing = true;
-    refreshDraftSoon.cancel();
-    const request = ++state.draftRequest;
-    try {
-      const index = draftCommitIndex();
-      const result = await api("/api/feature/draft", {
-        design: state.design, feature: one,
-        ...(index === false ? {} : { index }),
-      });
-      if (request !== state.draftRequest || state.draft !== one) return;
-      resolved = result.resolved_options || {};
-      state.draftResolvedOptions = resolved;
-    } catch (error) {
-      toast(error.message || "Could not read the current Auto values.", true);
-      return;
-    } finally {
-      state.boreManualizing = false;
-    }
-  }
-  if (!one.options?.[`auto_${group}`]) return;
-  delete one.options[`auto_${group}`];
-  if (group === "base") {
-    // Keep the current full-interior size as the manual Base and own both axes.
-    pinDraftAxis("width");
-    pinDraftAxis("depth");
-  } else if (group === "height") {
-    if (Number.isFinite(number(resolved.height, NaN))) one.options.height = number(resolved.height);
-  } else if (group === "grid") {
-    for (const key of ["columns", "rows"]) {
-      if (Number.isFinite(number(resolved[key], NaN))) {
-        one.options[key] = Math.max(1, Math.round(number(resolved[key])));
-      }
-    }
-  }
-  finishBoreAutoChange(focusKey);
 }
 
 function syncNest2DWorkspace() {
@@ -6544,21 +6456,26 @@ function sizeCradleToItem(one) {
 // minimum - a hand-set Base size is never shrunk back. An axis left on "auto"
 // count still keeps room for at least one hole so the fitter always has
 // something to divide.
-// Persisted Bore Auto modes (options auto_base / auto_height / auto_grid).
-// Base Auto owns the zone (the whole usable floor, never a pin or a minimum
-// grid); Height and Grid Auto own their numbers by leaving them unset so the
-// engine derives them. Returns true when Base Auto placed the zone.
-function applyBoreAuto(one) {
+// Persisted Bore sizing modes (options xy_size_mode / height_size_mode). Mirrors
+// normalize_bore_modes() in organizer_inserts/_bore.py: retired state is dropped,
+// Base "bore to bin" owns the zone (the whole usable floor, never a pin or a
+// minimum grid), and Height "bore to bin" owns its number by leaving it unset so
+// the engine derives it. Returns true when "bore to bin" placed the zone.
+function applyBoreSizing(one) {
   if (one?.kind !== "bore") return false;
   const opts = one.options ||= {};
-  if (opts.auto_height) delete opts.height;
-  // Wavy Base sizes itself; a saved Auto Base / Auto Grid is kept but dormant.
-  if (opts.bore_style === "wavy_base") return false;
-  if (opts.auto_grid) {
-    delete opts.columns;
-    delete opts.rows;
+  const style = normalizeBoreStyle(opts.bore_style, opts.wall_style);
+  for (const retired of ["auto_base", "auto_height", "auto_grid", "wall_style"]) delete opts[retired];
+  opts.bore_style = style;
+  opts.xy_size_mode = boreXyMode(one);
+  opts.height_size_mode = boreHeightMode(one);
+  if (style !== "base_straight") {
+    delete opts.angle;
+    delete opts.angle_towards;
   }
-  if (!opts.auto_base) return false;
+  if (!boreWallsOnly(style)) delete opts.wall;   // Base styles use internal defaults
+  if (opts.height_size_mode === "bore_to_bin") delete opts.height;
+  if (opts.xy_size_mode !== "bore_to_bin" || boreWallsOnly(style)) return false;
   const [insideX, insideY] = binInsideExtent(state.design.box);
   one.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
   delete state.pinnedZone.width;
@@ -6578,22 +6495,24 @@ function boreCrossPitch(profile, held, wall) {
 
 function sizeBoreToGrid(one) {
   if (one.kind !== "bore") return;
-  // Auto Base fills the bin whatever the grid needs; Auto Grid fills whatever
-  // Base there is. Only a manual Base with manual counts grows to the grid.
+  // "Auto size bore to bin" fills the bin whatever the grid needs. Every other
+  // Base grows to its grid; a Walls Only Bore, or one whose bin is sized around
+  // it, always sits exactly at its minimum footprint.
   const opts = one.options || {};
   const resolved = state.draftResolvedOptions || {};
-  const dormantAuto = (opts.bore_style ?? resolved.bore_style ?? "full_base") === "wavy_base";
-  if (applyBoreAuto(one) || (!dormantAuto && opts.auto_grid)) return;
+  if (applyBoreSizing(one)) return;
   const profile = one.item?.profile || "round";
   const hexBit = isHexBitProfile(profile);
   const diameter = hexBit
     ? HEX_BIT_PROFILES[profile].diameter
     : number(one.item?.segments?.[0]?.diameter, 6);
   const held = diameter + 0.25;
-  const boreStyle = opts.bore_style ?? resolved.bore_style ?? "full_base";
-  const wavyBase = boreStyle === "wavy_base";
-  // Wall Only and Wavy Base both stand upright and size to their outer envelope.
-  const wallOnly = boreStyle === "wall_only" || wavyBase;
+  const boreStyle = boreStyleOf(one);
+  const walls = boreWallsOnly(boreStyle);
+  // Both Walls Only styles and Base - Wavy Walls stand upright and size to their
+  // wavy/straight sleeves' outer envelope.
+  const wallOnly = boreStyle !== "base_straight";
+  const exactSize = walls || boreXyMode(one) === "bin_to_bore";
   const angle = hexBit || wallOnly ? 0 : Math.min(70, Math.max(0, number(opts.angle ?? resolved.angle, 0)));
   // A leaned bore defaults to a thicker wall (engine: BORE_TILTED_WALL) unless
   // Wall was hand-set - match that so the block sizing tracks the real pitch.
@@ -6637,7 +6556,7 @@ function sizeBoreToGrid(one) {
   const amplitude = number(wallRules.wave_amplitude_mm ?? state.catalog?.wave_amplitude_mm, 0.4);
   const depthFactor = number(wallRules.wall_depth_factor ?? state.catalog?.wall_depth_factor, 1.181);
   const waveNoiseFloor = 1e-4;  // ensure wavy troughs never self-intersect
-  const wavy = wavyBase || (opts.wall_style ?? resolved.wall_style ?? "wavy") !== "straight";
+  const wavy = boreWavy(boreStyle);
   const shellReach = wavy ? 2 * amplitude + wall * depthFactor + waveNoiseFloor : wall;
   const clearSpan = (axis) => {
     if (profile === "round") {
@@ -6651,8 +6570,8 @@ function sizeBoreToGrid(one) {
     return sides === 4 || axis === "x" ? circum : held;
   };
   // Mirrors WALL_ONLY_FOOT in _bore.py: the strengthening foot reaches this far
-  // past the sleeve on each outside side. Wall Only only - never Wavy Base.
-  const wallOnlyFoot = boreStyle === "wall_only" ? 0.5 : 0;
+  // past the sleeve on each outside side. Walls Only only - never Base - Wavy.
+  const wallOnlyFoot = walls ? 0.5 : 0;
   const axisSpan = (count, axis) => {
     if (wallOnly) {
       return Math.ceil(clearSpan(axis) + 2 * shellReach + 2 * wallOnlyFoot + (count - 1) * crossPitch - 1e-6);
@@ -6665,8 +6584,9 @@ function sizeBoreToGrid(one) {
   const resolveAxis = (countKey, cur, pinKey, leanAxis) => {
     const count = Math.max(1, Math.round(number(opts[countKey] ?? resolved[countKey], 1)));
     const minimum = axisSpan(count, leanAxis);
-    // A Wavy Base always takes its exact envelope; nothing pins it larger.
-    return state.pinnedZone[pinKey] && !wavyBase ? Math.max(cur, minimum) : minimum;
+    // Walls Only and "bin to bore" always take their exact minimum; a manual Base
+    // that has been pinned only ever grows.
+    return state.pinnedZone[pinKey] && !exactSize ? Math.max(cur, minimum) : minimum;
   };
   const width = resolveAxis("columns", curW, "width", "x");
   const depth = resolveAxis("rows", curD, "depth", "y");
@@ -6891,6 +6811,13 @@ function markDraftChanged() {
 function keepCutBelowHeight(one, changedKey, gap = 2) {
   if (!one || !["pocket", "bore", "slot"].includes(one.kind) ||
       !["depth", "height"].includes(changedKey)) return;
+  // A Bore Base cavity may be exactly as deep as the Bore is tall - it then
+  // reaches the normal bin floor - so it needs no raised floor. Walls Only has
+  // no hole depth at all. Pocket and Slot keep their 2 mm floor.
+  if (one.kind === "bore") {
+    if (boreWallsOnly(boreStyleOf(one))) return;
+    gap = 0;
+  }
   if (changedKey === "depth") {
     const depth = number(one.options.depth, 0);
     const height = number(
@@ -7009,20 +6936,58 @@ function updateDraftFromFields(event) {
     const toward = get("option:angle_towards");
     if (toward !== undefined) one.options.angle_towards = toward;
     else delete one.options.angle_towards;
-    // Style choices are words, never numbers.
+    // Style and sizing choices are words, never numbers.
     if (changed === "option:bore_style") {
-      const chosen = get(changed);
-      one.options.bore_style = ["wall_only", "wavy_base"].includes(chosen) ? chosen : "full_base";
-      // Wall Only and Wavy Base stand upright.
-      if (one.options.bore_style !== "full_base") {
-        one.options.angle = 0;
+      const previousStyle = boreStyleOf(one);
+      const resolvedHeight = number(one.options.height ?? state.draftResolvedOptions?.height, NaN);
+      const chosen = normalizeBoreStyle(get(changed));
+      one.options.bore_style = chosen;
+      delete one.options.wall_style;
+      // Base - Wavy Walls and both Walls Only styles stand upright.
+      if (chosen !== "base_straight") {
+        delete one.options.angle;
         delete one.options.angle_towards;
       }
-      // Wavy Base sizes its own Base and the bin. Any saved Auto Base / Auto
-      // Grid stays on record, dormant, and returns when another style is chosen.
+      // Wall Thickness belongs to Walls Only; a Base style returns to its
+      // internal default and a Walls Only style to the bin wall.
+      delete one.options.wall;
+      if (boreWallsOnly(chosen) && !boreWallsOnly(previousStyle)) {
+        // Switching to Walls Only sizes the bin to the Bore by default.
+        one.options.xy_size_mode = "bin_to_bore";
+      } else if (!boreWallsOnly(chosen) && boreWallsOnly(previousStyle)) {
+        // Walls Only -> Base keeps a cavity that reaches the normal bin floor:
+        // Hole Depth becomes the Bore's resolved Height.
+        if (Number.isFinite(resolvedHeight)) {
+          one.options.depth = resolvedHeight;
+          if (boreHeightMode(one) !== "bore_to_bin") one.options.height = resolvedHeight;
+        }
+        if (one.options.xy_size_mode === "bin_to_bore") delete one.options.xy_size_mode;
+      }
     }
-    if (changed === "option:wall_style") {
-      one.options.wall_style = get(changed) === "straight" ? "straight" : "wavy";
+    if (changed === "option:xy_size_mode") {
+      const before = boreXyMode(one);
+      const chosen = get(changed);
+      one.options.xy_size_mode = chosen;
+      if (chosen === "manual" && before !== "manual") {
+        // Leaving an automatic mode keeps its current size as the manual Base.
+        pinDraftAxis("width");
+        pinDraftAxis("depth");
+        if (Number.isInteger(state.selected)) state.partZoneLocks[state.selected] = state.pinnedZone;
+      } else {
+        delete state.pinnedZone.width;
+        delete state.pinnedZone.depth;
+      }
+    }
+    if (changed === "option:height_size_mode") {
+      const before = boreHeightMode(one);
+      const chosen = get(changed);
+      one.options.height_size_mode = chosen;
+      const resolvedHeight = number(state.draftResolvedOptions?.height, NaN);
+      if (chosen === "bore_to_bin") delete one.options.height;
+      else if (before === "bore_to_bin" && Number.isFinite(resolvedHeight)) {
+        // Leaving "bore to bin" keeps the height it resolved to as the visible number.
+        one.options.height = resolvedHeight;
+      }
     }
   }
   if (one.kind === "nest") {
@@ -7150,7 +7115,7 @@ function updateDraftFromFields(event) {
         "slope_base", "bottom_mode", "slope_construction", "label_divisions", "division_level", "division_side", "division_labels",
         "level", "rim_side",
         "lift_assist", "finger_position", "push_position", "angle_towards",
-        "bore_style", "wall_style", "holder_style", "auto_size", "repeat_spacing_percent"]
+        "bore_style", "wall_style", "xy_size_mode", "height_size_mode", "holder_style", "auto_size", "repeat_spacing_percent"]
         .includes(changed.slice("option:".length))) {
     const key = changed.slice("option:".length);
     const option = info.fields.find(entry => entry.key === key);
@@ -7261,9 +7226,11 @@ function updateDraftFromFields(event) {
     changed === "option:angle" || changed === "item_diameter" ||
     changed === "clearance" || changed === "profile" || changed === "along" ||
     changed === "option:angle_towards" ||
-    changed === "option:bore_style" || changed === "option:wall_style"
+    changed === "option:bore_style" || changed === "option:xy_size_mode" ||
+    changed === "option:height_size_mode"
   )) sizeBoreToGrid(one);
-  if (one.kind === "bore" && (changed === "option:bore_style" || changed === "option:wall_style")) {
+  if (one.kind === "bore" && (changed === "option:bore_style" ||
+      changed === "option:xy_size_mode" || changed === "option:height_size_mode")) {
     renderDraftFields();
   }
   // The peg row and the slot bank track their own contents the same way the
@@ -7323,7 +7290,7 @@ async function refreshDraft() {
     const [insideX, insideY] = dividerLayoutExtent(state.design.box);
     state.draft.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
   }
-  applyBoreAuto(state.draft);
+  applyBoreSizing(state.draft);
   const request = ++state.draftRequest;
   if (state.draft.kind === "nest") {
     $("#draft-status").textContent = "Resizing bin around cavity…";
@@ -7346,9 +7313,9 @@ async function refreshDraft() {
     });
     if (request !== state.draftRequest) return;
     state.draftResolvedOptions = result.resolved_options || {};
-    // The server's usable layout area is the authority for Base Auto.
-    if (state.draft.kind === "bore" && state.draft.options?.auto_base
-        && state.draft.options?.bore_style !== "wavy_base"
+    // The server's usable layout area is the authority for "bore to bin".
+    if (state.draft.kind === "bore" && boreXyMode(state.draft) === "bore_to_bin"
+        && !boreWallsOnly(boreStyleOf(state.draft))
         && Array.isArray(result.feature?.zone)) {
       state.draft.zone = result.feature.zone;
     }
@@ -7356,20 +7323,6 @@ async function refreshDraft() {
     // The resolver now has the real item depth and lean. Re-size before saving
     // so Base always reflects the actual hole grid, not a stale preview size.
     if (info.kind === "bore") sizeBoreToGrid(state.draft);
-    // A Wavy Base sizes the bin: the server says what the smallest legal bin is,
-    // so the bin shrinks or grows to it (the browser never guesses this number).
-    const wavyBin = result.wavy_base_bin;
-    const box = state.design.box;
-    if (wavyBin && state.draftAutoCommit && !state.autoGrowingBin
-        && (Math.abs(number(box.x) - wavyBin.x) > 1e-6 || Math.abs(number(box.y) - wavyBin.y) > 1e-6)) {
-      state.autoGrowingBin = true;
-      try {
-        await autoExpandBin({ keepDraft: true, silent: true });
-      } finally {
-        state.autoGrowingBin = false;
-      }
-      return;
-    }
     for (const option of info.fields) {
       if (Object.prototype.hasOwnProperty.call(state.draft.options || {}, option.key)) continue;
       const input = $(`[data-draft="option:${option.key}"]`, $("#draft-fields"));
@@ -7398,6 +7351,9 @@ async function refreshDraft() {
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
     if (state.draftAutoCommit) await autoCommitDraft(request);
+    // "Auto size bin to bore" (Width / Length or Height) keeps the bin fitted to
+    // this Bore after every edit.
+    if (request === state.draftRequest && await reconcileBoreBin(result)) return;
   } catch (error) {
     if (request !== state.draftRequest) return;
     // A part whose contents outgrew the bin: grow the bin around it instead of
@@ -7413,7 +7369,12 @@ async function refreshDraft() {
     if (growKinds.has(state.draft?.kind) && outgrewBin && !state.autoGrowingBin) {
       state.autoGrowingBin = true;
       try {
-        await autoExpandBin({ keepDraft: true });
+        // A Bore that sizes the bin around itself lands on the smallest fit, so
+        // the bin shrinks as well as grows to meet it.
+        await autoExpandBin({
+          keepDraft: true,
+          fit: state.draft.kind === "bore" && boreXyMode(state.draft) === "bin_to_bore",
+        });
       } finally {
         state.autoGrowingBin = false;
       }
@@ -8395,57 +8356,36 @@ function fillPartToBin() {
   refreshDraftSoon();
 }
 
-function sizeBoreBaseToBinOnce() {
-  if (state.draft?.kind !== "bore") return;
-  markDraftChanged();
-  const [insideX, insideY] = binInsideExtent(state.design.box);
-  state.draft.options ||= {};
-  state.draft.options.auto_base = false;
-  state.draft.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
-  pinDraftAxis("width");
-  pinDraftAxis("depth");
-  if (Number.isInteger(state.selected)) state.partZoneLocks[state.selected] = state.pinnedZone;
-  state.draftAutoCommit = true;
-  renderDraftFields();
-  updateSelectionButtons();
-  refreshDraftSoon();
-}
-
-async function sizeBoreHeightToBinOnce() {
+// Persistent "Auto size bin to bore" (Width / Length and Height). The server says
+// what bin the Bore asks for (result.bore_bin / result.bore_bin_height); when the
+// bin is not already there this runs the exact resize through the one existing
+// expand endpoint. One bounded pass: it acts only on the live draft, refuses to
+// overlap another design mutation, and remembers what it already tried so its own
+// refresh (or a bin held larger by another part) cannot loop. Returns true when
+// it resized, so the caller stops instead of saving a stale preview.
+async function reconcileBoreBin(result) {
   const draft = state.draft;
-  if (draft?.kind !== "bore") return;
-  const snapshot = JSON.stringify(draft);
-  const request = ++state.draftRequest;
-  const candidate = clone(draft);
-  candidate.options ||= {};
-  candidate.options.auto_height = true;
+  if (draft?.kind !== "bore" || !state.draftAutoCommit || state.autoGrowingBin
+      || state.designMutationBusy) return false;
+  const box = state.design.box;
+  const wantXY = boreXyMode(draft) === "bin_to_bore" ? result?.bore_bin : null;
+  const wantZ = boreHeightMode(draft) === "bin_to_bore" ? number(result?.bore_bin_height, NaN) : NaN;
+  const xyOff = !!wantXY && (Math.abs(number(box.x) - number(wantXY.x)) > 1e-6
+    || Math.abs(number(box.y) - number(wantXY.y)) > 1e-6);
+  const zOff = Number.isFinite(wantZ) && Math.abs(number(box.z) - wantZ) > 1e-6;
+  if (!xyOff && !zOff) return false;
+  const signature = JSON.stringify([box.x, box.y, box.z, wantXY, wantZ, draft.zone,
+    draft.options, draft.item]);
+  if (state.boreFitSignature === signature) return false;
+  state.boreFitSignature = signature;
+  state.autoGrowingBin = true;
   try {
-    const result = await api("/api/feature/draft", {
-      design: state.design,
-      feature: candidate,
-      index: Number.isInteger(draftCommitIndex()) ? draftCommitIndex() : undefined,
-    });
-    if (request !== state.draftRequest
-        || state.draft !== draft
-        || JSON.stringify(draft) !== snapshot) return;
-    const resolvedHeight = number(result.resolved_options?.height, NaN);
-    if (!Number.isFinite(resolvedHeight)) {
-      throw new Error("Could not resolve a legal Bore height for this bin.");
-    }
-    markDraftChanged();
-    draft.options ||= {};
-    draft.options.height = resolvedHeight;
-    draft.options.auto_height = false;
-    state.draftAutoCommit = true;
-    renderDraftFields();
-    updateSelectionButtons();
-    refreshDraftSoon();
-  } catch (error) {
-    if (request !== state.draftRequest
-        || state.draft !== draft
-        || JSON.stringify(draft) !== snapshot) return;
-    toast(error.message, true, 5000);
+    if (zOff) await sizeBinHeightToBore({ silent: true });
+    if (xyOff) await autoExpandBin({ keepDraft: true, silent: true, fit: true });
+  } finally {
+    state.autoGrowingBin = false;
   }
+  return true;
 }
 
 function activeSpaceMaximumBinHeight() {
@@ -8455,11 +8395,11 @@ function activeSpaceMaximumBinHeight() {
   return Number.isFinite(maximum) ? maximum : undefined;
 }
 
-async function sizeBinHeightToBoreOnce(button = null) {
+async function sizeBinHeightToBore({ button = null, silent = false } = {}) {
   if (state.draft?.kind !== "bore") return;
   const draftIndex = draftCommitIndex();
   if (!Number.isInteger(draftIndex)) {
-    toast("Select the Bore again before sizing the bin height.", true, 5000);
+    if (!silent) toast("Select the Bore again before sizing the bin height.", true, 5000);
     return;
   }
   if (!beginDesignMutation()) return;
@@ -8494,7 +8434,12 @@ async function sizeBinHeightToBoreOnce(button = null) {
     await refreshPreview();
     if (result.changed) flashField($("#z"));
   } catch (error) {
-    toast(error.message, true, 5000);
+    if (silent) {
+      $("#draft-status").textContent = error.message;
+      $("#draft-status").classList.add("error");
+    } else {
+      toast(error.message, true, 5000);
+    }
   } finally {
     if (button) button.disabled = false;
     finishDesignMutation();

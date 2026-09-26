@@ -147,7 +147,7 @@ from ._bore import (
     _is_hex_bit,
     build_bore,
     bore_defaults,
-    normalize_bore_auto,
+    normalize_bore_modes,
     bore_hole_axes,
 )
 from ._post import build_post, post_defaults
@@ -210,7 +210,7 @@ from ._layout import (
     feature_footprint,
     feature_min_footprint,
     occupied_zones,
-    wavy_base_bin_minimum,
+    bore_bin_minimum,
 )
 from ._assembly import (
     apply_texts,

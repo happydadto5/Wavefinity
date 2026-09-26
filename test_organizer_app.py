@@ -3070,7 +3070,7 @@ class EdgeMountTests(unittest.TestCase):
             one = organizer_app.Feature(
                 "bore", organizer_app.Zone(-20.0, -20.0, 20.0, 20.0),
                 organizer_inserts.Item.simple("tube", 30.0, 25.0),
-                options={"bore_style": "wall_only", "wall_style": style,
+                options={"bore_style": f"walls_{style}",
                          "height": 30.0, "wall": 1.6},
             )
             with self.subTest(style=style):
@@ -3194,7 +3194,7 @@ class EdgeMountTests(unittest.TestCase):
             cases.append((f"bore_wall_only_{style}", organizer_app.Feature(
                 "bore", organizer_app.Zone(-20.0, -20.0, 20.0, 20.0),
                 organizer_inserts.Item.simple("tube", 30.0, 25.0),
-                options={"bore_style": "wall_only", "wall_style": style,
+                options={"bore_style": f"walls_{style}",
                          "height": 30.0, "wall": 1.6},
             )))
         contour = ((-20.0, -8.0), (20.0, -8.0), (18.0, 8.0), (-20.0, 8.0))

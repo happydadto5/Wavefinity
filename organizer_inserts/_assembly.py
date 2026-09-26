@@ -33,7 +33,10 @@ from ._core import (
     feature_touches_wall,
     layout_zone,
 )
-from ._bore import ENVELOPE_STYLES, WALL_JOIN_FLAG
+from ._bore import (
+    JOIN_STYLES, WALL_HUG_FLAG, WALL_JOIN_FLAG, bore_xy_size_mode, is_walls_only,
+    normalize_bore_style,
+)
 from ._layout import _feature_reach, check_layout, feature_footprint
 from ._registry import FEATURE_BUILDERS
 from ._text import (
@@ -153,10 +156,18 @@ def build_features(
             continue
         recessed_deck_footprint = None
         if (mode == "fused" and one.kind == "bore"
-                and str(one.options.get("bore_style", "")) in ENVELOPE_STYLES):
+                and normalize_bore_style(
+                    one.options.get("bore_style"), one.options.get("wall_style")) in JOIN_STYLES):
             # Only a bore fused into the bin can join its wall; removable and
             # cartridge inserts never touch it.
-            one = replace(one, options={**one.options, WALL_JOIN_FLAG: True})
+            joined = {**one.options, WALL_JOIN_FLAG: True}
+            style = normalize_bore_style(
+                one.options.get("bore_style"), one.options.get("wall_style"))
+            if is_walls_only(style) and bore_xy_size_mode(one.options, style) == "bin_to_bore":
+                # The bin is sized around it, so the sleeves bridge the rest of
+                # the way to the wall on every side.
+                joined[WALL_HUG_FLAG] = True
+            one = replace(one, options=joined)
 
         if (
             one.kind == "nest"

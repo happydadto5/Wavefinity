@@ -19,7 +19,7 @@ MIN_FEATURE_GAP = 0.8      # material between two features
 CONNECTOR_EDGE_KEEP_OUT = 2.0  # interior strip kept low for connector arms
 EDITOR_SNAP = 1.0          # normal editor movement; effectively no floor loss
 CARTRIDGE_PITCH = 8.0      # optional interchangeable standalone-insert grid
-WAVY_BASE_ZONE_SLACK = 1.5  # a Wavy Base zone may overhang the floor this far
+ENVELOPE_ZONE_SLACK = 1.5  # a bin-sized Walls Only zone may overhang the floor this far
 LAYOUT_MODES = ("fused", "separate", "cartridge")
 
 
@@ -306,13 +306,15 @@ def layout_zone(box: BoxSpec, mode: str = "fused") -> Zone:
 def zone_overhang(one: "Feature", mode: str) -> float:
     """How far past the usable floor a Feature's snapped zone may sit.
 
-    A Wavy Base bin is sized to the Bore's true outer envelope, while its zone
-    is that envelope rounded up to the editor grid. The zone can therefore poke
-    a hair past the floor even though nothing physical does.
+    A Walls Only Bore whose bin is sized around it (Auto size bin to bore) is
+    fitted to the Bore's true outer envelope, while its zone is that envelope
+    rounded up to the editor grid. The zone can therefore poke a hair past the
+    floor even though nothing physical does.
     """
     if (mode == "fused" and one.kind == "bore"
-            and str(one.options.get("bore_style", "")) == "wavy_base"):
-        return WAVY_BASE_ZONE_SLACK
+            and str(one.options.get("bore_style", "")) in ("walls_straight", "walls_wavy", "wall_only")
+            and str(one.options.get("xy_size_mode", "bin_to_bore")) == "bin_to_bore"):
+        return ENVELOPE_ZONE_SLACK
     return 0.0
 
 
