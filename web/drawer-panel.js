@@ -430,11 +430,15 @@ DP.onInventoryClick = async event => {
 // Mouse and keyboard activation share this single success boundary.
 DP.openInventoryRow = async id => {
   const request = ++DP.modeRequest;
+  const spaceContext = DL.spaceContext();
+  const acceptTransition = () => request === DP.modeRequest &&
+    state.folderMode === "space" && DL.active && DL.spaceContextCurrent(spaceContext);
   DP.showPendingMode("design");
   try {
-    if (!(await designerEditInventoryRow(id)) || request !== DP.modeRequest) return false;
+    if (!(await designerEditInventoryRow(id, acceptTransition)) || !acceptTransition()) return false;
     DL.selectRow(id);
     DP.setMode("design");
+    activatePreviewView("3d");
     return true;
   } finally {
     if (request === DP.modeRequest) DP.showPendingMode(null);
@@ -522,12 +526,16 @@ DP.designFirstBin = () => {
   DP.newBinFromSpace();
 };
 DP.newBinFromSpace = async () => {
+  const request = ++DP.modeRequest;
+  const spaceContext = DL.spaceContext();
+  const acceptTransition = () => request === DP.modeRequest &&
+    state.folderMode === "space" && DL.active && DL.spaceContextCurrent(spaceContext);
   DP.showPendingMode("design");
   try {
-    if (!(await designerNewBin())) return false;
+    if (!(await designerNewBin(acceptTransition)) || !acceptTransition()) return false;
     DP.setMode("design");
     return true;
-  } finally { DP.showPendingMode(null); }
+  } finally { if (request === DP.modeRequest) DP.showPendingMode(null); }
 };
 
 // A normal typed one-drawer Space: name and size are owned by the Space.

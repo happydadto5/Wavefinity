@@ -894,12 +894,15 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false } 
 // design, replacing whatever is currently shown.
 async function installLoadedDesignSource(rowId, spec, {
   successMessage = "Loaded from Space.",
+  acceptTransition = null,
 } = {}) {
+  if (acceptTransition && !acceptTransition()) return false;
   if (!beginDesignMutation()) return false;
   const sourceSpace = state.activeSpace, sourceFolder = state.folderMode;
   try {
     const result = await api("/api/design/validate", { design: spec });
-    if (state.activeSpace !== sourceSpace || state.folderMode !== sourceFolder) return false;
+    if (state.activeSpace !== sourceSpace || state.folderMode !== sourceFolder ||
+        (acceptTransition && !acceptTransition())) return false;
     state.design = result.design;
     state.lastOrdinaryDesign = clone(state.design);
     resetNestPhotoSession();
@@ -915,8 +918,10 @@ async function installLoadedDesignSource(rowId, spec, {
     bindLidMemoryForDesign();
     syncForm();
     clearDraftSelection();
-    if (typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
-    activatePreviewView("3d");
+    if (!acceptTransition) {
+      if (typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
+      activatePreviewView("3d");
+    }
     const preview = refreshPreview();
     if (rowId === null && typedSpaceOrdinaryBin()) {
       await preview;
@@ -932,7 +937,8 @@ async function installLoadedDesignSource(rowId, spec, {
   }
 }
 
-async function designerEditInventoryRow(rowId) {
+async function designerEditInventoryRow(rowId, acceptTransition = null) {
+  if (acceptTransition && !acceptTransition()) return false;
   if (state.folderMode !== "space" || typeof DL === "undefined") return false;
   const one = DL.bin(rowId);
   const spec = DL.layout?.design_specs?.[rowId];
@@ -941,17 +947,19 @@ async function designerEditInventoryRow(rowId) {
     toast("A Storage Box or Base Trim is saved from its Space, not designed here.", true, 6000);
     return false;
   }
-  return designerInstallInventorySpec(rowId, spec);
+  return designerInstallInventorySpec(rowId, spec, acceptTransition);
 }
 
-async function designerInstallInventorySpec(rowId, spec) {
+async function designerInstallInventorySpec(rowId, spec, acceptTransition = null) {
   if (!spec) return false;
+  if (acceptTransition && !acceptTransition()) return false;
   if (state.designInventoryId === rowId) {
-    activatePreviewView("3d");
+    if (!acceptTransition) activatePreviewView("3d");
     return true;
   }
   if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return false;
-  return installLoadedDesignSource(rowId, spec);
+  if (acceptTransition && !acceptTransition()) return false;
+  return installLoadedDesignSource(rowId, spec, { acceptTransition });
 }
 
 // Regenerate a saved source without replacing the live Designer edit.
@@ -1010,21 +1018,26 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
 // New Bin (B1): a fresh product-appropriate starter. Meaningful current work
 // in a typed Space is preserved through the autosave flush first, never silently
 // discarded; on flush failure New Bin is cancelled rather than losing work.
-async function designerNewBin() {
+async function designerNewBin(acceptTransition = null) {
+  if (acceptTransition && !acceptTransition()) return false;
   if (!(await guardDraftSwitch())) return false;
+  if (acceptTransition && !acceptTransition()) return false;
   if (state.folderMode === "space") {
     if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return false;
+    if (acceptTransition && !acceptTransition()) return false;
   } else if (designHasChanges() && !(await appConfirmAction({
     title: "Start a new bin?",
     message: "Start a new bin and discard the current changes?",
     actionLabel: "Discard Changes",
     danger: true,
   }))) return false;
+  if (acceptTransition && !acceptTransition()) return false;
   if (!beginDesignMutation()) return false;
+  if (acceptTransition && !acceptTransition()) { finishDesignMutation(); return false; }
   try {
     state.designInventoryId = null;
     state.surfaceHeightPromptSkipped = false;
-    if (typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
+    if (!acceptTransition && typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
     await loadFreshOrdinaryDesignForCurrentFolder();
     toast("Started a new bin.");
     return true;
@@ -4562,7 +4575,7 @@ async function selectKind(kind, reset = false) {
 
 async function selectedFeature(index, force = false, acceptPreviewPick = null) {
   if (index === null || index < 0 || index >= state.design.layout.features.length) return false;
-  if (!force && index === state.selected) return true;
+  if (!force && index === state.selected) return !acceptPreviewPick || acceptPreviewPick();
   const request = state.selectionRequest = (state.selectionRequest || 0) + 1;
   const design = state.design, source = state.designInventoryId, space = state.activeSpace;
   // Don't drop unsaved work on the part currently open without asking first.
@@ -9831,8 +9844,12 @@ function clickedPreviewMesh(point) {
 }
 
 function drawFrontMarker(context, camera, project) {
-  if (!state.design?.box || b4bEnabled() || baseTrimEnabled()) return;
-  const point = project([0, -state.design.box.y / 2 - 5, 0]);
+  if (!state.design?.box || baseTrimEnabled()) return;
+  const frontY = b4bEnabled()
+    ? state.preview?.b4b?.assembled_bounds_mm?.[1]
+    : -state.design.box.y / 2;
+  if (!Number.isFinite(frontY)) return;
+  const point = project([0, frontY - 5, 0]);
   context.save();
   context.font = "bold 13px 'Segoe UI', sans-serif";
   context.textAlign = "center";
@@ -9862,7 +9879,10 @@ async function selectFromPreview(pick, context) {
   status.classList.add("preview-pending");
   try {
     if (pick.type === "saved") {
-      if (!Number.isInteger(pick.index) || !(await selectedFeature(pick.index, false, current))) return;
+      if (!Number.isInteger(pick.index)) return;
+      const alreadySelected = pick.index === state.selected;
+      if (!(await selectedFeature(pick.index, false, current))) return;
+      if (alreadySelected && !current()) return;
       // Selecting cancels the old preview request itself. Its guard already
       // rejects stale design/Space switches; check the accepted target here.
       if (state.designInventoryId !== context.source || state.activeSpace !== context.space ||

@@ -2174,9 +2174,10 @@ vm.runInContext(code + ";this.queue=queueStaleFileRefresh;this.settle=settleStal
 const vm = require("vm"), fs = require("fs");
 const calls = { edits: [], opens: [], selected: [], prompts: 0, flushes: 0 };
 let editSuccess = true;
-const state = { designInventoryId: "B1", design: { box: {} }, cleanDesign: {}, runtime: { hosted: true } };
+const state = { folderMode: "space", activeSpaceId: "A", output: "folder", designInventoryId: "B1", design: { box: {} }, cleanDesign: {}, runtime: { hosted: true } };
 const rows = ["B1", "B2"].map(id => ({ id, kind: "bin", name: id }));
 const DL = { bins: rows, isOrdinary: row => !!row && row.kind !== "spacer",
+  active: true,
   bin: id => rows.find(row => row.id === id), placedCount: id => id === "B1" ? 1 : 0,
   spaceContext: () => ({ spaceId: "A" }), spaceContextCurrent: c => c.spaceId === "A",
   editBins: async payload => { calls.edits.push(payload); return true; },

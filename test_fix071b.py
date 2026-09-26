@@ -73,6 +73,143 @@ class PreviewPickTransportTests(unittest.TestCase):
 
 
 class BrowserStateLogicTests(unittest.TestCase):
+    def test_same_selected_preview_pick_rechecks_generation_before_2d(self):
+        source = "\n".join(function_source(name, APP) for name in
+                           ("selectedFeature", "selectFromPreview"))
+        script = r"""
+const design={layout:{features:[{kind:'post'}]}},space={id:'S'},events=[];
+const state={design,activeSpace:space,designInventoryId:'B1',previewRequest:4,selected:0};
+const DP={mode:'design'},$=()=>({textContent:'',classList:{add(){},remove(){}}});
+const activatePreviewView=v=>events.push(v),renderLayout2D=()=>events.push('layout');
+const localStorage={getItem:()=>null};
+__SOURCE__
+(async()=>{
+  const rejected=await selectedFeature(0,false,()=>false);
+  Promise.resolve().then(()=>state.previewRequest++);
+  await selectFromPreview({type:'saved',index:0},
+    {design,space,source:'B1',preview:4});
+  process.stdout.write(JSON.stringify({rejected,events,selected:state.selected}));
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {"rejected": False, "events": [], "selected": 0})
+
+    def test_front_marker_uses_real_low_y_case_bounds_and_camera_projection(self):
+        design = default_design()
+        design["box"].update(x=64, y=48, z=40, b4b={"enabled": True})
+        preview = preview_payload({"design": design})
+        front = preview["b4b"]["assembled_bounds_mm"][1]
+        self.assertLess(front, -design["box"]["y"] / 2)
+        source = "\n".join(function_source(name, APP) for name in ("iso", "drawFrontMarker"))
+        script = r"""
+const state={design:{box:{y:48}},preview:{b4b:{assembled_bounds_mm:[-40,__FRONT__,40,40]}}};
+let structural=false,storage=true;
+const b4bEnabled=()=>storage,baseTrimEnabled=()=>structural;
+const worlds=[],screens=[];
+const ctx={save(){},restore(){},fillText:(label,x,y)=>screens.push([label,x,y])};
+__SOURCE__
+for(const yaw of [0,90]){
+  const camera={yaw,elevation:35};
+  drawFrontMarker(ctx,camera,p=>{worlds.push(p);return iso(p,camera)});
+}
+storage=false;
+drawFrontMarker(ctx,{yaw:0,elevation:35},p=>{worlds.push(p);return iso(p,{yaw:0,elevation:35})});
+structural=true;
+drawFrontMarker(ctx,{yaw:0,elevation:35},p=>{worlds.push(p);return iso(p,{yaw:0,elevation:35})});
+process.stdout.write(JSON.stringify({worlds,screens}));
+""".replace("__SOURCE__", source).replace("__FRONT__", str(front))
+        out = node_json(script)
+        self.assertEqual(out["worlds"][0], [0, front - 5, 0])
+        self.assertEqual(out["worlds"][0], out["worlds"][1])
+        self.assertNotEqual(out["screens"][0][1:], out["screens"][1][1:])
+        self.assertEqual(out["worlds"][2], [0, -29, 0])
+        self.assertEqual(len(out["worlds"]), 3)
+
+    def test_space_edit_real_async_chain_never_overwrites_newer_navigation(self):
+        app_source = "\n".join(function_source(name, APP) for name in
+                               ("installLoadedDesignSource", "designerEditInventoryRow",
+                                "designerInstallInventorySpec"))
+        script = r"""
+const fs=require('fs'),vm=require('vm'),events=[],resolvers={};
+const original={marker:'original',layout:{features:[]}},space={id:'S'};
+const state={folderMode:'space',activeSpace:space,activeSpaceId:'S',output:'folder',
+  design:original,designInventoryId:'B1'};
+const DL={active:true,loaded:true,pegboardRefreshError:false,selectedRow:'B1',
+  layout:{design_specs:{B2:{marker:'B2'},B3:{marker:'B3'}}},
+  bin:id=>({id,kind:'bin'}),selectRow:id=>{DL.selectedRow=id;events.push('select:'+id)},
+  spaceContext:()=>({spaceId:state.activeSpaceId,output:state.output}),
+  spaceContextCurrent:c=>c.spaceId===state.activeSpaceId&&c.output===state.output};
+const ctx={Map,Set,Promise,JSON,Number,String,Object,Date,Math,state,DL,
+  localStorage:{getItem:()=>null},$:()=>null,$$:()=>[],
+  SP:{offerSpacePlanning(){}},toast:()=>{},clone:v=>JSON.parse(JSON.stringify(v)),
+  isStructuralDesign:()=>false,typedSpaceOrdinaryBin:()=>true,
+  flushSpaceDesignAutosave:async()=>true,beginDesignMutation:()=>true,finishDesignMutation:()=>{},
+  api:(_path,arg)=>new Promise(resolve=>resolvers[arg.design.marker]=resolve),
+  resetNestPhotoSession:()=>{},bindLidMemoryForDesign:()=>{},syncForm:()=>{},
+  clearDraftSelection:()=>{},refreshPreview:()=>Promise.resolve(),
+  activatePreviewView:v=>events.push('view:'+v)};
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1],'utf8')+';this.DP=DP',ctx);
+vm.runInContext(__APP_SOURCE__,ctx);
+const DP=ctx.DP;DP.mode='space';DP.showPendingMode=()=>{};
+DP.setMode=mode=>{DP.mode=mode;events.push('mode:'+mode)};
+DP.update=()=>{};DP.ensureInventoryLoaded=async()=>true;
+const tick=()=>new Promise(setImmediate);
+(async()=>{
+  const old=DP.openInventoryRow('B2');await tick();
+  await DP.selectMode('space');
+  resolvers.B2({design:{marker:'B2',layout:{features:[]}}});await old;
+  const afterNavigation=[state.design.marker,DL.selectedRow,DP.mode];
+  const first=DP.openInventoryRow('B2');await tick();
+  const second=DP.openInventoryRow('B3');await tick();
+  resolvers.B3({design:{marker:'B3',layout:{features:[]}}});await second;
+  resolvers.B2({design:{marker:'B2',layout:{features:[]}}});await first;
+  process.stdout.write(JSON.stringify({afterNavigation,afterCompeting:[state.design.marker,DL.selectedRow,DP.mode]}));
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__APP_SOURCE__", json.dumps(app_source))
+        out = node_json(script.replace("process.argv[1]", json.dumps(str(ROOT / "web" / "drawer-panel.js"))))
+        self.assertEqual(out["afterNavigation"], ["original", "B1", "space"])
+        self.assertEqual(out["afterCompeting"], ["B3", "B3", "design"])
+
+    def test_space_new_bin_real_async_guard_respects_newer_navigation_and_space(self):
+        app_source = function_source("designerNewBin", APP)
+        script = r"""
+const fs=require('fs'),vm=require('vm'),events=[];
+const state={folderMode:'space',activeSpace:{id:'S'},activeSpaceId:'S',output:'folder',
+  design:{marker:'original'},designInventoryId:'B1'};
+const DL={active:true,loaded:true,pegboardRefreshError:false,
+  spaceContext:()=>({spaceId:state.activeSpaceId,output:state.output}),
+  spaceContextCurrent:c=>c.spaceId===state.activeSpaceId&&c.output===state.output};
+let release;
+const ctx={Map,Set,Promise,JSON,Number,String,Object,Date,Math,state,DL,
+  localStorage:{getItem:()=>null},$:()=>null,$$:()=>[],SP:{offerSpacePlanning(){}},
+  guardDraftSwitch:()=>new Promise(resolve=>release=resolve),
+  flushSpaceDesignAutosave:async()=>true,typedSpaceOrdinaryBin:()=>true,
+  beginDesignMutation:()=>true,finishDesignMutation:()=>{},
+  loadFreshOrdinaryDesignForCurrentFolder:async()=>{state.design={marker:'fresh'}},
+  toast:()=>{},activatePreviewView:()=>{}};
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1],'utf8')+';this.DP=DP',ctx);
+vm.runInContext(__APP_SOURCE__,ctx);
+const DP=ctx.DP;DP.mode='space';DP.showPendingMode=m=>events.push('pending:'+m);
+DP.setMode=m=>{DP.mode=m;events.push('mode:'+m)};
+DP.update=()=>{};DP.ensureInventoryLoaded=async()=>true;
+(async()=>{
+  const staleNav=DP.newBinFromSpace();
+  const immediate=events.slice();await DP.selectMode('space');release(true);await staleNav;
+  const afterNavigation=[state.design.marker,state.designInventoryId,DP.mode];
+  const staleSpace=DP.newBinFromSpace();state.activeSpaceId='S2';release(true);await staleSpace;
+  const afterSpace=[state.design.marker,state.designInventoryId,DP.mode];
+  const fresh=DP.newBinFromSpace();release(true);await fresh;
+  process.stdout.write(JSON.stringify({immediate,afterNavigation,afterSpace,
+    accepted:[state.design.marker,state.designInventoryId,DP.mode]}));
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__APP_SOURCE__", json.dumps(app_source))
+        out = node_json(script.replace("process.argv[1]", json.dumps(str(ROOT / "web" / "drawer-panel.js"))))
+        self.assertEqual(out["immediate"], ["pending:design"])
+        self.assertEqual(out["afterNavigation"], ["original", "B1", "space"])
+        self.assertEqual(out["afterSpace"], ["original", "B1", "space"])
+        self.assertEqual(out["accepted"], ["fresh", None, "design"])
+
     def test_primary_and_legacy_preview_proxy_paths_execute_with_visibility(self):
         names = ["drawOverlay2D", "drawGeometryLegacy2D", "addPreviewPickFace", "addPreviewPickProxies"]
         source = "\n".join(function_source(name, APP) for name in names)
@@ -183,7 +320,10 @@ __SOURCE__
         script = r"""
 const fs=require('fs'),vm=require('vm');
 const ctx={Map,Set,Promise,JSON,Number,String,Object,Date,
-  state:{activeSpaceId:'S',output:'folder'},DL:{selectRow:id=>events.push('select:'+id)},
+  state:{folderMode:'space',activeSpaceId:'S',output:'folder'},
+  DL:{active:true,spaceContext:()=>({spaceId:'S'}),spaceContextCurrent:c=>c.spaceId==='S',
+    selectRow:id=>events.push('select:'+id)},
+  activatePreviewView:v=>events.push('view:'+v),
   localStorage:{getItem:()=>null},$:()=>null,$$:()=>[]};
 const events=[]; let release;
 ctx.designerEditInventoryRow=()=>new Promise(resolve=>release=resolve);
@@ -203,7 +343,7 @@ DP.setMode=mode=>{DP.mode=mode;events.push('mode:'+mode)};
         out = node_json(script.replace("process.argv[1]", json.dumps(str(ROOT / "web" / "drawer-panel.js"))))
         self.assertEqual(out["before"], ["space", ["pending:design"]])
         self.assertEqual(out["afterFailure"], ["space", ["pending:design", "pending:null"]])
-        self.assertEqual(out["afterSuccess"], ["design", ["pending:design", "select:B2", "mode:design", "pending:null"]])
+        self.assertEqual(out["afterSuccess"], ["design", ["pending:design", "select:B2", "mode:design", "view:3d", "pending:null"]])
 
     def test_bore_derived_display_and_manual_minimum_are_separate(self):
         helpers = "\n".join((APP[APP.index("const roundUpHalfMm ="):APP.index("\n", APP.index("const roundUpHalfMm ="))],
@@ -227,7 +367,7 @@ const dialog={open:false,showModal(){this.open=true;events.push('help')},close()
 const els={'#support-layout-dialog':dialog,'#support-layout-dialog-open':{addEventListener(){}},
   '#support-layout-remember':{checked:true},'#preview-state':{textContent:'',classList:{add(){},remove(){}}}};
 const $=s=>els[s], localStorage={getItem:k=>saved[k],setItem:(k,v)=>saved[k]=v};
-const selectedFeature=async index=>{state.selected=index;state.previewRequest++;events.push('selected');return true};
+const selectedFeature=async index=>{if(state.selected!==index)state.previewRequest++;state.selected=index;events.push('selected');return true};
 const activatePreviewView=v=>events.push(v),renderLayout2D=()=>events.push('layout');
 __SOURCE__
 (async()=>{

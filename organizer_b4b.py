@@ -3502,6 +3502,9 @@ def b4b_summary(box: BoxSpec) -> dict:
         "assembled_envelope_mm": [
             round(max_x - min_x, 3), round(max_y - min_y, 3), round(top_z, 3)
         ],
+        "assembled_bounds_mm": [
+            round(min_x, 3), round(min_y, 3), round(max_x, 3), round(max_y, 3)
+        ],
         "base_thickened": b4b_grew(box),
         "capacity_units": [cx, cy],
         "capacity_mm": [round(mx, 2), round(my, 2)],
