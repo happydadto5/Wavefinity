@@ -12,10 +12,24 @@ const DP = {
   signatures: {},
   open: new Set(),        // bin ids whose details are expanded
   filter: { text: "", show: "all", sort: "height" },
+  filtersBySpace: new Map(),
   printSelected: new Set(), // general ordinary-bin selection, keyed by durable row ID
 };
 
-try { Object.assign(DP.filter, JSON.parse(localStorage.getItem("wavefinity-drawer-filter") || "{}"), { text: "" }); } catch (_error) {}
+try {
+  const saved = JSON.parse(localStorage.getItem("wavefinity-drawer-filter") || "{}");
+  if (["height", "size", "name", "newest"].includes(saved.sort)) DP.filter.sort = saved.sort;
+} catch (_error) {}
+DP.filterSpace = null;
+DP.syncFilterSpace = () => {
+  const id = state.activeSpaceId || state.output || null;
+  if (id === DP.filterSpace) return;
+  if (DP.filterSpace) DP.filtersBySpace.set(DP.filterSpace, DP.filter.show);
+  DP.filterSpace = id;
+  DP.filter.show = DP.filtersBySpace.get(id) || "all";
+  DP.filter.text = "";
+  DP.signatures.inventory = null;
+};
 
 const dlNum = (value, fallback = null) => {
   const parsed = Number(String(value ?? "").trim());
@@ -79,11 +93,12 @@ DP.build = () => {
     <section class="control-section open dl-section" aria-label="Inventory">
       <div class="section-body">
         <div id="dl-stats" class="dl-stats"></div>
+        <button type="button" id="dl-new-bin" class="button primary">New Bin</button>
         <div class="dl-inv-tools">
           <label class="dl-search-label"><span>Search</span><input id="dl-inv-search" type="search" placeholder="Name or size" aria-label="Search the inventory"></label>
           <label>Filter<select id="dl-inv-show" aria-label="Filter bins">
             <option value="all">Everything</option>
-            <option value="in_design">In Space</option>
+            <option value="in_design">In Design</option>
             <option value="saved">Saved</option>
             <option value="printed">Printed</option>
             <option value="unplaced">Unplaced</option>
@@ -245,6 +260,7 @@ DP.wire = () => {
     if (act === "design") DP.designFirstBin();
   };
   $("#dl-inv-list").addEventListener("click", emptyAction);
+  $("#dl-new-bin").addEventListener("click", () => DP.newBinFromSpace());
   $('.canvas-wrap[data-canvas="drawer"]').addEventListener("click", emptyAction);
 
   $("#dl-sp-plan").addEventListener("click", () => DL.planSpacers());
@@ -256,12 +272,15 @@ DP.wire = () => {
   });
   $("#spacer-print-confirm").addEventListener("click", () => DP.confirmSpacerPrint());
   const filterChanged = () => {
-    try { localStorage.setItem("wavefinity-drawer-filter", JSON.stringify(DP.filter)); } catch (_error) {}
     DP.renderInventory();
   };
   $("#dl-inv-search").addEventListener("input", event => { DP.filter.text = event.target.value; filterChanged(); });
-  $("#dl-inv-show").addEventListener("change", event => { DP.filter.show = event.target.value; filterChanged(); });
-  $("#dl-inv-sort").addEventListener("change", event => { DP.filter.sort = event.target.value; filterChanged(); });
+  $("#dl-inv-show").addEventListener("change", event => { DP.filter.show = event.target.value; DP.filtersBySpace.set(DP.filterSpace, DP.filter.show); filterChanged(); });
+  $("#dl-inv-sort").addEventListener("change", event => {
+    DP.filter.sort = event.target.value;
+    try { localStorage.setItem("wavefinity-drawer-filter", JSON.stringify({ sort: DP.filter.sort })); } catch (_error) {}
+    filterChanged();
+  });
 
   const list = $("#dl-inv-list");
   list.addEventListener("click", event => DP.onInventoryClick(event));
@@ -283,10 +302,10 @@ DP.wire = () => {
   });
   list.addEventListener("keydown", event => {
     if (!["Enter", " "].includes(event.key) || event.target.closest("button, input, select, a, textarea, .dl-bin-details")) return;
-    const row = event.target.closest(".dl-bin[data-editable='true']");
+    const row = event.target.closest(".dl-bin[data-bin]");
     if (!row) return;
     event.preventDefault();
-    DP.openInventoryRow(row.dataset.bin);
+    DL.selectRow(row.dataset.bin);
   });
   list.addEventListener("dragstart", event => {
     DP.draggingRow = true;
@@ -400,9 +419,9 @@ DP.onInventoryClick = async event => {
   else if (action === "print") DL.printSelectedBins({ [one.id]: DL.printCount(one) }, false);
   else if (action === "printed") DL.markPrinted(one);
   else if (action === "not-printed") DL.markNotPrinted(one);
-  else if (action === "delete" && DL.isSpacer(one)) DP.deleteRow(one);
+  else if (action === "edit") DP.openInventoryRow(one.id);
+  else if (action === "delete") DP.deleteRow(one);
   else if (!action && !event.target.closest("button, input, select, a, textarea, .dl-bin-details")) {
-    if (row?.dataset.editable === "true") return DP.openInventoryRow(one.id);
     DL.selectRow(one.id);
   }
 };
@@ -410,13 +429,24 @@ DP.onInventoryClick = async event => {
 // Commit the row/canvas selection only after Designer accepted the switch.
 // Mouse and keyboard activation share this single success boundary.
 DP.openInventoryRow = async id => {
-  if (!(await designerEditInventoryRow(id))) return false;
-  DL.selectRow(id);
-  return true;
+  const request = ++DP.modeRequest;
+  const spaceContext = DL.spaceContext();
+  const acceptTransition = () => request === DP.modeRequest &&
+    state.folderMode === "space" && DL.active && DL.spaceContextCurrent(spaceContext);
+  DP.showPendingMode("design");
+  try {
+    if (!(await designerEditInventoryRow(id, acceptTransition)) || !acceptTransition()) return false;
+    DL.selectRow(id);
+    DP.setMode("design");
+    activatePreviewView("3d");
+    return true;
+  } finally {
+    if (request === DP.modeRequest) DP.showPendingMode(null);
+  }
 };
 
 // Duplicate a design-source row through the accepted atomic owner. The new
-// row is In Space and unplaced, so it appears in the staging rail; the user
+// row is In Design and unplaced, so it appears in the staging rail; the user
 // stays in Space.
 DP.duplicateRow = async one => {
   if (typeof flushSpaceDesignAutosave === "function" && !(await flushSpaceDesignAutosave())) return;
@@ -434,8 +464,9 @@ DP.duplicateRow = async one => {
   }
 };
 
-// Spacer rows keep their own remove control.
+// Every Delete button carries its row ID; never delete a stale selection.
 DP.deleteRow = async one => {
+  const context = DL.spaceContext();
   const placed = DL.placedCount(one.id);
   const ok = await appConfirmAction({
     title: "Delete this bin?",
@@ -443,11 +474,21 @@ DP.deleteRow = async one => {
     actionLabel: "Delete Bin",
     danger: true,
   });
-  if (!ok) return;
+  if (!ok || !DL.spaceContextCurrent(context)) return;
+  if (one.id === state.designInventoryId && !(await flushSpaceDesignAutosave())) return;
+  if (!DL.spaceContextCurrent(context)) return;
+  const wasDesign = one.id === state.designInventoryId;
   DP.open.delete(one.id);
   DP.printSelected.delete(one.id);
   if (DL.selectedRow === one.id) DL.selectedRow = null;
-  DL.editBins({ delete_ids: [one.id] });
+  if (!(await DL.editBins({ delete_ids: [one.id] }, { context }))) return;
+  if (wasDesign) {
+    state.designInventoryId = null;
+    state.cleanDesign = clone(state.design);
+    if (typeof discardStaleFileRefreshRows === "function") discardStaleFileRefreshRows([one.id]);
+    DP.setMode("space");
+    activatePreviewView("drawer");
+  }
 };
 
 DP.deleteSelected = async () => {
@@ -475,14 +516,26 @@ DP.deleteSelected = async () => {
     state.cleanDesign = clone(state.design);
     if (typeof discardStaleFileRefreshRows === "function") discardStaleFileRefreshRows(ids);
     DP.setMode("space");
+    activatePreviewView("drawer");
   }
   DP.renderInventory(true);
 };
 
 // The one "go design a bin" jump used by both empty states.
 DP.designFirstBin = () => {
-  DP.setMode("design");
-  activatePreviewView("3d");
+  DP.newBinFromSpace();
+};
+DP.newBinFromSpace = async () => {
+  const request = ++DP.modeRequest;
+  const spaceContext = DL.spaceContext();
+  const acceptTransition = () => request === DP.modeRequest &&
+    state.folderMode === "space" && DL.active && DL.spaceContextCurrent(spaceContext);
+  DP.showPendingMode("design");
+  try {
+    if (!(await designerNewBin(acceptTransition)) || !acceptTransition()) return false;
+    DP.setMode("design");
+    return true;
+  } finally { if (request === DP.modeRequest) DP.showPendingMode(null); }
 };
 
 // A normal typed one-drawer Space: name and size are owned by the Space.
@@ -752,6 +805,7 @@ DP.filteredBins = () => {
 };
 
 DP.renderInventory = (force = false) => {
+  DP.syncFilterSpace();
   const drawer = DL.drawer();
   const list = $("#dl-inv-list");
   dlSet("#dl-inv-show", DP.filter.show);
@@ -805,14 +859,16 @@ DP.renderInventory = (force = false) => {
     const statusTracked = !spacer && ["bin", "b4b", "manual"].includes(one.kind);
     const printed = one.status === "printed";
     const picked = !spacer && DP.printSelected.has(one.id);
-    const swatch = `<span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${fmt(one.z)} mm tall">${spacer ? fmt(one.z) : DL.binNumberLabel(one)}</span>`;
+    const swatch = `<span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${fmt(one.z)} mm tall">${DL.badgeLabel(one)}</span>`;
     const check = !spacer
       ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.binNumberLabel(one))} ${escapeHtml(DL.label(one))}"${picked ? " checked" : ""}>`
       : `<span class="dl-print-placeholder" aria-hidden="true"></span>`;
     const lifecycle = spacer
       ? `<small>${dlPlural(placed, "placement")} · ${one.qty} printed</small>`
-      : `<small class="dl-status">${DL.statusLabel(one)}</small>`;
+      : `<small class="dl-status">${placed ? "Placed" : "Unplaced"} · ${DL.statusLabel(one)}</small>`;
     const actions = spacer ? "" : `<div class="dl-row-actions">
+          ${editable ? `<button type="button" class="button secondary dl-small" data-act="edit">Edit</button>` : ""}
+          <button type="button" class="button danger dl-small" data-act="delete">Delete</button>
           ${designSource ? `<button type="button" class="button secondary dl-small" data-act="duplicate">Duplicate</button>` : ""}
           ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}
           ${statusTracked ? (printed
@@ -820,7 +876,7 @@ DP.renderInventory = (force = false) => {
             : `<button type="button" class="button secondary dl-small" data-act="printed">Mark Printed</button>`) : ""}
         </div>`;
     return `
-      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" data-editable="${editable}"${editable ? ' tabindex="0" role="button"' : ""} draggable="${canPlace}" title="${editable ? "Open in Designer or drag into Space" : canPlace ? "Drag into the Space" : ""}">
+      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" data-editable="${editable}" tabindex="0" role="button" aria-label="Select ${escapeHtml(DL.label(one))}" draggable="${canPlace}" title="Select this item${canPlace ? " or drag it into Space" : ""}">
         ${check}
         ${swatch}
         <span class="dl-bin-main">
@@ -893,7 +949,13 @@ DP.renderSave = () => {
 //     tools, "design" for the current bin or Storage Box.
 // Preview and editor controls synchronize through their owners below.
 
-DP.mode = "space";
+DP.mode = "design";
+DP.modeRequest = 0;
+DP.showPendingMode = mode => {
+  $$("[data-space-mode]").forEach(button => button.classList.toggle("pending", mode === button.dataset.spaceMode));
+  const busy = $("#space-mode-busy");
+  if (busy) busy.hidden = !mode;
+};
 
 // The layout tools own the left panel (keys, Undo/Redo and the header
 // buttons act on the layout only then).
@@ -906,6 +968,7 @@ DP.applyMode = () => {
   // Hides the bin editor's own chrome while the layout tools are showing.
   document.body.classList.toggle("drawer-mode", space);
   $("#drawer-panel").hidden = !space;
+  $(".view-tabs").hidden = space;
   $$("[data-space-mode]").forEach(button => {
     const on = button.dataset.spaceMode === DP.mode;
     button.classList.toggle("active", on);
@@ -940,47 +1003,60 @@ DP.ensureInventoryLoaded = async (message = "Could not read the inventory") => {
 };
 
 DP.selectMode = async mode => {
-  if (mode !== "space" && mode !== "design") return;
-  if (DP.mode === "design" && mode === "space" &&
-      typeof flushVisibleDesignEditsBeforeModeSwitch === "function" &&
-      !(await flushVisibleDesignEditsBeforeModeSwitch())) {
-    return;
+  if (mode !== "space" && mode !== "design") return false;
+  if (mode === "space" && (state.folderMode !== "space" || !state.activeSpace)) {
+    SP.offerSpacePlanning();
+    return false;
   }
-  if (DP.mode === "design" && mode === "space" &&
-      typeof flushSpaceDesignAutosave === "function" &&
-      !(await flushSpaceDesignAutosave())) return;
-  DP.setMode(mode);
-  if (mode === "space") {
-    if (!(await DP.ensureInventoryLoaded())) return;
-    if (DL.pegboardRefreshError) await DL.retryPegboardLayouts();
-    if (!DL.active || DP.mode !== "space") return;
-    activatePreviewView("drawer");
-    DP.update();
-  } else if ($('.view-tab[data-view="drawer"]')?.classList.contains("active")) {
-    activatePreviewView("3d");
+  const request = ++DP.modeRequest;
+  DP.showPendingMode(mode);
+  try {
+    if (DP.mode === "design" && mode === "space") {
+      if (typeof flushVisibleDesignEditsBeforeModeSwitch === "function" &&
+          !(await flushVisibleDesignEditsBeforeModeSwitch())) return false;
+      if (typeof flushSpaceDesignAutosave === "function" &&
+          !(await flushSpaceDesignAutosave())) return false;
+    }
+    if (request !== DP.modeRequest) return false;
+    if (mode === "space") {
+      if (!(await DP.ensureInventoryLoaded()) || request !== DP.modeRequest) return false;
+      if (DL.pegboardRefreshError) await DL.retryPegboardLayouts();
+      if (request !== DP.modeRequest) return false;
+      if (!DL.active) { DL.active = true; DP.build(); DP.applyMode(); }
+    }
+    DP.setMode(mode);
+    activatePreviewView(mode === "space" ? "drawer" : "3d");
+    if (mode === "space") DP.update();
+    return true;
+  } finally {
+    if (request === DP.modeRequest) DP.showPendingMode(null);
   }
 };
 
 // Open the Space workspace. Starts in Space mode unless a caller asks for Design.
 DP.enter = async (preferredMode, inventoryLoaded = false) => {
   if (DL.active) {
-    if (preferredMode === "space" || preferredMode === "design") DP.setMode(preferredMode);
-    if (!DL.loaded) await DP.ensureInventoryLoaded();
-    return;
+    if (preferredMode === "space" || preferredMode === "design") return DP.selectMode(preferredMode);
+    return DL.loaded || DP.ensureInventoryLoaded();
   }
+  if (!inventoryLoaded && !(await DP.ensureInventoryLoaded())) return false;
   DL.active = true;
   DP.mode = preferredMode === "design" ? "design" : "space";
   DP.build();
   DP.applyMode();
   DP.update();
   // inventoryLoaded is a hint from the caller; DL.loaded is authoritative.
-  if (!DL.loaded) await DP.ensureInventoryLoaded();
+  if (DP.mode === "space") activatePreviewView("drawer");
+  return true;
 };
 
 // Close the Space workspace (the folder is no longer this Space).
 DP.leave = () => {
   if (!DL.active) return;
   DL.active = false;
+  DP.modeRequest += 1;
+  DP.mode = "design";
+  DP.showPendingMode(null);
   if (typeof SP !== "undefined" && SP.cancelInlineEdit) SP.cancelInlineEdit();
   DP.applyMode();
   DV.drag = null;
@@ -996,10 +1072,6 @@ DP.leave = () => {
   DV.wire();
   DL.on(DP.update);
   $$("[data-space-mode]").forEach(button => button.addEventListener("click", () => DP.selectMode(button.dataset.spaceMode)));
-  // Showing the Space preview opens the workspace; hiding it does not close it.
-  new MutationObserver(() => {
-    if (wrap.classList.contains("active") && (!DL.active || !DL.loaded)) DP.enter("space");
-  }).observe(wrap, { attributes: true, attributeFilter: ["class"] });
   window.addEventListener("beforeunload", event => {
     if (DL.dirty && DL.layout && !DL.layout.settings.autosave) {
       event.preventDefault();

@@ -24,11 +24,18 @@
 
   <main class="app-shell" id="app-shell">
     <aside class="controls" aria-label="Bin controls">
+      <nav id="space-mode-row" class="space-mode-row" aria-label="Work area">
+        <div id="space-mode-toggle" class="space-mode-toggle" role="tablist" aria-label="Work area">
+          <button type="button" role="tab" data-space-mode="space" aria-selected="false" aria-pressed="false" tabindex="-1">Space</button>
+          <button type="button" role="tab" data-space-mode="design" class="active" aria-selected="true" aria-pressed="true" tabindex="0">Design</button>
+        </div>
+        <span id="space-mode-busy" role="status" hidden>Loading…</span>
+      </nav>
       <section id="space-head" class="space-head" aria-label="Space" hidden>
         <div id="space-head-view" class="space-head-view">
           <div class="space-head-title"><strong id="space-head-name"></strong><span id="space-head-type" class="space-head-type"></span></div>
           <div id="space-head-summary" class="muted"></div>
-          <div id="space-actions" class="space-actions" role="group" aria-label="Space Actions">
+          <div id="space-actions" class="space-actions" role="group" aria-label="Space controls">
             <div class="button-row">
               <button id="space-head-open" class="button secondary dl-small" type="button">Open Space…</button>
               <button id="space-head-edit" class="button secondary dl-small" type="button">Edit Space</button>
@@ -49,12 +56,6 @@
           </div>
         </div>
         <div id="space-head-edit-host" class="space-head-edit-host" hidden></div>
-        <div id="space-mode-row" class="space-mode-row">
-          <div id="space-mode-toggle" class="space-mode-toggle" role="tablist" aria-label="What the left panel edits" hidden>
-            <button type="button" role="tab" data-space-mode="space" class="active" aria-selected="true" aria-pressed="true" tabindex="0" title="Work on the Space and its layout">Space</button>
-            <button type="button" role="tab" data-space-mode="design" aria-selected="false" aria-pressed="false" tabindex="-1" title="Work on the current bin">Design</button>
-          </div>
-        </div>
       </section>
       <section class="control-section open" data-section="build">
         <div class="section-body">
@@ -202,14 +203,12 @@
                 </div>
               </div>
               <div class="setting-group"><span class="setting-group-label">Vertical position</span>
-                <div class="field-grid two">
-                  <label>% from bottom
-                    <input id="side-opening-from-bottom" type="number" min="0" max="100" step="1">
-                  </label>
-                  <label>% from top
-                    <input id="side-opening-from-top" type="number" min="0" max="100" step="1">
-                  </label>
+                <div class="side-opening-range" role="group" aria-label="Opening height range">
+                  <div class="side-opening-range-track" aria-hidden="true"><div id="side-opening-range-fill"></div></div>
+                  <input id="side-opening-lower" type="range" min="0" max="99.9" step="any" aria-label="Lower edge of opening">
+                  <input id="side-opening-upper" type="range" min="0.1" max="100" step="any" aria-label="Upper edge of opening">
                 </div>
+                <p id="side-opening-range-readout" class="inline-help" aria-live="polite"></p>
               </div>
               <div class="setting-group"><span class="setting-group-label">Walls</span>
                 <div class="segmented four" aria-label="Side Opening walls">
@@ -446,7 +445,6 @@
           <div class="view-tabs" role="tablist">
             <button class="view-tab active" data-view="3d" role="tab" aria-selected="true" title="The bin in 3D">3D</button>
             <button class="view-tab" data-view="2d" role="tab" aria-selected="false" title="Lay out the interior parts of this bin">2D</button>
-            <button class="view-tab" data-view="drawer" role="tab" aria-selected="false" title="Arrange bins in this Space">Space</button>
           </div>
           <span id="workspace-space-name" class="workspace-space-name" hidden></span>
         </div>
@@ -648,11 +646,11 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <dialog id="support-layout-dialog" class="support-layout-dialog" aria-labelledby="support-layout-dialog-title">
-    <h2 id="support-layout-dialog-title">Adjust this interior part?</h2>
-    <p>Switch to 2D layout to adjust interior parts.</p>
+    <h2 id="support-layout-dialog-title">Edit the interior in 2D</h2>
+    <p>Wavefinity opened 2D so you can see and edit the part you selected.</p>
+    <label class="checkbox-row"><span>Don't show this again</span><input id="support-layout-remember" type="checkbox" checked></label>
     <div class="button-row">
-      <button id="support-layout-dialog-close" type="button" class="button secondary">Stay in 3D</button>
-      <button id="support-layout-dialog-open" type="button" class="button primary">Open 2D layout</button>
+      <button id="support-layout-dialog-open" type="button" class="button primary">Got it</button>
     </div>
   </dialog>
 
@@ -855,18 +853,18 @@
           <section class="space-tutorial-section">
             <h3>1. Start with a Space</h3>
             <p>A <strong>Space</strong> is the real area you want to organize. Choose <strong>Drawer</strong>, <strong>Storage Box</strong>, <strong>Surface</strong>, or <strong>Pegboard</strong>.</p>
-            <p>The Space keeps the physical size, layout, and inventory together so Wavefinity knows what has to fit. A Storage Box Space also makes its own case, and a Surface Space makes its own Base Trim - use <strong>Space Actions</strong> to save or print them.</p>
+            <p>The Space keeps its physical size, layout, and inventory together. A Storage Box Space makes its own case, and a Surface Space makes its own Base Trim; save or print them from the Space header.</p>
           </section>
 
           <section class="space-tutorial-section">
             <h3>2. Design your bins</h3>
             <p>A <strong>Design</strong> is the bin you are building. Set its width, depth, height, wall and base choices, labels, stacking choices, and other shell options here. It saves as you go.</p>
-            <p>Use <strong>3D</strong> to inspect the assembled result. When you are working in a typed Space, the Design and Space tabs let you switch between the current bin and the overall layout.</p>
+            <p>Use the top-level <strong>Space</strong> and <strong>Design</strong> buttons to change work areas. Design has 3D and 2D views; Space shows the overall layout.</p>
           </section>
 
           <section class="space-tutorial-section">
-            <h3>3. Add Parts &amp; Options</h3>
-            <p><strong>Parts &amp; Options</strong> customize what the bin holds or how the shell behaves. Interior features include things such as Dividers, Bores, Cradles, Slot Racks, and Photo Nests. Shell options can change labels, grips, openings, lids, stacking, or mounts.</p>
+            <h3>3. Add Options</h3>
+            <p><strong>Options</strong> customize what the bin holds or how the shell behaves. Interior features include things such as Dividers, Bores, Cradles, Slot Racks, and Photo Nests. Shell options can change labels, grips, openings, lids, stacking, or mounts.</p>
             <p>Add only what the bin needs. The 3D preview shows the combined result as you work.</p>
           </section>
 
@@ -878,8 +876,8 @@
 
           <section class="space-tutorial-section">
             <h3>5. Arrange bins inside the Space</h3>
-            <p>Every bin you design is one row in the active Space's <strong>Inventory</strong>, numbered <strong>Bin 1</strong> onward and marked <strong>In Space</strong>, <strong>Saved</strong> or <strong>Printed</strong>. In Space means the editable design is stored in the Space; Saved means a current print file exists. Bins that are not placed yet wait in <strong>Unplaced bins</strong> beside the Space. Drag one in to place it; drag a placed bin off the Space to unplace it.</p>
-            <p>Click an editable Inventory row to open its bin in Designer. Select rows and use the Inventory <strong>Delete</strong> button to remove them together. <strong>Spacers</strong> appear below ordinary bins and can fill leftover areas.</p>
+            <p>Every bin you design is one row in the active Space's <strong>Inventory</strong>. Its number badge is separate from its name. <strong>Placed</strong> or <strong>Unplaced</strong> describes its physical location; <strong>In Design</strong>, <strong>Saved</strong>, or <strong>Printed</strong> describes its files. Unplaced bins wait beside the Space. Drag one in to place it; drag a placed bin off the Space to unplace it.</p>
+            <p>Click an Inventory row to select it. Use its <strong>Edit</strong> button to open that bin in Design, or its <strong>Delete</strong> button to remove it. Select multiple rows with their checkboxes for bulk Delete. <strong>Spacers</strong> appear below ordinary bins.</p>
           </section>
 
           <section class="space-tutorial-section">
@@ -900,7 +898,7 @@
             <ol>
               <li>Create the Space and enter its real measurements.</li>
               <li>Design one bin that fits something you actually want to store.</li>
-              <li>Add Parts &amp; Options, then arrange interior parts in 2D.</li>
+              <li>Add Options, then arrange interior parts in 2D.</li>
               <li>Check the result in 3D and save or print it.</li>
               <li>Open Space, drag the bin from Unplaced bins into the Space, and repeat.</li>
               <li>Use connectors and spacers to finish the overall layout.</li>

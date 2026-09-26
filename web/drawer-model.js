@@ -341,13 +341,16 @@ DL.binNumberLabel = one => {
   const number = DL.isOrdinary(one) ? DL.binNumber(one) : null;
   return number ? `Bin ${number}` : "";
 };
+DL.badgeLabel = one => DL.isSpacer(one)
+  ? `S${DL.bins.filter(DL.isSpacer).findIndex(item => item.id === one.id) + 1}`
+  : String(DL.binNumber(one) || "");
 
 // The staging rail's membership, derived and never persisted: every ordinary
 // Inventory row with no placement, in Inventory order.
 DL.stagedBins = () => DL.bins.filter(one => DL.isOrdinary(one) && !DL.isPlaced(one.id));
 
 // The one lifecycle label a row shows.
-DL.statusLabel = one => one?.status === "printed" ? "Printed" : one?.status === "saved" ? "Saved" : "In Space";
+DL.statusLabel = one => one?.status === "printed" ? "Printed" : one?.status === "saved" ? "Saved" : "In Design";
 
 // Bulk printing: a generated bin/B4B row (one with a file, or with a
 // canonical design source that Save can resolve on demand) can be sent to the

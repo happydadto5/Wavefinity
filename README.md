@@ -49,7 +49,7 @@ everything whose meaning it can change.
 *structural outputs of their Space*, never Designer objects and never Inventory
 rows: a Storage Box Space saves or prints its own case (settings live on the
 Space and are edited in **Edit Space**), and a Surface Space saves or prints its
-own Base Trim, both from **Space Actions** in the Space header. Lid & Stacking is
+own Base Trim, both from the Space header controls. Lid & Stacking is
 a bin-level option. The selected wall/base values are shown and saved; they are
 never silent generation-only overrides.
 
@@ -90,14 +90,14 @@ typed — stacking raising the wall and floor — it
 says so in plain language in a note under the control that caused it, and it
 never writes the new value back into the field the user is typing in.
 
-**The right side has three primary views: *3D*, *2D* and optional *Space*.** 3D and 2D
-show the bin being designed (2D is where its interior parts are laid out).
+**Space and Design are separate top-level work areas.** Design has 3D and 2D
+views of the bin (2D is where its interior parts are laid out).
 **Space is a mode, not a panel**: it swaps the whole screen: the inventory and
 its tools take the sidebar, the Space takes the workspace, and the bin editor's
 chrome (placed parts, the design file buttons) steps aside. Undo, Redo and
 Ctrl+Z act on the Space while it is showing. A Space has only two mental
-objects: **the Space** and **the bins inside it**. The left mode switch reads
-**Space | Design**. In Design, the main build fields, **Parts & Options**, and
+objects: **the Space** and **the bins inside it**. The top-level switch reads
+**Space | Design**. In Design, the main build fields, **Options**, and
 **Connectors** appear in separate cards.
 
 **The drawer is seen through a camera looking into it.** It is a real 3D
@@ -343,7 +343,7 @@ Before spending testing tokens, ask:
 
 The page is split between intent-based controls and a large responsive
 workspace. The top design controls contain the dimensions, print mode and interior
-interior-part editor. **Parts & options** below them holds the interior-part
+interior-part editor. **Options** below them holds the interior-part
 palette and the bin-level options (Lid & Stacking, Inside Grip, Side Openings,
 Edge Mount). The bin's name is the *Bin Name* field at the top, before the
 dimensions.
@@ -433,7 +433,7 @@ shows a temporary *Legacy — W × H mm* option until a preset is picked. It is
 never rewritten on disk just by opening it.
 
 **Maintainer note:** for a local Surface Space, Ctrl+Shift+click
-**Print Base Trim** in Space Actions sends a small ~50 mm two-piece
+**Print Base Trim** in the Space header sends a small ~50 mm two-piece
 drop-in-joint sample instead of the normal trim, to physically check the fit
 before a full print. It is not a normal UI control; an ordinary click still
 prints the normal Base Trim, and the same chord on Storage Box's Print has no
@@ -477,7 +477,7 @@ file.
 length in mm. Wavefinity rounds down to the largest whole-unit interior field
 that fits (`outside = field + mating gap + 2 × trim width`); Space data still
 stores the interior field and the trim size. The Surface owns its **Base Trim**:
-**Save Base Trim** / **Print Base Trim** in Space Actions build it from the
+**Save Base Trim** / **Print Base Trim** in the Space header build it from the
 Surface definition (with the printer-bed size used to split it) and never create
 an Inventory row. A bin you design saves itself into Inventory as you go and
 reopening the Space later restores the design you were editing (resume is
@@ -487,8 +487,8 @@ A folder is either an untyped Design folder, or a typed **Space** - a
 **Drawer**, a **Storage Box**, a **Surface**, or a **Pegboard**. *Create New Space*
 configures the Space's type and dimensions first and chooses the save folder
 last; *Open Existing* can instead turn an already-selected folder into a
-Space, or use it without a type. The **Space** tab (beside *3D* and *2D*)
-then lays out that Space's inventory. A folder can already hold a full
+Space, or use it without a type. The top-level **Space** button then shows
+that Space's inventory. A folder can already hold a full
 inventory of bins before it becomes a Space - configuring one adds layout
 information to that same inventory file rather than starting a second one,
 so nothing already generated is lost or needs re-adding. Because a Space's
@@ -558,7 +558,7 @@ as `space.storage_box` (`secure_lid`, `latch_count`, `latch_strength`,
 `lid_headroom_mm`, `label_enabled`, `label_text`, `label_location`,
 `front_label_style`, `stacking`, `handle`, `wall_mm`, `base_mm`), round-trip
 through `.wavefinity.json`, `layout.space` and hosted Inventory text, and default to
-the established B4B values when a legacy Space has no block. **Space Actions**
+the established B4B values when a legacy Space has no block. The Space header
 owns the Space-level buttons - *Open Space…*, *Edit Space*, *Show Folder*, *New
 Space* - plus the structural output: *Save Storage Box* / *Print Storage Box* for a
 Storage Box and *Save Base Trim* / *Print Base Trim* for a Surface. Those outputs
@@ -580,7 +580,7 @@ which suppress Inventory logging entirely.
   **ID**, a **Kind** (bin, Storage Box, spacer, or a legacy hand-added row), a **Name**,
   a **Stack** (blank, `lid` or `direct` - how the bin was printed to stack)
   and a persisted **Status** of `in_design`, `saved`, or `printed`, displayed as
-  **In Space** (editable design saved in the Space), **Saved** (current files exist),
+  **In Design** (editable design saved in the Space), **Saved** (current files exist),
   or **Printed**. There
   is no user-facing quantity: a row is one bin, and `Qty` survives only as a
   0/1 compatibility field derived from Status. Saving files is not printing. Print
@@ -599,7 +599,7 @@ which suppress Inventory logging entirely.
   bins already saved stay Saved, Bambu Studio is not opened, and the unfinished
   rows stay selected to retry.
   **Editing a saved bin.** Changing the design of a bin that already has saved
-  files makes those files stale (the row shows *In Space*). When focus leaves
+  files makes those files stale (the row shows *In Design*). When focus leaves
   that bin, Wavefinity asks whether to update its saved files; the dialog can
   remember automatic updates for that Space through
   `layout.settings.auto_update_changed_files` (default off).
@@ -613,12 +613,10 @@ which suppress Inventory logging entirely.
   time it is saved, and a one-off `.bak` copy is left beside it. Every save
   re-reads the file and merges, so a bin saved while the layout is open is never
   lost.
-- **Space workspace.** A typed Space opens as one workspace with a **Space |
-  Design** switch at the top left, under the Space's name, type (Drawer,
-  Storage Box, Surface or Pegboard) and size, and its **Space Actions**. The
-  switch decides what the left panel edits: *Space* is the layout tools, *Design*
-  is the current bin. The 3D and 2D tabs select Design; the Space tab selects
-  Space. Opening an existing Space with a bin (or a legacy hand-added row) in Inventory
+- **Space workspace.** The top-level **Space | Design** buttons choose the work
+  area. *Space* shows layout tools and Inventory; *Design* shows the current bin
+  with its 3D and 2D views. Choosing Space without an active Space opens the
+  existing Open/New Space flow. Opening an existing Space with a bin (or a legacy hand-added row) in Inventory
   starts in *Space*. An empty or spacer-only Space starts in *Design / 3D*. The
   workspace stays open until the folder stops being that Space. The name, type and
   size are shown read-only; **Edit Space** opens the same fields in place with
@@ -648,10 +646,13 @@ which suppress Inventory logging entirely.
   stack takes it and everything above it; dragging the bottom bin moves the
   whole stack.
 - **Inventory is the primary Space control.** Each ordinary row shows a
-  general selection tick, **Bin N**, name, dimensions and exactly one lifecycle
-  label (**In Space**, **Saved** or **Printed**). Click an editable row to open it
-  in Designer. Row actions include **Duplicate**, **Print**, and **Mark Printed**
-  (or **Mark Not Printed**). Selection survives filtering and sorting; one
+  general selection tick, a number badge, name, dimensions, physical placement
+  (**Placed** or **Unplaced**) and file lifecycle (**In Design**, **Saved** or
+  **Printed**). Click a row to select it; use its explicit **Edit** button to
+  open that bin in Design. Row actions include **Delete**, **Duplicate**, **Print**,
+  and **Mark Printed** (or **Mark Not Printed**). Filter starts on All for each
+  Space in a fresh session and stays selected while switching work areas;
+  Sort remains a saved preference. Selection survives filtering and sorting; one
   Inventory **Delete** button removes selected ordinary bins. Spacers remain
   visible below ordinary bins. *Clear selection* is disabled while nothing is ticked.
 - **Placing.** Drag a bin from **Unplaced bins** (or its Inventory row) onto the
@@ -1575,7 +1576,7 @@ none of those are migrated or replaced.
 ### Side Openings
 
 **Side Openings modifies an ordinary bin; it is not an interior part.**
-It is a normal **Parts & options** palette option. It cuts centered finger-access
+It is a normal **Options** palette option. It cuts centered finger-access
 notches through selected bin walls - built by making the normal Wavefinity
 bin first, then subtracting negative cutter solids through the selected
 wall(s), so the ordinary shell, cavity, wave, lock and connector geometry
@@ -1588,10 +1589,11 @@ never change. Default is off.
   prefers Left + Right when both are legal.
 - **Opening size** - Small (8 mm), Medium (10 mm, default), Large (15 mm)
   or XL (20 mm).
-- **% from bottom** - defaults to 0%. It leaves that percentage of the usable
-  wall material below the opening; raising it leaves more material below.
-- **% from top** - defaults to 0%. It leaves that percentage of the usable
-  wall material above the opening; raising it leaves more material above.
+- **Vertical range** - two handles show the opening on one wall-height track.
+  The lower handle is the percentage up from the floor; the upper handle is
+  `100 - % from top`. Both work by pointer or keyboard and cannot cross.
+  Saved designs keep their original `from_bottom_percent` and
+  `from_top_percent` values.
 
 A wall needs to be at least **2 Wavefinity units (16 mm)** long to take a
 Side Opening at all, with a 4 mm solid corner shoulder kept at each end of
@@ -1603,7 +1605,7 @@ re-validates the same rule and refuses an impossible saved or imported
 combination outright.
 
 Side Openings are for **ordinary bins only** - hidden for Storage Box and Base
-Trim. Lid & Stacking clamps **% from top** as needed to keep its required
+Trim. Lid & Stacking limits the upper handle to keep its required
 bridge. Curved supported openings use a pointed supportless arch with a
 minimum 45-degree underside, rather than the old fixed arch.
 A rim label, an Edge Mount

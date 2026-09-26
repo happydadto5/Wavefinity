@@ -1359,10 +1359,9 @@ SP.openTypedSpacePreferredView = async () => {
   const preferred = DL.bins.some(one => ["bin", "b4b", "manual"].includes(one.kind))
     ? "space" : "design";
   if (preferred === "space") {
-    await DP.enter("space", true);
-    activatePreviewView("drawer");
+    if (!(await DP.enter("space", true))) return false;
   } else {
-    if (DL.active) DP.setMode("design");
+    if (!(await DP.enter("design", true))) return false;
     activatePreviewView("3d");
   }
   return true;
@@ -2691,13 +2690,6 @@ SP.renderSpaceInfo = () => {
         return;
     }
     head.hidden = false;
-    const toggle = document.getElementById("space-mode-toggle");
-    if (toggle) {
-        const hideToggle = !(typeof DL !== "undefined" && DL.active);
-        toggle.hidden = hideToggle;
-        const modeRow = document.getElementById("space-mode-row");
-        if (modeRow) modeRow.hidden = hideToggle;
-    }
     const viewing = document.getElementById("space-head-view");
     if (viewing) viewing.hidden = SP.editing;
     document.getElementById("space-head-name").textContent = state.activeSpace.name;

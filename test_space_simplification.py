@@ -35,7 +35,7 @@ const makeEl = () => ({
   setAttribute() {}, getContext() { return null; }, insertAdjacentHTML() {}, scrollIntoView() {},
 });
 const known = ["#dl-inv-list", "#dl-inv-show", "#dl-inv-sort", "#dl-inv-count", "#dl-batch-tools",
-  "#dl-batch-summary", "#dl-batch-connectors", "#dl-batch-clear", "#dl-batch-print", "#dl-batch-save", "#dl-refresh-saved", "#dl-staging",
+  "#dl-batch-summary", "#dl-batch-connectors", "#dl-batch-delete", "#dl-batch-clear", "#dl-batch-print", "#dl-batch-save", "#dl-refresh-saved", "#dl-staging",
   "#dl-empty-state", "#dl-stats", "#dl-save-status"];
 known.forEach(sel => { els[sel] = makeEl(); });
 els["#dl-staging"].querySelector = sel => (els["#dl-staging"]._kids ||= {})[sel] ||= makeEl();
@@ -308,19 +308,18 @@ setLayout([bin("B1", { status: "in_design" }), bin("B2", { status: "saved", file
 DP.printSelected = new Set(["B1"]);
 DP.renderInventory(true);
 out.html = els["#dl-inv-list"].innerHTML;
-out.count = els["#dl-inv-count"].textContent;
 out.clearDisabled = els["#dl-batch-clear"].disabled;
 DP.printSelected = new Set();
 DP.renderBatch();
 out.clearDisabledWhenEmpty = els["#dl-batch-clear"].disabled;
 """)
         html = out["html"]
-        self.assertEqual(out["count"], "4 bins")
         rows = re.split(r'(?=<div class="dl-bin )', html)[1:]
         self.assertEqual(len(rows), 4)
         for row in rows:
-            labels = [label for label in ("In Design", "Saved", "Printed") if f">{label}<" in row]
+            labels = [label for label in ("In Design", "Saved", "Printed") if f"{label}</small>" in row]
             self.assertEqual(len(labels), 1, row)
+            self.assertTrue("Placed" in row or "Unplaced" in row)
         for retired in ("data-act=\"qty", "dl-qty", "dl-placed", "planned", "needed", "Qty", "placed copies"):
             self.assertNotIn(retired, html)
         first = rows[0]
@@ -605,7 +604,7 @@ class RetiredConceptSourceTests(unittest.TestCase):
                            "Auto layout", "Auto Layout", "Print map", "Portable Storage", "Qty 0"):
                 self.assertNotIn(phrase, text, phrase)
         self.assertIn("Unplaced bins", tutorial)
-        self.assertIn("Space Actions", tutorial)
+        self.assertIn("Space header", tutorial)
         self.assertNotIn("Generate", tutorial)
 
 
@@ -613,7 +612,7 @@ class SpaceActionsMarkupTests(unittest.TestCase):
     def test_space_actions_group_and_labels(self):
         html = _read("index.html")
         head = html[html.index('id="space-actions"'):html.index('id="space-head-edit-host"')]
-        for label in ("Space Actions", ">Open Space…<", ">Edit Space<", ">Show Folder<", ">New Space<"):
+        for label in ("Space controls", ">Open Space…<", ">Edit Space<", ">Show Folder<", ">New Space<"):
             self.assertIn(label, head)
         for control in ("space-structural-save", "space-structural-print"):
             self.assertIn(control, head)

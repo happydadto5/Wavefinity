@@ -1703,9 +1703,11 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     draft_error: str | None = None
 
     normalized_saved = []
+    saved_indexes: list[int] = []
     for idx, feat in enumerate(layout.features):
         try:
             normalized_saved.append(normalize_b4b_divider(box, feat))
+            saved_indexes.append(idx)
         except Exception as err:
             feature_errors.append(str(err))
             invalid_feature_indexes.append(idx)
@@ -1716,6 +1718,7 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     draft_raw = payload.get("draft")
     selected = payload.get("selected")
     draft_feature = None
+    showing_draft = False
     if draft_raw and isinstance(draft_raw, dict):
         try:
             one = _feature_from_json(draft_raw, "fused")
@@ -1723,8 +1726,10 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
             draft_feature = one
             if selected == 0:
                 display_features = [one]
+                showing_draft = True
             elif selected is None and not normalized_saved:
                 display_features = [one]
+                showing_draft = True
             else:
                 draft_error = "Storage Box supports one Divider layout."
         except Exception as err:
@@ -1743,6 +1748,7 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception as error:
         if draft_feature is not None and display_features == [draft_feature]:
             draft_error = str(error)
+            showing_draft = False
             try:
                 with GEOMETRY_LOCK:
                     validate_b4b_design(
@@ -1782,6 +1788,14 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     bounds = b4b_divider_zone(box)
     cavity = b4b_mating_polygon(box)
+    divider_pick = ({"type": "draft"} if showing_draft else
+                    {"type": "saved", "index": saved_indexes[0]}
+                    if saved_indexes else None)
+    pick_meshes = [
+        {"mesh_index": index, "pick": divider_pick}
+        for index, mesh in enumerate(meshes)
+        if divider_pick and mesh.get("kind") == "feature_divider"
+    ]
     return {
         "design": design_to_dict(
             adopted, saved_layout, label, part_name, label_location, False
@@ -1792,6 +1806,7 @@ def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "text_meta": [],
         "geometry": [],
         "meshes": meshes,
+        "pick_meshes": pick_meshes,
         "fits": not message and not feature_errors and not draft_error,
         "message": message,
         "feature_errors": feature_errors,
@@ -1860,8 +1875,9 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     bounds = layout_zone(box, layout.mode)
     geometry = [
         {"points": points, "kind": kind, "normal": normal,
-         "layer": layer, "owner": owner}
-        for points, kind, normal, layer, owner in scene["geometry"]
+         "layer": layer, "owner": owner,
+         "pick": scene.get("pick_faces", {}).get(index)}
+        for index, (points, kind, normal, layer, owner) in enumerate(scene["geometry"])
     ]
     cavity = wavy_cavity_polygon(box)
     # An auto text part finds its own spot during the preview, so the design
@@ -1880,6 +1896,7 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "label_meta": scene["label_meta"],
         "text_meta": scene["text_meta"],
         "geometry": geometry,
+        "pick_proxies": scene.get("pick_proxies", []),
         "fits": scene["fits"],
         "message": scene["message"],
         "feature_errors": scene["feature_errors"],
@@ -2096,8 +2113,8 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         work = b4b_divider_work_box(box)
         return {
             "geometry": [
-                {"points": points, "kind": kind, "normal": normal,
-                 "layer": layer, "owner": owner}
+                 {"points": points, "kind": kind, "normal": normal,
+                  "layer": layer, "owner": owner, "pick": {"type": "draft"}}
                 for points, kind, normal, layer, owner in geometry
             ],
             "feature": feature_to_dict(one, "fused"),
@@ -2136,8 +2153,8 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 pass
         return {
             "geometry": [
-                {"points": points, "kind": kind, "normal": normal,
-                 "layer": layer, "owner": owner}
+                 {"points": points, "kind": kind, "normal": normal,
+                  "layer": layer, "owner": owner, "pick": {"type": "draft"}}
                 for points, kind, normal, layer, owner in geometry
             ],
             "feature": feature_to_dict(one, layout.mode),
@@ -2180,8 +2197,8 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_{one.kind}"))
     result = {
         "geometry": [
-            {"points": points, "kind": kind, "normal": normal,
-             "layer": layer, "owner": owner}
+             {"points": points, "kind": kind, "normal": normal,
+              "layer": layer, "owner": owner, "pick": {"type": "draft"}}
             for points, kind, normal, layer, owner in geometry
         ],
         "feature": feature_to_dict(one, layout.mode),
