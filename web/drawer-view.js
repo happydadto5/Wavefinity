@@ -476,7 +476,7 @@ DV.paintScene = (ctx, drawer, cam) => {
   }
 
   // Empty cells, and the largest empty spot the report found.
-  if (DL.layout.settings.show_empty) {
+  {
     const taken = new Set();
     DL.items(drawer).forEach(item => {
       for (let r = item.gy; r < item.gy + item.d; r += 1) for (let c = item.gx; c < item.gx + item.w; c += 1) taken.add(`${c},${r}`);
@@ -543,6 +543,20 @@ DV.paintScene = (ctx, drawer, cam) => {
       const stroke = entry.mode === "invalid" || problem === "error" ? "#a8443d" : "rgba(23,37,45,.45)";
       const screens = faces.map(([side, points]) => ({ side, screen: face(points, DV.tone(color, DV.FACE_TONE[side]), stroke) }));
       ctx.globalAlpha = 1;
+      if (DL.isOrdinary(one)) {
+        const side = screens.find(({ side, screen }) => side !== "top" &&
+          Math.hypot(screen[1][0] - screen[0][0], screen[1][1] - screen[0][1]) > 34 &&
+          Math.hypot(screen[3][0] - screen[0][0], screen[3][1] - screen[0][1]) > 14);
+        if (side) {
+          const points = side.screen;
+          ctx.fillStyle = color.ink;
+          ctx.font = "700 10px 'Segoe UI', sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(DL.binNumberLabel(one), points.reduce((sum, p) => sum + p[0], 0) / 4,
+            points.reduce((sum, p) => sum + p[1], 0) / 4);
+        }
+      }
       if (problem === "height") {
         ctx.save();
         ctx.setLineDash([4, 3]);
@@ -638,7 +652,7 @@ DV.paintScene = (ctx, drawer, cam) => {
 DV.binLabelInfo = (one, stackCount = 1) => {
   const isEdgeSpacer = one.kind === "spacer" && one.boundary === "edge";
   const rawName = String(one.name || "").trim();
-  const name = isEdgeSpacer ? "Spacer" : (rawName || "Unnamed bin");
+  const name = DL.isSpacer(one) ? "Spacer" : `${DL.binNumberLabel(one)}${rawName ? ` · ${rawName}` : ""}`;
   const wMm = fmt(one.x);
   const lMm = fmt(one.y);
   const wUnits = DL.mmToUnits ? DL.mmToUnits(one.x) : fmt(Number(one.x) / DL.UNIT);
@@ -979,7 +993,7 @@ DV.renderStaging = () => {
   const staged = DL.stagedBins();
   const drawer = DL.drawer();
   const signature = JSON.stringify([
-    staged.map(one => [one.id, one.name, one.x, one.y, one.z, one.status]), DL.selectedRow, drawer.id,
+    staged.map(one => [one.id, DL.binNumber(one), one.name, one.x, one.y, one.z, one.status]), DL.selectedRow, drawer.id,
     DL.bins.some(DL.isOrdinary),
   ]);
   if (rail.dataset.signature === signature) return;
@@ -991,7 +1005,7 @@ DV.renderStaging = () => {
     const color = DV.binColor(one, range);
     const picked = one.id === DL.selectedRow;
     return `<div class="dl-staged${picked ? " selected" : ""}" data-staged-bin="${escapeHtml(one.id)}" draggable="true" tabindex="0" title="Drag into the Space">
-      <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}">${fmt(one.z)}</span>
+      <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}">${DL.binNumberLabel(one)}</span>
       <span class="dl-bin-main"><strong>${escapeHtml(DL.label(one))}</strong>
         <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${escapeHtml(DL.statusLabel(one))}</small></span>
     </div>`;
@@ -1030,7 +1044,6 @@ DV.buildOverlay = () => {
       <div class="camera-controls-row">
         <label class="canvas-select dl-tilt-control" title="How steeply you look down into the Space">Angle <input id="dl-tilt" type="range" min="${DV.LIMITS.tilt[0]}" max="${DV.LIMITS.tilt[1]}" step="1"></label>
         <label class="canvas-select dl-tilt-control" title="Move the viewpoint left or right around the Space">Turn <input id="dl-turn" type="range" min="${DV.LIMITS.turn[0]}" max="${DV.LIMITS.turn[1]}" step="1"></label>
-        <label class="canvas-select dl-empty-control">Empty cells <input id="dl-show-empty" type="checkbox"></label>
       </div>
     </div>
     <div id="dl-empty-state" class="dl-empty-state" hidden></div>
@@ -1066,7 +1079,5 @@ DV.buildOverlay = () => {
     () => DV.zoomBy(button.dataset.dlZoom === "in" ? 1.2 : 1 / 1.2)));
   $("#dl-tilt").addEventListener("input", event => DV.setView({ tilt: event.target.value }));
   $("#dl-turn").addEventListener("input", event => DV.setView({ turn: event.target.value }));
-  $("#dl-show-empty").addEventListener("change", event => DL.change(
-    () => { DL.layout.settings.show_empty = event.target.checked; }, { history: false }));
   DV.syncControls();
 };

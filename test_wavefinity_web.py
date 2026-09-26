@@ -1889,28 +1889,226 @@ class WebApplicationTests(unittest.TestCase):
         css = (root / "drawer.css").read_text(encoding="utf-8")
         self.assertNotIn("dl-new-printed", panel + css)
         self.assertNotIn("new_bins_printed: false", model)
-        for ident in ("dl-batch-select-all", "dl-batch-clear", "dl-batch-connectors", "dl-batch-save", "dl-batch-print"):
+        for ident in ("dl-batch-select-all", "dl-batch-clear", "dl-batch-delete", "dl-batch-save", "dl-batch-print"):
             self.assertIn(f'id="{ident}"', panel)
-        self.assertIn("Print Spacers + Connectors", panel)
+        self.assertNotIn("Print Spacers + Connectors", panel)
+        self.assertNotIn('id="dl-batch-connectors"', panel)
         # Session-only selection: never written into the layout or storage.
         defaults = model[model.index("DL.defaultSettings"):model.index("DL.canonicalLayoutRules")]
         self.assertNotIn("print", defaults)
         self.assertNotIn("localStorage", panel[panel.index("DP.printSelected ="):][:200])
-        self.assertIn("DL.bins.filter(one => DL.printNeeded(one) > 0)", panel)
+        self.assertIn('one.status !== "printed"', panel)
         self.assertIn("DL.printCount(one)", panel)
-        self.assertIn("tools.hidden = hosted;", panel)
+        self.assertIn('$("#dl-batch-delete").disabled', panel)
+        self.assertIn('$("#dl-batch-save").hidden = hosted;', panel)
         fn = model[model.index("DL.printSelectedBins ="):]
         fn = fn[:fn.index("DL.printDrawer =")]
         self.assertLess(fn.index("await DL.save()"), fn.index("/api/drawer/print-bins"))
         self.assertIn("DL.adoptBatchResult(result)", fn)
         self.assertIn("DL.adopt(result);", model[model.index("DL.adoptBatchResult ="):][:200])
-        self.assertIn("DP.resetPrintSelection()", fn)
+        self.assertIn("DP.renderInventory(true)", fn)
         self.assertNotIn("set copies to", model)
         node = shutil.which("node")
         if node:
             for name in ("drawer-model.js", "drawer-panel.js"):
                 done = subprocess.run([node, "--check", str(root / name)], capture_output=True, text=True)
                 self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_fix067_inventory_selection_numbers_and_spacers(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        root = Path(__file__).resolve().parent / "web"
+        script = r'''
+const vm = require("vm"), fs = require("fs");
+const ctx = { console, Math, JSON, Number, Set, Map, Date,
+  debounce: fn => fn, clone: v => JSON.parse(JSON.stringify(v)),
+  drawerHardClearance: () => 0.6, fmt: v => String(v),
+  localStorage: { getItem: () => null }, $: () => null,
+  state: { activeSpaceId: "A", output: "folder", runtime: { hosted: true }, activeSpace: { kind: "drawer" } } };
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + ";this.DL=DL", ctx);
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8") + ";this.DP=DP", ctx);
+const { DL, DP } = ctx;
+DL.bins = [
+  { id: "B7", kind: "bin", name: "Alpha", x: 16, y: 16, z: 20, status: "in_design" },
+  { id: "S1", kind: "spacer", name: "Spacer", x: 8, y: 8, z: 12, status: "saved" },
+  { id: "B9", kind: "manual", name: "Beta", x: 16, y: 16, z: 30, status: "saved" },
+];
+DL.normaliseLayout({ settings: { show_empty: false }, drawers: [{ id: "d1", placements: [] }] });
+DP.filter.sort = "name";
+DP.filter.show = "printed";
+DP.printSelected = new Set(["B9"]);
+const filtered = DP.filteredBins().map(one => one.id);
+const selectedScope = DP.batchScope();
+DP.printSelected.clear();
+const emptyScope = DP.batchScope();
+DL.bins = DL.bins.filter(one => one.id !== "B7");
+console.log(JSON.stringify({
+  numbers: [DL.binNumberLabel({ id: "B9", kind: "manual" })],
+  status: DL.statusLabel({ status: "in_design" }),
+  filtered, selectedSubset: selectedScope.subset, selectedSave: selectedScope.save.length,
+  emptySubset: emptyScope.subset, showEmptyRetired: !("show_empty" in DL.layout.settings),
+}));
+'''
+        done = subprocess.run([node, "-e", script, str(root / "drawer-model.js"),
+                               str(root / "drawer-panel.js")], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+        self.assertEqual(out, {"numbers": ["Bin 1"], "status": "In Space", "filtered": ["S1"],
+                               "selectedSubset": True, "selectedSave": 0,
+                               "emptySubset": False, "showEmptyRetired": True})
+
+    def test_fix067_saved_file_question_waits_for_focus_exit(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        gate = source[source.index("const staleFileRefreshQueue = new Map();"):
+                      source.index("function queueSpaceDesignAutosave()")]
+        script = r'''
+const vm = require("vm"), fs = require("fs");
+const code = fs.readFileSync(process.argv[1], "utf8");
+const calls = { prompts: [], generated: [] };
+let choice = "cancel", switchSpace = false, success = true;
+const state = { runtime: { hosted: false }, activeSpaceId: "A", designInventoryId: "B1" };
+const DL = { layout: { settings: {} }, folder: () => "folder", bin: id => ({ id, name: "A", file: "" }),
+  label: row => row.name, spaceContext: () => ({ output: "folder", spaceId: state.activeSpaceId }),
+  spaceContextCurrent: c => c.spaceId === state.activeSpaceId,
+  change: fn => fn(), save: async () => true, isStaleSpaceError: () => false };
+const appConfirm = async opts => {
+  calls.prompts.push(opts.message);
+  appConfirm.checked = false;
+  if (switchSpace) state.activeSpaceId = "B";
+  return choice;
+};
+const ctx = { state, DL, appConfirm, Map, Set, JSON,
+  designerGenerateInventoryRow: async id => { calls.generated.push(id); return success; },
+  toast: () => {} };
+vm.createContext(ctx);
+vm.runInContext(code + ";this.queue=queueStaleFileRefresh;this.settle=settleStaleFileRefresh", ctx);
+(async () => {
+  ctx.queue({ output: "folder", spaceId: "A" }, "B1", true);
+  const before = calls.prompts.length;
+  const declinedNavigation = await ctx.settle();
+  ctx.queue({ output: "folder", spaceId: "A" }, "B1", true);
+  choice = "primary";
+  const updated = await ctx.settle();
+  ctx.queue({ output: "folder", spaceId: "A" }, "B1", false);
+  const beforeOutput = calls.generated.length;
+  const outputApproved = await ctx.settle({ materialize: true });
+  const afterOutput = calls.generated.length;
+  ctx.queue({ output: "folder", spaceId: "A" }, "B1", false);
+  switchSpace = true;
+  const switched = await ctx.settle();
+  console.log(JSON.stringify({ before, declinedNavigation, updated, outputApproved,
+    beforeOutput, afterOutput, switched, prompts: calls.prompts,
+    generated: calls.generated, space: state.activeSpaceId }));
+})();
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "gate.js"
+            path.write_text(gate, encoding="utf-8")
+            done = subprocess.run([node, "-e", script, str(path)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+        self.assertEqual(out["before"], 0)
+        self.assertTrue(out["declinedNavigation"])
+        self.assertTrue(out["updated"])
+        self.assertTrue(out["outputApproved"])
+        self.assertEqual(out["beforeOutput"], out["afterOutput"])
+        self.assertFalse(out["switched"])
+        self.assertEqual(out["space"], "B")
+        self.assertEqual(out["generated"], ["B1"])
+        self.assertIn("was saved and printed", out["prompts"][1])
+
+    def test_fix067_row_open_commits_selection_only_after_success(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        root = Path(__file__).resolve().parent / "web"
+        script = r'''
+const vm = require("vm"), fs = require("fs");
+const calls = { edits: [], opens: [], selected: [], prompts: 0, flushes: 0 };
+let editSuccess = true;
+const state = { designInventoryId: "B1", design: { box: {} }, cleanDesign: {}, runtime: { hosted: true } };
+const rows = ["B1", "B2"].map(id => ({ id, kind: "bin", name: id }));
+const DL = { bins: rows, isOrdinary: row => !!row && row.kind !== "spacer",
+  bin: id => rows.find(row => row.id === id), placedCount: id => id === "B1" ? 1 : 0,
+  spaceContext: () => ({ spaceId: "A" }), spaceContextCurrent: c => c.spaceId === "A",
+  editBins: async payload => { calls.edits.push(payload); return true; },
+  markPrinted: () => {}, markNotPrinted: () => {}, printCount: () => 1,
+  selectRow: id => { calls.selected.push(id); DL.selectedRow = id; }, selectedRow: "B1" };
+const ctx = { console, Date, Set, Map, Math, JSON, Number, state, DL,
+  localStorage: { getItem: () => null }, $: () => null,
+  appConfirmAction: async () => { calls.prompts++; return true; },
+  flushSpaceDesignAutosave: async () => { calls.flushes++; return true; },
+  designerEditInventoryRow: async id => { calls.opens.push(id); return editSuccess; },
+  clearTimeout: () => {}, spaceAutosaveTimer: null,
+  clone: value => JSON.parse(JSON.stringify(value)),
+  discardStaleFileRefreshRows: () => {},
+  toast: () => {}, fmt: value => String(value) };
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1], "utf8") + ";this.DP=DP", ctx);
+const DP = ctx.DP;
+DP.renderInventory = () => {};
+DP.renderBatch = () => {};
+DP.setMode = () => {};
+DP.duplicateRow = () => {};
+DL.printSelectedBins = () => {};
+const event = (id, editable, child = "none") => ({ target: { closest: selector => {
+  if (selector === "[data-bin]") return { dataset: { bin: id, editable: String(editable) } };
+  if (selector === ".dl-print-select") return child === "checkbox" ? {} : null;
+  if (selector === "[data-act]" && ["more", "duplicate", "print", "printed", "not-printed"].includes(child))
+    return { dataset: { act: child } };
+  if (selector === "button, input, select, a, textarea, .dl-bin-details" &&
+      ["field", "link", "checkbox"].includes(child)) return {};
+  return null;
+} } });
+(async () => {
+  await DP.onInventoryClick(event("B2", true, false));
+  const mouseSuccess = DL.selectedRow;
+  DL.selectedRow = "B1"; editSuccess = false;
+  await DP.onInventoryClick(event("B2", true, false));
+  const mouseFailure = DL.selectedRow;
+  editSuccess = true; DL.selectedRow = "B1";
+  await DP.openInventoryRow("B2");
+  const keyboardSuccess = DL.selectedRow;
+  editSuccess = false; DL.selectedRow = "B1";
+  await DP.openInventoryRow("B2");
+  const keyboardFailure = DL.selectedRow;
+  editSuccess = true;
+  const opensBeforeChildren = calls.opens.length;
+  for (const child of ["checkbox", "more", "duplicate", "print", "printed", "not-printed", "field", "link"])
+    await DP.onInventoryClick(event("B2", true, child));
+  DP.draggingRow = true;
+  await DP.onInventoryClick(event("B2", true, false));
+  DP.draggingRow = false;
+  const childAndDragOpens = calls.opens.length - opensBeforeChildren;
+  DL.selectedRow = "B1"; state.designInventoryId = "B1";
+  DP.printSelected = new Set(["B1", "B2"]);
+  await DP.deleteSelected();
+  console.log(JSON.stringify({ calls, mouseSuccess, mouseFailure, keyboardSuccess, keyboardFailure,
+    childAndDragOpens, bound: state.designInventoryId, selection: [...DP.printSelected] }));
+})();
+'''
+        done = subprocess.run([node, "-e", script, str(root / "drawer-panel.js")],
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        out = json.loads(done.stdout)
+        self.assertEqual(out["mouseSuccess"], "B2")
+        self.assertEqual(out["mouseFailure"], "B1")
+        self.assertEqual(out["keyboardSuccess"], "B2")
+        self.assertEqual(out["keyboardFailure"], "B1")
+        self.assertEqual(out["childAndDragOpens"], 0)
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        keyboard = panel[panel.index('list.addEventListener("keydown"'):panel.index('list.addEventListener("dragstart"')]
+        self.assertIn("DP.openInventoryRow(row.dataset.bin)", keyboard)
+        self.assertEqual(out["calls"]["edits"], [{"delete_ids": ["B1", "B2"]}])
+        self.assertEqual(out["calls"]["prompts"], 1)
+        self.assertEqual(out["calls"]["flushes"], 1)
+        self.assertIsNone(out["bound"])
+        self.assertEqual(out["selection"], [])
 
     def test_print_payload_generates_and_opens_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3424,16 +3622,15 @@ const tick = () => new Promise(r => setImmediate(r));
 
     def test_hosted_drawer_actions_stay_disabled_every_render(self):
         # Item 3: hosted capability is part of the normal render-state
-        # calculation (DP.renderStats), not only a one-time DP.build() patch,
-        # and covers all four backend-rejected actions including Print
-        # Drawer (All).
+        # calculation (DP.renderStats), not only a one-time DP.build() patch.
         root = Path(__file__).resolve().parent / "web"
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         stats = panel[panel.index("DP.renderStats = () => {"):]
         stats = stats[:stats.index("\n};")]
         self.assertIn("const hosted = Boolean(state.runtime.hosted);", stats)
-        for selector in ('"#dl-sp-plan"', '"#dl-sp-generate"', '"#dl-sp-print"', '"#dl-print"'):
+        for selector in ('"#dl-sp-plan"', '"#dl-sp-generate"', '"#dl-sp-print"'):
             self.assertIn(selector, stats)
+        self.assertNotIn('"#dl-print"', stats)
         self.assertIn("if (hosted) {", stats)
         self.assertIn("DP.HOSTED_UNSUPPORTED_TOOLTIP", panel)
 

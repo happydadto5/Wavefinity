@@ -63,7 +63,6 @@ DL.emit = () => DL.listeners.forEach(fn => fn());
 
 DL.defaultSettings = () => ({
   autosave: true,
-  show_empty: true,
   spacers: { flexible: true, height: 15 },
   surface: { ask_object_height: true },
   // Fix 061 F6: per-Space choice to refresh a bin's saved files after an edit
@@ -109,6 +108,7 @@ DL.normaliseLayout = raw => {
   layout.settings = { ...defaults, ...(layout.settings || {}) };
   delete layout.settings.new_bins_printed; // retired: generating always means Qty 0
   delete layout.settings.auto;             // retired: there is no Auto layout
+  delete layout.settings.show_empty;      // the empty-cell grid is always visible
   layout.settings.spacers = { ...defaults.spacers, ...(layout.settings.spacers || {}) };
   layout.settings.surface = { ...defaults.surface, ...(layout.settings.surface || {}) };
   // Fix 034 K1: autosave has no user-off path any more; a legacy
@@ -335,13 +335,19 @@ DL.isPlaced = id => DL.placedCount(id) > 0;
 // Ordinary rows are the placeable, stageable bins; spacers are filler parts
 // planned from the Spacers section.
 DL.isOrdinary = one => Boolean(one) && !DL.isSpacer(one);
+DL.binNumbers = () => new Map(DL.bins.filter(DL.isOrdinary).map((one, index) => [one.id, index + 1]));
+DL.binNumber = one => DL.binNumbers().get(one?.id);
+DL.binNumberLabel = one => {
+  const number = DL.isOrdinary(one) ? DL.binNumber(one) : null;
+  return number ? `Bin ${number}` : "";
+};
 
 // The staging rail's membership, derived and never persisted: every ordinary
 // Inventory row with no placement, in Inventory order.
 DL.stagedBins = () => DL.bins.filter(one => DL.isOrdinary(one) && !DL.isPlaced(one.id));
 
 // The one lifecycle label a row shows.
-DL.statusLabel = one => one?.status === "printed" ? "Printed" : one?.status === "saved" ? "Saved" : "In Design";
+DL.statusLabel = one => one?.status === "printed" ? "Printed" : one?.status === "saved" ? "Saved" : "In Space";
 
 // Bulk printing: a generated bin/B4B row (one with a file, or with a
 // canonical design source that Save can resolve on demand) can be sent to the
@@ -1009,7 +1015,7 @@ DL.generateSelectedSpacers = () => DL.busyWith("spacers", async context => {
   DL.dirty = false;
   DL.saveState = "saved";
   DL.savedAt = new Date();
-  
+  DL.emit(); // show newly saved or reused spacer rows before connector work
   const made = result.generated?.length || 0;
   const bits = [];
   if (result.placed) bits.push(`${result.placed} spacer${result.placed === 1 ? "" : "s"} placed`);
@@ -1231,9 +1237,9 @@ DL.adoptBatchResult = result => {
 
 // Shared start of a batch Save/Print: flush the visible Designer, then the
 // Space layout, so the server prepares the latest saved designs.
-DL.prepareBatch = async () => {
+DL.prepareBatch = async selection => {
   if (typeof flushSpaceDesignAutosave === "function" &&
-      !(await flushSpaceDesignAutosave())) return false;
+      !(await flushSpaceDesignAutosave({ materialize: selection.includes(state.designInventoryId) }))) return false;
   if (state.runtime.hosted) {
     toast("Bulk saving and printing are available in local Wavefinity.", true);
     return false;
@@ -1244,7 +1250,7 @@ DL.prepareBatch = async () => {
 // Batch Save: make the chosen bins' files current (only rows without current
 // files are generated) and never open Bambu Studio or change Printed status.
 DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", async context => {
-  if (!(await DL.prepareBatch())) return;
+  if (!(await DL.prepareBatch(rowIds || []))) return;
   const chosen = [...new Set(rowIds || [])];
   if (!chosen.length) return;
   if (!(await DL.save())) return;
@@ -1262,18 +1268,14 @@ DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", as
   }
   DL.adoptBatchResult(result);
   if (result.partial) {
-    // Keep only the unfinished rows picked so a retry is one click.
-    if (result.partial_stage === "generate" && DP.printSelected.size) {
-      const unfinished = new Set(result.unfinished || []);
-      DP.printSelected = new Set(chosen.filter(id => unfinished.has(id)));
-    }
+    // Selection remains the user's general Inventory selection across output.
     DP.renderInventory(true);
     DL.emit();
     DL.requestReport();
     toast(result.error || "Not every file could be saved.", true, 10000);
     return;
   }
-  DP.resetPrintSelection();
+  DP.renderInventory(true);
   DL.emit();
   DL.requestReport();
   const made = (result.generated_rows || []).length;
@@ -1289,7 +1291,7 @@ DL.saveSelectedBins = (rowIds, includeConnectors) => DL.busyWith("save-bins", as
 
 // The server re-reads saved Inventory; each selected row opens once in Bambu.
 DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins", async context => {
-  if (!(await DL.prepareBatch())) return;
+  if (!(await DL.prepareBatch(Object.keys(selection || {})))) return;
   if (!state.slicer || !state.slicer.available) {
     toast("Bambu Studio was not found. Locate it with Change slicer in the bin view.", true, 7000);
     return;
@@ -1322,7 +1324,7 @@ DL.printSelectedBins = (selection, includeConnectors) => DL.busyWith("print-bins
     toast(`${result.error || "Bambu Studio did not open."}${recorded}`, true, 10000);
     return;
   }
-  DP.resetPrintSelection();
+  DP.renderInventory(true);
   DL.emit();
   DL.requestReport();
   toast([
