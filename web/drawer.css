@@ -43,9 +43,10 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 }
 .dl-problems li.height { color: #8a4e12; }
 
-.dl-inv-tools { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, .8fr) minmax(80px, .8fr); gap: 6px; margin-bottom: 10px; }
-.dl-inv-tools label { min-width: 0; font-size: 11px; font-weight: 700; }
-.dl-inv-tools input, .dl-inv-tools select { width: 100%; min-width: 0; margin: 0; padding: 7px 8px; font-size: 12px; }
+.dl-inv-tools { display: grid; grid-template-columns: minmax(0, 1fr) minmax(78px, .8fr) minmax(78px, .8fr); gap: 6px; align-items: end; margin-bottom: 10px; }
+.dl-inv-tools label { display: flex; flex-direction: column; justify-content: end; gap: 3px; min-width: 0; font-size: 11px; font-weight: 700; }
+.dl-inv-tools input, .dl-inv-tools select { width: 100%; min-width: 0; height: 36px; margin: 0; padding: 7px 8px; font-size: 12px; }
+.dl-inv-tools .dl-search-label input { font-weight: 400; }
 .dl-inv-list { display: grid; gap: 6px; }
 .dl-bin {
   display: grid; grid-template-columns: 18px 38px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
@@ -113,6 +114,8 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-batch-tools[hidden] { display: none; }
 .dl-batch-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .dl-batch-summary { font-size: 11px; color: var(--muted); flex: 1 1 100%; min-height: 14px; }
+.dl-batch-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.dl-batch-actions .button { min-width: 0; padding: 7px 6px; line-height: 1.25; }
 /* The drawer canvas and its floating controls. The staging rail (Unplaced
    bins) sits immediately beside the physical Space. */
 .canvas-wrap[data-canvas="drawer"].active { display: flex; }
@@ -171,6 +174,7 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 }
 .space-head-type { text-transform: none; letter-spacing: normal; }
 .space-head-view .muted { margin-top: 3px; font-size: 12px; line-height: 1.4; }
+.space-head-view #space-head-summary { color: #455960; font-size: 13px; }
 .space-head-view .button-row { margin-top: 8px; }
 .space-head-edit-host .space-form,
 .space-head-edit-host .space-type-fields { display: grid; gap: 8px; margin: 0; padding: 0; }
@@ -220,7 +224,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 
 /* Space Actions: the Space-level buttons in the Space header. */
 .space-actions { margin-top: 8px; }
-.space-actions-label { display: block; font-size: 11px; font-weight: 750; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
 .space-actions .button-row { margin-top: 0; }
 .space-structural { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .space-structural[hidden] { display: none; }

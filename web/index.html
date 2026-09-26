@@ -29,7 +29,6 @@
           <div class="space-head-title"><strong id="space-head-name"></strong><span id="space-head-type" class="space-head-type"></span></div>
           <div id="space-head-summary" class="muted"></div>
           <div id="space-actions" class="space-actions" role="group" aria-label="Space Actions">
-            <span class="space-actions-label">Space Actions</span>
             <div class="button-row">
               <button id="space-head-open" class="button secondary dl-small" type="button">Open Space…</button>
               <button id="space-head-edit" class="button secondary dl-small" type="button">Edit Space</button>
@@ -59,15 +58,14 @@
       </section>
       <section class="control-section open" data-section="build">
         <div class="section-body">
-          <div id="bin-actions" class="bin-actions" role="group" aria-label="Bin Actions">
-            <span class="bin-actions-label">Bin Actions</span>
-            <button type="button" id="designer-new-bin" class="button secondary">New Bin</button>
-            <button type="button" id="designer-duplicate" class="button secondary">Duplicate Bin</button>
-          </div>
           <div class="part-name-block">
-            <label class="part-name-row"><span id="part-name-label">Bin Name</span>
-              <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
-            </label>
+            <div id="bin-actions" class="bin-actions" role="group" aria-label="Bin name and actions">
+              <label class="part-name-row"><span id="part-name-label">Bin Name</span>
+                <input id="part-name" type="text" maxlength="80" placeholder="e.g. Driver rack">
+              </label>
+              <button type="button" id="designer-new-bin" class="button secondary">New Bin</button>
+              <button type="button" id="designer-duplicate" class="button secondary">Duplicate Bin</button>
+            </div>
             <span id="stack-note" class="stack-note" hidden></span>
           </div>
           <div id="ordinary-size-row" class="field-grid three">
@@ -122,8 +120,7 @@
       <section class="control-section open" data-section="parts-options">
         <div class="section-body">
           <div class="subheading-row">
-            <div><h2>Parts &amp; options</h2></div>
-            <span id="support-count" class="count-badge">0 added</span>
+            <div><h2>Options</h2></div>
           </div>
           <div id="lid-option" class="lid-option-card" hidden>
             <div id="lid-option-panel">
@@ -231,7 +228,7 @@
 
 
           <div class="added-parts-block">
-            <h3>Added to this bin</h3>
+            <h3>Already added to this bin</h3>
             <div id="added-parts-list" class="placed-supports"></div>
           </div>
 
