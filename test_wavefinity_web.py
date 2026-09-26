@@ -2022,7 +2022,7 @@ vm.runInContext(code + ";this.queue=queueStaleFileRefresh;this.settle=settleStal
         self.assertEqual(out["generated"], ["B1"])
         self.assertIn("was saved and printed", out["prompts"][1])
 
-    def test_fix067_row_open_and_bulk_delete_use_one_write(self):
+    def test_fix067_row_open_commits_selection_only_after_success(self):
         node = shutil.which("node")
         if not node:
             self.skipTest("node is not installed")
@@ -2030,18 +2030,20 @@ vm.runInContext(code + ";this.queue=queueStaleFileRefresh;this.settle=settleStal
         script = r'''
 const vm = require("vm"), fs = require("fs");
 const calls = { edits: [], opens: [], selected: [], prompts: 0, flushes: 0 };
+let editSuccess = true;
 const state = { designInventoryId: "B1", design: { box: {} }, cleanDesign: {}, runtime: { hosted: true } };
 const rows = ["B1", "B2"].map(id => ({ id, kind: "bin", name: id }));
 const DL = { bins: rows, isOrdinary: row => !!row && row.kind !== "spacer",
   bin: id => rows.find(row => row.id === id), placedCount: id => id === "B1" ? 1 : 0,
   spaceContext: () => ({ spaceId: "A" }), spaceContextCurrent: c => c.spaceId === "A",
   editBins: async payload => { calls.edits.push(payload); return true; },
-  selectRow: id => calls.selected.push(id), selectedRow: "B1" };
+  markPrinted: () => {}, markNotPrinted: () => {}, printCount: () => 1,
+  selectRow: id => { calls.selected.push(id); DL.selectedRow = id; }, selectedRow: "B1" };
 const ctx = { console, Date, Set, Map, Math, JSON, Number, state, DL,
   localStorage: { getItem: () => null }, $: () => null,
   appConfirmAction: async () => { calls.prompts++; return true; },
   flushSpaceDesignAutosave: async () => { calls.flushes++; return true; },
-  designerEditInventoryRow: id => calls.opens.push(id),
+  designerEditInventoryRow: async id => { calls.opens.push(id); return editSuccess; },
   clearTimeout: () => {}, spaceAutosaveTimer: null,
   clone: value => JSON.parse(JSON.stringify(value)),
   discardStaleFileRefreshRows: () => {},
@@ -2052,25 +2054,56 @@ const DP = ctx.DP;
 DP.renderInventory = () => {};
 DP.renderBatch = () => {};
 DP.setMode = () => {};
-const event = (editable, child) => ({ target: { closest: selector => {
-  if (selector === "[data-bin]") return { dataset: { bin: "B1", editable: String(editable) } };
-  if (selector === ".dl-print-select") return child ? {} : null;
+DP.duplicateRow = () => {};
+DL.printSelectedBins = () => {};
+const event = (id, editable, child = "none") => ({ target: { closest: selector => {
+  if (selector === "[data-bin]") return { dataset: { bin: id, editable: String(editable) } };
+  if (selector === ".dl-print-select") return child === "checkbox" ? {} : null;
+  if (selector === "[data-act]" && ["more", "duplicate", "print", "printed", "not-printed"].includes(child))
+    return { dataset: { act: child } };
+  if (selector === "button, input, select, a, textarea, .dl-bin-details" &&
+      ["field", "link", "checkbox"].includes(child)) return {};
   return null;
 } } });
 (async () => {
-  await DP.onInventoryClick(event(true, true));
-  await DP.onInventoryClick(event(false, false));
-  await DP.onInventoryClick(event(true, false));
+  await DP.onInventoryClick(event("B2", true, false));
+  const mouseSuccess = DL.selectedRow;
+  DL.selectedRow = "B1"; editSuccess = false;
+  await DP.onInventoryClick(event("B2", true, false));
+  const mouseFailure = DL.selectedRow;
+  editSuccess = true; DL.selectedRow = "B1";
+  await DP.openInventoryRow("B2");
+  const keyboardSuccess = DL.selectedRow;
+  editSuccess = false; DL.selectedRow = "B1";
+  await DP.openInventoryRow("B2");
+  const keyboardFailure = DL.selectedRow;
+  editSuccess = true;
+  const opensBeforeChildren = calls.opens.length;
+  for (const child of ["checkbox", "more", "duplicate", "print", "printed", "not-printed", "field", "link"])
+    await DP.onInventoryClick(event("B2", true, child));
+  DP.draggingRow = true;
+  await DP.onInventoryClick(event("B2", true, false));
+  DP.draggingRow = false;
+  const childAndDragOpens = calls.opens.length - opensBeforeChildren;
+  DL.selectedRow = "B1"; state.designInventoryId = "B1";
   DP.printSelected = new Set(["B1", "B2"]);
   await DP.deleteSelected();
-  console.log(JSON.stringify({ calls, bound: state.designInventoryId, selection: [...DP.printSelected] }));
+  console.log(JSON.stringify({ calls, mouseSuccess, mouseFailure, keyboardSuccess, keyboardFailure,
+    childAndDragOpens, bound: state.designInventoryId, selection: [...DP.printSelected] }));
 })();
 '''
         done = subprocess.run([node, "-e", script, str(root / "drawer-panel.js")],
                               capture_output=True, text=True, timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
         out = json.loads(done.stdout)
-        self.assertEqual(out["calls"]["opens"], ["B1"])
+        self.assertEqual(out["mouseSuccess"], "B2")
+        self.assertEqual(out["mouseFailure"], "B1")
+        self.assertEqual(out["keyboardSuccess"], "B2")
+        self.assertEqual(out["keyboardFailure"], "B1")
+        self.assertEqual(out["childAndDragOpens"], 0)
+        panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
+        keyboard = panel[panel.index('list.addEventListener("keydown"'):panel.index('list.addEventListener("dragstart"')]
+        self.assertIn("DP.openInventoryRow(row.dataset.bin)", keyboard)
         self.assertEqual(out["calls"]["edits"], [{"delete_ids": ["B1", "B2"]}])
         self.assertEqual(out["calls"]["prompts"], 1)
         self.assertEqual(out["calls"]["flushes"], 1)

@@ -285,7 +285,7 @@ DP.wire = () => {
     const row = event.target.closest(".dl-bin[data-editable='true']");
     if (!row) return;
     event.preventDefault();
-    designerEditInventoryRow(row.dataset.bin);
+    DP.openInventoryRow(row.dataset.bin);
   });
   list.addEventListener("dragstart", event => {
     DP.draggingRow = true;
@@ -401,9 +401,17 @@ DP.onInventoryClick = async event => {
   else if (action === "not-printed") DL.markNotPrinted(one);
   else if (action === "delete" && DL.isSpacer(one)) DP.deleteRow(one);
   else if (!action && !event.target.closest("button, input, select, a, textarea, .dl-bin-details")) {
+    if (row?.dataset.editable === "true") return DP.openInventoryRow(one.id);
     DL.selectRow(one.id);
-    if (row?.dataset.editable === "true") designerEditInventoryRow(one.id);
   }
+};
+
+// Commit the row/canvas selection only after Designer accepted the switch.
+// Mouse and keyboard activation share this single success boundary.
+DP.openInventoryRow = async id => {
+  if (!(await designerEditInventoryRow(id))) return false;
+  DL.selectRow(id);
+  return true;
 };
 
 // Duplicate a design-source row through the accepted atomic owner. The new

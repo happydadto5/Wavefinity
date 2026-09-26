@@ -879,7 +879,7 @@ async function flushSpaceDesignAutosave({ visible = true, materialize = false } 
 async function installLoadedDesignSource(rowId, spec, {
   successMessage = "Loaded from Space.",
 } = {}) {
-  if (!beginDesignMutation()) return;
+  if (!beginDesignMutation()) return false;
   try {
     const result = await api("/api/design/validate", { design: spec });
     state.design = result.design;
@@ -911,25 +911,25 @@ async function installLoadedDesignSource(rowId, spec, {
 }
 
 async function designerEditInventoryRow(rowId) {
-  if (state.folderMode !== "space" || typeof DL === "undefined") return;
+  if (state.folderMode !== "space" || typeof DL === "undefined") return false;
   const one = DL.bin(rowId);
   const spec = DL.layout?.design_specs?.[rowId];
-  if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return;
+  if (!one || !["bin", "b4b"].includes(one.kind) || !spec) return false;
   if (isStructuralDesign(spec)) {
     toast("A Storage Box or Base Trim is saved from its Space, not designed here.", true, 6000);
-    return;
+    return false;
   }
-  await designerInstallInventorySpec(rowId, spec);
+  return designerInstallInventorySpec(rowId, spec);
 }
 
 async function designerInstallInventorySpec(rowId, spec) {
-  if (!spec) return;
+  if (!spec) return false;
   if (state.designInventoryId === rowId) {
     activatePreviewView("3d");
-    return;
+    return true;
   }
-  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
-  await installLoadedDesignSource(rowId, spec);
+  if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return false;
+  return installLoadedDesignSource(rowId, spec);
 }
 
 // Regenerate a saved source without replacing the live Designer edit.
