@@ -82,6 +82,8 @@ class EdgeMountLabelConflictTests(unittest.TestCase):
         self.assertEqual(loaded.stack.mode, "direct")
         with self.assertRaisesRegex(ValueError, "direct Stackable Bin"):
             self.preview(loaded)
+        with self.assertRaisesRegex(ValueError, "direct Stackable Bin"):
+            self.generate(loaded)
 
 
 class EdgeMountBrowserConflictTests(unittest.TestCase):
