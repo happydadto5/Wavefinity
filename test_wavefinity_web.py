@@ -1676,8 +1676,9 @@ class WebApplicationTests(unittest.TestCase):
         design["label"] = "M3"
         design["label_position"] = "top"
         preview = preview_payload({"design": design})
-        self.assertTrue(preview["label_outline"])
-        self.assertEqual(preview["label_meta"]["location"], "top")
+        self.assertEqual(preview["design"]["layout"]["features"][0]["options"]["level"], "rim")
+        self.assertTrue(any(face["kind"] == "feature_text" for face in preview["geometry"]))
+        self.assertEqual(preview["design"]["label"], "")
 
     def test_text_part_rim_shelf_uses_its_selected_side(self):
         design = default_design()
@@ -1686,8 +1687,9 @@ class WebApplicationTests(unittest.TestCase):
             _text_feature("M3", level="rim", rim_side="right")
         ]
         preview = preview_payload({"design": design})
-        self.assertEqual(preview["label_meta"]["side"], "right")
-        xs = [point[0] for ring in preview["label_outline"] for point in ring]
+        self.assertEqual(preview["design"]["layout"]["features"][0]["options"]["rim_side"], "right")
+        xs = [point[0] for face in preview["geometry"] if face["kind"] == "feature_text"
+              for point in face["points"]]
         self.assertGreater(min(xs), 0.0)
 
     def test_preview_draws_a_text_part_like_any_other_interior_part(self):
@@ -1705,7 +1707,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIsNone(preview["label_meta"])
         said = preview["text_meta"][0]
         self.assertEqual(said["text"], "DEBURR")
-        self.assertTrue(said["auto"])
+        self.assertFalse(said["auto"])
         self.assertGreater(said["cap_height"], 0.0)
 
     def test_an_auto_text_part_comes_back_where_the_engine_put_it(self):
@@ -1726,19 +1728,15 @@ class WebApplicationTests(unittest.TestCase):
         zone = [-20.0, 5.0, 20.0, 17.0]
         design["layout"]["features"] = [_text_feature("M3", auto=False, zone=zone)]
         preview = preview_payload({"design": design})
-        self.assertEqual(preview["design"]["layout"]["features"][0]["zone"], zone)
+        saved_zone = preview["design"]["layout"]["features"][0]["zone"]
+        self.assertAlmostEqual((saved_zone[0] + saved_zone[2]) / 2, 0)
+        self.assertAlmostEqual((saved_zone[1] + saved_zone[3]) / 2, 11)
         self.assertFalse(preview["text_meta"][0]["auto"])
 
-    def test_a_second_auto_text_places_itself_instead_of_being_refused(self):
-        """Apply has to resolve before it judges overlaps.
-
-        Every new text starts on the same placeholder zone in the middle of
-        the bin, so judging the raw submission refuses the second one for
-        sitting on the first - which auto placement would have moved.
-        """
+    def test_a_second_base_text_is_refused(self):
         design = default_design()
         design["box"]["x"] = 48.0
-        for said in ("M3", "M4"):
+        for said in ("M3",):
             feature = default_feature_payload(
                 {"design": design, "kind": "text", "along": "x", "item": None}
             )["feature"]
@@ -1746,17 +1744,12 @@ class WebApplicationTests(unittest.TestCase):
             design = apply_feature_payload(
                 {"design": design, "feature": feature, "index": None}
             )["design"]
-        placed = design["layout"]["features"]
-        self.assertEqual([one["options"]["text"] for one in placed], ["M3", "M4"])
-        self.assertNotEqual(placed[0]["zone"], placed[1]["zone"])
+        feature = default_feature_payload({"design": design, "kind": "text"})["feature"]
+        feature["options"]["text"] = "M4"
+        with self.assertRaisesRegex(ValueError, "Only one Text"):
+            apply_feature_payload({"design": design, "feature": feature})
 
-    def test_a_draft_auto_text_is_drawn_where_it_will_actually_go(self):
-        """The draft endpoint has to resolve too, and must return geometry.
-
-        Text is left out of ``build_features``'s solids by default because a
-        recessed inlay is subtracted rather than added; the draft preview has
-        to ask for it, or the shape being edited draws nothing at all.
-        """
+    def test_a_draft_text_uses_canonical_geometry(self):
         design = default_design()
         design["box"]["x"] = 48.0
         design["layout"]["features"] = [_text_feature("M3", auto=True)]
@@ -1764,25 +1757,23 @@ class WebApplicationTests(unittest.TestCase):
         draft = default_feature_payload(
             {"design": design, "kind": "text", "along": "x", "item": None}
         )["feature"]
-        draft["options"]["text"] = "M4"
+        draft["options"].update(text="M4", level="rim", rim_side="back")
         result = draft_payload({"design": design, "feature": draft})
         self.assertTrue(result["geometry"])
-        # Moved clear of the one already placed, not left on the placeholder.
-        self.assertNotEqual(result["feature"]["zone"], draft["zone"])
-        placed = design["layout"]["features"][0]["zone"]
-        self.assertNotEqual(result["feature"]["zone"], placed)
+        self.assertEqual(result["feature"]["options"]["level"], "rim")
+        self.assertNotIn("auto", result["feature"]["options"])
 
-    def test_draft_text_part_auto_grows_width_when_text_added(self):
+    def test_draft_text_part_reports_unfittable_legacy_lettering(self):
         design = default_design()
         design["box"].update({"x": 120.0, "y": 80.0})
         zone = [-8.0, -5.0, 8.0, 5.0]
         feature = _text_feature("M3 BOLTS AND NUTS", auto=False, zone=zone)
-        result = draft_payload({"design": design, "feature": feature})
-        grown_zone = result["feature"]["zone"]
-        self.assertGreater(grown_zone[2] - grown_zone[0], 16.0)
+        with self.assertRaisesRegex(ValueError, "reaches outside|will not fit"):
+            draft_payload({"design": design, "feature": feature})
 
     def test_auto_text_replacing_a_part_does_not_avoid_that_part(self):
         design = default_design()
+        design["box"].update(x=64, y=64)
         scoop = default_feature_payload({"design": design, "kind": "scoop"})["feature"]
         design = apply_feature_payload({
             "design": design, "feature": scoop, "index": None,
@@ -1814,7 +1805,8 @@ class WebApplicationTests(unittest.TestCase):
         preview = preview_payload({"design": design})
         self.assertEqual(preview["invalid_feature_indexes"], (0,))
         self.assertTrue(
-            any("will not fit" in message for message in preview["feature_errors"])
+            any("will not fit" in message or "reaches outside" in message
+                for message in preview["feature_errors"])
         )
 
     def test_preview_includes_a_highlighted_draft_not_yet_placed(self):
@@ -4103,9 +4095,7 @@ const tick = () => new Promise(r => setImmediate(r));
         app_py = (root / "wavefinity_web.py").read_text(encoding="utf-8")
         self.assertIn("Add a label and/or screw mounting for an outside edge.", app_py)
         app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
-        self.assertIn(
-            'description.hidden = isNest || kind === "edge_mount" || kind === "lid_stacking";', app_js,
-        )
+        self.assertIn('description.hidden = true;', app_js)
 
     def test_edge_mount_field_grouping_and_compact_sizing(self):
         # C1.4D/F: Flip text sits on the Text row, Standoff Ribs/Quantity are

@@ -166,6 +166,7 @@ from ._divider import (
     build_divider,
     divider_cells,
     divider_defaults,
+    divider_division_texts,
     divider_scoop_targets,
     normalize_divider_scoop,
 )

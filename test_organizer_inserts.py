@@ -1224,9 +1224,14 @@ class DividerScoopTests(unittest.TestCase):
             division_side="left",
             division_labels=["A", "B", "C", "D"],
         )
+        # A rim label's shelf is body material; only its lettering is a separate
+        # recessed object, added to the preview and written as a text object.
         rim_preview_with = build_features(self.box, [rim_feature], self.base_z, include_text=True)
         rim_preview_without = build_features(self.box, [rim_feature], self.base_z, include_text=False)
-        self.assertEqual(len(rim_preview_with), len(rim_preview_without))
+        rim_texts = inserts.build_texts(self.box, [rim_feature], self.base_z)
+        self.assertEqual(len(rim_texts), 4)
+        self.assertTrue(all(not raised for _label, _solid, raised in rim_texts))
+        self.assertEqual(len(rim_preview_with), len(rim_preview_without) + len(rim_texts))
 
     def test_scoop_wins_over_an_old_conflicting_sloped_bottom(self) -> None:
         feature = Feature(
@@ -1255,8 +1260,14 @@ class DividerScoopTests(unittest.TestCase):
             division_labels=["A", "B", "C", "D"],
         )
         solids = build_features(self.box, [feature], self.base_z)
-        label_pieces = solids[2:]
-        self.assertEqual(len(label_pieces), 8)
+        shelf_pieces = solids[2:]
+        self.assertEqual(len(shelf_pieces), 4)              # shelves only: lettering is its own object
+        label_pieces = []
+        for shelf, (_label, inlay, raised) in zip(
+                shelf_pieces, [o for o in divider_impl.divider_division_texts(
+                    self.box, feature, self.base_z) if not o[2]]):
+            self.assertFalse(raised)
+            label_pieces.extend((shelf, inlay))
         options = inserts.resolved_options(self.box, feature, self.base_z)
         crest = self.base_z + options["height"]
         cells = inserts.divider_cells(self.box, feature, self.base_z)
@@ -1561,12 +1572,12 @@ class DividerBottomSlopeTests(unittest.TestCase):
             low_z, high_z = self._ends(solid, 0)
             self.assertGreater(low_z, high_z + 1.0)
 
-    def test_over_75_and_non_finite_values_fail_clearly(self) -> None:
+    def test_over_80_and_non_finite_values_fail_clearly(self) -> None:
         zone = Zone(-15.0, -20.0, 15.0, 20.0)
-        for bad in (75.5, -75.5, math.nan):
+        for bad in (80.5, -80.5, math.nan):
             one = Feature("divider", zone, along="x", count=1,
                           options={"bottom_angle": bad})
-            with self.assertRaisesRegex(ValueError, "within 75 degrees either way"):
+            with self.assertRaisesRegex(ValueError, "within 80 degrees either way"):
                 build_features(self.box, [one], self.box.base_thickness)
 
     def test_excessive_rise_fails_clearly(self) -> None:
@@ -3353,7 +3364,7 @@ def text_part(said="M3", zone=Zone(-20.0, -6.0, 20.0, 6.0), **options):
 
 
 class TextPartTests(unittest.TestCase):
-    """Lettering as an interior part: it owns a zone like everything else."""
+    """Legacy Text remains readable while canonical Text owns a destination."""
 
     def test_text_is_sunk_into_the_floor_it_stands_on(self) -> None:
         base = BIN.base_thickness
@@ -3406,12 +3417,11 @@ class TextPartTests(unittest.TestCase):
         self.assertLess(ink.width, 30.0)
         self.assertLess(ink.width, one.zone.width)
 
-    def test_two_text_parts_can_share_a_bin(self) -> None:
+    def test_two_base_text_parts_cannot_share_a_bin(self) -> None:
         left = text_part("M3", zone=Zone(-40.0, 4.0, -10.0, 16.0))
         right = text_part("M4", zone=Zone(10.0, 4.0, 40.0, 16.0))
-        check_layout(BIN, [left, right], base_z=BIN.base_thickness)
-        made = inserts.build_texts(BIN, [left, right], BIN.base_thickness)
-        self.assertEqual([said for said, _mesh, _raised in made], ["M3", "M4"])
+        with self.assertRaisesRegex(ValueError, "Only one Text"):
+            check_layout(BIN, [left, right], base_z=BIN.base_thickness)
 
     def test_overlapping_text_and_holder_is_refused(self) -> None:
         said = text_part("M3", zone=Zone(-20.0, -6.0, 20.0, 6.0))
@@ -3424,10 +3434,11 @@ class TextPartTests(unittest.TestCase):
         back = layout_from_dict(layout_to_dict(Layout((one,), "fused"))).features[0]
         self.assertEqual(back.kind, "text")
         self.assertEqual(back.options["text"], "BOLTS")
-        self.assertTrue(back.options["auto"])
+        self.assertNotIn("auto", back.options)
+        self.assertTrue(back.options["text_v2"])
         self.assertEqual(back.options["quarter_turns"], 1)
         self.assertTrue(back.options["raised"])
-        self.assertEqual(back.zone, one.zone)
+        self.assertEqual(back.zone.centre, one.zone.centre)
 
     def test_an_auto_text_part_moves_around_a_holder(self) -> None:
         post = Feature("post", Zone(-10.0, -10.0, 10.0, 10.0))
@@ -3443,33 +3454,35 @@ class TextPartTests(unittest.TestCase):
             .overlaps(feature_footprint(BIN, post, BIN.base_thickness))
         )
 
-    def test_two_auto_text_parts_do_not_land_on_each_other(self) -> None:
+    def test_two_legacy_auto_text_parts_need_distinct_destinations(self) -> None:
         resolved = inserts.resolve_text_features(
             BIN, [text_part("M3", auto=True), text_part("M4", auto=True)],
             base_z=BIN.base_thickness,
         )
-        check_layout(BIN, list(resolved), base_z=BIN.base_thickness)
-        self.assertNotEqual(resolved[0].zone, resolved[1].zone)
+        with self.assertRaisesRegex(ValueError, "Only one Text"):
+            check_layout(BIN, list(resolved), base_z=BIN.base_thickness)
 
-    def test_a_hand_placed_text_part_is_left_where_it_was_put(self) -> None:
+    def test_a_legacy_hand_placed_text_keeps_its_centre(self) -> None:
         said = text_part("M3", zone=Zone(-20.0, 10.0, 20.0, 22.0))
         resolved = inserts.resolve_text_features(
             BIN, [said], base_z=BIN.base_thickness
         )
-        self.assertEqual(resolved[0].zone, said.zone)
+        self.assertEqual(resolved[0].zone.centre, said.zone.centre)
+        self.assertEqual(inserts.text_fitted(resolved[0])[0], inserts.text_fitted(said)[0])
 
     def test_empty_text_says_so(self) -> None:
         with self.assertRaisesRegex(ValueError, "no text"):
             inserts.text_fitted(text_part(""))
 
-    def test_an_auto_text_lands_on_whole_cells_in_a_cartridge(self) -> None:
-        """The ink never lands on an 8 mm cell, so the zone has to grow to one."""
+    def test_a_legacy_auto_text_occupies_whole_cartridge_cells(self) -> None:
+        """The glyph stays exact; only cartridge spacing rounds to cells."""
         base = inserts.BASE_PLATE + BIN.base_thickness
         resolved = inserts.resolve_text_features(
             BIN, [text_part("M3", auto=True)], base_z=base, mode="cartridge"
         )
         Layout(resolved, "cartridge").validate(BIN)
-        zone, cells = resolved[0].zone, inserts.cartridge_zone(BIN)
+        zone = inserts.occupied_zones(BIN, resolved, base, "cartridge")[0]
+        cells = inserts.cartridge_zone(BIN)
         for value in (zone.x0 - cells.x0, zone.y0 - cells.y0,
                       zone.width, zone.depth):
             self.assertAlmostEqual(

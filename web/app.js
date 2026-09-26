@@ -1468,21 +1468,10 @@ function ensureRimFeatureInLayout() {
 
 function syncRimLabelFromFeatures() {
   if (!state.design) return;
-  let rimText = "";
-  let rimSide = "back";
-  if (state.draft?.kind === "text" && state.draft.options?.level === "rim") {
-    rimText = String(state.draft.options?.text ?? "").trim();
-    rimSide = state.draft.options?.rim_side || "back";
-  } else {
-    const rimFeature = state.design.layout?.features?.find(f => f.kind === "text" && f.options?.level === "rim");
-    if (rimFeature) {
-      rimText = String(rimFeature.options?.text ?? "").trim();
-      rimSide = rimFeature.options?.rim_side || "back";
-    }
-  }
-  state.design.label = rimText;
-  state.design.label_position = rimText ? rimSide : "bottom";
-  if (rimText) seedPartNameFromLabel(rimText);
+  // General rim lettering belongs to independent Text features. These old
+  // fields are accepted on load only and must never collapse those features.
+  state.design.label = "";
+  state.design.label_position = "bottom";
 }
 
 function populateLiftGrabberChoices() {
@@ -1754,11 +1743,18 @@ function insideGripWalls(box) {
   return new Set();
 }
 
-function rimLabelSideForDesign(design) {
-  if (!String(design?.label || "").trim()) return null;
-  const side = design?.label_position;
-  if (side === "top") return "back";
-  return SIDE_OPENING_SIDE_IDS.includes(side) ? side : null;
+function rimLabelSidesForDesign(design) {
+  const sides = new Set();
+  for (const feature of design?.layout?.features || []) {
+    if (feature.kind !== "text" || feature.options?.level !== "rim") continue;
+    const side = feature.options?.rim_side || "back";
+    if (SIDE_OPENING_SIDE_IDS.includes(side)) sides.add(side);
+  }
+  if (String(design?.label || "").trim() && !sides.size) {
+    const side = design.label_position === "top" ? "back" : design.label_position;
+    if (SIDE_OPENING_SIDE_IDS.includes(side)) sides.add(side);
+  }
+  return sides;
 }
 
 function modifierConflicts(design) {
@@ -1793,13 +1789,12 @@ function modifierConflicts(design) {
     });
   }
 
-  const rimSide = rimLabelSideForDesign(design);
-  if (rimSide && openSides.has(rimSide)) {
-    conflicts.push({
+  const rimSides = rimLabelSidesForDesign(design);
+  for (const rimSide of rimSides) {
+    if (openSides.has(rimSide)) conflicts.push({
       key: `side-opening:rim-label:${rimSide}`,
-      message:
-        `The ${MODIFIER_SIDE_LABEL[rimSide]} wall already has a Side Opening. ` +
-        "Put the rim label on another wall or remove that Side Opening.",
+      message: `The ${MODIFIER_SIDE_LABEL[rimSide]} wall already has a Side Opening. ` +
+        "Put the rim Text on another wall or remove that Side Opening.",
     });
   }
 
@@ -1807,7 +1802,7 @@ function modifierConflicts(design) {
     const edgeSide = SIDE_OPENING_SIDE_IDS.includes(edgeMount.side)
       ? edgeMount.side
       : "front";
-    if (rimSide && rimSide === edgeSide) {
+    if (rimSides.has(edgeSide)) {
       conflicts.push({
         key: `edge-mount-separate:rim-label:${edgeSide}`,
         message:
@@ -1928,7 +1923,7 @@ function sideOpeningEligibleSide(side, design = state.design) {
   if ((box.edge_mount?.label_enabled || box.edge_mount?.holes_enabled) &&
       box.edge_mount.side === side) return false;
 
-  if (rimLabelSideForDesign(design) === side) return false;
+  if (rimLabelSidesForDesign(design).has(side)) return false;
 
   return true;
 }
@@ -4811,31 +4806,6 @@ function plainCheckbox(key, title, on, options = {}) {
   </label>`;
 }
 
-// Text location and whatever sits beside it share one row: the rim shelf
-// side when the text is on the rim, otherwise `companion` (the text itself),
-// so the location is never left on a half-empty row.
-function textPlacementFields(levelKey, sideKey, level, side = "back", companion = "") {
-  const sides = [["front", "Front"], ["back", "Back"], ["left", "Left"], ["right", "Right"]];
-  const pickedSide = sides.some(([value]) => value === side) ? side : "back";
-  let html = `<label>Text location<select data-draft="${escapeHtml(levelKey)}">
-    <option value="base" ${level === "base" ? "selected" : ""}>On base</option>
-    <option value="rim" ${level === "rim" ? "selected" : ""}>Rim level</option>
-  </select></label>`;
-  if (level === "rim") {
-    html += `<label>Rim shelf<select data-draft="${escapeHtml(sideKey)}">
-      ${sides.map(([value, label]) => `<option value="${value}" ${pickedSide === value ? "selected" : ""}>${label}</option>`).join("")}
-    </select></label>`;
-  } else {
-    html += companion;
-  }
-  return `<div class="pair">${html}</div>`;
-}
-
-function dividerScoopDefaultDepth() {
-  const scoop = partInfo("scoop");
-  return scoop?.fields?.find(field => field.key === "depth")?.default ?? "";
-}
-
 // Photo Nest Access state has exactly one writer per value. Finger access owns
 // lift_assist (auto / none / finger_grasp), the Push Out toggle owns
 // lift_assist = "push_out", and Location / Push at own their own positions.
@@ -5177,28 +5147,39 @@ function renderDraftFields() {
   }
   if (info.flags.text) {
     const textLevel = one.options?.level === "rim" ? "rim" : "base";
+    const textType = `${textLevel}_${one.options?.raised === true ? "raised" : "inlaid"}`;
     const textInput = `<input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">`;
     let textGroup = `<label>Text${textInput}</label>`;
-    let placementGroup = textPlacementFields(
-      "option:level", "option:rim_side", textLevel, one.options?.rim_side, "",
-    );
-    if (textLevel === "base") {
-      const capShown = one.options?.cap_height ?? state.draftResolvedOptions?.cap_height ?? "";
-      const depthShown = one.options?.depth ?? state.draftResolvedOptions?.depth ?? 0.4;
-      textGroup += `<div class="pair">${field("Letter height", "option:cap_height", capShown === "" ? "" : fmt(capShown), { unit: "mm", step: "0.5" })}${field("Depth", "option:depth", fmt(depthShown), { unit: "mm", step: "0.1" })}</div>`;
-      textGroup += `<fieldset><legend>Text style</legend><div class="segmented two">
-        <label><input type="radio" name="draft-text-style" value="inlaid" ${one.options?.raised === true ? "" : "checked"}><span>Inlaid</span></label>
-        <label><input type="radio" name="draft-text-style" value="raised" ${one.options?.raised === true ? "checked" : ""}><span>Raised</span></label>
-      </div></fieldset>`;
-      placementGroup += `<fieldset><legend>Turn</legend><div class="segmented four">
+    textGroup += `<label>Text Type<select data-draft="option:text_type">
+      ${[["base_inlaid", "On base — Inlaid"], ["base_raised", "On base — Raised"], ["rim_inlaid", "At rim — Inlaid"], ["rim_raised", "At rim — Raised"]]
+        .map(([value, label]) => `<option value="${value}" ${value === textType ? "selected" : ""}>${label}</option>`).join("")}
+      </select></label>`;
+    const capShown = textLevel === "rim"
+      ? (state.draftResolvedOptions?.cap_height ?? one.options?.cap_height ?? 5)
+      : (one.options?.cap_height ?? state.draftResolvedOptions?.cap_height ?? 15);
+    const depthShown = number(one.options?.depth ?? state.draftResolvedOptions?.depth, 0.4);
+    const depthLabel = one.options?.raised === true ? "Raised height" : "Inlay depth";
+    const depthTip = one.options?.raised === true
+      ? "How far the letters project above their receiving surface."
+      : "How deeply the letters are embedded or cut into their receiving surface.";
+    textGroup += field("Letter height", "option:cap_height", fmt(capShown), { unit: "mm", step: "0.5" });
+    textGroup += `<label title="${depthTip}">${depthLabel}<select data-draft="option:depth">
+      ${[[0.2, "Thin"], [0.4, "Default"], [0.6, "Thick"], [0.8, "Thickest"]]
+        .map(([value, name]) => `<option value="${value}" ${Math.abs(depthShown - value) < 1e-6 ? "selected" : ""}>${name} ${value} mm</option>`).join("")}
+      ${[0.2, 0.4, 0.6, 0.8].includes(depthShown) ? "" : `<option value="${depthShown}" selected>${depthShown} mm · Existing</option>`}
+      </select></label>`;
+    if (textLevel === "rim") {
+      textGroup += `<label>Rim side<select data-draft="option:rim_side">${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]]
+        .map(([value, label]) => `<option value="${value}" ${(one.options?.rim_side || "back") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>`;
+    } else {
+      textGroup += `<fieldset><legend>Turn</legend><div class="segmented four">
         ${[0, 1, 2, 3].map(turn => `<label><input type="radio" name="draft-turns" value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "checked" : ""}><span>${turn * 90}°</span></label>`).join("")}
       </div></fieldset>`;
-      placementGroup += toggle("option:auto", "Place it for me",
-        "Keeps it centred where it fits, moving around the other interior parts as they change. Turn this off to put it exactly where you want.",
-        one.options?.auto === true);
+    }
+    if (Number.isInteger(state.selected) && !state.draftIsNew) {
+      textGroup += `<button type="button" class="button secondary" data-action="duplicate-text">Duplicate to another side</button>`;
     }
     html += editorGroup("Text", textGroup);
-    html += editorGroup("Placement", placementGroup);
   }
   if (info.flags.size && one.kind !== "cradle" && !(one.kind === "text" && one.options?.level === "rim")) {
     const isPocket = one.kind === "pocket";
@@ -5349,8 +5330,7 @@ function renderDraftFields() {
     } else {
       const footprint = field(widthLabel, "width", fmt(shownWidth), { unit: "mm", step: "1" })
         + field(depthLabel, "depth", fmt(shownDepth), { unit: "mm", step: "1" });
-      if (one.kind === "text") html += editorGroup("Footprint", `<div class="pair">${footprint}</div>`);
-      else if (one.kind === "steps") stepsSizeHtml += footprint;
+      if (one.kind === "steps") stepsSizeHtml += footprint;
       else html += footprint;
     }
   }
@@ -5586,7 +5566,7 @@ function renderDraftFields() {
         `<option value="${angle}" ${angle === angleVal ? "selected" : ""}>${angle}°</option>`).join("")}${legacyAngle}</select></label>`;
     } else if (scoopConfig) {
       const scoopDepth = Object.prototype.hasOwnProperty.call(scoopConfig, "depth")
-        ? number(scoopConfig.depth, 60) : number(dividerScoopDefaultDepth(), 60);
+        ? number(scoopConfig.depth, 60) : number(state.draftResolvedOptions?.curved_default_depth, 60);
       const depthChoices = [10, 20, 30, 40, 50, 60, 70, 80, 90];
       const legacyDepth = depthChoices.includes(scoopDepth) ? "" : `<option value="${escapeHtml(scoopDepth)}" selected>${escapeHtml(scoopDepth)}% · Existing</option>`;
       html += `<label title="Every Divider compartment uses the same curved depth, starting at its front floor edge.">Curved depth<select data-divider-scoop-depth>${depthChoices.map(depth =>
@@ -5626,18 +5606,15 @@ function renderDraftFields() {
 
     if (!b4bEnabled()) {
       const hasLabels = opt.label_divisions === true;
-      html += `<div class="editor-group"><span class="editor-group-label">Division labels</span>`;
-      html += plainCheckbox("option:label_divisions", "Label divisions", hasLabels, {
-        wide: true,
-        help: "Add text labels to each division slot.",
-      });
+      const labelType = !hasLabels ? "none" : opt.division_level === "rim" ? "rim" : "base";
+      html += `<div class="editor-group"><span class="editor-group-label">Labels</span>`;
+      html += `<label>Label Type<select data-draft="option:label_type">
+        <option value="none" ${labelType === "none" ? "selected" : ""}>No label</option>
+        <option value="base" ${labelType === "base" ? "selected" : ""}>On base</option>
+        <option value="rim" ${labelType === "rim" ? "selected" : ""}>Rim level</option>
+      </select></label>`;
 
       if (hasLabels) {
-        const divLevel = opt.division_level === "rim" ? "rim" : "base";
-        html += textPlacementFields(
-          "option:division_level", "option:division_side", divLevel, opt.division_side,
-        );
-
         // A cell per compartment: (Qty X + 1) columns by (Qty Y + 1) rows,
         // laid out to mirror the bin so a label lands where its slot is.
         const legacyN = one.count == null ? 1 : Math.max(1, number(one.count, 1));
@@ -5665,7 +5642,7 @@ function renderDraftFields() {
         for (const cell of topology.cells) {
           const idx = cell.row * nCols + cell.column;
           const val = escapeHtml(String(divLabels[idx] || ""));
-          html += `<input type="text" data-division-index="${idx}" data-grid-column="${cell.column + 1}" data-grid-column-span="${cell.columnSpan}" data-grid-row="${cell.row + 1}" data-grid-row-span="${cell.rowSpan}" value="${val}">`;
+          html += `<input type="text" data-division-index="${idx}" data-grid-column="${cell.column + 1}" data-grid-column-span="${cell.columnSpan}" data-grid-row="${cell.row + 1}" data-grid-row-span="${cell.rowSpan}" value="${val}" placeholder="${cell.row + 1},${cell.column + 1}">`;
         }
         html += `</div>`;
       }
@@ -5717,7 +5694,7 @@ function renderDraftFields() {
     const config = state.draft.options.scoop ||= {};
     const raw = scoopDepth.value.trim();
     if (raw === "") delete config.depth;
-    else config.depth = number(raw, dividerScoopDefaultDepth());
+    else config.depth = number(raw, state.draftResolvedOptions?.curved_default_depth ?? 60);
     state.draftAutoCommit = true;
     renderLayout2D();
     refreshDraftSoon();
@@ -5779,27 +5756,12 @@ function renderDraftFields() {
     markDraftChanged();
     state.draft.options ||= {};
     state.draft.options.quarter_turns = Number(input.value) % 4;
-    // Turning it is a placement decision, so it stops being auto-placed.
-    if (state.draft.options.auto) {
-      state.draft.options.auto = false;
-      const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
-      if (autoField) autoField.checked = false;
-    }
     // The zone was fitted to the old orientation; swap its sides so the
     // lettering keeps roughly the same size after the quarter turn.
     const zone = state.draft.zone;
     const cx = (zone[0] + zone[2]) / 2, cy = (zone[1] + zone[3]) / 2;
     const w = zone[2] - zone[0], d = zone[3] - zone[1];
     state.draft.zone = [cx - d / 2, cy - w / 2, cx + d / 2, cy + w / 2];
-    state.draftAutoCommit = true;
-    updateSelectionButtons();
-    refreshDraftSoon();
-  }));
-  $$('input[name="draft-text-style"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
-    markDraftChanged();
-    state.draft.options ||= {};
-    if (input.value === "raised") state.draft.options.raised = true;
-    else delete state.draft.options.raised;
     state.draftAutoCommit = true;
     updateSelectionButtons();
     refreshDraftSoon();
@@ -5823,6 +5785,33 @@ function renderDraftFields() {
   if (growBtn) growBtn.addEventListener("click", event => autoExpandBin({ button: event.currentTarget }));
   updateFitActions();
   if (state.draft?.kind === "nest") wireNestFieldActions();
+  const duplicateTextButton = $('[data-action="duplicate-text"]', $("#draft-fields"));
+  if (duplicateTextButton) duplicateTextButton.addEventListener("click", duplicateText);
+}
+
+async function duplicateText() {
+  if (state.draft?.kind !== "text" || !Number.isInteger(state.selected)) return;
+  let mutationStarted = false;
+  try {
+    await commitVisibleDraft();
+    if (!beginDesignMutation()) return;
+    mutationStarted = true;
+    const before = clone(state.design);
+    const result = await api("/api/feature/duplicate", { design: state.design, index: state.selected });
+    state.design = result.design;
+    recordHistory(before);
+    state.selected = result.selected;
+    state.draftSourceIndex = result.selected;
+    state.draft = clone(state.design.layout.features[result.selected]);
+    state.draftKind = "text";
+    state.draftIsNew = false;
+    state.draftTouched = false;
+    state.draftAutoCommit = true;
+    syncForm(); renderDraftFields(); renderPlaced(); await refreshPreview();
+    toast("Text duplicated on a free rim side.");
+  } catch (error) {
+    toast(error.message, true, 6500);
+  } finally { if (mutationStarted) finishDesignMutation(); }
 }
 
 function syncNest2DWorkspace() {
@@ -7193,24 +7182,42 @@ function updateDraftFromFields(event) {
       one.options.text = said.value;
       seedPartNameFromText(one);
     }
-    one.options.level = get("option:level") === "rim" ? "rim" : "base";
+    const type = get("option:text_type") || "base_inlaid";
+    const oldLevel = one.options.level === "rim" ? "rim" : "base";
+    one.options.level = type.startsWith("rim_") ? "rim" : "base";
+    one.options.raised = type.endsWith("raised");
+    delete one.options.auto;
+    if (oldLevel !== one.options.level) {
+      // The server re-centres it and seeds a fitting Letter height for the
+      // new destination, then this marker is gone.
+      one.options.retarget = one.options.level;
+      delete one.options.cap_height;
+      delete one.options.text_v2;
+    }
     if (one.options.level === "rim") {
       one.options.rim_side = get("option:rim_side") || one.options.rim_side || "back";
-      delete one.options.auto;
-      delete one.options.raised;
-      delete one.options.quarter_turns;
-      delete one.options.cap_height;
-      delete one.options.depth;
     } else {
       delete one.options.rim_side;
-      one.options.auto = $('[data-draft="option:auto"]', fields)?.checked === true;
-      if (changed === "option:auto" && one.options.auto) {
-        // Handing placement back to the engine: drop the hand-set letter height
-        // so it can pick the biggest that fits wherever it lands.
-        delete one.options.cap_height;
-        const capField = $('[data-draft="option:cap_height"]', fields);
-        if (capField) capField.value = "";
-      }
+    }
+    const destination = one.options.level === "rim"
+      ? `rim:${one.options.rim_side || "back"}` : "base";
+    const occupied = (state.design.layout?.features || []).some((feature, index) => {
+      if (index === state.selected || feature.kind !== "text") return false;
+      const place = feature.options?.level === "rim"
+        ? `rim:${feature.options?.rim_side || "back"}` : "base";
+      return place === destination;
+    });
+    if (occupied) {
+      state.design = previousConflictDesign;
+      state.draft = previousDraftForConflict;
+      state.draftAutoCommit = previousDraftAutoCommit;
+      state.draftTouched = previousDraftTouched;
+      state.canGenerate = previousCanGenerate;
+      syncForm();
+      renderDraftFields();
+      updateGenerateAvailability();
+      toast(`Only one Text can use the ${destination === "base" ? "base" : "same rim side"}. Change Text Type or remove the other Text.`, true, 6000);
+      return;
     }
     syncRimLabelFromFeatures();
     const conflict = newModifierConflict(previousConflictDesign, state.design);
@@ -7235,14 +7242,19 @@ function updateDraftFromFields(event) {
     if (bottomMode === "slope") {
       one.options.slope_base = true;
       delete one.options.scoop;
-      if (!Object.prototype.hasOwnProperty.call(one.options, "bottom_angle")) one.options.bottom_angle = 45;
+      if (changed === "option:bottom_mode") {
+        one.options.bottom_angle = number(state.draftResolvedOptions?.bottom_default_angle, 45);
+      }
     } else if (bottomMode === "scoop") {
       one.options.scoop ||= {};
+      if (changed === "option:bottom_mode") {
+        one.options.scoop.depth = number(state.draftResolvedOptions?.curved_default_depth, 60);
+      }
       for (const key of ["slope_base", "bottom_angle", "reverse_bottom", "alternate_bottom", "minimal_bottom", "bottom_supports"]) delete one.options[key];
     } else {
       for (const key of ["slope_base", "bottom_angle", "reverse_bottom", "alternate_bottom", "minimal_bottom", "bottom_supports", "scoop"]) delete one.options[key];
     }
-    for (const key of ["alternate_bottom", "label_divisions"]) {
+    for (const key of ["alternate_bottom"]) {
       const boxEl = $(`[data-draft="option:${key}"]`, fields);
       if (!boxEl) continue;
       if (boxEl.checked) one.options[key] = true;
@@ -7255,21 +7267,20 @@ function updateDraftFromFields(event) {
         delete one.options.bottom_supports;
       }
     }
-    if (!one.options.label_divisions) {
-      delete one.options.division_level;
-      delete one.options.division_labels;
-      delete one.options.division_side;
+    const labelType = get("option:label_type") || "none";
+    if (labelType === "none") {
+      delete one.options.label_divisions;
+      // Keep remembered side and entered text if this label type is restored.
     } else {
-      one.options.division_level = get("option:division_level") === "rim" ? "rim" : "base";
-      if (one.options.division_level === "rim") {
-        one.options.division_side = get("option:division_side") || one.options.division_side || "back";
-      } else delete one.options.division_side;
+      one.options.label_divisions = true;
+      one.options.division_level = labelType === "rim" ? "rim" : "base";
+      if (labelType === "rim" && !one.options.division_side) one.options.division_side = "back";
     }
   }
   if (changed.startsWith("option:") &&
       !["text", "auto", "raised", "reverse_bottom", "alternate_bottom", "minimal_bottom",
-        "slope_base", "bottom_mode", "slope_construction", "label_divisions", "division_level", "division_side", "division_labels",
-        "level", "rim_side",
+        "slope_base", "bottom_mode", "slope_construction", "label_divisions", "label_type", "division_level", "division_side", "division_labels",
+        "level", "rim_side", "text_type",
         "lift_assist", "finger_position", "push_position", "angle_towards",
         "bore_style", "wall_style", "xy_size_mode", "height_size_mode", "holder_style", "auto_size", "repeat_spacing_percent"]
         .includes(changed.slice("option:".length))) {
@@ -7301,12 +7312,6 @@ function updateDraftFromFields(event) {
       }
       if (info.kind === "cradle" && key === "spacing") value = Math.max(0, value);
       one.options[key] = value;
-    }
-    // A hand-set letter height means the user is placing it themselves.
-    if (info.flags.text && key === "cap_height" && raw !== "") {
-      one.options.auto = false;
-      const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
-      if (autoField) autoField.checked = false;
     }
     if (info.kind === "divider" && key === "thickness") {
       widenDividerFootprint(one);
@@ -7414,9 +7419,9 @@ function updateDraftFromFields(event) {
   // the Angle field for round/square only).
   if ((changed === "profile" || changed === "option:angle") && one.kind === "bore") renderDraftFields();
   if ((changed === "option:lift_assist" || changed === "option:holder_style") && one.kind === "nest") renderDraftFields();
-  if (changed === "option:level") renderDraftFields();
+  if (changed === "option:text_type") renderDraftFields();
   if (one.kind === "divider" && (
-    changed === "option:bottom_mode" || changed === "option:slope_construction" || changed === "option:label_divisions" ||
+    changed === "option:bottom_mode" || changed === "option:slope_construction" || changed === "option:label_type" ||
     changed === "option:division_level" || changed === "count" ||
     changed === "option:count_x" || changed === "option:count_y"
   )) renderDraftFields();
@@ -7470,6 +7475,17 @@ async function refreshDraft() {
     });
     if (request !== state.draftRequest) return;
     state.draftResolvedOptions = result.resolved_options || {};
+    if (state.draft.kind === "text" && result.feature) {
+      if (Array.isArray(result.feature.zone)) state.draft.zone = result.feature.zone.slice();
+      state.draft.options.text_v2 = true;
+      if (state.draft.options.retarget) {
+        delete state.draft.options.retarget;
+        if (result.feature.options?.cap_height !== undefined) {
+          state.draft.options.cap_height = result.feature.options.cap_height;
+        }
+        renderDraftFields();
+      }
+    }
     // The server's usable layout area is the authority for "bore to bin".
     if (state.draft.kind === "bore" && boreXyMode(state.draft) === "bore_to_bin"
         && !boreWallsOnly(boreStyleOf(state.draft))
@@ -8382,9 +8398,6 @@ async function refreshPreview({ persistResume = true } = {}) {
     state.canGenerate = !messages.length;
     updateGenerateAvailability();
     if (messages.length) setError("", actions);
-    // An auto text part places itself server-side, so adopt the zones the
-    // preview resolved - otherwise the next edit would send the stale ones.
-    adoptResolvedFeatures(result.design?.layout?.features);
     state.textMeta = result.text_meta || [];
     state.fitError = Boolean(result.feature_errors.length || result.draft_error);
     updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
@@ -8410,24 +8423,6 @@ async function refreshPreview({ persistResume = true } = {}) {
     state.fitError = true;
     updateAutoExpandButton();
   }
-}
-
-// An auto-placed text part is positioned by the engine, not by the editor, so
-// the zone it lands on only comes back with the preview. Take those zones -
-// and nothing else - so a drag or a field edit in flight is never overwritten.
-function adoptResolvedFeatures(resolved) {
-  const features = state.design?.layout?.features;
-  if (!Array.isArray(resolved) || !Array.isArray(features)) return;
-  if (resolved.length !== features.length) return;
-  features.forEach((one, index) => {
-    if (one.kind !== "text" || !one.options?.auto) return;
-    const from = resolved[index];
-    if (!from || from.kind !== "text") return;
-    one.zone = from.zone.slice();
-    if (from.options && from.options.quarter_turns !== undefined) {
-      one.options.quarter_turns = from.options.quarter_turns;
-    }
-  });
 }
 
 // Kept as the single hook the preview/draft paths call whenever the fit state
@@ -11615,13 +11610,9 @@ function wireLayoutInteraction() {
       toast(dividerLockMessage(), true, 6500);
       return;
     }
-    // Moving or resizing lettering by hand is a placement decision, so it
-    // stops placing itself - otherwise the next preview would put it straight
-    // back where the engine wanted it and the drag would look broken.
-    if (feature.kind === "text" && feature.options?.auto) {
-      feature.options.auto = false;
-      const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
-      if (autoField) autoField.checked = false;
+    if (feature.kind === "text") {
+      pointerActive = false;
+      return; // Text is selected here; its position is derived from its type.
     }
     if (feature.kind === "nest" && feature.contour && isNestEditWorkspaceActive()
         && (state.nestOutlineTool === "add-point" || state.nestOutlineTool === "delete-point")) {
@@ -11840,6 +11831,7 @@ function handleLayoutArrowKeys(event) {
     state.draftAutoCommit = true;
   }
   const feature = state.draft;
+  if (feature.kind === "text") return;
   if (feature.kind === "divider" && dividerLockedByLidLabels()) {
     toast(dividerLockMessage(), true, 6500);
     return;
@@ -11858,11 +11850,6 @@ function handleLayoutArrowKeys(event) {
     roundCoord(z[3] + dy),
   ];
 
-  if (feature.kind === "text" && feature.options?.auto) {
-    feature.options.auto = false;
-    const autoField = $('[data-draft="option:auto"]', $("#draft-fields"));
-    if (autoField) autoField.checked = false;
-  }
   if (feature.kind === "nest") {
     if (feature.options?.auto_size === true
         && state.design.layout.features.filter(one => one.kind === "nest").length === 1) {
