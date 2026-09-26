@@ -230,11 +230,11 @@ The hosted app tracks `main`; fix branches remain isolated until outside review 
 
 > **MAXIMIZE CONFIDENCE PER TOKEN.**
 > Use cheap automated tests when they materially improve confidence.
-> Prefer existing non-browser tests because running them is usually inexpensive in
-> LLM/token terms. Use browser-driving tests only when the behavior genuinely
-> depends on a real browser.
+> Browser-driven tests are retired by user decision as of 2026-09-25. Do not add,
+> update, repair, run, or use them as completion evidence unless the user explicitly
+> reverses this policy. Keep non-browser tests for frontend/web logic active.
 
-Wavefinity should avoid both extremes: skipping useful automated verification and wasting time/tokens on ceremonial testing. The computer running a test does not meaningfully consume LLM tokens; token cost mostly comes from the agent reading output, diagnosing failures, writing new tests, or driving a browser. Therefore prefer quiet, high-signal automated checks and concise output.
+Wavefinity should avoid both extremes: skipping useful automated verification and wasting time/tokens on ceremonial testing. The computer running a test does not meaningfully consume LLM tokens; token cost mostly comes from the agent reading output, diagnosing failures, or writing tests. Therefore prefer quiet, high-signal automated checks and concise output.
 
 > **Implement carefully, inspect the diff, run the cheapest useful automated checks, and stop when the meaningful risks are covered.**
 
@@ -258,18 +258,13 @@ Testing is expected when the change can realistically break significant portions
 - Use the relevant targeted tests and normally the existing broader/full automated suite when it is practical and reasonably fast.
 - A large line count alone does not make work Class C; a tiny shared-contract edit can.
 
-#### Browser-driving rule
+#### Browser-test retirement
 
-Browser-driving/UI automation is intentionally the exception because it is more expensive in tokens and interaction steps.
-
-Use browser driving only when non-browser automated tests plus static review cannot establish the behavior with adequate confidence, such as:
-- real DOM interaction or browser initialization;
-- browser-only event behavior;
-- async UI state that cannot be exercised through existing tests;
-- visual/layout behavior where appearance itself is the risk;
-- download/file-picker or other browser-specific workflows.
-
-When browser driving is justified, use the smallest surgical path that answers the question. Avoid broad walkthroughs, screenshot-heavy QA, and repeated UI reassurance runs.
+Existing browser-driven tests and browser-only harness material are historical
+reference under `retired-tests/browser/`. They are not part of active testing:
+do not run, repair, modernize, or use them as completion evidence. Reactivation
+requires an explicit later user decision. This does not retire ordinary
+non-browser tests of frontend or web-service logic.
 
 #### Correction-escalation rule
 
@@ -283,7 +278,6 @@ The Help Code fix file should state the testing approach for that fix, choosing 
 - **No testing needed**
 - **Existing targeted automated tests**
 - **Existing broader/full automated suite**
-- **Targeted browser smoke check** (only when browser-specific risk requires it)
 
 Name exact commands/checks when known, but do not turn the fix file into a testing plan.
 
@@ -299,7 +293,7 @@ Name exact commands/checks when known, but do not turn the fix file into a testi
   `python -m unittest` directly is for when you need its own `-v`/`-k` flags while diagnosing a failure.
 - **New tests are optional, not automatic.** Add one only when it protects an important stable invariant and is worth the implementation/maintenance cost.
 - **Syntax/import checks are cheap** and encouraged when relevant.
-- **Browser/server driving is sparse.** Use it only for risks that cheaper automated checks cannot resolve.
+- **Browser automation is retired.** Use static review and active non-browser checks.
 - **Rerun failures, not reassurance.** After fixing a failure, rerun the failed/relevant checks. Do not repeatedly rerun already-passing suites without a reason.
 - **No exhaustive matrices or random sweeps** unless the changed algorithm genuinely requires them.
 - **No screenshot QA** for routine styling; inspect visuals only when visual behavior is itself the risk.
@@ -313,7 +307,7 @@ Do not create testing bureaucracy:
 - no giant acceptance matrices;
 - no dozens of near-duplicate cases;
 - no “one more verification” loops after the named risks are covered;
-- no browser-driving test when a normal automated test can answer the question;
+- no retired browser-driven test;
 - no new test merely to increase confidence cosmetically.
 
 #### Fast implementation workflow
@@ -323,10 +317,9 @@ Do not create testing bureaucracy:
 3. Inspect the changed code and diff.
 4. Choose the cheapest high-signal verification appropriate to the blast radius.
 5. Run relevant existing automated tests when they materially improve confidence.
-6. Use browser driving only if browser-specific behavior remains unverified.
-7. Fix real failures and rerun only the affected checks.
-8. Commit/push the coherent completed work.
-9. Stop.
+6. Fix real failures and rerun only the affected checks.
+7. Commit/push the coherent completed work.
+8. Stop.
 
 #### Quick decision rule
 
@@ -337,14 +330,14 @@ Before spending testing tokens, ask:
 - Tiny/local change with no meaningful runtime risk → testing may be skipped.
 - Relevant existing targeted test → usually run it.
 - Fast, concise full suite with useful regression coverage → running it is allowed and often worthwhile.
-- Behavior only provable in a real browser → use one small browser-driving smoke path.
+- Browser-specific behavior → use active non-browser checks and static review; browser automation is retired.
 - Repeated corrections or escaped runtime failures → increase automated verification.
 
 #### Definition of done
 
 - **Class A:** requested behavior implemented, code path reasoned through, diff verified; cheap relevant automated checks may be run but are not mandatory.
 - **Class B:** Class A plus useful existing automated verification when available; targeted is preferred, but a fast full suite is acceptable.
-- **Class C:** implementation plus relevant automated verification; broader/full suite is normally appropriate when practical. Browser driving is added only for browser-specific residual risk.
+- **Class C:** implementation plus relevant non-browser automated verification; broader/full suite is normally appropriate when practical.
 
 ### Using the browser UI
 
@@ -1024,18 +1017,15 @@ frontend's *Keep inventory for this folder* checkbox). Legacy inventory,
 decide a folder's first `inventory` value, then superseded by the explicit
 field - and are not deleted.
 
-**Known limitations:** no standalone browser/DOM test suite yet — Python API
-contracts and JavaScript syntax are covered by `test_wavefinity_web.py` and
-`node --check`, interactive QA is manual. A very dense design (many
+**Verification:** browser-driven tests are retired and are not part of the
+active verification contract. Python API contracts and JavaScript syntax are
+covered by `test_wavefinity_web.py` and `node --check`. A very dense design (many
 cradle/bore parts at once) serializes a large triangle payload to
 the browser; camera motion stays client-side and fast regardless, but the
 initial load is heavier. **Save design** relies on the browser's own
-download prompt, which some browser-automation tools cannot observe as an
-event — a real browser session shows it normally. Photo Nest's automatic
-finger-access search and its 2D access indicators are new and interactive QA
-on real photographed tools (especially irregular/concave outlines that need
-its boundary-sampling fallback) remains manual, same as the rest of the
-browser UI.
+download prompt. Photo Nest's automatic finger-access search and its 2D access
+indicators are interactive UI behavior; their active automated checks remain
+non-browser tests.
 
 ---
 

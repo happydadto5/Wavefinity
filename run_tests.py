@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+from pathlib import Path
 import sys
 import time
 import unittest
@@ -27,7 +28,12 @@ def main(argv: list[str]) -> int:
     if argv:
         suite = loader.loadTestsFromNames(argv)
     else:
-        suite = loader.discover(".", pattern="test_*.py")
+        # Only root-level test modules are active. Historical browser tests live
+        # under retired-tests/ and must never enter normal discovery.
+        suite = unittest.TestSuite(
+            loader.loadTestsFromName(path.stem)
+            for path in sorted(Path(__file__).resolve().parent.glob("test_*.py"))
+        )
 
     # verbosity=0 already skips the per-test dots; redirecting stdout/stderr
     # during the run also swallows the app's own request-log prints, which
