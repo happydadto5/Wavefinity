@@ -395,9 +395,11 @@ class WebApplicationTests(unittest.TestCase):
         # The persistent bin-to-bore pass reuses the one expand endpoint.
         recon = app_js[app_js.index("async function reconcileBoreBin(result) {"):]
         recon = recon[:recon.index("\n}\n")]
-        self.assertIn("sizeBinHeightToBore({ silent: true })", recon)
-        self.assertIn("autoExpandBin({ keepDraft: true, silent: true, fit: true })", recon)
-        self.assertIn("state.boreFitSignature", recon)
+        self.assertIn("sizeBinHeightToBore({ silent: true, guard: isCurrent })", recon)
+        self.assertIn("keepDraft: true, silent: true, fit: true, guard: isCurrent", recon)
+        self.assertIn("state.boreFitPending", recon)
+        self.assertIn("state.boreFitDone", recon)
+        self.assertNotIn("boreFitSignature", app_js)
         self.assertIn("fit_height_to_bore: true", app_js)
         # Style words never go through the numeric option path.
         self.assertIn('"bore_style", "wall_style", "xy_size_mode", "height_size_mode", "holder_style"', app_js)

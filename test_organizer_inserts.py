@@ -2933,15 +2933,56 @@ class BoreWavyBaseTests(unittest.TestCase):
             if y > 8.0:
                 self.assertLess(replace(BIN, y=y - 8.0).usable_inside[1], envelope.depth)
 
-    def test_bore_position_is_kept_and_bin_grows_around_it(self) -> None:
+    def test_bin_sized_walls_only_is_centred_not_kept_off_centre(self) -> None:
+        # Correction 1: a Walls Only Bore in bin_to_bore is centred in the usable
+        # floor, so the smallest grid bin around it supports it on every side.
         zone = Zone(-4.0, -30.0, 56.0, 30.0)
         one = self._one(zone, style="walls_wavy", xy_size_mode="bin_to_bore")
-        envelope = bore_envelope_zone(BIN, one, BIN.base_thickness)
-        self.assertAlmostEqual(envelope.centre[0], 26.0, places=6)
-        x, _y = bore_bin_minimum(BIN, [one], BIN.base_thickness)
-        self.assertGreaterEqual(replace(BIN, x=x).usable_inside[0], 2.0 * envelope.x1 - 1e-6)
-        self.assertIsNone(bore_bin_minimum(BIN, [self._one(zone, xy_size_mode="manual")]))
+        fixed = inserts.normalize_bore_modes(BIN, one, BIN.base_thickness)
+        self.assertAlmostEqual(fixed.zone.centre[0], 0.0, places=9)
+        self.assertAlmostEqual(fixed.zone.centre[1], 0.0, places=9)
+        self.assertAlmostEqual(fixed.zone.width, zone.width, places=9)     # size untouched
+        envelope = bore_envelope_zone(BIN, fixed, BIN.base_thickness)
+        x, y = bore_bin_minimum(BIN, [one], BIN.base_thickness)            # off-centre input too
+        self.assertGreaterEqual(replace(BIN, x=x).usable_inside[0], envelope.width - 1e-6)
+        self.assertLess(replace(BIN, x=x - 8.0).usable_inside[0], envelope.width)
+        self.assertEqual((x, y), bore_bin_minimum(BIN, [fixed], BIN.base_thickness))
+        self.assertIsNone(bore_bin_minimum(BIN, [self._one(zone, xy_size_mode="manual")],
+                                           BIN.base_thickness))
         self.assertIsNone(bore_bin_minimum(BIN, [one], BIN.base_thickness, "separate"))
+        # Manual Walls Only may stay off-centre inside a larger bin.
+        manual = inserts.normalize_bore_modes(
+            BIN, self._one(zone, style="walls_wavy", xy_size_mode="manual"), BIN.base_thickness)
+        self.assertEqual(manual.zone, zone)
+
+    def test_walls_only_bin_to_bore_is_supported_on_all_four_sides_after_edits(self) -> None:
+        # The fitted result (smallest bin around the centred Bore) leaves less
+        # than one grid step of bridge per side; the geometry reaches all sides.
+        for edit in ({}, {"columns": 2}, {"rows": 2}, {"wall": 2.4}, {"diameter": 22.0}):
+            with self.subTest(edit=edit):
+                diameter = edit.get("diameter", 30.0)
+                options = {k: v for k, v in edit.items() if k != "diameter"}
+                probe = self._one(Zone(-4.0, -30.0, 56.0, 30.0), style="walls_wavy",
+                                  diameter=diameter, xy_size_mode="bin_to_bore", **options)
+                need = inserts.feature_min_footprint(BIN, probe, BIN.base_thickness)
+                # the browser holds the zone at (rounded-up) minimum; the server centres it
+                zone = Zone(-math.ceil(need[0]) / 2.0, -math.ceil(need[1]) / 2.0,
+                            math.ceil(need[0]) / 2.0, math.ceil(need[1]) / 2.0)
+                one = replace(probe, zone=zone)
+                x, y = bore_bin_minimum(BIN, [one], BIN.base_thickness)
+                box = replace(BIN, x=x, y=y)
+                whole = Zone.whole(box)
+                envelope = bore_envelope_zone(box, one, box.base_thickness)
+                for gap in (whole.x1 - envelope.x1, envelope.x0 - whole.x0,
+                            whole.y1 - envelope.y1, envelope.y0 - whole.y0):
+                    self.assertGreaterEqual(gap, -1.5)
+                    self.assertLess(gap, 5.0)          # intentional grid-rounding allowance only
+                mesh = build_features(box, [one], box.base_thickness)[0]
+                self.assertTrue(mesh.is_watertight)
+                self.assertGreater(mesh.bounds[1][0], whole.x1 + 0.5)
+                self.assertLess(mesh.bounds[0][0], whole.x0 - 0.5)
+                self.assertGreater(mesh.bounds[1][1], whole.y1 + 0.5)
+                self.assertLess(mesh.bounds[0][1], whole.y0 - 0.5)
 
     def test_wavy_base_joins_every_wall_it_reaches_without_touching_the_outside(self) -> None:
         outer = wavy_outer_polygon(self._touching()[0]).bounds

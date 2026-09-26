@@ -521,6 +521,108 @@ process.stdout.write(JSON.stringify({ legacy, fill, filled, walls, wallsFilled, 
         self.assertEqual(out["walls"]["options"]["wall"], 1.2)
         self.assertNotIn("angle", out["walls"]["options"])
 
+    RECONCILE_PRELUDE = r"""
+const BORE_STYLES = [["base_straight", "a"], ["base_wavy", "b"], ["walls_straight", "c"], ["walls_wavy", "d"]];
+const BORE_LEGACY_STYLES = { full_base: "base_straight", wavy_base: "base_wavy" };
+const boreWallsOnly = style => style === "walls_straight" || style === "walls_wavy";
+const number = (v, d = 0) => Number.isFinite(Number(v)) && v !== "" && v !== null ? Number(v) : d;
+const timers = []; const setTimeout = fn => { timers.push(fn); };
+const state = { folderMode: "space", activeSpaceId: "A", designInventoryId: "I1",
+  draftAutoCommit: true, designMutationBusy: false, autoGrowingBin: false, boreEpoch: 0,
+  design: { box: { x: 136, y: 120, z: 40 } },
+  draft: { kind: "bore", zone: [-10, -10, 10, 10], item: {}, options: { bore_style: "walls_wavy" } } };
+const draftCommitIndex = () => 0;
+let refreshes = 0; const refreshDraft = () => { refreshes += 1; };
+const want = { bore_bin: { x: 48, y: 48 } };
+let autoExpandBin = async () => "done", sizeBinHeightToBore = async () => "done";
+"""
+    RECONCILE_FUNCTIONS = (
+        "normalizeBoreStyle", "boreStyleOf", "boreXyMode", "boreHeightMode",
+        "boreReconcileContext", "bumpBoreEpoch", "flushBoreReconcile", "reconcileBoreBin",
+    )
+
+    def _reconcile_js(self, body):
+        return node_run(
+            self.RECONCILE_PRELUDE + "".join(function_source(n) for n in self.RECONCILE_FUNCTIONS)
+            + "\n(async () => {\n" + body + "\n})();")
+
+    def test_bore_reconcile_asked_while_busy_is_kept_and_retried_after_release(self):
+        out = self._reconcile_js("""
+state.designMutationBusy = true;
+const asked = await reconcileBoreBin(want);
+const pending = state.boreFitPending;
+flushBoreReconcile();                      // still busy: nothing yet
+const stillBusy = refreshes + timers.length;
+state.designMutationBusy = false;
+flushBoreReconcile();                      // the owner finished
+timers.splice(0).forEach(fn => fn());
+process.stdout.write(JSON.stringify({ asked, pending: !!pending, stillBusy, refreshes,
+  cleared: state.boreFitPending }));
+""")
+        self.assertFalse(out["asked"])
+        self.assertTrue(out["pending"])
+        self.assertEqual(out["stillBusy"], 0)
+        self.assertEqual(out["refreshes"], 1)          # converged by itself, no manual refresh
+        self.assertIsNone(out["cleared"])
+
+    def test_bore_reconcile_ignores_a_stale_resize_and_never_records_it(self):
+        out = self._reconcile_js("""
+let applied = 0;
+autoExpandBin = async ({ guard }) => {
+  bumpBoreEpoch();                          // a newer edit lands while the resize is in flight
+  if (!guard()) return "stale";
+  applied += 1; return "done";
+};
+sizeBinHeightToBore = async () => "done";
+await reconcileBoreBin(want);
+process.stdout.write(JSON.stringify({ applied, done: state.boreFitDone ?? null }));
+""")
+        self.assertEqual(out["applied"], 0)
+        self.assertIsNone(out["done"])
+        out = self._reconcile_js("""
+let calls = 0;
+autoExpandBin = async ({ guard }) => {
+  calls += 1;
+  state.designInventoryId = "OTHER";        // a different design took over
+  return guard() ? "done" : "stale";
+};
+sizeBinHeightToBore = async () => "done";
+await reconcileBoreBin(want);
+process.stdout.write(JSON.stringify({ calls, done: state.boreFitDone ?? null }));
+""")
+        self.assertEqual(out["calls"], 1)
+        self.assertIsNone(out["done"])
+
+    def test_bore_reconcile_failure_does_not_poison_the_same_fit(self):
+        out = self._reconcile_js("""
+const outcomes = ["failed", "done"]; let calls = 0;
+autoExpandBin = async () => { calls += 1; return outcomes.shift(); };
+sizeBinHeightToBore = async () => "done";
+const first = await reconcileBoreBin(want);
+const afterFail = state.boreFitDone ?? null;
+const second = await reconcileBoreBin(want);   // identical desired dimensions
+process.stdout.write(JSON.stringify({ first, second, calls, afterFail,
+  done: !!state.boreFitDone, busy: state.autoGrowingBin }));
+""")
+        self.assertTrue(out["first"] and out["second"])
+        self.assertEqual(out["calls"], 2)               # retried, not suppressed
+        self.assertIsNone(out["afterFail"])
+        self.assertTrue(out["done"])
+        self.assertFalse(out["busy"])
+
+    def test_bore_reconcile_runs_height_then_width_length_and_skips_a_converged_fit(self):
+        out = self._reconcile_js("""
+const order = [];
+sizeBinHeightToBore = async () => { order.push("z"); return "done"; };
+autoExpandBin = async (o) => { order.push(o.fit ? "xy-fit" : "xy"); return "done"; };
+state.draft.options.height_size_mode = "bin_to_bore";
+const both = { bore_bin: { x: 48, y: 48 }, bore_bin_height: 20 };
+await reconcileBoreBin(both);
+await reconcileBoreBin(both);                   // converged: identical inputs, no repeat
+process.stdout.write(JSON.stringify({ order }));
+""")
+        self.assertEqual(out["order"], ["z", "xy-fit"])
+
     STALE_PRELUDE = r"""
 const timers = [];
 const setTimeout = (fn) => { timers.push(fn); return timers.length; };

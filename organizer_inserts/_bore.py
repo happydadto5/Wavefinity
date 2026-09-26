@@ -583,6 +583,13 @@ def normalize_bore_modes(
         options.pop("height", None)
     if options["xy_size_mode"] == "bore_to_bin" and not is_walls_only(style):
         zone = layout_zone(box, mode)
+    elif (options["xy_size_mode"] == "bin_to_bore" and is_walls_only(style)
+            and mode == "fused" and any(abs(c) > 1e-9 for c in one.zone.centre)):
+        # Walls Only sizing the bin around itself is centred in the usable floor
+        # (a nudge is undone), so the smallest grid-sized bin supports it on all
+        # four sides within the grid-rounding allowance.
+        half_w, half_d = one.zone.width / 2.0, one.zone.depth / 2.0
+        zone = Zone(-half_w, -half_d, half_w, half_d)
     if zone is one.zone and options == one.options:
         return one
     return replace(one, zone=zone, options=options)

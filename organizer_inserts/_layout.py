@@ -467,6 +467,8 @@ def bore_bin_minimum(
             size = (max(size[0], one.zone.width), max(size[1], one.zone.depth))
         found = True
         cx, cy = one.zone.centre
+        if is_walls_only(style):
+            cx = cy = 0.0        # a bin-sized Walls Only Bore is centred in the bin
         need_x = max(need_x, 2.0 * (abs(cx) + size[0] / 2.0))
         need_y = max(need_y, 2.0 * (abs(cy) + size[1] / 2.0))
     if not found:

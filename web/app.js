@@ -6475,6 +6475,13 @@ function applyBoreSizing(one) {
   }
   if (!boreWallsOnly(style)) delete opts.wall;   // Base styles use internal defaults
   if (opts.height_size_mode === "bore_to_bin") delete opts.height;
+  if (opts.xy_size_mode === "bin_to_bore" && boreWallsOnly(style)) {
+    // Mirrors normalize_bore_modes(): a bin-sized Walls Only Bore is centred.
+    const halfW = (one.zone[2] - one.zone[0]) / 2;
+    const halfD = (one.zone[3] - one.zone[1]) / 2;
+    one.zone = [-halfW, -halfD, halfW, halfD];
+    return false;
+  }
   if (opts.xy_size_mode !== "bore_to_bin" || boreWallsOnly(style)) return false;
   const [insideX, insideY] = binInsideExtent(state.design.box);
   one.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
@@ -6606,8 +6613,10 @@ function sizeBoreToGrid(one) {
     const bias = -leanSign * toolOverhang / 2;
     return leanSign < 0 ? Math.max(centre, bias) : Math.min(centre, bias);
   };
-  const ncx = place(leanTarget(cx, "x"), width, insideX);
-  const ncy = place(leanTarget(cy, "y"), depth, insideY);
+  // A Walls Only Bore that sizes the bin around itself stays centred.
+  const centred = walls && boreXyMode(one) === "bin_to_bore";
+  const ncx = centred ? 0 : place(leanTarget(cx, "x"), width, insideX);
+  const ncy = centred ? 0 : place(leanTarget(cy, "y"), depth, insideY);
   one.zone = [ncx - width / 2, ncy - depth / 2, ncx + width / 2, ncy + depth / 2];
 
   const widthField = $('[data-draft="width"]', $("#draft-fields"));
@@ -6840,6 +6849,7 @@ function keepCutBelowHeight(one, changedKey, gap = 2) {
 }
 
 function updateDraftFromFields(event) {
+  bumpBoreEpoch();
   const previousConflictDesign = clone(state.design);
   const previousDraftForConflict = clone(state.draft);
   const previousDraftAutoCommit = state.draftAutoCommit;
@@ -7291,6 +7301,7 @@ async function refreshDraft() {
     state.draft.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
   }
   applyBoreSizing(state.draft);
+  bumpBoreEpoch();
   const request = ++state.draftRequest;
   if (state.draft.kind === "nest") {
     $("#draft-status").textContent = "Resizing bin around cavity…";
@@ -7377,6 +7388,7 @@ async function refreshDraft() {
         });
       } finally {
         state.autoGrowingBin = false;
+        flushBoreReconcile();
       }
       return;
     }
@@ -7853,6 +7865,7 @@ function beginDesignMutation() {
 
 function finishDesignMutation() {
   state.designMutationBusy = false;
+  flushBoreReconcile();
   setMutationSurfacesInert(false);
   mutationControls().forEach(control => control.disabled = false);
   syncLidForm();
@@ -8359,14 +8372,40 @@ function fillPartToBin() {
 // Persistent "Auto size bin to bore" (Width / Length and Height). The server says
 // what bin the Bore asks for (result.bore_bin / result.bore_bin_height); when the
 // bin is not already there this runs the exact resize through the one existing
-// expand endpoint. One bounded pass: it acts only on the live draft, refuses to
-// overlap another design mutation, and remembers what it already tried so its own
-// refresh (or a bin held larger by another part) cannot loop. Returns true when
-// it resized, so the caller stops instead of saving a stale preview.
+// expand endpoint.
+//   * One identity (state.boreEpoch + Space/design/selection ids) is captured up
+//     front and re-proved before EVERY async resize result is applied and before
+//     a second resize starts, so an answer for an older edit, Bore or design is
+//     ignored.
+//   * If another design mutation owns the design the request is kept pending and
+//     retried by flushBoreReconcile() when that owner finishes - never dropped.
+//   * A failed or interrupted attempt is never remembered as done, so the same
+//     desired fit can retry; only a converged pass records boreFitDone, which just
+//     skips repeat calls while another part holds the bin larger.
+// Returns true when it resized, so the caller stops instead of saving a stale
+// preview.
+function boreReconcileContext() {
+  return JSON.stringify([state.folderMode, state.activeSpaceId || null,
+    state.designInventoryId || null, draftCommitIndex()]);
+}
+
+function bumpBoreEpoch() {
+  state.boreEpoch = (state.boreEpoch || 0) + 1;
+}
+
+function flushBoreReconcile() {
+  const pending = state.boreFitPending;
+  if (!pending || state.autoGrowingBin || state.designMutationBusy) return;
+  state.boreFitPending = null;
+  if (state.draft?.kind === "bore" && state.draftAutoCommit
+      && pending === boreReconcileContext()) {
+    setTimeout(() => { if (state.draft?.kind === "bore") refreshDraft(); }, 0);
+  }
+}
+
 async function reconcileBoreBin(result) {
   const draft = state.draft;
-  if (draft?.kind !== "bore" || !state.draftAutoCommit || state.autoGrowingBin
-      || state.designMutationBusy) return false;
+  if (draft?.kind !== "bore" || !state.draftAutoCommit) return false;
   const box = state.design.box;
   const wantXY = boreXyMode(draft) === "bin_to_bore" ? result?.bore_bin : null;
   const wantZ = boreHeightMode(draft) === "bin_to_bore" ? number(result?.bore_bin_height, NaN) : NaN;
@@ -8374,17 +8413,31 @@ async function reconcileBoreBin(result) {
     || Math.abs(number(box.y) - number(wantXY.y)) > 1e-6);
   const zOff = Number.isFinite(wantZ) && Math.abs(number(box.z) - wantZ) > 1e-6;
   if (!xyOff && !zOff) return false;
-  const signature = JSON.stringify([box.x, box.y, box.z, wantXY, wantZ, draft.zone,
-    draft.options, draft.item]);
-  if (state.boreFitSignature === signature) return false;
-  state.boreFitSignature = signature;
+  const fitKey = () => JSON.stringify([boreReconcileContext(), state.design.box.x,
+    state.design.box.y, state.design.box.z, wantXY, wantZ, state.draft?.zone,
+    state.draft?.options, state.draft?.item]);
+  if (state.boreFitDone === fitKey()) return false;
+  const context = boreReconcileContext();
+  if (state.autoGrowingBin || state.designMutationBusy) {
+    state.boreFitPending = context;
+    return false;
+  }
+  const token = state.boreEpoch || 0;
+  const isCurrent = () => (state.boreEpoch || 0) === token
+    && boreReconcileContext() === context && state.draft?.kind === "bore";
   state.autoGrowingBin = true;
+  let converged = true;
   try {
-    if (zOff) await sizeBinHeightToBore({ silent: true });
-    if (xyOff) await autoExpandBin({ keepDraft: true, silent: true, fit: true });
+    if (zOff) converged = (await sizeBinHeightToBore({ silent: true, guard: isCurrent })) === "done";
+    if (converged && xyOff && isCurrent()) {
+      converged = (await autoExpandBin({
+        keepDraft: true, silent: true, fit: true, guard: isCurrent })) === "done";
+    }
   } finally {
     state.autoGrowingBin = false;
   }
+  if (converged && isCurrent()) state.boreFitDone = fitKey();
+  flushBoreReconcile();
   return true;
 }
 
@@ -8395,14 +8448,14 @@ function activeSpaceMaximumBinHeight() {
   return Number.isFinite(maximum) ? maximum : undefined;
 }
 
-async function sizeBinHeightToBore({ button = null, silent = false } = {}) {
-  if (state.draft?.kind !== "bore") return;
+async function sizeBinHeightToBore({ button = null, silent = false, guard = null } = {}) {
+  if (state.draft?.kind !== "bore") return "skipped";
   const draftIndex = draftCommitIndex();
   if (!Number.isInteger(draftIndex)) {
     if (!silent) toast("Select the Bore again before sizing the bin height.", true, 5000);
-    return;
+    return "skipped";
   }
-  if (!beginDesignMutation()) return;
+  if (!beginDesignMutation()) return "skipped";
   if (button) button.disabled = true;
   try {
     const previousDesign = clone(state.design);
@@ -8419,6 +8472,7 @@ async function sizeBinHeightToBore({ button = null, silent = false } = {}) {
       fit_height_to_bore: true,
       max_height: activeSpaceMaximumBinHeight(),
     });
+    if (guard && !guard()) return "stale";
     state.design = result.design;
     if (result.changed) recordHistory(previousDesign);
     state.selected = draftIndex;
@@ -8433,6 +8487,7 @@ async function sizeBinHeightToBore({ button = null, silent = false } = {}) {
     updateSelectionButtons();
     await refreshPreview();
     if (result.changed) flashField($("#z"));
+    return "done";
   } catch (error) {
     if (silent) {
       $("#draft-status").textContent = error.message;
@@ -8440,6 +8495,7 @@ async function sizeBinHeightToBore({ button = null, silent = false } = {}) {
     } else {
       toast(error.message, true, 5000);
     }
+    return "failed";
   } finally {
     if (button) button.disabled = false;
     finishDesignMutation();
@@ -8452,14 +8508,17 @@ async function sizeBinHeightToBore({ button = null, silent = false } = {}) {
 //   silent    - no toast
 //   fit       - smallest legal footprint instead of only growing
 //   button    - the button element to disable while the request runs
-async function autoExpandBin({ keepDraft = false, silent = false, fit = false, button = null } = {}) {
+//   guard     - returns false once the request that asked for this is stale; the
+//               result is then ignored instead of becoming the design
+// Returns "done", "failed", "skipped" (nothing was started) or "stale".
+async function autoExpandBin({ keepDraft = false, silent = false, fit = false, button = null, guard = null } = {}) {
   const opts = { keepDraft, silent };
   const draftIndex = state.draft ? draftCommitIndex() : null;
   if (draftIndex === false) {
     if (!opts.silent) toast("Select the interior part again before growing the bin.", true);
-    return;
+    return "skipped";
   }
-  if (!beginDesignMutation()) return;
+  if (!beginDesignMutation()) return "skipped";
   if (button) button.disabled = true;
   try {
     // Grow for what the user is actually looking at: an open draft may hold
@@ -8487,6 +8546,7 @@ async function autoExpandBin({ keepDraft = false, silent = false, fit = false, b
       anchor,
       fit,
     });
+    if (guard && !guard()) return "stale";
     const changed = result.changed ?? result.grew;
     state.design = result.design;
     if (changed) recordHistory(previousDesign);
@@ -8521,8 +8581,10 @@ async function autoExpandBin({ keepDraft = false, silent = false, fit = false, b
     } else if (!opts.silent && !opts.keepDraft) {
       toast("The interior parts already fit - bin unchanged.");
     }
+    return "done";
   } catch (error) {
     if (!opts.silent) toast(error.message, true, 5000);
+    return "failed";
   } finally {
     if (button) button.disabled = false;
     finishDesignMutation();
