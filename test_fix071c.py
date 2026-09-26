@@ -310,6 +310,25 @@ class TextMigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, self.assertRaisesRegex(ValueError, "Only one Text"):
             app.generate_organizer_files(box, layout, Path(folder))
 
+    def test_changing_text_type_recentres_and_reseeds_size_without_saving_the_marker(self):
+        design = default_design()
+        design["box"].update(x=64, y=64, z=40)
+        fresh = default_feature_payload({"design": design, "kind": "text"})["feature"]
+        self.assertEqual(fresh["options"]["cap_height"], 15.0)
+        to_rim = json.loads(json.dumps(fresh))
+        to_rim["options"].update(level="rim", rim_side="left", retarget="rim")
+        rim = draft_payload({"design": design, "feature": to_rim})["feature"]
+        self.assertEqual(rim["options"]["level"], "rim")
+        self.assertEqual(rim["options"]["cap_height"], 5.0)
+        self.assertNotIn("retarget", rim["options"])
+        back = json.loads(json.dumps(rim))
+        back["options"].update(level="base", retarget="base")
+        back["options"].pop("rim_side")
+        base = draft_payload({"design": design, "feature": back})["feature"]
+        self.assertEqual(base["options"]["cap_height"], 15.0)
+        self.assertNotIn("retarget", base["options"])
+        self.assertAlmostEqual(sum(base["zone"][0::2]), 0.0, places=6)     # centred
+
     def test_text_type_registry_text_matches_the_new_model(self):
         source = Path("organizer_inserts/_text.py").read_text(encoding="utf-8")
         for stale in ("label on the floor", "Stand proud", "Place it for me", '"Level"'):
