@@ -43,8 +43,9 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 }
 .dl-problems li.height { color: #8a4e12; }
 
-.dl-inv-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin-bottom: 10px; }
-.dl-inv-tools input, .dl-inv-tools select { margin: 0; padding: 7px 8px; font-size: 12px; }
+.dl-inv-tools { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, .8fr) minmax(80px, .8fr); gap: 6px; margin-bottom: 10px; }
+.dl-inv-tools label { min-width: 0; font-size: 11px; font-weight: 700; }
+.dl-inv-tools input, .dl-inv-tools select { width: 100%; min-width: 0; margin: 0; padding: 7px 8px; font-size: 12px; }
 .dl-inv-list { display: grid; gap: 6px; }
 .dl-bin {
   display: grid; grid-template-columns: 18px 38px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
@@ -52,11 +53,12 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 }
 .dl-bin[draggable="true"] { cursor: grab; }
 .dl-bin:hover { border-color: var(--line-dark); }
+.dl-bin[data-editable="true"]:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .dl-bin.selected { border-color: var(--teal); box-shadow: 0 0 0 2px rgba(20,108,112,.18); }
 .dl-bin.too-tall { border-color: #e0aaa5; }
 .dl-swatch {
-  width: 38px; height: 38px; border-radius: 7px; display: grid; place-items: center;
-  font-size: 11px; font-weight: 800; border: 1px solid rgba(23,37,45,.2);
+  width: 38px; min-height: 38px; border-radius: 7px; display: grid; place-items: center;
+  text-align: center; font-size: 10px; font-weight: 800; border: 1px solid rgba(23,37,45,.2);
 }
 .dl-bin-main { display: flex; flex-direction: column; min-width: 0; }
 .dl-bin-main strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -66,11 +68,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-row-actions .button { padding: 4px 7px; font-size: 11px; }
 .dl-bin-main .dl-status { color: var(--teal-dark); font-weight: 700; }
 .dl-bin.printed .dl-bin-main .dl-status { color: #1f6b45; }
-.dl-delete {
-  margin-left: auto; border: 0; background: none; color: var(--muted); font-size: 11px; cursor: pointer;
-  padding: 4px 6px; text-decoration: underline; text-underline-offset: 2px;
-}
-.dl-delete:hover { color: var(--danger); }
 .dl-more { border: 0; background: none; font-size: 13px; cursor: pointer; color: var(--muted); padding: 4px 2px; }
 .dl-remove {
   border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 13px;
@@ -116,13 +113,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-batch-tools[hidden] { display: none; }
 .dl-batch-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .dl-batch-summary { font-size: 11px; color: var(--muted); flex: 1 1 100%; min-height: 14px; }
-.dl-batch-connectors { margin: 0; }
-.dl-batch-refresh { margin: 0; }
-.dl-swatch { position: relative; }
-.dl-swatch i {
-  position: absolute; right: -4px; bottom: -4px; font-style: normal; font-size: 10px; line-height: 1;
-  padding: 2px 3px; border-radius: 4px; background: var(--teal); color: white;
-}
 /* The drawer canvas and its floating controls. The staging rail (Unplaced
    bins) sits immediately beside the physical Space. */
 .canvas-wrap[data-canvas="drawer"].active { display: flex; }
@@ -148,8 +138,7 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .canvas-wrap[data-canvas="drawer"] { background: radial-gradient(circle at 50% 40%, #fff 0, #f6f7f5 60%, #eceeea 100%); }
 #drawer-canvas.panning { cursor: grabbing; }
 .dl-tilt-control input[type="range"] { width: 104px; margin: 0; accent-color: var(--teal); }
-.dl-tilt-control, .dl-empty-control { padding: 6px 10px; }
-.dl-empty-control input { margin: 0; accent-color: var(--teal); }
+.dl-tilt-control { padding: 6px 10px; }
 /* First-run empty state over the drawer canvas. */
 .dl-empty-state[hidden] { display: none; }
 .dl-empty-state {

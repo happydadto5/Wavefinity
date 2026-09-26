@@ -12,8 +12,7 @@ const DP = {
   signatures: {},
   open: new Set(),        // bin ids whose details are expanded
   filter: { text: "", show: "all", sort: "height" },
-  printSelected: new Set(), // bin ids picked for the bulk print (session only)
-  includeSpaceConnectors: true,
+  printSelected: new Set(), // general ordinary-bin selection, keyed by durable row ID
 };
 
 try { Object.assign(DP.filter, JSON.parse(localStorage.getItem("wavefinity-drawer-filter") || "{}"), { text: "" }); } catch (_error) {}
@@ -83,32 +82,33 @@ DP.build = () => {
         <div id="dl-stats" class="dl-stats"></div>
         <div class="dl-inv-tools">
           <input id="dl-inv-search" type="search" placeholder="Search name or size" aria-label="Search the inventory">
-          <select id="dl-inv-show" aria-label="Which bins to list">
+          <label>Filter<select id="dl-inv-show" aria-label="Filter bins">
             <option value="all">Everything</option>
+            <option value="in_design">In Space</option>
+            <option value="saved">Saved</option>
             <option value="printed">Printed</option>
             <option value="unplaced">Unplaced</option>
             <option value="placed">Placed</option>
             <option value="unprinted">Not printed</option>
             <option value="stackable">Stackable</option>
-          </select>
-          <select id="dl-inv-sort" aria-label="Sort the inventory">
+          </select></label>
+          <label>Sort<select id="dl-inv-sort" aria-label="Sort bins">
             <option value="height">Tallest first</option>
             <option value="size">Biggest first</option>
             <option value="name">Name</option>
             <option value="newest">Newest first</option>
-          </select>
+          </select></label>
         </div>
         <div id="dl-batch-tools" class="dl-batch-tools">
           <div class="dl-batch-row">
             <button type="button" id="dl-batch-select-needed" class="button secondary dl-small">Select all not printed</button>
             <button type="button" id="dl-batch-select-all" class="button secondary dl-small">Select all</button>
             <button type="button" id="dl-batch-clear" class="button secondary dl-small">Clear selection</button>
+            <button type="button" id="dl-batch-delete" class="button danger dl-small" disabled>Delete</button>
             <span id="dl-batch-summary" class="dl-batch-summary" role="status"></span>
           </div>
-          <label class="checkbox-row dl-batch-connectors" title="Connectors belong to the whole Space, not to individual bins. They are included with Save and Print when this is on."><span>Include Space Connectors</span><input id="dl-batch-connectors" type="checkbox" checked></label>
           <button type="button" id="dl-batch-save" class="button secondary wide">Save Selected</button>
           <button type="button" id="dl-batch-print" class="button secondary wide">Print Selected to Bambu Studio</button>
-          <label class="checkbox-row dl-batch-refresh" title="When you edit a bin that already has saved files, remake those files to match instead of asking. This applies to this Space only."><span>Update saved files automatically after edits</span><input id="dl-refresh-saved" type="checkbox"></label>
         </div>
         <div id="dl-inv-list" class="dl-inv-list"></div>
       </div>
@@ -131,14 +131,13 @@ DP.build = () => {
       <summary>Spacers</summary>
       <div class="section-body">
         <div class="field-grid two">
-          <label class="checkbox-row grid-span-all" title="Build serpentine springs into the edge spacers to absorb real-world tolerance"><span>Flexible fit (recommended)</span><input id="dl-sp-flexible" type="checkbox" checked></label>
+          <label>Spacer type<select id="dl-sp-type"><option value="rigid">Rigid</option><option value="flexible">Flexible</option></select></label>
           <label>Height <span class="unit">mm</span><input id="dl-sp-height" type="number" min="6" step="1" title="How tall the spacers are"></label>
         </div>
         <div class="dl-action-grid">
-          <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the back and right walls">Plan / Update Spacers</button>
+          <button type="button" id="dl-sp-plan" class="button secondary" title="Find candidate spacers for the gaps against the back and right walls">Create Spacers</button>
           <button type="button" id="dl-sp-generate" class="button secondary" title="Save the selected spacer candidates">Save Selected Spacers</button>
           <button type="button" id="dl-sp-print" class="button secondary" title="Choose which spacers to print">Print Spacers…</button>
-          <button type="button" id="dl-print" class="button secondary" title="Open this Space's spacers and the connectors they need together in Bambu Studio">Print Spacers + Connectors</button>
         </div>
       </div>
     </details>
@@ -154,7 +153,7 @@ DP.build = () => {
   // DP.renderStats() below, not only here - this first pass just avoids a
   // flash of enabled buttons before the first render.
   if (state.runtime.hosted) {
-    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print", "#dl-print"].forEach(selector => {
+    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print"].forEach(selector => {
       const button = $(selector);
       if (button) {
         button.disabled = true;
@@ -166,7 +165,7 @@ DP.build = () => {
 
 // Fix 019 Item 3: the hosted backend rejects /api/drawer/spacers,
 // /api/drawer/spacers/generate, /api/drawer/print-spacers and
-// /api/drawer/print outright, so these four stay unavailable in hosted mode
+// /api/drawer/print outright, so the remaining spacer actions stay unavailable in hosted mode
 // on every render, not just once at build time.
 DP.HOSTED_UNSUPPORTED_TOOLTIP = "Hosted Wavefinity uses the normal Design save-to-folder workflow instead of local Space spacer/slicer operations.";
 
@@ -218,7 +217,7 @@ DP.wire = () => {
       target[key] = read(event.target);
     }, { history: false });
   });
-  setting("#dl-sp-flexible", "spacers", "flexible", node => node.checked);
+  setting("#dl-sp-type", "spacers", "flexible", node => node.value === "flexible");
   setting("#dl-sp-height", "spacers", "height", node => Math.max(6, dlNum(node.value, 15)));
   $("#dl-surface-ask-height").addEventListener("change", async event => {
     DL.change(() => { DL.layout.settings.surface.ask_object_height = event.target.checked; }, { history: false });
@@ -234,18 +233,11 @@ DP.wire = () => {
   $("#dl-batch-select-needed").addEventListener("click", () => DP.selectAllNotPrinted());
   $("#dl-batch-select-all").addEventListener("click", () => DP.selectAllPrintable());
   $("#dl-batch-clear").addEventListener("click", () => DP.clearPrintSelection());
-  $("#dl-batch-connectors").addEventListener("change", event => {
-    DP.includeSpaceConnectors = event.target.checked;
-    DP.renderBatch();
-  });
+  $("#dl-batch-delete").addEventListener("click", () => DP.deleteSelected());
   $("#dl-batch-save").addEventListener("click", () =>
-    DL.saveSelectedBins(DP.batchSaveIds(), DP.includeSpaceConnectors));
+    DL.saveSelectedBins(DP.batchSaveIds(), true));
   $("#dl-batch-print").addEventListener("click", () =>
-    DL.printSelectedBins(DP.printSelectionPayload(), DP.includeSpaceConnectors));
-  $("#dl-refresh-saved").addEventListener("change", async event => {
-    DL.change(() => { DL.layout.settings.auto_update_changed_files = event.target.checked; }, { history: false });
-    await DL.save();
-  });
+    DL.printSelectedBins(DP.printSelectionPayload(), true));
   // Empty-state buttons (canvas overlay and Inventory list) share these.
   const emptyAction = event => {
     const act = event.target.closest("[data-empty-act]")?.dataset.emptyAct;
@@ -262,7 +254,6 @@ DP.wire = () => {
     if (event.target === $("#spacer-print-dialog")) $("#spacer-print-dialog").close();
   });
   $("#spacer-print-confirm").addEventListener("click", () => DP.confirmSpacerPrint());
-  $("#dl-print").addEventListener("click", () => DL.printDrawer());
   const filterChanged = () => {
     try { localStorage.setItem("wavefinity-drawer-filter", JSON.stringify(DP.filter)); } catch (_error) {}
     DP.renderInventory();
@@ -289,37 +280,40 @@ DP.wire = () => {
       : field === "object_height_mm" && !event.target.value.trim() ? null
         : dlNum(event.target.value, 0) }] });
   });
+  list.addEventListener("keydown", event => {
+    if (!["Enter", " "].includes(event.key) || event.target.closest("button, input, select, a, textarea, .dl-bin-details")) return;
+    const row = event.target.closest(".dl-bin[data-editable='true']");
+    if (!row) return;
+    event.preventDefault();
+    designerEditInventoryRow(row.dataset.bin);
+  });
   list.addEventListener("dragstart", event => {
+    DP.draggingRow = true;
     const one = DL.bin(event.target.closest?.("[data-bin]")?.dataset.bin);
     if (!one) return;
     DV.dragBin = one;
     event.dataTransfer.setData("text/plain", one.id);
     event.dataTransfer.effectAllowed = "move";
   });
-  list.addEventListener("dragend", () => { DV.dragBin = null; DV.drop = null; DV.render(); });
+  list.addEventListener("dragend", () => { DV.dragBin = null; DV.drop = null; DV.render(); DP.draggingRow = false; DP.suppressRowClickUntil = Date.now() + 400; });
 };
 
 // ------------------------------------------------------------ bulk print
 
 DP.prunePrintSelection = () => {
   DP.printSelected = new Set(
-    [...DP.printSelected].filter(id => DL.printEligible(DL.bin(id))));
-};
-
-DP.resetPrintSelection = () => {
-  DP.printSelected = new Set();
-  DP.renderInventory(true);
+    [...DP.printSelected].filter(id => DL.isOrdinary(DL.bin(id))));
 };
 
 DP.selectAllNotPrinted = () => {
   DP.printSelected = new Set(
-    DL.bins.filter(one => DL.printNeeded(one) > 0).map(one => one.id));
+    DL.bins.filter(one => DL.isOrdinary(one) && one.status !== "printed").map(one => one.id));
   DP.renderInventory(true);
 };
 
 DP.selectAllPrintable = () => {
   DP.printSelected = new Set(
-    DL.bins.filter(one => DL.printEligible(one)).map(one => one.id));
+    DL.bins.filter(DL.isOrdinary).map(one => one.id));
   DP.renderInventory(true);
 };
 
@@ -334,7 +328,7 @@ DP.clearPrintSelection = () => {
 // not yet Printed.
 DP.batchScope = () => {
   const picked = [...DP.printSelected].map(id => DL.bin(id)).filter(one => DL.printEligible(one));
-  if (picked.length) return { subset: true, save: picked, print: picked, picked };
+  if (DP.printSelected.size) return { subset: true, save: picked, print: picked, picked };
   const eligible = DL.bins.filter(one => DL.printEligible(one));
   return {
     subset: false, picked: [], eligible,
@@ -352,23 +346,23 @@ DP.renderBatch = () => {
   const hosted = Boolean(state.runtime.hosted);
   const tools = $("#dl-batch-tools");
   if (!tools) return;
-  tools.hidden = hosted;
-  if (hosted) return;
+  $("#dl-batch-save").hidden = hosted;
+  $("#dl-batch-print").hidden = hosted;
   const scope = DP.batchScope();
-  const connectorNote = DP.includeSpaceConnectors ? " · Space connectors included" : "";
+  const connectorNote = hosted ? "" : " · Space connectors included";
   const needFiles = scope.subset ? scope.picked.filter(one => DL.saveNeeded(one)).length : scope.save.length;
   let summary;
   if (scope.subset) {
-    summary = `${dlPlural(scope.picked.length, "design")} selected · ${needFiles} need${needFiles === 1 ? "s" : ""} new files${connectorNote}`;
+    summary = `${dlPlural(DP.printSelected.size, "bin")} selected · ${scope.picked.length} eligible for Save/Print · ${needFiles} need${needFiles === 1 ? "s" : ""} new files${connectorNote}`;
   } else if (!scope.eligible.length) {
     summary = "No designs to save or print yet.";
   } else {
     summary = `Nothing ticked - the buttons cover the whole Space${connectorNote}`;
   }
   $("#dl-batch-summary").textContent = summary;
-  dlSet("#dl-batch-connectors", DP.includeSpaceConnectors, "checked");
-  dlSet("#dl-refresh-saved", Boolean(DL.layout?.settings?.auto_update_changed_files), "checked");
   $("#dl-batch-clear").disabled = !DP.printSelected.size;
+  $("#dl-batch-delete").disabled = !DP.printSelected.size || Boolean(DL.busy);
+  if (hosted) return;
   const noSlicer = !state.slicer || !state.slicer.available;
   const busy = Boolean(DL.busy);
 
@@ -393,7 +387,7 @@ DP.renderBatch = () => {
 };
 
 DP.onInventoryClick = async event => {
-  if (event.target.closest(".dl-print-select, .dl-print-placeholder")) return;
+  if (event.target.closest(".dl-print-select") || DP.draggingRow || Date.now() < (DP.suppressRowClickUntil || 0)) return;
   const row = event.target.closest("[data-bin]");
   const one = row && DL.bin(row.dataset.bin);
   if (!one) return;
@@ -401,17 +395,19 @@ DP.onInventoryClick = async event => {
   if (action === "more") {
     if (DP.open.has(one.id)) DP.open.delete(one.id); else DP.open.add(one.id);
     DP.renderInventory(true);
-  } else if (action === "edit") designerEditInventoryRow(one.id);
-  else if (action === "duplicate") DP.duplicateRow(one);
+  } else if (action === "duplicate") DP.duplicateRow(one);
   else if (action === "print") DL.printSelectedBins({ [one.id]: DL.printCount(one) }, false);
   else if (action === "printed") DL.markPrinted(one);
   else if (action === "not-printed") DL.markNotPrinted(one);
-  else if (action === "delete") DP.deleteRow(one);
-  else if (!action && !event.target.closest(".dl-bin-details")) DL.selectRow(one.id);
+  else if (action === "delete" && DL.isSpacer(one)) DP.deleteRow(one);
+  else if (!action && !event.target.closest("button, input, select, a, textarea, .dl-bin-details")) {
+    DL.selectRow(one.id);
+    if (row?.dataset.editable === "true") designerEditInventoryRow(one.id);
+  }
 };
 
 // Duplicate a design-source row through the accepted atomic owner. The new
-// row is In Design and unplaced, so it appears in the staging rail; the user
+// row is In Space and unplaced, so it appears in the staging rail; the user
 // stays in Space.
 DP.duplicateRow = async one => {
   if (typeof flushSpaceDesignAutosave === "function" && !(await flushSpaceDesignAutosave())) return;
@@ -429,8 +425,7 @@ DP.duplicateRow = async one => {
   }
 };
 
-// Delete removes the row, its design source and its single placement.
-// Dragging a placed bin off the Space only unplaces it.
+// Spacer rows keep their own remove control.
 DP.deleteRow = async one => {
   const placed = DL.placedCount(one.id);
   const ok = await appConfirmAction({
@@ -444,6 +439,35 @@ DP.deleteRow = async one => {
   DP.printSelected.delete(one.id);
   if (DL.selectedRow === one.id) DL.selectedRow = null;
   DL.editBins({ delete_ids: [one.id] });
+};
+
+DP.deleteSelected = async () => {
+  DP.prunePrintSelection();
+  const ids = [...DP.printSelected];
+  if (!ids.length) return;
+  const context = DL.spaceContext();
+  const placed = ids.filter(id => DL.placedCount(id)).length;
+  const ok = await appConfirmAction({
+    title: `Delete ${dlPlural(ids.length, "bin")}?`,
+    message: `Delete all ${ids.length} selected bins, including any hidden by Search or Filter?${placed ? ` ${placed} placed bin${placed === 1 ? "" : "s"} will also be removed from this Space.` : ""} Generated files stay in the folder.`,
+    actionLabel: `Delete ${ids.length} bins`, danger: true,
+  });
+  if (!ok || !DL.spaceContextCurrent(context)) return;
+  if (ids.includes(state.designInventoryId) && !(await flushSpaceDesignAutosave())) return;
+  if (!DL.spaceContextCurrent(context)) return;
+  const removed = await DL.editBins({ delete_ids: ids }, { context });
+  if (!removed) return;
+  ids.forEach(id => { DP.open.delete(id); DP.printSelected.delete(id); });
+  if (ids.includes(DL.selectedRow)) DL.selectedRow = null;
+  if (ids.includes(state.designInventoryId)) {
+    clearTimeout(spaceAutosaveTimer);
+    spaceAutosaveTimer = null;
+    state.designInventoryId = null;
+    state.cleanDesign = clone(state.design);
+    if (typeof discardStaleFileRefreshRows === "function") discardStaleFileRefreshRows(ids);
+    DP.setMode("space");
+  }
+  DP.renderInventory(true);
 };
 
 // The one "go design a bin" jump used by both empty states.
@@ -520,7 +544,6 @@ DP.update = () => {
     if (canvas) canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     return;
   }
-  dlSet("#dl-show-empty", Boolean(DL.layout.settings.show_empty), "checked");
   DP.renderDrawer();
   DP.renderStats();
   DP.renderSurfaceFill();
@@ -625,16 +648,14 @@ DP.renderSurfaceFill = () => {
 DP.renderStats = () => {
   const box = $("#dl-stats");
   const spacers = DL.layout.settings.spacers;
-  dlSet("#dl-sp-flexible", Boolean(spacers.flexible), "checked");
+  dlSet("#dl-sp-type", spacers.flexible ? "flexible" : "rigid");
   dlSet("#dl-sp-height", fmt(spacers.height));
 
   const busy = Boolean(DL.busy);
   const hosted = Boolean(state.runtime.hosted);
   const label = (id, idle, working, what) => { const node = $(id); node.disabled = busy; node.textContent = DL.busy === what ? working : idle; };
-  label("#dl-sp-plan", "Plan / Update Spacers", "Planning…", "spacers");
+  label("#dl-sp-plan", "Create Spacers", "Planning…", "spacers");
   label("#dl-sp-generate", "Save Selected Spacers", "Saving…", "spacers");
-  const printAll = $("#dl-print");
-  if (printAll) printAll.disabled = busy;
   // Nothing placed yet: these have nothing to work on, so say why instead of
   // letting the click end in an error.
   const nothingPlaced = DL.loaded && !DL.drawer().placements.length;
@@ -673,10 +694,10 @@ DP.renderStats = () => {
   label("#dl-sp-print", "Print Spacers", "Printing…", "print");
   if (spacerPrint) spacerPrint.disabled = busy || !hasPlacedSpacers;
 
-  // Hosted: these four always stay unavailable, on every render - see
+  // Hosted: spacer generation and slicer actions stay unavailable on every render - see
   // DP.HOSTED_UNSUPPORTED_TOOLTIP (Fix 019 Item 3).
   if (hosted) {
-    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print", "#dl-print"].forEach(selector => {
+    ["#dl-sp-plan", "#dl-sp-generate", "#dl-sp-print"].forEach(selector => {
       const node = $(selector);
       if (!node) return;
       node.disabled = true;
@@ -700,7 +721,10 @@ DP.filteredBins = () => {
   const text = DP.filter.text.trim().toLowerCase();
   const show = DP.filter.show;
   const list = DL.bins.filter(one => {
+    if (DL.isSpacer(one)) return false;
     const placed = DL.placedCount(one.id);
+    if (show === "in_design" && one.status !== "in_design") return false;
+    if (show === "saved" && one.status !== "saved") return false;
     if (show === "printed" && one.status !== "printed") return false;
     if (show === "unplaced" && placed) return false;
     if (show === "placed" && !placed) return false;
@@ -717,8 +741,7 @@ DP.filteredBins = () => {
     name: (a, b) => DL.label(a).localeCompare(DL.label(b), undefined, { numeric: true }),
     newest: (a, b) => Number(b.id.slice(1)) - Number(a.id.slice(1)),
   };
-  // Spacers sink below real bins whatever the sort.
-  return list.sort((a, b) => Number(DL.isSpacer(a)) - Number(DL.isSpacer(b)) || sorters[DP.filter.sort](a, b));
+  return [...list.sort(sorters[DP.filter.sort] || sorters.height), ...DL.bins.filter(DL.isSpacer)];
 };
 
 DP.renderInventory = (force = false) => {
@@ -776,25 +799,23 @@ DP.renderInventory = (force = false) => {
     const printable = eligible && !state.runtime.hosted && Boolean(state.slicer?.available);
     const statusTracked = !spacer && ["bin", "b4b", "manual"].includes(one.kind);
     const printed = one.status === "printed";
-    const picked = eligible && DP.printSelected.has(one.id);
-    const swatch = `<span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${DL.stackable(one) ? `${fmt(one.z)} mm stack module; ${fmt(DL.partHeight(one))} mm detached` : `${fmt(one.z)} mm tall`}">${fmt(one.z)}${DL.stackable(one) ? "<i>⇅</i>" : ""}</span>`;
-    const check = eligible
-      ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.label(one))} for printing"${picked ? " checked" : ""}>`
+    const picked = !spacer && DP.printSelected.has(one.id);
+    const swatch = `<span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}" title="${fmt(one.z)} mm tall">${spacer ? fmt(one.z) : DL.binNumberLabel(one)}</span>`;
+    const check = !spacer
+      ? `<input type="checkbox" class="dl-print-select" data-print-select="${escapeHtml(one.id)}" aria-label="Select ${escapeHtml(DL.binNumberLabel(one))} ${escapeHtml(DL.label(one))}"${picked ? " checked" : ""}>`
       : `<span class="dl-print-placeholder" aria-hidden="true"></span>`;
     const lifecycle = spacer
       ? `<small>${dlPlural(placed, "placement")} · ${one.qty} printed</small>`
       : `<small class="dl-status">${DL.statusLabel(one)}</small>`;
     const actions = spacer ? "" : `<div class="dl-row-actions">
-          ${editable ? `<button type="button" class="button primary dl-small" data-act="edit" title="Open this bin in the Designer">Edit</button>` : ""}
           ${designSource ? `<button type="button" class="button secondary dl-small" data-act="duplicate">Duplicate</button>` : ""}
           ${printable ? `<button type="button" class="button secondary dl-small" data-act="print">Print</button>` : ""}
           ${statusTracked ? (printed
             ? `<button type="button" class="button secondary dl-small" data-act="not-printed">Mark Not Printed</button>`
             : `<button type="button" class="button secondary dl-small" data-act="printed">Mark Printed</button>`) : ""}
-          <button type="button" class="dl-delete" data-act="delete" aria-label="Delete ${escapeHtml(DL.label(one))}">Delete</button>
         </div>`;
     return `
-      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" draggable="${canPlace}" title="${canPlace ? "Drag into the Space" : ""}">
+      <div class="dl-bin ${classes}${picked ? " print-selected" : ""}" data-bin="${escapeHtml(one.id)}" data-editable="${editable}"${editable ? ' tabindex="0" role="button"' : ""} draggable="${canPlace}" title="${editable ? "Open in Designer or drag into Space" : canPlace ? "Drag into the Space" : ""}">
         ${check}
         ${swatch}
         <span class="dl-bin-main">

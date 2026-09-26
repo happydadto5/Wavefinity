@@ -724,6 +724,29 @@ class DesignSourceTests(unittest.TestCase):
         after = load_inventory(self.folder)
         self.assertEqual(design_specs(after["layout"]), {})
 
+    def test_multi_delete_removes_rows_sources_and_placements_but_keeps_files(self):
+        from organizer_inventory import save_design_source, design_specs, change_design_status
+        first = save_design_source(self.folder, design=self._design("One"), record=self._record("One"))
+        second = save_design_source(self.folder, design=self._design("Two"), record=self._record("Two"))
+        third = save_design_source(self.folder, design=self._design("Three"), record=self._record("Three"))
+        ids = [first["row_id"], second["row_id"]]
+        for name, row_id in zip(("One.3mf", "Two.3mf"), ids):
+            (self.folder / name).write_bytes(b"existing print file")
+            change_design_status(self.folder, row_id, "saved", name)
+        current = load_inventory(self.folder)
+        layout = {**current["layout"], **_layout(100, 100, placements=[
+            {"bin": ids[0], "copy": 0, "gx": 0, "gy": 0},
+            {"bin": third["row_id"], "copy": 0, "gx": 2, "gy": 0},
+        ])}
+        save_inventory(self.folder, layout=layout)
+        after = save_inventory(self.folder, delete_ids=ids)
+        self.assertEqual([one["id"] for one in after["bins"]], [third["row_id"]])
+        self.assertEqual(set(design_specs(after["layout"])), {third["row_id"]})
+        self.assertEqual([one["bin"] for one in after["layout"]["drawers"][0]["placements"]],
+                         [third["row_id"]])
+        self.assertTrue((self.folder / "One.3mf").exists())
+        self.assertTrue((self.folder / "Two.3mf").exists())
+
     def test_stale_layout_save_cannot_replace_newer_design_source(self):
         from organizer_inventory import save_design_source, design_specs
         first = save_design_source(self.folder, design=self._design("A"), record=self._record("A"))

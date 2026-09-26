@@ -586,7 +586,9 @@ which suppress Inventory logging entirely.
 - **The inventory file** is a Markdown table, one row per bin design, with an
   **ID**, a **Kind** (bin, Storage Box, spacer, or a legacy hand-added row), a **Name**,
   a **Stack** (blank, `lid` or `direct` - how the bin was printed to stack)
-  and a **Status**: **In Design**, **Saved** (files exist) or **Printed**. There
+  and a persisted **Status** of `in_design`, `saved`, or `printed`, displayed as
+  **In Space** (editable design saved in the Space), **Saved** (current files exist),
+  or **Printed**. There
   is no user-facing quantity: a row is one bin, and `Qty` survives only as a
   0/1 compatibility field derived from Status. Saving files is not printing. Print
   (direct, or in Space Inventory) marks each bin Printed exactly once, and only
@@ -599,19 +601,19 @@ which suppress Inventory logging entirely.
   Both use one preparation step: it re-reads the Inventory, reuses a row's
   current files, and generates only rows without current files (each becomes
   Saved as soon as it is made). Save stops there; Print then opens the files in
-  Bambu Studio. *Include Space Connectors* adds the Space-wide connector set to
-  either action and never belongs to a bin row. If a bin fails part-way, the
+  Bambu Studio. Applicable Space connectors are included automatically.
+  If a bin fails part-way, the
   bins already saved stay Saved, Bambu Studio is not opened, and the unfinished
   rows stay selected to retry.
   **Editing a saved bin.** Changing the design of a bin that already has saved
-  files makes those files stale (the row goes back to *In Design*). Once, per
-  generated revision, Wavefinity asks whether to update the saved files; the
-  per-Space *Update saved files automatically after edits* setting
-  (`layout.settings.auto_update_changed_files`, default off) skips the question.
+  files makes those files stale (the row shows *In Space*). When focus leaves
+  that bin, Wavefinity asks whether to update its saved files; the dialog can
+  remember automatic updates for that Space through
+  `layout.settings.auto_update_changed_files` (default off).
   Superseded files are removed only when they were tracked to that row and no
   other row uses them. **Mark Printed** / **Mark Not Printed** on a row change the
-  status for external or failed prints. **Delete** on a row removes that bin from
-  the inventory altogether (its one placement and design source go with it);
+  status for external or failed prints. The Inventory **Delete** action removes
+  all selected ordinary bins in one transaction (placements and design sources go with them);
   dragging a bin off the Space only unplaces it. Under the table, a `## Drawer
   layout` JSON block holds the drawers and where each bin sits. Rows stay
   hand-editable; keep the IDs. An older seven-column log is upgraded the first
@@ -653,12 +655,12 @@ which suppress Inventory logging entirely.
   stack takes it and everything above it; dragging the bottom bin moves the
   whole stack.
 - **Inventory is the primary Space control.** Each ordinary row shows a
-  bulk-print tick (where eligible), the name, its dimensions and exactly one
-  lifecycle label (**In Design**, **Saved** or **Printed**), with **Edit**,
-  **Duplicate**, **Print**, **Mark Printed** (or **Mark Not Printed**) and a small
-  **Delete**. Clicking a placed bin on the canvas highlights and scrolls to its
-  Inventory row; clicking a row highlights its placement (or its chip in Unplaced
-  bins). *Clear selection* is disabled while nothing is ticked.
+  general selection tick, **Bin N**, name, dimensions and exactly one lifecycle
+  label (**In Space**, **Saved** or **Printed**). Click an editable row to open it
+  in Designer. Row actions include **Duplicate**, **Print**, and **Mark Printed**
+  (or **Mark Not Printed**). Selection survives filtering and sorting; one
+  Inventory **Delete** button removes selected ordinary bins. Spacers remain
+  visible below ordinary bins. *Clear selection* is disabled while nothing is ticked.
 - **Placing.** Drag a bin from **Unplaced bins** (or its Inventory row) onto the
   Space. Drag placed bins to move them: they snap to the 8 mm grid and refuse
   overlaps and the Space edge. Drag one off the Space, or select it and press
@@ -699,8 +701,8 @@ which suppress Inventory logging entirely.
   later. **Save Selected Spacers**
   also saves one connector file for each pair of rim heights the layout needs,
   and says how many of each to print. Stacks join at their top bins; X spacers
-  need none, since their waves hold them. **Print Spacers + Connectors** opens the lot in
-  Bambu Studio.
+  need none, since their waves hold them. **Print Spacers…** selects spacer
+  copies for Bambu Studio. **Create Spacers** plans candidates before **Save Selected Spacers**.
 - **Surface Fill** (Surface only) turns free Surface cells into ordinary editable
   bins. It first settles the Designer's autosave, then works from the authoritative
   Inventory and layout.
