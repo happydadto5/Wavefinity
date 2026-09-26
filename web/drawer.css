@@ -4,7 +4,7 @@
 /* In the mode the sidebar shows only the drawer panel, and the bin editor's
    chrome (placed parts, its error panel, footer, design file buttons) steps
    aside. */
-body.drawer-mode .controls > :not(#drawer-panel):not(#space-head),
+body.drawer-mode .controls > :not(#drawer-panel):not(#space-head):not(#space-mode-row),
 body.drawer-mode #error-panel,
 body.drawer-mode .workspace-footer,
 body.drawer-mode #preview-state,
@@ -180,9 +180,11 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .space-head-edit-host .space-type-fields { display: grid; gap: 8px; margin: 0; padding: 0; }
 .space-head-edit-host .space-buttons { margin-top: 10px; }
 .space-mode-row {
-  display: flex; align-items: center; gap: 8px; margin-top: 10px;
+  display: flex; align-items: center; gap: 8px; margin: 10px 12px;
 }
 .space-mode-row[hidden] { display: none; }
+#space-mode-busy { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.space-mode-toggle button.pending { background: var(--teal-soft); color: var(--teal-dark); }
 .space-mode-toggle {
   display: inline-flex; flex: 1; border: 1px solid var(--line-dark);
   border-radius: 8px; background: #eef5f4; overflow: hidden; margin: 0;

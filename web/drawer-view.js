@@ -553,7 +553,7 @@ DV.paintScene = (ctx, drawer, cam) => {
           ctx.font = "700 10px 'Segoe UI', sans-serif";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(DL.binNumberLabel(one), points.reduce((sum, p) => sum + p[0], 0) / 4,
+          ctx.fillText(DL.badgeLabel(one), points.reduce((sum, p) => sum + p[0], 0) / 4,
             points.reduce((sum, p) => sum + p[1], 0) / 4);
         }
       }
@@ -1005,9 +1005,9 @@ DV.renderStaging = () => {
     const color = DV.binColor(one, range);
     const picked = one.id === DL.selectedRow;
     return `<div class="dl-staged${picked ? " selected" : ""}" data-staged-bin="${escapeHtml(one.id)}" draggable="true" tabindex="0" title="Drag into the Space">
-      <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}">${DL.binNumberLabel(one)}</span>
+      <span class="dl-swatch" data-top="${color.top}" data-ink="${color.ink}">${DL.badgeLabel(one)}</span>
       <span class="dl-bin-main"><strong>${escapeHtml(DL.label(one))}</strong>
-        <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · ${escapeHtml(DL.statusLabel(one))}</small></span>
+        <small>${fmt(one.x)} × ${fmt(one.y)} × ${fmt(one.z)} mm · Unplaced · ${escapeHtml(DL.statusLabel(one))}</small></span>
     </div>`;
   }).join("") : `<p class="dl-note">${DL.bins.some(DL.isOrdinary) ? "Every bin is placed." : "New and duplicated bins wait here until you drag them into the Space."}</p>`;
   $$(".dl-swatch", list).forEach(node => {

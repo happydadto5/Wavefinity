@@ -2098,7 +2098,7 @@ console.log(JSON.stringify({
                                str(root / "drawer-panel.js")], capture_output=True, text=True, timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
         out = json.loads(done.stdout)
-        self.assertEqual(out, {"numbers": ["Bin 1"], "status": "In Space", "filtered": ["S1"],
+        self.assertEqual(out, {"numbers": ["Bin 1"], "status": "In Design", "filtered": ["S1"],
                                "selectedSubset": True, "selectedSave": 0,
                                "emptySubset": False, "showEmptyRetired": True})
 
@@ -2165,7 +2165,7 @@ vm.runInContext(code + ";this.queue=queueStaleFileRefresh;this.settle=settleStal
         self.assertEqual(out["generated"], ["B1"])
         self.assertIn("was saved and printed", out["prompts"][1])
 
-    def test_fix067_row_open_commits_selection_only_after_success(self):
+    def test_fix071b_row_selects_and_explicit_edit_commits_only_after_success(self):
         node = shutil.which("node")
         if not node:
             self.skipTest("node is not installed")
@@ -2202,7 +2202,7 @@ DL.printSelectedBins = () => {};
 const event = (id, editable, child = "none") => ({ target: { closest: selector => {
   if (selector === "[data-bin]") return { dataset: { bin: id, editable: String(editable) } };
   if (selector === ".dl-print-select") return child === "checkbox" ? {} : null;
-  if (selector === "[data-act]" && ["more", "duplicate", "print", "printed", "not-printed"].includes(child))
+  if (selector === "[data-act]" && ["edit", "more", "duplicate", "print", "printed", "not-printed"].includes(child))
     return { dataset: { act: child } };
   if (selector === "button, input, select, a, textarea, .dl-bin-details" &&
       ["field", "link", "checkbox"].includes(child)) return {};
@@ -2211,11 +2211,12 @@ const event = (id, editable, child = "none") => ({ target: { closest: selector =
 (async () => {
   await DP.onInventoryClick(event("B2", true, false));
   const mouseSuccess = DL.selectedRow;
+  const rowOpens = calls.opens.length;
   DL.selectedRow = "B1"; editSuccess = false;
-  await DP.onInventoryClick(event("B2", true, false));
+  await DP.onInventoryClick(event("B2", true, "edit"));
   const mouseFailure = DL.selectedRow;
   editSuccess = true; DL.selectedRow = "B1";
-  await DP.openInventoryRow("B2");
+  await DP.onInventoryClick(event("B2", true, "edit"));
   const keyboardSuccess = DL.selectedRow;
   editSuccess = false; DL.selectedRow = "B1";
   await DP.openInventoryRow("B2");
@@ -2231,7 +2232,7 @@ const event = (id, editable, child = "none") => ({ target: { closest: selector =
   DL.selectedRow = "B1"; state.designInventoryId = "B1";
   DP.printSelected = new Set(["B1", "B2"]);
   await DP.deleteSelected();
-  console.log(JSON.stringify({ calls, mouseSuccess, mouseFailure, keyboardSuccess, keyboardFailure,
+  console.log(JSON.stringify({ calls, mouseSuccess, rowOpens, mouseFailure, keyboardSuccess, keyboardFailure,
     childAndDragOpens, bound: state.designInventoryId, selection: [...DP.printSelected] }));
 })();
 '''
@@ -2240,13 +2241,14 @@ const event = (id, editable, child = "none") => ({ target: { closest: selector =
         self.assertEqual(done.returncode, 0, done.stderr)
         out = json.loads(done.stdout)
         self.assertEqual(out["mouseSuccess"], "B2")
+        self.assertEqual(out["rowOpens"], 0)
         self.assertEqual(out["mouseFailure"], "B1")
         self.assertEqual(out["keyboardSuccess"], "B2")
         self.assertEqual(out["keyboardFailure"], "B1")
         self.assertEqual(out["childAndDragOpens"], 0)
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         keyboard = panel[panel.index('list.addEventListener("keydown"'):panel.index('list.addEventListener("dragstart"')]
-        self.assertIn("DP.openInventoryRow(row.dataset.bin)", keyboard)
+        self.assertIn("DL.selectRow(row.dataset.bin)", keyboard)
         self.assertEqual(out["calls"]["edits"], [{"delete_ids": ["B1", "B2"]}])
         self.assertEqual(out["calls"]["prompts"], 1)
         self.assertEqual(out["calls"]["flushes"], 1)
@@ -2552,7 +2554,7 @@ const event = (id, editable, child = "none") => ({ target: { closest: selector =
             " from_bottom_percent: 100, from_top_percent: 100 };",
             "const SIDE_OPENING_SIDE_IDS = ['front', 'back', 'left', 'right'];",
             "const els = { '#side-openings-panel': { hidden: false }, '#side-opening-shape': { value: 'square' },"
-            " '#side-opening-from-bottom': { value: '60' }, '#side-opening-from-top': { value: '90' },"
+            " '#side-opening-lower': { value: '60' }, '#side-opening-upper': { value: '10' },"
             " '#side-opening-size': { value: 'small', options: [] } };",
             "for (const side of SIDE_OPENING_SIDE_IDS) {"
             " const attrs = { 'aria-pressed': side === 'front' ? 'true' : 'false' };"
@@ -2564,6 +2566,7 @@ const event = (id, editable, child = "none") => ({ target: { closest: selector =
             "const b4bEnabled = () => false, baseTrimEnabled = () => false;",
             "const sideOpeningLidStackForced = () => false, clampSideOpeningTopForLid = () => {};",
             "const sideOpeningEligibleSide = () => true, sideOpeningAllowedSizes = () => [];",
+            "const syncSideOpeningRange = () => {};",
             "const sideOpeningAdjustmentNote = '', fmt = v => String(v), flashField = () => {};",
             "const number = (v, f) => (Number.isFinite(Number(v)) ? Number(v) : f);",
             code,
@@ -2639,29 +2642,20 @@ const event = (id, editable, child = "none") => ({ target: { closest: selector =
             self.assertNotIn(name, model)
 
     def test_space_workspace_separates_editor_mode_from_preview(self):
-        # Fix 024: preview and editor choices are synchronized without a
-        # second state machine.
+        # Fix 071B: work-area navigation owns mode, while 2D/3D only choose
+        # the Design view. Guard behavior is exercised in test_fix071b.py.
         root = Path(__file__).resolve().parent / "web"
         panel = (root / "drawer-panel.js").read_text(encoding="utf-8")
         index_html = (root / "index.html").read_text(encoding="utf-8")
         self.assertIn('data-space-mode="space"', index_html)
         self.assertIn('data-space-mode="design"', index_html)
-        observer = panel[panel.index("new MutationObserver"):]
-        observer = observer[:observer.index("attributeFilter")]
-        self.assertIn('DP.enter("space")', observer)
-        self.assertNotIn("DP.leave()", observer)
-        self.assertNotIn("DP.mode =", observer)
-        enter = panel[panel.index("DP.enter = "):panel.index("DP.leave = ")]
-        self.assertIn('preferredMode === "design" ? "design" : "space"', enter)
-        self.assertNotIn("workingDesignForSpace", enter)
-        setter = panel[panel.index("DP.setMode = "):panel.index("DP.selectMode = ")]
-        self.assertNotIn("activatePreviewView", setter)
+        self.assertNotIn('data-view="drawer"', index_html)
+        self.assertNotIn("new MutationObserver", panel)
+        self.assertIn("DP.selectMode = async mode =>", panel)
         app = (root / "app.js").read_text(encoding="utf-8")
         preview = app[app.index("function activatePreviewView(view)"):app.index("\nfunction wireControls", app.index("function activatePreviewView(view)"))]
-        self.assertIn('view === "2d" || view === "3d"', preview)
-        self.assertIn('DP.setMode("design")', preview)
-        self.assertIn('DP.enter("space")', preview)
-        self.assertIn('DP.setMode("space")', preview)
+        self.assertNotIn("DP.setMode", preview)
+        self.assertNotIn("DP.enter", preview)
         self.assertIn('role="tablist"', index_html)
         mode_toggle = index_html[index_html.index('id="space-mode-toggle"'):index_html.index("</div>", index_html.index('id="space-mode-toggle"'))]
         self.assertEqual(mode_toggle.count('role="tab"'), 2)
@@ -2670,8 +2664,7 @@ const event = (id, editable, child = "none") => ({ target: { closest: selector =
         self.assertIn('setAttribute("aria-selected", String(on))', apply_mode)
         self.assertIn("button.tabIndex = on ? 0 : -1", apply_mode)
         select_mode = panel[panel.index("DP.selectMode = "):panel.index("// Open the Space workspace")]
-        self.assertIn('activatePreviewView("drawer")', select_mode)
-        self.assertIn('activatePreviewView("3d")', select_mode)
+        self.assertIn('activatePreviewView(mode === "space" ? "drawer" : "3d")', select_mode)
 
     def test_space_settings_lost_their_user_choices(self):
         root = Path(__file__).resolve().parent / "web"

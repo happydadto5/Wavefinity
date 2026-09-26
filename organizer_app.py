@@ -166,6 +166,7 @@ from organizer_inserts import (
     fitted_nest_feature,
     make_insert_plate,
     normalize_divider_scoop,
+    nest_contour_polygon,
     resolve_nest_settings,
     resolve_text_features,
     resolved_options,
@@ -1054,7 +1055,10 @@ def preview_geometry(
     floor_cavity = _valid_preview_floor_ring(cavity)
     floor_z, rim_z = box.base_thickness, box.z
     geometry: list[tuple[list[tuple[float, float, float]], str,
-                         tuple[float, float, float], int, str | None]] = []
+                          tuple[float, float, float], int, str | None]] = []
+    # Preview-only identities. Geometry keeps its physical base/lid owner.
+    pick_faces: dict[int, dict[str, object]] = {}
+    pick_proxies: list[dict[str, object]] = []
 
     tidy = clean_label(label)
     location = label_position(label_location)
@@ -1247,6 +1251,24 @@ def preview_geometry(
                     feature_overhang_mm[index] = round(max(0.0, top_z - box.z), 3)
                 if draft_in_group:
                     draft_overhang_mm = round(max(0.0, top_z - box.z), 3)
+                # The deck is one shared solid; it cannot have one truthful
+                # feature owner. Invisible contours give each Nest its own pick.
+                for index in represented_recessed:
+                    if index == selected and draft_in_group:
+                        continue
+                    polygon = nest_contour_polygon(features[index], include_clearance=True)
+                    pick_proxies.append({
+                        "points": [(float(x), float(y), top_z + 0.02)
+                                   for x, y in polygon.exterior.coords[:-1]],
+                        "pick": {"type": "saved", "index": index},
+                    })
+                if draft_in_group:
+                    polygon = nest_contour_polygon(draft, include_clearance=True)
+                    pick_proxies.append({
+                        "points": [(float(x), float(y), top_z + 0.02)
+                                   for x, y in polygon.exterior.coords[:-1]],
+                        "pick": {"type": "draft"},
+                    })
             for solid in built:
                 if cut_fused_pieces:
                     solid = apply_edge_mount_hole_cuts(
@@ -1259,8 +1281,26 @@ def preview_geometry(
                 feature_errors.append(f"nest: {error}")
                 if index not in invalid_feature_indexes:
                     invalid_feature_indexes.append(index)
+                if index == selected and draft_in_group:
+                    continue
+                start = len(geometry)
+                geometry.extend(_prism_geometry(
+                    features[index].zone, base_z,
+                    min(box.z - 0.25, _feature_height(box, features[index], base_z)),
+                    f"{part_kind}_invalid",
+                ))
+                for face_index in range(start, len(geometry)):
+                    pick_faces[face_index] = {"type": "saved", "index": index}
             if draft_in_group:
                 draft_error = f"nest: {error}"
+                start = len(geometry)
+                geometry.extend(_prism_geometry(
+                    draft.zone, base_z,
+                    min(box.z - 0.25, _feature_height(box, draft, base_z)),
+                    "draft_invalid",
+                ))
+                for face_index in range(start, len(geometry)):
+                    pick_faces[face_index] = {"type": "draft"}
 
     for feature_index, one in enumerate(features):
         if is_text(one) and one.options.get("level") == "rim":
@@ -1322,19 +1362,23 @@ def preview_geometry(
                         box, solid, geometry_owner=f"{one.kind} feature")
                 if cut_side_opening_pieces and not is_text(one):
                     solid = apply_side_openings(box, solid)
-                geometry.extend(
-                    _mesh_preview_geometry(solid, tag)
-                )
+                start = len(geometry)
+                geometry.extend(_mesh_preview_geometry(solid, tag))
+                for face_index in range(start, len(geometry)):
+                    pick_faces[face_index] = {"type": "saved", "index": feature_index}
         except Exception as error:
             feature_errors.append(f"{one.kind}: {error}")
             if feature_index not in invalid_feature_indexes:
                 invalid_feature_indexes.append(feature_index)
+            start = len(geometry)
             geometry.extend(_prism_geometry(
                 one.zone,
                 base_z,
                 min(box.z - 0.25, _feature_height(box, one, base_z)),
                 f"{part_kind}_invalid",
             ))
+            for face_index in range(start, len(geometry)):
+                pick_faces[face_index] = {"type": "saved", "index": feature_index}
         geometry.extend(_bore_axis_geometry(
             box, one, base_z, f"{part_kind}_bore_axis"
         ))
@@ -1357,17 +1401,23 @@ def preview_geometry(
                             box, solid, geometry_owner=f"{draft.kind} draft")
                     if cut_draft_side_opening:
                         solid = apply_side_openings(box, solid)
+                    start = len(geometry)
                     geometry.extend(_mesh_preview_geometry(solid, "draft_invalid"))
+                    for face_index in range(start, len(geometry)):
+                        pick_faces[face_index] = {"type": "draft"}
                 built = True
             except Exception:
                 pass
             if not built:
+                start = len(geometry)
                 geometry.extend(_prism_geometry(
                     draft.zone,
                     base_z,
                     min(box.z - 0.25, _feature_height(box, draft, base_z)),
                     "draft_invalid",
                 ))
+                for face_index in range(start, len(geometry)):
+                    pick_faces[face_index] = {"type": "draft"}
         else:
             try:
                 solids = build_features(box, [draft], base_z, layout_zone(box, mode),
@@ -1382,15 +1432,21 @@ def preview_geometry(
                             box, solid, geometry_owner=f"{draft.kind} draft")
                     if cut_draft_side_opening:
                         solid = apply_side_openings(box, solid)
+                    start = len(geometry)
                     geometry.extend(_mesh_preview_geometry(solid, f"draft_{draft.kind}"))
+                    for face_index in range(start, len(geometry)):
+                        pick_faces[face_index] = {"type": "draft"}
             except Exception as error:
                 draft_error = f"{draft.kind}: {error}"
+                start = len(geometry)
                 geometry.extend(_prism_geometry(
                     draft.zone,
                     base_z,
                     min(box.z - 0.25, _feature_height(box, draft, base_z)),
                     "draft_invalid",
                 ))
+                for face_index in range(start, len(geometry)):
+                    pick_faces[face_index] = {"type": "draft"}
         geometry.extend(_bore_axis_geometry(box, draft, base_z, "draft_bore_axis"))
 
     # The rim label is the only lettering left that is not an interior part:
@@ -1448,6 +1504,8 @@ def preview_geometry(
     inside_x, inside_y = box.usable_opening
     return {
         "geometry": geometry,
+        "pick_faces": pick_faces,
+        "pick_proxies": pick_proxies,
         "fits": fits,
         "message": message,
         "feature_errors": tuple(feature_errors),

@@ -1860,8 +1860,9 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     bounds = layout_zone(box, layout.mode)
     geometry = [
         {"points": points, "kind": kind, "normal": normal,
-         "layer": layer, "owner": owner}
-        for points, kind, normal, layer, owner in scene["geometry"]
+         "layer": layer, "owner": owner,
+         "pick": scene.get("pick_faces", {}).get(index)}
+        for index, (points, kind, normal, layer, owner) in enumerate(scene["geometry"])
     ]
     cavity = wavy_cavity_polygon(box)
     # An auto text part finds its own spot during the preview, so the design
@@ -1880,6 +1881,7 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "label_meta": scene["label_meta"],
         "text_meta": scene["text_meta"],
         "geometry": geometry,
+        "pick_proxies": scene.get("pick_proxies", []),
         "fits": scene["fits"],
         "message": scene["message"],
         "feature_errors": scene["feature_errors"],
@@ -2096,8 +2098,8 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         work = b4b_divider_work_box(box)
         return {
             "geometry": [
-                {"points": points, "kind": kind, "normal": normal,
-                 "layer": layer, "owner": owner}
+                 {"points": points, "kind": kind, "normal": normal,
+                  "layer": layer, "owner": owner, "pick": {"type": "draft"}}
                 for points, kind, normal, layer, owner in geometry
             ],
             "feature": feature_to_dict(one, "fused"),
@@ -2136,8 +2138,8 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 pass
         return {
             "geometry": [
-                {"points": points, "kind": kind, "normal": normal,
-                 "layer": layer, "owner": owner}
+                 {"points": points, "kind": kind, "normal": normal,
+                  "layer": layer, "owner": owner, "pick": {"type": "draft"}}
                 for points, kind, normal, layer, owner in geometry
             ],
             "feature": feature_to_dict(one, layout.mode),
@@ -2180,8 +2182,8 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
         geometry.extend(_mesh_preview_geometry(solid, f"{part_kind}_{one.kind}"))
     result = {
         "geometry": [
-            {"points": points, "kind": kind, "normal": normal,
-             "layer": layer, "owner": owner}
+             {"points": points, "kind": kind, "normal": normal,
+              "layer": layer, "owner": owner, "pick": {"type": "draft"}}
             for points, kind, normal, layer, owner in geometry
         ],
         "feature": feature_to_dict(one, layout.mode),

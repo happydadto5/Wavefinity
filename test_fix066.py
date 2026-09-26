@@ -161,8 +161,8 @@ class CurrentDocumentationTests(unittest.TestCase):
         self.assertNotIn('There is no separate "slot" kind', readme)
         self.assertIn("full-span - also gets a 1 mm, 45-degree strengthening chamfer", readme)
         self.assertNotIn("full-span divider does not get one yet", readme)
-        self.assertIn("**% from bottom** - defaults to 0%", readme)
-        self.assertIn("**% from top** - defaults to 0%", readme)
+        self.assertIn("The lower handle is the percentage up from the floor", readme)
+        self.assertIn("the upper handle is", readme)
 
 
 class CommaFileStaleTests(BatchFixture):

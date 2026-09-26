@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-26 — Space/Design workflow and Side Openings (Fix 071B)
+
+- Space and Design now have separate work-area buttons. Inventory row clicks select a bin; Edit opens that bin in Design. New Bin starts a design from Space.
+- Inventory filters reset to All for each new session and Space. Sort stays remembered. Bin and spacer badges identify placements, and placement is shown separately from design status.
+- The 3D preview can select the exact visible option and open its 2D editor. Its FRONT marker follows the physical front side.
+- Side Openings now use a two-handle vertical range while retaining saved percentages. Auto-fitted manual dimensions round safely to half-millimetre steps.
+
 ## 2026-09-25 — Product updates through Fix 068
 
 - Added Straight/Wavy wall choices, stronger wall feet, and clear Save/Print choices with or without connectors (Fix 055).

@@ -647,10 +647,10 @@ function applySpaceSizingDefaults(design, remembered = null) {
       design.layout.object_height_mm = null;
       design.box.standard_base = false;
       design.box.base_thickness = base;
-      design.box.z = Math.max(
-        base + minimumAbove,
-        haveRememberedZ ? Math.round(rememberedZ * 10) / 10 : 0,
-      );
+      const exactMinimum = base + minimumAbove;
+      design.box.z = haveRememberedZ && rememberedZ >= exactMinimum
+        ? Math.round(rememberedZ * 10) / 10
+        : roundUpHalfMm(exactMinimum);
     }
   } else if (kind === "portable" || kind === "box") {
     design.box.z = normalizeBinDimension(
@@ -896,8 +896,10 @@ async function installLoadedDesignSource(rowId, spec, {
   successMessage = "Loaded from Space.",
 } = {}) {
   if (!beginDesignMutation()) return false;
+  const sourceSpace = state.activeSpace, sourceFolder = state.folderMode;
   try {
     const result = await api("/api/design/validate", { design: spec });
+    if (state.activeSpace !== sourceSpace || state.folderMode !== sourceFolder) return false;
     state.design = result.design;
     state.lastOrdinaryDesign = clone(state.design);
     resetNestPhotoSession();
@@ -913,9 +915,13 @@ async function installLoadedDesignSource(rowId, spec, {
     bindLidMemoryForDesign();
     syncForm();
     clearDraftSelection();
+    if (typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
     activatePreviewView("3d");
-    await refreshPreview();
-    if (rowId === null && typedSpaceOrdinaryBin()) await persistSpaceDesignSource(null, true);
+    const preview = refreshPreview();
+    if (rowId === null && typedSpaceOrdinaryBin()) {
+      await preview;
+      await persistSpaceDesignSource(null, true);
+    }
     toast(successMessage);
     return true;
   } catch (error) {
@@ -1005,21 +1011,23 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
 // in a typed Space is preserved through the autosave flush first, never silently
 // discarded; on flush failure New Bin is cancelled rather than losing work.
 async function designerNewBin() {
-  if (!(await guardDraftSwitch())) return;
+  if (!(await guardDraftSwitch())) return false;
   if (state.folderMode === "space") {
-    if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return;
+    if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave())) return false;
   } else if (designHasChanges() && !(await appConfirmAction({
     title: "Start a new bin?",
     message: "Start a new bin and discard the current changes?",
     actionLabel: "Discard Changes",
     danger: true,
-  }))) return;
-  if (!beginDesignMutation()) return;
+  }))) return false;
+  if (!beginDesignMutation()) return false;
   try {
     state.designInventoryId = null;
     state.surfaceHeightPromptSkipped = false;
+    if (typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
     await loadFreshOrdinaryDesignForCurrentFolder();
     toast("Started a new bin.");
+    return true;
   } finally {
     finishDesignMutation();
   }
@@ -1135,6 +1143,7 @@ async function designerDuplicate() {
     bindLidMemoryForDesign();
     syncForm();
     clearDraftSelection();
+    if (typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
     activatePreviewView("3d");
     await refreshPreview();
     toast("Duplicated. Edit the copy freely - the original is unchanged.");
@@ -2011,7 +2020,7 @@ function clampSideOpeningTopForLid(design = state.design, flash = false) {
   const minimum = Math.max(0, sideOpeningMinFromTop(design));
   if (number(current.from_top_percent, 0) < minimum) {
     design.box.side_openings = { ...current, from_top_percent: minimum };
-    if (flash) flashField($("#side-opening-from-top"));
+    if (flash) flashField($("#side-opening-upper"));
   }
 }
 
@@ -2045,9 +2054,9 @@ function readSideOpeningForm(design) {
   }
   const current = { ...SIDE_OPENING_DEFAULTS, ...(design.box.side_openings || {}) };
   const shape = $("#side-opening-shape")?.value || current.shape;
-  const fromBottom = number($("#side-opening-from-bottom")?.value, current.from_bottom_percent);
-  let fromTop = number($("#side-opening-from-top")?.value, current.from_top_percent);
-  if (sideOpeningLidStackForced(design)) fromTop = Math.max(fromTop, sideOpeningMinFromTop(design));
+  const pair = normalizeSideOpeningPair(design, sideOpeningPairFromControls(), "upper");
+  const fromBottom = pair.lower;
+  const fromTop = 100 - pair.upper;
   const allowed = sideOpeningAllowedSizes({
     ...design,
     box: { ...design.box, side_openings: {
@@ -2065,6 +2074,7 @@ function readSideOpeningForm(design) {
     from_bottom_percent: fromBottom,
     from_top_percent: fromTop,
   };
+  syncSideOpeningRange(design.box.side_openings);
 }
 
 function syncSideOpeningControls() {
@@ -2074,8 +2084,7 @@ function syncSideOpeningControls() {
   const so = sideOpeningState();
   $("#side-openings-panel").hidden = !active;
   $("#side-opening-shape").value = so.shape;
-  $("#side-opening-from-bottom").value = fmt(so.from_bottom_percent);
-  $("#side-opening-from-top").value = fmt(so.from_top_percent);
+  syncSideOpeningRange(so);
   for (const side of SIDE_OPENING_SIDE_IDS) {
     const input = $(`#side-opening-${side}`);
     if (!input) continue;
@@ -2105,7 +2114,7 @@ function syncSideOpeningControls() {
     } else if (sideOpeningAdjustmentNote) {
       note.textContent = sideOpeningAdjustmentNote;
     } else if (forced) {
-      note.textContent = "% from top has a minimum to keep the Lid & Stacking bridge.";
+      note.textContent = "The upper handle stops below the rim to keep the Lid & Stacking bridge.";
     } else {
       note.textContent = "";
     }
@@ -3191,9 +3200,8 @@ function readStackForm(design) {
 // Shared by typed Width/Length/Height edits, by dragging their dimension
 // labels (see hitDimensionHandle/commitDimensionDrag), so every path
 // lands on the same legal value: X/Y snap to the catalog base unit and clamp
-// to [unit, max_box_size]; Z rounds to whole millimetres with a floor that
-// clears the base thickness by min_height_above_base_mm (BoxSpec requires
-// it).
+// to [unit, max_box_size]; ordinary Z stays on whole millimetres, while
+// Surface Z uses half millimetres. A computed minimum always rounds upward.
 function normalizeBinDimension(axis, requestedValue, fallback, design = state.design) {
   const value = number(requestedValue, fallback);
   if (axis === "z") {
@@ -3203,7 +3211,7 @@ function normalizeBinDimension(axis, requestedValue, fallback, design = state.de
     );
     const minimum = base + number(state.catalog.min_height_above_base_mm, 5);
     return isSurfaceBinDesign(design)
-      ? Math.max(minimum, Math.round(value * 10) / 10)
+      ? Math.max(roundUpHalfMm(minimum), Math.round(value * 2) / 2)
       : Math.max(Math.ceil(minimum), Math.round(value));
   }
   const unit = state.catalog.base_unit;
@@ -3728,13 +3736,6 @@ function activatePreviewView(view) {
     if (typeof SP !== "undefined") SP.showFolderAccessNeeded();
     return;
   }
-  if (typeof DP !== "undefined") {
-    if ((view === "2d" || view === "3d") && DP.spaceEditing()) DP.setMode("design");
-    else if (view === "drawer") {
-      if (DL.active) DP.setMode("space");
-      else DP.enter("space");
-    }
-  }
   const tab = $(`.view-tab[data-view="${view}"]`);
   const canvasWrap = $(`.canvas-wrap[data-canvas="${view}"]`);
   if (!tab || !canvasWrap) return;
@@ -3897,9 +3898,12 @@ function wireControls() {
       syncSideOpeningControls();
       changedDesign(previous);
     }));
-  ["#side-opening-from-bottom", "#side-opening-from-top"].forEach(selector =>
+  [["#side-opening-lower", "lower"], ["#side-opening-upper", "upper"]].forEach(([selector, changed]) =>
     $(selector)?.addEventListener("input", () => {
       const previous = clone(state.design);
+      const pair = normalizeSideOpeningPair(state.design, sideOpeningPairFromControls(), changed);
+      $("#side-opening-lower").value = String(pair.lower);
+      $("#side-opening-upper").value = String(pair.upper);
       readSideOpeningForm(state.design);
       syncSideOpeningControls();
       changedDesign(previous);
@@ -4056,10 +4060,7 @@ function wireControls() {
   $("#show-log-button")?.addEventListener("click", showLog);
 
   const viewTabs = $$(".view-tab");
-  const selectPreviewTab = view => {
-    if (view === "drawer" && typedSpaceOrdinaryBin() && DP.mode === "design") return DP.selectMode("space");
-    return activatePreviewView(view);
-  };
+  const selectPreviewTab = view => activatePreviewView(view);
   viewTabs.forEach((tab, index) => {
     tab.addEventListener("click", () => selectPreviewTab(tab.dataset.view));
     tab.addEventListener("keydown", event => {
@@ -4560,13 +4561,17 @@ async function selectKind(kind, reset = false) {
 }
 
 async function selectedFeature(index, force = false) {
-  if (index === null || index < 0 || index >= state.design.layout.features.length) return;
-  if (!force && index === state.selected) return;
+  if (index === null || index < 0 || index >= state.design.layout.features.length) return false;
+  if (!force && index === state.selected) return true;
+  const request = state.selectionRequest = (state.selectionRequest || 0) + 1;
+  const design = state.design, source = state.designInventoryId, space = state.activeSpace;
   // Don't drop unsaved work on the part currently open without asking first.
-  if (!force && !(await guardDraftSwitch())) return;
+  if (!force && !(await guardDraftSwitch())) return false;
+  if (request !== state.selectionRequest || design !== state.design ||
+      source !== state.designInventoryId || space !== state.activeSpace) return false;
   const selected = state.design.layout.features[index];
   if (state.draft?.kind === "nest" || selected?.kind === "nest") resetNestPhotoSession();
-  if (!commitEdgeMountFormBeforeSwitch()) return;
+  if (!commitEdgeMountFormBeforeSwitch()) return false;
   cancelPendingDraftWork();
   state.edgeMountEditing = false;
   $("#draft-fields").hidden = false;
@@ -4606,6 +4611,77 @@ async function selectedFeature(index, force = false) {
   updateSelectionButtons();
   refreshDraft();
   renderLayout2D();
+  return true;
+}
+const roundUpHalfMm = value => Math.ceil((number(value, 0) - 1e-9) * 2) / 2;
+function roundFitZoneUpHalfMm(zone) {
+  const cx = (zone[0] + zone[2]) / 2, cy = (zone[1] + zone[3]) / 2;
+  const width = roundUpHalfMm(zone[2] - zone[0]);
+  const depth = roundUpHalfMm(zone[3] - zone[1]);
+  return [cx - width / 2, cy - depth / 2, cx + width / 2, cy + depth / 2];
+}
+
+// One live pair owns the inset_v2 range. Upper is measured from the floor;
+// the saved compatibility field measures that same edge down from the rim.
+function sideOpeningPairFromControls() {
+  return {
+    lower: number($("#side-opening-lower")?.value, 0),
+    upper: number($("#side-opening-upper")?.value, 100),
+  };
+}
+
+function sideOpeningRangeLegal(design, pair) {
+  if (pair.lower < 0 || pair.upper > 100 || pair.lower >= pair.upper) return false;
+  const fromTop = 100 - pair.upper;
+  if (sideOpeningLidStackForced(design) && fromTop + 1e-8 < sideOpeningMinFromTop(design)) return false;
+  const shape = $("#side-opening-shape")?.value || sideOpeningState(design).shape;
+  const size = $("#side-opening-size")?.value || sideOpeningState(design).size;
+  const width = (state.catalog?.side_openings?.sizes || []).find(one => one.value === size)?.width_mm;
+  return !width || sideOpeningVerticalFits(design, {
+    shape, from_bottom_percent: pair.lower, from_top_percent: fromTop,
+  }, width);
+}
+
+function normalizeSideOpeningPair(design, pair, changed = "lower") {
+  const maximum = sideOpeningLidStackForced(design) ? 100 - sideOpeningMinFromTop(design) : 100;
+  const trial = { lower: Math.max(0, Math.min(99.9, pair.lower)),
+    upper: Math.max(0.1, Math.min(maximum, pair.upper)) };
+  if (sideOpeningRangeLegal(design, trial)) return trial;
+  if (changed === "lower") {
+    for (let value = Math.min(trial.lower, trial.upper - 0.1); value >= 0; value -= 0.1) {
+      trial.lower = Math.round(value * 10) / 10;
+      if (sideOpeningRangeLegal(design, trial)) return trial;
+    }
+  } else {
+    for (let value = Math.max(trial.upper, trial.lower + 0.1); value <= maximum + 1e-8; value += 0.1) {
+      trial.upper = Math.round(value * 10) / 10;
+      if (sideOpeningRangeLegal(design, trial)) return trial;
+    }
+  }
+  return { lower: number(sideOpeningState(design).from_bottom_percent, 0),
+    upper: 100 - number(sideOpeningState(design).from_top_percent, 0) };
+}
+
+function syncSideOpeningRange(spec) {
+  const lower = $("#side-opening-lower"), upper = $("#side-opening-upper");
+  if (!lower || !upper) return;
+  const pair = { lower: number(spec.from_bottom_percent, 0),
+    upper: 100 - number(spec.from_top_percent, 0) };
+  const maximum = sideOpeningLidStackForced() ? 100 - sideOpeningMinFromTop() : 100;
+  lower.max = String(Math.max(0, pair.upper - 0.1));
+  upper.min = String(Math.min(100, pair.lower + 0.1));
+  upper.max = String(maximum);
+  lower.value = String(pair.lower);
+  upper.value = String(pair.upper);
+  lower.setAttribute("aria-valuetext", `${fmt(pair.lower)}% from bottom`);
+  upper.setAttribute("aria-valuetext", `${fmt(pair.upper)}% up from floor, ${fmt(100 - pair.upper)}% from top`);
+  const fill = $("#side-opening-range-fill");
+  if (fill) {
+    fill.style.bottom = `${pair.lower}%`;
+    fill.style.height = `${pair.upper - pair.lower}%`;
+  }
+  const readout = $("#side-opening-range-readout");
+  if (readout) readout.textContent = `${fmt(pair.lower)}% from bottom · ${fmt(100 - pair.upper)}% from top`;
 }
 
 function field(label, key, value, options = {}) {
@@ -8085,8 +8161,8 @@ function renderPlaced() {
   const preview = $("#placed-supports");
   if (preview) {
     preview.innerHTML = placedRowsMarkup(previewRows) || (rows.length
-      ? '<div class="placed-empty">No other parts or options.</div>'
-      : '<div class="placed-empty">No parts or options yet. Pick one above.</div>');
+      ? '<div class="placed-empty">No other options.</div>'
+      : '<div class="placed-empty">No options yet. Pick one above.</div>');
     wirePlacedRows(preview);
   }
   const added = $("#added-parts-list");
@@ -8395,7 +8471,7 @@ async function fitPartToContents() {
     // while the calculation was in flight.
     if (request !== state.fitRequest || state.draft !== draft ||
         JSON.stringify(draft) !== snapshot) return;
-    const zone = result.feature.zone;
+    const zone = roundFitZoneUpHalfMm(result.feature.zone);
     const unchanged = state.draft.zone.every((v, i) => Math.abs(v - zone[i]) < 0.05);
     markDraftChanged();
     state.draft.zone = zone;
@@ -8922,7 +8998,7 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
       depth += px * vx + py * vy + pz * vz;
     }
     faces.push({
-      kind, normal, points, projected, corners,
+       kind, normal, points, projected, corners, pick: face.pick,
       depth: depth / corners, layer: number(face.layer),
     });
   }
@@ -8990,13 +9066,11 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
     context.closePath();
     const kind = face.kind;
     const isDraft = kind.startsWith("draft_");
-    if (isDraft || kind.startsWith("feature_") || kind.startsWith("insert_")) {
-      const polygon = new Array(corners);
-      for (let at = 0; at < corners; at += 1) {
-        polygon[at] = [originX + flat[at * 2] * scale, originY + flat[at * 2 + 1] * scale];
-      }
-      state.previewSupportPolygons.push(polygon);
+    const polygon = new Array(corners);
+    for (let at = 0; at < corners; at += 1) {
+      polygon[at] = [originX + flat[at * 2] * scale, originY + flat[at * 2 + 1] * scale];
     }
+    addPreviewPickFace(face, polygon, camera);
     const fill = shadedColor(kind, face.normal);
     if (fill !== penFill) { context.fillStyle = fill; penFill = fill; }
     context.fill();
@@ -9019,6 +9093,8 @@ function drawGeometryLegacy2D(canvas, geometry, camera) {
   drawUsableFloor(context, geometry, camera, project);
   drawBoreAxes(context, boreAxes, camera, project);
   draw3DDimensions(context, state.design?.box, camera, project, b4bAssembledEnvelope());
+  addPreviewPickProxies(camera, point => project(iso(point, camera)), visibleGroups);
+  drawFrontMarker(context, camera, point => project(iso(point, camera)));
 }
 
 // A line up the centre of every hole in a leaned bore, arrow-tipped, so it's
@@ -9609,11 +9685,12 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
   ];
   for (const face of solidGeometry) {
     const kind = face.kind;
-    const isSupport = kind.startsWith("draft_") || kind.startsWith("feature_") || kind.startsWith("insert_");
-    if (!isSupport || !visibleGroups.has(classify(face))) continue;
+    if (!visibleGroups.has(classify(face))) continue;
+    if (state.xrayOn && isFacingBinWall(face, camera)) continue;
     if (dot(face.normal, vector) <= 0) continue;
-    state.previewSupportPolygons.push(face.points.map(point => project(iso(point, camera))));
+    addPreviewPickFace(face, face.points.map(point => project(iso(point, camera))), camera);
   }
+  addPreviewPickProxies(camera, point => project(iso(point, camera)));
   const box = dimensionDragBoxOverride(state.design?.box, "3d");
   drawContactShadow(context, b4bShadowBox(), camera, project, b4bAssembledEnvelope());
   drawUsableFloor(context, solidGeometry, camera, project);
@@ -9621,6 +9698,7 @@ function drawOverlay2D(context, width, height, solidGeometry, boreAxes, camera, 
   const outerXYZ = dimensionDisplayOverride(b4bAssembledEnvelope());
   draw3DDimensions(context, box, camera, project, outerXYZ);
   drawDimensionGhost3D(context, camera, project, box, outerXYZ);
+  drawFrontMarker(context, camera, point => project(iso(point, camera)));
 }
 
 // B4B's assembled_envelope_mm accounts for hinge/latch/handle/stacking
@@ -9654,19 +9732,108 @@ function pointInPolygon([x, y], polygon) {
   return inside;
 }
 
+function addPreviewPickFace(face, polygon, camera) {
+  state.previewSupportPolygons.push({
+    polygon, depths: face.points.map(point => dot(point, cameraVector(camera))),
+    pick: face.pick || null, proxy: false,
+  });
+}
+
+function addPreviewPickProxies(camera, project, visibleGroups) {
+  if (!state.interiorVisible || baseTrimEnabled() ||
+      (b4bEnabled() && !visibleGroups.has("base"))) return;
+  for (const proxy of state.preview?.pick_proxies || []) {
+    if (!proxy.points?.length || !proxy.pick) continue;
+    state.previewSupportPolygons.push({
+      polygon: proxy.points.map(project),
+      depths: proxy.points.map(point => dot(point, cameraVector(camera))),
+      pick: proxy.pick, proxy: true,
+    });
+  }
+}
+
+function pickTriangleDepth(point, record, first, second, third, requireInside) {
+  const [a, b, c] = [first, second, third].map(index => record.polygon[index]);
+  const cross = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+  if (Math.abs(cross) < 1e-9) return null;
+  const u = ((b[1] - c[1]) * (point[0] - c[0]) + (c[0] - b[0]) * (point[1] - c[1])) / cross;
+  const v = ((c[1] - a[1]) * (point[0] - c[0]) + (a[0] - c[0]) * (point[1] - c[1])) / cross;
+  const w = 1 - u - v;
+  if (requireInside && Math.min(u, v, w) < -1e-6) return null;
+  return u * record.depths[first] + v * record.depths[second] + w * record.depths[third];
+}
+
+function previewPickDepth(point, record) {
+  if (!pointInPolygon(point, record.polygon)) return null;
+  for (let at = 1; at < record.polygon.length - 1; at += 1) {
+    const depth = pickTriangleDepth(point, record, 0, at, at + 1, !record.proxy);
+    if (depth !== null) return depth;
+  }
+  return null;
+}
+
 function clickedPreviewSupport(canvas, event) {
   const bounds = canvas.getBoundingClientRect();
   const point = [event.clientX - bounds.left, event.clientY - bounds.top];
-  return state.previewSupportPolygons.some(polygon => pointInPolygon(point, polygon));
+  let closest = null;
+  for (const record of state.previewSupportPolygons) {
+    const depth = previewPickDepth(point, record);
+    if (depth !== null && (!closest || depth > closest.depth)) closest = { depth, pick: record.pick };
+  }
+  return closest?.pick || null;
+}
+
+function drawFrontMarker(context, camera, project) {
+  if (!state.design?.box || b4bEnabled() || baseTrimEnabled()) return;
+  const point = project([0, -state.design.box.y / 2 - 5, 0]);
+  context.save();
+  context.font = "bold 13px 'Segoe UI', sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = "#153f48";
+  context.fillText("FRONT", point[0], point[1]);
+  context.restore();
 }
 
 function wireSupportLayoutDialog() {
   const dialog = $("#support-layout-dialog");
-  $("#support-layout-dialog-close").addEventListener("click", () => dialog.close());
-  $("#support-layout-dialog-open").addEventListener("click", () => {
-    dialog.close();
-    $('.view-tab[data-view="2d"]').click();
+  $("#support-layout-dialog-open").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", () => {
+    try { localStorage.setItem("wavefinity-3d-pick-help-dismissed",
+      $("#support-layout-remember").checked ? "1" : "0"); } catch (_error) {}
   });
+}
+
+async function selectFromPreview(pick, context) {
+  if (!pick) return;
+  const current = () => state.design === context.design &&
+    state.designInventoryId === context.source && state.activeSpace === context.space &&
+    state.previewRequest === context.preview && DP.mode === "design";
+  if (!current()) return;
+  const status = $("#preview-state");
+  status.textContent = "Selecting part…";
+  status.classList.add("preview-pending");
+  try {
+    if (pick.type === "saved") {
+      if (!Number.isInteger(pick.index) || !(await selectedFeature(pick.index))) return;
+      // Selecting cancels the old preview request itself. Its guard already
+      // rejects stale design/Space switches; check the accepted target here.
+      if (state.designInventoryId !== context.source || state.activeSpace !== context.space ||
+          state.selected !== pick.index || DP.mode !== "design") return;
+    } else if (pick.type !== "draft" || !state.draft) return;
+    activatePreviewView("2d");
+    renderLayout2D();
+    let dismissed = false;
+    try { dismissed = localStorage.getItem("wavefinity-3d-pick-help-dismissed") === "1"; } catch (_error) {}
+    if (!dismissed) {
+      $("#support-layout-remember").checked = true;
+      const dialog = $("#support-layout-dialog");
+      if (!dialog.open) dialog.showModal();
+    }
+  } finally {
+    status.classList.remove("preview-pending");
+    if (status.textContent === "Selecting part…") status.textContent = "";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -9932,12 +10099,11 @@ function wireSceneInteraction(canvas, camera, render) {
       return;
     }
     const clickedSupport = drag && !drag.moved && clickedPreviewSupport(canvas, event);
+    const pickContext = { design: state.design, source: state.designInventoryId,
+      space: state.activeSpace, preview: state.previewRequest };
     drag = null;
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-    if (clickedSupport) {
-      const dialog = $("#support-layout-dialog");
-      if (!dialog.open) dialog.showModal();
-    }
+    if (clickedSupport) void selectFromPreview(clickedSupport, pickContext);
   });
   canvas.addEventListener("pointercancel", () => {
     if (state.dimensionDrag) {
