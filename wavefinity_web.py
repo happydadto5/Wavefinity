@@ -95,7 +95,6 @@ from organizer_inserts import (
     Layout,
     Segment,
     Zone,
-    auto_grow_text_feature,
     build_features,
     connector_keep_out,
     cradle_min_footprint,
@@ -849,7 +848,9 @@ def _first_open_position(
     # so a new one can drop into the open end of a cradle's zone - see
     # ``occupied_zones``.
     base_z = base_height(box, layout.mode)
-    taken = occupied_zones(box, layout.features, base_z, layout.mode)
+    taken = [zone for feature, zone in zip(
+        layout.features, occupied_zones(box, layout.features, base_z, layout.mode)
+    ) if not (feature.kind == "text" and feature.options.get("level") == "rim")]
     taken.extend(zone for _name, zone in reserved)
     # That covered floor sits at a fixed offset inside the support's own zone,
     # and moving the support moves both together, so it is worked out once here
@@ -1658,12 +1659,7 @@ def _resolved_text(
     box: BoxSpec, features: tuple, mode: str,
     label: str, label_location: str, scoop: bool,
 ) -> tuple:
-    """``features`` with every auto-placed text moved to where it really goes.
-
-    Any endpoint that judges a layout has to do this first: an auto text's
-    stored zone is only a cache of where it last landed, and a brand-new one
-    starts on a placeholder in the middle of the bin.
-    """
+    """Canonical Text, resolving old auto-placement once on import."""
     return resolve_text_features(
         box, features,
         reserved=[
@@ -1673,22 +1669,6 @@ def _resolved_text(
         ],
         base_z=base_height(box, mode), mode=mode,
     )
-
-
-def _features_from_preview(layout: Layout, scene: dict[str, Any]) -> tuple:
-    """The layout's features as the preview resolved them.
-
-    Only ``auto`` text moves, and only during the preview, so a scene that
-    could not report its features leaves the layout exactly as it was.
-    """
-    raw = scene.get("features")
-    if not raw:
-        return layout.features
-    try:
-        return layout_from_dict({"mode": layout.mode, "features": raw}).features
-    except (ValueError, KeyError, TypeError):
-        return layout.features
-
 
 def _b4b_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Preview for a Storage Box design: body/lid/latch/label meshes plus the
@@ -1880,10 +1860,7 @@ def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         for index, (points, kind, normal, layer, owner) in enumerate(scene["geometry"])
     ]
     cavity = wavy_cavity_polygon(box)
-    # An auto text part finds its own spot during the preview, so the design
-    # that comes back carries the zone it actually landed on - otherwise the
-    # browser would keep drawing it where it used to be.
-    resolved = replace(layout, features=_features_from_preview(layout, scene))
+    resolved = layout
     canonical = design_to_dict(stack_request, resolved, label, part_name, label_location, scoop)
     planning_record = inventory_bin_record(stack_request, resolved, None, label, part_name, scoop)
     planning = object_height_plan(canonical, resolved.object_height_mm)
@@ -2126,6 +2103,8 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
     box = _interior_work_box(request_box)
     one = _feature_from_json(payload["feature"], layout.mode)
     one = normalize_bore_modes(box, one, base_height(box, layout.mode), layout.mode)
+    if one.kind == "text":
+        one = _resolved_text(box, (one,), layout.mode, label, label_location, scoop)[0]
     nest_solids = None
     if one.kind == "nest":
         request_box, box, _updated, one, _warnings, nest_solids = _resolve_photo_nest_edit(
@@ -2142,15 +2121,11 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
             box, one, base_height(box, layout.mode), layout.mode, layout.snap
         ))
     if one.kind == "text" and one.options.get("level") == "rim":
+        from organizer_inserts._text import rim_text_geometry
         geometry = []
-        tidy = clean_label(text_of(one))
-        side = str(one.options.get("rim_side", "back"))
-        geometry.extend(_mesh_preview_geometry(make_top_label_ledge(box, side), "top_label_ledge"))
-        if tidy:
-            try:
-                geometry.extend(_mesh_preview_geometry(make_top_label(box, tidy, side), "top_label"))
-            except ValueError:
-                pass
+        ledge, glyph, effective_cap, _surface = rim_text_geometry(box, one)
+        geometry.extend(_mesh_preview_geometry(ledge, "top_label_ledge"))
+        geometry.extend(_mesh_preview_geometry(glyph, "feature_text"))
         return {
             "geometry": [
                  {"points": points, "kind": kind, "normal": normal,
@@ -2158,26 +2133,8 @@ def draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 for points, kind, normal, layer, owner in geometry
             ],
             "feature": feature_to_dict(one, layout.mode),
-            "resolved_options": {},
+            "resolved_options": {"cap_height": round(effective_cap, 3)},
         }
-    # An auto text's stored zone is a placeholder until the resolver has had
-    # the rest of the layout to look at, so resolve it here too - otherwise the
-    # draft is judged, and drawn, somewhere it will never actually be.
-    if one.kind == "text" and one.options.get("auto"):
-        existing = list(layout.features)
-        index = payload.get("index")
-        if index is not None:
-            index = int(index)
-            if not 0 <= index < len(existing):
-                raise ValueError("the selected interior part no longer exists")
-            existing.pop(index)
-        placed = _resolved_text(
-            box, tuple(existing) + (one,), layout.mode,
-            label, label_location, scoop,
-        )
-        one = placed[-1]
-    elif one.kind == "text":
-        one = auto_grow_text_feature(one, box, layout.mode)
     shown = (
         resolve_nest_settings(box, one, base_height(box, layout.mode))
         if one.kind == "nest" else
@@ -2307,8 +2264,9 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "selected": (int(index) if index is not None else 0),
             "warnings": nest_warnings,
         }
-    if one.kind == "text" and not one.options.get("auto"):
-        one = auto_grow_text_feature(one, box, layout.mode)
+    if one.kind == "text":
+        from organizer_inserts._text import canonical_text_feature
+        one = canonical_text_feature(one)
     if one.kind == "scoop":
         one = replace(one, zone=scoop_zone(
             box, one, base_height(box, layout.mode), layout.mode, layout.snap
@@ -2317,7 +2275,7 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     # Full-span Dividers and Curved Scoops are derived from the bin, not from
     # a user-draggable footprint. Keep their exact normalized zone instead of
     # passing it through ordinary 1 mm resize/move snapping.
-    if not (one.kind == "scoop" or (one.kind == "divider" and one.full_span)
+    if not (one.kind in {"scoop", "text"} or (one.kind == "divider" and one.full_span)
             or (one.kind == "bore" and one.options.get("xy_size_mode") == "bore_to_bin")):
         width, depth = one.zone.width, one.zone.depth
         cx, cy = one.zone.centre
@@ -2328,9 +2286,10 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if any(item.kind == "nest" and item.contour for item in existing):
         raise ValueError("Photo Nest designs can contain scanned Photo Nests only.")
     if index is None:
-        one = _first_open_position(
-            one, box, layout, label, label_location, scoop
-        )
+        if one.kind != "text":
+            one = _first_open_position(
+                one, box, layout, label, label_location, scoop
+            )
         existing.append(one)
         selected = len(existing) - 1
     else:
@@ -2339,10 +2298,11 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("the selected interior part no longer exists")
         if one.kind != existing[selected].kind:
             remaining = existing[:selected] + existing[selected + 1:]
-            one = _first_open_position(
-                one, box, replace(layout, features=tuple(remaining)),
-                label, label_location, scoop,
-            )
+            if one.kind != "text":
+                one = _first_open_position(
+                    one, box, replace(layout, features=tuple(remaining)),
+                    label, label_location, scoop,
+                )
         existing[selected] = one
     # Auto-placed text finds its own spot, so resolve before judging overlaps -
     # otherwise a second one is refused for sitting on the first at the
@@ -2369,10 +2329,36 @@ def apply_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def duplicate_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Duplicate one completed Photo Nest as an independently editable group."""
+    """Duplicate a Text to a free destination or a completed Photo Nest."""
     request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     index = int(payload["index"])
     features = list(layout.features)
+    if 0 <= index < len(features) and features[index].kind == "text":
+        from organizer_engine import top_label_zone
+        from organizer_inserts._text import canonical_text_feature
+        box = _interior_work_box(request_box)
+        used = {("rim", str(f.options.get("rim_side") or "back")) if f.options.get("level") == "rim"
+                else ("base", "") for f in features if f.kind == "text"}
+        available = [("rim", side) for side in ("back", "front", "left", "right")
+                     if ("rim", side) not in used]
+        if ("base", "") not in used:
+            available.append(("base", ""))
+        if not available:
+            raise ValueError("No free Text destination. Remove a Text or change a rim side first.")
+        level, side = available[0]
+        source = features[index]
+        options = {**source.options, "level": level, "rim_side": side or "back",
+                   "quarter_turns": 0 if level == "rim" else source.options.get("quarter_turns", 0)}
+        if level == "rim":
+            zone = Zone(*top_label_zone(box, side).bounds)
+        else:
+            zone = default_feature(box, "text", mode=layout.mode).zone
+        clone = canonical_text_feature(replace(source, zone=zone, options=options))
+        updated = replace(layout, features=tuple(features + [clone]))
+        updated.validate(box)
+        validate_customization_clearance(box, updated.features, label, label_location, scoop, updated.mode)
+        return {"design": design_to_dict(request_box, updated, label, part_name, label_location, scoop),
+                "selected": len(features)}
     if not 0 <= index < len(features) or features[index].kind != "nest" or not features[index].contour:
         raise ValueError("the selected Photo Nest no longer exists")
     if any(one.kind != "nest" for one in features):
@@ -2561,6 +2547,8 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     def sized(one: Feature, trial: BoxSpec) -> Feature:
+        if one.kind == "text":
+            return one  # Text has no user-sized floor footprint.
         exact = False
         if one.kind == "bore":
             # A Bore's persisted sizing modes are re-resolved against each trial
@@ -2619,15 +2607,23 @@ def expand_layout_payload(payload: dict[str, Any]) -> dict[str, Any]:
                        + (zones[i].centre[1] - ay) ** 2)
         out = list(placed)
         settled = [pivot]
+        def rim_text(one: Feature) -> bool:
+            return one.kind == "text" and one.options.get("level") == "rim"
         for i in order:
             feat = out[i]
+            if rim_text(feat):
+                settled.append(i)
+                continue
             for _ in range(80):
                 here = covered(feat)
                 clash = next((j for j in settled
-                              if here.overlaps(covered(out[j]), MIN_FEATURE_GAP)),
+                              if not rim_text(out[j])
+                              and here.overlaps(covered(out[j]), MIN_FEATURE_GAP)),
                              None)
                 if clash is None:
                     break
+                if feat.kind == "text":
+                    break  # A centered Text feature cannot be slid.
                 other = covered(out[clash])
                 # One editor grid step of slack on top of the bare overlap, so
                 # the centre snap in ``moved_feature`` can't round it back into

@@ -184,7 +184,12 @@ def build_features(
         else:
             made = FEATURE_BUILDERS[one.kind](box, one, base_z)
 
-        reach = _feature_reach(box, one, base_z)
+        if is_text(one) and one.options.get("level") == "rim":
+            from organizer_engine import top_label_zone
+            from ._core import Zone
+            reach = Zone(*top_label_zone(box, one.options.get("rim_side", "back")).bounds)
+        else:
+            reach = _feature_reach(box, one, base_z)
 
         if recessed_deck_footprint is not None:
             x0, y0, x1, y1 = recessed_deck_footprint.bounds
@@ -245,7 +250,7 @@ def build_features(
             # Fix 034 G1: Auto Height now resolves to a legal height itself
             # (see bore_defaults), so Auto obeys this exactly like manual.
             and any(solid.bounds[1][2] > connector_keep_out(box) + 1e-6 for solid in made)
-            and not (divider_rim_shelf and clears_stack_lid)
+            and not ((divider_rim_shelf or (is_text(one) and one.options.get("level") == "rim")) and clears_stack_lid)
         ):
             raise ValueError(
                 f"a {one.kind} touching the wall must stay below "
@@ -279,7 +284,8 @@ def build_texts(
     for one in features:
         if one.kind == "divider":
             for text_label, text_solid, raised in divider_division_texts(box, one, base_z):
-                made.append((text_label, text_solid, raised))
+                if not raised:      # a rim shelf is body material, not a text object
+                    made.append((text_label, text_solid, False))
             continue
         if not is_text(one) or one.options.get("level") == "rim":
             continue
@@ -300,69 +306,40 @@ def resolve_text_features(
     base_z: float = 0.0,
     mode: str = "fused",
 ) -> tuple[Feature, ...]:
-    """Give every ``auto`` text part the best spot left on the floor.
-
-    This is the "blank config just works" case the plain floor label always
-    had: stay centred if you can, otherwise move beside whatever is in the
-    way, then turn, then shrink. Everything else keeps the zone it was
-    dragged to. Never raises - a text that cannot be placed keeps the zone it
-    already had, so the ordinary validation reports it in the usual way.
-    """
-    features = tuple(features)
-    auto = [
-        index for index, one in enumerate(features)
-        if is_text(one) and one.options.get("auto") and one.options.get("level") != "rim"
-    ]
-    if not auto:
-        return features
+    """Resolve legacy auto placement once, then store fixed glyph-derived Text."""
+    from organizer_engine import top_label_zone
+    from ._text import canonical_text_feature, retargeted_text
     resolved = list(features)
-    # Each auto text has to dodge the others too, so they are placed one at a
-    # time and every one already placed becomes an obstacle for the next.
-    obstacles = [polygon for polygon in reserved if not polygon.is_empty]
-    obstacles += [
-        feature_footprint(box, one, base_z).polygon
-        for index, one in enumerate(features)
-        if index not in auto
-    ]
-    for index in auto:
-        one = resolved[index]
-        label = text_of(one)
-        if not label:
+    for index, one in enumerate(resolved):
+        if is_text(one) and one.options.get("retarget"):
+            resolved[index] = retargeted_text(box, one, mode)
             continue
+        if is_text(one) and one.options.get("level") == "rim":
+            side = str(one.options.get("rim_side") or "back")
+            resolved[index] = canonical_text_feature(replace(
+                one, zone=Zone(*top_label_zone(box, side).bounds)))
+            continue
+        if not is_text(one) or not one.options.get("auto"):
+            resolved[index] = canonical_text_feature(one)
+            continue
+        obstacles = [shape for shape in reserved if not shape.is_empty]
+        obstacles.extend(feature_footprint(box, other, base_z).polygon
+                         for other_index, other in enumerate(resolved)
+                         if other_index != index and not (is_text(other) and other.options.get("level") == "rim"))
         try:
-            placement = label_placement(box, label, obstacles)
-            outline = _oriented_text(label, placement.cap_height,
+            placement = label_placement(box, text_of(one), obstacles)
+            outline = _oriented_text(text_of(one), placement.cap_height,
                                      placement.quarter_turns)
-            bx0, by0, bx1, by1 = outline.bounds
-            zone = Zone(bx0 + placement.x, by0 + placement.y,
-                        bx1 + placement.x, by1 + placement.y)
+            x0, y0, x1, y1 = outline.bounds
+            zone = Zone(x0 + placement.x, y0 + placement.y,
+                        x1 + placement.x, y1 + placement.y)
+            options = dict(one.options)
+            options.update(cap_height=placement.cap_height,
+                           quarter_turns=placement.quarter_turns)
+            options.pop("auto", None)
+            resolved[index] = canonical_text_feature(replace(one, zone=zone, options=options))
         except (ValueError, ZeroDivisionError):
-            obstacles.append(one.zone.polygon)
-            continue
-        options = dict(one.options)
-        options["quarter_turns"] = placement.quarter_turns
-        # The zone is now exactly the ink, so re-fitting into it lands back on
-        # the cap height the search chose; leave the field free to say so.
-        options.pop("cap_height", None)
-        if mode == "cartridge":
-            # A cartridge layout only accepts whole 8 mm cells and the ink
-            # never lands on one, so grow the zone *outward* to the cells
-            # around it - snapping to the nearest would cut the lettering off.
-            # Pin the height the search chose so the bigger box does not
-            # quietly enlarge the lettering to fill it either.
-            cells = cartridge_zone(box)
-            low_x = cells.x0 + math.floor((zone.x0 - cells.x0) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
-            low_y = cells.y0 + math.floor((zone.y0 - cells.y0) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
-            high_x = cells.x0 + math.ceil((zone.x1 - cells.x0) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
-            high_y = cells.y0 + math.ceil((zone.y1 - cells.y0) / CARTRIDGE_PITCH) * CARTRIDGE_PITCH
-            if (low_x < cells.x0 - 1e-9 or low_y < cells.y0 - 1e-9
-                    or high_x > cells.x1 + 1e-9 or high_y > cells.y1 + 1e-9):
-                obstacles.append(one.zone.polygon)
-                continue
-            zone = Zone(low_x, low_y, high_x, high_y)
-            options["cap_height"] = placement.cap_height
-        resolved[index] = replace(one, zone=zone, options=options)
-        obstacles.append(zone.polygon)
+            resolved[index] = canonical_text_feature(one)
     return tuple(resolved)
 
 

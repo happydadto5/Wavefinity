@@ -32,12 +32,12 @@ from ._bore import (
     is_wavy_style,
     normalize_bore_style,
 )
-from ._core import MIN_FEATURE_GAP, Feature, Zone, _fit_count
+from ._core import CARTRIDGE_PITCH, MIN_FEATURE_GAP, Feature, Zone, _fit_count, cartridge_zone
 from ._cradle import _cradle_end_margin, _cradle_offset, cradle_min_footprint
 from ._divider import DIVIDER_CHAMFER, _divider_cross_centres, divider_grid_counts
 from ._pocket import POCKET_CHAMFER
 from ._registry import FEATURE_BUILDERS, resolved_options
-from ._text import TEXT_KIND, TEXT_ZONE_EPSILON, _text_footprint, is_text
+from ._text import TEXT_KIND, TEXT_ZONE_EPSILON, _text_footprint, is_text, text_of, text_placed_outline
 
 
 def _bore_style(one: Feature) -> str:
@@ -372,10 +372,23 @@ def occupied_zones(
     one interchangeable tile and each keeps its whole zone; cartridge mode
     needs whole 8 mm cells for the same reason.
     """
-    return [
-        feature_footprint(box, one, base_z) if mode == "fused" else one.zone
-        for one in features
-    ]
+    cells = cartridge_zone(box) if mode == "cartridge" else None
+    occupied = []
+    for one in features:
+        if mode == "fused":
+            occupied.append(feature_footprint(box, one, base_z))
+        elif cells is not None and is_text(one) and one.options.get("level") != "rim":
+            zone = one.zone
+            pitch = CARTRIDGE_PITCH
+            occupied.append(Zone(
+                cells.x0 + math.floor((zone.x0 - cells.x0) / pitch) * pitch,
+                cells.y0 + math.floor((zone.y0 - cells.y0) / pitch) * pitch,
+                cells.x0 + math.ceil((zone.x1 - cells.x0) / pitch) * pitch,
+                cells.y0 + math.ceil((zone.y1 - cells.y0) / pitch) * pitch,
+            ))
+        else:
+            occupied.append(one.zone)
+    return occupied
 
 
 def check_layout(
@@ -385,12 +398,23 @@ def check_layout(
     """Catch the mistakes that produce quietly wrong parts."""
     features = list(features)
     whole = bounds or Zone.whole(box)
+    text_destinations = set()
+    for one in features:
+        if not is_text(one):
+            continue
+        destination = ("rim", str(one.options.get("rim_side") or "back")) if one.options.get("level") == "rim" else ("base", "")
+        if destination in text_destinations:
+            place = destination[1].capitalize() + " rim" if destination[0] == "rim" else "base"
+            raise ValueError(f"Only one Text is allowed on the {place}; change its Text Type or remove a duplicate")
+        text_destinations.add(destination)
     for one in features:
         if one.kind not in FEATURE_BUILDERS:
             raise ValueError(
                 f"unknown holder {one.kind!r}; have "
                 f"{', '.join(sorted(FEATURE_BUILDERS))}"
             )
+        if is_text(one) and one.options.get("level") == "rim":
+            continue  # Shell feature, not an insert/floor zone.
         # A Walls Only Bore whose bin is sized around it is judged on its real
         # outer envelope: its zone is that envelope rounded up to the editor
         # grid, and may overhang by less.
@@ -401,6 +425,14 @@ def check_layout(
             judged = bore_envelope_zone(box, one, base_z) or one.zone
         if (judged.x0 < whole.x0 - 1e-6 or judged.x1 > whole.x1 + 1e-6
                 or judged.y0 < whole.y0 - 1e-6 or judged.y1 > whole.y1 + 1e-6):
+            if is_text(one):
+                raise ValueError(
+                    f"the text '{text_of(one)}' will not fit the bin at "
+                    f"{float(one.options.get('cap_height') or 0):g} mm letter height: it needs "
+                    f"{one.zone.width:.1f} x {one.zone.depth:.1f} mm and the bin gives "
+                    f"{whole.width:.1f} x {whole.depth:.1f} mm. Lower the Letter height, "
+                    "turn it, or use shorter text"
+                )
             raise ValueError(
                 f"a {one.kind} reaches outside the bin: its zone is "
                 f"{one.zone.width:.1f} x {one.zone.depth:.1f} mm at "
@@ -423,8 +455,18 @@ def check_layout(
     # neighbours are judged on the floor each one actually covers.
     occupied = occupied_zones(box, features, base_z, mode)
     for index, one in enumerate(features):
+        if is_text(one) and one.options.get("level") == "rim":
+            continue
         for offset, other in enumerate(features[index + 1:], index + 1):
-            if occupied[index].overlaps(occupied[offset], MIN_FEATURE_GAP):
+            if is_text(other) and other.options.get("level") == "rim":
+                continue
+            if mode == "fused" and (is_text(one) or is_text(other)):
+                first = text_placed_outline(one) if is_text(one) else occupied[index].polygon
+                second = text_placed_outline(other) if is_text(other) else occupied[offset].polygon
+                overlaps = first.distance(second) < MIN_FEATURE_GAP
+            else:
+                overlaps = occupied[index].overlaps(occupied[offset], MIN_FEATURE_GAP)
+            if overlaps:
                 raise ValueError(
                     f"a {one.kind} and a {other.kind} overlap; leave at least "
                     f"{MIN_FEATURE_GAP:g} mm between features"

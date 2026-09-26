@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-26 — Text, Divider labels and Bore supports (Fix 071C)
+
+- **Text** has one **Text Type**: On base or At rim, Inlaid or Raised, with Inlay depth / Raised height presets (0.2–0.8 mm). Footprint, Place it for me and Text dragging are gone; Text is centered automatically, with Letter height and Turn kept. One On-base Text per bin and one At-rim Text per rim side. Old Text and the old single rim label open and migrate.
+- Inlaid Text now shows in the 3D preview without moving the printed geometry.
+- **Divider Labels**: one Label Type (No label / On base / Rim level) with coordinate placeholders. Base and rim label lettering now export, and the rim shelf roots into the real wall on both its flat top and sloped underside.
+- **Bore** gap support is now thin straight or wavy webs instead of chunky blocks.
+- Divider bottom: Sloped starts at 45° and Curved at 60% (or the largest legal value), the 80° preset now works, and older custom values are kept.
+
 ## 2026-09-26 — Space/Design workflow and Side Openings (Fix 071B)
 
 - Space and Design now have separate work-area buttons. Inventory row clicks select a bin; Edit opens that bin in Design. New Bin starts a design from Space.

@@ -152,6 +152,7 @@ from organizer_inserts import (
     build_texts,
     connector_keep_out,
     divider_cells,
+    divider_division_texts,
     feature_footprint,
     feature_definitions,
     insert_footprint,
@@ -166,6 +167,7 @@ from organizer_inserts import (
     fitted_nest_feature,
     make_insert_plate,
     normalize_divider_scoop,
+    occupied_zones,
     nest_contour_polygon,
     resolve_nest_settings,
     resolve_text_features,
@@ -797,6 +799,7 @@ def _mesh_preview_geometry(
     only ever passed by the B4B preview walk, which knows which source mesh
     each face came from; ordinary-bin geometry leaves it ``None``.
     """
+    layer = int(mesh.metadata.get("wavefinity_preview_layer", 0) or 0)
     preview_kind = mesh.metadata.get("wavefinity_preview_kind")
     if preview_kind and "invalid" not in kind and "conflict" not in kind:
         kind = f"{kind}_{preview_kind}"
@@ -812,7 +815,7 @@ def _mesh_preview_geometry(
     # thousand of them in tuples costs more than everything else here put
     # together, and nothing downstream needs them to be tuples.
     return [
-        (triangle, kind, normal, 0, owner)
+        (triangle, kind, normal, layer, owner)
         for triangle, normal in zip(corners, normals)
     ]
 
@@ -863,13 +866,18 @@ def inside_handle_conflict(
 ) -> str | None:
     if not box.lift_grabbers.enabled:
         return None
-    footprint = feature_footprint(box, one, base_z).polygon
-    try:
-        z0, z1 = _feature_z_range(box, one, base_z, mode)
-    except Exception:
-        # The normal feature build path owns malformed-feature errors. Avoid
-        # turning one bad editor draft into a whole-preview failure here.
-        return None
+    if is_text(one) and one.options.get("level") == "rim":
+        from organizer_inserts._text import rim_text_geometry
+        ledge, glyph, _cap, _surface = rim_text_geometry(box, one)
+        footprint = top_label_zone(box, one.options.get("rim_side", "back"))
+        z0 = min(float(ledge.bounds[0][2]), float(glyph.bounds[0][2]))
+        z1 = max(float(ledge.bounds[1][2]), float(glyph.bounds[1][2]))
+    else:
+        footprint = text_placed_outline(one) if is_text(one) else feature_footprint(box, one, base_z).polygon
+        try:
+            z0, z1 = _feature_z_range(box, one, base_z, mode)
+        except Exception:
+            return None
     for name, polygon, h0, h1 in lift_grabber_collision_volumes(box):
         xy_overlap = footprint.buffer(MIN_FEATURE_GAP).intersects(polygon)
         z_overlap = z1 + MIN_FEATURE_GAP > h0 and h1 + MIN_FEATURE_GAP > z0
@@ -982,23 +990,26 @@ def validate_customization_clearance(
     mode: str = "fused",
 ) -> None:
     features = list(features)
-    rim_feature = next((one for one in features if is_text(one) and one.options.get("level") == "rim"), None)
-    if rim_feature is not None:
-        label = text_of(rim_feature)
-        label_location = str(rim_feature.options.get("rim_side", "back"))
     base_z = base_height(box, mode)
     for index, one in enumerate(features):
         if is_text(one) and one.options.get("level") == "rim":
+            handle_conflict = inside_handle_conflict(box, one, base_z, mode)
+            if handle_conflict is not None:
+                raise ValueError(
+                    f"rim Text on {one.options.get('rim_side', 'back')} overlaps the "
+                    f"{handle_conflict}; choose another rim side or move the handle"
+                )
             continue
         # A default divider's zone can span most of the floor even though its
         # actual printed wall is a narrow strip - judge the customization
         # keep-outs against what is really built, not the editor's drag zone.
         # Always use the actual footprint, regardless of fused vs removable mode.
         footprint = feature_footprint(box, one, base_z)
+        physical = text_placed_outline(one) if is_text(one) else footprint.polygon
         for name, zone in _customization_zones(
             box, label, label_location, scoop, mode
         ):
-            if footprint.overlaps(zone, MIN_FEATURE_GAP):
+            if physical.distance(zone.polygon) < MIN_FEATURE_GAP:
                 raise ValueError(
                     f"interior part {index + 1} ({one.kind}) overlaps the {name}; "
                     "move or resize the part in the 2D layout"
@@ -1009,6 +1020,31 @@ def validate_customization_clearance(
                 f"interior part {index + 1} ({one.kind}) overlaps the "
                 f"{handle_conflict}; move, resize, or lower the part"
             )
+
+
+def validate_rim_text_divider_clearance(box: BoxSpec, features: Iterable[Feature], base_z: float) -> None:
+    """Keep independently built rim Text and Divider label shelves apart."""
+    features = tuple(features)
+    rims = [one for one in features if is_text(one) and one.options.get("level") == "rim"]
+    dividers = [one for one in features if one.kind == "divider"
+                and one.options.get("label_divisions")
+                and one.options.get("division_level") == "rim"]
+    if not rims or not dividers:
+        return
+    from organizer_inserts._text import rim_text_geometry
+    for rim in rims:
+        ledge, glyph, _cap, _surface = rim_text_geometry(box, rim)
+        for divider in dividers:
+            for _name, shelf_or_text, _raised in divider_division_texts(box, divider, base_z):
+                a, b = ledge.bounds, shelf_or_text.bounds
+                xy = (a[0][0] < b[1][0] and b[0][0] < a[1][0]
+                      and a[0][1] < b[1][1] and b[0][1] < a[1][1])
+                z = a[0][2] < b[1][2] and b[0][2] < a[1][2]
+                if xy and z:
+                    raise ValueError(
+                        "rim Text overlaps a Divider rim label shelf; move the Text "
+                        "to another rim side or turn off one label system"
+                    )
 
 
 def preview_geometry(
@@ -1029,18 +1065,29 @@ def preview_geometry(
     same placeholder prism a placed feature would, reported through
     ``draft_error`` instead.
     """
-    features = tuple(features)
-    rim_feature = next((one for one in features if is_text(one) and one.options.get("level") == "rim"), None)
-    if rim_feature is None and draft is not None and is_text(draft) and draft.options.get("level") == "rim":
-        rim_feature = draft
-    if rim_feature is not None:
-        label = text_of(rim_feature)
-        label_location = str(rim_feature.options.get("rim_side", "back"))
+    migrated, label, label_location = _canonical_rim_label(
+        box, Layout(tuple(features), mode), label, label_location,
+    )
+    features = migrated.features
+    effective_features = list(features)
+    if draft is not None:
+        if selected is not None and 0 <= selected < len(effective_features):
+            effective_features[selected] = draft
+        else:
+            effective_features.append(draft)
+    active_rim = tuple(one for one in effective_features if is_text(one) and one.options.get("level") == "rim")
     validate_inside_handles_mode(box, mode)
     validate_scoop_lift_grabbers(box, scoop)
     validate_side_openings(box)
-    validate_side_opening_label(box, label, label_location)
-    validate_edge_mount_label_conflicts(box, label, label_location)
+    for rim_text in active_rim:
+        side = str(rim_text.options.get("rim_side") or "back")
+        validate_side_opening_label(box, text_of(rim_text), side)
+        validate_edge_mount_label_conflicts(box, text_of(rim_text), side)
+        handle_conflict = inside_handle_conflict(box, rim_text, base_height(box, mode), mode)
+        if handle_conflict:
+            raise ValueError(f"rim Text on {side} overlaps the {handle_conflict}; choose another rim side")
+    if not active_rim:
+        validate_edge_mount_label_conflicts(box, "", "bottom")   # lid / stack rules need no label
 
     features = resolve_text_features(
         box, features,
@@ -1051,6 +1098,7 @@ def preview_geometry(
         ],
         base_z=base_height(box, mode), mode=mode,
     )
+    validate_rim_text_divider_clearance(box, effective_features, base_height(box, mode))
     outer, cavity = preview_rings(box)
     floor_cavity = _valid_preview_floor_ring(cavity)
     floor_z, rim_z = box.base_thickness, box.z
@@ -1151,20 +1199,40 @@ def preview_geometry(
     conflicting_feature_indexes = []
     feature_overhang_mm = [0.0 for _ in features]
     draft_overhang_mm = 0.0
+    draft_error = None
+    destinations = {}
+    for index, one in enumerate(features):
+        if not is_text(one):
+            continue
+        destination = ("rim", one.options.get("rim_side", "back")) if one.options.get("level") == "rim" else ("base", "")
+        if destination in destinations:
+            feature_errors.append("Only one Text is allowed on each base or rim side; remove a duplicate")
+            invalid_feature_indexes.extend((destinations[destination], index))
+        destinations[destination] = index
+    if draft is not None and is_text(draft):
+        destination = ("rim", draft.options.get("rim_side", "back")) if draft.options.get("level") == "rim" else ("base", "")
+        if destination in destinations and destinations[destination] != selected:
+            draft_error = "Only one Text is allowed on each base or rim side; change Text Type or remove the other Text"
     reserved = _customization_zones(box, tidy, location, scoop, mode)
 
     occupied = [
-        None if (is_text(one) and one.options.get("level") == "rim")
-        else (feature_footprint(box, one, base_z) if mode == "fused" else one.zone)
-        for one in features
+        None if (is_text(one) and one.options.get("level") == "rim") else zone
+        for one, zone in zip(features, occupied_zones(box, features, base_z, mode))
     ]
+    def floor_overlap(a: Feature, a_zone: Zone, b: Feature, b_zone: Zone) -> bool:
+        if mode == "fused" and (is_text(a) or is_text(b)):
+            a_shape = text_placed_outline(a) if is_text(a) else a_zone.polygon
+            b_shape = text_placed_outline(b) if is_text(b) else b_zone.polygon
+            return a_shape.distance(b_shape) < MIN_FEATURE_GAP
+        return a_zone.overlaps(b_zone, MIN_FEATURE_GAP)
 
-    draft_error = None
     if draft is not None:
         if not (is_text(draft) and draft.options.get("level") == "rim"):
             draft_customization_footprint = feature_footprint(box, draft, base_z)
             conflict = next(
-                (name for name, zone in reserved if draft_customization_footprint.overlaps(zone, MIN_FEATURE_GAP)),
+                (name for name, zone in reserved if
+                 ((text_placed_outline(draft) if is_text(draft) else draft_customization_footprint.polygon)
+                  .distance(zone.polygon) < MIN_FEATURE_GAP)),
                 None,
             )
             if conflict is not None:
@@ -1175,16 +1243,17 @@ def preview_geometry(
                     draft_error = f"{draft.kind}: overlaps the {handle_conflict}"
             if draft_error is None:
                 try:
-                    draft_occ = feature_footprint(box, draft, base_z) if mode == "fused" else draft.zone
+                    draft_occ = occupied_zones(box, (draft,), base_z, mode)[0]
                     for idx, one_occ in enumerate(occupied):
                         if one_occ is None:
                             continue
                         if selected is not None and idx == selected:
                             continue
-                        if draft_occ.overlaps(one_occ, MIN_FEATURE_GAP):
-                            conflicting_feature_indexes.append(idx)
-                            if draft_error is None:
-                                draft_error = (
+                        if not floor_overlap(draft, draft_occ, features[idx], one_occ):
+                            continue
+                        conflicting_feature_indexes.append(idx)
+                        if draft_error is None:
+                            draft_error = (
                                     f"a {draft.kind} and a {features[idx].kind} overlap; "
                                     f"leave at least {MIN_FEATURE_GAP:g} mm between features"
                                 )
@@ -1201,7 +1270,7 @@ def preview_geometry(
                 continue
             if selected is not None and j == selected and draft is not None:
                 continue
-            if one_occ.overlaps(occupied[j], MIN_FEATURE_GAP):
+            if floor_overlap(features[i], one_occ, features[j], occupied[j]):
                 feature_errors.append(
                     f"a {features[i].kind} and a {features[j].kind} overlap; "
                     f"leave at least {MIN_FEATURE_GAP:g} mm between features"
@@ -1303,7 +1372,21 @@ def preview_geometry(
                     pick_faces[face_index] = {"type": "draft"}
 
     for feature_index, one in enumerate(features):
+        if selected is not None and feature_index == selected and draft is not None:
+            continue
         if is_text(one) and one.options.get("level") == "rim":
+            try:
+                from organizer_inserts._text import rim_text_geometry
+                ledge, glyph, _cap, _surface = rim_text_geometry(box, one)
+                for mesh, kind in ((ledge, "top_label_ledge"), (glyph, "feature_text")):
+                    start = len(geometry)
+                    faces = _mesh_preview_geometry(mesh, kind)
+                    geometry.extend(faces)
+                    for face_index in range(start, len(geometry)):
+                        pick_faces[face_index] = {"type": "saved", "index": feature_index}
+            except Exception as error:
+                feature_errors.append(f"text: {error}")
+                invalid_feature_indexes.append(feature_index)
             continue
         if selected is not None and feature_index == selected and draft is not None:
             continue
@@ -1315,7 +1398,9 @@ def preview_geometry(
         # feature layout, not customization collision).
         customization_footprint = feature_footprint(box, one, base_z)
         conflict = next(
-            (name for name, zone in reserved if customization_footprint.overlaps(zone, MIN_FEATURE_GAP)),
+            (name for name, zone in reserved if
+             ((text_placed_outline(one) if is_text(one) else customization_footprint.polygon)
+              .distance(zone.polygon) < MIN_FEATURE_GAP)),
             None,
         )
         if conflict is not None:
@@ -1352,6 +1437,7 @@ def preview_geometry(
                     max(0.0, top_z - box.z), 3,
                 )
             for solid in built:
+                layer = solid.metadata.get("wavefinity_preview_layer")
                 # Export never cuts a text object with the driver-access
                 # tunnel (it is a separate part cut in only at its own
                 # pocket), so leave text features out of this - every other
@@ -1362,8 +1448,11 @@ def preview_geometry(
                         box, solid, geometry_owner=f"{one.kind} feature")
                 if cut_side_opening_pieces and not is_text(one):
                     solid = apply_side_openings(box, solid)
+                if layer:
+                    solid.metadata["wavefinity_preview_layer"] = layer
                 start = len(geometry)
-                geometry.extend(_mesh_preview_geometry(solid, tag))
+                faces = _mesh_preview_geometry(solid, tag)
+                geometry.extend(faces)
                 for face_index in range(start, len(geometry)):
                     pick_faces[face_index] = {"type": "saved", "index": feature_index}
         except Exception as error:
@@ -1391,18 +1480,25 @@ def preview_geometry(
             try:
                 solids = build_features(box, [draft], base_z, layout_zone(box, mode),
                                         mode=mode, include_text=True)
+                if is_text(draft) and draft.options.get("level") == "rim":
+                    from organizer_inserts._text import rim_text_geometry
+                    solids = [rim_text_geometry(box, draft)[0], *solids]
                 if solids:
                     draft_overhang_mm = round(max(
                         0.0, max(float(s.bounds[1][2]) for s in solids) - box.z,
                     ), 3)
                 for solid in solids:
+                    layer = solid.metadata.get("wavefinity_preview_layer")
                     if cut_draft:
                         solid = apply_edge_mount_hole_cuts(
                             box, solid, geometry_owner=f"{draft.kind} draft")
                     if cut_draft_side_opening:
                         solid = apply_side_openings(box, solid)
+                    if layer:
+                        solid.metadata["wavefinity_preview_layer"] = layer
                     start = len(geometry)
-                    geometry.extend(_mesh_preview_geometry(solid, "draft_invalid"))
+                    faces = _mesh_preview_geometry(solid, "draft_invalid")
+                    geometry.extend(faces)
                     for face_index in range(start, len(geometry)):
                         pick_faces[face_index] = {"type": "draft"}
                 built = True
@@ -1422,18 +1518,25 @@ def preview_geometry(
             try:
                 solids = build_features(box, [draft], base_z, layout_zone(box, mode),
                                         mode=mode, include_text=True)
+                if is_text(draft) and draft.options.get("level") == "rim":
+                    from organizer_inserts._text import rim_text_geometry
+                    solids = [rim_text_geometry(box, draft)[0], *solids]
                 if solids:
                     draft_overhang_mm = round(max(
                         0.0, max(float(s.bounds[1][2]) for s in solids) - box.z,
                     ), 3)
                 for solid in solids:
+                    layer = solid.metadata.get("wavefinity_preview_layer")
                     if cut_draft:
                         solid = apply_edge_mount_hole_cuts(
                             box, solid, geometry_owner=f"{draft.kind} draft")
                     if cut_draft_side_opening:
                         solid = apply_side_openings(box, solid)
+                    if layer:
+                        solid.metadata["wavefinity_preview_layer"] = layer
                     start = len(geometry)
-                    geometry.extend(_mesh_preview_geometry(solid, f"draft_{draft.kind}"))
+                    faces = _mesh_preview_geometry(solid, f"draft_{draft.kind}")
+                    geometry.extend(faces)
                     for face_index in range(start, len(geometry)):
                         pick_faces[face_index] = {"type": "draft"}
             except Exception as error:
@@ -1592,12 +1695,25 @@ def generate_box_file(
 
 def text_report(box: BoxSpec, one: Feature, surface: float) -> dict[str, object]:
     """What one text interior part came out as, for the export report."""
+    if one.options.get("level") == "rim":
+        from organizer_inserts._text import rim_text_geometry
+        _ledge, glyph, cap, receiving_z = rim_text_geometry(box, one)
+        return {
+            "text": text_of(one), "text_type": "At rim — Raised" if text_is_raised(one) else "At rim — Inlaid",
+            "rim_side": str(one.options.get("rim_side") or "back"),
+            "cap_height_mm": round(cap, 3),
+            "depth_mm": round(text_depth(one), 3),
+            "surface_z_mm": round(receiving_z, 3),
+            "raised": text_is_raised(one),
+            "glyph_bounds_mm": [round(float(value), 3) for value in glyph.bounds.flatten()],
+        }
     cap, _outline = text_fitted(one)
     placed = text_placed_outline(one)
     minx, miny, maxx, maxy = placed.bounds
     centre_x, centre_y = one.zone.centre
     return {
         "text": text_of(one),
+        "text_type": "On base — Raised" if text_is_raised(one) else "On base — Inlaid",
         "cap_height_mm": round(cap, 3),
         "quarter_turns": int(one.options.get("quarter_turns", 0) or 0) % 4,
         "auto": bool(one.options.get("auto")),
@@ -1764,14 +1880,16 @@ def generate_organizer_files(
     stack_request = box
     box = stack_effective_box(box)
     validate_inside_handles_mode(box, layout.mode)
-    rim_feature = next((one for one in layout.features if is_text(one) and one.options.get("level") == "rim"), None)
-    if rim_feature is not None:
-        label = text_of(rim_feature)
-        label_location = str(rim_feature.options.get("rim_side", "back"))
+    layout, label, label_location = _canonical_rim_label(box, layout, label, label_location)
+    rim_features = tuple(one for one in layout.features if is_text(one) and one.options.get("level") == "rim")
     validate_scoop_lift_grabbers(box, scoop)
     validate_side_openings(box)
-    validate_side_opening_label(box, label, label_location)
-    validate_edge_mount_label_conflicts(box, label, label_location)
+    for rim_text in rim_features:
+        side = str(rim_text.options.get("rim_side") or "back")
+        validate_side_opening_label(box, text_of(rim_text), side)
+        validate_edge_mount_label_conflicts(box, text_of(rim_text), side)
+    if not rim_features:
+        validate_edge_mount_label_conflicts(box, "", "bottom")   # lid / stack rules need no label
     layout = replace(
         layout,
         features=resolve_text_features(
@@ -1784,6 +1902,7 @@ def generate_organizer_files(
         ),
     )
     layout.validate(box)
+    validate_rim_text_divider_clearance(box, layout.features, base_height(box, layout.mode))
     tidy = clean_label(label)
     location = label_position(label_location)
     side = rim_label_side(location)
@@ -1805,6 +1924,10 @@ def generate_organizer_files(
         else insert_footprint(box, layout.mode)
     )
     texts = build_texts(box, layout.features, text_surface, text_limit)
+    from organizer_inserts._text import rim_text_geometry
+    rim_parts = [rim_text_geometry(box, one) for one in rim_features]
+    rim_texts = [(text_of(one), parts[1], text_is_raised(one))
+                 for one, parts in zip(rim_features, rim_parts)]
 
     def _resolve_file(filename_fn, *args, **kwargs) -> Path:
         base_name = filename_fn(*args, **kwargs)
@@ -1824,7 +1947,9 @@ def generate_organizer_files(
         output = _resolve_file(box_filename, stack_request, part_name)
         # The rim label's ledge is part of the body, so it goes on before the
         # floor text is sunk into it.
-        inlays = list(texts)
+        inlays = list(texts) + rim_texts
+        if rim_parts:
+            body = union([body, *(parts[0] for parts in rim_parts)])
         if tidy:
             body, ledge_inlay = make_top_labelled_box(box, tidy, body, side)
             inlays.append((tidy, ledge_inlay, False))
@@ -1833,7 +1958,7 @@ def generate_organizer_files(
         # the driver-access cut also clears any fused geometry blocking it.
         body = apply_edge_mount_structure(box, body)
         body = apply_pegboard_mount_structure(box, body)
-        reported = apply_texts(body, texts)
+        reported = apply_texts(body, texts + rim_texts)
         edge_text = edge_mount_text_object(box)
         if edge_text is not None and box.edge_mount.label_type == "integrated":
             _edge_label, edge_mesh, edge_raised = edge_text
@@ -1865,10 +1990,12 @@ def generate_organizer_files(
     else:
         box_output = _resolve_file(box_filename, stack_request, part_name)
         plain_box = make_box(box)
+        insert_features = tuple(one for one in layout.features
+                                if not (is_text(one) and one.options.get("level") == "rim"))
         insert = (
-            make_cartridge_insert(box, layout.features)
+            make_cartridge_insert(box, insert_features)
             if layout.mode == "cartridge"
-            else make_fitted_insert(box, layout.features)
+            else make_fitted_insert(box, insert_features)
         )
         if scoop:
             insert = union([insert, _removable_scoop(box, layout.mode)])
@@ -1882,6 +2009,10 @@ def generate_organizer_files(
         # apply to the box shell only - never to the removable insert.
         body = plain_box
         box_inlays: list[tuple[str, trimesh.Trimesh, bool]] = []
+        if rim_parts:
+            body = union([body, *(parts[0] for parts in rim_parts)])
+            body = apply_texts(body, rim_texts)
+            box_inlays.extend(rim_texts)
         if tidy:
             body, box_inlay = make_top_labelled_box(box, tidy, body, side)
             box_inlays.append((tidy, box_inlay, False))
@@ -1901,11 +2032,12 @@ def generate_organizer_files(
         body = apply_side_openings(box, body)
         reported_box = body
         if box_inlays:
-            export_text_body_3mf(
+            box_written = export_text_body_3mf(
                 reported_box, [(name, mesh) for name, mesh, _raised in box_inlays],
                 box_output, box_output.stem,
             )
         else:
+            box_written = []
             export_mesh(reported_box, box_output, "wavy_box")
         if texts:
             written = export_text_body_3mf(
@@ -1921,8 +2053,9 @@ def generate_organizer_files(
             "insert": _part_result(
                 insert_output, mesh_report("organizer_insert", reported_insert)
             ),
-            "layout": insert_report("organizer_insert", layout.features, insert),
+            "layout": insert_report("organizer_insert", insert_features, insert),
             "text_objects": written,
+            "box_text_objects": box_written,
         }
     if box.edge_mount.label_enabled and box.edge_mount.label_type == "separate":
         label_body = make_edge_mount_label_part(box)
@@ -2048,6 +2181,8 @@ def summarize_interior_parts(layout: Layout, scoop: bool = False) -> str:
         elif kind == "text":
             opts = getattr(feature, "options", {}) or {}
             txt = str(opts.get("text", "")).strip()
+            if opts.get("level") == "rim":
+                continue  # Shell lettering, not part of the removable insert.
             name = f'Text ("{txt}")' if txt else "Text"
         else:
             name = kind.capitalize()
@@ -2099,19 +2234,15 @@ def inventory_bin_record(
         file_names = box_filename(box, part_name)
 
     tidy_label = clean_label(label)
-    floor_texts = [
-        str(f.options.get("text", "")).strip()
+    text_labels = [
+        f"{str(f.options.get('text')).strip()} ({'rim ' + str(f.options.get('rim_side') or 'back') if f.options.get('level') == 'rim' else 'base'})"
         for f in layout.features
         if getattr(f, "kind", "") == "text" and str(f.options.get("text", "")).strip()
     ]
-    if tidy_label and floor_texts:
-        label_text = f"{tidy_label} (rim), {', '.join(floor_texts)} (floor)"
-    elif tidy_label:
-        label_text = tidy_label
-    elif floor_texts:
-        label_text = f"{', '.join(floor_texts)} (floor)"
-    else:
-        label_text = "-"
+    if tidy_label and not any(f.options.get("level") == "rim" for f in layout.features if f.kind == "text"):
+        # An old top-level rim label: plain when alone, tagged beside other Text.
+        text_labels.insert(0, f"{tidy_label} (rim)" if text_labels else tidy_label)
+    label_text = ", ".join(text_labels) if text_labels else "-"
 
     interior_text = b4b_note or summarize_interior_parts(layout, scoop=scoop)
 
@@ -2132,7 +2263,8 @@ def inventory_bin_record(
         "x": phys_x, "y": phys_y, "z": phys_z,
         "label": "" if label_text == "-" else label_text,
         "interior": interior_text,
-        "name": clean_label(part_name) or tidy_label or (floor_texts[0] if floor_texts else ""),
+        "name": clean_label(part_name) or tidy_label or next(
+            (text_of(one) for one in layout.features if is_text(one) and text_of(one)), ""),
         "kind": "b4b" if b4b_note else "bin",
         "stack": (
             b4b_stack_mode
@@ -2592,12 +2724,12 @@ def default_feature(
         scoop_height = (box.z - box.base_thickness) * 0.6
         width, depth = bounds.width, min(scoop_height, bounds.depth / 2.0)
     elif kind == TEXT_KIND:
-        # Wide and short, the shape lettering actually wants, and starting
-        # life placed for itself rather than dumped in the middle.
-        width = min(max(16.0, bounds.width * 0.6), bounds.width)
-        depth = min(max(8.0, TEXT_CAP_HEIGHT_IDEAL + 2.0), bounds.depth)
-        feature_options = {"text": "label", "auto": True, "quarter_turns": 0,
-                           "raised": False, "depth": TEXT_DEPTH}
+        # The starting zone is only an interaction aid; the glyph determines
+        # its canonical bounds after fitting into the usable base.
+        width, depth = bounds.width, bounds.depth
+        feature_options = {"text": "label", "level": "base", "quarter_turns": 0,
+                           "raised": False, "depth": TEXT_DEPTH,
+                           "cap_height": TEXT_CAP_HEIGHT_IDEAL}
     else:
         width = _starter_span(bounds.width, 16.0, mode)
         depth = _starter_span(bounds.depth, 16.0, mode)
@@ -2606,7 +2738,7 @@ def default_feature(
     # bin floor and must keep following it when Width, Length, or wall depth
     # changes. Snapping this derived zone can leave it stale or slightly
     # short; ordinary parts still use the editor grid below.
-    one_zone = bounds if kind == "divider" else snapped_zone(raw, box, mode)
+    one_zone = bounds if kind in {"divider", TEXT_KIND} else snapped_zone(raw, box, mode)
     if kind == "scoop":
         one = Feature(kind, one_zone, along=along, options=feature_options)
         one_zone = scoop_zone(
@@ -2614,7 +2746,7 @@ def default_feature(
             box.base_thickness if mode == "fused" else box.base_thickness + BASE_PLATE,
             mode,
         )
-    return Feature(
+    result = Feature(
         kind,
         one_zone,
         item=item,
@@ -2625,19 +2757,24 @@ def default_feature(
         options=feature_options,
         full_span=(kind == "divider"),
     )
+    if kind == TEXT_KIND:
+        from organizer_inserts._text import canonical_text_feature
+        try:
+            fitted_cap = text_fitted(result)[0]
+            result = replace(result, options={**result.options, "cap_height": fitted_cap})
+        except ValueError:
+            pass
+        return canonical_text_feature(result)
+    return result
 
 
 def auto_text_feature(box: BoxSpec, label: str, mode: str = "fused") -> Feature:
-    """A text interior part that places itself, from a plain string.
-
-    Used by the ``--label`` command-line sugar and anywhere else a piece of
-    lettering arrives without a zone of its own. ``resolve_text_features``
-    replaces the provisional zone with the spot it actually finds.
-    """
+    """A centered base Text from the command-line label shortcut."""
     one = default_feature(box, TEXT_KIND, mode=mode)
     options = dict(one.options)
     options["text"] = str(label).strip()
-    return replace(one, options=options)
+    from organizer_inserts._text import canonical_text_feature
+    return canonical_text_feature(replace(one, options=options))
 
 
 def convert_layout_mode(
@@ -2675,6 +2812,30 @@ def convert_layout_mode(
     return layout
 
 
+def _canonical_rim_label(
+    box: BoxSpec, layout: Layout, label: str, location: str,
+) -> tuple[Layout, str, str]:
+    """Retire the one-label design field after importing it as a Text feature."""
+    if box.b4b.enabled:
+        return layout, label, location
+    side = rim_label_side(label_position(location))
+    if not clean_label(label) or not side:
+        return layout, label, location
+    if any(is_text(one) and one.options.get("level") == "rim"
+           and one.options.get("rim_side", "back") == side
+           and text_of(one) == clean_label(label) for one in layout.features):
+        return layout, "", "bottom"
+    try:
+        zone = Zone(*top_label_zone(box, side).bounds)
+    except ValueError:
+        zone = Zone(-4.0, -4.0, 4.0, 4.0)
+    feature = Feature("text", zone, options={
+        "text": clean_label(label), "level": "rim", "rim_side": side,
+        "raised": False, "depth": TEXT_DEPTH,
+    })
+    return replace(layout, features=layout.features + (feature,)), "", "bottom"
+
+
 def design_to_dict(
     box: BoxSpec,
     layout: Layout,
@@ -2695,6 +2856,11 @@ def design_to_dict(
     legacy_lid = lid_spec(box)
     if getattr(box.stack, "mode", "none") == "lid":
         box = replace(box, stack=StackSpec(), lid=legacy_lid)
+    layout, label, label_location = _canonical_rim_label(box, layout, label, label_location)
+    if not box.b4b.enabled:
+        layout = replace(layout, features=resolve_text_features(
+            box, layout.features, base_z=base_height(box, layout.mode), mode=layout.mode,
+        ))
     box = normalize_stack_settings(box)
     if box.pegboard.enabled:
         if box.b4b.enabled:
@@ -3095,6 +3261,7 @@ def design_from_dict(
     ))
     label = str(data.get("label", ""))
     location = label_position(data.get("label_position", "bottom"))
+    layout, label, location = _canonical_rim_label(box, layout, label, location)
     scoop = bool(data.get("scoop", False))
     # The retired scoop checkbox made a real ramp but was not represented in
     # the interior-parts list. Turn it into the equivalent editable feature
@@ -3135,7 +3302,18 @@ def design_from_dict(
                 base_z=base_height(box, layout.mode), mode=layout.mode,
             ),
         )
-        layout.validate(box)
+        try:
+            layout.validate(box)
+        except ValueError as error:
+            # Old designs could contain independently placed duplicate Text.
+            # Let them open for editing; preview/generation still reports the
+            # destination conflict until the extra Text is removed.
+            legacy_text = any(raw.get("kind") == "text"
+                              and not raw.get("options", {}).get("text_v2")
+                              for raw in data.get("layout", {}).get("features", ()))
+            if not (str(error).startswith("Only one Text is allowed")
+                    or (legacy_text and "will not fit the bin" in str(error))):
+                raise
     return (box, layout, label, str(data.get("part_name", "")), location, scoop)
 
 

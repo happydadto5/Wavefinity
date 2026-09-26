@@ -875,20 +875,20 @@ height follows that limit; an explicit unsafe height is refused at generation.
 
 **Fused** is the default and gives the most usable floor.
 
-Floor lettering is a **text** interior part, placed and checked like every other
-one — see [Text on the floor, and the rim label](#text-on-the-floor-and-the-rim-label).
-A bin may carry several. In removable modes each is inlaid into the insert plate
-rather than hidden under it. The **rim label** is separate: 5 mm letters when
-they fit, otherwise automatically smaller, inlaid flush into a 7 mm-deep rear
-ledge just below the rim. Its underside rises at 45 degrees and prints without
-supports.
+Lettering is a **Text** part with one Text Type (On base or At rim, Inlaid or
+Raised) — see [Text — centered lettering on the base or at a rim wall](#text--centered-lettering-on-the-base-or-at-a-rim-wall).
+A bin carries one On-base Text and up to one At-rim Text per rim side. In
+removable modes On-base Text is inlaid into the insert plate rather than hidden
+under it, while At-rim Text stays on the bin shell: 5 mm letters when they fit,
+otherwise automatically smaller, on a 7 mm-deep ledge just below the rim whose
+underside rises at 45 degrees and prints without supports.
 
 The optional **curved scoop** spans the usable width at the front of the bin and
 rises 60% up the usable wall height, so a part sweeps forward and lifts out
 over the low front lip — the opposite wall from the rim-label ledge. In
 removable modes it is part of the insert; in fused mode it is part of the box.
-An auto-placed text moves clear of the scoop strip, and the 2D editor shades the
-space reserved by a scoop or rim-label ledge and refuses overlapping parts.
+The 2D editor shades the space reserved by a scoop. Fused-layout clearance
+against base Text uses the actual letter shapes; rim Text reserves no floor.
 
 What a scoop reserves is not its whole run. The curve meets the floor
 tangentially, so its innermost millimetres are only microns proud of it — on a
@@ -1156,11 +1156,28 @@ effect when only one tool fits.
 | `nest` | Photo-traced Photo Nest: a Recessed Cavity deck (default) or a Raised Wall, on the bin floor or removable insert, with Automatic (default), Off, or Custom finger access, or Push Out (Raised Wall only). `rim` (thickness) is fixed | `clearance`, `smoothing`, `tool_thickness`, `holder_style`, `cavity_depth`, `cavity_depth_mode`, `auto_size`, `lift_assist`, `finger_position`, `finger_width`, `push_position`, `push_area`, `push_depth` |
 | `bore` | Round, hex or square holes for items standing up. One `bore_style`: `base_straight` (default), `base_wavy`, `walls_straight`, `walls_wavy`. Sizing is persistent: `xy_size_mode` (`manual` / `bore_to_bin` / `bin_to_bore`; Walls Only offers only `manual` and `bin_to_bore`, default `bin_to_bore`) and `height_size_mode` (`manual` / `bore_to_bin` / `bin_to_bore`). X/Y counts are always explicit. Auto Height under an Edge Mount screwdriver-access hole stops 2 mm below the lowest cutter. A Base cavity may be as deep as the Bore is tall (`depth == height`) | `bore_style`, `depth`, `height`, `wall` (Walls Only only), `columns`, `rows`, `xy_size_mode`, `height_size_mode` |
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
-| `divider` | One or more straight or leaning subdividing walls along X or Y, with optional sloped tool-slot bottoms | `height`, `thickness`, `angle`, `spacing`, `bottom_angle`, `reverse_bottom`, `alternate_bottom`, `minimal_bottom`, `bottom_supports` |
+| `divider` | One or more straight or leaning subdividing walls along X or Y, with optional sloped tool-slot bottoms and per-compartment **Labels** (No label / On base / Rim level) | `height`, `thickness`, `angle`, `spacing`, `bottom_angle`, `reverse_bottom`, `alternate_bottom`, `minimal_bottom`, `bottom_supports` |
 | `pocket` | Raised rectangular tray with a recessed centre and 0.5 mm chamfered edges | `height`, `wall` |
 | `slot` | Slot Rack: angled slots for driver bits, cards, and small tools | `height`, `depth`, `thickness`, `angle`, `wall`, `wall_style` |
 | `steps` | Tiered riser shelves that climb from front to back | `height`, `lip`, `count` |
-| `text` | Lettering sunk flush into the floor (or standing proud), one 3MF object each, any number per bin | `text`, `cap_height`, `quarter_turns`, `depth`, `raised`, `auto` |
+| `text` | Centered lettering, Inlaid or Raised, on the base or at a rim wall; one 3MF object each. One On-base Text per bin, one At-rim Text per rim side | `text`, `cap_height`, `quarter_turns`, `depth`, `raised`, `level`, `rim_side` |
+
+**Divider labels.** The **Labels** group has one **Label Type**: *No label*
+(default), *On base* or *Rim level*. Each compartment gets a text box whose
+grey placeholder shows its position (`1,1` is the front-left compartment;
+columns run left to right, then rows front to back). Placeholders are hints
+only — they are never saved or printed. Base labels are inlaid into the floor.
+Rim labels sit on a shelf against the chosen wall (Back for a new Divider; a
+saved side is kept) whose root runs into the real wavy wall material on both the
+flat top and the sloped underside, without reaching the outside skin. Each
+label's lettering is its own recessed part of the 3MF.
+
+**Bore supports.** A **Walls Only** Bore sized around its holes (`bin_to_bore`)
+reaches the bin wall with **thin webs** about one Bore wall thick — a straight
+web for Straight walls, a wavy web following Wavefinity's wall wave for Wavy —
+at most one per bin wall for each connected group of holes, only where there is
+a real gap. Sleeves that already touch a wall are simply fused to it, and every
+requested opening is re-cut after the webs are added, so a web never narrows it.
 
 **Slot Rack** makes angled slots for driver bits, cards, and small tools. It is
 separate from Divider, which makes upright compartment walls.
@@ -1180,8 +1197,9 @@ to the wall lean.
 
 A divider can also tilt the **bottoms of the tool slots** it forms, so a
 tool rests at an angle without the wall itself leaning. `bottom_angle`
-(0–75°, default 0 — a plain flat bin bottom, so older designs are
-unchanged) sets the rise, measured along the divider/tool direction: +X
+(0–80°, default 0 — a plain flat bin bottom, so older designs are
+unchanged; choosing Sloped in the editor starts at 45° and Curved at 60%,
+or the largest value that legally fits a short bin) sets the rise, measured along the divider/tool direction: +X
 (toward the right) for a divider that runs along X, +Y (toward the back)
 along Y. `reverse_bottom` sends the rise the other way; `alternate_bottom`
 flips every second slot, ordered across the divider zone, and
@@ -1437,53 +1455,55 @@ floor and the connector arms hang from the rim, so on any normal bin they are
 nowhere near each other; on a very shallow one they would meet, and asking for a
 connector then gives an error saying how tall the box needs to be.
 
-### Text on the floor, and the rim label
+### Text — centered lettering on the base or at a rim wall
 
-Floor lettering is an **interior part**, not a property of the bin — so a bin can
-carry **as many labels as it needs**: a size over each bore cluster, a name along
-the front. Pick **Text** from the palette, type what it should say, and it moves,
-resizes, turns and is checked against its neighbours through exactly the same
-editor path as a cradle or a divider.
+**Text** is one part with one **Text Type** control:
 
-Each text is **sunk into the surface it sits on**: that surface gets a pocket and
-the lettering is the solid that fills it flush, exported as **its own part of the
-3MF**. The `.3mf` is written as one assembly object with the body and every piece
-of lettering as named parts, so Bambu Studio / OrcaSlicer opens it directly — no
-"load as a single object with multiple parts?" prompt — and a
-`Metadata/model_settings.config` sidecar opens the body on **filament 1** and all
-lettering on **filament 2**, so the two-colour intent is already set. No print
-profile is embedded, so an opened file still uses the slicer's current printer
-and process. (A generic 3MF from a non-slicer tool: recent Bambu Studio may still
-note it "only contains geometry" — nothing is lost, and slicing is unaffected.)
+1. **On base — Inlaid** (the default)
+2. **On base — Raised**
+3. **At rim — Inlaid**
+4. **At rim — Raised**
 
-- **Its zone is its size.** Drag a corner and the lettering scales to fill it.
-  **Letter height** overrides that but is never allowed to overflow the box; a
-  box too small to hold the text at the **5 mm** minimum is refused, saying what
-  it needs.
-- **Place it for me** hands positioning back to the engine: stay centred where it
-  fits, otherwise move beside whatever is in the way, then turn, then shrink (no
-  smaller than **5 mm** on that path). Dragging, resizing or turning it by hand
-  switches that off, so it stays where you put it.
-- **Stand proud** puts the letters on top of the floor instead of sunk into it.
-  Either way they remain their own part on filament 2.
-- Sunk **0.4 mm** into the default 0.6 mm floor, leaving 0.2 mm beneath, and
-  reads correctly looking into the open box, which is the way the box prints.
-  The pocket and the inlay are exact complements: put them back together and you
-  get the plain box, to the last cubic micron.
-- In removable modes the lettering is inlaid into the **0.6 mm insert plate**
-  rather than hidden under it. Text that would hang over that plate's edge is
-  refused rather than clipped mid-letter.
+Text is **centered automatically** in its destination; there is no Footprint,
+Width/Depth, **Place it for me** or drag/offset control. Size comes from
+**Letter height** (new On-base Text starts at 15 mm and shrinks only if the
+bin needs it; never below the 5 mm minimum). **Turn** (0/90/180/270°) is
+kept for On-base Text; At-rim Text reads the right way up for its **Rim side**
+(default Back).
+
+- **Inlay depth** (Inlaid) or **Raised height** (Raised): Thin 0.2 mm, Default
+  0.4 mm, Thick 0.6 mm or Thickest 0.8 mm. Inlay depth is how deeply the
+  letters are cut into the receiving surface (the pocket keeps its backing);
+  Raised height is how far they stand above it. Deeper inlays require a thick
+  enough base or insert to leave at least 0.2 mm of backing.
+- Every Text is its **own part of the 3MF** (its own filament). The pocket and
+  the inlay are exact complements. In a removable insert the lettering is inlaid
+  into the **0.6 mm insert plate**.
+- **One On-base Text per bin** and **one At-rim Text per rim side**, because
+  each is centered on its destination. Different rim sides work independently.
+  A second Text on an occupied destination is refused with a clear message
+  instead of overlapping.
+- **At rim** Text belongs to the **bin shell**, never to a removable insert. It
+  sits on a **7 mm** shelf just below the rim, whose surface stays **3.4 mm**
+  below the rim so the stacking foot or lid still fits. **Raised** rim Text
+  lowers its shelf by the Raised height, so the top of the letters stays at that
+  safe datum. Rim Text reserves **no floor space**, but it cannot share a wall
+  with a Side Opening, a Separate Edge Mount label, a Divider rim-label shelf
+  or a real overlap with an Inside Handle.
+- Base Text keeps others away by its **real letter shapes** plus the normal gap,
+  not by an editor rectangle around them.
 - Two texts reading the same thing get distinct part names (`M3`, `M3 2`) — a
   3MF object name has to be unique or the second silently replaces the first.
+- **Old designs still open.** Footprint, `auto` placement and the old single
+  top-level rim label are read once and migrated: a base Text keeps its centre
+  and effective Letter height, an old rim label becomes one At-rim Text on the
+  same wall, and the next save writes only the new fields.
 
-The **rim label** is the one piece of lettering that is not an interior part: it
-sits on a shelf just below the rear rim, so it has no floor zone to drag. It
-targets **5 mm** letters on a **7 mm** front-to-back shelf, automatically
-shrinking only when needed; a warning appears below **4 mm**. It remains a
-0.4 mm-deep flush inlay and its own part on filament 2; the shelf's underside
-rises 7 mm over its 7 mm run, an exact 45-degree self-supporting slope. Its
-3.4 mm rim clearance leaves room for the stacking foot or lid. Leave **Rim
-label** empty for none.
+The `.3mf` is written as one assembly object with the body and every piece of
+lettering as named parts, so Bambu Studio / OrcaSlicer opens it directly, and a
+`Metadata/model_settings.config` sidecar opens the body on **filament 1** and all
+lettering on **filament 2**. No print profile is embedded, so an opened file still
+uses the slicer's current printer and process.
 
 **The part name alone names the file**: `Box 48 x 48 x 40 Driver rack.3mf`.
 Lettering does not appear in it — with several labels there is no answer to which
@@ -1608,7 +1628,7 @@ Side Openings are for **ordinary bins only** - hidden for Storage Box and Base
 Trim. Lid & Stacking limits the upper handle to keep its required
 bridge. Curved supported openings use a pointed supportless arch with a
 minimum 45-degree underside, rather than the old fixed arch.
-A rim label, an Edge Mount
+A rim Text, an Edge Mount
 mounting wall, or an Inside Grip may not share a wall with a Side Opening -
 different walls are fine for all three. The scoop and other interior parts
 are never globally blocked; the cutter is authoritative wherever a Side
@@ -1942,8 +1962,8 @@ these numbers look arbitrary and are not.
 | Lock bump | **0.35** proud, 1.0 tall, **1.2** long | on every wave extremum, so every **2.0** |
 | Bump corner clearance | **2.0** | keeps two walls' bumps apart at a corner |
 | Bump band | top **4.0** below the rim | |
-| Text letters | **15.0** ideal, **5.0** auto minimum, **5.0** floor | sunk **0.4**; a zone sizes it, a hand-set height is capped by that zone |
-| Rim label | **5.0** target letters, **7.0** ledge | auto-shrinks; warns below 4.0 mm; 45-degree underside |
+| Text letters | **15.0** usual base height, **5.0** readable minimum | centered; Letter height sets size; Inlay depth / Raised height **0.2–0.8** subject to backing |
+| At-rim Text | **5.0** target letters, **7.0** ledge | auto-shrinks; 45-degree underside; Raised lowers the ledge by its height |
 | Scoop | **60%** of usable wall height | full usable width at front |
 
 Connector tolerance, length and height were chosen from a **printed five-clip fit
@@ -2080,16 +2100,14 @@ Measured and regression-tested; run the suite for the current exact count.
 - Pocket volume removed == inlay volume; the two intersect by **<0.01 mm³**;
   union restores the plain box exactly. Checked on 48x48, 16x48 and 24x40
 - Strict 3MF, **zero warnings**; one assembly object, one build item, the body
-  and every piece of lettering as named parts — verified with three floor texts
-  and with a rim label alongside floor text. `model_settings.config` opens the
+  and every piece of lettering as named parts — verified with one base Text
+  and independent rim sides. `model_settings.config` opens the
   body on filament 1 and all lettering on filament 2
 - A raised text takes nothing out of the body; a recessed one is its exact
   complement
-- An auto-placed text moves around holders, reserved scoop/ledge space and other
-  auto texts with a 1 mm clearance; the same placement is used by the 2D editor,
-  3D preview, mesh pocket and export report
-- Neighbours are judged on the lettering's **ink**, not the box it was dragged
-  out to, so a short word in a wide box does not push a holder away
+- Base Text remains centered; fused neighbours are judged against the actual
+  buffered glyph outline, not the empty corners of its selection bounds.
+  Rim Text is outside floor occupancy in every layout mode.
 
 **Insert layouts**
 - Nine registered builders: cradle, Snug Holder, bore, center post, divider,

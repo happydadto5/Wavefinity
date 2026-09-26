@@ -89,7 +89,7 @@ class EdgeMountLabelConflictTests(unittest.TestCase):
 class EdgeMountBrowserConflictTests(unittest.TestCase):
     def run_js(self, cases):
         prelude = "\n".join(function_source(name) for name in (
-            "rimLabelSideForDesign", "modifierConflicts", "newModifierConflict", "insideGripWalls", "sideOpeningState"))
+            "rimLabelSidesForDesign", "modifierConflicts", "newModifierConflict", "insideGripWalls", "sideOpeningState"))
         return node_run("""
 const SIDE_OPENING_SIDE_IDS = ["front", "back", "left", "right"];
 const SIDE_OPENING_DEFAULTS = {};

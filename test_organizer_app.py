@@ -1478,9 +1478,11 @@ class BinCustomizationTests(unittest.TestCase):
         kinds = [kind for _points, kind, _normal, _layer, _owner in geometry["geometry"]]
         self.assertIn("top_label_ledge", kinds)
         self.assertIn("scoop", kinds)
+        # Rim lettering is shell material, not floor occupancy: only the scoop
+        # reserves floor.
         self.assertEqual(
             [name for name, _zone in geometry["customization_zones"]],
-            ["rim label ledge", "scoop"],
+            ["scoop"],
         )
 
     def test_supports_cannot_collide_with_fixed_customizations(self) -> None:
@@ -1936,17 +1938,23 @@ class InsertEditorTests(unittest.TestCase):
         box, rebuilt, label, part_name, location, scoop = organizer_app.design_from_dict(
             organizer_app.design_to_dict(spec, layout, "M3", "Nozzles", "top", True)
         )
-        self.assertEqual((box, label, part_name, location), (spec, "M3", "Nozzles", "top"))
+        # The old one-label fields are migration input: the rim label reopens as
+        # one At-rim Text feature on the same wall.
+        self.assertEqual((box, label, part_name, location), (spec, "", "Nozzles", "bottom"))
         # The retired scoop checkbox reopens as an editable scoop interior part,
         # and the hidden flag is gone.
         self.assertFalse(scoop)
-        self.assertEqual([one.kind for one in rebuilt.features], ["bore", "scoop"])
-        self.assertEqual(rebuilt.features[0], feature)
+        self.assertEqual(sorted(one.kind for one in rebuilt.features), ["bore", "scoop", "text"])
+        bore = next(one for one in rebuilt.features if one.kind == "bore")
+        self.assertEqual((bore.kind, bore.zone), (feature.kind, feature.zone))
+        rim = next(one for one in rebuilt.features if one.kind == "text")
+        self.assertEqual((rim.options["text"], rim.options["level"], rim.options["rim_side"]),
+                         ("M3", "rim", "back"))
         # Saving the migrated design and reopening it is stable.
         again = organizer_app.design_from_dict(
             organizer_app.design_to_dict(spec, rebuilt, label, part_name, location, scoop)
         )
-        self.assertEqual(again, (spec, rebuilt, "M3", "Nozzles", "top", False))
+        self.assertEqual(again, (spec, rebuilt, "", "Nozzles", "bottom", False))
 
     def test_old_saved_design_defaults_to_bottom_label_without_scoop(self) -> None:
         spec = BoxSpec(48.0, 48.0, 35.0)
@@ -1981,9 +1989,14 @@ class InsertEditorTests(unittest.TestCase):
             (used_box, used_layout, _, used_label, used_part,
              used_label_location, used_scoop) = generate.call_args.args
             self.assertEqual((used_box.x, used_box.y, used_box.z), (48.0, 32.0, 50.0))
-            self.assertEqual(used_layout, layout)
-            self.assertEqual((used_label, used_part), ("M3", "Nozzles"))
-            self.assertEqual((used_label_location, used_scoop), ("top", False))
+            # The old one-label fields are migration input: the label comes back
+            # as one canonical At-rim Text feature on the same wall.
+            self.assertEqual([one.kind for one in used_layout.features], ["text"])
+            rim = used_layout.features[0]
+            self.assertEqual((rim.options["text"], rim.options["level"], rim.options["rim_side"]),
+                             ("M3", "rim", "back"))
+            self.assertEqual((used_label, used_part), ("", "Nozzles"))
+            self.assertEqual((used_label_location, used_scoop), ("bottom", False))
 
     def test_organizer_cli_keeps_saved_side_openings(self) -> None:
         openings = SideOpeningSpec(
@@ -2035,7 +2048,8 @@ class InsertEditorTests(unittest.TestCase):
             self.assertEqual([one.kind for one in used_layout.features], ["text"])
             said = used_layout.features[0]
             self.assertEqual(said.options["text"], "BOLTS")
-            self.assertTrue(said.options["auto"])
+            self.assertEqual(said.options["level"], "base")
+            self.assertNotIn("auto", said.options)
             # The rim label stays empty, and the part name is seeded once.
             self.assertEqual((used_label, used_location), ("", "bottom"))
             self.assertEqual(used_part, "BOLTS")
@@ -2128,7 +2142,8 @@ class InsertEditorTests(unittest.TestCase):
                 spec, organizer_app.Layout(mode="separate"), Path(directory),
                 label="M3", label_location="top", scoop=True,
             )
-            self.assertEqual(result["label"]["position"], "top")
+            self.assertEqual(result["texts"][0]["rim_side"], "back")
+            self.assertEqual(result["box_text_objects"], ["M3"])
             self.assertEqual(result["customizations"]["scoop"], True)
             self.assertEqual(
                 validate_3mf(Path(result["box"]["output"]), 2, multipart=("M3",))["warnings"],
@@ -2469,7 +2484,7 @@ class DimensionReadoutTests(unittest.TestCase):
 
 
 class TextExportTests(unittest.TestCase):
-    """Any number of text parts, each its own object for its own filament."""
+    """One base and independent rim Text parts export as separate objects."""
 
     @staticmethod
     def _text(said, zone, **options):
@@ -2481,8 +2496,8 @@ class TextExportTests(unittest.TestCase):
         spec = BoxSpec(48.0, 48.0, 40.0)
         layout = organizer_app.Layout((
             self._text("M3", (-20.0, 6.0, -2.0, 15.0)),
-            self._text("M4", (2.0, 6.0, 20.0, 15.0)),
-            self._text("M5", (-20.0, -15.0, -2.0, -6.0), raised=True),
+            self._text("M4", (2.0, 6.0, 20.0, 15.0), level="rim", rim_side="back"),
+            self._text("M5", (-20.0, -15.0, -2.0, -6.0), level="rim", rim_side="front", raised=True),
         ), "fused")
         with tempfile.TemporaryDirectory() as directory:
             result = organizer_app.generate_organizer_files(
@@ -2502,7 +2517,7 @@ class TextExportTests(unittest.TestCase):
         spec = BoxSpec(48.0, 48.0, 40.0)
         layout = organizer_app.Layout((
             self._text("M3", (-20.0, 6.0, -2.0, 15.0)),
-            self._text("M4", (2.0, 6.0, 20.0, 15.0)),
+            self._text("M4", (2.0, 6.0, 20.0, 15.0), level="rim", rim_side="back"),
         ), "fused")
         with tempfile.TemporaryDirectory() as directory:
             result = organizer_app.generate_organizer_files(
@@ -2539,7 +2554,7 @@ class TextExportTests(unittest.TestCase):
         spec = BoxSpec(48.0, 48.0, 40.0)
         layout = organizer_app.Layout((
             self._text("M3", (-20.0, 6.0, -2.0, 15.0)),
-            self._text("M3", (2.0, 6.0, 20.0, 15.0)),
+            self._text("M3", (2.0, 6.0, 20.0, 15.0), level="rim", rim_side="back"),
         ), "fused")
         with tempfile.TemporaryDirectory() as directory:
             result = organizer_app.generate_organizer_files(
@@ -2598,7 +2613,7 @@ class TextExportTests(unittest.TestCase):
         wide, deep = spec.usable_inside
         edge = self._text("M3", (-wide / 2.0, deep / 2.0 - 9.0, 0.0, deep / 2.0))
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "hangs over the edge"):
+            with self.assertRaisesRegex(ValueError, "reaches outside the bin|will not fit the bin|hangs over the edge"):
                 organizer_app.generate_organizer_files(
                     spec, organizer_app.Layout((edge,), "separate"), Path(directory)
                 )
@@ -2614,7 +2629,7 @@ class TextExportTests(unittest.TestCase):
                 label_location="top", part_name="Both",
             )
             self.assertEqual(result["text_objects"], ["M3", "BOLTS"])
-            self.assertEqual(result["label"]["position"], "top")
+            self.assertEqual(result["texts"][1]["rim_side"], "back")
             self.assertEqual(
                 validate_3mf(
                     Path(result["box"]["output"]), 3, multipart=("M3", "BOLTS")

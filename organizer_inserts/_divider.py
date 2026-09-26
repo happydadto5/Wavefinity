@@ -6,16 +6,17 @@ import trimesh
 from shapely import affinity
 from shapely.geometry import MultiPolygon, Polygon, box as shapely_box
 from organizer_engine import (
-    BoxSpec, TEXT_DEPTH, TOP_LABEL_CAP_HEIGHT, TOP_LABEL_LEDGE_DEPTH,
+    BoxSpec, LOCK_SAFE_SKIN, TEXT_DEPTH, TOP_LABEL_CAP_HEIGHT, TOP_LABEL_LEDGE_DEPTH,
     TOP_LABEL_MARGIN, WAVE_AMPLITUDE, WAVE_LENGTH, _rounded, flat_cavity_polygon,
     require_text_backing, text_outline, text_prism, top_label_surface_z,
-    wavy_cavity_polygon, build_scoop_region, wall_depth_for, wave_value,
+    wavy_cavity_polygon, wavy_outer_polygon, build_scoop_region, wall_depth_for, wave_value,
 )
 from organizer_geometry import (
     _extrude_polygon, _extrude_xz_profile, _extrude_yz_profile,
     difference, intersection, union,
 )
 from ._core import Feature, Zone, connector_keep_out
+from ._text import preview_inlay_layer
 from ._divider_cells import (
     DividerCell,
     _divider_cross_centres,
@@ -36,11 +37,11 @@ from ._registry import (
     register_setting_interactions,
     resolved_options,
 )
-from ._scoop import scoop_region, scoop_settings
+from ._scoop import scoop_default_depth, scoop_region, scoop_settings
 MAX_DIVIDER_ANGLE = 45.0
 MIN_WEDGE_EDGE = 0.4
 DIVIDER_CHAMFER = 1.0
-BOTTOM_SLOPE_MAX = 75.0
+BOTTOM_SLOPE_MAX = 80.0
 BOTTOM_EMBED = 0.4
 BOTTOM_CROSSBAR_THICKNESS = 2.4
 BOTTOM_CROSSBAR_CHAMFER = 1.0
@@ -57,6 +58,11 @@ DIVISION_TEXT_MARGIN = TOP_LABEL_MARGIN + WAVE_AMPLITUDE
 # lettering inlaid flush for its own filament colour.
 DIVISION_SHELF_DEPTH = TOP_LABEL_LEDGE_DEPTH
 DIVISION_SHELF_EMBED = 0.6
+# A shelf that reaches the bin's own wavy wall roots this far past the flat
+# compartment edge. That is more than the wall ripple plus the wall itself, so
+# the flat top and the sloped underside both run into real wall material; the
+# outside safety skin then trims it back so nothing can show through.
+DIVISION_SHELF_WALL_ROOT = 2.0
 DIVISION_SHELF_TEXT_MARGIN = TOP_LABEL_MARGIN
 DIVISION_CAP_MAX = TOP_LABEL_CAP_HEIGHT
 DIVISION_SHELF_MIN_DEPTH = 2.5
@@ -68,6 +74,11 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
     along = one.along
     count = one.count or 1
     span = (zone.y1 - zone.y0) if along == "x" else (zone.x1 - zone.x0)
+    maximum_bottom_angle = divider_max_bottom_angle(box, one, base_z)
+    try:
+        curved_default_depth = scoop_default_depth(box, base_z)
+    except ValueError:
+        curved_default_depth = 0.0
     return {
         "wall_style": "straight",
         "thickness": RIB_THICKNESS,
@@ -84,6 +95,9 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
         # angle adds nothing, so an older design with none of these keys
         # keeps exactly the geometry it always had.
         "bottom_angle": 0.0,
+        "bottom_default_angle": min(45.0, maximum_bottom_angle),
+        "bottom_max_angle": maximum_bottom_angle,
+        "curved_default_depth": curved_default_depth,
         "slope_base": 0,
         "reverse_bottom": 0,
         "alternate_bottom": 0,
@@ -99,6 +113,33 @@ def divider_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, f
         "count_x": 0,
         "count_y": 0,
     }
+
+
+def divider_max_bottom_angle(box: BoxSpec, one: Feature, base_z: float) -> float:
+    """Maximum slope from the same longest-run/height rule as the builder."""
+    options = one.options or {}
+    height = float(options.get("height") or connector_keep_out(box) - base_z)
+    run = one.zone.width if one.along == "x" else one.zone.depth
+    grid_x, grid_y = divider_grid_counts(options)
+    if grid_x or grid_y:
+        x_edges, y_edges = divider_grid_edges(one.zone, grid_x, grid_y)
+        edges = x_edges if one.along == "x" else y_edges
+        spans = normalized_compartment_spans(
+            options.get("compartment_spans"), len(y_edges) - 1, len(x_edges) - 1,
+        )
+        if spans:
+            run = max([max(hi - lo for lo, hi in zip(edges, edges[1:]))] + [
+                (x_edges[col + col_span] - x_edges[col]) if one.along == "x"
+                else (y_edges[row + row_span] - y_edges[row])
+                for row, col, row_span, col_span in spans
+            ])
+        else:
+            run = max(hi - lo for lo, hi in zip(edges, edges[1:]))
+    if run <= 0 or height <= 0:
+        return 0.0
+    limit = min(height, box.z - base_z)
+    return max(0.0, min(BOTTOM_SLOPE_MAX,
+                        math.degrees(math.atan(limit / run)) - 1e-6))
 
 
 def _divider_scoops(
@@ -637,16 +678,29 @@ def _divider_grid_texts(
         )
         require_text_backing(z, DIVISION_TEXT_DEPTH, what="division label")
         try:
-            solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH)
+            solid = preview_inlay_layer(text_prism(outline, z, depth=DIVISION_TEXT_DEPTH))
         except Exception:
             continue
         results.append((text, solid, False))
     return results
 
 
+def _shelf_edge_is_bin_wall(
+    box: BoxSpec, zone: Zone, edge: float, edge_axis: str, inward: float,
+) -> bool:
+    """Whether a shelf edge is the bin's own wall rather than a divider crest."""
+    whole = Zone.whole(box)
+    if edge_axis == "x":
+        wall, whole_edge = (zone.y1, whole.y1) if inward < 0 else (zone.y0, whole.y0)
+    else:
+        wall, whole_edge = (zone.x1, whole.x1) if inward < 0 else (zone.x0, whole.x0)
+    return abs(edge - wall) < 1e-6 and abs(wall - whole_edge) < 0.05
+
+
 def _division_shelf_solid(
     edge: float, edge_axis: str, span_lo: float, span_hi: float,
     inward: float, z_top: float, depth: float, embed: float,
+    wall_box: BoxSpec | None = None,
 ) -> trimesh.Trimesh:
     """A rim-height label ledge welded along one edge of a compartment.
 
@@ -657,14 +711,27 @@ def _division_shelf_solid(
     that falls ``depth`` back to the edge line, with a short buried lip so it
     fuses cleanly to the divider crest (or bin wall) it sits on.
     """
-    near = edge - inward * embed          # buried, inside the crest / wall
     far = edge + inward * depth           # inner top lip, over the compartment
-    profile = Polygon([
-        (near, z_top),
-        (far, z_top),
-        (edge, z_top - depth),
-        (near, z_top - depth),
-    ])
+    if wall_box is not None:
+        # Bin wall: keep the same 45-degree underside going on into the wall
+        # instead of stopping in a flat ledge that could hang in air where the
+        # wall ripples away from the compartment edge.
+        root = DIVISION_SHELF_WALL_ROOT
+        near = edge - inward * root
+        profile = Polygon([
+            (near, z_top),
+            (far, z_top),
+            (edge, z_top - depth),
+            (near, z_top - depth - root),
+        ])
+    else:
+        near = edge - inward * embed      # buried, inside the crest
+        profile = Polygon([
+            (near, z_top),
+            (far, z_top),
+            (edge, z_top - depth),
+            (near, z_top - depth),
+        ])
     if not profile.is_valid:
         profile = profile.buffer(0)
     length = span_hi - span_lo
@@ -675,6 +742,14 @@ def _division_shelf_solid(
     else:
         solid = _extrude_xz_profile(profile, length)
         solid.apply_translation((0.0, centre, 0.0))
+    if wall_box is not None:
+        # Never let the deeper root reach the outside: stay inside the wall's
+        # exterior safety skin.
+        safe = wavy_outer_polygon(wall_box).buffer(-LOCK_SAFE_SKIN)
+        low = max(0.0, z_top - depth - DIVISION_SHELF_WALL_ROOT - 0.5)
+        limit = _extrude_polygon(safe, z_top + 0.5 - low)
+        limit.apply_translation((0.0, 0.0, low))
+        solid = intersection([solid, limit])
     return solid
 
 
@@ -763,6 +838,8 @@ def _divider_grid_rim_texts(
             shelf = _division_shelf_solid(
                 edge, edge_axis, lo, hi, inward, z_top, depth_here,
                 DIVISION_SHELF_EMBED,
+                box if spec_feature.full_span and _shelf_edge_is_bin_wall(
+                    box, spec_feature.zone, edge, edge_axis, inward) else None,
             )
             outline = text_outline(text, shared_cap)
             if turn:
@@ -770,21 +847,21 @@ def _divider_grid_rim_texts(
                     outline, turn, origin=(0.0, 0.0), use_radians=False,
                 )
             outline = affinity.translate(outline, xoff=cx, yoff=cy)
-            inlay = text_prism(outline, z_top)
+            inlay = preview_inlay_layer(text_prism(outline, z_top))
         except Exception:
             continue
-        try:
-            shelf = difference([shelf, inlay])
-        except Exception:
-            pass
+        # The shelf is plain body material. The lettering is its own recessed
+        # object: the exporter cuts the pocket out of the body and writes the
+        # inlay flush in it, exactly like floor Text.
         results.append((text, shelf, True))
-        results.append((text, inlay, True))
+        results.append((text, inlay, False))
     return results
 
 
 def _division_side_shelves(
     box: BoxSpec, along: str, zone: Zone, slots: list[tuple[float, float]],
     labels: list, thickness: float, base_z: float, height: float, side: str,
+    full_span: bool = False,
 ) -> list[tuple[str, trimesh.Trimesh, bool]]:
     """Rim-level division labels on self-supporting shelves lined up against
     one bin wall, with a single letter height shared by every label.
@@ -805,7 +882,9 @@ def _division_side_shelves(
         (along == "x" and side in ("top", "bottom"))
         or (along == "y" and side in ("left", "right"))
     )
-    embed = DIVISION_SHELF_EMBED if on_crest else 0.0
+    # Both the flat crown and the sloped root need material past the wall
+    # boundary. A coplanar cross-wall shelf is not a printable joint.
+    embed = DIVISION_SHELF_EMBED
 
     def geom(slot_lo: float, slot_hi: float):
         """(edge, edge_axis, span_lo, span_hi, inward) for one compartment."""
@@ -872,6 +951,8 @@ def _division_side_shelves(
         try:
             shelf = _division_shelf_solid(
                 edge, edge_axis, lo, hi, inward, z_top, depth_here, embed,
+                box if full_span and _shelf_edge_is_bin_wall(
+                    box, zone, edge, edge_axis, inward) else None,
             )
         except Exception:
             continue
@@ -894,16 +975,15 @@ def _division_side_shelves(
             cy = (span_lo + span_hi) / 2.0
         outline = affinity.translate(outline, xoff=cx, yoff=cy)
         try:
-            inlay = text_prism(outline, z_top)
+            inlay = preview_inlay_layer(text_prism(outline, z_top))
         except Exception:
             results.append((text, shelf, True))
             continue
-        try:
-            shelf = difference([shelf, inlay])
-        except Exception:
-            pass
+        # The shelf is plain body material. The lettering is its own recessed
+        # object: the exporter cuts the pocket out of the body and writes the
+        # inlay flush in it, exactly like floor Text.
         results.append((text, shelf, True))
-        results.append((text, inlay, True))
+        results.append((text, inlay, False))
     return results
 
 
@@ -949,6 +1029,7 @@ def divider_division_texts(
         return _division_side_shelves(
             box, along, zone, slots, labels, thickness, base_z, height,
             str(options.get("division_side", "back")),
+            spec_feature.full_span,
         )
     z = base_z
 
@@ -1014,7 +1095,7 @@ def divider_division_texts(
 
         require_text_backing(z, DIVISION_TEXT_DEPTH, what="division label")
         try:
-            solid = text_prism(outline, z, depth=DIVISION_TEXT_DEPTH)
+            solid = preview_inlay_layer(text_prism(outline, z, depth=DIVISION_TEXT_DEPTH))
             results.append((text, solid, False))
         except Exception:
             continue

@@ -264,6 +264,8 @@ class Layout:
         check_layout(box, self.features, bounds, box.base_thickness, self.mode)
         if self.mode == "cartridge":
             for one in self.features:
+                if one.kind == "text":
+                    continue  # Derived glyph bounds use whole cells for occupancy.
                 values = (
                     one.zone.x0 - bounds.x0,
                     one.zone.y0 - bounds.y0,
@@ -403,6 +405,8 @@ def _item_dict(item: Item | None) -> dict | None:
 
 
 def layout_to_dict(layout: Layout) -> dict:
+    from ._text import canonical_text_feature
+    layout = replace(layout, features=tuple(canonical_text_feature(one) for one in layout.features))
     return {
         "version": 1,
         "mode": layout.mode,
@@ -435,6 +439,7 @@ def layout_to_dict(layout: Layout) -> dict:
 
 
 def layout_from_dict(data: dict) -> Layout:
+    from ._text import canonical_text_feature
     if data.get("version", 1) != 1:
         raise ValueError(f"unsupported layout version {data.get('version')!r}")
     made = []
@@ -461,7 +466,7 @@ def layout_from_dict(data: dict) -> Layout:
         count = 3 if kind == "steps" and raw_count is None else (
             None if raw_count is None else int(raw_count)
         )
-        made.append(Feature(
+        part = Feature(
             kind, Zone(*coords), item, count,
             str(raw.get("along", "x")), dict(raw.get("options", {})),
             bool(raw.get("full_span", False)),
@@ -473,7 +478,11 @@ def layout_from_dict(data: dict) -> Layout:
             float(raw.get("scale", 1.0)),
             (tuple((float(point[0]), float(point[1])) for point in raw["source_contour"])
              if raw.get("source_contour") else None),
-        ))
+        )
+        # Legacy auto-placement and a fresh Text Type move are resolved once, by
+        # resolve_text_features, which has the bin to place them in.
+        made.append(part if kind == "text" and (part.options.get("auto") or part.options.get("retarget"))
+                    else canonical_text_feature(part))
     object_height = data.get("object_height_mm")
     return Layout(
         tuple(made), str(data.get("mode", "fused")),
