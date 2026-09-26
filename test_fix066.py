@@ -73,6 +73,16 @@ class EdgeMountLabelConflictTests(unittest.TestCase):
         organizer_app.validate_edge_mount_label_conflicts(
             box(label=False, holes=True, direct=True), "", "back")
 
+    def test_saved_direct_stack_separate_label_round_trips_then_rejects(self):
+        original = box(direct=True)
+        saved = organizer_app.design_to_dict(original, Layout())
+        loaded, *_ = organizer_app.design_from_dict(saved)
+        self.assertTrue(loaded.edge_mount.label_enabled)
+        self.assertEqual(loaded.edge_mount.label_type, "separate")
+        self.assertEqual(loaded.stack.mode, "direct")
+        with self.assertRaisesRegex(ValueError, "direct Stackable Bin"):
+            self.preview(loaded)
+
 
 class EdgeMountBrowserConflictTests(unittest.TestCase):
     def run_js(self, cases):
@@ -114,12 +124,15 @@ process.stdout.write(JSON.stringify(cases.map(([prev, next]) => {{
             [d(label_type="integrated"), d(label_type="integrated", direct=True)],
             [d(label=False, holes=True), d(label=False, holes=True, direct=True)],
             [d(direct=True), d()],
+            [d(label_type="integrated", direct=True), d(direct=True)],
+            [d(label=False, direct=True), d(direct=True)],
         ])
         self.assertEqual(out, [
             "edge-mount-separate:rim-label:front", None, "edge-mount-separate:rim-label:back",
             "edge-mount-separate:lid", None, "edge-mount-separate:lid",
             "edge-mount-separate:rim-label:front", None,
             "edge-mount-separate:direct-stack", None, None, None,
+            "edge-mount-separate:direct-stack", "edge-mount-separate:direct-stack",
         ])
 
     def test_lid_configuration_change_uses_conflict_guard(self):
@@ -130,6 +143,12 @@ process.stdout.write(JSON.stringify(cases.map(([prev, next]) => {{
         self.assertIn('const previous = clone(state.design);', handler)
         self.assertIn('readStackForm(state.design);', handler)
         self.assertIn('changedDesign(previous);', handler)
+
+        label_start = source.index('$("#edge-mount-label-mode")?.addEventListener("change"')
+        label_end = source.index('$("#edge-mount-holes-enabled")?.addEventListener("change"', label_start)
+        label_handler = source[label_start:label_end]
+        self.assertIn('syncEdgeMountEditorVisibility();', label_handler)
+        self.assertIn('changedDesign();', label_handler)
 
 
 class CurrentDocumentationTests(unittest.TestCase):
