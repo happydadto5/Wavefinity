@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-25 — Product updates through Fix 068
+
+- Added Straight/Wavy wall choices, stronger wall feet, and clear Save/Print choices with or without connectors (Fix 055).
+- Save and Print now report partial results truthfully, with retry-safe status handling (Fixes 056–057).
+- Bambu handoff preserves settings; startup, Parts UI, and Edge Mount hierarchy were clarified (Fix 058).
+- Lid & Stacking, Storage Box, and Pegboard settings now show only the controls that apply (Fix 060).
+- Space lifecycle handling was completed, and Separate Edge Mount labels gained their locking clip behavior (Fix 061).
+- Storage Box can make a fitting Inside Bin; Bore Walls Only now keeps matching feet and sizing bounds (Fixes 064–065).
+- Edge-label conflict guards and safe stale-file cleanup were added (Fix 066).
+- Spaces now use the current Inventory workflow and clear **In Space → Saved → Printed** status (Fix 067).
+- Bore now has four styles with persistent size modes (Fix 068).
+
 ## 2026-09-24 — Space preference memory, exact bin autosave and Parts UI cleanup (Fix 053)
 
 - A typed Space now remembers your last-used settings (bin size, wall, base, Fused/Removable, and each part's and option's settings such as Edge Mount plate thickness or Bore size). New Bin starts from them, limited by the Space's own size rules. It does not copy the last bin's parts, names or text; adding a part or option starts from its remembered settings with text blank.

@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import organizer_app
-from organizer_app import BoxSpec, Layout
+from organizer_app import BoxSpec, Layout, StackSpec
 from organizer_edge_mount import EdgeMountSpec
 from organizer_engine import LidSpec
 from test_fix061 import BatchFixture, design, record
@@ -15,7 +15,7 @@ from organizer_inventory import change_design_status, load_inventory, save_desig
 from test_space_preferences import function_source, node_run
 
 
-def box(label_type="separate", side="front", label=True, lid=False, holes=False):
+def box(label_type="separate", side="front", label=True, lid=False, holes=False, direct=False):
     return BoxSpec(
         48.0, 56.0, 40.0,
         edge_mount=EdgeMountSpec(
@@ -23,6 +23,7 @@ def box(label_type="separate", side="front", label=True, lid=False, holes=False)
             label_type=label_type, holes_enabled=holes,
         ),
         lid=LidSpec(enabled=True) if lid else LidSpec(),
+        stack=StackSpec(mode="direct") if direct else StackSpec(),
     )
 
 
@@ -60,6 +61,18 @@ class EdgeMountLabelConflictTests(unittest.TestCase):
             self.preview(spec)
         self.assertEqual(spec.edge_mount.label_type, "separate")
 
+    def test_direct_stack_with_separate_rejected_but_integrated_and_screws_allowed(self):
+        spec = box(direct=True)
+        with self.assertRaisesRegex(ValueError, "direct Stackable Bin"):
+            self.preview(spec)
+        with self.assertRaisesRegex(ValueError, "direct Stackable Bin"):
+            self.generate(spec)
+        self.assertEqual(spec.stack.mode, "direct")
+        organizer_app.validate_edge_mount_label_conflicts(
+            box(label_type="integrated", direct=True), "", "back")
+        organizer_app.validate_edge_mount_label_conflicts(
+            box(label=False, holes=True, direct=True), "", "back")
+
 
 class EdgeMountBrowserConflictTests(unittest.TestCase):
     def run_js(self, cases):
@@ -80,10 +93,13 @@ process.stdout.write(JSON.stringify(cases.map(([prev, next]) => {{
 """)
 
     def test_conflict_parity(self):
-        def d(label_type="separate", side="front", rim="", pos="back", lid=False):
+        def d(label_type="separate", side="front", rim="", pos="back", lid=False, direct=False,
+              label=True, holes=False):
             return {"label": rim, "label_position": pos,
-                    "box": {"edge_mount": {"label_enabled": True, "label_type": label_type, "side": side},
-                            "lid": {"enabled": lid}}}
+                    "box": {"edge_mount": {"label_enabled": label, "holes_enabled": holes,
+                                             "label_type": label_type, "side": side},
+                            "lid": {"enabled": lid},
+                            "stack": {"mode": "direct"} if direct else {}}}
         base = d()
         out = self.run_js([
             [base, d(rim="X", pos="front")],
@@ -94,12 +110,38 @@ process.stdout.write(JSON.stringify(cases.map(([prev, next]) => {{
             [d(label_type="integrated", lid=True), d(lid=True)],
             [d(rim="X", pos="front", label_type="integrated"), d(rim="X", pos="front")],
             [d(rim="X", pos="front"), d(rim="X", pos="front", side="back")],
+            [d(), d(direct=True)],
+            [d(label_type="integrated"), d(label_type="integrated", direct=True)],
+            [d(label=False, holes=True), d(label=False, holes=True, direct=True)],
+            [d(direct=True), d()],
         ])
         self.assertEqual(out, [
             "edge-mount-separate:rim-label:front", None, "edge-mount-separate:rim-label:back",
             "edge-mount-separate:lid", None, "edge-mount-separate:lid",
             "edge-mount-separate:rim-label:front", None,
+            "edge-mount-separate:direct-stack", None, None, None,
         ])
+
+    def test_lid_configuration_change_uses_conflict_guard(self):
+        source = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        start = source.index('["#lid-configuration", "#lid-thickness"')
+        end = source.index('  $("#lid-label-text")', start)
+        handler = source[start:end]
+        self.assertIn('const previous = clone(state.design);', handler)
+        self.assertIn('readStackForm(state.design);', handler)
+        self.assertIn('changedDesign(previous);', handler)
+
+
+class CurrentDocumentationTests(unittest.TestCase):
+    def test_readme_records_current_holder_divider_and_side_opening_contracts(self):
+        readme = (Path(__file__).resolve().parent / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Slot Rack: angled slots", readme)
+        self.assertIn("Tiered riser shelves", readme)
+        self.assertNotIn('There is no separate "slot" kind', readme)
+        self.assertIn("full-span - also gets a 1 mm, 45-degree strengthening chamfer", readme)
+        self.assertNotIn("full-span divider does not get one yet", readme)
+        self.assertIn("**% from bottom** - defaults to 0%", readme)
+        self.assertIn("**% from top** - defaults to 0%", readme)
 
 
 class CommaFileStaleTests(BatchFixture):

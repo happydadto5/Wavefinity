@@ -1777,6 +1777,14 @@ function modifierConflicts(design) {
           "Use Integrated or remove the lid.",
       });
     }
+    if (box.stack?.mode === "direct") {
+      conflicts.push({
+        key: "edge-mount-separate:direct-stack",
+        message:
+          "A Separate Edge Mount label cannot be used with direct Stackable Bin because " +
+          "its inside clip occupies the stacking opening. Use Integrated or turn off direct stacking.",
+      });
+    }
   }
 
   if (edgeMount.holes_enabled) {

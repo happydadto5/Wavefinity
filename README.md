@@ -1157,13 +1157,12 @@ effect when only one tool fits.
 | `post` | Lightly tapered pegs for rolls, spools, sockets and ring-shaped parts | `diameter`, `height`, `spacing`, `taper` |
 | `divider` | One or more straight or leaning subdividing walls along X or Y, with optional sloped tool-slot bottoms | `height`, `thickness`, `angle`, `spacing`, `bottom_angle`, `reverse_bottom`, `alternate_bottom`, `minimal_bottom`, `bottom_supports` |
 | `pocket` | Raised rectangular tray with a recessed centre and 0.5 mm chamfered edges | `height`, `wall` |
+| `slot` | Slot Rack: angled slots for driver bits, cards, and small tools | `height`, `depth`, `thickness`, `angle`, `wall`, `wall_style` |
+| `steps` | Tiered riser shelves that climb from front to back | `height`, `lip`, `count` |
 | `text` | Lettering sunk flush into the floor (or standing proud), one 3MF object each, any number per bin | `text`, `cap_height`, `quarter_turns`, `depth`, `raised`, `auto` |
 
-There is no separate "slot" kind - a divider covers it. A slot's one real
-extra, a shallow groove with a solid floor left under it, was a narrower need
-than a full separator wall; the browser now defaults a new divider to run
-wall to wall and lets `count` place several of them, which covers dividing
-a bin into compartments in one action instead.
+**Slot Rack** makes angled slots for driver bits, cards, and small tools. It is
+separate from Divider, which makes upright compartment walls.
 
 A divider can lean up to **45 degrees** off vertical — the standard
 support-free FDM overhang limit — for holding what it stores at an angle
@@ -1197,13 +1196,14 @@ crossbars that touch the same theoretical sloped plane, print support-free
 plastic. Either way the normal structural bin floor or removable-insert
 plate is untouched — this is only the material added above it.
 
-Every divider - wedge, straight-leaning or plain vertical - also gets a
-1 mm, 45-degree chamfer where its two long faces meet the floor
+Every divider path that meets the floor - wedge, straight-leaning, plain
+vertical, or full-span - also gets a 1 mm, 45-degree strengthening chamfer
+where its two long faces meet the floor
 (`DIVIDER_CHAMFER`). It is a pure addition below the wall's stated profile,
 not a substitute for any of it: the lean and thickness the fields describe
-are exactly what is built above that first millimetre. A straight
-(non-leaning) full-span divider does not get one yet - it is built by a
-separate, simpler path that has not been extended to match.
+are exactly what is built above that first millimetre. A full-span divider is
+built by its own trimmed path, which gives it the same strengthening foot while
+still following the true interior wall outline.
 
 A divider can also be told to run the full width or depth of the bin and
 hug the box's true wavy wall exactly — not the safe straight-sided
@@ -1588,10 +1588,10 @@ never change. Default is off.
   prefers Left + Right when both are legal.
 - **Opening size** - Small (8 mm), Medium (10 mm, default), Large (15 mm)
   or XL (20 mm).
-- **% from bottom** - defaults to 100%. It sets how far down the opening
-  reaches; 100% reaches the top of the base but never cuts into it.
-- **% from top** - defaults to 100%. Lowering it leaves progressively more
-  material above the opening.
+- **% from bottom** - defaults to 0%. It leaves that percentage of the usable
+  wall material below the opening; raising it leaves more material below.
+- **% from top** - defaults to 0%. It leaves that percentage of the usable
+  wall material above the opening; raising it leaves more material above.
 
 A wall needs to be at least **2 Wavefinity units (16 mm)** long to take a
 Side Opening at all, with a 4 mm solid corner shoulder kept at each end of

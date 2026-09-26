@@ -61,6 +61,7 @@ from organizer_engine import (
     lid_enabled,
     lid_spec,
     lid_stackable,
+    direct_stack_enabled,
     placed_label_outline,
     preview_rings,
     make_box,
@@ -258,7 +259,7 @@ def validate_side_opening_label(box: BoxSpec, label: str, label_location: str) -
 
 
 def validate_edge_mount_label_conflicts(box: BoxSpec, label: str, label_location: str) -> None:
-    """A Separate Edge Mount label cannot share the rim region with a rim label or lid.
+    """A Separate Edge Mount label cannot share its clip space with other parts.
 
     Its deep inside leg (Fix 061) occupies the near-rim inside wall, so the
     combination cannot seat. Integrated labels are unaffected. Checked here
@@ -278,6 +279,11 @@ def validate_edge_mount_label_conflicts(box: BoxSpec, label: str, label_location
         raise ValueError(
             "A Separate Edge Mount label cannot be used with a lid. "
             "Use Integrated or remove the lid."
+        )
+    if direct_stack_enabled(box):
+        raise ValueError(
+            "A Separate Edge Mount label cannot be used with direct Stackable Bin because "
+            "its inside clip occupies the stacking opening. Use Integrated or turn off direct stacking."
         )
 
 
