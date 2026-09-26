@@ -3,6 +3,30 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
+let engineeringInputId = 0;
+const engineeringInputSelector = 'input[type="number"], input[inputmode="numeric"], input[inputmode="decimal"]';
+function suppressEngineeringAutofill(root = document) {
+  const inputs = root.matches?.(engineeringInputSelector)
+    ? [root]
+    : root.querySelectorAll?.(engineeringInputSelector) || [];
+  for (const input of inputs) {
+    input.autocomplete = "off";
+    if (!input.name || !input.name.startsWith("wavefinity-")) {
+      const identity = input.id || input.dataset.draft || input.dataset.dividerScoopDepth || "field";
+      const safeIdentity = identity.replace(/[^a-zA-Z0-9_-]+/g, "-");
+      input.name = `wavefinity-${safeIdentity}-${++engineeringInputId}`;
+    }
+  }
+}
+suppressEngineeringAutofill();
+new MutationObserver(records => {
+  for (const record of records) {
+    for (const node of record.addedNodes) {
+      if (node.nodeType === Node.ELEMENT_NODE) suppressEngineeringAutofill(node);
+    }
+  }
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 function flashField(input) {
   if (!input) return;
   input.classList.remove("field-flash");
@@ -4420,7 +4444,8 @@ function syncDraftEditorIdentity(kind, info) {
   const description = $("#draft-description");
 
   title.textContent = info.title;
-  description.textContent = info.description;
+  description.textContent = "";
+  description.hidden = true;
 
   title.hidden = isNest || kind === "bore";
   // Fix 058 Correction 1, C1.4A: the palette keeps its short description for
@@ -4431,7 +4456,7 @@ function syncDraftEditorIdentity(kind, info) {
   // hierarchy makes the redundant "Add a lid or make matching bins stack
   // together." sentence unnecessary once the editor is open; the palette
   // tile keeps it for discoverability.
-  description.hidden = isNest || kind === "edge_mount" || kind === "lid_stacking";
+  description.hidden = true;
 
   $(".support-editor")?.classList.toggle("nest-editor", isNest);
 }
@@ -5034,7 +5059,10 @@ function renderDraftFields() {
   // Bore and Photo Nest carry their own identity inside their controls, so the
   // grey panel blurb just wastes space there.
   const descEl = $("#draft-description");
-  if (descEl) descEl.hidden = one.kind === "bore" || one.kind === "nest";
+  if (descEl) {
+    descEl.textContent = "";
+    descEl.hidden = true;
+  }
   let html = "";
   // Keys pulled up into the "Repeats" cluster, so the body loop skips them.
   const repeatKeys = new Set();
@@ -5443,21 +5471,41 @@ function renderDraftFields() {
     );
 
     const bottomMode = scoopConfig ? "scoop" : hasSlope ? "slope" : "flat";
-    html += `<div class="editor-group"><span class="editor-group-label">Bottom</span>`;
-    html += `<label class="wide">Bottom<select data-draft="option:bottom_mode">
+    html += `<div class="editor-group divider-bottom-group">`;
+    html += `<div class="divider-bottom-row"><label>Bottom Type<select data-draft="option:bottom_mode">
       <option value="flat" ${bottomMode === "flat" ? "selected" : ""}>Flat</option>
       <option value="slope" ${bottomMode === "slope" ? "selected" : ""}>Sloped</option>
-      <option value="scoop" ${bottomMode === "scoop" ? "selected" : ""}>Curved scoop</option>
+      <option value="scoop" ${bottomMode === "scoop" ? "selected" : ""}>Curved</option>
     </select></label>`;
 
     if (hasSlope) {
       const explicitAngle = Object.prototype.hasOwnProperty.call(opt, "bottom_angle");
-      const angleVal = explicitAngle ? opt.bottom_angle : (number(state.draftResolvedOptions?.bottom_angle, 0) || 20);
+      const angleVal = explicitAngle
+        ? number(opt.bottom_angle, 45)
+        : number(state.draftResolvedOptions?.bottom_angle, 20);
+      const angleChoices = [10, 20, 30, 40, 45, 50, 60, 70, 80];
+      const legacyAngle = angleChoices.includes(angleVal) ? "" : `<option value="${escapeHtml(angleVal)}" selected>${escapeHtml(angleVal)}° · Existing</option>`;
+      html += `<label>Slope angle<select data-draft="option:bottom_angle">${angleChoices.map(angle =>
+        `<option value="${angle}" ${angle === angleVal ? "selected" : ""}>${angle}°</option>`).join("")}${legacyAngle}</select></label>`;
+    } else if (scoopConfig) {
+      const scoopDepth = Object.prototype.hasOwnProperty.call(scoopConfig, "depth")
+        ? number(scoopConfig.depth, 60) : number(dividerScoopDefaultDepth(), 60);
+      const depthChoices = [10, 20, 30, 40, 50, 60, 70, 80, 90];
+      const legacyDepth = depthChoices.includes(scoopDepth) ? "" : `<option value="${escapeHtml(scoopDepth)}" selected>${escapeHtml(scoopDepth)}% · Existing</option>`;
+      html += `<label title="Every Divider compartment uses the same curved depth, starting at its front floor edge.">Curved depth<select data-divider-scoop-depth>${depthChoices.map(depth =>
+        `<option value="${depth}" ${depth === scoopDepth ? "selected" : ""}>${depth}%</option>`).join("")}${legacyDepth}</select></label>`;
+    } else {
+      html += `<div class="divider-bottom-empty" aria-hidden="true"></div>`;
+    }
+    html += `</div>`;
+
+    if (hasSlope) {
+      const angleVal = Object.prototype.hasOwnProperty.call(opt, "bottom_angle")
+        ? opt.bottom_angle : number(state.draftResolvedOptions?.bottom_angle, 20);
       const angleNum = number(angleVal, 0);
       const useBars = angleNum !== 0 && opt.minimal_bottom === true;
       const construction = useBars ? "crossbars" : "solid";
       html += `<div class="pair divider-slope-options"><div class="divider-slope-fields">`;
-      html += field("Slope angle", "option:bottom_angle", angleVal, { step: "1", unit: "°" });
       html += `<label>Slope construction<select data-draft="option:slope_construction">
         <option value="solid" ${construction === "solid" ? "selected" : ""}>Solid</option>
         <option value="crossbars" ${construction === "crossbars" ? "selected" : ""}>Crossbars</option>
@@ -5477,14 +5525,6 @@ function renderDraftFields() {
       html += `</div></div>`;
     }
 
-    if (scoopConfig) {
-      const scoopDepth = Object.prototype.hasOwnProperty.call(scoopConfig, "depth")
-        ? scoopConfig.depth : dividerScoopDefaultDepth();
-      html += scoopDepthField("depth", scoopDepth, {
-        dataAttribute: "data-divider-scoop-depth",
-        tip: "Every Divider compartment gets the same Scoop depth and starts at its front floor edge.",
-      });
-    }
     html += `</div>`;
 
     if (!b4bEnabled()) {
@@ -5561,7 +5601,7 @@ function renderDraftFields() {
     if (el) el.focus();
   }
   const dividerAngle = $('[data-draft="option:bottom_angle"]', $("#draft-fields"));
-  if (dividerAngle) dividerAngle.addEventListener("focus", () => dividerAngle.select());
+  if (typeof dividerAngle?.select === "function") dividerAngle.addEventListener("focus", () => dividerAngle.select());
   $$('input[data-division-index]', $("#draft-fields")).forEach(input => input.addEventListener("input", () => {
     markDraftChanged();
     state.draft.options ||= {};
@@ -5574,7 +5614,7 @@ function renderDraftFields() {
     refreshDraftSoon();
   }));
   const scoopDepth = $('[data-divider-scoop-depth]', $("#draft-fields"));
-  if (scoopDepth) scoopDepth.addEventListener("input", () => {
+  if (scoopDepth) scoopDepth.addEventListener("change", () => {
     markDraftChanged();
     state.draft.options ||= {};
     const config = state.draft.options.scoop ||= {};
@@ -7097,7 +7137,7 @@ function updateDraftFromFields(event) {
     if (bottomMode === "slope") {
       one.options.slope_base = true;
       delete one.options.scoop;
-      if (!Object.prototype.hasOwnProperty.call(one.options, "bottom_angle")) one.options.bottom_angle = 20;
+      if (!Object.prototype.hasOwnProperty.call(one.options, "bottom_angle")) one.options.bottom_angle = 45;
     } else if (bottomMode === "scoop") {
       one.options.scoop ||= {};
       for (const key of ["slope_base", "bottom_angle", "reverse_bottom", "alternate_bottom", "minimal_bottom", "bottom_supports"]) delete one.options[key];
@@ -7886,15 +7926,17 @@ function updateSelectionButtons() {
   const busy = state.designMutationBusy;
   // The editor being open IS "editing mode" - set synchronously the moment a
   // part is picked, before its defaults have loaded. Browse state shows the
-  // palette; edit state hides it while "Added to this bin" stays visible and
-  // its selected row owns Done / Delete.
+  // palette; edit state hides it while "Already added to this bin" stays visible.
   const editing = !$(".support-editor").hidden;
   $("#support-palette").hidden = editing;
   const hasPlaced = placedPartCount() > 0;
   $$(".placed-block").forEach(placedBlock => { placedBlock.hidden = !hasPlaced; });
   const lockedDivider = state.draft?.kind === "divider" && dividerLockedByLidLabels();
-  $$(".placed-item-done").forEach(button => { button.disabled = busy; });
-  $$(".placed-item-remove").forEach(button => { button.disabled = busy || lockedDivider; });
+  $$(".placed-item-remove").forEach(button => {
+    const index = Number(button.dataset.index);
+    const target = Number.isInteger(index) ? state.design?.layout?.features?.[index] : null;
+    button.disabled = busy || (target?.kind === "divider" && lockedDivider);
+  });
   const hasPhotoNest = state.design?.layout?.features?.some(one => one.kind === "nest" && one.contour);
   $$(".support-choice").forEach(button => {
     const info = partInfo(button.dataset.kind);
@@ -7921,8 +7963,6 @@ function updateSelectionButtons() {
         : `${info.title} — ${info.description}`;
     }
   });
-  $$(".placed-item-select").forEach(button => { button.disabled = busy; });
-  $("#support-count").textContent = `${placedPartCount()} added`;
 }
 
 function updateDraftStatusColor(hasError) {
@@ -7998,16 +8038,19 @@ function placedRowsMarkup(rows, { actions = false } = {}) {
       ? `data-index="${row.index}"`
       : row.type === "modifier" ? `data-kind="${row.kind}"` : 'data-draft="true"';
     const title = escapeHtml(row.title);
-    const rowActions = actions && row.editing
+    const editIdentity = row.type === "feature"
+      ? `data-index="${row.index}"`
+      : row.type === "modifier" ? `data-kind="${row.kind}"` : 'data-draft="true"';
+    const rowActions = actions
       ? `<div class="placed-item-actions">
-        <button type="button" class="placed-item-done button primary">Done</button>
-        <button type="button" class="placed-item-remove button danger" title="Delete ${title}" aria-label="Delete ${title}">Delete</button>
+        <button type="button" class="placed-item-edit button secondary" ${editIdentity} aria-label="Edit ${title}">Edit</button>
+        <button type="button" class="placed-item-remove button danger" ${identity} title="Delete ${title}" aria-label="Delete ${title}">Delete</button>
       </div>` : "";
     return `<div class="placed-item ${row.selected ? "selected" : ""} ${statusClass}" data-support-kind="${escapeHtml(row.kind)}">
-      <button type="button" class="placed-item-select" ${identity}>
+      <div class="placed-item-content">
         <span class="placed-item-icon">${iconFor(row.kind)}</span>
         <span class="placed-item-copy"><strong>${title}</strong><span class="placed-item-detail">${escapeHtml(row.detail)}</span></span>
-      </button>
+      </div>
       ${rowActions}
     </div>`;
   }).join("");
@@ -8018,15 +8061,21 @@ function wirePlacedRows(container) {
   $$(".placed-item[data-support-kind]", container).forEach(row => {
     row.style.setProperty("--support-color", kindColor(row.dataset.supportKind));
   });
-  $$(".placed-item-select[data-index]", container).forEach(button => button.addEventListener("click", async () => {
+  $$(".placed-item-edit[data-index]", container).forEach(button => button.addEventListener("click", async () => {
     await selectedFeature(Number(button.dataset.index));
   }));
-  $$(".placed-item-select[data-kind]", container).forEach(button =>
+  $$(".placed-item-edit[data-kind]", container).forEach(button =>
     button.addEventListener("click", () => openModifier(button.dataset.kind, true)));
-  $$(".placed-item-done", container).forEach(button =>
-    button.addEventListener("click", saveCurrentPart));
-  $$(".placed-item-remove", container).forEach(button =>
-    button.addEventListener("click", deleteCurrentPart));
+  $$(".placed-item-edit[data-draft]", container).forEach(button => button.addEventListener("click", () => {
+    if (state.draft) selectKind(state.draft.kind);
+  }));
+  $$(".placed-item-remove[data-index]", container).forEach(button => button.addEventListener("click", async () => {
+    await deleteSupportAt(Number(button.dataset.index));
+  }));
+  $$(".placed-item-remove[data-kind]", container).forEach(button => button.addEventListener("click", async () => {
+    await removeModifier(button.dataset.kind);
+  }));
+  $$(".placed-item-remove[data-draft]", container).forEach(button => button.addEventListener("click", deleteCurrentPart));
 }
 
 function renderPlaced() {
@@ -8046,12 +8095,9 @@ function renderPlaced() {
     wirePlacedRows(added);
   }
   const total = placedPartCount();
-  $("#support-count").textContent = `${total} added`;
   const summaryEl = $("#design-summary");
   if (summaryEl) {
-    summaryEl.textContent = total
-      ? `${total} added · ${state.design.layout.mode}`
-      : `Nothing added · ${state.design.layout.mode}`;
+    summaryEl.textContent = state.design.layout.mode;
   }
 
   updateSelectionButtons();

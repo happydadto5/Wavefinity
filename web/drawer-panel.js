@@ -77,11 +77,10 @@ DP.build = () => {
     </section>
 
     <section class="control-section open dl-section" aria-label="Inventory">
-      <div class="section-heading no-toggle"><span>Inventory</span><span id="dl-inv-count" class="count-badge"></span></div>
       <div class="section-body">
         <div id="dl-stats" class="dl-stats"></div>
         <div class="dl-inv-tools">
-          <input id="dl-inv-search" type="search" placeholder="Search name or size" aria-label="Search the inventory">
+          <label class="dl-search-label"><span>Search</span><input id="dl-inv-search" type="search" placeholder="Name or size" aria-label="Search the inventory"></label>
           <label>Filter<select id="dl-inv-show" aria-label="Filter bins">
             <option value="all">Everything</option>
             <option value="in_design">In Space</option>
@@ -107,8 +106,10 @@ DP.build = () => {
             <button type="button" id="dl-batch-delete" class="button danger dl-small" disabled>Delete</button>
             <span id="dl-batch-summary" class="dl-batch-summary" role="status"></span>
           </div>
-          <button type="button" id="dl-batch-save" class="button secondary wide">Save Selected</button>
-          <button type="button" id="dl-batch-print" class="button secondary wide">Print Selected to Bambu Studio</button>
+          <div class="dl-batch-actions">
+            <button type="button" id="dl-batch-save" class="button secondary">Save Selected</button>
+            <button type="button" id="dl-batch-print" class="button secondary">Print Selected to Bambu Studio</button>
+          </div>
         </div>
         <div id="dl-inv-list" class="dl-inv-list"></div>
       </div>
@@ -356,10 +357,10 @@ DP.renderBatch = () => {
     summary = `${dlPlural(DP.printSelected.size, "bin")} selected · ${scope.picked.length} eligible for Save/Print · ${needFiles} need${needFiles === 1 ? "s" : ""} new files${connectorNote}`;
   } else if (!scope.eligible.length) {
     summary = "No designs to save or print yet.";
-  } else {
-    summary = `Nothing ticked - the buttons cover the whole Space${connectorNote}`;
-  }
-  $("#dl-batch-summary").textContent = summary;
+  } else summary = "";
+  const summaryNode = $("#dl-batch-summary");
+  summaryNode.textContent = summary;
+  summaryNode.hidden = !summary;
   $("#dl-batch-clear").disabled = !DP.printSelected.size;
   $("#dl-batch-delete").disabled = !DP.printSelected.size || Boolean(DL.busy);
   if (hosted) return;
@@ -538,8 +539,6 @@ DP.update = () => {
   if (!DL.layout) {
     const list = $("#dl-inv-list");
     if (list) list.innerHTML = '<p class="dl-note">Inventory unavailable. Select Space to retry loading.</p>';
-    const count = $("#dl-inv-count");
-    if (count) count.textContent = "";
     const stats = $("#dl-stats");
     if (stats) stats.textContent = "";
     const overlay = $("#dl-empty-state");
@@ -759,8 +758,6 @@ DP.renderInventory = (force = false) => {
   dlSet("#dl-inv-sort", DP.filter.sort);
   DP.prunePrintSelection();
   DP.renderBatch();
-  // The count is rows only: bins in this Inventory, nothing else.
-  $("#dl-inv-count").textContent = dlPlural(DL.bins.filter(DL.isOrdinary).length, "bin");
   const selectedRow = DL.selectedRow && DL.bin(DL.selectedRow) ? DL.selectedRow : null;
   const counts = DL.bins.map(one => [one.id, DL.placedCount(one.id)]);
   const signature = JSON.stringify([DL.bins, counts, Object.keys(DL.layout.design_specs || {}), DL.report?.planning_heights,
