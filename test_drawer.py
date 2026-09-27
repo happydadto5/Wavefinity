@@ -396,7 +396,7 @@ class DesignSourceTests(unittest.TestCase):
         after = load_inventory(self.folder)
         self.assertEqual(design_specs(after["layout"]), {})
 
-    def test_multi_delete_removes_rows_sources_and_placements_but_keeps_files(self):
+    def test_multi_delete_removes_rows_sources_placements_and_owned_files(self):
         from organizer_inventory import save_design_source, design_specs, change_design_status
         first = save_design_source(self.folder, design=self._design("One"), record=self._record("One"))
         second = save_design_source(self.folder, design=self._design("Two"), record=self._record("Two"))
@@ -416,8 +416,8 @@ class DesignSourceTests(unittest.TestCase):
         self.assertEqual(set(design_specs(after["layout"])), {third["row_id"]})
         self.assertEqual([one["bin"] for one in after["layout"]["drawers"][0]["placements"]],
                          [third["row_id"]])
-        self.assertTrue((self.folder / "One.3mf").exists())
-        self.assertTrue((self.folder / "Two.3mf").exists())
+        self.assertFalse((self.folder / "One.3mf").exists())
+        self.assertFalse((self.folder / "Two.3mf").exists())
 
     def test_stale_layout_save_cannot_replace_newer_design_source(self):
         from organizer_inventory import save_design_source, design_specs

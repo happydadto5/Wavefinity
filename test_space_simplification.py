@@ -14,6 +14,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from test_space_preferences import node_run
+
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 
@@ -319,7 +321,84 @@ await DP.deleteRow(DL.bin("B1"));
 out.seen = seen;
 """)
         self.assertIn("placement is removed too", out["seen"][0])
+        self.assertIn("Generated files owned only by this bin", out["seen"][0])
+        self.assertNotIn("Dragging", out["seen"][0])
+        self.assertNotIn("file stays", out["seen"][0])
         self.assertEqual(out["seen"][1], {"delete_ids": ["B1"]})
+
+    def test_cancel_and_bulk_delete_copy(self):
+        out = run_node(r"""
+setLayout([bin("B1"), bin("B2")]);
+DP.printSelected = new Set(["B1", "B2"]);
+const messages = [];
+ctx.appConfirmAction = async options => { messages.push(options.message); return false; };
+await DP.deleteRow(DL.bin("B1"));
+await DP.deleteSelected();
+out.messages = messages;
+out.calls = calls;
+""")
+        self.assertEqual(len(out["messages"]), 2)
+        self.assertIn("Generated files owned only by these bins", out["messages"][1])
+        self.assertFalse(any(call.get("path") == "/api/drawer/save" for call in out["calls"]))
+
+    def test_open_designer_row_clears_identity_only_after_delete_succeeds(self):
+        out = run_node(r"""
+setLayout([bin("B1")]);
+ctx.state.designInventoryId = "B1";
+ctx.state.design = { box: {} };
+DL.selectedRow = "B1";
+DP.open.add("B1"); DP.printSelected.add("B1");
+const modes = [];
+DP.setMode = mode => modes.push(mode);
+DL.editBins = async () => false;
+await DP.deleteRow(DL.bin("B1"));
+out.failed = { identity: ctx.state.designInventoryId, open: DP.open.has("B1"),
+  selected: DP.printSelected.has("B1"), mode: [...modes] };
+DL.editBins = async () => true;
+await DP.deleteRow(DL.bin("B1"));
+out.saved = { identity: ctx.state.designInventoryId, open: DP.open.has("B1"),
+  selected: DP.printSelected.has("B1"), mode: [...modes] };
+""")
+        self.assertEqual(out["failed"], {"identity": "B1", "open": True, "selected": True, "mode": []})
+        self.assertEqual(out["saved"], {"identity": None, "open": False, "selected": False,
+                                        "mode": ["space"]})
+
+    def test_hosted_delete_writes_inventory_then_removes_exact_files_and_reports_failure(self):
+        source = _read("spaces.js")
+        request = source[source.index("SP.inventoryRequest = async"):source.index("// Fix 034 F1", source.index("SP.inventoryRequest = async"))]
+        script = r"""
+const events = [], oldFolder = { handle: {}, name: "Old" }, newFolder = { handle: {}, name: "New" };
+const state = { browserFolder: oldFolder, activeSpace: { name: "Old" } };
+const DL = { spaceContextCurrent: () => true,
+  staleSpaceError: () => Object.assign(new Error("stale"), { code: "STALE_SPACE_CONTEXT" }) };
+const SP = { _inventoryWriteChain: Promise.resolve(), readInventoryFor: async () => "before" };
+const WFFileSystem = {
+  listFilenames: async () => ["Owned.3mf", "Other.3mf"],
+  writeText: async (_handle, _name, text) => { events.push(["write", text]); },
+  removeFile: async (_handle, name) => { events.push(["remove", name]); throw new Error("locked"); },
+};
+const INVENTORY_FILENAME = "Wavefinity bins.md";
+const api = async (_path, payload) => {
+  events.push(["api", payload.available_filenames]);
+  return { inventory_text: "after", cleanup_files: ["Owned.3mf"] };
+};
+""" + request + r"""
+(async () => {
+  const result = await SP.inventoryRequest("/api/drawer/save", { delete_ids: ["B1"] }, { context: {} });
+  const first = { events: [...events], failed: result.cleanup_failed };
+  events.length = 0;
+  WFFileSystem.writeText = async () => { events.push(["write"]); state.browserFolder = newFolder; };
+  try { await SP.inventoryRequest("/api/drawer/save", { delete_ids: ["B1"] }, { context: {} }); }
+  catch (error) { events.push(["error", error.code]); }
+  process.stdout.write(JSON.stringify({ first, switched: events }));
+})().catch(error => { console.error(error); process.exit(1); });
+"""
+        out = node_run(script)
+        self.assertEqual(out["first"]["events"], [
+            ["api", ["Owned.3mf", "Other.3mf"]], ["write", "after"], ["remove", "Owned.3mf"]])
+        self.assertEqual(out["first"]["failed"], ["Owned.3mf"])
+        self.assertEqual(out["switched"], [
+            ["api", ["Owned.3mf", "Other.3mf"]], ["write"], ["error", "STALE_SPACE_CONTEXT"]])
 
 
 class ManualAddRemovalTests(unittest.TestCase):

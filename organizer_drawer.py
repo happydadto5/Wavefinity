@@ -1137,39 +1137,35 @@ def _safe_row_file(root: Path, name: str) -> Path | None:
     return path if path.parent == root and path.is_file() else None
 
 
-def inventory_row_files(output_dir: Path | str, row: dict[str, Any]) -> list[Path]:
-    """The generated .3mf files an inventory row records, safely resolved.
-
-    The File cell is user-editable text joined with ", ", but a generated file
-    name may itself contain ", ". So the cell is resolved against the real
-    files in the Space folder: the whole cell if it is one file, otherwise the
-    one way of cutting it at ", " where every piece is a real .3mf file.
-    """
-    root = Path(output_dir).expanduser().resolve()
+def inventory_row_file_names(available: Iterable[str], row: dict[str, Any]) -> list[str]:
+    """Resolve a File cell only when one partition matches safe folder filenames."""
+    names = {name for name in available if isinstance(name, str) and
+             name == name.strip() and Path(name).name == name and
+             not Path(name).is_absolute() and "/" not in name and "\\" not in name and
+             name.lower().endswith(".3mf")}
     label = f"{_label(row)} ({row.get('id')})"
     text = str(row.get("file") or "").strip()
     if not text:
         raise ValueError(f"{label} has no generated file to print")
-    whole = _safe_row_file(root, text)
-    if whole is not None:
-        return [whole]
+    if text in names:
+        return [text]
 
     pieces = text.split(", ")
-    partitions: list[list[Path]] = []
+    partitions: list[list[str]] = []
 
-    def walk(start: int, chosen: list[Path]) -> None:
+    def walk(start: int, chosen: list[str]) -> None:
         if len(partitions) > 1:
             return
         if start == len(pieces):
             partitions.append(list(chosen))
             return
         for end in range(start + 1, len(pieces) + 1):
-            found = _safe_row_file(root, ", ".join(pieces[start:end]))
-            if found is not None:
+            found = ", ".join(pieces[start:end])
+            if found in names:
                 walk(end, chosen + [found])
 
     walk(0, [])
-    unique = {tuple(str(path) for path in part) for part in partitions}
+    unique = {tuple(part) for part in partitions}
     if len(unique) == 1:
         return partitions[0]
     if len(unique) > 1:
@@ -1185,6 +1181,13 @@ def inventory_row_files(output_dir: Path | str, row: dict[str, Any]) -> list[Pat
         if not token.lower().endswith(".3mf"):
             raise ValueError(f"{label}: {token} is not a .3mf file")
     raise ValueError(f"{label}: a recorded file is missing from the Space folder ({text})")
+
+
+def inventory_row_files(output_dir: Path | str, row: dict[str, Any]) -> list[Path]:
+    """The real generated files recorded by one row, using the shared resolver."""
+    root = Path(output_dir).expanduser().resolve()
+    available = [path.name for path in root.iterdir() if _safe_row_file(root, path.name)] if root.is_dir() else []
+    return [root / name for name in inventory_row_file_names(available, row)]
 
 
 def _copy_count(one: dict[str, Any], raw: Any) -> int:
@@ -1510,6 +1513,7 @@ def drawer_routes(
             return with_rules(save_inventory_text(
                 payload.get("inventory_text") or "",
                 title=str(payload.get("inventory_title") or "Wavefinity"),
+                available_filenames=payload.get("available_filenames") or (),
                 **changes,
             ))
         return with_rules(save_inventory(folder(payload), **changes))

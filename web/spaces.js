@@ -862,19 +862,45 @@ SP.readInventoryFor = async (folder, { migrate = false } = {}) => {
 };
 
 SP._inventoryWriteChain = Promise.resolve();
-SP.inventoryRequest = async (path, extra = {}, { write = true } = {}) => {
+SP.inventoryRequest = async (path, extra = {}, { write = true, context = null } = {}) => {
   const folder = state.browserFolder;
-  if (!folder?.handle) throw new Error("Keeping an inventory needs folder access so Wavefinity can save it with your designs.");
+  const handle = folder?.handle;
+  if (!handle) throw new Error("Keeping an inventory needs folder access so Wavefinity can save it with your designs.");
   const title = state.activeSpace?.name || folder.name;
+  const requireContext = () => {
+    if (state.browserFolder !== folder || state.browserFolder?.handle !== handle ||
+        (context && !DL.spaceContextCurrent(context))) {
+      throw DL.staleSpaceError();
+    }
+  };
   const run = async () => {
-    const inventoryText = await SP.readInventoryFor(folder, { migrate: write });
+    requireContext();
+    const inventoryText = await SP.readInventoryFor({ ...folder, handle }, { migrate: write });
+    const deleting = path === "/api/drawer/save" && Boolean(extra.delete_ids?.length);
+    const availableFilenames = deleting ? await WFFileSystem.listFilenames(handle) : [];
+    requireContext();
     const data = await api(path, {
       inventory_text: inventoryText,
       inventory_title: title,
+      ...(deleting ? { available_filenames: availableFilenames } : {}),
       ...extra,
     });
+    requireContext();
     if (write && typeof data.inventory_text === "string") {
-      await WFFileSystem.writeText(folder.handle, INVENTORY_FILENAME, data.inventory_text);
+      await WFFileSystem.writeText(handle, INVENTORY_FILENAME, data.inventory_text);
+    }
+    if (deleting && data.cleanup_files?.length) {
+      const failed = [];
+      for (const name of data.cleanup_files) {
+        requireContext();
+        if (!availableFilenames.includes(name)) continue;
+        try {
+          await WFFileSystem.removeFile(handle, name);
+        } catch (error) {
+          if (error?.name !== "NotFoundError") failed.push(name);
+        }
+      }
+      if (failed.length) data.cleanup_failed = failed;
     }
     return data;
   };

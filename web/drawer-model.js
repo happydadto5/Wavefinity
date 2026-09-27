@@ -585,7 +585,7 @@ DL.inventoryCall = async (path, payload = {}, options = {}) => {
   const { context = DL.spaceContext(), ...requestOptions } = options;
   DL.requireSpaceContext(context);
   const data = state.runtime.hosted
-    ? await SP.inventoryRequest(path, payload, requestOptions)
+    ? await SP.inventoryRequest(path, payload, { ...requestOptions, context })
     : await api(path, { output: DL.output ?? DL.folder(), ...payload });
   DL.requireSpaceContext(context);
   return data;
@@ -784,6 +784,9 @@ DL.editBins = async (changes, {
     DL.requireSpaceContext(context);
     const data = await DL.inventoryCall("/api/drawer/save", payload, { context });
     DL.adopt(data);
+    if (data.cleanup_failed?.length) {
+      toast(`Bin deleted from Inventory, but ${data.cleanup_failed.length} generated file${data.cleanup_failed.length === 1 ? "" : "s"} could not be removed from the folder.`, true, 8000);
+    }
     if (commitLayout) DL.normaliseLayout(data.layout || payload.layout);
     DL.exists = true;
     // Bin sizes/kinds may have just changed underneath any spacer proposal.

@@ -87,6 +87,104 @@ class BatchFixture(unittest.TestCase):
             lambda _p: self.slicer, launch or self.launch, None, self.gen)
 
 
+class DeleteSafetyTests(BatchFixture):
+    def saved_for_delete(self, name: str, file_text: str | None = None) -> str:
+        row_id = save_design_source(self.folder, design=design(name), record=record(name))["row_id"]
+        if file_text:
+            change_design_status(self.folder, row_id, "saved", file_text)
+        return row_id
+
+    def test_single_delete_cleans_current_and_stale_after_inventory_write(self):
+        current = self.folder / "Current.3mf"
+        stale = self.folder / "Old.3mf"
+        current.write_bytes(b"x")
+        stale.write_bytes(b"x")
+        row_id = self.saved_for_delete("One", current.name)
+        stale_id = self.saved_for_delete("Old", stale.name)
+        save_design_source(self.folder, design=design("Old edited"), record=record("Old edited"), row_id=stale_id)
+        layout = {**load_inventory(self.folder)["layout"], "drawers": [
+            {"id": "d1", "placements": [{"bin": row_id, "copy": 0, "gx": 0, "gy": 0}]}]}
+        save_inventory(self.folder, layout=layout)
+        first = save_inventory(self.folder, delete_ids=[row_id])
+        self.assertEqual(first["layout"]["drawers"][0]["placements"], [])
+        self.assertFalse(current.exists())
+        self.assertTrue(stale.exists())
+        after = save_inventory(self.folder, delete_ids=[stale_id])
+        self.assertEqual(after["bins"], [])
+        self.assertEqual(after["layout"].get("design_specs"), {})
+        self.assertNotIn("stale_files", after["layout"])
+        self.assertFalse(stale.exists())
+
+    def test_shared_ambiguous_and_unsafe_files_survive_delete(self):
+        shared = self.folder / "Shared.3mf"
+        shared.write_bytes(b"x")
+        owner = self.saved_for_delete("Owner", shared.name)
+        self.saved_for_delete("Survivor", shared.name)
+        save_inventory(self.folder, delete_ids=[owner])
+        self.assertTrue(shared.exists())
+
+        for name in ("A.3mf", "B.3mf", "C.3mf", "A.3mf, B.3mf", "B.3mf, C.3mf"):
+            (self.folder / name).write_bytes(b"x")
+        ambiguous = self.saved_for_delete("Ambiguous", "A.3mf, B.3mf, C.3mf")
+        save_inventory(self.folder, delete_ids=[ambiguous])
+        self.assertTrue(all((self.folder / name).exists() for name in
+                            ("A.3mf", "B.3mf", "C.3mf", "A.3mf, B.3mf", "B.3mf, C.3mf")))
+        unsafe = self.saved_for_delete("Unsafe", "../Shared.3mf")
+        save_inventory(self.folder, delete_ids=[unsafe])
+        self.assertTrue(shared.exists())
+        subdir = self.folder / "subdir"
+        subdir.mkdir()
+        (subdir / "Nested.3mf").write_bytes(b"x")
+        (self.folder / "Shared.txt").write_bytes(b"x")
+        for value in ("subdir/Nested.3mf", "Shared.txt"):
+            save_inventory(self.folder, delete_ids=[self.saved_for_delete(value, value)])
+        self.assertTrue((subdir / "Nested.3mf").exists())
+        self.assertTrue((self.folder / "Shared.txt").exists())
+
+    def test_missing_row_and_write_failure_leave_files_untouched(self):
+        path = self.folder / "Own.3mf"
+        path.write_bytes(b"x")
+        row_id = self.saved_for_delete("Own", path.name)
+        with self.assertRaises(ValueError):
+            save_inventory(self.folder, delete_ids=[row_id, "B999"])
+        self.assertTrue(path.exists())
+        with mock.patch("organizer_inventory._write", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                save_inventory(self.folder, delete_ids=[row_id])
+        self.assertTrue(path.exists())
+        self.assertIn(row_id, self.rows())
+        path.unlink()
+        result = save_inventory(self.folder, delete_ids=[row_id])
+        self.assertNotIn(row_id, {row["id"] for row in result["bins"]})
+
+    def test_unlink_failure_commits_inventory_and_reports_partial_cleanup(self):
+        path = self.folder / "Own.3mf"
+        path.write_bytes(b"x")
+        row_id = self.saved_for_delete("Own", path.name)
+        original_unlink = Path.unlink
+        def fail_owned(file, *args, **kwargs):
+            if file == path:
+                raise PermissionError("locked")
+            return original_unlink(file, *args, **kwargs)
+        with mock.patch.object(Path, "unlink", fail_owned):
+            result = save_inventory(self.folder, delete_ids=[row_id])
+        self.assertEqual(result["cleanup_failed"], [path.name])
+        self.assertNotIn(row_id, self.rows())
+        self.assertTrue(path.exists())
+
+    def test_hosted_delete_authorizes_only_snapshot_owned_names(self):
+        from organizer_inventory import save_inventory_text, render_inventory
+        rows = [
+            {"id": "B1", "file": "Owned.3mf", "kind": "bin", "name": "One", "x": 16, "y": 16, "z": 20, "qty": 0},
+            {"id": "B2", "file": "Shared.3mf", "kind": "bin", "name": "Two", "x": 16, "y": 16, "z": 20, "qty": 0},
+        ]
+        text = render_inventory("Space", rows, {"design_specs": {"B1": {}, "B2": {}}})
+        result = save_inventory_text(text, delete_ids=["B1"],
+                                     available_filenames=["Owned.3mf", "Shared.3mf", "Other.3mf"])
+        self.assertEqual(result["cleanup_files"], ["Owned.3mf"])
+        self.assertEqual([row["id"] for row in result["bins"]], ["B2"])
+
+
 class BatchSaveAndPrintTests(BatchFixture):
 
 
