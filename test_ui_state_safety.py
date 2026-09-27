@@ -35,6 +35,124 @@ def node_json(source: str):
 
 
 class BrowserStateLogicTests(unittest.TestCase):
+    def test_reopened_auto_height_reference_waits_for_accepted_draft_response(self):
+        source = "\n".join(function_source(name, APP) for name in (
+            "referencePhysicalHeight", "referenceSeedForDraft", "referenceAddReady",
+            "updateReferenceAddAvailability", "addReferenceToCurrentDraft", "refreshDraft"))
+        script = r"""
+const number=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
+const _nestMeasuredThickness=()=>null;
+const button={hidden:true};
+const status={textContent:'',classList:{add(){},remove(){}}};
+const $=selector=>selector==='[data-action="add-reference"]'?button:
+ selector==='#draft-status'?status:selector==='#draft-fields'?{}:null;
+const document={activeElement:null};
+const draftCommitIndex=()=>0;
+const applyBoreSizing=()=>holderCalls++;
+const bumpBoreEpoch=()=>{};
+const partInfo=()=>({kind:state.draft.kind,fields:[],flags:{qty:false}});
+const autoCommitDraft=async()=>true;
+const reconcileBoreBin=async()=>false;
+const refreshPreview=async()=>{};
+const renderDraftFields=()=>{};
+const updateGenerateAvailability=()=>{};
+const markDraftChanged=()=>{state.draftTouched=true;state.draftRequest++;updateReferenceAddAvailability()};
+const commitReferenceEditSoon=()=>referenceCommits++;
+const previewClientId='c2';
+let holderCalls=0,referenceCommits=0,resolveDraft;
+const api=()=>new Promise(resolve=>{resolveDraft=resolve});
+const state={draft:null,draftRequest:4,referenceResolutionRequest:null,draftResolvedOptions:{},
+ draftIsNew:false,draftTouched:false,draftAutoCommit:true,selected:0,
+ design:{box:{z:40,base_thickness:4},layout:{features:[]}}};
+__SOURCE__
+(async()=>{
+ const results=[];
+ for(const kind of ['slot','steps']){
+  state.draft={kind,zone:[-10,-8,10,8],options:{}};
+  state.design.layout.features=[state.draft];state.draftTouched=false;
+  state.referenceResolutionRequest=null;state.draftResolvedOptions={};
+  const pending=refreshDraft();
+  const before={hidden:button.hidden,ready:referenceAddReady()};
+  addReferenceToCurrentDraft();
+  resolveDraft({resolved_options:{height:16,lip:1},feature:{}});
+  await pending;
+  const after={hidden:button.hidden,ready:referenceAddReady()};
+  const sizingBeforeAdd=holderCalls;
+  addReferenceToCurrentDraft();
+  results.push({kind,before,after,height:state.draft.reference_object?.height,
+   zone:state.draft.zone,referenceCommits,extraSizing:holderCalls-sizingBeforeAdd});
+ }
+ process.stdout.write(JSON.stringify(results));
+})();
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), [
+            {"kind": "slot", "before": {"hidden": True, "ready": False},
+             "after": {"hidden": False, "ready": True}, "height": 16,
+             "zone": [-10, -8, 10, 8], "referenceCommits": 1, "extraSizing": 0},
+            {"kind": "steps", "before": {"hidden": True, "ready": False},
+             "after": {"hidden": False, "ready": True}, "height": 17,
+             "zone": [-10, -8, 10, 8], "referenceCommits": 2, "extraSizing": 0},
+        ])
+
+    def test_reference_seed_waits_for_resolved_slot_and_steps_height(self):
+        source = "\n".join(function_source(name, APP) for name in (
+            "referencePhysicalHeight", "referenceSeedForDraft", "referenceAddReady",
+            "updateReferenceAddAvailability", "addReferenceToCurrentDraft"))
+        script = r"""
+const number=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
+const _nestMeasuredThickness=()=>null;
+const button={hidden:true};
+const $=selector=>selector==='[data-action="add-reference"]'?button:{};
+const draftCommitIndex=()=>0;
+let referenceCommits=0;
+const renderDraftFields=()=>{};
+const commitReferenceEditSoon=()=>referenceCommits++;
+const state={draft:null,draftRequest:5,referenceResolutionRequest:null,draftResolvedOptions:{},
+ draftIsNew:false,draftTouched:false,design:{box:{z:40,base_thickness:4},layout:{features:[]}}};
+const markDraftChanged=()=>{state.draftTouched=true;state.draftRequest++;updateReferenceAddAvailability()};
+__SOURCE__
+const results=[];
+for(const kind of ['slot','steps']){
+ state.draft={kind,zone:[-10,-8,10,8],options:{}};
+ state.draftTouched=false;state.draftRequest=5;state.referenceResolutionRequest=null;
+ state.draftResolvedOptions={};state.design.layout.features=[state.draft];
+ updateReferenceAddAvailability();
+ addReferenceToCurrentDraft();
+ let unresolvedRejected=false;
+ try{referenceSeedForDraft(state.draft,null,state.design)}catch{unresolvedRejected=true}
+ const before={hidden:button.hidden,reference:state.draft.reference_object??null,
+  commits:referenceCommits,unresolvedRejected};
+ state.draftResolvedOptions={height:16,lip:1};state.referenceResolutionRequest=5;
+ updateReferenceAddAvailability();
+ const shown=!button.hidden;
+ addReferenceToCurrentDraft();
+ results.push({kind,before,shown,height:state.draft.reference_object?.height,
+   zone:state.draft.zone,commits:referenceCommits});
+}
+const explicit=[];
+for(const kind of ['pocket','post','slot']){
+ state.draft={kind,zone:[-10,-8,10,8],options:{height:12}};
+ state.draftTouched=false;state.referenceResolutionRequest=null;state.draftResolvedOptions={};
+ explicit.push({kind,ready:referenceAddReady(),height:referenceSeedForDraft(state.draft,null,state.design).height});
+}
+state.draft={kind:'steps',zone:[-10,-8,10,8],options:{height:16,lip:-2}};
+const clamped=referenceSeedForDraft(state.draft,null,state.design).height;
+process.stdout.write(JSON.stringify({results,explicit,clamped}));
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {
+            "results": [
+                {"kind": "slot", "before": {"hidden": True, "reference": None, "commits": 0,
+                                              "unresolvedRejected": True},
+                 "shown": True, "height": 16, "zone": [-10, -8, 10, 8], "commits": 1},
+                {"kind": "steps", "before": {"hidden": True, "reference": None, "commits": 1,
+                                               "unresolvedRejected": True},
+                 "shown": True, "height": 17, "zone": [-10, -8, 10, 8], "commits": 2},
+            ],
+            "explicit": [{"kind": kind, "ready": True, "height": 12}
+                         for kind in ("pocket", "post", "slot")],
+            "clamped": 16,
+        })
+
     def test_bore_ceiling_warning_stays_at_design_level_and_clears(self):
         source = function_source("updateBoreCeilingWarning", APP)
         script = r"""
@@ -57,10 +175,11 @@ process.stdout.write(JSON.stringify({whileEditingAnotherBore,afterCorrection:{hi
 
     def test_new_part_reference_action_waits_for_initial_add(self):
         source = "\n".join(function_source(name, APP) for name in
-                           ("referenceAddReady", "addReferenceToCurrentDraft"))
+                           ("referencePhysicalHeight", "referenceAddReady", "addReferenceToCurrentDraft"))
         script = r"""
 const state={draftIsNew:true,selected:null,draftSourceIndex:null,draft:{kind:'post',zone:[-10,-8,10,8]},
- design:{layout:{features:[]}},draftResolvedOptions:{height:30},referenceEditPending:false};
+ design:{layout:{features:[]}},draftRequest:0,referenceResolutionRequest:0,
+ draftResolvedOptions:{height:30},referenceEditPending:false,draftTouched:false};
 const draftCommitIndex=()=>state.selected!==null ? state.selected : state.draftIsNew ? null : state.draftSourceIndex;
 const markDraftChanged=()=>{},renderDraftFields=()=>{};
 const referenceSeedForDraft=()=>({width:20,depth:16,height:30});
@@ -106,7 +225,7 @@ commitReferenceEdit().then(()=>process.stdout.write(JSON.stringify({calls,
 
     def test_reference_editor_seed_and_positive_edit_leave_holder_size_alone(self):
         source = "\n".join(function_source(name, APP) for name in
-                           ("referenceSeedForDraft", "updateReferenceAxis"))
+                           ("referencePhysicalHeight", "referenceSeedForDraft", "updateReferenceAxis"))
         script = r"""
 const number=(v,f)=>Number.isFinite(Number(v))?Number(v):f;
 const _nestMeasuredThickness=o=>o?.tool_thickness || null;

@@ -45,6 +45,7 @@ const state = {
   draftKind: "divider",
   draft: null,
   draftResolvedOptions: {},
+  referenceResolutionRequest: null,
   // The last Design 2D/3D view actually used, runtime-only (Fix 078): a mode
   // switch through Space never overwrites it, only 2D/3D activation does.
   lastDesignView: "3d",
@@ -5370,6 +5371,7 @@ async function selectKind(kind, reset = false) {
     state.draftTouched = false;
     state.pinnedZone = {};
     state.draftResolvedOptions = result.resolved_options || {};
+    state.referenceResolutionRequest = state.draftRequest;
     // What the engine started this text at, so the Part Name is only ever
     // seeded from lettering the user actually typed - never the placeholder.
     state.draftStartingText = result.feature?.options?.text ?? null;
@@ -5462,6 +5464,7 @@ async function selectedFeature(index, force = false, acceptPreviewPick = null) {
     state.pinnedZone.depth = true;
   }
   state.draftResolvedOptions = {};
+  state.referenceResolutionRequest = null;
   if (state.draft.kind === "bore") sizeBoreToGrid(state.draft);
   state.draftKind = state.draft.kind;
   updateInteriorModeVisibility(true);
@@ -5983,11 +5986,32 @@ function pocketWallReach(wall, style) {
   return 2 * amplitude + wall * depthFactor + waveNoiseFloor;
 }
 
+function referencePhysicalHeight(draft, resolvedOptions) {
+  const explicitHeight = draft.options?.height;
+  const rawHeight = explicitHeight !== null && explicitHeight !== undefined && explicitHeight !== ""
+    ? explicitHeight : resolvedOptions?.height;
+  const height = Number(rawHeight);
+  if (rawHeight === null || rawHeight === undefined || rawHeight === "" ||
+      !Number.isFinite(height) || height <= 0) return null;
+  if (draft.kind !== "steps") return height;
+  const explicitLip = draft.options?.lip;
+  const rawLip = explicitLip !== null && explicitLip !== undefined && explicitLip !== ""
+    ? explicitLip : resolvedOptions?.lip;
+  const lip = Number(rawLip);
+  if (rawLip === null || rawLip === undefined || rawLip === "" || !Number.isFinite(lip)) return null;
+  const physicalHeight = height + Math.max(0, lip);
+  return Number.isFinite(physicalHeight) ? physicalHeight : null;
+}
+
 function referenceSeedForDraft(draft, resolvedOptions, design) {
   const zone = draft.zone;
   const usable = Math.max(0.1, number(design?.box?.z, 8) - number(design?.box?.base_thickness, 0.6));
   const resolved = draft.kind === "nest" ? _nestMeasuredThickness(draft.options)
-    : number(resolvedOptions?.height ?? draft.options?.height, NaN);
+    : referencePhysicalHeight(draft, resolvedOptions);
+  if (["pocket", "post", "slot", "steps"].includes(draft.kind) &&
+      (!Number.isFinite(resolved) || resolved <= 0)) {
+    throw new Error("Wait for this part's height to finish updating before adding a reference.");
+  }
   return { width: zone[2] - zone[0], depth: zone[3] - zone[1],
     height: Number.isFinite(resolved) && resolved > 0 ? resolved : usable };
 }
@@ -6000,14 +6024,29 @@ function updateReferenceAxis(draft, axis, raw) {
 }
 
 function referenceAddReady() {
-  return !state.draftIsNew && Number.isInteger(draftCommitIndex());
+  if (!state.draft || state.draftIsNew || state.draftTouched ||
+      !Number.isInteger(draftCommitIndex())) return false;
+  if (state.draft.kind === "nest") {
+    return Boolean(state.draft.contour && _nestMeasuredThickness(state.draft.options) > 0);
+  }
+  if (!["pocket", "post", "slot", "steps"].includes(state.draft.kind)) return false;
+  const resolved = state.referenceResolutionRequest === state.draftRequest
+    ? state.draftResolvedOptions : null;
+  return referencePhysicalHeight(state.draft, resolved) !== null;
+}
+
+function updateReferenceAddAvailability() {
+  const button = $('[data-action="add-reference"]', $("#draft-fields"));
+  if (button) button.hidden = !referenceAddReady();
 }
 
 function addReferenceToCurrentDraft() {
   const draft = state.draft;
   if (!draft || !referenceAddReady()) return;
+  const resolved = state.referenceResolutionRequest === state.draftRequest
+    ? state.draftResolvedOptions : null;
   markDraftChanged(true);
-  draft.reference_object = referenceSeedForDraft(draft, state.draftResolvedOptions, state.design);
+  draft.reference_object = referenceSeedForDraft(draft, resolved, state.design);
   state.draftAutoCommit = true;
   state.referenceEditPending = true;
   renderDraftFields();
@@ -6603,8 +6642,8 @@ function renderDraftFields() {
           { unit: "mm", min: "0", step: "any", dataAttribute: "data-reference-axis" });
       }
       referenceFields += `<button type="button" class="button secondary" data-action="remove-reference">Remove reference</button>`;
-    } else if (ready && referenceAddReady()) {
-      referenceFields += `<button type="button" class="button secondary" data-action="add-reference">Add object reference</button>`;
+    } else if (ready) {
+      referenceFields += `<button type="button" class="button secondary" data-action="add-reference" ${referenceAddReady() ? "" : "hidden"}>Add object reference</button>`;
     }
     html += editorGroup("Reference object", referenceFields);
   }
@@ -8037,6 +8076,7 @@ function markDraftChanged(referenceOnly = false) {
   // which the older response can replace the newer edit.
   state.draftTouched = true;
   state.draftRequest += 1;
+  updateReferenceAddAvailability();
   state.canGenerate = false;
   updateGenerateAvailability();
 }
@@ -8576,6 +8616,7 @@ async function refreshDraft() {
   applyBoreSizing(state.draft);
   bumpBoreEpoch();
   const request = ++state.draftRequest;
+  updateReferenceAddAvailability();
   if (state.draft.kind === "nest") {
     $("#draft-status").textContent = "Resizing bin around cavity…";
     if (state.draftAutoCommit && !(await autoCommitDraft(request))) {
@@ -8598,6 +8639,7 @@ async function refreshDraft() {
     if (request !== state.draftRequest) return;
     if (result.superseded) throw new Error("Current draft was unexpectedly superseded. Try again.");
     state.draftResolvedOptions = result.resolved_options || {};
+    state.referenceResolutionRequest = request;
     if (state.draft.kind === "text" && result.feature) {
       if (Array.isArray(result.feature.zone)) state.draft.zone = result.feature.zone.slice();
       state.draft.options.text_v2 = true;
@@ -8647,8 +8689,9 @@ async function refreshDraft() {
     }
     $("#draft-status").textContent = "";
     $("#draft-status").classList.remove("error");
-    if (state.draftAutoCommit) await autoCommitDraft(request);
+    const committed = !state.draftAutoCommit || await autoCommitDraft(request);
     if (request !== state.draftRequest) return;
+    if (committed) updateReferenceAddAvailability();
     // "Auto size bin to bore" (Width / Length or Height) keeps the bin fitted to
     // this Bore after every edit.
     if (request === state.draftRequest && await reconcileBoreBin(result)) return;
