@@ -18,7 +18,7 @@
 
 ### In-review feature
 
-- **AI Design — In review (Fix 073):** implemented on branch `fix73` and awaiting acceptance into `main` at the time of this document.
+- **AI Design — Current (Fix 073):** accepted and integrated into `main`.
 
 ---
 
@@ -1053,7 +1053,7 @@ Spaces can use **Spacers** to fill leftover physical area.
 
 # 16. AI Design — Fix 073
 
-**Status at this document revision: In review — implemented on `fix73`, not yet accepted into `main`.**
+**Status: Current — accepted and integrated into `main`.**
 
 AI Design is a Designer workflow for turning a natural-language object description into a legal Wavefinity bin design **without Wavefinity directly calling an AI provider**.
 
