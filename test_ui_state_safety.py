@@ -80,27 +80,49 @@ process.stdout.write(JSON.stringify(labels));
 """.replace("__SOURCE__", source)
         self.assertEqual(node_json(script), ["Bin height", "Height", "Bin height"])
 
-    def test_nudge_failure_keeps_draft_rollback_without_undo_snapshot(self):
+    def test_nudge_success_failure_and_stale_response_without_undo_snapshot(self):
         source = APP[APP.index("const commitNudge = debounce("):
                      APP.index("}, 200);", APP.index("const commitNudge = debounce(")) + len("}, 200);")]
         handler = function_source("handleLayoutArrowKeys", APP)
         self.assertIn("if (!pendingNudgeDraft)", handler)
         script = r"""
-const clone=v=>JSON.parse(JSON.stringify(v));
-const debounce=fn=>fn;
-let pendingNudgeDraft={kind:'post',zone:[0,0,2,2]};
+const clone=v=>JSON.parse(JSON.stringify(v)),debounce=fn=>fn;
+const original={kind:'post',zone:[0,0,2,2]};
+let pendingNudgeDraft=clone(original),resolveApi,rejectApi,changes=0;
 const state={draftRequest:1,selected:0,draft:{kind:'post',zone:[1,0,3,2]},
- design:{layout:{features:[{kind:'post',zone:[0,0,2,2]}]}},spaceStarterPreviewPending:true};
-const api=async()=>{throw Error('rejected')};
-const toast=()=>{},renderDraftFields=()=>{},refreshDraft=()=>{},renderLayout2D=()=>{};
+ design:{layout:{features:[clone(original)]}},spaceStarterPreviewPending:true};
+const api=()=>new Promise((resolve,reject)=>{resolveApi=resolve;rejectApi=reject});
+const toast=()=>{},renderDraftFields=()=>{},refreshDraft=async()=>{},renderLayout2D=()=>{};
 const renderPlaced=()=>{},updateSelectionButtons=()=>{};
-const noteCommittedDesignChange=()=>{state.spaceStarterPreviewPending=false};
+const noteCommittedDesignChange=()=>{changes++;state.spaceStarterPreviewPending=false};
 __SOURCE__
-commitNudge(1).then(()=>process.stdout.write(JSON.stringify({zone:state.draft.zone,
- pending:pendingNudgeDraft,starter:state.spaceStarterPreviewPending})));
+(async()=>{
+ const success=commitNudge(1);
+ resolveApi({design:{layout:{features:[clone(state.draft)]}},selected:0});
+ await success;
+ const afterSuccess={zone:state.draft.zone,pending:pendingNudgeDraft,
+  starter:state.spaceStarterPreviewPending,changes};
+ state.draftRequest=2;state.draft={kind:'post',zone:[2,0,4,2]};
+ pendingNudgeDraft=clone(original);
+ const failure=commitNudge(2);rejectApi(Error('rejected'));await failure;
+ const afterFailure={zone:state.draft.zone,pending:pendingNudgeDraft,changes};
+ state.draftRequest=3;state.draft={kind:'post',zone:[3,0,5,2]};
+ pendingNudgeDraft=clone(original);
+ const stale=commitNudge(3);
+ state.draftRequest=4;state.draft={kind:'post',zone:[4,0,6,2]};
+ resolveApi({design:{layout:{features:[{kind:'post',zone:[99,0,101,2]}]}},selected:0});
+ await stale;
+ process.stdout.write(JSON.stringify({afterSuccess,afterFailure,
+  afterStale:{zone:state.draft.zone,pending:pendingNudgeDraft,changes}}));
+})().catch(e=>{console.error(e);process.exit(1)});
 """.replace("__SOURCE__", source)
-        self.assertEqual(node_json(script), {"zone": [0, 0, 2, 2],
-                                            "pending": None, "starter": True})
+        self.assertEqual(node_json(script), {
+            "afterSuccess": {"zone": [1, 0, 3, 2], "pending": None,
+                             "starter": False, "changes": 1},
+            "afterFailure": {"zone": [0, 0, 2, 2], "pending": None, "changes": 1},
+            "afterStale": {"zone": [4, 0, 6, 2], "pending": {"kind": "post", "zone": [0, 0, 2, 2]},
+                           "changes": 1},
+        })
 
     def test_reference_add_remove_readd_preserves_only_current_height_authority(self):
         source = "\n".join(function_source(name, APP) for name in (
@@ -452,6 +474,49 @@ __SOURCE__
             self.assertEqual(actual["changes"], 1)
             self.assertTrue(actual["closed"])
         self.assertEqual(result[3], {"kind": "failed", "value": "medium", "closed": False})
+
+    def test_modifier_save_claims_live_baseline_before_awaited_validation(self):
+        source = "\n".join(function_source(name, APP) for name in
+                           ("beginDesignMutation", "flushModifierForm", "saveModifierPart"))
+        script = r"""
+const clone=v=>JSON.parse(JSON.stringify(v));
+const old={box:{inside_grip:{size:'small'}}};
+const state={design:clone(old),modifierEditing:'inside_grip',canGenerate:true,
+ spaceStarterPreviewPending:true,designMutationBusy:false};
+let pendingDesignHistory=clone(old),debounced=true,resolveApi,changes=0;
+const cancelChangedDesignDebounce=()=>{debounced=false};
+const applyLiveFormWithModifierConflictGuard=()=>{
+ state.design.box.inside_grip.size='large';return true;
+};
+const cancelPendingDraftWork=()=>{},setMutationSurfacesInert=()=>{};
+const mutationControls=()=>[],updateSelectionButtons=()=>{},updateGenerateAvailability=()=>{};
+const finishDesignMutation=()=>{state.designMutationBusy=false};
+const noteCommittedDesignChange=before=>{
+ if(JSON.stringify(before)!==JSON.stringify(state.design)){
+  changes++;state.spaceStarterPreviewPending=false;
+ }
+};
+const api=()=>new Promise(resolve=>{resolveApi=resolve});
+const clearDraftSelection=()=>{state.modifierEditing=null};
+const renderPlaced=()=>{},refreshPreview=async()=>{},toast=()=>{};
+__SOURCE__
+(async()=>{
+ const saving=saveModifierPart();
+ const held={value:state.design.box.inside_grip.size,baseline:pendingDesignHistory,
+  debounced,busy:state.designMutationBusy,changes};
+ resolveApi({design:clone(state.design)});
+ await saving;
+ process.stdout.write(JSON.stringify({held,final:{value:state.design.box.inside_grip.size,
+  closed:state.modifierEditing===null,starter:state.spaceStarterPreviewPending,
+  busy:state.designMutationBusy,changes}}));
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__SOURCE__", source)
+        self.assertEqual(node_json(script), {
+            "held": {"value": "large", "baseline": None, "debounced": False,
+                     "busy": True, "changes": 1},
+            "final": {"value": "large", "closed": True, "starter": False,
+                      "busy": False, "changes": 1},
+        })
 
     def test_space_canvas_switch_remembers_design_view_and_uses_space_renderer(self):
         source = function_source("activatePreviewView", APP) + "\n" + function_source("preferredDesignView", APP)
