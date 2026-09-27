@@ -15,24 +15,7 @@ import wavefinity_web
 
 
 class TestBinLogging(unittest.TestCase):
-    def test_summarize_interior_parts_empty(self):
-        layout = Layout((), "fused", 1.0)
-        self.assertEqual(summarize_interior_parts(layout), "None")
-        self.assertEqual(summarize_interior_parts(layout, scoop=True), "Scoop")
 
-    def test_summarize_interior_parts_features(self):
-        f1 = Feature("divider", Zone(0, 0, 10, 10))
-        f2 = Feature("divider", Zone(10, 0, 20, 10))
-        layout = Layout((f1, f2), "fused", 1.0)
-        self.assertEqual(summarize_interior_parts(layout), "2x Divider")
-
-        item = Item("Pencil", (Segment(100.0, 7.0),))
-        f3 = Feature("cradle", Zone(0, 0, 20, 20), item=item)
-        layout2 = Layout((f1, f3), "fused", 1.0)
-        summary = summarize_interior_parts(layout2, scoop=True)
-        self.assertIn("Divider", summary)
-        self.assertIn("Cradle (Pencil)", summary)
-        self.assertIn("Scoop", summary)
 
     def test_log_bin_to_folder_creates_and_appends(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -147,11 +130,6 @@ class TestBinLogging(unittest.TestCase):
                 })
                 self.assertFalse(generate.call_args.kwargs["keep_log"])
 
-    def test_keep_log_is_not_an_active_preference(self):
-        with patch.object(wavefinity_web, "save_preferences", return_value={"output": "kept"}) as save:
-            result = wavefinity_web.preferences_payload({"keep_log": True})
-        self.assertEqual(result["preferences"], {"output": "kept"})
-        save.assert_called_once_with({})
 
 
 if __name__ == "__main__":

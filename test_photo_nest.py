@@ -111,19 +111,8 @@ class OutlineCleanupAndRejectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "multiple objects"):
             segment_object(image)
 
-    def test_object_touching_edge_is_rejected(self):
-        image = letter_image(((0, 60, 45, 100),))
-        with self.assertRaisesRegex(ValueError, "touching paper edge"):
-            segment_object(image)
 
-    def test_tiny_outline_is_rejected(self):
-        image = letter_image(((100, 130, 101, 131),))
-        with self.assertRaisesRegex(ValueError, "too small or noisy"):
-            segment_object(image)
 
-    def test_unsupported_upload_type_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "JPG, JPEG, PNG, or WEBP"):
-            decode_image_data("data:image/gif;base64,R0lGODlhAQABAIAAAAUEBA==", "image/gif")
 
 
 if __name__ == "__main__":

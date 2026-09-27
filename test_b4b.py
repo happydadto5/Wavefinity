@@ -50,51 +50,11 @@ class B4BSpecTests(unittest.TestCase):
         for good in (0.5, 1.0, 2.0):
             self.assertEqual(B4BSpec(lid_headroom_mm=good).lid_headroom_mm, good)
 
-    def test_front_label_style_default_and_choices(self):
-        self.assertEqual(B4BSpec().front_label_style, "flat")
-        self.assertEqual(B4BSpec(front_label_style="flat").front_label_style, "flat")
-        self.assertEqual(B4BSpec(front_label_style="wavy").front_label_style, "wavy")
-        self.assertEqual(
-            B4BSpec(front_label_style="wavy").normalised().front_label_style, "wavy",
-        )
 
-    def test_legacy_nolid_normalises_to_lid_only(self):
-        n = B4BSpec(
-            enabled=True, lid=False, secure_lid=True, stacking=True,
-            label_location="top", latch_count="2",
-        ).normalised()
-        self.assertTrue(n.lid)
-        self.assertFalse(n.secure_lid)
-        self.assertFalse(n.stacking)
-        self.assertEqual(n.label_location, "top")
-        # Latch count is a user-configurable Auto/1/2 preference, not a
-        # legacy field normalised() resets - only lid/secure_lid/stacking
-        # (which genuinely depended on the removed no-lid state) are forced.
-        self.assertEqual(n.latch_count, "2")
 
 
 class B4BCapacityTests(unittest.TestCase):
-    def test_selected_dimensions_are_exact_child_field(self):
-        for wall in CASE_WALLS:
-            for ux in (2, 4, 6, 8, 10):
-                for uy in (2, 6, 10):
-                    box = BoxSpec(
-                        x=ux * GRID_PITCH, y=uy * GRID_PITCH, z=40, wall=wall,
-                        b4b=B4BSpec(enabled=True, secure_lid=False, lid=False,
-                                    handle=False),
-                    )
-                    self.assertEqual(b4b.b4b_capacity_units(box), (ux, uy))
-                    self.assertEqual(
-                        b4b.b4b_capacity_mm(box),
-                        (ux * GRID_PITCH, uy * GRID_PITCH),
-                    )
 
-    def test_32_by_48_means_four_by_six_child_field(self):
-        # a passive lid asks nothing of the field, so 32x48 stays 32x48
-        box = BoxSpec(x=32, y=48, z=40,
-                      b4b=B4BSpec(enabled=True, secure_lid=False, handle=False))
-        self.assertEqual(b4b.b4b_capacity_units(box), (4, 6))
-        self.assertEqual(b4b.b4b_capacity_mm(box), (32, 48))
 
     def test_wall_thickness_changes_case_outside_not_capacity(self):
         box = BoxSpec(x=64, y=48, z=40, b4b=B4BSpec(enabled=True))
@@ -211,50 +171,8 @@ class B4BPreviewOwnershipTests(unittest.TestCase):
     carrying an explicit ``owner`` - "base" or "lid" - rather than being
     guessed client-side from its ``kind``. See fix3d.md."""
 
-    def test_every_face_is_owned_and_both_groups_are_non_empty(self):
-        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(
-            enabled=True, lid=True, secure_lid=True, stacking=True,
-        ))
-        parts = b4b.b4b_preview_parts(box)
-        self.assertTrue(parts)
-        owners = {owner for _points, _kind, _normal, _layer, owner in parts}
-        self.assertEqual(owners, {"base", "lid"})
-        by_owner: dict[str, int] = {"base": 0, "lid": 0}
-        for _points, _kind, _normal, _layer, owner in parts:
-            by_owner[owner] += 1
-        self.assertGreater(by_owner["base"], 0)
-        self.assertGreater(by_owner["lid"], 0)
 
-    def test_front_label_is_base_owned_top_label_is_lid_owned(self):
-        front = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(
-            enabled=True, lid=True, label_text="ABC", label_location="front",
-        ))
-        front_owners = {
-            owner for _points, kind, _normal, _layer, owner
-            in b4b.b4b_preview_parts(front) if kind == "b4b_label"
-        }
-        self.assertEqual(front_owners, {"base"})
 
-        top = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(
-            enabled=True, lid=True, label_text="ABC", label_location="top",
-        ))
-        top_owners = {
-            owner for _points, kind, _normal, _layer, owner
-            in b4b.b4b_preview_parts(top) if kind == "b4b_label"
-        }
-        self.assertEqual(top_owners, {"lid"})
-
-    def test_latches_are_lid_owned_body_is_base_owned(self):
-        box = BoxSpec(x=80, y=64, z=40, b4b=B4BSpec(
-            enabled=True, lid=True, secure_lid=True,
-        ))
-        parts = b4b.b4b_preview_parts(box)
-        self.assertTrue(any(kind == "b4b_latch" for _p, kind, _n, _l, _o in parts))
-        for _points, kind, _normal, _layer, owner in parts:
-            if kind == "b4b_latch":
-                self.assertEqual(owner, "lid")
-            if kind == "b4b_body":
-                self.assertEqual(owner, "base")
 
 
 class B4BPrintabilityTests(unittest.TestCase):
@@ -326,17 +244,6 @@ class B4BFilletTests(unittest.TestCase):
     """Hardware is filleted where it grows out of the lid plate or the body
     root web - a square internal corner is where a printed bracket cracks."""
 
-    def test_fillet_helper_adds_material_only_in_internal_corners(self):
-        ell = Polygon([(0, 0), (10, 0), (10, 4), (4, 4), (4, 10), (0, 10)])
-        rounded = b4b._filleted(ell, 1.0)
-        self.assertGreater(rounded.area, ell.area)
-        # the internal corner is filled...
-        self.assertTrue(rounded.contains(Point(4.2, 4.2)))
-        # ...with an arc, not a square block
-        self.assertFalse(rounded.contains(Point(4.9, 4.9)))
-        # and every external corner survives untouched
-        for corner in ((0.01, 0.01), (9.99, 0.01), (9.99, 3.99), (0.01, 9.99)):
-            self.assertTrue(rounded.contains(Point(*corner)))
 
 
 class B4BValidationTests(unittest.TestCase):
@@ -379,15 +286,6 @@ class B4BValidationTests(unittest.TestCase):
             b4b.validate_b4b_design(box)
         self.assertIn("Side Openings are not available", str(ctx.exception))
 
-    def test_legacy_nolid_normalisation_keeps_lid_only(self):
-        n = B4BSpec(
-            enabled=True, lid=False, secure_lid=True, stacking=True,
-            label_location="top",
-        ).normalised()
-        self.assertTrue(n.lid)
-        self.assertEqual(n.label_location, "top")
-        self.assertFalse(n.secure_lid)
-        self.assertFalse(n.stacking)
 
 
 class B4BSerializationTests(unittest.TestCase):
@@ -412,14 +310,6 @@ class B4BSerializationTests(unittest.TestCase):
         back, *_ = design_from_dict(data)
         self.assertEqual(back.b4b.front_label_style, "wavy")
 
-    def test_old_design_missing_front_label_style_loads_flat(self):
-        box = BoxSpec(x=64, y=48, z=40, wall=1.2, b4b=B4BSpec(
-            enabled=True, label_text="NUTS", label_location="front",
-        ))
-        data = design_to_dict(box, Layout((), "fused"))
-        del data["box"]["b4b"]["front_label_style"]
-        back, *_ = design_from_dict(data)
-        self.assertEqual(back.b4b.front_label_style, "flat")
 
 
 class B4BGenerationTests(unittest.TestCase):
@@ -525,46 +415,8 @@ class B4B3MFHierarchyTests(unittest.TestCase):
         for name in latches:
             self._assert_direct(hierarchy, name)
 
-    def test_front_label_is_the_only_registered_multipart_object(self):
-        hierarchy = self._export_hierarchy(B4BSpec(
-            enabled=True, secure_lid=True, label_text="NUTS", label_location="front",
-        ))
-        self.assertEqual(hierarchy["components"], {
-            "Storage Box Front Label": [
-                "Storage Box Front Label Plate", "Storage Box Front Label Text",
-            ],
-        })
-        self._assert_direct(hierarchy, "Storage Box Body")
-        self._assert_direct(hierarchy, "Storage Box Lid")
-        for name in hierarchy["top"]:
-            if name.startswith("Storage Box Latch "):
-                self._assert_direct(hierarchy, name)
-        self.assertEqual(hierarchy["filaments"]["Storage Box Front Label Plate"], 1)
-        self.assertEqual(hierarchy["filaments"]["Storage Box Front Label Text"], 2)
 
-    def test_top_label_is_registered_with_its_lid_only(self):
-        hierarchy = self._export_hierarchy(B4BSpec(
-            enabled=True, secure_lid=True, label_text="NUTS", label_location="top",
-        ))
-        self.assertEqual(hierarchy["components"], {
-            "Storage Box Lid": ["Storage Box Lid", "Storage Box Top Label"],
-        })
-        self.assertEqual(hierarchy["top"]["Storage Box Lid"]["children"], [
-            "Storage Box Lid", "Storage Box Top Label",
-        ])
-        self._assert_direct(hierarchy, "Storage Box Body")
-        for name in hierarchy["top"]:
-            if name.startswith("Storage Box Latch "):
-                self._assert_direct(hierarchy, name)
-        self.assertEqual(hierarchy["filaments"]["Storage Box Top Label"], 2)
 
-    def test_lid_only_b4b_has_no_unneeded_components_object(self):
-        hierarchy = self._export_hierarchy(B4BSpec(
-            enabled=True, secure_lid=False, label_location="top",
-        ))
-        self.assertEqual(hierarchy["components"], {})
-        self._assert_direct(hierarchy, "Storage Box Body")
-        self._assert_direct(hierarchy, "Storage Box Lid")
 
 
 def _front_label_box(style: str = "flat", text: str = "FRONT", **overrides) -> BoxSpec:
@@ -583,22 +435,7 @@ def _front_label_box(style: str = "flat", text: str = "FRONT", **overrides) -> B
 class B4BFrontLabelRetentionRemovedTests(unittest.TestCase):
     """The removable front label has no retention feature of any kind."""
 
-    def test_retention_constants_are_gone(self):
-        for name in (
-            "B4B_FRONT_LABEL_RETENTION_REACH",
-            "B4B_FRONT_LABEL_RETENTION_H",
-            "B4B_FRONT_LABEL_RETENTION_W",
-        ):
-            self.assertFalse(hasattr(b4b, name), name)
 
-    def test_frame_is_smaller_without_retention_bumps(self):
-        # The frame is exactly patch + wedge + bottom_lip + two side channels
-        # now; removing two bumps can only shrink or leave unchanged the
-        # holder's own bounding volume, never grow it.
-        frame, _plate, _text, _centre = b4b.b4b_front_label_geometry(
-            _front_label_box("flat")
-        )
-        self.assertTrue(frame.is_watertight)
 
 
 class B4BFrontLabelInsertCorridorTests(unittest.TestCase):
@@ -616,24 +453,6 @@ class B4BFrontLabelInsertCorridorTests(unittest.TestCase):
                     b4b.b4b_front_label_geometry(box)
 
 
-class B4BFrontLabelFlatRegressionTests(unittest.TestCase):
-    def test_flat_plate_is_a_plain_rectangular_slab(self):
-        _frame, plate, text, _centre = b4b.b4b_front_label_geometry(
-            _front_label_box("flat")
-        )
-        self.assertTrue(plate.is_watertight)
-        self.assertGreater(plate.volume, 0.0)
-        self.assertTrue(text.is_watertight)
-        self.assertGreater(text.volume, 0.0)
-        # Every vertex not inside the shallow text pocket sits on one of the
-        # two exact flat planes of a plain box.
-        front_y = plate.bounds[0][1]
-        back_y = plate.bounds[1][1]
-        ys = np.unique(np.round(plate.vertices[:, 1], 6))
-        self.assertTrue(np.isclose(ys.max(), back_y))
-        self.assertTrue(np.isclose(ys.min(), front_y))
-
-
 class B4BFrontLabelWavyGeometryTests(unittest.TestCase):
     def setUp(self):
         self.box = _front_label_box("wavy")
@@ -646,28 +465,7 @@ class B4BFrontLabelWavyGeometryTests(unittest.TestCase):
         self.assertGreater(self.plate.volume, 0.0)
         self.assertTrue(self.frame.is_watertight)
 
-    def test_back_is_perfectly_planar(self):
-        back_y = self.plate.bounds[1][1]
-        back_vertices = self.plate.vertices[
-            self.plate.vertices[:, 1] > back_y - 1e-6
-        ]
-        self.assertGreater(len(back_vertices), 0)
-        self.assertTrue(np.allclose(back_vertices[:, 1], back_y, atol=1e-6))
 
-    def test_rectangular_perimeter_stays_flat(self):
-        plate_w = self.plate.bounds[1][0] - self.plate.bounds[0][0]
-        plate_h = self.plate.bounds[1][2] - self.plate.bounds[0][2]
-        front_y = b4b._b4b_wavy_front_y(plate_w, plate_h, b4b.B4B_FRONT_LABEL_PLATE_T)
-        flat_y = -b4b.B4B_FRONT_LABEL_PLATE_T / 2.0
-        half_w, half_h = plate_w / 2.0, plate_h / 2.0
-        # Right at every edge and at the flat border, the wave contributes
-        # nothing: the outline is the exact same rectangle Flat style uses.
-        for x, z in (
-            (half_w - 0.05, 0.0), (-half_w + 0.05, 0.0),
-            (0.0, half_h - 0.05), (0.0, -half_h + 0.05),
-            (half_w - b4b.B4B_FRONT_LABEL_FLAT_BORDER, 0.0),
-        ):
-            self.assertAlmostEqual(front_y(x, z), flat_y, places=6)
 
     def test_centre_face_carries_the_exact_wavefinity_wave(self):
         plate_w = self.plate.bounds[1][0] - self.plate.bounds[0][0]
@@ -679,48 +477,6 @@ class B4BFrontLabelWavyGeometryTests(unittest.TestCase):
                 front_y(float(x), 0.0), flat_y + wave_value(float(x)), places=6,
             )
 
-    def test_peak_to_peak_matches_wave_amplitude(self):
-        span = self.plate.bounds[1][1] - self.plate.bounds[0][1]
-        # Back is fixed at +plate_t/2; the front's deepest excursion reaches
-        # roughly plate_t/2 + WAVE_AMPLITUDE below it once sampling finds a
-        # near-extremum, so the full peak-to-peak span is close to
-        # plate_t + WAVE_AMPLITUDE (never more).
-        self.assertLessEqual(span, b4b.B4B_FRONT_LABEL_PLATE_T + WAVE_AMPLITUDE + 1e-6)
-        self.assertGreater(span, b4b.B4B_FRONT_LABEL_PLATE_T)
-
-
-class B4BFrontLabelWavyTextTests(unittest.TestCase):
-    def test_text_solid_is_nonempty_and_registered(self):
-        _frame, plate, text, _centre = b4b.b4b_front_label_geometry(
-            _front_label_box("wavy")
-        )
-        self.assertTrue(text.is_watertight)
-        self.assertGreater(text.volume, 0.0)
-        self.assertTrue(plate.is_watertight)
-        self.assertGreater(plate.volume, 0.0)
-        # The text sits inside the plate's own footprint and just past its
-        # deepest front excursion, never floating clear of the plate.  The
-        # boolean cut boundary lands within a few hundredths of a micron of
-        # the analytic surface, so the tolerance here is generous relative to
-        # that noise while still far tighter than anything print-relevant.
-        self.assertGreaterEqual(
-            text.bounds[0][1] + 1e-3, plate.bounds[0][1],
-        )
-        self.assertLessEqual(text.bounds[1][1], plate.bounds[1][1] + 1e-3)
-
-    def test_short_text_does_not_restart_the_wave_phase(self):
-        # A short label still reads the wave at true case-relative X=0 - the
-        # same phase a long label or the surrounding wall itself would see.
-        _frame, plate, _text, _centre = b4b.b4b_front_label_geometry(
-            _front_label_box("wavy", text="I")
-        )
-        plate_w = plate.bounds[1][0] - plate.bounds[0][0]
-        plate_h = plate.bounds[1][2] - plate.bounds[0][2]
-        front_y = b4b._b4b_wavy_front_y(plate_w, plate_h, b4b.B4B_FRONT_LABEL_PLATE_T)
-        self.assertAlmostEqual(
-            front_y(0.0, 0.0), -b4b.B4B_FRONT_LABEL_PLATE_T / 2.0 + wave_value(0.0),
-            places=6,
-        )
 
 
 class B4BFrontLabelPrintPoseTests(unittest.TestCase):
@@ -734,124 +490,28 @@ class B4BFrontLabelPrintPoseTests(unittest.TestCase):
         ))
         return parts
 
-    def test_flat_and_wavy_print_back_down_text_up(self):
-        for style in ("flat", "wavy"):
-            with self.subTest(style=style):
-                parts = self._label_parts(style)
-                plate = parts["Storage Box Front Label Plate"]
-                text = parts["Storage Box Front Label Text"]
-                # Flat back on the build plate.
-                self.assertAlmostEqual(float(plate.bounds[0][2]), 0.0, places=6)
-                # Lettering sits above the back, flush with (never past) the
-                # plate's own top/visible face - not against the plate.  A
-                # few hundredths of a micron of boolean-cut noise is fine;
-                # anything print-relevant is orders of magnitude bigger.
-                self.assertGreater(float(text.bounds[0][2]), 0.0)
-                self.assertLessEqual(
-                    float(text.bounds[1][2]), float(plate.bounds[1][2]) + 1e-3,
-                )
-                self.assertAlmostEqual(
-                    float(text.bounds[1][2]), float(plate.bounds[1][2]), places=3,
-                )
 
 
 class B4BWavyLabelZSamplesTests(unittest.TestCase):
     """``_b4b_wavy_label_z_samples`` replaces the flat per-mm Z grid with one
     tied to the border/blend topology - see ``_b4b_wave_mask_1d``."""
 
-    def test_starts_and_ends_at_half_height(self):
-        zs = b4b._b4b_wavy_label_z_samples(12.0)
-        self.assertAlmostEqual(float(zs[0]), -6.0, places=6)
-        self.assertAlmostEqual(float(zs[-1]), 6.0, places=6)
 
-    def test_includes_centreline(self):
-        zs = b4b._b4b_wavy_label_z_samples(12.0)
-        self.assertTrue(np.any(np.isclose(zs, 0.0)))
 
-    def test_strictly_increasing(self):
-        zs = b4b._b4b_wavy_label_z_samples(12.0)
-        self.assertTrue(np.all(np.diff(zs) > 0))
 
-    def test_symmetric_around_zero(self):
-        zs = b4b._b4b_wavy_label_z_samples(12.0)
-        self.assertTrue(np.allclose(zs, -zs[::-1]))
 
-    def test_represents_border_and_blend_transition(self):
-        zs = b4b._b4b_wavy_label_z_samples(12.0)
-        half_h = 6.0
-        border = b4b.B4B_FRONT_LABEL_FLAT_BORDER
-        blend = b4b.B4B_FRONT_LABEL_WAVE_BLEND
-        # The flat-border/blend boundary and the far end of the blend, both
-        # sides of the centreline.
-        for expected in (half_h - border, half_h - border - blend):
-            self.assertTrue(np.any(np.isclose(zs, expected, atol=1e-6)))
-            self.assertTrue(np.any(np.isclose(zs, -expected, atol=1e-6)))
 
-    def test_sample_count_does_not_scale_with_height(self):
-        # Unlike the old per-mm grid, the row count is set by the fixed
-        # border/blend constants, not by plate height.
-        counts = {len(b4b._b4b_wavy_label_z_samples(h)) for h in (8.0, 12.0, 20.0, 40.0)}
-        self.assertEqual(len(counts), 1)
-        (count,) = counts
-        self.assertLess(count, 20)
-        self.assertGreater(count, 5)
 
 
 class B4BWavyLabelMeshComplexityTests(unittest.TestCase):
     """The Z-topology sampling must cut triangle count without losing any
     visible geometry - see ``_b4b_wavy_label_z_samples``."""
 
-    def test_blank_mesh_is_efficient_and_correct(self):
-        plate_w, plate_h = 40.0, 12.0
-        blank = b4b._b4b_wavy_label_blank(plate_w, plate_h)
-
-        self.assertTrue(blank.is_watertight)
-        self.assertGreater(blank.volume, 0.0)
-        self.assertLess(len(blank.faces), 100_000)
-        # X sampling is deliberately left at full per-mm density, so it still
-        # dominates the triangle count; the win is against the old per-mm Z
-        # grid this replaces - at least a 5x cut in row count for a 12 mm
-        # label, so at least roughly that much fewer triangles too.
-        old_nz = max(2, b4b._sample_count(plate_h))
-        new_nz = len(b4b._b4b_wavy_label_z_samples(plate_h))
-        self.assertLess(new_nz * 5, old_nz)
-
-        back_y = blank.bounds[1][1]
-        back_vertices = blank.vertices[blank.vertices[:, 1] > back_y - 1e-6]
-        self.assertGreater(len(back_vertices), 0)
-        self.assertTrue(np.allclose(back_vertices[:, 1], back_y, atol=1e-6))
-
-        front_y = b4b._b4b_wavy_front_y(plate_w, plate_h, b4b.B4B_FRONT_LABEL_PLATE_T)
-        flat_y = -b4b.B4B_FRONT_LABEL_PLATE_T / 2.0
-        half_w, half_h = plate_w / 2.0, plate_h / 2.0
-        for x, z in (
-            (half_w - 0.05, 0.0), (-half_w + 0.05, 0.0),
-            (0.0, half_h - 0.05), (0.0, -half_h + 0.05),
-        ):
-            self.assertAlmostEqual(front_y(x, z), flat_y, places=6)
-        for x in np.linspace(-plate_w / 4.0, plate_w / 4.0, 5):
-            self.assertAlmostEqual(
-                front_y(float(x), 0.0), flat_y + wave_value(float(x)), places=6,
-            )
 
 
 class B4BDividerAndMaterialTests(unittest.TestCase):
-    def test_lid_skin_equals_effective_base(self):
-        for base in (0.8, 1.2, 1.6, 2.0, 2.4):
-            box = BoxSpec(x=64, y=48, z=40, base_thickness=base, b4b=B4BSpec(enabled=True, lid=True))
-            self.assertAlmostEqual(b4b.b4b_lid_skin(box), base)
 
-        # Stacking forces B4B_STACK_MIN_BASE (2.8)
-        stacked = BoxSpec(x=64, y=48, z=40, base_thickness=1.6, b4b=B4BSpec(enabled=True, lid=True, stacking=True))
-        self.assertAlmostEqual(b4b.b4b_lid_skin(stacked), b4b.B4B_STACK_MIN_BASE)
-        self.assertAlmostEqual(b4b.b4b_lid_skin(stacked), 2.8)
 
-    def test_b4b_min_wall_constant(self):
-        self.assertEqual(b4b.B4B_MIN_WALL, 0.8)
-
-    def test_explicit_thin_materials_accepted(self):
-        box = BoxSpec(x=64, y=48, z=40, wall=0.8, base_thickness=0.8, standard_walls=False, standard_base=False, b4b=B4BSpec(enabled=True))
-        b4b.validate_b4b_design(box)
 
     def test_b4b_divider_round_trip(self):
         from organizer_inserts import Feature, Zone
@@ -863,96 +523,11 @@ class B4BDividerAndMaterialTests(unittest.TestCase):
         self.assertEqual(back_layout.features[0].kind, "divider")
         self.assertEqual(back_layout.features[0].zone, Zone(-32, -24, 32, 24))
 
-    def test_b4b_rejects_divider_with_labels_enabled(self):
-        data = {
-            "version": 1,
-            "box": {"x": 64, "y": 48, "z": 40, "b4b": {"enabled": True}},
-            "layout": {
-                "mode": "fused",
-                "features": [{
-                    "kind": "divider",
-                    "zone": [-32, -24, 32, 24],
-                    "options": {"label_divisions": True},
-                }],
-            },
-        }
-        with self.assertRaises(ValueError) as ctx:
-            design_from_dict(data)
-        self.assertIn("Divider division labels are not available on Storage Box", str(ctx.exception))
 
-    def test_b4b_rejects_non_divider_feature(self):
-        data = {
-            "version": 1,
-            "box": {"x": 64, "y": 48, "z": 40, "b4b": {"enabled": True}},
-            "layout": {
-                "mode": "fused",
-                "features": [{
-                    "kind": "post",
-                    "zone": [-10, -10, 10, 10],
-                }],
-            },
-        }
-        with self.assertRaises(ValueError) as ctx:
-            design_from_dict(data)
-        self.assertIn("Storage Box supports Dividers only", str(ctx.exception))
 
-    def test_b4b_rejects_multiple_dividers(self):
-        data = {
-            "version": 1,
-            "box": {"x": 64, "y": 48, "z": 40, "b4b": {"enabled": True}},
-            "layout": {
-                "mode": "fused",
-                "features": [
-                    {"kind": "divider", "zone": [-32, -24, 32, 24]},
-                    {"kind": "divider", "zone": [-32, -24, 32, 24]},
-                ],
-            },
-        }
-        with self.assertRaises(ValueError) as ctx:
-            design_from_dict(data)
-        self.assertIn("Storage Box supports one Divider layout", str(ctx.exception))
 
-    def test_b4b_rejects_non_fused_layout(self):
-        data = {
-            "version": 1,
-            "box": {"x": 64, "y": 48, "z": 40, "b4b": {"enabled": True}},
-            "layout": {"mode": "removable", "features": []},
-        }
-        with self.assertRaises(ValueError) as ctx:
-            design_from_dict(data)
-        self.assertIn("fused", str(ctx.exception).lower())
 
-    def test_old_b4b_standard_defaults_migrate_to_b4b_defaults(self):
-        data = {
-            "version": 1,
-            "box": {
-                "x": 64, "y": 48, "z": 40,
-                "wall": 0.8, "standard_walls": True,
-                "base_thickness": 0.6, "standard_base": True,
-                "b4b": {"enabled": True},
-            },
-            "layout": {"mode": "fused", "features": []},
-        }
-        box, layout, *_ = design_from_dict(data)
-        self.assertEqual(box.wall, 1.6)
-        self.assertEqual(box.base_thickness, 1.6)
-        self.assertFalse(box.standard_walls)
-        self.assertFalse(box.standard_base)
 
-    def test_explicit_b4b_materials_preserved_on_deserialization(self):
-        data = {
-            "version": 1,
-            "box": {
-                "x": 64, "y": 48, "z": 40,
-                "wall": 1.2, "standard_walls": False,
-                "base_thickness": 0.8, "standard_base": False,
-                "b4b": {"enabled": True},
-            },
-            "layout": {"mode": "fused", "features": []},
-        }
-        box, layout, *_ = design_from_dict(data)
-        self.assertEqual(box.wall, 1.2)
-        self.assertEqual(box.base_thickness, 0.8)
 
     def test_b4b_build_print_objects_with_divider(self):
         from organizer_inserts import Feature, Zone

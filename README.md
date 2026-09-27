@@ -264,6 +264,12 @@ Wavefinity should avoid both extremes: skipping useful automated verification an
 
 Existing tests are a safety net. Reuse them freely when they fit. Do not build a large new testing program merely because a change exists.
 
+#### Test inventory and planning limit
+
+The active suite baseline is **500 tests**. Do not exceed **550 active test methods** without an explicit user decision; prefer replacing or consolidating an older test over permanent net growth. Do not create permanent active `test_fixNNN.py` suites. Temporary fix-specific tests may be used during development, but move durable cases into behavior-owned suites and remove the temporary file before acceptance. An obsolete test for behavior the product no longer promises may be deleted.
+
+A normal Fix names only the smallest useful verification set. Several requirements may share one test or code/static proof. Do not create a correction solely to add an assertion when review can directly prove the requirement. After a correction, rerun the failing/new check and directly affected owner tests, not the full suite by default. A green full suite alone does not prove completion. There is no coverage-percentage target.
+
 #### Change classification
 
 **Class A — Small/localized change: TESTING OPTIONAL**
@@ -273,13 +279,13 @@ Existing tests are a safety net. Reuse them freely when they fit. Do not build a
 **Class B — Moderate/bounded change: AUTOMATED TESTING ENCOURAGED**
 - *Examples:* one feature plus paired UI/API wiring; contained serialization; several files in one coherent path; a new local interaction/state flow; a meaningful bug fix spanning multiple functions.
 - Prefer an existing targeted automated test or small related test group.
-- A broader/full existing automated suite is also acceptable when it is fast, produces concise output, and can cheaply catch regressions outside the immediate path.
+- Use `python3 run_tests.py core` if targeted tests are insufficient; reserve the full suite for broad Class C work, release/audit milestones, or shared-owner breakage.
 - Do not write a new test unless it is likely to protect an important behavior at reasonable maintenance/token cost.
 
 **Class C — Major / Heavy-Lift / High-Blast-Radius change: AUTOMATED TESTING EXPECTED**
 Testing is expected when the change can realistically break significant portions of Wavefinity outside the immediate feature.
 - *Qualifying criteria:* shared box/wave/grid geometry; global mating/interlock rules; central data models; saved-design schema/versioning; broad save/load/generation paths; shared layout/assembly/registry infrastructure; major subsystem replacement; security/request boundaries; global browser state synchronization; common 3MF/export logic; versioned serialization.
-- Use the relevant targeted tests and normally the existing broader/full automated suite when it is practical and reasonably fast.
+- Use relevant targeted tests and the core gate. Run the full suite when the changed shared contract genuinely needs it.
 - A large line count alone does not make work Class C; a tiny shared-contract edit can.
 
 #### Browser-test retirement
@@ -309,13 +315,13 @@ Name exact commands/checks when known, but do not turn the fix file into a testi
 
 - **Prefer existing tests.** Reuse them before writing new ones.
 - **Targeted first when obvious.** If one small test group directly covers the change, start there.
-- **Full suites are allowed.** A full existing automated suite is reasonable whenever it is fast enough, output is concise, and the extra regression coverage is worth the small token cost.
+- **Core first.** `python3 run_tests.py core` is the default broad gate. Reserve the full suite for broad Class C work, release/audit milestones, or shared-owner breakage.
 - **Use quiet/concise output.** Avoid verbose logs unless diagnosing a failure. Run the suite through
-  `python3 run_tests.py` (whole suite) or `python3 run_tests.py test_foo test_bar` (a subset) — it
+  `python3 run_tests.py core` (74-test core), `python3 run_tests.py` (whole suite), or `python3 run_tests.py test_foo test_bar` (a subset) — it
   prints one `PASS: N/N passed in Ys` line when everything passes, and only the failing test IDs plus
   their tracebacks otherwise. A green run costs one line of output no matter how large the suite is;
   `python -m unittest` directly is for when you need its own `-v`/`-k` flags while diagnosing a failure.
-- **New tests are optional, not automatic.** Add one only when it protects an important stable invariant and is worth the implementation/maintenance cost.
+- **New tests are exceptional.** Class A normally adds none. Class B uses existing targeted tests first; add one only for an important stable failure mode that static review cannot cheaply catch. Class C adds the smallest durable set for shared contracts. Exact UI copy, layout, and source structure normally use code review or manual verification.
 - **Syntax/import checks are cheap** and encouraged when relevant.
 - **Browser automation is retired.** Use static review and active non-browser checks.
 - **Rerun failures, not reassurance.** After fixing a failure, rerun the failed/relevant checks. Do not repeatedly rerun already-passing suites without a reason.
@@ -353,15 +359,15 @@ Before spending testing tokens, ask:
 
 - Tiny/local change with no meaningful runtime risk → testing may be skipped.
 - Relevant existing targeted test → usually run it.
-- Fast, concise full suite with useful regression coverage → running it is allowed and often worthwhile.
+- Targeted tests insufficient → run the 74-test core gate; use the full suite only for genuinely broad risk or milestones.
 - Browser-specific behavior → use active non-browser checks and static review; browser automation is retired.
 - Repeated corrections or escaped runtime failures → increase automated verification.
 
 #### Definition of done
 
 - **Class A:** requested behavior implemented, code path reasoned through, diff verified; cheap relevant automated checks may be run but are not mandatory.
-- **Class B:** Class A plus useful existing automated verification when available; targeted is preferred, but a fast full suite is acceptable.
-- **Class C:** implementation plus relevant non-browser automated verification; broader/full suite is normally appropriate when practical.
+- **Class B:** Class A plus useful existing automated verification when available; targeted tests are preferred, with core for broader confidence.
+- **Class C:** implementation plus relevant non-browser automated verification; use core first, with full suite for genuinely broad shared-contract risk.
 
 ### Using the browser UI
 
@@ -1734,7 +1740,12 @@ layered implementation:
 | `test_wavefinity_web.py` | Browser-service API contract, security boundary and static-file regressions. | Only via `python -m unittest`. |
 | `test_drawer.py` | Inventory file, one-placement layout, report and spacer regressions. | Only via `python -m unittest`. |
 | `test_pegboard.py` | Pegboard sizing, persistence, mount geometry and placement regressions. | Only via `python -m unittest`. |
-| `run_tests.py` | Compact test runner: one pass/fail summary line, full tracebacks only on failure. See [Testing rules](#testing-rules). | Yes — `python3 run_tests.py [module ...]`. |
+| `test_inventory_safety.py` | Inventory refresh, deletion, and Space isolation. | Via `run_tests.py`. |
+| `test_edge_conflicts.py` | Edge Mount and Lid & Stacking conflicts. | Via `run_tests.py`. |
+| `test_ui_state_safety.py` | Preview selection and async UI state. | Via `run_tests.py`. |
+| `test_text_geometry.py` | Text placement and geometry. | Via `run_tests.py`. |
+| `test_lid_geometry.py` | Lid fit, labels, and export geometry. | Via `run_tests.py`. |
+| `run_tests.py` | Compact test runner: full, 74-test core, or selected modules. See [Testing rules](#testing-rules). | Yes — `python3 run_tests.py [core | module ...]`. |
 
 `web/index.html`, `web/styles.css`, `web/feature-icons.js` and `web/app.js` are
 plain dependency-free frontend files with no build step. Icon artwork lives in

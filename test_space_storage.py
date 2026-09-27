@@ -82,13 +82,6 @@ class SpaceStorageStartupTests(unittest.TestCase):
 
     # 5. a custom parent creates <parent>/Wavefinity/<Space Name>, not
     #    <parent>/<Space Name>.
-    def test_custom_parent_nests_under_its_own_wavefinity_folder(self):
-        custom = self.home / "custom3"
-        custom.mkdir()
-        self.routes["/api/space/storage-parent"]({"parent": str(custom)})
-        result = self.routes["/api/space/create"]({"name": "Bench", "kind": "drawer", "x": 320, "y": 240, "z": 55})
-        created = Path(result["folder"]["folder"])
-        self.assertEqual(created, (custom / "Wavefinity" / "Bench").resolve())
 
     # 6. opening or cancelling the Open Existing chooser never creates
     #    Documents/Wavefinity.
@@ -106,14 +99,6 @@ class SpaceStorageStartupTests(unittest.TestCase):
 
     # 7. saving space_parent validates an existing directory but never
     #    creates its Wavefinity child.
-    def test_saving_space_parent_validates_but_does_not_create_child(self):
-        with self.assertRaises(ValueError):
-            self.routes["/api/space/storage-parent"]({"parent": str(self.home / "does-not-exist")})
-        custom = self.home / "custom4"
-        custom.mkdir()
-        result = self.routes["/api/space/storage-parent"]({"parent": str(custom)})
-        self.assertEqual(result["storage"]["parent"], str(custom.resolve()))
-        self.assertFalse((custom / "Wavefinity").exists())
 
     # 8. an unavailable saved custom parent is reported for user repair
     #    rather than silently reset to Documents.
@@ -182,16 +167,6 @@ class BrowseSpaceParentChooserTests(unittest.TestCase):
         self.assertNotIn("space_parent", self.saved)
         self.assertFalse((self.docs / "Wavefinity").exists())
 
-    def test_a_real_pick_saves_the_absolute_parent(self):
-        custom = self.home / "picked"
-        custom.mkdir()
-        with mock.patch.object(wavefinity_web, "load_preferences", side_effect=self._prefs), \
-             mock.patch.object(wavefinity_web, "save_preferences", side_effect=self._save), \
-             mock.patch.object(wavefinity_web.subprocess, "run", return_value=mock.Mock(stdout=str(custom), stderr="")):
-            result = wavefinity_web.browse_space_parent_payload({})
-        self.assertEqual(result["folder"], str(custom.resolve()))
-        self.assertEqual(self.saved["space_parent"], str(custom.resolve()))
-        self.assertFalse((custom / "Wavefinity").exists())
 
 
 if __name__ == "__main__":

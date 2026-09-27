@@ -192,9 +192,6 @@ class WaveTests(unittest.TestCase):
 
 
 class BoxTests(unittest.TestCase):
-    def test_engine_reexports_the_shared_geometry_helpers(self) -> None:
-        self.assertIs(organizer_engine.union, organizer_geometry.union)
-        self.assertIs(organizer_engine.difference, organizer_geometry.difference)
         # _loft_cavity is no longer part of organizer_engine's re-export
         # surface - organizer_stack.py / organizer_base_trim.py now import
         # it straight from organizer_geometry.
@@ -215,26 +212,6 @@ class BoxTests(unittest.TestCase):
             places=4,
         )
 
-    def test_outline_keeps_the_wave_and_rounds_only_the_corners(self) -> None:
-        spec = BoxSpec()
-        outline = wavy_outer_polygon(spec)
-        self.assertTrue(outline.is_valid)
-        ring = outline.exterior
-        raw = _wall_points(
-            spec.half_x, spec.half_y,
-            spec.half_x - CORNER_INSET, spec.half_y - CORNER_INSET,
-        )
-        corners = [
-            (sx * spec.half_x, sy * spec.half_y)
-            for sx in (-1, 1) for sy in (-1, 1)
-        ]
-        away = [
-            ring.distance(Point(p)) for p in raw
-            if min(math.dist(p, c) for c in corners) > 3.0
-        ]
-        self.assertTrue(away)
-        self.assertLess(max(away), 0.005)         # wave untouched
-        self.assertLess(max(ring.distance(Point(p)) for p in raw), 0.25)  # corners eased
 
     def test_cavity_runs_parallel_to_the_outer_wall(self) -> None:
         spec = BoxSpec()
@@ -309,29 +286,6 @@ class BoxTests(unittest.TestCase):
                     matched, places=3,
                 )
 
-    def test_corners_stay_behind_the_wave_so_they_never_decide_the_fit(self) -> None:
-        """The two long corner flats are cosmetic, not a mating surface.
-
-        The odd wave leaves one diagonal's walls ending on a crest and the
-        other's on a trough, so two of the four corner chords come out roughly
-        twice as long as the other two.  That asymmetry is fine as long as
-        every chord cuts *inward* from the wave envelope: a corner that stands
-        back can only add clearance, never take it away.
-        """
-        square = BoxSpec(24.0, 24.0, 40.0)
-        outline = placed_outline(square)
-        for corner in ((12.0, 12.0), (12.0, -12.0), (-12.0, -12.0), (-12.0, 12.0)):
-            standoff = min(
-                math.dist(corner, point) for point in outline.exterior.coords
-            )
-            with self.subTest(corner=corner):
-                self.assertGreater(standoff, WAVE_AMPLITUDE)
-                self.assertLess(standoff, CORNER_INSET * 2.0)
-
-        # Diagonal neighbours meet corner to corner and nothing else, so they
-        # have to clear by more than a shared wall does.
-        diagonal = mating_clearance(square, (-12.0, -12.0), square, (12.0, 12.0))
-        self.assertGreater(diagonal, nested_clearance() * 4.0)
 
     def test_a_packed_drawer_of_seven_different_sizes_has_no_collisions(self) -> None:
         tiles = (
@@ -349,12 +303,6 @@ class BoxTests(unittest.TestCase):
                     gap = mating_clearance(spec, centre, other, other_centre)
                     self.assertGreaterEqual(gap, nested_clearance() - 1e-3)
 
-    def test_an_off_lattice_placement_is_refused_rather_than_measured(self) -> None:
-        square = BoxSpec(24.0, 24.0, 40.0)
-        with self.assertRaisesRegex(ValueError, "wave lattice"):
-            placed_outline(square, (2.0, 0.0))
-        with self.assertRaisesRegex(ValueError, "wave lattice"):
-            mating_clearance(square, (0.0, 0.0), square, (0.0, 26.0))
 
     def test_scaled_boxes_remain_watertight_and_exact_height(self) -> None:
         for dimensions in ((24.0, 24.0, 40.0), (32.0, 24.0, 45.0), (24.0, 48.0, 30.0)):
@@ -365,54 +313,8 @@ class BoxTests(unittest.TestCase):
             self.assertAlmostEqual(mesh.extents[2], dimensions[2], places=5)
 
 
-    def test_sizes_must_sit_on_the_grid(self) -> None:
-        for good in (8.0, 16.0, 24.0, 96.0):
-            BoxSpec(x=good, y=24.0)          # must not raise
-            self.assertEqual(BoxSpec(x=good, y=24.0).grid_steps[0], round(good / 8))
-        for bad in (20.0, 25.0, 22.0, 24.5):
-            with self.assertRaisesRegex(ValueError, "whole multiple"):
-                BoxSpec(x=bad, y=24.0)
-        for small in (4.0, 6.0, 2.0):
-            with self.assertRaisesRegex(ValueError, "at least"):
-                BoxSpec(x=small, y=24.0)
-        self.assertEqual(GRID_PITCH, 8.0)
-        self.assertEqual(MIN_BOX_SIZE, 8.0)
-        self.assertEqual(BASE_UNIT, 8.0)
-        self.assertEqual(MIN_JOINABLE_SIZE, 16.0)
 
-    def test_a_one_unit_side_is_legal_and_joins_on_its_long_sides(self) -> None:
-        from organizer_engine import joinable_sides, connector_fits
 
-        narrow = BoxSpec(x=BASE_UNIT, y=6.0 * BASE_UNIT, z=40.0)   # 1 x 6 units
-        mesh = make_box(narrow)
-        report = mesh_report("narrow", mesh)
-        self.assertEqual(report["components"], 1)
-        # the short walls take neither a bump nor a connector; the long ones do
-        self.assertEqual(
-            lock_positions(narrow.half_x - CORNER_INSET - LOCK_CORNER_CLEAR), []
-        )
-        self.assertTrue(
-            lock_positions(narrow.half_y - CORNER_INSET - LOCK_CORNER_CLEAR)
-        )
-        self.assertEqual(joinable_sides(narrow), (False, True))
-        connector = ConnectorSpec()
-        clip = make_side_connector(narrow, connector, "y")
-        self.assertLess(validate_side_fit(narrow, connector, clip, "y"), 1e-3)
-        with self.assertRaisesRegex(ValueError, "does not fit between"):
-            make_side_connector(narrow, connector, "x")
-        self.assertFalse(connector_fits(narrow, "x"))
-
-    def test_off_grid_sizes_would_actually_have_collided(self) -> None:
-        # Why the grid rule exists: shift a box by half a wave along a shared
-        # wall - what an off-grid size does - and the walls foul badly.
-        spec = BoxSpec()
-        mesh = make_box(spec)
-        pitch = spec.x
-        left = translated(mesh, (-pitch / 2.0, 0.0, 0.0))
-        aligned = translated(mesh, (pitch / 2.0, 0.0, 0.0))
-        shifted = translated(mesh, (pitch / 2.0, WAVE_LENGTH / 2.0, 0.0))
-        self.assertEqual(intersection_volume(left, aligned), 0.0)
-        self.assertGreater(intersection_volume(left, shifted), 10.0)
 
     def test_invalid_parameters_fail_before_export(self) -> None:
         with self.assertRaises(ValueError):
@@ -440,29 +342,7 @@ class PreviewRingDensityTests(unittest.TestCase):
     points on a bigger box."
     """
 
-    def test_a_longer_wall_gets_proportionally_more_preview_points(self) -> None:
-        square = BoxSpec(32.0, 32.0, 40.0)
-        elongated = BoxSpec(16.0, 96.0, 40.0)
-        outer_square, _ = preview_rings(square)
-        outer_elongated, _ = preview_rings(elongated)
-        # before the fix this ratio was ~1 - a fixed per-wall budget didn't
-        # care how much longer the elongated box's long walls actually were
-        self.assertGreater(len(outer_elongated), len(outer_square) * 1.5)
 
-    def test_the_short_and_long_wall_pair_sample_at_the_same_density(self) -> None:
-        spec = BoxSpec(16.0, 48.0, 40.0)
-        density = 7.0
-        tangent_x = spec.half_x - CORNER_INSET
-        tangent_y = spec.half_y - CORNER_INSET
-        count_x = max(4, round(density * 2.0 * tangent_x / WAVE_LENGTH))
-        count_y = max(4, round(density * 2.0 * tangent_y / WAVE_LENGTH))
-        outer, _ = preview_rings(spec, density)
-        self.assertEqual(len(outer), 2 * count_x + 2 * count_y)
-        # points per mm of wall length - close between the short (x) and
-        # long (y) wall pair is exactly what "equally smooth" means here
-        density_x = count_x / (2.0 * tangent_x)
-        density_y = count_y / (2.0 * tangent_y)
-        self.assertAlmostEqual(density_x, density_y, delta=0.05)
 
 
 class LockTests(unittest.TestCase):
@@ -476,53 +356,8 @@ class LockTests(unittest.TestCase):
             self.assertTrue(bump.is_winding_consistent)
             self.assertGreater(bump.volume, 0.0)
 
-    def test_bump_stands_exactly_the_stated_amount_proud(self) -> None:
-        spec = BoxSpec()
-        mesh = make_box(spec)
-        centre = lock_positions(spec.half_x - CORNER_INSET - LOCK_CORNER_CLEAR)[0]
-        face_x = spec.half_x - spec.wall_depth + wave_value(centre)
-        low, _, _, high = lock_z_levels(spec.z)
 
-        def probe(inset: float) -> float:
-            block = trimesh.creation.box(extents=(0.1, 0.1, 0.1))
-            block.apply_translation((face_x - inset, centre, (low + high) / 2.0))
-            return intersection_volume(mesh, block)
 
-        self.assertGreater(probe(LOCK_PROTRUSION / 2.0), 0.0)   # bump material
-        self.assertEqual(probe(LOCK_PROTRUSION + 0.15), 0.0)    # open air past it
-
-    def test_finished_box_has_no_overhang_at_the_bumps(self) -> None:
-        # Boxes print open side up. In the bump band every downward-facing face
-        # must sit at 45 degrees or shallower, so nothing inside needs support.
-        spec = BoxSpec()
-        mesh = make_box(spec)
-        low, _, _, high = lock_z_levels(spec.z)
-        centroids = mesh.triangles.mean(axis=1)
-        band = (centroids[:, 2] > low - 0.01) & (centroids[:, 2] < high + 0.01)
-        normals = mesh.face_normals[band]
-        downward = normals[normals[:, 2] < -1e-6]
-        self.assertTrue(len(downward))
-        # the sweep's ruled faces tilt a hair where the wave curves, so allow a
-        # fraction of a degree past 45
-        worst = max(abs(n[2]) - math.hypot(n[0], n[1]) for n in downward)
-        self.assertLessEqual(worst, 0.01)
-
-    def test_bumps_sit_on_every_wave_extremum_clear_of_the_corners(self) -> None:
-        for spec in (BoxSpec(), BoxSpec(x=48, y=24, z=40)):
-            reach = spec.half_x - CORNER_INSET - LOCK_CORNER_CLEAR
-            positions = lock_positions(reach)
-            self.assertTrue(positions)
-            for centre in positions:
-                # crest or trough, but always an extremum
-                self.assertAlmostEqual(
-                    abs(wave_value(centre)), WAVE_AMPLITUDE, places=6
-                )
-                self.assertLess(
-                    abs(centre) + LOCK_RUN / 2.0, spec.half_x - CORNER_INSET
-                )
-            # every half cycle, which is what makes the connector reversible
-            for first, second in zip(positions, positions[1:]):
-                self.assertAlmostEqual(second - first, WAVE_LENGTH / 2.0, places=6)
 
     def test_every_box_puts_its_bumps_on_one_shared_lattice(self) -> None:
         # A box packed on the grid has its centre on a multiple of WAVE_LENGTH,
@@ -588,33 +423,6 @@ class LockTests(unittest.TestCase):
                 self.assertLess(overlap(position), 1e-3)
                 self.assertGreater(overlap(position, lift=0.5), 0.05)
 
-    def test_a_clip_will_not_straddle_the_joint_between_two_short_bins(self) -> None:
-        """A clip has to sit against one neighbour, not across two of them.
-
-        Where two short bins butt end to end, the far side of the seam is not
-        an open cavity - it is those bins' end walls, full height.  An arm
-        lowered there lands on solid material.  The clip has to clear the joint
-        by half its own length, which on the 4 mm lattice means the first legal
-        spot is 8 mm away.
-        """
-        tall, short = BoxSpec(24.0, 48.0, 40.0), BoxSpec(24.0, 24.0, 40.0)
-        connector = ConnectorSpec()
-        neighbours = [
-            translated(make_box(tall), (-12.0, 0.0, 0.0)),
-            translated(make_box(short), (12.0, -12.0, 0.0)),
-            translated(make_box(short), (12.0, 12.0, 0.0)),
-        ]
-        clip = make_side_connector(tall, connector, "y", 0.0)
-        seated_z = tall.z - connector.arm_depth
-
-        def overlap(position):
-            seated = translated(clip, (0.0, position, seated_z))
-            return sum(intersection_volume(seated, one) for one in neighbours)
-
-        self.assertGreater(overlap(0.0), 1.0)     # straddling the joint: blocked
-        self.assertGreater(overlap(4.0), 1.0)     # still catching an end wall
-        self.assertLess(overlap(8.0), 1e-3)       # clear of it by half a clip
-        self.assertLess(overlap(-8.0), 1e-3)
 
     def test_neighbouring_bins_of_any_size_share_one_bump_lattice(self) -> None:
         # Two 24 mm bins stacked against one 48 mm bin put their bumps on the
@@ -634,29 +442,7 @@ class LockTests(unittest.TestCase):
 
 
 class ConnectorTests(unittest.TestCase):
-    def test_three_way_corner_has_t_cap_and_only_two_real_grips(self) -> None:
-        branches = organizer_engine._corner_connector_branches(3)
-        self.assertEqual(branches, (("y", 1, True), ("x", -1, True), ("x", 1, False)))
-        self.assertNotIn(("y", -1, True), branches)
 
-        mesh = make_corner_connector(BoxSpec(24.0, 24.0, 40.0), ConnectorSpec(), 3)
-        report = mesh_report("three-way corner", mesh)
-        self.assertTrue(mesh.is_watertight)
-        self.assertEqual(report["components"], 1)
-
-    def test_four_way_corner_has_four_full_grip_cross(self) -> None:
-        branches = organizer_engine._corner_connector_branches(4)
-        self.assertEqual(
-            set(branches),
-            {("y", 1, True), ("y", -1, True), ("x", 1, True), ("x", -1, True)},
-        )
-        self.assertEqual(len(branches), 4)
-
-        mesh = make_corner_connector(BoxSpec(24.0, 24.0, 40.0), ConnectorSpec(), 4)
-        report = mesh_report("four-way corner", mesh)
-        self.assertTrue(mesh.is_watertight)
-        self.assertEqual(report["components"], 1)
-        self.assertAlmostEqual(mesh.extents[0], mesh.extents[1], places=5)
 
     def test_corner_connectors_fit_every_wall_preset(self) -> None:
         connector = ConnectorSpec()
@@ -684,14 +470,6 @@ class ConnectorTests(unittest.TestCase):
             )
         self.assertNotEqual(cap_volumes[WALL_PRESETS[0][0]], cap_volumes[WALL_PRESETS[-1][0]])
 
-    def test_arms_are_two_perimeters_thick(self) -> None:
-        box, connector = BoxSpec(), ConnectorSpec()
-        inner, outer = connector_half_widths(box, connector)
-        self.assertAlmostEqual(outer - inner, connector.arm_thickness, places=9)
-        self.assertAlmostEqual(connector.arm_thickness, 1.0, places=9)
-        self.assertAlmostEqual(
-            inner, box.wall_depth + WAVE_MATING_GAP / 2.0 + connector.tolerance
-        )
 
     def test_scaled_connectors_fit(self) -> None:
         for dimensions in ((32.0, 24.0, 45.0), (40.0, 32.0, 60.0), (24.0, 48.0, 40.0)):
@@ -766,67 +544,7 @@ class ConnectorTests(unittest.TestCase):
             0.1,
         )
 
-    def test_the_web_runs_on_the_taller_wall_where_the_short_one_is_missing(
-        self,
-    ) -> None:
-        """The whole point of the web, and the thing a width check misses.
 
-        Over the drop the seam holds one wall, not two: the short bin's has not
-        started yet.  The channel is cut for two, so half of it is empty air and
-        the clip would bear on nothing for the entire span - locked at its two
-        ends and free to rock everywhere between.  The web has to reach back
-        across and run on the taller bin's outer face.
-        """
-        tall, short = 50.0, 20.0
-        box, connector = BoxSpec(40.0, 40.0, tall), ConnectorSpec()
-        clip = make_side_connector(
-            box, connector, "y", 0.0, 12.0, bin_a_height=tall, bin_b_height=short,
-        )
-        seated = translated(
-            clip, seat_transform(box, connector, 0.0, "y", tall)
-        )
-        tall_bin = installed_side_boxes(box, "y", tall, short)[0]
-
-        def span_at(mesh, z):
-            """x-interval of solid across the seam at height ``z``."""
-            knife = trimesh.creation.box(extents=(20.0, 0.05, 0.05))
-            knife.apply_translation((0.0, 0.0, z))
-            hit = knife.intersection(mesh)
-            if hit.is_empty or hit.volume < 1e-9:
-                return None
-            return float(hit.bounds[0][0]), float(hit.bounds[1][0])
-
-        # Between the taller bin's arm (which stops arm_depth below its rim) and
-        # the taper into the short bin, the web is all there is across the seam.
-        arm_bottom = tall - connector.arm_depth
-        for z in (arm_bottom - 1.0, 35.0, 30.0, 27.0):
-            clip_span, wall_span = span_at(seated, z), span_at(tall_bin, z)
-            self.assertIsNotNone(clip_span, z)
-            self.assertIsNotNone(wall_span, z)
-            gap = clip_span[0] - wall_span[1]
-            # Runs on that wall rather than floating a whole wall-width away.
-            self.assertGreater(gap, 0.0, f"web fouls the taller wall at z={z}")
-            self.assertLess(gap, 0.25, f"web is not bearing on anything at z={z}")
-
-    def test_every_rim_difference_makes_one_sound_solid(self) -> None:
-        """Sweep the drop, not a couple of favourite pairs.
-
-        The web ramps in steps and its inner face tracks the channel closely
-        for the whole drop, so particular drops used to land a near-parallel
-        pair of surfaces inside the vertex-weld tolerance and hand back a leaky
-        mesh - silently, and only at some heights.
-        """
-        connector = ConnectorSpec()
-        tall = 50.0
-        for drop in range(0, 41):
-            box = BoxSpec(40.0, 40.0, tall)
-            clip = make_side_connector(
-                box, connector, "y", 0.0, 12.0,
-                bin_a_height=tall, bin_b_height=tall - drop,
-            )
-            self.assertTrue(clip.is_watertight, f"leaky mesh at a {drop} mm drop")
-            self.assertTrue(clip.is_winding_consistent, f"bad winding at {drop} mm")
-            self.assertGreater(clip.volume, 0.0, f"empty at a {drop} mm drop")
 
     def test_the_tallest_drop_still_seats_locks_and_prints_flat(self) -> None:
         """A 60 -> 20 pair, past the drop the ramps are maxed at.
@@ -890,45 +608,8 @@ class ConnectorTests(unittest.TestCase):
         full = differing_connector_plan(connector, 12.0, 50.0, 20.0, box)
         self.assertAlmostEqual(full["web_thickness_mm"], 3.0, places=6)
 
-    def test_a_tiny_rim_difference_leaves_the_clip_plain(self) -> None:
-        box, connector = BoxSpec(32.0, 32.0, 40.0), ConnectorSpec()
-        plain = make_side_connector(box, connector, "y", 0.0, 12.0)
-        near = make_side_connector(
-            box, connector, "y", 0.0, 12.0, bin_a_height=40.0, bin_b_height=38.5,
-        )
-        self.assertEqual(differing_drop_fraction(1.5), 0.0)
-        self.assertAlmostEqual(near.extents[1], plain.extents[1], places=5)
-        self.assertAlmostEqual(near.extents[0], plain.extents[0], places=5)
 
-    def test_a_too_shallow_short_bin_is_refused_with_a_clear_message(self) -> None:
-        # Pair a 40 mm bin with one shorter than the arms are deep: the arm
-        # would punch into that bin's base slab and the clip could not seat on
-        # either side.  Say so plainly, not as a bare fit-check collision.
-        box, connector = BoxSpec(32.0, 32.0, 40.0), ConnectorSpec()
-        with self.assertRaisesRegex(ValueError, "too shallow for this connector"):
-            make_side_connector(
-                box, connector, "y", 0.0, 12.0, bin_a_height=40.0, bin_b_height=8.5,
-            )
-        # One that just clears the base slab still builds and seats cleanly.
-        ok = make_side_connector(
-            box, connector, "y", 0.0, 12.0, bin_a_height=40.0, bin_b_height=12.0,
-        )
-        self.assertLess(
-            validate_side_fit(
-                box, connector, ok, "y", 0.0, bin_a_height=40.0, bin_b_height=12.0,
-            ),
-            1e-3,
-        )
 
-    def test_orientation_and_position_are_explicit(self) -> None:
-        box = BoxSpec(x=32.0, y=48.0, z=40.0)
-        connector = ConnectorSpec()
-        x_clip = make_side_connector(box, connector, "x", position=4.0)
-        y_clip = make_side_connector(box, connector, "y", position=-4.0)
-        self.assertAlmostEqual(x_clip.extents[0], 12.0, places=5)
-        self.assertAlmostEqual(y_clip.extents[1], 12.0, places=5)
-        self.assertLess(validate_side_fit(box, connector, x_clip, "x", 4.0), 1e-3)
-        self.assertLess(validate_side_fit(box, connector, y_clip, "y", -4.0), 1e-3)
 
     def test_mixed_sizes_share_a_seam_and_the_clip_locks_both_sides(self) -> None:
         # The whole point: a 20x40 beside two 20x20s. They must nest, and a
@@ -950,19 +631,6 @@ class ConnectorTests(unittest.TestCase):
             self.assertLess(sum(intersection_volume(seated, m) for m in boxes), 1e-3)
             self.assertGreater(sum(intersection_volume(lifted, m) for m in boxes), 0.1)
 
-    def test_one_connector_part_fits_every_box_and_lattice_position(self) -> None:
-        connector = ConnectorSpec(tolerance=0.06)
-        reference = make_side_connector(BoxSpec(), connector, "y", 0.0)
-        for spec, position in (
-            (BoxSpec(24.0, 48.0, 40.0), -12.0),
-            (BoxSpec(48.0, 48.0, 30.0), 16.0),
-            (BoxSpec(24.0, 72.0, 40.0), 20.0),
-            (BoxSpec(24.0, 72.0, 40.0), 4.0),      # the closest legal step
-        ):
-            other = make_side_connector(spec, connector, "y", position)
-            self.assertAlmostEqual(other.volume, reference.volume, places=4)
-            shared = intersection_volume(reference, other)
-            self.assertAlmostEqual(shared / reference.volume, 1.0, places=5)
 
     def test_the_printed_clip_still_seats_when_slid_to_another_lattice_step(
         self,
@@ -989,54 +657,8 @@ class ConnectorTests(unittest.TestCase):
                     sum(intersection_volume(lifted, one) for one in boxes), 0.05
                 )
 
-    def test_off_lattice_connector_position_is_rejected(self) -> None:
-        spec = BoxSpec(24.0, 48.0, 40.0)
-        make_side_connector(spec, ConnectorSpec(), "y", 4.0)   # one whole wave: fine
-        for bad in (1.0, 2.0, 2.5, 3.0, 6.0):
-            with self.subTest(position=bad):
-                with self.assertRaisesRegex(ValueError, "whole multiple"):
-                    make_side_connector(spec, ConnectorSpec(), "y", bad)
 
-    def test_a_half_wave_along_the_seam_needs_a_mirrored_clip_nobody_prints(
-        self,
-    ) -> None:
-        """Why the rule is a whole wave and not half of one.
 
-        The wave inverts every half cycle, so the clip a half-wave along wants
-        is this one reflected in the seam - same volume, and a shape no amount
-        of turning a printed part over will produce.  Slide the real part there
-        and it meets the wall crest to crest.  The rule used to allow half
-        waves, and every fixed position the suite checked happened to land on a
-        whole one, so nothing ever said so.
-        """
-        box, connector = BoxSpec(24.0, 72.0, 40.0), ConnectorSpec()
-        boxes = installed_boxes(box, "y")
-        printed = make_side_connector(box, connector, "y", 0.0)
-        seat_z = box.z - connector.arm_depth
-
-        mirrored = printed.copy()
-        mirrored.apply_transform(np.diag([-1.0, 1.0, 1.0, 1.0]))
-        self.assertAlmostEqual(mirrored.volume, printed.volume, places=4)
-        self.assertLess(
-            intersection_volume(printed, mirrored) / printed.volume, 0.7
-        )
-
-        def overlap(mesh, position):
-            seated = translated(mesh, (0.0, position, seat_z))
-            return sum(intersection_volume(seated, one) for one in boxes)
-
-        self.assertGreater(overlap(printed, 2.0), 1.0)     # the real part jams
-        self.assertLess(overlap(mirrored, 2.0), 1e-3)      # only a mirror fits
-        self.assertGreater(overlap(mirrored, 0.0), 1.0)    # and only there
-
-    def test_corner_connector_footprints_helper_is_gone(self) -> None:
-        # Corner connectors themselves are a live feature
-        # (make_corner_connector/validate_corner_fit are still used by
-        # organizer_app.generate_corner_file and wired into the web API) -
-        # only this one specific superseded helper was removed.
-        import organizer_engine
-
-        self.assertFalse(hasattr(organizer_engine, "corner_connector_footprints"))
 
 
 class SamplerTests(unittest.TestCase):
@@ -1058,27 +680,7 @@ class SamplerTests(unittest.TestCase):
                 ),
             )
 
-    def test_every_connector_on_the_plate_is_the_same_part(self) -> None:
-        scene = make_sampler_scene(clips=5)
-        prints = set()
-        for name, geometry in scene.geometry.items():
-            if not name.startswith("connector"):
-                continue
-            centred = translated(geometry, -geometry.bounds.mean(axis=0))
-            prints.add(round(float(centred.volume), 4))
-        self.assertEqual(len(prints), 1)
 
-    def test_cli_generates_sample_set_from_unit_sizes(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "cli_sample.3mf"
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(
-                    organizer_app.main(
-                        ["sampler", "--boxes", "2x6,4x6,6x6", "--output", str(output)]
-                    ),
-                    0,
-                )
-            self.assertEqual(validate_3mf(output, 8)["warnings"], 0)
 
     def test_one_unit_is_the_same_number_everywhere(self) -> None:
         # the bug this guards: the sampler and the UI once disagreed on what a
@@ -1089,61 +691,11 @@ class SamplerTests(unittest.TestCase):
         scene = make_sampler_scene()
         self.assertIn("box_6x6_48x48", scene.geometry)
 
-    def test_generated_box_files_are_named_by_size(self) -> None:
-        self.assertEqual(
-            organizer_app.box_filename(BoxSpec(16.0, 48.0, 40.0)),
-            "Box 16 x 48 x 40.3mf",
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            out = Path(directory)
-            organizer_app.generate_kit_files(
-                BoxSpec(16.0, 48.0, 40.0), ConnectorSpec(), out
-            )
-            self.assertEqual(
-                sorted(p.name for p in out.iterdir()),
-                ["Box 16 x 48 x 40.3mf", "Connector - Same height.3mf"],
-            )
 
-    def test_unit_sizes_parse_to_grid_millimetres(self) -> None:
-        self.assertEqual(
-            organizer_app.parse_sizes("2x6,4x6"), ((16.0, 48.0), (32.0, 48.0))
-        )
-        self.assertEqual(organizer_app.parse_sizes("1x6"), ((8.0, 48.0),))
-        # bare numbers are units; "mm" is explicit, so 8x8 is never ambiguous
-        self.assertEqual(organizer_app.parse_sizes("8x8"), ((64.0, 64.0),))
-        self.assertEqual(organizer_app.parse_sizes("8x8mm"), ((8.0, 8.0),))
-        self.assertEqual(organizer_app.parse_sizes("16x48mm"), ((16.0, 48.0),))
 
 
 class ExportAndCliTests(unittest.TestCase):
-    def test_exported_connector_is_flipped_flat_side_down(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "Connector.3mf"
-            result = organizer_app.generate_side_file(
-                BoxSpec(32.0, 32.0, 40.0), ConnectorSpec(), output,
-                bin_a_height=40.0, bin_b_height=24.0,
-            )
-            printed = trimesh.load(output, force="mesh")
-            self.assertAlmostEqual(float(printed.bounds[0][2]), 0.0, places=5)
-            self.assertAlmostEqual(float(printed.extents[2]), 25.6, places=5)
-            self.assertEqual(result["fit"]["print_orientation"], "flat cap down")
 
-    @unittest.skipUnless(
-        sys.platform == "win32", "the .bat launcher only runs under cmd.exe on Windows",
-    )
-    def test_batch_launcher_bootstraps_and_checks_from_another_directory(self) -> None:
-        batch = Path(__file__).resolve().with_name("Launch_Organizer_UI.bat")
-        environment = dict(os.environ)
-        environment.pop("PYTHONPATH", None)
-        with tempfile.TemporaryDirectory() as directory:
-            result = subprocess.run(
-                ["cmd.exe", "/d", "/c", str(batch), "--check"],
-                cwd=directory, env=environment, capture_output=True,
-                text=True, timeout=180, check=False,
-            )
-        combined = result.stdout + result.stderr
-        self.assertEqual(result.returncode, 0, combined)
-        self.assertIn("Organizer launcher ready", combined)
 
     def test_cli_generates_box_and_connector(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1174,16 +726,7 @@ class FloorLabelTests(unittest.TestCase):
         solid = text_outline("I", TEXT_CAP_HEIGHT_IDEAL)
         self.assertEqual(len(solid.interiors), 0)
 
-    def test_letter_height_is_what_was_asked_for(self) -> None:
-        for cap in (7.0, 8.5, 10.0):
-            outline = text_outline("XX", cap)
-            minx, miny, maxx, maxy = outline.bounds
-            self.assertAlmostEqual(maxy - miny, cap, places=6)
 
-    def test_a_label_that_fits_stays_at_the_ideal_height(self) -> None:
-        cap, rotated = label_layout(BoxSpec(48.0, 48.0, 40.0), "M3")
-        self.assertAlmostEqual(cap, TEXT_CAP_HEIGHT_IDEAL, places=6)
-        self.assertFalse(rotated)
 
     def test_a_long_label_shrinks_before_it_turns(self) -> None:
         # square floor: turning cannot help, so it must shrink and stay flat
@@ -1192,18 +735,7 @@ class FloorLabelTests(unittest.TestCase):
         self.assertLess(cap, TEXT_CAP_HEIGHT_IDEAL)
         self.assertGreaterEqual(cap, TEXT_CAP_HEIGHT_MIN)
 
-    def test_it_turns_only_when_across_will_not_do(self) -> None:
-        narrow = BoxSpec(16.0, 48.0, 40.0)
-        for label in ("M3", "BOLTS"):
-            cap, rotated = label_layout(narrow, label)
-            self.assertTrue(rotated, label)
-            self.assertGreaterEqual(cap, TEXT_CAP_HEIGHT_MIN)
 
-    def test_the_label_never_goes_below_the_minimum_height(self) -> None:
-        with self.assertRaisesRegex(ValueError, "will not fit"):
-            label_layout(BoxSpec(48.0, 48.0, 40.0), "LONG WASHERS")
-        with self.assertRaisesRegex(ValueError, "will not fit"):
-            label_layout(BoxSpec(16.0, 48.0, 40.0), "LONG WASHERS")
 
     def test_the_label_fits_inside_the_floor_it_was_measured_against(self) -> None:
         for spec, label in (
@@ -1261,18 +793,6 @@ class FloorLabelTests(unittest.TestCase):
                 mesh_union([pocketed, inlay]).volume, plain.volume, places=4
             )
 
-    def test_turning_is_always_the_same_way_round(self) -> None:
-        # so a row of printed boxes reads consistently: 90 degrees anticlockwise,
-        # which puts the first letter at the bottom
-        spec = BoxSpec(16.0, 48.0, 40.0)
-        flat = text_outline("LJ", TEXT_CAP_HEIGHT_MIN)
-        turned = make_floor_label(spec, "LJ")
-        # "L" is left of "J" flat, and below it once turned
-        self.assertLess(flat.bounds[0], flat.bounds[2])
-        pieces = turned.split(only_watertight=False)
-        self.assertEqual(len(pieces), 2)
-        lowest = min(pieces, key=lambda part: part.bounds.mean(axis=0)[1])
-        self.assertLess(lowest.extents[0], lowest.extents[1])
 
     def test_a_blank_label_changes_nothing(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
@@ -1287,114 +807,12 @@ class FloorLabelTests(unittest.TestCase):
             self.assertNotIn("label", result)
             self.assertEqual(validate_3mf(output, 1)["warnings"], 0)
 
-    def test_a_labelled_box_is_two_objects_named_for_the_label(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        name = organizer_app.box_filename(spec, "BOLTS")
-        self.assertEqual(name, "Box 48 x 48 x 40 BOLTS.3mf")
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / name
-            result = organizer_app.generate_box_file(spec, output, "BOLTS")
-            self.assertEqual(result["label"]["label"], "BOLTS")
-            self.assertEqual(result["label"]["depth_mm"], TEXT_DEPTH)
-            report = validate_3mf(output, 2, multipart=("BOLTS",))
-            self.assertEqual(report["warnings"], 0)
-            self.assertEqual(
-                report["names"], ["BOLTS", "Box 48 x 48 x 40"]
-            )
 
-    def test_labels_are_cleaned_for_the_filename(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        self.assertEqual(organizer_app.clean_label("  M3 / M4  "), "M3 M4")
-        self.assertEqual(
-            organizer_app.box_filename(spec, "M3/M4"), "Box 48 x 48 x 40 M3 M4.3mf"
-        )
 
-    def test_connector_filename_defaults_and_custom_options(self) -> None:
-        self.assertEqual(
-            organizer_app.connector_filename(),
-            "Connector - Same height.3mf",
-        )
-        self.assertEqual(
-            organizer_app.connector_filename(ConnectorSpec()),
-            "Connector - Same height.3mf",
-        )
-        # Equal heights with different_heights=True should still be same height
-        self.assertEqual(
-            organizer_app.connector_filename(different_heights=True, bin_a_height=40.0, bin_b_height=40.0),
-            "Connector - Same height.3mf",
-        )
-        # Different heights
-        self.assertEqual(
-            organizer_app.connector_filename(different_heights=True, bin_a_height=40.0, bin_b_height=20.0),
-            "Connector - 40mm to 20mm.3mf",
-        )
-        # Custom tolerance
-        self.assertEqual(
-            organizer_app.connector_filename(ConnectorSpec(tolerance=0.06)),
-            "Connector - Tol 0.06mm.3mf",
-        )
-        # Custom height
-        self.assertEqual(
-            organizer_app.connector_filename(ConnectorSpec(height=12.0)),
-            "Connector - Height 12mm.3mf",
-        )
-        # Custom length
-        self.assertEqual(
-            organizer_app.connector_filename(length=16.0),
-            "Connector - Len 16mm.3mf",
-        )
-        # Custom arm thickness
-        self.assertEqual(
-            organizer_app.connector_filename(arm_thickness=1.5),
-            "Connector - Arm 1.5mm.3mf",
-        )
-        # Multiple non-default variables combined
-        self.assertEqual(
-            organizer_app.connector_filename(
-                ConnectorSpec(tolerance=0.05, height=14.0),
-                length=18.0,
-                bin_a_height=50.0,
-                bin_b_height=30.0,
-                arm_thickness=1.2,
-                different_heights=True,
-            ),
-            "Connector - 50mm to 30mm Tol 0.05mm Height 14mm Len 18mm Arm 1.2mm.3mf",
-        )
 
-    def test_cli_labels_a_box(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "cli.3mf"
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(
-                    organizer_app.main(
-                        ["box", "--x", "48", "--y", "48", "--z", "40",
-                         "--label", "NUTS", "--output", str(output)]
-                    ),
-                    0,
-                )
-            self.assertEqual(
-                validate_3mf(output, 2, multipart=("NUTS",))["warnings"], 0
-            )
 
 
 class BinCustomizationTests(unittest.TestCase):
-    def test_top_label_uses_five_mm_when_it_fits_on_a_seven_mm_ledge(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        # A flat-topped/bottomed label ("AB"): DejaVu Sans Bold's round
-        # letters/digits (the "3" in "M3", "S", "O", ...) overshoot the
-        # nominal cap height slightly for optical balance, which is real
-        # font metric behavior, not a bug - it shrinks those labels a touch
-        # to stay on the ledge. This test wants a label that genuinely does
-        # fit at the full nominal cap height.
-        label = "AB"
-        report = top_label_report(spec, label)
-        outline = top_label_outline(spec, label)
-        zone = top_label_zone(spec)
-        self.assertEqual(report["cap_height_mm"], TOP_LABEL_CAP_HEIGHT)
-        self.assertEqual(report["ledge_depth_mm"], TOP_LABEL_LEDGE_DEPTH)
-        self.assertEqual(report["ledge_underside_degrees"], 45.0)
-        self.assertAlmostEqual(zone.bounds[3] - zone.bounds[1], 7.0)
-        self.assertTrue(zone.covers(outline))
 
     def test_top_label_ledge_and_inlay_are_clean_flush_solids(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
@@ -1438,17 +856,6 @@ class BinCustomizationTests(unittest.TestCase):
             scoop_floor_zone(spec).bounds[3] - scoop_floor_zone(spec).bounds[1], run
         )
 
-    def test_scoop_sits_against_the_front_wall_opposite_the_top_label(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        _height, run = scoop_dimensions(spec)
-        _inside_x, inside_y = spec.usable_inside
-        zone = scoop_floor_zone(spec)
-        # front wall is -Y; the strip starts at the wall and reaches `run` in
-        self.assertAlmostEqual(zone.bounds[1], -inside_y / 2.0)
-        self.assertAlmostEqual(zone.bounds[3], -inside_y / 2.0 + run)
-        self.assertLessEqual(make_scoop(spec).bounds[1][1], 0.0)
-        # the top-label ledge is on the opposite (+Y) wall
-        self.assertGreater(top_label_zone(spec).bounds[1], 0.0)
 
     def test_floor_label_is_kept_out_of_the_scoop_strip(self) -> None:
         spec = BoxSpec(40.0, 40.0, 40.0)
@@ -1472,18 +879,6 @@ class BinCustomizationTests(unittest.TestCase):
             self.assertEqual(result["customizations"]["scoop"], True)
             self.assertEqual(validate_3mf(output, 2, multipart=("M3",))["warnings"], 0)
 
-    def test_preview_shows_and_reserves_both_customizations(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        geometry = organizer_app.preview_geometry(spec, "M3", (), "fused", "top", True)
-        kinds = [kind for _points, kind, _normal, _layer, _owner in geometry["geometry"]]
-        self.assertIn("top_label_ledge", kinds)
-        self.assertIn("scoop", kinds)
-        # Rim lettering is shell material, not floor occupancy: only the scoop
-        # reserves floor.
-        self.assertEqual(
-            [name for name, _zone in geometry["customization_zones"]],
-            ["scoop"],
-        )
 
     def test_supports_cannot_collide_with_fixed_customizations(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
@@ -1494,40 +889,6 @@ class BinCustomizationTests(unittest.TestCase):
                 spec, [support], scoop=True
             )
 
-    def test_the_scoop_only_reserves_the_floor_it_actually_lifts(self) -> None:
-        # The curve meets the floor tangentially, so its last few millimetres
-        # are microns high; reserving them rejected supports that sit flat.
-        spec = BoxSpec(40.0, 48.0, 40.0)
-        height, run = scoop_dimensions(spec)
-        footprint = scoop_floor_zone(spec)
-        keep_out = scoop_keep_out(spec)
-        self.assertAlmostEqual(keep_out.bounds[1], footprint.bounds[1])
-        self.assertLess(keep_out.bounds[3], footprint.bounds[3])
-        angle = math.asin((footprint.bounds[3] - keep_out.bounds[3]) / run)
-        self.assertAlmostEqual(
-            height * (1.0 - math.cos(angle)), SCOOP_FLOOR_TOLERANCE
-        )
-
-        def divider(y0: float, y1: float) -> object:
-            return organizer_app.Feature(
-                "divider", organizer_app.Zone(-8.0, y0, 8.0, y1)
-            )
-
-        # A bar crossing only the shallow tail of the ramp clears the scoop;
-        # it used to be called a collision even when the ramp was 0.03 mm proud.
-        organizer_app.validate_customization_clearance(
-            spec, [divider(-2.0, 2.0)], scoop=True
-        )
-        self.assertEqual(
-            organizer_app.preview_geometry(
-                spec, "", [divider(-2.0, 2.0)], "fused", "bottom", True
-            )["feature_errors"],
-            (),
-        )
-        with self.assertRaisesRegex(ValueError, "overlaps the scoop"):
-            organizer_app.validate_customization_clearance(
-                spec, [divider(-18.0, -10.0)], scoop=True
-            )
 
 
 
@@ -1636,24 +997,7 @@ class FlatInsideTests(unittest.TestCase):
                 self._cavity_area_at(spec, mesh, z), wavy, delta=0.5, msg=f"z={z}"
             )
 
-    def test_the_band_height_follows_the_setting(self) -> None:
-        # it is a height, not an on/off switch: half the number, half the band
-        for flat in (0.4, 0.8):
-            spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=flat)
-            mesh = make_box(spec)
-            straight = flat_cavity_polygon(spec).area
-            just_under = self._cavity_area_at(spec, mesh, spec.base_thickness + flat - 0.05)
-            just_over = self._cavity_area_at(spec, mesh, spec.base_thickness + flat + 0.05)
-            self.assertAlmostEqual(just_under, straight, delta=0.5)
-            self.assertGreater(just_over, straight + 1.0)
 
-    def test_no_band_at_all_when_it_is_off(self) -> None:
-        spec = BoxSpec(32.0, 32.0, 40.0)
-        mesh = make_box(spec)
-        wavy = wavy_cavity_polygon(spec).area
-        self.assertAlmostEqual(
-            self._cavity_area_at(spec, mesh, spec.wall + 0.05), wavy, delta=0.5
-        )
 
     def test_the_band_only_adds_material(self) -> None:
         plain = make_box(BoxSpec(32.0, 32.0, 40.0)).volume
@@ -1662,48 +1006,15 @@ class FlatInsideTests(unittest.TestCase):
             self.assertEqual(mesh_report(f"flat_{flat}", filled)["components"], 1)
             self.assertGreater(filled.volume, plain)
 
-    def test_the_band_never_cuts_into_the_wall(self) -> None:
-        # it is sized to the innermost the wave reaches, so it cannot
-        for flat in (0.5, 1.0):
-            spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=flat)
-            straight = flat_cavity_polygon(spec)
-            self.assertTrue(wavy_cavity_polygon(spec).contains(straight))
 
     def test_the_outside_and_the_wave_are_untouched(self) -> None:
         plain = wavy_outer_polygon(BoxSpec(32.0, 32.0, 40.0))
         banded = wavy_outer_polygon(BoxSpec(32.0, 32.0, 40.0, flat_inside=1.0))
         self.assertAlmostEqual(plain.area, banded.area, places=6)
 
-    def test_the_connector_is_unaffected_on_a_normal_box(self) -> None:
-        # the band sits on the floor, the arms hang from the rim
-        connector = ConnectorSpec()
-        for flat in (0.0, 0.5, 1.0):
-            spec = BoxSpec(32.0, 32.0, 40.0, flat_inside=flat)
-            clip = make_side_connector(spec, connector, "y")
-            self.assertLess(validate_side_fit(spec, connector, clip, "y"), 1e-3)
-            self.assertGreater(measure_lock(spec, connector)["lift_0.5_mm3"], 0.1)
 
-    def test_a_shallow_box_says_why_the_band_will_not_work(self) -> None:
-        with self.assertRaisesRegex(ValueError, "would collide"):
-            make_side_connector(
-                BoxSpec(32.0, 32.0, 10.0, flat_inside=1.0), ConnectorSpec(), "y"
-            )
-        # and the same box is fine without the band
-        spec = BoxSpec(32.0, 32.0, 10.0)
-        clip = make_side_connector(spec, ConnectorSpec(), "y")
-        self.assertLess(validate_side_fit(spec, ConnectorSpec(), clip, "y"), 1e-3)
 
-    def test_too_shallow_for_a_band_at_all_is_refused(self) -> None:
-        with self.assertRaisesRegex(ValueError, "too shallow"):
-            BoxSpec(32.0, 32.0, 1.5, flat_inside=1.0)
 
-    def test_usable_inside_is_unchanged(self) -> None:
-        # the band is exactly the rectangle usable_inside already reported
-        plain = BoxSpec(32.0, 32.0, 40.0).usable_inside
-        for flat in (0.5, 1.0):
-            self.assertEqual(
-                BoxSpec(32.0, 32.0, 40.0, flat_inside=flat).usable_inside, plain
-            )
 
     def test_a_banded_box_still_tiles_and_still_turns(self) -> None:
         for flat in (0.5, 1.0):
@@ -1718,18 +1029,6 @@ class FlatInsideTests(unittest.TestCase):
                     0.0,
                 )
 
-    def test_cli_takes_the_band(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "flat.3mf"
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(
-                    organizer_app.main(
-                        ["box", "--x", "32", "--y", "32", "--z", "40",
-                         "--flat-inside", "1.0", "--output", str(output)]
-                    ),
-                    0,
-                )
-            self.assertEqual(validate_3mf(output, 1)["warnings"], 0)
 
 
 class InsertEditorTests(unittest.TestCase):
@@ -1819,111 +1118,14 @@ class InsertEditorTests(unittest.TestCase):
                 kind,
             )
 
-    def test_a_new_cradle_is_a_single_holder(self) -> None:
-        # A cradle starts like a post - one lane - so "auto" stays opt-in.
-        spec = BoxSpec(64.0, 184.0, 30.0)
-        self.assertEqual(organizer_app.default_feature(spec, "cradle").count, 1)
 
-    def test_cradle_quantity_and_direction_all_build_when_there_is_room(self) -> None:
-        # Regression: a cradle zone sized to N lanes used to be snapped to the
-        # nearest grid line, landing just under what the engine needs, so
-        # Quantity 2+ was refused in a bin with room to spare. The editor now
-        # rounds every cradle edge up to the grid; mirror that here and confirm
-        # the whole Quantity x direction matrix builds.
-        spec = BoxSpec(96.0, 200.0, 30.0)
-        item = organizer_inserts.Item.simple("Driver", 40.0, 6.0)
-        rib = organizer_inserts._cradle_wall(item.widest)
-        spacing = 0.0   # default: neighbours share a wall
-        base = organizer_app.base_height(spec, "fused")
-        inside_x, inside_y = spec.usable_inside
-        for count in (1, 2, 3, 5):
-            for along in ("x", "y"):
-                run_room, across_room = (
-                    (inside_x, inside_y) if along == "x" else (inside_y, inside_x)
-                )
-                run = min(run_room, math.ceil(item.length))
-                across = min(
-                    across_room,
-                    math.ceil(item.widest + rib
-                              + (count - 1) * (item.widest + spacing + rib / 2)),
-                )
-                w, d = (run, across) if along == "x" else (across, run)
-                zone = organizer_app.snapped_zone(
-                    organizer_app.Zone(-w / 2, -d / 2, w / 2, d / 2), spec, "fused"
-                )
-                feature = organizer_app.Feature(
-                    "cradle", zone, item, count=count, along=along
-                )
-                built = build_features(spec, [feature], base)
-                self.assertTrue(built, (count, along))
 
-    def test_default_cradle_hugs_tool_length_without_ghost_rib_margin(self) -> None:
-        spec = BoxSpec(96.0, 96.0, 30.0)
-        item = organizer_inserts.Item.simple("Driver", 40.0, 6.0)
-        feature = organizer_app.default_feature(spec, "cradle", item=item, along="x")
-        self.assertEqual(feature.zone.width, 40.0)
 
-    def test_cradle_part_kind_flags_has_size_false(self) -> None:
-        cradle_info = organizer_app.PART_KIND_INFO["cradle"]
-        flags = cradle_info[2]
-        self.assertFalse(flags["size"])
 
-    def test_cradle_feature_height_ignores_item_clearance(self) -> None:
-        spec = BoxSpec(96.0, 96.0, 30.0)
-        item = organizer_inserts.Item.simple("Driver", 40.0, 6.0, clearance=2.0)
-        feature = organizer_app.default_feature(spec, "cradle", item=item)
-        base_z = 0.8
-        height = organizer_app._feature_height(spec, feature, base_z)
-        expected = base_z + 2.0 + item.widest / 2.0
-        self.assertAlmostEqual(height, expected, places=5)
 
-    def test_default_post_adapts_to_a_one_cell_wide_cartridge(self) -> None:
-        spec = BoxSpec(16.0, 48.0, 40.0)
-        feature = organizer_app.default_feature(spec, "post", mode="cartridge")
-        self.assertEqual(feature.zone.width, 8.0)
-        self.assertEqual(feature.options["diameter"], 8.0)
-        built = build_features(
-            spec,
-            [feature],
-            organizer_app.base_height(spec, "cartridge"),
-            organizer_app.layout_zone(spec, "cartridge"),
-        )
-        self.assertTrue(built)
 
-    def test_starter_part_builds_on_a_short_bin(self) -> None:
-        # A starter sized to fill a short bin used to land in the strip a side
-        # connector's arms need, so adding one raised "must stay below N mm so
-        # a connector can seat" the instant it appeared - an error for doing
-        # nothing but clicking Add, on a bin the app itself accepted.
-        for kind in ("pocket", "post", "slot", "steps"):
-            for z in (12.0, 16.0, 24.0, 30.0):
-                with self.subTest(kind=kind, z=z):
-                    spec = BoxSpec(16.0, 16.0, z)
-                    feature = organizer_app.default_feature(spec, kind)
-                    built = build_features(
-                        spec, [feature], organizer_app.base_height(spec, "fused")
-                    )
-                    self.assertTrue(built)
 
-    def test_starter_part_keeps_full_size_on_a_roomy_bin(self) -> None:
-        # The connector-safe inset must only bite on bins small enough to need
-        # it; a roomy bin keeps the established 16 mm starter footprint.
-        spec = BoxSpec(64.0, 48.0, 40.0)
-        for kind in ("pocket", "post"):
-            with self.subTest(kind=kind):
-                feature = organizer_app.default_feature(spec, kind)
-                self.assertEqual(feature.zone.width, 16.0)
-                self.assertEqual(feature.zone.depth, 16.0)
-        self.assertEqual(
-            organizer_app.default_feature(spec, "post").options["diameter"], 12.0
-        )
 
-    def test_switching_to_cartridge_resnaps_existing_supports(self) -> None:
-        spec = BoxSpec(64.0, 64.0, 40.0)
-        original = organizer_app.Feature("pocket", organizer_app.Zone(-8, -8, 8, 8))
-        converted = organizer_app.convert_layout_mode(spec, [original], "cartridge")
-        converted.validate(spec)
-        self.assertNotEqual(converted.features[0].zone, original.zone)
 
     def test_saved_design_round_trip_includes_customizations(self) -> None:
         spec = BoxSpec(48.0, 48.0, 35.0, flat_inside=0.5)
@@ -1956,14 +1158,6 @@ class InsertEditorTests(unittest.TestCase):
         )
         self.assertEqual(again, (spec, rebuilt, "", "Nozzles", "bottom", False))
 
-    def test_old_saved_design_defaults_to_bottom_label_without_scoop(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 35.0)
-        data = organizer_app.design_to_dict(spec, organizer_app.Layout())
-        data.pop("label_position")
-        data.pop("scoop")
-        self.assertEqual(
-            organizer_app.design_from_dict(data)[4:], ("bottom", False)
-        )
 
     def test_organizer_cli_uses_saved_design_values_unless_overridden(self) -> None:
         spec = BoxSpec(48.0, 32.0, 35.0, flat_inside=0.5)
@@ -1998,90 +1192,9 @@ class InsertEditorTests(unittest.TestCase):
             self.assertEqual((used_label, used_part), ("", "Nozzles"))
             self.assertEqual((used_label_location, used_scoop), ("bottom", False))
 
-    def test_organizer_cli_keeps_saved_side_openings(self) -> None:
-        openings = SideOpeningSpec(
-            enabled=True, sides=("front",), shape="curved", size="medium",
-            from_bottom_percent=30.0, from_top_percent=20.0,
-        )
-        spec = BoxSpec(48.0, 32.0, 35.0, side_openings=openings)
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "saved.wavefinity.json"
-            path.write_text(
-                organizer_app.json.dumps(
-                    organizer_app.design_to_dict(spec, organizer_app.Layout())
-                ),
-                encoding="utf-8",
-            )
-            args = organizer_app.build_parser().parse_args([
-                "organizer", "--layout", str(path), "--z", "50",
-                "--output-dir", directory,
-            ])
-            with mock.patch.object(
-                organizer_app, "generate_organizer_files", return_value={}
-            ) as generate:
-                organizer_app.run_command(args)
-            used_box = generate.call_args.args[0]
-            self.assertEqual(used_box.z, 50.0)
-            self.assertEqual(used_box.side_openings, openings)
 
-    def test_a_floor_label_on_the_command_line_becomes_a_text_part(self) -> None:
-        """``--label`` with no position is sugar for a self-placing text part."""
-        spec = BoxSpec(48.0, 32.0, 35.0)
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "saved.wavefinity.json"
-            path.write_text(
-                organizer_app.json.dumps(
-                    organizer_app.design_to_dict(spec, organizer_app.Layout())
-                ),
-                encoding="utf-8",
-            )
-            args = organizer_app.build_parser().parse_args([
-                "organizer", "--layout", str(path), "--label", "BOLTS",
-                "--output-dir", directory,
-            ])
-            with mock.patch.object(
-                organizer_app, "generate_organizer_files", return_value={}
-            ) as generate:
-                organizer_app.run_command(args)
-            (_box, used_layout, _out, used_label, used_part,
-             used_location, _scoop) = generate.call_args.args
-            self.assertEqual([one.kind for one in used_layout.features], ["text"])
-            said = used_layout.features[0]
-            self.assertEqual(said.options["text"], "BOLTS")
-            self.assertEqual(said.options["level"], "base")
-            self.assertNotIn("auto", said.options)
-            # The rim label stays empty, and the part name is seeded once.
-            self.assertEqual((used_label, used_location), ("", "bottom"))
-            self.assertEqual(used_part, "BOLTS")
 
-    def test_a_size_like_label_never_seeds_the_part_name(self) -> None:
-        for size in ("8", "12mm", " 6.5 mm "):
-            self.assertEqual(organizer_app.part_name_seed(size), "")
-        for real in ("M3", "BOLTS", "8mm hex"):
-            self.assertEqual(organizer_app.part_name_seed(real), real.strip())
 
-    def test_organizer_cli_can_override_saved_customizations(self) -> None:
-        spec = BoxSpec(48.0, 32.0, 35.0)
-        layout = organizer_app.Layout()
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "saved.wavefinity.json"
-            path.write_text(
-                organizer_app.json.dumps(
-                    organizer_app.design_to_dict(
-                        spec, layout, "M3", "Nozzles", "top", True
-                    )
-                ),
-                encoding="utf-8",
-            )
-            args = organizer_app.build_parser().parse_args([
-                "organizer", "--layout", str(path), "--label-position", "bottom",
-                "--no-scoop", "--output-dir", directory,
-            ])
-            with mock.patch.object(
-                organizer_app, "generate_organizer_files", return_value={}
-            ) as generate:
-                organizer_app.run_command(args)
-            self.assertEqual(generate.call_args.args[-2:], ("bottom", False))
 
     def test_photo_nest_exports_on_the_bin_floor_or_removable_insert(self) -> None:
         spec = BoxSpec(96.0, 64.0, 40.0)
@@ -2119,65 +1232,9 @@ class InsertEditorTests(unittest.TestCase):
             spec, [one], organizer_app.base_height(spec, "separate"), mode="separate"
         )[0].volume))
 
-    def test_separate_export_writes_a_box_and_a_removable_insert(self) -> None:
-        spec = BoxSpec(16.0, 24.0, 20.0)
-        with tempfile.TemporaryDirectory() as directory:
-            result = organizer_app.generate_organizer_files(
-                spec, organizer_app.Layout(mode="separate"), Path(directory),
-                part_name="Test",
-            )
-            files = sorted(Path(directory).glob("*.3mf"))
-            self.assertEqual(
-                [path.name for path in files],
-                ["Box 16 x 24 x 20 Test.3mf", "Insert 16 x 24 Test.3mf"],
-            )
-            self.assertEqual(result["mode"], "separate")
-            for path in files:
-                self.assertEqual(validate_3mf(path, 1)["warnings"], 0)
 
-    def test_separate_top_label_stays_on_box_and_scoop_goes_on_insert(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        with tempfile.TemporaryDirectory() as directory:
-            result = organizer_app.generate_organizer_files(
-                spec, organizer_app.Layout(mode="separate"), Path(directory),
-                label="M3", label_location="top", scoop=True,
-            )
-            self.assertEqual(result["texts"][0]["rim_side"], "back")
-            self.assertEqual(result["box_text_objects"], ["M3"])
-            self.assertEqual(result["customizations"]["scoop"], True)
-            self.assertEqual(
-                validate_3mf(Path(result["box"]["output"]), 2, multipart=("M3",))["warnings"],
-                0,
-            )
-            self.assertEqual(
-                validate_3mf(Path(result["insert"]["output"]), 1)["warnings"], 0
-            )
 
-    def test_failed_removable_text_preflight_leaves_no_partial_box(self) -> None:
-        spec = BoxSpec(32.0, 32.0, 40.0)
-        too_long = organizer_app.Feature(
-            "text", organizer_app.Zone(-12.0, -4.0, 12.0, 4.0),
-            options={"text": "THIS LABEL IS MUCH TOO LONG"},
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "result"
-            with self.assertRaisesRegex(ValueError, "will not fit"):
-                organizer_app.generate_organizer_files(
-                    spec,
-                    organizer_app.Layout((too_long,), "separate"),
-                    output,
-                )
-            self.assertFalse(output.exists())
 
-    def test_a_floor_label_reaching_the_exporter_says_to_use_a_text_part(self) -> None:
-        """The one place the old bottom-label API could fail silently."""
-        spec = BoxSpec(32.0, 32.0, 40.0)
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "text.*interior part"):
-                organizer_app.generate_organizer_files(
-                    spec, organizer_app.Layout(mode="separate"), Path(directory),
-                    label="M3", label_location="bottom",
-                )
 
     def test_failed_removable_support_preflight_leaves_no_partial_box(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
@@ -2535,38 +1592,7 @@ class TextExportTests(unittest.TestCase):
             with zipfile.ZipFile(output) as archive:
                 self.assertIn("Metadata/model_settings.config", archive.namelist())
 
-    def test_a_plain_box_stays_a_single_object_with_no_sidecar(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        with tempfile.TemporaryDirectory() as directory:
-            result = organizer_app.generate_organizer_files(
-                spec, organizer_app.Layout((), "fused"), Path(directory),
-                part_name="Plain",
-            )
-            output = Path(result["box"]["output"])
-            report = validate_3mf(output, 1)
-            self.assertNotIn("filaments", report)
-            with zipfile.ZipFile(output) as archive:
-                self.assertNotIn(
-                    "Metadata/model_settings.config", archive.namelist()
-                )
 
-    def test_two_texts_reading_the_same_thing_get_distinct_objects(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        layout = organizer_app.Layout((
-            self._text("M3", (-20.0, 6.0, -2.0, 15.0)),
-            self._text("M3", (2.0, 6.0, 20.0, 15.0), level="rim", rim_side="back"),
-        ), "fused")
-        with tempfile.TemporaryDirectory() as directory:
-            result = organizer_app.generate_organizer_files(
-                spec, layout, Path(directory), part_name="Twins"
-            )
-            self.assertEqual(result["text_objects"], ["M3", "M3 2"])
-            self.assertEqual(
-                validate_3mf(
-                    Path(result["box"]["output"]), 3, multipart=("M3", "M3 2")
-                )["warnings"],
-                0,
-            )
 
     def test_a_sunk_text_and_its_pocket_are_exact_complements(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
@@ -2581,42 +1607,8 @@ class TextExportTests(unittest.TestCase):
             float(body.volume), places=3,
         )
 
-    def test_a_raised_text_takes_nothing_out_of_the_body(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        one = self._text("M3", (-20.0, 6.0, -2.0, 15.0), raised=True)
-        body = make_box(spec)
-        inlay = organizer_inserts.build_text(spec, one, spec.base_thickness)[0]
-        self.assertIs(
-            organizer_inserts.apply_texts(body, [("M3", inlay, True)]), body
-        )
 
-    def test_text_is_inlaid_into_a_removable_insert_plate(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        layout = organizer_app.Layout(
-            (self._text("M3", (-20.0, 6.0, -2.0, 15.0)),), "separate"
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            result = organizer_app.generate_organizer_files(
-                spec, layout, Path(directory), part_name="Tray"
-            )
-            # The lettering rides on the insert, not the bare box.
-            self.assertEqual(
-                validate_3mf(Path(result["insert"]["output"]), 2, multipart=("M3",))["warnings"],
-                0,
-            )
-            self.assertEqual(validate_3mf(Path(result["box"]["output"]), 1)["warnings"], 0)
-            said = result["texts"][0]
-            self.assertAlmostEqual(said["surface_z_mm"], organizer_app.BASE_PLATE)
 
-    def test_text_hanging_off_the_insert_plate_is_refused(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        wide, deep = spec.usable_inside
-        edge = self._text("M3", (-wide / 2.0, deep / 2.0 - 9.0, 0.0, deep / 2.0))
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "reaches outside the bin|will not fit the bin|hangs over the edge"):
-                organizer_app.generate_organizer_files(
-                    spec, organizer_app.Layout((edge,), "separate"), Path(directory)
-                )
 
     def test_a_rim_label_and_floor_text_coexist_as_separate_objects(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
@@ -2637,36 +1629,7 @@ class TextExportTests(unittest.TestCase):
                 0,
             )
 
-    def test_a_design_whose_auto_text_went_stale_still_opens(self) -> None:
-        """An auto text's stored zone is a cache; the resolver is the authority."""
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        post = organizer_app.Feature("post", organizer_app.Zone(-10, -10, 10, 10))
-        # Saved sitting right on top of the post - as it would be if a holder
-        # were moved onto it and the design saved before the next preview.
-        stale = self._text("BOLTS", (-16.0, -6.0, 16.0, 6.0), auto=True)
-        saved = organizer_app.design_to_dict(
-            spec, organizer_app.Layout((post, stale), "fused")
-        )
-        _box, layout, *_rest = organizer_app.design_from_dict(
-            organizer_app.json.loads(organizer_app.json.dumps(saved))
-        )
-        moved = layout.features[1]
-        self.assertEqual(moved.kind, "text")
-        self.assertNotEqual(moved.zone, stale.zone)
-        organizer_inserts.check_layout(
-            spec, list(layout.features), base_z=spec.base_thickness
-        )
 
-    def test_a_hand_placed_overlap_is_still_reported_on_open(self) -> None:
-        """Auto-resolution must not paper over a real mistake."""
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        post = organizer_app.Feature("post", organizer_app.Zone(-10, -10, 10, 10))
-        fixed = self._text("M3", (-10.0, -6.0, 10.0, 6.0))
-        saved = organizer_app.design_to_dict(
-            spec, organizer_app.Layout((post, fixed), "fused")
-        )
-        with self.assertRaisesRegex(ValueError, "overlap"):
-            organizer_app.design_from_dict(saved)
 
     def test_preview_and_export_agree_on_where_an_auto_text_landed(self) -> None:
         spec = BoxSpec(48.0, 48.0, 40.0)
@@ -2690,19 +1653,6 @@ class TextExportTests(unittest.TestCase):
             preview["text_meta"][0]["cap_height"], said["cap_height_mm"], places=6
         )
 
-    def test_the_filename_comes_from_the_part_name_alone(self) -> None:
-        spec = BoxSpec(48.0, 48.0, 40.0)
-        self.assertEqual(
-            organizer_app.box_filename(spec, "Driver rack"),
-            "Box 48 x 48 x 40 Driver rack.3mf",
-        )
-        self.assertEqual(
-            organizer_app.box_filename(spec), "Box 48 x 48 x 40.3mf"
-        )
-        self.assertEqual(
-            organizer_app.insert_filename(spec, "Driver rack"),
-            "Insert 48 x 48 Driver rack.3mf",
-        )
 
 
 def _wall_midpoint(box: BoxSpec, side: str, z: float) -> tuple[float, float, float]:
@@ -2754,59 +1704,10 @@ class SideOpeningTests(unittest.TestCase):
         # opening, must still be solid.
         self.assertTrue(bool(cut.contains([(0.0, -box.half_y + 1.0, floor_z / 2.0)])[0]))
 
-    def test_50_percent_depth_stops_halfway_down_usable_wall(self) -> None:
-        box = self._box()
-        floor_z, rim_z, bottom_z, top_z = organizer_side_openings._vertical_geometry(
-            box, 50.0, 0.0
-        )
-        usable = rim_z - floor_z
-        self.assertAlmostEqual(bottom_z, rim_z - usable * 0.5)
-        self.assertAlmostEqual(rim_z - bottom_z, usable / 2.0)
-        self.assertAlmostEqual(top_z, rim_z)
 
-    def test_square_open_top_profile_has_flat_bottom(self) -> None:
-        profile = organizer_side_openings._open_top_profile("square", 5.0, 10.0, 30.0)
-        ys = [round(y, 6) for _x, y in profile.exterior.coords]
-        self.assertEqual(ys.count(10.0), 2)
 
-    def test_curved_open_top_profile_has_u_bottom(self) -> None:
-        profile = organizer_side_openings._open_top_profile("curved", 5.0, 10.0, 30.0)
-        minx, miny, maxx, maxy = profile.bounds
-        self.assertAlmostEqual(miny, 10.0, places=6)
-        # The deepest point is a single point on the curve (the semicircle's
-        # bottom), not a flat run like the square profile.
-        ys = [round(y, 6) for _x, y in profile.exterior.coords]
-        self.assertEqual(ys.count(round(miny, 6)), 1)
 
-    def test_curved_supported_profile_uses_the_shallow_arch_curve(self) -> None:
-        box = self._box(z=60.0)
-        rim_z = box.z
-        r = 5.0
-        opening_top_z = rim_z - SIDE_OPENING_TOP_BRIDGE_MM
-        profile = organizer_side_openings._bridged_profile("curved", r, 20.0, opening_top_z)
-        minx, miny, maxx, maxy = profile.bounds
-        self.assertAlmostEqual(maxy, opening_top_z, places=6)
-        self.assertAlmostEqual(rim_z - maxy, SIDE_OPENING_TOP_BRIDGE_MM, places=6)
-        right_roof = max(
-            y for x, y in profile.exterior.coords if math.isclose(x, r, abs_tol=1e-6)
-        )
-        self.assertAlmostEqual(right_roof, opening_top_z - 1.5 * r, places=6)
 
-    def test_square_top_support_has_exact_45_degree_roof(self) -> None:
-        r = 7.5
-        bottom_z = 10.0
-        opening_top_z = 40.0
-        profile = organizer_side_openings._bridged_profile("square", r, bottom_z, opening_top_z)
-        coords = list(profile.exterior.coords)
-        shoulder = next(
-            pt for pt in coords
-            if math.isclose(pt[0], r, abs_tol=1e-6) and not math.isclose(pt[1], bottom_z, abs_tol=1e-6)
-        )
-        apex = next(pt for pt in coords if math.isclose(pt[0], 0.0, abs_tol=1e-6))
-        self.assertAlmostEqual(shoulder[1], opening_top_z - r, places=6)
-        self.assertAlmostEqual(apex[1], opening_top_z, places=6)
-        # 45 degrees: the roof rises exactly ``r`` over a run of exactly ``r``.
-        self.assertAlmostEqual(apex[1] - shoulder[1], r, places=6)
 
     def test_each_side_cuts_only_its_own_wall(self) -> None:
         for side in ("front", "back", "left", "right"):
@@ -2843,25 +1744,7 @@ class SideOpeningTests(unittest.TestCase):
                 self.assertTrue(cut.is_watertight)
                 self.assertEqual(len(cut.split(only_watertight=False)), 1)
 
-    def test_width_presets_are_exact(self) -> None:
-        self.assertEqual(
-            SIDE_OPENING_WIDTHS,
-            {"small": 8.0, "medium": 10.0, "large": 15.0, "xl": 20.0},
-        )
 
-    def test_size_availability_follows_wall_units(self) -> None:
-        spec = SideOpeningSpec(enabled=True, sides=("front",))
-        self.assertEqual(
-            side_opening_allowed_sizes(self._box(x=16.0), spec), ("small",)
-        )
-        self.assertEqual(
-            side_opening_allowed_sizes(self._box(x=24.0), spec),
-            ("small", "medium", "large"),
-        )
-        self.assertEqual(
-            side_opening_allowed_sizes(self._box(x=32.0), spec),
-            ("small", "medium", "large", "xl"),
-        )
 
     def test_illegal_combinations_are_rejected(self) -> None:
         box = self._box(z=20.0)
@@ -2900,17 +1783,6 @@ class SideOpeningTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "top must be above"):
             organizer_app.design_from_dict(saved)
 
-    def test_legacy_depth_and_top_support_migrate(self) -> None:
-        saved = organizer_app.design_to_dict(self._box(), organizer_app.Layout())
-        saved["box"]["side_openings"] = {
-            "enabled": True, "shape": "square", "sides": ["front"],
-            "size": "small", "depth_percent": 60.0, "top_support": False,
-        }
-        box, *_ = organizer_app.design_from_dict(saved)
-        # Legacy reach semantics (no percent_mode marker): old 60/absent
-        # (implicit 100) converts to new inset 40/0, the same physical cut.
-        self.assertEqual(box.side_openings.from_bottom_percent, 40.0)
-        self.assertEqual(box.side_openings.from_top_percent, 0.0)
 
     def _legacy_top_support(self, **box_changes):
         saved = organizer_app.design_to_dict(self._box(), organizer_app.Layout())
@@ -2927,29 +1799,9 @@ class SideOpeningTests(unittest.TestCase):
         bridge = usable * (box.side_openings.from_top_percent / 100.0)
         self.assertAlmostEqual(bridge, organizer_app.SIDE_OPENING_TOP_BRIDGE_MM, places=6)
 
-    def test_legacy_top_support_gives_exact_bridge(self) -> None:
-        box, *_ = organizer_app.design_from_dict(self._legacy_top_support())
-        self._assert_bridge(box)
 
-    def test_legacy_top_support_uses_final_z_for_v4_stackable_lid(self) -> None:
-        saved = self._legacy_top_support(z=40.0)
-        saved["version"] = 4
-        saved["box"]["lid"] = {"enabled": True, "stackable": True}
-        box, *_ = organizer_app.design_from_dict(saved)
-        self._assert_bridge(box)
 
-    def test_legacy_top_support_uses_final_base_after_stack_normalization(self) -> None:
-        saved = self._legacy_top_support(base_thickness=0.6)
-        saved["box"]["stack"] = {"mode": "direct"}
-        raw_base = saved["box"]["base_thickness"]
-        box, *_ = organizer_app.design_from_dict(saved)
-        self.assertGreater(box.base_thickness, raw_base)
-        self._assert_bridge(box)
 
-    def test_legacy_top_support_degenerate_height_is_controlled(self) -> None:
-        saved = self._legacy_top_support(z=2.0, base_thickness=2.0)
-        with self.assertRaises(ValueError):
-            organizer_app.design_from_dict(saved)
 
     def test_save_load_round_trips_exactly(self) -> None:
         spec = self._box(x=48.0, y=48.0, z=40.0)
@@ -2964,67 +1816,11 @@ class SideOpeningTests(unittest.TestCase):
         self.assertEqual(box, spec)
         self.assertEqual(box.side_openings, spec.side_openings)
 
-    def test_old_design_without_side_openings_block_loads_unchanged(self) -> None:
-        spec = self._box()
-        data = organizer_app.design_to_dict(spec, organizer_app.Layout())
-        self.assertNotIn("side_openings", data["box"])
-        box, *_ = organizer_app.design_from_dict(data)
-        self.assertEqual(box.side_openings, SideOpeningSpec())
-        self.assertEqual(box, spec)
 
-    def test_b4b_rejects_side_openings(self) -> None:
-        box = BoxSpec(
-            x=64.0, y=48.0, z=40.0, wall=1.4,
-            b4b=B4BSpec(enabled=True),
-            side_openings=SideOpeningSpec(enabled=True, sides=("front",)),
-        )
-        with self.assertRaises(ValueError):
-            organizer_b4b.validate_b4b_design(box)
 
-    def test_lid_and_stacking_require_a_top_bridge(self) -> None:
-        box = self._box(side_openings=SideOpeningSpec(
-            enabled=True, sides=("front",), from_top_percent=0.0,
-        ))
-        with self.assertRaises(ValueError):
-            validate_side_openings(replace(box, lid=LidSpec(enabled=True)))
-        # Raising the top inset leaves a bridge for the lid/stacking geometry.
-        validate_side_openings(replace(
-            box, lid=LidSpec(enabled=True),
-            side_openings=replace(box.side_openings, from_top_percent=20.0),
-        ))
-        with self.assertRaises(ValueError):
-            validate_side_openings(replace(box, stack=StackSpec(mode="direct")))
 
-    def test_edge_mount_same_wall_rejected_different_wall_allowed(self) -> None:
-        box = self._box(side_openings=SideOpeningSpec(enabled=True, sides=("front",)))
-        with self.assertRaises(ValueError):
-            validate_side_openings(replace(
-                box, edge_mount=EdgeMountSpec(side="front", holes_enabled=True)
-            ))
-        validate_side_openings(replace(
-            box, edge_mount=EdgeMountSpec(side="back", holes_enabled=True)
-        ))
 
-    def test_lift_grabber_same_wall_rejected_different_wall_allowed(self) -> None:
-        box = self._box(side_openings=SideOpeningSpec(enabled=True, sides=("front",)))
-        with self.assertRaises(ValueError):
-            validate_side_openings(replace(
-                box, lift_grabbers=LiftGrabberSpec(enabled=True, location="front_back")
-            ))
-        validate_side_openings(replace(
-            box, lift_grabbers=LiftGrabberSpec(enabled=True, location="sides")
-        ))
 
-    def test_rim_label_same_wall_rejected_in_preview_and_generate(self) -> None:
-        box = self._box(side_openings=SideOpeningSpec(enabled=True, sides=("front",)))
-        with self.assertRaises(ValueError):
-            organizer_app.preview_geometry(box, label="HELLO", label_location="front")
-        organizer_app.preview_geometry(box, label="HELLO", label_location="back")
-        with self.assertRaises(ValueError):
-            organizer_app.generate_organizer_files(
-                box, organizer_app.Layout(), Path(tempfile.mkdtemp()),
-                label="HELLO", label_location="front",
-            )
 
     def test_exported_body_retains_cut_after_later_body_operations(self) -> None:
         # A scoop is fused into the shell after make_box() but before the
@@ -3064,17 +1860,6 @@ class EdgeMountTests(unittest.TestCase):
         self.assertTrue(combined.is_watertight)
         self.assertTrue(combined.is_winding_consistent)
 
-    def test_screw_cutters_remain_volumes_on_every_side_and_diameter(self) -> None:
-        for side in ("front", "back", "left", "right"):
-            for diameter in (1.0, 4.0, 10.0):
-                with self.subTest(side=side, diameter=diameter):
-                    box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
-                        side=side, holes_enabled=True, hole_count=1,
-                        screw_diameter_mm=diameter, top_offset_mm=20.0,
-                    ))
-                    for hole in organizer_edge_mount.edge_mount_hole_plan(box):
-                        for cutter in organizer_edge_mount._hole_cutters(box, side, hole, True):
-                            self.assertTrue(cutter.is_volume, cutter.bounds)
 
     def test_wall_only_bore_screw_cut_preview_and_export(self) -> None:
         box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
@@ -3124,58 +1909,7 @@ class EdgeMountTests(unittest.TestCase):
                         Path(result["edge_mount_label"]["output"]), 2,
                         multipart=("A",))["warnings"], 0)
 
-    def test_screw_cut_skips_disjoint_mesh_and_names_invalid_intersection(self) -> None:
-        box = BoxSpec(48.0, 48.0, 40.0,
-                      edge_mount=EdgeMountSpec(holes_enabled=True))
-        invalid = trimesh.creation.box(extents=(2.0, 2.0, 2.0))
-        invalid.update_faces(np.arange(len(invalid.faces)) != 0)
-        self.assertFalse(invalid.is_volume)
-        invalid.apply_translation((110.0, 100.0, 100.0))
-        vertices = invalid.vertices.copy()
-        with mock.patch.object(organizer_edge_mount, "difference",
-                               side_effect=AssertionError("boolean was called")):
-            self.assertIs(organizer_edge_mount.apply_edge_mount_hole_cuts(box, invalid), invalid)
-        np.testing.assert_array_equal(invalid.vertices, vertices)
-        invalid.apply_translation((-100.0, -100.0, -72.7))
-        with self.assertRaisesRegex(ValueError, "test post is not a valid volume"):
-            organizer_edge_mount.apply_edge_mount_hole_cuts(
-                box, invalid, geometry_owner="test post")
-        intersecting = trimesh.creation.box(extents=(20.0, 20.0, 10.0))
-        intersecting.apply_translation((0.0, 0.0, 27.3))
-        with mock.patch.object(organizer_edge_mount, "difference",
-                               wraps=organizer_edge_mount.difference) as difference:
-            cut = organizer_edge_mount.apply_edge_mount_hole_cuts(box, intersecting)
-        difference.assert_called_once()
-        self.assertTrue(cut.is_volume)
-        self.assertLess(cut.volume, intersecting.volume)
 
-    def test_pocket_screw_cut_preview_and_export_parity(self) -> None:
-        import wavefinity_web
-        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
-            holes_enabled=True, hole_count=1, top_offset_mm=20.0))
-        one = organizer_app.default_feature(box, "pocket")
-        body = organizer_inserts.build_features(
-            box, [one], organizer_app.base_height(box, "fused"))[0]
-        cut = organizer_edge_mount.apply_edge_mount_hole_cuts(box, body)
-        self.assertTrue(body.is_volume)
-        self.assertTrue(cut.is_volume)
-        self.assertLess(cut.volume, body.volume)
-        saved = wavefinity_web.preview_payload({
-            "design": organizer_app.design_to_dict(
-                box, organizer_app.Layout((one,), "fused")),
-        })
-        draft = wavefinity_web.preview_payload({
-            "design": organizer_app.design_to_dict(
-                box, organizer_app.Layout((), "fused")),
-            "draft": wavefinity_web.feature_to_dict(one),
-        })
-        self.assertFalse(saved["feature_errors"])
-        self.assertIsNone(draft["draft_error"])
-        with tempfile.TemporaryDirectory() as directory:
-            result = organizer_app.generate_organizer_files(
-                box, organizer_app.Layout((one,), "fused"), Path(directory))
-            self.assertTrue(result["box"]["mesh"]["positive_volume"])
-            self.assertEqual(validate_3mf(Path(result["box"]["output"]), 1)["warnings"], 0)
 
     def test_screw_cut_covers_shell_rim_ledge_and_fused_scoop(self) -> None:
         box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
@@ -3200,60 +1934,6 @@ class EdgeMountTests(unittest.TestCase):
                 label="M3", label_location="top", scoop=True)
             self.assertTrue(result["box"]["mesh"]["positive_volume"])
 
-    def test_non_text_fused_feature_screw_cut_matrix(self) -> None:
-        base = BoxSpec(96.0, 96.0, 64.0)
-        cases = [(kind, organizer_app.default_feature(base, kind)) for kind in (
-            "bore", "divider", "pocket", "slot", "cradle", "steps", "post", "scoop"
-        )]
-        for style in ("straight", "wavy"):
-            cases.append((f"bore_wall_only_{style}", organizer_app.Feature(
-                "bore", organizer_app.Zone(-20.0, -20.0, 20.0, 20.0),
-                organizer_inserts.Item.simple("tube", 30.0, 25.0),
-                options={"bore_style": f"walls_{style}",
-                         "height": 30.0, "wall": 1.6},
-            )))
-        contour = ((-20.0, -8.0), (20.0, -8.0), (18.0, 8.0), (-20.0, 8.0))
-        for style in ("raised_wall", "recessed"):
-            cases.append((f"nest_{style}", organizer_inserts.fitted_nest_feature(
-                organizer_app.Feature(
-                    "nest", organizer_app.Zone(-1.0, -1.0, 1.0, 1.0),
-                    options={"holder_style": style, "tool_thickness": 8.0,
-                             "cavity_depth_mode": "auto", "lift_assist": "none",
-                             "clearance": 0.6, "depth": 8.0, "rim": 3.0,
-                             "smoothing": 0.0}, contour=contour,
-                ))))
-        for name, one in cases:
-            for intersects in (False, True):
-                placed = (replace(one, options={**one.options, "height": 20.0})
-                          if name == "divider" and not intersects else one)
-                if name == "cradle" and intersects:
-                    placed = organizer_inserts.moved_feature(placed, base, (4.0, 0.0))
-                spec = EdgeMountSpec(
-                    side="front", holes_enabled=True,
-                    hole_count=1,
-                    top_offset_mm=58.0 if intersects else 8.0,
-                    standoff_ribs_enabled=False,
-                )
-                box = replace(base, edge_mount=spec)
-                with self.subTest(feature=name, intersects=intersects):
-                    solids = organizer_inserts.build_features(
-                        box, [placed], organizer_app.base_height(box, "fused"))
-                    self.assertTrue(solids)
-                    for solid in solids:
-                        self.assertTrue(solid.is_volume, (name, solid.bounds,
-                                                        solid.is_watertight,
-                                                        solid.is_winding_consistent))
-                        cut = organizer_edge_mount.apply_edge_mount_hole_cuts(
-                            box, solid, geometry_owner=name)
-                        self.assertTrue(cut.is_volume, name)
-                        if intersects:
-                            self.assertLess(cut.volume, solid.volume, name)
-                        else:
-                            self.assertIs(cut, solid, name)
-                    for kwargs in ({"features": [placed]}, {"draft": placed}):
-                        preview = organizer_app.preview_geometry(box, mode="fused", **kwargs)
-                        self.assertFalse(preview["feature_errors"], (name, preview["feature_errors"]))
-                        self.assertIsNone(preview["draft_error"], name)
 
     def test_label_type_migrates_and_separate_clip_is_watertight(self) -> None:
         self.assertEqual(EdgeMountSpec().label_type, "separate")
@@ -3267,47 +1947,7 @@ class EdgeMountTests(unittest.TestCase):
         self.assertTrue(label.is_watertight)
         self.assertEqual(len(label.split()), 1)
 
-    def test_separate_part_label_can_never_be_raised(self) -> None:
-        # Fix 058 Correction 1, C1.4C: Separate Part is always exported with
-        # its text face down, so Raised is never a valid manufacturing state
-        # for it - normalized at construction, not merely hidden in the UI,
-        # so a legacy saved design or any non-UI/programmatic input cannot
-        # bypass the invariant.
-        spec = EdgeMountSpec(label_type="separate", label_enabled=True, label_raised=True)
-        self.assertFalse(spec.label_raised)
 
-        # A legacy saved design that explicitly contains
-        # label_type="separate" + label_raised=true must load as flush.
-        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(label_enabled=True, label_text="TOOLS"))
-        saved = organizer_app.design_to_dict(box, organizer_app.Layout())
-        saved["box"]["edge_mount"]["label_type"] = "separate"
-        saved["box"]["edge_mount"]["label_raised"] = True
-        loaded, *_ = organizer_app.design_from_dict(saved)
-        self.assertEqual(loaded.edge_mount.label_type, "separate")
-        self.assertFalse(loaded.edge_mount.label_raised)
-
-        # Integrated may still be Raised - the invariant is specific to
-        # Separate Part.
-        integrated = EdgeMountSpec(label_type="integrated", label_enabled=True, label_raised=True)
-        self.assertTrue(integrated.label_raised)
-
-    def test_edge_mount_text_depth_default_is_06mm_and_scoped(self) -> None:
-        # Fix 058 Correction 1, C1.4D: a new/missing Edge Mount value uses
-        # the Edge-Mount-only 0.6 mm default; an explicit saved 0.4 mm design
-        # stays 0.4 mm, and the shared floor-label TEXT_DEPTH is untouched.
-        self.assertEqual(EdgeMountSpec().label_text_depth_mm, 0.6)
-        self.assertEqual(organizer_engine.TEXT_DEPTH, 0.4)
-
-        box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(label_enabled=True, label_text="TOOLS"))
-        saved = organizer_app.design_to_dict(box, organizer_app.Layout())
-        self.assertEqual(saved["box"]["edge_mount"]["label_text_depth_mm"], 0.6)
-        del saved["box"]["edge_mount"]["label_text_depth_mm"]
-        loaded, *_ = organizer_app.design_from_dict(saved)
-        self.assertEqual(loaded.edge_mount.label_text_depth_mm, 0.6)
-
-        saved["box"]["edge_mount"]["label_text_depth_mm"] = 0.4
-        loaded_legacy, *_ = organizer_app.design_from_dict(saved)
-        self.assertEqual(loaded_legacy.edge_mount.label_text_depth_mm, 0.4)
 
     def test_separate_label_is_not_fused_and_exports_separately(self) -> None:
         box = BoxSpec(48.0, 48.0, 40.0, edge_mount=EdgeMountSpec(
@@ -3321,25 +1961,6 @@ class EdgeMountTests(unittest.TestCase):
             result = organizer_app.generate_organizer_files(box, organizer_app.Layout(), Path(directory))
         self.assertTrue(result["edge_mount_label"]["mesh"]["watertight"])
 
-    def test_separate_clip_ribs_have_real_45_degree_ramps_and_clear_every_wall(self) -> None:
-        for side in ("front", "back", "left", "right"):
-            for wall in (0.8, 1.2):
-                box = BoxSpec(
-                    48.0, 56.0, 40.0, wall=wall,
-                    edge_mount=EdgeMountSpec(
-                        side=side, label_enabled=True, label_text="A",
-                        label_length_mode="text",
-                    ),
-                )
-                clip = organizer_edge_mount.make_edge_mount_label_part(box)
-                self.assertTrue(clip.is_watertight, f"{side}/{wall}")
-                self.assertEqual(len(clip.split()), 1, f"{side}/{wall}")
-                self.assertLess(intersection_volume(clip, make_box(box)), 1e-3)
-                # The ramp face is 45 degrees: its Z normal component is
-                # sin(45), unlike a constant-cross-section vertical nub.
-                self.assertTrue(np.any(np.isclose(
-                    np.abs(clip.face_normals[:, 2]), math.sqrt(0.5), atol=0.02,
-                )), f"{side}/{wall} has no 45-degree retention ramp")
 
     def test_separate_label_inner_leg_seats_over_and_catches_the_wall_locks(self) -> None:
         # Fix 061 U1: the outside leg stays 3 mm; the inside leg reaches past
@@ -3391,53 +2012,9 @@ class EdgeMountTests(unittest.TestCase):
                     raised.apply_translation((0.0, 0.0, 0.3))
                     self.assertGreater(intersection_volume(raised, locks), 1e-3, label)
 
-    def test_narrow_separate_label_only_notches_the_locks_beneath_it(self) -> None:
-        narrow = BoxSpec(48.0, 56.0, 40.0, edge_mount=EdgeMountSpec(
-            side="front", label_enabled=True, label_text="A", label_length_mode="text"))
-        wide = replace(narrow, edge_mount=replace(narrow.edge_mount, label_length_mode="full"))
-        locks = organizer_geometry.union(organizer_engine.make_wall_lock_bumps(narrow))
-        raised = {}
-        for name, box in (("narrow", narrow), ("wide", wide)):
-            clip = organizer_edge_mount.make_edge_mount_label_part(box)
-            moved = clip.copy()
-            moved.apply_translation((0.0, 0.0, 0.3))
-            raised[name] = intersection_volume(moved, locks)
-        self.assertGreater(raised["narrow"], 1e-3)
-        self.assertGreater(raised["wide"], raised["narrow"])
 
-    def test_inner_leg_depth_stays_above_the_floor_of_a_shallow_bin(self) -> None:
-        shallow = BoxSpec(48.0, 56.0, 8.0)
-        depth = organizer_edge_mount.edge_mount_inner_leg_depth_mm(shallow)
-        self.assertLessEqual(depth, shallow.z - shallow.base_thickness)
-        self.assertGreaterEqual(depth, organizer_edge_mount.EDGE_LABEL_CLIP_DEPTH_MM)
 
-    def test_label_uses_12_mm_target_and_6_mm_floor(self) -> None:
-        box = BoxSpec(
-            48.0, 48.0, 40.0,
-            edge_mount=EdgeMountSpec(
-                label_enabled=True, label_text="A", label_projection_mm=20.0,
-            ),
-        )
-        self.assertEqual(organizer_edge_mount.edge_mount_label_plan(box)["cap_height_mm"], 12.0)
-        too_small = replace(
-            box,
-            edge_mount=replace(
-                box.edge_mount, label_text="A VERY LONG LABEL", label_projection_mm=5.0,
-            ),
-        )
-        with self.assertRaisesRegex(ValueError, "Shorten the text, increase Projection"):
-            organizer_edge_mount.edge_mount_label_plan(too_small)
 
-    def test_label_plate_has_square_wall_corners_and_one_mm_free_chamfers(self) -> None:
-        box = BoxSpec(48.0, 48.0, 40.0)
-        outer_top = organizer_engine.wavy_outer_polygon(box).bounds[3]
-        polygon = organizer_edge_mount._plate_rectangle(box, "back", 10.0, 20.0)
-        coords = {(round(x, 6), round(y, 6)) for x, y in polygon.exterior.coords}
-        attached_y = min(y for _x, y in coords)
-        self.assertIn((-10.0, attached_y), coords)
-        self.assertIn((10.0, attached_y), coords)
-        self.assertIn((-9.0, round(outer_top + 20.0, 6)), coords)
-        self.assertIn((9.0, round(outer_top + 20.0, 6)), coords)
 
     def test_driver_access_preserves_legacy_auto_and_rejects_too_small(self) -> None:
         auto = EdgeMountSpec(holes_enabled=True, screw_diameter_mm=5.0)

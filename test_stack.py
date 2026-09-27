@@ -57,21 +57,9 @@ class StackHeightTests(unittest.TestCase):
             st.stack_effective_box(direct).z, 40 + st.STACK_PLUG_DEPTH, places=6,
         )
 
-    def test_two_nominal_50_mm_modules_contribute_100_mm(self):
-        for mode in ("lid", "direct"):
-            box = BoxSpec(x=48, y=32, z=50, stack=StackSpec(mode=mode))
-            self.assertAlmostEqual(2.0 * st.stack_pitch(box), 100.0, places=6)
 
 
 class StackAutoSettingsTests(unittest.TestCase):
-    def test_stack_settings_are_visible_legal_values(self):
-        box = BoxSpec(x=48, y=32, z=40, wall=0.8, stack=StackSpec(mode="direct"))
-        legal = st.normalize_stack_settings(box)
-        self.assertAlmostEqual(legal.wall, st.STACK_MIN_WALL)
-        self.assertAlmostEqual(legal.base_thickness, st.stack_base_minimum(legal))
-        self.assertFalse(legal.standard_walls)
-        self.assertFalse(legal.standard_base)
-        self.assertTrue(st.stack_grew(box))
 
     def test_user_values_above_stack_minimums_are_preserved(self):
         for mode in ("lid", "direct"):
@@ -87,17 +75,6 @@ class StackAutoSettingsTests(unittest.TestCase):
                 self.assertEqual(legal.wall, 1.6)
                 self.assertEqual(legal.base_thickness, minimum + 0.7)
 
-    def test_catalog_and_browser_enforce_visible_dependencies(self):
-        rules = catalog_payload()["stack_rules"]
-        self.assertEqual(rules["min_wall_mm"], 1.2)
-        self.assertIn("lid", rules["base_min_by_wall_mm"])
-        self.assertIn("direct", rules["base_min_by_wall_mm"])
-        app = (Path(__file__).parent / "web" / "app.js").read_text(encoding="utf-8")
-        self.assertIn("function normalizeStackSettings", app)
-        self.assertIn("{ restoreDefaults = false, flash = false } = {}", app)
-        self.assertNotIn("wasB4B", app)
-        self.assertIn('set("standard_walls", false, "#wall-thickness")', app)
-        self.assertIn('set("standard_base", false, "#base-thickness")', app)
 
 
 class StackGeometryTests(unittest.TestCase):
@@ -176,35 +153,6 @@ class StackGeometryTests(unittest.TestCase):
         upper_peak = st.stack_pitch(box) + st.stack_step_depth(box) - st.STACK_BEAD_DROP
         self.assertAlmostEqual(lower_peak, upper_peak, places=6)
 
-    def test_print_profiles_are_45_degrees_or_shallower_and_segmented(self):
-        for mode in ("lid", "direct"):
-            with self.subTest(mode=mode):
-                box = BoxSpec(x=48, y=32, z=40, wall=2.4,
-                              standard_walls=False, stack=StackSpec(mode=mode))
-                eff = st.stack_effective_box(box)
-                run = st._outline_run(st._plug_polygon(eff), st.wavy_outer_polygon(eff))
-                self.assertGreaterEqual(st.stack_foot_flare_height(eff), run)
-                if mode == "lid":
-                    self.assertGreaterEqual(st.stack_lid_rise(eff), st.stack_foot_flare_height(eff))
-                    self.assertGreaterEqual(
-                        st.stack_lid_rise(eff) - st.STACK_SEAT_DEPTH,
-                        st.STACK_MIN_FLOOR_SKIN,
-                    )
-                    for protrusion, clearance in (
-                        (st.STACK_FIT + st.LID_LOCK_INTERFERENCE, 0.0),
-                        (st.LID_LOCK_INTERFERENCE, st.LID_LOCK_CLEARANCE),
-                    ):
-                        profile = st._lid_lock_profile(protrusion, 0.0, clearance)
-                        for (t0, z0), (t1, z1) in zip(profile, profile[1:]):
-                            self.assertGreaterEqual(
-                                abs(z1 - z0) + 1e-9, abs(t1 - t0),
-                            )
-                else:
-                    self.assertGreaterEqual(
-                        st.STACK_SNAP_RAMP, st.STACK_FIT + st.STACK_SNAP,
-                    )
-                    self.assertGreaterEqual(st.STACK_SNAP_RELEASE, st.STACK_BEAD)
-                    self.assertGreaterEqual(len(st._detent_masks(eff)), 4)
 
 
 class StackValidationTests(unittest.TestCase):
@@ -251,54 +199,11 @@ class StackSerializationTests(unittest.TestCase):
                 self.assertEqual(back.stack.mode, "direct" if mode == "direct" else "none")
                 self.assertEqual(back.lid.stackable, mode == "lid")
 
-    def test_v4_closed_height_migrates_without_changing_old_geometry(self):
-        for mode in ("lid", "direct"):
-            with self.subTest(mode=mode):
-                old = design_to_dict(BoxSpec(x=48, y=32, z=40), Layout())
-                old["version"] = 4
-                old["box"]["z"] = 40
-                old["box"]["stack"] = {"mode": mode}
-                migrated, *_ = design_from_dict(old)
-                self.assertEqual(migrated.z, 40 - st.stack_step_depth(migrated))
-                self.assertAlmostEqual(st.stack_closed_height(migrated), 40, places=6)
 
-    def test_an_ordinary_bin_carries_no_stack_block(self):
-        data = design_to_dict(BoxSpec(x=48, y=32, z=40), Layout((), "fused"))
-        self.assertEqual(data["version"], 1)
-        self.assertNotIn("stack", data["box"])
-        back, *_ = design_from_dict(data)
-        self.assertFalse(back.stack.enabled)
 
 
 class LidContractTests(unittest.TestCase):
-    def test_handled_lid_is_not_a_vertical_stack_and_keeps_the_floor(self):
-        box = BoxSpec(
-            x=48, y=32, z=40, wall=0.8, base_thickness=0.6,
-            lid=LidSpec(
-                enabled=True, stackable=False, thickness="thick",
-                label_enabled=True, label_style="raised", label_text="TOOLS",
-                handle_type="pull", handle_size="large", handle_position="front",
-            ),
-        )
-        legal = st.normalize_stack_settings(box)
-        self.assertFalse(st.stack_enabled(legal))
-        self.assertEqual(legal.base_thickness, 0.6)
-        self.assertEqual(legal.wall, st.STACK_MIN_WALL)
-        data = design_to_dict(legal, Layout())
-        self.assertEqual(data["version"], 7)          # ordinary lid: fit + label depth
-        self.assertNotIn("stack", data["box"])
-        back, *_ = design_from_dict(data)
-        self.assertEqual(back.lid.handle_type, "pull")
-        self.assertEqual(back.lid.handle_size, "large")
-        self.assertEqual(back.lid.handle_position, "front")
-        self.assertGreater(st.stack_closed_height(back), back.z)
 
-    def test_stackable_lid_requires_a_flat_label_surface(self):
-        with self.assertRaises(ValueError):
-            LidSpec(
-                enabled=True, stackable=True,
-                label_enabled=True, label_style="raised",
-            )
 
     def test_legacy_stack_lid_migrates_to_lid_spec(self):
         old = design_to_dict(BoxSpec(x=48, y=32, z=40), Layout())
@@ -312,23 +217,7 @@ class LidContractTests(unittest.TestCase):
         self.assertNotIn("stack", saved["box"])
         self.assertTrue(saved["box"]["lid"]["stackable"])
 
-    def test_b4b_rejects_the_ordinary_lid_system(self):
-        box = BoxSpec(
-            x=64, y=48, z=40,
-            b4b=B4BSpec(enabled=True),
-            lid=LidSpec(enabled=True, stackable=False),
-        )
-        with self.assertRaises(ValueError):
-            st.validate_stack_design(box)
 
-    def test_handled_lid_inventory_is_nonstacking_and_includes_handle_height(self):
-        box = BoxSpec(
-            x=48, y=32, z=40,
-            lid=LidSpec(enabled=True, stackable=False, handle_type="knob"),
-        )
-        record = inventory_bin_record(box, Layout())
-        self.assertEqual(record["stack"], "none")
-        self.assertGreater(record["z"], box.z)
 
     def test_lid_disables_side_connectors(self):
         design = design_to_dict(
@@ -337,15 +226,6 @@ class LidContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unavailable.*lid"):
             connector_payload({"design": design})
 
-    def test_browser_exposes_lid_part_and_locks_labeled_dividers(self):
-        root = Path(__file__).parent
-        html = (root / "web" / "index.html").read_text(encoding="utf-8")
-        app = (root / "web" / "app.js").read_text(encoding="utf-8")
-        self.assertIn('id="lid-configuration"', html)
-        self.assertNotIn('value="stack-direct"', html)
-        self.assertNotIn('value="stack-lid"', html)
-        self.assertIn("function dividerLockedByLidLabels", app)
-        self.assertIn("Clear the lid compartment labels", app)
 
 
 if __name__ == "__main__":

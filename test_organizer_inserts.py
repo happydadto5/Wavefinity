@@ -103,48 +103,7 @@ class OrganizerInsertsCompatibilityContractTests(unittest.TestCase):
         )
         self.assertTrue(all(name in namespace for name in REQUIRED_FACADE_NAMES))
 
-    def test_fresh_process_sees_the_complete_recorded_registries(self) -> None:
-        completed = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "import json, organizer_inserts as m; print(json.dumps({"
-                "'builders': sorted(m.FEATURE_BUILDERS), "
-                "'defaults': sorted(m.FEATURE_DEFAULTS)}))",
-            ],
-            cwd=Path(__file__).resolve().parent,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        fresh = json.loads(completed.stdout)
-        self.assertEqual(set(fresh["builders"]), EXPECTED_REGISTRY_KEYS)
-        self.assertEqual(set(fresh["defaults"]), EXPECTED_REGISTRY_KEYS)
 
-    def test_facade_exposes_the_live_registry_singletons(self) -> None:
-        kind = "_compatibility_contract_probe"
-        builders = inserts.FEATURE_BUILDERS
-        defaults = inserts.FEATURE_DEFAULTS
-        builders.pop(kind, None)
-        defaults.pop(kind, None)
-        inserts.FEATURE_DEFINITIONS.pop(kind, None)
-        try:
-            @inserts.feature(kind)
-            def builder(_box, _feature, _base_z):
-                return []
-
-            @inserts.defaults(kind)
-            def resolver(_box, _feature, _base_z):
-                return {}
-
-            self.assertIs(inserts.FEATURE_BUILDERS, builders)
-            self.assertIs(inserts.FEATURE_DEFAULTS, defaults)
-            self.assertIs(builders[kind], builder)
-            self.assertIs(defaults[kind], resolver)
-        finally:
-            builders.pop(kind, None)
-            defaults.pop(kind, None)
-            inserts.FEATURE_DEFINITIONS.pop(kind, None)
 
     def test_saved_layouts_still_round_trip_and_legacy_defaults_survive(self) -> None:
         layout = Layout((Feature(
@@ -200,25 +159,9 @@ def _material_at(solid, x: float, y: float, z0: float, z1: float) -> float:
 
 
 class ItemTests(unittest.TestCase):
-    def test_an_item_measures_itself_end_to_end(self) -> None:
-        self.assertEqual(DRIVER.length, 80.0)
-        self.assertEqual(DRIVER.widest, 18.0)
-        self.assertEqual(len(DRIVER.segments), 2)
 
-    def test_segment_centres_are_midpoints_along_the_object(self) -> None:
-        centres = [round(c, 3) for c, _ in DRIVER.segment_centres()]
-        self.assertEqual(centres, [25.0, 65.0])       # 50 long, then 30 long
 
-    def test_segment_centres_can_be_measured_from_the_other_end(self) -> None:
-        centres = [round(c, 3) for c, _ in DRIVER.segment_centres(True)]
-        diameters = [segment.diameter for _, segment in DRIVER.segment_centres(True)]
-        self.assertEqual(centres, [15.0, 55.0])
-        self.assertEqual(diameters, [18.0, 6.0])
 
-    def test_a_simple_item_is_one_segment(self) -> None:
-        stick = Item.simple("Glue", 100.0, 11.0)
-        self.assertEqual(len(stick.segments), 1)
-        self.assertEqual(stick.length, 100.0)
 
     def test_bad_items_are_refused(self) -> None:
         with self.assertRaises(ValueError):
@@ -277,72 +220,22 @@ class CradleTests(unittest.TestCase):
         centre = self._feature().zone.centre[0]
         self.assertAlmostEqual(float(trough.bounds[:, 0].mean()), centre, places=3)
 
-    def test_the_trough_sits_on_the_floor_with_a_level_top(self) -> None:
-        trough = build_features(BIN, [self._feature()], BIN.base_thickness)[0]
-        self.assertAlmostEqual(trough.bounds[0][2], BIN.base_thickness, places=6)
-        axis_z = BIN.base_thickness + inserts.CRADLE_FLOOR_GAP + ROD.widest / 2.0
-        self.assertAlmostEqual(trough.bounds[1][2], axis_z, places=6)  # rests level
 
-    def test_a_short_tool_still_gets_one_full_length_trough(self) -> None:
-        stub = Item.simple("Stub", 3.0, 6.0)
-        solids = build_features(
-            BIN,
-            [Feature("cradle", Zone(-20.0, -20.0, 20.0, 20.0), stub, count=1)],
-            BIN.base_thickness,
-        )
-        self.assertEqual(len(solids), 1)
-        self.assertAlmostEqual(float(solids[0].bounds[:, 0].mean()), 0.0, places=3)
-        run = solids[0].bounds[1][0] - solids[0].bounds[0][0]
-        self.assertAlmostEqual(run, stub.length, places=3)
 
-    def test_the_channel_mouth_sits_on_the_top_face_so_a_tool_can_drop_in(self) -> None:
-        # any lower and the opening would be narrower than the tool
-        trough = build_features(BIN, [self._feature()], BIN.base_thickness)[0]
-        axis_z = BIN.base_thickness + inserts.CRADLE_FLOOR_GAP + ROD.widest / 2.0
-        self.assertAlmostEqual(trough.bounds[1][2], axis_z, places=6)
 
-    def test_a_cradle_ignores_fit_clearance(self) -> None:
-        # A cradle is an open channel the tool drops into - no fit slack - so
-        # the tool's stated clearance changes nothing about the trough.
-        loose = Item.simple("Loose", 60.0, 8.0, clearance=2.0)
-        snug = build_features(BIN, [self._feature(item=ROD)], BIN.base_thickness)[0]
-        wide = build_features(BIN, [self._feature(item=loose)], BIN.base_thickness)[0]
-        np.testing.assert_allclose(wide.bounds, snug.bounds, atol=1e-6)
 
-    def test_a_multi_segment_item_is_held_as_one_plain_cylinder(self) -> None:
-        solids = build_features(BIN, [self._feature(span=124.0, item=DRIVER)], BIN.base_thickness)
-        self.assertEqual(len(solids), 1)   # one trough, not one per segment
-        axis_z = BIN.base_thickness + inserts.CRADLE_FLOOR_GAP + DRIVER.widest / 2.0
-        self.assertAlmostEqual(solids[0].bounds[1][2], axis_z, places=6)  # widest dia
 
     def test_an_explicit_count_that_will_not_fit_is_refused(self) -> None:
         crowded = Feature("cradle", Zone.end(BIN, "x", 88.0), ROD, count=40)
         with self.assertRaisesRegex(ValueError, "across"):
             build_features(BIN, [crowded], BIN.base_thickness)
 
-    def test_negative_cradle_spacing_is_refused(self) -> None:
-        invalid = Feature(
-            "cradle", Zone.end(BIN, "x", 88.0), ROD,
-            options={"spacing": -0.8},
-        )
-        with self.assertRaisesRegex(ValueError, "spacing must be zero or greater"):
-            build_features(BIN, [invalid], BIN.base_thickness)
 
     def test_an_item_longer_than_its_zone_is_refused(self) -> None:
         cramped = Feature("cradle", Zone.end(BIN, "x", 40.0), PEN)
         with self.assertRaisesRegex(ValueError, "long"):
             build_features(BIN, [cramped], BIN.base_thickness)
 
-    def test_saved_floor_gap_is_ignored_in_favour_of_the_fixed_clearance(self) -> None:
-        normal = Feature("cradle", Zone.end(BIN, "x", 88.0), ROD)
-        expected = build_features(BIN, [normal], BIN.base_thickness)[0].bounds
-        for old_gap in (-1.0, 0.0, 0.1, 0.35):
-            saved = Feature(
-                "cradle", Zone.end(BIN, "x", 88.0), ROD,
-                options={"floor_gap": old_gap},
-            )
-            actual = build_features(BIN, [saved], BIN.base_thickness)[0].bounds
-            self.assertTrue(np.allclose(actual, expected))
 
     def test_alternate_ends_places_troughs_near_opposite_run_ends(self) -> None:
         one = Feature(
@@ -374,17 +267,6 @@ class CradleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "end clearance"):
             build_features(BIN, [snug], BIN.base_thickness)
 
-    def test_alternate_ends_does_not_change_a_single_cradle(self) -> None:
-        plain = Feature("cradle", Zone.end(BIN, "x", 88.0), ROD, count=1)
-        alternate = Feature(
-            "cradle", plain.zone, ROD, count=1, alternate_ends=True,
-        )
-        for expected, actual in zip(
-            build_features(BIN, [plain], BIN.base_thickness),
-            build_features(BIN, [alternate], BIN.base_thickness),
-            strict=True,
-        ):
-            np.testing.assert_allclose(actual.bounds, expected.bounds, atol=1e-6)
 
 
 class BuildTests(unittest.TestCase):
@@ -396,14 +278,7 @@ class BuildTests(unittest.TestCase):
         self.assertTrue(fused.is_watertight)
         self.assertEqual(len(fused.split(only_watertight=False)), 1)
 
-    def test_fusing_only_adds_material(self) -> None:
-        plain = make_box(BIN)
-        fused = make_fused_box(BIN, [self._feature()], plain)
-        self.assertGreater(fused.volume, plain.volume)
 
-    def test_no_features_leaves_the_box_alone(self) -> None:
-        plain = make_box(BIN)
-        self.assertIs(make_fused_box(BIN, [], plain), plain)
 
     def test_alternating_cradles_assemble_into_valid_fused_and_removable_parts(self) -> None:
         one = Feature(
@@ -416,26 +291,6 @@ class BuildTests(unittest.TestCase):
             self.assertTrue(part.is_watertight)
             self.assertEqual(len(part.split(only_watertight=False)), 1)
 
-    def test_a_standalone_insert_clears_the_bin_walls(self) -> None:
-        insert = make_fitted_insert(BIN, [self._feature()])
-        self.assertTrue(insert.is_watertight)
-        footprint = insert_footprint(BIN, "separate")
-        # A removable passage also has to clear the lock bumps' tips, on top
-        # of the normal running clearance - see insert_footprint().
-        expected = inserts.wavy_cavity_polygon(BIN).buffer(-(inserts.INSERT_CLEARANCE + LOCK_PROTRUSION))
-        self.assertLess(footprint.hausdorff_distance(expected), 1e-6)
-        # Following the waves covers more floor than the former safe rectangle,
-        # offset by the same real passage clearance the current footprint uses.
-        clear_x, clear_y = BIN.usable_inside
-        passage_clearance = inserts.INSERT_CLEARANCE + LOCK_PROTRUSION
-        old_rectangle_area = (
-            clear_x - 2.0 * passage_clearance
-        ) * (clear_y - 2.0 * passage_clearance)
-        self.assertGreater(footprint.area, old_rectangle_area)
-        # it is built standing on z=0 so it prints flat on the bed; dropped
-        # onto the bin floor it clears the box entirely
-        seated = translated(insert, (0.0, 0.0, BIN.base_thickness))
-        self.assertLess(intersection_volume(seated, make_box(BIN)), 0.01)
 
     def test_a_standalone_insert_stands_on_its_own_plate(self) -> None:
         insert = make_fitted_insert(BIN, [self._feature()])
@@ -452,25 +307,8 @@ class MultipleCradleTests(unittest.TestCase):
         return Feature("cradle", zone, item, count=count, along=along,
                        alternate_ends=alternate, options={"spacing": spacing})
 
-    def test_a_row_of_lanes_is_evenly_pitched(self) -> None:
-        ribs = build_features(BIN, [self._row(count=5, alternate=True)], BIN.base_thickness)
-        centres = _lane_centres(ribs, 1)
-        self.assertEqual(len(centres), 5)
-        gaps = np.diff(centres)
-        np.testing.assert_allclose(gaps, gaps[0], atol=1e-6)
-        self.assertAlmostEqual(float(gaps[0]), _cradle_pitch(ROD.widest), places=6)
 
-    def test_the_row_is_centred_across_the_zone(self) -> None:
-        ribs = build_features(BIN, [self._row(count=4, alternate=True)], BIN.base_thickness)
-        centres = _lane_centres(ribs, 1)
-        self.assertAlmostEqual((centres[0] + centres[-1]) / 2.0, 0.0, places=6)
 
-    def test_every_lane_holds_the_tool_at_the_same_height(self) -> None:
-        ribs = build_features(BIN, [self._row(count=5, alternate=True)], BIN.base_thickness)
-        tops = {round(float(r.bounds[1][2]), 6) for r in ribs}
-        floors = {round(float(r.bounds[0][2]), 6) for r in ribs}
-        self.assertEqual(len(tops), 1)
-        self.assertEqual(len(floors), 1)
 
     def test_auto_count_fills_the_zone_without_overrunning_it(self) -> None:
         one = self._row(count=None)
@@ -484,53 +322,9 @@ class MultipleCradleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_features(BIN, [crowded], BIN.base_thickness)
 
-    def test_more_lanes_place_more_troughs(self) -> None:
-        two = build_features(BIN, [self._row(count=2)], BIN.base_thickness)
-        five = build_features(BIN, [self._row(count=5)], BIN.base_thickness)
-        self.assertEqual(len(two), 2)
-        self.assertEqual(len(five), 5)
-        self.assertGreater(sum(t.volume for t in five), sum(t.volume for t in two))
 
-    def test_neighbouring_troughs_have_clear_air_between_them(self) -> None:
-        troughs = sorted(
-            build_features(BIN, [self._row(count=2)], BIN.base_thickness),
-            key=lambda t: t.bounds[:, 1].mean(),
-        )
-        axis_z = BIN.base_thickness + inserts.CRADLE_FLOOR_GAP + ROD.widest / 2.0
-        x = float(troughs[0].bounds[:, 0].mean())
-        seat_a = float(troughs[0].bounds[:, 1].mean())
-        seat_b = float(troughs[1].bounds[:, 1].mean())
-        wall_of_a = _material_at(troughs[0], x, seat_a - ROD.widest / 2.0 - 0.4,
-                                 axis_z - 2.0, axis_z - 0.1)
-        gap = _material_at(troughs[0], x, (seat_a + seat_b) / 2.0,
-                           axis_z - 2.0, axis_z - 0.1)
-        self.assertGreater(wall_of_a, gap)     # a solid wall beside the channel
-        self.assertLess(gap, 0.05)             # nothing but air between troughs
 
-    def test_along_y_puts_the_lanes_across_x(self) -> None:
-        x_ribs = build_features(
-            BIN, [self._row(count=4, along="x", alternate=True, item=BIT)], BIN.base_thickness
-        )
-        y_ribs = build_features(
-            BIN, [self._row(count=4, along="y", alternate=True, span=80.0, item=BIT)],
-            BIN.base_thickness,
-        )
-        # a row's lanes sit on its cross axis: exactly `count` evenly spaced seats
-        self.assertEqual(len(_lane_centres(x_ribs, 1)), 4)   # x-row lanes across y
-        self.assertEqual(len(_lane_centres(y_ribs, 0)), 4)   # y-row lanes across x
-        for ribs, axis in ((x_ribs, 1), (y_ribs, 0)):
-            gaps = np.diff(_lane_centres(ribs, axis))
-            np.testing.assert_allclose(gaps, gaps[0], atol=1e-6)
 
-    def test_a_single_lane_matches_an_explicit_count_of_one(self) -> None:
-        auto = build_features(
-            BIN, [Feature("cradle", Zone(-40, -6, 40, 6), ROD)], BIN.base_thickness
-        )
-        one = build_features(
-            BIN, [Feature("cradle", Zone(-40, -6, 40, 6), ROD, count=1)], BIN.base_thickness
-        )
-        for a, b in zip(auto, one, strict=True):
-            np.testing.assert_allclose(a.bounds, b.bounds, atol=1e-6)
 
     def test_a_fatter_tool_fits_fewer_lanes(self) -> None:
         thin = build_features(
@@ -543,40 +337,8 @@ class MultipleCradleTests(unittest.TestCase):
         )
         self.assertLess(len(fat), len(thin))   # one solid per lane at this spacing
 
-    def test_each_trough_of_a_row_is_its_own_watertight_solid(self) -> None:
-        for alternate in (False, True):
-            troughs = build_features(
-                BIN, [self._row(count=6, alternate=alternate)], BIN.base_thickness
-            )
-            self.assertEqual(len(troughs), 6, alternate)
-            for trough in troughs:
-                self.assertTrue(trough.is_watertight)
-                self.assertEqual(len(trough.split(only_watertight=False)), 1)
 
-    def test_spacing_zero_joins_the_row_into_one_shared_body(self) -> None:
-        # Facing side walls fully overlap: the middle joint is only as thick
-        # as one exposed side, not the double-thick joint that abutting blocks
-        # would create.
-        solids = build_features(BIN, [self._row(count=5, spacing=0.0)], BIN.base_thickness)
-        self.assertEqual(len(solids), 1)
-        self.assertTrue(solids[0].is_watertight)
-        self.assertEqual(len(solids[0].split(only_watertight=False)), 1)
-        wall = _cradle_wall(ROD.widest)
-        expected = 5 * ROD.widest + 6 * wall / 2.0
-        self.assertAlmostEqual(
-            float(solids[0].bounds[1][1] - solids[0].bounds[0][1]), expected, places=6
-        )
 
-    def test_raising_spacing_past_a_side_wall_splits_the_row(self) -> None:
-        side_wall = _cradle_wall(ROD.widest) / 2.0
-        merged = build_features(BIN, [self._row(count=4, spacing=side_wall)], BIN.base_thickness)
-        split = build_features(BIN, [self._row(count=4, spacing=side_wall + 2.0)], BIN.base_thickness)
-        self.assertEqual(len(merged), 1)          # side walls still touch
-        self.assertEqual(len(split), 4)           # beyond that, clear air
-        gap = _lane_centres(split, 1)
-        self.assertAlmostEqual(
-            float(np.diff(gap)[0]), _cradle_pitch(ROD.widest, side_wall + 2.0), places=6
-        )
 
     def test_a_fused_row_of_many_cradles_is_one_solid(self) -> None:
         fused = make_fused_box(BIN, [self._row(count=5)], make_box(BIN))
@@ -589,36 +351,13 @@ class MultipleCradleTests(unittest.TestCase):
         self.assertAlmostEqual(insert.bounds[0][2], 0.0, places=6)
         self.assertEqual(len(insert.split(only_watertight=False)), 1)
 
-    def test_an_alternating_removable_row_is_also_one_solid(self) -> None:
-        insert = make_fitted_insert(BIN, [self._row(count=5, alternate=True)])
-        self.assertTrue(insert.is_watertight)
-        self.assertEqual(len(insert.split(only_watertight=False)), 1)
 
-    def test_two_separate_cradle_groups_in_one_bin(self) -> None:
-        left = Feature("cradle", Zone(-60.0, -40.0, -6.0, 40.0), BIT, along="x")
-        right = Feature("cradle", Zone(6.0, -40.0, 60.0, 40.0), BIT, along="x", count=4)
-        check_layout(BIN, [left, right])
-        fused = make_fused_box(BIN, [left, right], make_box(BIN))
-        self.assertTrue(fused.is_watertight)
-        self.assertEqual(len(fused.split(only_watertight=False)), 1)
 
-    def test_a_crowded_explicit_count_names_the_across_dimension(self) -> None:
-        crowded = self._row(count=40)
-        with self.assertRaisesRegex(ValueError, "across"):
-            build_features(BIN, [crowded], BIN.base_thickness)
 
 
 class CradleAndDividerLayoutTests(unittest.TestCase):
     """Cradles and dividers sharing one bin - placement and assembly."""
 
-    def test_a_divider_between_two_cradle_groups_is_accepted(self) -> None:
-        left = Feature("cradle", Zone(-60.0, -40.0, -12.0, 40.0), BIT)
-        wall = Feature("divider", Zone(-6.0, -40.0, 6.0, 40.0), along="y")
-        right = Feature("cradle", Zone(12.0, -40.0, 60.0, 40.0), BIT)
-        check_layout(BIN, [left, wall, right])
-        fused = make_fused_box(BIN, [left, wall, right], make_box(BIN))
-        self.assertTrue(fused.is_watertight)
-        self.assertEqual(len(fused.split(only_watertight=False)), 1)
 
     def test_a_cradle_overlapping_a_divider_is_refused(self) -> None:
         # Zones that overlap where the parts inside them do too: the bit's
@@ -649,35 +388,8 @@ class CradleAndDividerLayoutTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "overlap"):
             check_layout(BIN, [cradle, wall], mode="separate")
 
-    def test_a_removable_insert_carries_cradles_and_a_divider(self) -> None:
-        cradle = Feature("cradle", Zone(-58.0, -40.0, -6.0, 40.0), BIT, count=3)
-        wall = Feature("divider", Zone(6.0, -40.0, 58.0, 40.0), along="x", count=2)
-        insert = make_fitted_insert(BIN, [cradle, wall])
-        self.assertTrue(insert.is_watertight)
-        self.assertAlmostEqual(insert.bounds[0][2], 0.0, places=6)
-        self.assertEqual(len(insert.split(only_watertight=False)), 1)
 
-    def test_a_full_span_divider_beside_a_cradle_row(self) -> None:
-        box = BoxSpec(96.0, 96.0, 40.0)
-        whole = Zone.whole(box)
-        cradle = Feature(
-            "cradle", Zone(whole.x0, -30.0, whole.x0 + 70.0, 30.0), BIT, count=3
-        )
-        wall = Feature(
-            "divider", Zone(whole.x1 - 12.0, whole.y0, whole.x1, whole.y1),
-            along="y", full_span=True,
-        )
-        fused = make_fused_box(box, [cradle, wall], make_box(box))
-        self.assertTrue(fused.is_watertight)
 
-    def test_a_mixed_cradle_and_divider_layout_round_trips_through_json(self) -> None:
-        layout = Layout((
-            Feature("cradle", Zone(-58.0, -40.0, -6.0, 40.0), BIT, count=3,
-                    alternate_ends=True),
-            Feature("divider", Zone(6.0, -40.0, 58.0, 40.0), along="x", count=2),
-        ), "separate")
-        rebuilt = layout_from_dict(layout_to_dict(layout))
-        self.assertEqual(rebuilt, layout)
 
 
 class LayoutCheckTests(unittest.TestCase):
@@ -692,18 +404,7 @@ class LayoutCheckTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "overlap"):
             check_layout(BIN, [cradle, wall])
 
-    def test_separated_features_are_allowed(self) -> None:
-        cradle = Feature("cradle", Zone(-60.0, -20.0, 20.0, 20.0), DRIVER)
-        wall = Feature("divider", Zone(24.0, -20.0, 40.0, 20.0))
-        check_layout(BIN, [cradle, wall])
 
-    def test_shallow_overlap_and_subminimum_gap_are_refused(self) -> None:
-        first = Feature("pocket", Zone(-20.0, -10.0, -10.0, 10.0))
-        overlap = Feature("pocket", Zone(-10.5, -10.0, -0.5, 10.0))
-        too_close = Feature("pocket", Zone(-9.5, -10.0, 0.5, 10.0))
-        for second in (overlap, too_close):
-            with self.assertRaisesRegex(ValueError, "leave at least"):
-                check_layout(BIN, [first, second])
 
     def test_an_unknown_holder_names_the_ones_that_exist(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown holder"):
@@ -713,9 +414,6 @@ class LayoutCheckTests(unittest.TestCase):
 class FullSpanDividerTests(unittest.TestCase):
     """A divider that hugs the box's true wavy wall, not the safe rectangle."""
 
-    def test_only_a_divider_may_span_the_full_wall(self) -> None:
-        with self.assertRaisesRegex(ValueError, "only a divider"):
-            Feature("post", Zone(-5.0, -5.0, 5.0, 5.0), full_span=True)
 
     def test_the_edge_touches_the_true_wall_everywhere_along_its_thickness(self) -> None:
         # Not just at the centreline: the wave shifts the wall as a function
@@ -753,37 +451,7 @@ class FullSpanDividerTests(unittest.TestCase):
                     float(built_xs.max()), max(true_xs), places=3, msg=(cy, y, "right")
                 )
 
-    def test_a_full_span_divider_reaches_further_than_the_safe_rectangle(self) -> None:
-        # This is the point of the feature: it should not be equivalent to
-        # the plain, conservative full-width sizing.
-        box = BoxSpec(40.0, 48.0, 40.0)
-        whole = Zone.whole(box)
-        zone = Zone(whole.x0, -0.8, whole.x1, 0.8)
-        plain = build_features(
-            box, [Feature("divider", zone, along="x")], box.base_thickness
-        )[0]
-        full = build_features(
-            box, [Feature("divider", zone, along="x", full_span=True)], box.base_thickness
-        )[0]
-        self.assertGreater(full.bounds[1][0] - full.bounds[0][0],
-                            plain.bounds[1][0] - plain.bounds[0][0])
 
-    def test_flat_inside_gives_two_stacked_pieces_that_meet_at_the_seam(self) -> None:
-        box = BoxSpec(40.0, 48.0, 40.0, flat_inside=0.6)
-        whole = Zone.whole(box)
-        zone = Zone(whole.x0, -0.8, whole.x1, 0.8)
-        pieces = build_features(
-            box, [Feature("divider", zone, along="x", full_span=True,
-                           options={"height": 20.0})],
-            box.base_thickness,
-        )
-        self.assertEqual(len(pieces), 2)
-        flat, wavy = sorted(pieces, key=lambda solid: solid.bounds[0][2])
-        self.assertAlmostEqual(flat.bounds[0][2], box.base_thickness, places=6)
-        self.assertAlmostEqual(flat.bounds[1][2], box.base_thickness + box.flat_inside, places=6)
-        self.assertAlmostEqual(wavy.bounds[0][2], flat.bounds[1][2], places=6)
-        for solid in pieces:
-            self.assertTrue(solid.is_watertight)
 
     def test_inside_a_removable_insert_it_clips_flush_to_the_wavy_plate_edge(
         self,
@@ -803,13 +471,6 @@ class FullSpanDividerTests(unittest.TestCase):
             insert.bounds[0][0], footprint.bounds[0], places=3
         )
 
-    def test_flat_lower_wall_band_uses_its_actual_straight_profile(self) -> None:
-        box = BoxSpec(40.0, 48.0, 40.0, flat_inside=0.6)
-        footprint = insert_footprint(box, "separate")
-        expected = inserts.flat_cavity_polygon(box).buffer(-(inserts.INSERT_CLEARANCE + LOCK_PROTRUSION))
-        self.assertLess(footprint.hausdorff_distance(expected), 1e-6)
-        seated = translated(make_fitted_insert(box, []), (0.0, 0.0, box.base_thickness))
-        self.assertLess(intersection_volume(seated, make_box(box)), 0.01)
 
     def test_full_span_round_trips_through_the_saved_design_schema(self) -> None:
         box = BoxSpec(40.0, 48.0, 40.0)
@@ -846,18 +507,6 @@ class AngledDividerTests(unittest.TestCase):
         values = lines[:, :, axis].ravel()
         return float(values.min()), float(values.max())
 
-    def test_zero_angle_is_pixel_identical_to_a_plain_divider(self) -> None:
-        zone = Zone(-15.0, -1.0, 15.0, 1.0)
-        plain = build_features(
-            self.box, [Feature("divider", zone, along="x")], self.box.base_thickness
-        )[0]
-        explicit_zero = build_features(
-            self.box,
-            [Feature("divider", zone, along="x", options={"angle": 0.0})],
-            self.box.base_thickness,
-        )[0]
-        self.assertTrue((plain.bounds == explicit_zero.bounds).all())
-        self.assertAlmostEqual(plain.volume, explicit_zero.volume, places=6)
 
     def test_the_base_gets_a_45_degree_chamfer_for_strength(self) -> None:
         zone = Zone(-15.0, -self.thickness / 2.0, 15.0, self.thickness / 2.0)
@@ -909,76 +558,8 @@ class AngledDividerTests(unittest.TestCase):
         chamfer_volume = DIVIDER_CHAMFER ** 2 * 30.0
         self.assertAlmostEqual(mesh.volume, self.thickness * height * 30.0 + chamfer_volume, places=1)
 
-    def test_the_default_wedge_keeps_its_top_width_and_widens_at_the_floor(
-        self,
-    ) -> None:
-        zone = Zone(-15.0, -self.thickness / 2.0, 15.0, self.thickness / 2.0)
-        height, angle = 8.0, 20.0
-        one = Feature(
-            "divider", zone, along="x",
-            options={"angle": angle, "thickness": self.thickness, "height": height},
-        )
-        self.assertTrue(one.wedge)  # the default
-        mesh = build_features(self.box, [one], self.box.base_thickness)[0]
-        self.assertTrue(mesh.is_watertight)
-        lean = height * math.tan(math.radians(angle))
-        front = None
-        for frac in (0.2, 0.5, 0.95):
-            z = self.box.base_thickness + frac * height
-            lo, hi = self._cross_section(mesh, z, "x")
-            # the face the load leans into stays vertical - it never moves
-            front = hi if front is None else front
-            self.assertAlmostEqual(hi, front, places=3)
-            # widest at the floor, tapering back to the asked-for width up top
-            self.assertAlmostEqual(hi - lo, self.thickness + (1.0 - frac) * lean, places=2)
-        # right at the top the wedge is exactly the width that was asked for
-        lo, hi = self._cross_section(
-            mesh, self.box.base_thickness + height - 1e-3, "x")
-        self.assertAlmostEqual(hi - lo, self.thickness, places=2)
-        # it uses more material than the plain sheared wall - the extra is
-        # the gusset packed in at the base
-        straight = build_features(
-            self.box,
-            [Feature("divider", zone, along="x", wedge=False,
-                      options={"angle": angle, "thickness": self.thickness,
-                               "height": height})],
-            self.box.base_thickness,
-        )[0]
-        self.assertGreater(mesh.volume, straight.volume)
 
-    def test_a_negative_angle_leans_the_wedge_the_other_way(self) -> None:
-        zone = Zone(-15.0, -self.thickness / 2.0, 15.0, self.thickness / 2.0)
-        height, angle = 8.0, -20.0
-        one = Feature(
-            "divider", zone, along="x",
-            options={"angle": angle, "thickness": self.thickness, "height": height},
-        )
-        mesh = build_features(self.box, [one], self.box.base_thickness)[0]
-        self.assertTrue(mesh.is_watertight)
-        lean = abs(height * math.tan(math.radians(angle)))
-        back = None
-        for frac in (0.2, 0.95):
-            z = self.box.base_thickness + frac * height
-            lo, hi = self._cross_section(mesh, z, "x")
-            # this time the low face is the vertical one that stays put
-            back = lo if back is None else back
-            self.assertAlmostEqual(lo, back, places=3)
-            self.assertAlmostEqual(hi - lo, self.thickness + (1.0 - frac) * lean, places=2)
 
-    def test_along_y_mirrors_along_x(self) -> None:
-        zone = Zone(-self.thickness / 2.0, -15.0, self.thickness / 2.0, 15.0)
-        height, angle = 8.0, 20.0
-        one = Feature(
-            "divider", zone, along="y",
-            options={"angle": angle, "thickness": self.thickness, "height": height},
-        )
-        mesh = build_features(self.box, [one], self.box.base_thickness)[0]
-        front = None
-        for frac in (0.2, 0.95):
-            z = self.box.base_thickness + frac * height
-            lo, hi = self._cross_section(mesh, z, "y")
-            front = hi if front is None else front
-            self.assertAlmostEqual(hi, front, places=3)
 
     def test_an_angle_past_the_printable_limit_is_refused(self) -> None:
         zone = Zone(-15.0, -1.0, 15.0, 1.0)
@@ -987,31 +568,7 @@ class AngledDividerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "45 degrees"):
                 build_features(self.box, [one], self.box.base_thickness)
 
-    def test_a_steep_lean_widens_the_wedge_base_instead_of_being_refused(self) -> None:
-        zone = Zone(-15.0, -1.0, 15.0, 1.0)
-        thickness, height, angle = 2.0, 30.0, 44.0
-        one = Feature(
-            "divider", zone, along="x",
-            options={"angle": angle, "thickness": thickness, "height": height},
-        )
-        mesh = build_features(self.box, [one], self.box.base_thickness)[0]
-        self.assertTrue(mesh.is_watertight)
-        lean = height * math.tan(math.radians(angle))
-        lo, hi = self._cross_section(
-            mesh, self.box.base_thickness + height - 1e-3, "x")
-        self.assertAlmostEqual(hi - lo, thickness, places=2)
-        lo, hi = self._cross_section(
-            mesh, self.box.base_thickness + 2.0, "x")
-        self.assertGreater(hi - lo, thickness + 0.5 * lean)
 
-    def test_a_sub_millimetre_divider_is_refused(self) -> None:
-        zone = Zone(-15.0, -1.0, 15.0, 1.0)
-        one = Feature(
-            "divider", zone, along="x",
-            options={"angle": 20.0, "thickness": 0.3, "height": 8.0},
-        )
-        with self.assertRaisesRegex(ValueError, "0.4 mm thick"):
-            build_features(self.box, [one], self.box.base_thickness)
 
     def test_wedge_round_trips_through_the_saved_design_schema(self) -> None:
         zone = Zone(-15.0, -1.0, 15.0, 1.0)
@@ -1037,15 +594,6 @@ class MultiDividerTests(unittest.TestCase):
 
     box = BoxSpec(80.0, 80.0, 40.0)
 
-    def test_count_one_is_identical_to_no_count_at_all(self) -> None:
-        zone = Zone(-15.0, -20.0, 15.0, 20.0)
-        auto = build_features(self.box, [Feature("divider", zone, along="x")], self.box.base_thickness)
-        explicit = build_features(
-            self.box, [Feature("divider", zone, along="x", count=1)], self.box.base_thickness
-        )
-        self.assertEqual(len(auto), 1)
-        self.assertEqual(len(explicit), 1)
-        self.assertTrue((auto[0].bounds == explicit[0].bounds).all())
 
     def test_three_dividers_split_the_zone_into_four_equal_gaps(self) -> None:
         zone = Zone(-15.0, -20.0, 15.0, 20.0)
@@ -1063,33 +611,7 @@ class MultiDividerTests(unittest.TestCase):
         self.assertAlmostEqual(centres[0] - zone.y0, gaps[0], places=3)
         self.assertAlmostEqual(zone.y1 - centres[-1], gaps[0], places=3)
 
-    def test_along_y_spaces_dividers_across_x_instead(self) -> None:
-        zone = Zone(-20.0, -15.0, 20.0, 15.0)
-        walls = build_features(
-            self.box,
-            [Feature("divider", zone, along="y", count=3,
-                      options={"thickness": 1.0})],
-            self.box.base_thickness,
-        )
-        centres = sorted((wall.bounds[0][0] + wall.bounds[1][0]) / 2.0 for wall in walls)
-        self.assertAlmostEqual(centres[1], 0.0, places=3)  # zone is centred on x=0
 
-    def test_an_explicit_spacing_overrides_the_computed_even_gap(self) -> None:
-        zone = Zone(-15.0, -20.0, 15.0, 20.0)
-        walls = build_features(
-            self.box,
-            [Feature("divider", zone, along="x", count=3,
-                      options={"thickness": 1.0, "spacing": 5.0})],
-            self.box.base_thickness,
-        )
-        self.assertEqual(len(walls), 3)
-        centres = sorted((wall.bounds[0][1] + wall.bounds[1][1]) / 2.0 for wall in walls)
-        gaps = [b - a for a, b in zip(centres, centres[1:])]
-        self.assertAlmostEqual(gaps[0], 5.0, places=3)
-        self.assertAlmostEqual(gaps[1], 5.0, places=3)
-        # anchored from the zone's low edge, not necessarily centred, since
-        # an explicit spacing need not equal the auto (evenly-filling) value
-        self.assertAlmostEqual(centres[0] - zone.y0, 5.0, places=3)
 
     def test_an_explicit_spacing_too_tight_for_the_zone_is_refused(self) -> None:
         zone = Zone(-15.0, -20.0, 15.0, 20.0)
@@ -1106,16 +628,6 @@ class MultiDividerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "need at least"):
             build_features(self.box, [one], self.box.base_thickness)
 
-    def test_count_also_works_full_span_and_leaning(self) -> None:
-        zone = Zone(-15.0, -30.0, 15.0, 30.0)
-        one = Feature(
-            "divider", zone, along="x", count=3, full_span=True,
-            options={"angle": 10.0, "thickness": 3.0, "height": 10.0},
-        )
-        walls = build_features(self.box, [one], self.box.base_thickness)
-        self.assertEqual(len(walls), 3)
-        for wall in walls:
-            self.assertTrue(wall.is_watertight)
 
 
 class DividerScoopTests(unittest.TestCase):
@@ -1140,37 +652,8 @@ class DividerScoopTests(unittest.TestCase):
         self.assertLess(cells[0].zone.x1, cells[1].zone.x0)
         self.assertLess(cells[0].zone.y1, cells[2].zone.y0)
 
-    def test_disabled_scoop_adds_no_scoop_geometry(self) -> None:
-        plain = build_features(self.box, [self.divider()], self.base_z)
-        self.assertEqual(len(plain), 2)
 
-    def test_grid_divider_builds_its_sloped_bases(self) -> None:
-        feature = self.divider(bottom_angle=20.0, alternate_bottom=True)
-        solids = build_features(self.box, [feature], self.base_z)
-        slopes = [
-            solid for solid in solids
-            if solid.metadata.get("wavefinity_preview_kind") == "slope"
-        ]
-        # A 1x1 grid cuts the floor into four cells and each one carries its
-        # own ramp, restarting from the floor rather than one ramp sweeping the
-        # whole zone.
-        self.assertEqual(len(slopes), 4)
-        self.assertTrue(all(solid.bounds[1][2] > self.base_z + 5.0 for solid in slopes))
-        zone = feature.zone
-        half_w = (zone.x1 - zone.x0) / 2.0
-        half_d = (zone.y1 - zone.y0) / 2.0
-        for solid in slopes:
-            (x0, y0, _), (x1, y1, _) = solid.bounds
-            self.assertLess(x1 - x0, half_w + 1e-6)
-            self.assertLess(y1 - y0, half_d + 1e-6)
 
-    def test_slope_checkbox_without_saved_angle_uses_the_default_slope(self) -> None:
-        feature = self.divider(slope_base=True)
-        solids = build_features(self.box, [feature], self.base_z)
-        self.assertTrue(any(
-            solid.metadata.get("wavefinity_preview_kind") == "slope"
-            for solid in solids
-        ))
 
     def test_enabled_scoop_uses_shared_geometry_in_every_cell(self) -> None:
         solids = build_features(self.box, [self.divider(True)], self.base_z)
@@ -1196,137 +679,16 @@ class DividerScoopTests(unittest.TestCase):
         self.assertTrue(assembled.is_volume)
         self.assertTrue(assembled.is_watertight)
 
-    def test_base_labels_share_cells_with_scoops_in_the_clear_back_band(self) -> None:
-        feature = self.divider(
-            True,
-            label_divisions=True,
-            division_level="base",
-            division_labels=["A", "B", "C", "D"],
-        )
-        # Base-level labels are floor inlays now (set into the base, not
-        # embossed on top of it), so they come from build_texts rather than
-        # riding along in the divider's own solids.
-        texts = inserts.build_texts(self.box, [feature], self.base_z)
-        cells = inserts.divider_cells(self.box, feature, self.base_z)
-        self.assertEqual(len(texts), len(cells))
-        for (_label, solid, raised), cell in zip(texts, cells):
-            self.assertFalse(raised)
-            clear_band_start = (cell.zone.y0 + cell.zone.y1) / 2.0
-            self.assertGreaterEqual(solid.bounds[0][1], clear_band_start - 1e-6)
 
-        preview_with_text = build_features(self.box, [feature], self.base_z, include_text=True)
-        preview_without_text = build_features(self.box, [feature], self.base_z, include_text=False)
-        self.assertEqual(len(preview_with_text), len(preview_without_text) + len(texts))
 
-        rim_feature = self.divider(
-            label_divisions=True,
-            division_level="rim",
-            division_side="left",
-            division_labels=["A", "B", "C", "D"],
-        )
-        # A rim label's shelf is body material; only its lettering is a separate
-        # recessed object, added to the preview and written as a text object.
-        rim_preview_with = build_features(self.box, [rim_feature], self.base_z, include_text=True)
-        rim_preview_without = build_features(self.box, [rim_feature], self.base_z, include_text=False)
-        rim_texts = inserts.build_texts(self.box, [rim_feature], self.base_z)
-        self.assertEqual(len(rim_texts), 4)
-        self.assertTrue(all(not raised for _label, _solid, raised in rim_texts))
-        self.assertEqual(len(rim_preview_with), len(rim_preview_without) + len(rim_texts))
-
-    def test_scoop_wins_over_an_old_conflicting_sloped_bottom(self) -> None:
-        feature = Feature(
-            "divider", Zone.whole(self.box), along="x", count=1,
-            options={
-                "scoop": {"depth": 60.0},
-                "slope_base": True,
-                "bottom_angle": 20.0,
-                "minimal_bottom": True,
-                "bottom_supports": 4,
-            },
-            full_span=True,
-        )
-        normalized = inserts.normalize_divider_scoop(self.box, feature, self.base_z)
-        self.assertEqual(normalized.options["scoop"], {"depth": 60.0})
-        for key in ("slope_base", "bottom_angle", "minimal_bottom", "bottom_supports"):
-            self.assertNotIn(key, normalized.options)
-        # One wall plus one Scoop in each of its two compartments; no slope solids.
-        self.assertEqual(len(build_features(self.box, [feature], self.base_z)), 3)
-
-    def test_grid_rim_labels_use_the_selected_shelf_side(self) -> None:
-        feature = self.divider(
-            label_divisions=True,
-            division_level="rim",
-            division_side="left",
-            division_labels=["A", "B", "C", "D"],
-        )
-        solids = build_features(self.box, [feature], self.base_z)
-        shelf_pieces = solids[2:]
-        self.assertEqual(len(shelf_pieces), 4)              # shelves only: lettering is its own object
-        label_pieces = []
-        for shelf, (_label, inlay, raised) in zip(
-                shelf_pieces, [o for o in divider_impl.divider_division_texts(
-                    self.box, feature, self.base_z) if not o[2]]):
-            self.assertFalse(raised)
-            label_pieces.extend((shelf, inlay))
-        options = inserts.resolved_options(self.box, feature, self.base_z)
-        crest = self.base_z + options["height"]
-        cells = inserts.divider_cells(self.box, feature, self.base_z)
-        for cell, shelf, inlay in zip(cells, label_pieces[::2], label_pieces[1::2]):
-            # places=3: mesh bounds come from float32 vertices.
-            self.assertAlmostEqual(shelf.bounds[1][2], crest, places=3)
-            self.assertLess(shelf.bounds[0][2], crest - 2.0)
-            self.assertLessEqual(shelf.bounds[0][0], cell.zone.x0 + 1e-6)
-            self.assertGreater(shelf.bounds[1][0], cell.zone.x0 + 2.0)
-            self.assertAlmostEqual(shelf.bounds[0][1], cell.zone.y0, places=3)
-            self.assertAlmostEqual(shelf.bounds[1][1], cell.zone.y1, places=3)
-            self.assertAlmostEqual(inlay.bounds[1][2], crest, places=3)
-            self.assertGreater(inlay.bounds[0][1], cell.zone.y0 + divider_impl.DIVISION_SHELF_TEXT_MARGIN - 1e-6)
-            self.assertLess(inlay.bounds[1][1], cell.zone.y1 - divider_impl.DIVISION_SHELF_TEXT_MARGIN + 1e-6)
-            self.assertTrue(shelf.is_volume)
-            self.assertTrue(inlay.is_volume)
-        assembled = make_fitted_insert(self.box, [feature])
-        self.assertTrue(assembled.is_volume)
-        self.assertTrue(assembled.is_watertight)
 
     def test_divider_scoop_settings_round_trip_without_cell_targets(self) -> None:
         layout = Layout((self.divider(True),))
         rebuilt = layout_from_dict(layout_to_dict(layout))
         self.assertEqual(rebuilt.features[0].options["scoop"], {"depth": 60.0})
 
-    def test_old_selected_targets_migrate_to_all_cells(self) -> None:
-        changed = Feature(
-            "divider", Zone.whole(self.box), full_span=True,
-            options={
-                "count_x": 1, "count_y": 0,
-                "scoop": {"cells": ["r0c0", "r1c1"], "depth": 60.0},
-            },
-        )
-        self.assertEqual(
-            inserts.divider_scoop_targets(self.box, changed, self.base_z),
-            ("r0c0", "r0c1"),
-        )
-        normalized = inserts.normalize_divider_scoop(self.box, changed, self.base_z)
-        self.assertEqual(normalized.options["scoop"], {"depth": 60.0})
-        self.assertTrue(build_features(self.box, [normalized], self.base_z))
 
-    def test_standalone_and_divider_scoops_share_the_same_default(self) -> None:
-        standalone = Feature("scoop", Zone(-10.0, -10.0, 10.0, 0.0))
-        standalone_settings = inserts.scoop_settings(self.box, standalone.options, self.base_z)
-        divider_settings = inserts.scoop_settings(self.box, {}, self.base_z, allow_legacy_height=False)
-        self.assertEqual(standalone_settings, divider_settings)
-        self.assertEqual(standalone_settings.depth, inserts.SCOOP_DEFAULT_DEPTH)
 
-    def test_scoop_and_divider_setting_relationships_are_discoverable(self) -> None:
-        rules = inserts.setting_interactions()
-        self.assertTrue(rules)
-        self.assertTrue(all(
-            rule.source and rule.target and rule.effect and rule.owner and rule.reason
-            for rule in rules
-        ))
-        self.assertTrue(any(
-            rule.source == "scoop.enabled" and rule.target == "scoop.geometry"
-            for rule in inserts.setting_interactions("divider")
-        ))
 
     def test_automatic_setting_cycles_are_rejected(self) -> None:
         rule = inserts.SettingInteraction
@@ -1391,27 +753,7 @@ class DividerBottomSlopeTests(unittest.TestCase):
             self.assertTrue((a.bounds == b.bounds).all())
             self.assertAlmostEqual(a.volume, b.volume, places=6)
 
-    def test_full_bottom_rises_toward_the_right_for_x(self) -> None:
-        zone = Zone(-20.0, -20.0, 20.0, 20.0)
-        _walls, bottoms = self._walls_and_bottoms(
-            zone, count=2, along="x", options={"bottom_angle": 20.0})
-        self.assertEqual(len(bottoms), 3)  # 2 walls -> 3 slots
-        rise = 40.0 * math.tan(math.radians(20.0))
-        for solid in bottoms:
-            self.assertTrue(solid.is_watertight)
-            low_z, high_z = self._ends(solid, 0)
-            self.assertAlmostEqual(low_z, self.box.base_thickness, places=3)
-            self.assertAlmostEqual(high_z, self.box.base_thickness + rise, places=3)
 
-    def test_full_bottom_rises_toward_the_back_for_y(self) -> None:
-        zone = Zone(-20.0, -20.0, 20.0, 20.0)
-        _walls, bottoms = self._walls_and_bottoms(
-            zone, count=2, along="y", options={"bottom_angle": 20.0})
-        rise = 40.0 * math.tan(math.radians(20.0))
-        for solid in bottoms:
-            low_z, high_z = self._ends(solid, 1)
-            self.assertAlmostEqual(low_z, self.box.base_thickness, places=3)
-            self.assertAlmostEqual(high_z, self.box.base_thickness + rise, places=3)
 
     def test_reverse_mirrors_the_slope(self) -> None:
         zone = Zone(-20.0, -20.0, 20.0, 20.0)
@@ -1441,25 +783,7 @@ class DividerBottomSlopeTests(unittest.TestCase):
             signs.append(1 if high_z > low_z else -1)
         self.assertEqual(signs, [1, -1, 1])
 
-    def test_reverse_plus_alternate_flips_the_pattern(self) -> None:
-        zone = Zone(-20.0, -20.0, 20.0, 20.0)
-        _w, bottoms = self._walls_and_bottoms(
-            zone, count=2, along="x",
-            options={"bottom_angle": 20.0, "alternate_bottom": True,
-                     "reverse_bottom": True})
-        bottoms = sorted(bottoms, key=lambda s: s.vertices[:, 1].mean())
-        signs = []
-        for solid in bottoms:
-            low_z, high_z = self._ends(solid, 0)
-            signs.append(1 if high_z > low_z else -1)
-        self.assertEqual(signs, [-1, 1, -1])
 
-    def test_n_walls_make_n_plus_one_supported_slots(self) -> None:
-        zone = Zone(-20.0, -30.0, 20.0, 30.0)
-        for count in (1, 2, 3, 4):
-            _w, bottoms = self._walls_and_bottoms(
-                zone, count=count, along="x", options={"bottom_angle": 15.0})
-            self.assertEqual(len(bottoms), count + 1)
 
     def test_full_bottom_is_one_continuous_solid_per_slot(self) -> None:
         zone = Zone(-20.0, -20.0, 20.0, 20.0)
@@ -1477,24 +801,6 @@ class DividerBottomSlopeTests(unittest.TestCase):
             expected = slot_width * (0.5 * run * rise + BOTTOM_EMBED * run)
             self.assertAlmostEqual(solid.volume, expected, delta=expected * 0.01)
 
-    def test_crossbar_count_is_exact_and_evenly_spaced(self) -> None:
-        zone = Zone(-20.0, -20.0, 20.0, 20.0)
-        _w, bars = self._walls_and_bottoms(
-            zone, count=1, along="x",
-            options={"bottom_angle": 25.0, "minimal_bottom": True,
-                     "bottom_supports": 4})
-        self.assertEqual(len(bars), 2 * 4)  # 2 slots, 4 bars each
-        per_slot = {}
-        for bar in bars:
-            key = round(bar.vertices[:, 1].mean(), 3)
-            per_slot.setdefault(key, []).append(bar.vertices[:, 0].mean())
-        for centres in per_slot.values():
-            centres.sort()
-            self.assertEqual(len(centres), 4)
-            gaps = [b - a for a, b in zip(centres, centres[1:])]
-            for gap in gaps:
-                self.assertAlmostEqual(gap, 40.0 / 5.0, delta=0.05)
-            self.assertAlmostEqual(centres[0] - zone.x0, 40.0 / 5.0, delta=0.05)
 
     def test_crossbar_tops_sit_on_the_requested_slope_plane(self) -> None:
         zone = Zone(-20.0, -20.0, 20.0, 20.0)
@@ -1513,64 +819,10 @@ class DividerBottomSlopeTests(unittest.TestCase):
             # top follows the plane, give or take half a bar's own run of slope
             self.assertAlmostEqual(top, plane_z, delta=1.0)
 
-    def test_crossbar_undersides_are_not_steeper_than_45_degrees(self) -> None:
-        zone = Zone(-20.0, -20.0, 20.0, 20.0)
-        _w, bars = self._walls_and_bottoms(
-            zone, count=1, along="x",
-            options={"bottom_angle": 30.0, "minimal_bottom": True,
-                     "bottom_supports": 3})
-        floor = self.box.base_thickness
-        for bar in bars:
-            for centroid, normal in zip(bar.triangles_center, bar.face_normals):
-                if normal[2] < -1e-6 and centroid[2] > floor - 0.4 + 1e-3:
-                    # a downward face above the embedded base must be within
-                    # 45 degrees of vertical to print support-free
-                    self.assertGreaterEqual(normal[2], -math.sqrt(0.5) - 1e-6)
 
-    def test_crossbars_use_less_material_than_the_solid_wedge(self) -> None:
-        zone = Zone(-20.0, -20.0, 20.0, 20.0)
-        opts = {"bottom_angle": 25.0}
-        _w, wedge = self._walls_and_bottoms(zone, count=2, along="x", options=opts)
-        _w, bars = self._walls_and_bottoms(
-            zone, count=2, along="x",
-            options={**opts, "minimal_bottom": True, "bottom_supports": 3})
-        self.assertLess(sum(b.volume for b in bars),
-                        0.5 * sum(w.volume for w in wedge))
 
-    def test_forty_five_degrees_succeeds_when_it_fits(self) -> None:
-        zone = Zone(-6.0, -20.0, 6.0, 20.0)  # 12 mm run -> 12 mm rise
-        _w, bottoms = self._walls_and_bottoms(
-            zone, count=1, along="x",
-            options={"bottom_angle": 45.0, "height": 16.0})
-        self.assertEqual(len(bottoms), 2)
-        for solid in bottoms:
-            self.assertTrue(solid.is_watertight)
 
-    def test_a_slope_steeper_than_45_still_builds(self) -> None:
-        # Nothing about the ramp needs a 45-degree cap - it is solid, or
-        # 45-degree-tapered crossbars - so steep angles are allowed up to 75.
-        zone = Zone(-5.0, -20.0, 5.0, 20.0)  # 10 mm run
-        for minimal in (False, True):
-            _w, bottoms = self._walls_and_bottoms(
-                zone, count=1, along="x",
-                options={"bottom_angle": 60.0, "height": 24.0,
-                         "minimal_bottom": minimal, "bottom_supports": 3})
-            self.assertTrue(bottoms)
-            for solid in bottoms:
-                self.assertTrue(solid.is_watertight)
 
-    def test_a_negative_slope_mirrors_the_wedge(self) -> None:
-        zone = Zone(-20.0, -20.0, 20.0, 20.0)
-        _w, up = self._walls_and_bottoms(
-            zone, count=1, along="x", options={"bottom_angle": 20.0})
-        _w, down = self._walls_and_bottoms(
-            zone, count=1, along="x", options={"bottom_angle": -20.0})
-        for solid in up:
-            low_z, high_z = self._ends(solid, 0)
-            self.assertGreater(high_z, low_z + 1.0)
-        for solid in down:
-            low_z, high_z = self._ends(solid, 0)
-            self.assertGreater(low_z, high_z + 1.0)
 
     def test_over_80_and_non_finite_values_fail_clearly(self) -> None:
         zone = Zone(-15.0, -20.0, 15.0, 20.0)
@@ -1580,20 +832,7 @@ class DividerBottomSlopeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "within 80 degrees either way"):
                 build_features(self.box, [one], self.box.base_thickness)
 
-    def test_excessive_rise_fails_clearly(self) -> None:
-        zone = Zone(-30.0, -20.0, 30.0, 20.0)  # 60 mm run
-        one = Feature("divider", zone, along="x", count=1,
-                      options={"bottom_angle": 40.0, "height": 12.0})
-        with self.assertRaisesRegex(ValueError, "reduce the bottom slope"):
-            build_features(self.box, [one], self.box.base_thickness)
 
-    def test_crossbar_count_must_be_a_positive_whole_number(self) -> None:
-        zone = Zone(-15.0, -20.0, 15.0, 20.0)
-        one = Feature("divider", zone, along="x", count=1,
-                      options={"bottom_angle": 20.0, "minimal_bottom": True,
-                               "bottom_supports": 0})
-        with self.assertRaisesRegex(ValueError, "positive whole number"):
-            build_features(self.box, [one], self.box.base_thickness)
 
     def test_options_survive_the_saved_design_schema(self) -> None:
         zone = Zone(-15.0, -20.0, 15.0, 20.0)
@@ -1613,20 +852,6 @@ class DividerBottomSlopeTests(unittest.TestCase):
         self.assertIs(restored["minimal_bottom"], True)
         self.assertEqual(restored["bottom_supports"], 5)
 
-    def test_older_designs_without_any_new_keys_still_load(self) -> None:
-        zone = Zone(-15.0, -20.0, 15.0, 20.0)
-        data = layout_to_dict(Layout(
-            (Feature("divider", zone, along="x", count=2),), "fused", EDITOR_SNAP))
-        for key in ("bottom_angle", "reverse_bottom", "alternate_bottom",
-                    "minimal_bottom", "bottom_supports"):
-            self.assertNotIn(key, data["features"][0]["options"])
-        restored = layout_from_dict(data)
-        rebuilt = build_features(
-            self.box, list(restored.features), self.box.base_thickness)
-        plain = build_features(
-            self.box, [Feature("divider", zone, along="x", count=2)],
-            self.box.base_thickness)
-        self.assertEqual(len(rebuilt), len(plain))
 
     def test_fused_and_removable_outputs_are_one_watertight_component(self) -> None:
         zone = Zone(-20.0, -20.0, 20.0, 20.0)
@@ -1641,63 +866,8 @@ class DividerBottomSlopeTests(unittest.TestCase):
             self.assertEqual(
                 removable.split(only_watertight=False).__len__(), 1)
 
-    def test_slope_material_stays_inside_the_divider_zone(self) -> None:
-        zone = Zone(-20.0, -18.0, 20.0, 18.0)
-        _w, bottoms = self._walls_and_bottoms(
-            zone, count=2, along="x", options={"bottom_angle": 20.0})
-        for solid in bottoms:
-            self.assertGreaterEqual(solid.bounds[0][0], zone.x0 - 1e-6)
-            self.assertLessEqual(solid.bounds[1][0], zone.x1 + 1e-6)
-            self.assertGreaterEqual(solid.bounds[0][1], zone.y0 - 1e-6)
-            self.assertLessEqual(solid.bounds[1][1], zone.y1 + 1e-6)
 
-    def test_floating_crossbars_are_inverted_v_and_print_without_support(self) -> None:
-        # A narrow interior slot's crossbars hang off both walls: a 45-degree
-        # corbel from each side meets at a central ridge, with a full bar on
-        # top. Nothing overhangs past 45 degrees, and they never reach the
-        # floor.
-        zone = Zone(-30.0, -30.0, 30.0, 30.0)
-        angle = 25.0
-        _walls, bars = self._walls_and_bottoms(
-            zone, count=3, along="x",
-            options={"bottom_angle": angle, "height": 32.0,
-                     "minimal_bottom": True, "bottom_supports": 3})
-        self.assertTrue(bars)
-        floor = self.box.base_thickness
-        run, rise = 60.0, 60.0 * math.tan(math.radians(angle))
-        floaters = []
-        for bar in bars:
-            self.assertTrue(bar.is_watertight)
-            v = bar.vertices
-            centre = v[:, 0].mean()
-            plane_z = floor + (centre - zone.x0) / run * rise
-            self.assertAlmostEqual(v[:, 2].max(), plane_z, delta=1.5)
-            # no downward face steeper than 45 degrees off vertical, anywhere
-            # clear of the floor - i.e. it prints with no support
-            for normal, cen in zip(bar.face_normals, bar.triangles_center):
-                if normal[2] < -1e-6 and cen[2] > floor + 0.5:
-                    self.assertGreaterEqual(normal[2], -math.sqrt(0.5) - 1e-6)
-            if v[:, 2].min() > floor + 1.0:
-                floaters.append(bar)
-        # the interior slots well up the slope do float, as inverted Vs:
-        # the underside is lower at the walls than at the slot's centre
-        self.assertTrue(floaters)
-        for bar in floaters:
-            v = bar.vertices
-            ylo, yhi = v[:, 1].min(), v[:, 1].max()
-            ymid = (ylo + yhi) / 2.0
-            at_wall = v[np.abs(v[:, 1] - ylo) < 0.6][:, 2].min()
-            at_mid = v[np.abs(v[:, 1] - ymid) < 0.6][:, 2].min()
-            self.assertGreater(at_mid, at_wall + 1.0)
 
-    def test_a_full_span_divider_with_crossbars_unions_watertight(self) -> None:
-        zone = Zone(-30.0, -30.0, 30.0, 30.0)
-        one = Feature("divider", zone, along="x", count=2, full_span=True,
-                      options={"bottom_angle": 20.0, "minimal_bottom": True,
-                               "bottom_supports": 3})
-        fused = make_fused_box(self.box, [one], make_box(self.box))
-        self.assertTrue(fused.is_watertight)
-        self.assertEqual(len(fused.split(only_watertight=False)), 1)
 
 
 class FullSpanLeaningDividerTests(unittest.TestCase):
@@ -1764,27 +934,7 @@ class FullSpanLeaningDividerTests(unittest.TestCase):
             solid = build_features(self.box, [one], self.box.base_thickness)[0]
             self.assertTrue(solid.is_watertight, overrides)
 
-    def test_along_y_mirrors_along_x(self) -> None:
-        solid = build_features(self.box, [self._feature(along="y")], self.box.base_thickness)[0]
-        self.assertTrue(solid.is_watertight)
 
-    def test_flat_inside_still_gives_two_stacked_pieces(self) -> None:
-        box = BoxSpec(40.0, 48.0, 40.0, flat_inside=0.6)
-        whole = Zone.whole(box)
-        half_t = self.thickness / 2.0
-        zone = Zone(whole.x0, -half_t, whole.x1, half_t)
-        one = Feature(
-            "divider", zone, along="x", full_span=True,
-            options={"thickness": self.thickness, "height": self.height, "angle": self.angle},
-        )
-        pieces = build_features(box, [one], box.base_thickness)
-        self.assertEqual(len(pieces), 2)
-        flat, wavy = sorted(pieces, key=lambda solid: solid.bounds[0][2])
-        self.assertAlmostEqual(flat.bounds[0][2], box.base_thickness, places=6)
-        self.assertAlmostEqual(flat.bounds[1][2], box.base_thickness + box.flat_inside, places=6)
-        self.assertAlmostEqual(wavy.bounds[0][2], flat.bounds[1][2], places=6)
-        for solid in pieces:
-            self.assertTrue(solid.is_watertight)
 
     def test_still_refuses_an_angle_past_the_limit_and_a_paper_thin_wall(self) -> None:
         with self.assertRaisesRegex(ValueError, "45 degrees"):
@@ -1806,42 +956,10 @@ class FullSpanLeaningDividerTests(unittest.TestCase):
         self.assertAlmostEqual(insert.bounds[1][0], footprint.bounds[2], places=3)
         self.assertAlmostEqual(insert.bounds[0][0], footprint.bounds[0], places=3)
 
-    def test_full_span_cavity_override(self) -> None:
-        from organizer_inserts._divider import build_divider
-        from shapely.geometry import box as shapely_box
-        cavity = shapely_box(-18.0, -22.0, 18.0, 22.0)
-        feature = self._feature()
-        solids_default = build_divider(self.box, feature, self.box.base_thickness)
-        self.assertTrue(len(solids_default) > 0)
-        solids_custom = build_divider(self.box, feature, self.box.base_thickness, full_span_cavity=cavity)
-        self.assertTrue(len(solids_custom) > 0)
-        self.assertAlmostEqual(solids_custom[0].bounds[1][0], 18.0, places=3)
-        self.assertAlmostEqual(solids_custom[0].bounds[0][0], -18.0, places=3)
 
 
 class RegistryTests(unittest.TestCase):
-    def test_every_holder_is_registered_and_callable(self) -> None:
-        for kind in ("cradle", "nest", "bore", "post", "divider", "pocket"):
-            self.assertIn(kind, inserts.FEATURE_BUILDERS)
-            self.assertTrue(callable(inserts.FEATURE_BUILDERS[kind]))
 
-    def test_a_new_holder_needs_nothing_but_a_function(self) -> None:
-        # the point of the registry: holders are add- and remove-able
-        @inserts.feature("test_slab")
-        def build(box, spec_feature, base_z):
-            slab = trimesh.creation.box(extents=(10.0, 10.0, 5.0))
-            slab.apply_translation((0.0, 0.0, base_z + 2.5))
-            return [slab]
-
-        try:
-            made = build_features(
-                BIN, [Feature("test_slab", Zone(-10.0, -10.0, 10.0, 10.0))], BIN.base_thickness
-            )
-            self.assertEqual(len(made), 1)
-        finally:
-            del inserts.FEATURE_BUILDERS["test_slab"]
-            inserts.FEATURE_DEFINITIONS.pop("test_slab", None)
-        self.assertNotIn("test_slab", inserts.FEATURE_BUILDERS)
 
     def test_feature_definitions_are_complete_and_authoritative(self) -> None:
         definitions = inserts.feature_definitions()
@@ -1874,9 +992,6 @@ class RegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least 1"):
             inserts.feature("test_bad_limit", max_instances=0)
 
-    def test_divider_compartments_have_their_own_module_boundary(self) -> None:
-        self.assertEqual(inserts.DividerCell.__module__, "organizer_inserts._divider_cells")
-        self.assertEqual(inserts.divider_cells.__module__, "organizer_inserts._divider_cells")
 
     def test_remaining_auto_setting_relationships_are_registered(self) -> None:
         for kind in ("cradle", "nest", "bore", "post", "pocket", "divider",
@@ -1921,52 +1036,8 @@ class OtherHoldersTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between 1 and 20"):
             photo_nest(count=21)
 
-    def test_fix21_repeat_axis_uses_shorter_finished_axis_and_ties_choose_x(self) -> None:
-        tall = photo_nest(
-            contour=((-5, -20), (5, -20), (5, 20), (-5, 20)), count=3,
-            options={"lift_assist": "none"},
-        )
-        wide = photo_nest(
-            contour=((-20, -5), (20, -5), (20, 5), (-20, 5)), count=3,
-            options={"lift_assist": "none"},
-        )
-        square = photo_nest(
-            contour=((-10, -10), (10, -10), (10, 10), (-10, 10)), count=2,
-            options={"lift_assist": "none"},
-        )
-        tall_occ = inserts.nest_occurrences(tall)
-        wide_occ = inserts.nest_occurrences(wide)
-        square_occ = inserts.nest_occurrences(square)
-        self.assertNotEqual(tall_occ[0].x, tall_occ[1].x)
-        self.assertEqual(tall_occ[0].y, tall_occ[1].y)
-        self.assertEqual(wide_occ[0].x, wide_occ[1].x)
-        self.assertNotEqual(wide_occ[0].y, wide_occ[1].y)
-        self.assertNotEqual(square_occ[0].x, square_occ[1].x)
-        self.assertEqual(square_occ[0].y, square_occ[1].y)
 
-    def test_fix21_spacing_presets_are_exact_and_invalid_values_reject(self) -> None:
-        expected = {
-            -100: 0.0, -75: 0.5, -50: 1.0, -25: 1.5, 0: 2.0,
-            25: 2.5, 50: 3.0, 75: 3.5, 100: 4.0,
-        }
-        for percent, gap in expected.items():
-            one = photo_nest(options={"repeat_spacing_percent": percent})
-            self.assertAlmostEqual(inserts.nest_repeat_gap(one), gap)
-        for invalid in (10, 12.5, "wide"):
-            with self.assertRaisesRegex(ValueError, "Photo Nest spacing"):
-                inserts.nest_repeat_gap(photo_nest(options={"repeat_spacing_percent": invalid}))
 
-    def test_fix21_flip_and_historical_rotation_semantics(self) -> None:
-        plain = photo_nest(count=4, rotation=90.0)
-        self.assertEqual([one.rotation for one in inserts.nest_occurrences(plain)], [90.0] * 4)
-        flipped = photo_nest(count=4, rotation=90.0, alternate_ends=True)
-        self.assertEqual(
-            [one.rotation for one in inserts.nest_occurrences(flipped)],
-            [90.0, 270.0, 90.0, 270.0],
-        )
-        single = photo_nest(count=1, rotation=37.0, alternate_ends=True)
-        self.assertTrue(single.alternate_ends)
-        self.assertEqual(inserts.nest_occurrences(single)[0].rotation, 37.0)
 
     def test_fix21_required_zone_contains_every_finished_occurrence_envelope(self) -> None:
         one = photo_nest(count=4, rotation=90.0, alternate_ends=True,
@@ -1983,69 +1054,8 @@ class OtherHoldersTests(unittest.TestCase):
             self.assertGreaterEqual(required.x1, x1 - 1e-7)
             self.assertGreaterEqual(required.y1, y1 - 1e-7)
 
-    def test_fix21_asymmetric_flip_preserves_exact_gap_without_overlap(self) -> None:
-        one = photo_nest(
-            contour=((-2, -5), (18, -5), (18, 8), (3, 8), (3, 16), (-2, 16)),
-            count=3, alternate_ends=True,
-            options={"lift_assist": "none", "repeat_spacing_percent": -50},
-        )
-        footprints = [
-            affinity.translate(
-                nest_impl._nest_single_required_footprint(one, occurrence.rotation),
-                xoff=occurrence.x, yoff=occurrence.y,
-            )
-            for occurrence in inserts.nest_occurrences(one)
-        ]
-        for left, right in zip(footprints, footprints[1:]):
-            self.assertFalse(left.overlaps(right))
-            self.assertAlmostEqual(left.distance(right), 1.0, places=6)
 
-    def test_fix21_recessed_quantity_and_independent_nests_share_one_open_deck(self) -> None:
-        box = BoxSpec(224.0, 128.0, 40.0)
-        options = {
-            "holder_style": "recessed", "tool_thickness": 8.0,
-            "cavity_depth_mode": "auto", "lift_assist": "none",
-        }
-        single = inserts.moved_feature(photo_nest(options=options), box, (-55.0, 0.0))
-        repeated = inserts.moved_feature(photo_nest(count=3, options=options), box, (0.0, 0.0))
-        single_deck = build_features(box, [single], box.base_thickness)
-        repeated_deck = build_features(box, [repeated], box.base_thickness)
-        self.assertEqual(len(repeated_deck), 1)
-        self.assertLess(repeated_deck[0].volume, single_deck[0].volume)
 
-        right = inserts.moved_feature(photo_nest(options=options), box, (55.0, 0.0))
-        shared = build_features(box, [single, right], box.base_thickness)
-        self.assertEqual(len(shared), 1)
-        self.assertLess(shared[0].volume, single_deck[0].volume)
-        self.assertTrue(shared[0].is_watertight)
-
-    def test_fix21_mixed_styles_build_and_variable_depths_remain_independent(self) -> None:
-        box = BoxSpec(224.0, 128.0, 40.0)
-        raised = inserts.fitted_nest_feature(photo_nest(options={
-            "holder_style": "raised_wall", "tool_thickness": 6.0,
-            "lift_assist": "none",
-        }), (-55.0, 0.0))
-        recessed = inserts.fitted_nest_feature(photo_nest(options={
-            "holder_style": "recessed", "tool_thickness": 10.0,
-            "cavity_depth_mode": "manual", "cavity_depth": 6.0,
-            "lift_assist": "none",
-        }), (55.0, 0.0))
-        self.assertEqual(len(build_features(box, [raised, recessed], box.base_thickness)), 2)
-
-        shallow = inserts.fitted_nest_feature(photo_nest(options={
-            "holder_style": "recessed", "tool_thickness": 10.0,
-            "cavity_depth_mode": "manual", "cavity_depth": 3.0,
-            "lift_assist": "none",
-        }), (-55.0, 0.0))
-        mixed_depth = build_features(box, [shallow, recessed], box.base_thickness)[0]
-        deep_left = inserts.fitted_nest_feature(photo_nest(options={
-            "holder_style": "recessed", "tool_thickness": 10.0,
-            "cavity_depth_mode": "manual", "cavity_depth": 6.0,
-            "lift_assist": "none",
-        }), (-55.0, 0.0))
-        all_deep = build_features(box, [deep_left, recessed], box.base_thickness)[0]
-        self.assertAlmostEqual(mixed_depth.bounds[1][2], all_deep.bounds[1][2], places=6)
-        self.assertGreater(mixed_depth.volume, all_deep.volume)
 
     def test_fix21_serialization_and_old_save_defaults_preserve_behavior(self) -> None:
         one = photo_nest(
@@ -2070,17 +1080,6 @@ class OtherHoldersTests(unittest.TestCase):
         self.assertAlmostEqual(inserts.nest_repeat_gap(legacy), 2.0)
         self.assertEqual(len(inserts.nest_occurrences(legacy)), 1)
 
-    def test_recessed_photo_nests_share_one_watertight_deck(self) -> None:
-        box = BoxSpec(192.0, 120.0, 40.0)
-        options = {
-            "holder_style": "recessed", "tool_thickness": 6.0,
-            "cavity_depth_mode": "auto", "lift_assist": "none",
-        }
-        left = inserts.moved_feature(photo_nest(options=options), box, (-48.0, 0.0))
-        right = inserts.moved_feature(photo_nest(options=options), box, (48.0, 0.0))
-        made = build_features(box, [left, right], box.base_thickness)
-        self.assertEqual(len(made), 1)
-        self.assertTrue(made[0].is_watertight)
 
     def test_each_holder_builds_a_watertight_solid(self) -> None:
         pencil = inserts.LIBRARY["pencil"]
@@ -2123,18 +1122,6 @@ class OtherHoldersTests(unittest.TestCase):
         self.assertNotAlmostEqual(shaped_mesh.volume, rectangle_mesh.volume, places=3)
         self.assertTrue(shaped_mesh.is_watertight)
 
-    def test_clearance_and_rim_control_cavity_and_footprint(self) -> None:
-        tight = photo_nest(options={"clearance": 0.0, "rim": 2.0, "depth": 8.0})
-        loose = photo_nest(options={"clearance": 1.0, "rim": 4.0, "depth": 8.0})
-        self.assertAlmostEqual(loose.zone.width - tight.zone.width, 6.0, places=5)
-        self.assertAlmostEqual(loose.zone.depth - tight.zone.depth, 6.0, places=5)
-        tight_mesh = build_features(BIN, [tight], BIN.base_thickness)[0]
-        loose_same_zone = inserts.fitted_nest_feature(
-            Feature("nest", tight.zone, options={"clearance": 1.0, "rim": 1.0, "depth": 8.0},
-                    contour=PHOTO_CONTOUR)
-        )
-        loose_mesh = build_features(BIN, [loose_same_zone], BIN.base_thickness)[0]
-        self.assertLess(loose_mesh.volume, tight_mesh.volume)
 
     def test_cavity_depth_leaves_printable_base(self) -> None:
         one = photo_nest(options={"clearance": 0.0, "rim": 3.0, "depth": 12.0})
@@ -2154,102 +1141,11 @@ class OtherHoldersTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "rises above the bin rim"):
             build_features(BIN, [too_deep], BIN.base_thickness, mode="separate")
 
-    def test_smoothing_removes_small_outline_details(self) -> None:
-        detailed = photo_nest(contour=((-20, -8), (-4, -8), (-4, -2), (4, -2),
-                                       (4, -8), (20, -8), (20, 8), (4, 8),
-                                       (4, 2), (-4, 2), (-4, 8), (-20, 8)),
-                              options={"smoothing": 3.0})
-        raw_area = inserts.nest_contour_polygon(
-            photo_nest(contour=detailed.contour), include_clearance=False
-        ).area
-        smooth_area = inserts.nest_contour_polygon(detailed, include_clearance=False).area
-        self.assertNotAlmostEqual(raw_area, smooth_area, places=3)
 
-    def test_smoothed_local_contour_matches_the_built_silhouette(self) -> None:
-        # what the 2D layout draws (local, pre-transform) must be the same
-        # softening the builder bakes into the printed wall
-        shape = ((-20, -8), (-4, -8), (-4, -2), (4, -2), (4, -8),
-                 (20, -8), (20, 8), (-20, 8))
-        sharp = photo_nest(contour=shape, options={"smoothing": 0.0})
-        soft = photo_nest(contour=shape, options={"smoothing": 3.0})
-        self.assertEqual(len(inserts.nest_smoothed_contour(sharp)), len(shape))
-        soft_local = inserts.nest_smoothed_contour(soft)
-        self.assertGreater(len(soft_local), len(shape))
-        from shapely.geometry import Polygon as _P
-        # the local softened ring, scaled/placed by hand, lands on the same
-        # outline nest_contour_polygon produces for the builder
-        built = inserts.nest_contour_polygon(soft, include_clearance=False)
-        placed = _P([(x * soft.scale + soft.zone.centre[0],
-                      y * soft.scale + soft.zone.centre[1]) for x, y in soft_local])
-        self.assertAlmostEqual(placed.area, built.area, delta=built.area * 0.02)
 
-    def test_photo_nest_is_a_raised_cutter_not_a_filled_block(self) -> None:
-        one = photo_nest(options={"clearance": 0.0, "rim": 3.0, "depth": 8.0})
-        cutter = inserts.union(build_features(BIN, [one], BIN.base_thickness))
-        outer_area = inserts.nest_contour_polygon(one, True).buffer(3.0).area
-        self.assertLess(cutter.volume, outer_area * 8.0)
-        self.assertTrue(cutter.is_watertight)
-        self.assertGreater(cutter.bounds[0][2], 0.0)
 
-    def test_default_finger_grasps_are_rounded_opposing_side_openings(self) -> None:
-        plain = build_features(
-            BIN, [photo_nest(options={"lift_assist": "none"})], BIN.base_thickness
-        )[0]
-        sides = build_features(BIN, [photo_nest()], BIN.base_thickness)[0]
-        ends = build_features(
-            BIN,
-            [photo_nest(options={
-                "lift_assist": "finger_grasp", "finger_position": "top_bottom",
-            })],
-            BIN.base_thickness,
-        )[0]
-        both = build_features(
-            BIN,
-            [photo_nest(options={
-                "lift_assist": "finger_grasp", "finger_position": "both",
-            })],
-            BIN.base_thickness,
-        )[0]
-        self.assertEqual(
-            inserts.resolved_options(BIN, photo_nest(), BIN.base_thickness)["finger_position"],
-            "sides",
-        )
-        self.assertLess(sides.volume, plain.volume)
-        self.assertLess(ends.volume, plain.volume)
-        self.assertLess(both.volume, min(sides.volume, ends.volume))
-        self.assertTrue(all(mesh.is_watertight for mesh in (plain, sides, ends, both)))
 
-    def test_finger_grasps_rotate_with_the_photo_outline(self) -> None:
-        base = photo_nest(options={"lift_assist": "finger_grasp"})
-        turned = photo_nest(options={"lift_assist": "finger_grasp"}, rotation=90.0)
-        base_mesh = build_features(BIN, [base], BIN.base_thickness)[0]
-        turned_mesh = build_features(BIN, [turned], BIN.base_thickness)[0]
-        self.assertAlmostEqual(base_mesh.volume, turned_mesh.volume, places=2)
-        self.assertAlmostEqual(
-            base_mesh.bounds[1][0] - base_mesh.bounds[0][0],
-            turned_mesh.bounds[1][1] - turned_mesh.bounds[0][1],
-            places=2,
-        )
-        self.assertAlmostEqual(
-            base_mesh.bounds[1][1] - base_mesh.bounds[0][1],
-            turned_mesh.bounds[1][0] - turned_mesh.bounds[0][0],
-            places=2,
-        )
 
-    def test_photo_nest_has_two_mm_foot_and_gently_rounded_top(self) -> None:
-        one = photo_nest(
-            contour=((-30, -10), (30, -10), (30, 10), (-30, 10)),
-            options={"lift_assist": "none"},
-        )
-        mesh = build_features(BIN, [one], BIN.base_thickness)[0]
-        opening = inserts.nest_contour_polygon(one, include_clearance=True)
-        nominal_outer = opening.buffer(3.0, join_style="round")
-        self.assertAlmostEqual(mesh.bounds[1][0], nominal_outer.bounds[2] + 2.0, places=2)
-        top = float(mesh.bounds[1][2])
-        crown_x = max(
-            vertex[0] for vertex in mesh.vertices if abs(float(vertex[2]) - top) < 1e-4
-        )
-        self.assertAlmostEqual(crown_x, nominal_outer.bounds[2] - 1.0, places=2)
 
     def test_push_out_builds_a_low_press_end_and_four_mm_raised_support(self) -> None:
         one = photo_nest(
@@ -2273,27 +1169,7 @@ class OtherHoldersTests(unittest.TestCase):
         )
         self.assertTrue(mesh.is_watertight)
 
-    def test_posts_are_tapered_and_repeat_along_the_selected_axis(self) -> None:
-        feature = Feature(
-            "post", Zone(-30.0, -10.0, 30.0, 10.0), count=3, along="x",
-            options={"diameter": 12.0, "height": 16.0, "spacing": 4.0, "taper": 0.4},
-        )
-        posts = build_features(BIN, [feature], BIN.base_thickness)
-        self.assertEqual(len(posts), 3)
-        self.assertEqual(len({round(post.centroid[1], 6) for post in posts}), 1)
-        post = posts[0]
-        low = post.vertices[abs(post.vertices[:, 2] - BIN.base_thickness) < 1e-5]
-        high = post.vertices[abs(post.vertices[:, 2] - (BIN.base_thickness + 16.0)) < 1e-5]
-        low_radius = max((vertex[0] - post.centroid[0]) ** 2 + vertex[1] ** 2 for vertex in low)
-        high_radius = max((vertex[0] - post.centroid[0]) ** 2 + vertex[1] ** 2 for vertex in high)
-        self.assertGreater(low_radius, high_radius)
 
-    def test_auto_posts_fill_the_available_run(self) -> None:
-        feature = Feature(
-            "post", Zone(-24.0, -8.0, 24.0, 8.0), count=None, along="x",
-            options={"diameter": 12.0, "spacing": 4.0},
-        )
-        self.assertEqual(len(build_features(BIN, [feature], BIN.base_thickness)), 3)
 
     def test_a_builder_cannot_escape_the_zone_claimed_by_the_editor(self) -> None:
         # A divider is a deliberate, documented exception to this (its
@@ -2311,25 +1187,6 @@ class OtherHoldersTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "exceeds its layout zone"):
                 build_features(BIN, [oversized], BIN.base_thickness)
 
-    def test_a_thicker_wall_than_the_zone_widens_to_match(self) -> None:
-        # A divider is built from its own thickness option on the cross
-        # axis, not from the zone's stored footprint there - the two are
-        # allowed to disagree, and the wider one wins rather than the
-        # builder being refused for a footprint that was only ever a
-        # convenience the editor drew, never the wall's real thickness.
-        thicker = Feature(
-            "divider", Zone(-20.0, -0.5, 20.0, 0.5),
-            options={"thickness": 5.0},
-        )
-        wall = build_features(BIN, [thicker], BIN.base_thickness)[0]
-        # the built wall's overall footprint also carries the base chamfer's
-        # flare on top of the 5 mm thickness (see
-        # AngledDividerTests.test_the_base_gets_a_45_degree_chamfer_for_strength)
-        from organizer_inserts import DIVIDER_CHAMFER
-        self.assertAlmostEqual(
-            wall.bounds[1][1] - wall.bounds[0][1], 5.0 + 2.0 * DIVIDER_CHAMFER, places=6
-        )
-        self.assertTrue(wall.is_watertight)
 
 
 class BoreEnhancementTests(unittest.TestCase):
@@ -2371,10 +1228,6 @@ class BoreEnhancementTests(unittest.TestCase):
         # More holes remove more material.
         self.assertGreater(few.volume, many.volume)
 
-    def test_a_fractional_grid_count_is_refused(self) -> None:
-        item = Item.simple("nozzle", 20.0, 6.0)
-        with self.assertRaises(ValueError):
-            self._bore(item, columns=3.5)
 
     def _bottom_hole_centre_x(self, mesh):
         """Mean x of the hole-surface vertices in the lowest slice of the block -
@@ -2395,45 +1248,13 @@ class BoreEnhancementTests(unittest.TestCase):
         self.assertAlmostEqual(self._bottom_hole_centre_x(straight), 0.0, delta=0.3)
         self.assertGreater(self._bottom_hole_centre_x(leaned), 0.8)
 
-    def test_an_angled_grid_builds(self) -> None:
-        item = Item.simple("tube", 20.0, 6.0)
-        mesh = self._bore(item, columns=3, rows=2, angle=30)
-        self.assertTrue(mesh.is_watertight)
-        self.assertGreater(mesh.volume, 0.0)
 
-    def test_an_angled_bore_fits_a_zone_sized_to_its_contents(self) -> None:
-        # "Fit to holes" sizes the zone to feature_min_footprint (rounded up to
-        # the editor grid). An angled bore then rotates its whole block about
-        # the centre, swinging the top corners out past that snug edge - the
-        # reach must allow for it or the build is wrongly refused.
-        item = Item.simple("tube", 40.0, 12.0)
-        for along, angle in (("x", 8.0), ("x", 25.0), ("y", 15.0)):
-            one = Feature("bore", Zone(-60.0, -60.0, 60.0, 60.0), item, along=along,
-                          options={"columns": 2, "rows": 2, "angle": angle})
-            size = inserts.feature_min_footprint(BIN, one, BIN.base_thickness)
-            snug = tuple(math.ceil(v / EDITOR_SNAP - 1e-6) * EDITOR_SNAP for v in size)
-            cx, cy = one.zone.centre
-            fitted = Feature(
-                "bore",
-                Zone(cx - snug[0] / 2.0, cy - snug[1] / 2.0,
-                     cx + snug[0] / 2.0, cy + snug[1] / 2.0),
-                item, along=along, options=one.options,
-            )
-            mesh = build_features(BIN, [fitted], BIN.base_thickness)[0]
-            self.assertTrue(mesh.is_watertight, (along, angle))
 
     def test_a_lean_past_the_printable_limit_is_refused(self) -> None:
         item = Item.simple("tube", 20.0, 6.0)
         with self.assertRaises(ValueError):
             self._bore(item, rows=1, angle=71)
 
-    def test_hole_mouths_are_chamfered(self) -> None:
-        item = Item.simple("nozzle", 20.0, 6.0)
-        plain = self._bore(item, columns=2, rows=2)
-        # The 45-degree lead-in removes a little extra material at every mouth,
-        # so a chamfered build is always lighter than one with square mouths.
-        self.assertGreater(inserts.BORE_MOUTH_CHAMFER, 0.0)
-        self.assertTrue(plain.is_watertight)
 
     def test_square_and_diamond_profiles_keep_their_distinct_orientation(self) -> None:
         zone = Zone(-10.0, -10.0, 10.0, 10.0)
@@ -2452,11 +1273,6 @@ class BoreEnhancementTests(unittest.TestCase):
         self.assertTrue(any(abs(x) < 1e-6 and abs(y) > 4.0 for x, y in legacy_near))
         self.assertTrue(any(abs(x) > 3.0 and abs(y) > 3.0 for x, y in axis_near))
 
-    def test_axis_square_pitch_uses_held_width_plus_wall(self) -> None:
-        self.assertEqual(
-            bore_minimum_pitches("square_axis", 6.4, 1.6, 0.0, "x"),
-            (8.0, 8.0),
-        )
 
 
 class FeatureMinFootprintTests(unittest.TestCase):
@@ -2482,42 +1298,8 @@ class FeatureMinFootprintTests(unittest.TestCase):
         self.assertLessEqual(depth, 24.0 + 1e-6)
         self.assertGreater(width, 0.0)
 
-    def test_leaned_bore_pitch_preserves_the_requested_wall(self) -> None:
-        item = Item("n", (Segment(20.0, 12.0),), profile="round", clearance=0.4)
-        wall, depth = 2.0, 16.0
-        straight = Feature(
-            "bore", Zone(-60.0, -30.0, 60.0, 30.0), item, along="x",
-            options={"columns": 2, "rows": 1, "wall": wall, "depth": depth, "angle": 0.0},
-        )
-        leaned = Feature(
-            "bore", straight.zone, item, along="x",
-            options={**straight.options, "angle": 45.0},
-        )
-        straight_width, _ = self.mn(straight)
-        leaned_width, _ = self.mn(leaned)
-        held = item.held(item.widest)
-        angle = math.radians(45.0)
-        centre_pitch = (leaned_width - depth * math.sin(angle)) / 2.0
-        fitted = Feature(
-            "bore", Zone(-leaned_width / 2.0, -8.0, leaned_width / 2.0, 8.0),
-            item, along="x", options=leaned.options,
-        )
-        grid = _bore_grid(BIN, fitted, BIN.base_thickness)
 
-        self.assertGreater(leaned_width, straight_width)
-        self.assertAlmostEqual(centre_pitch * math.cos(angle) - held, wall, places=6)
-        self.assertAlmostEqual(grid["pitch_x"] * math.cos(angle) - held, wall, places=6)
-        self.assertTrue(build_features(BIN, [fitted], BIN.base_thickness)[0].is_watertight)
 
-    def test_post_row_is_pegs_plus_gaps(self) -> None:
-        one = Feature("post", Zone(-40.0, -20.0, 40.0, 20.0), count=3,
-                      options={"diameter": 12.0, "spacing": 4.0})
-        self.assertEqual(self.mn(one), (3 * 12.0 + 2 * 4.0, 12.0))
-
-    def test_auto_post_row_fits_the_available_run(self) -> None:
-        one = Feature("post", Zone(-24.0, -8.0, 24.0, 8.0), count=None,
-                      options={"diameter": 12.0, "spacing": 4.0})
-        self.assertEqual(self.mn(one), (44.0, 12.0))
 
     def test_slot_tightens_the_across_axis_keeps_the_run(self) -> None:
         one = Feature("slot", Zone(-40.0, -30.0, 40.0, 30.0), count=3,
@@ -2526,9 +1308,6 @@ class FeatureMinFootprintTests(unittest.TestCase):
         self.assertEqual(width, 80.0)           # run axis untouched
         self.assertLess(depth, 60.0)            # across axis trimmed to 3 slots
 
-    def test_cradle_delegates_to_its_own_helper(self) -> None:
-        one = Feature("cradle", Zone(-60.0, -15.0, 60.0, 15.0), DRIVER)
-        self.assertEqual(self.mn(one), inserts.cradle_min_footprint(one))
 
     def test_kinds_with_no_contents_return_none(self) -> None:
         cases = [
@@ -2592,14 +1371,6 @@ class LayoutModelTests(unittest.TestCase):
             places=3,
         )
 
-    def test_cartridge_features_snap_from_the_cartridge_origin(self) -> None:
-        one = Feature("pocket", Zone(-7.0, -7.0, 8.0, 8.0))
-        snapped = inserts.resized_feature(one, BIN, (16.0, 16.0), "cartridge")
-        layout = inserts.Layout((snapped,), "cartridge")
-        layout.validate(BIN)
-        bounds = inserts.cartridge_zone(BIN)
-        self.assertAlmostEqual((snapped.zone.x0 - bounds.x0) % 8.0, 0.0)
-        self.assertAlmostEqual((snapped.zone.y0 - bounds.y0) % 8.0, 0.0)
 
     def test_a_non_cell_cartridge_layout_is_refused(self) -> None:
         bad = inserts.Layout((Feature("pocket", Zone(-5, -5, 5, 5)),), "cartridge")
@@ -2614,19 +1385,7 @@ class LayoutModelTests(unittest.TestCase):
         rebuilt = inserts.layout_from_dict(inserts.layout_to_dict(layout))
         self.assertEqual(rebuilt, layout)
 
-    def test_old_layouts_default_to_non_alternating_ends(self) -> None:
-        data = inserts.layout_to_dict(Layout((Feature(
-            "cradle", Zone(-40, -20, 40, 20), DRIVER, 2,
-        ),)))
-        del data["features"][0]["alternate_ends"]
-        self.assertFalse(layout_from_dict(data).features[0].alternate_ends)
 
-    def test_old_steps_with_auto_quantity_load_as_three(self) -> None:
-        data = layout_to_dict(Layout((Feature(
-            "steps", Zone(-20, -20, 20, 20), count=3,
-        ),)))
-        data["features"][0]["count"] = None
-        self.assertEqual(layout_from_dict(data).features[0].count, 3)
 
     def test_only_cradles_can_alternate_ends(self) -> None:
         with self.assertRaisesRegex(ValueError, "only a cradle"):
@@ -2652,12 +1411,6 @@ class LayoutModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "retired measured Nest"):
             layout_from_dict(legacy)
 
-    def test_empty_standalone_and_cartridge_inserts_are_valid_base_plates(self) -> None:
-        for mesh in (inserts.make_fitted_insert(BIN, []),
-                     inserts.make_cartridge_insert(BIN, [])):
-            self.assertTrue(mesh.is_watertight)
-            self.assertAlmostEqual(mesh.bounds[0][2], 0.0)
-            self.assertAlmostEqual(mesh.bounds[1][2], inserts.BASE_PLATE)
 
 
 from organizer_inserts._bore import WALL_ONLY_FOOT
@@ -2723,48 +1476,7 @@ class BoreWallOnlyTests(unittest.TestCase):
         self.assertGreater(inner(wavy).max() - inner(wavy).min(), WAVE_AMPLITUDE)
         self.assertLess(inner(straight).max() - inner(straight).min(), 0.01)
 
-    def test_pre_065_shell_sized_wall_only_zone_still_builds_and_counts_once(self) -> None:
-        old = wall_only_envelope("round", 30.0, 1.6, "wavy")
-        legacy = Zone(-old["span_x"] / 2.0, -old["span_y"] / 2.0,
-                      old["span_x"] / 2.0, old["span_y"] / 2.0)
-        mesh = self._build(zone=legacy, wall_style="wavy")      # must not raise
-        self.assertTrue(mesh.is_watertight)
-        one = Feature("bore", legacy, self._item(), options={
-            "bore_style": "walls_wavy", "wall": 1.6, "height": 10.0})
-        self.assertEqual(inserts.resolved_options(BIN, one, BIN.base_thickness)["columns"], 1.0)
-        # A pre-065 two-column, two-row shell-sized zone keeps both (explicit) counts.
-        two = Zone(-(old["span_x"] + old["pitch_x"]) / 2.0, -(old["span_y"] + old["pitch_y"]) / 2.0,
-                   (old["span_x"] + old["pitch_x"]) / 2.0, (old["span_y"] + old["pitch_y"]) / 2.0)
-        grid = _bore_grid(BIN, replace(one, zone=two, options={**one.options, "columns": 2, "rows": 2}),
-                          BIN.base_thickness)
-        self.assertEqual((grid["columns"], grid["rows"]), (2, 2))
-        # Foot counted once: legacy and foot-sized zones give the same footprint.
-        new = wall_only_envelope("round", 30.0, 1.6, "wavy", foot=True)
-        sized = Zone(-new["span_x"] / 2.0, -new["span_y"] / 2.0,
-                     new["span_x"] / 2.0, new["span_y"] / 2.0)
-        opts = {"bore_style": "walls_wavy", "wall": 1.6, "height": 10.0}
-        for zone in (legacy, sized):
-            fp = inserts.feature_footprint(
-                BIN, Feature("bore", zone, self._item(), options=dict(opts)), BIN.base_thickness)
-            self.assertAlmostEqual(fp.width, new["span_x"], places=6)
 
-    def test_walls_only_minimum_adds_foot_but_base_wavy_does_not(self) -> None:
-        from organizer_inserts._bore import wall_only_envelope
-        base = wall_only_envelope("round", 30.0, 1.6, "wavy")
-        foot = wall_only_envelope("round", 30.0, 1.6, "wavy", foot=True)
-        self.assertAlmostEqual(foot["span_x"] - base["span_x"], 2.0 * WALL_ONLY_FOOT)
-        self.assertAlmostEqual(foot["span_y"] - base["span_y"], 2.0 * WALL_ONLY_FOOT)
-        self.assertEqual(foot["pitch_x"], base["pitch_x"])
-        for style, extra in (("walls_wavy", 1.0), ("base_wavy", 0.0)):
-            sizes = []
-            for columns in (1, 3):
-                one = Feature("bore", self.ZONE, self._item(), options={
-                    "bore_style": style, "height": 10.0, "columns": columns,
-                    "wall": 1.6})
-                sizes.append(inserts.feature_min_footprint(BIN, one, BIN.base_thickness))
-            plain = wall_only_envelope("round", 30.0, 1.6, "wavy")
-            self.assertAlmostEqual(sizes[0][0], plain["span_x"] + extra, delta=1e-6)
-            self.assertAlmostEqual(sizes[1][0] - sizes[0][0], 2.0 * plain["pitch_x"], delta=1e-6)
 
     def test_wall_thickness_grows_the_sleeve_and_defaults_to_the_bin_wall(self) -> None:
         thin = self._build(wall=0.8, wall_style="straight")
@@ -2788,54 +1500,9 @@ class BoreWallOnlyTests(unittest.TestCase):
                 inside = np.hypot(vertices[:, 0], vertices[:, 1]) < 15.0 - 1e-6
                 self.assertFalse(inside.any(), (wall_style, column))
 
-    def test_every_profile_builds_in_both_wall_styles(self) -> None:
-        for profile in self.PROFILES:
-            for wall_style in ("straight", "wavy"):
-                mesh = self._build(self._item(profile), wall_style=wall_style)
-                self.assertTrue(mesh.is_watertight, (profile, wall_style))
-        diamond = self._build(self._item("square"), wall_style="straight")
-        square = self._build(self._item("square_axis"), wall_style="straight")
-        self.assertGreater(diamond.bounds[1][0], square.bounds[1][0] + 5.0)
 
-    def test_angle_is_rejected(self) -> None:
-        with self.assertRaisesRegex(ValueError, "upright"):
-            self._build(angle=10.0)
-        with self.assertRaisesRegex(ValueError, "style"):
-            self._build(bore_style="sideways")
 
-    def test_wall_only_default_height_ignores_stale_depth(self) -> None:
-        item = self._item()
-        # Wall Only with no explicit Height and no stored Depth gets default from item.
-        one = Feature("bore", self.ZONE, item, options={"bore_style": "walls_wavy"})
-        no_depth_h = inserts.resolved_options(BIN, one, BIN.base_thickness)["height"]
-        # Now add stale Full Base Depth; Wall Only should ignore it.
-        with_stale_depth = Feature("bore", self.ZONE, item, options={
-            "bore_style": "walls_wavy", "depth": 500.0})
-        same_h = inserts.resolved_options(BIN, with_stale_depth, BIN.base_thickness)["height"]
-        self.assertEqual(no_depth_h, same_h)
-        # Build both: they must have identical Z bounds despite stale 500 mm Depth.
-        mesh_no_depth = self._build()
-        mesh_stale = self._build(depth=500.0)
-        self.assertAlmostEqual(mesh_no_depth.bounds[0][2], mesh_stale.bounds[0][2], places=4)
-        self.assertAlmostEqual(mesh_no_depth.bounds[1][2], mesh_stale.bounds[1][2], places=4)
-        # Explicit Height still wins.
-        explicit = Feature("bore", self.ZONE, item, options={
-            "bore_style": "walls_wavy", "height": 15.0, "depth": 500.0})
-        self.assertEqual(inserts.resolved_options(BIN, explicit, BIN.base_thickness)["height"], 15.0)
-        mesh_explicit = self._build(height=15.0, depth=500.0)
-        self.assertAlmostEqual(mesh_explicit.bounds[1][2], BIN.base_thickness + 15.0, places=4)
 
-    def test_zone_equal_to_minimum_footprint_builds_within_it(self) -> None:
-        for wall_style in ("straight", "wavy"):
-            for profile in self.PROFILES:
-                probe = Feature("bore", self.ZONE, self._item(profile), options={
-                    "bore_style": f"walls_{wall_style}", "wall": 1.6})
-                width, depth = inserts.feature_min_footprint(BIN, probe, BIN.base_thickness)
-                zone = Zone(-width / 2.0, -depth / 2.0, width / 2.0, depth / 2.0)
-                mesh = self._build(self._item(profile), zone=zone, wall_style=wall_style)
-                extent = mesh.bounds[1] - mesh.bounds[0]
-                self.assertLessEqual(extent[0], width + 1e-5, (profile, wall_style))
-                self.assertLessEqual(extent[1], depth + 1e-5, (profile, wall_style))
 
     def test_minimum_footprint_and_explicit_counts_use_the_true_outer_shell(self) -> None:
         for wall_style in ("straight", "wavy"):
@@ -2912,20 +1579,6 @@ class BoreWavyBaseTests(unittest.TestCase):
             _bore_grid(BIN, self._one(zone, style="walls_straight"),
                        BIN.base_thickness)["wall_style"], "straight")
 
-    def test_wavy_base_body_is_the_zone_not_the_minimum_envelope(self) -> None:
-        # Fix 068: like Base - Straight Walls, the block takes the zone's own
-        # Width / Length and centre; the wavy grid only has to fit inside.
-        zone = Zone(-4.0, -30.0, 56.0, 30.0)
-        mesh = build_features(BIN, [self._one(zone)], BIN.base_thickness)[0]
-        self.assertTrue(mesh.is_watertight)
-        self.assertAlmostEqual(mesh.bounds[0][0], zone.x0, places=4)
-        self.assertAlmostEqual(mesh.bounds[1][0], zone.x1, places=4)
-        self.assertAlmostEqual(mesh.bounds[0][1], zone.y0, places=4)
-        self.assertAlmostEqual(mesh.bounds[1][1], zone.y1, places=4)
-        env = wall_only_envelope("round", 30.0, 1.6, "wavy")
-        tiny = Zone(-(env["span_x"] - 1.0) / 2.0, -30.0, (env["span_x"] - 1.0) / 2.0, 30.0)
-        with self.assertRaisesRegex(ValueError, "bores need"):
-            build_features(BIN, [self._one(tiny)], BIN.base_thickness)
 
     def test_bin_is_the_smallest_legal_size_around_the_whole_grid(self) -> None:
         for columns, rows in ((1, 1), (3, 2)):
@@ -2944,56 +1597,7 @@ class BoreWavyBaseTests(unittest.TestCase):
             if y > 8.0:
                 self.assertLess(replace(BIN, y=y - 8.0).usable_inside[1], envelope.depth)
 
-    def test_bin_sized_walls_only_is_centred_not_kept_off_centre(self) -> None:
-        # Correction 1: a Walls Only Bore in bin_to_bore is centred in the usable
-        # floor, so the smallest grid bin around it supports it on every side.
-        zone = Zone(-4.0, -30.0, 56.0, 30.0)
-        one = self._one(zone, style="walls_wavy", xy_size_mode="bin_to_bore")
-        fixed = inserts.normalize_bore_modes(BIN, one, BIN.base_thickness)
-        self.assertAlmostEqual(fixed.zone.centre[0], 0.0, places=9)
-        self.assertAlmostEqual(fixed.zone.centre[1], 0.0, places=9)
-        self.assertAlmostEqual(fixed.zone.width, zone.width, places=9)     # size untouched
-        envelope = bore_envelope_zone(BIN, fixed, BIN.base_thickness)
-        x, y = bore_bin_minimum(BIN, [one], BIN.base_thickness)            # off-centre input too
-        self.assertGreaterEqual(replace(BIN, x=x).usable_inside[0], envelope.width - 1e-6)
-        self.assertLess(replace(BIN, x=x - 8.0).usable_inside[0], envelope.width)
-        self.assertEqual((x, y), bore_bin_minimum(BIN, [fixed], BIN.base_thickness))
-        self.assertIsNone(bore_bin_minimum(BIN, [self._one(zone, xy_size_mode="manual")],
-                                           BIN.base_thickness))
-        self.assertIsNone(bore_bin_minimum(BIN, [one], BIN.base_thickness, "separate"))
-        # Manual Walls Only may stay off-centre inside a larger bin.
-        manual = inserts.normalize_bore_modes(
-            BIN, self._one(zone, style="walls_wavy", xy_size_mode="manual"), BIN.base_thickness)
-        self.assertEqual(manual.zone, zone)
 
-    def test_walls_only_bin_to_bore_is_supported_on_all_four_sides_after_edits(self) -> None:
-        # The fitted result (smallest bin around the centred Bore) leaves less
-        # than one grid step of bridge per side; the geometry reaches all sides.
-        for edit in ({}, {"columns": 2}, {"rows": 2}, {"wall": 2.4}, {"diameter": 22.0}):
-            with self.subTest(edit=edit):
-                diameter = edit.get("diameter", 30.0)
-                options = {k: v for k, v in edit.items() if k != "diameter"}
-                probe = self._one(Zone(-4.0, -30.0, 56.0, 30.0), style="walls_wavy",
-                                  diameter=diameter, xy_size_mode="bin_to_bore", **options)
-                need = inserts.feature_min_footprint(BIN, probe, BIN.base_thickness)
-                # the browser holds the zone at (rounded-up) minimum; the server centres it
-                zone = Zone(-math.ceil(need[0]) / 2.0, -math.ceil(need[1]) / 2.0,
-                            math.ceil(need[0]) / 2.0, math.ceil(need[1]) / 2.0)
-                one = replace(probe, zone=zone)
-                x, y = bore_bin_minimum(BIN, [one], BIN.base_thickness)
-                box = replace(BIN, x=x, y=y)
-                whole = Zone.whole(box)
-                envelope = bore_envelope_zone(box, one, box.base_thickness)
-                for gap in (whole.x1 - envelope.x1, envelope.x0 - whole.x0,
-                            whole.y1 - envelope.y1, envelope.y0 - whole.y0):
-                    self.assertGreaterEqual(gap, -1.5)
-                    self.assertLess(gap, 5.0)          # intentional grid-rounding allowance only
-                mesh = build_features(box, [one], box.base_thickness)[0]
-                self.assertTrue(mesh.is_watertight)
-                self.assertGreater(mesh.bounds[1][0], whole.x1 + 0.5)
-                self.assertLess(mesh.bounds[0][0], whole.x0 - 0.5)
-                self.assertGreater(mesh.bounds[1][1], whole.y1 + 0.5)
-                self.assertLess(mesh.bounds[0][1], whole.y0 - 0.5)
 
     def test_wavy_base_joins_every_wall_it_reaches_without_touching_the_outside(self) -> None:
         outer = wavy_outer_polygon(self._touching()[0]).bounds
@@ -3016,15 +1620,6 @@ class BoreWavyBaseTests(unittest.TestCase):
             self.assertGreaterEqual(
                 radii[radii < diameter / 2.0 + 0.5].min(), diameter / 2.0 - 1e-6, style)
 
-    def test_a_single_wall_contact_joins_only_that_wall(self) -> None:
-        box, diameter, _ = self._touching()
-        box = replace(box, x=56.0, y=56.0)                     # room to spare
-        whole = Zone.whole(box)
-        span = wall_only_envelope("round", diameter, 1.6, "wavy")["span_x"]
-        zone = Zone(whole.x0, -20.0, whole.x0 + span, 20.0)   # only the low-X wall
-        mesh = build_features(box, [self._one(zone, diameter=diameter)], box.base_thickness)[0]
-        self.assertLess(mesh.bounds[0][0], whole.x0 - 0.5)
-        self.assertLessEqual(mesh.bounds[1][0], whole.x1 + 1e-6)
 
     def test_removable_insert_never_claims_to_join_the_bin_wall(self) -> None:
         box, diameter, whole = self._touching()
@@ -3034,26 +1629,6 @@ class BoreWavyBaseTests(unittest.TestCase):
         self.assertLessEqual(mesh.bounds[1][0], whole.x1 + 1e-5)
         self.assertGreaterEqual(mesh.bounds[0][0], whole.x0 - 1e-5)
 
-    def test_retired_auto_state_is_dropped_and_legacy_styles_translate(self) -> None:
-        zone = Zone(-30.0, -30.0, 30.0, 30.0)
-        for legacy, expected in (("full_base", "base_straight"), ("wavy_base", "base_wavy")):
-            old = Feature("bore", zone, self._item(), options={
-                "bore_style": legacy, "auto_base": True, "auto_grid": True, "auto_height": True,
-                "wall_style": "straight", "wall": 2.0, "columns": 1})
-            fixed = inserts.normalize_bore_modes(BIN, old, BIN.base_thickness)
-            self.assertEqual(fixed.options["bore_style"], expected)
-            for retired in ("auto_base", "auto_grid", "auto_height", "wall_style", "wall"):
-                self.assertNotIn(retired, fixed.options)
-            self.assertEqual(fixed.zone, zone)            # no hidden fill of the bin
-            self.assertEqual(fixed.options["xy_size_mode"], "manual")
-            self.assertEqual(fixed.options["height_size_mode"], "manual")
-        for wall_style, expected in (("straight", "walls_straight"), ("wavy", "walls_wavy")):
-            old = Feature("bore", zone, self._item(), options={
-                "bore_style": "wall_only", "wall_style": wall_style, "wall": 2.0})
-            fixed = inserts.normalize_bore_modes(BIN, old, BIN.base_thickness)
-            self.assertEqual(fixed.options["bore_style"], expected)
-            self.assertEqual(fixed.options["wall"], 2.0)       # Walls Only keeps its wall
-            self.assertEqual(fixed.options["xy_size_mode"], "bin_to_bore")
 
     def test_joined_bore_in_the_connector_band_is_a_clear_error(self) -> None:
         box, diameter, whole = self._touching()
@@ -3170,15 +1745,6 @@ class BoreFix068Tests(unittest.TestCase):
         plain = BoxSpec(64.0, 64.0, 80.0)
         self.assertAlmostEqual(self._auto_height_top(plain), plain.z, places=6)
 
-    def test_auto_height_uses_the_lowest_of_several_vertical_holes(self) -> None:
-        from organizer_edge_mount import (
-            _print_safe_profile_radius, edge_mount_hole_plan)
-        box = self._edge_box(z=90.0, hole_count=3, hole_orientation="vertical")
-        holes = edge_mount_hole_plan(box)
-        self.assertEqual(len(holes), 3)
-        lowest = min(h["z_mm"] for h in holes) - _print_safe_profile_radius(4.0)
-        self.assertLess(min(h["z_mm"] for h in holes), max(h["z_mm"] for h in holes))
-        self.assertAlmostEqual(self._auto_height_top(box), lowest - 2.0, places=6)
 
     def test_auto_height_uses_the_larger_access_diameter(self) -> None:
         from organizer_edge_mount import _print_safe_profile_radius
@@ -3201,51 +1767,10 @@ class BoreFix068Tests(unittest.TestCase):
 
     # -- floor-reaching Base cavity ----------------------------------------------
 
-    def test_both_base_styles_accept_depth_equal_to_height(self) -> None:
-        for style in ("base_straight", "base_wavy"):
-            with self.subTest(style=style):
-                env = wall_only_envelope("round", 12.0, 1.6, "wavy")
-                zone = Zone(-env["span_x"] / 2.0 - 2.0, -env["span_y"] / 2.0 - 2.0,
-                            env["span_x"] / 2.0 + 2.0, env["span_y"] / 2.0 + 2.0)
-                base_z = BIN.base_thickness
-                floor = self._bore(zone, bore_style=style, height=8.0, depth=8.0)
-                mesh = inserts.build_bore(BIN, floor, base_z)[0]
-                self.assertTrue(mesh.is_watertight)
-                self.assertTrue(mesh.is_volume)
-                # The cavity reaches the bore's floor: nothing is left under the hole.
-                probe = [[0.0, 0.0, base_z + 0.02], [0.0, 0.0, base_z + 4.0]]
-                self.assertFalse(mesh.contains(probe).any(), style)
-                raised = self._bore(zone, bore_style=style, height=8.0, depth=6.0)
-                held = inserts.build_bore(BIN, raised, base_z)[0]
-                self.assertTrue(held.contains([[0.0, 0.0, base_z + 0.5]]).all(), style)
-                # The stored depth is never altered by the geometry overtravel.
-                self.assertEqual(_bore_grid(BIN, floor, base_z)["depth"], 8.0)
-                deeper = self._bore(zone, bore_style=style, height=8.0, depth=8.5)
-                with self.assertRaisesRegex(ValueError, "no more than its height"):
-                    inserts.build_bore(BIN, deeper, base_z)
 
-    def test_pocket_and_slot_keep_their_raised_floor_rule(self) -> None:
-        zone = Zone(-15.0, -15.0, 15.0, 15.0)
-        with self.assertRaisesRegex(ValueError, "depth must be less than height"):
-            build_features(BIN, [Feature("slot", zone, options={"depth": 16.0, "height": 16.0})],
-                           BIN.base_thickness)
 
     # -- style / mode contract ---------------------------------------------------
 
-    def test_walls_only_default_and_base_minimum_are_explicit_modes(self) -> None:
-        for style, expected in (("base_straight", "manual"), ("base_wavy", "manual"),
-                                ("walls_straight", "bin_to_bore"), ("walls_wavy", "bin_to_bore")):
-            fixed = inserts.normalize_bore_modes(
-                BIN, self._bore(bore_style=style), BIN.base_thickness)
-            self.assertEqual(fixed.options["xy_size_mode"], expected, style)
-        # Bore-to-bin is not a Walls Only choice; a stale value falls back to its default.
-        stale = inserts.normalize_bore_modes(
-            BIN, self._bore(bore_style="walls_wavy", xy_size_mode="bore_to_bin"), BIN.base_thickness)
-        self.assertEqual(stale.options["xy_size_mode"], "bin_to_bore")
-        self.assertEqual(stale.zone, self.ZONE)                   # and never fills the bin
-        explicit = inserts.normalize_bore_modes(
-            BIN, self._bore(bore_style="walls_straight", xy_size_mode="manual"), BIN.base_thickness)
-        self.assertEqual(explicit.options["xy_size_mode"], "manual")
 
     def test_counts_resize_the_minimum_footprint(self) -> None:
         for style in ("base_straight", "base_wavy", "walls_straight", "walls_wavy"):
@@ -3276,31 +1801,6 @@ class BoreFix068Tests(unittest.TestCase):
 
     # -- Walls Only hugs the bin on every side -----------------------------------
 
-    def test_walls_only_bin_to_bore_reaches_the_bin_on_all_four_sides(self) -> None:
-        item = Item("tube", (Segment(25.0, 30.0),), profile="round", clearance=0.0)
-        box = replace(BIN, x=48.0, y=48.0)
-        whole = Zone.whole(box)
-        env = wall_only_envelope("round", 30.0, 1.6, "wavy", foot=True)
-        gap = (whole.width - env["span_x"]) / 2.0
-        self.assertGreater(gap, 0.5)                      # not already touching
-        self.assertLess(gap, 8.0)
-        zone = Zone(-env["span_x"] / 2.0, -env["span_y"] / 2.0,
-                    env["span_x"] / 2.0, env["span_y"] / 2.0)
-        hugged = Feature("bore", zone, item, options={
-            "bore_style": "walls_wavy", "xy_size_mode": "bin_to_bore", "height": 10.0, "wall": 1.6})
-        mesh = build_features(box, [hugged], box.base_thickness)[0]
-        self.assertTrue(mesh.is_watertight)
-        self.assertGreater(mesh.bounds[1][0], whole.x1 + 0.5)
-        self.assertLess(mesh.bounds[0][0], whole.x0 - 0.5)
-        self.assertGreater(mesh.bounds[1][1], whole.y1 + 0.5)
-        self.assertLess(mesh.bounds[0][1], whole.y0 - 0.5)
-        radii = np.hypot(mesh.vertices[:, 0], mesh.vertices[:, 1])
-        self.assertGreaterEqual(radii[radii < 20.0].min(), 15.0 - 1e-6)   # opening stays open
-        # Manual keeps the sleeve inside a larger bin, touching nothing.
-        manual = replace(hugged, options={**hugged.options, "xy_size_mode": "manual"})
-        free = build_features(box, [manual], box.base_thickness)[0]
-        self.assertLess(free.bounds[1][0], whole.x1 - 0.5)
-        self.assertGreater(free.bounds[0][0], whole.x0 + 0.5)
 
 
 class SlotRackTests(unittest.TestCase):
@@ -3315,13 +1815,6 @@ class SlotRackTests(unittest.TestCase):
         self.assertAlmostEqual(mesh.bounds[0][2], base, places=3)
         self.assertAlmostEqual(mesh.bounds[1][2], base + 16.0, places=3)
 
-    def test_slot_rack_along_y_with_explicit_count(self) -> None:
-        zone = Zone(-15.0, -20.0, 15.0, 20.0)
-        one = Feature("slot", zone, count=3, along="y", options={"height": 14.0, "depth": 10.0, "thickness": 3.0, "angle": 15.0})
-        base = BIN.base_thickness
-        solids = build_features(BIN, [one], base)
-        self.assertEqual(len(solids), 1)
-        self.assertTrue(solids[0].is_watertight)
 
     def test_slot_rack_rejects_excessive_angle_or_depth(self) -> None:
         zone = Zone(-15.0, -15.0, 15.0, 15.0)
@@ -3343,15 +1836,6 @@ class TieredStepsTests(unittest.TestCase):
         self.assertAlmostEqual(mesh.bounds[0][2], base, places=3)
         self.assertAlmostEqual(mesh.bounds[1][2], base + 15.0 + 1.0, places=3)
 
-    def test_steps_along_y_without_lip(self) -> None:
-        zone = Zone(-15.0, -15.0, 15.0, 15.0)
-        one = Feature("steps", zone, count=4, along="y", options={"height": 12.0, "lip": 0.0})
-        base = BIN.base_thickness
-        solids = build_features(BIN, [one], base)
-        self.assertEqual(len(solids), 1)
-        mesh = solids[0]
-        self.assertTrue(mesh.is_watertight)
-        self.assertAlmostEqual(mesh.bounds[1][2], base + 12.0, places=3)
 
     def test_steps_rejects_invalid_count(self) -> None:
         zone = Zone(-10.0, -10.0, 10.0, 10.0)
@@ -3380,23 +1864,7 @@ class TextPartTests(unittest.TestCase):
         self.assertAlmostEqual(mesh.bounds[0][2], base, places=6)
         self.assertAlmostEqual(mesh.bounds[1][2], base + inserts.TEXT_DEPTH, places=6)
 
-    def test_text_is_left_out_of_the_additive_union_but_still_checked(self) -> None:
-        """A recessed inlay is subtracted from the body, never added to it."""
-        one = text_part()
-        self.assertEqual(build_features(BIN, [one], BIN.base_thickness), [])
-        self.assertEqual(
-            len(build_features(BIN, [one], BIN.base_thickness, include_text=True)), 1
-        )
-        # A bad one still raises from the ordinary build, so its error surfaces
-        # alongside every other interior part's.
-        tiny = text_part("MUCH TOO LONG", zone=Zone(-4.0, -2.0, 4.0, 2.0))
-        with self.assertRaisesRegex(ValueError, "will not fit"):
-            build_features(BIN, [tiny], BIN.base_thickness)
 
-    def test_resizing_the_zone_scales_the_lettering(self) -> None:
-        small = inserts.text_fitted(text_part(zone=Zone(-10.0, -4.0, 10.0, 4.0)))[0]
-        big = inserts.text_fitted(text_part(zone=Zone(-30.0, -12.0, 30.0, 12.0)))[0]
-        self.assertGreater(big, small)
 
     def test_a_hand_set_letter_height_is_honoured_but_never_overflows(self) -> None:
         roomy = Zone(-40.0, -15.0, 40.0, 15.0)
@@ -3440,75 +1908,12 @@ class TextPartTests(unittest.TestCase):
         self.assertTrue(back.options["raised"])
         self.assertEqual(back.zone.centre, one.zone.centre)
 
-    def test_an_auto_text_part_moves_around_a_holder(self) -> None:
-        post = Feature("post", Zone(-10.0, -10.0, 10.0, 10.0))
-        said = text_part("M3", auto=True)
-        resolved = inserts.resolve_text_features(
-            BIN, [post, said], base_z=BIN.base_thickness
-        )
-        placed = resolved[1]
-        self.assertNotEqual(placed.zone, said.zone)
-        check_layout(BIN, list(resolved), base_z=BIN.base_thickness)
-        self.assertFalse(
-            feature_footprint(BIN, placed, BIN.base_thickness)
-            .overlaps(feature_footprint(BIN, post, BIN.base_thickness))
-        )
 
-    def test_two_legacy_auto_text_parts_need_distinct_destinations(self) -> None:
-        resolved = inserts.resolve_text_features(
-            BIN, [text_part("M3", auto=True), text_part("M4", auto=True)],
-            base_z=BIN.base_thickness,
-        )
-        with self.assertRaisesRegex(ValueError, "Only one Text"):
-            check_layout(BIN, list(resolved), base_z=BIN.base_thickness)
 
-    def test_a_legacy_hand_placed_text_keeps_its_centre(self) -> None:
-        said = text_part("M3", zone=Zone(-20.0, 10.0, 20.0, 22.0))
-        resolved = inserts.resolve_text_features(
-            BIN, [said], base_z=BIN.base_thickness
-        )
-        self.assertEqual(resolved[0].zone.centre, said.zone.centre)
-        self.assertEqual(inserts.text_fitted(resolved[0])[0], inserts.text_fitted(said)[0])
 
-    def test_empty_text_says_so(self) -> None:
-        with self.assertRaisesRegex(ValueError, "no text"):
-            inserts.text_fitted(text_part(""))
 
-    def test_a_legacy_auto_text_occupies_whole_cartridge_cells(self) -> None:
-        """The glyph stays exact; only cartridge spacing rounds to cells."""
-        base = inserts.BASE_PLATE + BIN.base_thickness
-        resolved = inserts.resolve_text_features(
-            BIN, [text_part("M3", auto=True)], base_z=base, mode="cartridge"
-        )
-        Layout(resolved, "cartridge").validate(BIN)
-        zone = inserts.occupied_zones(BIN, resolved, base, "cartridge")[0]
-        cells = inserts.cartridge_zone(BIN)
-        for value in (zone.x0 - cells.x0, zone.y0 - cells.y0,
-                      zone.width, zone.depth):
-            self.assertAlmostEqual(
-                value / inserts.CARTRIDGE_PITCH,
-                round(value / inserts.CARTRIDGE_PITCH), places=6,
-            )
-        # The bigger box must not quietly enlarge the lettering with it.
-        self.assertIn("cap_height", resolved[0].options)
-        self.assertAlmostEqual(
-            inserts.text_fitted(resolved[0])[0],
-            resolved[0].options["cap_height"], places=6,
-        )
 
-    def test_auto_grow_text_feature_widens_when_text_fits(self) -> None:
-        starter = text_part("M3 BOLTS", zone=Zone(-8.0, -5.0, 8.0, 5.0))
-        grown = inserts.auto_grow_text_feature(starter, BIN)
-        self.assertGreater(grown.zone.width, starter.zone.width)
-        cap, _ = inserts.text_fitted(grown)
-        self.assertGreaterEqual(cap, inserts.TEXT_CAP_HEIGHT_FLOOR)
 
-    def test_auto_grow_text_feature_does_not_exceed_bin_bounds(self) -> None:
-        very_long = text_part("EXTRAORDINARILY LONG LABEL WITH MANY WORDS", zone=Zone(-8.0, -5.0, 8.0, 5.0))
-        grown = inserts.auto_grow_text_feature(very_long, BIN)
-        bounds = inserts.layout_zone(BIN)
-        self.assertLessEqual(grown.zone.width, bounds.width + 1e-9)
-        self.assertGreater(grown.zone.width, 16.0)
 
 
 

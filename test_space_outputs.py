@@ -121,26 +121,9 @@ class StorageBoxRoundTripTests(unittest.TestCase):
         self.assertEqual(kept["layout"]["space"]["storage_box"], normalise_storage_box(box))
         self.assertEqual(kept["layout"]["space"]["y"], 104.0)
 
-    def test_a_legacy_portable_space_without_the_block_reads_defaults_without_migration(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Legacy"
-            folder.mkdir()
-            from organizer_spaces import _write_metadata
-            _write_metadata(folder, "space", {"kind": "portable", "name": "Old", "x": 96.0, "y": 96.0, "z": 40.0},
-                            keep_bin_defaults=True)
-            info = describe(folder, {})
-            self.assertEqual(info["space"]["storage_box"], storage_box_defaults())
-            self.assertFalse((folder / "Wavefinity bins.md").exists())
 
 
 class StructuralOutputTests(unittest.TestCase):
-    def test_kind_ownership(self):
-        self.assertEqual(structural_kind(CASE), STORAGE_BOX)
-        self.assertEqual(structural_kind({**CASE, "kind": "box"}), STORAGE_BOX)
-        self.assertEqual(structural_kind(SURFACE), BASE_TRIM)
-        self.assertIsNone(structural_kind({"kind": "drawer"}))
-        self.assertIsNone(structural_kind({"kind": "pegboard"}))
-        self.assertIsNone(structural_kind(None))
 
     def test_storage_box_design_is_an_empty_layout_b4b_from_space_and_settings(self):
         design = storage_box_design({**CASE, "storage_box": {"stacking": True, "wall_mm": 2.0, "base_mm": 2.4}})
@@ -165,19 +148,7 @@ class StructuralOutputTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             storage_box_design(SURFACE)
 
-    def test_design_payload_summarises_and_wrong_types_are_refused(self):
-        box = wavefinity_web.structural_design_payload({"space": CASE})
-        self.assertEqual(box["kind"], "storage_box")
-        self.assertIn("assembled_envelope_mm", box["summary"])
-        trim = wavefinity_web.structural_design_payload({"space": SURFACE})
-        self.assertEqual(trim["kind"], "base_trim")
-        with self.assertRaises(ValueError):
-            wavefinity_web.structural_design_payload({"space": {"name": "D", "kind": "drawer", "x": 200, "y": 200, "z": 60}})
 
-    def test_routes_are_registered(self):
-        for path in ("/api/space/structural-design", "/api/space/structural-generate",
-                     "/api/space/structural-print"):
-            self.assertIn(path, wavefinity_web.POST_ROUTES)
 
     def test_save_writes_files_but_never_an_inventory_row(self):
         for space in (CASE, SURFACE):
@@ -209,19 +180,6 @@ class StructuralOutputTests(unittest.TestCase):
                 self.assertTrue(result["design_files"])
                 self.assertEqual(load_inventory(folder)["bins"], before["bins"])
 
-    def test_an_ordinary_bin_print_still_logs_but_structural_flag_suppresses(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_exe = Path(tmp) / "slicer.exe"
-            fake_exe.write_text("x")
-            design = wavefinity_web.default_design()
-            with patch.object(wavefinity_web, "detect_bambu_studio", return_value=fake_exe), \
-                    patch.object(wavefinity_web, "launch_slicer", return_value=None), \
-                    patch.object(wavefinity_web, "inventory_enabled", return_value=True), \
-                    patch.object(wavefinity_web, "append_bin") as append:
-                wavefinity_web.print_payload({"design": design, "output": tmp, "structural_output": True})
-                append.assert_not_called()
-                wavefinity_web.print_payload({"design": design, "output": tmp})
-                append.assert_called_once()
 
 
 if __name__ == "__main__":

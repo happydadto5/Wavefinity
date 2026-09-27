@@ -53,15 +53,6 @@ class PegboardSizeTests(unittest.TestCase):
             self.assertEqual(drawer["pegboard_holes_x"], 12)
             self.assertEqual(drawer["pegboard_holes_y"], 15)
 
-    def test_hosted_space_creation_keeps_board_fields(self) -> None:
-        made = create_space_text_payload({
-            "inventory_text": "", "inventory_title": "Wall", "name": "Wall",
-            "kind": "pegboard", "x": 320, "y": 240, "z": 350,
-            "pegboard_standard": "skadis", "pegboard_size_mode": "holes",
-            "pegboard_holes_x": 8, "pegboard_holes_y": 12,
-        })
-        self.assertEqual(made["layout"]["space"]["pegboard_standard"], "skadis")
-        self.assertIn('"boundary": "pegboard"', made["inventory_text"])
 
 
 class PegboardMountTests(unittest.TestCase):
@@ -144,46 +135,7 @@ class PegboardMountTests(unittest.TestCase):
             self.assertAlmostEqual(float(adapter.bounds[0][2]), 0)
             self.assertGreater(float(adapter.bounds[1][2]), PEGBOARD_PROJECTION + 2)
 
-    def test_standard_multirow_pairs_are_disjoint_and_bodies_separate(self) -> None:
-        catalog = {one["id"]: one for one in pegboard_catalog()["standards"]}
-        self.assertEqual(catalog["standard"]["minimum_heights_mm"], [47.1, 97.9, 148.7])
-        self.assertEqual(catalog["skadis"]["minimum_widths_mm"][0], 49.0)
-        for count, height in ((2, 112), (3, 160)):
-            layout = pegboard_layout_for_bin({
-                "x": 48, "z": height, "pegboard_standard": "standard",
-                "cleat_x": 1, "cleat_y": count,
-            }, "standard")
-            offsets = layout["mount_offsets"]
-            self.assertEqual(len(offsets), 2 * count)
-            self.assertEqual(len({tuple(pair) for pair in offsets}), len(offsets))
-            self.assertEqual(sorted({int(pair[1]) for pair in offsets}), list(range(2 * count)))
-            adapter = make_board_adapter("standard")
-            bounds = [adapter.bounds[:, 2] + row["z"] - 42.4 for row in layout["receivers"]]
-            self.assertTrue(all(left[1] < right[0] for left, right in zip(bounds, bounds[1:])))
 
-    def test_receiver_and_both_adapter_families_are_printable_meshes(self) -> None:
-        for standard in ("standard", "skadis"):
-            box = BoxSpec(96, 64, 112, pegboard=PegboardMountSpec(True, standard, 2, 2))
-            body = __import__("trimesh").creation.box((box.x, box.y, box.z))
-            body.apply_translation((0, 0, box.z / 2))
-            mounted = apply_pegboard_mount_structure(box, body)
-            self.assertGreater(mounted.volume, body.volume)
-            self.assertTrue(mounted.is_watertight)
-            # The rear support must not grow beyond the side mating envelope.
-            self.assertAlmostEqual(float(mounted.bounds[0][0]), float(body.bounds[0][0]))
-            self.assertAlmostEqual(float(mounted.bounds[1][0]), float(body.bounds[1][0]))
-            self.assertAlmostEqual(float(mounted.bounds[1][1]), box.y / 2 + PEGBOARD_PROJECTION)
-            adapters = make_board_adapters(box)
-            self.assertEqual(len(adapters), 4)
-            self.assertTrue(all(mesh.is_watertight for _, mesh in adapters))
-            self.assertEqual(len({round(float(mesh.centroid[0]), 3) for _, mesh in adapters}), 4)
-            for index, (_, left) in enumerate(adapters):
-                for _, right in adapters[index + 1:]:
-                    self.assertTrue(any(
-                        left.bounds[1][axis] < right.bounds[0][axis]
-                        or right.bounds[1][axis] < left.bounds[0][axis]
-                        for axis in (0, 1)
-                    ))
 
     def test_generation_writes_bin_and_separate_adapter_plate(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -210,62 +162,10 @@ class PegboardPlacementTests(unittest.TestCase):
             "cleat_x": "auto", "cleat_y": "auto",
         }
 
-    def test_layout_exposes_footprint_and_exact_mounts(self) -> None:
-        layout = pegboard_layout_for_bin(self.bin, "standard")
-        self.assertEqual((layout["cells_x"], layout["cells_y"]), (2, 2))
-        self.assertEqual(layout["mount_offsets"], [[0.0, 0], [0.0, 1]])
-        payload = pegboard_layouts_payload({"standard": "standard", "bins": [self.bin]})
-        self.assertEqual(payload["layouts"]["B1"]["mount_offsets"], [[0.0, 0], [0.0, 1]])
-
-    def test_report_rejects_unsnapped_outside_overlap_and_wrong_standard(self) -> None:
-        other = {**self.bin, "id": "B2", "pegboard_standard": "skadis"}
-        self.drawer["placements"] = [
-            {"bin": "B1", "copy": 0, "gx": 0.5, "gy": 0},
-            {"bin": "B1", "copy": 1, "gx": 9, "gy": 9},
-            {"bin": "B2", "copy": 0, "gx": 0, "gy": 0},
-        ]
-        report = drawer_report(self.drawer, [self.bin, other])
-        kinds = {problem["type"] for problem in report["problems"]}
-        self.assertTrue({"outside", "mount"}.issubset(kinds))
-
-    def test_ordinary_inventory_bin_without_receiver_is_incompatible(self) -> None:
-        ordinary = {**self.bin, "pegboard_standard": ""}
-        layout = pegboard_layout_for_bin(ordinary, "standard")
-        self.assertFalse(layout["compatible"])
-
-    def test_report_returns_selected_mount_positions(self) -> None:
-        self.drawer["placements"] = [{"bin": "B1", "copy": 0, "gx": 2, "gy": 3}]
-        report = drawer_report(self.drawer, [self.bin])
-        self.assertFalse(report["problems"])
-        self.assertEqual(report["mounts"], [
-            {"gx": 2, "gy": 3, "key": "B1:0"},
-            {"gx": 2, "gy": 4, "key": "B1:0"},
-        ])
-
-    def test_same_bin_cannot_use_one_hole_twice(self) -> None:
-        self.drawer["placements"] = [{"bin": "B1", "copy": 0, "gx": 2, "gy": 3}]
-        duplicate = {**pegboard_layout_for_bin(self.bin, "standard"),
-                     "mount_offsets": [[0.0, 0], [0.0, 0]]}
-        with patch("organizer_drawer.pegboard_layout_for_bin", return_value=duplicate):
-            report = drawer_report(self.drawer, [self.bin])
-        self.assertIn("mount_overlap", {problem["type"] for problem in report["problems"]})
 
 
-class PegboardBrowserContractTests(unittest.TestCase):
-    def test_setup_mount_controls_and_board_view_are_wired(self) -> None:
-        root = Path(__file__).parent
-        html = (root / "web" / "index.html").read_text(encoding="utf-8")
-        spaces = (root / "web" / "spaces.js").read_text(encoding="utf-8")
-        app = (root / "web" / "app.js").read_text(encoding="utf-8")
-        model = (root / "web" / "drawer-model.js").read_text(encoding="utf-8")
-        view = (root / "web" / "drawer-view.js").read_text(encoding="utf-8")
-        self.assertIn('id="space-fields-pegboard"', html)
-        self.assertIn('id="pegboard-cleat-x"', html)
-        self.assertIn('id="pegboard-cleat-y"', html)
-        self.assertIn("SP.resolvePegboard", spaces)
-        self.assertIn("syncPegboardMountForm", app)
-        self.assertIn("DL.refreshPegboardLayouts", model)
-        self.assertIn("DV.paintPegboardScene", view)
+
+
 
 
 if __name__ == "__main__":

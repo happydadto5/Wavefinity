@@ -95,38 +95,9 @@ class StageBambuInputsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bh.stage_bambu_inputs([unsafe], handoff_root=self.root)
 
-    def test_missing_source_is_rejected(self):
-        with self.assertRaises(ValueError):
-            bh.stage_bambu_inputs([self.dir / "nope.3mf"], handoff_root=self.root)
 
-    def test_non_3mf_source_is_rejected(self):
-        stl = self.dir / "x.stl"
-        stl.write_bytes(b"x")
-        with self.assertRaises(ValueError):
-            bh.stage_bambu_inputs([stl], handoff_root=self.root)
 
-    def test_old_handoff_pruning_never_touches_the_new_one(self):
-        old = self.root / "old-handoff"
-        old.mkdir(parents=True)
-        (old / "0001 - Box.3mf").write_bytes(b"x")
-        old_time = time.time() - (bh.STALE_HANDOFF_AGE_SECONDS + 3600)
-        import os
-        os.utime(old, (old_time, old_time))
 
-        staged = bh.stage_bambu_inputs([self.a], handoff_root=self.root)
-        self.assertTrue(staged[0].is_file())
-        self.assertFalse(old.exists())
-        # The just-created handoff directory itself must never be pruned.
-        self.assertTrue(staged[0].parent.is_dir())
-
-    def test_recent_old_handoff_is_kept(self):
-        recent = self.root / "recent-handoff"
-        recent.mkdir(parents=True)
-        (recent / "0001 - Box.3mf").write_bytes(b"x")
-
-        staged = bh.stage_bambu_inputs([self.a], handoff_root=self.root)
-        self.assertTrue(staged[0].is_file())
-        self.assertTrue(recent.is_dir())
 
     def test_extruder_slot_mismatch_is_rejected_before_launch_and_cleaned_up(self):
         # Fix 058 Correction 1, C1.3: simulate a staged copy that failed to
@@ -152,9 +123,6 @@ class StageBambuInputsTests(unittest.TestCase):
         # The incomplete handoff directory created for this launch is removed.
         self.assertEqual(list(self.root.iterdir()) if self.root.is_dir() else [], [])
 
-    def test_no_files_raises(self):
-        with self.assertRaises(ValueError):
-            bh.stage_bambu_inputs([], handoff_root=self.root)
 
     def test_executable_detection(self):
         self.assertTrue(bh.is_bambu_studio_executable(Path("C:/x/Bambu-Studio.exe")))

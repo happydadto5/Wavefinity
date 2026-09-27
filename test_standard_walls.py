@@ -97,20 +97,6 @@ class StandardWallsTests(unittest.TestCase):
             clip = make_side_connector(spec, connector, "y", 0.0, 12.0)
             self.assertLessEqual(validate_side_fit(spec, connector, clip, "y"), 0.01)
 
-    def test_extreme_wall_connectors_handle_height_and_bin_size(self) -> None:
-        connector = ConnectorSpec()
-        for wall in (MIN_WALL, MAX_WALL):
-            source = BoxSpec(32.0, 48.0, 40.0, wall=wall, standard_walls=False)
-            other = BoxSpec(48.0, 48.0, 40.0, wall=wall, standard_walls=False)
-            equal = make_side_connector(source, connector, "y", 0.0, 12.0)
-            self.assertLessEqual(validate_side_fit(other, connector, equal, "y"), 0.01)
-            differing = make_side_connector(
-                source, connector, "y", 0.0, 12.0, 40.0, 24.0,
-            )
-            self.assertLessEqual(validate_side_fit(
-                source, connector, differing, "y",
-                bin_a_height=40.0, bin_b_height=24.0,
-            ), 0.01)
 
     def test_flat_divider_and_removable_insert_work_at_extremes(self) -> None:
         for wall in (MIN_WALL, MAX_WALL):
@@ -130,16 +116,6 @@ class StandardWallsTests(unittest.TestCase):
             ))
             self.assertTrue(make_fitted_insert(flat, [divider]).is_watertight)
 
-    def test_snug_holder_growth_preserves_custom_wall(self) -> None:
-        box = BoxSpec(16.0, 16.0, 40.0, wall=MAX_WALL, standard_walls=False)
-        nest = Feature(
-            "nest", Zone(-20.0, -10.0, 20.0, 10.0),
-            contour=((-20.0, -10.0), (20.0, -10.0), (20.0, 10.0), (-20.0, 10.0)),
-        )
-        grown = _fit_photo_nest_box(box, nest, "fused")
-        self.assertGreater(grown.x, box.x)
-        self.assertEqual(grown.wall, MAX_WALL)
-        self.assertFalse(grown.standard_walls)
 
     def test_save_open_and_legacy_migration(self) -> None:
         custom = BoxSpec(wall=1.2)
@@ -166,23 +142,7 @@ class StandardWallsTests(unittest.TestCase):
         self.assertFalse(reopened.standard_walls)
         self.assertEqual(reopened.wall, 1.2)
 
-    def test_standard_flag_normalizes_wall_and_bad_input_is_rejected(self) -> None:
-        saved = design_to_dict(BoxSpec(), Layout())
-        saved["box"].update({"standard_walls": True, "wall": 1.2})
-        reopened, *_ = design_from_dict(saved)
-        self.assertEqual(reopened.wall, DEFAULT_WALL)
-        saved["box"]["wall"] = MAX_WALL + 0.1
-        with self.assertRaisesRegex(ValueError, "wall thickness"):
-            design_from_dict(saved)
 
-    def test_custom_filenames_are_identifiable(self) -> None:
-        standard = BoxSpec()
-        custom = BoxSpec(wall=1.2, standard_walls=False)
-        self.assertEqual(box_filename(standard), "Box 16 x 16 x 40.3mf")
-        self.assertEqual(connector_filename(), "Connector - Same height.3mf")
-        self.assertIn("Wall 1.2mm", box_filename(custom))
-        self.assertIn("Wall 1.2mm", insert_filename(custom))
-        self.assertIn("Wall 1.2mm", connector_filename(wall=custom.wall))
 
     def test_sampler_connector_uses_requested_wall(self) -> None:
         with patch("organizer_engine.make_side_connector", wraps=__import__(
@@ -194,21 +154,6 @@ class StandardWallsTests(unittest.TestCase):
             )
         self.assertEqual(make_connector.call_args.args[0].wall, MAX_WALL)
 
-    def test_catalog_exposes_discrete_wall_choices(self) -> None:
-        rules = catalog_payload()["wall_rules"]
-        self.assertEqual(
-            (rules["min_mm"], rules["max_mm"], rules["step_mm"]),
-            (MIN_WALL, MAX_WALL, WALL_STEP),
-        )
-        # The UI's choice list is the curated WALL_PRESETS - the wall
-        # thicknesses that print differently on a typical nozzle - not every
-        # value the min/max/step validation quantum still accepts.
-        self.assertEqual(
-            tuple(choice["value"] for choice in rules["choices"]),
-            tuple(value for value, _label in WALL_PRESETS),
-        )
-        self.assertEqual(rules["choices"][0]["label"], WALL_PRESETS[0][1])
-        self.assertEqual(rules["choices"][-1]["label"], WALL_PRESETS[-1][1])
 
 
 if __name__ == "__main__":

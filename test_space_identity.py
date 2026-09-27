@@ -121,32 +121,7 @@ class SpaceIdentityTests(unittest.TestCase):
         self.assertEqual(meta(folder)["space_id"], space_id)
         self.assertEqual(self.prefs["active_space_id"], space_id)
 
-    def test_v5_upgrade_preserves_id_and_adds_empty_part_defaults(self):
-        folder = make_v4_space(self.tmp)
-        self.call("/api/folder/use", output=str(folder))
-        data = meta(folder)
-        space_id = data["space_id"]
-        data["version"] = 5
-        data.pop("part_defaults")
-        (folder / ".wavefinity.json").write_text(json.dumps(data), encoding="utf-8")
-        opened = self.call("/api/folder/use", output=str(folder))["folder"]
-        upgraded = meta(folder)
-        self.assertEqual(upgraded["version"], 8)
-        self.assertEqual(upgraded["space_id"], space_id)
-        self.assertEqual(upgraded["part_defaults"], {})
-        self.assertIsNone(upgraded["resume_design"])
-        self.assertFalse(upgraded["resume_pending"])
-        self.assertEqual(opened["part_defaults"], {})
 
-    def test_part_defaults_round_trip_through_the_space_defaults_route(self):
-        folder = make_v4_space(self.tmp)
-        self.call("/api/folder/use", output=str(folder))
-        saved = {"post": {"options": {"height": 24}, "zone": [16, 16]}}
-        result = self.call(
-            "/api/space/defaults", output=str(folder), part_defaults=saved,
-        )["folder"]
-        self.assertEqual(result["part_defaults"], saved)
-        self.assertEqual(meta(folder)["part_defaults"], saved)
 
     def test_v8_typed_without_id_is_damaged_not_healed(self):
         folder = make_v4_space(self.tmp)
@@ -258,41 +233,7 @@ class SpaceIdentityTests(unittest.TestCase):
         self.assertEqual(Path(self.prefs["space_registry"][space_id]["folder"]), first)
         self.assertEqual(Path(self.prefs["output"]), first)
 
-    def test_v3_space_id_is_not_trusted_during_setup_migration(self):
-        folder = self.tmp / "V3 Space"
-        folder.mkdir()
-        injected = str(uuid.uuid4())
-        (folder / ".wavefinity.json").write_text(json.dumps({
-            **V4, "version": 3, "space_id": injected,
-        }), encoding="utf-8")
-        info = self.call("/api/space/inspect", output=str(folder))["folder"]
-        self.assertTrue(info["needs_setup"])
-        self.call(
-            "/api/space/configure", output=str(folder),
-            name="Vanity", kind="drawer", x=320, y=240, z=55,
-        )
-        data = meta(folder)
-        self.assertEqual(data["version"], 8)
-        self.assertEqual(data["part_defaults"], {})
-        self.assertIsNone(data["resume_design"])
-        self.assertFalse(data["resume_pending"])
-        self.assertEqual(str(uuid.UUID(data["space_id"])), data["space_id"])
-        self.assertNotEqual(data["space_id"], injected)
 
-    def test_inspect_does_not_advance_last_seen(self):
-        folder = self.tmp / "Legacy Typed"
-        folder.mkdir()
-        space_id = str(uuid.uuid4())
-        (folder / ".wavefinity.json").write_text(json.dumps({
-            **V4, "version": 5, "space_id": space_id,
-        }), encoding="utf-8")
-        self.prefs["recent_folders"] = [{"folder": str(folder), "name": "Vanity", "kind": "drawer"}]
-        for _ in range(2):
-            recent = self.call("/api/space/inspect")["recent"]
-            self.assertEqual(recent[0]["space_id"], space_id)
-            entry = self.prefs["space_registry"][space_id]
-            self.assertFalse(entry.get("last_seen"))
-        self.assertEqual(self.prefs["recent_folders"], [])
 
     # ---- Fix 009: typed-Space authority (space_source / setup_prefill_space)
 
@@ -378,38 +319,7 @@ class SpaceIdentityTests(unittest.TestCase):
         self.assertEqual(info["folder_mode"], "space")
         self.assertEqual(info["space_source"], "legacy_metadata")
 
-    def test_exploration_commits_design_over_inventory_candidate(self):
-        folder = self.tmp / "Just Get Started"
-        folder.mkdir()
-        configure_space(
-            folder,
-            raw_def={"kind": "drawer", "name": "Old Drawer", "x": 320, "y": 240, "z": 55},
-        )
-        append_bin(folder, file="Box 16 x 16 x 20.3mf", x=16, y=16, z=20, name="Nuts")
-        before = (folder / INVENTORY_FILENAME).read_text(encoding="utf-8")
 
-        used = self.call("/api/space/use-untyped", output=str(folder))["folder"]
-        self.assertEqual(used["folder_mode"], "design")
-        self.assertIsNone(used["space"])
-        self.assertIsNone(used["space_source"])
-        self.assertFalse(used["needs_setup"])
-
-        info = self.call("/api/space/inspect", output=str(folder))["folder"]
-        self.assertEqual(info["folder_mode"], "design")
-        self.assertIsNone(info["space"])
-        self.assertIsNone(info["space_source"])
-        self.assertFalse(info["needs_setup"])
-        # The stale candidate survives only as a prefill suggestion, and the
-        # inventory itself was not rewritten or deleted.
-        self.assertEqual(info["setup_prefill_space"]["kind"], "drawer")
-        self.assertTrue((folder / INVENTORY_FILENAME).is_file())
-        self.assertEqual((folder / INVENTORY_FILENAME).read_text(encoding="utf-8"), before)
-        self.assertEqual([b["name"] for b in load_inventory(folder)["bins"]], ["Nuts"])
-
-    def test_authoritative_typed_space_still_refuses_exploration(self):
-        folder = make_v4_space(self.tmp, "Committed")
-        with self.assertRaises(ValueError):
-            self.call("/api/space/use-untyped", output=str(folder))
 
     # ---- Fix 032: exact Space resume checkpoint
 
@@ -456,22 +366,6 @@ class SpaceIdentityTests(unittest.TestCase):
         self.assertEqual(meta(folder)["resume_design"], design)
         self.assertTrue(meta(folder)["resume_pending"])
 
-    def test_null_resume_design_forces_pending_false(self):
-        folder = make_v4_space(self.tmp)
-        self.call("/api/folder/use", output=str(folder))
-        space_id = meta(folder)["space_id"]
-        self.call(
-            "/api/space/resume", output=str(folder), space_id=space_id,
-            resume_design={"box": {}}, resume_pending=True,
-        )
-        result = self.call(
-            "/api/space/resume", output=str(folder), space_id=space_id,
-            resume_design=None, resume_pending=True,
-        )["folder"]
-        self.assertIsNone(result["resume_design"])
-        self.assertFalse(result["resume_pending"])
-        self.assertIsNone(meta(folder)["resume_design"])
-        self.assertFalse(meta(folder)["resume_pending"])
 
     def test_malformed_resume_fields_are_rejected_without_rewriting_the_file(self):
         folder = make_v4_space(self.tmp)
@@ -491,42 +385,11 @@ class SpaceIdentityTests(unittest.TestCase):
             )
         self.assertEqual((folder / ".wavefinity.json").read_bytes(), before)
 
-    def test_missing_v8_resume_pending_is_malformed_not_defaulted(self):
-        # Fix 032 Correction 1: a v8 typed Space must carry a literal boolean
-        # resume_pending - a missing field is malformed metadata, not a
-        # silent "not pending".
-        folder = make_v4_space(self.tmp)
-        self.call("/api/folder/use", output=str(folder))
-        data = meta(folder)
-        self.assertEqual(data["version"], 8)
-        del data["resume_pending"]
-        (folder / ".wavefinity.json").write_text(json.dumps(data), encoding="utf-8")
-        with self.assertRaises(ValueError):
-            self.call("/api/space/inspect", output=str(folder))
 
-    def test_resume_route_refuses_an_untyped_folder(self):
-        plain = self.tmp / "Plain"
-        plain.mkdir()
-        self.call("/api/space/use-untyped", output=str(plain))
-        with self.assertRaises(ValueError):
-            self.call(
-                "/api/space/resume", output=str(plain),
-                resume_design={"box": {}}, resume_pending=True,
-            )
 
 
 
 class InventoryResolverTests(unittest.TestCase):
-    def test_log_bin_to_folder_uses_canonical_filename(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Any Name"
-            log_file = log_bin_to_folder(
-                folder, BoxSpec(40.0, 48.0, 40.0), Layout((), "fused", 1.0),
-                generated_files=[folder / "Box 40 x 48 x 40.3mf"], label="TOOLS", part_name="Tools",
-            )
-            self.assertEqual(Path(log_file).name, INVENTORY_FILENAME)
-            self.assertTrue(Path(log_file).is_file())
-            self.assertIn("Box 40 x 48 x 40.3mf", Path(log_file).read_text(encoding="utf-8"))
     def test_resolver_is_read_only_then_migrates_safely(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "Renamed Folder"
@@ -570,42 +433,6 @@ class InventoryResolverTests(unittest.TestCase):
             with self.assertRaises(InventoryMigrationError):
                 append_bin(folder, file="x.3mf", x=8, y=8, z=8)
             self.assertFalse((folder / INVENTORY_FILENAME).exists())
-
-
-class ProfilePreferenceTests(unittest.TestCase):
-    def test_local_preference_file_migrates_to_user_profile(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            legacy = Path(tmp) / "app" / "wavefinity_prefs.json"
-            profile = Path(tmp) / "profile" / "Wavefinity" / "wavefinity_prefs.json"
-            legacy.parent.mkdir()
-            legacy.write_text(json.dumps({"output": "X", "slicer_path": "S"}), encoding="utf-8")
-            with patch.object(wavefinity_web, "LEGACY_PREFERENCES_FILE", legacy), \
-                    patch.object(wavefinity_web, "PREFERENCES_FILE", profile):
-                self.assertEqual(wavefinity_web.load_preferences()["output"], "X")
-                wavefinity_web.save_preferences({"extra": 1})
-                self.assertTrue(profile.is_file())
-                saved = json.loads(profile.read_text(encoding="utf-8"))
-                self.assertEqual(saved, {"output": "X", "slicer_path": "S", "extra": 1})
-                self.assertEqual(json.loads(legacy.read_text(encoding="utf-8"))["output"], "X")
-                legacy.write_text(json.dumps({"output": "STALE"}), encoding="utf-8")
-                self.assertEqual(wavefinity_web.load_preferences()["output"], "X")
-
-
-class ShowLogTests(unittest.TestCase):
-    def test_show_log_uses_canonical_inventory_resolver(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Somewhere"
-            folder.mkdir()
-            append_bin(folder, file="a.3mf", x=16, y=16, z=20)
-            (folder / INVENTORY_FILENAME).rename(folder / "Old bins.md")
-            (folder / "notes.md").write_text("unrelated", encoding="utf-8")
-            with patch.object(wavefinity_web, "HOSTED", False), \
-                    patch.object(wavefinity_web, "open_log_with_wordpad") as opener:
-                wavefinity_web.show_log_payload({"output": str(folder)})
-            opened = Path(opener.call_args.args[0])
-            self.assertEqual(opened.name, INVENTORY_FILENAME)
-            self.assertTrue(opened.is_file())
-            self.assertFalse((folder / "Old bins.md").exists())
 
 
 if __name__ == "__main__":

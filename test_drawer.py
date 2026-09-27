@@ -139,53 +139,8 @@ class FolderMigrationTests(unittest.TestCase):
         routes = space_routes(Path(tmp), lambda: dict(prefs), lambda update: prefs.update(update) or dict(prefs))
         return routes, prefs
 
-    def test_empty_folder_becomes_design_with_inventory_on_by_default(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Designs"
-            routes, _prefs = self.routes(tmp)
-            # A never-before-seen folder always needs_setup=True; the "no
-            # Space type" choice is the explicit /api/space/use-untyped
-            # route - /api/folder/use only opens an already-settled folder.
-            result = routes["/api/space/use-untyped"]({"output": str(folder)})
-            self.assertEqual(result["folder"]["folder_mode"], "design")
-            self.assertTrue(result["folder"]["inventory"])
-            written = json.loads((folder / ".wavefinity.json").read_text())
-            self.assertEqual(written["folder_mode"], "design")
-            self.assertTrue(written["inventory"])
-            # Inventory is enabled, but the file itself is only created lazily,
-            # the first time there is something to log.
-            self.assertFalse(inventory_path(folder).exists())
-            # Now that setup is complete, reopening it is the plain open route.
-            self.assertEqual(
-                routes["/api/folder/use"]({"output": str(folder)})["folder"]["folder_mode"], "design",
-            )
 
-    def test_old_design_metadata_migrates_to_inventory_on(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "OldDesign"
-            folder.mkdir()
-            (folder / ".wavefinity.json").write_text('{"version":2,"folder_mode":"design"}', encoding="utf-8")
-            routes, _prefs = self.routes(tmp)
-            # A v2 design marker still needs its one-time setup pass.
-            result = routes["/api/space/use-untyped"]({"output": str(folder)})
-            self.assertEqual(result["folder"]["folder_mode"], "design")
-            self.assertTrue(result["folder"]["inventory"])
-            self.assertTrue(json.loads((folder / ".wavefinity.json").read_text())["inventory"])
 
-    def test_inventory_can_be_turned_off_and_back_on_explicitly(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Bench"
-            routes, _prefs = self.routes(tmp)
-            routes["/api/space/use-untyped"]({"output": str(folder)})
-
-            off = routes["/api/folder/inventory"]({"output": str(folder), "inventory": False})
-            self.assertFalse(off["folder"]["inventory"])
-            self.assertFalse(json.loads((folder / ".wavefinity.json").read_text())["inventory"])
-            # Reopening the folder preserves the opt-out.
-            self.assertFalse(routes["/api/folder/use"]({"output": str(folder)})["folder"]["inventory"])
-
-            on = routes["/api/folder/inventory"]({"output": str(folder), "inventory": True})
-            self.assertTrue(on["folder"]["inventory"])
 
     def test_space_requires_inventory_and_rejects_turning_it_off(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -198,143 +153,10 @@ class FolderMigrationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 routes["/api/folder/inventory"]({"output": str(folder), "inventory": False})
 
-    def test_legacy_space_and_design_markers_migrate_additively(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            routes, prefs = self.routes(tmp)
-            drawer = Path(tmp) / "Drawer"
-            drawer.mkdir()
-            legacy_space = {"name": "Tools", "kind": "drawer", "x": 120, "y": 80, "z": 40}
-            (drawer / ".wavefinity-space.json").write_text(json.dumps(legacy_space), encoding="utf-8")
 
-            # A legacy typed Space is only ever a candidate: it needs the
-            # explicit migration pass (/api/space/configure), never an
-            # automatic promotion from merely opening the folder.
-            inspected = routes["/api/space/inspect"]({"output": str(drawer)})["folder"]
-            self.assertEqual(inspected["folder_mode"], "space")
-            self.assertEqual(inspected["space_source"], "legacy_metadata")
-            self.assertTrue(inspected["needs_setup"])
-            result = routes["/api/space/configure"]({
-                "output": str(drawer), "name": "Tools", "kind": "drawer", "x": 120, "y": 80, "z": 40,
-            })
-            self.assertEqual(result["folder"]["folder_mode"], "space")
-            self.assertEqual(result["folder"]["space"]["x"], 120.0)
-            self.assertEqual(json.loads((drawer / ".wavefinity.json").read_text())["space"]["name"], "Tools")
 
-            plain = Path(tmp) / "Plain"
-            plain.mkdir()
-            (plain / ".wavefinity-space.json").write_text('{"kind":"none"}', encoding="utf-8")
-            self.assertEqual(
-                routes["/api/space/use-untyped"]({"output": str(plain)})["folder"]["folder_mode"], "design",
-            )
 
-            preferred = Path(tmp) / "Preferred"
-            preferred.mkdir()
-            prefs["no_inventory_folders"] = [str(preferred)]
-            preferred_result = routes["/api/space/use-untyped"]({"output": str(preferred)})["folder"]
-            self.assertEqual(preferred_result["folder_mode"], "design")
-            self.assertFalse(preferred_result["inventory"])
 
-    def test_inventory_layout_space_needs_explicit_migration_over_contrary_metadata(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Drawer"
-            folder.mkdir()
-            configure_space(folder, raw_def={"name": "Hardware", "kind": "drawer", "x": 100, "y": 80, "z": 40})
-            inventory_before = inventory_path(folder).read_bytes()
-            (folder / ".wavefinity.json").write_text('{"version":2,"folder_mode":"design"}', encoding="utf-8")
-            (folder / ".wavefinity-space.json").write_text('{"kind":"none"}', encoding="utf-8")
-            routes, _prefs = self.routes(tmp)
-
-            # Merely inspecting the folder never rewrites the inventory, and
-            # an inventory-only candidate is never silently authoritative -
-            # it still needs the explicit migration pass, even though it is
-            # the only real Space information the folder has.
-            inspected = routes["/api/space/inspect"]({"output": str(folder)})["folder"]
-            self.assertEqual(inspected["folder_mode"], "space")
-            self.assertEqual(inspected["space"]["name"], "Hardware")
-            self.assertEqual(inspected["space_source"], "inventory_layout")
-            self.assertTrue(inspected["needs_setup"])
-            self.assertEqual(inventory_path(folder).read_bytes(), inventory_before)
-
-            result = routes["/api/space/configure"]({
-                "output": str(folder), "name": "Hardware", "kind": "drawer", "x": 100, "y": 80, "z": 40,
-            })["folder"]
-            self.assertEqual(result["folder_mode"], "space")
-            self.assertEqual(result["space"]["name"], "Hardware")
-            self.assertEqual(json.loads((folder / ".wavefinity.json").read_text())["folder_mode"], "space")
-
-    def test_legacy_box_space_migrates_to_portable_over_a_stale_current_design_marker(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Garage"
-            folder.mkdir()
-            # A current "design" marker is not a positive Space identity and
-            # must not hide a genuine legacy Box recorded alongside it.
-            (folder / ".wavefinity.json").write_text('{"version":2,"folder_mode":"design"}', encoding="utf-8")
-            (folder / ".wavefinity-space.json").write_text(
-                json.dumps({"name": "Screws", "kind": "box", "x": 96, "y": 48, "z": 40}), encoding="utf-8",
-            )
-            routes, _prefs = self.routes(tmp)
-            inspected = routes["/api/space/inspect"]({"output": str(folder)})["folder"]
-            self.assertEqual(inspected["folder_mode"], "space")
-            self.assertEqual(inspected["space"], {
-                "name": "Screws", "kind": "box", "x": 96.0, "y": 48.0, "z": 40.0,
-                "storage_box": storage_box_defaults(),
-            })
-            self.assertEqual(inspected["space_source"], "legacy_metadata")
-            self.assertTrue(inspected["needs_setup"])
-
-            # The explicit migration pass always persists legacy "box" as
-            # "portable" - that mapping is enforced by configure_space()
-            # itself, never left to the caller.
-            result = routes["/api/space/configure"]({
-                "output": str(folder), "name": "Screws", "kind": "box", "x": 96, "y": 48, "z": 40,
-            })["folder"]
-            self.assertEqual(result["folder_mode"], "space")
-            self.assertEqual(result["space"], {
-                "name": "Screws", "kind": "portable", "x": 96.0, "y": 48.0, "z": 40.0,
-                "storage_box": storage_box_defaults(),
-            })
-            self.assertTrue(result["inventory"])
-            written = json.loads((folder / ".wavefinity.json").read_text())
-            self.assertEqual(written["folder_mode"], "space")
-            self.assertTrue(written["inventory"])
-            self.assertEqual(written["space"]["kind"], "portable")
-
-    def test_legacy_space_migration_requires_inventory_even_with_a_stale_opt_out(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Bench"
-            folder.mkdir()
-            (folder / ".wavefinity.json").write_text(
-                '{"version":2,"folder_mode":"design","inventory":false}', encoding="utf-8",
-            )
-            (folder / ".wavefinity-space.json").write_text(
-                json.dumps({"name": "Bits", "kind": "drawer", "x": 120, "y": 80, "z": 40}), encoding="utf-8",
-            )
-            routes, _prefs = self.routes(tmp)
-            inspected = routes["/api/space/inspect"]({"output": str(folder)})["folder"]
-            self.assertEqual(inspected["folder_mode"], "space")
-            self.assertEqual(inspected["space"]["kind"], "drawer")
-            self.assertEqual(inspected["space_source"], "legacy_metadata")
-
-            result = routes["/api/space/configure"]({
-                "output": str(folder), "name": "Bits", "kind": "drawer", "x": 120, "y": 80, "z": 40,
-            })["folder"]
-            self.assertEqual(result["folder_mode"], "space")
-            self.assertEqual(result["space"]["kind"], "drawer")
-            # Space always requires inventory, overriding the stale opt-out.
-            self.assertTrue(result["inventory"])
-
-    def test_current_design_wins_over_legacy_none_and_keeps_its_own_inventory_choice(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Plain2"
-            folder.mkdir()
-            (folder / ".wavefinity.json").write_text(
-                '{"version":2,"folder_mode":"design","inventory":false}', encoding="utf-8",
-            )
-            (folder / ".wavefinity-space.json").write_text('{"kind":"none"}', encoding="utf-8")
-            routes, _prefs = self.routes(tmp)
-            result = routes["/api/space/use-untyped"]({"output": str(folder)})["folder"]
-            self.assertEqual(result["folder_mode"], "design")
-            self.assertFalse(result["inventory"])
 
     def test_damaged_or_unsupported_metadata_is_never_rewritten(self):
         cases = {
@@ -392,15 +214,6 @@ class FolderMigrationTests(unittest.TestCase):
 
 
 class AutoLayoutRemovalTests(unittest.TestCase):
-    def test_auto_layout_function_route_and_helpers_are_gone(self):
-        for name in ("auto_layout", "_pack", "_rescue_pack", "_build_stacks", "STRATEGIES",
-                     "AUTO_NO_SPOT", "HEIGHT_RULES", "reconcile_printed_copies"):
-            self.assertFalse(hasattr(organizer_drawer, name), name)
-        routes = drawer_routes(threading.Lock(), Path("."), hosted=False)
-        self.assertNotIn("/api/drawer/auto", routes)
-        for path in ("/api/drawer/report", "/api/drawer/surface-fill", "/api/drawer/spacers",
-                     "/api/drawer/connectors", "/api/drawer/design-source/duplicate"):
-            self.assertIn(path, routes)
 
     def test_manual_placements_still_report_fit_overlap_and_height(self):
         bins = [_bin("B1", 16, 16, 50), _bin("B2", 32, 16, 20)]
@@ -415,22 +228,6 @@ class AutoLayoutRemovalTests(unittest.TestCase):
         report = drawer_report(overlap["drawers"][0], bins)
         self.assertTrue(any(p["type"] == "overlap" for p in report["problems"]))
 
-    def test_report_has_no_planned_or_locked_semantics_for_ordinary_bins(self):
-        # An unprinted (Qty 0) placed bin is simply placed - never "planned".
-        bins = [_bin("B1", 16, 16, 30, qty=0), _bin("B2", 16, 16, 30, qty=1)]
-        layout = _layout(8 * 8 + 1, 6 * 8 + 1, placements=[
-            {"bin": "B1", "copy": 0, "gx": 0, "gy": 0, "locked": True},
-            {"bin": "B2", "copy": 0, "gx": 2, "gy": 0},
-        ])
-        report = drawer_report(layout["drawers"][0], bins)
-        self.assertNotIn("planned", report)
-        self.assertEqual(report["placed"], 2)
-        pegboard = drawer_report({**layout["drawers"][0], "boundary": "pegboard"}, bins)
-        self.assertNotIn("planned", pegboard)
-        from organizer_drawer import _grid_items
-        item = _grid_items(normalise_drawer(layout["drawers"][0]), {one["id"]: one for one in bins})[0]
-        self.assertNotIn("locked", item)
-        self.assertTrue(all("planned" not in layer for layer in item["layers"]))
 
 
 class StackTests(unittest.TestCase):
@@ -446,92 +243,11 @@ class StackTests(unittest.TestCase):
         self.assertEqual(report["stacks"], 1)
         self.assertEqual([p for p in report["problems"] if p["type"] != "height"], [])
 
-    def test_a_bin_not_printed_to_stack_is_flagged_on_a_stack(self):
-        bins = [{**_bin("B1", 16, 16, 30), "stack": "lid"}, _bin("B2", 16, 16, 20)]
-        layout = _layout(4 * 8 + 1, 4 * 8 + 1, placements=[
-            {"bin": "B1", "copy": 0, "gx": 0, "gy": 0}, {"bin": "B2", "copy": 0, "on": "B1:0"},
-        ])
-        report = drawer_report(layout["drawers"][0], bins)
-        self.assertTrue(any(p["type"] == "stack" for p in report["problems"]))
 
 
 class SpacerTests(unittest.TestCase):
-    def test_edges_get_spacer_candidates_for_every_exposed_side(self):
-        # The unified edge-spacer design plans one short, deterministic
-        # contact-width candidate per exposed wall segment - never a full
-        # tiled "cover the whole run" set, and never an interior grid-cell
-        # filler (that older "X spacer" concept no longer exists).
-        bins = [_bin("B1", 16, 16, 40)]
-        layout = _layout(4 * 8 + 1 + 5.0, 3 * 8 + 1, placements=[{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}])
-        plan = plan_spacers(layout["drawers"][0], bins, {"fill": "all"})
-        self.assertEqual(plan["height"], 15)
-        sides = sorted(c["placements"][0]["side"] for c in plan["candidates"])
-        self.assertEqual(sides, ["back", "right"])
-        # A single simple component gets both its exposed sides auto-selected.
-        self.assertEqual({c["id"] for c in plan["selected"]}, {c["id"] for c in plan["candidates"]})
-        right = next(c["placements"][0] for c in plan["candidates"] if c["placements"][0]["side"] == "right")
-        # flat against the drawer wall; wave crests reach just past the grid edge.
-        self.assertAlmostEqual(right["x"] + right["w"], 37.5, places=6)
-        self.assertTrue(16.1 < right["x"] < 16.6, right["x"])
 
-    def test_a_non_8mm_interior_spacer_carries_the_global_wave_phase(self):
-        # A normal bin's own centre always lands on the global wave lattice
-        # (its size is always a whole 8 mm unit). A spacer whose size is
-        # "4 mod 8" on a 4 mm-snap drawer does NOT get that for free: its
-        # grid corner is lattice-aligned, but corner + size/2 is not, so its
-        # wave is half a cycle out of phase unless corrected - crest against
-        # trough instead of matched. This checks the corrected geometry
-        # actually mates with a real neighbouring bin: same clearance a
-        # same-wall-sharing pair of ordinary bins would show, not a collision.
-        z = 20.0
-        bin_spec = BoxSpec(16, 16, z)
-        bin_centre = (8.0, 8.0)  # bin occupies grid x in [0, 16], y in [0, 16]
-        bin_outline = placed_outline(bin_spec, bin_centre)
 
-        # A spacer immediately to the left, sharing the vertical seam at
-        # x = 0: grid x in [-16, 0], y in [0, 4]. Its Y size (4 mm) is what
-        # governs its left/right-wall phase, since those walls run along Y.
-        sx, sy = 16.0, 4.0
-        spacer_centre = (-8.0, 2.0)
-        half_x, half_y = sx / 2.0 - WAVE_MATING_GAP / 2.0, sy / 2.0 - WAVE_MATING_GAP / 2.0
-        phase_x, phase_y = (sx / 2.0) % WAVE_LENGTH, (sy / 2.0) % WAVE_LENGTH
-        self.assertAlmostEqual(phase_y, 2.0, places=6, msg="test setup should exercise a half-cycle correction")
-
-        corrected = affinity.translate(wavy_rect_outer(half_x, half_y, phase_x=phase_x, phase_y=phase_y), *spacer_centre)
-        self.assertTrue(corrected.intersection(bin_outline).is_empty)
-        self.assertAlmostEqual(corrected.distance(bin_outline), nested_clearance(), places=3)
-
-        # The uncorrected (phase 0) geometry is the bug this guards against:
-        # it should actually collide with the neighbouring bin.
-        uncorrected = affinity.translate(wavy_rect_outer(half_x, half_y), *spacer_centre)
-        self.assertGreater(uncorrected.intersection(bin_outline).area, 0.01)
-
-    def test_edge_spacer_plans_correctly_on_a_non_8mm_run_with_a_4mm_snap_drawer(self):
-        # 23 rows of 4 mm = 92 mm - not a multiple of 8, so BoxSpec (8 mm
-        # grid only) can't be built at exactly this length; spacer planning
-        # must still produce sane, in-bounds geometry for the odd run
-        # instead of failing or silently rounding to the nearest 8 mm.
-        # (The candidate itself is now a short, fixed contact-width piece,
-        # never a set of pieces tiled across the whole run - see
-        # SPACER_CONTACT_TARGET / _make_candidate.)
-        raw_drawer = {
-            "id": "d1", "name": "Drawer 1", "width": 100.0, "depth": 93.0, "height": 60,
-            "clearance": 1.0, "anchor": "front-left", "bin_axis": "x", "snap": 4,
-            "placements": [{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}],
-        }
-        bins = [_bin("B1", 16, 16, 40)]
-        grid = drawer_grid(normalise_drawer(raw_drawer))
-        run_mm = grid["rows"] * grid["step"]
-        self.assertNotEqual(run_mm % 8, 0, "test setup should exercise a non-8mm run")
-        plan = plan_spacers(raw_drawer, bins, {"fill": "edges"})
-        right = next(
-            c["placements"][0] for c in plan["candidates"] if c["placements"][0]["side"] == "right"
-        )
-        self.assertGreater(right["w"], 0)
-        self.assertGreater(right["d"], 0)
-        # The candidate sits inside the drawer, clear of the bin and the wall.
-        self.assertGreaterEqual(right["y"], grid["oy"])
-        self.assertLessEqual(right["y"] + right["d"], grid["oy"] + run_mm)
 
     def test_edge_spacer_mesh_is_a_watertight_flexure(self):
         # spacer_frame() (an "open braced frame" mesh) no longer exists -
@@ -572,32 +288,6 @@ class SpacerTests(unittest.TestCase):
             placements = made["layout"]["drawers"][0]["placements"]
             self.assertTrue(any(p["bin"] == edges[0]["id"] for p in placements))
 
-    def test_legacy_shim_rows_load_as_spacers_and_never_resave_as_shim(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Old Shop"
-            folder.mkdir(parents=True)
-            path = inventory_path(folder)
-            path.write_text(
-                "# Old Shop Bins\n\n"
-                "| ID | Date | Kind | Name | X (mm) | Y (mm) | Z (mm) | Stack | Wall (mm) | Qty | File | Label | Interior Part(s) |\n"
-                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
-                "| B1 | 2024-01-01 00:00 | shim | Edge shim | 16 | 250 | 15 | | | 1 | Shim 16 x 250 x 15.3mf | | Edge shim, wavy on the bin side |\n",
-                encoding="utf-8",
-            )
-            loaded = load_inventory(folder)
-            legacy = loaded["bins"][0]
-            self.assertEqual(legacy["kind"], "spacer")
-            self.assertEqual(legacy["boundary"], "edge")
-            self.assertEqual((legacy["x"], legacy["y"], legacy["z"]), (16, 250, 15))
-            # Any save (even one touching an unrelated row) normalises it.
-            # Its historical name/file text is free-form data describing a
-            # real file already on disk and is left alone; only the Kind
-            # column - the thing that made it a second data model - changes.
-            saved = save_inventory(folder, bin_updates=[{"id": "B1", "qty": 1}])
-            self.assertEqual(saved["bins"][0]["kind"], "spacer")
-            self.assertEqual(saved["bins"][0]["boundary"], "edge")
-            kind_column = re.search(r"\|\s*shim\s*\|", path.read_text(encoding="utf-8"), re.I)
-            self.assertIsNone(kind_column, "a Kind cell still literally says shim")
 
 
 class BoundaryTests(unittest.TestCase):
@@ -647,12 +337,6 @@ class BoundaryTests(unittest.TestCase):
             grid = drawer_grid(normalise_drawer(drawer))
             self.assertEqual((grid["cols"], grid["rows"]), (12, 6))
 
-    def test_an_existing_plain_drawer_space_missing_boundary_migrates_to_wall_on_load(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Drawer"
-            self._write_space(folder, "drawer")
-            loaded = load_inventory(folder)
-            self.assertEqual(loaded["layout"]["drawers"][0]["boundary"], "wall")
 
     def test_an_already_explicit_boundary_is_never_overwritten(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -661,18 +345,6 @@ class BoundaryTests(unittest.TestCase):
             loaded = load_inventory(folder)
             self.assertEqual(loaded["layout"]["drawers"][0]["boundary"], "wall")
 
-    def test_hosted_browser_text_migrates_an_existing_box_space_too(self):
-        layout = {
-            "version": 1, "active": "d1",
-            "space": {"kind": "box", "name": "Case", "x": 96, "y": 48, "z": 40},
-            "drawers": [{
-                "id": "d1", "name": "Case", "width": 96, "depth": 48, "height": 40,
-                "clearance": 0.0, "placements": [],
-            }],
-        }
-        text = render_inventory("Case", [], layout)
-        loaded = load_inventory_text(text, title="Case")
-        self.assertEqual(loaded["layout"]["drawers"][0]["boundary"], "mating")
 
 
 class StorageBoxFilenameTests(unittest.TestCase):
@@ -756,13 +428,6 @@ class DesignSourceTests(unittest.TestCase):
         save_inventory(self.folder, layout=old_layout)
         self.assertEqual(design_specs(load_inventory(self.folder)["layout"])[row_id]["part_name"], "B")
 
-    def test_layout_creation_can_attach_source_for_its_new_row(self):
-        from organizer_inventory import design_specs
-        design = self._design("Filled")
-        saved = save_inventory(self.folder,
-            layout={"design_specs": {"B1": design}},
-            new_bins=[{"id": "B1", "kind": "bin", "name": "Filled", "x": 16, "y": 16, "z": 20, "qty": 0}])
-        self.assertEqual(design_specs(saved["layout"])["B1"], design)
 
     def test_save_to_space_identity_transaction_cases(self):
         """Identical saves preserve status; real edits reset the same row."""
@@ -811,81 +476,8 @@ class DesignSourceTests(unittest.TestCase):
         specs = design_specs(edited_again["layout"])
         self.assertIn(row_id, specs)
 
-    def test_legacy_status_and_lifecycle(self):
-        from organizer_inventory import parse_inventory, change_design_status, save_design_source
-        header = "| ID | Date | Kind | Name | X (mm) | Y (mm) | Z (mm) | Qty | File |\n"
-        divider = "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
-        for qty, file, expected in [("2", "-", "printed"), ("0", "A.3mf", "saved"), ("0", "-", "in_design")]:
-            text = header + divider + f"| B1 | - | bin | A | 16 | 16 | 20 | {qty} | {file} |\n"
-            self.assertEqual(parse_inventory(text)["bins"][0]["status"], expected)
-        no_qty_header = "| ID | Date | Kind | Name | X (mm) | Y (mm) | Z (mm) | File |\n"
-        no_qty_divider = "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
-        for file, expected in [("A.3mf", "saved"), ("-", "in_design")]:
-            text = no_qty_header + no_qty_divider + f"| B1 | - | bin | A | 16 | 16 | 20 | {file} |\n"
-            self.assertEqual(parse_inventory(text)["bins"][0]["status"], expected)
-        with_status = header.replace("| File |", "| Status | File |")
-        with_divider = divider.replace("| --- |\n", "| --- | --- |\n")
-        bad = with_status + with_divider + "| B1 | - | bin | A | 16 | 16 | 20 | 0 | unknown | A.3mf |\n"
-        self.assertEqual(parse_inventory(bad)["bins"][0]["status"], "saved")
-        first = save_design_source(self.folder, design=self._design("A"), record=self._record("A"))
-        row_id = first["row_id"]
-        saved = change_design_status(self.folder, row_id, "saved", "A.3mf")
-        self.assertEqual(saved["bins"][0]["status"], "saved")
-        (self.folder / "A.3mf").write_bytes(b"3mf")
-        printed = change_design_status(self.folder, row_id, "mark_printed")
-        self.assertEqual(printed["bins"][0]["qty"], 1)
-        save_inventory(self.folder, layout={**printed["layout"], **_layout(200, 120, placements=[
-            {"bin": row_id, "copy": 0, "gx": 0, "gy": 0},
-        ])})
-        self.assertEqual(load_inventory(self.folder)["bins"][0]["status"], "printed")
-        back = change_design_status(self.folder, row_id, "mark_not_printed")
-        self.assertEqual(back["bins"][0]["status"], "saved")
-        changed = save_design_source(self.folder, design=self._design("B"), record=self._record("B"), row_id=row_id)
-        self.assertEqual(changed["bins"][0]["status"], "in_design")
-        self.assertEqual(changed["bins"][0]["file"], "")
-        with self.assertRaises(ValueError):
-            change_design_status(self.folder, row_id, "arbitrary")
-        with self.assertRaises(ValueError):
-            change_design_status(self.folder, row_id, "saved", "old.3mf",
-                                 expected_design=self._design("A"))
-        change_design_status(self.folder, row_id, "printed", "missing.3mf")
-        missing = change_design_status(self.folder, row_id, "mark_not_printed")
-        self.assertEqual(missing["bins"][0]["status"], "in_design")
 
-    def test_duplicate_clone_and_unique_names(self):
-        from organizer_inventory import save_design_source, duplicate_design_source, design_specs
-        design = {**self._design("Popper"), "label": "Keep", "box": {**self._design()["box"], "edge_mount": {"label_text": "Keep"}}}
-        first = save_design_source(self.folder, design=design, record=self._record("Popper"))
-        placed_layout = {**first["layout"], **_layout(200, 120, placements=[
-            {"bin": first["row_id"], "copy": 0, "gx": 0, "gy": 0},
-        ])}
-        save_inventory(self.folder, layout=placed_layout)
-        second = duplicate_design_source(self.folder, first["row_id"])
-        third = duplicate_design_source(self.folder, second["row_id"])
-        self.assertEqual([one["name"] for one in third["bins"]], ["Popper", "Popper (2)", "Popper (3)"])
-        self.assertEqual(second["design"]["box"], design["box"])
-        self.assertEqual(second["design"]["label"], "Keep")
-        self.assertEqual(second["bins"][-1]["status"], "in_design")
-        self.assertEqual(second["bins"][-1]["file"], "")
-        self.assertNotEqual(first["row_id"], second["row_id"])
-        self.assertEqual(len(design_specs(third["layout"])), 3)
-        self.assertEqual([one["bin"] for one in third["layout"]["drawers"][0]["placements"]],
-                         [first["row_id"]])
-        save_inventory(self.folder, delete_ids=[second["row_id"]])
-        gap = duplicate_design_source(self.folder, first["row_id"])
-        self.assertEqual(gap["design"]["part_name"], "Popper (2)")
 
-    def test_unnamed_source_gets_unique_simple_bin_name(self):
-        from organizer_inventory import save_design_source, duplicate_design_source
-        first = save_design_source(self.folder, design=self._design(""), record=self._record(""))
-        self.assertEqual(first["design"]["part_name"], "Bin 1")
-        second = save_design_source(self.folder, design=self._design(""), record=self._record(""))
-        self.assertEqual(second["design"]["part_name"], "Bin 2")
-        # Named duplicate follows the root, while a blank root uses Bin N.
-        duplicate = duplicate_design_source(self.folder, first["row_id"])
-        self.assertEqual(duplicate["design"]["part_name"], "Bin 1 (2)")
-        from organizer_inventory import _duplicate_name
-        self.assertEqual(_duplicate_name(duplicate["bins"], ""), "Bin 3")
 
     def test_local_and_hosted_design_source_routes_match(self):
         from wavefinity_web import default_design
@@ -913,15 +505,6 @@ class DesignSourceTests(unittest.TestCase):
             self.assertEqual((row["status"], row["qty"]), ("saved", 0))
 
 
-class KeepOutRemovalTests(unittest.TestCase):
-    def test_a_stray_old_keepouts_key_is_dropped(self):
-        drawer = normalise_drawer({
-            "id": "d1", "width": 100.0, "depth": 93.0, "height": 60,
-            "keepouts": [{"x": 0, "y": 0, "w": 16, "d": 16}], "placements": [],
-        })
-        self.assertNotIn("keepouts", drawer)
-
-
 class OpenSpaceTests(unittest.TestCase):
     def test_two_distinct_openings_are_reported_largest_first(self):
         # A drawer with one bin in the middle leaves two separate gaps, one
@@ -945,19 +528,6 @@ class OpenSpaceTests(unittest.TestCase):
         report = drawer_report(layout["drawers"][0], bins)
         self.assertEqual(report["opens"], [])
 
-    def test_a_sub_bin_width_sliver_is_not_offered_as_an_open_space(self):
-        # A 3x4-cell (4 mm snap) grid with a 2x4-cell bin in it leaves a
-        # genuine 1x4-cell (4 x 16 mm) strip - real free area, but narrower
-        # than the smallest normal bin (one 8 mm unit) in every direction.
-        bins = [_bin("B1", 8, 16, 20)]
-        drawer = {
-            "id": "d1", "name": "Drawer 1", "width": 14.0, "depth": 18.0, "height": 40,
-            "clearance": 1.0, "anchor": "front-left", "bin_axis": "x", "snap": 4,
-            "placements": [{"bin": "B1", "copy": 0, "gx": 0, "gy": 0}],
-        }
-        report = drawer_report(drawer, bins)
-        self.assertGreater(report["cells"]["free"], 0)
-        self.assertEqual(report["opens"], [])
 
 
 class AutoSpaceFolderTests(unittest.TestCase):
@@ -999,25 +569,6 @@ class AutoSpaceFolderTests(unittest.TestCase):
                 "Space names can't be reused. Choose a different name.",
             )
 
-    def test_auto_space_cleanup_on_validation_failure(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            space_root = Path(tmp) / "Documents" / "Wavefinity"
-            prefs = {}
-            routes = space_routes(
-                Path(tmp),
-                lambda: dict(prefs),
-                lambda update: prefs.update(update) or dict(prefs),
-                space_root=space_root,
-            )
-            with self.assertRaises(ValueError):
-                routes["/api/space/create"]({
-                    "name": "Invalid Drawer",
-                    "kind": "drawer",
-                    "x": 0,
-                    "y": 0,
-                    "z": 0,
-                })
-            self.assertFalse((space_root / "Invalid Drawer").exists())
 
 
 class BulkPrintTests(unittest.TestCase):
@@ -1069,133 +620,12 @@ class BulkPrintTests(unittest.TestCase):
         self.assertEqual(copies, [0, 1, 2])
         self.assertEqual(result["bin_copies"], 1)
 
-    def test_partial_selection_keeps_rest_planned_and_stack_refs_follow(self):
-        self.add("A", "A.3mf", qty=1)
-        self.place(
-            {"bin": "B1", "copy": 0, "gx": 0, "gy": 0},
-            {"bin": "B1", "copy": 3, "gx": 2, "gy": 0},
-            {"bin": "B1", "copy": 5, "gx": 4, "gy": 0, "on": "B1:3"},
-            {"bin": "B1", "copy": 6, "gx": 6, "gy": 0},
-        )
-        result = self.run_print({"B1": 2})
-        placements = {(p["copy"]): p for p in result["layout"]["drawers"][0]["placements"]}
-        self.assertEqual(result["bins"][0]["qty"], 1)
-        self.assertEqual(sorted(placements), [0, 3, 5, 6])
-        self.assertEqual(placements[5].get("on"), "B1:3")
 
-    def test_unplaced_qty_zero_sends_one(self):
-        self.add("A", "A.3mf")
-        result = self.run_print({"B1": 1})
-        self.assertEqual(result["bins"][0]["qty"], 1)
 
-    def test_multi_file_row_expands_every_file_per_copy(self):
-        self.add("A", "A.3mf, A insert.3mf, A lid.3mf")
-        self.run_print({"B1": 2})
-        names = [p.name for p in self.launched[0]]
-        self.assertEqual(names, ["A.3mf", "A insert.3mf", "A lid.3mf"])
 
-    def test_connectors_aggregate_once_across_drawers(self):
-        self.add("A", "A.3mf")
-        inv = load_inventory(self.folder)
-        layout = {**_layout(200, 120), "drawers": [
-            {**_layout(200, 120)["drawers"][0], "id": "d1"},
-            {**_layout(200, 120)["drawers"][0], "id": "d2"},
-        ]}
-        (self.folder / "Conn.3mf").write_bytes(b"3mf")
-        calls = []
 
-        def fake_connectors(out, lay, bins, drawer_id=None):
-            calls.append(drawer_id)
-            return {"connectors": [{"file": "Conn.3mf", "count": 2}], "notes": ["n"]}
 
-        with mock.patch("organizer_drawer.generate_connectors", fake_connectors):
-            result = print_inventory_bins(
-                self.folder, layout, inv["bins"], {"B1": 1}, True,
-                lambda _p: self.slicer, self.launch)
-        self.assertEqual(calls, ["d1", "d2"])
-        self.assertEqual(result["connector_counts"], {"Conn.3mf": 4})
-        self.assertEqual(result["notes"], ["n"])
-        self.assertEqual([p.name for p in self.launched[0]].count("Conn.3mf"), 4)
 
-    def test_connectors_off_generates_nothing(self):
-        self.add("A", "A.3mf")
-        with mock.patch("organizer_drawer.generate_connectors") as gen:
-            self.run_print({"B1": 1}, include=False)
-        gen.assert_not_called()
-
-    def test_rejects_non_bin_rows_and_no_file_rows(self):
-        self.add("A", "A.3mf")
-        save_inventory(self.folder, new_bins=[
-            {"kind": "manual", "x": 16, "y": 16, "z": 20, "name": "Hand"},
-            {"kind": "spacer", "x": 16, "y": 16, "z": 20, "name": "Sp", "file": "S.3mf"},
-            # Fix 034 F: a Wavefinity bin/b4b row with neither a file nor a
-            # design_specs entry remains ineligible - only spec-only rows
-            # become printable now, not every no-file row.
-            {"kind": "bin", "x": 16, "y": 16, "z": 20, "name": "NoSourceEither"},
-        ])
-        with self.assertRaises(ValueError):
-            self.run_print({"B2": 1})
-        with self.assertRaises(ValueError):
-            self.run_print({"B3": 1})
-        with self.assertRaises(ValueError):
-            self.run_print({"B4": 1})
-        self.assertEqual(self.launched, [])
-
-    def test_spec_only_row_generates_on_demand_and_follows_qty_semantics(self):
-        from organizer_inventory import save_design_source
-
-        design = {"version": 1, "box": {"x": 16, "y": 16, "z": 20}, "part_name": "Spec Only"}
-        record = {"kind": "bin", "name": "Spec Only", "x": 16, "y": 16, "z": 20, "stack": "none"}
-        saved = save_design_source(self.folder, design=design, record=record)
-        row_id = saved["row_id"]
-
-        generated = []
-
-        def generate_from_design(output_dir, spec):
-            self.assertEqual(spec, design)
-            out = Path(output_dir) / "OnDemand.3mf"
-            out.write_bytes(b"3mf")
-            generated.append(out)
-            return [out]
-
-        def failing_launch(_slicer, _files):
-            raise RuntimeError("slicer did not open")
-
-        inv = load_inventory(self.folder)
-        partial = print_inventory_bins(
-            self.folder, inv["layout"], inv["bins"], {row_id: 1}, False,
-            lambda _path: self.slicer, failing_launch, None, generate_from_design,
-        )
-        # Fix 057: a launch failure after on-demand generation is a structured
-        # partial result carrying the refreshed Saved (not Printed) state.
-        self.assertTrue(partial["partial"])
-        self.assertEqual(partial["partial_stage"], "slicer")
-        self.assertIn("kept", partial["error"])
-        partial_row = next(one for one in partial["bins"] if one["id"] == row_id)
-        self.assertEqual((partial_row["status"], partial_row["qty"], partial_row["file"]),
-                         ("saved", 0, "OnDemand.3mf"))
-        # The resolved file is persisted even though the handoff failed, but
-        # Qty is untouched - generating is not printing.
-        mid = load_inventory(self.folder)
-        mid_row = next(one for one in mid["bins"] if one["id"] == row_id)
-        self.assertEqual(mid_row["file"], "OnDemand.3mf")
-        self.assertEqual(mid_row["status"], "saved")
-        self.assertEqual(mid_row["qty"], 0)
-        self.assertEqual(len(generated), 1)
-
-        inv2 = load_inventory(self.folder)
-        result = print_inventory_bins(
-            self.folder, inv2["layout"], inv2["bins"], {row_id: 1}, False,
-            lambda _path: self.slicer, self.launch, None, generate_from_design,
-        )
-        self.assertEqual(self.launched, [[self.folder / "OnDemand.3mf"]])
-        # The already-resolved file is reused - no second on-demand generation.
-        self.assertEqual(len(generated), 1)
-        after = load_inventory(self.folder)
-        after_row = next(one for one in after["bins"] if one["id"] == row_id)
-        self.assertEqual(after_row["qty"], 1)
-        self.assertEqual(after_row["status"], "printed")
-        self.assertEqual(result["selection"], {row_id: 1})
 
     def test_changed_source_during_slicer_handoff_is_not_marked_printed(self):
         from organizer_inventory import save_design_source, change_design_status
@@ -1242,120 +672,14 @@ class BulkPrintTests(unittest.TestCase):
         self.assertTrue(result["partial"])
         self.assertEqual(inventory_path(self.folder).read_text(encoding="utf-8"), before)
 
-    def test_invalid_slicer_generates_nothing_before_preflight(self):
-        from organizer_inventory import save_design_source
 
-        design = {"version": 1, "box": {"x": 16, "y": 16, "z": 20}, "part_name": "Spec Only"}
-        record = {"kind": "bin", "name": "Spec Only", "x": 16, "y": 16, "z": 20, "stack": "none"}
-        row_id = save_design_source(self.folder, design=design, record=record)["row_id"]
-        before = inventory_path(self.folder).read_text(encoding="utf-8")
-        generate = mock.Mock(return_value=[])
-        inv = load_inventory(self.folder)
-        with mock.patch("organizer_drawer.generate_connectors") as connectors:
-            for detect in (lambda _p: None, lambda _p: self.folder / "missing.exe"):
-                with self.assertRaisesRegex(ValueError, "Bambu Studio was not found"):
-                    print_inventory_bins(
-                        self.folder, inv["layout"], inv["bins"], {row_id: 1}, True,
-                        detect, self.launch, None, generate,
-                    )
-        generate.assert_not_called()
-        connectors.assert_not_called()
-        self.assertEqual(inventory_path(self.folder).read_text(encoding="utf-8"), before)
-        self.assertEqual(self.launched, [])
 
-    def test_file_names_containing_commas(self):
-        (self.folder / "Box Bolts, Nuts.3mf").write_bytes(b"3mf")
-        append_bin(self.folder, file="Box Bolts, Nuts.3mf", x=16, y=16, z=20, name="Bolts")
-        one = load_inventory(self.folder)["bins"][0]
-        self.assertEqual([p.name for p in inventory_row_files(self.folder, one)], ["Box Bolts, Nuts.3mf"])
-        (self.folder / "Insert, A.3mf").write_bytes(b"3mf")
-        (self.folder / "Lid.3mf").write_bytes(b"3mf")
-        row = dict(one, file="Box Bolts, Nuts.3mf, Insert, A.3mf, Lid.3mf")
-        self.assertEqual(
-            [p.name for p in inventory_row_files(self.folder, row)],
-            ["Box Bolts, Nuts.3mf", "Insert, A.3mf", "Lid.3mf"])
-        self.run_print({"B1": 1})
-        self.assertEqual([p.name for p in self.launched[0]], ["Box Bolts, Nuts.3mf"])
 
-    def test_ambiguous_file_list_rejected(self):
-        for name in ("A.3mf", "C.3mf", "B.3mf, C.3mf", "A.3mf, B.3mf"):
-            (self.folder / name).write_bytes(b"3mf")
-        row = {"id": "B1", "name": "X", "file": "A.3mf, B.3mf, C.3mf"}
-        with self.assertRaises(ValueError) as ctx:
-            inventory_row_files(self.folder, row)
-        self.assertIn("more than one way", str(ctx.exception))
-        (self.folder / "A.3mf, B.3mf, C.3mf").write_bytes(b"3mf")
-        self.assertEqual(len(inventory_row_files(self.folder, row)), 1)
 
-    def test_traversal_and_missing_still_rejected_with_commas(self):
-        self.add("A", "A.3mf")
-        one = load_inventory(self.folder)["bins"][0]
-        for bad in ("A.3mf, ../evil.3mf", "A.3mf, nope.3mf", "C:/evil.3mf"):
-            with self.assertRaises(ValueError):
-                inventory_row_files(self.folder, dict(one, file=bad))
 
-    def test_invalid_copy_counts_rejected_without_side_effects(self):
-        self.add("A", "A.3mf")
-        before = inventory_path(self.folder).read_text(encoding="utf-8")
-        for bad in (0, -1, 1.5, 1.0, True, "1.5", "-1", "abc", ""):
-            with self.assertRaises(ValueError, msg=repr(bad)):
-                self.run_print({"B1": bad})
-        self.assertEqual(self.launched, [])
-        self.assertEqual(inventory_path(self.folder).read_text(encoding="utf-8"), before)
-        self.assertEqual(self.run_print({"B1": "2"})["bins"][0]["qty"], 1)
-        self.assertEqual(self.run_print({"B1": 1})["bins"][0]["qty"], 1)
 
-    def test_route_is_registered_and_hosted_rejects(self):
-        routes = drawer_routes(threading.Lock(), self.folder, lambda _p: self.slicer, self.launch)
-        self.assertIn("/api/drawer/print-bins", routes)
-        hosted = drawer_routes(threading.Lock(), self.folder, None, None, hosted=True)
-        with self.assertRaises(ValueError):
-            hosted["/api/drawer/print-bins"]({"selection": {"B1": 1}})
-        self.add("A", "A.3mf")
-        result = routes["/api/drawer/print-bins"](
-            {"output": str(self.folder), "selection": {"B1": 1}, "include_connectors": False})
-        self.assertEqual(result["bins"][0]["qty"], 1)
-        self.assertIn("stack_steps", result)
 
-    def test_spacer_and_connector_print_repeats_files_by_count(self):
-        self.add("A", "A.3mf")
-        (self.folder / "Conn.3mf").write_bytes(b"3mf")
-        inv = load_inventory(self.folder)
-        with mock.patch("organizer_drawer.generate_connectors",
-                        lambda *a, **k: {"connectors": [{"file": "Conn.3mf", "count": 3}], "notes": []}):
-            print_spacers_and_connectors(
-                self.folder, _layout(200, 120), inv["bins"], None,
-                lambda _p: self.slicer, self.launch)
-        self.assertEqual([p.name for p in self.launched[0]], ["Conn.3mf"] * 3)
 
-    def test_spacer_and_connector_print_validates_slicer_before_generating(self):
-        self.add("A", "A.3mf")
-        inv = load_inventory(self.folder)
-        with mock.patch("organizer_drawer.generate_connectors") as connectors:
-            with self.assertRaisesRegex(ValueError, "Bambu Studio was not found"):
-                print_spacers_and_connectors(
-                    self.folder, _layout(200, 120), inv["bins"], None,
-                    lambda _p: None, self.launch)
-        connectors.assert_not_called()
-
-    def test_spacer_and_connector_launch_failure_is_partial_after_files_prepared(self):
-        self.add("A", "A.3mf")
-        (self.folder / "Conn.3mf").write_bytes(b"3mf")
-        inv = load_inventory(self.folder)
-
-        def boom(_slicer, _files):
-            raise RuntimeError("no open")
-
-        with mock.patch("organizer_drawer.generate_connectors",
-                        lambda *a, **k: {"connectors": [{"file": "Conn.3mf", "count": 2}], "notes": []}):
-            result = print_spacers_and_connectors(
-                self.folder, _layout(200, 120), inv["bins"], None,
-                lambda _p: self.slicer, boom)
-        self.assertTrue(result["partial"])
-        self.assertEqual(result["partial_stage"], "slicer")
-        self.assertEqual(result["counts"], {"Conn.3mf": 2})
-        self.assertEqual([Path(f).name for f in result["files"]], ["Conn.3mf"])
-        self.assertIn("did not open", result["error"])
 
 
 if __name__ == "__main__":

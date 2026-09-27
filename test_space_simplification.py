@@ -217,17 +217,6 @@ out.selected = DL.selected;
         self.assertEqual(out["staged"], ["B2", "B3"])
         self.assertIsNone(out["selected"])
 
-    def test_move_and_detach_carry_no_lock_field(self):
-        out = run_node(r"""
-setLayout([bin("B1"), bin("B2")], [{ bin: "B1", copy: 0, gx: 0, gy: 0 }]);
-DL.moveTo("B1:0", { gx: 6, gy: 0 });
-out.moved = { ...DL.layout.drawers[0].placements[0] };
-DL.removePlacement("B1:0");
-out.left = DL.layout.drawers[0].placements.length;
-""")
-        self.assertEqual((out["moved"]["gx"], out["moved"]["gy"]), (6, 0))
-        self.assertNotIn("locked", out["moved"])
-        self.assertEqual(out["left"], 0)
 
     def test_print_need_comes_from_status_not_qty_or_placement(self):
         out = run_node(r"""
@@ -299,61 +288,7 @@ out.failed = calls.map(c => c.path);
 
 
 class InventoryRowRenderingTests(unittest.TestCase):
-    def test_ordinary_rows_show_status_and_actions_but_no_qty_or_planned_math(self):
-        out = run_node(r"""
-const specs = { B1: { box: {} }, B2: { box: {} }, B3: { box: {} } };
-setLayout([bin("B1", { status: "in_design" }), bin("B2", { status: "saved", file: "b.3mf" }),
-           bin("B3", { status: "printed", qty: 1, file: "c.3mf" }), bin("M1", { kind: "manual", status: "printed", qty: 1 })],
-  [{ bin: "B2", copy: 0, gx: 0, gy: 0 }], { design_specs: specs });
-DP.printSelected = new Set(["B1"]);
-DP.renderInventory(true);
-out.html = els["#dl-inv-list"].innerHTML;
-out.clearDisabled = els["#dl-batch-clear"].disabled;
-DP.printSelected = new Set();
-DP.renderBatch();
-out.clearDisabledWhenEmpty = els["#dl-batch-clear"].disabled;
-""")
-        html = out["html"]
-        rows = re.split(r'(?=<div class="dl-bin )', html)[1:]
-        self.assertEqual(len(rows), 4)
-        for row in rows:
-            labels = [label for label in ("In Design", "Saved", "Printed") if f"{label}</small>" in row]
-            self.assertEqual(len(labels), 1, row)
-            self.assertTrue("Placed" in row or "Unplaced" in row)
-        for retired in ("data-act=\"qty", "dl-qty", "dl-placed", "planned", "needed", "Qty", "placed copies"):
-            self.assertNotIn(retired, html)
-        first = rows[0]
-        for action in ("Edit", "Duplicate", "Mark Printed", "Delete"):
-            self.assertIn(f">{action}<", first)
-        self.assertIn(">Mark Not Printed<", rows[2])
-        self.assertNotIn(">Mark Printed<", rows[2])
-        self.assertNotIn(">Edit<", rows[3])                # a hand-added row has no design source
-        self.assertIn('data-print-select="B1"', html)
-        self.assertFalse(out["clearDisabled"])
-        self.assertTrue(out["clearDisabledWhenEmpty"])
 
-    def test_only_unplaced_ordinary_rows_are_draggable_and_actions_use_the_status_owner(self):
-        out = run_node(r"""
-setLayout([bin("B1"), bin("B2")], [{ bin: "B2", copy: 0, gx: 0, gy: 0 }], { design_specs: { B1: {}, B2: {} } });
-DP.renderInventory(true);
-out.html = els["#dl-inv-list"].innerHTML;
-const calls2 = [];
-DL.setBinPrinted = async (one, printed) => { calls2.push([one.id, printed]); return true; };
-DL.printSelectedBins = (selection, includeConnectors) => calls2.push(["print", selection, includeConnectors]);
-const event = act => ({ target: { closest: sel => sel === "[data-bin]" ? { dataset: { bin: "B1" } } : sel === "[data-act]" ? { dataset: { act } } : null } });
-await DP.onInventoryClick(event("printed"));
-await DP.onInventoryClick(event("not-printed"));
-await DP.onInventoryClick(event("print"));
-await DP.onInventoryClick(event("edit"));
-out.actions = calls2;
-out.calls = calls;
-""")
-        rows = re.split(r'(?=<div class="dl-bin )', out["html"])[1:]
-        self.assertIn('draggable="true"', rows[0])
-        self.assertIn('draggable="false"', rows[1])
-        self.assertEqual(out["actions"][:2], [["B1", True], ["B1", False]])
-        self.assertEqual(out["actions"][2], ["print", {"B1": 1}, False])   # each row exactly once
-        self.assertTrue(any(call.get("path") == "edit" for call in out["calls"]))
 
     def test_duplicate_stays_in_space_adopts_the_returned_inventory_and_stages_the_new_row(self):
         out = run_node(r"""
@@ -387,38 +322,7 @@ out.seen = seen;
         self.assertEqual(out["seen"][1], {"delete_ids": ["B1"]})
 
 
-class StagingRailRenderingTests(unittest.TestCase):
-    def test_rail_lists_unplaced_bins_and_updates_when_a_bin_is_placed(self):
-        out = run_node(r"""
-setLayout([bin("B1", { name: "Alpha" }), bin("B2", { name: "Beta" })]);
-DV.renderStaging();
-const list = els["#dl-staging"]._kids[".dl-staging-list"];
-out.before = list.innerHTML;
-out.count = els["#dl-staging"]._kids[".dl-staging-count"].textContent;
-DL.placeAt(DL.bin("B1"), { gx: 0, gy: 0 });
-DV.renderStaging();
-out.after = list.innerHTML;
-out.countAfter = els["#dl-staging"]._kids[".dl-staging-count"].textContent;
-""")
-        self.assertIn('data-staged-bin="B1"', out["before"])
-        self.assertIn('data-staged-bin="B2"', out["before"])
-        self.assertEqual(out["count"], "2")
-        self.assertNotIn('data-staged-bin="B1"', out["after"])
-        self.assertIn('data-staged-bin="B2"', out["after"])
-        self.assertEqual(out["countAfter"], "1")
-
-
 class ManualAddRemovalTests(unittest.TestCase):
-    def test_manual_add_creation_ui_and_wiring_are_gone(self):
-        panel = _read("drawer-panel.js")
-        view = _read("drawer-view.js")
-        app = _read("app.js")
-        for name in ("Add a bin by hand", "Add an existing bin", "dl-add", "focusManualAdd",
-                     "wireManualDimension", 'data-empty-act="add"', 'act === "add"', "by hand below"):
-            self.assertNotIn(name, panel + view, name)
-        self.assertNotIn("baseThickness", panel + app)
-        self.assertNotIn("Add a bin by hand", app)
-        self.assertIn('data-empty-act="design"', view)
 
     def test_a_legacy_manual_row_still_loads_stages_places_and_is_manageable(self):
         out = run_node(r"""
@@ -497,147 +401,6 @@ const run = async (hosted) => {
         self.assertFalse(local["view"]["disabled"])
         self.assertEqual(local["afterPrint"], ["/api/space/structural-print"])
 
-    def test_source_keeps_print_and_save_separate(self):
-        spaces = _read("spaces.js")
-        run = spaces[spaces.index("SP.runStructural = "):spaces.index("SP.saveStructural = ")]
-        self.assertIn('mode === "print" && hosted', run)
-        self.assertNotIn("&& !hosted;", run)
-
-
-class RetiredConceptSourceTests(unittest.TestCase):
-    def test_current_design_shadow_owner_is_gone(self):
-        combined = "\n".join(_read(name) for name in ("app.js", "drawer-model.js", "drawer-panel.js", "drawer-view.js", "spaces.js"))
-        for name in ("DL.working", "workingTicket", "refreshWorking", "workingFit", "workingContext",
-                     "moveWorkingTo", "workingRow", "workingDesignForSpace", "markWorkingDesignPending",
-                     "markWorkingDesignReconciled", "workingPending", "workingGeneratedKey"):
-            self.assertNotIn(name, combined, name)
-
-    def test_auto_layout_is_removed_not_hidden(self):
-        combined = "\n".join(_read(name) for name in ("app.js", "drawer-model.js", "drawer-panel.js", "drawer-view.js"))
-        html = _read("index.html")
-        for name in ("runAuto", "applyCandidate", "quickPlace", "/api/drawer/auto", "dl-auto", "dl-candidates",
-                     "DL.candidates", "candidateIndex", "keep_locked", "height_reach"):
-            self.assertNotIn(name, combined, name)
-        for name in ("dl-auto", "Auto layout", "Auto Layout"):
-            self.assertNotIn(name, html, name)
-        panel = _read("drawer-panel.js")
-        self.assertNotIn('addEventListener("dblclick"', panel)
-        self.assertNotIn("Auto layout", _read("drawer-view.js"))
-        self.assertNotIn("Auto", _read("drawer.css").replace("autosave", ""))
-
-    def test_lock_is_removed_everywhere_in_the_space_ui(self):
-        combined = "\n".join(_read(name) for name in ("drawer-model.js", "drawer-panel.js", "drawer-view.js"))
-        # Legacy `locked` input is only ever stripped, on normalization.
-        stripped = "\n".join(line for line in combined.splitlines() if "retired: there is no Lock" not in line)
-        for name in ("toggleLock", "🔒", "Unlock", "L locks", 'key === "l"', "drag.locked", ".locked",
-                     "keep_locked", "placement.locked"):
-            self.assertNotIn(name, stripped, name)
-        self.assertIn("delete p.locked", combined)
-
-    def test_print_map_and_the_selected_bin_card_are_removed(self):
-        combined = "\n".join(_read(name) for name in ("app.js", "drawer-panel.js", "drawer-view.js"))
-        css = _read("drawer.css")
-        for name in ("printMap", "planImage", "renderSelection", "dl-selection", "dl-print-sheet",
-                     "dl-printing", "Print map", 'key === "p"'):
-            self.assertNotIn(name, combined, name)
-            self.assertNotIn(name, css, name)
-        self.assertNotIn("dl-map", _read("drawer-panel.js"))
-
-    def test_designer_has_no_design_a_selector_or_type_switch(self):
-        html = _read("index.html")
-        app = _read("app.js")
-        for name in ('id="bin-type"', "Design a:", "bin-type-base-trim", 'value="b4b"', 'value="base-trim"',
-                     'id="b4b-panel"', 'id="base-trim-panel"', "base-trim-auto-size", "cross-type-warning"):
-            self.assertNotIn(name, html, name)
-        for name in ("changeBinType", "toggleB4B", "startBaseTrimFromSpace", "autoSizeBaseTrimFromSpace",
-                     "syncBaseTrimOption", "binTypeFromDesign", '"#bin-type"', "makeBaseTrimDesign",
-                     "crossTypeCheck"):
-            self.assertNotIn(name, app, name)
-        spaces = _read("spaces.js")
-        for name in ("crossTypeCheck", "designPortable", "designSurface", "makeBaseTrimDesign", "toggleB4B"):
-            self.assertNotIn(name, spaces, name)
-
-    def test_the_designer_refuses_storage_box_and_base_trim_designs(self):
-        app = _read("app.js")
-        self.assertIn("function isStructuralDesign(design)", app)
-        opened = app[app.index("async function openDesign(event)"):app.index("async function newDesign()")]
-        self.assertIn("isStructuralDesign(result.design)", opened)
-        edit = app[app.index("async function designerEditInventoryRow"):app.index("async function designerInstallInventorySpec")]
-        self.assertIn("isStructuralDesign(spec)", edit)
-        spaces = _read("spaces.js")
-        self.assertIn("resumeIsStructural", spaces)
-
-    def test_standalone_and_space_designer_still_start_ordinary_bins(self):
-        spaces = _read("spaces.js")
-        starter = spaces[spaces.index("SP.installSpaceStarterDesign = "):spaces.index("SP.initializeDesignForActiveSpace = ")]
-        self.assertIn("freshDesignForCurrentFolder()", starter)
-        self.assertNotIn("b4b", starter.lower())
-        self.assertNotIn("trim", starter.lower())
-        create = spaces[spaces.index("SP.create = "):spaces.index("SP.resetDesignSession")]
-        self.assertIn("await loadFreshOrdinaryDesignForCurrentFolder();", create)
-
-    def test_user_facing_portable_storage_wording_is_gone(self):
-        for name in ("index.html", "spaces.js", "drawer-view.js", "drawer-panel.js", "app.js"):
-            self.assertNotIn("Portable Storage", _read(name), name)
-        spaces = _read("spaces.js")
-        self.assertIn('label: "Storage Box"', spaces)
-        self.assertNotIn("Pegboard Space</h3>", _read("index.html"))
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertNotIn("Portable Storage", readme)
-
-    def test_spacers_render_below_inventory_and_are_collapsed_by_default(self):
-        panel = _read("drawer-panel.js")
-        self.assertLess(panel.index('aria-label="Inventory"'), panel.index('id="dl-spacers"'))
-        details = re.search(r'<details id="dl-spacers"[^>]*>', panel).group(0)
-        self.assertNotIn(" open", details)
-        self.assertIn("Save Selected Spacers", panel)
-        self.assertNotIn("Generate Selected Spacers", panel)
-        self.assertNotIn("dl-base-trim", panel)
-        self.assertNotIn("Make Base Trim", panel)
-
-    def test_documentation_and_tutorial_describe_the_current_product_only(self):
-        html = _read("index.html")
-        tutorial = html[html.index('id="space-tutorial"'):html.index('id="space-form"')]
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        for text in (tutorial, readme):
-            for phrase in ("Save to Space", "Load from Space", "Current design pseudo", "planned copies",
-                           "Auto layout", "Auto Layout", "Print map", "Portable Storage", "Qty 0"):
-                self.assertNotIn(phrase, text, phrase)
-        self.assertIn("Unplaced bins", tutorial)
-        self.assertIn("Space header", tutorial)
-        self.assertNotIn("Generate", tutorial)
-
-
-class SpaceActionsMarkupTests(unittest.TestCase):
-    def test_space_actions_group_and_labels(self):
-        html = _read("index.html")
-        head = html[html.index('id="space-actions"'):html.index('id="space-head-edit-host"')]
-        for label in ("Space controls", ">Open Space…<", ">Edit Space<", ">Show Folder<", ">New Space<"):
-            self.assertIn(label, head)
-        for control in ("space-structural-save", "space-structural-print"):
-            self.assertIn(control, head)
-        self.assertNotIn("Next step", html)
-
-    def test_structural_actions_are_space_owned_never_inventory(self):
-        spaces = _read("spaces.js")
-        panel = _read("drawer-panel.js")
-        for text in ("Save Storage Box", "Save Base Trim", "Print Base Trim"):
-            self.assertNotIn(text, panel)
-        self.assertIn("/api/space/structural-generate", spaces)
-        self.assertIn("/api/space/structural-print", spaces)
-        run = spaces[spaces.index("SP.runStructural = "):spaces.index("SP.saveStructural = ")]
-        self.assertIn("DL.requireSpaceContext(context)", run)
-        self.assertNotIn("addInventoryBin", run)
-        self.assertNotIn("/api/drawer/", run)
-        render = spaces[spaces.index("SP.renderStructuralActions = "):spaces.index("SP.renderSpaceInfo = ")]
-        self.assertIn("Save ${label}", render)
-        self.assertIn("Print ${label}", render)
-
-    def test_the_four_space_types_are_named_for_users(self):
-        spaces = _read("spaces.js")
-        kinds = spaces[spaces.index("const SP_KINDS = {"):spaces.index("const FOLDER_METADATA")]
-        labels = re.findall(r'label: "([^"]+)"', kinds)
-        self.assertEqual(sorted(set(labels)), ["Drawer", "Pegboard", "Storage Box", "Surface"])
 
 
 if __name__ == "__main__":

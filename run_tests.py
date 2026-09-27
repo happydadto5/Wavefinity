@@ -8,6 +8,7 @@ tests spin up a real WavefinityServer, which prints one line per request).
 
 Usage:
     python3 run_tests.py                 # whole suite (test_*.py)
+    python3 run_tests.py core            # compact 74-test gate
     python3 run_tests.py test_b4b         # one module
     python3 run_tests.py test_b4b test_stack
 
@@ -25,6 +26,12 @@ import unittest
 
 def main(argv: list[str]) -> int:
     loader = unittest.TestLoader()
+    if argv == ["core"]:
+        argv = [
+            "test_inventory_safety", "test_edge_conflicts", "test_ui_state_safety",
+            "test_lid_geometry", "test_bambu_handoff", "test_space_identity",
+            "test_standard_walls", "test_stack",
+        ]
     if argv:
         suite = loader.loadTestsFromNames(argv)
     else:
