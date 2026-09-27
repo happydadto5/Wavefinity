@@ -310,6 +310,44 @@ function plainObject(value) {
 // automatically. Preferences only ever seed a NEW bin or a newly added
 // part/option; they never rewrite a bin that already exists.
 
+// Fix 082 H: a Text feature with no words yet is an incomplete editor state,
+// not an invalid design - never committed, never a fit error, never an
+// Inventory row by itself.
+function isBlankTextDraft(feature) {
+  return feature?.kind === "text" && !String(feature.options?.text ?? "").trim();
+}
+
+// Fix 082 I: the backend raises this exact, distinctive phrase (and only
+// this phrase) when a Text's real fit needs less than the 5 mm recommended
+// minimum letter height - never for a genuine geometry failure - so the
+// browser can tell the two apart and offer the consent dialog instead of a
+// plain error.
+const SMALL_TEXT_MARKER = /recommended minimum/i;
+
+// Shows the one-time-per-Space "Text below 5mm isn't recommended" consent
+// dialog (or skips it silently when this Space already acknowledged it) and
+// records the acknowledgement through the same durable Space settings owner
+// as auto_update_changed_files. Returns whether the caller may now let the
+// small Text through. Outside a typed Space, OK permits only this one
+// action - there is nowhere durable to remember it, and none is invented.
+async function acknowledgeSmallText() {
+  const inSpace = state.folderMode === "space" && typeof DL !== "undefined" && DL.layout;
+  if (inSpace && DL.layout.settings?.text_small_size_ack === true) return true;
+  const choice = await appConfirm({
+    title: "Small text size",
+    message: "Text below 5mm isn't recommended",
+    primaryLabel: "OK",
+    cancelLabel: "Cancel",
+  });
+  if (choice !== "primary") return false;
+  if (inSpace) {
+    const context = DL.spaceContext();
+    DL.change(() => { DL.layout.settings.text_small_size_ack = true; }, { history: false });
+    if (DL.spaceContextCurrent(context)) await DL.save();
+  }
+  return true;
+}
+
 function isSpaceTextKey(key) {
   return key === "text" || key === "label" || key === "division_labels" ||
     key === "photo" || key.endsWith("_text");
@@ -400,6 +438,15 @@ function partDefaultsFromFeature(feature) {
   for (const key of Object.keys(copy.options)) {
     if (isSpaceTextKey(key)) delete copy.options[key];
   }
+  // Fix 082 H: a brand-new Text always starts On base - Inlaid - 0 degrees,
+  // regardless of what style/rotation the last Text in this Space happened
+  // to use, so those settings are never remembered for this kind.
+  if (feature.kind === "text") {
+    delete copy.options.level;
+    delete copy.options.raised;
+    delete copy.options.rim_side;
+    delete copy.options.quarter_turns;
+  }
   if (feature.kind === "nest") {
     delete copy.count;
     delete copy.options.repeat_spacing_percent;
@@ -426,6 +473,12 @@ function cleanPartDefaultEntry(entry) {
   clean.options = plainObject(entry.options) ? clone(entry.options) : {};
   for (const key of Object.keys(clean.options)) {
     if (isSpaceTextKey(key)) delete clean.options[key];
+  }
+  if (entry.kind === "text") {
+    delete clean.options.level;
+    delete clean.options.raised;
+    delete clean.options.rim_side;
+    delete clean.options.quarter_turns;
   }
   if (Object.hasOwn(entry, "count")) clean.count = entry.count;
   if (typeof entry.along === "string") clean.along = entry.along;
@@ -2708,7 +2761,7 @@ function readSideOpeningForm(design, changed = "lower") {
     return;
   }
   const sides = SIDE_OPENING_SIDE_IDS.filter(
-    side => $(`#side-opening-${side}`)?.getAttribute("aria-pressed") === "true"
+    side => $(`#side-opening-${side}`)?.checked === true
   );
   const enabled = sides.length > 0 && !$("#side-openings-panel").hidden;
   if (!enabled) {
@@ -2751,11 +2804,10 @@ function syncSideOpeningControls() {
   for (const side of SIDE_OPENING_SIDE_IDS) {
     const input = $(`#side-opening-${side}`);
     if (!input) continue;
-    input.setAttribute("aria-pressed", String((so.sides || []).includes(side)));
-    input.classList.toggle("active", (so.sides || []).includes(side));
+    input.checked = (so.sides || []).includes(side);
     const eligible = sideOpeningEligibleSide(side);
     input.disabled = !eligible;
-    if (!eligible) input.setAttribute("aria-pressed", "false");
+    if (!eligible) input.checked = false;
   }
   const anyEligible = SIDE_OPENING_SIDE_IDS.some(side => sideOpeningEligibleSide(side));
   const allowed = sideOpeningAllowedSizes();
@@ -2826,7 +2878,7 @@ function populateWallChoices(box, select = $("#wall-thickness")) {
   const signature = JSON.stringify({ numericChoices, customValue, modeMin, standard });
   if (select.dataset.choices !== signature) {
     select.replaceChildren();
-    if (!stacking && !hasLid && !isB4B) select.add(new Option("Standard", "standard"));
+    if (!stacking && !hasLid && !isB4B) select.add(new Option("0.8 mm — Default", "standard"));
     select.append(...numericChoices.map(choice => new Option(
       `${number(choice.value).toFixed(1)} mm — ${choice.label}`,
       fmt(choice.value),
@@ -4564,6 +4616,13 @@ function wireControls() {
   $$('[data-layout-orientation]').forEach(button =>
     button.addEventListener("click", () => setLayoutOrientation(button.dataset.layoutOrientation)));
   $("#divider-edit-breadcrumb")?.addEventListener("click", openDividerSegmentEditor);
+  $("#active-option-save")?.addEventListener("click", saveCurrentPart);
+  $("#active-option-delete")?.addEventListener("click", async event => {
+    const button = event.currentTarget;
+    if (button.dataset.kind) { await removeModifier(button.dataset.kind); return; }
+    if (button.dataset.index !== undefined) { await deleteSupportAt(Number(button.dataset.index)); return; }
+    await deleteCurrentPart();
+  });
   $$("button.section-heading").forEach(button => button.addEventListener("click", () => {
     const section = button.closest(".control-section");
     section.classList.toggle("open");
@@ -4712,17 +4771,17 @@ function wireControls() {
       changedDesign(previous);
     }));
   SIDE_OPENING_SIDE_IDS.forEach(side => {
-    $(`#side-opening-${side}`)?.addEventListener("click", event => {
-      const button = event.currentTarget;
-      const active = button.getAttribute("aria-pressed") === "true";
+    $(`#side-opening-${side}`)?.addEventListener("change", event => {
+      const checkbox = event.currentTarget;
+      const wasActive = !checkbox.checked;
       const selected = SIDE_OPENING_SIDE_IDS.filter(
-        one => $(`#side-opening-${one}`)?.getAttribute("aria-pressed") === "true"
+        one => $(`#side-opening-${one}`)?.checked === true
       );
-      if (active && selected.length === 1) {
+      if (wasActive && selected.length === 0) {
+        checkbox.checked = true;
         toast("Side Openings need at least one side.", true, 4000);
         return;
       }
-      button.setAttribute("aria-pressed", String(!active));
       const previous = clone(state.design);
       readSideOpeningForm(state.design);
       syncSideOpeningControls();
@@ -5335,8 +5394,12 @@ async function selectKind(kind, reset = false) {
     renderDraftFields();
     updateSelectionButtons();
 
-    // Auto-save the new part immediately and treat it as a saved part we are editing
-    if (kind !== "nest") {
+    // Auto-save the new part immediately and treat it as a saved part we are editing.
+    // Fix 082 H: a brand-new Text with no words yet is an inert editor state,
+    // not a design mutation - it stays an uncommitted armed draft (draftIsNew)
+    // until real lettering is typed, at which point the normal edit pipeline
+    // (refreshDraft -> autoCommitDraft) saves it for the first time.
+    if (kind !== "nest" && !isBlankTextDraft(state.draft)) {
       try {
         const applyResult = await api("/api/feature/apply", {
           design: state.design,
@@ -6092,12 +6155,12 @@ function renderDraftFields() {
     const textLevel = one.options?.level === "rim" ? "rim" : "base";
     const textType = `${textLevel}_${one.options?.raised === true ? "raised" : "inlaid"}`;
     const textInput = `<input type="text" maxlength="80" data-draft="option:text" value="${escapeHtml(one.options?.text ?? "")}" placeholder="${textLevel === "rim" ? "e.g. M3 BOLTS" : "e.g. M3"}">`;
-    let textGroup = `<label>Text${textInput}</label>`;
+    let textGroup = `<label>Words${textInput}</label>`;
     // At most one rim Text is allowed per bin (Fix 078). Another Text's At-rim
     // choices are disabled once one rim Text already exists elsewhere.
     const hasOtherRimText = (state.design.layout?.features || []).some((feature, index) =>
       index !== state.selected && feature.kind === "text" && feature.options?.level === "rim");
-    textGroup += `<label>Text Type<select data-draft="option:text_type">
+    textGroup += `<label>Style<select data-draft="option:text_type">
       ${[["base_inlaid", "On base — Inlaid"], ["base_raised", "On base — Raised"], ["rim_inlaid", "At rim — Inlaid"], ["rim_raised", "At rim — Raised"]]
         .map(([value, label]) => `<option value="${value}" ${value === textType ? "selected" : ""} ${hasOtherRimText && value.startsWith("rim_") ? "disabled" : ""}>${label}</option>`).join("")}
       </select></label>`;
@@ -6119,12 +6182,9 @@ function renderDraftFields() {
       textGroup += `<label>Rim side<select data-draft="option:rim_side">${[["back", "Back"], ["front", "Front"], ["left", "Left"], ["right", "Right"]]
         .map(([value, label]) => `<option value="${value}" ${(one.options?.rim_side || "back") === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>`;
     } else {
-      textGroup += `<fieldset><legend>Turn</legend><div class="segmented four">
-        ${[0, 1, 2, 3].map(turn => `<label><input type="radio" name="draft-turns" value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "checked" : ""}><span>${turn * 90}°</span></label>`).join("")}
-      </div></fieldset>`;
-    }
-    if (textLevel !== "rim" && Number.isInteger(state.selected) && !state.draftIsNew) {
-      textGroup += `<button type="button" class="button secondary" data-action="duplicate-text" ${state.preview?.duplicate_text_indexes?.includes(state.selected) ? "" : "hidden"}>Duplicate to rim</button>`;
+      textGroup += `<label>Rotate<select id="draft-rotate">
+        ${[0, 1, 2, 3].map(turn => `<option value="${turn}" ${(number(one.options?.quarter_turns, 0) % 4) === turn ? "selected" : ""}>${turn * 90}°</option>`).join("")}
+      </select></label>`;
     }
     html += editorGroup("Text", textGroup);
   }
@@ -6744,10 +6804,11 @@ function renderDraftFields() {
     updateSelectionButtons();
     refreshDraftSoon();
   }));
-  $$('input[name="draft-turns"]', $("#draft-fields")).forEach(input => input.addEventListener("change", () => {
+  const rotateSelect = $("#draft-rotate", $("#draft-fields"));
+  if (rotateSelect) rotateSelect.addEventListener("change", () => {
     markDraftChanged();
     state.draft.options ||= {};
-    state.draft.options.quarter_turns = Number(input.value) % 4;
+    state.draft.options.quarter_turns = Number(rotateSelect.value) % 4;
     // The zone was fitted to the old orientation; swap its sides so the
     // lettering keeps roughly the same size after the quarter turn.
     const zone = state.draft.zone;
@@ -6757,7 +6818,7 @@ function renderDraftFields() {
     state.draftAutoCommit = true;
     updateSelectionButtons();
     refreshDraftSoon();
-  }));
+  });
   const autoCount = $('[data-action="auto-count"]', $("#draft-fields"));
   if (autoCount) autoCount.addEventListener("click", () => {
     markDraftChanged();
@@ -6777,8 +6838,6 @@ function renderDraftFields() {
   if (growBtn) growBtn.addEventListener("click", event => autoExpandBin({ button: event.currentTarget }));
   updateFitActions();
   if (state.draft?.kind === "nest") wireNestFieldActions();
-  const duplicateTextButton = $('[data-action="duplicate-text"]', $("#draft-fields"));
-  if (duplicateTextButton) duplicateTextButton.addEventListener("click", duplicateText);
   $('[data-action="add-reference"]', $("#draft-fields"))?.addEventListener("click", addReferenceToCurrentDraft);
   $('[data-action="remove-reference"]', $("#draft-fields"))?.addEventListener("click", removeReferenceFromCurrentDraft);
   $$('[data-reference-axis]', $("#draft-fields")).forEach(input => input.addEventListener("input", () => {
@@ -6892,37 +6951,6 @@ async function commitBoreAngleChange(event) {
   } finally {
     state.boreAngleGrowthPending = false;
   }
-}
-
-async function duplicateText() {
-  if (state.draft?.kind !== "text" || !Number.isInteger(state.selected)) return;
-  let mutationStarted = false;
-  let committedDraft = false;
-  try {
-    committedDraft = await commitVisibleDraft({ previewAfterCommit: false });
-    if (!beginDesignMutation()) {
-      if (committedDraft) refreshPreview();
-      return;
-    }
-    mutationStarted = true;
-    const before = clone(state.design);
-    const result = await api("/api/feature/duplicate", { design: state.design, index: state.selected });
-    state.design = result.design;
-    noteCommittedDesignChange(before);
-    state.selected = result.selected;
-    state.draftSourceIndex = result.selected;
-    state.draft = clone(state.design.layout.features[result.selected]);
-    state.draftKind = "text";
-    state.draftIsNew = false;
-    state.draftTouched = false;
-    state.draftAutoCommit = true;
-    syncForm(); renderDraftFields(); renderPlaced(); await refreshPreview();
-    committedDraft = false;
-    toast(`Text duplicated to ${result.rim_side[0].toUpperCase()}${result.rim_side.slice(1)} rim.`);
-  } catch (error) {
-    if (committedDraft) refreshPreview();
-    toast(error.message, true, 6500);
-  } finally { if (mutationStarted) finishDesignMutation(); }
 }
 
 function syncNest2DWorkspace() {
@@ -8597,6 +8625,15 @@ async function refreshDraft() {
     $("#draft-status").classList.remove("error");
     return await refreshPreview();
   }
+  // Fix 082 H: blank Text is inert - no fit error, no commit, no fake
+  // lettering in the preview. The existing valid bin keeps showing as-is.
+  if (isBlankTextDraft(state.draft)) {
+    ++state.draftRequest;
+    $("#draft-status").textContent = "Type the words this Text should say.";
+    $("#draft-status").classList.remove("error");
+    state.fitError = false;
+    return await refreshPreview();
+  }
   // A divider always splits the whole bin, so keep its footprint pinned to
   // the usable inside - re-stretched here every rebuild, which is what makes
   // the walls re-space evenly after the bin is resized (or a wall lean is
@@ -8691,6 +8728,32 @@ async function refreshDraft() {
     if (request === state.draftRequest && await reconcileBoreBin(result)) return;
   } catch (error) {
     if (request !== state.draftRequest) return;
+    // Fix 082 I: the fit only works below the 5 mm recommendation - ask once
+    // per Space instead of showing this as a plain validation failure.
+    if (state.draft?.kind === "text" && SMALL_TEXT_MARKER.test(error.message || "")) {
+      if (state.smallTextPromptOpen) {
+        $("#draft-status").textContent = "Text needs to be smaller than 5 mm to fit here.";
+        $("#draft-status").classList.remove("error");
+        return;
+      }
+      state.smallTextPromptOpen = true;
+      let acknowledged = false;
+      try {
+        acknowledged = await acknowledgeSmallText();
+      } finally {
+        state.smallTextPromptOpen = false;
+      }
+      if (request !== state.draftRequest) return;
+      if (acknowledged) {
+        state.draft.options.small_size_ack = true;
+        return await refreshDraft();
+      }
+      // Cancelled: leave the prior valid state alone, no sub-5 mutation.
+      $("#draft-status").textContent = "Text needs to be smaller than 5 mm to fit here.";
+      $("#draft-status").classList.remove("error");
+      state.fitError = false;
+      return await refreshPreview();
+    }
     // A part whose contents outgrew the bin: grow the bin around it instead of
     // stopping at the error, so "put 10 x 10 holes in a stock bin" (or a longer
     // tool, more pegs, more slots) just resizes the bin the way the "Grow the
@@ -8743,9 +8806,8 @@ function seedPartNameFromLabel(said) {
   if (state.design) state.design.part_name = tidy;
 }
 
-// "Real" means the user typed it. A text part starts life with placeholder
-// lettering so it is valid and visible the moment it is added, and naming
-// every file after that placeholder would be worse than leaving it blank.
+// "Real" means the user typed it. A text part starts life blank (Fix 082 H),
+// so any lettering it now carries is something the user actually said.
 function seedPartNameFromText(one) {
   if (!one || one.kind !== "text") return;
   const said = String(one.options?.text ?? "").trim();
@@ -8778,6 +8840,7 @@ function draftCommitIndex() {
 // other validation error.
 async function autoCommitDraft(request) {
   if (state.draft?.kind === "nest" && !state.draft.contour) return false;
+  if (isBlankTextDraft(state.draft)) return false;
   const index = draftCommitIndex();
   if (index === false) return false;   // stale edit - don't append a duplicate
   if (!state.draftIsNew && Number.isInteger(index) &&
@@ -8820,6 +8883,7 @@ async function autoCommitDraft(request) {
 async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
   if (!state.draft) return false;
   if (state.draft?.kind === "nest" && !state.draft.contour) return false;
+  if (isBlankTextDraft(state.draft)) return false;
   const index = draftCommitIndex();
   if (index === false) return false;
   if (Number.isInteger(index) &&
@@ -8867,6 +8931,10 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
 // own counts as nothing to lose.
 function draftNeedsSaving() {
   if (!state.draft) return false;
+  // A Text draft with no words can never be committed (Fix 082 H), so
+  // whatever the user typed and deleted while it was open is not work to
+  // lose - switching away from it silently is fine.
+  if (isBlankTextDraft(state.draft)) return false;
   const index = draftCommitIndex();
   if (Number.isInteger(index)) {
     return JSON.stringify(state.design.layout.features[index]) !== JSON.stringify(state.draft);
@@ -9053,8 +9121,10 @@ function appConfirm({
 
 // Ordinary two-choice confirmation. Resolves true for the action, false for
 // Cancel/Escape/backdrop.
-async function appConfirmAction({ title, message, actionLabel = "OK", cancelLabel = "Cancel", danger = false }) {
-  const choice = await appConfirm({ title, message, primaryLabel: actionLabel, cancelLabel, danger });
+async function appConfirmAction({ title, message, actionLabel = "OK", cancelLabel = "Cancel", danger = false, checkboxLabel = null }) {
+  const choice = await appConfirm({ title, message, primaryLabel: actionLabel, cancelLabel, danger, checkboxLabel });
+  // Read by callers that passed checkboxLabel (see appConfirm.checked).
+  appConfirmAction.checked = appConfirm.checked;
   return choice === "primary";
 }
 
@@ -9278,7 +9348,7 @@ function updateSelectionButtons() {
   const hasPlaced = placedPartCount() > 0;
   $$(".placed-block").forEach(placedBlock => { placedBlock.hidden = !hasPlaced; });
   const lockedDivider = state.draft?.kind === "divider" && dividerLockedByLidLabels();
-  $$(".placed-item-remove").forEach(button => {
+  $$(".placed-item-remove, #active-option-delete").forEach(button => {
     const index = Number(button.dataset.index);
     const target = Number.isInteger(index) ? state.design?.layout?.features?.[index] : null;
     button.disabled = busy || (target?.kind === "divider" && lockedDivider);
@@ -9387,14 +9457,12 @@ function placedRowsMarkup(rows, { actions = false } = {}) {
       ? `data-index="${row.index}"`
       : row.type === "modifier" ? `data-kind="${row.kind}"` : 'data-draft="true"';
     const title = escapeHtml(row.title);
-    // The row currently being edited shows Save, never Edit; every other row
-    // shows Edit, never Save (Fix 078).
-    const editAction = row.editing
-      ? `<button type="button" class="placed-item-save button secondary" ${identity} aria-label="Save ${title}">Save</button>`
-      : `<button type="button" class="placed-item-edit button secondary" ${identity} aria-label="Edit ${title}">Edit</button>`;
+    // Fix 082 L2: the row currently open for editing renders in the active
+    // option row above, not here - every row this list ever shows is an
+    // inactive sibling, so it always shows Edit, never Save.
     const rowActions = actions
       ? `<div class="placed-item-actions">
-        ${editAction}
+        <button type="button" class="placed-item-edit button secondary" ${identity} aria-label="Edit ${title}">Edit</button>
         <button type="button" class="placed-item-remove button danger" ${identity} title="Delete ${title}" aria-label="Delete ${title}">Delete</button>
       </div>` : "";
     return `<div class="placed-item ${row.selected ? "selected" : ""} ${statusClass}" data-support-kind="${escapeHtml(row.kind)}">
@@ -9420,7 +9488,6 @@ function wirePlacedRows(container) {
   $$(".placed-item-edit[data-draft]", container).forEach(button => button.addEventListener("click", () => {
     if (state.draft) selectKind(state.draft.kind);
   }));
-  $$(".placed-item-save", container).forEach(button => button.addEventListener("click", saveCurrentPart));
   $$(".placed-item-remove[data-index]", container).forEach(button => button.addEventListener("click", async () => {
     await deleteSupportAt(Number(button.dataset.index));
   }));
@@ -9430,12 +9497,35 @@ function wirePlacedRows(container) {
   $$(".placed-item-remove[data-draft]", container).forEach(button => button.addEventListener("click", deleteCurrentPart));
 }
 
+// Fix 082 L2: the option currently open for editing shows once, above its
+// own settings, with its identity and the one Save action (plus Delete, so
+// abandoning an in-progress part loses no capability the combined list used
+// to give it). "Options in this bin" below never repeats this row.
+function renderActiveOptionRow(row) {
+  const container = $("#active-option-row");
+  if (!container) return;
+  if (!row) { container.hidden = true; return; }
+  container.hidden = false;
+  const title = $("#active-option-title");
+  if (title) title.textContent = row.title;
+  const deleteBtn = $("#active-option-delete");
+  if (deleteBtn) {
+    if (row.type === "feature") deleteBtn.dataset.index = String(row.index);
+    else delete deleteBtn.dataset.index;
+    if (row.type === "modifier") deleteBtn.dataset.kind = row.kind;
+    else delete deleteBtn.dataset.kind;
+  }
+}
+
 function renderPlaced() {
   if (!state.design) return;
   const rows = placedRowData();
+  const activeRow = rows.find(row => row.editing) || null;
+  renderActiveOptionRow(activeRow);
+  const siblingRows = rows.filter(row => !row.editing);
   const added = $("#added-parts-list");
   if (added) {
-    added.innerHTML = placedRowsMarkup(rows, { actions: true }) || '<div class="placed-empty">Nothing added yet.</div>';
+    added.innerHTML = placedRowsMarkup(siblingRows, { actions: true }) || '<div class="placed-empty">Nothing added yet.</div>';
     wirePlacedRows(added);
   }
   const total = placedPartCount();
@@ -9609,8 +9699,6 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   updateGenerateAvailability();
   if (actions.length) setError("", actions);
   state.textMeta = result.text_meta || [];
-  const duplicateToRim = $('[data-action="duplicate-text"]', $("#draft-fields"));
-  if (duplicateToRim) duplicateToRim.hidden = !result.duplicate_text_indexes?.includes(state.selected);
   updateBoreCeilingWarning(result.bore_ceiling_warning);
   state.fitError = Boolean(result.feature_errors.length || result.draft_error);
   updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);

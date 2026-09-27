@@ -85,24 +85,45 @@ def text_fitted(one: Feature) -> tuple[float, object]:
     if width <= 0.0 or height <= 0.0:
         raise ValueError(f"'{label}' has no printable outline")
     zone = one.zone
+    # Fix 082 I: 5 mm is a recommendation, not an absolute floor. A Text that
+    # has been acknowledged for its Space (or explicitly re-saved with the
+    # marker still set) may size all the way down to a real, positive,
+    # printable height; everything else still stops at the recommendation so
+    # the caller (the browser draft/apply pipeline) gets the chance to ask
+    # first. The marker phrase below is matched by the browser to tell this
+    # specific, expected case apart from a genuine geometry failure.
+    ack = bool(one.options.get("small_size_ack"))
     wanted = one.options.get("cap_height")
     if one.options.get("text_v2") and wanted not in (None, ""):
         cap = float(wanted)
-        if not math.isfinite(cap) or cap < TEXT_CAP_HEIGHT_FLOOR:
-            raise ValueError("Letter height is below the minimum readable size")
+        if not math.isfinite(cap) or cap <= 0.0:
+            raise ValueError("Letter height must be a positive number")
+        if cap < TEXT_CAP_HEIGHT_FLOOR and not ack:
+            raise ValueError(
+                f"Letter height {cap:g} mm is below the {TEXT_CAP_HEIGHT_FLOOR:g} mm "
+                "recommended minimum"
+            )
         return cap, _oriented_text(label, cap, turns)
     fits = TEXT_CAP_HEIGHT_IDEAL * min(zone.width / width, zone.depth / height)
-    if fits < TEXT_CAP_HEIGHT_FLOOR - 1e-9:
+    if not math.isfinite(fits) or fits <= 0.0:
+        raise ValueError(f"'{label}' has no room to print in this box")
+    if fits < TEXT_CAP_HEIGHT_FLOOR - 1e-9 and not ack:
         needed_x = width * TEXT_CAP_HEIGHT_FLOOR / TEXT_CAP_HEIGHT_IDEAL
         needed_y = height * TEXT_CAP_HEIGHT_FLOOR / TEXT_CAP_HEIGHT_IDEAL
         raise ValueError(
-            f"'{label}' will not fit its box: at the {TEXT_CAP_HEIGHT_FLOOR:g} mm "
-            f"minimum letter height it needs {needed_x:.1f} x {needed_y:.1f} mm "
-            f"and the box is {zone.width:.1f} x {zone.depth:.1f} mm. Make it "
-            f"bigger, turn it, or use shorter text"
+            f"'{label}' only fits its box below the {TEXT_CAP_HEIGHT_FLOOR:g} mm "
+            f"recommended minimum letter height: it needs {needed_x:.1f} x "
+            f"{needed_y:.1f} mm at that height and the box is "
+            f"{zone.width:.1f} x {zone.depth:.1f} mm"
         )
     cap = min(float(wanted), fits) if wanted else fits
-    cap = max(cap, TEXT_CAP_HEIGHT_FLOOR)
+    if not ack:
+        cap = max(cap, TEXT_CAP_HEIGHT_FLOOR)
+    # Fix 082 I: an auto-fit height (nothing explicitly typed) never rounds
+    # up past the room it actually has - only ever down, to the largest
+    # whole millimetre, and only while that still clears the recommendation.
+    if not wanted and cap >= TEXT_CAP_HEIGHT_FLOOR:
+        cap = float(math.floor(cap))
     return cap, _oriented_text(label, cap, turns)
 
 
@@ -258,6 +279,8 @@ def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         OptionDefinition("Base or rim", "level", "base", "enum", False, choices=(("base", "On the base"), ("rim", "On the rim ledge"))),
         OptionDefinition("Retarget", "retarget", "", "string", False, internal=True, note="internal editor helper consumed by the app; never set it"),
         OptionDefinition("Rim side", "rim_side", "back", "enum", False, choices=SIDE_CHOICES, note="only when level = rim"),
+        OptionDefinition("Small size acknowledged", "small_size_ack", False, "boolean", False, internal=True,
+                          note="internal editor marker consumed by the app; never set it. True once the Letter height was knowingly saved below the 5 mm recommendation."),
     ), order=100,
 )
 def build_text(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:

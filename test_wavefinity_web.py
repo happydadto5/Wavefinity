@@ -168,28 +168,15 @@ class ObjectReferenceWebTests(unittest.TestCase):
         with patch.object(wavefinity_web, "bore_reference_top", side_effect=lambda box, *_: box.z + 10):
             self.assertIsNone(wavefinity_web._ai_space_cap_violation(design, clear_space))
 
-    def test_text_duplicate_uses_one_legal_rim_destination(self):
+    def test_text_duplicate_endpoint_now_serves_photo_nest_only(self):
+        # Fix 082 J retires Text's own Duplicate to rim; the shared endpoint
+        # rejects a Text index instead of cloning it to a rim side.
         design = default_design()
         design["box"].update({"x": 64, "y": 64, "z": 40})
         design["layout"]["features"] = [_text_feature("Tools")]
         preview = preview_payload({"design": design, "client_id": "duplicate-test", "generation": 1})
-        self.assertEqual(preview["duplicate_text_indexes"], [0])
-        duplicate = wavefinity_web.duplicate_feature_payload({"design": design, "index": 0})
-        self.assertEqual(duplicate["rim_side"], "back")
-        with self.assertRaisesRegex(ValueError, "no legal rim side"):
-            wavefinity_web.duplicate_feature_payload({"design": duplicate["design"], "index": 0})
-        with self.assertRaisesRegex(ValueError, "no legal rim side"):
-            wavefinity_web.duplicate_feature_payload({"design": duplicate["design"], "index": 1})
-        self.assertEqual(preview_payload({"design": duplicate["design"],
-                                          "client_id": "duplicate-test", "generation": 2})["duplicate_text_indexes"], [])
-        design["box"]["side_openings"] = {"enabled": True, "shape": "curved",
-            "sides": ["back"], "size": "small", "from_bottom_percent": 0,
-            "from_top_percent": 0, "percent_mode": "inset_v2"}
-        self.assertEqual(wavefinity_web.duplicate_feature_payload({"design": design, "index": 0})["rim_side"], "front")
-        design["box"]["side_openings"]["sides"] = ["back", "front", "left", "right"]
-        self.assertEqual(preview_payload({"design": design, "client_id": "duplicate-test",
-                                          "generation": 3})["duplicate_text_indexes"], [])
-        with self.assertRaisesRegex(ValueError, "no legal rim side"):
+        self.assertNotIn("duplicate_text_indexes", preview)
+        with self.assertRaisesRegex(ValueError, "Photo Nest"):
             wavefinity_web.duplicate_feature_payload({"design": design, "index": 0})
 
 

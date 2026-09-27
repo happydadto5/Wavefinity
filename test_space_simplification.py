@@ -347,20 +347,20 @@ setLayout([bin("B1")]);
 ctx.state.designInventoryId = "B1";
 ctx.state.design = { box: {} };
 DL.selectedRow = "B1";
-DP.open.add("B1"); DP.printSelected.add("B1");
+DP.printSelected.add("B1");
 const modes = [];
 DP.setMode = mode => modes.push(mode);
 DL.editBins = async () => false;
 await DP.deleteRow(DL.bin("B1"));
-out.failed = { identity: ctx.state.designInventoryId, open: DP.open.has("B1"),
+out.failed = { identity: ctx.state.designInventoryId,
   selected: DP.printSelected.has("B1"), mode: [...modes] };
 DL.editBins = async () => true;
 await DP.deleteRow(DL.bin("B1"));
-out.saved = { identity: ctx.state.designInventoryId, open: DP.open.has("B1"),
+out.saved = { identity: ctx.state.designInventoryId,
   selected: DP.printSelected.has("B1"), mode: [...modes] };
 """)
-        self.assertEqual(out["failed"], {"identity": "B1", "open": True, "selected": True, "mode": []})
-        self.assertEqual(out["saved"], {"identity": None, "open": False, "selected": False,
+        self.assertEqual(out["failed"], {"identity": "B1", "selected": True, "mode": []})
+        self.assertEqual(out["saved"], {"identity": None, "selected": False,
                                         "mode": ["space"]})
 
     def test_hosted_delete_writes_inventory_then_removes_exact_files_and_reports_failure(self):

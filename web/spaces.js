@@ -2038,7 +2038,22 @@ SP.initializeDesignForActiveSpace = async () => {
     const key = JSON.stringify(state.design);
     const matches = Object.entries(DL.layout?.design_specs || {})
       .filter(([, design]) => JSON.stringify(design) === key);
-    if (matches.length === 1) state.designInventoryId = matches[0][0];
+    if (matches.length === 1) {
+      state.designInventoryId = matches[0][0];
+    } else if (matches.length === 0 && typeof freshDesignForCurrentFolder === "function" &&
+               typeof persistSpaceDesignSource === "function") {
+      // Fix 082 B: a resume checkpoint can represent real, meaningful work
+      // that never got a durable Inventory row (e.g. a crash between the
+      // preview and the debounced autosave). Showing that as editable
+      // current work with nothing backing it is an orphan that could
+      // vanish on the next navigation. A checkpoint that is not
+      // distinguishable from an untouched fresh starter needs no row yet;
+      // anything else is atomically attached to a durable row now, through
+      // the same owner every other meaningful change already uses, before
+      // it is exposed as editable.
+      const untouched = JSON.stringify(freshDesignForCurrentFolder()) === key;
+      if (!untouched) await persistSpaceDesignSource(null, true);
+    }
   }
 
   if (!restored) await SP.installSpaceStarterDesign();
@@ -2688,16 +2703,6 @@ SP.renderStructuralActions = () => {
 
 SP.renderSpaceInfo = () => {
     const isSpace = state.folderMode === "space" && state.activeSpace;
-    const wsName = document.getElementById("workspace-space-name");
-    if (wsName) {
-        if (isSpace) {
-            wsName.textContent = state.activeSpace.name;
-            wsName.hidden = false;
-        } else {
-            wsName.hidden = true;
-        }
-    }
-    
     const saveEl = document.getElementById("save-location-row");
     if (saveEl) saveEl.hidden = Boolean(isSpace);
 

@@ -615,28 +615,37 @@ Compatibility logic protects nearby shell features such as front Inside Grips.
 
 **Purpose:** Add centered lettering to the bin base or rim.
 
-### Text Type
+A new Text always starts blank: no placeholder word is ever pre-filled, and
+opening the editor with nothing typed yet creates no Inventory row and shows
+no error — it becomes a real part of the design only once real lettering is
+entered. A brand-new Text also always starts **On base — Inlaid** at **0°**,
+regardless of what style or rotation the last Text in this Space used.
+
+### Text editor fields
+
+- **Words** — the lettering itself;
+- **Style** — one of the four Text Types below;
+- **Letter height** (mm, whole numbers);
+- **Inlay depth** / **Raised height** (label follows Style);
+- **Rotate** — a dropdown of **0°, 90°, 180°, 270°** (base Text only; 0° is
+  straight across/unrotated); rim Text has no Rotate control since its
+  orientation always follows its rim side.
+
+### Style (Text Type)
 
 - **On base — Inlaid**
 - **On base — Raised**
 - **At rim — Inlaid**
 - **At rim — Raised**
 
-### Text options
-
-- text content;
-- letter height;
-- inlay depth / raised height;
-- quarter-turn rotation;
-- rim side for rim text.
-
 ### Text rules
 
 - Text is centered automatically.
 - One On-base Text can be used per bin.
-- A bin may contain **at most one rim Text total** (Fix 078), not one per rim side. Once a rim Text exists, every other Text's At-rim choices are unavailable and rim Text no longer offers Duplicate to another side; the existing rim Text can still change its own side. A legacy design saved with more than one rim Text remains loadable so it can be corrected, but Preview/Generate reports it invalid until only one remains.
+- A bin may contain **at most one rim Text total** (Fix 078), not one per rim side. Once a rim Text exists, every other Text's At-rim choices are unavailable; the existing rim Text can still change its own side. A legacy design saved with more than one rim Text remains loadable so it can be corrected, but Preview/Generate reports it invalid until only one remains. Text no longer offers its own Duplicate action (Fix 082); Photo Nest's separate Duplicate is unaffected.
 - Current relief choices are 0.2, 0.4, 0.6, and 0.8 mm.
 - Inlaid text is represented in the preview without changing the visible exterior envelope incorrectly.
+- **Letter height auto-fits down to 5 mm without asking.** Below 5 mm is a recommendation, not a hard limit (Fix 082): if the text only fits smaller than that, a one-time-per-Space dialog reads exactly "Text below 5mm isn't recommended" with an OK to proceed; once acknowledged, that Space does not ask again, and the smaller size stays valid through Preview, Save/Reopen and Generate/Export. Outside a typed Space, OK permits only that one action.
 
 ---
 

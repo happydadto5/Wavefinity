@@ -583,6 +583,16 @@ input[type="number"]::-webkit-inner-spin-button {
 .subheading-row { display: flex; align-items: end; justify-content: space-between; margin-top: 18px; }
 .subheading-row h2 { margin: 0; font-size: 15px; }
 .subheading-row p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+/* Fix 082 L2: the option currently open for editing - one identity, one
+   Save action - sits once above its own settings, not mixed into the list
+   of everything else already added to the bin. */
+.active-option-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 18px; padding: 8px 10px; border-radius: 8px;
+  background: var(--teal-soft); border: 1px solid var(--line);
+}
+.active-option-row strong { font-size: 14px; }
+.active-option-actions { display: flex; gap: 6px; }
 .count-badge { border-radius: 999px; background: var(--teal-soft); color: var(--teal-dark); padding: 4px 8px; font-size: 11px; font-weight: 700; }
 .support-palette { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 8px 0; }
 .support-choice {
@@ -944,12 +954,13 @@ input[type="number"]::-webkit-inner-spin-button {
 #side-opening-lower::-moz-range-thumb { transform: translateX(-10px); }
 #side-opening-upper::-moz-range-thumb { transform: translateX(10px); }
 
-/* The four wall checkboxes sit beside the visual, a compact 2x2 block rather
-   than a full-width row. */
-.segmented.four.side-opening-walls {
-  grid-template-columns: repeat(2, 1fr); align-self: center; width: auto; min-width: 128px;
+/* Fix 082 L3: four literal wall checkboxes sit beside the visual, a compact
+   2x2 block rather than a full-width row. */
+.side-opening-wall-checks {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 14px;
+  align-self: center; width: auto; min-width: 128px;
 }
-.side-opening-walls button { padding: 7px 8px; font-size: 12px; }
+.side-opening-wall-checks .checkbox-row { margin: 0; font-weight: 500; }
 .preview-hint { text-align: right; color: var(--muted); font-size: 11px; }
 .preview-hint span { display: block; }
 #preview-state { color: var(--teal-dark); font-weight: 700; margin-bottom: 2px; }

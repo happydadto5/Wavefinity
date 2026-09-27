@@ -91,7 +91,7 @@
                 <select id="base-thickness"><option value="standard">Standard</option></select>
               </label>
               <label id="wall-thickness-setting" class="inline-select compact-select">Wall thickness
-                <select id="wall-thickness"><option value="standard">Standard</option></select>
+                <select id="wall-thickness"><option value="standard">0.8 mm — Default</option></select>
               </label>
             </div>
             <div id="surface-bin-controls" class="surface-bin-controls" hidden>
@@ -121,8 +121,12 @@
 
       <section class="control-section open" data-section="parts-options">
         <div class="section-body">
-          <div class="subheading-row">
-            <div><h2>Options</h2></div>
+          <div id="active-option-row" class="active-option-row" hidden>
+            <strong id="active-option-title"></strong>
+            <div class="active-option-actions">
+              <button type="button" id="active-option-delete" class="button danger dl-small">Delete</button>
+              <button type="button" id="active-option-save" class="button primary dl-small">Save</button>
+            </div>
           </div>
           <div id="lid-option" class="lid-option-card" hidden>
             <div id="lid-option-panel">
@@ -233,11 +237,11 @@
                     </div>
                     <span class="side-opening-range-cue">Base / bottom of bin</span>
                   </div>
-                  <div class="segmented four side-opening-walls" aria-label="Side Opening walls">
-                    <button id="side-opening-front" type="button" aria-pressed="false">Front</button>
-                    <button id="side-opening-back" type="button" aria-pressed="false">Back</button>
-                    <button id="side-opening-left" type="button" aria-pressed="false">Left</button>
-                    <button id="side-opening-right" type="button" aria-pressed="false">Right</button>
+                  <div class="side-opening-wall-checks" role="group" aria-label="Side Opening walls">
+                    <label class="checkbox-row"><span>Front</span><input id="side-opening-front" type="checkbox"></label>
+                    <label class="checkbox-row"><span>Back</span><input id="side-opening-back" type="checkbox"></label>
+                    <label class="checkbox-row"><span>Left</span><input id="side-opening-left" type="checkbox"></label>
+                    <label class="checkbox-row"><span>Right</span><input id="side-opening-right" type="checkbox"></label>
                   </div>
                 </div>
               </div>
@@ -384,7 +388,7 @@
           </div>
 
           <div class="added-parts-block">
-            <h3>Already added to this bin</h3>
+            <h3>Options in this bin</h3>
             <div id="added-parts-list" class="placed-supports"></div>
           </div>
 
@@ -468,7 +472,6 @@
             <button class="view-tab active" data-view="3d" role="tab" aria-selected="true" title="The bin in 3D">3D</button>
             <button class="view-tab" data-view="2d" role="tab" aria-selected="false" title="Lay out the interior parts of this bin">2D</button>
           </div>
-          <span id="workspace-space-name" class="workspace-space-name" hidden></span>
         </div>
         <div class="preview-hint"><span id="preview-state">Building preview…</span></div>
       </div>

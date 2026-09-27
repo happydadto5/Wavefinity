@@ -2762,7 +2762,7 @@ def default_feature(
         # The starting zone is only an interaction aid; the glyph determines
         # its canonical bounds after fitting into the usable base.
         width, depth = bounds.width, bounds.depth
-        feature_options = {"text": "label", "level": "base", "quarter_turns": 0,
+        feature_options = {"text": "", "level": "base", "quarter_turns": 0,
                            "raised": False, "depth": TEXT_DEPTH,
                            "cap_height": TEXT_CAP_HEIGHT_IDEAL}
     else:

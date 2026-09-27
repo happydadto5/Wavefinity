@@ -72,6 +72,13 @@ DL.defaultSettings = () => ({
   // from, this Space only - newest first, at most 10, never the prompt text
   // itself and never a bin design.
   ai_design_recent_descriptions: [],
+  // Fix 082 I: once this Space has acknowledged one sub-5 mm Text, later
+  // automatic fits in this Space don't ask again. Default not acknowledged.
+  text_small_size_ack: false,
+  // Fix 082 E: suppresses only the explicit Inventory-row Delete
+  // confirmation; drag-off, Space deletion and every other destructive
+  // prompt are unaffected. Default off (still asks).
+  suppress_inventory_delete_confirm: false,
 });
 
 DL.newDrawerId = () => {
@@ -119,6 +126,9 @@ DL.normaliseLayout = raw => {
   // autosave:false layout normalises to the always-on runtime value.
   layout.settings.autosave = true;
   layout.settings.auto_update_changed_files = layout.settings.auto_update_changed_files === true;
+  layout.settings.text_small_size_ack = layout.settings.text_small_size_ack === true;
+  layout.settings.suppress_inventory_delete_confirm =
+    layout.settings.suppress_inventory_delete_confirm === true;
   const recent = Array.isArray(layout.settings.ai_design_recent_descriptions)
     ? layout.settings.ai_design_recent_descriptions : [];
   const seenRecent = new Set();

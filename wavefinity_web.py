@@ -1991,16 +1991,11 @@ def _preview_payload(payload: dict[str, Any], token) -> dict[str, Any]:
             effective[selected] = draft
         else:
             effective.append(draft)
-    effective_layout = replace(layout, features=tuple(effective))
-    duplicate_text_indexes = [index for index in range(len(layout.features))
-                              if effective[index].kind == "text" and _text_duplicate_destination(
-                                  stack_request, effective_layout, index, label, label_location, scoop) is not None]
     bore_warning = _capped_bore_warning(stack_request, layout, effective, payload.get("space"))
     return {
         "design": canonical,
         "planning": planning,
         "bore_ceiling_warning": bore_warning,
-        "duplicate_text_indexes": duplicate_text_indexes,
         "stack": stack_block,
         "label_outline": scene["label_outline"],
         "label_meta": scene["label_meta"],
@@ -2470,50 +2465,12 @@ def apply_reference_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "selected": selected}
 
 
-def _text_duplicate_destination(request_box: BoxSpec, layout: Layout, index: int,
-                                label: str, label_location: str, scoop: bool):
-    """One authority for the preview action and the duplicate endpoint."""
-    from organizer_engine import top_label_zone
-    from organizer_inserts._text import canonical_text_feature
-    features = list(layout.features)
-    if not 0 <= index < len(features) or features[index].kind != "text":
-        return None
-    source = features[index]
-    if source.options.get("level") == "rim" or any(
-        one.kind == "text" and one.options.get("level") == "rim" for one in features
-    ):
-        return None
-    box = _interior_work_box(request_box)
-    for side in ("back", "front", "left", "right"):
-        options = {**source.options, "level": "rim", "rim_side": side, "quarter_turns": 0}
-        clone = canonical_text_feature(replace(source, zone=Zone(*top_label_zone(box, side).bounds),
-                                               options=options))
-        updated = replace(layout, features=tuple(features + [clone]))
-        try:
-            updated.validate(box)
-            validate_customization_clearance(box, updated.features, label, label_location, scoop, updated.mode)
-            scene = preview_geometry(box, label, updated.features, updated.mode,
-                                     label_location, scoop, layout=updated)
-            if scene["fits"] and not scene["feature_errors"]:
-                return side, clone
-        except (ValueError, TypeError):
-            continue
-    return None
-
-
 def duplicate_feature_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Duplicate a Text to a free destination or a completed Photo Nest."""
+    """Duplicate a completed Photo Nest to another spot (Fix 082 J: Text's own
+    Duplicate to rim is retired; this endpoint now serves Photo Nest only)."""
     request_box, layout, label, part_name, label_location, scoop = _design(payload["design"])
     index = int(payload["index"])
     features = list(layout.features)
-    if 0 <= index < len(features) and features[index].kind == "text":
-        destination = _text_duplicate_destination(request_box, layout, index, label, label_location, scoop)
-        if destination is None:
-            raise ValueError("This Text has no legal rim side for Duplicate to rim.")
-        side, clone = destination
-        updated = replace(layout, features=tuple(features + [clone]))
-        return {"design": design_to_dict(request_box, updated, label, part_name, label_location, scoop),
-                "selected": len(features), "rim_side": side}
     if not 0 <= index < len(features) or features[index].kind != "nest" or not features[index].contour:
         raise ValueError("the selected Photo Nest no longer exists")
     if any(one.kind != "nest" for one in features):

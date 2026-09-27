@@ -69,26 +69,6 @@ body.drawer-mode .header-actions .file-button { display: none !important; }
 .dl-row-actions .button { padding: 4px 7px; font-size: 11px; }
 .dl-bin-main .dl-status { color: var(--teal-dark); font-weight: 700; }
 .dl-bin.printed .dl-bin-main .dl-status { color: #1f6b45; }
-.dl-more { border: 0; background: none; font-size: 13px; cursor: pointer; color: var(--muted); padding: 4px 2px; }
-.dl-remove {
-  border: 0; border-radius: 6px; background: none; color: var(--muted); font-size: 13px;
-  cursor: pointer; padding: 5px 6px; line-height: 1;
-}
-.dl-remove:hover { color: var(--danger); background: #fff0ef; }
-.dl-bin-details {
-  margin: -4px 0 2px; padding: 10px 12px; border: 1px solid var(--line); border-top: 0;
-  border-radius: 0 0 9px 9px; background: #fbfcfc;
-}
-.dl-bin-details .field-grid { margin-bottom: 0; }
-/* Fix 061 F1.10: each cluster of row details reads as its own labelled group. */
-.dl-bin-details .dl-group {
-  display: grid; gap: 6px; margin: 0 0 8px; padding: 8px;
-  border: 1px solid var(--line); border-radius: 8px; background: #fbfcfc;
-}
-.dl-bin-details .dl-group-label {
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted);
-}
-.dl-bin-details p { margin: 6px 0 10px; font-size: 11px; color: var(--muted); line-height: 1.5; word-break: break-word; }
 .dl-empty {
   padding: 14px; border: 1px dashed var(--line-dark); border-radius: 8px; color: var(--muted);
   font-size: 12px; text-align: center; line-height: 1.5;

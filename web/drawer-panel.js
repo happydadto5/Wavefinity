@@ -10,7 +10,6 @@
 const DP = {
   built: false,
   signatures: {},
-  open: new Set(),        // bin ids whose details are expanded
   filter: { text: "", show: "all", sort: "height" },
   filtersBySpace: new Map(),
   printSelected: new Set(), // general ordinary-bin selection, keyed by durable row ID
@@ -45,8 +44,6 @@ const dlChanged = (name, value) => {
   DP.signatures[name] = value;
   return true;
 };
-const STACK_OPTIONS = `<option value="none">Not stackable</option><option value="lid">Snap-on lid</option><option value="direct">Direct snap</option>`;
-
 DP.singleTypedSpace = () => state.folderMode === "space"
   && Boolean(state.activeSpace)
   && Boolean(DL.layout)
@@ -286,22 +283,13 @@ DP.wire = () => {
   list.addEventListener("click", event => DP.onInventoryClick(event));
   list.addEventListener("change", event => {
     const printId = event.target.dataset.printSelect;
-    if (printId) {
-      if (event.target.checked) DP.printSelected.add(printId); else DP.printSelected.delete(printId);
-      event.target.closest("[data-bin]")?.classList.toggle("print-selected", event.target.checked);
-      DP.renderBatch();
-      return;
-    }
-    const field = event.target.dataset.field;
-    const id = event.target.closest("[data-bin]")?.dataset.bin;
-    if (!field || !id) return;
-    const text = field === "name" || field === "stack";
-    DL.editBins({ bin_updates: [{ id, [field]: text ? event.target.value
-      : field === "object_height_mm" && !event.target.value.trim() ? null
-        : dlNum(event.target.value, 0) }] });
+    if (!printId) return;
+    if (event.target.checked) DP.printSelected.add(printId); else DP.printSelected.delete(printId);
+    event.target.closest("[data-bin]")?.classList.toggle("print-selected", event.target.checked);
+    DP.renderBatch();
   });
   list.addEventListener("keydown", event => {
-    if (!["Enter", " "].includes(event.key) || event.target.closest("button, input, select, a, textarea, .dl-bin-details")) return;
+    if (!["Enter", " "].includes(event.key) || event.target.closest("button, input, select, a, textarea")) return;
     const row = event.target.closest(".dl-bin[data-bin]");
     if (!row) return;
     event.preventDefault();
@@ -412,16 +400,13 @@ DP.onInventoryClick = async event => {
   const one = row && DL.bin(row.dataset.bin);
   if (!one) return;
   const action = event.target.closest("[data-act]")?.dataset.act;
-  if (action === "more") {
-    if (DP.open.has(one.id)) DP.open.delete(one.id); else DP.open.add(one.id);
-    DP.renderInventory(true);
-  } else if (action === "duplicate") DP.duplicateRow(one);
+  if (action === "duplicate") DP.duplicateRow(one);
   else if (action === "print") DL.printSelectedBins({ [one.id]: DL.printCount(one) }, false);
   else if (action === "printed") DL.markPrinted(one);
   else if (action === "not-printed") DL.markNotPrinted(one);
   else if (action === "edit") DP.openInventoryRow(one.id);
   else if (action === "delete") DP.deleteRow(one);
-  else if (!action && !event.target.closest("button, input, select, a, textarea, .dl-bin-details")) {
+  else if (!action && !event.target.closest("button, input, select, a, textarea")) {
     DL.selectRow(one.id);
   }
 };
@@ -469,19 +454,30 @@ DP.duplicateRow = async one => {
 DP.deleteRow = async one => {
   const context = DL.spaceContext();
   const placed = DL.placedCount(one.id);
-  const ok = await appConfirmAction({
-    title: "Delete this bin?",
-    message: `Delete ${DL.label(one)} from Inventory?${placed ? " It is placed in this Space; its placement is removed too." : ""} Generated files owned only by this bin will also be deleted from the folder.`,
-    actionLabel: "Delete Bin",
-    danger: true,
-  });
+  // Fix 082 E: this exact confirmation, and only this one, can be suppressed
+  // per Space - drag-off, Space deletion and every other destructive prompt
+  // are untouched.
+  const suppressed = DL.layout?.settings?.suppress_inventory_delete_confirm === true;
+  let ok = suppressed;
+  if (!suppressed) {
+    ok = await appConfirmAction({
+      title: "Delete this bin?",
+      message: `Delete ${DL.label(one)} from Inventory?${placed ? " It is placed in this Space; its placement is removed too." : ""} Generated files owned only by this bin will also be deleted from the folder.`,
+      actionLabel: "Delete Bin",
+      danger: true,
+      checkboxLabel: "Don't show this confirmation again",
+    });
+    if (appConfirmAction.checked) {
+      DL.change(() => { DL.layout.settings.suppress_inventory_delete_confirm = true; }, { history: false });
+      if (DL.spaceContextCurrent(context)) await DL.save();
+    }
+  }
   if (!ok || !DL.spaceContextCurrent(context)) return;
   if (one.id === state.designInventoryId &&
       !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   if (!DL.spaceContextCurrent(context)) return;
   const wasDesign = one.id === state.designInventoryId;
   if (!(await DL.editBins({ delete_ids: [one.id] }, { context }))) return;
-  DP.open.delete(one.id);
   DP.printSelected.delete(one.id);
   if (DL.selectedRow === one.id) DL.selectedRow = null;
   if (wasDesign) {
@@ -499,18 +495,27 @@ DP.deleteSelected = async () => {
   if (!ids.length) return;
   const context = DL.spaceContext();
   const placed = ids.filter(id => DL.placedCount(id)).length;
-  const ok = await appConfirmAction({
-    title: `Delete ${dlPlural(ids.length, "bin")}?`,
-    message: `Delete all ${ids.length} selected bins, including any hidden by Search or Filter?${placed ? ` ${placed} placed bin${placed === 1 ? "" : "s"} will also be removed from this Space.` : ""} Generated files owned only by these bins will also be deleted from the folder.`,
-    actionLabel: `Delete ${ids.length} bins`, danger: true,
-  });
+  const suppressed = DL.layout?.settings?.suppress_inventory_delete_confirm === true;
+  let ok = suppressed;
+  if (!suppressed) {
+    ok = await appConfirmAction({
+      title: `Delete ${dlPlural(ids.length, "bin")}?`,
+      message: `Delete all ${ids.length} selected bins, including any hidden by Search or Filter?${placed ? ` ${placed} placed bin${placed === 1 ? "" : "s"} will also be removed from this Space.` : ""} Generated files owned only by these bins will also be deleted from the folder.`,
+      actionLabel: `Delete ${ids.length} bins`, danger: true,
+      checkboxLabel: "Don't show this confirmation again",
+    });
+    if (appConfirmAction.checked) {
+      DL.change(() => { DL.layout.settings.suppress_inventory_delete_confirm = true; }, { history: false });
+      if (DL.spaceContextCurrent(context)) await DL.save();
+    }
+  }
   if (!ok || !DL.spaceContextCurrent(context)) return;
   if (ids.includes(state.designInventoryId) &&
       !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   if (!DL.spaceContextCurrent(context)) return;
   const removed = await DL.editBins({ delete_ids: ids }, { context });
   if (!removed) return;
-  ids.forEach(id => { DP.open.delete(id); DP.printSelected.delete(id); });
+  ids.forEach(id => DP.printSelected.delete(id));
   if (ids.includes(DL.selectedRow)) DL.selectedRow = null;
   if (ids.includes(state.designInventoryId)) {
     clearTimeout(spaceAutosaveTimer);
@@ -820,7 +825,7 @@ DP.renderInventory = (force = false) => {
   const counts = DL.bins.map(one => [one.id, DL.placedCount(one.id)]);
   const signature = JSON.stringify([DL.bins, counts, Object.keys(DL.layout.design_specs || {}), DL.report?.planning_heights,
     Boolean(state.runtime.hosted), Boolean(state.slicer?.available),
-    DP.filter, [...DP.open], selectedRow, drawer.id, drawer.height, [...DP.printSelected]]);
+    DP.filter, selectedRow, drawer.id, drawer.height, [...DP.printSelected]]);
   if (!dlChanged("inventory", signature) && !force) return;
   if (list.contains(document.activeElement) && document.activeElement.matches("input, select") && !force) return;
   const bins = DP.filteredBins();
@@ -853,7 +858,6 @@ DP.renderInventory = (force = false) => {
     ].filter(Boolean);
     const classes = [one.id === selectedRow ? "selected" : "", tooTall ? "too-tall" : "",
       spacer ? "spacer-row" : "", one.status === "printed" ? "printed" : ""].filter(Boolean).join(" ");
-    const open = DP.open.has(one.id);
     const eligible = DL.printEligible(one);
     const spec = DL.layout?.design_specs?.[one.id];
     const designSource = ["bin", "b4b"].includes(one.kind) && Boolean(spec);
@@ -890,40 +894,15 @@ DP.renderInventory = (force = false) => {
           ${lifecycle}
           ${flags.length ? `<small class="dl-flags">${escapeHtml(flags.join(" · "))}</small>` : ""}
         </span>
-        <button type="button" class="dl-more" data-act="more" aria-expanded="${open}" title="Details">${open ? "▴" : "▾"}</button>
-        ${spacer ? `<button type="button" class="dl-remove" data-act="delete" title="Delete" aria-label="Delete ${escapeHtml(DL.label(one))}">✕</button>` : ""}
+        ${spacer ? `<div class="dl-row-actions"><button type="button" class="button danger dl-small" data-act="delete" aria-label="Delete ${escapeHtml(DL.label(one))}">Delete</button></div>` : ""}
         ${actions}
-      </div>
-      ${open ? `<div class="dl-bin-details" data-bin="${escapeHtml(one.id)}">
-        <div class="dl-group"><span class="dl-group-label">Bin</span>
-          <div class="field-grid two">
-            <label>Name<input type="text" data-field="name" maxlength="80" value="${escapeHtml(one.name)}" placeholder="Shows the size when blank"></label>
-            <label>Stacking<select data-field="stack">${STACK_OPTIONS.replace(`value="${one.stack}"`, `value="${one.stack}" selected`)}</select></label>
-          </div>
-        </div>
-        ${DL.isSurface() ? `<div class="dl-group"><span class="dl-group-label">Planning</span>
-          <label>Object height <span class="unit">mm</span><input type="number" data-field="object_height_mm" min="0.1" step="0.1" value="${one.object_height_mm ?? ""}" placeholder="Not set"></label>
-        </div>` : ""}
-        <div class="dl-group"><span class="dl-group-label">Size</span>
-          <div class="field-grid three">
-            <label>Width <span class="unit">mm</span><input type="number" data-field="x" min="1" step="8" value="${fmt(one.x)}"></label>
-            <label>Length <span class="unit">mm</span><input type="number" data-field="y" min="1" step="8" value="${fmt(one.y)}"></label>
-            <label>Height <span class="unit">mm</span><input type="number" data-field="z" min="1" step="1" value="${fmt(one.z)}" title="${DL.stackable(one) ? "Stack module height" : "Finished height"}"></label>
-          </div>
-        </div>
-        <p>${DL.stackable(one) ? `Adds ${fmt(DL.pitch(one))} mm to a stack; detached height is ${fmt(DL.partHeight(one))} mm including its interlock.<br>` : ""}${one.file ? `File: ${escapeHtml(one.file)}<br>` : ""}${one.label ? `Label: ${escapeHtml(one.label)}<br>` : ""}${one.interior ? `Inside: ${escapeHtml(one.interior)}<br>` : ""}${escapeHtml(one.id)}${one.date ? ` · logged ${escapeHtml(one.date)}` : ""}</p>
-      </div>` : ""}`;
+      </div>`;
   }).join("");
   // The page's security policy refuses inline style attributes, so colours
   // go on through the DOM instead.
   $$(".dl-swatch", list).forEach(node => {
     node.style.background = node.dataset.top;
     node.style.color = node.dataset.ink;
-  });
-  $$(".dl-bin-details[data-bin]", list).forEach(details => {
-    if (DL.layout?.design_specs?.[details.dataset.bin]) {
-      $$("[data-field]", details).forEach(field => { field.disabled = true; });
-    }
   });
 };
 
