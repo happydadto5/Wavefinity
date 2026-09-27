@@ -317,21 +317,11 @@ function isBlankTextDraft(feature) {
   return feature?.kind === "text" && !String(feature.options?.text ?? "").trim();
 }
 
-// Fix 082 I: the backend raises this exact, distinctive phrase (and only
-// this phrase) when a Text's real fit needs less than the 5 mm recommended
-// minimum letter height - never for a genuine geometry failure - so the
-// browser can tell the two apart and offer the consent dialog instead of a
-// plain error.
-const SMALL_TEXT_MARKER = /recommended minimum/i;
-
-// Shows the one-time-per-Space "Text below 5mm isn't recommended" consent
-// dialog (or skips it silently when this Space already acknowledged it) and
-// records the acknowledgement through the same durable Space settings owner
-// as auto_update_changed_files. Returns whether the caller may now let the
-// small Text through. Outside a typed Space, OK permits only this one
-// action - there is nowhere durable to remember it, and none is invented.
+// Consent belongs to this edit and, for a typed Space, its durable settings.
+// It is never a property of the Text feature or a geometry requirement.
 async function acknowledgeSmallText() {
   const inSpace = state.folderMode === "space" && typeof DL !== "undefined" && DL.layout;
+  const context = inSpace ? DL.spaceContext() : null;
   if (inSpace && DL.layout.settings?.text_small_size_ack === true) return true;
   const choice = await appConfirm({
     title: "Small text size",
@@ -341,11 +331,44 @@ async function acknowledgeSmallText() {
   });
   if (choice !== "primary") return false;
   if (inSpace) {
-    const context = DL.spaceContext();
+    if (!DL.spaceContextCurrent(context)) return false;
     DL.change(() => { DL.layout.settings.text_small_size_ack = true; }, { history: false });
-    if (DL.spaceContextCurrent(context)) await DL.save();
+    const saved = await DL.save();
+    if (!DL.spaceContextCurrent(context)) return false;
+    if (!saved) {
+      DL.change(() => { DL.layout.settings.text_small_size_ack = false; }, { history: false });
+      return false;
+    }
   }
   return true;
+}
+
+async function allowSmallTextEdit(cap, request, draft) {
+  if (draft?.kind !== "text") return true;
+  if (!Number.isFinite(cap) || cap <= 0) {
+    throw new Error("Could not determine a printable Letter height for this Text.");
+  }
+  if (cap >= 5) return true;
+  const index = draftCommitIndex();
+  const changed = state.draftIsNew || (Number.isInteger(index)
+    ? JSON.stringify(state.design.layout.features[index]) !== JSON.stringify(draft)
+    : state.draftTouched);
+  if (!changed) return true; // reopening an existing sub-5 Text is not an edit
+  if (state.smallTextApprovedDraftRequest === request) return true;
+  if (state.smallTextConsentDeclined) return false;
+  if (!state.smallTextConsentPromise) {
+    const pending = acknowledgeSmallText();
+    state.smallTextConsentPromise = pending;
+    const clearPending = () => {
+      if (state.smallTextConsentPromise === pending) state.smallTextConsentPromise = null;
+    };
+    pending.then(clearPending, clearPending);
+  }
+  const allowed = await state.smallTextConsentPromise;
+  if (request !== state.draftRequest || state.draft !== draft) return false;
+  if (allowed) state.smallTextApprovedDraftRequest = request;
+  else state.smallTextConsentDeclined = true;
+  return allowed;
 }
 
 function isSpaceTextKey(key) {
@@ -442,6 +465,7 @@ function partDefaultsFromFeature(feature) {
   // regardless of what style/rotation the last Text in this Space happened
   // to use, so those settings are never remembered for this kind.
   if (feature.kind === "text") {
+    delete copy.options.small_size_ack;
     delete copy.options.level;
     delete copy.options.raised;
     delete copy.options.rim_side;
@@ -475,6 +499,7 @@ function cleanPartDefaultEntry(entry) {
     if (isSpaceTextKey(key)) delete clean.options[key];
   }
   if (entry.kind === "text") {
+    delete clean.options.small_size_ack;
     delete clean.options.level;
     delete clean.options.raised;
     delete clean.options.rim_side;
@@ -4984,6 +5009,7 @@ function cancelPendingDraftWork() {
   state.nestTraceRequest += 1;
   state.nestRetraceRequest += 1;
   state.draftRequest += 1;
+  state.smallTextConsentDeclined = false;
   invalidatePendingPreview();
 }
 
@@ -6172,7 +6198,7 @@ function renderDraftFields() {
     const depthTip = one.options?.raised === true
       ? "How far the letters project above their receiving surface."
       : "How deeply the letters are embedded or cut into their receiving surface.";
-    textGroup += field("Letter height", "option:cap_height", fmt(capShown), { unit: "mm", step: "0.5" });
+    textGroup += field("Letter height", "option:cap_height", String(Math.floor(number(capShown, 15))), { unit: "mm", step: "1" });
     textGroup += `<label title="${depthTip}">${depthLabel}<select data-draft="option:depth">
       ${[[0.2, "Thin"], [0.4, "Default"], [0.6, "Thick"], [0.8, "Thickest"]]
         .map(([value, name]) => `<option value="${value}" ${Math.abs(depthShown - value) < 1e-6 ? "selected" : ""}>${name} ${value} mm</option>`).join("")}
@@ -8097,6 +8123,7 @@ function markDraftChanged(referenceOnly = false) {
   // which the older response can replace the newer edit.
   state.draftTouched = true;
   state.draftRequest += 1;
+  state.smallTextConsentDeclined = false;
   if (keepReferenceResolution) state.referenceResolutionRequest = state.draftRequest;
   updateReferenceAddAvailability();
   state.canGenerate = false;
@@ -8348,6 +8375,11 @@ function updateDraftFromFields(event) {
     if (said) {
       one.options.text = said.value;
       seedPartNameFromText(one);
+      if (changed === "option:text" && said.value.trim()) {
+        delete one.options.cap_height;
+        delete one.options.text_v2;
+        if (one.options.level === "rim") one.options.retarget = "rim";
+      }
     }
     const type = get("option:text_type") || "base_inlaid";
     const oldLevel = one.options.level === "rim" ? "rim" : "base";
@@ -8383,7 +8415,7 @@ function updateDraftFromFields(event) {
       syncForm();
       renderDraftFields();
       updateGenerateAvailability();
-      toast(`Only one Text can use the ${destination === "base" ? "base" : "same rim side"}. Change Text Type or remove the other Text.`, true, 6000);
+      toast(`Only one Text can use the ${destination === "base" ? "base" : "same rim side"}. Change Style or remove the other Text.`, true, 6000);
       return;
     }
     syncRimLabelFromFeatures();
@@ -8669,11 +8701,29 @@ async function refreshDraft() {
     });
     if (request !== state.draftRequest) return;
     if (result.superseded) throw new Error("Current draft was unexpectedly superseded. Try again.");
+    const draft = state.draft;
+    const textCap = Number(result.resolved_options?.cap_height ?? result.feature?.options?.cap_height);
+    if (!(await allowSmallTextEdit(textCap, request, draft))) {
+      if (request !== state.draftRequest) return;
+      $("#draft-status").textContent = "Text needs to be smaller than 5 mm to fit here.";
+      $("#draft-status").classList.remove("error");
+      return await refreshPreview();
+    }
+    if (request !== state.draftRequest) return;
+    state.smallTextConsentDeclined = false;
     state.draftResolvedOptions = result.resolved_options || {};
     state.referenceResolutionRequest = request;
     if (state.draft.kind === "text" && result.feature) {
       if (Array.isArray(result.feature.zone)) state.draft.zone = result.feature.zone.slice();
       state.draft.options.text_v2 = true;
+      if (state.draft.options.cap_height == null || state.draft.options.cap_height === "") {
+        state.draft.options.cap_height = result.feature.options?.cap_height;
+      }
+      const heightInput = $('[data-draft="option:cap_height"]', $("#draft-fields"));
+      if (heightInput && heightInput !== document.activeElement) {
+        heightInput.value = String(Math.floor(number(
+          result.resolved_options?.cap_height ?? result.feature.options?.cap_height, 15)));
+      }
       if (state.draft.options.retarget) {
         delete state.draft.options.retarget;
         if (result.feature.options?.cap_height !== undefined) {
@@ -8728,32 +8778,6 @@ async function refreshDraft() {
     if (request === state.draftRequest && await reconcileBoreBin(result)) return;
   } catch (error) {
     if (request !== state.draftRequest) return;
-    // Fix 082 I: the fit only works below the 5 mm recommendation - ask once
-    // per Space instead of showing this as a plain validation failure.
-    if (state.draft?.kind === "text" && SMALL_TEXT_MARKER.test(error.message || "")) {
-      if (state.smallTextPromptOpen) {
-        $("#draft-status").textContent = "Text needs to be smaller than 5 mm to fit here.";
-        $("#draft-status").classList.remove("error");
-        return;
-      }
-      state.smallTextPromptOpen = true;
-      let acknowledged = false;
-      try {
-        acknowledged = await acknowledgeSmallText();
-      } finally {
-        state.smallTextPromptOpen = false;
-      }
-      if (request !== state.draftRequest) return;
-      if (acknowledged) {
-        state.draft.options.small_size_ack = true;
-        return await refreshDraft();
-      }
-      // Cancelled: leave the prior valid state alone, no sub-5 mutation.
-      $("#draft-status").textContent = "Text needs to be smaller than 5 mm to fit here.";
-      $("#draft-status").classList.remove("error");
-      state.fitError = false;
-      return await refreshPreview();
-    }
     // A part whose contents outgrew the bin: grow the bin around it instead of
     // stopping at the error, so "put 10 x 10 holes in a stock bin" (or a longer
     // tool, more pegs, more slots) just resizes the bin the way the "Grow the
@@ -8889,6 +8913,29 @@ async function commitVisibleDraft({ previewAfterCommit = true } = {}) {
   if (Number.isInteger(index) &&
       JSON.stringify(state.design.layout.features[index]) === JSON.stringify(state.draft)) {
     return false;
+  }
+  if (state.draft.kind === "text" &&
+      state.smallTextApprovedDraftRequest !== state.draftRequest) {
+    const request = state.draftRequest;
+    const draftAtCheck = state.draft;
+    const checked = await api("/api/feature/draft", {
+      design: state.design, feature: draftAtCheck, index,
+    });
+    if (request !== state.draftRequest || state.draft !== draftAtCheck) {
+      throw new Error("The Text changed while it was being saved. Try again.");
+    }
+    const cap = Number(checked.resolved_options?.cap_height ?? checked.feature?.options?.cap_height);
+    if (!(await allowSmallTextEdit(cap, request, draftAtCheck))) {
+      throw new Error("Text needs approval below 5 mm before it can be saved.");
+    }
+    if (request !== state.draftRequest || state.draft !== draftAtCheck) {
+      throw new Error("The Text changed while it was being saved. Try again.");
+    }
+    if ((state.draft.options.cap_height == null || state.draft.options.cap_height === "") &&
+        checked.feature?.options?.cap_height != null) {
+      state.draft.options.cap_height = checked.feature.options.cap_height;
+      state.draft.options.text_v2 = true;
+    }
   }
   const draft = state.draft;
   const snapshot = JSON.stringify(draft);
@@ -9749,7 +9796,8 @@ async function refreshPreview({ persistResume = true } = {}) {
   try {
     const payload = { design: state.design, client_id: previewClientId, generation: request,
       space: state.folderMode === "space" ? state.activeSpace : null };
-    if (state.draft && !(state.draft.kind === "nest" && !state.draft.contour)) {
+    if (state.draft && !state.smallTextConsentDeclined &&
+        !(state.draft.kind === "nest" && !state.draft.contour)) {
       payload.draft = state.draft;
       // A draft opened from a placed part replaces that part for preview
       // validation. Without its index, the server sees the saved bore and its
@@ -12090,9 +12138,7 @@ function renderLayoutText(context, feature, toCanvas, scale, isDraft = false) {
   } else {
     cap = Math.min(cap, fits);
   }
-  cap = Math.max(cap, 3.5);
-
-  const fontSizePx = Math.max(6, (cap / 0.729) * scale);
+  const fontSizePx = Math.max(1, (cap / 0.729) * scale);
   const angle = -turns * (Math.PI / 2);
 
   context.save();

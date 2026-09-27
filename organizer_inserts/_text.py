@@ -6,7 +6,7 @@ import trimesh
 from shapely import affinity
 from shapely.geometry import Polygon
 from organizer_engine import (
-    BoxSpec, TEXT_CAP_HEIGHT_FLOOR, TEXT_CAP_HEIGHT_IDEAL, TEXT_DEPTH,
+    BoxSpec, TEXT_CAP_HEIGHT_IDEAL, TEXT_DEPTH,
     TOP_LABEL_CAP_HEIGHT, TOP_LABEL_LEDGE_DEPTH, TOP_LABEL_MARGIN,
     make_top_label_ledge, require_text_backing, text_outline, text_prism,
     top_label_surface_z, top_label_zone,
@@ -85,45 +85,30 @@ def text_fitted(one: Feature) -> tuple[float, object]:
     if width <= 0.0 or height <= 0.0:
         raise ValueError(f"'{label}' has no printable outline")
     zone = one.zone
-    # Fix 082 I: 5 mm is a recommendation, not an absolute floor. A Text that
-    # has been acknowledged for its Space (or explicitly re-saved with the
-    # marker still set) may size all the way down to a real, positive,
-    # printable height; everything else still stops at the recommendation so
-    # the caller (the browser draft/apply pipeline) gets the chance to ask
-    # first. The marker phrase below is matched by the browser to tell this
-    # specific, expected case apart from a genuine geometry failure.
-    ack = bool(one.options.get("small_size_ack"))
+    # The 5 mm recommendation is an editor consent decision. Saved geometry
+    # has no consent marker and remains valid at any positive printable height.
     wanted = one.options.get("cap_height")
     if one.options.get("text_v2") and wanted not in (None, ""):
         cap = float(wanted)
         if not math.isfinite(cap) or cap <= 0.0:
             raise ValueError("Letter height must be a positive number")
-        if cap < TEXT_CAP_HEIGHT_FLOOR and not ack:
-            raise ValueError(
-                f"Letter height {cap:g} mm is below the {TEXT_CAP_HEIGHT_FLOOR:g} mm "
-                "recommended minimum"
-            )
         return cap, _oriented_text(label, cap, turns)
     fits = TEXT_CAP_HEIGHT_IDEAL * min(zone.width / width, zone.depth / height)
     if not math.isfinite(fits) or fits <= 0.0:
         raise ValueError(f"'{label}' has no room to print in this box")
-    if fits < TEXT_CAP_HEIGHT_FLOOR - 1e-9 and not ack:
-        needed_x = width * TEXT_CAP_HEIGHT_FLOOR / TEXT_CAP_HEIGHT_IDEAL
-        needed_y = height * TEXT_CAP_HEIGHT_FLOOR / TEXT_CAP_HEIGHT_IDEAL
-        raise ValueError(
-            f"'{label}' only fits its box below the {TEXT_CAP_HEIGHT_FLOOR:g} mm "
-            f"recommended minimum letter height: it needs {needed_x:.1f} x "
-            f"{needed_y:.1f} mm at that height and the box is "
-            f"{zone.width:.1f} x {zone.depth:.1f} mm"
-        )
-    cap = min(float(wanted), fits) if wanted else fits
-    if not ack:
-        cap = max(cap, TEXT_CAP_HEIGHT_FLOOR)
-    # Fix 082 I: an auto-fit height (nothing explicitly typed) never rounds
-    # up past the room it actually has - only ever down, to the largest
-    # whole millimetre, and only while that still clears the recommendation.
-    if not wanted and cap >= TEXT_CAP_HEIGHT_FLOOR:
+    if wanted not in (None, ""):
+        requested = float(wanted)
+        if not math.isfinite(requested) or requested <= 0.0:
+            raise ValueError("Letter height must be a positive number")
+        cap = min(requested, fits)
+    else:
+        cap = min(TEXT_CAP_HEIGHT_IDEAL, fits)
+    # A new automatic fit is always a whole millimetre, including below 5 mm.
+    # A legacy explicit fractional height remains unchanged on import.
+    if wanted in (None, "") or requested == TEXT_CAP_HEIGHT_IDEAL:
         cap = float(math.floor(cap))
+        if cap <= 0:
+            raise ValueError(f"'{label}' has no room for a printable whole-millimetre letter height")
     return cap, _oriented_text(label, cap, turns)
 
 
@@ -148,6 +133,7 @@ def canonical_text_feature(one: Feature) -> Feature:
     if not is_text(one):
         return one
     options = dict(one.options)
+    options.pop("small_size_ack", None)  # discard the retired feature-level consent marker
     canonical = options.get("text_v2") is True
     options["level"] = "rim" if options.get("level") == "rim" else "base"
     options["raised"] = bool(options.get("raised", False))
@@ -211,7 +197,10 @@ def rim_text_geometry(box: BoxSpec, one: Feature):
         raise ValueError("rim Text needs lettering")
     shelf_zone = top_label_zone(box, side)
     turns = {"back": 0, "front": 2, "left": 1, "right": 3}[side]
-    wanted = float(one.options.get("cap_height") or TOP_LABEL_CAP_HEIGHT)
+    raw_height = one.options.get("cap_height")
+    wanted = TOP_LABEL_CAP_HEIGHT if raw_height in (None, "") else float(raw_height)
+    if not math.isfinite(wanted) or wanted <= 0:
+        raise ValueError("Letter height must be a positive number")
     probe = _oriented_text(label, wanted, turns)
     x0, y0, x1, y1 = probe.bounds
     available_x = shelf_zone.bounds[2] - shelf_zone.bounds[0] - 2 * TOP_LABEL_MARGIN
@@ -270,7 +259,7 @@ def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     description="Centered lettering on the base or rim, Inlaid or Raised.",
     capabilities=("text",),
     options=(
-        OptionDefinition("Letter height", "cap_height", "", minimum=TEXT_CAP_HEIGHT_FLOOR, note="mm; blank = biggest that fits (set text_v2 = true when giving a value)"),
+        OptionDefinition("Letter height", "cap_height", "", note="positive finite mm; blank = biggest whole-mm height up to 15 mm that fits (set text_v2 = true when giving a value)"),
         OptionDefinition("Inlay depth / Raised height", "depth", "0.4", choices=tuple((f"{value:g}", f"{value:g} mm") for value in TEXT_DEPTH_CHOICES), note="mm; recessed depth or raised height of the lettering"),
         OptionDefinition("Text", "text", "", "string", False, note="the words to print; required"),
         OptionDefinition("Font", "font", "", "string", False, legacy=True, note="not a current Designer control; every Text part uses the one built-in font"),
@@ -279,8 +268,6 @@ def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         OptionDefinition("Base or rim", "level", "base", "enum", False, choices=(("base", "On the base"), ("rim", "On the rim ledge"))),
         OptionDefinition("Retarget", "retarget", "", "string", False, internal=True, note="internal editor helper consumed by the app; never set it"),
         OptionDefinition("Rim side", "rim_side", "back", "enum", False, choices=SIDE_CHOICES, note="only when level = rim"),
-        OptionDefinition("Small size acknowledged", "small_size_ack", False, "boolean", False, internal=True,
-                          note="internal editor marker consumed by the app; never set it. True once the Letter height was knowingly saved below the 5 mm recommendation."),
     ), order=100,
 )
 def build_text(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
@@ -340,13 +327,13 @@ def text_min_footprint(
     target_cap = float(wanted) if wanted else TEXT_CAP_HEIGHT_IDEAL
     if turns % 2 == 0:
         cap_by_depth = TEXT_CAP_HEIGHT_IDEAL * (one.zone.depth / text_h)
-        effective_cap = min(target_cap, max(TEXT_CAP_HEIGHT_FLOOR, cap_by_depth))
+        effective_cap = min(target_cap, cap_by_depth)
         needed_w = text_w * (effective_cap / TEXT_CAP_HEIGHT_IDEAL)
         needed_d = max(one.zone.depth, text_h * (effective_cap / TEXT_CAP_HEIGHT_IDEAL))
         return (math.ceil(needed_w), math.ceil(needed_d))
     else:
         cap_by_width = TEXT_CAP_HEIGHT_IDEAL * (one.zone.width / text_w)
-        effective_cap = min(target_cap, max(TEXT_CAP_HEIGHT_FLOOR, cap_by_width))
+        effective_cap = min(target_cap, cap_by_width)
         needed_w = max(one.zone.width, text_w * (effective_cap / TEXT_CAP_HEIGHT_IDEAL))
         needed_d = text_h * (effective_cap / TEXT_CAP_HEIGHT_IDEAL)
         return (math.ceil(needed_w), math.ceil(needed_d))
@@ -392,7 +379,7 @@ register_setting_interactions(TEXT_KIND, (
     SettingInteraction("quarter_turns", "zone", "derived", "text-fit",
                        "Turning base Text re-derives its bounds around the same centre."),
     SettingInteraction("level", "zone", "auto-adjust", "text-editor",
-                       "Changing Text Type recenters the Text in its new base or rim destination."),
+                       "Changing Style recenters the Text in its new base or rim destination."),
     SettingInteraction("level", "quarter_turns", "enable/disable", "text-editor",
-                       "Rim Text follows its rim side's readable orientation and has no Turn."),
+                       "Rim Text follows its rim side's readable orientation and has no Rotate control."),
 ))

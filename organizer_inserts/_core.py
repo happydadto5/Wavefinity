@@ -9,7 +9,7 @@ from pathlib import Path
 
 from shapely.geometry import Polygon, box as shapely_box
 
-from organizer_engine import BoxSpec, ConnectorSpec
+from organizer_engine import BoxSpec, ConnectorSpec, TOP_LABEL_CAP_HEIGHT
 
 
 ITEM_CLEARANCE = 0.4       # slack around a stored object, on the diameter
@@ -518,9 +518,20 @@ def layout_from_dict(data: dict) -> Layout:
              if raw.get("source_contour") else None),
             _reference_from_dict(raw.get("reference_object")),
         )
-        # Legacy auto-placement and a fresh Text Type move are resolved once, by
-        # resolve_text_features, which has the bin to place them in.
-        made.append(part if kind == "text" and (part.options.get("auto") or part.options.get("retarget"))
+        if kind == "text" and "small_size_ack" in part.options:
+            options = dict(part.options)
+            del options["small_size_ack"]
+            part = replace(part, options=options)
+        # Auto placement, a destination change, and a new automatic rim fit
+        # need the bin before their Text height can be made canonical.
+        deferred_text = kind == "text" and (
+            part.options.get("auto") or part.options.get("retarget") or (
+                part.options.get("level") == "rim"
+                and not part.options.get("text_v2")
+                and part.options.get("cap_height") in (None, "", TOP_LABEL_CAP_HEIGHT)
+            )
+        )
+        made.append(part if deferred_text
                     else canonical_text_feature(part))
     object_height = data.get("object_height_mm")
     return Layout(

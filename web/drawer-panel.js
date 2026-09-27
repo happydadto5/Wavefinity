@@ -15,6 +15,16 @@ const DP = {
   printSelected: new Set(), // general ordinary-bin selection, keyed by durable row ID
 };
 
+const INVENTORY_DELETE_CONFIRM_KEY = "wavefinity-inventory-row-delete-confirm-suppressed";
+DP.rowDeleteConfirmSuppressed = () => {
+  try { return localStorage.getItem(INVENTORY_DELETE_CONFIRM_KEY) === "1"; }
+  catch (_error) { return false; }
+};
+DP.suppressRowDeleteConfirm = () => {
+  try { localStorage.setItem(INVENTORY_DELETE_CONFIRM_KEY, "1"); }
+  catch (_error) {}
+};
+
 try {
   const saved = JSON.parse(localStorage.getItem("wavefinity-drawer-filter") || "{}");
   if (["height", "size", "name", "newest"].includes(saved.sort)) DP.filter.sort = saved.sort;
@@ -454,10 +464,8 @@ DP.duplicateRow = async one => {
 DP.deleteRow = async one => {
   const context = DL.spaceContext();
   const placed = DL.placedCount(one.id);
-  // Fix 082 E: this exact confirmation, and only this one, can be suppressed
-  // per Space - drag-off, Space deletion and every other destructive prompt
-  // are untouched.
-  const suppressed = DL.layout?.settings?.suppress_inventory_delete_confirm === true;
+  // Only this explicit single-row confirmation uses the browser preference.
+  const suppressed = DP.rowDeleteConfirmSuppressed();
   let ok = suppressed;
   if (!suppressed) {
     ok = await appConfirmAction({
@@ -467,12 +475,9 @@ DP.deleteRow = async one => {
       danger: true,
       checkboxLabel: "Don't show this confirmation again",
     });
-    if (appConfirmAction.checked) {
-      DL.change(() => { DL.layout.settings.suppress_inventory_delete_confirm = true; }, { history: false });
-      if (DL.spaceContextCurrent(context)) await DL.save();
-    }
   }
   if (!ok || !DL.spaceContextCurrent(context)) return;
+  if (!suppressed && appConfirmAction.checked) DP.suppressRowDeleteConfirm();
   if (one.id === state.designInventoryId &&
       !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;
   if (!DL.spaceContextCurrent(context)) return;
@@ -495,20 +500,11 @@ DP.deleteSelected = async () => {
   if (!ids.length) return;
   const context = DL.spaceContext();
   const placed = ids.filter(id => DL.placedCount(id)).length;
-  const suppressed = DL.layout?.settings?.suppress_inventory_delete_confirm === true;
-  let ok = suppressed;
-  if (!suppressed) {
-    ok = await appConfirmAction({
-      title: `Delete ${dlPlural(ids.length, "bin")}?`,
-      message: `Delete all ${ids.length} selected bins, including any hidden by Search or Filter?${placed ? ` ${placed} placed bin${placed === 1 ? "" : "s"} will also be removed from this Space.` : ""} Generated files owned only by these bins will also be deleted from the folder.`,
-      actionLabel: `Delete ${ids.length} bins`, danger: true,
-      checkboxLabel: "Don't show this confirmation again",
-    });
-    if (appConfirmAction.checked) {
-      DL.change(() => { DL.layout.settings.suppress_inventory_delete_confirm = true; }, { history: false });
-      if (DL.spaceContextCurrent(context)) await DL.save();
-    }
-  }
+  const ok = await appConfirmAction({
+    title: `Delete ${dlPlural(ids.length, "bin")}?`,
+    message: `Delete all ${ids.length} selected bins, including any hidden by Search or Filter?${placed ? ` ${placed} placed bin${placed === 1 ? "" : "s"} will also be removed from this Space.` : ""} Generated files owned only by these bins will also be deleted from the folder.`,
+    actionLabel: `Delete ${ids.length} bins`, danger: true,
+  });
   if (!ok || !DL.spaceContextCurrent(context)) return;
   if (ids.includes(state.designInventoryId) &&
       !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) return;

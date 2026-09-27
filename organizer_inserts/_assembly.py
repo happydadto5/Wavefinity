@@ -14,6 +14,7 @@ from organizer_geometry import _extrude_polygon, difference, intersection, union
 from organizer_engine import (
     BoxSpec,
     LOCK_PROTRUSION,
+    TOP_LABEL_CAP_HEIGHT,
     _rounded,
     flat_cavity_polygon,
     label_placement,
@@ -308,16 +309,29 @@ def resolve_text_features(
 ) -> tuple[Feature, ...]:
     """Resolve legacy auto placement once, then store fixed glyph-derived Text."""
     from organizer_engine import top_label_zone
-    from ._text import canonical_text_feature, retargeted_text
+    from ._text import canonical_text_feature, retargeted_text, rim_text_geometry
     resolved = list(features)
     for index, one in enumerate(resolved):
         if is_text(one) and one.options.get("retarget"):
-            resolved[index] = retargeted_text(box, one, mode)
+            fitted = retargeted_text(box, one, mode)
+            if fitted.options.get("level") == "rim" and text_of(fitted):
+                cap = math.floor(rim_text_geometry(box, fitted)[2])
+                if cap <= 0:
+                    raise ValueError("rim Text has no room for a printable whole-millimetre letter height")
+                fitted = replace(fitted, options={**fitted.options, "cap_height": float(cap)})
+            resolved[index] = fitted
             continue
         if is_text(one) and one.options.get("level") == "rim":
             side = str(one.options.get("rim_side") or "back")
-            resolved[index] = canonical_text_feature(replace(
+            automatic = not one.options.get("text_v2") and one.options.get("cap_height") in (None, "", TOP_LABEL_CAP_HEIGHT)
+            fitted = canonical_text_feature(replace(
                 one, zone=Zone(*top_label_zone(box, side).bounds)))
+            if automatic and text_of(fitted):
+                cap = math.floor(rim_text_geometry(box, fitted)[2])
+                if cap <= 0:
+                    raise ValueError("rim Text has no room for a printable whole-millimetre letter height")
+                fitted = replace(fitted, options={**fitted.options, "cap_height": float(cap)})
+            resolved[index] = fitted
             continue
         if not is_text(one) or not one.options.get("auto"):
             resolved[index] = canonical_text_feature(one)

@@ -272,8 +272,8 @@ LOCK_NOTCH_CLEARANCE = 0.12
 # Studio can print it in a second colour
 # --------------------------------------------------------------------------- #
 TEXT_CAP_HEIGHT_IDEAL = 15.0   # letter height starts here and scales down to fit
-TEXT_CAP_HEIGHT_MIN = 5.0      # auto letter height will shrink to here, no further
-TEXT_CAP_HEIGHT_FLOOR = 5.0    # no text smaller than the readable automatic minimum
+TEXT_CAP_HEIGHT_MIN = 5.0      # legacy auto-placement search threshold
+TEXT_CAP_HEIGHT_FLOOR = 5.0    # recommendation threshold for Text editor consent
 TEXT_DEPTH = 0.4               # how deep the label is sunk into the floor,
                                # leaving DEFAULT_BASE_THICKNESS - TEXT_DEPTH beneath it
 # Fix 058 Correction 1, C1.4D: Edge Mount's own label text-depth default is

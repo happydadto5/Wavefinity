@@ -624,14 +624,14 @@ regardless of what style or rotation the last Text in this Space used.
 ### Text editor fields
 
 - **Words** — the lettering itself;
-- **Style** — one of the four Text Types below;
+- **Style** — one of the four choices below;
 - **Letter height** (mm, whole numbers);
 - **Inlay depth** / **Raised height** (label follows Style);
 - **Rotate** — a dropdown of **0°, 90°, 180°, 270°** (base Text only; 0° is
   straight across/unrotated); rim Text has no Rotate control since its
   orientation always follows its rim side.
 
-### Style (Text Type)
+### Style
 
 - **On base — Inlaid**
 - **On base — Raised**

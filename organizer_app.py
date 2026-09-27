@@ -1236,7 +1236,7 @@ def preview_geometry(
         if destination in destinations and destinations[destination] != selected:
             draft_error = (
                 "Only one rim Text is allowed; change the existing rim Text or use Base Text" if destination == "rim"
-                else "Only one Text is allowed on the base; change Text Type or remove the other Text"
+                else "Only one Text is allowed on the base; change Style or remove the other Text"
             )
     reserved = _customization_zones(box, tidy, location, scoop, mode)
 
@@ -2808,6 +2808,8 @@ def auto_text_feature(box: BoxSpec, label: str, mode: str = "fused") -> Feature:
     one = default_feature(box, TEXT_KIND, mode=mode)
     options = dict(one.options)
     options["text"] = str(label).strip()
+    options.pop("cap_height", None)
+    options.pop("text_v2", None)
     from organizer_inserts._text import canonical_text_feature
     return canonical_text_feature(replace(one, options=options))
 

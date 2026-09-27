@@ -75,10 +75,6 @@ DL.defaultSettings = () => ({
   // Fix 082 I: once this Space has acknowledged one sub-5 mm Text, later
   // automatic fits in this Space don't ask again. Default not acknowledged.
   text_small_size_ack: false,
-  // Fix 082 E: suppresses only the explicit Inventory-row Delete
-  // confirmation; drag-off, Space deletion and every other destructive
-  // prompt are unaffected. Default off (still asks).
-  suppress_inventory_delete_confirm: false,
 });
 
 DL.newDrawerId = () => {
@@ -112,6 +108,17 @@ DL.canonicalLayoutRules = boundary => ({
   snap: 8,
 });
 
+DL.cleanTextConsent = designSpecs => {
+  const specs = clone(designSpecs || {});
+  for (const design of Object.values(specs)) {
+    const features = design?.layout?.features;
+    for (const feature of Array.isArray(features) ? features : []) {
+      if (feature?.kind === "text" && feature.options) delete feature.options.small_size_ack;
+    }
+  }
+  return specs;
+};
+
 DL.normaliseLayout = raw => {
   const layout = raw && typeof raw === "object" ? clone(raw) : {};
   const defaults = DL.defaultSettings();
@@ -127,8 +134,8 @@ DL.normaliseLayout = raw => {
   layout.settings.autosave = true;
   layout.settings.auto_update_changed_files = layout.settings.auto_update_changed_files === true;
   layout.settings.text_small_size_ack = layout.settings.text_small_size_ack === true;
-  layout.settings.suppress_inventory_delete_confirm =
-    layout.settings.suppress_inventory_delete_confirm === true;
+  delete layout.settings.suppress_inventory_delete_confirm; // retired Space-scoped preference
+  layout.design_specs = DL.cleanTextConsent(layout.design_specs);
   const recent = Array.isArray(layout.settings.ai_design_recent_descriptions)
     ? layout.settings.ai_design_recent_descriptions : [];
   const seenRecent = new Set();
@@ -621,7 +628,7 @@ DL.adopt = data => {
   DL.file = data.file || DL.file;
   if (data.stack_steps) DL.stackSteps = data.stack_steps;
   if (DL.layout && data.layout && Object.hasOwn(data.layout, "design_specs")) {
-    DL.layout.design_specs = clone(data.layout.design_specs || {});
+    DL.layout.design_specs = DL.cleanTextConsent(data.layout.design_specs);
   }
 };
 

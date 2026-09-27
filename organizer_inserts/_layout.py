@@ -406,7 +406,7 @@ def check_layout(
         if destination in text_destinations:
             message = ("Only one rim Text is allowed; change the existing rim Text or use Base Text"
                        if destination == "rim" else
-                       "Only one Text is allowed on the base; change its Text Type or remove a duplicate")
+                       "Only one Text is allowed on the base; change its Style or remove a duplicate")
             raise ValueError(message)
         text_destinations.add(destination)
     for one in features:
