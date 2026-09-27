@@ -4,7 +4,7 @@
 >
 > This file describes **what the product can do**. It is not the authoritative source for geometry constants, numeric validation limits, schemas, or implementation details. Those remain in the code/catalog/rule owners.
 >
-> **Maintenance rule:** Any fix that adds, removes, renames, or materially changes a user-facing feature or option must update this file before the work is considered complete.
+> **Maintenance rule:** Any fix that adds, removes, renames, or materially changes a user-facing feature or option must update this file before the work is considered complete. If the change affects something an outside AI could legally choose, configure, return, or must avoid, the same fix must also update `ai-features.md`.
 >
 > Last reviewed: **2026-09-26**
 
@@ -1203,7 +1203,15 @@ If the answer to any of those is yes, update this catalog as part of the fix.
 
 ---
 
-# 19. Source-of-truth boundaries
+# 19. AI-facing documentation
+
+`ai-features.md` is the compact public reference intended for outside AI systems used with AI Help. It supplements the request-specific machine-readable prompt; it does not replace the live catalog/rules embedded by the running app.
+
+When a product change affects what an outside AI can legally select, configure, return, or must avoid, update both this catalog and `ai-features.md` in the same fix.
+
+---
+
+# 20. Source-of-truth boundaries
 
 Use this document to learn **which features exist** and how they relate.
 

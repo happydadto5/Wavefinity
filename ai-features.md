@@ -1,0 +1,564 @@
+# Wavefinity AI Feature Reference
+
+> **Audience:** External AI systems helping a person design one ordinary Wavefinity bin.
+>
+> **Purpose:** Public, compact background reference for Wavefinity AI Help. The AI Help prompt may link here instead of repeating every explanatory detail.
+>
+> **Authority rule:** The **request-specific prompt embedded by the running Wavefinity app wins** over this file whenever they differ. The prompt contains the exact current design, Space constraints, request/fingerprint, legal machine-readable values, and response contract needed for that request.
+>
+> **Maintenance rule:** Any Wavefinity fix that adds, removes, renames, or materially changes a user-facing feature, option, legal choice, compatibility rule, or design field that an outside AI could use must update this file in the same fix.
+>
+> For the broader human product catalog, see `features.md`.
+
+---
+
+# 1. What the external AI is designing
+
+AI Help designs **one ordinary Wavefinity Bin**.
+
+It does **not** design these Space-owned structural outputs:
+
+- Storage Box case.
+- Surface Base Trim.
+
+The final answer is design **data**, not mesh/geometry. Wavefinity validates the data and builds the real geometry.
+
+The outside AI may ask follow-up questions before giving the final JSON. It should ask whenever a critical size, fit, orientation, unit, or other necessary fact is missing or suspicious.
+
+All Wavefinity design dimensions are in **millimetres**.
+
+---
+
+# 2. Request-specific information always supplied by Wavefinity
+
+The generated AI Help prompt supplies the current authoritative values for the active request, including:
+
+- user description;
+- request ID;
+- context fingerprint;
+- current ordinary-bin design;
+- current typed-Space context, when any;
+- Space-controlled fields that must be preserved;
+- legal option values/ranges/defaults from the running build;
+- canonical design examples/shape;
+- exact final JSON response contract.
+
+This file is supplemental explanation. Do not substitute values from this file for different values explicitly supplied in the generated prompt.
+
+---
+
+# 3. Space context
+
+Wavefinity may be used without a typed Space or inside one of these typed Spaces.
+
+## Drawer
+
+- Real usable drawer width, depth, and height.
+- Returned bins must fit the active drawer constraints.
+- Bin placement in the drawer happens later in Wavefinity.
+
+## Surface
+
+- Open-surface organization using a Space-owned Base Trim.
+- Surface bin base behavior may be Space-controlled.
+- Preserve any fields the generated prompt marks as Space-controlled.
+
+## Storage Box
+
+- Ordinary bins may be designed to fit inside a Storage Box Space.
+- The AI result is still an ordinary bin, not the Storage Box case itself.
+
+## Pegboard
+
+- Supports Standard Pegboard and IKEA SKÅDIS Space types.
+- Pegboard mount metadata is Space-controlled.
+- Preserve the current mount data exactly unless the generated prompt explicitly says otherwise.
+- The returned bin must satisfy the current board/minimum-size rules supplied in the generated prompt.
+
+---
+
+# 4. Ordinary-bin shell controls
+
+## Size
+
+- Width.
+- Depth.
+- Height.
+- Width/depth are Wavefinity-grid aware.
+- The outside AI may resize the bin when that is legal for the active Space.
+- Interior feature zones must fit the **returned** bin, not merely the original bin.
+
+## Interior print mode
+
+- **Fused into box** — interior parts become part of the bin.
+- **Removable insert** — interior parts print as a separate drop-in insert.
+
+Some shell features require Fused mode because they physically modify the bin wall.
+
+## Wall thickness
+
+Wavefinity exposes current legal wall choices in the generated prompt.
+
+General behavior:
+
+- wall choice changes the physical Wavefinity wall/mating geometry;
+- lids/stacking can require stronger walls;
+- connector fit follows the bin's actual wall thickness.
+
+## Base thickness
+
+Wavefinity exposes current legal base choices in the generated prompt.
+
+General behavior:
+
+- stacking/lids can require a thicker minimum base;
+- Surface Spaces can control base behavior.
+
+---
+
+# 5. Interior parts
+
+The generated prompt contains the exact legal fields, values, ranges, defaults, and canonical JSON for the running build. The descriptions below explain intent.
+
+## Cradle
+
+For tools laid horizontally.
+
+Typical controls:
+
+- stored-item dimensions/profile;
+- quantity;
+- run direction;
+- alternate ends where supported;
+- spacing;
+- distance from ends;
+- placement/fit.
+
+## Photo Nest
+
+Custom holder created from a photograph and traced contour.
+
+**AI rule:** recommend-only for text AI.
+
+An outside text AI must **not fabricate**:
+
+- photo data;
+- traced contour;
+- source contour.
+
+The user can add Photo Nest in Wavefinity after the AI-designed bin is created.
+
+## Bore
+
+For upright tools/items held in one or more fitted holes.
+
+Current style families:
+
+- **Base - Straight Walls**
+- **Base - Wavy Walls**
+- **Straight Walls Only**
+- **Wavy Walls Only**
+
+Typical controls include:
+
+- held-item profile/measurements;
+- hole depth;
+- Bore height;
+- Bore wall thickness;
+- X/Y quantity;
+- angle and angle direction;
+- footprint sizing relationship;
+- height sizing relationship.
+
+Current item-profile choices and any special fixed-profile dimensions are supplied in the generated prompt. Do not invent a profile value.
+
+## Post
+
+Center peg for rolls, rings, spools, sockets, and similar objects.
+
+Typical controls:
+
+- height;
+- diameter;
+- taper;
+- spacing;
+- quantity/layout.
+
+## Dividers
+
+Interior walls that split the bin into compartments.
+
+Typical controls:
+
+- divider thickness;
+- divider height;
+- straight/wavy divider walls;
+- X/Y layout;
+- spacing;
+- bottom construction/slope behavior;
+- compartment merging/spans;
+- per-compartment Scoop behavior;
+- Divider labels.
+
+## Slot Rack
+
+Angled slots for bits, cards, small tools, and similar objects.
+
+Typical controls:
+
+- height;
+- depth;
+- thickness;
+- angle;
+- wall thickness;
+- Straight/Wavy Walls;
+- quantity/layout.
+
+## Steps
+
+Tiered shelves/riser.
+
+Typical controls:
+
+- height;
+- lip;
+- number of steps;
+- quantity/layout.
+
+## Curved Scoop
+
+Curved retrieval ramp to make small contents easier to remove.
+
+Typical control:
+
+- scoop depth.
+
+Wavefinity enforces compatibility with nearby shell features.
+
+## Text
+
+Centered lettering on the base or rim.
+
+Current Text Types:
+
+- **On base — Inlaid**
+- **On base — Raised**
+- **At rim — Inlaid**
+- **At rim — Raised**
+
+Typical controls:
+
+- text;
+- letter height;
+- inlay depth / raised height;
+- quarter-turn rotation;
+- rim side.
+
+The generated prompt supplies the exact legal relief values.
+
+Text is automatically centered. Internal transport/editor fields that are not user choices must not be invented.
+
+---
+
+# 6. Shared interior-part fields
+
+Many interior parts use common canonical fields outside their feature-specific option block. The exact machine contract is in the generated prompt.
+
+Common concepts include:
+
+## Zone / footprint
+
+- `[x0, y0, x1, y1]` in millimetres relative to bin center.
+- `x1 > x0` and `y1 > y0`.
+- Must fit the returned design's legal interior.
+
+## Quantity
+
+- Explicit positive whole-number quantity where supported.
+- Some features support Auto through the canonical null/omitted behavior described by the generated prompt.
+
+## Run direction
+
+- X or Y where the feature supports directional runs.
+
+## Alternate ends
+
+- Boolean behavior only on features that support it.
+
+## Item
+
+Held-object description for features such as Bore or Cradle.
+
+The prompt supplies the legal structure, including:
+
+- length;
+- diameter/thickness;
+- fit clearance;
+- profile/shape;
+- any profile-specific fixed dimensions.
+
+Never transfer Bore-only profiles to Cradle or vice versa.
+
+---
+
+# 7. Box modifiers
+
+These alter the ordinary bin shell rather than acting like independent interior parts.
+
+## Lid & Stacking
+
+Current user-facing configurations:
+
+- **Stackable bin on bin**
+- **Stackable bin on lid**
+- **Lid with handle — non-stackable**
+
+When a lid is present, current prompt metadata supplies:
+
+- legal lid thickness choices;
+- legal lid-fit choices;
+- handle types/sizes/positions;
+- label choices and relief values;
+- stacking compatibility.
+
+General rules:
+
+- direct bin-on-bin stacking uses no lid;
+- stackable lid keeps a seat/recess for another bin;
+- handled lid is non-stackable;
+- Wavefinity may require stronger wall/base values;
+- raised lid text cannot interfere with stacking contact;
+- a handle that does not fit is rejected rather than silently shrunk.
+
+## Inside Grip
+
+Finger grip built into the bin wall.
+
+Typical controls:
+
+- size;
+- location.
+
+General rules:
+
+- requires shell geometry;
+- incompatible with Removable insert;
+- may conflict with Side Openings, Edge Mount screw access, Scoop, or other wall occupancy.
+
+## Side Openings
+
+Finger-access cutouts through selected bin walls.
+
+Typical controls:
+
+- shape: Curved or Square;
+- opening size;
+- vertical lower/upper position;
+- selected wall(s): Front, Back, Left, Right.
+
+Wavefinity prevents collisions with other wall/rim features.
+
+## Edge Mount
+
+External label and/or screw mounting on one bin edge.
+
+Mounting side:
+
+- Front.
+- Back.
+- Left.
+- Right.
+
+Label type:
+
+- None.
+- Separate Part.
+- Integrated.
+
+Typical label controls:
+
+- text;
+- flip text;
+- Full Side vs Text Length;
+- text depth/style;
+- projection;
+- thickness;
+- standoff-rib behavior.
+
+Typical screw-mount controls:
+
+- enabled/disabled;
+- screw count;
+- pattern/orientation;
+- screw diameter;
+- access diameter;
+- distance from top;
+- automatic/custom spacing.
+
+Wavefinity checks Edge Mount against lids, direct stacking, rim Text, Side Openings, Inside Grip, and other incompatible wall use.
+
+---
+
+# 8. Label systems
+
+Wavefinity has multiple distinct label systems. Do not merge them into one generic label concept.
+
+## Text feature
+
+- Ordinary bin base or rim.
+- Inlaid or Raised.
+
+## Divider labels
+
+- No label.
+- On base.
+- Rim level.
+- Per-compartment text.
+
+## Lid label
+
+- On/off.
+- Text.
+- Horizontal/Vertical.
+- Inlaid/Raised.
+- Relief depth/height.
+
+## Edge Mount label
+
+- None.
+- Separate Part.
+- Integrated.
+- Own text/size/projection/support settings.
+
+## Storage Box label
+
+- Belongs to the Storage Box structural case, not an ordinary AI-designed bin.
+
+---
+
+# 9. Straight and wavy choices
+
+Several interior systems independently support straight or wavy walls.
+
+Current important families include:
+
+## Bore
+
+- Base - Straight Walls.
+- Base - Wavy Walls.
+- Straight Walls Only.
+- Wavy Walls Only.
+
+## Dividers
+
+- Straight Walls.
+- Wavy Walls.
+
+## Slot Rack
+
+- Straight Walls.
+- Wavy Walls.
+
+The exact wave geometry is owned by Wavefinity and must not be recreated by the outside AI.
+
+---
+
+# 10. Connectors
+
+Connectors are generated by Wavefinity from bin geometry.
+
+## Side Connector
+
+Joins two neighboring bins across a shared seam.
+
+Supports:
+
+- same-height bins;
+- different-height bins.
+
+Current request/build data can include connector settings such as:
+
+- tolerance;
+- length;
+- arm thickness;
+- A/B heights where needed.
+
+Connector wall fit follows actual bin wall thickness.
+
+## 3-Way Corner Connector
+
+- Joins three compatible bins around a grid corner.
+- Equal-height/equal-wall requirements apply.
+
+## 4-Way Corner Connector
+
+- Joins four compatible bins around a grid corner.
+- Equal-height/equal-wall requirements apply.
+
+The AI generally designs the bin; Wavefinity determines which connector outputs are legal for the final arrangement.
+
+---
+
+# 11. Important compatibility rules
+
+The running Wavefinity validator is authoritative. Important classes of conflict include:
+
+- Removable insert vs shell features that must be built into the bin wall.
+- Side Openings vs Inside Grip.
+- Side Openings vs rim Text.
+- Side Openings vs Edge Mount.
+- Edge Mount vs rim Text on the same wall.
+- Separate Edge Mount label vs lid.
+- Separate Edge Mount label vs direct stacking.
+- Edge Mount screw access vs Inside Grip.
+- Scoop vs conflicting front Inside Grip geometry.
+- Lid/stacking vs insufficient wall/base strength.
+- Raised lid label vs stacking contact.
+- Lid vs Side connector rim geometry.
+- Corner connectors vs unequal-height or unequal-wall bins.
+- Pegboard mounting fields vs non-Space ownership.
+- Surface base fields vs non-Space ownership.
+- Photo Nest contour data vs text-AI synthesis.
+
+When unsure, prefer a simpler legal design or ask the user a question.
+
+---
+
+# 12. Final-answer behavior
+
+The generated Wavefinity prompt contains the exact response envelope and IDs.
+
+General rules:
+
+- final answer is one JSON object;
+- no prose before or after the final object;
+- return a **complete** ordinary-bin design, not a patch;
+- echo the exact request ID and context fingerprint;
+- harmless assumptions may be listed;
+- critical dimensions may not be guessed;
+- no fabricated Photo Nest contour;
+- preserve all Space-controlled fields.
+
+Wavefinity will run canonical validation, real geometry validation, and active-Space checks before adopting the design.
+
+---
+
+# 13. Maintenance checklist for Wavefinity fixes
+
+Update this file whenever a fix changes anything an outside AI could reasonably need to choose or describe, including:
+
+- new/removed/renamed interior part;
+- new/removed/renamed box modifier;
+- new option or enum choice;
+- changed legal range/default/step that affects AI design;
+- new item profile/shape;
+- changed straight/wavy behavior;
+- changed label type or label rule;
+- changed Lid/Stacking configuration;
+- changed Side Opening / Inside Grip / Edge Mount behavior;
+- changed Space restriction or Space-controlled field;
+- changed compatibility/conflict rule;
+- changed canonical design field that the outside AI must return;
+- changed AI recommend-only restriction.
+
+If a change is implementation-only and does not affect what the outside AI may legally choose or return, this file does not need a cosmetic update.
