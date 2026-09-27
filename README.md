@@ -178,7 +178,7 @@ supplies the font outlines for floor labels.
 ### Feature documentation contract
 
 - `features.md` is the broad user-facing product feature catalog.
-- `ai-features.md` is the compact public reference for outside AI systems used with Wavefinity AI Help.
+- `ai-features.md` is the compact public reference for outside AI systems used with Wavefinity AI Design.
 - Any change that adds, removes, renames, or materially changes a user-facing feature must update `features.md`.
 - If that change affects something an outside AI could legally choose, configure, return, or must avoid, the same change must also update `ai-features.md`.
 - These documentation files explain capabilities; exact geometry constants, validation limits, and canonical schema remain code/catalog-owned.

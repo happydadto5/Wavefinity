@@ -25,12 +25,12 @@ def post_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float]
     description="A tapered peg for tape rolls, spools, sockets and rings.",
     capabilities=("qty", "along"),
     options=(
-        OptionDefinition("Height", "height", "16"),
-        OptionDefinition("Diameter", "diameter", "12"),
-        OptionDefinition("Taper", "taper", "0.4"),
-        OptionDefinition("Spacing", "spacing", "4"),
-        OptionDefinition("X quantity", "count_x", "", "integer", False),
-        OptionDefinition("Y quantity", "count_y", "", "integer", False),
+        OptionDefinition("Height", "height", "16", minimum=0.1, note="mm; must fit inside the bin above the base"),
+        OptionDefinition("Diameter", "diameter", "12", minimum=0.1, note="mm at the base; must fit the zone"),
+        OptionDefinition("Taper", "taper", "0.4", minimum=0.0, note="mm the peg narrows over its height; must be smaller than the diameter"),
+        OptionDefinition("Spacing", "spacing", "4", minimum=0.0, note="mm between neighbouring posts"),
+        OptionDefinition("X quantity", "count_x", "", "integer", False, minimum=1, legacy=True, note="engine-only grid override; the current Designer sets posts through top-level count/along instead"),
+        OptionDefinition("Y quantity", "count_y", "", "integer", False, minimum=1, legacy=True, note="engine-only grid override; the current Designer sets posts through top-level count/along instead"),
     ), order=40,
 )
 def build_post(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:

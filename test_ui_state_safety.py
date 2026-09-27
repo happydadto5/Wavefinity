@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import unittest
@@ -218,6 +219,267 @@ process.stdout.write(JSON.stringify({zero,ten,handles,crossing,bridged}));
         self.assertEqual(out["handles"], ["10", "90"])
         self.assertLess(out["crossing"]["lower"], out["crossing"]["upper"])
         self.assertLessEqual(out["bridged"]["upper"], 80)
+
+    def test_ai_help_envelope_composition_session_and_space_rules(self):
+        source = "\n".join(function_source(name, APP) for name in (
+            "aiParseEnvelope", "aiCompositionEmpty", "aiCheckSession", "aiSpaceViolation",
+            "pegboardProductMinimums"))
+        error_class = APP[APP.index("class AiHelpError"):APP.index("\n}\n", APP.index("class AiHelpError")) + 3]
+        schema = re.search(r'const AI_SCHEMA = "([^"]+)"', APP).group(1)
+        script = r"""
+__ERROR__
+const AI_SCHEMA='__SCHEMA__',number=(v,f=0)=>{const n=Number(v);return Number.isFinite(n)?n:f},fmt=v=>String(v);
+let draft=false,key='K1',space={kind:'drawer',x:80,y:80,z:50};
+const state={folderMode:'space',get activeSpace(){return space},catalog:{base_unit:8}};
+const draftNeedsSaving=()=>draft,edgeMountActive=d=>Boolean(d.box.edge_mount?.active);
+const isStructuralDesign=d=>Boolean(d.box.b4b?.enabled),drawerSpaceCapacity=mm=>Math.floor(mm/8);
+const aiContextKey=()=>key;
+__FUNCTIONS__
+const ok={schema:AI_SCHEMA,request_id:'R',context_fingerprint:'F',assumptions:[],design:{box:{x:16}}};
+const text=v=>JSON.stringify(v);
+const fail=fn=>{try{fn();return null}catch(e){return e.stale?'stale':e.message}};
+const parsed=[
+  aiParseEnvelope(text(ok)).request_id,
+  aiParseEnvelope('```json\n'+text(ok)+'\n```').request_id,
+  fail(()=>aiParseEnvelope('Here you go: '+text(ok))),
+  fail(()=>aiParseEnvelope(text(ok)+text(ok))),
+  fail(()=>aiParseEnvelope('```json\n```json\n'+text(ok)+'\n```\n```')),
+  fail(()=>aiParseEnvelope(text({...ok,schema:'v2'}))),
+  fail(()=>aiParseEnvelope(text({...ok,assumptions:undefined}))),
+  fail(()=>aiParseEnvelope(text({...ok,design:[]}))),
+];
+const blank={box:{x:16,y:32,z:40,wall:1.2,pegboard:{enabled:true}},label:'',scoop:false,layout:{features:[]}};
+const withBox=extra=>({...blank,box:{...blank.box,...extra}});
+const composed={
+  blank:aiCompositionEmpty(blank),
+  feature:aiCompositionEmpty({...blank,layout:{features:[{kind:'text'}]}}),
+  label:aiCompositionEmpty({...blank,label:'Tools'}),
+  scoop:aiCompositionEmpty({...blank,scoop:true}),
+  lid:aiCompositionEmpty(withBox({lid:{enabled:true}})),
+  stack:aiCompositionEmpty(withBox({stack:{mode:'direct'}})),
+  grip:aiCompositionEmpty(withBox({lift_grabbers:{enabled:true}})),
+  sides:aiCompositionEmpty(withBox({side_openings:{enabled:true}})),
+  edge:aiCompositionEmpty(withBox({edge_mount:{side:'front',active:true}})),
+  dormantLid:aiCompositionEmpty(withBox({lid:{enabled:false,label_text:'Spice'}})),
+  dormantDivision:aiCompositionEmpty(withBox({lid:{enabled:false,division_labels:['','A']}})),
+  dormantEdge:aiCompositionEmpty(withBox({edge_mount:{active:false,label_text:'Front'}})),
+  emptyDormant:aiCompositionEmpty(withBox({lid:{enabled:false,label_text:'',division_labels:['']}})),
+};
+draft=true;composed.draft=aiCompositionEmpty(blank);draft=false;
+const session={request_id:'R',context_fingerprint:'F',contextKey:'K1'};
+const sessions=[fail(()=>aiCheckSession(ok,session)),fail(()=>aiCheckSession(ok,null)),
+  fail(()=>aiCheckSession({...ok,request_id:'OLD'},session)),
+  fail(()=>{key='K2';aiCheckSession(ok,session)})];
+const base={box:{x:32,y:32,z:40,pegboard:{enabled:true,standard:'standard',cleat_x:'auto'}}};
+space={kind:'drawer',x:80,y:80,z:50};const plain={box:{x:32,y:32,z:40}};
+const rules=[aiSpaceViolation({box:{x:72,y:72,z:50}},plain),aiSpaceViolation({box:{x:88,y:72,z:50}},plain),
+  aiSpaceViolation({box:{x:72,y:72,z:60}},plain),
+  aiSpaceViolation({box:{x:16,y:16,z:40,b4b:{enabled:true}}},plain)];
+space={kind:'pegboard',x:200,y:200,z:100,pegboard_standard:'standard'};
+rules.push(aiSpaceViolation({box:{x:32,y:32,z:60,pegboard:base.box.pegboard}},base),
+  aiSpaceViolation({box:{x:32,y:32,z:60}},base),
+  aiSpaceViolation({box:{x:32,y:32,z:60,pegboard:{...base.box.pegboard,cleat_x:'3'}}},base),
+  aiSpaceViolation({box:{x:32,y:32,z:40,pegboard:base.box.pegboard}},base));
+space={kind:'pegboard',x:200,y:200,z:100,pegboard_standard:'skadis'};
+const sk={box:{pegboard:{enabled:true,standard:'skadis'}}};
+rules.push(aiSpaceViolation({box:{x:64,y:32,z:60,pegboard:sk.box.pegboard}},sk),
+  aiSpaceViolation({box:{x:48,y:32,z:60,pegboard:sk.box.pegboard}},sk));
+process.stdout.write(JSON.stringify({parsed,composed,sessions,rules}));
+""".replace("__ERROR__", error_class).replace("__SCHEMA__", schema).replace("__FUNCTIONS__", source)
+        out = node_json(script)
+        self.assertEqual(out["parsed"][:2], ["R", "R"])
+        self.assertTrue(all(out["parsed"][2:]))
+        self.assertEqual(out["composed"], {
+            "blank": True, "feature": False, "label": False, "scoop": False, "lid": False,
+            "stack": False, "grip": False, "sides": False, "edge": False, "draft": False,
+            "dormantLid": False, "dormantDivision": False, "dormantEdge": False, "emptyDormant": True})
+        self.assertEqual(out["sessions"][0], None)
+        self.assertEqual(out["sessions"][1:], ["stale", "stale", "stale"])
+        self.assertIsNone(out["rules"][0])
+        self.assertTrue(all(out["rules"][1:4]))
+        self.assertIsNone(out["rules"][4])
+        self.assertTrue(all(out["rules"][5:8]))  # missing mount, changed cleat, Standard below 48 mm tall
+        self.assertIsNone(out["rules"][8])
+        self.assertTrue(out["rules"][9])  # SKÅDIS below 56 mm wide
+
+    def test_ai_help_install_reuses_or_creates_identity_and_adopts_without_rebuild(self):
+        source = "\n".join(function_source(name, APP) for name in (
+            "aiIdentityKey", "aiSpaceContext", "aiInstallCandidate", "aiProveCandidate", "aiCheckSession"))
+        error_class = APP[APP.index("class AiHelpError"):APP.index("\n}\n", APP.index("class AiHelpError")) + 3]
+        script = r"""
+__ERROR__
+const clone=v=>JSON.parse(JSON.stringify(v)),events=[],previewClientId='C';
+const old={box:{x:16},marker:'old',layout:{features:[]}},proven={marker:'ai',box:{x:32},layout:{features:[]}};
+const state={folderMode:'space',activeSpace:{kind:'drawer',x:80,y:80,z:50},activeSpaceId:'S',
+  designInventoryId:'B1',design:old,cleanDesign:old,previewRequest:0,history:[1]};
+const aiHelp={generation:0};let fullPreviewStarts=0,unsaved=false,confirmed=true,next={problems:[]};
+const aiContextKey=()=>'K',aiSetStatus=()=>{},typedSpaceOrdinaryBin=()=>true;
+const withDeferredDraftSwitch=action=>action({}),beginDesignMutation=()=>true,finishDesignMutation=()=>{};
+const resetNestPhotoSession=()=>{},bindLidMemoryForDesign=()=>{},syncForm=()=>{},clearDraftSelection=()=>{};
+const DP={setMode:()=>{}},activatePreviewView=()=>{},freshDesignForCurrentFolder=()=>({marker:'starter'});
+const flushSpaceDesignAutosave=async()=>{events.push('flush');return true};
+const designHasChanges=()=>unsaved,appConfirmAction=async()=>confirmed;
+const invalidatePendingPreview=()=>{state.previewRequest+=1;events.push('invalidate')};
+const adoptPreviewResult=r=>{state.preview=r;state.design=r.design;events.push('adopt')};
+const persistSpaceDesignSource=async(_c,force)=>{events.push('persist:'+force)};
+const refreshPreview=()=>events.push('REBUILD');
+const aiSpaceViolation=()=>null;
+const api=async path=>{events.push('api:'+path);return next};
+__FUNCTIONS__
+const candidate=()=>({design:clone(proven),preview:{design:clone(proven),fits:true}});
+const session=reuse=>({request_id:'R',context_fingerprint:'F',reuse,baseline:old,
+  contextKey:JSON.stringify({identity:aiIdentityKey()})});
+(async()=>{
+  const run=async reuse=>{
+    events.length=0;state.design=clone(old);state.designInventoryId='B1';
+    const ok=await aiInstallCandidate(candidate(),session(reuse));
+    return {ok,marker:state.design.marker,id:state.designInventoryId,events:[...events],
+      previews:fullPreviewStarts,history:state.history.length,clean:state.cleanDesign.marker};
+  };
+  const reuse=await run(true), fresh=await run(false);
+  unsaved=true;confirmed=false;state.activeSpace=state.activeSpace;
+  const noSpace=(state.folderMode='design',state.activeSpace=null,state.activeSpaceId=null,
+    await (async()=>{events.length=0;state.design=clone(old);const ok=await aiInstallCandidate(candidate(),
+      {request_id:'R',context_fingerprint:'F',reuse:false,baseline:old,contextKey:JSON.stringify({identity:aiIdentityKey()})});
+      return {ok,marker:state.design.marker,events:[...events]}})());
+  state.folderMode='space';state.activeSpace={kind:'drawer',x:80,y:80,z:50};state.activeSpaceId='S';
+  state.design=clone(old);events.length=0;next={problems:['post: does not fit'],design:proven};
+  let refusal=null;
+  try{await aiProveCandidate({design:{},request_id:'R',context_fingerprint:'F'},{...session(true),contextKey:'K'})}
+  catch(e){refusal=e.message}
+  const stale=await(async()=>{state.design=clone(old);const bound=session(true);state.activeSpaceId='OTHER';
+    try{await aiInstallCandidate(candidate(),bound);return null}catch(e){return e.stale}})();
+  process.stdout.write(JSON.stringify({reuse,fresh,noSpace,refusal,marker:state.design.marker,stale}));
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__ERROR__", error_class).replace("__FUNCTIONS__", source)
+        out = node_json(script)
+        self.assertEqual((out["reuse"]["previews"], out["fresh"]["previews"]), (1, 2))  # one owner claim each
+        # Blank bin: rewritten in place, keeps its row, saved as an edit, preview adopted not rebuilt.
+        self.assertEqual((out["reuse"]["ok"], out["reuse"]["marker"], out["reuse"]["id"]), (True, "ai", "B1"))
+        self.assertEqual(out["reuse"]["events"], ["invalidate", "adopt", "persist:true"])
+        # Remembered Space defaults follow ordinary edit rules: a reused bin keeps its own
+        # clean baseline; a new AI bin starts from the unedited starter, never the candidate.
+        self.assertEqual((out["reuse"]["clean"], out["fresh"]["clean"]), ("old", "starter"))
+        # Meaningful bin: saved first, then the AI result is a brand-new bin.
+        self.assertEqual((out["fresh"]["ok"], out["fresh"]["marker"], out["fresh"]["id"]), (True, "ai", None))
+        self.assertEqual(out["fresh"]["events"], ["flush", "invalidate", "adopt", "persist:true"])
+        for one in (out["reuse"], out["fresh"]):
+            self.assertNotIn("REBUILD", one["events"])
+            self.assertEqual(one["history"], 0)
+        # Declining the Design-folder discard prompt changes nothing.
+        self.assertEqual(out["noSpace"], {"ok": False, "marker": "old", "events": []})
+        # A candidate with problems is refused before any state or preview owner is touched.
+        self.assertIn("could not build", out["refusal"])
+        self.assertEqual(out["marker"], "old")
+        # A different Space at install time is stale, never applied.
+        self.assertTrue(out["stale"])
+
+    def test_ai_help_prompt_covers_committed_draft_and_only_answer_defects_are_repairable(self):
+        error_class = APP[APP.index("class AiHelpError"):APP.index("\n}\n", APP.index("class AiHelpError")) + 3]
+        source = "\n".join(function_source(name, APP) for name in (
+            "aiGeneratePrompt", "aiProcessResponse", "aiProveCandidate", "aiParseEnvelope", "aiCheckSession"))
+        schema = re.search(r'const AI_SCHEMA = "([^"]+)"', APP).group(1)
+        script = r"""
+__ERROR__
+const AI_SCHEMA='__SCHEMA__',clone=v=>JSON.parse(JSON.stringify(v)),previewClientId='C';
+const statuses=[],sent=[],events=[];let refuse=false,answer='',mode='';
+const state={design:{part_name:'',layout:{features:[]}}};
+const aiHelp={session:null,busy:false,generation:0,failure:null};
+const $=selector=>({value:selector==='#ai-help-description'?'A tray':answer,close:()=>events.push('close')});
+const aiSetBusy=b=>{aiHelp.busy=b},aiSetStatus=(m,o={})=>statuses.push({m,repair:Boolean(o.repair)});
+const aiShowPrompt=()=>{},toast=()=>{},isStructuralDesign=()=>false,aiCompositionEmpty=d=>!d.layout.features.length;
+const aiSpaceContext=()=>null,aiContextKey=()=>'K',visibleDesignSnapshot=()=>clone(state.design);
+const withDeferredDraftSwitch=async(action,refused)=>{
+  events.push('guard');if(refuse)return refused;
+  state.design.layout.features.push({kind:'post'});events.push('committed');return action({});};
+const api=async(path,body)=>{
+  if(path==='/api/ai/prompt'){sent.push(clone(body.design));return{request_id:'R',context_fingerprint:'F',prompt:'P'};}
+  if(mode==='400')throw Object.assign(new Error('bad design'),{status:400});
+  if(mode==='500')throw Object.assign(new Error('boom'),{status:500});
+  if(mode==='network')throw new TypeError('Failed to fetch');
+  return{problems:[],design:{},preview:{}};};
+const aiSpaceViolation=()=>null;
+let installError=null,installResult=true;
+const aiInstallCandidate=async()=>{if(installError)throw installError;return installResult;};
+__FUNCTIONS__
+const envelope=JSON.stringify({schema:AI_SCHEMA,request_id:'R',context_fingerprint:'F',assumptions:[],design:{box:{}}});
+(async()=>{
+  await aiGeneratePrompt();
+  const prompt={features:sent[0].layout.features.length,order:[...events],session:Boolean(aiHelp.session),
+    reuse:aiHelp.session.reuse};
+  events.length=0;refuse=true;aiHelp.session=null;await aiGeneratePrompt();
+  const refused={session:aiHelp.session,last:statuses.at(-1).m};refuse=false;
+  await aiGeneratePrompt();
+  const run=async(label,setup)=>{mode='';await aiGeneratePrompt();events.length=0;statuses.length=0;
+    aiHelp.failure=null;installError=null;installResult=true;
+    answer=envelope;setup();await aiProcessResponse();
+    const last=statuses.at(-1);return{label,repair:last.repair,failure:Boolean(aiHelp.failure),
+      session:Boolean(aiHelp.session),closed:events.includes('close')};};
+  const out=[];
+  out.push(await run('junk',()=>{answer='not json';}));
+  out.push(await run('ok',()=>{}));
+  out.push(await run('rejected',()=>{mode='400';}));
+  out.push(await run('service',()=>{mode='500';}));
+  out.push(await run('network',()=>{mode='network';}));
+  out.push(await run('applyFailed',()=>{installError=new AiHelpError('x',{operational:true,applied:true});}));
+  out.push(await run('unexpected',()=>{installError=new Error('kaboom');}));
+  out.push(await run('stale',()=>{installError=new AiHelpError('old',{stale:true});}));
+  process.stdout.write(JSON.stringify({prompt,refused,out}));
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__ERROR__", error_class).replace("__SCHEMA__", schema).replace("__FUNCTIONS__", source)
+        out = node_json(script)
+        # The prompt is written from the design AFTER a meaningful draft was committed.
+        self.assertEqual(out["prompt"], {"features": 1, "order": ["guard", "committed"], "session": True, "reuse": False})
+        self.assertEqual(out["refused"]["session"], None)
+        self.assertIn("Finish or discard", out["refused"]["last"])
+        by = {one["label"]: one for one in out["out"]}
+        # Only a defect in the answer itself is handed back to the AI.
+        for label in ("junk", "rejected"):
+            self.assertEqual((by[label]["repair"], by[label]["failure"]), (True, True), label)
+        for label in ("service", "network", "applyFailed", "unexpected", "stale"):
+            self.assertEqual((by[label]["repair"], by[label]["failure"]), (False, False), label)
+        self.assertFalse(by["applyFailed"]["session"])  # applied: the old prompt is spent
+        self.assertTrue(by["ok"]["closed"])
+
+    def test_ai_help_context_key_covers_bin_name_and_draft(self):
+        source = "\n".join(function_source(name, APP) for name in ("aiContextKey", "aiIdentityKey", "aiSpaceContext"))
+        script = r"""
+const state={folderMode:'space',activeSpaceId:'S',designInventoryId:'B1',activeSpace:{kind:'drawer',x:80,y:80,z:50}};
+let design={part_name:'Tray',box:{x:16}},draft=null;
+const visibleDesignSnapshot=()=>JSON.parse(JSON.stringify(design)),isStructuralDesign=()=>false;
+const draftNeedsSaving=()=>Boolean(draft);state.draft=null;
+const pegboardProductMinimums=()=>({x:0,z:48});
+__FUNCTIONS__
+const keys=[aiContextKey()];
+design={part_name:'Renamed',box:{x:16}};keys.push(aiContextKey());
+design={part_name:'Tray',box:{x:24}};keys.push(aiContextKey());
+design={part_name:'Tray',box:{x:16}};draft=true;state.draft={kind:'post'};keys.push(aiContextKey());
+draft=null;state.draft=null;state.designInventoryId='B2';keys.push(aiContextKey());
+process.stdout.write(JSON.stringify({distinct:new Set(keys).size}));
+""".replace("__FUNCTIONS__", source)
+        out = node_json(script)
+        self.assertEqual(out["distinct"], 5)  # name, size, open draft and bin identity each change the key
+
+    def test_ai_help_ui_is_wired_without_a_provider_and_dictation_is_optional(self):
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        actions = html[html.index('id="bin-actions"'):html.index('id="stack-note"')]
+        self.assertLess(actions.index('id="designer-duplicate"'), actions.index('id="ai-help-open"'))
+        self.assertRegex(html, r'<button[^>]*id="ai-help-dictate"[^>]*\shidden')
+        # Product name is "AI Design"; internal ai-help-* IDs are implementation detail only.
+        dialog = html[html.index('id="ai-help-dialog"'):html.index('</dialog>', html.index('id="ai-help-dialog"'))]
+        self.assertIn("AI Design", html[html.index('id="ai-help-open"'):html.index("</button>", html.index('id="ai-help-open"'))])
+        self.assertIn(">AI Design<", dialog)
+        self.assertNotIn("AI Help", dialog)
+        section = APP[APP.index("// ------------------------------------------------------------ AI Help (Fix 073)"):
+                      APP.index("// New Bin (B1)")]
+        self.assertNotIn("fetch(", section)
+        self.assertEqual(sorted(set(re.findall(r'api\("(/[^"]+)"', section))),
+                         ["/api/ai/candidate", "/api/ai/prompt", "/api/ai/repair-prompt"])
+        script = "\n".join([function_source("aiSpeechRecognitionClass", APP), r"""
+const none=aiSpeechRecognitionClass({}),moz=aiSpeechRecognitionClass({SpeechRecognition:'A'}),
+  webkit=aiSpeechRecognitionClass({webkitSpeechRecognition:'B'});
+process.stdout.write(JSON.stringify({none,moz,webkit}));"""])
+        self.assertEqual(node_json(script), {"none": None, "moz": "A", "webkit": "B"})
 
 
 

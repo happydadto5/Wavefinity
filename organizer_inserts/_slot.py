@@ -30,12 +30,12 @@ def slot_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float]
     description="Angled slots for driver bits, cards, and small tools.",
     capabilities=("qty", "size", "along"),
     options=(
-        OptionDefinition("Height", "height", ""),
-        OptionDefinition("Depth", "depth", ""),
-        OptionDefinition("Thickness", "thickness", "4"),
-        OptionDefinition("Angle °", "angle", "20"),
-        OptionDefinition("Wall", "wall", "1.6"),
-        OptionDefinition("Walls", "wall_style", "straight", "enum"),
+        OptionDefinition("Height", "height", "", minimum=0.1, note="mm; blank = worked out from the bin"),
+        OptionDefinition("Depth", "depth", "", minimum=0.1, note="mm; must be less than the height"),
+        OptionDefinition("Thickness", "thickness", "4", minimum=0.1, note="mm width of each slot"),
+        OptionDefinition("Angle °", "angle", "20", minimum=0.0, maximum=45.0, note="degrees the slots lean"),
+        OptionDefinition("Wall", "wall", "1.6", minimum=0.1, note="mm wall around the slots"),
+        OptionDefinition("Walls", "wall_style", "straight", "enum", choices=(("straight", "Straight"), ("wavy", "Wavy"))),
     ), order=70,
 )
 def build_slot(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:

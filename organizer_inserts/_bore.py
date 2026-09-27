@@ -18,9 +18,12 @@ from organizer_engine import (
 )
 from organizer_geometry import _extrude_polygon, difference, union
 
-from ._core import Feature, Zone, _fit_count, _need_item, connector_keep_out, feature_touches_wall, layout_zone
+from ._core import (
+    ITEM_PROFILES, Feature, Zone, _fit_count, _need_item, connector_keep_out,
+    feature_touches_wall, layout_zone,
+)
 from ._registry import (
-    OptionDefinition, SettingInteraction, defaults, feature,
+    OptionDefinition, SIDE_CHOICES, SettingInteraction, defaults, feature,
     register_setting_interactions, resolved_options,
 )
 
@@ -36,6 +39,16 @@ HEX_BIT_HOLD = {"hex_bit_short": 12.0, "hex_bit_long": 16.0}
 HEX_BIT_LENGTH = {
     "hex_bit_short": HEX_BIT_SHORT_LENGTH,
     "hex_bit_long": HEX_BIT_LONG_LENGTH,
+}
+# A Bore accepts every item profile. The two hex-bit profiles are fixed presets:
+# the item is exactly this size with this fit, and the hole stands upright.
+BORE_ITEM_PROFILES = tuple(value for value, _label in ITEM_PROFILES)
+HEX_BIT_FIXED = {
+    profile: {
+        "length_mm": HEX_BIT_LENGTH[profile], "diameter_mm": HEX_BIT_FLATS,
+        "clearance_mm": HEX_BIT_CLEARANCE, "hole_depth_mm": HEX_BIT_HOLD[profile],
+    }
+    for profile in HEX_BIT_HOLD
 }
 BORE_MOUTH_CHAMFER = 0.6  # 45-degree lead-in at each hole mouth
 WALL_ONLY_FOOT = 0.5
@@ -976,17 +989,24 @@ def bore_tool_clearance_zone(
     "bore", title="Bore", display="Bore — upright tools",
     description="Small pockets for your stuff of vary sizes/shapes.",
     capabilities=("size", "along", "item"),
+    item_profiles=BORE_ITEM_PROFILES,
     options=(
-        OptionDefinition("Style", "bore_style", "base_straight", "enum"),
-        OptionDefinition("Height", "height", ""),
-        OptionDefinition("Hole depth", "depth", ""),
-        OptionDefinition("Wall", "wall", "1.6"),
-        OptionDefinition("X quantity", "columns", "", "integer"),
-        OptionDefinition("Y quantity", "rows", "", "integer"),
-        OptionDefinition("Angle °", "angle", "0"),
-        OptionDefinition("Angle towards", "angle_towards", "front", "enum", False),
-        OptionDefinition("Width / Length sizing", "xy_size_mode", "manual", "enum", False),
-        OptionDefinition("Height sizing", "height_size_mode", "manual", "enum", False),
+        OptionDefinition("Style", "bore_style", "base_straight", "enum", choices=(
+            ("base_straight", "Base - Straight"), ("base_wavy", "Base - Wavy Walls"),
+            ("walls_straight", "Walls Only - Straight"), ("walls_wavy", "Walls Only - Wavy")),
+            note="Walls Only and Base - Wavy Walls stand upright, so their angle must be 0"),
+        OptionDefinition("Height", "height", "", minimum=0.1, note="mm; blank = worked out from the bin"),
+        OptionDefinition("Hole depth", "depth", "", minimum=0.1, note="mm; no more than the height"),
+        OptionDefinition("Wall", "wall", "1.6", minimum=0.1, note="mm wall around each hole"),
+        OptionDefinition("X quantity", "columns", "", "integer", minimum=1, note="whole number; blank = as many as fit"),
+        OptionDefinition("Y quantity", "rows", "", "integer", minimum=1, note="whole number; blank = as many as fit"),
+        OptionDefinition("Angle °", "angle", "0", minimum=0.0, maximum=BORE_MAX_TILT, note="degrees off vertical; only Base - Straight may lean"),
+        OptionDefinition("Angle towards", "angle_towards", "front", "enum", False, choices=SIDE_CHOICES, note="direction of the lean; only meaningful when angle > 0"),
+        OptionDefinition("Width / Length sizing", "xy_size_mode", "manual", "enum", False, choices=(
+            ("manual", "Manual"), ("bore_to_bin", "Bore to bin"), ("bin_to_bore", "Bin to bore")),
+            note="Walls Only styles allow only manual or bin_to_bore"),
+        OptionDefinition("Height sizing", "height_size_mode", "manual", "enum", False, choices=(
+            ("manual", "Manual"), ("bore_to_bin", "Bore to bin"), ("bin_to_bore", "Bin to bore"))),
     ), order=30,
 )
 def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:

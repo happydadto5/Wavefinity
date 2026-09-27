@@ -601,6 +601,13 @@ function ordinaryBinMinimumHeight() {
   );
 }
 
+// Smallest bin (mm) the product allows on a Pegboard Space: Standard needs a
+// minimum height only; SKÅDIS needs a minimum width and height. New Bin and AI Help
+// both read this, so there is one table.
+function pegboardProductMinimums(standard) {
+  return standard === "standard" ? { x: 0, z: 48 } : { x: 56, z: 40 };
+}
+
 // `remembered` is this Space's bin-preference snapshot (see
 // spaceBinPreferences). Its X/Y/Z seed the bin, then the Space's own capacity
 // and height rules clamp them - a remembered value that no longer fits is
@@ -663,11 +670,9 @@ function applySpaceSizingDefaults(design, remembered = null) {
     );
   } else if (kind === "pegboard") {
     if (haveRememberedZ) design.box.z = normalizeBinDimension("z", rememberedZ, rememberedZ);
-    if (space.pegboard_standard === "standard") design.box.z = Math.max(48, design.box.z);
-    else {
-      design.box.x = Math.max(56, design.box.x);
-      design.box.z = Math.max(40, design.box.z);
-    }
+    const minimum = pegboardProductMinimums(space.pegboard_standard);
+    design.box.x = Math.max(minimum.x, design.box.x);
+    design.box.z = Math.max(minimum.z, design.box.z);
     design.box.pegboard = {
       enabled: true,
       standard: space.pegboard_standard,
@@ -1030,6 +1035,473 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
   return skipFlush ? generateRow(expected) : DL.busyWith("generate-row", generateRow);
 }
 
+// ------------------------------------------------------------ AI Help (Fix 073)
+//
+// Wavefinity never talks to an AI. It writes a prompt the person pastes into any
+// outside AI, then checks the pasted answer here. Every check happens before
+// anything changes: the candidate is proven in the real geometry path first, and
+// only a fully valid design is installed. All of this state is runtime-only -
+// never saved into a design, a Space or a preference.
+
+const AI_SCHEMA = "wavefinity-ai-design-v1";
+const aiHelp = { session: null, busy: false, generation: 0, failure: null, recognition: null };
+
+// `stale`: the answer belongs to an older prompt/context - needs a fresh prompt.
+// `operational`: the answer was fine but Wavefinity itself failed (service, save,
+// apply) - the AI cannot fix that, so it is never offered a repair.
+// `applied`: the design was already installed when that failure happened.
+class AiHelpError extends Error {
+  constructor(message, { stale = false, operational = false, applied = false } = {}) {
+    super(message);
+    this.stale = stale;
+    this.operational = operational;
+    this.applied = applied;
+  }
+}
+
+// The Space facts an AI needs to make legal choices, and nothing else.
+function aiSpaceContext() {
+  const space = state.folderMode === "space" ? state.activeSpace : null;
+  if (!space) return null;
+  const context = {
+    kind: space.kind, x: space.x, y: space.y, z: space.z,
+    trim_size: space.trim_size, pegboard_standard: space.pegboard_standard,
+  };
+  if (space.kind === "pegboard") {
+    const minimum = pegboardProductMinimums(space.pegboard_standard);
+    if (minimum.x > 0) context.min_x = minimum.x;
+    context.min_z = minimum.z;
+  }
+  return context;
+}
+
+// Who owns this bin: the pieces of context that never change just because a
+// form re-rendered or the bin was auto-named.
+function aiIdentityKey() {
+  return JSON.stringify({
+    folder: state.folderMode,
+    spaceId: state.folderMode === "space" ? (state.activeSpaceId || null) : null,
+    space: aiSpaceContext(),
+    inventoryId: state.designInventoryId ?? null,
+  });
+}
+
+// Exact context a prompt was written for: everything the person can see, the bin
+// name included, so a name typed after the prompt was written is never overwritten.
+function aiContextKey() {
+  const design = visibleDesignSnapshot();
+  return JSON.stringify({
+    identity: aiIdentityKey(),
+    structural: isStructuralDesign(design),
+    design,
+    draft: draftNeedsSaving() ? state.draft : null,
+  });
+}
+
+// True only when the bin has no meaningful user-added composition. Shell size,
+// wall/base, layout defaults, the bin name and Space-controlled mounting do not
+// count. Reads canonical design state, never the DOM.
+function aiCompositionEmpty(design = visibleDesignSnapshot()) {
+  if (draftNeedsSaving()) return false;
+  const box = design.box || {};
+  if ((design.layout?.features || []).length) return false;
+  if (String(design.label || "").trim()) return false;
+  if (design.scoop) return false;
+  const typed = value => String(value ?? "").trim() !== "";
+  const lid = box.lid || {};
+  if (lid.enabled || typed(lid.label_text) || (lid.division_labels || []).some(typed)) return false;
+  if (box.stack?.mode && box.stack.mode !== "none") return false;
+  if (box.lift_grabbers?.enabled) return false;
+  if (box.side_openings?.enabled) return false;
+  if (edgeMountActive(design) || typed(box.edge_mount?.label_text)) return false;
+  return true;
+}
+
+// Accepts exactly one JSON object, optionally inside ONE outer markdown fence.
+// It never scrapes JSON out of prose, merges objects, repairs syntax, or fills in
+// a missing envelope field.
+function aiParseEnvelope(text) {
+  let source = String(text ?? "").trim();
+  if (!source) throw new AiHelpError("Paste the AI's answer first.");
+  const fence = source.match(/^```[A-Za-z]*[ \t]*\r?\n([\s\S]*?)\r?\n?```$/);
+  if (fence) source = fence[1].trim();
+  let data;
+  try {
+    data = JSON.parse(source);
+  } catch (_error) {
+    throw new AiHelpError("The answer is not one valid JSON object. It must be only the JSON, with no extra text.");
+  }
+  const plain = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  if (!plain(data)) throw new AiHelpError("The answer must be one JSON object.");
+  if (data.schema !== AI_SCHEMA) throw new AiHelpError(`"schema" must be exactly "${AI_SCHEMA}".`);
+  if (typeof data.request_id !== "string" || typeof data.context_fingerprint !== "string") {
+    throw new AiHelpError('"request_id" and "context_fingerprint" must be copied exactly as text.');
+  }
+  if (!Array.isArray(data.assumptions)) throw new AiHelpError('"assumptions" must be a list.');
+  if (!plain(data.design)) throw new AiHelpError('"design" must be a complete design object.');
+  return data;
+}
+
+// A response is only good for the exact prompt and context it was written for.
+function aiCheckSession(envelope, session) {
+  const fresh = "Your design or Space changed since the prompt was made. Generate a new AI prompt for what is open now.";
+  if (!session) throw new AiHelpError("Generate an AI prompt first, then paste its answer.", { stale: true });
+  if (envelope && (envelope.request_id !== session.request_id ||
+      envelope.context_fingerprint !== session.context_fingerprint)) {
+    throw new AiHelpError("This answer belongs to a different prompt. Generate a new AI prompt and use its answer.", { stale: true });
+  }
+  if (aiContextKey() !== session.contextKey) throw new AiHelpError(fresh, { stale: true });
+}
+
+// The active Space's exact rules, checked rather than silently clamped.
+function aiSpaceViolation(design, baseline) {
+  const box = design.box || {};
+  if (isStructuralDesign(design)) return "A Storage Box or Base Trim cannot be used as an AI bin.";
+  const mount = JSON.stringify(box.pegboard || null);
+  const space = state.folderMode === "space" ? state.activeSpace : null;
+  if (!space) {
+    return mount === JSON.stringify(baseline?.box?.pegboard || null)
+      ? null : "Pegboard mounting belongs to a Pegboard Space and cannot be changed here.";
+  }
+  const kind = space.kind;
+  const unit = number(state.catalog?.base_unit, 8);
+  const capacity = mm => kind === "drawer" ? drawerSpaceCapacity(mm) : Math.floor(number(mm, 0) / unit + 1e-9);
+  const maxX = capacity(space.x) * unit, maxY = capacity(space.y) * unit;
+  if (box.x > maxX + 1e-6 || box.y > maxY + 1e-6) {
+    return `The bin is ${fmt(box.x)} x ${fmt(box.y)} mm but this Space fits at most ${fmt(maxX)} x ${fmt(maxY)} mm.`;
+  }
+  if (["drawer", "portable", "box"].includes(kind) && box.z > number(space.z, Infinity) + 1e-6) {
+    return `The bin is ${fmt(box.z)} mm tall but this Space is only ${fmt(space.z)} mm tall.`;
+  }
+  if (kind === "pegboard") {
+    if (!box.pegboard?.enabled || box.pegboard.standard !== space.pegboard_standard ||
+        mount !== JSON.stringify(baseline?.box?.pegboard || null)) {
+      return "This Space's Pegboard mounting must be kept exactly as it was.";
+    }
+    const minimum = pegboardProductMinimums(space.pegboard_standard);
+    if (box.x < minimum.x - 1e-6 || box.z < minimum.z - 1e-6) {
+      const needs = [minimum.x > 0 ? `${fmt(minimum.x)} mm wide` : "", `${fmt(minimum.z)} mm tall`].filter(Boolean);
+      return `A bin on this Pegboard Space must be at least ${needs.join(" and ")}.`;
+    }
+  } else if (mount !== JSON.stringify(baseline?.box?.pegboard || null)) {
+    return "Pegboard mounting belongs to a Pegboard Space and cannot be changed here.";
+  }
+  if (kind === "surface") {
+    const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    if (!same(box.base_thickness, baseline?.box?.base_thickness) ||
+        !same(box.standard_base, baseline?.box?.standard_base) ||
+        !same(design.layout?.surface_base_mode, baseline?.layout?.surface_base_mode)) {
+      return "This Surface Space controls the bin base, so it must be kept exactly as it was.";
+    }
+  }
+  return null;
+}
+
+function aiSetStatus(message = "", { error = false, repair = false } = {}) {
+  const status = $("#ai-help-status");
+  if (!status) return;
+  status.textContent = message;
+  status.hidden = !message;
+  status.classList.toggle("error", error);
+  const repairButton = $("#ai-help-repair");
+  if (repairButton) repairButton.hidden = !repair;
+}
+
+function aiSetBusy(busy) {
+  aiHelp.busy = busy;
+  ["#ai-help-generate", "#ai-help-process", "#ai-help-repair", "#ai-help-close"].forEach(selector => {
+    const button = $(selector);
+    if (button) button.disabled = busy;
+  });
+}
+
+function aiShowPrompt(text) {
+  const area = $("#ai-help-prompt");
+  area.value = text;
+  $("#ai-help-prompt-block").hidden = false;
+}
+
+async function aiCopyText(text, area) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_error) {
+    try {
+      area?.select();
+      return Boolean(document.execCommand?.("copy"));
+    } catch (_inner) {
+      return false;
+    }
+  }
+}
+
+async function aiGeneratePrompt() {
+  if (aiHelp.busy) return;
+  const description = $("#ai-help-description").value.trim();
+  if (!description) {
+    aiSetStatus("Describe the object first.", { error: true });
+    return;
+  }
+  aiHelp.session = null;
+  aiHelp.failure = null;
+  aiSetBusy(true);
+  aiSetStatus("Writing the prompt…");
+  try {
+    // Unsaved work on an interior part is saved into the design first, through the
+    // same owner every other bin transition uses, so the prompt - and the session
+    // bound to it - describe exactly what the person sees now.
+    const done = await withDeferredDraftSwitch(async () => {
+      const baseline = visibleDesignSnapshot();
+      if (isStructuralDesign(baseline)) throw new AiHelpError("AI Design designs ordinary bins only.");
+      const contextKey = aiContextKey();
+      const result = await api("/api/ai/prompt", { description, design: baseline, space: aiSpaceContext() });
+      if (aiContextKey() !== contextKey) {
+        throw new AiHelpError("Your design changed while the prompt was being written. Try again.");
+      }
+      aiHelp.session = {
+        request_id: result.request_id,
+        context_fingerprint: result.context_fingerprint,
+        contextKey,
+        baseline,
+        reuse: aiCompositionEmpty(baseline),
+      };
+      aiShowPrompt(result.prompt);
+      aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
+      return true;
+    }, false);
+    if (!done) aiSetStatus("Finish or discard the part you are editing, then generate the prompt again.", { error: true });
+  } catch (error) {
+    aiSetStatus(error.message, { error: true });
+  } finally {
+    aiSetBusy(false);
+  }
+}
+
+// Steps 3-7 of the transaction: canonical design, structural rejection, the real
+// preview/geometry proof and the Space's rules. Nothing here touches state.design.
+async function aiProveCandidate(envelope, session) {
+  let result;
+  try {
+    result = await api("/api/ai/candidate", {
+      design: envelope.design, client_id: `${previewClientId}-ai`, generation: ++aiHelp.generation,
+    });
+  } catch (error) {
+    // 400 means Wavefinity judged the answer invalid; anything else is Wavefinity failing.
+    if (error.status === 400) throw new AiHelpError(error.message);
+    throw new AiHelpError(`Wavefinity could not check the answer just now (${error.message}). Nothing was changed; try again.`,
+      { operational: true });
+  }
+  aiCheckSession(envelope, session);
+  if (result.superseded) throw new AiHelpError("Another check was started. Try Process AI Response again.");
+  if (result.problems.length) {
+    throw new AiHelpError(`Wavefinity could not build this design: ${result.problems.slice(0, 3).join(" ")}`);
+  }
+  const violation = aiSpaceViolation(result.design, session.baseline);
+  if (violation) throw new AiHelpError(violation);
+  return result;
+}
+
+// Step 8: install the proven design and adopt its already-built preview through
+// the same owner refreshPreview() uses - no second identical geometry build.
+// Returns true on success, false when nothing was changed.
+async function aiInstallCandidate(candidate, session) {
+  // The one expected identity change: the pre-install save of a nonblank typed-Space
+  // bin may legitimately give that bin a name and row ID. So the first check compares
+  // everything including the bin's own ID, and the re-check after that save compares
+  // only the folder/Space identity. Nothing else is ever ignored.
+  const identity = ({ inventory = false } = {}) => {
+    const now = JSON.parse(aiIdentityKey()), then = JSON.parse(JSON.parse(session.contextKey).identity);
+    if (!inventory) { delete now.inventoryId; delete then.inventoryId; }
+    if (JSON.stringify(now) !== JSON.stringify(then)) {
+      throw new AiHelpError("Your Space or bin changed. Generate a new AI prompt for what is open now.", { stale: true });
+    }
+  };
+  return withDeferredDraftSwitch(async () => {
+    identity({ inventory: true });
+    if (!session.reuse) {
+      if (state.folderMode === "space") {
+        if (typedSpaceOrdinaryBin() && !(await flushSpaceDesignAutosave({ deferDraftPreview: true }))) {
+          aiSetStatus("The current bin could not be saved first, so nothing was changed.", { error: true });
+          return false;
+        }
+      } else if (designHasChanges() && !(await appConfirmAction({
+        title: "Use the AI design as a new bin?",
+        message: "Replace the current bin with the AI design and discard its unsaved changes?",
+        actionLabel: "Use AI Design",
+        danger: true,
+      }))) {
+        aiSetStatus("Nothing was changed. Your answer is still here.");
+        return false;
+      }
+      identity();
+    }
+    if (!beginDesignMutation()) {
+      aiSetStatus("Wavefinity is finishing another change. Try again in a moment.", { error: true });
+      return false;
+    }
+    let installed = false;
+    try {
+      state.design = clone(candidate.design);
+      installed = true;
+      state.lastOrdinaryDesign = clone(state.design);
+      resetNestPhotoSession();
+      if (!session.reuse) {
+        // The equivalent New Bin baseline (the unedited starter), never the finished
+        // candidate: persisting the AI design then updates the Space's remembered
+        // bin/part defaults exactly as the same edits made by hand would.
+        state.cleanDesign = clone(freshDesignForCurrentFolder());
+        state.designInventoryId = null;
+      }
+      state.spaceStarterPreviewPending = false;
+      state.surfaceHeightPromptSkipped = false;
+      state.drafts = {};
+      state.history = [];
+      state.future = [];
+      state.binResizePending = false;
+      state.binFootprintResizePending = false;
+      bindLidMemoryForDesign();
+      syncForm();
+      clearDraftSelection();
+      if (typeof DP !== "undefined" && state.folderMode === "space") DP.setMode("design");
+      activatePreviewView("3d");
+      // Claim preview ownership (older in-flight previews become stale, exactly as a
+      // normal refresh would) and adopt the proven result instead of rebuilding it.
+      invalidatePendingPreview();
+      fullPreviewStarts += 1;
+      adoptPreviewResult(candidate.preview);
+      if (typedSpaceOrdinaryBin()) await persistSpaceDesignSource(null, true);
+      return true;
+    } catch (error) {
+      if (error instanceof AiHelpError) throw error;
+      // The answer was valid; this is Wavefinity failing to apply or save it.
+      throw new AiHelpError(installed
+        ? `The AI design is valid and is open in the Designer, but applying or saving it hit a problem: ${error.message}`
+        : `The AI design is valid, but Wavefinity could not apply it: ${error.message}. Nothing was changed.`,
+      { operational: true, applied: installed });
+    } finally {
+      finishDesignMutation();
+    }
+  }, false);
+}
+
+async function aiProcessResponse() {
+  if (aiHelp.busy) return;
+  const text = $("#ai-help-response").value;
+  const session = aiHelp.session;
+  aiHelp.failure = null;
+  aiSetBusy(true);
+  aiSetStatus("Checking the answer…");
+  try {
+    const envelope = aiParseEnvelope(text);
+    aiCheckSession(envelope, session);
+    const candidate = await aiProveCandidate(envelope, session);
+    if (await aiInstallCandidate(candidate, session)) {
+      aiHelp.session = null;
+      $("#ai-help-dialog").close();
+      toast("AI design applied.");
+    }
+  } catch (error) {
+    // A stale answer needs a fresh prompt; a Wavefinity (service/save/apply) failure is
+    // not the AI's fault; only a defect in the answer itself can be repaired.
+    const known = error instanceof AiHelpError;
+    const operational = !known || error.operational;
+    if (error.applied) aiHelp.session = null;
+    const repairable = known && !error.stale && !operational && Boolean(session);
+    if (repairable) aiHelp.failure = { response: text, message: error.message, session };
+    aiSetStatus(known ? error.message
+      : `Wavefinity hit a problem (${error.message}). Your answer is still here.`, { error: true, repair: repairable });
+  } finally {
+    aiSetBusy(false);
+  }
+}
+
+async function aiMakeRepairPrompt() {
+  const failure = aiHelp.failure;
+  if (!failure || aiHelp.busy) return;
+  aiSetBusy(true);
+  try {
+    const result = await api("/api/ai/repair-prompt", {
+      request_id: failure.session.request_id,
+      context_fingerprint: failure.session.context_fingerprint,
+      response: failure.response,
+      error: failure.message,
+    });
+    aiShowPrompt(result.prompt);
+    const copied = await aiCopyText(result.prompt, $("#ai-help-prompt"));
+    aiSetStatus(copied
+      ? "Repair prompt copied. Give it to your AI, then paste its new answer below."
+      : "Repair prompt ready above. Copy it to your AI, then paste its new answer below.",
+    { repair: true });
+  } catch (error) {
+    aiSetStatus(error.message, { error: true, repair: true });
+  } finally {
+    aiSetBusy(false);
+  }
+}
+
+// Dictation is a progressive enhancement: only offered when the browser has it.
+function aiSpeechRecognitionClass(win = window) {
+  return win.SpeechRecognition || win.webkitSpeechRecognition || null;
+}
+
+function aiWireDictation() {
+  const Recognition = aiSpeechRecognitionClass();
+  const button = $("#ai-help-dictate");
+  if (!button || !Recognition) return;
+  button.hidden = false;
+  const stop = () => {
+    aiHelp.recognition = null;
+    button.textContent = "Dictate";
+  };
+  button.addEventListener("click", () => {
+    if (aiHelp.recognition) {
+      aiHelp.recognition.stop();
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.lang = document.documentElement.lang || navigator.language || "en-US";
+    recognition.onresult = event => {
+      const heard = [...event.results].map(one => one[0]?.transcript || "").join(" ").trim();
+      if (!heard) return;
+      const field = $("#ai-help-description");
+      field.value = field.value && !/\s$/.test(field.value) ? `${field.value} ${heard}` : `${field.value}${heard}`;
+    };
+    recognition.onerror = () => { stop(); aiSetStatus("Dictation is not available right now. You can still type.", { error: true }); };
+    recognition.onend = stop;
+    aiHelp.recognition = recognition;
+    button.textContent = "Stop";
+    try { recognition.start(); } catch (_error) { stop(); }
+  });
+}
+
+function aiWireHelp() {
+  const dialog = $("#ai-help-dialog");
+  if (!dialog) return;
+  $("#ai-help-open").addEventListener("click", () => {
+    aiSetStatus("");
+    if (!dialog.open) dialog.showModal();
+  });
+  $("#ai-help-generate").addEventListener("click", aiGeneratePrompt);
+  $("#ai-help-process").addEventListener("click", aiProcessResponse);
+  $("#ai-help-repair").addEventListener("click", aiMakeRepairPrompt);
+  $("#ai-help-copy").addEventListener("click", async () => {
+    const copied = await aiCopyText($("#ai-help-prompt").value, $("#ai-help-prompt"));
+    aiSetStatus(copied ? "Copied." : "Select the prompt and copy it.", { error: !copied });
+  });
+  $("#ai-help-close").addEventListener("click", () => {
+    aiHelp.recognition?.stop();
+    dialog.close();
+  });
+  // A check in flight owns the dialog; closing never applies anything half-checked.
+  dialog.addEventListener("cancel", event => {
+    if (aiHelp.busy) event.preventDefault();
+    else aiHelp.recognition?.stop();
+  });
+  aiWireDictation();
+}
+
 // New Bin (B1): a fresh product-appropriate starter. Meaningful current work
 // in a typed Space is preserved through the autosave flush first, never silently
 // discarded; on flush failure New Bin is cancelled rather than losing work.
@@ -1306,7 +1778,11 @@ async function api(path, payload = null) {
   } catch (_error) {
     throw new Error(`The local Wavefinity service returned ${response.status}.`);
   }
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(data.error || `Request failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -4242,6 +4718,7 @@ function wireControls() {
   // for the algorithms that still use it (e.g. size-drag history).
   $("#designer-new-bin").addEventListener("click", designerNewBin);
   $("#designer-duplicate").addEventListener("click", designerDuplicate);
+  aiWireHelp();
   $("#designer-save-file").addEventListener("click", saveDesign);
   $("#designer-open-file").addEventListener("change", openDesign);
   window.addEventListener("beforeunload", event => {
@@ -8220,7 +8697,7 @@ function mutationControls() {
     '#mode-select, ' +
     '#lid-option-toggle, #lid-configuration, #lid-thickness, #lid-fit, #lid-handle-type, #lid-handle-size, ' +
     '#lid-handle-position, #lid-label-enabled, #lid-label-orientation, #lid-label-style, #lid-label-depth, #lid-label-text, ' +
-    '#designer-new-bin, #designer-duplicate, ' +
+    '#designer-new-bin, #designer-duplicate, #ai-help-open, ' +
     '#designer-save-file, #designer-open-file'
   );
 }
@@ -8521,6 +8998,120 @@ function endPreviewWait(requestId) {
   if (wrapper) wrapper.classList.remove("preview-recalculating");
 }
 
+// Everything a finished, current preview does to the browser: geometry and pick
+// data, fit/error state, generation availability, the canonical design, the
+// preview currentness key, checkpoints/autosave and every render. refreshPreview()
+// calls it for its own result, and AI Help calls it for a candidate it already
+// proved, so an accepted design never costs a second identical geometry build.
+function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = state.lidThicknessEpoch } = {}) {
+  const grownX = result.design?.box?.x !== state.design?.box?.x;
+  const grownY = result.design?.box?.y !== state.design?.box?.y;
+  const grownZ = result.design?.box?.z !== state.design?.box?.z;
+  state.preview = result;
+  state.design = result.design;
+  // Bind the three backend-measured lid thicknesses to the design and edit
+  // epoch they were measured for; a later bin or a newer edit never shows them.
+  applyLidThicknessReport(result, lidEpochAtRequest);
+  syncSurfaceControls();
+  state.previewDesignKey = JSON.stringify(result.design);
+  updateDraftOverhangNote();
+  checkBinSizeChange();
+  // Surface the access planner's own warning (spec section 46) once per
+  // distinct message, not on every preview refresh.
+  const accessWarning = (result.draft_nest_access || result.nest_access?.[state.selected])?.warning;
+  if (accessWarning && accessWarning !== state.nestAccessWarningShown) {
+    toast(accessWarning, true, 6500);
+  }
+  state.nestAccessWarningShown = accessWarning || null;
+  const rimLabelWarning = result.label_meta?.warning || null;
+  if (rimLabelWarning && rimLabelWarning !== state.rimLabelWarningShown) {
+    toast(rimLabelWarning, false, 6500);
+  }
+  state.rimLabelWarningShown = rimLabelWarning;
+  // A B4B preview returns its effective printable dimensions. Adopt them
+  // into the controls and flash every field the engine adjusted.
+  if (grownX) flashField($("#x-size"));
+  if (grownY) flashField($("#y-size"));
+  if (grownZ) flashField($("#z"));
+  const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
+  $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
+  $("#preview-state").classList.toggle("status-error", Boolean(previewHasErrors));
+  $("#preview-state").classList.toggle("status-ok", !previewHasErrors);
+  formatDimField("x");
+  formatDimField("y");
+  formatHeightField();
+  // The backend may have grown X/Y. Their displayed values now match the
+  // accepted report, so an unrelated next edit must not look like a size edit.
+  if (lidEpochAtRequest === state.lidThicknessEpoch) settleLidThicknessFormKey();
+  const physical = result.base_trim?.outer_mm || [state.design.box.x, state.design.box.y];
+  $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(physical[0])} mm`;
+  $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(physical[1])} mm`;
+  $(".dimension-height", $("#dimensions")).textContent = `Height ${fmt(state.design.box.z)} mm`;
+  // A typed Space's exact resume checkpoint (Fix 032): only a fully valid
+  // preview - never one that merely returned HTTP 200 while still
+  // reporting fit/feature/draft errors - replaces the last valid one.
+  // Placed after the controls above so the checkpoint is the same canonical
+  // design the user now sees, including any server-adjusted X/Y/Z.
+  if (!previewHasErrors && typedSpaceOrdinaryBin()) {
+    if (state.spaceStarterPreviewPending) {
+      state.cleanDesign = clone(state.design);
+      state.spaceStarterPreviewPending = false;
+    } else queueSpaceDesignAutosave();
+  }
+  if (persistResume && !previewHasErrors && state.folderMode === "space" && typeof SP !== "undefined") {
+    SP.queueResumeCheckpoint(state.design, false);
+  }
+  const messages = [result.message, ...result.feature_errors, result.draft_error].filter(Boolean);
+  const actions = [];
+  if (result.message) actions.push({
+    message: result.message,
+    activate: () => {
+      const input = $('[data-draft="option:text"]', $("#draft-fields"));
+      if (input) {
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+        input.focus();
+        flashField(input);
+      }
+    },
+  });
+  result.feature_errors.forEach((message, errorIndex) => {
+    const featureIndex = result.invalid_feature_indexes?.[errorIndex];
+    actions.push({
+      message: featureIndex === undefined ? message : `Interior part ${featureIndex + 1}: ${message}`,
+      activate: async () => {
+        if (featureIndex === undefined) return;
+        await selectedFeature(featureIndex);
+        if (state.selected !== featureIndex) return;
+        $(".support-editor").scrollIntoView({ behavior: "smooth", block: "center" });
+        flashField($(".support-editor"));
+      },
+    });
+  });
+  if (result.draft_error) actions.push({
+    message: result.draft_error,
+    activate: () => {
+      $(".support-editor").scrollIntoView({ behavior: "smooth", block: "center" });
+      const invalidField = $('#draft-fields input:invalid') || $('#draft-fields input');
+      invalidField?.focus();
+      flashField(invalidField || $(".support-editor"));
+    },
+  });
+  state.canGenerate = !messages.length;
+  updateGenerateAvailability();
+  if (messages.length) setError("", actions);
+  state.textMeta = result.text_meta || [];
+  state.fitError = Boolean(result.feature_errors.length || result.draft_error);
+  updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
+  updateAutoExpandButton();
+  if (typeof SP !== "undefined" && SP.renderSpaceInfo) {
+    SP.renderSpaceInfo();
+  }
+  applyStackVisibility();
+  renderPreview3D();
+  renderLayout2D();
+  renderPlaced();
+}
+
 // `persistResume: false` (Fix 032 Correction 4, C4.2) renders a normal,
 // fully valid preview WITHOUT queuing it as the Space's resume checkpoint.
 // Used only for the one narrow starter preview that replaces a stored
@@ -8556,112 +9147,7 @@ async function refreshPreview({ persistResume = true } = {}) {
     if (request !== state.previewRequest) return;
     if (result.superseded) throw new Error("Current preview was unexpectedly superseded. Try again.");
     endPreviewWait(request);
-    const grownX = result.design?.box?.x !== state.design?.box?.x;
-    const grownY = result.design?.box?.y !== state.design?.box?.y;
-    const grownZ = result.design?.box?.z !== state.design?.box?.z;
-    state.preview = result;
-    state.design = result.design;
-    // Bind the three backend-measured lid thicknesses to the design and edit
-    // epoch they were measured for; a later bin or a newer edit never shows them.
-    applyLidThicknessReport(result, lidEpochAtRequest);
-    syncSurfaceControls();
-    state.previewDesignKey = JSON.stringify(result.design);
-    updateDraftOverhangNote();
-    checkBinSizeChange();
-    // Surface the access planner's own warning (spec section 46) once per
-    // distinct message, not on every preview refresh.
-    const accessWarning = (result.draft_nest_access || result.nest_access?.[state.selected])?.warning;
-    if (accessWarning && accessWarning !== state.nestAccessWarningShown) {
-      toast(accessWarning, true, 6500);
-    }
-    state.nestAccessWarningShown = accessWarning || null;
-    const rimLabelWarning = result.label_meta?.warning || null;
-    if (rimLabelWarning && rimLabelWarning !== state.rimLabelWarningShown) {
-      toast(rimLabelWarning, false, 6500);
-    }
-    state.rimLabelWarningShown = rimLabelWarning;
-    // A B4B preview returns its effective printable dimensions. Adopt them
-    // into the controls and flash every field the engine adjusted.
-    if (grownX) flashField($("#x-size"));
-    if (grownY) flashField($("#y-size"));
-    if (grownZ) flashField($("#z"));
-    const previewHasErrors = !result.fits || result.feature_errors.length || result.draft_error;
-    $("#preview-state").textContent = previewHasErrors ? "Design needs attention" : "Preview current";
-    $("#preview-state").classList.toggle("status-error", Boolean(previewHasErrors));
-    $("#preview-state").classList.toggle("status-ok", !previewHasErrors);
-    formatDimField("x");
-    formatDimField("y");
-    formatHeightField();
-    // The backend may have grown X/Y. Their displayed values now match the
-    // accepted report, so an unrelated next edit must not look like a size edit.
-    if (lidEpochAtRequest === state.lidThicknessEpoch) settleLidThicknessFormKey();
-    const physical = result.base_trim?.outer_mm || [state.design.box.x, state.design.box.y];
-    $(".dimension-width", $("#dimensions")).textContent = `Width ${fmt(physical[0])} mm`;
-    $(".dimension-depth", $("#dimensions")).textContent = `Depth ${fmt(physical[1])} mm`;
-    $(".dimension-height", $("#dimensions")).textContent = `Height ${fmt(state.design.box.z)} mm`;
-    // A typed Space's exact resume checkpoint (Fix 032): only a fully valid
-    // preview - never one that merely returned HTTP 200 while still
-    // reporting fit/feature/draft errors - replaces the last valid one.
-    // Placed after the controls above so the checkpoint is the same canonical
-    // design the user now sees, including any server-adjusted X/Y/Z.
-    if (!previewHasErrors && typedSpaceOrdinaryBin()) {
-      if (state.spaceStarterPreviewPending) {
-        state.cleanDesign = clone(state.design);
-        state.spaceStarterPreviewPending = false;
-      } else queueSpaceDesignAutosave();
-    }
-    if (persistResume && !previewHasErrors && state.folderMode === "space" && typeof SP !== "undefined") {
-      SP.queueResumeCheckpoint(state.design, false);
-    }
-    const messages = [result.message, ...result.feature_errors, result.draft_error].filter(Boolean);
-    const actions = [];
-    if (result.message) actions.push({
-      message: result.message,
-      activate: () => {
-        const input = $('[data-draft="option:text"]', $("#draft-fields"));
-        if (input) {
-          input.scrollIntoView({ behavior: "smooth", block: "center" });
-          input.focus();
-          flashField(input);
-        }
-      },
-    });
-    result.feature_errors.forEach((message, errorIndex) => {
-      const featureIndex = result.invalid_feature_indexes?.[errorIndex];
-      actions.push({
-        message: featureIndex === undefined ? message : `Interior part ${featureIndex + 1}: ${message}`,
-        activate: async () => {
-          if (featureIndex === undefined) return;
-          await selectedFeature(featureIndex);
-          if (state.selected !== featureIndex) return;
-          $(".support-editor").scrollIntoView({ behavior: "smooth", block: "center" });
-          flashField($(".support-editor"));
-        },
-      });
-    });
-    if (result.draft_error) actions.push({
-      message: result.draft_error,
-      activate: () => {
-        $(".support-editor").scrollIntoView({ behavior: "smooth", block: "center" });
-        const invalidField = $('#draft-fields input:invalid') || $('#draft-fields input');
-        invalidField?.focus();
-        flashField(invalidField || $(".support-editor"));
-      },
-    });
-    state.canGenerate = !messages.length;
-    updateGenerateAvailability();
-    if (messages.length) setError("", actions);
-    state.textMeta = result.text_meta || [];
-    state.fitError = Boolean(result.feature_errors.length || result.draft_error);
-    updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
-    updateAutoExpandButton();
-    if (typeof SP !== "undefined" && SP.renderSpaceInfo) {
-      SP.renderSpaceInfo();
-    }
-    applyStackVisibility();
-    renderPreview3D();
-    renderLayout2D();
-    renderPlaced();
+    adoptPreviewResult(result, { persistResume, lidEpochAtRequest });
   } catch (error) {
     if (request !== state.previewRequest) return;
     endPreviewWait(request);

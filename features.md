@@ -18,7 +18,7 @@
 
 ### In-review feature
 
-- **AI Help — In review (Fix 073):** implemented on branch `fix73` and awaiting acceptance into `main` at the time of this document.
+- **AI Design — In review (Fix 073):** implemented on branch `fix73` and awaiting acceptance into `main` at the time of this document.
 
 ---
 
@@ -434,7 +434,7 @@ Cradle is intended for tools laid down rather than upright.
 
 ### AI limitation
 
-Photo Nest is a **media-derived feature**. AI Help may recommend it, but text AI is not allowed to fabricate a photo contour.
+Photo Nest is a **media-derived feature**. AI Design may recommend it, but text AI is not allowed to fabricate a photo contour.
 
 ---
 
@@ -1051,16 +1051,16 @@ Spaces can use **Spacers** to fill leftover physical area.
 
 ---
 
-# 16. AI Help — Fix 073
+# 16. AI Design — Fix 073
 
 **Status at this document revision: In review — implemented on `fix73`, not yet accepted into `main`.**
 
-AI Help is a Designer workflow for turning a natural-language object description into a legal Wavefinity bin design **without Wavefinity directly calling an AI provider**.
+AI Design is a Designer workflow for turning a natural-language object description into a legal Wavefinity bin design **without Wavefinity directly calling an AI provider**.
 
 ## 16.1 User flow
 
-1. Click **AI Help** beside the Designer's New/Duplicate controls.
-2. Describe one object in a multiline text field.
+1. Click **AI Design** beside the Designer's New/Duplicate controls.
+2. Describe one object in a multiline text field. (If you have an unsaved interior part open, Wavefinity saves it into the design first so the prompt matches exactly what you see.)
 3. Optionally use **Dictate** when the browser supports speech recognition.
 4. Click **Generate Prompt**.
 5. Copy the generated Wavefinity prompt.
@@ -1077,11 +1077,13 @@ The prompt contains:
 - the user's object description;
 - current bin context;
 - current typed-Space constraints when applicable;
-- an authoritative capability manifest of current palette-visible parts/options;
-- legal modifier families;
+- an authoritative capability manifest naming, for every current palette-visible part, the exact current Designer control for each field the AI may set (not merely that a capability exists) -- footprint zone, quantity (and what Auto means), run direction, alternate ends, and the stored item's shape/length/diameter/fit (Bore offers all six shapes including the fixed hex-bit sizes; Cradle is always round) -- with legacy/derived fields (for example Bore's older orientation field, Divider's older single-axis quantity, Post's engine-only grid override, Cradle's derived floor gap/rib thickness, Text's unused font field) explained as structure to preserve, never offered as a second control for the same behavior;
+- legal modifier families, with a canonical example of each Lid & Stacking configuration (Stackable Bin, Stackable Lid, Lid with Handle);
 - important compatibility rules;
+- the current bin's interior bounds as a reference only: if the AI changes the bin size, every part must fit the interior of the design it returns;
 - a complete canonical design example;
-- the required response schema.
+- the required response schema;
+- an optional link to Wavefinity's public `ai-features.md` reference, for background only -- the AI is told the data above always wins and the link is never required.
 
 The AI can choose any legal user-facing Wavefinity feature that helps solve the request.
 
@@ -1100,7 +1102,8 @@ Before applying an answer, Wavefinity checks:
 - structural-design rejection;
 - actual geometry preview;
 - fit/errors;
-- active Space constraints.
+- active Space constraints, including the Pegboard minimum bin sizes New Bin already uses;
+- the manifest's own public-control rules: an item shape not legal for that part, a Cradle item that is not plain round, a Bore item with the wrong fit clearance, a hex-bit item that is not exactly the fixed preset or is leaned, or an answer that tries to set a part's layout through a legacy/derived field instead of its current control.
 
 Invalid designs do not modify the current design.
 
@@ -1108,7 +1111,7 @@ Invalid designs do not modify the current design.
 
 An AI answer is rejected if the user changed the relevant:
 
-- design;
+- design (including the bin name);
 - Space;
 - Space dimensions/rules;
 - Inventory identity/binding;
@@ -1121,7 +1124,7 @@ The user must then generate a fresh prompt rather than applying stale AI output.
 ## 16.5 Existing-bin behavior
 
 - If the current bin is composition-empty, a valid AI result can reuse the current bin identity.
-- If the current bin already contains meaningful parts/options/labels/etc., the AI result becomes a new bin rather than overwriting the existing composed bin.
+- If the current bin already contains meaningful parts/options/labels/etc. (including saved label text on a switched-off lid or edge mount), the AI result becomes a new bin rather than overwriting the existing composed bin. In a typed Space the current bin is saved first, and the new bin then updates the Space's remembered defaults the same way the same edits made by hand would.
 
 ## 16.6 Repair prompt
 
@@ -1132,6 +1135,8 @@ If the external AI returns invalid JSON or an invalid design, Wavefinity can cre
 - the previous AI response;
 - a safe validation error;
 - instructions to return one corrected JSON object.
+
+Only a problem in the AI's answer is repairable this way. If the answer was fine but Wavefinity itself failed afterward (service, save or apply), no repair prompt is offered and Wavefinity says whether the design was already applied.
 
 ## 16.7 AI limitations
 
@@ -1183,7 +1188,7 @@ When a fix changes the product, update this file if it changes any of the follow
 - Connector type or rule.
 - 2D/3D editing behavior.
 - Save/Print output.
-- AI Help capability.
+- AI Design capability.
 - User-visible compatibility/conflict rule.
 
 ### Documentation rule for future fixes
@@ -1202,7 +1207,7 @@ If the answer to any of those is yes, update this catalog as part of the fix.
 
 # 19. AI-facing documentation
 
-`ai-features.md` is the compact public reference intended for outside AI systems used with AI Help. It supplements the request-specific machine-readable prompt; it does not replace the live catalog/rules embedded by the running app.
+`ai-features.md` is the compact public reference intended for outside AI systems used with AI Design. It supplements the request-specific machine-readable prompt; it does not replace the live catalog/rules embedded by the running app.
 
 When a product change affects what an outside AI can legally select, configure, return, or must avoid, update both this catalog and `ai-features.md` in the same fix.
 

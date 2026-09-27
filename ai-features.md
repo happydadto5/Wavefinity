@@ -2,7 +2,7 @@
 
 > **Audience:** External AI systems helping a person design one ordinary Wavefinity bin.
 >
-> **Purpose:** Public, compact background reference for Wavefinity AI Help. The AI Help prompt may link here instead of repeating every explanatory detail.
+> **Purpose:** Public, compact background reference for Wavefinity AI Design. The AI Design prompt may link here instead of repeating every explanatory detail.
 >
 > **Authority rule:** The **request-specific prompt embedded by the running Wavefinity app wins** over this file whenever they differ. The prompt contains the exact current design, Space constraints, request/fingerprint, legal machine-readable values, and response contract needed for that request.
 >
@@ -14,7 +14,7 @@
 
 # 1. What the external AI is designing
 
-AI Help designs **one ordinary Wavefinity Bin**.
+AI Design designs **one ordinary Wavefinity Bin**.
 
 It does **not** design these Space-owned structural outputs:
 
@@ -31,7 +31,7 @@ All Wavefinity design dimensions are in **millimetres**.
 
 # 2. Request-specific information always supplied by Wavefinity
 
-The generated AI Help prompt supplies the current authoritative values for the active request, including:
+The generated AI Design prompt supplies the current authoritative values for the active request, including:
 
 - user description;
 - request ID;

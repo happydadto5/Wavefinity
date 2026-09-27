@@ -13,7 +13,7 @@ from organizer_engine import (
 )
 from ._core import EDITOR_SNAP, Feature, Zone, layout_zone, snapped_zone
 from ._registry import (
-    OPTION_TYPES, OptionDefinition, SettingInteraction, defaults, feature,
+    OPTION_TYPES, OptionDefinition, SIDE_CHOICES, SettingInteraction, defaults, feature,
     option_value, register_setting_interactions, resolved_options,
 )
 #
@@ -249,15 +249,15 @@ def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
     description="Centered lettering on the base or rim, Inlaid or Raised.",
     capabilities=("text",),
     options=(
-        OptionDefinition("Letter height", "cap_height", ""),
-        OptionDefinition("Inlay depth / Raised height", "depth", "0.4"),
-        OptionDefinition("Text", "text", "", "string", False),
-        OptionDefinition("Font", "font", "", "string", False),
-        OptionDefinition("Raised", "raised", False, "boolean", False),
-        OptionDefinition("Quarter turns", "quarter_turns", 0, "integer", False),
-        OptionDefinition("Base or rim", "level", "base", "enum", False),
-        OptionDefinition("Retarget", "retarget", "", "string", False),
-        OptionDefinition("Rim side", "rim_side", "back", "enum", False),
+        OptionDefinition("Letter height", "cap_height", "", minimum=TEXT_CAP_HEIGHT_FLOOR, note="mm; blank = biggest that fits (set text_v2 = true when giving a value)"),
+        OptionDefinition("Inlay depth / Raised height", "depth", "0.4", choices=tuple((f"{value:g}", f"{value:g} mm") for value in TEXT_DEPTH_CHOICES), note="mm; recessed depth or raised height of the lettering"),
+        OptionDefinition("Text", "text", "", "string", False, note="the words to print; required"),
+        OptionDefinition("Font", "font", "", "string", False, legacy=True, note="not a current Designer control; every Text part uses the one built-in font"),
+        OptionDefinition("Raised", "raised", False, "boolean", False, note="true = raised lettering, false = recessed inlay"),
+        OptionDefinition("Quarter turns", "quarter_turns", 0, "integer", False, minimum=0, maximum=3, note="90-degree turns of the lettering (base text only)"),
+        OptionDefinition("Base or rim", "level", "base", "enum", False, choices=(("base", "On the base"), ("rim", "On the rim ledge"))),
+        OptionDefinition("Retarget", "retarget", "", "string", False, internal=True, note="internal editor helper consumed by the app; never set it"),
+        OptionDefinition("Rim side", "rim_side", "back", "enum", False, choices=SIDE_CHOICES, note="only when level = rim"),
     ), order=100,
 )
 def build_text(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:

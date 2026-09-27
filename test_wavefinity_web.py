@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 import os
@@ -116,9 +117,11 @@ class WebApplicationTests(unittest.TestCase):
         )
         self.assertEqual(parts["scoop"]["fields"][0]["type"], "number")
         self.assertIn("item", parts["bore"]["capabilities"])
+        # Options may also carry legal-value metadata (choices/range/note); the key
+        # and type stay exactly as declared.
         self.assertIn(
-            {"key": "angle_towards", "type": "enum"},
-            parts["bore"]["options"],
+            ("angle_towards", "enum"),
+            [(one["key"], one["type"]) for one in parts["bore"]["options"]],
         )
         interactions = catalog["setting_interactions"]
         self.assertTrue(all(rule["feature"] for rule in interactions))
@@ -1859,9 +1862,12 @@ const tick = () => new Promise(r => setImmediate(r));
         # reports fit/feature/draft errors must not replace the last valid
         # resume checkpoint.
         app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        # refreshPreview() adopts its result through adoptPreviewResult() (shared
+        # with AI Help's already-proven candidate), which owns the checkpoint rule.
         start = app_js.index("async function refreshPreview(")
-        end = app_js.index("\nasync function ", start + 1)
-        source = app_js[start:end]
+        self.assertIn("adoptPreviewResult(result,", app_js[start:app_js.index("\nasync function ", start + 1)])
+        start = app_js.index("function adoptPreviewResult(")
+        source = app_js[start:app_js.index("\n}\n", start)]
 
         previews_has_errors_idx = source.index("const previewHasErrors =")
         queue_idx = source.index("SP.queueResumeCheckpoint(")
@@ -2048,6 +2054,310 @@ class Fix20StorageBoxMaterialsTests(unittest.TestCase):
 
 
 
+
+
+class AiHelpBackendTests(unittest.TestCase):
+    """Fix 073: prompt/manifest, candidate proof and repair prompt (no AI provider)."""
+
+    def _space(self):
+        return {"kind": "pegboard", "x": 96.0, "y": 96.0, "z": 80.0, "pegboard_standard": "standard"}
+
+    def test_manifest_covers_every_user_facing_capability_and_round_trips(self):
+        manifest = wavefinity_web.ai_capability_manifest()
+        catalog = catalog_payload()
+        listed = {one["kind"]: one for one in manifest["features"]}
+        visible = {p["kind"] for p in catalog["parts"]
+                   if p["palette_visible"] and "box_modifier" not in p["capabilities"]}
+        self.assertEqual(set(listed), visible)
+        self.assertNotIn("pocket", listed)  # hidden/legacy kinds are never offered
+        for kind, one in listed.items():
+            expected = "recommend_only" if "photo" in one["capabilities"] else "configurable"
+            self.assertEqual(one["ai"], expected, kind)
+        self.assertEqual(listed["nest"]["ai"], "recommend_only")
+        modifiers = {p["kind"] for p in catalog["parts"] if "box_modifier" in p["capabilities"]}
+        self.assertEqual({one["kind"] for one in manifest["box_modifiers"]}, modifiers)
+        # The rule tables are the catalog's own, not a second copy.
+        by_kind = {one["kind"]: one for one in manifest["box_modifiers"]}
+        self.assertEqual(by_kind["side_openings"]["rules"]["side_openings"], catalog["side_openings"])
+        self.assertEqual(by_kind["lid_stacking"]["rules"]["lid_rules"], catalog["lid_rules"])
+        # All three Lid & Stacking configurations have a canonical example.
+        configs = by_kind["lid_stacking"]["example"]
+        self.assertEqual(set(configs), {"stackable_bin", "stackable_lid", "lid_with_handle"})
+        self.assertEqual(configs["stackable_bin"], {"stack": {"mode": "direct"}})
+        self.assertTrue(configs["stackable_lid"]["lid"]["stackable"])
+        self.assertFalse(configs["lid_with_handle"]["lid"]["stackable"])
+        # Legal values, not just keys: every enum has its choices from the registry's
+        # own constants, ranges are declared, and custom-UI (editor=false) options are included.
+        from organizer_inserts import _bore, _text
+        options = {one["kind"]: {o["key"]: o for o in one["options"]}
+                   for one in manifest["features"] if one["ai"] == "configurable"}
+        for kind, table in options.items():
+            for key, option in table.items():
+                self.assertTrue(option["legal_values"], (kind, key))
+                if option["type"] == "enum":
+                    self.assertTrue(option["choices"], (kind, key))
+        self.assertEqual([c["value"] for c in options["bore"]["bore_style"]["choices"]], list(_bore.BORE_STYLES))
+        self.assertEqual([c["value"] for c in options["bore"]["xy_size_mode"]["choices"]], list(_bore.XY_SIZE_MODES))
+        self.assertEqual(options["bore"]["angle"]["maximum"], _bore.BORE_MAX_TILT)
+        self.assertEqual([float(c["value"]) for c in options["text"]["depth"]["choices"]], list(_text.TEXT_DEPTH_CHOICES))
+        self.assertEqual([c["value"] for c in options["text"]["level"]["choices"]], ["base", "rim"])
+        self.assertIn("bore_style", {o["key"] for p in catalog["parts"] if p["kind"] == "bore" for o in p["options"] if "choices" in o})
+        self.assertIn("height_size_mode", options["bore"])  # editor=False option still offered
+        # Every example is legal in the canonical validator.
+        for one in listed.values():
+            if one["ai"] != "configurable":
+                continue
+            design = wavefinity_web._ai_example_base()
+            design["layout"]["features"] = [one["example"]]
+            wavefinity_web.validate_design_payload({"design": design})
+        for one in manifest["box_modifiers"]:
+            blocks = one["example"]
+            for block in ([blocks] if "stackable_bin" not in blocks else blocks.values()):
+                design = wavefinity_web._ai_example_base()
+                design["box"].update(block)
+                wavefinity_web.validate_design_payload({"design": design})
+
+    def test_manifest_describes_every_shared_top_level_feature_field(self):
+        from organizer_inserts import _bore
+        from organizer_inserts._core import ITEM_PROFILES, Item
+        manifest = wavefinity_web.ai_capability_manifest()
+        catalog = catalog_payload()
+        features = {one["kind"]: one for one in manifest["features"] if one["ai"] == "configurable"}
+        for kind, one in features.items():
+            self.assertIn("zone", one["generic_fields"], kind)
+        # Public-control precedence matrix (Fix 073 Correction 3): a capability flag
+        # says a feature HAS this kind of control, not that today's Designer UI
+        # exposes it as this generic top-level field. Exact known exceptions:
+        # Bore moved lean direction to options.angle_towards (top-level `along` is a
+        # legacy fallback); Divider moved quantities entirely to options.count_x/
+        # count_y (top-level `count`/`along` are legacy single-axis compatibility).
+        self.assertNotIn("along", features["bore"]["generic_fields"])
+        self.assertIn("angle_towards", {o["key"] for o in features["bore"]["options"]})
+        self.assertNotIn("count", features["divider"]["generic_fields"])
+        self.assertNotIn("along", features["divider"]["generic_fields"])
+        self.assertEqual({o["key"] for o in features["divider"]["options"]} & {"count_x", "count_y"},
+                         {"count_x", "count_y"})
+        # Every other qty/along/item/alternate holder keeps its ordinary generic field.
+        implied = {"qty": "count", "along": "along", "item": "item", "alternate": "alternate_ends"}
+        for kind, one in features.items():
+            if kind in ("bore", "divider"):
+                continue
+            fields = one["generic_fields"]
+            for capability, field_name in implied.items():
+                self.assertEqual(capability in one["capabilities"], field_name in fields, (kind, field_name))
+        # full_span/wedge are current-UI-unreachable structure, never an AI choice.
+        self.assertNotIn("full_span", features["divider"]["generic_fields"])
+        self.assertNotIn("wedge", features["divider"]["generic_fields"])
+        # Bore offers all six persisted profiles; Cradle never inherits Bore-only shapes.
+        bore_item, cradle_item = features["bore"]["generic_fields"]["item"], features["cradle"]["generic_fields"]["item"]
+        self.assertEqual([p["value"] for p in bore_item["profiles"]], [v for v, _ in ITEM_PROFILES])
+        self.assertEqual(len(bore_item["profiles"]), 6)
+        self.assertEqual([p["value"] for p in cradle_item["profiles"]], ["round"])
+        self.assertNotIn("hex_bit", cradle_item)
+        for value, _label in ITEM_PROFILES:  # the engine accepts exactly the advertised set
+            Item.simple("x", 10.0, 5.0, profile=value)
+        with self.assertRaises(ValueError):
+            Item.simple("x", 10.0, 5.0, profile="triangle")
+        # Fixed hex-bit dimensions come from the Bore constants, and the browser's own
+        # literals (which cannot read them yet) must agree - this is the drift guard.
+        self.assertEqual(bore_item["hex_bit"], _bore.HEX_BIT_FIXED)
+        app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        labels = dict(ITEM_PROFILES)
+        for profile, fixed in _bore.HEX_BIT_FIXED.items():
+            match = re.search(
+                rf'{profile}: \{{ label: "([^"]+)", length: ([\d.]+), diameter: ([\d.]+), clearance: ([\d.]+)', app_js)
+            self.assertIsNotNone(match, profile)
+            self.assertEqual(match.group(1), labels[profile])
+            self.assertEqual([float(v) for v in match.groups()[1:]],
+                             [fixed["length_mm"], fixed["diameter_mm"], fixed["clearance_mm"]])
+        for value in ("round", "hex", "square", "square_axis"):
+            self.assertIn(f'["{value}", "{labels[value]}"]', app_js)
+        self.assertEqual(catalog["item_rules"]["hex_bit"], _bore.HEX_BIT_FIXED)
+        # Count semantics: Auto where the editor has Auto, explicit for Steps.
+        self.assertIn("Auto", features["post"]["generic_fields"]["count"]["null_means"])
+        self.assertIn("not allowed", features["steps"]["generic_fields"]["count"]["null_means"])
+        # Internal serialized helpers are never configurable.
+        internal = {(p["kind"], o["key"]) for p in catalog["parts"] for o in p["options"] if o.get("internal")}
+        self.assertEqual(internal, {("text", "retarget")})
+        for kind, one in features.items():
+            self.assertFalse({(kind, o["key"]) for o in one["options"]} & internal)
+        # Legacy/derived serialized fields exist for round-tripping old designs but are
+        # never advertised as an alternate AI control, on top of the public precedence above.
+        legacy = {(p["kind"], o["key"]) for p in catalog["parts"] for o in p["options"] if o.get("legacy")}
+        self.assertEqual(legacy, {
+            ("post", "count_x"), ("post", "count_y"),
+            ("cradle", "floor_gap"), ("cradle", "rib_thickness"),
+            ("divider", "angle"), ("divider", "reverse_bottom"),
+            ("text", "font"),
+        })
+        for kind, one in features.items():
+            self.assertFalse({(kind, o["key"]) for o in one["options"]} & legacy, kind)
+
+    def test_ai_public_contract_semantic_preflight_rejects_canonically_valid_defects(self):
+        base = wavefinity_web._ai_example_base()
+        base["box"].update({"x": 96.0, "y": 96.0, "z": 60.0})
+
+        def candidate(feature):
+            design = json.loads(json.dumps(base))
+            design["layout"]["features"] = [feature]
+            return design
+
+        rejections = {
+            "cradle_bore_only_profile": candidate({
+                "kind": "cradle", "zone": [-6, -6, 6, 6],
+                "item": {"name": "x", "profile": "hex", "clearance": 0,
+                         "segments": [{"length": 10, "diameter": 5}]},
+            }),
+            "cradle_nonzero_clearance": candidate({
+                "kind": "cradle", "zone": [-6, -6, 6, 6],
+                "item": {"name": "x", "profile": "round", "clearance": 0.4,
+                         "segments": [{"length": 10, "diameter": 5}]},
+            }),
+            "bore_wrong_clearance": candidate({
+                "kind": "bore", "zone": [-8, -8, 8, 8],
+                "item": {"name": "x", "profile": "round", "clearance": 0.4,
+                         "segments": [{"length": 10, "diameter": 5}]},
+            }),
+            "hex_bit_wrong_dimensions": candidate({
+                "kind": "bore", "zone": [-8, -8, 8, 8],
+                "item": {"name": "x", "profile": "hex_bit_short", "clearance": 0.25,
+                         "segments": [{"length": 99, "diameter": 6.35}]},
+            }),
+            "hex_bit_nonzero_lean": candidate({
+                "kind": "bore", "zone": [-8, -8, 8, 8],
+                "item": {"name": "x", "profile": "hex_bit_short", "clearance": 0.25,
+                         "segments": [{"length": 25.0, "diameter": 6.35}]},
+                "options": {"angle": 10},
+            }),
+            "steps_options_count_conflict": candidate({
+                "kind": "steps", "zone": [-8, -8, 8, 8], "count": 3, "options": {"count": 5},
+            }),
+            "post_legacy_grid_override": candidate({
+                "kind": "post", "zone": [-8, -8, 8, 8], "count": 2, "along": "x",
+                "options": {"count_x": 2, "count_y": 1},
+            }),
+            "divider_legacy_top_level_count": candidate({
+                "kind": "divider", "zone": [-8, -8, 8, 8], "count": 2, "along": "x",
+                "full_span": True, "wedge": True, "options": {},
+            }),
+        }
+        for label, design in rejections.items():
+            with self.assertRaises(ValueError, msg=label) as caught:
+                wavefinity_web.ai_candidate_payload({"design": design})
+            self.assertNotIn("Traceback", str(caught.exception), label)
+        # The exact fixed hex-bit preset is accepted, upright, and preserved unmodified.
+        good = candidate({
+            "kind": "bore", "zone": [-8, -8, 8, 8],
+            "item": {"name": "x", "profile": "hex_bit_short", "clearance": 0.25,
+                     "segments": [{"length": 25.0, "diameter": 6.35}]},
+            "options": {"angle": 0},
+        })
+        accepted = wavefinity_web.ai_candidate_payload({"design": good})
+        self.assertEqual(accepted["problems"], [])
+
+    def test_prompt_contract_context_and_privacy(self):
+        design = wavefinity_web.default_design()
+        first = wavefinity_web.ai_prompt_payload(
+            {"description": "  A tray for three screwdrivers  ", "design": design, "space": self._space(),
+             "inventory_id": "B7", "path": "C:\\Users\\someone\\secret"})
+        second = wavefinity_web.ai_prompt_payload(
+            {"description": "A tray for three screwdrivers", "design": design, "space": self._space()})
+        self.assertNotEqual(first["request_id"], second["request_id"])
+        self.assertEqual(first["context_fingerprint"], second["context_fingerprint"])
+        prompt = first["prompt"]
+        for needle in ("A tray for three screwdrivers", first["request_id"], first["context_fingerprint"],
+                       "wavefinity-ai-design-v1", "recommend_only", "box.pegboard", "ASK the person"):
+            self.assertIn(needle, prompt)
+        for private in ("B7", "someone", str(Path(__file__).resolve().parent)):
+            self.assertNotIn(private, prompt)
+        # Old layout bounds are a reference for the current size only, and Pegboard minimums pass through.
+        self.assertIn("current_baseline_layout_bounds_mm", prompt)
+        self.assertIn("RETURN", prompt)
+        self.assertIn('"min_z_mm":48.0', wavefinity_web.ai_prompt_payload({
+            "description": "x", "design": design,
+            "space": {**self._space(), "min_z": 48, "min_x": 0}})["prompt"])
+        drawer = wavefinity_web.ai_prompt_payload({
+            "description": "x", "design": design, "space": {"kind": "drawer", "x": 96, "y": 96, "z": 60, "min_z": 48}})
+        self.assertNotIn("min_z_mm", drawer["prompt"])
+        moved = json.loads(json.dumps(design))
+        moved["box"]["z"] = 48.0
+        third = wavefinity_web.ai_prompt_payload({"description": "x", "design": moved, "space": self._space()})
+        self.assertNotEqual(third["context_fingerprint"], first["context_fingerprint"])
+        for bad in ({"description": "  ", "design": design},
+                    {"description": "x", "design": {"design_kind": "base_trim"}},
+                    {"description": "x", "design": {"box": {"b4b": {"enabled": True}}}}):
+            with self.assertRaises(ValueError):
+                wavefinity_web.ai_prompt_payload(bad)
+
+    def test_public_reference_link_is_optional_supplemental_and_never_fetched(self):
+        design = wavefinity_web.default_design()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RENDER_GIT_COMMIT", None)
+            stable = wavefinity_web.ai_feature_reference_url()
+            self.assertEqual(
+                stable, "https://raw.githubusercontent.com/happydadto5/Wavefinity/main/ai-features.md")
+            os.environ["RENDER_GIT_COMMIT"] = "not-a-real-sha"
+            self.assertEqual(wavefinity_web.ai_feature_reference_url(), stable)
+            full_sha = "a" * 40
+            os.environ["RENDER_GIT_COMMIT"] = full_sha
+            pinned = wavefinity_web.ai_feature_reference_url()
+            self.assertEqual(
+                pinned, f"https://raw.githubusercontent.com/happydadto5/Wavefinity/{full_sha}/ai-features.md")
+            os.environ.pop("RENDER_GIT_COMMIT", None)
+            prompt = wavefinity_web.ai_prompt_payload(
+                {"description": "x", "design": design, "space": {"kind": "drawer", "x": 80, "y": 80, "z": 50}})["prompt"]
+            self.assertIn(stable, prompt)
+            self.assertIn("the data above", prompt)
+            self.assertIn("only if you can fetch", prompt.lower())
+            repair = wavefinity_web.ai_repair_prompt_payload(
+                {"request_id": "r", "context_fingerprint": "f", "response": "{}", "error": "bad"})["prompt"]
+            self.assertIn(stable, repair)
+        # Never an outbound call: no urlopen/requests/http.client symbol is even imported.
+        self.assertNotIn("requests", dir(wavefinity_web))
+        source = inspect.getsource(wavefinity_web.ai_feature_reference_url)
+        for forbidden in ("urlopen", "requests.", "http.client", "subprocess", "socket"):
+            self.assertNotIn(forbidden, source)
+
+    def test_candidate_is_proven_in_real_geometry_without_side_effects(self):
+        design = wavefinity_web.default_design()
+        before = json.dumps(design, sort_keys=True)
+        registry = dict(wavefinity_web._PREVIEW_REQUESTS)
+        good = wavefinity_web.ai_candidate_payload(
+            {"design": design, "client_id": "ai-lane", "generation": 1})
+        self.assertEqual(good["problems"], [])
+        self.assertTrue(good["preview"]["fits"])
+        self.assertEqual(good["design"], good["preview"]["design"])
+        self.assertEqual(json.dumps(design, sort_keys=True), before)
+        # Only its own lane was touched, so it can never supersede a Designer preview.
+        self.assertEqual({k for k in wavefinity_web._PREVIEW_REQUESTS} - set(registry),
+                         {("ai-lane", "preview")})
+        # A geometry failure is reported, not applied.
+        post = wavefinity_web.default_feature_payload({"design": design, "kind": "post"})["feature"]
+        post["options"]["diameter"] = 60.0
+        broken = json.loads(json.dumps(design))
+        broken["layout"]["features"] = [post]
+        self.assertTrue(wavefinity_web.ai_candidate_payload({"design": broken})["problems"])
+        # Structural, media-derived and unreadable designs are refused with a safe reason.
+        nest = json.loads(json.dumps(design))
+        nest["layout"]["features"] = [{"kind": "nest", "zone": [-4, -4, 4, 4]}]
+        for bad in (nest, {"version": 1}, {"design_kind": "base_trim"}, "not a design"):
+            with self.assertRaises(ValueError) as caught:
+                wavefinity_web.ai_candidate_payload({"design": bad})
+            self.assertNotIn("Traceback", str(caught.exception))
+
+    def test_repair_prompt_is_exact_and_safe(self):
+        made = wavefinity_web.ai_repair_prompt_payload({
+            "request_id": "wf-ai-1", "context_fingerprint": "abc123",
+            "response": '{"schema": "oops"}',
+            "error": "Could not read C:\\Users\\me\\Wavefinity\\x.json\nTraceback (most recent call last): boom",
+        })["prompt"]
+        for needle in ("wavefinity-ai-design-v1", "wf-ai-1", "abc123", '{"schema": "oops"}',
+                       "exactly ONE corrected JSON object"):
+            self.assertIn(needle, made)
+        for private in ("Users", "Traceback", "boom"):
+            self.assertNotIn(private, made)
+        with self.assertRaises(ValueError):
+            wavefinity_web.ai_repair_prompt_payload({"request_id": "", "context_fingerprint": "x", "response": "y"})
 
 
 if __name__ == "__main__":

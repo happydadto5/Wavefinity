@@ -19,6 +19,9 @@ Defaults = Callable[[BoxSpec, "Feature", float], dict[str, object]]
 FEATURE_BUILDERS: dict[str, Builder] = {}
 FEATURE_DEFAULTS: dict[str, Defaults] = {}
 
+# The four sides of a bin, shared by every option that names one.
+SIDE_CHOICES = tuple((side, side.title()) for side in ("front", "back", "left", "right"))
+
 
 @dataclass(frozen=True)
 class OptionDefinition:
@@ -29,6 +32,21 @@ class OptionDefinition:
     default: object = ""
     value_type: str = "number"
     editor: bool = True
+    # Legal-value metadata the AI Help manifest (and any editor) reads instead of
+    # keeping its own copy. ``choices`` are (value, label) pairs for an enum;
+    # ``minimum``/``maximum``/``step`` bound a number; ``note`` states any rule that
+    # depends on the bin or zone and so cannot be a fixed number.
+    choices: tuple[tuple[str, str], ...] = ()
+    minimum: float | None = None
+    maximum: float | None = None
+    step: float | None = None
+    note: str = ""
+    # Serialized only as an editor/transport marker; never offered to the AI.
+    internal: bool = False
+    # A real schema field with no current Designer control - superseded by another
+    # field, or from a retired UI path. It still round-trips in saved designs, but
+    # is never offered to the AI as a choice (see Fix 073 Correction 3).
+    legacy: bool = False
 
 
 @dataclass(frozen=True)
@@ -45,6 +63,8 @@ class FeatureDefinition:
     order: int = 100
     max_instances: int | None = None
     palette_visible: bool = True
+    # Item profiles this holder accepts (persisted values); empty when it has no item.
+    item_profiles: tuple[str, ...] = ()
     builder: Builder | None = None
     default_resolver: Defaults | None = None
 
@@ -95,6 +115,7 @@ def feature(
     order: int | None = None,
     max_instances: int | None = None,
     palette_visible: bool | None = None,
+    item_profiles: tuple[str, ...] | None = None,
 ) -> Callable[[Builder], Builder]:
     if max_instances is not None and max_instances < 1:
         raise ValueError("max_instances must be at least 1")
@@ -120,6 +141,8 @@ def feature(
                            else max_instances),
             palette_visible=(current.palette_visible if palette_visible is None
                              else palette_visible),
+            item_profiles=(current.item_profiles if item_profiles is None
+                           else tuple(item_profiles)),
             builder=function,
         )
         return function

@@ -1040,6 +1040,12 @@ dialog:not([open]) { display: none; }
 .support-layout-dialog p { margin: 0 0 16px; color: var(--muted); }
 .support-layout-dialog .button-row { justify-content: end; }
 #draft-switch-dialog { width: min(440px, calc(100vw - 32px)); }
+.ai-help-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
+.ai-help-dialog .ai-help-field { display: grid; gap: 5px; margin: 0 0 10px; color: var(--ink); font-weight: 600; }
+.ai-help-dialog textarea { width: 100%; box-sizing: border-box; font: inherit; font-weight: 400; resize: vertical; }
+.ai-help-dialog .ai-help-row { margin: 0 0 12px; }
+.ai-help-dialog .ai-help-status { margin: 0 0 12px; line-height: 1.4; color: var(--ink); }
+.ai-help-dialog .ai-help-status.error { color: var(--danger); }
 #draft-switch-dialog p { line-height: 1.45; }
 #draft-switch-dialog .field-error { color: var(--danger); margin: 0 0 16px; }
 
