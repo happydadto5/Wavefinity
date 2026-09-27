@@ -1399,11 +1399,12 @@ function renderCatalog() {
         return;
       }
       const oldMode = state.design.layout.mode;
+      let committedDraft = false;
       try {
         // Preserve the exact visible edit before converting the saved layout.
         // A debounced draft must not disappear just because the user switches
         // print mode quickly after changing a field.
-        await commitVisibleDraft();
+        committedDraft = await commitVisibleDraft({ previewAfterCommit: false });
         const previousDesign = clone(state.design);
         const previousSelected = state.selected;
         const result = await api("/api/layout/mode", { design: state.design, mode: modes.value });
@@ -1421,7 +1422,9 @@ function renderCatalog() {
           clearDraftSelection();
           refreshPreview();
         }
+        committedDraft = false;
       } catch (error) {
+        if (committedDraft) refreshPreview();
         modes.value = oldMode;
         toast(error.message, true);
       } finally {
@@ -5926,9 +5929,13 @@ function renderDraftFields() {
 async function duplicateText() {
   if (state.draft?.kind !== "text" || !Number.isInteger(state.selected)) return;
   let mutationStarted = false;
+  let committedDraft = false;
   try {
-    await commitVisibleDraft();
-    if (!beginDesignMutation()) return;
+    committedDraft = await commitVisibleDraft({ previewAfterCommit: false });
+    if (!beginDesignMutation()) {
+      if (committedDraft) refreshPreview();
+      return;
+    }
     mutationStarted = true;
     const before = clone(state.design);
     const result = await api("/api/feature/duplicate", { design: state.design, index: state.selected });
@@ -5942,8 +5949,10 @@ async function duplicateText() {
     state.draftTouched = false;
     state.draftAutoCommit = true;
     syncForm(); renderDraftFields(); renderPlaced(); await refreshPreview();
+    committedDraft = false;
     toast("Text duplicated on a free rim side.");
   } catch (error) {
+    if (committedDraft) refreshPreview();
     toast(error.message, true, 6500);
   } finally { if (mutationStarted) finishDesignMutation(); }
 }
@@ -6311,11 +6320,14 @@ async function duplicateNest() {
   let previousDesign = null;
   let previousSelected = null;
   let mutationStarted = false;
+  let committedDraft = false;
   try {
-    await commitVisibleDraft();
+    committedDraft = await commitVisibleDraft({ previewAfterCommit: false });
     const index = state.selected;
-    if (!Number.isInteger(index) || !state.design.layout.features[index]) return;
-    if (!beginDesignMutation()) return;
+    if (!Number.isInteger(index) || !state.design.layout.features[index] || !beginDesignMutation()) {
+      if (committedDraft) refreshPreview();
+      return;
+    }
     mutationStarted = true;
     previousDesign = clone(state.design);
     previousSelected = index;
@@ -6329,6 +6341,7 @@ async function duplicateNest() {
     state.draftKind = "nest"; state.draftIsNew = false; state.draftTouched = false;
     state.draftAutoCommit = true; state.nestOutlineEditing = false;
     syncForm(); renderDraftFields(); renderPlaced(); await refreshPreview();
+    committedDraft = false;
     toast("Photo Nest duplicated.");
   } catch (error) {
     if (previousDesign && Number.isInteger(previousSelected)) {
@@ -6340,6 +6353,7 @@ async function duplicateNest() {
       state.draftAutoCommit = true; state.nestOutlineEditing = false;
       renderDraftFields(); renderPlaced(); await refreshPreview();
     }
+    if (committedDraft && !previousDesign) refreshPreview();
     toast(error.message, true, 6500);
   } finally { if (mutationStarted) finishDesignMutation(); }
 }
