@@ -158,6 +158,7 @@ from organizer_spaces import (
     storage_startup_state,
 )
 from organizer_app import (
+    LABEL_POSITIONS,
     APP_DIR,
     DEFAULT_SAMPLE_BOXES,
     _customization_zones,
@@ -933,6 +934,19 @@ def _first_open_position(
     raise ValueError("there is no open floor area large enough for that interior part")
 
 
+def _option_payload(option) -> dict[str, Any]:
+    """One option's key/type plus whatever legal-value metadata it declares."""
+    entry: dict[str, Any] = {"key": option.key, "type": option.value_type}
+    if option.choices:
+        entry["choices"] = [{"value": value, "label": label} for value, label in option.choices]
+    for name in ("minimum", "maximum", "step"):
+        if getattr(option, name) is not None:
+            entry[name] = getattr(option, name)
+    if option.note:
+        entry["note"] = option.note
+    return entry
+
+
 def catalog_payload() -> dict[str, Any]:
     parts = [
         {
@@ -951,10 +965,7 @@ def catalog_payload() -> dict[str, Any]:
                 }
                 for option in definition.options if option.editor
             ],
-            "options": [
-                {"key": option.key, "type": option.value_type}
-                for option in definition.options
-            ],
+            "options": [_option_payload(option) for option in definition.options],
             "capabilities": list(definition.capabilities),
             "max_instances": definition.max_instances,
             "palette_visible": definition.palette_visible,
@@ -3453,8 +3464,10 @@ AI_MEDIA_REASON = (
 )
 AI_MODIFIER_BLOCKS = (
     ("lid_stacking", "Lid & Stacking",
-     "Choose ONE of: an ordinary lid (box.lid), a stackable lid (box.lid with "
-     "stackable=true) or a stackable bin (box.stack = {\"mode\": \"direct\"}). "
+     "Choose ONE of three configurations (see example): Stackable Bin "
+     "(box.stack = {\"mode\": \"direct\"}, no box.lid), Stackable Lid (box.lid with "
+     "stackable=true; its label style is forced to flush) or Lid with Handle "
+     "(box.lid with stackable=false, handle_type/size/position). "
      "Never combine a lid with direct stacking.",
      ("box.lid", "box.stack")),
     ("inside_handles", "Inside Grip",
@@ -3477,6 +3490,23 @@ def _ai_example_base() -> dict[str, Any]:
     return design
 
 
+def _ai_legal_values(option: dict[str, Any]) -> str:
+    """One readable line of what an option may hold, from its own metadata."""
+    kind = option["type"]
+    if "choices" in option:
+        quote = "" if kind in ("number", "integer") else '"'
+        return "one of: " + ", ".join(f'{quote}{one["value"]}{quote}' for one in option["choices"])
+    if kind == "boolean":
+        return "true or false"
+    if kind in ("number", "integer"):
+        low, high = option.get("minimum"), option.get("maximum")
+        span = (f"{low:g} to {high:g}" if low is not None and high is not None
+                else f"at least {low:g}" if low is not None
+                else f"at most {high:g}" if high is not None else "any number")
+        return ("whole number " if kind == "integer" else "number ") + span
+    return {"string": "text", "json": "JSON value", "enum": "see note"}.get(kind, kind)
+
+
 def _ai_modifier_examples() -> dict[str, dict[str, Any]]:
     """One canonical example block per user-facing modifier.
 
@@ -3484,7 +3514,8 @@ def _ai_modifier_examples() -> dict[str, dict[str, Any]]:
     design uses, so an example can never drift from the real serializer.
     """
     raw_blocks = {
-        "lid": {"lid": {"enabled": True}},
+        "lid_with_handle": {"lid": {"enabled": True}},
+        "stackable_lid": {"lid": {"enabled": True, "stackable": True}},
         "stackable_bin": {"stack": {"mode": "direct"}},
         "inside_handles": {"lift_grabbers": {
             "enabled": True, "size": "medium", "location": "sides"}},
@@ -3527,14 +3558,24 @@ def ai_capability_manifest() -> dict[str, Any]:
             entry["reason"] = AI_MEDIA_REASON
         else:
             entry["ai"] = "configurable"
-            entry["fields"] = part["fields"]
-            entry["option_keys"] = [option["key"] for option in part["options"]]
-            entry["example"] = default_feature_payload(
-                {"design": base, "kind": part["kind"]})["feature"]
+            starter = default_feature_payload({"design": base, "kind": part["kind"]})
+            labels = {one["key"]: one["label"] for one in part["fields"]}
+            entry["options"] = [
+                {**option, **({"label": labels[option["key"]]} if option["key"] in labels else {}),
+                 "legal_values": _ai_legal_values(option)}
+                for option in part["options"]
+            ]
+            # What Wavefinity fills in for a blank option in the example bin.
+            entry["resolved_defaults"] = starter["resolved_options"]
+            entry["example"] = starter["feature"]
         features.append(entry)
     examples = _ai_modifier_examples()
     modifier_examples = {
-        "lid_stacking": {"ordinary_lid": examples["lid"], "stackable_bin": examples["stackable_bin"]},
+        "lid_stacking": {
+            "stackable_bin": examples["stackable_bin"],
+            "stackable_lid": examples["stackable_lid"],
+            "lid_with_handle": examples["lid_with_handle"],
+        },
         "inside_handles": examples["inside_handles"],
         "side_openings": examples["side_openings"],
         "edge_mount": examples["edge_mount"],
@@ -3568,6 +3609,7 @@ def ai_capability_manifest() -> dict[str, Any]:
             "base_rules": catalog["base_rules"],
             "scoop_rules": catalog["scoop_rules"],
             "layout_modes": catalog["modes"],
+            "label_positions": list(LABEL_POSITIONS),
             "design_fields": {
                 "box.x / box.y": "footprint, whole multiples of base_unit_mm",
                 "box.z": "height in whole millimetres",
@@ -3645,6 +3687,11 @@ def _ai_space_context(raw: Any) -> dict[str, Any]:
         space["trim_size"] = raw["trim_size"][:24]
     if raw["kind"] == "pegboard" and isinstance(raw.get("pegboard_standard"), str):
         space["pegboard_standard"] = raw["pegboard_standard"][:24]
+    # The browser owns the Pegboard product minimums (the same ones New Bin uses).
+    for key in ("min_x", "min_z"):
+        value = raw.get(key)
+        if raw["kind"] == "pegboard" and isinstance(value, (int, float))                 and not isinstance(value, bool) and math.isfinite(value) and value > 0:
+            space[f"{key}_mm"] = round(float(value), 3)
     return space
 
 
@@ -3687,7 +3734,7 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "- All values in the design are millimetres. Convert nothing silently; ask if unsure.",
         "- You may use any legal part, option or modifier in the CAPABILITY MANIFEST that best solves the request.",
         "- Parts marked recommend_only (for example Photo Nest) may be suggested to the person but must NEVER appear in the returned design.",
-        "- Interior part zones are [x0,y0,x1,y1] in mm from the bin centre and must stay inside current_layout_bounds_mm. Adjust the example zones, counts and sizes to the real item.",
+        "- Interior part zones are [x0,y0,x1,y1] in mm from the bin centre. current_baseline_layout_bounds_mm is only the interior of the CURRENT bin size. If you change box.x/box.y/box.z, the legal interior changes with it (each axis keeps about interior_margin_mm of shell in total): every zone you return must fit inside the interior of the design you RETURN, not the old one. Adjust the example zones, counts and sizes to the real item.",
         "- Keep every field listed in space_controlled_fields exactly as it is in the current design.",
         "",
         "=== WAVEFINITY CONTEXT (JSON) ===",
@@ -3727,7 +3774,8 @@ def ai_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
     context = {
         **space,
         "space_controlled_fields": _ai_controlled_fields(space),
-        "current_layout_bounds_mm": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
+        "current_baseline_layout_bounds_mm": [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
+        "interior_margin_mm": [round(box.x - bounds.width, 3), round(box.y - bounds.depth, 3)],
         "base_unit_mm": BASE_UNIT,
     }
     prompt = _ai_prompt_text(

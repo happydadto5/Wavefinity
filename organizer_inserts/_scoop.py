@@ -132,7 +132,7 @@ def scoop_defaults(box: BoxSpec, one: Feature, base_z: float) -> dict[str, float
 @feature(
     "scoop", title="Curved Scoop", display="Curved Scoop — retrieval ramp",
     description="A curved retrieval ramp for easy access to small parts.",
-    options=(OptionDefinition("Depth", "depth", f"{SCOOP_DEFAULT_DEPTH:g}"),),
+    options=(OptionDefinition("Depth", "depth", f"{SCOOP_DEFAULT_DEPTH:g}", minimum=SCOOP_MIN_DEPTH, maximum=SCOOP_MAX_DEPTH, note="percent of the scoop height that is cut away"),),
     order=90,
 )
 def build_scoop(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:

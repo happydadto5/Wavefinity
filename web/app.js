@@ -601,6 +601,13 @@ function ordinaryBinMinimumHeight() {
   );
 }
 
+// Smallest bin (mm) the product allows on a Pegboard Space: Standard needs a
+// minimum height only; SKÅDIS needs a minimum width and height. New Bin and AI Help
+// both read this, so there is one table.
+function pegboardProductMinimums(standard) {
+  return standard === "standard" ? { x: 0, z: 48 } : { x: 56, z: 40 };
+}
+
 // `remembered` is this Space's bin-preference snapshot (see
 // spaceBinPreferences). Its X/Y/Z seed the bin, then the Space's own capacity
 // and height rules clamp them - a remembered value that no longer fits is
@@ -663,11 +670,9 @@ function applySpaceSizingDefaults(design, remembered = null) {
     );
   } else if (kind === "pegboard") {
     if (haveRememberedZ) design.box.z = normalizeBinDimension("z", rememberedZ, rememberedZ);
-    if (space.pegboard_standard === "standard") design.box.z = Math.max(48, design.box.z);
-    else {
-      design.box.x = Math.max(56, design.box.x);
-      design.box.z = Math.max(40, design.box.z);
-    }
+    const minimum = pegboardProductMinimums(space.pegboard_standard);
+    design.box.x = Math.max(minimum.x, design.box.x);
+    design.box.z = Math.max(minimum.z, design.box.z);
     design.box.pegboard = {
       enabled: true,
       standard: space.pegboard_standard,
@@ -1041,10 +1046,16 @@ async function designerGenerateInventoryRow(rowId, expected = null, { skipFlush 
 const AI_SCHEMA = "wavefinity-ai-design-v1";
 const aiHelp = { session: null, busy: false, generation: 0, failure: null, recognition: null };
 
+// `stale`: the answer belongs to an older prompt/context - needs a fresh prompt.
+// `operational`: the answer was fine but Wavefinity itself failed (service, save,
+// apply) - the AI cannot fix that, so it is never offered a repair.
+// `applied`: the design was already installed when that failure happened.
 class AiHelpError extends Error {
-  constructor(message, { stale = false } = {}) {
+  constructor(message, { stale = false, operational = false, applied = false } = {}) {
     super(message);
     this.stale = stale;
+    this.operational = operational;
+    this.applied = applied;
   }
 }
 
@@ -1052,10 +1063,16 @@ class AiHelpError extends Error {
 function aiSpaceContext() {
   const space = state.folderMode === "space" ? state.activeSpace : null;
   if (!space) return null;
-  return {
+  const context = {
     kind: space.kind, x: space.x, y: space.y, z: space.z,
     trim_size: space.trim_size, pegboard_standard: space.pegboard_standard,
   };
+  if (space.kind === "pegboard") {
+    const minimum = pegboardProductMinimums(space.pegboard_standard);
+    if (minimum.x > 0) context.min_x = minimum.x;
+    context.min_z = minimum.z;
+  }
+  return context;
 }
 
 // Who owns this bin: the pieces of context that never change just because a
@@ -1069,11 +1086,10 @@ function aiIdentityKey() {
   });
 }
 
-// Exact context a prompt was written for. The bin name does not change what an
-// AI should design, so it is left out; every other visible design change counts.
+// Exact context a prompt was written for: everything the person can see, the bin
+// name included, so a name typed after the prompt was written is never overwritten.
 function aiContextKey() {
   const design = visibleDesignSnapshot();
-  delete design.part_name;
   return JSON.stringify({
     identity: aiIdentityKey(),
     structural: isStructuralDesign(design),
@@ -1091,11 +1107,13 @@ function aiCompositionEmpty(design = visibleDesignSnapshot()) {
   if ((design.layout?.features || []).length) return false;
   if (String(design.label || "").trim()) return false;
   if (design.scoop) return false;
-  if (box.lid?.enabled) return false;
+  const typed = value => String(value ?? "").trim() !== "";
+  const lid = box.lid || {};
+  if (lid.enabled || typed(lid.label_text) || (lid.division_labels || []).some(typed)) return false;
   if (box.stack?.mode && box.stack.mode !== "none") return false;
   if (box.lift_grabbers?.enabled) return false;
   if (box.side_openings?.enabled) return false;
-  if (edgeMountActive(design)) return false;
+  if (edgeMountActive(design) || typed(box.edge_mount?.label_text)) return false;
   return true;
 }
 
@@ -1159,6 +1177,11 @@ function aiSpaceViolation(design, baseline) {
     if (!box.pegboard?.enabled || box.pegboard.standard !== space.pegboard_standard ||
         mount !== JSON.stringify(baseline?.box?.pegboard || null)) {
       return "This Space's Pegboard mounting must be kept exactly as it was.";
+    }
+    const minimum = pegboardProductMinimums(space.pegboard_standard);
+    if (box.x < minimum.x - 1e-6 || box.z < minimum.z - 1e-6) {
+      const needs = [minimum.x > 0 ? `${fmt(minimum.x)} mm wide` : "", `${fmt(minimum.z)} mm tall`].filter(Boolean);
+      return `A bin on this Pegboard Space must be at least ${needs.join(" and ")}.`;
     }
   } else if (mount !== JSON.stringify(baseline?.box?.pegboard || null)) {
     return "Pegboard mounting belongs to a Pegboard Space and cannot be changed here.";
@@ -1224,22 +1247,29 @@ async function aiGeneratePrompt() {
   aiSetBusy(true);
   aiSetStatus("Writing the prompt…");
   try {
-    const baseline = visibleDesignSnapshot();
-    if (isStructuralDesign(baseline)) throw new AiHelpError("AI Help designs ordinary bins only.");
-    const contextKey = aiContextKey();
-    const result = await api("/api/ai/prompt", { description, design: baseline, space: aiSpaceContext() });
-    if (aiContextKey() !== contextKey) {
-      throw new AiHelpError("Your design changed while the prompt was being written. Try again.");
-    }
-    aiHelp.session = {
-      request_id: result.request_id,
-      context_fingerprint: result.context_fingerprint,
-      contextKey,
-      baseline,
-      reuse: aiCompositionEmpty(baseline),
-    };
-    aiShowPrompt(result.prompt);
-    aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
+    // Unsaved work on an interior part is saved into the design first, through the
+    // same owner every other bin transition uses, so the prompt - and the session
+    // bound to it - describe exactly what the person sees now.
+    const done = await withDeferredDraftSwitch(async () => {
+      const baseline = visibleDesignSnapshot();
+      if (isStructuralDesign(baseline)) throw new AiHelpError("AI Help designs ordinary bins only.");
+      const contextKey = aiContextKey();
+      const result = await api("/api/ai/prompt", { description, design: baseline, space: aiSpaceContext() });
+      if (aiContextKey() !== contextKey) {
+        throw new AiHelpError("Your design changed while the prompt was being written. Try again.");
+      }
+      aiHelp.session = {
+        request_id: result.request_id,
+        context_fingerprint: result.context_fingerprint,
+        contextKey,
+        baseline,
+        reuse: aiCompositionEmpty(baseline),
+      };
+      aiShowPrompt(result.prompt);
+      aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
+      return true;
+    }, false);
+    if (!done) aiSetStatus("Finish or discard the part you are editing, then generate the prompt again.", { error: true });
   } catch (error) {
     aiSetStatus(error.message, { error: true });
   } finally {
@@ -1250,9 +1280,17 @@ async function aiGeneratePrompt() {
 // Steps 3-7 of the transaction: canonical design, structural rejection, the real
 // preview/geometry proof and the Space's rules. Nothing here touches state.design.
 async function aiProveCandidate(envelope, session) {
-  const result = await api("/api/ai/candidate", {
-    design: envelope.design, client_id: `${previewClientId}-ai`, generation: ++aiHelp.generation,
-  });
+  let result;
+  try {
+    result = await api("/api/ai/candidate", {
+      design: envelope.design, client_id: `${previewClientId}-ai`, generation: ++aiHelp.generation,
+    });
+  } catch (error) {
+    // 400 means Wavefinity judged the answer invalid; anything else is Wavefinity failing.
+    if (error.status === 400) throw new AiHelpError(error.message);
+    throw new AiHelpError(`Wavefinity could not check the answer just now (${error.message}). Nothing was changed; try again.`,
+      { operational: true });
+  }
   aiCheckSession(envelope, session);
   if (result.superseded) throw new AiHelpError("Another check was started. Try Process AI Response again.");
   if (result.problems.length) {
@@ -1267,8 +1305,10 @@ async function aiProveCandidate(envelope, session) {
 // the same owner refreshPreview() uses - no second identical geometry build.
 // Returns true on success, false when nothing was changed.
 async function aiInstallCandidate(candidate, session) {
-  // Saving the current bin first may legitimately give it a row ID, so only the
-  // very first check includes the bin's own identity.
+  // The one expected identity change: the pre-install save of a nonblank typed-Space
+  // bin may legitimately give that bin a name and row ID. So the first check compares
+  // everything including the bin's own ID, and the re-check after that save compares
+  // only the folder/Space identity. Nothing else is ever ignored.
   const identity = ({ inventory = false } = {}) => {
     const now = JSON.parse(aiIdentityKey()), then = JSON.parse(JSON.parse(session.contextKey).identity);
     if (!inventory) { delete now.inventoryId; delete then.inventoryId; }
@@ -1295,14 +1335,21 @@ async function aiInstallCandidate(candidate, session) {
       }
       identity();
     }
-    if (!beginDesignMutation()) return false;
+    if (!beginDesignMutation()) {
+      aiSetStatus("Wavefinity is finishing another change. Try again in a moment.", { error: true });
+      return false;
+    }
+    let installed = false;
     try {
       state.design = clone(candidate.design);
+      installed = true;
       state.lastOrdinaryDesign = clone(state.design);
       resetNestPhotoSession();
       if (!session.reuse) {
-        state.cleanDesign = state.folderMode === "space" && typedSpaceOrdinaryBin()
-          ? clone(state.design) : clone(freshDesignForCurrentFolder());
+        // The equivalent New Bin baseline (the unedited starter), never the finished
+        // candidate: persisting the AI design then updates the Space's remembered
+        // bin/part defaults exactly as the same edits made by hand would.
+        state.cleanDesign = clone(freshDesignForCurrentFolder());
         state.designInventoryId = null;
       }
       state.spaceStarterPreviewPending = false;
@@ -1326,7 +1373,11 @@ async function aiInstallCandidate(candidate, session) {
       return true;
     } catch (error) {
       if (error instanceof AiHelpError) throw error;
-      throw new AiHelpError(`The AI design was not saved: ${error.message}`);
+      // The answer was valid; this is Wavefinity failing to apply or save it.
+      throw new AiHelpError(installed
+        ? `The AI design is valid and is open in the Designer, but applying or saving it hit a problem: ${error.message}`
+        : `The AI design is valid, but Wavefinity could not apply it: ${error.message}. Nothing was changed.`,
+      { operational: true, applied: installed });
     } finally {
       finishDesignMutation();
     }
@@ -1350,10 +1401,15 @@ async function aiProcessResponse() {
       toast("AI design applied.");
     }
   } catch (error) {
-    // Nothing changed. A stale answer needs a fresh prompt; anything else can be repaired.
-    const repairable = !error.stale && Boolean(session);
+    // A stale answer needs a fresh prompt; a Wavefinity (service/save/apply) failure is
+    // not the AI's fault; only a defect in the answer itself can be repaired.
+    const known = error instanceof AiHelpError;
+    const operational = !known || error.operational;
+    if (error.applied) aiHelp.session = null;
+    const repairable = known && !error.stale && !operational && Boolean(session);
     if (repairable) aiHelp.failure = { response: text, message: error.message, session };
-    aiSetStatus(error.message, { error: true, repair: repairable });
+    aiSetStatus(known ? error.message
+      : `Wavefinity hit a problem (${error.message}). Your answer is still here.`, { error: true, repair: repairable });
   } finally {
     aiSetBusy(false);
   }
@@ -1722,7 +1778,11 @@ async function api(path, payload = null) {
   } catch (_error) {
     throw new Error(`The local Wavefinity service returned ${response.status}.`);
   }
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(data.error || `Request failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 

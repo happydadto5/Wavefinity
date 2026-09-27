@@ -19,6 +19,9 @@ Defaults = Callable[[BoxSpec, "Feature", float], dict[str, object]]
 FEATURE_BUILDERS: dict[str, Builder] = {}
 FEATURE_DEFAULTS: dict[str, Defaults] = {}
 
+# The four sides of a bin, shared by every option that names one.
+SIDE_CHOICES = tuple((side, side.title()) for side in ("front", "back", "left", "right"))
+
 
 @dataclass(frozen=True)
 class OptionDefinition:
@@ -29,6 +32,15 @@ class OptionDefinition:
     default: object = ""
     value_type: str = "number"
     editor: bool = True
+    # Legal-value metadata the AI Help manifest (and any editor) reads instead of
+    # keeping its own copy. ``choices`` are (value, label) pairs for an enum;
+    # ``minimum``/``maximum``/``step`` bound a number; ``note`` states any rule that
+    # depends on the bin or zone and so cannot be a fixed number.
+    choices: tuple[tuple[str, str], ...] = ()
+    minimum: float | None = None
+    maximum: float | None = None
+    step: float | None = None
+    note: str = ""
 
 
 @dataclass(frozen=True)

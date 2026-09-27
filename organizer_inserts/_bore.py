@@ -20,7 +20,7 @@ from organizer_geometry import _extrude_polygon, difference, union
 
 from ._core import Feature, Zone, _fit_count, _need_item, connector_keep_out, feature_touches_wall, layout_zone
 from ._registry import (
-    OptionDefinition, SettingInteraction, defaults, feature,
+    OptionDefinition, SIDE_CHOICES, SettingInteraction, defaults, feature,
     register_setting_interactions, resolved_options,
 )
 
@@ -977,16 +977,22 @@ def bore_tool_clearance_zone(
     description="Small pockets for your stuff of vary sizes/shapes.",
     capabilities=("size", "along", "item"),
     options=(
-        OptionDefinition("Style", "bore_style", "base_straight", "enum"),
-        OptionDefinition("Height", "height", ""),
-        OptionDefinition("Hole depth", "depth", ""),
-        OptionDefinition("Wall", "wall", "1.6"),
-        OptionDefinition("X quantity", "columns", "", "integer"),
-        OptionDefinition("Y quantity", "rows", "", "integer"),
-        OptionDefinition("Angle °", "angle", "0"),
-        OptionDefinition("Angle towards", "angle_towards", "front", "enum", False),
-        OptionDefinition("Width / Length sizing", "xy_size_mode", "manual", "enum", False),
-        OptionDefinition("Height sizing", "height_size_mode", "manual", "enum", False),
+        OptionDefinition("Style", "bore_style", "base_straight", "enum", choices=(
+            ("base_straight", "Base - Straight"), ("base_wavy", "Base - Wavy Walls"),
+            ("walls_straight", "Walls Only - Straight"), ("walls_wavy", "Walls Only - Wavy")),
+            note="Walls Only and Base - Wavy Walls stand upright, so their angle must be 0"),
+        OptionDefinition("Height", "height", "", minimum=0.1, note="mm; blank = worked out from the bin"),
+        OptionDefinition("Hole depth", "depth", "", minimum=0.1, note="mm; no more than the height"),
+        OptionDefinition("Wall", "wall", "1.6", minimum=0.1, note="mm wall around each hole"),
+        OptionDefinition("X quantity", "columns", "", "integer", minimum=1, note="whole number; blank = as many as fit"),
+        OptionDefinition("Y quantity", "rows", "", "integer", minimum=1, note="whole number; blank = as many as fit"),
+        OptionDefinition("Angle °", "angle", "0", minimum=0.0, maximum=BORE_MAX_TILT, note="degrees off vertical; only Base - Straight may lean"),
+        OptionDefinition("Angle towards", "angle_towards", "front", "enum", False, choices=SIDE_CHOICES, note="direction of the lean; only meaningful when angle > 0"),
+        OptionDefinition("Width / Length sizing", "xy_size_mode", "manual", "enum", False, choices=(
+            ("manual", "Manual"), ("bore_to_bin", "Bore to bin"), ("bin_to_bore", "Bin to bore")),
+            note="Walls Only styles allow only manual or bin_to_bore"),
+        OptionDefinition("Height sizing", "height_size_mode", "manual", "enum", False, choices=(
+            ("manual", "Manual"), ("bore_to_bin", "Bore to bin"), ("bin_to_bore", "Bin to bore"))),
     ), order=30,
 )
 def build_bore(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:

@@ -116,9 +116,11 @@ class WebApplicationTests(unittest.TestCase):
         )
         self.assertEqual(parts["scoop"]["fields"][0]["type"], "number")
         self.assertIn("item", parts["bore"]["capabilities"])
+        # Options may also carry legal-value metadata (choices/range/note); the key
+        # and type stay exactly as declared.
         self.assertIn(
-            {"key": "angle_towards", "type": "enum"},
-            parts["bore"]["options"],
+            ("angle_towards", "enum"),
+            [(one["key"], one["type"]) for one in parts["bore"]["options"]],
         )
         interactions = catalog["setting_interactions"]
         self.assertTrue(all(rule["feature"] for rule in interactions))
@@ -2077,6 +2079,29 @@ class AiHelpBackendTests(unittest.TestCase):
         by_kind = {one["kind"]: one for one in manifest["box_modifiers"]}
         self.assertEqual(by_kind["side_openings"]["rules"]["side_openings"], catalog["side_openings"])
         self.assertEqual(by_kind["lid_stacking"]["rules"]["lid_rules"], catalog["lid_rules"])
+        # All three Lid & Stacking configurations have a canonical example.
+        configs = by_kind["lid_stacking"]["example"]
+        self.assertEqual(set(configs), {"stackable_bin", "stackable_lid", "lid_with_handle"})
+        self.assertEqual(configs["stackable_bin"], {"stack": {"mode": "direct"}})
+        self.assertTrue(configs["stackable_lid"]["lid"]["stackable"])
+        self.assertFalse(configs["lid_with_handle"]["lid"]["stackable"])
+        # Legal values, not just keys: every enum has its choices from the registry's
+        # own constants, ranges are declared, and custom-UI (editor=false) options are included.
+        from organizer_inserts import _bore, _text
+        options = {one["kind"]: {o["key"]: o for o in one["options"]}
+                   for one in manifest["features"] if one["ai"] == "configurable"}
+        for kind, table in options.items():
+            for key, option in table.items():
+                self.assertTrue(option["legal_values"], (kind, key))
+                if option["type"] == "enum":
+                    self.assertTrue(option["choices"], (kind, key))
+        self.assertEqual([c["value"] for c in options["bore"]["bore_style"]["choices"]], list(_bore.BORE_STYLES))
+        self.assertEqual([c["value"] for c in options["bore"]["xy_size_mode"]["choices"]], list(_bore.XY_SIZE_MODES))
+        self.assertEqual(options["bore"]["angle"]["maximum"], _bore.BORE_MAX_TILT)
+        self.assertEqual([float(c["value"]) for c in options["text"]["depth"]["choices"]], list(_text.TEXT_DEPTH_CHOICES))
+        self.assertEqual([c["value"] for c in options["text"]["level"]["choices"]], ["base", "rim"])
+        self.assertIn("bore_style", {o["key"] for p in catalog["parts"] if p["kind"] == "bore" for o in p["options"] if "choices" in o})
+        self.assertIn("height_size_mode", options["bore"])  # editor=False option still offered
         # Every example is legal in the canonical validator.
         for one in listed.values():
             if one["ai"] != "configurable":
@@ -2086,7 +2111,7 @@ class AiHelpBackendTests(unittest.TestCase):
             wavefinity_web.validate_design_payload({"design": design})
         for one in manifest["box_modifiers"]:
             blocks = one["example"]
-            for block in ([blocks] if "ordinary_lid" not in blocks else blocks.values()):
+            for block in ([blocks] if "stackable_bin" not in blocks else blocks.values()):
                 design = wavefinity_web._ai_example_base()
                 design["box"].update(block)
                 wavefinity_web.validate_design_payload({"design": design})
@@ -2106,6 +2131,15 @@ class AiHelpBackendTests(unittest.TestCase):
             self.assertIn(needle, prompt)
         for private in ("B7", "someone", str(Path(__file__).resolve().parent)):
             self.assertNotIn(private, prompt)
+        # Old layout bounds are a reference for the current size only, and Pegboard minimums pass through.
+        self.assertIn("current_baseline_layout_bounds_mm", prompt)
+        self.assertIn("RETURN", prompt)
+        self.assertIn('"min_z_mm":48.0', wavefinity_web.ai_prompt_payload({
+            "description": "x", "design": design,
+            "space": {**self._space(), "min_z": 48, "min_x": 0}})["prompt"])
+        drawer = wavefinity_web.ai_prompt_payload({
+            "description": "x", "design": design, "space": {"kind": "drawer", "x": 96, "y": 96, "z": 60, "min_z": 48}})
+        self.assertNotIn("min_z_mm", drawer["prompt"])
         moved = json.loads(json.dumps(design))
         moved["box"]["z"] = 48.0
         third = wavefinity_web.ai_prompt_payload({"description": "x", "design": moved, "space": self._space()})

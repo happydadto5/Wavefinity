@@ -100,13 +100,13 @@ def cradle_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, fl
     description="A half-circle notch that holds a tool on its side.",
     capabilities=("qty", "along", "item", "alternate"),
     options=(
-        OptionDefinition("Spacing", "spacing", "0"),
+        OptionDefinition("Spacing", "spacing", "0", minimum=0.0, note="mm of clear air between neighbouring troughs; 0 = touching"),
         # Legacy: still tolerated in saved data, but the geometry always uses the
         # fixed CRADLE_FLOOR_GAP, so it is not an editor control.
-        OptionDefinition("Floor gap", "floor_gap", "2", editor=False),
-        OptionDefinition("% from ends", "end_margin", "10"),
-        OptionDefinition("Offset from center", "run_offset", "0", editor=False),
-        OptionDefinition("Rib thickness", "rib_thickness", "", editor=False),
+        OptionDefinition("Floor gap", "floor_gap", "2", editor=False, minimum=CRADLE_MIN_FLOOR_GAP, note="mm between the bin floor and the held item"),
+        OptionDefinition("% from ends", "end_margin", "10", minimum=0.0, maximum=CRADLE_ALTERNATE_END_MARGIN_MAX * 100.0, note="percent of the run kept clear at each end (used with alternate ends)"),
+        OptionDefinition("Offset from center", "run_offset", "0", editor=False, minimum=-CRADLE_RUN_OFFSET_MAX * 100.0, maximum=CRADLE_RUN_OFFSET_MAX * 100.0, note="percent shift of the row along its run"),
+        OptionDefinition("Rib thickness", "rib_thickness", "", editor=False, maximum=CRADLE_RIB_MAX, note="mm; blank = worked out from the held item"),
     ), order=10,
 )
 def build_cradle(box: BoxSpec, spec_feature: Feature, base_z: float) -> list[trimesh.Trimesh]:
