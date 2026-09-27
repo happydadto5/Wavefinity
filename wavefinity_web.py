@@ -140,7 +140,8 @@ from organizer_inserts import (
     snapped_zone,
     text_of,
 )
-from organizer_inserts._core import feature_touches_wall
+from organizer_inserts._bore import BORE_CLEARANCE, HEX_BIT_FIXED
+from organizer_inserts._core import ITEM_CLEARANCE, ITEM_PROFILES, feature_touches_wall
 from photo_nest import photo_outline_from_data, retrace_outline_from_rectified
 from bambu_handoff import is_bambu_studio_executable, stage_bambu_inputs
 from organizer_drawer import drawer_routes, stack_part_height
@@ -944,6 +945,8 @@ def _option_payload(option) -> dict[str, Any]:
             entry[name] = getattr(option, name)
     if option.note:
         entry["note"] = option.note
+    if option.internal:
+        entry["internal"] = True
     return entry
 
 
@@ -966,6 +969,10 @@ def catalog_payload() -> dict[str, Any]:
                 for option in definition.options if option.editor
             ],
             "options": [_option_payload(option) for option in definition.options],
+            "item_profiles": [
+                {"value": value, "label": dict(ITEM_PROFILES)[value]}
+                for value in definition.item_profiles
+            ],
             "capabilities": list(definition.capabilities),
             "max_instances": definition.max_instances,
             "palette_visible": definition.palette_visible,
@@ -1014,6 +1021,12 @@ def catalog_payload() -> dict[str, Any]:
             "ordinary_bin_min_height_mm": ORDINARY_BIN_MIN_HEIGHT_MM,
         },
         "pegboard_rules": pegboard_catalog(),
+        "item_rules": {
+            "profiles": [{"value": value, "label": label} for value, label in ITEM_PROFILES],
+            "default_clearance_mm": ITEM_CLEARANCE,
+            "bore_clearance_mm": BORE_CLEARANCE,
+            "hex_bit": HEX_BIT_FIXED,
+        },
         "modes": [
             {"value": "fused", "label": "Fused into box"},
             {"value": "separate", "label": "Removable insert"},
@@ -3507,6 +3520,96 @@ def _ai_legal_values(option: dict[str, Any]) -> str:
     return {"string": "text", "json": "JSON value", "enum": "see note"}.get(kind, kind)
 
 
+def _ai_generic_fields(part: dict[str, Any], starter: dict[str, Any],
+                       item_rules: dict[str, Any]) -> dict[str, Any]:
+    """The shared top-level feature fields (outside ``options``) this holder uses.
+
+    Keyed by the holder's own capabilities, so an AI only sees controls that apply
+    to it. A capability flag alone says nothing about legal values; this does.
+    """
+    caps, kind = set(part["capabilities"]), part["kind"]
+    zone_note = ("Text's zone is derived from its lettering: copy the example's zone and do not tune it."
+                 if kind == "text" else
+                 "Width is x1-x0 and depth is y1-y0; make it large enough for the count and item size.")
+    fields: dict[str, Any] = {
+        "zone": {
+            "type": "array of 4 numbers", "form": "[x0, y0, x1, y1]",
+            "rules": "millimetres from the bin centre; x1 > x0 and y1 > y0; must lie entirely inside "
+                     "the interior of the design you RETURN (not the old size). " + zone_note,
+            "example": starter["zone"],
+        },
+    }
+    if "size" in caps:
+        fields["size"] = {
+            "rules": "This part's footprint is its zone: width = x1-x0, depth = y1-y0. There is no separate "
+                     "size field, so choose a zone big enough for the requested quantity/shape.",
+        }
+    if "qty" in caps:
+        auto = kind != "steps"
+        fields["count"] = {
+            "type": "whole number or null", "minimum": 1,
+            "null_means": ("Auto: as many as fit the zone" if auto else
+                           "not allowed for Steps: give the number of steps (default 3)"),
+            "example": starter["count"],
+            **({"note": "Dividers are normally set with options.count_x / options.count_y; leave count null."}
+               if kind == "divider" else
+               {"note": "Posts may instead use options.count_x / options.count_y for a grid."}
+               if kind == "post" else {}),
+        }
+    if "along" in caps:
+        fields["along"] = {
+            "type": "text", "default": "x",
+            "values": [
+                {"value": "x", "meaning": "the part runs along the bin's X axis (its width, left to right)"},
+                {"value": "y", "meaning": "the part runs along the bin's Y axis (its depth, front to back)"},
+            ],
+            **({"note": "A Bore's lean direction is options.angle_towards when present; along is the older control."}
+               if kind == "bore" else {}),
+        }
+    if "alternate" in caps:
+        fields["alternate_ends"] = {
+            "type": "boolean", "default": False,
+            "meaning": "false = every item faces the same way (Aligned); true = every second item is turned "
+                       "end-for-end so neighbouring handles and shafts interleave (Alternate ends)",
+        }
+    if "item" in caps:
+        profiles = [dict(one) for one in part["item_profiles"]]
+        item: dict[str, Any] = {
+            "type": "object",
+            "shape": {"name": "non-empty text",
+                      "profile": "one of the profile values below",
+                      "clearance": "number, mm, 0 or more (slack around the item)",
+                      "segments": "list of at least one {length, diameter}; both positive numbers in mm"},
+            "profiles": profiles,
+            "default_clearance_mm": item_rules["default_clearance_mm"],
+            "example": starter["item"],
+        }
+        if kind == "bore":
+            item["rules"] = (
+                "Use one segment {length, diameter}; length is the item's length and diameter its width. "
+                f"Set clearance to exactly {item_rules['bore_clearance_mm']:g} mm. "
+                "Profile 'hex_bit_short' / 'hex_bit_long' are fixed 1/4 inch hex-bit presets: the item MUST be "
+                "exactly the hex_bit entry below for that profile (single segment, its length_mm and diameter_mm, its clearance_mm), "
+                "and the bore stands straight up, so leave options.angle at 0 and omit options.angle_towards. "
+                "Its hole depth (options.depth) defaults to the entry's hole_depth_mm.")
+            item["hex_bit"] = item_rules["hex_bit"]
+        elif kind == "cradle":
+            item["rules"] = ("A cradle is a half-round notch: profile is always 'round', clearance 0. Give one "
+                             "segment {length, diameter} for the tool laid on its side.")
+        fields["item"] = item
+    if kind == "divider":
+        fields["full_span"] = {
+            "type": "boolean", "default": True,
+            "meaning": "true = the divider runs edge to edge hugging the bin's wall; false = it fills only its zone",
+        }
+        fields["wedge"] = {
+            "type": "boolean", "default": True,
+            "meaning": "when the divider leans: true = wedge (thick at the floor, tapering up); false = uniform-"
+                       "thickness sloped wall. Meaningless for an upright divider.",
+        }
+    return fields
+
+
 def _ai_modifier_examples() -> dict[str, dict[str, Any]]:
     """One canonical example block per user-facing modifier.
 
@@ -3563,8 +3666,9 @@ def ai_capability_manifest() -> dict[str, Any]:
             entry["options"] = [
                 {**option, **({"label": labels[option["key"]]} if option["key"] in labels else {}),
                  "legal_values": _ai_legal_values(option)}
-                for option in part["options"]
+                for option in part["options"] if not option.get("internal")
             ]
+            entry["generic_fields"] = _ai_generic_fields(part, starter["feature"], catalog["item_rules"])
             # What Wavefinity fills in for a blank option in the example bin.
             entry["resolved_defaults"] = starter["resolved_options"]
             entry["example"] = starter["feature"]

@@ -41,6 +41,8 @@ class OptionDefinition:
     maximum: float | None = None
     step: float | None = None
     note: str = ""
+    # Serialized only as an editor/transport marker; never offered to the AI.
+    internal: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,8 @@ class FeatureDefinition:
     order: int = 100
     max_instances: int | None = None
     palette_visible: bool = True
+    # Item profiles this holder accepts (persisted values); empty when it has no item.
+    item_profiles: tuple[str, ...] = ()
     builder: Builder | None = None
     default_resolver: Defaults | None = None
 
@@ -107,6 +111,7 @@ def feature(
     order: int | None = None,
     max_instances: int | None = None,
     palette_visible: bool | None = None,
+    item_profiles: tuple[str, ...] | None = None,
 ) -> Callable[[Builder], Builder]:
     if max_instances is not None and max_instances < 1:
         raise ValueError("max_instances must be at least 1")
@@ -132,6 +137,8 @@ def feature(
                            else max_instances),
             palette_visible=(current.palette_visible if palette_visible is None
                              else palette_visible),
+            item_profiles=(current.item_profiles if item_profiles is None
+                           else tuple(item_profiles)),
             builder=function,
         )
         return function

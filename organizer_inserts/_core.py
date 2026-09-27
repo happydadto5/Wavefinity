@@ -13,6 +13,12 @@ from organizer_engine import BoxSpec, ConnectorSpec
 
 
 ITEM_CLEARANCE = 0.4       # slack around a stored object, on the diameter
+# Every persisted item profile and its user-facing name. Which of them a holder
+# offers is that holder's own choice (Bore: all six; Cradle: always "round").
+ITEM_PROFILES = (
+    ("round", "Round"), ("hex", "Hex"), ("square", "Diamond"), ("square_axis", "Square"),
+    ("hex_bit_short", "Hex bit – short"), ("hex_bit_long", "Hex bit – long"),
+)
 BASE_PLATE = 0.6           # floor of a standalone insert
 INSERT_CLEARANCE = 0.2     # slack around a standalone insert, per side
 MIN_FEATURE_GAP = 0.8      # material between two features
@@ -55,9 +61,7 @@ class Item:
             raise ValueError("an item needs a name")
         if not self.segments:
             raise ValueError(f"{self.name}: an item needs at least one segment")
-        if self.profile not in {
-            "round", "hex", "square", "square_axis", "hex_bit_short", "hex_bit_long"
-        }:
+        if self.profile not in {value for value, _label in ITEM_PROFILES}:
             raise ValueError(f"{self.name}: unknown profile {self.profile!r}")
         if not math.isfinite(self.clearance) or self.clearance < 0.0:
             raise ValueError(f"{self.name}: clearance must be a non-negative finite number")

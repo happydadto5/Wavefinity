@@ -256,7 +256,7 @@ def text_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, floa
         OptionDefinition("Raised", "raised", False, "boolean", False, note="true = raised lettering, false = recessed inlay"),
         OptionDefinition("Quarter turns", "quarter_turns", 0, "integer", False, minimum=0, maximum=3, note="90-degree turns of the lettering (base text only)"),
         OptionDefinition("Base or rim", "level", "base", "enum", False, choices=(("base", "On the base"), ("rim", "On the rim ledge"))),
-        OptionDefinition("Retarget", "retarget", "", "string", False, note="internal editor helper; leave blank"),
+        OptionDefinition("Retarget", "retarget", "", "string", False, internal=True, note="internal editor helper consumed by the app; never set it"),
         OptionDefinition("Rim side", "rim_side", "back", "enum", False, choices=SIDE_CHOICES, note="only when level = rim"),
     ), order=100,
 )

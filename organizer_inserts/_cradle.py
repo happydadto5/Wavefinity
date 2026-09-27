@@ -99,6 +99,7 @@ def cradle_defaults(box: BoxSpec, one: "Feature", base_z: float) -> dict[str, fl
     "cradle", title="Cradle", display="Cradle — tools laid down",
     description="A half-circle notch that holds a tool on its side.",
     capabilities=("qty", "along", "item", "alternate"),
+    item_profiles=("round",),  # a cradle is a half-round notch; it never offers Bore's shapes
     options=(
         OptionDefinition("Spacing", "spacing", "0", minimum=0.0, note="mm of clear air between neighbouring troughs; 0 = touching"),
         # Legacy: still tolerated in saved data, but the geometry always uses the

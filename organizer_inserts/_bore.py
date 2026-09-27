@@ -18,7 +18,10 @@ from organizer_engine import (
 )
 from organizer_geometry import _extrude_polygon, difference, union
 
-from ._core import Feature, Zone, _fit_count, _need_item, connector_keep_out, feature_touches_wall, layout_zone
+from ._core import (
+    ITEM_PROFILES, Feature, Zone, _fit_count, _need_item, connector_keep_out,
+    feature_touches_wall, layout_zone,
+)
 from ._registry import (
     OptionDefinition, SIDE_CHOICES, SettingInteraction, defaults, feature,
     register_setting_interactions, resolved_options,
@@ -36,6 +39,16 @@ HEX_BIT_HOLD = {"hex_bit_short": 12.0, "hex_bit_long": 16.0}
 HEX_BIT_LENGTH = {
     "hex_bit_short": HEX_BIT_SHORT_LENGTH,
     "hex_bit_long": HEX_BIT_LONG_LENGTH,
+}
+# A Bore accepts every item profile. The two hex-bit profiles are fixed presets:
+# the item is exactly this size with this fit, and the hole stands upright.
+BORE_ITEM_PROFILES = tuple(value for value, _label in ITEM_PROFILES)
+HEX_BIT_FIXED = {
+    profile: {
+        "length_mm": HEX_BIT_LENGTH[profile], "diameter_mm": HEX_BIT_FLATS,
+        "clearance_mm": HEX_BIT_CLEARANCE, "hole_depth_mm": HEX_BIT_HOLD[profile],
+    }
+    for profile in HEX_BIT_HOLD
 }
 BORE_MOUTH_CHAMFER = 0.6  # 45-degree lead-in at each hole mouth
 WALL_ONLY_FOOT = 0.5
@@ -976,6 +989,7 @@ def bore_tool_clearance_zone(
     "bore", title="Bore", display="Bore — upright tools",
     description="Small pockets for your stuff of vary sizes/shapes.",
     capabilities=("size", "along", "item"),
+    item_profiles=BORE_ITEM_PROFILES,
     options=(
         OptionDefinition("Style", "bore_style", "base_straight", "enum", choices=(
             ("base_straight", "Base - Straight"), ("base_wavy", "Base - Wavy Walls"),

@@ -1077,7 +1077,7 @@ The prompt contains:
 - the user's object description;
 - current bin context;
 - current typed-Space constraints when applicable;
-- an authoritative capability manifest of current palette-visible parts/options, including the actual legal choices, ranges and defaults for every option (even ones edited through custom controls);
+- an authoritative capability manifest of current palette-visible parts/options, including the actual legal choices, ranges and defaults for every option (even ones edited through custom controls), plus each part's shared controls: footprint zone, quantity (and what Auto means), run direction, alternate ends, and the stored item's shape, length, diameter and fit (Bore offers all six shapes including the fixed hex-bit sizes; Cradle is always round);
 - legal modifier families, with a canonical example of each Lid & Stacking configuration (Stackable Bin, Stackable Lid, Lid with Handle);
 - important compatibility rules;
 - the current bin's interior bounds as a reference only: if the AI changes the bin size, every part must fit the interior of the design it returns;

@@ -2116,6 +2116,54 @@ class AiHelpBackendTests(unittest.TestCase):
                 design["box"].update(block)
                 wavefinity_web.validate_design_payload({"design": design})
 
+    def test_manifest_describes_every_shared_top_level_feature_field(self):
+        from organizer_inserts import _bore
+        from organizer_inserts._core import ITEM_PROFILES, Item
+        manifest = wavefinity_web.ai_capability_manifest()
+        catalog = catalog_payload()
+        features = {one["kind"]: one for one in manifest["features"] if one["ai"] == "configurable"}
+        implied = {"qty": "count", "along": "along", "item": "item", "alternate": "alternate_ends", "size": "size"}
+        for kind, one in features.items():
+            fields = one["generic_fields"]
+            self.assertIn("zone", fields, kind)
+            for capability, field_name in implied.items():
+                # A capability flag alone is not enough: the matching field contract must exist,
+                # and must not appear on a holder that lacks the capability.
+                self.assertEqual(capability in one["capabilities"], field_name in fields, (kind, field_name))
+        # Bore offers all six persisted profiles; Cradle never inherits Bore-only shapes.
+        bore_item, cradle_item = features["bore"]["generic_fields"]["item"], features["cradle"]["generic_fields"]["item"]
+        self.assertEqual([p["value"] for p in bore_item["profiles"]], [v for v, _ in ITEM_PROFILES])
+        self.assertEqual(len(bore_item["profiles"]), 6)
+        self.assertEqual([p["value"] for p in cradle_item["profiles"]], ["round"])
+        self.assertNotIn("hex_bit", cradle_item)
+        for value, _label in ITEM_PROFILES:  # the engine accepts exactly the advertised set
+            Item.simple("x", 10.0, 5.0, profile=value)
+        with self.assertRaises(ValueError):
+            Item.simple("x", 10.0, 5.0, profile="triangle")
+        # Fixed hex-bit dimensions come from the Bore constants, and the browser's own
+        # literals (which cannot read them yet) must agree - this is the drift guard.
+        self.assertEqual(bore_item["hex_bit"], _bore.HEX_BIT_FIXED)
+        app_js = (Path(__file__).resolve().parent / "web" / "app.js").read_text(encoding="utf-8")
+        labels = dict(ITEM_PROFILES)
+        for profile, fixed in _bore.HEX_BIT_FIXED.items():
+            match = re.search(
+                rf'{profile}: \{{ label: "([^"]+)", length: ([\d.]+), diameter: ([\d.]+), clearance: ([\d.]+)', app_js)
+            self.assertIsNotNone(match, profile)
+            self.assertEqual(match.group(1), labels[profile])
+            self.assertEqual([float(v) for v in match.groups()[1:]],
+                             [fixed["length_mm"], fixed["diameter_mm"], fixed["clearance_mm"]])
+        for value in ("round", "hex", "square", "square_axis"):
+            self.assertIn(f'["{value}", "{labels[value]}"]', app_js)
+        self.assertEqual(catalog["item_rules"]["hex_bit"], _bore.HEX_BIT_FIXED)
+        # Count semantics: Auto where the editor has Auto, explicit for Steps.
+        self.assertIn("Auto", features["post"]["generic_fields"]["count"]["null_means"])
+        self.assertIn("not allowed", features["steps"]["generic_fields"]["count"]["null_means"])
+        # Internal serialized helpers are never configurable.
+        internal = {(p["kind"], o["key"]) for p in catalog["parts"] for o in p["options"] if o.get("internal")}
+        self.assertEqual(internal, {("text", "retarget")})
+        for kind, one in features.items():
+            self.assertFalse({(kind, o["key"]) for o in one["options"]} & internal)
+
     def test_prompt_contract_context_and_privacy(self):
         design = wavefinity_web.default_design()
         first = wavefinity_web.ai_prompt_payload(
