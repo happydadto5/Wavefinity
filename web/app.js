@@ -1053,7 +1053,8 @@ const AI_SCHEMA = "wavefinity-ai-design-v1";
 // `generatedFor`: the trimmed description the current prompt/session was
 // generated from - Generate Prompt stays disabled while the live description
 // still equals it (Fix 078).
-const aiHelp = { session: null, busy: false, generation: 0, failure: null, recognition: null, generatedFor: null };
+const aiHelp = { session: null, busy: false, generation: 0, failure: null, recognition: null,
+  generatedFor: null, openIdentityKey: null };
 
 function aiTypedSpaceActive() {
   return state.folderMode === "space" && typeof DL !== "undefined" && DL.active && Boolean(DL.layout);
@@ -1070,7 +1071,7 @@ function aiRecentDescriptions() {
 // match to the top instead of duplicating it; keeps at most 10, newest first.
 // A save failure here must never invalidate the prompt/session already
 // established - it is reported as a separate, non-blocking warning.
-function aiRecordRecentDescription(description) {
+async function aiRecordRecentDescription(description) {
   if (!aiTypedSpaceActive()) return;
   try {
     const trimmed = description.trim();
@@ -1080,6 +1081,7 @@ function aiRecordRecentDescription(description) {
       DL.layout.settings.ai_design_recent_descriptions = [trimmed, ...kept].slice(0, 10);
     }, { history: false });
     aiRenderRecentDescriptions();
+    if (!(await DL.save())) throw new Error("Recent descriptions were not saved");
   } catch (_error) {
     toast("The prompt is ready, but its description could not be saved to Recent descriptions.", true, 6000);
   }
@@ -1100,20 +1102,21 @@ function aiRenderRecentDescriptions() {
 }
 
 // Wavefinity, not the outside AI, owns final bin-name uniqueness (Fix 078):
-// trimmed, case-insensitive comparison, one trailing " (N)" suffix stripped
-// before renumbering, first free `Name (N)`. Mirrors (generalizes) the
+// trimmed, case-insensitive comparison. Keep an exact free requested name;
+// only on collision strip one trailing " (N)" and find the first free suffix.
+// Mirrors (generalizes) the
 // existing Inventory duplicate-name convention in
 // organizer_inventory.py::_duplicate_name(), so there is one suffix rule.
 function aiResolveCandidateName(candidateName, { excludeCurrent }) {
   const requested = String(candidateName || "").trim() || "Bin";
-  const root = requested.replace(/ \(\d+\)$/, "").trim() || "Bin";
   const rows = aiTypedSpaceActive() ? (DL.bins || []) : [];
   const currentId = state.designInventoryId;
   const taken = new Set(
     rows.filter(one => !(excludeCurrent && one.id === currentId))
       .map(one => String(one.name || "").trim().toLowerCase())
   );
-  if (!taken.has(root.toLowerCase())) return root;
+  if (!taken.has(requested.toLowerCase())) return requested;
+  const root = requested.replace(/ \(\d+\)$/, "").trim() || "Bin";
   let number = 2;
   while (taken.has(`${root} (${number})`.toLowerCase())) number += 1;
   return `${root} (${number})`;
@@ -1321,6 +1324,10 @@ async function aiCopyText(text, area) {
 
 async function aiGeneratePrompt() {
   if (aiHelp.busy) return;
+  if (aiHelp.openIdentityKey && aiIdentityKey() !== aiHelp.openIdentityKey) {
+    aiSetStatus("The open bin or Space changed. Close AI Design and open it again for the current bin.", { error: true });
+    return;
+  }
   const description = $("#ai-help-description").value.trim();
   if (!description) {
     aiSetStatus("Describe the object first.", { error: true });
@@ -1355,9 +1362,9 @@ async function aiGeneratePrompt() {
         space,
       };
       aiHelp.generatedFor = description;
-      aiRecordRecentDescription(description);
       aiShowPrompt(result.prompt);
       aiSetStatus("Prompt ready. Copy it into your AI, answer its questions, then paste its final answer below.");
+      await aiRecordRecentDescription(description);
       return true;
     }, false);
     if (!done) aiSetStatus("Finish or discard the part you are editing, then generate the prompt again.", { error: true });
@@ -1515,6 +1522,11 @@ async function aiProcessResponse(mode) {
     // not the AI's fault; only a defect in the answer itself can be repaired.
     const known = error instanceof AiHelpError;
     const operational = !known || error.operational;
+    if (error.stale) {
+      aiHelp.session = null;
+      aiHelp.generatedFor = null;
+      aiUpdateGenerateAvailability();
+    }
     if (error.applied) aiHelp.session = null;
     const repairable = known && !error.stale && !operational && Boolean(session);
     if (repairable) aiHelp.failure = { response: text, message: error.message, session };
@@ -1596,6 +1608,7 @@ function aiResetDialog() {
   aiHelp.session = null;
   aiHelp.failure = null;
   aiHelp.generatedFor = null;
+  aiHelp.openIdentityKey = aiIdentityKey();
   aiHelp.recognition?.stop();
   aiSetCopyState("Copy Prompt");
   aiSetStatus("");
@@ -6526,6 +6539,10 @@ function renderDraftFields() {
   const photoInput = $("#nest-photo-input", $("#draft-fields"));
   if (photoInput) photoInput.addEventListener("change", uploadNestPhoto);
   $$('[data-draft]', $("#draft-fields")).forEach(input => {
+    // A Bore angle/direction is a committed transaction. Raw typing stays in
+    // the control until change; growth is proved before the draft is touched.
+    if (state.draft?.kind === "bore" &&
+        ["option:angle", "option:angle_towards"].includes(input.dataset.draft)) return;
     input.addEventListener(input.tagName === "SELECT" ? "change" : "input", updateDraftFromFields);
   });
   if (activeDraft) {
@@ -6648,68 +6665,100 @@ function renderDraftFields() {
   if (state.draft?.kind === "bore") {
     const fields = $("#draft-fields");
     const angleField = $('[data-draft="option:angle"]', fields);
-    // A second "change" listener (blur/Enter) alongside the generic "input"
-    // one: lets updateDraftFromFields() tell a raw keystroke apart from a
-    // committed value, so the dependent Angle towards control only redraws
-    // on commit, never mid-keystroke (Fix 078).
-    if (angleField) angleField.addEventListener("change", updateDraftFromFields);
-    // A committed Bore angle or Angle towards change that would outgrow the
-    // bin asks before mutating anything (Fix 078). The container-level pair
-    // below is wired exactly once (#draft-fields survives every re-render):
-    // the capture-phase listener snapshots state before the field's own
-    // "change" handler runs; the bubble-phase one runs after it.
-    if (fields && !fields.dataset.boreGrowthWired) {
-      fields.dataset.boreGrowthWired = "1";
-      let boreGrowthSnapshot = null;
-      const isGrowthField = event => {
-        const key = event.target?.dataset?.draft;
-        return (key === "option:angle" || key === "option:angle_towards") && state.draft?.kind === "bore";
-      };
-      fields.addEventListener("change", event => {
-        if (!isGrowthField(event)) return;
-        boreGrowthSnapshot = { draft: clone(state.draft), box: clone(state.design.box) };
-      }, true);
-      fields.addEventListener("change", async event => {
-        if (!isGrowthField(event) || !boreGrowthSnapshot) return;
-        const snapshot = boreGrowthSnapshot;
-        boreGrowthSnapshot = null;
-        await confirmBoreAngleGrowth(snapshot.draft, snapshot.box);
-      });
-    }
+    const directionField = $('[data-draft="option:angle_towards"]', fields);
+    if (angleField) angleField.addEventListener("change", commitBoreAngleChange);
+    if (directionField) directionField.addEventListener("change", commitBoreAngleChange);
   }
 }
 
-// A committed Bore-angle or angle-direction change that already fits commits
-// with no dialog. One that would outgrow the bin asks first and reuses
-// autoExpandBin's own "smallest legal grid fit" (Fix 078); Cancel restores
-// the prior angle, direction, zone and bin exactly.
-async function confirmBoreAngleGrowth(previousDraft, previousBox) {
-  if (state.draft?.kind !== "bore" || !state.design) return;
-  const [insideX, insideY] = binInsideExtent(state.design.box);
-  const zone = state.draft.zone;
-  const fits = (zone[2] - zone[0]) <= insideX + 1e-6 && (zone[3] - zone[1]) <= insideY + 1e-6;
-  if (fits) return;
-  const revert = async () => {
-    state.draft = previousDraft;
-    state.design.box = previousBox;
-    renderDraftFields();
-    renderPlaced();
-    await refreshPreview();
-  };
+// Probe the same authoritative layout-expansion owner used for the final
+// resize, with a cloned candidate. Until OK there is no draft/history/save or
+// preview mutation; Cancel only restores the control's displayed value.
+async function commitBoreAngleChange(event) {
+  const input = event.currentTarget;
+  if (state.draft?.kind !== "bore" || !state.design || state.boreAngleGrowthPending) return;
+  const key = input.dataset.draft;
+  const original = state.draft;
+  const originalSnapshot = clone(original);
+  const originalBox = clone(state.design.box);
+  const candidate = clone(original);
+  candidate.options ||= {};
+  const previousValue = key === "option:angle"
+    ? fmt(90 - number(original.options?.angle, 0))
+    : original.options?.angle_towards || (original.along === "y" ? "front" : "left");
+  const restoreField = () => { input.value = previousValue; };
+  if (key === "option:angle") {
+    const shown = Number(input.value);
+    if (!input.value.trim() || !Number.isFinite(shown) || shown < 20 || shown > 90) {
+      restoreField();
+      toast("Bore angle must be between 20° and 90°.", true, 4500);
+      return;
+    }
+    candidate.options.angle = 90 - shown;
+    if (number(original.options?.angle, 0) <= 1e-9 && candidate.options.angle > 1e-9 &&
+        !Object.prototype.hasOwnProperty.call(candidate.options, "angle_towards")) {
+      candidate.options.angle_towards = boreDefaultAngleDirection(state.design);
+    }
+  } else {
+    if (!["back", "front", "left", "right"].includes(input.value)) {
+      restoreField();
+      return;
+    }
+    candidate.options.angle_towards = input.value;
+  }
+  sizeBoreToGrid(candidate, { syncFields: false });
+  const index = draftCommitIndex();
+  if (index === false) { restoreField(); return; }
+  const design = clone(state.design);
+  const features = design.layout.features;
+  if (index === null) features.push(candidate);
+  else features[index] = candidate;
+  const anchor = index === null ? features.length - 1 : index;
+  const fit = boreXyMode(candidate) === "bin_to_bore";
+  const epoch = state.boreEpoch || 0;
+  const space = state.activeSpace, folderMode = state.folderMode;
+  const inventoryId = state.designInventoryId;
+  const current = () => state.draft === original && (state.boreEpoch || 0) === epoch &&
+    state.activeSpace === space && state.folderMode === folderMode &&
+    state.designInventoryId === inventoryId;
   state.boreAngleGrowthPending = true;
   try {
-    const grow = await appConfirmAction({
-      title: "Angled option will require a bigger bin. OK to size bin?",
-      message: "The current angle or direction needs a larger bin footprint than it has. Wavefinity can grow the bin to the smallest size that fits.",
-      actionLabel: "OK",
-    });
-    if (!grow) { await revert(); return; }
-    const result = await autoExpandBin({
-      keepDraft: true, silent: true, fit: boreXyMode(state.draft) === "bin_to_bore",
-    });
-    if (result !== "done") {
+    const trial = await api("/api/layout/expand", { design, anchor, fit });
+    if (!current()) return;
+    const spaceError = aiSpaceViolation(trial.design, state.design);
+    if (spaceError) {
+      restoreField();
       toast("This angle does not fit in this Space.", true, 6000);
-      await revert();
+      return;
+    }
+    const growth = trial.box.x > state.design.box.x + 1e-6 ||
+      trial.box.y > state.design.box.y + 1e-6;
+    if (growth) {
+      const accepted = await appConfirmAction({
+        title: "Angled option will require a bigger bin. OK to size bin?",
+        message: "The current angle or direction needs a larger bin footprint than it has. Wavefinity can grow the bin to the smallest size that fits.",
+        actionLabel: "OK",
+      });
+      if (!current()) return;
+      if (!accepted) { restoreField(); return; }
+    }
+    updateDraftFromFields({ currentTarget: input, target: input, type: "change" });
+    if (growth) {
+      refreshDraftSoon.cancel();
+      const result = await autoExpandBin({ keepDraft: true, silent: true, fit });
+      if (result !== "done") {
+        toast("This angle does not fit in this Space.", true, 6000);
+        state.draft = originalSnapshot;
+        state.design.box = originalBox;
+        renderDraftFields();
+        renderPlaced();
+        await refreshPreview();
+      }
+    }
+  } catch (error) {
+    if (current()) {
+      restoreField();
+      toast(error.message || "This angle cannot be fitted.", true, 6000);
     }
   } finally {
     state.boreAngleGrowthPending = false;
@@ -7533,7 +7582,7 @@ function sizeCradleToItem(one) {
 // Base "bore to bin" owns the zone (the whole usable floor, never a pin or a
 // minimum grid), and Height "bore to bin" owns its number by leaving it unset so
 // the engine derives it. Returns true when "bore to bin" placed the zone.
-function applyBoreSizing(one) {
+function applyBoreSizing(one, { syncState = true } = {}) {
   if (one?.kind !== "bore") return false;
   const opts = one.options ||= {};
   const style = normalizeBoreStyle(opts.bore_style, opts.wall_style);
@@ -7557,8 +7606,10 @@ function applyBoreSizing(one) {
   if (opts.xy_size_mode !== "bore_to_bin" || boreWallsOnly(style)) return false;
   const [insideX, insideY] = binInsideExtent(state.design.box);
   one.zone = [-insideX / 2, -insideY / 2, insideX / 2, insideY / 2];
-  delete state.pinnedZone.width;
-  delete state.pinnedZone.depth;
+  if (syncState) {
+    delete state.pinnedZone.width;
+    delete state.pinnedZone.depth;
+  }
   return true;
 }
 
@@ -7572,14 +7623,14 @@ function boreCrossPitch(profile, held, wall) {
   return 2 * holeRadius + wall;
 }
 
-function sizeBoreToGrid(one) {
+function sizeBoreToGrid(one, { syncFields = true } = {}) {
   if (one.kind !== "bore") return;
   // "Auto size bore to bin" fills the bin whatever the grid needs. Every other
   // Base grows to its grid; a Walls Only Bore, or one whose bin is sized around
   // it, always sits exactly at its minimum footprint.
   const opts = one.options || {};
   const resolved = state.draftResolvedOptions || {};
-  if (applyBoreSizing(one)) return;
+  if (applyBoreSizing(one, { syncState: syncFields })) return;
   const profile = one.item?.profile || "round";
   const hexBit = isHexBitProfile(profile);
   const diameter = hexBit
@@ -7691,6 +7742,7 @@ function sizeBoreToGrid(one) {
   const ncy = centred ? 0 : place(leanTarget(cy, "y"), depth, insideY);
   one.zone = [ncx - width / 2, ncy - depth / 2, ncx + width / 2, ncy + depth / 2];
 
+  if (!syncFields) return;
   const widthField = $('[data-draft="width"]', $("#draft-fields"));
   if (widthField && Math.abs(width - curW) >= 0.05) { widthField.value = fmt(width); flashField(widthField); }
   const depthField = $('[data-draft="depth"]', $("#draft-fields"));
@@ -9173,7 +9225,7 @@ function placedRowData() {
     });
   }
   // A newly chosen draft (e.g. Photo Nest setup) has no saved feature yet:
-  // show it as one temporary selected row so Done / Delete stay reachable.
+  // show it as one temporary selected row so Save / Delete stay reachable.
   // Presentation only - nothing is persisted for it.
   if (state.draft && !Number.isInteger(draftCommitIndex()) && !Number.isInteger(state.draftSourceIndex)) {
     rows.push({
@@ -9389,17 +9441,6 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   }
   const messages = [result.message, ...result.feature_errors, result.draft_error].filter(Boolean);
   const actions = [];
-  if (result.message) actions.push({
-    message: result.message,
-    activate: () => {
-      const input = $('[data-draft="option:text"]', $("#draft-fields"));
-      if (input) {
-        input.scrollIntoView({ behavior: "smooth", block: "center" });
-        input.focus();
-        flashField(input);
-      }
-    },
-  });
   result.feature_errors.forEach((message, errorIndex) => {
     const featureIndex = result.invalid_feature_indexes?.[errorIndex];
     actions.push({
@@ -9424,7 +9465,7 @@ function adoptPreviewResult(result, { persistResume = true, lidEpochAtRequest = 
   });
   state.canGenerate = !messages.length;
   updateGenerateAvailability();
-  if (messages.length) setError("", actions);
+  if (actions.length) setError("", actions);
   state.textMeta = result.text_meta || [];
   state.fitError = Boolean(result.feature_errors.length || result.draft_error);
   updateDraftStatusColor(state.draft ? Boolean(result.draft_error) : null);
@@ -9482,7 +9523,6 @@ async function refreshPreview({ persistResume = true } = {}) {
     $("#preview-state").textContent = "Preview could not build";
     $("#preview-state").classList.remove("status-ok");
     $("#preview-state").classList.add("status-error");
-    setError(error.message);
     setDesignInvalidOverlay(error.message);
     state.canGenerate = false;
     updateGenerateAvailability();

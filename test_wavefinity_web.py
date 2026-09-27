@@ -997,6 +997,21 @@ class WebApplicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Only one Text"):
             apply_feature_payload({"design": design, "feature": feature})
 
+    def test_legacy_multiple_rim_texts_remain_loadable_but_preview_rejects_them(self):
+        design = default_design()
+        design["box"].update({"x": 48.0, "y": 48.0})
+        design["layout"]["features"] = [
+            _text_feature("A", zone=(-20, 6, 20, 15), level="rim", rim_side="back"),
+            _text_feature("B", zone=(-20, -15, 20, -6), level="rim", rim_side="front"),
+        ]
+        before = json.dumps(design, sort_keys=True)
+        _box, layout, *_rest = design_from_dict(design, validate_layout=False)
+        self.assertEqual(len(layout.features), 2)
+        self.assertEqual(json.dumps(design, sort_keys=True), before)
+        with self.assertRaisesRegex(ValueError, "Only one rim Text"):
+            preview_payload({"design": design})
+        self.assertEqual(json.dumps(design, sort_keys=True), before)
+
     def test_a_draft_text_uses_canonical_geometry(self):
         design = default_design()
         design["box"]["x"] = 48.0

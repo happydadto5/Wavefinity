@@ -622,7 +622,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .support-choice.active { color: var(--ink); border-color: #1f6b45; background: #edf7f1; box-shadow: 0 0 0 2px rgba(31,107,69,.32); }
 .support-choice.active .support-choice-icon { color: #1f6b45; background: #d5eddf; }
 
-/* Edit state hides the whole palette; the selected Added row owns Done / Delete. */
+/* Edit state hides the whole palette; the selected Added row owns Save / Delete. */
 .support-palette[hidden] { display: none; }
 /* A full-width structural break, like the one between Bin settings and Parts &
    options: things you can add above it, things already in this bin below. */
@@ -1022,7 +1022,7 @@ input[type="number"]::-webkit-inner-spin-button {
   background: rgba(255, 244, 242, .94); border: 1px solid #e0aaa5;
   box-shadow: 0 4px 14px rgba(126, 48, 43, .18);
 }
-.design-invalid-heading { display: block; font-size: 18px; line-height: 1.25; font-weight: 800; color: var(--danger); }
+.design-invalid-heading { display: block; font-size: 24px; line-height: 1.25; font-weight: 800; color: var(--danger); }
 .design-invalid-overlay .design-invalid-message { margin: 4px 0 0; font-size: 13px; line-height: 1.4; color: #7e302b; }
 .error-panel { margin: 0 18px 14px; padding: 9px; border: 1px solid #e0aaa5; border-radius: 7px; background: #fff4f2; color: #7e302b; font-size: 12px; }
 .error-link { display: block; width: 100%; border: 0; border-radius: 5px; padding: 6px 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }

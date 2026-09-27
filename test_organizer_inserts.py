@@ -13,12 +13,14 @@ import unittest
 import numpy as np
 import trimesh
 from shapely import affinity
+from shapely.geometry import Point, box as shapely_box
 
 import organizer_inserts._nest as nest_impl
 import organizer_inserts._divider as divider_impl
 
 from organizer_engine import (
     BoxSpec,
+    SideOpeningSpec,
     ConnectorSpec,
     LOCK_PROTRUSION,
     WAVE_AMPLITUDE,
@@ -31,6 +33,7 @@ from organizer_engine import (
     wavy_outer_polygon,
 )
 import organizer_inserts as inserts
+from organizer_side_openings import apply_side_openings
 from organizer_inserts._bore import (
     JOIN_SKIN, _bore_grid, _round_clear_sides, _wall_only_shell_reach,
     bore_envelope_zone, bore_minimum_pitches, wall_only_envelope,
@@ -1460,6 +1463,17 @@ class BoreWallOnlyTests(unittest.TestCase):
         self.assertTrue(shallow.contains(pedestal_point)[0])
         self.assertFalse(through_floor.contains(pedestal_point)[0])
 
+    def test_multiple_walls_only_holes_keep_each_raised_stop_and_open_top(self) -> None:
+        zone = Zone(-60.0, -25.0, 60.0, 25.0)
+        for wall_style in ("straight", "wavy"):
+            with self.subTest(wall_style=wall_style):
+                mesh = self._build(zone=zone, columns=3, rows=1, wall_style=wall_style,
+                                   height=20.0, walls_depth=6.0)
+                self.assertTrue(mesh.is_watertight)
+                for x in (-31.6, 0.0, 31.6):
+                    self.assertTrue(mesh.contains([[x, 0.0, BIN.base_thickness + 1.0]])[0])
+                    self.assertFalse(mesh.contains([[x, 0.0, BIN.base_thickness + 18.0]])[0])
+
     def test_missing_walls_depth_keeps_legacy_through_floor(self) -> None:
         legacy = self._build(wall_style="straight", height=20.0)  # no walls_depth at all
         explicit = self._build(wall_style="straight", height=20.0, walls_depth=20.0)
@@ -1471,6 +1485,8 @@ class BoreWallOnlyTests(unittest.TestCase):
             self._build(wall_style="straight", height=10.0, walls_depth=15.0)
         with self.assertRaisesRegex(ValueError, "Depth"):
             self._build(wall_style="straight", height=10.0, walls_depth=0.0)
+        with self.assertRaisesRegex(ValueError, "Depth"):
+            self._build(wall_style="straight", height=10.0, walls_depth=float("nan"))
 
     def test_clear_opening_is_never_reduced(self) -> None:
         for wall_style in ("straight", "wavy"):
@@ -1665,6 +1681,71 @@ class BoreWavyBaseTests(unittest.TestCase):
         radii = np.hypot(mesh.vertices[:, 0], mesh.vertices[:, 1])
         near_hole = radii[(radii > 1.0) & (radii < 5.5)]
         self.assertGreaterEqual(near_hole.min(), 5.0 - 1e-6)
+
+    def test_fused_base_fills_true_cavity_strip_only_on_touched_sides(self) -> None:
+        box = replace(BIN, x=64.0, y=48.0)
+        whole = Zone.whole(box)
+        cavity = wavy_cavity_polygon(box)
+        mid_z = box.base_thickness + 5.0
+
+        def strip_probes(zone, side):
+            # Probe the actual cavity outside the nominal Base rectangle, not
+            # just its bounds. Multiple samples per wave catch scalloped gaps.
+            nominal = shapely_box(zone.x0, zone.y0, zone.x1, zone.y1)
+            strip = cavity.difference(nominal)
+            x0, y0, x1, y1 = cavity.bounds
+            points = []
+            for x in np.arange(x0 + 0.1, x1, 0.3):
+                for y in np.arange(y0 + 0.1, y1, 0.5):
+                    if side == "right" and not (x > zone.x1 + 0.05 and zone.y0 + 1 < y < zone.y1 - 1):
+                        continue
+                    if side == "left" and not (x < zone.x0 - 0.05 and zone.y0 + 1 < y < zone.y1 - 1):
+                        continue
+                    if side == "back" and not (y > zone.y1 + 0.05 and zone.x0 + 1 < x < zone.x1 - 1):
+                        continue
+                    if side == "front" and not (y < zone.y0 - 0.05 and zone.x0 + 1 < x < zone.x1 - 1):
+                        continue
+                    point = Point(float(x), float(y))
+                    if strip.contains(point) and cavity.boundary.distance(point) > 0.05:
+                        points.append((float(x), float(y), mid_z))
+            self.assertGreater(len(points), 10, side)
+            return np.asarray(points)
+
+        # Both Base families must fill all four true-wall strips, with the
+        # central Bore still open at a safe mid-height.
+        for style in ("base_straight", "base_wavy"):
+            with self.subTest(style=style):
+                one = self._one(whole, style=style, diameter=10.0, depth=6.0)
+                mesh = build_features(box, [one], box.base_thickness)[0]
+                for side in ("right", "left", "back", "front"):
+                    probes = strip_probes(whole, side)
+                    self.assertTrue(mesh.contains(probes).all(), (style, side))
+                self.assertFalse(mesh.contains([[0.0, 0.0, mid_z]])[0])
+
+        # Reaching only right/back may not broaden the left/front edges.
+        partial = Zone(-15.0, -12.0, whole.x1, whole.y1)
+        one = self._one(partial, style="base_straight", diameter=10.0, depth=6.0)
+        mesh = build_features(box, [one], box.base_thickness)[0]
+        for side in ("right", "back"):
+            self.assertTrue(mesh.contains(strip_probes(partial, side)).all(), side)
+        self.assertGreater(mesh.bounds[0][0], whole.x0 + 1.0)
+        self.assertGreater(mesh.bounds[0][1], whole.y0 + 1.0)
+        right_only = Zone(-15.0, -12.0, whole.x1, 12.0)
+        one = self._one(right_only, style="base_straight", diameter=10.0, depth=6.0)
+        mesh = build_features(box, [one], box.base_thickness)[0]
+        self.assertTrue(mesh.contains(strip_probes(right_only, "right")).all())
+        self.assertLess(mesh.bounds[1][1], whole.y1 - 1.0)
+        self.assertGreater(mesh.bounds[0][0], whole.x0 + 1.0)
+
+    def test_final_side_opening_cut_wins_over_joined_base(self) -> None:
+        box = replace(BIN, x=48.0, y=48.0, side_openings=SideOpeningSpec(
+            enabled=True, sides=("front",), shape="square", size="medium"))
+        one = self._one(Zone.whole(box), style="base_straight", diameter=10.0, depth=6.0)
+        joined = make_fused_box(box, [one], make_box(box))
+        cut = apply_side_openings(box, joined)
+        opening = [[0.0, -box.half_y + box.wall_depth / 2.0, box.base_thickness + 5.0]]
+        self.assertTrue(joined.contains(opening)[0])
+        self.assertFalse(cut.contains(opening)[0])
 
     def test_removable_insert_never_claims_to_join_the_bin_wall(self) -> None:
         box, diameter, whole = self._touching()

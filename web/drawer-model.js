@@ -119,9 +119,17 @@ DL.normaliseLayout = raw => {
   // autosave:false layout normalises to the always-on runtime value.
   layout.settings.autosave = true;
   layout.settings.auto_update_changed_files = layout.settings.auto_update_changed_files === true;
-  layout.settings.ai_design_recent_descriptions = Array.isArray(layout.settings.ai_design_recent_descriptions)
-    ? layout.settings.ai_design_recent_descriptions.filter(one => typeof one === "string" && one.trim()).slice(0, 10)
-    : [];
+  const recent = Array.isArray(layout.settings.ai_design_recent_descriptions)
+    ? layout.settings.ai_design_recent_descriptions : [];
+  const seenRecent = new Set();
+  layout.settings.ai_design_recent_descriptions = recent.flatMap(one => {
+    if (typeof one !== "string") return [];
+    const trimmed = one.trim();
+    const key = trimmed.toLowerCase();
+    if (!trimmed || trimmed.length > 4000 || seenRecent.has(key)) return [];
+    seenRecent.add(key);
+    return [trimmed];
+  }).slice(0, 10);
   layout.drawers = Array.isArray(layout.drawers)
     ? layout.drawers.filter(one => one && typeof one === "object") : [];
   DL.layout = layout;

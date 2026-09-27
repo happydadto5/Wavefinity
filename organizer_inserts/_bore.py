@@ -1041,7 +1041,8 @@ def bore_tool_clearance_zone(
             note="degrees off vertical (0 = upright); the Designer's \"Bore angle\" field shows 90 minus this "
                  "value (so displayed 90 = upright = 0 here, displayed 20 = the steepest lean = 70 here); "
                  "only Base - Straight may lean"),
-        OptionDefinition("Angle towards", "angle_towards", "front", "enum", False, choices=SIDE_CHOICES, note="direction of the lean; only meaningful when angle > 0"),
+        OptionDefinition("Angle towards", "angle_towards", "back", "enum", False, choices=SIDE_CHOICES,
+            note="direction of a new lean; defaults Back or opposite the one rim Text; old saved Bores without this key retain their Feature.along fallback"),
         OptionDefinition("Width / Length sizing", "xy_size_mode", "manual", "enum", False, choices=(
             ("manual", "Manual"), ("bore_to_bin", "Bore to bin"), ("bin_to_bore", "Bin to bore")),
             note="Walls Only styles allow only manual or bin_to_bore"),
