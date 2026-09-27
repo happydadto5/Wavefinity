@@ -18,7 +18,7 @@
 
 ### In-review feature
 
-- **AI Help — In review (Fix 073):** implemented on branch `fix73` and awaiting acceptance into `main` at the time of this document.
+- **AI Design — In review (Fix 073):** implemented on branch `fix73` and awaiting acceptance into `main` at the time of this document.
 
 ---
 
@@ -434,7 +434,7 @@ Cradle is intended for tools laid down rather than upright.
 
 ### AI limitation
 
-Photo Nest is a **media-derived feature**. AI Help may recommend it, but text AI is not allowed to fabricate a photo contour.
+Photo Nest is a **media-derived feature**. AI Design may recommend it, but text AI is not allowed to fabricate a photo contour.
 
 ---
 
@@ -1051,18 +1051,18 @@ Spaces can use **Spacers** to fill leftover physical area.
 
 ---
 
-# 16. AI Help — Fix 073
+# 16. AI Design — Fix 073
 
 **Status at this document revision: In review — implemented on `fix73`, not yet accepted into `main`.**
 
-AI Help is a Designer workflow for turning a natural-language object description into a legal Wavefinity bin design **without Wavefinity directly calling an AI provider**.
+AI Design is a Designer workflow for turning a natural-language object description into a legal Wavefinity bin design **without Wavefinity directly calling an AI provider**.
 
 ## 16.1 User flow
 
-1. Click **AI Help** beside the Designer's New/Duplicate controls.
+1. Click **AI Design** beside the Designer's New/Duplicate controls.
 2. Describe one object in a multiline text field. (If you have an unsaved interior part open, Wavefinity saves it into the design first so the prompt matches exactly what you see.)
 3. Optionally use **Dictate** when the browser supports speech recognition.
-4. Click **Generate Prompt**.
+4. Click **Generate Prompt**. It greys out once it succeeds, and stays greyed out until the description changes or Wavefinity says the prompt has gone stale and a fresh one is needed.
 5. Copy the generated Wavefinity prompt.
 6. Paste it into any external AI.
 7. Let that AI ask follow-up questions when measurements or intent are unclear.
@@ -1082,7 +1082,8 @@ The prompt contains:
 - important compatibility rules;
 - the current bin's interior bounds as a reference only: if the AI changes the bin size, every part must fit the interior of the design it returns;
 - a complete canonical design example;
-- the required response schema.
+- the required response schema;
+- an optional link to Wavefinity's public `ai-features.md` reference, for background only -- the AI is told the data above always wins and the link is never required.
 
 The AI can choose any legal user-facing Wavefinity feature that helps solve the request.
 
@@ -1187,7 +1188,7 @@ When a fix changes the product, update this file if it changes any of the follow
 - Connector type or rule.
 - 2D/3D editing behavior.
 - Save/Print output.
-- AI Help capability.
+- AI Design capability.
 - User-visible compatibility/conflict rule.
 
 ### Documentation rule for future fixes
@@ -1206,7 +1207,7 @@ If the answer to any of those is yes, update this catalog as part of the fix.
 
 # 19. AI-facing documentation
 
-`ai-features.md` is the compact public reference intended for outside AI systems used with AI Help. It supplements the request-specific machine-readable prompt; it does not replace the live catalog/rules embedded by the running app.
+`ai-features.md` is the compact public reference intended for outside AI systems used with AI Design. It supplements the request-specific machine-readable prompt; it does not replace the live catalog/rules embedded by the running app.
 
 When a product change affects what an outside AI can legally select, configure, return, or must avoid, update both this catalog and `ai-features.md` in the same fix.
 

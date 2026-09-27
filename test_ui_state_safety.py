@@ -460,11 +460,76 @@ process.stdout.write(JSON.stringify({distinct:new Set(keys).size}));
         out = node_json(script)
         self.assertEqual(out["distinct"], 5)  # name, size, open draft and bin identity each change the key
 
+    def test_ai_help_generate_button_disables_until_description_changes(self):
+        source = "\n".join(function_source(name, APP) for name in (
+            "aiSetBusy", "aiUpdateGenerateButtonState", "aiGeneratePrompt"))
+        script = r"""
+const clone=v=>JSON.parse(JSON.stringify(v));
+const state={design:{part_name:'',layout:{features:[]}}};
+const aiHelp={session:null,busy:false,generation:0,failure:null,generatedDescription:null};
+const elements={
+  '#ai-help-generate':{disabled:false},'#ai-help-process':{disabled:false},
+  '#ai-help-repair':{disabled:false},'#ai-help-close':{disabled:false},
+  '#ai-help-description':{value:'A tray'},
+};
+const $=selector=>elements[selector];
+const aiSetStatus=()=>{},aiShowPrompt=()=>{},toast=()=>{},isStructuralDesign=()=>false;
+const aiCompositionEmpty=()=>true,aiSpaceContext=()=>null,aiContextKey=()=>'K';
+const visibleDesignSnapshot=()=>clone(state.design);
+const withDeferredDraftSwitch=async action=>action({});
+class AiHelpError extends Error{constructor(m,o={}){super(m);Object.assign(this,o);}}
+let mode='ok';
+const api=async()=>{
+  if(mode==='fail')throw new Error('no');
+  return{request_id:'R',context_fingerprint:'F',prompt:'P'};};
+__FUNCTIONS__
+const snapshot=()=>({disabled:elements['#ai-help-generate'].disabled,marker:aiHelp.generatedDescription});
+const out={};
+out.beforeFirst=snapshot();
+await aiGeneratePrompt();
+out.afterSuccess=snapshot();
+elements['#ai-help-description'].value='A tray';   // no real change, only re-checks
+aiUpdateGenerateButtonState();
+out.sameTextStaysDisabled=snapshot();
+elements['#ai-help-description'].value='  A tray  '; // whitespace-only does not count as new
+aiUpdateGenerateButtonState();
+out.whitespaceOnlyStaysDisabled=snapshot();
+elements['#ai-help-description'].value='A different tray';
+aiUpdateGenerateButtonState();
+out.afterEdit=snapshot();
+mode='fail';
+await aiGeneratePrompt();
+out.afterFailedGenerate=snapshot();
+mode='ok';
+elements['#ai-help-description'].value='A different tray';
+await aiGeneratePrompt();
+out.afterSecondSuccess=snapshot();
+// An explicit stale-session invalidation clears the marker for the SAME text.
+aiHelp.generatedDescription=null;
+aiUpdateGenerateButtonState();
+out.afterStaleInvalidation=snapshot();
+process.stdout.write(JSON.stringify(out));
+""".replace("__FUNCTIONS__", source)
+        out = node_json(script)
+        self.assertEqual(out["beforeFirst"], {"disabled": False, "marker": None})
+        self.assertEqual(out["afterSuccess"], {"disabled": True, "marker": "A tray"})
+        self.assertEqual(out["sameTextStaysDisabled"]["disabled"], True)
+        self.assertEqual(out["whitespaceOnlyStaysDisabled"]["disabled"], True)
+        self.assertEqual(out["afterEdit"], {"disabled": False, "marker": "A tray"})
+        self.assertEqual(out["afterFailedGenerate"], {"disabled": False, "marker": "A tray"})
+        self.assertEqual(out["afterSecondSuccess"], {"disabled": True, "marker": "A different tray"})
+        self.assertEqual(out["afterStaleInvalidation"], {"disabled": False, "marker": None})
+
     def test_ai_help_ui_is_wired_without_a_provider_and_dictation_is_optional(self):
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
         actions = html[html.index('id="bin-actions"'):html.index('id="stack-note"')]
         self.assertLess(actions.index('id="designer-duplicate"'), actions.index('id="ai-help-open"'))
         self.assertRegex(html, r'<button[^>]*id="ai-help-dictate"[^>]*\shidden')
+        # Product name is "AI Design"; internal ai-help-* IDs are implementation detail only.
+        dialog = html[html.index('id="ai-help-dialog"'):html.index('</dialog>', html.index('id="ai-help-dialog"'))]
+        self.assertIn("AI Design", html[html.index('id="ai-help-open"'):html.index("</button>", html.index('id="ai-help-open"'))])
+        self.assertIn(">AI Design<", dialog)
+        self.assertNotIn("AI Help", dialog)
         section = APP[APP.index("// ------------------------------------------------------------ AI Help (Fix 073)"):
                       APP.index("// New Bin (B1)")]
         self.assertNotIn("fetch(", section)

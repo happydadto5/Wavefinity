@@ -3467,6 +3467,21 @@ def structural_print_payload(payload: dict[str, Any]) -> dict[str, Any]:
 # request ID / fingerprint are opaque, and the browser owns the runtime session.
 
 AI_DESIGN_SCHEMA = "wavefinity-ai-design-v1"
+# The public outside-AI reference (see ai-features.md). Supplemental only: the
+# embedded prompt is always sufficient, so nothing here ever makes a network
+# call - it just picks which URL to print, from the one already-known commit
+# identity Wavefinity has (RENDER_GIT_COMMIT), falling back to the stable
+# branch link when that is absent or not a real full SHA.
+AI_FEATURE_REFERENCE_REPO = "happydadto5/Wavefinity"
+AI_FEATURE_REFERENCE_PATH = "ai-features.md"
+_HEX40 = re.compile(r"^[0-9a-f]{40}$")
+
+
+def ai_feature_reference_url() -> str:
+    commit = os.environ.get("RENDER_GIT_COMMIT", "")
+    ref = commit if _HEX40.fullmatch(commit) else "main"
+    return f"https://raw.githubusercontent.com/{AI_FEATURE_REFERENCE_REPO}/{ref}/{AI_FEATURE_REFERENCE_PATH}"
+
 AI_MAX_DESCRIPTION = 4000
 AI_MAX_RESPONSE = 400_000
 AI_SPACE_KINDS = ("drawer", "box", "surface", "portable", "pegboard")
@@ -3868,6 +3883,12 @@ def _ai_prompt_text(description: str, request_id: str, fingerprint: str,
         "=== CAPABILITY MANIFEST (JSON) ===",
         block(manifest),
         "",
+        "=== OPTIONAL BACKGROUND (only if you can fetch web pages) ===",
+        f"{ai_feature_reference_url()} explains these features in plain language. Everything above is",
+        "already the exact current data for this request, so use that page only for background; if you",
+        "cannot access it, ignore it and proceed. When it and this prompt ever disagree, the data above",
+        "wins - the page can be newer than this running copy of Wavefinity.",
+        "",
         "=== RESPONSE CONTRACT ===",
         "Your FINAL answer is exactly one JSON object and nothing else - no text before or after it:",
         block(envelope),
@@ -4050,6 +4071,9 @@ def ai_repair_prompt_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "=== YOUR PREVIOUS ANSWER ===",
         response.strip()[:AI_MAX_RESPONSE],
         "=== END PREVIOUS ANSWER ===",
+        "",
+        f"(Background, optional: {ai_feature_reference_url()} - only if you can fetch it; the exact",
+        "schema/request/fingerprint/error above are authoritative either way.)",
         "",
         "Return exactly ONE corrected JSON object and nothing else. It must keep",
         f"\"schema\": \"{AI_DESIGN_SCHEMA}\", the same request_id and context_fingerprint,",

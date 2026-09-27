@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import math
 import os
@@ -2287,6 +2288,35 @@ class AiHelpBackendTests(unittest.TestCase):
                     {"description": "x", "design": {"box": {"b4b": {"enabled": True}}}}):
             with self.assertRaises(ValueError):
                 wavefinity_web.ai_prompt_payload(bad)
+
+    def test_public_reference_link_is_optional_supplemental_and_never_fetched(self):
+        design = wavefinity_web.default_design()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RENDER_GIT_COMMIT", None)
+            stable = wavefinity_web.ai_feature_reference_url()
+            self.assertEqual(
+                stable, "https://raw.githubusercontent.com/happydadto5/Wavefinity/main/ai-features.md")
+            os.environ["RENDER_GIT_COMMIT"] = "not-a-real-sha"
+            self.assertEqual(wavefinity_web.ai_feature_reference_url(), stable)
+            full_sha = "a" * 40
+            os.environ["RENDER_GIT_COMMIT"] = full_sha
+            pinned = wavefinity_web.ai_feature_reference_url()
+            self.assertEqual(
+                pinned, f"https://raw.githubusercontent.com/happydadto5/Wavefinity/{full_sha}/ai-features.md")
+            os.environ.pop("RENDER_GIT_COMMIT", None)
+            prompt = wavefinity_web.ai_prompt_payload(
+                {"description": "x", "design": design, "space": {"kind": "drawer", "x": 80, "y": 80, "z": 50}})["prompt"]
+            self.assertIn(stable, prompt)
+            self.assertIn("the data above", prompt)
+            self.assertIn("only if you can fetch", prompt.lower())
+            repair = wavefinity_web.ai_repair_prompt_payload(
+                {"request_id": "r", "context_fingerprint": "f", "response": "{}", "error": "bad"})["prompt"]
+            self.assertIn(stable, repair)
+        # Never an outbound call: no urlopen/requests/http.client symbol is even imported.
+        self.assertNotIn("requests", dir(wavefinity_web))
+        source = inspect.getsource(wavefinity_web.ai_feature_reference_url)
+        for forbidden in ("urlopen", "requests.", "http.client", "subprocess", "socket"):
+            self.assertNotIn(forbidden, source)
 
     def test_candidate_is_proven_in_real_geometry_without_side_effects(self):
         design = wavefinity_web.default_design()
